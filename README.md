@@ -251,10 +251,69 @@ npm --prefix backend run db:push      # Apply migrations
 - SSE for world generation progress and narrative streaming
 - Typed events: `narrative`, `oracle_result`, `state_update`, `quick_actions`, `done`
 
+## Contributing
+
+### Branch Structure
+
+| Branch | Purpose |
+|--------|---------|
+| `main` | Stable releases — always working |
+| `develop` | Active development — PRs merge here |
+| `feature/*` | New features (`feature/image-gen-v2`) |
+| `fix/*` | Bug fixes (`fix/oracle-timeout`) |
+
+### Workflow
+
+1. Fork the repo
+2. Create a branch from `develop`:
+   ```bash
+   git checkout develop
+   git checkout -b feature/your-feature
+   ```
+3. Make changes, commit with conventional commits:
+   ```
+   feat: add support for Ollama embeddings
+   fix: Oracle timeout on slow providers
+   refactor: extract prompt builder into separate module
+   ```
+4. Push and open a PR against `develop`
+5. After review → merge to `develop` → periodically release to `main`
+
+### Code Guidelines
+
+- **TypeScript strict mode** — no `any`, no implicit returns
+- **Immutability** — always create new objects, never mutate
+- **Zod validation** — all API inputs and AI tool schemas validated
+- **Small files** — 200-400 lines typical, 800 max
+- **No console.log** — use `createLogger()` from `lib/`
+- **Error handling** — outer try/catch in route handlers, `AppError` for status codes
+
+### Running Tests
+
+```bash
+npm --prefix backend run test        # unit tests
+npm --prefix backend run typecheck   # type check
+npm --prefix frontend run lint       # linting
+```
+
+### Adding a New LLM Tool
+
+1. Define Zod schema in `backend/src/engine/tool-schemas.ts`
+2. Add handler in `backend/src/engine/tool-executor.ts`
+3. Register in Storyteller tool list in `backend/src/ai/storyteller.ts`
+4. Add DB migration if tool modifies state
+
+### Adding a New API Endpoint
+
+1. Create or extend route file in `backend/src/routes/`
+2. Use `parseBody()` for input validation
+3. Wrap handler in try/catch with `getErrorStatus()`
+4. Register route in `backend/src/index.ts`
+
 ## License
 
 MIT
 
 ---
 
-*[Русская версия](README.en.md)*
+*[Русская версия](README.ru.md)*
