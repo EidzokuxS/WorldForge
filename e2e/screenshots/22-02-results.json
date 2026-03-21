@@ -1,0 +1,38 @@
+{
+  "phase": "22",
+  "plan": "02",
+  "timestamp": "2026-03-20T23:09:53.595Z",
+  "areas": [
+    {
+      "area": "Checkpoint Panel Opens",
+      "passed": true,
+      "details": "Dialog opened with title \"Checkpoints\", save input visible"
+    },
+    {
+      "area": "Create Checkpoint",
+      "passed": true,
+      "details": "Checkpoint \"Browser E2E Save\" created and visible in list (7 items total)"
+    },
+    {
+      "area": "Checkpoint Persistence",
+      "passed": true,
+      "details": "\"Browser E2E Save\" still visible after page reload (7 items)"
+    },
+    {
+      "area": "Load Checkpoint",
+      "passed": true,
+      "details": "Load triggered page reload. Messages: before=0, afterTurn=0, afterLoad=0. State reverted=true"
+    },
+    {
+      "area": "Delete Checkpoint",
+      "passed": true,
+      "details": "Checkpoint deleted. Count: 7 -> 6. \"Browser E2E Save\" no longer in list"
+    }
+  ],
+  "quality": 5,
+  "passedCount": 5,
+  "totalCount": 5,
+  "threshold": 4,
+  "meetsThreshold": true,
+  "consoleErrors": []
+}

@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# User data
+campaigns/
+settings.json
+
+# Environment
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build / cache
+dist/
+*.tsbuildinfo
+node-compile-cache/
+%USERPROFILE%/
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Tasks (local workflow)
+tasks/
+rpi/
+
+# Tool configs
+.claude/
+.desloppify/
+.playwright-mcp/
+scorecard.png

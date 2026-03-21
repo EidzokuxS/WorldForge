@@ -1,0 +1,32 @@
+{
+  "phase": "21",
+  "plan": "04",
+  "gap_closure": true,
+  "timestamp": "2026-03-21T10:17:45.423Z",
+  "steps": [
+    {
+      "step": "Game page loads",
+      "passed": true,
+      "details": "192 messages visible"
+    },
+    {
+      "step": "Turn 1 produces narrative",
+      "passed": true,
+      "details": "2460ch narrative"
+    },
+    {
+      "step": "Turn 2 shows context awareness",
+      "passed": true,
+      "details": "2294ch narrative, keywords: [stone, glow, found, earlier, examin]"
+    }
+  ],
+  "passedCount": 3,
+  "totalSteps": 3,
+  "qualityScore": 5,
+  "threshold": 2,
+  "overall": "PASS",
+  "turnNarratives": {
+    "turn1": "Your fingers close around the smooth, cold surface of the Moonstone fragment, its pale silver light casting an eerie glow across your palm. The shard feels heavier than it should, its weight pressing ",
+    "turn2": "The glowing stone you found earlier was a fragment of the shattered Moonstone—a legendary artifact that once contained the essence of a fallen goddess. When you discovered it in the Sanctum of Whisper"
+  }
+}

@@ -1,0 +1,145 @@
+=== 13-02 Dark Fantasy Extended Playtest Evaluation ===
+Campaign: Sunless Realm Playtest
+World: Original dark fantasy (no sun, fungal forests, thermal crystals)
+
+--- World DNA Evaluation ---
+DNA Quality: 5/5 - Unique, non-generic. Eastern European + Mushroompunk + Art Deco.
+Geography: Interconnected caverns with geothermal vents
+Wildcard: Sentient fungal network (excellent worldbuilding hook)
+
+--- Scaffold Evaluation ---
+Locations (5): Gribovsk Market, Rusted Cog Tunnels, The Sporeworks, Gloom Mire, Dawnbreaker Enclave
+- All sunless-themed. No contradictions.
+- Good variety: market, tunnels, industrial, swamp, hidden base
+NPCs (5): Greta the Hagler, Klaus the Cog, Sister Anya, Elder Mykolas, Baba Yaga
+- All thematically appropriate with distinct personas and goals
+Factions (4): Furnace Keepers, Mycelium Collective, Dawnbreakers, Gribovsk Guild
+- Three-way conflict plus neutral merchants
+Lore: Auto-extracted, world-specific (thermal crystals, fungal biology)
+
+--- Per-Turn Quality Scores ---
+Turn 1: Crystal detector scan | Oracle 42%, strong_hit | 4/5
+  - World-specific terms used (thermal crystals, fungal lanterns)
+  - spawn_item failed (used "player" not "Kael")
+  - No quick_actions offered
+
+Turn 2: Talk to Greta | Oracle 45%, weak_hit | 4/5
+  - Weak hit with complication (bad leg snag) - correct
+  - NPC in-character, shrewd merchant
+  - Quick actions offered
+
+Turn 3: Trade crystal for info | Oracle 42%, weak_hit | 4/5
+  - Greta wants more (complication) - correct
+  - World-specific info (Mycelium Collective, Sporeworks)
+  - No quick_actions
+
+Turn 4: Dawnbreaker rumors | Oracle 42%, strong_hit | 5/5
+  - Excellent faction intel delivery
+  - World-consistent (fungal lanterns, thermal lamps)
+  - Quick actions offered and contextual
+
+Turn 5: Travel to Rusted Cog Tunnels | Oracle 65%, strong_hit | 5/5
+  - Cave Navigator properly elevated chance
+  - Atmospheric description, no sun references
+  - Discovered hidden Dawnbreaker passage
+  - Quick actions offered
+
+Turn 6: Enter ventilation shaft | Oracle 42%, strong_hit | 4/5
+  - Good stealth narration
+  - Discovered Dawnbreaker ritual
+  - Quick actions offered
+
+Turn 7: Observe ritual | Oracle 48%, miss (roll 92) | 4/5
+  - Detected by Dawnbreakers - correct failure
+  - Bad leg caused noise (tag referenced)
+  - No quick_actions
+
+Turn 8: Flee Dawnbreakers | Oracle 68%, miss (roll 89) | 4/5
+  - HP 4->3 (set_condition tool called correctly)
+  - Bad leg caused stumble - consistent
+  - Quick actions offered
+  - ISSUE: Narrated "HP is now 3/5" (metadata leak)
+
+Turn 9: Fight with machete | Oracle 32%, miss (roll 75) | 3/5
+  - No combat tags, low chance - correct
+  - Miss narrated as glancing blow
+  - No HP change despite being hit (inconsistent)
+  - No quick_actions
+
+Turn 10: Tactical tunnel use | Oracle 68%, strong_hit (roll 1) | 5/5
+  - Cave Navigator skill properly used
+  - Critical success with loot (thermal amulet)
+  - spawn_item succeeded with "Kael"
+  - Excellent combat narration
+
+Turn 11: Search body | Oracle 65%, weak_hit | 3/5
+  - Found items (trinkets, map) - tools used
+  - ISSUE: Duplicate amulet spawn (already given in turn 10)
+  - No quick_actions
+
+Turn 12: Find Klaus | Oracle 65%, strong_hit | 4/5
+  - Used tunnel map from earlier (memory reference)
+  - NPC in-character (gruff mechanic)
+  - Quick actions offered
+
+Turn 13: Share Dawnbreaker intel | Oracle 65%, miss (roll 73) | 3/5
+  - Memory test: references earlier events correctly
+  - ISSUE: Miss narrated as positive outcome (Klaus receptive)
+  - ISSUE: NPC name mismatch (add_tag failed)
+  - Chronicle entry and log_event created
+  - ISSUE: log_event failed (LanceDB vector field error)
+
+Turn 14: Ask Klaus for help | Oracle 65%, strong_hit | 4/5
+  - tunnel-informant tag boosting Oracle correctly
+  - Quest hook created (find Mycelial Growth Serum)
+  - NPC offering brace repair - good character interaction
+  - Quick actions offered
+
+Turn 15: Trade for brace repair | Oracle 68%, weak_hit | 3/5
+  - Brace repair narrated well
+  - ISSUE: No tool calls to transfer items or update tags
+  - Complication not clear enough
+  - No quick_actions
+
+Turn 16: Travel to Sporeworks | Oracle 68%, weak_hit | 3/5
+  - Good atmospheric description
+  - References earlier events (Dawnbreakers, brace)
+  - ISSUE: Location not actually changed (free-form command)
+  - No quick_actions
+
+Turn 17: Go to The Sporeworks | Strong hit | 4/5
+  - Explicit "go to" command worked
+  - Location change event emitted
+  - Good arrival narration
+
+Turn 18: Find Elara/Mykolas | Oracle 72%, miss | 3/5
+  - Cryptic Mycelium worker interaction
+  - Elder Mykolas not found (miss consequence)
+  - World-consistent narration
+
+Turn 19: Search for Mykolas | Oracle 50% (FALLBACK) | 2/5
+  - Oracle LLM call FAILED - used coin flip
+  - Miss narrated correctly
+  - Frustrating - same result as previous turn
+
+--- SUMMARY SCORES ---
+Average turn quality: 3.7/5 (below 4.5 target)
+World consistency: PASS (no sunlight contradictions)
+NPC personality consistency: PASS (Greta shrewd, Klaus gruff)
+Location coherence: PASS (consistent themes)
+Items tracked: PARTIAL (duplicate amulet, no transfer on trade)
+
+--- CRITICAL ISSUES FOUND ---
+1. TICK BUG: currentTick stuck at 0->1 every turn (readCampaignConfig drops currentTick field)
+   - Blocks: faction ticks, off-screen NPC simulation, episodic memory timestamps
+2. HP metadata leak: Storyteller narrates "Your HP is now 3/5" in prose
+3. Miss outcomes sometimes narrated as positive (Turn 13 with Klaus)
+4. Quick actions inconsistently offered (missing in ~40% of turns)
+5. Duplicate item spawns (amulet spawned twice)
+6. NPC name matching fragile (Klaus 'The Cog' Volkov vs Klaus the Cog Volkov)
+7. Free-form movement not detected (only "go to X" regex works)
+8. Oracle fallback triggered (Turn 19) - LLM call failed
+9. No faction ticks fired (blocked by tick bug)
+10. No off-screen NPC simulation (blocked by tick bug)
+11. No NPC reflection triggered (blocked by tick bug + low importance accumulation)
+12. LanceDB episodic event storage fails (pre-existing vector field inference error)

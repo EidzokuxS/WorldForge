@@ -1,0 +1,148 @@
+{
+  "results": [
+    {
+      "task": 1,
+      "turn": 1,
+      "action": "talk-to-Inquisitor Vale",
+      "location": "Sanctum of Whispers",
+      "npcsInSidebar": [
+        "Inquisitor Valerius"
+      ],
+      "narrativeMentionsNpc": true,
+      "mentionedNpcName": "Inquisitor Valerius",
+      "quickActionsCount": 0
+    },
+    {
+      "task": 1,
+      "turn": 2,
+      "action": "ask-about-dangers",
+      "location": "Sanctum of Whispers",
+      "npcsInSidebar": [
+        "Inquisitor Valerius"
+      ],
+      "narrativeMentionsNpc": true,
+      "mentionedNpcName": "Inquisitor Valerius",
+      "quickActionsCount": 0
+    },
+    {
+      "task": 1,
+      "turn": 3,
+      "action": "search-for-hidden",
+      "location": "Sanctum of Whispers",
+      "npcsInSidebar": [
+        "Inquisitor Valerius"
+      ],
+      "narrativeMentionsNpc": false,
+      "mentionedNpcName": "",
+      "quickActionsCount": 0
+    },
+    {
+      "task": 1,
+      "turn": 4,
+      "action": "observe-npcs",
+      "location": "Sanctum of Whispers",
+      "npcsInSidebar": [
+        "Inquisitor Valerius"
+      ],
+      "narrativeMentionsNpc": true,
+      "mentionedNpcName": "",
+      "quickActionsCount": 0
+    },
+    {
+      "task": 1,
+      "turn": 5,
+      "action": "talk-to-Inquisitor Vale",
+      "location": "Sanctum of Whispers",
+      "npcsInSidebar": [
+        "Inquisitor Valerius"
+      ],
+      "narrativeMentionsNpc": false,
+      "mentionedNpcName": "Inquisitor Valerius",
+      "quickActionsCount": 0
+    },
+    {
+      "task": 2,
+      "turn": 6,
+      "action": "observe-ticks",
+      "location": "Sanctum of Whispers",
+      "npcsInSidebar": [
+        "Inquisitor Valerius"
+      ],
+      "narrativeMentionsNpc": true,
+      "mentionedNpcName": "",
+      "quickActionsCount": 0
+    },
+    {
+      "task": 2,
+      "turn": 7,
+      "action": "observe-continued",
+      "location": "Sanctum of Whispers",
+      "npcsInSidebar": [
+        "Inquisitor Valerius"
+      ],
+      "narrativeMentionsNpc": true,
+      "mentionedNpcName": "",
+      "quickActionsCount": 0
+    },
+    {
+      "task": 2,
+      "turn": 8,
+      "action": "move-to-Festering Mire",
+      "location": "Festering Mire",
+      "npcsInSidebar": [
+        "Elder Thistlewick"
+      ],
+      "narrativeMentionsNpc": true,
+      "mentionedNpcName": "",
+      "quickActionsCount": 0
+    },
+    {
+      "task": 2,
+      "turn": 9,
+      "action": "greet-at-new-location",
+      "location": "Festering Mire",
+      "npcsInSidebar": [
+        "Elder Thistlewick"
+      ],
+      "narrativeMentionsNpc": true,
+      "mentionedNpcName": "Elder Thistlewick",
+      "quickActionsCount": 0
+    },
+    {
+      "task": 2,
+      "turn": 10,
+      "action": "final-observation",
+      "location": "Festering Mire",
+      "npcsInSidebar": [
+        "Elder Thistlewick"
+      ],
+      "narrativeMentionsNpc": true,
+      "mentionedNpcName": "",
+      "quickActionsCount": 0
+    }
+  ],
+  "consoleErrors": [],
+  "passed": [
+    "10 turns completed (need 10+)",
+    "NPCs visible in sidebar at game start",
+    "NPC mentioned in narrative (3 turns: Inquisitor Valerius, Inquisitor Valerius, Elder Thistlewick)",
+    "Sidebar NPCs visible in 10/10 turns",
+    "No page crashes",
+    "2 different locations visited (Sanctum of Whispers, Festering Mire)",
+    "NPC names consistent: 2 unique NPCs observed (Inquisitor Valerius, Elder Thistlewick)",
+    "11 screenshots captured"
+  ],
+  "failed": [
+    "Quick actions never appeared"
+  ],
+  "locations": [
+    "Sanctum of Whispers",
+    "Festering Mire"
+  ],
+  "uniqueNpcs": [
+    "Inquisitor Valerius",
+    "Elder Thistlewick"
+  ],
+  "qualityScore": 4.444444444444445,
+  "totalTurns": 10
+}

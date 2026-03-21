@@ -1,0 +1,1 @@
+ALTER TABLE `locations` ADD `is_starting` integer DEFAULT false NOT NULL;

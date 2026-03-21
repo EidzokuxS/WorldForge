@@ -1,0 +1,1259 @@
+import { describe, it, expect } from "vitest";
+import { z } from "zod";
+import {
+  chatBodySchema,
+  seedCategorySchema,
+  settingsPayloadSchema,
+  worldSeedsSchema,
+  createCampaignSchema,
+  rollSeedSchema,
+  suggestSeedsSchema,
+  suggestSeedSchema,
+  generateWorldSchema,
+  testProviderSchema,
+  testRoleSchema,
+  parseBody,
+  zodFirstError,
+} from "../schemas.js";
+
+// ---------------------------------------------------------------------------
+// seedCategorySchema
+// ---------------------------------------------------------------------------
+describe("seedCategorySchema", () => {
+  const validCategories = [
+    "geography",
+    "politicalStructure",
+    "centralConflict",
+    "culturalFlavor",
+    "environment",
+    "wildcard",
+  ] as const;
+
+  describe("accepts all valid seed categories", () => {
+    for (const category of validCategories) {
+      it(`accepts "${category}"`, () => {
+        const result = seedCategorySchema.safeParse(category);
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data).toBe(category);
+        }
+      });
+    }
+  });
+
+  describe("rejects invalid values", () => {
+    it("rejects an unknown string", () => {
+      const result = seedCategorySchema.safeParse("magic");
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects an empty string", () => {
+      const result = seedCategorySchema.safeParse("");
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects a misspelled category", () => {
+      const result = seedCategorySchema.safeParse("geographi");
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects a category with wrong casing", () => {
+      const result = seedCategorySchema.safeParse("Geography");
+      expect(result.success).toBe(false);
+    });
+
+  });
+});
+
+// ---------------------------------------------------------------------------
+// worldSeedsSchema
+// ---------------------------------------------------------------------------
+describe("worldSeedsSchema", () => {
+  describe("rejects objects with no non-empty seed values", () => {
+    it("rejects an empty object", () => {
+      const result = worldSeedsSchema.safeParse({});
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues.some((i) => i.message.includes("At least one seed"))).toBe(true);
+      }
+    });
+
+    it("rejects an object where all string fields are empty", () => {
+      const result = worldSeedsSchema.safeParse({
+        geography: "",
+        politicalStructure: "",
+        centralConflict: "",
+        environment: "",
+        wildcard: "",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects an object where all string fields are whitespace-only", () => {
+      const result = worldSeedsSchema.safeParse({
+        geography: "   ",
+        politicalStructure: "\t",
+        centralConflict: " \n ",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects when culturalFlavor is an empty array and all strings are empty", () => {
+      const result = worldSeedsSchema.safeParse({
+        geography: "",
+        culturalFlavor: [],
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects when all fields are undefined (explicit)", () => {
+      const result = worldSeedsSchema.safeParse({
+        geography: undefined,
+        politicalStructure: undefined,
+      });
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe("accepts objects with at least one non-empty seed value", () => {
+    it("accepts when only geography is set", () => {
+      const result = worldSeedsSchema.safeParse({ geography: "mountains" });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.geography).toBe("mountains");
+      }
+    });
+
+    it("accepts when only politicalStructure is set", () => {
+      const result = worldSeedsSchema.safeParse({ politicalStructure: "feudal monarchy" });
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts when only centralConflict is set", () => {
+      const result = worldSeedsSchema.safeParse({ centralConflict: "civil war" });
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts when only environment is set", () => {
+      const result = worldSeedsSchema.safeParse({ environment: "tundra" });
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts when only wildcard is set", () => {
+      const result = worldSeedsSchema.safeParse({ wildcard: "sentient animals" });
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts when only culturalFlavor has items", () => {
+      const result = worldSeedsSchema.safeParse({ culturalFlavor: ["samurai culture"] });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.culturalFlavor).toEqual(["samurai culture"]);
+      }
+    });
+
+    it("accepts when culturalFlavor has multiple items", () => {
+      const result = worldSeedsSchema.safeParse({
+        culturalFlavor: ["feudal Japan", "steam-powered tech"],
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.culturalFlavor).toHaveLength(2);
+      }
+    });
+
+    it("accepts a fully populated object", () => {
+      const result = worldSeedsSchema.safeParse({
+        geography: "archipelago",
+        politicalStructure: "city-states",
+        centralConflict: "trade war",
+        culturalFlavor: ["maritime", "mercantile"],
+        environment: "tropical",
+        wildcard: "dragons",
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts when one string is non-empty alongside empty strings", () => {
+      const result = worldSeedsSchema.safeParse({
+        geography: "",
+        politicalStructure: "",
+        centralConflict: "dragon invasion",
+        environment: "",
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts when culturalFlavor has items but all strings are empty", () => {
+      const result = worldSeedsSchema.safeParse({
+        geography: "",
+        culturalFlavor: ["viking"],
+      });
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe("handles culturalFlavor type constraints", () => {
+    it("rejects culturalFlavor when it is a plain string", () => {
+      const result = worldSeedsSchema.safeParse({
+        culturalFlavor: "should be array",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects culturalFlavor when it contains non-strings", () => {
+      const result = worldSeedsSchema.safeParse({
+        culturalFlavor: [123, true],
+      });
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe("strips unknown fields", () => {
+    it("does not include unknown top-level fields in the output", () => {
+      const result = worldSeedsSchema.safeParse({
+        geography: "plains",
+        unknownField: "should vanish",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data).not.toHaveProperty("unknownField");
+      }
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createCampaignSchema
+// ---------------------------------------------------------------------------
+describe("createCampaignSchema", () => {
+  describe("accepts valid inputs", () => {
+    it("accepts a minimal valid object", () => {
+      const result = createCampaignSchema.safeParse({
+        name: "My Campaign",
+        premise: "A dark world awaits",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.name).toBe("My Campaign");
+        expect(result.data.premise).toBe("A dark world awaits");
+        expect(result.data.seeds).toBeUndefined();
+      }
+    });
+
+    it("accepts an object with seeds", () => {
+      const result = createCampaignSchema.safeParse({
+        name: "Seeded Campaign",
+        premise: "Interesting premise",
+        seeds: { geography: "desert" },
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.seeds).toBeDefined();
+        expect(result.data.seeds!.geography).toBe("desert");
+      }
+    });
+
+    it("accepts without seeds field at all", () => {
+      const result = createCampaignSchema.safeParse({
+        name: "No seeds",
+        premise: "Quick start",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.seeds).toBeUndefined();
+      }
+    });
+  });
+
+  describe("trims whitespace from name and premise", () => {
+    it("trims leading and trailing whitespace from name", () => {
+      const result = createCampaignSchema.safeParse({
+        name: "  My Campaign  ",
+        premise: "A premise",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.name).toBe("My Campaign");
+      }
+    });
+
+    it("trims leading and trailing whitespace from premise", () => {
+      const result = createCampaignSchema.safeParse({
+        name: "Campaign",
+        premise: "  A dark world  ",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.premise).toBe("A dark world");
+      }
+    });
+
+    it("trims tabs and newlines", () => {
+      const result = createCampaignSchema.safeParse({
+        name: "\tTabbed\n",
+        premise: "\nNewlined\t",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.name).toBe("Tabbed");
+        expect(result.data.premise).toBe("Newlined");
+      }
+    });
+  });
+
+  describe("rejects invalid inputs", () => {
+    it("rejects empty name", () => {
+      const result = createCampaignSchema.safeParse({
+        name: "",
+        premise: "Valid premise",
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const nameIssue = result.error.issues.find((i) =>
+          i.path.includes("name")
+        );
+        expect(nameIssue).toBeDefined();
+        expect(nameIssue!.message).toBe("Campaign name is required.");
+      }
+    });
+
+    it("rejects whitespace-only name", () => {
+      const result = createCampaignSchema.safeParse({
+        name: "   ",
+        premise: "Valid premise",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects empty premise", () => {
+      const result = createCampaignSchema.safeParse({
+        name: "Valid name",
+        premise: "",
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const premiseIssue = result.error.issues.find((i) =>
+          i.path.includes("premise")
+        );
+        expect(premiseIssue).toBeDefined();
+        expect(premiseIssue!.message).toBe("Campaign premise is required.");
+      }
+    });
+
+    it("rejects whitespace-only premise", () => {
+      const result = createCampaignSchema.safeParse({
+        name: "Valid name",
+        premise: "   ",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects missing name field", () => {
+      const result = createCampaignSchema.safeParse({
+        premise: "Valid premise",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects missing premise field", () => {
+      const result = createCampaignSchema.safeParse({
+        name: "Valid name",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects non-string premise", () => {
+      const result = createCampaignSchema.safeParse({
+        name: "Valid name",
+        premise: false,
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects when both name and premise are empty", () => {
+      const result = createCampaignSchema.safeParse({
+        name: "",
+        premise: "",
+      });
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe("seeds validation within createCampaignSchema", () => {
+    it("rejects seeds that are an empty object (no non-empty value)", () => {
+      const result = createCampaignSchema.safeParse({
+        name: "Campaign",
+        premise: "Premise",
+        seeds: {},
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("accepts seeds with at least one non-empty value", () => {
+      const result = createCampaignSchema.safeParse({
+        name: "Campaign",
+        premise: "Premise",
+        seeds: { wildcard: "time travel" },
+      });
+      expect(result.success).toBe(true);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rollSeedSchema
+// ---------------------------------------------------------------------------
+describe("rollSeedSchema", () => {
+  describe("accepts valid categories", () => {
+    const categories = [
+      "geography",
+      "politicalStructure",
+      "centralConflict",
+      "culturalFlavor",
+      "environment",
+      "wildcard",
+    ] as const;
+
+    for (const category of categories) {
+      it(`accepts { category: "${category}" }`, () => {
+        const result = rollSeedSchema.safeParse({ category });
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data.category).toBe(category);
+        }
+      });
+    }
+  });
+
+  describe("rejects invalid categories", () => {
+    it("rejects an unknown category string", () => {
+      const result = rollSeedSchema.safeParse({ category: "unknown" });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects an empty string category", () => {
+      const result = rollSeedSchema.safeParse({ category: "" });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects a missing category field", () => {
+      const result = rollSeedSchema.safeParse({});
+      expect(result.success).toBe(false);
+    });
+
+  });
+});
+
+// ---------------------------------------------------------------------------
+// suggestSeedsSchema
+// ---------------------------------------------------------------------------
+describe("suggestSeedsSchema", () => {
+  describe("accepts valid inputs", () => {
+    it("accepts a non-empty premise", () => {
+      const result = suggestSeedsSchema.safeParse({ premise: "A world of magic" });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.premise).toBe("A world of magic");
+      }
+    });
+
+    it("trims whitespace from premise", () => {
+      const result = suggestSeedsSchema.safeParse({ premise: "  space opera  " });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.premise).toBe("space opera");
+      }
+    });
+  });
+
+  describe("rejects invalid inputs", () => {
+    it("rejects empty premise", () => {
+      const result = suggestSeedsSchema.safeParse({ premise: "" });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues[0]?.message).toBe("premise is required.");
+      }
+    });
+
+    it("rejects whitespace-only premise", () => {
+      const result = suggestSeedsSchema.safeParse({ premise: "   " });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects missing premise field", () => {
+      const result = suggestSeedsSchema.safeParse({});
+      expect(result.success).toBe(false);
+    });
+
+  });
+});
+
+// ---------------------------------------------------------------------------
+// suggestSeedSchema
+// ---------------------------------------------------------------------------
+describe("suggestSeedSchema", () => {
+  describe("accepts valid inputs", () => {
+    it("accepts a valid premise and category", () => {
+      const result = suggestSeedSchema.safeParse({
+        premise: "Fantasy world",
+        category: "geography",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.premise).toBe("Fantasy world");
+        expect(result.data.category).toBe("geography");
+      }
+    });
+
+    it("trims whitespace from premise", () => {
+      const result = suggestSeedSchema.safeParse({
+        premise: "  trimmed  ",
+        category: "wildcard",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.premise).toBe("trimmed");
+      }
+    });
+
+    it("accepts all valid category values", () => {
+      const categories = [
+        "geography",
+        "politicalStructure",
+        "centralConflict",
+        "culturalFlavor",
+        "environment",
+        "wildcard",
+      ] as const;
+
+      for (const category of categories) {
+        const result = suggestSeedSchema.safeParse({
+          premise: "Some premise",
+          category,
+        });
+        expect(result.success).toBe(true);
+      }
+    });
+  });
+
+  describe("rejects invalid inputs", () => {
+    it("rejects empty premise with valid category", () => {
+      const result = suggestSeedSchema.safeParse({
+        premise: "",
+        category: "geography",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects whitespace-only premise", () => {
+      const result = suggestSeedSchema.safeParse({
+        premise: "   ",
+        category: "geography",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects valid premise with invalid category", () => {
+      const result = suggestSeedSchema.safeParse({
+        premise: "Valid premise",
+        category: "invalid",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects missing premise", () => {
+      const result = suggestSeedSchema.safeParse({
+        category: "geography",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects missing category", () => {
+      const result = suggestSeedSchema.safeParse({
+        premise: "Valid premise",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects entirely empty object", () => {
+      const result = suggestSeedSchema.safeParse({});
+      expect(result.success).toBe(false);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// generateWorldSchema
+// ---------------------------------------------------------------------------
+describe("generateWorldSchema", () => {
+  describe("accepts valid inputs", () => {
+    it("accepts a non-empty campaignId", () => {
+      const result = generateWorldSchema.safeParse({
+        campaignId: "abc-123-def",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.campaignId).toBe("abc-123-def");
+      }
+    });
+
+    it("trims whitespace from campaignId", () => {
+      const result = generateWorldSchema.safeParse({
+        campaignId: "  uuid-456  ",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.campaignId).toBe("uuid-456");
+      }
+    });
+  });
+
+  describe("rejects invalid inputs", () => {
+    it("rejects empty campaignId", () => {
+      const result = generateWorldSchema.safeParse({ campaignId: "" });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues[0]?.message).toBe("campaignId is required.");
+      }
+    });
+
+    it("rejects whitespace-only campaignId", () => {
+      const result = generateWorldSchema.safeParse({ campaignId: "   " });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects missing campaignId field", () => {
+      const result = generateWorldSchema.safeParse({});
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects null campaignId", () => {
+      const result = generateWorldSchema.safeParse({ campaignId: null });
+      expect(result.success).toBe(false);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// testProviderSchema
+// ---------------------------------------------------------------------------
+describe("testProviderSchema", () => {
+  describe("accepts valid inputs", () => {
+    it("accepts a complete valid object", () => {
+      const result = testProviderSchema.safeParse({
+        baseUrl: "https://api.openai.com/v1",
+        model: "gpt-4",
+        apiKey: "sk-test-key",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.baseUrl).toBe("https://api.openai.com/v1");
+        expect(result.data.model).toBe("gpt-4");
+        expect(result.data.apiKey).toBe("sk-test-key");
+      }
+    });
+
+    it("defaults apiKey to empty string when omitted", () => {
+      const result = testProviderSchema.safeParse({
+        baseUrl: "http://localhost:1234",
+        model: "llama2",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.apiKey).toBe("");
+      }
+    });
+
+    it("accepts empty apiKey explicitly", () => {
+      const result = testProviderSchema.safeParse({
+        baseUrl: "http://localhost:1234",
+        model: "llama2",
+        apiKey: "",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.apiKey).toBe("");
+      }
+    });
+  });
+
+  describe("trims whitespace from baseUrl and model", () => {
+    it("trims baseUrl", () => {
+      const result = testProviderSchema.safeParse({
+        baseUrl: "  http://localhost:1234  ",
+        model: "gpt-4",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.baseUrl).toBe("http://localhost:1234");
+      }
+    });
+
+    it("trims model", () => {
+      const result = testProviderSchema.safeParse({
+        baseUrl: "http://localhost:1234",
+        model: "  gpt-4  ",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.model).toBe("gpt-4");
+      }
+    });
+  });
+
+  describe("rejects invalid inputs", () => {
+    it("rejects empty baseUrl", () => {
+      const result = testProviderSchema.safeParse({
+        baseUrl: "",
+        model: "gpt-4",
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues[0]?.message).toBe("baseUrl is required.");
+      }
+    });
+
+    it("rejects whitespace-only baseUrl", () => {
+      const result = testProviderSchema.safeParse({
+        baseUrl: "   ",
+        model: "gpt-4",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects empty model", () => {
+      const result = testProviderSchema.safeParse({
+        baseUrl: "http://localhost:1234",
+        model: "",
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues[0]?.message).toBe("model is required.");
+      }
+    });
+
+    it("rejects whitespace-only model", () => {
+      const result = testProviderSchema.safeParse({
+        baseUrl: "http://localhost:1234",
+        model: "   ",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects missing baseUrl", () => {
+      const result = testProviderSchema.safeParse({
+        model: "gpt-4",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects missing model", () => {
+      const result = testProviderSchema.safeParse({
+        baseUrl: "http://localhost:1234",
+      });
+      expect(result.success).toBe(false);
+    });
+
+  });
+});
+
+// ---------------------------------------------------------------------------
+// testRoleSchema
+// ---------------------------------------------------------------------------
+describe("testRoleSchema", () => {
+  // Helper to build a minimal valid input
+  const validInput = (role: "judge" | "storyteller" | "generator" = "judge") => ({
+    role,
+    providers: [
+      {
+        id: "p1",
+        name: "Provider",
+        baseUrl: "http://localhost:1234",
+        apiKey: "",
+        defaultModel: "gpt-4",
+      },
+    ],
+    roles: {
+      judge: {
+        providerId: "p1",
+        model: "gpt-4",
+        temperature: 0.3,
+        maxTokens: 512,
+      },
+    },
+  });
+
+  describe("accepts valid inputs", () => {
+    it("accepts a complete valid object with role 'judge'", () => {
+      const result = testRoleSchema.safeParse(validInput());
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts role 'storyteller'", () => {
+      const result = testRoleSchema.safeParse(validInput("storyteller"));
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts role 'generator'", () => {
+      const result = testRoleSchema.safeParse(validInput("generator"));
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts providers with default values for missing fields", () => {
+      const result = testRoleSchema.safeParse({
+        role: "judge",
+        providers: [{}],
+        roles: {},
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.providers[0]).toEqual({
+          id: "",
+          name: "",
+          baseUrl: "",
+          apiKey: "",
+          defaultModel: "",
+        });
+      }
+    });
+
+    it("accepts an empty roles record", () => {
+      const result = testRoleSchema.safeParse({
+        role: "storyteller",
+        providers: [{ id: "p1" }],
+        roles: {},
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.roles).toEqual({});
+      }
+    });
+
+    it("applies default temperature (0.8) and maxTokens (1024) in role configs", () => {
+      const result = testRoleSchema.safeParse({
+        role: "judge",
+        providers: [{ id: "p1" }],
+        roles: {
+          judge: { providerId: "p1" },
+        },
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.roles.judge!.temperature).toBe(0.8);
+        expect(result.data.roles.judge!.maxTokens).toBe(1024);
+      }
+    });
+
+    it("accepts multiple providers", () => {
+      const result = testRoleSchema.safeParse({
+        role: "judge",
+        providers: [
+          { id: "p1", name: "First" },
+          { id: "p2", name: "Second" },
+        ],
+        roles: {},
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.providers).toHaveLength(2);
+      }
+    });
+
+    it("accepts multiple role configs in the roles record", () => {
+      const result = testRoleSchema.safeParse({
+        role: "judge",
+        providers: [{ id: "p1" }],
+        roles: {
+          judge: { providerId: "p1", temperature: 0.3 },
+          storyteller: { providerId: "p1", temperature: 0.9 },
+          generator: { providerId: "p1", temperature: 0.7 },
+        },
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(Object.keys(result.data.roles)).toHaveLength(3);
+      }
+    });
+  });
+
+  describe("validates the role enum", () => {
+    it("rejects an unknown role string", () => {
+      const input = { ...validInput(), role: "narrator" };
+      const result = testRoleSchema.safeParse(input);
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects an empty role string", () => {
+      const input = { ...validInput(), role: "" };
+      const result = testRoleSchema.safeParse(input);
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects a numeric role", () => {
+      const input = { ...validInput(), role: 1 };
+      const result = testRoleSchema.safeParse(input);
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects role with wrong casing", () => {
+      const input = { ...validInput(), role: "Judge" };
+      const result = testRoleSchema.safeParse(input);
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe("validates the providers array", () => {
+    it("rejects an empty providers array", () => {
+      const result = testRoleSchema.safeParse({
+        role: "judge",
+        providers: [],
+        roles: {},
+      });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        const providerIssue = result.error.issues.find((i) =>
+          i.message.includes("providers")
+        );
+        expect(providerIssue).toBeDefined();
+      }
+    });
+
+    it("rejects missing providers field", () => {
+      const result = testRoleSchema.safeParse({
+        role: "judge",
+        roles: {},
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects providers as a non-array", () => {
+      const result = testRoleSchema.safeParse({
+        role: "judge",
+        providers: "not an array",
+        roles: {},
+      });
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe("validates role config values in the roles record", () => {
+    it("rejects non-integer maxTokens", () => {
+      const result = testRoleSchema.safeParse({
+        role: "judge",
+        providers: [{ id: "p1" }],
+        roles: {
+          judge: { providerId: "p1", maxTokens: 512.5 },
+        },
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects non-number temperature", () => {
+      const result = testRoleSchema.safeParse({
+        role: "judge",
+        providers: [{ id: "p1" }],
+        roles: {
+          judge: { providerId: "p1", temperature: "hot" },
+        },
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("accepts model as optional (undefined)", () => {
+      const result = testRoleSchema.safeParse({
+        role: "judge",
+        providers: [{ id: "p1" }],
+        roles: {
+          judge: { providerId: "p1" },
+        },
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.roles.judge!.model).toBeUndefined();
+      }
+    });
+
+    it("accepts model when provided as a string", () => {
+      const result = testRoleSchema.safeParse({
+        role: "judge",
+        providers: [{ id: "p1" }],
+        roles: {
+          judge: { providerId: "p1", model: "gpt-4" },
+        },
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.roles.judge!.model).toBe("gpt-4");
+      }
+    });
+  });
+
+  describe("handles missing required fields", () => {
+    it("rejects missing role field", () => {
+      const result = testRoleSchema.safeParse({
+        providers: [{ id: "p1" }],
+        roles: {},
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects missing roles field", () => {
+      const result = testRoleSchema.safeParse({
+        role: "judge",
+        providers: [{ id: "p1" }],
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects an entirely empty object", () => {
+      const result = testRoleSchema.safeParse({});
+      expect(result.success).toBe(false);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// zodFirstError
+// ---------------------------------------------------------------------------
+describe("zodFirstError", () => {
+  it("extracts the first error message from a ZodError", () => {
+    const result = z.string().min(5, "too short").safeParse("hi");
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(zodFirstError(result.error)).toBe("too short");
+    }
+  });
+
+  it("returns the first message when there are multiple issues", () => {
+    const schema = z.object({
+      a: z.string().min(1, "a is required"),
+      b: z.string().min(1, "b is required"),
+    });
+    const result = schema.safeParse({ a: "", b: "" });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      // First issue in order should be about "a"
+      const msg = zodFirstError(result.error);
+      expect(msg).toBe("a is required");
+    }
+  });
+
+  it("returns fallback 'Validation failed.' for a ZodError with no issues", () => {
+    // Construct a ZodError with an empty issues array (edge case)
+    const emptyError = new z.ZodError([]);
+    expect(zodFirstError(emptyError)).toBe("Validation failed.");
+  });
+
+  it("works with custom error messages from refine", () => {
+    const schema = z.string().refine((s) => s.length > 3, {
+      message: "Must be longer than 3 characters",
+    });
+    const result = schema.safeParse("ab");
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(zodFirstError(result.error)).toBe("Must be longer than 3 characters");
+    }
+  });
+
+  it("works with enum validation errors", () => {
+    const schema = z.enum(["a", "b"]);
+    const result = schema.safeParse("c");
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const msg = zodFirstError(result.error);
+      expect(typeof msg).toBe("string");
+      expect(msg.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("works with nested object validation errors", () => {
+    const schema = z.object({
+      nested: z.object({
+        value: z.number({ message: "Expected number" }),
+      }),
+    });
+    const result = schema.safeParse({ nested: { value: "not a number" } });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const msg = zodFirstError(result.error);
+      expect(msg).toBe("Expected number");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// chatBodySchema
+// ---------------------------------------------------------------------------
+describe("chatBodySchema", () => {
+  it("accepts a valid playerAction", () => {
+    const result = chatBodySchema.safeParse({ playerAction: "look around" });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.playerAction).toBe("look around");
+    }
+  });
+
+  it("trims whitespace from playerAction", () => {
+    const result = chatBodySchema.safeParse({ playerAction: "  go north  " });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.playerAction).toBe("go north");
+    }
+  });
+
+  it("rejects empty playerAction", () => {
+    const result = chatBodySchema.safeParse({ playerAction: "" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects whitespace-only playerAction", () => {
+    const result = chatBodySchema.safeParse({ playerAction: "   " });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects missing playerAction", () => {
+    const result = chatBodySchema.safeParse({});
+    expect(result.success).toBe(false);
+  });
+
+});
+
+// ---------------------------------------------------------------------------
+// settingsPayloadSchema
+// ---------------------------------------------------------------------------
+describe("settingsPayloadSchema", () => {
+  const validSettings = () => ({
+    providers: [
+      { id: "p1", name: "Test", baseUrl: "http://localhost", apiKey: "", defaultModel: "m1" },
+    ],
+    judge: { providerId: "p1", temperature: 0.3, maxTokens: 512 },
+    storyteller: { providerId: "p1", temperature: 0.8, maxTokens: 1024 },
+    generator: { providerId: "p1", temperature: 0.7, maxTokens: 2048 },
+    fallback: { providerId: "p1", model: "m1", timeoutMs: 30000, retryCount: 2 },
+    images: { providerId: "p1", model: "dall-e", stylePrompt: "fantasy", enabled: false },
+  });
+
+  it("accepts a complete valid settings object", () => {
+    const result = settingsPayloadSchema.safeParse(validSettings());
+    expect(result.success).toBe(true);
+  });
+
+  it("strips extra properties", () => {
+    const input = { ...validSettings(), customField: "extra" };
+    const result = settingsPayloadSchema.safeParse(input);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect("customField" in result.data).toBe(false);
+    }
+  });
+
+  it("rejects missing providers", () => {
+    const { providers: _, ...rest } = validSettings();
+    const result = settingsPayloadSchema.safeParse(rest);
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects missing judge role", () => {
+    const { judge: _, ...rest } = validSettings();
+    const result = settingsPayloadSchema.safeParse(rest);
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects missing fallback config", () => {
+    const { fallback: _, ...rest } = validSettings();
+    const result = settingsPayloadSchema.safeParse(rest);
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects missing images config", () => {
+    const { images: _, ...rest } = validSettings();
+    const result = settingsPayloadSchema.safeParse(rest);
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects non-number temperature in role", () => {
+    const input = validSettings();
+    (input.judge as Record<string, unknown>).temperature = "hot";
+    const result = settingsPayloadSchema.safeParse(input);
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects non-boolean enabled in images", () => {
+    const input = validSettings();
+    (input.images as Record<string, unknown>).enabled = "yes";
+    const result = settingsPayloadSchema.safeParse(input);
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts providers with optional isBuiltin", () => {
+    const input = validSettings();
+    (input.providers[0] as Record<string, unknown>).isBuiltin = true;
+    const result = settingsPayloadSchema.safeParse(input);
+    expect(result.success).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseBody
+// ---------------------------------------------------------------------------
+describe("parseBody", () => {
+  function mockContext(body: unknown, throwOnJson = false) {
+    return {
+      req: {
+        json: async () => {
+          if (throwOnJson) throw new Error("parse error");
+          return body;
+        },
+      },
+      json: (data: unknown, status?: number) =>
+        ({ __data: data, __status: status ?? 200 }) as unknown as Response,
+    } as Parameters<typeof parseBody>[0];
+  }
+
+  it("returns parsed data for valid body", async () => {
+    const schema = z.object({ name: z.string() });
+    const c = mockContext({ name: "hello" });
+    const result = await parseBody(c, schema);
+    expect("data" in result).toBe(true);
+    if ("data" in result) {
+      expect(result.data.name).toBe("hello");
+    }
+  });
+
+  it("returns error response for invalid JSON", async () => {
+    const schema = z.object({ name: z.string() });
+    const c = mockContext(null, true);
+    const result = await parseBody(c, schema);
+    expect("response" in result).toBe(true);
+    if ("response" in result) {
+      const resp = result.response as unknown as { __data: { error: string }; __status: number };
+      expect(resp.__status).toBe(400);
+      expect(resp.__data.error).toBe("Invalid JSON body.");
+    }
+  });
+
+  it("returns error response for schema validation failure", async () => {
+    const schema = z.object({ name: z.string().min(1, "name required") });
+    const c = mockContext({ name: "" });
+    const result = await parseBody(c, schema);
+    expect("response" in result).toBe(true);
+    if ("response" in result) {
+      const resp = result.response as unknown as { __data: { error: string }; __status: number };
+      expect(resp.__status).toBe(400);
+      expect(resp.__data.error).toBe("name required");
+    }
+  });
+
+  it("applies schema transforms (e.g. trim)", async () => {
+    const schema = z.object({
+      value: z.string().transform((s) => s.trim()).pipe(z.string().min(1, "empty")),
+    });
+    const c = mockContext({ value: "  hello  " });
+    const result = await parseBody(c, schema);
+    expect("data" in result).toBe(true);
+    if ("data" in result) {
+      expect(result.data.value).toBe("hello");
+    }
+  });
+});
