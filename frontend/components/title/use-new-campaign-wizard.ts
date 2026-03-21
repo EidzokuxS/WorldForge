@@ -60,8 +60,8 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
     if (!nextOpen) resetFlow();
   }
 
-  async function tryGenerateWorld(campaignId: string): Promise<void> {
-    if (!settings || !isGeneratorConfigured(settings)) return;
+  async function tryGenerateWorld(campaignId: string): Promise<boolean> {
+    if (!settings || !isGeneratorConfigured(settings)) return true;
 
     setPhase({ kind: "generating" });
     setGenerationProgress(null);
@@ -72,10 +72,12 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
       toast.success(`World generated: ${generation.startingLocation ?? "Unknown"}`, {
         description: `${generation.locationCount ?? 0} locations, ${generation.npcCount ?? 0} NPCs, ${generation.factionCount ?? 0} factions`,
       });
+      return true;
     } catch (error) {
       toast.error("World generation failed", {
         description: getErrorMessage(error, "You can still play - the world will be empty."),
       });
+      return false;
     } finally {
       setGenerationProgress(null);
     }
@@ -110,9 +112,9 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
       resetFlow();
       onCreated();
 
-      await tryGenerateWorld(created.id);
+      const generated = await tryGenerateWorld(created.id);
 
-      router.push(`/world-review?campaignId=${created.id}`);
+      router.push(`/campaign/${created.id}/${generated ? "review" : "character"}`);
     } catch (error) {
       toast.error("Failed to create campaign", {
         description: getErrorMessage(error, DEFAULT_API_ERROR),
@@ -272,7 +274,7 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
     canCreate,
 
     // Handlers
-    createCampaignWithSeeds,
+    handleCreateWithSeeds: createCampaignWithSeeds,
     handleNextToDna,
     handleResuggestAll,
     handleResuggestCategory,

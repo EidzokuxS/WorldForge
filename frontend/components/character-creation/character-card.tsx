@@ -2,6 +2,7 @@
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -39,6 +40,49 @@ export function CharacterCard({
           onChange={(e) => update({ name: e.target.value })}
           placeholder="Character name"
           className="mt-1 font-serif text-lg font-bold"
+        />
+      </div>
+
+      {/* Race / Gender / Age row */}
+      <div className="grid grid-cols-3 gap-3">
+        <div>
+          <Label className="text-xs text-muted-foreground">Race</Label>
+          <Input
+            value={character.race}
+            onChange={(e) => update({ race: e.target.value })}
+            placeholder="e.g. Human"
+            className="mt-1"
+          />
+        </div>
+        <div>
+          <Label className="text-xs text-muted-foreground">Gender</Label>
+          <Input
+            value={character.gender}
+            onChange={(e) => update({ gender: e.target.value })}
+            placeholder="e.g. Male"
+            className="mt-1"
+          />
+        </div>
+        <div>
+          <Label className="text-xs text-muted-foreground">Age</Label>
+          <Input
+            value={character.age}
+            onChange={(e) => update({ age: e.target.value })}
+            placeholder="e.g. Young adult"
+            className="mt-1"
+          />
+        </div>
+      </div>
+
+      {/* Appearance */}
+      <div>
+        <Label className="text-xs text-muted-foreground">Appearance</Label>
+        <Textarea
+          value={character.appearance}
+          onChange={(e) => update({ appearance: e.target.value })}
+          placeholder="Brief physical description..."
+          className="mt-1 min-h-[60px]"
+          maxLength={1000}
         />
       </div>
 
@@ -83,7 +127,7 @@ export function CharacterCard({
           </Label>
           <Select
             value={character.locationName}
-            onValueChange={(v) => update({ locationName: v })}
+            onValueChange={(v: string) => update({ locationName: v })}
           >
             <SelectTrigger className="mt-1 h-9 text-sm">
               <SelectValue placeholder="Select location" />

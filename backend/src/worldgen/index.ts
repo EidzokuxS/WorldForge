@@ -12,9 +12,11 @@ export {
 export type {
   GenerateScaffoldRequest,
   WorldScaffold,
-} from "./scaffold-generator.js";
+} from "./types.js";
 export { saveScaffoldToDb } from "./scaffold-saver.js";
 export { extractLoreCards } from "./lore-extractor.js";
-export type { ExtractedLoreCard } from "./lore-extractor.js";
+export type { ExtractedLoreCard } from "./types.js";
 export { researchKnownIP } from "./ip-researcher.js";
 export type { IpResearchContext } from "./ip-researcher.js";
+export { resolveStartingLocation } from "./starting-location.js";
+export type { StartingLocationResult } from "./starting-location.js";

@@ -76,7 +76,7 @@ export function NewCampaignDialog({ wizard: w }: NewCampaignDialogProps) {
               </Button>
               <Button
                 variant="outline"
-                onClick={() => void w.createCampaignWithSeeds()}
+                onClick={() => void w.handleCreateWithSeeds()}
                 disabled={!w.canCreate}
               >
                 {w.creatingCampaign ? (

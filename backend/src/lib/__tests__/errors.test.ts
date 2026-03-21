@@ -111,17 +111,22 @@ describe("getErrorStatus", () => {
       expect(getErrorStatus(err)).toBe(500);
     });
 
-    it("returns 500 for any unrecognized statusCode (e.g. 403)", () => {
+    it("returns 403 for statusCode 403", () => {
       const err = new AppError("forbidden", 403);
-      expect(getErrorStatus(err)).toBe(500);
+      expect(getErrorStatus(err)).toBe(403);
     });
 
-    it("returns 500 for statusCode 422", () => {
+    it("returns 422 for statusCode 422", () => {
       const err = new AppError("unprocessable", 422);
-      expect(getErrorStatus(err)).toBe(500);
+      expect(getErrorStatus(err)).toBe(422);
     });
 
-    it("returns 500 for statusCode 503", () => {
+    it("returns 429 for statusCode 429", () => {
+      const err = new AppError("too many requests", 429);
+      expect(getErrorStatus(err)).toBe(429);
+    });
+
+    it("returns 500 for statusCode 503 (5xx falls to 500)", () => {
       const err = new AppError("unavailable", 503);
       expect(getErrorStatus(err)).toBe(500);
     });

@@ -21,6 +21,10 @@ export interface ResolvedRole {
   maxTokens: number;
 }
 
+export type ResolveResult =
+  | { resolved: ResolvedRole }
+  | { error: string; status: 400 };
+
 export function resolveRoleModel(
   role: RoleSettings,
   providers: ProviderSettings[]

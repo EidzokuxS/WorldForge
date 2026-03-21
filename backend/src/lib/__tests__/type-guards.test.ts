@@ -42,15 +42,13 @@ describe("isRecord", () => {
       expect(isRecord(new Set())).toBe(true);
     });
 
-    // Note: arrays pass the current implementation because
-    // typeof [] === "object" && [] !== null. This documents
-    // the actual behavior.
-    it("array (typeof object, not null)", () => {
-      expect(isRecord([1, 2, 3])).toBe(true);
-    });
   });
 
   describe("returns false for non-record values", () => {
+    it("array", () => {
+      expect(isRecord([1, 2, 3])).toBe(false);
+    });
+
     it("null", () => {
       expect(isRecord(null)).toBe(false);
     });

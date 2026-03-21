@@ -8,7 +8,7 @@ import {
   npcs,
   relationships,
 } from "../db/schema.js";
-import type { WorldScaffold } from "./scaffold-generator.js";
+import type { WorldScaffold } from "./types.js";
 
 type DbInstance = ReturnType<typeof getDb>;
 type Tx = Parameters<Parameters<DbInstance["transaction"]>[0]>[0];

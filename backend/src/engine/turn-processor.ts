@@ -6,6 +6,8 @@
  */
 
 import { streamText, stepCountIs } from "ai";
+import { safeGenerateObject as generateObject } from "../ai/generate-object-safe.js";
+import { z } from "zod";
 import { eq, sql } from "drizzle-orm";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
 import { callOracle, type OracleResult } from "./oracle.js";
@@ -48,6 +50,7 @@ export interface TurnOptions {
   storytellerTemperature: number;
   storytellerMaxTokens: number;
   embedderResult?: ResolveResult;
+  fallbackProvider?: ProviderConfig | null;
   contextWindow?: number;
   onPostTurn?: (summary: TurnSummary) => void | Promise<void>;
 }
@@ -61,16 +64,41 @@ export interface TurnSummary {
 
 // -- Movement detection -------------------------------------------------------
 
-const MOVEMENT_REGEX =
-  /^(?:go\s+to|travel\s+to|move\s+to|head\s+to|walk\s+to|run\s+to|go)\s+(.+)$/i;
+const movementDetectionSchema = z.object({
+  isMovement: z.boolean().describe("Whether the action is a movement/travel command"),
+  destination: z.string().nullable().describe("The destination name if movement detected, null otherwise"),
+});
 
 /**
- * Detect if a player action is a movement command.
+ * Detect if a player action is a movement command using LLM analysis.
  * Returns the destination name if matched, null otherwise.
  */
-export function detectMovement(action: string): string | null {
-  const match = action.trim().match(MOVEMENT_REGEX);
-  return match ? match[1]!.trim() : null;
+export async function detectMovement(
+  action: string,
+  judgeProvider: ProviderConfig,
+): Promise<string | null> {
+  try {
+    const { object } = await generateObject({
+      model: createModel(judgeProvider),
+      schema: movementDetectionSchema,
+      prompt: `Is this player action a movement/travel command? If yes, extract the destination name.
+
+Actions like "go to X", "head towards X", "visit X", "walk to X", "check out X", "travel to X", "let's go to X", "I want to visit X" are movement.
+Actions like "attack", "talk to", "look around", "pick up", "search", "examine" are NOT movement.
+Movement in any language counts (e.g. Russian "Пойдём на рынок" = movement to "рынок").
+
+Player action: "${action.trim()}"`,
+      temperature: 0.1,
+    });
+
+    if (object.isMovement && object.destination) {
+      return object.destination.trim();
+    }
+    return null;
+  } catch (error) {
+    log.warn("LLM movement detection failed, assuming no movement", error);
+    return null;
+  }
 }
 
 // -- Narrative sanitizer --------------------------------------------------------
@@ -210,6 +238,7 @@ export async function* processTurn(
     storytellerTemperature,
     storytellerMaxTokens,
     embedderResult,
+    fallbackProvider,
     contextWindow = 8192,
     onPostTurn,
   } = options;
@@ -257,7 +286,7 @@ export async function* processTurn(
   }
 
   // 1b. Detect movement and handle location change
-  const movementDestination = detectMovement(playerAction);
+  const movementDestination = await detectMovement(playerAction, judgeProvider);
   if (movementDestination && player) {
     const destName = movementDestination.toLowerCase();
 
@@ -336,7 +365,8 @@ export async function* processTurn(
       environmentTags,
       sceneContext,
     },
-    judgeProvider
+    judgeProvider,
+    fallbackProvider ?? null
   );
 
   yield { type: "oracle_result", data: oracleResult };
@@ -348,6 +378,7 @@ export async function* processTurn(
     actionResult: oracleResult,
     embedderResult,
     playerAction,
+    judgeRole: { provider: judgeProvider, temperature: 0.1, maxTokens: 1024 },
   });
 
   // 4. Build system prompt with outcome instructions
@@ -369,14 +400,16 @@ export async function* processTurn(
   const tools = createStorytellerTools(campaignId, currentTick, oracleResult.outcome);
 
   // 9. Call Storyteller with streaming
+  const storyMessages = [
+    ...chatHistory.slice(-20),
+    { role: "user" as const, content: playerAction },
+  ];
+
   const model = createModel(storytellerProvider);
   const result = streamText({
     model,
     system: systemPrompt,
-    messages: [
-      ...chatHistory.slice(-20),
-      { role: "user" as const, content: playerAction },
-    ],
+    messages: storyMessages,
     tools,
     stopWhen: stepCountIs(3),
     temperature: storytellerTemperature,
@@ -390,39 +423,43 @@ export async function* processTurn(
   let leakDetected = false;
   let quickActionsEmitted = false;
   let playerDowned = false;
+  let narrativeStarted = false;
   const toolCallResults: Array<{
     tool: string;
     args: unknown;
     result: unknown;
   }> = [];
 
-  for await (const part of result.fullStream) {
+  /**
+   * Process a single stream part: yield events, track state.
+   * Returns yielded TurnEvents for the caller to yield.
+   */
+  function processStreamPart(
+    part: { type: string; [key: string]: unknown },
+  ): TurnEvent[] {
+    const events: TurnEvent[] = [];
     if (part.type === "text-delta") {
-      rawNarrative += part.text;
-      // Check for metadata leak in accumulated text
+      const text = part.text as string;
+      narrativeStarted = true;
+      rawNarrative += text;
       if (!leakDetected) {
         const hasLeak = LEAKED_HEADERS.some((h) => rawNarrative.includes(h));
         if (hasLeak) {
           leakDetected = true;
-          // Send the clean portion before the leak started
-          const sanitized = sanitizeNarrative(rawNarrative);
-          // We already sent some deltas; the sanitized text may be shorter.
-          // For the SSE stream, we just stop sending more narrative.
+          sanitizeNarrative(rawNarrative);
           log.warn("Metadata leak detected in Storyteller output, truncating narrative");
         } else {
-          yield { type: "narrative", data: { text: part.text } };
+          events.push({ type: "narrative", data: { text } });
         }
       }
-      // If leak already detected, silently consume the rest
     } else if (part.type === "tool-result") {
-      const toolName = part.toolName;
-      const args = part.input;
-      const toolOutput = part.output;
+      const toolName = (part as Record<string, unknown>).toolName as string;
+      const args = (part as Record<string, unknown>).input;
+      const toolOutput = (part as Record<string, unknown>).output;
 
       const toolResult = { tool: toolName, args, result: toolOutput };
       toolCallResults.push(toolResult);
 
-      // Detect HP=0 (player downed) from set_condition result
       if (toolName === "set_condition") {
         const output = toolOutput as Record<string, unknown>;
         const inner = output?.result as Record<string, unknown> | undefined;
@@ -433,10 +470,51 @@ export async function* processTurn(
 
       if (toolName === "offer_quick_actions") {
         quickActionsEmitted = true;
-        yield { type: "quick_actions", data: toolOutput };
+        events.push({ type: "quick_actions", data: toolOutput });
       } else {
-        yield { type: "state_update", data: toolResult };
+        events.push({ type: "state_update", data: toolResult });
       }
+    }
+    return events;
+  }
+
+  try {
+    for await (const part of result.fullStream) {
+      const events = processStreamPart(part as { type: string });
+      for (const event of events) {
+        yield event;
+      }
+    }
+  } catch (streamError) {
+    if (!narrativeStarted && fallbackProvider) {
+      log.warn("Storyteller stream failed before narrative, retrying with fallback", streamError);
+      // Reset state for retry
+      rawNarrative = "";
+      leakDetected = false;
+      quickActionsEmitted = false;
+      playerDowned = false;
+      narrativeStarted = false;
+      toolCallResults.length = 0;
+
+      const fallbackModel = createModel(fallbackProvider);
+      const fallbackResult = streamText({
+        model: fallbackModel,
+        system: systemPrompt,
+        messages: storyMessages,
+        tools,
+        stopWhen: stepCountIs(3),
+        temperature: storytellerTemperature,
+        maxOutputTokens: storytellerMaxTokens,
+      });
+
+      for await (const part of fallbackResult.fullStream) {
+        const events = processStreamPart(part as { type: string });
+        for (const event of events) {
+          yield event;
+        }
+      }
+    } else {
+      throw streamError;
     }
   }
 

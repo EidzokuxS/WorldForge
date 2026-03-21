@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import type { WorldSeeds, SeedCategory } from "@worldforge/shared";
-import { isRecord } from "../lib/type-guards.js";
+import { isRecord } from "../lib/index.js";
 
 export type { WorldSeeds, SeedCategory } from "@worldforge/shared";
 

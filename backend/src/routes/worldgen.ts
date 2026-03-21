@@ -17,6 +17,7 @@ import {
   suggestWorldSeeds,
 } from "../worldgen/index.js";
 import { parseBody, requireActiveCampaign, resolveGenerator, resolveEmbedder } from "./helpers.js";
+import { resolveFallbackProvider } from "../ai/with-model-fallback.js";
 import { createLogger } from "../lib/index.js";
 
 const log = createLogger("worldgen-route");
@@ -128,6 +129,14 @@ app.post("/generate", async (c) => {
       return c.json({ error: gen.error }, gen.status);
     }
 
+    // Resolve Fallback role for lore extraction retry
+    const fallbackProviderConfig = resolveFallbackProvider(settings.fallback, settings.providers);
+    const fallbackRole = fallbackProviderConfig ? {
+      provider: fallbackProviderConfig,
+      temperature: gen.resolved.temperature,
+      maxTokens: gen.resolved.maxTokens,
+    } : undefined;
+
     return streamSSE(c, async (stream) => {
       try {
         const scaffold = await generateWorldScaffold(
@@ -137,6 +146,7 @@ app.post("/generate", async (c) => {
             premise: campaign.premise,
             seeds: campaign.seeds,
             role: gen.resolved,
+            fallbackRole,
             research: settings.research,
           },
           async (progress) => {

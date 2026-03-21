@@ -1,6 +1,7 @@
 import { safeGenerateObject as generateObject } from "../ai/generate-object-safe.js";
 import { z } from "zod";
 import { createModel } from "../ai/index.js";
+import { withModelFallback } from "../ai/with-model-fallback.js";
 import { createLogger } from "../lib/index.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import { LORE_CATEGORIES } from "./types.js";
@@ -59,7 +60,8 @@ ${npcLines}`;
 
 export async function extractLoreCards(
   scaffold: WorldScaffold,
-  role: ResolvedRole
+  role: ResolvedRole,
+  fallbackRole?: ResolvedRole
 ): Promise<ExtractedLoreCard[]> {
   const context = formatScaffoldContext(scaffold);
 
@@ -104,11 +106,12 @@ EXTRACTION RULES:
   }
 
   // If all retries failed, try with a reduced schema (min 10 instead of 20)
+  const reducedSchema = z.object({
+    loreCards: z.array(loreCardSchema).min(10).max(30),
+  });
+
   try {
     log.info("Attempting lore extraction with reduced card count (10-30)");
-    const reducedSchema = z.object({
-      loreCards: z.array(loreCardSchema).min(10).max(30),
-    });
     const result = await generateObject({
       model: createModel(role.provider),
       schema: reducedSchema,
@@ -117,7 +120,34 @@ EXTRACTION RULES:
       maxOutputTokens: role.maxTokens,
     });
     return result.object.loreCards;
-  } catch {
+  } catch (reducedError) {
+    const lastPrimaryError = reducedError;
+
+    // If all primary retries failed, try with fallback model via withModelFallback
+    if (fallbackRole) {
+      try {
+        log.info("Attempting lore extraction with fallback model via withModelFallback");
+        return await withModelFallback(
+          // Primary already failed -- pass a guaranteed-failure thunk
+          async () => { throw lastPrimaryError; },
+          // Fallback: try with fallback model + reduced schema
+          async () => {
+            const fbResult = await generateObject({
+              model: createModel(fallbackRole.provider),
+              schema: reducedSchema,
+              prompt,
+              temperature: fallbackRole.temperature,
+              maxOutputTokens: fallbackRole.maxTokens,
+            });
+            return fbResult.object.loreCards;
+          },
+          "lore-extraction:extractLoreCards"
+        );
+      } catch (fallbackError) {
+        log.error("Lore extraction failed with fallback model too", fallbackError);
+      }
+    }
+
     throw new Error(
       `Lore extraction failed after ${MAX_RETRIES} retries: ${lastError?.message ?? "unknown error"}. ` +
         `Check that the Generator provider (${role.provider.model}) supports structured JSON output.`

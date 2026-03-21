@@ -17,42 +17,53 @@ const log = createLogger("worldgen");
 
 const locationSchema = z.object({
   name: z.string(),
-  description: z.string().describe("2-3 sentences"),
+  description: z.string().default("").describe("2-3 sentences"),
   tags: z
     .array(z.string())
+    .default([])
     .describe("Structural tags like [Warm], [Crowded], [Dangerous]"),
   isStarting: z
     .boolean()
+    .default(false)
     .describe("Exactly one location must be the starting location"),
-  connectedTo: z.array(z.string()).describe("Names of connected locations"),
+  connectedTo: z.array(z.string()).default([]).describe("Names of connected locations"),
 });
 
 const factionSchema = z.object({
   name: z.string(),
   tags: z
     .array(z.string())
+    .default([])
     .describe("Faction tags like [Militaristic], [Secretive]"),
-  goals: z.array(z.string()).min(1).max(8),
-  assets: z.array(z.string()).min(1).max(8),
+  goals: z.array(z.string()).default([]),
+  assets: z.array(z.string()).default([]),
   territoryNames: z
     .array(z.string())
+    .default([])
     .describe("Names of locations this faction controls"),
 });
 
 const npcSchema = z.object({
   name: z.string(),
-  persona: z.string().describe("2-3 sentence personality and backstory"),
+  persona: z.string().default("").describe("2-3 sentence personality and backstory"),
   tags: z
     .array(z.string())
+    .default([])
     .describe("Character tags like [Master Swordsman], [Cynical]"),
-  goals: z.object({
-    shortTerm: z.array(z.string()).min(1).max(5),
-    longTerm: z.array(z.string()).min(1).max(3),
-  }),
-  locationName: z.string().describe("Name of the location where NPC starts"),
+  goals: z.union([
+    z.object({
+      shortTerm: z.array(z.string()).default([]),
+      longTerm: z.array(z.string()).default([]),
+    }),
+    // Some models return goals as flat array or string — normalize
+    z.array(z.string()).transform((arr) => ({ shortTerm: arr, longTerm: [] })),
+    z.string().transform((s) => ({ shortTerm: [s], longTerm: [] })),
+  ]).default({ shortTerm: [], longTerm: [] }),
+  locationName: z.string().default("").describe("Name of the location where NPC starts"),
   factionName: z
     .string()
     .nullable()
+    .default(null)
     .describe("Faction this NPC belongs to, if any"),
 });
 
@@ -317,19 +328,7 @@ export async function generateWorldScaffold(
   const baseScaffold = { refinedPremise, locations, factions, npcs, loreCards: [] as ExtractedLoreCard[] };
 
   reportProgress(onProgress, currentStep++, totalSteps, "Extracting world lore");
-  try {
-    const loreCards = await extractLoreCards(baseScaffold, req.role);
-    log.info(`Extracted ${loreCards.length} lore cards`);
-    return { refinedPremise, locations, factions, npcs, loreCards };
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    log.error(`Lore extraction failed: ${errorMessage}`, error);
-    reportProgress(
-      onProgress,
-      currentStep,
-      totalSteps,
-      `Lore extraction failed: ${errorMessage}. World created without lore cards.`
-    );
-    return { refinedPremise, locations, factions, npcs, loreCards: [] };
-  }
+  const loreCards = await extractLoreCards(baseScaffold, req.role, req.fallbackRole);
+  log.info(`Extracted ${loreCards.length} lore cards`);
+  return { refinedPremise, locations, factions, npcs, loreCards };
 }

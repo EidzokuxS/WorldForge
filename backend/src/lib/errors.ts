@@ -10,14 +10,16 @@ export class AppError extends Error {
   }
 }
 
+type ErrorStatusCode = 400 | 401 | 403 | 404 | 405 | 409 | 422 | 429 | 500;
+
 export function getErrorStatus(
   error: unknown,
-  fallback: 400 | 404 | 500 = 500
-): 400 | 404 | 500 {
+  fallback: ErrorStatusCode = 500
+): ErrorStatusCode {
   if (error instanceof AppError) {
     const code = error.statusCode;
-    if (code === 400 || code === 404) {
-      return code;
+    if (code >= 400 && code < 500) {
+      return code as ErrorStatusCode;
     }
     return 500;
   }

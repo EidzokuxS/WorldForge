@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import { loadSettings, saveSettings } from "../settings/index.js";
-import { getErrorMessage, getErrorStatus } from "../lib/errors.js";
-import { parseBody, settingsPayloadSchema } from "./schemas.js";
+import { getErrorMessage, getErrorStatus } from "../lib/index.js";
+import { parseBody } from "./helpers.js";
+import { settingsPayloadSchema } from "./schemas.js";
 
 const app = new Hono();
 
@@ -17,10 +18,10 @@ app.get("/", (c) => {
 });
 
 app.post("/", async (c) => {
-  const result = await parseBody(c, settingsPayloadSchema);
-  if ("response" in result) return result.response;
-
   try {
+    const result = await parseBody(c, settingsPayloadSchema);
+    if ("response" in result) return result.response;
+
     return c.json(saveSettings(result.data));
   } catch (error) {
     return c.json(

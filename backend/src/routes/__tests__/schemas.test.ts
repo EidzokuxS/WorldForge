@@ -12,9 +12,13 @@ import {
   generateWorldSchema,
   testProviderSchema,
   testRoleSchema,
-  parseBody,
-  zodFirstError,
+  parseCharacterSchema,
+  generateCharacterSchema,
+  researchCharacterSchema,
+  importV2CardSchema,
+  resolveStartingLocationSchema,
 } from "../schemas.js";
+import { parseBody, zodFirstError } from "../helpers.js";
 
 // ---------------------------------------------------------------------------
 // seedCategorySchema
@@ -1130,8 +1134,10 @@ describe("settingsPayloadSchema", () => {
     judge: { providerId: "p1", temperature: 0.3, maxTokens: 512 },
     storyteller: { providerId: "p1", temperature: 0.8, maxTokens: 1024 },
     generator: { providerId: "p1", temperature: 0.7, maxTokens: 2048 },
+    embedder: { providerId: "p1", temperature: 0, maxTokens: 512 },
     fallback: { providerId: "p1", model: "m1", timeoutMs: 30000, retryCount: 2 },
     images: { providerId: "p1", model: "dall-e", stylePrompt: "fantasy", enabled: false },
+    research: { enabled: true, maxSearchSteps: 10 },
   });
 
   it("accepts a complete valid settings object", () => {
@@ -1191,6 +1197,56 @@ describe("settingsPayloadSchema", () => {
     (input.providers[0] as Record<string, unknown>).isBuiltin = true;
     const result = settingsPayloadSchema.safeParse(input);
     expect(result.success).toBe(true);
+  });
+
+  it("rejects missing research config", () => {
+    const { research: _, ...rest } = validSettings();
+    const result = settingsPayloadSchema.safeParse(rest);
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects missing embedder role", () => {
+    const { embedder: _, ...rest } = validSettings();
+    const result = settingsPayloadSchema.safeParse(rest);
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects non-boolean research.enabled", () => {
+    const input = validSettings();
+    (input.research as Record<string, unknown>).enabled = "yes";
+    const result = settingsPayloadSchema.safeParse(input);
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects non-integer research.maxSearchSteps", () => {
+    const input = validSettings();
+    (input.research as Record<string, unknown>).maxSearchSteps = 5.5;
+    const result = settingsPayloadSchema.safeParse(input);
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects research.maxSearchSteps below 1", () => {
+    const input = validSettings();
+    (input.research as Record<string, unknown>).maxSearchSteps = 0;
+    const result = settingsPayloadSchema.safeParse(input);
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects research.maxSearchSteps above 100", () => {
+    const input = validSettings();
+    (input.research as Record<string, unknown>).maxSearchSteps = 101;
+    const result = settingsPayloadSchema.safeParse(input);
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts research.maxSearchSteps at boundaries", () => {
+    const input1 = validSettings();
+    (input1.research as Record<string, unknown>).maxSearchSteps = 1;
+    expect(settingsPayloadSchema.safeParse(input1).success).toBe(true);
+
+    const input100 = validSettings();
+    (input100.research as Record<string, unknown>).maxSearchSteps = 100;
+    expect(settingsPayloadSchema.safeParse(input100).success).toBe(true);
   });
 });
 
@@ -1255,5 +1311,306 @@ describe("parseBody", () => {
     if ("data" in result) {
       expect(result.data.value).toBe("hello");
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseCharacterSchema
+// ---------------------------------------------------------------------------
+describe("parseCharacterSchema", () => {
+  it("accepts valid player input (minimal: campaignId + concept)", () => {
+    const result = parseCharacterSchema.safeParse({
+      campaignId: "abc-123",
+      concept: "A wandering bard",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("defaults role to 'player'", () => {
+    const result = parseCharacterSchema.safeParse({
+      campaignId: "abc-123",
+      concept: "A wandering bard",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.role).toBe("player");
+    }
+  });
+
+  it("trims concept whitespace", () => {
+    const result = parseCharacterSchema.safeParse({
+      campaignId: "abc-123",
+      concept: "  A wandering bard  ",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.concept).toBe("A wandering bard");
+    }
+  });
+
+  it("rejects empty campaignId", () => {
+    const result = parseCharacterSchema.safeParse({
+      campaignId: "",
+      concept: "A wandering bard",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects empty concept", () => {
+    const result = parseCharacterSchema.safeParse({
+      campaignId: "abc-123",
+      concept: "",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects concept over 2000 chars", () => {
+    const result = parseCharacterSchema.safeParse({
+      campaignId: "abc-123",
+      concept: "x".repeat(2001),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts key role with locationNames", () => {
+    const result = parseCharacterSchema.safeParse({
+      campaignId: "abc-123",
+      concept: "A guard captain",
+      role: "key",
+      locationNames: ["Castle"],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects key role without locationNames", () => {
+    const result = parseCharacterSchema.safeParse({
+      campaignId: "abc-123",
+      concept: "A guard captain",
+      role: "key",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects key role with empty locationNames array", () => {
+    const result = parseCharacterSchema.safeParse({
+      campaignId: "abc-123",
+      concept: "A guard captain",
+      role: "key",
+      locationNames: [],
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// generateCharacterSchema
+// ---------------------------------------------------------------------------
+describe("generateCharacterSchema", () => {
+  it("accepts valid player input (minimal: campaignId only)", () => {
+    const result = generateCharacterSchema.safeParse({
+      campaignId: "abc-123",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("defaults role to 'player'", () => {
+    const result = generateCharacterSchema.safeParse({
+      campaignId: "abc-123",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.role).toBe("player");
+    }
+  });
+
+  it("accepts key role with locationNames", () => {
+    const result = generateCharacterSchema.safeParse({
+      campaignId: "abc-123",
+      role: "key",
+      locationNames: ["Tavern"],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects key role without locationNames", () => {
+    const result = generateCharacterSchema.safeParse({
+      campaignId: "abc-123",
+      role: "key",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects empty campaignId", () => {
+    const result = generateCharacterSchema.safeParse({
+      campaignId: "",
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// researchCharacterSchema
+// ---------------------------------------------------------------------------
+describe("researchCharacterSchema", () => {
+  it("accepts valid input (campaignId + archetype)", () => {
+    const result = researchCharacterSchema.safeParse({
+      campaignId: "abc-123",
+      archetype: "Noble knight",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("defaults role to 'player'", () => {
+    const result = researchCharacterSchema.safeParse({
+      campaignId: "abc-123",
+      archetype: "Noble knight",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.role).toBe("player");
+    }
+  });
+
+  it("trims archetype whitespace", () => {
+    const result = researchCharacterSchema.safeParse({
+      campaignId: "abc-123",
+      archetype: "  Noble knight  ",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.archetype).toBe("Noble knight");
+    }
+  });
+
+  it("rejects empty archetype", () => {
+    const result = researchCharacterSchema.safeParse({
+      campaignId: "abc-123",
+      archetype: "",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects archetype over 500 chars", () => {
+    const result = researchCharacterSchema.safeParse({
+      campaignId: "abc-123",
+      archetype: "x".repeat(501),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts key role with locationNames", () => {
+    const result = researchCharacterSchema.safeParse({
+      campaignId: "abc-123",
+      archetype: "Noble knight",
+      role: "key",
+      locationNames: ["Keep"],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects key role without locationNames", () => {
+    const result = researchCharacterSchema.safeParse({
+      campaignId: "abc-123",
+      archetype: "Noble knight",
+      role: "key",
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// importV2CardSchema
+// ---------------------------------------------------------------------------
+describe("importV2CardSchema", () => {
+  it("accepts valid player input (campaignId + name + description)", () => {
+    const result = importV2CardSchema.safeParse({
+      campaignId: "abc-123",
+      name: "Elara",
+      description: "A mysterious sorceress from the northern wastes.",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("defaults role, personality, scenario, tags", () => {
+    const result = importV2CardSchema.safeParse({
+      campaignId: "abc-123",
+      name: "Elara",
+      description: "A mysterious sorceress.",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.role).toBe("player");
+      expect(result.data.personality).toBe("");
+      expect(result.data.scenario).toBe("");
+      expect(result.data.tags).toEqual([]);
+    }
+  });
+
+  it("rejects description over 8000 chars", () => {
+    const result = importV2CardSchema.safeParse({
+      campaignId: "abc-123",
+      name: "Elara",
+      description: "x".repeat(8001),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts key role with locationNames", () => {
+    const result = importV2CardSchema.safeParse({
+      campaignId: "abc-123",
+      name: "Elara",
+      description: "A mysterious sorceress.",
+      role: "key",
+      locationNames: ["Tower"],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects key role without locationNames", () => {
+    const result = importV2CardSchema.safeParse({
+      campaignId: "abc-123",
+      name: "Elara",
+      description: "A mysterious sorceress.",
+      role: "key",
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveStartingLocationSchema
+// ---------------------------------------------------------------------------
+describe("resolveStartingLocationSchema", () => {
+  it("accepts valid input (campaignId only)", () => {
+    const result = resolveStartingLocationSchema.safeParse({
+      campaignId: "abc-123",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts with optional prompt", () => {
+    const result = resolveStartingLocationSchema.safeParse({
+      campaignId: "abc-123",
+      prompt: "Start near the harbor",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.prompt).toBe("Start near the harbor");
+    }
+  });
+
+  it("rejects empty campaignId", () => {
+    const result = resolveStartingLocationSchema.safeParse({
+      campaignId: "",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects prompt over 500 chars", () => {
+    const result = resolveStartingLocationSchema.safeParse({
+      campaignId: "abc-123",
+      prompt: "x".repeat(501),
+    });
+    expect(result.success).toBe(false);
   });
 });

@@ -3,13 +3,14 @@
  *
  * Evaluates action probability via Judge LLM (generateObject with Zod schema,
  * temperature 0), rolls D100, resolves 3-tier outcome (strong_hit / weak_hit / miss).
- * Never returns chance 0 or 100. Falls back to 50% on failure.
+ * Never returns chance 0 or 100. Retries with Fallback role on primary failure.
  */
 
 import crypto from "node:crypto";
 import { z } from "zod";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
 import { safeGenerateObject } from "../ai/generate-object-safe.js";
+import { withModelFallback } from "../ai/with-model-fallback.js";
 import { createLogger } from "../lib/index.js";
 
 const log = createLogger("oracle");
@@ -97,44 +98,51 @@ Target: []
 Environment: [forest, dry]
 -> { "chance": 12, "reasoning": "Actor has wind magic, not fire magic. No fire-related tags. Novice skill level. Attempting a technique outside their element gives very low odds." }`;
 
+function buildOraclePrompt(payload: OraclePayload): string {
+  return [
+    `Action: ${payload.intent}${payload.method ? ` via ${payload.method}` : ""}`,
+    `Actor: [${payload.actorTags.join(", ")}]`,
+    `Target: [${payload.targetTags.join(", ")}]`,
+    `Environment: [${payload.environmentTags.join(", ")}]`,
+    `Scene: ${payload.sceneContext}`,
+  ].join("\n");
+}
+
+async function executeOracleCall(
+  provider: ProviderConfig,
+  userPrompt: string
+): Promise<OracleResult> {
+  const model = createModel(provider);
+  const { object } = await safeGenerateObject({
+    model,
+    schema: oracleOutputSchema,
+    temperature: 0,
+    system: ORACLE_SYSTEM_PROMPT,
+    prompt: userPrompt,
+  });
+
+  // Clamp as safety net even if Zod somehow passes out-of-range
+  const chance = Math.max(1, Math.min(99, object.chance));
+  const roll = rollD100();
+  const outcome = resolveOutcome(roll, chance);
+  return { chance, roll, outcome, reasoning: object.reasoning };
+}
+
 export async function callOracle(
   payload: OraclePayload,
-  provider: ProviderConfig
+  provider: ProviderConfig,
+  fallbackProvider?: ProviderConfig | null
 ): Promise<OracleResult> {
-  try {
-    const userPrompt = [
-      `Action: ${payload.intent}${payload.method ? ` via ${payload.method}` : ""}`,
-      `Actor: [${payload.actorTags.join(", ")}]`,
-      `Target: [${payload.targetTags.join(", ")}]`,
-      `Environment: [${payload.environmentTags.join(", ")}]`,
-      `Scene: ${payload.sceneContext}`,
-    ].join("\n");
+  const userPrompt = buildOraclePrompt(payload);
 
-    const model = createModel(provider);
-
-    const { object } = await safeGenerateObject({
-      model,
-      schema: oracleOutputSchema,
-      temperature: 0,
-      system: ORACLE_SYSTEM_PROMPT,
-      prompt: userPrompt,
-    });
-
-    // Clamp as safety net even if Zod somehow passes out-of-range
-    const chance = Math.max(1, Math.min(99, object.chance));
-    const roll = rollD100();
-    const outcome = resolveOutcome(roll, chance);
-
-    return { chance, roll, outcome, reasoning: object.reasoning };
-  } catch (error) {
-    log.warn("Oracle call failed, using coin flip fallback", error);
-    const roll = rollD100();
-    const outcome = resolveOutcome(roll, 50);
-    return {
-      chance: 50,
-      roll,
-      outcome,
-      reasoning: "Oracle unavailable -- using coin flip fallback",
-    };
+  if (fallbackProvider) {
+    return withModelFallback(
+      () => executeOracleCall(provider, userPrompt),
+      () => executeOracleCall(fallbackProvider, userPrompt),
+      "oracle:callOracle"
+    );
   }
+
+  // No fallback configured — just call primary, let error propagate
+  return executeOracleCall(provider, userPrompt);
 }

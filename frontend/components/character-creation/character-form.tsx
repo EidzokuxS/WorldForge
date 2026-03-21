@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Loader2, Sparkles, Wand2 } from "lucide-react";
+import { useState, useRef } from "react";
+import { Loader2, Sparkles, Upload, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -9,18 +9,23 @@ import { Label } from "@/components/ui/label";
 interface CharacterFormProps {
   onParse: (description: string) => void;
   onGenerate: () => void;
+  onImport: (file: File) => void;
   parsing: boolean;
   generating: boolean;
+  importing: boolean;
 }
 
 export function CharacterForm({
   onParse,
   onGenerate,
+  onImport,
   parsing,
   generating,
+  importing,
 }: CharacterFormProps) {
   const [description, setDescription] = useState("");
-  const busy = parsing || generating;
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const busy = parsing || generating || importing;
 
   return (
     <div className="space-y-4">
@@ -70,6 +75,37 @@ export function CharacterForm({
             <>
               <Sparkles className="mr-2 h-4 w-4" />
               AI Generate
+            </>
+          )}
+        </Button>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json,.png"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) {
+              onImport(file);
+              e.target.value = "";
+            }
+          }}
+        />
+        <Button
+          variant="outline"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={busy}
+        >
+          {importing ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Importing...
+            </>
+          ) : (
+            <>
+              <Upload className="mr-2 h-4 w-4" />
+              Import V2 Card
             </>
           )}
         </Button>

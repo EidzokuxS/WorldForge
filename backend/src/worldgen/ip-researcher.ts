@@ -25,51 +25,132 @@ export interface IpResearchContext {
 }
 
 // ---------------------------------------------------------------------------
-// Known IP keyword detection
+// LLM-based franchise detection
 // ---------------------------------------------------------------------------
 
-const KNOWN_FRANCHISE_KEYWORDS: ReadonlyArray<[string, string]> = [
-  ["dungeons.*dragons|d\\&d|dnd|d&d", "Dungeons & Dragons"],
-  ["warhammer", "Warhammer"],
-  ["star wars", "Star Wars"],
-  ["star trek", "Star Trek"],
-  ["lord of the rings|lotr|tolkien|middle.earth", "Middle-earth (Tolkien)"],
-  ["game of thrones|song of ice and fire|westeros", "A Song of Ice and Fire"],
-  ["pathfinder", "Pathfinder"],
-  ["forgotten realms|faerun|faerûn", "Forgotten Realms"],
-  ["elder scrolls|tamriel|skyrim|oblivion|morrowind", "The Elder Scrolls"],
-  ["witcher", "The Witcher"],
-  ["warcraft|world of warcraft|wow|azeroth", "World of Warcraft"],
-  ["final fantasy", "Final Fantasy"],
-  ["mass effect", "Mass Effect"],
-  ["dragon age", "Dragon Age"],
-  ["starcraft", "StarCraft"],
-  ["shadowrun", "Shadowrun"],
-  ["cyberpunk", "Cyberpunk"],
-  ["vampire.*masquerade|world of darkness", "World of Darkness"],
-  ["call of cthulhu|lovecraft|cthulhu", "Lovecraftian/Cthulhu Mythos"],
-  ["marvel", "Marvel Universe"],
-  ["dc comics|gotham|metropolis|superman|batman", "DC Universe"],
-];
+const franchiseDetectionSchema = z.object({
+  confidence: z.enum(["certain", "likely", "unknown"]).describe(
+    "How confident you are: 'certain' = definitely a known IP, 'likely' = probably references something but you're not 100% sure, 'unknown' = might be original or might reference something obscure you don't recognize"
+  ),
+  franchise: z.string().nullable().describe("The canonical franchise name if detected, null if completely original"),
+  searchQuery: z.string().nullable().describe(
+    "A web search query to verify or learn more about this potential IP. Set even if you're unsure — the search will confirm. Null only if you're certain it's a 100% original world with zero references to existing media."
+  ),
+});
 
-function detectFranchise(
+const searchVerifySchema = z.object({
+  isKnownIP: z.boolean().describe("Based on search results, is this a real franchise/IP?"),
+  franchise: z.string().nullable().describe("The canonical franchise name confirmed by search, null if not a real IP"),
+});
+
+/**
+ * Detect franchise using LLM analysis + optional web search verification.
+ *
+ * Flow:
+ * - "certain" → use franchise directly
+ * - "likely"/"unknown" + searchQuery → quick web search to verify
+ * - no searchQuery → original world
+ */
+async function detectFranchise(
   knownIP: string | undefined,
   premise: string,
-  name: string
-): string | null {
+  name: string,
+  role: ResolvedRole,
+  searchProvider: SearchProvider = "duckduckgo",
+): Promise<string | null> {
   if (knownIP?.trim()) {
     return knownIP.trim();
   }
 
-  const haystack = `${name} ${premise}`.toLowerCase();
+  try {
+    const { object } = await generateObject({
+      model: createModel(role.provider),
+      schema: franchiseDetectionSchema,
+      prompt: `Analyze this RPG campaign concept. Does it reference a known intellectual property (movie, book, game, anime, manga, TV show, comic, tabletop RPG)?
 
-  for (const [pattern, canonical] of KNOWN_FRANCHISE_KEYWORDS) {
-    if (new RegExp(pattern, "i").test(haystack)) {
-      return canonical;
+Campaign name: "${name}"
+Premise: "${premise}"
+
+Consider: character names, location names, faction names, magic systems, terminology, plot elements that match existing media. Even subtle references count (e.g. mentioning "Sasuke" or "chakra" implies Naruto, "lightsaber" implies Star Wars).
+
+If you're not sure — that's fine. Set confidence to "likely" or "unknown" and provide a searchQuery so we can verify via web search. Better to search and confirm than to miss a reference.`,
+      temperature: 0.1,
+    });
+
+    // Certain → use directly
+    if (object.confidence === "certain" && object.franchise) {
+      log.info(`Franchise detected (certain): "${object.franchise}"`);
+      return object.franchise;
     }
-  }
 
-  return null;
+    // Has a search query → verify via web search
+    if (object.searchQuery) {
+      log.info(`Franchise uncertain (${object.confidence}), verifying via search: "${object.searchQuery}"`);
+      const verified = await verifyFranchiseViaSearch(
+        object.searchQuery,
+        object.franchise,
+        premise,
+        role,
+        searchProvider,
+      );
+      if (verified) {
+        log.info(`Franchise confirmed by search: "${verified}"`);
+        return verified;
+      }
+      log.info("Search did not confirm a known franchise — treating as original world");
+      return null;
+    }
+
+    // No search query, not certain → original world
+    return null;
+  } catch (error) {
+    log.warn("LLM franchise detection failed, assuming original world", error);
+    return null;
+  }
+}
+
+/**
+ * Quick web search to verify whether a premise references a real franchise.
+ * Single search query → parse results → LLM confirms or denies.
+ */
+async function verifyFranchiseViaSearch(
+  searchQuery: string,
+  candidateFranchise: string | null,
+  premise: string,
+  role: ResolvedRole,
+  searchProvider: SearchProvider,
+): Promise<string | null> {
+  try {
+    return await withSearchMcp(
+      searchProvider,
+      async (tools: ToolSet) => {
+        const { text: searchResults } = await generateText({
+          model: createModel(role.provider),
+          tools,
+          stopWhen: stepCountIs(3),
+          prompt: `Search for: "${searchQuery}". Then determine if the search results confirm this is a real franchise/IP that the following campaign premise references:\n\nPremise: "${premise}"\n\nReturn your findings as plain text.`,
+          temperature: 0.1,
+        });
+
+        const { object } = await generateObject({
+          model: createModel(role.provider),
+          schema: searchVerifySchema,
+          prompt: `Based on these search results, is "${candidateFranchise ?? searchQuery}" a real franchise/IP?\n\nSearch results:\n${searchResults}\n\nOriginal premise: "${premise}"`,
+          temperature: 0.0,
+        });
+
+        return object.isKnownIP ? object.franchise : null;
+      },
+      async () => {
+        // MCP search unavailable — fall back to LLM knowledge only
+        log.warn("Search MCP unavailable for franchise verification, using LLM knowledge only");
+        return candidateFranchise;
+      },
+    );
+  } catch (error) {
+    log.warn("Franchise verification search failed", error);
+    return candidateFranchise;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -204,13 +285,12 @@ export async function researchKnownIP(
   role: ResolvedRole,
   maxSearchSteps = 10
 ): Promise<IpResearchContext | null> {
-  const franchise = detectFranchise(req.knownIP, req.premise, req.name);
+  const searchProvider: SearchProvider = req.research?.searchProvider ?? "duckduckgo";
+  const franchise = await detectFranchise(req.knownIP, req.premise, req.name, role, searchProvider);
 
   if (!franchise) {
     return null;
   }
-
-  const searchProvider: SearchProvider = req.research?.searchProvider ?? "duckduckgo";
   log.info(`Detected franchise: "${franchise}" — starting research (maxSteps=${maxSearchSteps}, provider=${searchProvider})`);
 
   try {

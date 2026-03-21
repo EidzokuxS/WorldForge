@@ -57,8 +57,10 @@ function makeMinimalValidSettings(
     judge: d.judge,
     storyteller: d.storyteller,
     generator: d.generator,
+    embedder: d.embedder,
     fallback: d.fallback,
     images: d.images,
+    research: d.research,
     ...overrides,
   };
 }
@@ -362,6 +364,45 @@ describe("normalizeSettings", () => {
         images: { stylePrompt: "pixel art, retro" },
       });
       expect(result.images.stylePrompt).toBe("pixel art, retro");
+    });
+  });
+
+  describe("with missing or partial research config", () => {
+    it("returns research defaults when research is missing", () => {
+      const result = normalizeSettings({});
+      expect(result.research.enabled).toBe(defaults().research.enabled);
+      expect(result.research.maxSearchSteps).toBe(defaults().research.maxSearchSteps);
+    });
+
+    it("returns research defaults when research is null", () => {
+      const result = normalizeSettings({ research: null });
+      expect(result.research.enabled).toBe(defaults().research.enabled);
+      expect(result.research.maxSearchSteps).toBe(defaults().research.maxSearchSteps);
+    });
+
+    it("preserves custom research.enabled", () => {
+      const result = normalizeSettings({ research: { enabled: false } });
+      expect(result.research.enabled).toBe(false);
+    });
+
+    it("preserves custom research.maxSearchSteps", () => {
+      const result = normalizeSettings({ research: { maxSearchSteps: 50 } });
+      expect(result.research.maxSearchSteps).toBe(50);
+    });
+
+    it("clamps research.maxSearchSteps below 1 to min", () => {
+      const result = normalizeSettings({ research: { maxSearchSteps: 0 } });
+      expect(result.research.maxSearchSteps).toBe(1);
+    });
+
+    it("clamps research.maxSearchSteps above 100 to max", () => {
+      const result = normalizeSettings({ research: { maxSearchSteps: 200 } });
+      expect(result.research.maxSearchSteps).toBe(100);
+    });
+
+    it("uses default for non-boolean research.enabled", () => {
+      const result = normalizeSettings({ research: { enabled: "yes" } });
+      expect(result.research.enabled).toBe(defaults().research.enabled);
     });
   });
 

@@ -35,8 +35,22 @@ yarn-error.log*
 tasks/
 rpi/
 
+# E2E test artifacts
+e2e/
+qa-results/
+qa-screenshots/
+backend/e2e/
+backend/logs/
+
+# Planning (GSD workflow)
+.planning/
+
 # Tool configs
 .claude/
+.serena/
 .desloppify/
 .playwright-mcp/
 scorecard.png
+.gitnexus
+AGENTS.md
+start.bat

@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProvidersTab } from "@/components/settings/providers-tab";
 import { RolesTab } from "@/components/settings/roles-tab";
 import { ImagesTab } from "@/components/settings/images-tab";
+import { ResearchTab } from "@/components/settings/research-tab";
 
 export default function SettingsPage() {
   const { settings, setSettings, isLoading, isSaving, save } = useSettings();
@@ -87,6 +88,7 @@ export default function SettingsPage() {
           <TabsTrigger value="providers">Providers</TabsTrigger>
           <TabsTrigger value="roles">Roles</TabsTrigger>
           <TabsTrigger value="images">Images</TabsTrigger>
+          <TabsTrigger value="research">Research</TabsTrigger>
         </TabsList>
 
         <TabsContent value="providers" className="space-y-4">
@@ -99,6 +101,10 @@ export default function SettingsPage() {
 
         <TabsContent value="images" className="space-y-4">
           <ImagesTab settings={settings} setSettings={setSettings} />
+        </TabsContent>
+
+        <TabsContent value="research" className="space-y-4">
+          <ResearchTab settings={settings} setSettings={setSettings} />
         </TabsContent>
       </Tabs>
 

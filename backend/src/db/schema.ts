@@ -42,6 +42,10 @@ export const players = sqliteTable(
       .notNull()
       .references(() => campaigns.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    race: text("race").notNull().default(""),
+    gender: text("gender").notNull().default(""),
+    age: text("age").notNull().default(""),
+    appearance: text("appearance").notNull().default(""),
     hp: integer("hp").notNull().default(5),
     tags: text("tags").notNull().default("[]"),
     equippedItems: text("equipped_items").notNull().default("[]"),

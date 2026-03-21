@@ -10,6 +10,9 @@
 
 import { eq, desc } from "drizzle-orm";
 import type { ChatMessage } from "@worldforge/shared";
+import { safeGenerateObject as generateObject } from "../ai/generate-object-safe.js";
+import { z } from "zod";
+import { createModel } from "../ai/provider-registry.js";
 import { readCampaignConfig, getChatHistory } from "../campaign/index.js";
 import { getDb } from "../db/index.js";
 import { players, npcs, locations, items, relationships, chronicle, factions } from "../db/schema.js";
@@ -52,44 +55,56 @@ export interface AssembleOptions {
   embedderResult?: ResolveResult;
   /** Current action text, used as lore search query. */
   playerAction?: string;
+  /** Judge role for LLM-based importance detection during compression. */
+  judgeRole?: ResolvedRole;
 }
 
-// -- Importance keywords for smart compression --------------------------------
+// -- LLM-based importance detection for smart compression --------------------
+
+const importantIndicesSchema = z.object({
+  importantIndices: z
+    .array(z.number())
+    .describe("Indices (0-based) of messages that are important enough to always keep in context"),
+});
 
 /**
- * Keywords that mark a message as important enough to survive compression.
- * Messages containing these (case-insensitive) are kept even from the middle.
+ * Batch-detect important messages via a single LLM call.
+ * Returns a Set of indices (into the provided messages array) that are important.
+ * Falls back to empty set on LLM failure.
  */
-export const IMPORTANCE_KEYWORDS = [
-  "attack",
-  "attacked",
-  "killed",
-  "kill",
-  "died",
-  "death",
-  "dead",
-  "discovered",
-  "discovery",
-  "betrayed",
-  "betrayal",
-  "ambush",
-  "battle",
-  "fight",
-  "fighting",
-  "defeated",
-  "captured",
-  "escaped",
-  "destroyed",
-  "stolen",
-  "revealed",
-  "secret",
-  "cursed",
-  "poisoned",
-  "wounded",
-  "critical",
-  "treasure",
-  "artifact",
-] as const;
+async function detectImportantMessages(
+  messages: ReadonlyArray<{ role: string; content: string }>,
+  judgeRole: ResolvedRole,
+): Promise<Set<number>> {
+  if (messages.length === 0) return new Set();
+
+  try {
+    const numbered = messages.map(
+      (m, i) => `[${i}] ${m.role === "user" ? "Player" : "GM"}: ${m.content}`,
+    );
+
+    const { object } = await generateObject({
+      model: createModel(judgeRole.provider),
+      schema: importantIndicesSchema,
+      prompt: `You are reviewing RPG game messages to decide which are important enough to always keep in context during compression.
+
+Important messages include: combat encounters, death, major discoveries, betrayals, captures, escapes, plot twists, relationship changes, acquisition of powerful items, critical world events.
+Mundane actions (looking around, walking, casual greetings, routine conversation) are NOT important.
+Messages with [IMPORTANT] prefix are always important.
+
+Return the indices of important messages.
+
+Messages:
+${numbered.join("\n")}`,
+      temperature: 0.1,
+    });
+
+    return new Set(object.importantIndices.filter((i) => i >= 0 && i < messages.length));
+  } catch (error) {
+    log.warn("LLM importance detection failed, keeping no middle messages", error);
+    return new Set();
+  }
+}
 
 // -- System rules template --------------------------------------------------
 
@@ -133,27 +148,19 @@ Rules you MUST follow:
 // -- Smart conversation compression -----------------------------------------
 
 /**
- * Check whether a message is "important" based on keywords or [IMPORTANT] tag.
- */
-function isImportantMessage(content: string): boolean {
-  if (content.startsWith("[IMPORTANT]")) return true;
-  const lower = content.toLowerCase();
-  return IMPORTANCE_KEYWORDS.some((kw) => lower.includes(kw));
-}
-
-/**
  * Smart conversation compression: keeps first 2 messages (world setup),
  * last N messages (recent context, ~60% of budget), and any important
- * messages from the middle. Drops mundane middle turns and inserts
- * an omission marker.
+ * messages from the middle (detected via LLM batch call). Drops mundane
+ * middle turns and inserts an omission marker.
  *
- * Exported for testability (pure function -- no DB/campaign access).
+ * When no judgeRole is provided, falls back to keeping no middle messages
+ * (only first + last).
  */
-export function compressConversation(
+export async function compressConversation(
   history: ChatMessage[],
   budgetTokens: number,
-  _importanceThreshold: number = 7,
-): PromptSection | null {
+  judgeRole?: ResolvedRole,
+): Promise<PromptSection | null> {
   if (history.length === 0) return null;
 
   const FIRST_KEEP = 2; // Always keep first 2 messages (world setup / character intro)
@@ -214,14 +221,18 @@ export function compressConversation(
   }
 
   // 3. From middle (firstCount .. recentStartIdx), keep important messages
+  const middleMessages = history.slice(firstCount, recentStartIdx);
+  const importantSet = judgeRole
+    ? await detectImportantMessages(middleMessages, judgeRole)
+    : new Set<number>();
+
   const importantMiddle: Array<{ idx: number; line: string }> = [];
-  for (let i = firstCount; i < recentStartIdx; i++) {
-    const msg = history[i]!;
-    if (isImportantMessage(msg.content)) {
-      const line = format(msg);
+  for (let i = 0; i < middleMessages.length; i++) {
+    if (importantSet.has(i)) {
+      const line = format(middleMessages[i]!);
       const lineTokens = estimateTokens(line);
       if (usedTokens + lineTokens <= budgetTokens) {
-        importantMiddle.push({ idx: i, line });
+        importantMiddle.push({ idx: firstCount + i, line });
         usedTokens += lineTokens;
       }
     }
@@ -662,7 +673,7 @@ function buildWorldStateSection(
 export async function assemblePrompt(
   options: AssembleOptions,
 ): Promise<AssembledPrompt> {
-  const { campaignId, contextWindow, actionResult, embedderResult, playerAction } =
+  const { campaignId, contextWindow, actionResult, embedderResult, playerAction, judgeRole } =
     options;
 
   const budgets = allocateBudgets(contextWindow);
@@ -758,7 +769,7 @@ export async function assemblePrompt(
   // 10. Smart conversation compression (replaces naive tail-slicing)
   const conversationBudget = budgets.recentConversation ?? Math.floor(contextWindow * 0.20);
   const history = getChatHistory(campaignId);
-  const conversationSection = compressConversation(history, conversationBudget);
+  const conversationSection = await compressConversation(history, conversationBudget, judgeRole);
 
   // Collect all non-null sections
   const allSections: PromptSection[] = [

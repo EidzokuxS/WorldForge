@@ -23,6 +23,7 @@ import type { TurnSnapshot, TurnSummary } from "../engine/index.js";
 import { embedAndUpdateEvent } from "../vectors/episodic-events.js";
 import type { Settings } from "../settings/index.js";
 import type { ProviderConfig } from "../ai/provider-registry.js";
+import { resolveFallbackProvider } from "../ai/with-model-fallback.js";
 import {
   generateImage,
   resolveImageProvider,
@@ -227,7 +228,7 @@ function buildOnPostTurn(
               if (loc) locationName = loc.name;
             }
 
-            const premise = (() => { try { return getCampaignPremise(campaignId); } catch { return ""; } })();
+            const premise = getCampaignPremise(campaignId);
 
             void (async () => {
               try {
@@ -253,7 +254,7 @@ function buildOnPostTurn(
           const locTags = (args.tags as string[]) || [];
 
           if (locId && locName && !imageExists(campaignId, "locations", `${locId}.png`)) {
-            const premise = (() => { try { return getCampaignPremise(campaignId); } catch { return ""; } })();
+            const premise = getCampaignPremise(campaignId);
 
             void (async () => {
               try {
@@ -406,6 +407,9 @@ app.post("/action", async (c) => {
     // Resolve Embedder (optional -- used for lore search)
     const embedderResult = resolveEmbedder(settings);
 
+    // Resolve Fallback provider (optional -- used for Oracle/Storyteller retry)
+    const fallbackProvider = resolveFallbackProvider(settings.fallback, settings.providers);
+
     // Auto-checkpoint before dangerous turns (HP <= 2)
     try {
       const db = (await import("../db/index.js")).getDb();
@@ -447,6 +451,7 @@ app.post("/action", async (c) => {
           storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
           storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
           embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
+          fallbackProvider,
           onPostTurn: buildOnPostTurn(settings, activeCampaign.id, judgeResult.resolved.provider),
         });
 
@@ -528,6 +533,9 @@ app.post("/retry", async (c) => {
     // Resolve Embedder (optional)
     const embedderResult = resolveEmbedder(settings);
 
+    // Resolve Fallback provider (optional -- used for Oracle/Storyteller retry)
+    const fallbackProvider = resolveFallbackProvider(settings.fallback, settings.providers);
+
     // Restore pre-turn game state
     restoreSnapshot(activeCampaign.id, lastTurnSnapshot);
 
@@ -557,6 +565,7 @@ app.post("/retry", async (c) => {
           storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
           storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
           embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
+          fallbackProvider,
           onPostTurn: buildOnPostTurn(settings, activeCampaign.id, judgeResult.resolved.provider),
         });
 

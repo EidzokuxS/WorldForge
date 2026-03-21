@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 import { rollSeed, rollWorldSeeds, parseWorldSeeds } from "../seed-roller.js";
 import type { WorldSeeds, SeedCategory } from "../seed-roller.js";
 
@@ -74,8 +74,7 @@ describe("rollSeed", () => {
   });
 
   describe("deterministic output with mocked randomInt", () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let randomIntSpy: any;
+    let randomIntSpy: MockInstance;
 
     beforeEach(() => {
       randomIntSpy = vi.spyOn(crypto, "randomInt");
@@ -145,7 +144,7 @@ describe("rollWorldSeeds", () => {
   it("returns no extra keys beyond the six categories", () => {
     const seeds = rollWorldSeeds();
     const keys = Object.keys(seeds);
-    expect(keys.sort()).toEqual([...ALL_CATEGORIES].sort());
+    expect(keys.sort((a, b) => a.localeCompare(b))).toEqual([...ALL_CATEGORIES].sort((a, b) => a.localeCompare(b)));
   });
 
   it("produces varied results across multiple calls", () => {

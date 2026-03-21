@@ -27,7 +27,7 @@ export type {
   OutcomeTier,
 } from "./oracle.js";
 
-export { processTurn, detectMovement } from "./turn-processor.js";
+export { processTurn, detectMovement, sanitizeNarrative } from "./turn-processor.js";
 
 export type {
   TurnEvent,

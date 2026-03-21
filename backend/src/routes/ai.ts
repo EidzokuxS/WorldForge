@@ -5,9 +5,9 @@ import {
   resolveRoleModel,
   testProviderConnection,
 } from "../ai/index.js";
-import { clampTokens } from "../lib/clamp.js";
-import { getErrorMessage, getErrorStatus } from "../lib/errors.js";
-import { parseBody, testProviderSchema, testRoleSchema } from "./schemas.js";
+import { clampTokens, getErrorMessage, getErrorStatus } from "../lib/index.js";
+import { parseBody } from "./helpers.js";
+import { testProviderSchema, testRoleSchema } from "./schemas.js";
 
 const app = new Hono();
 
