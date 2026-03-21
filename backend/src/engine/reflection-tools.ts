@@ -13,6 +13,7 @@ import { getDb } from "../db/index.js";
 import { npcs, players } from "../db/schema.js";
 import { executeToolCall } from "./tool-executor.js";
 import { createLogger } from "../lib/index.js";
+import { parseTags, parseBeliefs, parseNpcGoals } from "./parse-helpers.js";
 
 const log = createLogger("reflection-tools");
 
@@ -24,19 +25,6 @@ const MAX_GOALS_PER_CATEGORY = 5;
 export const WEALTH_TIERS = ["Destitute", "Poor", "Comfortable", "Wealthy", "Obscenely Rich"] as const;
 export const SKILL_TIERS = ["Novice", "Skilled", "Master"] as const;
 export const RELATIONSHIP_TAGS = ["Trusted Ally", "Friendly", "Neutral", "Suspicious", "Hostile", "Sworn Enemy"] as const;
-
-// -- Tag helpers --------------------------------------------------------------
-
-function parseTags(raw: string): string[] {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter((t): t is string => typeof t === "string")
-      : [];
-  } catch {
-    return [];
-  }
-}
 
 type EntityType = "player" | "npc";
 
@@ -70,38 +58,6 @@ function updateEntityTags(
     .set({ tags: JSON.stringify(tags) })
     .where(eq(table.id, entityId))
     .run();
-}
-
-// -- Helpers ------------------------------------------------------------------
-
-function parseBeliefs(raw: string): string[] {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter((b): b is string => typeof b === "string")
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-interface NpcGoals {
-  short_term: string[];
-  long_term: string[];
-}
-
-function parseGoals(raw: string): NpcGoals {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed && typeof parsed === "object") {
-      const obj = parsed as Record<string, unknown>;
-      return {
-        short_term: Array.isArray(obj.short_term) ? obj.short_term.filter((g): g is string => typeof g === "string") : [],
-        long_term: Array.isArray(obj.long_term) ? obj.long_term.filter((g): g is string => typeof g === "string") : [],
-      };
-    }
-  } catch { /* ignore */ }
-  return { short_term: [], long_term: [] };
 }
 
 // -- Tool factory -------------------------------------------------------------
@@ -169,7 +125,7 @@ export function createReflectionTools(campaignId: string, npcId: string) {
 
         if (!npc) return { error: "NPC not found" };
 
-        const goals = parseGoals(npc.goals);
+        const goals = parseNpcGoals(npc.goals);
         const goalList = goals[priority];
 
         // Append if not duplicate
@@ -209,7 +165,7 @@ export function createReflectionTools(campaignId: string, npcId: string) {
 
         if (!npc) return { error: "NPC not found" };
 
-        const goals = parseGoals(npc.goals);
+        const goals = parseNpcGoals(npc.goals);
         const lowerGoal = goal.toLowerCase();
 
         // Remove from both arrays (case-insensitive)

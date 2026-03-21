@@ -281,7 +281,7 @@ describe("listCampaigns", () => {
     vi.spyOn(fs, "readdirSync").mockReturnValue([
       { name: "camp-a", isDirectory: () => true },
       { name: "camp-b", isDirectory: () => true },
-    ] as unknown as fs.Dirent[]);
+    ] as unknown as ReturnType<typeof fs.readdirSync>);
     vi.spyOn(fs, "readFileSync").mockImplementation((filePath) => {
       const p = String(filePath);
       if (p.includes("camp-a")) {
@@ -304,7 +304,7 @@ describe("listCampaigns", () => {
     vi.spyOn(fs, "readdirSync").mockReturnValue([
       { name: "good", isDirectory: () => true },
       { name: "bad", isDirectory: () => true },
-    ] as unknown as fs.Dirent[]);
+    ] as unknown as ReturnType<typeof fs.readdirSync>);
     vi.spyOn(fs, "readFileSync").mockImplementation((filePath) => {
       const p = String(filePath);
       if (p.includes("bad")) {

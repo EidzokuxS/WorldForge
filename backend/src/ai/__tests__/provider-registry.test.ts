@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ProviderConfig } from "../provider-registry.js";
 
 // Mock both SDK providers before importing the module under test
-const mockOpenAIModelFn = vi.fn();
-const mockCreateOpenAI = vi.fn(() => mockOpenAIModelFn);
+const mockOpenAIChatFn = vi.fn();
+const mockCreateOpenAI = vi.fn(() => ({ chat: mockOpenAIChatFn }));
 
 const mockAnthropicModelFn = vi.fn();
 const mockCreateAnthropic = vi.fn(() => mockAnthropicModelFn);
@@ -100,7 +100,7 @@ describe("resolveProviderProtocol", () => {
 describe("createModel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockOpenAIModelFn.mockReturnValue({ modelId: "mock-model" });
+    mockOpenAIChatFn.mockReturnValue({ modelId: "mock-model" });
     mockAnthropicModelFn.mockReturnValue({ modelId: "mock-model" });
   });
 
@@ -119,7 +119,7 @@ describe("createModel", () => {
       baseURL: "https://api.openai.com/v1",
       apiKey: "sk-test-key",
     });
-    expect(mockOpenAIModelFn).toHaveBeenCalledWith("gpt-4o");
+    expect(mockOpenAIChatFn).toHaveBeenCalledWith("gpt-4o");
   });
 
   it("strips trailing slashes from baseUrl", () => {
@@ -154,7 +154,7 @@ describe("createModel", () => {
       baseURL: "http://localhost:11434/v1",
       apiKey: "ollama",
     });
-    expect(mockOpenAIModelFn).toHaveBeenCalledWith("llama3");
+    expect(mockOpenAIChatFn).toHaveBeenCalledWith("llama3");
   });
 
   it("creates an Anthropic-compatible model for anthropic.com URLs", () => {
@@ -272,7 +272,7 @@ describe("createModel", () => {
 
   it("returns the model object from the provider factory", () => {
     const fakeModel = { modelId: "test-model", provider: "openai" };
-    mockOpenAIModelFn.mockReturnValue(fakeModel);
+    mockOpenAIChatFn.mockReturnValue(fakeModel);
 
     const config: ProviderConfig = {
       id: "openai",

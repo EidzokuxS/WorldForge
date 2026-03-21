@@ -11,9 +11,6 @@ import { z } from "zod";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
 import { safeGenerateObject } from "../ai/generate-object-safe.js";
 import { withModelFallback } from "../ai/with-model-fallback.js";
-import { createLogger } from "../lib/index.js";
-
-const log = createLogger("oracle");
 
 // -- Types -------------------------------------------------------------------
 

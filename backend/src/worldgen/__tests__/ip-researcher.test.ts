@@ -75,19 +75,19 @@ describe("researchKnownIP", () => {
 
     describe("no-op path", () => {
         it("returns null when LLM detects no franchise and knownIP is not set", async () => {
-            vi.mocked(safeGenerateObject).mockResolvedValue({ object: { isKnownIP: false, franchise: null } } as never);
+            vi.mocked(safeGenerateObject).mockResolvedValue({ object: { confidence: "unknown", franchise: null, searchQuery: null } } as never);
             const result = await researchKnownIP(makeReq(), makeReq().role);
             expect(result).toBeNull();
         });
 
         it("returns null when knownIP is explicitly an empty string", async () => {
-            vi.mocked(safeGenerateObject).mockResolvedValue({ object: { isKnownIP: false, franchise: null } } as never);
+            vi.mocked(safeGenerateObject).mockResolvedValue({ object: { confidence: "unknown", franchise: null, searchQuery: null } } as never);
             const result = await researchKnownIP(makeReq({ knownIP: "" }), makeReq().role);
             expect(result).toBeNull();
         });
 
         it("returns null when knownIP is whitespace only", async () => {
-            vi.mocked(safeGenerateObject).mockResolvedValue({ object: { isKnownIP: false, franchise: null } } as never);
+            vi.mocked(safeGenerateObject).mockResolvedValue({ object: { confidence: "unknown", franchise: null, searchQuery: null } } as never);
             const result = await researchKnownIP(makeReq({ knownIP: "   " }), makeReq().role);
             expect(result).toBeNull();
         });
@@ -95,7 +95,7 @@ describe("researchKnownIP", () => {
 
     describe("franchise detection from premise", () => {
         it("detects Warhammer from premise text via LLM", async () => {
-            vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { isKnownIP: true, franchise: "Warhammer" } } as never);
+            vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { confidence: "certain", franchise: "Warhammer", searchQuery: null } } as never);
             vi.mocked(createMCPClient).mockRejectedValue(new Error("MCP unavailable"));
             vi.mocked(safeGenerateObject).mockResolvedValue({ object: MOCK_IP_CONTEXT } as never);
 
@@ -110,7 +110,7 @@ describe("researchKnownIP", () => {
         });
 
         it("detects D&D from name field via LLM", async () => {
-            vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { isKnownIP: true, franchise: "Dungeons & Dragons" } } as never);
+            vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { confidence: "certain", franchise: "Dungeons & Dragons", searchQuery: null } } as never);
             vi.mocked(createMCPClient).mockRejectedValue(new Error("MCP unavailable"));
             vi.mocked(safeGenerateObject).mockResolvedValue({
                 object: { franchise: "Dungeons & Dragons", keyFacts: ["d20 system"], tonalNotes: ["High fantasy"] },
@@ -145,7 +145,7 @@ describe("researchKnownIP", () => {
 
     describe("MCP failure -> LLM fallback", () => {
         it("falls back to LLM when createMCPClient rejects", async () => {
-            vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { isKnownIP: true, franchise: "Warhammer" } } as never);
+            vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { confidence: "certain", franchise: "Warhammer", searchQuery: null } } as never);
             vi.mocked(createMCPClient).mockRejectedValue(new Error("spawn failed"));
             vi.mocked(safeGenerateObject).mockResolvedValue({ object: MOCK_IP_CONTEXT } as never);
 
@@ -159,7 +159,7 @@ describe("researchKnownIP", () => {
         });
 
         it("returns null when both MCP and LLM fallback fail", async () => {
-            vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { isKnownIP: true, franchise: "Warhammer" } } as never);
+            vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { confidence: "certain", franchise: "Warhammer", searchQuery: null } } as never);
             vi.mocked(createMCPClient).mockRejectedValue(new Error("MCP error"));
             vi.mocked(safeGenerateObject).mockRejectedValue(new Error("LLM error"));
 
@@ -172,7 +172,7 @@ describe("researchKnownIP", () => {
         });
 
         it("fallback result has source='llm'", async () => {
-            vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { isKnownIP: true, franchise: "Warhammer" } } as never);
+            vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { confidence: "certain", franchise: "Warhammer", searchQuery: null } } as never);
             vi.mocked(createMCPClient).mockRejectedValue(new Error("MCP error"));
             vi.mocked(safeGenerateObject).mockResolvedValue({ object: MOCK_IP_CONTEXT } as never);
 
@@ -187,7 +187,7 @@ describe("researchKnownIP", () => {
 
     describe("MCP happy path", () => {
         it("returns source='mcp' when MCP succeeds", async () => {
-            vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { isKnownIP: true, franchise: "Warhammer" } } as never);
+            vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { confidence: "certain", franchise: "Warhammer", searchQuery: null } } as never);
             const mockMcpClient = {
                 tools: vi.fn().mockResolvedValue({ duckduckgo_search: {} }),
                 close: vi.fn().mockResolvedValue(undefined),
@@ -206,7 +206,7 @@ describe("researchKnownIP", () => {
         });
 
         it("always calls mcpClient.close() even if generateText throws", async () => {
-            vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { isKnownIP: true, franchise: "Warhammer" } } as never);
+            vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { confidence: "certain", franchise: "Warhammer", searchQuery: null } } as never);
             const mockMcpClient = {
                 tools: vi.fn().mockResolvedValue({}),
                 close: vi.fn().mockResolvedValue(undefined),

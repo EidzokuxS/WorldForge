@@ -182,10 +182,10 @@ export function deleteCheckpoint(
   fs.rmSync(checkpointDir, { recursive: true, force: true });
 }
 
-export async function pruneAutoCheckpoints(
+export function pruneAutoCheckpoints(
   campaignId: string,
   keepCount = 3
-): Promise<void> {
+): void {
   const all = listCheckpoints(campaignId);
   const autoCheckpoints = all
     .filter((cp) => cp.auto)

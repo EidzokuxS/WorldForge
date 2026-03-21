@@ -13,34 +13,11 @@ import { eq, sql } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { factions, locations, chronicle } from "../db/schema.js";
 import { createLogger } from "../lib/index.js";
+import { parseTags } from "./parse-helpers.js";
 
 const log = createLogger("faction-tools");
 
 const MAX_GOALS = 10;
-
-// -- Helpers ------------------------------------------------------------------
-
-function parseTags(raw: string): string[] {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter((t): t is string => typeof t === "string")
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function parseGoals(raw: string): string[] {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter((g): g is string => typeof g === "string")
-      : [];
-  } catch {
-    return [];
-  }
-}
 
 // -- Tool factory -------------------------------------------------------------
 
@@ -156,7 +133,7 @@ export function createFactionTools(campaignId: string, tick: number) {
           return { error: `Faction not found: ${factionName}` };
         }
 
-        const goals = parseGoals(faction.goals);
+        const goals = parseTags(faction.goals);
         const oldGoalLower = oldGoal.toLowerCase();
 
         // Find and replace (case-insensitive)

@@ -150,15 +150,10 @@ describe("callOracle", () => {
     expect(callArgs.temperature).toBe(0);
   });
 
-  it("returns fallback result (chance=50) on generateObject failure", async () => {
+  it("throws when generateObject fails and no fallback provider is configured", async () => {
     vi.mocked(generateObject).mockRejectedValue(new Error("API error"));
 
-    const result = await callOracle(mockPayload, mockProvider);
-
-    expect(result.chance).toBe(50);
-    expect(result.reasoning).toContain("Oracle unavailable");
-    expect(typeof result.roll).toBe("number");
-    expect(["strong_hit", "weak_hit", "miss"]).toContain(result.outcome);
+    await expect(callOracle(mockPayload, mockProvider)).rejects.toThrow("API error");
   });
 
   it("clamps chance to 1-99 even if value is out of range", async () => {

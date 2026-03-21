@@ -7,7 +7,7 @@
  * deletes any entities created during the rolled-back turn.
  */
 
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import {
   players,

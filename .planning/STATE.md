@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 17-05-PLAN.md
-last_updated: "2026-03-21T19:56:58.668Z"
+stopped_at: Completed 17-04-PLAN.md
+last_updated: "2026-03-21T19:58:18.990Z"
 progress:
   total_phases: 18
-  completed_phases: 17
+  completed_phases: 18
   total_plans: 47
-  completed_plans: 46
+  completed_plans: 47
 ---
 
 # Project State
@@ -95,6 +95,7 @@ Plan: 5 of 5
 | Phase 17 P02 | 4min | 2 tasks | 2 files |
 | Phase 17 P01 | 4min | 2 tasks | 2 files |
 | Phase 17 P05 | 3min | 2 tasks | 2 files |
+| Phase 17 P04 | 4min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -201,6 +202,7 @@ Recent decisions affecting current work:
 - [Phase 17]: Mock paths resolved relative to test file location, not source module
 - [Phase 17]: Inline vi.mock factories to avoid hoisting issues with external variable references
 - [Phase 17]: Mock all worldgen service functions inline rather than importing from external factory
+- [Phase 17]: Let parseBody execute with real Zod schemas rather than mocking for actual validation testing
 
 ### Roadmap Evolution
 
@@ -225,6 +227,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-21T19:56:58.665Z
-Stopped at: Completed 17-05-PLAN.md
+Last session: 2026-03-21T19:58:18.987Z
+Stopped at: Completed 17-04-PLAN.md
 Resume file: None

@@ -151,7 +151,9 @@ describe("assemblePrompt", () => {
 
   it("omits [SCENE] section when no location exists", async () => {
     const result = await assemblePrompt(defaultOptions);
-    expect(result.formatted).not.toContain("[SCENE]");
+    // Check sections array instead of formatted string, because SYSTEM_RULES
+    // text mentions "[SCENE]" in the FORBIDDEN list
+    expect(result.sections.find((s) => s.name === "SCENE")).toBeUndefined();
   });
 
   it("includes [ACTION RESULT] when actionResult is provided", async () => {
@@ -199,7 +201,9 @@ describe("assemblePrompt", () => {
       embedderResult: { error: "Not configured", status: 400 },
       playerAction: "I investigate",
     });
-    expect(result.formatted).not.toContain("[LORE CONTEXT]");
+    // Check sections array instead of formatted string, because SYSTEM_RULES
+    // text mentions "[LORE CONTEXT]" in the FORBIDDEN list
+    expect(result.sections.find((s) => s.name === "LORE CONTEXT")).toBeUndefined();
   });
 
   it("totalTokens is within contextWindow", async () => {

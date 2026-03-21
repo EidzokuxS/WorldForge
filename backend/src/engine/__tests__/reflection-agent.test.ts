@@ -264,7 +264,7 @@ describe("checkAndTriggerReflections", () => {
     expect(results).toEqual([]);
   });
 
-  it("REFLECTION_THRESHOLD equals 15", () => {
-    expect(REFLECTION_THRESHOLD).toBe(15);
+  it("REFLECTION_THRESHOLD equals 10", () => {
+    expect(REFLECTION_THRESHOLD).toBe(10);
   });
 });

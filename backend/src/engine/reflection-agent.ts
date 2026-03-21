@@ -16,6 +16,7 @@ import { createReflectionTools } from "./reflection-tools.js";
 import { searchEpisodicEvents } from "../vectors/episodic-events.js";
 import { embedTexts } from "../vectors/embeddings.js";
 import { createLogger } from "../lib/index.js";
+import { parseBeliefs, parseNpcGoals } from "./parse-helpers.js";
 
 const log = createLogger("reflection-agent");
 
@@ -29,33 +30,6 @@ export interface ReflectionResult {
   npcName: string;
   toolCalls: Array<{ tool: string; args: unknown; result: unknown }>;
   error?: string;
-}
-
-// -- Helpers ------------------------------------------------------------------
-
-function parseBeliefs(raw: string): string[] {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter((b): b is string => typeof b === "string")
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function parseGoals(raw: string): { short_term: string[]; long_term: string[] } {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed && typeof parsed === "object") {
-      const obj = parsed as Record<string, unknown>;
-      return {
-        short_term: Array.isArray(obj.short_term) ? obj.short_term.filter((g): g is string => typeof g === "string") : [],
-        long_term: Array.isArray(obj.long_term) ? obj.long_term.filter((g): g is string => typeof g === "string") : [],
-      };
-    }
-  } catch { /* ignore */ }
-  return { short_term: [], long_term: [] };
 }
 
 // -- Core reflection ----------------------------------------------------------
@@ -92,7 +66,7 @@ export async function runReflection(
   }
 
   const beliefs = parseBeliefs(npc.beliefs);
-  const goals = parseGoals(npc.goals);
+  const goals = parseNpcGoals(npc.goals);
 
   // 2. Search episodic events involving this NPC (fetch more for reflection: 10)
   let recentEvents: string[] = [];

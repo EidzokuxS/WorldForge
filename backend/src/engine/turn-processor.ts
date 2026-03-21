@@ -8,7 +8,7 @@
 import { streamText, stepCountIs } from "ai";
 import { safeGenerateObject as generateObject } from "../ai/generate-object-safe.js";
 import { z } from "zod";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
 import { callOracle, type OracleResult } from "./oracle.js";
 import { assemblePrompt } from "./prompt-assembler.js";
@@ -422,7 +422,6 @@ export async function* processTurn(
   let rawNarrative = "";
   let leakDetected = false;
   let quickActionsEmitted = false;
-  let playerDowned = false;
   let narrativeStarted = false;
   const toolCallResults: Array<{
     tool: string;
@@ -460,14 +459,6 @@ export async function* processTurn(
       const toolResult = { tool: toolName, args, result: toolOutput };
       toolCallResults.push(toolResult);
 
-      if (toolName === "set_condition") {
-        const output = toolOutput as Record<string, unknown>;
-        const inner = output?.result as Record<string, unknown> | undefined;
-        if (inner?.isDowned === true) {
-          playerDowned = true;
-        }
-      }
-
       if (toolName === "offer_quick_actions") {
         quickActionsEmitted = true;
         events.push({ type: "quick_actions", data: toolOutput });
@@ -492,7 +483,6 @@ export async function* processTurn(
       rawNarrative = "";
       leakDetected = false;
       quickActionsEmitted = false;
-      playerDowned = false;
       narrativeStarted = false;
       toolCallResults.length = 0;
 

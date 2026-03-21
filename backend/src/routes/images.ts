@@ -7,7 +7,6 @@ import {
   generateImage,
   resolveImageProvider,
   cacheImage,
-  ensureImageDir,
 } from "../images/index.js";
 import { loadSettings } from "../settings/index.js";
 import { getErrorMessage, getErrorStatus } from "../lib/index.js";

@@ -14,6 +14,7 @@ import { factions, locations, chronicle } from "../db/schema.js";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
 import { createFactionTools } from "./faction-tools.js";
 import { createLogger } from "../lib/index.js";
+import { parseTags } from "./parse-helpers.js";
 
 const log = createLogger("world-engine");
 
@@ -24,41 +25,6 @@ export interface FactionTickResult {
   factionName: string;
   toolCalls: Array<{ tool: string; args: unknown; result: unknown }>;
   error?: string;
-}
-
-// -- Helpers ------------------------------------------------------------------
-
-function parseTags(raw: string): string[] {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter((t): t is string => typeof t === "string")
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function parseGoals(raw: string): string[] {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter((g): g is string => typeof g === "string")
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function parseAssets(raw: string): string[] {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter((a): a is string => typeof a === "string")
-      : [];
-  } catch {
-    return [];
-  }
 }
 
 // -- Core: tick a single faction ----------------------------------------------
@@ -78,8 +44,8 @@ async function tickSingleFaction(
   const db = getDb();
 
   const factionTags = parseTags(faction.tags);
-  const factionGoals = parseGoals(faction.goals);
-  const factionAssets = parseAssets(faction.assets);
+  const factionGoals = parseTags(faction.goals);
+  const factionAssets = parseTags(faction.assets);
 
   // Load faction's owned locations (locations where tags contain "Controlled by {factionName}")
   const allLocations = db
@@ -119,7 +85,7 @@ async function tickSingleFaction(
     : "  (no controlled territory)";
 
   const neighborsText = allFactions.length > 0
-    ? allFactions.map((f) => `  - ${f.name} [${parseTags(f.tags).join(", ")}] goals: ${parseGoals(f.goals).join("; ")}`).join("\n")
+    ? allFactions.map((f) => `  - ${f.name} [${parseTags(f.tags).join(", ")}] goals: ${parseTags(f.goals).join("; ")}`).join("\n")
     : "  (no other factions)";
 
   const chronicleText = recentChronicle.length > 0

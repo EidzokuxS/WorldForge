@@ -11,55 +11,13 @@ import { eq, sql } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { npcs, locations } from "../db/schema.js";
 import { callOracle, type OraclePayload } from "./oracle.js";
-import { executeToolCall, type ToolResult } from "./tool-executor.js";
+import { executeToolCall } from "./tool-executor.js";
 import { storeEpisodicEvent } from "../vectors/episodic-events.js";
 import type { ProviderConfig } from "../ai/provider-registry.js";
 import { createLogger } from "../lib/index.js";
+import { parseTags, parseNpcGoals } from "./parse-helpers.js";
 
 const log = createLogger("npc-tools");
-
-// -- Helpers ------------------------------------------------------------------
-
-function parseTags(raw: string): string[] {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter((t): t is string => typeof t === "string")
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-interface NpcGoals {
-  short_term: string[];
-  long_term: string[];
-}
-
-function parseGoals(raw: string): NpcGoals {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed && typeof parsed === "object") {
-      const obj = parsed as Record<string, unknown>;
-      return {
-        short_term: Array.isArray(obj.short_term) ? obj.short_term.filter((g): g is string => typeof g === "string") : [],
-        long_term: Array.isArray(obj.long_term) ? obj.long_term.filter((g): g is string => typeof g === "string") : [],
-      };
-    }
-  } catch { /* ignore */ }
-  return { short_term: [], long_term: [] };
-}
-
-function parseConnectedTo(raw: string): string[] {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter((c): c is string => typeof c === "string")
-      : [];
-  } catch {
-    return [];
-  }
-}
 
 // -- Tool factory -------------------------------------------------------------
 
@@ -198,7 +156,7 @@ export function createNpcAgentTools(
 
         if (!currentLoc) return { error: "Current location not found" };
 
-        const connectedIds = parseConnectedTo(currentLoc.connectedTo);
+        const connectedIds = parseTags(currentLoc.connectedTo);
 
         // Resolve target location by name (case-insensitive)
         const targetLoc = db
@@ -249,7 +207,7 @@ export function createNpcAgentTools(
 
         if (!npc) return { error: "NPC not found" };
 
-        const goals = parseGoals(npc.goals);
+        const goals = parseNpcGoals(npc.goals);
         const goalList = goals[type];
 
         // Find and replace, or append

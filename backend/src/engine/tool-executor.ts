@@ -19,6 +19,7 @@ import {
 } from "../db/schema.js";
 import { storeEpisodicEvent } from "../vectors/episodic-events.js";
 import { createLogger } from "../lib/index.js";
+import { parseTags } from "./parse-helpers.js";
 
 const log = createLogger("tool-executor");
 
@@ -88,17 +89,6 @@ function resolveEntityIdByName(
   return null;
 }
 
-function parseTags(raw: string): string[] {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter((t): t is string => typeof t === "string")
-      : [];
-  } catch {
-    return [];
-  }
-}
-
 // -- Character resolution helper (search players then npcs) -------------------
 
 function resolveCharacterByName(
@@ -134,10 +124,10 @@ function resolveCharacterByName(
 
 // -- Tool handlers ------------------------------------------------------------
 
-async function handleAddTag(
+function handleAddTag(
   campaignId: string,
   args: Record<string, unknown>
-): Promise<ToolResult> {
+): ToolResult {
   const entityName = args.entityName as string;
   const entityType = args.entityType as string;
   const tag = args.tag as string;
@@ -171,10 +161,10 @@ async function handleAddTag(
   };
 }
 
-async function handleRemoveTag(
+function handleRemoveTag(
   campaignId: string,
   args: Record<string, unknown>
-): Promise<ToolResult> {
+): ToolResult {
   const entityName = args.entityName as string;
   const entityType = args.entityType as string;
   const tag = args.tag as string;
@@ -210,10 +200,10 @@ async function handleRemoveTag(
   };
 }
 
-async function handleSetRelationship(
+function handleSetRelationship(
   campaignId: string,
   args: Record<string, unknown>
-): Promise<ToolResult> {
+): ToolResult {
   const entityAName = args.entityA as string;
   const entityBName = args.entityB as string;
   const tag = args.tag as string;
@@ -262,11 +252,11 @@ async function handleSetRelationship(
   };
 }
 
-async function handleAddChronicleEntry(
+function handleAddChronicleEntry(
   campaignId: string,
   args: Record<string, unknown>,
   tick: number
-): Promise<ToolResult> {
+): ToolResult {
   const text = args.text as string;
   const id = crypto.randomUUID();
 
@@ -321,10 +311,10 @@ async function handleLogEvent(
 
 // -- New tool handlers --------------------------------------------------------
 
-async function handleSpawnNpc(
+function handleSpawnNpc(
   campaignId: string,
   args: Record<string, unknown>
-): Promise<ToolResult> {
+): ToolResult {
   const name = args.name as string;
   const tags = args.tags as string[];
   const locationName = args.locationName as string;
@@ -359,10 +349,10 @@ async function handleSpawnNpc(
   };
 }
 
-async function handleSpawnItem(
+function handleSpawnItem(
   campaignId: string,
   args: Record<string, unknown>
-): Promise<ToolResult> {
+): ToolResult {
   const name = args.name as string;
   const tags = args.tags as string[];
   const ownerName = args.ownerName as string;
@@ -418,10 +408,10 @@ async function handleSpawnItem(
   return { success: false, error: `Invalid ownerType: ${ownerType}` };
 }
 
-async function handleRevealLocation(
+function handleRevealLocation(
   campaignId: string,
   args: Record<string, unknown>
-): Promise<ToolResult> {
+): ToolResult {
   const name = args.name as string;
   const description = args.description as string;
   const tags = args.tags as string[];
@@ -479,10 +469,10 @@ async function handleRevealLocation(
   };
 }
 
-async function handleMoveTo(
+function handleMoveTo(
   campaignId: string,
   args: Record<string, unknown>
-): Promise<ToolResult> {
+): ToolResult {
   const targetLocationName = args.targetLocationName as string;
 
   const db = getDb();
@@ -550,11 +540,11 @@ async function handleMoveTo(
   };
 }
 
-async function handleSetCondition(
+function handleSetCondition(
   campaignId: string,
   args: Record<string, unknown>,
   outcomeTier?: string
-): Promise<ToolResult> {
+): ToolResult {
   const targetName = args.targetName as string;
   const delta = args.delta as number | undefined;
   const value = args.value as number | undefined;
@@ -609,10 +599,10 @@ async function handleSetCondition(
   };
 }
 
-async function handleTransferItem(
+function handleTransferItem(
   campaignId: string,
   args: Record<string, unknown>
-): Promise<ToolResult> {
+): ToolResult {
   const itemName = args.itemName as string;
   const targetName = args.targetName as string;
   const targetType = args.targetType as string;

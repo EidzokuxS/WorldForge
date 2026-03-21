@@ -10,13 +10,14 @@
 import { generateText, stepCountIs } from "ai";
 import { eq, and, sql } from "drizzle-orm";
 import { getDb } from "../db/index.js";
-import { npcs, locations, players, items } from "../db/schema.js";
+import { npcs, locations, players } from "../db/schema.js";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
 import { createNpcAgentTools } from "./npc-tools.js";
 import { getRelationshipGraph } from "./graph-queries.js";
 import { searchEpisodicEvents } from "../vectors/episodic-events.js";
 import { embedTexts } from "../vectors/embeddings.js";
 import { createLogger } from "../lib/index.js";
+import { parseTags, parseNpcGoals, parseBeliefs } from "./parse-helpers.js";
 
 const log = createLogger("npc-agent");
 
@@ -27,44 +28,6 @@ export interface NpcTickResult {
   npcName: string;
   toolCalls: Array<{ tool: string; args: unknown; result: unknown }>;
   error?: string;
-}
-
-// -- Helpers ------------------------------------------------------------------
-
-function parseTags(raw: string): string[] {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter((t): t is string => typeof t === "string")
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function parseGoals(raw: string): { short_term: string[]; long_term: string[] } {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed && typeof parsed === "object") {
-      const obj = parsed as Record<string, unknown>;
-      return {
-        short_term: Array.isArray(obj.short_term) ? obj.short_term.filter((g): g is string => typeof g === "string") : [],
-        long_term: Array.isArray(obj.long_term) ? obj.long_term.filter((g): g is string => typeof g === "string") : [],
-      };
-    }
-  } catch { /* ignore */ }
-  return { short_term: [], long_term: [] };
-}
-
-function parseBeliefs(raw: string): string[] {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter((b): b is string => typeof b === "string")
-      : [];
-  } catch {
-    return [];
-  }
 }
 
 // -- Core NPC tick ------------------------------------------------------------
@@ -94,13 +57,12 @@ export async function tickNpcAgent(
   }
 
   const npcTags = parseTags(npc.tags);
-  const goals = parseGoals(npc.goals);
+  const goals = parseNpcGoals(npc.goals);
   const beliefs = parseBeliefs(npc.beliefs);
 
   // 2. Load NPC's current location
   let locationName = "Unknown location";
   let locationDesc = "";
-  let locationTags: string[] = [];
 
   if (npc.currentLocationId) {
     const loc = db
@@ -112,7 +74,6 @@ export async function tickNpcAgent(
     if (loc) {
       locationName = loc.name;
       locationDesc = loc.description;
-      locationTags = parseTags(loc.tags);
     }
   }
 

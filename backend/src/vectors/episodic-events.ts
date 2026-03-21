@@ -25,7 +25,7 @@ const TABLE_NAME = "episodic_events";
  * Returns the generated event ID.
  */
 export async function storeEpisodicEvent(
-  campaignId: string,
+  _campaignId: string,
   event: Omit<EpisodicEvent, "id" | "vector">
 ): Promise<string> {
   const id = crypto.randomUUID();

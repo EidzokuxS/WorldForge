@@ -91,10 +91,11 @@ const mockRole: ResolvedRole = {
 };
 
 const mockEmbedderResult: ResolveResult = {
-  ok: true,
-  provider: mockRole.provider,
-  temperature: 0,
-  maxTokens: 512,
+  resolved: {
+    provider: mockRole.provider,
+    temperature: 0,
+    maxTokens: 512,
+  },
 };
 
 describe("parseWorldBook", () => {

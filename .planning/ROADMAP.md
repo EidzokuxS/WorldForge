@@ -286,7 +286,7 @@ Note: Phases 4, 9, 10, 11 have flexible ordering relative to later phases. Phase
 | 14. Final Systems Verification | 3/3 | Complete    | 2026-03-20 |
 | 15. Systematic Mechanics Fix | 3/3 | Complete    | 2026-03-20 |
 | 16. NPC System QA | 3/3 | Complete    | 2026-03-20 |
-| 17. Unit Test Coverage | 4/5 | In Progress|  |
+| 17. Unit Test Coverage | 5/5 | Complete   | 2026-03-21 |
 
 ### Phase 16: NPC System QA — Three NPC Tiers + World Gen Integration
 
@@ -305,11 +305,11 @@ Plans:
 **Goal:** Write real unit tests for all untested backend logic modules (worldgen, campaign), backend routes (ai, images, character, worldgen), and frontend pure logic (world-data-helpers, v2-card-parser). Remove desloppify test_coverage ignore patterns. Target: desloppify strict score 95+.
 **Requirements**: Unit test coverage (no formal requirement IDs)
 **Depends on:** Phase 16
-**Plans:** 4/5 plans executed
+**Plans:** 5/5 plans complete
 
 Plans:
 - [x] 17-01-PLAN.md -- Worldgen logic tests: scaffold-saver + worldbook-importer
 - [x] 17-02-PLAN.md -- Campaign logic tests: manager + checkpoints
 - [x] 17-03-PLAN.md -- Frontend pure logic tests: world-data-helpers + v2-card-parser
-- [ ] 17-04-PLAN.md -- Route tests: ai + images + character
+- [x] 17-04-PLAN.md -- Route tests: ai + images + character
 - [x] 17-05-PLAN.md -- Route tests: worldgen + desloppify ignore cleanup

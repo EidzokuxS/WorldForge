@@ -196,7 +196,7 @@ describe("listCheckpoints", () => {
     vi.spyOn(fs, "readdirSync").mockReturnValue([
       { name: "cp-1", isDirectory: () => true },
       { name: "cp-2", isDirectory: () => true },
-    ] as unknown as fs.Dirent[]);
+    ] as unknown as ReturnType<typeof fs.readdirSync>);
     vi.spyOn(fs, "readFileSync").mockImplementation((filePath) => {
       const p = String(filePath);
       if (p.includes("cp-1")) {
@@ -237,7 +237,7 @@ describe("listCheckpoints", () => {
     vi.spyOn(fs, "readdirSync").mockReturnValue([
       { name: "cp-good", isDirectory: () => true },
       { name: "cp-bad", isDirectory: () => true },
-    ] as unknown as fs.Dirent[]);
+    ] as unknown as ReturnType<typeof fs.readdirSync>);
     vi.spyOn(fs, "readFileSync").mockReturnValue(
       JSON.stringify({
         id: "cp-good",
@@ -331,7 +331,7 @@ describe("pruneAutoCheckpoints", () => {
     vi.spyOn(fs, "readdirSync").mockReturnValue(
       ["auto-1", "auto-2", "manual-1", "auto-3", "auto-4", "manual-2", "auto-5"].map(
         (name) => ({ name, isDirectory: () => true })
-      ) as unknown as fs.Dirent[]
+      ) as unknown as ReturnType<typeof fs.readdirSync>
     );
     vi.spyOn(fs, "readFileSync").mockImplementation((filePath) => {
       const p = String(filePath);
@@ -367,7 +367,7 @@ describe("pruneAutoCheckpoints", () => {
       ["manual-1", "manual-2"].map((name) => ({
         name,
         isDirectory: () => true,
-      })) as unknown as fs.Dirent[]
+      })) as unknown as ReturnType<typeof fs.readdirSync>
     );
     vi.spyOn(fs, "readFileSync").mockImplementation((filePath) => {
       const p = String(filePath);
