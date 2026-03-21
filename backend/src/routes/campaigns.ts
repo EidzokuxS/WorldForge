@@ -7,12 +7,16 @@ import {
   getActiveCampaign,
   listCampaigns,
   loadCampaign,
+  createCheckpoint,
+  listCheckpoints,
+  loadCheckpoint,
+  deleteCheckpoint,
 } from "../campaign/index.js";
 import { getDb } from "../db/index.js";
 import { factions, items, locations, npcs, players, relationships } from "../db/schema.js";
 import { getErrorMessage, getErrorStatus } from "../lib/index.js";
 import { parseBody, requireActiveCampaign } from "./helpers.js";
-import { createCampaignSchema, promoteNpcBodySchema } from "./schemas.js";
+import { createCampaignSchema, createCheckpointSchema, promoteNpcBodySchema } from "./schemas.js";
 
 const app = new Hono();
 
@@ -260,6 +264,89 @@ app.post("/:id/npcs/:npcId/promote", async (c) => {
   } catch (error) {
     return c.json(
       { error: getErrorMessage(error, "Failed to promote NPC.") },
+      getErrorStatus(error)
+    );
+  }
+});
+
+// ───── Checkpoint endpoints ─────
+
+app.post("/:id/checkpoints", async (c) => {
+  try {
+    const id = c.req.param("id");
+    assertSafeId(id);
+
+    const activeCampaign = requireActiveCampaign(c, id);
+    if (activeCampaign instanceof Response) return activeCampaign;
+
+    const result = await parseBody(c, createCheckpointSchema);
+    if ("response" in result) return result.response;
+
+    const checkpoint = await createCheckpoint(id, {
+      name: result.data.name,
+      description: result.data.description,
+    });
+    return c.json(checkpoint, 201);
+  } catch (error) {
+    return c.json(
+      { error: getErrorMessage(error, "Failed to create checkpoint.") },
+      getErrorStatus(error)
+    );
+  }
+});
+
+app.get("/:id/checkpoints", (c) => {
+  try {
+    const id = c.req.param("id");
+    assertSafeId(id);
+
+    const activeCampaign = requireActiveCampaign(c, id);
+    if (activeCampaign instanceof Response) return activeCampaign;
+
+    return c.json(listCheckpoints(id));
+  } catch (error) {
+    return c.json(
+      { error: getErrorMessage(error, "Failed to list checkpoints.") },
+      getErrorStatus(error)
+    );
+  }
+});
+
+app.post("/:id/checkpoints/:checkpointId/load", async (c) => {
+  try {
+    const id = c.req.param("id");
+    const checkpointId = c.req.param("checkpointId");
+    assertSafeId(id);
+    assertSafeId(checkpointId);
+
+    const activeCampaign = requireActiveCampaign(c, id);
+    if (activeCampaign instanceof Response) return activeCampaign;
+
+    const meta = await loadCheckpoint(id, checkpointId);
+    return c.json(meta);
+  } catch (error) {
+    return c.json(
+      { error: getErrorMessage(error, "Failed to load checkpoint.") },
+      getErrorStatus(error)
+    );
+  }
+});
+
+app.delete("/:id/checkpoints/:checkpointId", (c) => {
+  try {
+    const id = c.req.param("id");
+    const checkpointId = c.req.param("checkpointId");
+    assertSafeId(id);
+    assertSafeId(checkpointId);
+
+    const activeCampaign = requireActiveCampaign(c, id);
+    if (activeCampaign instanceof Response) return activeCampaign;
+
+    deleteCheckpoint(id, checkpointId);
+    return c.json({ ok: true });
+  } catch (error) {
+    return c.json(
+      { error: getErrorMessage(error, "Failed to delete checkpoint.") },
       getErrorStatus(error)
     );
   }

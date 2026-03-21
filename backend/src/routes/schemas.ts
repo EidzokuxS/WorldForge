@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { LORE_CATEGORIES } from "../worldgen/types.js";
+import { WORLDBOOK_ENTRY_TYPES } from "../worldgen/worldbook-importer.js";
 
 const SEED_CATEGORIES = [
   "geography",
@@ -278,6 +279,13 @@ export const resolveStartingLocationSchema = z.object({
   prompt: z.string().max(500).optional(),
 });
 
+// --- Checkpoint schema ---
+
+export const createCheckpointSchema = z.object({
+  name: z.string().max(60).optional(),
+  description: z.string().max(200).optional(),
+});
+
 // --- NPC promotion schema ---
 
 export const promoteNpcBodySchema = z.object({
@@ -289,5 +297,35 @@ export const promoteNpcBodySchema = z.object({
 export const chatEditBodySchema = z.object({
   messageIndex: z.number().int().min(0),
   newContent: z.string().min(1),
+});
+
+// --- Image generation schema ---
+
+export const imageGenerateSchema = z.object({
+  campaignId: z.string().min(1),
+  type: z.enum(["portrait", "location", "scene"]),
+  entityId: z.string().min(1).max(128),
+  prompt: z.string().min(1).max(4000),
+});
+
+// --- WorldBook import schemas ---
+
+export const parseWorldBookSchema = z.object({
+  campaignId: z.string().min(1),
+  worldbook: z.object({
+    entries: z.record(z.string(), z.object({
+      comment: z.string(),
+      content: z.string(),
+    }).passthrough()),
+  }).passthrough(),
+});
+
+export const importWorldBookSchema = z.object({
+  campaignId: z.string().min(1),
+  entries: z.array(z.object({
+    name: z.string().min(1),
+    type: z.enum(WORLDBOOK_ENTRY_TYPES),
+    summary: z.string().min(1),
+  })),
 });
 

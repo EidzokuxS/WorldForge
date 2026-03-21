@@ -4,6 +4,7 @@ export type {
   FallbackConfig,
   ImageConfig,
   ResearchConfig,
+  SearchProvider,
   Settings,
   ChatRole,
   ChatMessage,

@@ -7,9 +7,12 @@ import { LocationPanel } from "@/components/game/location-panel";
 import { NarrativeLog } from "@/components/game/narrative-log";
 import { CharacterPanel } from "@/components/game/character-panel";
 import { LorePanel } from "@/components/game/lore-panel";
+import { CheckpointPanel } from "@/components/game/checkpoint-panel";
 import { ActionBar } from "@/components/game/action-bar";
 import { OraclePanel, type OracleResultData } from "@/components/game/oracle-panel";
 import { QuickActions } from "@/components/game/quick-actions";
+import { Save } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import type { CampaignMeta, ChatMessage } from "@worldforge/shared";
 import { isChatMessage } from "@worldforge/shared";
 import { getErrorMessage } from "@/lib/settings";
@@ -20,6 +23,7 @@ import {
   chatRetry,
   chatUndo,
   getActiveCampaign,
+  getImageUrl,
   getWorldData,
   parseTurnSSE,
 } from "@/lib/api";
@@ -41,6 +45,7 @@ export default function GamePage() {
   const [lastOracleResult, setLastOracleResult] = useState<OracleResultData | null>(null);
   const [quickActions, setQuickActions] = useState<Array<{ label: string; action: string }>>([]);
   const [worldData, setWorldData] = useState<WorldData | null>(null);
+  const [checkpointOpen, setCheckpointOpen] = useState(false);
 
   const refreshWorldData = useCallback(
     async (campaignId: string) => {
@@ -140,6 +145,11 @@ export default function GamePage() {
   }, [worldData, player]);
 
   const locationName = currentLocation?.name ?? null;
+
+  const portraitUrl = useMemo(() => {
+    if (!activeCampaign || !player) return undefined;
+    return getImageUrl(activeCampaign.id, "portraits", `${player.id}.png`);
+  }, [activeCampaign, player]);
 
   const canInteract = Boolean(activeCampaign) && !isInitializing;
 
@@ -359,6 +369,18 @@ export default function GamePage() {
 
   return (
     <div className="flex h-screen flex-col">
+      {/* Toolbar */}
+      <div className="flex items-center justify-end border-b border-border bg-card px-4 py-1.5">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1.5 text-xs"
+          onClick={() => setCheckpointOpen(true)}
+        >
+          <Save className="h-3.5 w-3.5" />
+          Saves
+        </Button>
+      </div>
       <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">
         <LocationPanel
           location={currentLocation}
@@ -384,6 +406,7 @@ export default function GamePage() {
           player={player}
           items={playerItems}
           locationName={locationName}
+          portraitUrl={portraitUrl}
         />
         <LorePanel campaignId={activeCampaign?.id ?? null} />
       </div>
@@ -399,6 +422,13 @@ export default function GamePage() {
         isLoading={isStreaming}
         disabled={!canInteract}
       />
+      {activeCampaign && (
+        <CheckpointPanel
+          campaignId={activeCampaign.id}
+          open={checkpointOpen}
+          onClose={() => setCheckpointOpen(false)}
+        />
+      )}
     </div>
   );
 }

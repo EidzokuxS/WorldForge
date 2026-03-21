@@ -10,6 +10,7 @@ import loreRoutes from "./routes/lore.js";
 import settingsRoutes from "./routes/settings.js";
 import worldgenRoutes from "./routes/worldgen.js";
 import characterRoutes from "./routes/character.js";
+import imageRoutes from "./routes/images.js";
 
 const app = new Hono();
 const port = Number.parseInt(process.env.PORT ?? "3001", 10);
@@ -66,6 +67,7 @@ app.route("/api/worldgen", worldgenRoutes);
 app.route("/api/worldgen", characterRoutes);
 app.route("/api", aiRoutes);
 app.route("/api/chat", chatRoutes);
+app.route("/api/images", imageRoutes);
 
 const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
 

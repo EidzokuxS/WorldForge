@@ -1,14 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Provider, RoleConfig, FallbackConfig, Settings } from "@worldforge/shared";
+import type { Provider, RoleConfig, FallbackConfig, ResearchConfig, Settings } from "@worldforge/shared";
 import {
   BUILTIN_PROVIDER_PRESETS,
   NONE_PROVIDER_ID,
   createDefaultSettings,
   firstProviderId,
 } from "@worldforge/shared";
-import { isRecord } from "../lib/type-guards.js";
+import { isRecord } from "../lib/index.js";
 
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -143,6 +143,24 @@ function normalizeFallbackConfig(
   };
 }
 
+const VALID_SEARCH_PROVIDERS = new Set(["duckduckgo", "zai"]);
+
+function normalizeResearchConfig(
+  value: unknown,
+  defaults: ResearchConfig
+): ResearchConfig {
+  const source = isRecord(value) ? value : {};
+  const rawProvider = asString(source.searchProvider);
+
+  return {
+    enabled: typeof source.enabled === "boolean" ? source.enabled : defaults.enabled,
+    maxSearchSteps: clampInt(source.maxSearchSteps, 1, 100, defaults.maxSearchSteps),
+    searchProvider: VALID_SEARCH_PROVIDERS.has(rawProvider)
+      ? (rawProvider as ResearchConfig["searchProvider"])
+      : defaults.searchProvider,
+  };
+}
+
 export function rebindProviderReferences(settings: Settings): Settings {
   const providers = mergeBuiltinProviders(settings.providers);
   const defaults = createDefaultSettings();
@@ -242,6 +260,7 @@ export function normalizeSettings(value: unknown): Settings {
       stylePrompt: asString(imagesSource.stylePrompt, defaults.images.stylePrompt),
       enabled: Boolean(imagesSource.enabled),
     },
+    research: normalizeResearchConfig(value.research, defaults.research),
   };
 }
 

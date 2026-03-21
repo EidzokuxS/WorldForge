@@ -21,8 +21,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 7: Reflection + Progression** - Importance-triggered NPC reflection, wealth tiers, skill progression, relationship evolution (completed 2026-03-18)
 - [x] **Phase 8: World Engine** - Faction macro-ticks, territory changes, world events, information flow to NPCs and player (completed 2026-03-18)
 - [ ] **Phase 9: Persistence** - Checkpoint save/load, branching, auto-checkpoint before lethal encounters
-- [ ] **Phase 10: Image Generation** - Provider-agnostic image gen, portraits, scene illustrations, location backgrounds, graceful degradation
-- [ ] **Phase 11: Content Import** - SillyTavern WorldBook import with entity classification, web search expansion
+- [x] **Phase 10: Image Generation** - Provider-agnostic image gen, portraits, scene illustrations, location backgrounds, graceful degradation (completed 2026-03-19)
+- [x] **Phase 11: Content Import** - SillyTavern WorldBook import with entity classification, web search expansion (completed 2026-03-19)
 
 ## Phase Details
 
@@ -178,8 +178,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 10-01: Image Provider Integration + Settings
-- [ ] 10-02: Portrait, Scene, and Location Image Pipeline
+- [ ] 10-01-PLAN.md -- Image generation module + prompt builder + cache + serving route
+- [ ] 10-02-PLAN.md -- Portrait on save + scene/location triggers + frontend display
 
 ### Phase 11: Content Import
 **Goal**: Players can import external content -- SillyTavern WorldBooks and web-sourced lore -- into their campaign worlds
@@ -193,7 +193,7 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 11-01: WorldBook Import Pipeline
+- [x] 11-01: WorldBook Import Pipeline (completed 2026-03-19)
 - [ ] 11-02: Web Search Expansion
 
 ## Progress
@@ -214,5 +214,5 @@ Note: Phases 4, 9, 10, 11 have flexible ordering relative to later phases. Phase
 | 7. Reflection + Progression | 2/2 | Complete   | 2026-03-18 |
 | 8. World Engine | 2/2 | Complete   | 2026-03-18 |
 | 9. Persistence | 0/2 | Not started | - |
-| 10. Image Generation | 0/2 | Not started | - |
-| 11. Content Import | 0/2 | Not started | - |
+| 10. Image Generation | 2/2 | Complete    | 2026-03-19 |
+| 11. Content Import | 2/2 | Complete    | 2026-03-19 |

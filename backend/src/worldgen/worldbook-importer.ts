@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { z } from "zod";
-import { safeGenerateObject as generateObject } from "../ai/generate-object-safe.js";
+import { generateObject } from "ai";
 import { createModel } from "../ai/index.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import type { ResolveResult } from "../ai/index.js";

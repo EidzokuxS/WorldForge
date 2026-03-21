@@ -2,15 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_plan: 2 of 2
 status: unknown
-stopped_at: Completed 08-02-PLAN.md
-last_updated: "2026-03-18T23:49:55.103Z"
+stopped_at: Completed 11-02-PLAN.md
+last_updated: "2026-03-19T04:32:13.496Z"
 progress:
   total_phases: 11
-  completed_phases: 8
-  total_plans: 17
-  completed_plans: 17
+  completed_phases: 11
+  total_plans: 23
+  completed_plans: 23
 ---
 
 # Project State
@@ -20,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-18)
 
 **Core value:** The LLM is the narrator, never the engine. All mechanical outcomes are resolved by backend code.
-**Current focus:** Phase 08 — world-engine
+**Current focus:** Phase 11 — content-import
 
 ## Current Position
 
-Phase: 08 (world-engine) — EXECUTING
-Current Plan: 2 of 2
+Phase: 11 (content-import) — COMPLETE
+Plan: 2 of 2
 
 ## Performance Metrics
 
@@ -67,6 +66,12 @@ Current Plan: 2 of 2
 | Phase 07 P02 | 5min | 2 tasks | 5 files |
 | Phase 08 P01 | 5min | 2 tasks | 5 files |
 | Phase 08 P02 | 4min | 2 tasks | 5 files |
+| Phase 09 P01 | 3min | 2 tasks | 6 files |
+| Phase 09 P02 | 4min | 3 tasks | 5 files |
+| Phase 10 P01 | 4min | 2 tasks | 8 files |
+| Phase 10 P02 | 3min | 2 tasks | 5 files |
+| Phase 11 P01 | 5min | 2 tasks | 7 files |
+| Phase 11 P02 | 5min | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -121,6 +126,17 @@ Recent decisions affecting current work:
 - [Phase 08]: Event tags follow pattern Type-affected on locations (Plague-affected etc)
 - [Phase 08]: No explicit event propagation -- LLM infers NPC awareness from WORLD STATE + NPC tags + SCENE context
 - [Phase 08]: WORLD STATE section at priority 3 between SCENE and PLAYER STATE, canTruncate true
+- [09-01]: Checkpoint ID format {timestamp}-{sanitized-name} for natural sort order and human readability
+- [09-01]: better-sqlite3 .backup() API for safe SQLite snapshots instead of raw file copy
+- [09-01]: Checkpoint load disconnects/reconnects both SQLite and LanceDB connections
+- [Phase 09]: Auto-checkpoint triggers at HP <= 2 with non-blocking try/catch
+- [Phase 09]: CheckpointPanel uses Dialog component, load triggers full page reload
+- [Phase 10]: Plain fetch to OpenAI-compatible endpoint for maximum image provider compatibility
+- [Phase 10]: All image generation is fire-and-forget with void async IIFE -- never blocks gameplay
+- [11-01]: Single LLM call for batch WorldBook entry classification (not per-entry)
+- [11-01]: Bestiary entries stored as lore cards with category "npc", lore_general as "concept"
+- [Phase 11-02]: withMcpClient kept as deprecated wrapper; withSearchMcp is preferred API for configurable search providers
+- [Phase 11-02]: SEARCH_MCP_CONFIGS record maps SearchProvider to MCP server command/args for easy provider addition
 
 ### Pending Todos
 
@@ -132,6 +148,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-18T23:46:13.645Z
-Stopped at: Completed 08-02-PLAN.md
+Last session: 2026-03-19T04:26:48.784Z
+Stopped at: Completed 11-02-PLAN.md
 Resume file: None

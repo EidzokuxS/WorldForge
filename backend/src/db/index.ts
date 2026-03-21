@@ -26,6 +26,13 @@ export function getDb() {
   return db;
 }
 
+export function getSqliteConnection(): Database.Database {
+  if (!sqliteConnection) {
+    throw new Error("Database not connected. Call connectDb() first.");
+  }
+  return sqliteConnection;
+}
+
 export function closeDb() {
   if (sqliteConnection) {
     sqliteConnection.close();

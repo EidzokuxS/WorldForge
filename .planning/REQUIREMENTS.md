@@ -97,27 +97,27 @@ Requirements for complete product. Each maps to roadmap phases.
 
 ### Persistence
 
-- [ ] **SAVE-01**: Checkpoint creates timestamped snapshot of state.db + vectors/ directory
-- [ ] **SAVE-02**: User can load any checkpoint to restore campaign state (death recovery, what-if branching)
-- [ ] **SAVE-03**: Checkpoint list shown in UI with timestamp and description
-- [ ] **SAVE-04**: Auto-checkpoint before potentially lethal encounters (HP≤2 entering combat)
+- [x] **SAVE-01**: Checkpoint creates timestamped snapshot of state.db + vectors/ directory
+- [x] **SAVE-02**: User can load any checkpoint to restore campaign state (death recovery, what-if branching)
+- [x] **SAVE-03**: Checkpoint list shown in UI with timestamp and description
+- [x] **SAVE-04**: Auto-checkpoint before potentially lethal encounters (HP≤2 entering combat)
 
 ### Image Generation
 
-- [ ] **IMG-01**: Provider-agnostic image generation (fal, GLM, Stable Diffusion, DALL-E, ComfyUI, custom OpenAI-compatible)
-- [ ] **IMG-02**: Image provider configuration in Settings panel (provider, model, API key, default style prompt)
-- [ ] **IMG-03**: Character portraits generated on character creation from appearance tags, cached
-- [ ] **IMG-04**: Scene illustrations for high-importance events (new location, boss encounter, dramatic moments), async non-blocking
-- [ ] **IMG-05**: Location backgrounds generated on first visit, cached for return visits
-- [ ] **IMG-06**: Image generation is optional — togglable in settings, graceful degradation when disabled or no provider configured
-- [ ] **IMG-07**: Image prompts built from game state (appearance tags → portrait, location tags + premise → scene)
+- [x] **IMG-01**: Provider-agnostic image generation (fal, GLM, Stable Diffusion, DALL-E, ComfyUI, custom OpenAI-compatible)
+- [x] **IMG-02**: Image provider configuration in Settings panel (provider, model, API key, default style prompt)
+- [x] **IMG-03**: Character portraits generated on character creation from appearance tags, cached
+- [x] **IMG-04**: Scene illustrations for high-importance events (new location, boss encounter, dramatic moments), async non-blocking
+- [x] **IMG-05**: Location backgrounds generated on first visit, cached for return visits
+- [x] **IMG-06**: Image generation is optional — togglable in settings, graceful degradation when disabled or no provider configured
+- [x] **IMG-07**: Image prompts built from game state (appearance tags → portrait, location tags + premise → scene)
 
 ### Content Import
 
-- [ ] **IMPT-01**: SillyTavern WorldBook JSON import — parse structured lore entries
-- [ ] **IMPT-02**: WorldBook cleaning — strip irrelevant SillyTavern-specific data (activation keys, recursion settings, etc.)
-- [ ] **IMPT-03**: Entity separation — LLM classifies WorldBook entries by type (character, location, faction, bestiary, lore) and routes to appropriate DB tables
-- [ ] **IMPT-04**: Web search expansion — multiple search sources (DuckDuckGo MCP, Z.AI search MCP) for IP research
+- [x] **IMPT-01**: SillyTavern WorldBook JSON import — parse structured lore entries
+- [x] **IMPT-02**: WorldBook cleaning — strip irrelevant SillyTavern-specific data (activation keys, recursion settings, etc.)
+- [x] **IMPT-03**: Entity separation — LLM classifies WorldBook entries by type (character, location, faction, bestiary, lore) and routes to appropriate DB tables
+- [x] **IMPT-04**: Web search expansion — multiple search sources (DuckDuckGo MCP, Z.AI search MCP) for IP research
 
 ## v2 Requirements
 
@@ -212,21 +212,21 @@ Deferred to future release. Tracked but not in current roadmap.
 | CTRL-02 | Phase 4 | Complete |
 | CTRL-03 | Phase 4 | Complete |
 | CTRL-04 | Phase 4 | Complete |
-| SAVE-01 | Phase 9 | Pending |
-| SAVE-02 | Phase 9 | Pending |
-| SAVE-03 | Phase 9 | Pending |
-| SAVE-04 | Phase 9 | Pending |
-| IMG-01 | Phase 10 | Pending |
-| IMG-02 | Phase 10 | Pending |
-| IMG-03 | Phase 10 | Pending |
-| IMG-04 | Phase 10 | Pending |
-| IMG-05 | Phase 10 | Pending |
-| IMG-06 | Phase 10 | Pending |
-| IMG-07 | Phase 10 | Pending |
-| IMPT-01 | Phase 11 | Pending |
-| IMPT-02 | Phase 11 | Pending |
-| IMPT-03 | Phase 11 | Pending |
-| IMPT-04 | Phase 11 | Pending |
+| SAVE-01 | Phase 9 | Complete |
+| SAVE-02 | Phase 9 | Complete |
+| SAVE-03 | Phase 9 | Complete |
+| SAVE-04 | Phase 9 | Complete |
+| IMG-01 | Phase 10 | Complete |
+| IMG-02 | Phase 10 | Complete |
+| IMG-03 | Phase 10 | Complete |
+| IMG-04 | Phase 10 | Complete |
+| IMG-05 | Phase 10 | Complete |
+| IMG-06 | Phase 10 | Complete |
+| IMG-07 | Phase 10 | Complete |
+| IMPT-01 | Phase 11 | Complete |
+| IMPT-02 | Phase 11 | Complete |
+| IMPT-03 | Phase 11 | Complete |
+| IMPT-04 | Phase 11 | Complete |
 
 **Coverage:**
 - v1 requirements: 73 total

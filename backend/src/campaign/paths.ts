@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { AppError } from "../lib/errors.js";
+import { AppError } from "../lib/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const CAMPAIGNS_DIR = path.resolve(__dirname, "../../../campaigns");
@@ -22,4 +22,17 @@ export function getCampaignConfigPath(campaignId: string): string {
 
 export function getChatHistoryPath(campaignId: string): string {
   return path.join(getCampaignDir(campaignId), "chat_history.json");
+}
+
+export function getCheckpointsDir(campaignId: string): string {
+  return path.join(getCampaignDir(campaignId), "checkpoints");
+}
+
+export function getCheckpointDir(campaignId: string, checkpointId: string): string {
+  assertSafeId(checkpointId);
+  return path.join(getCheckpointsDir(campaignId), checkpointId);
+}
+
+export function getImagesDir(campaignId: string): string {
+  return path.join(getCampaignDir(campaignId), "images");
 }

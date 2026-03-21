@@ -1,8 +1,7 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import crypto from "node:crypto";
-import { getActiveCampaign, markGenerationComplete } from "../campaign/manager.js";
-import { getErrorMessage, getErrorStatus } from "../lib/errors.js";
+import { markGenerationComplete } from "../campaign/index.js";
+import { getErrorMessage, getErrorStatus } from "../lib/index.js";
 import { loadSettings } from "../settings/index.js";
 import {
   extractLoreCards,
@@ -17,29 +16,30 @@ import {
   suggestSingleSeed,
   suggestWorldSeeds,
 } from "../worldgen/index.js";
-import { parseCharacterDescription, generateCharacter } from "../character/generator.js";
-import { getDb } from "../db/index.js";
-import { locations, factions, players } from "../db/schema.js";
-import { eq } from "drizzle-orm";
-import { resolveGenerator, resolveEmbedder } from "./helpers.js";
-import { embedTexts } from "../vectors/embeddings.js";
-import { insertLoreCards, insertLoreCardsWithoutVectors, deleteCampaignLore } from "../vectors/lore-cards.js";
+import { parseBody, requireActiveCampaign, resolveGenerator, resolveEmbedder } from "./helpers.js";
+import { createLogger } from "../lib/index.js";
+
+const log = createLogger("worldgen-route");
+import { deleteCampaignLore, storeLoreCards } from "../vectors/lore-cards.js";
 import {
-  generateCharacterSchema,
   generateWorldSchema,
-  parseBody,
-  parseCharacterSchema,
   regenerateSectionSchema,
   rollSeedSchema,
-  saveCharacterSchema,
   saveEditsSchema,
   suggestSeedSchema,
   suggestSeedsSchema,
+  parseWorldBookSchema,
+  importWorldBookSchema,
 } from "./schemas.js";
+import {
+  parseWorldBook,
+  classifyEntries,
+  importClassifiedEntries,
+} from "../worldgen/worldbook-importer.js";
 
 const app = new Hono();
 
-app.post("/roll-seeds", (c) => {
+app.post("/roll-seeds", async (c) => {
   try {
     return c.json(rollWorldSeeds());
   } catch (error) {
@@ -114,91 +114,76 @@ app.post("/suggest-seed", async (c) => {
 });
 
 app.post("/generate", async (c) => {
-  const result = await parseBody(c, generateWorldSchema);
-  if ("response" in result) return result.response;
+  try {
+    const result = await parseBody(c, generateWorldSchema);
+    if ("response" in result) return result.response;
 
-  const { campaignId } = result.data;
-  const campaign = getActiveCampaign();
-  if (!campaign || campaign.id !== campaignId) {
-    return c.json({ error: "Campaign not active or not found." }, 400);
-  }
+    const { campaignId } = result.data;
+    const campaign = requireActiveCampaign(c, campaignId);
+    if (campaign instanceof Response) return campaign;
 
-  const settings = loadSettings();
-  const gen = resolveGenerator(settings);
-  if ("error" in gen) {
-    return c.json({ error: gen.error }, gen.status);
-  }
-
-  return streamSSE(c, async (stream) => {
-    try {
-      const scaffold = await generateWorldScaffold(
-        {
-          campaignId,
-          name: campaign.name,
-          premise: campaign.premise,
-          seeds: campaign.seeds,
-          role: gen.resolved,
-          research: settings.research,
-        },
-        async (progress) => {
-          await stream.writeSSE({
-            event: "progress",
-            data: JSON.stringify(progress),
-          });
-        }
-      );
-
-      saveScaffoldToDb(campaignId, scaffold);
-      markGenerationComplete(campaignId, scaffold.refinedPremise);
-
-      // Store lore cards in LanceDB
-      if (scaffold.loreCards.length > 0) {
-        const cards = scaffold.loreCards.map((lc) => ({
-          id: crypto.randomUUID(),
-          term: lc.term,
-          definition: lc.definition,
-          category: lc.category,
-        }));
-
-        const embedderResult = resolveEmbedder(settings);
-        if ("resolved" in embedderResult) {
-          try {
-            const definitions = cards.map((c) => `${c.term}: ${c.definition}`);
-            const embeddings = await embedTexts(definitions, embedderResult.resolved.provider);
-            await insertLoreCards(cards, embeddings);
-          } catch (embedError) {
-            console.error("Embedding failed, storing lore without vectors:", embedError);
-            await insertLoreCardsWithoutVectors(cards);
-          }
-        } else {
-          await insertLoreCardsWithoutVectors(cards);
-        }
-      }
-
-      const startingLocation =
-        scaffold.locations.find((location) => location.isStarting)?.name ??
-        scaffold.locations[0]?.name ??
-        "Unknown";
-
-      await stream.writeSSE({
-        event: "complete",
-        data: JSON.stringify({
-          refinedPremise: scaffold.refinedPremise,
-          locationCount: scaffold.locations.length,
-          npcCount: scaffold.npcs.length,
-          factionCount: scaffold.factions.length,
-          startingLocation,
-        }),
-      });
-    } catch (error) {
-      await stream.writeSSE({
-        event: "error",
-        data: JSON.stringify({
-          error: getErrorMessage(error, "World generation failed."),
-        }),
-      });
+    const settings = loadSettings();
+    const gen = resolveGenerator(settings);
+    if ("error" in gen) {
+      return c.json({ error: gen.error }, gen.status);
     }
-  });
+
+    return streamSSE(c, async (stream) => {
+      try {
+        const scaffold = await generateWorldScaffold(
+          {
+            campaignId,
+            name: campaign.name,
+            premise: campaign.premise,
+            seeds: campaign.seeds,
+            role: gen.resolved,
+            research: settings.research,
+          },
+          async (progress) => {
+            await stream.writeSSE({
+              event: "progress",
+              data: JSON.stringify(progress),
+            });
+          }
+        );
+
+        saveScaffoldToDb(campaignId, scaffold);
+        markGenerationComplete(campaignId, scaffold.refinedPremise);
+
+        // Store lore cards in LanceDB
+        await storeLoreCards(scaffold.loreCards, resolveEmbedder(settings));
+
+        const startingLocation =
+          scaffold.locations.find((location) => location.isStarting)?.name ??
+          scaffold.locations[0]?.name ??
+          "Unknown";
+
+        await stream.writeSSE({
+          event: "complete",
+          data: JSON.stringify({
+            refinedPremise: scaffold.refinedPremise,
+            locationCount: scaffold.locations.length,
+            npcCount: scaffold.npcs.length,
+            factionCount: scaffold.factions.length,
+            startingLocation,
+          }),
+        });
+      } catch (error) {
+        log.error("World generation pipeline failed", error);
+        await stream.writeSSE({
+          event: "error",
+          data: JSON.stringify({
+            error: getErrorMessage(error, "World generation failed."),
+          }),
+        });
+      }
+    });
+  } catch (error) {
+    return c.json(
+      { error: getErrorMessage(error, "World generation failed.") },
+      getErrorStatus(error)
+    );
+  }
 });
 
 app.post("/regenerate-section", async (c) => {
@@ -212,10 +197,9 @@ app.post("/regenerate-section", async (c) => {
       return c.json({ error: gen.error }, gen.status);
     }
 
-    const campaign = getActiveCampaign();
-    if (!campaign) {
-      return c.json({ error: "No active campaign." }, 400);
-    }
+    const { campaignId } = result.data;
+    const campaign = requireActiveCampaign(c, campaignId);
+    if (campaign instanceof Response) return campaign;
 
     const req = {
       campaignId: campaign.id,
@@ -244,6 +228,8 @@ app.post("/regenerate-section", async (c) => {
         const npcs = await generateNpcsStep(req, result.data.refinedPremise, result.data.locationNames, result.data.factionNames, null, result.data.additionalInstruction);
         return c.json({ npcs });
       }
+      default:
+        return c.json({ error: `Unknown section: ${section}` }, 400);
     }
   } catch (error) {
     return c.json(
@@ -259,10 +245,8 @@ app.post("/save-edits", async (c) => {
     if ("response" in result) return result.response;
 
     const { campaignId, scaffold } = result.data;
-    const campaign = getActiveCampaign();
-    if (!campaign || campaign.id !== campaignId) {
-      return c.json({ error: "Campaign not active or not found." }, 400);
-    }
+    const campaign = requireActiveCampaign(c, campaignId);
+    if (campaign instanceof Response) return campaign;
 
     saveScaffoldToDb(campaignId, scaffold);
     markGenerationComplete(campaignId, scaffold.refinedPremise);
@@ -277,30 +261,10 @@ app.post("/save-edits", async (c) => {
       try {
         const loreCards = await extractLoreCards(scaffold, gen.resolved);
 
-        if (loreCards.length > 0) {
-          const cards = loreCards.map((lc) => ({
-            id: crypto.randomUUID(),
-            term: lc.term,
-            definition: lc.definition,
-            category: lc.category,
-          }));
-
-          const embedderResult = resolveEmbedder(settings);
-          if ("resolved" in embedderResult) {
-            try {
-              const definitions = cards.map((c) => `${c.term}: ${c.definition}`);
-              const embeddings = await embedTexts(definitions, embedderResult.resolved.provider);
-              await insertLoreCards(cards, embeddings);
-            } catch (embedError) {
-              console.error("Embedding failed, storing lore without vectors:", embedError);
-              await insertLoreCardsWithoutVectors(cards);
-            }
-          } else {
-            await insertLoreCardsWithoutVectors(cards);
-          }
-        }
+        await storeLoreCards(loreCards, resolveEmbedder(settings));
       } catch (loreError) {
-        console.error("Lore re-extraction failed:", loreError);
+        log.error("Lore re-extraction failed", loreError);
+        return c.json({ ok: true, loreExtractionFailed: true });
       }
     }
 
@@ -313,16 +277,16 @@ app.post("/save-edits", async (c) => {
   }
 });
 
-app.post("/parse-character", async (c) => {
+// ───── WorldBook Import ─────
+
+app.post("/parse-worldbook", async (c) => {
   try {
-    const result = await parseBody(c, parseCharacterSchema);
+    const result = await parseBody(c, parseWorldBookSchema);
     if ("response" in result) return result.response;
 
-    const { campaignId, description } = result.data;
-    const campaign = getActiveCampaign();
-    if (!campaign || campaign.id !== campaignId) {
-      return c.json({ error: "Campaign not active or not found." }, 400);
-    }
+    const { campaignId, worldbook } = result.data;
+    const campaign = requireActiveCampaign(c, campaignId);
+    if (campaign instanceof Response) return campaign;
 
     const settings = loadSettings();
     const gen = resolveGenerator(settings);
@@ -330,131 +294,37 @@ app.post("/parse-character", async (c) => {
       return c.json({ error: gen.error }, gen.status);
     }
 
-    const db = getDb();
-    const locationNames = db
-      .select({ name: locations.name })
-      .from(locations)
-      .where(eq(locations.campaignId, campaignId))
-      .all()
-      .map((r) => r.name);
+    const parsed = parseWorldBook(worldbook);
+    const classified = await classifyEntries(parsed, gen.resolved);
 
-    if (locationNames.length === 0) {
-      return c.json({ error: "No locations found. Generate the world first." }, 400);
-    }
-
-    const character = await parseCharacterDescription({
-      description,
-      premise: campaign.premise,
-      locationNames,
-      role: gen.resolved,
-    });
-
-    return c.json(character);
+    return c.json({ entries: classified });
   } catch (error) {
     return c.json(
-      { error: getErrorMessage(error, "Failed to parse character.") },
-      getErrorStatus(error)
+      { error: getErrorMessage(error, "Failed to parse WorldBook.") },
+      getErrorStatus(error),
     );
   }
 });
 
-app.post("/generate-character", async (c) => {
+app.post("/import-worldbook", async (c) => {
   try {
-    const result = await parseBody(c, generateCharacterSchema);
+    const result = await parseBody(c, importWorldBookSchema);
     if ("response" in result) return result.response;
 
-    const { campaignId } = result.data;
-    const campaign = getActiveCampaign();
-    if (!campaign || campaign.id !== campaignId) {
-      return c.json({ error: "Campaign not active or not found." }, 400);
-    }
+    const { campaignId, entries } = result.data;
+    const campaign = requireActiveCampaign(c, campaignId);
+    if (campaign instanceof Response) return campaign;
 
     const settings = loadSettings();
-    const gen = resolveGenerator(settings);
-    if ("error" in gen) {
-      return c.json({ error: gen.error }, gen.status);
-    }
+    const embedder = resolveEmbedder(settings);
 
-    const db = getDb();
-    const locationNames = db
-      .select({ name: locations.name })
-      .from(locations)
-      .where(eq(locations.campaignId, campaignId))
-      .all()
-      .map((r) => r.name);
+    const imported = await importClassifiedEntries(campaignId, entries, embedder);
 
-    if (locationNames.length === 0) {
-      return c.json({ error: "No locations found. Generate the world first." }, 400);
-    }
-
-    const factionNames = db
-      .select({ name: factions.name })
-      .from(factions)
-      .where(eq(factions.campaignId, campaignId))
-      .all()
-      .map((r) => r.name);
-
-    const character = await generateCharacter({
-      premise: campaign.premise,
-      locationNames,
-      factionNames,
-      role: gen.resolved,
-    });
-
-    return c.json(character);
+    return c.json(imported);
   } catch (error) {
     return c.json(
-      { error: getErrorMessage(error, "Failed to generate character.") },
-      getErrorStatus(error)
-    );
-  }
-});
-
-app.post("/save-character", async (c) => {
-  try {
-    const result = await parseBody(c, saveCharacterSchema);
-    if ("response" in result) return result.response;
-
-    const { campaignId, character } = result.data;
-    const campaign = getActiveCampaign();
-    if (!campaign || campaign.id !== campaignId) {
-      return c.json({ error: "Campaign not active or not found." }, 400);
-    }
-
-    const db = getDb();
-
-    // Find matching location by name
-    const allLocations = db
-      .select({ id: locations.id, name: locations.name })
-      .from(locations)
-      .where(eq(locations.campaignId, campaignId))
-      .all();
-    const matchedLocation = allLocations.find((l) => l.name === character.locationName);
-    if (!matchedLocation) {
-      return c.json({ error: `Location "${character.locationName}" not found in this campaign.` }, 400);
-    }
-
-    // Delete existing player for this campaign (single player per campaign)
-    db.delete(players).where(eq(players.campaignId, campaignId)).run();
-
-    const playerId = crypto.randomUUID();
-    db.insert(players)
-      .values({
-        id: playerId,
-        campaignId,
-        name: character.name,
-        hp: character.hp,
-        tags: JSON.stringify(character.tags),
-        equippedItems: JSON.stringify(character.equippedItems),
-        currentLocationId: matchedLocation.id,
-      })
-      .run();
-
-    return c.json({ ok: true, playerId });
-  } catch (error) {
-    return c.json(
-      { error: getErrorMessage(error, "Failed to save character.") },
-      getErrorStatus(error)
+      { error: getErrorMessage(error, "Failed to import WorldBook.") },
+      getErrorStatus(error),
     );
   }
 });

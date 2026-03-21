@@ -3,6 +3,8 @@ import {
   createDefaultSettings,
   BUILTIN_PROVIDER_PRESETS,
   NONE_PROVIDER_ID,
+  isLocalProvider,
+  firstProviderId,
 } from "../settings.js";
 import type { Provider, Settings } from "../types.js";
 
@@ -90,6 +92,71 @@ describe("BUILTIN_PROVIDER_PRESETS", () => {
 });
 
 // ---------------------------------------------------------------------------
+// isLocalProvider
+// ---------------------------------------------------------------------------
+describe("isLocalProvider", () => {
+  it.each([
+    "http://localhost:11434/v1",
+    "http://localhost:8080",
+    "https://localhost/api",
+    "http://127.0.0.1:5000",
+    "http://127.0.0.1/v1",
+    "http://0.0.0.0:3000",
+    "http://0.0.0.0:11434/v1",
+    "http://LOCALHOST:8080",
+  ])("returns true for local URL: %s", (url) => {
+    expect(isLocalProvider(url)).toBe(true);
+  });
+
+  it.each([
+    "https://api.openai.com/v1",
+    "https://openrouter.ai/api/v1",
+    "https://api.anthropic.com/v1",
+    "https://example.com",
+    "https://my-server.com:8080",
+  ])("returns false for remote URL: %s", (url) => {
+    expect(isLocalProvider(url)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// firstProviderId
+// ---------------------------------------------------------------------------
+describe("firstProviderId", () => {
+  it("returns the first provider's id from a non-empty array", () => {
+    const providers: Provider[] = [
+      {
+        id: "custom-1",
+        name: "Custom",
+        baseUrl: "https://example.com",
+        apiKey: "",
+        defaultModel: "m1",
+        isBuiltin: false,
+      },
+      {
+        id: "custom-2",
+        name: "Other",
+        baseUrl: "https://other.com",
+        apiKey: "",
+        defaultModel: "m2",
+        isBuiltin: false,
+      },
+    ];
+    expect(firstProviderId(providers)).toBe("custom-1");
+  });
+
+  it("falls back to BUILTIN_PROVIDER_PRESETS[0].id for an empty array", () => {
+    expect(firstProviderId([])).toBe(BUILTIN_PROVIDER_PRESETS[0].id);
+  });
+
+  it("returns builtin preset id when given the builtin array", () => {
+    expect(firstProviderId(BUILTIN_PROVIDER_PRESETS)).toBe(
+      BUILTIN_PROVIDER_PRESETS[0].id,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // createDefaultSettings
 // ---------------------------------------------------------------------------
 describe("createDefaultSettings", () => {
@@ -107,8 +174,10 @@ describe("createDefaultSettings", () => {
     expect(settings).toHaveProperty("judge");
     expect(settings).toHaveProperty("storyteller");
     expect(settings).toHaveProperty("generator");
+    expect(settings).toHaveProperty("embedder");
     expect(settings).toHaveProperty("fallback");
     expect(settings).toHaveProperty("images");
+    expect(settings).toHaveProperty("research");
   });
 
   it("returns a new object on every call (no shared reference)", () => {
@@ -231,6 +300,44 @@ describe("createDefaultSettings", () => {
 
     it("is disabled by default", () => {
       expect(settings.images.enabled).toBe(false);
+    });
+  });
+
+  // --- embedder role ---
+
+  describe("embedder role", () => {
+    it("uses the first provider id", () => {
+      expect(settings.embedder.providerId).toBe(
+        BUILTIN_PROVIDER_PRESETS[0].id,
+      );
+    });
+
+    it("has temperature 0 (deterministic)", () => {
+      expect(settings.embedder.temperature).toBe(0);
+    });
+
+    it("has maxTokens 512", () => {
+      expect(settings.embedder.maxTokens).toBe(512);
+    });
+
+    it("has empty model string", () => {
+      expect(settings.embedder.model).toBe("");
+    });
+  });
+
+  // --- research ---
+
+  describe("research config", () => {
+    it("is enabled by default", () => {
+      expect(settings.research.enabled).toBe(true);
+    });
+
+    it("has maxSearchSteps 10", () => {
+      expect(settings.research.maxSearchSteps).toBe(10);
+    });
+
+    it("defaults searchProvider to 'duckduckgo'", () => {
+      expect(settings.research.searchProvider).toBe("duckduckgo");
     });
   });
 

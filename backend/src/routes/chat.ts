@@ -10,6 +10,8 @@ import {
   popLastMessages,
   replaceChatMessage,
   getLastPlayerAction,
+  createCheckpoint,
+  pruneAutoCheckpoints,
 } from "../campaign/index.js";
 import { clamp, getErrorMessage, getErrorStatus } from "../lib/index.js";
 import { loadSettings } from "../settings/index.js";
@@ -21,6 +23,15 @@ import type { TurnSnapshot, TurnSummary } from "../engine/index.js";
 import { embedAndUpdateEvent } from "../vectors/episodic-events.js";
 import type { Settings } from "../settings/index.js";
 import type { ProviderConfig } from "../ai/provider-registry.js";
+import {
+  generateImage,
+  resolveImageProvider,
+  buildScenePrompt,
+  buildLocationPrompt,
+  ensureImageDir,
+  cacheImage,
+  imageExists,
+} from "../images/index.js";
 
 const log = createLogger("chat");
 
@@ -171,6 +182,95 @@ function buildOnPostTurn(
     } catch (err) {
       log.warn("World engine tick failed (non-blocking)", err);
     }
+
+    // -- 6. Image generation (scene illustrations + location backgrounds) --
+    try {
+      const imgProvider = resolveImageProvider(settings);
+      if (imgProvider) {
+        // Scene illustration for high-importance events (importance >= 7)
+        const highImportanceEvents = summary.toolCalls
+          .filter((tc) => tc.tool === "log_event")
+          .filter((tc) => {
+            const args = tc.args as Record<string, unknown>;
+            return typeof args.importance === "number" && args.importance >= 7;
+          });
+
+        if (highImportanceEvents.length > 0) {
+          const firstEvent = highImportanceEvents[0];
+          const eventArgs = firstEvent.args as Record<string, unknown>;
+          const eventText = eventArgs.text as string;
+          const eventId = (() => {
+            const result = firstEvent.result as Record<string, unknown> | undefined;
+            const inner = result?.result as Record<string, unknown> | undefined;
+            return inner?.eventId as string | undefined;
+          })();
+
+          if (eventText && eventId) {
+            // Get location name for scene context
+            const db2 = (await import("../db/index.js")).getDb();
+            const { players: playersTable, locations: locsTable } = await import("../db/schema.js");
+            const { eq: eq2 } = await import("drizzle-orm");
+
+            const playerRow = db2
+              .select({ currentLocationId: playersTable.currentLocationId })
+              .from(playersTable)
+              .where(eq2(playersTable.campaignId, campaignId))
+              .get();
+
+            let locationName = "Unknown";
+            if (playerRow?.currentLocationId) {
+              const loc = db2
+                .select({ name: locsTable.name })
+                .from(locsTable)
+                .where(eq2(locsTable.id, playerRow.currentLocationId))
+                .get();
+              if (loc) locationName = loc.name;
+            }
+
+            const premise = (() => { try { return getCampaignPremise(campaignId); } catch { return ""; } })();
+
+            void (async () => {
+              try {
+                const prompt = buildScenePrompt({ eventText, locationName, premise, stylePrompt: settings.images.stylePrompt });
+                ensureImageDir(campaignId, "scenes");
+                const data = await generateImage({ prompt, provider: imgProvider.provider, model: imgProvider.model });
+                cacheImage(campaignId, "scenes", `${eventId}.png`, data);
+              } catch (err) {
+                log.warn("Scene illustration failed (non-blocking)", err);
+              }
+            })();
+          }
+        }
+
+        // Location background on first visit (check if reveal_location was called)
+        const revealedLocations = summary.toolCalls.filter((tc) => tc.tool === "reveal_location");
+        for (const reveal of revealedLocations) {
+          const result = reveal.result as Record<string, unknown> | undefined;
+          const inner = result?.result as Record<string, unknown> | undefined;
+          const locId = inner?.id as string | undefined;
+          const args = reveal.args as Record<string, unknown>;
+          const locName = args.name as string;
+          const locTags = (args.tags as string[]) || [];
+
+          if (locId && locName && !imageExists(campaignId, "locations", `${locId}.png`)) {
+            const premise = (() => { try { return getCampaignPremise(campaignId); } catch { return ""; } })();
+
+            void (async () => {
+              try {
+                const prompt = buildLocationPrompt({ locationName: locName, tags: locTags, premise, stylePrompt: settings.images.stylePrompt });
+                ensureImageDir(campaignId, "locations");
+                const data = await generateImage({ prompt, provider: imgProvider.provider, model: imgProvider.model });
+                cacheImage(campaignId, "locations", `${locId}.png`, data);
+              } catch (err) {
+                log.warn("Location background generation failed (non-blocking)", err);
+              }
+            })();
+          }
+        }
+      }
+    } catch (err) {
+      log.warn("Image generation in post-turn failed (non-blocking)", err);
+    }
   };
 }
 
@@ -305,6 +405,30 @@ app.post("/action", async (c) => {
 
     // Resolve Embedder (optional -- used for lore search)
     const embedderResult = resolveEmbedder(settings);
+
+    // Auto-checkpoint before dangerous turns (HP <= 2)
+    try {
+      const db = (await import("../db/index.js")).getDb();
+      const { players } = await import("../db/schema.js");
+      const { eq } = await import("drizzle-orm");
+
+      const player = db
+        .select({ hp: players.hp })
+        .from(players)
+        .where(eq(players.campaignId, activeCampaign.id))
+        .get();
+
+      if (player && player.hp <= 2) {
+        await createCheckpoint(activeCampaign.id, {
+          name: "auto-danger",
+          description: "Auto-save: low HP",
+          auto: true,
+        });
+        await pruneAutoCheckpoints(activeCampaign.id, 3);
+      }
+    } catch (err) {
+      log.warn("Auto-checkpoint failed (non-blocking)", err);
+    }
 
     // Capture pre-turn snapshot for potential undo/retry
     const snapshot = captureSnapshot(activeCampaign.id);

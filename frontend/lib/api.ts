@@ -16,6 +16,9 @@ import type {
   RegenerateSectionRequest,
   ParsedCharacter,
   CharacterResult,
+  CheckpointMeta,
+  ClassifiedWorldBookEntry,
+  WorldBookImportResult,
 } from "./api-types";
 
 // Re-export all types so existing `import type { X } from "@/lib/api"` keeps working.
@@ -36,6 +39,9 @@ export type {
   RegenerateSectionRequest,
   ParsedCharacter,
   CharacterResult,
+  CheckpointMeta,
+  ClassifiedWorldBookEntry,
+  WorldBookImportResult,
 };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:3001";
@@ -543,6 +549,16 @@ export function resolveStartingLocation(
   return apiPost("/api/worldgen/resolve-starting-location", { campaignId, prompt });
 }
 
+// ───── Image URLs ─────
+
+export function getImageUrl(
+  campaignId: string,
+  type: "portraits" | "locations" | "scenes",
+  filename: string,
+): string {
+  return `${API_BASE}/api/images/${campaignId}/${type}/${filename}`;
+}
+
 // ───── Chat Controls (Retry / Undo / Edit) ─────
 
 export function chatRetry(): Promise<Response> {
@@ -558,4 +574,59 @@ export function chatEdit(
   newContent: string,
 ): Promise<{ success: boolean }> {
   return apiPost<{ success: boolean }>("/api/chat/edit", { messageIndex, newContent });
+}
+
+// ───── Checkpoints ─────
+
+export function fetchCheckpoints(campaignId: string): Promise<CheckpointMeta[]> {
+  return apiGet<CheckpointMeta[]>(`/api/campaigns/${campaignId}/checkpoints`);
+}
+
+export function createCheckpointApi(
+  campaignId: string,
+  name?: string,
+  description?: string,
+): Promise<CheckpointMeta> {
+  return apiPost<CheckpointMeta>(`/api/campaigns/${campaignId}/checkpoints`, {
+    name,
+    description,
+  });
+}
+
+export function loadCheckpointApi(
+  campaignId: string,
+  checkpointId: string,
+): Promise<CheckpointMeta> {
+  return apiPost<CheckpointMeta>(
+    `/api/campaigns/${campaignId}/checkpoints/${checkpointId}/load`,
+  );
+}
+
+export function deleteCheckpointApi(
+  campaignId: string,
+  checkpointId: string,
+): Promise<void> {
+  return apiDelete(`/api/campaigns/${campaignId}/checkpoints/${checkpointId}`);
+}
+
+// ───── WorldBook Import ─────
+
+export function parseWorldBook(
+  campaignId: string,
+  worldbook: object,
+): Promise<{ entries: ClassifiedWorldBookEntry[] }> {
+  return apiPost<{ entries: ClassifiedWorldBookEntry[] }>(
+    "/api/worldgen/parse-worldbook",
+    { campaignId, worldbook },
+  );
+}
+
+export function importWorldBook(
+  campaignId: string,
+  entries: ClassifiedWorldBookEntry[],
+): Promise<WorldBookImportResult> {
+  return apiPost<WorldBookImportResult>(
+    "/api/worldgen/import-worldbook",
+    { campaignId, entries },
+  );
 }

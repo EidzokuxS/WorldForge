@@ -17,9 +17,10 @@ interface CharacterPanelProps {
   } | null;
   items: Array<{ id: string; name: string; tags: string[] }>;
   locationName: string | null;
+  portraitUrl?: string;
 }
 
-export function CharacterPanel({ player, items, locationName }: CharacterPanelProps) {
+export function CharacterPanel({ player, items, locationName, portraitUrl }: CharacterPanelProps) {
   if (!player) {
     return (
       <aside className="flex w-full flex-col border-l border-border bg-card lg:w-[280px]">
@@ -46,6 +47,17 @@ export function CharacterPanel({ player, items, locationName }: CharacterPanelPr
       </div>
       <ScrollArea className="flex-1 p-4">
         <div className="space-y-4">
+          {portraitUrl && (
+            <div className="overflow-hidden rounded-lg border border-border">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={portraitUrl}
+                alt={`Portrait of ${player.name}`}
+                className="h-48 w-full object-cover"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+              />
+            </div>
+          )}
           <div>
             <h3 className="text-base font-semibold">{player.name}</h3>
             {(player.race || player.gender || player.age) && (

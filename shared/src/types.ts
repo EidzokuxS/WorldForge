@@ -28,9 +28,12 @@ export interface ImageConfig {
   enabled: boolean;
 }
 
+export type SearchProvider = "duckduckgo" | "zai";
+
 export interface ResearchConfig {
   enabled: boolean;
   maxSearchSteps: number;
+  searchProvider: SearchProvider;
 }
 
 export interface Settings {
@@ -74,6 +77,10 @@ export interface CampaignMeta {
 
 export interface PlayerCharacter {
   name: string;
+  race: string;
+  gender: string;
+  age: string;
+  appearance: string;
   tags: string[];
   hp: number;
   equippedItems: string[];
