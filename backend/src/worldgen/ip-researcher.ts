@@ -1,4 +1,5 @@
-import { generateObject, generateText, stepCountIs, type ToolSet } from "ai";
+import { generateText, stepCountIs, type ToolSet } from "ai";
+import { safeGenerateObject as generateObject } from "../ai/generate-object-safe.js";
 import { z } from "zod";
 import type { SearchProvider } from "@worldforge/shared";
 import { createModel } from "../ai/index.js";

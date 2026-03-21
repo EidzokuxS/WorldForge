@@ -32,6 +32,7 @@ export interface TurnEvent {
     | "narrative"
     | "state_update"
     | "quick_actions"
+    | "auto_checkpoint"
     | "done"
     | "error";
   data: unknown;
@@ -72,15 +73,127 @@ export function detectMovement(action: string): string | null {
   return match ? match[1]!.trim() : null;
 }
 
+// -- Narrative sanitizer --------------------------------------------------------
+
+/**
+ * Remove metadata leaks from Storyteller narrative output.
+ * Some LLMs (notably Gemini Flash) echo bracketed section headers and their
+ * content into the narrative despite explicit instructions not to.
+ * This function strips everything from the FIRST leaked header onward.
+ */
+const LEAKED_HEADERS = [
+  "[NPC STATES]",
+  "[ACTION RESULT]",
+  "[NARRATION DIRECTIVE]",
+  "[RECENT CONVERSATION]",
+  "[SYSTEM RULES]",
+  "[WORLD PREMISE]",
+  "[SCENE]",
+  "[PLAYER STATE]",
+  "[WORLD STATE]",
+  "[LORE CONTEXT]",
+  "[EPISODIC MEMORY]",
+  "[RELATIONSHIPS]",
+];
+
+/**
+ * Patterns that match tool-call syntax leaked into prose by models like Gemini Flash.
+ * Examples:
+ *   print(default_api.offer_quick_actions(actions=[...]))
+ *   default_api.set_condition(entity="player", delta=-1)
+ */
+const TOOL_CALL_LEAK_PATTERNS: RegExp[] = [
+  // print(default_api.xxx(...)) — may span multiple lines
+  /print\s*\(\s*default_api\.\w+\s*\([^)]*\)\s*\)/gs,
+  // bare default_api.xxx(...) calls
+  /default_api\.\w+\s*\([^)]*\)/gs,
+  // generic tool-call-like syntax: known tool names with arguments
+  /\b(?:offer_quick_actions|set_condition|log_event|spawn_npc|spawn_item|reveal_location|set_relationship|add_chronicle_entry|add_tag|remove_tag|transfer_item|move_to)\s*\([^)]*\)/g,
+  // Catch-all: any word_word(param=value, ...) pattern that looks like a function call
+  /\b[a-z_]+\s*\(\s*(?:[a-z_]+=|["'\[])[^)]*\)/gi,
+  // Bare print(...) wrapping anything
+  /print\s*\([^)]*\)/gs,
+];
+
+export function sanitizeNarrative(raw: string): string {
+  let text = raw;
+
+  // 1. Strip tool-call syntax that leaked into prose
+  for (const pattern of TOOL_CALL_LEAK_PATTERNS) {
+    text = text.replace(pattern, "");
+  }
+
+  // 2. Find the earliest occurrence of any leaked header and truncate
+  let earliestIdx = text.length;
+  for (const header of LEAKED_HEADERS) {
+    const idx = text.indexOf(header);
+    if (idx !== -1 && idx < earliestIdx) {
+      earliestIdx = idx;
+    }
+  }
+  if (earliestIdx < text.length) {
+    text = text.slice(0, earliestIdx);
+  }
+
+  // 3. Collapse excessive whitespace left by removals
+  text = text.replace(/\n{3,}/g, "\n\n");
+
+  return text.trim();
+}
+
 // -- Outcome instructions -----------------------------------------------------
 
 const OUTCOME_INSTRUCTIONS: Record<string, string> = {
   strong_hit:
-    "The player SUCCEEDED DECISIVELY. Narrate full success with an unexpected bonus or advantage.",
+    "The player SUCCEEDED DECISIVELY. Narrate full success with sensory detail of mastery — the action is executed flawlessly. Include an unexpected bonus or advantage (discovered something, impressed an NPC, gained a tactical edge). In combat: if the player dealt damage to an NPC, narrate it. If the player avoided all harm, emphasize their dominance. After narration, you MUST call set_condition if any HP changed, then call offer_quick_actions.",
   weak_hit:
-    "The player SUCCEEDED WITH A COMPLICATION. Narrate success but introduce a cost, complication, or partial setback.",
-  miss: "The player FAILED. Narrate the failure with meaningful consequences -- not just 'nothing happens.'",
+    "The player SUCCEEDED WITH A COMPLICATION. The action works, but name the SPECIFIC complication — damaged equipment, unwanted attention, partial result, physical cost, time lost. The success must feel earned, not free. In combat: the complication often involves taking damage (call set_condition with negative delta) or losing a tactical advantage. If you call set_condition and the result shows isDowned=true (HP reached 0), you MUST immediately narrate the death/defeat/KO outcome. Do NOT continue the fight or give the player more actions after HP=0. After narration, you MUST call set_condition if any HP changed, then call offer_quick_actions.",
+  miss: "The player FAILED. Narrate the failure clearly and unambiguously. In combat: the player takes damage — call set_condition with a negative delta (-1 for a glancing blow, -2 for a solid hit). EXAMPLES OF CORRECT MISS NARRATION: Combat miss → attack misses or is blocked, enemy counterattacks and DEALS DAMAGE (you MUST call set_condition). Persuasion miss → NPC refuses, dismisses, or becomes hostile. Search miss → find nothing useful, or attract danger. Information miss → NPC gives wrong info, lies, or clams up. NEVER narrate the NPC being 'intrigued', 'persuaded', 'considering', or 'impressed' on a miss. The failure must be OBVIOUS to the reader. Include concrete consequences. If you call set_condition and the result shows isDowned=true (HP reached 0), you MUST immediately narrate the death/defeat/KO outcome. Do NOT continue the fight or give the player more actions after HP=0. After narration, you MUST call set_condition if any HP changed, then call offer_quick_actions.",
 };
+
+// -- Fallback quick actions ---------------------------------------------------
+
+interface SceneInfo {
+  locationName: string;
+  npcNames: string[];
+}
+
+/**
+ * Build 3 contextual quick action suggestions as a server-side fallback
+ * when the Storyteller fails to call offer_quick_actions.
+ */
+function buildFallbackQuickActions(
+  playerAction: string,
+  outcomeTier: string,
+  context: SceneInfo,
+): Array<{ label: string; action: string }> {
+  const actions: Array<{ label: string; action: string }> = [];
+
+  // 1. NPC interaction (if NPCs present) or exploration
+  if (context.npcNames.length > 0) {
+    const npc = context.npcNames[0]!;
+    actions.push({ label: `Talk to ${npc}`, action: `Talk to ${npc}` });
+  } else {
+    actions.push({ label: "Call out", action: "Call out to see if anyone is nearby" });
+  }
+
+  // 2. Always: observation/exploration
+  actions.push({
+    label: "Look around",
+    action: `Look around ${context.locationName || "the area"} for anything noteworthy`,
+  });
+
+  // 3. Outcome-based suggestion
+  if (outcomeTier === "miss") {
+    actions.push({ label: "Try again carefully", action: "Try again, this time more carefully" });
+  } else if (outcomeTier === "strong_hit") {
+    actions.push({ label: "Press the advantage", action: "Press the advantage and continue forward" });
+  } else {
+    actions.push({ label: "Proceed cautiously", action: "Proceed cautiously, staying alert" });
+  }
+
+  return actions;
+}
 
 // -- Main processor -----------------------------------------------------------
 
@@ -118,6 +231,11 @@ export async function* processTurn(
       actorTags = JSON.parse(player.tags) as string[];
     } catch {
       actorTags = [];
+    }
+
+    // Include HP status in scene context for Oracle to factor in
+    if (player.hp < 5) {
+      sceneContext += ` Actor HP: ${player.hp}/5.`;
     }
 
     if (player.currentLocationId) {
@@ -247,8 +365,8 @@ export async function* processTurn(
   const config = readCampaignConfig(campaignId);
   const currentTick = config.currentTick ?? 0;
 
-  // 8. Create tools
-  const tools = createStorytellerTools(campaignId, currentTick);
+  // 8. Create tools (pass outcomeTier so set_condition can enforce HP guard)
+  const tools = createStorytellerTools(campaignId, currentTick, oracleResult.outcome);
 
   // 9. Call Storyteller with streaming
   const model = createModel(storytellerProvider);
@@ -260,13 +378,18 @@ export async function* processTurn(
       { role: "user" as const, content: playerAction },
     ],
     tools,
-    stopWhen: stepCountIs(2),
+    stopWhen: stepCountIs(3),
     temperature: storytellerTemperature,
     maxOutputTokens: storytellerMaxTokens,
   });
 
   // 10. Iterate fullStream, yield events
-  let narrativeText = "";
+  // Stream narrative deltas but detect metadata leaks in real-time.
+  // Once a leaked header is detected, stop streaming narrative text.
+  let rawNarrative = "";
+  let leakDetected = false;
+  let quickActionsEmitted = false;
+  let playerDowned = false;
   const toolCallResults: Array<{
     tool: string;
     args: unknown;
@@ -275,8 +398,22 @@ export async function* processTurn(
 
   for await (const part of result.fullStream) {
     if (part.type === "text-delta") {
-      narrativeText += part.text;
-      yield { type: "narrative", data: { text: part.text } };
+      rawNarrative += part.text;
+      // Check for metadata leak in accumulated text
+      if (!leakDetected) {
+        const hasLeak = LEAKED_HEADERS.some((h) => rawNarrative.includes(h));
+        if (hasLeak) {
+          leakDetected = true;
+          // Send the clean portion before the leak started
+          const sanitized = sanitizeNarrative(rawNarrative);
+          // We already sent some deltas; the sanitized text may be shorter.
+          // For the SSE stream, we just stop sending more narrative.
+          log.warn("Metadata leak detected in Storyteller output, truncating narrative");
+        } else {
+          yield { type: "narrative", data: { text: part.text } };
+        }
+      }
+      // If leak already detected, silently consume the rest
     } else if (part.type === "tool-result") {
       const toolName = part.toolName;
       const args = part.input;
@@ -285,7 +422,17 @@ export async function* processTurn(
       const toolResult = { tool: toolName, args, result: toolOutput };
       toolCallResults.push(toolResult);
 
+      // Detect HP=0 (player downed) from set_condition result
+      if (toolName === "set_condition") {
+        const output = toolOutput as Record<string, unknown>;
+        const inner = output?.result as Record<string, unknown> | undefined;
+        if (inner?.isDowned === true) {
+          playerDowned = true;
+        }
+      }
+
       if (toolName === "offer_quick_actions") {
+        quickActionsEmitted = true;
         yield { type: "quick_actions", data: toolOutput };
       } else {
         yield { type: "state_update", data: toolResult };
@@ -293,10 +440,62 @@ export async function* processTurn(
     }
   }
 
-  // 11. Persist assistant message, increment tick
-  if (narrativeText.trim()) {
+  // 10b. Fallback quick actions if Storyteller didn't call offer_quick_actions
+  if (!quickActionsEmitted) {
+    // Gather NPC names at player's current location for contextual suggestions
+    let locationName = "";
+    const npcNames: string[] = [];
+    try {
+      if (player?.currentLocationId) {
+        const loc = db
+          .select()
+          .from(locations)
+          .where(eq(locations.id, player.currentLocationId))
+          .get();
+        if (loc) locationName = loc.name;
+
+        const { npcs } = await import("../db/schema.js");
+        const presentNpcs = db
+          .select({ name: npcs.name })
+          .from(npcs)
+          .where(eq(npcs.currentLocationId, player.currentLocationId))
+          .all();
+        for (const npc of presentNpcs) {
+          npcNames.push(npc.name);
+        }
+      }
+    } catch {
+      // Best-effort — fallback works even without NPC data
+    }
+
+    const fallbackActions = buildFallbackQuickActions(
+      playerAction,
+      oracleResult.outcome,
+      { locationName, npcNames },
+    );
+    log.info("Storyteller omitted offer_quick_actions — using server-side fallback");
+    yield { type: "quick_actions", data: { success: true, result: { actions: fallbackActions } } };
+  }
+
+  // 10c. Reactive auto-checkpoint if HP dropped to danger zone (2 or below) during turn
+  const hpDropped = toolCallResults.some((tc) => {
+    if (tc.tool !== "set_condition") return false;
+    const output = tc.result as Record<string, unknown> | undefined;
+    const inner = output?.result as Record<string, unknown> | undefined;
+    const newHp = inner?.newHp as number | undefined;
+    return newHp !== undefined && newHp <= 2 && newHp > 0; // >0 because HP=0 is game over, not checkpoint
+  });
+
+  if (hpDropped) {
+    yield { type: "auto_checkpoint", data: { reason: "HP dropped to danger zone" } };
+  }
+
+  // 11. Sanitize narrative and persist
+  const narrativeText = sanitizeNarrative(rawNarrative);
+  log.info(`Stream complete: raw=${rawNarrative.length} chars, sanitized=${narrativeText.length} chars, leakDetected=${leakDetected}`);
+  if (narrativeText) {
     appendChatMessages(campaignId, [
-      { role: "assistant", content: narrativeText.trim() },
+      { role: "assistant", content: narrativeText },
     ]);
   }
   const newTick = incrementTick(campaignId);
@@ -304,7 +503,8 @@ export async function* processTurn(
   // 12. Yield done
   yield { type: "done", data: { tick: newTick } };
 
-  // 13. Post-turn callback (fire-and-forget)
+  // 13. Post-turn callback (fire-and-forget — do NOT await so the SSE stream
+  //     closes immediately after yielding 'done', keeping isStreaming accurate)
   if (onPostTurn) {
     const summary: TurnSummary = {
       tick: newTick,
@@ -313,10 +513,12 @@ export async function* processTurn(
       narrativeText,
     };
 
-    try {
-      await onPostTurn(summary);
-    } catch (error) {
-      log.warn("Post-turn callback failed", error);
-    }
+    void (async () => {
+      try {
+        await onPostTurn(summary);
+      } catch (error) {
+        log.warn("Post-turn callback failed", error);
+      }
+    })();
   }
 }

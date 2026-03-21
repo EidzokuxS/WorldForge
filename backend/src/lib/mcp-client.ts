@@ -9,10 +9,13 @@ const log = createLogger("mcp-client");
 /** Timeout (ms) to wait for the MCP subprocess to initialise */
 const MCP_INIT_TIMEOUT_MS = 20_000;
 
+/** Platform-aware npx command (Windows requires .cmd extension) */
+const NPX_CMD = process.platform === "win32" ? "npx.cmd" : "npx";
+
 /** MCP server command configs for each search provider */
 const SEARCH_MCP_CONFIGS: Record<SearchProvider, { command: string; args: string[] }> = {
-  duckduckgo: { command: "npx", args: ["-y", "duckduckgo-mcp-server"] },
-  zai: { command: "npx", args: ["-y", "zai-search-mcp"] },
+  duckduckgo: { command: NPX_CMD, args: ["-y", "duckduckgo-mcp-server"] },
+  zai: { command: NPX_CMD, args: ["-y", "zai-search-mcp"] },
 };
 
 /**

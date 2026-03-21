@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 11-02-PLAN.md
-last_updated: "2026-03-19T04:32:13.496Z"
+stopped_at: Completed 16-02-PLAN.md
+last_updated: "2026-03-20T10:36:20.361Z"
 progress:
-  total_phases: 11
-  completed_phases: 11
-  total_plans: 23
-  completed_plans: 23
+  total_phases: 16
+  completed_phases: 16
+  total_plans: 40
+  completed_plans: 40
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-18)
 
 **Core value:** The LLM is the narrator, never the engine. All mechanical outcomes are resolved by backend code.
-**Current focus:** Phase 11 — content-import
+**Current focus:** Phase 16 — npc-system-qa-three-npc-tiers-world-gen-integration
 
 ## Current Position
 
-Phase: 11 (content-import) — COMPLETE
-Plan: 2 of 2
+Phase: 16 (npc-system-qa-three-npc-tiers-world-gen-integration) — EXECUTING
+Plan: 3 of 3
 
 ## Performance Metrics
 
@@ -72,6 +72,25 @@ Plan: 2 of 2
 | Phase 10 P02 | 3min | 2 tasks | 5 files |
 | Phase 11 P01 | 5min | 2 tasks | 7 files |
 | Phase 11 P02 | 5min | 2 tasks | 9 files |
+| Phase 12 P01 | 1min | 2 tasks | 2 files |
+| Phase 12 P02 | 4min | 2 tasks | 7 files |
+| Phase 12 P03 | 14min | 2 tasks | 0 files |
+| Phase 12 P04 | 7min | 2 tasks | 0 files |
+| Phase 12 P06 | 7min | 2 tasks | 0 files |
+| Phase 12 P05 | 14min | 2 tasks | 2 files |
+| Phase 12 P02 | 5min | 2 tasks | 9 files |
+| Phase 12 P03 | 8min | 2 tasks | 14 files |
+| Phase 12 P04 | 15min | 2 tasks | 12 files |
+| Phase 13 P01 | 17min | 2 tasks | 5 files |
+| Phase 13 P02 | 27min | 2 tasks | 6 files |
+| Phase 13 P03 | 15min | 2 tasks | 4 files |
+| Phase 14 P02 | 2min | 2 tasks | 2 files |
+| Phase 14 P01 | 3min | 3 tasks | 3 files |
+| Phase 14 P03 | 3min | 2 tasks | 0 files |
+| Phase 15 P01 | 4min | 2 tasks | 4 files |
+| Phase 15 P02 | 3min | 2 tasks | 2 files |
+| Phase 16 P01 | 10min | 2 tasks | 2 files |
+| Phase 16 P02 | 12min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -131,12 +150,61 @@ Recent decisions affecting current work:
 - [09-01]: Checkpoint load disconnects/reconnects both SQLite and LanceDB connections
 - [Phase 09]: Auto-checkpoint triggers at HP <= 2 with non-blocking try/catch
 - [Phase 09]: CheckpointPanel uses Dialog component, load triggers full page reload
+- [Phase 12]: Added createLogger mock inline rather than importOriginal spread -- explicit test isolation
+- [Phase 12]: No bugs found in infrastructure or settings -- all E2E tests passed clean
+- [Phase 12]: OpenRouter+Gemini Flash used for QA testing (GLM had insufficient balance)
+- [Phase 12]: Lore extraction failure is transient provider error, gracefully handled by try/catch fallback
+- [Phase 12]: No bugs found in character creation -- all 3 modes (parse, generate, import V2) work correctly
+- [Phase 12]: No bugs found in WorldBook import or checkpoint system -- both work correctly via API testing
+- [Phase 12]: Use provider.chat() instead of provider() for Chat Completions API compatibility with third-party providers
+- [Phase 12]: Retry pops both user+assistant messages since processTurn re-appends user message
+- [Phase 12]: No visual bugs found -- all pages scored >= 3/5 on 6-aspect rubric
+- [Phase 12]: LoreSection onRefresh was missing -- wired async re-fetch callback after WorldBook import
+- [Phase 12]: No bugs found in checkpoint system -- save/load/delete all work correctly via browser
+- [Phase 12]: No bugs found in campaign creation flow -- entire pipeline works end-to-end through browser
+- [Phase 12]: Post-turn callback must be fire-and-forget (void IIFE) so SSE stream closes promptly after done event
+- [Phase 13]: Oracle calibration bands: 5-15% (no tags), 60-75% (relevant tag), 80-90% (master) prevent over-generous probabilities
+- [Phase 13]: CRITICAL OUTPUT RULES block at top of SYSTEM_RULES prevents Gemini Flash from echoing section headers into narrative
+- [Phase 13]: NPC agent temperature 0 -> 0.3 for varied autonomous behavior; action bias strengthened
+- [Phase 13]: IP terminology guidance references [WORLD PREMISE] and [LORE CONTEXT] for world-specific terms
+- [Phase 13]: readCampaignConfig must include currentTick in return object (was silently dropped, causing tick to stick at 1)
+- [Phase 13]: Faction tick interval lowered to 5 (from 10) for more frequent world simulation events
+- [Phase 13]: NPC reflection threshold lowered to 10 (from 15) for more responsive belief updates
+- [Phase 13]: Storyteller stepCountIs(3) to allow narrative + state tools + quick_actions in one turn
+- [Phase 13]: Miss narration requires concrete examples per action type to prevent LLM from narrating positive outcomes
+- [Phase 13]: COMBAT HP TRACKING rules mandate set_condition call on every damage/heal event in combat
+- [Phase 13]: set_condition damage scale: light=-1, solid=-1/-2, devastating=-2/-3 guides LLM on delta sizing
+- [Phase 13]: Oracle receives HP context via scene string; wounded state reduces probability by 10-20%
+- [Phase 13]: Non-lethal vs lethal HP=0 narration split in SYSTEM_RULES based on fight context
+- [14-02]: onStateUpdate triggers refreshWorldData immediately -- no debounce needed for 1-3 events per turn
+- [14-02]: Lore extraction 3-attempt strategy: 2x full-size (min 20), 1x reduced (min 10) with 2s delay between retries
+- [Phase 14]: Remove vector field entirely from initial episodic event row -- matches lore-cards pattern
+- [Phase 14]: Use npx.cmd on Windows instead of shell:true for MCP spawn
+- [Phase 14]: Fallback quick actions are deterministic (not AI) for zero latency and guaranteed availability
+- [Phase 14]: All 5 bug fixes verified working via API testing: episodic vectors, MCP spawn, quick actions fallback, sidebar refresh, lore retry
+- [15-01]: outcomeTier passed as optional param through executeToolCall -- backward compatible with NPC tools
+- [15-01]: move_to tool validates connection graph and returns available paths on failure for LLM self-correction
+- [15-01]: NPC engagement rules are prompt-level (not code enforcement) -- LLM compliance expected from explicit MUST instructions
+- [15-02]: Catch-all regex for unknown function-call patterns prevents future tool leaks without manual enumeration
+- [15-02]: auto_checkpoint event emitted from turn-processor, handled in chat.ts -- separation of concerns
+- [15-02]: HP=0 awareness added to outcome instructions (miss + weak_hit) rather than post-hoc injection
+- [Phase 16]: GLM 4.7 Flash structured output limitation is a provider issue, not a code bug
+- [Phase 16]: Scaffold-saver beliefs field stores {} instead of [] -- minor inconsistency, non-blocking
+- [Phase 16]: Faction cross-references maintained via relationships table (Member tags), not in NPC persona text
+- [Phase 16]: save-edits FK constraint on active campaigns is correct behavior -- scaffold rewrite destroys locations referenced by player FK
+- [Phase 16]: GLM 4.7 Flash fails generateObject structured output -- provider compatibility issue, not code defect
+
+### Roadmap Evolution
+
+- Phase 12 added: E2E QA & Bug Fixing — full browser-based verification + iterative bug fixing
 - [Phase 10]: Plain fetch to OpenAI-compatible endpoint for maximum image provider compatibility
 - [Phase 10]: All image generation is fire-and-forget with void async IIFE -- never blocks gameplay
 - [11-01]: Single LLM call for batch WorldBook entry classification (not per-entry)
 - [11-01]: Bestiary entries stored as lore cards with category "npc", lore_general as "concept"
 - [Phase 11-02]: withMcpClient kept as deprecated wrapper; withSearchMcp is preferred API for configurable search providers
 - [Phase 11-02]: SEARCH_MCP_CONFIGS record maps SearchProvider to MCP server command/args for easy provider addition
+- Phase 14 added: Final Systems Verification & Bug Fixing — fix remaining bugs + verify all systems per docs/
+- Phase 16 added: NPC System QA — Three NPC Tiers + World Gen Integration
 
 ### Pending Todos
 
@@ -148,6 +216,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-19T04:26:48.784Z
-Stopped at: Completed 11-02-PLAN.md
+Last session: 2026-03-20T10:16:40.381Z
+Stopped at: Completed 16-02-PLAN.md
 Resume file: None

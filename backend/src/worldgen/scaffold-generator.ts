@@ -1,29 +1,19 @@
-import { generateObject } from "ai";
+import { safeGenerateObject as generateObject } from "../ai/generate-object-safe.js";
 import { z } from "zod";
-import type { ResearchConfig } from "@worldforge/shared";
 import { createModel } from "../ai/index.js";
-import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import type { WorldSeeds } from "./seed-roller.js";
-import { extractLoreCards, type ExtractedLoreCard } from "./lore-extractor.js";
+import { extractLoreCards } from "./lore-extractor.js";
 import { researchKnownIP, type IpResearchContext } from "./ip-researcher.js";
+import { createLogger } from "../lib/index.js";
+import type {
+  GenerateScaffoldRequest,
+  GenerationProgress,
+  WorldScaffold,
+  ExtractedLoreCard,
+} from "./types.js";
 
-export interface GenerateScaffoldRequest {
-  campaignId: string;
-  name: string;
-  premise: string;
-  seeds?: Partial<WorldSeeds>;
-  role: ResolvedRole;
-  /** Optional: name of a known franchise/IP to research before generation (e.g. "Warhammer 40,000"). If omitted, franchise detection runs on premise/name automatically. Pass an empty string to disable research entirely. */
-  knownIP?: string;
-  /** Research agent configuration. When omitted, defaults to enabled with 10 max steps. */
-  research?: ResearchConfig;
-}
 
-export interface GenerationProgress {
-  step: number;
-  totalSteps: number;
-  label: string;
-}
+const log = createLogger("worldgen");
 
 const locationSchema = z.object({
   name: z.string(),
@@ -86,13 +76,6 @@ const npcsStepSchema = z.object({
   npcs: z.array(npcSchema).min(3).max(10),
 });
 
-export interface WorldScaffold {
-  refinedPremise: z.infer<typeof refinedPremiseStepSchema>["refinedPremise"];
-  locations: z.infer<typeof locationsStepSchema>["locations"];
-  factions: z.infer<typeof factionsStepSchema>["factions"];
-  npcs: z.infer<typeof npcsStepSchema>["npcs"];
-  loreCards: ExtractedLoreCard[];
-}
 
 const SEED_LABELS: Array<{ field: keyof WorldSeeds; label: string }> = [
   { field: "geography", label: "Geography" },
@@ -298,7 +281,9 @@ export async function generateWorldScaffold(
     ipContext = await researchKnownIP(req, req.role, req.research?.maxSearchSteps);
     didRunResearch = true;
     if (ipContext) {
-      console.log(`[worldgen] IP research complete (${ipContext.source}): ${ipContext.franchise}`);
+      log.info(`IP research complete (${ipContext.source}): ${ipContext.franchise}`);
+    } else {
+      log.info("No known IP detected, skipping research");
     }
   }
 
@@ -307,13 +292,16 @@ export async function generateWorldScaffold(
 
   reportProgress(onProgress, currentStep++, totalSteps, "Refining world premise");
   const refinedPremise = await generateRefinedPremiseStep(req, ipContext);
+  log.info(`Premise refined (${refinedPremise.length} chars)`);
 
   reportProgress(onProgress, currentStep++, totalSteps, "Building locations");
   const locations = await generateLocationsStep(req, refinedPremise, ipContext);
+  log.info(`Generated ${locations.length} locations`);
   const locationNames = locations.map((location) => location.name);
 
   reportProgress(onProgress, currentStep++, totalSteps, "Forging factions");
   const factions = await generateFactionsStep(req, refinedPremise, locationNames, ipContext);
+  log.info(`Generated ${factions.length} factions`);
   const factionNames = factions.map((faction) => faction.name);
 
   reportProgress(onProgress, currentStep++, totalSteps, "Creating key NPCs");
@@ -324,15 +312,24 @@ export async function generateWorldScaffold(
     factionNames,
     ipContext
   );
+  log.info(`Generated ${npcs.length} NPCs`);
 
   const baseScaffold = { refinedPremise, locations, factions, npcs, loreCards: [] as ExtractedLoreCard[] };
 
   reportProgress(onProgress, currentStep++, totalSteps, "Extracting world lore");
   try {
     const loreCards = await extractLoreCards(baseScaffold, req.role);
+    log.info(`Extracted ${loreCards.length} lore cards`);
     return { refinedPremise, locations, factions, npcs, loreCards };
   } catch (error) {
-    console.error("Lore extraction failed, continuing without lore cards:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    log.error(`Lore extraction failed: ${errorMessage}`, error);
+    reportProgress(
+      onProgress,
+      currentStep,
+      totalSteps,
+      `Lore extraction failed: ${errorMessage}. World created without lore cards.`
+    );
     return { refinedPremise, locations, factions, npcs, loreCards: [] };
   }
 }

@@ -1,8 +1,8 @@
-import { generateObject } from "ai";
+import { safeGenerateObject as generateObject } from "../ai/generate-object-safe.js";
 import { z } from "zod";
 import { createModel } from "../ai/index.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
-import { clampTokens } from "../lib/clamp.js";
+import { clampTokens } from "../lib/index.js";
 import type { SeedCategory } from "./seed-roller.js";
 
 const suggestedSeedsSchema = z.object({

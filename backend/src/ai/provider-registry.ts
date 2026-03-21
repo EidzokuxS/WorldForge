@@ -56,7 +56,10 @@ export function createModel(config: ProviderConfig): LanguageModel {
   const provider = createOpenAI({
     baseURL,
     apiKey: config.apiKey || "ollama",
+    structuredOutputs: false,
   });
 
-  return provider(config.model);
+  // Use Chat Completions API (not Responses API) for broad provider compatibility.
+  // The Responses API is OpenAI-specific and fails on OpenRouter, Ollama, etc.
+  return provider.chat(config.model);
 }

@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 1: Engine Foundation** - Prompt assembler with token budgets, Oracle probability system, Storyteller tool schemas
 - [x] **Phase 2: Turn Cycle** - Full turn pipeline (input -> context -> Oracle -> roll -> narration with tools -> state update), SSE multi-event streaming (completed 2026-03-18)
 - [x] **Phase 3: World State Mechanics** - HP/damage, inventory, location graph navigation, entity tracking, spawn/reveal tools (completed 2026-03-18)
-- [x] **Phase 4: Story Control** - Retry/regenerate, undo, inline edit of AI output, quick action buttons (completed 2026-03-18)
+- [x] **Phase 4: Story Control** - Retry/regenerate, undo, inline edit of AI output, quick action buttons (completed 2026-03-18)
 - [ ] **Phase 5: Episodic Memory** - Event embedding with importance scoring, composite retrieval, smart context compression, multi-hop graph queries
 - [ ] **Phase 6: NPC Agents** - Autonomous Key Character agents, off-screen batch simulation, character promotion
 - [x] **Phase 7: Reflection + Progression** - Importance-triggered NPC reflection, wealth tiers, skill progression, relationship evolution (completed 2026-03-18)
@@ -23,6 +23,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 9: Persistence** - Checkpoint save/load, branching, auto-checkpoint before lethal encounters
 - [x] **Phase 10: Image Generation** - Provider-agnostic image gen, portraits, scene illustrations, location backgrounds, graceful degradation (completed 2026-03-19)
 - [x] **Phase 11: Content Import** - SillyTavern WorldBook import with entity classification, web search expansion (completed 2026-03-19)
+- [x] **Phase 12: E2E QA & Bug Fixing** - Full browser-based verification of all features via Playwright MCP, iterative bug fixing until clean (completed 2026-03-19)
+- [x] **Phase 13: Gameplay Playtest & AI Tuning** - Full gameplay playtesting across 3 scenarios, AI quality evaluation, system prompt tuning (completed 2026-03-20)
 
 ## Phase Details
 
@@ -196,10 +198,73 @@ Plans:
 - [x] 11-01: WorldBook Import Pipeline (completed 2026-03-19)
 - [ ] 11-02: Web Search Expansion
 
+### Phase 12: E2E QA & Bug Fixing
+**Goal**: All 73 v1 requirements verified working in real browser usage via Playwright MCP -- every page renders, every flow completes, every interaction works. Bugs found are fixed immediately and re-tested.
+**Depends on**: Phase 11
+**Requirements**: All v1 requirements (cross-cutting QA validation)
+**Success Criteria** (what must be TRUE):
+  1. All backend unit tests pass (0 failures)
+  2. Every page renders correctly with dark theme, passes 6-aspect visual rubric
+  3. Campaign creation flow works end-to-end through browser
+  4. Gameplay loop works: action -> Oracle -> narrative -> quick actions
+  5. Story control works: retry, undo, inline edit
+  6. WorldBook import works through browser upload
+  7. Checkpoints save/load/delete work through browser
+**Plans**: 5 plans
+
+Plans:
+- [x] 12-01-PLAN.md -- Fix failing unit tests (prerequisite) (completed 2026-03-19)
+- [ ] 12-02-PLAN.md -- UI Polish & Visual QA (every page screenshotted + rubric scored)
+- [ ] 12-03-PLAN.md -- Campaign Flow E2E (new campaign -> world review -> character -> game)
+- [ ] 12-04-PLAN.md -- Gameplay E2E (actions, Oracle, streaming, story control)
+- [ ] 12-05-PLAN.md -- Import & Persistence E2E (WorldBook import + checkpoints)
+
+### Phase 13: Gameplay Playtest & AI Tuning
+**Goal**: AI Game Master produces quality gameplay across 3 different scenarios -- Oracle gives reasonable probabilities, Storyteller narrates atmospherically with correct outcome tier differentiation, NPCs act autonomously, factions evolve the world, and combat mechanics work correctly under stress
+**Depends on**: Phase 12
+**Requirements**: Qualitative playtest (no formal requirement IDs)
+**Success Criteria** (what must be TRUE):
+  1. Known IP campaign (Naruto) uses canon terminology and research agent grounding
+  2. Original world campaign produces unique setting via World DNA, maintains consistency over 15+ turns
+  3. Oracle probabilities are reasonable (20-80 for standard actions, <15 absurd, >85 trivial)
+  4. Storyteller differentiates strong_hit / weak_hit / miss narratively
+  5. NPC agents take autonomous actions, reflect on events, show goal-driven behavior
+  6. Faction ticks produce observable world changes
+  7. HP tracking accurate, death at HP=0 is contextual, auto-checkpoint works
+  8. Average gameplay quality >= 3.5/5.0 across all sessions
+**Plans**: 3 plans
+
+Plans:
+- [ ] 13-01-PLAN.md -- Known IP Playtest (Naruto) + initial tuning
+- [ ] 13-02-PLAN.md -- Original World Playtest (Dark Fantasy) + long-session tuning
+- [ ] 13-03-PLAN.md -- Combat & Mechanics Stress Test + final tuning
+
+### Phase 14: Final Systems Verification & Bug Fixing
+**Goal:** Fix all remaining bugs (lore extraction, LanceDB episodic events, DuckDuckGo MCP, location sidebar, quick actions fallback) and verify every system described in docs/ works end-to-end with GLM-5 Turbo. Final QA pass with 4.5+ quality across all areas.
+**Requirements**: Qualitative verification (no formal requirement IDs)
+**Depends on:** Phase 13
+**Plans:** 3/3 plans complete
+
+Plans:
+- [ ] 14-01-PLAN.md -- Fix backend bugs (episodic vector, MCP spawn, quick actions fallback)
+- [ ] 14-02-PLAN.md -- Fix frontend/lore bugs (location sidebar, lore extraction resilience)
+- [ ] 14-03-PLAN.md -- E2E verification playtest with GLM-5 Turbo
+
+### Phase 15: Systematic Mechanics Fix & Docs-Driven Verification
+**Goal:** Fix 6 gameplay-breaking bugs found in playtest (HP on Strong Hit, move_to missing, NPCs invisible, tool-call leaks, auto-checkpoint timing, HP=0 handling) with backend enforcement, then verify all mechanics from docs/ work correctly.
+**Requirements**: Systematic fix + verification (no formal requirement IDs)
+**Depends on:** Phase 14
+**Plans:** 3/3 plans complete
+
+Plans:
+- [ ] 15-01-PLAN.md -- Core mechanics fixes: HP guard, Storyteller move_to tool, NPC prompt instructions
+- [ ] 15-02-PLAN.md -- Safety nets: tool-call sanitization, reactive auto-checkpoint, HP=0 context injection
+- [ ] 15-03-PLAN.md -- Systematic verification playtest against all docs/ mechanics
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10 -> 11
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10 -> 11 -> 12 -> 13 -> 14 -> 15 -> 16
 
 Note: Phases 4, 9, 10, 11 have flexible ordering relative to later phases. Phase 4 can start after Phase 2. Phases 9-11 can run in any order after their dependencies are met.
 
@@ -216,3 +281,20 @@ Note: Phases 4, 9, 10, 11 have flexible ordering relative to later phases. Phase
 | 9. Persistence | 0/2 | Not started | - |
 | 10. Image Generation | 2/2 | Complete    | 2026-03-19 |
 | 11. Content Import | 2/2 | Complete    | 2026-03-19 |
+| 12. E2E QA & Bug Fixing | 5/5 | Complete    | 2026-03-19 |
+| 13. Gameplay Playtest & AI Tuning | 3/3 | Complete    | 2026-03-20 |
+| 14. Final Systems Verification | 3/3 | Complete    | 2026-03-20 |
+| 15. Systematic Mechanics Fix | 3/3 | Complete    | 2026-03-20 |
+| 16. NPC System QA | 3/3 | Complete    | 2026-03-20 |
+
+### Phase 16: NPC System QA — Three NPC Tiers + World Gen Integration
+
+**Goal:** Systematically verify the entire NPC system across all 3 tiers (key/persistent/temporary) and all lifecycle stages: world generation, world review, and gameplay runtime behavior.
+**Requirements**: NPC QA verification (no formal requirement IDs)
+**Depends on:** Phase 15
+**Plans:** 3/3 plans complete
+
+Plans:
+- [ ] 16-01-PLAN.md -- Scaffold NPC generation + DB integrity + NPC creation API modes
+- [ ] 16-02-PLAN.md -- World Review NPC tab display, editing, tier changes, duplicate warnings
+- [ ] 16-03-PLAN.md -- Gameplay NPC behavior: Key NPC ticks, spawn_npc, tier differentiation, off-screen sim

@@ -18,7 +18,7 @@ import { loadSettings } from "../settings/index.js";
 import { parseBody, resolveStoryteller, resolveJudge, resolveEmbedder } from "./helpers.js";
 import { chatBodySchema, chatActionBodySchema, chatEditBodySchema } from "./schemas.js";
 import { createLogger } from "../lib/index.js";
-import { processTurn, captureSnapshot, restoreSnapshot, tickPresentNpcs, simulateOffscreenNpcs, checkAndTriggerReflections, tickFactions } from "../engine/index.js";
+import { processTurn, captureSnapshot, restoreSnapshot, tickPresentNpcs, simulateOffscreenNpcs, checkAndTriggerReflections, tickFactions, sanitizeNarrative } from "../engine/index.js";
 import type { TurnSnapshot, TurnSummary } from "../engine/index.js";
 import { embedAndUpdateEvent } from "../vectors/episodic-events.js";
 import type { Settings } from "../settings/index.js";
@@ -345,7 +345,7 @@ app.post("/", async (c) => {
       onFinish: async ({ text }) => {
         const assistantMessage: ChatMessage = {
           role: "assistant",
-          content: text.trim(),
+          content: sanitizeNarrative(text),
         };
         for (let attempt = 0; attempt < 3; attempt++) {
           try {
@@ -459,6 +459,22 @@ app.post("/action", async (c) => {
             );
           }
 
+          // Reactive auto-checkpoint when HP drops to danger zone during turn
+          if (event.type === "auto_checkpoint") {
+            void (async () => {
+              try {
+                await createCheckpoint(activeCampaign.id, {
+                  name: "auto-danger",
+                  description: "Auto-save: HP dropped to danger zone",
+                  auto: true,
+                });
+                await pruneAutoCheckpoints(activeCampaign.id, 3);
+              } catch (err) {
+                log.warn("Reactive auto-checkpoint failed (non-blocking)", err);
+              }
+            })();
+          }
+
           await stream.writeSSE({
             event: event.type,
             data: JSON.stringify(event.data),
@@ -515,14 +531,14 @@ app.post("/retry", async (c) => {
     // Restore pre-turn game state
     restoreSnapshot(activeCampaign.id, lastTurnSnapshot);
 
-    // Remove last assistant message (keep user message)
-    popLastMessages(activeCampaign.id, 1);
-
-    // Get the player action to re-run
+    // Get the player action BEFORE popping messages
     const playerAction = getLastPlayerAction(activeCampaign.id);
     if (!playerAction) {
       return c.json({ error: "No player action found to retry." }, 400);
     }
+
+    // Remove both user + assistant messages (processTurn re-appends user message)
+    popLastMessages(activeCampaign.id, 2);
 
     // Capture fresh snapshot for the re-run
     const freshSnapshot = captureSnapshot(activeCampaign.id);
@@ -551,6 +567,22 @@ app.post("/retry", async (c) => {
               freshSnapshot,
               event.data as { tool: string; args: unknown; result: unknown }
             );
+          }
+
+          // Reactive auto-checkpoint when HP drops to danger zone during turn
+          if (event.type === "auto_checkpoint") {
+            void (async () => {
+              try {
+                await createCheckpoint(activeCampaign.id, {
+                  name: "auto-danger",
+                  description: "Auto-save: HP dropped to danger zone",
+                  auto: true,
+                });
+                await pruneAutoCheckpoints(activeCampaign.id, 3);
+              } catch (err) {
+                log.warn("Reactive auto-checkpoint failed (non-blocking)", err);
+              }
+            })();
           }
 
           await stream.writeSSE({

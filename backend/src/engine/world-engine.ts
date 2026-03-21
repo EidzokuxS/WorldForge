@@ -152,7 +152,7 @@ async function tickSingleFaction(
     ``,
     `You may also introduce an unexpected world event (plague, disaster, anomaly, discovery) if narratively appropriate for the current world state. Use declare_world_event for this. Do NOT force events every tick -- only when the situation calls for it.`,
     ``,
-    `Use tools to execute your decision. Each action should be meaningful and driven by the faction's goals.`,
+    `Use tools to execute your decision. Your faction_action MUST include a SPECIFIC, OBSERVABLE change — territory gained/lost, resource acquired/depleted, alliance formed/broken, attack launched, fortification built. Vague actions like "continued to plan" or "monitored the situation" are NOT acceptable. Name specific locations, NPCs, or resources affected.`,
   ].join("\n");
 
   // Call Judge LLM with faction tools
@@ -206,7 +206,7 @@ export async function tickFactions(
   campaignId: string,
   tick: number,
   judgeProvider: ProviderConfig,
-  interval = 10,
+  interval = 5,
 ): Promise<FactionTickResult[]> {
   // Skip if not on interval
   if (tick % interval !== 0) {

@@ -15,7 +15,7 @@ const entityTypeEnum = z.enum(["player", "npc", "location", "item", "faction"]);
  * Create Storyteller tools bound to a specific campaign and tick.
  * Returns a tools object suitable for passing to streamText().
  */
-export function createStorytellerTools(campaignId: string, tick: number) {
+export function createStorytellerTools(campaignId: string, tick: number, outcomeTier?: string) {
   return {
     add_tag: tool({
       description:
@@ -90,7 +90,7 @@ export function createStorytellerTools(campaignId: string, tick: number) {
 
     offer_quick_actions: tool({
       description:
-        "Suggest 3-5 quick action options for the player to choose from. Offer these after narration to guide gameplay.",
+        "Suggest 3-5 quick action options for the player to choose from. You MUST call this tool after EVERY narration — no exceptions. In combat: vary suggestions each turn — include specific combat moves referencing available weapons/skills (e.g. 'Shield bash', 'Overhead slash'), defensive maneuvers (dodge, block, parry), environmental actions (throw sand, kick over table), social options (surrender, intimidate, taunt), and escape routes. Outside combat: include at least one social, one physical, and one exploratory option. Reference present NPCs by name.",
       inputSchema: z.object({
         actions: z
           .array(
@@ -148,7 +148,7 @@ export function createStorytellerTools(campaignId: string, tick: number) {
 
     set_condition: tool({
       description:
-        "Modify a player character's HP. Use delta for relative changes (+1 heal, -2 damage) or value for absolute setting. Only works on player characters, not NPCs.",
+        "Modify a player character's HP. Call this EVERY TIME the player takes damage or is healed. In combat: light hit = delta -1, solid blow = delta -1 or -2, devastating attack = delta -2 or -3. Healing: potion/rest = delta +1 or +2. Use delta for relative changes or value for absolute setting. Only works on player characters, not NPCs.",
       inputSchema: z.object({
         targetName: z.string().describe("Name of the player character"),
         delta: z.number().optional().describe("HP change: positive to heal, negative to damage"),
@@ -158,7 +158,19 @@ export function createStorytellerTools(campaignId: string, tick: number) {
         { message: "Either delta or value must be provided" }
       ),
       execute: async (args) =>
-        executeToolCall(campaignId, "set_condition", args, tick),
+        executeToolCall(campaignId, "set_condition", args, tick, outcomeTier),
+    }),
+
+    move_to: tool({
+      description:
+        "Move the player to a connected location. Use when the player describes traveling, walking, going to another place. If the destination doesn't exist in the world yet, call reveal_location first to create it, then move_to.",
+      inputSchema: z.object({
+        targetLocationName: z
+          .string()
+          .describe("Name of the destination location (must be connected to current location)"),
+      }),
+      execute: async (args) =>
+        executeToolCall(campaignId, "move_to", args, tick),
     }),
 
     transfer_item: tool({

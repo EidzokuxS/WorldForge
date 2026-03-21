@@ -74,8 +74,10 @@ export function CharacterPanel({ player, items, locationName, portraitUrl }: Cha
               {Array.from({ length: 5 }, (_, i) => (
                 <span
                   key={i}
-                  className={`text-sm ${
-                    i < player.hp ? "text-red-500" : "text-muted-foreground/30"
+                  className={`text-base ${
+                    i < player.hp
+                      ? "text-red-500 drop-shadow-[0_0_4px_rgba(239,68,68,0.5)]"
+                      : "text-muted-foreground/15"
                   }`}
                 >
                   &#9829;

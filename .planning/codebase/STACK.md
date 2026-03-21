@@ -1,139 +1,108 @@
 # Technology Stack
 
-**Analysis Date:** 2026-03-09
+**Analysis Date:** 2026-03-19
 
 ## Languages
 
 **Primary:**
-- TypeScript (strict mode) - Used across all packages: backend, frontend, shared
+- TypeScript 5.x (strict mode) — all backend, frontend, and shared package code
+  - Backend: `ES2022` target, `NodeNext` module resolution
+  - Frontend: Next.js TypeScript config
+  - Shared: compiled to `dist/` via `tsc`
 
 **Secondary:**
-- SQL (SQLite dialect) - Drizzle migrations in `backend/drizzle/`
+- None
 
 ## Runtime
 
 **Environment:**
-- Node.js (no `.nvmrc` or `.node-version` present; docs specify Node.js 20+)
-- ES Modules (`"type": "module"` in backend and shared)
+- Node.js (no version pinned — no `.nvmrc` or `.node-version` file)
+- ES Modules throughout (`"type": "module"` in backend and shared)
 
 **Package Manager:**
-- npm with workspaces
-- Lockfile: `package-lock.json` (npm workspace monorepo)
-
-**Workspaces (root `package.json`):**
-- `shared/` - `@worldforge/shared`
-- `frontend/`
-- `backend/`
+- npm workspaces
+- Root `package.json` declares workspaces: `["shared", "frontend", "backend"]`
+- Lockfiles: `package-lock.json` present in root, frontend, and backend
 
 ## Frameworks
 
 **Core:**
-- Hono `^4.12.3` - Backend HTTP framework (`backend/src/index.ts`)
-- `@hono/node-server` `^1.19.9` - Node.js adapter for Hono
-- `@hono/node-ws` `^1.3.0` - WebSocket support
-- Next.js `^16.1.6` (App Router) - Frontend framework (`frontend/`)
-- React `19.2.3` / React DOM `19.2.3` - UI library
+- `hono` ^4.12.3 — HTTP server framework for backend API
+- `@hono/node-server` ^1.19.9 — Node.js adapter for Hono
+- `@hono/node-ws` ^1.3.0 — WebSocket support via Hono
+- `next` ^16.1.6 — Frontend React framework (App Router)
+- `react` 19.2.3 — UI library
+- `react-dom` 19.2.3 — DOM renderer
+
+**AI/LLM:**
+- `ai` ^6.0.106 — Vercel AI SDK (streaming, `streamText`, `generateText`, `generateObject`, `embedMany`)
+- `@ai-sdk/openai` ^3.0.37 — OpenAI-compatible provider adapter
+- `@ai-sdk/anthropic` ^3.0.51 — Anthropic-compatible provider adapter
+- `@ai-sdk/mcp` ^1.0.25 — MCP (Model Context Protocol) client for tool calling
 
 **Testing:**
-- Vitest `^3.2.4` - Test runner (present in all three packages)
+- `vitest` ^3.2.4 — test runner (both backend and frontend)
 
 **Build/Dev:**
-- `tsx` `^4.21.0` - TypeScript execution for backend dev (`tsx watch src/index.ts`)
-- TypeScript `^5.9.3` (backend), `^5` (frontend), `^5.7.0` (shared)
-- `concurrently` `^9.2.1` - Runs frontend + backend dev servers in parallel
-- `drizzle-kit` `^0.31.9` - Drizzle migration generation
+- `tsx` ^4.21.0 — TypeScript execution / watch mode for backend dev server
+- `drizzle-kit` ^0.31.9 — ORM migration generator and schema manager
+- `concurrently` ^9.2.1 — runs frontend + backend in parallel during dev
 
 ## Key Dependencies
 
 **Critical:**
-- `ai` `^6.0.106` (Vercel AI SDK) - All LLM interactions: `streamText()`, `generateText()`, `generateObject()`, `embedMany()`
-- `@ai-sdk/openai` `^3.0.37` - OpenAI-compatible provider adapter (used for ALL providers including OpenRouter, Ollama, custom)
-- `@ai-sdk/anthropic` `^3.0.51` - Anthropic-compatible provider adapter
-- `@ai-sdk/mcp` `^1.0.25` - MCP client for DuckDuckGo web search in IP researcher
-- `drizzle-orm` `^0.45.1` - SQLite ORM, type-safe queries
-- `better-sqlite3` `^12.6.2` - Synchronous SQLite driver
-- `@lancedb/lancedb` `^0.26.2` - Embedded vector database (Rust-based, no Python)
-- `zod` `^4.3.6` - Schema validation for API payloads and AI tool definitions
+- `drizzle-orm` ^0.45.1 — type-safe SQL query builder for SQLite
+- `better-sqlite3` ^12.6.2 — synchronous SQLite bindings for Node.js
+- `@lancedb/lancedb` ^0.26.2 — embedded vector database (no Python required)
+- `zod` ^4.3.6 — runtime schema validation for all API payloads and AI tool definitions
+- `@worldforge/shared` * — internal monorepo package for shared types, constants, and defaults
 
-**Frontend UI:**
-- `radix-ui` `^1.4.3` - Headless UI primitives (via Shadcn)
-- `shadcn` `^3.8.5` (devDep) - Component generator CLI
-- Tailwind CSS `^4` + `@tailwindcss/postcss` `^4` - Styling
-- `tw-animate-css` `^1.4.0` - Tailwind animation utilities
-- `lucide-react` `^0.576.0` - Icon library
-- `class-variance-authority` `^0.7.1` - Variant-based component styling
-- `clsx` `^2.1.1` + `tailwind-merge` `^3.5.0` - Class name utilities
-- `sonner` `^2.0.7` - Toast notifications
+**UI:**
+- `radix-ui` ^1.4.3 — headless accessible component primitives
+- `tailwindcss` ^4 — utility-first CSS
+- `shadcn` ^3.8.5 — component CLI (Shadcn UI components, config in `frontend/components.json`)
+- `lucide-react` ^0.576.0 — icon library
+- `class-variance-authority` ^0.7.1 — variant class management
+- `tailwind-merge` ^3.5.0 — conditional class merging
+- `sonner` ^2.0.7 — toast notifications
 
 **Infrastructure:**
-- `@worldforge/shared` `*` - Shared types, constants, defaults (workspace link)
+- `hono/cors` — CORS middleware (built-in Hono middleware)
 
 ## Configuration
 
-**TypeScript:**
-- Backend: `backend/tsconfig.json` - target ES2022, module NodeNext, strict: true
-- Frontend: `frontend/tsconfig.json` - target ES2017, module esnext, bundler resolution, strict: true
-- Shared: compiles to `dist/` with type declarations
-- Path alias: `@/*` maps to `./` in frontend
+**Environment Variables (no .env files detected):**
+- `PORT` — backend HTTP port (default: `3001`)
+- `CORS_ORIGIN` — allowed CORS origin (default: `http://localhost:3000`)
+- LLM API keys are NOT environment variables — they are stored in `settings.json` (server-side)
+- Campaign data stored at `campaigns/{uuid}/` relative to backend root
 
-**Next.js:**
-- `frontend/next.config.ts` - `transpilePackages: ["@worldforge/shared"]`
-- Dev port: 3000
-
-**Drizzle:**
-- `backend/drizzle.config.ts` - schema at `./src/db/schema.ts`, output to `./drizzle`, dialect SQLite
-
-**Environment Variables:**
-- `PORT` - Backend port (default: 3001)
-- `CORS_ORIGIN` - Allowed CORS origin (default: `http://localhost:3000`)
-- `NEXT_PUBLIC_API_BASE` - Frontend API base URL (default: `http://localhost:3001`)
-- No `.env` files detected in repo
-
-**Settings:**
-- `settings.json` at project root - Server-side settings file (LLM providers, role configs, research config)
-- Managed by `backend/src/settings/manager.ts` - auto-created with defaults if missing
-
-## Build & Dev Commands
-
-**Development:**
-```bash
-npm run dev                    # Both frontend + backend (concurrently)
-npm run dev:frontend           # Frontend only (port 3000)
-npm run dev:backend            # Backend only (port 3001)
-```
+**Settings File:**
+- `settings.json` — server-side persistent settings at backend root
+  - Managed by `backend/src/settings/manager.ts`
+  - Contains provider configs, role assignments, research settings, image settings
+  - Auto-created with defaults on first boot
 
 **Build:**
-```bash
-npm run build                  # Build frontend + backend
-npm --prefix backend run typecheck  # Backend type check
-npm --prefix frontend run lint      # Frontend ESLint
-```
-
-**Database:**
-```bash
-cd backend && npm run db:generate   # Regenerate Drizzle migrations
-cd backend && npm run db:push       # Push schema to DB
-```
-
-**Testing:**
-```bash
-cd backend && npm test              # Run backend tests (vitest)
-cd backend && npm run test:watch    # Watch mode
-```
+- Backend: `backend/tsconfig.json` — `rootDir: src`, `outDir: dist`
+- Frontend: `frontend/tsconfig.json` — Next.js managed
+- Shared: `shared/tsconfig.json` — outputs to `shared/dist/`
+- Drizzle: `backend/drizzle.config.ts` — dialect sqlite, schema `./src/db/schema.ts`, migrations out `./drizzle`
+- Frontend config: `frontend/next.config.ts` — transpiles `@worldforge/shared`
 
 ## Platform Requirements
 
 **Development:**
-- Node.js 20+
-- No Python dependency - all components JS-native
-- 8GB+ RAM recommended (LanceDB + SQLite for large campaigns)
-- Windows, macOS, or Linux
+- Node.js (ES2022 compatible)
+- Backend dev: `cd backend && npm run dev` → `tsx watch src/index.ts` on port 3001
+- Frontend dev: `cd frontend && npm run dev` → Next.js on port 3000
+- Combined: root `npm run dev` via `concurrently`
 
 **Production:**
-- Localhost only - runs as a local Node.js server accessed via browser
-- No cloud deployment target
-- Campaign data stored in `campaigns/` directory (gitignored)
+- Backend: compiled to `dist/` via `tsc`, run with `node dist/index.js`
+- Frontend: `next build` then `next start`
+- No containerization config detected
 
 ---
 
-*Stack analysis: 2026-03-09*
+*Stack analysis: 2026-03-19*

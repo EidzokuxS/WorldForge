@@ -82,8 +82,8 @@ export const chatBodySchema = z.object({
 
 export const chatActionBodySchema = z.object({
   playerAction: z.string().min(1).max(2000),
-  intent: z.string().min(1).max(200),
-  method: z.string().max(200).default(""),
+  intent: z.string().min(1).max(2000),
+  method: z.string().max(500).default(""),
 });
 
 export const createCampaignSchema = z.object({

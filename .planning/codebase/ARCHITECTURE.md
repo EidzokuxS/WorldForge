@@ -1,248 +1,202 @@
 # Architecture
 
-**Analysis Date:** 2026-03-09
+**Analysis Date:** 2026-03-19
 
 ## Pattern Overview
 
-**Overall:** Client-Server with LLM Orchestration Layer
+**Overall:** Deterministic Game Engine + LLM-as-Narrator
 
 **Key Characteristics:**
-- Separate Next.js frontend (port 3000) and Hono backend (port 3001) communicating via REST + SSE
-- Backend orchestrates all LLM interactions through a role-based AI system (Judge, Storyteller, Generator, Embedder)
-- LLM is narrator only -- the engine is deterministic. LLM never modifies game state directly.
-- Campaign-scoped data isolation: each campaign gets its own SQLite DB file + LanceDB vector directory
-- In-memory singleton pattern for active campaign state (one campaign loaded at a time)
-- All AI tool calls use Vercel AI SDK (`generateObject`, `streamText`) with Zod schemas for structured output
+- LLM never modifies game state directly. All state changes go through typed tool calls validated by the backend engine.
+- 4 LLM roles with distinct responsibilities: Judge (probability), Storyteller (narrative), Generator (world gen), Embedder (vectors). Each resolved at runtime from provider settings.
+- Dual storage: SQLite (source of truth for all game state) + LanceDB (semantic search over lore cards and episodic events).
+- Single active campaign in server memory at a time. Campaign scoped data lives in `campaigns/{uuid}/`.
+- Monorepo with three packages: `shared/` (types/constants), `backend/` (Hono API), `frontend/` (Next.js).
 
 ## Layers
 
-**Routes (HTTP API):**
-- Purpose: Request handling, validation, response formatting
+**Shared Types (`shared/src/`):**
+- Purpose: Cross-package type contracts
+- Location: `shared/src/types.ts`, `shared/src/settings.ts`, `shared/src/chat.ts`
+- Contains: `Settings`, `Provider`, `RoleConfig`, `CampaignMeta`, `WorldSeeds`, `ChatMessage`, `PlayerCharacter`
+- Depends on: nothing (pure types + pure functions)
+- Used by: both `backend/` and `frontend/`
+
+**Route Layer (`backend/src/routes/`):**
+- Purpose: HTTP entry points, request validation, response shaping
 - Location: `backend/src/routes/`
-- Contains: Hono route handlers for all API endpoints
-- Key files: `campaigns.ts`, `worldgen.ts`, `chat.ts`, `ai.ts`, `settings.ts`, `lore.ts`
-- Depends on: Schemas, Campaign Manager, AI layer, Settings, Worldgen, Vectors
-- Used by: Frontend via `frontend/lib/api.ts`
-- Pattern: Each route file creates a `new Hono()` instance, exported as default, mounted in `backend/src/index.ts`
+- Contains: `campaigns.ts`, `chat.ts`, `worldgen.ts`, `character.ts`, `lore.ts`, `settings.ts`, `ai.ts`, `images.ts`
+- Depends on: all service layers, `helpers.ts` (role resolver, `parseBody`, `requireActiveCampaign`)
+- Used by: `backend/src/index.ts`
+- Pattern: outer try/catch wrapping entire handler body; `parseBody(c, schema)` for Zod validation; `getErrorStatus(error)` for status codes
 
-**Schemas (Validation):**
-- Purpose: Zod schemas for all request payloads, shared validation logic
-- Location: `backend/src/routes/schemas.ts`
-- Contains: All Zod schemas, `parseBody()` utility for request validation
-- Depends on: Zod
-- Used by: All route handlers via `parseBody(c, schema)`
-- Pattern: Every POST endpoint calls `parseBody()` first; if validation fails, returns `{ response }` error immediately
+**Engine Layer (`backend/src/engine/`):**
+- Purpose: Deterministic turn processing; Oracle probability system; prompt assembly; NPC agents; world simulation
+- Location: `backend/src/engine/`
+- Contains: `turn-processor.ts`, `oracle.ts`, `prompt-assembler.ts`, `tool-schemas.ts`, `tool-executor.ts`, `state-snapshot.ts`, `npc-agent.ts`, `npc-offscreen.ts`, `reflection-agent.ts`, `world-engine.ts`, `faction-tools.ts`, `token-budget.ts`, `graph-queries.ts`
+- Depends on: `db/`, `campaign/`, `vectors/`, `ai/`
+- Used by: `routes/chat.ts`
 
-**Route Helpers:**
-- Purpose: Resolve LLM role configurations from settings into usable provider configs
-- Location: `backend/src/routes/helpers.ts`
-- Contains: `resolveGenerator()`, `resolveStoryteller()`, `resolveEmbedder()`
-- Depends on: AI layer (`resolveRoleModel`), Settings
-- Used by: Route handlers before any LLM call
-- Pattern: Returns discriminated union `{ resolved: ResolvedRole } | { error: string; status: 400 }`
-
-**AI Layer:**
-- Purpose: LLM provider abstraction, model creation, role resolution
+**AI Layer (`backend/src/ai/`):**
+- Purpose: LLM provider abstraction; model creation; role resolution; storyteller streaming
 - Location: `backend/src/ai/`
-- Contains: Provider registry, storyteller, role model resolver, connection tester
-- Key files: `provider-registry.ts` (creates OpenAI-compatible models), `storyteller.ts` (streaming narrative), `resolve-role-model.ts`, `test-connection.ts`
-- Depends on: Vercel AI SDK (`ai`, `@ai-sdk/openai`), Settings types
-- Used by: Routes, Worldgen, Character generators
-- Pattern: All providers use `createOpenAI()` with custom `baseURL` -- everything goes through OpenAI-compatible API
+- Contains: `provider-registry.ts`, `resolve-role-model.ts`, `storyteller.ts`, `test-connection.ts`
+- Depends on: `@ai-sdk/openai`, Vercel AI SDK `ai` package, `@worldforge/shared`
+- Used by: engine layer, route helpers
 
-**Campaign Manager:**
-- Purpose: Campaign lifecycle (create, load, delete), active campaign state
+**Campaign Layer (`backend/src/campaign/`):**
+- Purpose: Campaign lifecycle management; chat history; checkpoints; tick counter
 - Location: `backend/src/campaign/`
-- Contains: Campaign CRUD, chat history persistence, path utilities
-- Key files: `manager.ts` (CRUD + in-memory active campaign), `chat-history.ts` (JSON file read/write), `paths.ts` (path resolution + ID validation)
-- Depends on: DB layer, Vector DB, filesystem
-- Used by: Routes
-- Pattern: Module-level `let activeCampaign` singleton. Loading a campaign connects its SQLite DB + opens its LanceDB directory.
+- Contains: `manager.ts`, `chat-history.ts`, `checkpoints.ts`, `paths.ts`, `index.ts`
+- Depends on: `db/`, `vectors/`, `worldgen/`
+- Used by: routes, engine
 
-**Database Layer:**
-- Purpose: SQLite connection management, schema definitions
-- Location: `backend/src/db/`
-- Contains: Connection singleton, Drizzle schema, migrations
-- Key files: `index.ts` (connect/get/close), `schema.ts` (8 tables), `migrate.ts`
-- Depends on: `better-sqlite3`, `drizzle-orm`
-- Used by: Campaign Manager, Routes, Worldgen scaffold saver
-- Pattern: Global singleton `db` variable. Only one DB connected at a time (one campaign active). WAL mode + foreign keys enabled.
-
-**Vectors Layer:**
-- Purpose: LanceDB vector database for semantic search (lore cards)
-- Location: `backend/src/vectors/`
-- Contains: Embedding generation, lore card CRUD, vector DB connection
-- Key files: `lore-cards.ts` (insert/search/delete), `embeddings.ts` (call embedder model), `connection.ts` / `index.ts`
-- Depends on: `@lancedb/lancedb`, AI layer (for embeddings)
-- Used by: Routes (lore endpoints, worldgen)
-- Pattern: Campaign-scoped vector DB at `campaigns/{id}/vectors/`. Tables are dropped and recreated on each world generation.
-
-**Worldgen Layer:**
-- Purpose: World scaffold generation pipeline (premise, locations, factions, NPCs, lore)
+**World Generation Layer (`backend/src/worldgen/`):**
+- Purpose: World scaffold generation pipeline; seed rolling; lore extraction; character generation; IP research; WorldBook import
 - Location: `backend/src/worldgen/`
-- Contains: Seed roller, seed suggester, scaffold generator (multi-step), scaffold saver, lore extractor, IP researcher
-- Key files: `scaffold-generator.ts` (5-step pipeline), `scaffold-saver.ts` (DB writes), `seed-roller.ts`, `seed-suggester.ts`, `ip-researcher.ts`, `lore-extractor.ts`
-- Depends on: AI layer, DB layer
-- Used by: Worldgen routes
-- Pattern: Pipeline with SSE progress reporting. Each step is a separate `generateObject` call. IP researcher uses DuckDuckGo MCP for known franchises.
+- Contains: `scaffold-generator.ts`, `seed-roller.ts`, `seed-suggester.ts`, `scaffold-saver.ts`, `lore-extractor.ts`, `ip-researcher.ts`, `starting-location.ts`, `worldbook-importer.ts`, `types.ts`
+- Depends on: `ai/`, `db/`, `vectors/`
+- Used by: `routes/worldgen.ts`, `routes/character.ts`
 
-**Character Layer:**
-- Purpose: Player character and NPC generation/parsing
+**Character Layer (`backend/src/character/`):**
+- Purpose: Player and NPC character generation (parse/generate/research/import V2 card)
 - Location: `backend/src/character/`
-- Contains: Character generator (parse/generate/import), NPC generator, archetype researcher
-- Key files: `generator.ts` (player characters), `npc-generator.ts` (key NPCs), `archetype-researcher.ts`
-- Depends on: AI layer
-- Used by: Worldgen routes
-- Pattern: Each function takes a premise + role config, uses `generateObject` with Zod schemas to produce structured character data
+- Contains: `generator.ts`, `npc-generator.ts`, `archetype-researcher.ts`, `v2-sections.ts`, `index.ts`
+- Depends on: `ai/`
+- Used by: `routes/character.ts`
 
-**Settings Layer:**
-- Purpose: Server-side settings persistence and normalization
+**Database Layer (`backend/src/db/`):**
+- Purpose: SQLite schema definitions and connection management
+- Location: `backend/src/db/`
+- Contains: `schema.ts` (8 tables), `index.ts` (connection singleton), `migrate.ts`
+- Depends on: `drizzle-orm`, `better-sqlite3`
+- Used by: engine, worldgen, campaign layers
+
+**Vector Layer (`backend/src/vectors/`):**
+- Purpose: LanceDB embedded vector store for lore cards and episodic events; text embedding
+- Location: `backend/src/vectors/`
+- Contains: `connection.ts`, `embeddings.ts`, `lore-cards.ts`, `episodic-events.ts`, `index.ts`
+- Depends on: `@lancedb/lancedb`, `ai/`
+- Used by: engine (prompt assembler), worldgen (lore storage), routes (lore endpoints)
+
+**Settings Layer (`backend/src/settings/`):**
+- Purpose: Server-side settings persistence (`settings.json`)
 - Location: `backend/src/settings/`
-- Contains: Settings load/save, normalization, provider merging
-- Key files: `manager.ts` (normalize, load, save, rebind)
-- Depends on: `@worldforge/shared` (defaults, presets)
-- Used by: Routes, all LLM-calling code
-- Pattern: File-based (`settings.json` at project root). Auto-normalizes on load, merges builtin provider presets with user-saved data.
+- Contains: `manager.ts`
+- Used by: all route handlers via `loadSettings()`
 
-**Shared Package:**
-- Purpose: Types, constants, defaults shared between frontend and backend
-- Location: `shared/src/`
-- Contains: TypeScript types, builtin provider presets, default settings factory, error utilities
-- Key files: `types.ts` (Provider, Settings, ChatMessage, WorldSeeds, PlayerCharacter), `settings.ts` (defaults + presets), `errors.ts`, `chat.ts`
-- Depends on: Nothing
-- Used by: Backend and Frontend via `@worldforge/shared`
-
-**Frontend API Client:**
-- Purpose: Typed HTTP client for all backend endpoints
-- Location: `frontend/lib/api.ts`
-- Contains: Generic `apiGet`, `apiPost`, `apiDelete`, `apiStreamPost` helpers + typed endpoint functions
-- Depends on: Frontend types
-- Used by: All frontend pages and components
-- Pattern: All functions call `API_BASE` (default `http://localhost:3001`). SSE parsing is manual (for world generation). JSON arrays stored as strings in DB are parsed client-side.
-
-**Frontend Pages:**
-- Purpose: Next.js App Router pages
-- Location: `frontend/app/`
-- Contains: Title screen, game page, settings, campaign character creation, campaign world review
-- Key pages: `page.tsx` (title), `game/page.tsx`, `settings/page.tsx`, `campaign/[id]/character/page.tsx`, `campaign/[id]/review/page.tsx`
-- Depends on: Components, API client, types
-- Pattern: All pages are `"use client"`. No server components in use. State managed with React hooks (useState, useEffect).
-
-**Frontend Components:**
-- Purpose: Reusable UI components organized by feature
-- Location: `frontend/components/`
-- Contains: Game panels, title screen dialogs, character creation forms, world review sections, Shadcn UI primitives
-- Key dirs: `game/` (5 panels), `title/` (dialogs + wizard hook), `character-creation/` (form + card), `world-review/` (5 sections + helpers), `ui/` (Shadcn)
-- Depends on: API client, Shadcn UI, Tailwind CSS
-- Used by: Pages
-
-**Lib (Frontend Utilities):**
-- Purpose: Shared frontend utilities
-- Location: `frontend/lib/`
-- Contains: API client, settings helpers, types, V2 card parser, general utils
-- Key files: `api.ts`, `types.ts` (re-exports + frontend-specific types), `settings.ts`, `v2-card-parser.ts`, `use-settings.ts`
+**Frontend (`frontend/`):**
+- Purpose: Next.js App Router UI — title screen, settings, world review, character creation, game
+- Location: `frontend/app/`, `frontend/components/`, `frontend/lib/`
+- Depends on: backend via REST at `http://localhost:3001`
+- State: local React state only; no global state manager
 
 ## Data Flow
 
 **Campaign Creation Flow:**
 
-1. User fills name + premise on title screen (`frontend/app/page.tsx` -> `NewCampaignDialog`)
-2. Optional: World DNA step -- roll or AI-suggest seeds (`/api/worldgen/roll-seeds`, `/api/worldgen/suggest-seeds`)
-3. `POST /api/campaigns` creates campaign directory, SQLite DB, config.json, vector DB
-4. `POST /api/worldgen/generate` starts SSE-streamed 5-step pipeline:
-   - Step 0: IP research (if enabled, via DuckDuckGo MCP)
-   - Step 1: Refined premise (`generateObject`)
-   - Step 2: Locations (`generateObject`)
-   - Step 3: Factions (`generateObject`)
-   - Step 4: NPCs (`generateObject`)
-   - Step 5: Lore extraction + embedding
-5. Scaffold saved to SQLite via `saveScaffoldToDb()`, lore cards saved to LanceDB
-6. Redirect to world review page (`/campaign/[id]/review`)
-7. User edits scaffold, saves via `POST /api/worldgen/save-edits`
-8. User creates character on `/campaign/[id]/character`, saves via `POST /api/worldgen/save-character`
-9. Redirect to game page (`/game`)
+1. User submits name + premise on Title Screen (`frontend/app/page.tsx`)
+2. `POST /api/campaigns` → `backend/src/routes/campaigns.ts` → `campaign/manager.ts` creates UUID directory, `state.db`, `config.json`, `chat_history.json`, `vectors/`
+3. `POST /api/worldgen/generate` streams SSE progress events while pipeline runs: IP Research → Premise Refinement → Locations → Factions → NPCs → Lore Extraction
+4. `saveScaffoldToDb()` writes entities to SQLite; `storeLoreCards()` embeds and stores in LanceDB
+5. Frontend redirects to `/campaign/[id]/character`
 
-**Gameplay Chat Flow:**
+**Turn Cycle Flow (Core Gameplay):**
 
-1. Player types action in ActionBar (`frontend/components/game/action-bar.tsx`)
-2. `POST /api/chat` with `{ playerAction }`
-3. Backend loads chat history from `chat_history.json`, builds system prompt with world premise
-4. `streamText()` via Vercel AI SDK sends to Storyteller LLM
-5. Response streamed as plain text to frontend
-6. `onFinish` callback persists assistant message to chat history file
-7. Frontend displays streamed text in NarrativeLog
+1. Player submits action via `ActionBar` → `POST /api/chat/action` with `{ playerAction, intent, method }`
+2. Route handler resolves Judge + Storyteller providers, captures `TurnSnapshot` for undo
+3. `processTurn()` generator in `engine/turn-processor.ts`:
+   - Queries player state + location from SQLite
+   - Detects movement commands; applies location change if valid graph connection
+   - Calls Oracle (`callOracle()` via Judge LLM `generateObject`) → yields `oracle_result` SSE event
+   - `assemblePrompt()` gathers: system rules + world premise + scene context + player state + NPC states + lore search results + episodic memory + chat history (with smart compression) + Oracle outcome directive
+   - Calls Storyteller (`streamText`) with tool definitions → streams narrative text + tool call results
+   - Persists assistant message; increments tick; yields `done` SSE event
+4. `onPostTurn` callback (non-blocking): embeds `log_event` calls to episodic vector store, ticks NPC agents, simulates off-screen NPCs, checks reflection thresholds, ticks factions, generates scene/location images
+
+**Lore Search Flow:**
+
+1. `assemblePrompt()` calls `searchLoreCards()` with player action as query
+2. `embedTexts()` generates embedding via Embedder LLM role
+3. LanceDB cosine similarity search returns top-N lore cards
+4. Results injected into prompt as `[LORE CONTEXT]` section
 
 **State Management:**
-- No global state manager (no Redux, Zustand, etc.)
-- React `useState` + `useEffect` in each page
-- Settings fetched from server on page load
-- Campaign state is server-side (in-memory singleton + filesystem)
-- Chat history persisted as JSON file per campaign
+- Backend: single `activeCampaign` module-level variable in `campaign/manager.ts`; SQLite per-campaign `state.db`; `chat_history.json` on disk
+- Frontend: local `useState` per page; no shared state, no global store
+- Turn undo: in-memory `lastTurnSnapshot` in `routes/chat.ts` (module-level, single-step only)
 
 ## Key Abstractions
 
-**ResolvedRole:**
-- Purpose: Fully resolved LLM configuration ready for API calls
-- Examples: returned by `backend/src/routes/helpers.ts` functions
-- Pattern: Discriminated union result type -- `{ resolved: ResolvedRole } | { error, status }`
-- Contains: `provider` (baseUrl, apiKey, model), `temperature`, `maxTokens`
+**LLM Role System:**
+- Purpose: Decouple AI behavior from provider configuration
+- Examples: `backend/src/ai/resolve-role-model.ts`, `backend/src/routes/helpers.ts`
+- Pattern: `resolveJudge(settings)` / `resolveStoryteller(settings)` / `resolveGenerator(settings)` / `resolveEmbedder(settings)` return `ResolveResult = { resolved: ResolvedRole } | { error: string; status: 400 }`
 
-**Campaign Lifecycle:**
-- Purpose: Represents the active campaign and its connected resources
-- Examples: `backend/src/campaign/manager.ts`
-- Pattern: Module-level singleton. Loading connects SQLite + LanceDB. Deleting disconnects + removes directory. Only one campaign active at a time.
+**Oracle Probability System:**
+- Purpose: Deterministic outcome resolution separate from narrative generation
+- Examples: `backend/src/engine/oracle.ts`
+- Pattern: Judge LLM returns `{ chance: 1-99 }` via `generateObject` → D100 roll → `strong_hit / weak_hit / miss` tier → instruction injected into Storyteller system prompt
 
-**WorldScaffold:**
-- Purpose: Complete generated world data before DB persistence
-- Examples: returned by `backend/src/worldgen/scaffold-generator.ts`
-- Pattern: Intermediate data structure with `refinedPremise`, `locations[]`, `factions[]`, `npcs[]`, `loreCards[]`. Passed to `saveScaffoldToDb()` for persistence.
+**Tool Calling for State Mutations:**
+- Purpose: Storyteller declares intent via tools; engine validates and executes
+- Examples: `backend/src/engine/tool-schemas.ts`, `backend/src/engine/tool-executor.ts`
+- Pattern: `createStorytellerTools(campaignId, tick)` returns Zod-validated tool definitions; each tool call is intercepted in `fullStream` and dispatched to `executeToolCall()`
 
-**parseBody:**
-- Purpose: Standardized request validation across all routes
-- Examples: `backend/src/routes/schemas.ts`
-- Pattern: Takes Hono context + Zod schema, returns `{ data }` or `{ response }` (error). Every POST handler starts with this call.
+**TurnSnapshot for Undo:**
+- Purpose: Pre-turn game state capture for single-step rollback
+- Examples: `backend/src/engine/state-snapshot.ts`
+- Pattern: `captureSnapshot(campaignId)` records entity IDs before turn; `restoreSnapshot()` deletes spawned entities; `popLastMessages()` removes chat entries
+
+**Tag System:**
+- Purpose: All character/location/faction traits expressed as string tags, stored as JSON arrays in SQLite `text` columns
+- Examples: `backend/src/db/schema.ts` columns `tags text NOT NULL DEFAULT '[]'`
+- Pattern: tags are the universal trait carrier — skills, relationships, wealth, affiliations. Only numeric field: HP (1-5 integer).
+
+**SSE Streaming:**
+- Purpose: Long-running operations (turn processing, world generation) stream progress to frontend
+- Examples: `backend/src/routes/chat.ts` (`streamSSE`), `backend/src/routes/worldgen.ts`
+- Pattern: Hono `streamSSE()` writes typed events (`event: oracle_result`, `event: narrative`, `event: state_update`, `event: done`); frontend `parseTurnSSE()` in `frontend/lib/api.ts` dispatches to typed handler callbacks
 
 ## Entry Points
 
 **Backend Server:**
 - Location: `backend/src/index.ts`
-- Triggers: `npm run dev` (tsx watch)
-- Responsibilities: Creates Hono app, mounts all route groups, sets up CORS, WebSocket, starts HTTP server on port 3001
+- Triggers: `node` / `tsx` via `npm run dev`
+- Responsibilities: Creates Hono app, registers all route modules, sets up WebSocket upgrade, starts `@hono/node-server` on port 3001, handles graceful shutdown
 
 **Frontend App:**
-- Location: `frontend/app/layout.tsx` + `frontend/app/page.tsx`
-- Triggers: `npm run dev` (Next.js dev server on port 3000)
-- Responsibilities: Root layout with fonts + Toaster, title screen as home page
+- Location: `frontend/app/layout.tsx`, `frontend/app/page.tsx`
+- Triggers: Next.js dev server on port 3000
+- Responsibilities: Root layout (fonts, dark theme, Toaster); Title Screen as default route
 
-**Shared Package:**
-- Location: `shared/src/index.ts`
-- Triggers: Imported as `@worldforge/shared`
-- Responsibilities: Re-exports all shared types, constants, utility functions
+**Campaign Setup Wizard:**
+- Location: `frontend/components/title/use-new-campaign-wizard.ts`, `frontend/components/title/new-campaign-dialog.tsx`
+- Triggers: "New Campaign" button on title screen
+- Responsibilities: 2-step wizard (concept input → World DNA seeds → world generation with SSE progress overlay)
 
 ## Error Handling
 
-**Strategy:** Outer try/catch in every route handler with typed error responses
+**Strategy:** Structured error types propagated as JSON responses with consistent status codes
 
 **Patterns:**
-- `AppError` class (`backend/src/lib/errors.ts`) with `statusCode` property for domain errors (400, 404, 500)
-- `getErrorMessage(error, fallback)` extracts error message or returns fallback string (shared package)
-- `getErrorStatus(error, fallback)` extracts status code from `AppError` or returns fallback (500)
-- Every route handler wraps entire body in try/catch, returns `c.json({ error }, status)`
-- `parseBody()` returns validation errors as `{ response }` instead of throwing
-- Frontend `readErrorMessage()` extracts `{ error }` from response JSON or falls back to statusText
+- `AppError` class in `backend/src/lib/errors.ts` carries an HTTP status code
+- `getErrorStatus(error)` returns the status from `AppError`, or 500 for unknown errors
+- `getErrorMessage(error, fallback)` extracts message from `Error` or `AppError`
+- All route handlers wrap their body in a single outer `try/catch` that calls both helpers
+- Frontend `readErrorMessage(response)` parses `{ error: string }` from API error responses
+- Non-blocking post-turn operations (NPC ticks, image gen, embeddings) are individually try/caught and logged as warnings without failing the turn
 
 ## Cross-Cutting Concerns
 
-**Logging:** `console.log` / `console.error` only. No structured logging framework.
+**Logging:** Structured logger from `backend/src/lib/logger.ts`; `createLogger(module)` returns `{ info, warn, error, debug }`. Used throughout backend modules. Never `console.log` in production code.
 
-**Validation:** Zod schemas for all API payloads (`backend/src/routes/schemas.ts`). Settings normalized on load/save (`backend/src/settings/manager.ts`). Campaign IDs validated via `assertSafeId()` regex.
+**Validation:** All API request bodies validated with Zod schemas defined in `backend/src/routes/schemas.ts`. Shared types also defined in `shared/src/types.ts`. Frontend API calls are typed against `frontend/lib/api-types.ts`.
 
-**Authentication:** None. Single-user local application. No auth middleware.
+**Security:** `assertSafeId(id)` in `backend/src/campaign/paths.ts` validates campaign IDs against UUID regex to prevent path traversal. Applied before any file system access on user-supplied IDs.
 
-**Security:** `assertSafeId()` prevents path traversal via campaign IDs (`backend/src/campaign/paths.ts`). CORS restricted to frontend origin. API keys stored in `settings.json` (not environment variables).
-
-**Streaming:** Two patterns -- SSE via `streamSSE()` for world generation progress, plain text streaming via `streamText().toTextStreamResponse()` for chat.
+**Authentication:** None. Single-user local application.
 
 ---
 
-*Architecture analysis: 2026-03-09*
+*Architecture analysis: 2026-03-19*

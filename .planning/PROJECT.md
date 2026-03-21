@@ -52,6 +52,12 @@ The LLM is the narrator, never the engine. All mechanical outcomes (probability,
 - ✓ Relationship evolution: qualitative tags updated by Reflection — Phase 7
 - ✓ World Engine: faction macro-ticks, territory changes, world events — Phase 8
 - ✓ Information flow: NPC knowledge from location/faction/chronicle context — Phase 8
+- ✓ Checkpoints: save/load/branch, auto-checkpoint before lethal encounters — Phase 9
+- ✓ Image generation: provider-agnostic portraits/scenes/locations, optional — Phase 10
+- ✓ WorldBook import: parse → clean → classify → route to DB tables — Phase 11
+- ✓ Web search expansion: multi-provider MCP (DuckDuckGo + Z.AI) — Phase 11
+- ✓ World Engine: faction macro-ticks, territory changes, world events — Phase 8
+- ✓ Information flow: NPC knowledge from location/faction/chronicle context — Phase 8
 
 ### Active
 
@@ -125,4 +131,4 @@ The LLM is the narrator, never the engine. All mechanical outcomes (probability,
 | WorldBook cleaning on import | SillyTavern cards have irrelevant data for our system | — Pending |
 
 ---
-*Last updated: 2026-03-19 after Phase 8 completion*
+*Last updated: 2026-03-19 after all 11 phases complete — v1 feature-complete*

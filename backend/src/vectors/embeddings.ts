@@ -1,7 +1,9 @@
 import { embedMany } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
+import { createLogger } from "../lib/index.js";
 
+const log = createLogger("embeddings");
 const BATCH_SIZE = 50;
 
 export async function embedTexts(
@@ -24,8 +26,17 @@ export async function embedTexts(
 
     for (let i = 0; i < texts.length; i += BATCH_SIZE) {
         const batch = texts.slice(i, i + BATCH_SIZE);
-        const result = await embedMany({ model, values: batch });
-        allEmbeddings.push(...result.embeddings);
+        try {
+            const result = await embedMany({ model, values: batch });
+            allEmbeddings.push(...result.embeddings);
+        } catch (error) {
+            const batchRange = `${i + 1}-${Math.min(i + BATCH_SIZE, texts.length)}`;
+            const msg = error instanceof Error ? error.message : String(error);
+            log.error(`Embedding batch ${batchRange}/${texts.length} failed: ${msg}`);
+            throw new Error(
+                `Embedding failed on batch ${batchRange} of ${texts.length} texts: ${msg}`
+            );
+        }
     }
 
     return allEmbeddings;

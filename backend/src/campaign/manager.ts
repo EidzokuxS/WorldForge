@@ -9,6 +9,9 @@ import { parseWorldSeeds } from "../worldgen/index.js";
 import { AppError } from "../lib/index.js";
 import { assertSafeId, CAMPAIGNS_DIR, getCampaignConfigPath, getCampaignDir } from "./paths.js";
 import { openVectorDb, closeVectorDb } from "../vectors/index.js";
+import { createLogger } from "../lib/index.js";
+
+const log = createLogger("campaign-manager");
 
 export type { CampaignMeta } from "@worldforge/shared";
 
@@ -52,6 +55,7 @@ export function readCampaignConfig(campaignId: string): CampaignConfigFile {
     premise: parsed.premise,
     seeds: parseWorldSeeds(parsed.seeds) ?? undefined,
     generationComplete: Boolean(parsed.generationComplete),
+    currentTick: typeof parsed.currentTick === "number" ? parsed.currentTick : undefined,
     createdAt: parsed.createdAt,
     updatedAt:
       typeof parsed.updatedAt === "number" ? parsed.updatedAt : parsed.createdAt,
@@ -287,8 +291,10 @@ export function getActiveCampaign(): CampaignMeta | null {
 export function incrementTick(campaignId: string): number {
   assertSafeId(campaignId);
   const config = readCampaignConfig(campaignId);
-  const nextTick = (config.currentTick ?? 0) + 1;
+  const prevTick = config.currentTick ?? 0;
+  const nextTick = prevTick + 1;
   const campaignDir = getCampaignDir(campaignId);
   writeCampaignConfig(campaignDir, { ...config, currentTick: nextTick });
+  log.info(`Tick incremented: ${prevTick} -> ${nextTick}`);
   return nextTick;
 }

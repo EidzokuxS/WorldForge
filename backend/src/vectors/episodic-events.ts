@@ -32,7 +32,9 @@ export async function storeEpisodicEvent(
 
   const db = getVectorDb();
 
-  const row: EpisodicEvent = {
+  // Store WITHOUT vector column — embedding is deferred to post-turn async.
+  // An empty vector [] causes "Failed to infer data type for field vector" on createTable.
+  const row = {
     id,
     text: event.text,
     tick: event.tick,
@@ -40,7 +42,6 @@ export async function storeEpisodicEvent(
     participants: event.participants,
     importance: event.importance,
     type: event.type || "event",
-    vector: new Array(0),
   };
 
   const tableNames = await db.tableNames();
@@ -141,13 +142,21 @@ export async function searchEpisodicEvents(
 
   const table = await db.openTable(TABLE_NAME);
 
-  // Over-fetch for composite re-ranking
+  // Over-fetch for composite re-ranking.
+  // vectorSearch will fail if no rows have a vector column yet (all embeddings deferred).
+  // Gracefully return empty in that case.
   const fetchLimit = limit * 3;
-  const results = await table
-    .vectorSearch(queryVector)
-    .distanceType("cosine")
-    .limit(fetchLimit)
-    .toArray();
+  let results: Record<string, unknown>[];
+  try {
+    results = await table
+      .vectorSearch(queryVector)
+      .distanceType("cosine")
+      .limit(fetchLimit)
+      .toArray();
+  } catch (err) {
+    log.warn("vectorSearch failed (table may lack vector column yet)", err);
+    return [];
+  }
 
   // Re-rank with composite score
   const scored = results.map((row: Record<string, unknown>) => {

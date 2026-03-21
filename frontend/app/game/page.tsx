@@ -11,8 +11,19 @@ import { CheckpointPanel } from "@/components/game/checkpoint-panel";
 import { ActionBar } from "@/components/game/action-bar";
 import { OraclePanel, type OracleResultData } from "@/components/game/oracle-panel";
 import { QuickActions } from "@/components/game/quick-actions";
-import { Save } from "lucide-react";
+import { Home, Save, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import type { CampaignMeta, ChatMessage } from "@worldforge/shared";
 import { isChatMessage } from "@worldforge/shared";
 import { getErrorMessage } from "@/lib/settings";
@@ -171,8 +182,8 @@ export default function GamePage() {
     setLastOracleResult(null);
     setQuickActions([]);
 
-    const userMessage: ChatMessage = { role: "user", content: actionText };
-    setMessages((current) => [...current, userMessage, { role: "assistant", content: "" }]);
+    // Track whether we successfully started receiving narrative data
+    let streamStarted = false;
 
     try {
       const response = await apiStreamPost("/api/chat/action", {
@@ -185,6 +196,11 @@ export default function GamePage() {
         throw new Error("Empty response stream.");
       }
 
+      // Only add messages to chat once the stream connection succeeds
+      const userMessage: ChatMessage = { role: "user", content: actionText };
+      setMessages((current) => [...current, userMessage, { role: "assistant", content: "" }]);
+      streamStarted = true;
+
       let narrativeText = "";
 
       await parseTurnSSE(response.body, {
@@ -196,7 +212,10 @@ export default function GamePage() {
           setLastOracleResult(result as OracleResultData);
         },
         onStateUpdate: () => {
-          // State update received — world data will be refreshed after stream completes
+          // Refresh world data on any state change (movement, spawn, item transfer, etc.)
+          if (activeCampaign) {
+            void refreshWorldData(activeCampaign.id);
+          }
         },
         onQuickActions: (actions) => {
           setQuickActions(actions);
@@ -212,14 +231,22 @@ export default function GamePage() {
         },
       });
     } catch (error) {
-      setMessages((current) => {
-        const next = [...current];
-        const lastMessage = next[next.length - 1];
-        if (lastMessage?.role === "assistant" && !lastMessage.content.trim()) {
-          next.pop();
-        }
-        return next;
-      });
+      if (streamStarted) {
+        // Remove empty assistant placeholder if stream failed after messages were added
+        setMessages((current) => {
+          const next = [...current];
+          const lastMessage = next[next.length - 1];
+          if (lastMessage?.role === "assistant" && !lastMessage.content.trim()) {
+            next.pop();
+          }
+          // Also remove the user message that triggered the failed turn
+          const prevMessage = next[next.length - 1];
+          if (prevMessage?.role === "user") {
+            next.pop();
+          }
+          return next;
+        });
+      }
 
       toast.error("Failed to generate narrative", {
         description: getErrorMessage(error, "Unknown streaming error."),
@@ -263,7 +290,11 @@ export default function GamePage() {
         onOracleResult: (result) => {
           setLastOracleResult(result as OracleResultData);
         },
-        onStateUpdate: () => {},
+        onStateUpdate: () => {
+          if (activeCampaign) {
+            void refreshWorldData(activeCampaign.id);
+          }
+        },
         onQuickActions: (actions) => {
           setQuickActions(actions);
         },
@@ -370,7 +401,44 @@ export default function GamePage() {
   return (
     <div className="flex h-screen flex-col">
       {/* Toolbar */}
-      <div className="flex items-center justify-end border-b border-border bg-card px-4 py-1.5">
+      <div className="flex items-center justify-between border-b border-border bg-card px-4 py-1.5">
+        <div className="flex items-center gap-1">
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1.5 text-xs"
+              >
+                <Home className="h-3.5 w-3.5" />
+                Title
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Leave game?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Your progress is saved automatically. You can resume this campaign from the title screen.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={() => router.push("/")}>
+                  Go to Title
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1.5 text-xs"
+            onClick={() => router.push("/settings")}
+          >
+            <Settings className="h-3.5 w-3.5" />
+            Settings
+          </Button>
+        </div>
         <Button
           variant="ghost"
           size="sm"

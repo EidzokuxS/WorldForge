@@ -1,221 +1,201 @@
 # Coding Conventions
 
-**Analysis Date:** 2026-03-09
+**Analysis Date:** 2026-03-19
 
 ## Naming Patterns
 
 **Files:**
-- Backend: `kebab-case.ts` (e.g., `seed-roller.ts`, `ip-researcher.ts`, `npc-generator.ts`)
-- Frontend pages: `page.tsx` inside route directories (Next.js App Router convention)
-- Frontend components: `kebab-case.tsx` (e.g., `character-form.tsx`, `character-panel.tsx`)
-- Test files: `*.test.ts` inside `__tests__/` subdirectories
-- Shared package: `kebab-case.ts` (e.g., `settings.ts`, `errors.ts`)
+- kebab-case for all source files: `seed-roller.ts`, `lore-cards.ts`, `scaffold-generator.ts`
+- Test files mirror source name with `.test.ts` suffix: `seed-roller.test.ts`
+- Test files live in `__tests__/` subdirectory next to source: `src/worldgen/__tests__/seed-roller.test.ts`
+- Index barrel files named `index.ts` for module entry points: `src/ai/index.ts`, `src/lib/index.ts`
 
 **Functions:**
-- Use `camelCase` for all functions: `rollWorldSeeds()`, `parseBody()`, `getErrorMessage()`
-- Exported functions start with verbs: `create`, `get`, `load`, `save`, `resolve`, `parse`, `generate`, `delete`
-- Route helper pattern: `resolveGenerator()`, `resolveStoryteller()`, `resolveEmbedder()`
-- Frontend API wrappers: `apiGet<T>()`, `apiPost<T>()`, `apiDelete<T>()`, `apiStreamPost()`
+- camelCase for all functions: `rollSeed`, `parseCharacterDescription`, `createLogger`, `getErrorStatus`
+- Async functions for I/O: `parseBody`, `loadCampaign`, `insertLoreCards`
+- Boolean-returning functions prefixed with `is`/`has`/`requires`: `isRecord`, `requiresApiKey`, `isLocalProvider`
+- Factory functions prefixed with `create`: `createLogger`, `createModel`, `createCampaign`
+- Getter functions prefixed with `get`: `getDb`, `getActiveCampaign`, `getErrorStatus`
+- Resolver functions prefixed with `resolve`: `resolveRoleModel`, `resolveGenerator`, `resolveStoryteller`
 
 **Variables:**
-- `camelCase` everywhere: `campaignId`, `worldData`, `locationNames`
-- Boolean variables use `is`/`has` prefix or descriptive adjectives: `isStarting`, `cancelled`, `busy`
-- Constants: `UPPER_SNAKE_CASE` for module-level constants: `ALL_CATEGORIES`, `SEED_CATEGORIES`, `API_BASE`
+- camelCase throughout: `campaignId`, `worldSeeds`, `locationNames`
+- Mocked function variables prefixed with `mocked`: `mockedList`, `mockedCreate`, `mockedGetDb`
+- Module-level logger always: `const log = createLogger("tag")` at top of file
 
-**Types:**
-- `PascalCase` for interfaces and types: `WorldSeeds`, `ParsedCharacter`, `ScaffoldNpc`
-- Interfaces preferred over type aliases for object shapes
-- Discriminated unions for variant types: `ResolveResult`, `CharacterResult`
-- Props interfaces named `{ComponentName}Props`: `CharacterPanelProps`, `CharacterFormProps`
+**Types/Interfaces:**
+- PascalCase: `AppError`, `ParsedCharacter`, `ResolvedRole`, `CharacterEndpointContext`
+- Zod schemas named with `Schema` suffix: `characterSchema`, `worldSeedsSchema`, `settingsPayloadSchema`
+- `type` keyword for aliases and imports; `interface` for structural shapes
+- Zod-inferred types extracted with `z.infer<typeof xSchema>`
 
-**Database columns:**
-- SQL uses `snake_case`: `campaign_id`, `created_at`, `is_starting`
-- Drizzle schema maps to `camelCase` JS: `campaignId`, `createdAt`, `isStarting`
+**Constants:**
+- SCREAMING_SNAKE_CASE for true constants: `SEED_CATEGORIES`, `LOG_DIR`, `CAMPAIGN_ID`, `NONE_PROVIDER_ID`
+- Module-level loggers lowercase: `const log = createLogger(...)`
 
 ## Code Style
 
 **Formatting:**
-- No Prettier config file detected; formatting relies on editor defaults
-- 2-space indentation
-- Semicolons always used
-- Double quotes for strings in source code
-- Trailing commas in multi-line arrays/objects
+- No Prettier config detected — formatting enforced via post-tool hook (`prettier` runs after every `.ts`/`.tsx` edit)
+- 2-space indentation throughout
+- Double quotes for strings in TypeScript (consistent across backend and frontend)
+- Trailing commas in multi-line structures
 
 **Linting:**
-- Frontend: ESLint with `eslint-config-next` (core-web-vitals + TypeScript), config at `frontend/eslint.config.mjs`
-- Backend: No ESLint config; relies on TypeScript strict mode
-- Run frontend lint: `npm --prefix frontend run lint`
-- Run backend typecheck: `npm --prefix backend run typecheck`
+- Backend: TypeScript strict mode enforced via `tsconfig.json` (`"strict": true`)
+- Frontend: ESLint with `eslint-config-next/core-web-vitals` and `eslint-config-next/typescript`
+- TypeScript check hook runs `tsc` after every `.ts`/`.tsx` edit
 
-**TypeScript:**
-- Strict mode enabled in all three packages (`backend/tsconfig.json`, `frontend/tsconfig.json`, `shared/tsconfig.json`)
-- ES modules everywhere (`"type": "module"` in backend `package.json`)
-- Backend target: ES2022, module: NodeNext
-- Frontend target: ES2017, module: esnext, moduleResolution: bundler
-- Use `type` imports where only types are needed: `import type { Context } from "hono"`
+**TypeScript Config:**
+- Backend: `target: ES2022`, `module: NodeNext`, `moduleResolution: NodeNext`, `strict: true`
+- Frontend: Next.js defaults with strict TypeScript
+- Shared: compiled separately, consumed by both backend and frontend
 
 ## Import Organization
 
 **Order:**
-1. External packages (e.g., `hono`, `drizzle-orm`, `zod`, `ai`, `react`)
-2. Shared package (`@worldforge/shared`)
-3. Internal modules with `.js` extension (backend) or `@/` alias (frontend)
+1. Node built-ins: `import { appendFileSync } from "node:fs"` (always use `node:` prefix)
+2. Third-party packages: `import { Hono } from "hono"`, `import { z } from "zod"`
+3. Shared workspace: `import type { PlayerCharacter } from "@worldforge/shared"`
+4. Internal relative imports with `.js` extension: `import { createLogger } from "../lib/index.js"`
 
 **Path Aliases:**
-- Frontend: `@/*` maps to project root (e.g., `@/lib/api`, `@/components/ui/button`)
-- Shared: `@worldforge/shared` used from both frontend and backend
-- Backend: Relative imports with `.js` extension required (NodeNext module resolution): `../lib/errors.js`, `./schemas.js`
+- Backend: none — only relative paths with explicit `.js` extension
+- Frontend: `@/` alias maps to `frontend/` root: `import type { Settings } from "@/lib/types"`
+- Shared: `@worldforge/shared` resolves to `shared/src` in vitest; to compiled `dist` in production
 
-**Backend import extension rule:** Always use `.js` extension on relative imports even though source files are `.ts`. This is required by NodeNext module resolution.
+**Module Exports:**
+- Barrel `index.ts` files aggregate and re-export from sub-modules
+- Types exported separately with `export type { ... }` — named type exports, not `export *`
+- Route files export `default app` (Hono instance)
 
 ## Error Handling
 
-**Backend Route Pattern:**
-Every route handler wraps its entire body in try/catch. Use `parseBody()` for request validation and `getErrorMessage()`/`getErrorStatus()` for error responses.
-
+**Route-level pattern (all Hono route handlers):**
 ```typescript
-app.post("/endpoint", async (c) => {
+app.get("/", (c) => {
   try {
-    const result = await parseBody(c, someSchema);
-    if ("response" in result) return result.response;
-
-    const { field } = result.data;
-    // ... business logic ...
-    return c.json({ ok: true });
+    return c.json(listCampaigns());
   } catch (error) {
     return c.json(
-      { error: getErrorMessage(error, "Fallback message.") },
+      { error: getErrorMessage(error, "Failed to list campaigns.") },
       getErrorStatus(error)
     );
   }
 });
 ```
+- Every route body wrapped in a single outer `try/catch`
+- `getErrorMessage(error, "Fallback message.")` — always pass a human-readable fallback
+- `getErrorStatus(error)` — maps `AppError.statusCode` to HTTP status; non-AppErrors return 500
+- Never throw from route handlers; always return a `c.json(...)` response
 
-**Key error utilities:**
-- `AppError` class at `backend/src/lib/errors.ts` - custom error with `statusCode` (defaults to 500)
-- `getErrorStatus(error, fallback?)` - extracts status from AppError, only returns 400/404/500
-- `getErrorMessage(error, fallback?)` - extracts message from Error instances, returns fallback for non-Error values
-- `parseBody(c, schema)` - parses JSON body against Zod schema, returns `{ data }` or `{ response }` (pre-built error response)
-- `zodFirstError(error)` - extracts first Zod issue message
-
-**Frontend API Pattern:**
-All API calls use thin wrappers (`apiGet`, `apiPost`, `apiDelete`) that throw on non-ok responses. Error messages extracted via `readErrorMessage()` at `frontend/lib/api.ts`.
-
+**AppError class (`backend/src/lib/errors.ts`):**
 ```typescript
-export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) {
-    throw new Error(await readErrorMessage(res));
+export class AppError extends Error {
+  constructor(message: string, public readonly statusCode: number = 500) {
+    super(message);
+    this.name = "AppError";
   }
-  return (await res.json()) as T;
 }
 ```
+- Throw `AppError` for expected domain errors (e.g. `new AppError("Not found", 404)`)
+- Plain `Error` for unexpected errors — caught at route boundary, mapped to 500
 
-**Discriminated union results:**
-Use `"error" in result` / `"resolved" in result` pattern for functions that can fail without throwing:
-
+**Request validation pattern:**
 ```typescript
-export type ResolveResult =
-  | { resolved: ResolvedRole }
-  | { error: string; status: 400 };
-
-const gen = resolveGenerator(settings);
-if ("error" in gen) return c.json({ error: gen.error }, gen.status);
+const result = await parseBody(c, createCampaignSchema);
+if ("response" in result) return result.response;
+const { name, premise } = result.data;
 ```
+- `parseBody()` in `backend/src/routes/helpers.ts` handles JSON parse + Zod validation
+- Returns discriminated union: `{ data }` on success or `{ response: Response }` on failure
+- Early return pattern: check for error response immediately after `parseBody`
+
+**Active campaign guard:**
+```typescript
+const campaign = requireActiveCampaign(c, id);
+if (campaign instanceof Response) return campaign;
+```
+- `requireActiveCampaign()` returns campaign or 404 Response — always check `instanceof Response`
 
 ## Logging
 
-**Framework:** `console` (no structured logging library)
+**Framework:** Custom `createLogger` (`backend/src/lib/logger.ts`)
 
-**Patterns:**
-- `console.error()` for recoverable failures in non-critical paths (e.g., embedding failures)
-- No debug/info logging observed; errors are surfaced via HTTP responses
+**Usage pattern:**
+```typescript
+// Module-level logger — one per file
+const log = createLogger("worldgen");
 
-## Validation
+// Usage
+log.info("Starting scaffold generation", { campaignId });
+log.warn("Embedder not configured — storing without vectors");
+log.error("LanceDB write failed", error);
+```
 
-**Framework:** Zod (`zod` v4.3+)
+**Output format:** `[2026-01-15T10:30:00.000Z] [LEVEL] [tag] message\ndata`
+- Writes to both console and daily file in `backend/logs/YYYY-MM-DD.log`
+- Error objects serialized as `message + stack`; other data as JSON
+- `console.log` for INFO/WARN, `console.error` for ERROR
 
-**Schema location:** All route-level schemas centralized in `backend/src/routes/schemas.ts`
-
-**Patterns:**
-- String trimming via `.transform(s => s.trim()).pipe(z.string().min(1))` for required strings
-- `.default()` for optional fields with fallback values
-- `.strip()` to remove unknown keys from nested objects
-- `.refine()` for cross-field validation (e.g., locationNames required when role is "key")
-- `z.discriminatedUnion()` for variant request bodies (e.g., `regenerateSectionSchema`)
+**Rule:** Do not use raw `console.log` in source files — use `createLogger`. A Stop hook audits all modified files for `console.log` before session ends.
 
 ## Comments
 
-**When to Comment:**
-- Section dividers use `// ───── Section Name ─────` pattern (Unicode box-drawing characters)
-- JSDoc-style `/** */` comments used sparingly, mainly on utility functions like `parseBody`
-- Inline comments explain non-obvious business logic (e.g., "Single player per campaign")
-- Test files use horizontal rule dividers: `// ---------------------------------------------------------------------------`
+**When to comment:**
+- Section dividers in test files use `// -------` separator lines
+- Complex logic with non-obvious behavior: inline `//` comments
+- JSDoc-style `/** ... */` on exported utility functions with non-obvious signatures (`parseBody`, `requireActiveCampaign`)
+- Type satisfies checks with explanatory comment: `// Compile-time check: ParsedCharacter must be assignable to PlayerCharacter`
 
-**JSDoc/TSDoc:**
-- Minimal usage; types serve as documentation
-- Used on `parseBody()` and on `_uid` field in `ScaffoldNpc`
+**No-comment zones:**
+- Simple CRUD operations — code is self-documenting
+- Zod schema field descriptions go in `.describe("...")` — not comments
+
+## Validation
+
+**All schemas use Zod:**
+```typescript
+const schema = z.object({
+  name: z.string().min(1),
+  premise: z.string().min(1),
+  seeds: worldSeedsSchema.optional(),
+});
+```
+- Route input schemas live in `backend/src/routes/schemas.ts`
+- AI tool schemas defined inline where used (co-located with AI call)
+- All schemas use `.describe()` for AI-facing schemas (LLM sees these as field hints)
+- `.safeParse()` for validation returning success/error; `.parse()` only inside try/catch
 
 ## Function Design
 
-**Size:** Most functions are small (10-30 lines). Route handlers can be longer (30-60 lines) due to the try/catch + validation + business logic pattern.
+**Size:** Functions kept small; single responsibility. Files > 400 lines split by concern.
 
-**Parameters:** Use object parameters for functions with 3+ args (e.g., `generateWorldScaffold({ campaignId, name, premise, seeds, role, research })`)
+**Parameters:** Named options objects for functions with 3+ parameters:
+```typescript
+export async function parseCharacterDescription(opts: {
+  description: string;
+  premise: string;
+  locationNames: string[];
+  role: ResolvedRole;
+}): Promise<ParsedCharacter>
+```
 
 **Return Values:**
-- Route handlers return `c.json()` with data or `{ error: string }` and appropriate status code
-- Business logic functions return typed objects
-- Discriminated unions for functions that can fail: `{ data } | { response }`, `{ resolved } | { error, status }`
+- Async functions return `Promise<T>` explicitly
+- Discriminated unions for fallible operations: `{ data: T } | { response: Response }`, `{ resolved: R } | { error: string; status: 400 }`
+- Never `null | T` when a typed union is clearer
 
 ## Module Design
 
-**Exports:**
-- Default export for Hono route apps: `export default app` in each route file
-- Named exports for everything else: functions, types, constants
-- Re-exports via index files: `backend/src/ai/index.ts`, `backend/src/settings/index.ts`, `shared/src/index.ts`
+**Barrel Files:** Every feature directory has `index.ts` re-exporting public API:
+- `backend/src/ai/index.ts` — exports `createModel`, `resolveRoleModel`, `callStoryteller`, etc.
+- `backend/src/lib/index.ts` — exports `errors`, `logger`, `type-guards`, `clamp`
 
-**Barrel Files:**
-- Used in `backend/src/ai/index.ts`, `backend/src/settings/index.ts`, `backend/src/worldgen/index.ts`
-- `shared/src/index.ts` re-exports all public types and functions
-- Frontend: No barrel files; direct imports from specific files
-
-## React Component Conventions
-
-**Client Components:**
-- Always start with `"use client"` directive
-- Use named function exports: `export function CharacterPanel()`
-- Props destructured in function signature
-- State managed with `useState`, side effects with `useEffect`
-- Cleanup pattern for async effects: `let cancelled = false` with cleanup returning `() => { cancelled = true }`
-
-**Styling:**
-- Tailwind CSS utility classes exclusively (no CSS modules, no styled-components)
-- Shadcn UI components from `@/components/ui/` (Button, Textarea, Label, ScrollArea, etc.)
-- Dark theme with custom color tokens: `text-bone`, `bg-card`, `text-muted-foreground`, `border-border`
-- Responsive: `lg:w-[280px]` breakpoint pattern for sidebars
-
-**Icons:** Lucide React (`lucide-react`): `Loader2`, `Sparkles`, `Upload`, `Wand2`, `AlertTriangle`
-
-## Database Conventions
-
-**ORM:** Drizzle with `better-sqlite3` (synchronous operations)
-
-**Query pattern:** Use Drizzle query builder, not raw SQL:
-```typescript
-const db = getDb();
-db.select().from(locations).where(eq(locations.campaignId, id)).all();
-```
-
-**JSON fields:** Arrays and objects stored as JSON strings in SQLite text columns. Parsed client-side with safe `parseJsonArray()`/`parseJsonObject()` helpers that catch parse errors.
-
-**IDs:** UUID strings via `crypto.randomUUID()`
-
-**Migrations:** Drizzle Kit generates migrations to `backend/drizzle/`. Generate with `npm run db:generate` from backend directory.
+**Import discipline:**
+- Import from `index.js` (barrel), not from individual files: `from "../lib/index.js"` not `from "../lib/errors.js"`
+- Exceptions: when the specific sub-module needs to be referenced by type (e.g., `from "../ai/resolve-role-model.js"` for a type only it defines)
 
 ---
 
-*Convention analysis: 2026-03-09*
+*Convention analysis: 2026-03-19*

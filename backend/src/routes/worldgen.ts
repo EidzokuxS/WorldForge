@@ -150,8 +150,26 @@ app.post("/generate", async (c) => {
         saveScaffoldToDb(campaignId, scaffold);
         markGenerationComplete(campaignId, scaffold.refinedPremise);
 
-        // Store lore cards in LanceDB
-        await storeLoreCards(scaffold.loreCards, resolveEmbedder(settings));
+        // Store lore cards in LanceDB (non-fatal — world is saved regardless)
+        let loreStorageFailed = false;
+        if (scaffold.loreCards.length > 0) {
+          try {
+            await storeLoreCards(scaffold.loreCards, resolveEmbedder(settings));
+            log.info(`Stored ${scaffold.loreCards.length} lore cards in LanceDB`);
+          } catch (loreError) {
+            loreStorageFailed = true;
+            const msg = loreError instanceof Error ? loreError.message : String(loreError);
+            log.error(`Lore card storage failed: ${msg}`, loreError);
+            await stream.writeSSE({
+              event: "progress",
+              data: JSON.stringify({
+                step: -1,
+                totalSteps: -1,
+                label: `Lore storage failed: ${msg}. World saved without vector search.`,
+              }),
+            });
+          }
+        }
 
         const startingLocation =
           scaffold.locations.find((location) => location.isStarting)?.name ??
@@ -165,6 +183,8 @@ app.post("/generate", async (c) => {
             locationCount: scaffold.locations.length,
             npcCount: scaffold.npcs.length,
             factionCount: scaffold.factions.length,
+            loreCardCount: scaffold.loreCards.length,
+            loreStorageFailed,
             startingLocation,
           }),
         });

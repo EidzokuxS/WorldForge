@@ -479,9 +479,81 @@ async function handleRevealLocation(
   };
 }
 
-async function handleSetCondition(
+async function handleMoveTo(
   campaignId: string,
   args: Record<string, unknown>
+): Promise<ToolResult> {
+  const targetLocationName = args.targetLocationName as string;
+
+  const db = getDb();
+  const player = db
+    .select()
+    .from(players)
+    .where(eq(players.campaignId, campaignId))
+    .get();
+
+  if (!player) return { success: false, error: "No player found" };
+  if (!player.currentLocationId) return { success: false, error: "Player has no current location" };
+
+  // Resolve destination by name (case-insensitive)
+  const destination = db
+    .select()
+    .from(locations)
+    .where(
+      sql`${locations.campaignId} = ${campaignId} AND LOWER(${locations.name}) = LOWER(${targetLocationName})`
+    )
+    .get();
+
+  if (!destination) return { success: false, error: `Location not found: ${targetLocationName}` };
+
+  // Check connectivity
+  const currentLoc = db
+    .select({ connectedTo: locations.connectedTo })
+    .from(locations)
+    .where(eq(locations.id, player.currentLocationId))
+    .get();
+
+  let connectedIds: string[] = [];
+  if (currentLoc) {
+    try {
+      connectedIds = JSON.parse(currentLoc.connectedTo) as string[];
+    } catch {
+      connectedIds = [];
+    }
+  }
+
+  if (!connectedIds.includes(destination.id)) {
+    // List available paths for LLM retry
+    const allLocs = db
+      .select({ id: locations.id, name: locations.name })
+      .from(locations)
+      .where(eq(locations.campaignId, campaignId))
+      .all();
+    const reachable = allLocs
+      .filter((l) => connectedIds.includes(l.id))
+      .map((l) => l.name);
+    return {
+      success: false,
+      error: `${targetLocationName} is not connected to current location. Available paths: ${reachable.join(", ")}`,
+    };
+  }
+
+  // Move player
+  db.update(players)
+    .set({ currentLocationId: destination.id })
+    .where(eq(players.id, player.id))
+    .run();
+
+  return {
+    success: true,
+    result: { locationId: destination.id, locationName: destination.name },
+  };
+}
+
+async function handleSetCondition(
+  campaignId: string,
+  args: Record<string, unknown>,
+  outcomeTier?: string
 ): Promise<ToolResult> {
   const targetName = args.targetName as string;
   const delta = args.delta as number | undefined;
@@ -500,6 +572,14 @@ async function handleSetCondition(
     return {
       success: false,
       error: "NPCs do not have HP in the current system. Use add_tag/remove_tag for NPC conditions.",
+    };
+  }
+
+  // Backend enforcement: reject HP decrease on Strong Hit unless combat where player is target
+  if (outcomeTier === "strong_hit" && delta !== undefined && delta < 0) {
+    return {
+      success: false,
+      error: "Cannot decrease HP on a Strong Hit. Strong Hit = full success with no damage to the player. Use add_tag for non-HP consequences.",
     };
   }
 
@@ -595,7 +675,8 @@ export async function executeToolCall(
   campaignId: string,
   toolName: string,
   args: Record<string, unknown>,
-  tick: number
+  tick: number,
+  outcomeTier?: string
 ): Promise<ToolResult> {
   try {
     switch (toolName) {
@@ -621,7 +702,9 @@ export async function executeToolCall(
       case "reveal_location":
         return await handleRevealLocation(campaignId, args);
       case "set_condition":
-        return await handleSetCondition(campaignId, args);
+        return await handleSetCondition(campaignId, args, outcomeTier);
+      case "move_to":
+        return await handleMoveTo(campaignId, args);
       case "transfer_item":
         return await handleTransferItem(campaignId, args);
       default:

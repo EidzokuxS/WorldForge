@@ -1,165 +1,133 @@
 # External Integrations
 
-**Analysis Date:** 2026-03-09
+**Analysis Date:** 2026-03-19
 
 ## APIs & External Services
 
-**LLM Providers (Provider-Agnostic via Vercel AI SDK):**
-- All LLM calls go through `ai` package (`streamText`, `generateText`, `generateObject`, `embedMany`)
-- Provider registry: `backend/src/ai/provider-registry.ts`
-- Two protocol adapters:
-  - `@ai-sdk/openai` (`createOpenAI`) - OpenAI-compatible endpoints (OpenAI, OpenRouter, Ollama, LM Studio, vLLM, custom)
-  - `@ai-sdk/anthropic` (`createAnthropic`) - Anthropic-compatible endpoints
-- Protocol auto-detected from base URL (contains "anthropic" -> anthropic-compatible, else openai-compatible)
-- Override via `protocol` field on provider config
+**LLM Providers (user-configurable, not hardcoded):**
+All LLM API calls go through the Vercel AI SDK. Provider URLs and keys are stored in `settings.json` and resolved at runtime via `backend/src/ai/provider-registry.ts`.
 
-**Supported Cloud LLM Providers:**
-- OpenAI - Built-in preset, base URL `https://api.openai.com/v1`
-- Anthropic - Built-in preset, base URL `https://api.anthropic.com`
-- OpenRouter - Built-in preset, base URL `https://openrouter.ai/api/v1`
-- Any custom OpenAI-compatible endpoint (user-configurable)
+- **OpenAI** — `https://api.openai.com/v1`
+  - SDK: `@ai-sdk/openai` via `createOpenAI()`
+  - Protocol: `openai-compatible`
+  - Auth: API key stored in `settings.json` under provider config
 
-**Supported Local LLM Providers:**
-- Ollama - Built-in preset, base URL `http://localhost:11434/v1`
-- LM Studio, vLLM - Via custom provider configuration
+- **Anthropic** — `https://api.anthropic.com/v1`
+  - SDK: `@ai-sdk/anthropic` via `createAnthropic()`
+  - Protocol: `anthropic-compatible` (detected by URL pattern `/anthropic` or `anthropic.com`)
+  - Auth: `authToken` + `x-api-key` header
 
-**4 LLM Roles (each independently configurable):**
-- Judge - Structured JSON decisions (low temperature)
-- Storyteller - Creative narrative prose (high temperature)
-- Generator - World generation, character creation (medium temperature)
-- Embedder - Text embeddings for vector search
+- **OpenRouter** — `https://openrouter.ai/api/v1`
+  - SDK: `@ai-sdk/openai` (OpenAI-compatible protocol)
+  - Used in production for Embedder role (qwen/qwen3-embedding-8b)
 
-**DuckDuckGo Web Search (via MCP):**
-- Package: `@ai-sdk/mcp` + `Experimental_StdioMCPTransport`
-- Usage: IP researcher spawns `npx -y duckduckgo-mcp-server` as subprocess
-- File: `backend/src/worldgen/ip-researcher.ts`
-- Purpose: Research known IP franchises (D&D, Star Wars, etc.) for world generation
-- Fallback: If MCP fails, uses LLM internal knowledge instead
-- Configuration: `research.enabled` and `research.maxSearchSteps` in settings
+- **Ollama (local)** — `http://localhost:11434/v1`
+  - SDK: `@ai-sdk/openai` (OpenAI-compatible)
+  - No API key required (`"ollama"` placeholder used)
+
+- **Custom providers** — any OpenAI-compatible or Anthropic-compatible endpoint
+  - Detected by `resolveProviderProtocol()` in `backend/src/ai/provider-registry.ts`
+
+**Image Generation:**
+- Any OpenAI-compatible `/v1/images/generations` endpoint
+  - Implementation: raw `fetch()` in `backend/src/images/generate.ts`
+  - Returns `b64_json`, cached to `campaigns/{id}/images/`
+  - Disabled by default (`settings.images.enabled = false`, `providerId = "none"`)
+
+**Web Search (via MCP):**
+- **DuckDuckGo MCP Server** — `npx -y duckduckgo-mcp-server` (spawned as subprocess)
+  - Used by: `backend/src/worldgen/ip-researcher.ts` (Step 0 of world generation pipeline)
+  - Client: `@ai-sdk/mcp` via `createMCPClient()` with `Experimental_StdioMCPTransport`
+  - Fallback: LLM internal knowledge if MCP fails or times out (20s timeout)
+  - Config: `backend/src/lib/mcp-client.ts`
+
+- **Z.AI Search MCP** — `npx -y zai-search-mcp` (spawned as subprocess)
+  - Alternative to DuckDuckGo, selectable via `settings.research.searchProvider`
+  - Same MCP transport mechanism
 
 ## Data Storage
 
-**SQLite (Primary Database):**
-- Driver: `better-sqlite3` (synchronous, embedded)
-- ORM: `drizzle-orm` with `drizzle-kit` for migrations
-- Schema: `backend/src/db/schema.ts`
-- Connection: `backend/src/db/index.ts`
-- Migrations: `backend/drizzle/` directory
-- Location: `campaigns/{uuid}/state.db` (per-campaign)
-- 7 tables: `campaigns`, `locations`, `players`, `npcs`, `items`, `factions`, `relationships`, `chronicle`
-- JSON columns stored as text (tags, goals, beliefs, connectedTo, equippedItems)
+**Databases:**
+- **SQLite** via `better-sqlite3` + `drizzle-orm`
+  - Per-campaign database: `campaigns/{uuid}/state.db`
+  - WAL mode enabled, foreign keys ON, busy timeout 5000ms
+  - Client: `backend/src/db/index.ts` — `connectDb()` / `getDb()`
+  - Schema: `backend/src/db/schema.ts` — 7 tables: `campaigns`, `locations`, `players`, `npcs`, `items`, `factions`, `relationships`, `chronicle`
+  - Migrations: `backend/drizzle/` (4 migration files), generated via `drizzle-kit`
 
-**LanceDB (Vector Database):**
-- Package: `@lancedb/lancedb` (Rust-based, embedded, no external server)
-- Connection: `backend/src/vectors/connection.ts` - singleton pattern, one campaign at a time
-- Location: `campaigns/{uuid}/vectors/` (per-campaign, filesystem-based)
-- Tables: `lore_cards` (implemented), `episodic_events` (schema only)
-- Operations: `backend/src/vectors/lore-cards.ts` - insert, search (cosine similarity), get all, delete
-- Embeddings: `backend/src/vectors/embeddings.ts` - uses Vercel AI SDK `embedMany()` with OpenAI-compatible embedding models
-- Batch size: 50 texts per embedding call
+**Vector Database:**
+- **LanceDB** (`@lancedb/lancedb` ^0.26.2) — embedded, file-based, no Python
+  - Per-campaign storage: `campaigns/{uuid}/vectors/`
+  - Connection: `backend/src/vectors/connection.ts` — single-connection singleton
+  - Use: semantic search for lore cards (cosine similarity)
+  - Embedding: via `embedMany()` from Vercel AI SDK using configured Embedder role
+  - Implementation: `backend/src/vectors/lore-cards.ts`, `backend/src/vectors/embeddings.ts`
 
 **File Storage:**
-- Campaign data: `campaigns/{uuid}/` directory structure
-  - `state.db` - SQLite database
-  - `config.json` - Campaign metadata, premise, world seeds
-  - `chat_history.json` - Conversation history
-  - `vectors/` - LanceDB data files
-- Settings: `settings.json` at project root (auto-created)
-- All local filesystem, no cloud storage
+- Local filesystem only
+  - Campaign configs: `campaigns/{uuid}/config.json` (world seeds, campaign metadata)
+  - Chat history: `campaigns/{uuid}/chat_history.json`
+  - Images cache: `campaigns/{uuid}/images/` (generated portrait/location/scene images)
+  - App settings: `settings.json` at backend root
 
 **Caching:**
-- None (no Redis, no in-memory cache layer)
+- In-memory singleton for active DB connection and vector DB connection
+- Image caching: filesystem at `campaigns/{uuid}/images/`
 
 ## Authentication & Identity
 
 **Auth Provider:**
-- None - Single-user local application
-- No authentication, no user accounts
-- API keys for LLM providers stored in `settings.json` (server-side)
-- Security: `assertSafeId()` regex validates campaign IDs to prevent path traversal
+- None — no user authentication system
+- Single-user local application
+- LLM API keys stored plaintext in `settings.json`
+- Campaign ID path traversal protection via `assertSafeId()` regex in routes
 
 ## Monitoring & Observability
 
 **Error Tracking:**
-- None (no Sentry, no external error tracking)
+- None (no external service)
 
 **Logs:**
-- `console.log` / `console.warn` / `console.error` throughout backend
-- No structured logging framework
-- Key log prefixes: `[ip-researcher]`, `[scaffold-generator]`
+- Custom structured logger: `backend/src/lib/logger.ts`
+- Log files written to `backend/logs/`
+- Usage: `createLogger("module-name")` returns `{ info, warn, error }` logger
+- Frontend uses no logging library
 
 ## CI/CD & Deployment
 
 **Hosting:**
-- Localhost only - No cloud deployment
-- Backend on port 3001, frontend on port 3000
+- No deployment config detected (no Dockerfile, no Vercel/Railway/Fly config)
+- Development-only setup (local machine)
 
 **CI Pipeline:**
-- No `.github/` directory detected
-- No CI/CD configuration
+- Not detected
 
 ## Environment Configuration
 
 **Required env vars:**
-- None strictly required (all have defaults)
+- None strictly required — all defaults are hardcoded
+- `PORT` — optional, defaults to `3001`
+- `CORS_ORIGIN` — optional, defaults to `http://localhost:3000`
 
-**Optional env vars:**
-- `PORT` - Backend port (default: 3001)
-- `CORS_ORIGIN` - Allowed CORS origin (default: `http://localhost:3000`)
-- `NEXT_PUBLIC_API_BASE` - Frontend API base URL (default: `http://localhost:3001`)
-
-**Settings file (`settings.json`):**
-- LLM provider configs (name, base URL, API key, default model)
-- Role assignments (provider + model + temperature + maxTokens for each of 4 roles)
-- Fallback config (provider, model, timeout, retry count)
-- Image generation config (provider, model, style prompt, enabled flag)
-- Research config (enabled, maxSearchSteps)
-- Managed by `backend/src/settings/manager.ts` with normalization and validation
-
-## Communication Protocols
-
-**HTTP REST:**
-- Frontend -> Backend via `fetch()` calls
-- API client: `frontend/lib/api.ts` - `apiGet()`, `apiPost()`, `apiDelete()`, `apiStreamPost()`
-- Base URL configurable via `NEXT_PUBLIC_API_BASE`
-
-**Server-Sent Events (SSE):**
-- World generation pipeline streams progress via SSE (`text/event-stream`)
-- Events: `progress` (step updates), `complete` (final result), `error`
-- Client parsing: `frontend/lib/api.ts` `generateWorld()` function
-
-**WebSocket:**
-- Endpoint: `/ws` on backend
-- Currently minimal: connection confirmation + ping/pong
-- Set up via `@hono/node-ws` (`createNodeWebSocket`)
-- File: `backend/src/index.ts`
-
-**Plain Text Streaming:**
-- Chat/narrative responses stream as plain text (not SSE)
-- Manual `ReadableStream` parsing on frontend
+**Secrets location:**
+- LLM API keys: `settings.json` at project root (not in environment variables)
+- No `.env` files present in the project
 
 ## Webhooks & Callbacks
 
 **Incoming:**
-- None
+- None — no webhook receivers
 
 **Outgoing:**
-- None
+- None — all external calls are request-response (LLM API calls, MCP subprocess tool calls)
 
-## External Tool Integration
+## WebSocket
 
-**MCP (Model Context Protocol):**
-- `@ai-sdk/mcp` `^1.0.25` - Client for MCP tool servers
-- `Experimental_StdioMCPTransport` - Spawns MCP servers as child processes
-- Currently used: `duckduckgo-mcp-server` (installed on-demand via `npx -y`)
-- File: `backend/src/worldgen/ip-researcher.ts`
-- Pattern: spawn MCP server -> get tools -> pass to `generateText()` -> close
-
-**SillyTavern V2/V3 Card Import:**
-- Client-side parser: `frontend/lib/v2-card-parser.ts`
-- Supports JSON files and PNG files with embedded tEXt chunks
-- Zero external dependencies (manual PNG chunk parsing)
+**Internal WebSocket endpoint:**
+- `ws://localhost:3001/ws` — implemented via `@hono/node-ws`
+- Current use: ping/pong keepalive only (`backend/src/index.ts`)
+- LLM streaming is done via HTTP SSE (Server-Sent Events), not WebSocket
 
 ---
 
-*Integration audit: 2026-03-09*
+*Integration audit: 2026-03-19*
