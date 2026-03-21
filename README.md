@@ -312,7 +312,7 @@ npm --prefix frontend run lint       # linting
 
 ## License
 
-MIT
+AGPL-3.0 — see [LICENSE](LICENSE). Free to use, modify, and distribute, but all derivative works must remain open-source under the same license. Commercial licensing available on request.
 
 ---
 
