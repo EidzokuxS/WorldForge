@@ -29,24 +29,30 @@ No main quest. The world evolves independently: key characters pursue their own 
 ### Installation
 
 ```bash
-git clone <repository-url>
-cd worldforge
+git clone https://github.com/EidzokuxS/WorldForge.git
+cd WorldForge
 
-npm install
-cd shared && npm run build && cd ..
+npm install    # installs all dependencies + auto-builds shared package
 ```
 
 ### Running
 
 ```bash
-# Terminal 1 — backend (port 3001)
-cd backend && npm run dev
+# Both servers at once (backend :3001 + frontend :3000)
+npm run dev
 
-# Terminal 2 — frontend (port 3000)
-cd frontend && npm run dev
+# Or separately in two terminals:
+npm run dev:backend
+npm run dev:frontend
 ```
 
 Open **http://localhost:3000** in your browser.
+
+### First Launch
+
+1. Go to **Settings** → **Providers** → add your LLM provider (API key + endpoint)
+2. Go to **Settings** → **Roles** → assign models to Judge, Storyteller, Generator, Embedder
+3. Return to title screen → **New Campaign** → enter a premise → play
 
 ## Configuration
 
