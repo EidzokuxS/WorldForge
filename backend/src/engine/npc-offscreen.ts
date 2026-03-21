@@ -8,7 +8,7 @@
  */
 
 import { z } from "zod";
-import { safeGenerateObject as generateObject } from "../ai/generate-object-safe.js";
+import { generateObject } from "ai";
 import { eq, and, sql } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { npcs, locations } from "../db/schema.js";
@@ -248,7 +248,6 @@ export async function simulateOffscreenNpcs(
     "You are the world simulation engine for a text RPG.",
     "For each NPC listed below, determine what they have been doing off-screen since the last simulation.",
     "Consider their persona, traits, location, and goals when deciding their actions.",
-    "Each NPC update MUST describe something SPECIFIC they did — name locations, actions, and consequences. Do NOT use vague summaries like 'continued pursuing goals' or 'maintained their position'. Example good update: 'Traveled to the Sporeworks to negotiate a spore trade deal with the fungal workers.' Example bad update: 'Continued working toward their goals.'",
     "Return a structured update for each NPC.",
     "",
     "NPCs:",

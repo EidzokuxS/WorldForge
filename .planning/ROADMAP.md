@@ -13,13 +13,13 @@ Transform the existing world generation + chat pipeline (Tasks 1-14) into a full
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [ ] **Phase 1: Engine Foundation** - Prompt assembler with token budgets, Oracle probability system, Storyteller tool schemas
-- [ ] **Phase 2: Turn Cycle** - Full turn pipeline (input -> context -> Oracle -> roll -> narration with tools -> state update), SSE multi-event streaming
-- [ ] **Phase 3: World State Mechanics** - HP/damage, inventory, location graph navigation, entity tracking, spawn/reveal tools
-- [ ] **Phase 4: Story Control** - Retry/regenerate, undo, inline edit of AI output, quick action buttons
+- [x] **Phase 2: Turn Cycle** - Full turn pipeline (input -> context -> Oracle -> roll -> narration with tools -> state update), SSE multi-event streaming (completed 2026-03-18)
+- [x] **Phase 3: World State Mechanics** - HP/damage, inventory, location graph navigation, entity tracking, spawn/reveal tools (completed 2026-03-18)
+- [x] **Phase 4: Story Control** - Retry/regenerate, undo, inline edit of AI output, quick action buttons (completed 2026-03-18)
 - [ ] **Phase 5: Episodic Memory** - Event embedding with importance scoring, composite retrieval, smart context compression, multi-hop graph queries
 - [ ] **Phase 6: NPC Agents** - Autonomous Key Character agents, off-screen batch simulation, character promotion
-- [ ] **Phase 7: Reflection + Progression** - Importance-triggered NPC reflection, wealth tiers, skill progression, relationship evolution
-- [ ] **Phase 8: World Engine** - Faction macro-ticks, territory changes, world events, information flow to NPCs and player
+- [x] **Phase 7: Reflection + Progression** - Importance-triggered NPC reflection, wealth tiers, skill progression, relationship evolution (completed 2026-03-18)
+- [x] **Phase 8: World Engine** - Faction macro-ticks, territory changes, world events, information flow to NPCs and player (completed 2026-03-18)
 - [ ] **Phase 9: Persistence** - Checkpoint save/load, branching, auto-checkpoint before lethal encounters
 - [ ] **Phase 10: Image Generation** - Provider-agnostic image gen, portraits, scene illustrations, location backgrounds, graceful degradation
 - [ ] **Phase 11: Content Import** - SillyTavern WorldBook import with entity classification, web search expansion
@@ -35,7 +35,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Player types an action and receives a structured Oracle response showing chance percentage, outcome tier (Strong Hit / Weak Hit / Miss), and reasoning
   3. Near-zero probability actions (absurd requests) still receive a non-zero chance and proceed through the roll -- nothing is hard-blocked
   4. Oracle uses temperature 0.0 and produces consistent results for equivalent inputs
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
 - [ ] 01-01: Prompt Assembler
@@ -51,11 +51,11 @@ Plans:
   3. Storyteller can call add_tag, remove_tag, set_relationship, add_chronicle_entry, log_event, and offer_quick_actions -- all validated by backend before DB write
   4. Invalid tool calls from the LLM are rejected and the Storyteller retries with error feedback
   5. Quick action buttons appear below narrative; clicking one sends that action as the next turn
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 02-01: Turn Processor + Tool Executor
-- [ ] 02-02: SSE Streaming + Frontend Integration
+- [ ] 02-01-PLAN.md -- Tool schemas + Tool executor + Turn processor
+- [ ] 02-02-PLAN.md -- SSE streaming route + Frontend integration + Quick actions
 
 ### Phase 3: World State Mechanics
 **Goal**: The game world has tangible mechanical systems -- characters take damage, carry items, move between locations, and interact with tracked entities
@@ -67,12 +67,12 @@ Plans:
   3. Player can move between connected location nodes; travel takes abstract turns; the sidebar shows current location and entities present
   4. When player explores beyond the scaffold, new location nodes are generated on-the-fly via reveal_location tool and connected to the graph
   5. NPCs and items are tracked per location node; scene prompts include who/what is present at the player's current location
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 03-01: HP + Damage + Death System
-- [ ] 03-02: Inventory + Item Transfers
-- [ ] 03-03: Location Graph + Entity Tracking
+- [ ] 03-01-PLAN.md -- Spawn/condition tools + prompt assembler inventory/death context
+- [ ] 03-02-PLAN.md -- Movement validation + world data enrichment + entity tracking
+- [ ] 03-03-PLAN.md -- Frontend sidebar real-time updates + clickable navigation
 
 ### Phase 4: Story Control
 **Goal**: Player has full editorial control over the narrative -- can retry, undo, edit AI output, and use suggested action buttons
@@ -83,11 +83,11 @@ Plans:
   2. Player can click "Undo" to revert the last action+response -- chat history and game state both roll back
   3. Player can click on AI-generated narrative text and edit it inline; edited text becomes the canonical version in chat history
   4. Quick action buttons rendered below the narrative are clickable and send the action as if the player typed it
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 04-01: Retry + Undo
-- [ ] 04-02: Inline Edit + Quick Actions UI
+- [ ] 04-01-PLAN.md -- State snapshot + retry/undo/edit backend endpoints
+- [ ] 04-02-PLAN.md -- Frontend retry/undo/edit controls + CTRL-04 verification
 
 ### Phase 5: Episodic Memory
 **Goal**: The game remembers what happened -- significant events are stored as searchable memories, context compression keeps prompts within budget over long sessions, and relationship chains enrich context
@@ -98,11 +98,11 @@ Plans:
   2. Prompt assembly retrieves top 3-5 episodic memories per turn using composite scoring (similarity x0.4 + recency x0.3 + importance x0.3)
   3. Over a 50+ turn session, the prompt stays within token budget by retaining first messages (world setup), last N turns, and high-importance anomalous events while dropping mundane middle turns
   4. Context assembly follows relationship chains (NPC -> location -> faction) via SQL JOINs to include relevant connected entities even if not explicitly mentioned
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 05-01: Episodic Event Storage + Retrieval
-- [ ] 05-02: Smart Context Compression + Multi-hop Queries
+- [ ] 05-01-PLAN.md -- Episodic event embedding + composite retrieval scoring
+- [ ] 05-02-PLAN.md -- Smart context compression + multi-hop graph queries + prompt assembler integration
 
 ### Phase 6: NPC Agents
 **Goal**: Key Characters act autonomously -- they pursue goals, speak unprompted, move between locations, and react to the player's presence
@@ -113,7 +113,7 @@ Plans:
   2. NPC actions are processed through the Oracle the same way player actions are -- probability evaluation + dice roll, not auto-success
   3. Off-screen Key Characters are batch-simulated every N ticks with structured updates (new location, action summary, goal progress)
   4. An NPC that becomes narratively important can be promoted from extra to persistent to key tier
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
 - [ ] 06-01: NPC Agent Loop + Tick Scheduling
@@ -129,7 +129,7 @@ Plans:
   3. Character wealth is tracked as tag tiers (Destitute through Obscenely Rich); the Oracle evaluates affordability based on wealth tier
   4. Skills progress through tag tiers (Novice through Master) driven by the Reflection Agent observing repeated successful use
   5. Relationship tags between entities (Trusted Ally, Suspicious, Sworn Enemy) update through Reflection based on accumulated interactions -- no numeric scores
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
 - [ ] 07-01: Reflection Agent + Triggers
@@ -144,7 +144,7 @@ Plans:
   2. Factions can take actions (expand territory, declare war, trade) and update goals via structured tools; results mutate location tags and faction state
   3. Unexpected world events (plagues, disasters, anomalies) are occasionally introduced when narratively appropriate
   4. NPCs learn about world events through location history, chronicle entries, and proximity/faction affiliation -- information does not teleport
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
 - [ ] 08-01: Faction Tick System
@@ -159,7 +159,7 @@ Plans:
   2. Player can load any checkpoint to restore full campaign state (DB + vectors + chat history)
   3. Checkpoint list is visible in UI with timestamp and description; player can manage (load/delete) checkpoints
   4. The game auto-creates a checkpoint before potentially lethal encounters (HP <= 2 entering combat)
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
 - [ ] 09-01: Checkpoint Save/Load System
@@ -175,7 +175,7 @@ Plans:
   3. High-importance events (new location discovery, boss encounter, dramatic moments) trigger async scene illustration without blocking narration
   4. Location backgrounds are generated on first visit and cached for return visits
   5. Image generation is togglable in Settings; when disabled or no provider configured, the game works identically without images
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
 - [ ] 10-01: Image Provider Integration + Settings
@@ -190,7 +190,7 @@ Plans:
   2. WorldBook entries are cleaned of SillyTavern-specific data (activation keys, recursion settings) and classified by type (character, location, faction, bestiary, lore) via LLM
   3. Classified entries are routed to appropriate DB tables (NPCs, locations, factions) or stored as lore cards
   4. IP research supports multiple search sources (DuckDuckGo MCP, Z.AI search MCP) for broader lore discovery
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
 - [ ] 11-01: WorldBook Import Pipeline
@@ -206,13 +206,13 @@ Note: Phases 4, 9, 10, 11 have flexible ordering relative to later phases. Phase
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Engine Foundation | 0/2 | Not started | - |
-| 2. Turn Cycle | 0/2 | Not started | - |
-| 3. World State Mechanics | 0/3 | Not started | - |
-| 4. Story Control | 0/2 | Not started | - |
+| 2. Turn Cycle | 2/2 | Complete   | 2026-03-18 |
+| 3. World State Mechanics | 3/3 | Complete   | 2026-03-18 |
+| 4. Story Control | 2/2 | Complete   | 2026-03-18 |
 | 5. Episodic Memory | 0/2 | Not started | - |
 | 6. NPC Agents | 0/2 | Not started | - |
-| 7. Reflection + Progression | 0/2 | Not started | - |
-| 8. World Engine | 0/2 | Not started | - |
+| 7. Reflection + Progression | 2/2 | Complete   | 2026-03-18 |
+| 8. World Engine | 2/2 | Complete   | 2026-03-18 |
 | 9. Persistence | 0/2 | Not started | - |
 | 10. Image Generation | 0/2 | Not started | - |
 | 11. Content Import | 0/2 | Not started | - |

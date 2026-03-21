@@ -169,28 +169,3 @@ export interface ParsedCharacter {
 export type CharacterResult =
   | { role: "player"; character: ParsedCharacter }
   | { role: "key"; npc: ScaffoldNpc };
-
-export type CheckpointMeta = {
-  id: string;
-  name: string;
-  description: string;
-  createdAt: number;
-  auto: boolean;
-};
-
-// ───── WorldBook Import ─────
-
-export interface ClassifiedWorldBookEntry {
-  name: string;
-  type: "character" | "location" | "faction" | "bestiary" | "lore_general";
-  summary: string;
-}
-
-export interface WorldBookImportResult {
-  imported: {
-    characters: number;
-    locations: number;
-    factions: number;
-    loreCards: number;
-  };
-}

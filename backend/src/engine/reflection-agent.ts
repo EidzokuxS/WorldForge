@@ -20,7 +20,7 @@ import { createLogger } from "../lib/index.js";
 const log = createLogger("reflection-agent");
 
 /** NPCs must accumulate this much importance before reflection triggers. */
-export const REFLECTION_THRESHOLD = 10;
+export const REFLECTION_THRESHOLD = 15;
 
 // -- Types --------------------------------------------------------------------
 

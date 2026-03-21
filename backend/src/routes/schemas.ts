@@ -1,5 +1,5 @@
-import type { Context } from "hono";
 import { z } from "zod";
+import { LORE_CATEGORIES } from "../worldgen/types.js";
 
 const SEED_CATEGORIES = [
   "geography",
@@ -79,6 +79,12 @@ export const chatBodySchema = z.object({
     .pipe(z.string().min(1, "playerAction is required.")),
 });
 
+export const chatActionBodySchema = z.object({
+  playerAction: z.string().min(1).max(2000),
+  intent: z.string().min(1).max(200),
+  method: z.string().max(200).default(""),
+});
+
 export const createCampaignSchema = z.object({
   name: z
     .string()
@@ -138,6 +144,7 @@ export const testRoleSchema = z.object({
 // --- World review schemas ---
 
 const regenerateSectionBaseSchema = z.object({
+  campaignId: z.string().min(1),
   additionalInstruction: z.string().optional(),
 });
 
@@ -190,17 +197,6 @@ const scaffoldNpcSchema = z.object({
   factionName: z.string().nullable(),
 });
 
-const LORE_CATEGORIES = [
-  "location",
-  "npc",
-  "faction",
-  "ability",
-  "rule",
-  "concept",
-  "item",
-  "event",
-] as const;
-
 export const saveEditsSchema = z.object({
   campaignId: z.string().min(1),
   scaffold: z.object({
@@ -216,21 +212,16 @@ export const saveEditsSchema = z.object({
   }),
 });
 
-// --- Character creation schemas ---
-
-export const parseCharacterSchema = z.object({
-  campaignId: z.string().min(1),
-  description: z.string().trim().min(1, "Character description is required.").max(2000, "Character description is too long (max 2000 characters)."),
-});
-
-export const generateCharacterSchema = z.object({
-  campaignId: z.string().min(1),
-});
+// --- Character save schema ---
 
 export const saveCharacterSchema = z.object({
   campaignId: z.string().min(1),
   character: z.object({
     name: z.string().min(1),
+    race: z.string().max(100).default(""),
+    gender: z.string().max(100).default(""),
+    age: z.string().max(100).default(""),
+    appearance: z.string().max(1000).default(""),
     tags: z.array(z.string()),
     hp: z.number().int().min(1).max(5),
     equippedItems: z.array(z.string()),
@@ -238,30 +229,65 @@ export const saveCharacterSchema = z.object({
   }),
 });
 
-// Utility: extract first Zod error message
-export function zodFirstError(error: z.ZodError): string {
-  return error.issues[0]?.message ?? "Validation failed.";
-}
+// ───── Unified character/NPC endpoints ─────
 
-/**
- * Parse a JSON request body and validate it against a Zod schema.
- * Returns `{ data }` on success or a ready-made Hono JSON error response.
- */
-export async function parseBody<T extends z.ZodTypeAny>(
-  c: Context,
-  schema: T
-): Promise<{ data: z.infer<T> } | { response: Response }> {
-  let raw: unknown;
-  try {
-    raw = await c.req.json();
-  } catch {
-    return { response: c.json({ error: "Invalid JSON body." }, 400) };
-  }
+const roleField = z.enum(["player", "key"]).default("player");
 
-  const parsed = schema.safeParse(raw);
-  if (!parsed.success) {
-    return { response: c.json({ error: zodFirstError(parsed.error) }, 400) };
-  }
+/** Shared fields and refinement for all character/NPC creation schemas. */
+const characterRoleFields = {
+  role: roleField,
+  locationNames: z.array(z.string()).optional(),
+  factionNames: z.array(z.string()).optional(),
+} as const;
 
-  return { data: parsed.data as z.infer<T> };
-}
+const keyRoleLocationRefine = {
+  refinement: (d: { role: string; locationNames?: string[] }) =>
+    d.role === "player" || (d.locationNames != null && d.locationNames.length > 0),
+  options: { message: "locationNames required when role is 'key'.", path: ["locationNames"] as string[] },
+};
+
+export const parseCharacterSchema = z.object({
+  campaignId: z.string().min(1),
+  concept: z.string().trim().min(1, "Character concept is required.").max(2000),
+  ...characterRoleFields,
+}).refine(keyRoleLocationRefine.refinement, keyRoleLocationRefine.options);
+
+export const generateCharacterSchema = z.object({
+  campaignId: z.string().min(1),
+  ...characterRoleFields,
+}).refine(keyRoleLocationRefine.refinement, keyRoleLocationRefine.options);
+
+export const researchCharacterSchema = z.object({
+  campaignId: z.string().min(1),
+  archetype: z.string().trim().min(1, "Archetype is required.").max(500),
+  ...characterRoleFields,
+}).refine(keyRoleLocationRefine.refinement, keyRoleLocationRefine.options);
+
+export const importV2CardSchema = z.object({
+  campaignId: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().min(1).max(8000),
+  personality: z.string().max(4000).default(""),
+  scenario: z.string().max(4000).default(""),
+  tags: z.array(z.string()).default([]),
+  ...characterRoleFields,
+}).refine(keyRoleLocationRefine.refinement, keyRoleLocationRefine.options);
+
+export const resolveStartingLocationSchema = z.object({
+  campaignId: z.string().min(1),
+  prompt: z.string().max(500).optional(),
+});
+
+// --- NPC promotion schema ---
+
+export const promoteNpcBodySchema = z.object({
+  newTier: z.enum(["persistent", "key"]),
+});
+
+// --- Chat control schemas ---
+
+export const chatEditBodySchema = z.object({
+  messageIndex: z.number().int().min(0),
+  newContent: z.string().min(1),
+});
+

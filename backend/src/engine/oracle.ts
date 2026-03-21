@@ -3,14 +3,13 @@
  *
  * Evaluates action probability via Judge LLM (generateObject with Zod schema,
  * temperature 0), rolls D100, resolves 3-tier outcome (strong_hit / weak_hit / miss).
- * Never returns chance 0 or 100. Retries with Fallback role on primary failure.
+ * Never returns chance 0 or 100. Falls back to 50% on failure.
  */
 
 import crypto from "node:crypto";
 import { z } from "zod";
+import { generateObject } from "ai";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
-import { safeGenerateObject } from "../ai/generate-object-safe.js";
-import { withModelFallback } from "../ai/with-model-fallback.js";
 import { createLogger } from "../lib/index.js";
 
 const log = createLogger("oracle");
@@ -63,20 +62,9 @@ Given the actor's capabilities (tags), the target's attributes (tags), and the e
 Rules:
 - NEVER return 0 or 100. Nothing is impossible, nothing is guaranteed.
 - Base your evaluation on the mechanical interaction of tags, not narrative preference.
-- Do NOT default to high chances. A character without an explicit skill tag for the attempted action starts at ~30%. Only specialized training (relevant tags) pushes above 50%.
-- If the actor attempts a SPECIFIC named technique/ability and does NOT have a tag for it, the chance should be very low (5-20%). Having a related but different skill gives only a small bonus.
-- Characters WITH relevant skill tags should generally succeed: [Master Swordsman] attacking a common guard should be 80+.
-- Environmental factors modify the base chance by +/-10 to +/-20 (darkness, advantageous terrain, weather).
-- If the actor is wounded (low HP noted in scene context), reduce chance for physically demanding actions by 10-20%. A character at HP 1-2 is severely hampered.
-- Provide brief reasoning referencing SPECIFIC tags (or lack thereof) that justify the number.
-
-Calibration bands:
-- 5-15%: Acting far outside capabilities (no relevant tags, attempting advanced techniques)
-- 20-35%: Unskilled attempt at something requiring training
-- 40-55%: Relevant but not specialized (adjacent skill, basic training)
-- 60-75%: Directly relevant skill tag (Adept/Skilled level)
-- 80-90%: Master-level tag against lesser opposition
-- 91-99%: Overwhelming advantage (multiple relevant tags, weak target, ideal conditions)
+- A peasant swinging at a dragon gets ~5. A master swordsman against a drunk bandit gets ~90.
+- Environmental factors modify the base chance (darkness, rain, noise).
+- Provide brief reasoning based on the mechanical factors.
 
 Example:
 Action: Pick the iron lock using lockpicks
@@ -89,60 +77,46 @@ Example:
 Action: Intimidate the guard captain
 Actor: [scrawny, peasant]
 Target: [veteran-soldier, fearless, armored]
--> { "chance": 8, "reasoning": "A scrawny peasant has almost no leverage against a fearless veteran in full armor." }
-
-Example:
-Action: Cast Fireball
-Actor: [wind-mage, novice]
-Target: []
-Environment: [forest, dry]
--> { "chance": 12, "reasoning": "Actor has wind magic, not fire magic. No fire-related tags. Novice skill level. Attempting a technique outside their element gives very low odds." }`;
-
-function buildOraclePrompt(payload: OraclePayload): string {
-  return [
-    `Action: ${payload.intent}${payload.method ? ` via ${payload.method}` : ""}`,
-    `Actor: [${payload.actorTags.join(", ")}]`,
-    `Target: [${payload.targetTags.join(", ")}]`,
-    `Environment: [${payload.environmentTags.join(", ")}]`,
-    `Scene: ${payload.sceneContext}`,
-  ].join("\n");
-}
-
-async function executeOracleCall(
-  provider: ProviderConfig,
-  userPrompt: string
-): Promise<OracleResult> {
-  const model = createModel(provider);
-  const { object } = await safeGenerateObject({
-    model,
-    schema: oracleOutputSchema,
-    temperature: 0,
-    system: ORACLE_SYSTEM_PROMPT,
-    prompt: userPrompt,
-  });
-
-  // Clamp as safety net even if Zod somehow passes out-of-range
-  const chance = Math.max(1, Math.min(99, object.chance));
-  const roll = rollD100();
-  const outcome = resolveOutcome(roll, chance);
-  return { chance, roll, outcome, reasoning: object.reasoning };
-}
+-> { "chance": 8, "reasoning": "A scrawny peasant has almost no leverage against a fearless veteran in full armor." }`;
 
 export async function callOracle(
   payload: OraclePayload,
-  provider: ProviderConfig,
-  fallbackProvider?: ProviderConfig | null
+  provider: ProviderConfig
 ): Promise<OracleResult> {
-  const userPrompt = buildOraclePrompt(payload);
+  try {
+    const userPrompt = [
+      `Action: ${payload.intent}${payload.method ? ` via ${payload.method}` : ""}`,
+      `Actor: [${payload.actorTags.join(", ")}]`,
+      `Target: [${payload.targetTags.join(", ")}]`,
+      `Environment: [${payload.environmentTags.join(", ")}]`,
+      `Scene: ${payload.sceneContext}`,
+    ].join("\n");
 
-  if (fallbackProvider) {
-    return withModelFallback(
-      () => executeOracleCall(provider, userPrompt),
-      () => executeOracleCall(fallbackProvider, userPrompt),
-      "oracle:callOracle"
-    );
+    const model = createModel(provider);
+
+    const { object } = await generateObject({
+      model,
+      schema: oracleOutputSchema,
+      temperature: 0,
+      system: ORACLE_SYSTEM_PROMPT,
+      prompt: userPrompt,
+    });
+
+    // Clamp as safety net even if Zod somehow passes out-of-range
+    const chance = Math.max(1, Math.min(99, object.chance));
+    const roll = rollD100();
+    const outcome = resolveOutcome(roll, chance);
+
+    return { chance, roll, outcome, reasoning: object.reasoning };
+  } catch (error) {
+    log.warn("Oracle call failed, using coin flip fallback", error);
+    const roll = rollD100();
+    const outcome = resolveOutcome(roll, 50);
+    return {
+      chance: 50,
+      roll,
+      outcome,
+      reasoning: "Oracle unavailable -- using coin flip fallback",
+    };
   }
-
-  // No fallback configured — just call primary, let error propagate
-  return executeOracleCall(provider, userPrompt);
 }

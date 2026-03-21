@@ -9,6 +9,7 @@ import chatRoutes from "./routes/chat.js";
 import loreRoutes from "./routes/lore.js";
 import settingsRoutes from "./routes/settings.js";
 import worldgenRoutes from "./routes/worldgen.js";
+import characterRoutes from "./routes/character.js";
 
 const app = new Hono();
 const port = Number.parseInt(process.env.PORT ?? "3001", 10);
@@ -22,10 +23,47 @@ app.use(
 
 app.get("/api/health", (c) => c.json({ status: "ok" }));
 
+app.get("/api/debug/prompt", async (c) => {
+  try {
+    const { getActiveCampaign } = await import("./campaign/index.js");
+    const { assemblePrompt } = await import("./engine/index.js");
+
+    const campaign = getActiveCampaign();
+    if (!campaign) {
+      return c.json({ error: "No active campaign loaded." }, 400);
+    }
+
+    const action = c.req.query("action") ?? "";
+
+    const assembled = await assemblePrompt({
+      campaignId: campaign.id,
+      contextWindow: 8192,
+      playerAction: action || undefined,
+    });
+
+    return c.json({
+      sections: assembled.sections.map((s) => ({
+        name: s.name,
+        estimatedTokens: s.estimatedTokens,
+        contentPreview: s.content.slice(0, 100),
+      })),
+      totalTokens: assembled.totalTokens,
+      budgetUsed: assembled.budgetUsed,
+    });
+  } catch (error) {
+    const { getErrorMessage, getErrorStatus } = await import("./lib/index.js");
+    return c.json(
+      { error: getErrorMessage(error, "Debug prompt failed.") },
+      getErrorStatus(error)
+    );
+  }
+});
+
 app.route("/api/settings", settingsRoutes);
 app.route("/api/campaigns", campaignRoutes);
 app.route("/api/campaigns", loreRoutes);
 app.route("/api/worldgen", worldgenRoutes);
+app.route("/api/worldgen", characterRoutes);
 app.route("/api", aiRoutes);
 app.route("/api/chat", chatRoutes);
 
@@ -61,3 +99,14 @@ const server = serve(
 );
 
 injectWebSocket(server);
+
+// Graceful shutdown — ensures port is freed on Ctrl+C (especially on Windows)
+function shutdown() {
+  console.log("\nShutting down...");
+  server.close(() => process.exit(0));
+  // Force exit after 3s if server.close hangs
+  setTimeout(() => process.exit(1), 3000);
+}
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);

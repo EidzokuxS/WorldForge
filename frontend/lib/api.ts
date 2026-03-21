@@ -1,47 +1,46 @@
-import type { SeedCategory, Settings, WorldSeeds } from "@/lib/types";
+import type { CampaignMeta, SeedCategory, Settings, WorldSeeds } from "@/lib/types";
+import type {
+  TestConnectionRequest,
+  TestConnectionResult,
+  TestRoleResult,
+  RollSeedResult,
+  GenerateWorldResult,
+  GenerationProgress,
+  WorldData,
+  LoreCardItem,
+  ScaffoldLocation,
+  ScaffoldFaction,
+  ScaffoldNpc,
+  ScaffoldLoreCard,
+  EditableScaffold,
+  RegenerateSectionRequest,
+  ParsedCharacter,
+  CharacterResult,
+} from "./api-types";
+
+// Re-export all types so existing `import type { X } from "@/lib/api"` keeps working.
+export type {
+  TestConnectionRequest,
+  TestConnectionResult,
+  TestRoleResult,
+  RollSeedResult,
+  GenerateWorldResult,
+  GenerationProgress,
+  WorldData,
+  LoreCardItem,
+  ScaffoldLocation,
+  ScaffoldFaction,
+  ScaffoldNpc,
+  ScaffoldLoreCard,
+  EditableScaffold,
+  RegenerateSectionRequest,
+  ParsedCharacter,
+  CharacterResult,
+};
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:3001";
 
-export interface TestConnectionRequest {
-  baseUrl: string;
-  apiKey: string;
-  model: string;
-}
-
-export interface TestConnectionResult {
-  success: boolean;
-  latencyMs: number;
-  model: string;
-  error?: string;
-}
-
-export interface TestRoleResult {
-  success: boolean;
-  role: string;
-  model: string;
-  response?: string;
-  error?: string;
-  latencyMs: number;
-}
-
-export interface RollSeedResult {
-  category: SeedCategory;
-  value: string | string[];
-}
-
-export interface GenerateWorldResult {
-  refinedPremise?: string;
-  locationCount?: number;
-  npcCount?: number;
-  factionCount?: number;
-  startingLocation?: string;
-}
-
-export interface GenerationProgress {
-  step: number;
-  totalSteps: number;
-  label: string;
-}
+// ───── Raw types (internal) ─────
 
 interface RawWorldData {
   locations: Array<{
@@ -80,46 +79,29 @@ interface RawWorldData {
     tags: string;
     reason: string | null;
   }>;
+  items: Array<{
+    id: string;
+    name: string;
+    tags: string;
+    ownerId: string | null;
+    locationId: string | null;
+  }>;
+  player: {
+    id: string;
+    campaignId: string;
+    name: string;
+    race: string;
+    gender: string;
+    age: string;
+    appearance: string;
+    hp: number;
+    tags: string;
+    equippedItems: string;
+    currentLocationId: string | null;
+  } | null;
 }
 
-export interface WorldData {
-  locations: Array<{
-    id: string;
-    campaignId: string;
-    name: string;
-    description: string;
-    tags: string[];
-    connectedTo: string[];
-    isStarting: boolean;
-  }>;
-  npcs: Array<{
-    id: string;
-    campaignId: string;
-    name: string;
-    persona: string;
-    tags: string[];
-    tier: string;
-    currentLocationId: string | null;
-    goals: Record<string, string>;
-    beliefs: Record<string, string>;
-  }>;
-  factions: Array<{
-    id: string;
-    campaignId: string;
-    name: string;
-    tags: string[];
-    goals: string[];
-    assets: string[];
-  }>;
-  relationships: Array<{
-    id: string;
-    campaignId: string;
-    entityA: string;
-    entityB: string;
-    tags: string[];
-    reason: string | null;
-  }>;
-}
+// ───── Helpers ─────
 
 function parseJsonArray(value: string): string[] {
   try {
@@ -132,14 +114,21 @@ function parseJsonArray(value: string): string[] {
   }
 }
 
-function parseJsonObject(value: string): Record<string, string> {
+const EMPTY_NPC_GOALS = { short_term: [] as string[], long_term: [] as string[] };
+
+function parseNpcGoals(value: string): { short_term: string[]; long_term: string[] } {
   try {
     const parsed = JSON.parse(value) as unknown;
-    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-      ? (parsed as Record<string, string>)
-      : {};
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      const obj = parsed as Record<string, unknown>;
+      return {
+        short_term: Array.isArray(obj.short_term) ? obj.short_term as string[] : [],
+        long_term: Array.isArray(obj.long_term) ? obj.long_term as string[] : [],
+      };
+    }
+    return EMPTY_NPC_GOALS;
   } catch {
-    return {};
+    return EMPTY_NPC_GOALS;
   }
 }
 
@@ -153,8 +142,8 @@ function parseWorldData(raw: RawWorldData): WorldData {
     npcs: raw.npcs.map((npc) => ({
       ...npc,
       tags: parseJsonArray(npc.tags),
-      goals: parseJsonObject(npc.goals),
-      beliefs: parseJsonObject(npc.beliefs),
+      goals: parseNpcGoals(npc.goals),
+      beliefs: parseJsonArray(npc.beliefs),
     })),
     factions: raw.factions.map((fac) => ({
       ...fac,
@@ -162,12 +151,25 @@ function parseWorldData(raw: RawWorldData): WorldData {
       goals: parseJsonArray(fac.goals),
       assets: parseJsonArray(fac.assets),
     })),
+    items: raw.items.map((item) => ({
+      ...item,
+      tags: parseJsonArray(item.tags),
+    })),
     relationships: raw.relationships.map((rel) => ({
       ...rel,
       tags: parseJsonArray(rel.tags),
     })),
+    player: raw.player
+      ? {
+          ...raw.player,
+          tags: parseJsonArray(raw.player.tags),
+          equippedItems: parseJsonArray(raw.player.equippedItems),
+        }
+      : null,
   };
 }
+
+// ───── HTTP primitives ─────
 
 export async function readErrorMessage(response: Response): Promise<string> {
   try {
@@ -224,6 +226,8 @@ export async function apiDelete<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+// ───── Settings ─────
+
 export function fetchSettings(): Promise<Settings> {
   return apiGet<Settings>("/api/settings");
 }
@@ -231,6 +235,8 @@ export function fetchSettings(): Promise<Settings> {
 export function updateSettings(settings: Settings): Promise<Settings> {
   return apiPost<Settings>("/api/settings", settings);
 }
+
+// ───── Provider Testing ─────
 
 export function testConnection(
   req: TestConnectionRequest
@@ -252,6 +258,8 @@ export function testRole(
     },
   });
 }
+
+// ───── World DNA Seeds ─────
 
 export function rollWorldSeeds(): Promise<WorldSeeds> {
   return apiPost<WorldSeeds>("/api/worldgen/roll-seeds");
@@ -277,6 +285,116 @@ export function suggestSeed(
   });
 }
 
+// ───── Turn SSE Parser ─────
+
+export interface TurnSSEHandlers {
+  onNarrative: (text: string) => void;
+  onOracleResult: (result: { chance: number; roll: number; outcome: string; reasoning: string }) => void;
+  onStateUpdate: (update: { tool: string; args: unknown; result: unknown }) => void;
+  onQuickActions: (actions: Array<{ label: string; action: string }>) => void;
+  onDone: () => void;
+  onError: (error: string) => void;
+}
+
+export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: TurnSSEHandlers): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let currentEvent = "";
+  let currentData = "";
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop()!;
+
+    for (const line of lines) {
+      if (line.startsWith("event:")) {
+        currentEvent = line.slice(6).trim();
+      } else if (line.startsWith("data:")) {
+        currentData += line.slice(5).trim();
+      } else if (line === "") {
+        if (currentEvent && currentData) {
+          try {
+            const parsed = JSON.parse(currentData);
+            switch (currentEvent) {
+              case "narrative": handlers.onNarrative(parsed.text); break;
+              case "oracle_result": handlers.onOracleResult(parsed); break;
+              case "state_update": handlers.onStateUpdate(parsed); break;
+              case "quick_actions": handlers.onQuickActions(parsed.actions ?? parsed.result?.actions ?? []); break;
+              case "done": handlers.onDone(); break;
+              case "error": handlers.onError(parsed.error ?? "Unknown error"); break;
+            }
+          } catch { /* skip malformed events */ }
+        }
+        currentEvent = "";
+        currentData = "";
+      }
+    }
+  }
+}
+
+// ───── SSE Stream Parser ─────
+
+interface SSEHandlers<T> {
+  onProgress?: (data: Record<string, unknown>) => void;
+  onComplete: (data: Record<string, unknown>) => T;
+  onError?: (data: Record<string, unknown>) => never;
+  label: string;
+}
+
+async function parseSSEStream<T>(body: ReadableStream<Uint8Array>, handlers: SSEHandlers<T>): Promise<T> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let currentEvent = "";
+  let currentData = "";
+
+  for (; ;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop()!;
+
+    for (const line of lines) {
+      if (line.startsWith("event:")) {
+        currentEvent = line.slice(6).trim();
+      } else if (line.startsWith("data:")) {
+        currentData = line.slice(5).trim();
+      } else if (line === "") {
+        if (currentEvent && currentData) {
+          let parsed: Record<string, unknown>;
+          try {
+            parsed = JSON.parse(currentData) as Record<string, unknown>;
+          } catch {
+            throw new Error(`${handlers.label}: invalid SSE data for event '${currentEvent}'`);
+          }
+
+          if (currentEvent === "progress") {
+            handlers.onProgress?.(parsed);
+          } else if (currentEvent === "complete") {
+            return handlers.onComplete(parsed);
+          } else if (currentEvent === "error") {
+            if (handlers.onError) handlers.onError(parsed);
+            const msg = typeof parsed.error === "string" ? parsed.error : `${handlers.label} failed.`;
+            throw new Error(msg);
+          }
+        }
+        currentEvent = "";
+        currentData = "";
+      }
+    }
+  }
+
+  throw new Error(`${handlers.label} stream ended without completion.`);
+}
+
+// ───── World Generation ─────
+
 export async function generateWorld(
   campaignId: string,
   onProgress?: (progress: GenerationProgress) => void
@@ -298,51 +416,13 @@ export async function generateWorld(
     return (await res.json()) as GenerateWorldResult;
   }
 
-  // SSE parsing
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let currentEvent = "";
-  let currentData = "";
-
-  for (; ;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop()!; // keep incomplete line in buffer
-
-    for (const line of lines) {
-      if (line.startsWith("event:")) {
-        currentEvent = line.slice(6).trim();
-      } else if (line.startsWith("data:")) {
-        currentData = line.slice(5).trim();
-      } else if (line === "") {
-        // Empty line = end of SSE message
-        if (currentEvent && currentData) {
-          const parsed = JSON.parse(currentData) as Record<string, unknown>;
-
-          if (currentEvent === "progress") {
-            onProgress?.(parsed as unknown as GenerationProgress);
-          } else if (currentEvent === "complete") {
-            return parsed as unknown as GenerateWorldResult;
-          } else if (currentEvent === "error") {
-            const msg =
-              typeof parsed.error === "string"
-                ? parsed.error
-                : "World generation failed.";
-            throw new Error(msg);
-          }
-        }
-        currentEvent = "";
-        currentData = "";
-      }
-    }
-  }
-
-  // Stream ended without "complete" event
-  throw new Error("World generation stream ended without completion.");
+  return parseSSEStream<GenerateWorldResult>(res.body!, {
+    label: "World generation",
+    onProgress: onProgress
+      ? (data) => onProgress(data as unknown as GenerationProgress)
+      : undefined,
+    onComplete: (data) => data as unknown as GenerateWorldResult,
+  });
 }
 
 export async function getWorldData(campaignId: string): Promise<WorldData> {
@@ -351,13 +431,6 @@ export async function getWorldData(campaignId: string): Promise<WorldData> {
 }
 
 // ───── Lore Cards ─────
-
-export interface LoreCardItem {
-  id: string;
-  term: string;
-  definition: string;
-  category: string;
-}
 
 export async function getLoreCards(
   campaignId: string
@@ -387,64 +460,14 @@ export async function deleteLore(
 
 // ───── Campaign Meta ─────
 
-export interface CampaignMeta {
-  id: string;
-  name: string;
-  premise: string;
-  createdAt: number;
-  updatedAt: number;
-}
+export type { CampaignMeta };
 
-export function getActiveCampaign(): Promise<CampaignMeta> {
-  return apiGet<CampaignMeta>("/api/campaigns/active");
+export async function getActiveCampaign(): Promise<CampaignMeta | null> {
+  const res = await apiGet<{ campaign: CampaignMeta | null }>("/api/campaigns/active");
+  return res.campaign;
 }
 
 // ───── World Review ─────
-
-export interface ScaffoldLocation {
-  name: string;
-  description: string;
-  tags: string[];
-  isStarting: boolean;
-  connectedTo: string[];
-}
-
-export interface ScaffoldFaction {
-  name: string;
-  tags: string[];
-  goals: string[];
-  assets: string[];
-  territoryNames: string[];
-}
-
-export interface ScaffoldNpc {
-  name: string;
-  persona: string;
-  tags: string[];
-  goals: { shortTerm: string[]; longTerm: string[] };
-  locationName: string;
-  factionName: string | null;
-}
-
-export interface ScaffoldLoreCard {
-  term: string;
-  definition: string;
-  category: string;
-}
-
-export interface EditableScaffold {
-  refinedPremise: string;
-  locations: ScaffoldLocation[];
-  factions: ScaffoldFaction[];
-  npcs: ScaffoldNpc[];
-  loreCards: ScaffoldLoreCard[];
-}
-
-export type RegenerateSectionRequest =
-  | { section: "premise"; additionalInstruction?: string }
-  | { section: "locations"; refinedPremise: string; additionalInstruction?: string }
-  | { section: "factions"; refinedPremise: string; locationNames: string[]; additionalInstruction?: string }
-  | { section: "npcs"; refinedPremise: string; locationNames: string[]; factionNames: string[]; additionalInstruction?: string };
 
 export function regenerateSection<T>(body: RegenerateSectionRequest): Promise<T> {
   return apiPost<T>("/api/worldgen/regenerate-section", body);
@@ -456,32 +479,6 @@ export function saveWorldEdits(campaignId: string, scaffold: EditableScaffold): 
 
 // ───── Character Creation ─────
 
-export interface ParsedCharacter {
-  name: string;
-  tags: string[];
-  hp: number;
-  equippedItems: string[];
-  locationName: string;
-}
-
-export function parseCharacter(
-  campaignId: string,
-  description: string
-): Promise<ParsedCharacter> {
-  return apiPost<ParsedCharacter>("/api/worldgen/parse-character", {
-    campaignId,
-    description,
-  });
-}
-
-export function generateCharacter(
-  campaignId: string
-): Promise<ParsedCharacter> {
-  return apiPost<ParsedCharacter>("/api/worldgen/generate-character", {
-    campaignId,
-  });
-}
-
 export function saveCharacter(
   campaignId: string,
   character: ParsedCharacter
@@ -490,4 +487,75 @@ export function saveCharacter(
     "/api/worldgen/save-character",
     { campaignId, character }
   );
+}
+
+export function parseCharacter(
+  campaignId: string,
+  concept: string,
+  role: "player" | "key" = "player",
+  locationNames?: string[],
+  factionNames?: string[],
+): Promise<CharacterResult> {
+  return apiPost<CharacterResult>("/api/worldgen/parse-character", {
+    campaignId, concept, role, locationNames, factionNames,
+  });
+}
+
+export function generateCharacter(
+  campaignId: string,
+  role: "player" | "key" = "player",
+  locationNames?: string[],
+  factionNames?: string[],
+): Promise<CharacterResult> {
+  return apiPost<CharacterResult>("/api/worldgen/generate-character", {
+    campaignId, role, locationNames, factionNames,
+  });
+}
+
+export function researchCharacter(
+  campaignId: string,
+  archetype: string,
+  role: "player" | "key" = "player",
+  locationNames?: string[],
+  factionNames?: string[],
+): Promise<CharacterResult> {
+  return apiPost<CharacterResult>("/api/worldgen/research-character", {
+    campaignId, archetype, role, locationNames, factionNames,
+  });
+}
+
+export function importV2Card(
+  campaignId: string,
+  card: { name: string; description: string; personality: string; scenario: string; tags: string[] },
+  role: "player" | "key" = "player",
+  locationNames?: string[],
+  factionNames?: string[],
+): Promise<CharacterResult> {
+  return apiPost<CharacterResult>("/api/worldgen/import-v2-card", {
+    campaignId, ...card, role, locationNames, factionNames,
+  });
+}
+
+export function resolveStartingLocation(
+  campaignId: string,
+  prompt?: string,
+): Promise<{ locationId: string; locationName: string; narrative: string | null }> {
+  return apiPost("/api/worldgen/resolve-starting-location", { campaignId, prompt });
+}
+
+// ───── Chat Controls (Retry / Undo / Edit) ─────
+
+export function chatRetry(): Promise<Response> {
+  return apiStreamPost("/api/chat/retry", {});
+}
+
+export function chatUndo(): Promise<{ success: boolean; messagesRemoved: number }> {
+  return apiPost<{ success: boolean; messagesRemoved: number }>("/api/chat/undo", {});
+}
+
+export function chatEdit(
+  messageIndex: number,
+  newContent: string,
+): Promise<{ success: boolean }> {
+  return apiPost<{ success: boolean }>("/api/chat/edit", { messageIndex, newContent });
 }

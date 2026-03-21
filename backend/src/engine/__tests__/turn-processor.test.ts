@@ -32,15 +32,11 @@ vi.mock("ai", () => ({
   tool: vi.fn((def: unknown) => def),
 }));
 
-vi.mock("../../ai/generate-object-safe.js", () => ({
-  safeGenerateObject: vi.fn().mockResolvedValue({ object: { isMovement: false, destination: null } }),
-}));
-
 vi.mock("../../ai/provider-registry.js", () => ({
   createModel: vi.fn().mockReturnValue("mock-model"),
 }));
 
-import { processTurn, type TurnEvent } from "../turn-processor.js";
+import { processTurn, detectMovement, type TurnEvent } from "../turn-processor.js";
 import { callOracle } from "../oracle.js";
 import { assemblePrompt } from "../prompt-assembler.js";
 import {
@@ -51,7 +47,6 @@ import {
 } from "../../campaign/index.js";
 import { createStorytellerTools } from "../tool-schemas.js";
 import { streamText } from "ai";
-import { safeGenerateObject } from "../../ai/generate-object-safe.js";
 import { getDb } from "../../db/index.js";
 import { players, locations } from "../../db/schema.js";
 
@@ -184,8 +179,6 @@ async function collectEvents(generator: AsyncGenerator<TurnEvent>): Promise<Turn
 describe("processTurn", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Default: no movement detected
-    vi.mocked(safeGenerateObject).mockResolvedValue({ object: { isMovement: false, destination: null } } as never);
   });
 
   it("yields oracle_result event first", async () => {
@@ -302,7 +295,7 @@ describe("processTurn", () => {
 
     await collectEvents(processTurn(options));
 
-    expect(createStorytellerTools).toHaveBeenCalledWith(CAMPAIGN_ID, expect.any(Number), expect.any(String));
+    expect(createStorytellerTools).toHaveBeenCalledWith(CAMPAIGN_ID, expect.any(Number));
     expect(streamText).toHaveBeenCalledWith(
       expect.objectContaining({
         tools: expect.any(Object),
@@ -372,10 +365,43 @@ describe("processTurn", () => {
     );
   });
 
+  describe("movement detection", () => {
+    it("detects 'go to' movement commands", () => {
+      expect(detectMovement("go to the tavern")).toBe("the tavern");
+      expect(detectMovement("Go to Market Square")).toBe("Market Square");
+    });
+
+    it("detects 'travel to' movement commands", () => {
+      expect(detectMovement("travel to the forest")).toBe("the forest");
+    });
+
+    it("detects 'move to' movement commands", () => {
+      expect(detectMovement("move to the castle")).toBe("the castle");
+    });
+
+    it("detects 'head to' movement commands", () => {
+      expect(detectMovement("head to the docks")).toBe("the docks");
+    });
+
+    it("detects 'walk to' and 'run to' movement commands", () => {
+      expect(detectMovement("walk to the shrine")).toBe("the shrine");
+      expect(detectMovement("run to the gate")).toBe("the gate");
+    });
+
+    it("returns null for non-movement actions", () => {
+      expect(detectMovement("I attack the goblin")).toBeNull();
+      expect(detectMovement("look around")).toBeNull();
+      expect(detectMovement("pick up the sword")).toBeNull();
+    });
+
+    it("is case-insensitive", () => {
+      expect(detectMovement("GO TO the tavern")).toBe("the tavern");
+      expect(detectMovement("TRAVEL TO the castle")).toBe("the castle");
+    });
+  });
+
   describe("movement in turn processing", () => {
     it("yields location_change state_update when moving to connected location", async () => {
-      vi.mocked(safeGenerateObject).mockResolvedValue({ object: { isMovement: true, destination: "the tavern" } } as never);
-
       const playerRow = {
         id: "player-1",
         name: "Hero",
@@ -471,8 +497,6 @@ describe("processTurn", () => {
     });
 
     it("does not block movement to non-connected location, passes through to Oracle", async () => {
-      vi.mocked(safeGenerateObject).mockResolvedValue({ object: { isMovement: true, destination: "the tavern" } } as never);
-
       const playerRow = {
         id: "player-1",
         name: "Hero",

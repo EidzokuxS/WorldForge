@@ -10,9 +10,6 @@
 
 import { eq, desc } from "drizzle-orm";
 import type { ChatMessage } from "@worldforge/shared";
-import { safeGenerateObject as generateObject } from "../ai/generate-object-safe.js";
-import { z } from "zod";
-import { createModel } from "../ai/provider-registry.js";
 import { readCampaignConfig, getChatHistory } from "../campaign/index.js";
 import { getDb } from "../db/index.js";
 import { players, npcs, locations, items, relationships, chronicle, factions } from "../db/schema.js";
@@ -55,112 +52,91 @@ export interface AssembleOptions {
   embedderResult?: ResolveResult;
   /** Current action text, used as lore search query. */
   playerAction?: string;
-  /** Judge role for LLM-based importance detection during compression. */
-  judgeRole?: ResolvedRole;
 }
 
-// -- LLM-based importance detection for smart compression --------------------
-
-const importantIndicesSchema = z.object({
-  importantIndices: z
-    .array(z.number())
-    .describe("Indices (0-based) of messages that are important enough to always keep in context"),
-});
+// -- Importance keywords for smart compression --------------------------------
 
 /**
- * Batch-detect important messages via a single LLM call.
- * Returns a Set of indices (into the provided messages array) that are important.
- * Falls back to empty set on LLM failure.
+ * Keywords that mark a message as important enough to survive compression.
+ * Messages containing these (case-insensitive) are kept even from the middle.
  */
-async function detectImportantMessages(
-  messages: ReadonlyArray<{ role: string; content: string }>,
-  judgeRole: ResolvedRole,
-): Promise<Set<number>> {
-  if (messages.length === 0) return new Set();
-
-  try {
-    const numbered = messages.map(
-      (m, i) => `[${i}] ${m.role === "user" ? "Player" : "GM"}: ${m.content}`,
-    );
-
-    const { object } = await generateObject({
-      model: createModel(judgeRole.provider),
-      schema: importantIndicesSchema,
-      prompt: `You are reviewing RPG game messages to decide which are important enough to always keep in context during compression.
-
-Important messages include: combat encounters, death, major discoveries, betrayals, captures, escapes, plot twists, relationship changes, acquisition of powerful items, critical world events.
-Mundane actions (looking around, walking, casual greetings, routine conversation) are NOT important.
-Messages with [IMPORTANT] prefix are always important.
-
-Return the indices of important messages.
-
-Messages:
-${numbered.join("\n")}`,
-      temperature: 0.1,
-    });
-
-    return new Set(object.importantIndices.filter((i) => i >= 0 && i < messages.length));
-  } catch (error) {
-    log.warn("LLM importance detection failed, keeping no middle messages", error);
-    return new Set();
-  }
-}
+export const IMPORTANCE_KEYWORDS = [
+  "attack",
+  "attacked",
+  "killed",
+  "kill",
+  "died",
+  "death",
+  "dead",
+  "discovered",
+  "discovery",
+  "betrayed",
+  "betrayal",
+  "ambush",
+  "battle",
+  "fight",
+  "fighting",
+  "defeated",
+  "captured",
+  "escaped",
+  "destroyed",
+  "stolen",
+  "revealed",
+  "secret",
+  "cursed",
+  "poisoned",
+  "wounded",
+  "critical",
+  "treasure",
+  "artifact",
+] as const;
 
 // -- System rules template --------------------------------------------------
 
 const SYSTEM_RULES = `You are the Game Master of a text RPG. You narrate the world and its inhabitants.
-
-CRITICAL OUTPUT RULES (MANDATORY — VIOLATION MEANS FAILURE):
-1. Your output is ONLY narrative prose. NOTHING ELSE.
-2. FORBIDDEN in your output: any text in [BRACKETS], any section header, any metadata, any statistics, any chance/roll numbers, any system information, any HP values (like "HP is now 3/5").
-3. FORBIDDEN: echoing, repeating, or referencing [ACTION RESULT], [NPC STATES], [NARRATION DIRECTIVE], [RECENT CONVERSATION], [SCENE], [SYSTEM RULES], [WORLD PREMISE], [PLAYER STATE], [WORLD STATE], [LORE CONTEXT], [EPISODIC MEMORY], [RELATIONSHIPS], or ANY bracketed text.
-4. FORBIDDEN: fabricating dice rolls, chances, percentages, or outcome values. The outcome is already determined — narrate it as prose.
-5. If you are about to write a bracket "[" followed by a section name — STOP. That is system data, not narrative.
 
 Rules you MUST follow:
 - You are a narrator ONLY. You describe what happens, you do not decide mechanical outcomes.
 - All characters, items, locations, and factions use a tag-based system (string labels, not numbers).
 - The only numeric stat is HP (1-5). Do not invent other numeric stats.
 - Do not hallucinate items, NPCs, or locations that have not been established.
-- If the [NPC STATES] section lists NPCs, those NPCs ARE PRESENT at the player's location. Include them in your narration. Do not claim they are absent.
-- When Key NPCs are present at the player's location (listed in [NPC STATES]), you MUST acknowledge their presence and have them react to the player's action. Key NPCs are autonomous characters with goals and beliefs — they should speak, react, or take action based on their persona and the situation. Do NOT ignore NPCs listed in [NPC STATES].
-- If a Key NPC's goals or beliefs conflict with the player's action, narrate the NPC's reaction (objection, interference, support). NPCs are not passive scenery.
-- MOVEMENT: When the player describes traveling to another location (walking, running, going somewhere), you MUST call the move_to tool with the destination name. If the destination doesn't exist, call reveal_location first to create it, then call move_to. NEVER narrate the player arriving at a new location without calling move_to — the backend tracks player position.
-- After moving to a new location, describe the new location using its tags and description from [SCENE]. Mention any NPCs or items present at the new location.
 - Reference established lore, relationships, and world facts when relevant.
 - Stay consistent with the world premise and previously narrated events.
-- When an [ACTION RESULT] is provided, narrate the outcome matching that result EXACTLY. If the outcome is "miss", narrate FAILURE. If "strong_hit", narrate SUCCESS with bonus. If "weak_hit", narrate success with complication. Do NOT contradict the outcome.
-- COMBAT HP TRACKING (MANDATORY): Whenever the player takes physical damage in combat (hit by a weapon, struck by a fist, injured by a fall, hurt by magic), you MUST call set_condition with a negative delta. A light hit = -1 HP, a solid blow = -1 or -2 HP, a devastating attack = -2 or -3 HP. NEVER describe the player being injured without calling set_condition. Similarly, if the player heals (potion, rest, medical treatment), call set_condition with a positive delta.
+- When an [ACTION RESULT] is provided, narrate the outcome accordingly.
 - When a character reaches HP 0, narrate a contextual outcome based on the situation:
-  - Non-lethal context (pit fight, bar brawl, sparring, training): knockout/submission/unconsciousness. Do NOT describe lethal wounds in non-lethal contexts.
-  - Lethal context (death match, assassination, monster attack): death is possible. Consider the attacker's intent, the setting, and dramatic alternatives (capture, last-second rescue, enemy mercy).
-  - NEVER automatically kill at HP 0 -- always consider context first.
+  - Bar brawl or non-lethal encounter: unconsciousness/knockout
+  - Assassination or deadly ambush: death
+  - Consider the attacker's intent, the setting, and dramatic appropriateness
+  - NEVER automatically kill at HP 0 -- always consider context
 - NEVER reference items the player does not have in their inventory. Check [PLAYER STATE] Inventory before mentioning any item.
-- To give the player a new item, use the spawn_item tool first. Do NOT spawn an item that already exists in the player's inventory.
-- When the player trades or gives away an item, use the transfer_item tool. Do NOT just narrate the trade without using tools.
+- To give the player a new item, use the spawn_item tool first.
 - Character wealth is tag-based: Destitute < Poor < Comfortable < Wealthy < Obscenely Rich. Consider wealth tier when evaluating purchase, bribe, or trade actions.
-- Skills are tag-based: Novice < Skilled < Master. Higher skill tier gives better odds on relevant actions.
-- Use the terminology, concepts, and naming conventions from the world premise and lore context. If the world has specific terms for abilities, locations, or social structures, use those terms consistently instead of generic fantasy equivalents.
-- CRITICAL WORLD CONSISTENCY: Never contradict the world premise. If the premise says "no sun", NEVER describe sunlight, sunshine, or daybreak. If the premise defines specific technology levels, respect them. The premise is absolute truth.
-- MANDATORY: You MUST call offer_quick_actions after EVERY narration. This is not optional. If you do not call offer_quick_actions, the turn is incomplete. Vary suggestions — include at least one social, one physical, and one exploratory option. Reference present NPCs by name, available items, current threats, and nearby locations.`;
-
+- Skills are tag-based: Novice < Skilled < Master. Higher skill tier gives better odds on relevant actions.`;
 
 // -- Smart conversation compression -----------------------------------------
 
 /**
+ * Check whether a message is "important" based on keywords or [IMPORTANT] tag.
+ */
+function isImportantMessage(content: string): boolean {
+  if (content.startsWith("[IMPORTANT]")) return true;
+  const lower = content.toLowerCase();
+  return IMPORTANCE_KEYWORDS.some((kw) => lower.includes(kw));
+}
+
+/**
  * Smart conversation compression: keeps first 2 messages (world setup),
  * last N messages (recent context, ~60% of budget), and any important
- * messages from the middle (detected via LLM batch call). Drops mundane
- * middle turns and inserts an omission marker.
+ * messages from the middle. Drops mundane middle turns and inserts
+ * an omission marker.
  *
- * When no judgeRole is provided, falls back to keeping no middle messages
- * (only first + last).
+ * Exported for testability (pure function -- no DB/campaign access).
  */
-export async function compressConversation(
+export function compressConversation(
   history: ChatMessage[],
   budgetTokens: number,
-  judgeRole?: ResolvedRole,
-): Promise<PromptSection | null> {
+  _importanceThreshold: number = 7,
+): PromptSection | null {
   if (history.length === 0) return null;
 
   const FIRST_KEEP = 2; // Always keep first 2 messages (world setup / character intro)
@@ -221,18 +197,14 @@ export async function compressConversation(
   }
 
   // 3. From middle (firstCount .. recentStartIdx), keep important messages
-  const middleMessages = history.slice(firstCount, recentStartIdx);
-  const importantSet = judgeRole
-    ? await detectImportantMessages(middleMessages, judgeRole)
-    : new Set<number>();
-
   const importantMiddle: Array<{ idx: number; line: string }> = [];
-  for (let i = 0; i < middleMessages.length; i++) {
-    if (importantSet.has(i)) {
-      const line = format(middleMessages[i]!);
+  for (let i = firstCount; i < recentStartIdx; i++) {
+    const msg = history[i]!;
+    if (isImportantMessage(msg.content)) {
+      const line = format(msg);
       const lineTokens = estimateTokens(line);
       if (usedTokens + lineTokens <= budgetTokens) {
-        importantMiddle.push({ idx: firstCount + i, line });
+        importantMiddle.push({ idx: i, line });
         usedTokens += lineTokens;
       }
     }
@@ -673,7 +645,7 @@ function buildWorldStateSection(
 export async function assemblePrompt(
   options: AssembleOptions,
 ): Promise<AssembledPrompt> {
-  const { campaignId, contextWindow, actionResult, embedderResult, playerAction, judgeRole } =
+  const { campaignId, contextWindow, actionResult, embedderResult, playerAction } =
     options;
 
   const budgets = allocateBudgets(contextWindow);
@@ -769,7 +741,7 @@ export async function assemblePrompt(
   // 10. Smart conversation compression (replaces naive tail-slicing)
   const conversationBudget = budgets.recentConversation ?? Math.floor(contextWindow * 0.20);
   const history = getChatHistory(campaignId);
-  const conversationSection = await compressConversation(history, conversationBudget, judgeRole);
+  const conversationSection = compressConversation(history, conversationBudget);
 
   // Collect all non-null sections
   const allSections: PromptSection[] = [

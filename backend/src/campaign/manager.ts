@@ -6,7 +6,7 @@ import { runMigrations } from "../db/migrate.js";
 import { campaigns } from "../db/schema.js";
 import type { CampaignMeta, WorldSeeds } from "@worldforge/shared";
 import { parseWorldSeeds } from "../worldgen/index.js";
-import { AppError } from "../lib/errors.js";
+import { AppError } from "../lib/index.js";
 import { assertSafeId, CAMPAIGNS_DIR, getCampaignConfigPath, getCampaignDir } from "./paths.js";
 import { openVectorDb, closeVectorDb } from "../vectors/index.js";
 
@@ -17,13 +17,12 @@ type CampaignConfigFile = {
   premise: string;
   seeds?: WorldSeeds;
   generationComplete?: boolean;
+  currentTick?: number;
   createdAt: number;
   updatedAt?: number;
 };
 
 let activeCampaign: CampaignMeta | null = null;
-
-export { assertSafeId } from "./paths.js";
 
 function ensureCampaignsDir() {
   if (!fs.existsSync(CAMPAIGNS_DIR)) {
@@ -209,7 +208,7 @@ export async function loadCampaign(id: string): Promise<CampaignMeta> {
         .get();
 
     if (!campaignRow) {
-      throw new Error("Campaign record could not be loaded.");
+      throw new AppError("Campaign record could not be loaded.", 500);
     }
 
     await openVectorDb(id);
@@ -283,4 +282,13 @@ export function markGenerationComplete(
 
 export function getActiveCampaign(): CampaignMeta | null {
   return activeCampaign;
+}
+
+export function incrementTick(campaignId: string): number {
+  assertSafeId(campaignId);
+  const config = readCampaignConfig(campaignId);
+  const nextTick = (config.currentTick ?? 0) + 1;
+  const campaignDir = getCampaignDir(campaignId);
+  writeCampaignConfig(campaignDir, { ...config, currentTick: nextTick });
+  return nextTick;
 }

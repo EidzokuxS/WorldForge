@@ -195,15 +195,13 @@ export async function tickNpcAgent(
       ? `Your relationships:\n${relationshipLines.join("\n")}`
       : "",
     ``,
-    `Decide your next action. You SHOULD take at least one action when other characters are present — passing (no tools) should only happen if truly nothing warrants action.`,
-    ``,
-    `You may:`,
+    `Decide your next action. You may:`,
     `- act(action) — attempt an action (will be evaluated for success via dice roll)`,
     `- speak(dialogue) — say something to someone present`,
     `- move_to(location) — travel to an adjacent location`,
     `- update_own_goal(old, new) — revise your goals based on events`,
     ``,
-    `Choose ONE action that best serves your current goals. Prioritize interaction with present characters over doing nothing.`,
+    `Choose ONE action that best serves your current goals. If nothing pressing, you may pass (call no tools).`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -215,7 +213,7 @@ export async function tickNpcAgent(
   const result = await generateText({
     model,
     tools,
-    temperature: 0.3,
+    temperature: 0,
     stopWhen: stepCountIs(2),
     system: systemPrompt,
     prompt: `What do you do this turn?`,

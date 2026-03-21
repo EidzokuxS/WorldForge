@@ -1,17 +1,33 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { RotateCcw, Undo2, Check, X } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import type { ChatMessage } from "./types";
+import type { ChatMessage } from "@worldforge/shared";
 
 interface NarrativeLogProps {
   messages: ChatMessage[];
   premise: string;
   isStreaming: boolean;
+  onRetry?: () => void;
+  onUndo?: () => void;
+  onEdit?: (index: number, content: string) => void;
+  canRetryUndo?: boolean;
 }
 
-export function NarrativeLog({ messages, premise, isStreaming }: NarrativeLogProps) {
+export function NarrativeLog({
+  messages,
+  premise,
+  isStreaming,
+  onRetry,
+  onUndo,
+  onEdit,
+  canRetryUndo,
+}: NarrativeLogProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editText, setEditText] = useState("");
+  const [editedIndices, setEditedIndices] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     const viewport = containerRef.current?.querySelector(
@@ -22,6 +38,40 @@ export function NarrativeLog({ messages, premise, isStreaming }: NarrativeLogPro
       viewport.scrollTop = viewport.scrollHeight;
     }
   }, [messages, isStreaming]);
+
+  const startEditing = (index: number, content: string) => {
+    if (isStreaming) return;
+    setEditingIndex(index);
+    setEditText(content);
+  };
+
+  const cancelEditing = () => {
+    setEditingIndex(null);
+    setEditText("");
+  };
+
+  const saveEdit = () => {
+    if (editingIndex === null || !onEdit) return;
+    onEdit(editingIndex, editText);
+    setEditedIndices((prev) => new Set(prev).add(editingIndex));
+    cancelEditing();
+  };
+
+  const handleEditKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Escape") {
+      cancelEditing();
+    } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      saveEdit();
+    }
+  };
+
+  const lastAssistantIndex = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "assistant") return i;
+    }
+    return -1;
+  })();
 
   return (
     <section className="flex-1 overflow-hidden">
@@ -55,13 +105,87 @@ export function NarrativeLog({ messages, premise, isStreaming }: NarrativeLogPro
                   );
                 }
 
+                // Assistant message
+                const isLastAssistant = index === lastAssistantIndex;
+                const isEditing = editingIndex === index;
+                const wasEdited = editedIndices.has(index);
+
                 return (
-                  <p
-                    key={`${message.role}-${index}`}
-                    className="whitespace-pre-wrap font-serif text-base leading-relaxed text-foreground"
-                  >
-                    {message.content}
-                  </p>
+                  <div key={`${message.role}-${index}`} className="group relative">
+                    {isEditing ? (
+                      <div className="flex flex-col gap-2">
+                        <textarea
+                          value={editText}
+                          onChange={(e) => setEditText(e.target.value)}
+                          onKeyDown={handleEditKeyDown}
+                          className="w-full resize-none rounded-md border border-border bg-background p-3 font-serif text-base leading-relaxed text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                          style={{ minHeight: "120px" }}
+                          rows={Math.max(4, editText.split("\n").length)}
+                          autoFocus
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={saveEdit}
+                            className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                            Save
+                          </button>
+                          <button
+                            onClick={cancelEditing}
+                            className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                            Cancel
+                          </button>
+                          <span className="text-xs text-muted-foreground">
+                            Ctrl+Enter to save, Esc to cancel
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <p
+                          onClick={() => startEditing(index, message.content)}
+                          className="cursor-pointer whitespace-pre-wrap font-serif text-base leading-relaxed text-foreground hover:bg-accent/30 rounded-md transition-colors px-1 -mx-1"
+                          title="Click to edit"
+                        >
+                          {message.content}
+                        </p>
+                        {wasEdited && (
+                          <span className="mt-1 inline-block text-xs italic text-muted-foreground">
+                            (edited)
+                          </span>
+                        )}
+                      </>
+                    )}
+
+                    {/* Retry/Undo buttons on last assistant message */}
+                    {isLastAssistant && canRetryUndo && !isStreaming && !isEditing && (
+                      <div className="mt-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                        {onRetry && (
+                          <button
+                            onClick={onRetry}
+                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+                            title="Retry"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                            Retry
+                          </button>
+                        )}
+                        {onUndo && (
+                          <button
+                            onClick={onUndo}
+                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+                            title="Undo"
+                          >
+                            <Undo2 className="h-3.5 w-3.5" />
+                            Undo
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 );
               })
             )}

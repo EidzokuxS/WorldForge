@@ -28,6 +28,30 @@ The LLM is the narrator, never the engine. All mechanical outcomes (probability,
 - ✓ Research agent: IP researcher with DuckDuckGo MCP + LLM fallback, configurable — Task 12
 - ✓ Player character: creation page (parse description / AI generate / import V2-V3 card), save to DB — Task 13
 - ✓ NPC generation: 3 creation modes in world-review, stable keys, duplicate warnings — Task 14
+- ✓ Prompt assembler: structured context from 6+ sources with token budgets — Phase 1
+- ✓ Oracle probability system: Judge LLM evaluation, D100 roll, 3-tier outcomes, soft-fail — Phase 1
+- ✓ OraclePanel: collapsible UI showing chance%, roll, tier, reasoning — Phase 1
+- ✓ Turn processor: full Oracle→Storyteller pipeline as async generator — Phase 2
+- ✓ Storyteller tool calling: 6 tools (add_tag, remove_tag, set_relationship, chronicle, log_event, quick_actions) — Phase 2
+- ✓ SSE streaming: typed events (narrative, oracle_result, state_update, quick_actions, done) — Phase 2
+- ✓ Quick action buttons: context-sensitive clickable suggestions from Storyteller — Phase 2
+- ✓ Spawn tools: spawn_npc, spawn_item, reveal_location, set_condition, transfer_item — Phase 3
+- ✓ HP/damage system: 5-point scale, contextual death narration at HP=0 — Phase 3
+- ✓ Inventory system: strict item table, backend-validated transfers — Phase 3
+- ✓ Location navigation: movement detection, on-the-fly generation, entity tracking — Phase 3
+- ✓ Frontend sidebars: live HP/inventory character panel, clickable location panel — Phase 3
+- ✓ Story control: retry/regenerate, undo with state rollback, inline edit — Phase 4
+- ✓ Episodic memory: event embedding, composite retrieval (sim×0.4+rec×0.3+imp×0.3) — Phase 5
+- ✓ Smart context compression: first+last+anomalous events, token-budget aware — Phase 5
+- ✓ Multi-hop graph queries: 2-hop BFS relationship traversal for context enrichment — Phase 5
+- ✓ NPC agents: autonomous Key Characters with 4 tools, Oracle-based actions, tick scheduling — Phase 6
+- ✓ Off-screen simulation: batch LLM processing of distant Key NPCs every N ticks — Phase 6
+- ✓ Character promotion: extra→persistent→key tier upgrades via API — Phase 6
+- ✓ NPC reflection: importance-triggered belief/goal/relationship synthesis — Phase 7
+- ✓ Wealth/skill progression: tag-tier upgrades via Reflection Agent — Phase 7
+- ✓ Relationship evolution: qualitative tags updated by Reflection — Phase 7
+- ✓ World Engine: faction macro-ticks, territory changes, world events — Phase 8
+- ✓ Information flow: NPC knowledge from location/faction/chronicle context — Phase 8
 
 ### Active
 
@@ -101,4 +125,4 @@ The LLM is the narrator, never the engine. All mechanical outcomes (probability,
 | WorldBook cleaning on import | SillyTavern cards have irrelevant data for our system | — Pending |
 
 ---
-*Last updated: 2026-03-18 after GSD initialization*
+*Last updated: 2026-03-19 after Phase 8 completion*
