@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 17-01-PLAN.md
-last_updated: "2026-03-21T19:53:05.382Z"
+stopped_at: Completed 17-05-PLAN.md
+last_updated: "2026-03-21T19:56:58.668Z"
 progress:
   total_phases: 18
   completed_phases: 17
   total_plans: 47
-  completed_plans: 45
+  completed_plans: 46
 ---
 
 # Project State
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-03-18)
 ## Current Position
 
 Phase: 17 (unit-test-coverage) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 
 ## Performance Metrics
 
@@ -94,6 +94,7 @@ Plan: 4 of 5
 | Phase 17 P03 | 3min | 2 tasks | 2 files |
 | Phase 17 P02 | 4min | 2 tasks | 2 files |
 | Phase 17 P01 | 4min | 2 tasks | 2 files |
+| Phase 17 P05 | 3min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -199,6 +200,7 @@ Recent decisions affecting current work:
 - [Phase 17]: No mocks needed for frontend pure logic tests -- fixture data only
 - [Phase 17]: Mock paths resolved relative to test file location, not source module
 - [Phase 17]: Inline vi.mock factories to avoid hoisting issues with external variable references
+- [Phase 17]: Mock all worldgen service functions inline rather than importing from external factory
 
 ### Roadmap Evolution
 
@@ -223,6 +225,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-21T19:53:05.379Z
-Stopped at: Completed 17-01-PLAN.md
+Last session: 2026-03-21T19:56:58.665Z
+Stopped at: Completed 17-05-PLAN.md
 Resume file: None
