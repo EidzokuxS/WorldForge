@@ -14,6 +14,7 @@ function createMockWizard(
     isBusy: false,
     canCreate: false,
     creatingCampaign: false,
+    isGenerating: false,
     isSuggesting: false,
     suggestingCategory: null,
     dnaState: null,

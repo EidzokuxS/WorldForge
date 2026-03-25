@@ -45,7 +45,7 @@ export default function WorldReviewPage(props: { params: Promise<{ id: string }>
           getLoreCards(campaignId).catch(() => [] as LoreCardItem[]),
         ]);
 
-        const editableScaffold = toEditableScaffold(world, campaign.premise, lore);
+        const editableScaffold = toEditableScaffold(world, campaign?.premise ?? "", lore);
 
         setScaffold(editableScaffold);
         setLoreCards(lore);
@@ -73,16 +73,16 @@ export default function WorldReviewPage(props: { params: Promise<{ id: string }>
 
         switch (section) {
           case "premise":
-            body = { section: "premise", additionalInstruction };
+            body = { campaignId, section: "premise", additionalInstruction };
             break;
           case "locations":
-            body = { section: "locations", refinedPremise: scaffold.refinedPremise, additionalInstruction };
+            body = { campaignId, section: "locations", refinedPremise: scaffold.refinedPremise, additionalInstruction };
             break;
           case "factions":
-            body = { section: "factions", refinedPremise: scaffold.refinedPremise, locationNames, additionalInstruction };
+            body = { campaignId, section: "factions", refinedPremise: scaffold.refinedPremise, locationNames, additionalInstruction };
             break;
           case "npcs":
-            body = { section: "npcs", refinedPremise: scaffold.refinedPremise, locationNames, factionNames, additionalInstruction };
+            body = { campaignId, section: "npcs", refinedPremise: scaffold.refinedPremise, locationNames, factionNames, additionalInstruction };
             break;
           default:
             return;
