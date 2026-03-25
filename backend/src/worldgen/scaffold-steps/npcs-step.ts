@@ -87,11 +87,13 @@ async function planKeyNpcs(
   const ipBlock = buildIpContextBlock(ipContext);
 
   const keyInstruction = ipContext
-    ? `List 6-10 characters from the ${ipContext.franchise} franchise using a WORLD-FIRST approach:
-STEP 1 — List the franchise's most important characters (leaders, mentors, antagonists, key allies) who define the world's power dynamics.
-STEP 2 — Add any characters directly named in the premise.
-STEP 3 — Add characters who would be logically affected by the premise's divergence (shifted allegiances, changed relationships).
-Use canonical full names exactly as they appear in the franchise.`
+    ? `List 6-10 CANONICAL characters from ${ipContext.franchise}.
+HARD RULE: ALL key characters MUST be real, canonical characters from the franchise. Do NOT invent original characters for the key tier.
+PROCEDURE:
+1. List the franchise's major characters: protagonists, antagonists, mentors, political leaders, key supporting cast.
+2. Include ALL characters named or implied by the premise.
+3. Add other canonical characters who would logically interact with the premise changes.
+Use canonical full names exactly as they appear in the franchise. Assign each to a canonical location and faction from the lists provided.`
     : `List 6-8 key characters who hold power, drive conflict, or control resources in this world. Each must connect to at least one faction or location. Ensure variety:
 - At least 1 political leader
 - At least 1 antagonist or rival

@@ -32,12 +32,15 @@ ${facts}
 Tone:
 ${tone}
 
-CANONICAL FIDELITY RULES:
-1. Use the franchise's own names for every location, faction, organization, and character. Never substitute, translate, or create "inspired by" variants.
-2. Start from the canonical world as-is. Then apply the premise as a single point of divergence — trace its logical consequences outward. Everything NOT affected by that divergence stays canonical.
-3. When the premise reassigns a character's allegiance, teacher, or role: update ONLY relationships that logically change. Keep all other canonical details (abilities, backstory, personality) intact.
-4. If a detail is absent from the reference data above, rely on your knowledge of the franchise. Never fabricate franchise elements that do not exist in canon.
-5. Never rename canonical entities to avoid copyright. This is a private RPG tool, not a published work.
+CANONICAL FIDELITY RULES (MANDATORY — violations will be rejected):
+1. You are building the CANONICAL world with targeted modifications. Every location, faction, organization, and character MUST be from the franchise canon unless the premise's divergence logically creates something new.
+2. DO NOT INVENT original locations, factions, or characters when canonical ones exist. If the franchise has 5 major cities, use those 5 cities. Do not replace them with original creations.
+3. Use the franchise's own names exactly as they appear in the source material. Never substitute, translate, simplify, or create "inspired by" variants.
+4. The premise is a SINGLE POINT OF DIVERGENCE. Start from the canonical world and trace logical consequences outward. Everything NOT directly affected by that divergence stays exactly as it is in canon.
+5. When the premise reassigns a character's allegiance, teacher, or role: update ONLY relationships that logically change. Keep all other canonical details (abilities, backstory, personality, appearance) intact.
+6. If a detail is absent from the reference data above, rely on your knowledge of the franchise. Never fabricate franchise elements that do not exist in canon.
+7. Never rename canonical entities to avoid copyright. This is a private RPG tool, not a published work.
+8. The ratio of canonical to original content must be AT LEAST 80/20. Original content is acceptable ONLY for minor supporting characters or locations that the premise's divergence logically requires.
 `;
 }
 

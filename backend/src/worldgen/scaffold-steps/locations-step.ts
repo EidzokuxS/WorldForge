@@ -40,11 +40,13 @@ export async function generateLocationsStep(
 
   // --- Call 1: PLAN ---
   const planInstruction = ipContext
-    ? `You are a gazetteer for the ${ipContext.franchise} universe. List 5-8 locations using a WORLD-FIRST approach:
-STEP 1 — List the franchise's most important locations (capitals, headquarters, major cities, key geographic features) regardless of the premise.
-STEP 2 — Check if the premise implies additional locations not yet listed. Add them.
-STEP 3 — If any listed location would be altered by the premise's divergence, note that in its purpose.
-Use the franchise's canonical names exactly as they appear in the source material. Never translate or substitute them.`
+    ? `You are writing a location reference for the ${ipContext.franchise} universe. Output 5-8 CANONICAL locations.
+HARD RULE: At least 5 out of your locations MUST be real, canonical locations from ${ipContext.franchise}. You may add at most 1-2 original locations ONLY if the premise divergence logically creates a new place that does not exist in canon.
+PROCEDURE:
+1. List the franchise's major canonical locations: capitals, hidden villages/cities, headquarters, key geographic landmarks. These form the bulk of your list.
+2. For each canonical location, note if the premise divergence changes anything about it (leadership, allegiance, condition). If unchanged, describe it as canon.
+3. Only if the premise creates a genuinely new place (e.g., a new base for a reassigned character), add it as slot 6-8.
+Use canonical names exactly. Never translate, simplify, or invent substitutes.`
     : `Generate 5-8 locations for this original world. Prioritize variety of function:
 - At least 1 seat of political power (capital, palace, council hall)
 - At least 1 economic hub (market town, trade port, mining settlement)

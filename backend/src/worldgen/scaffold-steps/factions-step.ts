@@ -41,11 +41,13 @@ export async function generateFactionsStep(
 
   // --- Call 1: PLAN ---
   const planInstruction = ipContext
-    ? `You are a political analyst for the ${ipContext.franchise} universe. List 3-6 factions using a WORLD-FIRST approach:
-STEP 1 — List the franchise's major canonical power structures (governments, military organizations, criminal syndicates, religious orders, etc.) that define the world's politics.
-STEP 2 — Check whether the premise creates, destroys, or alters any faction. Note changes in purpose.
-STEP 3 — If the premise implies a new faction that doesn't exist in canon, add it — but only if the premise directly requires it.
-Use canonical faction names exactly. Never substitute or rename them.`
+    ? `You are writing a faction reference for the ${ipContext.franchise} universe. Output 3-6 CANONICAL factions.
+HARD RULE: ALL factions MUST be real, canonical organizations from ${ipContext.franchise}. Do NOT invent new factions. The premise changes WHO leads or joins a faction, not WHETHER the faction exists.
+PROCEDURE:
+1. List the franchise's major canonical organizations: governments, military bodies, antagonist groups, clans, guilds, orders. These ARE your factions.
+2. For each, note if the premise divergence changes its leadership, goals, or allegiance.
+3. You may add a new faction ONLY if the premise explicitly describes one that has no canonical equivalent.
+Use canonical faction names exactly. Never create "premise-themed" factions like "[Character]'s Disciples" when a real faction already exists.`
     : `Generate 3-6 factions that form the political skeleton of this world. Ensure structural variety:
 - At least 1 governing authority (state, council, empire)
 - At least 1 opposition or rebel force
