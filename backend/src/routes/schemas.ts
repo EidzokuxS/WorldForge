@@ -209,6 +209,7 @@ const scaffoldNpcSchema = z.object({
   }),
   locationName: z.string(),
   factionName: z.string().nullable(),
+  tier: z.enum(["key", "supporting"]).default("key"),
 });
 
 export const saveEditsSchema = z.object({

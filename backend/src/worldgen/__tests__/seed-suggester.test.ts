@@ -56,12 +56,15 @@ describe("suggestWorldSeeds (sequential DNA)", () => {
     const result = await suggestWorldSeeds({ premise: "Naruto world", role: fakeRole });
 
     expect(result).toEqual({
-      geography: "Five Great Shinobi Nations",
-      politicalStructure: "Hidden Village system",
-      centralConflict: "Akatsuki threat",
-      culturalFlavor: ["Japanese feudal", "Martial arts"],
-      environment: "Temperate forests",
-      wildcard: "Bijuu sealed in hosts",
+      seeds: {
+        geography: "Five Great Shinobi Nations",
+        politicalStructure: "Hidden Village system",
+        centralConflict: "Akatsuki threat",
+        culturalFlavor: ["Japanese feudal", "Martial arts"],
+        environment: "Temperate forests",
+        wildcard: "Bijuu sealed in hosts",
+      },
+      ipContext: null,
     });
   });
 
