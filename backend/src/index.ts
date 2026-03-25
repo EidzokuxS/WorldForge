@@ -1,7 +1,24 @@
+import { execSync } from "node:child_process";
 import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+
+// Kill any zombie process holding our port (fixes --watch restart on Windows)
+const port = Number(process.env.PORT) || 3001;
+try {
+  if (process.platform === "win32") {
+    const out = execSync(`netstat -ano | findstr ":${port}.*LISTENING"`, { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+    const pids = [...new Set(out.split("\n").map(l => l.trim().split(/\s+/).pop()).filter(Boolean))];
+    for (const pid of pids) {
+      if (pid !== String(process.pid)) {
+        try { execSync(`taskkill /F /PID ${pid}`, { stdio: "ignore" }); } catch {}
+      }
+    }
+  }
+} catch {
+  // No process on port — normal case
+}
 
 import aiRoutes from "./routes/ai.js";
 import campaignRoutes from "./routes/campaigns.js";
@@ -13,7 +30,6 @@ import characterRoutes from "./routes/character.js";
 import imageRoutes from "./routes/images.js";
 
 const app = new Hono();
-const port = Number.parseInt(process.env.PORT ?? "3001", 10);
 
 app.use(
   "/*",
@@ -111,4 +127,5 @@ function shutdown() {
 }
 
 process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
 process.on("SIGTERM", shutdown);
