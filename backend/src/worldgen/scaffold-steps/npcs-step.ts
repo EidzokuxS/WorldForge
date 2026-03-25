@@ -39,10 +39,16 @@ const npcDetailSchema = z.object({
           "Character traits and skills: [Master Swordsman], [Cynical], [Wealthy]"
         ),
       goals: z
-        .object({
-          shortTerm: z.array(z.string()).min(1).max(2),
-          longTerm: z.array(z.string()).min(1).max(2),
-        })
+        .union([
+          z.object({
+            shortTerm: z.array(z.string()).min(1).max(3),
+            longTerm: z.array(z.string()).min(1).max(3),
+          }),
+          z.object({
+            short_term: z.array(z.string()).min(1).max(3),
+            long_term: z.array(z.string()).min(1).max(3),
+          }).transform((g) => ({ shortTerm: g.short_term, longTerm: g.long_term })),
+        ])
         .catch({ shortTerm: ["Survive"], longTerm: ["Find purpose"] }),
     })
   ),

@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: unknown
-stopped_at: Completed 17-04-PLAN.md
-last_updated: "2026-03-21T19:58:18.990Z"
+status: Ready to plan
+stopped_at: Completed 24-04-PLAN.md
+last_updated: "2026-03-25T15:08:41.866Z"
 progress:
-  total_phases: 18
-  completed_phases: 18
-  total_plans: 47
-  completed_plans: 47
+  total_phases: 22
+  completed_phases: 19
+  total_plans: 53
+  completed_plans: 51
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-18)
 
 **Core value:** The LLM is the narrator, never the engine. All mechanical outcomes are resolved by backend code.
-**Current focus:** Phase 17 — unit-test-coverage
+**Current focus:** Phase 24 — worldgen-known-ip-quality
 
 ## Current Position
 
-Phase: 17 (unit-test-coverage) — EXECUTING
-Plan: 5 of 5
+Phase: 999.1
+Plan: Not started
 
 ## Performance Metrics
 
@@ -96,6 +96,10 @@ Plan: 5 of 5
 | Phase 17 P01 | 4min | 2 tasks | 2 files |
 | Phase 17 P05 | 3min | 2 tasks | 2 files |
 | Phase 17 P04 | 4min | 2 tasks | 3 files |
+| Phase 24 P01 | 7min | 2 tasks | 4 files |
+| Phase 24 P02 | 2min | 2 tasks | 3 files |
+| Phase 24 P03 | 3min | 2 tasks | 2 files |
+| Phase 24 P04 | 5min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -203,6 +207,14 @@ Recent decisions affecting current work:
 - [Phase 17]: Inline vi.mock factories to avoid hoisting issues with external variable references
 - [Phase 17]: Mock all worldgen service functions inline rather than importing from external factory
 - [Phase 17]: Let parseBody execute with real Zod schemas rather than mocking for actual validation testing
+- [Phase 24]: ScaffoldNpc.tier made optional to avoid breaking downstream until plan 24-03
+- [Phase 24]: IP context block inverted: use REAL canonical names instead of avoid trademarked names
+- [Phase 24]: DNA generation uses 6 sequential LLM calls with accumulated context per category
+- [Phase 24]: Plan+detail mini-call pattern for incremental world building with canonical IP fidelity
+- [Phase 24]: NPC plan+detail pattern: 3-5 mini-calls instead of 1 monolithic call for tiered key+supporting NPCs
+- [Phase 24]: Lore extractor ipContext is optional 4th param -- backward compatible with existing callers
+- [Phase 24]: scaffold-generator.ts reduced from 367 to 98 lines via re-export pattern from scaffold-steps/
+- [Phase 24]: Scaffold tier 'supporting' maps to DB tier 'persistent' at saver boundary
 
 ### Roadmap Evolution
 
@@ -216,6 +228,8 @@ Recent decisions affecting current work:
 - Phase 14 added: Final Systems Verification & Bug Fixing — fix remaining bugs + verify all systems per docs/
 - Phase 16 added: NPC System QA — Three NPC Tiers + World Gen Integration
 - Phase 17 added: Unit Test Coverage — real tests for untested backend and frontend modules, desloppify strict 95+
+- Phase 23 added: Unified Research & World Generation Pipeline — single research with cache, feeds both DNA and scaffold
+- Phase 24 added: Worldgen Known IP Quality — canonical DNA/premise/locations/factions/NPCs, key vs supporting NPC tiers, research-grounded lore
 
 ### Pending Todos
 
@@ -227,6 +241,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-21T19:58:18.987Z
-Stopped at: Completed 17-04-PLAN.md
+Last session: 2026-03-25T14:19:24.109Z
+Stopped at: Completed 24-04-PLAN.md
 Resume file: None

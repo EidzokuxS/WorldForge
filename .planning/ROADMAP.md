@@ -25,6 +25,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 11: Content Import** - SillyTavern WorldBook import with entity classification, web search expansion (completed 2026-03-19)
 - [x] **Phase 12: E2E QA & Bug Fixing** - Full browser-based verification of all features via Playwright MCP, iterative bug fixing until clean (completed 2026-03-19)
 - [x] **Phase 13: Gameplay Playtest & AI Tuning** - Full gameplay playtesting across 3 scenarios, AI quality evaluation, system prompt tuning (completed 2026-03-20)
+- [x] **Phase 24: Worldgen Known IP Quality** - Canonical DNA/premise/locations/factions/NPCs with butterfly-effect changes, key vs supporting NPC tiers, research-grounded lore (completed 2026-03-25)
 
 ## Phase Details
 
@@ -287,6 +288,7 @@ Note: Phases 4, 9, 10, 11 have flexible ordering relative to later phases. Phase
 | 15. Systematic Mechanics Fix | 3/3 | Complete    | 2026-03-20 |
 | 16. NPC System QA | 3/3 | Complete    | 2026-03-20 |
 | 17. Unit Test Coverage | 5/5 | Complete   | 2026-03-21 |
+| 24. Worldgen Known IP Quality | 3/4 | Complete    | 2026-03-25 |
 
 ### Phase 16: NPC System QA — Three NPC Tiers + World Gen Integration
 
@@ -313,3 +315,43 @@ Plans:
 - [x] 17-03-PLAN.md -- Frontend pure logic tests: world-data-helpers + v2-card-parser
 - [x] 17-04-PLAN.md -- Route tests: ai + images + character
 - [x] 17-05-PLAN.md -- Route tests: worldgen + desloppify ignore cleanup
+
+## Backlog
+
+### Phase 999.1: RAG-Inspired Improvements (BACKLOG)
+
+**Goal:** Применить паттерны из production-agentic-rag-course к WorldForge:
+1. **Document Grading для lore cards** — LLM оценивает релевантность lore card перед включением в промпт Judge/Storyteller, отсекает нерелевантные
+2. **Query Rewriting для episodic memory** — если semantic search не находит релевантные events, переформулировать запрос через LLM и повторить
+3. **Hybrid Search (BM25 + Vector)** — добавить keyword search через SQLite FTS5 к cosine similarity в LanceDB, объединить через Reciprocal Rank Fusion (RRF)
+4. **Input Guardrails** — отдельный LLM node для валидации действий игрока перед Judge (out-of-character, абсурдные, meta-gaming)
+
+**Source:** https://github.com/jamwithai/production-agentic-rag-course
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd:review-backlog when ready)
+
+### Phase 23: Unified Research & World Generation Pipeline
+
+**Goal:** Single research pipeline with cached results, feeding both DNA and scaffold generation. AI evaluates research sufficiency before each generation step.
+**Requirements**: TBD
+**Depends on:** Phase 17
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 23 to break down)
+
+### Phase 24: Worldgen Known IP Quality
+
+**Goal:** Intelligent world-building pipeline: (1) DNA with inter-category dependencies and reasoning, (2) incremental generation within each scaffold step (mini-calls building element-by-element from general to specific, each referencing already-created elements), (3) canonical fidelity for known IPs (butterfly-effect changes only), (4) key vs supporting NPC tiers (10-15 total), (5) research-grounded lore. Prompt engineering best practices throughout (stop-slop, anti-hallucination, structured reasoning).
+**Requirements**: P24-01, P24-02, P24-03, P24-04, P24-05, P24-06, P24-07, P24-08, P24-09
+**Depends on:** Phase 17
+**Plans:** 4/4 plans complete
+
+Plans:
+- [x] 24-01-PLAN.md -- Types + prompt utilities + sequential DNA generation
+- [x] 24-02-PLAN.md -- Premise step + locations step + factions step (plan+detail mini-calls)
+- [x] 24-03-PLAN.md -- NPCs step (key/supporting tiers) + lore extractor (IP grounding)
+- [ ] 24-04-PLAN.md -- Orchestrator wiring + scaffold-saver tier mapping + route schema updates
