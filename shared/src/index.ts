@@ -10,6 +10,7 @@ export type {
   ChatMessage,
   WorldSeeds,
   SeedCategory,
+  IpResearchContext,
   CampaignMeta,
   PlayerCharacter,
 } from "./types.js";

@@ -10,6 +10,10 @@ vi.mock("../../ai/index.js", () => ({
   createModel: vi.fn(() => "mock-model"),
 }));
 
+vi.mock("../ip-researcher.js", () => ({
+  researchKnownIP: vi.fn().mockResolvedValue(null),
+}));
+
 import { suggestWorldSeeds, suggestSingleSeed } from "../seed-suggester.js";
 
 const fakeRole = {
@@ -34,16 +38,18 @@ describe("suggestWorldSeeds", () => {
     const result = await suggestWorldSeeds({
       premise: "A volcanic island world.",
       role: fakeRole,
+      research: { enabled: false },
     });
 
-    expect(result).toEqual(fakeSeeds);
+    expect(result.seeds).toEqual(fakeSeeds);
+    expect(result.ipContext).toBeNull();
     expect(mockGenerateObject).toHaveBeenCalledTimes(1);
   });
 
   it("includes premise in prompt", async () => {
     mockGenerateObject.mockResolvedValueOnce({ object: fakeSeeds });
 
-    await suggestWorldSeeds({ premise: "A volcanic island world.", role: fakeRole });
+    await suggestWorldSeeds({ premise: "A volcanic island world.", role: fakeRole, research: { enabled: false } });
 
     const callArgs = mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>;
     expect(callArgs.prompt).toContain("A volcanic island world.");

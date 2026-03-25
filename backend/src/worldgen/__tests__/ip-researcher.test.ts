@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// We must mock the AI modules BEFORE importing the module under test
 vi.mock("ai", async (importOriginal) => {
     const actual = await importOriginal<typeof import("ai")>();
     return {
@@ -15,58 +14,47 @@ vi.mock("../../ai/generate-object-safe.js", () => ({
     safeGenerateObject: vi.fn(),
 }));
 
-vi.mock("@ai-sdk/mcp", () => ({
-    createMCPClient: vi.fn(),
-}));
-
-vi.mock("@ai-sdk/mcp/mcp-stdio", () => ({
-    Experimental_StdioMCPTransport: vi.fn(),
-}));
-
 vi.mock("../../ai/index.js", () => ({
     createModel: vi.fn(() => "mock-model"),
 }));
 
+vi.mock("../../lib/web-search.js", () => ({
+    webSearch: vi.fn(),
+}));
+
 import { researchKnownIP } from "../ip-researcher.js";
-import { createMCPClient } from "@ai-sdk/mcp";
-import { generateText } from "ai";
 import { safeGenerateObject } from "../../ai/generate-object-safe.js";
-import type { GenerateScaffoldRequest } from "../types.js";
+import { webSearch } from "../../lib/web-search.js";
 import type { ResolvedRole } from "../../ai/resolve-role-model.js";
+import type { Mock } from "vitest";
 
-// ---------------------------------------------------------------------------
-// Test fixtures
-// ---------------------------------------------------------------------------
+const mockedWebSearch = webSearch as Mock;
 
-function makeReq(overrides: Partial<GenerateScaffoldRequest> = {}): GenerateScaffoldRequest {
+function makeReq(overrides: Record<string, unknown> = {}) {
     return {
-        campaignId: "test-campaign",
         name: "My World",
         premise: "A generic original world with no known franchise references.",
-        role: {
-            provider: {
-                id: "test",
-                name: "Test Provider",
-                baseUrl: "http://localhost:11434",
-                apiKey: "test-key",
-                model: "test-model",
-            },
-            temperature: 0.7,
-            maxTokens: 2048,
-        } as ResolvedRole,
         ...overrides,
     };
 }
+
+const fakeRole = {
+    provider: {
+        id: "test",
+        name: "Test Provider",
+        baseUrl: "http://localhost:11434",
+        apiKey: "test-key",
+        model: "test-model",
+    },
+    temperature: 0.7,
+    maxTokens: 2048,
+} as ResolvedRole;
 
 const MOCK_IP_CONTEXT = {
     franchise: "Warhammer",
     keyFacts: ["Humanity wages endless war", "The Emperor sits on a golden throne", "Space Marines are genetically enhanced warriors"],
     tonalNotes: ["Grimdark", "Military sci-fi"],
 };
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 describe("researchKnownIP", () => {
     beforeEach(() => {
@@ -76,153 +64,129 @@ describe("researchKnownIP", () => {
     describe("no-op path", () => {
         it("returns null when LLM detects no franchise and knownIP is not set", async () => {
             vi.mocked(safeGenerateObject).mockResolvedValue({ object: { confidence: "unknown", franchise: null, searchQuery: null } } as never);
-            const result = await researchKnownIP(makeReq(), makeReq().role);
+            const result = await researchKnownIP(makeReq(), fakeRole);
             expect(result).toBeNull();
         });
 
         it("returns null when knownIP is explicitly an empty string", async () => {
             vi.mocked(safeGenerateObject).mockResolvedValue({ object: { confidence: "unknown", franchise: null, searchQuery: null } } as never);
-            const result = await researchKnownIP(makeReq({ knownIP: "" }), makeReq().role);
+            const result = await researchKnownIP(makeReq({ knownIP: "" }), fakeRole);
             expect(result).toBeNull();
         });
 
         it("returns null when knownIP is whitespace only", async () => {
             vi.mocked(safeGenerateObject).mockResolvedValue({ object: { confidence: "unknown", franchise: null, searchQuery: null } } as never);
-            const result = await researchKnownIP(makeReq({ knownIP: "   " }), makeReq().role);
+            const result = await researchKnownIP(makeReq({ knownIP: "   " }), fakeRole);
             expect(result).toBeNull();
         });
     });
 
     describe("franchise detection from premise", () => {
         it("detects Warhammer from premise text via LLM", async () => {
+            // First call: franchise detection → certain
             vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { confidence: "certain", franchise: "Warhammer", searchQuery: null } } as never);
-            vi.mocked(createMCPClient).mockRejectedValue(new Error("MCP unavailable"));
+            // DDG searches for research
+            mockedWebSearch.mockResolvedValue([{ title: "Warhammer lore", description: "Grimdark universe", url: "https://example.com" }]);
+            // Second call: parse research into structured context
             vi.mocked(safeGenerateObject).mockResolvedValue({ object: MOCK_IP_CONTEXT } as never);
 
             const result = await researchKnownIP(
                 makeReq({ premise: "A world inspired by Warhammer 40,000" }),
-                makeReq().role
+                fakeRole
             );
 
             expect(result).not.toBeNull();
             expect(result?.franchise).toBe("Warhammer");
-            expect(result?.source).toBe("llm");
         });
 
         it("detects D&D from name field via LLM", async () => {
             vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { confidence: "certain", franchise: "Dungeons & Dragons", searchQuery: null } } as never);
-            vi.mocked(createMCPClient).mockRejectedValue(new Error("MCP unavailable"));
+            mockedWebSearch.mockResolvedValue([{ title: "D&D", description: "Fantasy RPG", url: "https://example.com" }]);
             vi.mocked(safeGenerateObject).mockResolvedValue({
                 object: { franchise: "Dungeons & Dragons", keyFacts: ["d20 system"], tonalNotes: ["High fantasy"] },
             } as never);
 
             const result = await researchKnownIP(
                 makeReq({ name: "D&D Campaign World", premise: "A standard adventure" }),
-                makeReq().role
+                fakeRole
             );
 
             expect(result).not.toBeNull();
-            expect(result?.source).toBe("llm");
+            expect(result?.franchise).toBe("Dungeons & Dragons");
         });
     });
 
     describe("explicit knownIP field takes priority", () => {
         it("uses knownIP value directly without LLM franchise detection", async () => {
-            vi.mocked(createMCPClient).mockRejectedValue(new Error("MCP unavailable"));
+            mockedWebSearch.mockResolvedValue([{ title: "Custom", description: "Custom franchise", url: "https://example.com" }]);
             vi.mocked(safeGenerateObject).mockResolvedValue({
                 object: { franchise: "Custom Franchise", keyFacts: ["fact1"], tonalNotes: ["tone1"] },
             } as never);
 
             const result = await researchKnownIP(
                 makeReq({ knownIP: "Custom Franchise", premise: "totally original premise" }),
-                makeReq().role
+                fakeRole
             );
 
             expect(result).not.toBeNull();
-            expect(result?.source).toBe("llm");
+            expect(result?.franchise).toBe("Custom Franchise");
+            // safeGenerateObject should NOT be called for franchise detection (only for research parsing)
+            // The first call should be research parsing, not detection
         });
     });
 
-    describe("MCP failure -> LLM fallback", () => {
-        it("falls back to LLM when createMCPClient rejects", async () => {
-            vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { confidence: "certain", franchise: "Warhammer", searchQuery: null } } as never);
-            vi.mocked(createMCPClient).mockRejectedValue(new Error("spawn failed"));
-            vi.mocked(safeGenerateObject).mockResolvedValue({ object: MOCK_IP_CONTEXT } as never);
+    describe("DDG search failure → LLM fallback", () => {
+        it("falls back to LLM when DDG search fails", async () => {
+            vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { confidence: "certain", franchise: "Naruto", searchQuery: null } } as never);
+            mockedWebSearch.mockRejectedValue(new Error("DDG anomaly"));
+            // LLM fallback research
+            vi.mocked(safeGenerateObject).mockResolvedValue({
+                object: { franchise: "Naruto", keyFacts: ["Ninja world"], tonalNotes: ["Shonen action"] },
+            } as never);
 
             const result = await researchKnownIP(
-                makeReq({ premise: "Inspired by Warhammer" }),
-                makeReq().role
+                makeReq({ premise: "A world of ninjas and chakra" }),
+                fakeRole
             );
 
             expect(result).not.toBeNull();
+            expect(result?.franchise).toBe("Naruto");
             expect(result?.source).toBe("llm");
         });
 
-        it("returns null when both MCP and LLM fallback fail", async () => {
-            vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { confidence: "certain", franchise: "Warhammer", searchQuery: null } } as never);
-            vi.mocked(createMCPClient).mockRejectedValue(new Error("MCP error"));
-            vi.mocked(safeGenerateObject).mockRejectedValue(new Error("LLM error"));
+        it("returns null when both DDG and LLM fallback fail", async () => {
+            vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { confidence: "certain", franchise: "Unknown", searchQuery: null } } as never);
+            mockedWebSearch.mockRejectedValue(new Error("DDG anomaly"));
+            vi.mocked(safeGenerateObject).mockRejectedValue(new Error("LLM failed"));
 
             const result = await researchKnownIP(
-                makeReq({ premise: "Inspired by Warhammer" }),
-                makeReq().role
+                makeReq({ premise: "Obscure franchise" }),
+                fakeRole
             );
 
             expect(result).toBeNull();
         });
-
-        it("fallback result has source='llm'", async () => {
-            vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { confidence: "certain", franchise: "Warhammer", searchQuery: null } } as never);
-            vi.mocked(createMCPClient).mockRejectedValue(new Error("MCP error"));
-            vi.mocked(safeGenerateObject).mockResolvedValue({ object: MOCK_IP_CONTEXT } as never);
-
-            const result = await researchKnownIP(
-                makeReq({ premise: "Inspired by Warhammer" }),
-                makeReq().role
-            );
-
-            expect(result?.source).toBe("llm");
-        });
     });
 
-    describe("MCP happy path", () => {
-        it("returns source='mcp' when MCP succeeds", async () => {
-            vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { confidence: "certain", franchise: "Warhammer", searchQuery: null } } as never);
-            const mockMcpClient = {
-                tools: vi.fn().mockResolvedValue({ duckduckgo_search: {} }),
-                close: vi.fn().mockResolvedValue(undefined),
-            };
-            vi.mocked(createMCPClient).mockResolvedValue(mockMcpClient as never);
-            vi.mocked(generateText).mockResolvedValue({ text: "Research notes about Warhammer..." } as never);
-            vi.mocked(safeGenerateObject).mockResolvedValue({ object: MOCK_IP_CONTEXT } as never);
+    describe("DDG search happy path", () => {
+        it("returns research with DDG results", async () => {
+            vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { confidence: "certain", franchise: "Star Wars", searchQuery: null } } as never);
+            mockedWebSearch.mockResolvedValue([
+                { title: "Star Wars lore", description: "A galaxy far far away", url: "https://starwars.com" },
+            ]);
+            vi.mocked(safeGenerateObject).mockResolvedValue({
+                object: { franchise: "Star Wars", keyFacts: ["The Force", "Jedi vs Sith"], tonalNotes: ["Space opera"] },
+            } as never);
 
             const result = await researchKnownIP(
-                makeReq({ premise: "Inspired by Warhammer" }),
-                makeReq().role
+                makeReq({ premise: "In a galaxy far far away" }),
+                fakeRole
             );
 
-            expect(result?.source).toBe("mcp");
-            expect(mockMcpClient.close).toHaveBeenCalledTimes(1);
-        });
-
-        it("always calls mcpClient.close() even if generateText throws", async () => {
-            vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { confidence: "certain", franchise: "Warhammer", searchQuery: null } } as never);
-            const mockMcpClient = {
-                tools: vi.fn().mockResolvedValue({}),
-                close: vi.fn().mockResolvedValue(undefined),
-            };
-            vi.mocked(createMCPClient).mockResolvedValue(mockMcpClient as never);
-            vi.mocked(generateText).mockRejectedValue(new Error("LLM error during MCP path"));
-            vi.mocked(safeGenerateObject).mockResolvedValue({ object: MOCK_IP_CONTEXT } as never);
-
-            // Should fall to LLM fallback
-            const result = await researchKnownIP(
-                makeReq({ premise: "Inspired by Warhammer" }),
-                makeReq().role
-            );
-
-            expect(mockMcpClient.close).toHaveBeenCalledTimes(1);
-            expect(result?.source).toBe("llm");
+            expect(result).not.toBeNull();
+            expect(result?.franchise).toBe("Star Wars");
+            expect(result?.keyFacts).toContain("The Force");
+            expect(mockedWebSearch).toHaveBeenCalled();
         });
     });
 });
