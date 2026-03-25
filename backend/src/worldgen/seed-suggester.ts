@@ -13,8 +13,10 @@ import { buildIpContextBlock, buildStopSlopRules } from "./scaffold-steps/prompt
 
 export interface SuggestSeedsRequest {
   premise: string;
+  name?: string;
   role: ResolvedRole;
   ipContext?: IpResearchContext | null;
+  research?: { enabled: boolean; searchProvider?: string; braveApiKey?: string; zaiApiKey?: string; maxSearchSteps?: number };
 }
 
 export interface SuggestedSeeds {
@@ -63,7 +65,7 @@ const DNA_CATEGORIES: ReadonlyArray<{ key: SeedCategory; label: string }> = [
 
 export async function suggestWorldSeeds(
   req: SuggestSeedsRequest
-): Promise<SuggestedSeeds> {
+): Promise<{ seeds: SuggestedSeeds; ipContext: IpResearchContext | null }> {
   const ipContext = req.ipContext ?? null;
   const results: Partial<Record<SeedCategory, DnaCategoryResult>> = {};
   const accumulated: string[] = [];
@@ -120,7 +122,7 @@ ${buildStopSlopRules()}`;
     accumulated.push(`- ${label}: ${displayValue} (Reasoning: ${categoryResult.reasoning})`);
   }
 
-  return {
+  const seeds: SuggestedSeeds = {
     geography: results.geography!.value as string,
     politicalStructure: results.politicalStructure!.value as string,
     centralConflict: results.centralConflict!.value as string,
@@ -128,6 +130,8 @@ ${buildStopSlopRules()}`;
     environment: results.environment!.value as string,
     wildcard: results.wildcard!.value as string,
   };
+
+  return { seeds, ipContext };
 }
 
 // ---------------------------------------------------------------------------
