@@ -50,6 +50,9 @@ export interface ScaffoldNpc {
   goals: ScaffoldNpcGoals;
   locationName: string;
   factionName: string | null;
+  /** NPC importance tier. "key" = canonical/plot-relevant, "supporting" = original/background.
+   *  Optional until plan 24-03 rewrites the NPC generation step to always populate it. */
+  tier?: "key" | "supporting";
 }
 
 export const LORE_CATEGORIES = [
