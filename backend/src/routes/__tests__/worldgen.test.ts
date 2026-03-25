@@ -25,6 +25,11 @@ vi.mock("../../worldgen/worldbook-importer.js", () => ({
   importClassifiedEntries: vi.fn(),
 }));
 
+vi.mock("../../worldgen/ip-researcher.js", () => ({
+  researchKnownIP: vi.fn(() => Promise.resolve(null)),
+  evaluateResearchSufficiency: vi.fn((ctx: unknown) => Promise.resolve(ctx)),
+}));
+
 vi.mock("../../campaign/index.js", () => ({
   markGenerationComplete: vi.fn(),
   saveIpContext: vi.fn(),
@@ -224,7 +229,7 @@ describe("POST /api/worldgen/roll-seed", () => {
 describe("POST /api/worldgen/suggest-seeds", () => {
   it("calls suggestWorldSeeds with premise and returns result", async () => {
     const suggested = { geography: "Floating islands", centralConflict: "War" };
-    mockedSuggestWorldSeeds.mockResolvedValue({ seeds: suggested, ipContext: null } as any);
+    mockedSuggestWorldSeeds.mockResolvedValue(suggested as any);
 
     const res = await app.request("/api/worldgen/suggest-seeds", {
       method: "POST",

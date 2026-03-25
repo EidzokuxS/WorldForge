@@ -77,11 +77,17 @@ app.post("/suggest-seeds", async (c) => {
       return c.json({ error: gen.error }, gen.status);
     }
 
-    const { seeds, ipContext } = await suggestWorldSeeds({
+    // Research known IP if premise suggests one
+    const { researchKnownIP } = await import("../worldgen/ip-researcher.js");
+    const ipContext = await researchKnownIP(
+      { premise: result.data.premise, name: result.data.name ?? "", knownIP: result.data.name, research: settings.research },
+      gen.resolved,
+    );
+
+    const seeds = await suggestWorldSeeds({
       premise: result.data.premise,
-      name: result.data.name,
       role: gen.resolved,
-      research: settings.research,
+      ipContext,
     });
 
     return c.json({ ...seeds, _ipContext: ipContext });
