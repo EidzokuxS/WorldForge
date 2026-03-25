@@ -4,8 +4,10 @@ import { createModel } from "../ai/index.js";
 import { withModelFallback } from "../ai/with-model-fallback.js";
 import { createLogger } from "../lib/index.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
+import type { IpResearchContext } from "@worldforge/shared";
 import { LORE_CATEGORIES } from "./types.js";
 import type { WorldScaffold, ExtractedLoreCard } from "./types.js";
+import { buildIpContextBlock, buildStopSlopRules } from "./scaffold-steps/prompt-utils.js";
 
 const log = createLogger("lore-extractor");
 
@@ -61,25 +63,43 @@ ${npcLines}`;
 export async function extractLoreCards(
   scaffold: WorldScaffold,
   role: ResolvedRole,
-  fallbackRole?: ResolvedRole
+  fallbackRole?: ResolvedRole,
+  ipContext?: IpResearchContext | null,
 ): Promise<ExtractedLoreCard[]> {
   const context = formatScaffoldContext(scaffold);
+  const ipBlock = buildIpContextBlock(ipContext ?? null);
 
-  const prompt = `You are a world-building encyclopedist. Given a generated RPG world, extract 30-50 structured lore cards — factual knowledge entries that define this world.
+  const ipFactsSection =
+    ipContext?.keyFacts && ipContext.keyFacts.length > 0
+      ? `\nFRANCHISE REFERENCE FACTS (use as primary source for concept/ability/rule cards):\n${ipContext.keyFacts.map((f) => `  - ${f}`).join("\n")}\n`
+      : "";
+
+  const ipQualityRule = ipContext
+    ? `- For known IPs: concept/ability/rule cards MUST reference actual franchise elements from the REFERENCE FACTS above. Do NOT invent fictional systems (no "Chakra Storms" - use real concepts like "Chakra Nature Types", "Sage Mode", "Bijuu").`
+    : "";
+
+  const prompt = `You are a world-building encyclopedist. Extract 30-50 structured lore cards from this RPG world scaffold.
 
 ${context}
-
+${ipBlock}${ipFactsSection}
 EXTRACTION RULES:
-- Each location → one "location" card
-- Each NPC → one "npc" card
-- Each faction → one "faction" card
-- Extract world concepts: magic systems, technologies, political systems, currencies, religions → "concept" cards
-- Extract world rules: what is possible, what is forbidden, physical laws → "rule" cards
-- Extract notable items, artifacts, or assets mentioned → "item" cards
-- Extract any special abilities or powers mentioned → "ability" cards
-- Definition must be 1-2 factual sentences, no storytelling or narrative flair
-- Term should be a short unique name (1-5 words)
-- Aim for 30-50 cards total, covering all aspects of the world`;
+- Each location in the scaffold -> one "location" card (name = location name, definition = 1-2 sentence factual description)
+- Each NPC in the scaffold -> one "npc" card (name = character name, definition = role and key trait)
+- Each faction in the scaffold -> one "faction" card (name = faction name, definition = purpose and power)
+- Extract world SYSTEMS and POWERS -> "concept" cards (e.g., "Chakra Nature Types", "Kekkei Genkai", "The Force")
+- Extract world RULES and LAWS -> "rule" cards (physical laws, magic constraints, political laws)
+- Extract notable ABILITIES or TECHNIQUES -> "ability" cards
+- Extract notable ITEMS or ARTIFACTS -> "item" cards
+- Extract historical EVENTS -> "event" cards
+
+QUALITY RULES:
+- Definition must be 1-2 FACTUAL sentences. No storytelling, no narrative flair, no "is said to be".
+- Term must be a short unique name (1-5 words).
+- Do NOT restate scaffold descriptions verbatim. Concept/ability/rule cards must add NEW information about world systems, not repeat location or NPC descriptions.
+${ipQualityRule}
+- Aim for 30-50 cards total. At minimum: 1 per location + 1 per NPC + 1 per faction + 10-20 concept/ability/rule cards.
+
+${buildStopSlopRules()}`;
 
   const MAX_RETRIES = 2;
   let lastError: Error | null = null;
