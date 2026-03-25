@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { closeDb, connectDb } from "../db/index.js";
 import { runMigrations } from "../db/migrate.js";
 import { campaigns } from "../db/schema.js";
-import type { CampaignMeta, WorldSeeds } from "@worldforge/shared";
+import type { CampaignMeta, IpResearchContext, WorldSeeds } from "@worldforge/shared";
 import { parseWorldSeeds } from "../worldgen/index.js";
 import { AppError } from "../lib/index.js";
 import { assertSafeId, CAMPAIGNS_DIR, getCampaignConfigPath, getCampaignDir } from "./paths.js";
@@ -19,6 +19,7 @@ type CampaignConfigFile = {
   name: string;
   premise: string;
   seeds?: WorldSeeds;
+  ipContext?: IpResearchContext;
   generationComplete?: boolean;
   currentTick?: number;
   createdAt: number;
@@ -54,6 +55,7 @@ export function readCampaignConfig(campaignId: string): CampaignConfigFile {
     name: parsed.name,
     premise: parsed.premise,
     seeds: parseWorldSeeds(parsed.seeds) ?? undefined,
+    ipContext: parsed.ipContext ?? undefined,
     generationComplete: Boolean(parsed.generationComplete),
     currentTick: typeof parsed.currentTick === "number" ? parsed.currentTick : undefined,
     createdAt: parsed.createdAt,
@@ -281,6 +283,23 @@ export function markGenerationComplete(
       seeds: nextConfig.seeds,
       generationComplete: true,
     };
+  }
+}
+
+export function saveIpContext(campaignId: string, ipContext: IpResearchContext): void {
+  assertSafeId(campaignId);
+  const config = readCampaignConfig(campaignId);
+  writeCampaignConfig(getCampaignDir(campaignId), { ...config, ipContext });
+  log.info(`Saved ipContext for "${ipContext.franchise}" (${ipContext.keyFacts.length} facts) to campaign ${campaignId}`);
+}
+
+export function loadIpContext(campaignId: string): IpResearchContext | null {
+  assertSafeId(campaignId);
+  try {
+    const config = readCampaignConfig(campaignId);
+    return config.ipContext ?? null;
+  } catch {
+    return null;
   }
 }
 

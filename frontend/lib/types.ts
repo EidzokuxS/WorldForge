@@ -1,5 +1,6 @@
 export type {
   CampaignMeta,
+  IpResearchContext,
   Provider,
   RoleConfig,
   FallbackConfig,

@@ -3,8 +3,10 @@ import { z } from "zod";
 import { createModel } from "../ai/index.js";
 import type { WorldSeeds } from "./seed-roller.js";
 import { extractLoreCards } from "./lore-extractor.js";
-import { researchKnownIP, type IpResearchContext } from "./ip-researcher.js";
+import type { IpResearchContext, ResearchConfig } from "@worldforge/shared";
+import { evaluateResearchSufficiency } from "./ip-researcher.js";
 import { createLogger } from "../lib/index.js";
+import type { SearchConfig } from "../lib/web-search.js";
 import type {
   GenerateScaffoldRequest,
   GenerationProgress,
@@ -277,44 +279,70 @@ REQUIREMENTS:
   return result.object.npcs;
 }
 
+/** Build SearchConfig from research settings for sufficiency checks */
+function buildSearchConfig(req: GenerateScaffoldRequest): SearchConfig | undefined {
+  if (!req.research) return undefined;
+  return {
+    provider: req.research.searchProvider,
+    braveApiKey: req.research.braveApiKey,
+    zaiApiKey: req.research.zaiApiKey,
+    llmProvider: req.role.provider,
+  };
+}
+
+/** Run sufficiency check if ipContext is available, return enriched context */
+async function checkSufficiency(
+  ipContext: IpResearchContext | null,
+  step: "locations" | "factions" | "npcs",
+  premise: string,
+  req: GenerateScaffoldRequest,
+  onProgress?: (progress: GenerationProgress) => void,
+  currentStep?: number,
+  totalSteps?: number,
+): Promise<IpResearchContext | null> {
+  if (!ipContext) return null;
+
+  if (currentStep !== undefined && totalSteps !== undefined) {
+    reportProgress(onProgress, currentStep, totalSteps, `Checking research for ${step}...`);
+  }
+
+  const searchConfig = buildSearchConfig(req);
+  return evaluateResearchSufficiency(ipContext, step, premise, req.role, searchConfig);
+}
+
 export async function generateWorldScaffold(
   req: GenerateScaffoldRequest,
   onProgress?: (progress: GenerationProgress) => void
-): Promise<WorldScaffold> {
-  const researchEnabled = req.research?.enabled ?? true;
-
-  // Step 0: Research known franchise/IP (conditional)
-  let ipContext: IpResearchContext | null = null;
-  let didRunResearch = false;
-
-  if (researchEnabled) {
-    reportProgress(onProgress, 0, 6, "Researching franchise lore...");
-    ipContext = await researchKnownIP(req, req.role, req.research?.maxSearchSteps);
-    didRunResearch = true;
-    if (ipContext) {
-      log.info(`IP research complete (${ipContext.source}): ${ipContext.franchise}`);
-    } else {
-      log.info("No known IP detected, skipping research");
-    }
+): Promise<{ scaffold: WorldScaffold; enrichedIpContext: IpResearchContext | null }> {
+  // ipContext is pre-cached from suggest-seeds phase (loaded from config.json)
+  let ipContext = req.ipContext ?? null;
+  if (ipContext) {
+    log.info(`Using cached IP context: "${ipContext.franchise}" (${ipContext.keyFacts.length} facts, source: ${ipContext.source})`);
   }
 
-  const totalSteps = didRunResearch ? 6 : 5;
-  let currentStep = didRunResearch ? 1 : 0;
+  const totalSteps = 5;
+  let currentStep = 0;
 
   reportProgress(onProgress, currentStep++, totalSteps, "Refining world premise");
   const refinedPremise = await generateRefinedPremiseStep(req, ipContext);
   log.info(`Premise refined (${refinedPremise.length} chars)`);
 
+  // Sufficiency check before locations
+  ipContext = await checkSufficiency(ipContext, "locations", refinedPremise, req);
   reportProgress(onProgress, currentStep++, totalSteps, "Building locations");
   const locations = await generateLocationsStep(req, refinedPremise, ipContext);
   log.info(`Generated ${locations.length} locations`);
   const locationNames = locations.map((location) => location.name);
 
+  // Sufficiency check before factions
+  ipContext = await checkSufficiency(ipContext, "factions", refinedPremise, req);
   reportProgress(onProgress, currentStep++, totalSteps, "Forging factions");
   const factions = await generateFactionsStep(req, refinedPremise, locationNames, ipContext);
   log.info(`Generated ${factions.length} factions`);
   const factionNames = factions.map((faction) => faction.name);
 
+  // Sufficiency check before NPCs
+  ipContext = await checkSufficiency(ipContext, "npcs", refinedPremise, req);
   reportProgress(onProgress, currentStep++, totalSteps, "Creating key NPCs");
   const npcs = await generateNpcsStep(
     req,
@@ -330,5 +358,9 @@ export async function generateWorldScaffold(
   reportProgress(onProgress, currentStep++, totalSteps, "Extracting world lore");
   const loreCards = await extractLoreCards(baseScaffold, req.role, req.fallbackRole);
   log.info(`Extracted ${loreCards.length} lore cards`);
-  return { refinedPremise, locations, factions, npcs, loreCards };
+
+  return {
+    scaffold: { refinedPremise, locations, factions, npcs, loreCards },
+    enrichedIpContext: ipContext,
+  };
 }

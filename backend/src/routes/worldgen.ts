@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { markGenerationComplete } from "../campaign/index.js";
+import { markGenerationComplete, saveIpContext, loadIpContext } from "../campaign/index.js";
 import { getErrorMessage, getErrorStatus } from "../lib/index.js";
 import { loadSettings } from "../settings/index.js";
 import {
@@ -71,16 +71,20 @@ app.post("/suggest-seeds", async (c) => {
     const result = await parseBody(c, suggestSeedsSchema);
     if ("response" in result) return result.response;
 
-    const gen = resolveGenerator(loadSettings());
+    const settings = loadSettings();
+    const gen = resolveGenerator(settings);
     if ("error" in gen) {
       return c.json({ error: gen.error }, gen.status);
     }
 
-    const seeds = await suggestWorldSeeds({
+    const { seeds, ipContext } = await suggestWorldSeeds({
       premise: result.data.premise,
+      name: result.data.name,
       role: gen.resolved,
+      research: settings.research,
     });
-    return c.json(seeds);
+
+    return c.json({ ...seeds, _ipContext: ipContext });
   } catch (error) {
     return c.json(
       { error: getErrorMessage(error, "Failed to generate seed suggestions.") },
@@ -104,6 +108,7 @@ app.post("/suggest-seed", async (c) => {
       premise,
       category,
       role: gen.resolved,
+      ipContext: result.data.ipContext ?? undefined,
     });
     return c.json({ category, value });
   } catch (error) {
@@ -139,7 +144,17 @@ app.post("/generate", async (c) => {
 
     return streamSSE(c, async (stream) => {
       try {
-        const scaffold = await generateWorldScaffold(
+        // Load IP context: from request body (fresh from wizard) or from config cache
+        const bodyIpContext = result.data.ipContext;
+        if (bodyIpContext) {
+          saveIpContext(campaignId, bodyIpContext);
+        }
+        const ipContext = bodyIpContext ?? loadIpContext(campaignId);
+        if (ipContext) {
+          log.info(`Using IP context: "${ipContext.franchise}" (${ipContext.keyFacts.length} facts, source: ${bodyIpContext ? "request" : "cache"})`);
+        }
+
+        const { scaffold, enrichedIpContext } = await generateWorldScaffold(
           {
             campaignId,
             name: campaign.name,
@@ -147,6 +162,7 @@ app.post("/generate", async (c) => {
             seeds: campaign.seeds,
             role: gen.resolved,
             fallbackRole,
+            ipContext,
             research: settings.research,
           },
           async (progress) => {
@@ -156,6 +172,12 @@ app.post("/generate", async (c) => {
             });
           }
         );
+
+        // Save enriched ipContext back to cache if facts were added
+        if (enrichedIpContext && ipContext && enrichedIpContext.keyFacts.length > ipContext.keyFacts.length) {
+          saveIpContext(campaignId, enrichedIpContext);
+          log.info(`Saved enriched IP context: ${ipContext.keyFacts.length} → ${enrichedIpContext.keyFacts.length} facts`);
+        }
 
         saveScaffoldToDb(campaignId, scaffold);
         markGenerationComplete(campaignId, scaffold.refinedPremise);
@@ -231,6 +253,9 @@ app.post("/regenerate-section", async (c) => {
     const campaign = requireActiveCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
 
+    // Load cached IP research for section regeneration
+    const ipContext = loadIpContext(campaignId);
+
     const req = {
       campaignId: campaign.id,
       name: campaign.name,
@@ -243,19 +268,19 @@ app.post("/regenerate-section", async (c) => {
 
     switch (section) {
       case "premise": {
-        const refinedPremise = await generateRefinedPremiseStep(req, null, result.data.additionalInstruction);
+        const refinedPremise = await generateRefinedPremiseStep(req, ipContext, result.data.additionalInstruction);
         return c.json({ refinedPremise });
       }
       case "locations": {
-        const locations = await generateLocationsStep(req, result.data.refinedPremise, null, result.data.additionalInstruction);
+        const locations = await generateLocationsStep(req, result.data.refinedPremise, ipContext, result.data.additionalInstruction);
         return c.json({ locations });
       }
       case "factions": {
-        const factions = await generateFactionsStep(req, result.data.refinedPremise, result.data.locationNames, null, result.data.additionalInstruction);
+        const factions = await generateFactionsStep(req, result.data.refinedPremise, result.data.locationNames, ipContext, result.data.additionalInstruction);
         return c.json({ factions });
       }
       case "npcs": {
-        const npcs = await generateNpcsStep(req, result.data.refinedPremise, result.data.locationNames, result.data.factionNames, null, result.data.additionalInstruction);
+        const npcs = await generateNpcsStep(req, result.data.refinedPremise, result.data.locationNames, result.data.factionNames, ipContext, result.data.additionalInstruction);
         return c.json({ npcs });
       }
       default:

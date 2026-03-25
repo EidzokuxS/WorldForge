@@ -27,6 +27,8 @@ vi.mock("../../worldgen/worldbook-importer.js", () => ({
 
 vi.mock("../../campaign/index.js", () => ({
   markGenerationComplete: vi.fn(),
+  saveIpContext: vi.fn(),
+  loadIpContext: vi.fn(() => null),
   getActiveCampaign: vi.fn(),
 }));
 
@@ -222,7 +224,7 @@ describe("POST /api/worldgen/roll-seed", () => {
 describe("POST /api/worldgen/suggest-seeds", () => {
   it("calls suggestWorldSeeds with premise and returns result", async () => {
     const suggested = { geography: "Floating islands", centralConflict: "War" };
-    mockedSuggestWorldSeeds.mockResolvedValue(suggested as any);
+    mockedSuggestWorldSeeds.mockResolvedValue({ seeds: suggested, ipContext: null } as any);
 
     const res = await app.request("/api/worldgen/suggest-seeds", {
       method: "POST",
@@ -232,7 +234,7 @@ describe("POST /api/worldgen/suggest-seeds", () => {
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual(suggested);
+    expect(body.geography).toBe("Floating islands");
     expect(mockedSuggestWorldSeeds).toHaveBeenCalledWith(
       expect.objectContaining({ premise: "A world of floating islands" })
     );

@@ -5,6 +5,8 @@ export {
   loadCampaign,
   deleteCampaign,
   markGenerationComplete,
+  saveIpContext,
+  loadIpContext,
   getActiveCampaign,
   incrementTick,
 } from "./manager.js";

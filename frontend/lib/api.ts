@@ -1,4 +1,4 @@
-import type { CampaignMeta, SeedCategory, Settings, WorldSeeds } from "@/lib/types";
+import type { CampaignMeta, IpResearchContext, SeedCategory, Settings, WorldSeeds } from "@/lib/types";
 import type {
   TestConnectionRequest,
   TestConnectionResult,
@@ -277,17 +277,22 @@ export function rollWorldSeed(
   return apiPost<RollSeedResult>("/api/worldgen/roll-seed", { category });
 }
 
-export function suggestSeeds(premise: string): Promise<WorldSeeds> {
-  return apiPost<WorldSeeds>("/api/worldgen/suggest-seeds", { premise });
+export function suggestSeeds(premise: string, name?: string): Promise<WorldSeeds & { _ipContext?: IpContext | null }> {
+  return apiPost<WorldSeeds & { _ipContext?: IpContext | null }>("/api/worldgen/suggest-seeds", { premise, name });
 }
+
+/** @deprecated Use IpResearchContext from @/lib/types */
+export type IpContext = IpResearchContext;
 
 export function suggestSeed(
   premise: string,
-  category: SeedCategory
+  category: SeedCategory,
+  ipContext?: IpContext | null
 ): Promise<RollSeedResult> {
   return apiPost<RollSeedResult>("/api/worldgen/suggest-seed", {
     premise,
     category,
+    ipContext: ipContext ?? null,
   });
 }
 
@@ -403,12 +408,17 @@ async function parseSSEStream<T>(body: ReadableStream<Uint8Array>, handlers: SSE
 
 export async function generateWorld(
   campaignId: string,
-  onProgress?: (progress: GenerationProgress) => void
+  onProgress?: (progress: GenerationProgress) => void,
+  ipContext?: IpContext | null,
 ): Promise<GenerateWorldResult> {
+  const body: Record<string, unknown> = { campaignId };
+  if (ipContext) {
+    body.ipContext = ipContext;
+  }
   const res = await fetch(`${API_BASE}/api/worldgen/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ campaignId }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
