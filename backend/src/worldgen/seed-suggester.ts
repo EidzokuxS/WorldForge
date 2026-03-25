@@ -74,23 +74,25 @@ export async function suggestWorldSeeds(
     const isCultural = key === "culturalFlavor";
 
     const ipInstruction = ipContext
-      ? `This world is based on "${ipContext.franchise}". Describe the ACTUAL canonical ${label.toLowerCase()} as modified by the premise changes below. Use franchise-specific terminology.`
-      : `This is an original world. Generate a specific, concrete ${label.toLowerCase()} based on the premise.`;
+      ? `This world is the ${ipContext.franchise} universe. Describe its canonical ${label.toLowerCase()} as it exists in the source material, then note any modifications caused by the premise divergence. Use the franchise's own terminology.`
+      : `This is an original world. Generate a specific, concrete ${label.toLowerCase()} that follows logically from the premise.`;
 
     const ipBlock = buildIpContextBlock(ipContext);
 
     const accumulatedSection = accumulated.length > 0
-      ? `\nALREADY ESTABLISHED DNA:\n${accumulated.join("\n")}\n\nYour ${label.toLowerCase()} MUST be consistent with and influenced by the above.`
+      ? `\nALREADY ESTABLISHED DNA:\n${accumulated.join("\n")}\n\nYour ${label.toLowerCase()} MUST be consistent with the above. Do not contradict established DNA.`
       : "";
 
-    const prompt = `You are describing the ${label} of a world for a text RPG.
+    const prompt = `You are defining the ${label} of a world for a text RPG engine.
 
 ${ipInstruction}
 ${ipBlock}
 PREMISE: "${req.premise}"
 ${accumulatedSection}
 
-Return the ${label.toLowerCase()} as a concrete 1-2 sentence description${isCultural ? " (2-3 cultural/thematic inspirations as an array)" : ""}, plus 1 sentence of reasoning explaining WHY this follows from the premise${accumulated.length > 0 ? " and previous DNA" : ""}.
+OUTPUT:
+- value: ${isCultural ? "An array of 2-3 specific cultural or thematic inspirations (real-world cultures, literary genres, historical periods)" : "A concrete 1-2 sentence description. Name specific places, systems, or conditions — not vague adjectives"}.
+- reasoning: 1 sentence explaining why this ${label.toLowerCase()} follows from the premise${accumulated.length > 0 ? " and established DNA" : ""}.
 ${buildStopSlopRules()}`;
 
     let categoryResult: DnaCategoryResult;
@@ -145,11 +147,11 @@ export async function suggestSingleSeed(
   const ipContext = req.ipContext ?? null;
   const ipBlock = buildIpContextBlock(ipContext);
 
-  const prompt = `You are a world-building assistant. Based on this premise, suggest a value for "${req.category}" (${categoryDescriptions[req.category]}).
+  const prompt = `Define the ${req.category} (${categoryDescriptions[req.category]}) for a text RPG world.
 ${ipBlock}
 PREMISE: "${req.premise}"
 
-Be specific, creative, and evocative. 1-2 sentences max.${isCultural ? " Return 2-3 cultural/thematic inspirations." : ""}
+OUTPUT: ${isCultural ? "An array of 2-3 specific cultural or thematic inspirations." : "A concrete 1-2 sentence description. Name specific places, systems, or conditions."}
 ${buildStopSlopRules()}`;
 
   if (isCultural) {

@@ -17,19 +17,21 @@ export async function generateRefinedPremiseStep(
   const seedConstraints = buildSeedConstraints(req.seeds);
   const ipBlock = buildIpContextBlock(ipContext);
 
-  const prompt = `You are refining a world premise for a text RPG.
+  const prompt = `You are a world-state summarizer for a text RPG engine.
 
 PLAYER CONCEPT:
 Name: ${req.name}
 Premise: ${req.premise}
 ${seedConstraints}${ipBlock}
-PREMISE REFINEMENT RULES:
-- Output EXACTLY 2-3 sentences that set the stage for this world.
-- PRESERVE the user's stated character relationships VERBATIM. If the user says "Naruto trained by Tsunade, Sakura by Orochimaru" — your premise MUST state exactly that. Do NOT swap, reorder, or reinterpret pairings.
-- For known IPs: use CANONICAL character titles and epithets (e.g., Tsunade = "Slug Princess/Legendary Sannin", Jiraiya = "Toad Sage", Orochimaru = "Snake Sannin"). Do NOT invent titles.
-- Set the WORLD STATE, not a plot summary. Describe what the world looks like NOW given the premise changes.
-- If WORLD DNA constraints are present, incorporate all of them.
-- Do NOT add characters, events, or details not stated or implied by the user's premise.${additionalInstruction ? `\n\nADDITIONAL USER INSTRUCTION:\n${additionalInstruction}` : ""}
+YOUR TASK: Write exactly 2-3 sentences describing the current state of this world.
+
+RULES:
+1. Describe the world AS IT EXISTS RIGHT NOW — not a plot synopsis, not a story hook. What does a bird's-eye view of this world show today?
+2. Preserve every character relationship the user stated VERBATIM. If the user wrote "A trained by B, C by D" — output those exact pairings unchanged. Do not swap, merge, or reinterpret them.
+3. For known IPs: use canonical titles and epithets as they exist in the franchise. Do not invent titles.
+4. If WORLD DNA constraints are listed above, weave ALL of them into the premise. None may be omitted.
+5. Do not introduce characters, events, factions, or details that the user's premise does not state or directly imply.
+6. Do not write hooks like "but little do they know..." or "the stage is set for...". State facts about the world's current condition.${additionalInstruction ? `\n\nADDITIONAL USER INSTRUCTION:\n${additionalInstruction}` : ""}
 
 ${buildStopSlopRules()}`;
 

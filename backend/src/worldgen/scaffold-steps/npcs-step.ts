@@ -87,8 +87,16 @@ async function planKeyNpcs(
   const ipBlock = buildIpContextBlock(ipContext);
 
   const keyInstruction = ipContext
-    ? `List 6-10 canonical characters from "${ipContext.franchise}" who are most relevant to this premise. Use REAL canonical names (e.g., "Kakashi Hatake" not "Silver-haired Mentor", "Darth Vader" not "Dark Enforcer"). Include characters directly mentioned in the premise AND characters who would logically be affected by the premise changes.`
-    : "List 6-8 key characters who drive this world's conflicts and story. Each must have a clear relationship to at least one faction or location.";
+    ? `List 6-10 characters from the ${ipContext.franchise} franchise using a WORLD-FIRST approach:
+STEP 1 — List the franchise's most important characters (leaders, mentors, antagonists, key allies) who define the world's power dynamics.
+STEP 2 — Add any characters directly named in the premise.
+STEP 3 — Add characters who would be logically affected by the premise's divergence (shifted allegiances, changed relationships).
+Use canonical full names exactly as they appear in the franchise.`
+    : `List 6-8 key characters who hold power, drive conflict, or control resources in this world. Each must connect to at least one faction or location. Ensure variety:
+- At least 1 political leader
+- At least 1 antagonist or rival
+- At least 1 mentor or ally figure
+- At least 1 wild card (spy, trickster, rogue agent)`;
 
   const prompt = `You are planning key NPCs for a text RPG world.
 
@@ -103,10 +111,10 @@ ${formatNameList(factionNames)}
 ${ipBlock}
 TASK: ${keyInstruction}
 
-RULES:
-- locationName MUST be one of KNOWN LOCATIONS listed above.
-- factionName MUST be one of KNOWN FACTIONS listed above, or null if unaffiliated.
-- role: 1 sentence describing what this character does in the story.
+FIELD CONSTRAINTS:
+- locationName: MUST exactly match one name from KNOWN LOCATIONS above. Copy-paste the name.
+- factionName: MUST exactly match one name from KNOWN FACTIONS above, or be null if the character is unaffiliated.
+- role: One sentence stating what this character DOES (their function in the world), not who they ARE.
 
 ${buildStopSlopRules()}`;
 
@@ -139,8 +147,8 @@ async function planSupportingNpcs(
   const ipBlock = buildIpContextBlock(ipContext);
 
   const supportingInstruction = ipContext
-    ? `List 3-5 supporting characters to round out the world. These can be original characters OR minor canonical characters. They should fill roles not covered by the key characters (merchants, informants, guards, rivals).`
-    : "List 3-5 supporting characters who populate the world. Each serves a specific gameplay function (quest giver, merchant, rival, informant).";
+    ? `List 3-5 supporting characters. These can be minor canonical characters or original characters. They must fill GAMEPLAY roles not covered by key characters: merchants, informants, gatekeepers, quest givers, local rivals.`
+    : `List 3-5 supporting characters who serve specific gameplay functions. Each must offer the player something concrete: goods to buy, information to trade, jobs to accept, or obstacles to overcome.`;
 
   const prompt = `You are planning supporting NPCs for a text RPG world.
 
@@ -154,14 +162,14 @@ KNOWN FACTIONS:
 ${formatNameList(factionNames)}
 ${ipBlock}
 KEY CHARACTERS ALREADY PLANNED: ${keyNames.join(", ")}
-Supporting characters must NOT duplicate any key character. Fill gaps in the world.
+Do NOT duplicate any key character. Supporting characters fill gaps — they give the player people to interact with in locations that lack key NPCs.
 
 TASK: ${supportingInstruction}
 
-RULES:
-- locationName MUST be one of KNOWN LOCATIONS listed above.
-- factionName MUST be one of KNOWN FACTIONS listed above, or null if unaffiliated.
-- role: 1 sentence describing this character's gameplay function.
+FIELD CONSTRAINTS:
+- locationName: MUST exactly match one name from KNOWN LOCATIONS above. Copy-paste the name. Prefer locations that have no key NPCs assigned yet.
+- factionName: MUST exactly match one name from KNOWN FACTIONS above, or be null if unaffiliated.
+- role: One sentence stating this character's GAMEPLAY FUNCTION (what they offer the player), not personality.
 
 ${buildStopSlopRules()}`;
 
@@ -204,10 +212,10 @@ async function detailNpcBatch(
       : "";
 
   const ipPersonaRule = ipContext
-    ? `- For known IP characters: persona must reflect their CANONICAL personality, modified only by the premise's butterfly effects.`
+    ? `- For known-IP characters: describe their canonical personality and backstory first, then note ONLY changes caused by the premise divergence.`
     : "";
 
-  const prompt = `Detail these NPCs for a text RPG world.
+  const prompt = `You are writing NPC reference cards for a text RPG engine. The engine reads these fields mechanically — follow the format exactly.
 
 WORLD PREMISE:
 ${refinedPremise}
@@ -219,10 +227,14 @@ ${previousSection}
 NPCs TO DETAIL NOW:
 ${batch.map((b) => `- ${b.name} (${b.tier}): ${b.role}`).join("\n")}
 
-RULES:
-- persona: 2-3 sentences of CONCRETE personality and backstory. Not "a mysterious figure" but specific details about their history, skills, and relationships.
-- tags: character traits and skills relevant to gameplay. Include combat abilities, social traits, wealth level.
-- goals: 1-2 short-term (current objectives) and 1-2 long-term (life ambitions).
+FIELD INSTRUCTIONS:
+- persona: Exactly 2-3 sentences. Sentence 1 = who they are and their background. Sentence 2 = personality and how they treat others. Sentence 3 (optional) = a specific skill, secret, or relationship that matters for gameplay. Never write "mysterious" or "enigmatic" — state concrete facts.
+- tags: Gameplay-relevant traits and skills. Format: [Trait] or [Skill]. Examples: [Master Swordsman], [Cynical], [Wealthy], [Poisoner], [Charismatic], [Illiterate]. 3-5 tags per NPC.
+- goals: An object with EXACTLY two keys: "shortTerm" and "longTerm".
+  - "shortTerm": array of 1-2 strings. Current objectives the character is actively pursuing RIGHT NOW. Each goal names a specific action, target, or deadline.
+  - "longTerm": array of 1-2 strings. Life ambitions or multi-year plans. Each goal names a specific outcome, not a vague aspiration.
+  - Example: { "shortTerm": ["Recover the stolen shipment before the festival"], "longTerm": ["Become guild master of the Merchants' Circle"] }
+  - CRITICAL: The keys MUST be "shortTerm" and "longTerm" (camelCase). NOT "short_term", NOT "short-term".
 ${ipPersonaRule}
 
 ${buildStopSlopRules()}`;

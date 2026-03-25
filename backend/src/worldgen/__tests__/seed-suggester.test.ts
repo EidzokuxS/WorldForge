@@ -119,7 +119,7 @@ describe("suggestWorldSeeds (sequential DNA)", () => {
     // Check first call has IP context
     const firstCallPrompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>).prompt as string;
     expect(firstCallPrompt).toContain("Naruto");
-    expect(firstCallPrompt).toContain("ACTUAL canonical");
+    expect(firstCallPrompt).toContain("canonical");
   });
 
   it("original world premise includes original world instruction", async () => {
@@ -138,8 +138,8 @@ describe("suggestWorldSeeds (sequential DNA)", () => {
 
     for (let i = 0; i < 6; i++) {
       const prompt = (mockGenerateObject.mock.calls[i]![0] as Record<string, unknown>).prompt as string;
-      expect(prompt).toContain("OUTPUT QUALITY RULES");
-      expect(prompt).toContain("No purple prose");
+      expect(prompt).toContain("WRITING RULES");
+      expect(prompt).toContain("BANNED words");
     }
   });
 });
@@ -181,7 +181,7 @@ describe("suggestSingleSeed", () => {
     });
 
     const prompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>).prompt as string;
-    expect(prompt).toContain("OUTPUT QUALITY RULES");
+    expect(prompt).toContain("WRITING RULES");
   });
 
   it("includes IP context when provided", async () => {

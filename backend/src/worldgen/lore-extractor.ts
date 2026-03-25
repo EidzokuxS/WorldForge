@@ -75,29 +75,31 @@ export async function extractLoreCards(
       : "";
 
   const ipQualityRule = ipContext
-    ? `- For known IPs: concept/ability/rule cards MUST reference actual franchise elements from the REFERENCE FACTS above. Do NOT invent fictional systems (no "Chakra Storms" - use real concepts like "Chakra Nature Types", "Sage Mode", "Bijuu").`
+    ? `- For known IPs: concept/ability/rule cards MUST describe actual franchise systems, powers, and mechanics drawn from the REFERENCE FACTS above. Never invent systems that do not exist in the franchise canon.`
     : "";
 
-  const prompt = `You are a world-building encyclopedist. Extract 30-50 structured lore cards from this RPG world scaffold.
+  const prompt = `You are a world encyclopedia compiler. Extract 30-50 structured lore cards from this RPG world scaffold. Each card is a database entry the game engine uses for semantic search — accuracy and specificity matter.
 
 ${context}
 ${ipBlock}${ipFactsSection}
-EXTRACTION RULES:
-- Each location in the scaffold -> one "location" card (name = location name, definition = 1-2 sentence factual description)
-- Each NPC in the scaffold -> one "npc" card (name = character name, definition = role and key trait)
-- Each faction in the scaffold -> one "faction" card (name = faction name, definition = purpose and power)
-- Extract world SYSTEMS and POWERS -> "concept" cards (e.g., "Chakra Nature Types", "Kekkei Genkai", "The Force")
-- Extract world RULES and LAWS -> "rule" cards (physical laws, magic constraints, political laws)
-- Extract notable ABILITIES or TECHNIQUES -> "ability" cards
-- Extract notable ITEMS or ARTIFACTS -> "item" cards
-- Extract historical EVENTS -> "event" cards
+EXTRACTION PROCEDURE:
+1. Create one "location" card per scaffold location. term = location name. definition = 1-2 sentence factual summary (geography, population, function). Do NOT copy the scaffold description verbatim — summarize.
+2. Create one "npc" card per scaffold NPC. term = character name. definition = their role and single most important trait.
+3. Create one "faction" card per scaffold faction. term = faction name. definition = what they control and what they want.
+4. Extract 10-20 additional cards from world knowledge (not just the scaffold text):
+   - "concept" cards: power systems, magic types, technologies, social structures, economic systems.
+   - "rule" cards: physical laws, magic constraints, political laws, taboos, treaties.
+   - "ability" cards: named techniques, spells, fighting styles, special powers.
+   - "item" cards: named artifacts, weapons, resources, currencies.
+   - "event" cards: historical wars, catastrophes, treaties, discoveries that shaped the current world.
 
-QUALITY RULES:
-- Definition must be 1-2 FACTUAL sentences. No storytelling, no narrative flair, no "is said to be".
-- Term must be a short unique name (1-5 words).
-- Do NOT restate scaffold descriptions verbatim. Concept/ability/rule cards must add NEW information about world systems, not repeat location or NPC descriptions.
+CARD FORMAT:
+- term: 1-5 word unique name. No articles ("the"). No generic terms ("Magic System") — use the world's own terminology.
+- definition: 1-2 factual sentences. State what it IS and what it DOES. No narrative flair, no "is said to be", no "legend has it".
+- category: one of location, npc, faction, ability, rule, concept, item, event.
 ${ipQualityRule}
-- Aim for 30-50 cards total. At minimum: 1 per location + 1 per NPC + 1 per faction + 10-20 concept/ability/rule cards.
+
+TARGET: 30-50 cards total. Minimum: 1 per location + 1 per NPC + 1 per faction + 10 concept/ability/rule/item/event cards.
 
 ${buildStopSlopRules()}`;
 

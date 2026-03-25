@@ -40,8 +40,17 @@ export async function generateLocationsStep(
 
   // --- Call 1: PLAN ---
   const planInstruction = ipContext
-    ? `List 5-8 canonical locations from "${ipContext.franchise}" that are relevant to this premise. Use REAL canonical names (e.g., "Konohagakure" not "Leaf Village", "Coruscant" not "Capital Planet"). Include the most important locations for the story.`
-    : "Generate 5-8 locations that logically arise from this world's premise and DNA. Each location must serve a distinct narrative purpose.";
+    ? `You are a gazetteer for the ${ipContext.franchise} universe. List 5-8 locations using a WORLD-FIRST approach:
+STEP 1 — List the franchise's most important locations (capitals, headquarters, major cities, key geographic features) regardless of the premise.
+STEP 2 — Check if the premise implies additional locations not yet listed. Add them.
+STEP 3 — If any listed location would be altered by the premise's divergence, note that in its purpose.
+Use the franchise's canonical names exactly as they appear in the source material. Never translate or substitute them.`
+    : `Generate 5-8 locations for this original world. Prioritize variety of function:
+- At least 1 seat of political power (capital, palace, council hall)
+- At least 1 economic hub (market town, trade port, mining settlement)
+- At least 1 wilderness or frontier zone
+- At least 1 location tied to the central conflict
+- Remaining slots: fill gaps (religious site, criminal underworld, scholarly institution, etc.)`;
 
   const plan = await generateObject({
     model: createModel(req.role.provider),
@@ -51,8 +60,10 @@ export async function generateLocationsStep(
 WORLD PREMISE:
 ${refinedPremise}
 ${ipBlock}
-- Exactly ONE location must have isStarting=true (the player's starting location).
-- Each location's purpose must be unique — no two locations serving the same narrative role.${additionalInstruction ? `\nADDITIONAL: ${additionalInstruction}` : ""}
+CONSTRAINTS:
+- Exactly ONE location has isStarting=true — the player's starting point. Pick a location where a newcomer or young character would plausibly begin.
+- Every location must serve a DIFFERENT narrative function. No two locations filling the same role (e.g., two "training grounds" or two "hidden bases").
+- purpose: one sentence explaining what this location IS and why it matters to the world (not just to the premise).${additionalInstruction ? `\nADDITIONAL: ${additionalInstruction}` : ""}
 
 ${buildStopSlopRules()}`,
     temperature: req.role.temperature,
@@ -75,20 +86,20 @@ ${buildStopSlopRules()}`,
     const detail = await generateObject({
       model: createModel(req.role.provider),
       schema: locationDetailSchema,
-      prompt: `Detail these locations for a text RPG world.
+      prompt: `You are writing a location reference sheet for a text RPG engine. The engine uses these fields mechanically — be precise.
 
 WORLD PREMISE:
 ${refinedPremise}
 ${ipBlock}
-ALL LOCATION NAMES IN THIS WORLD: ${nameList.join(", ")}
+ALL LOCATIONS IN THIS WORLD: ${nameList.join(", ")}
 
 ${previousSummary ? `ALREADY DETAILED LOCATIONS:\n${previousSummary}\n` : ""}LOCATIONS TO DETAIL NOW:
 ${batch.map((b) => `- ${b.name}: ${b.purpose}`).join("\n")}
 
-RULES:
-- description: 2-3 concrete sentences about physical appearance, atmosphere, and significance. No purple prose.
-- tags: structural tags like [Warm], [Crowded], [Dangerous], [Controlled by FactionName].
-- connectedTo: ONLY reference names from the full list: ${nameList.join(", ")}. No self-links.${ipContext ? `\n- For known IPs: describe locations as they canonically are, modified by the premise's butterfly effects.` : ""}
+FIELD INSTRUCTIONS:
+- description: Exactly 2-3 sentences. Sentence 1 = physical appearance (size, terrain, architecture). Sentence 2 = who lives/works here and what they do. Sentence 3 (optional) = what changed due to the premise, or a notable danger/resource.${ipContext ? ` For known-IP locations: describe the canonical state first, then note premise-driven changes.` : ""}
+- tags: Mechanical tags the game engine reads. Format: [Adjective] or [Controlled by FactionName]. Examples: [Warm], [Crowded], [Dangerous], [Poor], [Fortified], [Controlled by Iron Guard]. 3-5 tags per location.
+- connectedTo: Which other locations a player can travel to from here. ONLY use names from this list: ${nameList.join(", ")}. Never link a location to itself. Each location connects to 1-3 others.
 
 ${buildStopSlopRules()}`,
       temperature: req.role.temperature,

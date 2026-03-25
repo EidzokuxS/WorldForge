@@ -27,17 +27,17 @@ export function buildIpContextBlock(ipContext: IpResearchContext | null): string
 
   return `
 FRANCHISE REFERENCE (${ipContext.franchise}, verified via ${ipContext.source}):
-Key facts (use as source of truth):
+Key facts — treat as ground truth:
 ${facts}
 Tone:
 ${tone}
 
 CANONICAL FIDELITY RULES:
-- Use REAL canonical names for locations, factions, organizations, characters.
-- Do NOT invent replacements, translations, or "inspired by" variants.
-- Apply premise changes as butterfly effects on the canonical world.
-- When the premise changes a character's teacher/faction/role, keep all OTHER canonical details unchanged unless logically affected.
-- If a fact is not in the reference data, use your knowledge of the franchise. Do NOT invent non-existent franchise elements.
+1. Use the franchise's own names for every location, faction, organization, and character. Never substitute, translate, or create "inspired by" variants.
+2. Start from the canonical world as-is. Then apply the premise as a single point of divergence — trace its logical consequences outward. Everything NOT affected by that divergence stays canonical.
+3. When the premise reassigns a character's allegiance, teacher, or role: update ONLY relationships that logically change. Keep all other canonical details (abilities, backstory, personality) intact.
+4. If a detail is absent from the reference data above, rely on your knowledge of the franchise. Never fabricate franchise elements that do not exist in canon.
+5. Never rename canonical entities to avoid copyright. This is a private RPG tool, not a published work.
 `;
 }
 
@@ -81,13 +81,14 @@ export function formatNameList(names: string[]): string {
 
 export function buildStopSlopRules(): string {
   return `
-OUTPUT QUALITY RULES:
-- Write concrete, specific statements. Not "a vast ancient realm" but "a continent of five island nations."
-- No purple prose: no "sprawling", "enigmatic", "shrouded in mystery", "tapestry of", "crucible of".
-- No hedge words: no "perhaps", "possibly", "might be". Use definitive statements.
-- No AI filler: no "In this world, there exists...", "It is worth noting that...", "Interestingly,".
-- Action verbs over passive: not "There is a conflict" but "Two clans war over the northern mines."
-- Every sentence must add NEW information. No restating what was already said.
+WRITING RULES — violations will be rejected:
+- Every sentence states a concrete fact. Not "a vast ancient realm" → "a continent of five island nations connected by rope bridges."
+- BANNED words/phrases: "sprawling", "enigmatic", "shrouded in mystery", "tapestry of", "crucible of", "bustling", "ancient evil", "delicate balance", "rich history", "looming threat", "diverse array", "stands as a testament".
+- No hedging: never write "perhaps", "possibly", "might be", "it is said that". State facts.
+- No AI filler openers: never start with "In this world", "It is worth noting", "Interestingly", "As a", "Here we find".
+- Active voice only: not "There is a conflict between" → "Two clans fight over the northern mines."
+- Zero repetition: every sentence adds information not present in any previous sentence. If you catch yourself restating, delete the sentence.
+- No meta-commentary: never describe what you are doing ("I will now describe..."). Just output the content.
 `;
 }
 
