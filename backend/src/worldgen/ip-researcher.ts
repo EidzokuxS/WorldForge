@@ -163,6 +163,11 @@ const ipResearchContextSchema = z.object({
     .min(1)
     .max(12)
     .describe("Atmospheric/tonal signals: grimdark, hopepunk, high-magic, shonen action, etc."),
+  canonicalNames: z.object({
+    locations: z.array(z.string()).max(15).describe("Major canonical location names from the franchise (cities, villages, planets, regions). Use EXACT names from source material."),
+    factions: z.array(z.string()).max(10).describe("Major canonical faction/organization names (governments, guilds, armies, clans). Use EXACT names from source material."),
+    characters: z.array(z.string()).max(15).describe("Major canonical character names (protagonists, antagonists, leaders). Use EXACT full names from source material."),
+  }).describe("Explicit lists of canonical entity names — these will be injected into generation prompts to prevent the AI from inventing substitutes."),
 });
 
 // ---------------------------------------------------------------------------
@@ -303,6 +308,7 @@ Every fact should be a complete, self-contained sentence.`,
     franchise: object.franchise,
     keyFacts: object.keyFacts,
     tonalNotes: object.tonalNotes,
+    canonicalNames: object.canonicalNames,
     source: "mcp" as const,
   };
 }
@@ -337,6 +343,7 @@ Focus on information useful for building a custom RPG world inspired by this IP:
     franchise: object.franchise,
     keyFacts: object.keyFacts,
     tonalNotes: object.tonalNotes,
+    canonicalNames: object.canonicalNames,
     source: "llm",
   };
 }

@@ -59,6 +59,13 @@ export interface IpResearchContext {
   keyFacts: string[];
   /** Tonal / atmosphere notes for prompting */
   tonalNotes: string[];
+  /** Canonical entity names extracted by LLM during research compilation.
+   *  Locations, factions, characters — exact names from the source material. */
+  canonicalNames?: {
+    locations?: string[];
+    factions?: string[];
+    characters?: string[];
+  };
   /** Whether context came from live web search or LLM internal knowledge */
   source: "mcp" | "llm";
 }

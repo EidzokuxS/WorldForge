@@ -19,40 +19,25 @@ export const SEED_LABELS: ReadonlyArray<{ field: keyof WorldSeeds; label: string
 // buildIpContextBlock — canonical IP fidelity instructions
 // ---------------------------------------------------------------------------
 
-/** Extract proper nouns from facts that look like canonical entity names */
-function extractCanonicalNames(facts: string[]): string {
-  const namePatterns = [
-    // "X Village" / "Village Hidden in X" / "Land of X"
-    /\b(?:Hidden\s+)?(?:Leaf|Sand|Mist|Rock|Cloud|Sound|Rain|Grass|Waterfall|Star)\s+Village\b/gi,
-    /\b(?:Konohagakure|Sunagakure|Kirigakure|Iwagakure|Kumogakure|Otogakure|Amegakure)\b/gi,
-    /\bLand\s+of\s+(?:Fire|Wind|Water|Earth|Lightning|Iron|Waves|Tea|Snow|Rice|Rain|Sound|Sky|Bears|Silence)\b/gi,
-    // Capitalized multi-word names (2-4 words, not starting common words)
-    /\b(?:The\s+)?(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b/g,
-  ];
-
-  const names = new Set<string>();
-  const joined = facts.join(" ");
-  for (const pattern of namePatterns) {
-    for (const match of joined.matchAll(pattern)) {
-      const name = match[0].trim();
-      if (name.length > 3 && !["The World", "The Story", "The Series", "This World"].includes(name)) {
-        names.add(name);
-      }
-    }
-  }
-  return names.size > 0 ? `CANONICAL NAMES FOUND IN RESEARCH (use these EXACT names):\n${[...names].join(", ")}\n` : "";
-}
-
 export function buildIpContextBlock(ipContext: IpResearchContext | null): string {
   if (!ipContext) return "";
 
   const facts = ipContext.keyFacts.map((f) => `  - ${f}`).join("\n");
   const tone = ipContext.tonalNotes.map((t) => `  - ${t}`).join("\n");
-  const canonicalNames = extractCanonicalNames(ipContext.keyFacts);
+
+  const cn = ipContext.canonicalNames;
+  const nameBlock = cn
+    ? `
+CANONICAL NAMES — use these EXACT names, never invent substitutes:
+${cn.locations?.length ? `  Locations: ${cn.locations.join(", ")}` : ""}
+${cn.factions?.length ? `  Factions: ${cn.factions.join(", ")}` : ""}
+${cn.characters?.length ? `  Characters: ${cn.characters.join(", ")}` : ""}
+`.trim()
+    : "";
 
   return `
 FRANCHISE REFERENCE (${ipContext.franchise}, verified via ${ipContext.source}):
-${canonicalNames}
+${nameBlock ? `${nameBlock}\n` : ""}
 Key facts — treat as ground truth:
 ${facts}
 Tone:
