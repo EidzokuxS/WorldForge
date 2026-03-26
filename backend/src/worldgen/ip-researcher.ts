@@ -154,14 +154,14 @@ const ipResearchContextSchema = z.object({
   keyFacts: z
     .array(z.string())
     .min(3)
-    .max(30)
+    .max(50)
     .describe(
-      "Key lore facts covering: geography, races/species, factions, power systems, characters, history, creatures, culture. Each fact is one complete sentence."
+      "Key lore facts covering: geography, races/species, factions, power systems, characters, history, creatures, culture. Each fact is one complete sentence. 15-40 facts for major franchises."
     ),
   tonalNotes: z
     .array(z.string())
     .min(1)
-    .max(8)
+    .max(12)
     .describe("Atmospheric/tonal signals: grimdark, hopepunk, high-magic, shonen action, etc."),
 });
 
