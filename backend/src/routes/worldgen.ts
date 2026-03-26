@@ -155,7 +155,21 @@ app.post("/generate", async (c) => {
         if (bodyIpContext) {
           saveIpContext(campaignId, bodyIpContext);
         }
-        const ipContext = bodyIpContext ?? loadIpContext(campaignId);
+        let ipContext = bodyIpContext ?? loadIpContext(campaignId);
+
+        // If no ipContext exists, run research now (user may have skipped DNA step)
+        if (!ipContext) {
+          const { researchKnownIP } = await import("../worldgen/ip-researcher.js");
+          ipContext = await researchKnownIP(
+            { premise: campaign.premise, name: campaign.name, research: settings.research },
+            gen.resolved,
+          );
+          if (ipContext) {
+            saveIpContext(campaignId, ipContext);
+            log.info(`Ran research on-demand: "${ipContext.franchise}" (${ipContext.keyFacts.length} facts)`);
+          }
+        }
+
         if (ipContext) {
           log.info(`Using IP context: "${ipContext.franchise}" (${ipContext.keyFacts.length} facts, source: ${bodyIpContext ? "request" : "cache"})`);
         }
