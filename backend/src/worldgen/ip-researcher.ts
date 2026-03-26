@@ -470,7 +470,7 @@ If insufficient, suggest up to 3 targeted search queries to fill the gaps.`,
             schema: z.object({
               facts: z.array(z.string()).max(5).describe("Key facts extracted from search results"),
             }),
-            prompt: `Extract key facts about "${ipContext.franchise}" relevant to ${step} from these search results:\n\n${snippets}\n\nOnly include facts that are NOT already known:\n${ipContext.keyFacts.slice(0, 10).map((f) => `- ${f}`).join("\n")}`,
+            prompt: `Extract key CANONICAL facts about "${ipContext.franchise}" relevant to ${step} from these search results:\n\n${snippets}\n\nRULES:\n- Only include facts from the OFFICIAL canon (manga, anime, games by the original creators).\n- EXCLUDE fan-made content, fan wikis speculation, filler episodes, non-canon movies, and fan theories.\n- Each fact must name specific canonical entities (places, characters, organizations).\n- Only include facts that are NOT already known:\n${ipContext.keyFacts.slice(0, 10).map((f) => `- ${f}`).join("\n")}`,
             temperature: 0.1,
             maxOutputTokens: 512,
           });
