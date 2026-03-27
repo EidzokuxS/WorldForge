@@ -46,8 +46,18 @@ const categoryDescriptions: Record<SeedCategory, string> = {
   politicalStructure: "how power is organized - government, authority, hierarchy",
   centralConflict: "the core tension or struggle driving the world",
   culturalFlavor: "2-3 real-world or thematic cultural inspirations",
-  environment: "climate, atmosphere, or environmental condition",
+  environment: "climate, weather, biomes, and sensory atmosphere — what you SEE, HEAR, SMELL walking through this world",
   wildcard: "one unexpected, unique element that makes this world stand out",
+};
+
+/** Per-category rules to prevent overlap between DNA categories */
+const categoryConstraints: Partial<Record<SeedCategory, string>> = {
+  environment: `CRITICAL: Environment is about the PHYSICAL WORLD the player experiences — weather, light, sounds, smells, flora, fauna, seasons, natural hazards.
+NOT about who controls territory (that's Political Structure) or who fights whom (that's Central Conflict).
+Describe what a traveler would SENSE, not what armies are doing.
+Examples of GOOD environment: "Perpetual fog blankets the lowlands, broken only by volcanic vents that turn nights orange" or "Three moons create unpredictable tides that flood coastal cities twice daily."
+Examples of BAD environment (these belong in other categories): "Imperial forces patrol the streets" or "Factions compete for resources."`,
+  wildcard: `The wildcard must introduce something NOT covered by any previous category. It should surprise the player — a strange custom, hidden mechanic, cosmic anomaly, unique creature, or cultural quirk that makes this world memorable.`,
 };
 
 const DNA_CATEGORIES: ReadonlyArray<{ key: SeedCategory; label: string }> = [
@@ -83,10 +93,12 @@ export async function suggestWorldSeeds(
       ? `\nALREADY ESTABLISHED DNA:\n${accumulated.join("\n")}\n\nYour ${label.toLowerCase()} MUST be consistent with the above. Do not contradict established DNA.`
       : "";
 
+    const constraint = categoryConstraints[key] ?? "";
+
     const prompt = `You are defining the ${label} of a world for a text RPG engine.
 
 ${ipInstruction}
-${ipBlock}
+${constraint ? `${constraint}\n` : ""}${ipBlock}
 PREMISE: "${req.premise}"
 ${accumulatedSection}
 
