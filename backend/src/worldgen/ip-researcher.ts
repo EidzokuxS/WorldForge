@@ -169,7 +169,6 @@ const ipResearchContextSchema = z.object({
   tonalNotes: z
     .array(z.string())
     .min(1)
-    .max(12)
     .describe("Atmospheric/tonal signals: grimdark, hopepunk, high-magic, shonen action, etc."),
   canonicalNames: z.object({
     locations: z.array(z.string()).describe("Major canonical location names from the franchise (cities, villages, planets, regions). Use EXACT names from source material. Include all major locations."),
@@ -184,10 +183,10 @@ const ipResearchContextSchema = z.object({
 
 // Schema for LLM to decide what to research next
 const researchPlanSchema = z.object({
-  queries: z.array(z.string()).min(1).max(10).describe(
+  queries: z.array(z.string()).min(1).describe(
     "Search queries to look up. Each query should target a specific aspect of the franchise that needs clarification."
   ),
-  knownFromOverview: z.array(z.string()).max(30).describe(
+  knownFromOverview: z.array(z.string()).describe(
     "Key facts already clear from the overview — no need to search for these."
   ),
 });
