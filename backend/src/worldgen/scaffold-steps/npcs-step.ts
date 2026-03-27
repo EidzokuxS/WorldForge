@@ -5,6 +5,7 @@ import type { IpResearchContext } from "@worldforge/shared";
 import type { GenerateScaffoldRequest, ScaffoldNpc } from "../types.js";
 import {
   buildIpContextBlock,
+  buildCanonicalList,
   formatNameList,
   buildStopSlopRules,
 } from "./prompt-utils.js";
@@ -86,14 +87,17 @@ async function planKeyNpcs(
 ): Promise<PlannedNpc[]> {
   const ipBlock = buildIpContextBlock(ipContext);
 
+  const canonChars = buildCanonicalList(ipContext, "characters");
+
   const keyInstruction = ipContext
     ? `List 6-10 CANONICAL characters from ${ipContext.franchise}.
-HARD RULE: ALL key characters MUST be real, canonical characters from the franchise. Do NOT invent original characters for the key tier.
+${canonChars}
+HARD RULE: Your character names MUST come from the canonical list above. Do NOT invent original characters for the key tier.
 PROCEDURE:
-1. List the franchise's major characters: protagonists, antagonists, mentors, political leaders, key supporting cast.
+1. Pick 6-10 names from the CANONICAL CHARACTERS list above.
 2. Include ALL characters named or implied by the premise.
-3. Add other canonical characters who would logically interact with the premise changes.
-Use canonical full names exactly as they appear in the franchise. Assign each to a canonical location and faction from the lists provided.`
+3. Add other characters from the list who would logically interact with the premise changes.
+Copy-paste canonical full names exactly. Assign each to a location and faction from the lists below.`
     : `List 6-8 key characters who hold power, drive conflict, or control resources in this world. Each must connect to at least one faction or location. Ensure variety:
 - At least 1 political leader
 - At least 1 antagonist or rival

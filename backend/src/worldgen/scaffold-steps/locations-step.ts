@@ -1,7 +1,7 @@
 import { safeGenerateObject as generateObject } from "../../ai/generate-object-safe.js";
 import { z } from "zod";
 import { createModel } from "../../ai/index.js";
-import { buildIpContextBlock, buildStopSlopRules } from "./prompt-utils.js";
+import { buildIpContextBlock, buildCanonicalList, buildStopSlopRules } from "./prompt-utils.js";
 import type { IpResearchContext } from "../ip-researcher.js";
 import type { GenerateScaffoldRequest, ScaffoldLocation } from "../types.js";
 
@@ -37,16 +37,18 @@ export async function generateLocationsStep(
   additionalInstruction?: string,
 ): Promise<ScaffoldLocation[]> {
   const ipBlock = buildIpContextBlock(ipContext);
+  const canonLocs = buildCanonicalList(ipContext, "locations");
 
   // --- Call 1: PLAN ---
   const planInstruction = ipContext
     ? `You are writing a location reference for the ${ipContext.franchise} universe. Output 5-8 CANONICAL locations.
-HARD RULE: At least 5 out of your locations MUST be real, canonical locations from ${ipContext.franchise}. You may add at most 1-2 original locations ONLY if the premise divergence logically creates a new place that does not exist in canon.
+${canonLocs}
+HARD RULE: Your location names MUST come from the canonical list above. At least 5 out of your locations MUST use names EXACTLY as listed. You may add at most 1-2 original locations ONLY if the premise divergence logically creates a new place that does not exist in canon.
 PROCEDURE:
-1. List the franchise's major canonical locations: capitals, hidden villages/cities, headquarters, key geographic landmarks. These form the bulk of your list.
-2. For each canonical location, note if the premise divergence changes anything about it (leadership, allegiance, condition). If unchanged, describe it as canon.
-3. Only if the premise creates a genuinely new place (e.g., a new base for a reassigned character), add it as slot 6-8.
-Use canonical names exactly. Never translate, simplify, or invent substitutes.`
+1. Pick 5-8 names from the CANONICAL LOCATIONS list above. These are your locations.
+2. For each, note if the premise divergence changes anything about it (leadership, allegiance, condition). If unchanged, describe it as canon.
+3. Only if the premise creates a genuinely new place (e.g., a new base for a reassigned character), add it as slot 6-8 with an original name.
+Copy-paste canonical names exactly. Never translate, simplify, or invent substitutes.`
     : `Generate 5-8 locations for this original world. Prioritize variety of function:
 - At least 1 seat of political power (capital, palace, council hall)
 - At least 1 economic hub (market town, trade port, mining settlement)

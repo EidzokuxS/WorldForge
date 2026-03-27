@@ -1,7 +1,7 @@
 import { safeGenerateObject as generateObject } from "../../ai/generate-object-safe.js";
 import { z } from "zod";
 import { createModel } from "../../ai/index.js";
-import { buildIpContextBlock, buildStopSlopRules, formatNameList } from "./prompt-utils.js";
+import { buildIpContextBlock, buildCanonicalList, buildStopSlopRules, formatNameList } from "./prompt-utils.js";
 import type { IpResearchContext } from "../ip-researcher.js";
 import type { GenerateScaffoldRequest, ScaffoldFaction } from "../types.js";
 
@@ -38,16 +38,18 @@ export async function generateFactionsStep(
   additionalInstruction?: string,
 ): Promise<ScaffoldFaction[]> {
   const ipBlock = buildIpContextBlock(ipContext);
+  const canonFactions = buildCanonicalList(ipContext, "factions");
 
   // --- Call 1: PLAN ---
   const planInstruction = ipContext
     ? `You are writing a faction reference for the ${ipContext.franchise} universe. Output 3-6 CANONICAL factions.
-HARD RULE: ALL factions MUST be real, canonical organizations from ${ipContext.franchise}. Do NOT invent new factions. The premise changes WHO leads or joins a faction, not WHETHER the faction exists.
+${canonFactions}
+HARD RULE: Your faction names MUST come from the canonical list above. Do NOT invent new factions. The premise changes WHO leads or joins a faction, not WHETHER the faction exists.
 PROCEDURE:
-1. List the franchise's major canonical organizations: governments, military bodies, antagonist groups, clans, guilds, orders. These ARE your factions.
+1. Pick 3-6 names from the CANONICAL FACTIONS list above. These ARE your factions.
 2. For each, note if the premise divergence changes its leadership, goals, or allegiance.
 3. You may add a new faction ONLY if the premise explicitly describes one that has no canonical equivalent.
-Use canonical faction names exactly. Never create "premise-themed" factions like "[Character]'s Disciples" when a real faction already exists.`
+Copy-paste canonical faction names exactly. Never create "premise-themed" factions.`
     : `Generate 3-6 factions that form the political skeleton of this world. Ensure structural variety:
 - At least 1 governing authority (state, council, empire)
 - At least 1 opposition or rebel force

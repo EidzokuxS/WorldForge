@@ -55,6 +55,21 @@ CANONICAL FIDELITY RULES (MANDATORY — violations will be rejected):
 `;
 }
 
+/**
+ * Build a focused canonical names block for a specific entity type.
+ * Placed DIRECTLY inside the step's task instruction, not buried in ipBlock.
+ */
+export function buildCanonicalList(
+  ipContext: IpResearchContext | null,
+  type: "locations" | "factions" | "characters",
+): string {
+  if (!ipContext?.canonicalNames) return "";
+  const names = ipContext.canonicalNames[type];
+  if (!names?.length) return "";
+  const label = type.charAt(0).toUpperCase() + type.slice(1);
+  return `\nCANONICAL ${label.toUpperCase()} FROM ${ipContext.franchise.toUpperCase()} (use these EXACT names):\n${names.map((n) => `  • ${n}`).join("\n")}\n`;
+}
+
 // ---------------------------------------------------------------------------
 // buildSeedConstraints — World DNA block for generation prompts
 // ---------------------------------------------------------------------------

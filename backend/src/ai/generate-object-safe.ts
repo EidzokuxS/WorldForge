@@ -208,13 +208,10 @@ export async function safeGenerateObject<T>(opts: {
 }): Promise<{ object: T }> {
   const { schema, mode, ...rest } = opts;
 
-  // Default to "json" mode — most OpenAI-compatible providers (GLM, Ollama, OpenRouter)
-  // don't support tool-based structured outputs, causing 3-5s wasted per call.
-  const resolvedMode = mode ?? "json";
-
-  // Attempt 1: standard generateObject
+  // Attempt 1: standard generateObject (let AI SDK auto-detect mode)
   try {
-    const result = await generateObject({ ...rest, schema, mode: resolvedMode } as Parameters<typeof generateObject>[0]);
+    const genOpts = mode ? { ...rest, schema, mode } : { ...rest, schema };
+    const result = await generateObject(genOpts as Parameters<typeof generateObject>[0]);
     return { object: result.object as T };
   } catch (primaryError) {
     // Only fall back on parse errors, not network/auth errors
