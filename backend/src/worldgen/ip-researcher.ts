@@ -134,7 +134,15 @@ async function verifyFranchiseViaSearch(
     const { object } = await generateObject({
       model: createModel(role.provider),
       schema: searchVerifySchema,
-      prompt: `Based on these search results, is "${candidateFranchise ?? searchQuery}" a real franchise/IP?\n\nSearch results:\n${searchText}\n\nOriginal premise: "${premise}"`,
+      prompt: `A user wrote this RPG premise: "${premise}"
+
+We suspect it references "${candidateFranchise ?? searchQuery}". Search results:
+${searchText}
+
+QUESTION: Does the user's PREMISE actually describe this franchise's world?
+- The premise must contain franchise-specific elements (unique characters, locations, terminology, magic systems, plot points).
+- Sharing a common word or generic theme is NOT enough. Only count references that would be meaningless outside the franchise.
+- If the campaign name resembles a franchise but the premise describes an unrelated world, answer false.`,
       temperature: 0.0,
     });
 

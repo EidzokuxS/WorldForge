@@ -277,8 +277,16 @@ export function rollWorldSeed(
   return apiPost<RollSeedResult>("/api/worldgen/roll-seed", { category });
 }
 
-export function suggestSeeds(premise: string, name?: string): Promise<WorldSeeds & { _ipContext?: IpContext | null }> {
-  return apiPost<WorldSeeds & { _ipContext?: IpContext | null }>("/api/worldgen/suggest-seeds", { premise, name });
+export function suggestSeeds(
+  premise: string,
+  opts?: { name?: string; franchise?: string; research?: boolean }
+): Promise<WorldSeeds & { _ipContext?: IpContext | null }> {
+  return apiPost<WorldSeeds & { _ipContext?: IpContext | null }>("/api/worldgen/suggest-seeds", {
+    premise,
+    name: opts?.name,
+    franchise: opts?.franchise,
+    research: opts?.research,
+  });
 }
 
 /** @deprecated Use IpResearchContext from @/lib/types */

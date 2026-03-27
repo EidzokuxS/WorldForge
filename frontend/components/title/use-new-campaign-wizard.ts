@@ -34,6 +34,8 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
   const [step, setStep] = useState<1 | 2>(1);
   const [campaignName, setCampaignName] = useState("");
   const [campaignPremise, setCampaignPremise] = useState("");
+  const [campaignFranchise, setCampaignFranchise] = useState("");
+  const [researchEnabled, setResearchEnabled] = useState(true);
   const [dnaState, setDnaState] = useState<DnaState | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [generationProgress, setGenerationProgress] = useState<GenerationProgress | null>(null);
@@ -113,6 +115,8 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
       // so the fullscreen overlay in TitleScreen takes over.
       setCampaignName("");
       setCampaignPremise("");
+      setCampaignFranchise("");
+      setResearchEnabled(true);
       setOpen(false);
       resetFlow();
       onCreated();
@@ -150,7 +154,11 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
     setStep(2);
     setPhase({ kind: "suggesting-all" });
     try {
-      const suggested = await suggestSeeds(campaignPremise.trim(), campaignName.trim());
+      const suggested = await suggestSeeds(campaignPremise.trim(), {
+          name: campaignName.trim(),
+          franchise: campaignFranchise.trim() || undefined,
+          research: researchEnabled,
+        });
       if (suggested._ipContext) {
         setIpContext(suggested._ipContext);
       }
@@ -182,7 +190,11 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
 
     setPhase({ kind: "suggesting-all" });
     try {
-      const suggested = await suggestSeeds(campaignPremise.trim(), campaignName.trim());
+      const suggested = await suggestSeeds(campaignPremise.trim(), {
+          name: campaignName.trim(),
+          franchise: campaignFranchise.trim() || undefined,
+          research: researchEnabled,
+        });
       if (suggested._ipContext) {
         setIpContext(suggested._ipContext);
       }
@@ -273,6 +285,10 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
     setCampaignName,
     campaignPremise,
     setCampaignPremise,
+    campaignFranchise,
+    setCampaignFranchise,
+    researchEnabled,
+    setResearchEnabled,
     dnaState,
 
     // Derived state

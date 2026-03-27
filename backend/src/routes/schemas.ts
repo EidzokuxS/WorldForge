@@ -111,6 +111,10 @@ export const suggestSeedsSchema = z.object({
     .transform((s) => s.trim())
     .pipe(z.string().min(1, "premise is required.")),
   name: z.string().optional(),
+  /** Explicit franchise name — if set, research this IP. If empty, treat as original world. */
+  franchise: z.string().optional(),
+  /** Whether to run web research. Default true. */
+  research: z.boolean().optional(),
 });
 
 const ipContextSchema = z.object({

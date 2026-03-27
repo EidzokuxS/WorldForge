@@ -77,12 +77,16 @@ app.post("/suggest-seeds", async (c) => {
       return c.json({ error: gen.error }, gen.status);
     }
 
-    // Research known IP if premise suggests one
-    const { researchKnownIP } = await import("../worldgen/ip-researcher.js");
-    const ipContext = await researchKnownIP(
-      { premise: result.data.premise, name: result.data.name ?? "", knownIP: result.data.name, research: settings.research },
-      gen.resolved,
-    );
+    // Research franchise if user specified one
+    let ipContext = null;
+    const franchiseName = result.data.franchise?.trim();
+    if (franchiseName && result.data.research !== false) {
+      const { researchKnownIP } = await import("../worldgen/ip-researcher.js");
+      ipContext = await researchKnownIP(
+        { premise: result.data.premise, name: result.data.name ?? "", knownIP: franchiseName, research: settings.research },
+        gen.resolved,
+      );
+    }
 
     const seeds = await suggestWorldSeeds({
       premise: result.data.premise,

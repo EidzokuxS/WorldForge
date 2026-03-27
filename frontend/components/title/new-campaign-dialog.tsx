@@ -64,6 +64,23 @@ export function NewCampaignDialog({ wizard: w }: NewCampaignDialogProps) {
                   rows={6}
                 />
               </div>
+              <div className="space-y-2">
+                <Input
+                  value={w.campaignFranchise}
+                  onChange={(event) => w.setCampaignFranchise(event.target.value)}
+                  placeholder="Franchise / IP (optional) — e.g. Naruto, Star Wars, The Witcher"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="research-toggle"
+                  checked={w.researchEnabled}
+                  onCheckedChange={w.setResearchEnabled}
+                />
+                <label htmlFor="research-toggle" className="text-sm text-muted-foreground cursor-pointer">
+                  Web research {w.campaignFranchise.trim() ? "for franchise lore" : "for inspiration"}
+                </label>
+              </div>
             </div>
 
             <DialogFooter>
