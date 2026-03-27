@@ -208,31 +208,14 @@ export async function safeGenerateObject<T>(opts: {
 }): Promise<{ object: T }> {
   const { schema, mode, ...rest } = opts;
 
-  // Attempt 1: standard generateObject (let AI SDK auto-detect mode)
-  try {
-    const genOpts = mode ? { ...rest, schema, mode } : { ...rest, schema };
-    const result = await generateObject(genOpts as Parameters<typeof generateObject>[0]);
-    return { object: result.object as T };
-  } catch (primaryError) {
-    // Only fall back on parse errors, not network/auth errors
-    const msg = String(primaryError);
-    if (
-      !msg.includes("could not parse") &&
-      !msg.includes("No object generated")
-    ) {
-      throw primaryError;
-    }
-
-    log.warn(
-      "generateObject failed to parse, falling back to generateText + manual parse"
-    );
-  }
-
-  // Attempt 2: generateText + strip fences + Zod parse
-  // Inject JSON instruction + schema shape so the model knows the exact field names.
+  // Generate via generateText with explicit JSON instructions.
+  // generateObject (AI SDK) fails on reasoning models (GLM-5, DeepSeek R1) because:
+  // 1. Tool-calling mode: model ignores tools definition, outputs markdown
+  // 2. JSON mode: model returns correct JSON but with wrong field names
+  // Both waste 10-20s per call. generateText + manual parse is reliable and fast.
   const schemaHint = describeZodShape(schema);
   const jsonSuffix =
-    "\n\nIMPORTANT: You MUST respond with valid JSON only. No explanations, no markdown, no text before or after the JSON object." +
+    "\n\nYou MUST respond with valid JSON only. No explanations, no markdown, no text before or after the JSON object." +
     (schemaHint ? `\n\nThe JSON object MUST have EXACTLY these fields (use these exact names):\n${schemaHint}` : "");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fallbackOpts: Record<string, unknown> = {
