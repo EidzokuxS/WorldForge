@@ -162,7 +162,6 @@ const ipResearchContextSchema = z.object({
   keyFacts: z
     .array(z.string())
     .min(3)
-    .max(50)
     .describe(
       "Key lore facts covering: geography, races/species, factions, power systems, characters, history, creatures, culture. Each fact is one complete sentence. 15-40 facts for major franchises."
     ),
