@@ -449,7 +449,7 @@ Is this enough to generate accurate, detailed ${step} for this franchise? Consid
 
 If insufficient, suggest up to 3 targeted search queries to fill the gaps.`,
       temperature: 0.2,
-      maxOutputTokens: 512,
+      maxOutputTokens: 32000,
     });
 
     if (evaluation.sufficient || evaluation.missingTopics.length === 0) {
@@ -479,7 +479,7 @@ If insufficient, suggest up to 3 targeted search queries to fill the gaps.`,
             }),
             prompt: `Extract key CANONICAL facts about "${ipContext.franchise}" relevant to ${step} from these search results:\n\n${snippets}\n\nRULES:\n- Only include facts from the OFFICIAL canon (manga, anime, games by the original creators).\n- EXCLUDE fan-made content, fan wikis speculation, filler episodes, non-canon movies, and fan theories.\n- Each fact must name specific canonical entities (places, characters, organizations).\n- Only include facts that are NOT already known:\n${ipContext.keyFacts.slice(0, 10).map((f) => `- ${f}`).join("\n")}`,
             temperature: 0.1,
-            maxOutputTokens: 512,
+            maxOutputTokens: 32000,
           });
           newFacts.push(...extracted.facts);
         }
