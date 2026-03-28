@@ -100,20 +100,30 @@ const classificationSchema = z.object({
   ),
 });
 
+const CLASSIFY_BATCH_SIZE = 20;
+
 export async function classifyEntries(
   entries: WorldBookEntry[],
   role: ResolvedRole,
 ): Promise<ClassifiedEntry[]> {
   if (entries.length === 0) return [];
 
-  const entriesList = entries
-    .map((e, i) => `${i + 1}. "${e.name}": ${e.text.slice(0, 500)}`)
-    .join("\n\n");
+  const allClassified: ClassifiedEntry[] = [];
+  const batches = Math.ceil(entries.length / CLASSIFY_BATCH_SIZE);
 
-  const result = await generateObject({
-    model: createModel(role.provider),
-    schema: classificationSchema,
-    prompt: `You are a content classifier for an RPG world-building system. Classify each WorldBook entry by its type.
+  for (let i = 0; i < entries.length; i += CLASSIFY_BATCH_SIZE) {
+    const batch = entries.slice(i, i + CLASSIFY_BATCH_SIZE);
+    const batchNum = Math.floor(i / CLASSIFY_BATCH_SIZE) + 1;
+    log.info(`Classifying batch ${batchNum}/${batches} (${batch.length} entries)...`);
+
+    const entriesList = batch
+      .map((e, j) => `${j + 1}. "${e.name}": ${e.text.slice(0, 500)}`)
+      .join("\n\n");
+
+    const result = await generateObject({
+      model: createModel(role.provider),
+      schema: classificationSchema,
+      prompt: `You are a content classifier for an RPG world-building system. Classify each WorldBook entry by its type.
 
 ENTRY TYPES:
 - character: describes a person, creature with personality, an NPC (individual with unique identity)
@@ -129,12 +139,15 @@ For each entry, provide:
 - name: the exact entry name as given
 - type: one of the five types above
 - summary: a 1-2 sentence factual summary of the entry content`,
-    temperature: role.temperature,
-    maxOutputTokens: role.maxTokens,
-  });
+      temperature: role.temperature,
+      maxOutputTokens: role.maxTokens,
+    });
 
-  log.info(`Classified ${result.object.entries.length} entries`);
-  return result.object.entries;
+    allClassified.push(...result.object.entries);
+  }
+
+  log.info(`Classified ${allClassified.length} entries total (${batches} batches)`);
+  return allClassified;
 }
 
 // ───── 3. Import Classified Entries ─────
