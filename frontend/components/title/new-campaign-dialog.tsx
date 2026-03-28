@@ -89,11 +89,14 @@ export function NewCampaignDialog({ wizard: w }: NewCampaignDialogProps) {
               {/* WorldBook Upload */}
               <div className="space-y-2">
                 {w.worldbookStatus === "idle" ? (
-                  <label
-                    htmlFor="worldbook-upload"
+                  <div
+                    role="button"
+                    tabIndex={0}
                     className={`flex cursor-pointer flex-col items-center gap-2 rounded-lg border-2 border-dashed border-border/50 px-4 py-3 text-sm text-muted-foreground transition-colors hover:border-border hover:text-foreground${
                       w.isBusy ? " pointer-events-none opacity-50" : ""
                     }`}
+                    onClick={() => document.getElementById("worldbook-upload")?.click()}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") document.getElementById("worldbook-upload")?.click(); }}
                     onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
                     onDrop={(e) => {
                       e.preventDefault();
@@ -117,7 +120,7 @@ export function NewCampaignDialog({ wizard: w }: NewCampaignDialogProps) {
                         e.target.value = "";
                       }}
                     />
-                  </label>
+                  </div>
                 ) : (
                   <div className="flex items-center gap-3 rounded-lg border border-border/70 px-4 py-3 text-sm">
                     {w.worldbookStatus === "parsing" || w.worldbookStatus === "classifying" ? (
