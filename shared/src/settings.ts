@@ -90,7 +90,9 @@ export function createDefaultSettings(): Settings {
     research: {
       enabled: true,
       maxSearchSteps: 10,
-      searchProvider: "duckduckgo",
+      searchProvider: "brave",
+      braveApiKey: "",
+      zaiApiKey: "",
     },
   };
 }

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
+  apiPost,
   getActiveCampaign,
   getWorldData,
   getLoreCards,
@@ -39,13 +40,16 @@ export default function WorldReviewPage(props: { params: Promise<{ id: string }>
   useEffect(() => {
     async function loadData() {
       try {
+        // Ensure campaign is loaded (handles server restarts / direct URL navigation)
+        await apiPost(`/api/campaigns/${campaignId}/load`).catch(() => {});
+
         const [campaign, world, lore] = await Promise.all([
           getActiveCampaign(),
           getWorldData(campaignId),
           getLoreCards(campaignId).catch(() => [] as LoreCardItem[]),
         ]);
 
-        const editableScaffold = toEditableScaffold(world, campaign.premise, lore);
+        const editableScaffold = toEditableScaffold(world, campaign?.premise ?? "", lore);
 
         setScaffold(editableScaffold);
         setLoreCards(lore);
@@ -73,16 +77,16 @@ export default function WorldReviewPage(props: { params: Promise<{ id: string }>
 
         switch (section) {
           case "premise":
-            body = { section: "premise", additionalInstruction };
+            body = { campaignId, section: "premise", additionalInstruction };
             break;
           case "locations":
-            body = { section: "locations", refinedPremise: scaffold.refinedPremise, additionalInstruction };
+            body = { campaignId, section: "locations", refinedPremise: scaffold.refinedPremise, additionalInstruction };
             break;
           case "factions":
-            body = { section: "factions", refinedPremise: scaffold.refinedPremise, locationNames, additionalInstruction };
+            body = { campaignId, section: "factions", refinedPremise: scaffold.refinedPremise, locationNames, additionalInstruction };
             break;
           case "npcs":
-            body = { section: "npcs", refinedPremise: scaffold.refinedPremise, locationNames, factionNames, additionalInstruction };
+            body = { campaignId, section: "npcs", refinedPremise: scaffold.refinedPremise, locationNames, factionNames, additionalInstruction };
             break;
           default:
             return;

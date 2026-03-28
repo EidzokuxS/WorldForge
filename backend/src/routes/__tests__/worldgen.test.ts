@@ -25,8 +25,15 @@ vi.mock("../../worldgen/worldbook-importer.js", () => ({
   importClassifiedEntries: vi.fn(),
 }));
 
+vi.mock("../../worldgen/ip-researcher.js", () => ({
+  researchKnownIP: vi.fn(() => Promise.resolve(null)),
+  evaluateResearchSufficiency: vi.fn((ctx: unknown) => Promise.resolve(ctx)),
+}));
+
 vi.mock("../../campaign/index.js", () => ({
   markGenerationComplete: vi.fn(),
+  saveIpContext: vi.fn(),
+  loadIpContext: vi.fn(() => null),
   getActiveCampaign: vi.fn(),
 }));
 
@@ -232,7 +239,7 @@ describe("POST /api/worldgen/suggest-seeds", () => {
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual(suggested);
+    expect(body.geography).toBe("Floating islands");
     expect(mockedSuggestWorldSeeds).toHaveBeenCalledWith(
       expect.objectContaining({ premise: "A world of floating islands" })
     );

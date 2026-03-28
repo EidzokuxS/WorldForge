@@ -149,10 +149,10 @@ export interface EditableScaffold {
 }
 
 export type RegenerateSectionRequest =
-  | { section: "premise"; additionalInstruction?: string }
-  | { section: "locations"; refinedPremise: string; additionalInstruction?: string }
-  | { section: "factions"; refinedPremise: string; locationNames: string[]; additionalInstruction?: string }
-  | { section: "npcs"; refinedPremise: string; locationNames: string[]; factionNames: string[]; additionalInstruction?: string };
+  | { campaignId: string; section: "premise"; additionalInstruction?: string }
+  | { campaignId: string; section: "locations"; refinedPremise: string; additionalInstruction?: string }
+  | { campaignId: string; section: "factions"; refinedPremise: string; locationNames: string[]; additionalInstruction?: string }
+  | { campaignId: string; section: "npcs"; refinedPremise: string; locationNames: string[]; factionNames: string[]; additionalInstruction?: string };
 
 export interface ParsedCharacter {
   name: string;

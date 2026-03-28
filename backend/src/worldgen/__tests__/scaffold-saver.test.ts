@@ -120,6 +120,7 @@ function buildScaffold(): WorldScaffold {
         goals: { shortTerm: ["Patrol borders"], longTerm: ["Unite the kingdoms"] },
         locationName: "Castle Keep",
         factionName: "Iron Guard",
+        tier: "key" as const,
       },
       {
         name: "Mira the Wanderer",
@@ -128,6 +129,7 @@ function buildScaffold(): WorldScaffold {
         goals: { shortTerm: ["Find shelter"], longTerm: ["Discover the truth"] },
         locationName: "Unknown Village",
         factionName: null,
+        tier: "supporting" as const,
       },
     ],
     loreCards: [],
@@ -231,6 +233,16 @@ describe("saveScaffoldToDb", () => {
     const mira = npcInserts[1]!.data as Record<string, unknown>;
     expect(mira.name).toBe("Mira the Wanderer");
     expect(mira.currentLocationId).toBeNull();
+  });
+
+  it("maps scaffold tier 'supporting' to DB tier 'persistent'", () => {
+    saveScaffoldToDb("campaign-1", buildScaffold());
+    const npcInserts = dbCalls.filter(
+      (c) => c.op === "insert" && c.table === "npcs",
+    );
+    const mira = npcInserts[1]!.data as Record<string, unknown>;
+    expect(mira.name).toBe("Mira the Wanderer");
+    expect(mira.tier).toBe("persistent");
   });
 
   it("insertMembershipRelationships creates relationship with ['Member'] tag for NPCs with factionName", () => {

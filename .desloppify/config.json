@@ -7,7 +7,6 @@
   "badge_path": "scorecard.png",
   "exclude": [],
   "ignore": [
-    "test_coverage::frontend/*",
     "test_coverage::backend/src/db/*",
     "test_coverage::backend/src/index.ts::*",
     "orphaned::frontend/*",

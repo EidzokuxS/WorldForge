@@ -28,12 +28,16 @@ export interface ImageConfig {
   enabled: boolean;
 }
 
-export type SearchProvider = "duckduckgo" | "zai";
+export type SearchProvider = "brave" | "duckduckgo" | "zai";
 
 export interface ResearchConfig {
   enabled: boolean;
   maxSearchSteps: number;
   searchProvider: SearchProvider;
+  /** Brave Search API key — required when searchProvider is "brave" */
+  braveApiKey?: string;
+  /** Z.AI API key — required when searchProvider is "zai" */
+  zaiApiKey?: string;
 }
 
 export interface Settings {
@@ -45,6 +49,25 @@ export interface Settings {
   fallback: FallbackConfig;
   images: ImageConfig;
   research: ResearchConfig;
+}
+
+/** Cached IP research context — persisted in campaign config.json */
+export interface IpResearchContext {
+  /** Canonical franchise name, e.g. "Warhammer 40,000" */
+  franchise: string;
+  /** Key lore facts: geography, races, factions, powers, characters, history, creatures */
+  keyFacts: string[];
+  /** Tonal / atmosphere notes for prompting */
+  tonalNotes: string[];
+  /** Canonical entity names extracted by LLM during research compilation.
+   *  Locations, factions, characters — exact names from the source material. */
+  canonicalNames?: {
+    locations?: string[];
+    factions?: string[];
+    characters?: string[];
+  };
+  /** Whether context came from live web search or LLM internal knowledge */
+  source: "mcp" | "llm";
 }
 
 export type ChatRole = "user" | "assistant" | "system";

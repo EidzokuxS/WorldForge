@@ -68,6 +68,9 @@ export const settingsPayloadSchema = z.object({
   research: z.object({
     enabled: z.boolean(),
     maxSearchSteps: z.number().int().min(1).max(100),
+    searchProvider: z.enum(["brave", "duckduckgo", "zai"]).optional(),
+    braveApiKey: z.string().optional(),
+    zaiApiKey: z.string().optional(),
   }).strip(),
 }).strip();
 
@@ -107,7 +110,19 @@ export const suggestSeedsSchema = z.object({
     .string()
     .transform((s) => s.trim())
     .pipe(z.string().min(1, "premise is required.")),
+  name: z.string().optional(),
+  /** Explicit franchise name — if set, research this IP. If empty, treat as original world. */
+  franchise: z.string().optional(),
+  /** Whether to run web research. Default true. */
+  research: z.boolean().optional(),
 });
+
+const ipContextSchema = z.object({
+  franchise: z.string(),
+  keyFacts: z.array(z.string()),
+  tonalNotes: z.array(z.string()),
+  source: z.enum(["mcp", "llm"]),
+}).nullable().optional();
 
 export const suggestSeedSchema = z.object({
   premise: z
@@ -115,6 +130,7 @@ export const suggestSeedSchema = z.object({
     .transform((s) => s.trim())
     .pipe(z.string().min(1, "premise is required.")),
   category: seedCategorySchema,
+  ipContext: ipContextSchema,
 });
 
 export const generateWorldSchema = z.object({
@@ -122,6 +138,7 @@ export const generateWorldSchema = z.object({
     .string()
     .transform((s) => s.trim())
     .pipe(z.string().min(1, "campaignId is required.")),
+  ipContext: ipContextSchema,
 });
 
 export const testProviderSchema = z.object({
@@ -196,6 +213,7 @@ const scaffoldNpcSchema = z.object({
   }),
   locationName: z.string(),
   factionName: z.string().nullable(),
+  tier: z.enum(["key", "supporting"]).default("key"),
 });
 
 export const saveEditsSchema = z.object({

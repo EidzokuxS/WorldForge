@@ -386,7 +386,6 @@ export function NpcsSection({
           accept=".json,.png"
           className="hidden"
           onChange={handleImportNpc}
-          onCancel={() => setAddMode(null)}
         />
 
         {addMode === "describe" && (

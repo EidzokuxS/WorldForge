@@ -109,7 +109,7 @@ export function CheckpointPanel({ campaignId, open, onClose }: CheckpointPanelPr
 
   return (
     <>
-      <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <Dialog open={open} onOpenChange={(v: boolean) => !v && onClose()}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Checkpoints</DialogTitle>
@@ -200,7 +200,7 @@ export function CheckpointPanel({ campaignId, open, onClose }: CheckpointPanelPr
       {/* Confirm load */}
       <AlertDialog
         open={!!confirmLoad}
-        onOpenChange={(v) => !v && setConfirmLoad(null)}
+        onOpenChange={(v: boolean) => !v && setConfirmLoad(null)}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -226,7 +226,7 @@ export function CheckpointPanel({ campaignId, open, onClose }: CheckpointPanelPr
       {/* Confirm delete */}
       <AlertDialog
         open={!!confirmDelete}
-        onOpenChange={(v) => !v && setConfirmDelete(null)}
+        onOpenChange={(v: boolean) => !v && setConfirmDelete(null)}
       >
         <AlertDialogContent>
           <AlertDialogHeader>

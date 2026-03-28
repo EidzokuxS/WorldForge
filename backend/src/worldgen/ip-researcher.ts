@@ -1,11 +1,11 @@
-import { generateText, stepCountIs, type ToolSet } from "ai";
 import { safeGenerateObject as generateObject } from "../ai/generate-object-safe.js";
 import { z } from "zod";
-import type { SearchProvider } from "@worldforge/shared";
+import type { SearchProvider, IpResearchContext } from "@worldforge/shared";
 import { createModel } from "../ai/index.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import type { GenerateScaffoldRequest } from "./types.js";
-import { createLogger, withSearchMcp } from "../lib/index.js";
+import { createLogger } from "../lib/index.js";
+import { webSearch, type SearchConfig } from "../lib/web-search.js";
 
 const log = createLogger("ip-researcher");
 
@@ -13,25 +13,24 @@ const log = createLogger("ip-researcher");
 // Public types
 // ---------------------------------------------------------------------------
 
-export interface IpResearchContext {
-  /** Canonical franchise name, e.g. "Warhammer 40,000" */
-  franchise: string;
-  /** Up to 15 key lore facts (races, factions, magic systems, tone…) */
-  keyFacts: string[];
-  /** Up to 5 tonal / atmosphere notes for prompting */
-  tonalNotes: string[];
-  /** Whether context came from live web search or LLM internal knowledge */
-  source: "mcp" | "llm";
-}
+// IpResearchContext re-exported from @worldforge/shared
+export type { IpResearchContext } from "@worldforge/shared";
 
 // ---------------------------------------------------------------------------
 // LLM-based franchise detection
 // ---------------------------------------------------------------------------
 
+const confidenceEnum = z.string().transform((val): "certain" | "likely" | "unknown" => {
+  const v = val.toLowerCase().trim();
+  if (["certain", "definitive", "confirmed", "yes", "100%"].includes(v)) return "certain";
+  if (["likely", "probable", "high", "probably"].includes(v)) return "likely";
+  return "unknown";
+}).describe(
+  "How confident you are: 'certain' = definitely a known IP, 'likely' = probably references something but you're not 100% sure, 'unknown' = might be original or might reference something obscure you don't recognize"
+);
+
 const franchiseDetectionSchema = z.object({
-  confidence: z.enum(["certain", "likely", "unknown"]).describe(
-    "How confident you are: 'certain' = definitely a known IP, 'likely' = probably references something but you're not 100% sure, 'unknown' = might be original or might reference something obscure you don't recognize"
-  ),
+  confidence: confidenceEnum,
   franchise: z.string().nullable().describe("The canonical franchise name if detected, null if completely original"),
   searchQuery: z.string().nullable().describe(
     "A web search query to verify or learn more about this potential IP. Set even if you're unsure — the search will confirm. Null only if you're certain it's a 100% original world with zero references to existing media."
@@ -56,7 +55,7 @@ async function detectFranchise(
   premise: string,
   name: string,
   role: ResolvedRole,
-  searchProvider: SearchProvider = "duckduckgo",
+  searchConfig: SearchConfig,
 ): Promise<string | null> {
   if (knownIP?.trim()) {
     return knownIP.trim();
@@ -91,7 +90,7 @@ If you're not sure — that's fine. Set confidence to "likely" or "unknown" and 
         object.franchise,
         premise,
         role,
-        searchProvider,
+        searchConfig,
       );
       if (verified) {
         log.info(`Franchise confirmed by search: "${verified}"`);
@@ -118,37 +117,38 @@ async function verifyFranchiseViaSearch(
   candidateFranchise: string | null,
   premise: string,
   role: ResolvedRole,
-  searchProvider: SearchProvider,
+  searchConfig: SearchConfig,
 ): Promise<string | null> {
   try {
-    return await withSearchMcp(
-      searchProvider,
-      async (tools: ToolSet) => {
-        const { text: searchResults } = await generateText({
-          model: createModel(role.provider),
-          tools,
-          stopWhen: stepCountIs(3),
-          prompt: `Search for: "${searchQuery}". Then determine if the search results confirm this is a real franchise/IP that the following campaign premise references:\n\nPremise: "${premise}"\n\nReturn your findings as plain text.`,
-          temperature: 0.1,
-        });
+    const results = await webSearch(searchQuery, searchConfig, 5);
 
-        const { object } = await generateObject({
-          model: createModel(role.provider),
-          schema: searchVerifySchema,
-          prompt: `Based on these search results, is "${candidateFranchise ?? searchQuery}" a real franchise/IP?\n\nSearch results:\n${searchResults}\n\nOriginal premise: "${premise}"`,
-          temperature: 0.0,
-        });
+    if (results.length === 0) {
+      log.info("No search results for franchise verification, using LLM candidate");
+      return candidateFranchise;
+    }
 
-        return object.isKnownIP ? object.franchise : null;
-      },
-      async () => {
-        // MCP search unavailable — fall back to LLM knowledge only
-        log.warn("Search MCP unavailable for franchise verification, using LLM knowledge only");
-        return candidateFranchise;
-      },
-    );
+    const searchText = results
+      .map((r) => `- ${r.title}: ${r.description} (${r.url})`)
+      .join("\n");
+
+    const { object } = await generateObject({
+      model: createModel(role.provider),
+      schema: searchVerifySchema,
+      prompt: `A user wrote this RPG premise: "${premise}"
+
+We suspect it references "${candidateFranchise ?? searchQuery}". Search results:
+${searchText}
+
+QUESTION: Does the user's PREMISE actually describe this franchise's world?
+- The premise must contain franchise-specific elements (unique characters, locations, terminology, magic systems, plot points).
+- Sharing a common word or generic theme is NOT enough. Only count references that would be meaningless outside the franchise.
+- If the campaign name resembles a franchise but the premise describes an unrelated world, answer false.`,
+      temperature: 0.0,
+    });
+
+    return object.isKnownIP ? object.franchise : null;
   } catch (error) {
-    log.warn("Franchise verification search failed", error);
+    log.warn("Franchise verification search failed, using LLM candidate", error);
     return candidateFranchise;
   }
 }
@@ -162,77 +162,161 @@ const ipResearchContextSchema = z.object({
   keyFacts: z
     .array(z.string())
     .min(3)
-    .max(15)
     .describe(
-      "Key lore facts: races, factions, magic systems, history, technology. Each fact is one sentence."
+      "Key lore facts covering: geography, races/species, factions, power systems, characters, history, creatures, culture. Each fact is one complete sentence. 15-40 facts for major franchises."
     ),
   tonalNotes: z
     .array(z.string())
     .min(1)
-    .max(5)
-    .describe("Atmospheric/tonal signals: grimdark, hopepunk, high-magic, etc."),
+    .describe("Atmospheric/tonal signals: grimdark, hopepunk, high-magic, shonen action, etc."),
+  canonicalNames: z.object({
+    locations: z.array(z.string()).describe("Major canonical location names from the franchise (cities, villages, planets, regions). Use EXACT names from source material. Include all major locations."),
+    factions: z.array(z.string()).describe("Major canonical faction/organization names (governments, guilds, armies, clans). Use EXACT names from source material."),
+    characters: z.array(z.string()).describe("Major canonical character names (protagonists, antagonists, leaders, key supporting). Use EXACT full names from source material."),
+  }).describe("Explicit lists of canonical entity names — these will be injected into generation prompts to prevent the AI from inventing substitutes."),
 });
 
 // ---------------------------------------------------------------------------
 // MCP primary path
 // ---------------------------------------------------------------------------
 
-async function researchViaMCP(
+// Schema for LLM to decide what to research next
+const researchPlanSchema = z.object({
+  queries: z.array(z.string()).min(1).describe(
+    "Search queries to look up. Each query should target a specific aspect of the franchise that needs clarification."
+  ),
+  knownFromOverview: z.array(z.string()).describe(
+    "Key facts already clear from the overview — no need to search for these."
+  ),
+});
+
+function formatResults(query: string, results: { title: string; description: string; url: string }[]): string {
+  return `## "${query}"\n${results.map((r) => `- **${r.title}**: ${r.description} (${r.url})`).join("\n")}`;
+}
+
+async function researchViaWebSearch(
   franchise: string,
   role: ResolvedRole,
-  maxSearchSteps: number,
-  searchProvider: SearchProvider = "duckduckgo"
+  searchConfig: SearchConfig,
 ): Promise<IpResearchContext> {
-  return withSearchMcp(
-    searchProvider,
-    async (tools: ToolSet) => {
-      const searchPrompt = `You are a franchise lore researcher for a tabletop RPG world generator.
-Research the franchise "${franchise}" using the available DuckDuckGo search tools.
+  const allSearchResults: string[] = [];
 
-Your goals:
-1. Search for "${franchise} lore overview"
-2. Search for "${franchise} races factions"
-3. Search for "${franchise} magic system" (or equivalent power/technology system)
+  // ── Phase 1: Broad overview search ──
+  log.info(`Research phase 1: broad overview for "${franchise}"`);
+  let overviewText = "";
+  try {
+    const overviewResults = await webSearch(`${franchise} world lore overview wiki`, searchConfig, 10);
+    if (overviewResults.length > 0) {
+      overviewText = formatResults(`${franchise} overview`, overviewResults);
+      allSearchResults.push(overviewText);
+      log.info(`Overview: ${overviewResults.length} results`);
+    }
+  } catch (err) {
+    log.warn("Overview search failed", err);
+  }
 
-After researching, compile:
-- Up to 15 concise KEY FACTS about the franchise world (races, factions, notable locations, historical events, power systems)
-- Up to 5 TONAL NOTES describing the atmosphere (e.g. "grimdark military sci-fi", "high fantasy epic", "cosmic horror")
+  // ── Phase 2: LLM reads overview, decides what to deep-dive ──
+  let deepDiveQueries: string[] = [];
 
-Output your final compiled notes in plain text.`;
-
-      const { text: rawResearch } = await generateText({
+  if (overviewText) {
+    try {
+      const { object: plan } = await generateObject({
         model: createModel(role.provider),
-        tools,
-        stopWhen: stepCountIs(maxSearchSteps),
-        prompt: searchPrompt,
-        temperature: 0.3,
+        schema: researchPlanSchema,
+        prompt: `You are researching the franchise "${franchise}" for a tabletop RPG world generator.
+
+Here is a broad overview from web search:
+
+${overviewText}
+
+Based on this, what SPECIFIC topics still need deeper research? Focus on what's essential for worldbuilding:
+- Geography, regions, notable locations
+- Races, species, creatures
+- Factions, nations, political structure
+- Power system (magic, technology, abilities)
+- Key characters and their roles
+- Major conflicts and historical events
+- Flora, fauna, environment, climate
+
+List what you already know from the overview (no need to search again) and generate targeted search queries for gaps. Each query should be specific, e.g. "${franchise} hidden villages map" not just "${franchise} locations".`,
+        temperature: 0.2,
       });
 
-      // Parse the LLM's freeform research into structured data
-      const parsePrompt = `You just completed web research on the franchise "${franchise}". Here are your research notes:
+      deepDiveQueries = plan.queries;
+      if (plan.knownFromOverview.length > 0) {
+        log.info(`Already known from overview: ${plan.knownFromOverview.length} facts`);
+      }
+      log.info(`Phase 2: ${deepDiveQueries.length} deep-dive queries planned`);
+    } catch (err) {
+      log.warn("Research planning failed, using default queries", err);
+      deepDiveQueries = [
+        `${franchise} races species factions`,
+        `${franchise} power system magic abilities`,
+        `${franchise} geography locations map`,
+      ];
+    }
+  } else {
+    // Overview failed — use broad defaults
+    deepDiveQueries = [
+      `${franchise} world setting lore`,
+      `${franchise} races factions characters`,
+      `${franchise} power system geography`,
+    ];
+  }
 
-${rawResearch}
+  // ── Phase 3: Execute deep-dive searches ──
+  for (const query of deepDiveQueries) {
+    try {
+      const results = await webSearch(query, searchConfig, 8);
+      if (results.length > 0) {
+        allSearchResults.push(formatResults(query, results));
+        log.info(`Deep-dive: ${results.length} results for "${query}"`);
+      }
+    } catch (err) {
+      log.warn(`Deep-dive search failed: "${query}"`, err);
+    }
+  }
 
-Now structure these into a clean JSON object.`;
+  if (allSearchResults.length === 0) {
+    log.warn("All searches failed, falling back to LLM knowledge");
+    return researchViaLLM(franchise, role);
+  }
 
-      const { object } = await generateObject({
-        model: createModel(role.provider),
-        schema: ipResearchContextSchema,
-        prompt: parsePrompt,
-        temperature: 0.1,
-      });
+  // ── Phase 4: LLM compiles everything into structured context ──
+  const searchText = allSearchResults.join("\n\n");
 
-      log.info(`MCP research complete for "${franchise}": ${object.keyFacts.length} facts collected`);
+  const { object } = await generateObject({
+    model: createModel(role.provider),
+    schema: ipResearchContextSchema,
+    prompt: `You are a franchise lore researcher compiling a worldbuilding reference for "${franchise}".
 
-      return {
-        franchise: object.franchise,
-        keyFacts: object.keyFacts,
-        tonalNotes: object.tonalNotes,
-        source: "mcp" as const,
-      };
-    },
-    () => researchViaLLM(franchise, role),
-  );
+Web search results:
+
+${searchText}
+
+Compile ALL relevant worldbuilding information into structured data. Be thorough — this will be used to generate an RPG world. Include:
+- Geography & notable locations
+- Races, species, creatures
+- Factions, nations, organizations
+- Power/magic system with key terminology
+- Major characters and their significance
+- Historical events and conflicts
+- Environmental/atmospheric details
+- Cultural elements and traditions
+
+Every fact should be a complete, self-contained sentence.`,
+    temperature: 0.1,
+  });
+
+  log.info(`Research complete for "${franchise}": ${object.keyFacts.length} facts, ${object.tonalNotes.length} tonal notes`);
+
+  return {
+    franchise: object.franchise,
+    keyFacts: object.keyFacts,
+    tonalNotes: object.tonalNotes,
+    canonicalNames: object.canonicalNames,
+    source: "mcp" as const,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -248,8 +332,8 @@ async function researchViaLLM(
 Provide a structured lore overview for the franchise: "${franchise}"
 
 Focus on information useful for building a custom RPG world inspired by this IP:
-- KEY FACTS: races, factions, power systems, notable historical events, signature locations (up to 15, one sentence each)
-- TONAL NOTES: atmospheric/genre descriptors for the world's feel (up to 5 phrases)`;
+- KEY FACTS: geography & locations, races & species, factions & nations, power/magic system, key characters, historical events, creatures, cultural elements (up to 30, one sentence each)
+- TONAL NOTES: atmospheric/genre descriptors for the world's feel (up to 8 phrases)`;
 
   const { object } = await generateObject({
     model: createModel(role.provider),
@@ -265,6 +349,7 @@ Focus on information useful for building a custom RPG world inspired by this IP:
     franchise: object.franchise,
     keyFacts: object.keyFacts,
     tonalNotes: object.tonalNotes,
+    canonicalNames: object.canonicalNames,
     source: "llm",
   };
 }
@@ -280,13 +365,28 @@ Focus on information useful for building a custom RPG world inspired by this IP:
  * a recognisable franchise. Returns `null` when no franchise is detected (pure
  * original world), skipping the step with zero overhead.
  */
+export interface ResearchableRequest {
+  premise: string;
+  name: string;
+  knownIP?: string;
+  research?: { searchProvider?: SearchProvider; braveApiKey?: string; zaiApiKey?: string };
+}
+
 export async function researchKnownIP(
-  req: GenerateScaffoldRequest,
+  req: ResearchableRequest,
   role: ResolvedRole,
   maxSearchSteps = 10
 ): Promise<IpResearchContext | null> {
-  const searchProvider: SearchProvider = req.research?.searchProvider ?? "duckduckgo";
-  const franchise = await detectFranchise(req.knownIP, req.premise, req.name, role, searchProvider);
+  const searchProvider: SearchProvider = req.research?.searchProvider ?? "brave";
+
+  const searchConfig: SearchConfig = {
+    provider: searchProvider,
+    braveApiKey: req.research?.braveApiKey,
+    zaiApiKey: req.research?.zaiApiKey,
+    llmProvider: role.provider,
+  };
+
+  const franchise = await detectFranchise(req.knownIP, req.premise, req.name, role, searchConfig);
 
   if (!franchise) {
     return null;
@@ -294,9 +394,126 @@ export async function researchKnownIP(
   log.info(`Detected franchise: "${franchise}" — starting research (maxSteps=${maxSearchSteps}, provider=${searchProvider})`);
 
   try {
-    return await researchViaMCP(franchise, role, maxSearchSteps, searchProvider);
+    return await researchViaWebSearch(franchise, role, searchConfig);
   } catch (error) {
-    log.error("Research failed entirely", error);
-    return null;
+    log.warn("Web research failed, falling back to LLM knowledge", error);
+    try {
+      return await researchViaLLM(franchise, role);
+    } catch (llmError) {
+      log.error("Research failed entirely (web + LLM)", llmError);
+      return null;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Research sufficiency evaluation
+// ---------------------------------------------------------------------------
+
+const sufficiencySchema = z.object({
+  sufficient: z.boolean().describe(
+    "true if the existing facts provide enough detail to generate this section accurately"
+  ),
+  missingTopics: z.array(z.string()).max(3).describe(
+    "Up to 3 specific topics that need more research for this section. Each should be a concrete search query."
+  ),
+});
+
+/**
+ * Evaluate whether cached research is sufficient for a specific scaffold step.
+ * If not, run targeted searches and merge new facts into ipContext.
+ * Returns the (potentially enriched) ipContext.
+ */
+export async function evaluateResearchSufficiency(
+  ipContext: IpResearchContext,
+  step: "locations" | "factions" | "npcs",
+  premise: string,
+  role: ResolvedRole,
+  searchConfig?: SearchConfig,
+): Promise<IpResearchContext> {
+  const stepDescriptions: Record<string, string> = {
+    locations: "geographic locations, cities, landmarks, terrain, and spatial layout",
+    factions: "political factions, organizations, clans, guilds, and power groups",
+    npcs: "notable characters, leaders, heroes, villains, and key personalities",
+  };
+
+  try {
+    const { object: evaluation } = await generateObject({
+      model: createModel(role.provider),
+      schema: sufficiencySchema,
+      prompt: `You are evaluating whether existing research about "${ipContext.franchise}" is sufficient to generate ${stepDescriptions[step]} for a world scaffold.
+
+PREMISE: "${premise}"
+
+EXISTING RESEARCH (${ipContext.keyFacts.length} facts):
+${ipContext.keyFacts.map((f) => `- ${f}`).join("\n")}
+
+Is this enough to generate accurate, detailed ${step} for this franchise? Consider:
+- Do we know enough specific ${step} from the source material?
+- Are there major ${step} missing that would make the generation inaccurate?
+- Would a fan notice obvious omissions?
+
+If insufficient, suggest up to 3 targeted search queries to fill the gaps.`,
+      temperature: 0.2,
+      maxOutputTokens: 32000,
+    });
+
+    if (evaluation.sufficient || evaluation.missingTopics.length === 0) {
+      log.info(`Research sufficient for ${step} (${ipContext.franchise})`);
+      return ipContext;
+    }
+
+    if (!searchConfig) {
+      log.info(`Research gaps for ${step} but no search config — proceeding with existing data`);
+      return ipContext;
+    }
+
+    // Run targeted searches for missing topics
+    log.info(`Research gaps for ${step}: ${evaluation.missingTopics.join(", ")} — searching...`);
+    const newFacts: string[] = [];
+
+    for (const topic of evaluation.missingTopics) {
+      try {
+        const results = await webSearch(topic, searchConfig, 5);
+        if (results.length > 0) {
+          // Extract facts from search results via LLM
+          const snippets = results.map((r) => `${r.title}: ${r.description}`).join("\n");
+          const { object: extracted } = await generateObject({
+            model: createModel(role.provider),
+            schema: z.object({
+              facts: z.array(z.string()).max(5).describe("Key facts extracted from search results"),
+            }),
+            prompt: `Extract key CANONICAL facts about "${ipContext.franchise}" relevant to ${step} from these search results:\n\n${snippets}\n\nRULES:\n- Only include facts from the OFFICIAL canon (manga, anime, games by the original creators).\n- EXCLUDE fan-made content, fan wikis speculation, filler episodes, non-canon movies, and fan theories.\n- Each fact must name specific canonical entities (places, characters, organizations).\n- Only include facts that are NOT already known:\n${ipContext.keyFacts.slice(0, 10).map((f) => `- ${f}`).join("\n")}`,
+            temperature: 0.1,
+            maxOutputTokens: 32000,
+          });
+          newFacts.push(...extracted.facts);
+        }
+      } catch (err) {
+        log.warn(`Sufficiency search failed for "${topic}": ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    if (newFacts.length === 0) {
+      log.info(`No new facts found for ${step} — proceeding with existing data`);
+      return ipContext;
+    }
+
+    // Deduplicate: filter out facts that are too similar to existing ones
+    const existingLower = new Set(ipContext.keyFacts.map((f) => f.toLowerCase().trim()));
+    const unique = newFacts.filter((f) => !existingLower.has(f.toLowerCase().trim()));
+
+    if (unique.length === 0) {
+      return ipContext;
+    }
+
+    log.info(`Enriched research for ${step}: +${unique.length} new facts`);
+    return {
+      ...ipContext,
+      keyFacts: [...ipContext.keyFacts, ...unique],
+    };
+  } catch (err) {
+    log.warn(`Sufficiency evaluation failed for ${step}: ${err instanceof Error ? err.message : String(err)}`);
+    return ipContext;
   }
 }

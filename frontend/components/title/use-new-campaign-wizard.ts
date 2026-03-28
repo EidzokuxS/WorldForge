@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { generateWorld, suggestSeed, suggestSeeds, apiPost } from "@/lib/api";
-import type { GenerationProgress } from "@/lib/api";
+import type { GenerationProgress, IpContext } from "@/lib/api";
 import { getErrorMessage } from "@/lib/settings";
 import type { SeedCategory, Settings, WorldSeeds } from "@/lib/types";
 import {
@@ -34,9 +34,12 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
   const [step, setStep] = useState<1 | 2>(1);
   const [campaignName, setCampaignName] = useState("");
   const [campaignPremise, setCampaignPremise] = useState("");
+  const [campaignFranchise, setCampaignFranchise] = useState("");
+  const [researchEnabled, setResearchEnabled] = useState(true);
   const [dnaState, setDnaState] = useState<DnaState | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [generationProgress, setGenerationProgress] = useState<GenerationProgress | null>(null);
+  const [ipContext, setIpContext] = useState<IpContext | null>(null);
 
   const isBusy = phase.kind !== "idle";
   const creatingCampaign = phase.kind === "creating" || phase.kind === "generating";
@@ -51,6 +54,7 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
   function resetFlow() {
     setStep(1);
     setDnaState(null);
+    setIpContext(null);
     setPhase({ kind: "idle" });
   }
 
@@ -60,7 +64,7 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
     if (!nextOpen) resetFlow();
   }
 
-  async function tryGenerateWorld(campaignId: string): Promise<boolean> {
+  async function tryGenerateWorld(campaignId: string, ctx?: IpContext | null): Promise<boolean> {
     if (!settings || !isGeneratorConfigured(settings)) return true;
 
     setPhase({ kind: "generating" });
@@ -68,7 +72,7 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
     try {
       const generation = await generateWorld(campaignId, (progress) => {
         setGenerationProgress(progress);
-      });
+      }, ctx);
       toast.success(`World generated: ${generation.startingLocation ?? "Unknown"}`, {
         description: `${generation.locationCount ?? 0} locations, ${generation.npcCount ?? 0} NPCs, ${generation.factionCount ?? 0} factions`,
       });
@@ -104,15 +108,20 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
       const created = await apiPost<CampaignMeta>("/api/campaigns", payload);
       toast.success("Campaign created", { description: created.name });
 
+      // Load campaign so it becomes active BEFORE generation (generate needs active campaign)
+      await apiPost(`/api/campaigns/${created.id}/load`);
+
       // Close dialog and clear form before generation starts
       // so the fullscreen overlay in TitleScreen takes over.
       setCampaignName("");
       setCampaignPremise("");
+      setCampaignFranchise("");
+      setResearchEnabled(true);
       setOpen(false);
       resetFlow();
       onCreated();
 
-      const generated = await tryGenerateWorld(created.id);
+      const generated = await tryGenerateWorld(created.id, ipContext);
 
       router.push(`/campaign/${created.id}/${generated ? "review" : "character"}`);
     } catch (error) {
@@ -145,7 +154,14 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
     setStep(2);
     setPhase({ kind: "suggesting-all" });
     try {
-      const suggested = await suggestSeeds(campaignPremise.trim());
+      const suggested = await suggestSeeds(campaignPremise.trim(), {
+          name: campaignName.trim(),
+          franchise: campaignFranchise.trim() || undefined,
+          research: researchEnabled,
+        });
+      if (suggested._ipContext) {
+        setIpContext(suggested._ipContext);
+      }
       setDnaState(createDnaStateFromSeeds(suggested));
     } catch (error) {
       toast.error("Failed to generate suggestions", {
@@ -174,7 +190,14 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
 
     setPhase({ kind: "suggesting-all" });
     try {
-      const suggested = await suggestSeeds(campaignPremise.trim());
+      const suggested = await suggestSeeds(campaignPremise.trim(), {
+          name: campaignName.trim(),
+          franchise: campaignFranchise.trim() || undefined,
+          research: researchEnabled,
+        });
+      if (suggested._ipContext) {
+        setIpContext(suggested._ipContext);
+      }
       setDnaState((current) => {
         if (!current) return current;
         const next = { ...current };
@@ -202,7 +225,7 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
 
     setPhase({ kind: "suggesting-category", category });
     try {
-      const result = await suggestSeed(campaignPremise.trim(), category);
+      const result = await suggestSeed(campaignPremise.trim(), category, ipContext);
       setDnaState((current) => {
         if (!current) return current;
         return {
@@ -262,6 +285,10 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
     setCampaignName,
     campaignPremise,
     setCampaignPremise,
+    campaignFranchise,
+    setCampaignFranchise,
+    researchEnabled,
+    setResearchEnabled,
     dnaState,
 
     // Derived state

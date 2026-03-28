@@ -29,14 +29,17 @@ function parseV2Json(text: string): V2ImportPayload {
     throw new Error("Invalid JSON — not a valid SillyTavern card file.");
   }
   // Accept both root-level V2 and nested data
-  const data = obj.spec === "chara_card_v2" ? obj.data : obj.data ?? obj;
-  if (!data?.name) throw new Error("Not a valid SillyTavern V2 card (missing name).");
+  const raw = obj.spec === "chara_card_v2" ? obj.data : obj.data ?? obj;
+  const data = raw as Record<string, unknown> | undefined;
+  if (!data || typeof data !== "object" || !("name" in data)) {
+    throw new Error("Not a valid SillyTavern V2 card (missing name).");
+  }
   return {
-    name: data.name,
-    description: data.description ?? "",
-    personality: data.personality ?? "",
-    scenario: data.scenario ?? "",
-    tags: Array.isArray(data.tags) ? data.tags : [],
+    name: String(data.name),
+    description: String(data.description ?? ""),
+    personality: String(data.personality ?? ""),
+    scenario: String(data.scenario ?? ""),
+    tags: Array.isArray(data.tags) ? (data.tags as string[]) : [],
   };
 }
 
