@@ -108,9 +108,7 @@ export async function createCampaign(
   if (!trimmedName) {
     throw new AppError("Campaign name is required.", 400);
   }
-  if (!trimmedPremise) {
-    throw new AppError("Campaign premise is required.", 400);
-  }
+  // Premise is optional when worldbook provides context
 
   ensureCampaignsDir();
 
