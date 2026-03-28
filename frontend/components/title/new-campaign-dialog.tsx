@@ -90,6 +90,7 @@ export function NewCampaignDialog({ wizard: w }: NewCampaignDialogProps) {
               <div className="space-y-2">
                 {w.worldbookStatus === "idle" ? (
                   <label
+                    htmlFor="worldbook-upload"
                     className={`flex cursor-pointer flex-col items-center gap-2 rounded-lg border-2 border-dashed border-border/50 px-4 py-3 text-sm text-muted-foreground transition-colors hover:border-border hover:text-foreground${
                       w.isBusy ? " pointer-events-none opacity-50" : ""
                     }`}
@@ -106,6 +107,7 @@ export function NewCampaignDialog({ wizard: w }: NewCampaignDialogProps) {
                     <BookOpen className="h-5 w-5" />
                     <span>Drop WorldBook JSON or click to upload</span>
                     <input
+                      id="worldbook-upload"
                       type="file"
                       accept=".json"
                       className="hidden"
