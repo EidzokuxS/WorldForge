@@ -48,8 +48,9 @@ export interface ImportResult {
 
 const worldBookEntrySchema = z
   .object({
-    comment: z.string(),
+    comment: z.string().default(""),
     content: z.string(),
+    name: z.string().optional(),
   })
   .passthrough();
 
@@ -71,7 +72,7 @@ export function parseWorldBook(json: unknown): WorldBookEntry[] {
     const entry = parsed.entries[key];
     if (!entry) continue;
 
-    const name = (entry.comment || "").trim();
+    const name = (entry.comment || entry.name || "").trim();
     if (!name) continue;
 
     const nameLower = name.toLowerCase();

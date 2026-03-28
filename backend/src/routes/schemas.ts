@@ -335,8 +335,9 @@ export const parseWorldBookSchema = z.object({
   campaignId: z.string().min(1).optional(),
   worldbook: z.object({
     entries: z.record(z.string(), z.object({
-      comment: z.string(),
+      comment: z.string().default(""),
       content: z.string(),
+      name: z.string().optional(),
     }).passthrough()),
   }).passthrough(),
 });
