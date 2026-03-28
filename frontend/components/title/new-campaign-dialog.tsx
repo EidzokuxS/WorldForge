@@ -88,6 +88,17 @@ export function NewCampaignDialog({ wizard: w }: NewCampaignDialogProps) {
 
               {/* WorldBook Upload */}
               <div className="space-y-2">
+                <input
+                  id="worldbook-upload"
+                  type="file"
+                  accept=".json"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void w.handleWorldBookUpload(file);
+                    e.target.value = "";
+                  }}
+                />
                 {w.worldbookStatus === "idle" ? (
                   <div
                     role="button"
@@ -109,17 +120,6 @@ export function NewCampaignDialog({ wizard: w }: NewCampaignDialogProps) {
                   >
                     <BookOpen className="h-5 w-5" />
                     <span>Drop WorldBook JSON or click to upload</span>
-                    <input
-                      id="worldbook-upload"
-                      type="file"
-                      accept=".json"
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) void w.handleWorldBookUpload(file);
-                        e.target.value = "";
-                      }}
-                    />
                   </div>
                 ) : (
                   <div className="flex items-center gap-3 rounded-lg border border-border/70 px-4 py-3 text-sm">
