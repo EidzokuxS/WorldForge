@@ -193,11 +193,12 @@ Plans:
   2. WorldBook entries are cleaned of SillyTavern-specific data (activation keys, recursion settings) and classified by type (character, location, faction, bestiary, lore) via LLM
   3. Classified entries are routed to appropriate DB tables (NPCs, locations, factions) or stored as lore cards
   4. IP research supports multiple search sources (DuckDuckGo MCP, Z.AI search MCP) for broader lore discovery
-**Plans**: 2 plans
+**Plans**: 3 plans
 
 Plans:
 - [x] 11-01: WorldBook Import Pipeline (completed 2026-03-19)
 - [ ] 11-02: Web Search Expansion
+- [ ] 11-03: WorldBook as scaffold foundation (upload on Step 1, background classification, feeds DNA generation)
 
 ### Phase 12: E2E QA & Bug Fixing
 **Goal**: All 73 v1 requirements verified working in real browser usage via Playwright MCP -- every page renders, every flow completes, every interaction works. Bugs found are fixed immediately and re-tested.
