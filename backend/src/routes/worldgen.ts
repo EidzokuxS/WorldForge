@@ -88,7 +88,7 @@ app.post("/suggest-seeds", async (c) => {
       );
     }
 
-    const seeds = await suggestWorldSeeds({
+    const { seeds } = await suggestWorldSeeds({
       premise: result.data.premise,
       role: gen.resolved,
       ipContext,
