@@ -106,15 +106,18 @@ export const rollSeedSchema = z.object({
 });
 
 export const suggestSeedsSchema = z.object({
-  premise: z
-    .string()
-    .transform((s) => s.trim())
-    .pipe(z.string().min(1, "premise is required.")),
+  premise: z.string().optional().default(""),
   name: z.string().optional(),
   /** Explicit franchise name — if set, research this IP. If empty, treat as original world. */
   franchise: z.string().optional(),
   /** Whether to run web research. Default true. */
   research: z.boolean().optional(),
+  /** Pre-classified worldbook entries — used as knowledge base for world generation. */
+  worldbookEntries: z.array(z.object({
+    name: z.string(),
+    type: z.enum(["character", "location", "faction", "bestiary", "lore_general"]),
+    summary: z.string(),
+  })).optional(),
 });
 
 const ipContextSchema = z.object({

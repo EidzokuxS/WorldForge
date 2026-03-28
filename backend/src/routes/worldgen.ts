@@ -77,19 +77,28 @@ app.post("/suggest-seeds", async (c) => {
       return c.json({ error: gen.error }, gen.status);
     }
 
-    // Research franchise if user specified one
+    // Build knowledge context: worldbook entries OR franchise research
     let ipContext = null;
-    const franchiseName = result.data.franchise?.trim();
-    if (franchiseName && result.data.research !== false) {
-      const { researchKnownIP } = await import("../worldgen/ip-researcher.js");
-      ipContext = await researchKnownIP(
-        { premise: result.data.premise, name: result.data.name ?? "", knownIP: franchiseName, research: settings.research },
-        gen.resolved,
-      );
+    if (result.data.worldbookEntries?.length) {
+      const { worldbookToIpContext } = await import("../worldgen/worldbook-importer.js");
+      ipContext = worldbookToIpContext(result.data.worldbookEntries, result.data.name ?? "Worldbook");
+    } else {
+      const franchiseName = result.data.franchise?.trim();
+      if (franchiseName && result.data.research !== false) {
+        const { researchKnownIP } = await import("../worldgen/ip-researcher.js");
+        ipContext = await researchKnownIP(
+          { premise: result.data.premise, name: result.data.name ?? "", knownIP: franchiseName, research: settings.research },
+          gen.resolved,
+        );
+      }
     }
 
+    // If no premise provided but worldbook exists, generate premise from worldbook
+    const premise = result.data.premise?.trim() ||
+      (ipContext ? `A world based on the ${ipContext.franchise} setting` : "An original fantasy world");
+
     const { seeds } = await suggestWorldSeeds({
-      premise: result.data.premise,
+      premise,
       role: gen.resolved,
       ipContext,
     });

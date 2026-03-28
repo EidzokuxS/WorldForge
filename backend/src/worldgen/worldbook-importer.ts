@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import type { IpResearchContext } from "@worldforge/shared";
 import { z } from "zod";
 import { safeGenerateObject as generateObject } from "../ai/generate-object-safe.js";
 import { createModel } from "../ai/index.js";
@@ -236,4 +237,44 @@ export async function importClassifiedEntries(
 
   log.info("WorldBook import complete", result.imported);
   return result;
+}
+
+// ───── 4. WorldBook → IpResearchContext ─────
+
+/**
+ * Convert classified worldbook entries into an IpResearchContext.
+ * This lets the scaffold generation pipeline use worldbook as its
+ * knowledge base — same as franchise research, but from a file.
+ */
+export function worldbookToIpContext(
+  entries: ClassifiedEntry[],
+  worldbookName: string,
+): IpResearchContext {
+  const characters = entries.filter((e) => e.type === "character");
+  const locs = entries.filter((e) => e.type === "location");
+  const facs = entries.filter((e) => e.type === "faction");
+  const loreEntries = entries.filter(
+    (e) => e.type === "bestiary" || e.type === "lore_general",
+  );
+
+  // Build key facts from ALL entries — each becomes a fact
+  const keyFacts = entries.map((e) => `${e.name}: ${e.summary}`);
+
+  // Tonal notes from lore_general entries (world rules, atmosphere)
+  const tonalNotes = loreEntries
+    .filter((e) => e.type === "lore_general")
+    .slice(0, 10)
+    .map((e) => e.summary);
+
+  return {
+    franchise: worldbookName,
+    keyFacts,
+    tonalNotes: tonalNotes.length > 0 ? tonalNotes : ["Custom worldbook setting"],
+    canonicalNames: {
+      locations: locs.map((e) => e.name),
+      factions: facs.map((e) => e.name),
+      characters: characters.map((e) => e.name),
+    },
+    source: "llm" as const,
+  };
 }
