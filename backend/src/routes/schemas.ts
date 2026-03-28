@@ -97,7 +97,7 @@ export const createCampaignSchema = z.object({
   premise: z
     .string()
     .transform((s) => s.trim())
-    .pipe(z.string().min(1, "Campaign premise is required.")),
+    .default(""),
   seeds: worldSeedsSchema.optional(),
 });
 
@@ -332,7 +332,7 @@ export const imageGenerateSchema = z.object({
 // --- WorldBook import schemas ---
 
 export const parseWorldBookSchema = z.object({
-  campaignId: z.string().min(1),
+  campaignId: z.string().min(1).optional(),
   worldbook: z.object({
     entries: z.record(z.string(), z.object({
       comment: z.string(),

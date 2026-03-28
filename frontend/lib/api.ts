@@ -279,13 +279,19 @@ export function rollWorldSeed(
 
 export function suggestSeeds(
   premise: string,
-  opts?: { name?: string; franchise?: string; research?: boolean }
+  opts?: {
+    name?: string;
+    franchise?: string;
+    research?: boolean;
+    worldbookEntries?: ClassifiedWorldBookEntry[];
+  }
 ): Promise<WorldSeeds & { _ipContext?: IpContext | null }> {
   return apiPost<WorldSeeds & { _ipContext?: IpContext | null }>("/api/worldgen/suggest-seeds", {
     premise,
     name: opts?.name,
     franchise: opts?.franchise,
     research: opts?.research,
+    worldbookEntries: opts?.worldbookEntries,
   });
 }
 
@@ -636,6 +642,16 @@ export function parseWorldBook(
   return apiPost<{ entries: ClassifiedWorldBookEntry[] }>(
     "/api/worldgen/parse-worldbook",
     { campaignId, worldbook },
+  );
+}
+
+/** Classify worldbook entries without requiring an active campaign (pre-creation). */
+export function classifyWorldBook(
+  worldbook: object,
+): Promise<{ entries: ClassifiedWorldBookEntry[] }> {
+  return apiPost<{ entries: ClassifiedWorldBookEntry[] }>(
+    "/api/worldgen/parse-worldbook",
+    { worldbook },
   );
 }
 

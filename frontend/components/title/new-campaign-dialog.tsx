@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Plus, Sparkles, Wand2 } from "lucide-react";
+import { Loader2, Plus, Sparkles, Wand2, X, BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -60,7 +60,11 @@ export function NewCampaignDialog({ wizard: w }: NewCampaignDialogProps) {
                 <Textarea
                   value={w.campaignPremise}
                   onChange={(event) => w.setCampaignPremise(event.target.value)}
-                  placeholder="Describe your world: setting, tone, key themes..."
+                  placeholder={
+                    w.hasWorldbook
+                      ? "Describe your world (optional — WorldBook provides context)..."
+                      : "Describe your world: setting, tone, key themes..."
+                  }
                   rows={6}
                 />
               </div>
@@ -80,6 +84,85 @@ export function NewCampaignDialog({ wizard: w }: NewCampaignDialogProps) {
                 <label htmlFor="research-toggle" className="text-sm text-muted-foreground cursor-pointer">
                   Web research {w.campaignFranchise.trim() ? "for franchise lore" : "for inspiration"}
                 </label>
+              </div>
+
+              {/* WorldBook Upload */}
+              <div className="space-y-2">
+                {w.worldbookStatus === "idle" ? (
+                  <label
+                    className={`flex cursor-pointer flex-col items-center gap-2 rounded-lg border-2 border-dashed border-border/50 px-4 py-3 text-sm text-muted-foreground transition-colors hover:border-border hover:text-foreground${
+                      w.isBusy ? " pointer-events-none opacity-50" : ""
+                    }`}
+                    onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const file = e.dataTransfer.files[0];
+                      if (file && file.name.endsWith(".json")) {
+                        void w.handleWorldBookUpload(file);
+                      }
+                    }}
+                  >
+                    <BookOpen className="h-5 w-5" />
+                    <span>Drop WorldBook JSON or click to upload</span>
+                    <input
+                      type="file"
+                      accept=".json"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) void w.handleWorldBookUpload(file);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                ) : (
+                  <div className="flex items-center gap-3 rounded-lg border border-border/70 px-4 py-3 text-sm">
+                    {w.worldbookStatus === "parsing" || w.worldbookStatus === "classifying" ? (
+                      <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
+                    ) : w.worldbookStatus === "done" ? (
+                      <BookOpen className="h-4 w-4 shrink-0 text-green-500" />
+                    ) : (
+                      <BookOpen className="h-4 w-4 shrink-0 text-destructive" />
+                    )}
+
+                    <div className="min-w-0 flex-1">
+                      {w.worldbookStatus === "parsing" && (
+                        <span className="text-muted-foreground">Reading WorldBook...</span>
+                      )}
+                      {w.worldbookStatus === "classifying" && (
+                        <span className="text-muted-foreground">
+                          Classifying entries{w.classifyProgress
+                            ? ` (${w.classifyProgress.batch}/${w.classifyProgress.total} batches)`
+                            : "..."}
+                        </span>
+                      )}
+                      {w.worldbookStatus === "done" && w.worldbookEntries && (
+                        <span>
+                          <span className="font-medium">{w.worldbookFile?.name}</span>
+                          <span className="ml-2 text-muted-foreground">
+                            {w.worldbookEntries.length} entries classified
+                          </span>
+                        </span>
+                      )}
+                      {w.worldbookStatus === "error" && (
+                        <span className="text-destructive">{w.worldbookError ?? "Classification failed"}</span>
+                      )}
+                    </div>
+
+                    {w.worldbookStatus !== "parsing" && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 shrink-0 p-0"
+                        onClick={w.handleWorldBookRemove}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 

@@ -372,9 +372,7 @@ app.post("/parse-worldbook", async (c) => {
     const result = await parseBody(c, parseWorldBookSchema);
     if ("response" in result) return result.response;
 
-    const { campaignId, worldbook } = result.data;
-    const campaign = requireActiveCampaign(c, campaignId);
-    if (campaign instanceof Response) return campaign;
+    const { worldbook } = result.data;
 
     const settings = loadSettings();
     const gen = resolveGenerator(settings);
