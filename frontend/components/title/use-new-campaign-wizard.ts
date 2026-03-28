@@ -172,7 +172,13 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
       resetFlow();
       onCreated();
 
-      const generated = await tryGenerateWorld(created.id, ipContext);
+      // If worldbook was uploaded but ipContext not set (skipped DNA step), build it now
+      let ctx = ipContext;
+      if (!ctx && worldbookEntries?.length) {
+        const { worldbookToIpContext } = await import("@/lib/api");
+        ctx = worldbookToIpContext(worldbookEntries, name);
+      }
+      const generated = await tryGenerateWorld(created.id, ctx);
 
       router.push(`/campaign/${created.id}/${generated ? "review" : "character"}`);
     } catch (error) {

@@ -655,6 +655,27 @@ export function classifyWorldBook(
   );
 }
 
+/** Convert classified worldbook entries to IpResearchContext (client-side, no LLM needed) */
+export function worldbookToIpContext(
+  entries: ClassifiedWorldBookEntry[],
+  name: string,
+): IpResearchContext {
+  return {
+    franchise: name,
+    keyFacts: entries.map((e) => `${e.name}: ${e.summary}`),
+    tonalNotes: entries
+      .filter((e) => e.type === "lore_general")
+      .slice(0, 10)
+      .map((e) => e.summary),
+    canonicalNames: {
+      locations: entries.filter((e) => e.type === "location").map((e) => e.name),
+      factions: entries.filter((e) => e.type === "faction").map((e) => e.name),
+      characters: entries.filter((e) => e.type === "character").map((e) => e.name),
+    },
+    source: "llm",
+  };
+}
+
 export function importWorldBook(
   campaignId: string,
   entries: ClassifiedWorldBookEntry[],

@@ -47,13 +47,13 @@ export function readCampaignConfig(campaignId: string): CampaignConfigFile {
   } catch {
     throw new AppError("Campaign config.json contains invalid JSON.", 500);
   }
-  if (!parsed.name || !parsed.premise || typeof parsed.createdAt !== "number") {
+  if (!parsed.name || typeof parsed.createdAt !== "number") {
     throw new AppError("Campaign config.json is invalid.", 500);
   }
 
   return {
     name: parsed.name,
-    premise: parsed.premise,
+    premise: parsed.premise ?? "",
     seeds: parseWorldSeeds(parsed.seeds) ?? undefined,
     ipContext: parsed.ipContext ?? undefined,
     generationComplete: Boolean(parsed.generationComplete),
