@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
+  apiPost,
   getActiveCampaign,
   getWorldData,
   getLoreCards,
@@ -39,6 +40,9 @@ export default function WorldReviewPage(props: { params: Promise<{ id: string }>
   useEffect(() => {
     async function loadData() {
       try {
+        // Ensure campaign is loaded (handles server restarts / direct URL navigation)
+        await apiPost(`/api/campaigns/${campaignId}/load`).catch(() => {});
+
         const [campaign, world, lore] = await Promise.all([
           getActiveCampaign(),
           getWorldData(campaignId),
