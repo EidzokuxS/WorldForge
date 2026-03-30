@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: In Progress
-stopped_at: Completed 25-02-PLAN.md
-last_updated: "2026-03-30T07:39:50.832Z"
+stopped_at: Completed 25-03-PLAN.md
+last_updated: "2026-03-30T07:55:53.985Z"
 progress:
   total_phases: 20
-  completed_phases: 19
+  completed_phases: 20
   total_plans: 55
-  completed_plans: 54
+  completed_plans: 55
 ---
 
 # Project State
@@ -19,35 +19,36 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-18)
 
 **Core value:** The LLM is the narrator, never the engine. All mechanical outcomes are resolved by backend code.
-**Current focus:** Phase 25 — replace-premise-override-heuristics-with-structured-divergence-interpretation
+**Current focus:** Phase 25 complete — replace-premise-override-heuristics-with-structured-divergence-interpretation
 
 ## Current Position
 
 Phase: 25
-Plan: 03 (next)
+Plan: 03 (completed)
 
 ## Performance Metrics
 
 **Current Snapshot:**
 
 - Active roadmap phases: 20
-- Completed phases: 19
-- Planned or in-progress phases: 1
+- Completed phases: 20
+- Planned or in-progress phases: 0
 - Total plans tracked: 55
-- Completed plans: 54
-- Pending plans: 1
+- Completed plans: 55
+- Pending plans: 0
 
 **Open Work:**
 
-- Active execution target: Phase 25
-- Next required workflow step: execute Phase 25 Plan 03
-- Current phase has 1 incomplete plan remaining
+- Active execution target: None
+- Next required workflow step: choose the next milestone or backlog item
+- Current phase has 0 incomplete plans remaining
 - Backlog items outside active execution order are tracked in `.planning/BACKLOG.md`
 
 **Notes:**
 
 - Historical per-plan timing metrics from earlier GSD runs were removed during planning hygiene because they no longer matched the active roadmap after renumbering and archival cleanup.
 - Use `ROADMAP.md` progress plus phase directories as the source of truth for current execution state.
+- Latest execution: Phase 25 Plan 03 completed in 10 minutes (2 tasks, 9 files touched).
 
 ## Accumulated Context
 
@@ -169,6 +170,9 @@ Recent decisions affecting current work:
 - [Phase 25]: Prompt helpers now separate canonical baseline from interpreted divergence plus a reusable known-IP generation contract.
 - [Phase 25]: scaffold-generator computes or reuses one PremiseDivergence artifact and injects the same object into every known-IP scaffold step and lore extraction call.
 - [Phase 25]: Known-IP lore generation updates only divergence-affected facts while keeping untouched canon explicit instead of suppressing names.
+- [Phase 25]: The old premise-override helper stays only as a deprecated compatibility shim and no longer participates in the live worldgen export surface.
+- [Phase 25]: Phase 25 regressions should prove behavior at three layers: divergence interpretation, prompt assembly, and route/cache reuse.
+- [Phase 25]: Known-IP single-seed generation now computes premise divergence when callers omit the cached artifact so every seed entry point follows the same structured path.
 
 ### Roadmap Evolution
 
@@ -200,6 +204,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-30T07:39:50.828Z
-Stopped at: Completed 25-02-PLAN.md
+Last session: 2026-03-30T07:55:53.982Z
+Stopped at: Completed 25-03-PLAN.md
 Resume file: None

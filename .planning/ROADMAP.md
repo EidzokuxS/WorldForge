@@ -31,7 +31,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 17: Unit Test Coverage** - Real backend/frontend tests and desloppify strict 95+ cleanup (completed 2026-03-21)
 - [x] **Phase 23: Unified Research & World Generation Pipeline** - Single research cache feeding DNA and scaffold generation, with sufficiency checks on regeneration (completed 2026-03-30)
 - [x] **Phase 24: Worldgen Known IP Quality** - Canonical DNA/premise/locations/factions/NPCs with butterfly-effect changes, key vs supporting NPC tiers, research-grounded lore (completed 2026-03-25)
-- [ ] **Phase 25: Replace premise-override heuristics with structured divergence interpretation** - Structured premise/world divergence interpretation for known-IP generation
+- [x] **Phase 25: Replace premise-override heuristics with structured divergence interpretation** - Structured premise/world divergence interpretation for known-IP generation (completed 2026-03-30)
 
 ## Phase Details
 
@@ -297,7 +297,7 @@ Note: Backlog phases (like 999.1) are tracked separately and are not part of the
 | 17. Unit Test Coverage | 5/5 | Complete | 2026-03-21 |
 | 23. Unified Research & World Generation Pipeline | 2/2 | Complete | 2026-03-30 |
 | 24. Worldgen Known IP Quality | 4/4 | Complete | 2026-03-25 |
-| 25. Structured Divergence Interpretation | 2/3 | In Progress|  |
+| 25. Structured Divergence Interpretation | 3/3 | Complete   | 2026-03-30 |
 
 ### Phase 16: NPC System QA — Three NPC Tiers + World Gen Integration
 
@@ -354,12 +354,12 @@ Plans:
 **Goal:** Known-IP world generation interprets the player's premise as canonical baseline plus structured divergence, then reuses that interpretation across DNA, scaffold, and lore generation without regressing Phase 24 canonical fidelity.
 **Requirements**: P25-01, P25-02, P25-03, P25-04, P25-05, P25-06
 **Depends on:** Phase 24
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans complete
 
 Plans:
 - [x] 25-01-PLAN.md -- Divergence contract, interpreter, cache/schema handoff
 - [x] 25-02-PLAN.md -- Divergence-aware prompt contracts across DNA, scaffold, and lore
-- [ ] 25-03-PLAN.md -- Legacy override cleanup plus regression lock-in
+- [x] 25-03-PLAN.md -- Legacy override cleanup plus regression lock-in
 
 
 
