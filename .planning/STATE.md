@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: In Progress
-stopped_at: Completed 25-01-PLAN.md
-last_updated: "2026-03-30T07:20:40.696Z"
+stopped_at: Completed 25-02-PLAN.md
+last_updated: "2026-03-30T07:39:50.832Z"
 progress:
   total_phases: 20
   completed_phases: 19
   total_plans: 55
-  completed_plans: 53
+  completed_plans: 54
 ---
 
 # Project State
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-03-18)
 ## Current Position
 
 Phase: 25
-Plan: 02 (next)
+Plan: 03 (next)
 
 ## Performance Metrics
 
@@ -34,14 +34,14 @@ Plan: 02 (next)
 - Completed phases: 19
 - Planned or in-progress phases: 1
 - Total plans tracked: 55
-- Completed plans: 53
-- Pending plans: 2
+- Completed plans: 54
+- Pending plans: 1
 
 **Open Work:**
 
 - Active execution target: Phase 25
-- Next required workflow step: execute Phase 25 Plan 02
-- Current phase has 2 incomplete plans remaining
+- Next required workflow step: execute Phase 25 Plan 03
+- Current phase has 1 incomplete plan remaining
 - Backlog items outside active execution order are tracked in `.planning/BACKLOG.md`
 
 **Notes:**
@@ -166,6 +166,9 @@ Recent decisions affecting current work:
 - [Phase 25]: PremiseDivergence lives beside IpResearchContext so canonical research stays immutable.
 - [Phase 25]: Routes compute-or-load premiseDivergence once and pass the cached artifact downstream instead of mutating ipContext.
 - [Phase 25]: Prompt rewrites were deferred; this plan establishes interpretation and transport first.
+- [Phase 25]: Prompt helpers now separate canonical baseline from interpreted divergence plus a reusable known-IP generation contract.
+- [Phase 25]: scaffold-generator computes or reuses one PremiseDivergence artifact and injects the same object into every known-IP scaffold step and lore extraction call.
+- [Phase 25]: Known-IP lore generation updates only divergence-affected facts while keeping untouched canon explicit instead of suppressing names.
 
 ### Roadmap Evolution
 
@@ -197,6 +200,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-30T07:20:40.693Z
-Stopped at: Completed 25-01-PLAN.md
+Last session: 2026-03-30T07:39:50.828Z
+Stopped at: Completed 25-02-PLAN.md
 Resume file: None
