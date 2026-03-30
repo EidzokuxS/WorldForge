@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Ready to plan
-stopped_at: Completed 24-04-PLAN.md
-last_updated: "2026-03-25T15:08:41.866Z"
+status: In Progress
+stopped_at: Completed 25-01-PLAN.md
+last_updated: "2026-03-30T07:20:40.696Z"
 progress:
-  total_phases: 22
+  total_phases: 20
   completed_phases: 19
-  total_plans: 53
-  completed_plans: 51
+  total_plans: 55
+  completed_plans: 53
 ---
 
 # Project State
@@ -19,87 +19,35 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-18)
 
 **Core value:** The LLM is the narrator, never the engine. All mechanical outcomes are resolved by backend code.
-**Current focus:** Phase 24 — worldgen-known-ip-quality
+**Current focus:** Phase 25 — replace-premise-override-heuristics-with-structured-divergence-interpretation
 
 ## Current Position
 
-Phase: 999.1
-Plan: Not started
+Phase: 25
+Plan: 02 (next)
 
 ## Performance Metrics
 
-**Velocity:**
+**Current Snapshot:**
 
-- Total plans completed: 11
-- Average duration: 5.8min
-- Total execution time: 0.9 hours
+- Active roadmap phases: 20
+- Completed phases: 19
+- Planned or in-progress phases: 1
+- Total plans tracked: 55
+- Completed plans: 53
+- Pending plans: 2
 
-**By Phase:**
+**Open Work:**
 
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| 01-engine-foundation | 2/2 | 13min | 6.5min |
-| 02-turn-cycle | 2/2 | 18min | 9min |
-| 03-world-state-mechanics | 3/3 | 17min | 5.7min |
-| 04-story-control | 2/2 | 6min | 3min |
+- Active execution target: Phase 25
+- Next required workflow step: execute Phase 25 Plan 02
+- Current phase has 2 incomplete plans remaining
+- Backlog items outside active execution order are tracked in `.planning/BACKLOG.md`
 
-**Recent Trend:**
+**Notes:**
 
-- Last 5 plans: -
-- Trend: -
-
-*Updated after each plan completion*
-| Phase 01 P02 | 7min | 3 tasks | 10 files |
-| Phase 02 P01 | 15min | 2 tasks | 8 files |
-| Phase 02 P02 | 3min | 2 tasks | 4 files |
-| Phase 03 P01 | 8min | 2 tasks | 5 files |
-
-| Phase 03 P02 | 6min | 2 tasks | 5 files |
-| Phase 03 P03 | 3min | 2 tasks | 5 files |
-| Phase 04 P01 | 4min | 2 tasks | 6 files |
-| Phase 04 P02 | 2min | 2 tasks | 3 files |
-| Phase 05 P01 | 4min | 2 tasks | 3 files |
-| Phase 05 P02 | 5min | 1 tasks | 5 files |
-| Phase 06 P01 | 8min | 2 tasks | 5 files |
-| Phase 06 P02 | 5min | 2 tasks | 6 files |
-| Phase 07 P01 | 4min | 2 tasks | 5 files |
-| Phase 07 P02 | 5min | 2 tasks | 5 files |
-| Phase 08 P01 | 5min | 2 tasks | 5 files |
-| Phase 08 P02 | 4min | 2 tasks | 5 files |
-| Phase 09 P01 | 3min | 2 tasks | 6 files |
-| Phase 09 P02 | 4min | 3 tasks | 5 files |
-| Phase 10 P01 | 4min | 2 tasks | 8 files |
-| Phase 10 P02 | 3min | 2 tasks | 5 files |
-| Phase 11 P01 | 5min | 2 tasks | 7 files |
-| Phase 11 P02 | 5min | 2 tasks | 9 files |
-| Phase 12 P01 | 1min | 2 tasks | 2 files |
-| Phase 12 P02 | 4min | 2 tasks | 7 files |
-| Phase 12 P03 | 14min | 2 tasks | 0 files |
-| Phase 12 P04 | 7min | 2 tasks | 0 files |
-| Phase 12 P06 | 7min | 2 tasks | 0 files |
-| Phase 12 P05 | 14min | 2 tasks | 2 files |
-| Phase 12 P02 | 5min | 2 tasks | 9 files |
-| Phase 12 P03 | 8min | 2 tasks | 14 files |
-| Phase 12 P04 | 15min | 2 tasks | 12 files |
-| Phase 13 P01 | 17min | 2 tasks | 5 files |
-| Phase 13 P02 | 27min | 2 tasks | 6 files |
-| Phase 13 P03 | 15min | 2 tasks | 4 files |
-| Phase 14 P02 | 2min | 2 tasks | 2 files |
-| Phase 14 P01 | 3min | 3 tasks | 3 files |
-| Phase 14 P03 | 3min | 2 tasks | 0 files |
-| Phase 15 P01 | 4min | 2 tasks | 4 files |
-| Phase 15 P02 | 3min | 2 tasks | 2 files |
-| Phase 16 P01 | 10min | 2 tasks | 2 files |
-| Phase 16 P02 | 12min | 2 tasks | 2 files |
-| Phase 17 P03 | 3min | 2 tasks | 2 files |
-| Phase 17 P02 | 4min | 2 tasks | 2 files |
-| Phase 17 P01 | 4min | 2 tasks | 2 files |
-| Phase 17 P05 | 3min | 2 tasks | 2 files |
-| Phase 17 P04 | 4min | 2 tasks | 3 files |
-| Phase 24 P01 | 7min | 2 tasks | 4 files |
-| Phase 24 P02 | 2min | 2 tasks | 3 files |
-| Phase 24 P03 | 3min | 2 tasks | 2 files |
-| Phase 24 P04 | 5min | 2 tasks | 6 files |
+- Historical per-plan timing metrics from earlier GSD runs were removed during planning hygiene because they no longer matched the active roadmap after renumbering and archival cleanup.
+- Use `ROADMAP.md` progress plus phase directories as the source of truth for current execution state.
 
 ## Accumulated Context
 
@@ -215,6 +163,9 @@ Recent decisions affecting current work:
 - [Phase 24]: Lore extractor ipContext is optional 4th param -- backward compatible with existing callers
 - [Phase 24]: scaffold-generator.ts reduced from 367 to 98 lines via re-export pattern from scaffold-steps/
 - [Phase 24]: Scaffold tier 'supporting' maps to DB tier 'persistent' at saver boundary
+- [Phase 25]: PremiseDivergence lives beside IpResearchContext so canonical research stays immutable.
+- [Phase 25]: Routes compute-or-load premiseDivergence once and pass the cached artifact downstream instead of mutating ipContext.
+- [Phase 25]: Prompt rewrites were deferred; this plan establishes interpretation and transport first.
 
 ### Roadmap Evolution
 
@@ -230,10 +181,15 @@ Recent decisions affecting current work:
 - Phase 17 added: Unit Test Coverage — real tests for untested backend and frontend modules, desloppify strict 95+
 - Phase 23 added: Unified Research & World Generation Pipeline — single research with cache, feeds both DNA and scaffold
 - Phase 24 added: Worldgen Known IP Quality — canonical DNA/premise/locations/factions/NPCs, key vs supporting NPC tiers, research-grounded lore
+- Phase 25 added: Replace premise-override heuristics with structured divergence interpretation
+- Planning hygiene (2026-03-30): ROADMAP/STATE reconciled with completed phase artifacts; legacy superseded E2E phase directories moved out of active `.planning/phases/`
+- Phase 23 completed (2026-03-30): cached IP research pipeline reconciled, regression-tested, and verified against the live codebase
 
 ### Pending Todos
 
-None yet.
+- 2 pending todos captured in `.planning/todos/pending/`
+- `Add reusable multi-worldbook library` — multi-lorebook mixing for world generation plus a reusable processed lorebook library selectable during campaign creation
+- `Add lore card editing and deletion` — per-card edit/delete for Lore entries instead of the current read/search/import or delete-all-only flow
 
 ### Blockers/Concerns
 
@@ -241,6 +197,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-25T14:19:24.109Z
-Stopped at: Completed 24-04-PLAN.md
+Last session: 2026-03-30T07:20:40.693Z
+Stopped at: Completed 25-01-PLAN.md
 Resume file: None

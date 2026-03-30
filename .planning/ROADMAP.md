@@ -12,20 +12,26 @@ Transform the existing world generation + chat pipeline (Tasks 1-14) into a full
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Engine Foundation** - Prompt assembler with token budgets, Oracle probability system, Storyteller tool schemas
+- [x] **Phase 1: Engine Foundation** - Prompt assembler with token budgets, Oracle probability system, Storyteller tool schemas (completed 2026-03-18)
 - [x] **Phase 2: Turn Cycle** - Full turn pipeline (input -> context -> Oracle -> roll -> narration with tools -> state update), SSE multi-event streaming (completed 2026-03-18)
 - [x] **Phase 3: World State Mechanics** - HP/damage, inventory, location graph navigation, entity tracking, spawn/reveal tools (completed 2026-03-18)
 - [x] **Phase 4: Story Control** - Retry/regenerate, undo, inline edit of AI output, quick action buttons (completed 2026-03-18)
-- [ ] **Phase 5: Episodic Memory** - Event embedding with importance scoring, composite retrieval, smart context compression, multi-hop graph queries
-- [ ] **Phase 6: NPC Agents** - Autonomous Key Character agents, off-screen batch simulation, character promotion
+- [x] **Phase 5: Episodic Memory** - Event embedding with importance scoring, composite retrieval, smart context compression, multi-hop graph queries (completed 2026-03-18)
+- [x] **Phase 6: NPC Agents** - Autonomous Key Character agents, off-screen batch simulation, character promotion (completed 2026-03-18)
 - [x] **Phase 7: Reflection + Progression** - Importance-triggered NPC reflection, wealth tiers, skill progression, relationship evolution (completed 2026-03-18)
 - [x] **Phase 8: World Engine** - Faction macro-ticks, territory changes, world events, information flow to NPCs and player (completed 2026-03-18)
-- [ ] **Phase 9: Persistence** - Checkpoint save/load, branching, auto-checkpoint before lethal encounters
+- [x] **Phase 9: Persistence** - Checkpoint save/load, branching, auto-checkpoint before lethal encounters (completed 2026-03-19)
 - [x] **Phase 10: Image Generation** - Provider-agnostic image gen, portraits, scene illustrations, location backgrounds, graceful degradation (completed 2026-03-19)
 - [x] **Phase 11: Content Import** - SillyTavern WorldBook import with entity classification, web search expansion (completed 2026-03-19)
 - [x] **Phase 12: E2E QA & Bug Fixing** - Full browser-based verification of all features via Playwright MCP, iterative bug fixing until clean (completed 2026-03-19)
 - [x] **Phase 13: Gameplay Playtest & AI Tuning** - Full gameplay playtesting across 3 scenarios, AI quality evaluation, system prompt tuning (completed 2026-03-20)
-- [x] **Phase 24: Worldgen Known IP Quality** - Canonical DNA/premise/locations/factions/NPCs with butterfly-effect changes, key vs supporting NPC tiers, research-grounded lore (completed 2026-03-25)
+- [x] **Phase 14: Final Systems Verification & Bug Fixing** - Final QA pass, remaining bug fixes, and docs-driven end-to-end verification (completed 2026-03-20)
+- [x] **Phase 15: Systematic Mechanics Fix & Docs-Driven Verification** - Backend enforcement for gameplay-breaking bugs plus mechanics verification (completed 2026-03-20)
+- [x] **Phase 16: NPC System QA** - Verification of all NPC tiers across worldgen, review, and gameplay runtime (completed 2026-03-20)
+- [x] **Phase 17: Unit Test Coverage** - Real backend/frontend tests and desloppify strict 95+ cleanup (completed 2026-03-21)
+- [x] **Phase 23: Unified Research & World Generation Pipeline** - Single research cache feeding DNA and scaffold generation, with sufficiency checks on regeneration (completed 2026-03-30)
+- [x] **Phase 24: Worldgen Known IP Quality** - Canonical DNA/premise/locations/factions/NPCs with butterfly-effect changes, key vs supporting NPC tiers, research-grounded lore (completed 2026-03-25)
+- [ ] **Phase 25: Replace premise-override heuristics with structured divergence interpretation** - Structured premise/world divergence interpretation for known-IP generation
 
 ## Phase Details
 
@@ -41,8 +47,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 2 plans
 
 Plans:
-- [ ] 01-01: Prompt Assembler
-- [ ] 01-02: Oracle System
+- [x] 01-01: Prompt Assembler
+- [x] 01-02: Oracle System
 
 ### Phase 2: Turn Cycle
 **Goal**: The game has a complete turn processing pipeline where player actions flow through Oracle evaluation, dice rolls, Storyteller narration with tool calling, and state updates
@@ -57,8 +63,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 02-01-PLAN.md -- Tool schemas + Tool executor + Turn processor
-- [ ] 02-02-PLAN.md -- SSE streaming route + Frontend integration + Quick actions
+- [x] 02-01-PLAN.md -- Tool schemas + Tool executor + Turn processor
+- [x] 02-02-PLAN.md -- SSE streaming route + Frontend integration + Quick actions
 
 ### Phase 3: World State Mechanics
 **Goal**: The game world has tangible mechanical systems -- characters take damage, carry items, move between locations, and interact with tracked entities
@@ -73,9 +79,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 03-01-PLAN.md -- Spawn/condition tools + prompt assembler inventory/death context
-- [ ] 03-02-PLAN.md -- Movement validation + world data enrichment + entity tracking
-- [ ] 03-03-PLAN.md -- Frontend sidebar real-time updates + clickable navigation
+- [x] 03-01-PLAN.md -- Spawn/condition tools + prompt assembler inventory/death context
+- [x] 03-02-PLAN.md -- Movement validation + world data enrichment + entity tracking
+- [x] 03-03-PLAN.md -- Frontend sidebar real-time updates + clickable navigation
 
 ### Phase 4: Story Control
 **Goal**: Player has full editorial control over the narrative -- can retry, undo, edit AI output, and use suggested action buttons
@@ -89,8 +95,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 04-01-PLAN.md -- State snapshot + retry/undo/edit backend endpoints
-- [ ] 04-02-PLAN.md -- Frontend retry/undo/edit controls + CTRL-04 verification
+- [x] 04-01-PLAN.md -- State snapshot + retry/undo/edit backend endpoints
+- [x] 04-02-PLAN.md -- Frontend retry/undo/edit controls + CTRL-04 verification
 
 ### Phase 5: Episodic Memory
 **Goal**: The game remembers what happened -- significant events are stored as searchable memories, context compression keeps prompts within budget over long sessions, and relationship chains enrich context
@@ -104,8 +110,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 05-01-PLAN.md -- Episodic event embedding + composite retrieval scoring
-- [ ] 05-02-PLAN.md -- Smart context compression + multi-hop graph queries + prompt assembler integration
+- [x] 05-01-PLAN.md -- Episodic event embedding + composite retrieval scoring
+- [x] 05-02-PLAN.md -- Smart context compression + multi-hop graph queries + prompt assembler integration
 
 ### Phase 6: NPC Agents
 **Goal**: Key Characters act autonomously -- they pursue goals, speak unprompted, move between locations, and react to the player's presence
@@ -119,8 +125,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 06-01: NPC Agent Loop + Tick Scheduling
-- [ ] 06-02: Off-screen Simulation + Promotion
+- [x] 06-01: NPC Agent Loop + Tick Scheduling
+- [x] 06-02: Off-screen Simulation + Promotion
 
 ### Phase 7: Reflection + Progression
 **Goal**: NPCs form beliefs and evolve goals based on accumulated experiences; characters progress through tag-based wealth, skill, and relationship tiers
@@ -135,8 +141,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 07-01: Reflection Agent + Triggers
-- [ ] 07-02: Tag-based Progression (Wealth, Skills, Relationships)
+- [x] 07-01: Reflection Agent + Triggers
+- [x] 07-02: Tag-based Progression (Wealth, Skills, Relationships)
 
 ### Phase 8: World Engine
 **Goal**: The world simulates at the macro level -- factions pursue goals, territories shift, world events occur, and information flows realistically through NPCs
@@ -150,8 +156,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 08-01: Faction Tick System
-- [ ] 08-02: World Events + Information Flow
+- [x] 08-01: Faction Tick System
+- [x] 08-02: World Events + Information Flow
 
 ### Phase 9: Persistence
 **Goal**: Player can save, load, and branch campaign state for death recovery and "what if" exploration
@@ -165,8 +171,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 09-01: Checkpoint Save/Load System
-- [ ] 09-02: Auto-checkpoint + UI
+- [x] 09-01: Checkpoint Save/Load System
+- [x] 09-02: Auto-checkpoint + UI
 
 ### Phase 10: Image Generation
 **Goal**: The game generates visual content -- character portraits, scene illustrations, location backgrounds -- through any supported image provider, with graceful degradation when disabled
@@ -181,8 +187,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 10-01-PLAN.md -- Image generation module + prompt builder + cache + serving route
-- [ ] 10-02-PLAN.md -- Portrait on save + scene/location triggers + frontend display
+- [x] 10-01-PLAN.md -- Image generation module + prompt builder + cache + serving route
+- [x] 10-02-PLAN.md -- Portrait on save + scene/location triggers + frontend display
 
 ### Phase 11: Content Import
 **Goal**: Players can import external content -- SillyTavern WorldBooks and web-sourced lore -- into their campaign worlds
@@ -197,8 +203,8 @@ Plans:
 
 Plans:
 - [x] 11-01: WorldBook Import Pipeline (completed 2026-03-19)
-- [ ] 11-02: Web Search Expansion
-- [ ] 11-03: WorldBook as scaffold foundation (upload on Step 1, background classification, feeds DNA generation)
+- [x] 11-02: Web Search Expansion
+- [x] 11-03: WorldBook as scaffold foundation (upload on Step 1, background classification, feeds DNA generation)
 
 ### Phase 12: E2E QA & Bug Fixing
 **Goal**: All 73 v1 requirements verified working in real browser usage via Playwright MCP -- every page renders, every flow completes, every interaction works. Bugs found are fixed immediately and re-tested.
@@ -216,10 +222,10 @@ Plans:
 
 Plans:
 - [x] 12-01-PLAN.md -- Fix failing unit tests (prerequisite) (completed 2026-03-19)
-- [ ] 12-02-PLAN.md -- UI Polish & Visual QA (every page screenshotted + rubric scored)
-- [ ] 12-03-PLAN.md -- Campaign Flow E2E (new campaign -> world review -> character -> game)
-- [ ] 12-04-PLAN.md -- Gameplay E2E (actions, Oracle, streaming, story control)
-- [ ] 12-05-PLAN.md -- Import & Persistence E2E (WorldBook import + checkpoints)
+- [x] 12-02-PLAN.md -- UI Polish & Visual QA (every page screenshotted + rubric scored)
+- [x] 12-03-PLAN.md -- Campaign Flow E2E (new campaign -> world review -> character -> game)
+- [x] 12-04-PLAN.md -- Gameplay E2E (actions, Oracle, streaming, story control)
+- [x] 12-05-PLAN.md -- Import & Persistence E2E (WorldBook import + checkpoints)
 
 ### Phase 13: Gameplay Playtest & AI Tuning
 **Goal**: AI Game Master produces quality gameplay across 3 different scenarios -- Oracle gives reasonable probabilities, Storyteller narrates atmospherically with correct outcome tier differentiation, NPCs act autonomously, factions evolve the world, and combat mechanics work correctly under stress
@@ -237,9 +243,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 13-01-PLAN.md -- Known IP Playtest (Naruto) + initial tuning
-- [ ] 13-02-PLAN.md -- Original World Playtest (Dark Fantasy) + long-session tuning
-- [ ] 13-03-PLAN.md -- Combat & Mechanics Stress Test + final tuning
+- [x] 13-01-PLAN.md -- Known IP Playtest (Naruto) + initial tuning
+- [x] 13-02-PLAN.md -- Original World Playtest (Dark Fantasy) + long-session tuning
+- [x] 13-03-PLAN.md -- Combat & Mechanics Stress Test + final tuning
 
 ### Phase 14: Final Systems Verification & Bug Fixing
 **Goal:** Fix all remaining bugs (lore extraction, LanceDB episodic events, DuckDuckGo MCP, location sidebar, quick actions fallback) and verify every system described in docs/ works end-to-end with GLM-5 Turbo. Final QA pass with 4.5+ quality across all areas.
@@ -248,9 +254,9 @@ Plans:
 **Plans:** 3/3 plans complete
 
 Plans:
-- [ ] 14-01-PLAN.md -- Fix backend bugs (episodic vector, MCP spawn, quick actions fallback)
-- [ ] 14-02-PLAN.md -- Fix frontend/lore bugs (location sidebar, lore extraction resilience)
-- [ ] 14-03-PLAN.md -- E2E verification playtest with GLM-5 Turbo
+- [x] 14-01-PLAN.md -- Fix backend bugs (episodic vector, MCP spawn, quick actions fallback)
+- [x] 14-02-PLAN.md -- Fix frontend/lore bugs (location sidebar, lore extraction resilience)
+- [x] 14-03-PLAN.md -- E2E verification playtest with GLM-5 Turbo
 
 ### Phase 15: Systematic Mechanics Fix & Docs-Driven Verification
 **Goal:** Fix 6 gameplay-breaking bugs found in playtest (HP on Strong Hit, move_to missing, NPCs invisible, tool-call leaks, auto-checkpoint timing, HP=0 handling) with backend enforcement, then verify all mechanics from docs/ work correctly.
@@ -259,37 +265,39 @@ Plans:
 **Plans:** 3/3 plans complete
 
 Plans:
-- [ ] 15-01-PLAN.md -- Core mechanics fixes: HP guard, Storyteller move_to tool, NPC prompt instructions
-- [ ] 15-02-PLAN.md -- Safety nets: tool-call sanitization, reactive auto-checkpoint, HP=0 context injection
-- [ ] 15-03-PLAN.md -- Systematic verification playtest against all docs/ mechanics
+- [x] 15-01-PLAN.md -- Core mechanics fixes: HP guard, Storyteller move_to tool, NPC prompt instructions
+- [x] 15-02-PLAN.md -- Safety nets: tool-call sanitization, reactive auto-checkpoint, HP=0 context injection
+- [x] 15-03-PLAN.md -- Systematic verification playtest against all docs/ mechanics
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10 -> 11 -> 12 -> 13 -> 14 -> 15 -> 16 -> 17
+Phases execute in numeric order across the active roadmap: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10 -> 11 -> 12 -> 13 -> 14 -> 15 -> 16 -> 17 -> 23 -> 24 -> 1000
 
-Note: Phases 4, 9, 10, 11 have flexible ordering relative to later phases. Phase 4 can start after Phase 2. Phases 9-11 can run in any order after their dependencies are met.
+Note: Backlog phases (like 999.1) are tracked separately and are not part of the active execution order. Phase 4 can start after Phase 2. Phases 9-11 can run in any order after their dependencies are met.
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Engine Foundation | 0/2 | Not started | - |
-| 2. Turn Cycle | 2/2 | Complete   | 2026-03-18 |
-| 3. World State Mechanics | 3/3 | Complete   | 2026-03-18 |
-| 4. Story Control | 2/2 | Complete   | 2026-03-18 |
-| 5. Episodic Memory | 0/2 | Not started | - |
-| 6. NPC Agents | 0/2 | Not started | - |
-| 7. Reflection + Progression | 2/2 | Complete   | 2026-03-18 |
-| 8. World Engine | 2/2 | Complete   | 2026-03-18 |
-| 9. Persistence | 0/2 | Not started | - |
-| 10. Image Generation | 2/2 | Complete    | 2026-03-19 |
-| 11. Content Import | 2/2 | Complete    | 2026-03-19 |
-| 12. E2E QA & Bug Fixing | 5/5 | Complete    | 2026-03-19 |
-| 13. Gameplay Playtest & AI Tuning | 3/3 | Complete    | 2026-03-20 |
-| 14. Final Systems Verification | 3/3 | Complete    | 2026-03-20 |
-| 15. Systematic Mechanics Fix | 3/3 | Complete    | 2026-03-20 |
-| 16. NPC System QA | 3/3 | Complete    | 2026-03-20 |
-| 17. Unit Test Coverage | 5/5 | Complete   | 2026-03-21 |
-| 24. Worldgen Known IP Quality | 3/4 | Complete    | 2026-03-25 |
+| 1. Engine Foundation | 2/2 | Complete | 2026-03-18 |
+| 2. Turn Cycle | 2/2 | Complete | 2026-03-18 |
+| 3. World State Mechanics | 3/3 | Complete | 2026-03-18 |
+| 4. Story Control | 2/2 | Complete | 2026-03-18 |
+| 5. Episodic Memory | 2/2 | Complete | 2026-03-18 |
+| 6. NPC Agents | 2/2 | Complete | 2026-03-18 |
+| 7. Reflection + Progression | 2/2 | Complete | 2026-03-18 |
+| 8. World Engine | 2/2 | Complete | 2026-03-18 |
+| 9. Persistence | 2/2 | Complete | 2026-03-19 |
+| 10. Image Generation | 2/2 | Complete | 2026-03-19 |
+| 11. Content Import | 3/3 | Complete | 2026-03-19 |
+| 12. E2E QA & Bug Fixing | 5/5 | Complete | 2026-03-19 |
+| 13. Gameplay Playtest & AI Tuning | 3/3 | Complete | 2026-03-20 |
+| 14. Final Systems Verification | 3/3 | Complete | 2026-03-20 |
+| 15. Systematic Mechanics Fix | 3/3 | Complete | 2026-03-20 |
+| 16. NPC System QA | 3/3 | Complete | 2026-03-20 |
+| 17. Unit Test Coverage | 5/5 | Complete | 2026-03-21 |
+| 23. Unified Research & World Generation Pipeline | 2/2 | Complete | 2026-03-30 |
+| 24. Worldgen Known IP Quality | 4/4 | Complete | 2026-03-25 |
+| 25. Structured Divergence Interpretation | 1/3 | In Progress|  |
 
 ### Phase 16: NPC System QA — Three NPC Tiers + World Gen Integration
 
@@ -299,9 +307,9 @@ Note: Phases 4, 9, 10, 11 have flexible ordering relative to later phases. Phase
 **Plans:** 3/3 plans complete
 
 Plans:
-- [ ] 16-01-PLAN.md -- Scaffold NPC generation + DB integrity + NPC creation API modes
-- [ ] 16-02-PLAN.md -- World Review NPC tab display, editing, tier changes, duplicate warnings
-- [ ] 16-03-PLAN.md -- Gameplay NPC behavior: Key NPC ticks, spawn_npc, tier differentiation, off-screen sim
+- [x] 16-01-PLAN.md -- Scaffold NPC generation + DB integrity + NPC creation API modes
+- [x] 16-02-PLAN.md -- World Review NPC tab display, editing, tier changes, duplicate warnings
+- [x] 16-03-PLAN.md -- Gameplay NPC behavior: Key NPC ticks, spawn_npc, tier differentiation, off-screen sim
 
 ### Phase 17: Unit Test Coverage — real tests for untested backend and frontend modules, desloppify strict 95+
 
@@ -317,32 +325,16 @@ Plans:
 - [x] 17-04-PLAN.md -- Route tests: ai + images + character
 - [x] 17-05-PLAN.md -- Route tests: worldgen + desloppify ignore cleanup
 
-## Backlog
-
-### Phase 999.1: RAG-Inspired Improvements (BACKLOG)
-
-**Goal:** Применить паттерны из production-agentic-rag-course к WorldForge:
-1. **Document Grading для lore cards** — LLM оценивает релевантность lore card перед включением в промпт Judge/Storyteller, отсекает нерелевантные
-2. **Query Rewriting для episodic memory** — если semantic search не находит релевантные events, переформулировать запрос через LLM и повторить
-3. **Hybrid Search (BM25 + Vector)** — добавить keyword search через SQLite FTS5 к cosine similarity в LanceDB, объединить через Reciprocal Rank Fusion (RRF)
-4. **Input Guardrails** — отдельный LLM node для валидации действий игрока перед Judge (out-of-character, абсурдные, meta-gaming)
-
-**Source:** https://github.com/jamwithai/production-agentic-rag-course
-**Requirements:** TBD
-**Plans:** 0 plans
-
-Plans:
-- [ ] TBD (promote with /gsd:review-backlog when ready)
-
 ### Phase 23: Unified Research & World Generation Pipeline
 
 **Goal:** Single research pipeline with cached results, feeding both DNA and scaffold generation. AI evaluates research sufficiency before each generation step.
 **Requirements**: TBD
 **Depends on:** Phase 17
-**Plans:** 0 plans
+**Plans:** 2/2 plans complete
 
 Plans:
-- [ ] TBD (run /gsd:plan-phase 23 to break down)
+- [x] 23-01-PLAN.md -- Persist ipContext in campaign config
+- [x] 23-02-PLAN.md -- Research sufficiency check before scaffold steps
 
 ### Phase 24: Worldgen Known IP Quality
 
@@ -355,4 +347,20 @@ Plans:
 - [x] 24-01-PLAN.md -- Types + prompt utilities + sequential DNA generation
 - [x] 24-02-PLAN.md -- Premise step + locations step + factions step (plan+detail mini-calls)
 - [x] 24-03-PLAN.md -- NPCs step (key/supporting tiers) + lore extractor (IP grounding)
-- [ ] 24-04-PLAN.md -- Orchestrator wiring + scaffold-saver tier mapping + route schema updates
+- [x] 24-04-PLAN.md -- Orchestrator wiring + scaffold-saver tier mapping + route schema updates
+
+### Phase 25: Replace premise-override heuristics with structured divergence interpretation
+
+**Goal:** Known-IP world generation interprets the player's premise as canonical baseline plus structured divergence, then reuses that interpretation across DNA, scaffold, and lore generation without regressing Phase 24 canonical fidelity.
+**Requirements**: P25-01, P25-02, P25-03, P25-04, P25-05, P25-06
+**Depends on:** Phase 24
+**Plans:** 1/3 plans executed
+
+Plans:
+- [x] 25-01-PLAN.md -- Divergence contract, interpreter, cache/schema handoff
+- [ ] 25-02-PLAN.md -- Divergence-aware prompt contracts across DNA, scaffold, and lore
+- [ ] 25-03-PLAN.md -- Legacy override cleanup plus regression lock-in
+
+
+
+
