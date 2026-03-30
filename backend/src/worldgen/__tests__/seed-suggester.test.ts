@@ -369,6 +369,19 @@ describe("suggestSingleSeed", () => {
       role: fakeRole,
       category: "geography",
       ipContext: fakeIpContext,
+      premiseDivergence: {
+        mode: "canonical",
+        protagonistRole: {
+          kind: "canonical",
+          interpretation: "canonical",
+          canonicalCharacterName: null,
+          roleSummary: "Canon protagonist roles remain unchanged.",
+        },
+        preservedCanonFacts: ["Naruto Uzumaki remains the core protagonist of Konohagakure."],
+        changedCanonFacts: [],
+        currentStateDirectives: ["Keep the canon cast intact."],
+        ambiguityNotes: [],
+      },
     });
 
     const prompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>).prompt as string;

@@ -177,11 +177,13 @@ export async function suggestSingleSeed(
 ): Promise<string | string[]> {
   const isCultural = req.category === "culturalFlavor";
   const ipContext = req.ipContext ?? null;
+  const premiseDivergence = req.premiseDivergence
+    ?? await interpretPremiseDivergence(ipContext, req.premise, req.role);
   const ipBlock = buildIpContextBlock(ipContext);
-  const divergenceBlock = buildPremiseDivergenceBlock(req.premiseDivergence ?? null);
+  const divergenceBlock = buildPremiseDivergenceBlock(premiseDivergence);
   const knownIpContract = buildKnownIpGenerationContract(
     ipContext,
-    req.premiseDivergence ?? null,
+    premiseDivergence,
     `${req.category} DNA`,
   );
 
