@@ -49,6 +49,22 @@ const narutoContext: IpResearchContext = {
   source: "mcp",
 };
 
+const starWarsContext: IpResearchContext = {
+  franchise: "Star Wars",
+  keyFacts: [
+    "The Galactic Republic commands clone armies during the Clone Wars.",
+    "The Jedi Order serves as peacekeepers across the Republic.",
+    "Coruscant is the political capital of the Republic.",
+  ],
+  tonalNotes: ["space opera", "mythic conflict", "political intrigue"],
+  canonicalNames: {
+    locations: ["Coruscant", "Mustafar", "Utapau"],
+    factions: ["Galactic Republic", "Jedi Order", "Separatist Alliance"],
+    characters: ["Anakin Skywalker", "Obi-Wan Kenobi", "Palpatine", "Yoda"],
+  },
+  source: "mcp",
+};
+
 beforeEach(() => {
   mockGenerateObject.mockReset();
 });
@@ -114,6 +130,91 @@ describe("interpretPremiseDivergence", () => {
     expect(result?.protagonistRole.canonicalCharacterName).toBeNull();
     expect(result?.currentStateDirectives).toContain(
       "Keep the canon cast intact while introducing the player as a separate newcomer.",
+    );
+  });
+
+  it("captures relationship divergence without suppressing unrelated Naruto canon", async () => {
+    mockGenerateObject.mockResolvedValueOnce({
+      object: {
+        mode: "diverged",
+        protagonistRole: {
+          kind: "canonical",
+          interpretation: "unknown",
+          canonicalCharacterName: null,
+          roleSummary: "Canon protagonist roles remain intact.",
+        },
+        preservedCanonFacts: [
+          "Naruto Uzumaki remains the Nine-Tails jinchuriki of Konohagakure.",
+          "Konohagakure is one of the Five Great Shinobi Villages.",
+        ],
+        changedCanonFacts: [
+          "Sakura Haruno trained under Orochimaru instead of following Tsunade's apprenticeship path.",
+        ],
+        currentStateDirectives: [
+          "Keep the wider Naruto cast and village structure intact.",
+          "Reflect Orochimaru's influence on Sakura's present relationships, tactics, and reputation.",
+        ],
+        ambiguityNotes: [],
+      },
+    });
+
+    const result = await interpretPremiseDivergence(
+      narutoContext,
+      "Naruto, but Sakura was trained by Orochimaru.",
+      fakeRole as never,
+    );
+
+    expect(result?.mode).toBe("diverged");
+    expect(result?.protagonistRole.interpretation).toBe("unknown");
+    expect(result?.changedCanonFacts).toContain(
+      "Sakura Haruno trained under Orochimaru instead of following Tsunade's apprenticeship path.",
+    );
+    expect(result?.currentStateDirectives).toContain(
+      "Keep the wider Naruto cast and village structure intact.",
+    );
+  });
+
+  it("captures Order 66 failure as a political divergence while preserving Star Wars canon baseline", async () => {
+    mockGenerateObject.mockResolvedValueOnce({
+      object: {
+        mode: "diverged",
+        protagonistRole: {
+          kind: "canonical",
+          interpretation: "canonical",
+          canonicalCharacterName: null,
+          roleSummary: "The saga's core protagonists remain canon figures.",
+        },
+        preservedCanonFacts: [
+          "Coruscant remains the political capital of the Republic.",
+          "The Galactic Republic still commands clone armies during the Clone Wars.",
+        ],
+        changedCanonFacts: [
+          "Order 66 failed, so the Jedi Order remains an organized military and political force.",
+          "Palpatine cannot consolidate the Empire through the purge.",
+        ],
+        currentStateDirectives: [
+          "Preserve canonical planets, institutions, and major characters unless the failed purge would directly alter them.",
+          "Describe the Republic and Jedi as embattled but still publicly active powers.",
+        ],
+        ambiguityNotes: [],
+      },
+    });
+
+    const result = await interpretPremiseDivergence(
+      starWarsContext,
+      "Star Wars, but Order 66 failed.",
+      fakeRole as never,
+    );
+
+    expect(result?.mode).toBe("diverged");
+    expect(result?.preservedCanonFacts).toContain(
+      "Coruscant remains the political capital of the Republic.",
+    );
+    expect(result?.changedCanonFacts).toContain(
+      "Order 66 failed, so the Jedi Order remains an organized military and political force.",
+    );
+    expect(result?.currentStateDirectives).toContain(
+      "Describe the Republic and Jedi as embattled but still publicly active powers.",
     );
   });
 });

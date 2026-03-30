@@ -26,6 +26,22 @@ const fakeIpContext: IpResearchContext = {
   source: "mcp",
 };
 
+const starWarsIpContext: IpResearchContext = {
+  franchise: "Star Wars",
+  keyFacts: [
+    "The Galactic Republic commands clone armies during the Clone Wars.",
+    "The Jedi Order serves as peacekeepers across the Republic.",
+    "Coruscant is the political capital of the Republic.",
+  ],
+  tonalNotes: ["space opera", "mythic conflict"],
+  canonicalNames: {
+    locations: ["Coruscant", "Mustafar", "Utapau"],
+    factions: ["Galactic Republic", "Jedi Order", "Separatist Alliance"],
+    characters: ["Anakin Skywalker", "Obi-Wan Kenobi", "Palpatine", "Yoda"],
+  },
+  source: "mcp",
+};
+
 beforeEach(() => {
   mockGenerateObject.mockReset();
 });
@@ -242,6 +258,47 @@ describe("suggestWorldSeeds (sequential DNA)", () => {
     );
   });
 
+  it("grounds political divergence prompts in preserved Star Wars canon instead of replacing the setting wholesale", async () => {
+    setupSequentialMocks();
+
+    await suggestWorldSeeds({
+      premise: "Star Wars, but Order 66 failed.",
+      role: fakeRole,
+      ipContext: starWarsIpContext,
+      premiseDivergence: {
+        mode: "diverged",
+        protagonistRole: {
+          kind: "canonical",
+          interpretation: "canonical",
+          canonicalCharacterName: null,
+          roleSummary: "Saga protagonists remain canon figures.",
+        },
+        preservedCanonFacts: [
+          "Coruscant remains the political capital of the Republic.",
+          "The Galactic Republic still commands clone armies during the Clone Wars.",
+        ],
+        changedCanonFacts: [
+          "Order 66 failed, so the Jedi Order remains an organized political and military force.",
+        ],
+        currentStateDirectives: [
+          "Keep canonical planets, factions, and leaders unless the failed purge would directly change them.",
+          "Describe the Republic and Jedi as embattled but still publicly active powers.",
+        ],
+        ambiguityNotes: [],
+      },
+    });
+
+    const firstCallPrompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>)
+      .prompt as string;
+    expect(firstCallPrompt).toContain("Coruscant remains the political capital of the Republic.");
+    expect(firstCallPrompt).toContain(
+      "Order 66 failed, so the Jedi Order remains an organized political and military force.",
+    );
+    expect(firstCallPrompt).toContain(
+      "Keep canonical planets, factions, and leaders unless the failed purge would directly change them.",
+    );
+  });
+
   it("original world premise includes original world instruction", async () => {
     setupSequentialMocks();
 
@@ -317,5 +374,48 @@ describe("suggestSingleSeed", () => {
     const prompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>).prompt as string;
     expect(prompt).toContain("FRANCHISE REFERENCE");
     expect(prompt).toContain("Naruto");
+  });
+
+  it("computes premiseDivergence for known-IP single-seed prompts when callers omit the cached artifact", async () => {
+    mockGenerateObject
+      .mockResolvedValueOnce({
+        object: {
+          mode: "coexisting",
+          protagonistRole: {
+            kind: "custom",
+            interpretation: "outsider",
+            canonicalCharacterName: null,
+            roleSummary: "The player arrives as a newcomer alongside the canon cast.",
+          },
+          preservedCanonFacts: ["Naruto Uzumaki remains the Nine-Tails jinchuriki of Konohagakure."],
+          changedCanonFacts: [],
+          currentStateDirectives: [
+            "Keep the canon cast intact while introducing the player as a separate newcomer.",
+          ],
+          ambiguityNotes: [],
+        },
+      })
+      .mockResolvedValueOnce({ object: { value: "Konohagakure remains the central shinobi hub." } });
+
+    await suggestSingleSeed({
+      premise: "I arrive in the Naruto world as an outsider.",
+      role: fakeRole,
+      category: "geography",
+      ipContext: {
+        ...fakeIpContext,
+        canonicalNames: {
+          locations: ["Konohagakure"],
+          factions: ["Konohagakure"],
+          characters: ["Naruto Uzumaki", "Sasuke Uchiha", "Sakura Haruno"],
+        },
+      },
+    });
+
+    expect(mockGenerateObject).toHaveBeenCalledTimes(2);
+    const prompt = (mockGenerateObject.mock.calls[1]![0] as Record<string, unknown>).prompt as string;
+    expect(prompt).toContain("CURRENT WORLD-STATE DIRECTIVES");
+    expect(prompt).toContain(
+      "Keep the canon cast intact while introducing the player as a separate newcomer.",
+    );
   });
 });

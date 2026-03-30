@@ -511,6 +511,37 @@ describe("premiseDivergence persistence", () => {
     expect(loadPremiseDivergence("test-id")).toEqual(premiseDivergence);
     expect(loadIpContext("test-id")).toEqual(cachedIpContext);
   });
+
+  it("readCampaignConfig preserves legacy excludedCharacters beside cached premiseDivergence", () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "readFileSync").mockReturnValue(
+      JSON.stringify({
+        name: "Test",
+        premise: "P",
+        createdAt: 1000,
+        ipContext: {
+          ...cachedIpContext,
+          excludedCharacters: ["Dr. Kel"],
+        },
+        premiseDivergence,
+      })
+    );
+
+    expect(readCampaignConfig("test-id")).toEqual({
+      name: "Test",
+      premise: "P",
+      createdAt: 1000,
+      updatedAt: 1000,
+      generationComplete: false,
+      ipContext: {
+        ...cachedIpContext,
+        excludedCharacters: ["Dr. Kel"],
+      },
+      premiseDivergence,
+      currentTick: undefined,
+      seeds: undefined,
+    });
+  });
 });
 
 describe("getActiveCampaign", () => {

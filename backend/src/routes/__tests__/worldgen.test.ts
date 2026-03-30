@@ -338,6 +338,81 @@ describe("POST /api/worldgen/suggest-seed", () => {
 // POST /api/worldgen/generate
 // ---------------------------------------------------------------------------
 describe("POST /api/worldgen/generate", () => {
+  it("computes premiseDivergence once during generate and reuses the cached artifact during later regeneration", async () => {
+    const ipContext = {
+      franchise: "Voices of the Void",
+      keyFacts: ["The signal base sits in a remote valley."],
+      tonalNotes: ["lonely", "paranormal"],
+      canonicalNames: {
+        locations: ["Signal Base"],
+        factions: ["Research Staff"],
+        characters: ["Dr. Kel", "Maxwell"],
+      },
+      source: "mcp" as const,
+    };
+    const computedPremiseDivergence = {
+      mode: "diverged",
+      protagonistRole: {
+        kind: "custom",
+        interpretation: "replacement",
+        canonicalCharacterName: "Dr. Kel",
+        roleSummary: "The player replaces Dr. Kel as the station operator.",
+      },
+      preservedCanonFacts: ["The signal base remains active."],
+      changedCanonFacts: ["Dr. Kel is no longer the active protagonist."],
+      currentStateDirectives: ["Treat the player as the newly arrived operator."],
+      ambiguityNotes: [],
+    };
+
+    let cachedPremiseDivergence: typeof computedPremiseDivergence | null = null;
+    mockedLoadIpContext.mockReturnValue(ipContext as any);
+    mockedLoadPremiseDivergence.mockImplementation(() => cachedPremiseDivergence as any);
+    mockedSavePremiseDivergence.mockImplementation((_, divergence) => {
+      cachedPremiseDivergence = divergence as typeof computedPremiseDivergence;
+    });
+    mockedInterpretPremiseDivergence.mockResolvedValue(computedPremiseDivergence as any);
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "A strange signals campaign",
+        locations: [
+          { name: "Signal Base", description: "Station", tags: [], isStarting: true, connectedTo: [] },
+        ],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: null,
+    } as any);
+    mockedGenerateRefinedPremise.mockResolvedValue("Cached divergence reuse" as any);
+
+    const generateRes = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID, ipContext }),
+    });
+
+    expect(generateRes.status).toBe(200);
+    await generateRes.text();
+    expect(mockedInterpretPremiseDivergence).toHaveBeenCalledTimes(1);
+    expect(mockedSavePremiseDivergence).toHaveBeenCalledWith(CAMPAIGN_ID, computedPremiseDivergence);
+    expect(cachedPremiseDivergence).toBe(computedPremiseDivergence);
+
+    const regenerateRes = await app.request("/api/worldgen/regenerate-section", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID, section: "premise" }),
+    });
+
+    expect(regenerateRes.status).toBe(200);
+    expect(await regenerateRes.json()).toEqual({ refinedPremise: "Cached divergence reuse" });
+    expect(mockedGenerateRefinedPremise).toHaveBeenCalledWith(
+      expect.objectContaining({ premiseDivergence: computedPremiseDivergence }),
+      expect.objectContaining({ franchise: "Voices of the Void" }),
+      undefined,
+    );
+    expect(mockedInterpretPremiseDivergence).toHaveBeenCalledTimes(1);
+  });
+
   it("accepts premiseDivergence from the request body and passes it through to generation/cache", async () => {
     const premiseDivergence = {
       mode: "diverged",

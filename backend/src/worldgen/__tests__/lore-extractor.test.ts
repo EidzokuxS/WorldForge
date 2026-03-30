@@ -137,4 +137,62 @@ describe("extractLoreCards", () => {
     expect(prompt).toContain("CURRENT WORLD-STATE DIRECTIVES");
     expect(prompt).toContain("Keep unrelated Leaf Village canon intact.");
   });
+
+  it("keeps canonical Star Wars institutions explicit when Order 66 fails", async () => {
+    mockGenerateObject.mockResolvedValueOnce({
+      object: { loreCards: fakeLoreCards },
+    });
+
+    await extractLoreCards(
+      fakeScaffold,
+      fakeRole,
+      undefined,
+      {
+        franchise: "Star Wars",
+        keyFacts: [
+          "The Galactic Republic commands clone armies during the Clone Wars.",
+          "The Jedi Order serves as peacekeepers across the Republic.",
+          "Coruscant is the political capital of the Republic.",
+        ],
+        tonalNotes: ["space opera"],
+        canonicalNames: {
+          locations: ["Coruscant", "Mustafar", "Utapau"],
+          factions: ["Galactic Republic", "Jedi Order", "Separatist Alliance"],
+          characters: ["Anakin Skywalker", "Obi-Wan Kenobi", "Palpatine", "Yoda"],
+        },
+        source: "mcp",
+      },
+      {
+        mode: "diverged",
+        protagonistRole: {
+          kind: "canonical",
+          interpretation: "canonical",
+          canonicalCharacterName: null,
+          roleSummary: "Saga protagonists remain canon figures.",
+        },
+        preservedCanonFacts: [
+          "Coruscant remains the political capital of the Republic.",
+          "The Galactic Republic still commands clone armies during the Clone Wars.",
+        ],
+        changedCanonFacts: [
+          "Order 66 failed, so the Jedi Order remains an organized political and military force.",
+        ],
+        currentStateDirectives: [
+          "Keep canonical planets, factions, and leaders unless the failed purge would directly change them.",
+          "Describe the Republic and Jedi as embattled but still publicly active powers.",
+        ],
+        ambiguityNotes: [],
+      },
+    );
+
+    const prompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>)
+      .prompt as string;
+    expect(prompt).toContain("Coruscant remains the political capital of the Republic.");
+    expect(prompt).toContain(
+      "Order 66 failed, so the Jedi Order remains an organized political and military force.",
+    );
+    expect(prompt).toContain(
+      "Keep canonical planets, factions, and leaders unless the failed purge would directly change them.",
+    );
+  });
 });
