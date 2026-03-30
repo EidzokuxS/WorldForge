@@ -9,6 +9,7 @@ vi.mock("../../worldgen/index.js", () => ({
   rollSeed: vi.fn(),
   suggestWorldSeeds: vi.fn(),
   suggestSingleSeed: vi.fn(),
+  applyPremiseCharacterOverrides: vi.fn((ctx: unknown) => ctx),
   generateWorldScaffold: vi.fn(),
   generateRefinedPremiseStep: vi.fn(),
   generateLocationsStep: vi.fn(),
@@ -34,6 +35,8 @@ vi.mock("../../campaign/index.js", () => ({
   markGenerationComplete: vi.fn(),
   saveIpContext: vi.fn(),
   loadIpContext: vi.fn(() => null),
+  savePremiseDivergence: vi.fn(),
+  loadPremiseDivergence: vi.fn(() => null),
   getActiveCampaign: vi.fn(),
 }));
 
@@ -75,6 +78,7 @@ import {
   rollSeed,
   suggestWorldSeeds,
   suggestSingleSeed,
+  generateWorldScaffold,
   saveScaffoldToDb,
   extractLoreCards,
   generateRefinedPremiseStep,
@@ -87,7 +91,14 @@ import {
   classifyEntries,
   importClassifiedEntries,
 } from "../../worldgen/worldbook-importer.js";
-import { markGenerationComplete, getActiveCampaign } from "../../campaign/index.js";
+import {
+  markGenerationComplete,
+  getActiveCampaign,
+  saveIpContext,
+  loadIpContext,
+  savePremiseDivergence,
+  loadPremiseDivergence,
+} from "../../campaign/index.js";
 import { deleteCampaignLore, storeLoreCards } from "../../vectors/lore-cards.js";
 import { loadSettings } from "../../settings/index.js";
 import { resolveRoleModel } from "../../ai/index.js";
@@ -99,10 +110,15 @@ const mockedRollWorldSeeds = vi.mocked(rollWorldSeeds);
 const mockedRollSeed = vi.mocked(rollSeed);
 const mockedSuggestWorldSeeds = vi.mocked(suggestWorldSeeds);
 const mockedSuggestSingleSeed = vi.mocked(suggestSingleSeed);
+const mockedGenerateWorldScaffold = vi.mocked(generateWorldScaffold);
 const mockedSaveScaffoldToDb = vi.mocked(saveScaffoldToDb);
 const mockedExtractLoreCards = vi.mocked(extractLoreCards);
 const mockedMarkGenComplete = vi.mocked(markGenerationComplete);
 const mockedGetActiveCampaign = vi.mocked(getActiveCampaign);
+const mockedSaveIpContext = vi.mocked(saveIpContext);
+const mockedLoadIpContext = vi.mocked(loadIpContext);
+const mockedSavePremiseDivergence = vi.mocked(savePremiseDivergence);
+const mockedLoadPremiseDivergence = vi.mocked(loadPremiseDivergence);
 const mockedDeleteLore = vi.mocked(deleteCampaignLore);
 const mockedStoreLore = vi.mocked(storeLoreCards);
 const mockedLoadSettings = vi.mocked(loadSettings);
@@ -228,7 +244,7 @@ describe("POST /api/worldgen/roll-seed", () => {
 // ---------------------------------------------------------------------------
 describe("POST /api/worldgen/suggest-seeds", () => {
   it("calls suggestWorldSeeds with premise and returns result", async () => {
-    const suggested = { geography: "Floating islands", centralConflict: "War" };
+    const suggested = { seeds: { geography: "Floating islands", centralConflict: "War" } };
     mockedSuggestWorldSeeds.mockResolvedValue(suggested as any);
 
     const res = await app.request("/api/worldgen/suggest-seeds", {
@@ -245,16 +261,21 @@ describe("POST /api/worldgen/suggest-seeds", () => {
     );
   });
 
-  it("returns 400 for empty premise", async () => {
+  it("accepts empty premise and lets the route apply its fallback premise", async () => {
+    mockedSuggestWorldSeeds.mockResolvedValue({ seeds: { geography: "Ruins" } } as any);
+
     const res = await app.request("/api/worldgen/suggest-seeds", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ premise: "   " }),
     });
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toHaveProperty("error");
+    expect(body.geography).toBe("Ruins");
+    expect(mockedSuggestWorldSeeds).toHaveBeenCalledWith(
+      expect.objectContaining({ premise: "An original fantasy world" })
+    );
   });
 });
 
@@ -276,6 +297,189 @@ describe("POST /api/worldgen/suggest-seed", () => {
     expect(body).toEqual({ category: "geography", value: "Great Desert" });
     expect(mockedSuggestSingleSeed).toHaveBeenCalledWith(
       expect.objectContaining({ premise: "Arid world", category: "geography" })
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/worldgen/generate
+// ---------------------------------------------------------------------------
+describe("POST /api/worldgen/generate", () => {
+  it("accepts premiseDivergence from the request body and passes it through to generation/cache", async () => {
+    const premiseDivergence = {
+      mode: "diverged",
+      protagonistRole: {
+        kind: "custom",
+        interpretation: "replacement",
+        canonicalCharacterName: "Dr. Kel",
+        roleSummary: "The player's custom character replaces Dr. Kel as the active station operator.",
+      },
+      preservedCanonFacts: ["The signal base remains active."],
+      changedCanonFacts: ["Dr. Kel is no longer the active protagonist."],
+      currentStateDirectives: ["Treat the player as the newly arrived operator."],
+      ambiguityNotes: [],
+    };
+
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "A strange signals campaign",
+        locations: [
+          { name: "Signal Base", description: "Station", tags: [], isStarting: true, connectedTo: [] },
+        ],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID, premiseDivergence }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+
+    expect(mockedSavePremiseDivergence).toHaveBeenCalledWith(CAMPAIGN_ID, premiseDivergence);
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({ campaignId: CAMPAIGN_ID, premiseDivergence }),
+      expect.any(Function),
+    );
+  });
+
+  it("passes full ipContext from request body into generation and saves it to cache", async () => {
+    const ipContext = {
+      franchise: "Naruto",
+      keyFacts: ["Konohagakure is a hidden village."],
+      tonalNotes: ["Shonen action"],
+      canonicalNames: {
+        locations: ["Konohagakure"],
+        factions: ["Akatsuki"],
+        characters: ["Naruto Uzumaki"],
+      },
+      excludedCharacters: ["Naruto Uzumaki"],
+      source: "mcp" as const,
+    };
+
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "A shinobi world",
+        locations: [
+          { name: "Konohagakure", description: "Village", tags: [], isStarting: true, connectedTo: [] },
+        ],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: ipContext,
+    } as any);
+    mockedSaveScaffoldToDb.mockReturnValue(undefined as any);
+    mockedMarkGenComplete.mockReturnValue(undefined as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID, ipContext }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/event-stream");
+    await res.text();
+
+    expect(mockedSaveIpContext).toHaveBeenCalledWith(CAMPAIGN_ID, ipContext);
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({ campaignId: CAMPAIGN_ID, ipContext }),
+      expect.any(Function),
+    );
+  });
+
+  it("loads cached ipContext when request body omits it and saves enriched context back", async () => {
+    const cachedIpContext = {
+      franchise: "Naruto",
+      keyFacts: ["Konohagakure is a hidden village."],
+      tonalNotes: ["Shonen action"],
+      canonicalNames: {
+        locations: ["Konohagakure"],
+      },
+      source: "mcp" as const,
+    };
+    const enrichedIpContext = {
+      ...cachedIpContext,
+      keyFacts: [...cachedIpContext.keyFacts, "Akatsuki is a rogue shinobi organization."],
+    };
+
+    mockedLoadIpContext.mockReturnValue(cachedIpContext as any);
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "A shinobi world",
+        locations: [
+          { name: "Konohagakure", description: "Village", tags: [], isStarting: true, connectedTo: [] },
+        ],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext,
+    } as any);
+    mockedSaveScaffoldToDb.mockReturnValue(undefined as any);
+    mockedMarkGenComplete.mockReturnValue(undefined as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+
+    expect(mockedLoadIpContext).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({ ipContext: cachedIpContext }),
+      expect.any(Function),
+    );
+    expect(mockedSaveIpContext).toHaveBeenCalledWith(CAMPAIGN_ID, enrichedIpContext);
+  });
+
+  it("remains compatible with cached ipContext-only generation requests", async () => {
+    mockedLoadIpContext.mockReturnValue({
+      franchise: "Naruto",
+      keyFacts: ["Konohagakure is a hidden village."],
+      tonalNotes: ["Shonen action"],
+      source: "mcp",
+    } as any);
+    mockedLoadPremiseDivergence.mockReturnValue(null as any);
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "A shinobi world",
+        locations: [
+          { name: "Konohagakure", description: "Village", tags: [], isStarting: true, connectedTo: [] },
+        ],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+
+    expect(mockedLoadIpContext).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({
+        campaignId: CAMPAIGN_ID,
+        ipContext: expect.objectContaining({ franchise: "Naruto" }),
+      }),
+      expect.any(Function),
     );
   });
 });

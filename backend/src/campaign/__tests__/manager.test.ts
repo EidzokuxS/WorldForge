@@ -74,6 +74,10 @@ import {
   markGenerationComplete,
   incrementTick,
   getActiveCampaign,
+  saveIpContext,
+  loadIpContext,
+  savePremiseDivergence,
+  loadPremiseDivergence,
 } from "../manager.js";
 import { closeDb } from "../../db/index.js";
 import { openVectorDb, closeVectorDb } from "../../vectors/index.js";
@@ -133,8 +137,15 @@ describe("createCampaign", () => {
     await expect(createCampaign("   ", "premise")).rejects.toThrow("name is required");
   });
 
-  it("rejects empty premise with 400", async () => {
-    await expect(createCampaign("Name", "")).rejects.toThrow("premise is required");
+  it("accepts empty premise because worldbook can provide the context", async () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "mkdirSync").mockImplementation(() => "");
+    vi.spyOn(fs, "writeFileSync").mockImplementation(() => {});
+
+    await expect(createCampaign("Name", "")).resolves.toMatchObject({
+      name: "Name",
+      premise: "",
+    });
   });
 
   it("creates campaign directory and vectors dir", async () => {
@@ -355,6 +366,150 @@ describe("incrementTick", () => {
     );
     const data = JSON.parse(configCall![1] as string);
     expect(data.currentTick).toBe(6);
+  });
+});
+
+describe("ipContext persistence", () => {
+  it("saveIpContext writes ipContext into config.json", () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "readFileSync").mockReturnValue(
+      JSON.stringify({ name: "Test", premise: "P", createdAt: 1000 })
+    );
+    const writeSpy = vi.spyOn(fs, "writeFileSync").mockImplementation(() => {});
+
+    saveIpContext("test-id", {
+      franchise: "Naruto",
+      keyFacts: ["Konohagakure is a hidden village."],
+      tonalNotes: ["Shonen action"],
+      canonicalNames: {
+        locations: ["Konohagakure"],
+        factions: ["Akatsuki"],
+        characters: ["Naruto Uzumaki"],
+      },
+      excludedCharacters: ["Naruto Uzumaki"],
+      source: "mcp",
+    });
+
+    const configCall = writeSpy.mock.calls.find(
+      (c) => typeof c[0] === "string" && c[0].includes("config.json")
+    );
+    expect(configCall).toBeDefined();
+    const data = JSON.parse(configCall![1] as string);
+    expect(data.ipContext).toEqual({
+      franchise: "Naruto",
+      keyFacts: ["Konohagakure is a hidden village."],
+      tonalNotes: ["Shonen action"],
+      canonicalNames: {
+        locations: ["Konohagakure"],
+        factions: ["Akatsuki"],
+        characters: ["Naruto Uzumaki"],
+      },
+      excludedCharacters: ["Naruto Uzumaki"],
+      source: "mcp",
+    });
+  });
+
+  it("loadIpContext returns cached ipContext when present", () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "readFileSync").mockReturnValue(
+      JSON.stringify({
+        name: "Test",
+        premise: "P",
+        createdAt: 1000,
+        ipContext: {
+          franchise: "Naruto",
+          keyFacts: ["Konohagakure is a hidden village."],
+          tonalNotes: ["Shonen action"],
+          canonicalNames: {
+            locations: ["Konohagakure"],
+            factions: ["Akatsuki"],
+            characters: ["Naruto Uzumaki"],
+          },
+          excludedCharacters: ["Naruto Uzumaki"],
+          source: "mcp",
+        },
+      })
+    );
+
+    expect(loadIpContext("test-id")).toEqual({
+      franchise: "Naruto",
+      keyFacts: ["Konohagakure is a hidden village."],
+      tonalNotes: ["Shonen action"],
+      canonicalNames: {
+        locations: ["Konohagakure"],
+        factions: ["Akatsuki"],
+        characters: ["Naruto Uzumaki"],
+      },
+      excludedCharacters: ["Naruto Uzumaki"],
+      source: "mcp",
+    });
+  });
+});
+
+describe("premiseDivergence persistence", () => {
+  const cachedIpContext = {
+    franchise: "Voices of the Void",
+    keyFacts: ["The signal base sits in a remote valley."],
+    tonalNotes: ["lonely", "paranormal"],
+    canonicalNames: {
+      locations: ["Signal Base"],
+      factions: ["Research Staff"],
+      characters: ["Dr. Kel"],
+    },
+    source: "mcp" as const,
+  };
+
+  const premiseDivergence = {
+    mode: "diverged" as const,
+    protagonistRole: {
+      kind: "custom" as const,
+      interpretation: "replacement" as const,
+      canonicalCharacterName: "Dr. Kel",
+      roleSummary: "The player's custom protagonist replaces Dr. Kel as the active station operator.",
+    },
+    preservedCanonFacts: ["The signal base still operates in the same remote valley."],
+    changedCanonFacts: ["Dr. Kel is not the active protagonist in the current campaign state."],
+    currentStateDirectives: ["Treat the custom protagonist as the newly arrived operator handling anomalies."],
+    ambiguityNotes: [],
+  };
+
+  it("savePremiseDivergence writes premiseDivergence beside legacy ipContext without mutating ipContext", () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "readFileSync").mockReturnValue(
+      JSON.stringify({
+        name: "Test",
+        premise: "P",
+        createdAt: 1000,
+        ipContext: cachedIpContext,
+      })
+    );
+    const writeSpy = vi.spyOn(fs, "writeFileSync").mockImplementation(() => {});
+
+    savePremiseDivergence("test-id", premiseDivergence);
+
+    const configCall = writeSpy.mock.calls.find(
+      (c) => typeof c[0] === "string" && c[0].includes("config.json")
+    );
+    expect(configCall).toBeDefined();
+    const data = JSON.parse(configCall![1] as string);
+    expect(data.ipContext).toEqual(cachedIpContext);
+    expect(data.premiseDivergence).toEqual(premiseDivergence);
+  });
+
+  it("loadPremiseDivergence returns cached divergence when present", () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "readFileSync").mockReturnValue(
+      JSON.stringify({
+        name: "Test",
+        premise: "P",
+        createdAt: 1000,
+        ipContext: cachedIpContext,
+        premiseDivergence,
+      })
+    );
+
+    expect(loadPremiseDivergence("test-id")).toEqual(premiseDivergence);
+    expect(loadIpContext("test-id")).toEqual(cachedIpContext);
   });
 });
 
