@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockGenerateObject = vi.fn();
 
-vi.mock("ai", () => ({
-  generateObject: (...args: unknown[]) => mockGenerateObject(...args),
+vi.mock("../../ai/generate-object-safe.js", () => ({
+  safeGenerateObject: (...args: unknown[]) => mockGenerateObject(...args),
 }));
 
 vi.mock("../../ai/index.js", () => ({
@@ -65,6 +65,7 @@ describe("suggestWorldSeeds (sequential DNA)", () => {
         wildcard: "Bijuu sealed in hosts",
       },
       ipContext: null,
+      premiseDivergence: null,
     });
   });
 
@@ -112,14 +113,80 @@ describe("suggestWorldSeeds (sequential DNA)", () => {
   });
 
   it("known IP premise includes franchise name and canonical instruction", async () => {
+    mockGenerateObject.mockResolvedValueOnce({
+      object: {
+        mode: "canonical",
+        protagonistRole: {
+          kind: "canonical",
+          interpretation: "canonical",
+          canonicalCharacterName: null,
+          roleSummary: "The canon protagonist slot is unchanged.",
+        },
+        preservedCanonFacts: ["Naruto Uzumaki remains the canon protagonist of Konohagakure."],
+        changedCanonFacts: [],
+        currentStateDirectives: ["Keep the canon cast intact."],
+        ambiguityNotes: [],
+      },
+    });
     setupSequentialMocks();
 
     await suggestWorldSeeds({ premise: "Naruto world", role: fakeRole, ipContext: fakeIpContext });
 
-    // Check first call has IP context
-    const firstCallPrompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>).prompt as string;
-    expect(firstCallPrompt).toContain("Naruto");
-    expect(firstCallPrompt).toContain("canonical");
+    // Call 0 is premise override analysis, call 1 is the first DNA generation prompt.
+    const firstGenerationPrompt = (mockGenerateObject.mock.calls[1]![0] as Record<string, unknown>).prompt as string;
+    expect(firstGenerationPrompt).toContain("Naruto");
+    expect(firstGenerationPrompt).toContain("canonical");
+  });
+
+  it("returns structured premiseDivergence without mutating canonical ipContext", async () => {
+    mockGenerateObject.mockResolvedValueOnce({
+      object: {
+        mode: "diverged",
+        protagonistRole: {
+          kind: "custom",
+          interpretation: "replacement",
+          canonicalCharacterName: "Dr. Kel",
+          roleSummary: "The player's custom character replaces Dr. Kel as the active station operator.",
+        },
+        preservedCanonFacts: ["The signal base remains active."],
+        changedCanonFacts: ["Dr. Kel is no longer the active protagonist."],
+        currentStateDirectives: ["Treat the player as the newly arrived operator."],
+        ambiguityNotes: [],
+      },
+    });
+    setupSequentialMocks();
+
+    const ipContext = {
+      franchise: "Voices of the Void",
+      keyFacts: [
+        "Dr. Kel runs the station.",
+        "Maxwell handles supply runs.",
+      ],
+      tonalNotes: ["weird science"],
+      canonicalNames: {
+        locations: ["Signal Base"],
+        factions: ["Research Staff"],
+        characters: ["Dr. Kel", "Maxwell"],
+      },
+      source: "llm" as const,
+    };
+
+    const result = await suggestWorldSeeds({
+      premise: "Voices of the Void, but I'm playing with my own char instead off Dr Kel",
+      role: fakeRole,
+      ipContext,
+    });
+
+    expect(result.premiseDivergence).toMatchObject({
+      mode: "diverged",
+      protagonistRole: {
+        interpretation: "replacement",
+        canonicalCharacterName: "Dr. Kel",
+      },
+    });
+    expect(result.ipContext).toEqual(ipContext);
+    expect(result.ipContext?.canonicalNames?.characters).toEqual(["Dr. Kel", "Maxwell"]);
+    expect(result.ipContext?.keyFacts).toContain("Dr. Kel runs the station.");
   });
 
   it("original world premise includes original world instruction", async () => {

@@ -4,7 +4,8 @@ import { createModel } from "../ai/index.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import { clampTokens } from "../lib/index.js";
 import type { SeedCategory } from "./seed-roller.js";
-import type { IpResearchContext } from "./ip-researcher.js";
+import type { IpResearchContext, PremiseDivergence } from "@worldforge/shared";
+import { interpretPremiseDivergence } from "./premise-divergence.js";
 import { buildIpContextBlock, buildStopSlopRules } from "./scaffold-steps/prompt-utils.js";
 
 // ---------------------------------------------------------------------------
@@ -16,6 +17,7 @@ export interface SuggestSeedsRequest {
   name?: string;
   role: ResolvedRole;
   ipContext?: IpResearchContext | null;
+  premiseDivergence?: PremiseDivergence | null;
   research?: { enabled: boolean; searchProvider?: string; braveApiKey?: string; zaiApiKey?: string; maxSearchSteps?: number };
 }
 
@@ -75,8 +77,14 @@ const DNA_CATEGORIES: ReadonlyArray<{ key: SeedCategory; label: string }> = [
 
 export async function suggestWorldSeeds(
   req: SuggestSeedsRequest
-): Promise<{ seeds: SuggestedSeeds; ipContext: IpResearchContext | null }> {
+): Promise<{
+  seeds: SuggestedSeeds;
+  ipContext: IpResearchContext | null;
+  premiseDivergence: PremiseDivergence | null;
+}> {
   const ipContext = req.ipContext ?? null;
+  const premiseDivergence = req.premiseDivergence
+    ?? await interpretPremiseDivergence(ipContext, req.premise, req.role);
   const results: Partial<Record<SeedCategory, DnaCategoryResult>> = {};
   const accumulated: string[] = [];
 
@@ -145,7 +153,7 @@ ${buildStopSlopRules()}`;
     wildcard: results.wildcard!.value as string,
   };
 
-  return { seeds, ipContext };
+  return { seeds, ipContext, premiseDivergence };
 }
 
 // ---------------------------------------------------------------------------
@@ -153,7 +161,11 @@ ${buildStopSlopRules()}`;
 // ---------------------------------------------------------------------------
 
 export async function suggestSingleSeed(
-  req: SuggestSeedsRequest & { category: SeedCategory; ipContext?: IpResearchContext | null }
+  req: SuggestSeedsRequest & {
+    category: SeedCategory;
+    ipContext?: IpResearchContext | null;
+    premiseDivergence?: PremiseDivergence | null;
+  }
 ): Promise<string | string[]> {
   const isCultural = req.category === "culturalFlavor";
   const ipContext = req.ipContext ?? null;

@@ -1,5 +1,7 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
+import type { IpResearchContext, PremiseDivergence } from "@worldforge/shared";
+import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import {
   markGenerationComplete,
   saveIpContext,
@@ -11,7 +13,7 @@ import { getErrorMessage, getErrorStatus } from "../lib/index.js";
 import { loadSettings } from "../settings/index.js";
 import {
   extractLoreCards,
-  applyPremiseCharacterOverrides,
+  interpretPremiseDivergence,
   generateWorldScaffold,
   generateRefinedPremiseStep,
   generateLocationsStep,
@@ -46,6 +48,24 @@ import {
 } from "../worldgen/worldbook-importer.js";
 
 const app = new Hono();
+
+async function resolvePremiseDivergence(
+  campaignId: string,
+  ipContext: IpResearchContext | null,
+  premise: string,
+  role: ResolvedRole,
+  cached: PremiseDivergence | null,
+): Promise<PremiseDivergence | null> {
+  if (cached) {
+    return cached;
+  }
+
+  const premiseDivergence = await interpretPremiseDivergence(ipContext, premise, role);
+  if (premiseDivergence) {
+    savePremiseDivergence(campaignId, premiseDivergence);
+  }
+  return premiseDivergence;
+}
 
 app.post("/roll-seeds", async (c) => {
   try {
@@ -103,15 +123,17 @@ app.post("/suggest-seeds", async (c) => {
     // If no premise provided but worldbook exists, generate premise from worldbook
     const premise = result.data.premise?.trim() ||
       (ipContext ? `A world based on the ${ipContext.franchise} setting` : "An original fantasy world");
-    ipContext = await applyPremiseCharacterOverrides(ipContext, premise, gen.resolved);
-
-    const { seeds } = await suggestWorldSeeds({
+    const { seeds, premiseDivergence } = await suggestWorldSeeds({
       premise,
       role: gen.resolved,
       ipContext,
     });
 
-    return c.json({ ...seeds, _ipContext: ipContext });
+    return c.json({
+      ...seeds,
+      _ipContext: ipContext,
+      _premiseDivergence: premiseDivergence,
+    });
   } catch (error) {
     return c.json(
       { error: getErrorMessage(error, "Failed to generate seed suggestions.") },
@@ -136,6 +158,7 @@ app.post("/suggest-seed", async (c) => {
       category,
       role: gen.resolved,
       ipContext: result.data.ipContext ?? undefined,
+      premiseDivergence: result.data.premiseDivergence ?? undefined,
     });
     return c.json({ category, value });
   } catch (error) {
@@ -174,24 +197,14 @@ app.post("/generate", async (c) => {
         // Load cached worldgen context: request body (fresh from wizard) or config cache
         const bodyIpContext = result.data.ipContext;
         const bodyPremiseDivergence = result.data.premiseDivergence ?? null;
-        const sanitizedBodyIpContext = await applyPremiseCharacterOverrides(
-          bodyIpContext ?? null,
-          campaign.premise,
-          gen.resolved,
-        );
-        if (sanitizedBodyIpContext) {
-          saveIpContext(campaignId, sanitizedBodyIpContext);
+        if (bodyIpContext) {
+          saveIpContext(campaignId, bodyIpContext);
         }
         if (bodyPremiseDivergence) {
           savePremiseDivergence(campaignId, bodyPremiseDivergence);
         }
-        let ipContext = sanitizedBodyIpContext
-          ?? await applyPremiseCharacterOverrides(
-            loadIpContext(campaignId),
-            campaign.premise,
-            gen.resolved,
-          );
-        const premiseDivergence = bodyPremiseDivergence ?? loadPremiseDivergence(campaignId);
+        let ipContext = bodyIpContext ?? loadIpContext(campaignId);
+        let premiseDivergence = bodyPremiseDivergence ?? loadPremiseDivergence(campaignId);
 
         // If no ipContext exists, run research now (user may have skipped DNA step)
         if (!ipContext) {
@@ -201,22 +214,21 @@ app.post("/generate", async (c) => {
             gen.resolved,
           );
           if (ipContext) {
-            const overriddenIpContext = await applyPremiseCharacterOverrides(
-              ipContext,
-              campaign.premise,
-              gen.resolved,
-            );
-            if (overriddenIpContext) {
-              ipContext = overriddenIpContext;
-              saveIpContext(campaignId, overriddenIpContext);
-              log.info(`Ran research on-demand: "${overriddenIpContext.franchise}" (${overriddenIpContext.keyFacts.length} facts)`);
-            }
+            saveIpContext(campaignId, ipContext);
+            log.info(`Ran research on-demand: "${ipContext.franchise}" (${ipContext.keyFacts.length} facts)`);
           }
         }
 
         if (ipContext) {
           log.info(`Using IP context: "${ipContext.franchise}" (${ipContext.keyFacts.length} facts, source: ${bodyIpContext ? "request" : "cache"})`);
         }
+        premiseDivergence = await resolvePremiseDivergence(
+          campaignId,
+          ipContext,
+          campaign.premise,
+          gen.resolved,
+          premiseDivergence,
+        );
 
         const { scaffold, enrichedIpContext } = await generateWorldScaffold(
           {
@@ -319,10 +331,13 @@ app.post("/regenerate-section", async (c) => {
     if (campaign instanceof Response) return campaign;
 
     // Load cached IP research for section regeneration
-    const ipContext = await applyPremiseCharacterOverrides(
-      loadIpContext(campaignId),
+    const ipContext = loadIpContext(campaignId);
+    const premiseDivergence = await resolvePremiseDivergence(
+      campaignId,
+      ipContext,
       campaign.premise,
       gen.resolved,
+      loadPremiseDivergence(campaignId),
     );
 
     const req = {
@@ -331,6 +346,7 @@ app.post("/regenerate-section", async (c) => {
       premise: campaign.premise,
       seeds: campaign.seeds,
       role: gen.resolved,
+      premiseDivergence,
     };
 
     const { section } = result.data;

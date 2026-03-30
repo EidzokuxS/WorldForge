@@ -11,6 +11,7 @@ import { generateNpcsStep } from "./scaffold-steps/npcs-step.js";
 import { reportProgress } from "./scaffold-steps/prompt-utils.js";
 import { extractLoreCards } from "./lore-extractor.js";
 import { evaluateResearchSufficiency } from "./ip-researcher.js";
+import { interpretPremiseDivergence } from "./premise-divergence.js";
 import { createLogger } from "../lib/index.js";
 import type { IpResearchContext } from "@worldforge/shared";
 import type { SearchConfig } from "../lib/web-search.js";
@@ -53,8 +54,13 @@ export async function generateWorldScaffold(
 ): Promise<{ scaffold: WorldScaffold; enrichedIpContext: IpResearchContext | null }> {
   // ipContext is pre-cached from suggest-seeds phase (loaded from config.json)
   let ipContext = req.ipContext ?? null;
+  const premiseDivergence = req.premiseDivergence
+    ?? await interpretPremiseDivergence(ipContext, req.premise, req.role);
   if (ipContext) {
     log.info(`Using cached IP context: "${ipContext.franchise}" (${ipContext.keyFacts.length} facts, source: ${ipContext.source})`);
+  }
+  if (premiseDivergence) {
+    log.info(`Using premise divergence: ${premiseDivergence.mode}`);
   }
 
   const totalSteps = 5;
