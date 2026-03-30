@@ -2,8 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 
 const mockGenerateObject = vi.fn();
 
-vi.mock("ai", () => ({
-  generateObject: (...args: unknown[]) => mockGenerateObject(...args),
+vi.mock("../../ai/generate-object-safe.js", () => ({
+  safeGenerateObject: (...args: unknown[]) => mockGenerateObject(...args),
 }));
 
 vi.mock("../../ai/index.js", () => ({
@@ -81,5 +81,56 @@ describe("extractLoreCards", () => {
     expect(prompt).toContain("The Crown");
     expect(prompt).toContain("Lord Varn");
     expect(prompt).toContain("A dark fantasy world");
+  });
+
+  it("grounds lore extraction in political divergence while preserving untouched canon", async () => {
+    mockGenerateObject.mockResolvedValueOnce({
+      object: { loreCards: fakeLoreCards },
+    });
+
+    await extractLoreCards(
+      fakeScaffold,
+      fakeRole,
+      undefined,
+      {
+        franchise: "Naruto",
+        keyFacts: [
+          "Konohagakure is one of the Five Great Shinobi Villages.",
+          "Naruto Uzumaki remains the Seventh Hokage.",
+        ],
+        tonalNotes: ["Shonen action"],
+        canonicalNames: {
+          locations: ["Konohagakure"],
+          factions: ["Konohagakure", "Otogakure"],
+          characters: ["Naruto Uzumaki", "Sakura Haruno", "Orochimaru"],
+        },
+        source: "mcp",
+      },
+      {
+        mode: "diverged",
+        protagonistRole: {
+          kind: "canonical",
+          interpretation: "unknown",
+          canonicalCharacterName: null,
+          roleSummary: "The canon protagonist slot is unchanged.",
+        },
+        preservedCanonFacts: ["Naruto Uzumaki remains the Seventh Hokage."],
+        changedCanonFacts: ["Sakura Haruno trained under Orochimaru instead of Tsunade."],
+        currentStateDirectives: [
+          "Describe only the institutions, relationships, and abilities that this altered training would realistically change.",
+          "Keep unrelated Leaf Village canon intact.",
+        ],
+        ambiguityNotes: [],
+      },
+    );
+
+    const prompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>)
+      .prompt as string;
+    expect(prompt).toContain("PRESERVED CANON FACTS");
+    expect(prompt).toContain("Naruto Uzumaki remains the Seventh Hokage.");
+    expect(prompt).toContain("CHANGED CANON FACTS");
+    expect(prompt).toContain("Sakura Haruno trained under Orochimaru instead of Tsunade.");
+    expect(prompt).toContain("CURRENT WORLD-STATE DIRECTIVES");
+    expect(prompt).toContain("Keep unrelated Leaf Village canon intact.");
   });
 });
