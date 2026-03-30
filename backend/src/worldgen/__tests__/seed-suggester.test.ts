@@ -189,6 +189,59 @@ describe("suggestWorldSeeds (sequential DNA)", () => {
     expect(result.ipContext?.keyFacts).toContain("Dr. Kel runs the station.");
   });
 
+  it("injects preserved canon facts and divergence directives into known-IP DNA prompts", async () => {
+    setupSequentialMocks();
+
+    await suggestWorldSeeds({
+      premise: "Naruto, but Sakura was trained by Orochimaru.",
+      role: fakeRole,
+      ipContext: {
+        ...fakeIpContext,
+        keyFacts: [
+          "Konohagakure remains one of the Five Great Shinobi Villages.",
+          "Naruto Uzumaki is the Seventh Hokage.",
+        ],
+        canonicalNames: {
+          locations: ["Konohagakure", "Otogakure"],
+          factions: ["Konohagakure", "Otogakure"],
+          characters: ["Naruto Uzumaki", "Sakura Haruno", "Orochimaru"],
+        },
+      },
+      premiseDivergence: {
+        mode: "diverged",
+        protagonistRole: {
+          kind: "canonical",
+          interpretation: "unknown",
+          canonicalCharacterName: null,
+          roleSummary: "Canon protagonist roles remain intact.",
+        },
+        preservedCanonFacts: [
+          "Konohagakure remains one of the Five Great Shinobi Villages.",
+          "Naruto Uzumaki is the Seventh Hokage.",
+        ],
+        changedCanonFacts: [
+          "Sakura Haruno trained under Orochimaru instead of Tsunade.",
+        ],
+        currentStateDirectives: [
+          "Preserve the wider Naruto canon unless Sakura's altered training directly changes it.",
+          "Reflect Orochimaru's influence on Sakura's present relationships and skill set.",
+        ],
+        ambiguityNotes: [],
+      },
+    });
+
+    const firstCallPrompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>)
+      .prompt as string;
+    expect(firstCallPrompt).toContain("PRESERVED CANON FACTS");
+    expect(firstCallPrompt).toContain("Naruto Uzumaki is the Seventh Hokage.");
+    expect(firstCallPrompt).toContain("CHANGED CANON FACTS");
+    expect(firstCallPrompt).toContain("Sakura Haruno trained under Orochimaru instead of Tsunade.");
+    expect(firstCallPrompt).toContain("CURRENT WORLD-STATE DIRECTIVES");
+    expect(firstCallPrompt).toContain(
+      "Preserve the wider Naruto canon unless Sakura's altered training directly changes it.",
+    );
+  });
+
   it("original world premise includes original world instruction", async () => {
     setupSequentialMocks();
 
