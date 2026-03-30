@@ -9,6 +9,7 @@ vi.mock("../../worldgen/index.js", () => ({
   rollSeed: vi.fn(),
   suggestWorldSeeds: vi.fn(),
   suggestSingleSeed: vi.fn(),
+  interpretPremiseDivergence: vi.fn(),
   applyPremiseCharacterOverrides: vi.fn((ctx: unknown) => ctx),
   generateWorldScaffold: vi.fn(),
   generateRefinedPremiseStep: vi.fn(),
@@ -78,6 +79,7 @@ import {
   rollSeed,
   suggestWorldSeeds,
   suggestSingleSeed,
+  interpretPremiseDivergence,
   generateWorldScaffold,
   saveScaffoldToDb,
   extractLoreCards,
@@ -110,6 +112,7 @@ const mockedRollWorldSeeds = vi.mocked(rollWorldSeeds);
 const mockedRollSeed = vi.mocked(rollSeed);
 const mockedSuggestWorldSeeds = vi.mocked(suggestWorldSeeds);
 const mockedSuggestSingleSeed = vi.mocked(suggestSingleSeed);
+const mockedInterpretPremiseDivergence = vi.mocked(interpretPremiseDivergence);
 const mockedGenerateWorldScaffold = vi.mocked(generateWorldScaffold);
 const mockedSaveScaffoldToDb = vi.mocked(saveScaffoldToDb);
 const mockedExtractLoreCards = vi.mocked(extractLoreCards);
@@ -277,6 +280,36 @@ describe("POST /api/worldgen/suggest-seeds", () => {
       expect.objectContaining({ premise: "An original fantasy world" })
     );
   });
+
+  it("returns a hidden _premiseDivergence artifact from suggestWorldSeeds", async () => {
+    const premiseDivergence = {
+      mode: "diverged",
+      protagonistRole: {
+        kind: "custom",
+        interpretation: "replacement",
+        canonicalCharacterName: "Dr. Kel",
+        roleSummary: "The player's custom character replaces Dr. Kel as the active station operator.",
+      },
+      preservedCanonFacts: ["The signal base remains active."],
+      changedCanonFacts: ["Dr. Kel is no longer the active protagonist."],
+      currentStateDirectives: ["Treat the player as the newly arrived operator."],
+      ambiguityNotes: [],
+    };
+    mockedSuggestWorldSeeds.mockResolvedValue({
+      seeds: { geography: "Remote valley" },
+      premiseDivergence,
+    } as any);
+
+    const res = await app.request("/api/worldgen/suggest-seeds", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ premise: "Voices of the Void, but I'm playing instead of Dr Kel" }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body._premiseDivergence).toEqual(premiseDivergence);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -441,6 +474,52 @@ describe("POST /api/worldgen/generate", () => {
       expect.any(Function),
     );
     expect(mockedSaveIpContext).toHaveBeenCalledWith(CAMPAIGN_ID, enrichedIpContext);
+  });
+
+  it("loads cached premiseDivergence when request body omits it and reuses it for generation", async () => {
+    const cachedPremiseDivergence = {
+      mode: "diverged",
+      protagonistRole: {
+        kind: "custom",
+        interpretation: "replacement",
+        canonicalCharacterName: "Dr. Kel",
+        roleSummary: "The player replaces Dr. Kel as the station operator.",
+      },
+      preservedCanonFacts: ["The signal base remains active."],
+      changedCanonFacts: ["Dr. Kel is no longer the active protagonist."],
+      currentStateDirectives: ["Treat the player as the newly arrived operator."],
+      ambiguityNotes: [],
+    };
+
+    mockedLoadPremiseDivergence.mockReturnValue(cachedPremiseDivergence as any);
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "A strange signals campaign",
+        locations: [
+          { name: "Signal Base", description: "Station", tags: [], isStarting: true, connectedTo: [] },
+        ],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+
+    expect(mockedLoadPremiseDivergence).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({ premiseDivergence: cachedPremiseDivergence }),
+      expect.any(Function),
+    );
+    expect(mockedInterpretPremiseDivergence).not.toHaveBeenCalled();
   });
 
   it("remains compatible with cached ipContext-only generation requests", async () => {
@@ -629,6 +708,41 @@ describe("POST /api/worldgen/import-worldbook", () => {
 // POST /api/worldgen/regenerate-section
 // ---------------------------------------------------------------------------
 describe("POST /api/worldgen/regenerate-section", () => {
+  it("reuses cached premiseDivergence for section regeneration", async () => {
+    const cachedPremiseDivergence = {
+      mode: "diverged",
+      protagonistRole: {
+        kind: "custom",
+        interpretation: "replacement",
+        canonicalCharacterName: "Dr. Kel",
+        roleSummary: "The player replaces Dr. Kel as the station operator.",
+      },
+      preservedCanonFacts: ["The signal base remains active."],
+      changedCanonFacts: ["Dr. Kel is no longer the active protagonist."],
+      currentStateDirectives: ["Treat the player as the newly arrived operator."],
+      ambiguityNotes: [],
+    };
+
+    mockedLoadPremiseDivergence.mockReturnValue(cachedPremiseDivergence as any);
+    mockedGenerateRefinedPremise.mockResolvedValue("New refined premise" as any);
+
+    const res = await app.request("/api/worldgen/regenerate-section", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID, section: "premise" }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ refinedPremise: "New refined premise" });
+    expect(mockedLoadPremiseDivergence).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(mockedGenerateRefinedPremise).toHaveBeenCalledWith(
+      expect.objectContaining({ premiseDivergence: cachedPremiseDivergence }),
+      expect.anything(),
+      undefined,
+    );
+  });
+
   it("calls generateRefinedPremiseStep for section=premise", async () => {
     mockedGenerateRefinedPremise.mockResolvedValue("New refined premise" as any);
 
