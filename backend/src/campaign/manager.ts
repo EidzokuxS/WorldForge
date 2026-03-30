@@ -4,7 +4,12 @@ import { eq } from "drizzle-orm";
 import { closeDb, connectDb } from "../db/index.js";
 import { runMigrations } from "../db/migrate.js";
 import { campaigns } from "../db/schema.js";
-import type { CampaignMeta, IpResearchContext, WorldSeeds } from "@worldforge/shared";
+import type {
+  CampaignMeta,
+  IpResearchContext,
+  PremiseDivergence,
+  WorldSeeds,
+} from "@worldforge/shared";
 import { parseWorldSeeds } from "../worldgen/index.js";
 import { AppError } from "../lib/index.js";
 import { assertSafeId, CAMPAIGNS_DIR, getCampaignConfigPath, getCampaignDir } from "./paths.js";
@@ -20,6 +25,7 @@ type CampaignConfigFile = {
   premise: string;
   seeds?: WorldSeeds;
   ipContext?: IpResearchContext;
+  premiseDivergence?: PremiseDivergence;
   generationComplete?: boolean;
   currentTick?: number;
   createdAt: number;
@@ -56,6 +62,7 @@ export function readCampaignConfig(campaignId: string): CampaignConfigFile {
     premise: parsed.premise ?? "",
     seeds: parseWorldSeeds(parsed.seeds) ?? undefined,
     ipContext: parsed.ipContext ?? undefined,
+    premiseDivergence: parsed.premiseDivergence ?? undefined,
     generationComplete: Boolean(parsed.generationComplete),
     currentTick: typeof parsed.currentTick === "number" ? parsed.currentTick : undefined,
     createdAt: parsed.createdAt,
@@ -296,6 +303,26 @@ export function loadIpContext(campaignId: string): IpResearchContext | null {
   try {
     const config = readCampaignConfig(campaignId);
     return config.ipContext ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function savePremiseDivergence(
+  campaignId: string,
+  premiseDivergence: PremiseDivergence,
+): void {
+  assertSafeId(campaignId);
+  const config = readCampaignConfig(campaignId);
+  writeCampaignConfig(getCampaignDir(campaignId), { ...config, premiseDivergence });
+  log.info(`Saved premiseDivergence (${premiseDivergence.mode}) to campaign ${campaignId}`);
+}
+
+export function loadPremiseDivergence(campaignId: string): PremiseDivergence | null {
+  assertSafeId(campaignId);
+  try {
+    const config = readCampaignConfig(campaignId);
+    return config.premiseDivergence ?? null;
   } catch {
     return null;
   }

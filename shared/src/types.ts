@@ -40,6 +40,37 @@ export interface ResearchConfig {
   zaiApiKey?: string;
 }
 
+export type PremiseDivergenceMode = "canonical" | "coexisting" | "diverged";
+
+export type PremiseDivergenceProtagonistKind = "canonical" | "custom";
+
+export type PremiseDivergenceInterpretation =
+  | "canonical"
+  | "replacement"
+  | "coexisting"
+  | "outsider"
+  | "unknown";
+
+export interface PremiseDivergenceProtagonistRole {
+  kind: PremiseDivergenceProtagonistKind;
+  interpretation: PremiseDivergenceInterpretation;
+  canonicalCharacterName?: string | null;
+  roleSummary: string;
+}
+
+/**
+ * Structured interpretation of how a user's premise diverges from known canon.
+ * Kept beside IpResearchContext so canonical research data stays immutable.
+ */
+export interface PremiseDivergence {
+  mode: PremiseDivergenceMode;
+  protagonistRole: PremiseDivergenceProtagonistRole;
+  preservedCanonFacts: string[];
+  changedCanonFacts: string[];
+  currentStateDirectives: string[];
+  ambiguityNotes: string[];
+}
+
 export interface Settings {
   providers: Provider[];
   judge: RoleConfig;
@@ -66,6 +97,9 @@ export interface IpResearchContext {
     factions?: string[];
     characters?: string[];
   };
+  /** Legacy Phase 24 override cache. Kept for backward compatibility only. */
+  /** Canonical characters intentionally replaced or excluded by the premise. */
+  excludedCharacters?: string[];
   /** Whether context came from live web search or LLM internal knowledge */
   source: "mcp" | "llm";
 }

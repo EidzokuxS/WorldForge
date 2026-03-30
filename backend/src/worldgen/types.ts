@@ -1,4 +1,8 @@
-import type { IpResearchContext, ResearchConfig } from "@worldforge/shared";
+import type {
+  IpResearchContext,
+  PremiseDivergence,
+  ResearchConfig,
+} from "@worldforge/shared";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import type { WorldSeeds } from "./seed-roller.js";
 
@@ -12,6 +16,8 @@ export interface GenerateScaffoldRequest {
   fallbackRole?: ResolvedRole;
   /** Pre-cached IP research context from suggest-seeds phase. Loaded from config.json. */
   ipContext?: IpResearchContext | null;
+  /** Structured divergence interpretation cached beside ipContext. */
+  premiseDivergence?: PremiseDivergence | null;
   /** Research config for sufficiency checks — provider + API keys. */
   research?: ResearchConfig;
 }

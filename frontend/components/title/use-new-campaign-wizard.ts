@@ -3,10 +3,10 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { generateWorld, suggestSeed, suggestSeeds, classifyWorldBook, apiPost } from "@/lib/api";
+import { generateWorld, suggestSeed, suggestSeeds, classifyWorldBook, apiPost, loadCampaign } from "@/lib/api";
 import type { GenerationProgress, IpContext, ClassifiedWorldBookEntry } from "@/lib/api";
 import { getErrorMessage } from "@/lib/settings";
-import type { SeedCategory, Settings, WorldSeeds } from "@/lib/types";
+import type { PremiseDivergence, SeedCategory, Settings, WorldSeeds } from "@/lib/types";
 import {
   type CampaignMeta,
   type DnaState,
@@ -40,6 +40,7 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [generationProgress, setGenerationProgress] = useState<GenerationProgress | null>(null);
   const [ipContext, setIpContext] = useState<IpContext | null>(null);
+  const [premiseDivergence, setPremiseDivergence] = useState<PremiseDivergence | null>(null);
 
   // Worldbook state
   const [worldbookFile, setWorldbookFile] = useState<File | null>(null);
@@ -63,6 +64,7 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
     setStep(1);
     setDnaState(null);
     setIpContext(null);
+    setPremiseDivergence(null);
     setPhase({ kind: "idle" });
     setWorldbookFile(null);
     setWorldbookEntries(null);
@@ -77,7 +79,11 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
     if (!nextOpen) resetFlow();
   }
 
-  async function tryGenerateWorld(campaignId: string, ctx?: IpContext | null): Promise<boolean> {
+  async function tryGenerateWorld(
+    campaignId: string,
+    ctx?: IpContext | null,
+    divergence?: PremiseDivergence | null,
+  ): Promise<boolean> {
     if (!settings || !isGeneratorConfigured(settings)) return true;
 
     setPhase({ kind: "generating" });
@@ -85,7 +91,7 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
     try {
       const generation = await generateWorld(campaignId, (progress) => {
         setGenerationProgress(progress);
-      }, ctx);
+      }, ctx, divergence);
       toast.success(`World generated: ${generation.startingLocation ?? "Unknown"}`, {
         description: `${generation.locationCount ?? 0} locations, ${generation.npcCount ?? 0} NPCs, ${generation.factionCount ?? 0} factions`,
       });
@@ -160,7 +166,7 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
       toast.success("Campaign created", { description: created.name });
 
       // Load campaign so it becomes active BEFORE generation (generate needs active campaign)
-      await apiPost(`/api/campaigns/${created.id}/load`);
+      await loadCampaign(created.id);
 
       // Close dialog and clear form before generation starts
       // so the fullscreen overlay in TitleScreen takes over.
@@ -178,7 +184,7 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
         const { worldbookToIpContext } = await import("@/lib/api");
         ctx = worldbookToIpContext(worldbookEntries, name);
       }
-      const generated = await tryGenerateWorld(created.id, ctx);
+      const generated = await tryGenerateWorld(created.id, ctx, premiseDivergence);
 
       router.push(`/campaign/${created.id}/${generated ? "review" : "character"}`);
     } catch (error) {
@@ -220,6 +226,9 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
       if (suggested._ipContext) {
         setIpContext(suggested._ipContext);
       }
+      if (suggested._premiseDivergence) {
+        setPremiseDivergence(suggested._premiseDivergence);
+      }
       setDnaState(createDnaStateFromSeeds(suggested));
     } catch (error) {
       toast.error("Failed to generate suggestions", {
@@ -257,6 +266,9 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
       if (suggested._ipContext) {
         setIpContext(suggested._ipContext);
       }
+      if (suggested._premiseDivergence) {
+        setPremiseDivergence(suggested._premiseDivergence);
+      }
       setDnaState((current) => {
         if (!current) return current;
         const next = { ...current };
@@ -284,7 +296,12 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
 
     setPhase({ kind: "suggesting-category", category });
     try {
-      const result = await suggestSeed(campaignPremise.trim(), category, ipContext);
+      const result = await suggestSeed(
+        campaignPremise.trim(),
+        category,
+        ipContext,
+        premiseDivergence,
+      );
       setDnaState((current) => {
         if (!current) return current;
         return {

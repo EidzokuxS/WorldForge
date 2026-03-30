@@ -1,4 +1,11 @@
-import type { CampaignMeta, IpResearchContext, SeedCategory, Settings, WorldSeeds } from "@/lib/types";
+import type {
+  CampaignMeta,
+  IpResearchContext,
+  PremiseDivergence,
+  SeedCategory,
+  Settings,
+  WorldSeeds,
+} from "@/lib/types";
 import type {
   TestConnectionRequest,
   TestConnectionResult,
@@ -45,6 +52,7 @@ export type {
 };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:3001";
+const LAST_ACTIVE_CAMPAIGN_KEY = "worldforge:lastActiveCampaignId";
 
 // ───── Raw types (internal) ─────
 
@@ -232,6 +240,34 @@ export async function apiDelete<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+function campaignStorage(): Storage | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function rememberCampaignId(campaignId: string | null | undefined): void {
+  if (!campaignId) return;
+  try {
+    campaignStorage()?.setItem(LAST_ACTIVE_CAMPAIGN_KEY, campaignId);
+  } catch {
+    // Non-fatal in private mode or restricted environments.
+  }
+}
+
+export function getRememberedCampaignId(): string | null {
+  try {
+    return campaignStorage()?.getItem(LAST_ACTIVE_CAMPAIGN_KEY) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // ───── Settings ─────
 
 export function fetchSettings(): Promise<Settings> {
@@ -285,8 +321,8 @@ export function suggestSeeds(
     research?: boolean;
     worldbookEntries?: ClassifiedWorldBookEntry[];
   }
-): Promise<WorldSeeds & { _ipContext?: IpContext | null }> {
-  return apiPost<WorldSeeds & { _ipContext?: IpContext | null }>("/api/worldgen/suggest-seeds", {
+): Promise<WorldSeeds & { _ipContext?: IpContext | null; _premiseDivergence?: PremiseDivergence | null }> {
+  return apiPost<WorldSeeds & { _ipContext?: IpContext | null; _premiseDivergence?: PremiseDivergence | null }>("/api/worldgen/suggest-seeds", {
     premise,
     name: opts?.name,
     franchise: opts?.franchise,
@@ -297,16 +333,19 @@ export function suggestSeeds(
 
 /** @deprecated Use IpResearchContext from @/lib/types */
 export type IpContext = IpResearchContext;
+export type PremiseDivergenceContext = PremiseDivergence;
 
 export function suggestSeed(
   premise: string,
   category: SeedCategory,
-  ipContext?: IpContext | null
+  ipContext?: IpContext | null,
+  premiseDivergence?: PremiseDivergence | null,
 ): Promise<RollSeedResult> {
   return apiPost<RollSeedResult>("/api/worldgen/suggest-seed", {
     premise,
     category,
     ipContext: ipContext ?? null,
+    premiseDivergence: premiseDivergence ?? null,
   });
 }
 
@@ -424,10 +463,14 @@ export async function generateWorld(
   campaignId: string,
   onProgress?: (progress: GenerationProgress) => void,
   ipContext?: IpContext | null,
+  premiseDivergence?: PremiseDivergence | null,
 ): Promise<GenerateWorldResult> {
   const body: Record<string, unknown> = { campaignId };
   if (ipContext) {
     body.ipContext = ipContext;
+  }
+  if (premiseDivergence) {
+    body.premiseDivergence = premiseDivergence;
   }
   const res = await fetch(`${API_BASE}/api/worldgen/generate`, {
     method: "POST",
@@ -494,7 +537,16 @@ export type { CampaignMeta };
 
 export async function getActiveCampaign(): Promise<CampaignMeta | null> {
   const res = await apiGet<{ campaign: CampaignMeta | null }>("/api/campaigns/active");
+  if (res.campaign) {
+    rememberCampaignId(res.campaign.id);
+  }
   return res.campaign;
+}
+
+export async function loadCampaign(campaignId: string): Promise<CampaignMeta> {
+  const campaign = await apiPost<CampaignMeta>(`/api/campaigns/${campaignId}/load`);
+  rememberCampaignId(campaign.id);
+  return campaign;
 }
 
 // ───── World Review ─────

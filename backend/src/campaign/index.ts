@@ -7,6 +7,8 @@ export {
   markGenerationComplete,
   saveIpContext,
   loadIpContext,
+  savePremiseDivergence,
+  loadPremiseDivergence,
   getActiveCampaign,
   incrementTick,
 } from "./manager.js";

@@ -106,7 +106,11 @@ export const rollSeedSchema = z.object({
 });
 
 export const suggestSeedsSchema = z.object({
-  premise: z.string().optional().default(""),
+  premise: z
+    .string()
+    .transform((s) => s.trim())
+    .optional()
+    .default(""),
   name: z.string().optional(),
   /** Explicit franchise name — if set, research this IP. If empty, treat as original world. */
   franchise: z.string().optional(),
@@ -124,7 +128,27 @@ const ipContextSchema = z.object({
   franchise: z.string(),
   keyFacts: z.array(z.string()),
   tonalNotes: z.array(z.string()),
+  canonicalNames: z.object({
+    locations: z.array(z.string()).optional(),
+    factions: z.array(z.string()).optional(),
+    characters: z.array(z.string()).optional(),
+  }).optional(),
+  excludedCharacters: z.array(z.string()).optional(),
   source: z.enum(["mcp", "llm"]),
+}).nullable().optional();
+
+const premiseDivergenceSchema = z.object({
+  mode: z.enum(["canonical", "coexisting", "diverged"]),
+  protagonistRole: z.object({
+    kind: z.enum(["canonical", "custom"]),
+    interpretation: z.enum(["canonical", "replacement", "coexisting", "outsider", "unknown"]),
+    canonicalCharacterName: z.string().nullable().optional(),
+    roleSummary: z.string(),
+  }),
+  preservedCanonFacts: z.array(z.string()),
+  changedCanonFacts: z.array(z.string()),
+  currentStateDirectives: z.array(z.string()),
+  ambiguityNotes: z.array(z.string()),
 }).nullable().optional();
 
 export const suggestSeedSchema = z.object({
@@ -134,6 +158,7 @@ export const suggestSeedSchema = z.object({
     .pipe(z.string().min(1, "premise is required.")),
   category: seedCategorySchema,
   ipContext: ipContextSchema,
+  premiseDivergence: premiseDivergenceSchema,
 });
 
 export const generateWorldSchema = z.object({
@@ -142,6 +167,7 @@ export const generateWorldSchema = z.object({
     .transform((s) => s.trim())
     .pipe(z.string().min(1, "campaignId is required.")),
   ipContext: ipContextSchema,
+  premiseDivergence: premiseDivergenceSchema,
 });
 
 export const testProviderSchema = z.object({
@@ -288,9 +314,9 @@ export const researchCharacterSchema = z.object({
 export const importV2CardSchema = z.object({
   campaignId: z.string().min(1),
   name: z.string().min(1),
-  description: z.string().min(1).max(8000),
-  personality: z.string().max(4000).default(""),
-  scenario: z.string().max(4000).default(""),
+  description: z.string().min(1),
+  personality: z.string().default(""),
+  scenario: z.string().default(""),
   tags: z.array(z.string()).default([]),
   ...characterRoleFields,
 }).refine(keyRoleLocationRefine.refinement, keyRoleLocationRefine.options);
