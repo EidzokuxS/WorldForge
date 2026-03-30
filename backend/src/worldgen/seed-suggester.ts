@@ -6,7 +6,12 @@ import { clampTokens } from "../lib/index.js";
 import type { SeedCategory } from "./seed-roller.js";
 import type { IpResearchContext, PremiseDivergence } from "@worldforge/shared";
 import { interpretPremiseDivergence } from "./premise-divergence.js";
-import { buildIpContextBlock, buildStopSlopRules } from "./scaffold-steps/prompt-utils.js";
+import {
+  buildIpContextBlock,
+  buildKnownIpGenerationContract,
+  buildPremiseDivergenceBlock,
+  buildStopSlopRules,
+} from "./scaffold-steps/prompt-utils.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -92,10 +97,12 @@ export async function suggestWorldSeeds(
     const isCultural = key === "culturalFlavor";
 
     const ipInstruction = ipContext
-      ? `This world is the ${ipContext.franchise} universe. Describe its canonical ${label.toLowerCase()} as it exists in the source material, then note any modifications caused by the premise divergence. Use the franchise's own terminology.`
+      ? `This world is the ${ipContext.franchise} universe. Define its current ${label.toLowerCase()} by starting from canon and then applying only the interpreted divergence consequences. Use the franchise's own terminology.`
       : `This is an original world. Generate a specific, concrete ${label.toLowerCase()} that follows logically from the premise.`;
 
     const ipBlock = buildIpContextBlock(ipContext);
+    const divergenceBlock = buildPremiseDivergenceBlock(premiseDivergence);
+    const knownIpContract = buildKnownIpGenerationContract(ipContext, premiseDivergence, `${label} DNA`);
 
     const accumulatedSection = accumulated.length > 0
       ? `\nALREADY ESTABLISHED DNA:\n${accumulated.join("\n")}\n\nYour ${label.toLowerCase()} MUST be consistent with the above. Do not contradict established DNA.`
@@ -107,6 +114,7 @@ export async function suggestWorldSeeds(
 
 ${ipInstruction}
 ${constraint ? `${constraint}\n` : ""}${ipBlock}
+${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}
 PREMISE: "${req.premise}"
 ${accumulatedSection}
 
@@ -170,9 +178,16 @@ export async function suggestSingleSeed(
   const isCultural = req.category === "culturalFlavor";
   const ipContext = req.ipContext ?? null;
   const ipBlock = buildIpContextBlock(ipContext);
+  const divergenceBlock = buildPremiseDivergenceBlock(req.premiseDivergence ?? null);
+  const knownIpContract = buildKnownIpGenerationContract(
+    ipContext,
+    req.premiseDivergence ?? null,
+    `${req.category} DNA`,
+  );
 
   const prompt = `Define the ${req.category} (${categoryDescriptions[req.category]}) for a text RPG world.
 ${ipBlock}
+${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}
 PREMISE: "${req.premise}"
 
 OUTPUT: ${isCultural ? "An array of 2-3 specific cultural or thematic inspirations." : "A concrete 1-2 sentence description. Name specific places, systems, or conditions."}
