@@ -62,39 +62,49 @@ export async function generateWorldScaffold(
   if (premiseDivergence) {
     log.info(`Using premise divergence: ${premiseDivergence.mode}`);
   }
+  const requestWithDivergence: GenerateScaffoldRequest = {
+    ...req,
+    premiseDivergence,
+  };
 
   const totalSteps = 5;
   let currentStep = 0;
 
   // Step 1: Premise
   reportProgress(onProgress, currentStep++, totalSteps, "Refining world premise...");
-  const refinedPremise = await generateRefinedPremiseStep(req, ipContext);
+  const refinedPremise = await generateRefinedPremiseStep(requestWithDivergence, ipContext);
   log.info(`Premise refined (${refinedPremise.length} chars)`);
 
   // Step 2: Locations (with sufficiency check)
   ipContext = await checkSufficiency(ipContext, "locations", refinedPremise, req);
   reportProgress(onProgress, currentStep++, totalSteps, "Building locations (plan + detail)...");
-  const locations = await generateLocationsStep(req, refinedPremise, ipContext);
+  const locations = await generateLocationsStep(requestWithDivergence, refinedPremise, ipContext);
   log.info(`Generated ${locations.length} locations`);
   const locationNames = locations.map((l) => l.name);
 
   // Step 3: Factions (with sufficiency check)
   ipContext = await checkSufficiency(ipContext, "factions", refinedPremise, req);
   reportProgress(onProgress, currentStep++, totalSteps, "Forging factions (plan + detail)...");
-  const factions = await generateFactionsStep(req, refinedPremise, locationNames, ipContext);
+  const factions = await generateFactionsStep(requestWithDivergence, refinedPremise, locationNames, ipContext);
   log.info(`Generated ${factions.length} factions`);
   const factionNames = factions.map((f) => f.name);
 
   // Step 4: NPCs (with sufficiency check)
   ipContext = await checkSufficiency(ipContext, "npcs", refinedPremise, req);
   reportProgress(onProgress, currentStep++, totalSteps, "Creating NPCs (key + supporting)...");
-  const npcs = await generateNpcsStep(req, refinedPremise, locationNames, factionNames, ipContext);
+  const npcs = await generateNpcsStep(requestWithDivergence, refinedPremise, locationNames, factionNames, ipContext);
   log.info(`Generated ${npcs.length} NPCs (${npcs.filter((n) => n.tier === "key").length} key, ${npcs.filter((n) => n.tier === "supporting").length} supporting)`);
 
   // Step 5: Lore (with ipContext for grounding)
   const baseScaffold: WorldScaffold = { refinedPremise, locations, factions, npcs, loreCards: [] as ExtractedLoreCard[] };
   reportProgress(onProgress, currentStep++, totalSteps, "Extracting world lore...");
-  const loreCards = await extractLoreCards(baseScaffold, req.role, req.fallbackRole, ipContext);
+  const loreCards = await extractLoreCards(
+    baseScaffold,
+    req.role,
+    req.fallbackRole,
+    ipContext,
+    premiseDivergence,
+  );
   log.info(`Extracted ${loreCards.length} lore cards`);
 
   return {

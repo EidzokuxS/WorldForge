@@ -1,7 +1,13 @@
 import { safeGenerateObject as generateObject } from "../../ai/generate-object-safe.js";
 import { z } from "zod";
 import { createModel } from "../../ai/index.js";
-import { buildIpContextBlock, buildCanonicalList, buildStopSlopRules } from "./prompt-utils.js";
+import {
+  buildCanonicalList,
+  buildIpContextBlock,
+  buildKnownIpGenerationContract,
+  buildPremiseDivergenceBlock,
+  buildStopSlopRules,
+} from "./prompt-utils.js";
 import type { IpResearchContext } from "../ip-researcher.js";
 import type { GenerateScaffoldRequest, ScaffoldLocation } from "../types.js";
 
@@ -13,8 +19,8 @@ const locationPlanSchema = z.object({
   locations: z.array(z.object({
     name: z.string(),
     purpose: z.string().describe("1 line: why this location matters"),
-    isStarting: z.boolean(),
-  })).min(5).max(8),
+    isStarting: z.boolean().default(false),
+  })).max(8),
 });
 
 const locationDetailSchema = z.object({
@@ -37,6 +43,13 @@ export async function generateLocationsStep(
   additionalInstruction?: string,
 ): Promise<ScaffoldLocation[]> {
   const ipBlock = buildIpContextBlock(ipContext);
+  const premiseDivergence = req.premiseDivergence ?? null;
+  const divergenceBlock = buildPremiseDivergenceBlock(premiseDivergence);
+  const knownIpContract = buildKnownIpGenerationContract(
+    ipContext,
+    premiseDivergence,
+    "locations",
+  );
   const canonLocs = buildCanonicalList(ipContext, "locations");
 
   // --- Call 1: PLAN ---
@@ -46,7 +59,7 @@ ${canonLocs}
 HARD RULE: Your location names MUST come from the canonical list above. At least 5 out of your locations MUST use names EXACTLY as listed. You may add at most 1-2 original locations ONLY if the premise divergence logically creates a new place that does not exist in canon.
 PROCEDURE:
 1. Pick 5-8 names from the CANONICAL LOCATIONS list above. These are your locations.
-2. For each, note if the premise divergence changes anything about it (leadership, allegiance, condition). If unchanged, describe it as canon.
+2. For each, note how the PREMISE DIVERGENCE changes its present state (leadership, allegiance, condition, inhabitants). If unchanged, keep it canon.
 3. Only if the premise creates a genuinely new place (e.g., a new base for a reassigned character), add it as slot 6-8 with an original name.
 Copy-paste canonical names exactly. Never translate, simplify, or invent substitutes.`
     : `Generate 5-8 locations for this original world. Prioritize variety of function:
@@ -64,6 +77,7 @@ Copy-paste canonical names exactly. Never translate, simplify, or invent substit
 WORLD PREMISE:
 ${refinedPremise}
 ${ipBlock}
+${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}
 CONSTRAINTS:
 - Exactly ONE location has isStarting=true — the player's starting point. Pick a location where a newcomer or young character would plausibly begin.
 - Every location must serve a DIFFERENT narrative function. No two locations filling the same role (e.g., two "training grounds" or two "hidden bases").
@@ -95,13 +109,14 @@ ${buildStopSlopRules()}`,
 WORLD PREMISE:
 ${refinedPremise}
 ${ipBlock}
+${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}
 ALL LOCATIONS IN THIS WORLD: ${nameList.join(", ")}
 
 ${previousSummary ? `ALREADY DETAILED LOCATIONS:\n${previousSummary}\n` : ""}LOCATIONS TO DETAIL NOW:
 ${batch.map((b) => `- ${b.name}: ${b.purpose}`).join("\n")}
 
 FIELD INSTRUCTIONS:
-- description: Exactly 2-3 sentences. Sentence 1 = physical appearance (size, terrain, architecture). Sentence 2 = who lives/works here and what they do. Sentence 3 (optional) = what changed due to the premise, or a notable danger/resource.${ipContext ? ` For known-IP locations: describe the canonical state first, then note premise-driven changes.` : ""}
+- description: Exactly 2-3 sentences. Sentence 1 = physical appearance (size, terrain, architecture). Sentence 2 = who lives/works here and what they do. Sentence 3 (optional) = what changed due to the premise, or a notable danger/resource.${ipContext ? ` For known-IP locations: start from the canonical location, then describe only the present-state consequences of PREMISE DIVERGENCE. Keep unrelated canon intact.` : ""}
 - tags: Mechanical tags the game engine reads. Format: [Adjective] or [Controlled by FactionName]. Examples: [Warm], [Crowded], [Dangerous], [Poor], [Fortified], [Controlled by Iron Guard]. 3-5 tags per location.
 - connectedTo: Which other locations a player can travel to from here. ONLY use names from this list: ${nameList.join(", ")}. Never link a location to itself. Each location connects to 1-3 others.
 
@@ -122,5 +137,17 @@ ${buildStopSlopRules()}`,
     }
   }
 
-  return detailed;
+  if (detailed.length === 0) {
+    return detailed;
+  }
+
+  // Keep location planning best-effort: if the model omitted or duplicated
+  // the starting flag, normalize to exactly one starting location.
+  const firstStartingIndex = detailed.findIndex((loc) => loc.isStarting);
+  const normalizedStartingIndex = firstStartingIndex >= 0 ? firstStartingIndex : 0;
+
+  return detailed.map((loc, index) => ({
+    ...loc,
+    isStarting: index === normalizedStartingIndex,
+  }));
 }

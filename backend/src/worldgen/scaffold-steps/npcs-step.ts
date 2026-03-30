@@ -6,6 +6,8 @@ import type { GenerateScaffoldRequest, ScaffoldNpc } from "../types.js";
 import {
   buildIpContextBlock,
   buildCanonicalList,
+  buildKnownIpGenerationContract,
+  buildPremiseDivergenceBlock,
   formatNameList,
   buildStopSlopRules,
 } from "./prompt-utils.js";
@@ -86,6 +88,13 @@ async function planKeyNpcs(
   ipContext: IpResearchContext | null,
 ): Promise<PlannedNpc[]> {
   const ipBlock = buildIpContextBlock(ipContext);
+  const premiseDivergence = req.premiseDivergence ?? null;
+  const divergenceBlock = buildPremiseDivergenceBlock(premiseDivergence);
+  const knownIpContract = buildKnownIpGenerationContract(
+    ipContext,
+    premiseDivergence,
+    "key npcs",
+  );
 
   const canonChars = buildCanonicalList(ipContext, "characters");
 
@@ -95,8 +104,9 @@ ${canonChars}
 HARD RULE: Your character names MUST come from the canonical list above. Do NOT invent original characters for the key tier.
 PROCEDURE:
 1. Pick 6-10 names from the CANONICAL CHARACTERS list above.
-2. Include ALL characters named or implied by the premise.
-3. Add other characters from the list who would logically interact with the premise changes.
+2. Include canonical characters who are active in the PRESENT WORLD STATE after PREMISE DIVERGENCE.
+3. If PREMISE DIVERGENCE says a canonical protagonist was replaced or is absent, do NOT include that character in the current cast unless the divergence explicitly says they still coexist.
+4. Add other canon characters who would logically interact with the changed world state while preserving unaffected canon.
 Copy-paste canonical full names exactly. Assign each to a location and faction from the lists below.`
     : `List 6-8 key characters who hold power, drive conflict, or control resources in this world. Each must connect to at least one faction or location. Ensure variety:
 - At least 1 political leader
@@ -115,6 +125,7 @@ ${formatNameList(locationNames)}
 KNOWN FACTIONS:
 ${formatNameList(factionNames)}
 ${ipBlock}
+${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}
 TASK: ${keyInstruction}
 
 FIELD CONSTRAINTS:
@@ -127,7 +138,9 @@ ${buildStopSlopRules()}`;
   const result = await generateObject({
     model: createModel(req.role.provider),
     schema: z.object({
-      npcs: npcPlanSchema.shape.npcs.min(6).max(10),
+      // Treat plan generation as best-effort: ask for 6-10 in the prompt,
+      // but don't fail the whole worldgen step if the model returns fewer.
+      npcs: npcPlanSchema.shape.npcs.max(10),
     }),
     prompt,
     temperature: req.role.temperature,
@@ -151,9 +164,16 @@ async function planSupportingNpcs(
   keyNames: string[],
 ): Promise<PlannedNpc[]> {
   const ipBlock = buildIpContextBlock(ipContext);
+  const premiseDivergence = req.premiseDivergence ?? null;
+  const divergenceBlock = buildPremiseDivergenceBlock(premiseDivergence);
+  const knownIpContract = buildKnownIpGenerationContract(
+    ipContext,
+    premiseDivergence,
+    "supporting npcs",
+  );
 
   const supportingInstruction = ipContext
-    ? `List 3-5 supporting characters. These can be minor canonical characters or original characters. They must fill GAMEPLAY roles not covered by key characters: merchants, informants, gatekeepers, quest givers, local rivals.`
+    ? `List 3-5 supporting characters. These can be minor canonical characters or original characters created only where PREMISE DIVERGENCE or gameplay needs require them. They must fill GAMEPLAY roles not covered by key characters: merchants, informants, gatekeepers, quest givers, local rivals. Preserve unaffected canon support characters when they still fit the present world state.`
     : `List 3-5 supporting characters who serve specific gameplay functions. Each must offer the player something concrete: goods to buy, information to trade, jobs to accept, or obstacles to overcome.`;
 
   const prompt = `You are planning supporting NPCs for a text RPG world.
@@ -167,6 +187,7 @@ ${formatNameList(locationNames)}
 KNOWN FACTIONS:
 ${formatNameList(factionNames)}
 ${ipBlock}
+${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}
 KEY CHARACTERS ALREADY PLANNED: ${keyNames.join(", ")}
 Do NOT duplicate any key character. Supporting characters fill gaps — they give the player people to interact with in locations that lack key NPCs.
 
@@ -182,7 +203,8 @@ ${buildStopSlopRules()}`;
   const result = await generateObject({
     model: createModel(req.role.provider),
     schema: z.object({
-      npcs: npcPlanSchema.shape.npcs.min(3).max(5),
+      // Supporting NPCs are additive; partial output is still usable.
+      npcs: npcPlanSchema.shape.npcs.max(5),
     }),
     prompt,
     temperature: req.role.temperature,
@@ -211,6 +233,13 @@ async function detailNpcBatch(
   previouslyDetailed: Array<{ name: string; tier: string; persona: string }>,
 ): Promise<DetailedNpc[]> {
   const ipBlock = buildIpContextBlock(ipContext);
+  const premiseDivergence = req.premiseDivergence ?? null;
+  const divergenceBlock = buildPremiseDivergenceBlock(premiseDivergence);
+  const knownIpContract = buildKnownIpGenerationContract(
+    ipContext,
+    premiseDivergence,
+    "npc details",
+  );
 
   const previousSection =
     previouslyDetailed.length > 0
@@ -218,7 +247,7 @@ async function detailNpcBatch(
       : "";
 
   const ipPersonaRule = ipContext
-    ? `- For known-IP characters: describe their canonical personality and backstory first, then note ONLY changes caused by the premise divergence.`
+    ? `- For known-IP characters: describe their canonical personality and backstory as modified by the present world state. Keep unaffected canon details intact, but do NOT reintroduce replaced protagonists or reverted relationships unless PREMISE DIVERGENCE explicitly says they coexist.`
     : "";
 
   const prompt = `You are writing NPC reference cards for a text RPG engine. The engine reads these fields mechanically — follow the format exactly.
@@ -229,6 +258,7 @@ ${refinedPremise}
 KNOWN LOCATIONS: ${locationNames.join(", ")}
 KNOWN FACTIONS: ${factionNames.join(", ")}
 ${ipBlock}
+${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}
 ${previousSection}
 NPCs TO DETAIL NOW:
 ${batch.map((b) => `- ${b.name} (${b.tier}): ${b.role}`).join("\n")}

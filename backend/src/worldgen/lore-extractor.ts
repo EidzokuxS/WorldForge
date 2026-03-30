@@ -4,10 +4,15 @@ import { createModel } from "../ai/index.js";
 import { withModelFallback } from "../ai/with-model-fallback.js";
 import { createLogger } from "../lib/index.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
-import type { IpResearchContext } from "@worldforge/shared";
+import type { IpResearchContext, PremiseDivergence } from "@worldforge/shared";
 import { LORE_CATEGORIES } from "./types.js";
 import type { WorldScaffold, ExtractedLoreCard } from "./types.js";
-import { buildIpContextBlock, buildStopSlopRules } from "./scaffold-steps/prompt-utils.js";
+import {
+  buildIpContextBlock,
+  buildKnownIpGenerationContract,
+  buildPremiseDivergenceBlock,
+  buildStopSlopRules,
+} from "./scaffold-steps/prompt-utils.js";
 
 const log = createLogger("lore-extractor");
 
@@ -65,9 +70,16 @@ export async function extractLoreCards(
   role: ResolvedRole,
   fallbackRole?: ResolvedRole,
   ipContext?: IpResearchContext | null,
+  premiseDivergence?: PremiseDivergence | null,
 ): Promise<ExtractedLoreCard[]> {
   const context = formatScaffoldContext(scaffold);
   const ipBlock = buildIpContextBlock(ipContext ?? null);
+  const divergenceBlock = buildPremiseDivergenceBlock(premiseDivergence ?? null);
+  const knownIpContract = buildKnownIpGenerationContract(
+    ipContext ?? null,
+    premiseDivergence ?? null,
+    "lore cards",
+  );
 
   const ipFactsSection =
     ipContext?.keyFacts && ipContext.keyFacts.length > 0
@@ -75,13 +87,14 @@ export async function extractLoreCards(
       : "";
 
   const ipQualityRule = ipContext
-    ? `- For known IPs: concept/ability/rule cards MUST describe actual franchise systems, powers, and mechanics drawn from the REFERENCE FACTS above. Never invent systems that do not exist in the franchise canon.`
+    ? `- For known IPs: concept/ability/rule cards MUST describe actual franchise systems, powers, and mechanics drawn from the REFERENCE FACTS above. Never invent systems that do not exist in the franchise canon.
+- For known IPs: when PREMISE DIVERGENCE changes one role, relationship, allegiance, or institution, update only lore affected by that change. Keep untouched canon facts explicit in the lore cards.`
     : "";
 
   const prompt = `You are a world encyclopedia compiler. Extract 30-50 structured lore cards from this RPG world scaffold. Each card is a database entry the game engine uses for semantic search — accuracy and specificity matter.
 
 ${context}
-${ipBlock}${ipFactsSection}
+${ipBlock}${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}${ipFactsSection}
 EXTRACTION PROCEDURE:
 1. Create one "location" card per scaffold location. term = location name. definition = 1-2 sentence factual summary (geography, population, function). Do NOT copy the scaffold description verbatim — summarize.
 2. Create one "npc" card per scaffold NPC. term = character name. definition = their role and single most important trait.

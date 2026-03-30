@@ -1,7 +1,14 @@
 import { safeGenerateObject as generateObject } from "../../ai/generate-object-safe.js";
 import { z } from "zod";
 import { createModel } from "../../ai/index.js";
-import { buildIpContextBlock, buildCanonicalList, buildStopSlopRules, formatNameList } from "./prompt-utils.js";
+import {
+  buildCanonicalList,
+  buildIpContextBlock,
+  buildKnownIpGenerationContract,
+  buildPremiseDivergenceBlock,
+  buildStopSlopRules,
+  formatNameList,
+} from "./prompt-utils.js";
 import type { IpResearchContext } from "../ip-researcher.js";
 import type { GenerateScaffoldRequest, ScaffoldFaction } from "../types.js";
 
@@ -13,7 +20,7 @@ const factionPlanSchema = z.object({
   factions: z.array(z.object({
     name: z.string(),
     purpose: z.string().describe("1 line: what role this faction plays in the world"),
-  })).min(3).max(6),
+  })).max(6),
 });
 
 const factionDetailSchema = z.object({
@@ -38,6 +45,13 @@ export async function generateFactionsStep(
   additionalInstruction?: string,
 ): Promise<ScaffoldFaction[]> {
   const ipBlock = buildIpContextBlock(ipContext);
+  const premiseDivergence = req.premiseDivergence ?? null;
+  const divergenceBlock = buildPremiseDivergenceBlock(premiseDivergence);
+  const knownIpContract = buildKnownIpGenerationContract(
+    ipContext,
+    premiseDivergence,
+    "factions",
+  );
   const canonFactions = buildCanonicalList(ipContext, "factions");
 
   // --- Call 1: PLAN ---
@@ -47,7 +61,7 @@ ${canonFactions}
 HARD RULE: Your faction names MUST come from the canonical list above. Do NOT invent new factions. The premise changes WHO leads or joins a faction, not WHETHER the faction exists.
 PROCEDURE:
 1. Pick 3-6 names from the CANONICAL FACTIONS list above. These ARE your factions.
-2. For each, note if the premise divergence changes its leadership, goals, or allegiance.
+2. For each, note how the PREMISE DIVERGENCE changes its leadership, goals, allegiance, or pressure points in the present world.
 3. You may add a new faction ONLY if the premise explicitly describes one that has no canonical equivalent.
 Copy-paste canonical faction names exactly. Never create "premise-themed" factions.`
     : `Generate 3-6 factions that form the political skeleton of this world. Ensure structural variety:
@@ -67,6 +81,7 @@ ${refinedPremise}
 KNOWN LOCATIONS:
 ${formatNameList(locationNames)}
 ${ipBlock}
+${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}
 CONSTRAINTS:
 - purpose: one sentence explaining what ROLE this faction plays in the world's power dynamics (not just its relationship to the premise).
 - No two factions may fill the same structural role (e.g., two "secretive criminal organizations").
@@ -90,6 +105,7 @@ ${refinedPremise}
 
 KNOWN LOCATIONS: ${locationNames.join(", ")}
 ${ipBlock}
+${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}
 FACTIONS TO DETAIL:
 ${planned.map((f) => `- ${f.name}: ${f.purpose}`).join("\n")}
 
@@ -97,7 +113,7 @@ FIELD INSTRUCTIONS:
 - tags: Mechanical trait tags. Format: [Adjective]. Examples: [Militaristic], [Secretive], [Wealthy], [Religious], [Expansionist], [Decentralized]. 2-4 tags per faction.
 - goals: 1-3 SPECIFIC objectives with concrete targets. Bad: "Expand influence." Good: "Annex the northern mining towns before winter." Each goal names a place, person, resource, or deadline.
 - assets: 1-3 concrete resources. Not "great power" — name the specific army, spy network, trade fleet, artifact, or territory they control.
-- territoryNames: Locations this faction controls or operates from. ONLY use names from this list: ${locationNames.join(", ")}. A faction may control 0 locations if it operates covertly or is nomadic.${ipContext ? `\n- For known-IP factions: describe their canonical state first, then note how the premise's divergence changes their goals, assets, or territory.` : ""}
+- territoryNames: Locations this faction controls or operates from. ONLY use names from this list: ${locationNames.join(", ")}. A faction may control 0 locations if it operates covertly or is nomadic.${ipContext ? `\n- For known-IP factions: start from the canonical faction, then update only the goals, assets, territory, or alliances that PREMISE DIVERGENCE changes. Preserve untouched canon exactly.` : ""}
 
 ${buildStopSlopRules()}`,
     temperature: req.role.temperature,

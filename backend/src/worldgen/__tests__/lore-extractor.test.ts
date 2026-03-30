@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 
 const mockGenerateObject = vi.fn();
 
@@ -58,6 +58,10 @@ const fakeLoreCards = [
 ];
 
 describe("extractLoreCards", () => {
+  beforeEach(() => {
+    mockGenerateObject.mockReset();
+  });
+
   it("returns lore cards from generateObject", async () => {
     mockGenerateObject.mockResolvedValueOnce({
       object: { loreCards: fakeLoreCards },
