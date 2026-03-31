@@ -1,5 +1,6 @@
 import type {
   CampaignMeta,
+  CampaignWorldbookSelection,
   IpResearchContext,
   PremiseDivergence,
   SeedCategory,
@@ -26,6 +27,7 @@ import type {
   CheckpointMeta,
   ClassifiedWorldBookEntry,
   WorldBookImportResult,
+  WorldbookLibraryItem,
 } from "./api-types";
 
 // Re-export all types so existing `import type { X } from "@/lib/api"` keeps working.
@@ -49,6 +51,7 @@ export type {
   CheckpointMeta,
   ClassifiedWorldBookEntry,
   WorldBookImportResult,
+  WorldbookLibraryItem,
 };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:3001";
@@ -319,6 +322,7 @@ export function suggestSeeds(
     name?: string;
     franchise?: string;
     research?: boolean;
+    selectedWorldbooks?: CampaignWorldbookSelection[];
     worldbookEntries?: ClassifiedWorldBookEntry[];
   }
 ): Promise<WorldSeeds & { _ipContext?: IpContext | null; _premiseDivergence?: PremiseDivergence | null }> {
@@ -327,6 +331,7 @@ export function suggestSeeds(
     name: opts?.name,
     franchise: opts?.franchise,
     research: opts?.research,
+    selectedWorldbooks: opts?.selectedWorldbooks,
     worldbookEntries: opts?.worldbookEntries,
   });
 }
@@ -334,6 +339,7 @@ export function suggestSeeds(
 /** @deprecated Use IpResearchContext from @/lib/types */
 export type IpContext = IpResearchContext;
 export type PremiseDivergenceContext = PremiseDivergence;
+export type WorldbookSelection = CampaignWorldbookSelection;
 
 export function suggestSeed(
   premise: string,
@@ -751,6 +757,25 @@ export function worldbookToIpContext(
     },
     source: "llm",
   };
+}
+
+export function listWorldbookLibrary(): Promise<{ items: WorldbookLibraryItem[] }> {
+  return apiGet<{ items: WorldbookLibraryItem[] }>("/api/worldgen/worldbook-library");
+}
+
+export function importWorldbookLibrary(
+  displayName: string,
+  worldbook: object,
+  originalFileName?: string,
+): Promise<{ item: WorldbookLibraryItem; existed: boolean }> {
+  return apiPost<{ item: WorldbookLibraryItem; existed: boolean }>(
+    "/api/worldgen/worldbook-library/import",
+    {
+      displayName,
+      originalFileName,
+      worldbook,
+    },
+  );
 }
 
 export function importWorldBook(

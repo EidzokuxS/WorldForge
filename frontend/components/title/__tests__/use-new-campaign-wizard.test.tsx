@@ -122,7 +122,7 @@ async function openWizard(result: { current: ReturnType<typeof useNewCampaignWiz
 
 async function uploadWorldbook(result: { current: ReturnType<typeof useNewCampaignWizard> }, file = createWorldbookFile()) {
   await act(async () => {
-    await result.current.handleWorldBookUpload(file);
+    await result.current.handleWorldbookUpload(file);
   });
 }
 

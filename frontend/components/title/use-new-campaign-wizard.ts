@@ -7,13 +7,19 @@ import {
   generateWorld,
   suggestSeed,
   suggestSeeds,
-  classifyWorldBook,
+  importWorldbookLibrary,
+  listWorldbookLibrary,
   apiPost,
   loadCampaign,
   getWorldData,
   getWorldgenDebugProgress,
 } from "@/lib/api";
-import type { GenerateWorldResult, GenerationProgress, IpContext, ClassifiedWorldBookEntry } from "@/lib/api";
+import type {
+  GenerateWorldResult,
+  GenerationProgress,
+  IpContext,
+  WorldbookLibraryItem,
+} from "@/lib/api";
 import { getErrorMessage } from "@/lib/settings";
 import type { PremiseDivergence, SeedCategory, Settings, WorldSeeds } from "@/lib/types";
 import {
@@ -31,6 +37,38 @@ import {
 const DEFAULT_API_ERROR = "Unknown API error.";
 const GENERATION_RECOVERY_POLL_MS = 5000;
 const GENERATION_RECOVERY_ATTEMPTS = 360;
+
+function sortWorldbookItems(items: WorldbookLibraryItem[]): WorldbookLibraryItem[] {
+  return [...items].sort((left, right) => {
+    const nameCompare = left.displayName.localeCompare(right.displayName, "en", {
+      sensitivity: "base",
+    });
+    if (nameCompare !== 0) {
+      return nameCompare;
+    }
+    return left.id.localeCompare(right.id, "en", { sensitivity: "base" });
+  });
+}
+
+function mergeWorldbookItem(
+  items: WorldbookLibraryItem[],
+  item: WorldbookLibraryItem,
+): WorldbookLibraryItem[] {
+  return sortWorldbookItems([
+    ...items.filter((existing) => existing.id !== item.id),
+    item,
+  ]);
+}
+
+function mergeSelectedWorldbooks(
+  items: WorldbookLibraryItem[],
+  item: WorldbookLibraryItem,
+): WorldbookLibraryItem[] {
+  if (items.some((existing) => existing.id === item.id)) {
+    return items;
+  }
+  return [...items, item];
+}
 
 type Phase =
   | { kind: "idle" }
@@ -53,11 +91,10 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
   const [ipContext, setIpContext] = useState<IpContext | null>(null);
   const [premiseDivergence, setPremiseDivergence] = useState<PremiseDivergence | null>(null);
 
-  // Worldbook state
-  const [worldbookFile, setWorldbookFile] = useState<File | null>(null);
-  const [worldbookEntries, setWorldbookEntries] = useState<ClassifiedWorldBookEntry[] | null>(null);
-  const [worldbookStatus, setWorldbookStatus] = useState<"idle" | "parsing" | "classifying" | "done" | "error">("idle");
-  const [classifyProgress, setClassifyProgress] = useState<{ batch: number; total: number } | null>(null);
+  const [worldbookLibrary, setWorldbookLibrary] = useState<WorldbookLibraryItem[]>([]);
+  const [selectedWorldbooks, setSelectedWorldbooks] = useState<WorldbookLibraryItem[]>([]);
+  const [worldbookLibraryLoading, setWorldbookLibraryLoading] = useState(false);
+  const [worldbookStatus, setWorldbookStatus] = useState<"idle" | "importing" | "done" | "error">("idle");
   const [worldbookError, setWorldbookError] = useState<string | null>(null);
 
   const isBusy = phase.kind !== "idle";
@@ -66,7 +103,7 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
   const isSuggesting = phase.kind === "suggesting-all";
   const suggestingCategory =
     phase.kind === "suggesting-category" ? phase.category : null;
-  const hasWorldbook = worldbookStatus === "done" && worldbookEntries !== null && worldbookEntries.length > 0;
+  const hasWorldbook = selectedWorldbooks.length > 0;
   const conceptReady =
     campaignName.trim().length > 0 && (campaignPremise.trim().length > 0 || hasWorldbook);
   const canCreate = conceptReady && !isBusy;
@@ -77,17 +114,38 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
     setIpContext(null);
     setPremiseDivergence(null);
     setPhase({ kind: "idle" });
-    setWorldbookFile(null);
-    setWorldbookEntries(null);
+    setWorldbookLibrary([]);
+    setSelectedWorldbooks([]);
+    setWorldbookLibraryLoading(false);
     setWorldbookStatus("idle");
-    setClassifyProgress(null);
     setWorldbookError(null);
+  }
+
+  async function loadReusableWorldbooks() {
+    setWorldbookLibraryLoading(true);
+    setWorldbookError(null);
+    try {
+      const result = await listWorldbookLibrary();
+      setWorldbookLibrary(sortWorldbookItems(result.items));
+    } catch (error) {
+      const message = getErrorMessage(error, "Failed to load reusable worldbooks.");
+      setWorldbookError(message);
+      toast.error("Failed to load worldbook library", {
+        description: message,
+      });
+    } finally {
+      setWorldbookLibraryLoading(false);
+    }
   }
 
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen && isBusy) return;
     setOpen(nextOpen);
-    if (!nextOpen) resetFlow();
+    if (nextOpen) {
+      void loadReusableWorldbooks();
+      return;
+    }
+    resetFlow();
   }
 
   function sleep(ms: number): Promise<void> {
@@ -195,11 +253,9 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
     }
   }
 
-  async function handleWorldBookUpload(file: File) {
-    setWorldbookFile(file);
-    setWorldbookStatus("parsing");
+  async function handleWorldbookUpload(file: File) {
+    setWorldbookStatus("importing");
     setWorldbookError(null);
-    setClassifyProgress(null);
 
     let parsed: unknown;
     try {
@@ -211,26 +267,34 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
       return;
     }
 
-    setWorldbookStatus("classifying");
+    const displayName = file.name.replace(/\.json$/i, "").trim() || "Worldbook";
+
     try {
-      const result = await classifyWorldBook(parsed as object);
-      setWorldbookEntries(result.entries);
+      const result = await importWorldbookLibrary(
+        displayName,
+        parsed as object,
+        file.name,
+      );
+      setWorldbookLibrary((current) => mergeWorldbookItem(current, result.item));
+      setSelectedWorldbooks((current) => mergeSelectedWorldbooks(current, result.item));
       setWorldbookStatus("done");
     } catch (error) {
+      const message = getErrorMessage(error, "Worldbook import failed");
       setWorldbookStatus("error");
-      setWorldbookError(getErrorMessage(error, "Classification failed"));
-      toast.error("WorldBook classification failed", {
-        description: getErrorMessage(error, "Check your Generator settings."),
+      setWorldbookError(message);
+      toast.error("Worldbook import failed", {
+        description: message,
       });
     }
   }
 
-  function handleWorldBookRemove() {
-    setWorldbookFile(null);
-    setWorldbookEntries(null);
-    setWorldbookStatus("idle");
-    setClassifyProgress(null);
-    setWorldbookError(null);
+  function toggleWorldbookSelection(item: WorldbookLibraryItem) {
+    setSelectedWorldbooks((current) => {
+      if (current.some((existing) => existing.id === item.id)) {
+        return current.filter((existing) => existing.id !== item.id);
+      }
+      return [...current, item];
+    });
   }
 
   async function createCampaignWithSeeds(seeds?: Partial<WorldSeeds>): Promise<void> {
@@ -249,6 +313,7 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
         seeds?: Partial<WorldSeeds>;
         ipContext?: IpContext | null;
         premiseDivergence?: PremiseDivergence | null;
+        worldbookSelection?: WorldbookLibraryItem[];
       } = {
         name,
         premise,
@@ -262,6 +327,9 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
       if (premiseDivergence) {
         payload.premiseDivergence = premiseDivergence;
       }
+      if (selectedWorldbooks.length > 0) {
+        payload.worldbookSelection = selectedWorldbooks;
+      }
 
       const created = await apiPost<CampaignMeta>("/api/campaigns", payload);
       toast.success("Campaign created", { description: created.name });
@@ -272,13 +340,6 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
       // Close the dialog before generation starts, but keep local state intact
       // until the request resolves so we do not churn wizard state mid-SSE.
       setOpen(false);
-
-      // If worldbook was uploaded but ipContext not set (skipped DNA step), build it now
-      if (!ipContext && worldbookEntries?.length) {
-        const { worldbookToIpContext } = await import("@/lib/api");
-        const derivedContext = worldbookToIpContext(worldbookEntries, name);
-        setIpContext(derivedContext);
-      }
       const generated = await tryGenerateWorld(created.id);
 
       setCampaignName("");
@@ -322,7 +383,7 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
           name: campaignName.trim(),
           franchise: campaignFranchise.trim() || undefined,
           research: researchEnabled,
-          worldbookEntries: worldbookEntries ?? undefined,
+          selectedWorldbooks: selectedWorldbooks.length > 0 ? selectedWorldbooks : undefined,
         });
       if (suggested._ipContext) {
         setIpContext(suggested._ipContext);
@@ -362,7 +423,7 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
           name: campaignName.trim(),
           franchise: campaignFranchise.trim() || undefined,
           research: researchEnabled,
-          worldbookEntries: worldbookEntries ?? undefined,
+          selectedWorldbooks: selectedWorldbooks.length > 0 ? selectedWorldbooks : undefined,
         });
       if (suggested._ipContext) {
         setIpContext(suggested._ipContext);
@@ -479,10 +540,10 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
     hasWorldbook,
 
     // Worldbook state
-    worldbookFile,
-    worldbookEntries,
+    worldbookLibrary,
+    selectedWorldbooks,
+    worldbookLibraryLoading,
     worldbookStatus,
-    classifyProgress,
     worldbookError,
 
     // Handlers
@@ -493,7 +554,7 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
     handleSeedToggle,
     handleSeedTextChange,
     handleCreateWithDna,
-    handleWorldBookUpload,
-    handleWorldBookRemove,
+    handleWorldbookUpload,
+    toggleWorldbookSelection,
   };
 }

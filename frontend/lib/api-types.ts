@@ -1,4 +1,4 @@
-import type { SeedCategory } from "@/lib/types";
+import type { CampaignWorldbookSelection, SeedCategory } from "@/lib/types";
 
 export interface TestConnectionRequest {
   baseUrl: string;
@@ -194,3 +194,5 @@ export interface WorldBookImportResult {
     loreCards: number;
   };
 }
+
+export type WorldbookLibraryItem = CampaignWorldbookSelection;

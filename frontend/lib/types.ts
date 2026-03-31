@@ -1,5 +1,6 @@
 export type {
   CampaignMeta,
+  CampaignWorldbookSelection,
   IpResearchContext,
   PremiseDivergence,
   Provider,
@@ -9,5 +10,6 @@ export type {
   ResearchConfig,
   Settings,
   WorldSeeds,
+  WorldbookLibraryItemSummary,
   SeedCategory,
 } from "@worldforge/shared";
