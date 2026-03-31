@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Plus, Sparkles, Wand2, X, BookOpen } from "lucide-react";
+import { BookOpen, Loader2, Plus, Sparkles, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -23,6 +23,10 @@ interface NewCampaignDialogProps {
 }
 
 export function NewCampaignDialog({ wizard: w }: NewCampaignDialogProps) {
+  const selectedWorldbookIds = new Set(
+    w.selectedWorldbooks.map((item) => item.id),
+  );
+
   return (
     <Dialog open={w.open} onOpenChange={w.handleOpenChange}>
       <DialogTrigger asChild>
@@ -41,10 +45,10 @@ export function NewCampaignDialog({ wizard: w }: NewCampaignDialogProps) {
         {w.step === 1 ? (
           <>
             <DialogHeader>
-              <DialogTitle>Create Campaign — Concept</DialogTitle>
+              <DialogTitle>Create Campaign - Concept</DialogTitle>
               <DialogDescription>
-                Name your campaign and define the world tone, themes, and starting
-                premise.
+                Name your campaign, define the premise, and choose any reusable
+                worldbooks you want to carry into this session.
               </DialogDescription>
             </DialogHeader>
 
@@ -62,7 +66,7 @@ export function NewCampaignDialog({ wizard: w }: NewCampaignDialogProps) {
                   onChange={(event) => w.setCampaignPremise(event.target.value)}
                   placeholder={
                     w.hasWorldbook
-                      ? "Describe your world (optional — WorldBook provides context)..."
+                      ? "Describe your world (optional - selected worldbooks provide context)..."
                       : "Describe your world: setting, tone, key themes..."
                   }
                   rows={6}
@@ -86,88 +90,132 @@ export function NewCampaignDialog({ wizard: w }: NewCampaignDialogProps) {
                 </label>
               </div>
 
-              {/* WorldBook Upload */}
-              <div className="space-y-2">
-                <input
-                  id="worldbook-upload"
-                  type="file"
-                  accept=".json"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) void w.handleWorldBookUpload(file);
-                    e.target.value = "";
-                  }}
-                />
-                {w.worldbookStatus === "idle" ? (
+              <div className="space-y-3 rounded-xl border border-border/70 bg-muted/20 p-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <BookOpen className="h-4 w-4" />
+                    <span>Knowledge Sources</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Select reusable worldbooks, then add more JSON files in the
+                    same session if needed. The backend remains the canonical
+                    merge path.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  {w.worldbookLibraryLoading ? (
+                    <div className="flex items-center gap-2 rounded-lg border border-dashed border-border/60 px-3 py-3 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Loading reusable worldbooks...</span>
+                    </div>
+                  ) : w.worldbookLibrary.length > 0 ? (
+                    <div className="grid gap-2">
+                      {w.worldbookLibrary.map((item) => {
+                        const selected = selectedWorldbookIds.has(item.id);
+                        return (
+                          <Button
+                            key={item.id}
+                            type="button"
+                            variant={selected ? "default" : "outline"}
+                            className="h-auto justify-between px-3 py-3 text-left"
+                            aria-pressed={selected}
+                            onClick={() => w.toggleWorldbookSelection(item)}
+                            disabled={w.isBusy}
+                          >
+                            <span className="flex flex-col items-start">
+                              <span>{item.displayName}</span>
+                              <span className="text-xs opacity-80">
+                                {item.entryCount} reusable entries
+                              </span>
+                            </span>
+                            <span className="text-xs uppercase tracking-[0.18em] opacity-80">
+                              {selected ? "Selected" : "Available"}
+                            </span>
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-border/60 px-3 py-3 text-sm text-muted-foreground">
+                      No reusable worldbooks yet. Import one below to seed the library.
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2 rounded-lg border border-border/60 bg-background/80 p-3">
+                  <input
+                    id="worldbook-upload"
+                    type="file"
+                    accept=".json"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void w.handleWorldbookUpload(file);
+                      event.target.value = "";
+                    }}
+                  />
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-medium">Upload reusable source</p>
+                      <p className="text-xs text-muted-foreground">
+                        Upload a SillyTavern-style JSON file and store it for reuse.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => document.getElementById("worldbook-upload")?.click()}
+                      disabled={w.isBusy}
+                    >
+                      <Plus className="h-4 w-4" />
+                      Add Worldbook JSON
+                    </Button>
+                  </div>
+
                   <div
                     role="button"
                     tabIndex={0}
-                    className={`flex cursor-pointer flex-col items-center gap-2 rounded-lg border-2 border-dashed border-border/50 px-4 py-3 text-sm text-muted-foreground transition-colors hover:border-border hover:text-foreground${
+                    className={`rounded-lg border-2 border-dashed border-border/50 px-4 py-3 text-sm text-muted-foreground transition-colors hover:border-border hover:text-foreground${
                       w.isBusy ? " pointer-events-none opacity-50" : ""
                     }`}
                     onClick={() => document.getElementById("worldbook-upload")?.click()}
-                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") document.getElementById("worldbook-upload")?.click(); }}
-                    onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      const file = e.dataTransfer.files[0];
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        document.getElementById("worldbook-upload")?.click();
+                      }
+                    }}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      const file = event.dataTransfer.files[0];
                       if (file && file.name.endsWith(".json")) {
-                        void w.handleWorldBookUpload(file);
+                        void w.handleWorldbookUpload(file);
                       }
                     }}
                   >
-                    <BookOpen className="h-5 w-5" />
-                    <span>Drop WorldBook JSON or click to upload</span>
+                    Drop a JSON file here or click to import it into the reusable library.
                   </div>
-                ) : (
-                  <div className="flex items-center gap-3 rounded-lg border border-border/70 px-4 py-3 text-sm">
-                    {w.worldbookStatus === "parsing" || w.worldbookStatus === "classifying" ? (
-                      <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
-                    ) : w.worldbookStatus === "done" ? (
-                      <BookOpen className="h-4 w-4 shrink-0 text-green-500" />
-                    ) : (
-                      <BookOpen className="h-4 w-4 shrink-0 text-destructive" />
-                    )}
 
-                    <div className="min-w-0 flex-1">
-                      {w.worldbookStatus === "parsing" && (
-                        <span className="text-muted-foreground">Reading WorldBook...</span>
-                      )}
-                      {w.worldbookStatus === "classifying" && (
-                        <span className="text-muted-foreground">
-                          Classifying entries{w.classifyProgress
-                            ? ` (${w.classifyProgress.batch}/${w.classifyProgress.total} batches)`
-                            : "..."}
-                        </span>
-                      )}
-                      {w.worldbookStatus === "done" && w.worldbookEntries && (
-                        <span>
-                          <span className="font-medium">{w.worldbookFile?.name}</span>
-                          <span className="ml-2 text-muted-foreground">
-                            {w.worldbookEntries.length} entries classified
-                          </span>
-                        </span>
-                      )}
-                      {w.worldbookStatus === "error" && (
-                        <span className="text-destructive">{w.worldbookError ?? "Classification failed"}</span>
-                      )}
+                  {w.worldbookStatus === "importing" && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Importing reusable worldbook...</span>
                     </div>
-
-                    {w.worldbookStatus !== "parsing" && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 w-7 shrink-0 p-0"
-                        onClick={w.handleWorldBookRemove}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
-                )}
+                  )}
+                  {w.worldbookStatus === "done" && (
+                    <p className="text-sm text-emerald-600">
+                      Worldbook imported and selected for this campaign.
+                    </p>
+                  )}
+                  {w.worldbookError && (
+                    <p className="text-sm text-destructive">{w.worldbookError}</p>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -202,7 +250,7 @@ export function NewCampaignDialog({ wizard: w }: NewCampaignDialogProps) {
         ) : (
           <>
             <DialogHeader>
-              <DialogTitle>Create Campaign — World DNA</DialogTitle>
+              <DialogTitle>Create Campaign - World DNA</DialogTitle>
               <DialogDescription>
                 AI-generated constraints based on your premise. Toggle categories,
                 edit freely, and keep only what fits your vision.
