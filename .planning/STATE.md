@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Executing Phase 27
-stopped_at: Completed 27-01-PLAN.md
-last_updated: "2026-03-31T10:25:06.714Z"
+status: Ready to execute
+stopped_at: Completed 27-02-PLAN.md
+last_updated: "2026-03-31T10:41:09.192Z"
 progress:
   total_phases: 22
   completed_phases: 21
   total_plans: 61
-  completed_plans: 59
+  completed_plans: 60
 ---
 
 # Project State
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-03-18)
 ## Current Position
 
 Phase: 27 (Lore card editing and deletion) — IN PROGRESS
-Plan: 1 of 3 complete
+Plan: 2 of 3 complete
 
 ## Performance Metrics
 
@@ -186,6 +186,8 @@ Recent decisions affecting current work:
 - [Phase 27]: Lore item edits use PUT with a full replacement payload for term, definition, and category.
 - [Phase 27]: Lore card deletion stays row-level and returns a boolean not-found signal to map cleanly to route-level 404 responses.
 - [Phase 27]: Lore edits require a resolved embedder and rewrite the full lore table so ids stay stable while vectors stay fresh.
+- [Phase 27]: LoreSection clears search results before awaiting onRefresh so parent lore state remains authoritative after item mutations.
+- [Phase 27]: LoreCardUpdateInput stays narrowed to canonical categories while LoreCardItem reads remain string-typed for compatibility with existing callers and fixtures.
 
 ### Roadmap Evolution
 
@@ -218,6 +220,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-31T10:25:06.714Z
-Stopped at: Completed 27-01-PLAN.md
+Last session: 2026-03-31T10:41:09.187Z
+Stopped at: Completed 27-02-PLAN.md
 Resume file: None
