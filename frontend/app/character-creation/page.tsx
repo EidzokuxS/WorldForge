@@ -15,6 +15,7 @@ import {
   type ParsedCharacter,
   importV2Card,
 } from "@/lib/api";
+import type { CharacterImportMode } from "@/lib/types";
 import { parseV2CardFile } from "@/lib/v2-card-parser";
 import { CharacterForm } from "@/components/character-creation/character-form";
 import { CharacterCard } from "@/components/character-creation/character-card";
@@ -88,12 +89,16 @@ export default function CharacterCreationPage() {
   }, [campaignId]);
 
   const handleImport = useCallback(
-    async (file: File) => {
+    async (file: File, importMode: CharacterImportMode) => {
       if (!campaignId) return;
       setImporting(true);
       try {
         const card = await parseV2CardFile(file);
-        const result = await importV2Card(campaignId, card, "player", locationNames);
+        const result = await importV2Card(campaignId, card, {
+          role: "player",
+          importMode,
+          locationNames,
+        });
         if (result.role === "player") setCharacter(result.character);
         toast.success("Character imported");
       } catch (error) {

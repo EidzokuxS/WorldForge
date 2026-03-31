@@ -347,6 +347,7 @@ export const importV2CardSchema = z.object({
   personality: z.string().default(""),
   scenario: z.string().default(""),
   tags: z.array(z.string()).default([]),
+  importMode: z.enum(["native", "outsider"]).default("native"),
   ...characterRoleFields,
 }).refine(keyRoleLocationRefine.refinement, keyRoleLocationRefine.options);
 

@@ -1590,7 +1590,18 @@ describe("importV2CardSchema", () => {
       expect(result.data.personality).toBe("");
       expect(result.data.scenario).toBe("");
       expect(result.data.tags).toEqual([]);
+      expect(result.data.importMode).toBe("native");
     }
+  });
+
+  it("accepts outsider import mode", () => {
+    const result = importV2CardSchema.safeParse({
+      campaignId: "abc-123",
+      name: "Elara",
+      description: "A mysterious sorceress.",
+      importMode: "outsider",
+    });
+    expect(result.success).toBe(true);
   });
 
   it("accepts long V2 card text fields without max-length limits", () => {

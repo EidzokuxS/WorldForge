@@ -1,6 +1,7 @@
 import type {
   CampaignMeta,
   CampaignWorldbookSelection,
+  CharacterImportMode,
   IpResearchContext,
   PremiseDivergence,
   SeedCategory,
@@ -673,12 +674,21 @@ export function researchCharacter(
 export function importV2Card(
   campaignId: string,
   card: { name: string; description: string; personality: string; scenario: string; tags: string[] },
-  role: "player" | "key" = "player",
-  locationNames?: string[],
-  factionNames?: string[],
+  options?: {
+    role?: "player" | "key";
+    importMode?: CharacterImportMode;
+    locationNames?: string[];
+    factionNames?: string[];
+  },
 ): Promise<CharacterResult> {
+  const role = options?.role ?? "player";
   return apiPost<CharacterResult>("/api/worldgen/import-v2-card", {
-    campaignId, ...card, role, locationNames, factionNames,
+    campaignId,
+    ...card,
+    role,
+    importMode: options?.importMode ?? "native",
+    locationNames: options?.locationNames,
+    factionNames: options?.factionNames,
   });
 }
 

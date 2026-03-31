@@ -5,11 +5,19 @@ import { Loader2, Sparkles, Upload, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { CharacterImportMode } from "@/lib/types";
 
 interface CharacterFormProps {
   onParse: (description: string) => void;
   onGenerate: () => void;
-  onImport: (file: File) => void;
+  onImport: (file: File, importMode: CharacterImportMode) => void;
   parsing: boolean;
   generating: boolean;
   importing: boolean;
@@ -24,6 +32,7 @@ export function CharacterForm({
   importing,
 }: CharacterFormProps) {
   const [description, setDescription] = useState("");
+  const [importMode, setImportMode] = useState<CharacterImportMode>("native");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const busy = parsing || generating || importing;
 
@@ -47,7 +56,7 @@ export function CharacterForm({
         />
       </div>
 
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <Button
           onClick={() => onParse(description.trim())}
           disabled={busy || !description.trim()}
@@ -79,6 +88,23 @@ export function CharacterForm({
           )}
         </Button>
 
+        <div className="min-w-[240px] space-y-1">
+          <Label className="text-xs text-muted-foreground">Import integration</Label>
+          <Select
+            value={importMode}
+            onValueChange={(value: CharacterImportMode) => setImportMode(value)}
+            disabled={busy}
+          >
+            <SelectTrigger className="h-10">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="native">Native resident</SelectItem>
+              <SelectItem value="outsider">Outsider / popadanets</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
         <input
           ref={fileInputRef}
           type="file"
@@ -87,7 +113,7 @@ export function CharacterForm({
           onChange={(e) => {
             const file = e.target.files?.[0];
             if (file) {
-              onImport(file);
+              onImport(file, importMode);
               e.target.value = "";
             }
           }}

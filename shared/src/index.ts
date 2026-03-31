@@ -19,6 +19,7 @@ export type {
   WorldbookLibraryItemSummary,
   CampaignWorldbookSelection,
   CampaignMeta,
+  CharacterImportMode,
   PlayerCharacter,
 } from "./types.js";
 

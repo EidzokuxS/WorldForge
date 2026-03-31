@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockGenerateObject = vi.fn();
 
-vi.mock("ai", () => ({
-  generateObject: (...args: unknown[]) => mockGenerateObject(...args),
+vi.mock("../../ai/generate-object-safe.js", () => ({
+  safeGenerateObject: (...args: unknown[]) => mockGenerateObject(...args),
 }));
 
 vi.mock("../../ai/index.js", () => ({
@@ -64,6 +64,7 @@ describe("mapV2CardToNpc", () => {
       personality: "Gruff.",
       scenario: "In a forge.",
       v2Tags: ["male"],
+      importMode: "native",
       premise: "Fantasy.",
       locationNames: ["Ironhaven"],
       factionNames: [],
@@ -73,6 +74,31 @@ describe("mapV2CardToNpc", () => {
     expect(result.name).toBe("Grom");
     const prompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>).prompt as string;
     expect(prompt).toContain("CHARACTER NAME: Grom");
+    expect(prompt).toContain("IMPORT MODE: native resident.");
+  });
+
+  it("normalizes noisy imported NPC tags", async () => {
+    mockGenerateObject.mockResolvedValueOnce({
+      object: {
+        ...fakeNpc,
+        tags: ["[Remote Researcher]", "pattern_analysis", "offworld-origin", "nsfw"],
+      },
+    });
+
+    const result = await mapV2CardToNpc({
+      name: "Grom",
+      description: "A blacksmith.",
+      personality: "Gruff.",
+      scenario: "In a forge.",
+      v2Tags: ["male"],
+      importMode: "outsider",
+      premise: "Fantasy.",
+      locationNames: ["Ironhaven"],
+      factionNames: [],
+      role: fakeRole,
+    });
+
+    expect(result.tags).toEqual(["Remote Researcher", "Pattern Analysis"]);
   });
 });
 

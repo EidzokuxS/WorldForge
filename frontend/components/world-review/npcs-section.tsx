@@ -20,6 +20,7 @@ import { StringListEditor } from "@/components/world-review/string-list-editor";
 import { RegenerateDialog } from "@/components/world-review/regenerate-dialog";
 import { parseV2CardFile } from "@/lib/v2-card-parser";
 import { parseCharacter, importV2Card, researchCharacter } from "@/lib/api";
+import type { CharacterImportMode } from "@/lib/types";
 import type { ScaffoldNpc } from "@/lib/api";
 
 interface NpcsSectionProps {
@@ -55,6 +56,7 @@ export function NpcsSection({
   const [busy, setBusy] = useState(false);
   const [descriptionText, setDescriptionText] = useState("");
   const [archetypeText, setArchetypeText] = useState("");
+  const [importMode, setImportMode] = useState<CharacterImportMode>("native");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Assign stable UIDs to any NPCs missing them (e.g., from initial load or regeneration)
@@ -147,9 +149,12 @@ export function NpcsSection({
             scenario: card.scenario,
             tags: card.tags,
           },
-          "key",
-          locationNames,
-          factionNames,
+          {
+            role: "key",
+            importMode,
+            locationNames,
+            factionNames,
+          },
         );
         if (result.role !== "key") throw new Error("Unexpected response");
         const npc = result.npc;
@@ -164,7 +169,7 @@ export function NpcsSection({
         setBusy(false);
       }
     },
-    [campaignId, locationNames, factionNames, npcs, onChange]
+    [campaignId, factionNames, importMode, locationNames, npcs, onChange]
   );
 
   const handleGenerateNpc = useCallback(async () => {
@@ -360,10 +365,7 @@ export function NpcsSection({
           <Button
             variant={addMode === "import" ? "default" : "outline"}
             size="sm"
-            onClick={() => {
-              setAddMode("import");
-              fileInputRef.current?.click();
-            }}
+            onClick={() => setAddMode(addMode === "import" ? null : "import")}
             disabled={busy}
           >
             <Upload className="mr-2 h-4 w-4" />
@@ -426,6 +428,56 @@ export function NpcsSection({
           </div>
         )}
 
+        {addMode === "import" && (
+          <div className="mt-4 space-y-3 rounded-lg border border-border/50 bg-card p-4">
+            <div>
+              <Label className="text-sm">Import integration</Label>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Choose whether this character belongs to the setting natively or arrived here as an outsider with their own prior lore.
+              </p>
+            </div>
+
+            <Select
+              value={importMode}
+              onValueChange={(value: CharacterImportMode) => setImportMode(value)}
+              disabled={busy}
+            >
+              <SelectTrigger className="h-10 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="native">Native resident</SelectItem>
+                <SelectItem value="outsider">Outsider / popadanets</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setAddMode(null)}
+                disabled={busy}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={busy}
+              >
+                {busy ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Importing...
+                  </>
+                ) : (
+                  "Choose V2 Card"
+                )}
+              </Button>
+            </div>
+          </div>
+        )}
+
         {addMode === "generate" && (
           <div className="mt-4 space-y-2 rounded-lg border border-border/50 bg-card p-4">
             <Label className="text-sm">Archetype or inspiration</Label>
@@ -463,12 +515,6 @@ export function NpcsSection({
           </div>
         )}
 
-        {busy && addMode === "import" && (
-          <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Importing card...
-          </div>
-        )}
       </div>
     </div>
   );

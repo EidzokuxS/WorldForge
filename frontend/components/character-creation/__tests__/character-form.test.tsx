@@ -77,6 +77,32 @@ describe("CharacterForm", () => {
     expect(screen.getByText("Parsing...")).toBeInTheDocument();
   });
 
+  it("passes the selected import mode when importing a card", async () => {
+    const user = userEvent.setup();
+    const { props } = renderForm();
+    const file = new File(['{"name":"Kafka"}'], "kafka.json", { type: "application/json" });
+    const combo = screen.getByRole("combobox");
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+
+    Element.prototype.scrollIntoView = vi.fn();
+
+    Object.defineProperties(combo, {
+      hasPointerCapture: { value: () => false },
+      setPointerCapture: { value: () => {} },
+      releasePointerCapture: { value: () => {} },
+    });
+
+    await user.click(combo);
+    await user.click(screen.getByText(/Outsider \/ popadanets/i));
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, file);
+
+    expect(props.onImport).toHaveBeenCalledWith(file, "outsider");
+
+    Element.prototype.scrollIntoView = originalScrollIntoView;
+  });
+
   it("disables all buttons when busy (generating)", () => {
     renderForm({ generating: true });
 

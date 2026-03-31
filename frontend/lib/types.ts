@@ -1,6 +1,7 @@
 export type {
   CampaignMeta,
   CampaignWorldbookSelection,
+  CharacterImportMode,
   IpResearchContext,
   PremiseDivergence,
   Provider,

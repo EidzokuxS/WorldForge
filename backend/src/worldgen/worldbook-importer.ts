@@ -8,7 +8,7 @@ import type { ResolveResult } from "../ai/index.js";
 import { getDb } from "../db/index.js";
 import { npcs, locations, factions } from "../db/schema.js";
 import { storeLoreCards } from "../vectors/lore-cards.js";
-import { createLogger } from "../lib/index.js";
+import { clampTokens, createLogger } from "../lib/index.js";
 
 const log = createLogger("worldbook-importer");
 
@@ -160,28 +160,15 @@ const classificationSchema = z.object({
 
 const CLASSIFY_BATCH_SIZE = 20;
 
-export async function classifyEntries(
+function buildClassificationPrompt(
   entries: WorldBookEntry[],
-  role: ResolvedRole,
-): Promise<ClassifiedEntry[]> {
-  if (entries.length === 0) return [];
+  compact = false,
+): string {
+  const entriesList = entries
+    .map((entry, index) => `${index + 1}. "${entry.name}": ${entry.text.slice(0, 500)}`)
+    .join("\n\n");
 
-  const allClassified: ClassifiedEntry[] = [];
-  const batches = Math.ceil(entries.length / CLASSIFY_BATCH_SIZE);
-
-  for (let i = 0; i < entries.length; i += CLASSIFY_BATCH_SIZE) {
-    const batch = entries.slice(i, i + CLASSIFY_BATCH_SIZE);
-    const batchNum = Math.floor(i / CLASSIFY_BATCH_SIZE) + 1;
-    log.info(`Classifying batch ${batchNum}/${batches} (${batch.length} entries)...`);
-
-    const entriesList = batch
-      .map((e, j) => `${j + 1}. "${e.name}": ${e.text.slice(0, 500)}`)
-      .join("\n\n");
-
-    const result = await generateObject({
-      model: createModel(role.provider),
-      schema: classificationSchema,
-      prompt: `You are a content classifier for an RPG world-building system. Classify each WorldBook entry by its type.
+  return `You are a content classifier for an RPG world-building system. Classify each WorldBook entry by its type.
 
 ENTRY TYPES:
 - character: describes a person, creature with personality, an NPC (individual with unique identity)
@@ -196,12 +183,115 @@ ${entriesList}
 For each entry, provide:
 - name: the exact entry name as given
 - type: one of the five types above
-- summary: a 1-2 sentence factual summary of the entry content`,
-      temperature: role.temperature,
-      maxOutputTokens: role.maxTokens,
-    });
+- summary: a 1-2 sentence factual summary of the entry content
+${compact
+    ? `
 
-    allClassified.push(...result.object.entries);
+RETRY MODE:
+- Keep summaries very short.
+- Return exactly one object per input entry.
+- Do not omit entries.
+- Do not add commentary or markdown.`
+    : ""}`;
+}
+
+function normalizeClassificationName(value: string): string {
+  return value.trim().toLocaleLowerCase("en-US");
+}
+
+function reconcileClassifiedBatch(
+  requestedEntries: WorldBookEntry[],
+  classifiedEntries: ClassifiedEntry[],
+): ClassifiedEntry[] {
+  const byName = new Map<string, ClassifiedEntry>();
+  for (const entry of classifiedEntries) {
+    const key = normalizeClassificationName(entry.name);
+    if (!byName.has(key)) {
+      byName.set(key, entry);
+    }
+  }
+
+  return requestedEntries.map((requestedEntry) => {
+    const match = byName.get(normalizeClassificationName(requestedEntry.name));
+    if (!match) {
+      throw new Error(`Missing classification for worldbook entry "${requestedEntry.name}"`);
+    }
+
+    return {
+      ...match,
+      name: requestedEntry.name,
+    };
+  });
+}
+
+async function classifyBatchEntries(
+  entries: WorldBookEntry[],
+  role: ResolvedRole,
+  options?: {
+    compact?: boolean;
+    maxOutputTokens?: number;
+  },
+): Promise<ClassifiedEntry[]> {
+  const result = await generateObject({
+    model: createModel(role.provider),
+    schema: classificationSchema,
+    prompt: buildClassificationPrompt(entries, options?.compact),
+    temperature: role.temperature,
+    ...(options?.maxOutputTokens === undefined
+      ? {}
+      : { maxOutputTokens: options.maxOutputTokens }),
+  });
+
+  return reconcileClassifiedBatch(entries, result.object.entries);
+}
+
+export async function classifyEntries(
+  entries: WorldBookEntry[],
+  role: ResolvedRole,
+): Promise<ClassifiedEntry[]> {
+  if (entries.length === 0) return [];
+
+  const allClassified: ClassifiedEntry[] = [];
+  const batches = Math.ceil(entries.length / CLASSIFY_BATCH_SIZE);
+
+  for (let i = 0; i < entries.length; i += CLASSIFY_BATCH_SIZE) {
+    const batch = entries.slice(i, i + CLASSIFY_BATCH_SIZE);
+    const batchNum = Math.floor(i / CLASSIFY_BATCH_SIZE) + 1;
+    log.info(`Classifying batch ${batchNum}/${batches} (${batch.length} entries)...`);
+
+    try {
+      allClassified.push(...await classifyBatchEntries(batch, role));
+      continue;
+    } catch (firstError) {
+      log.warn(
+        `Worldbook batch ${batchNum}/${batches} classification failed; retrying with compact output`,
+        firstError,
+      );
+    }
+
+    try {
+      allClassified.push(
+        ...await classifyBatchEntries(batch, role, {
+          compact: true,
+          maxOutputTokens: clampTokens(Math.max(role.maxTokens, 8192)),
+        }),
+      );
+      continue;
+    } catch (retryError) {
+      log.warn(
+        `Worldbook batch ${batchNum}/${batches} retry failed; falling back to single-entry classification`,
+        retryError,
+      );
+    }
+
+    for (const entry of batch) {
+      allClassified.push(
+        ...(await classifyBatchEntries([entry], role, {
+          compact: true,
+          maxOutputTokens: clampTokens(Math.min(Math.max(role.maxTokens, 1024), 4096)),
+        })),
+      );
+    }
   }
 
   log.info(`Classified ${allClassified.length} entries total (${batches} batches)`);

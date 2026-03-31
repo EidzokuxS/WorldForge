@@ -159,3 +159,5 @@ export interface PlayerCharacter {
   equippedItems: string[];
   locationName: string;
 }
+
+export type CharacterImportMode = "native" | "outsider";
