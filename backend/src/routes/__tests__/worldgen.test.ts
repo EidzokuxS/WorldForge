@@ -33,6 +33,11 @@ vi.mock("../../worldgen/worldbook-importer.js", () => ({
   importClassifiedEntries: vi.fn(),
 }));
 
+vi.mock("../../worldbook-library/index.js", () => ({
+  listWorldbookLibrary: vi.fn(),
+  importWorldbookToLibrary: vi.fn(),
+}));
+
 vi.mock("../../worldgen/ip-researcher.js", () => ({
   researchKnownIP: vi.fn(() => Promise.resolve(null)),
   evaluateResearchSufficiency: vi.fn((ctx: unknown) => Promise.resolve(ctx)),
@@ -101,6 +106,10 @@ import {
   importClassifiedEntries,
 } from "../../worldgen/worldbook-importer.js";
 import {
+  listWorldbookLibrary,
+  importWorldbookToLibrary,
+} from "../../worldbook-library/index.js";
+import {
   markGenerationComplete,
   getActiveCampaign,
   loadCampaign,
@@ -139,6 +148,8 @@ const mockedResolveFallback = vi.mocked(resolveFallbackProvider);
 const mockedParseWorldBook = vi.mocked(parseWorldBook);
 const mockedClassifyEntries = vi.mocked(classifyEntries);
 const mockedImportClassifiedEntries = vi.mocked(importClassifiedEntries);
+const mockedListWorldbookLibrary = vi.mocked(listWorldbookLibrary);
+const mockedImportWorldbookToLibrary = vi.mocked(importWorldbookToLibrary);
 const mockedGenerateRefinedPremise = vi.mocked(generateRefinedPremiseStep);
 const mockedGenerateLocations = vi.mocked(generateLocationsStep);
 const mockedGenerateFactions = vi.mocked(generateFactionsStep);
@@ -780,6 +791,93 @@ describe("POST /api/worldgen/parse-worldbook", () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body).toHaveProperty("error");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/worldgen/worldbook-library
+// ---------------------------------------------------------------------------
+describe("GET /api/worldgen/worldbook-library", () => {
+  it("returns reusable worldbook items without requiring an active campaign", async () => {
+    const items = [
+      {
+        id: "wb-alpha",
+        displayName: "Alpha Codex",
+        normalizedSourceHash: "hash-alpha",
+        entryCount: 12,
+        createdAt: 1700000000000,
+        updatedAt: 1700000001000,
+      },
+      {
+        id: "wb-beta",
+        displayName: "Beta Codex",
+        normalizedSourceHash: "hash-beta",
+        entryCount: 8,
+        createdAt: 1700000002000,
+        updatedAt: 1700000003000,
+      },
+    ];
+    mockedListWorldbookLibrary.mockReturnValue(items as any);
+    mockedGetActiveCampaign.mockReturnValue(null as any);
+
+    const res = await app.request("/api/worldgen/worldbook-library");
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ items });
+    expect(mockedListWorldbookLibrary).toHaveBeenCalledOnce();
+    expect(mockedLoadCampaign).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/worldgen/worldbook-library/import
+// ---------------------------------------------------------------------------
+describe("POST /api/worldgen/worldbook-library/import", () => {
+  it("parses raw worldbook JSON, classifies on first import, and returns { item, existed }", async () => {
+    const worldbook = {
+      entries: {
+        "0": { comment: "Hero", content: "A brave warrior" },
+      },
+    };
+    const parsed = [{ name: "Hero", text: "A brave warrior" }];
+    const classified = [
+      { name: "Hero", type: "character" as const, summary: "A brave warrior" },
+    ];
+    const item = {
+      id: "wb-hero",
+      displayName: "Hero Book",
+      normalizedSourceHash: "hash-hero",
+      entryCount: 1,
+      createdAt: 1700000000000,
+      updatedAt: 1700000001000,
+    };
+
+    mockedParseWorldBook.mockReturnValue(parsed as any);
+    mockedImportWorldbookToLibrary.mockImplementation(async (options: any) => {
+      const entries = await options.classify();
+      expect(entries).toEqual(classified);
+      expect(options.displayName).toBe("Hero Book");
+      expect(options.originalFileName).toBe("hero.json");
+      expect(options.parsedEntries).toEqual(parsed);
+      return { item, existed: false };
+    });
+    mockedClassifyEntries.mockResolvedValue(classified as any);
+
+    const res = await app.request("/api/worldgen/worldbook-library/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        displayName: "Hero Book",
+        originalFileName: "hero.json",
+        worldbook,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ item, existed: false });
+    expect(mockedParseWorldBook).toHaveBeenCalledWith(worldbook);
+    expect(mockedClassifyEntries).toHaveBeenCalledWith(parsed, fakeResolvedRole);
+    expect(mockedImportWorldbookToLibrary).toHaveBeenCalledOnce();
   });
 });
 
