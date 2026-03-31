@@ -18,5 +18,7 @@ export { extractLoreCards } from "./lore-extractor.js";
 export type { ExtractedLoreCard } from "./types.js";
 export { researchKnownIP } from "./ip-researcher.js";
 export type { IpResearchContext } from "./ip-researcher.js";
+export { interpretPremiseDivergence } from "./premise-divergence.js";
+export { beginWorldgenOperation, listWorldgenOperations } from "./debug-progress.js";
 export { resolveStartingLocation } from "./starting-location.js";
 export type { StartingLocationResult } from "./starting-location.js";

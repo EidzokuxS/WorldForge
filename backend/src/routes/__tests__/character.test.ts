@@ -279,7 +279,12 @@ describe("POST /api/worldgen/import-v2-card", () => {
     const body = await res.json();
     expect(body.role).toBe("player");
     expect(body.character).toEqual(fakeChar);
-    expect(mockedMapV2Char).toHaveBeenCalled();
+    expect(mockedMapV2Char).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "Raven",
+        importMode: "native",
+      })
+    );
   });
 
   it("with role=key calls mapV2CardToNpc", async () => {
@@ -302,7 +307,36 @@ describe("POST /api/worldgen/import-v2-card", () => {
     const body = await res.json();
     expect(body.role).toBe("key");
     expect(body.npc).toEqual(fakeNpc);
-    expect(mockedMapV2Npc).toHaveBeenCalled();
+    expect(mockedMapV2Npc).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "Raven",
+        importMode: "native",
+      })
+    );
+  });
+
+  it("passes outsider import mode through to NPC mapping", async () => {
+    setActiveCampaign();
+    createMockDbForResolveNames();
+    mockedMapV2Npc.mockResolvedValue({ name: "Raven" } as any);
+
+    const res = await app.request("/api/worldgen/import-v2-card", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...v2Body,
+        role: "key",
+        importMode: "outsider",
+        locationNames: ["Tavern"],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(mockedMapV2Npc).toHaveBeenCalledWith(
+      expect.objectContaining({
+        importMode: "outsider",
+      })
+    );
   });
 });
 

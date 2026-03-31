@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockGenerateObject = vi.fn();
 
-vi.mock("ai", () => ({
-  generateObject: (...args: unknown[]) => mockGenerateObject(...args),
+vi.mock("../../ai/generate-object-safe.js", () => ({
+  safeGenerateObject: (...args: unknown[]) => mockGenerateObject(...args),
 }));
 
 vi.mock("../../ai/index.js", () => ({
@@ -88,6 +88,7 @@ describe("mapV2CardToCharacter", () => {
       personality: "Cheerful.",
       scenario: "Lost.",
       v2Tags: ["female"],
+      importMode: "native",
       premise: "Fantasy.",
       locationNames: ["Ironhaven"],
       role: fakeRole,
@@ -96,6 +97,30 @@ describe("mapV2CardToCharacter", () => {
     expect(result.name).toBe("Kael");
     const prompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>).prompt as string;
     expect(prompt).toContain("CHARACTER NAME: Aria");
+    expect(prompt).toContain("IMPORT MODE: native resident.");
+  });
+
+  it("normalizes imported tags into worldforge house style", async () => {
+    mockGenerateObject.mockResolvedValueOnce({
+      object: {
+        ...fakeCharacter,
+        tags: ["[mind-controller]", "fearless-operative", "female", "offworld-origin"],
+      },
+    });
+
+    const result = await mapV2CardToCharacter({
+      name: "Aria",
+      description: "A wandering bard.",
+      personality: "Cheerful.",
+      scenario: "Lost.",
+      v2Tags: ["female"],
+      importMode: "outsider",
+      premise: "Fantasy.",
+      locationNames: ["Ironhaven"],
+      role: fakeRole,
+    });
+
+    expect(result.tags).toEqual(["Mind Controller", "Fearless Operative"]);
   });
 });
 

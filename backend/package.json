@@ -24,7 +24,9 @@
     "@worldforge/shared": "*",
     "ai": "^6.0.106",
     "better-sqlite3": "^12.6.2",
+    "ddgs": "^1.0.4",
     "drizzle-orm": "^0.45.1",
+    "duck-duck-scrape": "^2.2.7",
     "hono": "^4.12.3",
     "zod": "^4.3.6"
   },

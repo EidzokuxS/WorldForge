@@ -5,10 +5,18 @@ import { Hono } from "hono";
 // Mocks
 // ---------------------------------------------------------------------------
 vi.mock("../../worldgen/index.js", () => ({
+  beginWorldgenOperation: vi.fn(() => ({
+    startHeartbeat: vi.fn(),
+    setLabel: vi.fn(),
+    finish: vi.fn(),
+  })),
+  listWorldgenOperations: vi.fn(() => ({ active: [], recent: [] })),
   rollWorldSeeds: vi.fn(),
   rollSeed: vi.fn(),
   suggestWorldSeeds: vi.fn(),
   suggestSingleSeed: vi.fn(),
+  interpretPremiseDivergence: vi.fn(),
+  applyPremiseCharacterOverrides: vi.fn((ctx: unknown) => ctx),
   generateWorldScaffold: vi.fn(),
   generateRefinedPremiseStep: vi.fn(),
   generateLocationsStep: vi.fn(),
@@ -23,11 +31,29 @@ vi.mock("../../worldgen/worldbook-importer.js", () => ({
   parseWorldBook: vi.fn(),
   classifyEntries: vi.fn(),
   importClassifiedEntries: vi.fn(),
+  worldbookToIpContext: vi.fn(),
+}));
+
+vi.mock("../../worldbook-library/index.js", () => ({
+  listWorldbookLibrary: vi.fn(),
+  importWorldbookToLibrary: vi.fn(),
+  composeSelectedWorldbooks: vi.fn(),
+}));
+
+vi.mock("../../worldgen/ip-researcher.js", () => ({
+  researchKnownIP: vi.fn(() => Promise.resolve(null)),
+  evaluateResearchSufficiency: vi.fn((ctx: unknown) => Promise.resolve(ctx)),
 }));
 
 vi.mock("../../campaign/index.js", () => ({
+  readCampaignConfig: vi.fn(() => ({})),
   markGenerationComplete: vi.fn(),
+  saveIpContext: vi.fn(),
+  loadIpContext: vi.fn(() => null),
+  savePremiseDivergence: vi.fn(),
+  loadPremiseDivergence: vi.fn(() => null),
   getActiveCampaign: vi.fn(),
+  loadCampaign: vi.fn(),
 }));
 
 vi.mock("../../vectors/lore-cards.js", () => ({
@@ -68,6 +94,8 @@ import {
   rollSeed,
   suggestWorldSeeds,
   suggestSingleSeed,
+  interpretPremiseDivergence,
+  generateWorldScaffold,
   saveScaffoldToDb,
   extractLoreCards,
   generateRefinedPremiseStep,
@@ -79,8 +107,23 @@ import {
   parseWorldBook,
   classifyEntries,
   importClassifiedEntries,
+  worldbookToIpContext,
 } from "../../worldgen/worldbook-importer.js";
-import { markGenerationComplete, getActiveCampaign } from "../../campaign/index.js";
+import {
+  listWorldbookLibrary,
+  importWorldbookToLibrary,
+  composeSelectedWorldbooks,
+} from "../../worldbook-library/index.js";
+import {
+  readCampaignConfig,
+  markGenerationComplete,
+  getActiveCampaign,
+  loadCampaign,
+  saveIpContext,
+  loadIpContext,
+  savePremiseDivergence,
+  loadPremiseDivergence,
+} from "../../campaign/index.js";
 import { deleteCampaignLore, storeLoreCards } from "../../vectors/lore-cards.js";
 import { loadSettings } from "../../settings/index.js";
 import { resolveRoleModel } from "../../ai/index.js";
@@ -92,10 +135,17 @@ const mockedRollWorldSeeds = vi.mocked(rollWorldSeeds);
 const mockedRollSeed = vi.mocked(rollSeed);
 const mockedSuggestWorldSeeds = vi.mocked(suggestWorldSeeds);
 const mockedSuggestSingleSeed = vi.mocked(suggestSingleSeed);
+const mockedInterpretPremiseDivergence = vi.mocked(interpretPremiseDivergence);
+const mockedGenerateWorldScaffold = vi.mocked(generateWorldScaffold);
 const mockedSaveScaffoldToDb = vi.mocked(saveScaffoldToDb);
 const mockedExtractLoreCards = vi.mocked(extractLoreCards);
 const mockedMarkGenComplete = vi.mocked(markGenerationComplete);
 const mockedGetActiveCampaign = vi.mocked(getActiveCampaign);
+const mockedLoadCampaign = vi.mocked(loadCampaign);
+const mockedSaveIpContext = vi.mocked(saveIpContext);
+const mockedLoadIpContext = vi.mocked(loadIpContext);
+const mockedSavePremiseDivergence = vi.mocked(savePremiseDivergence);
+const mockedLoadPremiseDivergence = vi.mocked(loadPremiseDivergence);
 const mockedDeleteLore = vi.mocked(deleteCampaignLore);
 const mockedStoreLore = vi.mocked(storeLoreCards);
 const mockedLoadSettings = vi.mocked(loadSettings);
@@ -104,6 +154,11 @@ const mockedResolveFallback = vi.mocked(resolveFallbackProvider);
 const mockedParseWorldBook = vi.mocked(parseWorldBook);
 const mockedClassifyEntries = vi.mocked(classifyEntries);
 const mockedImportClassifiedEntries = vi.mocked(importClassifiedEntries);
+const mockedWorldbookToIpContext = vi.mocked(worldbookToIpContext);
+const mockedListWorldbookLibrary = vi.mocked(listWorldbookLibrary);
+const mockedImportWorldbookToLibrary = vi.mocked(importWorldbookToLibrary);
+const mockedComposeSelectedWorldbooks = vi.mocked(composeSelectedWorldbooks);
+const mockedReadCampaignConfig = vi.mocked(readCampaignConfig);
 const mockedGenerateRefinedPremise = vi.mocked(generateRefinedPremiseStep);
 const mockedGenerateLocations = vi.mocked(generateLocationsStep);
 const mockedGenerateFactions = vi.mocked(generateFactionsStep);
@@ -146,6 +201,14 @@ beforeEach(() => {
     seeds: { geography: "Mountains" },
     createdAt: "2026-01-01",
   } as any);
+  mockedLoadCampaign.mockResolvedValue({
+    id: CAMPAIGN_ID,
+    name: "Test Campaign",
+    premise: "A dark world",
+    seeds: { geography: "Mountains" },
+    createdAt: "2026-01-01",
+  } as any);
+  mockedReadCampaignConfig.mockReturnValue({} as any);
 });
 
 // ---------------------------------------------------------------------------
@@ -221,7 +284,7 @@ describe("POST /api/worldgen/roll-seed", () => {
 // ---------------------------------------------------------------------------
 describe("POST /api/worldgen/suggest-seeds", () => {
   it("calls suggestWorldSeeds with premise and returns result", async () => {
-    const suggested = { geography: "Floating islands", centralConflict: "War" };
+    const suggested = { seeds: { geography: "Floating islands", centralConflict: "War" } };
     mockedSuggestWorldSeeds.mockResolvedValue(suggested as any);
 
     const res = await app.request("/api/worldgen/suggest-seeds", {
@@ -232,22 +295,141 @@ describe("POST /api/worldgen/suggest-seeds", () => {
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual(suggested);
+    expect(body.geography).toBe("Floating islands");
     expect(mockedSuggestWorldSeeds).toHaveBeenCalledWith(
       expect.objectContaining({ premise: "A world of floating islands" })
     );
   });
 
-  it("returns 400 for empty premise", async () => {
+  it("accepts empty premise and lets the route apply its fallback premise", async () => {
+    mockedSuggestWorldSeeds.mockResolvedValue({ seeds: { geography: "Ruins" } } as any);
+
     const res = await app.request("/api/worldgen/suggest-seeds", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ premise: "   " }),
     });
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toHaveProperty("error");
+    expect(body.geography).toBe("Ruins");
+    expect(mockedSuggestWorldSeeds).toHaveBeenCalledWith(
+      expect.objectContaining({ premise: "An original fantasy world" })
+    );
+  });
+
+  it("returns a hidden _premiseDivergence artifact from suggestWorldSeeds", async () => {
+    const premiseDivergence = {
+      mode: "diverged",
+      protagonistRole: {
+        kind: "custom",
+        interpretation: "replacement",
+        canonicalCharacterName: "Dr. Kel",
+        roleSummary: "The player's custom character replaces Dr. Kel as the active station operator.",
+      },
+      preservedCanonFacts: ["The signal base remains active."],
+      changedCanonFacts: ["Dr. Kel is no longer the active protagonist."],
+      currentStateDirectives: ["Treat the player as the newly arrived operator."],
+      ambiguityNotes: [],
+    };
+    mockedSuggestWorldSeeds.mockResolvedValue({
+      seeds: { geography: "Remote valley" },
+      premiseDivergence,
+    } as any);
+
+    const res = await app.request("/api/worldgen/suggest-seeds", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ premise: "Voices of the Void, but I'm playing instead of Dr Kel" }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body._premiseDivergence).toEqual(premiseDivergence);
+  });
+
+  it("composes selected reusable worldbooks on the backend when selectedWorldbooks is present", async () => {
+    const selectedWorldbooks = [
+      {
+        id: "wb-alpha",
+        displayName: "Alpha Archive",
+        normalizedSourceHash: "hash-alpha",
+        entryCount: 12,
+        createdAt: 1700000000000,
+        updatedAt: 1700000001000,
+      },
+    ];
+    const ipContext = {
+      franchise: "Alpha Archive",
+      keyFacts: ["Captain Mira: A decorated sky captain."],
+      tonalNotes: ["Lightning oaths bind all captains."],
+      source: "llm" as const,
+    };
+
+    mockedComposeSelectedWorldbooks.mockReturnValue({
+      ipContext,
+      worldbookSelection: selectedWorldbooks,
+      provenance: { sources: selectedWorldbooks, groups: [] },
+    } as any);
+    mockedSuggestWorldSeeds.mockResolvedValue({ seeds: { geography: "Sky mesas" } } as any);
+
+    const res = await app.request("/api/worldgen/suggest-seeds", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ selectedWorldbooks }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(mockedComposeSelectedWorldbooks).toHaveBeenCalledWith(selectedWorldbooks);
+    expect(mockedSuggestWorldSeeds).toHaveBeenCalledWith(
+      expect.objectContaining({
+        premise: "A world based on the Alpha Archive setting",
+        ipContext,
+      }),
+    );
+  });
+
+  it("falls back to legacy worldbookEntries when reusable selections are absent", async () => {
+    const ipContext = {
+      franchise: "Legacy Book",
+      keyFacts: ["Captain Mira: A decorated sky captain."],
+      tonalNotes: ["Custom worldbook setting"],
+      source: "llm" as const,
+    };
+
+    mockedWorldbookToIpContext.mockReturnValue(ipContext as any);
+    mockedSuggestWorldSeeds.mockResolvedValue({ seeds: { geography: "Sky mesas" } } as any);
+
+    const res = await app.request("/api/worldgen/suggest-seeds", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Legacy Book",
+        worldbookEntries: [
+          {
+            name: "Captain Mira",
+            type: "character",
+            summary: "A decorated sky captain.",
+          },
+        ],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(mockedComposeSelectedWorldbooks).not.toHaveBeenCalled();
+    expect(mockedWorldbookToIpContext).toHaveBeenCalledWith(
+      [
+        {
+          name: "Captain Mira",
+          type: "character",
+          summary: "A decorated sky captain.",
+        },
+      ],
+      "Legacy Book",
+    );
+    expect(mockedSuggestWorldSeeds).toHaveBeenCalledWith(
+      expect.objectContaining({ ipContext }),
+    );
   });
 });
 
@@ -270,6 +452,399 @@ describe("POST /api/worldgen/suggest-seed", () => {
     expect(mockedSuggestSingleSeed).toHaveBeenCalledWith(
       expect.objectContaining({ premise: "Arid world", category: "geography" })
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/worldgen/generate
+// ---------------------------------------------------------------------------
+describe("POST /api/worldgen/generate", () => {
+  it("computes premiseDivergence once during generate and reuses the cached artifact during later regeneration", async () => {
+    const ipContext = {
+      franchise: "Voices of the Void",
+      keyFacts: ["The signal base sits in a remote valley."],
+      tonalNotes: ["lonely", "paranormal"],
+      canonicalNames: {
+        locations: ["Signal Base"],
+        factions: ["Research Staff"],
+        characters: ["Dr. Kel", "Maxwell"],
+      },
+      source: "mcp" as const,
+    };
+    const computedPremiseDivergence = {
+      mode: "diverged",
+      protagonistRole: {
+        kind: "custom",
+        interpretation: "replacement",
+        canonicalCharacterName: "Dr. Kel",
+        roleSummary: "The player replaces Dr. Kel as the station operator.",
+      },
+      preservedCanonFacts: ["The signal base remains active."],
+      changedCanonFacts: ["Dr. Kel is no longer the active protagonist."],
+      currentStateDirectives: ["Treat the player as the newly arrived operator."],
+      ambiguityNotes: [],
+    };
+
+    let cachedPremiseDivergence: typeof computedPremiseDivergence | null = null;
+    mockedLoadIpContext.mockReturnValue(ipContext as any);
+    mockedLoadPremiseDivergence.mockImplementation(() => cachedPremiseDivergence as any);
+    mockedSavePremiseDivergence.mockImplementation((_, divergence) => {
+      cachedPremiseDivergence = divergence as typeof computedPremiseDivergence;
+    });
+    mockedInterpretPremiseDivergence.mockResolvedValue(computedPremiseDivergence as any);
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "A strange signals campaign",
+        locations: [
+          { name: "Signal Base", description: "Station", tags: [], isStarting: true, connectedTo: [] },
+        ],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: null,
+    } as any);
+    mockedGenerateRefinedPremise.mockResolvedValue("Cached divergence reuse" as any);
+
+    const generateRes = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID, ipContext }),
+    });
+
+    expect(generateRes.status).toBe(200);
+    await generateRes.text();
+    expect(mockedInterpretPremiseDivergence).toHaveBeenCalledTimes(1);
+    expect(mockedSavePremiseDivergence).toHaveBeenCalledWith(CAMPAIGN_ID, computedPremiseDivergence);
+    expect(cachedPremiseDivergence).toBe(computedPremiseDivergence);
+
+    const regenerateRes = await app.request("/api/worldgen/regenerate-section", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID, section: "premise" }),
+    });
+
+    expect(regenerateRes.status).toBe(200);
+    expect(await regenerateRes.json()).toEqual({ refinedPremise: "Cached divergence reuse" });
+    expect(mockedGenerateRefinedPremise).toHaveBeenCalledWith(
+      expect.objectContaining({ premiseDivergence: computedPremiseDivergence }),
+      expect.objectContaining({ franchise: "Voices of the Void" }),
+      undefined,
+    );
+    expect(mockedInterpretPremiseDivergence).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts premiseDivergence from the request body and passes it through to generation/cache", async () => {
+    const premiseDivergence = {
+      mode: "diverged",
+      protagonistRole: {
+        kind: "custom",
+        interpretation: "replacement",
+        canonicalCharacterName: "Dr. Kel",
+        roleSummary: "The player's custom character replaces Dr. Kel as the active station operator.",
+      },
+      preservedCanonFacts: ["The signal base remains active."],
+      changedCanonFacts: ["Dr. Kel is no longer the active protagonist."],
+      currentStateDirectives: ["Treat the player as the newly arrived operator."],
+      ambiguityNotes: [],
+    };
+
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "A strange signals campaign",
+        locations: [
+          { name: "Signal Base", description: "Station", tags: [], isStarting: true, connectedTo: [] },
+        ],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID, premiseDivergence }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+
+    expect(mockedSavePremiseDivergence).toHaveBeenCalledWith(CAMPAIGN_ID, premiseDivergence);
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({ campaignId: CAMPAIGN_ID, premiseDivergence }),
+      expect.any(Function),
+    );
+  });
+
+  it("passes full ipContext from request body into generation and saves it to cache", async () => {
+    const ipContext = {
+      franchise: "Naruto",
+      keyFacts: ["Konohagakure is a hidden village."],
+      tonalNotes: ["Shonen action"],
+      canonicalNames: {
+        locations: ["Konohagakure"],
+        factions: ["Akatsuki"],
+        characters: ["Naruto Uzumaki"],
+      },
+      excludedCharacters: ["Naruto Uzumaki"],
+      source: "mcp" as const,
+    };
+
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "A shinobi world",
+        locations: [
+          { name: "Konohagakure", description: "Village", tags: [], isStarting: true, connectedTo: [] },
+        ],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: ipContext,
+    } as any);
+    mockedSaveScaffoldToDb.mockReturnValue(undefined as any);
+    mockedMarkGenComplete.mockReturnValue(undefined as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID, ipContext }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/event-stream");
+    await res.text();
+
+    expect(mockedSaveIpContext).toHaveBeenCalledWith(CAMPAIGN_ID, ipContext);
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({ campaignId: CAMPAIGN_ID, ipContext }),
+      expect.any(Function),
+    );
+  });
+
+  it("loads cached ipContext when request body omits it and saves enriched context back", async () => {
+    const cachedIpContext = {
+      franchise: "Naruto",
+      keyFacts: ["Konohagakure is a hidden village."],
+      tonalNotes: ["Shonen action"],
+      canonicalNames: {
+        locations: ["Konohagakure"],
+      },
+      source: "mcp" as const,
+    };
+    const enrichedIpContext = {
+      ...cachedIpContext,
+      keyFacts: [...cachedIpContext.keyFacts, "Akatsuki is a rogue shinobi organization."],
+    };
+
+    mockedLoadIpContext.mockReturnValue(cachedIpContext as any);
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "A shinobi world",
+        locations: [
+          { name: "Konohagakure", description: "Village", tags: [], isStarting: true, connectedTo: [] },
+        ],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext,
+    } as any);
+    mockedSaveScaffoldToDb.mockReturnValue(undefined as any);
+    mockedMarkGenComplete.mockReturnValue(undefined as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+
+    expect(mockedLoadIpContext).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({ ipContext: cachedIpContext }),
+      expect.any(Function),
+    );
+    expect(mockedSaveIpContext).toHaveBeenCalledWith(CAMPAIGN_ID, enrichedIpContext);
+  });
+
+  it("rebuilds ipContext from saved worldbook selection when cache is empty", async () => {
+    const worldbookSelection = [
+      {
+        id: "wb-alpha",
+        displayName: "Alpha Archive",
+        normalizedSourceHash: "hash-alpha",
+        entryCount: 12,
+        createdAt: 1700000000000,
+        updatedAt: 1700000001000,
+      },
+    ];
+    const composedIpContext = {
+      franchise: "Alpha Archive",
+      keyFacts: ["Captain Mira: A decorated sky captain."],
+      tonalNotes: ["Lightning oaths bind all captains."],
+      source: "llm" as const,
+    };
+
+    mockedReadCampaignConfig.mockReturnValue({ worldbookSelection } as any);
+    mockedLoadIpContext.mockReturnValue(null as any);
+    mockedComposeSelectedWorldbooks.mockReturnValue({
+      ipContext: composedIpContext,
+      worldbookSelection,
+      provenance: { sources: worldbookSelection, groups: [] },
+    } as any);
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "A skyfaring campaign",
+        locations: [
+          { name: "Sunspire", description: "Trade city", tags: [], isStarting: true, connectedTo: [] },
+        ],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+
+    expect(mockedReadCampaignConfig).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(mockedComposeSelectedWorldbooks).toHaveBeenCalledWith(worldbookSelection);
+    expect(mockedSaveIpContext).toHaveBeenCalledWith(CAMPAIGN_ID, composedIpContext);
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({ ipContext: composedIpContext }),
+      expect.any(Function),
+    );
+  });
+
+  it("loads cached premiseDivergence when request body omits it and reuses it for generation", async () => {
+    const cachedPremiseDivergence = {
+      mode: "diverged",
+      protagonistRole: {
+        kind: "custom",
+        interpretation: "replacement",
+        canonicalCharacterName: "Dr. Kel",
+        roleSummary: "The player replaces Dr. Kel as the station operator.",
+      },
+      preservedCanonFacts: ["The signal base remains active."],
+      changedCanonFacts: ["Dr. Kel is no longer the active protagonist."],
+      currentStateDirectives: ["Treat the player as the newly arrived operator."],
+      ambiguityNotes: [],
+    };
+
+    mockedLoadPremiseDivergence.mockReturnValue(cachedPremiseDivergence as any);
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "A strange signals campaign",
+        locations: [
+          { name: "Signal Base", description: "Station", tags: [], isStarting: true, connectedTo: [] },
+        ],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+
+    expect(mockedLoadPremiseDivergence).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({ premiseDivergence: cachedPremiseDivergence }),
+      expect.any(Function),
+    );
+    expect(mockedInterpretPremiseDivergence).not.toHaveBeenCalled();
+  });
+
+  it("remains compatible with cached ipContext-only generation requests", async () => {
+    mockedLoadIpContext.mockReturnValue({
+      franchise: "Naruto",
+      keyFacts: ["Konohagakure is a hidden village."],
+      tonalNotes: ["Shonen action"],
+      source: "mcp",
+    } as any);
+    mockedLoadPremiseDivergence.mockReturnValue(null as any);
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "A shinobi world",
+        locations: [
+          { name: "Konohagakure", description: "Village", tags: [], isStarting: true, connectedTo: [] },
+        ],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+
+    expect(mockedLoadIpContext).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({
+        campaignId: CAMPAIGN_ID,
+        ipContext: expect.objectContaining({ franchise: "Naruto" }),
+      }),
+      expect.any(Function),
+    );
+  });
+
+  it("reloads the requested campaign when active state was lost before generation", async () => {
+    mockedGetActiveCampaign.mockReturnValue(null as any);
+    mockedLoadCampaign.mockResolvedValue({
+      id: CAMPAIGN_ID,
+      name: "Recovered campaign",
+      premise: "A dark world",
+      seeds: { geography: "Mountains" },
+      createdAt: "2026-01-01",
+    } as any);
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "Recovered world",
+        locations: [
+          { name: "Konohagakure", description: "Village", tags: [], isStarting: true, connectedTo: [] },
+        ],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(mockedLoadCampaign).toHaveBeenCalledWith(CAMPAIGN_ID);
   });
 });
 
@@ -307,6 +882,7 @@ describe("POST /api/worldgen/save-edits", () => {
 
   it("returns 404 with no active campaign", async () => {
     mockedGetActiveCampaign.mockReturnValue(null as any);
+    mockedLoadCampaign.mockRejectedValue(new Error("not found"));
 
     const res = await app.request("/api/worldgen/save-edits", {
       method: "POST",
@@ -369,6 +945,93 @@ describe("POST /api/worldgen/parse-worldbook", () => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/worldgen/worldbook-library
+// ---------------------------------------------------------------------------
+describe("GET /api/worldgen/worldbook-library", () => {
+  it("returns reusable worldbook items without requiring an active campaign", async () => {
+    const items = [
+      {
+        id: "wb-alpha",
+        displayName: "Alpha Codex",
+        normalizedSourceHash: "hash-alpha",
+        entryCount: 12,
+        createdAt: 1700000000000,
+        updatedAt: 1700000001000,
+      },
+      {
+        id: "wb-beta",
+        displayName: "Beta Codex",
+        normalizedSourceHash: "hash-beta",
+        entryCount: 8,
+        createdAt: 1700000002000,
+        updatedAt: 1700000003000,
+      },
+    ];
+    mockedListWorldbookLibrary.mockReturnValue(items as any);
+    mockedGetActiveCampaign.mockReturnValue(null as any);
+
+    const res = await app.request("/api/worldgen/worldbook-library");
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ items });
+    expect(mockedListWorldbookLibrary).toHaveBeenCalledOnce();
+    expect(mockedLoadCampaign).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/worldgen/worldbook-library/import
+// ---------------------------------------------------------------------------
+describe("POST /api/worldgen/worldbook-library/import", () => {
+  it("parses raw worldbook JSON, classifies on first import, and returns { item, existed }", async () => {
+    const worldbook = {
+      entries: {
+        "0": { comment: "Hero", content: "A brave warrior" },
+      },
+    };
+    const parsed = [{ name: "Hero", text: "A brave warrior" }];
+    const classified = [
+      { name: "Hero", type: "character" as const, summary: "A brave warrior" },
+    ];
+    const item = {
+      id: "wb-hero",
+      displayName: "Hero Book",
+      normalizedSourceHash: "hash-hero",
+      entryCount: 1,
+      createdAt: 1700000000000,
+      updatedAt: 1700000001000,
+    };
+
+    mockedParseWorldBook.mockReturnValue(parsed as any);
+    mockedImportWorldbookToLibrary.mockImplementation(async (options: any) => {
+      const entries = await options.classify();
+      expect(entries).toEqual(classified);
+      expect(options.displayName).toBe("Hero Book");
+      expect(options.originalFileName).toBe("hero.json");
+      expect(options.parsedEntries).toEqual(parsed);
+      return { item, existed: false };
+    });
+    mockedClassifyEntries.mockResolvedValue(classified as any);
+
+    const res = await app.request("/api/worldgen/worldbook-library/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        displayName: "Hero Book",
+        originalFileName: "hero.json",
+        worldbook,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ item, existed: false });
+    expect(mockedParseWorldBook).toHaveBeenCalledWith(worldbook);
+    expect(mockedClassifyEntries).toHaveBeenCalledWith(parsed, fakeResolvedRole);
+    expect(mockedImportWorldbookToLibrary).toHaveBeenCalledOnce();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/worldgen/import-worldbook
 // ---------------------------------------------------------------------------
 describe("POST /api/worldgen/import-worldbook", () => {
@@ -398,6 +1061,7 @@ describe("POST /api/worldgen/import-worldbook", () => {
 
   it("returns 404 when campaign not active", async () => {
     mockedGetActiveCampaign.mockReturnValue(null as any);
+    mockedLoadCampaign.mockRejectedValue(new Error("not found"));
 
     const res = await app.request("/api/worldgen/import-worldbook", {
       method: "POST",
@@ -418,6 +1082,41 @@ describe("POST /api/worldgen/import-worldbook", () => {
 // POST /api/worldgen/regenerate-section
 // ---------------------------------------------------------------------------
 describe("POST /api/worldgen/regenerate-section", () => {
+  it("reuses cached premiseDivergence for section regeneration", async () => {
+    const cachedPremiseDivergence = {
+      mode: "diverged",
+      protagonistRole: {
+        kind: "custom",
+        interpretation: "replacement",
+        canonicalCharacterName: "Dr. Kel",
+        roleSummary: "The player replaces Dr. Kel as the station operator.",
+      },
+      preservedCanonFacts: ["The signal base remains active."],
+      changedCanonFacts: ["Dr. Kel is no longer the active protagonist."],
+      currentStateDirectives: ["Treat the player as the newly arrived operator."],
+      ambiguityNotes: [],
+    };
+
+    mockedLoadPremiseDivergence.mockReturnValue(cachedPremiseDivergence as any);
+    mockedGenerateRefinedPremise.mockResolvedValue("New refined premise" as any);
+
+    const res = await app.request("/api/worldgen/regenerate-section", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID, section: "premise" }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ refinedPremise: "New refined premise" });
+    expect(mockedLoadPremiseDivergence).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(mockedGenerateRefinedPremise).toHaveBeenCalledWith(
+      expect.objectContaining({ premiseDivergence: cachedPremiseDivergence }),
+      expect.anything(),
+      undefined,
+    );
+  });
+
   it("calls generateRefinedPremiseStep for section=premise", async () => {
     mockedGenerateRefinedPremise.mockResolvedValue("New refined premise" as any);
 

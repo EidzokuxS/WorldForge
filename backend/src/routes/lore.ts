@@ -2,12 +2,15 @@ import { Hono } from "hono";
 import { assertSafeId } from "../campaign/index.js";
 import { getErrorMessage, getErrorStatus } from "../lib/index.js";
 import { loadSettings } from "../settings/index.js";
-import { requireActiveCampaign, resolveEmbedder } from "./helpers.js";
+import { parseBody, requireLoadedCampaign, resolveEmbedder } from "./helpers.js";
+import { loreCardUpdateSchema } from "./schemas.js";
 import { embedTexts } from "../vectors/embeddings.js";
 import {
   getAllLoreCards,
   searchLoreCards,
   deleteCampaignLore,
+  updateLoreCard,
+  deleteLoreCardById,
 } from "../vectors/lore-cards.js";
 
 const app = new Hono();
@@ -17,7 +20,7 @@ app.get("/:id/lore", async (c) => {
   try {
     const campaignId = c.req.param("id");
     assertSafeId(campaignId);
-    const campaign = requireActiveCampaign(c, campaignId);
+    const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
 
     const cards = await getAllLoreCards();
@@ -35,7 +38,7 @@ app.get("/:id/lore/search", async (c) => {
   try {
     const campaignId = c.req.param("id");
     assertSafeId(campaignId);
-    const campaign = requireActiveCampaign(c, campaignId);
+    const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
 
     const query = c.req.query("q")?.trim();
@@ -77,12 +80,48 @@ app.get("/:id/lore/search", async (c) => {
   }
 });
 
+/** PUT /:id/lore/:cardId — update one lore card for the active campaign */
+app.put("/:id/lore/:cardId", async (c) => {
+  try {
+    const campaignId = c.req.param("id");
+    const cardId = c.req.param("cardId");
+    assertSafeId(campaignId);
+    assertSafeId(cardId);
+
+    const result = await parseBody(c, loreCardUpdateSchema);
+    if ("response" in result) {
+      return result.response;
+    }
+
+    const campaign = await requireLoadedCampaign(c, campaignId);
+    if (campaign instanceof Response) return campaign;
+
+    const settings = loadSettings();
+    const card = await updateLoreCard(cardId, {
+      term: result.data.term,
+      definition: result.data.definition,
+      category: result.data.category,
+    }, resolveEmbedder(settings));
+
+    if (!card) {
+      return c.json({ error: "Lore card not found." }, 404);
+    }
+
+    return c.json({ card });
+  } catch (error) {
+    return c.json(
+      { error: getErrorMessage(error, "Failed to update lore card.") },
+      getErrorStatus(error)
+    );
+  }
+});
+
 /** DELETE /:id/lore — delete all lore cards for the active campaign */
 app.delete("/:id/lore", async (c) => {
   try {
     const campaignId = c.req.param("id");
     assertSafeId(campaignId);
-    const campaign = requireActiveCampaign(c, campaignId);
+    const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
 
     await deleteCampaignLore();
@@ -90,6 +129,31 @@ app.delete("/:id/lore", async (c) => {
   } catch (error) {
     return c.json(
       { error: getErrorMessage(error, "Failed to delete lore cards.") },
+      getErrorStatus(error)
+    );
+  }
+});
+
+/** DELETE /:id/lore/:cardId — delete one lore card for the active campaign */
+app.delete("/:id/lore/:cardId", async (c) => {
+  try {
+    const campaignId = c.req.param("id");
+    const cardId = c.req.param("cardId");
+    assertSafeId(campaignId);
+    assertSafeId(cardId);
+
+    const campaign = await requireLoadedCampaign(c, campaignId);
+    if (campaign instanceof Response) return campaign;
+
+    const deleted = await deleteLoreCardById(cardId);
+    if (!deleted) {
+      return c.json({ error: "Lore card not found." }, 404);
+    }
+
+    return c.json({ ok: true });
+  } catch (error) {
+    return c.json(
+      { error: getErrorMessage(error, "Failed to delete lore card.") },
       getErrorStatus(error)
     );
   }

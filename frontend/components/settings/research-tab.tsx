@@ -88,7 +88,7 @@ export function ResearchTab({ settings, setSettings }: ResearchTabProps) {
         <div className="max-w-xs space-y-2">
           <Label htmlFor="searchProvider">Search Provider</Label>
           <Select
-            value={settings.research.searchProvider ?? "duckduckgo"}
+            value={settings.research.searchProvider ?? "brave"}
             onValueChange={(value: string) =>
               updateSettings((current) => ({
                 ...current,
@@ -103,15 +103,81 @@ export function ResearchTab({ settings, setSettings }: ResearchTabProps) {
               <SelectValue placeholder="Select search provider" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="duckduckgo">DuckDuckGo</SelectItem>
+              <SelectItem value="brave">Brave Search</SelectItem>
+              <SelectItem value="duckduckgo">DuckDuckGo (unstable)</SelectItem>
               <SelectItem value="zai">Z.AI Search</SelectItem>
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
-            Search backend used by the research agent. DuckDuckGo is free web
-            search; Z.AI Search provides broader results via the Z.AI MCP.
+            Search backend for franchise research. Brave requires a free API key.
+            DuckDuckGo may be blocked. Z.AI uses MCP tool calling.
           </p>
         </div>
+
+        {settings.research.searchProvider === "brave" && (
+          <div className="max-w-xs space-y-2">
+            <Label htmlFor="braveApiKey">Brave Search API Key</Label>
+            <Input
+              id="braveApiKey"
+              type="password"
+              placeholder="BSA..."
+              value={settings.research.braveApiKey ?? ""}
+              onChange={(e) =>
+                updateSettings((current) => ({
+                  ...current,
+                  research: {
+                    ...current.research,
+                    braveApiKey: e.target.value,
+                  },
+                }))
+              }
+            />
+            <p className="text-xs text-muted-foreground">
+              Get a free key at{" "}
+              <a
+                href="https://brave.com/search/api/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline"
+              >
+                brave.com/search/api
+              </a>
+              {" "}— $5 free credits/month (~1000 searches).
+            </p>
+          </div>
+        )}
+
+        {settings.research.searchProvider === "zai" && (
+          <div className="max-w-xs space-y-2">
+            <Label htmlFor="zaiApiKey">Z.AI API Key</Label>
+            <Input
+              id="zaiApiKey"
+              type="password"
+              placeholder="..."
+              value={settings.research.zaiApiKey ?? ""}
+              onChange={(e) =>
+                updateSettings((current) => ({
+                  ...current,
+                  research: {
+                    ...current.research,
+                    zaiApiKey: e.target.value,
+                  },
+                }))
+              }
+            />
+            <p className="text-xs text-muted-foreground">
+              Z.AI API key for web search MCP.{" "}
+              <a
+                href="https://z.ai"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline"
+              >
+                z.ai
+              </a>
+            </p>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

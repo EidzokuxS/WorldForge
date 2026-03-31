@@ -13,7 +13,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/lib/api", () => ({
-  getActiveCampaign: vi.fn(),
+  loadCampaign: vi.fn(),
   getWorldData: vi.fn(),
   parseCharacter: vi.fn(),
   generateCharacter: vi.fn(),
@@ -39,12 +39,12 @@ vi.mock("@/components/character-creation/character-card", () => ({
 }));
 
 import {
-  getActiveCampaign,
+  loadCampaign,
   getWorldData,
 } from "@/lib/api";
 import CharacterCreationPage from "../page";
 
-const mockedGetActive = vi.mocked(getActiveCampaign);
+const mockedLoadCampaign = vi.mocked(loadCampaign);
 const mockedGetWorld = vi.mocked(getWorldData);
 
 // ---------------------------------------------------------------------------
@@ -63,7 +63,7 @@ describe("CharacterCreationPage", () => {
 
   it("shows loading spinner while data is fetching", () => {
     mockGet.mockReturnValue("test-id");
-    mockedGetActive.mockReturnValue(new Promise(() => {}));
+    mockedLoadCampaign.mockReturnValue(new Promise(() => {}));
     mockedGetWorld.mockReturnValue(new Promise(() => {}));
 
     const { container } = render(<CharacterCreationPage />);
@@ -74,7 +74,7 @@ describe("CharacterCreationPage", () => {
 
   it("renders character form after data loads", async () => {
     mockGet.mockReturnValue("test-id");
-    mockedGetActive.mockResolvedValue({ id: "test-id", name: "Test", premise: "A world" } as never);
+    mockedLoadCampaign.mockResolvedValue({ id: "test-id", name: "Test", premise: "A world" } as never);
     mockedGetWorld.mockResolvedValue({
       locations: [{ name: "Town" }],
       factions: [],
@@ -92,7 +92,7 @@ describe("CharacterCreationPage", () => {
 
   it("does not render character card when no character is set", async () => {
     mockGet.mockReturnValue("test-id");
-    mockedGetActive.mockResolvedValue({ id: "test-id", name: "Test", premise: "A world" } as never);
+    mockedLoadCampaign.mockResolvedValue({ id: "test-id", name: "Test", premise: "A world" } as never);
     mockedGetWorld.mockResolvedValue({
       locations: [{ name: "Town" }],
       factions: [],

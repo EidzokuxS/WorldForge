@@ -7,11 +7,17 @@ import { Hono } from "hono";
 vi.mock("../../campaign/index.js", () => ({
   assertSafeId: vi.fn(),
   getActiveCampaign: vi.fn(),
+  loadCampaign: vi.fn(),
 }));
 
 vi.mock("../../lib/index.js", () => ({
   getErrorMessage: vi.fn((_err: unknown, fallback: string) => fallback),
   getErrorStatus: vi.fn(() => 500),
+  createLogger: vi.fn(() => ({
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  })),
 }));
 
 vi.mock("../../settings/index.js", () => ({
@@ -34,24 +40,31 @@ vi.mock("../../vectors/lore-cards.js", () => ({
   getAllLoreCards: vi.fn(),
   searchLoreCards: vi.fn(),
   deleteCampaignLore: vi.fn(),
+  updateLoreCard: vi.fn(),
+  deleteLoreCardById: vi.fn(),
 }));
 
-import { getActiveCampaign } from "../../campaign/index.js";
+import { getActiveCampaign, loadCampaign } from "../../campaign/index.js";
 import { loadSettings } from "../../settings/index.js";
 import { embedTexts } from "../../vectors/embeddings.js";
 import {
   getAllLoreCards,
   searchLoreCards,
   deleteCampaignLore,
+  updateLoreCard,
+  deleteLoreCardById,
 } from "../../vectors/lore-cards.js";
 import loreRoutes from "../lore.js";
 
 const mockedGetActive = vi.mocked(getActiveCampaign);
+const mockedLoadCampaign = vi.mocked(loadCampaign);
 const mockedLoadSettings = vi.mocked(loadSettings);
 const mockedEmbedTexts = vi.mocked(embedTexts);
 const mockedGetAllLore = vi.mocked(getAllLoreCards);
 const mockedSearchLore = vi.mocked(searchLoreCards);
 const mockedDeleteLore = vi.mocked(deleteCampaignLore);
+const mockedUpdateLoreCard = vi.mocked(updateLoreCard);
+const mockedDeleteLoreCardById = vi.mocked(deleteLoreCardById);
 
 // ---------------------------------------------------------------------------
 // App setup — mount under /api/campaigns so :id param is captured
@@ -80,8 +93,8 @@ describe("GET /:id/lore", () => {
   it("returns lore cards", async () => {
     activateCampaign();
     const fakeCards = [
-      { id: "1", title: "Ancient Ruins", category: "location", content: "Ruins of old city" },
-      { id: "2", title: "Dragon Cult", category: "faction", content: "Secret cult" },
+      { id: "1", term: "Ancient Ruins", category: "location", definition: "Ruins of old city" },
+      { id: "2", term: "Dragon Cult", category: "faction", definition: "Secret cult" },
     ];
     mockedGetAllLore.mockResolvedValue(fakeCards as any);
 
@@ -95,12 +108,28 @@ describe("GET /:id/lore", () => {
 
   it("returns 404 when no active campaign matches", async () => {
     mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockRejectedValue(new Error("not found"));
 
     const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/lore`);
 
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body).toHaveProperty("error");
+  });
+
+  it("reloads the requested campaign when active state was lost", async () => {
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockResolvedValue({
+      id: CAMPAIGN_ID,
+      name: "Recovered",
+      createdAt: new Date().toISOString(),
+    } as any);
+    mockedGetAllLore.mockResolvedValue([] as any);
+
+    const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/lore`);
+
+    expect(res.status).toBe(200);
+    expect(mockedLoadCampaign).toHaveBeenCalledWith(CAMPAIGN_ID);
   });
 
   it("returns 500 when getAllLoreCards throws", async () => {
@@ -139,7 +168,7 @@ describe("GET /:id/lore/search", () => {
     mockedEmbedTexts.mockResolvedValue([fakeVector]);
 
     const fakeResults = [
-      { id: "1", title: "Found Card", content: "Match", vector: fakeVector },
+      { id: "1", term: "Found Card", definition: "Match", category: "concept", vector: fakeVector },
     ];
     mockedSearchLore.mockResolvedValue(fakeResults as any);
 
@@ -151,7 +180,7 @@ describe("GET /:id/lore/search", () => {
     const body = await res.json();
     // vector field should be stripped from results
     expect(body.cards).toEqual([
-      { id: "1", title: "Found Card", content: "Match" },
+      { id: "1", term: "Found Card", definition: "Match", category: "concept" },
     ]);
   });
 
@@ -169,6 +198,7 @@ describe("GET /:id/lore/search", () => {
 
   it("returns 404 when no active campaign", async () => {
     mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockRejectedValue(new Error("not found"));
 
     const res = await app.request(
       `/api/campaigns/${CAMPAIGN_ID}/lore/search?q=test`
@@ -177,6 +207,81 @@ describe("GET /:id/lore/search", () => {
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body).toHaveProperty("error");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PUT /:id/lore/:cardId
+// ---------------------------------------------------------------------------
+describe("PUT /:id/lore/:cardId", () => {
+  it("updates one lore card by id", async () => {
+    activateCampaign();
+    mockedUpdateLoreCard.mockResolvedValue({
+      id: "card-1",
+      term: "Updated Ruins",
+      definition: "Now reclaimed by scholars.",
+      category: "location",
+    } as any);
+
+    const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/lore/card-1`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        term: " Updated Ruins ",
+        definition: " Now reclaimed by scholars. ",
+        category: "location",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(mockedUpdateLoreCard).toHaveBeenCalledWith("card-1", {
+      term: "Updated Ruins",
+      definition: "Now reclaimed by scholars.",
+      category: "location",
+    }, expect.anything());
+    await expect(res.json()).resolves.toEqual({
+      card: {
+        id: "card-1",
+        term: "Updated Ruins",
+        definition: "Now reclaimed by scholars.",
+        category: "location",
+      },
+    });
+  });
+
+  it("rejects invalid lore edit payloads", async () => {
+    activateCampaign();
+
+    const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/lore/card-1`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        term: "   ",
+        definition: "",
+        category: "invalid-category",
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(mockedUpdateLoreCard).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 for missing lore cards", async () => {
+    activateCampaign();
+    mockedUpdateLoreCard.mockResolvedValue(null);
+
+    const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/lore/missing-card`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        term: "Updated Ruins",
+        definition: "Now reclaimed by scholars.",
+        category: "location",
+      }),
+    });
+
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toEqual({ error: "Lore card not found." });
   });
 });
 
@@ -200,6 +305,7 @@ describe("DELETE /:id/lore", () => {
 
   it("returns 404 when no active campaign", async () => {
     mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockRejectedValue(new Error("not found"));
 
     const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/lore`, {
       method: "DELETE",
@@ -221,5 +327,35 @@ describe("DELETE /:id/lore", () => {
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body).toHaveProperty("error");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /:id/lore/:cardId
+// ---------------------------------------------------------------------------
+describe("DELETE /:id/lore/:cardId", () => {
+  it("deletes one lore card by id", async () => {
+    activateCampaign();
+    mockedDeleteLoreCardById.mockResolvedValue(true);
+
+    const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/lore/card-1`, {
+      method: "DELETE",
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ ok: true });
+    expect(mockedDeleteLoreCardById).toHaveBeenCalledWith("card-1");
+  });
+
+  it("returns 404 for missing lore cards", async () => {
+    activateCampaign();
+    mockedDeleteLoreCardById.mockResolvedValue(false);
+
+    const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/lore/missing-card`, {
+      method: "DELETE",
+    });
+
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toEqual({ error: "Lore card not found." });
   });
 });

@@ -5,9 +5,9 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
-  getActiveCampaign,
   getWorldData,
   getLoreCards,
+  loadCampaign,
   saveWorldEdits,
   regenerateSection,
   type EditableScaffold,
@@ -42,13 +42,13 @@ export default function WorldReviewPage() {
 
     async function loadData() {
       try {
-        const [campaign, world, lore] = await Promise.all([
-          getActiveCampaign(),
-          getWorldData(campaignId!),
-          getLoreCards(campaignId!).catch(() => [] as LoreCardItem[]),
+        const campaign = await loadCampaign(campaignId);
+        const [world, lore] = await Promise.all([
+          getWorldData(campaignId),
+          getLoreCards(campaignId).catch(() => [] as LoreCardItem[]),
         ]);
 
-        const editableScaffold = toEditableScaffold(world, campaign.premise, lore);
+        const editableScaffold = toEditableScaffold(world, campaign?.premise ?? "", lore);
 
         setScaffold(editableScaffold);
         setLoreCards(lore);
@@ -76,16 +76,16 @@ export default function WorldReviewPage() {
 
         switch (section) {
           case "premise":
-            body = { section: "premise", additionalInstruction };
+            body = { campaignId, section: "premise", additionalInstruction };
             break;
           case "locations":
-            body = { section: "locations", refinedPremise: scaffold.refinedPremise, additionalInstruction };
+            body = { campaignId, section: "locations", refinedPremise: scaffold.refinedPremise, additionalInstruction };
             break;
           case "factions":
-            body = { section: "factions", refinedPremise: scaffold.refinedPremise, locationNames, additionalInstruction };
+            body = { campaignId, section: "factions", refinedPremise: scaffold.refinedPremise, locationNames, additionalInstruction };
             break;
           case "npcs":
-            body = { section: "npcs", refinedPremise: scaffold.refinedPremise, locationNames, factionNames, additionalInstruction };
+            body = { campaignId, section: "npcs", refinedPremise: scaffold.refinedPremise, locationNames, factionNames, additionalInstruction };
             break;
           default:
             return;
@@ -234,6 +234,7 @@ export default function WorldReviewPage() {
 
         <TabsContent value="npcs">
           <NpcsSection
+            campaignId={campaignId ?? ""}
             npcs={scaffold.npcs}
             locationNames={scaffold.locations.map((l) => l.name)}
             factionNames={scaffold.factions.map((f) => f.name)}

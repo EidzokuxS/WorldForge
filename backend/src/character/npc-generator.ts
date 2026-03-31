@@ -3,6 +3,8 @@ import { z } from "zod";
 import { createModel } from "../ai/index.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import { buildV2CardSections } from "./v2-sections.js";
+import { buildImportModeGuidance, normalizeImportedTags } from "./import-utils.js";
+import type { CharacterImportMode } from "./import-utils.js";
 
 const npcSchema = z.object({
   name: z.string(),
@@ -64,6 +66,7 @@ export async function mapV2CardToNpc(opts: {
   personality: string;
   scenario: string;
   v2Tags: string[];
+  importMode: CharacterImportMode;
   premise: string;
   locationNames: string[];
   factionNames: string[];
@@ -86,12 +89,17 @@ ${sections}
 
 REQUIREMENTS:
 - Keep the character's name as "${opts.name}".
-- persona: 2-3 sentences from description + personality fields.
-- tags: convert traits into evocative WorldForge tags (3-10).
+- persona: 2-3 sentences from description + personality fields, adapted to the chosen import mode.
+- tags: convert traits into evocative WorldForge tags (4-8).
+- Tags must match the same house style as normal WorldForge generation: short Title Case role, trait, flaw, or skill tags.
+- Prefer 1-3 word tags like Field Medic, Fearless, Signal Analyst, Noble-born.
+- Avoid trope/meta sludge, fandom metadata, POV markers, formatting labels, or literal copies of source hyphen-tags.
+- Keep outsider/native status in persona and goals when relevant, not as tags like Offworld Origin.
 - goals: infer from description/scenario. shortTerm: 1-3, longTerm: 1-2.
 - locationName MUST be one of KNOWN LOCATIONS.
 - factionName: one of KNOWN FACTIONS or null.
-- Source tags from SillyTavern are meta-tags — use as context, don't copy verbatim.`;
+- Source tags from SillyTavern are meta-tags — use as context, don't copy verbatim.
+${buildImportModeGuidance(opts.importMode)}`;
 
   const result = await generateObject({
     model: createModel(opts.role.provider),
@@ -100,7 +108,10 @@ REQUIREMENTS:
     temperature: opts.role.temperature,
     maxOutputTokens: opts.role.maxTokens,
   });
-  return result.object;
+  return {
+    ...result.object,
+    tags: normalizeImportedTags(result.object.tags, { max: 8 }),
+  };
 }
 
 export async function generateNpcFromArchetype(opts: {

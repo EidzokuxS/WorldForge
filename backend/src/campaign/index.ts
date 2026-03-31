@@ -5,6 +5,10 @@ export {
   loadCampaign,
   deleteCampaign,
   markGenerationComplete,
+  saveIpContext,
+  loadIpContext,
+  savePremiseDivergence,
+  loadPremiseDivergence,
   getActiveCampaign,
   incrementTick,
 } from "./manager.js";

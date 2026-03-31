@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import type { IpResearchContext } from "@worldforge/shared";
 import { z } from "zod";
 import { safeGenerateObject as generateObject } from "../ai/generate-object-safe.js";
 import { createModel } from "../ai/index.js";
@@ -7,7 +8,7 @@ import type { ResolveResult } from "../ai/index.js";
 import { getDb } from "../db/index.js";
 import { npcs, locations, factions } from "../db/schema.js";
 import { storeLoreCards } from "../vectors/lore-cards.js";
-import { createLogger } from "../lib/index.js";
+import { clampTokens, createLogger } from "../lib/index.js";
 
 const log = createLogger("worldbook-importer");
 
@@ -43,12 +44,69 @@ export interface ImportResult {
   };
 }
 
+const WORLDBOOK_ENTRY_TYPE_ORDER: Record<WorldBookEntryType, number> = {
+  character: 0,
+  location: 1,
+  faction: 2,
+  bestiary: 3,
+  lore_general: 4,
+};
+
+function normalizeEntryText(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function normalizeEntityName(value: string): string {
+  return normalizeEntryText(value).toLocaleLowerCase("en-US");
+}
+
+export function getClassifiedEntryEntityKey(entry: Pick<ClassifiedEntry, "type" | "name">): string {
+  return `${entry.type}:${normalizeEntityName(entry.name)}`;
+}
+
+export function sortClassifiedEntriesForWorldContext<T extends ClassifiedEntry>(
+  entries: T[],
+): T[] {
+  return [...entries].sort((left, right) => {
+    const typeCompare =
+      WORLDBOOK_ENTRY_TYPE_ORDER[left.type] - WORLDBOOK_ENTRY_TYPE_ORDER[right.type];
+    if (typeCompare !== 0) {
+      return typeCompare;
+    }
+
+    const entityKeyCompare = getClassifiedEntryEntityKey(left).localeCompare(
+      getClassifiedEntryEntityKey(right),
+      "en",
+      { sensitivity: "base" },
+    );
+    if (entityKeyCompare !== 0) {
+      return entityKeyCompare;
+    }
+
+    const nameCompare = normalizeEntryText(left.name).localeCompare(
+      normalizeEntryText(right.name),
+      "en",
+      { sensitivity: "base" },
+    );
+    if (nameCompare !== 0) {
+      return nameCompare;
+    }
+
+    return normalizeEntryText(left.summary).localeCompare(
+      normalizeEntryText(right.summary),
+      "en",
+      { sensitivity: "base" },
+    );
+  });
+}
+
 // ───── Zod schema for WorldBook JSON validation ─────
 
 const worldBookEntrySchema = z
   .object({
-    comment: z.string(),
+    comment: z.string().default(""),
     content: z.string(),
+    name: z.string().optional(),
   })
   .passthrough();
 
@@ -70,7 +128,7 @@ export function parseWorldBook(json: unknown): WorldBookEntry[] {
     const entry = parsed.entries[key];
     if (!entry) continue;
 
-    const name = (entry.comment || "").trim();
+    const name = (entry.comment || entry.name || "").trim();
     if (!name) continue;
 
     const nameLower = name.toLowerCase();
@@ -100,20 +158,17 @@ const classificationSchema = z.object({
   ),
 });
 
-export async function classifyEntries(
-  entries: WorldBookEntry[],
-  role: ResolvedRole,
-): Promise<ClassifiedEntry[]> {
-  if (entries.length === 0) return [];
+const CLASSIFY_BATCH_SIZE = 20;
 
+function buildClassificationPrompt(
+  entries: WorldBookEntry[],
+  compact = false,
+): string {
   const entriesList = entries
-    .map((e, i) => `${i + 1}. "${e.name}": ${e.text.slice(0, 500)}`)
+    .map((entry, index) => `${index + 1}. "${entry.name}": ${entry.text.slice(0, 500)}`)
     .join("\n\n");
 
-  const result = await generateObject({
-    model: createModel(role.provider),
-    schema: classificationSchema,
-    prompt: `You are a content classifier for an RPG world-building system. Classify each WorldBook entry by its type.
+  return `You are a content classifier for an RPG world-building system. Classify each WorldBook entry by its type.
 
 ENTRY TYPES:
 - character: describes a person, creature with personality, an NPC (individual with unique identity)
@@ -128,13 +183,119 @@ ${entriesList}
 For each entry, provide:
 - name: the exact entry name as given
 - type: one of the five types above
-- summary: a 1-2 sentence factual summary of the entry content`,
+- summary: a 1-2 sentence factual summary of the entry content
+${compact
+    ? `
+
+RETRY MODE:
+- Keep summaries very short.
+- Return exactly one object per input entry.
+- Do not omit entries.
+- Do not add commentary or markdown.`
+    : ""}`;
+}
+
+function normalizeClassificationName(value: string): string {
+  return value.trim().toLocaleLowerCase("en-US");
+}
+
+function reconcileClassifiedBatch(
+  requestedEntries: WorldBookEntry[],
+  classifiedEntries: ClassifiedEntry[],
+): ClassifiedEntry[] {
+  const byName = new Map<string, ClassifiedEntry>();
+  for (const entry of classifiedEntries) {
+    const key = normalizeClassificationName(entry.name);
+    if (!byName.has(key)) {
+      byName.set(key, entry);
+    }
+  }
+
+  return requestedEntries.map((requestedEntry) => {
+    const match = byName.get(normalizeClassificationName(requestedEntry.name));
+    if (!match) {
+      throw new Error(`Missing classification for worldbook entry "${requestedEntry.name}"`);
+    }
+
+    return {
+      ...match,
+      name: requestedEntry.name,
+    };
+  });
+}
+
+async function classifyBatchEntries(
+  entries: WorldBookEntry[],
+  role: ResolvedRole,
+  options?: {
+    compact?: boolean;
+    maxOutputTokens?: number;
+  },
+): Promise<ClassifiedEntry[]> {
+  const result = await generateObject({
+    model: createModel(role.provider),
+    schema: classificationSchema,
+    prompt: buildClassificationPrompt(entries, options?.compact),
     temperature: role.temperature,
-    maxOutputTokens: role.maxTokens,
+    ...(options?.maxOutputTokens === undefined
+      ? {}
+      : { maxOutputTokens: options.maxOutputTokens }),
   });
 
-  log.info(`Classified ${result.object.entries.length} entries`);
-  return result.object.entries;
+  return reconcileClassifiedBatch(entries, result.object.entries);
+}
+
+export async function classifyEntries(
+  entries: WorldBookEntry[],
+  role: ResolvedRole,
+): Promise<ClassifiedEntry[]> {
+  if (entries.length === 0) return [];
+
+  const allClassified: ClassifiedEntry[] = [];
+  const batches = Math.ceil(entries.length / CLASSIFY_BATCH_SIZE);
+
+  for (let i = 0; i < entries.length; i += CLASSIFY_BATCH_SIZE) {
+    const batch = entries.slice(i, i + CLASSIFY_BATCH_SIZE);
+    const batchNum = Math.floor(i / CLASSIFY_BATCH_SIZE) + 1;
+    log.info(`Classifying batch ${batchNum}/${batches} (${batch.length} entries)...`);
+
+    try {
+      allClassified.push(...await classifyBatchEntries(batch, role));
+      continue;
+    } catch (firstError) {
+      log.warn(
+        `Worldbook batch ${batchNum}/${batches} classification failed; retrying with compact output`,
+        firstError,
+      );
+    }
+
+    try {
+      allClassified.push(
+        ...await classifyBatchEntries(batch, role, {
+          compact: true,
+          maxOutputTokens: clampTokens(Math.max(role.maxTokens, 8192)),
+        }),
+      );
+      continue;
+    } catch (retryError) {
+      log.warn(
+        `Worldbook batch ${batchNum}/${batches} retry failed; falling back to single-entry classification`,
+        retryError,
+      );
+    }
+
+    for (const entry of batch) {
+      allClassified.push(
+        ...(await classifyBatchEntries([entry], role, {
+          compact: true,
+          maxOutputTokens: clampTokens(Math.min(Math.max(role.maxTokens, 1024), 4096)),
+        })),
+      );
+    }
+  }
+
+  log.info(`Classified ${allClassified.length} entries total (${batches} batches)`);
+  return allClassified;
 }
 
 // ───── 3. Import Classified Entries ─────
@@ -223,4 +384,45 @@ export async function importClassifiedEntries(
 
   log.info("WorldBook import complete", result.imported);
   return result;
+}
+
+// ───── 4. WorldBook → IpResearchContext ─────
+
+/**
+ * Convert classified worldbook entries into an IpResearchContext.
+ * This lets the scaffold generation pipeline use worldbook as its
+ * knowledge base — same as franchise research, but from a file.
+ */
+export function worldbookToIpContext(
+  entries: ClassifiedEntry[],
+  worldbookName: string,
+): IpResearchContext {
+  const sortedEntries = sortClassifiedEntriesForWorldContext(entries);
+  const characters = sortedEntries.filter((e) => e.type === "character");
+  const locs = sortedEntries.filter((e) => e.type === "location");
+  const facs = sortedEntries.filter((e) => e.type === "faction");
+  const loreEntries = sortedEntries.filter(
+    (e) => e.type === "bestiary" || e.type === "lore_general",
+  );
+
+  // Build key facts from ALL entries — each becomes a fact
+  const keyFacts = sortedEntries.map((e) => `${normalizeEntryText(e.name)}: ${normalizeEntryText(e.summary)}`);
+
+  // Tonal notes from lore_general entries (world rules, atmosphere)
+  const tonalNotes = loreEntries
+    .filter((e) => e.type === "lore_general")
+    .slice(0, 10)
+    .map((e) => e.summary);
+
+  return {
+    franchise: worldbookName,
+    keyFacts,
+    tonalNotes: tonalNotes.length > 0 ? tonalNotes : ["Custom worldbook setting"],
+    canonicalNames: {
+      locations: locs.map((e) => e.name),
+      factions: facs.map((e) => e.name),
+      characters: characters.map((e) => e.name),
+    },
+    source: "llm" as const,
+  };
 }

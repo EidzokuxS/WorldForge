@@ -1,4 +1,4 @@
-import type { SeedCategory } from "@/lib/types";
+import type { CampaignWorldbookSelection, SeedCategory } from "@/lib/types";
 
 export interface TestConnectionRequest {
   baseUrl: string;
@@ -100,6 +100,25 @@ export interface WorldData {
   } | null;
 }
 
+export const LORE_CARD_CATEGORIES = [
+  "concept",
+  "rule",
+  "location",
+  "faction",
+  "npc",
+  "ability",
+  "item",
+  "event",
+] as const;
+
+export type LoreCardCategory = (typeof LORE_CARD_CATEGORIES)[number];
+
+export interface LoreCardUpdateInput {
+  term: string;
+  definition: string;
+  category: LoreCardCategory;
+}
+
 export interface LoreCardItem {
   id: string;
   term: string;
@@ -149,10 +168,10 @@ export interface EditableScaffold {
 }
 
 export type RegenerateSectionRequest =
-  | { section: "premise"; additionalInstruction?: string }
-  | { section: "locations"; refinedPremise: string; additionalInstruction?: string }
-  | { section: "factions"; refinedPremise: string; locationNames: string[]; additionalInstruction?: string }
-  | { section: "npcs"; refinedPremise: string; locationNames: string[]; factionNames: string[]; additionalInstruction?: string };
+  | { campaignId: string; section: "premise"; additionalInstruction?: string }
+  | { campaignId: string; section: "locations"; refinedPremise: string; additionalInstruction?: string }
+  | { campaignId: string; section: "factions"; refinedPremise: string; locationNames: string[]; additionalInstruction?: string }
+  | { campaignId: string; section: "npcs"; refinedPremise: string; locationNames: string[]; factionNames: string[]; additionalInstruction?: string };
 
 export interface ParsedCharacter {
   name: string;
@@ -194,3 +213,5 @@ export interface WorldBookImportResult {
     loreCards: number;
   };
 }
+
+export type WorldbookLibraryItem = CampaignWorldbookSelection;

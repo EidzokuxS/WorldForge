@@ -13,7 +13,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/lib/api", () => ({
-  getActiveCampaign: vi.fn(),
+  loadCampaign: vi.fn(),
   getWorldData: vi.fn(),
   getLoreCards: vi.fn(),
   saveWorldEdits: vi.fn(),
@@ -49,14 +49,14 @@ vi.mock("@/components/world-review/lore-section", () => ({
 }));
 
 import {
-  getActiveCampaign,
+  loadCampaign,
   getWorldData,
   getLoreCards,
 } from "@/lib/api";
 import { toEditableScaffold } from "@/lib/world-data-helpers";
 import WorldReviewPage from "../page";
 
-const mockedGetActive = vi.mocked(getActiveCampaign);
+const mockedLoadCampaign = vi.mocked(loadCampaign);
 const mockedGetWorld = vi.mocked(getWorldData);
 const mockedGetLore = vi.mocked(getLoreCards);
 const mockedToEditable = vi.mocked(toEditableScaffold);
@@ -88,7 +88,7 @@ describe("WorldReviewPage", () => {
 
   it("shows loading spinner while data is fetching", () => {
     mockGet.mockReturnValue("test-id");
-    mockedGetActive.mockReturnValue(new Promise(() => {}));
+    mockedLoadCampaign.mockReturnValue(new Promise(() => {}));
     mockedGetWorld.mockReturnValue(new Promise(() => {}));
     mockedGetLore.mockReturnValue(new Promise(() => {}));
 
@@ -99,7 +99,7 @@ describe("WorldReviewPage", () => {
 
   it("renders scaffold tabs after data loads", async () => {
     mockGet.mockReturnValue("test-id");
-    mockedGetActive.mockResolvedValue({ id: "test-id", name: "Test", premise: "A dark fantasy world" } as never);
+    mockedLoadCampaign.mockResolvedValue({ id: "test-id", name: "Test", premise: "A dark fantasy world" } as never);
     mockedGetWorld.mockResolvedValue({ locations: [], factions: [], npcs: [], relationships: [] } as never);
     mockedGetLore.mockResolvedValue([]);
     mockedToEditable.mockReturnValue(fakeScaffold as never);
@@ -117,9 +117,33 @@ describe("WorldReviewPage", () => {
     expect(screen.getByText("Lore (0)")).toBeInTheDocument();
   });
 
+  it("loads the campaign before requesting world data", async () => {
+    mockGet.mockReturnValue("test-id");
+    const callOrder: string[] = [];
+    mockedLoadCampaign.mockImplementation(async () => {
+      callOrder.push("loadCampaign");
+      return { id: "test-id", name: "Test", premise: "A world" } as never;
+    });
+    mockedGetWorld.mockImplementation(async () => {
+      callOrder.push("getWorldData");
+      return { locations: [], factions: [], npcs: [], relationships: [] } as never;
+    });
+    mockedGetLore.mockResolvedValue([]);
+    mockedToEditable.mockReturnValue(fakeScaffold as never);
+
+    render(<WorldReviewPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("World Review")).toBeInTheDocument();
+    });
+
+    expect(callOrder[0]).toBe("loadCampaign");
+    expect(callOrder).toContain("getWorldData");
+  });
+
   it("shows 'Failed to load' when world data is unavailable", async () => {
     mockGet.mockReturnValue("test-id");
-    mockedGetActive.mockRejectedValue(new Error("Network error"));
+    mockedLoadCampaign.mockRejectedValue(new Error("Network error"));
 
     render(<WorldReviewPage />);
 
@@ -130,7 +154,7 @@ describe("WorldReviewPage", () => {
 
   it("renders Continue button", async () => {
     mockGet.mockReturnValue("test-id");
-    mockedGetActive.mockResolvedValue({ id: "test-id", name: "Test", premise: "A world" } as never);
+    mockedLoadCampaign.mockResolvedValue({ id: "test-id", name: "Test", premise: "A world" } as never);
     mockedGetWorld.mockResolvedValue({ locations: [], factions: [], npcs: [], relationships: [] } as never);
     mockedGetLore.mockResolvedValue([]);
     mockedToEditable.mockReturnValue(fakeScaffold as never);

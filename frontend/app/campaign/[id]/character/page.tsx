@@ -8,14 +8,15 @@ import { getErrorMessage } from "@/lib/settings";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  getActiveCampaign,
   getWorldData,
+  loadCampaign,
   parseCharacter,
   generateCharacter as apiGenerateCharacter,
   importV2Card,
   saveCharacter,
   type ParsedCharacter,
 } from "@/lib/api";
+import type { CharacterImportMode } from "@/lib/types";
 import { parseV2CardFile } from "@/lib/v2-card-parser";
 import { CharacterForm } from "@/components/character-creation/character-form";
 import { CharacterCard } from "@/components/character-creation/character-card";
@@ -33,10 +34,8 @@ export default function CharacterCreationPage(props: { params: Promise<{ id: str
   useEffect(() => {
     async function loadData() {
       try {
-        const [, world] = await Promise.all([
-          getActiveCampaign(),
-          getWorldData(campaignId),
-        ]);
+        await loadCampaign(campaignId);
+        const world = await getWorldData(campaignId);
         setLocationNames(world.locations.map((l) => l.name));
       } catch (error) {
         toast.error("Failed to load world data", {
@@ -84,11 +83,15 @@ export default function CharacterCreationPage(props: { params: Promise<{ id: str
   }, [campaignId]);
 
   const handleImport = useCallback(
-    async (file: File) => {
+    async (file: File, importMode: CharacterImportMode) => {
       setBusy("importing");
       try {
         const payload = await parseV2CardFile(file);
-        const result = await importV2Card(campaignId, payload);
+        const result = await importV2Card(campaignId, payload, {
+          role: "player",
+          importMode,
+          locationNames,
+        });
         if (result.role === "player") setCharacter(result.character);
         toast.success(`Imported "${payload.name}"`);
       } catch (error) {
@@ -99,7 +102,7 @@ export default function CharacterCreationPage(props: { params: Promise<{ id: str
         setBusy("idle");
       }
     },
-    [campaignId],
+    [campaignId, locationNames],
   );
 
   const handleSave = useCallback(async () => {

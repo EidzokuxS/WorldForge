@@ -58,6 +58,7 @@ vi.mock("../../vectors/lore-cards.js", () => ({
 }));
 
 vi.mock("../../lib/index.js", () => ({
+  clampTokens: vi.fn((value: number) => value),
   createLogger: vi.fn(() => ({
     info: vi.fn(),
     warn: vi.fn(),
@@ -209,6 +210,66 @@ describe("classifyEntries", () => {
     expect(result).toEqual([
       { name: "Goblin", type: "bestiary", summary: "A small green menace." },
     ]);
+  });
+
+  it("retries a failed batch classification with compact output before giving up", async () => {
+    const entries: WorldBookEntry[] = [
+      { name: "Fog Orchard", text: "A mountain orchard hidden in fog." },
+      { name: "Relay Warden", text: "A caretaker who maintains relay dishes." },
+    ];
+
+    vi.mocked(generateObject)
+      .mockRejectedValueOnce(new Error("safeGenerateObject fallback: invalid JSON"))
+      .mockResolvedValueOnce({
+        object: {
+          entries: [
+            { name: "Fog Orchard", type: "location", summary: "A fog-hidden orchard in the mountains." },
+            { name: "Relay Warden", type: "character", summary: "A solitary caretaker of relay dishes." },
+          ],
+        },
+      } as never);
+
+    const result = await classifyEntries(entries, mockRole);
+
+    expect(result).toEqual([
+      { name: "Fog Orchard", type: "location", summary: "A fog-hidden orchard in the mountains." },
+      { name: "Relay Warden", type: "character", summary: "A solitary caretaker of relay dishes." },
+    ]);
+    expect(generateObject).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(generateObject).mock.calls[1]![0]?.prompt).toContain("RETRY MODE");
+  });
+
+  it("falls back to single-entry classification when batch attempts keep failing", async () => {
+    const entries: WorldBookEntry[] = [
+      { name: "Fog Orchard", text: "A mountain orchard hidden in fog." },
+      { name: "Relay Warden", text: "A caretaker who maintains relay dishes." },
+    ];
+
+    vi.mocked(generateObject)
+      .mockRejectedValueOnce(new Error("batch failed"))
+      .mockRejectedValueOnce(new Error("batch retry failed"))
+      .mockResolvedValueOnce({
+        object: {
+          entries: [
+            { name: "Fog Orchard", type: "location", summary: "A fog-hidden orchard in the mountains." },
+          ],
+        },
+      } as never)
+      .mockResolvedValueOnce({
+        object: {
+          entries: [
+            { name: "Relay Warden", type: "character", summary: "A solitary caretaker of relay dishes." },
+          ],
+        },
+      } as never);
+
+    const result = await classifyEntries(entries, mockRole);
+
+    expect(result).toEqual([
+      { name: "Fog Orchard", type: "location", summary: "A fog-hidden orchard in the mountains." },
+      { name: "Relay Warden", type: "character", summary: "A solitary caretaker of relay dishes." },
+    ]);
+    expect(generateObject).toHaveBeenCalledTimes(4);
   });
 });
 

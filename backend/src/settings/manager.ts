@@ -143,7 +143,7 @@ function normalizeFallbackConfig(
   };
 }
 
-const VALID_SEARCH_PROVIDERS = new Set(["duckduckgo", "zai"]);
+const VALID_SEARCH_PROVIDERS = new Set(["brave", "duckduckgo", "zai"]);
 
 function normalizeResearchConfig(
   value: unknown,
@@ -158,6 +158,8 @@ function normalizeResearchConfig(
     searchProvider: VALID_SEARCH_PROVIDERS.has(rawProvider)
       ? (rawProvider as ResearchConfig["searchProvider"])
       : defaults.searchProvider,
+    braveApiKey: asString(source.braveApiKey, defaults.braveApiKey ?? ""),
+    zaiApiKey: asString(source.zaiApiKey, defaults.zaiApiKey ?? ""),
   };
 }
 

@@ -127,7 +127,7 @@ function insertNpcs(
         name: npc.name,
         persona: npc.persona,
         tags: JSON.stringify(npc.tags),
-        tier: "key",
+        tier: npc.tier === "key" ? "key" : "persistent",
         currentLocationId: locationIds.get(npc.locationName) ?? null,
         goals: JSON.stringify({
           short_term: npc.goals.shortTerm,

@@ -125,13 +125,13 @@ app.post("/import-v2-card", async (c) => {
     const result = await parseBody(c, importV2CardSchema);
     if ("response" in result) return result.response;
 
-    const { campaignId, name, description, personality, scenario, tags, role, locationNames: bodyLoc, factionNames: bodyFac } = result.data;
+    const { campaignId, name, description, personality, scenario, tags, importMode, role, locationNames: bodyLoc, factionNames: bodyFac } = result.data;
     const ctx = setupCharacterEndpoint(c, campaignId, role, bodyLoc, bodyFac);
     if (ctx instanceof Response) return ctx;
 
     if (role === "key") {
       const npc = await mapV2CardToNpc({
-        name, description, personality, scenario, v2Tags: tags,
+        name, description, personality, scenario, v2Tags: tags, importMode,
         premise: ctx.campaign.premise,
         locationNames: ctx.names.locationNames, factionNames: ctx.names.factionNames,
         role: ctx.gen,
@@ -140,7 +140,7 @@ app.post("/import-v2-card", async (c) => {
     }
 
     const character = await mapV2CardToCharacter({
-      name, description, personality, scenario, v2Tags: tags,
+      name, description, personality, scenario, v2Tags: tags, importMode,
       premise: ctx.campaign.premise, locationNames: ctx.names.locationNames,
       role: ctx.gen,
     });

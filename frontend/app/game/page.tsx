@@ -34,8 +34,10 @@ import {
   chatRetry,
   chatUndo,
   getActiveCampaign,
+  getRememberedCampaignId,
   getImageUrl,
   getWorldData,
+  loadCampaign,
   parseTurnSSE,
 } from "@/lib/api";
 import type { WorldData } from "@/lib/api-types";
@@ -75,7 +77,14 @@ export default function GamePage() {
 
     async function initGame() {
       try {
-        const campaign = await getActiveCampaign();
+        let campaign = await getActiveCampaign();
+        if (!campaign) {
+          const rememberedCampaignId = getRememberedCampaignId();
+          if (rememberedCampaignId) {
+            campaign = await loadCampaign(rememberedCampaignId).catch(() => null);
+          }
+        }
+
         if (!campaign) {
           toast.error("No active campaign found. Create or load one first.");
           router.replace("/");

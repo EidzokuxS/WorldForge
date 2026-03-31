@@ -68,6 +68,9 @@ export const settingsPayloadSchema = z.object({
   research: z.object({
     enabled: z.boolean(),
     maxSearchSteps: z.number().int().min(1).max(100),
+    searchProvider: z.enum(["brave", "duckduckgo", "zai"]).optional(),
+    braveApiKey: z.string().optional(),
+    zaiApiKey: z.string().optional(),
   }).strip(),
 }).strip();
 
@@ -86,7 +89,7 @@ export const chatActionBodySchema = z.object({
   method: z.string().max(500).default(""),
 });
 
-export const createCampaignSchema = z.object({
+const createCampaignBaseSchema = z.object({
   name: z
     .string()
     .transform((s) => s.trim())
@@ -94,8 +97,17 @@ export const createCampaignSchema = z.object({
   premise: z
     .string()
     .transform((s) => s.trim())
-    .pipe(z.string().min(1, "Campaign premise is required.")),
+    .default(""),
   seeds: worldSeedsSchema.optional(),
+});
+
+const worldbookSelectionSchema = z.object({
+  id: z.string().min(1),
+  displayName: z.string().min(1),
+  normalizedSourceHash: z.string().min(1),
+  entryCount: z.number().int().min(0),
+  createdAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
 });
 
 export const rollSeedSchema = z.object({
@@ -106,7 +118,54 @@ export const suggestSeedsSchema = z.object({
   premise: z
     .string()
     .transform((s) => s.trim())
-    .pipe(z.string().min(1, "premise is required.")),
+    .optional()
+    .default(""),
+  name: z.string().optional(),
+  /** Explicit franchise name — if set, research this IP. If empty, treat as original world. */
+  franchise: z.string().optional(),
+  /** Whether to run web research. Default true. */
+  research: z.boolean().optional(),
+  /** Selected reusable worldbooks — composed on the backend into one context. */
+  selectedWorldbooks: z.array(worldbookSelectionSchema).optional(),
+  /** Pre-classified worldbook entries — used as knowledge base for world generation. */
+  worldbookEntries: z.array(z.object({
+    name: z.string(),
+    type: z.enum(["character", "location", "faction", "bestiary", "lore_general"]),
+    summary: z.string(),
+  })).optional(),
+});
+
+const ipContextSchema = z.object({
+  franchise: z.string(),
+  keyFacts: z.array(z.string()),
+  tonalNotes: z.array(z.string()),
+  canonicalNames: z.object({
+    locations: z.array(z.string()).optional(),
+    factions: z.array(z.string()).optional(),
+    characters: z.array(z.string()).optional(),
+  }).optional(),
+  excludedCharacters: z.array(z.string()).optional(),
+  source: z.enum(["mcp", "llm"]),
+}).nullable().optional();
+
+const premiseDivergenceSchema = z.object({
+  mode: z.enum(["canonical", "coexisting", "diverged"]),
+  protagonistRole: z.object({
+    kind: z.enum(["canonical", "custom"]),
+    interpretation: z.enum(["canonical", "replacement", "coexisting", "outsider", "unknown"]),
+    canonicalCharacterName: z.string().nullable().optional(),
+    roleSummary: z.string(),
+  }),
+  preservedCanonFacts: z.array(z.string()),
+  changedCanonFacts: z.array(z.string()),
+  currentStateDirectives: z.array(z.string()),
+  ambiguityNotes: z.array(z.string()),
+}).nullable().optional();
+
+export const createCampaignSchema = createCampaignBaseSchema.extend({
+  ipContext: ipContextSchema,
+  premiseDivergence: premiseDivergenceSchema,
+  worldbookSelection: z.array(worldbookSelectionSchema).optional(),
 });
 
 export const suggestSeedSchema = z.object({
@@ -115,6 +174,8 @@ export const suggestSeedSchema = z.object({
     .transform((s) => s.trim())
     .pipe(z.string().min(1, "premise is required.")),
   category: seedCategorySchema,
+  ipContext: ipContextSchema,
+  premiseDivergence: premiseDivergenceSchema,
 });
 
 export const generateWorldSchema = z.object({
@@ -122,6 +183,8 @@ export const generateWorldSchema = z.object({
     .string()
     .transform((s) => s.trim())
     .pipe(z.string().min(1, "campaignId is required.")),
+  ipContext: ipContextSchema,
+  premiseDivergence: premiseDivergenceSchema,
 });
 
 export const testProviderSchema = z.object({
@@ -196,6 +259,7 @@ const scaffoldNpcSchema = z.object({
   }),
   locationName: z.string(),
   factionName: z.string().nullable(),
+  tier: z.enum(["key", "supporting"]).default("key"),
 });
 
 export const saveEditsSchema = z.object({
@@ -211,6 +275,18 @@ export const saveEditsSchema = z.object({
       category: z.enum(LORE_CATEGORIES),
     })),
   }),
+});
+
+export const loreCardUpdateSchema = z.object({
+  term: z
+    .string()
+    .transform((value) => value.trim())
+    .pipe(z.string().min(1, "term is required.")),
+  definition: z
+    .string()
+    .transform((value) => value.trim())
+    .pipe(z.string().min(1, "definition is required.")),
+  category: z.enum(LORE_CATEGORIES),
 });
 
 // --- Character save schema ---
@@ -267,10 +343,11 @@ export const researchCharacterSchema = z.object({
 export const importV2CardSchema = z.object({
   campaignId: z.string().min(1),
   name: z.string().min(1),
-  description: z.string().min(1).max(8000),
-  personality: z.string().max(4000).default(""),
-  scenario: z.string().max(4000).default(""),
+  description: z.string().min(1),
+  personality: z.string().default(""),
+  scenario: z.string().default(""),
   tags: z.array(z.string()).default([]),
+  importMode: z.enum(["native", "outsider"]).default("native"),
   ...characterRoleFields,
 }).refine(keyRoleLocationRefine.refinement, keyRoleLocationRefine.options);
 
@@ -311,13 +388,20 @@ export const imageGenerateSchema = z.object({
 // --- WorldBook import schemas ---
 
 export const parseWorldBookSchema = z.object({
-  campaignId: z.string().min(1),
+  campaignId: z.string().min(1).optional(),
   worldbook: z.object({
     entries: z.record(z.string(), z.object({
-      comment: z.string(),
+      comment: z.string().default(""),
       content: z.string(),
+      name: z.string().optional(),
     }).passthrough()),
   }).passthrough(),
+});
+
+export const worldbookLibraryImportSchema = z.object({
+  displayName: z.string().trim().optional(),
+  originalFileName: z.string().trim().optional(),
+  worldbook: parseWorldBookSchema.shape.worldbook,
 });
 
 export const importWorldBookSchema = z.object({

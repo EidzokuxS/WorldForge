@@ -1,4 +1,8 @@
-import type { ResearchConfig } from "@worldforge/shared";
+import type {
+  IpResearchContext,
+  PremiseDivergence,
+  ResearchConfig,
+} from "@worldforge/shared";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import type { WorldSeeds } from "./seed-roller.js";
 
@@ -10,9 +14,11 @@ export interface GenerateScaffoldRequest {
   role: ResolvedRole;
   /** Optional fallback role for retrying lore extraction when primary model fails. */
   fallbackRole?: ResolvedRole;
-  /** Optional: name of a known franchise/IP to research before generation (e.g. "Warhammer 40,000"). If omitted, franchise detection runs on premise/name automatically. Pass an empty string to disable research entirely. */
-  knownIP?: string;
-  /** Research agent configuration. When omitted, defaults to enabled with 10 max steps. */
+  /** Pre-cached IP research context from suggest-seeds phase. Loaded from config.json. */
+  ipContext?: IpResearchContext | null;
+  /** Structured divergence interpretation cached beside ipContext. */
+  premiseDivergence?: PremiseDivergence | null;
+  /** Research config for sufficiency checks — provider + API keys. */
   research?: ResearchConfig;
 }
 
@@ -50,6 +56,9 @@ export interface ScaffoldNpc {
   goals: ScaffoldNpcGoals;
   locationName: string;
   factionName: string | null;
+  /** NPC importance tier. "key" = canonical/plot-relevant, "supporting" = original/background.
+   *  Optional until plan 24-03 rewrites the NPC generation step to always populate it. */
+  tier?: "key" | "supporting";
 }
 
 export const LORE_CATEGORIES = [

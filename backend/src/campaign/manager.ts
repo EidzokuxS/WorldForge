@@ -4,7 +4,13 @@ import { eq } from "drizzle-orm";
 import { closeDb, connectDb } from "../db/index.js";
 import { runMigrations } from "../db/migrate.js";
 import { campaigns } from "../db/schema.js";
-import type { CampaignMeta, WorldSeeds } from "@worldforge/shared";
+import type {
+  CampaignWorldbookSelection,
+  CampaignMeta,
+  IpResearchContext,
+  PremiseDivergence,
+  WorldSeeds,
+} from "@worldforge/shared";
 import { parseWorldSeeds } from "../worldgen/index.js";
 import { AppError } from "../lib/index.js";
 import { assertSafeId, CAMPAIGNS_DIR, getCampaignConfigPath, getCampaignDir } from "./paths.js";
@@ -19,6 +25,9 @@ type CampaignConfigFile = {
   name: string;
   premise: string;
   seeds?: WorldSeeds;
+  ipContext?: IpResearchContext;
+  premiseDivergence?: PremiseDivergence;
+  worldbookSelection?: CampaignWorldbookSelection[];
   generationComplete?: boolean;
   currentTick?: number;
   createdAt: number;
@@ -46,14 +55,19 @@ export function readCampaignConfig(campaignId: string): CampaignConfigFile {
   } catch {
     throw new AppError("Campaign config.json contains invalid JSON.", 500);
   }
-  if (!parsed.name || !parsed.premise || typeof parsed.createdAt !== "number") {
+  if (!parsed.name || typeof parsed.createdAt !== "number") {
     throw new AppError("Campaign config.json is invalid.", 500);
   }
 
   return {
     name: parsed.name,
-    premise: parsed.premise,
+    premise: parsed.premise ?? "",
     seeds: parseWorldSeeds(parsed.seeds) ?? undefined,
+    ipContext: parsed.ipContext ?? undefined,
+    premiseDivergence: parsed.premiseDivergence ?? undefined,
+    worldbookSelection: Array.isArray(parsed.worldbookSelection)
+      ? parsed.worldbookSelection
+      : undefined,
     generationComplete: Boolean(parsed.generationComplete),
     currentTick: typeof parsed.currentTick === "number" ? parsed.currentTick : undefined,
     createdAt: parsed.createdAt,
@@ -72,7 +86,7 @@ export function listCampaigns(): CampaignMeta[] {
 
   const entries = fs
     .readdirSync(CAMPAIGNS_DIR, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory());
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("_"));
 
   const campaignsList: CampaignMeta[] = [];
 
@@ -99,16 +113,19 @@ export function listCampaigns(): CampaignMeta[] {
 export async function createCampaign(
   name: string,
   premise: string,
-  seeds?: WorldSeeds
+  seeds?: WorldSeeds,
+  initialContext?: {
+    ipContext?: IpResearchContext | null;
+    premiseDivergence?: PremiseDivergence | null;
+    worldbookSelection?: CampaignWorldbookSelection[] | null;
+  },
 ): Promise<CampaignMeta> {
   const trimmedName = name.trim();
   const trimmedPremise = premise.trim();
   if (!trimmedName) {
     throw new AppError("Campaign name is required.", 400);
   }
-  if (!trimmedPremise) {
-    throw new AppError("Campaign premise is required.", 400);
-  }
+  // Premise is optional when worldbook provides context
 
   ensureCampaignsDir();
 
@@ -140,6 +157,9 @@ export async function createCampaign(
       name: trimmedName,
       premise: trimmedPremise,
       seeds,
+      ipContext: initialContext?.ipContext ?? undefined,
+      premiseDivergence: initialContext?.premiseDivergence ?? undefined,
+      worldbookSelection: initialContext?.worldbookSelection ?? undefined,
       generationComplete: false,
       createdAt: now,
       updatedAt: now,
@@ -281,6 +301,43 @@ export function markGenerationComplete(
       seeds: nextConfig.seeds,
       generationComplete: true,
     };
+  }
+}
+
+export function saveIpContext(campaignId: string, ipContext: IpResearchContext): void {
+  assertSafeId(campaignId);
+  const config = readCampaignConfig(campaignId);
+  writeCampaignConfig(getCampaignDir(campaignId), { ...config, ipContext });
+  log.info(`Saved ipContext for "${ipContext.franchise}" (${ipContext.keyFacts.length} facts) to campaign ${campaignId}`);
+}
+
+export function loadIpContext(campaignId: string): IpResearchContext | null {
+  assertSafeId(campaignId);
+  try {
+    const config = readCampaignConfig(campaignId);
+    return config.ipContext ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function savePremiseDivergence(
+  campaignId: string,
+  premiseDivergence: PremiseDivergence,
+): void {
+  assertSafeId(campaignId);
+  const config = readCampaignConfig(campaignId);
+  writeCampaignConfig(getCampaignDir(campaignId), { ...config, premiseDivergence });
+  log.info(`Saved premiseDivergence (${premiseDivergence.mode}) to campaign ${campaignId}`);
+}
+
+export function loadPremiseDivergence(campaignId: string): PremiseDivergence | null {
+  assertSafeId(campaignId);
+  try {
+    const config = readCampaignConfig(campaignId);
+    return config.premiseDivergence ?? null;
+  } catch {
+    return null;
   }
 }
 

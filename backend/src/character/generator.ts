@@ -4,6 +4,8 @@ import type { PlayerCharacter } from "@worldforge/shared";
 import { createModel } from "../ai/index.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import { buildV2CardSections } from "./v2-sections.js";
+import { buildImportModeGuidance, normalizeImportedTags } from "./import-utils.js";
+import type { CharacterImportMode } from "./import-utils.js";
 
 const characterSchema = z.object({
   name: z.string().describe("Character's full name"),
@@ -90,6 +92,7 @@ export async function mapV2CardToCharacter(opts: {
   personality: string;
   scenario: string;
   v2Tags: string[];
+  importMode: CharacterImportMode;
   premise: string;
   locationNames: string[];
   role: ResolvedRole;
@@ -108,18 +111,23 @@ ${sections}
 
 REQUIREMENTS:
 - Keep the character's name as "${opts.name}".
+- Integrate the character according to the chosen import mode.
 - race: character's race/species fitting the world (leave empty if truly unknown).
 - gender: character's gender (leave empty if truly unknown).
 - age: descriptive age (e.g. "Young adult", "Middle-aged", "Elder").
 - appearance: 1-3 sentences describing physical features — build, hair, distinguishing marks.
-- Convert description + personality into WorldForge tags (3-12 tags).
-- Tags should cover: personality traits, skills/abilities, flaws/weaknesses, background, wealth level.
+- Convert description + personality into WorldForge tags (4-8 tags).
+- Tags must match the same house style as normal WorldForge generation: short Title Case traits, roles, skills, flaws, or background markers.
+- Prefer 1-3 word tags like Veteran Scout, Fearless, Signal Analyst, Noble-born.
+- Avoid trope/meta sludge, fandom metadata, POV markers, formatting labels, or literal copies of source hyphen-tags.
+- Keep outsider/native status in the biography when relevant, not as tags like Offworld Origin.
 - HP reflects physical condition: 5=peak, 3=average, 1=frail/wounded.
 - equippedItems: extract mentioned weapons, armor, tools, possessions (0-6 items).
 - locationName MUST be one of KNOWN LOCATIONS — pick the most fitting one.
 - Keep tags evocative and concise: Master Thief, not Is good at stealing things.
 - Do NOT wrap tags in square brackets.
-- Source tags from SillyTavern are meta-tags — use as context, don't copy verbatim.`;
+- Source tags from SillyTavern are meta-tags — use as context, don't copy verbatim.
+${buildImportModeGuidance(opts.importMode)}`;
 
   const result = await generateObject({
     model: createModel(opts.role.provider),
@@ -129,7 +137,10 @@ REQUIREMENTS:
     maxOutputTokens: opts.role.maxTokens,
   });
 
-  return result.object;
+  return {
+    ...result.object,
+    tags: normalizeImportedTags(result.object.tags, { max: 8 }),
+  };
 }
 
 export async function generateCharacter(opts: {

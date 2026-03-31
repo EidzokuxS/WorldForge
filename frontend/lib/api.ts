@@ -1,4 +1,13 @@
-import type { CampaignMeta, SeedCategory, Settings, WorldSeeds } from "@/lib/types";
+import type {
+  CampaignMeta,
+  CampaignWorldbookSelection,
+  CharacterImportMode,
+  IpResearchContext,
+  PremiseDivergence,
+  SeedCategory,
+  Settings,
+  WorldSeeds,
+} from "@/lib/types";
 import type {
   TestConnectionRequest,
   TestConnectionResult,
@@ -8,6 +17,7 @@ import type {
   GenerationProgress,
   WorldData,
   LoreCardItem,
+  LoreCardUpdateInput,
   ScaffoldLocation,
   ScaffoldFaction,
   ScaffoldNpc,
@@ -19,6 +29,7 @@ import type {
   CheckpointMeta,
   ClassifiedWorldBookEntry,
   WorldBookImportResult,
+  WorldbookLibraryItem,
 } from "./api-types";
 
 // Re-export all types so existing `import type { X } from "@/lib/api"` keeps working.
@@ -31,6 +42,7 @@ export type {
   GenerationProgress,
   WorldData,
   LoreCardItem,
+  LoreCardUpdateInput,
   ScaffoldLocation,
   ScaffoldFaction,
   ScaffoldNpc,
@@ -42,9 +54,11 @@ export type {
   CheckpointMeta,
   ClassifiedWorldBookEntry,
   WorldBookImportResult,
+  WorldbookLibraryItem,
 };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:3001";
+const LAST_ACTIVE_CAMPAIGN_KEY = "worldforge:lastActiveCampaignId";
 
 // ───── Raw types (internal) ─────
 
@@ -224,12 +238,52 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   return (await res.json()) as T;
 }
 
+export async function apiPut<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new Error(await readErrorMessage(res));
+  }
+  return (await res.json()) as T;
+}
+
 export async function apiDelete<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, { method: "DELETE" });
   if (!res.ok) {
     throw new Error(await readErrorMessage(res));
   }
   return (await res.json()) as T;
+}
+
+function campaignStorage(): Storage | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function rememberCampaignId(campaignId: string | null | undefined): void {
+  if (!campaignId) return;
+  try {
+    campaignStorage()?.setItem(LAST_ACTIVE_CAMPAIGN_KEY, campaignId);
+  } catch {
+    // Non-fatal in private mode or restricted environments.
+  }
+}
+
+export function getRememberedCampaignId(): string | null {
+  try {
+    return campaignStorage()?.getItem(LAST_ACTIVE_CAMPAIGN_KEY) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // ───── Settings ─────
@@ -277,17 +331,42 @@ export function rollWorldSeed(
   return apiPost<RollSeedResult>("/api/worldgen/roll-seed", { category });
 }
 
-export function suggestSeeds(premise: string): Promise<WorldSeeds> {
-  return apiPost<WorldSeeds>("/api/worldgen/suggest-seeds", { premise });
+export function suggestSeeds(
+  premise: string,
+  opts?: {
+    name?: string;
+    franchise?: string;
+    research?: boolean;
+    selectedWorldbooks?: CampaignWorldbookSelection[];
+    worldbookEntries?: ClassifiedWorldBookEntry[];
+  }
+): Promise<WorldSeeds & { _ipContext?: IpContext | null; _premiseDivergence?: PremiseDivergence | null }> {
+  return apiPost<WorldSeeds & { _ipContext?: IpContext | null; _premiseDivergence?: PremiseDivergence | null }>("/api/worldgen/suggest-seeds", {
+    premise,
+    name: opts?.name,
+    franchise: opts?.franchise,
+    research: opts?.research,
+    selectedWorldbooks: opts?.selectedWorldbooks,
+    worldbookEntries: opts?.worldbookEntries,
+  });
 }
+
+/** @deprecated Use IpResearchContext from @/lib/types */
+export type IpContext = IpResearchContext;
+export type PremiseDivergenceContext = PremiseDivergence;
+export type WorldbookSelection = CampaignWorldbookSelection;
 
 export function suggestSeed(
   premise: string,
-  category: SeedCategory
+  category: SeedCategory,
+  ipContext?: IpContext | null,
+  premiseDivergence?: PremiseDivergence | null,
 ): Promise<RollSeedResult> {
   return apiPost<RollSeedResult>("/api/worldgen/suggest-seed", {
     premise,
     category,
+    ipContext: ipContext ?? null,
+    premiseDivergence: premiseDivergence ?? null,
   });
 }
 
@@ -351,6 +430,26 @@ interface SSEHandlers<T> {
   label: string;
 }
 
+export interface WorldgenDebugOperation {
+  id: string;
+  kind: "suggest-seeds" | "generate-world";
+  status: "running" | "completed" | "failed";
+  label: string;
+  startedAt: number;
+  updatedAt: number;
+  elapsedMs: number;
+  heartbeatCount: number;
+  campaignId?: string;
+  franchise?: string;
+  premisePreview?: string;
+  error?: string;
+}
+
+export interface WorldgenDebugProgress {
+  active: WorldgenDebugOperation[];
+  recent: WorldgenDebugOperation[];
+}
+
 async function parseSSEStream<T>(body: ReadableStream<Uint8Array>, handlers: SSEHandlers<T>): Promise<T> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -367,11 +466,12 @@ async function parseSSEStream<T>(body: ReadableStream<Uint8Array>, handlers: SSE
     buffer = lines.pop()!;
 
     for (const line of lines) {
-      if (line.startsWith("event:")) {
-        currentEvent = line.slice(6).trim();
-      } else if (line.startsWith("data:")) {
-        currentData = line.slice(5).trim();
-      } else if (line === "") {
+      const normalizedLine = line.replace(/\r$/, "");
+      if (normalizedLine.startsWith("event:")) {
+        currentEvent = normalizedLine.slice(6).trim();
+      } else if (normalizedLine.startsWith("data:")) {
+        currentData += normalizedLine.slice(5).trim();
+      } else if (normalizedLine === "") {
         if (currentEvent && currentData) {
           let parsed: Record<string, unknown>;
           try {
@@ -403,12 +503,21 @@ async function parseSSEStream<T>(body: ReadableStream<Uint8Array>, handlers: SSE
 
 export async function generateWorld(
   campaignId: string,
-  onProgress?: (progress: GenerationProgress) => void
+  onProgress?: (progress: GenerationProgress) => void,
+  ipContext?: IpContext | null,
+  premiseDivergence?: PremiseDivergence | null,
 ): Promise<GenerateWorldResult> {
+  const body: Record<string, unknown> = { campaignId };
+  if (ipContext) {
+    body.ipContext = ipContext;
+  }
+  if (premiseDivergence) {
+    body.premiseDivergence = premiseDivergence;
+  }
   const res = await fetch(`${API_BASE}/api/worldgen/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ campaignId }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
@@ -429,6 +538,10 @@ export async function generateWorld(
       : undefined,
     onComplete: (data) => data as unknown as GenerateWorldResult,
   });
+}
+
+export function getWorldgenDebugProgress(): Promise<WorldgenDebugProgress> {
+  return apiGet<WorldgenDebugProgress>("/api/worldgen/debug/progress");
 }
 
 export async function getWorldData(campaignId: string): Promise<WorldData> {
@@ -464,13 +577,41 @@ export async function deleteLore(
   await apiDelete(`/api/campaigns/${campaignId}/lore`);
 }
 
+export async function updateLoreCard(
+  campaignId: string,
+  cardId: string,
+  payload: LoreCardUpdateInput,
+): Promise<LoreCardItem> {
+  const result = await apiPut<{ card: LoreCardItem }>(
+    `/api/campaigns/${campaignId}/lore/${cardId}`,
+    payload,
+  );
+  return result.card;
+}
+
+export async function deleteLoreCardById(
+  campaignId: string,
+  cardId: string,
+): Promise<void> {
+  await apiDelete(`/api/campaigns/${campaignId}/lore/${cardId}`);
+}
+
 // ───── Campaign Meta ─────
 
 export type { CampaignMeta };
 
 export async function getActiveCampaign(): Promise<CampaignMeta | null> {
   const res = await apiGet<{ campaign: CampaignMeta | null }>("/api/campaigns/active");
+  if (res.campaign) {
+    rememberCampaignId(res.campaign.id);
+  }
   return res.campaign;
+}
+
+export async function loadCampaign(campaignId: string): Promise<CampaignMeta> {
+  const campaign = await apiPost<CampaignMeta>(`/api/campaigns/${campaignId}/load`);
+  rememberCampaignId(campaign.id);
+  return campaign;
 }
 
 // ───── World Review ─────
@@ -533,12 +674,21 @@ export function researchCharacter(
 export function importV2Card(
   campaignId: string,
   card: { name: string; description: string; personality: string; scenario: string; tags: string[] },
-  role: "player" | "key" = "player",
-  locationNames?: string[],
-  factionNames?: string[],
+  options?: {
+    role?: "player" | "key";
+    importMode?: CharacterImportMode;
+    locationNames?: string[];
+    factionNames?: string[];
+  },
 ): Promise<CharacterResult> {
+  const role = options?.role ?? "player";
   return apiPost<CharacterResult>("/api/worldgen/import-v2-card", {
-    campaignId, ...card, role, locationNames, factionNames,
+    campaignId,
+    ...card,
+    role,
+    importMode: options?.importMode ?? "native",
+    locationNames: options?.locationNames,
+    factionNames: options?.factionNames,
   });
 }
 
@@ -618,6 +768,56 @@ export function parseWorldBook(
   return apiPost<{ entries: ClassifiedWorldBookEntry[] }>(
     "/api/worldgen/parse-worldbook",
     { campaignId, worldbook },
+  );
+}
+
+/** Classify worldbook entries without requiring an active campaign (pre-creation). */
+export function classifyWorldBook(
+  worldbook: object,
+): Promise<{ entries: ClassifiedWorldBookEntry[] }> {
+  return apiPost<{ entries: ClassifiedWorldBookEntry[] }>(
+    "/api/worldgen/parse-worldbook",
+    { worldbook },
+  );
+}
+
+/** Convert classified worldbook entries to IpResearchContext (client-side, no LLM needed) */
+export function worldbookToIpContext(
+  entries: ClassifiedWorldBookEntry[],
+  name: string,
+): IpResearchContext {
+  return {
+    franchise: name,
+    keyFacts: entries.map((e) => `${e.name}: ${e.summary}`),
+    tonalNotes: entries
+      .filter((e) => e.type === "lore_general")
+      .slice(0, 10)
+      .map((e) => e.summary),
+    canonicalNames: {
+      locations: entries.filter((e) => e.type === "location").map((e) => e.name),
+      factions: entries.filter((e) => e.type === "faction").map((e) => e.name),
+      characters: entries.filter((e) => e.type === "character").map((e) => e.name),
+    },
+    source: "llm",
+  };
+}
+
+export function listWorldbookLibrary(): Promise<{ items: WorldbookLibraryItem[] }> {
+  return apiGet<{ items: WorldbookLibraryItem[] }>("/api/worldgen/worldbook-library");
+}
+
+export function importWorldbookLibrary(
+  displayName: string,
+  worldbook: object,
+  originalFileName?: string,
+): Promise<{ item: WorldbookLibraryItem; existed: boolean }> {
+  return apiPost<{ item: WorldbookLibraryItem; existed: boolean }>(
+    "/api/worldgen/worldbook-library/import",
+    {
+      displayName,
+      originalFileName,
+      worldbook,
+    },
   );
 }
 

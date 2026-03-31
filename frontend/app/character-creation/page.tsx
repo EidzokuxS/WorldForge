@@ -7,13 +7,16 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  getActiveCampaign,
   getWorldData,
+  loadCampaign,
   parseCharacter,
   generateCharacter as apiGenerateCharacter,
   saveCharacter,
   type ParsedCharacter,
+  importV2Card,
 } from "@/lib/api";
+import type { CharacterImportMode } from "@/lib/types";
+import { parseV2CardFile } from "@/lib/v2-card-parser";
 import { CharacterForm } from "@/components/character-creation/character-form";
 import { CharacterCard } from "@/components/character-creation/character-card";
 
@@ -26,6 +29,7 @@ export default function CharacterCreationPage() {
   const [loading, setLoading] = useState(true);
   const [parsing, setParsing] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [character, setCharacter] = useState<ParsedCharacter | null>(null);
 
@@ -34,10 +38,8 @@ export default function CharacterCreationPage() {
 
     async function loadData() {
       try {
-        const [, world] = await Promise.all([
-          getActiveCampaign(),
-          getWorldData(campaignId!),
-        ]);
+        await loadCampaign(campaignId);
+        const world = await getWorldData(campaignId);
         setLocationNames(world.locations.map((l) => l.name));
       } catch (error) {
         toast.error("Failed to load world data", {
@@ -57,7 +59,7 @@ export default function CharacterCreationPage() {
       setParsing(true);
       try {
         const result = await parseCharacter(campaignId, description);
-        setCharacter(result);
+        if (result.role === "player") setCharacter(result.character);
         toast.success("Character parsed");
       } catch (error) {
         toast.error("Failed to parse character", {
@@ -75,7 +77,7 @@ export default function CharacterCreationPage() {
     setGenerating(true);
     try {
       const result = await apiGenerateCharacter(campaignId);
-      setCharacter(result);
+      if (result.role === "player") setCharacter(result.character);
       toast.success("Character generated");
     } catch (error) {
       toast.error("Failed to generate character", {
@@ -85,6 +87,30 @@ export default function CharacterCreationPage() {
       setGenerating(false);
     }
   }, [campaignId]);
+
+  const handleImport = useCallback(
+    async (file: File, importMode: CharacterImportMode) => {
+      if (!campaignId) return;
+      setImporting(true);
+      try {
+        const card = await parseV2CardFile(file);
+        const result = await importV2Card(campaignId, card, {
+          role: "player",
+          importMode,
+          locationNames,
+        });
+        if (result.role === "player") setCharacter(result.character);
+        toast.success("Character imported");
+      } catch (error) {
+        toast.error("Failed to import character", {
+          description: error instanceof Error ? error.message : "Unknown error",
+        });
+      } finally {
+        setImporting(false);
+      }
+    },
+    [campaignId, locationNames]
+  );
 
   const handleSave = useCallback(async () => {
     if (!campaignId || !character) return;
@@ -135,8 +161,10 @@ export default function CharacterCreationPage() {
             <CharacterForm
               onParse={handleParse}
               onGenerate={handleGenerate}
+              onImport={handleImport}
               parsing={parsing}
               generating={generating}
+              importing={importing}
             />
           </CardContent>
         </Card>

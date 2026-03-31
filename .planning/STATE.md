@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: unknown
-stopped_at: Completed 17-04-PLAN.md
-last_updated: "2026-03-21T19:58:18.990Z"
+status: Phase 27 complete
+stopped_at: Completed 27-03-PLAN.md
+last_updated: "2026-03-31T10:59:34.047Z"
 progress:
-  total_phases: 18
-  completed_phases: 18
-  total_plans: 47
-  completed_plans: 47
+  total_phases: 22
+  completed_phases: 22
+  total_plans: 61
+  completed_plans: 61
 ---
 
 # Project State
@@ -19,83 +19,37 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-18)
 
 **Core value:** The LLM is the narrator, never the engine. All mechanical outcomes are resolved by backend code.
-**Current focus:** Phase 17 — unit-test-coverage
+**Current focus:** Milestone v1 complete through Phase 27
 
 ## Current Position
 
-Phase: 17 (unit-test-coverage) — EXECUTING
-Plan: 5 of 5
+Phase: 27 (Lore card editing and deletion) — COMPLETE
+Plan: 3 of 3 complete
 
 ## Performance Metrics
 
-**Velocity:**
+**Current Snapshot:**
 
-- Total plans completed: 11
-- Average duration: 5.8min
-- Total execution time: 0.9 hours
+- Active roadmap phases: 22
+- Completed phases: 22
+- Planned or in-progress phases: 0
+- Total plans tracked: 61
+- Completed plans: 61
+- Pending plans: 0
 
-**By Phase:**
+**Open Work:**
 
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| 01-engine-foundation | 2/2 | 13min | 6.5min |
-| 02-turn-cycle | 2/2 | 18min | 9min |
-| 03-world-state-mechanics | 3/3 | 17min | 5.7min |
-| 04-story-control | 2/2 | 6min | 3min |
+- Active execution target: None
+- Next required workflow step: milestone closeout / verification handoff
+- Current phase is complete with all 3 plans executed
+- Backlog items outside active execution order are tracked in `.planning/BACKLOG.md`
 
-**Recent Trend:**
+**Notes:**
 
-- Last 5 plans: -
-- Trend: -
-
-*Updated after each plan completion*
-| Phase 01 P02 | 7min | 3 tasks | 10 files |
-| Phase 02 P01 | 15min | 2 tasks | 8 files |
-| Phase 02 P02 | 3min | 2 tasks | 4 files |
-| Phase 03 P01 | 8min | 2 tasks | 5 files |
-
-| Phase 03 P02 | 6min | 2 tasks | 5 files |
-| Phase 03 P03 | 3min | 2 tasks | 5 files |
-| Phase 04 P01 | 4min | 2 tasks | 6 files |
-| Phase 04 P02 | 2min | 2 tasks | 3 files |
-| Phase 05 P01 | 4min | 2 tasks | 3 files |
-| Phase 05 P02 | 5min | 1 tasks | 5 files |
-| Phase 06 P01 | 8min | 2 tasks | 5 files |
-| Phase 06 P02 | 5min | 2 tasks | 6 files |
-| Phase 07 P01 | 4min | 2 tasks | 5 files |
-| Phase 07 P02 | 5min | 2 tasks | 5 files |
-| Phase 08 P01 | 5min | 2 tasks | 5 files |
-| Phase 08 P02 | 4min | 2 tasks | 5 files |
-| Phase 09 P01 | 3min | 2 tasks | 6 files |
-| Phase 09 P02 | 4min | 3 tasks | 5 files |
-| Phase 10 P01 | 4min | 2 tasks | 8 files |
-| Phase 10 P02 | 3min | 2 tasks | 5 files |
-| Phase 11 P01 | 5min | 2 tasks | 7 files |
-| Phase 11 P02 | 5min | 2 tasks | 9 files |
-| Phase 12 P01 | 1min | 2 tasks | 2 files |
-| Phase 12 P02 | 4min | 2 tasks | 7 files |
-| Phase 12 P03 | 14min | 2 tasks | 0 files |
-| Phase 12 P04 | 7min | 2 tasks | 0 files |
-| Phase 12 P06 | 7min | 2 tasks | 0 files |
-| Phase 12 P05 | 14min | 2 tasks | 2 files |
-| Phase 12 P02 | 5min | 2 tasks | 9 files |
-| Phase 12 P03 | 8min | 2 tasks | 14 files |
-| Phase 12 P04 | 15min | 2 tasks | 12 files |
-| Phase 13 P01 | 17min | 2 tasks | 5 files |
-| Phase 13 P02 | 27min | 2 tasks | 6 files |
-| Phase 13 P03 | 15min | 2 tasks | 4 files |
-| Phase 14 P02 | 2min | 2 tasks | 2 files |
-| Phase 14 P01 | 3min | 3 tasks | 3 files |
-| Phase 14 P03 | 3min | 2 tasks | 0 files |
-| Phase 15 P01 | 4min | 2 tasks | 4 files |
-| Phase 15 P02 | 3min | 2 tasks | 2 files |
-| Phase 16 P01 | 10min | 2 tasks | 2 files |
-| Phase 16 P02 | 12min | 2 tasks | 2 files |
-| Phase 17 P03 | 3min | 2 tasks | 2 files |
-| Phase 17 P02 | 4min | 2 tasks | 2 files |
-| Phase 17 P01 | 4min | 2 tasks | 2 files |
-| Phase 17 P05 | 3min | 2 tasks | 2 files |
-| Phase 17 P04 | 4min | 2 tasks | 3 files |
+- Historical per-plan timing metrics from earlier GSD runs were removed during planning hygiene because they no longer matched the active roadmap after renumbering and archival cleanup.
+- Use `ROADMAP.md` progress plus phase directories as the source of truth for current execution state.
+- Latest execution: Phase 27 Plan 03 completed in 17 min (3 tasks, 5 files touched).
+- Active roadmap execution is complete through Phase 27.
 
 ## Accumulated Context
 
@@ -203,6 +157,39 @@ Recent decisions affecting current work:
 - [Phase 17]: Inline vi.mock factories to avoid hoisting issues with external variable references
 - [Phase 17]: Mock all worldgen service functions inline rather than importing from external factory
 - [Phase 17]: Let parseBody execute with real Zod schemas rather than mocking for actual validation testing
+- [Phase 24]: ScaffoldNpc.tier made optional to avoid breaking downstream until plan 24-03
+- [Phase 24]: IP context block inverted: use REAL canonical names instead of avoid trademarked names
+- [Phase 24]: DNA generation uses 6 sequential LLM calls with accumulated context per category
+- [Phase 24]: Plan+detail mini-call pattern for incremental world building with canonical IP fidelity
+- [Phase 24]: NPC plan+detail pattern: 3-5 mini-calls instead of 1 monolithic call for tiered key+supporting NPCs
+- [Phase 24]: Lore extractor ipContext is optional 4th param -- backward compatible with existing callers
+- [Phase 24]: scaffold-generator.ts reduced from 367 to 98 lines via re-export pattern from scaffold-steps/
+- [Phase 24]: Scaffold tier 'supporting' maps to DB tier 'persistent' at saver boundary
+- [Phase 25]: PremiseDivergence lives beside IpResearchContext so canonical research stays immutable.
+- [Phase 25]: Routes compute-or-load premiseDivergence once and pass the cached artifact downstream instead of mutating ipContext.
+- [Phase 25]: Prompt rewrites were deferred; this plan establishes interpretation and transport first.
+- [Phase 25]: Prompt helpers now separate canonical baseline from interpreted divergence plus a reusable known-IP generation contract.
+- [Phase 25]: scaffold-generator computes or reuses one PremiseDivergence artifact and injects the same object into every known-IP scaffold step and lore extraction call.
+- [Phase 25]: Known-IP lore generation updates only divergence-affected facts while keeping untouched canon explicit instead of suppressing names.
+- [Phase 25]: The old premise-override helper stays only as a deprecated compatibility shim and no longer participates in the live worldgen export surface.
+- [Phase 25]: Phase 25 regressions should prove behavior at three layers: divergence interpretation, prompt assembly, and route/cache reuse.
+- [Phase 25]: Known-IP single-seed generation now computes premise divergence when callers omit the cached artifact so every seed entry point follows the same structured path.
+- [Phase 26]: Reusable worldbooks live under campaigns/_worldbook-library with one immutable record file per normalized content hash plus a lightweight index.json.
+- [Phase 26]: Campaigns persist worldbookSelection as a structured snapshot beside ipContext and premiseDivergence instead of owning reusable records.
+- [Phase 26]: The library import route parses raw JSON first, then lets the manager decide whether classification is needed so duplicate uploads skip reclassification.
+- [Phase 26]: Reusable worldbooks are composed only on the backend, with deterministic source and entity sorting.
+- [Phase 26]: Route contracts stay additive: selectedWorldbooks/worldbookSelection are new inputs while legacy worldbookEntries remains valid.
+- [Phase 26]: World generation rebuilds ipContext from saved worldbookSelection before any franchise research fallback.
+- [Phase 26]: Wizard state now tracks reusable library items plus an ordered selected source set instead of transient classified entries.
+- [Phase 26]: Direct create no longer rebuilds ipContext in the browser; worldbookSelection is enough for backend-owned composition.
+- [Phase 26]: Step 1 keeps upload and library selection in one surface while leaving advanced management out of scope.
+- [Phase 27]: Lore item edits use PUT with a full replacement payload for term, definition, and category.
+- [Phase 27]: Lore card deletion stays row-level and returns a boolean not-found signal to map cleanly to route-level 404 responses.
+- [Phase 27]: Lore edits require a resolved embedder and rewrite the full lore table so ids stay stable while vectors stay fresh.
+- [Phase 27]: LoreSection clears search results before awaiting onRefresh so parent lore state remains authoritative after item mutations.
+- [Phase 27]: LoreCardUpdateInput stays narrowed to canonical categories while LoreCardItem reads remain string-typed for compatibility with existing callers and fixtures.
+- [Phase 27]: Added a repo-root Vitest alias config so the plan's exact npm --prefix verification command resolves frontend @/ imports correctly.
+- [Phase 27]: Reused the existing 'Voices of the Void' campaign as the smoke target because it already had working lore search and more than two lore cards.
 
 ### Roadmap Evolution
 
@@ -216,10 +203,18 @@ Recent decisions affecting current work:
 - Phase 14 added: Final Systems Verification & Bug Fixing — fix remaining bugs + verify all systems per docs/
 - Phase 16 added: NPC System QA — Three NPC Tiers + World Gen Integration
 - Phase 17 added: Unit Test Coverage — real tests for untested backend and frontend modules, desloppify strict 95+
+- Phase 23 added: Unified Research & World Generation Pipeline — single research with cache, feeds both DNA and scaffold
+- Phase 24 added: Worldgen Known IP Quality — canonical DNA/premise/locations/factions/NPCs, key vs supporting NPC tiers, research-grounded lore
+- Phase 25 added: Replace premise-override heuristics with structured divergence interpretation
+- Phase 26 added: Reusable multi-worldbook library for campaign creation
+- Phase 27 added: Lore card editing and deletion
+- Planning hygiene (2026-03-30): ROADMAP/STATE reconciled with completed phase artifacts; legacy superseded E2E phase directories moved out of active `.planning/phases/`
+- Phase 23 completed (2026-03-30): cached IP research pipeline reconciled, regression-tested, and verified against the live codebase
 
 ### Pending Todos
 
-None yet.
+- Todo ideas were promoted into active roadmap phases 26 and 27.
+- None - active roadmap execution is complete through Phase 27.
 
 ### Blockers/Concerns
 
@@ -227,6 +222,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-21T19:58:18.987Z
-Stopped at: Completed 17-04-PLAN.md
+Last session: 2026-03-31T10:59:34.043Z
+Stopped at: Completed 27-03-PLAN.md
 Resume file: None

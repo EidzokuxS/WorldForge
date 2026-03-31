@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Play, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { apiDelete, apiGet, apiPost } from "@/lib/api";
+import { apiDelete, apiGet, loadCampaign } from "@/lib/api";
 import { getErrorMessage } from "@/lib/settings";
 import {
   AlertDialog,
@@ -74,7 +74,7 @@ export function LoadCampaignDialog({ onLoaded }: LoadCampaignDialogProps) {
   async function handleLoadCampaign(id: string) {
     setLoadingCampaignId(id);
     try {
-      const loaded = await apiPost<CampaignMeta>(`/api/campaigns/${id}/load`);
+      const loaded = await loadCampaign(id);
       toast.success("Campaign loaded", { description: loaded.name });
       setOpen(false);
       onLoaded();

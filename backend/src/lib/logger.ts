@@ -12,7 +12,11 @@ function ensureLogDir(): void {
 }
 
 function timestamp(): string {
-  return new Date().toISOString();
+  const now = new Date();
+  const offset = 3 * 60; // GMT+3 in minutes
+  const local = new Date(now.getTime() + offset * 60_000);
+  const iso = local.toISOString().replace("Z", "+03:00");
+  return iso;
 }
 
 function formatMessage(level: string, tag: string, message: string, data?: unknown): string {
@@ -40,7 +44,8 @@ function writeLog(level: string, tag: string, message: string, data?: unknown): 
   // Also write to file
   try {
     ensureLogDir();
-    const today = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const today = new Date(now.getTime() + 3 * 60 * 60_000).toISOString().slice(0, 10);
     appendFileSync(join(LOG_DIR, `${today}.log`), line);
   } catch {
     // don't crash on log failure

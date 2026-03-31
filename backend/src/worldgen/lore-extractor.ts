@@ -4,8 +4,15 @@ import { createModel } from "../ai/index.js";
 import { withModelFallback } from "../ai/with-model-fallback.js";
 import { createLogger } from "../lib/index.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
+import type { IpResearchContext, PremiseDivergence } from "@worldforge/shared";
 import { LORE_CATEGORIES } from "./types.js";
 import type { WorldScaffold, ExtractedLoreCard } from "./types.js";
+import {
+  buildIpContextBlock,
+  buildKnownIpGenerationContract,
+  buildPremiseDivergenceBlock,
+  buildStopSlopRules,
+} from "./scaffold-steps/prompt-utils.js";
 
 const log = createLogger("lore-extractor");
 
@@ -61,25 +68,53 @@ ${npcLines}`;
 export async function extractLoreCards(
   scaffold: WorldScaffold,
   role: ResolvedRole,
-  fallbackRole?: ResolvedRole
+  fallbackRole?: ResolvedRole,
+  ipContext?: IpResearchContext | null,
+  premiseDivergence?: PremiseDivergence | null,
 ): Promise<ExtractedLoreCard[]> {
   const context = formatScaffoldContext(scaffold);
+  const ipBlock = buildIpContextBlock(ipContext ?? null);
+  const divergenceBlock = buildPremiseDivergenceBlock(premiseDivergence ?? null);
+  const knownIpContract = buildKnownIpGenerationContract(
+    ipContext ?? null,
+    premiseDivergence ?? null,
+    "lore cards",
+  );
 
-  const prompt = `You are a world-building encyclopedist. Given a generated RPG world, extract 30-50 structured lore cards — factual knowledge entries that define this world.
+  const ipFactsSection =
+    ipContext?.keyFacts && ipContext.keyFacts.length > 0
+      ? `\nFRANCHISE REFERENCE FACTS (use as primary source for concept/ability/rule cards):\n${ipContext.keyFacts.map((f) => `  - ${f}`).join("\n")}\n`
+      : "";
+
+  const ipQualityRule = ipContext
+    ? `- For known IPs: concept/ability/rule cards MUST describe actual franchise systems, powers, and mechanics drawn from the REFERENCE FACTS above. Never invent systems that do not exist in the franchise canon.
+- For known IPs: when PREMISE DIVERGENCE changes one role, relationship, allegiance, or institution, update only lore affected by that change. Keep untouched canon facts explicit in the lore cards.`
+    : "";
+
+  const prompt = `You are a world encyclopedia compiler. Extract 30-50 structured lore cards from this RPG world scaffold. Each card is a database entry the game engine uses for semantic search — accuracy and specificity matter.
 
 ${context}
+${ipBlock}${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}${ipFactsSection}
+EXTRACTION PROCEDURE:
+1. Create one "location" card per scaffold location. term = location name. definition = 1-2 sentence factual summary (geography, population, function). Do NOT copy the scaffold description verbatim — summarize.
+2. Create one "npc" card per scaffold NPC. term = character name. definition = their role and single most important trait.
+3. Create one "faction" card per scaffold faction. term = faction name. definition = what they control and what they want.
+4. Extract 10-20 additional cards from world knowledge (not just the scaffold text):
+   - "concept" cards: power systems, magic types, technologies, social structures, economic systems.
+   - "rule" cards: physical laws, magic constraints, political laws, taboos, treaties.
+   - "ability" cards: named techniques, spells, fighting styles, special powers.
+   - "item" cards: named artifacts, weapons, resources, currencies.
+   - "event" cards: historical wars, catastrophes, treaties, discoveries that shaped the current world.
 
-EXTRACTION RULES:
-- Each location → one "location" card
-- Each NPC → one "npc" card
-- Each faction → one "faction" card
-- Extract world concepts: magic systems, technologies, political systems, currencies, religions → "concept" cards
-- Extract world rules: what is possible, what is forbidden, physical laws → "rule" cards
-- Extract notable items, artifacts, or assets mentioned → "item" cards
-- Extract any special abilities or powers mentioned → "ability" cards
-- Definition must be 1-2 factual sentences, no storytelling or narrative flair
-- Term should be a short unique name (1-5 words)
-- Aim for 30-50 cards total, covering all aspects of the world`;
+CARD FORMAT:
+- term: 1-5 word unique name. No articles ("the"). No generic terms ("Magic System") — use the world's own terminology.
+- definition: 1-2 factual sentences. State what it IS and what it DOES. No narrative flair, no "is said to be", no "legend has it".
+- category: one of location, npc, faction, ability, rule, concept, item, event.
+${ipQualityRule}
+
+TARGET: 30-50 cards total. Minimum: 1 per location + 1 per NPC + 1 per faction + 10 concept/ability/rule/item/event cards.
+
+${buildStopSlopRules()}`;
 
   const MAX_RETRIES = 2;
   let lastError: Error | null = null;

@@ -330,27 +330,26 @@ describe("createCampaignSchema", () => {
       expect(result.success).toBe(false);
     });
 
-    it("rejects empty premise", () => {
+    it("accepts empty premise because worldbook can provide the context", () => {
       const result = createCampaignSchema.safeParse({
         name: "Valid name",
         premise: "",
       });
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        const premiseIssue = result.error.issues.find((i) =>
-          i.path.includes("premise")
-        );
-        expect(premiseIssue).toBeDefined();
-        expect(premiseIssue!.message).toBe("Campaign premise is required.");
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.premise).toBe("");
       }
     });
 
-    it("rejects whitespace-only premise", () => {
+    it("normalizes whitespace-only premise to empty string", () => {
       const result = createCampaignSchema.safeParse({
         name: "Valid name",
         premise: "   ",
       });
-      expect(result.success).toBe(false);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.premise).toBe("");
+      }
     });
 
     it("rejects missing name field", () => {
@@ -360,11 +359,14 @@ describe("createCampaignSchema", () => {
       expect(result.success).toBe(false);
     });
 
-    it("rejects missing premise field", () => {
+    it("defaults missing premise field to empty string", () => {
       const result = createCampaignSchema.safeParse({
         name: "Valid name",
       });
-      expect(result.success).toBe(false);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.premise).toBe("");
+      }
     });
 
     it("rejects non-string premise", () => {
@@ -472,22 +474,28 @@ describe("suggestSeedsSchema", () => {
   });
 
   describe("rejects invalid inputs", () => {
-    it("rejects empty premise", () => {
+    it("accepts empty premise and falls back later in the route", () => {
       const result = suggestSeedsSchema.safeParse({ premise: "" });
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        expect(result.error.issues[0]?.message).toBe("premise is required.");
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.premise).toBe("");
       }
     });
 
-    it("rejects whitespace-only premise", () => {
+    it("normalizes whitespace-only premise to empty string", () => {
       const result = suggestSeedsSchema.safeParse({ premise: "   " });
-      expect(result.success).toBe(false);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.premise).toBe("");
+      }
     });
 
-    it("rejects missing premise field", () => {
+    it("defaults missing premise field to empty string", () => {
       const result = suggestSeedsSchema.safeParse({});
-      expect(result.success).toBe(false);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.premise).toBe("");
+      }
     });
 
   });
@@ -610,6 +618,45 @@ describe("generateWorldSchema", () => {
       if (result.success) {
         expect(result.data.campaignId).toBe("uuid-456");
       }
+    });
+
+    it("accepts optional premiseDivergence beside ipContext", () => {
+      const result = generateWorldSchema.safeParse({
+        campaignId: "abc-123-def",
+        ipContext: {
+          franchise: "Voices of the Void",
+          keyFacts: ["The signal base sits in a remote valley."],
+          tonalNotes: ["lonely"],
+          source: "mcp",
+        },
+        premiseDivergence: {
+          mode: "diverged",
+          protagonistRole: {
+            kind: "custom",
+            interpretation: "replacement",
+            canonicalCharacterName: "Dr. Kel",
+            roleSummary: "The player's custom character replaces Dr. Kel in the active role.",
+          },
+          preservedCanonFacts: ["The signal base remains active."],
+          changedCanonFacts: ["Dr. Kel is no longer the active protagonist."],
+          currentStateDirectives: ["Treat the player as the new arrival to the station."],
+          ambiguityNotes: [],
+        },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("remains backward compatible with requests that only send ipContext", () => {
+      const result = generateWorldSchema.safeParse({
+        campaignId: "abc-123-def",
+        ipContext: {
+          franchise: "Naruto",
+          keyFacts: ["Konohagakure is a hidden village."],
+          tonalNotes: ["shonen"],
+          source: "mcp",
+        },
+      });
+      expect(result.success).toBe(true);
     });
   });
 
@@ -1543,16 +1590,29 @@ describe("importV2CardSchema", () => {
       expect(result.data.personality).toBe("");
       expect(result.data.scenario).toBe("");
       expect(result.data.tags).toEqual([]);
+      expect(result.data.importMode).toBe("native");
     }
   });
 
-  it("rejects description over 8000 chars", () => {
+  it("accepts outsider import mode", () => {
     const result = importV2CardSchema.safeParse({
       campaignId: "abc-123",
       name: "Elara",
-      description: "x".repeat(8001),
+      description: "A mysterious sorceress.",
+      importMode: "outsider",
     });
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts long V2 card text fields without max-length limits", () => {
+    const result = importV2CardSchema.safeParse({
+      campaignId: "abc-123",
+      name: "Elara",
+      description: "x".repeat(20000),
+      personality: "y".repeat(15000),
+      scenario: "z".repeat(15000),
+    });
+    expect(result.success).toBe(true);
   });
 
   it("accepts key role with locationNames", () => {
