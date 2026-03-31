@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Phase complete — ready for verification
-stopped_at: Completed 26-03-PLAN.md
-last_updated: "2026-03-31T05:43:53.205Z"
+status: Executing Phase 27
+stopped_at: Completed 27-01-PLAN.md
+last_updated: "2026-03-31T10:25:06.714Z"
 progress:
   total_phases: 22
   completed_phases: 21
-  total_plans: 58
-  completed_plans: 58
+  total_plans: 61
+  completed_plans: 59
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-18)
 
 **Core value:** The LLM is the narrator, never the engine. All mechanical outcomes are resolved by backend code.
-**Current focus:** Phase 26 complete — ready for verification
+**Current focus:** Phase 27 execution
 
 ## Current Position
 
-Phase: 26 (Reusable multi-worldbook library for campaign creation) — COMPLETE
-Plan: 3 of 3 complete
+Phase: 27 (Lore card editing and deletion) — IN PROGRESS
+Plan: 1 of 3 complete
 
 ## Performance Metrics
 
@@ -33,23 +33,23 @@ Plan: 3 of 3 complete
 - Active roadmap phases: 22
 - Completed phases: 21
 - Planned or in-progress phases: 1
-- Total plans tracked: 58
-- Completed plans: 58
-- Pending plans: 0
+- Total plans tracked: 61
+- Completed plans: 59
+- Pending plans: 2
 
 **Open Work:**
 
-- Active execution target: None
-- Next required workflow step: verify Phase 26 work or move into Phase 27 planning
-- Current phase has 3 plans and all 3 are complete
+- Active execution target: Phase 27
+- Next required workflow step: execute Plan 27-02, then 27-03
+- Current phase has 3 plans and 1 is complete
 - Backlog items outside active execution order are tracked in `.planning/BACKLOG.md`
 
 **Notes:**
 
 - Historical per-plan timing metrics from earlier GSD runs were removed during planning hygiene because they no longer matched the active roadmap after renumbering and archival cleanup.
 - Use `ROADMAP.md` progress plus phase directories as the source of truth for current execution state.
-- Latest execution: Phase 26 Plan 03 completed in 8 minutes (2 tasks, 7 files touched).
-- Pending execution tail: Phase 27 planning remains.
+- Latest execution: Phase 27 Plan 01 completed in 6 min 47 sec (2 tasks, 5 files touched).
+- Pending execution tail: Plans 27-02 and 27-03 remain.
 
 ## Accumulated Context
 
@@ -183,6 +183,9 @@ Recent decisions affecting current work:
 - [Phase 26]: Wizard state now tracks reusable library items plus an ordered selected source set instead of transient classified entries.
 - [Phase 26]: Direct create no longer rebuilds ipContext in the browser; worldbookSelection is enough for backend-owned composition.
 - [Phase 26]: Step 1 keeps upload and library selection in one surface while leaving advanced management out of scope.
+- [Phase 27]: Lore item edits use PUT with a full replacement payload for term, definition, and category.
+- [Phase 27]: Lore card deletion stays row-level and returns a boolean not-found signal to map cleanly to route-level 404 responses.
+- [Phase 27]: Lore edits require a resolved embedder and rewrite the full lore table so ids stay stable while vectors stay fresh.
 
 ### Roadmap Evolution
 
@@ -206,9 +209,8 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-- 2 pending todos captured in `.planning/todos/pending/`
-- `Add reusable multi-worldbook library` — multi-lorebook mixing for world generation plus a reusable processed lorebook library selectable during campaign creation
-- `Add lore card editing and deletion` — per-card edit/delete for Lore entries instead of the current read/search/import or delete-all-only flow
+- Todo ideas were promoted into active roadmap phases 26 and 27.
+- Remaining active milestone work is now Phase 27: per-card lore editing and deletion.
 
 ### Blockers/Concerns
 
@@ -216,6 +218,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-31T05:43:53.202Z
-Stopped at: Completed 26-03-PLAN.md
+Last session: 2026-03-31T10:25:06.714Z
+Stopped at: Completed 27-01-PLAN.md
 Resume file: None

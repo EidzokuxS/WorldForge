@@ -299,7 +299,7 @@ Note: Backlog phases (like 999.1) are tracked separately and are not part of the
 | 24. Worldgen Known IP Quality | 4/4 | Complete | 2026-03-25 |
 | 25. Structured Divergence Interpretation | 3/3 | Complete   | 2026-03-30 |
 | 26. Reusable multi-worldbook library for campaign creation | 3/3 | Complete   | 2026-03-31 |
-| 27. Lore card editing and deletion | 0/0 | Not Started | |
+| 27. Lore card editing and deletion | 1/3 | In Progress|  |
 
 ### Phase 16: NPC System QA — Three NPC Tiers + World Gen Integration
 
@@ -381,10 +381,18 @@ Plans:
 
 ### Phase 27: Lore card editing and deletion
 
-**Goal:** [To be planned]
-**Requirements**: TBD
+**Goal:** World review users can edit or delete individual lore cards without destabilizing semantic search or forcing collection-wide cleanup.
+**Requirements**: P27-01, P27-02, P27-03, P27-04, P27-05, P27-06
 **Depends on:** Phase 26
-**Plans:** 0 plans
+**Success Criteria** (what must be TRUE):
+  1. A user can edit a single lore card's term, definition, and category from the world review tab, and the saved change persists after refresh.
+  2. A user can delete a single lore card without affecting the rest of the campaign lore collection.
+  3. Invalid edit payloads are rejected clearly, and edit/delete requests for missing cards return 404 instead of silent success.
+  4. Semantic lore search reflects edited content after save, proving vector freshness is maintained.
+  5. Automated regressions cover edit success, delete success, validation failure, not-found handling, and UI refresh/pending behavior.
+**Plans:** 1/3 plans executed
 
 Plans:
-- [ ] TBD (run /gsd:plan-phase 27 to break down)
+- [x] 27-01-PLAN.md -- Backend lore item routes + stable-id vector mutation safety
+- [ ] 27-02-PLAN.md -- World-review lore edit/delete UI + client helpers
+- [ ] 27-03-PLAN.md -- Regression coverage + smoke verification
