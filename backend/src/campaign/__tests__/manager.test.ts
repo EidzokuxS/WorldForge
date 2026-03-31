@@ -148,6 +148,37 @@ describe("createCampaign", () => {
     });
   });
 
+  it("accepts an initial worldbookSelection snapshot without requiring a premise", async () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "mkdirSync").mockImplementation(() => "");
+    const writeSpy = vi.spyOn(fs, "writeFileSync").mockImplementation(() => {});
+
+    const worldbookSelection = [
+      {
+        id: "wb-1",
+        displayName: "Naruto Core",
+        normalizedSourceHash: "hash-1",
+        entryCount: 42,
+        createdAt: 1700000000000,
+        updatedAt: 1700000005000,
+      },
+    ];
+
+    await expect(
+      createCampaign("Name", "", undefined, { worldbookSelection }),
+    ).resolves.toMatchObject({
+      name: "Name",
+      premise: "",
+    });
+
+    const configCall = writeSpy.mock.calls.find(
+      (c) => typeof c[0] === "string" && c[0].includes("config.json"),
+    );
+    expect(configCall).toBeDefined();
+    const configData = JSON.parse(configCall![1] as string);
+    expect(configData.worldbookSelection).toEqual(worldbookSelection);
+  });
+
   it("creates campaign directory and vectors dir", async () => {
     vi.spyOn(fs, "existsSync").mockReturnValue(true);
     const mkdirSpy = vi.spyOn(fs, "mkdirSync").mockImplementation(() => "");
@@ -228,6 +259,62 @@ describe("createCampaign", () => {
     const configData = JSON.parse(configCall![1] as string);
     expect(configData.ipContext).toEqual(ipContext);
     expect(configData.premiseDivergence).toEqual(premiseDivergence);
+  });
+
+  it("persists worldbookSelection beside ipContext and premiseDivergence in config.json", async () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "mkdirSync").mockImplementation(() => "");
+    const writeSpy = vi.spyOn(fs, "writeFileSync").mockImplementation(() => {});
+
+    const worldbookSelection = [
+      {
+        id: "wb-1",
+        displayName: "Naruto Core",
+        normalizedSourceHash: "hash-1",
+        entryCount: 42,
+        createdAt: 1700000000000,
+        updatedAt: 1700000005000,
+      },
+    ];
+    const ipContext = {
+      franchise: "Naruto",
+      keyFacts: ["fact"],
+      tonalNotes: ["tone"],
+      canonicalNames: {
+        locations: ["Konoha"],
+        factions: ["Akatsuki"],
+        characters: ["Naruto Uzumaki"],
+      },
+      source: "mcp" as const,
+    };
+    const premiseDivergence = {
+      mode: "coexisting" as const,
+      protagonistRole: {
+        kind: "custom" as const,
+        interpretation: "coexisting" as const,
+        canonicalCharacterName: null,
+        roleSummary: "A new shinobi joins canon events.",
+      },
+      preservedCanonFacts: ["canon"],
+      changedCanonFacts: ["change"],
+      currentStateDirectives: ["directive"],
+      ambiguityNotes: [],
+    };
+
+    await createCampaign("My Game", "", undefined, {
+      ipContext,
+      premiseDivergence,
+      worldbookSelection,
+    });
+
+    const configCall = writeSpy.mock.calls.find(
+      (c) => typeof c[0] === "string" && c[0].includes("config.json"),
+    );
+    expect(configCall).toBeDefined();
+    const configData = JSON.parse(configCall![1] as string);
+    expect(configData.ipContext).toEqual(ipContext);
+    expect(configData.premiseDivergence).toEqual(premiseDivergence);
+    expect(configData.worldbookSelection).toEqual(worldbookSelection);
   });
 
   it("connects DB, runs migrations, and inserts campaign row", async () => {
@@ -371,6 +458,30 @@ describe("listCampaigns", () => {
     const result = listCampaigns();
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe("Good");
+  });
+
+  it("ignores reserved underscored storage directories", () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "mkdirSync").mockImplementation(() => "");
+    vi.spyOn(fs, "readdirSync").mockReturnValue([
+      { name: "_worldbook-library", isDirectory: () => true },
+      { name: "_scratch", isDirectory: () => true },
+      { name: "good", isDirectory: () => true },
+    ] as unknown as ReturnType<typeof fs.readdirSync>);
+    const readSpy = vi.spyOn(fs, "readFileSync").mockImplementation((filePath) =>
+      JSON.stringify({
+        name: String(filePath).includes("good") ? "Good" : "Unexpected",
+        premise: "P1",
+        createdAt: 1000,
+      }),
+    );
+
+    const result = listCampaigns();
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe("good");
+    expect(readSpy).toHaveBeenCalledTimes(1);
+    expect(String(readSpy.mock.calls[0]?.[0])).toContain("good");
   });
 });
 
@@ -582,6 +693,44 @@ describe("premiseDivergence persistence", () => {
         excludedCharacters: ["Dr. Kel"],
       },
       premiseDivergence,
+      currentTick: undefined,
+      seeds: undefined,
+    });
+  });
+
+  it("readCampaignConfig preserves worldbookSelection beside ipContext and premiseDivergence", () => {
+    const worldbookSelection = [
+      {
+        id: "wb-1",
+        displayName: "Naruto Core",
+        normalizedSourceHash: "hash-1",
+        entryCount: 42,
+        createdAt: 1700000000000,
+        updatedAt: 1700000005000,
+      },
+    ];
+
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "readFileSync").mockReturnValue(
+      JSON.stringify({
+        name: "Test",
+        premise: "",
+        createdAt: 1000,
+        ipContext: cachedIpContext,
+        premiseDivergence,
+        worldbookSelection,
+      }),
+    );
+
+    expect(readCampaignConfig("test-id")).toEqual({
+      name: "Test",
+      premise: "",
+      createdAt: 1000,
+      updatedAt: 1000,
+      generationComplete: false,
+      ipContext: cachedIpContext,
+      premiseDivergence,
+      worldbookSelection,
       currentTick: undefined,
       seeds: undefined,
     });
