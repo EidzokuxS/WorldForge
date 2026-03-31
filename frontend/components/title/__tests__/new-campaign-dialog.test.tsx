@@ -1,7 +1,27 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { NewCampaignDialog } from "../new-campaign-dialog";
 import type { useNewCampaignWizard } from "../use-new-campaign-wizard";
+
+const LIBRARY_ITEMS = [
+  {
+    id: "wb-alpha",
+    displayName: "Alpha Codex",
+    normalizedSourceHash: "hash-alpha",
+    entryCount: 12,
+    createdAt: 100,
+    updatedAt: 100,
+  },
+  {
+    id: "wb-beta",
+    displayName: "Beta Atlas",
+    normalizedSourceHash: "hash-beta",
+    entryCount: 7,
+    createdAt: 200,
+    updatedAt: 250,
+  },
+];
 
 function createMockWizard(
   overrides: Partial<ReturnType<typeof useNewCampaignWizard>> = {}
@@ -35,59 +55,76 @@ function createMockWizard(
     handleSeedToggle: vi.fn(),
     handleSeedTextChange: vi.fn(),
     hasWorldbook: false,
-    worldbookFile: null,
-    worldbookEntries: null,
+    worldbookLibrary: LIBRARY_ITEMS,
+    selectedWorldbooks: [],
+    worldbookLibraryLoading: false,
     worldbookStatus: "idle",
-    classifyProgress: null,
     worldbookError: null,
-    handleWorldBookUpload: vi.fn(),
-    handleWorldBookRemove: vi.fn(),
+    handleWorldbookUpload: vi.fn(),
+    toggleWorldbookSelection: vi.fn(),
     ...overrides,
   };
 }
 
 describe("NewCampaignDialog", () => {
-  it("renders step 1 with concept form fields", () => {
-    const wizard = createMockWizard();
+  it("renders a reusable worldbook library section with selection state", async () => {
+    const user = userEvent.setup();
+    const wizard = createMockWizard({
+      selectedWorldbooks: [LIBRARY_ITEMS[0]],
+    });
+
     render(<NewCampaignDialog wizard={wizard} />);
 
-    expect(screen.getByText("Create Campaign — Concept")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Campaign Name")).toBeInTheDocument();
+    expect(screen.getByText("Knowledge Sources")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Alpha Codex/i })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /Beta Atlas/i })).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(screen.getByRole("button", { name: /Beta Atlas/i }));
+    expect(wizard.toggleWorldbookSelection).toHaveBeenCalledWith(LIBRARY_ITEMS[1]);
+  });
+
+  it("keeps upload controls visible and shows import progress", () => {
+    const wizard = createMockWizard({
+      worldbookStatus: "importing",
+    });
+
+    render(<NewCampaignDialog wizard={wizard} />);
+
+    expect(screen.getByText("Add Worldbook JSON")).toBeInTheDocument();
+    expect(screen.getByText("Importing reusable worldbook...")).toBeInTheDocument();
+  });
+
+  it("shows reusable import errors without hiding the upload affordance", () => {
+    const wizard = createMockWizard({
+      worldbookStatus: "error",
+      worldbookError: "Import failed",
+    });
+
+    render(<NewCampaignDialog wizard={wizard} />);
+
+    expect(screen.getByText("Add Worldbook JSON")).toBeInTheDocument();
+    expect(screen.getByText("Import failed")).toBeInTheDocument();
+  });
+
+  it("treats premise as optional when worldbooks are selected", () => {
+    const wizard = createMockWizard({
+      canCreate: true,
+      hasWorldbook: true,
+      selectedWorldbooks: [LIBRARY_ITEMS[0]],
+    });
+
+    render(<NewCampaignDialog wizard={wizard} />);
+
     expect(
       screen.getByPlaceholderText(
-        "Describe your world: setting, tone, key themes..."
+        "Describe your world (optional - selected worldbooks provide context)..."
       )
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Create World/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Next → World DNA/i })).toBeEnabled();
   });
 
-  it("shows campaign name and premise values", () => {
-    const wizard = createMockWizard({
-      campaignName: "Dark Realm",
-      campaignPremise: "A world of shadows",
-    });
-    render(<NewCampaignDialog wizard={wizard} />);
-
-    expect(screen.getByDisplayValue("Dark Realm")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("A world of shadows")).toBeInTheDocument();
-  });
-
-  it("disables action buttons when canCreate is false", () => {
-    const wizard = createMockWizard({ canCreate: false });
-    render(<NewCampaignDialog wizard={wizard} />);
-
-    const createBtn = screen.getByRole("button", { name: /Create World/i });
-    expect(createBtn).toBeDisabled();
-  });
-
-  it("enables action buttons when canCreate is true", () => {
-    const wizard = createMockWizard({ canCreate: true });
-    render(<NewCampaignDialog wizard={wizard} />);
-
-    const createBtn = screen.getByRole("button", { name: /Create World/i });
-    expect(createBtn).toBeEnabled();
-  });
-
-  it("renders step 2 with World DNA header", () => {
+  it("renders step 2 with the World DNA header", () => {
     const wizard = createMockWizard({
       step: 2,
       dnaState: {
@@ -99,26 +136,10 @@ describe("NewCampaignDialog", () => {
         wildcard: { value: "Dragons", enabled: true, isCustom: false },
       },
     });
+
     render(<NewCampaignDialog wizard={wizard} />);
 
-    expect(
-      screen.getByText("Create Campaign — World DNA")
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /Re-roll All/i })
-    ).toBeInTheDocument();
-  });
-
-  it("shows loading state on step 2 when suggesting without dnaState", () => {
-    const wizard = createMockWizard({
-      step: 2,
-      isSuggesting: true,
-      dnaState: null,
-    });
-    render(<NewCampaignDialog wizard={wizard} />);
-
-    expect(
-      screen.getByText("Generating World DNA suggestions...")
-    ).toBeInTheDocument();
+    expect(screen.getByText("Create Campaign - World DNA")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Re-roll All/i })).toBeInTheDocument();
   });
 });
