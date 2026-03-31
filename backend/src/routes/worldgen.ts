@@ -3,6 +3,7 @@ import { streamSSE } from "hono/streaming";
 import type { IpResearchContext, PremiseDivergence } from "@worldforge/shared";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import {
+  readCampaignConfig,
   markGenerationComplete,
   saveIpContext,
   loadIpContext,
@@ -47,8 +48,10 @@ import {
   parseWorldBook,
   classifyEntries,
   importClassifiedEntries,
+  worldbookToIpContext,
 } from "../worldgen/worldbook-importer.js";
 import {
+  composeSelectedWorldbooks,
   listWorldbookLibrary,
   importWorldbookToLibrary,
 } from "../worldbook-library/index.js";
@@ -126,11 +129,14 @@ app.post("/suggest-seeds", async (c) => {
     });
     debugOperation.startHeartbeat(10000);
 
-    // Build knowledge context: worldbook entries OR franchise research
+    // Build knowledge context: reusable worldbook selection, legacy worldbook
+    // entries, or franchise research.
     let ipContext = null;
-    if (result.data.worldbookEntries?.length) {
+    if (result.data.selectedWorldbooks?.length) {
+      debugOperation.setLabel("Composing selected worldbooks...");
+      ipContext = composeSelectedWorldbooks(result.data.selectedWorldbooks).ipContext;
+    } else if (result.data.worldbookEntries?.length) {
       debugOperation.setLabel("Converting WorldBook into generation context...");
-      const { worldbookToIpContext } = await import("../worldgen/worldbook-importer.js");
       ipContext = worldbookToIpContext(result.data.worldbookEntries, result.data.name ?? "Worldbook");
     } else {
       const franchiseName = result.data.franchise?.trim();
@@ -254,6 +260,18 @@ app.post("/generate", async (c) => {
         }
         let ipContext = bodyIpContext ?? loadIpContext(campaignId);
         let premiseDivergence = bodyPremiseDivergence ?? loadPremiseDivergence(campaignId);
+
+        if (!ipContext) {
+          const config = readCampaignConfig(campaignId);
+          if (config.worldbookSelection?.length) {
+            debugOperation?.setLabel("Composing saved worldbook selection...");
+            ipContext = composeSelectedWorldbooks(config.worldbookSelection).ipContext;
+            saveIpContext(campaignId, ipContext);
+            log.info(
+              `Composed saved worldbook selection for campaign ${campaignId} (${ipContext.keyFacts.length} facts)`,
+            );
+          }
+        }
 
         // If no ipContext exists, run research now (user may have skipped DNA step)
         if (!ipContext) {

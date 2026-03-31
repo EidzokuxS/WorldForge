@@ -691,6 +691,7 @@ describe("POST /api/worldgen/generate", () => {
     };
 
     mockedReadCampaignConfig.mockReturnValue({ worldbookSelection } as any);
+    mockedLoadIpContext.mockReturnValue(null as any);
     mockedComposeSelectedWorldbooks.mockReturnValue({
       ipContext: composedIpContext,
       worldbookSelection,

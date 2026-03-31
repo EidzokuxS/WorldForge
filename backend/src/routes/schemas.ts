@@ -101,6 +101,15 @@ const createCampaignBaseSchema = z.object({
   seeds: worldSeedsSchema.optional(),
 });
 
+const worldbookSelectionSchema = z.object({
+  id: z.string().min(1),
+  displayName: z.string().min(1),
+  normalizedSourceHash: z.string().min(1),
+  entryCount: z.number().int().min(0),
+  createdAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
+});
+
 export const rollSeedSchema = z.object({
   category: seedCategorySchema,
 });
@@ -116,6 +125,8 @@ export const suggestSeedsSchema = z.object({
   franchise: z.string().optional(),
   /** Whether to run web research. Default true. */
   research: z.boolean().optional(),
+  /** Selected reusable worldbooks — composed on the backend into one context. */
+  selectedWorldbooks: z.array(worldbookSelectionSchema).optional(),
   /** Pre-classified worldbook entries — used as knowledge base for world generation. */
   worldbookEntries: z.array(z.object({
     name: z.string(),
@@ -154,6 +165,7 @@ const premiseDivergenceSchema = z.object({
 export const createCampaignSchema = createCampaignBaseSchema.extend({
   ipContext: ipContextSchema,
   premiseDivergence: premiseDivergenceSchema,
+  worldbookSelection: z.array(worldbookSelectionSchema).optional(),
 });
 
 export const suggestSeedSchema = z.object({

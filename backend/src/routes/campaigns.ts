@@ -36,10 +36,11 @@ app.post("/", async (c) => {
     const result = await parseBody(c, createCampaignSchema);
     if ("response" in result) return result.response;
 
-    const { name, premise, seeds, ipContext, premiseDivergence } = result.data;
+    const { name, premise, seeds, ipContext, premiseDivergence, worldbookSelection } = result.data;
     const campaign = await createCampaign(name, premise, seeds, {
       ipContext,
       premiseDivergence,
+      ...(Array.isArray(worldbookSelection) ? { worldbookSelection } : {}),
     });
     return c.json(campaign, 201);
   } catch (error) {
