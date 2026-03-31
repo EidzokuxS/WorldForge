@@ -100,11 +100,30 @@ export interface WorldData {
   } | null;
 }
 
+export const LORE_CARD_CATEGORIES = [
+  "concept",
+  "rule",
+  "location",
+  "faction",
+  "npc",
+  "ability",
+  "item",
+  "event",
+] as const;
+
+export type LoreCardCategory = (typeof LORE_CARD_CATEGORIES)[number];
+
+export interface LoreCardUpdateInput {
+  term: string;
+  definition: string;
+  category: LoreCardCategory;
+}
+
 export interface LoreCardItem {
   id: string;
   term: string;
   definition: string;
-  category: string;
+  category: LoreCardCategory;
 }
 
 export interface ScaffoldLocation {

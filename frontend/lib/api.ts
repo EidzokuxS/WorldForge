@@ -16,6 +16,7 @@ import type {
   GenerationProgress,
   WorldData,
   LoreCardItem,
+  LoreCardUpdateInput,
   ScaffoldLocation,
   ScaffoldFaction,
   ScaffoldNpc,
@@ -40,6 +41,7 @@ export type {
   GenerationProgress,
   WorldData,
   LoreCardItem,
+  LoreCardUpdateInput,
   ScaffoldLocation,
   ScaffoldFaction,
   ScaffoldNpc,
@@ -228,6 +230,18 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    throw new Error(await readErrorMessage(res));
+  }
+  return (await res.json()) as T;
+}
+
+export async function apiPut<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     throw new Error(await readErrorMessage(res));
@@ -560,6 +574,25 @@ export async function deleteLore(
   campaignId: string
 ): Promise<void> {
   await apiDelete(`/api/campaigns/${campaignId}/lore`);
+}
+
+export async function updateLoreCard(
+  campaignId: string,
+  cardId: string,
+  payload: LoreCardUpdateInput,
+): Promise<LoreCardItem> {
+  const result = await apiPut<{ card: LoreCardItem }>(
+    `/api/campaigns/${campaignId}/lore/${cardId}`,
+    payload,
+  );
+  return result.card;
+}
+
+export async function deleteLoreCardById(
+  campaignId: string,
+  cardId: string,
+): Promise<void> {
+  await apiDelete(`/api/campaigns/${campaignId}/lore/${cardId}`);
 }
 
 // ───── Campaign Meta ─────
