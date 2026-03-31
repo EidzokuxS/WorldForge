@@ -48,6 +48,11 @@ import {
   classifyEntries,
   importClassifiedEntries,
 } from "../worldgen/worldbook-importer.js";
+import {
+  listWorldbookLibrary,
+  importWorldbookToLibrary,
+} from "../worldbook-library/index.js";
+import { worldbookLibraryImportSchema } from "./schemas.js";
 
 const app = new Hono();
 
@@ -469,6 +474,45 @@ app.post("/save-edits", async (c) => {
 });
 
 // ───── WorldBook Import ─────
+
+app.get("/worldbook-library", (c) => {
+  try {
+    return c.json({ items: listWorldbookLibrary() });
+  } catch (error) {
+    return c.json(
+      { error: getErrorMessage(error, "Failed to list reusable worldbooks.") },
+      getErrorStatus(error),
+    );
+  }
+});
+
+app.post("/worldbook-library/import", async (c) => {
+  try {
+    const result = await parseBody(c, worldbookLibraryImportSchema);
+    if ("response" in result) return result.response;
+
+    const settings = loadSettings();
+    const gen = resolveGenerator(settings);
+    if ("error" in gen) {
+      return c.json({ error: gen.error }, gen.status);
+    }
+
+    const parsedEntries = parseWorldBook(result.data.worldbook);
+    const imported = await importWorldbookToLibrary({
+      displayName: result.data.displayName,
+      originalFileName: result.data.originalFileName,
+      parsedEntries,
+      classify: () => classifyEntries(parsedEntries, gen.resolved),
+    });
+
+    return c.json(imported);
+  } catch (error) {
+    return c.json(
+      { error: getErrorMessage(error, "Failed to import reusable worldbook.") },
+      getErrorStatus(error),
+    );
+  }
+});
 
 app.post("/parse-worldbook", async (c) => {
   try {

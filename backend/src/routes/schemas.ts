@@ -373,6 +373,12 @@ export const parseWorldBookSchema = z.object({
   }).passthrough(),
 });
 
+export const worldbookLibraryImportSchema = z.object({
+  displayName: z.string().trim().optional(),
+  originalFileName: z.string().trim().optional(),
+  worldbook: parseWorldBookSchema.shape.worldbook,
+});
+
 export const importWorldBookSchema = z.object({
   campaignId: z.string().min(1),
   entries: z.array(z.object({
