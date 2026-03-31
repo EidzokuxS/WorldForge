@@ -32,7 +32,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 23: Unified Research & World Generation Pipeline** - Single research cache feeding DNA and scaffold generation, with sufficiency checks on regeneration (completed 2026-03-30)
 - [x] **Phase 24: Worldgen Known IP Quality** - Canonical DNA/premise/locations/factions/NPCs with butterfly-effect changes, key vs supporting NPC tiers, research-grounded lore (completed 2026-03-25)
 - [x] **Phase 25: Replace premise-override heuristics with structured divergence interpretation** - Structured premise/world divergence interpretation for known-IP generation (completed 2026-03-30)
-- [ ] **Phase 28: Research & Design Synthesis for Character Systems, Prompts, UI, and External References** - Consolidate prompt-engineering research, desktop UI patterns, character-model redesign direction, and Aventuras findings into a cohesive implementation spec
+- [x] **Phase 28: Research & Design Synthesis for Character Systems, Prompts, UI, and External References** - Consolidate prompt-engineering research, desktop UI patterns, character-model redesign direction, and Aventuras findings into a cohesive implementation spec (completed 2026-03-31)
 - [ ] **Phase 29: Unified Character Ontology & Tag System** - Replace flat noisy character tags with a shared structured profile model for player creation, NPC generation, editing, and runtime prompt usage
 - [ ] **Phase 30: Start Conditions, Canonical Loadouts, and Persona Templates** - Make start selection about location plus arrival conditions, derive starting items from canonical scenario state, and introduce reusable base personas for player/NPC generation
 - [ ] **Phase 31: Prompt System Harmonization & Audit** - Audit and refine prompts across worldgen, character, gameplay, and support systems so they operate as one coherent mechanism
@@ -306,7 +306,7 @@ Note: Backlog phases (like 999.1) are tracked separately and are not part of the
 | 25. Structured Divergence Interpretation | 3/3 | Complete   | 2026-03-30 |
 | 26. Reusable multi-worldbook library for campaign creation | 3/3 | Complete   | 2026-03-31 |
 | 27. Lore card editing and deletion | 3/3 | Complete   | 2026-03-31 |
-| 28. Research & Design Synthesis | 2/3 | In Progress|  |
+| 28. Research & Design Synthesis | 3/3 | Complete   | 2026-03-31 |
 | 29. Unified Character Ontology & Tag System | 0/0 | Not Started | - |
 | 30. Start Conditions, Canonical Loadouts, and Persona Templates | 0/0 | Not Started | - |
 | 31. Prompt System Harmonization & Audit | 0/0 | Not Started | - |
@@ -424,7 +424,7 @@ Plans:
 Plans:
 - [x] 28-01-PLAN.md -- Character-system audit + canonical ontology/start/persona handoff for Phases 29-30
 - [x] 28-02-PLAN.md -- Prompt family inventory + rewrite rulebook + Phase 31 handoff
-- [ ] 28-03-PLAN.md -- Aventuras adoption decisions + desktop UI workspace spec + Phase 32-33 handoff
+- [x] 28-03-PLAN.md -- Aventuras adoption decisions + desktop UI workspace spec + Phase 32-33 handoff
 
 ### Phase 29: Unified Character Ontology & Tag System
 
