@@ -1,25 +1,94 @@
+// @vitest-environment jsdom
+
+import "@testing-library/jest-dom/vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
-import { LoreSection } from "../lore-section";
 import type { LoreCardItem, LoreCardUpdateInput } from "@/lib/api-types";
 
-vi.mock("@/lib/api", () => ({
+const apiMocks = vi.hoisted(() => ({
   searchLore: vi.fn(),
   updateLoreCard: vi.fn(),
   deleteLoreCardById: vi.fn(),
 }));
 
+vi.mock("@/lib/api", () => ({
+  searchLore: apiMocks.searchLore,
+  updateLoreCard: apiMocks.updateLoreCard,
+  deleteLoreCardById: apiMocks.deleteLoreCardById,
+}));
+
+vi.mock("@/lib/api-types", () => ({
+  LORE_CARD_CATEGORIES: [
+    "location",
+    "npc",
+    "faction",
+    "ability",
+    "rule",
+    "concept",
+    "item",
+    "event",
+  ],
+}), { virtual: true });
+
+vi.mock("@/components/ui/badge", () => ({
+  Badge: ({ children, ...props }: any) => <span {...props}>{children}</span>,
+}), { virtual: true });
+
+vi.mock("@/components/ui/button", () => ({
+  Button: ({ children, ...props }: any) => <button {...props}>{children}</button>,
+}), { virtual: true });
+
+vi.mock("@/components/ui/dialog", () => ({
+  Dialog: ({ open, children }: any) => (open ? <div>{children}</div> : null),
+  DialogContent: ({ children }: any) => <div role="dialog" aria-label="Edit Lore Card">{children}</div>,
+  DialogDescription: ({ children }: any) => <p>{children}</p>,
+  DialogFooter: ({ children }: any) => <div>{children}</div>,
+  DialogHeader: ({ children }: any) => <div>{children}</div>,
+  DialogTitle: ({ children }: any) => <h2>{children}</h2>,
+}), { virtual: true });
+
+vi.mock("@/components/ui/input", () => ({
+  Input: (props: any) => <input {...props} />,
+}), { virtual: true });
+
+vi.mock("@/components/ui/label", () => ({
+  Label: ({ children, ...props }: any) => <label {...props}>{children}</label>,
+}), { virtual: true });
+
+vi.mock("@/components/ui/select", () => ({
+  Select: ({ children }: any) => <div>{children}</div>,
+  SelectContent: ({ children }: any) => <div>{children}</div>,
+  SelectItem: ({ children }: any) => <div>{children}</div>,
+  SelectTrigger: ({ children, ...props }: any) => <button type="button" {...props}>{children}</button>,
+  SelectValue: ({ placeholder }: any) => <span>{placeholder ?? null}</span>,
+}), { virtual: true });
+
+vi.mock("@/components/ui/textarea", () => ({
+  Textarea: ({ children, ...props }: any) => <textarea {...props}>{children}</textarea>,
+}), { virtual: true });
+
+vi.mock("@/components/ui/alert-dialog", () => ({
+  AlertDialog: ({ open, children }: any) => (open ? <div>{children}</div> : null),
+  AlertDialogAction: ({ children, ...props }: any) => <button {...props}>{children}</button>,
+  AlertDialogCancel: ({ children, ...props }: any) => <button {...props}>{children}</button>,
+  AlertDialogContent: ({ children }: any) => <div role="alertdialog" aria-label="Delete Lore Card">{children}</div>,
+  AlertDialogDescription: ({ children }: any) => <p>{children}</p>,
+  AlertDialogFooter: ({ children }: any) => <div>{children}</div>,
+  AlertDialogHeader: ({ children }: any) => <div>{children}</div>,
+  AlertDialogTitle: ({ children }: any) => <h2>{children}</h2>,
+}), { virtual: true });
+
 vi.mock("../worldbook-import-dialog", () => ({
   WorldBookImportDialog: () => null,
 }));
 
-import { deleteLoreCardById, searchLore, updateLoreCard } from "@/lib/api";
+import { LoreSection } from "../lore-section";
 
-const mockedSearchLore = vi.mocked(searchLore);
-const mockedUpdateLoreCard = vi.mocked(updateLoreCard);
-const mockedDeleteLoreCardById = vi.mocked(deleteLoreCardById);
+const mockedSearchLore = apiMocks.searchLore;
+const mockedUpdateLoreCard = apiMocks.updateLoreCard;
+const mockedDeleteLoreCardById = apiMocks.deleteLoreCardById;
 
 const makeCard = (overrides: Partial<LoreCardItem> = {}): LoreCardItem => ({
   id: `card-${Math.random()}`,
@@ -66,6 +135,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  document.body.innerHTML = "";
   vi.useRealTimers();
 });
 
@@ -107,7 +177,7 @@ describe("LoreSection", () => {
     const updatedPayload: LoreCardUpdateInput = {
       term: "The Black Spire",
       definition: "A ruined tower watching the northern pass.",
-      category: "location",
+      category: "concept",
     };
     const refreshedCards = [
       makeCard({ id: "1", ...updatedPayload }),
@@ -127,8 +197,6 @@ describe("LoreSection", () => {
     await user.type(screen.getByLabelText(/term/i), updatedPayload.term);
     await user.clear(screen.getByLabelText(/definition/i));
     await user.type(screen.getByLabelText(/definition/i), updatedPayload.definition);
-    await user.click(screen.getByRole("combobox", { name: /category/i }));
-    await user.click(await screen.findByRole("option", { name: "Locations" }));
     await user.click(screen.getByRole("button", { name: /save changes/i }));
 
     await waitFor(() => {
@@ -137,6 +205,51 @@ describe("LoreSection", () => {
     });
     expect(screen.getByText("The Black Spire")).toBeInTheDocument();
     expect(screen.queryByText("Edit Lore Card")).not.toBeInTheDocument();
+  });
+
+  it("clears active search results before refreshing after an edit", async () => {
+    const user = userEvent.setup();
+    const updatedPayload: LoreCardUpdateInput = {
+      term: "Phase 27 Smoke Edited Term",
+      definition: "A revised lore definition.",
+      category: "concept",
+    };
+    let resolveRefresh: (() => void) | undefined;
+    const onRefresh = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRefresh = resolve;
+        }),
+    );
+
+    mockedSearchLore.mockResolvedValue([defaults.initialCards[0]]);
+    mockedUpdateLoreCard.mockResolvedValue({ id: "1", ...updatedPayload });
+
+    render(<LoreSectionHarness {...defaults} onRefresh={onRefresh} />);
+
+    await user.type(screen.getByPlaceholderText("Search lore cards..."), "dragon");
+    await waitFor(() => {
+      expect(mockedSearchLore).toHaveBeenCalledWith("test-campaign", "dragon", 20);
+    });
+    expect(screen.queryByText("Fireball")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /edit dragon/i }));
+    await user.clear(screen.getByLabelText(/term/i));
+    await user.type(screen.getByLabelText(/term/i), updatedPayload.term);
+    await user.clear(screen.getByLabelText(/definition/i));
+    await user.type(screen.getByLabelText(/definition/i), updatedPayload.definition);
+    await user.click(screen.getByRole("button", { name: /save changes/i }));
+
+    await waitFor(() => {
+      expect(mockedUpdateLoreCard).toHaveBeenCalledWith("test-campaign", "1", updatedPayload);
+      expect(onRefresh).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.getByText("Fireball")).toBeInTheDocument();
+
+    resolveRefresh?.();
+    await waitFor(() => {
+      expect(screen.queryByText("Edit Lore Card")).not.toBeInTheDocument();
+    });
   });
 
   it("deletes a lore card and clears search results", async () => {
@@ -210,5 +323,18 @@ describe("LoreSection", () => {
     expect(await within(dialog).findByText("Definition is required.")).toBeInTheDocument();
     expect(screen.getByText("Edit Lore Card")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /save changes/i })).toBeEnabled();
+  });
+
+  it("surfaces delete failures under the targeted card", async () => {
+    const user = userEvent.setup();
+    mockedDeleteLoreCardById.mockRejectedValue(new Error("Lore card not found."));
+
+    render(<LoreSectionHarness {...defaults} />);
+
+    await user.click(screen.getByRole("button", { name: /delete dragon/i }));
+    await user.click(screen.getByRole("button", { name: /^delete$/i }));
+
+    expect(await screen.findByText("Lore card not found.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /delete dragon/i })).toBeEnabled();
   });
 });

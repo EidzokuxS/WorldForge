@@ -86,7 +86,7 @@ describe("lore item API helpers", () => {
     });
   });
 
-  it("propagates lore item API errors", async () => {
+  it("propagates update lore card API errors", async () => {
     const payload: LoreCardUpdateInput = {
       term: "Bad",
       definition: "",
@@ -102,13 +102,16 @@ describe("lore item API helpers", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(updateLoreCard("camp-1", "missing-card", payload)).rejects.toThrow("Lore card not found.");
+  });
 
+  it("propagates delete lore card API errors", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "Definition is required." }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
       }),
     );
+    vi.stubGlobal("fetch", fetchMock);
 
     await expect(deleteLoreCardById("camp-1", "blocked-card")).rejects.toThrow("Definition is required.");
   });

@@ -339,4 +339,20 @@ describe("deleteLoreCardById", () => {
     expect(deleted).toBe(true);
     expect(db._mockTable.delete).toHaveBeenCalledWith("id = '1'");
   });
+
+  it("returns false without deleting when the target card is missing", async () => {
+    const db = createMockDb({
+      hasTable: true,
+      queryRows: [
+        { id: "2" },
+        { id: "3" },
+      ],
+    });
+    mockGetVectorDb.mockReturnValue(db);
+
+    const deleted = await deleteLoreCardById("1");
+
+    expect(deleted).toBe(false);
+    expect(db._mockTable.delete).not.toHaveBeenCalled();
+  });
 });
