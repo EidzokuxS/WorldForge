@@ -5,10 +5,9 @@ import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
-  apiPost,
-  getActiveCampaign,
   getWorldData,
   getLoreCards,
+  loadCampaign,
   saveWorldEdits,
   regenerateSection,
   type EditableScaffold,
@@ -40,11 +39,8 @@ export default function WorldReviewPage(props: { params: Promise<{ id: string }>
   useEffect(() => {
     async function loadData() {
       try {
-        // Ensure campaign is loaded (handles server restarts / direct URL navigation)
-        await apiPost(`/api/campaigns/${campaignId}/load`).catch(() => {});
-
-        const [campaign, world, lore] = await Promise.all([
-          getActiveCampaign(),
+        const campaign = await loadCampaign(campaignId);
+        const [world, lore] = await Promise.all([
           getWorldData(campaignId),
           getLoreCards(campaignId).catch(() => [] as LoreCardItem[]),
         ]);
@@ -119,7 +115,7 @@ export default function WorldReviewPage(props: { params: Promise<{ id: string }>
         setRegenerating(null);
       }
     },
-    [scaffold],
+    [campaignId, scaffold],
   );
 
   const handleSaveAndContinue = useCallback(async () => {

@@ -1,9 +1,14 @@
 import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
 
 const mockGenerateObject = vi.fn();
+const mockGenerateText = vi.fn();
 
 vi.mock("../../ai/generate-object-safe.js", () => ({
   safeGenerateObject: (...args: unknown[]) => mockGenerateObject(...args),
+}));
+
+vi.mock("ai", () => ({
+  generateText: (...args: unknown[]) => mockGenerateText(...args),
 }));
 
 vi.mock("../../ai/index.js", () => ({
@@ -34,6 +39,7 @@ const fakeReq = {
 describe("worldgen scaffold step resilience", () => {
   beforeEach(() => {
     mockGenerateObject.mockReset();
+    mockGenerateText.mockReset();
   });
 
   afterEach(() => {
@@ -189,6 +195,41 @@ describe("worldgen scaffold step resilience", () => {
       "Keep unrelated canon institutions and leadership intact unless the divergence explicitly changes them.",
     );
     expect(prompt).toContain("Describe the world AS IT EXISTS RIGHT NOW");
+  });
+
+  it("falls back to plain-text refined premise when a model returns prose instead of JSON", async () => {
+    mockGenerateObject.mockRejectedValueOnce(
+      new Error(
+        "safeGenerateObject fallback: invalid JSON. Raw text: A custom protagonist of undefined species occupies Dr. Kel's position...",
+      ),
+    );
+    mockGenerateText.mockResolvedValueOnce({
+      text:
+        "A custom protagonist occupies the Swiss mountain installation once associated with Dr. Kel's duties, operating the signal monitoring equipment and server arrays while heavy fog rolls through the surrounding forest. The ASO facility and its alien pressures remain intact, but the active operator is now the player's character rather than the canon protagonist.",
+    });
+
+    const refinedPremise = await generateRefinedPremiseStep(
+      {
+        ...fakeReq,
+        premise: "Voices of the Void, but my custom operator replaced Dr. Kel at the base.",
+      },
+      {
+        franchise: "Voices of the Void",
+        keyFacts: [
+          "Alpha Root Base is the main observatory facility.",
+        ],
+        tonalNotes: ["lonely sci-fi horror"],
+        canonicalNames: {
+          locations: ["Alpha Root Base"],
+          factions: ["Alpen Signal Observatorium (ASO)"],
+          characters: ["Dr. Kel"],
+        },
+        source: "mcp",
+      },
+    );
+
+    expect(refinedPremise).toContain("custom protagonist");
+    expect(mockGenerateText).toHaveBeenCalledTimes(1);
   });
 
   it("injects replacement-state divergence into known-IP location prompts", async () => {

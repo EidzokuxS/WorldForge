@@ -4,7 +4,7 @@ import { isLocalProvider } from "@worldforge/shared";
 import type { CampaignMeta } from "@worldforge/shared";
 import type { ProviderSettings, ResolvedRole, ResolveResult, RoleSettings } from "../ai/index.js";
 import { resolveRoleModel } from "../ai/index.js";
-import { getActiveCampaign } from "../campaign/index.js";
+import { getActiveCampaign, loadCampaign } from "../campaign/index.js";
 import { getErrorMessage } from "../lib/index.js";
 import { loadSettings } from "../settings/index.js";
 import type { Settings } from "../settings/index.js";
@@ -109,6 +109,28 @@ export function requireActiveCampaign(
     return c.json({ error: "Campaign not active or not found." }, 404);
   }
   return campaign;
+}
+
+/**
+ * Ensure a campaign is available for explicit :id routes even after a backend restart.
+ */
+export async function requireLoadedCampaign(
+  c: Context,
+  campaignId: string,
+): Promise<CampaignMeta | Response> {
+  const campaign = getActiveCampaign();
+  if (campaign?.id === campaignId) {
+    return campaign;
+  }
+
+  try {
+    return await loadCampaign(campaignId);
+  } catch (error) {
+    return c.json(
+      { error: getErrorMessage(error, "Campaign not active or not found.") },
+      404,
+    );
+  }
 }
 
 /**

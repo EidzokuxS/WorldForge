@@ -258,6 +258,38 @@ describe("suggestWorldSeeds (sequential DNA)", () => {
     );
   });
 
+  it("continues seed generation when premise divergence interpretation fails", async () => {
+    mockGenerateObject
+      .mockRejectedValueOnce(new Error("safeGenerateObject fallback: invalid JSON"))
+      .mockRejectedValueOnce(new Error("safeGenerateObject fallback: invalid JSON"))
+      .mockResolvedValueOnce({ object: { value: "Five Great Shinobi Nations", reasoning: "Canonical geography" } })
+      .mockResolvedValueOnce({ object: { value: "Hidden Village system", reasoning: "Flows from geography" } })
+      .mockResolvedValueOnce({ object: { value: "Akatsuki threat", reasoning: "Flows from political structure" } })
+      .mockResolvedValueOnce({ object: { value: ["Japanese feudal", "Martial arts"], reasoning: "Cultural roots" } })
+      .mockResolvedValueOnce({ object: { value: "Temperate forests", reasoning: "Fire Country terrain" } })
+      .mockResolvedValueOnce({ object: { value: "Bijuu sealed in hosts", reasoning: "Unique power system" } });
+
+    const result = await suggestWorldSeeds({
+      premise: "Voices of the Void, but I'm playing with my own char instead off Dr Kel",
+      role: fakeRole,
+      ipContext: {
+        franchise: "Voices of the Void",
+        keyFacts: ["Dr. Kel runs the station."],
+        tonalNotes: ["weird science"],
+        canonicalNames: {
+          characters: ["Dr. Kel", "Maxwell"],
+        },
+        source: "llm",
+      },
+    });
+
+    expect(result.premiseDivergence).toBeNull();
+    expect(result.seeds.geography).toBe("Five Great Shinobi Nations");
+    expect(mockGenerateObject).toHaveBeenCalledTimes(8);
+    expect((mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>).maxOutputTokens).toBeUndefined();
+    expect((mockGenerateObject.mock.calls[1]![0] as Record<string, unknown>).maxOutputTokens).toBe(8192);
+  });
+
   it("grounds political divergence prompts in preserved Star Wars canon instead of replacing the setting wholesale", async () => {
     setupSequentialMocks();
 

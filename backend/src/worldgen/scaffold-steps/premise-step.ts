@@ -1,5 +1,6 @@
 import { safeGenerateObject as generateObject } from "../../ai/generate-object-safe.js";
 import { z } from "zod";
+import { generateText } from "ai";
 import { createModel } from "../../ai/index.js";
 import {
   buildIpContextBlock,
@@ -14,6 +15,30 @@ import type { GenerateScaffoldRequest } from "../types.js";
 const refinedPremiseSchema = z.object({
   refinedPremise: z.string().describe("2-3 sentence refined world premise"),
 });
+
+function normalizeRefinedPremiseText(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    throw new Error("Refined premise fallback returned empty text.");
+  }
+
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed) as { refinedPremise?: unknown };
+      if (typeof parsed.refinedPremise === "string" && parsed.refinedPremise.trim()) {
+        return parsed.refinedPremise.trim();
+      }
+    } catch {
+      // Fall through to plain text handling.
+    }
+  }
+
+  return trimmed
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .replace(/^"(.*)"$/s, "$1")
+    .trim();
+}
 
 export async function generateRefinedPremiseStep(
   req: GenerateScaffoldRequest,
@@ -49,13 +74,41 @@ RULES:
 
 ${buildStopSlopRules()}`;
 
-  const result = await generateObject({
-    model: createModel(req.role.provider),
-    schema: refinedPremiseSchema,
-    prompt,
-    temperature: req.role.temperature,
-    maxOutputTokens: req.role.maxTokens,
-  });
+  const model = createModel(req.role.provider);
 
-  return result.object.refinedPremise;
+  try {
+    const result = await generateObject({
+      model,
+      schema: refinedPremiseSchema,
+      prompt,
+      temperature: req.role.temperature,
+      maxOutputTokens: req.role.maxTokens,
+    });
+
+    return result.object.refinedPremise;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const shouldRetryAsText =
+      message.includes("safeGenerateObject fallback: invalid JSON")
+      || message.includes("safeGenerateObject fallback: Zod validation failed");
+
+    if (!shouldRetryAsText) {
+      throw error;
+    }
+
+    const { text } = await generateText({
+      model,
+      temperature: req.role.temperature,
+      maxOutputTokens: req.role.maxTokens,
+      system: [
+        "You are a world-state summarizer for a text RPG engine.",
+        "Respond with plain text only.",
+        "Write exactly 2-3 sentences.",
+        "Do not use JSON, markdown, bullet points, labels, or quotes.",
+      ].join(" "),
+      prompt,
+    });
+
+    return normalizeRefinedPremiseText(text);
+  }
 }

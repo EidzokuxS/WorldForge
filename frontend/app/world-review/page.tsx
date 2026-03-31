@@ -5,9 +5,9 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
-  getActiveCampaign,
   getWorldData,
   getLoreCards,
+  loadCampaign,
   saveWorldEdits,
   regenerateSection,
   type EditableScaffold,
@@ -42,10 +42,10 @@ export default function WorldReviewPage() {
 
     async function loadData() {
       try {
-        const [campaign, world, lore] = await Promise.all([
-          getActiveCampaign(),
-          getWorldData(campaignId!),
-          getLoreCards(campaignId!).catch(() => [] as LoreCardItem[]),
+        const campaign = await loadCampaign(campaignId);
+        const [world, lore] = await Promise.all([
+          getWorldData(campaignId),
+          getLoreCards(campaignId).catch(() => [] as LoreCardItem[]),
         ]);
 
         const editableScaffold = toEditableScaffold(world, campaign?.premise ?? "", lore);

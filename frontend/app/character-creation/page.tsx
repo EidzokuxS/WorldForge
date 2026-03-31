@@ -7,8 +7,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  getActiveCampaign,
   getWorldData,
+  loadCampaign,
   parseCharacter,
   generateCharacter as apiGenerateCharacter,
   saveCharacter,
@@ -37,10 +37,8 @@ export default function CharacterCreationPage() {
 
     async function loadData() {
       try {
-        const [, world] = await Promise.all([
-          getActiveCampaign(),
-          getWorldData(campaignId!),
-        ]);
+        await loadCampaign(campaignId);
+        const world = await getWorldData(campaignId);
         setLocationNames(world.locations.map((l) => l.name));
       } catch (error) {
         toast.error("Failed to load world data", {

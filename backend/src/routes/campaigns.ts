@@ -15,7 +15,7 @@ import {
 import { getDb } from "../db/index.js";
 import { factions, items, locations, npcs, players, relationships } from "../db/schema.js";
 import { getErrorMessage, getErrorStatus } from "../lib/index.js";
-import { parseBody, requireActiveCampaign } from "./helpers.js";
+import { parseBody, requireActiveCampaign, requireLoadedCampaign } from "./helpers.js";
 import { createCampaignSchema, createCheckpointSchema, promoteNpcBodySchema } from "./schemas.js";
 
 const app = new Hono();
@@ -36,8 +36,11 @@ app.post("/", async (c) => {
     const result = await parseBody(c, createCampaignSchema);
     if ("response" in result) return result.response;
 
-    const { name, premise, seeds } = result.data;
-    const campaign = await createCampaign(name, premise, seeds);
+    const { name, premise, seeds, ipContext, premiseDivergence } = result.data;
+    const campaign = await createCampaign(name, premise, seeds, {
+      ipContext,
+      premiseDivergence,
+    });
     return c.json(campaign, 201);
   } catch (error) {
     return c.json(
@@ -60,12 +63,12 @@ app.get("/active", (c) => {
   }
 });
 
-app.get("/:id/world", (c) => {
+app.get("/:id/world", async (c) => {
   try {
     const id = c.req.param("id");
     assertSafeId(id);
 
-    const activeCampaign = requireActiveCampaign(c, id);
+    const activeCampaign = await requireLoadedCampaign(c, id);
     if (activeCampaign instanceof Response) return activeCampaign;
 
     const db = getDb();

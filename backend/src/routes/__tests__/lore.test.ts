@@ -7,6 +7,7 @@ import { Hono } from "hono";
 vi.mock("../../campaign/index.js", () => ({
   assertSafeId: vi.fn(),
   getActiveCampaign: vi.fn(),
+  loadCampaign: vi.fn(),
 }));
 
 vi.mock("../../lib/index.js", () => ({
@@ -36,7 +37,7 @@ vi.mock("../../vectors/lore-cards.js", () => ({
   deleteCampaignLore: vi.fn(),
 }));
 
-import { getActiveCampaign } from "../../campaign/index.js";
+import { getActiveCampaign, loadCampaign } from "../../campaign/index.js";
 import { loadSettings } from "../../settings/index.js";
 import { embedTexts } from "../../vectors/embeddings.js";
 import {
@@ -47,6 +48,7 @@ import {
 import loreRoutes from "../lore.js";
 
 const mockedGetActive = vi.mocked(getActiveCampaign);
+const mockedLoadCampaign = vi.mocked(loadCampaign);
 const mockedLoadSettings = vi.mocked(loadSettings);
 const mockedEmbedTexts = vi.mocked(embedTexts);
 const mockedGetAllLore = vi.mocked(getAllLoreCards);
@@ -95,12 +97,28 @@ describe("GET /:id/lore", () => {
 
   it("returns 404 when no active campaign matches", async () => {
     mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockRejectedValue(new Error("not found"));
 
     const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/lore`);
 
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body).toHaveProperty("error");
+  });
+
+  it("reloads the requested campaign when active state was lost", async () => {
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockResolvedValue({
+      id: CAMPAIGN_ID,
+      name: "Recovered",
+      createdAt: new Date().toISOString(),
+    } as any);
+    mockedGetAllLore.mockResolvedValue([] as any);
+
+    const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/lore`);
+
+    expect(res.status).toBe(200);
+    expect(mockedLoadCampaign).toHaveBeenCalledWith(CAMPAIGN_ID);
   });
 
   it("returns 500 when getAllLoreCards throws", async () => {
@@ -169,6 +187,7 @@ describe("GET /:id/lore/search", () => {
 
   it("returns 404 when no active campaign", async () => {
     mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockRejectedValue(new Error("not found"));
 
     const res = await app.request(
       `/api/campaigns/${CAMPAIGN_ID}/lore/search?q=test`
@@ -200,6 +219,7 @@ describe("DELETE /:id/lore", () => {
 
   it("returns 404 when no active campaign", async () => {
     mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockRejectedValue(new Error("not found"));
 
     const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/lore`, {
       method: "DELETE",

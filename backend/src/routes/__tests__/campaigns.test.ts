@@ -11,6 +11,10 @@ vi.mock("../../campaign/index.js", () => ({
   getActiveCampaign: vi.fn(),
   listCampaigns: vi.fn(),
   loadCampaign: vi.fn(),
+  createCheckpoint: vi.fn(),
+  listCheckpoints: vi.fn(),
+  loadCheckpoint: vi.fn(),
+  deleteCheckpoint: vi.fn(),
 }));
 
 vi.mock("../../db/index.js", () => ({
@@ -114,7 +118,12 @@ describe("POST /api/campaigns", () => {
     expect(res.status).toBe(201);
     const body = await res.json();
     expect(body).toEqual(created);
-    expect(mockedCreate).toHaveBeenCalledWith("New World", "A dark fantasy realm", undefined);
+    expect(mockedCreate).toHaveBeenCalledWith(
+      "New World",
+      "A dark fantasy realm",
+      undefined,
+      { ipContext: undefined, premiseDivergence: undefined },
+    );
   });
 
   it("passes seeds when provided", async () => {
@@ -131,7 +140,12 @@ describe("POST /api/campaigns", () => {
       }),
     });
 
-    expect(mockedCreate).toHaveBeenCalledWith("Seeded", "A premise", seeds);
+    expect(mockedCreate).toHaveBeenCalledWith(
+      "Seeded",
+      "A premise",
+      seeds,
+      { ipContext: undefined, premiseDivergence: undefined },
+    );
   });
 
   it("returns 400 for missing name", async () => {
@@ -146,16 +160,69 @@ describe("POST /api/campaigns", () => {
     expect(body).toHaveProperty("error");
   });
 
-  it("returns 400 for missing premise", async () => {
+  it("allows missing premise for worldbook-driven campaign creation", async () => {
+    mockedCreate.mockResolvedValue({ id: CAMPAIGN_ID, name: "Test" } as any);
+
     const res = await app.request("/api/campaigns", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: "Test" }),
     });
 
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body).toHaveProperty("error");
+    expect(res.status).toBe(201);
+    expect(mockedCreate).toHaveBeenCalledWith(
+      "Test",
+      "",
+      undefined,
+      { ipContext: undefined, premiseDivergence: undefined },
+    );
+  });
+
+  it("passes precomputed worldgen context when provided", async () => {
+    mockedCreate.mockResolvedValue({ id: CAMPAIGN_ID, name: "Test" } as any);
+    const ipContext = {
+      franchise: "Voices of the Void",
+      keyFacts: ["fact"],
+      tonalNotes: ["tone"],
+      canonicalNames: {
+        locations: ["Alpha Root Base"],
+        factions: ["Alpen Signal Observatorium (ASO)"],
+        characters: ["Doctor Kel"],
+      },
+      source: "mcp",
+    };
+    const premiseDivergence = {
+      mode: "diverged",
+      protagonistRole: {
+        kind: "custom",
+        interpretation: "replacement",
+        canonicalCharacterName: "Doctor Kel",
+        roleSummary: "A custom researcher replaces Doctor Kel.",
+      },
+      preservedCanonFacts: ["canon"],
+      changedCanonFacts: ["change"],
+      currentStateDirectives: ["directive"],
+      ambiguityNotes: ["note"],
+    };
+
+    const res = await app.request("/api/campaigns", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Test",
+        premise: "Custom researcher in VotV",
+        ipContext,
+        premiseDivergence,
+      }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(mockedCreate).toHaveBeenCalledWith(
+      "Test",
+      "Custom researcher in VotV",
+      undefined,
+      { ipContext, premiseDivergence },
+    );
   });
 
   it("returns 400 for empty name (whitespace only)", async () => {
@@ -324,11 +391,42 @@ describe("GET /:id/world", () => {
 
   it("returns 404 when campaign is not active", async () => {
     mockedGetActive.mockReturnValue(null as any);
+    mockedLoad.mockRejectedValue(new Error("not found"));
 
     const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/world`);
 
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body).toHaveProperty("error");
+  });
+
+  it("reloads the requested campaign when active state was lost", async () => {
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoad.mockResolvedValue({
+      id: CAMPAIGN_ID,
+      name: "Recovered",
+      createdAt: "2026-01-01",
+    } as any);
+
+    const mockAll = vi.fn();
+    const mockWhere = vi.fn(() => ({ all: mockAll }));
+    const mockFrom = vi.fn(() => ({ where: mockWhere }));
+    const mockSelect = vi.fn(() => ({ from: mockFrom }));
+
+    mockAll
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([]);
+
+    mockedGetDb.mockReturnValue({
+      select: mockSelect,
+    } as any);
+
+    const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/world`);
+
+    expect(res.status).toBe(200);
+    expect(mockedLoad).toHaveBeenCalledWith(CAMPAIGN_ID);
   });
 });

@@ -108,7 +108,11 @@ export function listCampaigns(): CampaignMeta[] {
 export async function createCampaign(
   name: string,
   premise: string,
-  seeds?: WorldSeeds
+  seeds?: WorldSeeds,
+  initialContext?: {
+    ipContext?: IpResearchContext | null;
+    premiseDivergence?: PremiseDivergence | null;
+  },
 ): Promise<CampaignMeta> {
   const trimmedName = name.trim();
   const trimmedPremise = premise.trim();
@@ -147,6 +151,8 @@ export async function createCampaign(
       name: trimmedName,
       premise: trimmedPremise,
       seeds,
+      ipContext: initialContext?.ipContext ?? undefined,
+      premiseDivergence: initialContext?.premiseDivergence ?? undefined,
       generationComplete: false,
       createdAt: now,
       updatedAt: now,

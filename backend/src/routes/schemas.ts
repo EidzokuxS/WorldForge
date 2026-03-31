@@ -89,7 +89,7 @@ export const chatActionBodySchema = z.object({
   method: z.string().max(500).default(""),
 });
 
-export const createCampaignSchema = z.object({
+const createCampaignBaseSchema = z.object({
   name: z
     .string()
     .transform((s) => s.trim())
@@ -150,6 +150,11 @@ const premiseDivergenceSchema = z.object({
   currentStateDirectives: z.array(z.string()),
   ambiguityNotes: z.array(z.string()),
 }).nullable().optional();
+
+export const createCampaignSchema = createCampaignBaseSchema.extend({
+  ipContext: ipContextSchema,
+  premiseDivergence: premiseDivergenceSchema,
+});
 
 export const suggestSeedSchema = z.object({
   premise: z

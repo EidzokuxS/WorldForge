@@ -3,8 +3,17 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { generateWorld, suggestSeed, suggestSeeds, classifyWorldBook, apiPost, loadCampaign } from "@/lib/api";
-import type { GenerationProgress, IpContext, ClassifiedWorldBookEntry } from "@/lib/api";
+import {
+  generateWorld,
+  suggestSeed,
+  suggestSeeds,
+  classifyWorldBook,
+  apiPost,
+  loadCampaign,
+  getWorldData,
+  getWorldgenDebugProgress,
+} from "@/lib/api";
+import type { GenerateWorldResult, GenerationProgress, IpContext, ClassifiedWorldBookEntry } from "@/lib/api";
 import { getErrorMessage } from "@/lib/settings";
 import type { PremiseDivergence, SeedCategory, Settings, WorldSeeds } from "@/lib/types";
 import {
@@ -20,6 +29,8 @@ import {
 } from "./utils";
 
 const DEFAULT_API_ERROR = "Unknown API error.";
+const GENERATION_RECOVERY_POLL_MS = 5000;
+const GENERATION_RECOVERY_ATTEMPTS = 360;
 
 type Phase =
   | { kind: "idle" }
@@ -79,10 +90,66 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
     if (!nextOpen) resetFlow();
   }
 
+  function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      window.setTimeout(resolve, ms);
+    });
+  }
+
+  function isRecoverableGenerationError(error: unknown): boolean {
+    const message = getErrorMessage(error, DEFAULT_API_ERROR).toLowerCase();
+    return message.includes("network error")
+      || message.includes("failed to fetch")
+      || message.includes("stream ended without completion");
+  }
+
+  async function readCompletedGenerationResult(campaignId: string): Promise<GenerateWorldResult> {
+    await loadCampaign(campaignId);
+    const world = await getWorldData(campaignId);
+    return {
+      refinedPremise: "",
+      locationCount: world.locations.length,
+      npcCount: world.npcs.length,
+      factionCount: world.factions.length,
+      startingLocation:
+        world.locations.find((location) => location.isStarting)?.name
+        ?? world.locations[0]?.name
+        ?? "Unknown",
+    };
+  }
+
+  async function recoverInterruptedGeneration(campaignId: string): Promise<GenerateWorldResult | null> {
+    for (let attempt = 0; attempt < GENERATION_RECOVERY_ATTEMPTS; attempt += 1) {
+      const [campaign, debug] = await Promise.all([
+        loadCampaign(campaignId).catch(() => null),
+        getWorldgenDebugProgress().catch(() => null),
+      ]);
+
+      if (campaign?.generationComplete) {
+        return readCompletedGenerationResult(campaignId);
+      }
+
+      const activeGeneration = debug?.active.some(
+        (operation) => operation.kind === "generate-world" && operation.campaignId === campaignId,
+      ) ?? false;
+
+      if (!activeGeneration) {
+        break;
+      }
+
+      setGenerationProgress((current) => current ?? {
+        step: 0,
+        totalSteps: 5,
+        label: "Reconnecting to running generation",
+      });
+      await sleep(GENERATION_RECOVERY_POLL_MS);
+    }
+
+    return null;
+  }
+
   async function tryGenerateWorld(
     campaignId: string,
-    ctx?: IpContext | null,
-    divergence?: PremiseDivergence | null,
   ): Promise<boolean> {
     if (!settings || !isGeneratorConfigured(settings)) return true;
 
@@ -91,12 +158,34 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
     try {
       const generation = await generateWorld(campaignId, (progress) => {
         setGenerationProgress(progress);
-      }, ctx, divergence);
+      });
       toast.success(`World generated: ${generation.startingLocation ?? "Unknown"}`, {
         description: `${generation.locationCount ?? 0} locations, ${generation.npcCount ?? 0} NPCs, ${generation.factionCount ?? 0} factions`,
       });
       return true;
     } catch (error) {
+      if (isRecoverableGenerationError(error)) {
+        const recovered = await recoverInterruptedGeneration(campaignId);
+        if (recovered) {
+          toast.success(`World generated: ${recovered.startingLocation ?? "Unknown"}`, {
+            description: `${recovered.locationCount ?? 0} locations, ${recovered.npcCount ?? 0} NPCs, ${recovered.factionCount ?? 0} factions`,
+          });
+          return true;
+        }
+
+        try {
+          const restarted = await generateWorld(campaignId, (progress) => {
+            setGenerationProgress(progress);
+          });
+          toast.success(`World generated: ${restarted.startingLocation ?? "Unknown"}`, {
+            description: `${restarted.locationCount ?? 0} locations, ${restarted.npcCount ?? 0} NPCs, ${restarted.factionCount ?? 0} factions`,
+          });
+          return true;
+        } catch (retryError) {
+          error = retryError;
+        }
+      }
+
       toast.error("World generation failed", {
         description: getErrorMessage(error, "You can still play - the world will be empty."),
       });
@@ -154,12 +243,24 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
 
     setPhase({ kind: "creating" });
     try {
-      const payload: { name: string; premise: string; seeds?: Partial<WorldSeeds> } = {
+      const payload: {
+        name: string;
+        premise: string;
+        seeds?: Partial<WorldSeeds>;
+        ipContext?: IpContext | null;
+        premiseDivergence?: PremiseDivergence | null;
+      } = {
         name,
         premise,
       };
       if (seeds && Object.keys(seeds).length > 0) {
         payload.seeds = seeds;
+      }
+      if (ipContext) {
+        payload.ipContext = ipContext;
+      }
+      if (premiseDivergence) {
+        payload.premiseDivergence = premiseDivergence;
       }
 
       const created = await apiPost<CampaignMeta>("/api/campaigns", payload);
@@ -168,24 +269,24 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
       // Load campaign so it becomes active BEFORE generation (generate needs active campaign)
       await loadCampaign(created.id);
 
-      // Close dialog and clear form before generation starts
-      // so the fullscreen overlay in TitleScreen takes over.
+      // Close the dialog before generation starts, but keep local state intact
+      // until the request resolves so we do not churn wizard state mid-SSE.
+      setOpen(false);
+
+      // If worldbook was uploaded but ipContext not set (skipped DNA step), build it now
+      if (!ipContext && worldbookEntries?.length) {
+        const { worldbookToIpContext } = await import("@/lib/api");
+        const derivedContext = worldbookToIpContext(worldbookEntries, name);
+        setIpContext(derivedContext);
+      }
+      const generated = await tryGenerateWorld(created.id);
+
       setCampaignName("");
       setCampaignPremise("");
       setCampaignFranchise("");
       setResearchEnabled(true);
-      setOpen(false);
       resetFlow();
       onCreated();
-
-      // If worldbook was uploaded but ipContext not set (skipped DNA step), build it now
-      let ctx = ipContext;
-      if (!ctx && worldbookEntries?.length) {
-        const { worldbookToIpContext } = await import("@/lib/api");
-        ctx = worldbookToIpContext(worldbookEntries, name);
-      }
-      const generated = await tryGenerateWorld(created.id, ctx, premiseDivergence);
-
       router.push(`/campaign/${created.id}/${generated ? "review" : "character"}`);
     } catch (error) {
       toast.error("Failed to create campaign", {

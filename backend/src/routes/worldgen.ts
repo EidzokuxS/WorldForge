@@ -12,6 +12,8 @@ import {
 import { getErrorMessage, getErrorStatus } from "../lib/index.js";
 import { loadSettings } from "../settings/index.js";
 import {
+  listWorldgenOperations,
+  beginWorldgenOperation,
   extractLoreCards,
   interpretPremiseDivergence,
   generateWorldScaffold,
@@ -25,7 +27,7 @@ import {
   suggestSingleSeed,
   suggestWorldSeeds,
 } from "../worldgen/index.js";
-import { parseBody, requireActiveCampaign, resolveGenerator, resolveEmbedder } from "./helpers.js";
+import { parseBody, requireActiveCampaign, requireLoadedCampaign, resolveGenerator, resolveEmbedder } from "./helpers.js";
 import { resolveFallbackProvider } from "../ai/with-model-fallback.js";
 import { createLogger } from "../lib/index.js";
 
@@ -48,6 +50,10 @@ import {
 } from "../worldgen/worldbook-importer.js";
 
 const app = new Hono();
+
+app.get("/debug/progress", (c) => {
+  return c.json(listWorldgenOperations());
+});
 
 async function resolvePremiseDivergence(
   campaignId: string,
@@ -94,6 +100,9 @@ app.post("/roll-seed", async (c) => {
 });
 
 app.post("/suggest-seeds", async (c) => {
+  let debugOperation:
+    | ReturnType<typeof beginWorldgenOperation>
+    | null = null;
   try {
     const result = await parseBody(c, suggestSeedsSchema);
     if ("response" in result) return result.response;
@@ -104,14 +113,24 @@ app.post("/suggest-seeds", async (c) => {
       return c.json({ error: gen.error }, gen.status);
     }
 
+    debugOperation = beginWorldgenOperation({
+      kind: "suggest-seeds",
+      label: "Preparing World DNA suggestions...",
+      franchise: result.data.franchise?.trim() || undefined,
+      premise: result.data.premise,
+    });
+    debugOperation.startHeartbeat(10000);
+
     // Build knowledge context: worldbook entries OR franchise research
     let ipContext = null;
     if (result.data.worldbookEntries?.length) {
+      debugOperation.setLabel("Converting WorldBook into generation context...");
       const { worldbookToIpContext } = await import("../worldgen/worldbook-importer.js");
       ipContext = worldbookToIpContext(result.data.worldbookEntries, result.data.name ?? "Worldbook");
     } else {
       const franchiseName = result.data.franchise?.trim();
       if (franchiseName && result.data.research !== false) {
+        debugOperation.setLabel(`Researching franchise lore for ${franchiseName}...`);
         const { researchKnownIP } = await import("../worldgen/ip-researcher.js");
         ipContext = await researchKnownIP(
           { premise: result.data.premise, name: result.data.name ?? "", knownIP: franchiseName, research: settings.research },
@@ -123,11 +142,14 @@ app.post("/suggest-seeds", async (c) => {
     // If no premise provided but worldbook exists, generate premise from worldbook
     const premise = result.data.premise?.trim() ||
       (ipContext ? `A world based on the ${ipContext.franchise} setting` : "An original fantasy world");
+    debugOperation.setLabel("Generating World DNA suggestions...");
     const { seeds, premiseDivergence } = await suggestWorldSeeds({
       premise,
       role: gen.resolved,
       ipContext,
     });
+
+    debugOperation.finish("completed");
 
     return c.json({
       ...seeds,
@@ -135,6 +157,7 @@ app.post("/suggest-seeds", async (c) => {
       _premiseDivergence: premiseDivergence,
     });
   } catch (error) {
+    debugOperation?.finish("failed", error);
     return c.json(
       { error: getErrorMessage(error, "Failed to generate seed suggestions.") },
       getErrorStatus(error)
@@ -170,13 +193,25 @@ app.post("/suggest-seed", async (c) => {
 });
 
 app.post("/generate", async (c) => {
+  let debugOperation:
+    | ReturnType<typeof beginWorldgenOperation>
+    | null = null;
   try {
     const result = await parseBody(c, generateWorldSchema);
     if ("response" in result) return result.response;
 
     const { campaignId } = result.data;
-    const campaign = requireActiveCampaign(c, campaignId);
+    const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
+
+    debugOperation = beginWorldgenOperation({
+      kind: "generate-world",
+      label: "Preparing world generation...",
+      campaignId,
+      franchise: result.data.ipContext?.franchise,
+      premise: campaign.premise,
+    });
+    debugOperation.startHeartbeat(15000);
 
     const settings = loadSettings();
     const gen = resolveGenerator(settings);
@@ -193,6 +228,15 @@ app.post("/generate", async (c) => {
     } : undefined;
 
     return streamSSE(c, async (stream) => {
+      const keepaliveTimer = setInterval(() => {
+        void stream.writeSSE({
+          event: "keepalive",
+          data: "{}",
+        }).catch(() => {
+          // Ignore write errors here; the main generation flow will surface real failures.
+        });
+      }, 10000);
+
       try {
         // Load cached worldgen context: request body (fresh from wizard) or config cache
         const bodyIpContext = result.data.ipContext;
@@ -208,6 +252,7 @@ app.post("/generate", async (c) => {
 
         // If no ipContext exists, run research now (user may have skipped DNA step)
         if (!ipContext) {
+          debugOperation?.setLabel("Researching franchise lore...");
           const { researchKnownIP } = await import("../worldgen/ip-researcher.js");
           ipContext = await researchKnownIP(
             { premise: campaign.premise, name: campaign.name, research: settings.research },
@@ -243,6 +288,7 @@ app.post("/generate", async (c) => {
             research: settings.research,
           },
           async (progress) => {
+            debugOperation?.setLabel(progress.label);
             await stream.writeSSE({
               event: "progress",
               data: JSON.stringify(progress),
@@ -297,17 +343,22 @@ app.post("/generate", async (c) => {
             startingLocation,
           }),
         });
+        debugOperation?.finish("completed");
       } catch (error) {
         log.error("World generation pipeline failed", error);
+        debugOperation?.finish("failed", error);
         await stream.writeSSE({
           event: "error",
           data: JSON.stringify({
             error: getErrorMessage(error, "World generation failed."),
           }),
         });
+      } finally {
+        clearInterval(keepaliveTimer);
       }
     });
   } catch (error) {
+    debugOperation?.finish("failed", error);
     return c.json(
       { error: getErrorMessage(error, "World generation failed.") },
       getErrorStatus(error)
@@ -327,7 +378,7 @@ app.post("/regenerate-section", async (c) => {
     }
 
     const { campaignId } = result.data;
-    const campaign = requireActiveCampaign(c, campaignId);
+    const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
 
     // Load cached IP research for section regeneration
@@ -385,7 +436,7 @@ app.post("/save-edits", async (c) => {
     if ("response" in result) return result.response;
 
     const { campaignId, scaffold } = result.data;
-    const campaign = requireActiveCampaign(c, campaignId);
+    const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
 
     saveScaffoldToDb(campaignId, scaffold);
@@ -450,7 +501,7 @@ app.post("/import-worldbook", async (c) => {
     if ("response" in result) return result.response;
 
     const { campaignId, entries } = result.data;
-    const campaign = requireActiveCampaign(c, campaignId);
+    const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
 
     const settings = loadSettings();

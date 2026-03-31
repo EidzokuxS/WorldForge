@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { assertSafeId } from "../campaign/index.js";
 import { getErrorMessage, getErrorStatus } from "../lib/index.js";
 import { loadSettings } from "../settings/index.js";
-import { requireActiveCampaign, resolveEmbedder } from "./helpers.js";
+import { requireActiveCampaign, requireLoadedCampaign, resolveEmbedder } from "./helpers.js";
 import { embedTexts } from "../vectors/embeddings.js";
 import {
   getAllLoreCards,
@@ -17,7 +17,7 @@ app.get("/:id/lore", async (c) => {
   try {
     const campaignId = c.req.param("id");
     assertSafeId(campaignId);
-    const campaign = requireActiveCampaign(c, campaignId);
+    const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
 
     const cards = await getAllLoreCards();
@@ -35,7 +35,7 @@ app.get("/:id/lore/search", async (c) => {
   try {
     const campaignId = c.req.param("id");
     assertSafeId(campaignId);
-    const campaign = requireActiveCampaign(c, campaignId);
+    const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
 
     const query = c.req.query("q")?.trim();
@@ -82,7 +82,7 @@ app.delete("/:id/lore", async (c) => {
   try {
     const campaignId = c.req.param("id");
     assertSafeId(campaignId);
-    const campaign = requireActiveCampaign(c, campaignId);
+    const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
 
     await deleteCampaignLore();

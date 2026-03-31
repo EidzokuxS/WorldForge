@@ -5,6 +5,12 @@ import { Hono } from "hono";
 // Mocks
 // ---------------------------------------------------------------------------
 vi.mock("../../worldgen/index.js", () => ({
+  beginWorldgenOperation: vi.fn(() => ({
+    startHeartbeat: vi.fn(),
+    setLabel: vi.fn(),
+    finish: vi.fn(),
+  })),
+  listWorldgenOperations: vi.fn(() => ({ active: [], recent: [] })),
   rollWorldSeeds: vi.fn(),
   rollSeed: vi.fn(),
   suggestWorldSeeds: vi.fn(),
@@ -39,6 +45,7 @@ vi.mock("../../campaign/index.js", () => ({
   savePremiseDivergence: vi.fn(),
   loadPremiseDivergence: vi.fn(() => null),
   getActiveCampaign: vi.fn(),
+  loadCampaign: vi.fn(),
 }));
 
 vi.mock("../../vectors/lore-cards.js", () => ({
@@ -96,6 +103,7 @@ import {
 import {
   markGenerationComplete,
   getActiveCampaign,
+  loadCampaign,
   saveIpContext,
   loadIpContext,
   savePremiseDivergence,
@@ -118,6 +126,7 @@ const mockedSaveScaffoldToDb = vi.mocked(saveScaffoldToDb);
 const mockedExtractLoreCards = vi.mocked(extractLoreCards);
 const mockedMarkGenComplete = vi.mocked(markGenerationComplete);
 const mockedGetActiveCampaign = vi.mocked(getActiveCampaign);
+const mockedLoadCampaign = vi.mocked(loadCampaign);
 const mockedSaveIpContext = vi.mocked(saveIpContext);
 const mockedLoadIpContext = vi.mocked(loadIpContext);
 const mockedSavePremiseDivergence = vi.mocked(savePremiseDivergence);
@@ -166,6 +175,13 @@ beforeEach(() => {
   mockedResolveRoleModel.mockReturnValue(fakeResolvedRole as any);
   mockedResolveFallback.mockReturnValue(null as any);
   mockedGetActiveCampaign.mockReturnValue({
+    id: CAMPAIGN_ID,
+    name: "Test Campaign",
+    premise: "A dark world",
+    seeds: { geography: "Mountains" },
+    createdAt: "2026-01-01",
+  } as any);
+  mockedLoadCampaign.mockResolvedValue({
     id: CAMPAIGN_ID,
     name: "Test Campaign",
     premise: "A dark world",
@@ -636,6 +652,39 @@ describe("POST /api/worldgen/generate", () => {
       expect.any(Function),
     );
   });
+
+  it("reloads the requested campaign when active state was lost before generation", async () => {
+    mockedGetActiveCampaign.mockReturnValue(null as any);
+    mockedLoadCampaign.mockResolvedValue({
+      id: CAMPAIGN_ID,
+      name: "Recovered campaign",
+      premise: "A dark world",
+      seeds: { geography: "Mountains" },
+      createdAt: "2026-01-01",
+    } as any);
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "Recovered world",
+        locations: [
+          { name: "Konohagakure", description: "Village", tags: [], isStarting: true, connectedTo: [] },
+        ],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(mockedLoadCampaign).toHaveBeenCalledWith(CAMPAIGN_ID);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -672,6 +721,7 @@ describe("POST /api/worldgen/save-edits", () => {
 
   it("returns 404 with no active campaign", async () => {
     mockedGetActiveCampaign.mockReturnValue(null as any);
+    mockedLoadCampaign.mockRejectedValue(new Error("not found"));
 
     const res = await app.request("/api/worldgen/save-edits", {
       method: "POST",
@@ -763,6 +813,7 @@ describe("POST /api/worldgen/import-worldbook", () => {
 
   it("returns 404 when campaign not active", async () => {
     mockedGetActiveCampaign.mockReturnValue(null as any);
+    mockedLoadCampaign.mockRejectedValue(new Error("not found"));
 
     const res = await app.request("/api/worldgen/import-worldbook", {
       method: "POST",

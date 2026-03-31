@@ -409,6 +409,26 @@ interface SSEHandlers<T> {
   label: string;
 }
 
+export interface WorldgenDebugOperation {
+  id: string;
+  kind: "suggest-seeds" | "generate-world";
+  status: "running" | "completed" | "failed";
+  label: string;
+  startedAt: number;
+  updatedAt: number;
+  elapsedMs: number;
+  heartbeatCount: number;
+  campaignId?: string;
+  franchise?: string;
+  premisePreview?: string;
+  error?: string;
+}
+
+export interface WorldgenDebugProgress {
+  active: WorldgenDebugOperation[];
+  recent: WorldgenDebugOperation[];
+}
+
 async function parseSSEStream<T>(body: ReadableStream<Uint8Array>, handlers: SSEHandlers<T>): Promise<T> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -425,11 +445,12 @@ async function parseSSEStream<T>(body: ReadableStream<Uint8Array>, handlers: SSE
     buffer = lines.pop()!;
 
     for (const line of lines) {
-      if (line.startsWith("event:")) {
-        currentEvent = line.slice(6).trim();
-      } else if (line.startsWith("data:")) {
-        currentData = line.slice(5).trim();
-      } else if (line === "") {
+      const normalizedLine = line.replace(/\r$/, "");
+      if (normalizedLine.startsWith("event:")) {
+        currentEvent = normalizedLine.slice(6).trim();
+      } else if (normalizedLine.startsWith("data:")) {
+        currentData += normalizedLine.slice(5).trim();
+      } else if (normalizedLine === "") {
         if (currentEvent && currentData) {
           let parsed: Record<string, unknown>;
           try {
@@ -496,6 +517,10 @@ export async function generateWorld(
       : undefined,
     onComplete: (data) => data as unknown as GenerateWorldResult,
   });
+}
+
+export function getWorldgenDebugProgress(): Promise<WorldgenDebugProgress> {
+  return apiGet<WorldgenDebugProgress>("/api/worldgen/debug/progress");
 }
 
 export async function getWorldData(campaignId: string): Promise<WorldData> {

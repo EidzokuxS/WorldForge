@@ -12,7 +12,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/lib/api", () => ({
-  getActiveCampaign: vi.fn(),
+  loadCampaign: vi.fn(),
   getWorldData: vi.fn(),
   parseCharacter: vi.fn(),
   generateCharacter: vi.fn(),
@@ -47,10 +47,10 @@ vi.mock("@/components/character-creation/character-card", () => ({
   CharacterCard: () => <div data-testid="character-card" />,
 }));
 
-import { getActiveCampaign, getWorldData } from "@/lib/api";
+import { loadCampaign, getWorldData } from "@/lib/api";
 import CharacterCreationPage from "../page";
 
-const mockedGetActive = vi.mocked(getActiveCampaign);
+const mockedLoadCampaign = vi.mocked(loadCampaign);
 const mockedGetWorld = vi.mocked(getWorldData);
 
 // ---------------------------------------------------------------------------
@@ -80,7 +80,7 @@ beforeEach(() => {
 
 describe("CharacterCreationPage (campaign/[id]/character)", () => {
   it("renders loading spinner while world data is fetching", async () => {
-    mockedGetActive.mockReturnValue(new Promise(() => {}));
+    mockedLoadCampaign.mockReturnValue(new Promise(() => {}));
     mockedGetWorld.mockReturnValue(new Promise(() => {}));
 
     const { container } = await renderPage("test-id");
@@ -91,7 +91,7 @@ describe("CharacterCreationPage (campaign/[id]/character)", () => {
   });
 
   it("renders character form after data loads", async () => {
-    mockedGetActive.mockResolvedValue({
+    mockedLoadCampaign.mockResolvedValue({
       id: "test-id",
       name: "Test",
       premise: "A world",
@@ -111,8 +111,38 @@ describe("CharacterCreationPage (campaign/[id]/character)", () => {
     expect(screen.getByTestId("character-form")).toBeInTheDocument();
   });
 
+  it("loads the campaign before requesting world data", async () => {
+    const callOrder: string[] = [];
+    mockedLoadCampaign.mockImplementation(async () => {
+      callOrder.push("loadCampaign");
+      return {
+        id: "test-id",
+        name: "Test",
+        premise: "A world",
+      } as never;
+    });
+    mockedGetWorld.mockImplementation(async () => {
+      callOrder.push("getWorldData");
+      return {
+        locations: [{ name: "Town" }],
+        factions: [],
+        npcs: [],
+        relationships: [],
+      } as never;
+    });
+
+    await renderPage("test-id");
+
+    await waitFor(() => {
+      expect(screen.getByText("Create Your Character")).toBeInTheDocument();
+    });
+
+    expect(callOrder[0]).toBe("loadCampaign");
+    expect(callOrder).toContain("getWorldData");
+  });
+
   it("renders form with correct busy states when idle", async () => {
-    mockedGetActive.mockResolvedValue({
+    mockedLoadCampaign.mockResolvedValue({
       id: "test-id",
       name: "Test",
       premise: "A world",
@@ -137,7 +167,7 @@ describe("CharacterCreationPage (campaign/[id]/character)", () => {
   });
 
   it("does not render character card when no character is set", async () => {
-    mockedGetActive.mockResolvedValue({
+    mockedLoadCampaign.mockResolvedValue({
       id: "test-id",
       name: "Test",
       premise: "A world",

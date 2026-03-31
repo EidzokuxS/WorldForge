@@ -99,6 +99,8 @@ describe("interpretPremiseDivergence", () => {
     expect(result?.protagonistRole.canonicalCharacterName).toBe("Dr. Kel");
     expect(result?.preservedCanonFacts).toContain("The signal base still sits in the same remote valley.");
     expect(result?.changedCanonFacts).toContain("Dr. Kel is not the active station protagonist in the current campaign state.");
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+    expect((mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>).maxOutputTokens).toBeUndefined();
   });
 
   it("treats outsider Naruto premises as canonical or coexisting instead of protagonist replacement", async () => {
@@ -217,4 +219,22 @@ describe("interpretPremiseDivergence", () => {
       "Describe the Republic and Jedi as embattled but still publicly active powers.",
     );
   });
+
+  it("returns null instead of throwing when structured output is invalid", async () => {
+    mockGenerateObject
+      .mockRejectedValueOnce(new Error("safeGenerateObject fallback: invalid JSON"))
+      .mockRejectedValueOnce(new Error("safeGenerateObject fallback: invalid JSON"));
+
+    await expect(
+      interpretPremiseDivergence(
+        voicesOfTheVoidContext,
+        "Voices of the Void, but I'm playing with my own char instead of Dr Kel",
+        fakeRole as never,
+      ),
+    ).resolves.toBeNull();
+
+    expect((mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>).maxOutputTokens).toBeUndefined();
+    expect((mockGenerateObject.mock.calls[1]![0] as Record<string, unknown>).maxOutputTokens).toBe(8192);
+  });
+
 });

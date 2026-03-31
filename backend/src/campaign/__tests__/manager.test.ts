@@ -186,6 +186,50 @@ describe("createCampaign", () => {
     expect(configData.generationComplete).toBe(false);
   });
 
+  it("persists precomputed ipContext and premiseDivergence in config.json", async () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "mkdirSync").mockImplementation(() => "");
+    const writeSpy = vi.spyOn(fs, "writeFileSync").mockImplementation(() => {});
+
+    const ipContext = {
+      franchise: "Voices of the Void",
+      keyFacts: ["fact"],
+      tonalNotes: ["tone"],
+      canonicalNames: {
+        locations: ["Alpha Root Base"],
+        factions: ["Alpen Signal Observatorium (ASO)"],
+        characters: ["Doctor Kel"],
+      },
+      source: "mcp" as const,
+    };
+    const premiseDivergence = {
+      mode: "diverged" as const,
+      protagonistRole: {
+        kind: "custom" as const,
+        interpretation: "replacement" as const,
+        canonicalCharacterName: "Doctor Kel",
+        roleSummary: "A custom researcher replaces Doctor Kel.",
+      },
+      preservedCanonFacts: ["canon"],
+      changedCanonFacts: ["change"],
+      currentStateDirectives: ["directive"],
+      ambiguityNotes: ["note"],
+    };
+
+    await createCampaign("My Game", "A dark tale", undefined, {
+      ipContext,
+      premiseDivergence,
+    });
+
+    const configCall = writeSpy.mock.calls.find(
+      (c) => typeof c[0] === "string" && c[0].includes("config.json")
+    );
+    expect(configCall).toBeDefined();
+    const configData = JSON.parse(configCall![1] as string);
+    expect(configData.ipContext).toEqual(ipContext);
+    expect(configData.premiseDivergence).toEqual(premiseDivergence);
+  });
+
   it("connects DB, runs migrations, and inserts campaign row", async () => {
     vi.spyOn(fs, "existsSync").mockReturnValue(true);
     vi.spyOn(fs, "mkdirSync").mockImplementation(() => "");
