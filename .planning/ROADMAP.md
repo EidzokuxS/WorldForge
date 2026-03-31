@@ -299,7 +299,7 @@ Note: Backlog phases (like 999.1) are tracked separately and are not part of the
 | 24. Worldgen Known IP Quality | 4/4 | Complete | 2026-03-25 |
 | 25. Structured Divergence Interpretation | 3/3 | Complete   | 2026-03-30 |
 | 26. Reusable multi-worldbook library for campaign creation | 3/3 | Complete   | 2026-03-31 |
-| 27. Lore card editing and deletion | 2/3 | In Progress|  |
+| 27. Lore card editing and deletion | 3/3 | Complete   | 2026-03-31 |
 
 ### Phase 16: NPC System QA — Three NPC Tiers + World Gen Integration
 
@@ -390,9 +390,9 @@ Plans:
   3. Invalid edit payloads are rejected clearly, and edit/delete requests for missing cards return 404 instead of silent success.
   4. Semantic lore search reflects edited content after save, proving vector freshness is maintained.
   5. Automated regressions cover edit success, delete success, validation failure, not-found handling, and UI refresh/pending behavior.
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans complete
 
 Plans:
 - [x] 27-01-PLAN.md -- Backend lore item routes + stable-id vector mutation safety
 - [x] 27-02-PLAN.md -- World-review lore edit/delete UI + client helpers
-- [ ] 27-03-PLAN.md -- Regression coverage + smoke verification
+- [x] 27-03-PLAN.md -- Regression coverage + smoke verification

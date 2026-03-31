@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Ready to execute
-stopped_at: Completed 27-02-PLAN.md
-last_updated: "2026-03-31T10:41:09.192Z"
+status: Phase 27 complete
+stopped_at: Completed 27-03-PLAN.md
+last_updated: "2026-03-31T10:59:34.047Z"
 progress:
   total_phases: 22
-  completed_phases: 21
+  completed_phases: 22
   total_plans: 61
-  completed_plans: 60
+  completed_plans: 61
 ---
 
 # Project State
@@ -19,37 +19,37 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-18)
 
 **Core value:** The LLM is the narrator, never the engine. All mechanical outcomes are resolved by backend code.
-**Current focus:** Phase 27 execution
+**Current focus:** Milestone v1 complete through Phase 27
 
 ## Current Position
 
-Phase: 27 (Lore card editing and deletion) — IN PROGRESS
-Plan: 2 of 3 complete
+Phase: 27 (Lore card editing and deletion) — COMPLETE
+Plan: 3 of 3 complete
 
 ## Performance Metrics
 
 **Current Snapshot:**
 
 - Active roadmap phases: 22
-- Completed phases: 21
-- Planned or in-progress phases: 1
+- Completed phases: 22
+- Planned or in-progress phases: 0
 - Total plans tracked: 61
-- Completed plans: 59
-- Pending plans: 2
+- Completed plans: 61
+- Pending plans: 0
 
 **Open Work:**
 
-- Active execution target: Phase 27
-- Next required workflow step: execute Plan 27-02, then 27-03
-- Current phase has 3 plans and 1 is complete
+- Active execution target: None
+- Next required workflow step: milestone closeout / verification handoff
+- Current phase is complete with all 3 plans executed
 - Backlog items outside active execution order are tracked in `.planning/BACKLOG.md`
 
 **Notes:**
 
 - Historical per-plan timing metrics from earlier GSD runs were removed during planning hygiene because they no longer matched the active roadmap after renumbering and archival cleanup.
 - Use `ROADMAP.md` progress plus phase directories as the source of truth for current execution state.
-- Latest execution: Phase 27 Plan 01 completed in 6 min 47 sec (2 tasks, 5 files touched).
-- Pending execution tail: Plans 27-02 and 27-03 remain.
+- Latest execution: Phase 27 Plan 03 completed in 17 min (3 tasks, 5 files touched).
+- Active roadmap execution is complete through Phase 27.
 
 ## Accumulated Context
 
@@ -188,6 +188,8 @@ Recent decisions affecting current work:
 - [Phase 27]: Lore edits require a resolved embedder and rewrite the full lore table so ids stay stable while vectors stay fresh.
 - [Phase 27]: LoreSection clears search results before awaiting onRefresh so parent lore state remains authoritative after item mutations.
 - [Phase 27]: LoreCardUpdateInput stays narrowed to canonical categories while LoreCardItem reads remain string-typed for compatibility with existing callers and fixtures.
+- [Phase 27]: Added a repo-root Vitest alias config so the plan's exact npm --prefix verification command resolves frontend @/ imports correctly.
+- [Phase 27]: Reused the existing 'Voices of the Void' campaign as the smoke target because it already had working lore search and more than two lore cards.
 
 ### Roadmap Evolution
 
@@ -212,7 +214,7 @@ Recent decisions affecting current work:
 ### Pending Todos
 
 - Todo ideas were promoted into active roadmap phases 26 and 27.
-- Remaining active milestone work is now Phase 27: per-card lore editing and deletion.
+- None - active roadmap execution is complete through Phase 27.
 
 ### Blockers/Concerns
 
@@ -220,6 +222,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-31T10:41:09.187Z
-Stopped at: Completed 27-02-PLAN.md
+Last session: 2026-03-31T10:59:34.043Z
+Stopped at: Completed 27-03-PLAN.md
 Resume file: None
