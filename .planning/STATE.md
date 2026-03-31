@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: In Progress
-stopped_at: Completed 25-03-PLAN.md
-last_updated: "2026-03-30T07:55:53.985Z"
+status: Ready to execute
+stopped_at: Completed 26-01-PLAN.md
+last_updated: "2026-03-31T05:16:46.558Z"
 progress:
-  total_phases: 20
+  total_phases: 22
   completed_phases: 20
-  total_plans: 55
-  completed_plans: 55
+  total_plans: 58
+  completed_plans: 56
 ---
 
 # Project State
@@ -19,36 +19,37 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-18)
 
 **Core value:** The LLM is the narrator, never the engine. All mechanical outcomes are resolved by backend code.
-**Current focus:** Phase 25 complete — replace-premise-override-heuristics-with-structured-divergence-interpretation
+**Current focus:** Phase 26 — Reusable multi-worldbook library for campaign creation
 
 ## Current Position
 
-Phase: 25
-Plan: 03 (completed)
+Phase: 26 (Reusable multi-worldbook library for campaign creation) — EXECUTING
+Plan: 2 of 3
 
 ## Performance Metrics
 
 **Current Snapshot:**
 
-- Active roadmap phases: 20
+- Active roadmap phases: 22
 - Completed phases: 20
-- Planned or in-progress phases: 0
-- Total plans tracked: 55
-- Completed plans: 55
-- Pending plans: 0
+- Planned or in-progress phases: 2
+- Total plans tracked: 58
+- Completed plans: 56
+- Pending plans: 2
 
 **Open Work:**
 
-- Active execution target: None
-- Next required workflow step: choose the next milestone or backlog item
-- Current phase has 0 incomplete plans remaining
+- Active execution target: Phase 26
+- Next required workflow step: execute Phase 26 Plan 02
+- Current phase has 3 plans with 1 completed and 2 remaining
 - Backlog items outside active execution order are tracked in `.planning/BACKLOG.md`
 
 **Notes:**
 
 - Historical per-plan timing metrics from earlier GSD runs were removed during planning hygiene because they no longer matched the active roadmap after renumbering and archival cleanup.
 - Use `ROADMAP.md` progress plus phase directories as the source of truth for current execution state.
-- Latest execution: Phase 25 Plan 03 completed in 10 minutes (2 tasks, 9 files touched).
+- Latest execution: Phase 26 Plan 01 completed in 9 minutes (2 tasks, 11 files touched).
+- Pending execution tail: Phase 26 Plans 02-03 and Phase 27 planning remain.
 
 ## Accumulated Context
 
@@ -173,6 +174,9 @@ Recent decisions affecting current work:
 - [Phase 25]: The old premise-override helper stays only as a deprecated compatibility shim and no longer participates in the live worldgen export surface.
 - [Phase 25]: Phase 25 regressions should prove behavior at three layers: divergence interpretation, prompt assembly, and route/cache reuse.
 - [Phase 25]: Known-IP single-seed generation now computes premise divergence when callers omit the cached artifact so every seed entry point follows the same structured path.
+- [Phase 26]: Reusable worldbooks live under campaigns/_worldbook-library with one immutable record file per normalized content hash plus a lightweight index.json.
+- [Phase 26]: Campaigns persist worldbookSelection as a structured snapshot beside ipContext and premiseDivergence instead of owning reusable records.
+- [Phase 26]: The library import route parses raw JSON first, then lets the manager decide whether classification is needed so duplicate uploads skip reclassification.
 
 ### Roadmap Evolution
 
@@ -189,6 +193,8 @@ Recent decisions affecting current work:
 - Phase 23 added: Unified Research & World Generation Pipeline — single research with cache, feeds both DNA and scaffold
 - Phase 24 added: Worldgen Known IP Quality — canonical DNA/premise/locations/factions/NPCs, key vs supporting NPC tiers, research-grounded lore
 - Phase 25 added: Replace premise-override heuristics with structured divergence interpretation
+- Phase 26 added: Reusable multi-worldbook library for campaign creation
+- Phase 27 added: Lore card editing and deletion
 - Planning hygiene (2026-03-30): ROADMAP/STATE reconciled with completed phase artifacts; legacy superseded E2E phase directories moved out of active `.planning/phases/`
 - Phase 23 completed (2026-03-30): cached IP research pipeline reconciled, regression-tested, and verified against the live codebase
 
@@ -204,6 +210,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-30T07:55:53.982Z
-Stopped at: Completed 25-03-PLAN.md
+Last session: 2026-03-31T05:16:46.554Z
+Stopped at: Completed 26-01-PLAN.md
 Resume file: None
