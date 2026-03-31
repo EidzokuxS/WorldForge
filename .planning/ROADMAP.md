@@ -436,7 +436,14 @@ Plans:
   2. Traits, skills, flaws, role/background, drives, and stateful conditions are separated into meaningful buckets with explicit semantics.
   3. Any flat tags retained for engine/runtime use are derived from the structured profile, not treated as the source of truth.
   4. Existing editing and prompt assembly flows can read the new structure without regressing gameplay/runtime behavior.
-**Plans**: 0 plans
+**Plans**: 5 plans
+
+Plans:
+- [ ] 29-01-PLAN.md -- Shared character contracts, derived runtime tags, and persistence bridge
+- [ ] 29-02-PLAN.md -- Shared draft pipeline for character, NPC, and scaffold writers
+- [ ] 29-03-PLAN.md -- Prompt and engine reader migration to structured character views
+- [ ] 29-04-PLAN.md -- Tool, reflection, and runtime mutation adapters for canonical character data
+- [ ] 29-05-PLAN.md -- Campaign/world payload and frontend editor migration to the shared model
 
 ### Phase 30: Start Conditions, Canonical Loadouts, and Persona Templates
 
