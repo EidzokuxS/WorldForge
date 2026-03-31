@@ -32,6 +32,12 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 23: Unified Research & World Generation Pipeline** - Single research cache feeding DNA and scaffold generation, with sufficiency checks on regeneration (completed 2026-03-30)
 - [x] **Phase 24: Worldgen Known IP Quality** - Canonical DNA/premise/locations/factions/NPCs with butterfly-effect changes, key vs supporting NPC tiers, research-grounded lore (completed 2026-03-25)
 - [x] **Phase 25: Replace premise-override heuristics with structured divergence interpretation** - Structured premise/world divergence interpretation for known-IP generation (completed 2026-03-30)
+- [ ] **Phase 28: Research & Design Synthesis for Character Systems, Prompts, UI, and External References** - Consolidate prompt-engineering research, desktop UI patterns, character-model redesign direction, and Aventuras findings into a cohesive implementation spec
+- [ ] **Phase 29: Unified Character Ontology & Tag System** - Replace flat noisy character tags with a shared structured profile model for player creation, NPC generation, editing, and runtime prompt usage
+- [ ] **Phase 30: Start Conditions, Canonical Loadouts, and Persona Templates** - Make start selection about location plus arrival conditions, derive starting items from canonical scenario state, and introduce reusable base personas for player/NPC generation
+- [ ] **Phase 31: Prompt System Harmonization & Audit** - Audit and refine prompts across worldgen, character, gameplay, and support systems so they operate as one coherent mechanism
+- [ ] **Phase 32: Desktop-First Non-Game UI Overhaul** - Redesign campaign creation, world review, character creation, settings, and other non-game flows for FHD/1440p desktop using Tailwind, shadcn, and compatible libraries only
+- [ ] **Phase 33: Browser E2E Verification for Redesigned Creation Flows** - Validate the new character/world creation, persona, prompt, and UI flows end-to-end in the browser and polish regressions
 
 ## Phase Details
 
@@ -272,7 +278,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order across the active roadmap: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10 -> 11 -> 12 -> 13 -> 14 -> 15 -> 16 -> 17 -> 23 -> 24 -> 25 -> 26 -> 27
+Phases execute in numeric order across the active roadmap: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10 -> 11 -> 12 -> 13 -> 14 -> 15 -> 16 -> 17 -> 23 -> 24 -> 25 -> 26 -> 27 -> 28 -> 29 -> 30 -> 31 -> 32 -> 33
 
 Note: Backlog phases (like 999.1) are tracked separately and are not part of the active execution order. Phase 4 can start after Phase 2. Phases 9-11 can run in any order after their dependencies are met.
 
@@ -300,6 +306,12 @@ Note: Backlog phases (like 999.1) are tracked separately and are not part of the
 | 25. Structured Divergence Interpretation | 3/3 | Complete   | 2026-03-30 |
 | 26. Reusable multi-worldbook library for campaign creation | 3/3 | Complete   | 2026-03-31 |
 | 27. Lore card editing and deletion | 3/3 | Complete   | 2026-03-31 |
+| 28. Research & Design Synthesis | 1/3 | In Progress|  |
+| 29. Unified Character Ontology & Tag System | 0/0 | Not Started | - |
+| 30. Start Conditions, Canonical Loadouts, and Persona Templates | 0/0 | Not Started | - |
+| 31. Prompt System Harmonization & Audit | 0/0 | Not Started | - |
+| 32. Desktop-First Non-Game UI Overhaul | 0/0 | Not Started | - |
+| 33. Browser E2E Verification for Redesigned Creation Flows | 0/0 | Not Started | - |
 
 ### Phase 16: NPC System QA — Three NPC Tiers + World Gen Integration
 
@@ -396,3 +408,80 @@ Plans:
 - [x] 27-01-PLAN.md -- Backend lore item routes + stable-id vector mutation safety
 - [x] 27-02-PLAN.md -- World-review lore edit/delete UI + client helpers
 - [x] 27-03-PLAN.md -- Regression coverage + smoke verification
+
+### Phase 28: Research & Design Synthesis for Character Systems, Prompts, UI, and External References
+
+**Goal:** Build a research-grounded implementation foundation for the next milestone by studying prompt engineering, desktop UI patterns, WorldForge's current prompt/character architecture, and the Aventuras codebase, then synthesize those findings into one coherent redesign direction.
+**Requirements**: P28-01, P28-02, P28-03, P28-04, P28-05, P28-06
+**Depends on:** Phase 27
+**Success Criteria** (what must be TRUE):
+  1. A written synthesis explains what the new shared character model must be, why flat tags are insufficient, and how prompts/UI/runtime should consume the new structure.
+  2. Aventuras is inspected for reusable concepts, patterns, or implementation ideas, with concrete take/do-not-take decisions recorded.
+  3. Desktop UI direction is defined for non-game flows with explicit constraints: FHD/1440p first, Tailwind + shadcn only, no bespoke CSS files.
+  4. Prompt-engineering findings are converted into actionable rules for WorldForge prompt rewrites instead of vague notes.
+**Plans**: 3 plans
+
+Plans:
+- [x] 28-01-PLAN.md -- Character-system audit + canonical ontology/start/persona handoff for Phases 29-30
+- [ ] 28-02-PLAN.md -- Prompt family inventory + rewrite rulebook + Phase 31 handoff
+- [ ] 28-03-PLAN.md -- Aventuras adoption decisions + desktop UI workspace spec + Phase 32-33 handoff
+
+### Phase 29: Unified Character Ontology & Tag System
+
+**Goal:** Replace the current flat character tag pile with a structured character ontology shared by player characters and NPCs, with clear derivation rules for any remaining runtime tags.
+**Requirements**: P29-01, P29-02, P29-03, P29-04, P29-05, P29-06
+**Depends on:** Phase 28
+**Success Criteria** (what must be TRUE):
+  1. Player and NPC generation use the same underlying character profile shape instead of unrelated prompt contracts.
+  2. Traits, skills, flaws, role/background, drives, and stateful conditions are separated into meaningful buckets with explicit semantics.
+  3. Any flat tags retained for engine/runtime use are derived from the structured profile, not treated as the source of truth.
+  4. Existing editing and prompt assembly flows can read the new structure without regressing gameplay/runtime behavior.
+**Plans**: 0 plans
+
+### Phase 30: Start Conditions, Canonical Loadouts, and Persona Templates
+
+**Goal:** Treat character start as a full scenario (location + arrival conditions + canonical situation) and add reusable base personas that can seed both protagonist and NPC creation.
+**Requirements**: P30-01, P30-02, P30-03, P30-04, P30-05, P30-06
+**Depends on:** Phase 29
+**Success Criteria** (what must be TRUE):
+  1. The user can describe how and under what circumstances they enter the world, not just choose a location.
+  2. Starting equipment derives from the resolved starting scenario and canonical baseline, rather than from a detached vibe list.
+  3. Persona templates can be created, stored, selected, and used to generate or parse both player characters and NPCs.
+  4. World and character prompts receive structured start-condition context they can reason about consistently.
+**Plans**: 0 plans
+
+### Phase 31: Prompt System Harmonization & Audit
+
+**Goal:** Audit and rework prompts across WorldForge so generation, interpretation, runtime narration, and character systems behave as one consistent machine.
+**Requirements**: P31-01, P31-02, P31-03, P31-04, P31-05, P31-06
+**Depends on:** Phase 30
+**Success Criteria** (what must be TRUE):
+  1. Character, worldgen, prompt-assembler, runtime, and support prompts follow a coherent shared contract instead of drifting independently.
+  2. Prompts explicitly preserve user-provided facts, constrain structured outputs correctly, and reflect the new character/start-condition model.
+  3. Prompt changes are justified by concrete research findings and verified through targeted regressions or browser/API checks.
+  4. The system no longer contains obviously stale, contradictory, or noise-inducing prompt instructions in critical flows.
+**Plans**: 0 plans
+
+### Phase 32: Desktop-First Non-Game UI Overhaul
+
+**Goal:** Redesign the non-game product surface so campaign creation, world review, character creation, settings, and adjacent flows feel intentional, desktop-first, and production-ready.
+**Requirements**: P32-01, P32-02, P32-03, P32-04, P32-05, P32-06
+**Depends on:** Phase 31
+**Success Criteria** (what must be TRUE):
+  1. Non-game screens are visibly reworked for FHD/1440p desktop usage with better hierarchy, density, workflows, and visual consistency.
+  2. The redesign uses Tailwind, shadcn, and compatible libraries only, with no custom CSS files introduced.
+  3. Character creation and world review especially reflect the new ontology/start/persona systems cleanly.
+  4. The redesign respects existing visual language where appropriate but removes the current broken or clumsy workflow hotspots.
+**Plans**: 0 plans
+
+### Phase 33: Browser E2E Verification for Redesigned Creation Flows
+
+**Goal:** Validate the redesigned prompt, character, persona, start-condition, and UI flows through real browser testing and polish remaining regressions.
+**Requirements**: P33-01, P33-02, P33-03, P33-04
+**Depends on:** Phase 32
+**Success Criteria** (what must be TRUE):
+  1. End-to-end browser tests cover campaign creation, DNA/world generation entry, character creation, persona selection, starting situation resolution, and world review editing on the redesigned UI.
+  2. Bugs discovered during E2E verification are fixed and re-tested in the same phase.
+  3. At least one known-IP flow and one original-world flow are smoke-tested after the redesign.
+  4. The resulting UX feels stable enough to hand back to the user without obvious broken states or blocking regressions.
+**Plans**: 0 plans
