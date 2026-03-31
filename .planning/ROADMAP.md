@@ -298,7 +298,7 @@ Note: Backlog phases (like 999.1) are tracked separately and are not part of the
 | 23. Unified Research & World Generation Pipeline | 2/2 | Complete | 2026-03-30 |
 | 24. Worldgen Known IP Quality | 4/4 | Complete | 2026-03-25 |
 | 25. Structured Divergence Interpretation | 3/3 | Complete   | 2026-03-30 |
-| 26. Reusable multi-worldbook library for campaign creation | 2/3 | In Progress|  |
+| 26. Reusable multi-worldbook library for campaign creation | 3/3 | Complete   | 2026-03-31 |
 | 27. Lore card editing and deletion | 0/0 | Not Started | |
 
 ### Phase 16: NPC System QA — Three NPC Tiers + World Gen Integration
@@ -372,12 +372,12 @@ Plans:
 **Goal:** Campaign creation can reuse and combine multiple processed worldbooks from a local library, with backend-composed generation context and campaign-level source provenance preserved across DNA suggestion and direct world generation.
 **Requirements**: P26-01, P26-02, P26-03, P26-04, P26-05
 **Depends on:** Phase 25
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans complete
 
 Plans:
 - [x] 26-01-PLAN.md -- Reusable library contracts, file-backed storage, and import/list routes
 - [x] 26-02-PLAN.md -- Deterministic backend composition plus campaign/worldgen compatibility
-- [ ] 26-03-PLAN.md -- Wizard multi-source selection UX and frontend migration
+- [x] 26-03-PLAN.md -- Wizard multi-source selection UX and frontend migration
 
 ### Phase 27: Lore card editing and deletion
 
