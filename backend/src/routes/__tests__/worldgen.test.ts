@@ -31,11 +31,13 @@ vi.mock("../../worldgen/worldbook-importer.js", () => ({
   parseWorldBook: vi.fn(),
   classifyEntries: vi.fn(),
   importClassifiedEntries: vi.fn(),
+  worldbookToIpContext: vi.fn(),
 }));
 
 vi.mock("../../worldbook-library/index.js", () => ({
   listWorldbookLibrary: vi.fn(),
   importWorldbookToLibrary: vi.fn(),
+  composeSelectedWorldbooks: vi.fn(),
 }));
 
 vi.mock("../../worldgen/ip-researcher.js", () => ({
@@ -44,6 +46,7 @@ vi.mock("../../worldgen/ip-researcher.js", () => ({
 }));
 
 vi.mock("../../campaign/index.js", () => ({
+  readCampaignConfig: vi.fn(() => ({})),
   markGenerationComplete: vi.fn(),
   saveIpContext: vi.fn(),
   loadIpContext: vi.fn(() => null),
@@ -104,12 +107,15 @@ import {
   parseWorldBook,
   classifyEntries,
   importClassifiedEntries,
+  worldbookToIpContext,
 } from "../../worldgen/worldbook-importer.js";
 import {
   listWorldbookLibrary,
   importWorldbookToLibrary,
+  composeSelectedWorldbooks,
 } from "../../worldbook-library/index.js";
 import {
+  readCampaignConfig,
   markGenerationComplete,
   getActiveCampaign,
   loadCampaign,
@@ -148,8 +154,11 @@ const mockedResolveFallback = vi.mocked(resolveFallbackProvider);
 const mockedParseWorldBook = vi.mocked(parseWorldBook);
 const mockedClassifyEntries = vi.mocked(classifyEntries);
 const mockedImportClassifiedEntries = vi.mocked(importClassifiedEntries);
+const mockedWorldbookToIpContext = vi.mocked(worldbookToIpContext);
 const mockedListWorldbookLibrary = vi.mocked(listWorldbookLibrary);
 const mockedImportWorldbookToLibrary = vi.mocked(importWorldbookToLibrary);
+const mockedComposeSelectedWorldbooks = vi.mocked(composeSelectedWorldbooks);
+const mockedReadCampaignConfig = vi.mocked(readCampaignConfig);
 const mockedGenerateRefinedPremise = vi.mocked(generateRefinedPremiseStep);
 const mockedGenerateLocations = vi.mocked(generateLocationsStep);
 const mockedGenerateFactions = vi.mocked(generateFactionsStep);
@@ -199,6 +208,7 @@ beforeEach(() => {
     seeds: { geography: "Mountains" },
     createdAt: "2026-01-01",
   } as any);
+  mockedReadCampaignConfig.mockReturnValue({} as any);
 });
 
 // ---------------------------------------------------------------------------
@@ -336,6 +346,90 @@ describe("POST /api/worldgen/suggest-seeds", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body._premiseDivergence).toEqual(premiseDivergence);
+  });
+
+  it("composes selected reusable worldbooks on the backend when selectedWorldbooks is present", async () => {
+    const selectedWorldbooks = [
+      {
+        id: "wb-alpha",
+        displayName: "Alpha Archive",
+        normalizedSourceHash: "hash-alpha",
+        entryCount: 12,
+        createdAt: 1700000000000,
+        updatedAt: 1700000001000,
+      },
+    ];
+    const ipContext = {
+      franchise: "Alpha Archive",
+      keyFacts: ["Captain Mira: A decorated sky captain."],
+      tonalNotes: ["Lightning oaths bind all captains."],
+      source: "llm" as const,
+    };
+
+    mockedComposeSelectedWorldbooks.mockReturnValue({
+      ipContext,
+      worldbookSelection: selectedWorldbooks,
+      provenance: { sources: selectedWorldbooks, groups: [] },
+    } as any);
+    mockedSuggestWorldSeeds.mockResolvedValue({ seeds: { geography: "Sky mesas" } } as any);
+
+    const res = await app.request("/api/worldgen/suggest-seeds", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ selectedWorldbooks }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(mockedComposeSelectedWorldbooks).toHaveBeenCalledWith(selectedWorldbooks);
+    expect(mockedSuggestWorldSeeds).toHaveBeenCalledWith(
+      expect.objectContaining({
+        premise: "A world based on the Alpha Archive setting",
+        ipContext,
+      }),
+    );
+  });
+
+  it("falls back to legacy worldbookEntries when reusable selections are absent", async () => {
+    const ipContext = {
+      franchise: "Legacy Book",
+      keyFacts: ["Captain Mira: A decorated sky captain."],
+      tonalNotes: ["Custom worldbook setting"],
+      source: "llm" as const,
+    };
+
+    mockedWorldbookToIpContext.mockReturnValue(ipContext as any);
+    mockedSuggestWorldSeeds.mockResolvedValue({ seeds: { geography: "Sky mesas" } } as any);
+
+    const res = await app.request("/api/worldgen/suggest-seeds", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Legacy Book",
+        worldbookEntries: [
+          {
+            name: "Captain Mira",
+            type: "character",
+            summary: "A decorated sky captain.",
+          },
+        ],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(mockedComposeSelectedWorldbooks).not.toHaveBeenCalled();
+    expect(mockedWorldbookToIpContext).toHaveBeenCalledWith(
+      [
+        {
+          name: "Captain Mira",
+          type: "character",
+          summary: "A decorated sky captain.",
+        },
+      ],
+      "Legacy Book",
+    );
+    expect(mockedSuggestWorldSeeds).toHaveBeenCalledWith(
+      expect.objectContaining({ ipContext }),
+    );
   });
 });
 
@@ -576,6 +670,61 @@ describe("POST /api/worldgen/generate", () => {
       expect.any(Function),
     );
     expect(mockedSaveIpContext).toHaveBeenCalledWith(CAMPAIGN_ID, enrichedIpContext);
+  });
+
+  it("rebuilds ipContext from saved worldbook selection when cache is empty", async () => {
+    const worldbookSelection = [
+      {
+        id: "wb-alpha",
+        displayName: "Alpha Archive",
+        normalizedSourceHash: "hash-alpha",
+        entryCount: 12,
+        createdAt: 1700000000000,
+        updatedAt: 1700000001000,
+      },
+    ];
+    const composedIpContext = {
+      franchise: "Alpha Archive",
+      keyFacts: ["Captain Mira: A decorated sky captain."],
+      tonalNotes: ["Lightning oaths bind all captains."],
+      source: "llm" as const,
+    };
+
+    mockedReadCampaignConfig.mockReturnValue({ worldbookSelection } as any);
+    mockedComposeSelectedWorldbooks.mockReturnValue({
+      ipContext: composedIpContext,
+      worldbookSelection,
+      provenance: { sources: worldbookSelection, groups: [] },
+    } as any);
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "A skyfaring campaign",
+        locations: [
+          { name: "Sunspire", description: "Trade city", tags: [], isStarting: true, connectedTo: [] },
+        ],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+
+    expect(mockedReadCampaignConfig).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(mockedComposeSelectedWorldbooks).toHaveBeenCalledWith(worldbookSelection);
+    expect(mockedSaveIpContext).toHaveBeenCalledWith(CAMPAIGN_ID, composedIpContext);
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({ ipContext: composedIpContext }),
+      expect.any(Function),
+    );
   });
 
   it("loads cached premiseDivergence when request body omits it and reuses it for generation", async () => {

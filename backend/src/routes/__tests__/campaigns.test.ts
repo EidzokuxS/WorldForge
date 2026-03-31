@@ -225,6 +225,42 @@ describe("POST /api/campaigns", () => {
     );
   });
 
+  it("passes worldbookSelection through to createCampaign when provided", async () => {
+    mockedCreate.mockResolvedValue({ id: CAMPAIGN_ID, name: "Test" } as any);
+    const worldbookSelection = [
+      {
+        id: "wb-alpha",
+        displayName: "Alpha Archive",
+        normalizedSourceHash: "hash-alpha",
+        entryCount: 12,
+        createdAt: 1700000000000,
+        updatedAt: 1700000001000,
+      },
+    ];
+
+    const res = await app.request("/api/campaigns", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Test",
+        premise: "A premise",
+        worldbookSelection,
+      }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(mockedCreate).toHaveBeenCalledWith(
+      "Test",
+      "A premise",
+      undefined,
+      {
+        ipContext: undefined,
+        premiseDivergence: undefined,
+        worldbookSelection,
+      },
+    );
+  });
+
   it("returns 400 for empty name (whitespace only)", async () => {
     const res = await app.request("/api/campaigns", {
       method: "POST",
