@@ -1,11 +1,48 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Search, Upload } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { Loader2, Pencil, Search, Trash2, Upload } from "lucide-react";
+import {
+  deleteLoreCardById,
+  searchLore,
+  updateLoreCard,
+  type LoreCardItem,
+} from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { searchLore, type LoreCardItem } from "@/lib/api";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  LORE_CARD_CATEGORIES,
+  type LoreCardCategory,
+  type LoreCardUpdateInput,
+} from "@/lib/api-types";
 import { WorldBookImportDialog } from "./worldbook-import-dialog";
 
 interface LoreSectionProps {
@@ -14,7 +51,7 @@ interface LoreSectionProps {
   onRefresh?: () => void;
 }
 
-const CATEGORY_LABELS: Record<string, string> = {
+const CATEGORY_LABELS: Record<LoreCardCategory, string> = {
   location: "Locations",
   npc: "Characters",
   faction: "Factions",
@@ -25,25 +62,44 @@ const CATEGORY_LABELS: Record<string, string> = {
   event: "Events",
 };
 
-const CATEGORY_ORDER = [
-  "concept",
-  "rule",
-  "location",
-  "faction",
-  "npc",
-  "ability",
-  "item",
-  "event",
-];
+function defaultEditPayload(card: LoreCardItem): LoreCardUpdateInput {
+  return {
+    term: card.term,
+    definition: card.definition,
+    category: normalizeCategory(card.category),
+  };
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Lore update failed.";
+}
+
+function normalizeCategory(category: string): LoreCardCategory {
+  return (LORE_CARD_CATEGORIES as readonly string[]).includes(category)
+    ? (category as LoreCardCategory)
+    : "concept";
+}
 
 export function LoreSection({ cards: initialCards, campaignId, onRefresh }: LoreSectionProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<LoreCardItem[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [pendingCardId, setPendingCardId] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<"edit" | "delete" | null>(null);
+  const [cardErrors, setCardErrors] = useState<Record<string, string>>({});
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingCard, setEditingCard] = useState<LoreCardItem | null>(null);
+  const [editPayload, setEditPayload] = useState<LoreCardUpdateInput | null>(null);
+  const [editError, setEditError] = useState("");
+  const [deleteCandidate, setDeleteCandidate] = useState<LoreCardItem | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const displayCards = results ?? initialCards;
+  const isCardPending = useCallback(
+    (cardId: string) => pendingCardId === cardId,
+    [pendingCardId],
+  );
 
   const handleQueryChange = useCallback(
     (value: string) => {
@@ -77,17 +133,106 @@ export function LoreSection({ cards: initialCards, campaignId, onRefresh }: Lore
     };
   }, []);
 
+  const clearCardError = useCallback((cardId: string) => {
+    setCardErrors((current) => {
+      if (!(cardId in current)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[cardId];
+      return next;
+    });
+  }, []);
+
+  const beginEdit = useCallback(
+    (card: LoreCardItem) => {
+      clearCardError(card.id);
+      setEditError("");
+      setEditingCard(card);
+      setEditPayload(defaultEditPayload(card));
+      setEditOpen(true);
+    },
+    [clearCardError],
+  );
+
+  const beginDelete = useCallback(
+    (card: LoreCardItem) => {
+      clearCardError(card.id);
+      setDeleteCandidate(card);
+    },
+    [clearCardError],
+  );
+
+  const handleEditOpenChange = useCallback((open: boolean) => {
+    setEditOpen(open);
+    if (!open && pendingAction !== "edit") {
+      setEditingCard(null);
+      setEditPayload(null);
+      setEditError("");
+    }
+  }, [pendingAction]);
+
+  const refreshCards = useCallback(async () => {
+    setResults(null);
+    await onRefresh?.();
+  }, [onRefresh]);
+
+  const handleEditSave = useCallback(async () => {
+    if (!editingCard || !editPayload) return;
+
+    setPendingCardId(editingCard.id);
+    setPendingAction("edit");
+    clearCardError(editingCard.id);
+    setEditError("");
+
+    try {
+      await updateLoreCard(campaignId, editingCard.id, editPayload);
+      await refreshCards();
+      setEditOpen(false);
+      setEditingCard(null);
+      setEditPayload(null);
+    } catch (error) {
+      const message = getErrorMessage(error);
+      setCardErrors((current) => ({ ...current, [editingCard.id]: message }));
+      setEditError(message);
+    } finally {
+      setPendingCardId(null);
+      setPendingAction(null);
+    }
+  }, [campaignId, clearCardError, editPayload, editingCard, refreshCards]);
+
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!deleteCandidate) return;
+    const targetCard = deleteCandidate;
+
+    setPendingCardId(targetCard.id);
+    setPendingAction("delete");
+    clearCardError(targetCard.id);
+    setDeleteCandidate(null);
+
+    try {
+      await deleteLoreCardById(campaignId, targetCard.id);
+      await refreshCards();
+    } catch (error) {
+      const message = getErrorMessage(error);
+      setCardErrors((current) => ({ ...current, [targetCard.id]: message }));
+    } finally {
+      setPendingCardId(null);
+      setPendingAction(null);
+    }
+  }, [campaignId, clearCardError, deleteCandidate, refreshCards]);
+
   const grouped = useMemo(() => {
-    const groups: Record<string, LoreCardItem[]> = {};
+    const groups: Partial<Record<LoreCardCategory, LoreCardItem[]>> = {};
     for (const card of displayCards) {
-      const cat = card.category || "concept";
+      const cat = normalizeCategory(card.category);
       if (!groups[cat]) groups[cat] = [];
       groups[cat].push(card);
     }
-    return CATEGORY_ORDER.filter((cat) => groups[cat]?.length).map((cat) => ({
+    return LORE_CARD_CATEGORIES.filter((cat) => groups[cat]?.length).map((cat) => ({
       category: cat,
       label: CATEGORY_LABELS[cat] ?? cat,
-      items: groups[cat],
+      items: groups[cat] ?? [],
     }));
   }, [displayCards]);
 
@@ -129,6 +274,132 @@ export function LoreSection({ cards: initialCards, campaignId, onRefresh }: Lore
         onComplete={() => onRefresh?.()}
       />
 
+      <Dialog open={editOpen} onOpenChange={handleEditOpenChange}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Lore Card</DialogTitle>
+            <DialogDescription>
+              Update the term, definition, and category for this lore card.
+            </DialogDescription>
+          </DialogHeader>
+          {editingCard && editPayload ? (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="lore-edit-term">Term</Label>
+                <Input
+                  id="lore-edit-term"
+                  value={editPayload.term}
+                  onChange={(event) =>
+                    setEditPayload((current) => current
+                      ? { ...current, term: event.target.value }
+                      : current)
+                  }
+                  disabled={isCardPending(editingCard.id)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="lore-edit-definition">Definition</Label>
+                <Textarea
+                  id="lore-edit-definition"
+                  value={editPayload.definition}
+                  onChange={(event) =>
+                    setEditPayload((current) => current
+                      ? { ...current, definition: event.target.value }
+                      : current)
+                  }
+                  rows={5}
+                  disabled={isCardPending(editingCard.id)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="lore-edit-category">Category</Label>
+                <Select
+                  value={editPayload.category}
+                  onValueChange={(value: LoreCardCategory) =>
+                    setEditPayload((current) => current
+                      ? { ...current, category: value }
+                      : current)
+                  }
+                  disabled={isCardPending(editingCard.id)}
+                >
+                  <SelectTrigger id="lore-edit-category" aria-label="Category" className="w-full">
+                    <SelectValue placeholder="Choose a category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {LORE_CARD_CATEGORIES.map((category) => (
+                      <SelectItem key={category} value={category}>
+                        {CATEGORY_LABELS[category]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {editError ? (
+                <p className="text-sm text-destructive" role="alert">
+                  {editError}
+                </p>
+              ) : null}
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => handleEditOpenChange(false)}
+                  disabled={isCardPending(editingCard.id)}
+                >
+                  Cancel
+                </Button>
+                <Button onClick={() => void handleEditSave()} disabled={isCardPending(editingCard.id)}>
+                  {isCardPending(editingCard.id) && pendingAction === "edit" ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    "Save Changes"
+                  )}
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={deleteCandidate !== null}
+        onOpenChange={(open: boolean) => {
+          if (!open && pendingAction !== "delete") {
+            setDeleteCandidate(null);
+          }
+        }}
+      >
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Lore Card</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteCandidate
+                ? `Delete "${deleteCandidate.term}" from this campaign's lore?`
+                : "Delete this lore card?"}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteCandidate ? isCardPending(deleteCandidate.id) : false}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={(event: MouseEvent<HTMLButtonElement>) => {
+                event.preventDefault();
+                void handleDeleteConfirm();
+              }}
+              disabled={deleteCandidate ? isCardPending(deleteCandidate.id) : false}
+            >
+              {deleteCandidate && isCardPending(deleteCandidate.id) && pendingAction === "delete"
+                ? "Deleting..."
+                : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {displayCards.length === 0 ? (
         <p className="py-4 text-center text-sm italic text-muted-foreground">
           No lore cards available
@@ -160,6 +431,45 @@ export function LoreSection({ cards: initialCards, campaignId, onRefresh }: Lore
                     <p className="text-xs leading-relaxed text-muted-foreground">
                       {card.definition}
                     </p>
+                    <div className="mt-3 flex items-center justify-between gap-2">
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2 text-xs"
+                          aria-label={`Edit ${card.term}`}
+                          disabled={isCardPending(card.id)}
+                          onClick={() => beginEdit(card)}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          Edit
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+                          aria-label={isCardPending(card.id) && pendingAction === "delete"
+                            ? `Deleting ${card.term}`
+                            : `Delete ${card.term}`}
+                          disabled={isCardPending(card.id)}
+                          onClick={() => beginDelete(card)}
+                        >
+                          {isCardPending(card.id) && pendingAction === "delete" ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5" />
+                          )}
+                          {isCardPending(card.id) && pendingAction === "delete" ? "Deleting..." : "Delete"}
+                        </Button>
+                      </div>
+                    </div>
+                    {cardErrors[card.id] ? (
+                      <p className="mt-2 text-xs text-destructive" role="alert">
+                        {cardErrors[card.id]}
+                      </p>
+                    ) : null}
                   </div>
                 ))}
               </div>

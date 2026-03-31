@@ -123,7 +123,7 @@ export interface LoreCardItem {
   id: string;
   term: string;
   definition: string;
-  category: LoreCardCategory;
+  category: string;
 }
 
 export interface ScaffoldLocation {
