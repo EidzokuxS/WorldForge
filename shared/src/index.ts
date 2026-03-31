@@ -16,6 +16,8 @@ export type {
   WorldSeeds,
   SeedCategory,
   IpResearchContext,
+  WorldbookLibraryItemSummary,
+  CampaignWorldbookSelection,
   CampaignMeta,
   PlayerCharacter,
 } from "./types.js";

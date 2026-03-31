@@ -5,6 +5,7 @@ import { closeDb, connectDb } from "../db/index.js";
 import { runMigrations } from "../db/migrate.js";
 import { campaigns } from "../db/schema.js";
 import type {
+  CampaignWorldbookSelection,
   CampaignMeta,
   IpResearchContext,
   PremiseDivergence,
@@ -26,6 +27,7 @@ type CampaignConfigFile = {
   seeds?: WorldSeeds;
   ipContext?: IpResearchContext;
   premiseDivergence?: PremiseDivergence;
+  worldbookSelection?: CampaignWorldbookSelection[];
   generationComplete?: boolean;
   currentTick?: number;
   createdAt: number;
@@ -63,6 +65,9 @@ export function readCampaignConfig(campaignId: string): CampaignConfigFile {
     seeds: parseWorldSeeds(parsed.seeds) ?? undefined,
     ipContext: parsed.ipContext ?? undefined,
     premiseDivergence: parsed.premiseDivergence ?? undefined,
+    worldbookSelection: Array.isArray(parsed.worldbookSelection)
+      ? parsed.worldbookSelection
+      : undefined,
     generationComplete: Boolean(parsed.generationComplete),
     currentTick: typeof parsed.currentTick === "number" ? parsed.currentTick : undefined,
     createdAt: parsed.createdAt,
@@ -81,7 +86,7 @@ export function listCampaigns(): CampaignMeta[] {
 
   const entries = fs
     .readdirSync(CAMPAIGNS_DIR, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory());
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("_"));
 
   const campaignsList: CampaignMeta[] = [];
 
@@ -112,6 +117,7 @@ export async function createCampaign(
   initialContext?: {
     ipContext?: IpResearchContext | null;
     premiseDivergence?: PremiseDivergence | null;
+    worldbookSelection?: CampaignWorldbookSelection[] | null;
   },
 ): Promise<CampaignMeta> {
   const trimmedName = name.trim();
@@ -153,6 +159,7 @@ export async function createCampaign(
       seeds,
       ipContext: initialContext?.ipContext ?? undefined,
       premiseDivergence: initialContext?.premiseDivergence ?? undefined,
+      worldbookSelection: initialContext?.worldbookSelection ?? undefined,
       generationComplete: false,
       createdAt: now,
       updatedAt: now,

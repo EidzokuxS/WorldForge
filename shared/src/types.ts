@@ -104,6 +104,22 @@ export interface IpResearchContext {
   source: "mcp" | "llm";
 }
 
+/**
+ * Reusable processed worldbook metadata exposed to selection flows.
+ * The backing record stays outside campaigns; campaigns only store a snapshot.
+ */
+export interface WorldbookLibraryItemSummary {
+  id: string;
+  displayName: string;
+  normalizedSourceHash: string;
+  entryCount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Snapshot of the reusable worldbook sources selected for a campaign. */
+export interface CampaignWorldbookSelection extends WorldbookLibraryItemSummary {}
+
 export type ChatRole = "user" | "assistant" | "system";
 
 export interface ChatMessage {
