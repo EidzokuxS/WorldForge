@@ -306,7 +306,7 @@ Note: Backlog phases (like 999.1) are tracked separately and are not part of the
 | 25. Structured Divergence Interpretation | 3/3 | Complete   | 2026-03-30 |
 | 26. Reusable multi-worldbook library for campaign creation | 3/3 | Complete   | 2026-03-31 |
 | 27. Lore card editing and deletion | 3/3 | Complete   | 2026-03-31 |
-| 28. Research & Design Synthesis | 1/3 | In Progress|  |
+| 28. Research & Design Synthesis | 2/3 | In Progress|  |
 | 29. Unified Character Ontology & Tag System | 0/0 | Not Started | - |
 | 30. Start Conditions, Canonical Loadouts, and Persona Templates | 0/0 | Not Started | - |
 | 31. Prompt System Harmonization & Audit | 0/0 | Not Started | - |
@@ -423,7 +423,7 @@ Plans:
 
 Plans:
 - [x] 28-01-PLAN.md -- Character-system audit + canonical ontology/start/persona handoff for Phases 29-30
-- [ ] 28-02-PLAN.md -- Prompt family inventory + rewrite rulebook + Phase 31 handoff
+- [x] 28-02-PLAN.md -- Prompt family inventory + rewrite rulebook + Phase 31 handoff
 - [ ] 28-03-PLAN.md -- Aventuras adoption decisions + desktop UI workspace spec + Phase 32-33 handoff
 
 ### Phase 29: Unified Character Ontology & Tag System

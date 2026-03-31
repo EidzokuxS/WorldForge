@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Phase complete — ready for verification
-stopped_at: Completed 27-03-PLAN.md
-last_updated: "2026-03-31T21:33:22.274Z"
+stopped_at: Completed 28-02-PLAN.md
+last_updated: "2026-03-31T21:37:03.870Z"
 progress:
   total_phases: 28
   completed_phases: 22
   total_plans: 64
-  completed_plans: 62
+  completed_plans: 63
 ---
 
 # Project State
@@ -190,6 +190,9 @@ Recent decisions affecting current work:
 - [Phase 27]: LoreCardUpdateInput stays narrowed to canonical categories while LoreCardItem reads remain string-typed for compatibility with existing callers and fixtures.
 - [Phase 27]: Added a repo-root Vitest alias config so the plan's exact npm --prefix verification command resolves frontend @/ imports correctly.
 - [Phase 27]: Reused the existing 'Voices of the Void' campaign as the smoke target because it already had working lore search and more than two lore cards.
+- [Phase 28]: Phase 31 must audit prompt families by task boundary, not treat the prompt system as one monolith.
+- [Phase 28]: Prompt rewrites must consume structured character and start-condition fields before any derived runtime tags.
+- [Phase 28]: Runtime, character, and worldgen prompt families should centralize shared contract fragments instead of repeating contradictory copies.
 
 ### Roadmap Evolution
 
@@ -222,6 +225,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-31T10:59:34.043Z
-Stopped at: Completed 27-03-PLAN.md
+Last session: 2026-03-31T21:37:03.786Z
+Stopped at: Completed 28-02-PLAN.md
 Resume file: None
