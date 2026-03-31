@@ -1,4 +1,13 @@
 export {
+  composeSelectedWorldbooks,
+  composeWorldbookLibraryRecords,
+} from "./composition.js";
+export type {
+  ComposeWorldbookSelectionResult,
+  WorldbookCompositionContribution,
+  WorldbookCompositionGroup,
+} from "./composition.js";
+export {
   listWorldbookLibrary,
   loadWorldbookLibraryRecord,
   importWorldbookToLibrary,

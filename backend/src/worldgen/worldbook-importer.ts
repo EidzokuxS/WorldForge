@@ -44,6 +44,62 @@ export interface ImportResult {
   };
 }
 
+const WORLDBOOK_ENTRY_TYPE_ORDER: Record<WorldBookEntryType, number> = {
+  character: 0,
+  location: 1,
+  faction: 2,
+  bestiary: 3,
+  lore_general: 4,
+};
+
+function normalizeEntryText(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function normalizeEntityName(value: string): string {
+  return normalizeEntryText(value).toLocaleLowerCase("en-US");
+}
+
+export function getClassifiedEntryEntityKey(entry: Pick<ClassifiedEntry, "type" | "name">): string {
+  return `${entry.type}:${normalizeEntityName(entry.name)}`;
+}
+
+export function sortClassifiedEntriesForWorldContext<T extends ClassifiedEntry>(
+  entries: T[],
+): T[] {
+  return [...entries].sort((left, right) => {
+    const typeCompare =
+      WORLDBOOK_ENTRY_TYPE_ORDER[left.type] - WORLDBOOK_ENTRY_TYPE_ORDER[right.type];
+    if (typeCompare !== 0) {
+      return typeCompare;
+    }
+
+    const entityKeyCompare = getClassifiedEntryEntityKey(left).localeCompare(
+      getClassifiedEntryEntityKey(right),
+      "en",
+      { sensitivity: "base" },
+    );
+    if (entityKeyCompare !== 0) {
+      return entityKeyCompare;
+    }
+
+    const nameCompare = normalizeEntryText(left.name).localeCompare(
+      normalizeEntryText(right.name),
+      "en",
+      { sensitivity: "base" },
+    );
+    if (nameCompare !== 0) {
+      return nameCompare;
+    }
+
+    return normalizeEntryText(left.summary).localeCompare(
+      normalizeEntryText(right.summary),
+      "en",
+      { sensitivity: "base" },
+    );
+  });
+}
+
 // ───── Zod schema for WorldBook JSON validation ─────
 
 const worldBookEntrySchema = z
@@ -251,15 +307,16 @@ export function worldbookToIpContext(
   entries: ClassifiedEntry[],
   worldbookName: string,
 ): IpResearchContext {
-  const characters = entries.filter((e) => e.type === "character");
-  const locs = entries.filter((e) => e.type === "location");
-  const facs = entries.filter((e) => e.type === "faction");
-  const loreEntries = entries.filter(
+  const sortedEntries = sortClassifiedEntriesForWorldContext(entries);
+  const characters = sortedEntries.filter((e) => e.type === "character");
+  const locs = sortedEntries.filter((e) => e.type === "location");
+  const facs = sortedEntries.filter((e) => e.type === "faction");
+  const loreEntries = sortedEntries.filter(
     (e) => e.type === "bestiary" || e.type === "lore_general",
   );
 
   // Build key facts from ALL entries — each becomes a fact
-  const keyFacts = entries.map((e) => `${e.name}: ${e.summary}`);
+  const keyFacts = sortedEntries.map((e) => `${normalizeEntryText(e.name)}: ${normalizeEntryText(e.summary)}`);
 
   // Tonal notes from lore_general entries (world rules, atmosphere)
   const tonalNotes = loreEntries
