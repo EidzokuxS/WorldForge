@@ -277,6 +277,18 @@ export const saveEditsSchema = z.object({
   }),
 });
 
+export const loreCardUpdateSchema = z.object({
+  term: z
+    .string()
+    .transform((value) => value.trim())
+    .pipe(z.string().min(1, "term is required.")),
+  definition: z
+    .string()
+    .transform((value) => value.trim())
+    .pipe(z.string().min(1, "definition is required.")),
+  category: z.enum(LORE_CATEGORIES),
+});
+
 // --- Character save schema ---
 
 export const saveCharacterSchema = z.object({
