@@ -26,24 +26,37 @@ import {
   getAllLoreCards,
   deleteCampaignLore,
   storeLoreCards,
+  updateLoreCard,
+  deleteLoreCardById,
 } from "../lore-cards.js";
 
-function createMockDb(hasTable = false) {
+function createMockDb({
+  hasTable = false,
+  queryRows = [],
+  vectorRows = [],
+}: {
+  hasTable?: boolean;
+  queryRows?: Record<string, unknown>[];
+  vectorRows?: Record<string, unknown>[];
+} = {}) {
+  const mockQuery = {
+    select: vi.fn().mockReturnThis(),
+    toArray: vi.fn().mockResolvedValue(queryRows),
+  };
   const mockTable = {
     vectorSearch: vi.fn().mockReturnThis(),
     distanceType: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
-    toArray: vi.fn().mockResolvedValue([]),
-    query: vi.fn().mockReturnValue({
-      select: vi.fn().mockReturnThis(),
-      toArray: vi.fn().mockResolvedValue([]),
-    }),
+    toArray: vi.fn().mockResolvedValue(vectorRows),
+    query: vi.fn().mockReturnValue(mockQuery),
+    delete: vi.fn().mockResolvedValue(undefined),
   };
   return {
     tableNames: vi.fn().mockResolvedValue(hasTable ? ["lore_cards"] : []),
     createTable: vi.fn().mockResolvedValue(mockTable),
     dropTable: vi.fn().mockResolvedValue(undefined),
     openTable: vi.fn().mockResolvedValue(mockTable),
+    _mockQuery: mockQuery,
     _mockTable: mockTable,
   };
 }
@@ -56,10 +69,11 @@ const fakeCards = [
 describe("insertLoreCards", () => {
   beforeEach(() => {
     mockGetVectorDb.mockReset();
+    mockEmbedTexts.mockReset();
   });
 
   it("creates table with rows including vectors", async () => {
-    const db = createMockDb(false);
+    const db = createMockDb();
     mockGetVectorDb.mockReturnValue(db);
 
     await insertLoreCards(fakeCards, [[0.1, 0.2], [0.3, 0.4]]);
@@ -71,7 +85,7 @@ describe("insertLoreCards", () => {
   });
 
   it("drops existing table before creating", async () => {
-    const db = createMockDb(true);
+    const db = createMockDb({ hasTable: true });
     mockGetVectorDb.mockReturnValue(db);
 
     await insertLoreCards(fakeCards, [[0.1], [0.2]]);
@@ -87,7 +101,7 @@ describe("insertLoreCardsWithoutVectors", () => {
   });
 
   it("creates table without vector field", async () => {
-    const db = createMockDb(false);
+    const db = createMockDb();
     mockGetVectorDb.mockReturnValue(db);
 
     await insertLoreCardsWithoutVectors(fakeCards);
@@ -103,7 +117,7 @@ describe("searchLoreCards", () => {
   });
 
   it("returns empty array when table does not exist", async () => {
-    const db = createMockDb(false);
+    const db = createMockDb();
     mockGetVectorDb.mockReturnValue(db);
 
     const result = await searchLoreCards([0.1, 0.2]);
@@ -111,7 +125,12 @@ describe("searchLoreCards", () => {
   });
 
   it("performs vector search with cosine distance", async () => {
-    const db = createMockDb(true);
+    const db = createMockDb({
+      hasTable: true,
+      vectorRows: [
+        { id: "1", term: "Ironhaven", definition: "City.", category: "location", vector: [0.1] },
+      ],
+    });
     db._mockTable.toArray.mockResolvedValueOnce([
       { id: "1", term: "Ironhaven", definition: "City.", category: "location", vector: [0.1] },
     ]);
@@ -131,7 +150,7 @@ describe("getAllLoreCards", () => {
   });
 
   it("returns empty array when table does not exist", async () => {
-    const db = createMockDb(false);
+    const db = createMockDb();
     mockGetVectorDb.mockReturnValue(db);
 
     const result = await getAllLoreCards();
@@ -145,7 +164,7 @@ describe("deleteCampaignLore", () => {
   });
 
   it("drops table when it exists", async () => {
-    const db = createMockDb(true);
+    const db = createMockDb({ hasTable: true });
     mockGetVectorDb.mockReturnValue(db);
 
     await deleteCampaignLore();
@@ -153,7 +172,7 @@ describe("deleteCampaignLore", () => {
   });
 
   it("does nothing when table does not exist", async () => {
-    const db = createMockDb(false);
+    const db = createMockDb();
     mockGetVectorDb.mockReturnValue(db);
 
     await deleteCampaignLore();
@@ -173,7 +192,7 @@ describe("storeLoreCards", () => {
   });
 
   it("stores without vectors when embedder not resolved", async () => {
-    const db = createMockDb(false);
+    const db = createMockDb();
     mockGetVectorDb.mockReturnValue(db);
 
     await storeLoreCards(
@@ -186,7 +205,7 @@ describe("storeLoreCards", () => {
   });
 
   it("embeds and stores when embedder is resolved", async () => {
-    const db = createMockDb(false);
+    const db = createMockDb();
     mockGetVectorDb.mockReturnValue(db);
     mockEmbedTexts.mockResolvedValueOnce([[0.5, 0.6]]);
 
@@ -200,7 +219,7 @@ describe("storeLoreCards", () => {
   });
 
   it("falls back to no-vectors when embedding fails", async () => {
-    const db = createMockDb(false);
+    const db = createMockDb();
     mockGetVectorDb.mockReturnValue(db);
     mockEmbedTexts.mockRejectedValueOnce(new Error("embed failed"));
 
@@ -210,5 +229,114 @@ describe("storeLoreCards", () => {
     );
 
     expect(db.createTable).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("updateLoreCard", () => {
+  beforeEach(() => {
+    mockGetVectorDb.mockReset();
+    mockEmbedTexts.mockReset();
+  });
+
+  it("preserves ids and refreshes embeddings on edit", async () => {
+    const db = createMockDb({
+      hasTable: true,
+      queryRows: [
+        { id: "1", term: "Ironhaven", definition: "A fortified city.", category: "location" },
+        { id: "2", term: "The Crown", definition: "A noble faction.", category: "faction" },
+      ],
+    });
+    mockGetVectorDb.mockReturnValue(db);
+    mockEmbedTexts.mockResolvedValueOnce([[0.9, 0.1], [0.2, 0.8]]);
+
+    const updated = await updateLoreCard(
+      "1",
+      {
+        term: "New Ironhaven",
+        definition: "A rebuilt fortress-city.",
+        category: "location",
+      },
+      {
+        resolved: {
+          provider: {
+            id: "embedder",
+            name: "Embedder",
+            baseUrl: "http://localhost",
+            apiKey: "key",
+            model: "embed-model",
+          },
+          temperature: 0,
+          maxTokens: 512,
+        },
+      },
+    );
+
+    expect(updated).toEqual({
+      id: "1",
+      term: "New Ironhaven",
+      definition: "A rebuilt fortress-city.",
+      category: "location",
+    });
+    expect(mockEmbedTexts).toHaveBeenCalledWith(
+      [
+        "New Ironhaven: A rebuilt fortress-city.",
+        "The Crown: A noble faction.",
+      ],
+      expect.objectContaining({ model: "embed-model" }),
+    );
+    expect(db.dropTable).toHaveBeenCalledWith("lore_cards");
+    expect(db.createTable).toHaveBeenCalledTimes(1);
+    expect(db.createTable.mock.calls[0][1]).toEqual([
+      {
+        id: "1",
+        term: "New Ironhaven",
+        definition: "A rebuilt fortress-city.",
+        category: "location",
+        vector: [0.9, 0.1],
+      },
+      {
+        id: "2",
+        term: "The Crown",
+        definition: "A noble faction.",
+        category: "faction",
+        vector: [0.2, 0.8],
+      },
+    ]);
+  });
+
+  it("fails edit when embedder is unavailable", async () => {
+    await expect(() =>
+      updateLoreCard(
+        "1",
+        {
+          term: "New Ironhaven",
+          definition: "A rebuilt fortress-city.",
+          category: "location",
+        },
+        { error: "no embedder", status: 400 as const },
+      ),
+    ).rejects.toThrow("Embedder not configured. Lore edits require fresh embeddings.");
+  });
+});
+
+describe("deleteLoreCardById", () => {
+  beforeEach(() => {
+    mockGetVectorDb.mockReset();
+  });
+
+  it("deletes only the targeted lore card", async () => {
+    const db = createMockDb({
+      hasTable: true,
+      queryRows: [
+        { id: "1" },
+        { id: "2" },
+      ],
+    });
+    mockGetVectorDb.mockReturnValue(db);
+
+    const deleted = await deleteLoreCardById("1");
+
+    expect(deleted).toBe(true);
+    expect(db._mockTable.delete).toHaveBeenCalledWith("id = '1'");
   });
 });

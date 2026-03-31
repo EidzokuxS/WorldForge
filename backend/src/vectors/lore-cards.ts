@@ -32,6 +32,20 @@ export interface LoreCardRow {
 
 const TABLE_NAME = "lore_cards";
 
+export interface LoreCardUpdateInput {
+  term: string;
+  definition: string;
+  category: LoreCategory;
+}
+
+function buildEmbeddingText(card: Pick<LoreCard, "term" | "definition">): string {
+  return `${card.term}: ${card.definition}`;
+}
+
+function escapeTableString(value: string): string {
+  return value.replaceAll("'", "''");
+}
+
 export async function insertLoreCards(
   cards: Omit<LoreCard, "vector">[],
   embeddings: number[][]
@@ -125,6 +139,59 @@ export async function deleteCampaignLore(): Promise<void> {
   if (tableNames.includes(TABLE_NAME)) {
     await db.dropTable(TABLE_NAME);
   }
+}
+
+export async function updateLoreCard(
+  cardId: string,
+  updates: LoreCardUpdateInput,
+  embedderResult: ResolveResult,
+): Promise<Omit<LoreCard, "vector"> | null> {
+  if (!("resolved" in embedderResult)) {
+    throw new Error("Embedder not configured. Lore edits require fresh embeddings.");
+  }
+
+  const currentCards = await getAllLoreCards();
+  const targetIndex = currentCards.findIndex((card) => card.id === cardId);
+  if (targetIndex === -1) {
+    return null;
+  }
+
+  const nextCards = currentCards.map((card, index) =>
+    index === targetIndex
+      ? {
+          id: card.id,
+          term: updates.term,
+          definition: updates.definition,
+          category: updates.category,
+        }
+      : card,
+  );
+
+  const embeddings = await embedTexts(
+    nextCards.map((card) => buildEmbeddingText(card)),
+    embedderResult.resolved.provider,
+  );
+
+  await insertLoreCards(nextCards, embeddings);
+  return nextCards[targetIndex] ?? null;
+}
+
+export async function deleteLoreCardById(cardId: string): Promise<boolean> {
+  const db = getVectorDb();
+  const tableNames = await db.tableNames();
+  if (!tableNames.includes(TABLE_NAME)) {
+    return false;
+  }
+
+  const table = await db.openTable(TABLE_NAME);
+  const existingRows = await table.query().select(["id"]).toArray();
+  const exists = existingRows.some((row) => String(row.id) === cardId);
+  if (!exists) {
+    return false;
+  }
+
+  await table.delete(`id = '${escapeTableString(cardId)}'`);
+  return true;
 }
 
 /**
