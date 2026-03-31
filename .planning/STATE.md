@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 26-01-PLAN.md
-last_updated: "2026-03-31T05:16:46.558Z"
+stopped_at: Completed 26-02-PLAN.md
+last_updated: "2026-03-31T05:27:59.957Z"
 progress:
   total_phases: 22
   completed_phases: 20
   total_plans: 58
-  completed_plans: 56
+  completed_plans: 57
 ---
 
 # Project State
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-03-18)
 ## Current Position
 
 Phase: 26 (Reusable multi-worldbook library for campaign creation) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 
 ## Performance Metrics
 
@@ -34,22 +34,22 @@ Plan: 2 of 3
 - Completed phases: 20
 - Planned or in-progress phases: 2
 - Total plans tracked: 58
-- Completed plans: 56
-- Pending plans: 2
+- Completed plans: 57
+- Pending plans: 1
 
 **Open Work:**
 
 - Active execution target: Phase 26
-- Next required workflow step: execute Phase 26 Plan 02
-- Current phase has 3 plans with 1 completed and 2 remaining
+- Next required workflow step: execute Phase 26 Plan 03
+- Current phase has 3 plans with 2 completed and 1 remaining
 - Backlog items outside active execution order are tracked in `.planning/BACKLOG.md`
 
 **Notes:**
 
 - Historical per-plan timing metrics from earlier GSD runs were removed during planning hygiene because they no longer matched the active roadmap after renumbering and archival cleanup.
 - Use `ROADMAP.md` progress plus phase directories as the source of truth for current execution state.
-- Latest execution: Phase 26 Plan 01 completed in 9 minutes (2 tasks, 11 files touched).
-- Pending execution tail: Phase 26 Plans 02-03 and Phase 27 planning remain.
+- Latest execution: Phase 26 Plan 02 completed in 6 minutes (2 tasks, 9 files touched).
+- Pending execution tail: Phase 26 Plan 03 and Phase 27 planning remain.
 
 ## Accumulated Context
 
@@ -177,6 +177,9 @@ Recent decisions affecting current work:
 - [Phase 26]: Reusable worldbooks live under campaigns/_worldbook-library with one immutable record file per normalized content hash plus a lightweight index.json.
 - [Phase 26]: Campaigns persist worldbookSelection as a structured snapshot beside ipContext and premiseDivergence instead of owning reusable records.
 - [Phase 26]: The library import route parses raw JSON first, then lets the manager decide whether classification is needed so duplicate uploads skip reclassification.
+- [Phase 26]: Reusable worldbooks are composed only on the backend, with deterministic source and entity sorting.
+- [Phase 26]: Route contracts stay additive: selectedWorldbooks/worldbookSelection are new inputs while legacy worldbookEntries remains valid.
+- [Phase 26]: World generation rebuilds ipContext from saved worldbookSelection before any franchise research fallback.
 
 ### Roadmap Evolution
 
@@ -210,6 +213,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-31T05:16:46.554Z
-Stopped at: Completed 26-01-PLAN.md
+Last session: 2026-03-31T05:27:59.953Z
+Stopped at: Completed 26-02-PLAN.md
 Resume file: None
