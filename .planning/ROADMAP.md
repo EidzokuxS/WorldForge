@@ -36,7 +36,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 29: Unified Character Ontology & Tag System** - Replace flat noisy character tags with a shared structured profile model for player creation, NPC generation, editing, and runtime prompt usage (implementation is present across all 5 plans; only unrestricted verification/green closeout is still pending)
 - [ ] **Phase 30: Start Conditions, Canonical Loadouts, and Persona Templates** - Make start selection about location plus arrival conditions, derive starting items from canonical scenario state, and introduce reusable base personas for player/NPC generation (implementation pass completed in worktree on 2026-04-01; formal closeout still blocked by `.git` ACL denial plus sandbox `spawn EPERM`)
 - [x] **Phase 31: Prompt System Harmonization & Audit** - Audit and refine prompts across worldgen, character, gameplay, and support systems so they operate as one coherent mechanism (completed 2026-04-01)
-- [ ] **Phase 32: Desktop-First Non-Game UI Overhaul** - Redesign campaign creation, world review, character creation, settings, and other non-game flows for FHD/1440p desktop using Tailwind, shadcn, and compatible libraries only
+- [x] **Phase 32: Desktop-First Non-Game UI Overhaul** - Redesign campaign creation, world review, character creation, settings, and other non-game flows for FHD/1440p desktop using Tailwind, shadcn, and compatible libraries only (completed 2026-04-01)
 - [ ] **Phase 33: Browser E2E Verification for Redesigned Creation Flows** - Validate the new character/world creation, persona, prompt, and UI flows end-to-end in the browser and polish regressions
 
 ## Phase Details
@@ -310,7 +310,7 @@ Note: Backlog phases (like 999.1) are tracked separately and are not part of the
 | 29. Unified Character Ontology & Tag System | 2/5 committed (+3 implemented, 5/5 coded) | Closeout Pending | - |
 | 30. Start Conditions, Canonical Loadouts, and Persona Templates | 0/6 committed (+6 implemented) | Closeout Pending | - |
 | 31. Prompt System Harmonization & Audit | 7/7 | Complete   | 2026-04-01 |
-| 32. Desktop-First Non-Game UI Overhaul | 1/6 | In Progress|  |
+| 32. Desktop-First Non-Game UI Overhaul | 6/6 | Complete   | 2026-04-01 |
 | 33. Browser E2E Verification for Redesigned Creation Flows | 0/0 | Not Started | - |
 
 ### Phase 16: NPC System QA — Three NPC Tiers + World Gen Integration
@@ -503,11 +503,11 @@ Plans:
 
 Plans:
 - [x] 32-00-PLAN.md -- Wave 0 prerequisite gate for the current Phase 29/30 worktree baseline
-- [ ] 32-01-PLAN.md -- Shared non-game shell foundation, route-group layout, and shadcn shell primitives
-- [ ] 32-02-PLAN.md -- Routed launcher plus `/campaign/new` and `/campaign/new/dna` creation workspaces
-- [ ] 32-03-PLAN.md -- Shell adoption for `/settings` plus canonical `/library` workspace
-- [ ] 32-04-PLAN.md -- Desktop world-review workspace on canonical campaign route plus legacy redirect cleanup
-- [ ] 32-05-PLAN.md -- Desktop character-authoring workspace plus legacy redirect and `/game` compatibility guard
+- [x] 32-01-PLAN.md -- Shared non-game shell foundation, route-group layout, and shadcn shell primitives
+- [x] 32-02-PLAN.md -- Routed launcher plus `/campaign/new` and `/campaign/new/dna` creation workspaces
+- [x] 32-03-PLAN.md -- Shell adoption for `/settings` plus canonical `/library` workspace
+- [x] 32-04-PLAN.md -- Desktop world-review workspace on canonical campaign route plus legacy redirect cleanup
+- [x] 32-05-PLAN.md -- Desktop character-authoring workspace plus legacy redirect and `/game` compatibility guard
 
 ### Phase 33: Browser E2E Verification for Redesigned Creation Flows
 

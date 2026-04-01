@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Phase 32 Wave 0 baseline NO-GO; Phase 29/30 closeout blockers must be resolved before UI work
-stopped_at: Completed 32-00-PLAN.md with NO-GO baseline gate
-last_updated: "2026-04-01T16:04:47.805Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 32-05-PLAN.md
+last_updated: "2026-04-01T16:53:05.644Z"
 progress:
   total_phases: 28
-  completed_phases: 26
+  completed_phases: 27
   total_plans: 88
-  completed_plans: 83
+  completed_plans: 88
 ---
 
 # Project State
@@ -19,42 +19,42 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-18)
 
 **Core value:** The LLM is the narrator, never the engine. All mechanical outcomes are resolved by backend code.
-**Current focus:** Phase 32 stopped at the Wave 0 baseline gate; formal Phase 29/30 closeout blockers must be resolved before any UI route or shell work begins.
+**Current focus:** Phase 32 is complete on the current worktree; the next execution target is Phase 33 browser verification for the redesigned non-game flows.
 
 ## Current Position
 
-Phase: 32 (desktop-first-non-game-ui-overhaul) — BLOCKED AT WAVE 0
-Plan: 1 of 6 complete (`32-00` closed out as NO-GO)
+Phase: 32 (desktop-first-non-game-ui-overhaul) — COMPLETE
+Plan: 6 of 6 complete (`32-00` through `32-05`)
 
 ## Performance Metrics
 
 **Current Snapshot:**
 
 - Active roadmap phases: 28
-- Completed phases: 24
-- Planned or in-progress phases: 4
-- Total plans tracked: 82
-- Completed plans: 71
-- Pending plans: 11
+- Completed phases: 27
+- Planned or in-progress phases: 1
+- Total plans tracked: 88
+- Completed plans: 88
+- Pending plans: 0
 
 **Open Work:**
 
-- Active execution target: resolve the failing Phase 29/30 prerequisite regressions captured by Phase 32 Wave 0
-- Next required workflow step: fix the recorded state-snapshot, campaigns/character route, and frontend DOM-environment regressions, then rerun `32-00`
-- Current phase queue remains Phase 29 closure, Phase 30 formal closeout, Phase 32 UI overhaul, and Phase 33 browser verification, but Phase 32 cannot advance past Wave 0 yet
+- Active execution target: begin Phase 33 browser verification on top of the completed Phase 32 desktop shell migration
+- Next required workflow step: run browser E2E validation for launcher, campaign creation, world review, character creation, and legacy-route redirects on the new shell routes
+- Phase 29 and Phase 30 formal closeout still remain separate bookkeeping work, but they no longer block the Phase 32 UI output on the current baseline
 - Backlog items outside active execution order are tracked in `.planning/BACKLOG.md`
 
 **Notes:**
 
 - Historical per-plan timing metrics from earlier GSD runs were removed during planning hygiene because they no longer matched the active roadmap after renumbering and archival cleanup.
 - Use `ROADMAP.md` progress plus phase directories as the source of truth for current execution state.
-- Latest execution: Phase 32 plan `32-00` completed on 2026-04-01 and produced `32-BASELINE-CLOSEOUT.md` with `Status: NO-GO`.
+- Latest execution: Phase 32 plans `32-00` through `32-05` completed on 2026-04-01; `32-BASELINE-CLOSEOUT.md` now records `Status: GO`.
 - Phase 29 execution started on 2026-04-01. Plans 29-01 and 29-02 are complete and committed.
 - Plans 29-03 and 29-04 still have their canonical runtime/runtime-mutation implementations in the worktree; targeted backend TypeScript filtering remained clean during the 2026-04-01 resume pass, but unrestricted Vitest and green commits are still pending.
 - Plan 29-05 was resumed on 2026-04-01 and the remaining editor migration was completed in worktree: character pages now store `CharacterDraft`, the character card edits grouped draft fields, and the NPC review section edits draft-backed NPCs while preserving scaffold compatibility.
 - Phase 30 implementation pass on 2026-04-01 added shared contract types, backend start/loadout/template seams, campaign-scoped persona template routes, frontend API wiring, player editor controls, and NPC review persona plumbing directly in the worktree.
 - Phase 31 added shared prompt contracts plus harmonized runtime, character, worldgen, NPC/reflection, Oracle, and world-engine wording without touching Phase 32 UI scope or browser E2E work.
-- Phase 32 Wave 0 replay showed the earlier sandbox `spawn EPERM` issue is gone, but the prerequisite suites are still red in the current worktree: `state-snapshot.test.ts`, `campaigns.test.ts`, `character.test.ts`, and the targeted frontend DOM-based suites.
+- The prerequisite backend and frontend targeted suites that blocked Wave 0 were rerun successfully during the Phase 32 resume pass, unblocking the UI overhaul.
 
 ## Accumulated Context
 
@@ -202,6 +202,9 @@ Recent decisions affecting current work:
 - [Phase 31]: Support prompt audits preserve narrow task boundaries: Oracle stays deterministic, world-engine stays macro-concrete, and NPC/reflection prompts stay canonical-state-first.
 - [Phase 32]: Phase 32 stops at Wave 0 when the prerequisite Phase 29/30 regression bundle is red.
 - [Phase 32]: Baseline blockers are documented, not worked around, because the approved plan makes 32-00 a strict gate.
+- [Phase 32]: Phase 32 owns all non-game desktop flows through a shared (non-game) shell while leaving /game structurally separate.
+- [Phase 32]: Legacy /world-review and /character-creation pages are redirect-only compatibility stubs once canonical shell routes exist.
+- [Phase 32]: Character and review redesigns must stay on the existing CharacterDraft, persona-template, and loadout seams instead of introducing parallel UI models.
 
 ### Roadmap Evolution
 
@@ -230,12 +233,12 @@ Recent decisions affecting current work:
 
 ### Blockers/Concerns
 
-- Phase 32 Wave 0 baseline is NO-GO: `backend/src/engine/__tests__/state-snapshot.test.ts` fails on the canonical snapshot payload (`playerCharacterRecord`, `playerDerivedTags`).
-- `backend/src/routes/__tests__/campaigns.test.ts` and `backend/src/routes/__tests__/character.test.ts` still fail targeted Phase 29/30 route regressions.
-- The targeted frontend prerequisite command is running without a DOM environment, so React Testing Library suites fail with `document is not defined` and `userEvent.setup()` document-preparation errors.
+- Phase 33 browser verification has not started yet; the redesigned non-game flows are only regression-covered at the Vitest level so far.
+- Phase 29 and Phase 30 still need their separate formal closeout and unrestricted verification work, even though the specific prerequisite bundle for Phase 32 is now green.
+- Repo-root Vitest still emits a non-blocking `environmentMatchGlobs` deprecation warning during frontend verification.
 
 ## Session Continuity
 
-Last session: 2026-04-01T16:03:54.412Z
-Stopped at: Completed 32-00-PLAN.md with NO-GO baseline gate
+Last session: 2026-04-01T16:52:39.653Z
+Stopped at: Completed 32-05-PLAN.md
 Resume file: None
