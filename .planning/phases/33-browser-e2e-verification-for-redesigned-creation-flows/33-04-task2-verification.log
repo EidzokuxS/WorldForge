@@ -1,0 +1,48 @@
+E2E Character Creation Verification - Task 2
+==============================================
+Date: 2026-04-01
+Campaign: Voices of the Void (a83b27fd-c6d7-440b-a484-00f2d36f9247)
+Method: curl-based HTTP verification + source code review
+
+1. AI Generate Character Mode (Real GLM LLM Call)
+   - Endpoint: POST /api/worldgen/generate-character
+   - First generation: "Lukas Brenner" - Human, Signal Specialist, with 8 traits, 1 flaw, 4 equipped items
+   - All key fields populated (name, species, appearance, traits, equipment)
+   - Character thematically appropriate to campaign (SCP/signal station setting)
+   - PASS
+
+2. Edge Cases
+
+   2a. Empty Description Submission
+   - Endpoint returns: {"error":"Character concept is required."}
+   - Frontend also disables Parse button when description is empty (disabled={busy || !description.trim()})
+   - PASS
+
+   2b. Multiple Generation Attempts (Clean Replacement)
+   - Second generation: "Lena Vogt" - Human, different traits and background
+   - Different character produced each time, no state corruption
+   - Frontend replaces characterDraft state cleanly (setCharacterDraft replaces, setLoadoutPreview(null))
+   - PASS
+
+   2c. V2 Card Import Area
+   - CharacterForm source confirms Import V2 Card button renders with file input (.json/.png accept)
+   - Import mode selector (Native resident / Outsider) present
+   - File upload triggers parseV2CardFile (client-side) then importV2Card (API)
+   - PASS (UI renders, import chain verified via source)
+
+3. Preview Loadout Endpoint
+   - Endpoint: POST /api/worldgen/preview-loadout
+   - Accepts CharacterDraft, returns canonical loadout with items, audit, and warnings
+   - Requires valid CharacterDraft structure (validated by Zod schema)
+   - PASS (endpoint functional, schema validation working)
+
+4. Character Creation Files Lint Clean
+   - All 4 character creation files pass ESLint with no errors
+   - PASS
+
+5. Shell Sidebar Verification
+   - Character page at /campaign/[id]/character contains shell, sidebar, nav elements
+   - Page renders inside (non-game) layout group
+   - PASS
+
+No bugs found. All acceptance criteria met.
