@@ -85,4 +85,28 @@ describe("WorldReviewPage", () => {
     expect(screen.getByText("Review Summary").closest("[data-shell-surface='panel']")).not.toBeNull();
     expect(screen.getByRole("button", { name: "Continue to Character Creation" }).closest("[data-shell-region='action-tray']")).not.toBeNull();
   });
+
+  it("blocks world review when the campaign is not generation-ready", async () => {
+    mockedLoadCampaign.mockResolvedValue({
+      id: "campaign-1",
+      name: "Arcadia",
+      premise: "A world",
+      generationComplete: false,
+    } as never);
+
+    await act(async () => {
+      render(
+        <Suspense fallback={<div>Loading route...</div>}>
+          <WorldReviewPage params={Promise.resolve({ id: "campaign-1" })} />
+        </Suspense>,
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("World generation required")).toBeInTheDocument();
+    });
+
+    expect(mockedGetWorldData).not.toHaveBeenCalled();
+    expect(screen.queryByText("Review Summary")).not.toBeInTheDocument();
+  });
 });

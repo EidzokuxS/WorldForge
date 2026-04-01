@@ -81,4 +81,23 @@ describe("CharacterCreationPage", () => {
     expect(screen.getByText("Draft Summary").closest("[data-shell-surface='panel']")).not.toBeNull();
     expect(screen.getByRole("button", { name: "Begin Adventure" }).closest("[data-shell-region='action-tray']")).not.toBeNull();
   });
+
+  it("blocks character creation when the backend reports world generation is not ready", async () => {
+    mockedLoadCampaign.mockResolvedValue({
+      id: "campaign-1",
+      name: "Arcadia",
+      premise: "A world",
+      generationComplete: true,
+    } as never);
+    mockedGetWorldData.mockRejectedValue(new Error("World generation not complete yet."));
+
+    await renderPage("campaign-1");
+
+    await waitFor(() => {
+      expect(screen.getByText("World generation required")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId("character-form")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Begin Adventure" })).not.toBeInTheDocument();
+  });
 });
