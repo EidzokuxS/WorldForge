@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -28,6 +29,18 @@ import { Button } from "@/components/ui/button";
 
 type BusyState = "idle" | "loading" | "parsing" | "generating" | "importing" | "saving";
 
+function isGenerationRequiredError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("generation") &&
+    (message.includes("required") || message.includes("not ready") || message.includes("not complete"))
+  );
+}
+
 export default function CharacterCreationPage(props: { params: Promise<{ id: string }> }) {
   const { id: campaignId } = use(props.params);
   const router = useRouter();
@@ -36,6 +49,7 @@ export default function CharacterCreationPage(props: { params: Promise<{ id: str
   const [personaTemplates, setPersonaTemplates] = useState<PersonaTemplateSummary[]>([]);
   const [busy, setBusy] = useState<BusyState>("loading");
   const [characterDraft, setCharacterDraft] = useState<CharacterDraft | null>(null);
+  const [generationRequired, setGenerationRequired] = useState(false);
   const [resolvingStart, setResolvingStart] = useState(false);
   const [previewingLoadout, setPreviewingLoadout] = useState(false);
   const [loadoutPreview, setLoadoutPreview] = useState<LoadoutPreviewResult | null>(null);
@@ -44,11 +58,21 @@ export default function CharacterCreationPage(props: { params: Promise<{ id: str
   useEffect(() => {
     async function loadData() {
       try {
-        await loadCampaign(campaignId);
+        const campaign = await loadCampaign(campaignId);
+        if (!campaign.generationComplete) {
+          setGenerationRequired(true);
+          return;
+        }
+
         const world = await getWorldData(campaignId);
         setLocationNames(world.locations.map((location) => location.name));
         setPersonaTemplates(world.personaTemplates);
       } catch (error) {
+        if (isGenerationRequiredError(error)) {
+          setGenerationRequired(true);
+          return;
+        }
+
         toast.error("Failed to load world data", {
           description: error instanceof Error ? error.message : "Unknown error",
         });
@@ -205,6 +229,27 @@ export default function CharacterCreationPage(props: { params: Promise<{ id: str
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (generationRequired) {
+    return (
+      <div className="rounded-[var(--shell-radius-panel)] border [border-color:var(--shell-border)] bg-card/80 p-6 shadow-xl shadow-black/10">
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-blood">
+              Campaign Readiness
+            </p>
+            <h2 className="font-serif text-3xl text-bone">World generation required</h2>
+          </div>
+          <p className="max-w-2xl text-sm text-muted-foreground">
+            Finish generating this campaign before starting character creation. The character workspace unlocks after the world scaffold is ready.
+          </p>
+          <Button asChild size="lg">
+            <Link href="/campaign/new">Return to Creation Flow</Link>
+          </Button>
+        </div>
       </div>
     );
   }

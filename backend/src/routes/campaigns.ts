@@ -11,12 +11,20 @@ import {
   listCheckpoints,
   loadCheckpoint,
   deleteCheckpoint,
+  readCampaignConfig,
 } from "../campaign/index.js";
 import { getDb } from "../db/index.js";
 import { factions, items, locations, npcs, players, relationships } from "../db/schema.js";
 import { getErrorMessage, getErrorStatus } from "../lib/index.js";
-import { parseBody, requireActiveCampaign, requireLoadedCampaign } from "./helpers.js";
+import { parseBody, requireActiveCampaign, requireGeneratedCampaign } from "./helpers.js";
 import { createCampaignSchema, createCheckpointSchema, promoteNpcBodySchema } from "./schemas.js";
+import {
+  hydrateStoredNpcRecord,
+  hydrateStoredPlayerRecord,
+  toCharacterDraft,
+  toLegacyNpcDraft,
+  toLegacyPlayerCharacter,
+} from "../character/record-adapters.js";
 
 const app = new Hono();
 
@@ -69,7 +77,7 @@ app.get("/:id/world", async (c) => {
     const id = c.req.param("id");
     assertSafeId(id);
 
-    const activeCampaign = await requireLoadedCampaign(c, id);
+    const activeCampaign = await requireGeneratedCampaign(c, id);
     if (activeCampaign instanceof Response) return activeCampaign;
 
     const db = getDb();
@@ -101,13 +109,33 @@ app.get("/:id/world", async (c) => {
       .from(items)
       .where(eq(items.campaignId, id))
       .all();
+    const playerRow = worldPlayer[0] ?? null;
+    const playerRecord = playerRow ? hydrateStoredPlayerRecord(playerRow) : null;
+    const playerDraft = playerRecord ? toCharacterDraft(playerRecord) : null;
+    const personaTemplates = readCampaignConfig(id).personaTemplates ?? [];
 
     return c.json({
       locations: worldLocations,
-      npcs: worldNpcs,
+      npcs: worldNpcs.map((row) => {
+        const record = hydrateStoredNpcRecord(row);
+        return {
+          ...row,
+          characterRecord: record,
+          draft: toCharacterDraft(record),
+          npc: toLegacyNpcDraft(record),
+        };
+      }),
       factions: worldFactions,
       relationships: worldRelationships,
-      player: worldPlayer[0] ?? null,
+      player: playerRow && playerRecord
+        ? {
+            ...playerRow,
+            characterRecord: playerRecord,
+            draft: playerDraft,
+            character: toLegacyPlayerCharacter(playerRecord),
+          }
+        : null,
+      personaTemplates,
       items: worldItems,
     });
   } catch (error) {

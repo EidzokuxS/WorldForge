@@ -32,7 +32,19 @@ interface AppShellProps {
   stickyDescription?: string;
 }
 
-function describeRoute(pathname: string) {
+interface RouteDescription {
+  eyebrow: string;
+  title: string;
+  description: string;
+  inspectorTitle: string;
+  inspectorDescription: string;
+  stickyTitle: string;
+  stickyDescription: string;
+  stickyActions?: React.ReactNode;
+  suppressDefaultStickyAction?: boolean;
+}
+
+function describeRoute(pathname: string): RouteDescription {
   if (pathname === "/") {
     return {
       eyebrow: "Launch",
@@ -64,6 +76,7 @@ function describeRoute(pathname: string) {
       inspectorDescription: "Selected sources, research state, and handoff expectations stay visible as you move through the flow.",
       stickyTitle: "Creation Flow",
       stickyDescription: "Complete concept and DNA steps, then generate into the canonical review route.",
+      suppressDefaultStickyAction: true,
     };
   }
 
@@ -142,6 +155,7 @@ export function AppShell({
 }: AppShellProps) {
   const pathname = usePathname();
   const route = describeRoute(pathname);
+  const resolvedStickyActions = stickyActions ?? route.stickyActions;
 
   return (
     <SidebarProvider>
@@ -191,11 +205,11 @@ export function AppShell({
                     description={stickyDescription ?? route.stickyDescription}
                   >
                     <div className="flex flex-wrap justify-end gap-2">
-                      {stickyActions ?? route.stickyActions ?? (
+                      {resolvedStickyActions ?? (route.suppressDefaultStickyAction ? null : (
                         <Button asChild size="sm" variant="outline">
                           <Link href="/campaign/new">Open Creation Flow</Link>
                         </Button>
-                      )}
+                      ))}
                     </div>
                   </ShellActionTray>
                 </main>

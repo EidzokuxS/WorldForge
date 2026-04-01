@@ -56,7 +56,12 @@ beforeEach(() => {
 
 describe("WorldReviewPage", () => {
   it("pins Gap 1 review navigation, summary, and action tray to shared shell primitives", async () => {
-    mockedLoadCampaign.mockResolvedValue({ id: "campaign-1", name: "Arcadia", premise: "A world" } as never);
+    mockedLoadCampaign.mockResolvedValue({
+      id: "campaign-1",
+      name: "Arcadia",
+      premise: "A world",
+      generationComplete: true,
+    } as never);
     mockedGetWorldData.mockResolvedValue({ locations: [], factions: [], npcs: [], relationships: [] } as never);
     mockedGetLoreCards.mockResolvedValue([]);
     mockedToEditableScaffold.mockReturnValue({

@@ -66,7 +66,12 @@ beforeEach(() => {
 
 describe("CharacterCreationPage", () => {
   it("pins Gap 1 character navigation, summary, and action tray to shared shell primitives", async () => {
-    mockedLoadCampaign.mockResolvedValue({ id: "campaign-1", name: "Arcadia", premise: "A world" } as never);
+    mockedLoadCampaign.mockResolvedValue({
+      id: "campaign-1",
+      name: "Arcadia",
+      premise: "A world",
+      generationComplete: true,
+    } as never);
     mockedGetWorldData.mockResolvedValue({ locations: [], factions: [], npcs: [], relationships: [], personaTemplates: [] } as never);
 
     await renderPage("campaign-1");

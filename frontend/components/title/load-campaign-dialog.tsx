@@ -133,8 +133,7 @@ export function LoadCampaignDialog({ onLoaded }: LoadCampaignDialogProps) {
               {sortedCampaigns.map((campaign) => (
                 <Card
                   key={campaign.id}
-                  className="cursor-pointer transition-colors hover:bg-accent/30"
-                  onClick={() => handleLoadCampaign(campaign.id)}
+                  className="transition-colors hover:bg-accent/10"
                 >
                   <CardHeader className="pb-2">
                     <CardTitle className="text-base">{campaign.name}</CardTitle>

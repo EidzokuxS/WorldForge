@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { BookOpen, Compass, Library, Settings2, Sword } from "lucide-react";
+import { useCampaignStatus } from "@/components/non-game-shell/campaign-status-provider";
 
 import {
   Sidebar,
@@ -26,10 +27,14 @@ interface NavItem {
   match: (pathname: string) => boolean;
 }
 
-function getCampaignRoutes(pathname: string): NavItem[] {
-  const match = pathname.match(/^\/campaign\/([^/]+)/);
-  const campaignId = match?.[1];
-  if (!campaignId) {
+function getCampaignId(pathname: string): string | null {
+  const match = pathname.match(/^\/campaign\/(?!new(?:\/|$))([^/]+)/);
+  return match?.[1] ?? null;
+}
+
+function getCampaignRoutes(pathname: string, generationReady: boolean): NavItem[] {
+  const campaignId = getCampaignId(pathname);
+  if (!campaignId || !generationReady) {
     return [];
   }
 
@@ -53,6 +58,7 @@ function getCampaignRoutes(pathname: string): NavItem[] {
 }
 
 export function AppSidebar({ pathname }: AppSidebarProps) {
+  const { loading, generationReady } = useCampaignStatus();
   const primaryItems: NavItem[] = [
     {
       href: "/",
@@ -80,7 +86,8 @@ export function AppSidebar({ pathname }: AppSidebarProps) {
     },
   ];
 
-  const campaignItems = getCampaignRoutes(pathname);
+  const campaignItems = getCampaignRoutes(pathname, generationReady);
+  const routeCampaignId = getCampaignId(pathname);
 
   return (
     <Sidebar className="h-full w-full border-0 bg-transparent supports-[backdrop-filter]:bg-transparent">
@@ -112,24 +119,32 @@ export function AppSidebar({ pathname }: AppSidebarProps) {
             })}
           </SidebarMenu>
         </SidebarGroup>
-        {campaignItems.length > 0 ? (
+        {routeCampaignId ? (
           <SidebarGroup className="mt-6">
             <SidebarGroupLabel>Campaign</SidebarGroupLabel>
-            <SidebarMenu>
-              {campaignItems.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <SidebarMenuItem key={item.href}>
-                    <SidebarMenuButton asChild isActive={item.match(pathname)}>
-                      <Link href={item.href}>
-                        <Icon className="h-4 w-4" />
-                        <span>{item.label}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
+            {campaignItems.length > 0 ? (
+              <SidebarMenu>
+                {campaignItems.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <SidebarMenuItem key={item.href}>
+                      <SidebarMenuButton asChild isActive={item.match(pathname)}>
+                        <Link href={item.href}>
+                          <Icon className="h-4 w-4" />
+                          <span>{item.label}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            ) : (
+              <p className="px-3 text-xs text-muted-foreground">
+                {loading
+                  ? "Checking world readiness..."
+                  : "World Review and Character unlock after generation completes."}
+              </p>
+            )}
           </SidebarGroup>
         ) : null}
       </SidebarContent>

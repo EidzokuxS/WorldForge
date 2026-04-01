@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -28,6 +29,18 @@ import { NpcsSection } from "@/components/world-review/npcs-section";
 import { PremiseSection } from "@/components/world-review/premise-section";
 import { ReviewWorkspace } from "@/components/world-review/review-workspace";
 
+function isGenerationRequiredError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("generation") &&
+    (message.includes("required") || message.includes("not ready") || message.includes("not complete"))
+  );
+}
+
 export default function WorldReviewPage(props: { params: Promise<{ id: string }> }) {
   const { id: campaignId } = use(props.params);
   const router = useRouter();
@@ -35,6 +48,7 @@ export default function WorldReviewPage(props: { params: Promise<{ id: string }>
   const [scaffold, setScaffold] = useState<EditableScaffold | null>(null);
   const [loreCards, setLoreCards] = useState<LoreCardItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [generationRequired, setGenerationRequired] = useState(false);
   const [saving, setSaving] = useState(false);
   const [regenerating, setRegenerating] = useState<string | null>(null);
 
@@ -42,6 +56,11 @@ export default function WorldReviewPage(props: { params: Promise<{ id: string }>
     async function loadData() {
       try {
         const campaign = await loadCampaign(campaignId);
+        if (!campaign.generationComplete) {
+          setGenerationRequired(true);
+          return;
+        }
+
         const [world, lore] = await Promise.all([
           getWorldData(campaignId),
           getLoreCards(campaignId).catch(() => [] as LoreCardItem[]),
@@ -51,6 +70,11 @@ export default function WorldReviewPage(props: { params: Promise<{ id: string }>
         setScaffold(editableScaffold);
         setLoreCards(lore);
       } catch (error) {
+        if (isGenerationRequiredError(error)) {
+          setGenerationRequired(true);
+          return;
+        }
+
         toast.error("Failed to load world data", {
           description: error instanceof Error ? error.message : "Unknown error",
         });
@@ -141,6 +165,27 @@ export default function WorldReviewPage(props: { params: Promise<{ id: string }>
     return (
       <div className="flex min-h-[50vh] items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (generationRequired) {
+    return (
+      <div className="rounded-[var(--shell-radius-panel)] border [border-color:var(--shell-border)] bg-card/80 p-6 shadow-xl shadow-black/10">
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-blood">
+              Campaign Readiness
+            </p>
+            <h2 className="font-serif text-3xl text-bone">World generation required</h2>
+          </div>
+          <p className="max-w-2xl text-sm text-muted-foreground">
+            Finish generating this campaign before opening World Review. The review workspace unlocks once the scaffold and world data are available.
+          </p>
+          <Button asChild size="lg">
+            <Link href="/campaign/new">Return to Creation Flow</Link>
+          </Button>
+        </div>
       </div>
     );
   }

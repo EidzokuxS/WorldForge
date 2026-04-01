@@ -378,6 +378,7 @@ describe("GET /:id/world", () => {
       id: CAMPAIGN_ID,
       name: "Test",
       createdAt: "2026-01-01",
+      generationComplete: true,
     } as any);
 
     const mockAll = vi.fn();
@@ -429,6 +430,7 @@ describe("GET /:id/world", () => {
       id: CAMPAIGN_ID,
       name: "Test",
       createdAt: "2026-01-01",
+      generationComplete: true,
     } as any);
 
     const mockAll = vi.fn();
@@ -471,6 +473,7 @@ describe("GET /:id/world", () => {
       id: CAMPAIGN_ID,
       name: "Recovered",
       createdAt: "2026-01-01",
+      generationComplete: true,
     } as any);
 
     const mockAll = vi.fn();
