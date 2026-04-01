@@ -1,0 +1,54 @@
+E2E Character Creation Verification - Task 1
+==============================================
+Date: 2026-04-01
+Campaign: Voices of the Void (a83b27fd-c6d7-440b-a484-00f2d36f9247)
+Method: curl-based HTTP verification (PinchTab unavailable due to remote Chrome network isolation)
+
+1. Character Creation Page Renders Inside Shell
+   - URL: /campaign/a83b27fd-c6d7-440b-a484-00f2d36f9247/character
+   - HTTP Status: 200 (38KB response)
+   - Shell elements present: sidebar, nav, shell, layout
+   - Page elements: "Input Methods", "Structured Draft"
+   - PASS
+
+2. Review Page Links to Character Creation
+   - URL: /campaign/a83b27fd-c6d7-440b-a484-00f2d36f9247/review
+   - Contains href="/campaign/a83b27fd-c6d7-440b-a484-00f2d36f9247/character"
+   - PASS
+
+3. Character Description Parsing (Real LLM Call via GLM)
+   - Endpoint: POST /api/worldgen/parse-character
+   - Input: "A grizzled former soldier turned wandering healer..."
+   - Result: CharacterDraft with 9 sections (identity, profile, socialContext, motivations, capabilities, state, loadout, startConditions, provenance)
+   - Generated name: "Karl" (varied across calls: also "Heinrich", "Konrad")
+   - Species: Human
+   - Traits: ["Former Soldier", "Wandering Healer", "Field Medic", "Herbalist", "War Haunted", "Scarred Veteran", "Self Sufficient", "Cautious"]
+   - Equipment: ["Worn Medical Kit", "Short Blade"]
+   - HP: 4
+   - PASS
+
+4. Starting Location Resolution (Real LLM Call)
+   - Endpoint: POST /api/worldgen/resolve-starting-location
+   - Prompt: "I arrive at the listening station at dusk"
+   - Resolved location: Swiss Alpine Signal Listening Station
+   - Arrival mode, visibility, and immediate situation all populated
+   - PASS
+
+5. Character Save
+   - Endpoint: POST /api/worldgen/save-character
+   - Result: {"ok": true, "playerId": "dcf073df-5da7-49ec-a1c8-ccb9deea184e"}
+   - Player verified in world data with name, HP, tags, and equipped items
+   - PASS
+
+6. Game Page Handoff
+   - URL: /game
+   - HTTP Status: 200 (21KB response)
+   - Does NOT contain shell/sidebar elements (correctly outside non-game shell)
+   - PASS
+
+7. Persona Templates (Empty State)
+   - Campaign has 0 persona templates
+   - No persona template selector shown (correct empty-state behavior)
+   - PASS
+
+All Task 1 acceptance criteria met. No bugs found.
