@@ -260,6 +260,40 @@ describe("tickFactions", () => {
     expect(generateText).not.toHaveBeenCalled();
   });
 
+  it("keeps faction prompts concrete, chronicle-backed, and free of stale worldview wording", async () => {
+    const faction = createMockFaction({ id: "faction-001", name: "Iron Brotherhood" });
+
+    setupMockDb({
+      factions: [faction],
+      locations: [
+        {
+          id: "loc-west",
+          name: "Westmarch",
+          tags: '["fortified","Controlled by Iron Brotherhood"]',
+        },
+      ],
+      chronicle: [
+        { tick: 9, text: "The Iron Brotherhood seized the toll bridge." },
+      ],
+    });
+
+    (generateText as ReturnType<typeof vi.fn>).mockResolvedValue({
+      steps: [],
+    });
+
+    await tickFactions(CAMPAIGN_ID, 10, JUDGE_PROVIDER, 10);
+
+    const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
+    expect(systemPrompt).toContain('You are the world simulation engine evaluating faction "Iron Brotherhood".');
+    expect(systemPrompt).toContain("Use faction goals, territory, neighbors, assets, and chronicle-backed world state as your canonical macro context.");
+    expect(systemPrompt).toContain("Choose ONE macro-level action for this faction.");
+    expect(systemPrompt).toContain("SPECIFIC, OBSERVABLE change");
+    expect(systemPrompt).toContain("Recent World Events:");
+    expect(systemPrompt).not.toContain("All characters, items, locations, and factions use a tag-based system");
+    expect(systemPrompt).not.toContain("Your output must be narrative prose only.");
+    expect(systemPrompt).not.toContain("Use tag-only worldview updates");
+  });
+
   it("catches per-faction errors without stopping other factions", async () => {
     const faction1 = createMockFaction({ id: "faction-001", name: "Iron Brotherhood" });
     const faction2 = createMockFaction({ id: "faction-002", name: "Silver Circle" });
