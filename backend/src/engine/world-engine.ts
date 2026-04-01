@@ -95,6 +95,7 @@ async function tickSingleFaction(
   const systemPrompt = [
     `You are the world simulation engine evaluating faction "${faction.name}".`,
     `Consider their goals, resources, territory, and neighbors. Decide their macro-level action for this period.`,
+    `Use faction goals, territory, neighbors, assets, and chronicle-backed world state as your canonical macro context.`,
     ``,
     `Faction: ${faction.name}`,
     `Traits: [${factionTags.join(", ")}]`,
