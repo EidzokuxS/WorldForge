@@ -54,6 +54,19 @@
 
 :root {
   --radius: 0.625rem;
+  --shell-radius: 1.75rem;
+  --shell-radius-panel: 1.25rem;
+  --shell-backdrop:
+    radial-gradient(circle at top left, rgba(230, 62, 0, 0.16), transparent 24%),
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.1), transparent 22%),
+    linear-gradient(180deg, #111114 0%, #09090b 48%, #050506 100%);
+  --shell-frame-surface: rgba(10, 10, 12, 0.82);
+  --shell-rail-surface: rgba(24, 24, 27, 0.9);
+  --shell-panel-surface: rgba(18, 18, 22, 0.84);
+  --shell-panel-muted: rgba(39, 39, 42, 0.62);
+  --shell-border: rgba(255, 255, 255, 0.08);
+  --shell-highlight: rgba(230, 62, 0, 0.16);
+  --shell-highlight-strong: rgba(230, 62, 0, 0.28);
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -88,6 +101,17 @@
 }
 
 .dark {
+  --shell-backdrop:
+    radial-gradient(circle at top left, rgba(230, 62, 0, 0.16), transparent 24%),
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.1), transparent 22%),
+    linear-gradient(180deg, #111114 0%, #09090b 48%, #050506 100%);
+  --shell-frame-surface: rgba(10, 10, 12, 0.82);
+  --shell-rail-surface: rgba(24, 24, 27, 0.9);
+  --shell-panel-surface: rgba(18, 18, 22, 0.84);
+  --shell-panel-muted: rgba(39, 39, 42, 0.62);
+  --shell-border: rgba(255, 255, 255, 0.08);
+  --shell-highlight: rgba(230, 62, 0, 0.16);
+  --shell-highlight-strong: rgba(230, 62, 0, 0.28);
   --background: #09090b;
   --foreground: #f4f4f5;
   --card: #18181b;

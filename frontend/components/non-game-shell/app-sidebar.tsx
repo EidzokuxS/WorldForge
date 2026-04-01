@@ -83,9 +83,9 @@ export function AppSidebar({ pathname }: AppSidebarProps) {
   const campaignItems = getCampaignRoutes(pathname);
 
   return (
-    <Sidebar>
-      <SidebarHeader>
-        <div className="rounded-3xl border border-border/70 bg-background/50 px-4 py-4">
+    <Sidebar className="h-full w-full border-0 bg-transparent supports-[backdrop-filter]:bg-transparent">
+      <SidebarHeader className="p-5 pb-3">
+        <div className="rounded-[var(--shell-radius-panel)] border [border-color:var(--shell-border)] [background:var(--shell-panel-muted)] px-4 py-4 shadow-[0_18px_40px_rgba(0,0,0,0.16)]">
           <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-blood">WorldForge</p>
           <p className="mt-2 font-serif text-2xl text-bone">Desktop Shell</p>
           <p className="mt-2 text-sm text-muted-foreground">
@@ -93,7 +93,7 @@ export function AppSidebar({ pathname }: AppSidebarProps) {
           </p>
         </div>
       </SidebarHeader>
-      <SidebarContent>
+      <SidebarContent className="px-4 pb-5">
         <SidebarGroup>
           <SidebarGroupLabel>Workspace</SidebarGroupLabel>
           <SidebarMenu>
@@ -133,7 +133,7 @@ export function AppSidebar({ pathname }: AppSidebarProps) {
           </SidebarGroup>
         ) : null}
       </SidebarContent>
-      <SidebarFooter>
+      <SidebarFooter className="border-t [border-color:var(--shell-border)]">
         <p className="text-xs text-muted-foreground">
           Persistent navigation for launcher, creation, review, character, settings, and library flows.
         </p>

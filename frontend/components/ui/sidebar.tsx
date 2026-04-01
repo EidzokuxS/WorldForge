@@ -36,7 +36,7 @@ function Sidebar({
       data-slot="sidebar"
       data-state={open ? "open" : "collapsed"}
       className={cn(
-        "flex h-full w-72 shrink-0 flex-col border-r border-border/70 bg-sidebar/85 text-sidebar-foreground backdrop-blur supports-[backdrop-filter]:bg-sidebar/75",
+        "flex h-full w-72 shrink-0 flex-col text-sidebar-foreground",
         !open && "w-20",
         className,
       )}
@@ -129,8 +129,8 @@ function SidebarMenuButton({
       data-slot="sidebar-menu-button"
       data-active={isActive}
       className={cn(
-        "flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm font-medium transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-        isActive && "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm",
+        "flex w-full items-center gap-3 rounded-[calc(var(--shell-radius-panel)-0.5rem)] px-3 py-3 text-left text-sm font-medium text-sidebar-foreground/90 transition-all hover:[background:var(--shell-panel-muted)] hover:text-bone",
+        isActive && "[background:var(--shell-highlight)] text-bone [box-shadow:inset_0_0_0_1px_var(--shell-highlight-strong),0_12px_30px_rgba(0,0,0,0.18)]",
         className,
       )}
       {...props}

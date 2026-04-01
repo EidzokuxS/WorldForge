@@ -1,6 +1,10 @@
 import * as React from "react";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  ShellActionTray,
+  ShellPanel,
+  ShellRail,
+} from "@/components/non-game-shell/shell-primitives";
 import { cn } from "@/lib/utils";
 
 interface ReviewWorkspaceProps {
@@ -20,30 +24,36 @@ export function ReviewWorkspace({
 }: ReviewWorkspaceProps) {
   return (
     <div className={cn("grid gap-6 xl:grid-cols-[260px_minmax(0,1fr)]", className)}>
-      <Card className="h-fit border-border/70 bg-card/80 shadow-xl shadow-black/10">
-        <CardHeader>
-          <CardTitle className="font-serif text-2xl text-bone">Sections</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4 text-sm text-muted-foreground">
+      <ShellRail className="h-fit p-5">
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-blood">Review Rail</p>
+            <h2 className="font-serif text-2xl text-bone">Sections</h2>
+          </div>
+          <div className="space-y-4 text-sm text-muted-foreground">
           {sectionNav}
-        </CardContent>
-      </Card>
+          </div>
+        </div>
+      </ShellRail>
 
       <div className="space-y-6">
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
           <div className="min-w-0">{children}</div>
-          <Card className="h-fit border-border/70 bg-card/80 shadow-xl shadow-black/10">
-            <CardHeader>
-              <CardTitle className="font-serif text-2xl text-bone">Review Summary</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm text-muted-foreground">
+          <ShellPanel className="h-fit p-5">
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-blood">Shell Summary</p>
+                <h2 className="font-serif text-2xl text-bone">Review Summary</h2>
+              </div>
+              <div className="space-y-3 text-sm text-muted-foreground">
               {summary}
-            </CardContent>
-          </Card>
+              </div>
+            </div>
+          </ShellPanel>
         </div>
-        <div className="rounded-3xl border border-border/70 bg-background/90 px-4 py-3 shadow-xl shadow-black/20">
+        <ShellActionTray>
           {actions}
-        </div>
+        </ShellActionTray>
       </div>
     </div>
   );

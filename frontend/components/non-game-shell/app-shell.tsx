@@ -6,11 +6,16 @@ import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/non-game-shell/app-sidebar";
-import { InspectorRail } from "@/components/non-game-shell/inspector-rail";
 import { PageHeader } from "@/components/non-game-shell/page-header";
-import { StickyActionBar } from "@/components/non-game-shell/sticky-action-bar";
+import {
+  ShellActionTray,
+  ShellFrame,
+  ShellMainPanel,
+  ShellNavigationRail,
+  ShellPanel,
+} from "@/components/non-game-shell/shell-primitives";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -140,47 +145,63 @@ export function AppShell({
 
   return (
     <SidebarProvider>
-      <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(230,62,0,0.18),_transparent_26%),radial-gradient(circle_at_top_right,_rgba(59,130,246,0.12),_transparent_24%),linear-gradient(180deg,_#111114_0%,_#09090b_48%,_#050506_100%)]">
-        <div className="mx-auto flex min-h-screen w-full max-w-[1820px] gap-0 px-4 py-4 lg:px-6">
-          <AppSidebar pathname={pathname} />
-          <SidebarInset className="overflow-hidden rounded-r-[32px] border border-l-0 border-border/70 bg-background/80 shadow-[0_32px_120px_rgba(0,0,0,0.35)] backdrop-blur-xl">
-            <PageHeader
-              eyebrow={eyebrow ?? route.eyebrow}
-              title={title ?? route.title}
-              description={description ?? route.description}
-              status={status}
-              actions={headerActions}
-            />
-            <div className="flex min-h-[calc(100vh-10rem)] min-w-0 flex-1 flex-col lg:flex-row">
-              <main className="min-w-0 flex-1 px-6 py-6" role="main">
-                <div data-testid="shell-grid" className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-                  <div className="min-w-0">{children}</div>
-                  <InspectorRail
-                    title={inspectorTitle ?? route.inspectorTitle}
-                    description={inspectorDescription ?? route.inspectorDescription}
+      <div className="min-h-screen [background:var(--shell-backdrop)]">
+        <div className="mx-auto flex min-h-screen w-full max-w-[1820px] px-4 py-4 lg:px-6">
+          <ShellFrame className="flex min-h-[calc(100vh-2rem)] w-full">
+            <ShellNavigationRail className="w-[18.5rem]">
+              <AppSidebar pathname={pathname} />
+            </ShellNavigationRail>
+            <ShellMainPanel>
+              <PageHeader
+                eyebrow={eyebrow ?? route.eyebrow}
+                title={title ?? route.title}
+                description={description ?? route.description}
+                status={status}
+                actions={headerActions}
+                className="border-b [border-color:var(--shell-border)] [background:linear-gradient(180deg,rgba(255,255,255,0.025)_0%,rgba(255,255,255,0)_100%)]"
+              />
+              <div className="flex min-h-[calc(100vh-10rem)] min-w-0 flex-1 flex-col lg:flex-row">
+                <main className="min-w-0 flex-1 px-6 py-6" role="main">
+                  <div data-testid="shell-grid" className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+                    <div className="min-w-0">{children}</div>
+                    <aside className="hidden xl:block">
+                      <ShellPanel className="sticky top-6 p-5">
+                        <div className="space-y-3">
+                          <div className="space-y-2">
+                            <h2 className="font-serif text-xl text-bone">{inspectorTitle ?? route.inspectorTitle}</h2>
+                            <p className="text-sm text-muted-foreground">
+                              {inspectorDescription ?? route.inspectorDescription}
+                            </p>
+                          </div>
+                          <div className="space-y-3 text-sm text-muted-foreground">
+                            {inspector ?? (
+                              <>
+                                <p>Route context stays visible here instead of duplicating the full editor surface.</p>
+                                <Separator />
+                                <p>Use this rail for summaries, warnings, generation progress, or quick orientation notes.</p>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </ShellPanel>
+                    </aside>
+                  </div>
+                  <ShellActionTray
+                    title={stickyTitle ?? route.stickyTitle}
+                    description={stickyDescription ?? route.stickyDescription}
                   >
-                    {inspector ?? (
-                      <>
-                        <p>Route context stays visible here instead of duplicating the full editor surface.</p>
-                        <Separator />
-                        <p>Use this rail for summaries, warnings, generation progress, or quick orientation notes.</p>
-                      </>
-                    )}
-                  </InspectorRail>
-                </div>
-                <StickyActionBar
-                  title={stickyTitle ?? route.stickyTitle}
-                  description={stickyDescription ?? route.stickyDescription}
-                >
-                  {stickyActions ?? route.stickyActions ?? (
-                    <Button asChild size="sm" variant="outline">
-                      <Link href="/campaign/new">Open Creation Flow</Link>
-                    </Button>
-                  )}
-                </StickyActionBar>
-              </main>
-            </div>
-          </SidebarInset>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      {stickyActions ?? route.stickyActions ?? (
+                        <Button asChild size="sm" variant="outline">
+                          <Link href="/campaign/new">Open Creation Flow</Link>
+                        </Button>
+                      )}
+                    </div>
+                  </ShellActionTray>
+                </main>
+              </div>
+            </ShellMainPanel>
+          </ShellFrame>
         </div>
       </div>
     </SidebarProvider>
