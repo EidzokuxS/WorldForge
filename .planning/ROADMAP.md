@@ -37,7 +37,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 30: Start Conditions, Canonical Loadouts, and Persona Templates** - Make start selection about location plus arrival conditions, derive starting items from canonical scenario state, and introduce reusable base personas for player/NPC generation (implementation pass completed in worktree on 2026-04-01; formal closeout still blocked by `.git` ACL denial plus sandbox `spawn EPERM`)
 - [x] **Phase 31: Prompt System Harmonization & Audit** - Audit and refine prompts across worldgen, character, gameplay, and support systems so they operate as one coherent mechanism (completed 2026-04-01)
 - [x] **Phase 32: Desktop-First Non-Game UI Overhaul** - Redesign campaign creation, world review, character creation, settings, and other non-game flows for FHD/1440p desktop using Tailwind, shadcn, and compatible libraries only (completed 2026-04-01)
-- [ ] **Phase 33: Browser E2E Verification for Redesigned Creation Flows** - Validate the new character/world creation, persona, prompt, and UI flows end-to-end in the browser and polish regressions
+- [x] **Phase 33: Browser E2E Verification for Redesigned Creation Flows** - Validate the new character/world creation, persona, prompt, and UI flows end-to-end in the browser and polish regressions (completed 2026-04-01)
 
 ## Phase Details
 
@@ -311,7 +311,7 @@ Note: Backlog phases (like 999.1) are tracked separately and are not part of the
 | 30. Start Conditions, Canonical Loadouts, and Persona Templates | 0/6 committed (+6 implemented) | Closeout Pending | - |
 | 31. Prompt System Harmonization & Audit | 7/7 | Complete   | 2026-04-01 |
 | 32. Desktop-First Non-Game UI Overhaul | 6/6 | Complete   | 2026-04-01 |
-| 33. Browser E2E Verification for Redesigned Creation Flows | 3/4 | In Progress|  |
+| 33. Browser E2E Verification for Redesigned Creation Flows | 4/4 | Complete   | 2026-04-01 |
 
 ### Phase 16: NPC System QA — Three NPC Tiers + World Gen Integration
 
@@ -524,5 +524,5 @@ Plans:
 Plans:
 - [x] 33-01-PLAN.md -- Legacy route cleanup + shell/launcher browser verification
 - [x] 33-02-PLAN.md -- Original-world campaign creation + DNA + scaffold generation E2E
-- [ ] 33-03-PLAN.md -- Known-IP campaign + world review editing E2E
+- [x] 33-03-PLAN.md -- Known-IP campaign + world review editing E2E
 - [x] 33-04-PLAN.md -- Character creation + persona + start conditions + game handoff E2E

@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Ready to execute
-stopped_at: Completed 33-02-PLAN.md
-last_updated: "2026-04-01T18:33:11.965Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 33-03-PLAN.md
+last_updated: "2026-04-01T19:58:53.382Z"
 progress:
   total_phases: 28
-  completed_phases: 27
+  completed_phases: 28
   total_plans: 92
-  completed_plans: 91
+  completed_plans: 92
 ---
 
 # Project State
@@ -211,6 +211,8 @@ Recent decisions affecting current work:
 - [Phase 33]: Used curl HTTP verification for character creation E2E due to remote Chrome network isolation
 - [Phase 33]: Used curl HTTP verification instead of PinchTab due to remote Chrome network isolation
 - [Phase 33]: No bugs found in original-world creation flow -- all shell routes, API endpoints, and SSE generation work correctly
+- [Phase 33]: Known-IP world review verified: campaign creation, scaffold generation, all 5 sections, editing persistence, NPC creation, section regeneration, and lore search all pass with real GLM LLM calls
+- [Phase 33]: Parallel agent DB contention is a known operational issue: singleton DB connection gets switched when concurrent agents load different campaigns during long-running operations
 
 ### Roadmap Evolution
 
@@ -245,6 +247,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-01T18:33:11.961Z
-Stopped at: Completed 33-02-PLAN.md
+Last session: 2026-04-01T19:58:53.375Z
+Stopped at: Completed 33-03-PLAN.md
 Resume file: None
