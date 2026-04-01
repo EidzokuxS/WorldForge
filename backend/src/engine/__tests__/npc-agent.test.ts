@@ -347,7 +347,7 @@ describe("tickNpcAgent", () => {
 
     expect(generateText).toHaveBeenCalledWith(
       expect.objectContaining({
-        system: expect.stringContaining("Your persona: A patient fixer who trades in favors."),
+        system: expect.stringContaining("Your profile: A patient fixer who trades in favors."),
       }),
     );
 
