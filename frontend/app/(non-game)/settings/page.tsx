@@ -1,12 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
+
 import { getErrorMessage } from "@/lib/settings";
 import { useSettings } from "@/lib/use-settings";
-import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProvidersTab } from "@/components/settings/providers-tab";
 import { RolesTab } from "@/components/settings/roles-tab";
@@ -38,8 +36,7 @@ export default function SettingsPage() {
         })
         .catch((error) => {
           toast.error("Failed to save settings", {
-            description:
-              getErrorMessage(error, "Unknown API error."),
+            description: getErrorMessage(error, "Unknown API error."),
           });
         });
     }, 350);
@@ -50,38 +47,21 @@ export default function SettingsPage() {
   }, [isLoading, save, settings]);
 
   const providerById = useMemo(() => {
-    return new Map(settings.providers.map((p) => [p.id, p]));
+    return new Map(settings.providers.map((provider) => [provider.id, provider]));
   }, [settings.providers]);
 
   if (isLoading) {
-    return (
-      <main className="flex min-h-screen items-center justify-center p-6">
-        <p className="text-sm text-muted-foreground">Loading settings...</p>
-      </main>
-    );
+    return <p className="text-sm text-muted-foreground">Loading settings...</p>;
   }
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-6 p-4 md:p-6">
-      <header className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="font-serif text-4xl font-bold tracking-wide text-bone">
-            Settings
-          </h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Configure providers, role models, and image generation defaults.
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {isSaving ? "Saving changes..." : "Changes are saved automatically."}
-          </p>
-        </div>
-        <Button variant="outline" asChild>
-          <Link href="/">
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Title
-          </Link>
-        </Button>
-      </header>
+    <div className="space-y-6">
+      <div className="rounded-3xl border border-border/70 bg-muted/20 px-4 py-4">
+        <p className="text-sm font-medium text-bone">Save state</p>
+        <p className="text-xs text-muted-foreground">
+          {isSaving ? "Saving changes..." : "Changes are saved automatically."}
+        </p>
+      </div>
 
       <Tabs defaultValue="providers" className="w-full">
         <TabsList className="w-full justify-start">
@@ -94,31 +74,20 @@ export default function SettingsPage() {
         <TabsContent value="providers" className="space-y-4">
           <ProvidersTab settings={settings} setSettings={setSettings} />
         </TabsContent>
-
         <TabsContent value="roles" className="space-y-4">
           <RolesTab settings={settings} setSettings={setSettings} />
         </TabsContent>
-
         <TabsContent value="images" className="space-y-4">
           <ImagesTab settings={settings} setSettings={setSettings} />
         </TabsContent>
-
         <TabsContent value="research" className="space-y-4">
           <ResearchTab settings={settings} setSettings={setSettings} />
         </TabsContent>
       </Tabs>
 
-      <footer className="pb-2 text-xs text-muted-foreground">
-        Active providers: {settings.providers.length} · Judge:{" "}
-        {providerById.get(settings.judge.providerId)?.name ?? "Unknown"} ·
-        Storyteller:{" "}
-        {providerById.get(settings.storyteller.providerId)?.name ?? "Unknown"} ·
-        Generator:{" "}
-        {providerById.get(settings.generator.providerId)?.name ?? "Unknown"} ·
-        Embedder:{" "}
-        {providerById.get(settings.embedder.providerId)?.name ?? "Unknown"}
-      </footer>
-    </main>
+      <div className="rounded-3xl border border-border/70 bg-card/80 px-4 py-4 text-xs text-muted-foreground">
+        Active providers: {settings.providers.length} · Judge: {providerById.get(settings.judge.providerId)?.name ?? "Unknown"} · Storyteller: {providerById.get(settings.storyteller.providerId)?.name ?? "Unknown"} · Generator: {providerById.get(settings.generator.providerId)?.name ?? "Unknown"} · Embedder: {providerById.get(settings.embedder.providerId)?.name ?? "Unknown"}
+      </div>
+    </div>
   );
 }
-
