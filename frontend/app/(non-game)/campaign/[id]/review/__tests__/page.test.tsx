@@ -55,7 +55,7 @@ beforeEach(() => {
 });
 
 describe("WorldReviewPage", () => {
-  it("renders the canonical review workspace inside the shared shell seam", async () => {
+  it("pins Gap 1 review navigation, summary, and action tray to shared shell primitives", async () => {
     mockedLoadCampaign.mockResolvedValue({ id: "campaign-1", name: "Arcadia", premise: "A world" } as never);
     mockedGetWorldData.mockResolvedValue({ locations: [], factions: [], npcs: [], relationships: [] } as never);
     mockedGetLoreCards.mockResolvedValue([]);
@@ -81,5 +81,8 @@ describe("WorldReviewPage", () => {
 
     expect(screen.getByText("Sections")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Continue to Character Creation" })).toBeInTheDocument();
+    expect(screen.getByText("Sections").closest("[data-shell-surface='rail']")).not.toBeNull();
+    expect(screen.getByText("Review Summary").closest("[data-shell-surface='panel']")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Continue to Character Creation" }).closest("[data-shell-region='action-tray']")).not.toBeNull();
   });
 });

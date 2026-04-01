@@ -8,11 +8,14 @@ vi.mock("@/components/title/load-campaign-dialog", () => ({
 import LauncherPage from "@/app/(non-game)/page";
 
 describe("LauncherPage", () => {
-  it("exposes a routed new-campaign entry as the primary path", () => {
+  it("pins Gap 1 launcher cards to shared shell panel primitives", () => {
     render(<LauncherPage />);
 
     const link = screen.getByRole("link", { name: "New Campaign" });
     expect(link).toHaveAttribute("href", "/campaign/new");
     expect(screen.getByText("Load Campaign Dialog")).toBeInTheDocument();
+    expect(screen.getByText("Primary flow").closest("[data-shell-surface='panel']")).not.toBeNull();
+    expect(screen.getByText("Resume flow").closest("[data-shell-surface='panel']")).not.toBeNull();
+    expect(screen.getByText("Shell Shortcuts").closest("[data-shell-surface='panel']")).not.toBeNull();
   });
 });

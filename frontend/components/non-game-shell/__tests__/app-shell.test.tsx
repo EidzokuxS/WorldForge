@@ -8,7 +8,7 @@ vi.mock("next/navigation", () => ({
 import { AppShell } from "@/components/non-game-shell/app-shell";
 
 describe("AppShell", () => {
-  it("renders left navigation, main content, optional inspector content, and sticky actions in distinct regions", () => {
+  it("renders Gap 1 shell hooks for the outer frame, left rail, main panel, and sticky action tray", () => {
     render(
       <AppShell
         inspector={<p>Inspector summary</p>}
@@ -25,6 +25,10 @@ describe("AppShell", () => {
     expect(screen.getByText("Inspector summary")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save settings" })).toBeInTheDocument();
     expect(screen.getByTestId("shell-grid").className).toContain("xl:grid-cols");
+    expect(screen.getByRole("link", { name: "Settings" }).closest("[data-shell-region='navigation-rail']")).not.toBeNull();
+    expect(screen.getByRole("main").closest("[data-shell-region='main-panel']")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Save settings" }).closest("[data-shell-region='action-tray']")).not.toBeNull();
+    expect(screen.getByRole("main").closest("[data-shell-region='outer-frame']")).not.toBeNull();
   });
 
   it("exposes route context and action labels without baking page-specific forms into the foundation", () => {

@@ -65,7 +65,7 @@ beforeEach(() => {
 });
 
 describe("CharacterCreationPage", () => {
-  it("renders the canonical character workspace with the existing draft seam", async () => {
+  it("pins Gap 1 character navigation, summary, and action tray to shared shell primitives", async () => {
     mockedLoadCampaign.mockResolvedValue({ id: "campaign-1", name: "Arcadia", premise: "A world" } as never);
     mockedGetWorldData.mockResolvedValue({ locations: [], factions: [], npcs: [], relationships: [], personaTemplates: [] } as never);
 
@@ -77,5 +77,8 @@ describe("CharacterCreationPage", () => {
 
     expect(screen.getByTestId("character-form")).toBeInTheDocument();
     expect(screen.getByText("Awaiting Draft")).toBeInTheDocument();
+    expect(screen.getByText("Input Methods").closest("[data-shell-surface='rail']")).not.toBeNull();
+    expect(screen.getByText("Draft Summary").closest("[data-shell-surface='panel']")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Begin Adventure" }).closest("[data-shell-region='action-tray']")).not.toBeNull();
   });
 });
