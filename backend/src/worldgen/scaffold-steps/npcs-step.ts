@@ -2,6 +2,7 @@ import { safeGenerateObject as generateObject } from "../../ai/generate-object-s
 import { z } from "zod";
 import { createModel } from "../../ai/index.js";
 import type { IpResearchContext } from "@worldforge/shared";
+import { fromLegacyScaffoldNpc } from "../../character/record-adapters.js";
 import type { GenerateScaffoldRequest, ScaffoldNpc } from "../types.js";
 import {
   buildIpContextBlock,
@@ -427,14 +428,34 @@ export async function generateNpcsStep(
     const planEntry = allPlanned.find(
       (p) => p.name.toLowerCase() === detail.name.toLowerCase(),
     );
-    return {
+    const locationName = planEntry?.locationName ?? locationNames[0] ?? "";
+    const factionName = planEntry?.factionName ?? null;
+    const tier = planEntry?.tier ?? "supporting";
+    const canonicalStatus = ipContext
+      ? req.premiseDivergence && req.premiseDivergence.mode !== "canonical"
+        ? "known_ip_diverged"
+        : "known_ip_canonical"
+      : "original";
+
+    const legacyNpc = {
       name: detail.name,
       persona: detail.persona,
       tags: detail.tags,
       goals: detail.goals,
-      locationName: planEntry?.locationName ?? locationNames[0] ?? "",
-      factionName: planEntry?.factionName ?? null,
-      tier: planEntry?.tier ?? "supporting",
+      locationName,
+      factionName,
+      tier,
+    } satisfies ScaffoldNpc;
+
+    return {
+      ...legacyNpc,
+      draft: fromLegacyScaffoldNpc(legacyNpc, {
+        canonicalStatus,
+        sourceKind: "worldgen",
+        currentLocationName: locationName,
+        factionName,
+        originMode: "resident",
+      }),
     };
   });
 

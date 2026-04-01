@@ -1,4 +1,5 @@
 import type {
+  CharacterDraft,
   IpResearchContext,
   PremiseDivergence,
   ResearchConfig,
@@ -54,6 +55,7 @@ export interface ScaffoldNpc {
   persona: string;
   tags: string[];
   goals: ScaffoldNpcGoals;
+  draft?: CharacterDraft;
   locationName: string;
   factionName: string | null;
   /** NPC importance tier. "key" = canonical/plot-relevant, "supporting" = original/background.
