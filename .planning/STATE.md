@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Phase complete — ready for verification
-stopped_at: Completed 32-05-PLAN.md
-last_updated: "2026-04-01T16:53:05.644Z"
+status: Ready to execute
+stopped_at: Completed 33-01-PLAN.md
+last_updated: "2026-04-01T18:05:55.301Z"
 progress:
   total_phases: 28
   completed_phases: 27
-  total_plans: 88
-  completed_plans: 88
+  total_plans: 92
+  completed_plans: 89
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-18)
 
 **Core value:** The LLM is the narrator, never the engine. All mechanical outcomes are resolved by backend code.
-**Current focus:** Phase 32 is complete on the current worktree; the next execution target is Phase 33 browser verification for the redesigned non-game flows.
+**Current focus:** Phase 33 — browser-e2e-verification-for-redesigned-creation-flows
 
 ## Current Position
 
-Phase: 32 (desktop-first-non-game-ui-overhaul) — COMPLETE
-Plan: 6 of 6 complete (`32-00` through `32-05`)
+Phase: 33 (browser-e2e-verification-for-redesigned-creation-flows) — EXECUTING
+Plan: 2 of 4
 
 ## Performance Metrics
 
@@ -205,6 +205,8 @@ Recent decisions affecting current work:
 - [Phase 32]: Phase 32 owns all non-game desktop flows through a shared (non-game) shell while leaving /game structurally separate.
 - [Phase 32]: Legacy /world-review and /character-creation pages are redirect-only compatibility stubs once canonical shell routes exist.
 - [Phase 32]: Character and review redesigns must stay on the existing CharacterDraft, persona-template, and loadout seams instead of introducing parallel UI models.
+- [Phase 33]: Used curl HTTP verification instead of PinchTab browser testing due to remote Chrome network isolation
+- [Phase 33]: Removed unused resizable.tsx shadcn component with broken dependency rather than fixing import
 
 ### Roadmap Evolution
 
@@ -239,6 +241,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-01T16:52:39.653Z
-Stopped at: Completed 32-05-PLAN.md
+Last session: 2026-04-01T18:05:55.297Z
+Stopped at: Completed 33-01-PLAN.md
 Resume file: None
