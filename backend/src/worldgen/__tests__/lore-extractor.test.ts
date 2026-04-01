@@ -195,4 +195,18 @@ describe("extractLoreCards", () => {
       "Keep canonical planets, factions, and leaders unless the failed purge would directly change them.",
     );
   });
+
+  it("adds the shared character/start guardrail without turning lore extraction into a character generator", async () => {
+    mockGenerateObject.mockResolvedValueOnce({
+      object: { loreCards: fakeLoreCards },
+    });
+
+    await extractLoreCards(fakeScaffold, fakeRole);
+
+    const prompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>)
+      .prompt as string;
+    expect(prompt).toContain("startConditions");
+    expect(prompt).toContain("derived runtime tags");
+    expect(prompt).not.toContain("tag-only system");
+  });
 });
