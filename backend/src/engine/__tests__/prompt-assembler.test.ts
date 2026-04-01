@@ -512,4 +512,17 @@ describe("assemblePrompt", () => {
     expect(result.formatted).not.toContain("Legacy persona");
     expect(result.formatted).not.toContain("legacy belief");
   });
+
+  it("frames canonical character and start context before derived runtime tags in SYSTEM RULES", async () => {
+    const result = await assemblePrompt(defaultOptions);
+    const systemRules = result.sections.find((section) => section.name === "SYSTEM RULES");
+
+    expect(systemRules).toBeDefined();
+    expect(systemRules!.content).toContain("canonical character records");
+    expect(systemRules!.content).toContain("derived runtime tags");
+    expect(systemRules!.content).toContain("startConditions");
+    expect(systemRules!.content).not.toContain(
+      "All characters, items, locations, and factions use a tag-based system",
+    );
+  });
 });

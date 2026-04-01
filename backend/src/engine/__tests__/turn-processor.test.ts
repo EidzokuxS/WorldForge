@@ -713,7 +713,29 @@ describe("processTurn", () => {
         ],
       }),
       expect.anything(),
-      expect.anything(),
+      null,
     );
+  });
+
+  it("keeps narration directives outcome-specific instead of re-authoring generic tool policy", async () => {
+    setupMocks({
+      oracleResult: {
+        chance: 55,
+        roll: 42,
+        outcome: "weak_hit",
+        reasoning: "The action works, but the situation stays unstable.",
+      },
+    });
+
+    await collectEvents(processTurn(createTestOptions()));
+
+    const streamArgs = (streamText as Mock).mock.calls[0]![0] as {
+      system: string;
+    };
+
+    expect(streamArgs.system).toContain("[NARRATION DIRECTIVE]");
+    expect(streamArgs.system).toContain("The player SUCCEEDED WITH A COMPLICATION.");
+    expect(streamArgs.system).not.toContain("After narration, you MUST call offer_quick_actions");
+    expect(streamArgs.system).not.toContain("light hit = -1");
   });
 });
