@@ -38,6 +38,7 @@ vi.mock("ai", () => ({
     toolCalls: [],
     toolResults: [],
   }),
+  stepCountIs: vi.fn((count: number) => count),
   tool: vi.fn((def: Record<string, unknown>) => def),
 }));
 
@@ -46,11 +47,12 @@ vi.mock("../../ai/provider-registry.js", () => ({
 }));
 
 import { createNpcAgentTools } from "../npc-tools.js";
-import { tickPresentNpcs } from "../npc-agent.js";
+import { tickNpcAgent, tickPresentNpcs } from "../npc-agent.js";
 import { getDb } from "../../db/index.js";
 import { callOracle } from "../oracle.js";
 import { executeToolCall } from "../tool-executor.js";
 import { storeEpisodicEvent } from "../../vectors/episodic-events.js";
+import { generateText } from "ai";
 
 const CAMPAIGN_ID = "test-campaign-123";
 const NPC_ID = "npc-001";
@@ -78,6 +80,71 @@ function createMockNpc(overrides: Record<string, unknown> = {}) {
     currentLocationId: LOCATION_ID,
     goals: '{"short_term":["sell rare goods"],"long_term":["become guild master"]}',
     beliefs: '["money talks","trust no one"]',
+    characterRecord: JSON.stringify({
+      identity: {
+        id: NPC_ID,
+        campaignId: CAMPAIGN_ID,
+        role: "npc",
+        tier: "key",
+        displayName: "Greta the Merchant",
+        canonicalStatus: "original",
+      },
+      profile: {
+        species: "",
+        gender: "",
+        ageText: "",
+        appearance: "",
+        backgroundSummary: "",
+        personaSummary: "A patient fixer who trades in favors.",
+      },
+      socialContext: {
+        factionId: null,
+        factionName: null,
+        homeLocationId: null,
+        homeLocationName: null,
+        currentLocationId: LOCATION_ID,
+        currentLocationName: "Market Square",
+        relationshipRefs: [],
+        socialStatus: ["connected"],
+        originMode: "native",
+      },
+      motivations: {
+        shortTermGoals: ["Broker a truce"],
+        longTermGoals: ["Own the market district"],
+        beliefs: ["Every debt can be collected"],
+        drives: ["Profit"],
+        frictions: ["Watched by rivals"],
+      },
+      capabilities: {
+        traits: ["Observant"],
+        skills: [{ name: "Negotiation", tier: "Master" }],
+        flaws: ["Secretive"],
+        specialties: [],
+        wealthTier: "Wealthy",
+      },
+      state: {
+        hp: 5,
+        conditions: ["Hidden"],
+        statusFlags: [],
+        activityState: "active",
+      },
+      loadout: {
+        inventorySeed: [],
+        equippedItemRefs: [],
+        currencyNotes: "",
+        signatureItems: [],
+      },
+      startConditions: {},
+      provenance: {
+        sourceKind: "worldgen",
+        importMode: null,
+        templateId: null,
+        archetypePrompt: null,
+        worldgenOrigin: "scaffold",
+        legacyTags: ["merchant", "shrewd", "wealthy"],
+      },
+    }),
+    derivedTags: '["merchant","shrewd","wealthy"]',
     ...overrides,
   };
 }
@@ -256,5 +323,50 @@ describe("tickPresentNpcs", () => {
     const results = await tickPresentNpcs(CAMPAIGN_ID, TICK, JUDGE_PROVIDER, LOCATION_ID);
 
     expect(results).toEqual([]);
+  });
+});
+
+describe("tickNpcAgent", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("builds NPC prompts from canonical record fields before falling back to legacy blobs", async () => {
+    setupMockDb({
+      npc: createMockNpc({
+        persona: "Legacy merchant persona",
+        tags: '["legacy-only"]',
+        goals: '{"short_term":["legacy goal"],"long_term":[]}',
+        beliefs: '["legacy belief"]',
+      }),
+      npcsAtLocation: [],
+      player: { name: "Elara" },
+    });
+
+    await tickNpcAgent(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
+
+    expect(generateText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        system: expect.stringContaining("Your persona: A patient fixer who trades in favors."),
+      }),
+    );
+
+    const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
+    expect(systemPrompt).toContain(
+      "Canonical NPC record authority: profile, socialContext, motivations, capabilities, and state define who you are right now.",
+    );
+    expect(systemPrompt).toContain(
+      "Derived runtime tags are compact compatibility evidence, not the source-of-truth.",
+    );
+    expect(systemPrompt).toContain("Your traits: [Observant, Master Negotiation, Secretive, Wealthy, Hidden, connected, Profit, Watched by rivals]");
+    expect(systemPrompt).toContain("Your goals:\n  - [short] Broker a truce\n  - [long] Own the market district");
+    expect(systemPrompt).toContain("Your beliefs: [Every debt can be collected]");
+    expect(systemPrompt).toContain("Nearby entities:");
+    expect(systemPrompt).toContain("Recent memories involving you:");
+    expect(systemPrompt).not.toContain("legacy-only");
+    expect(systemPrompt).not.toContain("Legacy merchant persona");
+    expect(systemPrompt).not.toContain("legacy belief");
+    expect(systemPrompt).not.toContain("Legacy persona/goals/beliefs blobs are authoritative");
+    expect(systemPrompt).not.toContain("Use the legacy tags/persona blob as your main worldview");
   });
 });

@@ -94,6 +94,71 @@ function createMockNpc(overrides: Record<string, unknown> = {}) {
     goals: '{"short_term":["sell rare goods"],"long_term":["become guild master"]}',
     beliefs: '["money talks"]',
     unprocessedImportance: 20,
+    characterRecord: JSON.stringify({
+      identity: {
+        id: NPC_ID,
+        campaignId: CAMPAIGN_ID,
+        role: "npc",
+        tier: "key",
+        displayName: "Greta the Merchant",
+        canonicalStatus: "original",
+      },
+      profile: {
+        species: "",
+        gender: "",
+        ageText: "",
+        appearance: "",
+        backgroundSummary: "A merchant who keeps ledgers on everyone.",
+        personaSummary: "A patient fixer who trades in favors.",
+      },
+      socialContext: {
+        factionId: null,
+        factionName: null,
+        homeLocationId: null,
+        homeLocationName: null,
+        currentLocationId: "loc-001",
+        currentLocationName: "Market Square",
+        relationshipRefs: [],
+        socialStatus: ["connected"],
+        originMode: "native",
+      },
+      motivations: {
+        shortTermGoals: ["Stabilize the bazaar"],
+        longTermGoals: ["Own the market district"],
+        beliefs: ["Every debt can be collected"],
+        drives: ["Profit"],
+        frictions: ["Watched by rivals"],
+      },
+      capabilities: {
+        traits: ["Observant"],
+        skills: [{ name: "Negotiation", tier: "Master" }],
+        flaws: ["Secretive"],
+        specialties: [],
+        wealthTier: "Wealthy",
+      },
+      state: {
+        hp: 5,
+        conditions: ["Hidden"],
+        statusFlags: [],
+        activityState: "active",
+      },
+      loadout: {
+        inventorySeed: [],
+        equippedItemRefs: [],
+        currencyNotes: "",
+        signatureItems: [],
+      },
+      startConditions: {},
+      provenance: {
+        sourceKind: "worldgen",
+        importMode: null,
+        templateId: null,
+        archetypePrompt: null,
+        worldgenOrigin: "scaffold",
+        legacyTags: ["merchant", "shrewd", "wealthy"],
+      },
+    }),
+    derivedTags: '["merchant","shrewd","wealthy"]',
     ...overrides,
   };
 }
@@ -155,7 +220,7 @@ describe("createReflectionTools", () => {
     const beliefsStr = setCall?.beliefs as string;
     expect(beliefsStr).toBeDefined();
     const beliefs = JSON.parse(beliefsStr) as string[];
-    expect(beliefs).toContain("money talks");
+    expect(beliefs).toContain("Every debt can be collected");
     expect(beliefs).toContain("The market is dangerous");
   });
 
@@ -173,7 +238,7 @@ describe("createReflectionTools", () => {
     const goalsStr = setCall?.goals as string;
     const goals = JSON.parse(goalsStr) as { short_term: string[]; long_term: string[] };
     expect(goals.short_term).toContain("hire bodyguards");
-    expect(goals.short_term).toContain("sell rare goods");
+    expect(goals.short_term).toContain("Stabilize the bazaar");
   });
 
   it("drop_goal removes a goal from NPC goals (case-insensitive)", async () => {
@@ -232,6 +297,42 @@ describe("runReflection", () => {
       (call) => (call[0] as Record<string, unknown>)?.unprocessedImportance === 0,
     );
     expect(setCall).toBeDefined();
+  });
+
+  it("builds evidence-driven reflection prompts from canonical record fields before legacy blobs", async () => {
+    setupMockDb({
+      npc: createMockNpc({
+        persona: "Legacy merchant persona",
+        tags: '["legacy-only"]',
+        goals: '{"short_term":["legacy goal"],"long_term":[]}',
+        beliefs: '["legacy belief"]',
+      }),
+    });
+
+    const { generateText } = await import("ai");
+
+    await runReflection(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER, {
+      ...JUDGE_PROVIDER,
+      id: "embedder-provider",
+    });
+
+    const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
+    expect(systemPrompt).toContain(
+      "Canonical NPC record authority: profile, socialContext, motivations, capabilities, and state define the current baseline before any compatibility aliases.",
+    );
+    expect(systemPrompt).toContain(
+      "Derived runtime tags are compact compatibility evidence, not the source-of-truth worldview.",
+    );
+    expect(systemPrompt).toContain("Current profile: A patient fixer who trades in favors.");
+    expect(systemPrompt).toContain("Current beliefs: [Every debt can be collected]");
+    expect(systemPrompt).toContain("Current goals:\n  - [short] Stabilize the bazaar\n  - [long] Own the market district");
+    expect(systemPrompt).toContain("Recent evidence:");
+    expect(systemPrompt).toContain("Wealth changes require significant trade/loot events.");
+    expect(systemPrompt).toContain("Skill upgrades require 3+ successful uses of that skill.");
+    expect(systemPrompt).not.toContain("Legacy merchant persona");
+    expect(systemPrompt).not.toContain("legacy belief");
+    expect(systemPrompt).not.toContain("Use the legacy persona/goals/beliefs blobs as the main worldview");
+    expect(systemPrompt).not.toContain("Use tag-only worldview updates");
   });
 });
 
