@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Executing Phase 33
-stopped_at: Completed 33-11-PLAN.md
-last_updated: "2026-04-01T22:11:30.860Z"
+status: Ready to execute
+stopped_at: Completed 33-12-PLAN.md
+last_updated: "2026-04-01T22:19:38.452Z"
 progress:
   total_phases: 28
   completed_phases: 27
   total_plans: 100
-  completed_plans: 94
+  completed_plans: 95
 ---
 
 # Project State
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-03-18)
 ## Current Position
 
 Phase: 33 (browser-e2e-verification-for-redesigned-creation-flows) — EXECUTING
-Plan: 6 of 12 completed (latest: 33-11; pending: 33-06, 33-07, 33-08, 33-09, 33-10, 33-12)
+Plan: 7 of 12 completed (latest: 33-12; pending: 33-06, 33-07, 33-08, 33-09, 33-10)
 
 ## Performance Metrics
 
@@ -39,7 +39,7 @@ Plan: 6 of 12 completed (latest: 33-11; pending: 33-06, 33-07, 33-08, 33-09, 33-
 
 **Open Work:**
 
-- Active execution target: begin Phase 33 browser verification on top of the completed Phase 32 desktop shell migration
+- Active execution target: finish the remaining Phase 33 browser verification reruns on top of the completed Phase 32 desktop shell migration
 - Next required workflow step: unblock PinchTab localhost access, then resume Phase 33 browser reruns for launcher, campaign creation, world review, and character creation
 - Phase 29 and Phase 30 formal closeout still remain separate bookkeeping work, but they no longer block the Phase 32 UI output on the current baseline
 - Backlog items outside active execution order are tracked in `.planning/BACKLOG.md`
@@ -56,6 +56,7 @@ Plan: 6 of 12 completed (latest: 33-11; pending: 33-06, 33-07, 33-08, 33-09, 33-
 - Phase 31 added shared prompt contracts plus harmonized runtime, character, worldgen, NPC/reflection, Oracle, and world-engine wording without touching Phase 32 UI scope or browser E2E work.
 - The prerequisite backend and frontend targeted suites that blocked Wave 0 were rerun successfully during the Phase 32 resume pass, unblocking the UI overhaul.
 - Plan 33-11 completed on 2026-04-02 and recorded a PinchTab-only transport contract plus the current external blocker: the shared PinchTab browser can browse the public web but renders `chrome-error://chromewebdata/` for `http://localhost:3000/`.
+- Plan 33-12 completed on 2026-04-02 and closed the remaining `33-VERIFICATION.md` lint gap: the lore-section test now uses typed API mocks, `npm --prefix frontend run lint` exits 0, and the targeted lore-section Vitest suite still passes.
 
 ## Accumulated Context
 
@@ -218,6 +219,8 @@ Recent decisions affecting current work:
 - [Phase 33-browser-e2e-verification-for-redesigned-creation-flows]: The current failure is external to WorldForge because localhost responds on the host while PinchTab is attached to a shared proxied browser profile.
 - [Phase 33-browser-e2e-verification-for-redesigned-creation-flows]: Non-game shell visuals now flow through shell-specific CSS variables instead of generic card/sidebar theme buckets. — Gap 1 came from mixing generic shadcn surfaces and one-off route styling. A dedicated shell token layer removes the radius and surface drift at the source.
 - [Phase 33-browser-e2e-verification-for-redesigned-creation-flows]: Shared shell regressions assert data-shell-region and data-shell-surface hooks so page tests pin the contract without depending on one-off class strings. — The plan needed regressions that survive visual refinements. Semantic shell hooks keep the tests narrow to the shared shell contract instead of brittle cosmetic classes.
+- [Phase 33-browser-e2e-verification-for-redesigned-creation-flows]: The lore-section test now binds mocked API functions to the real @/lib/api signatures so the test contract stays explicit without changing behavior.
+- [Phase 33-browser-e2e-verification-for-redesigned-creation-flows]: Phase 33 closure evidence uses the actual npm --prefix frontend run lint exit code; unrelated warnings remain non-blocking because lint exits 0.
 
 ### Roadmap Evolution
 
@@ -247,12 +250,12 @@ Recent decisions affecting current work:
 ### Blockers/Concerns
 
 - Phase 33 browser reruns are blocked until PinchTab is restarted on the same host as the dev servers with a clean Chrome profile and no localhost proxy interception.
-- Phase 33 browser verification has not started yet; the redesigned non-game flows are only regression-covered at the Vitest level so far.
+- Phase 33 real-browser reruns are still blocked by the PinchTab localhost transport issue; only the lint-verification gap is now closed.
 - Phase 29 and Phase 30 still need their separate formal closeout and unrestricted verification work, even though the specific prerequisite bundle for Phase 32 is now green.
 - Repo-root Vitest still emits a non-blocking `environmentMatchGlobs` deprecation warning during frontend verification.
 
 ## Session Continuity
 
-Last session: 2026-04-01T22:12:21.002Z
-Stopped at: Completed 33-11-PLAN.md
+Last session: 2026-04-01T22:19:38.448Z
+Stopped at: Completed 33-12-PLAN.md
 Resume file: None

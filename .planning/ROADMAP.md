@@ -311,7 +311,7 @@ Note: Backlog phases (like 999.1) are tracked separately and are not part of the
 | 30. Start Conditions, Canonical Loadouts, and Persona Templates | 0/6 committed (+6 implemented) | Closeout Pending | - |
 | 31. Prompt System Harmonization & Audit | 7/7 | Complete   | 2026-04-01 |
 | 32. Desktop-First Non-Game UI Overhaul | 6/6 | Complete   | 2026-04-01 |
-| 33. Browser E2E Verification for Redesigned Creation Flows | 6/12 | In Progress|  |
+| 33. Browser E2E Verification for Redesigned Creation Flows | 7/12 | In Progress|  |
 
 ### Phase 16: NPC System QA — Three NPC Tiers + World Gen Integration
 
@@ -533,4 +533,4 @@ Plans:
 - [ ] 33-09-PLAN.md -- Known-IP browser re-verification plus world-review save/reload persistence
 - [ ] 33-10-PLAN.md -- Character browser re-verification plus persona/start-condition seams and `/game` handoff
 - [x] 33-11-PLAN.md -- Restore and prove the real browser localhost transport prerequisite for reruns
-- [ ] 33-12-PLAN.md -- Close the remaining lore-section lint gap and rerun frontend lint
+- [x] 33-12-PLAN.md -- Close the remaining lore-section lint gap and rerun frontend lint
