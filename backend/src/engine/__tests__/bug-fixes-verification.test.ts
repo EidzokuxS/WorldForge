@@ -62,6 +62,22 @@ describe("Bug 2: move_to tool in Storyteller tools", () => {
   });
 });
 
+describe("Runtime contract ownership in tool descriptions", () => {
+  it("keeps tool descriptions semantic instead of re-authoring narrator policy", async () => {
+    const { createStorytellerTools } = await import("../tool-schemas.js");
+    const tools = createStorytellerTools("test-campaign", 1, "weak_hit");
+
+    expect(tools.offer_quick_actions.description).toContain("Suggest 3-5 quick action options");
+    expect(tools.offer_quick_actions.description).not.toContain("after EVERY narration");
+
+    expect(tools.set_condition.description).toContain("Modify a player character's HP");
+    expect(tools.set_condition.description).not.toContain("light hit = -1");
+
+    expect(tools.move_to.description).toContain("Move the player to a connected location");
+    expect(tools.move_to.description).not.toContain("call reveal_location first");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Bug 3: NPC visibility in prompt
 // ---------------------------------------------------------------------------
