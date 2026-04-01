@@ -26,8 +26,8 @@ key-decisions:
 patterns-established:
   - "Downstream browser plans must reuse the recorded PinchTab smoke sequence before any flow-specific verification."
 requirements-completed: [P33-01, P33-02, P33-03, P33-04]
-duration: pending
-completed: pending
+duration: 8 min
+completed: 2026-04-02
 ---
 
 # Phase 33 Plan 11: Browser Transport Contract Summary
@@ -36,9 +36,9 @@ completed: pending
 
 ## Performance
 
-- **Duration:** pending
-- **Started:** pending
-- **Completed:** pending
+- **Duration:** 8 min
+- **Started:** 2026-04-02T01:03:10+03:00
+- **Completed:** 2026-04-02T01:11:30+03:00
 - **Tasks:** 2
 - **Files modified:** 2
 
@@ -52,10 +52,10 @@ completed: pending
 
 Each task was committed atomically:
 
-1. **Task 1: Restore the named PinchTab localhost path for Phase 33** - `pending` (docs)
-2. **Task 2: Record the reusable browser-transport contract for downstream reruns** - `pending` (docs)
+1. **Task 1: Restore the named PinchTab localhost path for Phase 33** - `508b52a` (docs)
+2. **Task 2: Record the reusable browser-transport contract for downstream reruns** - `9b94827` (docs)
 
-**Plan metadata:** `pending`
+**Plan metadata:** recorded in the final docs commit for this plan
 
 ## Reusable Contract
 
@@ -113,6 +113,16 @@ None - no repository configuration is missing. The missing prerequisite is an ex
 - Downstream browser rerun plans now have an explicit contract to reuse
 - Phase 33 remains blocked for real browser reruns until the PinchTab host/profile issue is resolved outside the repo
 
+## Known Stubs
+
+None - no stubbed UI/data placeholders were introduced by this plan.
+
+## Self-Check: PASSED
+
+- Verified file exists: `.planning/debug/phase-33-browser-transport.md`
+- Verified file exists: `.planning/phases/33-browser-e2e-verification-for-redesigned-creation-flows/33-11-SUMMARY.md`
+- Verified commits exist: `508b52a`, `9b94827`
+
 ---
 *Phase: 33-browser-e2e-verification-for-redesigned-creation-flows*
-*Completed: pending*
+*Completed: 2026-04-02*

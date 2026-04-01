@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Ready to execute
+status: Executing Phase 33
 stopped_at: Completed 33-11-PLAN.md
-last_updated: "2026-04-01T22:12:56.934Z"
+last_updated: "2026-04-01T22:11:30.860Z"
 progress:
   total_phases: 28
   completed_phases: 27
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-03-18)
 ## Current Position
 
 Phase: 33 (browser-e2e-verification-for-redesigned-creation-flows) — EXECUTING
-Plan: 3 of 12
+Plan: 6 of 12 completed (latest: 33-11; pending: 33-06, 33-07, 33-08, 33-09, 33-10, 33-12)
 
 ## Performance Metrics
 
@@ -40,7 +40,7 @@ Plan: 3 of 12
 **Open Work:**
 
 - Active execution target: begin Phase 33 browser verification on top of the completed Phase 32 desktop shell migration
-- Next required workflow step: run browser E2E validation for launcher, campaign creation, world review, character creation, and legacy-route redirects on the new shell routes
+- Next required workflow step: unblock PinchTab localhost access, then resume Phase 33 browser reruns for launcher, campaign creation, world review, and character creation
 - Phase 29 and Phase 30 formal closeout still remain separate bookkeeping work, but they no longer block the Phase 32 UI output on the current baseline
 - Backlog items outside active execution order are tracked in `.planning/BACKLOG.md`
 
@@ -55,6 +55,7 @@ Plan: 3 of 12
 - Phase 30 implementation pass on 2026-04-01 added shared contract types, backend start/loadout/template seams, campaign-scoped persona template routes, frontend API wiring, player editor controls, and NPC review persona plumbing directly in the worktree.
 - Phase 31 added shared prompt contracts plus harmonized runtime, character, worldgen, NPC/reflection, Oracle, and world-engine wording without touching Phase 32 UI scope or browser E2E work.
 - The prerequisite backend and frontend targeted suites that blocked Wave 0 were rerun successfully during the Phase 32 resume pass, unblocking the UI overhaul.
+- Plan 33-11 completed on 2026-04-02 and recorded a PinchTab-only transport contract plus the current external blocker: the shared PinchTab browser can browse the public web but renders `chrome-error://chromewebdata/` for `http://localhost:3000/`.
 
 ## Accumulated Context
 
@@ -245,6 +246,7 @@ Recent decisions affecting current work:
 
 ### Blockers/Concerns
 
+- Phase 33 browser reruns are blocked until PinchTab is restarted on the same host as the dev servers with a clean Chrome profile and no localhost proxy interception.
 - Phase 33 browser verification has not started yet; the redesigned non-game flows are only regression-covered at the Vitest level so far.
 - Phase 29 and Phase 30 still need their separate formal closeout and unrestricted verification work, even though the specific prerequisite bundle for Phase 32 is now green.
 - Repo-root Vitest still emits a non-blocking `environmentMatchGlobs` deprecation warning during frontend verification.
