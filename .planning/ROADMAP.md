@@ -33,9 +33,9 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 24: Worldgen Known IP Quality** - Canonical DNA/premise/locations/factions/NPCs with butterfly-effect changes, key vs supporting NPC tiers, research-grounded lore (completed 2026-03-25)
 - [x] **Phase 25: Replace premise-override heuristics with structured divergence interpretation** - Structured premise/world divergence interpretation for known-IP generation (completed 2026-03-30)
 - [x] **Phase 28: Research & Design Synthesis for Character Systems, Prompts, UI, and External References** - Consolidate prompt-engineering research, desktop UI patterns, character-model redesign direction, and Aventuras findings into a cohesive implementation spec (completed 2026-03-31)
-- [ ] **Phase 29: Unified Character Ontology & Tag System** - Replace flat noisy character tags with a shared structured profile model for player creation, NPC generation, editing, and runtime prompt usage
-- [ ] **Phase 30: Start Conditions, Canonical Loadouts, and Persona Templates** - Make start selection about location plus arrival conditions, derive starting items from canonical scenario state, and introduce reusable base personas for player/NPC generation
-- [ ] **Phase 31: Prompt System Harmonization & Audit** - Audit and refine prompts across worldgen, character, gameplay, and support systems so they operate as one coherent mechanism
+- [ ] **Phase 29: Unified Character Ontology & Tag System** - Replace flat noisy character tags with a shared structured profile model for player creation, NPC generation, editing, and runtime prompt usage (implementation is present across all 5 plans; only unrestricted verification/green closeout is still pending)
+- [ ] **Phase 30: Start Conditions, Canonical Loadouts, and Persona Templates** - Make start selection about location plus arrival conditions, derive starting items from canonical scenario state, and introduce reusable base personas for player/NPC generation (implementation pass completed in worktree on 2026-04-01; formal closeout still blocked by `.git` ACL denial plus sandbox `spawn EPERM`)
+- [x] **Phase 31: Prompt System Harmonization & Audit** - Audit and refine prompts across worldgen, character, gameplay, and support systems so they operate as one coherent mechanism (completed 2026-04-01)
 - [ ] **Phase 32: Desktop-First Non-Game UI Overhaul** - Redesign campaign creation, world review, character creation, settings, and other non-game flows for FHD/1440p desktop using Tailwind, shadcn, and compatible libraries only
 - [ ] **Phase 33: Browser E2E Verification for Redesigned Creation Flows** - Validate the new character/world creation, persona, prompt, and UI flows end-to-end in the browser and polish regressions
 
@@ -307,9 +307,9 @@ Note: Backlog phases (like 999.1) are tracked separately and are not part of the
 | 26. Reusable multi-worldbook library for campaign creation | 3/3 | Complete   | 2026-03-31 |
 | 27. Lore card editing and deletion | 3/3 | Complete   | 2026-03-31 |
 | 28. Research & Design Synthesis | 3/3 | Complete   | 2026-03-31 |
-| 29. Unified Character Ontology & Tag System | 0/0 | Not Started | - |
-| 30. Start Conditions, Canonical Loadouts, and Persona Templates | 0/0 | Not Started | - |
-| 31. Prompt System Harmonization & Audit | 0/0 | Not Started | - |
+| 29. Unified Character Ontology & Tag System | 2/5 committed (+3 implemented, 5/5 coded) | Closeout Pending | - |
+| 30. Start Conditions, Canonical Loadouts, and Persona Templates | 0/6 committed (+6 implemented) | Closeout Pending | - |
+| 31. Prompt System Harmonization & Audit | 7/7 | Complete   | 2026-04-01 |
 | 32. Desktop-First Non-Game UI Overhaul | 0/0 | Not Started | - |
 | 33. Browser E2E Verification for Redesigned Creation Flows | 0/0 | Not Started | - |
 
@@ -437,13 +437,14 @@ Plans:
   3. Any flat tags retained for engine/runtime use are derived from the structured profile, not treated as the source of truth.
   4. Existing editing and prompt assembly flows can read the new structure without regressing gameplay/runtime behavior.
 **Plans**: 5 plans
+**Execution Note:** All 5 plans now have implementation in the worktree. Only `29-01` and `29-02` reached formal green closeout; `29-03` through `29-05` are waiting on unrestricted regression runs and git closeout.
 
 Plans:
-- [ ] 29-01-PLAN.md -- Shared character contracts, derived runtime tags, and persistence bridge
-- [ ] 29-02-PLAN.md -- Shared draft pipeline for character, NPC, and scaffold writers
-- [ ] 29-03-PLAN.md -- Prompt and engine reader migration to structured character views
-- [ ] 29-04-PLAN.md -- Tool, reflection, and runtime mutation adapters for canonical character data
-- [ ] 29-05-PLAN.md -- Campaign/world payload and frontend editor migration to the shared model
+- [x] 29-01-PLAN.md -- Shared character contracts, derived runtime tags, and persistence bridge
+- [x] 29-02-PLAN.md -- Shared draft pipeline for character, NPC, and scaffold writers
+- [ ] 29-03-PLAN.md -- Prompt and engine reader migration to structured character views (implemented in worktree; unrestricted NPC Vitest + green closeout still pending)
+- [ ] 29-04-PLAN.md -- Tool, reflection, and runtime mutation adapters for canonical character data (implemented in worktree; unrestricted regression pass + green closeout still pending)
+- [ ] 29-05-PLAN.md -- Campaign/world payload and frontend editor migration to the shared model (implemented in worktree; unrestricted Vitest + green closeout still pending)
 
 ### Phase 30: Start Conditions, Canonical Loadouts, and Persona Templates
 
@@ -455,7 +456,16 @@ Plans:
   2. Starting equipment derives from the resolved starting scenario and canonical baseline, rather than from a detached vibe list.
   3. Persona templates can be created, stored, selected, and used to generate or parse both player characters and NPCs.
   4. World and character prompts receive structured start-condition context they can reason about consistently.
-**Plans**: 0 plans
+**Plans**: 6 plans
+**Execution Note:** All 6 plans were implemented in the worktree on 2026-04-01, but formal closeout is blocked by git write denial on `.git/index.lock` plus sandboxed Vitest `spawn EPERM`.
+
+Plans:
+- [ ] 30-01-PLAN.md -- Contract-first start/loadout/template foundations on the existing CharacterDraft seam (implemented in worktree; closeout pending)
+- [ ] 30-02-PLAN.md -- Structured start resolution plus backend-owned canonical loadout preview/materialization (implemented in worktree; closeout pending)
+- [ ] 30-03-PLAN.md -- Campaign-scoped persona template storage, apply routes, and world-payload wiring (implemented in worktree; closeout pending)
+- [ ] 30-04-PLAN.md -- Frontend client contracts and helper wiring for Phase 30 backend seams (implemented in worktree; closeout pending)
+- [ ] 30-05-PLAN.md -- Player-facing character editor integration for start conditions, templates, and loadout preview (implemented in worktree; closeout pending)
+- [ ] 30-06-PLAN.md -- World-review NPC integration for campaign persona templates and canonical draft context (implemented in worktree; closeout pending)
 
 ### Phase 31: Prompt System Harmonization & Audit
 
@@ -467,7 +477,16 @@ Plans:
   2. Prompts explicitly preserve user-provided facts, constrain structured outputs correctly, and reflect the new character/start-condition model.
   3. Prompt changes are justified by concrete research findings and verified through targeted regressions or browser/API checks.
   4. The system no longer contains obviously stale, contradictory, or noise-inducing prompt instructions in critical flows.
-**Plans**: 0 plans
+**Plans**: 7 plans
+
+Plans:
+- [x] 31-01-PLAN.md -- Shared prompt-contract anchors + stale-instruction audit harness
+- [x] 31-02-PLAN.md -- Runtime storyteller authority cleanup across prompt assembly, tools, and outcome framing
+- [x] 31-03-PLAN.md -- Player/NPC character prompt harmonization on the shared draft contract
+- [x] 31-04-PLAN.md -- Structured start-state and worldgen NPC prompt harmonization
+- [x] 31-05-PLAN.md -- Worldgen helper, seed, and lore prompt audit with canon/divergence preservation
+- [x] 31-06-PLAN.md -- NPC-agent and reflection support prompt audit
+- [x] 31-07-PLAN.md -- Oracle and world-engine support prompt audit
 
 ### Phase 32: Desktop-First Non-Game UI Overhaul
 

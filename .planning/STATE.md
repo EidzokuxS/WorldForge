@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Phase complete — ready for verification
-stopped_at: Completed 28-03-PLAN.md
-last_updated: "2026-03-31T21:40:41.282Z"
+status: Phase 31 prompt harmonization completed; Phase 29/30 formal closeout still pending before Phase 32
+stopped_at: Completed Phase 31 prompt-system harmonization and audit
+last_updated: "2026-04-01T14:31:00Z"
 progress:
   total_phases: 28
-  completed_phases: 23
-  total_plans: 64
-  completed_plans: 64
+  completed_phases: 24
+  total_plans: 82
+  completed_plans: 71
 ---
 
 # Project State
@@ -19,37 +19,42 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-18)
 
 **Core value:** The LLM is the narrator, never the engine. All mechanical outcomes are resolved by backend code.
-**Current focus:** Phase 28 research/design foundation for next character + UI milestone
+**Current focus:** Phase 31 is complete; remaining near-term execution risk is still formal Phase 29/30 closeout before Phase 32 UI work.
 
 ## Current Position
 
-Phase: 28 (Research & Design Synthesis for Character Systems, Prompts, UI, and External References) — READY TO START
-Plan: 0 of 0 complete
+Phase: 31 (prompt-system-harmonization-and-audit) — COMPLETE
+Plan: 7 of 7 complete
 
 ## Performance Metrics
 
 **Current Snapshot:**
 
 - Active roadmap phases: 28
-- Completed phases: 22
-- Planned or in-progress phases: 6
-- Total plans tracked: 61
-- Completed plans: 61
-- Pending plans: 0
+- Completed phases: 24
+- Planned or in-progress phases: 4
+- Total plans tracked: 82
+- Completed plans: 71
+- Pending plans: 11
 
 **Open Work:**
 
-- Active execution target: Phase 28
-- Next required workflow step: autonomous discuss/plan/execute for newly queued phases 28-33
-- Current phase queue covers research foundation, character ontology, start conditions/personas, prompt harmonization, UI overhaul, and browser verification
+- Active execution target: formal closeout for Phase 29 and Phase 30, which still trail the now-completed Phase 31 prompt audit
+- Next required workflow step: run unrestricted Phase 29/30 verification and finish their commit/docs replay before starting Phase 32 UI work
+- Current phase queue covers Phase 29 closure, Phase 30 formal closeout, Phase 32 UI overhaul, and Phase 33 browser verification
 - Backlog items outside active execution order are tracked in `.planning/BACKLOG.md`
 
 **Notes:**
 
 - Historical per-plan timing metrics from earlier GSD runs were removed during planning hygiene because they no longer matched the active roadmap after renumbering and archival cleanup.
 - Use `ROADMAP.md` progress plus phase directories as the source of truth for current execution state.
-- Latest execution: Phase 27 Plan 03 completed in 17 min (3 tasks, 5 files touched).
-- Active roadmap execution is complete through Phase 27.
+- Latest execution: Phase 31 completed on 2026-04-01 with 7/7 plans closed and per-task commits recorded across the full prompt audit.
+- Phase 29 execution started on 2026-04-01. Plans 29-01 and 29-02 are complete and committed.
+- Plans 29-03 and 29-04 still have their canonical runtime/runtime-mutation implementations in the worktree; targeted backend TypeScript filtering remained clean during the 2026-04-01 resume pass, but unrestricted Vitest and green commits are still pending.
+- Plan 29-05 was resumed on 2026-04-01 and the remaining editor migration was completed in worktree: character pages now store `CharacterDraft`, the character card edits grouped draft fields, and the NPC review section edits draft-backed NPCs while preserving scaffold compatibility.
+- Phase 30 implementation pass on 2026-04-01 added shared contract types, backend start/loadout/template seams, campaign-scoped persona template routes, frontend API wiring, player editor controls, and NPC review persona plumbing directly in the worktree.
+- Phase 31 added shared prompt contracts plus harmonized runtime, character, worldgen, NPC/reflection, Oracle, and world-engine wording without touching Phase 32 UI scope or browser E2E work.
+- Prior Git ACL and sandbox `spawn EPERM` blockers that affected the earlier Phase 29/30 closeout attempt no longer applied to Phase 31 execution, but those phases still need their formal replay/verification path completed.
 
 ## Accumulated Context
 
@@ -193,6 +198,8 @@ Recent decisions affecting current work:
 - [Phase 28]: Phase 31 must audit prompt families by task boundary, not treat the prompt system as one monolith.
 - [Phase 28]: Prompt rewrites must consume structured character and start-condition fields before any derived runtime tags.
 - [Phase 28]: Runtime, character, and worldgen prompt families should centralize shared contract fragments instead of repeating contradictory copies.
+- [Phase 31]: Phase 31 centralized canonical prompt vocabulary into shared helpers and reused it across runtime, character, worldgen, and support prompts.
+- [Phase 31]: Support prompt audits preserve narrow task boundaries: Oracle stays deterministic, world-engine stays macro-concrete, and NPC/reflection prompts stay canonical-state-first.
 
 ### Roadmap Evolution
 
@@ -225,6 +232,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-31T21:40:41.279Z
-Stopped at: Completed 28-03-PLAN.md
+Last session: 2026-04-01T14:30:19Z
+Stopped at: Completed Phase 31 prompt-system harmonization and audit
 Resume file: None
