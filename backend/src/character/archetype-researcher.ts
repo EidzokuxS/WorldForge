@@ -22,7 +22,7 @@ export async function researchArchetype(opts: {
           model: createModel(opts.role.provider),
           tools,
           stopWhen: stepCountIs(maxSteps),
-          prompt: `Research the character archetype "${opts.archetype}". Find key personality traits, abilities, backstory elements, motivations, and signature characteristics. Summarize in 3-5 paragraphs suitable for inspiring an original RPG character.`,
+          prompt: `Research the character archetype "${opts.archetype}" to support a shared CharacterDraft pipeline. Summarize the archetype in sections that feed canonical drafting: profile, motivations, capabilities, background hooks, social context cues, and signature traits. Keep the summary concrete enough to inspire an original RPG character without copying canon wholesale.`,
           temperature: opts.role.temperature,
         });
         if (result.text?.trim()) return result.text;
@@ -31,7 +31,7 @@ export async function researchArchetype(opts: {
       async () => {
         const result = await generateText({
           model: createModel(opts.role.provider),
-          prompt: `Describe the character archetype "${opts.archetype}" — key personality traits, abilities, backstory elements, motivations, and signature characteristics. 3-5 paragraphs.`,
+          prompt: `Describe the character archetype "${opts.archetype}" for the shared CharacterDraft pipeline. Cover profile, motivations, capabilities, background hooks, social context cues, and signature traits in a compact research summary for an original RPG character.`,
           temperature: opts.role.temperature,
           maxOutputTokens: opts.role.maxTokens,
         });
