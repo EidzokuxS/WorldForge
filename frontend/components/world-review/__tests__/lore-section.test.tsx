@@ -4,8 +4,11 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
 import { useState } from "react";
 import type { LoreCardItem, LoreCardUpdateInput } from "@/lib/api-types";
+
+type MockProps = Record<string, unknown> & { children?: ReactNode };
 
 const apiMocks = vi.hoisted(() => ({
   searchLore: vi.fn(),
@@ -33,51 +36,51 @@ vi.mock("@/lib/api-types", () => ({
 }), { virtual: true });
 
 vi.mock("@/components/ui/badge", () => ({
-  Badge: ({ children, ...props }: any) => <span {...props}>{children}</span>,
+  Badge: ({ children, ...props }: MockProps) => <span {...props}>{children}</span>,
 }), { virtual: true });
 
 vi.mock("@/components/ui/button", () => ({
-  Button: ({ children, ...props }: any) => <button {...props}>{children}</button>,
+  Button: ({ children, ...props }: MockProps) => <button {...props}>{children}</button>,
 }), { virtual: true });
 
 vi.mock("@/components/ui/dialog", () => ({
-  Dialog: ({ open, children }: any) => (open ? <div>{children}</div> : null),
-  DialogContent: ({ children }: any) => <div role="dialog" aria-label="Edit Lore Card">{children}</div>,
-  DialogDescription: ({ children }: any) => <p>{children}</p>,
-  DialogFooter: ({ children }: any) => <div>{children}</div>,
-  DialogHeader: ({ children }: any) => <div>{children}</div>,
-  DialogTitle: ({ children }: any) => <h2>{children}</h2>,
+  Dialog: ({ open, children }: MockProps) => (open ? <div>{children}</div> : null),
+  DialogContent: ({ children }: MockProps) => <div role="dialog" aria-label="Edit Lore Card">{children}</div>,
+  DialogDescription: ({ children }: MockProps) => <p>{children}</p>,
+  DialogFooter: ({ children }: MockProps) => <div>{children}</div>,
+  DialogHeader: ({ children }: MockProps) => <div>{children}</div>,
+  DialogTitle: ({ children }: MockProps) => <h2>{children}</h2>,
 }), { virtual: true });
 
 vi.mock("@/components/ui/input", () => ({
-  Input: (props: any) => <input {...props} />,
+  Input: (props: MockProps) => <input {...props} />,
 }), { virtual: true });
 
 vi.mock("@/components/ui/label", () => ({
-  Label: ({ children, ...props }: any) => <label {...props}>{children}</label>,
+  Label: ({ children, ...props }: MockProps) => <label {...props}>{children}</label>,
 }), { virtual: true });
 
 vi.mock("@/components/ui/select", () => ({
-  Select: ({ children }: any) => <div>{children}</div>,
-  SelectContent: ({ children }: any) => <div>{children}</div>,
-  SelectItem: ({ children }: any) => <div>{children}</div>,
-  SelectTrigger: ({ children, ...props }: any) => <button type="button" {...props}>{children}</button>,
-  SelectValue: ({ placeholder }: any) => <span>{placeholder ?? null}</span>,
+  Select: ({ children }: MockProps) => <div>{children}</div>,
+  SelectContent: ({ children }: MockProps) => <div>{children}</div>,
+  SelectItem: ({ children }: MockProps) => <div>{children}</div>,
+  SelectTrigger: ({ children, ...props }: MockProps) => <button type="button" {...props}>{children}</button>,
+  SelectValue: ({ placeholder }: MockProps) => <span>{placeholder ?? null}</span>,
 }), { virtual: true });
 
 vi.mock("@/components/ui/textarea", () => ({
-  Textarea: ({ children, ...props }: any) => <textarea {...props}>{children}</textarea>,
+  Textarea: ({ children, ...props }: MockProps) => <textarea {...props}>{children}</textarea>,
 }), { virtual: true });
 
 vi.mock("@/components/ui/alert-dialog", () => ({
-  AlertDialog: ({ open, children }: any) => (open ? <div>{children}</div> : null),
-  AlertDialogAction: ({ children, ...props }: any) => <button {...props}>{children}</button>,
-  AlertDialogCancel: ({ children, ...props }: any) => <button {...props}>{children}</button>,
-  AlertDialogContent: ({ children }: any) => <div role="alertdialog" aria-label="Delete Lore Card">{children}</div>,
-  AlertDialogDescription: ({ children }: any) => <p>{children}</p>,
-  AlertDialogFooter: ({ children }: any) => <div>{children}</div>,
-  AlertDialogHeader: ({ children }: any) => <div>{children}</div>,
-  AlertDialogTitle: ({ children }: any) => <h2>{children}</h2>,
+  AlertDialog: ({ open, children }: MockProps) => (open ? <div>{children}</div> : null),
+  AlertDialogAction: ({ children, ...props }: MockProps) => <button {...props}>{children}</button>,
+  AlertDialogCancel: ({ children, ...props }: MockProps) => <button {...props}>{children}</button>,
+  AlertDialogContent: ({ children }: MockProps) => <div role="alertdialog" aria-label="Delete Lore Card">{children}</div>,
+  AlertDialogDescription: ({ children }: MockProps) => <p>{children}</p>,
+  AlertDialogFooter: ({ children }: MockProps) => <div>{children}</div>,
+  AlertDialogHeader: ({ children }: MockProps) => <div>{children}</div>,
+  AlertDialogTitle: ({ children }: MockProps) => <h2>{children}</h2>,
 }), { virtual: true });
 
 vi.mock("../worldbook-import-dialog", () => ({
