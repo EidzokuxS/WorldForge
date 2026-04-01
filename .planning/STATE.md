@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Milestone complete
-stopped_at: Completed 33-03-PLAN.md
-last_updated: "2026-04-01T20:14:45.926Z"
+status: Ready to execute
+stopped_at: Completed 33-11-PLAN.md
+last_updated: "2026-04-01T22:12:56.934Z"
 progress:
   total_phases: 28
-  completed_phases: 28
-  total_plans: 92
-  completed_plans: 92
+  completed_phases: 27
+  total_plans: 100
+  completed_plans: 94
 ---
 
 # Project State
@@ -23,8 +23,8 @@ See: .planning/PROJECT.md (updated 2026-03-18)
 
 ## Current Position
 
-Phase: 33
-Plan: Not started
+Phase: 33 (browser-e2e-verification-for-redesigned-creation-flows) — EXECUTING
+Plan: 3 of 12
 
 ## Performance Metrics
 
@@ -213,6 +213,10 @@ Recent decisions affecting current work:
 - [Phase 33]: No bugs found in original-world creation flow -- all shell routes, API endpoints, and SSE generation work correctly
 - [Phase 33]: Known-IP world review verified: campaign creation, scaffold generation, all 5 sections, editing persistence, NPC creation, section regeneration, and lore search all pass with real GLM LLM calls
 - [Phase 33]: Parallel agent DB contention is a known operational issue: singleton DB connection gets switched when concurrent agents load different campaigns during long-running operations
+- [Phase 33-browser-e2e-verification-for-redesigned-creation-flows]: Phase 33 reruns remain PinchTab-only; when the bridge cannot render localhost, the plan records a concrete blocker instead of substituting another transport.
+- [Phase 33-browser-e2e-verification-for-redesigned-creation-flows]: The current failure is external to WorldForge because localhost responds on the host while PinchTab is attached to a shared proxied browser profile.
+- [Phase 33-browser-e2e-verification-for-redesigned-creation-flows]: Non-game shell visuals now flow through shell-specific CSS variables instead of generic card/sidebar theme buckets. — Gap 1 came from mixing generic shadcn surfaces and one-off route styling. A dedicated shell token layer removes the radius and surface drift at the source.
+- [Phase 33-browser-e2e-verification-for-redesigned-creation-flows]: Shared shell regressions assert data-shell-region and data-shell-surface hooks so page tests pin the contract without depending on one-off class strings. — The plan needed regressions that survive visual refinements. Semantic shell hooks keep the tests narrow to the shared shell contract instead of brittle cosmetic classes.
 
 ### Roadmap Evolution
 
@@ -247,6 +251,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-01T19:58:53.375Z
-Stopped at: Completed 33-03-PLAN.md
+Last session: 2026-04-01T22:12:21.002Z
+Stopped at: Completed 33-11-PLAN.md
 Resume file: None
