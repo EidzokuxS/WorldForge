@@ -498,7 +498,14 @@ Plans:
   2. The redesign uses Tailwind, shadcn, and compatible libraries only, with no custom CSS files introduced.
   3. Character creation and world review especially reflect the new ontology/start/persona systems cleanly.
   4. The redesign respects existing visual language where appropriate but removes the current broken or clumsy workflow hotspots.
-**Plans**: 0 plans
+**Plans**: 5 plans
+
+Plans:
+- [ ] 32-01-PLAN.md -- Shared non-game shell foundation, route-group layout, and shadcn shell primitives
+- [ ] 32-02-PLAN.md -- Routed launcher plus `/campaign/new` and `/campaign/new/dna` creation workspaces
+- [ ] 32-03-PLAN.md -- Shell adoption for `/settings` plus canonical `/library` workspace
+- [ ] 32-04-PLAN.md -- Desktop world-review workspace on canonical campaign route plus legacy redirect cleanup
+- [ ] 32-05-PLAN.md -- Desktop character-authoring workspace plus legacy redirect and `/game` compatibility guard
 
 ### Phase 33: Browser E2E Verification for Redesigned Creation Flows
 
