@@ -18,6 +18,23 @@ interface ConceptWorkspaceProps {
 export function ConceptWorkspace({ onContinue }: ConceptWorkspaceProps) {
   const w = useCampaignNewFlow();
   const selectedWorldbookIds = new Set(w.selectedWorldbooks.map((item) => item.id));
+  const missingCampaignName = w.campaignName.trim().length === 0;
+  const missingPremise = w.campaignPremise.trim().length === 0 && !w.hasWorldbook;
+  const conceptValidationMessage =
+    missingCampaignName || missingPremise
+      ? "Enter a campaign name and premise, or select a source, before continuing into DNA."
+      : null;
+  const activeProgressLabel = w.generationProgress?.label ?? (w.isSuggesting ? "Preparing World DNA suggestions..." : null);
+  const activeProgressStep =
+    w.generationProgress && w.generationProgress.totalSteps > 0
+      ? `Step ${w.generationProgress.step} of ${w.generationProgress.totalSteps}`
+      : null;
+  const createLabel = w.isGenerating
+    ? "Generating World..."
+    : w.creatingCampaign
+      ? "Creating Campaign..."
+      : "Create World Now";
+  const continueLabel = w.isSuggesting ? "Preparing DNA..." : "Continue to DNA";
 
   return (
     <div className="space-y-6">
@@ -162,16 +179,26 @@ export function ConceptWorkspace({ onContinue }: ConceptWorkspaceProps) {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm font-medium text-bone">Concept status</p>
-            <p className="text-xs text-muted-foreground">
-              Name, premise or selected source, and research context persist into the DNA route through the shared layout provider.
+            <p className={`text-xs ${conceptValidationMessage ? "text-destructive" : "text-muted-foreground"}`}>
+              {conceptValidationMessage
+                ?? "Name, premise or selected source, and research context persist into the DNA route through the shared layout provider."}
             </p>
+            {activeProgressLabel ? (
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <span>{activeProgressLabel}</span>
+                {activeProgressStep ? <span>{activeProgressStep}</span> : null}
+              </div>
+            ) : null}
           </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={() => void w.handleCreateWithSeeds()} disabled={!w.canCreate}>
-              Create World Now
+              {w.creatingCampaign ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {createLabel}
             </Button>
             <Button onClick={() => void onContinue()} disabled={!w.canCreate}>
-              Continue to DNA
+              {w.isSuggesting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {continueLabel}
             </Button>
           </div>
         </div>

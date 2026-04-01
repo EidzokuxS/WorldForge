@@ -6,6 +6,12 @@ import { fetchSettings } from "@/lib/api";
 import { createDefaultSettings } from "@/lib/settings";
 import type { Settings } from "@/lib/types";
 import { useNewCampaignWizard } from "@/components/title/use-new-campaign-wizard";
+import {
+  clearCampaignNewFlowSession,
+  isCampaignNewFlowSessionEmpty,
+  readCampaignNewFlowSession,
+  writeCampaignNewFlowSession,
+} from "@/components/campaign-new/flow-session";
 
 type CampaignNewFlowValue = ReturnType<typeof useNewCampaignWizard> & {
   settings: Settings | null;
@@ -17,7 +23,8 @@ const CampaignNewFlowContext = React.createContext<CampaignNewFlowValue | null>(
 export function CampaignNewFlowProvider({ children }: { children: React.ReactNode }) {
   const [settings, setSettings] = React.useState<Settings | null>(null);
   const [settingsLoading, setSettingsLoading] = React.useState(true);
-  const wizard = useNewCampaignWizard(settings, () => {});
+  const [initialSession] = React.useState(() => readCampaignNewFlowSession());
+  const wizard = useNewCampaignWizard(settings, () => {}, { initialSession });
 
   React.useEffect(() => {
     let cancelled = false;
@@ -47,6 +54,52 @@ export function CampaignNewFlowProvider({ children }: { children: React.ReactNod
   React.useEffect(() => {
     wizard.handleOpenChange(true);
   }, []);
+
+  React.useEffect(() => {
+    const phase =
+      wizard.suggestingCategory
+        ? { kind: "suggesting-category" as const, category: wizard.suggestingCategory }
+        : wizard.isSuggesting
+          ? { kind: "suggesting-all" as const }
+          : wizard.isGenerating
+            ? { kind: "generating" as const }
+            : wizard.creatingCampaign
+              ? { kind: "creating" as const }
+              : { kind: "idle" as const };
+
+    const session = {
+      version: 1 as const,
+      campaignName: wizard.campaignName,
+      campaignPremise: wizard.campaignPremise,
+      campaignFranchise: wizard.campaignFranchise,
+      researchEnabled: wizard.researchEnabled,
+      selectedWorldbooks: wizard.selectedWorldbooks,
+      dnaState: wizard.dnaState,
+      step: wizard.step,
+      phase,
+      generationProgress: wizard.generationProgress,
+    };
+
+    if (isCampaignNewFlowSessionEmpty(session)) {
+      clearCampaignNewFlowSession();
+      return;
+    }
+
+    writeCampaignNewFlowSession(session);
+  }, [
+    wizard.campaignFranchise,
+    wizard.campaignName,
+    wizard.campaignPremise,
+    wizard.creatingCampaign,
+    wizard.dnaState,
+    wizard.generationProgress,
+    wizard.isGenerating,
+    wizard.isSuggesting,
+    wizard.researchEnabled,
+    wizard.selectedWorldbooks,
+    wizard.step,
+    wizard.suggestingCategory,
+  ]);
 
   const value = React.useMemo(
     () => ({

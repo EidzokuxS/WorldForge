@@ -22,6 +22,7 @@ import type {
 } from "@/lib/api";
 import { getErrorMessage } from "@/lib/settings";
 import type { PremiseDivergence, SeedCategory, Settings, WorldSeeds } from "@/lib/types";
+import type { CampaignNewFlowSession } from "@/components/campaign-new/flow-session";
 import {
   type CampaignMeta,
   type DnaState,
@@ -77,22 +78,35 @@ type Phase =
   | { kind: "creating" }
   | { kind: "generating" };
 
-export function useNewCampaignWizard(settings: Settings | null, onCreated: () => void) {
+type UseNewCampaignWizardOptions = {
+  initialSession?: CampaignNewFlowSession | null;
+};
+
+export function useNewCampaignWizard(
+  settings: Settings | null,
+  onCreated: () => void,
+  options?: UseNewCampaignWizardOptions,
+) {
   const router = useRouter();
+  const initialSession = options?.initialSession ?? null;
   const [open, setOpen] = useState(false);
-  const [step, setStep] = useState<1 | 2>(1);
-  const [campaignName, setCampaignName] = useState("");
-  const [campaignPremise, setCampaignPremise] = useState("");
-  const [campaignFranchise, setCampaignFranchise] = useState("");
-  const [researchEnabled, setResearchEnabled] = useState(true);
-  const [dnaState, setDnaState] = useState<DnaState | null>(null);
-  const [phase, setPhase] = useState<Phase>({ kind: "idle" });
-  const [generationProgress, setGenerationProgress] = useState<GenerationProgress | null>(null);
+  const [step, setStep] = useState<1 | 2>(initialSession?.step ?? 1);
+  const [campaignName, setCampaignName] = useState(initialSession?.campaignName ?? "");
+  const [campaignPremise, setCampaignPremise] = useState(initialSession?.campaignPremise ?? "");
+  const [campaignFranchise, setCampaignFranchise] = useState(initialSession?.campaignFranchise ?? "");
+  const [researchEnabled, setResearchEnabled] = useState(initialSession?.researchEnabled ?? true);
+  const [dnaState, setDnaState] = useState<DnaState | null>(initialSession?.dnaState ?? null);
+  const [phase, setPhase] = useState<Phase>((initialSession?.phase as Phase | undefined) ?? { kind: "idle" });
+  const [generationProgress, setGenerationProgress] = useState<GenerationProgress | null>(
+    initialSession?.generationProgress ?? null,
+  );
   const [ipContext, setIpContext] = useState<IpContext | null>(null);
   const [premiseDivergence, setPremiseDivergence] = useState<PremiseDivergence | null>(null);
 
   const [worldbookLibrary, setWorldbookLibrary] = useState<WorldbookLibraryItem[]>([]);
-  const [selectedWorldbooks, setSelectedWorldbooks] = useState<WorldbookLibraryItem[]>([]);
+  const [selectedWorldbooks, setSelectedWorldbooks] = useState<WorldbookLibraryItem[]>(
+    initialSession?.selectedWorldbooks ?? [],
+  );
   const [worldbookLibraryLoading, setWorldbookLibraryLoading] = useState(false);
   const [worldbookStatus, setWorldbookStatus] = useState<"idle" | "importing" | "done" | "error">("idle");
   const [worldbookError, setWorldbookError] = useState<string | null>(null);
@@ -507,8 +521,26 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
   }
 
   async function handleCreateWithDna() {
+    if (!dnaState) {
+      setStep(2);
+      setDnaState(createEmptyDnaState());
+      toast.error("Prepare World DNA first.", {
+        description: "Continue from concept to generate suggestions, or add at least one manual seed before creating the world.",
+      });
+      return;
+    }
+
     const enabledSeeds = collectEnabledSeeds(dnaState);
+    if (!enabledSeeds) {
+      toast.error("Add at least one DNA seed before generating the world.");
+      return;
+    }
     await createCampaignWithSeeds(enabledSeeds);
+  }
+
+  function handlePrepareManualDna() {
+    setStep(2);
+    setDnaState((current) => current ?? createEmptyDnaState());
   }
 
   return {
@@ -554,6 +586,7 @@ export function useNewCampaignWizard(settings: Settings | null, onCreated: () =>
     handleSeedToggle,
     handleSeedTextChange,
     handleCreateWithDna,
+    handlePrepareManualDna,
     handleWorldbookUpload,
     toggleWorldbookSelection,
   };

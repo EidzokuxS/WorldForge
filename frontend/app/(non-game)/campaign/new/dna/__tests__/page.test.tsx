@@ -68,7 +68,7 @@ describe("CampaignDnaPage", () => {
 
     expect(screen.getByText("Generating factions")).toBeInTheDocument();
     expect(screen.getByText("Step 3 of 5")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Create World" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Generating World..." })).toBeDisabled();
   });
 
   it("replaces the dead fallback with actionable recovery guidance when DNA is still empty", () => {
