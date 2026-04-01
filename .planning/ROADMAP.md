@@ -310,7 +310,7 @@ Note: Backlog phases (like 999.1) are tracked separately and are not part of the
 | 29. Unified Character Ontology & Tag System | 2/5 committed (+3 implemented, 5/5 coded) | Closeout Pending | - |
 | 30. Start Conditions, Canonical Loadouts, and Persona Templates | 0/6 committed (+6 implemented) | Closeout Pending | - |
 | 31. Prompt System Harmonization & Audit | 7/7 | Complete   | 2026-04-01 |
-| 32. Desktop-First Non-Game UI Overhaul | 0/0 | Not Started | - |
+| 32. Desktop-First Non-Game UI Overhaul | 1/6 | In Progress|  |
 | 33. Browser E2E Verification for Redesigned Creation Flows | 0/0 | Not Started | - |
 
 ### Phase 16: NPC System QA — Three NPC Tiers + World Gen Integration
@@ -493,14 +493,16 @@ Plans:
 **Goal:** Redesign the non-game product surface so campaign creation, world review, character creation, settings, and adjacent flows feel intentional, desktop-first, and production-ready.
 **Requirements**: P32-01, P32-02, P32-03, P32-04, P32-05, P32-06
 **Depends on:** Phase 31
+**Execution Note:** Start with a Wave 0 prerequisite gate that re-confirms the pending Phase 29/30 closeout baseline before any Phase 32 shell or route migration begins.
 **Success Criteria** (what must be TRUE):
   1. Non-game screens are visibly reworked for FHD/1440p desktop usage with better hierarchy, density, workflows, and visual consistency.
   2. The redesign uses Tailwind, shadcn, and compatible libraries only, with no custom CSS files introduced.
   3. Character creation and world review especially reflect the new ontology/start/persona systems cleanly.
   4. The redesign respects existing visual language where appropriate but removes the current broken or clumsy workflow hotspots.
-**Plans**: 5 plans
+**Plans**: 6 plans
 
 Plans:
+- [x] 32-00-PLAN.md -- Wave 0 prerequisite gate for the current Phase 29/30 worktree baseline
 - [ ] 32-01-PLAN.md -- Shared non-game shell foundation, route-group layout, and shadcn shell primitives
 - [ ] 32-02-PLAN.md -- Routed launcher plus `/campaign/new` and `/campaign/new/dna` creation workspaces
 - [ ] 32-03-PLAN.md -- Shell adoption for `/settings` plus canonical `/library` workspace
