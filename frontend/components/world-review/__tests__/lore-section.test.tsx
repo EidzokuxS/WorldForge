@@ -9,11 +9,14 @@ import { useState } from "react";
 import type { LoreCardItem, LoreCardUpdateInput } from "@/lib/api-types";
 
 type MockProps = Record<string, unknown> & { children?: ReactNode };
+type SearchLore = typeof import("@/lib/api").searchLore;
+type UpdateLoreCard = typeof import("@/lib/api").updateLoreCard;
+type DeleteLoreCardById = typeof import("@/lib/api").deleteLoreCardById;
 
 const apiMocks = vi.hoisted(() => ({
-  searchLore: vi.fn(),
-  updateLoreCard: vi.fn(),
-  deleteLoreCardById: vi.fn(),
+  searchLore: vi.fn<SearchLore>(),
+  updateLoreCard: vi.fn<UpdateLoreCard>(),
+  deleteLoreCardById: vi.fn<DeleteLoreCardById>(),
 }));
 
 vi.mock("@/lib/api", () => ({
