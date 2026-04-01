@@ -121,6 +121,68 @@ function buildScaffold(): WorldScaffold {
         locationName: "Castle Keep",
         factionName: "Iron Guard",
         tier: "key" as const,
+        draft: {
+          identity: {
+            role: "npc",
+            tier: "key",
+            displayName: "Captain Aldric",
+            canonicalStatus: "original",
+          },
+          profile: {
+            species: "Human",
+            gender: "",
+            ageText: "",
+            appearance: "",
+            backgroundSummary: "A veteran commander.",
+            personaSummary: "A stern but fair military commander.",
+          },
+          socialContext: {
+            factionId: null,
+            factionName: "Iron Guard",
+            homeLocationId: null,
+            homeLocationName: null,
+            currentLocationId: null,
+            currentLocationName: "Castle Keep",
+            relationshipRefs: [],
+            socialStatus: [],
+            originMode: "resident",
+          },
+          motivations: {
+            shortTermGoals: ["Patrol borders"],
+            longTermGoals: ["Unite the kingdoms"],
+            beliefs: [],
+            drives: ["Duty-bound"],
+            frictions: [],
+          },
+          capabilities: {
+            traits: ["Veteran"],
+            skills: [{ name: "Commander", tier: "Skilled" }],
+            flaws: [],
+            specialties: [],
+            wealthTier: null,
+          },
+          state: {
+            hp: 5,
+            conditions: [],
+            statusFlags: [],
+            activityState: "active",
+          },
+          loadout: {
+            inventorySeed: [],
+            equippedItemRefs: [],
+            currencyNotes: "",
+            signatureItems: [],
+          },
+          startConditions: {},
+          provenance: {
+            sourceKind: "worldgen",
+            importMode: null,
+            templateId: null,
+            archetypePrompt: null,
+            worldgenOrigin: "scaffold",
+            legacyTags: [],
+          },
+        },
       },
       {
         name: "Mira the Wanderer",
@@ -223,6 +285,8 @@ describe("saveScaffoldToDb", () => {
         long_term: ["Unite the kingdoms"],
       }),
     );
+    expect(aldric.characterRecord).toBeDefined();
+    expect(aldric.derivedTags).toBeDefined();
   });
 
   it("NPC with unknown locationName gets null currentLocationId", () => {

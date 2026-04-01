@@ -100,12 +100,28 @@ describe("generateNpcsStep", () => {
         locationName: "Observation Deck",
         factionName: "Station Authority",
         tier: "key",
+        draft: expect.objectContaining({
+          identity: expect.objectContaining({
+            role: "npc",
+            displayName: "Dr. Kel",
+          }),
+          socialContext: expect.objectContaining({
+            currentLocationName: "Observation Deck",
+            factionName: "Station Authority",
+          }),
+        }),
       }),
       expect.objectContaining({
         name: "Mara Voss",
         locationName: "Dock Bazaar",
         factionName: null,
         tier: "supporting",
+        draft: expect.objectContaining({
+          identity: expect.objectContaining({
+            role: "npc",
+            displayName: "Mara Voss",
+          }),
+        }),
       }),
     ]);
   });
