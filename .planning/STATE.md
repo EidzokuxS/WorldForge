@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 33-07-PLAN.md
-last_updated: "2026-04-01T22:30:16.461Z"
+stopped_at: Completed 33-06-PLAN.md
+last_updated: "2026-04-01T22:31:34.653Z"
 progress:
   total_phases: 28
   completed_phases: 27
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-03-18)
 ## Current Position
 
 Phase: 33 (browser-e2e-verification-for-redesigned-creation-flows) — EXECUTING
-Plan: 9 of 12 completed (latest committed this session: 33-07; pending: 33-06, 33-08, 33-09, 33-10)
+Plan: 9 of 12 completed (latest session closeout: 33-06; pending: 33-08, 33-09, 33-10)
 
 ## Performance Metrics
 
@@ -57,6 +57,7 @@ Plan: 9 of 12 completed (latest committed this session: 33-07; pending: 33-06, 3
 - The prerequisite backend and frontend targeted suites that blocked Wave 0 were rerun successfully during the Phase 32 resume pass, unblocking the UI overhaul.
 - Plan 33-11 completed on 2026-04-02 and recorded a PinchTab-only transport contract plus the current external blocker: the shared PinchTab browser can browse the public web but renders `chrome-error://chromewebdata/` for `http://localhost:3000/`.
 - Plan 33-12 completed on 2026-04-02 and closed the remaining `33-VERIFICATION.md` lint gap: the lore-section test now uses typed API mocks, `npm --prefix frontend run lint` exits 0, and the targeted lore-section Vitest suite still passes.
+- Plan 33-06 completed on 2026-04-02 and restored routed concept/DNA persistence plus visible suggestion/generation progress for `/campaign/new` and `/campaign/new/dna`.
 
 ## Accumulated Context
 
@@ -261,5 +262,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-04-01T22:32:47.539Z
-Stopped at: Completed 33-07-PLAN.md
+Stopped at: Completed 33-06-PLAN.md
 Resume file: None
