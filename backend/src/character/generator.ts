@@ -7,6 +7,7 @@ import { buildV2CardSections } from "./v2-sections.js";
 import { buildImportModeGuidance, normalizeImportedTags } from "./import-utils.js";
 import type { CharacterImportMode } from "./import-utils.js";
 import { fromLegacyPlayerCharacter } from "./record-adapters.js";
+import { buildCharacterPromptContract } from "./prompt-contract.js";
 
 const characterSchema = z.object({
   name: z.string().describe("Character's full name"),
@@ -41,6 +42,19 @@ const characterSchema = z.object({
 type LegacyGeneratedPlayer = z.infer<typeof characterSchema>;
 
 export type ParsedCharacter = CharacterDraft;
+
+const PLAYER_DRAFT_CONTRACT = buildCharacterPromptContract({
+  roleEmphasis:
+    "For player drafting, use the shared draft pipeline: keep identity, profile, socialContext, motivations, capabilities, state, loadout, startConditions, and provenance coherent for one protagonist.",
+});
+
+const PLAYER_COMPATIBILITY_OUTPUT_RULES = `Return the compatibility projection required by this schema:
+- name maps from identity.displayName.
+- race, gender, age, and appearance map from profile.
+- tags are derived runtime tags: a compatibility view over the canonical profile, motivations, capabilities, state, and social context.
+- hp maps from state.hp.
+- equippedItems maps from the opening loadout.
+- locationName is the opening location alias chosen from the known locations while startConditions remains the authoritative opening-state reasoning.`;
 
 // Compile-time check: the LLM shape still matches the compatibility player contract.
 null as unknown as LegacyGeneratedPlayer satisfies PlayerCharacter;
@@ -87,6 +101,10 @@ ${opts.locationNames.map((n) => `- ${n}`).join("\n")}
 PLAYER'S CHARACTER DESCRIPTION:
 ${opts.description}
 
+SHARED CONTRACT:
+${PLAYER_DRAFT_CONTRACT}
+${PLAYER_COMPATIBILITY_OUTPUT_RULES}
+
 REQUIREMENTS:
 - If the description contains explicit profile fields like Name, Full name, Age, Gender, Race, Species, or Appearance, preserve those values exactly.
 - If an explicit Name or Full name field is present, copy it verbatim. Do not shorten, normalize, sanitize, reinterpret, or partially trim it.
@@ -95,8 +113,8 @@ REQUIREMENTS:
 - gender: character's gender (leave empty if truly unknown).
 - age: if the user explicitly gave an age, copy it verbatim. Do NOT rewrite "18" into "Young adult". Only use descriptive ages like "Young adult" when no explicit age was given.
 - appearance: 1-3 sentences describing physical features — build, hair, distinguishing marks.
-- Tags should cover: personality traits, skills/abilities, flaws/weaknesses, background/occupation.
-- Use the tag-only system: no numeric stats except HP (1-5).
+- Use the canonical field groups to reason about profile, motivations, capabilities, loadout, and startConditions before projecting the compatibility fields below.
+- Tags should cover: personality traits, skills/abilities, flaws/weaknesses, background/occupation. They are derived runtime tags, not the source-of-truth character model.
 - HP reflects physical condition: 5=peak, 3=average, 1=frail or wounded.
 - equippedItems: items the character would realistically carry based on description.
 - locationName MUST be one of KNOWN LOCATIONS — pick the most fitting one.
@@ -139,6 +157,10 @@ ${opts.locationNames.map((n) => `- ${n}`).join("\n")}
 
 ${sections}
 
+SHARED CONTRACT:
+${PLAYER_DRAFT_CONTRACT}
+${PLAYER_COMPATIBILITY_OUTPUT_RULES}
+
 REQUIREMENTS:
 - Keep the character's name as "${opts.name}".
 - Integrate the character according to the chosen import mode.
@@ -146,6 +168,7 @@ REQUIREMENTS:
 - gender: character's gender (leave empty if truly unknown).
 - age: descriptive age (e.g. "Young adult", "Middle-aged", "Elder").
 - appearance: 1-3 sentences describing physical features — build, hair, distinguishing marks.
+- Use the shared draft pipeline to keep profile, motivations, capabilities, loadout, startConditions, and provenance consistent before projecting the compatibility output.
 - Convert description + personality into WorldForge tags (4-8 tags).
 - Tags must match the same house style as normal WorldForge generation: short Title Case traits, roles, skills, flaws, or background markers.
 - Prefer 1-3 word tags like Veteran Scout, Fearless, Signal Analyst, Noble-born.
@@ -190,9 +213,14 @@ ${opts.locationNames.map((n) => `- ${n}`).join("\n")}
 KNOWN FACTIONS:
 ${opts.factionNames.map((n) => `- ${n}`).join("\n")}
 
+SHARED CONTRACT:
+${PLAYER_DRAFT_CONTRACT}
+${PLAYER_COMPATIBILITY_OUTPUT_RULES}
+
 REQUIREMENTS:
 - Create an interesting, flawed protagonist who fits this world.
 - The character should have clear motivations and a reason to explore.
+- Think first in canonical field groups: profile, motivations, capabilities, state, loadout, startConditions, and provenance.
 - race: character's race/species fitting the world (leave empty if truly unknown).
 - gender: character's gender (leave empty if truly unknown).
 - age: descriptive age (e.g. "Young adult", "Middle-aged", "Elder").
@@ -241,9 +269,14 @@ ${opts.factionNames.map((n) => `- ${n}`).join("\n")}
 
 ARCHETYPE: "${opts.archetype}"
 ${researchBlock}
+SHARED CONTRACT:
+${PLAYER_DRAFT_CONTRACT}
+${PLAYER_COMPATIBILITY_OUTPUT_RULES}
+
 REQUIREMENTS:
 - Create a WHOLLY ORIGINAL character inspired by the archetype — new name, new backstory.
 - Do NOT copy the archetype directly. Capture the essence, not the specifics.
+- Use the shared draft pipeline to keep profile, motivations, capabilities, loadout, startConditions, and provenance aligned while projecting the compatibility output.
 - race: character's race/species fitting the world (leave empty if truly unknown).
 - gender: character's gender (leave empty if truly unknown).
 - age: descriptive age (e.g. "Young adult", "Middle-aged", "Elder").
