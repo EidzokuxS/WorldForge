@@ -20,7 +20,32 @@ export type {
   CampaignWorldbookSelection,
   CampaignMeta,
   CharacterImportMode,
+  CharacterRole,
+  CharacterTier,
+  CharacterCanonicalStatus,
+  CharacterSourceKind,
+  CharacterWealthTier,
+  CharacterSkillTier,
+  CharacterIdentityDraft,
+  CharacterIdentity,
+  CharacterProfile,
+  CharacterRelationshipRef,
+  CharacterSocialContext,
+  CharacterMotivations,
+  CharacterSkill,
+  CharacterCapabilities,
+  CharacterState,
+  CharacterLoadout,
+  CharacterStartConditions,
+  CharacterProvenance,
+  CharacterDraft,
+  CharacterRecord,
   PlayerCharacter,
+} from "./types.js";
+
+export {
+  CHARACTER_WEALTH_TIERS,
+  CHARACTER_SKILL_TIERS,
 } from "./types.js";
 
 export {
