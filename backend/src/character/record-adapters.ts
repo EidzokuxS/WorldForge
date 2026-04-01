@@ -102,6 +102,14 @@ export function createCharacterRecordFromDraft(
   };
 }
 
+export function toCharacterDraft(record: CharacterRecord): CharacterDraft {
+  const { id: _id, campaignId: _campaignId, ...identity } = record.identity;
+  return {
+    ...record,
+    identity,
+  };
+}
+
 export function fromLegacyPlayerRow(
   row: LegacyPlayerRow,
   opts: LegacyPlayerOptions = {},
@@ -172,6 +180,33 @@ export function fromLegacyPlayerRow(
       legacyTags: parsedTags.legacyTags,
     },
   };
+}
+
+export function fromLegacyPlayerCharacter(
+  character: PlayerCharacter,
+  opts: LegacyPlayerOptions = {},
+): CharacterDraft {
+  return toCharacterDraft(
+    fromLegacyPlayerRow(
+      {
+        id: "legacy-player",
+        campaignId: "legacy-campaign",
+        name: character.name,
+        race: character.race,
+        gender: character.gender,
+        age: character.age,
+        appearance: character.appearance,
+        hp: character.hp,
+        tags: JSON.stringify(character.tags),
+        equippedItems: JSON.stringify(character.equippedItems),
+        currentLocationId: null,
+      },
+      {
+        ...opts,
+        currentLocationName: opts.currentLocationName ?? character.locationName,
+      },
+    ),
+  );
 }
 
 export function fromLegacyNpcRow(
@@ -245,6 +280,38 @@ export function fromLegacyNpcRow(
       legacyTags: parsedTags.legacyTags,
     },
   };
+}
+
+export function fromLegacyScaffoldNpc(
+  npc: ScaffoldNpc,
+  opts: LegacyNpcOptions = {},
+): CharacterDraft {
+  return toCharacterDraft(
+    fromLegacyNpcRow(
+      {
+        id: "legacy-npc",
+        campaignId: "legacy-campaign",
+        name: npc.name,
+        persona: npc.persona,
+        tags: JSON.stringify(npc.tags),
+        tier: npc.tier === "key" ? "key" : "persistent",
+        currentLocationId: null,
+        goals: JSON.stringify({
+          short_term: npc.goals.shortTerm,
+          long_term: npc.goals.longTerm,
+        }),
+        beliefs: "[]",
+        unprocessedImportance: 0,
+        inactiveTicks: 0,
+        createdAt: 0,
+      },
+      {
+        ...opts,
+        currentLocationName: opts.currentLocationName ?? npc.locationName,
+        factionName: opts.factionName ?? npc.factionName,
+      },
+    ),
+  );
 }
 
 export function toLegacyPlayerCharacter(record: CharacterRecord): PlayerCharacter {

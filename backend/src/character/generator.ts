@@ -1,28 +1,28 @@
 import { safeGenerateObject as generateObject } from "../ai/generate-object-safe.js";
 import { z } from "zod";
-import type { PlayerCharacter } from "@worldforge/shared";
+import type { CharacterDraft, PlayerCharacter } from "@worldforge/shared";
 import { createModel } from "../ai/index.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import { buildV2CardSections } from "./v2-sections.js";
 import { buildImportModeGuidance, normalizeImportedTags } from "./import-utils.js";
 import type { CharacterImportMode } from "./import-utils.js";
+import { fromLegacyPlayerCharacter } from "./record-adapters.js";
 
 const characterSchema = z.object({
   name: z.string().describe("Character's full name"),
   race: z.string().max(100).default("").describe("Character's race or species (e.g. Human, Elf, Dwarf, Android). Empty if unspecified."),
   gender: z.string().max(100).default("").describe("Character's gender (e.g. Male, Female, Non-binary). Empty if unspecified."),
-  age: z.string().max(100).default("").describe("Character's age as text (e.g. Young adult, 47, Ancient). Empty if unspecified."),
+  age: z.string().max(100).default("").describe("Character's age as text. Preserve explicit numeric ages exactly as written (e.g. 18). Empty if unspecified."),
   appearance: z.string().max(1000).default("").describe("Brief physical description in 1-3 sentences. Hair, build, distinguishing features."),
   tags: z
-    .array(z.string())
-    .min(3)
-    .max(12)
-    .transform((tags) => tags.map((t) => t.replace(/^\[|\]$/g, "")))
-    .describe(
-      "Character tags covering traits, skills, flaws, background. " +
-      "Examples: Charismatic, Veteran Soldier, Limping, Noble-born, Pickpocket, Cowardly. " +
-      "Do NOT wrap tags in brackets."
-    ),
+  .array(z.string())
+  .min(3)
+  .transform((tags) => tags.map((t) => t.replace(/^\[|\]$/g, "")))
+  .describe(
+    "Character tags covering traits, skills, flaws, background. " +
+    "Examples: Charismatic, Veteran Soldier, Limping, Noble-born, Pickpocket, Cowardly. " +
+    "Do NOT wrap tags in brackets."
+  ),
   hp: z
     .number()
     .int()
@@ -38,11 +38,37 @@ const characterSchema = z.object({
     .describe("Name of the starting location from KNOWN LOCATIONS that best fits this character"),
 });
 
-/** Zod-inferred type — structurally identical to PlayerCharacter from shared. */
-export type ParsedCharacter = z.infer<typeof characterSchema>;
+type LegacyGeneratedPlayer = z.infer<typeof characterSchema>;
 
-// Compile-time check: ParsedCharacter must be assignable to PlayerCharacter
-null as unknown as ParsedCharacter satisfies PlayerCharacter;
+export type ParsedCharacter = CharacterDraft;
+
+// Compile-time check: the LLM shape still matches the compatibility player contract.
+null as unknown as LegacyGeneratedPlayer satisfies PlayerCharacter;
+
+function normalizeCharacterResult(
+  character: LegacyGeneratedPlayer,
+  opts?: { maxTags?: number }
+): LegacyGeneratedPlayer {
+  return {
+    ...character,
+    tags: normalizeImportedTags(character.tags, { max: opts?.maxTags ?? 12 }),
+  };
+}
+
+function toCharacterDraft(
+  character: LegacyGeneratedPlayer,
+  opts?: {
+    importMode?: CharacterImportMode | null;
+    canonicalStatus?: CharacterDraft["identity"]["canonicalStatus"];
+    sourceKind?: CharacterDraft["provenance"]["sourceKind"];
+  }
+): CharacterDraft {
+  return fromLegacyPlayerCharacter(character, {
+    canonicalStatus: opts?.canonicalStatus ?? "original",
+    sourceKind: opts?.sourceKind ?? (opts?.importMode ? "import" : "generator"),
+    originMode: opts?.importMode ?? "native",
+  });
+}
 
 export async function parseCharacterDescription(opts: {
   description: string;
@@ -62,10 +88,12 @@ PLAYER'S CHARACTER DESCRIPTION:
 ${opts.description}
 
 REQUIREMENTS:
-- Extract or infer a name from the description. If none given, create a fitting one.
+- If the description contains explicit profile fields like Name, Full name, Age, Gender, Race, Species, or Appearance, preserve those values exactly.
+- If an explicit Name or Full name field is present, copy it verbatim. Do not shorten, normalize, sanitize, reinterpret, or partially trim it.
+- Only infer a name when the user did not explicitly provide one.
 - race: character's race/species fitting the world (leave empty if truly unknown).
 - gender: character's gender (leave empty if truly unknown).
-- age: descriptive age (e.g. "Young adult", "Middle-aged", "Elder").
+- age: if the user explicitly gave an age, copy it verbatim. Do NOT rewrite "18" into "Young adult". Only use descriptive ages like "Young adult" when no explicit age was given.
 - appearance: 1-3 sentences describing physical features — build, hair, distinguishing marks.
 - Tags should cover: personality traits, skills/abilities, flaws/weaknesses, background/occupation.
 - Use the tag-only system: no numeric stats except HP (1-5).
@@ -83,7 +111,9 @@ REQUIREMENTS:
     maxOutputTokens: opts.role.maxTokens,
   });
 
-  return result.object;
+  return toCharacterDraft(normalizeCharacterResult(result.object, { maxTags: 12 }), {
+    sourceKind: "player-input",
+  });
 }
 
 export async function mapV2CardToCharacter(opts: {
@@ -137,10 +167,10 @@ ${buildImportModeGuidance(opts.importMode)}`;
     maxOutputTokens: opts.role.maxTokens,
   });
 
-  return {
-    ...result.object,
-    tags: normalizeImportedTags(result.object.tags, { max: 8 }),
-  };
+  return toCharacterDraft(normalizeCharacterResult(result.object, { maxTags: 8 }), {
+    importMode: opts.importMode,
+    canonicalStatus: "imported",
+  });
 }
 
 export async function generateCharacter(opts: {
@@ -181,7 +211,9 @@ REQUIREMENTS:
     maxOutputTokens: opts.role.maxTokens,
   });
 
-  return result.object;
+  return toCharacterDraft(normalizeCharacterResult(result.object, { maxTags: 12 }), {
+    sourceKind: "generator",
+  });
 }
 
 export async function generateCharacterFromArchetype(opts: {
@@ -229,5 +261,7 @@ REQUIREMENTS:
     temperature: opts.role.temperature,
     maxOutputTokens: opts.role.maxTokens,
   });
-  return result.object;
+  return toCharacterDraft(normalizeCharacterResult(result.object, { maxTags: 12 }), {
+    sourceKind: opts.researchContext ? "archetype" : "generator",
+  });
 }

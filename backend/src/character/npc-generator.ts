@@ -1,10 +1,12 @@
 import { safeGenerateObject as generateObject } from "../ai/generate-object-safe.js";
 import { z } from "zod";
+import type { CharacterDraft } from "@worldforge/shared";
 import { createModel } from "../ai/index.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import { buildV2CardSections } from "./v2-sections.js";
 import { buildImportModeGuidance, normalizeImportedTags } from "./import-utils.js";
 import type { CharacterImportMode } from "./import-utils.js";
+import { fromLegacyScaffoldNpc } from "./record-adapters.js";
 
 const npcSchema = z.object({
   name: z.string(),
@@ -18,7 +20,32 @@ const npcSchema = z.object({
   factionName: z.string().nullable(),
 });
 
-export type GeneratedNpc = z.infer<typeof npcSchema>;
+type LegacyGeneratedNpc = z.infer<typeof npcSchema>;
+
+export type GeneratedNpc = CharacterDraft;
+
+function toNpcDraft(
+  npc: LegacyGeneratedNpc,
+  opts?: {
+    importMode?: CharacterImportMode | null;
+    canonicalStatus?: CharacterDraft["identity"]["canonicalStatus"];
+    sourceKind?: CharacterDraft["provenance"]["sourceKind"];
+  },
+): CharacterDraft {
+  return fromLegacyScaffoldNpc(
+    {
+      ...npc,
+      tier: "key",
+    },
+    {
+      canonicalStatus: opts?.canonicalStatus ?? "original",
+      sourceKind: opts?.sourceKind ?? (opts?.importMode ? "import" : "generator"),
+      originMode: opts?.importMode ?? "resident",
+      factionName: npc.factionName,
+      currentLocationName: npc.locationName,
+    },
+  );
+}
 
 export async function parseNpcDescription(opts: {
   description: string;
@@ -57,7 +84,7 @@ REQUIREMENTS:
     temperature: opts.role.temperature,
     maxOutputTokens: opts.role.maxTokens,
   });
-  return result.object;
+  return toNpcDraft(result.object, { sourceKind: "player-input" });
 }
 
 export async function mapV2CardToNpc(opts: {
@@ -108,10 +135,13 @@ ${buildImportModeGuidance(opts.importMode)}`;
     temperature: opts.role.temperature,
     maxOutputTokens: opts.role.maxTokens,
   });
-  return {
+  return toNpcDraft({
     ...result.object,
     tags: normalizeImportedTags(result.object.tags, { max: 8 }),
-  };
+  }, {
+    importMode: opts.importMode,
+    canonicalStatus: "imported",
+  });
 }
 
 export async function generateNpcFromArchetype(opts: {
@@ -156,5 +186,7 @@ REQUIREMENTS:
     temperature: opts.role.temperature,
     maxOutputTokens: opts.role.maxTokens,
   });
-  return result.object;
+  return toNpcDraft(result.object, {
+    sourceKind: opts.researchContext ? "archetype" : "generator",
+  });
 }

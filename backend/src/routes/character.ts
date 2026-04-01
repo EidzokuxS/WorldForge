@@ -4,8 +4,14 @@ import { getErrorMessage, getErrorStatus } from "../lib/index.js";
 import { loadSettings } from "../settings/index.js";
 import { resolveStartingLocation } from "../worldgen/index.js";
 import { parseCharacterDescription, generateCharacter, generateCharacterFromArchetype, mapV2CardToCharacter, parseNpcDescription, mapV2CardToNpc, generateNpcFromArchetype, researchArchetype } from "../character/index.js";
+import {
+  createCharacterRecordFromDraft,
+  toLegacyNpcDraft,
+  toLegacyPlayerCharacter,
+} from "../character/record-adapters.js";
 import { getDb } from "../db/index.js";
 import { locations, players } from "../db/schema.js";
+import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
 import { eq } from "drizzle-orm";
 import { parseBody, requireActiveCampaign, resolveGenerator, setupCharacterEndpoint } from "./helpers.js";
 import { createLogger } from "../lib/index.js";
@@ -29,6 +35,30 @@ import {
 
 const app = new Hono();
 
+function createDraftResponse(
+  campaignId: string,
+  draft: Awaited<ReturnType<typeof parseCharacterDescription>>,
+) {
+  const record = createCharacterRecordFromDraft(draft, {
+    id: `draft:${draft.identity.displayName || "character"}`,
+    campaignId,
+  });
+
+  if (draft.identity.role === "npc") {
+    return {
+      role: "key" as const,
+      draft,
+      npc: toLegacyNpcDraft(record),
+    };
+  }
+
+  return {
+    role: "player" as const,
+    draft,
+    character: toLegacyPlayerCharacter(record),
+  };
+}
+
 app.post("/parse-character", async (c) => {
   try {
     const result = await parseBody(c, parseCharacterSchema);
@@ -39,19 +69,19 @@ app.post("/parse-character", async (c) => {
     if (ctx instanceof Response) return ctx;
 
     if (role === "key") {
-      const npc = await parseNpcDescription({
+      const draft = await parseNpcDescription({
         description: concept, premise: ctx.campaign.premise,
         locationNames: ctx.names.locationNames, factionNames: ctx.names.factionNames,
         role: ctx.gen,
       });
-      return c.json({ role: "key", npc });
+      return c.json(createDraftResponse(campaignId, draft));
     }
 
-    const character = await parseCharacterDescription({
+    const draft = await parseCharacterDescription({
       description: concept, premise: ctx.campaign.premise,
       locationNames: ctx.names.locationNames, role: ctx.gen,
     });
-    return c.json({ role: "player", character });
+    return c.json(createDraftResponse(campaignId, draft));
   } catch (error) {
     return c.json({ error: getErrorMessage(error, "Failed to parse character.") }, getErrorStatus(error));
   }
@@ -67,21 +97,21 @@ app.post("/generate-character", async (c) => {
     if (ctx instanceof Response) return ctx;
 
     if (role === "key") {
-      const npc = await generateNpcFromArchetype({
+      const draft = await generateNpcFromArchetype({
         archetype: "a compelling and unique character",
         premise: ctx.campaign.premise,
         locationNames: ctx.names.locationNames, factionNames: ctx.names.factionNames,
         role: ctx.gen,
       });
-      return c.json({ role: "key", npc });
+      return c.json(createDraftResponse(campaignId, draft));
     }
 
-    const character = await generateCharacter({
+    const draft = await generateCharacter({
       premise: ctx.campaign.premise,
       locationNames: ctx.names.locationNames, factionNames: ctx.names.factionNames,
       role: ctx.gen,
     });
-    return c.json({ role: "player", character });
+    return c.json(createDraftResponse(campaignId, draft));
   } catch (error) {
     return c.json({ error: getErrorMessage(error, "Failed to generate character.") }, getErrorStatus(error));
   }
@@ -101,20 +131,20 @@ app.post("/research-character", async (c) => {
     });
 
     if (role === "key") {
-      const npc = await generateNpcFromArchetype({
+      const draft = await generateNpcFromArchetype({
         archetype, premise: ctx.campaign.premise,
         locationNames: ctx.names.locationNames, factionNames: ctx.names.factionNames,
         role: ctx.gen, researchContext,
       });
-      return c.json({ role: "key", npc });
+      return c.json(createDraftResponse(campaignId, draft));
     }
 
-    const character = await generateCharacterFromArchetype({
+    const draft = await generateCharacterFromArchetype({
       archetype, premise: ctx.campaign.premise,
       locationNames: ctx.names.locationNames, factionNames: ctx.names.factionNames,
       role: ctx.gen, researchContext,
     });
-    return c.json({ role: "player", character });
+    return c.json(createDraftResponse(campaignId, draft));
   } catch (error) {
     return c.json({ error: getErrorMessage(error, "Failed to research character.") }, getErrorStatus(error));
   }
@@ -130,21 +160,21 @@ app.post("/import-v2-card", async (c) => {
     if (ctx instanceof Response) return ctx;
 
     if (role === "key") {
-      const npc = await mapV2CardToNpc({
+      const draft = await mapV2CardToNpc({
         name, description, personality, scenario, v2Tags: tags, importMode,
         premise: ctx.campaign.premise,
         locationNames: ctx.names.locationNames, factionNames: ctx.names.factionNames,
         role: ctx.gen,
       });
-      return c.json({ role: "key", npc });
+      return c.json(createDraftResponse(campaignId, draft));
     }
 
-    const character = await mapV2CardToCharacter({
+    const draft = await mapV2CardToCharacter({
       name, description, personality, scenario, v2Tags: tags, importMode,
       premise: ctx.campaign.premise, locationNames: ctx.names.locationNames,
       role: ctx.gen,
     });
-    return c.json({ role: "player", character });
+    return c.json(createDraftResponse(campaignId, draft));
   } catch (error) {
     return c.json({ error: getErrorMessage(error, "Failed to import V2 card.") }, getErrorStatus(error));
   }
@@ -155,7 +185,7 @@ app.post("/save-character", async (c) => {
     const result = await parseBody(c, saveCharacterSchema);
     if ("response" in result) return result.response;
 
-    const { campaignId, character } = result.data;
+    const { campaignId, draft } = result.data;
     const campaign = requireActiveCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
 
@@ -167,27 +197,53 @@ app.post("/save-character", async (c) => {
       .from(locations)
       .where(eq(locations.campaignId, campaignId))
       .all();
-    const matchedLocation = allLocations.find((l) => l.name === character.locationName);
+    const matchedLocation = allLocations.find(
+      (l) => l.name === draft.socialContext.currentLocationName,
+    );
     if (!matchedLocation) {
-      return c.json({ error: `Location "${character.locationName}" not found in this campaign.` }, 400);
+      return c.json(
+        {
+          error: `Location "${draft.socialContext.currentLocationName}" not found in this campaign.`,
+        },
+        400,
+      );
     }
 
     // Delete existing player for this campaign (single player per campaign)
     db.delete(players).where(eq(players.campaignId, campaignId)).run();
 
     const playerId = crypto.randomUUID();
+    const characterRecord = createCharacterRecordFromDraft(
+      {
+        ...draft,
+        socialContext: {
+          ...draft.socialContext,
+          currentLocationId: matchedLocation.id,
+          currentLocationName: matchedLocation.name,
+        },
+      },
+      {
+        id: playerId,
+        campaignId,
+      },
+    );
+    const legacyCharacter = toLegacyPlayerCharacter(characterRecord);
+    const derivedTags = deriveRuntimeCharacterTags(characterRecord);
+
     db.insert(players)
       .values({
         id: playerId,
         campaignId,
-        name: character.name,
-        race: character.race,
-        gender: character.gender,
-        age: character.age,
-        appearance: character.appearance,
-        hp: character.hp,
-        tags: JSON.stringify(character.tags),
-        equippedItems: JSON.stringify(character.equippedItems),
+        name: legacyCharacter.name,
+        race: legacyCharacter.race,
+        gender: legacyCharacter.gender,
+        age: legacyCharacter.age,
+        appearance: legacyCharacter.appearance,
+        hp: legacyCharacter.hp,
+        characterRecord: JSON.stringify(characterRecord),
+        derivedTags: JSON.stringify(derivedTags),
+        tags: JSON.stringify(legacyCharacter.tags),
+        equippedItems: JSON.stringify(legacyCharacter.equippedItems),
         currentLocationId: matchedLocation.id,
       })
       .run();
@@ -199,12 +255,12 @@ app.post("/save-character", async (c) => {
       void (async () => {
         try {
           const prompt = buildPortraitPrompt({
-            name: character.name,
-            race: character.race,
-            gender: character.gender,
-            age: character.age,
-            appearance: character.appearance,
-            tags: character.tags,
+            name: legacyCharacter.name,
+            race: legacyCharacter.race,
+            gender: legacyCharacter.gender,
+            age: legacyCharacter.age,
+            appearance: legacyCharacter.appearance,
+            tags: legacyCharacter.tags,
             stylePrompt: settings.images.stylePrompt,
           });
           ensureImageDir(campaignId, "portraits");

@@ -540,7 +540,24 @@ describe("POST /api/worldgen/import-v2-card", () => {
   it("passes outsider import mode through to NPC mapping", async () => {
     setActiveCampaign();
     createMockDbForResolveNames();
-    mockedMapV2Npc.mockResolvedValue({ name: "Raven" } as any);
+    mockedMapV2Npc.mockResolvedValue(
+      makeNpcDraft({
+        identity: {
+          role: "npc",
+          tier: "key",
+          displayName: "Raven",
+          canonicalStatus: "imported",
+        },
+        provenance: {
+          sourceKind: "import",
+          importMode: "outsider",
+          templateId: null,
+          archetypePrompt: null,
+          worldgenOrigin: null,
+          legacyTags: [],
+        },
+      }) as any,
+    );
 
     const res = await app.request("/api/worldgen/import-v2-card", {
       method: "POST",
