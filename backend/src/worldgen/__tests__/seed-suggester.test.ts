@@ -351,6 +351,18 @@ describe("suggestWorldSeeds (sequential DNA)", () => {
       expect(prompt).toContain("BANNED words");
     }
   });
+
+  it("adds shared character/start guardrails without replacing worldgen helper authority", async () => {
+    setupSequentialMocks();
+
+    await suggestWorldSeeds({ premise: "Naruto world", role: fakeRole });
+
+    const firstCallPrompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>)
+      .prompt as string;
+    expect(firstCallPrompt).toContain("startConditions");
+    expect(firstCallPrompt).toContain("derived runtime tags");
+    expect(firstCallPrompt).not.toContain("tag-only system");
+  });
 });
 
 describe("suggestSingleSeed", () => {
