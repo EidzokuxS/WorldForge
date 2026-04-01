@@ -90,7 +90,7 @@ export function createStorytellerTools(campaignId: string, tick: number, outcome
 
     offer_quick_actions: tool({
       description:
-        "Suggest 3-5 quick action options for the player to choose from. You MUST call this tool after EVERY narration — no exceptions. In combat: vary suggestions each turn — include specific combat moves referencing available weapons/skills (e.g. 'Shield bash', 'Overhead slash'), defensive maneuvers (dodge, block, parry), environmental actions (throw sand, kick over table), social options (surrender, intimidate, taunt), and escape routes. Outside combat: include at least one social, one physical, and one exploratory option. Reference present NPCs by name.",
+        "Suggest 3-5 quick action options for the player to choose from. Keep the options varied, concrete, and grounded in the current scene, present NPCs, available items, and visible threats.",
       inputSchema: z.object({
         actions: z
           .array(
@@ -148,7 +148,7 @@ export function createStorytellerTools(campaignId: string, tick: number, outcome
 
     set_condition: tool({
       description:
-        "Modify a player character's HP. Call this EVERY TIME the player takes damage or is healed. In combat: light hit = delta -1, solid blow = delta -1 or -2, devastating attack = delta -2 or -3. Healing: potion/rest = delta +1 or +2. Use delta for relative changes or value for absolute setting. Only works on player characters, not NPCs.",
+        "Modify a player character's HP. Use delta for relative damage or healing, or value for an absolute HP set. Only works on player characters, not NPCs.",
       inputSchema: z.object({
         targetName: z.string().describe("Name of the player character"),
         delta: z.number().optional().describe("HP change: positive to heal, negative to damage"),
@@ -163,7 +163,7 @@ export function createStorytellerTools(campaignId: string, tick: number, outcome
 
     move_to: tool({
       description:
-        "Move the player to a connected location. Use when the player describes traveling, walking, going to another place. If the destination doesn't exist in the world yet, call reveal_location first to create it, then move_to.",
+        "Move the player to a connected location by targetLocationName when travel to an established destination succeeds.",
       inputSchema: z.object({
         targetLocationName: z
           .string()
