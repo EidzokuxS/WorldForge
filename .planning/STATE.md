@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 33-12-PLAN.md
-last_updated: "2026-04-01T22:19:38.452Z"
+stopped_at: Completed 33-07-PLAN.md
+last_updated: "2026-04-01T22:30:16.461Z"
 progress:
   total_phases: 28
   completed_phases: 27
   total_plans: 100
-  completed_plans: 95
+  completed_plans: 97
 ---
 
 # Project State
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-03-18)
 ## Current Position
 
 Phase: 33 (browser-e2e-verification-for-redesigned-creation-flows) — EXECUTING
-Plan: 7 of 12 completed (latest: 33-12; pending: 33-06, 33-07, 33-08, 33-09, 33-10)
+Plan: 9 of 12 completed (latest committed this session: 33-07; pending: 33-06, 33-08, 33-09, 33-10)
 
 ## Performance Metrics
 
@@ -221,6 +221,10 @@ Recent decisions affecting current work:
 - [Phase 33-browser-e2e-verification-for-redesigned-creation-flows]: Shared shell regressions assert data-shell-region and data-shell-surface hooks so page tests pin the contract without depending on one-off class strings. — The plan needed regressions that survive visual refinements. Semantic shell hooks keep the tests narrow to the shared shell contract instead of brittle cosmetic classes.
 - [Phase 33-browser-e2e-verification-for-redesigned-creation-flows]: The lore-section test now binds mocked API functions to the real @/lib/api signatures so the test contract stays explicit without changing behavior.
 - [Phase 33-browser-e2e-verification-for-redesigned-creation-flows]: Phase 33 closure evidence uses the actual npm --prefix frontend run lint exit code; unrelated warnings remain non-blocking because lint exits 0.
+- [Phase 33]: Campaign readiness is derived from the routed campaign id plus active-campaign fallback so shell links reflect real generation state.
+- [Phase 33]: Generated-world requests now return HTTP 409 with a clear readiness error instead of serving empty pseudo-world data.
+- [Phase 33]: Persist routed creation flow state in sessionStorage rather than route-local React memory — Leaving and returning to /campaign/new or navigating back/forward was wiping concept and DNA state. Hydrating the existing wizard from sessionStorage fixes that without adding a parallel state machine.
+- [Phase 33]: Routed concept and DNA pages must surface active suggestion/generation status and block empty DNA generation — The wizard already tracked suggestion and generation progress, but the routed UI never rendered it and still allowed empty DNA creation attempts. Inline progress and validation make the routed flow recoverable and browser-verifiable.
 
 ### Roadmap Evolution
 
@@ -256,6 +260,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-01T22:19:38.448Z
-Stopped at: Completed 33-12-PLAN.md
+Last session: 2026-04-01T22:32:47.539Z
+Stopped at: Completed 33-07-PLAN.md
 Resume file: None
