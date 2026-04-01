@@ -37,7 +37,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 30: Start Conditions, Canonical Loadouts, and Persona Templates** - Make start selection about location plus arrival conditions, derive starting items from canonical scenario state, and introduce reusable base personas for player/NPC generation (implementation pass completed in worktree on 2026-04-01; formal closeout still blocked by `.git` ACL denial plus sandbox `spawn EPERM`)
 - [x] **Phase 31: Prompt System Harmonization & Audit** - Audit and refine prompts across worldgen, character, gameplay, and support systems so they operate as one coherent mechanism (completed 2026-04-01)
 - [x] **Phase 32: Desktop-First Non-Game UI Overhaul** - Redesign campaign creation, world review, character creation, settings, and other non-game flows for FHD/1440p desktop using Tailwind, shadcn, and compatible libraries only (completed 2026-04-01)
-- [x] **Phase 33: Browser E2E Verification for Redesigned Creation Flows** - Validate the new character/world creation, persona, prompt, and UI flows end-to-end in the browser and polish regressions (completed 2026-04-01)
+- [ ] **Phase 33: Browser E2E Verification for Redesigned Creation Flows** - Validate the new character/world creation, persona, prompt, and UI flows end-to-end in the browser and polish regressions (gap closure plans 33-05 through 33-08 pending after diagnosed UAT on 2026-04-01)
 
 ## Phase Details
 
@@ -311,7 +311,7 @@ Note: Backlog phases (like 999.1) are tracked separately and are not part of the
 | 30. Start Conditions, Canonical Loadouts, and Persona Templates | 0/6 committed (+6 implemented) | Closeout Pending | - |
 | 31. Prompt System Harmonization & Audit | 7/7 | Complete   | 2026-04-01 |
 | 32. Desktop-First Non-Game UI Overhaul | 6/6 | Complete   | 2026-04-01 |
-| 33. Browser E2E Verification for Redesigned Creation Flows | 4/4 | Complete    | 2026-04-01 |
+| 33. Browser E2E Verification for Redesigned Creation Flows | 4/8 | Gap Closure Pending | - |
 
 ### Phase 16: NPC System QA — Three NPC Tiers + World Gen Integration
 
@@ -519,10 +519,14 @@ Plans:
   2. Bugs discovered during E2E verification are fixed and re-tested in the same phase.
   3. At least one known-IP flow and one original-world flow are smoke-tested after the redesign.
   4. The resulting UX feels stable enough to hand back to the user without obvious broken states or blocking regressions.
-**Plans**: 4 plans
+**Plans**: 8 plans
 
 Plans:
 - [x] 33-01-PLAN.md -- Legacy route cleanup + shell/launcher browser verification
 - [x] 33-02-PLAN.md -- Original-world campaign creation + DNA + scaffold generation E2E
 - [x] 33-03-PLAN.md -- Known-IP campaign + world review editing E2E
 - [x] 33-04-PLAN.md -- Character creation + persona + start conditions + game handoff E2E
+- [ ] 33-05-PLAN.md -- Unify shell tokens and shared non-game workspace primitives
+- [ ] 33-06-PLAN.md -- Restore routed concept/DNA orchestration, persistence, and visible progress
+- [ ] 33-07-PLAN.md -- Enforce readiness-aware review/character navigation and precise campaign loading
+- [ ] 33-08-PLAN.md -- Real browser/UAT re-verification for original-world and known-IP creation flows
