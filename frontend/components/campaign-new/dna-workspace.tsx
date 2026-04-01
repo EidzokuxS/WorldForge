@@ -39,7 +39,7 @@ export function DnaWorkspace() {
       ) : w.dnaState ? (
         <div className="grid gap-4 xl:grid-cols-2">
           {WORLD_DNA_CARDS.map((item) => {
-            const slot = w.dnaState[item.category];
+            const slot = w.dnaState![item.category];
             return (
               <Card key={item.category} className="border-border/70 bg-card/80 shadow-xl shadow-black/10">
                 <CardHeader className="pb-3">
