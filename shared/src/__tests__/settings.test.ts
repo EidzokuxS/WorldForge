@@ -336,8 +336,8 @@ describe("createDefaultSettings", () => {
       expect(settings.research.maxSearchSteps).toBe(10);
     });
 
-    it("defaults searchProvider to 'duckduckgo'", () => {
-      expect(settings.research.searchProvider).toBe("duckduckgo");
+    it("defaults searchProvider to 'brave'", () => {
+      expect(settings.research.searchProvider).toBe("brave");
     });
   });
 
