@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 33-08-PLAN.md
-last_updated: "2026-04-02T05:25:48.549Z"
+stopped_at: Completed 33-09-PLAN.md
+last_updated: "2026-04-02T05:42:40.957Z"
 progress:
   total_phases: 28
   completed_phases: 27
   total_plans: 100
-  completed_plans: 98
+  completed_plans: 99
 ---
 
 # Project State
@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-03-18)
 ## Current Position
 
 Phase: 33 (browser-e2e-verification-for-redesigned-creation-flows) — EXECUTING
-Plan: 2 of 12
+Plan: 3 of 12
 
 ## Performance Metrics
 
@@ -228,6 +228,8 @@ Recent decisions affecting current work:
 - [Phase 33]: Routed concept and DNA pages must surface active suggestion/generation status and block empty DNA generation — The wizard already tracked suggestion and generation progress, but the routed UI never rendered it and still allowed empty DNA creation attempts. Inline progress and validation make the routed flow recoverable and browser-verifiable.
 - [Phase 33]: DNA suggestion calls take 3-5 minutes with GLM-5.1 (6 sequential LLM calls) -- long but functional
 - [Phase 33]: LLM failure with invalid API key results in empty DNA state with clear validation and recovery paths -- no dead-end
+- [Phase 33]: Loading existing known-IP campaign satisfies create-or-load requirement without redundant LLM generation
+- [Phase 33]: Save-edits triggers lore re-extraction with real LLM calls adding ~30s save latency -- functional but noticeable
 
 ### Roadmap Evolution
 
@@ -263,6 +265,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-02T05:25:48.545Z
-Stopped at: Completed 33-08-PLAN.md
+Last session: 2026-04-02T05:42:40.953Z
+Stopped at: Completed 33-09-PLAN.md
 Resume file: None
