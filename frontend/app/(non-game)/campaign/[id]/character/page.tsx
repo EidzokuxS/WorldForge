@@ -24,7 +24,6 @@ import { parseV2CardFile } from "@/lib/v2-card-parser";
 import { CharacterCard } from "@/components/character-creation/character-card";
 import { CharacterForm } from "@/components/character-creation/character-form";
 import { CharacterWorkspace } from "@/components/character-creation/character-workspace";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
 type BusyState = "idle" | "loading" | "parsing" | "generating" | "importing" | "saving";
@@ -235,7 +234,7 @@ export default function CharacterCreationPage(props: { params: Promise<{ id: str
 
   if (generationRequired) {
     return (
-      <div className="rounded-[var(--shell-radius-panel)] border [border-color:var(--shell-border)] bg-card/80 p-6 shadow-xl shadow-black/10">
+      <div className="rounded-2xl border border-border/70 bg-card/80 p-6 shadow-xl shadow-black/10">
         <div className="space-y-3">
           <div className="space-y-2">
             <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-blood">
@@ -255,89 +254,59 @@ export default function CharacterCreationPage(props: { params: Promise<{ id: str
   }
 
   return (
-    <CharacterWorkspace
-      entryMethods={
-        <>
-          <p>Free text, AI generation, import, and persona-template application remain first-class entry paths.</p>
-          <CharacterForm
-            onParse={handleParse}
-            onGenerate={handleGenerate}
-            onImport={handleImport}
-            parsing={busy === "parsing"}
-            generating={busy === "generating"}
-            importing={busy === "importing"}
-          />
-        </>
-      }
-      editor={
-        characterDraft ? (
-          <Card className="border-border/70 bg-card/80 shadow-xl shadow-black/10">
-            <CardHeader>
-              <CardTitle className="font-serif text-2xl text-bone">Structured Draft</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <CharacterCard
-                draft={characterDraft}
-                locationNames={locationNames}
-                personaTemplates={personaTemplates}
-                previewLoadout={loadoutPreview}
-                previewingLoadout={previewingLoadout}
-                applyingTemplateId={applyingTemplateId}
-                resolvingStartingLocation={resolvingStart}
-                onChange={setCharacterDraft}
-                onResolveStartingLocation={handleResolveStartingLocation}
-                onPreviewLoadout={handlePreviewLoadout}
-                onApplyPersonaTemplate={handleApplyPersonaTemplate}
-              />
-            </CardContent>
-          </Card>
-        ) : (
-          <Card className="border-border/70 bg-card/80 shadow-xl shadow-black/10">
-            <CardHeader>
-              <CardTitle className="font-serif text-2xl text-bone">Awaiting Draft</CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm text-muted-foreground">
-              Use the entry methods to parse, generate, or import a character. The workspace preserves the current draft/start/loadout seam once a draft exists.
-            </CardContent>
-          </Card>
-        )
-      }
-      summary={
-        characterDraft ? (
-          <>
-            <p>Name: {characterDraft.identity.displayName || "Unnamed"}</p>
-            <p>Starting location: {characterDraft.socialContext.currentLocationName ?? "Unset"}</p>
-            <p>Persona templates available: {personaTemplates.length}</p>
-            <p>Loadout items: {(loadoutPreview?.loadout.equippedItemRefs ?? characterDraft.loadout.equippedItemRefs).length}</p>
-          </>
-        ) : (
-          <p>No draft yet. Start from free text, generation, or import to populate the authoring workspace.</p>
-        )
-      }
-      actions={
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-medium text-bone">Begin Adventure</p>
-            <p className="text-xs text-muted-foreground">
-              Save the canonical `CharacterDraft`, then hand off directly into `/game`.
-            </p>
+    <CharacterWorkspace>
+      <div className="flex-1 overflow-y-auto">
+        <CharacterForm
+          onParse={handleParse}
+          onGenerate={handleGenerate}
+          onImport={handleImport}
+          parsing={busy === "parsing"}
+          generating={busy === "generating"}
+          importing={busy === "importing"}
+        />
+
+        {characterDraft ? (
+          <div className="mt-[clamp(16px,1.4vw,28px)] grid grid-cols-[1fr_clamp(260px,20vw,340px)] gap-[clamp(24px,2vw,40px)]">
+            <CharacterCard
+              draft={characterDraft}
+              locationNames={locationNames}
+              personaTemplates={personaTemplates}
+              previewLoadout={loadoutPreview}
+              previewingLoadout={previewingLoadout}
+              applyingTemplateId={applyingTemplateId}
+              resolvingStartingLocation={resolvingStart}
+              onChange={setCharacterDraft}
+              onResolveStartingLocation={handleResolveStartingLocation}
+              onPreviewLoadout={handlePreviewLoadout}
+              onApplyPersonaTemplate={handleApplyPersonaTemplate}
+            />
           </div>
-          <Button
-            size="lg"
-            onClick={handleSave}
-            disabled={busy !== "idle" || !characterDraft || !characterDraft.identity.displayName.trim()}
-          >
-            {busy === "saving" ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Saving...
-              </>
-            ) : (
-              "Begin Adventure"
-            )}
-          </Button>
-        </div>
-      }
-    />
+        ) : (
+          <div className="mt-[clamp(16px,1.4vw,28px)] text-sm text-muted-foreground">
+            Use the entry methods above to parse, generate, or import a character.
+          </div>
+        )}
+      </div>
+
+      <div className="flex shrink-0 items-center justify-between border-t border-border/60 py-[clamp(12px,1vw,20px)]">
+        <Button variant="ghost" asChild>
+          <Link href={`/campaign/${campaignId}/review`}>Back to Review</Link>
+        </Button>
+        <Button
+          onClick={handleSave}
+          disabled={busy !== "idle" || !characterDraft || !characterDraft.identity.displayName.trim()}
+          className="bg-blood text-white hover:bg-blood/90"
+        >
+          {busy === "saving" ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Saving...
+            </>
+          ) : (
+            "Save & Begin Adventure"
+          )}
+        </Button>
+      </div>
+    </CharacterWorkspace>
   );
 }

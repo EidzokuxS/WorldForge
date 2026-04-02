@@ -171,7 +171,7 @@ export default function WorldReviewPage(props: { params: Promise<{ id: string }>
 
   if (generationRequired) {
     return (
-      <div className="rounded-[var(--shell-radius-panel)] border [border-color:var(--shell-border)] bg-card/80 p-6 shadow-xl shadow-black/10">
+      <div className="rounded-2xl border border-border/70 bg-card/80 p-6 shadow-xl shadow-black/10">
         <div className="space-y-3">
           <div className="space-y-2">
             <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-blood">
@@ -195,48 +195,9 @@ export default function WorldReviewPage(props: { params: Promise<{ id: string }>
   }
 
   return (
-    <ReviewWorkspace
-      sectionNav={
-        <ul className="space-y-2">
-          <li>Premise</li>
-          <li>Locations ({scaffold.locations.length})</li>
-          <li>Factions ({scaffold.factions.length})</li>
-          <li>NPCs ({scaffold.npcs.length})</li>
-          <li>Lore ({loreCards.length})</li>
-        </ul>
-      }
-      summary={
-        <>
-          <p>Premise reviewed: {scaffold.refinedPremise ? "ready" : "missing"}</p>
-          <p>Locations: {scaffold.locations.length}</p>
-          <p>Factions: {scaffold.factions.length}</p>
-          <p>NPCs: {scaffold.npcs.length}</p>
-          <p>Lore cards: {loreCards.length}</p>
-        </>
-      }
-      actions={
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-medium text-bone">Save and continue</p>
-            <p className="text-xs text-muted-foreground">
-              Persist current scaffold edits, then move into canonical character creation.
-            </p>
-          </div>
-          <Button size="lg" onClick={handleSaveAndContinue} disabled={saving}>
-            {saving ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Saving...
-              </>
-            ) : (
-              "Continue to Character Creation"
-            )}
-          </Button>
-        </div>
-      }
-    >
-      <Tabs defaultValue="premise" className="w-full">
-        <TabsList className="mb-6 w-full justify-start">
+    <ReviewWorkspace>
+      <Tabs defaultValue="premise" className="flex flex-1 flex-col min-h-0">
+        <TabsList className="w-full justify-start">
           <TabsTrigger value="premise">Premise</TabsTrigger>
           <TabsTrigger value="locations">Locations ({scaffold.locations.length})</TabsTrigger>
           <TabsTrigger value="factions">Factions ({scaffold.factions.length})</TabsTrigger>
@@ -244,58 +205,76 @@ export default function WorldReviewPage(props: { params: Promise<{ id: string }>
           <TabsTrigger value="lore">Lore ({loreCards.length})</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="premise">
-          <PremiseSection
-            refinedPremise={scaffold.refinedPremise}
-            onChange={(refinedPremise: string) => setScaffold((current) => current ? { ...current, refinedPremise } : current)}
-            onRegenerate={(instruction: string | undefined) => handleRegenerate("premise", instruction)}
-            regenerating={regenerating === "premise"}
-          />
-        </TabsContent>
-        <TabsContent value="locations">
-          <LocationsSection
-            locations={scaffold.locations}
-            onChange={(locations: ScaffoldLocation[]) => setScaffold((current) => current ? { ...current, locations } : current)}
-            onRegenerate={(instruction: string | undefined) => handleRegenerate("locations", instruction)}
-            regenerating={regenerating === "locations"}
-          />
-        </TabsContent>
-        <TabsContent value="factions">
-          <FactionsSection
-            factions={scaffold.factions}
-            locationNames={scaffold.locations.map((location) => location.name)}
-            onChange={(factions: ScaffoldFaction[]) => setScaffold((current) => current ? { ...current, factions } : current)}
-            onRegenerate={(instruction: string | undefined) => handleRegenerate("factions", instruction)}
-            regenerating={regenerating === "factions"}
-          />
-        </TabsContent>
-        <TabsContent value="npcs">
-          <NpcsSection
-            npcs={scaffold.npcs}
-            campaignId={campaignId}
-            locationNames={scaffold.locations.map((location) => location.name)}
-            factionNames={scaffold.factions.map((faction) => faction.name)}
-            personaTemplates={scaffold.personaTemplates ?? []}
-            onChange={(npcs: ScaffoldNpc[]) => setScaffold((current) => current ? { ...current, npcs } : current)}
-            onRegenerate={(instruction: string | undefined) => handleRegenerate("npcs", instruction)}
-            regenerating={regenerating === "npcs"}
-          />
-        </TabsContent>
-        <TabsContent value="lore">
-          <LoreSection
-            cards={loreCards}
-            campaignId={campaignId}
-            onRefresh={async () => {
-              try {
-                const refreshed = await getLoreCards(campaignId);
-                setLoreCards(refreshed);
-              } catch {
-                // Keep stale lore on refresh failure.
-              }
-            }}
-          />
-        </TabsContent>
+        <div className="flex-1 overflow-y-auto py-[clamp(20px,1.8vw,40px)]">
+          <TabsContent value="premise" className="mt-0">
+            <PremiseSection
+              refinedPremise={scaffold.refinedPremise}
+              onChange={(refinedPremise: string) => setScaffold((current) => current ? { ...current, refinedPremise } : current)}
+              onRegenerate={(instruction: string | undefined) => handleRegenerate("premise", instruction)}
+              regenerating={regenerating === "premise"}
+            />
+          </TabsContent>
+          <TabsContent value="locations" className="mt-0">
+            <LocationsSection
+              locations={scaffold.locations}
+              onChange={(locations: ScaffoldLocation[]) => setScaffold((current) => current ? { ...current, locations } : current)}
+              onRegenerate={(instruction: string | undefined) => handleRegenerate("locations", instruction)}
+              regenerating={regenerating === "locations"}
+            />
+          </TabsContent>
+          <TabsContent value="factions" className="mt-0">
+            <FactionsSection
+              factions={scaffold.factions}
+              locationNames={scaffold.locations.map((location) => location.name)}
+              onChange={(factions: ScaffoldFaction[]) => setScaffold((current) => current ? { ...current, factions } : current)}
+              onRegenerate={(instruction: string | undefined) => handleRegenerate("factions", instruction)}
+              regenerating={regenerating === "factions"}
+            />
+          </TabsContent>
+          <TabsContent value="npcs" className="mt-0">
+            <NpcsSection
+              npcs={scaffold.npcs}
+              campaignId={campaignId}
+              locationNames={scaffold.locations.map((location) => location.name)}
+              factionNames={scaffold.factions.map((faction) => faction.name)}
+              personaTemplates={scaffold.personaTemplates ?? []}
+              onChange={(npcs: ScaffoldNpc[]) => setScaffold((current) => current ? { ...current, npcs } : current)}
+              onRegenerate={(instruction: string | undefined) => handleRegenerate("npcs", instruction)}
+              regenerating={regenerating === "npcs"}
+            />
+          </TabsContent>
+          <TabsContent value="lore" className="mt-0">
+            <LoreSection
+              cards={loreCards}
+              campaignId={campaignId}
+              onRefresh={async () => {
+                try {
+                  const refreshed = await getLoreCards(campaignId);
+                  setLoreCards(refreshed);
+                } catch {
+                  // Keep stale lore on refresh failure.
+                }
+              }}
+            />
+          </TabsContent>
+        </div>
       </Tabs>
+
+      <div className="flex shrink-0 items-center justify-between border-t border-border/60 py-[clamp(12px,1vw,20px)]">
+        <Button variant="ghost" asChild>
+          <Link href="/">Launchpad</Link>
+        </Button>
+        <Button onClick={handleSaveAndContinue} disabled={saving}>
+          {saving ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Saving...
+            </>
+          ) : (
+            "Continue to Character"
+          )}
+        </Button>
+      </div>
     </ReviewWorkspace>
   );
 }

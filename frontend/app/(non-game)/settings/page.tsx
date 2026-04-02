@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 
 import { getErrorMessage } from "@/lib/settings";
@@ -46,24 +46,20 @@ export default function SettingsPage() {
     };
   }, [isLoading, save, settings]);
 
-  const providerById = useMemo(() => {
-    return new Map(settings.providers.map((provider) => [provider.id, provider]));
-  }, [settings.providers]);
-
   if (isLoading) {
     return <p className="text-sm text-muted-foreground">Loading settings...</p>;
   }
 
   return (
-    <div className="space-y-6">
-      <div className="rounded-3xl border border-border/70 bg-muted/20 px-4 py-4">
-        <p className="text-sm font-medium text-bone">Save state</p>
-        <p className="text-xs text-muted-foreground">
-          {isSaving ? "Saving changes..." : "Changes are saved automatically."}
-        </p>
+    <div className="flex flex-1 flex-col min-h-0">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-[clamp(12px,0.85vw,15px)] font-medium text-green-500">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-500" />
+          {isSaving ? "Saving..." : "Saved"}
+        </div>
       </div>
 
-      <Tabs defaultValue="providers" className="w-full">
+      <Tabs defaultValue="providers" className="flex flex-1 flex-col min-h-0 mt-[clamp(12px,1vw,20px)]">
         <TabsList className="w-full justify-start">
           <TabsTrigger value="providers">Providers</TabsTrigger>
           <TabsTrigger value="roles">Roles</TabsTrigger>
@@ -71,23 +67,21 @@ export default function SettingsPage() {
           <TabsTrigger value="research">Research</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="providers" className="space-y-4">
-          <ProvidersTab settings={settings} setSettings={setSettings} />
-        </TabsContent>
-        <TabsContent value="roles" className="space-y-4">
-          <RolesTab settings={settings} setSettings={setSettings} />
-        </TabsContent>
-        <TabsContent value="images" className="space-y-4">
-          <ImagesTab settings={settings} setSettings={setSettings} />
-        </TabsContent>
-        <TabsContent value="research" className="space-y-4">
-          <ResearchTab settings={settings} setSettings={setSettings} />
-        </TabsContent>
+        <div className="flex-1 overflow-y-auto py-[clamp(20px,1.8vw,40px)]">
+          <TabsContent value="providers" className="mt-0">
+            <ProvidersTab settings={settings} setSettings={setSettings} />
+          </TabsContent>
+          <TabsContent value="roles" className="mt-0">
+            <RolesTab settings={settings} setSettings={setSettings} />
+          </TabsContent>
+          <TabsContent value="images" className="mt-0">
+            <ImagesTab settings={settings} setSettings={setSettings} />
+          </TabsContent>
+          <TabsContent value="research" className="mt-0">
+            <ResearchTab settings={settings} setSettings={setSettings} />
+          </TabsContent>
+        </div>
       </Tabs>
-
-      <div className="rounded-3xl border border-border/70 bg-card/80 px-4 py-4 text-xs text-muted-foreground">
-        Active providers: {settings.providers.length} · Judge: {providerById.get(settings.judge.providerId)?.name ?? "Unknown"} · Storyteller: {providerById.get(settings.storyteller.providerId)?.name ?? "Unknown"} · Generator: {providerById.get(settings.generator.providerId)?.name ?? "Unknown"} · Embedder: {providerById.get(settings.embedder.providerId)?.name ?? "Unknown"}
-      </div>
     </div>
   );
 }
