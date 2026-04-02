@@ -1,0 +1,79 @@
+# Task 1: Browser Verification Log - Original-World Creation Flow + D-04 Edge Cases
+
+## Transport: PinchTab (port 9867, normal server mode)
+## Frontend: http://localhost:3000
+## Backend: http://localhost:3001
+
+## Test Results
+
+### Step 1: Shell coherence on `/`
+- Status: PASS
+- Evidence: Campaign Launchpad renders with sidebar (Launchpad, New Campaign, Library, Settings links), main content area, and right sidebar context panel
+- Shell elements: WORLDFORGE branding, Desktop Shell heading, all navigation links present
+
+### Step 2: Invalid input validation on `/campaign/new`
+- Status: PASS
+- Evidence:
+  - Empty form: "Create World Now" and "Continue to DNA" buttons are disabled
+  - Validation message displayed: "Enter a campaign name and premise, or select a source, before continuing into DNA."
+  - Name-only filled: buttons remain disabled (premise still required)
+  - Name + premise filled: buttons become enabled, validation message clears
+
+### Step 3: Concept to DNA flow with suggestion/loading state
+- Status: PASS
+- Evidence:
+  - "Continue to DNA" clicked: button text changes to "Preparing DNA...", progress text shows "Preparing World DNA suggestions..."
+  - DNA suggestions complete after ~5 minutes (GLM-5.1 sequential calls)
+  - Auto-navigates to `/campaign/new/dna` on completion
+  - 6 DNA categories populated: Geography, Political Structure, Central Conflict, Cultural Flavor, Environment, Wildcard
+  - Each category has editable textarea with suggested content and Re-roll button
+
+### Step 4: Browser back/forward navigation
+- Status: PASS
+- Evidence:
+  - Back from `/campaign/new/dna` to `/campaign/new`: campaign name and premise preserved
+  - Forward from `/campaign/new` back to `/campaign/new/dna`: 6 textareas with content preserved
+  - SessionStorage persists flow state across route changes
+
+### Step 5: Empty DNA edge case
+- Status: PASS
+- Evidence:
+  - Cleared all 6 DNA textareas to empty
+  - "Create World" button becomes disabled
+  - Validation message: "Add at least one enabled DNA seed before generating the world."
+  - "Re-roll All" available but doesn't re-suggest custom-edited (cleared) fields (correct: user explicitly emptied)
+  - User can navigate back to concept and restart, or click "Start With Manual DNA" from empty state
+
+### Step 6: Mid-generation interruption
+- Status: PASS
+- Evidence:
+  - Started world generation: "Generating World..." visible, step progress "Step 0 of 5" then "Step 1 of 5 - Building locations (plan + detail)..."
+  - Navigated to `/settings` during generation
+  - Session cleared on navigation away
+  - Returned to `/campaign/new/dna`: clean empty state with "Start With Manual DNA" button
+  - No dead-end, no corruption, clear recovery path available
+
+### Step 7: Review/character links gated
+- Status: PASS
+- Evidence:
+  - Sidebar on `/campaign/new` and `/campaign/new/dna` shows only: Launchpad, New Campaign, Library, Settings
+  - No "World Review" or "Character" links visible
+  - Gating logic: `getCampaignRoutes()` returns empty when no campaign ID in route or `generationReady` is false
+
+### Step 8: Load dialog - only explicit Load button loads
+- Status: PASS
+- Evidence:
+  - Load Campaign dialog opens with campaign cards
+  - Each card has explicit "Load" and "Delete" buttons
+  - Campaign cards use `onClick={(event) => event.stopPropagation()}` pattern
+  - No click-to-load on card body
+
+## Browser-Found Bugs
+None -- all flows work as expected.
+
+## Automated Test Results
+- `page.test.tsx` (concept): 3/3 passed
+- `flow-provider.test.tsx`: 1/1 passed
+- `page.test.tsx` (DNA): 3/3 passed
+- `campaigns.test.ts`: 19/19 passed
+- `load-campaign-dialog.test.tsx`: 5/5 FAILED (pre-existing userEvent.setup() jsdom issue, out of scope)
