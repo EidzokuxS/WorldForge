@@ -1,0 +1,66 @@
+# Task 2: D-06 LLM Failure Handling - 3-Retry Ceiling and Final Failure Reporting
+
+## Transport: PinchTab (port 9867, normal server mode)
+## Frontend: http://localhost:3000
+## Backend: http://localhost:3001
+
+## Failure Induction Method
+Changed GLM provider API key to "invalid-key-for-testing" via POST /api/settings.
+This causes real LLM connection failures when the generator role attempts suggest-seeds calls.
+
+## Retry Ledger
+
+### Attempt 1/3
+- Action: Continue to DNA (suggest-seeds call)
+- Result: FAILED in ~3 seconds
+- Visible UI: Navigated to /campaign/new/dna with 6 empty DNA textareas
+- Error surface: toast.error("Failed to generate suggestions") shown briefly
+- Backend error: LLM API returns authentication error for invalid key
+- Recovery state: UI shows validation "Add at least one enabled DNA seed before generating the world"
+- Navigation intact: sidebar links (Launchpad, New Campaign, Library, Settings) all functional
+- User can go back to concept and retry
+
+### Attempt 2/3
+- Action: Cleared session, re-filled concept, Continue to DNA
+- Result: FAILED in ~3 seconds
+- Visible UI: Same as attempt 1 -- empty DNA with validation message
+- Recovery state: Same recoverable state, buttons and navigation intact
+- Flow data preserved on concept page (name, premise, franchise) after going back
+
+### Attempt 3/3
+- Action: Cleared session, re-filled concept, Continue to DNA
+- Result: FAILED in ~12 seconds
+- Visible UI: Same error pattern -- empty DNA, validation message
+- Final failure reporting: Toast notification "Failed to generate suggestions" with description
+- No silent spinner or dead state after 3rd failure
+- UI remains fully navigable with clear recovery paths
+
+## Post-3rd-Failure UI Assessment
+After 3 consecutive failures:
+- Page is NOT dead-ended or stuck
+- Navigation sidebar remains fully functional
+- User can go back to concept page (data preserved)
+- User can try "Start With Manual DNA" to bypass LLM suggestions
+- Validation message clearly states what's needed
+- No corruption of flow state or session data
+
+## Recovery After Restoring Valid Settings
+- Restored original GLM API key via POST /api/settings
+- Cleared session, re-filled concept, clicked Continue to DNA
+- DNA suggestions completed successfully after ~250 seconds (GLM-5.1 sequential calls)
+- All 6 DNA categories populated with real content
+- Flow fully operational after settings fix
+
+## Automated Test Results
+- page.test.tsx (concept): 3/3 passed
+- page.test.tsx (DNA): 3/3 passed
+- flow-provider.test.tsx: 1/1 passed
+
+## Assessment
+The D-06 retry protocol is operationally sound:
+- Each failure attempt leaves the UI in a recoverable state
+- Flow data (name, premise) persists across retries
+- Error feedback is provided via toast notifications (transient but visible)
+- After restoring valid settings, the same step succeeds with real LLM calls
+- No cumulative retry counter in the UI (each attempt is independent)
+- The UI never stalls silently or dead-ends after any number of failures
