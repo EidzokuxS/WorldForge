@@ -519,7 +519,7 @@ Plans:
   2. Bugs discovered during E2E verification are fixed and re-tested in the same phase.
   3. At least one known-IP flow and one original-world flow are smoke-tested after the redesign.
   4. The resulting UX feels stable enough to hand back to the user without obvious broken states or blocking regressions.
-**Plans**: 12 plans
+**Plans**: 13 plans
 
 Plans:
 - [x] 33-01-PLAN.md -- Legacy route cleanup + shell/launcher browser verification
@@ -534,3 +534,4 @@ Plans:
 - [ ] 33-10-PLAN.md -- Character browser re-verification plus persona/start-condition seams and `/game` handoff
 - [x] 33-11-PLAN.md -- Restore and prove the real browser localhost transport prerequisite for reruns
 - [x] 33-12-PLAN.md -- Close the remaining lore-section lint gap and rerun frontend lint
+- [ ] 33-13-PLAN.md -- Gap closure: realign test suite to flat-layout rewrite + fix backend/shared test drift
