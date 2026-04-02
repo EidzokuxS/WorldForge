@@ -26,13 +26,13 @@ vi.mock("sonner", () => ({
 import LibraryPage from "@/app/(non-game)/library/page";
 
 describe("LibraryPage", () => {
-  it("lists reusable sources and keeps a path back to routed campaign creation", async () => {
+  it("lists reusable worldbooks with an import action", async () => {
     render(<LibraryPage />);
 
     await waitFor(() => {
       expect(screen.getByText("Alpha Codex")).toBeInTheDocument();
     });
 
-    expect(screen.getByRole("link", { name: "Back to Campaign Creation" })).toHaveAttribute("href", "/campaign/new");
+    expect(screen.getByText("Import Worldbook")).toBeInTheDocument();
   });
 });

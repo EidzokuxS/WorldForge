@@ -3,51 +3,63 @@ import { render, screen, within } from "@testing-library/react";
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/settings",
+  useRouter: () => ({ push: vi.fn() }),
 }));
 
+vi.mock("@/components/non-game-shell/campaign-status-provider", () => ({
+  CampaignStatusProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  useCampaignStatus: () => ({
+    loading: false,
+    generationReady: false,
+    campaignId: null,
+    campaign: null,
+    reviewAvailable: false,
+    characterAvailable: false,
+  }),
+}));
+
+vi.mock("@/lib/api", () => ({
+  getActiveCampaign: vi.fn().mockResolvedValue(null),
+  loadCampaign: vi.fn(),
+}));
+
+import React from "react";
 import { AppShell } from "@/components/non-game-shell/app-shell";
 
 describe("AppShell", () => {
-  it("renders Gap 1 shell hooks for the outer frame, left rail, main panel, and sticky action tray", () => {
+  it("renders the outer frame, navigation rail, main panel, and page header", () => {
     render(
-      <AppShell
-        inspector={<p>Inspector summary</p>}
-        stickyActions={<button type="button">Save settings</button>}
-      >
+      <AppShell>
         <div>Settings body</div>
       </AppShell>,
     );
 
-    expect(screen.getByText("Workspace")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
-    expect(screen.getByText("Provider and Role Settings")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Settings");
     expect(screen.getByRole("main")).toHaveTextContent("Settings body");
-    expect(screen.getByText("Inspector summary")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save settings" })).toBeInTheDocument();
-    expect(screen.getByTestId("shell-grid").className).toContain("xl:grid-cols");
-    expect(screen.getByRole("link", { name: "Settings" }).closest("[data-shell-region='navigation-rail']")).not.toBeNull();
-    expect(screen.getByRole("main").closest("[data-shell-region='main-panel']")).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Save settings" }).closest("[data-shell-region='action-tray']")).not.toBeNull();
-    expect(screen.getByRole("main").closest("[data-shell-region='outer-frame']")).not.toBeNull();
+
+    const main = screen.getByRole("main");
+    expect(main.closest("[data-shell-region='main-panel']")).not.toBeNull();
+
+    const outerFrame = document.querySelector("[data-shell-region='outer-frame']");
+    expect(outerFrame).not.toBeNull();
+
+    const navRail = document.querySelector("[data-shell-region='navigation-rail']");
+    expect(navRail).not.toBeNull();
+
+    expect(document.querySelector("[data-shell-region='action-tray']")).toBeNull();
   });
 
-  it("exposes route context and action labels without baking page-specific forms into the foundation", () => {
+  it("exposes route context via title and headerActions without baking page-specific forms into the foundation", () => {
     render(
       <AppShell
         title="Provider Settings"
-        description="Route-owned shell frame"
-        eyebrow="Route Context"
-        status="Autosave active"
         headerActions={<button type="button">Reconnect</button>}
       >
         <div>Child slot</div>
       </AppShell>,
     );
 
-    expect(screen.getByText("Route Context")).toBeInTheDocument();
     expect(screen.getByText("Provider Settings")).toBeInTheDocument();
-    expect(screen.getByText("Route-owned shell frame")).toBeInTheDocument();
-    expect(screen.getByText("Autosave active")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reconnect" })).toBeInTheDocument();
 
     const main = screen.getByRole("main");

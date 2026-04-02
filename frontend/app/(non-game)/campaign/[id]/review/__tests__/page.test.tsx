@@ -55,7 +55,7 @@ beforeEach(() => {
 });
 
 describe("WorldReviewPage", () => {
-  it("pins Gap 1 review navigation, summary, and action tray to shared shell primitives", async () => {
+  it("renders review tabs, premise section, and navigation footer", async () => {
     mockedLoadCampaign.mockResolvedValue({
       id: "campaign-1",
       name: "Arcadia",
@@ -81,14 +81,16 @@ describe("WorldReviewPage", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("Review Summary")).toBeInTheDocument();
+      expect(screen.getByText("Premise Section")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("Sections")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Continue to Character Creation" })).toBeInTheDocument();
-    expect(screen.getByText("Sections").closest("[data-shell-surface='rail']")).not.toBeNull();
-    expect(screen.getByText("Review Summary").closest("[data-shell-surface='panel']")).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Continue to Character Creation" }).closest("[data-shell-region='action-tray']")).not.toBeNull();
+    expect(screen.getByRole("tab", { name: /Premise/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Locations/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Factions/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /NPCs/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Lore/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue to Character" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Launchpad" })).toBeInTheDocument();
   });
 
   it("blocks world review when the campaign is not generation-ready", async () => {
@@ -112,6 +114,6 @@ describe("WorldReviewPage", () => {
     });
 
     expect(mockedGetWorldData).not.toHaveBeenCalled();
-    expect(screen.queryByText("Review Summary")).not.toBeInTheDocument();
+    expect(screen.queryByText("Premise Section")).not.toBeInTheDocument();
   });
 });

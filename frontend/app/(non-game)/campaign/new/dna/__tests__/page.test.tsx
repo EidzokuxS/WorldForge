@@ -12,6 +12,8 @@ const flowState = {
   handleResuggestCategory: vi.fn(),
   handleCreateWithDna: vi.fn(),
   handleSeedTextChange: vi.fn(),
+  handleSeedToggle: vi.fn(),
+  handlePrepareManualDna: vi.fn(),
   dnaState: {
     geography: { enabled: true, value: "Storm coast", isCustom: false },
     politicalStructure: { enabled: true, value: "Guild council", isCustom: false },
@@ -19,12 +21,17 @@ const flowState = {
     culturalFlavor: { enabled: true, value: ["masked festivals"], isCustom: false },
     environment: { enabled: true, value: "Sea caves", isCustom: false },
     wildcard: { enabled: true, value: "Whispering relics", isCustom: false },
-  },
+  } as Record<string, { enabled: boolean; value: string | string[]; isCustom: boolean }> | null,
 };
 
 vi.mock("@/components/campaign-new/flow-provider", () => ({
   useCampaignNewFlow: () => flowState,
 }));
+
+vi.mock("@/components/title/utils", async () => {
+  const actual = await vi.importActual<typeof import("@/components/title/utils")>("@/components/title/utils");
+  return actual;
+});
 
 import CampaignDnaPage from "@/app/(non-game)/campaign/new/dna/page";
 
@@ -49,7 +56,7 @@ describe("CampaignDnaPage", () => {
   it("renders routed DNA editing on persisted flow state", () => {
     render(<CampaignDnaPage />);
 
-    expect(screen.getByText("World DNA")).toBeInTheDocument();
+    expect(screen.getByText("Geography")).toBeInTheDocument();
     expect(screen.getByText(/Storm coast/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create World" })).toBeInTheDocument();
   });
@@ -76,7 +83,8 @@ describe("CampaignDnaPage", () => {
 
     render(<CampaignDnaPage />);
 
-    expect(screen.getByText("World DNA has not been prepared yet. Go back to concept, continue into DNA, or start with at least one manual seed before generating.")).toBeInTheDocument();
+    expect(screen.getByText("World DNA has not been prepared yet.")).toBeInTheDocument();
     expect(screen.queryByText("DNA suggestions are not ready yet. Return to concept and continue when the flow is populated.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start With Manual DNA" })).toBeInTheDocument();
   });
 });

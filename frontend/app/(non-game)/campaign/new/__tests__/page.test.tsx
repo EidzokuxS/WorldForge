@@ -22,6 +22,7 @@ const flowState = {
   handleWorldbookUpload: vi.fn(),
   canCreate: true,
   isBusy: false,
+  isSuggesting: false,
   creatingCampaign: false,
   isGenerating: false,
   generationProgress: null,
@@ -58,7 +59,7 @@ describe("CampaignConceptPage", () => {
 
     expect(screen.getByLabelText("Campaign Name")).toHaveValue("Arcadia");
     expect(screen.getByLabelText("Premise")).toHaveValue("A haunted coast.");
-    expect(screen.getByText("Source Library")).toBeInTheDocument();
+    expect(screen.getByText("Sources")).toBeInTheDocument();
     expect(screen.getByText("Alpha Codex")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Continue to DNA" })).toBeInTheDocument();
   });

@@ -65,7 +65,7 @@ beforeEach(() => {
 });
 
 describe("CharacterCreationPage", () => {
-  it("pins Gap 1 character navigation, summary, and action tray to shared shell primitives", async () => {
+  it("renders character form, no-draft message, and action buttons", async () => {
     mockedLoadCampaign.mockResolvedValue({
       id: "campaign-1",
       name: "Arcadia",
@@ -77,14 +77,12 @@ describe("CharacterCreationPage", () => {
     await renderPage("campaign-1");
 
     await waitFor(() => {
-      expect(screen.getByText("Input Methods")).toBeInTheDocument();
+      expect(screen.getByTestId("character-form")).toBeInTheDocument();
     });
 
-    expect(screen.getByTestId("character-form")).toBeInTheDocument();
-    expect(screen.getByText("Awaiting Draft")).toBeInTheDocument();
-    expect(screen.getByText("Input Methods").closest("[data-shell-surface='rail']")).not.toBeNull();
-    expect(screen.getByText("Draft Summary").closest("[data-shell-surface='panel']")).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Begin Adventure" }).closest("[data-shell-region='action-tray']")).not.toBeNull();
+    expect(screen.getByText("Use the entry methods above to parse, generate, or import a character.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save & Begin Adventure" })).toBeDisabled();
+    expect(screen.getByRole("link", { name: "Back to Review" })).toBeInTheDocument();
   });
 
   it("blocks character creation when the backend reports world generation is not ready", async () => {
@@ -103,6 +101,6 @@ describe("CharacterCreationPage", () => {
     });
 
     expect(screen.queryByTestId("character-form")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Begin Adventure" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Save.*Begin Adventure/ })).not.toBeInTheDocument();
   });
 });

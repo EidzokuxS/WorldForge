@@ -33,11 +33,10 @@ vi.mock("@/components/settings/research-tab", () => ({
 import SettingsPage from "@/app/(non-game)/settings/page";
 
 describe("SettingsPage", () => {
-  it("renders settings content with visible save state and provider summary", () => {
+  it("renders settings content with visible save state and tab navigation", () => {
     render(<SettingsPage />);
 
-    expect(screen.getByText("Changes are saved automatically.")).toBeInTheDocument();
+    expect(screen.getByText("Saved")).toBeInTheDocument();
     expect(screen.getByText("Providers")).toBeInTheDocument();
-    expect(screen.getByText(/Active providers: 1/)).toBeInTheDocument();
   });
 });
