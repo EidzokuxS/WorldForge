@@ -38,7 +38,7 @@ export function ShellMainPanel({ className, ...props }: DivProps) {
     <div
       data-shell-region="main-panel"
       className={cn(
-        "flex min-w-0 flex-1 flex-col [background:linear-gradient(180deg,rgba(255,255,255,0.02)_0%,rgba(255,255,255,0)_100%),var(--shell-panel-surface)]",
+        "flex min-w-0 flex-1 flex-col overflow-hidden [background:linear-gradient(180deg,rgba(255,255,255,0.02)_0%,rgba(255,255,255,0)_100%),var(--shell-panel-surface)]",
         className,
       )}
       {...props}
@@ -46,6 +46,7 @@ export function ShellMainPanel({ className, ...props }: DivProps) {
   );
 }
 
+/** @deprecated Use flat layout instead. Kept for backward compatibility with workspace components. */
 export function ShellPanel({ className, ...props }: DivProps) {
   return (
     <div
@@ -56,6 +57,7 @@ export function ShellPanel({ className, ...props }: DivProps) {
   );
 }
 
+/** @deprecated Use flat layout instead. Kept for backward compatibility with workspace components. */
 export function ShellRail({ className, ...props }: DivProps) {
   return (
     <div
@@ -71,6 +73,7 @@ interface ShellActionTrayProps extends DivProps {
   description?: string;
 }
 
+/** @deprecated Use flat layout instead. Kept for backward compatibility with workspace components. */
 export function ShellActionTray({
   title,
   description,

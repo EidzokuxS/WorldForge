@@ -91,16 +91,12 @@ export function AppSidebar({ pathname }: AppSidebarProps) {
 
   return (
     <Sidebar className="h-full w-full border-0 bg-transparent supports-[backdrop-filter]:bg-transparent">
-      <SidebarHeader className="p-5 pb-3">
-        <div className="rounded-[var(--shell-radius-panel)] border [border-color:var(--shell-border)] [background:var(--shell-panel-muted)] px-4 py-4 shadow-[0_18px_40px_rgba(0,0,0,0.16)]">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-blood">WorldForge</p>
-          <p className="mt-2 font-serif text-2xl text-bone">Desktop Shell</p>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Non-game planning, creation, review, and authoring surfaces.
-          </p>
-        </div>
+      <SidebarHeader className="px-[clamp(16px,1.2vw,24px)] pt-[clamp(20px,1.5vw,32px)] pb-[clamp(16px,1vw,24px)]">
+        <p className="text-[clamp(14px,1.1vw,20px)] font-bold uppercase tracking-[0.2em] text-blood">
+          WorldForge
+        </p>
       </SidebarHeader>
-      <SidebarContent className="px-4 pb-5">
+      <SidebarContent className="px-[clamp(6px,0.5vw,12px)] pb-5">
         <SidebarGroup>
           <SidebarGroupLabel>Workspace</SidebarGroupLabel>
           <SidebarMenu>
@@ -148,10 +144,8 @@ export function AppSidebar({ pathname }: AppSidebarProps) {
           </SidebarGroup>
         ) : null}
       </SidebarContent>
-      <SidebarFooter className="border-t [border-color:var(--shell-border)]">
-        <p className="text-xs text-muted-foreground">
-          Persistent navigation for launcher, creation, review, character, settings, and library flows.
-        </p>
+      <SidebarFooter className="border-t [border-color:var(--shell-border)] px-[clamp(16px,1.2vw,24px)] py-[clamp(12px,1vw,20px)]">
+        <p className="text-[clamp(11px,0.7vw,14px)] text-zinc-600">v0.1.0</p>
       </SidebarFooter>
     </Sidebar>
   );
