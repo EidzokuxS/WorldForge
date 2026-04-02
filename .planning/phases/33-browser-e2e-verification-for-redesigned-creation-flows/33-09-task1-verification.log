@@ -1,0 +1,51 @@
+# Task 1: Known-IP Browser Verification Log
+# Date: 2026-04-02
+# Campaign: Naruto World (4f96c8eb-a46f-4a64-a74d-0e07fb880637)
+# Method: PinchTab browser automation on localhost:3000
+
+## Step 1: Navigate to launcher
+- URL: http://localhost:3000/
+- Result: PASS
+- Observations: Shell rendered with sidebar (WORLDFORGE branding, Desktop Shell header), launcher workspace with Campaign Launchpad heading, New Campaign link, Load Campaign button, Shell Shortcuts (Library, Settings)
+
+## Step 2: Load known-IP campaign via dialog
+- Action: Clicked Load Campaign button (programmatic click required for React/lucide icon button)
+- Result: PASS
+- Observations: Load Campaign dialog appeared with 3 campaigns listed (Test Original World, Voices of the Void, Naruto World). Each has Load and Delete buttons. Load restricted to explicit button (not whole card click).
+
+## Step 3: Load Naruto World campaign
+- Action: Clicked Load button for Naruto World
+- Result: PASS
+- Observations: Dialog closed, campaign loaded via API, returned to launcher
+
+## Step 4: Navigate to review route
+- URL: http://localhost:3000/campaign/4f96c8eb-a46f-4a64-a74d-0e07fb880637/review
+- Result: PASS
+- Observations: Review page loaded with populated data. Shell coherent - sidebar shows WORKSPACE section (Launchpad, New Campaign, Library, Settings) and CAMPAIGN section (World Review, Character)
+
+## Step 5: Verify review data populated
+- Premise tab: PASS - Shows full Naruto world premise text in editable textarea
+- Locations tab (5): PASS - 5 locations with Regenerate and Add Location buttons
+- Factions tab (4): PASS - 4 factions with tags (Diplomatic, Nature-aligned, Defensive), goals visible
+- NPCs tab (6): PASS - 6 NPCs with background/persona data (e.g., Kaito)
+- Lore tab (30): PASS - 30 lore cards with categories (Concepts: 8), Import WorldBook button, Edit/Delete per card
+
+## Step 6: Verify shell coherence
+- Sidebar navigation: PASS - All links present and contextual
+- Review workspace framing: PASS - Review header, section navigation rail, review summary panel
+- Review summary: PASS - Shows "Premise reviewed: ready, Locations: 5, Factions: 4, NPCs: 6, Lore cards: 30"
+- Continue to Character Creation button: PASS - Present and functional
+
+## Step 7: Automated test verification
+- Test files: page.test.tsx (concept), page.test.tsx (dna), page.test.tsx (review)
+- Result: 3 files, 8 tests, ALL PASSED
+- Duration: 1.38s
+
+## Browser Regressions Found
+None - all segments passed cleanly.
+
+## LLM Calls
+No new LLM calls needed - used existing generated known-IP campaign data.
+
+## Summary
+Known-IP browser run reaches populated world review on the redesigned shell. All 5 data tabs populated with real scaffold data. Shell coherent on launcher, load dialog, and review route.
