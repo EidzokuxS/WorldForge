@@ -240,12 +240,12 @@ export function NpcsSection({
             </button>
 
             {/* NPC Name */}
-            <div className="pr-8">
+            <div>
               <Input
                 value={npc.name}
                 onChange={(e) => updateNpc(index, { name: e.target.value })}
                 placeholder="NPC NAME"
-                className="border-none bg-transparent px-2 font-mono text-[clamp(13px,0.9vw,16px)] uppercase tracking-widest text-zinc-100 focus:border-b focus:border-zinc-600 focus-visible:ring-0"
+                className="border-none bg-transparent px-2 font-mono text-[clamp(13px,0.9vw,16px)] uppercase tracking-widest text-zinc-100 shadow-none focus-visible:ring-0"
               />
               {npc.name.trim() && duplicateNames.has(npc.name.trim().toLowerCase()) && (
                 <p className="mt-1 flex items-center gap-1 text-xs text-yellow-500">
