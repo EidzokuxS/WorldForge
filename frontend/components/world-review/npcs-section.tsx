@@ -234,7 +234,7 @@ export function NpcsSection({
             <button
               type="button"
               onClick={() => deleteNpc(index)}
-              className="absolute right-2 top-2 rounded p-1 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-destructive/20 hover:text-destructive"
+              className="absolute right-3 top-3 rounded p-1 text-zinc-600 opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-400"
             >
               <Trash2 className="h-4 w-4" />
             </button>
