@@ -234,7 +234,7 @@ export function NpcsSection({
             <button
               type="button"
               onClick={() => deleteNpc(index)}
-              className="absolute right-3 top-3 rounded p-1 text-zinc-600 opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-400"
+              className="absolute right-3 top-3 hidden rounded p-1 text-zinc-600 group-hover:block hover:text-red-400"
             >
               <Trash2 className="h-4 w-4" />
             </button>
@@ -245,7 +245,7 @@ export function NpcsSection({
                 value={npc.name}
                 onChange={(e) => updateNpc(index, { name: e.target.value })}
                 placeholder="NPC NAME"
-                className="border-none bg-transparent px-2 font-mono text-[clamp(13px,0.9vw,16px)] uppercase tracking-widest text-zinc-100 shadow-none focus-visible:ring-0"
+                className="!border-0 !bg-transparent !shadow-none px-2 font-mono text-[clamp(13px,0.9vw,16px)] uppercase tracking-widest text-zinc-100 focus-visible:!ring-0"
               />
               {npc.name.trim() && duplicateNames.has(npc.name.trim().toLowerCase()) && (
                 <p className="mt-1 flex items-center gap-1 text-xs text-yellow-500">
