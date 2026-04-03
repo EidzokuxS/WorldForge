@@ -88,7 +88,7 @@ export function ConceptWorkspace({ onContinue }: ConceptWorkspaceProps) {
           </div>
 
           {/* Research toggle row */}
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between border-t border-white/[0.06] pt-[clamp(12px,1vw,20px)]">
             <Label htmlFor="research-toggle" className="mb-0">Research Mode</Label>
             <Switch
               id="research-toggle"
