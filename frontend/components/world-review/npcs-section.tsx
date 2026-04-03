@@ -228,7 +228,7 @@ export function NpcsSection({
         {npcs.map((npc, index) => (
           <div
             key={npc._uid ?? `npc-fallback-${index}`}
-            className="group relative border-l-[3px] border-l-[#e63e00] border border-border/30 rounded-r-lg bg-zinc-900/40 p-[clamp(16px,1.4vw,28px)]"
+            className="group relative overflow-hidden border border-border/30 rounded-lg bg-zinc-900/40 p-[clamp(16px,1.4vw,28px)] before:absolute before:left-0 before:top-0 before:h-12 before:w-[3px] before:bg-[#e63e00] before:rounded-bl-sm"
           >
             {/* Delete button — hidden until hover */}
             <button
@@ -245,7 +245,7 @@ export function NpcsSection({
                 value={npc.name}
                 onChange={(e) => updateNpc(index, { name: e.target.value })}
                 placeholder="NPC NAME"
-                className="border-none bg-transparent px-0 font-mono text-[clamp(13px,0.9vw,16px)] uppercase tracking-widest text-zinc-100 focus:border-b focus:border-zinc-600 focus-visible:ring-0"
+                className="border-none bg-transparent px-2 font-mono text-[clamp(13px,0.9vw,16px)] uppercase tracking-widest text-zinc-100 focus:border-b focus:border-zinc-600 focus-visible:ring-0"
               />
               {npc.name.trim() && duplicateNames.has(npc.name.trim().toLowerCase()) && (
                 <p className="mt-1 flex items-center gap-1 text-xs text-yellow-500">
@@ -335,9 +335,9 @@ export function NpcsSection({
             </div>
 
             {/* Location / Faction footer */}
-            <div className="grid grid-cols-2 gap-2 border-t border-white/[0.06] pt-[clamp(8px,0.6vw,14px)]">
+            <div className="grid grid-cols-2 gap-4 border-t border-white/[0.06] pt-[clamp(8px,0.6vw,14px)]">
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[10px] uppercase text-zinc-500">
+                <span className="shrink-0 font-mono text-[10px] uppercase text-zinc-500">
                   Location
                 </span>
                 <Select
@@ -359,7 +359,7 @@ export function NpcsSection({
                 </Select>
               </div>
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[10px] uppercase text-zinc-500">
+                <span className="shrink-0 font-mono text-[10px] uppercase text-zinc-500">
                   Faction
                 </span>
                 <Select

@@ -57,7 +57,7 @@ export function TagEditor({ tags, onChange, placeholder = "Add tag..." }: TagEdi
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
-        className="h-7 w-28 min-w-0 flex-shrink text-xs"
+        className="h-[22px] w-24 min-w-0 flex-shrink rounded-sm border-dashed px-1.5 font-mono text-[11px] text-zinc-400"
       />
     </div>
   );
