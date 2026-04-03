@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Plus, Trash2, FileText, Upload, Sparkles, Loader2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -209,9 +209,9 @@ export function NpcsSection({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-[clamp(12px,1vw,20px)] lg:grid-cols-2">
         {npcs.map((npc, index) => (
-          <Card key={npc._uid ?? `npc-fallback-${index}`} className="relative border-border/50 bg-card">
+          <div key={npc._uid ?? `npc-fallback-${index}`} className="relative rounded-lg border border-border/40 p-[clamp(16px,1.4vw,28px)]">
             <button
               type="button"
               onClick={() => deleteNpc(index)}
@@ -219,12 +219,12 @@ export function NpcsSection({
             >
               <Trash2 className="h-4 w-4" />
             </button>
-            <CardHeader className="pb-2 pr-10">
+            <div className="mb-[clamp(8px,0.6vw,14px)] pr-10">
               <Input
                 value={npc.name}
                 onChange={(e) => updateNpc(index, { name: e.target.value })}
                 placeholder="NPC name"
-                className="font-serif text-lg font-bold"
+                className="font-serif text-[clamp(14px,1vw,18px)] font-bold"
               />
               {npc.name.trim() && duplicateNames.has(npc.name.trim().toLowerCase()) && (
                 <p className="mt-1 flex items-center gap-1 text-xs text-yellow-500">
@@ -232,8 +232,8 @@ export function NpcsSection({
                   Duplicate name
                 </p>
               )}
-            </CardHeader>
-            <CardContent className="space-y-3">
+            </div>
+            <div className="space-y-[clamp(8px,0.7vw,14px)]">
               <div>
                 <Label className="text-xs text-muted-foreground">Persona</Label>
                 <Textarea
@@ -340,8 +340,8 @@ export function NpcsSection({
                   </Select>
                 </div>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         ))}
       </div>
 
