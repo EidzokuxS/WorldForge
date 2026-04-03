@@ -88,7 +88,7 @@ export function ConceptWorkspace({ onContinue }: ConceptWorkspaceProps) {
           </div>
 
           {/* Research toggle row */}
-          <div className="flex items-center justify-between border-t border-white/[0.06] pt-[clamp(12px,1vw,20px)]">
+          <div className="flex items-center justify-between">
             <Label htmlFor="research-toggle" className="mb-0">Research Mode</Label>
             <Switch
               id="research-toggle"
@@ -191,7 +191,7 @@ export function ConceptWorkspace({ onContinue }: ConceptWorkspaceProps) {
       </div>
 
       {/* Footer bar */}
-      <div className="mt-auto flex shrink-0 items-center justify-between border-t border-white/[0.06]" style={{ padding: "clamp(12px, 1vw, 20px) 0" }}>
+      <div className="mt-[clamp(16px,1.2vw,24px)] flex shrink-0 items-center justify-between border-t border-white/[0.06]" style={{ padding: "clamp(12px, 1vw, 20px) 0" }}>
         <div className="flex items-center gap-3">
           <Button asChild variant="ghost">
             <Link href="/">Cancel</Link>
