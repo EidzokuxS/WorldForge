@@ -21,4 +21,4 @@ export type { IpResearchContext } from "./ip-researcher.js";
 export { interpretPremiseDivergence } from "./premise-divergence.js";
 export { beginWorldgenOperation, listWorldgenOperations } from "./debug-progress.js";
 export { resolveStartingLocation } from "./starting-location.js";
-export type { StartingLocationResult } from "./starting-location.js";
+export type { ResolvedStartConditions as StartingLocationResult } from "@worldforge/shared";

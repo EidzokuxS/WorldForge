@@ -42,9 +42,6 @@ qa-screenshots/
 backend/e2e/
 backend/logs/
 
-# Planning (GSD workflow)
-.planning/
-
 # Tool configs
 .claude/
 .serena/

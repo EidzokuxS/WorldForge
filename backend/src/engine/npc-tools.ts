@@ -15,7 +15,12 @@ import { executeToolCall } from "./tool-executor.js";
 import { storeEpisodicEvent } from "../vectors/episodic-events.js";
 import type { ProviderConfig } from "../ai/provider-registry.js";
 import { createLogger } from "../lib/index.js";
-import { parseTags, parseNpcGoals } from "./parse-helpers.js";
+import { parseTags } from "./parse-helpers.js";
+import {
+  hydrateStoredNpcRecord,
+  projectNpcRecord,
+} from "../character/record-adapters.js";
+import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
 
 const log = createLogger("npc-tools");
 
@@ -42,14 +47,15 @@ export function createNpcAgentTools(
 
         // Load NPC for actor tags
         const npc = db
-          .select({ name: npcs.name, tags: npcs.tags, currentLocationId: npcs.currentLocationId })
+          .select()
           .from(npcs)
           .where(eq(npcs.id, npcId))
           .get();
 
         if (!npc) return { error: "NPC not found" };
 
-        const actorTags = parseTags(npc.tags);
+        const npcRecord = hydrateStoredNpcRecord(npc);
+        const actorTags = deriveRuntimeCharacterTags(npcRecord);
 
         // Load location for environment tags
         let environmentTags: string[] = [];
@@ -138,7 +144,7 @@ export function createNpcAgentTools(
 
         // Load NPC's current location
         const npc = db
-          .select({ name: npcs.name, currentLocationId: npcs.currentLocationId })
+          .select()
           .from(npcs)
           .where(eq(npcs.id, npcId))
           .get();
@@ -177,8 +183,18 @@ export function createNpcAgentTools(
         }
 
         // Update NPC location
+        const npcRecord = hydrateStoredNpcRecord(npc, {
+          currentLocationName: targetLoc.name,
+        });
         db.update(npcs)
-          .set({ currentLocationId: targetLoc.id })
+          .set(projectNpcRecord({
+            ...npcRecord,
+            socialContext: {
+              ...npcRecord.socialContext,
+              currentLocationId: targetLoc.id,
+              currentLocationName: targetLoc.name,
+            },
+          }))
           .where(eq(npcs.id, npcId))
           .run();
 
@@ -200,14 +216,18 @@ export function createNpcAgentTools(
         const db = getDb();
 
         const npc = db
-          .select({ goals: npcs.goals })
+          .select()
           .from(npcs)
           .where(eq(npcs.id, npcId))
           .get();
 
         if (!npc) return { error: "NPC not found" };
 
-        const goals = parseNpcGoals(npc.goals);
+        const npcRecord = hydrateStoredNpcRecord(npc);
+        const goals = {
+          short_term: [...npcRecord.motivations.shortTermGoals],
+          long_term: [...npcRecord.motivations.longTermGoals],
+        };
         const goalList = goals[type];
 
         // Find and replace, or append
@@ -219,7 +239,14 @@ export function createNpcAgentTools(
         }
 
         db.update(npcs)
-          .set({ goals: JSON.stringify(goals) })
+          .set(projectNpcRecord({
+            ...npcRecord,
+            motivations: {
+              ...npcRecord.motivations,
+              shortTermGoals: goals.short_term,
+              longTermGoals: goals.long_term,
+            },
+          }))
           .where(eq(npcs.id, npcId))
           .run();
 

@@ -10,8 +10,8 @@ vi.mock("../../vectors/episodic-events.js", () => ({
 }));
 
 vi.mock("ai", () => ({
-  generateObject: vi.fn().mockResolvedValue({
-    object: [],
+  generateText: vi.fn().mockResolvedValue({
+    text: JSON.stringify({ updates: [] }),
   }),
 }));
 
@@ -25,7 +25,7 @@ import {
   applyOffscreenUpdate,
 } from "../npc-offscreen.js";
 import { getDb } from "../../db/index.js";
-import { generateObject } from "ai";
+import { generateText } from "ai";
 import { storeEpisodicEvent } from "../../vectors/episodic-events.js";
 
 const CAMPAIGN_ID = "test-campaign-123";
@@ -52,6 +52,71 @@ function createMockNpc(overrides: Record<string, unknown> = {}) {
     currentLocationId: "loc-002", // NOT at player location
     goals: '{"short_term":["gather allies"],"long_term":["seize the throne"]}',
     beliefs: '["power is everything"]',
+    characterRecord: JSON.stringify({
+      identity: {
+        id: "npc-001",
+        campaignId: CAMPAIGN_ID,
+        role: "npc",
+        tier: "key",
+        displayName: "Lord Blackwood",
+        canonicalStatus: "original",
+      },
+      profile: {
+        species: "",
+        gender: "",
+        ageText: "",
+        appearance: "",
+        backgroundSummary: "",
+        personaSummary: "A calculating noble who hides panic behind manners.",
+      },
+      socialContext: {
+        factionId: null,
+        factionName: null,
+        homeLocationId: null,
+        homeLocationName: null,
+        currentLocationId: "loc-002",
+        currentLocationName: "Council Hall",
+        relationshipRefs: [],
+        socialStatus: ["noble"],
+        originMode: "native",
+      },
+      motivations: {
+        shortTermGoals: ["Secure the council vote"],
+        longTermGoals: ["Take the throne"],
+        beliefs: ["Power rewards patience"],
+        drives: ["Ambition"],
+        frictions: ["Paranoid"],
+      },
+      capabilities: {
+        traits: ["Strategic"],
+        skills: [{ name: "Intrigue", tier: "Master" }],
+        flaws: ["Cruel"],
+        specialties: [],
+        wealthTier: "Wealthy",
+      },
+      state: {
+        hp: 5,
+        conditions: ["Hidden"],
+        statusFlags: [],
+        activityState: "active",
+      },
+      loadout: {
+        inventorySeed: [],
+        equippedItemRefs: [],
+        currencyNotes: "",
+        signatureItems: [],
+      },
+      startConditions: {},
+      provenance: {
+        sourceKind: "worldgen",
+        importMode: null,
+        templateId: null,
+        archetypePrompt: null,
+        worldgenOrigin: "scaffold",
+        legacyTags: ["noble", "cunning", "wealthy"],
+      },
+    }),
+    derivedTags: '["noble","cunning","wealthy"]',
     ...overrides,
   };
 }
@@ -104,7 +169,7 @@ describe("simulateOffscreenNpcs", () => {
     );
 
     expect(results).toEqual([]);
-    expect(generateObject).not.toHaveBeenCalled();
+    expect(generateText).not.toHaveBeenCalled();
   });
 
   it("skips NPCs at the player's location (they are on-screen)", async () => {
@@ -121,7 +186,7 @@ describe("simulateOffscreenNpcs", () => {
     );
 
     expect(results).toEqual([]);
-    expect(generateObject).not.toHaveBeenCalled();
+    expect(generateText).not.toHaveBeenCalled();
   });
 
   it("only runs when tick % interval === 0", async () => {
@@ -147,8 +212,8 @@ describe("simulateOffscreenNpcs", () => {
     const npc = createMockNpc();
     setupMockDb({ offscreenNpcs: [npc] });
 
-    (generateObject as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      object: {
+    (generateText as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      text: JSON.stringify({
         updates: [
           {
             npcName: "Lord Blackwood",
@@ -157,7 +222,7 @@ describe("simulateOffscreenNpcs", () => {
             goalProgress: null,
           },
         ],
-      },
+      }),
     });
 
     const results = await simulateOffscreenNpcs(
@@ -167,7 +232,12 @@ describe("simulateOffscreenNpcs", () => {
       PLAYER_LOCATION_ID,
     );
 
-    expect(generateObject).toHaveBeenCalledOnce();
+    expect(generateText).toHaveBeenCalledOnce();
+    const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
+    expect(systemPrompt).toContain("Persona: A calculating noble who hides panic behind manners.");
+    expect(systemPrompt).toContain("  Traits: [Strategic, Master Intrigue, Cruel, Wealthy, Hidden, noble, Ambition, Paranoid]");
+    expect(systemPrompt).toContain("Goals: short=[Secure the council vote], long=[Take the throne]");
+    expect(systemPrompt).not.toContain("A cunning noble lord");
     expect(results).toHaveLength(1);
     expect(results[0]!.npcName).toBe("Lord Blackwood");
     expect(results[0]!.actionSummary).toBe("Plotted in his study");
@@ -211,12 +281,28 @@ describe("applyOffscreenUpdate", () => {
       locationByName: { id: "loc-003", name: "Castle Keep" },
     });
 
+    const storedNpc = createMockNpc();
     await applyOffscreenUpdate(
       CAMPAIGN_ID,
       {
         npcId: "npc-001",
         npcName: "Lord Blackwood",
         currentGoals: '{"short_term":["gather allies"],"long_term":["seize the throne"]}',
+        currentCharacterRecord: storedNpc.characterRecord as string,
+        storedRecord: {
+          campaignId: storedNpc.campaignId,
+          persona: storedNpc.persona,
+          tags: storedNpc.tags,
+          tier: storedNpc.tier,
+          currentLocationId: storedNpc.currentLocationId,
+          goals: storedNpc.goals,
+          beliefs: storedNpc.beliefs,
+          unprocessedImportance: 0,
+          inactiveTicks: 0,
+          createdAt: 0,
+          characterRecord: storedNpc.characterRecord,
+          derivedTags: storedNpc.derivedTags,
+        },
       },
       {
         npcName: "Lord Blackwood",
@@ -229,6 +315,14 @@ describe("applyOffscreenUpdate", () => {
 
     // Should have called update for location change
     expect(mockDb.update).toHaveBeenCalled();
+    expect(mockDb.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentLocationId: "loc-003",
+        goals: expect.stringContaining("Formed alliance with Duke"),
+        characterRecord: expect.stringContaining("Formed alliance with Duke"),
+        derivedTags: expect.any(String),
+      }),
+    );
     // Should store episodic event
     expect(storeEpisodicEvent).toHaveBeenCalled();
   });

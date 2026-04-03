@@ -32,6 +32,8 @@ export interface TurnSnapshot {
   playerTags: string;
   playerLocationId: string | null;
   playerEquippedItems: string;
+  playerCharacterRecord: string;
+  playerDerivedTags: string;
   tick: number;
   // IDs of entities created during the turn (for deletion on rollback)
   spawnedNpcIds: string[];
@@ -57,6 +59,8 @@ export function captureSnapshot(campaignId: string): TurnSnapshot {
       tags: players.tags,
       currentLocationId: players.currentLocationId,
       equippedItems: players.equippedItems,
+      characterRecord: players.characterRecord,
+      derivedTags: players.derivedTags,
     })
     .from(players)
     .where(eq(players.campaignId, campaignId))
@@ -70,6 +74,8 @@ export function captureSnapshot(campaignId: string): TurnSnapshot {
     playerTags: player?.tags ?? "[]",
     playerLocationId: player?.currentLocationId ?? null,
     playerEquippedItems: player?.equippedItems ?? "[]",
+    playerCharacterRecord: player?.characterRecord ?? "{}",
+    playerDerivedTags: player?.derivedTags ?? "[]",
     tick,
     spawnedNpcIds: [],
     spawnedItemIds: [],
@@ -98,6 +104,8 @@ export function restoreSnapshot(
       tags: snapshot.playerTags,
       currentLocationId: snapshot.playerLocationId,
       equippedItems: snapshot.playerEquippedItems,
+      characterRecord: snapshot.playerCharacterRecord,
+      derivedTags: snapshot.playerDerivedTags,
     })
     .where(eq(players.campaignId, campaignId))
     .run();

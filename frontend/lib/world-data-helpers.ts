@@ -4,6 +4,8 @@
  */
 
 import type { WorldData, EditableScaffold, LoreCardItem } from "./api-types";
+import type { CharacterDraft } from "@worldforge/shared";
+import { characterDraftToScaffoldNpc } from "./character-drafts";
 
 export interface WorldIdMaps {
   readonly locationIdToName: ReadonlyMap<string, string>;
@@ -79,6 +81,7 @@ export function toEditableScaffold(
       territoryNames: factionTerritories.get(fac.name) ?? [],
     })),
     npcs: world.npcs.map((npc) => {
+      const draft = npc.draft ?? null;
       const goals = npc.goals as Record<string, unknown>;
       const shortTerm = Array.isArray(goals.short_term)
         ? (goals.short_term as string[])
@@ -90,15 +93,17 @@ export function toEditableScaffold(
         : Array.isArray(goals.longTerm)
           ? (goals.longTerm as string[])
           : [];
+      const draftNpc = draft ? draftToEditableNpc(draft) : null;
       return {
-        name: npc.name,
-        persona: npc.persona,
-        tags: npc.tags,
-        goals: { shortTerm, longTerm },
-        locationName: npc.currentLocationId
+        name: draftNpc?.name ?? npc.name,
+        persona: draftNpc?.persona ?? npc.persona,
+        tags: draftNpc?.tags ?? npc.tags,
+        goals: draftNpc?.goals ?? { shortTerm, longTerm },
+        locationName: draftNpc?.locationName ?? (npc.currentLocationId
           ? idMaps.locationIdToName.get(npc.currentLocationId) ?? ""
-          : "",
-        factionName: npcFaction.get(npc.name) ?? null,
+          : ""),
+        factionName: draftNpc?.factionName ?? npcFaction.get(npc.name) ?? null,
+        ...(draft ? { draft } : {}),
       };
     }),
     loreCards: lore.map((lc) => ({
@@ -106,5 +111,10 @@ export function toEditableScaffold(
       definition: lc.definition,
       category: lc.category,
     })),
+    personaTemplates: world.personaTemplates,
   };
+}
+
+function draftToEditableNpc(draft: CharacterDraft) {
+  return characterDraftToScaffoldNpc(draft);
 }

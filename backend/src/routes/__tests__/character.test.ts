@@ -113,9 +113,10 @@ function createMockDb(opts: {
   const locs = opts.locations ?? [{ id: "loc-1", name: "Tavern" }];
 
   const mockRun = vi.fn();
+  const mockGet = vi.fn(() => null);
   const mockAll = vi.fn(() => locs);
-  const mockWhere = vi.fn(() => ({ all: mockAll, run: mockRun }));
-  const mockFrom = vi.fn(() => ({ where: mockWhere }));
+  const mockWhere = vi.fn(() => ({ all: mockAll, run: mockRun, get: mockGet }));
+  const mockFrom = vi.fn(() => ({ where: mockWhere, get: mockGet }));
   const mockSelect = vi.fn(() => ({ from: mockFrom }));
   const mockValues = vi.fn(() => ({ run: mockRun }));
   const mockInsert = vi.fn(() => ({ values: mockValues }));
@@ -128,7 +129,7 @@ function createMockDb(opts: {
   } as any;
 
   mockedGetDb.mockReturnValue(db);
-  return { db, mockRun, mockAll, mockDelete, mockInsert, mockValues };
+  return { db, mockRun, mockAll, mockDelete, mockInsert, mockValues, mockGet };
 }
 
 /** Mock DB that also returns locationNames for helpers.resolveNames */
@@ -617,9 +618,9 @@ describe("POST /api/worldgen/save-character", () => {
     expect(typeof body.playerId).toBe("string");
   });
 
-  it("rejects unknown location with 400", async () => {
+  it("falls back to the first known location when the requested location is unknown", async () => {
     setActiveCampaign();
-    createMockDb({
+    const { mockValues } = createMockDb({
       locations: [{ id: "loc-1", name: "Forest" }], // not "Tavern"
     });
 
@@ -629,9 +630,14 @@ describe("POST /api/worldgen/save-character", () => {
       body: JSON.stringify(saveBody),
     });
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.error).toContain("Tavern");
+    expect(body.ok).toBe(true);
+    expect(body).toHaveProperty("playerId");
+
+    const firstInsertCall = mockValues.mock.calls[0] as unknown as [Record<string, unknown>] | undefined;
+    const insertedPlayer = firstInsertCall?.[0];
+    expect(insertedPlayer?.currentLocationId).toBe("loc-1");
   });
 
   it("deletes existing player before inserting new one", async () => {
@@ -670,9 +676,11 @@ describe("POST /api/worldgen/save-character", () => {
 
     expect(res.status).toBe(200);
 
-    const insertPayload = mockValues.mock.calls[0]![0] as Record<string, unknown>;
-    expect(insertPayload.characterRecord).toBeDefined();
-    expect(insertPayload.derivedTags).toBeDefined();
+    const firstInsertCall = mockValues.mock.calls[0] as unknown as [Record<string, unknown>] | undefined;
+    const insertPayload = firstInsertCall?.[0];
+    expect(insertPayload).toBeDefined();
+    expect(insertPayload?.characterRecord).toBeDefined();
+    expect(insertPayload?.derivedTags).toBeDefined();
   });
 });
 
@@ -697,6 +705,21 @@ describe("POST /api/worldgen/resolve-starting-location", () => {
     const mockFrom = vi.fn(() => ({ where: mockWhere }));
     const mockSelect = vi.fn(() => ({ from: mockFrom }));
     mockedGetDb.mockReturnValue({ select: mockSelect } as any);
+    mockedResolveStart.mockResolvedValue({
+      locationId: "loc-2",
+      locationName: "Tavern",
+      startConditions: {
+        startLocationId: "loc-2",
+        arrivalMode: "settled",
+        immediateSituation: "You begin in Tavern.",
+        entryPressure: [],
+        companions: [],
+        startingVisibility: "expected",
+        resolvedNarrative: null,
+        sourcePrompt: null,
+      },
+      narrative: null,
+    } as any);
 
     const res = await app.request("/api/worldgen/resolve-starting-location", {
       method: "POST",
@@ -708,6 +731,7 @@ describe("POST /api/worldgen/resolve-starting-location", () => {
     const body = await res.json();
     expect(body.locationId).toBe("loc-2");
     expect(body.locationName).toBe("Tavern");
+    expect(body.startConditions.startLocationId).toBe("loc-2");
     expect(body.narrative).toBeNull();
   });
 
@@ -723,7 +747,18 @@ describe("POST /api/worldgen/resolve-starting-location", () => {
     mockedGetDb.mockReturnValue({ select: mockSelect } as any);
 
     mockedResolveStart.mockResolvedValue({
+      locationId: "loc-1",
       locationName: "Forest",
+      startConditions: {
+        startLocationId: "loc-1",
+        arrivalMode: "on-foot",
+        immediateSituation: "You arrive at the edge of the dark forest.",
+        entryPressure: [],
+        companions: [],
+        startingVisibility: "noticed",
+        resolvedNarrative: "You arrive at the edge of the dark forest.",
+        sourcePrompt: "I want to start in the forest",
+      },
       narrative: "You arrive at the edge of the dark forest.",
     } as any);
 
@@ -740,6 +775,7 @@ describe("POST /api/worldgen/resolve-starting-location", () => {
     const body = await res.json();
     expect(body.locationId).toBe("loc-1");
     expect(body.locationName).toBe("Forest");
+    expect(body.startConditions.arrivalMode).toBe("on-foot");
     expect(body.narrative).toBe("You arrive at the edge of the dark forest.");
     expect(mockedResolveStart).toHaveBeenCalled();
   });

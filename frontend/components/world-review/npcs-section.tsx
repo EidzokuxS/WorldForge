@@ -22,12 +22,14 @@ import { parseV2CardFile } from "@/lib/v2-card-parser";
 import { parseCharacter, importV2Card, researchCharacter } from "@/lib/api";
 import type { CharacterImportMode } from "@/lib/types";
 import type { ScaffoldNpc } from "@/lib/api";
+import type { PersonaTemplateSummary } from "@/lib/api-types";
 
 interface NpcsSectionProps {
   npcs: ScaffoldNpc[];
   campaignId: string;
   locationNames: string[];
   factionNames: string[];
+  personaTemplates?: PersonaTemplateSummary[];
   onChange: (npcs: ScaffoldNpc[]) => void;
   onRegenerate: (instruction: string | undefined) => void;
   regenerating: boolean;
@@ -48,6 +50,7 @@ export function NpcsSection({
   campaignId,
   locationNames,
   factionNames,
+  personaTemplates = [],
   onChange,
   onRegenerate,
   regenerating,

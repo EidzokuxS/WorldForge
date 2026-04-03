@@ -267,6 +267,14 @@ export interface CharacterStartConditions {
   sourcePrompt?: string | null;
 }
 
+export interface ResolvedStartConditions {
+  locationId: string;
+  locationName: string;
+  startConditions: CharacterStartConditions;
+  /** Legacy alias kept during the Phase 30 migration. */
+  narrative: string | null;
+}
+
 export interface CharacterProvenance {
   sourceKind: CharacterSourceKind;
   importMode: CharacterImportMode | null;
@@ -298,6 +306,53 @@ export interface CharacterRecord {
   loadout: CharacterLoadout;
   startConditions: CharacterStartConditions;
   provenance: CharacterProvenance;
+}
+
+export interface CharacterDraftPatch {
+  profile?: Partial<CharacterProfile>;
+  socialContext?: Partial<CharacterSocialContext>;
+  motivations?: Partial<CharacterMotivations>;
+  capabilities?: Partial<CharacterCapabilities>;
+  state?: Partial<CharacterState>;
+  loadout?: Partial<CharacterLoadout>;
+  startConditions?: Partial<CharacterStartConditions>;
+  provenance?: Partial<
+    Pick<CharacterProvenance, "templateId" | "archetypePrompt" | "worldgenOrigin">
+  >;
+}
+
+export type PersonaTemplateRoleScope = "player" | "npc" | "any";
+
+export interface PersonaTemplateSummary {
+  id: string;
+  campaignId: string;
+  name: string;
+  description: string;
+  roleScope: PersonaTemplateRoleScope;
+  tags: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface PersonaTemplate extends PersonaTemplateSummary {
+  patch: CharacterDraftPatch;
+}
+
+export type CanonicalLoadoutSlot = "equipped" | "pack" | "signature";
+
+export interface CanonicalLoadoutItemSpec {
+  name: string;
+  slot: CanonicalLoadoutSlot;
+  tags: string[];
+  quantity: number;
+  reason: string;
+}
+
+export interface CanonicalLoadoutPreview {
+  loadout: CharacterLoadout;
+  items: CanonicalLoadoutItemSpec[];
+  audit: string[];
+  warnings: string[];
 }
 
 export interface PlayerCharacter {

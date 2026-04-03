@@ -3,6 +3,12 @@ import {
   CHARACTER_SKILL_TIERS,
   CHARACTER_WEALTH_TIERS,
 } from "@worldforge/shared";
+import type {
+  CanonicalLoadoutPreview,
+  PersonaTemplate,
+  PersonaTemplateSummary,
+  ResolvedStartConditions,
+} from "@worldforge/shared";
 import {
   createCharacterRecordFromDraft,
   fromLegacyNpcRow,
@@ -305,14 +311,14 @@ const characterStateSchema = z.object({
   activityState: z.string().default("idle"),
 });
 
-const characterLoadoutSchema = z.object({
+export const characterLoadoutSchema = z.object({
   inventorySeed: z.array(z.string()).default([]),
   equippedItemRefs: z.array(z.string()).default([]),
   currencyNotes: z.string().default(""),
   signatureItems: z.array(z.string()).default([]),
 });
 
-const characterStartConditionsSchema = z.object({
+export const characterStartConditionsSchema = z.object({
   startLocationId: z.string().nullable().optional(),
   arrivalMode: z.string().nullable().optional(),
   immediateSituation: z.string().nullable().optional(),
@@ -322,6 +328,92 @@ const characterStartConditionsSchema = z.object({
   resolvedNarrative: z.string().nullable().optional(),
   sourcePrompt: z.string().nullable().optional(),
 });
+
+export const personaTemplatePatchSchema = z.object({
+  profile: characterProfileSchema.partial().optional(),
+  socialContext: characterSocialContextSchema.partial().optional(),
+  motivations: characterMotivationsSchema.partial().optional(),
+  capabilities: characterCapabilitiesSchema.partial().optional(),
+  state: characterStateSchema.partial().optional(),
+  loadout: characterLoadoutSchema.partial().optional(),
+  startConditions: characterStartConditionsSchema.partial().optional(),
+  provenance: z.object({
+    templateId: z.string().nullable().optional(),
+    archetypePrompt: z.string().nullable().optional(),
+    worldgenOrigin: z.string().nullable().optional(),
+  }).partial().optional(),
+}).strip();
+
+const personaTemplateRoleScopeSchema = z.enum(["player", "npc", "any"]);
+
+export const personaTemplateSummarySchema = z.object({
+  id: z.string().min(1),
+  campaignId: z.string().min(1),
+  name: z.string().trim().min(1),
+  description: z.string().default(""),
+  roleScope: personaTemplateRoleScopeSchema.default("any"),
+  tags: z.array(z.string()).default([]),
+  createdAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
+}).strip() satisfies z.ZodType<PersonaTemplateSummary>;
+
+export const personaTemplateSchema = personaTemplateSummarySchema.extend({
+  patch: personaTemplatePatchSchema,
+}).strip() satisfies z.ZodType<PersonaTemplate>;
+
+export const createPersonaTemplateSchema = z.object({
+  campaignId: z.string().min(1),
+  name: z.string().trim().min(1),
+  description: z.string().default(""),
+  roleScope: personaTemplateRoleScopeSchema.default("any"),
+  tags: z.array(z.string()).default([]),
+  patch: personaTemplatePatchSchema,
+}).strip();
+
+export const updatePersonaTemplateSchema = z.object({
+  campaignId: z.string().min(1),
+  templateId: z.string().min(1),
+  patch: z.object({
+    name: z.string().trim().min(1).optional(),
+    description: z.string().optional(),
+    roleScope: personaTemplateRoleScopeSchema.optional(),
+    tags: z.array(z.string()).optional(),
+    patch: personaTemplatePatchSchema.optional(),
+  }).strip(),
+}).strip();
+
+export const applyPersonaTemplateSchema = z.object({
+  campaignId: z.string().min(1),
+  templateId: z.string().min(1),
+  draft: z.lazy(() => characterDraftSchema),
+}).strip();
+
+export const previewCanonicalLoadoutSchema = z.object({
+  campaignId: z.string().min(1),
+  draft: z.lazy(() => characterDraftSchema),
+}).strip();
+
+const canonicalLoadoutItemSpecSchema = z.object({
+  name: z.string().min(1),
+  slot: z.enum(["equipped", "pack", "signature"]),
+  tags: z.array(z.string()).default([]),
+  quantity: z.number().int().positive().default(1),
+  reason: z.string().min(1),
+}).strip();
+
+export const canonicalLoadoutPreviewSchema = z.object({
+  loadout: characterLoadoutSchema,
+  items: z.array(canonicalLoadoutItemSpecSchema),
+  audit: z.array(z.string()).default([]),
+  warnings: z.array(z.string()).default([]),
+}).strip() satisfies z.ZodType<CanonicalLoadoutPreview>;
+
+export const resolvedStartConditionsSchema = z.object({
+  locationId: z.string().min(1),
+  locationName: z.string().min(1),
+  startConditions: characterStartConditionsSchema,
+  narrative: z.string().nullable(),
+}).strip() satisfies z.ZodType<ResolvedStartConditions>;
 
 const characterProvenanceSchema = z.object({
   sourceKind: sourceKindSchema,

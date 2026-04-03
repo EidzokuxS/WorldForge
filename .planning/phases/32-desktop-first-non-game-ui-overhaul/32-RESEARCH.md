@@ -379,18 +379,18 @@ app/
 |----------|-------|
 | Framework | Vitest `3.2.4` with jsdom |
 | Config file | `frontend/vitest.config.ts` |
-| Quick run command | `npm --prefix frontend exec vitest run "app/**/__tests__/**/*.test.tsx" "components/**/__tests__/**/*.test.tsx"` |
+| Quick run command | `npm --prefix frontend exec vitest run "components/non-game-shell/__tests__/app-shell.test.tsx" "app/(non-game)/__tests__/layout.test.tsx" "app/(non-game)/__tests__/page.test.tsx" "app/(non-game)/campaign/new/__tests__/page.test.tsx" "app/(non-game)/campaign/new/dna/__tests__/page.test.tsx" "app/(non-game)/settings/__tests__/page.test.tsx" "app/(non-game)/library/__tests__/page.test.tsx" "app/(non-game)/campaign/[id]/review/__tests__/page.test.tsx" "app/(non-game)/campaign/[id]/character/__tests__/page.test.tsx" "app/world-review/__tests__/page.test.tsx" "app/character-creation/__tests__/page.test.tsx" "app/game/__tests__/page.test.tsx" "components/character-creation/__tests__/character-workspace.test.tsx" "components/world-review/__tests__/npcs-section.test.tsx" "components/world-review/__tests__/lore-section.test.tsx" "components/character-creation/__tests__/character-card.test.tsx"` |
 | Full suite command | `npm --prefix frontend exec vitest run` |
 
 ### Phase Requirements → Test Map
 | Req ID | Behavior | Test Type | Automated Command | File Exists? |
 |--------|----------|-----------|-------------------|-------------|
-| P32-01 | shared non-game shell renders route context, nav, inspector slot, and sticky actions consistently | component/page integration | `npm --prefix frontend exec vitest run "components/non-game-shell/__tests__/**/*.test.tsx"` | ❌ Wave 0 |
-| P32-02 | routed `/campaign/new` and `/campaign/new/dna` preserve concept/source/DNA state across navigation | page integration | `npm --prefix frontend exec vitest run "app/campaign/new/__tests__/page.test.tsx" "app/campaign/new/dna/__tests__/page.test.tsx"` | ❌ Wave 0 |
-| P32-03 | world review uses canonical campaign route and desktop workspace editing grammar | page/component integration | `npm --prefix frontend exec vitest run "app/campaign/[id]/review/__tests__/page.test.tsx" "components/world-review/__tests__/npcs-section.test.tsx" "components/world-review/__tests__/lore-section.test.tsx"` | page ❌ / components ✅ |
-| P32-04 | character creation exposes persona/start/loadout workflow cleanly in the new workspace | page/component integration | `npm --prefix frontend exec vitest run "app/campaign/[id]/character/__tests__/page.test.tsx" "components/character-creation/__tests__/character-card.test.tsx"` | ✅ |
-| P32-05 | settings and library adopt the shell without losing provider/research/library behavior | page/component integration | `npm --prefix frontend exec vitest run "app/settings/__tests__/page.test.tsx" "app/library/__tests__/page.test.tsx"` | settings ✅ / library ❌ |
-| P32-06 | legacy routes redirect correctly and `/game` remains untouched structurally | redirect/smoke | `npm --prefix frontend exec vitest run "app/character-creation/__tests__/page.test.tsx" "app/world-review/__tests__/page.test.tsx" "app/game/__tests__/page.test.tsx"` | legacy/game ✅ but need updates |
+| P32-01 | shared non-game shell renders route context, nav, inspector slot, and sticky actions consistently | component/page integration | `npm --prefix frontend exec vitest run "components/non-game-shell/__tests__/app-shell.test.tsx" "app/(non-game)/__tests__/layout.test.tsx"` | ❌ Wave 1 |
+| P32-02 | routed `/campaign/new` and `/campaign/new/dna` preserve concept/source/DNA state across navigation | page integration | `npm --prefix frontend exec vitest run "app/(non-game)/__tests__/page.test.tsx" "app/(non-game)/campaign/new/__tests__/page.test.tsx" "app/(non-game)/campaign/new/dna/__tests__/page.test.tsx"` | ❌ Wave 2 |
+| P32-03 | world review uses canonical campaign route and desktop workspace editing grammar | page/component integration | `npm --prefix frontend exec vitest run "app/(non-game)/campaign/[id]/review/__tests__/page.test.tsx" "components/world-review/__tests__/npcs-section.test.tsx" "components/world-review/__tests__/lore-section.test.tsx"` | route ❌ / components ✅ |
+| P32-04 | character creation exposes persona/start/loadout workflow cleanly in the new workspace | page/component integration | `npm --prefix frontend exec vitest run "app/(non-game)/campaign/[id]/character/__tests__/page.test.tsx" "components/character-creation/__tests__/character-workspace.test.tsx" "components/character-creation/__tests__/character-card.test.tsx"` | page ❌ / workspace ❌ / card ✅ |
+| P32-05 | settings and library adopt the shell without losing provider/research/library behavior | page/component integration | `npm --prefix frontend exec vitest run "app/(non-game)/settings/__tests__/page.test.tsx" "app/(non-game)/library/__tests__/page.test.tsx"` | settings ❌ / library ❌ |
+| P32-06 | legacy routes redirect correctly and `/game` remains untouched structurally | redirect/smoke | `npm --prefix frontend exec vitest run "app/world-review/__tests__/page.test.tsx" "app/character-creation/__tests__/page.test.tsx" "app/(non-game)/campaign/[id]/review/__tests__/page.test.tsx" "app/(non-game)/campaign/[id]/character/__tests__/page.test.tsx" "app/game/__tests__/page.test.tsx"` | legacy/game ✅ update + route ❌ |
 
 ### Sampling Rate
 - **Per task commit:** run the impacted page/component tests plus any new shell tests.
@@ -399,10 +399,14 @@ app/
 
 ### Wave 0 Gaps
 - [ ] `frontend/components/non-game-shell/__tests__/app-shell.test.tsx` — protects shared shell contract for P32-01
-- [ ] `frontend/app/campaign/new/__tests__/page.test.tsx` — routed concept workspace for P32-02
-- [ ] `frontend/app/campaign/new/dna/__tests__/page.test.tsx` — routed DNA workspace for P32-02
-- [ ] `frontend/app/campaign/[id]/review/__tests__/page.test.tsx` — canonical review route coverage for P32-03
-- [ ] `frontend/app/library/__tests__/page.test.tsx` — library shell adoption for P32-05
+- [ ] `frontend/app/(non-game)/__tests__/page.test.tsx` — shell-owned launcher coverage for P32-02
+- [ ] `frontend/app/(non-game)/campaign/new/__tests__/page.test.tsx` — routed concept workspace for P32-02
+- [ ] `frontend/app/(non-game)/campaign/new/dna/__tests__/page.test.tsx` — routed DNA workspace for P32-02
+- [ ] `frontend/app/(non-game)/campaign/[id]/review/__tests__/page.test.tsx` — canonical review route coverage for P32-03
+- [ ] `frontend/app/(non-game)/campaign/[id]/character/__tests__/page.test.tsx` — canonical character route coverage for P32-04
+- [ ] `frontend/components/character-creation/__tests__/character-workspace.test.tsx` — desktop character workspace coverage for P32-04
+- [ ] `frontend/app/(non-game)/settings/__tests__/page.test.tsx` — settings shell adoption for P32-05
+- [ ] `frontend/app/(non-game)/library/__tests__/page.test.tsx` — library shell adoption for P32-05
 - [ ] Rewrite legacy route tests to assert redirect behavior instead of full standalone UI for P32-06
 
 ## Sources

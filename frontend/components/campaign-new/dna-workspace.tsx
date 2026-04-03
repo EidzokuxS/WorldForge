@@ -47,8 +47,8 @@ export function DnaWorkspace() {
                 {/* Header: category label + re-roll + toggle */}
                 <div className="flex items-center justify-between" style={{ marginBottom: "clamp(6px, 0.5vw, 12px)" }}>
                   <span
-                    className="font-semibold uppercase tracking-[0.06em] text-zinc-600"
-                    style={{ fontSize: "clamp(10px, 0.7vw, 13px)" }}
+                    className="font-semibold uppercase tracking-[0.08em] text-zinc-400"
+                    style={{ fontSize: "clamp(12px, 0.85vw, 15px)" }}
                   >
                     {item.label}
                   </span>
@@ -92,15 +92,16 @@ export function DnaWorkspace() {
 
                 {/* Transparent textarea */}
                 <textarea
-                  className="w-full resize-none border-none bg-transparent p-0 text-zinc-100 outline-none placeholder:text-zinc-600"
+                  className="w-full resize-none rounded-md border border-white/[0.08] bg-white/[0.04] text-zinc-200 outline-none focus:border-white/[0.15] placeholder:text-zinc-600"
                   style={{
                     fontFamily: "var(--font-sans, Inter, -apple-system, sans-serif)",
-                    fontSize: "clamp(13px, 0.9vw, 16px)",
+                    fontSize: "clamp(14px, 0.95vw, 17px)",
                     lineHeight: 1.6,
+                    padding: "clamp(8px, 0.6vw, 12px)",
                     minHeight: "auto",
                     height: "auto",
                   }}
-                  rows={item.category === "culturalFlavor" ? 3 : 3}
+                  rows={4}
                   value={seedValueToTextarea(slot.value)}
                   onChange={(event) => w.handleSeedTextChange(item.category, event.target.value)}
                   disabled={!slot.enabled}

@@ -2,18 +2,71 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CharacterCard } from "../character-card";
-import type { ParsedCharacter } from "@/lib/api";
+import type { CharacterDraft } from "@worldforge/shared";
 
-const MOCK_CHARACTER: ParsedCharacter = {
-  name: "Elara Nightwhisper",
-  race: "Half-Elf",
-  gender: "Female",
-  age: "Young adult",
-  appearance: "Tall with silver hair and violet eyes",
-  tags: ["stealth", "archery", "cunning"],
-  hp: 3,
-  equippedItems: ["Short bow", "Leather armor"],
-  locationName: "Rivendell",
+const MOCK_DRAFT: CharacterDraft = {
+  identity: {
+    role: "player",
+    tier: "key",
+    displayName: "Elara Nightwhisper",
+    canonicalStatus: "original",
+  },
+  profile: {
+    species: "Half-Elf",
+    gender: "Female",
+    ageText: "Young adult",
+    appearance: "Tall with silver hair and violet eyes",
+    backgroundSummary: "A scout from the northern borders.",
+    personaSummary: "Quiet, observant, and slow to trust.",
+  },
+  socialContext: {
+    factionId: null,
+    factionName: null,
+    homeLocationId: null,
+    homeLocationName: null,
+    currentLocationId: null,
+    currentLocationName: "Rivendell",
+    relationshipRefs: [],
+    socialStatus: ["wayfinder"],
+    originMode: "native",
+  },
+  motivations: {
+    shortTermGoals: ["Find her brother"],
+    longTermGoals: ["Protect the valley"],
+    beliefs: [],
+    drives: ["Duty"],
+    frictions: ["Distrusts nobility"],
+  },
+  capabilities: {
+    traits: ["stealth", "cunning"],
+    skills: [{ name: "archery", tier: "Skilled" }],
+    flaws: ["restless"],
+    specialties: [],
+    wealthTier: null,
+  },
+  state: {
+    hp: 3,
+    conditions: [],
+    statusFlags: [],
+    activityState: "idle",
+  },
+  loadout: {
+    inventorySeed: ["Short bow", "Leather armor"],
+    equippedItemRefs: ["Short bow", "Leather armor"],
+    currencyNotes: "",
+    signatureItems: ["Short bow"],
+  },
+  startConditions: {
+    sourcePrompt: "",
+  },
+  provenance: {
+    sourceKind: "player-input",
+    importMode: null,
+    templateId: null,
+    archetypePrompt: null,
+    worldgenOrigin: null,
+    legacyTags: ["stealth", "archery", "cunning"],
+  },
 };
 
 const MOCK_LOCATIONS = ["Rivendell", "Moria", "Bree"];
@@ -22,9 +75,10 @@ describe("CharacterCard", () => {
   it("renders all character fields", () => {
     render(
       <CharacterCard
-        character={MOCK_CHARACTER}
+        draft={MOCK_DRAFT}
         locationNames={MOCK_LOCATIONS}
         onChange={vi.fn()}
+        onResolveStartingLocation={vi.fn()}
       />
     );
 
@@ -40,9 +94,10 @@ describe("CharacterCard", () => {
   it("renders HP display with correct count", () => {
     render(
       <CharacterCard
-        character={MOCK_CHARACTER}
+        draft={MOCK_DRAFT}
         locationNames={MOCK_LOCATIONS}
         onChange={vi.fn()}
+        onResolveStartingLocation={vi.fn()}
       />
     );
 
@@ -52,23 +107,25 @@ describe("CharacterCard", () => {
   it("renders tags", () => {
     render(
       <CharacterCard
-        character={MOCK_CHARACTER}
+        draft={MOCK_DRAFT}
         locationNames={MOCK_LOCATIONS}
         onChange={vi.fn()}
+        onResolveStartingLocation={vi.fn()}
       />
     );
 
     expect(screen.getByText("stealth")).toBeInTheDocument();
-    expect(screen.getByText("archery")).toBeInTheDocument();
     expect(screen.getByText("cunning")).toBeInTheDocument();
+    expect(screen.getByText("Duty")).toBeInTheDocument();
   });
 
   it("renders equipped items", () => {
     render(
       <CharacterCard
-        character={MOCK_CHARACTER}
+        draft={MOCK_DRAFT}
         locationNames={MOCK_LOCATIONS}
         onChange={vi.fn()}
+        onResolveStartingLocation={vi.fn()}
       />
     );
 
@@ -81,9 +138,10 @@ describe("CharacterCard", () => {
     const user = userEvent.setup();
     render(
       <CharacterCard
-        character={MOCK_CHARACTER}
+        draft={MOCK_DRAFT}
         locationNames={MOCK_LOCATIONS}
         onChange={onChange}
+        onResolveStartingLocation={vi.fn()}
       />
     );
 
@@ -92,19 +150,18 @@ describe("CharacterCard", () => {
 
     expect(onChange).toHaveBeenCalledTimes(1);
     const call = onChange.mock.calls[0][0];
-    // The component spreads character and overrides name with new value
-    expect(call.name).toBe("Elara NightwhisperX");
-    // Other fields should remain unchanged
-    expect(call.race).toBe("Half-Elf");
-    expect(call.hp).toBe(3);
+    expect(call.identity.displayName).toBe("Elara NightwhisperX");
+    expect(call.profile.species).toBe("Half-Elf");
+    expect(call.state.hp).toBe(3);
   });
 
   it("renders all label text", () => {
     render(
       <CharacterCard
-        character={MOCK_CHARACTER}
+        draft={MOCK_DRAFT}
         locationNames={MOCK_LOCATIONS}
         onChange={vi.fn()}
+        onResolveStartingLocation={vi.fn()}
       />
     );
 
@@ -113,8 +170,36 @@ describe("CharacterCard", () => {
     expect(screen.getByText("Gender")).toBeInTheDocument();
     expect(screen.getByText("Age")).toBeInTheDocument();
     expect(screen.getByText("Appearance")).toBeInTheDocument();
+    expect(screen.getByText("Background")).toBeInTheDocument();
+    expect(screen.getByText("Persona")).toBeInTheDocument();
     expect(screen.getByText("HP")).toBeInTheDocument();
-    expect(screen.getByText("Tags")).toBeInTheDocument();
+    expect(screen.getByText("Traits")).toBeInTheDocument();
+    expect(screen.getByText("Flaws")).toBeInTheDocument();
     expect(screen.getByText("Equipped Items")).toBeInTheDocument();
+    expect(screen.getByText("Starting Situation")).toBeInTheDocument();
+  });
+
+  it("lets the user describe starting situation and apply it", async () => {
+    const onPromptChange = vi.fn();
+    const onResolve = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <CharacterCard
+        draft={MOCK_DRAFT}
+        locationNames={MOCK_LOCATIONS}
+        onChange={(draft) => onPromptChange(draft.startConditions.sourcePrompt)}
+        onResolveStartingLocation={onResolve}
+      />
+    );
+
+    await user.type(
+      screen.getByPlaceholderText(/I arrive at the station at dusk/i),
+      "Arrive during a storm",
+    );
+    await user.click(screen.getByRole("button", { name: "Apply Start" }));
+
+    expect(onPromptChange).toHaveBeenCalled();
+    expect(onResolve).toHaveBeenCalledTimes(1);
   });
 });

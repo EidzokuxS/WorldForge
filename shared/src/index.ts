@@ -37,9 +37,17 @@ export type {
   CharacterState,
   CharacterLoadout,
   CharacterStartConditions,
+  ResolvedStartConditions,
   CharacterProvenance,
   CharacterDraft,
   CharacterRecord,
+  CharacterDraftPatch,
+  PersonaTemplateRoleScope,
+  PersonaTemplateSummary,
+  PersonaTemplate,
+  CanonicalLoadoutSlot,
+  CanonicalLoadoutItemSpec,
+  CanonicalLoadoutPreview,
   PlayerCharacter,
 } from "./types.js";
 

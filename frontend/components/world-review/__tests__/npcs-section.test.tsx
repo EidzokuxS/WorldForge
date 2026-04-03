@@ -1,18 +1,28 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { NpcsSection } from "../npcs-section";
 import type { ScaffoldNpc } from "@/lib/api-types";
+import type { CharacterDraft } from "@worldforge/shared";
+
+const mockTagEditor = vi.fn();
+const mockStringListEditor = vi.fn();
 
 vi.mock("../regenerate-dialog", () => ({
   RegenerateDialog: () => <button data-testid="regenerate">Regenerate</button>,
 }));
 
 vi.mock("../tag-editor", () => ({
-  TagEditor: () => <div data-testid="tag-editor" />,
+  TagEditor: (props: unknown) => {
+    mockTagEditor(props);
+    return <div data-testid="tag-editor" />;
+  },
 }));
 
 vi.mock("../string-list-editor", () => ({
-  StringListEditor: () => <div data-testid="string-list-editor" />,
+  StringListEditor: (props: unknown) => {
+    mockStringListEditor(props);
+    return <div data-testid="string-list-editor" />;
+  },
 }));
 
 vi.mock("@/lib/v2-card-parser", () => ({
@@ -40,6 +50,79 @@ const makeNpc = (overrides: Partial<ScaffoldNpc> = {}): ScaffoldNpc => ({
   ...overrides,
 });
 
+const makeDraft = (overrides: Partial<CharacterDraft> = {}): CharacterDraft => ({
+  identity: {
+    role: "npc",
+    tier: "key",
+    displayName: "Draft Gandalf",
+    canonicalStatus: "original",
+    ...(overrides.identity ?? {}),
+  },
+  profile: {
+    species: "",
+    gender: "",
+    ageText: "",
+    appearance: "",
+    backgroundSummary: "A wandering wizard",
+    personaSummary: "Patient but dangerous",
+    ...(overrides.profile ?? {}),
+  },
+  socialContext: {
+    factionId: null,
+    factionName: null,
+    homeLocationId: null,
+    homeLocationName: null,
+    currentLocationId: null,
+    currentLocationName: "Forest",
+    relationshipRefs: [],
+    socialStatus: ["mythic"],
+    originMode: "resident",
+    ...(overrides.socialContext ?? {}),
+  },
+  motivations: {
+    shortTermGoals: ["Guide the fellowship"],
+    longTermGoals: ["Defeat Sauron"],
+    beliefs: [],
+    drives: ["Hope"],
+    frictions: ["Distrusts power"],
+    ...(overrides.motivations ?? {}),
+  },
+  capabilities: {
+    traits: ["wise"],
+    skills: [],
+    flaws: ["secretive"],
+    specialties: [],
+    wealthTier: null,
+    ...(overrides.capabilities ?? {}),
+  },
+  state: {
+    hp: 5,
+    conditions: [],
+    statusFlags: [],
+    activityState: "active",
+    ...(overrides.state ?? {}),
+  },
+  loadout: {
+    inventorySeed: [],
+    equippedItemRefs: [],
+    currencyNotes: "",
+    signatureItems: [],
+    ...(overrides.loadout ?? {}),
+  },
+  startConditions: {
+    ...(overrides.startConditions ?? {}),
+  },
+  provenance: {
+    sourceKind: "worldgen",
+    importMode: null,
+    templateId: null,
+    archetypePrompt: null,
+    worldgenOrigin: null,
+    legacyTags: ["wizard"],
+    ...(overrides.provenance ?? {}),
+  },
+});
+
 describe("NpcsSection", () => {
   const defaults = {
     npcs: [makeNpc(), makeNpc({ _uid: "npc-2", name: "Frodo", persona: "A hobbit" })],
@@ -50,6 +133,11 @@ describe("NpcsSection", () => {
     onRegenerate: vi.fn(),
     regenerating: false,
   };
+
+  beforeEach(() => {
+    mockTagEditor.mockClear();
+    mockStringListEditor.mockClear();
+  });
 
   it("renders NPC cards with names", () => {
     render(<NpcsSection {...defaults} />);
@@ -81,5 +169,30 @@ describe("NpcsSection", () => {
     const newNpcs = onChange.mock.calls[0][0];
     expect(newNpcs).toHaveLength(3);
     expect(newNpcs[2].name).toBe("");
+  });
+
+  it("renders canonical draft fields when present", () => {
+    render(
+      <NpcsSection
+        {...defaults}
+        npcs={[
+          makeNpc({
+            name: "Legacy Name",
+            persona: "Legacy persona",
+            draft: makeDraft(),
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByDisplayValue("Draft Gandalf")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Patient but dangerous")).toBeInTheDocument();
+
+    const tagEditorCalls = mockTagEditor.mock.calls.map(([props]) => props as { tags: string[] });
+    expect(tagEditorCalls.some(({ tags }) => tags.includes("wise"))).toBe(true);
+    expect(tagEditorCalls.some(({ tags }) => tags.includes("Hope"))).toBe(true);
+
+    const stringListCalls = mockStringListEditor.mock.calls.map(([props]) => props as { items: string[] });
+    expect(stringListCalls.some(({ items }) => items.includes("Guide the fellowship"))).toBe(true);
   });
 });

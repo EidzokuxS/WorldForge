@@ -53,6 +53,11 @@ type LegacyPlayerRow = {
   currentLocationId: string | null;
 };
 
+type StoredPlayerRow = LegacyPlayerRow & {
+  characterRecord?: string | null;
+  derivedTags?: string | null;
+};
+
 type LegacyNpcRow = {
   id: string;
   campaignId: string;
@@ -66,6 +71,11 @@ type LegacyNpcRow = {
   unprocessedImportance: number;
   inactiveTicks: number;
   createdAt: number;
+};
+
+type StoredNpcRow = LegacyNpcRow & {
+  characterRecord?: string | null;
+  derivedTags?: string | null;
 };
 
 interface LegacyPlayerOptions {
@@ -209,6 +219,72 @@ export function fromLegacyPlayerCharacter(
   );
 }
 
+export function hydrateStoredPlayerRecord(
+  row: StoredPlayerRow,
+  opts: LegacyPlayerOptions = {},
+): CharacterRecord {
+  const stored = parseStoredCharacterRecord(row.characterRecord);
+  if (!stored || stored.identity.role !== "player") {
+    return fromLegacyPlayerRow(row, opts);
+  }
+
+  const equippedItems = safeParseStringArray(row.equippedItems);
+
+  return {
+    ...stored,
+    identity: {
+      ...stored.identity,
+      id: row.id,
+      campaignId: row.campaignId,
+      role: "player",
+      tier: "key",
+      displayName: stored.identity.displayName || row.name,
+      canonicalStatus: opts.canonicalStatus ?? stored.identity.canonicalStatus,
+    },
+    profile: {
+      ...stored.profile,
+      species: stored.profile.species || row.race,
+      gender: stored.profile.gender || row.gender,
+      ageText: stored.profile.ageText || row.age,
+      appearance: stored.profile.appearance || row.appearance,
+    },
+    socialContext: {
+      ...stored.socialContext,
+      currentLocationId: row.currentLocationId,
+      currentLocationName:
+        opts.currentLocationName ?? stored.socialContext.currentLocationName,
+      originMode: opts.originMode ?? stored.socialContext.originMode,
+    },
+    state: {
+      ...stored.state,
+      hp: row.hp,
+    },
+    loadout: {
+      ...stored.loadout,
+      inventorySeed:
+        stored.loadout.inventorySeed.length > 0
+          ? stored.loadout.inventorySeed
+          : equippedItems,
+      equippedItemRefs:
+        stored.loadout.equippedItemRefs.length > 0
+          ? stored.loadout.equippedItemRefs
+          : equippedItems,
+      signatureItems:
+        stored.loadout.signatureItems.length > 0
+          ? stored.loadout.signatureItems
+          : equippedItems,
+    },
+    provenance: {
+      ...stored.provenance,
+      sourceKind: opts.sourceKind ?? stored.provenance.sourceKind,
+      legacyTags: dedupeStrings([
+        ...stored.provenance.legacyTags,
+        ...safeParseStringArray(row.derivedTags ?? "[]"),
+      ]),
+    },
+  };
+}
+
 export function fromLegacyNpcRow(
   row: LegacyNpcRow,
   opts: LegacyNpcOptions = {},
@@ -314,6 +390,72 @@ export function fromLegacyScaffoldNpc(
   );
 }
 
+export function hydrateStoredNpcRecord(
+  row: StoredNpcRow,
+  opts: LegacyNpcOptions = {},
+): CharacterRecord {
+  const stored = parseStoredCharacterRecord(row.characterRecord);
+  if (!stored || stored.identity.role !== "npc") {
+    return fromLegacyNpcRow(row, opts);
+  }
+
+  const goals = safeParseGoals(row.goals);
+  const beliefs = safeParseStringArray(row.beliefs);
+
+  return {
+    ...stored,
+    identity: {
+      ...stored.identity,
+      id: row.id,
+      campaignId: row.campaignId,
+      role: "npc",
+      tier: row.tier,
+      displayName: stored.identity.displayName || row.name,
+      canonicalStatus: opts.canonicalStatus ?? stored.identity.canonicalStatus,
+    },
+    profile: {
+      ...stored.profile,
+      personaSummary: stored.profile.personaSummary || row.persona,
+    },
+    socialContext: {
+      ...stored.socialContext,
+      factionId: opts.factionId ?? stored.socialContext.factionId,
+      factionName: opts.factionName ?? stored.socialContext.factionName,
+      currentLocationId: row.currentLocationId,
+      currentLocationName:
+        opts.currentLocationName ?? stored.socialContext.currentLocationName,
+      originMode: opts.originMode ?? stored.socialContext.originMode,
+    },
+    motivations: {
+      ...stored.motivations,
+      shortTermGoals:
+        stored.motivations.shortTermGoals.length > 0
+          ? stored.motivations.shortTermGoals
+          : goals.shortTerm,
+      longTermGoals:
+        stored.motivations.longTermGoals.length > 0
+          ? stored.motivations.longTermGoals
+          : goals.longTerm,
+      beliefs:
+        stored.motivations.beliefs.length > 0
+          ? stored.motivations.beliefs
+          : beliefs,
+    },
+    state: {
+      ...stored.state,
+      activityState: row.inactiveTicks > 0 ? "inactive" : stored.state.activityState,
+    },
+    provenance: {
+      ...stored.provenance,
+      sourceKind: opts.sourceKind ?? stored.provenance.sourceKind,
+      legacyTags: dedupeStrings([
+        ...stored.provenance.legacyTags,
+        ...safeParseStringArray(row.derivedTags ?? "[]"),
+      ]),
+    },
+  };
+}
+
 export function toLegacyPlayerCharacter(record: CharacterRecord): PlayerCharacter {
   return {
     name: record.identity.displayName,
@@ -325,6 +467,39 @@ export function toLegacyPlayerCharacter(record: CharacterRecord): PlayerCharacte
     hp: record.state.hp,
     equippedItems: record.loadout.equippedItemRefs,
     locationName: record.socialContext.currentLocationName ?? "",
+  };
+}
+
+export interface PlayerRecordProjection {
+  name: string;
+  race: string;
+  gender: string;
+  age: string;
+  appearance: string;
+  hp: number;
+  tags: string;
+  equippedItems: string;
+  currentLocationId: string | null;
+  characterRecord: string;
+  derivedTags: string;
+}
+
+export function projectPlayerRecord(record: CharacterRecord): PlayerRecordProjection {
+  const legacy = toLegacyPlayerCharacter(record);
+  const derivedTags = deriveRuntimeCharacterTags(record);
+
+  return {
+    name: legacy.name,
+    race: legacy.race,
+    gender: legacy.gender,
+    age: legacy.age,
+    appearance: legacy.appearance,
+    hp: legacy.hp,
+    tags: JSON.stringify(legacy.tags),
+    equippedItems: JSON.stringify(legacy.equippedItems),
+    currentLocationId: record.socialContext.currentLocationId,
+    characterRecord: JSON.stringify(record),
+    derivedTags: JSON.stringify(derivedTags),
   };
 }
 
@@ -345,10 +520,67 @@ export function toLegacyNpcDraft(record: CharacterRecord): ScaffoldNpc {
   };
 }
 
+export interface NpcRecordProjection {
+  name: string;
+  persona: string;
+  tags: string;
+  tier: "temporary" | "persistent" | "key";
+  currentLocationId: string | null;
+  goals: string;
+  beliefs: string;
+  characterRecord: string;
+  derivedTags: string;
+}
+
+export function projectNpcRecord(record: CharacterRecord): NpcRecordProjection {
+  const legacy = toLegacyNpcDraft(record);
+  const derivedTags = deriveRuntimeCharacterTags(record);
+
+  return {
+    name: legacy.name,
+    persona: legacy.persona,
+    tags: JSON.stringify(legacy.tags),
+    tier: record.identity.tier === "key"
+      ? "key"
+      : record.identity.tier === "temporary"
+        ? "temporary"
+        : "persistent",
+    currentLocationId: record.socialContext.currentLocationId,
+    goals: JSON.stringify({
+      short_term: legacy.goals.shortTerm,
+      long_term: legacy.goals.longTerm,
+    }),
+    beliefs: JSON.stringify(record.motivations.beliefs),
+    characterRecord: JSON.stringify(record),
+    derivedTags: JSON.stringify(derivedTags),
+  };
+}
+
 function mapRecordTierToScaffoldTier(
   tier: CharacterTier,
 ): ScaffoldNpc["tier"] {
   return tier === "key" ? "key" : "supporting";
+}
+
+function parseStoredCharacterRecord(raw: string | null | undefined): CharacterRecord | null {
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as CharacterRecord;
+    if (
+      !parsed
+      || typeof parsed !== "object"
+      || !parsed.identity
+      || typeof parsed.identity !== "object"
+      || !parsed.profile
+      || typeof parsed.profile !== "object"
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 function safeParseStringArray(raw: string): string[] {
@@ -401,6 +633,23 @@ function normalizeStringList(value: unknown): string[] {
     .filter((entry): entry is string => typeof entry === "string")
     .map((entry) => entry.trim())
     .filter(Boolean);
+}
+
+function dedupeStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+
+  for (const value of values) {
+    const normalized = value.trim();
+    if (!normalized) continue;
+
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(normalized);
+  }
+
+  return deduped;
 }
 
 function classifyLegacyTags(tags: string[]): ParsedLegacyTags {

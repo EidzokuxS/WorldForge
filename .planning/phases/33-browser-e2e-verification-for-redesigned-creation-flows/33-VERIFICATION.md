@@ -1,162 +1,156 @@
 ---
 phase: 33-browser-e2e-verification-for-redesigned-creation-flows
-verified: 2026-04-01T20:15:00Z
-status: gaps_found
-score: 10/11 must-haves verified
-gaps:
-  - truth: "npm run lint passes without errors"
-    status: failed
-    reason: "24 lint errors exist in frontend/components/world-review/__tests__/lore-section.test.tsx (no-explicit-any). Plan 33-01 acceptance criteria required lint to pass. These errors predate Phase 33 (introduced in Phase 27) but were not fixed when the plan claimed lint verification was done."
-    artifacts:
-      - path: "frontend/components/world-review/__tests__/lore-section.test.tsx"
-        issue: "24 @typescript-eslint/no-explicit-any errors on lines 36-80"
-    missing:
-      - "Replace 'any' types in lore-section.test.tsx with proper typed mock interfaces or 'unknown' casts"
+verified: 2026-04-02T21:15:00Z
+status: human_needed
+score: 4/4 success criteria verified
+re_verification:
+  previous_status: gaps_found
+  previous_score: 3/4
+  gaps_closed:
+    - "16 frontend test files failing after post-approval rewrites — closed by Plan 33-13 (test suite realignment, commits 243a7e8 + bd39127); 0 main-project FAIL lines confirmed"
+  gaps_remaining: []
+  regressions: []
 human_verification:
-  - test: "Visual rendering of shell sidebar, header, and inspector rail on all non-game routes"
-    expected: "All shell elements render correctly at FHD/1440p desktop resolution"
-    why_human: "All E2E verification was performed via curl HTTP verification, not a real browser. PinchTab was unavailable due to remote Chrome network isolation. Visual layout, shadcn component rendering, and responsive desktop-first layout cannot be confirmed without browser rendering."
-  - test: "Character creation workspace layout at /campaign/[id]/character"
-    expected: "3-column workspace: Input Methods sidebar, CharacterCard editor, Draft Summary panel"
-    why_human: "curl verified HTTP 200 and text content, but the actual React component layout and interactivity requires browser rendering to confirm"
-  - test: "World review editing via UI interactions (tab switching, inline editing, tag editor)"
-    expected: "User can click edit on a location, change a field, see it update in the UI, and confirm persistence"
-    why_human: "All editing was verified at the API level (curl to save-edits endpoint). Browser UI interaction flows (clicking, typing, saving via buttons) were not tested due to PinchTab unavailability"
+  - test: "Visual rendering of redesigned flat shell layout at FHD/1440p"
+    expected: "Launcher, campaign creation, review, character, and settings pages render coherently with the approved flat layout mockups — no radius mismatches, no asymmetric sidebars, no duplicate creation flow CTAs"
+    why_human: "PinchTab localhost transport remains blocked (shared Chrome profile, proxy interception). CSS layout, shadcn component rendering, and the approved mockup fidelity require browser rendering to confirm."
+  - test: "Final desktop approval for character-save-to-game handoff in the flat layout"
+    expected: "Character creation from review -> parse -> edit -> Save & Begin Adventure -> /game without non-game shell wrapping"
+    why_human: "33-10 SUMMARY.md Task 2 approval checkpoint is logged as 'awaiting'. The three subsequent commits ('per approved mockups') imply human approval occurred, but the formal sign-off was not recorded in the plan artifact. Explicit user confirmation closes this checkpoint."
 ---
 
 # Phase 33: Browser E2E Verification for Redesigned Creation Flows — Verification Report
 
 **Phase Goal:** Validate the redesigned prompt, character, persona, start-condition, and UI flows through real browser testing and polish remaining regressions.
-**Verified:** 2026-04-01T20:15:00Z
-**Status:** gaps_found
-**Re-verification:** No — initial verification
+**Verified:** 2026-04-02T21:15:00Z
+**Status:** human_needed
+**Re-verification:** Yes — after gap closure (Plan 33-13; previous status: gaps_found, score 3/4)
+
+## Re-verification Summary
+
+Plan 33-13 closed the sole blocking gap from the previous VERIFICATION.md: 16 frontend test files were failing after post-approval flat-layout rewrites (commits `4622090`, `f4dfc61`, `0a09e34`). Plan 33-13 realigned all affected tests to match the new flat-layout markup in two atomic commits (`243a7e8` frontend realignment, `bd39127` backend/shared fixes). Orphaned legacy test directories (`frontend/app/campaign/[id]/character/__tests__/`, `frontend/app/settings/__tests__/`) were deleted.
+
+**Current state:** 0 main-project FAIL lines in `npm --prefix frontend exec vitest run`. Build compiles successfully (`✓ Compiled successfully`). Lint exits 0 with 7 warnings and 0 errors. All four success criteria now pass automated checks.
+
+The only remaining items are the two human-verification checkpoints carried forward from the previous report (visual rendering fidelity and the 33-10 Task 2 formal approval gate) — these cannot be resolved programmatically.
 
 ## Goal Achievement
+
+### Success Criteria (from ROADMAP.md Phase 33)
+
+| # | Success Criterion | Status | Evidence |
+|---|-------------------|--------|----------|
+| 1 | E2E browser tests cover campaign creation, DNA/world gen, character creation, persona, start conditions, world review editing | ✓ VERIFIED | Plans 33-08 (original-world), 33-09 (known-IP review), 33-10 (character) used real PinchTab browser automation with real GLM LLM calls. All three priority flows exercised. |
+| 2 | Bugs discovered during E2E are fixed and re-tested in the same phase | ✓ VERIFIED | 33-05 fixed shell visual GAP-1, 33-06 fixed campaign creation flow GAP-2, 33-07 added readiness guards, 33-08/09/10 confirmed fixes in browser. All UAT issues from 33-UAT.md addressed. |
+| 3 | At least one known-IP flow and one original-world flow are smoke-tested | ✓ VERIFIED | 33-08: original-world via PinchTab (GLM DNA suggestion, world generation, review gating). 33-09: known-IP (Naruto World) via PinchTab with 5 tabs, save/reload persistence. Both used real LLM calls. |
+| 4 | Resulting UX stable enough to hand back without blocking regressions | ✓ VERIFIED | Plan 33-13 closed the test-suite gap: 0 main-project FAIL lines confirmed (worktree failures are stale copies, irrelevant to main project). Build passes. Lint passes (0 errors). |
+
+**Score:** 4/4 success criteria verified
 
 ### Observable Truths
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | Legacy /character-creation and /world-review routes no longer exist | ✓ VERIFIED | `frontend/app/character-creation/` and `frontend/app/world-review/` directories do not exist on filesystem |
-| 2 | Launcher page renders inside the shared shell at / | ✓ VERIFIED | `frontend/app/(non-game)/page.tsx` exists (61 lines), imports ConceptWorkspace, test at `__tests__/page.test.tsx` confirms "New Campaign" link to `/campaign/new` |
-| 3 | Original-world campaign creation pipeline works end-to-end | ✓ VERIFIED | 33-02 SUMMARY: 7 locations, 5 factions, 12 NPCs, 41 lore cards generated with real GLM calls. API chain verified: POST /api/campaigns → /api/campaigns/:id/load → /api/worldgen/generate → /campaign/:id/review |
-| 4 | Known-IP campaign creation pipeline works end-to-end | ✓ VERIFIED | 33-03 SUMMARY: Cyberpunk premise produced 7 locations, 5 factions, 13 NPCs, 41 lore cards. World review page returns HTTP 200 with shell layout |
-| 5 | World review sections render with generated content | ✓ VERIFIED | 33-03 SUMMARY: All 5 sections (premise, locations, factions, NPCs, lore) verified via API. Lore semantic search returns relevant results. Section regeneration with real LLM confirmed |
-| 6 | World review edits persist after save | ✓ VERIFIED | 33-03 SUMMARY: Location name edit ("Heywood - Modified"), faction goal addition, and NPC trait tag all persisted through save-edits endpoint and confirmed via subsequent GET |
-| 7 | Character creation page renders inside the shell with all 3 input modes | ✓ VERIFIED | 33-04 task1 log: HTTP 200, 38KB response, shell elements present, "Input Methods" card rendered, CharacterForm confirms all 3 modes (describe/generate/import) |
-| 8 | Character creation via description parsing works with real LLM | ✓ VERIFIED | 33-04 task1 log: POST /api/worldgen/parse-character produces CharacterDraft with 9 sections, real GLM call confirmed |
-| 9 | Character save + game handoff works | ✓ VERIFIED | 33-04 task1 log: POST /api/worldgen/save-character returns `{ok: true, playerId: "..."}`. /game page returns HTTP 200 without shell sidebar elements |
-| 10 | No bugs discovered during E2E that remain unfixed | ✓ VERIFIED | 33-01: 2 pre-existing build blockers found and fixed (dna-workspace.tsx nullable access, resizable.tsx broken import). 33-02/03/04: no code bugs found, only operational issues (PinchTab isolation, FK contention) |
-| 11 | Frontend lint passes without errors | ✗ FAILED | `npm --prefix frontend run lint` exits with 24 errors in `frontend/components/world-review/__tests__/lore-section.test.tsx`. Plan 33-01 acceptance criteria required lint to exit 0. |
+| 1 | Legacy /character-creation and /world-review routes deleted | ✓ VERIFIED | `frontend/app/character-creation/` — DELETED. `frontend/app/world-review/` — DELETED. Confirmed via filesystem check. |
+| 2 | Launcher renders inside non-game shell at / | ✓ VERIFIED | `frontend/app/(non-game)/page.tsx` exists (232 lines), contains `href="/campaign/new"` New Campaign link |
+| 3 | Original-world creation pipeline end-to-end | ✓ VERIFIED | 33-08 PinchTab evidence: shell -> concept -> DNA suggestion -> generation -> review gating with real GLM calls |
+| 4 | Known-IP review pipeline end-to-end | ✓ VERIFIED | 33-09 PinchTab evidence: Load dialog -> review with 5 tabs (5 locations, 4 factions, 6 NPCs, 30 lore) |
+| 5 | World review edits persist after save/reload | ✓ VERIFIED | 33-09 Task 2: premise edit persists through save, hard reload, shell navigation round-trip |
+| 6 | Character creation parse/edit/save in browser | ✓ VERIFIED | 33-10 Task 1: parse (Haruki Takeda), edit, preview canonical loadout, start conditions all exercised |
+| 7 | /game handoff after character save | ✓ VERIFIED | 33-10 Task 1: "Begin Adventure" -> `/game` without non-game shell wrapping confirmed |
+| 8 | Frontend lint passes (0 errors) | ✓ VERIFIED | `npm --prefix frontend run lint` exits 0 — 7 warnings, 0 errors |
+| 9 | Frontend build passes | ✓ VERIFIED | `npm --prefix frontend run build` exits 0, "Compiled successfully" |
+| 10 | Frontend test suite passes | ✓ VERIFIED | `npm --prefix frontend exec vitest run` — 0 main-project FAIL lines. All worktree failures are stale `.claude/worktrees/agent-ae7c0ddb/` copies irrelevant to main project. Plan 33-13 commits `243a7e8` + `bd39127` closed all 16 previously failing test files. |
+| 11 | No UAT blocking regressions after redesign | ✓ VERIFIED | All original UAT blocking regressions fixed (33-05 through 33-10). Test suite now aligned with flat-layout rewrite. No remaining automated failures in main project. |
 
-**Score:** 10/11 truths verified
+**Score:** 11/11 truths verified (automated)
 
 ### Required Artifacts
 
 | Artifact | Expected | Status | Details |
 |----------|----------|--------|---------|
-| `frontend/app/(non-game)/page.tsx` | Launcher page inside shared shell | ✓ VERIFIED | 61 lines, substantive, wired via layout group |
-| `frontend/components/non-game-shell/app-shell.tsx` | Shared desktop shell with sidebar, header, inspector | ✓ VERIFIED | 188 lines, substantive, no stubs |
-| `frontend/app/(non-game)/campaign/new/page.tsx` | Campaign creation concept step | ✓ VERIFIED | Thin page (17 lines) wrapping ConceptWorkspace (181 lines) — pattern is correct |
-| `frontend/app/(non-game)/campaign/new/dna/page.tsx` | World DNA seed configuration step | ✓ VERIFIED | Thin page (5 lines) wrapping DnaWorkspace (85 lines) — pattern is correct |
-| `frontend/app/(non-game)/campaign/[id]/review/page.tsx` | World review page after generation | ✓ VERIFIED | 256 lines, real data fetching via getWorldData/getLoreCards/saveWorldEdits |
-| `frontend/app/(non-game)/campaign/[id]/character/page.tsx` | Character creation page in shell | ✓ VERIFIED | 298 lines, imports parseCharacter/generateCharacter/saveCharacter from api.ts |
-| `frontend/components/character-creation/character-workspace.tsx` | Desktop character workspace | ✓ VERIFIED | 47 lines, layout composition component (correct pattern for desktop workspace) |
-| `frontend/components/character-creation/character-card.tsx` | Structured character draft editor | ✓ VERIFIED | 565 lines, substantive |
-| `frontend/components/world-review/review-workspace.tsx` | Review workspace composition | ✓ VERIFIED | 50 lines, layout composition component |
+| `frontend/app/(non-game)/page.tsx` | Launcher in shared shell | ✓ VERIFIED | 232 lines, substantive, contains New Campaign link |
+| `frontend/components/non-game-shell/app-shell.tsx` | Shared shell | ✓ VERIFIED | Flat-layout rewrite, uses ShellFrame/ShellMainPanel/ShellNavigationRail |
+| `frontend/components/non-game-shell/shell-primitives.tsx` | Shell token/primitives layer | ✓ VERIFIED | Exists, 8 primitive exports |
+| `frontend/app/(non-game)/campaign/new/page.tsx` | Concept creation step | ✓ VERIFIED | Exists, wraps ConceptWorkspace with session-persisted flow state |
+| `frontend/app/(non-game)/campaign/new/dna/page.tsx` | DNA step | ✓ VERIFIED | Exists |
+| `frontend/app/(non-game)/campaign/[id]/review/page.tsx` | World review | ✓ VERIFIED | 280 lines, imports saveWorldEdits, real data fetch |
+| `frontend/app/(non-game)/campaign/[id]/character/page.tsx` | Character creation | ✓ VERIFIED | 312 lines, imports all API functions, wired to /game via router.push |
+| `frontend/components/character-creation/character-workspace.tsx` | Character workspace | ✓ VERIFIED | Exists |
+| `frontend/components/character-creation/character-card.tsx` | Character draft editor | ✓ VERIFIED | 565 lines, substantive |
+| `frontend/components/world-review/review-workspace.tsx` | Review workspace | ✓ VERIFIED | Exists |
 
 ### Key Link Verification
 
 | From | To | Via | Status | Details |
 |------|----|-----|--------|---------|
-| Launcher `/` | `/campaign/new` | New Campaign button | ✓ WIRED | `href="/campaign/new"` confirmed in page.tsx line 27 and unit test |
-| `/campaign/new` | `/campaign/new/dna` | onContinue callback | ✓ WIRED | `router.push("/campaign/new/dna")` in page.tsx line 12 |
-| `/campaign/new/dna` | `POST /api/worldgen/generate` | generate button in DnaWorkspace | ✓ WIRED | 33-02 SUMMARY confirms SSE stream from /api/worldgen/generate |
-| Review page | `PUT /api/worldgen/save-edits` | handleSaveAndContinue | ✓ WIRED | review/page.tsx line 13 imports saveWorldEdits, line 128 calls it, line 180 wires to button |
-| NPC section | `POST /api/worldgen/parse-character` | parseCharacter import | ✓ WIRED | npcs-section.tsx line 26 imports parseCharacter from api.ts |
-| Lore section | `GET /api/campaigns/:id/lore` | getLoreCards | ✓ WIRED | review/page.tsx lines 9, 47: getLoreCards called in useEffect |
-| Character form | `POST /api/worldgen/parse-character` | parseCharacter | ✓ WIRED | character/page.tsx line 14 imports, line 66 calls |
-| Character save | `POST /api/worldgen/save-character` | saveCharacter | ✓ WIRED | character/page.tsx line 17 imports, line 192 calls |
-| Character save | `/game` redirect | router.push after save | ✓ WIRED | 33-04 task1 log confirms redirect to /game confirmed |
+| Launcher `/` | `/campaign/new` | New Campaign link | ✓ WIRED | `href="/campaign/new"` in page.tsx |
+| Character page | `/game` | router.push after save | ✓ WIRED | `router.push("/game")` in character/page.tsx |
+| Review page | `saveWorldEdits` API | handleSaveAndContinue | ✓ WIRED | Imported, called, wired to button |
+| Character page | `saveCharacter` API | handleSave | ✓ WIRED | Present in character/page.tsx |
+| Character page | `parseCharacter` API | handleParse | ✓ WIRED | Present in character/page.tsx |
 
 ### Data-Flow Trace (Level 4)
 
 | Artifact | Data Variable | Source | Produces Real Data | Status |
 |----------|---------------|--------|--------------------|--------|
-| review/page.tsx | `scaffold` (EditableScaffold) | `getWorldData(campaignId)` → GET /api/campaigns/:id/world | Yes — DB-backed, confirmed in 33-03 with 7 locations, 5 factions, 13 NPCs | ✓ FLOWING |
-| review/page.tsx | `loreCards` (LoreCardItem[]) | `getLoreCards(campaignId)` → GET /api/campaigns/:id/lore | Yes — LanceDB-backed, confirmed 41 cards | ✓ FLOWING |
-| character/page.tsx | `characterDraft` (CharacterDraft) | `parseCharacter()` / `apiGenerateCharacter()` → real GLM LLM calls | Yes — real LLM confirmed, 9 section CharacterDraft produced | ✓ FLOWING |
-| character/page.tsx | `locationNames` | `getWorldData(campaignId).locations` | Yes — confirmed from loaded campaign data | ✓ FLOWING |
-| character/page.tsx | `personaTemplates` | `getWorldData(campaignId).personaTemplates` | Yes — empty array for test campaign (correct empty-state behavior confirmed) | ✓ FLOWING |
+| review/page.tsx | `scaffold` | `getWorldData()` -> GET /api/campaigns/:id/world | Yes — DB-backed, confirmed 33-08/09 with real world data | ✓ FLOWING |
+| character/page.tsx | `characterDraft` | `parseCharacter()` / `apiGenerateCharacter()` -> real GLM | Yes — confirmed 33-10, Haruki Takeda parsed from description | ✓ FLOWING |
+| character/page.tsx | `locationNames` | `getWorldData().locations` | Yes — from loaded campaign | ✓ FLOWING |
 
 ### Behavioral Spot-Checks
 
 | Behavior | Method | Result | Status |
 |----------|--------|--------|--------|
-| Legacy `/character-creation` returns 404 | `ls frontend/app/character-creation/` filesystem check | Directory does not exist | ✓ PASS |
-| Legacy `/world-review` returns 404 | `ls frontend/app/world-review/` filesystem check | Directory does not exist | ✓ PASS |
-| Frontend build succeeds | `npm --prefix frontend run build` | Exits 0, "Compiled successfully in 1680.4ms" | ✓ PASS |
-| Campaign API responds | curl to /api/campaigns (33-02 SUMMARY) | Returns campaign list JSON | ✓ PASS |
-| Scaffold generation with real LLM | POST /api/worldgen/generate (33-02 SUMMARY) | SSE stream completes all 5 steps | ✓ PASS |
-| Character save + game handoff | POST /api/worldgen/save-character (33-04 log) | Returns `{ok: true}`, /game serves HTTP 200 without shell | ✓ PASS |
-| Frontend lint | `npm --prefix frontend run lint` | 24 errors in lore-section.test.tsx | ✗ FAIL |
+| Legacy /character-creation 404 | Filesystem check | `frontend/app/character-creation/` does not exist | ✓ PASS |
+| Legacy /world-review 404 | Filesystem check | `frontend/app/world-review/` does not exist | ✓ PASS |
+| Frontend build passes | `npm --prefix frontend run build` | "Compiled successfully" | ✓ PASS |
+| Frontend lint passes | `npm --prefix frontend run lint` | Exit 0, 7 warnings, 0 errors | ✓ PASS |
+| Frontend test suite | `npm --prefix frontend exec vitest run` | 0 main-project FAIL lines (44 FAIL files are all `.claude/worktrees/agent-ae7c0ddb/` — stale worktree copies) | ✓ PASS |
+| Character save -> /game | 33-10 PinchTab evidence | /game renders CRPG layout, no shell wrapping | ✓ PASS |
+| Known-IP review tabs | 33-09 PinchTab evidence | 5 tabs: Premise, 5 Locations, 4 Factions, 6 NPCs, 30 Lore | ✓ PASS |
+| 33-13 commits present | `git log --oneline` | `243a7e8 test(33-13)`, `bd39127 fix(33-13)`, `b24c260 docs(33-13)` all present | ✓ PASS |
 
 ### Requirements Coverage
 
 | Requirement | Source Plan(s) | Description | Status | Evidence |
 |-------------|----------------|-------------|--------|----------|
-| P33-01 | 33-01, 33-02, 33-03, 33-04 | Legacy routes removed; canonical (non-game) routes verified | ✓ SATISFIED | Routes deleted, canonical routes return HTTP 200 with shell content |
-| P33-02 | 33-02, 33-03, 33-04 | E2E verification of creation flows with real LLM calls | ✓ SATISFIED | All 3 priority flows smoke-tested with real GLM calls |
-| P33-03 | 33-02, 33-03 | Both known-IP and original-world smoke tests | ✓ SATISFIED | Original-world: "dying world / pocket dimensions" campaign. Known-IP: Cyberpunk Neon Sprawl |
-| P33-04 | 33-01, 33-04 | UX stable without blocking regressions | ? PARTIAL | No broken states found, build passes. But lint has 24 pre-existing errors and all E2E was curl-based, not real browser rendering |
+| P33-01 | 33-01, 33-02, 33-03, 33-04 | Legacy routes removed; canonical (non-game) routes verified | ✓ SATISFIED | Routes deleted confirmed via filesystem; canonical routes HTTP 200 confirmed in browser (33-08/09/10) |
+| P33-02 | 33-08, 33-09, 33-10 | E2E verification of creation flows with real LLM calls | ✓ SATISFIED | All 3 priority flows PinchTab-browser-verified with real GLM calls |
+| P33-03 | 33-08, 33-09 | Both known-IP and original-world smoke tests | ✓ SATISFIED | Original-world: GLM DNA+scaffold (33-08). Known-IP: Naruto World review (33-09). |
+| P33-04 | 33-12, 33-13 | UX stable without blocking regressions | ✓ SATISFIED | Lint gap closed (33-12). Test suite gap closed (33-13). 0 main-project test failures. Build passes. |
 
-**Note on P33-01 through P33-04:** These requirement IDs are phase-internal — they appear only in ROADMAP.md Phase 33 section. They are **not present in REQUIREMENTS.md** (which covers only v1 requirements PRMT through IMPT). This means REQUIREMENTS.md has no traceability entries for these IDs. This is an expected pattern for QA/verification phases with phase-scoped requirements.
+**Note on requirement IDs:** P33-01 through P33-04 are phase-internal requirements defined in ROADMAP.md Phase 33. They have no entries in REQUIREMENTS.md (which covers only v1 requirements PRMT through IMPT). This is expected for QA/verification phases.
 
 ### Anti-Patterns Found
 
-| File | Lines | Pattern | Severity | Impact |
-|------|-------|---------|----------|--------|
-| `frontend/components/world-review/__tests__/lore-section.test.tsx` | 36–80 | 24 `@typescript-eslint/no-explicit-any` errors | ⚠️ Warning | Fails lint, but file is a test file only — does not affect runtime behavior. Pre-dates Phase 33 (Phase 27 origin). |
-| `frontend/components/campaign-new/flow-provider.tsx` | 49 | `react-hooks/exhaustive-deps` warning (missing `wizard` dep) | ℹ️ Info | Pre-existing warning, not introduced in Phase 33 |
+| File | Pattern | Severity | Impact |
+|------|---------|----------|--------|
+| `frontend/components/campaign-new/flow-provider.tsx` | Pre-existing `react-hooks/exhaustive-deps` warning (missing `wizard` dep) | ℹ️ Info | Pre-existing, non-blocking, not introduced by Phase 33 |
+
+No blocker anti-patterns found. All 16 previously-failing test files have been aligned to flat-layout markup by Plan 33-13.
 
 ### Human Verification Required
 
-#### 1. Visual Shell Rendering
+#### 1. Visual Rendering of Flat Layout Mockups
 
-**Test:** Open `http://localhost:3000/` in a desktop browser at FHD or 1440p resolution and inspect the shell layout.
-**Expected:** Sidebar navigation panel on the left, page canvas in the center, inspector rail on the right (if used), correct dark theme with shadcn components.
-**Why human:** All E2E verification was curl-based (HTTP response body inspection). PinchTab browser automation was unavailable due to remote Chrome network isolation. CSS layout, component visual rendering, and responsive behavior cannot be verified from HTML source alone.
+**Test:** Open `http://localhost:3000/` in a desktop browser at FHD or 1440p. Inspect each non-game route (`/`, `/campaign/new`, `/campaign/new/dna`, `/campaign/[id]/review`, `/campaign/[id]/character`, `/settings`, `/library`).
+**Expected:** The flat layout approved by the user matches the mockups — no radius inconsistencies, no mismatched surfaces, sidebar is coherent, no duplicate CTAs.
+**Why human:** PinchTab localhost transport remains blocked. CSS layout, component visual rendering, and mockup fidelity cannot be verified from code analysis alone.
 
-#### 2. Character Creation Workspace Layout
+#### 2. Formal Closure of 33-10 Task 2 Approval Checkpoint
 
-**Test:** Navigate to `/campaign/[id]/character` for an existing campaign in a real browser.
-**Expected:** Three-column desktop workspace: left panel shows "Input Methods" (describe/generate/import modes), center shows CharacterCard editor, right shows "Draft Summary" panel.
-**Why human:** curl confirmed the page serves 38KB HTML with correct text content, but actual React hydration, component layout, and interactive card editing require browser rendering.
-
-#### 3. World Review Tab Navigation and Inline Editing
-
-**Test:** Navigate to `/campaign/[id]/review` and use the section tabs (Premise, Locations, Factions, NPCs, Lore). Edit a location name inline and click Save.
-**Expected:** Tab switching shows correct content per section, inline editing controls are visible and functional, save triggers a visible success state.
-**Why human:** All editing was verified via direct API calls. The actual UI interaction path (clicking tabs, typing in edit fields, clicking Save button) was not tested due to PinchTab unavailability.
+**Test:** Review the browser evidence from 33-10 Task 1 (character creation -> Save & Begin Adventure -> /game handoff) in the context of the current flat-layout rewrite.
+**Expected:** User confirms the non-game shell and creation/review/character flows feel coherent at desktop resolution and explicitly closes the Task 2 approval gate.
+**Why human:** The 33-10 SUMMARY.md Task 2 section reads "CHECKPOINT — awaiting human verification." The three subsequent commits ("per approved mockups") imply the user approved and requested further changes, but the formal approval signal was not recorded in the plan artifact. Explicit user confirmation is needed to formally close this checkpoint.
 
 ### Gaps Summary
 
-**One gap identified:** `npm run lint` fails with 24 pre-existing errors in `frontend/components/world-review/__tests__/lore-section.test.tsx`. These errors existed since Phase 27 and were not introduced by Phase 33. However, Plan 33-01 acceptance criteria explicitly required "npm --prefix frontend run lint exits 0" — this criterion was not met and was not noted as a deviation in the 33-01 SUMMARY. The errors are isolated to a test file (no runtime impact) but represent an unfulfilled acceptance criterion.
+No automated gaps remain. Plan 33-13 closed the only blocking gap (16 failing test files). The two human-verification items above are the sole outstanding items.
 
-**Critical deviation noted in all plans:** Real browser E2E testing (the stated phase goal) was not achieved due to PinchTab network isolation. All 4 plans fell back to curl-based HTTP verification. This verifies that:
-- Pages serve HTTP 200
-- API endpoints return correct data
-- Shell layout HTML structure is present in SSR output
-
-What it does NOT verify:
-- React hydration and client-side interactivity
-- CSS layout and visual rendering
-- JavaScript-driven UI interactions (clicks, form submissions via UI)
-- Real-time WebSocket behavior during gameplay
-
-The core artifacts exist and data flows through them correctly. The success criteria "End-to-end browser tests cover..." (criterion 1) was technically not fulfilled via real browser automation, though the API/backend verification was comprehensive and demonstrated the underlying functionality works.
+**Phase health (automated):** Build passes, lint passes (0 errors), 0 main-project test failures. All legacy routes deleted. All API wiring verified. All E2E browser flows exercised with real LLM calls.
 
 ---
 
-_Verified: 2026-04-01T20:15:00Z_
+_Verified: 2026-04-02T21:15:00Z_
 _Verifier: Claude (gsd-verifier)_
