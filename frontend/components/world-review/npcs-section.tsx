@@ -228,7 +228,7 @@ export function NpcsSection({
         {npcs.map((npc, index) => (
           <div
             key={npc._uid ?? `npc-fallback-${index}`}
-            className="group relative flex flex-col overflow-hidden border border-border/30 rounded-lg bg-zinc-900/40 p-[clamp(16px,1.4vw,28px)] before:absolute before:left-0 before:top-0 before:h-12 before:w-[3px] before:bg-[#e63e00] before:rounded-bl-sm"
+            className="group relative flex flex-col overflow-hidden border border-border/30 rounded-lg bg-zinc-900/40 p-[clamp(16px,1.4vw,28px)] before:pointer-events-none before:absolute before:left-0 before:top-0 before:h-24 before:w-24 before:rounded-br-full before:bg-[radial-gradient(ellipse_at_top_left,rgba(230,62,0,0.12)_0%,transparent_70%)]"
           >
             {/* Delete button — hidden until hover */}
             <button
