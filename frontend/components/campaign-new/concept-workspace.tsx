@@ -47,7 +47,7 @@ export function ConceptWorkspace({ onContinue }: ConceptWorkspaceProps) {
       >
         {/* Left column: form fields */}
         <div className="flex flex-col" style={{ gap: "clamp(16px, 1.2vw, 24px)" }}>
-          <div>
+          <div className="space-y-[clamp(4px,0.4vw,8px)]">
             <Label htmlFor="campaign-name">Campaign Name</Label>
             <Input
               id="campaign-name"
@@ -58,7 +58,7 @@ export function ConceptWorkspace({ onContinue }: ConceptWorkspaceProps) {
           </div>
 
           {/* Premise - flex-grows to fill available space */}
-          <div className="flex flex-1 flex-col">
+          <div className="flex flex-1 flex-col space-y-[clamp(4px,0.4vw,8px)]">
             <Label htmlFor="campaign-premise">Premise</Label>
             <Textarea
               id="campaign-premise"
@@ -74,7 +74,7 @@ export function ConceptWorkspace({ onContinue }: ConceptWorkspaceProps) {
             />
           </div>
 
-          <div>
+          <div className="space-y-[clamp(4px,0.4vw,8px)]">
             <Label htmlFor="campaign-franchise">
               Franchise / IP{" "}
               <span className="font-normal text-zinc-600">optional</span>
