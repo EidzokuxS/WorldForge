@@ -21,10 +21,13 @@ type CampaignNewFlowValue = ReturnType<typeof useNewCampaignWizard> & {
 const CampaignNewFlowContext = React.createContext<CampaignNewFlowValue | null>(null);
 
 export function CampaignNewFlowProvider({ children }: { children: React.ReactNode }) {
+  const [mounted, setMounted] = React.useState(false);
   const [settings, setSettings] = React.useState<Settings | null>(null);
   const [settingsLoading, setSettingsLoading] = React.useState(true);
   const [initialSession] = React.useState(() => readCampaignNewFlowSession());
   const wizard = useNewCampaignWizard(settings, () => {}, { initialSession });
+
+  React.useEffect(() => { setMounted(true); }, []);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -109,6 +112,10 @@ export function CampaignNewFlowProvider({ children }: { children: React.ReactNod
     }),
     [settings, settingsLoading, wizard],
   );
+
+  if (!mounted) {
+    return null;
+  }
 
   return (
     <CampaignNewFlowContext.Provider value={value}>
