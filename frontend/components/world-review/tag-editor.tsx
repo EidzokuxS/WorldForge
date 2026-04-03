@@ -41,7 +41,7 @@ export function TagEditor({ tags, onChange, placeholder = "Add tag..." }: TagEdi
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {tags.map((tag, i) => (
-        <Badge key={`${tag}-${i}`} variant="secondary" className="gap-1 pr-1 text-xs">
+        <Badge key={`${tag}-${i}`} variant="secondary" className="gap-1 rounded-sm border border-zinc-700 bg-zinc-800 pr-1 font-mono text-[11px] text-zinc-300">
           {tag}
           <button
             type="button"
