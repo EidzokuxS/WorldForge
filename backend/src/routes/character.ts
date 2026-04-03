@@ -93,7 +93,7 @@ app.post("/parse-character", async (c) => {
     if ("response" in result) return result.response;
 
     const { campaignId, concept, role, locationNames: bodyLoc, factionNames: bodyFac } = result.data;
-    const ctx = setupCharacterEndpoint(c, campaignId, role, bodyLoc, bodyFac);
+    const ctx = await setupCharacterEndpoint(c, campaignId, role, bodyLoc, bodyFac);
     if (ctx instanceof Response) return ctx;
 
     if (role === "key") {
@@ -121,7 +121,7 @@ app.post("/generate-character", async (c) => {
     if ("response" in result) return result.response;
 
     const { campaignId, role, locationNames: bodyLoc, factionNames: bodyFac } = result.data;
-    const ctx = setupCharacterEndpoint(c, campaignId, role, bodyLoc, bodyFac);
+    const ctx = await setupCharacterEndpoint(c, campaignId, role, bodyLoc, bodyFac);
     if (ctx instanceof Response) return ctx;
 
     if (role === "key") {
@@ -151,7 +151,7 @@ app.post("/research-character", async (c) => {
     if ("response" in result) return result.response;
 
     const { campaignId, archetype, role, locationNames: bodyLoc, factionNames: bodyFac } = result.data;
-    const ctx = setupCharacterEndpoint(c, campaignId, role, bodyLoc, bodyFac);
+    const ctx = await setupCharacterEndpoint(c, campaignId, role, bodyLoc, bodyFac);
     if (ctx instanceof Response) return ctx;
 
     const researchContext = await researchArchetype({
@@ -184,7 +184,7 @@ app.post("/import-v2-card", async (c) => {
     if ("response" in result) return result.response;
 
     const { campaignId, name, description, personality, scenario, tags, importMode, role, locationNames: bodyLoc, factionNames: bodyFac } = result.data;
-    const ctx = setupCharacterEndpoint(c, campaignId, role, bodyLoc, bodyFac);
+    const ctx = await setupCharacterEndpoint(c, campaignId, role, bodyLoc, bodyFac);
     if (ctx instanceof Response) return ctx;
 
     if (role === "key") {

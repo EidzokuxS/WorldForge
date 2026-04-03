@@ -194,14 +194,14 @@ export interface CharacterEndpointContext {
  * Shared setup for character creation endpoints (parse/generate/research/import).
  * Returns either the resolved context or a ready-made error Response.
  */
-export function setupCharacterEndpoint(
+export async function setupCharacterEndpoint(
   c: Context,
   campaignId: string,
   role: "player" | "key",
   bodyLocationNames?: string[],
   bodyFactionNames?: string[],
-): CharacterEndpointContext | Response {
-  const campaign = requireActiveCampaign(c, campaignId);
+): Promise<CharacterEndpointContext | Response> {
+  const campaign = await requireLoadedCampaign(c, campaignId);
   if (campaign instanceof Response) return campaign;
 
   const settings = loadSettings();
