@@ -26,13 +26,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -229,23 +222,21 @@ export function ProvidersTab({ settings, setSettings }: ProvidersTabProps) {
         </Button>
       </div>
 
-      <div className="grid gap-4">
+      <div className="space-y-[clamp(12px,1vw,20px)]">
         {settings.providers.map((provider) => (
-          <Card key={provider.id}>
-            <CardHeader className="gap-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <CardTitle className="text-lg">{provider.name}</CardTitle>
-                  <CardDescription className="mt-1">
-                    {provider.baseUrl}
-                  </CardDescription>
+          <div key={provider.id} className="rounded-lg border border-border/40 p-[clamp(16px,1.4vw,28px)]">
+            <div className="mb-[clamp(12px,1vw,20px)] flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[clamp(14px,1vw,18px)] font-semibold text-bone">{provider.name}</div>
+                <div className="mt-0.5 text-[clamp(11px,0.75vw,13px)] text-muted-foreground">
+                  {provider.baseUrl}
                 </div>
-                <Badge variant={provider.isBuiltin ? "secondary" : "outline"}>
-                  {provider.isBuiltin ? "Built-in" : "Custom"}
-                </Badge>
               </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
+              <Badge variant={provider.isBuiltin ? "secondary" : "outline"}>
+                {provider.isBuiltin ? "Built-in" : "Custom"}
+              </Badge>
+            </div>
+            <div className="space-y-[clamp(8px,0.7vw,14px)]">
               <div className="space-y-1">
                 <Label htmlFor={`default-model-${provider.id}`}>
                   Default Model
@@ -338,8 +329,8 @@ export function ProvidersTab({ settings, setSettings }: ProvidersTabProps) {
                   </AlertDialog>
                 )}
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         ))}
       </div>
 
