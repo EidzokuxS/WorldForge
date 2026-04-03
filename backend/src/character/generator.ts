@@ -6,7 +6,8 @@ import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import { buildV2CardSections } from "./v2-sections.js";
 import { buildImportModeGuidance, normalizeImportedTags } from "./import-utils.js";
 import type { CharacterImportMode } from "./import-utils.js";
-import { fromLegacyPlayerCharacter } from "./record-adapters.js";
+import { fromLegacyPlayerCharacter, fromRichParsedCharacter } from "./record-adapters.js";
+import type { RichParsedCharacter } from "./record-adapters.js";
 import { buildCharacterPromptContract } from "./prompt-contract.js";
 
 const characterSchema = z.object({
@@ -30,6 +31,43 @@ const characterSchema = z.object({
     .min(1)
     .max(5)
     .describe("Hit points 1-5. 5=peak health, 3=average, 1=frail/wounded"),
+  equippedItems: z
+    .array(z.string())
+    .max(6)
+    .describe("Starting items the character carries. 0-6 items."),
+  locationName: z
+    .string()
+    .describe("Name of the starting location from KNOWN LOCATIONS that best fits this character"),
+});
+
+const richCharacterSchema = z.object({
+  name: z.string().describe("Character's full name"),
+  race: z.string().max(100).default("").describe("Character's race or species. Empty if unspecified."),
+  gender: z.string().max(100).default("").describe("Character's gender. Empty if unspecified."),
+  age: z.string().max(100).default("").describe("Character's age as text. Preserve explicit numeric ages exactly."),
+  appearance: z.string().max(1000).default("").describe("Brief physical description in 1-3 sentences."),
+  backgroundSummary: z.string().max(2000).default("").describe("Character's history, origin, and how they ended up in their current situation. 2-4 sentences."),
+  personaSummary: z.string().max(2000).default("").describe("Character's temperament, voice, default demeanor, and how they interact with others. 2-4 sentences."),
+  tags: z
+    .array(z.string())
+    .min(3)
+    .transform((tags) => tags.map((t) => t.replace(/^\[|\]$/g, "")))
+    .describe(
+      "Character tags covering traits, skills, flaws, background. " +
+      "Examples: Charismatic, Veteran Soldier, Limping, Noble-born, Pickpocket, Cowardly. " +
+      "Do NOT wrap tags in brackets."
+    ),
+  drives: z.array(z.string()).default([]).describe("1-3 core drives: what motivates this character fundamentally."),
+  frictions: z.array(z.string()).default([]).describe("1-3 internal frictions or contradictions: what holds them back or creates conflict."),
+  shortTermGoals: z.array(z.string()).default([]).describe("1-2 immediate goals the character wants to accomplish."),
+  longTermGoals: z.array(z.string()).default([]).describe("1-2 long-term ambitions or aspirations."),
+  hp: z
+    .number()
+    .int()
+    .min(1)
+    .max(5)
+    .default(5)
+    .describe("Hit points 1-5. Default to 5 for a fresh character unless the description implies injury or frailty."),
   equippedItems: z
     .array(z.string())
     .max(6)
@@ -84,6 +122,26 @@ function toCharacterDraft(
   });
 }
 
+function toCharacterDraftFromRich(
+  character: z.infer<typeof richCharacterSchema>,
+  opts?: {
+    importMode?: CharacterImportMode | null;
+    canonicalStatus?: CharacterDraft["identity"]["canonicalStatus"];
+    sourceKind?: CharacterDraft["provenance"]["sourceKind"];
+  },
+): CharacterDraft {
+  const rich: RichParsedCharacter = {
+    ...character,
+    tags: normalizeImportedTags(character.tags, { max: 12 }),
+  };
+  return fromRichParsedCharacter(rich, {
+    canonicalStatus: opts?.canonicalStatus ?? "original",
+    sourceKind: opts?.sourceKind ?? (opts?.importMode ? "import" : "generator"),
+    originMode: opts?.importMode ?? "native",
+    importMode: opts?.importMode ?? null,
+  });
+}
+
 export async function parseCharacterDescription(opts: {
   description: string;
   premise: string;
@@ -103,7 +161,6 @@ ${opts.description}
 
 SHARED CONTRACT:
 ${PLAYER_DRAFT_CONTRACT}
-${PLAYER_COMPATIBILITY_OUTPUT_RULES}
 
 REQUIREMENTS:
 - If the description contains explicit profile fields like Name, Full name, Age, Gender, Race, Species, or Appearance, preserve those values exactly.
@@ -113,9 +170,14 @@ REQUIREMENTS:
 - gender: character's gender (leave empty if truly unknown).
 - age: if the user explicitly gave an age, copy it verbatim. Do NOT rewrite "18" into "Young adult". Only use descriptive ages like "Young adult" when no explicit age was given.
 - appearance: 1-3 sentences describing physical features — build, hair, distinguishing marks.
-- Use the canonical field groups to reason about profile, motivations, capabilities, loadout, and startConditions before projecting the compatibility fields below.
-- Tags should cover: personality traits, skills/abilities, flaws/weaknesses, background/occupation. They are derived runtime tags, not the source-of-truth character model.
-- HP reflects physical condition: 5=peak, 3=average, 1=frail or wounded.
+- backgroundSummary: 2-4 sentences on character history, origin, and how they ended up in their current situation.
+- personaSummary: 2-4 sentences on temperament, voice, default demeanor, and how they interact with others.
+- drives: 1-3 core motivations that drive this character.
+- frictions: 1-3 internal contradictions or conflicts that hold them back.
+- shortTermGoals: 1-2 immediate goals the character wants to accomplish.
+- longTermGoals: 1-2 long-term ambitions or aspirations.
+- Tags should cover: personality traits, skills/abilities, flaws/weaknesses, background/occupation.
+- HP: Default to 5 for a fresh character unless the description implies injury or frailty.
 - equippedItems: items the character would realistically carry based on description.
 - locationName MUST be one of KNOWN LOCATIONS — pick the most fitting one.
 - Keep tags evocative and concise: Master Thief, not Is good at stealing things.
@@ -123,13 +185,13 @@ REQUIREMENTS:
 
   const result = await generateObject({
     model: createModel(opts.role.provider),
-    schema: characterSchema,
+    schema: richCharacterSchema,
     prompt,
     temperature: opts.role.temperature,
     maxOutputTokens: opts.role.maxTokens,
   });
 
-  return toCharacterDraft(normalizeCharacterResult(result.object, { maxTags: 12 }), {
+  return toCharacterDraftFromRich(result.object, {
     sourceKind: "player-input",
   });
 }
@@ -215,31 +277,35 @@ ${opts.factionNames.map((n) => `- ${n}`).join("\n")}
 
 SHARED CONTRACT:
 ${PLAYER_DRAFT_CONTRACT}
-${PLAYER_COMPATIBILITY_OUTPUT_RULES}
 
 REQUIREMENTS:
 - Create an interesting, flawed protagonist who fits this world.
 - The character should have clear motivations and a reason to explore.
-- Think first in canonical field groups: profile, motivations, capabilities, state, loadout, startConditions, and provenance.
 - race: character's race/species fitting the world (leave empty if truly unknown).
 - gender: character's gender (leave empty if truly unknown).
 - age: descriptive age (e.g. "Young adult", "Middle-aged", "Elder").
 - appearance: 1-3 sentences describing physical features — build, hair, distinguishing marks.
+- backgroundSummary: 2-4 sentences on character history, origin, and how they ended up in their current situation.
+- personaSummary: 2-4 sentences on temperament, voice, default demeanor, and how they interact with others.
+- drives: 1-3 core motivations that drive this character.
+- frictions: 1-3 internal contradictions or conflicts that hold them back.
+- shortTermGoals: 1-2 immediate goals the character wants to accomplish.
+- longTermGoals: 1-2 long-term ambitions or aspirations.
 - Tags should cover: personality, skills, flaws, background (6-10 tags total).
-- HP: 4-5 (new adventure, healthy).
+- HP: Default to 5 for a fresh character unless the description implies injury or frailty.
 - equippedItems: 2-4 items fitting the character's background.
 - locationName MUST be one of KNOWN LOCATIONS.
 - Make the character compelling but not overpowered — flaws create good stories.`;
 
   const result = await generateObject({
     model: createModel(opts.role.provider),
-    schema: characterSchema,
+    schema: richCharacterSchema,
     prompt,
     temperature: opts.role.temperature,
     maxOutputTokens: opts.role.maxTokens,
   });
 
-  return toCharacterDraft(normalizeCharacterResult(result.object, { maxTags: 12 }), {
+  return toCharacterDraftFromRich(result.object, {
     sourceKind: "generator",
   });
 }
@@ -271,30 +337,34 @@ ARCHETYPE: "${opts.archetype}"
 ${researchBlock}
 SHARED CONTRACT:
 ${PLAYER_DRAFT_CONTRACT}
-${PLAYER_COMPATIBILITY_OUTPUT_RULES}
 
 REQUIREMENTS:
 - Create a WHOLLY ORIGINAL character inspired by the archetype — new name, new backstory.
 - Do NOT copy the archetype directly. Capture the essence, not the specifics.
-- Use the shared draft pipeline to keep profile, motivations, capabilities, loadout, startConditions, and provenance aligned while projecting the compatibility output.
 - race: character's race/species fitting the world (leave empty if truly unknown).
 - gender: character's gender (leave empty if truly unknown).
 - age: descriptive age (e.g. "Young adult", "Middle-aged", "Elder").
 - appearance: 1-3 sentences describing physical features — build, hair, distinguishing marks.
+- backgroundSummary: 2-4 sentences on character history, origin, and how they ended up in their current situation.
+- personaSummary: 2-4 sentences on temperament, voice, default demeanor, and how they interact with others.
+- drives: 1-3 core motivations that drive this character.
+- frictions: 1-3 internal contradictions or conflicts that hold them back.
+- shortTermGoals: 1-2 immediate goals the character wants to accomplish.
+- longTermGoals: 1-2 long-term ambitions or aspirations.
 - Tags: personality, skills, flaws, background (6-10 total). Evocative and concise.
-- HP: 4-5 (new adventure, healthy).
+- HP: Default to 5 for a fresh character unless the description implies injury or frailty.
 - equippedItems: 2-4 items fitting the archetype adapted to this world.
 - locationName MUST be one of KNOWN LOCATIONS.
 - Make the character compelling but not overpowered — flaws create good stories.`;
 
   const result = await generateObject({
     model: createModel(opts.role.provider),
-    schema: characterSchema,
+    schema: richCharacterSchema,
     prompt,
     temperature: opts.role.temperature,
     maxOutputTokens: opts.role.maxTokens,
   });
-  return toCharacterDraft(normalizeCharacterResult(result.object, { maxTags: 12 }), {
+  return toCharacterDraftFromRich(result.object, {
     sourceKind: opts.researchContext ? "archetype" : "generator",
   });
 }

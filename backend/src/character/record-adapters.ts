@@ -219,6 +219,99 @@ export function fromLegacyPlayerCharacter(
   );
 }
 
+export interface RichParsedCharacter {
+  name: string;
+  race: string;
+  gender: string;
+  age: string;
+  appearance: string;
+  backgroundSummary: string;
+  personaSummary: string;
+  tags: string[];
+  drives: string[];
+  frictions: string[];
+  shortTermGoals: string[];
+  longTermGoals: string[];
+  hp: number;
+  equippedItems: string[];
+  locationName: string;
+}
+
+export function fromRichParsedCharacter(
+  rich: RichParsedCharacter,
+  opts: {
+    canonicalStatus?: CharacterRecord["identity"]["canonicalStatus"];
+    sourceKind?: CharacterRecord["provenance"]["sourceKind"];
+    originMode?: CharacterDraft["socialContext"]["originMode"];
+    importMode?: CharacterImportMode | null;
+  },
+): CharacterDraft {
+  const parsedTags = classifyLegacyTags(rich.tags);
+
+  return {
+    identity: {
+      role: "player",
+      tier: "key",
+      displayName: rich.name,
+      canonicalStatus: opts.canonicalStatus ?? "original",
+    },
+    profile: {
+      species: rich.race,
+      gender: rich.gender,
+      ageText: rich.age,
+      appearance: rich.appearance,
+      backgroundSummary: rich.backgroundSummary,
+      personaSummary: rich.personaSummary,
+    },
+    socialContext: {
+      factionId: null,
+      factionName: null,
+      homeLocationId: null,
+      homeLocationName: null,
+      currentLocationId: null,
+      currentLocationName: rich.locationName,
+      relationshipRefs: [],
+      socialStatus: [],
+      originMode: opts.originMode ?? "native",
+    },
+    motivations: {
+      shortTermGoals: rich.shortTermGoals,
+      longTermGoals: rich.longTermGoals,
+      beliefs: [],
+      drives: rich.drives,
+      frictions: rich.frictions,
+    },
+    capabilities: {
+      traits: parsedTags.traits,
+      skills: parsedTags.skills,
+      flaws: parsedTags.flaws,
+      specialties: [],
+      wealthTier: parsedTags.wealthTier,
+    },
+    state: {
+      hp: rich.hp,
+      conditions: parsedTags.conditions,
+      statusFlags: [],
+      activityState: DEFAULT_ACTIVITY_STATE,
+    },
+    loadout: {
+      inventorySeed: rich.equippedItems,
+      equippedItemRefs: rich.equippedItems,
+      currencyNotes: "",
+      signatureItems: rich.equippedItems,
+    },
+    startConditions: {},
+    provenance: {
+      sourceKind: opts.sourceKind ?? "generator",
+      importMode: opts.importMode ?? null,
+      templateId: null,
+      archetypePrompt: null,
+      worldgenOrigin: null,
+      legacyTags: parsedTags.legacyTags,
+    },
+  };
+}
+
 export function hydrateStoredPlayerRecord(
   row: StoredPlayerRow,
   opts: LegacyPlayerOptions = {},
@@ -652,7 +745,7 @@ function dedupeStrings(values: string[]): string[] {
   return deduped;
 }
 
-function classifyLegacyTags(tags: string[]): ParsedLegacyTags {
+export function classifyLegacyTags(tags: string[]): ParsedLegacyTags {
   const traits: string[] = [];
   const skills: CharacterSkill[] = [];
   const flaws: string[] = [];
