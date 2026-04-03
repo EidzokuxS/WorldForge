@@ -166,30 +166,24 @@ export function ConceptWorkspace({ onContinue }: ConceptWorkspaceProps) {
                 Open Library
               </Link>
             </Button>
-            <label className="inline-flex">
-              <input
-                type="file"
-                accept=".json"
-                className="hidden"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) {
-                    void w.handleWorldbookUpload(file);
-                  }
-                  event.target.value = "";
-                }}
-              />
-              <span
-                className="inline-flex cursor-pointer items-center gap-2 rounded-md bg-transparent text-sm font-medium text-zinc-400 transition-colors hover:bg-white/[0.05]"
-                style={{
-                  height: "clamp(30px, 2vw, 38px)",
-                  padding: "0 clamp(10px, 0.8vw, 16px)",
-                }}
-              >
+            <Button variant="ghost" size="sm" asChild>
+              <label className="cursor-pointer">
+                <input
+                  type="file"
+                  accept=".json"
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) {
+                      void w.handleWorldbookUpload(file);
+                    }
+                    event.target.value = "";
+                  }}
+                />
                 <Plus className="h-4 w-4" />
                 Import Worldbook
-              </span>
-            </label>
+              </label>
+            </Button>
           </div>
 
           {w.worldbookError ? <p className="text-sm text-red-500">{w.worldbookError}</p> : null}
