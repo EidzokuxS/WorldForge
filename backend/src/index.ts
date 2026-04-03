@@ -28,6 +28,7 @@ import settingsRoutes from "./routes/settings.js";
 import worldgenRoutes from "./routes/worldgen.js";
 import characterRoutes from "./routes/character.js";
 import imageRoutes from "./routes/images.js";
+import personaTemplateRoutes from "./routes/persona-templates.js";
 
 const app = new Hono();
 
@@ -79,6 +80,7 @@ app.get("/api/debug/prompt", async (c) => {
 app.route("/api/settings", settingsRoutes);
 app.route("/api/campaigns", campaignRoutes);
 app.route("/api/campaigns", loreRoutes);
+app.route("/api/campaigns/:id/persona-templates", personaTemplateRoutes);
 app.route("/api/worldgen", worldgenRoutes);
 app.route("/api/worldgen", characterRoutes);
 app.route("/api", aiRoutes);
@@ -106,26 +108,37 @@ app.get(
   }))
 );
 
-const server = serve(
-  {
-    fetch: app.fetch,
-    port,
-  },
-  (info) => {
-    console.log(`WorldForge backend listening on http://localhost:${info.port}`);
+function startServer(retries = 3): void {
+  const server = serve(
+    {
+      fetch: app.fetch,
+      port,
+    },
+    (info) => {
+      console.log(`WorldForge backend listening on http://localhost:${info.port}`);
+    }
+  );
+
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE" && retries > 0) {
+      console.log(`Port ${port} busy, retrying in 1s... (${retries} left)`);
+      server.close();
+      setTimeout(() => startServer(retries - 1), 1000);
+      return;
+    }
+    throw err;
+  });
+
+  injectWebSocket(server);
+
+  function shutdown() {
+    console.log("\nShutting down...");
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(1), 3000);
   }
-);
 
-injectWebSocket(server);
-
-// Graceful shutdown — ensures port is freed on Ctrl+C (especially on Windows)
-function shutdown() {
-  console.log("\nShutting down...");
-  server.close(() => process.exit(0));
-  // Force exit after 3s if server.close hangs
-  setTimeout(() => process.exit(1), 3000);
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 }
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
-process.on("SIGTERM", shutdown);
+startServer();
