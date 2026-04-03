@@ -150,7 +150,7 @@ export default function CharacterCreationPage(props: { params: Promise<{ id: str
     try {
       const sourcePrompt = characterDraft.startConditions.sourcePrompt?.trim() || undefined;
       const resolved = await resolveStartingLocation(campaignId, sourcePrompt);
-      setCharacterDraft({
+      const updatedDraft: CharacterDraft = {
         ...characterDraft,
         socialContext: {
           ...characterDraft.socialContext,
@@ -158,8 +158,23 @@ export default function CharacterCreationPage(props: { params: Promise<{ id: str
           currentLocationName: resolved.locationName,
         },
         startConditions: resolved.startConditions,
-      });
+      };
+      setCharacterDraft(updatedDraft);
       toast.success("Starting situation applied");
+
+      // Auto-preview loadout with the freshly updated draft
+      setPreviewingLoadout(true);
+      try {
+        const preview = await previewCanonicalLoadout(campaignId, updatedDraft);
+        setLoadoutPreview(preview);
+        toast.success("Loadout preview updated");
+      } catch (loadoutError) {
+        toast.error("Failed to preview loadout", {
+          description: loadoutError instanceof Error ? loadoutError.message : "Unknown error",
+        });
+      } finally {
+        setPreviewingLoadout(false);
+      }
     } catch (error) {
       toast.error("Failed to resolve starting situation", {
         description: error instanceof Error ? error.message : "Unknown error",
