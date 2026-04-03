@@ -52,6 +52,11 @@ export function CharacterCard({
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>(
     draft.provenance.templateId ?? "",
   );
+  const [customLocation, setCustomLocation] = useState<boolean>(
+    () =>
+      !!draft.socialContext.currentLocationName &&
+      !locationNames.includes(draft.socialContext.currentLocationName),
+  );
 
   function update(next: CharacterDraft) {
     onChange(next);
@@ -321,14 +326,24 @@ export function CharacterCard({
             Starting Location
           </Label>
           <Select
-            value={draft.socialContext.currentLocationName ?? ""}
-            onValueChange={(currentLocationName: string) =>
-              patch("socialContext", {
-                ...draft.socialContext,
-                currentLocationName,
-                currentLocationId: null,
-              })
-            }
+            value={customLocation ? "__custom__" : (draft.socialContext.currentLocationName ?? "")}
+            onValueChange={(value: string) => {
+              if (value === "__custom__") {
+                setCustomLocation(true);
+                patch("socialContext", {
+                  ...draft.socialContext,
+                  currentLocationName: "",
+                  currentLocationId: null,
+                });
+              } else {
+                setCustomLocation(false);
+                patch("socialContext", {
+                  ...draft.socialContext,
+                  currentLocationName: value,
+                  currentLocationId: null,
+                });
+              }
+            }}
           >
             <SelectTrigger className="mt-1 h-9 text-sm">
               <SelectValue placeholder="Select location" />
@@ -339,8 +354,23 @@ export function CharacterCard({
                   {name}
                 </SelectItem>
               ))}
+              <SelectItem value="__custom__">Custom...</SelectItem>
             </SelectContent>
           </Select>
+          {customLocation && (
+            <Input
+              value={draft.socialContext.currentLocationName ?? ""}
+              onChange={(e) =>
+                patch("socialContext", {
+                  ...draft.socialContext,
+                  currentLocationName: e.target.value,
+                  currentLocationId: null,
+                })
+              }
+              placeholder="Type custom location name..."
+              className="mt-2"
+            />
+          )}
         </div>
       </div>
 
