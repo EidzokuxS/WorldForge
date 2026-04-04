@@ -3,7 +3,6 @@
 import { useState, useRef } from "react";
 import { Loader2, Sparkles, Upload, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -102,11 +101,11 @@ export function CharacterForm({
 
       {/* Textarea — the hero */}
       <div className="mt-[clamp(20px,1.6vw,32px)] w-full max-w-2xl">
-        <Textarea
+        <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           rows={12}
-          className="min-h-[clamp(200px,20vh,360px)] resize-none bg-zinc-800/50 border-zinc-700/50 font-mono text-[clamp(13px,1vw,16px)] text-zinc-200 placeholder:text-zinc-600 focus-visible:border-zinc-600"
+          className="flex w-full rounded-md border px-3 py-2 text-base min-h-[clamp(200px,20vh,360px)] resize-none bg-zinc-800/50 border-zinc-700/50 font-mono text-[clamp(13px,1vw,16px)] text-zinc-200 placeholder:text-zinc-600 focus-visible:border-zinc-600 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
           placeholder="A grizzled ex-soldier with a limp and a heart of gold. Carries a battered sword and a flask of cheap whiskey. Knows her way around a battlefield but can't resist a card game..."
           disabled={busy}
         />
