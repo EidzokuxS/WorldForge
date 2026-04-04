@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useState, startTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
@@ -88,7 +88,7 @@ export default function CharacterCreationPage(props: { params: Promise<{ id: str
     try {
       const result = await parseCharacter(campaignId, description);
       if (result.role === "player") {
-        setCharacterDraft(result.draft);
+        startTransition(() => setCharacterDraft(result.draft));
         setLoadoutPreview(null);
       }
       toast.success("Character parsed");
@@ -106,7 +106,7 @@ export default function CharacterCreationPage(props: { params: Promise<{ id: str
     try {
       const result = await apiGenerateCharacter(campaignId);
       if (result.role === "player") {
-        setCharacterDraft(result.draft);
+        startTransition(() => setCharacterDraft(result.draft));
         setLoadoutPreview(null);
       }
       toast.success("Character generated");
@@ -129,7 +129,7 @@ export default function CharacterCreationPage(props: { params: Promise<{ id: str
         locationNames,
       });
       if (result.role === "player") {
-        setCharacterDraft(result.draft);
+        startTransition(() => setCharacterDraft(result.draft));
         setLoadoutPreview(null);
       }
       toast.success(`Imported "${payload.name}"`);
@@ -159,7 +159,7 @@ export default function CharacterCreationPage(props: { params: Promise<{ id: str
         },
         startConditions: resolved.startConditions,
       };
-      setCharacterDraft(updatedDraft);
+      startTransition(() => setCharacterDraft(updatedDraft));
       toast.success("Starting situation applied");
 
       // Auto-preview loadout with the freshly updated draft
@@ -209,7 +209,7 @@ export default function CharacterCreationPage(props: { params: Promise<{ id: str
     setApplyingTemplateId(templateId);
     try {
       const result = await applyPersonaTemplate(campaignId, templateId, characterDraft);
-      setCharacterDraft(result.draft);
+      startTransition(() => setCharacterDraft(result.draft));
       setLoadoutPreview(null);
       toast.success("Persona template applied");
     } catch (error) {
@@ -249,18 +249,19 @@ export default function CharacterCreationPage(props: { params: Promise<{ id: str
 
   if (generationRequired) {
     return (
-      <div className="rounded-2xl border border-border/70 bg-card/80 p-6 shadow-xl shadow-black/10">
-        <div className="space-y-3">
-          <div className="space-y-2">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-blood">
-              Campaign Readiness
-            </p>
-            <h2 className="font-serif text-3xl text-bone">World generation required</h2>
-          </div>
-          <p className="max-w-2xl text-sm text-muted-foreground">
-            Finish generating this campaign before starting character creation. The character workspace unlocks after the world scaffold is ready.
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <div className="max-w-lg text-center">
+          <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-blood">
+            Campaign Readiness
           </p>
-          <Button asChild size="lg">
+          <h2 className="mt-2 font-serif text-[clamp(24px,2vw,36px)] text-bone">
+            World generation required
+          </h2>
+          <p className="mt-3 text-[13px] text-zinc-500">
+            Finish generating this campaign before starting character creation.
+            The character workspace unlocks after the world scaffold is ready.
+          </p>
+          <Button asChild size="lg" className="mt-6">
             <Link href="/campaign/new">Return to Creation Flow</Link>
           </Button>
         </div>
@@ -268,6 +269,33 @@ export default function CharacterCreationPage(props: { params: Promise<{ id: str
     );
   }
 
+  /* ── Empty state: centered launcher ── */
+  if (!characterDraft) {
+    return (
+      <CharacterWorkspace>
+        <div className="flex flex-1 items-start justify-center px-4 pt-[8vh]">
+          <div className="w-full max-w-3xl">
+            <CharacterForm
+              onParse={handleParse}
+              onGenerate={handleGenerate}
+              onImport={handleImport}
+              parsing={busy === "parsing"}
+              generating={busy === "generating"}
+              importing={busy === "importing"}
+            />
+          </div>
+        </div>
+
+        <div className="mt-auto flex shrink-0 items-center justify-between border-t border-border/30 py-[clamp(12px,1vw,20px)]">
+          <Button variant="ghost" asChild>
+            <Link href={`/campaign/${campaignId}/review`}>Back to Review</Link>
+          </Button>
+        </div>
+      </CharacterWorkspace>
+    );
+  }
+
+  /* ── Character exists: compact form + dossier card ── */
   return (
     <CharacterWorkspace>
       <div className="flex-1 overflow-y-auto">
@@ -278,32 +306,27 @@ export default function CharacterCreationPage(props: { params: Promise<{ id: str
           parsing={busy === "parsing"}
           generating={busy === "generating"}
           importing={busy === "importing"}
+          compact
         />
 
-        {characterDraft ? (
-          <div className="mt-[clamp(16px,1.4vw,28px)] grid grid-cols-[1fr_clamp(260px,20vw,340px)] gap-[clamp(24px,2vw,40px)]">
-            <CharacterCard
-              draft={characterDraft}
-              locationNames={locationNames}
-              personaTemplates={personaTemplates}
-              previewLoadout={loadoutPreview}
-              previewingLoadout={previewingLoadout}
-              applyingTemplateId={applyingTemplateId}
-              resolvingStartingLocation={resolvingStart}
-              onChange={setCharacterDraft}
-              onResolveStartingLocation={handleResolveStartingLocation}
-              onPreviewLoadout={handlePreviewLoadout}
-              onApplyPersonaTemplate={handleApplyPersonaTemplate}
-            />
-          </div>
-        ) : (
-          <div className="mt-[clamp(16px,1.4vw,28px)] text-sm text-muted-foreground">
-            Use the entry methods above to parse, generate, or import a character.
-          </div>
-        )}
+        <div className="mt-[clamp(16px,1.4vw,28px)]">
+          <CharacterCard
+            draft={characterDraft}
+            locationNames={locationNames}
+            personaTemplates={personaTemplates}
+            previewLoadout={loadoutPreview}
+            previewingLoadout={previewingLoadout}
+            applyingTemplateId={applyingTemplateId}
+            resolvingStartingLocation={resolvingStart}
+            onChange={setCharacterDraft}
+            onResolveStartingLocation={handleResolveStartingLocation}
+            onPreviewLoadout={handlePreviewLoadout}
+            onApplyPersonaTemplate={handleApplyPersonaTemplate}
+          />
+        </div>
       </div>
 
-      <div className="flex shrink-0 items-center justify-between border-t border-border/60 py-[clamp(12px,1vw,20px)]">
+      <div className="mt-auto flex shrink-0 items-center justify-between border-t border-border/30 py-[clamp(12px,1vw,20px)]">
         <Button variant="ghost" asChild>
           <Link href={`/campaign/${campaignId}/review`}>Back to Review</Link>
         </Button>

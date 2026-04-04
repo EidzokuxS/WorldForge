@@ -148,8 +148,9 @@ describe("CharacterCard", () => {
     const nameInput = screen.getByDisplayValue("Elara Nightwhisper");
     await user.type(nameInput, "X");
 
-    expect(onChange).toHaveBeenCalledTimes(1);
-    const call = onChange.mock.calls[0][0];
+    // onChange is debounced — wait for it
+    await vi.waitFor(() => expect(onChange).toHaveBeenCalled(), { timeout: 500 });
+    const call = onChange.mock.calls[onChange.mock.calls.length - 1][0];
     expect(call.identity.displayName).toBe("Elara NightwhisperX");
     expect(call.profile.species).toBe("Half-Elf");
     expect(call.state.hp).toBe(3);
@@ -199,7 +200,8 @@ describe("CharacterCard", () => {
     );
     await user.click(screen.getByRole("button", { name: "Apply Start" }));
 
-    expect(onPromptChange).toHaveBeenCalled();
+    // onChange is debounced — wait for it
+    await vi.waitFor(() => expect(onPromptChange).toHaveBeenCalled(), { timeout: 500 });
     expect(onResolve).toHaveBeenCalledTimes(1);
   });
 });

@@ -264,8 +264,15 @@ Recent decisions affecting current work:
 - Phase 29 and Phase 30 still need their separate formal closeout and unrestricted verification work, even though the specific prerequisite bundle for Phase 32 is now green.
 - Repo-root Vitest still emits a non-blocking `environmentMatchGlobs` deprecation warning during frontend verification.
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260403-grr | Redesign character creation page — full visual overhaul to dossier design language | 2026-04-03 | pending | [260403-grr](./quick/260403-grr-redesign-character-creation-page-full-vi/) |
+| 260403-m5v | Custom starting location + rich character parsing + HP default 5 + auto loadout chain | 2026-04-03 | c801490 | [260403-m5v](./quick/260403-m5v-custom-starting-location-auto-loadout-re/) |
+| 260403-u3n | Fix schema hints (array desc, HP default) + remove contradictory prompt + memoize CharacterCard | 2026-04-03 | pending | [260403-u3n](./quick/260403-u3n-fix-character-parsing-rich-fields-ignore/) |
+
 ## Session Continuity
 
-Last session: 2026-04-02T21:02:16.367Z
-Stopped at: Completed 33-13-PLAN.md
+Last activity: 2026-04-03 - Completed quick task 260403-u3n: fix parsing root cause + page perf
 Resume file: None
