@@ -60,10 +60,10 @@
     radial-gradient(circle at top left, rgba(230, 62, 0, 0.16), transparent 24%),
     radial-gradient(circle at top right, rgba(59, 130, 246, 0.1), transparent 22%),
     linear-gradient(180deg, #111114 0%, #09090b 48%, #050506 100%);
-  --shell-frame-surface: rgba(10, 10, 12, 0.82);
-  --shell-rail-surface: rgba(24, 24, 27, 0.9);
-  --shell-panel-surface: rgba(18, 18, 22, 0.84);
-  --shell-panel-muted: rgba(39, 39, 42, 0.62);
+  --shell-frame-surface: rgb(11, 11, 13);
+  --shell-rail-surface: rgb(23, 23, 26);
+  --shell-panel-surface: rgb(17, 17, 22);
+  --shell-panel-muted: rgb(31, 31, 34);
   --shell-border: rgba(255, 255, 255, 0.08);
   --shell-highlight: rgba(230, 62, 0, 0.16);
   --shell-highlight-strong: rgba(230, 62, 0, 0.28);
@@ -105,10 +105,10 @@
     radial-gradient(circle at top left, rgba(230, 62, 0, 0.16), transparent 24%),
     radial-gradient(circle at top right, rgba(59, 130, 246, 0.1), transparent 22%),
     linear-gradient(180deg, #111114 0%, #09090b 48%, #050506 100%);
-  --shell-frame-surface: rgba(10, 10, 12, 0.82);
-  --shell-rail-surface: rgba(24, 24, 27, 0.9);
-  --shell-panel-surface: rgba(18, 18, 22, 0.84);
-  --shell-panel-muted: rgba(39, 39, 42, 0.62);
+  --shell-frame-surface: rgb(11, 11, 13);
+  --shell-rail-surface: rgb(23, 23, 26);
+  --shell-panel-surface: rgb(17, 17, 22);
+  --shell-panel-muted: rgb(31, 31, 34);
   --shell-border: rgba(255, 255, 255, 0.08);
   --shell-highlight: rgba(230, 62, 0, 0.16);
   --shell-highlight-strong: rgba(230, 62, 0, 0.28);

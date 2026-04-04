@@ -269,10 +269,8 @@ Recent decisions affecting current work:
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 260403-grr | Redesign character creation page — full visual overhaul to dossier design language | 2026-04-03 | pending | [260403-grr](./quick/260403-grr-redesign-character-creation-page-full-vi/) |
-| 260403-m5v | Custom starting location + rich character parsing + HP default 5 + auto loadout chain | 2026-04-03 | c801490 | [260403-m5v](./quick/260403-m5v-custom-starting-location-auto-loadout-re/) |
-| 260403-u3n | Fix schema hints (array desc, HP default) + remove contradictory prompt + memoize CharacterCard | 2026-04-03 | pending | [260403-u3n](./quick/260403-u3n-fix-character-parsing-rich-fields-ignore/) |
 
 ## Session Continuity
 
-Last activity: 2026-04-03 - Completed quick task 260403-u3n: fix parsing root cause + page perf
+Last activity: 2026-04-03 - Completed quick task 260403-grr: character creation page redesign
 Resume file: None

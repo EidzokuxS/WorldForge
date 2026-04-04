@@ -5,14 +5,14 @@ import { cn } from "@/lib/utils";
 type DivProps = React.ComponentProps<"div">;
 
 const shellSurfaceBase =
-  "rounded-[var(--shell-radius-panel)] border [border-color:var(--shell-border)] shadow-[0_24px_70px_rgba(0,0,0,0.18)] backdrop-blur-xl";
+  "rounded-[var(--shell-radius-panel)] border [border-color:var(--shell-border)] shadow-[0_24px_70px_rgba(0,0,0,0.18)]";
 
 export function ShellFrame({ className, ...props }: DivProps) {
   return (
     <div
       data-shell-region="outer-frame"
       className={cn(
-        "overflow-hidden rounded-[var(--shell-radius)] border [border-color:var(--shell-border)] [background:var(--shell-frame-surface)] shadow-[0_32px_120px_rgba(0,0,0,0.35)] backdrop-blur-xl",
+        "overflow-hidden rounded-[var(--shell-radius)] border [border-color:var(--shell-border)] [background:var(--shell-frame-surface)] shadow-[0_8px_30px_rgba(0,0,0,0.35)]",
         className,
       )}
       {...props}
@@ -38,7 +38,7 @@ export function ShellMainPanel({ className, ...props }: DivProps) {
     <div
       data-shell-region="main-panel"
       className={cn(
-        "flex min-w-0 flex-1 flex-col overflow-hidden [background:linear-gradient(180deg,rgba(255,255,255,0.02)_0%,rgba(255,255,255,0)_100%),var(--shell-panel-surface)]",
+        "flex min-w-0 flex-1 flex-col overflow-hidden [background:var(--shell-panel-surface)]",
         className,
       )}
       {...props}
