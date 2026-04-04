@@ -116,7 +116,6 @@ describe("CharacterCard", () => {
 
     expect(screen.getByText("stealth")).toBeInTheDocument();
     expect(screen.getByText("cunning")).toBeInTheDocument();
-    expect(screen.getByText("Duty")).toBeInTheDocument();
   });
 
   it("renders equipped items", () => {
@@ -172,7 +171,7 @@ describe("CharacterCard", () => {
     expect(screen.getByText("Age")).toBeInTheDocument();
     expect(screen.getByText("Appearance")).toBeInTheDocument();
     expect(screen.getByText("Background")).toBeInTheDocument();
-    expect(screen.getByText("Persona")).toBeInTheDocument();
+    expect(screen.getByText("First Impression")).toBeInTheDocument();
     expect(screen.getByText("HP")).toBeInTheDocument();
     expect(screen.getByText("Traits")).toBeInTheDocument();
     expect(screen.getByText("Flaws")).toBeInTheDocument();
