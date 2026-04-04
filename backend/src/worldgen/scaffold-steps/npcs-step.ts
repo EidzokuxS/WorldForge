@@ -402,8 +402,8 @@ export async function generateNpcsStep(
   // Combine all planned NPCs
   const allPlanned: PlannedNpc[] = [...keyPlanned, ...supportingPlanned];
 
-  // Phase C: Detail all NPCs in batches of 4-5
-  const batches = chunk(allPlanned, 5);
+  // Phase C: Detail all NPCs in batches of 3
+  const batches = chunk(allPlanned, 3);
   const allDetailed: DetailedNpc[] = [];
   const previouslyDetailed: Array<{
     name: string;
