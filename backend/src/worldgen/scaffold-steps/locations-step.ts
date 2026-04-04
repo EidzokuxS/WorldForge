@@ -80,6 +80,7 @@ ${ipBlock}
 ${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}
 CONSTRAINTS:
 - Exactly ONE location has isStarting=true — the player's starting point. Pick a location where a newcomer or young character would plausibly begin.
+- Every location name must be UNIQUE. Never output two locations with the same name.
 - Every location must serve a DIFFERENT narrative function. No two locations filling the same role (e.g., two "training grounds" or two "hidden bases").
 - purpose: one sentence explaining what this location IS and why it matters to the world (not just to the premise).${additionalInstruction ? `\nADDITIONAL: ${additionalInstruction}` : ""}
 
@@ -137,16 +138,25 @@ ${buildStopSlopRules()}`,
     }
   }
 
-  if (detailed.length === 0) {
-    return detailed;
+  // Deduplicate by name (LLM may produce duplicates from worldbook references)
+  const seen = new Set<string>();
+  const unique = detailed.filter((loc) => {
+    const key = loc.name.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  if (unique.length === 0) {
+    return unique;
   }
 
   // Keep location planning best-effort: if the model omitted or duplicated
   // the starting flag, normalize to exactly one starting location.
-  const firstStartingIndex = detailed.findIndex((loc) => loc.isStarting);
+  const firstStartingIndex = unique.findIndex((loc) => loc.isStarting);
   const normalizedStartingIndex = firstStartingIndex >= 0 ? firstStartingIndex : 0;
 
-  return detailed.map((loc, index) => ({
+  return unique.map((loc, index) => ({
     ...loc,
     isStarting: index === normalizedStartingIndex,
   }));

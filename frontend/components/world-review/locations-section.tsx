@@ -102,7 +102,7 @@ export function LocationsSection({
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {locations.map((loc, index) => (
-          <Card key={loc.name || `loc-${index}`} className="relative border-border/50 bg-card">
+          <Card key={`loc-${index}`} className="relative border-border/50 bg-card">
             <button
               type="button"
               onClick={() => deleteLocation(index)}
@@ -195,8 +195,8 @@ export function LocationsSection({
                           <SelectValue placeholder="Add..." />
                         </SelectTrigger>
                         <SelectContent>
-                          {available.map((n) => (
-                            <SelectItem key={n} value={n}>
+                          {[...new Set(available)].map((n, i) => (
+                            <SelectItem key={`${n}-${i}`} value={n}>
                               {n}
                             </SelectItem>
                           ))}
