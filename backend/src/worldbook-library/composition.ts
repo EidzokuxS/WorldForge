@@ -4,6 +4,7 @@ import type {
 } from "@worldforge/shared";
 import { AppError } from "../lib/index.js";
 import {
+  extractSourceData,
   getClassifiedEntryEntityKey,
   sortClassifiedEntriesForWorldContext,
   worldbookToIpContext,
@@ -90,8 +91,105 @@ function buildFranchiseName(selection: CampaignWorldbookSelection[]): string {
   return selection.map((item) => item.displayName).join(" + ");
 }
 
+/** Max entries for supplementary sources to prevent context flooding. */
+const SUPPLEMENTARY_ENTRY_CAP = 15;
+
+/**
+ * Detect primary source from premise text. Returns the displayName of the
+ * primary source, or null if no clear signal is found.
+ *
+ * Looks for patterns like "mainly X", "primarily X", "based on X",
+ * "in the world of X" (case-insensitive).
+ */
+function detectPrimarySource(
+  premise: string,
+  sourceNames: string[],
+): string | null {
+  const premiseLower = premise.toLowerCase();
+
+  // Patterns that signal primary source intent
+  const patterns = [
+    /\b(?:mainly|primarily|mostly|chiefly|predominantly)\s+(?:based\s+on\s+)?(.+?)(?:\s+with|\s+and|\s*,|\s*\.|\s*$)/i,
+    /\b(?:based\s+on|in\s+the\s+world\s+of|set\s+in|from)\s+(.+?)(?:\s+with|\s+and|\s*,|\s*\.|\s*$)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = premiseLower.match(pattern);
+    if (!match?.[1]) continue;
+    const captured = match[1].trim();
+
+    // Check if any source name matches (substring match, case-insensitive)
+    for (const name of sourceNames) {
+      const nameLower = name.toLowerCase();
+      if (captured.includes(nameLower) || nameLower.includes(captured)) {
+        return name;
+      }
+    }
+  }
+
+  // Check if any source name appears right after a priority keyword
+  for (const name of sourceNames) {
+    const nameLower = name.toLowerCase();
+    const keywordPattern = new RegExp(
+      `\\b(?:mainly|primarily|mostly|chiefly|predominantly)\\s+${nameLower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+      "i",
+    );
+    if (keywordPattern.test(premiseLower)) {
+      return name;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Score entries by word overlap with premise text. Higher score = more relevant.
+ */
+function scorePremiseRelevance(
+  fact: string,
+  premiseWords: Set<string>,
+): number {
+  const factWords = fact.toLowerCase().split(/\s+/);
+  let score = 0;
+  for (const word of factWords) {
+    if (premiseWords.has(word) && word.length > 3) {
+      score += 1;
+    }
+  }
+  return score;
+}
+
+/**
+ * Cap entries to a limit, preferring those with higher premise relevance.
+ */
+function capEntries(
+  keyFacts: string[],
+  limit: number,
+  premise?: string,
+): string[] {
+  if (keyFacts.length <= limit) return keyFacts;
+
+  if (!premise) return keyFacts.slice(0, limit);
+
+  const premiseWords = new Set(
+    premise.toLowerCase().split(/\s+/).filter((w) => w.length > 3),
+  );
+
+  const scored = keyFacts.map((fact, index) => ({
+    fact,
+    score: scorePremiseRelevance(fact, premiseWords),
+    index,
+  }));
+
+  // Sort by score descending, then by original index for stability
+  scored.sort((a, b) => b.score - a.score || a.index - b.index);
+
+  return scored.slice(0, limit).sort((a, b) => a.index - b.index).map((s) => s.fact);
+}
+
 export function composeWorldbookLibraryRecords(
   records: StoredWorldbookLibraryRecord[],
+  premise?: string,
 ): ComposeWorldbookSelectionResult {
   const uniqueRecords = Array.from(
     new Map(records.map((record) => [record.id, record] as const)).values(),
@@ -162,11 +260,44 @@ export function composeWorldbookLibraryRecords(
     summary: group.summary,
   }));
 
+  const ipContext = worldbookToIpContext(
+    mergedEntries,
+    buildFranchiseName(worldbookSelection),
+  );
+
+  // Build per-source entry lists for source-grouped prompt rendering
+  const sourceNames = sortedRecords.map((r) => r.displayName);
+  const primarySourceName = premise && sortedRecords.length > 1
+    ? detectPrimarySource(premise, sourceNames)
+    : null;
+
+  const sourceGroups: NonNullable<typeof ipContext.sourceGroups> = sortedRecords.map(
+    (record) => {
+      const sourceEntries = record.entries.map((e) => ({
+        name: e.name,
+        type: e.type,
+        summary: e.summary,
+      }));
+      const sourceData = extractSourceData(sourceEntries);
+      const isPrimary =
+        primarySourceName === null || record.displayName === primarySourceName;
+      const priority = isPrimary ? ("primary" as const) : ("supplementary" as const);
+
+      return {
+        sourceName: record.displayName,
+        priority,
+        keyFacts: priority === "supplementary"
+          ? capEntries(sourceData.keyFacts, SUPPLEMENTARY_ENTRY_CAP, premise)
+          : sourceData.keyFacts,
+        canonicalNames: sourceData.canonicalNames,
+      };
+    },
+  );
+
+  ipContext.sourceGroups = sourceGroups;
+
   return {
-    ipContext: worldbookToIpContext(
-      mergedEntries,
-      buildFranchiseName(worldbookSelection),
-    ),
+    ipContext,
     worldbookSelection,
     provenance: {
       sources: worldbookSelection,
@@ -177,6 +308,7 @@ export function composeWorldbookLibraryRecords(
 
 export function composeSelectedWorldbooks(
   selectedWorldbooks: CampaignWorldbookSelection[],
+  premise?: string,
 ): ComposeWorldbookSelectionResult {
   if (selectedWorldbooks.length === 0) {
     throw new AppError("At least one selected worldbook is required.", 400);
@@ -193,5 +325,5 @@ export function composeSelectedWorldbooks(
     return record;
   });
 
-  return composeWorldbookLibraryRecords(records);
+  return composeWorldbookLibraryRecords(records, premise);
 }

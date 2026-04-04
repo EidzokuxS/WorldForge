@@ -389,14 +389,18 @@ export async function importClassifiedEntries(
 // ───── 4. WorldBook → IpResearchContext ─────
 
 /**
- * Convert classified worldbook entries into an IpResearchContext.
- * This lets the scaffold generation pipeline use worldbook as its
- * knowledge base — same as franchise research, but from a file.
+ * Extract per-source keyFacts and canonicalNames from classified entries.
+ * Used both by worldbookToIpContext (single source) and multi-source composition.
  */
-export function worldbookToIpContext(
-  entries: ClassifiedEntry[],
-  worldbookName: string,
-): IpResearchContext {
+export function extractSourceData(entries: ClassifiedEntry[]): {
+  keyFacts: string[];
+  canonicalNames: {
+    locations: string[];
+    factions: string[];
+    characters: string[];
+  };
+  tonalNotes: string[];
+} {
   const sortedEntries = sortClassifiedEntriesForWorldContext(entries);
   const characters = sortedEntries.filter((e) => e.type === "character");
   const locs = sortedEntries.filter((e) => e.type === "location");
@@ -405,24 +409,42 @@ export function worldbookToIpContext(
     (e) => e.type === "bestiary" || e.type === "lore_general",
   );
 
-  // Build key facts from ALL entries — each becomes a fact
-  const keyFacts = sortedEntries.map((e) => `${normalizeEntryText(e.name)}: ${normalizeEntryText(e.summary)}`);
+  const keyFacts = sortedEntries.map(
+    (e) => `${normalizeEntryText(e.name)}: ${normalizeEntryText(e.summary)}`,
+  );
 
-  // Tonal notes from lore_general entries (world rules, atmosphere)
   const tonalNotes = loreEntries
     .filter((e) => e.type === "lore_general")
     .slice(0, 10)
     .map((e) => e.summary);
 
   return {
-    franchise: worldbookName,
     keyFacts,
-    tonalNotes: tonalNotes.length > 0 ? tonalNotes : ["Custom worldbook setting"],
     canonicalNames: {
       locations: locs.map((e) => e.name),
       factions: facs.map((e) => e.name),
       characters: characters.map((e) => e.name),
     },
+    tonalNotes,
+  };
+}
+
+/**
+ * Convert classified worldbook entries into an IpResearchContext.
+ * This lets the scaffold generation pipeline use worldbook as its
+ * knowledge base — same as franchise research, but from a file.
+ */
+export function worldbookToIpContext(
+  entries: ClassifiedEntry[],
+  worldbookName: string,
+): IpResearchContext {
+  const { keyFacts, canonicalNames, tonalNotes } = extractSourceData(entries);
+
+  return {
+    franchise: worldbookName,
+    keyFacts,
+    tonalNotes: tonalNotes.length > 0 ? tonalNotes : ["Custom worldbook setting"],
+    canonicalNames,
     source: "llm" as const,
   };
 }

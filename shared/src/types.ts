@@ -102,6 +102,18 @@ export interface IpResearchContext {
   excludedCharacters?: string[];
   /** Whether context came from live web search or LLM internal knowledge */
   source: "mcp" | "llm";
+  /** Per-source grouping with priority labels for multi-worldbook composition.
+   *  When present, prompt rendering uses grouped format instead of flat keyFacts. */
+  sourceGroups?: Array<{
+    sourceName: string;
+    priority: "primary" | "supplementary";
+    keyFacts: string[];
+    canonicalNames?: {
+      locations?: string[];
+      factions?: string[];
+      characters?: string[];
+    };
+  }>;
 }
 
 /**

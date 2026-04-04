@@ -134,7 +134,7 @@ app.post("/suggest-seeds", async (c) => {
     let ipContext = null;
     if (result.data.selectedWorldbooks?.length) {
       debugOperation.setLabel("Composing selected worldbooks...");
-      ipContext = composeSelectedWorldbooks(result.data.selectedWorldbooks).ipContext;
+      ipContext = composeSelectedWorldbooks(result.data.selectedWorldbooks, result.data.premise).ipContext;
     } else if (result.data.worldbookEntries?.length) {
       debugOperation.setLabel("Converting WorldBook into generation context...");
       ipContext = worldbookToIpContext(result.data.worldbookEntries, result.data.name ?? "Worldbook");
@@ -265,7 +265,7 @@ app.post("/generate", async (c) => {
           const config = readCampaignConfig(campaignId);
           if (config.worldbookSelection?.length) {
             debugOperation?.setLabel("Composing saved worldbook selection...");
-            ipContext = composeSelectedWorldbooks(config.worldbookSelection).ipContext;
+            ipContext = composeSelectedWorldbooks(config.worldbookSelection, campaign.premise).ipContext;
             saveIpContext(campaignId, ipContext);
             log.info(
               `Composed saved worldbook selection for campaign ${campaignId} (${ipContext.keyFacts.length} facts)`,
