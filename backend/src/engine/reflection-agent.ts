@@ -16,7 +16,9 @@ import { createReflectionTools } from "./reflection-tools.js";
 import { searchEpisodicEvents } from "../vectors/episodic-events.js";
 import { embedTexts } from "../vectors/embeddings.js";
 import { createLogger } from "../lib/index.js";
-import { parseBeliefs, parseNpcGoals } from "./parse-helpers.js";
+import { hydrateStoredNpcRecord } from "../character/record-adapters.js";
+import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
+import { DERIVED_RUNTIME_TAGS_RULE } from "../character/prompt-contract.js";
 
 const log = createLogger("reflection-agent");
 
@@ -50,13 +52,7 @@ export async function runReflection(
 
   // 1. Load NPC
   const npc = db
-    .select({
-      name: npcs.name,
-      tags: npcs.tags,
-      beliefs: npcs.beliefs,
-      goals: npcs.goals,
-      unprocessedImportance: npcs.unprocessedImportance,
-    })
+    .select()
     .from(npcs)
     .where(eq(npcs.id, npcId))
     .get();
@@ -65,39 +61,45 @@ export async function runReflection(
     return { npcId, npcName: "Unknown", toolCalls: [], error: "NPC not found" };
   }
 
-  const beliefs = parseBeliefs(npc.beliefs);
-  const goals = parseNpcGoals(npc.goals);
+  const npcRecord = hydrateStoredNpcRecord(npc);
+  const runtimeTags = deriveRuntimeCharacterTags(npcRecord);
 
   // 2. Search episodic events involving this NPC (fetch more for reflection: 10)
   let recentEvents: string[] = [];
   if (embedderProvider) {
     try {
-      const queryVector = await embedTexts([npc.name], embedderProvider);
+      const queryVector = await embedTexts([npcRecord.identity.displayName], embedderProvider);
       if (queryVector[0] && queryVector[0].length > 0) {
         const events = await searchEpisodicEvents(queryVector[0], tick, 10);
         recentEvents = events.map((e) => `[Tick ${e.tick}] ${e.text}`);
       }
     } catch (err) {
-      log.warn(`Failed to search episodic events for ${npc.name}`, err);
+      log.warn(`Failed to search episodic events for ${npcRecord.identity.displayName}`, err);
     }
   }
 
   // 3. Build system prompt
   const goalsText = [
-    ...goals.short_term.map((g) => `  - [short] ${g}`),
-    ...goals.long_term.map((g) => `  - [long] ${g}`),
+    ...npcRecord.motivations.shortTermGoals.map((g) => `  - [short] ${g}`),
+    ...npcRecord.motivations.longTermGoals.map((g) => `  - [long] ${g}`),
   ].join("\n") || "  (none)";
 
   const systemPrompt = [
-    `You are reflecting on recent experiences as ${npc.name}.`,
+    `You are reflecting on recent experiences as ${npcRecord.identity.displayName}.`,
+    `Canonical NPC record authority: profile, socialContext, motivations, capabilities, and state define the current baseline before any compatibility aliases.`,
+    `Derived runtime tags are compact compatibility evidence, not the source-of-truth worldview.`,
+    DERIVED_RUNTIME_TAGS_RULE,
     `Based on these events, update your beliefs, goals, and relationships.`,
     `Only make changes that are clearly supported by the evidence.`,
     ``,
-    `Current beliefs: [${beliefs.join(", ")}]`,
+    `Current profile: ${npcRecord.profile.personaSummary}`,
+    `Current social context: location=${npcRecord.socialContext.currentLocationName ?? npc.currentLocationId ?? "unknown"}; status=[${npcRecord.socialContext.socialStatus.join(", ") || "none"}]`,
+    `Current capabilities/state shorthand: tags=[${runtimeTags.join(", ")}]`,
+    `Current beliefs: [${npcRecord.motivations.beliefs.join(", ")}]`,
     `Current goals:\n${goalsText}`,
     recentEvents.length > 0
-      ? `\nRecent events:\n${recentEvents.join("\n")}`
-      : "\nNo recent events recorded.",
+      ? `\nRecent evidence:\n${recentEvents.join("\n")}`
+      : "\nRecent evidence:\nNo recent events recorded.",
     ``,
     `You may upgrade wealth tiers (Destitute -> Poor -> Comfortable -> Wealthy -> Obscenely Rich) or skill tiers (Novice -> Skilled -> Master) when evidence clearly supports it. Wealth changes require significant trade/loot events. Skill upgrades require 3+ successful uses of that skill.`,
     `Use the tools to update your beliefs, goals, relationships, wealth, and skills as needed.`,
@@ -141,10 +143,10 @@ export async function runReflection(
     .run();
 
   log.info(
-    `${npc.name} reflection complete: ${toolCalls.length} tool call(s), importance reset to 0`,
+    `${npcRecord.identity.displayName} reflection complete: ${toolCalls.length} tool call(s), importance reset to 0`,
   );
 
-  return { npcId, npcName: npc.name, toolCalls };
+  return { npcId, npcName: npcRecord.identity.displayName, toolCalls };
 }
 
 // -- Orchestrator -------------------------------------------------------------

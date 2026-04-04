@@ -15,6 +15,11 @@ import { npcs, locations } from "../db/schema.js";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
 import { storeEpisodicEvent } from "../vectors/episodic-events.js";
 import { createLogger } from "../lib/index.js";
+import {
+  hydrateStoredNpcRecord,
+  toLegacyNpcDraft,
+} from "../character/record-adapters.js";
+import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
 
 const log = createLogger("npc-offscreen");
 
@@ -37,6 +42,21 @@ export interface NpcContext {
   npcId: string;
   npcName: string;
   currentGoals: string;
+  currentCharacterRecord?: string | null;
+  storedRecord?: {
+    campaignId: string;
+    persona: string;
+    tags: string;
+    tier: "temporary" | "persistent" | "key";
+    currentLocationId: string | null;
+    goals: string;
+    beliefs: string;
+    unprocessedImportance: number;
+    inactiveTicks?: number;
+    createdAt?: number;
+    characterRecord?: string | null;
+    derivedTags?: string | null;
+  };
 }
 
 // -- Zod schema for LLM output -----------------------------------------------
@@ -83,6 +103,8 @@ export async function applyOffscreenUpdate(
   const db = getDb();
   let locationChanged = false;
   let goalsUpdated = false;
+  let resolvedLocationId = npcCtx.storedRecord?.currentLocationId ?? null;
+  let resolvedLocationName: string | null = null;
 
   // -- Resolve and apply location change --
   if (update.newLocation) {
@@ -98,40 +120,101 @@ export async function applyOffscreenUpdate(
       .get();
 
     if (loc) {
-      db.update(npcs)
-        .set({ currentLocationId: loc.id })
-        .where(eq(npcs.id, npcCtx.npcId))
-        .run();
       locationChanged = true;
+      resolvedLocationId = loc.id;
+      resolvedLocationName = loc.name;
       log.info(`${npcCtx.npcName} moved to ${loc.name}`);
     } else {
       log.warn(`Location "${update.newLocation}" not found for ${npcCtx.npcName}, skipping move`);
     }
   }
 
-  // -- Apply goal progress --
-  if (update.goalProgress) {
-    try {
-      const goals = JSON.parse(npcCtx.currentGoals) as {
-        short_term: string[];
-        long_term: string[];
-      };
-      goals.short_term.push(update.goalProgress);
-      db.update(npcs)
-        .set({ goals: JSON.stringify(goals) })
-        .where(eq(npcs.id, npcCtx.npcId))
-        .run();
-      goalsUpdated = true;
-    } catch {
-      log.warn(`Failed to parse goals for ${npcCtx.npcName}`);
-    }
-  }
+  if (npcCtx.storedRecord) {
+    const currentRecord = hydrateStoredNpcRecord({
+      id: npcCtx.npcId,
+      campaignId,
+      name: npcCtx.npcName,
+      persona: npcCtx.storedRecord.persona,
+      tags: npcCtx.storedRecord.tags,
+      tier: npcCtx.storedRecord.tier,
+      currentLocationId: npcCtx.storedRecord.currentLocationId,
+      goals: npcCtx.storedRecord.goals,
+      beliefs: npcCtx.storedRecord.beliefs,
+      unprocessedImportance: npcCtx.storedRecord.unprocessedImportance ?? 0,
+      inactiveTicks: npcCtx.storedRecord.inactiveTicks ?? 0,
+      createdAt: npcCtx.storedRecord.createdAt ?? 0,
+      characterRecord:
+        npcCtx.currentCharacterRecord ?? npcCtx.storedRecord.characterRecord ?? null,
+      derivedTags: npcCtx.storedRecord.derivedTags ?? null,
+    });
 
-  // -- Reset inactive ticks (NPC acted) --
-  db.update(npcs)
-    .set({ inactiveTicks: 0 })
-    .where(eq(npcs.id, npcCtx.npcId))
-    .run();
+    const updatedRecord = {
+      ...currentRecord,
+      socialContext: {
+        ...currentRecord.socialContext,
+        currentLocationId: resolvedLocationId,
+        currentLocationName:
+          resolvedLocationName ?? currentRecord.socialContext.currentLocationName,
+      },
+      motivations: {
+        ...currentRecord.motivations,
+        shortTermGoals: update.goalProgress
+          ? [...currentRecord.motivations.shortTermGoals, update.goalProgress]
+          : currentRecord.motivations.shortTermGoals,
+      },
+      state: {
+        ...currentRecord.state,
+        activityState: "active" as const,
+      },
+    };
+
+    const legacyNpc = toLegacyNpcDraft(updatedRecord);
+    const derivedTags = deriveRuntimeCharacterTags(updatedRecord);
+
+    db.update(npcs)
+      .set({
+        currentLocationId: resolvedLocationId,
+        persona: legacyNpc.persona,
+        tags: JSON.stringify(legacyNpc.tags),
+        goals: JSON.stringify({
+          short_term: legacyNpc.goals.shortTerm,
+          long_term: legacyNpc.goals.longTerm,
+        }),
+        beliefs: JSON.stringify(updatedRecord.motivations.beliefs),
+        characterRecord: JSON.stringify(updatedRecord),
+        derivedTags: JSON.stringify(derivedTags),
+        inactiveTicks: 0,
+      })
+      .where(eq(npcs.id, npcCtx.npcId))
+      .run();
+
+    goalsUpdated = Boolean(update.goalProgress);
+  } else {
+    if (update.goalProgress) {
+      try {
+        const goals = JSON.parse(npcCtx.currentGoals) as {
+          short_term: string[];
+          long_term: string[];
+        };
+        goals.short_term.push(update.goalProgress);
+        db.update(npcs)
+          .set({ goals: JSON.stringify(goals) })
+          .where(eq(npcs.id, npcCtx.npcId))
+          .run();
+        goalsUpdated = true;
+      } catch {
+        log.warn(`Failed to parse goals for ${npcCtx.npcName}`);
+      }
+    }
+
+    db.update(npcs)
+      .set({
+        currentLocationId: resolvedLocationId,
+        inactiveTicks: 0,
+      })
+      .where(eq(npcs.id, npcCtx.npcId))
+      .run();
+  }
 
   // -- Store episodic event (best-effort) --
   try {
@@ -189,11 +272,19 @@ export async function simulateOffscreenNpcs(
   const offscreenKeyNpcs = db
     .select({
       id: npcs.id,
+      campaignId: npcs.campaignId,
       name: npcs.name,
       persona: npcs.persona,
       tags: npcs.tags,
+      tier: npcs.tier,
       currentLocationId: npcs.currentLocationId,
       goals: npcs.goals,
+      beliefs: npcs.beliefs,
+      unprocessedImportance: npcs.unprocessedImportance,
+      characterRecord: npcs.characterRecord,
+      derivedTags: npcs.derivedTags,
+      inactiveTicks: npcs.inactiveTicks,
+      createdAt: npcs.createdAt,
     })
     .from(npcs)
     .where(
@@ -213,18 +304,11 @@ export async function simulateOffscreenNpcs(
 
   // -- Build NPC summaries for batch prompt --
   const npcSummaries = offscreenKeyNpcs.map((npc) => {
-    let tags: string[] = [];
-    try {
-      tags = JSON.parse(npc.tags) as string[];
-    } catch { /* ignore */ }
-
-    let goals = { short_term: [] as string[], long_term: [] as string[] };
-    try {
-      goals = JSON.parse(npc.goals) as typeof goals;
-    } catch { /* ignore */ }
+    const npcRecord = hydrateStoredNpcRecord(npc);
+    const tags = deriveRuntimeCharacterTags(npcRecord);
 
     // Resolve location name
-    let locationName = "Unknown";
+    let locationName = npcRecord.socialContext.currentLocationName ?? "Unknown";
     if (npc.currentLocationId) {
       const loc = db
         .select({ name: locations.name })
@@ -235,11 +319,11 @@ export async function simulateOffscreenNpcs(
     }
 
     return [
-      `- Name: ${npc.name}`,
-      `  Persona: ${npc.persona}`,
+      `- Name: ${npcRecord.identity.displayName}`,
+      `  Persona: ${npcRecord.profile.personaSummary}`,
       `  Traits: [${tags.join(", ")}]`,
       `  Location: ${locationName}`,
-      `  Goals: short=[${goals.short_term.join("; ")}], long=[${goals.long_term.join("; ")}]`,
+      `  Goals: short=[${npcRecord.motivations.shortTermGoals.join("; ")}], long=[${npcRecord.motivations.longTermGoals.join("; ")}]`,
     ].join("\n");
   });
 
@@ -276,6 +360,21 @@ export async function simulateOffscreenNpcs(
       npcId: npc.id,
       npcName: npc.name,
       currentGoals: npc.goals,
+      currentCharacterRecord: npc.characterRecord,
+      storedRecord: {
+        campaignId: npc.campaignId,
+        persona: npc.persona,
+        tags: npc.tags,
+        tier: npc.tier,
+        currentLocationId: npc.currentLocationId,
+        goals: npc.goals,
+        beliefs: npc.beliefs,
+        unprocessedImportance: npc.unprocessedImportance,
+        inactiveTicks: npc.inactiveTicks,
+        createdAt: npc.createdAt,
+        characterRecord: npc.characterRecord,
+        derivedTags: npc.derivedTags,
+      },
     });
   }
 

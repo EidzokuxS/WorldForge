@@ -693,6 +693,8 @@ describe("premiseDivergence persistence", () => {
         excludedCharacters: ["Dr. Kel"],
       },
       premiseDivergence,
+      personaTemplates: [],
+      worldbookSelection: undefined,
       currentTick: undefined,
       seeds: undefined,
     });
@@ -731,6 +733,7 @@ describe("premiseDivergence persistence", () => {
       ipContext: cachedIpContext,
       premiseDivergence,
       worldbookSelection,
+      personaTemplates: [],
       currentTick: undefined,
       seeds: undefined,
     });

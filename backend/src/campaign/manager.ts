@@ -8,6 +8,7 @@ import type {
   CampaignWorldbookSelection,
   CampaignMeta,
   IpResearchContext,
+  PersonaTemplate,
   PremiseDivergence,
   WorldSeeds,
 } from "@worldforge/shared";
@@ -28,6 +29,7 @@ type CampaignConfigFile = {
   ipContext?: IpResearchContext;
   premiseDivergence?: PremiseDivergence;
   worldbookSelection?: CampaignWorldbookSelection[];
+  personaTemplates?: PersonaTemplate[];
   generationComplete?: boolean;
   currentTick?: number;
   createdAt: number;
@@ -68,6 +70,9 @@ export function readCampaignConfig(campaignId: string): CampaignConfigFile {
     worldbookSelection: Array.isArray(parsed.worldbookSelection)
       ? parsed.worldbookSelection
       : undefined,
+    personaTemplates: Array.isArray(parsed.personaTemplates)
+      ? parsed.personaTemplates
+      : [],
     generationComplete: Boolean(parsed.generationComplete),
     currentTick: typeof parsed.currentTick === "number" ? parsed.currentTick : undefined,
     createdAt: parsed.createdAt,
@@ -79,6 +84,31 @@ export function readCampaignConfig(campaignId: string): CampaignConfigFile {
 function writeCampaignConfig(campaignDir: string, config: CampaignConfigFile) {
   const configPath = path.join(campaignDir, "config.json");
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
+}
+
+function updateCampaignConfig(
+  campaignId: string,
+  updater: (config: CampaignConfigFile) => CampaignConfigFile,
+): CampaignConfigFile {
+  assertSafeId(campaignId);
+  const current = readCampaignConfig(campaignId);
+  const next = {
+    ...updater(current),
+    updatedAt: Date.now(),
+  };
+  writeCampaignConfig(getCampaignDir(campaignId), next);
+
+  if (activeCampaign?.id === campaignId) {
+    activeCampaign = {
+      ...activeCampaign,
+      updatedAt: next.updatedAt ?? activeCampaign.updatedAt,
+      premise: next.premise,
+      seeds: next.seeds,
+      generationComplete: next.generationComplete,
+    };
+  }
+
+  return next;
 }
 
 export function listCampaigns(): CampaignMeta[] {
@@ -160,6 +190,7 @@ export async function createCampaign(
       ipContext: initialContext?.ipContext ?? undefined,
       premiseDivergence: initialContext?.premiseDivergence ?? undefined,
       worldbookSelection: initialContext?.worldbookSelection ?? undefined,
+      personaTemplates: [],
       generationComplete: false,
       createdAt: now,
       updatedAt: now,
@@ -306,8 +337,7 @@ export function markGenerationComplete(
 
 export function saveIpContext(campaignId: string, ipContext: IpResearchContext): void {
   assertSafeId(campaignId);
-  const config = readCampaignConfig(campaignId);
-  writeCampaignConfig(getCampaignDir(campaignId), { ...config, ipContext });
+  updateCampaignConfig(campaignId, (config) => ({ ...config, ipContext }));
   log.info(`Saved ipContext for "${ipContext.franchise}" (${ipContext.keyFacts.length} facts) to campaign ${campaignId}`);
 }
 
@@ -326,8 +356,7 @@ export function savePremiseDivergence(
   premiseDivergence: PremiseDivergence,
 ): void {
   assertSafeId(campaignId);
-  const config = readCampaignConfig(campaignId);
-  writeCampaignConfig(getCampaignDir(campaignId), { ...config, premiseDivergence });
+  updateCampaignConfig(campaignId, (config) => ({ ...config, premiseDivergence }));
   log.info(`Saved premiseDivergence (${premiseDivergence.mode}) to campaign ${campaignId}`);
 }
 
@@ -350,8 +379,28 @@ export function incrementTick(campaignId: string): number {
   const config = readCampaignConfig(campaignId);
   const prevTick = config.currentTick ?? 0;
   const nextTick = prevTick + 1;
-  const campaignDir = getCampaignDir(campaignId);
-  writeCampaignConfig(campaignDir, { ...config, currentTick: nextTick });
+  updateCampaignConfig(campaignId, (current) => ({ ...current, currentTick: nextTick }));
   log.info(`Tick incremented: ${prevTick} -> ${nextTick}`);
   return nextTick;
+}
+
+export function listPersonaTemplates(campaignId: string): PersonaTemplate[] {
+  return readCampaignConfig(campaignId).personaTemplates ?? [];
+}
+
+export function getPersonaTemplate(
+  campaignId: string,
+  templateId: string,
+): PersonaTemplate | null {
+  return listPersonaTemplates(campaignId).find((template) => template.id === templateId) ?? null;
+}
+
+export function savePersonaTemplates(
+  campaignId: string,
+  templates: PersonaTemplate[],
+): PersonaTemplate[] {
+  return updateCampaignConfig(campaignId, (config) => ({
+    ...config,
+    personaTemplates: templates,
+  })).personaTemplates ?? [];
 }

@@ -43,7 +43,7 @@ export function StringListEditor({
           key={`${item}-${i}`}
           className="flex items-start gap-1 text-sm text-foreground"
         >
-          <span className="mt-0.5 text-muted-foreground">-</span>
+          <span className="mt-0.5 font-mono text-[11px] text-zinc-500">&#x25BA;</span>
           <span className="flex-1">{item}</span>
           <button
             type="button"

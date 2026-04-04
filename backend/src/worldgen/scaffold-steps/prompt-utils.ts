@@ -193,6 +193,14 @@ WRITING RULES — violations will be rejected:
 `;
 }
 
+export function buildCharacterStartGuardrail(): string {
+  return `
+CHARACTER/START GUARDRAIL:
+- If this world detail implies protagonists, NPCs, or opening-state facts, reason about them through authored profile/social context/motivations and startConditions rather than legacy tag-only shorthand.
+- Any derived runtime tags are a compact compatibility view, not the source-of-truth character model.
+`.trim();
+}
+
 // ---------------------------------------------------------------------------
 // reportProgress — emit SSE progress event
 // ---------------------------------------------------------------------------

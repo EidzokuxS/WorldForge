@@ -2,13 +2,6 @@
 
 import type { Settings } from "@/lib/types";
 import type { SearchProvider } from "@worldforge/shared";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -31,16 +24,16 @@ export function ResearchTab({ settings, setSettings }: ResearchTabProps) {
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Research Agent</CardTitle>
-        <CardDescription>
+    <div className="rounded-lg border border-border/40 p-[clamp(16px,1.4vw,28px)]">
+      <div className="mb-[clamp(12px,1vw,20px)]">
+        <div className="text-[clamp(14px,1vw,18px)] font-semibold">Research Agent</div>
+        <div className="text-[clamp(11px,0.75vw,13px)] text-muted-foreground">
           Configure the AI research agent that gathers information about known
           IPs and settings before world generation.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex items-center justify-between rounded-lg border border-border p-3">
+        </div>
+      </div>
+      <div className="space-y-[clamp(8px,0.7vw,14px)]">
+        <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-medium">Enable research agent</p>
             <p className="text-xs text-muted-foreground">
@@ -178,7 +171,7 @@ export function ResearchTab({ settings, setSettings }: ResearchTabProps) {
             </p>
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

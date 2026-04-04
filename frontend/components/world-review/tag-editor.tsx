@@ -41,7 +41,7 @@ export function TagEditor({ tags, onChange, placeholder = "Add tag..." }: TagEdi
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {tags.map((tag, i) => (
-        <Badge key={`${tag}-${i}`} variant="secondary" className="gap-1 pr-1 text-xs">
+        <Badge key={`${tag}-${i}`} variant="secondary" className="gap-1 rounded-sm border border-zinc-700 bg-zinc-800 pr-1 font-mono text-[11px] text-zinc-300">
           {tag}
           <button
             type="button"
@@ -57,7 +57,7 @@ export function TagEditor({ tags, onChange, placeholder = "Add tag..." }: TagEdi
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
-        className="h-7 w-28 min-w-0 flex-shrink text-xs"
+        className="h-[22px] w-24 min-w-0 flex-shrink rounded-sm border-dashed px-1.5 font-mono text-[11px] text-zinc-400"
       />
     </div>
   );

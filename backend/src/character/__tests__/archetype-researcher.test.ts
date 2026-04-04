@@ -60,6 +60,13 @@ describe("researchArchetype", () => {
     });
 
     expect(result).toBe("Rangers are skilled trackers and survivalists.");
+    const prompt = (mockGenerateText.mock.calls[0]![0] as Record<string, unknown>)
+      .prompt as string;
+    expect(prompt).toContain("profile");
+    expect(prompt).toContain("motivations");
+    expect(prompt).toContain("capabilities");
+    expect(prompt).toContain("signature traits");
+    expect(prompt).not.toContain("3-5 paragraphs suitable for inspiring an original RPG character");
   });
 
   it("returns null when both MCP and LLM fallback fail", async () => {

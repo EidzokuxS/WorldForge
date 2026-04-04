@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockGenerateObject = vi.fn();
 
@@ -11,13 +11,19 @@ vi.mock("../../ai/index.js", () => ({
 }));
 
 import {
-  parseNpcDescription,
-  mapV2CardToNpc,
   generateNpcFromArchetype,
+  mapV2CardToNpc,
+  parseNpcDescription,
 } from "../npc-generator.js";
 
 const fakeRole = {
-  provider: { id: "test", name: "Test Provider", baseUrl: "https://example.com", apiKey: "sk-test", model: "gpt-4" },
+  provider: {
+    id: "test",
+    name: "Test Provider",
+    baseUrl: "https://example.com",
+    apiKey: "sk-test",
+    model: "gpt-4",
+  },
   temperature: 0.7,
   maxTokens: 2048,
 };
@@ -26,7 +32,10 @@ const fakeNpc = {
   name: "Grom",
   persona: "A gruff blacksmith with a secret past.",
   tags: ["Blacksmith", "Gruff", "Secretive"],
-  goals: { shortTerm: ["Forge a legendary blade"], longTerm: ["Avenge his family"] },
+  goals: {
+    shortTerm: ["Forge a legendary blade"],
+    longTerm: ["Avenge his family"],
+  },
   locationName: "Ironhaven",
   factionName: null,
 };
@@ -36,7 +45,7 @@ beforeEach(() => {
 });
 
 describe("parseNpcDescription", () => {
-  it("returns parsed NPC from generateObject", async () => {
+  it("returns a canonical npc draft and uses shared field-group wording", async () => {
     mockGenerateObject.mockResolvedValueOnce({ object: fakeNpc });
 
     const result = await parseNpcDescription({
@@ -47,37 +56,22 @@ describe("parseNpcDescription", () => {
       role: fakeRole,
     });
 
-    expect(result).toEqual(fakeNpc);
-    const prompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>).prompt as string;
-    expect(prompt).toContain("A gruff blacksmith.");
-    expect(prompt).toContain("Ironhaven");
+    expect(result.identity.role).toBe("npc");
+    expect(result.identity.displayName).toBe("Grom");
+    expect(result.profile.personaSummary).toContain("blacksmith");
+    expect(result.motivations.shortTermGoals).toEqual(["Forge a legendary blade"]);
+
+    const prompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>)
+      .prompt as string;
+    expect(prompt).toContain("identity, profile, socialContext, motivations, capabilities, state, loadout, startConditions, provenance");
+    expect(prompt).toContain("socialContext");
+    expect(prompt).toContain("motivations");
+    expect(prompt).not.toContain("persona/tags/goals/location/faction");
   });
 });
 
 describe("mapV2CardToNpc", () => {
-  it("converts V2 card to NPC format", async () => {
-    mockGenerateObject.mockResolvedValueOnce({ object: fakeNpc });
-
-    const result = await mapV2CardToNpc({
-      name: "Grom",
-      description: "A blacksmith.",
-      personality: "Gruff.",
-      scenario: "In a forge.",
-      v2Tags: ["male"],
-      importMode: "native",
-      premise: "Fantasy.",
-      locationNames: ["Ironhaven"],
-      factionNames: [],
-      role: fakeRole,
-    });
-
-    expect(result.name).toBe("Grom");
-    const prompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>).prompt as string;
-    expect(prompt).toContain("CHARACTER NAME: Grom");
-    expect(prompt).toContain("IMPORT MODE: native resident.");
-  });
-
-  it("normalizes noisy imported NPC tags", async () => {
+  it("keeps NPC import prompts on the shared contract and normalizes noisy tags", async () => {
     mockGenerateObject.mockResolvedValueOnce({
       object: {
         ...fakeNpc,
@@ -98,12 +92,22 @@ describe("mapV2CardToNpc", () => {
       role: fakeRole,
     });
 
-    expect(result.tags).toEqual(["Remote Researcher", "Pattern Analysis"]);
+    expect(result.capabilities.traits).toEqual([
+      "Remote Researcher",
+      "Pattern Analysis",
+    ]);
+
+    const prompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>)
+      .prompt as string;
+    expect(prompt).toContain("CHARACTER NAME: Grom");
+    expect(prompt).toContain("shared draft pipeline");
+    expect(prompt).toContain("socialContext");
+    expect(prompt).not.toContain("persona/tags/goals/location/faction");
   });
 });
 
 describe("generateNpcFromArchetype", () => {
-  it("includes research context in prompt", async () => {
+  it("keeps archetype-driven NPC prompts on the same shared contract", async () => {
     mockGenerateObject.mockResolvedValueOnce({ object: fakeNpc });
 
     await generateNpcFromArchetype({
@@ -115,23 +119,13 @@ describe("generateNpcFromArchetype", () => {
       researchContext: "Innkeepers hear all rumors.",
     });
 
-    const prompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>).prompt as string;
+    const prompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>)
+      .prompt as string;
     expect(prompt).toContain("ARCHETYPE RESEARCH:");
     expect(prompt).toContain("Innkeepers hear all rumors.");
-  });
-
-  it("omits research block when context is absent", async () => {
-    mockGenerateObject.mockResolvedValueOnce({ object: fakeNpc });
-
-    await generateNpcFromArchetype({
-      archetype: "Innkeeper",
-      premise: "A town.",
-      locationNames: ["Ironhaven"],
-      factionNames: [],
-      role: fakeRole,
-    });
-
-    const prompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>).prompt as string;
-    expect(prompt).not.toContain("ARCHETYPE RESEARCH:");
+    expect(prompt).toContain("profile");
+    expect(prompt).toContain("motivations");
+    expect(prompt).toContain("socialContext");
+    expect(prompt).not.toContain("persona/tags/goals/location/faction");
   });
 });

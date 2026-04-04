@@ -13,7 +13,12 @@ import { getDb } from "../db/index.js";
 import { npcs, players } from "../db/schema.js";
 import { executeToolCall } from "./tool-executor.js";
 import { createLogger } from "../lib/index.js";
-import { parseTags, parseBeliefs, parseNpcGoals } from "./parse-helpers.js";
+import {
+  hydrateStoredNpcRecord,
+  hydrateStoredPlayerRecord,
+  projectNpcRecord,
+  projectPlayerRecord,
+} from "../character/record-adapters.js";
 
 const log = createLogger("reflection-tools");
 
@@ -32,31 +37,65 @@ function resolveEntityForUpgrade(
   campaignId: string,
   entityName: string,
   entityType: EntityType,
-): { id: string; name: string; tags: string } | null {
+):
+  | { id: string; name: string; type: "player"; record: ReturnType<typeof hydrateStoredPlayerRecord> }
+  | { id: string; name: string; type: "npc"; record: ReturnType<typeof hydrateStoredNpcRecord> }
+  | null {
   const db = getDb();
-  const table = entityType === "player" ? players : npcs;
+
+  if (entityType === "player") {
+    const row = db
+      .select()
+      .from(players)
+      .where(
+        sql`${players.campaignId} = ${campaignId} AND LOWER(${players.name}) = LOWER(${entityName})`,
+      )
+      .get();
+
+    if (!row) return null;
+    return {
+      id: row.id,
+      name: row.name,
+      type: "player",
+      record: hydrateStoredPlayerRecord(row),
+    };
+  }
 
   const row = db
-    .select({ id: table.id, name: table.name, tags: table.tags })
-    .from(table)
+    .select()
+    .from(npcs)
     .where(
-      sql`${table.campaignId} = ${campaignId} AND LOWER(${table.name}) = LOWER(${entityName})`,
+      sql`${npcs.campaignId} = ${campaignId} AND LOWER(${npcs.name}) = LOWER(${entityName})`,
     )
     .get();
 
-  return row ?? null;
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    type: "npc",
+    record: hydrateStoredNpcRecord(row),
+  };
 }
 
-function updateEntityTags(
-  entityId: string,
-  entityType: EntityType,
-  tags: string[],
-): void {
+function persistResolvedEntity(
+  entity:
+    | { id: string; type: "player"; record: ReturnType<typeof hydrateStoredPlayerRecord> }
+    | { id: string; type: "npc"; record: ReturnType<typeof hydrateStoredNpcRecord> },
+) {
   const db = getDb();
-  const table = entityType === "player" ? players : npcs;
-  db.update(table)
-    .set({ tags: JSON.stringify(tags) })
-    .where(eq(table.id, entityId))
+
+  if (entity.type === "player") {
+    db.update(players)
+      .set(projectPlayerRecord(entity.record))
+      .where(eq(players.id, entity.id))
+      .run();
+    return;
+  }
+
+  db.update(npcs)
+    .set(projectNpcRecord(entity.record))
+    .where(eq(npcs.id, entity.id))
     .run();
 }
 
@@ -78,14 +117,15 @@ export function createReflectionTools(campaignId: string, npcId: string) {
         const db = getDb();
 
         const npc = db
-          .select({ beliefs: npcs.beliefs })
+          .select()
           .from(npcs)
           .where(eq(npcs.id, npcId))
           .get();
 
         if (!npc) return { error: "NPC not found" };
 
-        const beliefs = parseBeliefs(npc.beliefs);
+        const npcRecord = hydrateStoredNpcRecord(npc);
+        const beliefs = [...npcRecord.motivations.beliefs];
 
         // Append new belief (avoid duplicates)
         if (!beliefs.includes(belief)) {
@@ -98,7 +138,13 @@ export function createReflectionTools(campaignId: string, npcId: string) {
         }
 
         db.update(npcs)
-          .set({ beliefs: JSON.stringify(beliefs) })
+          .set(projectNpcRecord({
+            ...npcRecord,
+            motivations: {
+              ...npcRecord.motivations,
+              beliefs,
+            },
+          }))
           .where(eq(npcs.id, npcId))
           .run();
 
@@ -118,14 +164,18 @@ export function createReflectionTools(campaignId: string, npcId: string) {
         const db = getDb();
 
         const npc = db
-          .select({ goals: npcs.goals })
+          .select()
           .from(npcs)
           .where(eq(npcs.id, npcId))
           .get();
 
         if (!npc) return { error: "NPC not found" };
 
-        const goals = parseNpcGoals(npc.goals);
+        const npcRecord = hydrateStoredNpcRecord(npc);
+        const goals = {
+          short_term: [...npcRecord.motivations.shortTermGoals],
+          long_term: [...npcRecord.motivations.longTermGoals],
+        };
         const goalList = goals[priority];
 
         // Append if not duplicate
@@ -139,7 +189,14 @@ export function createReflectionTools(campaignId: string, npcId: string) {
         }
 
         db.update(npcs)
-          .set({ goals: JSON.stringify(goals) })
+          .set(projectNpcRecord({
+            ...npcRecord,
+            motivations: {
+              ...npcRecord.motivations,
+              shortTermGoals: goals.short_term,
+              longTermGoals: goals.long_term,
+            },
+          }))
           .where(eq(npcs.id, npcId))
           .run();
 
@@ -158,14 +215,18 @@ export function createReflectionTools(campaignId: string, npcId: string) {
         const db = getDb();
 
         const npc = db
-          .select({ goals: npcs.goals })
+          .select()
           .from(npcs)
           .where(eq(npcs.id, npcId))
           .get();
 
         if (!npc) return { error: "NPC not found" };
 
-        const goals = parseNpcGoals(npc.goals);
+        const npcRecord = hydrateStoredNpcRecord(npc);
+        const goals = {
+          short_term: [...npcRecord.motivations.shortTermGoals],
+          long_term: [...npcRecord.motivations.longTermGoals],
+        };
         const lowerGoal = goal.toLowerCase();
 
         // Remove from both arrays (case-insensitive)
@@ -177,7 +238,14 @@ export function createReflectionTools(campaignId: string, npcId: string) {
         );
 
         db.update(npcs)
-          .set({ goals: JSON.stringify(goals) })
+          .set(projectNpcRecord({
+            ...npcRecord,
+            motivations: {
+              ...npcRecord.motivations,
+              shortTermGoals: goals.short_term,
+              longTermGoals: goals.long_term,
+            },
+          }))
           .where(eq(npcs.id, npcId))
           .run();
 
@@ -236,10 +304,7 @@ export function createReflectionTools(campaignId: string, npcId: string) {
         const entity = resolveEntityForUpgrade(campaignId, entityName, entityType);
         if (!entity) return { error: `Entity not found: ${entityName} (${entityType})` };
 
-        const currentTags = parseTags(entity.tags);
-        const currentWealthTag = currentTags.find((t) =>
-          (WEALTH_TIERS as readonly string[]).includes(t),
-        );
+        const currentWealthTag = entity.record.capabilities.wealthTier;
 
         const newIndex = WEALTH_TIERS.indexOf(newTier);
 
@@ -248,10 +313,16 @@ export function createReflectionTools(campaignId: string, npcId: string) {
           if (newIndex > 1) {
             return { error: `No current wealth tier. Can only set Destitute or Poor as starting tier, not ${newTier}.` };
           }
-          currentTags.push(newTier);
-          updateEntityTags(entity.id, entityType, currentTags);
+          entity.record = {
+            ...entity.record,
+            capabilities: {
+              ...entity.record.capabilities,
+              wealthTier: newTier,
+            },
+          };
+          persistResolvedEntity(entity);
           log.info(`${entityName}: set initial wealth tier "${newTier}"`);
-          return { updated: true, tags: currentTags };
+          return { updated: true, tags: entity.record.capabilities.wealthTier ? [entity.record.capabilities.wealthTier] : [] };
         }
 
         const currentIndex = WEALTH_TIERS.indexOf(currentWealthTag as typeof WEALTH_TIERS[number]);
@@ -265,11 +336,16 @@ export function createReflectionTools(campaignId: string, npcId: string) {
         }
 
         // Replace old tier with new tier
-        const tagIndex = currentTags.indexOf(currentWealthTag);
-        currentTags[tagIndex] = newTier;
-        updateEntityTags(entity.id, entityType, currentTags);
+        entity.record = {
+          ...entity.record,
+          capabilities: {
+            ...entity.record.capabilities,
+            wealthTier: newTier,
+          },
+        };
+        persistResolvedEntity(entity);
         log.info(`${entityName}: wealth ${currentWealthTag} -> ${newTier}`);
-        return { updated: true, tags: currentTags };
+        return { updated: true, tags: [newTier] };
       },
     }),
 
@@ -286,30 +362,35 @@ export function createReflectionTools(campaignId: string, npcId: string) {
         const entity = resolveEntityForUpgrade(campaignId, entityName, entityType);
         if (!entity) return { error: `Entity not found: ${entityName} (${entityType})` };
 
-        const currentTags = parseTags(entity.tags);
-
-        // Find existing skill tag matching pattern "{Tier} {skillName}"
-        const existingSkillTag = currentTags.find((t) =>
-          SKILL_TIERS.some((tier) => t === `${tier} ${skillName}`),
+        const existingSkill = entity.record.capabilities.skills.find((entry) =>
+          entry.name.toLowerCase() === skillName.toLowerCase(),
         );
 
         const newIndex = SKILL_TIERS.indexOf(newTier);
 
-        if (!existingSkillTag) {
+        if (!existingSkill) {
           // No existing skill tag -- only allow Novice as starting tier
           if (newIndex !== 0) {
             return { error: `No existing ${skillName} skill. Can only set Novice as starting tier, not ${newTier}.` };
           }
-          currentTags.push(`${newTier} ${skillName}`);
-          updateEntityTags(entity.id, entityType, currentTags);
+          entity.record = {
+            ...entity.record,
+            capabilities: {
+              ...entity.record.capabilities,
+              skills: [
+                ...entity.record.capabilities.skills,
+                { name: skillName, tier: newTier },
+              ],
+            },
+          };
+          persistResolvedEntity(entity);
           log.info(`${entityName}: set initial skill "${newTier} ${skillName}"`);
-          return { updated: true, tags: currentTags };
+          return { updated: true, tags: [`${newTier} ${skillName}`] };
         }
 
-        // Extract current tier from existing tag
-        const currentTier = SKILL_TIERS.find((tier) => existingSkillTag === `${tier} ${skillName}`);
+        const currentTier = existingSkill.tier;
         if (!currentTier) {
-          return { error: `Could not parse current skill tier from tag: ${existingSkillTag}` };
+          return { error: `Could not parse current skill tier from record: ${skillName}` };
         }
 
         const currentIndex = SKILL_TIERS.indexOf(currentTier);
@@ -323,11 +404,20 @@ export function createReflectionTools(campaignId: string, npcId: string) {
         }
 
         // Replace old skill tag with new one
-        const tagIndex = currentTags.indexOf(existingSkillTag);
-        currentTags[tagIndex] = `${newTier} ${skillName}`;
-        updateEntityTags(entity.id, entityType, currentTags);
-        log.info(`${entityName}: skill ${existingSkillTag} -> ${newTier} ${skillName}`);
-        return { updated: true, tags: currentTags };
+        entity.record = {
+          ...entity.record,
+          capabilities: {
+            ...entity.record.capabilities,
+            skills: entity.record.capabilities.skills.map((entry) =>
+              entry.name.toLowerCase() === skillName.toLowerCase()
+                ? { ...entry, tier: newTier }
+                : entry,
+            ),
+          },
+        };
+        persistResolvedEntity(entity);
+        log.info(`${entityName}: skill ${currentTier} ${skillName} -> ${newTier} ${skillName}`);
+        return { updated: true, tags: [`${newTier} ${skillName}`] };
       },
     }),
   };

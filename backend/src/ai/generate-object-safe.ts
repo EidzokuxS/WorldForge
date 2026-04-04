@@ -113,6 +113,10 @@ function generateSchemaExample(schema: ZodType<any>, depth = 0): unknown {
   }
 
   if (schemaType === "ZodArray" || schemaType === "array") {
+    // Preserve array-level description as the example element so the LLM sees field guidance
+    if (desc) {
+      return [desc];
+    }
     // Zod 3: def.type is element schema; Zod 4: def.element is element schema, def.type is "array"
     const elementSchema = def.element ?? (typeof def.type === "object" ? def.type : undefined);
     if (elementSchema) {
@@ -140,9 +144,12 @@ function generateSchemaExample(schema: ZodType<any>, depth = 0): unknown {
   }
 
   if (schemaType === "ZodDefault" || schemaType === "default") {
+    // Return actual default value instead of unwrapping to inner type's example
+    const defaultVal = def.defaultValue?.();
+    if (defaultVal !== undefined) return defaultVal;
     const inner = def.innerType ?? (typeof def.type === "object" ? def.type : undefined);
     if (inner) return generateSchemaExample(inner, depth + 1);
-    return def.defaultValue?.() ?? null;
+    return null;
   }
 
   if (schemaType === "ZodUnion" || schemaType === "union") {

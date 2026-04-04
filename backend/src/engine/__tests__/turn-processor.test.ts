@@ -574,4 +574,168 @@ describe("processTurn", () => {
       data: fallbackResult,
     });
   });
+
+  it("derives Oracle actor tags from canonical player records instead of raw stored tags", async () => {
+    vi.mocked(safeGenerateObject).mockResolvedValue({
+      object: { isMovement: false, destination: null },
+    } as never);
+
+    const playerRow = {
+      id: "player-1",
+      name: "Hero",
+      hp: 4,
+      tags: '["legacy-only"]',
+      characterRecord: JSON.stringify({
+        identity: {
+          id: "player-1",
+          campaignId: CAMPAIGN_ID,
+          role: "player",
+          tier: "key",
+          displayName: "Hero",
+          canonicalStatus: "original",
+        },
+        profile: {
+          species: "Human",
+          gender: "",
+          ageText: "",
+          appearance: "",
+          backgroundSummary: "",
+          personaSummary: "",
+        },
+        socialContext: {
+          factionId: null,
+          factionName: null,
+          homeLocationId: null,
+          homeLocationName: null,
+          currentLocationId: "loc-1",
+          currentLocationName: "Town Square",
+          relationshipRefs: [],
+          socialStatus: ["Wanted"],
+          originMode: "resident",
+        },
+        motivations: {
+          shortTermGoals: [],
+          longTermGoals: [],
+          beliefs: [],
+          drives: ["Curious"],
+          frictions: [],
+        },
+        capabilities: {
+          traits: ["Brave"],
+          skills: [{ name: "Swordsman", tier: "Skilled" }],
+          flaws: [],
+          specialties: [],
+          wealthTier: "Poor",
+        },
+        state: {
+          hp: 4,
+          conditions: ["Wounded"],
+          statusFlags: [],
+          activityState: "active",
+        },
+        loadout: {
+          inventorySeed: [],
+          equippedItemRefs: [],
+          currencyNotes: "",
+          signatureItems: [],
+        },
+        startConditions: {},
+        provenance: {
+          sourceKind: "generator",
+          importMode: null,
+          templateId: null,
+          archetypePrompt: null,
+          worldgenOrigin: null,
+          legacyTags: ["legacy-only"],
+        },
+      }),
+      derivedTags: '["legacy-only"]',
+      currentLocationId: "loc-1",
+    };
+    const locationRow = {
+      id: "loc-1",
+      name: "Town Square",
+      description: "A busy square",
+      tags: '["urban"]',
+      connectedTo: "[]",
+    };
+
+    let lastFromTable: unknown = null;
+    const mockDb = {
+      select: vi.fn().mockReturnThis(),
+      from: vi.fn().mockImplementation((table: unknown) => {
+        lastFromTable = table;
+        return mockDb;
+      }),
+      where: vi.fn().mockImplementation(() => {
+        if (lastFromTable === (players as unknown)) {
+          return {
+            get: vi.fn().mockReturnValue(playerRow),
+            all: vi.fn().mockReturnValue([playerRow]),
+          };
+        }
+        if (lastFromTable === (locations as unknown)) {
+          return {
+            get: vi.fn().mockReturnValue(locationRow),
+            all: vi.fn().mockReturnValue([locationRow]),
+          };
+        }
+        return {
+          get: vi.fn().mockReturnValue(null),
+          all: vi.fn().mockReturnValue([]),
+        };
+      }),
+    };
+
+    (getDb as Mock).mockReturnValue(mockDb);
+    (callOracle as Mock).mockResolvedValue(mockOracleResult());
+    (assemblePrompt as Mock).mockResolvedValue(mockAssembledPrompt());
+    (getChatHistory as Mock).mockReturnValue([]);
+    (readCampaignConfig as Mock).mockReturnValue({ currentTick: 5 });
+    (incrementTick as Mock).mockReturnValue(6);
+    (createStorytellerTools as Mock).mockReturnValue({});
+    (streamText as Mock).mockReturnValue({
+      fullStream: createMockFullStream([{ type: "text-delta", text: "The goblin falls." }]),
+      text: Promise.resolve("The goblin falls."),
+    });
+
+    await collectEvents(processTurn(createTestOptions()));
+
+    expect(callOracle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorTags: [
+          "Brave",
+          "Skilled Swordsman",
+          "Poor",
+          "Wounded",
+          "Wanted",
+          "Curious",
+        ],
+      }),
+      expect.anything(),
+      null,
+    );
+  });
+
+  it("keeps narration directives outcome-specific instead of re-authoring generic tool policy", async () => {
+    setupMocks({
+      oracleResult: {
+        chance: 55,
+        roll: 42,
+        outcome: "weak_hit",
+        reasoning: "The action works, but the situation stays unstable.",
+      },
+    });
+
+    await collectEvents(processTurn(createTestOptions()));
+
+    const streamArgs = (streamText as Mock).mock.calls[0]![0] as {
+      system: string;
+    };
+
+    expect(streamArgs.system).toContain("[NARRATION DIRECTIVE]");
+    expect(streamArgs.system).toContain("The player SUCCEEDED WITH A COMPLICATION.");
+    expect(streamArgs.system).not.toContain("After narration, you MUST call offer_quick_actions");
+    expect(streamArgs.system).not.toContain("light hit = -1");
+  });
 });

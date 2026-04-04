@@ -47,6 +47,8 @@ export const players = sqliteTable(
     age: text("age").notNull().default(""),
     appearance: text("appearance").notNull().default(""),
     hp: integer("hp").notNull().default(5),
+    characterRecord: text("character_record").notNull().default("{}"),
+    derivedTags: text("derived_tags").notNull().default("[]"),
     tags: text("tags").notNull().default("[]"),
     equippedItems: text("equipped_items").notNull().default("[]"),
     currentLocationId: text("current_location_id").references(() => locations.id),
@@ -66,6 +68,8 @@ export const npcs = sqliteTable(
       .references(() => campaigns.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     persona: text("persona").notNull(),
+    characterRecord: text("character_record").notNull().default("{}"),
+    derivedTags: text("derived_tags").notNull().default("[]"),
     tags: text("tags").notNull().default("[]"),
     tier: text("tier", {
       enum: ["temporary", "persistent", "key"],

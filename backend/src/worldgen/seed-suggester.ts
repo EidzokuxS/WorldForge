@@ -7,6 +7,7 @@ import type { SeedCategory } from "./seed-roller.js";
 import type { IpResearchContext, PremiseDivergence } from "@worldforge/shared";
 import { interpretPremiseDivergence } from "./premise-divergence.js";
 import {
+  buildCharacterStartGuardrail,
   buildIpContextBlock,
   buildKnownIpGenerationContract,
   buildPremiseDivergenceBlock,
@@ -103,6 +104,7 @@ export async function suggestWorldSeeds(
     const ipBlock = buildIpContextBlock(ipContext);
     const divergenceBlock = buildPremiseDivergenceBlock(premiseDivergence);
     const knownIpContract = buildKnownIpGenerationContract(ipContext, premiseDivergence, `${label} DNA`);
+    const characterStartGuardrail = buildCharacterStartGuardrail();
 
     const accumulatedSection = accumulated.length > 0
       ? `\nALREADY ESTABLISHED DNA:\n${accumulated.join("\n")}\n\nYour ${label.toLowerCase()} MUST be consistent with the above. Do not contradict established DNA.`
@@ -115,6 +117,7 @@ export async function suggestWorldSeeds(
 ${ipInstruction}
 ${constraint ? `${constraint}\n` : ""}${ipBlock}
 ${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}
+${characterStartGuardrail}
 PREMISE: "${req.premise}"
 ${accumulatedSection}
 
@@ -186,10 +189,12 @@ export async function suggestSingleSeed(
     premiseDivergence,
     `${req.category} DNA`,
   );
+  const characterStartGuardrail = buildCharacterStartGuardrail();
 
   const prompt = `Define the ${req.category} (${categoryDescriptions[req.category]}) for a text RPG world.
 ${ipBlock}
 ${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}
+${characterStartGuardrail}
 PREMISE: "${req.premise}"
 
 OUTPUT: ${isCultural ? "An array of 2-3 specific cultural or thematic inspirations." : "A concrete 1-2 sentence description. Name specific places, systems, or conditions."}

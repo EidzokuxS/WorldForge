@@ -7,6 +7,7 @@
 
 import crypto from "node:crypto";
 import { eq, sql } from "drizzle-orm";
+import { CHARACTER_SKILL_TIERS, CHARACTER_WEALTH_TIERS, type CharacterRecord } from "@worldforge/shared";
 import { getDb } from "../db/index.js";
 import {
   players,
@@ -20,6 +21,14 @@ import {
 import { storeEpisodicEvent } from "../vectors/episodic-events.js";
 import { createLogger } from "../lib/index.js";
 import { parseTags } from "./parse-helpers.js";
+import {
+  createCharacterRecordFromDraft,
+  fromLegacyScaffoldNpc,
+  hydrateStoredNpcRecord,
+  hydrateStoredPlayerRecord,
+  projectNpcRecord,
+  projectPlayerRecord,
+} from "../character/record-adapters.js";
 
 const log = createLogger("tool-executor");
 
@@ -32,6 +41,7 @@ export interface ToolResult {
 }
 
 type EntityType = "player" | "npc" | "location" | "item" | "faction";
+type CharacterEntityType = "player" | "npc";
 
 const ENTITY_TYPE_TABLE_MAP = {
   player: players,
@@ -89,6 +99,199 @@ function resolveEntityIdByName(
   return null;
 }
 
+const CONDITION_TAGS = new Set([
+  "bleeding",
+  "burned",
+  "cursed",
+  "disguised",
+  "exhausted",
+  "hidden",
+  "injured",
+  "poisoned",
+  "prone",
+  "sick",
+  "starving",
+  "wounded",
+]);
+
+function pushUnique(list: string[], value: string) {
+  if (list.some((item) => item.toLowerCase() === value.toLowerCase())) {
+    return;
+  }
+  list.push(value);
+}
+
+function removeInsensitive(list: string[], value: string): string[] {
+  const lower = value.toLowerCase();
+  return list.filter((item) => item.toLowerCase() !== lower);
+}
+
+function parseSkillTag(tag: string): { name: string; tier: typeof CHARACTER_SKILL_TIERS[number] } | null {
+  for (const tier of CHARACTER_SKILL_TIERS) {
+    const prefix = `${tier} `;
+    if (tag.startsWith(prefix)) {
+      const name = tag.slice(prefix.length).trim();
+      if (name) {
+        return { name, tier };
+      }
+    }
+  }
+
+  return null;
+}
+
+function addCompatibilityTagToRecord(record: CharacterRecord, tag: string): CharacterRecord {
+  const trimmed = tag.trim();
+  if (!trimmed) return record;
+
+  if (CHARACTER_WEALTH_TIERS.includes(trimmed as typeof CHARACTER_WEALTH_TIERS[number])) {
+    return {
+      ...record,
+      capabilities: {
+        ...record.capabilities,
+        wealthTier: trimmed as typeof CHARACTER_WEALTH_TIERS[number],
+      },
+    };
+  }
+
+  const skill = parseSkillTag(trimmed);
+  if (skill) {
+    const nextSkills = record.capabilities.skills.filter(
+      (entry) => entry.name.toLowerCase() !== skill.name.toLowerCase(),
+    );
+    nextSkills.push(skill);
+    return {
+      ...record,
+      capabilities: {
+        ...record.capabilities,
+        skills: nextSkills,
+      },
+    };
+  }
+
+  if (CONDITION_TAGS.has(trimmed.toLowerCase())) {
+    const conditions = [...record.state.conditions];
+    pushUnique(conditions, trimmed);
+    return {
+      ...record,
+      state: {
+        ...record.state,
+        conditions,
+      },
+    };
+  }
+
+  const socialStatus = [...record.socialContext.socialStatus];
+  pushUnique(socialStatus, trimmed);
+  return {
+    ...record,
+    socialContext: {
+      ...record.socialContext,
+      socialStatus,
+    },
+  };
+}
+
+function removeCompatibilityTagFromRecord(record: CharacterRecord, tag: string): CharacterRecord {
+  const trimmed = tag.trim();
+  if (!trimmed) return record;
+
+  const skill = parseSkillTag(trimmed);
+  return {
+    ...record,
+    capabilities: {
+      ...record.capabilities,
+      wealthTier:
+        record.capabilities.wealthTier?.toLowerCase() === trimmed.toLowerCase()
+          ? null
+          : record.capabilities.wealthTier,
+      skills: skill
+        ? record.capabilities.skills.filter(
+            (entry) => entry.name.toLowerCase() !== skill.name.toLowerCase(),
+          )
+        : record.capabilities.skills,
+      traits: removeInsensitive(record.capabilities.traits, trimmed),
+      flaws: removeInsensitive(record.capabilities.flaws, trimmed),
+    },
+    state: {
+      ...record.state,
+      conditions: removeInsensitive(record.state.conditions, trimmed),
+      statusFlags: removeInsensitive(record.state.statusFlags, trimmed),
+    },
+    socialContext: {
+      ...record.socialContext,
+      socialStatus: removeInsensitive(record.socialContext.socialStatus, trimmed),
+    },
+    motivations: {
+      ...record.motivations,
+      drives: removeInsensitive(record.motivations.drives, trimmed),
+      frictions: removeInsensitive(record.motivations.frictions, trimmed),
+    },
+  };
+}
+
+function resolveCharacterRecordByName(
+  campaignId: string,
+  entityName: string,
+  entityType: CharacterEntityType,
+) {
+  const db = getDb();
+
+  if (entityType === "player") {
+    const row = db
+      .select()
+      .from(players)
+      .where(
+        sql`${players.campaignId} = ${campaignId} AND LOWER(${players.name}) = LOWER(${entityName})`
+      )
+      .get();
+
+    if (!row) return null;
+    return {
+      id: row.id,
+      name: row.name,
+      type: "player" as const,
+      record: hydrateStoredPlayerRecord(row),
+    };
+  }
+
+  const row = db
+    .select()
+    .from(npcs)
+    .where(
+      sql`${npcs.campaignId} = ${campaignId} AND LOWER(${npcs.name}) = LOWER(${entityName})`
+    )
+    .get();
+
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    type: "npc" as const,
+    record: hydrateStoredNpcRecord(row),
+  };
+}
+
+function persistCharacterRecord(
+  character: ReturnType<typeof resolveCharacterRecordByName>,
+) {
+  if (!character) return;
+
+  const db = getDb();
+  if (character.type === "player") {
+    db.update(players)
+      .set(projectPlayerRecord(character.record))
+      .where(eq(players.id, character.id))
+      .run();
+    return;
+  }
+
+  db.update(npcs)
+    .set(projectNpcRecord(character.record))
+    .where(eq(npcs.id, character.id))
+    .run();
+}
+
 // -- Character resolution helper (search players then npcs) -------------------
 
 function resolveCharacterByName(
@@ -136,6 +339,29 @@ function handleAddTag(
     return { success: false, error: `Invalid entity type: ${entityType}` };
   }
 
+  if (entityType === "player" || entityType === "npc") {
+    const character = resolveCharacterRecordByName(
+      campaignId,
+      entityName,
+      entityType,
+    );
+    if (!character) {
+      return { success: false, error: `Entity not found: ${entityName} (${entityType})` };
+    }
+
+    character.record = addCompatibilityTagToRecord(character.record, tag);
+    persistCharacterRecord(character);
+    const tags =
+      character.type === "player"
+        ? JSON.parse(projectPlayerRecord(character.record).tags) as string[]
+        : JSON.parse(projectNpcRecord(character.record).tags) as string[];
+
+    return {
+      success: true,
+      result: { entity: character.name, tags },
+    };
+  }
+
   const entity = resolveEntity(campaignId, entityName, entityType as EntityType);
   if (!entity) {
     return { success: false, error: `Entity not found: ${entityName} (${entityType})` };
@@ -171,6 +397,35 @@ function handleRemoveTag(
 
   if (!(entityType in ENTITY_TYPE_TABLE_MAP)) {
     return { success: false, error: `Invalid entity type: ${entityType}` };
+  }
+
+  if (entityType === "player" || entityType === "npc") {
+    const character = resolveCharacterRecordByName(
+      campaignId,
+      entityName,
+      entityType,
+    );
+    if (!character) {
+      return { success: false, error: `Entity not found: ${entityName} (${entityType})` };
+    }
+
+    const before = JSON.stringify(character.record);
+    character.record = removeCompatibilityTagFromRecord(character.record, tag);
+
+    if (before === JSON.stringify(character.record)) {
+      return { success: false, error: `Tag not found: "${tag}" on ${entityName}` };
+    }
+
+    persistCharacterRecord(character);
+    const tags =
+      character.type === "player"
+        ? JSON.parse(projectPlayerRecord(character.record).tags) as string[]
+        : JSON.parse(projectNpcRecord(character.record).tags) as string[];
+
+    return {
+      success: true,
+      result: { entity: character.name, tags },
+    };
   }
 
   const entity = resolveEntity(campaignId, entityName, entityType as EntityType);
@@ -325,18 +580,40 @@ function handleSpawnNpc(
   }
 
   const id = crypto.randomUUID();
+  const draft = fromLegacyScaffoldNpc(
+    {
+      name,
+      persona: tags.join(", "),
+      tags,
+      goals: { shortTerm: [], longTerm: [] },
+      locationName,
+      factionName: null,
+      tier: "supporting",
+    },
+    { currentLocationName: location.name, sourceKind: "generator" },
+  );
+  const record = createCharacterRecordFromDraft(
+    {
+      ...draft,
+      identity: {
+        ...draft.identity,
+        tier: "temporary",
+      },
+      socialContext: {
+        ...draft.socialContext,
+        currentLocationId: location.id,
+        currentLocationName: location.name,
+      },
+    },
+    { id, campaignId },
+  );
+  const npcProjection = projectNpcRecord(record);
   const db = getDb();
   db.insert(npcs)
     .values({
       id,
       campaignId,
-      name,
-      persona: tags.join(", "),
-      tags: JSON.stringify(tags),
-      tier: "temporary",
-      currentLocationId: location.id,
-      goals: '{"short_term":[],"long_term":[]}',
-      beliefs: "[]",
+      ...npcProjection,
       unprocessedImportance: 0,
       inactiveTicks: 0,
       createdAt: Date.now(),
@@ -529,8 +806,19 @@ function handleMoveTo(
   }
 
   // Move player
+  const updatedPlayer = hydrateStoredPlayerRecord(player, {
+    currentLocationName: destination.name,
+  });
+
   db.update(players)
-    .set({ currentLocationId: destination.id })
+    .set(projectPlayerRecord({
+      ...updatedPlayer,
+      socialContext: {
+        ...updatedPlayer.socialContext,
+        currentLocationId: destination.id,
+        currentLocationName: destination.name,
+      },
+    }))
     .where(eq(players.id, player.id))
     .run();
 
@@ -583,8 +871,25 @@ function handleSetCondition(
   }
 
   const db = getDb();
+  const player = db
+    .select()
+    .from(players)
+    .where(eq(players.id, character.id))
+    .get();
+
+  if (!player) {
+    return { success: false, error: `Character not found: ${targetName}` };
+  }
+
+  const updatedPlayer = hydrateStoredPlayerRecord(player);
   db.update(players)
-    .set({ hp: newHp })
+    .set(projectPlayerRecord({
+      ...updatedPlayer,
+      state: {
+        ...updatedPlayer.state,
+        hp: newHp,
+      },
+    }))
     .where(eq(players.id, character.id))
     .run();
 

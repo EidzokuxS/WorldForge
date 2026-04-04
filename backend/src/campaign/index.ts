@@ -11,6 +11,9 @@ export {
   loadPremiseDivergence,
   getActiveCampaign,
   incrementTick,
+  listPersonaTemplates,
+  getPersonaTemplate,
+  savePersonaTemplates,
 } from "./manager.js";
 export type { CampaignMeta } from "./manager.js";
 

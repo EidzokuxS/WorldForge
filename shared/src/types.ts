@@ -148,6 +148,213 @@ export interface CampaignMeta {
   generationComplete?: boolean;
 }
 
+export const CHARACTER_WEALTH_TIERS = [
+  "Destitute",
+  "Poor",
+  "Comfortable",
+  "Wealthy",
+  "Obscenely Rich",
+] as const;
+
+export const CHARACTER_SKILL_TIERS = ["Novice", "Skilled", "Master"] as const;
+
+export type CharacterRole = "player" | "npc";
+
+export type CharacterTier = "temporary" | "supporting" | "persistent" | "key";
+
+export type CharacterCanonicalStatus =
+  | "original"
+  | "imported"
+  | "known_ip_canonical"
+  | "known_ip_diverged";
+
+export type CharacterSourceKind =
+  | "player-input"
+  | "generator"
+  | "archetype"
+  | "import"
+  | "worldgen"
+  | "runtime"
+  | "migration";
+
+export type CharacterWealthTier = (typeof CHARACTER_WEALTH_TIERS)[number];
+
+export type CharacterSkillTier = (typeof CHARACTER_SKILL_TIERS)[number];
+
+export interface CharacterIdentityDraft {
+  role: CharacterRole;
+  tier: CharacterTier;
+  displayName: string;
+  canonicalStatus: CharacterCanonicalStatus;
+}
+
+export interface CharacterIdentity extends CharacterIdentityDraft {
+  id: string;
+  campaignId: string;
+}
+
+export interface CharacterProfile {
+  species: string;
+  gender: string;
+  ageText: string;
+  appearance: string;
+  backgroundSummary: string;
+  personaSummary: string;
+}
+
+export interface CharacterRelationshipRef {
+  entityId: string | null;
+  entityName: string;
+  type: string;
+  reason: string;
+}
+
+export interface CharacterSocialContext {
+  factionId: string | null;
+  factionName: string | null;
+  homeLocationId: string | null;
+  homeLocationName: string | null;
+  currentLocationId: string | null;
+  currentLocationName: string | null;
+  relationshipRefs: CharacterRelationshipRef[];
+  socialStatus: string[];
+  originMode: CharacterImportMode | "resident" | "unknown" | null;
+}
+
+export interface CharacterMotivations {
+  shortTermGoals: string[];
+  longTermGoals: string[];
+  beliefs: string[];
+  drives: string[];
+  frictions: string[];
+}
+
+export interface CharacterSkill {
+  name: string;
+  tier: CharacterSkillTier | null;
+}
+
+export interface CharacterCapabilities {
+  traits: string[];
+  skills: CharacterSkill[];
+  flaws: string[];
+  specialties: string[];
+  wealthTier: CharacterWealthTier | null;
+}
+
+export interface CharacterState {
+  hp: number;
+  conditions: string[];
+  statusFlags: string[];
+  activityState: string;
+}
+
+export interface CharacterLoadout {
+  inventorySeed: string[];
+  equippedItemRefs: string[];
+  currencyNotes: string;
+  signatureItems: string[];
+}
+
+export interface CharacterStartConditions {
+  startLocationId?: string | null;
+  arrivalMode?: string | null;
+  immediateSituation?: string | null;
+  entryPressure?: string[];
+  companions?: string[];
+  startingVisibility?: string | null;
+  resolvedNarrative?: string | null;
+  sourcePrompt?: string | null;
+}
+
+export interface ResolvedStartConditions {
+  locationId: string;
+  locationName: string;
+  startConditions: CharacterStartConditions;
+  /** Legacy alias kept during the Phase 30 migration. */
+  narrative: string | null;
+}
+
+export interface CharacterProvenance {
+  sourceKind: CharacterSourceKind;
+  importMode: CharacterImportMode | null;
+  templateId: string | null;
+  archetypePrompt: string | null;
+  worldgenOrigin: string | null;
+  legacyTags: string[];
+}
+
+export interface CharacterDraft {
+  identity: CharacterIdentityDraft;
+  profile: CharacterProfile;
+  socialContext: CharacterSocialContext;
+  motivations: CharacterMotivations;
+  capabilities: CharacterCapabilities;
+  state: CharacterState;
+  loadout: CharacterLoadout;
+  startConditions: CharacterStartConditions;
+  provenance: CharacterProvenance;
+}
+
+export interface CharacterRecord {
+  identity: CharacterIdentity;
+  profile: CharacterProfile;
+  socialContext: CharacterSocialContext;
+  motivations: CharacterMotivations;
+  capabilities: CharacterCapabilities;
+  state: CharacterState;
+  loadout: CharacterLoadout;
+  startConditions: CharacterStartConditions;
+  provenance: CharacterProvenance;
+}
+
+export interface CharacterDraftPatch {
+  profile?: Partial<CharacterProfile>;
+  socialContext?: Partial<CharacterSocialContext>;
+  motivations?: Partial<CharacterMotivations>;
+  capabilities?: Partial<CharacterCapabilities>;
+  state?: Partial<CharacterState>;
+  loadout?: Partial<CharacterLoadout>;
+  startConditions?: Partial<CharacterStartConditions>;
+  provenance?: Partial<
+    Pick<CharacterProvenance, "templateId" | "archetypePrompt" | "worldgenOrigin">
+  >;
+}
+
+export type PersonaTemplateRoleScope = "player" | "npc" | "any";
+
+export interface PersonaTemplateSummary {
+  id: string;
+  campaignId: string;
+  name: string;
+  description: string;
+  roleScope: PersonaTemplateRoleScope;
+  tags: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface PersonaTemplate extends PersonaTemplateSummary {
+  patch: CharacterDraftPatch;
+}
+
+export type CanonicalLoadoutSlot = "equipped" | "pack" | "signature";
+
+export interface CanonicalLoadoutItemSpec {
+  name: string;
+  slot: CanonicalLoadoutSlot;
+  tags: string[];
+  quantity: number;
+  reason: string;
+}
+
+export interface CanonicalLoadoutPreview {
+  loadout: CharacterLoadout;
+  items: CanonicalLoadoutItemSpec[];
+  audit: string[];
+  warnings: string[];
+}
+
 export interface PlayerCharacter {
   name: string;
   race: string;

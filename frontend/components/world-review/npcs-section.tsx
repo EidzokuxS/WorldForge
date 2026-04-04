@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Plus, Trash2, FileText, Upload, Sparkles, Loader2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -22,12 +21,14 @@ import { parseV2CardFile } from "@/lib/v2-card-parser";
 import { parseCharacter, importV2Card, researchCharacter } from "@/lib/api";
 import type { CharacterImportMode } from "@/lib/types";
 import type { ScaffoldNpc } from "@/lib/api";
+import type { PersonaTemplateSummary } from "@/lib/api-types";
 
 interface NpcsSectionProps {
   npcs: ScaffoldNpc[];
   campaignId: string;
   locationNames: string[];
   factionNames: string[];
+  personaTemplates?: PersonaTemplateSummary[];
   onChange: (npcs: ScaffoldNpc[]) => void;
   onRegenerate: (instruction: string | undefined) => void;
   regenerating: boolean;
@@ -48,6 +49,7 @@ export function NpcsSection({
   campaignId,
   locationNames,
   factionNames,
+  personaTemplates = [],
   onChange,
   onRegenerate,
   regenerating,
@@ -57,6 +59,7 @@ export function NpcsSection({
   const [descriptionText, setDescriptionText] = useState("");
   const [archetypeText, setArchetypeText] = useState("");
   const [importMode, setImportMode] = useState<CharacterImportMode>("native");
+  const [expandedPersonas, setExpandedPersonas] = useState<Set<number>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Assign stable UIDs to any NPCs missing them (e.g., from initial load or regeneration)
@@ -76,6 +79,18 @@ export function NpcsSection({
       if (name) seen.add(name);
     }
   }
+
+  const togglePersona = useCallback((index: number) => {
+    setExpandedPersonas((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
+  }, []);
 
   const updateNpc = useCallback(
     (index: number, patch: Partial<ScaffoldNpc>) => {
@@ -211,20 +226,26 @@ export function NpcsSection({
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {npcs.map((npc, index) => (
-          <Card key={npc._uid ?? `npc-fallback-${index}`} className="relative border-border/50 bg-card">
+          <div
+            key={npc._uid ?? `npc-fallback-${index}`}
+            className="group relative flex flex-col overflow-hidden border border-border/30 rounded-lg bg-zinc-900/40 p-[clamp(16px,1.4vw,28px)] before:pointer-events-none before:absolute before:left-0 before:top-0 before:h-24 before:w-24 before:rounded-br-full before:bg-[radial-gradient(ellipse_at_top_left,rgba(230,62,0,0.12)_0%,transparent_70%)]"
+          >
+            {/* Delete button — hidden until hover */}
             <button
               type="button"
               onClick={() => deleteNpc(index)}
-              className="absolute right-3 top-3 rounded p-1 text-muted-foreground hover:bg-destructive/20 hover:text-destructive"
+              className="absolute right-3 top-3 hidden rounded p-1 text-zinc-600 group-hover:block hover:text-red-400"
             >
               <Trash2 className="h-4 w-4" />
             </button>
-            <CardHeader className="pb-2 pr-10">
+
+            {/* NPC Name */}
+            <div>
               <Input
                 value={npc.name}
                 onChange={(e) => updateNpc(index, { name: e.target.value })}
-                placeholder="NPC name"
-                className="font-serif text-lg font-bold"
+                placeholder="NPC NAME"
+                className="!border-0 !bg-transparent !shadow-none px-2 font-mono text-[clamp(13px,0.9vw,16px)] uppercase tracking-widest text-zinc-100 focus-visible:!ring-0"
               />
               {npc.name.trim() && duplicateNames.has(npc.name.trim().toLowerCase()) && (
                 <p className="mt-1 flex items-center gap-1 text-xs text-yellow-500">
@@ -232,116 +253,138 @@ export function NpcsSection({
                   Duplicate name
                 </p>
               )}
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div>
-                <Label className="text-xs text-muted-foreground">Persona</Label>
-                <Textarea
-                  value={npc.persona}
-                  onChange={(e) =>
-                    updateNpc(index, { persona: e.target.value })
-                  }
-                  rows={2}
-                  className="mt-1 resize-none text-sm"
-                  placeholder="Personality and background..."
+            </div>
+
+            {/* Persona */}
+            <div className="border-t border-white/[0.06] py-[clamp(8px,0.6vw,14px)]">
+              <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-zinc-500">
+                PERSONA
+              </span>
+              <Textarea
+                value={npc.persona}
+                onChange={(e) =>
+                  updateNpc(index, { persona: e.target.value })
+                }
+                rows={expandedPersonas.has(index) ? 8 : 3}
+                className={`mt-1 resize-none text-sm ${!expandedPersonas.has(index) ? "overflow-hidden" : ""}`}
+                placeholder="Personality and background..."
+              />
+              <button
+                type="button"
+                onClick={() => togglePersona(index)}
+                className="mt-1 cursor-pointer font-mono text-[10px] text-zinc-500 hover:text-zinc-300"
+              >
+                {expandedPersonas.has(index) ? "\u25BE less" : "\u25B8 more"}
+              </button>
+            </div>
+
+            {/* Tags */}
+            <div className="border-t border-white/[0.06] py-[clamp(8px,0.6vw,14px)]">
+              <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-zinc-500">
+                TAGS
+              </span>
+              <div className="mt-1">
+                <TagEditor
+                  tags={npc.tags}
+                  onChange={(tags) => updateNpc(index, { tags })}
                 />
               </div>
+            </div>
 
-              <div>
-                <Label className="text-xs text-muted-foreground">Tags</Label>
-                <div className="mt-1">
-                  <TagEditor
-                    tags={npc.tags}
-                    onChange={(tags) => updateNpc(index, { tags })}
-                  />
-                </div>
-              </div>
+            {/* Objectives */}
+            <div className="border-t border-white/[0.06] py-[clamp(8px,0.6vw,14px)]">
+              <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-zinc-500">
+                OBJECTIVES
+              </span>
 
-              <div>
-                <Label className="text-xs text-muted-foreground">
-                  Short-term Goals
-                </Label>
-                <div className="mt-1">
-                  <StringListEditor
-                    items={npc.goals.shortTerm}
-                    onChange={(shortTerm) =>
-                      updateNpc(index, {
-                        goals: { ...npc.goals, shortTerm },
-                      })
-                    }
-                    placeholder="Add short-term goal..."
-                  />
-                </div>
-              </div>
-
-              <div>
-                <Label className="text-xs text-muted-foreground">
-                  Long-term Goals
-                </Label>
-                <div className="mt-1">
-                  <StringListEditor
-                    items={npc.goals.longTerm}
-                    onChange={(longTerm) =>
-                      updateNpc(index, {
-                        goals: { ...npc.goals, longTerm },
-                      })
-                    }
-                    placeholder="Add long-term goal..."
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
+              <div className="mt-2 space-y-2">
                 <div>
-                  <Label className="text-xs text-muted-foreground">
-                    Location
-                  </Label>
-                  <Select
-                    value={npc.locationName}
-                    onValueChange={(v: string) =>
-                      updateNpc(index, { locationName: v })
-                    }
-                  >
-                    <SelectTrigger className="mt-1 h-8 text-xs">
-                      <SelectValue placeholder="Select location" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {locationNames.map((name) => (
-                        <SelectItem key={name} value={name}>
-                          {name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-zinc-500">
+                    SHORT-TERM
+                  </span>
+                  <div className="mt-1">
+                    <StringListEditor
+                      items={npc.goals.shortTerm}
+                      onChange={(shortTerm) =>
+                        updateNpc(index, {
+                          goals: { ...npc.goals, shortTerm },
+                        })
+                      }
+                      placeholder="Add short-term goal..."
+                    />
+                  </div>
                 </div>
+
                 <div>
-                  <Label className="text-xs text-muted-foreground">
-                    Faction
-                  </Label>
-                  <Select
-                    value={npc.factionName ?? NONE_VALUE}
-                    onValueChange={(v: string) =>
-                      updateNpc(index, {
-                        factionName: v === NONE_VALUE ? null : v,
-                      })
-                    }
-                  >
-                    <SelectTrigger className="mt-1 h-8 text-xs">
-                      <SelectValue placeholder="Select faction" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NONE_VALUE}>None</SelectItem>
-                      {factionNames.map((name) => (
-                        <SelectItem key={name} value={name}>
-                          {name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-zinc-500">
+                    LONG-TERM
+                  </span>
+                  <div className="mt-1">
+                    <StringListEditor
+                      items={npc.goals.longTerm}
+                      onChange={(longTerm) =>
+                        updateNpc(index, {
+                          goals: { ...npc.goals, longTerm },
+                        })
+                      }
+                      placeholder="Add long-term goal..."
+                    />
+                  </div>
                 </div>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+
+            {/* Location / Faction footer */}
+            <div className="mt-auto grid grid-cols-2 gap-4 border-t border-white/[0.06] pt-[clamp(8px,0.6vw,14px)]">
+              <div className="flex items-center gap-2">
+                <span className="shrink-0 font-mono text-[10px] uppercase text-zinc-500">
+                  Location
+                </span>
+                <Select
+                  value={npc.locationName}
+                  onValueChange={(v: string) =>
+                    updateNpc(index, { locationName: v })
+                  }
+                >
+                  <SelectTrigger className="h-7 flex-1 border-none bg-transparent text-[12px]">
+                    <SelectValue placeholder="Select location" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {locationNames.map((name) => (
+                      <SelectItem key={name} value={name}>
+                        {name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="shrink-0 font-mono text-[10px] uppercase text-zinc-500">
+                  Faction
+                </span>
+                <Select
+                  value={npc.factionName ?? NONE_VALUE}
+                  onValueChange={(v: string) =>
+                    updateNpc(index, {
+                      factionName: v === NONE_VALUE ? null : v,
+                    })
+                  }
+                >
+                  <SelectTrigger className="h-7 flex-1 border-none bg-transparent text-[12px]">
+                    <SelectValue placeholder="Select faction" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE_VALUE}>None</SelectItem>
+                    {factionNames.map((name) => (
+                      <SelectItem key={name} value={name}>
+                        {name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
         ))}
       </div>
 

@@ -2,13 +2,6 @@ import { Loader2, Play } from "lucide-react";
 import { clamp } from "@/lib/clamp";
 import type { Provider, RoleConfig } from "@/lib/types";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -52,11 +45,11 @@ export function RoleConfigCard({
   onTestRole,
 }: RoleConfigCardProps) {
   return (
-    <Card>
-      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div className="rounded-lg border border-border/40 p-[clamp(16px,1.4vw,28px)]">
+      <div className="mb-[clamp(12px,1vw,20px)] flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <CardTitle>{title}</CardTitle>
-          <CardDescription>{description}</CardDescription>
+          <div className="text-[clamp(14px,1vw,18px)] font-semibold">{title}</div>
+          <div className="text-[clamp(11px,0.75vw,13px)] text-muted-foreground">{description}</div>
         </div>
         <Button
           variant="secondary"
@@ -70,8 +63,8 @@ export function RoleConfigCard({
           )}
           {isTesting ? "Testing..." : "Test Role"}
         </Button>
-      </CardHeader>
-      <CardContent className="grid gap-4 md:grid-cols-2">
+      </div>
+      <div className="grid gap-[clamp(12px,1vw,20px)] md:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor={`${roleName}-provider`}>Provider</Label>
           <Select
@@ -150,7 +143,7 @@ export function RoleConfigCard({
             </div>
           </>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

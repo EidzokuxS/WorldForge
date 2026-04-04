@@ -36,10 +36,14 @@ export function parseNpcGoals(raw: string): NpcGoals {
       return {
         short_term: Array.isArray(obj.short_term)
           ? obj.short_term.filter((g): g is string => typeof g === "string")
-          : [],
+          : Array.isArray(obj.shortTerm)
+            ? obj.shortTerm.filter((g): g is string => typeof g === "string")
+            : [],
         long_term: Array.isArray(obj.long_term)
           ? obj.long_term.filter((g): g is string => typeof g === "string")
-          : [],
+          : Array.isArray(obj.longTerm)
+            ? obj.longTerm.filter((g): g is string => typeof g === "string")
+            : [],
       };
     }
   } catch { /* ignore */ }

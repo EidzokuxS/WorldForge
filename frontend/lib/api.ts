@@ -9,6 +9,7 @@ import type {
   WorldSeeds,
 } from "@/lib/types";
 import type {
+  ApplyPersonaTemplateResult,
   TestConnectionRequest,
   TestConnectionResult,
   TestRoleResult,
@@ -28,9 +29,21 @@ import type {
   CharacterResult,
   CheckpointMeta,
   ClassifiedWorldBookEntry,
+  LoadoutPreviewResult,
+  PersonaTemplateListResult,
+  PersonaTemplateRecord,
+  ResolveStartConditionsResult,
   WorldBookImportResult,
   WorldbookLibraryItem,
 } from "./api-types";
+import type { CharacterDraft, CharacterRecord } from "@worldforge/shared";
+import {
+  characterDraftToParsedCharacter,
+  characterDraftToScaffoldNpc,
+  characterRecordToDraft,
+  parsedCharacterToDraft,
+  scaffoldNpcToDraft,
+} from "./character-drafts";
 
 // Re-export all types so existing `import type { X } from "@/lib/api"` keeps working.
 export type {
@@ -51,8 +64,13 @@ export type {
   RegenerateSectionRequest,
   ParsedCharacter,
   CharacterResult,
+  ApplyPersonaTemplateResult,
   CheckpointMeta,
   ClassifiedWorldBookEntry,
+  LoadoutPreviewResult,
+  PersonaTemplateListResult,
+  PersonaTemplateRecord,
+  ResolveStartConditionsResult,
   WorldBookImportResult,
   WorldbookLibraryItem,
 };
@@ -82,6 +100,9 @@ interface RawWorldData {
     currentLocationId: string | null;
     goals: string;
     beliefs: string;
+    characterRecord?: CharacterRecord | null;
+    draft?: CharacterDraft | null;
+    npc?: ScaffoldNpc | null;
   }>;
   factions: Array<{
     id: string;
@@ -118,7 +139,20 @@ interface RawWorldData {
     tags: string;
     equippedItems: string;
     currentLocationId: string | null;
+    characterRecord?: CharacterRecord | null;
+    draft?: CharacterDraft | null;
+    character?: ParsedCharacter | null;
   } | null;
+  personaTemplates?: Array<{
+    id: string;
+    campaignId: string;
+    name: string;
+    description: string;
+    roleScope: "player" | "npc" | "any";
+    tags: string[];
+    createdAt: number;
+    updatedAt: number;
+  }>;
 }
 
 // ───── Helpers ─────
@@ -152,6 +186,24 @@ function parseNpcGoals(value: string): { short_term: string[]; long_term: string
   }
 }
 
+function normalizeCharacterResult(raw: CharacterResult | ({ role: "player"; draft?: CharacterDraft; character?: ParsedCharacter } | { role: "key"; draft?: CharacterDraft; npc?: ScaffoldNpc })) : CharacterResult {
+  if (raw.role === "player") {
+    const draft = raw.draft ?? raw.character?.draft ?? parsedCharacterToDraft(raw.character as ParsedCharacter);
+    return {
+      role: "player",
+      draft,
+      character: raw.character ?? characterDraftToParsedCharacter(draft),
+    };
+  }
+
+  const draft = raw.draft ?? raw.npc?.draft ?? scaffoldNpcToDraft(raw.npc as ScaffoldNpc);
+  return {
+    role: "key",
+    draft,
+    npc: raw.npc ?? characterDraftToScaffoldNpc(draft),
+  };
+}
+
 function parseWorldData(raw: RawWorldData): WorldData {
   return {
     locations: raw.locations.map((loc) => ({
@@ -164,6 +216,9 @@ function parseWorldData(raw: RawWorldData): WorldData {
       tags: parseJsonArray(npc.tags),
       goals: parseNpcGoals(npc.goals),
       beliefs: parseJsonArray(npc.beliefs),
+      characterRecord: npc.characterRecord ?? null,
+      draft: npc.draft ?? (npc.characterRecord ? characterRecordToDraft(npc.characterRecord) : npc.npc?.draft ?? null),
+      npc: npc.npc ?? (npc.draft ? characterDraftToScaffoldNpc(npc.draft) : npc.characterRecord ? characterDraftToScaffoldNpc(characterRecordToDraft(npc.characterRecord)) : null),
     })),
     factions: raw.factions.map((fac) => ({
       ...fac,
@@ -184,8 +239,12 @@ function parseWorldData(raw: RawWorldData): WorldData {
           ...raw.player,
           tags: parseJsonArray(raw.player.tags),
           equippedItems: parseJsonArray(raw.player.equippedItems),
+          characterRecord: raw.player.characterRecord ?? null,
+          draft: raw.player.draft ?? (raw.player.characterRecord ? characterRecordToDraft(raw.player.characterRecord) : raw.player.character?.draft ?? null),
+          character: raw.player.character ?? (raw.player.draft ? characterDraftToParsedCharacter(raw.player.draft) : raw.player.characterRecord ? characterDraftToParsedCharacter(characterRecordToDraft(raw.player.characterRecord)) : null),
         }
       : null,
+    personaTemplates: raw.personaTemplates ?? [],
   };
 }
 
@@ -628,11 +687,11 @@ export function saveWorldEdits(campaignId: string, scaffold: EditableScaffold): 
 
 export function saveCharacter(
   campaignId: string,
-  character: ParsedCharacter
+  character: ParsedCharacter | CharacterDraft
 ): Promise<{ ok: boolean; playerId: string }> {
   return apiPost<{ ok: boolean; playerId: string }>(
     "/api/worldgen/save-character",
-    { campaignId, character }
+    { campaignId, draft: "identity" in character ? character : parsedCharacterToDraft(character) }
   );
 }
 
@@ -645,7 +704,7 @@ export function parseCharacter(
 ): Promise<CharacterResult> {
   return apiPost<CharacterResult>("/api/worldgen/parse-character", {
     campaignId, concept, role, locationNames, factionNames,
-  });
+  }).then(normalizeCharacterResult);
 }
 
 export function generateCharacter(
@@ -656,7 +715,7 @@ export function generateCharacter(
 ): Promise<CharacterResult> {
   return apiPost<CharacterResult>("/api/worldgen/generate-character", {
     campaignId, role, locationNames, factionNames,
-  });
+  }).then(normalizeCharacterResult);
 }
 
 export function researchCharacter(
@@ -668,7 +727,7 @@ export function researchCharacter(
 ): Promise<CharacterResult> {
   return apiPost<CharacterResult>("/api/worldgen/research-character", {
     campaignId, archetype, role, locationNames, factionNames,
-  });
+  }).then(normalizeCharacterResult);
 }
 
 export function importV2Card(
@@ -689,14 +748,71 @@ export function importV2Card(
     importMode: options?.importMode ?? "native",
     locationNames: options?.locationNames,
     factionNames: options?.factionNames,
-  });
+  }).then(normalizeCharacterResult);
 }
 
 export function resolveStartingLocation(
   campaignId: string,
   prompt?: string,
-): Promise<{ locationId: string; locationName: string; narrative: string | null }> {
+): Promise<ResolveStartConditionsResult> {
   return apiPost("/api/worldgen/resolve-starting-location", { campaignId, prompt });
+}
+
+export function previewCanonicalLoadout(
+  campaignId: string,
+  draft: CharacterDraft,
+): Promise<LoadoutPreviewResult> {
+  return apiPost("/api/worldgen/preview-loadout", { campaignId, draft });
+}
+
+export function listPersonaTemplates(
+  campaignId: string,
+): Promise<PersonaTemplateListResult> {
+  return apiGet(`/api/campaigns/${campaignId}/persona-templates`);
+}
+
+export function createPersonaTemplate(
+  campaignId: string,
+  payload: Omit<PersonaTemplateRecord, "id" | "campaignId" | "createdAt" | "updatedAt">,
+): Promise<{ template: PersonaTemplateRecord }> {
+  return apiPost(`/api/campaigns/${campaignId}/persona-templates`, {
+    campaignId,
+    ...payload,
+  });
+}
+
+export function updatePersonaTemplate(
+  campaignId: string,
+  templateId: string,
+  patch: Partial<Pick<PersonaTemplateRecord, "name" | "description" | "roleScope" | "tags" | "patch">>,
+): Promise<{ template: PersonaTemplateRecord }> {
+  return apiPut(`/api/campaigns/${campaignId}/persona-templates/${templateId}`, {
+    campaignId,
+    templateId,
+    patch,
+  });
+}
+
+export function deletePersonaTemplate(
+  campaignId: string,
+  templateId: string,
+): Promise<{ ok: boolean }> {
+  return apiDelete(`/api/campaigns/${campaignId}/persona-templates/${templateId}`);
+}
+
+export function applyPersonaTemplate(
+  campaignId: string,
+  templateId: string,
+  draft: CharacterDraft,
+): Promise<ApplyPersonaTemplateResult> {
+  return apiPost<ApplyPersonaTemplateResult>(
+    `/api/campaigns/${campaignId}/persona-templates/${templateId}/apply`,
+    {
+      campaignId,
+      templateId,
+      draft,
+    },
+  );
 }
 
 // ───── Image URLs ─────

@@ -6,13 +6,6 @@ import { testRole } from "@/lib/api";
 import { clamp } from "@/lib/clamp";
 import { getErrorMessage } from "@/lib/settings";
 import type { RoleConfig, Settings } from "@/lib/types";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -134,14 +127,14 @@ export function RolesTab({ settings, setSettings }: RolesTabProps) {
         />
       ))}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Fallback</CardTitle>
-          <CardDescription>
+      <div className="rounded-lg border border-border/40 p-[clamp(16px,1.4vw,28px)]">
+        <div className="mb-[clamp(12px,1vw,20px)]">
+          <div className="text-[clamp(14px,1vw,18px)] font-semibold">Fallback</div>
+          <div className="text-[clamp(11px,0.75vw,13px)] text-muted-foreground">
             Global provider fallback and timeout behavior.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-2">
+          </div>
+        </div>
+        <div className="grid gap-[clamp(12px,1vw,20px)] md:grid-cols-2">
           <div className="space-y-2">
             <Label>Fallback Provider</Label>
             <Select
@@ -225,8 +218,8 @@ export function RolesTab({ settings, setSettings }: RolesTabProps) {
               }
             />
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </>
   );
 }

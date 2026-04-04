@@ -65,10 +65,12 @@ vi.mock("../../lib/index.js", () => ({
 import {
   parseCharacterDescription,
   generateCharacter,
+  generateCharacterFromArchetype,
   mapV2CardToCharacter,
   parseNpcDescription,
   mapV2CardToNpc,
   generateNpcFromArchetype,
+  researchArchetype,
 } from "../../character/index.js";
 import { getActiveCampaign } from "../../campaign/index.js";
 import { getDb } from "../../db/index.js";
@@ -80,9 +82,11 @@ const mockedGetDb = vi.mocked(getDb);
 const mockedParseChar = vi.mocked(parseCharacterDescription);
 const mockedParseNpc = vi.mocked(parseNpcDescription);
 const mockedGenChar = vi.mocked(generateCharacter);
+const mockedGenCharArch = vi.mocked(generateCharacterFromArchetype);
 const mockedGenNpcArch = vi.mocked(generateNpcFromArchetype);
 const mockedMapV2Char = vi.mocked(mapV2CardToCharacter);
 const mockedMapV2Npc = vi.mocked(mapV2CardToNpc);
+const mockedResearchArchetype = vi.mocked(researchArchetype);
 const mockedResolveStart = vi.mocked(resolveStartingLocation);
 
 // ---------------------------------------------------------------------------
@@ -109,9 +113,10 @@ function createMockDb(opts: {
   const locs = opts.locations ?? [{ id: "loc-1", name: "Tavern" }];
 
   const mockRun = vi.fn();
+  const mockGet = vi.fn(() => null);
   const mockAll = vi.fn(() => locs);
-  const mockWhere = vi.fn(() => ({ all: mockAll, run: mockRun }));
-  const mockFrom = vi.fn(() => ({ where: mockWhere }));
+  const mockWhere = vi.fn(() => ({ all: mockAll, run: mockRun, get: mockGet }));
+  const mockFrom = vi.fn(() => ({ where: mockWhere, get: mockGet }));
   const mockSelect = vi.fn(() => ({ from: mockFrom }));
   const mockValues = vi.fn(() => ({ run: mockRun }));
   const mockInsert = vi.fn(() => ({ values: mockValues }));
@@ -124,7 +129,7 @@ function createMockDb(opts: {
   } as any;
 
   mockedGetDb.mockReturnValue(db);
-  return { db, mockRun, mockAll, mockDelete, mockInsert };
+  return { db, mockRun, mockAll, mockDelete, mockInsert, mockValues, mockGet };
 }
 
 /** Mock DB that also returns locationNames for helpers.resolveNames */
@@ -154,6 +159,125 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+function makePlayerDraft(overrides: Record<string, unknown> = {}) {
+  return {
+    identity: {
+      role: "player",
+      tier: "key",
+      displayName: "Hero",
+      canonicalStatus: "original",
+    },
+    profile: {
+      species: "Human",
+      gender: "Male",
+      ageText: "25",
+      appearance: "Tall",
+      backgroundSummary: "A wandering swordsman.",
+      personaSummary: "Quiet but determined.",
+    },
+    socialContext: {
+      factionId: null,
+      factionName: null,
+      homeLocationId: null,
+      homeLocationName: null,
+      currentLocationId: null,
+      currentLocationName: "Tavern",
+      relationshipRefs: [],
+      socialStatus: [],
+      originMode: "native",
+    },
+    motivations: {
+      shortTermGoals: ["Find work"],
+      longTermGoals: ["Restore family honor"],
+      beliefs: [],
+      drives: ["Brave"],
+      frictions: ["Guarded"],
+    },
+    capabilities: {
+      traits: ["Brave"],
+      skills: [{ name: "Swordsman", tier: "Novice" }],
+      flaws: [],
+      specialties: [],
+      wealthTier: "Poor",
+    },
+    state: {
+      hp: 5,
+      conditions: [],
+      statusFlags: [],
+      activityState: "active",
+    },
+    loadout: {
+      inventorySeed: ["Sword"],
+      equippedItemRefs: ["Sword"],
+      currencyNotes: "",
+      signatureItems: ["Sword"],
+    },
+    startConditions: {},
+    provenance: {
+      sourceKind: "generator",
+      importMode: null,
+      templateId: null,
+      archetypePrompt: null,
+      worldgenOrigin: null,
+      legacyTags: [],
+    },
+    ...overrides,
+  };
+}
+
+function makeNpcDraft(overrides: Record<string, unknown> = {}) {
+  return {
+    ...makePlayerDraft({
+      identity: {
+        role: "npc",
+        tier: "key",
+        displayName: "Guard",
+        canonicalStatus: "original",
+      },
+      profile: {
+        species: "Human",
+        gender: "",
+        ageText: "",
+        appearance: "",
+        backgroundSummary: "Veteran sentry.",
+        personaSummary: "Stoic and suspicious.",
+      },
+      socialContext: {
+        factionId: null,
+        factionName: "Guild",
+        homeLocationId: null,
+        homeLocationName: null,
+        currentLocationId: null,
+        currentLocationName: "Tavern",
+        relationshipRefs: [],
+        socialStatus: [],
+        originMode: "resident",
+      },
+      motivations: {
+        shortTermGoals: ["Hold the gate"],
+        longTermGoals: ["Keep the town safe"],
+        beliefs: ["Trouble starts at the docks"],
+        drives: ["Duty-bound"],
+        frictions: ["Suspicious"],
+      },
+      capabilities: {
+        traits: ["Disciplined"],
+        skills: [{ name: "Spearman", tier: "Skilled" }],
+        flaws: [],
+        specialties: [],
+        wealthTier: null,
+      },
+      loadout: {
+        inventorySeed: [],
+        equippedItemRefs: [],
+        currencyNotes: "",
+        signatureItems: [],
+      },
+    }),
+    ...overrides,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // POST /parse-character
 // ---------------------------------------------------------------------------
@@ -161,8 +285,8 @@ describe("POST /api/worldgen/parse-character", () => {
   it("with role=player calls parseCharacterDescription", async () => {
     setActiveCampaign();
     createMockDbForResolveNames();
-    const fakeChar = { name: "Hero", race: "Human" };
-    mockedParseChar.mockResolvedValue(fakeChar as any);
+    const fakeDraft = makePlayerDraft();
+    mockedParseChar.mockResolvedValue(fakeDraft as any);
 
     const res = await app.request("/api/worldgen/parse-character", {
       method: "POST",
@@ -173,15 +297,20 @@ describe("POST /api/worldgen/parse-character", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.role).toBe("player");
-    expect(body.character).toEqual(fakeChar);
+    expect(body.draft).toEqual(fakeDraft);
+    expect(body.character).toMatchObject({
+      name: "Hero",
+      race: "Human",
+      locationName: "Tavern",
+    });
     expect(mockedParseChar).toHaveBeenCalled();
   });
 
   it("with role=key calls parseNpcDescription", async () => {
     setActiveCampaign();
     createMockDbForResolveNames();
-    const fakeNpc = { name: "Guard", persona: "Stoic" };
-    mockedParseNpc.mockResolvedValue(fakeNpc as any);
+    const fakeDraft = makeNpcDraft();
+    mockedParseNpc.mockResolvedValue(fakeDraft as any);
 
     const res = await app.request("/api/worldgen/parse-character", {
       method: "POST",
@@ -198,7 +327,12 @@ describe("POST /api/worldgen/parse-character", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.role).toBe("key");
-    expect(body.npc).toEqual(fakeNpc);
+    expect(body.draft).toEqual(fakeDraft);
+    expect(body.npc).toMatchObject({
+      name: "Guard",
+      persona: "Stoic and suspicious.",
+      locationName: "Tavern",
+    });
     expect(mockedParseNpc).toHaveBeenCalled();
   });
 });
@@ -210,8 +344,23 @@ describe("POST /api/worldgen/generate-character", () => {
   it("with role=player calls generateCharacter", async () => {
     setActiveCampaign();
     createMockDbForResolveNames();
-    const fakeChar = { name: "Ranger", race: "Elf" };
-    mockedGenChar.mockResolvedValue(fakeChar as any);
+    const fakeDraft = makePlayerDraft({
+      identity: {
+        role: "player",
+        tier: "key",
+        displayName: "Ranger",
+        canonicalStatus: "original",
+      },
+      profile: {
+        species: "Elf",
+        gender: "Female",
+        ageText: "Young adult",
+        appearance: "Sharp-eyed",
+        backgroundSummary: "A forest scout.",
+        personaSummary: "Calm under pressure.",
+      },
+    });
+    mockedGenChar.mockResolvedValue(fakeDraft as any);
 
     const res = await app.request("/api/worldgen/generate-character", {
       method: "POST",
@@ -222,15 +371,34 @@ describe("POST /api/worldgen/generate-character", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.role).toBe("player");
-    expect(body.character).toEqual(fakeChar);
+    expect(body.draft).toEqual(fakeDraft);
+    expect(body.character).toMatchObject({
+      name: "Ranger",
+      race: "Elf",
+    });
     expect(mockedGenChar).toHaveBeenCalled();
   });
 
   it("with role=key calls generateNpcFromArchetype", async () => {
     setActiveCampaign();
     createMockDbForResolveNames();
-    const fakeNpc = { name: "Merchant", persona: "Greedy" };
-    mockedGenNpcArch.mockResolvedValue(fakeNpc as any);
+    const fakeDraft = makeNpcDraft({
+      identity: {
+        role: "npc",
+        tier: "key",
+        displayName: "Merchant",
+        canonicalStatus: "original",
+      },
+      profile: {
+        species: "Human",
+        gender: "",
+        ageText: "",
+        appearance: "",
+        backgroundSummary: "A dockside broker.",
+        personaSummary: "Greedy but personable.",
+      },
+    });
+    mockedGenNpcArch.mockResolvedValue(fakeDraft as any);
 
     const res = await app.request("/api/worldgen/generate-character", {
       method: "POST",
@@ -245,8 +413,47 @@ describe("POST /api/worldgen/generate-character", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.role).toBe("key");
-    expect(body.npc).toEqual(fakeNpc);
+    expect(body.draft).toEqual(fakeDraft);
+    expect(body.npc).toMatchObject({
+      name: "Merchant",
+      persona: "Greedy but personable.",
+    });
     expect(mockedGenNpcArch).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /research-character
+// ---------------------------------------------------------------------------
+describe("POST /api/worldgen/research-character", () => {
+  it("returns a shared draft plus compatibility alias for player archetype research", async () => {
+    setActiveCampaign();
+    createMockDbForResolveNames();
+    mockedResearchArchetype.mockResolvedValue("swordmaster notes");
+    const fakeDraft = makePlayerDraft({
+      identity: {
+        role: "player",
+        tier: "key",
+        displayName: "Blade",
+        canonicalStatus: "original",
+      },
+    });
+    mockedGenCharArch.mockResolvedValue(fakeDraft as any);
+
+    const res = await app.request("/api/worldgen/research-character", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        archetype: "Swordmaster",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.role).toBe("player");
+    expect(body.draft).toEqual(fakeDraft);
+    expect(body.character).toMatchObject({ name: "Blade" });
   });
 });
 
@@ -266,8 +473,15 @@ describe("POST /api/worldgen/import-v2-card", () => {
   it("with role=player calls mapV2CardToCharacter", async () => {
     setActiveCampaign();
     createMockDbForResolveNames();
-    const fakeChar = { name: "Raven", race: "Human" };
-    mockedMapV2Char.mockResolvedValue(fakeChar as any);
+    const fakeDraft = makePlayerDraft({
+      identity: {
+        role: "player",
+        tier: "key",
+        displayName: "Raven",
+        canonicalStatus: "imported",
+      },
+    });
+    mockedMapV2Char.mockResolvedValue(fakeDraft as any);
 
     const res = await app.request("/api/worldgen/import-v2-card", {
       method: "POST",
@@ -278,7 +492,8 @@ describe("POST /api/worldgen/import-v2-card", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.role).toBe("player");
-    expect(body.character).toEqual(fakeChar);
+    expect(body.draft).toEqual(fakeDraft);
+    expect(body.character).toMatchObject({ name: "Raven" });
     expect(mockedMapV2Char).toHaveBeenCalledWith(
       expect.objectContaining({
         name: "Raven",
@@ -290,8 +505,15 @@ describe("POST /api/worldgen/import-v2-card", () => {
   it("with role=key calls mapV2CardToNpc", async () => {
     setActiveCampaign();
     createMockDbForResolveNames();
-    const fakeNpc = { name: "Raven", persona: "Enigmatic" };
-    mockedMapV2Npc.mockResolvedValue(fakeNpc as any);
+    const fakeDraft = makeNpcDraft({
+      identity: {
+        role: "npc",
+        tier: "key",
+        displayName: "Raven",
+        canonicalStatus: "imported",
+      },
+    });
+    mockedMapV2Npc.mockResolvedValue(fakeDraft as any);
 
     const res = await app.request("/api/worldgen/import-v2-card", {
       method: "POST",
@@ -306,7 +528,8 @@ describe("POST /api/worldgen/import-v2-card", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.role).toBe("key");
-    expect(body.npc).toEqual(fakeNpc);
+    expect(body.draft).toEqual(fakeDraft);
+    expect(body.npc).toMatchObject({ name: "Raven" });
     expect(mockedMapV2Npc).toHaveBeenCalledWith(
       expect.objectContaining({
         name: "Raven",
@@ -318,7 +541,24 @@ describe("POST /api/worldgen/import-v2-card", () => {
   it("passes outsider import mode through to NPC mapping", async () => {
     setActiveCampaign();
     createMockDbForResolveNames();
-    mockedMapV2Npc.mockResolvedValue({ name: "Raven" } as any);
+    mockedMapV2Npc.mockResolvedValue(
+      makeNpcDraft({
+        identity: {
+          role: "npc",
+          tier: "key",
+          displayName: "Raven",
+          canonicalStatus: "imported",
+        },
+        provenance: {
+          sourceKind: "import",
+          importMode: "outsider",
+          templateId: null,
+          archetypePrompt: null,
+          worldgenOrigin: null,
+          legacyTags: [],
+        },
+      }) as any,
+    );
 
     const res = await app.request("/api/worldgen/import-v2-card", {
       method: "POST",
@@ -378,9 +618,9 @@ describe("POST /api/worldgen/save-character", () => {
     expect(typeof body.playerId).toBe("string");
   });
 
-  it("rejects unknown location with 400", async () => {
+  it("falls back to the first known location when the requested location is unknown", async () => {
     setActiveCampaign();
-    createMockDb({
+    const { mockValues } = createMockDb({
       locations: [{ id: "loc-1", name: "Forest" }], // not "Tavern"
     });
 
@@ -390,9 +630,14 @@ describe("POST /api/worldgen/save-character", () => {
       body: JSON.stringify(saveBody),
     });
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.error).toContain("Tavern");
+    expect(body.ok).toBe(true);
+    expect(body).toHaveProperty("playerId");
+
+    const firstInsertCall = mockValues.mock.calls[0] as unknown as [Record<string, unknown>] | undefined;
+    const insertedPlayer = firstInsertCall?.[0];
+    expect(insertedPlayer?.currentLocationId).toBe("loc-1");
   });
 
   it("deletes existing player before inserting new one", async () => {
@@ -410,6 +655,32 @@ describe("POST /api/worldgen/save-character", () => {
     // delete is called before insert
     expect(db.delete).toHaveBeenCalled();
     expect(db.insert).toHaveBeenCalled();
+  });
+
+  it("persists canonical record and derived tags when saving a draft payload", async () => {
+    setActiveCampaign();
+    const { mockValues } = createMockDb({
+      locations: [{ id: "loc-1", name: "Tavern" }],
+    });
+
+    const draft = makePlayerDraft();
+
+    const res = await app.request("/api/worldgen/save-character", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        draft,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+
+    const firstInsertCall = mockValues.mock.calls[0] as unknown as [Record<string, unknown>] | undefined;
+    const insertPayload = firstInsertCall?.[0];
+    expect(insertPayload).toBeDefined();
+    expect(insertPayload?.characterRecord).toBeDefined();
+    expect(insertPayload?.derivedTags).toBeDefined();
   });
 });
 
@@ -434,6 +705,21 @@ describe("POST /api/worldgen/resolve-starting-location", () => {
     const mockFrom = vi.fn(() => ({ where: mockWhere }));
     const mockSelect = vi.fn(() => ({ from: mockFrom }));
     mockedGetDb.mockReturnValue({ select: mockSelect } as any);
+    mockedResolveStart.mockResolvedValue({
+      locationId: "loc-2",
+      locationName: "Tavern",
+      startConditions: {
+        startLocationId: "loc-2",
+        arrivalMode: "settled",
+        immediateSituation: "You begin in Tavern.",
+        entryPressure: [],
+        companions: [],
+        startingVisibility: "expected",
+        resolvedNarrative: null,
+        sourcePrompt: null,
+      },
+      narrative: null,
+    } as any);
 
     const res = await app.request("/api/worldgen/resolve-starting-location", {
       method: "POST",
@@ -445,6 +731,7 @@ describe("POST /api/worldgen/resolve-starting-location", () => {
     const body = await res.json();
     expect(body.locationId).toBe("loc-2");
     expect(body.locationName).toBe("Tavern");
+    expect(body.startConditions.startLocationId).toBe("loc-2");
     expect(body.narrative).toBeNull();
   });
 
@@ -460,7 +747,18 @@ describe("POST /api/worldgen/resolve-starting-location", () => {
     mockedGetDb.mockReturnValue({ select: mockSelect } as any);
 
     mockedResolveStart.mockResolvedValue({
+      locationId: "loc-1",
       locationName: "Forest",
+      startConditions: {
+        startLocationId: "loc-1",
+        arrivalMode: "on-foot",
+        immediateSituation: "You arrive at the edge of the dark forest.",
+        entryPressure: [],
+        companions: [],
+        startingVisibility: "noticed",
+        resolvedNarrative: "You arrive at the edge of the dark forest.",
+        sourcePrompt: "I want to start in the forest",
+      },
       narrative: "You arrive at the edge of the dark forest.",
     } as any);
 
@@ -477,6 +775,7 @@ describe("POST /api/worldgen/resolve-starting-location", () => {
     const body = await res.json();
     expect(body.locationId).toBe("loc-1");
     expect(body.locationName).toBe("Forest");
+    expect(body.startConditions.arrivalMode).toBe("on-foot");
     expect(body.narrative).toBe("You arrive at the edge of the dark forest.");
     expect(mockedResolveStart).toHaveBeenCalled();
   });

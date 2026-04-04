@@ -16,9 +16,22 @@ import {
   generateCharacterSchema,
   researchCharacterSchema,
   importV2CardSchema,
+  characterDraftSchema,
+  characterRecordSchema,
+  saveCharacterSchema,
+  saveEditsSchema,
   resolveStartingLocationSchema,
+  personaTemplateSchema,
+  personaTemplateSummarySchema,
+  personaTemplatePatchSchema,
+  createPersonaTemplateSchema,
+  updatePersonaTemplateSchema,
+  applyPersonaTemplateSchema,
+  resolvedStartConditionsSchema,
+  canonicalLoadoutPreviewSchema,
 } from "../schemas.js";
 import { parseBody, zodFirstError } from "../helpers.js";
+import { npcs, players } from "../../db/schema.js";
 
 // ---------------------------------------------------------------------------
 // seedCategorySchema
@@ -1638,6 +1651,162 @@ describe("importV2CardSchema", () => {
 });
 
 // ---------------------------------------------------------------------------
+// canonical character schemas
+// ---------------------------------------------------------------------------
+describe("canonical character schemas", () => {
+  const draft = {
+    identity: {
+      role: "player" as const,
+      tier: "key" as const,
+      displayName: "Aria Bloodthorn",
+      canonicalStatus: "original" as const,
+    },
+    profile: {
+      species: "Human",
+      gender: "Female",
+      ageText: "18",
+      appearance: "Violet eyes and raven hair.",
+      backgroundSummary: "A runaway courier from the alpine relay.",
+      personaSummary: "Quiet until she trusts you.",
+    },
+    socialContext: {
+      factionId: null,
+      factionName: null,
+      homeLocationId: null,
+      homeLocationName: null,
+      currentLocationId: null,
+      currentLocationName: "Signal Station",
+      relationshipRefs: [],
+      socialStatus: ["Wanted"],
+      originMode: "outsider" as const,
+    },
+    motivations: {
+      shortTermGoals: ["Reach the tower"],
+      longTermGoals: ["Decode the buried signal"],
+      beliefs: ["The storm is hiding something"],
+      drives: ["Curious"],
+      frictions: ["Guarded"],
+    },
+    capabilities: {
+      traits: ["Observant"],
+      skills: [{ name: "Swordsman", tier: "Novice" as const }],
+      flaws: ["Stubborn"],
+      specialties: ["Signal Lore"],
+      wealthTier: "Poor" as const,
+    },
+    state: {
+      hp: 4,
+      conditions: ["Wounded"],
+      statusFlags: ["Hidden"],
+      activityState: "active",
+    },
+    loadout: {
+      inventorySeed: ["Rope"],
+      equippedItemRefs: ["Iron Sword"],
+      currencyNotes: "",
+      signatureItems: ["Family Compass"],
+    },
+    startConditions: {},
+    provenance: {
+      sourceKind: "generator" as const,
+      importMode: null,
+      templateId: null,
+      archetypePrompt: null,
+      worldgenOrigin: null,
+      legacyTags: ["legacy"],
+    },
+  };
+
+  it("accepts a canonical character draft and record", () => {
+    expect(characterDraftSchema.safeParse(draft).success).toBe(true);
+    expect(
+      characterRecordSchema.safeParse({
+        ...draft,
+        identity: {
+          ...draft.identity,
+          id: "player-1",
+          campaignId: "camp-1",
+        },
+      }).success,
+    ).toBe(true);
+  });
+
+  it("keeps additive compatibility for legacy and canonical save-character payloads", () => {
+    expect(
+      saveCharacterSchema.safeParse({
+        campaignId: "camp-1",
+        draft,
+      }).success,
+    ).toBe(true);
+
+    expect(
+      saveCharacterSchema.safeParse({
+        campaignId: "camp-1",
+        character: {
+          name: "Aria Bloodthorn",
+          race: "Human",
+          gender: "Female",
+          age: "18",
+          appearance: "Violet eyes and raven hair.",
+          tags: ["Observant", "Poor"],
+          hp: 4,
+          equippedItems: ["Iron Sword"],
+          locationName: "Signal Station",
+        },
+      }).success,
+    ).toBe(true);
+  });
+
+  it("accepts scaffold NPC edits that carry the canonical draft seam", () => {
+    const result = saveEditsSchema.safeParse({
+      campaignId: "camp-1",
+      scaffold: {
+        refinedPremise: "Signals whisper through the alpine dark.",
+        locations: [
+          {
+            name: "Signal Station",
+            description: "A frozen relay tower above the valley.",
+            tags: ["Cold"],
+            isStarting: true,
+            connectedTo: [],
+          },
+        ],
+        factions: [],
+        npcs: [
+          {
+            draft: {
+              ...draft,
+              identity: {
+                ...draft.identity,
+                role: "npc",
+                tier: "key",
+                displayName: "Captain Mire",
+              },
+            },
+            locationName: "Signal Station",
+            factionName: "Wardens",
+            tier: "key",
+          },
+        ],
+        loreCards: [],
+      },
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("adds canonical persistence columns to players and npcs without removing legacy ones", () => {
+    expect(players.characterRecord.name).toBe("character_record");
+    expect(players.derivedTags.name).toBe("derived_tags");
+    expect(players.tags.name).toBe("tags");
+
+    expect(npcs.characterRecord.name).toBe("character_record");
+    expect(npcs.derivedTags.name).toBe("derived_tags");
+    expect(npcs.persona.name).toBe("persona");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // resolveStartingLocationSchema
 // ---------------------------------------------------------------------------
 describe("resolveStartingLocationSchema", () => {
@@ -1672,5 +1841,208 @@ describe("resolveStartingLocationSchema", () => {
       prompt: "x".repeat(501),
     });
     expect(result.success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 30 schemas
+// ---------------------------------------------------------------------------
+describe("phase 30 persona template schemas", () => {
+  const phase30Draft = {
+    identity: {
+      role: "player" as const,
+      tier: "key" as const,
+      displayName: "Aria Bloodthorn",
+      canonicalStatus: "original" as const,
+    },
+    profile: {
+      species: "Human",
+      gender: "Female",
+      ageText: "18",
+      appearance: "Violet eyes and raven hair.",
+      backgroundSummary: "A runaway courier from the alpine relay.",
+      personaSummary: "Quiet until she trusts you.",
+    },
+    socialContext: {
+      factionId: null,
+      factionName: null,
+      homeLocationId: null,
+      homeLocationName: null,
+      currentLocationId: null,
+      currentLocationName: "Signal Station",
+      relationshipRefs: [],
+      socialStatus: ["Wanted"],
+      originMode: "outsider" as const,
+    },
+    motivations: {
+      shortTermGoals: ["Reach the tower"],
+      longTermGoals: ["Decode the buried signal"],
+      beliefs: ["The storm is hiding something"],
+      drives: ["Curious"],
+      frictions: ["Guarded"],
+    },
+    capabilities: {
+      traits: ["Observant"],
+      skills: [{ name: "Swordsman", tier: "Novice" as const }],
+      flaws: ["Stubborn"],
+      specialties: ["Signal Lore"],
+      wealthTier: "Poor" as const,
+    },
+    state: {
+      hp: 4,
+      conditions: ["Wounded"],
+      statusFlags: ["Hidden"],
+      activityState: "active",
+    },
+    loadout: {
+      inventorySeed: ["Rope"],
+      equippedItemRefs: ["Iron Sword"],
+      currencyNotes: "",
+      signatureItems: ["Family Compass"],
+    },
+    startConditions: {},
+    provenance: {
+      sourceKind: "generator" as const,
+      importMode: null,
+      templateId: null,
+      archetypePrompt: null,
+      worldgenOrigin: null,
+      legacyTags: ["legacy"],
+    },
+  };
+
+  const patch = {
+    profile: {
+      backgroundSummary: "Raised in the border watch.",
+      personaSummary: "Dry humor covering old grief.",
+    },
+    motivations: {
+      drives: ["Duty"],
+      frictions: ["Distrusts authority"],
+    },
+    capabilities: {
+      traits: ["Observant"],
+    },
+    startConditions: {
+      arrivalMode: "on-foot",
+      entryPressure: ["late", "under-equipped"],
+    },
+  };
+
+  it("accepts a shared draft patch shape for persona templates", () => {
+    const result = personaTemplatePatchSchema.safeParse(patch);
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a campaign-scoped persona template", () => {
+    const result = personaTemplateSchema.safeParse({
+      id: "template-border-watch",
+      campaignId: "camp-1",
+      name: "Border Watch Veteran",
+      description: "A veteran hardened by frontier patrols.",
+      roleScope: "any",
+      tags: ["martial", "grim"],
+      patch,
+      createdAt: 123,
+      updatedAt: 456,
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts additive CRUD payloads and draft apply bodies", () => {
+    expect(
+      createPersonaTemplateSchema.safeParse({
+        campaignId: "camp-1",
+        name: "Court Attaché",
+        description: "Soft-power operator.",
+        roleScope: "player",
+        tags: ["politics"],
+        patch,
+      }).success,
+    ).toBe(true);
+
+    expect(
+      updatePersonaTemplateSchema.safeParse({
+        campaignId: "camp-1",
+        templateId: "template-border-watch",
+        patch: {
+          name: "Border Watch Veteran",
+          tags: ["martial", "watch"],
+        },
+      }).success,
+    ).toBe(true);
+
+    expect(
+      applyPersonaTemplateSchema.safeParse({
+        campaignId: "camp-1",
+        templateId: "template-border-watch",
+        draft: phase30Draft,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("accepts persona template summaries for world payload listing", () => {
+    const result = personaTemplateSummarySchema.safeParse({
+      id: "template-border-watch",
+      campaignId: "camp-1",
+      name: "Border Watch Veteran",
+      description: "A veteran hardened by frontier patrols.",
+      roleScope: "any",
+      tags: ["martial", "grim"],
+      createdAt: 123,
+      updatedAt: 456,
+    });
+
+    expect(result.success).toBe(true);
+  });
+});
+
+describe("phase 30 start and loadout schemas", () => {
+  it("accepts structured start-resolution responses with compatibility aliases", () => {
+    const result = resolvedStartConditionsSchema.safeParse({
+      locationId: "loc-1",
+      locationName: "Moonwell",
+      narrative: "You arrive at dawn with frost on your sleeves.",
+      startConditions: {
+        startLocationId: "loc-1",
+        arrivalMode: "on-foot",
+        immediateSituation: "Seeking shelter after a storm crossing.",
+        entryPressure: ["late", "cold"],
+        companions: ["hound"],
+        startingVisibility: "noticed",
+        resolvedNarrative: "You arrive at dawn with frost on your sleeves.",
+        sourcePrompt: "I reach town after a storm.",
+      },
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts canonical loadout preview payloads with audit metadata", () => {
+    const result = canonicalLoadoutPreviewSchema.safeParse({
+      loadout: {
+        inventorySeed: ["Travel Cloak", "Waterskin"],
+        equippedItemRefs: ["Travel Cloak"],
+        currencyNotes: "A few clipped silver marks.",
+        signatureItems: ["Weathered Compass"],
+      },
+      items: [
+        {
+          name: "Travel Cloak",
+          slot: "equipped",
+          tags: ["starting-loadout", "wearable"],
+          quantity: 1,
+          reason: "baseline travel gear",
+        },
+      ],
+      audit: [
+        "baseline-travel-kit",
+        "arrival:on-foot",
+      ],
+      warnings: [],
+    });
+
+    expect(result.success).toBe(true);
   });
 });

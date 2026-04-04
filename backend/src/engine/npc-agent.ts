@@ -17,7 +17,10 @@ import { getRelationshipGraph } from "./graph-queries.js";
 import { searchEpisodicEvents } from "../vectors/episodic-events.js";
 import { embedTexts } from "../vectors/embeddings.js";
 import { createLogger } from "../lib/index.js";
-import { parseTags, parseNpcGoals, parseBeliefs } from "./parse-helpers.js";
+import { parseTags } from "./parse-helpers.js";
+import { hydrateStoredNpcRecord } from "../character/record-adapters.js";
+import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
+import { DERIVED_RUNTIME_TAGS_RULE } from "../character/prompt-contract.js";
 
 const log = createLogger("npc-agent");
 
@@ -56,9 +59,9 @@ export async function tickNpcAgent(
     return { npcId, npcName: "Unknown", toolCalls: [], error: "NPC not found" };
   }
 
-  const npcTags = parseTags(npc.tags);
-  const goals = parseNpcGoals(npc.goals);
-  const beliefs = parseBeliefs(npc.beliefs);
+  const npcRecord = hydrateStoredNpcRecord(npc);
+  const npcTags = deriveRuntimeCharacterTags(npcRecord);
+  const beliefs = npcRecord.motivations.beliefs;
 
   // 2. Load NPC's current location
   let locationName = "Unknown location";
@@ -114,13 +117,13 @@ export async function tickNpcAgent(
   let recentMemories: string[] = [];
   if (embedderProvider) {
     try {
-      const queryVector = await embedTexts([npc.name], embedderProvider);
+      const queryVector = await embedTexts([npcRecord.identity.displayName], embedderProvider);
       if (queryVector[0] && queryVector[0].length > 0) {
         const events = await searchEpisodicEvents(queryVector[0], tick, 3);
         recentMemories = events.map((e) => `[Tick ${e.tick}] ${e.text}`);
       }
     } catch (err) {
-      log.warn(`Failed to search episodic events for ${npc.name}`, err);
+      log.warn(`Failed to search episodic events for ${npcRecord.identity.displayName}`, err);
     }
   }
 
@@ -134,24 +137,28 @@ export async function tickNpcAgent(
 
   // 6. Build system prompt
   const goalsText = [
-    ...goals.short_term.map((g) => `  - [short] ${g}`),
-    ...goals.long_term.map((g) => `  - [long] ${g}`),
+    ...npcRecord.motivations.shortTermGoals.map((g) => `  - [short] ${g}`),
+    ...npcRecord.motivations.longTermGoals.map((g) => `  - [long] ${g}`),
   ].join("\n") || "  (none)";
 
   const systemPrompt = [
-    `You are ${npc.name}, a character in a text RPG world.`,
-    `Your persona: ${npc.persona}`,
+    `You are ${npcRecord.identity.displayName}, a character in a text RPG world.`,
+    `Canonical NPC record authority: profile, socialContext, motivations, capabilities, and state define who you are right now.`,
+    `Derived runtime tags are compact compatibility evidence, not the source-of-truth.`,
+    DERIVED_RUNTIME_TAGS_RULE,
+    `Your profile: ${npcRecord.profile.personaSummary}`,
     `Your traits: [${npcTags.join(", ")}]`,
+    `Current social context: location=${locationName}; status=[${npcRecord.socialContext.socialStatus.join(", ") || "none"}]; drives=[${npcRecord.motivations.drives.join(", ") || "none"}]; frictions=[${npcRecord.motivations.frictions.join(", ") || "none"}]`,
     `Your goals:\n${goalsText}`,
     `Your beliefs: [${beliefs.join(", ")}]`,
     ``,
-    `You are at: ${locationName} — ${locationDesc}`,
+    `Current scene: ${locationName} — ${locationDesc}`,
     nearbyEntities.length > 0
-      ? `Also here: ${nearbyEntities.join(", ")}`
+      ? `Nearby entities:\n- ${nearbyEntities.join("\n- ")}`
       : `You are alone.`,
     recentMemories.length > 0
-      ? `Recent events involving you:\n${recentMemories.join("\n")}`
-      : "",
+      ? `Recent memories involving you:\n${recentMemories.join("\n")}`
+      : "Recent memories involving you:\n(none recorded)",
     relationshipLines.length > 0
       ? `Your relationships:\n${relationshipLines.join("\n")}`
       : "",
@@ -198,10 +205,10 @@ export async function tickNpcAgent(
   }
 
   log.info(
-    `${npc.name} tick complete: ${toolCalls.length} tool call(s)`,
+    `${npcRecord.identity.displayName} tick complete: ${toolCalls.length} tool call(s)`,
   );
 
-  return { npcId, npcName: npc.name, toolCalls };
+  return { npcId, npcName: npcRecord.identity.displayName, toolCalls };
 }
 
 // -- Orchestrator -------------------------------------------------------------

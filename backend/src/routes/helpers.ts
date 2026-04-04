@@ -134,6 +134,28 @@ export async function requireLoadedCampaign(
 }
 
 /**
+ * Ensure generated-world routes only resolve for campaigns that completed world generation.
+ */
+export async function requireGeneratedCampaign(
+  c: Context,
+  campaignId: string,
+): Promise<CampaignMeta | Response> {
+  const campaign = await requireLoadedCampaign(c, campaignId);
+  if (campaign instanceof Response) {
+    return campaign;
+  }
+
+  if (!campaign.generationComplete) {
+    return c.json(
+      { error: "World generation is not complete for this campaign." },
+      409,
+    );
+  }
+
+  return campaign;
+}
+
+/**
  * Resolve location and faction names for character endpoints.
  * For "key" role, uses the names passed in the request body.
  * For "player" role, loads them from the DB.
@@ -172,14 +194,14 @@ export interface CharacterEndpointContext {
  * Shared setup for character creation endpoints (parse/generate/research/import).
  * Returns either the resolved context or a ready-made error Response.
  */
-export function setupCharacterEndpoint(
+export async function setupCharacterEndpoint(
   c: Context,
   campaignId: string,
   role: "player" | "key",
   bodyLocationNames?: string[],
   bodyFactionNames?: string[],
-): CharacterEndpointContext | Response {
-  const campaign = requireActiveCampaign(c, campaignId);
+): Promise<CharacterEndpointContext | Response> {
+  const campaign = await requireLoadedCampaign(c, campaignId);
   if (campaign instanceof Response) return campaign;
 
   const settings = loadSettings();

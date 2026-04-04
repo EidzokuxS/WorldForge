@@ -23,6 +23,8 @@ import { getDb } from "../db/index.js";
 import { players, locations } from "../db/schema.js";
 import type { ResolveResult } from "../ai/index.js";
 import { createLogger } from "../lib/index.js";
+import { hydrateStoredPlayerRecord } from "../character/record-adapters.js";
+import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
 
 const log = createLogger("turn-processor");
 
@@ -173,10 +175,10 @@ export function sanitizeNarrative(raw: string): string {
 
 const OUTCOME_INSTRUCTIONS: Record<string, string> = {
   strong_hit:
-    "The player SUCCEEDED DECISIVELY. Narrate full success with sensory detail of mastery — the action is executed flawlessly. Include an unexpected bonus or advantage (discovered something, impressed an NPC, gained a tactical edge). In combat: if the player dealt damage to an NPC, narrate it. If the player avoided all harm, emphasize their dominance. After narration, you MUST call set_condition if any HP changed, then call offer_quick_actions.",
+    "The player SUCCEEDED DECISIVELY. Narrate full success with sensory detail of mastery — the action is executed flawlessly. Include an unexpected bonus or advantage (discovered something, impressed an NPC, gained a tactical edge). In combat: if the player dealt damage to an NPC, narrate it. If the player avoided all harm, emphasize their dominance.",
   weak_hit:
-    "The player SUCCEEDED WITH A COMPLICATION. The action works, but name the SPECIFIC complication — damaged equipment, unwanted attention, partial result, physical cost, time lost. The success must feel earned, not free. In combat: the complication often involves taking damage (call set_condition with negative delta) or losing a tactical advantage. If you call set_condition and the result shows isDowned=true (HP reached 0), you MUST immediately narrate the death/defeat/KO outcome. Do NOT continue the fight or give the player more actions after HP=0. After narration, you MUST call set_condition if any HP changed, then call offer_quick_actions.",
-  miss: "The player FAILED. Narrate the failure clearly and unambiguously. In combat: the player takes damage — call set_condition with a negative delta (-1 for a glancing blow, -2 for a solid hit). EXAMPLES OF CORRECT MISS NARRATION: Combat miss → attack misses or is blocked, enemy counterattacks and DEALS DAMAGE (you MUST call set_condition). Persuasion miss → NPC refuses, dismisses, or becomes hostile. Search miss → find nothing useful, or attract danger. Information miss → NPC gives wrong info, lies, or clams up. NEVER narrate the NPC being 'intrigued', 'persuaded', 'considering', or 'impressed' on a miss. The failure must be OBVIOUS to the reader. Include concrete consequences. If you call set_condition and the result shows isDowned=true (HP reached 0), you MUST immediately narrate the death/defeat/KO outcome. Do NOT continue the fight or give the player more actions after HP=0. After narration, you MUST call set_condition if any HP changed, then call offer_quick_actions.",
+    "The player SUCCEEDED WITH A COMPLICATION. The action works, but name the SPECIFIC complication — damaged equipment, unwanted attention, partial result, physical cost, time lost. The success must feel earned, not free. In combat: the complication often involves injury, exposure, lost position, or another immediate setback. If HP reaches 0 during the consequence, narrate the death/defeat/KO outcome immediately and do not continue the fight.",
+  miss: "The player FAILED. Narrate the failure clearly and unambiguously. In combat: the attack misses or is blocked and the opposition seizes the initiative. Persuasion miss means refusal, dismissal, or hostility. Search miss means nothing useful is found or new danger is stirred up. Information miss means the answer is blocked, false, or dangerously incomplete. NEVER narrate the NPC being 'intrigued', 'persuaded', 'considering', or 'impressed' on a miss. The failure must be OBVIOUS to the reader. Include concrete consequences. If HP reaches 0 during the consequence, narrate the death/defeat/KO outcome immediately and do not continue the fight.",
 };
 
 // -- Fallback quick actions ---------------------------------------------------
@@ -256,15 +258,12 @@ export async function* processTurn(
   let sceneContext = "";
 
   if (player) {
-    try {
-      actorTags = JSON.parse(player.tags) as string[];
-    } catch {
-      actorTags = [];
-    }
+    const playerRecord = hydrateStoredPlayerRecord(player);
+    actorTags = deriveRuntimeCharacterTags(playerRecord);
 
     // Include HP status in scene context for Oracle to factor in
-    if (player.hp < 5) {
-      sceneContext += ` Actor HP: ${player.hp}/5.`;
+    if (playerRecord.state.hp < 5) {
+      sceneContext += ` Actor HP: ${playerRecord.state.hp}/5.`;
     }
 
     if (player.currentLocationId) {

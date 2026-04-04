@@ -320,4 +320,209 @@ describe("assemblePrompt", () => {
     const result = await assemblePrompt(defaultOptions);
     expect(result.formatted).toContain("[WORLD STATE]");
   });
+
+  it("hydrates canonical player and npc records before falling back to legacy prompt fields", async () => {
+    const canonicalPlayer = {
+      identity: {
+        id: "p1",
+        campaignId: "test-campaign-123",
+        role: "player",
+        tier: "key",
+        displayName: "Elara",
+        canonicalStatus: "original",
+      },
+      profile: {
+        species: "Elf",
+        gender: "Female",
+        ageText: "120",
+        appearance: "Silver hair",
+        backgroundSummary: "A former royal scout.",
+        personaSummary: "Calm and unsentimental.",
+      },
+      socialContext: {
+        factionId: null,
+        factionName: null,
+        homeLocationId: null,
+        homeLocationName: null,
+        currentLocationId: "loc-1",
+        currentLocationName: "Moonwell",
+        relationshipRefs: [],
+        socialStatus: ["Wanted"],
+        originMode: "resident",
+      },
+      motivations: {
+        shortTermGoals: ["Reach the tower"],
+        longTermGoals: ["Break the eclipse curse"],
+        beliefs: [],
+        drives: ["Curious"],
+        frictions: ["Guarded"],
+      },
+      capabilities: {
+        traits: ["Observant"],
+        skills: [{ name: "Tracker", tier: "Skilled" }],
+        flaws: ["Stubborn"],
+        specialties: [],
+        wealthTier: "Comfortable",
+      },
+      state: {
+        hp: 4,
+        conditions: ["Wounded"],
+        statusFlags: ["Hidden"],
+        activityState: "active",
+      },
+      loadout: {
+        inventorySeed: ["Moonbow"],
+        equippedItemRefs: ["Moonbow"],
+        currencyNotes: "",
+        signatureItems: ["Moonbow"],
+      },
+      startConditions: {},
+      provenance: {
+        sourceKind: "generator",
+        importMode: null,
+        templateId: null,
+        archetypePrompt: null,
+        worldgenOrigin: null,
+        legacyTags: ["legacy-player-only"],
+      },
+    };
+
+    const canonicalNpc = {
+      identity: {
+        id: "n1",
+        campaignId: "test-campaign-123",
+        role: "npc",
+        tier: "key",
+        displayName: "Captain Mire",
+        canonicalStatus: "original",
+      },
+      profile: {
+        species: "Human",
+        gender: "",
+        ageText: "",
+        appearance: "",
+        backgroundSummary: "A veteran officer holding the line.",
+        personaSummary: "Quietly furious at the council's failures.",
+      },
+      socialContext: {
+        factionId: null,
+        factionName: "Wardens",
+        homeLocationId: null,
+        homeLocationName: null,
+        currentLocationId: "loc-1",
+        currentLocationName: "Moonwell",
+        relationshipRefs: [],
+        socialStatus: ["Respected"],
+        originMode: "resident",
+      },
+      motivations: {
+        shortTermGoals: ["Hold the barricade"],
+        longTermGoals: ["Rebuild the watch"],
+        beliefs: ["The city can still be saved"],
+        drives: ["Duty-bound"],
+        frictions: ["Bitter"],
+      },
+      capabilities: {
+        traits: ["Disciplined"],
+        skills: [{ name: "Commander", tier: "Master" }],
+        flaws: [],
+        specialties: [],
+        wealthTier: "Poor",
+      },
+      state: {
+        hp: 5,
+        conditions: [],
+        statusFlags: [],
+        activityState: "active",
+      },
+      loadout: {
+        inventorySeed: [],
+        equippedItemRefs: [],
+        currencyNotes: "",
+        signatureItems: [],
+      },
+      startConditions: {},
+      provenance: {
+        sourceKind: "worldgen",
+        importMode: null,
+        templateId: null,
+        archetypePrompt: null,
+        worldgenOrigin: "scaffold",
+        legacyTags: ["legacy-npc-only"],
+      },
+    };
+
+    vi.mocked(getDb).mockReturnValue(
+      createMockDb({
+        players: [
+          {
+            id: "p1",
+            campaignId: "test-campaign-123",
+            name: "Legacy Elara",
+            race: "Legacy Race",
+            gender: "Legacy Gender",
+            age: "Legacy Age",
+            appearance: "Legacy Appearance",
+            hp: 4,
+            characterRecord: JSON.stringify(canonicalPlayer),
+            derivedTags: '["legacy-player-only"]',
+            tags: '["legacy-player-only"]',
+            equippedItems: '["legacy-bow"]',
+            currentLocationId: "loc-1",
+          },
+        ],
+        locations: [
+          {
+            id: "loc-1",
+            campaignId: "test-campaign-123",
+            name: "Moonwell",
+            description: "A flooded plaza under a broken moon lens.",
+            tags: '["quiet"]',
+            connectedTo: "[]",
+          },
+        ],
+        npcs: [
+          {
+            id: "n1",
+            campaignId: "test-campaign-123",
+            name: "Legacy Mire",
+            persona: "Legacy persona",
+            characterRecord: JSON.stringify(canonicalNpc),
+            derivedTags: '["legacy-npc-only"]',
+            tags: '["legacy-npc-only"]',
+            tier: "key",
+            currentLocationId: "loc-1",
+            goals: '{"short_term":["legacy goal"],"long_term":[]}',
+            beliefs: '["legacy belief"]',
+          },
+        ],
+      }) as unknown as ReturnType<typeof getDb>,
+    );
+
+    const result = await assemblePrompt(defaultOptions);
+
+    expect(result.formatted).toContain("Race: Elf");
+    expect(result.formatted).toContain("Wealth: Comfortable");
+    expect(result.formatted).toContain("Tags: Observant, Skilled Tracker, Stubborn, Comfortable, Wounded, Hidden, Wanted, Curious, Guarded");
+    expect(result.formatted).not.toContain("legacy-player-only");
+
+    expect(result.formatted).toContain("Quietly furious at the council's failures.");
+    expect(result.formatted).toContain("Goals: Hold the barricade; Rebuild the watch");
+    expect(result.formatted).toContain("Beliefs: The city can still be saved");
+    expect(result.formatted).not.toContain("Legacy persona");
+    expect(result.formatted).not.toContain("legacy belief");
+  });
+
+  it("frames canonical character and start context before derived runtime tags in SYSTEM RULES", async () => {
+    const result = await assemblePrompt(defaultOptions);
+    const systemRules = result.sections.find((section) => section.name === "SYSTEM RULES");
+
+    expect(systemRules).toBeDefined();
+    expect(systemRules!.content).toContain("canonical character records");
+    expect(systemRules!.content).toContain("derived runtime tags");
+    expect(systemRules!.content).toContain("startConditions");
+    expect(systemRules!.content).not.toContain(
+      "All characters, items, locations, and factions use a tag-based system",
+    );
+  });
 });

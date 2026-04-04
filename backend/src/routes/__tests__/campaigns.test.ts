@@ -11,6 +11,7 @@ vi.mock("../../campaign/index.js", () => ({
   getActiveCampaign: vi.fn(),
   listCampaigns: vi.fn(),
   loadCampaign: vi.fn(),
+  readCampaignConfig: vi.fn(),
   createCheckpoint: vi.fn(),
   listCheckpoints: vi.fn(),
   loadCheckpoint: vi.fn(),
@@ -45,6 +46,7 @@ import {
   getActiveCampaign,
   listCampaigns,
   loadCampaign,
+  readCampaignConfig,
 } from "../../campaign/index.js";
 import { getDb } from "../../db/index.js";
 import campaignRoutes from "../campaigns.js";
@@ -55,6 +57,7 @@ const mockedLoad = vi.mocked(loadCampaign);
 const mockedDelete = vi.mocked(deleteCampaign);
 const mockedGetActive = vi.mocked(getActiveCampaign);
 const mockedGetDb = vi.mocked(getDb);
+const mockedReadConfig = vi.mocked(readCampaignConfig);
 
 // ---------------------------------------------------------------------------
 // App setup
@@ -66,6 +69,7 @@ const CAMPAIGN_ID = "abc-123";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockedReadConfig.mockReturnValue({ personaTemplates: [] } as any);
 });
 
 // ---------------------------------------------------------------------------
@@ -351,11 +355,30 @@ describe("DELETE /:id", () => {
 // GET /:id/world
 // ---------------------------------------------------------------------------
 describe("GET /:id/world", () => {
+  it("returns 409 when the requested campaign world is not generation-ready", async () => {
+    mockedGetActive.mockReturnValue({
+      id: CAMPAIGN_ID,
+      name: "Test",
+      createdAt: "2026-01-01",
+      generationComplete: false,
+    } as any);
+
+    const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/world`);
+
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body).toEqual({
+      error: "World generation is not complete for this campaign.",
+    });
+    expect(mockedGetDb).not.toHaveBeenCalled();
+  });
+
   it("returns world data for active campaign", async () => {
     mockedGetActive.mockReturnValue({
       id: CAMPAIGN_ID,
       name: "Test",
       createdAt: "2026-01-01",
+      generationComplete: true,
     } as any);
 
     const mockAll = vi.fn();
@@ -389,10 +412,17 @@ describe("GET /:id/world", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.locations).toEqual(worldData.locations);
-    expect(body.npcs).toEqual(worldData.npcs);
+    expect(body.npcs).toHaveLength(1);
+    expect(body.npcs[0]).toMatchObject(worldData.npcs[0]);
+    expect(body.npcs[0]).toHaveProperty("characterRecord");
+    expect(body.npcs[0]).toHaveProperty("draft");
+    expect(body.npcs[0]).toHaveProperty("npc");
     expect(body.factions).toEqual(worldData.factions);
     expect(body.relationships).toEqual(worldData.relationships);
-    expect(body.player).toEqual(worldData.player);
+    expect(body.player).toMatchObject(worldData.player);
+    expect(body.player).toHaveProperty("characterRecord");
+    expect(body.player).toHaveProperty("draft");
+    expect(body.player).toHaveProperty("character");
   });
 
   it("returns player as null when no player exists", async () => {
@@ -400,6 +430,7 @@ describe("GET /:id/world", () => {
       id: CAMPAIGN_ID,
       name: "Test",
       createdAt: "2026-01-01",
+      generationComplete: true,
     } as any);
 
     const mockAll = vi.fn();
@@ -442,6 +473,7 @@ describe("GET /:id/world", () => {
       id: CAMPAIGN_ID,
       name: "Recovered",
       createdAt: "2026-01-01",
+      generationComplete: true,
     } as any);
 
     const mockAll = vi.fn();

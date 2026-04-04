@@ -9,12 +9,12 @@ vi.mock("next/navigation", () => ({
 }));
 
 const mockApiGet = vi.fn();
-const mockApiPost = vi.fn();
 const mockApiDelete = vi.fn();
+const mockLoadCampaign = vi.fn();
 vi.mock("@/lib/api", () => ({
   apiGet: (...args: unknown[]) => mockApiGet(...args),
-  apiPost: (...args: unknown[]) => mockApiPost(...args),
   apiDelete: (...args: unknown[]) => mockApiDelete(...args),
+  loadCampaign: (...args: unknown[]) => mockLoadCampaign(...args),
 }));
 
 vi.mock("sonner", () => ({
@@ -46,6 +46,7 @@ describe("LoadCampaignDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockApiGet.mockResolvedValue(MOCK_CAMPAIGNS);
+    mockLoadCampaign.mockResolvedValue(MOCK_CAMPAIGNS[0]);
   });
 
   it("renders the trigger button", () => {
@@ -113,5 +114,21 @@ describe("LoadCampaignDialog", () => {
       expect(loadButtons).toHaveLength(2);
       expect(deleteButtons).toHaveLength(2);
     });
+  });
+
+  it("does not load a campaign when only the card body is clicked", async () => {
+    const user = userEvent.setup();
+    render(<LoadCampaignDialog onLoaded={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: /Load Campaign/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Dragon Age")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByText("A world of dragons and magic"));
+
+    expect(mockLoadCampaign).not.toHaveBeenCalled();
+    expect(mockPush).not.toHaveBeenCalled();
   });
 });

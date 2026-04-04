@@ -100,12 +100,28 @@ describe("generateNpcsStep", () => {
         locationName: "Observation Deck",
         factionName: "Station Authority",
         tier: "key",
+        draft: expect.objectContaining({
+          identity: expect.objectContaining({
+            role: "npc",
+            displayName: "Dr. Kel",
+          }),
+          socialContext: expect.objectContaining({
+            currentLocationName: "Observation Deck",
+            factionName: "Station Authority",
+          }),
+        }),
       }),
       expect.objectContaining({
         name: "Mara Voss",
         locationName: "Dock Bazaar",
         factionName: null,
         tier: "supporting",
+        draft: expect.objectContaining({
+          identity: expect.objectContaining({
+            role: "npc",
+            displayName: "Mara Voss",
+          }),
+        }),
       }),
     ]);
   });
@@ -208,5 +224,57 @@ describe("generateNpcsStep", () => {
       "Do not place Dr. Kel in the present cast unless the divergence explicitly says he still coexists.",
     );
     expect(keyPlanPrompt).toContain("Maxwell still handles supply runs for the base.");
+  });
+
+  it("teaches canonical character facets in the NPC detail prompt instead of a legacy npc-card worldview", async () => {
+    mockGenerateObject
+      .mockResolvedValueOnce({
+        object: {
+          npcs: [
+            {
+              name: "Dr. Kel",
+              role: "Operates the station's signal array and monitors unusual readings.",
+              locationName: "Observation Deck",
+              factionName: "Station Authority",
+            },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        object: {
+          npcs: [],
+        },
+      })
+      .mockResolvedValueOnce({
+        object: {
+          npcs: [
+            {
+              name: "Dr. Kel",
+              persona: "A sleep-deprived systems scientist who trusts data more than people.",
+              tags: ["Signal Analyst", "Paranoid", "Exhausted"],
+              goals: {
+                shortTerm: ["Prove the newest signal burst came from outside the station"],
+                longTerm: ["Decode the source before Station Authority silences the evidence"],
+              },
+            },
+          ],
+        },
+      });
+
+    await generateNpcsStep(
+      fakeReq,
+      fakeReq.premise,
+      ["Observation Deck"],
+      ["Station Authority"],
+      null,
+    );
+
+    const detailPrompt = (mockGenerateObject.mock.calls[2]![0] as Record<string, unknown>)
+      .prompt as string;
+    expect(detailPrompt).toContain("shared draft pipeline");
+    expect(detailPrompt).toContain("profile");
+    expect(detailPrompt).toContain("socialContext");
+    expect(detailPrompt).toContain("motivations");
+    expect(detailPrompt).not.toContain("You are writing NPC reference cards for a text RPG engine.");
   });
 });

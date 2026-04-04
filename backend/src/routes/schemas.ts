@@ -1,4 +1,21 @@
 import { z } from "zod";
+import {
+  CHARACTER_SKILL_TIERS,
+  CHARACTER_WEALTH_TIERS,
+} from "@worldforge/shared";
+import type {
+  CanonicalLoadoutPreview,
+  PersonaTemplate,
+  PersonaTemplateSummary,
+  ResolvedStartConditions,
+} from "@worldforge/shared";
+import {
+  createCharacterRecordFromDraft,
+  fromLegacyNpcRow,
+  fromLegacyPlayerRow,
+  toLegacyNpcDraft,
+  toLegacyPlayerCharacter,
+} from "../character/record-adapters.js";
 import { LORE_CATEGORIES } from "../worldgen/types.js";
 import { WORLDBOOK_ENTRY_TYPES } from "../worldgen/worldbook-importer.js";
 
@@ -205,6 +222,325 @@ export const testRoleSchema = z.object({
   roles: z.record(z.string(), roleConfigSchema),
 });
 
+const characterRoleSchema = z.enum(["player", "npc"]);
+const characterTierSchema = z.enum([
+  "temporary",
+  "supporting",
+  "persistent",
+  "key",
+]);
+const canonicalStatusSchema = z.enum([
+  "original",
+  "imported",
+  "known_ip_canonical",
+  "known_ip_diverged",
+]);
+const sourceKindSchema = z.enum([
+  "player-input",
+  "generator",
+  "archetype",
+  "import",
+  "worldgen",
+  "runtime",
+  "migration",
+]);
+const importModeSchema = z.enum(["native", "outsider"]);
+const characterSkillTierSchema = z.enum(CHARACTER_SKILL_TIERS);
+const characterWealthTierSchema = z.enum(CHARACTER_WEALTH_TIERS);
+
+const characterRelationshipRefSchema = z.object({
+  entityId: z.string().nullable(),
+  entityName: z.string().default(""),
+  type: z.string().default(""),
+  reason: z.string().default(""),
+});
+
+const characterIdentityDraftSchema = z.object({
+  role: characterRoleSchema,
+  tier: characterTierSchema,
+  displayName: z.string().min(1),
+  canonicalStatus: canonicalStatusSchema,
+});
+
+const characterProfileSchema = z.object({
+  species: z.string().default(""),
+  gender: z.string().default(""),
+  ageText: z.string().default(""),
+  appearance: z.string().default(""),
+  backgroundSummary: z.string().default(""),
+  personaSummary: z.string().default(""),
+});
+
+const characterSocialContextSchema = z.object({
+  factionId: z.string().nullable(),
+  factionName: z.string().nullable(),
+  homeLocationId: z.string().nullable(),
+  homeLocationName: z.string().nullable(),
+  currentLocationId: z.string().nullable(),
+  currentLocationName: z.string().nullable(),
+  relationshipRefs: z.array(characterRelationshipRefSchema).default([]),
+  socialStatus: z.array(z.string()).default([]),
+  originMode: z.enum(["native", "outsider", "resident", "unknown"]).nullable(),
+});
+
+const characterSkillSchema = z.object({
+  name: z.string().min(1),
+  tier: characterSkillTierSchema.nullable(),
+});
+
+const characterMotivationsSchema = z.object({
+  shortTermGoals: z.array(z.string()).default([]),
+  longTermGoals: z.array(z.string()).default([]),
+  beliefs: z.array(z.string()).default([]),
+  drives: z.array(z.string()).default([]),
+  frictions: z.array(z.string()).default([]),
+});
+
+const characterCapabilitiesSchema = z.object({
+  traits: z.array(z.string()).default([]),
+  skills: z.array(characterSkillSchema).default([]),
+  flaws: z.array(z.string()).default([]),
+  specialties: z.array(z.string()).default([]),
+  wealthTier: characterWealthTierSchema.nullable(),
+});
+
+const characterStateSchema = z.object({
+  hp: z.number().int().min(1).max(5),
+  conditions: z.array(z.string()).default([]),
+  statusFlags: z.array(z.string()).default([]),
+  activityState: z.string().default("idle"),
+});
+
+export const characterLoadoutSchema = z.object({
+  inventorySeed: z.array(z.string()).default([]),
+  equippedItemRefs: z.array(z.string()).default([]),
+  currencyNotes: z.string().default(""),
+  signatureItems: z.array(z.string()).default([]),
+});
+
+export const characterStartConditionsSchema = z.object({
+  startLocationId: z.string().nullable().optional(),
+  arrivalMode: z.string().nullable().optional(),
+  immediateSituation: z.string().nullable().optional(),
+  entryPressure: z.array(z.string()).optional(),
+  companions: z.array(z.string()).optional(),
+  startingVisibility: z.string().nullable().optional(),
+  resolvedNarrative: z.string().nullable().optional(),
+  sourcePrompt: z.string().nullable().optional(),
+});
+
+export const personaTemplatePatchSchema = z.object({
+  profile: characterProfileSchema.partial().optional(),
+  socialContext: characterSocialContextSchema.partial().optional(),
+  motivations: characterMotivationsSchema.partial().optional(),
+  capabilities: characterCapabilitiesSchema.partial().optional(),
+  state: characterStateSchema.partial().optional(),
+  loadout: characterLoadoutSchema.partial().optional(),
+  startConditions: characterStartConditionsSchema.partial().optional(),
+  provenance: z.object({
+    templateId: z.string().nullable().optional(),
+    archetypePrompt: z.string().nullable().optional(),
+    worldgenOrigin: z.string().nullable().optional(),
+  }).partial().optional(),
+}).strip();
+
+const personaTemplateRoleScopeSchema = z.enum(["player", "npc", "any"]);
+
+export const personaTemplateSummarySchema = z.object({
+  id: z.string().min(1),
+  campaignId: z.string().min(1),
+  name: z.string().trim().min(1),
+  description: z.string().default(""),
+  roleScope: personaTemplateRoleScopeSchema.default("any"),
+  tags: z.array(z.string()).default([]),
+  createdAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
+}).strip() satisfies z.ZodType<PersonaTemplateSummary>;
+
+export const personaTemplateSchema = personaTemplateSummarySchema.extend({
+  patch: personaTemplatePatchSchema,
+}).strip() satisfies z.ZodType<PersonaTemplate>;
+
+export const createPersonaTemplateSchema = z.object({
+  campaignId: z.string().min(1),
+  name: z.string().trim().min(1),
+  description: z.string().default(""),
+  roleScope: personaTemplateRoleScopeSchema.default("any"),
+  tags: z.array(z.string()).default([]),
+  patch: personaTemplatePatchSchema,
+}).strip();
+
+export const updatePersonaTemplateSchema = z.object({
+  campaignId: z.string().min(1),
+  templateId: z.string().min(1),
+  patch: z.object({
+    name: z.string().trim().min(1).optional(),
+    description: z.string().optional(),
+    roleScope: personaTemplateRoleScopeSchema.optional(),
+    tags: z.array(z.string()).optional(),
+    patch: personaTemplatePatchSchema.optional(),
+  }).strip(),
+}).strip();
+
+export const applyPersonaTemplateSchema = z.object({
+  campaignId: z.string().min(1),
+  templateId: z.string().min(1),
+  draft: z.lazy(() => characterDraftSchema),
+}).strip();
+
+export const previewCanonicalLoadoutSchema = z.object({
+  campaignId: z.string().min(1),
+  draft: z.lazy(() => characterDraftSchema),
+}).strip();
+
+const canonicalLoadoutItemSpecSchema = z.object({
+  name: z.string().min(1),
+  slot: z.enum(["equipped", "pack", "signature"]),
+  tags: z.array(z.string()).default([]),
+  quantity: z.number().int().positive().default(1),
+  reason: z.string().min(1),
+}).strip();
+
+export const canonicalLoadoutPreviewSchema = z.object({
+  loadout: characterLoadoutSchema,
+  items: z.array(canonicalLoadoutItemSpecSchema),
+  audit: z.array(z.string()).default([]),
+  warnings: z.array(z.string()).default([]),
+}).strip() satisfies z.ZodType<CanonicalLoadoutPreview>;
+
+export const resolvedStartConditionsSchema = z.object({
+  locationId: z.string().min(1),
+  locationName: z.string().min(1),
+  startConditions: characterStartConditionsSchema,
+  narrative: z.string().nullable(),
+}).strip() satisfies z.ZodType<ResolvedStartConditions>;
+
+const characterProvenanceSchema = z.object({
+  sourceKind: sourceKindSchema,
+  importMode: importModeSchema.nullable(),
+  templateId: z.string().nullable(),
+  archetypePrompt: z.string().nullable(),
+  worldgenOrigin: z.string().nullable(),
+  legacyTags: z.array(z.string()).default([]),
+});
+
+export const characterDraftSchema = z.object({
+  identity: characterIdentityDraftSchema,
+  profile: characterProfileSchema,
+  socialContext: characterSocialContextSchema,
+  motivations: characterMotivationsSchema,
+  capabilities: characterCapabilitiesSchema,
+  state: characterStateSchema,
+  loadout: characterLoadoutSchema,
+  startConditions: characterStartConditionsSchema.default({}),
+  provenance: characterProvenanceSchema,
+});
+
+export const characterRecordSchema = characterDraftSchema.extend({
+  identity: characterIdentityDraftSchema.extend({
+    id: z.string().min(1),
+    campaignId: z.string().min(1),
+  }),
+});
+
+const legacyCharacterSchema = z.object({
+  name: z.string().min(1),
+  race: z.string().max(100).default(""),
+  gender: z.string().max(100).default(""),
+  age: z.string().max(100).default(""),
+  appearance: z.string().max(1000).default(""),
+  tags: z.array(z.string()),
+  hp: z.number().int().min(1).max(5),
+  equippedItems: z.array(z.string()),
+  locationName: z.string().min(1),
+});
+
+function materializeDraftRecord(
+  campaignId: string,
+  draft: z.infer<typeof characterDraftSchema>,
+) {
+  return createCharacterRecordFromDraft(draft, {
+    id: `draft:${draft.identity.displayName || "character"}`,
+    campaignId,
+  });
+}
+
+function recordToDraft(
+  record: z.infer<typeof characterRecordSchema>,
+): z.infer<typeof characterDraftSchema> {
+  const { id: _id, campaignId: _campaignId, ...identity } = record.identity;
+  return {
+    ...record,
+    identity,
+  };
+}
+
+function legacyCharacterToDraft(
+  character: z.infer<typeof legacyCharacterSchema>,
+) {
+  return recordToDraft(
+    fromLegacyPlayerRow(
+      {
+        id: "legacy-player",
+        campaignId: "legacy-campaign",
+        name: character.name,
+        race: character.race,
+        gender: character.gender,
+        age: character.age,
+        appearance: character.appearance,
+        hp: character.hp,
+        tags: JSON.stringify(character.tags),
+        equippedItems: JSON.stringify(character.equippedItems),
+        currentLocationId: null,
+      },
+      { currentLocationName: character.locationName },
+    ),
+  );
+}
+
+const scaffoldNpcLegacySchema = z.object({
+  name: z.string(),
+  persona: z.string(),
+  tags: z.array(z.string()),
+  goals: z.object({
+    shortTerm: z.array(z.string()),
+    longTerm: z.array(z.string()),
+  }),
+  locationName: z.string(),
+  factionName: z.string().nullable(),
+  tier: z.enum(["key", "supporting"]).default("key"),
+});
+
+function legacyNpcToDraft(
+  npc: z.infer<typeof scaffoldNpcLegacySchema>,
+) {
+  return recordToDraft(
+    fromLegacyNpcRow(
+      {
+        id: "legacy-npc",
+        campaignId: "legacy-campaign",
+        name: npc.name,
+        persona: npc.persona,
+        tags: JSON.stringify(npc.tags),
+        tier: npc.tier === "key" ? "key" : "persistent",
+        currentLocationId: null,
+        goals: JSON.stringify({
+          short_term: npc.goals.shortTerm,
+          long_term: npc.goals.longTerm,
+        }),
+        beliefs: "[]",
+        unprocessedImportance: 0,
+        inactiveTicks: 0,
+        createdAt: 0,
+      },
+      {
+        currentLocationName: npc.locationName,
+        factionName: npc.factionName,
+      },
+    ),
+  );
+}
+
 // --- World review schemas ---
 
 const regenerateSectionBaseSchema = z.object({
@@ -249,18 +585,38 @@ const scaffoldFactionSchema = z.object({
   territoryNames: z.array(z.string()),
 });
 
-const scaffoldNpcSchema = z.object({
-  name: z.string(),
-  persona: z.string(),
-  tags: z.array(z.string()),
-  goals: z.object({
-    shortTerm: z.array(z.string()),
-    longTerm: z.array(z.string()),
-  }),
-  locationName: z.string(),
-  factionName: z.string().nullable(),
-  tier: z.enum(["key", "supporting"]).default("key"),
-});
+const scaffoldNpcSchema = z
+  .union([
+    scaffoldNpcLegacySchema,
+    scaffoldNpcLegacySchema.extend({
+      draft: characterDraftSchema,
+    }),
+    z.object({
+      draft: characterDraftSchema,
+      locationName: z.string().optional(),
+      factionName: z.string().nullable().optional(),
+      tier: z.enum(["key", "supporting"]).default("key"),
+    }),
+  ])
+  .transform((input) => {
+    if ("draft" in input) {
+      const legacy = toLegacyNpcDraft(
+        materializeDraftRecord("draft-campaign", input.draft),
+      );
+      return {
+        ...legacy,
+        locationName: input.locationName ?? legacy.locationName,
+        factionName: input.factionName ?? legacy.factionName,
+        tier: input.tier ?? legacy.tier,
+        draft: input.draft,
+      };
+    }
+
+    return {
+      ...input,
+      draft: legacyNpcToDraft(input),
+    };
+  });
 
 export const saveEditsSchema = z.object({
   campaignId: z.string().min(1),
@@ -293,17 +649,28 @@ export const loreCardUpdateSchema = z.object({
 
 export const saveCharacterSchema = z.object({
   campaignId: z.string().min(1),
-  character: z.object({
-    name: z.string().min(1),
-    race: z.string().max(100).default(""),
-    gender: z.string().max(100).default(""),
-    age: z.string().max(100).default(""),
-    appearance: z.string().max(1000).default(""),
-    tags: z.array(z.string()),
-    hp: z.number().int().min(1).max(5),
-    equippedItems: z.array(z.string()),
-    locationName: z.string().min(1),
+  character: legacyCharacterSchema,
+}).or(
+  z.object({
+    campaignId: z.string().min(1),
+    draft: characterDraftSchema,
   }),
+).transform((input) => {
+  if ("draft" in input) {
+    return {
+      campaignId: input.campaignId,
+      draft: input.draft,
+      character: toLegacyPlayerCharacter(
+        materializeDraftRecord(input.campaignId, input.draft),
+      ),
+    };
+  }
+
+  return {
+    campaignId: input.campaignId,
+    character: input.character,
+    draft: legacyCharacterToDraft(input.character),
+  };
 });
 
 // ───── Unified character/NPC endpoints ─────

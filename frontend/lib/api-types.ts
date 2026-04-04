@@ -1,4 +1,18 @@
 import type { CampaignWorldbookSelection, SeedCategory } from "@/lib/types";
+import type {
+  CanonicalLoadoutPreview,
+  CharacterDraft,
+  CharacterRecord,
+  PersonaTemplate,
+  PersonaTemplateSummary,
+  ResolvedStartConditions,
+} from "@worldforge/shared";
+export type {
+  CanonicalLoadoutPreview,
+  PersonaTemplate,
+  PersonaTemplateSummary,
+  ResolvedStartConditions,
+} from "@worldforge/shared";
 
 export interface TestConnectionRequest {
   baseUrl: string;
@@ -61,6 +75,9 @@ export interface WorldData {
     currentLocationId: string | null;
     goals: { short_term: string[]; long_term: string[] };
     beliefs: string[];
+    characterRecord?: CharacterRecord | null;
+    draft?: CharacterDraft | null;
+    npc?: ScaffoldNpc | null;
   }>;
   factions: Array<{
     id: string;
@@ -97,7 +114,11 @@ export interface WorldData {
     tags: string[];
     equippedItems: string[];
     currentLocationId: string | null;
+    characterRecord?: CharacterRecord | null;
+    draft?: CharacterDraft | null;
+    character?: ParsedCharacter | null;
   } | null;
+  personaTemplates: PersonaTemplateSummary[];
 }
 
 export const LORE_CARD_CATEGORIES = [
@@ -149,6 +170,7 @@ export interface ScaffoldNpc {
   goals: { shortTerm: string[]; longTerm: string[] };
   locationName: string;
   factionName: string | null;
+  draft?: CharacterDraft;
   /** Frontend-only stable key for React rendering. Stripped by backend Zod validation. */
   _uid?: string;
 }
@@ -165,6 +187,7 @@ export interface EditableScaffold {
   factions: ScaffoldFaction[];
   npcs: ScaffoldNpc[];
   loreCards: ScaffoldLoreCard[];
+  personaTemplates?: PersonaTemplateSummary[];
 }
 
 export type RegenerateSectionRequest =
@@ -183,11 +206,24 @@ export interface ParsedCharacter {
   hp: number;
   equippedItems: string[];
   locationName: string;
+  draft?: CharacterDraft;
 }
 
 export type CharacterResult =
-  | { role: "player"; character: ParsedCharacter }
-  | { role: "key"; npc: ScaffoldNpc };
+  | { role: "player"; draft: CharacterDraft; character: ParsedCharacter }
+  | { role: "key"; draft: CharacterDraft; npc: ScaffoldNpc };
+
+export type PersonaTemplateRecord = PersonaTemplate;
+export type PersonaTemplateListResult = {
+  personaTemplates: PersonaTemplateSummary[];
+};
+
+export type ApplyPersonaTemplateResult =
+  | { draft: CharacterDraft; character: ParsedCharacter; personaTemplate: PersonaTemplateSummary }
+  | { draft: CharacterDraft; npc: ScaffoldNpc; personaTemplate: PersonaTemplateSummary };
+
+export type ResolveStartConditionsResult = ResolvedStartConditions;
+export type LoadoutPreviewResult = CanonicalLoadoutPreview;
 
 export type CheckpointMeta = {
   id: string;

@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import type { CharacterDraft } from "@worldforge/shared";
 import {
   buildIdMaps,
   buildRelationshipMaps,
@@ -83,6 +84,7 @@ function makeWorldData(overrides?: Partial<WorldData>): WorldData {
     ],
     items: [],
     player: null,
+    personaTemplates: [],
     ...overrides,
   };
 }
@@ -223,6 +225,106 @@ describe("toEditableScaffold", () => {
       shortTerm: ["explore"],
       longTerm: ["discover"],
     });
+  });
+
+  it("prefers canonical npc draft fields over legacy persona/tag blobs", () => {
+    const draft: CharacterDraft = {
+      identity: {
+        role: "npc",
+        tier: "key",
+        displayName: "Draft Bartender",
+        canonicalStatus: "original",
+      },
+      profile: {
+        species: "",
+        gender: "",
+        ageText: "",
+        appearance: "",
+        backgroundSummary: "",
+        personaSummary: "Keeps notes on every patron",
+      },
+      socialContext: {
+        factionId: null,
+        factionName: "Guild",
+        homeLocationId: null,
+        homeLocationName: null,
+        currentLocationId: null,
+        currentLocationName: "Market",
+        relationshipRefs: [],
+        socialStatus: ["connected"],
+        originMode: "resident",
+      },
+      motivations: {
+        shortTermGoals: ["Gather rumors"],
+        longTermGoals: ["Control the tavern trade"],
+        beliefs: [],
+        drives: ["Order"],
+        frictions: ["Distrusts adventurers"],
+      },
+      capabilities: {
+        traits: ["observant"],
+        skills: [],
+        flaws: ["possessive"],
+        specialties: [],
+        wealthTier: null,
+      },
+      state: {
+        hp: 5,
+        conditions: [],
+        statusFlags: [],
+        activityState: "active",
+      },
+      loadout: {
+        inventorySeed: [],
+        equippedItemRefs: [],
+        currencyNotes: "",
+        signatureItems: [],
+      },
+      startConditions: {},
+      provenance: {
+        sourceKind: "worldgen",
+        importMode: null,
+        templateId: null,
+        archetypePrompt: null,
+        worldgenOrigin: null,
+        legacyTags: ["friendly"],
+      },
+    };
+
+    const scaffold = toEditableScaffold(
+      makeWorldData({
+        npcs: [
+          {
+            id: "npc-1",
+            campaignId: "c1",
+            name: "Legacy Bartender",
+            persona: "Friendly innkeeper",
+            tags: ["friendly"],
+            tier: "key",
+            currentLocationId: "loc-1",
+            goals: { short_term: ["serve drinks"], long_term: ["retire"] },
+            beliefs: [],
+            draft,
+          },
+        ],
+      }),
+      "",
+      [],
+    );
+
+    expect(scaffold.npcs[0]).toMatchObject({
+      name: "Draft Bartender",
+      persona: "Keeps notes on every patron",
+      locationName: "Market",
+      factionName: "Guild",
+      goals: {
+        shortTerm: ["Gather rumors"],
+        longTerm: ["Control the tavern trade"],
+      },
+      draft,
+    });
+    expect(scaffold.npcs[0].tags).toContain("observant");
+    expect(scaffold.npcs[0].tags).toContain("Order");
   });
 
   it("transforms lore cards into simplified objects", () => {

@@ -2,6 +2,12 @@ import crypto from "node:crypto";
 import { eq } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import {
+  createCharacterRecordFromDraft,
+  fromLegacyScaffoldNpc,
+  toLegacyNpcDraft,
+} from "../character/record-adapters.js";
+import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
+import {
   campaigns,
   factions,
   locations,
@@ -120,20 +126,45 @@ function insertNpcs(
   for (const npc of scaffoldNpcs) {
     const id = crypto.randomUUID();
     npcIds.set(npc.name, id);
+    const currentLocationId = locationIds.get(npc.locationName) ?? null;
+    const canonicalDraft = npc.draft ?? fromLegacyScaffoldNpc(npc, {
+      sourceKind: "worldgen",
+      currentLocationName: npc.locationName,
+      factionName: npc.factionName,
+      originMode: "resident",
+    });
+    const characterRecord = createCharacterRecordFromDraft(
+      {
+        ...canonicalDraft,
+        socialContext: {
+          ...canonicalDraft.socialContext,
+          currentLocationId,
+          currentLocationName: npc.locationName,
+        },
+      },
+      {
+        id,
+        campaignId,
+      },
+    );
+    const legacyNpc = toLegacyNpcDraft(characterRecord);
+
     tx.insert(npcs)
       .values({
         id,
         campaignId,
-        name: npc.name,
-        persona: npc.persona,
-        tags: JSON.stringify(npc.tags),
-        tier: npc.tier === "key" ? "key" : "persistent",
-        currentLocationId: locationIds.get(npc.locationName) ?? null,
+        name: legacyNpc.name,
+        persona: legacyNpc.persona,
+        characterRecord: JSON.stringify(characterRecord),
+        derivedTags: JSON.stringify(deriveRuntimeCharacterTags(characterRecord)),
+        tags: JSON.stringify(legacyNpc.tags),
+        tier: legacyNpc.tier === "key" ? "key" : "persistent",
+        currentLocationId,
         goals: JSON.stringify({
-          short_term: npc.goals.shortTerm,
-          long_term: npc.goals.longTerm,
+          short_term: legacyNpc.goals.shortTerm,
+          long_term: legacyNpc.goals.longTerm,
         }),
-        beliefs: "{}",
+        beliefs: JSON.stringify(characterRecord.motivations.beliefs),
         createdAt: Date.now(),
       })
       .run();

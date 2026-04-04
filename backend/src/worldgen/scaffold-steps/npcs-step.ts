@@ -2,7 +2,9 @@ import { safeGenerateObject as generateObject } from "../../ai/generate-object-s
 import { z } from "zod";
 import { createModel } from "../../ai/index.js";
 import type { IpResearchContext } from "@worldforge/shared";
+import { fromLegacyScaffoldNpc } from "../../character/record-adapters.js";
 import type { GenerateScaffoldRequest, ScaffoldNpc } from "../types.js";
+import { buildCharacterPromptContract } from "../../character/prompt-contract.js";
 import {
   buildIpContextBlock,
   buildCanonicalList,
@@ -75,6 +77,11 @@ interface DetailedNpc {
   tags: string[];
   goals: { shortTerm: string[]; longTerm: string[] };
 }
+
+const WORLDGEN_NPC_DETAIL_CONTRACT = buildCharacterPromptContract({
+  roleEmphasis:
+    "For worldgen NPC details, use the shared draft pipeline: keep identity, profile, socialContext, motivations, capabilities, state, loadout, startConditions, and provenance coherent before projecting scaffold-compatible fields.",
+});
 
 // ---------------------------------------------------------------------------
 // Plan calls
@@ -250,7 +257,7 @@ async function detailNpcBatch(
     ? `- For known-IP characters: describe their canonical personality and backstory as modified by the present world state. Keep unaffected canon details intact, but do NOT reintroduce replaced protagonists or reverted relationships unless PREMISE DIVERGENCE explicitly says they coexist.`
     : "";
 
-  const prompt = `You are writing NPC reference cards for a text RPG engine. The engine reads these fields mechanically — follow the format exactly.
+  const prompt = `You are detailing NPCs for a text RPG engine. The engine reads these fields mechanically — follow the format exactly.
 
 WORLD PREMISE:
 ${refinedPremise}
@@ -262,6 +269,14 @@ ${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenc
 ${previousSection}
 NPCs TO DETAIL NOW:
 ${batch.map((b) => `- ${b.name} (${b.tier}): ${b.role}`).join("\n")}
+
+SHARED CONTRACT:
+${WORLDGEN_NPC_DETAIL_CONTRACT}
+Project the canonical character facets into scaffold-compatible fields:
+- profile and world role should drive persona.
+- socialContext should stay consistent with locationName and factionName.
+- motivations should drive goals.shortTerm and goals.longTerm.
+- tags are derived runtime tags: a compatibility view over the canonical record, not a separate schema.
 
 FIELD INSTRUCTIONS:
 - persona: Exactly 2-3 sentences. Sentence 1 = who they are and their background. Sentence 2 = personality and how they treat others. Sentence 3 (optional) = a specific skill, secret, or relationship that matters for gameplay. Never write "mysterious" or "enigmatic" — state concrete facts.
@@ -427,14 +442,34 @@ export async function generateNpcsStep(
     const planEntry = allPlanned.find(
       (p) => p.name.toLowerCase() === detail.name.toLowerCase(),
     );
-    return {
+    const locationName = planEntry?.locationName ?? locationNames[0] ?? "";
+    const factionName = planEntry?.factionName ?? null;
+    const tier = planEntry?.tier ?? "supporting";
+    const canonicalStatus = ipContext
+      ? req.premiseDivergence && req.premiseDivergence.mode !== "canonical"
+        ? "known_ip_diverged"
+        : "known_ip_canonical"
+      : "original";
+
+    const legacyNpc = {
       name: detail.name,
       persona: detail.persona,
       tags: detail.tags,
       goals: detail.goals,
-      locationName: planEntry?.locationName ?? locationNames[0] ?? "",
-      factionName: planEntry?.factionName ?? null,
-      tier: planEntry?.tier ?? "supporting",
+      locationName,
+      factionName,
+      tier,
+    } satisfies ScaffoldNpc;
+
+    return {
+      ...legacyNpc,
+      draft: fromLegacyScaffoldNpc(legacyNpc, {
+        canonicalStatus,
+        sourceKind: "worldgen",
+        currentLocationName: locationName,
+        factionName,
+        originMode: "resident",
+      }),
     };
   });
 

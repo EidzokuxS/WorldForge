@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Mock ai SDK
 vi.mock("ai", () => ({
   generateObject: vi.fn(),
+  generateText: vi.fn(),
 }));
 
 // Mock provider registry
@@ -17,7 +18,7 @@ import {
   oracleOutputSchema,
   type OraclePayload,
 } from "../oracle.js";
-import { generateObject } from "ai";
+import { generateText } from "ai";
 import { createModel } from "../../ai/provider-registry.js";
 import type { ProviderConfig } from "../../ai/provider-registry.js";
 
@@ -124,9 +125,9 @@ describe("callOracle", () => {
   });
 
   it("returns OracleResult with chance, roll, outcome, reasoning", async () => {
-    vi.mocked(generateObject).mockResolvedValue({
-      object: { chance: 65, reasoning: "The thief is skilled." },
-    } as any);
+    vi.mocked(generateText).mockResolvedValue({
+      text: '{"chance":65,"reasoning":"The thief is skilled."}',
+    } as never);
 
     const result = await callOracle(mockPayload, mockProvider);
 
@@ -139,39 +140,51 @@ describe("callOracle", () => {
   });
 
   it("enforces temperature=0 in generateObject call", async () => {
-    vi.mocked(generateObject).mockResolvedValue({
-      object: { chance: 50, reasoning: "Even odds." },
-    } as any);
+    vi.mocked(generateText).mockResolvedValue({
+      text: '{"chance":50,"reasoning":"Even odds."}',
+    } as never);
 
     await callOracle(mockPayload, mockProvider);
 
-    expect(generateObject).toHaveBeenCalledTimes(1);
-    const callArgs = vi.mocked(generateObject).mock.calls[0]![0] as any;
+    expect(generateText).toHaveBeenCalledTimes(1);
+    const callArgs = vi.mocked(generateText).mock.calls[0]![0] as Record<string, unknown>;
     expect(callArgs.temperature).toBe(0);
   });
 
   it("throws when generateObject fails and no fallback provider is configured", async () => {
-    vi.mocked(generateObject).mockRejectedValue(new Error("API error"));
+    vi.mocked(generateText).mockRejectedValue(new Error("API error"));
 
     await expect(callOracle(mockPayload, mockProvider)).rejects.toThrow("API error");
   });
 
-  it("clamps chance to 1-99 even if value is out of range", async () => {
-    // Simulate generateObject returning out-of-range chance (bypassing Zod somehow)
-    vi.mocked(generateObject).mockResolvedValue({
-      object: { chance: 0, reasoning: "Should be clamped." },
-    } as any);
+  it("keeps the oracle prompt deterministic and calibration-focused without stale worldview instructions", async () => {
+    vi.mocked(generateText).mockResolvedValue({
+      text: '{"chance":75,"reasoning":"Skilled thief with favorable tools and conditions."}',
+    } as never);
 
-    const result = await callOracle(mockPayload, mockProvider);
+    await callOracle(mockPayload, mockProvider);
 
-    expect(result.chance).toBeGreaterThanOrEqual(1);
-    expect(result.chance).toBeLessThanOrEqual(99);
+    const callArgs = vi.mocked(generateText).mock.calls[0]![0] as Record<string, unknown>;
+    const systemPrompt = String(callArgs.system ?? "");
+    const prompt = String(callArgs.prompt ?? "");
+
+    expect(systemPrompt).toContain("Your job is to evaluate the probability of success for a player's action.");
+    expect(systemPrompt).toContain("Use only the provided actorTags, targetTags, environmentTags, and sceneContext as evidence snapshots.");
+    expect(systemPrompt).toContain("Do NOT widen this into narration, character creation, or world simulation.");
+    expect(systemPrompt).toContain("Calibration bands:");
+    expect(systemPrompt).not.toContain("Your output must be narrative prose only.");
+    expect(systemPrompt).not.toContain("Treat every player and NPC as one shared CharacterDraft/CharacterRecord model");
+    expect(systemPrompt).not.toContain("offer_quick_actions");
+    expect(prompt).toContain("Action: Pick the lock via Using lockpicks");
+    expect(prompt).toContain("Actor: [skilled-thief, nimble]");
+    expect(prompt).toContain("Target: [iron-lock, rusted]");
+    expect(prompt).toContain("Environment: [dim-light, quiet]");
   });
 
   it("calls createModel with the provided provider config", async () => {
-    vi.mocked(generateObject).mockResolvedValue({
-      object: { chance: 50, reasoning: "test" },
-    } as any);
+    vi.mocked(generateText).mockResolvedValue({
+      text: '{"chance":50,"reasoning":"test"}',
+    } as never);
 
     await callOracle(mockPayload, mockProvider);
 

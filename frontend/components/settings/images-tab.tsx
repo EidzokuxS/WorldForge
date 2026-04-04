@@ -2,13 +2,6 @@
 
 import { NONE_PROVIDER_ID } from "@/lib/settings";
 import type { Settings } from "@/lib/types";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -32,15 +25,15 @@ export function ImagesTab({ settings, setSettings }: ImagesTabProps) {
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Image Generation</CardTitle>
-        <CardDescription>
+    <div className="rounded-lg border border-border/40 p-[clamp(16px,1.4vw,28px)]">
+      <div className="mb-[clamp(12px,1vw,20px)]">
+        <div className="text-[clamp(14px,1vw,18px)] font-semibold">Image Generation</div>
+        <div className="text-[clamp(11px,0.75vw,13px)] text-muted-foreground">
           Configure provider, model, and style defaults for generated assets.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex items-center justify-between rounded-lg border border-border p-3">
+        </div>
+      </div>
+      <div className="space-y-[clamp(8px,0.7vw,14px)]">
+        <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-medium">Enable image generation</p>
             <p className="text-xs text-muted-foreground">
@@ -116,7 +109,7 @@ export function ImagesTab({ settings, setSettings }: ImagesTabProps) {
             placeholder="dark fantasy art, matte painting style..."
           />
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

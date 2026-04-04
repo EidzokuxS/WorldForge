@@ -8,6 +8,7 @@ import type { IpResearchContext, PremiseDivergence } from "@worldforge/shared";
 import { LORE_CATEGORIES } from "./types.js";
 import type { WorldScaffold, ExtractedLoreCard } from "./types.js";
 import {
+  buildCharacterStartGuardrail,
   buildIpContextBlock,
   buildKnownIpGenerationContract,
   buildPremiseDivergenceBlock,
@@ -80,6 +81,7 @@ export async function extractLoreCards(
     premiseDivergence ?? null,
     "lore cards",
   );
+  const characterStartGuardrail = buildCharacterStartGuardrail();
 
   const ipFactsSection =
     ipContext?.keyFacts && ipContext.keyFacts.length > 0
@@ -94,7 +96,8 @@ export async function extractLoreCards(
   const prompt = `You are a world encyclopedia compiler. Extract 30-50 structured lore cards from this RPG world scaffold. Each card is a database entry the game engine uses for semantic search — accuracy and specificity matter.
 
 ${context}
-${ipBlock}${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}${ipFactsSection}
+${ipBlock}${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}${ipFactsSection}${characterStartGuardrail}
+
 EXTRACTION PROCEDURE:
 1. Create one "location" card per scaffold location. term = location name. definition = 1-2 sentence factual summary (geography, population, function). Do NOT copy the scaffold description verbatim — summarize.
 2. Create one "npc" card per scaffold NPC. term = character name. definition = their role and single most important trait.
