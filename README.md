@@ -13,7 +13,7 @@ No main quest. The world evolves independently: key characters pursue their own 
 - **Tag system.** Characters, NPCs, locations, factions, items — everything is described by semantic tags. Only numeric value: HP (1–5)
 - **Soft-fail.** Nothing is blocked. A peasant can attempt to cast a fireball — they'll get a near-zero chance and the GM will narrate the humiliating failure
 - **Living world.** Key NPCs act autonomously: speak, move, pursue goals. Factions run macro-ticks: seize territories, declare wars
-- **World generation.** 5-step pipeline: IP research → World DNA → locations/factions/NPCs → lore cards → player character
+- **World generation.** 9-stage pipeline: IP research → World DNA → locations → factions → NPCs → inter-stage validation → lore cards → player character
 - **Semantic memory.** LanceDB stores episodic events and lore cards. Context assembly respects token budgets
 - **Character import.** Full SillyTavern V2/V3 card support (JSON and PNG)
 - **25+ LLM providers.** OpenAI, Anthropic, OpenRouter, Ollama, LM Studio, vLLM, and more via Vercel AI SDK
@@ -65,7 +65,7 @@ Configured via **Settings → Providers** in the UI.
 | OpenAI | api.openai.com | gpt-4o, gpt-4o-mini | Cloud |
 | Anthropic | api.anthropic.com | claude-sonnet, claude-haiku | Cloud |
 | OpenRouter | openrouter.ai/api/v1 | any of 200+ models | Cloud (multi) |
-| Z.AI (GLM) | api.minimax.io/anthropic | glm-4.7-flash | Cloud |
+| Z.AI (GLM) | api.z.ai | glm-4.7-flash | Cloud |
 | Ollama | localhost:11434 | llama3, mistral | Local |
 | LM Studio | localhost:1234 | any GGUF | Local |
 
@@ -131,13 +131,15 @@ Factions run macro-ticks every N in-game days: seize territories, generate world
 
 ### World Generation
 
-5-step pipeline with real-time SSE progress:
+9-stage pipeline with real-time SSE progress:
 
-1. **Research** (optional) — for known IPs: DuckDuckGo MCP search + LLM fallback
+1. **Research** (optional) — for known IPs: Brave web search + LLM fallback
 2. **World DNA** (optional) — 6 uniqueness categories: geographic archetype, political structure, central conflict, cultural flavor, environment, wildcard element
-3. **Scaffold** — AI generates locations, factions, NPCs constrained by DNA
-4. **Lore cards** — 30–50 knowledge entries auto-extracted and stored in LanceDB
-5. **Player character** — 3 modes: text description, AI generation, V2/V3 card import
+3. **Worldbook composition** (optional) — multi-source worldbook support with LLM-based primary/supplementary source detection and entry filtering
+4. **Scaffold** — AI generates locations, factions, NPCs one entity at a time, constrained by DNA and worldbook context
+5. **Validation** — Judge model runs inter-stage and cross-stage consistency checks (bounded 3-round loops)
+6. **Lore cards** — category-specific extraction (locations, factions, NPCs, concepts) stored in LanceDB
+7. **Player character** — 3 modes: text description, AI generation, V2/V3 card import
 
 ### Memory & Context
 
@@ -188,7 +190,8 @@ worldforge/
 │   ├── components/
 │   │   ├── game/               ← NarrativeLog, ActionBar, OraclePanel, CharacterPanel,
 │   │   │                         LocationPanel, LorePanel, CheckpointPanel, QuickActions
-│   │   ├── title/              ← TitleScreen, NewCampaignDialog
+│   │   ├── title/              ← TitleScreen, new-campaign-dialog
+│   │   ├── campaign-new/       ← concept-workspace, dna-workspace
 │   │   ├── character-creation/ ← CharacterForm, CharacterCard
 │   │   └── world-review/       ← PremiseSection, LocationsSection, FactionsSection,
 │   │                             NpcsSection, LoreSection
@@ -258,17 +261,16 @@ npm --prefix backend run db:push      # Apply migrations
 | Branch | Purpose |
 |--------|---------|
 | `main` | Stable releases — always working |
-| `develop` | Active development — PRs merge here |
-| `feature/*` | New features (`feature/image-gen-v2`) |
-| `fix/*` | Bug fixes (`fix/oracle-timeout`) |
+| `develop` | Mirrors main after squash-merge |
+| `codex/*` | Active development branches |
 
 ### Workflow
 
 1. Fork the repo
-2. Create a branch from `develop`:
+2. Create a branch from `main`:
    ```bash
-   git checkout develop
-   git checkout -b feature/your-feature
+   git checkout main
+   git checkout -b codex/your-feature
    ```
 3. Make changes, commit with conventional commits:
    ```
@@ -276,8 +278,7 @@ npm --prefix backend run db:push      # Apply migrations
    fix: Oracle timeout on slow providers
    refactor: extract prompt builder into separate module
    ```
-4. Push and open a PR against `develop`
-5. After review → merge to `develop` → periodically release to `main`
+4. Squash-merge into `main`, force-push `develop` to match
 
 ### Code Guidelines
 
