@@ -134,7 +134,13 @@ app.post("/suggest-seeds", async (c) => {
     let ipContext = null;
     if (result.data.selectedWorldbooks?.length) {
       debugOperation.setLabel("Composing selected worldbooks...");
-      ipContext = composeSelectedWorldbooks(result.data.selectedWorldbooks).ipContext;
+      const composed = await composeSelectedWorldbooks(result.data.selectedWorldbooks, result.data.premise);
+      ipContext = composed.ipContext;
+      log.info("suggest-seeds: composed worldbooks", {
+        hasSourceGroups: !!ipContext.sourceGroups,
+        sourceGroupCount: ipContext.sourceGroups?.length ?? 0,
+        totalKeyFacts: ipContext.keyFacts.length,
+      });
     } else if (result.data.worldbookEntries?.length) {
       debugOperation.setLabel("Converting WorldBook into generation context...");
       ipContext = worldbookToIpContext(result.data.worldbookEntries, result.data.name ?? "Worldbook");
@@ -265,7 +271,13 @@ app.post("/generate", async (c) => {
           const config = readCampaignConfig(campaignId);
           if (config.worldbookSelection?.length) {
             debugOperation?.setLabel("Composing saved worldbook selection...");
-            ipContext = composeSelectedWorldbooks(config.worldbookSelection).ipContext;
+            const composed = await composeSelectedWorldbooks(config.worldbookSelection, campaign.premise);
+            ipContext = composed.ipContext;
+            log.info("generate: composed worldbooks", {
+              hasSourceGroups: !!ipContext.sourceGroups,
+              sourceGroupCount: ipContext.sourceGroups?.length ?? 0,
+              totalKeyFacts: ipContext.keyFacts.length,
+            });
             saveIpContext(campaignId, ipContext);
             log.info(
               `Composed saved worldbook selection for campaign ${campaignId} (${ipContext.keyFacts.length} facts)`,

@@ -21,12 +21,20 @@ export interface GenerateScaffoldRequest {
   premiseDivergence?: PremiseDivergence | null;
   /** Research config for sufficiency checks — provider + API keys. */
   research?: ResearchConfig;
+  /** Optional Judge role for inter-stage validation. If not provided, validation is skipped. */
+  judgeRole?: ResolvedRole;
 }
 
 export interface GenerationProgress {
   step: number;
   totalSteps: number;
   label: string;
+  /** Current entity index within stage (0-based) */
+  subStep?: number;
+  /** Total entities in stage */
+  subTotal?: number;
+  /** Entity name or validation round label */
+  subLabel?: string;
 }
 
 export interface ScaffoldLocation {

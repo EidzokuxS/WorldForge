@@ -65,22 +65,19 @@ describe("worldgen scaffold step resilience", () => {
           ],
         },
       })
+      // Per-entity detail calls (1 per location)
       .mockResolvedValueOnce({
         object: {
-          locations: [
-            {
-              name: "Observation Deck",
-              description: "A cold ring of windows and consoles aimed at the dark beyond. Operators parse weak signals here while the station listens for impossible transmissions.",
-              tags: ["Cold", "Technical", "Exposed"],
-              connectedTo: ["Maintenance Tunnels"],
-            },
-            {
-              name: "Maintenance Tunnels",
-              description: "Narrow service corridors run behind the walls and beneath the deck plating. Engineers and smugglers both use them when they need to move unseen.",
-              tags: ["Claustrophobic", "Industrial", "Hidden"],
-              connectedTo: ["Observation Deck"],
-            },
-          ],
+          description: "A cold ring of windows and consoles aimed at the dark beyond. Operators parse weak signals here while the station listens for impossible transmissions.",
+          tags: ["Cold", "Technical", "Exposed"],
+          connectedTo: ["Maintenance Tunnels"],
+        },
+      })
+      .mockResolvedValueOnce({
+        object: {
+          description: "Narrow service corridors run behind the walls and beneath the deck plating. Engineers and smugglers both use them when they need to move unseen.",
+          tags: ["Claustrophobic", "Industrial", "Hidden"],
+          connectedTo: ["Observation Deck"],
         },
       });
 
@@ -107,17 +104,13 @@ describe("worldgen scaffold step resilience", () => {
           ],
         },
       })
+      // Per-entity detail call (1 faction)
       .mockResolvedValueOnce({
         object: {
-          factions: [
-            {
-              name: "Station Authority",
-              tags: ["Bureaucratic", "Security-minded"],
-              goals: ["Contain knowledge of the anomalous transmissions"],
-              assets: ["Security teams", "Communications blackout protocols"],
-              territoryNames: ["Observation Deck"],
-            },
-          ],
+          tags: ["Bureaucratic", "Security-minded"],
+          goals: ["Contain knowledge of the anomalous transmissions"],
+          assets: ["Security teams", "Communications blackout protocols"],
+          territoryNames: ["Observation Deck"],
         },
       });
 
@@ -245,17 +238,13 @@ describe("worldgen scaffold step resilience", () => {
           ],
         },
       })
+      // Per-entity detail call (1 location)
       .mockResolvedValueOnce({
         object: {
-          locations: [
-            {
-              name: "Signal Base",
-              description:
-                "A wind-battered research compound full of listening towers and improvised labs. Scientists and support crews coordinate the region's signal sweeps from here.",
-              tags: ["Cold", "Remote", "Technical"],
-              connectedTo: [],
-            },
-          ],
+          description:
+            "A wind-battered research compound full of listening towers and improvised labs. Scientists and support crews coordinate the region's signal sweeps from here.",
+          tags: ["Cold", "Remote", "Technical"],
+          connectedTo: [],
         },
       });
 
@@ -317,17 +306,13 @@ describe("worldgen scaffold step resilience", () => {
           ],
         },
       })
+      // Per-entity detail call (1 faction)
       .mockResolvedValueOnce({
         object: {
-          factions: [
-            {
-              name: "Konohagakure",
-              tags: ["Militaristic", "Disciplined"],
-              goals: ["Contain the fallout from Sakura's altered alliances"],
-              assets: ["ANBU", "Village administration"],
-              territoryNames: ["Konohagakure"],
-            },
-          ],
+          tags: ["Militaristic", "Disciplined"],
+          goals: ["Contain the fallout from Sakura's altered alliances"],
+          assets: ["ANBU", "Village administration"],
+          territoryNames: ["Konohagakure"],
         },
       });
 

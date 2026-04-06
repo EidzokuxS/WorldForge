@@ -8,9 +8,10 @@ import {
   buildPremiseDivergenceBlock,
   buildStopSlopRules,
   formatNameList,
+  reportSubProgress,
 } from "./prompt-utils.js";
 import type { IpResearchContext } from "../ip-researcher.js";
-import type { GenerateScaffoldRequest, ScaffoldFaction } from "../types.js";
+import type { GenerateScaffoldRequest, GenerationProgress, ScaffoldFaction } from "../types.js";
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -23,18 +24,16 @@ const factionPlanSchema = z.object({
   })).max(6),
 });
 
-const factionDetailSchema = z.object({
-  factions: z.array(z.object({
-    name: z.string(),
-    tags: z.array(z.string()).describe("Faction traits: [Militaristic], [Secretive], [Trade-focused]"),
-    goals: z.array(z.string()).min(1).max(3).describe("1-3 concrete faction goals"),
-    assets: z.array(z.string()).min(1).max(3).describe("1-3 faction resources or advantages"),
-    territoryNames: z.array(z.string()).describe("Controlled locations from the known locations list"),
-  })),
+/** Single-entity detail schema -- NO name field (review fix #6: planned name is authoritative). */
+const factionDetailSingleSchema = z.object({
+  tags: z.array(z.string()).describe("Faction traits: [Militaristic], [Secretive], [Trade-focused]"),
+  goals: z.array(z.string()).min(1).max(3).describe("1-3 concrete faction goals"),
+  assets: z.array(z.string()).min(1).max(3).describe("1-3 faction resources or advantages"),
+  territoryNames: z.array(z.string()).describe("Controlled locations from the known locations list"),
 });
 
 // ---------------------------------------------------------------------------
-// generateFactionsStep — plan + detail mini-calls
+// generateFactionsStep -- plan + per-entity detail calls with accumulator
 // ---------------------------------------------------------------------------
 
 export async function generateFactionsStep(
@@ -43,6 +42,9 @@ export async function generateFactionsStep(
   locationNames: string[],
   ipContext: IpResearchContext | null,
   additionalInstruction?: string,
+  onProgress?: (progress: GenerationProgress) => void,
+  progressStep?: number,
+  progressTotalSteps?: number,
 ): Promise<ScaffoldFaction[]> {
   const ipBlock = buildIpContextBlock(ipContext);
   const premiseDivergence = req.premiseDivergence ?? null;
@@ -94,11 +96,29 @@ ${buildStopSlopRules()}`,
 
   const planned = plan.object.factions;
 
-  // --- Call 2: DETAIL (all factions in one call — typically 3-6, fits in one batch) ---
-  const detail = await generateObject({
-    model: createModel(req.role.provider),
-    schema: factionDetailSchema,
-    prompt: `You are writing a faction reference sheet for a text RPG engine. The engine reads these fields mechanically — be precise.
+  // --- Calls 2+: DETAIL (1 entity per LLM call with sequential accumulator) ---
+  const detailed: ScaffoldFaction[] = [];
+
+  for (let i = 0; i < planned.length; i++) {
+    const entity = planned[i];
+    const step = progressStep ?? 0;
+    const total = progressTotalSteps ?? 1;
+
+    if (onProgress) {
+      reportSubProgress(onProgress, step, total, "Forging factions...", i, planned.length, `Faction: ${entity.name}`);
+    }
+
+    // Full detail of ALL previously generated factions (per D-02)
+    const previousSummary = detailed.length > 0
+      ? `ALREADY DETAILED FACTIONS:\n${detailed.map((f) =>
+          `- ${f.name}: Goals: ${f.goals.join("; ")} | Assets: ${f.assets.join("; ")} | Territory: ${f.territoryNames.join(", ")} [Tags: ${f.tags.join(", ")}]`
+        ).join("\n")}\n`
+      : "";
+
+    const detail = await generateObject({
+      model: createModel(req.role.provider),
+      schema: factionDetailSingleSchema,
+      prompt: `You are writing a faction reference sheet for a text RPG engine. The engine reads these fields mechanically -- be precise.
 
 WORLD PREMISE:
 ${refinedPremise}
@@ -106,23 +126,33 @@ ${refinedPremise}
 KNOWN LOCATIONS: ${locationNames.join(", ")}
 ${ipBlock}
 ${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}
-FACTIONS TO DETAIL:
-${planned.map((f) => `- ${f.name}: ${f.purpose}`).join("\n")}
+ALL FACTIONS IN THIS WORLD: ${planned.map(f => f.name).join(", ")}
+
+${previousSummary}FACTION TO DETAIL NOW: "${entity.name}"
+Purpose: ${entity.purpose}
 
 FIELD INSTRUCTIONS:
 - tags: Mechanical trait tags. Format: [Adjective]. Examples: [Militaristic], [Secretive], [Wealthy], [Religious], [Expansionist], [Decentralized]. 2-4 tags per faction.
-- goals: 1-3 SPECIFIC objectives with concrete targets. Bad: "Expand influence." Good: "Annex the northern mining towns before winter." Each goal names a place, person, resource, or deadline.
-- assets: 1-3 concrete resources. Not "great power" — name the specific army, spy network, trade fleet, artifact, or territory they control.
-- territoryNames: Locations this faction controls or operates from. ONLY use names from this list: ${locationNames.join(", ")}. A faction may control 0 locations if it operates covertly or is nomadic.${ipContext ? `\n- For known-IP factions: start from the canonical faction, then update only the goals, assets, territory, or alliances that PREMISE DIVERGENCE changes. Preserve untouched canon exactly.` : ""}
+- goals: 1-3 SPECIFIC objectives with concrete targets. Bad: "Expand influence." Good: "Annex the northern mining towns before winter." Each goal names a place, person, resource, or deadline. Consider goals of ALREADY DETAILED factions above to ensure rival dynamics.
+- assets: 1-3 concrete resources. Not "great power" -- name the specific army, spy network, trade fleet, artifact, or territory they control.
+- territoryNames: Locations this faction controls or operates from. ONLY use names from this list: ${locationNames.join(", ")}. A faction may control 0 locations if it operates covertly or is nomadic. Avoid claiming territory already controlled by factions in ALREADY DETAILED above unless the faction explicitly contests it.${ipContext ? `\n- For known-IP factions: start from the canonical faction, then update only the goals, assets, territory, or alliances that PREMISE DIVERGENCE changes. Preserve untouched canon exactly.` : ""}
 
 ${buildStopSlopRules()}`,
-    temperature: req.role.temperature,
-    maxOutputTokens: req.role.maxTokens,
-  });
+      temperature: req.role.temperature,
+      maxOutputTokens: req.role.maxTokens,
+    });
 
-  // Filter territoryNames to only include valid location names
-  return detail.object.factions.map((f) => ({
-    ...f,
-    territoryNames: f.territoryNames.filter((t) => locationNames.includes(t)),
-  }));
+    // REVIEW FIX #6: Force planned name as authoritative
+    detailed.push({
+      name: entity.name,  // From plan, NOT from LLM output
+      tags: detail.object.tags,
+      goals: detail.object.goals,
+      assets: detail.object.assets,
+      territoryNames: detail.object.territoryNames.filter((t) =>
+        locationNames.some(valid => valid.toLowerCase() === t.toLowerCase())
+      ),
+    });
+  }
+
+  return detailed;
 }

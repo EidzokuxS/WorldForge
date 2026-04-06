@@ -26,7 +26,11 @@ export function ConceptWorkspace({ onContinue }: ConceptWorkspaceProps) {
   const activeProgressLabel = w.generationProgress?.label ?? (w.isSuggesting ? "Preparing World DNA suggestions..." : null);
   const activeProgressStep =
     w.generationProgress && w.generationProgress.totalSteps > 0
-      ? `Step ${w.generationProgress.step} of ${w.generationProgress.totalSteps}`
+      ? `Step ${w.generationProgress.step + 1} of ${w.generationProgress.totalSteps}`
+      : null;
+  const activeSubLabel =
+    w.generationProgress?.subStep !== undefined && w.generationProgress?.subTotal !== undefined
+      ? `${w.generationProgress.subLabel ?? ""} (${w.generationProgress.subStep + 1}/${w.generationProgress.subTotal})`
       : null;
   const createLabel = w.isGenerating
     ? "Generating World..."
@@ -204,7 +208,15 @@ export function ConceptWorkspace({ onContinue }: ConceptWorkspaceProps) {
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               {activeProgressLabel}
               {activeProgressStep ? <span>{activeProgressStep}</span> : null}
+              {activeSubLabel ? (
+                <span className="text-xs text-zinc-600">{activeSubLabel}</span>
+              ) : null}
             </span>
+          ) : null}
+          {w.generationError ? (
+            <pre className="max-h-24 max-w-[60vw] overflow-auto whitespace-pre-wrap rounded border border-red-900/40 bg-red-950/30 px-3 py-2 text-xs text-red-400 select-all">
+              {w.generationError}
+            </pre>
           ) : null}
         </div>
         <div className="flex gap-2">

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createModel } from "../../ai/index.js";
 import type { IpResearchContext } from "@worldforge/shared";
 import { fromLegacyScaffoldNpc } from "../../character/record-adapters.js";
-import type { GenerateScaffoldRequest, ScaffoldNpc } from "../types.js";
+import type { GenerateScaffoldRequest, GenerationProgress, ScaffoldNpc } from "../types.js";
 import { buildCharacterPromptContract } from "../../character/prompt-contract.js";
 import {
   buildIpContextBlock,
@@ -12,6 +12,7 @@ import {
   buildPremiseDivergenceBlock,
   formatNameList,
   buildStopSlopRules,
+  reportSubProgress,
 } from "./prompt-utils.js";
 
 // ---------------------------------------------------------------------------
@@ -29,34 +30,33 @@ const npcPlanSchema = z.object({
   ),
 });
 
-const npcDetailSchema = z.object({
-  npcs: z.array(
-    z.object({
-      name: z.string(),
-      persona: z
-        .string()
-        .describe(
-          "2-3 sentences: personality, background, motivation. Concrete details, no vague archetypes."
-        ),
-      tags: z
-        .array(z.string())
-        .describe(
-          "Character traits and skills: [Master Swordsman], [Cynical], [Wealthy]"
-        ),
-      goals: z
-        .union([
-          z.object({
-            shortTerm: z.array(z.string()).min(1).max(3),
-            longTerm: z.array(z.string()).min(1).max(3),
-          }),
-          z.object({
-            short_term: z.array(z.string()).min(1).max(3),
-            long_term: z.array(z.string()).min(1).max(3),
-          }).transform((g) => ({ shortTerm: g.short_term, longTerm: g.long_term })),
-        ])
-        .catch({ shortTerm: ["Survive"], longTerm: ["Find purpose"] }),
-    })
-  ),
+/**
+ * Per-entity detail schema. CRITICAL: No `name` field.
+ * The planned name is authoritative (review fix #6).
+ */
+const npcDetailSingleSchema = z.object({
+  persona: z
+    .string()
+    .describe(
+      "2-3 sentences: personality, background, motivation. Concrete details, no vague archetypes."
+    ),
+  tags: z
+    .array(z.string())
+    .describe(
+      "Character traits and skills: [Master Swordsman], [Cynical], [Wealthy]"
+    ),
+  goals: z
+    .union([
+      z.object({
+        shortTerm: z.array(z.string()).min(1).max(3),
+        longTerm: z.array(z.string()).min(1).max(3),
+      }),
+      z.object({
+        short_term: z.array(z.string()).min(1).max(3),
+        long_term: z.array(z.string()).min(1).max(3),
+      }).transform((g) => ({ shortTerm: g.short_term, longTerm: g.long_term })),
+    ])
+    .catch({ shortTerm: ["Survive"], longTerm: ["Find purpose"] }),
 });
 
 // ---------------------------------------------------------------------------
@@ -227,83 +227,6 @@ ${buildStopSlopRules()}`;
 }
 
 // ---------------------------------------------------------------------------
-// Detail calls (batches of 4-5)
-// ---------------------------------------------------------------------------
-
-async function detailNpcBatch(
-  req: GenerateScaffoldRequest,
-  refinedPremise: string,
-  locationNames: string[],
-  factionNames: string[],
-  ipContext: IpResearchContext | null,
-  batch: PlannedNpc[],
-  previouslyDetailed: Array<{ name: string; tier: string; persona: string }>,
-): Promise<DetailedNpc[]> {
-  const ipBlock = buildIpContextBlock(ipContext);
-  const premiseDivergence = req.premiseDivergence ?? null;
-  const divergenceBlock = buildPremiseDivergenceBlock(premiseDivergence);
-  const knownIpContract = buildKnownIpGenerationContract(
-    ipContext,
-    premiseDivergence,
-    "npc details",
-  );
-
-  const previousSection =
-    previouslyDetailed.length > 0
-      ? `ALREADY DETAILED NPCs:\n${previouslyDetailed.map((n) => `- ${n.name} (${n.tier}): ${n.persona.slice(0, 60)}`).join("\n")}\n`
-      : "";
-
-  const ipPersonaRule = ipContext
-    ? `- For known-IP characters: describe their canonical personality and backstory as modified by the present world state. Keep unaffected canon details intact, but do NOT reintroduce replaced protagonists or reverted relationships unless PREMISE DIVERGENCE explicitly says they coexist.`
-    : "";
-
-  const prompt = `You are detailing NPCs for a text RPG engine. The engine reads these fields mechanically — follow the format exactly.
-
-WORLD PREMISE:
-${refinedPremise}
-
-KNOWN LOCATIONS: ${locationNames.join(", ")}
-KNOWN FACTIONS: ${factionNames.join(", ")}
-${ipBlock}
-${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}
-${previousSection}
-NPCs TO DETAIL NOW:
-${batch.map((b) => `- ${b.name} (${b.tier}): ${b.role}`).join("\n")}
-
-SHARED CONTRACT:
-${WORLDGEN_NPC_DETAIL_CONTRACT}
-Project the canonical character facets into scaffold-compatible fields:
-- profile and world role should drive persona.
-- socialContext should stay consistent with locationName and factionName.
-- motivations should drive goals.shortTerm and goals.longTerm.
-- tags are derived runtime tags: a compatibility view over the canonical record, not a separate schema.
-
-FIELD INSTRUCTIONS:
-- persona: Exactly 2-3 sentences. Sentence 1 = who they are and their background. Sentence 2 = personality and how they treat others. Sentence 3 (optional) = a specific skill, secret, or relationship that matters for gameplay. Never write "mysterious" or "enigmatic" — state concrete facts.
-- tags: Gameplay-relevant traits and skills. Format: [Trait] or [Skill]. Examples: [Master Swordsman], [Cynical], [Wealthy], [Poisoner], [Charismatic], [Illiterate]. 3-5 tags per NPC.
-- goals: An object with EXACTLY two keys: "shortTerm" and "longTerm".
-  - "shortTerm": array of 1-2 strings. Current objectives the character is actively pursuing RIGHT NOW. Each goal names a specific action, target, or deadline.
-  - "longTerm": array of 1-2 strings. Life ambitions or multi-year plans. Each goal names a specific outcome, not a vague aspiration.
-  - Example: { "shortTerm": ["Recover the stolen shipment before the festival"], "longTerm": ["Become guild master of the Merchants' Circle"] }
-  - CRITICAL: The keys MUST be "shortTerm" and "longTerm" (camelCase). NOT "short_term", NOT "short-term".
-${ipPersonaRule}
-
-${buildStopSlopRules()}`;
-
-  const result = await generateObject({
-    model: createModel(req.role.provider),
-    schema: z.object({
-      npcs: npcDetailSchema.shape.npcs.min(1).max(batch.length),
-    }),
-    prompt,
-    temperature: req.role.temperature,
-    maxOutputTokens: req.role.maxTokens,
-  });
-
-  return result.object.npcs;
-}
-
-// ---------------------------------------------------------------------------
 // Validation helpers
 // ---------------------------------------------------------------------------
 
@@ -345,18 +268,6 @@ function validateFaction(
 }
 
 // ---------------------------------------------------------------------------
-// Batch utility
-// ---------------------------------------------------------------------------
-
-function chunk<T>(arr: readonly T[], size: number): T[][] {
-  const result: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) {
-    result.push(arr.slice(i, i + size));
-  }
-  return result;
-}
-
-// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -369,6 +280,10 @@ function chunk<T>(arr: readonly T[], size: number): T[][] {
  * Supporting NPCs (3-5): gap-filling characters (merchants, informants, etc.)
  *
  * Total: 10-15 NPCs, each with a `tier` field.
+ *
+ * Detail calls are per-entity (1 NPC per LLM call) with a cross-tier
+ * accumulator so each subsequent NPC sees full details of all previously
+ * detailed NPCs.
  */
 export async function generateNpcsStep(
   req: GenerateScaffoldRequest,
@@ -377,6 +292,9 @@ export async function generateNpcsStep(
   factionNames: string[],
   ipContext: IpResearchContext | null,
   additionalInstruction?: string,
+  onProgress?: (progress: GenerationProgress) => void,
+  progressStep?: number,
+  progressTotalSteps?: number,
 ): Promise<ScaffoldNpc[]> {
   // Phase A: Plan key NPCs
   const keyPlanned = await planKeyNpcs(
@@ -402,39 +320,106 @@ export async function generateNpcsStep(
   // Combine all planned NPCs
   const allPlanned: PlannedNpc[] = [...keyPlanned, ...supportingPlanned];
 
-  // Phase C: Detail all NPCs in batches of 4-5
-  const batches = chunk(allPlanned, 5);
+  // Compute shared prompt blocks once (constant for entire step)
+  const ipBlock = buildIpContextBlock(ipContext);
+  const premiseDivergence = req.premiseDivergence ?? null;
+  const divergenceBlock = buildPremiseDivergenceBlock(premiseDivergence);
+  const knownIpContract = buildKnownIpGenerationContract(
+    ipContext,
+    premiseDivergence,
+    "npc details",
+  );
+  const ipPersonaRule = ipContext
+    ? `- For known-IP characters: describe their canonical personality and backstory as modified by the present world state. Keep unaffected canon details intact, but do NOT reintroduce replaced protagonists or reverted relationships unless PREMISE DIVERGENCE explicitly says they coexist.`
+    : "";
+
+  // Phase C: Detail all NPCs sequentially (per-entity, not batched)
   const allDetailed: DetailedNpc[] = [];
   const previouslyDetailed: Array<{
     name: string;
     tier: string;
     persona: string;
+    tags: string[];
+    goals: { shortTerm: string[]; longTerm: string[] };
   }> = [];
 
-  for (const batch of batches) {
-    const detailed = await detailNpcBatch(
-      req,
-      refinedPremise,
-      locationNames,
-      factionNames,
-      ipContext,
-      batch,
-      previouslyDetailed,
-    );
+  for (let i = 0; i < allPlanned.length; i++) {
+    const npc = allPlanned[i]!;
+    const step = progressStep ?? 0;
+    const total = progressTotalSteps ?? 1;
 
-    allDetailed.push(...detailed);
-
-    // Track for subsequent batches
-    for (const d of detailed) {
-      const planEntry = batch.find(
-        (p) => p.name.toLowerCase() === d.name.toLowerCase(),
+    if (onProgress) {
+      reportSubProgress(
+        onProgress,
+        step,
+        total,
+        "Creating NPCs...",
+        i,
+        allPlanned.length,
+        `NPC: ${npc.name} (${npc.tier})`,
       );
-      previouslyDetailed.push({
-        name: d.name,
-        tier: planEntry?.tier ?? "supporting",
-        persona: d.persona,
-      });
     }
+
+    // Full detail of ALL previously detailed NPCs (per D-02) -- both key and supporting
+    const previousSection =
+      previouslyDetailed.length > 0
+        ? `ALREADY DETAILED NPCs:\n${previouslyDetailed.map((n) =>
+            `- ${n.name} (${n.tier}): ${n.persona} [Tags: ${n.tags.join(", ")}] [Goals: ${n.goals.shortTerm.join("; ")} / ${n.goals.longTerm.join("; ")}]`
+          ).join("\n")}\n`
+        : "";
+
+    // REVIEW FIX #3 (D-05): Include ALL canonical NPC, location, and faction names
+    const detail = await generateObject({
+      model: createModel(req.role.provider),
+      schema: npcDetailSingleSchema,
+      prompt: `You are detailing a single NPC for a text RPG engine. The engine reads these fields mechanically -- follow the format exactly.
+
+WORLD PREMISE:
+${refinedPremise}
+
+KNOWN LOCATIONS: ${locationNames.join(", ")}
+KNOWN FACTIONS: ${factionNames.join(", ")}
+ALL NPCs IN THIS WORLD: ${allPlanned.map((n) => `${n.name} (${n.tier})`).join(", ")}
+${ipBlock}
+${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}
+${previousSection}
+NPC TO DETAIL NOW: "${npc.name}" (${npc.tier})
+Role: ${npc.role}
+Location: ${npc.locationName}, Faction: ${npc.factionName ?? "none"}
+
+SHARED CONTRACT:
+${WORLDGEN_NPC_DETAIL_CONTRACT}
+
+FIELD INSTRUCTIONS:
+- persona: Exactly 2-3 sentences. Sentence 1 = who they are and their background. Sentence 2 = personality and how they treat others. Sentence 3 (optional) = a specific skill, secret, or relationship that matters for gameplay. Never write "mysterious" or "enigmatic" -- state concrete facts. Consider relationships with ALREADY DETAILED NPCs above -- reference them by name where relevant.
+- tags: Gameplay-relevant traits and skills. Format: [Trait] or [Skill]. Examples: [Master Swordsman], [Cynical], [Wealthy], [Poisoner], [Charismatic], [Illiterate]. 3-5 tags per NPC.
+- goals: An object with EXACTLY two keys: "shortTerm" and "longTerm".
+  - "shortTerm": array of 1-2 strings. Current objectives the character is actively pursuing RIGHT NOW.
+  - "longTerm": array of 1-2 strings. Life ambitions or multi-year plans.
+  - CRITICAL: The keys MUST be "shortTerm" and "longTerm" (camelCase).
+${ipPersonaRule}
+
+${buildStopSlopRules()}`,
+      temperature: req.role.temperature,
+      maxOutputTokens: req.role.maxTokens,
+    });
+
+    // REVIEW FIX #6: Force planned name as authoritative
+    allDetailed.push({
+      name: npc.name, // From plan, NOT from LLM output
+      persona: detail.object.persona,
+      tags: detail.object.tags,
+      goals: detail.object.goals,
+    });
+
+    // Track for subsequent calls -- FULL detail, not truncated
+    previouslyDetailed.push({
+      name: npc.name, // Forced from plan
+      tier: npc.tier,
+      persona: detail.object.persona,
+      tags: detail.object.tags,
+      goals: detail.object.goals,
+    });
   }
 
   // Merge plan + detail data

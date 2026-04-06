@@ -6,16 +6,21 @@ import { createLogger } from "../lib/index.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import type { IpResearchContext, PremiseDivergence } from "@worldforge/shared";
 import { LORE_CATEGORIES } from "./types.js";
-import type { WorldScaffold, ExtractedLoreCard } from "./types.js";
+import type { WorldScaffold, ExtractedLoreCard, GenerationProgress, LoreCategory } from "./types.js";
 import {
   buildCharacterStartGuardrail,
   buildIpContextBlock,
   buildKnownIpGenerationContract,
   buildPremiseDivergenceBlock,
   buildStopSlopRules,
+  reportSubProgress,
 } from "./scaffold-steps/prompt-utils.js";
 
 const log = createLogger("lore-extractor");
+
+// ---------------------------------------------------------------------------
+// Schemas
+// ---------------------------------------------------------------------------
 
 const loreCardSchema = z.object({
   term: z.string().describe("Short unique name or title (1-5 words)"),
@@ -25,11 +30,36 @@ const loreCardSchema = z.object({
   category: z.enum(LORE_CATEGORIES),
 });
 
-const loreExtractionSchema = z.object({
-  loreCards: z.array(loreCardSchema).min(20).max(60),
+const locationLoreSchema = z.object({
+  loreCards: z.array(loreCardSchema).min(3).max(15),
+});
+
+const factionLoreSchema = z.object({
+  loreCards: z.array(loreCardSchema).min(3).max(15),
+});
+
+const npcLoreSchema = z.object({
+  loreCards: z.array(loreCardSchema).min(3).max(15),
+});
+
+const conceptLoreSchema = z.object({
+  loreCards: z.array(loreCardSchema).min(5).max(20),
 });
 
 export type { ExtractedLoreCard };
+
+// ---------------------------------------------------------------------------
+// Allowed categories per extraction call (review fix #5)
+// ---------------------------------------------------------------------------
+
+const LOCATION_LORE_CATEGORIES: LoreCategory[] = ["location", "event"];
+const FACTION_LORE_CATEGORIES: LoreCategory[] = ["faction", "rule"];
+const NPC_LORE_CATEGORIES: LoreCategory[] = ["npc", "ability"];
+const CONCEPT_LORE_CATEGORIES: LoreCategory[] = ["concept", "rule", "ability", "item", "event"];
+
+// ---------------------------------------------------------------------------
+// Scaffold context formatter
+// ---------------------------------------------------------------------------
 
 function formatScaffoldContext(scaffold: WorldScaffold): string {
   const locationLines = scaffold.locations
@@ -66,22 +96,36 @@ KEY NPCs:
 ${npcLines}`;
 }
 
-export async function extractLoreCards(
+// ---------------------------------------------------------------------------
+// Shared prompt blocks interface
+// ---------------------------------------------------------------------------
+
+interface SharedPromptBlocks {
+  context: string;
+  ipBlock: string;
+  divergenceBlock: string;
+  knownIpContract: string;
+  ipQualityRule: string;
+  ipFactsSection: string;
+  characterStartGuardrail: string;
+  slopRules: string;
+}
+
+function buildSharedBlocks(
   scaffold: WorldScaffold,
-  role: ResolvedRole,
-  fallbackRole?: ResolvedRole,
-  ipContext?: IpResearchContext | null,
-  premiseDivergence?: PremiseDivergence | null,
-): Promise<ExtractedLoreCard[]> {
+  ipContext: IpResearchContext | null,
+  premiseDivergence: PremiseDivergence | null,
+): SharedPromptBlocks {
   const context = formatScaffoldContext(scaffold);
-  const ipBlock = buildIpContextBlock(ipContext ?? null);
-  const divergenceBlock = buildPremiseDivergenceBlock(premiseDivergence ?? null);
+  const ipBlock = buildIpContextBlock(ipContext);
+  const divergenceBlock = buildPremiseDivergenceBlock(premiseDivergence);
   const knownIpContract = buildKnownIpGenerationContract(
-    ipContext ?? null,
-    premiseDivergence ?? null,
+    ipContext,
+    premiseDivergence,
     "lore cards",
   );
   const characterStartGuardrail = buildCharacterStartGuardrail();
+  const slopRules = buildStopSlopRules();
 
   const ipFactsSection =
     ipContext?.keyFacts && ipContext.keyFacts.length > 0
@@ -93,49 +137,58 @@ export async function extractLoreCards(
 - For known IPs: when PREMISE DIVERGENCE changes one role, relationship, allegiance, or institution, update only lore affected by that change. Keep untouched canon facts explicit in the lore cards.`
     : "";
 
-  const prompt = `You are a world encyclopedia compiler. Extract 30-50 structured lore cards from this RPG world scaffold. Each card is a database entry the game engine uses for semantic search — accuracy and specificity matter.
+  return {
+    context,
+    ipBlock,
+    divergenceBlock,
+    knownIpContract,
+    ipQualityRule,
+    ipFactsSection,
+    characterStartGuardrail,
+    slopRules,
+  };
+}
 
-${context}
-${ipBlock}${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}${ipFactsSection}${characterStartGuardrail}
+function buildSharedPromptHeader(blocks: SharedPromptBlocks): string {
+  return `${blocks.context}
+${blocks.ipBlock}${blocks.knownIpContract ? `${blocks.knownIpContract}\n` : ""}${blocks.divergenceBlock ? `${blocks.divergenceBlock}\n` : ""}${blocks.ipFactsSection}${blocks.characterStartGuardrail}`;
+}
 
-EXTRACTION PROCEDURE:
-1. Create one "location" card per scaffold location. term = location name. definition = 1-2 sentence factual summary (geography, population, function). Do NOT copy the scaffold description verbatim — summarize.
-2. Create one "npc" card per scaffold NPC. term = character name. definition = their role and single most important trait.
-3. Create one "faction" card per scaffold faction. term = faction name. definition = what they control and what they want.
-4. Extract 10-20 additional cards from world knowledge (not just the scaffold text):
-   - "concept" cards: power systems, magic types, technologies, social structures, economic systems.
-   - "rule" cards: physical laws, magic constraints, political laws, taboos, treaties.
-   - "ability" cards: named techniques, spells, fighting styles, special powers.
-   - "item" cards: named artifacts, weapons, resources, currencies.
-   - "event" cards: historical wars, catastrophes, treaties, discoveries that shaped the current world.
+// ---------------------------------------------------------------------------
+// Category-specific extraction functions
+// ---------------------------------------------------------------------------
 
-CARD FORMAT:
-- term: 1-5 word unique name. No articles ("the"). No generic terms ("Magic System") — use the world's own terminology.
-- definition: 1-2 factual sentences. State what it IS and what it DOES. No narrative flair, no "is said to be", no "legend has it".
-- category: one of location, npc, faction, ability, rule, concept, item, event.
-${ipQualityRule}
+const MAX_RETRIES = 2;
 
-TARGET: 30-50 cards total. Minimum: 1 per location + 1 per NPC + 1 per faction + 10 concept/ability/rule/item/event cards.
-
-${buildStopSlopRules()}`;
-
-  const MAX_RETRIES = 2;
+async function extractCategoryLore(
+  role: ResolvedRole,
+  fallbackRole: ResolvedRole | undefined,
+  prompt: string,
+  schema: z.ZodType,
+  reducedSchema: z.ZodType,
+  allowedCategories: LoreCategory[],
+  categoryLabel: string,
+): Promise<ExtractedLoreCard[]> {
   let lastError: Error | null = null;
 
+  // Primary attempts
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       const result = await generateObject({
         model: createModel(role.provider),
-        schema: loreExtractionSchema,
+        schema,
         prompt,
         temperature: role.temperature,
         maxOutputTokens: role.maxTokens,
       });
-      return result.object.loreCards;
+      // POST-FILTER: only allowed categories (review fix #5)
+      return (result.object as { loreCards: ExtractedLoreCard[] }).loreCards.filter(
+        (card) => allowedCategories.includes(card.category),
+      );
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
       log.warn(
-        `Lore extraction attempt ${attempt}/${MAX_RETRIES} failed: ${lastError.message}`
+        `${categoryLabel} lore extraction attempt ${attempt}/${MAX_RETRIES} failed: ${lastError.message}`,
       );
       if (attempt < MAX_RETRIES) {
         await new Promise((r) => setTimeout(r, 2000));
@@ -143,13 +196,9 @@ ${buildStopSlopRules()}`;
     }
   }
 
-  // If all retries failed, try with a reduced schema (min 10 instead of 20)
-  const reducedSchema = z.object({
-    loreCards: z.array(loreCardSchema).min(10).max(30),
-  });
-
+  // Reduced schema attempt
   try {
-    log.info("Attempting lore extraction with reduced card count (10-30)");
+    log.info(`Attempting ${categoryLabel} lore extraction with reduced card count`);
     const result = await generateObject({
       model: createModel(role.provider),
       schema: reducedSchema,
@@ -157,18 +206,18 @@ ${buildStopSlopRules()}`;
       temperature: role.temperature,
       maxOutputTokens: role.maxTokens,
     });
-    return result.object.loreCards;
+    return (result.object as { loreCards: ExtractedLoreCard[] }).loreCards.filter(
+      (card) => allowedCategories.includes(card.category),
+    );
   } catch (reducedError) {
     const lastPrimaryError = reducedError;
 
-    // If all primary retries failed, try with fallback model via withModelFallback
+    // Fallback model attempt
     if (fallbackRole) {
       try {
-        log.info("Attempting lore extraction with fallback model via withModelFallback");
+        log.info(`Attempting ${categoryLabel} lore extraction with fallback model`);
         return await withModelFallback(
-          // Primary already failed -- pass a guaranteed-failure thunk
           async () => { throw lastPrimaryError; },
-          // Fallback: try with fallback model + reduced schema
           async () => {
             const fbResult = await generateObject({
               model: createModel(fallbackRole.provider),
@@ -177,18 +226,183 @@ ${buildStopSlopRules()}`;
               temperature: fallbackRole.temperature,
               maxOutputTokens: fallbackRole.maxTokens,
             });
-            return fbResult.object.loreCards;
+            return (fbResult.object as { loreCards: ExtractedLoreCard[] }).loreCards.filter(
+              (card) => allowedCategories.includes(card.category),
+            );
           },
-          "lore-extraction:extractLoreCards"
+          `lore-extraction:${categoryLabel}`,
         );
       } catch (fallbackError) {
-        log.error("Lore extraction failed with fallback model too", fallbackError);
+        log.error(`${categoryLabel} lore extraction failed with fallback model too`, fallbackError);
       }
     }
 
-    throw new Error(
-      `Lore extraction failed after ${MAX_RETRIES} retries: ${lastError?.message ?? "unknown error"}. ` +
-        `Check that the Generator provider (${role.provider.model}) supports structured JSON output.`
+    // Category extraction is best-effort: log and return empty
+    log.warn(
+      `${categoryLabel} lore extraction failed entirely after all attempts: ${lastError?.message ?? "unknown"}`,
     );
+    return [];
   }
+}
+
+async function extractLocationLore(
+  role: ResolvedRole,
+  fallbackRole: ResolvedRole | undefined,
+  blocks: SharedPromptBlocks,
+): Promise<ExtractedLoreCard[]> {
+  const header = buildSharedPromptHeader(blocks);
+  const prompt = `You are a world encyclopedia compiler. Extract structured lore cards about LOCATIONS from this RPG world scaffold.
+
+${header}
+
+EXTRACTION PROCEDURE:
+1. Create one "location" card per scaffold location. term = location name. definition = 1-2 sentence factual summary (geography, population, function). Do NOT copy the scaffold description verbatim -- summarize.
+2. Add 2-5 "event" cards about location-specific historical events: battles, discoveries, disasters, founding events.
+
+CARD FORMAT:
+- term: 1-5 word unique name. No articles ("the"). No generic terms.
+- definition: 1-2 factual sentences. State what it IS and what it DOES.
+- category MUST be one of: location, event
+${blocks.ipQualityRule}
+
+${blocks.slopRules}`;
+
+  const reducedSchema = z.object({ loreCards: z.array(loreCardSchema).min(1).max(10) });
+  return extractCategoryLore(role, fallbackRole, prompt, locationLoreSchema, reducedSchema, LOCATION_LORE_CATEGORIES, "location");
+}
+
+async function extractFactionLore(
+  role: ResolvedRole,
+  fallbackRole: ResolvedRole | undefined,
+  blocks: SharedPromptBlocks,
+): Promise<ExtractedLoreCard[]> {
+  const header = buildSharedPromptHeader(blocks);
+  const prompt = `You are a world encyclopedia compiler. Extract structured lore cards about FACTIONS from this RPG world scaffold.
+
+${header}
+
+EXTRACTION PROCEDURE:
+1. Create one "faction" card per scaffold faction. term = faction name. definition = what they control and what they want.
+2. Add 2-5 "rule" cards about faction-specific laws, treaties, political systems, trade agreements, or hierarchies.
+
+CARD FORMAT:
+- term: 1-5 word unique name. No articles ("the"). No generic terms.
+- definition: 1-2 factual sentences. State what it IS and what it DOES.
+- category MUST be one of: faction, rule
+${blocks.ipQualityRule}
+
+${blocks.slopRules}`;
+
+  const reducedSchema = z.object({ loreCards: z.array(loreCardSchema).min(1).max(10) });
+  return extractCategoryLore(role, fallbackRole, prompt, factionLoreSchema, reducedSchema, FACTION_LORE_CATEGORIES, "faction");
+}
+
+async function extractNpcLore(
+  role: ResolvedRole,
+  fallbackRole: ResolvedRole | undefined,
+  blocks: SharedPromptBlocks,
+): Promise<ExtractedLoreCard[]> {
+  const header = buildSharedPromptHeader(blocks);
+  const prompt = `You are a world encyclopedia compiler. Extract structured lore cards about NPCs from this RPG world scaffold.
+
+${header}
+
+EXTRACTION PROCEDURE:
+1. Create one "npc" card per scaffold NPC. term = character name. definition = their role and single most important trait or relationship.
+2. Add 3-5 "ability" cards for named techniques, spells, fighting styles, special powers used by NPCs or available in this world.
+
+CARD FORMAT:
+- term: 1-5 word unique name. No articles ("the"). No generic terms.
+- definition: 1-2 factual sentences. State what it IS and what it DOES.
+- category MUST be one of: npc, ability
+${blocks.ipQualityRule}
+
+${blocks.slopRules}`;
+
+  const reducedSchema = z.object({ loreCards: z.array(loreCardSchema).min(1).max(10) });
+  return extractCategoryLore(role, fallbackRole, prompt, npcLoreSchema, reducedSchema, NPC_LORE_CATEGORIES, "npc");
+}
+
+async function extractConceptLore(
+  role: ResolvedRole,
+  fallbackRole: ResolvedRole | undefined,
+  blocks: SharedPromptBlocks,
+): Promise<ExtractedLoreCard[]> {
+  const header = buildSharedPromptHeader(blocks);
+  const prompt = `You are a world encyclopedia compiler. Extract structured lore cards about WORLD SYSTEMS from this RPG world scaffold.
+
+${header}
+
+EXTRACTION PROCEDURE:
+Extract 10-20 cards covering world systems, magic, technology, items, and history. Do NOT duplicate location/faction/NPC cards from other extraction passes.
+Focus on:
+- "concept" cards: power systems, magic types, technologies, social structures, economic systems.
+- "rule" cards: physical laws, magic constraints, political laws, taboos, treaties.
+- "ability" cards: named techniques, spells, fighting styles, special powers.
+- "item" cards: named artifacts, weapons, resources, currencies.
+- "event" cards: historical wars, catastrophes, treaties, discoveries that shaped the current world.
+
+CARD FORMAT:
+- term: 1-5 word unique name. No articles ("the"). No generic terms -- use the world's own terminology.
+- definition: 1-2 factual sentences. State what it IS and what it DOES.
+- category MUST be one of: concept, rule, ability, item, event
+${blocks.ipQualityRule}
+
+${blocks.slopRules}`;
+
+  const reducedSchema = z.object({ loreCards: z.array(loreCardSchema).min(3).max(15) });
+  return extractCategoryLore(role, fallbackRole, prompt, conceptLoreSchema, reducedSchema, CONCEPT_LORE_CATEGORIES, "concept");
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+export async function extractLoreCards(
+  scaffold: WorldScaffold,
+  role: ResolvedRole,
+  fallbackRole?: ResolvedRole,
+  ipContext?: IpResearchContext | null,
+  premiseDivergence?: PremiseDivergence | null,
+  onProgress?: (progress: GenerationProgress) => void,
+  progressStep?: number,
+  progressTotalSteps?: number,
+): Promise<ExtractedLoreCard[]> {
+  const blocks = buildSharedBlocks(
+    scaffold,
+    ipContext ?? null,
+    premiseDivergence ?? null,
+  );
+
+  const step = progressStep ?? 0;
+  const total = progressTotalSteps ?? 1;
+  const CATEGORY_COUNT = 4;
+
+  // 1. Location lore
+  reportSubProgress(onProgress, step, total, "Extracting lore...", 0, CATEGORY_COUNT, "Location lore");
+  const locationCards = await extractLocationLore(role, fallbackRole, blocks);
+
+  // 2. Faction lore
+  reportSubProgress(onProgress, step, total, "Extracting lore...", 1, CATEGORY_COUNT, "Faction lore");
+  const factionCards = await extractFactionLore(role, fallbackRole, blocks);
+
+  // 3. NPC lore
+  reportSubProgress(onProgress, step, total, "Extracting lore...", 2, CATEGORY_COUNT, "NPC lore");
+  const npcCards = await extractNpcLore(role, fallbackRole, blocks);
+
+  // 4. Concept/ability/item/event lore
+  reportSubProgress(onProgress, step, total, "Extracting lore...", 3, CATEGORY_COUNT, "World systems lore");
+  const conceptCards = await extractConceptLore(role, fallbackRole, blocks);
+
+  // Merge and deduplicate by term (case-insensitive)
+  const allCards = [...locationCards, ...factionCards, ...npcCards, ...conceptCards];
+  const seen = new Set<string>();
+  const deduped = allCards.filter((card) => {
+    const key = card.term.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return deduped;
 }

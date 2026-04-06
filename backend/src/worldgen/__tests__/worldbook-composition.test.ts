@@ -1,6 +1,23 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { StoredWorldbookLibraryRecord } from "../../worldbook-library/manager.js";
 import { composeWorldbookLibraryRecords } from "../../worldbook-library/composition.js";
+
+const mockSafeGenerateObject = vi.fn();
+vi.mock("../../ai/generate-object-safe.js", () => ({
+  safeGenerateObject: (...args: unknown[]) => mockSafeGenerateObject(...args),
+}));
+
+vi.mock("../../settings/manager.js", () => ({
+  loadSettings: () => ({ judge: { providerId: "test", model: "test", temperature: 0, maxTokens: 4096 }, providers: [{ id: "test", name: "Test", baseUrl: "http://test", apiKey: "test-key", defaultModel: "test-model" }] }),
+}));
+
+vi.mock("../../ai/resolve-role-model.js", () => ({
+  resolveRoleModel: () => ({ provider: { id: "test", name: "Test", baseUrl: "http://test", apiKey: "test-key", model: "test-model" }, temperature: 0, maxTokens: 4096 }),
+}));
+
+vi.mock("../../ai/index.js", () => ({
+  createModel: () => ({}),
+}));
 
 function buildRecord(
   overrides: Partial<StoredWorldbookLibraryRecord> & Pick<StoredWorldbookLibraryRecord, "id" | "displayName">,
@@ -19,7 +36,11 @@ function buildRecord(
 }
 
 describe("composeWorldbookLibraryRecords", () => {
-  it("produces the same merged result regardless of selected source order", () => {
+  beforeEach(() => {
+    mockSafeGenerateObject.mockReset();
+  });
+
+  it("produces the same merged result regardless of selected source order", async () => {
     const alpha = buildRecord({
       id: "wb-alpha",
       displayName: "Alpha Archive",
@@ -37,14 +58,14 @@ describe("composeWorldbookLibraryRecords", () => {
       ],
     });
 
-    const forward = composeWorldbookLibraryRecords([alpha, beta]);
-    const reversed = composeWorldbookLibraryRecords([beta, alpha]);
+    const forward = await composeWorldbookLibraryRecords([alpha, beta]);
+    const reversed = await composeWorldbookLibraryRecords([beta, alpha]);
 
     expect(reversed).toEqual(forward);
     expect(forward.worldbookSelection.map((item) => item.id)).toEqual(["wb-alpha", "wb-beta"]);
   });
 
-  it("groups duplicates by type plus normalized name instead of request order", () => {
+  it("groups duplicates by type plus normalized name instead of request order", async () => {
     const alpha = buildRecord({
       id: "wb-alpha",
       displayName: "Alpha Archive",
@@ -61,7 +82,7 @@ describe("composeWorldbookLibraryRecords", () => {
       ],
     });
 
-    const result = composeWorldbookLibraryRecords([beta, alpha]);
+    const result = await composeWorldbookLibraryRecords([beta, alpha]);
 
     expect(result.ipContext.keyFacts).toContain(
       "Nexus: A rogue archivist who guards forbidden routes.",
@@ -79,7 +100,7 @@ describe("composeWorldbookLibraryRecords", () => {
     ]);
   });
 
-  it("returns merged ipContext together with provenance for every contributing source", () => {
+  it("returns merged ipContext together with provenance for every contributing source", async () => {
     const alpha = buildRecord({
       id: "wb-alpha",
       displayName: "Alpha Archive",
@@ -96,7 +117,7 @@ describe("composeWorldbookLibraryRecords", () => {
       ],
     });
 
-    const result = composeWorldbookLibraryRecords([alpha, beta]);
+    const result = await composeWorldbookLibraryRecords([alpha, beta]);
     const captainMira = result.provenance.groups.find(
       (group) => group.entityKey === "character:captain mira",
     );
@@ -123,5 +144,166 @@ describe("composeWorldbookLibraryRecords", () => {
         },
       ],
     });
+  });
+
+  it("supplementary entries are filtered by LLM relevance when premise exists", async () => {
+    const primary = buildRecord({
+      id: "wb-primary",
+      displayName: "Voices of the Void",
+      entries: Array.from({ length: 15 }, (_, i) => ({
+        name: `VotV Entry ${i + 1}`,
+        type: "character" as const,
+        summary: `Primary character ${i + 1} from VotV.`,
+      })),
+    });
+    const supplementary = buildRecord({
+      id: "wb-supp",
+      displayName: "SCP Foundation",
+      entries: Array.from({ length: 10 }, (_, i) => ({
+        name: `SCP-${100 + i}`,
+        type: "character" as const,
+        summary: `SCP entity ${100 + i} description.`,
+      })),
+    });
+
+    // First call: detectPrimarySource
+    mockSafeGenerateObject.mockResolvedValueOnce({
+      object: { primarySource: "Voices of the Void", reasoning: "Premise is about VotV" },
+    });
+    // Second call: filterRelevantEntries — keep only 3 of 10
+    mockSafeGenerateObject.mockResolvedValueOnce({
+      object: {
+        relevantEntries: ["SCP-100", "SCP-103", "SCP-107"],
+        reasoning: "These three relate to the void theme",
+      },
+    });
+
+    const result = await composeWorldbookLibraryRecords(
+      [primary, supplementary],
+      "A campaign set in the Voices of the Void universe with some SCP crossovers",
+    );
+
+    // Primary source: all 15 entries pass through
+    const primaryFacts = result.ipContext.keyFacts.filter((f) => f.includes("VotV"));
+    expect(primaryFacts).toHaveLength(15);
+
+    // Supplementary source: only 3 entries pass through
+    const suppFacts = result.ipContext.keyFacts.filter((f) => f.includes("SCP-"));
+    expect(suppFacts).toHaveLength(3);
+
+    // Total: 15 + 3 = 18
+    expect(result.ipContext.keyFacts).toHaveLength(18);
+
+    // Verify both LLM calls were made
+    expect(mockSafeGenerateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it("filter failure falls back to including all supplementary entries", async () => {
+    const primary = buildRecord({
+      id: "wb-primary",
+      displayName: "Alpha Archive",
+      entries: [
+        { name: "Hero", type: "character", summary: "The hero." },
+      ],
+    });
+    const supplementary = buildRecord({
+      id: "wb-supp",
+      displayName: "Beta Codex",
+      entries: [
+        { name: "Villain", type: "character", summary: "The villain." },
+        { name: "Sidekick", type: "character", summary: "The sidekick." },
+      ],
+    });
+
+    // First call: detectPrimarySource succeeds
+    mockSafeGenerateObject.mockResolvedValueOnce({
+      object: { primarySource: "Alpha Archive", reasoning: "Primary world" },
+    });
+    // Second call: filterRelevantEntries throws
+    mockSafeGenerateObject.mockRejectedValueOnce(new Error("LLM unavailable"));
+
+    const result = await composeWorldbookLibraryRecords(
+      [primary, supplementary],
+      "A campaign in the Alpha Archive world",
+    );
+
+    // All entries included (fallback behavior)
+    expect(result.ipContext.keyFacts).toHaveLength(3);
+    expect(result.ipContext.keyFacts).toContainEqual(expect.stringContaining("Hero"));
+    expect(result.ipContext.keyFacts).toContainEqual(expect.stringContaining("Villain"));
+    expect(result.ipContext.keyFacts).toContainEqual(expect.stringContaining("Sidekick"));
+  });
+
+  it("single worldbook skips filtering entirely", async () => {
+    const single = buildRecord({
+      id: "wb-single",
+      displayName: "Solo Archive",
+      entries: [
+        { name: "Lone Wolf", type: "character", summary: "A solitary wanderer." },
+        { name: "Ghost Town", type: "location", summary: "An abandoned settlement." },
+      ],
+    });
+
+    const result = await composeWorldbookLibraryRecords(
+      [single],
+      "A campaign in Solo Archive",
+    );
+
+    // No LLM calls should be made for single worldbook
+    expect(mockSafeGenerateObject).not.toHaveBeenCalled();
+    expect(result.ipContext.keyFacts).toHaveLength(2);
+  });
+
+  it("primary source entries are never filtered even when supplementary filtering is active", async () => {
+    const primary = buildRecord({
+      id: "wb-primary",
+      displayName: "Main World",
+      entries: [
+        { name: "King Arthur", type: "character", summary: "The once and future king." },
+        { name: "Camelot", type: "location", summary: "A legendary castle." },
+        { name: "Excalibur", type: "lore_general", summary: "A magical sword." },
+      ],
+    });
+    const supplementary = buildRecord({
+      id: "wb-supp",
+      displayName: "Norse Myths",
+      entries: [
+        { name: "Odin", type: "character", summary: "The all-father." },
+        { name: "Loki", type: "character", summary: "The trickster god." },
+        { name: "Asgard", type: "location", summary: "Realm of the gods." },
+        { name: "Mjolnir", type: "lore_general", summary: "Thor's hammer." },
+      ],
+    });
+
+    // detectPrimarySource returns "Main World"
+    mockSafeGenerateObject.mockResolvedValueOnce({
+      object: { primarySource: "Main World", reasoning: "Arthurian focus" },
+    });
+    // filterRelevantEntries returns only 1 Norse entry
+    mockSafeGenerateObject.mockResolvedValueOnce({
+      object: {
+        relevantEntries: ["Odin"],
+        reasoning: "Odin parallels Arthur as a wise king figure",
+      },
+    });
+
+    const result = await composeWorldbookLibraryRecords(
+      [primary, supplementary],
+      "An Arthurian legend campaign with occasional Norse mythology crossovers",
+    );
+
+    // All 3 primary entries present
+    expect(result.ipContext.keyFacts).toContainEqual(expect.stringContaining("King Arthur"));
+    expect(result.ipContext.keyFacts).toContainEqual(expect.stringContaining("Camelot"));
+    expect(result.ipContext.keyFacts).toContainEqual(expect.stringContaining("Excalibur"));
+
+    // Only 1 of 4 supplementary entries present
+    expect(result.ipContext.keyFacts).toContainEqual(expect.stringContaining("Odin"));
+    expect(result.ipContext.keyFacts).not.toContainEqual(expect.stringContaining("Loki"));
+    expect(result.ipContext.keyFacts).not.toContainEqual(expect.stringContaining("Asgard"));
+    expect(result.ipContext.keyFacts).not.toContainEqual(expect.stringContaining("Mjolnir"));
+
+    // Total: 3 primary + 1 supplementary = 4
+    expect(result.ipContext.keyFacts).toHaveLength(4);
   });
 });

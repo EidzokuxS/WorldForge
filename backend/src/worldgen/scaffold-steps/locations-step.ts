@@ -7,9 +7,10 @@ import {
   buildKnownIpGenerationContract,
   buildPremiseDivergenceBlock,
   buildStopSlopRules,
+  reportSubProgress,
 } from "./prompt-utils.js";
 import type { IpResearchContext } from "../ip-researcher.js";
-import type { GenerateScaffoldRequest, ScaffoldLocation } from "../types.js";
+import type { GenerateScaffoldRequest, GenerationProgress, ScaffoldLocation } from "../types.js";
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -23,17 +24,15 @@ const locationPlanSchema = z.object({
   })).max(8),
 });
 
-const locationDetailSchema = z.object({
-  locations: z.array(z.object({
-    name: z.string(),
-    description: z.string().describe("2-3 concrete sentences: physical details, atmosphere, significance"),
-    tags: z.array(z.string()).describe("Structural tags: [Warm], [Crowded], [Dangerous], [Controlled by X]"),
-    connectedTo: z.array(z.string()).describe("Names of connected locations from the plan"),
-  })),
+/** Single-entity detail schema -- NO name field (review fix #6: planned name is authoritative). */
+const locationDetailSingleSchema = z.object({
+  description: z.string().describe("2-3 concrete sentences: physical details, atmosphere, significance"),
+  tags: z.array(z.string()).describe("Structural tags: [Warm], [Crowded], [Dangerous], [Controlled by X]"),
+  connectedTo: z.array(z.string()).describe("Names of connected locations from the plan"),
 });
 
 // ---------------------------------------------------------------------------
-// generateLocationsStep — plan + detail mini-calls
+// generateLocationsStep -- plan + per-entity detail calls with accumulator
 // ---------------------------------------------------------------------------
 
 export async function generateLocationsStep(
@@ -41,6 +40,9 @@ export async function generateLocationsStep(
   refinedPremise: string,
   ipContext: IpResearchContext | null,
   additionalInstruction?: string,
+  onProgress?: (progress: GenerationProgress) => void,
+  progressStep?: number,
+  progressTotalSteps?: number,
 ): Promise<ScaffoldLocation[]> {
   const ipBlock = buildIpContextBlock(ipContext);
   const premiseDivergence = req.premiseDivergence ?? null;
@@ -79,7 +81,7 @@ ${refinedPremise}
 ${ipBlock}
 ${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}
 CONSTRAINTS:
-- Exactly ONE location has isStarting=true — the player's starting point. Pick a location where a newcomer or young character would plausibly begin.
+- Exactly ONE location has isStarting=true -- the player's starting point. Pick a location where a newcomer or young character would plausibly begin.
 - Every location must serve a DIFFERENT narrative function. No two locations filling the same role (e.g., two "training grounds" or two "hidden bases").
 - purpose: one sentence explaining what this location IS and why it matters to the world (not just to the premise).${additionalInstruction ? `\nADDITIONAL: ${additionalInstruction}` : ""}
 
@@ -91,20 +93,29 @@ ${buildStopSlopRules()}`,
   const planned = plan.object.locations;
   const nameList = planned.map((l) => l.name);
 
-  // --- Calls 2+: DETAIL (batches of 3-4) ---
+  // --- Calls 2+: DETAIL (1 entity per LLM call with sequential accumulator) ---
   const detailed: ScaffoldLocation[] = [];
-  const BATCH_SIZE = 4;
 
-  for (let i = 0; i < planned.length; i += BATCH_SIZE) {
-    const batch = planned.slice(i, i + BATCH_SIZE);
-    const previousSummary = detailed
-      .map((l) => `- ${l.name}: ${l.description.slice(0, 80)}`)
-      .join("\n");
+  for (let i = 0; i < planned.length; i++) {
+    const entity = planned[i];
+    const step = progressStep ?? 0;
+    const total = progressTotalSteps ?? 1;
+
+    if (onProgress) {
+      reportSubProgress(onProgress, step, total, "Building locations...", i, planned.length, `Location: ${entity.name}`);
+    }
+
+    // Full detail of ALL previously generated locations (per D-02)
+    const previousSummary = detailed.length > 0
+      ? `ALREADY DETAILED LOCATIONS:\n${detailed.map((l) =>
+          `- ${l.name}: ${l.description} [Tags: ${l.tags.join(", ")}] [Connected: ${l.connectedTo.join(", ")}]`
+        ).join("\n")}\n`
+      : "";
 
     const detail = await generateObject({
       model: createModel(req.role.provider),
-      schema: locationDetailSchema,
-      prompt: `You are writing a location reference sheet for a text RPG engine. The engine uses these fields mechanically — be precise.
+      schema: locationDetailSingleSchema,
+      prompt: `You are writing a location reference sheet for a text RPG engine. The engine uses these fields mechanically -- be precise.
 
 WORLD PREMISE:
 ${refinedPremise}
@@ -112,29 +123,30 @@ ${ipBlock}
 ${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}
 ALL LOCATIONS IN THIS WORLD: ${nameList.join(", ")}
 
-${previousSummary ? `ALREADY DETAILED LOCATIONS:\n${previousSummary}\n` : ""}LOCATIONS TO DETAIL NOW:
-${batch.map((b) => `- ${b.name}: ${b.purpose}`).join("\n")}
+${previousSummary}LOCATION TO DETAIL NOW: "${entity.name}"
+Purpose: ${entity.purpose}
 
 FIELD INSTRUCTIONS:
 - description: Exactly 2-3 sentences. Sentence 1 = physical appearance (size, terrain, architecture). Sentence 2 = who lives/works here and what they do. Sentence 3 (optional) = what changed due to the premise, or a notable danger/resource.${ipContext ? ` For known-IP locations: start from the canonical location, then describe only the present-state consequences of PREMISE DIVERGENCE. Keep unrelated canon intact.` : ""}
 - tags: Mechanical tags the game engine reads. Format: [Adjective] or [Controlled by FactionName]. Examples: [Warm], [Crowded], [Dangerous], [Poor], [Fortified], [Controlled by Iron Guard]. 3-5 tags per location.
-- connectedTo: Which other locations a player can travel to from here. ONLY use names from this list: ${nameList.join(", ")}. Never link a location to itself. Each location connects to 1-3 others.
+- connectedTo: Which other locations a player can travel to from here. ONLY use names from this list: ${nameList.join(", ")}. Never link a location to itself ("${entity.name}"). Each location connects to 1-3 others. Consider connections to ALREADY DETAILED locations above for consistency.
 
 ${buildStopSlopRules()}`,
       temperature: req.role.temperature,
       maxOutputTokens: req.role.maxTokens,
     });
 
-    for (const loc of detail.object.locations) {
-      const plannedLoc = batch.find((b) => b.name === loc.name);
-      detailed.push({
-        name: loc.name,
-        description: loc.description,
-        tags: loc.tags,
-        isStarting: plannedLoc?.isStarting ?? false,
-        connectedTo: loc.connectedTo.filter((n) => nameList.includes(n)),
-      });
-    }
+    // REVIEW FIX #6: Force planned name as authoritative
+    detailed.push({
+      name: entity.name,  // From plan, NOT from LLM output
+      description: detail.object.description,
+      tags: detail.object.tags,
+      isStarting: entity.isStarting ?? false,
+      connectedTo: detail.object.connectedTo.filter((n) =>
+        nameList.some(valid => valid.toLowerCase() === n.toLowerCase()) &&
+        n.toLowerCase() !== entity.name.toLowerCase()
+      ),
+    });
   }
 
   if (detailed.length === 0) {

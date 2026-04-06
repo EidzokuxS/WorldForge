@@ -535,3 +535,17 @@ Plans:
 - [x] 33-11-PLAN.md -- Restore and prove the real browser localhost transport prerequisite for reruns
 - [x] 33-12-PLAN.md -- Close the remaining lore-section lint gap and rerun frontend lint
 - [x] 33-13-PLAN.md -- Gap closure: realign test suite to flat-layout rewrite + fix backend/shared test drift
+
+### Phase 34: Worldgen Pipeline Rework — 1 Entity per LLM Call with Inter-Stage Validation (completed 2026-04-04)
+
+**Goal:** Refactor world generation from batched LLM calls to per-entity calls with validation between stages.
+**Requirements**: D-01, D-02, D-03, D-04, D-05, D-06, D-07
+**Depends on:** Phase 24
+**Plans**: 4 plans
+**Verification**: 7/7 requirements verified — 34-VERIFICATION.md
+
+Plans:
+- [x] 34-01-PLAN.md -- Foundation contracts: validation module, regen helpers, progress types
+- [x] 34-02-PLAN.md -- Per-entity location and faction generation with inter-stage validation
+- [x] 34-03-PLAN.md -- Per-entity NPC generation and category-specific lore extraction
+- [x] 34-04-PLAN.md -- Pipeline orchestrator integration and end-to-end verification

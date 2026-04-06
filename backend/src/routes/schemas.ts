@@ -163,6 +163,16 @@ const ipContextSchema = z.object({
   }).optional(),
   excludedCharacters: z.array(z.string()).optional(),
   source: z.enum(["mcp", "llm"]),
+  sourceGroups: z.array(z.object({
+    sourceName: z.string(),
+    priority: z.enum(["primary", "supplementary"]),
+    keyFacts: z.array(z.string()),
+    canonicalNames: z.object({
+      locations: z.array(z.string()).optional(),
+      factions: z.array(z.string()).optional(),
+      characters: z.array(z.string()).optional(),
+    }).optional(),
+  })).optional(),
 }).nullable().optional();
 
 const premiseDivergenceSchema = z.object({

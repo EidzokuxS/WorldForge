@@ -53,9 +53,29 @@ function coerceToSchema(data: unknown, schema: ZodType<any>): unknown {
     if (Array.isArray(data)) {
       // Get element schema (Zod 3: _def.type is object, Zod 4: _def.element is object)
       const elementSchema = def.element ?? (typeof def.type === "object" ? def.type : undefined);
-      if (elementSchema) {
-        return data.map(item => coerceToSchema(item, elementSchema));
+      let result = elementSchema
+        ? data.map(item => coerceToSchema(item, elementSchema))
+        : data;
+      // Truncate to max_length if schema has a max constraint (Zod 4: checks[].{_zod.def})
+      const checks: unknown[] | undefined = def.checks;
+      if (Array.isArray(checks) && Array.isArray(result)) {
+        for (const c of checks) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const checkDef = (c as any)?._zod?.def;
+          if (checkDef?.check === "max_length" && typeof checkDef.maximum === "number") {
+            if (result.length > checkDef.maximum) {
+              result = result.slice(0, checkDef.maximum);
+            }
+          }
+        }
       }
+      // Zod 3: def.maxLength?.value
+      if (typeof def.maxLength?.value === "number" && Array.isArray(result)) {
+        if (result.length > def.maxLength.value) {
+          result = result.slice(0, def.maxLength.value);
+        }
+      }
+      return result;
     }
     return data;
   }
@@ -73,6 +93,27 @@ function coerceToSchema(data: unknown, schema: ZodType<any>): unknown {
         }
       }
     }
+  }
+
+  // Enum schema: normalize human-readable strings to valid enum values
+  // e.g. "Broken Connection" → "broken_reference", "CRITICAL" → "critical"
+  if (schemaType === "ZodEnum" || schemaType === "enum") {
+    // Zod 3: def.values is string[]. Zod 4: def.entries is Record<string, string>, no def.values.
+    const values: string[] | undefined =
+      def.values ?? (def.entries ? Object.keys(def.entries) : undefined);
+    if (typeof data === "string" && Array.isArray(values)) {
+      // Exact match
+      if (values.includes(data)) return data;
+      // Case-insensitive match
+      const lower = data.toLowerCase();
+      const ciMatch = values.find(v => v.toLowerCase() === lower);
+      if (ciMatch) return ciMatch;
+      // Normalize: lowercase + spaces/hyphens → underscores
+      const normalized = lower.replace(/[\s-]+/g, "_");
+      const normMatch = values.find(v => v === normalized);
+      if (normMatch) return normMatch;
+    }
+    return data;
   }
 
   // Pipe schema (Zod 4 .transform()/.pipe()): coerce against the input schema
@@ -160,8 +201,12 @@ function generateSchemaExample(schema: ZodType<any>, depth = 0): unknown {
   }
 
   if (schemaType === "ZodEnum" || schemaType === "enum") {
-    const values = def.values;
-    if (Array.isArray(values) && values.length > 0) return values[0];
+    // Zod 3: def.values is string[]. Zod 4: def.entries is Record<string, string>.
+    const values = def.values ?? (def.entries ? Object.keys(def.entries) : undefined);
+    if (Array.isArray(values) && values.length > 0) {
+      // Show ALL valid values so LLM knows the exact options
+      return values.join("|");
+    }
   }
 
   // Pipe schema (Zod 4 .transform()/.pipe()): use input schema for example
@@ -194,14 +239,10 @@ function describeZodShape(schema: ZodType<unknown>): string {
   return "";
 }
 
-/**
- * Wrapper around Vercel AI SDK's generateObject that handles providers
- * which wrap JSON in markdown code fences (e.g., GLM via Z.AI).
- *
- * Tries generateObject first. If parsing fails, falls back to generateText
- * + manual JSON parse + Zod validation.
- */
-export async function safeGenerateObject<T>(opts: {
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 2000;
+
+interface SafeGenerateOpts<T> {
   model: LanguageModel;
   schema: ZodType<T>;
   system?: string;
@@ -211,37 +252,40 @@ export async function safeGenerateObject<T>(opts: {
   maxTokens?: number;
   maxOutputTokens?: number;
   mode?: "json" | "tool";
+  /** Override retry count (default 3). Set to 1 to disable retries. */
+  retries?: number;
   [key: string]: unknown;
-}): Promise<{ object: T }> {
-  const { schema, mode, ...rest } = opts;
+}
 
-  // Generate via generateText with explicit JSON instructions.
-  // generateObject (AI SDK) fails on reasoning models (GLM-5, DeepSeek R1) because:
-  // 1. Tool-calling mode: model ignores tools definition, outputs markdown
-  // 2. JSON mode: model returns correct JSON but with wrong field names
-  // Both waste 10-20s per call. generateText + manual parse is reliable and fast.
+/**
+ * Single attempt: generateText → extractJson → coerce → Zod parse.
+ * Returns { object } on success, throws on failure.
+ */
+async function attemptGenerate<T>(opts: SafeGenerateOpts<T>): Promise<{ object: T }> {
+  const { schema } = opts;
   const schemaHint = describeZodShape(schema);
   const jsonSuffix =
     "\n\nYou MUST respond with valid JSON only. No explanations, no markdown, no text before or after the JSON object." +
     (schemaHint ? `\n\nThe JSON object MUST have EXACTLY these fields (use these exact names):\n${schemaHint}` : "");
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const fallbackOpts: Record<string, unknown> = {
+
+  const callOpts: Record<string, unknown> = {
     model: opts.model,
     temperature: opts.temperature,
     maxOutputTokens: opts.maxOutputTokens ?? opts.maxTokens,
   };
   if (opts.system) {
-    fallbackOpts.system = opts.system + jsonSuffix;
+    callOpts.system = opts.system + jsonSuffix;
   } else {
-    fallbackOpts.system = jsonSuffix.trim();
+    callOpts.system = jsonSuffix.trim();
   }
   if (opts.messages) {
-    fallbackOpts.messages = opts.messages;
+    callOpts.messages = opts.messages;
   } else {
-    fallbackOpts.prompt = opts.prompt;
+    callOpts.prompt = opts.prompt;
   }
+
   const { text } = await generateText(
-    fallbackOpts as Parameters<typeof generateText>[0]
+    callOpts as Parameters<typeof generateText>[0]
   );
 
   const cleaned = extractJson(text);
@@ -249,21 +293,18 @@ export async function safeGenerateObject<T>(opts: {
   try {
     parsed = JSON.parse(cleaned);
   } catch {
-    throw new Error(`safeGenerateObject fallback: invalid JSON. Raw text: ${text.slice(0, 200)}`);
+    throw new Error(`safeGenerateObject: invalid JSON. Raw: ${text.slice(0, 500)}`);
   }
 
-  // Recursively coerce mismatched types to match schema expectations
   parsed = coerceToSchema(parsed, schema);
 
-  // Try direct parse first
   const direct = schema.safeParse(parsed);
   if (direct.success) {
     return { object: direct.data as T };
   }
 
-  // If model returned a bare array but schema expects { key: array }, try wrapping
+  // Try wrapping bare array
   if (Array.isArray(parsed)) {
-    // Try each possible wrapper key by introspecting the Zod schema shape
     const shape = (schema as { shape?: Record<string, unknown> }).shape
       ?? (schema as { _def?: { shape?: () => Record<string, unknown> } })._def?.shape?.();
     if (shape) {
@@ -278,8 +319,37 @@ export async function safeGenerateObject<T>(opts: {
     }
   }
 
-  // Last resort: throw with context
+  const zodErrors = direct.error.issues.slice(0, 5).map(i =>
+    `[${i.path.join(".")}] ${i.message}`
+  ).join("; ");
   throw new Error(
-    `safeGenerateObject fallback: Zod validation failed. Errors: ${JSON.stringify(direct.error.issues.slice(0, 3))}. Raw: ${cleaned.slice(0, 200)}`
+    `safeGenerateObject: Zod validation failed.\nErrors: ${zodErrors}\nRaw (first 500 chars): ${cleaned.slice(0, 500)}`
   );
+}
+
+/**
+ * Wrapper around Vercel AI SDK's generateObject that handles providers
+ * which wrap JSON in markdown code fences (e.g., GLM via Z.AI).
+ *
+ * Uses generateText + manual JSON parse. Retries up to 3 times on failure
+ * (invalid JSON or Zod validation errors) with a 2s delay between attempts.
+ */
+export async function safeGenerateObject<T>(opts: SafeGenerateOpts<T>): Promise<{ object: T }> {
+  const maxAttempts = opts.retries ?? MAX_RETRIES;
+  let lastError: Error | undefined;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await attemptGenerate(opts);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (attempt < maxAttempts) {
+        log.warn(`safeGenerateObject attempt ${attempt}/${maxAttempts} failed, retrying in ${RETRY_DELAY_MS}ms: ${lastError.message.slice(0, 200)}`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+      }
+    }
+  }
+
+  log.error(`safeGenerateObject failed after ${maxAttempts} attempts`);
+  throw lastError;
 }

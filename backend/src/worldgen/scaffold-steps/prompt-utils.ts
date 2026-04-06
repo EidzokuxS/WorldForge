@@ -1,6 +1,9 @@
 import type { IpResearchContext, PremiseDivergence } from "@worldforge/shared";
+import { createLogger } from "../../lib/index.js";
 import type { WorldSeeds } from "../seed-roller.js";
 import type { GenerationProgress } from "../types.js";
+
+const log = createLogger("prompt-utils");
 
 // ---------------------------------------------------------------------------
 // Seed label mapping (re-exported for use in other steps)
@@ -19,21 +22,20 @@ export const SEED_LABELS: ReadonlyArray<{ field: keyof WorldSeeds; label: string
 // buildIpContextBlock — canonical IP fidelity instructions
 // ---------------------------------------------------------------------------
 
-export function buildIpContextBlock(ipContext: IpResearchContext | null): string {
-  if (!ipContext) return "";
+function buildCanonicalNamesBlock(cn: IpResearchContext["canonicalNames"]): string {
+  if (!cn) return "";
+  const lines: string[] = [];
+  if (cn.locations?.length) lines.push(`  Locations: ${cn.locations.join(", ")}`);
+  if (cn.factions?.length) lines.push(`  Factions: ${cn.factions.join(", ")}`);
+  if (cn.characters?.length) lines.push(`  Characters: ${cn.characters.join(", ")}`);
+  if (lines.length === 0) return "";
+  return `CANONICAL NAMES — use these EXACT names, never invent substitutes:\n${lines.join("\n")}`;
+}
 
+function buildFlatIpContextBlock(ipContext: IpResearchContext): string {
   const facts = ipContext.keyFacts.map((f) => `  - ${f}`).join("\n");
   const tone = ipContext.tonalNotes.map((t) => `  - ${t}`).join("\n");
-
-  const cn = ipContext.canonicalNames;
-  const nameBlock = cn
-    ? `
-CANONICAL NAMES — use these EXACT names, never invent substitutes:
-${cn.locations?.length ? `  Locations: ${cn.locations.join(", ")}` : ""}
-${cn.factions?.length ? `  Factions: ${cn.factions.join(", ")}` : ""}
-${cn.characters?.length ? `  Characters: ${cn.characters.join(", ")}` : ""}
-`.trim()
-    : "";
+  const nameBlock = buildCanonicalNamesBlock(ipContext.canonicalNames);
 
   return `
 FRANCHISE REFERENCE (${ipContext.franchise}, verified via ${ipContext.source}):
@@ -43,16 +45,81 @@ ${facts}
 Tone:
 ${tone}
 
-CANONICAL FIDELITY RULES (MANDATORY — violations will be rejected):
-1. You are building the CANONICAL world with targeted modifications. Every location, faction, organization, and character MUST be from the franchise canon unless the premise's divergence logically creates something new.
-2. DO NOT INVENT original locations, factions, or characters when canonical ones exist. If the franchise has 5 major cities, use those 5 cities. Do not replace them with original creations.
-3. Use the franchise's own names exactly as they appear in the source material. Never substitute, translate, simplify, or create "inspired by" variants.
-4. Treat this FRANCHISE REFERENCE as the canonical baseline. Apply only the divergence consequences stated elsewhere in the prompt. Everything not explicitly changed stays canon.
-5. When the premise reassigns a character's allegiance, teacher, or role: update ONLY relationships that logically change. Keep all other canonical details (abilities, backstory, personality, appearance) intact.
-6. If a detail is absent from the reference data above, rely on your knowledge of the franchise. Never fabricate franchise elements that do not exist in canon.
-7. Never rename canonical entities to avoid copyright. This is a private RPG tool, not a published work.
-8. The ratio of canonical to original content must be AT LEAST 80/20. Original content is acceptable ONLY for minor supporting characters or locations that the premise's divergence logically requires.
+GENERATION RULES:
+1. Build the canonical world from this FRANCHISE REFERENCE, with targeted modifications from the premise.
+2. Draw locations, factions, and characters from the franchise canon. Use the franchise's own names exactly as written.
+3. Keep all canonical details intact unless the premise explicitly changes them.
+4. For absent details, rely on your knowledge of the franchise.
+5. This is a private RPG tool — use real canonical names freely.
 `;
+}
+
+function buildSourceGroupedIpContextBlock(ipContext: IpResearchContext): string {
+  const groups = ipContext.sourceGroups!;
+  const tone = ipContext.tonalNotes.map((t) => `  - ${t}`).join("\n");
+
+  // Merged canonical names block (from the flat ipContext — already merged)
+  const nameBlock = buildCanonicalNamesBlock(ipContext.canonicalNames);
+
+  const primaryGroups = groups.filter(g => g.priority === "primary");
+  const suppGroups = groups.filter(g => g.priority !== "primary");
+
+  const sourceBlocks: string[] = [];
+  for (const group of primaryGroups) {
+    const facts = group.keyFacts.map((f) => `  - ${f}`).join("\n");
+    sourceBlocks.push(
+      `PRIMARY SOURCE — ${group.sourceName} (${group.keyFacts.length} entries):\nThis is THE WORLD. Draw all locations, factions, and NPCs from here.\n${facts}`,
+    );
+  }
+  for (const group of suppGroups) {
+    const facts = group.keyFacts.map((f) => `  - ${f}`).join("\n");
+    sourceBlocks.push(
+      `SUPPLEMENTARY — ${group.sourceName} (${group.keyFacts.length} entries):\nSeasoning only. Borrow 1-2 elements max and weave them into the PRIMARY world.\nThe PRIMARY SOURCE defines the setting; this source adds minor crossover flavor.\n${facts}`,
+    );
+  }
+
+  return `
+FRANCHISE REFERENCE (${ipContext.franchise}, verified via ${ipContext.source}):
+${nameBlock ? `${nameBlock}\n` : ""}
+${sourceBlocks.join("\n\n")}
+
+Tone:
+${tone}
+
+GENERATION RULES:
+1. The PREMISE defines what this world is. Follow it as the primary creative guide.
+2. Draw the vast majority of locations, factions, and NPCs from the PRIMARY SOURCE. This source IS the world.
+3. Supplementary sources contribute at most 1-2 crossover elements. The world belongs to the PRIMARY SOURCE.
+4. Use canonical names exactly as written in the source material.
+5. Keep all canonical details intact unless the premise explicitly changes them.
+6. For absent details, rely on your knowledge of the franchise.
+7. This is a private RPG tool — use real canonical names freely.
+`;
+}
+
+export function buildIpContextBlock(ipContext: IpResearchContext | null): string {
+  if (!ipContext) {
+    log.info("buildIpContextBlock: no ipContext provided");
+    return "";
+  }
+
+  // Use source-grouped format when multiple source groups with different priorities exist
+  const hasMultipleGroups = ipContext.sourceGroups && ipContext.sourceGroups.length > 1;
+  log.info("buildIpContextBlock DECISION", {
+    franchise: ipContext.franchise,
+    hasSourceGroups: !!ipContext.sourceGroups,
+    sourceGroupCount: ipContext.sourceGroups?.length ?? 0,
+    hasMultipleGroups,
+    format: hasMultipleGroups ? "GROUPED (primary/supplementary)" : "FLAT",
+    totalKeyFacts: ipContext.keyFacts.length,
+    sourceGroupDetails: ipContext.sourceGroups?.map((g) => `${g.sourceName}: ${g.priority} (${g.keyFacts.length} facts)`),
+  });
+
+  if (hasMultipleGroups) {
+    return buildSourceGroupedIpContextBlock(ipContext);
+  }
+
+  return buildFlatIpContextBlock(ipContext);
 }
 
 export function buildPremiseDivergenceBlock(
@@ -212,4 +279,20 @@ export function reportProgress(
   label: string
 ): void {
   onProgress?.({ step, totalSteps, label });
+}
+
+// ---------------------------------------------------------------------------
+// reportSubProgress — emit SSE progress event with entity-level sub-progress
+// ---------------------------------------------------------------------------
+
+export function reportSubProgress(
+  onProgress: ((progress: GenerationProgress) => void) | undefined,
+  step: number,
+  totalSteps: number,
+  label: string,
+  subStep: number,
+  subTotal: number,
+  subLabel: string,
+): void {
+  onProgress?.({ step, totalSteps, label, subStep, subTotal, subLabel });
 }

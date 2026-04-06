@@ -110,6 +110,7 @@ export function useNewCampaignWizard(
   const [worldbookLibraryLoading, setWorldbookLibraryLoading] = useState(false);
   const [worldbookStatus, setWorldbookStatus] = useState<"idle" | "importing" | "done" | "error">("idle");
   const [worldbookError, setWorldbookError] = useState<string | null>(null);
+  const [generationError, setGenerationError] = useState<string | null>(null);
 
   const isBusy = phase.kind !== "idle";
   const creatingCampaign = phase.kind === "creating" || phase.kind === "generating";
@@ -227,6 +228,7 @@ export function useNewCampaignWizard(
 
     setPhase({ kind: "generating" });
     setGenerationProgress(null);
+    setGenerationError(null);
     try {
       const generation = await generateWorld(campaignId, (progress) => {
         setGenerationProgress(progress);
@@ -258,8 +260,10 @@ export function useNewCampaignWizard(
         }
       }
 
+      const msg = getErrorMessage(error, "World generation failed.");
+      setGenerationError(msg);
       toast.error("World generation failed", {
-        description: getErrorMessage(error, "You can still play - the world will be empty."),
+        description: "See error details below the progress bar.",
       });
       return false;
     } finally {
@@ -356,13 +360,19 @@ export function useNewCampaignWizard(
       setOpen(false);
       const generated = await tryGenerateWorld(created.id);
 
+      if (!generated) {
+        // Generation failed — stay on creation page so the user sees the error
+        setPhase({ kind: "idle" });
+        return;
+      }
+
       setCampaignName("");
       setCampaignPremise("");
       setCampaignFranchise("");
       setResearchEnabled(true);
       resetFlow();
       onCreated();
-      router.push(`/campaign/${created.id}/${generated ? "review" : "character"}`);
+      router.push(`/campaign/${created.id}/review`);
     } catch (error) {
       toast.error("Failed to create campaign", {
         description: getErrorMessage(error, DEFAULT_API_ERROR),
@@ -566,6 +576,7 @@ export function useNewCampaignWizard(
     creatingCampaign,
     isGenerating,
     generationProgress,
+    generationError,
     isSuggesting,
     suggestingCategory,
     canCreate,

@@ -2,14 +2,34 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Milestone complete
-stopped_at: Completed 33-13-PLAN.md
-last_updated: "2026-04-03T06:58:06.192Z"
+<<<<<<< Updated upstream
+status: In progress
+<<<<<<< Updated upstream
+stopped_at: Completed 34-03-PLAN.md
+last_updated: "2026-04-04T14:55:00.000Z"
+=======
+stopped_at: Completed 34-01-PLAN.md
+last_updated: "2026-04-04T14:42:00.000Z"
+=======
+status: Executing Phase 34
+last_updated: "2026-04-04T14:32:36.452Z"
+last_activity: 2026-04-04
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
 progress:
   total_phases: 28
   completed_phases: 28
+<<<<<<< Updated upstream
   total_plans: 101
   completed_plans: 101
+=======
+  total_plans: 105
+<<<<<<< Updated upstream
+  completed_plans: 102
+=======
+  completed_plans: 101
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
 ---
 
 # Project State
@@ -19,12 +39,21 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-18)
 
 **Core value:** The LLM is the narrator, never the engine. All mechanical outcomes are resolved by backend code.
-**Current focus:** Phase 33 — browser-e2e-verification-for-redesigned-creation-flows
+**Current focus:** Phase 34 — worldgen-pipeline-rework-1-entity-per-llm-call-with-inter-stage-validation
 
 ## Current Position
 
-Phase: 33
-Plan: Not started
+<<<<<<< Updated upstream
+Phase: 34
+<<<<<<< Updated upstream
+Plan: 03 complete
+=======
+Plan: 01 complete, 02-04 remaining
+=======
+Phase: 34 (worldgen-pipeline-rework-1-entity-per-llm-call-with-inter-stage-validation) — EXECUTING
+Plan: 1 of 4
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
 
 ## Performance Metrics
 
@@ -226,6 +255,8 @@ Recent decisions affecting current work:
 - [Phase 33]: Generated-world requests now return HTTP 409 with a clear readiness error instead of serving empty pseudo-world data.
 - [Phase 33]: Persist routed creation flow state in sessionStorage rather than route-local React memory — Leaving and returning to /campaign/new or navigating back/forward was wiping concept and DNA state. Hydrating the existing wizard from sessionStorage fixes that without adding a parallel state machine.
 - [Phase 33]: Routed concept and DNA pages must surface active suggestion/generation status and block empty DNA generation — The wizard already tracked suggestion and generation progress, but the routed UI never rendered it and still allowed empty DNA creation attempts. Inline progress and validation make the routed flow recoverable and browser-verifiable.
+- [Phase 34]: Per-entity NPC detail loop replaces batch-of-5 for richer cross-references; schema excludes name to force planned name
+- [Phase 34]: 4 category-specific lore calls with post-filtering prevent cross-category leaks; failed category returns empty gracefully
 - [Phase 33]: DNA suggestion calls take 3-5 minutes with GLM-5.1 (6 sequential LLM calls) -- long but functional
 - [Phase 33]: LLM failure with invalid API key results in empty DNA state with clear validation and recovery paths -- no dead-end
 - [Phase 33]: Loading existing known-IP campaign satisfies create-or-load requirement without redundant LLM generation
@@ -269,8 +300,9 @@ Recent decisions affecting current work:
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 260403-grr | Redesign character creation page — full visual overhaul to dossier design language | 2026-04-03 | pending | [260403-grr](./quick/260403-grr-redesign-character-creation-page-full-vi/) |
+| 260405-r8a | Pre-filter worldbook entries via LLM before scaffold generation | 2026-04-05 | 63c3f2f | [260405-r8a](./quick/260405-r8a-pre-filter-worldbook-entries-via-llm-bef/) |
 
 ## Session Continuity
 
-Last activity: 2026-04-03 - Completed quick task 260403-grr: character creation page redesign
+Last activity: 2026-04-05 - Completed quick task 260405-r8a: Pre-filter worldbook entries via LLM
 Resume file: None
