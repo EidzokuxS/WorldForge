@@ -30,6 +30,7 @@ vi.mock("../../settings/index.js", () => ({
 
 vi.mock("../../campaign/index.js", () => ({
   getActiveCampaign: vi.fn(),
+  loadCampaign: vi.fn(),
 }));
 
 vi.mock("../../ai/index.js", () => ({
@@ -72,12 +73,13 @@ import {
   generateNpcFromArchetype,
   researchArchetype,
 } from "../../character/index.js";
-import { getActiveCampaign } from "../../campaign/index.js";
+import { getActiveCampaign, loadCampaign } from "../../campaign/index.js";
 import { getDb } from "../../db/index.js";
 import { resolveStartingLocation } from "../../worldgen/index.js";
 import characterRoutes from "../character.js";
 
 const mockedGetActive = vi.mocked(getActiveCampaign);
+const mockedLoadCampaign = vi.mocked(loadCampaign);
 const mockedGetDb = vi.mocked(getDb);
 const mockedParseChar = vi.mocked(parseCharacterDescription);
 const mockedParseNpc = vi.mocked(parseNpcDescription);
@@ -98,12 +100,14 @@ app.route("/api/worldgen", characterRoutes);
 const CAMPAIGN_ID = "test-camp-1";
 
 function setActiveCampaign() {
-  mockedGetActive.mockReturnValue({
+  const campaign = {
     id: CAMPAIGN_ID,
     name: "Test",
     createdAt: "2026-01-01",
     premise: "A dark world",
-  } as any);
+  } as any;
+  mockedGetActive.mockReturnValue(campaign);
+  mockedLoadCampaign.mockResolvedValue(campaign);
 }
 
 /** Create mock DB with chainable select/insert/delete */
@@ -157,6 +161,7 @@ function createMockDbForResolveNames() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockedLoadCampaign.mockRejectedValue(new Error("not found"));
 });
 
 function makePlayerDraft(overrides: Record<string, unknown> = {}) {
@@ -682,6 +687,29 @@ describe("POST /api/worldgen/save-character", () => {
     expect(insertPayload?.characterRecord).toBeDefined();
     expect(insertPayload?.derivedTags).toBeDefined();
   });
+
+  it("loads the campaign by id when active session is missing", async () => {
+    const campaign = {
+      id: CAMPAIGN_ID,
+      name: "Test",
+      createdAt: "2026-01-01",
+      premise: "A dark world",
+    } as any;
+    mockedGetActive.mockReturnValue(null);
+    mockedLoadCampaign.mockResolvedValue(campaign);
+    createMockDb({
+      locations: [{ id: "loc-1", name: "Tavern" }],
+    });
+
+    const res = await app.request("/api/worldgen/save-character", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(saveBody),
+    });
+
+    expect(res.status).toBe(200);
+    expect(mockedLoadCampaign).toHaveBeenCalledWith(CAMPAIGN_ID);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -778,5 +806,49 @@ describe("POST /api/worldgen/resolve-starting-location", () => {
     expect(body.startConditions.arrivalMode).toBe("on-foot");
     expect(body.narrative).toBe("You arrive at the edge of the dark forest.");
     expect(mockedResolveStart).toHaveBeenCalled();
+  });
+
+  it("loads the campaign by id when active session is missing", async () => {
+    mockedGetActive.mockReturnValue(null);
+    mockedLoadCampaign.mockResolvedValue({
+      id: CAMPAIGN_ID,
+      name: "Test",
+      createdAt: "2026-01-01",
+      premise: "A dark world",
+    } as any);
+
+    const mockAll = vi.fn(() => [
+      { id: "loc-1", name: "Forest", isStarting: false },
+      { id: "loc-2", name: "Tavern", isStarting: true },
+    ]);
+    const mockWhere = vi.fn(() => ({ all: mockAll }));
+    const mockFrom = vi.fn(() => ({ where: mockWhere }));
+    const mockSelect = vi.fn(() => ({ from: mockFrom }));
+    mockedGetDb.mockReturnValue({ select: mockSelect } as any);
+
+    mockedResolveStart.mockResolvedValue({
+      locationId: "loc-2",
+      locationName: "Tavern",
+      startConditions: {
+        startLocationId: "loc-2",
+        arrivalMode: "settled",
+        immediateSituation: "You begin in Tavern.",
+        entryPressure: [],
+        companions: [],
+        startingVisibility: "expected",
+        resolvedNarrative: null,
+        sourcePrompt: null,
+      },
+      narrative: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/resolve-starting-location", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(mockedLoadCampaign).toHaveBeenCalledWith(CAMPAIGN_ID);
   });
 });
