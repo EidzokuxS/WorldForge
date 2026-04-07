@@ -176,6 +176,7 @@ export interface ScaffoldNpc {
   goals: { shortTerm: string[]; longTerm: string[] };
   locationName: string;
   factionName: string | null;
+  tier: "key" | "supporting";
   draft?: CharacterDraft;
   /** Frontend-only stable key for React rendering. Stripped by backend Zod validation. */
   _uid?: string;

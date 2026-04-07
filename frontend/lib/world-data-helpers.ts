@@ -3,7 +3,12 @@
  * (human-readable names). Used by both world-review pages.
  */
 
-import type { WorldData, EditableScaffold, LoreCardItem } from "./api-types";
+import type {
+  WorldData,
+  EditableScaffold,
+  LoreCardItem,
+  ScaffoldNpc,
+} from "./api-types";
 import type { CharacterDraft } from "@worldforge/shared";
 import { characterDraftToScaffoldNpc } from "./character-drafts";
 
@@ -11,6 +16,40 @@ export interface WorldIdMaps {
   readonly locationIdToName: ReadonlyMap<string, string>;
   readonly factionIdToName: ReadonlyMap<string, string>;
   readonly npcIdToName: ReadonlyMap<string, string>;
+}
+
+function mapDraftTierToScaffoldTier(
+  tier: CharacterDraft["identity"]["tier"] | null | undefined,
+): ScaffoldNpc["tier"] | null {
+  if (!tier) {
+    return null;
+  }
+
+  return tier === "key" ? "key" : "supporting";
+}
+
+function mapWorldRowTierToScaffoldTier(
+  tier: string | null | undefined,
+): ScaffoldNpc["tier"] | null {
+  if (tier === "key") {
+    return "key";
+  }
+
+  if (tier === "supporting" || tier === "persistent" || tier === "temporary") {
+    return "supporting";
+  }
+
+  return null;
+}
+
+function resolveEditableNpcTier(
+  npc: WorldData["npcs"][number],
+): ScaffoldNpc["tier"] {
+  return (
+    mapDraftTierToScaffoldTier(npc.draft?.identity.tier)
+    ?? mapWorldRowTierToScaffoldTier(npc.tier)
+    ?? "key"
+  );
 }
 
 /** Build ID-to-name lookup maps from raw world data. */
@@ -94,6 +133,7 @@ export function toEditableScaffold(
           ? (goals.longTerm as string[])
           : [];
       const draftNpc = draft ? draftToEditableNpc(draft) : null;
+      const tier = resolveEditableNpcTier(npc);
       return {
         name: draftNpc?.name ?? npc.name,
         persona: draftNpc?.persona ?? npc.persona,
@@ -103,6 +143,7 @@ export function toEditableScaffold(
           ? idMaps.locationIdToName.get(npc.currentLocationId) ?? ""
           : ""),
         factionName: draftNpc?.factionName ?? npcFaction.get(npc.name) ?? null,
+        tier,
         ...(draft ? { draft } : {}),
       };
     }),

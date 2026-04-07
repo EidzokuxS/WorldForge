@@ -327,6 +327,142 @@ describe("toEditableScaffold", () => {
     expect(scaffold.npcs[0].tags).toContain("Order");
   });
 
+  it("prefers draft.identity.tier over legacy row tier when both are present", () => {
+    const draft: CharacterDraft = {
+      identity: {
+        role: "npc",
+        tier: "supporting",
+        displayName: "Archivist Pell",
+        canonicalStatus: "original",
+      },
+      profile: {
+        species: "",
+        gender: "",
+        ageText: "",
+        appearance: "",
+        backgroundSummary: "",
+        personaSummary: "Tracks every ship that enters port",
+      },
+      socialContext: {
+        factionId: null,
+        factionName: null,
+        homeLocationId: null,
+        homeLocationName: null,
+        currentLocationId: null,
+        currentLocationName: "Market",
+        relationshipRefs: [],
+        socialStatus: [],
+        originMode: "resident",
+      },
+      motivations: {
+        shortTermGoals: [],
+        longTermGoals: [],
+        beliefs: [],
+        drives: [],
+        frictions: [],
+      },
+      capabilities: {
+        traits: [],
+        skills: [],
+        flaws: [],
+        specialties: [],
+        wealthTier: null,
+      },
+      state: {
+        hp: 5,
+        conditions: [],
+        statusFlags: [],
+        activityState: "active",
+      },
+      loadout: {
+        inventorySeed: [],
+        equippedItemRefs: [],
+        currencyNotes: "",
+        signatureItems: [],
+      },
+      startConditions: {},
+      provenance: {
+        sourceKind: "worldgen",
+        importMode: null,
+        templateId: null,
+        archetypePrompt: null,
+        worldgenOrigin: null,
+        legacyTags: [],
+      },
+    };
+
+    const scaffold = toEditableScaffold(
+      makeWorldData({
+        npcs: [
+          {
+            id: "npc-tier-1",
+            campaignId: "c1",
+            name: "Archivist Pell",
+            persona: "Legacy persona",
+            tags: [],
+            tier: "key",
+            currentLocationId: "loc-1",
+            goals: { short_term: [], long_term: [] },
+            beliefs: [],
+            draft,
+          },
+        ],
+      }),
+      "",
+      [],
+    );
+
+    expect(scaffold.npcs[0].tier).toBe("supporting");
+  });
+
+  it("maps legacy persistent runtime rows to supporting scaffold NPCs when draft is missing", () => {
+    const scaffold = toEditableScaffold(
+      makeWorldData({
+        npcs: [
+          {
+            id: "npc-tier-2",
+            campaignId: "c1",
+            name: "Harbor Clerk",
+            persona: "Keeps the manifests",
+            tags: [],
+            tier: "persistent",
+            currentLocationId: "loc-1",
+            goals: { short_term: [], long_term: [] },
+            beliefs: [],
+          },
+        ],
+      }),
+      "",
+      [],
+    );
+
+    expect(scaffold.npcs[0].tier).toBe("supporting");
+  });
+
+  it("falls back to key only when neither draft tier nor legacy row tier exists", () => {
+    const scaffold = toEditableScaffold(
+      makeWorldData({
+        npcs: [
+          {
+            id: "npc-tier-3",
+            campaignId: "c1",
+            name: "Unknown Stranger",
+            persona: "No file on record",
+            tags: [],
+            tier: undefined as unknown as string,
+            currentLocationId: null,
+            goals: { short_term: [], long_term: [] },
+            beliefs: [],
+          },
+        ],
+      }),
+      "",
+      [],
+    );
+
+    expect(scaffold.npcs[0].tier).toBe("key");
+  });
+
   it("transforms lore cards into simplified objects", () => {
     const world = makeWorldData();
     const scaffold = toEditableScaffold(world, "premise", lore);
