@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Ready to execute
-last_updated: "2026-04-07T05:01:28.528Z"
+status: Phase complete — ready for verification
+last_updated: "2026-04-07T05:11:18.447Z"
 last_activity: 2026-04-07
 progress:
   total_phases: 30
-  completed_phases: 29
+  completed_phases: 30
   total_plans: 107
-  completed_plans: 106
+  completed_plans: 107
 ---
 
 # Project State
@@ -235,6 +235,9 @@ Recent decisions affecting current work:
 - [Phase 33]: Use getByRole heading/tab to disambiguate flat-layout test assertions from duplicate text in sidebar + page header
 - [Phase 35]: Review scaffold tier stays key/supporting while DB persistence remains key/persistent.
 - [Phase 35]: saveEditsSchema now applies scaffold tier defaults inside the transform so canonical draft tiers can win when explicit scaffold tier is absent.
+- [Phase 35]: World review keeps helper APIs on role 'key' and retieres returned NPCs locally to the selected review tier.
+- [Phase 35]: Tier controls now use explicit per-card and new-NPC button groups so key vs supporting stays visible in the review editor.
+- [Phase 35]: Tier sync is centralized in one local helper so ScaffoldNpc.tier and draft.identity.tier change together.
 
 ### Roadmap Evolution
 
@@ -276,6 +279,7 @@ Recent decisions affecting current work:
 | 260403-grr | Redesign character creation page — full visual overhaul to dossier design language | 2026-04-03 | pending | [260403-grr](./quick/260403-grr-redesign-character-creation-page-full-vi/) |
 | 260405-r8a | Pre-filter worldbook entries via LLM before scaffold generation | 2026-04-05 | 63c3f2f | [260405-r8a](./quick/260405-r8a-pre-filter-worldbook-entries-via-llm-bef/) |
 | Phase 35 P01 | 9min | 2 tasks | 10 files |
+| Phase 35 P02 | 8min | 2 tasks | 2 files |
 
 ## Session Continuity
 
