@@ -561,8 +561,8 @@ Plans:
   3. World review visibly shows NPC tier and lets the user switch an NPC between key and supporting before save.
   4. Manual add, describe, import, and AI-generate NPC flows let the user choose key vs non-key without changing Phase 24 generation rules.
   5. Saving review edits keeps the existing supporting->persistent DB mapping coherent, and targeted regressions lock the seam.
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 
 Plans:
-- [ ] 35-01-PLAN.md -- Restore the scaffold/draft/load-save tier contract and lock it with targeted regressions
+- [x] 35-01-PLAN.md -- Restore the scaffold/draft/load-save tier contract and lock it with targeted regressions
 - [ ] 35-02-PLAN.md -- Add visible key/supporting controls to world-review NPC editing and helper creation flows

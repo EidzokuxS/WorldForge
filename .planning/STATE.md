@@ -2,34 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-<<<<<<< Updated upstream
-status: In progress
-<<<<<<< Updated upstream
-stopped_at: Completed 34-03-PLAN.md
-last_updated: "2026-04-04T14:55:00.000Z"
-=======
-stopped_at: Completed 34-01-PLAN.md
-last_updated: "2026-04-04T14:42:00.000Z"
-=======
-status: Executing Phase 34
-last_updated: "2026-04-04T14:32:36.452Z"
-last_activity: 2026-04-04
->>>>>>> Stashed changes
->>>>>>> Stashed changes
+status: Ready to execute
+last_updated: "2026-04-07T05:01:28.528Z"
+last_activity: 2026-04-07
 progress:
-  total_phases: 28
-  completed_phases: 28
-<<<<<<< Updated upstream
-  total_plans: 101
-  completed_plans: 101
-=======
-  total_plans: 105
-<<<<<<< Updated upstream
-  completed_plans: 102
-=======
-  completed_plans: 101
->>>>>>> Stashed changes
->>>>>>> Stashed changes
+  total_phases: 30
+  completed_phases: 29
+  total_plans: 107
+  completed_plans: 106
 ---
 
 # Project State
@@ -39,21 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-18)
 
 **Core value:** The LLM is the narrator, never the engine. All mechanical outcomes are resolved by backend code.
-**Current focus:** Phase 34 — worldgen-pipeline-rework-1-entity-per-llm-call-with-inter-stage-validation
+**Current focus:** Phase 35 — restore-npc-tier-visibility-and-manual-tier-control-in-world-review
 
 ## Current Position
 
-<<<<<<< Updated upstream
-Phase: 34
-<<<<<<< Updated upstream
-Plan: 03 complete
-=======
-Plan: 01 complete, 02-04 remaining
-=======
-Phase: 34 (worldgen-pipeline-rework-1-entity-per-llm-call-with-inter-stage-validation) — EXECUTING
-Plan: 1 of 4
->>>>>>> Stashed changes
->>>>>>> Stashed changes
+Phase: 35 (restore-npc-tier-visibility-and-manual-tier-control-in-world-review) — EXECUTING
+Plan: 2 of 2
 
 ## Performance Metrics
 
@@ -262,6 +233,8 @@ Recent decisions affecting current work:
 - [Phase 33]: Loading existing known-IP campaign satisfies create-or-load requirement without redundant LLM generation
 - [Phase 33]: Save-edits triggers lore re-extraction with real LLM calls adding ~30s save latency -- functional but noticeable
 - [Phase 33]: Use getByRole heading/tab to disambiguate flat-layout test assertions from duplicate text in sidebar + page header
+- [Phase 35]: Review scaffold tier stays key/supporting while DB persistence remains key/persistent.
+- [Phase 35]: saveEditsSchema now applies scaffold tier defaults inside the transform so canonical draft tiers can win when explicit scaffold tier is absent.
 
 ### Roadmap Evolution
 
@@ -280,6 +253,7 @@ Recent decisions affecting current work:
 - Phase 25 added: Replace premise-override heuristics with structured divergence interpretation
 - Phase 26 added: Reusable multi-worldbook library for campaign creation
 - Phase 27 added: Lore card editing and deletion
+- Phase 35 added: Restore NPC tier visibility and manual tier control in world review
 - Planning hygiene (2026-03-30): ROADMAP/STATE reconciled with completed phase artifacts; legacy superseded E2E phase directories moved out of active `.planning/phases/`
 - Phase 23 completed (2026-03-30): cached IP research pipeline reconciled, regression-tested, and verified against the live codebase
 
@@ -301,8 +275,9 @@ Recent decisions affecting current work:
 |---|-------------|------|--------|-----------|
 | 260403-grr | Redesign character creation page — full visual overhaul to dossier design language | 2026-04-03 | pending | [260403-grr](./quick/260403-grr-redesign-character-creation-page-full-vi/) |
 | 260405-r8a | Pre-filter worldbook entries via LLM before scaffold generation | 2026-04-05 | 63c3f2f | [260405-r8a](./quick/260405-r8a-pre-filter-worldbook-entries-via-llm-bef/) |
+| Phase 35 P01 | 9min | 2 tasks | 10 files |
 
 ## Session Continuity
 
-Last activity: 2026-04-05 - Completed quick task 260405-r8a: Pre-filter worldbook entries via LLM
+Last activity: 2026-04-07
 Resume file: None
