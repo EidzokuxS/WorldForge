@@ -19,6 +19,11 @@ import { StringListEditor } from "@/components/world-review/string-list-editor";
 import { RegenerateDialog } from "@/components/world-review/regenerate-dialog";
 import { parseV2CardFile } from "@/lib/v2-card-parser";
 import { parseCharacter, importV2Card, researchCharacter } from "@/lib/api";
+import {
+  characterDraftToScaffoldNpc,
+  createEmptyNpcDraft,
+  syncScaffoldTierToDraft,
+} from "@/lib/character-drafts";
 import type { CharacterImportMode } from "@/lib/types";
 import type { ScaffoldNpc } from "@/lib/api";
 import type { PersonaTemplateSummary } from "@/lib/api-types";
@@ -44,6 +49,14 @@ function assignUid(npc: ScaffoldNpc): ScaffoldNpc {
   return npc;
 }
 
+function syncNpcTier(npc: ScaffoldNpc, tier: ScaffoldNpc["tier"]): ScaffoldNpc {
+  return {
+    ...npc,
+    tier,
+    draft: npc.draft ? syncScaffoldTierToDraft(npc.draft, tier) : npc.draft,
+  };
+}
+
 export function NpcsSection({
   npcs,
   campaignId,
@@ -59,6 +72,7 @@ export function NpcsSection({
   const [descriptionText, setDescriptionText] = useState("");
   const [archetypeText, setArchetypeText] = useState("");
   const [importMode, setImportMode] = useState<CharacterImportMode>("native");
+  const [creationTier, setCreationTier] = useState<ScaffoldNpc["tier"]>("supporting");
   const [expandedPersonas, setExpandedPersonas] = useState<Set<number>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -95,7 +109,11 @@ export function NpcsSection({
   const updateNpc = useCallback(
     (index: number, patch: Partial<ScaffoldNpc>) => {
       const updated = npcs.map((npc, i) =>
-        i === index ? { ...npc, ...patch } : npc
+        i === index
+          ? patch.tier
+            ? syncNpcTier({ ...npc, ...patch }, patch.tier)
+            : { ...npc, ...patch }
+          : npc
       );
       onChange(updated);
     },
@@ -110,17 +128,13 @@ export function NpcsSection({
   );
 
   const addNpc = useCallback(() => {
-    const newNpc: ScaffoldNpc = {
-      _uid: `npc-${npcUidCounter++}`,
-      name: "",
-      persona: "",
-      tags: [],
-      goals: { shortTerm: [], longTerm: [] },
-      locationName: locationNames[0] ?? "",
-      factionName: null,
-    };
+    const newNpc = assignUid(
+      characterDraftToScaffoldNpc(
+        createEmptyNpcDraft(locationNames[0] ?? "", creationTier)
+      )
+    );
     onChange([...npcs, newNpc]);
-  }, [npcs, locationNames, onChange]);
+  }, [creationTier, locationNames, npcs, onChange]);
 
   const handleParseNpc = useCallback(async () => {
     if (!descriptionText.trim()) return;
@@ -128,7 +142,7 @@ export function NpcsSection({
     try {
       const result = await parseCharacter(campaignId, descriptionText, "key", locationNames, factionNames);
       if (result.role !== "key") throw new Error("Unexpected response");
-      const npc = assignUid(result.npc);
+      const npc = assignUid(syncNpcTier(result.npc, creationTier));
       onChange([...npcs, npc]);
       setDescriptionText("");
       setAddMode(null);
@@ -137,10 +151,10 @@ export function NpcsSection({
       toast.error("Failed to parse NPC", {
         description: error instanceof Error ? error.message : "Unknown error",
       });
-    } finally {
+      } finally {
       setBusy(false);
     }
-  }, [descriptionText, campaignId, locationNames, factionNames, npcs, onChange]);
+  }, [creationTier, descriptionText, campaignId, locationNames, factionNames, npcs, onChange]);
 
   const handleImportNpc = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -172,8 +186,8 @@ export function NpcsSection({
           },
         );
         if (result.role !== "key") throw new Error("Unexpected response");
-        const npc = result.npc;
-        onChange([...npcs, assignUid(npc)]);
+        const npc = assignUid(syncNpcTier(result.npc, creationTier));
+        onChange([...npcs, npc]);
         setAddMode(null);
         toast.success(`NPC "${npc.name}" imported`);
       } catch (error) {
@@ -184,7 +198,7 @@ export function NpcsSection({
         setBusy(false);
       }
     },
-    [campaignId, factionNames, importMode, locationNames, npcs, onChange]
+    [campaignId, creationTier, factionNames, importMode, locationNames, npcs, onChange]
   );
 
   const handleGenerateNpc = useCallback(async () => {
@@ -193,7 +207,7 @@ export function NpcsSection({
     try {
       const result = await researchCharacter(campaignId, archetypeText, "key", locationNames, factionNames);
       if (result.role !== "key") throw new Error("Unexpected response");
-      const npc = assignUid(result.npc);
+      const npc = assignUid(syncNpcTier(result.npc, creationTier));
       onChange([...npcs, npc]);
       setArchetypeText("");
       setAddMode(null);
@@ -205,13 +219,42 @@ export function NpcsSection({
     } finally {
       setBusy(false);
     }
-  }, [archetypeText, campaignId, locationNames, factionNames, npcs, onChange]);
+  }, [archetypeText, campaignId, creationTier, locationNames, factionNames, npcs, onChange]);
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="font-serif text-xl font-bold text-bone">NPCs</h2>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div
+            role="group"
+            aria-label="New NPC tier"
+            className="flex items-center gap-2 rounded-md border border-border/40 bg-zinc-950/40 px-2 py-1"
+          >
+            <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-zinc-500">
+              New NPC tier
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant={creationTier === "key" ? "default" : "outline"}
+              aria-label="New NPC tier key"
+              aria-pressed={creationTier === "key"}
+              onClick={() => setCreationTier("key")}
+            >
+              Key
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={creationTier === "supporting" ? "default" : "outline"}
+              aria-label="New NPC tier supporting"
+              aria-pressed={creationTier === "supporting"}
+              onClick={() => setCreationTier("supporting")}
+            >
+              Supporting
+            </Button>
+          </div>
           <RegenerateDialog
             sectionName="NPCs"
             onConfirm={onRegenerate}
@@ -238,6 +281,44 @@ export function NpcsSection({
             >
               <Trash2 className="h-4 w-4" />
             </button>
+
+            {/* Tier */}
+            <div
+              role="group"
+              aria-label={`${npc.name.trim() || `NPC ${index + 1}`} tier`}
+              className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] pb-3"
+            >
+              <div>
+                <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">
+                  Tier
+                </span>
+                <p className="mt-1 text-xs text-zinc-300">
+                  {npc.tier === "key" ? "Key NPC" : "Supporting NPC"}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={npc.tier === "key" ? "default" : "outline"}
+                  aria-label={`${npc.name.trim() || `NPC ${index + 1}`} key tier`}
+                  aria-pressed={npc.tier === "key"}
+                  onClick={() => updateNpc(index, { tier: "key" })}
+                >
+                  Key
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={npc.tier === "supporting" ? "default" : "outline"}
+                  aria-label={`${npc.name.trim() || `NPC ${index + 1}`} supporting tier`}
+                  aria-pressed={npc.tier === "supporting"}
+                  onClick={() => updateNpc(index, { tier: "supporting" })}
+                >
+                  Supporting
+                </Button>
+              </div>
+            </div>
 
             {/* NPC Name */}
             <div>
@@ -388,11 +469,11 @@ export function NpcsSection({
         ))}
       </div>
 
-      {/* ─── Key Characters ─── */}
+      {/* ─── NPC Creation ─── */}
       <div className="mt-6 border-t border-border/50 pt-6">
-        <h3 className="mb-3 font-serif text-lg font-bold text-bone">Key Characters</h3>
+        <h3 className="mb-3 font-serif text-lg font-bold text-bone">Create NPCs</h3>
         <p className="mb-4 text-sm text-muted-foreground">
-          Add custom NPCs via description, V2 card import, or AI generation from an archetype.
+          Add custom NPCs via description, V2 card import, or AI generation from an archetype. New NPCs use the selected tier above.
         </p>
 
         <div className="flex flex-wrap gap-2">
