@@ -549,3 +549,20 @@ Plans:
 - [x] 34-02-PLAN.md -- Per-entity location and faction generation with inter-stage validation
 - [x] 34-03-PLAN.md -- Per-entity NPC generation and category-specific lore extraction
 - [x] 34-04-PLAN.md -- Pipeline orchestrator integration and end-to-end verification
+
+### Phase 35: Restore NPC tier visibility and manual tier control in world review
+
+**Goal:** World review preserves NPC key/supporting tier across load, edit, and save, and lets the user explicitly choose who is key vs non-key without changing the underlying worldgen rules.
+**Requirements**: P35-01, P35-02, P35-03, P35-04, P35-05
+**Depends on:** Phase 34
+**Success Criteria** (what must be TRUE):
+  1. Existing generated key/supporting NPCs remain distinguishable in world review after loading campaign world data.
+  2. Draft/scaffold compatibility helpers preserve NPC tier instead of silently defaulting supporting/manual NPCs back to key.
+  3. World review visibly shows NPC tier and lets the user switch an NPC between key and supporting before save.
+  4. Manual add, describe, import, and AI-generate NPC flows let the user choose key vs non-key without changing Phase 24 generation rules.
+  5. Saving review edits keeps the existing supporting->persistent DB mapping coherent, and targeted regressions lock the seam.
+**Plans:** 2 plans
+
+Plans:
+- [ ] 35-01-PLAN.md -- Restore the scaffold/draft/load-save tier contract and lock it with targeted regressions
+- [ ] 35-02-PLAN.md -- Add visible key/supporting controls to world-review NPC editing and helper creation flows
