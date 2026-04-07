@@ -1,7 +1,7 @@
 ---
 phase: 35
 reviewers: [gemini, claude]
-reviewed_at: 2026-04-07T07:28:22.9404168+03:00
+reviewed_at: 2026-04-07T07:45:19.1732196+03:00
 plans_reviewed:
   - 35-01-PLAN.md
   - 35-02-PLAN.md
@@ -11,27 +11,29 @@ plans_reviewed:
 
 ## Gemini Review
 
-### Summary
-The proposed plans for Phase 35 are solid and directly address the root cause of NPC tier loss: a mismatch between the frontend `ScaffoldNpc` type (missing the `tier` field) and the backend `saveEditsSchema` (which silently defaults missing tiers to `key`). By explicitly adding `tier` to the frontend contract and updating the adapters and UI, the plans restore manual control over NPC importance while maintaining a clear mapping between scaffold tiers (`key`/`supporting`) and database tiers (`key`/`persistent`).
+#### 1. Summary
+The updated plans for Phase 35 provide a robust and surgically precise path to restoring NPC tier differentiation. By prioritizing data-contract integrity and parser-seam repairs before UI implementation, the plan ensures that the "key vs. supporting" distinction is preserved across the entire lifecycle—from scaffold loading to DB persistence. The inclusion of a clear fallback hierarchy and explicit "at-the-edge" retiering for helper-generated NPCs successfully addresses previous concerns about silent upcasting and inconsistent state. The strategy maintains the "worldgen as a scaffold" philosophy while empowering the user with manual override capabilities during the review phase.
 
-### Strengths
-- Comprehensive data flow coverage from initial world load through editing and saving.
-- Targeted regressions explicitly lock parser and persistence boundaries on both frontend and backend.
-- Pragmatic reuse of existing NPC helper APIs while allowing the UI to locally retier results.
-- Backward-compatible direction that preserves the existing `supporting -> persistent` save mapping and does not alter worldgen rules.
+#### 2. Strengths
+- Contract-first approach fixes types and adapters before UI, reducing state bugs.
+- Coherent fallback logic: `draft.identity.tier -> DB row tier -> key`.
+- Helper-created NPCs are retiered at the right edge before component state or `onChange`.
+- Test coverage spans frontend normalization and backend persistence seams.
+- Scope remains narrow and preserves current worldgen rules.
 
-### Concerns
-- HIGH: The backend `scaffoldNpc` schema currently defaults missing `tier` to `key`; any incomplete frontend update can still silently upcast NPCs.
-- MEDIUM: `ScaffoldNpc.tier` and `draft.identity.tier` must stay synchronized or the editor can produce split-brain NPC state.
-- LOW: The internal `supporting` (UI) to `persistent` (DB) terminology bridge remains fragile if shared enums shift.
+#### 3. Concerns
+- MEDIUM: UI-side synchronization of `npc.tier` and `npc.draft.identity.tier` can still drift if implemented separately across multiple handlers.
+- LOW: Backend schema strictness could still reject `"supporting"` if save-edits parser input enums are narrower than expected.
+- LOW: `supporting` (UI) vs `persistent` (DB) naming can remain a source of developer confusion.
 
-### Suggestions
-- Ensure `toEditableScaffold` explicitly pulls tier from canonical draft data first, then from runtime/DB row fallback.
-- Consider tightening backend schema defaults so new payloads do not silently fall back to `key` outside true legacy paths.
-- Add visible UI affordance for `key` vs `supporting` so the distinction is obvious at a glance.
+#### 4. Suggestions
+- Centralize retiering logic in a single helper so scaffold tier and draft tier never diverge.
+- Make tier labels in UI self-explanatory for users.
+- Do an early schema audit of the save-edits path before the rest of 35-01 lands.
+- Optionally extend the manual smoke to exercise a larger batch of supporting NPC saves.
 
-### Risk Assessment
-LOW. The model and save boundary already support the intended behavior; the remaining risk is mostly silent data loss from missing `tier` fields, which the planned regressions directly target.
+#### 5. Risk Assessment
+LOW. The phase is isolated to the review/editor seam, the fallback rule is explicit, and the test plan covers the highest-risk boundaries.
 
 ---
 
@@ -39,64 +41,62 @@ LOW. The model and save boundary already support the intended behavior; the rema
 
 ## 1. Summary
 
-The two plans form a clean data-layer-first / UI-second sequence for restoring NPC tier (`key` | `supporting`) across the world-review seam. Plan 35-01 repairs the scaffold/draft/load-save contract so tier survives round-tripping and locks it with regression tests. Plan 35-02 layers visible tier controls and per-flow tier selection on top. The scope is deliberately narrow — no worldgen rule changes, no backend API contract widening — which is correct given the stated goal. The main risks are around legacy campaign compatibility and the local-retier-after-helper-generation pattern, both of which are addressable but not fully specified.
+The two-plan split is well-structured: 35-01 fixes the data contract and parser seams (types, adapters, normalization, fallback rule) with backend + frontend regressions, then 35-02 layers the UI tier control on top. The updated plans now explicitly address the three gaps from the previous review — legacy fallback order, canonical `draft.identity.tier` seam, and helper-created NPC retiering. The scope is appropriately conservative: no worldgen changes, no backend helper API changes, and backend schema modifications are gated behind "only if tests reveal a real contract bug." This is a clean editorial/seam fix, not a feature addition.
 
 ## 2. Strengths
 
-- Correct sequencing: data contract first, then UI.
-- Surgical scope: no unnecessary worldgen or backend helper API changes.
-- Explicit preservation of `supporting -> persistent` mapping at the save boundary.
-- Regression-first approach across adapter directions and parser seams.
-- Both load and save paths are covered.
-- Concrete file lists and verification commands.
+- Correct sequencing: contract fix before UI.
+- Explicit fallback rule is now deterministic and backward-compatible.
+- Helper retiering is specified at the right boundary before UI state sees stale tier.
+- No worldgen rule changes and no backend helper API widening.
+- Backend changes remain test-driven and gated.
+- Manual smoke closes the previous integration-confidence gap.
 
 ## 3. Concerns
 
-- HIGH: Legacy campaign fallback is not specified. Existing campaigns without an explicit scaffold `tier` need an exact fallback rule or they risk silent promotion/demotion.
-- HIGH: `draft.identity.tier` existence is assumed by the plan but not explicitly called out as a type/schema seam to verify or add.
-- MEDIUM: Local retiering after helper creation is correct in principle but fragile if any state path inserts the NPC before retiering.
-- MEDIUM: No explicit statement on whether scaffold-tier types live only in frontend or also in shared types.
-- MEDIUM: Component-test plan for `npcs-section.test.tsx` likely needs fresh test scaffolding, not just a small update.
-- LOW: `_uid` helper interactions are not mentioned; cloned NPCs must not lose `tier`.
-- LOW: No manual smoke verification is specified for the user-facing tier editor.
+- MEDIUM: The fallback rule should be explicitly covered by three test branches, not just the happy path.
+- MEDIUM: The mapping from DB/runtime row tiers should be named more concretely, especially if `temporary` can ever leak into the seam.
+- LOW: Retiering may still drift if each helper flow reimplements it inline instead of using one shared helper.
+- LOW: Confirm whether `ScaffoldNpc` exists only in frontend or also in shared types to avoid type divergence.
+- LOW: The manual smoke step could be more explicit about expected DB state after save.
 
 ## 4. Suggestions
 
-- Add an explicit legacy fallback rule to 35-01 for NPCs loaded without `tier`.
-- Explicitly verify or add `identity.tier` on canonical drafts as part of 35-01.
-- Retier helper-created NPCs inside the API response handler before they enter component state or `onChange`.
-- Add one manual smoke test covering load -> edit tier -> save -> reload.
-- Add one assertion that `_uid` assignment/helpers preserve `tier`.
+- Require explicit fallback-branch coverage in tests for all three cascade cases.
+- State the row-tier mapping table concretely.
+- Prefer a shared retier helper over duplicated response-handler logic.
+- Make the manual smoke assert the persisted DB meaning: supporting -> persistent, key -> key.
 
 ## 5. Risk Assessment
 
-MEDIUM. The plans are well-structured and correctly scoped, but the legacy fallback gap and the local-retier sequencing need sharper specification to avoid silent mis-tiering in existing campaigns or helper-driven flows.
+LOW, with minor implementation-detail caveats. The remaining concerns are clarifications, not structural blockers.
 
 ---
 
 ## Consensus Summary
 
-Both reviewers agree the phase is correctly sequenced and narrowly scoped: fix the data contract first, then expose tier editing in the world-review UI without changing worldgen rules or widening helper APIs. They also agree the most important risk is silent tier drift at compatibility seams rather than any architectural flaw.
+The updated Phase 35 plans are now in good shape. Both reviewers agree the previous blockers were addressed: the legacy fallback rule is explicit, the canonical draft seam is no longer implicit, helper-created NPC retiering is placed at the correct boundary, and the added manual smoke step does not bloat scope. Remaining feedback is refinement-level rather than blocker-level.
 
 ### Agreed Strengths
-- The split into `35-01` data-contract work and `35-02` UI work is the right order.
-- The phase is tightly scoped and avoids unnecessary worldgen or backend API churn.
-- The plan correctly preserves the established `supporting -> persistent` save-boundary mapping.
-- Targeted regressions around adapters, parser seams, and persistence are the right testing strategy.
+- The 2-plan sequence remains correct: seam/data contract first, UI second.
+- Scope stays narrow and avoids worldgen or backend helper API churn.
+- The explicit fallback rule significantly reduces silent upcasting risk.
+- Retiering helper-created NPCs before state/`onChange` is the right architectural boundary.
+- The current regression strategy targets the correct frontend/backend seams.
 
 ### Agreed Concerns
-- Missing-tier fallback behavior for legacy payloads/campaigns is not explicit enough and can still silently upcast NPCs to `key`.
-- `npc.tier` and `draft.identity.tier` must remain synchronized everywhere; otherwise the review editor can emit incoherent state.
-- Helper-created NPCs should be retiered before entering scaffold state, not as a loosely specified follow-up step.
+- Retiering logic should ideally be centralized rather than duplicated across multiple helper handlers.
+- The fallback rule should be fully covered by explicit test branches, not only implied by acceptance criteria.
+- The `supporting` (UI) to `persistent` (DB) mapping should stay explicit to avoid confusion or accidental drift.
 
 ### Divergent Views
-- Gemini rates overall risk LOW because the underlying data model already supports the feature and the planned regressions are strong.
-- Claude rates overall risk MEDIUM because the legacy fallback rule and helper-retier sequencing are not yet fully specified.
-- Claude also raises a possible missing seam around `identity.tier` ownership and `_uid` preservation that Gemini does not call out.
+- Gemini is satisfied with the current fallback statement as-is and rates risk plainly LOW.
+- Claude still wants a bit more specificity around mapping-table wording and fallback-branch test enumeration, but also rates overall risk LOW.
 
 ## Recommended Plan Adjustments
 
-- Update `35-01-PLAN.md` to explicitly define the legacy fallback rule for NPCs loaded without `tier`.
-- Update `35-01-PLAN.md` to explicitly verify the canonical draft tier seam (`draft.identity.tier`) rather than assuming it already exists and is stable.
-- Update `35-02-PLAN.md` to specify that helper-created NPCs are retiered before entering component state or firing `onChange`.
-- Add a small manual smoke step for the user-facing tier editor: load mixed NPCs, change tier, save, reload, verify.
+- Optionally tighten `35-01-PLAN.md` by spelling out the row-tier mapping more concretely if `temporary` can ever surface at the seam.
+- Optionally tighten `35-01-PLAN.md` acceptance/verification wording to explicitly enumerate all fallback test branches.
+- Optionally note in `35-02-PLAN.md` that a shared local retier helper is preferred over duplicated per-handler retier code.
+
+These are polish-level improvements. No replan blocker remains.
