@@ -15,7 +15,7 @@ import { getDb } from "../db/index.js";
 import { items, locations, players } from "../db/schema.js";
 import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
 import { and, eq } from "drizzle-orm";
-import { parseBody, requireActiveCampaign, resolveGenerator, setupCharacterEndpoint } from "./helpers.js";
+import { parseBody, requireLoadedCampaign, resolveGenerator, setupCharacterEndpoint } from "./helpers.js";
 import { createLogger } from "../lib/index.js";
 import {
   generateImage,
@@ -214,7 +214,7 @@ app.post("/save-character", async (c) => {
     if ("response" in result) return result.response;
 
     const { campaignId, draft } = result.data;
-    const campaign = requireActiveCampaign(c, campaignId);
+    const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
 
     const db = getDb();
@@ -333,7 +333,7 @@ app.post("/preview-loadout", async (c) => {
     if ("response" in result) return result.response;
 
     const { campaignId, draft } = result.data;
-    const campaign = requireActiveCampaign(c, campaignId);
+    const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
 
     return c.json(deriveCanonicalLoadout(draft));
@@ -353,7 +353,7 @@ app.post("/resolve-starting-location", async (c) => {
     if ("response" in result) return result.response;
 
     const { campaignId, prompt: userPrompt } = result.data;
-    const campaign = requireActiveCampaign(c, campaignId);
+    const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
 
     const db = getDb();
