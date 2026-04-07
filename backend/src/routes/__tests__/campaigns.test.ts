@@ -497,4 +497,55 @@ describe("GET /:id/world", () => {
     expect(res.status).toBe(200);
     expect(mockedLoad).toHaveBeenCalledWith(CAMPAIGN_ID);
   });
+
+  it("surfaces persistent DB npc rows as supporting review-tier aliases", async () => {
+    mockedGetActive.mockReturnValue({
+      id: CAMPAIGN_ID,
+      name: "Test",
+      createdAt: "2026-01-01",
+      generationComplete: true,
+    } as any);
+
+    const mockAll = vi.fn();
+    const mockWhere = vi.fn(() => ({ all: mockAll }));
+    const mockFrom = vi.fn(() => ({ where: mockWhere }));
+    const mockSelect = vi.fn(() => ({ from: mockFrom }));
+
+    mockAll
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([
+        {
+          id: "npc-1",
+          campaignId: CAMPAIGN_ID,
+          name: "Signal Runner Toma",
+          persona: "Carries messages through the storm.",
+          tags: "[]",
+          tier: "persistent",
+          currentLocationId: null,
+          goals: JSON.stringify({
+            short_term: ["Deliver the warning"],
+            long_term: ["Keep the valley connected"],
+          }),
+          beliefs: "[]",
+          unprocessedImportance: 0,
+          inactiveTicks: 0,
+          createdAt: 0,
+        },
+      ])
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([]);
+
+    mockedGetDb.mockReturnValue({
+      select: mockSelect,
+    } as any);
+
+    const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/world`);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.npcs).toHaveLength(1);
+    expect(body.npcs[0]?.npc?.tier).toBe("supporting");
+    expect(body.npcs[0]?.draft?.identity?.tier).toBe("persistent");
+  });
 });

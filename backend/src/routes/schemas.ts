@@ -518,13 +518,14 @@ const scaffoldNpcLegacySchema = z.object({
   }),
   locationName: z.string(),
   factionName: z.string().nullable(),
-  tier: z.enum(["key", "supporting"]).default("key"),
+  tier: z.enum(["key", "supporting"]).optional(),
 });
 
 function legacyNpcToDraft(
   npc: z.infer<typeof scaffoldNpcLegacySchema>,
 ) {
-  return recordToDraft(
+  const scaffoldTier = npc.tier ?? "key";
+  const draft = recordToDraft(
     fromLegacyNpcRow(
       {
         id: "legacy-npc",
@@ -532,7 +533,7 @@ function legacyNpcToDraft(
         name: npc.name,
         persona: npc.persona,
         tags: JSON.stringify(npc.tags),
-        tier: npc.tier === "key" ? "key" : "persistent",
+        tier: scaffoldTier === "key" ? "key" : "persistent",
         currentLocationId: null,
         goals: JSON.stringify({
           short_term: npc.goals.shortTerm,
@@ -549,6 +550,14 @@ function legacyNpcToDraft(
       },
     ),
   );
+
+  return {
+    ...draft,
+    identity: {
+      ...draft.identity,
+      tier: scaffoldTier === "key" ? "key" : "supporting",
+    },
+  };
 }
 
 // --- World review schemas ---
@@ -605,7 +614,7 @@ const scaffoldNpcSchema = z
       draft: characterDraftSchema,
       locationName: z.string().optional(),
       factionName: z.string().nullable().optional(),
-      tier: z.enum(["key", "supporting"]).default("key"),
+      tier: z.enum(["key", "supporting"]).optional(),
     }),
   ])
   .transform((input) => {
@@ -622,9 +631,14 @@ const scaffoldNpcSchema = z
       };
     }
 
+    const tier = input.tier ?? "key";
     return {
       ...input,
-      draft: legacyNpcToDraft(input),
+      tier,
+      draft: legacyNpcToDraft({
+        ...input,
+        tier,
+      }),
     };
   });
 

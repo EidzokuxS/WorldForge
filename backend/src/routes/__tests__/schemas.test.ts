@@ -1757,7 +1757,7 @@ describe("canonical character schemas", () => {
     ).toBe(true);
   });
 
-  it("accepts scaffold NPC edits that carry the canonical draft seam", () => {
+  it("preserves supporting tier for draft-backed save-edits NPC payloads", () => {
     const result = saveEditsSchema.safeParse({
       campaignId: "camp-1",
       scaffold: {
@@ -1779,13 +1779,13 @@ describe("canonical character schemas", () => {
               identity: {
                 ...draft.identity,
                 role: "npc",
-                tier: "key",
+                tier: "supporting",
                 displayName: "Captain Mire",
               },
             },
             locationName: "Signal Station",
             factionName: "Wardens",
-            tier: "key",
+            tier: "supporting",
           },
         ],
         loreCards: [],
@@ -1793,6 +1793,61 @@ describe("canonical character schemas", () => {
     });
 
     expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.scaffold.npcs[0]).toMatchObject({
+        name: "Captain Mire",
+        locationName: "Signal Station",
+        factionName: "Wardens",
+        tier: "supporting",
+      });
+      expect(result.data.scaffold.npcs[0]?.draft.identity.tier).toBe("supporting");
+    }
+  });
+
+  it("materializes a canonical supporting draft for legacy supporting scaffold NPC payloads", () => {
+    const result = saveEditsSchema.safeParse({
+      campaignId: "camp-1",
+      scaffold: {
+        refinedPremise: "Signals whisper through the alpine dark.",
+        locations: [
+          {
+            name: "Signal Station",
+            description: "A frozen relay tower above the valley.",
+            tags: ["Cold"],
+            isStarting: true,
+            connectedTo: [],
+          },
+        ],
+        factions: [],
+        npcs: [
+          {
+            name: "Field Runner Iven",
+            persona: "Carries sealed messages through the blizzard.",
+            tags: ["fast", "reliable"],
+            goals: {
+              shortTerm: ["Deliver the dispatch"],
+              longTerm: ["Map every pass in the range"],
+            },
+            locationName: "Signal Station",
+            factionName: null,
+            tier: "supporting",
+          },
+        ],
+        loreCards: [],
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.scaffold.npcs[0]).toMatchObject({
+        name: "Field Runner Iven",
+        tier: "supporting",
+      });
+      expect(result.data.scaffold.npcs[0]?.draft.identity.tier).toBe("supporting");
+      expect(result.data.scaffold.npcs[0]?.draft.profile.personaSummary).toBe(
+        "Carries sealed messages through the blizzard.",
+      );
+    }
   });
 
   it("adds canonical persistence columns to players and npcs without removing legacy ones", () => {

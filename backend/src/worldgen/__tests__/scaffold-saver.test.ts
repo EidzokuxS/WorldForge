@@ -309,6 +309,16 @@ describe("saveScaffoldToDb", () => {
     expect(mira.tier).toBe("persistent");
   });
 
+  it("keeps scaffold tier 'key' as DB tier 'key'", () => {
+    saveScaffoldToDb("campaign-1", buildScaffold());
+    const npcInserts = dbCalls.filter(
+      (c) => c.op === "insert" && c.table === "npcs",
+    );
+    const aldric = npcInserts[0]!.data as Record<string, unknown>;
+    expect(aldric.name).toBe("Captain Aldric");
+    expect(aldric.tier).toBe("key");
+  });
+
   it("insertMembershipRelationships creates relationship with ['Member'] tag for NPCs with factionName", () => {
     saveScaffoldToDb("campaign-1", buildScaffold());
     const relInserts = dbCalls.filter(

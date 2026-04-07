@@ -380,7 +380,7 @@ describe("POST /api/worldgen/suggest-seeds", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(mockedComposeSelectedWorldbooks).toHaveBeenCalledWith(selectedWorldbooks);
+    expect(mockedComposeSelectedWorldbooks).toHaveBeenCalledWith(selectedWorldbooks, "");
     expect(mockedSuggestWorldSeeds).toHaveBeenCalledWith(
       expect.objectContaining({
         premise: "A world based on the Alpha Archive setting",
@@ -720,7 +720,7 @@ describe("POST /api/worldgen/generate", () => {
     await res.text();
 
     expect(mockedReadCampaignConfig).toHaveBeenCalledWith(CAMPAIGN_ID);
-    expect(mockedComposeSelectedWorldbooks).toHaveBeenCalledWith(worldbookSelection);
+    expect(mockedComposeSelectedWorldbooks).toHaveBeenCalledWith(worldbookSelection, "A dark world");
     expect(mockedSaveIpContext).toHaveBeenCalledWith(CAMPAIGN_ID, composedIpContext);
     expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
       expect.objectContaining({ ipContext: composedIpContext }),
@@ -878,6 +878,160 @@ describe("POST /api/worldgen/save-edits", () => {
     expect(body).toEqual({ ok: true });
     expect(mockedSaveScaffoldToDb).toHaveBeenCalledWith(CAMPAIGN_ID, validScaffold);
     expect(mockedMarkGenComplete).toHaveBeenCalledWith(CAMPAIGN_ID, "A refined dark world");
+  });
+
+  it("normalizes draft-backed supporting NPC payloads without tier regression", async () => {
+    mockedSaveScaffoldToDb.mockReturnValue(undefined as any);
+    mockedMarkGenComplete.mockReturnValue(undefined as any);
+    mockedDeleteLore.mockResolvedValue(undefined as any);
+    mockedExtractLoreCards.mockResolvedValue([] as any);
+    mockedStoreLore.mockResolvedValue(undefined as any);
+
+    const res = await app.request("/api/worldgen/save-edits", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        scaffold: {
+          ...validScaffold,
+          npcs: [
+            {
+              draft: {
+                identity: {
+                  role: "npc",
+                  tier: "supporting",
+                  displayName: "Quartermaster Hale",
+                  canonicalStatus: "original",
+                },
+                profile: {
+                  species: "",
+                  gender: "",
+                  ageText: "",
+                  appearance: "",
+                  backgroundSummary: "",
+                  personaSummary: "Keeps the stores ledger balanced.",
+                },
+                socialContext: {
+                  factionId: null,
+                  factionName: "Castle Guard",
+                  homeLocationId: null,
+                  homeLocationName: null,
+                  currentLocationId: null,
+                  currentLocationName: "Castle",
+                  relationshipRefs: [],
+                  socialStatus: [],
+                  originMode: "resident",
+                },
+                motivations: {
+                  shortTermGoals: ["Count the rations"],
+                  longTermGoals: ["Keep the garrison supplied"],
+                  beliefs: [],
+                  drives: [],
+                  frictions: [],
+                },
+                capabilities: {
+                  traits: [],
+                  skills: [],
+                  flaws: [],
+                  specialties: [],
+                  wealthTier: null,
+                },
+                state: {
+                  hp: 5,
+                  conditions: [],
+                  statusFlags: [],
+                  activityState: "active",
+                },
+                loadout: {
+                  inventorySeed: [],
+                  equippedItemRefs: [],
+                  currencyNotes: "",
+                  signatureItems: [],
+                },
+                startConditions: {},
+                provenance: {
+                  sourceKind: "worldgen",
+                  importMode: null,
+                  templateId: null,
+                  archetypePrompt: null,
+                  worldgenOrigin: null,
+                  legacyTags: [],
+                },
+              },
+              locationName: "Castle",
+              factionName: "Castle Guard",
+              tier: "supporting",
+            },
+          ],
+        },
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(mockedSaveScaffoldToDb).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      expect.objectContaining({
+        npcs: [
+          expect.objectContaining({
+            name: "Quartermaster Hale",
+            tier: "supporting",
+            draft: expect.objectContaining({
+              identity: expect.objectContaining({
+                tier: "supporting",
+              }),
+            }),
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("materializes supporting draft state for legacy supporting save-edits NPC payloads", async () => {
+    mockedSaveScaffoldToDb.mockReturnValue(undefined as any);
+    mockedMarkGenComplete.mockReturnValue(undefined as any);
+    mockedDeleteLore.mockResolvedValue(undefined as any);
+    mockedExtractLoreCards.mockResolvedValue([] as any);
+    mockedStoreLore.mockResolvedValue(undefined as any);
+
+    const res = await app.request("/api/worldgen/save-edits", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        scaffold: {
+          ...validScaffold,
+          npcs: [
+            {
+              name: "Wall Runner Nessa",
+              persona: "Scales the walls faster than the watch can shout.",
+              tags: ["swift"],
+              goals: { shortTerm: ["Carry the alert"], longTerm: ["Protect the outer wards"] },
+              locationName: "Castle",
+              factionName: null,
+              tier: "supporting",
+            },
+          ],
+        },
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(mockedSaveScaffoldToDb).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      expect.objectContaining({
+        npcs: [
+          expect.objectContaining({
+            name: "Wall Runner Nessa",
+            tier: "supporting",
+            draft: expect.objectContaining({
+              identity: expect.objectContaining({
+                tier: "supporting",
+              }),
+            }),
+          }),
+        ],
+      }),
+    );
   });
 
   it("returns 404 with no active campaign", async () => {
