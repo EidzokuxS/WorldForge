@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Phase 36 in progress — 36-02 runtime matrix complete, 36-03 next
-last_updated: "2026-04-08T12:13:09.462Z"
+status: Phase 36 complete — gameplay baseline handoff and formal verification closed
+last_updated: "2026-04-08T12:55:00.000Z"
 last_activity: 2026-04-08
 progress:
   total_phases: 31
-  completed_phases: 30
+  completed_phases: 31
   total_plans: 110
-  completed_plans: 109
+  completed_plans: 110
 ---
 
 # Project State
@@ -19,28 +19,28 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-18)
 
 **Core value:** The LLM is the narrator, never the engine. All mechanical outcomes are resolved by backend code.
-**Current focus:** Phase 36 — synthesize the gameplay-baseline handoff from the completed claim register and runtime matrix
+**Current focus:** Milestone closeout and next gameplay-milestone definition from the completed Phase 36 handoff
 
 ## Current Position
 
 Phase: 36 — Gameplay docs-to-runtime reconciliation audit
-Plan: 3 of 3 — `36-03` next, using the completed claim register and runtime matrix as the synthesis surface
+Plan: Complete — 3 of 3 plans closed
 
 ## Performance Metrics
 
 **Current Snapshot:**
 
 - Active roadmap phases: 31
-- Completed phases: 30
-- Planned or in-progress phases: 1
+- Completed phases: 31
+- Planned or in-progress phases: 0
 - Total plans tracked: 110
-- Completed plans: 109
-- Pending plans: 1
+- Completed plans: 110
+- Pending plans: 0
 
 **Open Work:**
 
-- Active execution target: synthesize the gameplay-baseline handoff from the completed claim register and runtime matrix
-- Next required workflow step: execute `36-03-PLAN.md`
+- Active execution target: none inside v1.0; use the Phase 36 handoff to define the next gameplay milestone
+- Next required workflow step: milestone closeout or direct planning from `36-HANDOFF.md`
 - Phase 29 and Phase 30 are now formally closed via `29-VERIFICATION.md` and `30-VERIFICATION.md`
 - Backlog items outside active execution order are tracked in `.planning/BACKLOG.md`
 
@@ -62,6 +62,7 @@ Plan: 3 of 3 — `36-03` next, using the completed claim register and runtime ma
 - Phase 36 planning completed on 2026-04-08: `36-CONTEXT.md`, `36-RESEARCH.md`, and plans `36-01` through `36-03` now define the docs-wide gameplay claim register, runtime reconciliation matrix, and next-milestone handoff.
 - Plan 36-01 completed on 2026-04-08: `36-CLAIMS.md` now contains 136 subsystem-grouped gameplay claims with provenance, claim types, and preserved source tensions for direct use in `36-02`.
 - Plan 36-02 completed on 2026-04-08: `36-RUNTIME-MATRIX.md` now classifies all 136 claims against live runtime, counts 75 wired / 48 partial / 7 missing / 6 outdated claims, and elevates six integrity-critical seams for the next gameplay milestone.
+- Plan 36-03 completed on 2026-04-08: `36-HANDOFF.md` now converts the claim register and runtime matrix into the authoritative gameplay baseline for the next milestone, and `36-VERIFICATION.md` closes the phase formally.
 
 ## Accumulated Context
 
@@ -247,6 +248,8 @@ Recent decisions affecting current work:
 - [Phase 36]: Reserved runtime_status for Plan 36-02 and froze the allowed status vocabulary in 36-CLAIMS.md instead of partially classifying claims during extraction.
 - [Phase 36]: Reserved outdated_or_contradicted for claims explicitly superseded by live architecture; kept weaker drift as implemented_but_partial or documented_but_missing.
 - [Phase 36]: Elevated rollback, checkpoint, inventory authority, reflection, transport, and post-turn simulation seams out of per-claim rows so the next gameplay milestone can treat them as systemic blockers.
+- [Phase 36]: The next gameplay milestone should be planned from priority groups plus dependency constraints rather than pretending the reconciliation can safely prescribe exact phase order.
+- [Phase 36]: Integrity blockers, still-missing documented mechanics, and docs drift must stay in separate handoff lanes so the next milestone starts from one honest baseline.
 
 ### Roadmap Evolution
 
