@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
-status: verifying
-stopped_at: Completed 37-02-PLAN.md
-last_updated: "2026-04-08T16:34:52.895Z"
+status: planning
+stopped_at: Phase 39 context gathered
+last_updated: "2026-04-08T18:03:09.631Z"
 last_activity: 2026-04-08
 progress:
   total_phases: 8
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-08)
 
 **Core value:** The LLM is the narrator, never the engine. Mechanical truth stays in backend code so outcomes remain consistent, inspectable, and recoverable.
-**Current focus:** Phase 37 — campaign-loaded-gameplay-transport
+**Current focus:** Phase 39 — honest-turn-boundary-retry-undo
 
 ## Current Position
 
-Phase: 37 (campaign-loaded-gameplay-transport) — EXECUTING
-Plan: 2 of 2
-Status: Phase complete — ready for verification
+Phase: 39 (honest-turn-boundary-retry-undo) — DISCUSSING
+Plan: not planned yet
+Status: Context gathered — ready for planning
 Last activity: 2026-04-08
 
 Progress: [██████████] 100%
@@ -65,6 +65,9 @@ Recent decisions affecting current work:
 - [Phase 37]: Last-turn retry and undo snapshots are keyed by campaignId to prevent cross-campaign rollback leakage.
 - [Phase 37]: Frontend gameplay helpers now require campaignId, including shared chatHistory/chatAction wrappers in frontend/lib/api.ts.
 - [Phase 37]: The canonical /game page preserves active-first bootstrap with remembered fallback, but all targeted gameplay requests now send activeCampaign.id explicitly.
+- [Phase 39]: A turn is only complete after rollback-critical post-turn world mutations finish; embeddings and image generation remain auxiliary.
+- [Phase 39]: Retry and undo stay single-step in this phase, but must restore the same authoritative pre-turn boundary the player experienced.
+- [Phase 39]: Rollback-critical post-turn failure must prevent a turn from being presented as successfully complete.
 
 ### Pending Todos
 
@@ -77,6 +80,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-08T16:34:52.893Z
-Stopped at: Completed 37-02-PLAN.md
-Resume file: None
+Last session: 2026-04-08T18:03:09.628Z
+Stopped at: Phase 39 context gathered
+Resume file: .planning/phases/39-honest-turn-boundary-retry-undo/39-CONTEXT.md
