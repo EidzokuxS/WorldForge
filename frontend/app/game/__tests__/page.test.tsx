@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -14,12 +14,16 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/api", () => ({
   apiGet: vi.fn(),
   apiStreamPost: vi.fn(),
+  chatAction: vi.fn(),
   chatEdit: vi.fn(),
+  chatHistory: vi.fn(),
   chatRetry: vi.fn(),
   chatUndo: vi.fn(),
   getActiveCampaign: vi.fn(),
+  getRememberedCampaignId: vi.fn(),
   getImageUrl: vi.fn(),
   getWorldData: vi.fn(),
+  loadCampaign: vi.fn(),
   parseTurnSSE: vi.fn(),
 }));
 
@@ -35,7 +39,13 @@ vi.mock("@/components/game/location-panel", () => ({
   LocationPanel: () => <div data-testid="location-panel" />,
 }));
 vi.mock("@/components/game/narrative-log", () => ({
-  NarrativeLog: () => <div data-testid="narrative-log" />,
+  NarrativeLog: ({ onRetry }: { onRetry: () => void }) => (
+    <div data-testid="narrative-log">
+      <button type="button" onClick={onRetry}>
+        Retry turn
+      </button>
+    </div>
+  ),
 }));
 vi.mock("@/components/game/character-panel", () => ({
   CharacterPanel: () => <div data-testid="character-panel" />,
@@ -53,15 +63,35 @@ vi.mock("@/components/game/oracle-panel", () => ({
   OraclePanel: () => <div data-testid="oracle-panel" />,
 }));
 vi.mock("@/components/game/quick-actions", () => ({
-  QuickActions: () => <div data-testid="quick-actions" />,
+  QuickActions: ({ onAction }: { onAction: (action: string) => void }) => (
+    <div data-testid="quick-actions">
+      <button type="button" onClick={() => onAction("Scout ahead")}>
+        Trigger quick action
+      </button>
+    </div>
+  ),
 }));
 
-import { getActiveCampaign, getWorldData, apiGet } from "@/lib/api";
+import {
+  apiGet,
+  chatAction,
+  chatHistory,
+  chatRetry,
+  getActiveCampaign,
+  getRememberedCampaignId,
+  getWorldData,
+  loadCampaign,
+} from "@/lib/api";
 import GamePage from "../page";
 
 const mockedGetActive = vi.mocked(getActiveCampaign);
 const mockedGetWorld = vi.mocked(getWorldData);
 const mockedApiGet = vi.mocked(apiGet);
+const mockedChatAction = vi.mocked(chatAction);
+const mockedChatHistory = vi.mocked(chatHistory);
+const mockedChatRetry = vi.mocked(chatRetry);
+const mockedGetRememberedCampaignId = vi.mocked(getRememberedCampaignId);
+const mockedLoadCampaign = vi.mocked(loadCampaign);
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -103,6 +133,7 @@ const fakeChatHistory = {
 // ---------------------------------------------------------------------------
 beforeEach(() => {
   vi.clearAllMocks();
+  mockedGetRememberedCampaignId.mockReturnValue(null);
 });
 
 describe("GamePage", () => {
@@ -126,7 +157,7 @@ describe("GamePage", () => {
 
   it("renders full game layout after initialization", async () => {
     mockedGetActive.mockResolvedValue(fakeCampaign as never);
-    mockedApiGet.mockResolvedValue(fakeChatHistory as never);
+    mockedChatHistory.mockResolvedValue(fakeChatHistory as never);
     mockedGetWorld.mockResolvedValue(fakeWorldData as never);
 
     render(<GamePage />);
@@ -145,7 +176,7 @@ describe("GamePage", () => {
 
   it("renders toolbar with Title, Settings, and Saves buttons", async () => {
     mockedGetActive.mockResolvedValue(fakeCampaign as never);
-    mockedApiGet.mockResolvedValue(fakeChatHistory as never);
+    mockedChatHistory.mockResolvedValue(fakeChatHistory as never);
     mockedGetWorld.mockResolvedValue(fakeWorldData as never);
 
     render(<GamePage />);
@@ -160,13 +191,74 @@ describe("GamePage", () => {
 
   it("renders checkpoint panel when campaign is active", async () => {
     mockedGetActive.mockResolvedValue(fakeCampaign as never);
-    mockedApiGet.mockResolvedValue(fakeChatHistory as never);
+    mockedChatHistory.mockResolvedValue(fakeChatHistory as never);
     mockedGetWorld.mockResolvedValue(fakeWorldData as never);
 
     render(<GamePage />);
 
     await waitFor(() => {
       expect(screen.getByTestId("checkpoint-panel")).toBeInTheDocument();
+    });
+  });
+
+  it("loads the remembered campaign before fetching explicit campaign history on reload", async () => {
+    mockedGetActive.mockResolvedValue(null as never);
+    mockedGetRememberedCampaignId.mockReturnValue(fakeCampaign.id);
+    mockedLoadCampaign.mockResolvedValue(fakeCampaign as never);
+    mockedChatHistory.mockResolvedValue(fakeChatHistory as never);
+    mockedGetWorld.mockResolvedValue(fakeWorldData as never);
+
+    render(<GamePage />);
+
+    await waitFor(() => {
+      expect(mockedLoadCampaign).toHaveBeenCalledWith(fakeCampaign.id);
+    });
+
+    await waitFor(() => {
+      expect(mockedChatHistory).toHaveBeenCalledWith(fakeCampaign.id);
+    });
+    expect(mockedGetWorld).toHaveBeenCalledWith(fakeCampaign.id);
+    expect(mockedApiGet).not.toHaveBeenCalled();
+  });
+
+  it("passes the active campaign id into the explicit gameplay helpers", async () => {
+    mockedGetActive.mockResolvedValue(fakeCampaign as never);
+    mockedChatHistory.mockResolvedValue(fakeChatHistory as never);
+    mockedGetWorld.mockResolvedValue(fakeWorldData as never);
+    mockedChatAction.mockResolvedValue(
+      new Response("event: done\ndata: {}\n\n", {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }) as never,
+    );
+    mockedChatRetry.mockResolvedValue(
+      new Response("event: done\ndata: {}\n\n", {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }) as never,
+    );
+
+    render(<GamePage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("quick-actions")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Trigger quick action"));
+
+    await waitFor(() => {
+      expect(mockedChatAction).toHaveBeenCalledWith(
+        fakeCampaign.id,
+        "Scout ahead",
+        "Scout ahead",
+        "",
+      );
+    });
+
+    fireEvent.click(screen.getByText("Retry turn"));
+
+    await waitFor(() => {
+      expect(mockedChatRetry).toHaveBeenCalledWith(fakeCampaign.id);
     });
   });
 });
