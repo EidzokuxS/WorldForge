@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
-status: planning
-stopped_at: Phase 37 context gathered
-last_updated: "2026-04-08T13:28:55.674Z"
-last_activity: 2026-04-08 — Created the v1.1 roadmap from the Phase 36 reconciliation handoff
+status: executing
+stopped_at: Completed 37-01-PLAN.md
+last_updated: "2026-04-08T16:27:17.176Z"
+last_activity: 2026-04-08
 progress:
   total_phases: 8
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  total_plans: 2
+  completed_plans: 1
+  percent: 50
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-08)
 
 **Core value:** The LLM is the narrator, never the engine. Mechanical truth stays in backend code so outcomes remain consistent, inspectable, and recoverable.
-**Current focus:** Phase 37 planning for campaign-loaded gameplay transport
+**Current focus:** Phase 37 — campaign-loaded-gameplay-transport
 
 ## Current Position
 
-Phase: 37 of 44 (Campaign-Loaded Gameplay Transport)
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-04-08 — Created the v1.1 roadmap from the Phase 36 reconciliation handoff
+Phase: 37 (campaign-loaded-gameplay-transport) — EXECUTING
+Plan: 2 of 2
+Status: Ready to execute
+Last activity: 2026-04-08
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
@@ -42,6 +42,10 @@ Progress: [░░░░░░░░░░] 0%
 - Total plans tracked: 110
 - Completed plans: 110
 - Pending plans: TBD until phase planning
+
+**Recent Execution:**
+
+- Phase `37` Plan `01` — duration `8 min`, tasks `2`, files `3`
 
 ## Accumulated Context
 
@@ -55,6 +59,9 @@ Recent decisions affecting current work:
 - Session-decoupled transport, authoritative inventory, honest turn boundaries, live reflection, and checkpoint-complete restore are the v1.1 critical path.
 - Travel-time and per-location recent-happenings claims must end as real runtime behavior or explicit deprecations.
 - Gameplay docs must become the trusted planning baseline again after runtime repair.
+- [Phase 37]: GET /api/chat/history now requires ?campaignId=<id> and targeted gameplay POST routes require campaignId in JSON.
+- [Phase 37]: Targeted gameplay routes resolve campaigns through requireLoadedCampaign() instead of relying on an already-active singleton session.
+- [Phase 37]: Last-turn retry and undo snapshots are keyed by campaignId to prevent cross-campaign rollback leakage.
 
 ### Pending Todos
 
@@ -67,6 +74,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-08T13:28:55.671Z
-Stopped at: Phase 37 context gathered
-Resume file: .planning/phases/37-campaign-loaded-gameplay-transport/37-CONTEXT.md
+Last session: 2026-04-08T16:27:17.174Z
+Stopped at: Completed 37-01-PLAN.md
+Resume file: None

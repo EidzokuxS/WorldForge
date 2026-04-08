@@ -9,7 +9,7 @@ Requirements for the gameplay-fidelity milestone. Each maps to roadmap phases.
 
 ### Runtime Integrity
 
-- [ ] **RINT-01**: Player can resume gameplay routes (`history`, `action`, `retry`, `undo`, `edit`) after reload using campaign identity, without depending on an in-memory active campaign session.
+- [x] **RINT-01**: Player can resume gameplay routes (`history`, `action`, `retry`, `undo`, `edit`) after reload using campaign identity, without depending on an in-memory active campaign session.
 - [ ] **RINT-02**: Retry and undo restore the same authoritative world boundary the player experienced as the completed turn, including post-turn simulation effects.
 - [ ] **RINT-03**: Checkpoint save/load restores all campaign-authoritative runtime state, including `config.json`-backed values such as current tick and related campaign runtime metadata.
 - [ ] **RINT-04**: Inventory and equipment have one authoritative persistence model that gameplay, prompts, checkpoints, and UI all read and mutate consistently.
@@ -58,7 +58,7 @@ Explicitly excluded from this milestone to keep it reconciliation-driven.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| RINT-01 | Phase 37 | Pending |
+| RINT-01 | Phase 37 | Complete |
 | RINT-02 | Phase 39 | Pending |
 | RINT-03 | Phase 41 | Pending |
 | RINT-04 | Phase 38 | Pending |
