@@ -33,8 +33,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 24: Worldgen Known IP Quality** - Canonical DNA/premise/locations/factions/NPCs with butterfly-effect changes, key vs supporting NPC tiers, research-grounded lore (completed 2026-03-25)
 - [x] **Phase 25: Replace premise-override heuristics with structured divergence interpretation** - Structured premise/world divergence interpretation for known-IP generation (completed 2026-03-30)
 - [x] **Phase 28: Research & Design Synthesis for Character Systems, Prompts, UI, and External References** - Consolidate prompt-engineering research, desktop UI patterns, character-model redesign direction, and Aventuras findings into a cohesive implementation spec (completed 2026-03-31)
-- [ ] **Phase 29: Unified Character Ontology & Tag System** - Replace flat noisy character tags with a shared structured profile model for player creation, NPC generation, editing, and runtime prompt usage (implementation is present across all 5 plans; only unrestricted verification/green closeout is still pending)
-- [ ] **Phase 30: Start Conditions, Canonical Loadouts, and Persona Templates** - Make start selection about location plus arrival conditions, derive starting items from canonical scenario state, and introduce reusable base personas for player/NPC generation (implementation pass completed in worktree on 2026-04-01; formal closeout still blocked by `.git` ACL denial plus sandbox `spawn EPERM`)
+- [x] **Phase 29: Unified Character Ontology & Tag System** - Replace flat noisy character tags with a shared structured profile model for player creation, NPC generation, editing, and runtime prompt usage (completed 2026-04-08)
+- [x] **Phase 30: Start Conditions, Canonical Loadouts, and Persona Templates** - Make start selection about location plus arrival conditions, derive starting items from canonical scenario state, and introduce reusable base personas for player/NPC generation (completed 2026-04-08)
 - [x] **Phase 31: Prompt System Harmonization & Audit** - Audit and refine prompts across worldgen, character, gameplay, and support systems so they operate as one coherent mechanism (completed 2026-04-01)
 - [x] **Phase 32: Desktop-First Non-Game UI Overhaul** - Redesign campaign creation, world review, character creation, settings, and other non-game flows for FHD/1440p desktop using Tailwind, shadcn, and compatible libraries only (completed 2026-04-01)
 - [x] **Phase 33: Browser E2E Verification for Redesigned Creation Flows** - Validate the new character/world creation, persona, prompt, and UI flows end-to-end in the browser and polish regressions (gap closure plans 33-05 through 33-10 pending after diagnosed UAT on 2026-04-01) (completed 2026-04-02)
@@ -158,7 +158,7 @@ Plans:
   1. Every N in-game days, each faction gets an LLM evaluation of its goals, tags, chronicle, and neighbors -- producing territory changes, faction tag updates, and World Chronicle entries
   2. Factions can take actions (expand territory, declare war, trade) and update goals via structured tools; results mutate location tags and faction state
   3. Unexpected world events (plagues, disasters, anomalies) are occasionally introduced when narratively appropriate
-  4. NPCs learn about world events through location history, chronicle entries, and proximity/faction affiliation -- information does not teleport
+  4. NPCs learn about world events through location history, chronicle entries, and proximity/faction affiliation, with grounded approximate information flow rather than a strict guarantee that information never "teleports"
 **Plans**: 2 plans
 
 Plans:
@@ -307,8 +307,8 @@ Note: Backlog phases (like 999.1) are tracked separately and are not part of the
 | 26. Reusable multi-worldbook library for campaign creation | 3/3 | Complete   | 2026-03-31 |
 | 27. Lore card editing and deletion | 3/3 | Complete   | 2026-03-31 |
 | 28. Research & Design Synthesis | 3/3 | Complete   | 2026-03-31 |
-| 29. Unified Character Ontology & Tag System | 2/5 committed (+3 implemented, 5/5 coded) | Closeout Pending | - |
-| 30. Start Conditions, Canonical Loadouts, and Persona Templates | 0/6 committed (+6 implemented) | Closeout Pending | - |
+| 29. Unified Character Ontology & Tag System | 5/5 | Complete | 2026-04-08 |
+| 30. Start Conditions, Canonical Loadouts, and Persona Templates | 6/6 | Complete | 2026-04-08 |
 | 31. Prompt System Harmonization & Audit | 7/7 | Complete   | 2026-04-01 |
 | 32. Desktop-First Non-Game UI Overhaul | 6/6 | Complete   | 2026-04-01 |
 | 33. Browser E2E Verification for Redesigned Creation Flows | 13/13 | Complete    | 2026-04-03 |
@@ -437,14 +437,14 @@ Plans:
   3. Any flat tags retained for engine/runtime use are derived from the structured profile, not treated as the source of truth.
   4. Existing editing and prompt assembly flows can read the new structure without regressing gameplay/runtime behavior.
 **Plans**: 5 plans
-**Execution Note:** All 5 plans now have implementation in the worktree. Only `29-01` and `29-02` reached formal green closeout; `29-03` through `29-05` are waiting on unrestricted regression runs and git closeout.
+**Execution Note:** All 5 plans are now formally closed via `29-VERIFICATION.md` on 2026-04-08.
 
 Plans:
 - [x] 29-01-PLAN.md -- Shared character contracts, derived runtime tags, and persistence bridge
 - [x] 29-02-PLAN.md -- Shared draft pipeline for character, NPC, and scaffold writers
-- [ ] 29-03-PLAN.md -- Prompt and engine reader migration to structured character views (implemented in worktree; unrestricted NPC Vitest + green closeout still pending)
-- [ ] 29-04-PLAN.md -- Tool, reflection, and runtime mutation adapters for canonical character data (implemented in worktree; unrestricted regression pass + green closeout still pending)
-- [ ] 29-05-PLAN.md -- Campaign/world payload and frontend editor migration to the shared model (implemented in worktree; unrestricted Vitest + green closeout still pending)
+- [x] 29-03-PLAN.md -- Prompt and engine reader migration to structured character views
+- [x] 29-04-PLAN.md -- Tool, reflection, and runtime mutation adapters for canonical character data
+- [x] 29-05-PLAN.md -- Campaign/world payload and frontend editor migration to the shared model
 
 ### Phase 30: Start Conditions, Canonical Loadouts, and Persona Templates
 
@@ -457,15 +457,15 @@ Plans:
   3. Persona templates can be created, stored, selected, and used to generate or parse both player characters and NPCs.
   4. World and character prompts receive structured start-condition context they can reason about consistently.
 **Plans**: 6 plans
-**Execution Note:** All 6 plans were implemented in the worktree on 2026-04-01, but formal closeout is blocked by git write denial on `.git/index.lock` plus sandboxed Vitest `spawn EPERM`.
+**Execution Note:** All 6 plans are now formally closed via `30-VERIFICATION.md` on 2026-04-08.
 
 Plans:
-- [ ] 30-01-PLAN.md -- Contract-first start/loadout/template foundations on the existing CharacterDraft seam (implemented in worktree; closeout pending)
-- [ ] 30-02-PLAN.md -- Structured start resolution plus backend-owned canonical loadout preview/materialization (implemented in worktree; closeout pending)
-- [ ] 30-03-PLAN.md -- Campaign-scoped persona template storage, apply routes, and world-payload wiring (implemented in worktree; closeout pending)
-- [ ] 30-04-PLAN.md -- Frontend client contracts and helper wiring for Phase 30 backend seams (implemented in worktree; closeout pending)
-- [ ] 30-05-PLAN.md -- Player-facing character editor integration for start conditions, templates, and loadout preview (implemented in worktree; closeout pending)
-- [ ] 30-06-PLAN.md -- World-review NPC integration for campaign persona templates and canonical draft context (implemented in worktree; closeout pending)
+- [x] 30-01-PLAN.md -- Contract-first start/loadout/template foundations on the existing CharacterDraft seam
+- [x] 30-02-PLAN.md -- Structured start resolution plus backend-owned canonical loadout preview/materialization
+- [x] 30-03-PLAN.md -- Campaign-scoped persona template storage, apply routes, and world-payload wiring
+- [x] 30-04-PLAN.md -- Frontend client contracts and helper wiring for Phase 30 backend seams
+- [x] 30-05-PLAN.md -- Player-facing character editor integration for start conditions, templates, and loadout preview
+- [x] 30-06-PLAN.md -- World-review NPC integration for campaign persona templates and canonical draft context
 
 ### Phase 31: Prompt System Harmonization & Audit
 
@@ -493,7 +493,7 @@ Plans:
 **Goal:** Redesign the non-game product surface so campaign creation, world review, character creation, settings, and adjacent flows feel intentional, desktop-first, and production-ready.
 **Requirements**: P32-01, P32-02, P32-03, P32-04, P32-05, P32-06
 **Depends on:** Phase 31
-**Execution Note:** Start with a Wave 0 prerequisite gate that re-confirms the pending Phase 29/30 closeout baseline before any Phase 32 shell or route migration begins.
+**Execution Note:** Wave 0 originally re-confirmed the then-pending Phase 29/30 baseline; both prerequisite foundations are now formally closed.
 **Success Criteria** (what must be TRUE):
   1. Non-game screens are visibly reworked for FHD/1440p desktop usage with better hierarchy, density, workflows, and visual consistency.
   2. The redesign uses Tailwind, shadcn, and compatible libraries only, with no custom CSS files introduced.
@@ -566,3 +566,20 @@ Plans:
 Plans:
 - [x] 35-01-PLAN.md -- Restore the scaffold/draft/load-save tier contract and lock it with targeted regressions
 - [x] 35-02-PLAN.md -- Add visible key/supporting controls to world-review NPC editing and helper creation flows
+
+### Phase 36: Gameplay docs-to-runtime reconciliation audit
+
+**Goal:** Reconcile the entire gameplay specification described in `docs/` against the live runtime so the next milestone starts from one honest baseline of what is implemented, partial, missing, or outdated.
+**Requirements**: P36-01, P36-02, P36-03, P36-04, P36-05, P36-06
+**Depends on:** Phase 35
+**Success Criteria** (what must be TRUE):
+  1. All gameplay-relevant claims from the in-scope docs surface are captured in one normalized register with source provenance.
+  2. Every claim is classified against live runtime evidence as implemented, partial, missing, or outdated/contradicted.
+  3. High-risk gameplay integrity seams such as rollback, checkpoint fidelity, reflection triggers, state authority, and session coupling are called out explicitly.
+  4. The phase ends with one authoritative handoff that defines what the next gameplay milestone must fix first and what old documentation should be deprecated.
+**Plans:** 1/3 plans executed
+
+Plans:
+- [x] 36-01-PLAN.md -- Build the canonical gameplay claim register from docs and historical spec sources
+- [ ] 36-02-PLAN.md -- Classify the claim register against live runtime wiring and integrity seams
+- [ ] 36-03-PLAN.md -- Produce the gameplay-baseline handoff and phase verification for the next milestone

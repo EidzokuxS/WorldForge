@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Phase complete — ready for verification
-last_updated: "2026-04-07T05:11:18.447Z"
-last_activity: 2026-04-07
+status: Phase 36 in progress — 36-01 claim register complete, 36-02 next
+last_updated: "2026-04-08T14:36:12+03:00"
+last_activity: 2026-04-08
 progress:
-  total_phases: 30
+  total_phases: 31
   completed_phases: 30
-  total_plans: 107
-  completed_plans: 107
+  total_plans: 110
+  completed_plans: 108
 ---
 
 # Project State
@@ -19,29 +19,29 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-18)
 
 **Core value:** The LLM is the narrator, never the engine. All mechanical outcomes are resolved by backend code.
-**Current focus:** Phase 35 — restore-npc-tier-visibility-and-manual-tier-control-in-world-review
+**Current focus:** Phase 36 — classify the gameplay claim register against live runtime evidence
 
 ## Current Position
 
-Phase: 35 (restore-npc-tier-visibility-and-manual-tier-control-in-world-review) — EXECUTING
-Plan: 2 of 2
+Phase: 36 — Gameplay docs-to-runtime reconciliation audit
+Plan: 2 of 3 — `36-02` next, using the completed claim register as the classification surface
 
 ## Performance Metrics
 
 **Current Snapshot:**
 
-- Active roadmap phases: 28
-- Completed phases: 27
+- Active roadmap phases: 31
+- Completed phases: 30
 - Planned or in-progress phases: 1
-- Total plans tracked: 88
-- Completed plans: 88
-- Pending plans: 0
+- Total plans tracked: 110
+- Completed plans: 108
+- Pending plans: 2
 
 **Open Work:**
 
-- Active execution target: finish the remaining Phase 33 browser verification reruns on top of the completed Phase 32 desktop shell migration
-- Next required workflow step: unblock PinchTab localhost access, then resume Phase 33 browser reruns for launcher, campaign creation, world review, and character creation
-- Phase 29 and Phase 30 formal closeout still remain separate bookkeeping work, but they no longer block the Phase 32 UI output on the current baseline
+- Active execution target: classify the new gameplay claim register against live runtime and integrity seams
+- Next required workflow step: execute `36-02-PLAN.md`
+- Phase 29 and Phase 30 are now formally closed via `29-VERIFICATION.md` and `30-VERIFICATION.md`
 - Backlog items outside active execution order are tracked in `.planning/BACKLOG.md`
 
 **Notes:**
@@ -49,15 +49,18 @@ Plan: 2 of 2
 - Historical per-plan timing metrics from earlier GSD runs were removed during planning hygiene because they no longer matched the active roadmap after renumbering and archival cleanup.
 - Use `ROADMAP.md` progress plus phase directories as the source of truth for current execution state.
 - Latest execution: Phase 32 plans `32-00` through `32-05` completed on 2026-04-01; `32-BASELINE-CLOSEOUT.md` now records `Status: GO`.
-- Phase 29 execution started on 2026-04-01. Plans 29-01 and 29-02 are complete and committed.
-- Plans 29-03 and 29-04 still have their canonical runtime/runtime-mutation implementations in the worktree; targeted backend TypeScript filtering remained clean during the 2026-04-01 resume pass, but unrestricted Vitest and green commits are still pending.
-- Plan 29-05 was resumed on 2026-04-01 and the remaining editor migration was completed in worktree: character pages now store `CharacterDraft`, the character card edits grouped draft fields, and the NPC review section edits draft-backed NPCs while preserving scaffold compatibility.
-- Phase 30 implementation pass on 2026-04-01 added shared contract types, backend start/loadout/template seams, campaign-scoped persona template routes, frontend API wiring, player editor controls, and NPC review persona plumbing directly in the worktree.
+- Phase 29 retro-closeout completed on 2026-04-08: unrestricted backend/frontend targeted Vitest bundles are green, the remaining type/test tails were fixed, and `29-VERIFICATION.md` now closes the ontology seam formally.
+- Phase 30 retro-closeout completed on 2026-04-08: unrestricted backend/frontend targeted Vitest bundles are green, direct persona-template route coverage was added, and `30-VERIFICATION.md` now closes the start/loadout/template foundation formally.
+- Phase 14 retro-closeout completed on 2026-04-08: `14-VERIFICATION.md` now explicitly closes the old Phase 13 episodic-memory/vector blocker using the live deferred-embedding code path plus new regression anchors for episodic storage and quick-actions fallback.
+- Phase 33 retro-closeout completed on 2026-04-08: `33-VERIFICATION.md` now folds later real user desktop UAT and the save-character/session-recovery fixes back into the browser-proof chain, removing the stale `human_needed` blocker.
+- Phase 12 retro-closeout completed on 2026-04-08: `12-VERIFICATION.md` now consolidates the original v1 browser QA baseline across creation, gameplay, import, and checkpoint flows.
 - Phase 31 added shared prompt contracts plus harmonized runtime, character, worldgen, NPC/reflection, Oracle, and world-engine wording without touching Phase 32 UI scope or browser E2E work.
 - The prerequisite backend and frontend targeted suites that blocked Wave 0 were rerun successfully during the Phase 32 resume pass, unblocking the UI overhaul.
 - Plan 33-11 completed on 2026-04-02 and recorded a PinchTab-only transport contract plus the current external blocker: the shared PinchTab browser can browse the public web but renders `chrome-error://chromewebdata/` for `http://localhost:3000/`.
 - Plan 33-12 completed on 2026-04-02 and closed the remaining `33-VERIFICATION.md` lint gap: the lore-section test now uses typed API mocks, `npm --prefix frontend run lint` exits 0, and the targeted lore-section Vitest suite still passes.
 - Plan 33-06 completed on 2026-04-02 and restored routed concept/DNA persistence plus visible suggestion/generation progress for `/campaign/new` and `/campaign/new/dna`.
+- Phase 36 planning completed on 2026-04-08: `36-CONTEXT.md`, `36-RESEARCH.md`, and plans `36-01` through `36-03` now define the docs-wide gameplay claim register, runtime reconciliation matrix, and next-milestone handoff.
+- Plan 36-01 completed on 2026-04-08: `36-CLAIMS.md` now contains 136 subsystem-grouped gameplay claims with provenance, claim types, and preserved source tensions for direct use in `36-02`.
 
 ## Accumulated Context
 
@@ -238,6 +241,9 @@ Recent decisions affecting current work:
 - [Phase 35]: World review keeps helper APIs on role 'key' and retieres returned NPCs locally to the selected review tier.
 - [Phase 35]: Tier controls now use explicit per-card and new-NPC button groups so key vs supporting stays visible in the review editor.
 - [Phase 35]: Tier sync is centralized in one local helper so ScaffoldNpc.tier and draft.identity.tier change together.
+- [Phase 36]: Used subsystem-prefixed stable claim IDs so Plan 36-02 can classify by subsystem without rewriting the register.
+- [Phase 36]: Kept gameplay-relevant worldgen and character handoff claims in scope, but excluded non-game shell/UI noise and implementation-step prose.
+- [Phase 36]: Reserved runtime_status for Plan 36-02 and froze the allowed status vocabulary in 36-CLAIMS.md instead of partially classifying claims during extraction.
 
 ### Roadmap Evolution
 
@@ -257,6 +263,7 @@ Recent decisions affecting current work:
 - Phase 26 added: Reusable multi-worldbook library for campaign creation
 - Phase 27 added: Lore card editing and deletion
 - Phase 35 added: Restore NPC tier visibility and manual tier control in world review
+- Phase 36 added: Gameplay docs-to-runtime reconciliation audit
 - Planning hygiene (2026-03-30): ROADMAP/STATE reconciled with completed phase artifacts; legacy superseded E2E phase directories moved out of active `.planning/phases/`
 - Phase 23 completed (2026-03-30): cached IP research pipeline reconciled, regression-tested, and verified against the live codebase
 
@@ -269,7 +276,7 @@ Recent decisions affecting current work:
 
 - Phase 33 browser reruns are blocked until PinchTab is restarted on the same host as the dev servers with a clean Chrome profile and no localhost proxy interception.
 - Phase 33 real-browser reruns are still blocked by the PinchTab localhost transport issue; only the lint-verification gap is now closed.
-- Phase 29 and Phase 30 still need their separate formal closeout and unrestricted verification work, even though the specific prerequisite bundle for Phase 32 is now green.
+- Phase 12, Phase 14, Phase 29, Phase 30, and Phase 33 are now formally closed; remaining milestone proof debt is limited to later missing verification artifacts such as Phases 31 and 32 plus lower-priority documentary gaps.
 - Repo-root Vitest still emits a non-blocking `environmentMatchGlobs` deprecation warning during frontend verification.
 
 ### Quick Tasks Completed
@@ -280,8 +287,9 @@ Recent decisions affecting current work:
 | 260405-r8a | Pre-filter worldbook entries via LLM before scaffold generation | 2026-04-05 | 63c3f2f | [260405-r8a](./quick/260405-r8a-pre-filter-worldbook-entries-via-llm-bef/) |
 | Phase 35 P01 | 9min | 2 tasks | 10 files |
 | Phase 35 P02 | 8min | 2 tasks | 2 files |
+| Phase 36 P01 | 24 min | 1 tasks | 2 files |
 
 ## Session Continuity
 
-Last activity: 2026-04-07
+Last activity: 2026-04-08
 Resume file: None
