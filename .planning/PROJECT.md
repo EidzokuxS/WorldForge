@@ -21,6 +21,15 @@ The shipped baseline includes:
 
 The next milestone should start from the docs-to-runtime reconciliation in [36-HANDOFF.md](/R:/Projects/WorldForge/.planning/phases/36-gameplay-docs-to-runtime-reconciliation-audit/36-HANDOFF.md), not from old assumptions.
 
+## Current Milestone: v1.1 Gameplay Fidelity
+
+**Goal:** Bring live gameplay runtime into honest alignment with the documented design baseline from Phase 36, starting with integrity-critical seams before feature expansion.
+
+**Target features:**
+- runtime integrity: session-decoupled gameplay routes, authoritative inventory/equipment state, honest rollback/retry, and complete checkpoint fidelity
+- live simulation fidelity: reflection/progression that actually triggers, post-turn simulation with a trustworthy player-visible turn boundary, and target-aware Oracle context
+- mechanics and docs reconciliation: implement or explicitly deprecate documented gameplay claims around travel, location event state, retrieval semantics, and start-condition runtime effects
+
 ## Requirements
 
 ### Validated
@@ -33,12 +42,11 @@ The next milestone should start from the docs-to-runtime reconciliation in [36-H
 
 ### Active
 
-- [ ] Make gameplay runtime fully match documented intent from `docs/`, using Phase 36 as the authoritative baseline
-- [ ] Remove session-coupled gameplay seams so runtime routes work from campaign identity, not volatile active-memory state
-- [ ] Make checkpoints and undo/retry faithfully cover full world state, including config-backed state and post-turn simulation
-- [ ] Resolve inventory/equipment authority so gameplay mutations have one canonical source of truth
-- [ ] Either fully wire reflection/progression into live runtime or cut dead paths from the design
-- [ ] Make Oracle target resolution and start conditions matter as runtime mechanics, not mostly prompt context
+- [ ] Gameplay runtime matches the integrity baseline established by Phase 36 before new gameplay expansion
+- [ ] Session-coupled gameplay seams are removed from turn, history, retry, undo, and edit flows
+- [ ] Checkpoints, rollback, and retry restore one coherent authoritative world boundary
+- [ ] Reflection/progression and post-turn simulation become trustworthy live mechanics instead of half-wired background systems
+- [ ] Documented gameplay claims that are still intended are implemented; stale ones are explicitly deprecated
 
 ### Out of Scope
 
@@ -52,7 +60,7 @@ The next milestone should start from the docs-to-runtime reconciliation in [36-H
 
 **Tech stack:** Hono, Next.js App Router, Tailwind, shadcn/ui, Drizzle, SQLite, LanceDB, Vercel AI SDK.  
 **Execution reality:** worldgen and non-game authoring are now broad and feature-rich; the next major risk area is gameplay fidelity, not content creation breadth.  
-**Planning reality:** `v1.0` is archived; the next milestone should begin with a new requirements/roadmap cycle instead of adding more phases onto the closed one.
+**Planning reality:** `v1.0` is archived; `v1.1` starts from the `36-HANDOFF.md` priority groups instead of older milestone assumptions.
 
 ## Key Decisions
 
@@ -63,6 +71,7 @@ The next milestone should start from the docs-to-runtime reconciliation in [36-H
 | Known-IP generation uses structured divergence | Regex-style premise overrides were brittle and underfit the problem | ✓ Good |
 | Desktop-first non-game shell | Creation/review/character flows needed coherence before more feature growth | ✓ Good |
 | Next gameplay milestone must be docs-to-runtime-driven | Phase 36 proved assumptions had drifted from live wiring | ✓ Good |
+| Integrity repair before gameplay expansion | New mechanics on top of untrusted runtime state would create false progress | ✓ Good |
 
 ---
-*Last updated: 2026-04-08 after v1.0 milestone closeout*
+*Last updated: 2026-04-08 after starting v1.1 Gameplay Fidelity*
