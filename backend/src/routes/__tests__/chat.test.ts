@@ -14,6 +14,12 @@ vi.mock("../../campaign/index.js", () => ({
   getCampaignPremise: vi.fn(),
   getChatHistory: vi.fn(),
   getActiveCampaign: vi.fn(),
+  loadCampaign: vi.fn(),
+  popLastMessages: vi.fn(),
+  replaceChatMessage: vi.fn(),
+  getLastPlayerAction: vi.fn(),
+  createCheckpoint: vi.fn(),
+  pruneAutoCheckpoints: vi.fn(),
 }));
 
 vi.mock("../../lib/index.js", () => ({
@@ -38,22 +44,55 @@ vi.mock("../../db/index.js", () => ({
   getDb: vi.fn(),
 }));
 
+vi.mock("../../engine/index.js", () => ({
+  processTurn: vi.fn(),
+  captureSnapshot: vi.fn(),
+  restoreSnapshot: vi.fn(),
+  tickPresentNpcs: vi.fn(),
+  simulateOffscreenNpcs: vi.fn(),
+  checkAndTriggerReflections: vi.fn(),
+  tickFactions: vi.fn(),
+  sanitizeNarrative: vi.fn((text: string) => text),
+}));
+
+vi.mock("../../ai/with-model-fallback.js", () => ({
+  resolveFallbackProvider: vi.fn(() => null),
+}));
+
 import { callStoryteller } from "../../ai/index.js";
 import {
   getActiveCampaign,
   getCampaignPremise,
   getChatHistory,
+  loadCampaign,
+  popLastMessages,
+  replaceChatMessage,
+  getLastPlayerAction,
 } from "../../campaign/index.js";
 import { loadSettings } from "../../settings/index.js";
 import { resolveRoleModel } from "../../ai/index.js";
+import { getDb } from "../../db/index.js";
+import {
+  processTurn,
+  captureSnapshot,
+  restoreSnapshot,
+} from "../../engine/index.js";
 import chatRoutes from "../chat.js";
 
 const mockedGetActive = vi.mocked(getActiveCampaign);
 const mockedGetPremise = vi.mocked(getCampaignPremise);
 const mockedGetHistory = vi.mocked(getChatHistory);
+const mockedLoadCampaign = vi.mocked(loadCampaign);
+const mockedPopLastMessages = vi.mocked(popLastMessages);
+const mockedReplaceChatMessage = vi.mocked(replaceChatMessage);
+const mockedGetLastPlayerAction = vi.mocked(getLastPlayerAction);
 const mockedCallStoryteller = vi.mocked(callStoryteller);
 const mockedLoadSettings = vi.mocked(loadSettings);
 const mockedResolveRole = vi.mocked(resolveRoleModel);
+const mockedGetDb = vi.mocked(getDb);
+const mockedProcessTurn = vi.mocked(processTurn);
+const mockedCaptureSnapshot = vi.mocked(captureSnapshot);
+const mockedRestoreSnapshot = vi.mocked(restoreSnapshot);
 
 // ---------------------------------------------------------------------------
 // App setup
@@ -73,8 +112,11 @@ function activateCampaign() {
 
 function setupStoryteller() {
   mockedLoadSettings.mockReturnValue({
+    judge: { providerId: "p1", model: "judge-model", temperature: 0.1, maxTokens: 1024 },
     storyteller: { providerId: "p1", model: "st-model", temperature: 0.7, maxTokens: 2048 },
+    embedder: { providerId: "", model: "", temperature: 0.1, maxTokens: 256 },
     providers: [{ id: "p1", name: "P1", baseUrl: "http://localhost:1234", apiKey: "", defaultModel: "m", isBuiltin: false }],
+    fallback: { providerId: "", model: "", timeoutMs: 1000, retryCount: 0 },
   } as any);
 
   mockedResolveRole.mockReturnValue({
@@ -82,6 +124,30 @@ function setupStoryteller() {
     temperature: 0.7,
     maxTokens: 2048,
   } as any);
+}
+
+function setupDbMock(player: { hp: number } | null = { hp: 5 }) {
+  const query = {
+    from: vi.fn(),
+    where: vi.fn(),
+    get: vi.fn(() => player),
+    all: vi.fn(() => []),
+  } as any;
+
+  query.from.mockReturnValue(query);
+  query.where.mockReturnValue(query);
+
+  mockedGetDb.mockReturnValue({
+    select: vi.fn(() => query),
+  } as any);
+}
+
+function createTurnStream(events: Array<{ type: string; data: unknown }>) {
+  return (async function* () {
+    for (const event of events) {
+      yield event as any;
+    }
+  })();
 }
 
 beforeEach(() => {
@@ -197,6 +263,95 @@ describe("Targeted gameplay route campaignId validation", () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toBe("campaignId is required.");
+  });
+});
+
+describe("Campaign-loaded gameplay transport", () => {
+  it("loads history by explicit campaignId when no campaign is active", async () => {
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockResolvedValue({
+      id: CAMPAIGN_ID,
+      name: "Loaded Campaign",
+      createdAt: "2026-01-01",
+    } as any);
+    mockedGetPremise.mockReturnValue("A dark fantasy world.");
+    mockedGetHistory.mockReturnValue([
+      { role: "user", content: "I look around." },
+      { role: "assistant", content: "You see a forest." },
+    ] as any);
+
+    const res = await app.request(`/chat/history?campaignId=${CAMPAIGN_ID}`);
+
+    expect(res.status).toBe(200);
+    expect(mockedLoadCampaign).toHaveBeenCalledWith(CAMPAIGN_ID);
+    const body = await res.json();
+    expect(body.messages).toHaveLength(2);
+  });
+
+  it("keeps undo snapshots isolated by campaignId", async () => {
+    setupStoryteller();
+    setupDbMock();
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
+      id: campaignId,
+      name: `Campaign ${campaignId}`,
+      createdAt: "2026-01-01",
+    }) as any);
+    mockedCaptureSnapshot.mockImplementation((campaignId) => ({
+      campaignId,
+      spawnedNpcIds: [],
+      spawnedItemIds: [],
+      revealedLocationIds: [],
+      createdRelationshipIds: [],
+      createdChronicleIds: [],
+    }) as any);
+    mockedProcessTurn.mockImplementation(({ campaignId }) =>
+      createTurnStream([{ type: "done", data: { tick: 1, campaignId } }]),
+    );
+    mockedGetLastPlayerAction.mockImplementation((campaignId) => `retry-${campaignId}`);
+    mockedPopLastMessages.mockReturnValue([] as any);
+
+    const actionA = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: "campaign-a",
+        playerAction: "Action A",
+        intent: "Action A",
+        method: "",
+      }),
+    });
+    expect(actionA.status).toBe(200);
+    await actionA.text();
+
+    const actionB = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: "campaign-b",
+        playerAction: "Action B",
+        intent: "Action B",
+        method: "",
+      }),
+    });
+    expect(actionB.status).toBe(200);
+    await actionB.text();
+
+    const undoA = await app.request("/chat/undo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: "campaign-a" }),
+    });
+
+    expect(undoA.status).toBe(200);
+    expect(mockedRestoreSnapshot).toHaveBeenCalledWith(
+      "campaign-a",
+      expect.objectContaining({ campaignId: "campaign-a" }),
+    );
+    expect(mockedRestoreSnapshot).not.toHaveBeenCalledWith(
+      "campaign-a",
+      expect.objectContaining({ campaignId: "campaign-b" }),
+    );
   });
 });
 
