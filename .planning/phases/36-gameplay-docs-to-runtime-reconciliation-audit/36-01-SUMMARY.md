@@ -75,6 +75,8 @@ None - plan executed exactly as written.
 ## Issues Encountered
 
 - `apply_patch` on Windows rejected a long absolute-path patch payload with a path-length error. The fix was to switch to repo-relative patch paths and apply the large file in smaller hunks. No artifact or scope changed.
+- `gsd-tools state advance-plan` could not parse the current freeform `STATE.md` plan-position format (`Cannot parse Current Plan or Total Plans in Phase from STATE.md`). The required state transition was applied manually in `STATE.md` instead of leaving the file stale.
+- `gsd-tools requirements mark-complete P36-01 P36-02` reported both IDs as `not_found`, so no requirement checkboxes were updated in `.planning/REQUIREMENTS.md`. This is a planning-data gap, not a Plan 36-01 content blocker.
 
 ## User Setup Required
 
