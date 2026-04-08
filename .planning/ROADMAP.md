@@ -577,9 +577,9 @@ Plans:
   2. Every claim is classified against live runtime evidence as implemented, partial, missing, or outdated/contradicted.
   3. High-risk gameplay integrity seams such as rollback, checkpoint fidelity, reflection triggers, state authority, and session coupling are called out explicitly.
   4. The phase ends with one authoritative handoff that defines what the next gameplay milestone must fix first and what old documentation should be deprecated.
-**Plans:** 1/3 plans executed
+**Plans:** 2/3 plans executed
 
 Plans:
 - [x] 36-01-PLAN.md -- Build the canonical gameplay claim register from docs and historical spec sources
-- [ ] 36-02-PLAN.md -- Classify the claim register against live runtime wiring and integrity seams
+- [x] 36-02-PLAN.md -- Classify the claim register against live runtime wiring and integrity seams
 - [ ] 36-03-PLAN.md -- Produce the gameplay-baseline handoff and phase verification for the next milestone

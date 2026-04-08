@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Phase 36 in progress — 36-01 claim register complete, 36-02 next
-last_updated: "2026-04-08T14:36:12+03:00"
+status: Phase 36 in progress — 36-02 runtime matrix complete, 36-03 next
+last_updated: "2026-04-08T12:13:09.462Z"
 last_activity: 2026-04-08
 progress:
   total_phases: 31
   completed_phases: 30
   total_plans: 110
-  completed_plans: 108
+  completed_plans: 109
 ---
 
 # Project State
@@ -19,12 +19,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-18)
 
 **Core value:** The LLM is the narrator, never the engine. All mechanical outcomes are resolved by backend code.
-**Current focus:** Phase 36 — classify the gameplay claim register against live runtime evidence
+**Current focus:** Phase 36 — synthesize the gameplay-baseline handoff from the completed claim register and runtime matrix
 
 ## Current Position
 
 Phase: 36 — Gameplay docs-to-runtime reconciliation audit
-Plan: 2 of 3 — `36-02` next, using the completed claim register as the classification surface
+Plan: 3 of 3 — `36-03` next, using the completed claim register and runtime matrix as the synthesis surface
 
 ## Performance Metrics
 
@@ -34,13 +34,13 @@ Plan: 2 of 3 — `36-02` next, using the completed claim register as the classif
 - Completed phases: 30
 - Planned or in-progress phases: 1
 - Total plans tracked: 110
-- Completed plans: 108
-- Pending plans: 2
+- Completed plans: 109
+- Pending plans: 1
 
 **Open Work:**
 
-- Active execution target: classify the new gameplay claim register against live runtime and integrity seams
-- Next required workflow step: execute `36-02-PLAN.md`
+- Active execution target: synthesize the gameplay-baseline handoff from the completed claim register and runtime matrix
+- Next required workflow step: execute `36-03-PLAN.md`
 - Phase 29 and Phase 30 are now formally closed via `29-VERIFICATION.md` and `30-VERIFICATION.md`
 - Backlog items outside active execution order are tracked in `.planning/BACKLOG.md`
 
@@ -61,6 +61,7 @@ Plan: 2 of 3 — `36-02` next, using the completed claim register as the classif
 - Plan 33-06 completed on 2026-04-02 and restored routed concept/DNA persistence plus visible suggestion/generation progress for `/campaign/new` and `/campaign/new/dna`.
 - Phase 36 planning completed on 2026-04-08: `36-CONTEXT.md`, `36-RESEARCH.md`, and plans `36-01` through `36-03` now define the docs-wide gameplay claim register, runtime reconciliation matrix, and next-milestone handoff.
 - Plan 36-01 completed on 2026-04-08: `36-CLAIMS.md` now contains 136 subsystem-grouped gameplay claims with provenance, claim types, and preserved source tensions for direct use in `36-02`.
+- Plan 36-02 completed on 2026-04-08: `36-RUNTIME-MATRIX.md` now classifies all 136 claims against live runtime, counts 75 wired / 48 partial / 7 missing / 6 outdated claims, and elevates six integrity-critical seams for the next gameplay milestone.
 
 ## Accumulated Context
 
@@ -244,6 +245,8 @@ Recent decisions affecting current work:
 - [Phase 36]: Used subsystem-prefixed stable claim IDs so Plan 36-02 can classify by subsystem without rewriting the register.
 - [Phase 36]: Kept gameplay-relevant worldgen and character handoff claims in scope, but excluded non-game shell/UI noise and implementation-step prose.
 - [Phase 36]: Reserved runtime_status for Plan 36-02 and froze the allowed status vocabulary in 36-CLAIMS.md instead of partially classifying claims during extraction.
+- [Phase 36]: Reserved outdated_or_contradicted for claims explicitly superseded by live architecture; kept weaker drift as implemented_but_partial or documented_but_missing.
+- [Phase 36]: Elevated rollback, checkpoint, inventory authority, reflection, transport, and post-turn simulation seams out of per-claim rows so the next gameplay milestone can treat them as systemic blockers.
 
 ### Roadmap Evolution
 
@@ -288,6 +291,7 @@ Recent decisions affecting current work:
 | Phase 35 P01 | 9min | 2 tasks | 10 files |
 | Phase 35 P02 | 8min | 2 tasks | 2 files |
 | Phase 36 P01 | 24 min | 1 tasks | 2 files |
+| Phase 36 P02 | 60 | 1 tasks | 4 files |
 
 ## Session Continuity
 
