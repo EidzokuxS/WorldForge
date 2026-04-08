@@ -36,7 +36,7 @@ import type {
   WorldBookImportResult,
   WorldbookLibraryItem,
 } from "./api-types";
-import type { CharacterDraft, CharacterRecord } from "@worldforge/shared";
+import type { CharacterDraft, CharacterRecord, ChatMessage } from "@worldforge/shared";
 import {
   characterDraftToParsedCharacter,
   characterDraftToScaffoldNpc,
@@ -77,6 +77,11 @@ export type {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:3001";
 const LAST_ACTIVE_CAMPAIGN_KEY = "worldforge:lastActiveCampaignId";
+
+export type ChatHistoryResponse = {
+  messages: ChatMessage[];
+  premise: string;
+};
 
 // ───── Raw types (internal) ─────
 
@@ -827,19 +832,46 @@ export function getImageUrl(
 
 // ───── Chat Controls (Retry / Undo / Edit) ─────
 
-export function chatRetry(): Promise<Response> {
-  return apiStreamPost("/api/chat/retry", {});
+export function chatHistory(campaignId: string): Promise<ChatHistoryResponse> {
+  return apiGet<ChatHistoryResponse>(
+    `/api/chat/history?campaignId=${encodeURIComponent(campaignId)}`,
+  );
 }
 
-export function chatUndo(): Promise<{ success: boolean; messagesRemoved: number }> {
-  return apiPost<{ success: boolean; messagesRemoved: number }>("/api/chat/undo", {});
+export function chatAction(
+  campaignId: string,
+  playerAction: string,
+  intent: string,
+  method: string,
+): Promise<Response> {
+  return apiStreamPost("/api/chat/action", {
+    campaignId,
+    playerAction,
+    intent,
+    method,
+  });
+}
+
+export function chatRetry(campaignId: string): Promise<Response> {
+  return apiStreamPost("/api/chat/retry", { campaignId });
+}
+
+export function chatUndo(campaignId: string): Promise<{ success: boolean; messagesRemoved: number }> {
+  return apiPost<{ success: boolean; messagesRemoved: number }>("/api/chat/undo", {
+    campaignId,
+  });
 }
 
 export function chatEdit(
+  campaignId: string,
   messageIndex: number,
   newContent: string,
 ): Promise<{ success: boolean }> {
-  return apiPost<{ success: boolean }>("/api/chat/edit", { messageIndex, newContent });
+  return apiPost<{ success: boolean }>("/api/chat/edit", {
+    campaignId,
+    messageIndex,
+    newContent,
+  });
 }
 
 // ───── Checkpoints ─────
