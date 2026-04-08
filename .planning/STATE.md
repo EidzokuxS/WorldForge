@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
-status: executing
-stopped_at: Completed 37-01-PLAN.md
-last_updated: "2026-04-08T16:27:17.176Z"
+status: verifying
+stopped_at: Completed 37-02-PLAN.md
+last_updated: "2026-04-08T16:34:52.895Z"
 last_activity: 2026-04-08
 progress:
   total_phases: 8
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 1
-  percent: 50
+  completed_plans: 2
+  percent: 100
 ---
 
 # Project State
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 
 Phase: 37 (campaign-loaded-gameplay-transport) — EXECUTING
 Plan: 2 of 2
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-04-08
 
-Progress: [█████░░░░░] 50%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -46,6 +46,7 @@ Progress: [█████░░░░░] 50%
 **Recent Execution:**
 
 - Phase `37` Plan `01` — duration `8 min`, tasks `2`, files `3`
+- Phase `37` Plan `02` — duration `4 min`, tasks `2`, files `4`
 
 ## Accumulated Context
 
@@ -62,6 +63,8 @@ Recent decisions affecting current work:
 - [Phase 37]: GET /api/chat/history now requires ?campaignId=<id> and targeted gameplay POST routes require campaignId in JSON.
 - [Phase 37]: Targeted gameplay routes resolve campaigns through requireLoadedCampaign() instead of relying on an already-active singleton session.
 - [Phase 37]: Last-turn retry and undo snapshots are keyed by campaignId to prevent cross-campaign rollback leakage.
+- [Phase 37]: Frontend gameplay helpers now require campaignId, including shared chatHistory/chatAction wrappers in frontend/lib/api.ts.
+- [Phase 37]: The canonical /game page preserves active-first bootstrap with remembered fallback, but all targeted gameplay requests now send activeCampaign.id explicitly.
 
 ### Pending Todos
 
@@ -74,6 +77,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-08T16:27:17.174Z
-Stopped at: Completed 37-01-PLAN.md
+Last session: 2026-04-08T16:34:52.893Z
+Stopped at: Completed 37-02-PLAN.md
 Resume file: None

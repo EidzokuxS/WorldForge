@@ -16,7 +16,7 @@ v1.1 is a reconciliation milestone built from the [Phase 36 handoff](/R:/Project
 - Integer phases continue from the archived v1.0 roadmap and start here at `37`.
 - Decimal phases remain reserved for urgent insertions between planned integers.
 
-- [ ] **Phase 37: Campaign-Loaded Gameplay Transport** - Remove active-session coupling from gameplay routes.
+- [x] **Phase 37: Campaign-Loaded Gameplay Transport** - Remove active-session coupling from gameplay routes. (completed 2026-04-08)
 - [ ] **Phase 38: Authoritative Inventory & Equipment State** - Collapse runtime item truth onto one persistence model.
 - [ ] **Phase 39: Honest Turn Boundary, Retry & Undo** - Make the player-visible turn boundary match the authoritative rollback boundary.
 - [ ] **Phase 40: Live Reflection & Progression Triggers** - Turn dormant reflection scaffolding into observable runtime behavior.
@@ -38,7 +38,7 @@ v1.1 is a reconciliation milestone built from the [Phase 36 handoff](/R:/Project
 **Plans**: 2 plans
 Plans:
 - [x] 37-01-PLAN.md — Make `/api/chat/*` gameplay transport campaign-addressed on the backend and scope in-memory snapshots by `campaignId`.
-- [ ] 37-02-PLAN.md — Rewire `/game` and frontend gameplay helpers to use explicit `campaignId` on every targeted gameplay request.
+- [x] 37-02-PLAN.md — Rewire `/game` and frontend gameplay helpers to use explicit `campaignId` on every targeted gameplay request.
 
 ### Phase 38: Authoritative Inventory & Equipment State
 **Goal**: Inventory and equipment use one authoritative persistence model across gameplay, prompts, restore flows, and player-facing reads.
@@ -114,7 +114,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 37. Campaign-Loaded Gameplay Transport | 1/2 | In Progress|  |
+| 37. Campaign-Loaded Gameplay Transport | 2/2 | Complete   | 2026-04-08 |
 | 38. Authoritative Inventory & Equipment State | 0/TBD | Not started | - |
 | 39. Honest Turn Boundary, Retry & Undo | 0/TBD | Not started | - |
 | 40. Live Reflection & Progression Triggers | 0/TBD | Not started | - |
