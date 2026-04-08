@@ -100,10 +100,29 @@ export const chatBodySchema = z.object({
     .pipe(z.string().min(1, "playerAction is required.")),
 });
 
+export const campaignIdSchema = z
+  .preprocess(
+    (value) => (typeof value === "string" ? value.trim() : ""),
+    z.string().min(1, "campaignId is required."),
+  );
+
+export const chatHistoryQuerySchema = z.object({
+  campaignId: campaignIdSchema,
+});
+
 export const chatActionBodySchema = z.object({
+  campaignId: campaignIdSchema,
   playerAction: z.string().min(1).max(2000),
   intent: z.string().min(1).max(2000),
   method: z.string().max(500).default(""),
+});
+
+export const chatRetryBodySchema = z.object({
+  campaignId: campaignIdSchema,
+});
+
+export const chatUndoBodySchema = z.object({
+  campaignId: campaignIdSchema,
 });
 
 const createCampaignBaseSchema = z.object({
@@ -763,6 +782,7 @@ export const promoteNpcBodySchema = z.object({
 // --- Chat control schemas ---
 
 export const chatEditBodySchema = z.object({
+  campaignId: campaignIdSchema,
   messageIndex: z.number().int().min(0),
   newContent: z.string().min(1),
 });

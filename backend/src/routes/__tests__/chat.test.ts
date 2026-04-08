@@ -122,7 +122,7 @@ describe("GET /chat/history", () => {
   it("returns 400 when no active campaign", async () => {
     mockedGetActive.mockReturnValue(null as any);
 
-    const res = await app.request("/chat/history");
+    const res = await app.request(`/chat/history?campaignId=${CAMPAIGN_ID}`);
 
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -135,7 +135,7 @@ describe("GET /chat/history", () => {
       throw new Error("read error");
     });
 
-    const res = await app.request("/chat/history");
+    const res = await app.request(`/chat/history?campaignId=${CAMPAIGN_ID}`);
 
     expect(res.status).toBe(500);
     const body = await res.json();

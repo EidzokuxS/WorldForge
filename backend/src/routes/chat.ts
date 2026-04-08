@@ -15,8 +15,21 @@ import {
 } from "../campaign/index.js";
 import { clamp, getErrorMessage, getErrorStatus } from "../lib/index.js";
 import { loadSettings } from "../settings/index.js";
-import { parseBody, resolveStoryteller, resolveJudge, resolveEmbedder } from "./helpers.js";
-import { chatBodySchema, chatActionBodySchema, chatEditBodySchema } from "./schemas.js";
+import {
+  parseBody,
+  resolveStoryteller,
+  resolveJudge,
+  resolveEmbedder,
+  zodFirstError,
+} from "./helpers.js";
+import {
+  chatBodySchema,
+  chatActionBodySchema,
+  chatEditBodySchema,
+  chatHistoryQuerySchema,
+  chatRetryBodySchema,
+  chatUndoBodySchema,
+} from "./schemas.js";
 import { createLogger } from "../lib/index.js";
 import { processTurn, captureSnapshot, restoreSnapshot, tickPresentNpcs, simulateOffscreenNpcs, checkAndTriggerReflections, tickFactions, sanitizeNarrative } from "../engine/index.js";
 import type { TurnSnapshot, TurnSummary } from "../engine/index.js";
@@ -279,6 +292,11 @@ function buildOnPostTurn(
 
 app.get("/history", (c) => {
   try {
+    const query = chatHistoryQuerySchema.safeParse(c.req.query());
+    if (!query.success) {
+      return c.json({ error: zodFirstError(query.error) }, 400);
+    }
+
     const activeCampaign = getActiveCampaign();
     if (!activeCampaign) {
       return c.json({ error: "No active campaign loaded." }, 400);
@@ -507,6 +525,9 @@ app.post("/action", async (c) => {
 
 app.post("/retry", async (c) => {
   try {
+    const result = await parseBody(c, chatRetryBodySchema);
+    if ("response" in result) return result.response;
+
     const activeCampaign = getActiveCampaign();
     if (!activeCampaign) {
       return c.json({ error: "No active campaign loaded." }, 400);
@@ -621,6 +642,9 @@ app.post("/retry", async (c) => {
 
 app.post("/undo", async (c) => {
   try {
+    const result = await parseBody(c, chatUndoBodySchema);
+    if ("response" in result) return result.response;
+
     const activeCampaign = getActiveCampaign();
     if (!activeCampaign) {
       return c.json({ error: "No active campaign loaded." }, 400);
