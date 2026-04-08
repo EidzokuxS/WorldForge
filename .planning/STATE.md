@@ -1,9 +1,9 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.0
-milestone_name: milestone
-status: Phase 36 complete — gameplay baseline handoff and formal verification closed
-last_updated: "2026-04-08T12:55:00.000Z"
+milestone_name: Living Sandbox
+status: v1.0 archived; ready for next milestone definition
+last_updated: "2026-04-08T13:25:00.000Z"
 last_activity: 2026-04-08
 progress:
   total_phases: 31
@@ -16,15 +16,15 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-18)
+See: .planning/PROJECT.md (updated 2026-04-08)
 
 **Core value:** The LLM is the narrator, never the engine. All mechanical outcomes are resolved by backend code.
-**Current focus:** Milestone closeout and next gameplay-milestone definition from the completed Phase 36 handoff
+**Current focus:** Start the next gameplay milestone from the completed Phase 36 handoff
 
 ## Current Position
 
-Phase: 36 — Gameplay docs-to-runtime reconciliation audit
-Plan: Complete — 3 of 3 plans closed
+Phase: none
+Plan: none
 
 ## Performance Metrics
 
@@ -39,15 +39,15 @@ Plan: Complete — 3 of 3 plans closed
 
 **Open Work:**
 
-- Active execution target: none inside v1.0; use the Phase 36 handoff to define the next gameplay milestone
-- Next required workflow step: milestone closeout or direct planning from `36-HANDOFF.md`
-- Phase 29 and Phase 30 are now formally closed via `29-VERIFICATION.md` and `30-VERIFICATION.md`
+- Active execution target: none; v1.0 is archived
+- Next required workflow step: `$gsd-new-milestone`
+- Use `36-HANDOFF.md`, `36-RUNTIME-MATRIX.md`, and `36-CLAIMS.md` as inputs for the next milestone
 - Backlog items outside active execution order are tracked in `.planning/BACKLOG.md`
 
 **Notes:**
 
 - Historical per-plan timing metrics from earlier GSD runs were removed during planning hygiene because they no longer matched the active roadmap after renumbering and archival cleanup.
-- Use `ROADMAP.md` progress plus phase directories as the source of truth for current execution state.
+- Use archived milestone artifacts plus the next milestone's fresh roadmap as the source of truth.
 - Latest execution: Phase 32 plans `32-00` through `32-05` completed on 2026-04-01; `32-BASELINE-CLOSEOUT.md` now records `Status: GO`.
 - Phase 29 retro-closeout completed on 2026-04-08: unrestricted backend/frontend targeted Vitest bundles are green, the remaining type/test tails were fixed, and `29-VERIFICATION.md` now closes the ontology seam formally.
 - Phase 30 retro-closeout completed on 2026-04-08: unrestricted backend/frontend targeted Vitest bundles are green, direct persona-template route coverage was added, and `30-VERIFICATION.md` now closes the start/loadout/template foundation formally.
@@ -59,10 +59,8 @@ Plan: Complete — 3 of 3 plans closed
 - Plan 33-11 completed on 2026-04-02 and recorded a PinchTab-only transport contract plus the current external blocker: the shared PinchTab browser can browse the public web but renders `chrome-error://chromewebdata/` for `http://localhost:3000/`.
 - Plan 33-12 completed on 2026-04-02 and closed the remaining `33-VERIFICATION.md` lint gap: the lore-section test now uses typed API mocks, `npm --prefix frontend run lint` exits 0, and the targeted lore-section Vitest suite still passes.
 - Plan 33-06 completed on 2026-04-02 and restored routed concept/DNA persistence plus visible suggestion/generation progress for `/campaign/new` and `/campaign/new/dna`.
-- Phase 36 planning completed on 2026-04-08: `36-CONTEXT.md`, `36-RESEARCH.md`, and plans `36-01` through `36-03` now define the docs-wide gameplay claim register, runtime reconciliation matrix, and next-milestone handoff.
-- Plan 36-01 completed on 2026-04-08: `36-CLAIMS.md` now contains 136 subsystem-grouped gameplay claims with provenance, claim types, and preserved source tensions for direct use in `36-02`.
-- Plan 36-02 completed on 2026-04-08: `36-RUNTIME-MATRIX.md` now classifies all 136 claims against live runtime, counts 75 wired / 48 partial / 7 missing / 6 outdated claims, and elevates six integrity-critical seams for the next gameplay milestone.
-- Plan 36-03 completed on 2026-04-08: `36-HANDOFF.md` now converts the claim register and runtime matrix into the authoritative gameplay baseline for the next milestone, and `36-VERIFICATION.md` closes the phase formally.
+- Phase 36 completed on 2026-04-08: `36-CLAIMS.md`, `36-RUNTIME-MATRIX.md`, `36-HANDOFF.md`, and `36-VERIFICATION.md` define the baseline for the next gameplay milestone.
+- Milestone v1.0 archived on 2026-04-08 as `Living Sandbox`.
 
 ## Accumulated Context
 
@@ -280,9 +278,8 @@ Recent decisions affecting current work:
 
 ### Blockers/Concerns
 
-- Phase 33 browser reruns are blocked until PinchTab is restarted on the same host as the dev servers with a clean Chrome profile and no localhost proxy interception.
-- Phase 33 real-browser reruns are still blocked by the PinchTab localhost transport issue; only the lint-verification gap is now closed.
-- Phase 12, Phase 14, Phase 29, Phase 30, and Phase 33 are now formally closed; remaining milestone proof debt is limited to later missing verification artifacts such as Phases 31 and 32 plus lower-priority documentary gaps.
+- No active blocker inside archived v1.0.
+- Accepted documentary debt at closeout: missing phase-level verification artifacts for `15`, `16`, `17`, `25`, `27`, `31`, `32`.
 - Repo-root Vitest still emits a non-blocking `environmentMatchGlobs` deprecation warning during frontend verification.
 
 ### Quick Tasks Completed
