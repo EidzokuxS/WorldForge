@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { deleteLoreCardById, readErrorMessage, updateLoreCard } from "../api";
+import {
+  chatAction,
+  chatEdit,
+  chatHistory,
+  chatRetry,
+  chatUndo,
+  deleteLoreCardById,
+  readErrorMessage,
+  updateLoreCard,
+} from "../api";
 import type { LoreCardItem, LoreCardUpdateInput } from "../api-types";
 
 // ---------------------------------------------------------------------------
@@ -114,5 +123,117 @@ describe("lore item API helpers", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(deleteLoreCardById("camp-1", "blocked-card")).rejects.toThrow("Definition is required.");
+  });
+});
+
+describe("gameplay API helpers", () => {
+  const fetchMock = vi.fn<typeof fetch>();
+
+  afterEach(() => {
+    fetchMock.mockReset();
+    vi.unstubAllGlobals();
+  });
+
+  it("chatHistory sends the campaignId in the history query string", async () => {
+    const history = {
+      messages: [{ role: "assistant", content: "Welcome back." }],
+      premise: "A haunted frontier.",
+    };
+
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify(history), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(chatHistory("campaign id/42")).resolves.toEqual(history);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3001/api/chat/history?campaignId=campaign%20id%2F42",
+    );
+  });
+
+  it("chatAction is a streaming helper and sends the explicit campaignId in the request body", async () => {
+    const response = new Response("event: done\ndata: {}\n\n", {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    });
+
+    fetchMock.mockResolvedValue(response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      chatAction("campaign-42", "Open the gate", "Open the gate", ""),
+    ).resolves.toBe(response);
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost:3001/api/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: "campaign-42",
+        playerAction: "Open the gate",
+        intent: "Open the gate",
+        method: "",
+      }),
+    });
+  });
+
+  it("chatRetry is a streaming helper and sends only the explicit campaignId", async () => {
+    const response = new Response("event: done\ndata: {}\n\n", {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    });
+
+    fetchMock.mockResolvedValue(response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(chatRetry("campaign-42")).resolves.toBe(response);
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost:3001/api/chat/retry", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: "campaign-42" }),
+    });
+  });
+
+  it("chatUndo is a JSON helper and returns parsed undo results", async () => {
+    const undoResult = { success: true, messagesRemoved: 2 };
+
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify(undoResult), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(chatUndo("campaign-42")).resolves.toEqual(undoResult);
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost:3001/api/chat/undo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: "campaign-42" }),
+    });
+  });
+
+  it("chatEdit is a JSON helper and sends campaignId with the edit payload", async () => {
+    const editResult = { success: true };
+
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify(editResult), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(chatEdit("campaign-42", 3, "New content")).resolves.toEqual(editResult);
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost:3001/api/chat/edit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: "campaign-42",
+        messageIndex: 3,
+        newContent: "New content",
+      }),
+    });
   });
 });
