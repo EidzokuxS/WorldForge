@@ -35,7 +35,10 @@ v1.1 is a reconciliation milestone built from the [Phase 36 handoff](/R:/Project
   1. Player can reload the app, open an existing campaign, and fetch gameplay history without reactivating a hidden session first.
   2. Player can submit a new action after reload and receive a normal streamed turn for the loaded campaign.
   3. Player can use `retry`, `undo`, and `edit` on a reloaded campaign without route failures caused by missing active-session state.
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 37-01-PLAN.md — Make `/api/chat/*` gameplay transport campaign-addressed on the backend and scope in-memory snapshots by `campaignId`.
+- [ ] 37-02-PLAN.md — Rewire `/game` and frontend gameplay helpers to use explicit `campaignId` on every targeted gameplay request.
 
 ### Phase 38: Authoritative Inventory & Equipment State
 **Goal**: Inventory and equipment use one authoritative persistence model across gameplay, prompts, restore flows, and player-facing reads.
