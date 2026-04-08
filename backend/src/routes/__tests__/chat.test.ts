@@ -185,14 +185,15 @@ describe("GET /chat/history", () => {
     expect(body.messages[0].role).toBe("user");
   });
 
-  it("returns 400 when no active campaign", async () => {
+  it("returns 404 when the requested campaign cannot be loaded", async () => {
     mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockRejectedValue(new Error("missing campaign"));
 
     const res = await app.request(`/chat/history?campaignId=${CAMPAIGN_ID}`);
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(404);
     const body = await res.json();
-    expect(body.error).toBe("No active campaign loaded.");
+    expect(body.error).toBe("Campaign not active or not found.");
   });
 
   it("returns 500 when getChatHistory throws", async () => {

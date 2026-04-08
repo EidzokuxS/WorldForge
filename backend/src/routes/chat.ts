@@ -20,6 +20,7 @@ import {
   resolveStoryteller,
   resolveJudge,
   resolveEmbedder,
+  requireLoadedCampaign,
   zodFirstError,
 } from "./helpers.js";
 import {
@@ -53,7 +54,7 @@ const app = new Hono();
 
 // -- Module-level state for last turn (in-memory only) ------------------------
 
-let lastTurnSnapshot: TurnSnapshot | null = null;
+const lastTurnSnapshots = new Map<string, TurnSnapshot>();
 
 // -- Helpers ------------------------------------------------------------------
 
@@ -290,20 +291,19 @@ function buildOnPostTurn(
 
 // -- GET /history -------------------------------------------------------------
 
-app.get("/history", (c) => {
+app.get("/history", async (c) => {
   try {
     const query = chatHistoryQuerySchema.safeParse(c.req.query());
     if (!query.success) {
       return c.json({ error: zodFirstError(query.error) }, 400);
     }
 
-    const activeCampaign = getActiveCampaign();
-    if (!activeCampaign) {
-      return c.json({ error: "No active campaign loaded." }, 400);
-    }
+    const { campaignId } = query.data;
+    const campaign = await requireLoadedCampaign(c, campaignId);
+    if (campaign instanceof Response) return campaign;
 
-    const premise = getCampaignPremise(activeCampaign.id);
-    const messages = getChatHistory(activeCampaign.id);
+    const premise = getCampaignPremise(campaignId);
+    const messages = getChatHistory(campaignId);
     return c.json({ messages, premise });
   } catch (error) {
     return c.json(
@@ -402,11 +402,9 @@ app.post("/action", async (c) => {
     const result = await parseBody(c, chatActionBodySchema);
     if ("response" in result) return result.response;
 
-    const { playerAction, intent, method } = result.data;
-    const activeCampaign = getActiveCampaign();
-    if (!activeCampaign) {
-      return c.json({ error: "No active campaign loaded." }, 400);
-    }
+    const { campaignId, playerAction, intent, method } = result.data;
+    const campaign = await requireLoadedCampaign(c, campaignId);
+    if (campaign instanceof Response) return campaign;
 
     const settings = loadSettings();
 
@@ -437,30 +435,30 @@ app.post("/action", async (c) => {
       const player = db
         .select({ hp: players.hp })
         .from(players)
-        .where(eq(players.campaignId, activeCampaign.id))
+        .where(eq(players.campaignId, campaignId))
         .get();
 
       if (player && player.hp <= 2) {
-        await createCheckpoint(activeCampaign.id, {
+        await createCheckpoint(campaignId, {
           name: "auto-danger",
           description: "Auto-save: low HP",
           auto: true,
         });
-        await pruneAutoCheckpoints(activeCampaign.id, 3);
+        await pruneAutoCheckpoints(campaignId, 3);
       }
     } catch (err) {
       log.warn("Auto-checkpoint failed (non-blocking)", err);
     }
 
     // Capture pre-turn snapshot for potential undo/retry
-    const snapshot = captureSnapshot(activeCampaign.id);
+    const snapshot = captureSnapshot(campaignId);
 
     c.header("Cache-Control", "no-cache, no-transform");
 
     return streamSSE(c, async (stream) => {
       try {
         const turnGenerator = processTurn({
-          campaignId: activeCampaign.id,
+          campaignId,
           playerAction,
           intent,
           method,
@@ -470,7 +468,7 @@ app.post("/action", async (c) => {
           storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
           embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
           fallbackProvider,
-          onPostTurn: buildOnPostTurn(settings, activeCampaign.id, judgeResult.resolved.provider),
+          onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider),
         });
 
         for await (const event of turnGenerator) {
@@ -486,12 +484,12 @@ app.post("/action", async (c) => {
           if (event.type === "auto_checkpoint") {
             void (async () => {
               try {
-                await createCheckpoint(activeCampaign.id, {
+                await createCheckpoint(campaignId, {
                   name: "auto-danger",
                   description: "Auto-save: HP dropped to danger zone",
                   auto: true,
                 });
-                await pruneAutoCheckpoints(activeCampaign.id, 3);
+                await pruneAutoCheckpoints(campaignId, 3);
               } catch (err) {
                 log.warn("Reactive auto-checkpoint failed (non-blocking)", err);
               }
@@ -505,7 +503,7 @@ app.post("/action", async (c) => {
         }
 
         // Turn completed successfully -- store snapshot for potential undo/retry
-        lastTurnSnapshot = snapshot;
+        lastTurnSnapshots.set(campaignId, snapshot);
       } catch (error) {
         await stream.writeSSE({
           event: "error",
@@ -528,12 +526,12 @@ app.post("/retry", async (c) => {
     const result = await parseBody(c, chatRetryBodySchema);
     if ("response" in result) return result.response;
 
-    const activeCampaign = getActiveCampaign();
-    if (!activeCampaign) {
-      return c.json({ error: "No active campaign loaded." }, 400);
-    }
+    const { campaignId } = result.data;
+    const campaign = await requireLoadedCampaign(c, campaignId);
+    if (campaign instanceof Response) return campaign;
 
-    if (!lastTurnSnapshot) {
+    const previousSnapshot = lastTurnSnapshots.get(campaignId);
+    if (!previousSnapshot) {
       return c.json({ error: "Nothing to retry." }, 400);
     }
 
@@ -558,26 +556,26 @@ app.post("/retry", async (c) => {
     const fallbackProvider = resolveFallbackProvider(settings.fallback, settings.providers);
 
     // Restore pre-turn game state
-    restoreSnapshot(activeCampaign.id, lastTurnSnapshot);
+    restoreSnapshot(campaignId, previousSnapshot);
 
     // Get the player action BEFORE popping messages
-    const playerAction = getLastPlayerAction(activeCampaign.id);
+    const playerAction = getLastPlayerAction(campaignId);
     if (!playerAction) {
       return c.json({ error: "No player action found to retry." }, 400);
     }
 
     // Remove both user + assistant messages (processTurn re-appends user message)
-    popLastMessages(activeCampaign.id, 2);
+    popLastMessages(campaignId, 2);
 
     // Capture fresh snapshot for the re-run
-    const freshSnapshot = captureSnapshot(activeCampaign.id);
+    const freshSnapshot = captureSnapshot(campaignId);
 
     c.header("Cache-Control", "no-cache, no-transform");
 
     return streamSSE(c, async (stream) => {
       try {
         const turnGenerator = processTurn({
-          campaignId: activeCampaign.id,
+          campaignId,
           playerAction,
           intent: playerAction, // Re-use player action as intent for retry
           method: "",
@@ -587,7 +585,7 @@ app.post("/retry", async (c) => {
           storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
           embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
           fallbackProvider,
-          onPostTurn: buildOnPostTurn(settings, activeCampaign.id, judgeResult.resolved.provider),
+          onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider),
         });
 
         for await (const event of turnGenerator) {
@@ -603,12 +601,12 @@ app.post("/retry", async (c) => {
           if (event.type === "auto_checkpoint") {
             void (async () => {
               try {
-                await createCheckpoint(activeCampaign.id, {
+                await createCheckpoint(campaignId, {
                   name: "auto-danger",
                   description: "Auto-save: HP dropped to danger zone",
                   auto: true,
                 });
-                await pruneAutoCheckpoints(activeCampaign.id, 3);
+                await pruneAutoCheckpoints(campaignId, 3);
               } catch (err) {
                 log.warn("Reactive auto-checkpoint failed (non-blocking)", err);
               }
@@ -622,7 +620,7 @@ app.post("/retry", async (c) => {
         }
 
         // Store new snapshot for potential further retry/undo
-        lastTurnSnapshot = freshSnapshot;
+        lastTurnSnapshots.set(campaignId, freshSnapshot);
       } catch (error) {
         await stream.writeSSE({
           event: "error",
@@ -645,23 +643,23 @@ app.post("/undo", async (c) => {
     const result = await parseBody(c, chatUndoBodySchema);
     if ("response" in result) return result.response;
 
-    const activeCampaign = getActiveCampaign();
-    if (!activeCampaign) {
-      return c.json({ error: "No active campaign loaded." }, 400);
-    }
+    const { campaignId } = result.data;
+    const campaign = await requireLoadedCampaign(c, campaignId);
+    if (campaign instanceof Response) return campaign;
 
-    if (!lastTurnSnapshot) {
+    const previousSnapshot = lastTurnSnapshots.get(campaignId);
+    if (!previousSnapshot) {
       return c.json({ error: "Nothing to undo." }, 400);
     }
 
     // Restore pre-turn game state
-    restoreSnapshot(activeCampaign.id, lastTurnSnapshot);
+    restoreSnapshot(campaignId, previousSnapshot);
 
     // Remove last user + assistant message pair
-    popLastMessages(activeCampaign.id, 2);
+    popLastMessages(campaignId, 2);
 
     // Single-step undo only
-    lastTurnSnapshot = null;
+    lastTurnSnapshots.delete(campaignId);
 
     return c.json({ success: true, messagesRemoved: 2 });
   } catch (error) {
@@ -679,14 +677,12 @@ app.post("/edit", async (c) => {
     const result = await parseBody(c, chatEditBodySchema);
     if ("response" in result) return result.response;
 
-    const { messageIndex, newContent } = result.data;
-    const activeCampaign = getActiveCampaign();
-    if (!activeCampaign) {
-      return c.json({ error: "No active campaign loaded." }, 400);
-    }
+    const { campaignId, messageIndex, newContent } = result.data;
+    const campaign = await requireLoadedCampaign(c, campaignId);
+    if (campaign instanceof Response) return campaign;
 
     const success = replaceChatMessage(
-      activeCampaign.id,
+      campaignId,
       messageIndex,
       newContent
     );
