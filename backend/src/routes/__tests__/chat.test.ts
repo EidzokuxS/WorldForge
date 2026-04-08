@@ -92,6 +92,16 @@ beforeEach(() => {
 // GET /chat/history
 // ---------------------------------------------------------------------------
 describe("GET /chat/history", () => {
+  it("returns 400 when campaignId query is missing", async () => {
+    activateCampaign();
+
+    const res = await app.request("/chat/history");
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("campaignId is required.");
+  });
+
   it("returns messages and premise", async () => {
     activateCampaign();
     mockedGetPremise.mockReturnValue("A dark fantasy world.");
@@ -100,7 +110,7 @@ describe("GET /chat/history", () => {
       { role: "assistant", content: "You see a forest." },
     ] as any);
 
-    const res = await app.request("/chat/history");
+    const res = await app.request(`/chat/history?campaignId=${CAMPAIGN_ID}`);
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -130,6 +140,63 @@ describe("GET /chat/history", () => {
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body).toHaveProperty("error");
+  });
+});
+
+describe("Targeted gameplay route campaignId validation", () => {
+  it("rejects /chat/action without campaignId", async () => {
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        playerAction: "I open the door.",
+        intent: "Open the door.",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("campaignId is required.");
+  });
+
+  it("rejects /chat/retry without campaignId", async () => {
+    const res = await app.request("/chat/retry", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("campaignId is required.");
+  });
+
+  it("rejects /chat/undo without campaignId", async () => {
+    const res = await app.request("/chat/undo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("campaignId is required.");
+  });
+
+  it("rejects /chat/edit without campaignId", async () => {
+    const res = await app.request("/chat/edit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messageIndex: 1,
+        newContent: "Updated text",
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("campaignId is required.");
   });
 });
 
