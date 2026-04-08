@@ -28,12 +28,13 @@ import type { CampaignMeta, ChatMessage } from "@worldforge/shared";
 import { isChatMessage } from "@worldforge/shared";
 import { getErrorMessage } from "@/lib/settings";
 import {
-  apiGet,
-  apiStreamPost,
+  chatAction,
   chatEdit,
+  chatHistory,
   chatRetry,
   chatUndo,
   getActiveCampaign,
+  type ChatHistoryResponse,
   getRememberedCampaignId,
   getImageUrl,
   getWorldData,
@@ -41,11 +42,6 @@ import {
   parseTurnSSE,
 } from "@/lib/api";
 import type { WorldData } from "@/lib/api-types";
-
-type ChatHistoryResponse = {
-  messages: ChatMessage[];
-  premise: string;
-};
 
 export default function GamePage() {
   const router = useRouter();
@@ -95,7 +91,7 @@ export default function GamePage() {
         setActiveCampaign(campaign);
 
         const [history, world] = await Promise.all([
-          apiGet<ChatHistoryResponse>("/api/chat/history"),
+          chatHistory(campaign.id),
           getWorldData(campaign.id),
         ]);
 
@@ -185,7 +181,7 @@ export default function GamePage() {
   };
 
   const submitAction = async (actionText: string) => {
-    if (!actionText || isStreaming) return;
+    if (!actionText || isStreaming || !activeCampaign) return;
 
     setIsStreaming(true);
     setLastOracleResult(null);
@@ -195,11 +191,7 @@ export default function GamePage() {
     let streamStarted = false;
 
     try {
-      const response = await apiStreamPost("/api/chat/action", {
-        playerAction: actionText,
-        intent: actionText,
-        method: "",
-      });
+      const response = await chatAction(activeCampaign.id, actionText, actionText, "");
 
       if (!response.body) {
         throw new Error("Empty response stream.");
@@ -266,7 +258,7 @@ export default function GamePage() {
   };
 
   const handleRetry = async () => {
-    if (isStreaming) return;
+    if (isStreaming || !activeCampaign) return;
 
     setIsStreaming(true);
     setLastOracleResult(null);
@@ -283,7 +275,7 @@ export default function GamePage() {
     });
 
     try {
-      const response = await chatRetry();
+      const response = await chatRetry(activeCampaign.id);
 
       if (!response.body) {
         throw new Error("Empty response stream.");
@@ -336,10 +328,10 @@ export default function GamePage() {
   };
 
   const handleUndo = async () => {
-    if (isStreaming) return;
+    if (isStreaming || !activeCampaign) return;
 
     try {
-      await chatUndo();
+      await chatUndo(activeCampaign.id);
       setMessages((current) => {
         const next = [...current];
         // Remove last 2 messages (user action + assistant response)
@@ -363,8 +355,10 @@ export default function GamePage() {
   };
 
   const handleEdit = async (messageIndex: number, newContent: string) => {
+    if (!activeCampaign) return;
+
     try {
-      await chatEdit(messageIndex, newContent);
+      await chatEdit(activeCampaign.id, messageIndex, newContent);
       setMessages((current) => {
         const next = [...current];
         if (messageIndex >= 0 && messageIndex < next.length) {
