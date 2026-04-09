@@ -21,6 +21,7 @@ import {
 import { storeEpisodicEvent } from "../vectors/episodic-events.js";
 import { createLogger } from "../lib/index.js";
 import { parseTags } from "./parse-helpers.js";
+import { accumulateReflectionBudget } from "./reflection-budget.js";
 import {
   createCharacterRecordFromDraft,
   fromLegacyScaffoldNpc,
@@ -550,6 +551,7 @@ async function handleLogEvent(
       importance,
       type: "event",
     });
+    await accumulateReflectionBudget(campaignId, participants, importance);
 
     return {
       success: true,

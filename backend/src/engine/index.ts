@@ -61,6 +61,8 @@ export type { ReflectionResult } from "./reflection-agent.js";
 
 export { createReflectionTools } from "./reflection-tools.js";
 
+export { accumulateReflectionBudget } from "./reflection-budget.js";
+
 export { tickFactions } from "./world-engine.js";
 
 export type { FactionTickResult } from "./world-engine.js";

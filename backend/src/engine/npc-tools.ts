@@ -16,6 +16,7 @@ import { storeEpisodicEvent } from "../vectors/episodic-events.js";
 import type { ProviderConfig } from "../ai/provider-registry.js";
 import { createLogger } from "../lib/index.js";
 import { parseTags } from "./parse-helpers.js";
+import { accumulateReflectionBudget } from "./reflection-budget.js";
 import {
   hydrateStoredNpcRecord,
   projectNpcRecord,
@@ -125,6 +126,7 @@ export function createNpcAgentTools(
             importance: 3,
             type: "dialogue",
           });
+          await accumulateReflectionBudget(campaignId, participants, 3);
         } catch (err) {
           log.warn("Failed to store NPC dialogue event", err);
         }

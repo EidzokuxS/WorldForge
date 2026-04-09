@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const accumulateReflectionBudgetMock = vi.fn();
+const { accumulateReflectionBudgetMock } = vi.hoisted(() => ({
+  accumulateReflectionBudgetMock: vi.fn(),
+}));
 
 // Mock all external dependencies before imports
 vi.mock("../../db/index.js", () => ({

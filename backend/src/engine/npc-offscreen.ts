@@ -15,6 +15,7 @@ import { npcs, locations } from "../db/schema.js";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
 import { storeEpisodicEvent } from "../vectors/episodic-events.js";
 import { createLogger } from "../lib/index.js";
+import { accumulateReflectionBudget } from "./reflection-budget.js";
 import {
   hydrateStoredNpcRecord,
   toLegacyNpcDraft,
@@ -226,6 +227,7 @@ export async function applyOffscreenUpdate(
       importance: 3,
       type: "npc_offscreen",
     });
+    await accumulateReflectionBudget(campaignId, [npcCtx.npcName], 3);
   } catch (err) {
     log.warn(`Failed to store episodic event for ${npcCtx.npcName}`, err);
   }
