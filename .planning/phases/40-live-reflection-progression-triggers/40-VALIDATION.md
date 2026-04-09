@@ -27,10 +27,10 @@ created: 2026-04-09
 
 ## Sampling Rate
 
-- **After every task commit:** Run `npm --prefix backend exec vitest run src/engine/__tests__/reflection-agent.test.ts src/engine/__tests__/reflection-progression.test.ts src/engine/__tests__/tool-executor.test.ts src/engine/__tests__/npc-agent.test.ts src/engine/__tests__/npc-offscreen.test.ts src/routes/__tests__/chat.test.ts`
-- **After every plan wave:** Run `npm --prefix backend test`
+- **After every task commit:** Run only the narrow command for the task you just changed from the Per-Task Verification Map below.
+- **After every plan wave:** Run `npm --prefix backend exec vitest run src/engine/__tests__/reflection-agent.test.ts src/engine/__tests__/reflection-progression.test.ts src/engine/__tests__/tool-executor.test.ts src/engine/__tests__/npc-agent.test.ts src/engine/__tests__/npc-offscreen.test.ts src/routes/__tests__/chat.test.ts`
 - **Before `$gsd-verify-work`:** Full suite must be green
-- **Max feedback latency:** 45 seconds
+- **Max feedback latency:** ~15 seconds per task sample, ~45 seconds at wave/phase gates
 
 ---
 
@@ -38,11 +38,11 @@ created: 2026-04-09
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| 40-01-01 | 01 | 1 | SIMF-01 | unit | `npm --prefix backend exec vitest run src/engine/__tests__/tool-executor.test.ts -t "accumulates reflection budget"` | ❌ W0 | ⬜ pending |
-| 40-01-02 | 01 | 1 | SIMF-01 | integration | `npm --prefix backend exec vitest run src/engine/__tests__/npc-agent.test.ts -t "increments reflection budget"` | ❌ W0 | ⬜ pending |
-| 40-01-03 | 01 | 1 | SIMF-01 | integration | `npm --prefix backend exec vitest run src/engine/__tests__/npc-offscreen.test.ts -t "increments reflection budget"` | ❌ W0 | ⬜ pending |
-| 40-02-01 | 02 | 2 | SIMF-01 | integration | `npm --prefix backend exec vitest run src/routes/__tests__/chat.test.ts -t "triggers reflection during post-turn finalization"` | ❌ W0 | ⬜ pending |
-| 40-02-02 | 02 | 2 | SIMF-01 | unit/integration | `npm --prefix backend exec vitest run src/engine/__tests__/reflection-agent.test.ts -t "persists structured state changes"` | ✅ | ⬜ pending |
+| 40-01-01 | 01 | 1 | SIMF-01 | unit | `npm --prefix backend exec vitest run src/engine/__tests__/reflection-budget.test.ts` | ❌ W0 | ⬜ pending |
+| 40-01-02 | 01 | 1 | SIMF-01 | integration | `npm --prefix backend exec vitest run src/engine/__tests__/tool-executor.test.ts -t "accumulates reflection budget" src/engine/__tests__/npc-agent.test.ts -t "increments reflection budget" src/engine/__tests__/npc-offscreen.test.ts -t "increments reflection budget"` | ✅ | ⬜ pending |
+| 40-02-01 | 02 | 2 | SIMF-01 | integration | `npm --prefix backend exec vitest run src/routes/__tests__/chat.test.ts -t "triggers reflection during post-turn finalization"` | ✅ | ⬜ pending |
+| 40-02-02 | 02 | 2 | SIMF-01 | unit/integration | `npm --prefix backend exec vitest run src/engine/__tests__/reflection-agent.test.ts -t "beliefs, goals, and relationships first" src/engine/__tests__/reflection-agent.test.ts -t "materially stronger evidence"` | ✅ | ⬜ pending |
+| 40-02-03 | 02 | 2 | SIMF-01 | integration | `npm --prefix backend exec vitest run src/engine/__tests__/npc-agent.test.ts -t "reads reflected canonical beliefs, goals, and relationships on later turns"` | ✅ | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -62,7 +62,7 @@ created: 2026-04-09
 
 | Behavior | Requirement | Why Manual | Test Instructions |
 |----------|-------------|------------|-------------------|
-| Diegetic visibility of reflection outcome | SIMF-01 | NPC behavior change quality is prompt- and scenario-dependent | Load a campaign with a qualifying NPC, trigger reflection through ordinary play, then confirm later turns show changed beliefs/goals/relationship consequences without relying on a system popup. |
+| Diegetic visibility of reflection outcome | SIMF-01 | NPC behavior change quality is prompt- and scenario-dependent | Load a campaign with a qualifying NPC, trigger reflection through ordinary play, then play at least one later turn with that NPC and confirm the follow-up behavior or dialogue reflects the updated beliefs/goals/relationship state without relying on a system popup. |
 | Secondary debug inspection surface, if implemented in-phase | SIMF-01 | Optional UX surface and not guaranteed to exist in every plan | If a modal/drill-down is added, open the relevant character/NPC card and confirm the reflection/progression state is inspectable without becoming the primary gameplay signal. |
 
 ---
