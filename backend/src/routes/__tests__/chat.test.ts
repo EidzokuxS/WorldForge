@@ -181,6 +181,7 @@ describe("GET /chat/history", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.premise).toBe("A dark fantasy world.");
+    expect(body.hasLiveTurnSnapshot).toBe(false);
     expect(body.messages).toHaveLength(2);
     expect(body.messages[0].role).toBe("user");
   });
@@ -286,7 +287,55 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(res.status).toBe(200);
     expect(mockedLoadCampaign).toHaveBeenCalledWith(CAMPAIGN_ID);
     const body = await res.json();
+    expect(body.hasLiveTurnSnapshot).toBe(false);
     expect(body.messages).toHaveLength(2);
+  });
+
+  it("reports live turn snapshot availability in history after a successful action", async () => {
+    setupStoryteller();
+    setupDbMock();
+    const snapshotCampaignId = "campaign-snapshot";
+
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
+      id: campaignId,
+      name: `Campaign ${campaignId}`,
+      createdAt: "2026-01-01",
+    }) as any);
+    mockedGetPremise.mockReturnValue("A dark fantasy world.");
+    mockedGetHistory.mockReturnValue([
+      { role: "user", content: "Look around." },
+      { role: "assistant", content: "You see a forest." },
+    ] as any);
+    mockedCaptureSnapshot.mockImplementation((campaignId) => ({
+      campaignId,
+      spawnedNpcIds: [],
+      spawnedItemIds: [],
+      revealedLocationIds: [],
+      createdRelationshipIds: [],
+      createdChronicleIds: [],
+    }) as any);
+    mockedProcessTurn.mockImplementation(() =>
+      createTurnStream([{ type: "done", data: { tick: 1 } }]),
+    );
+
+    const actionRes = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: snapshotCampaignId,
+        playerAction: "Look around",
+        intent: "Look around",
+        method: "",
+      }),
+    });
+    expect(actionRes.status).toBe(200);
+    await actionRes.text();
+
+    const historyRes = await app.request(`/chat/history?campaignId=${snapshotCampaignId}`);
+    expect(historyRes.status).toBe(200);
+    const body = await historyRes.json();
+    expect(body.hasLiveTurnSnapshot).toBe(true);
   });
 
   it("keeps undo snapshots isolated by campaignId", async () => {
@@ -353,6 +402,112 @@ describe("Campaign-loaded gameplay transport", () => {
       "campaign-a",
       expect.objectContaining({ campaignId: "campaign-b" }),
     );
+  });
+
+  it("D-02/D-03 emits error and restores the authoritative bundle when /chat/action finalization fails", async () => {
+    setupStoryteller();
+    setupDbMock();
+    const snapshot = { bundleId: "turn-boundary-action" } as any;
+
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
+      id: campaignId,
+      name: `Campaign ${campaignId}`,
+      createdAt: "2026-01-01",
+    }) as any);
+    mockedCaptureSnapshot.mockReturnValue(snapshot);
+    mockedProcessTurn.mockImplementation(() =>
+      (async function* () {
+        yield { type: "oracle_result", data: { outcome: "strong_hit" } } as any;
+        yield { type: "finalizing_turn", data: { stage: "rollback_critical" } } as any;
+        throw new Error("rollback-critical finalization failed");
+      })(),
+    );
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Strike now",
+        intent: "Strike now",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("event: finalizing_turn");
+    expect(body).toContain("event: error");
+    expect(body).not.toContain("event: done");
+    expect(mockedRestoreSnapshot).toHaveBeenCalledWith(CAMPAIGN_ID, snapshot);
+
+    const historyRes = await app.request(`/chat/history?campaignId=${CAMPAIGN_ID}`);
+    expect(historyRes.status).toBe(200);
+    const historyBody = await historyRes.json();
+    expect(historyBody.hasLiveTurnSnapshot).toBe(false);
+  });
+
+  it("D-04/D-05 restores the same bundle before and after a failed /chat/retry replay", async () => {
+    setupStoryteller();
+    setupDbMock();
+    const previousSnapshot = { bundleId: "turn-boundary-retry" } as any;
+    const freshSnapshot = { bundleId: "turn-boundary-retry-fresh" } as any;
+
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
+      id: campaignId,
+      name: `Campaign ${campaignId}`,
+      createdAt: "2026-01-01",
+    }) as any);
+    mockedCaptureSnapshot
+      .mockReturnValueOnce(previousSnapshot)
+      .mockReturnValueOnce(freshSnapshot);
+    mockedGetLastPlayerAction.mockReturnValue("Retry the swing");
+    mockedPopLastMessages.mockReturnValue([] as any);
+    mockedProcessTurn
+      .mockImplementationOnce(() =>
+        createTurnStream([{ type: "done", data: { tick: 1 } }]),
+      )
+      .mockImplementationOnce(
+        () =>
+          (async function* () {
+            yield { type: "finalizing_turn", data: { stage: "rollback_critical" } } as any;
+            throw new Error("reflection finalization timed out");
+          })(),
+      );
+
+    const actionRes = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Retry the swing",
+        intent: "Retry the swing",
+        method: "",
+      }),
+    });
+    expect(actionRes.status).toBe(200);
+    await actionRes.text();
+
+    const retryRes = await app.request("/chat/retry", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(retryRes.status).toBe(200);
+    const retryBody = await retryRes.text();
+    expect(retryBody).toContain("event: finalizing_turn");
+    expect(retryBody).toContain("event: error");
+    expect(retryBody).not.toContain("event: done");
+    expect(mockedRestoreSnapshot).toHaveBeenNthCalledWith(1, CAMPAIGN_ID, previousSnapshot);
+    expect(mockedRestoreSnapshot).toHaveBeenNthCalledWith(2, CAMPAIGN_ID, previousSnapshot);
+
+    const historyRes = await app.request(`/chat/history?campaignId=${CAMPAIGN_ID}`);
+    expect(historyRes.status).toBe(200);
+    const historyBody = await historyRes.json();
+    expect(historyBody.hasLiveTurnSnapshot).toBe(false);
   });
 });
 

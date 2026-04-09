@@ -53,7 +53,7 @@ import { createStorytellerTools } from "../tool-schemas.js";
 import { streamText } from "ai";
 import { safeGenerateObject } from "../../ai/generate-object-safe.js";
 import { getDb } from "../../db/index.js";
-import { players, locations } from "../../db/schema.js";
+import { players, locations, npcs } from "../../db/schema.js";
 
 // -- Helpers ------------------------------------------------------------------
 
@@ -271,6 +271,68 @@ describe("processTurn", () => {
     });
   });
 
+  it("emits server-side fallback quick actions when storyteller omits the tool call", async () => {
+    setupMocks({
+      streamParts: [
+        { type: "text-delta", text: "The signal room falls quiet." },
+      ],
+    });
+
+    let lastFromTable: unknown = null;
+    const mockDb = {
+      select: vi.fn().mockReturnThis(),
+      from: vi.fn().mockImplementation((table: unknown) => {
+        lastFromTable = table;
+        return mockDb;
+      }),
+      where: vi.fn().mockImplementation(() => {
+        if (lastFromTable === (players as unknown)) {
+          return {
+            get: vi.fn().mockReturnValue({
+              id: "player-1",
+              name: "Hero",
+              tags: '["warrior"]',
+              currentLocationId: "loc-1",
+            }),
+          };
+        }
+        if (lastFromTable === (locations as unknown)) {
+          return {
+            get: vi.fn().mockReturnValue({
+              id: "loc-1",
+              name: "Signal Room",
+            }),
+          };
+        }
+        if (lastFromTable === (npcs as unknown)) {
+          return {
+            all: vi.fn().mockReturnValue([{ name: "Dr. Sato" }]),
+          };
+        }
+        return {
+          get: vi.fn().mockReturnValue(null),
+          all: vi.fn().mockReturnValue([]),
+        };
+      }),
+    };
+    (getDb as Mock).mockReturnValue(mockDb);
+
+    const events = await collectEvents(processTurn(createTestOptions()));
+
+    const quickActions = events.filter((e) => e.type === "quick_actions");
+    expect(quickActions).toHaveLength(1);
+    expect(quickActions[0]!.data).toEqual({
+      success: true,
+      result: {
+        actions: [
+          { label: "Talk to Dr. Sato", action: "Talk to Dr. Sato" },
+          { label: "Look around", action: "Look around Signal Room for anything noteworthy" },
+          { label: "Press the advantage", action: "Press the advantage and continue forward" },
+        ],
+      },
+    });
+  });
+
   it("yields done event as last event with tick", async () => {
     setupMocks();
     const options = createTestOptions();
@@ -370,6 +432,119 @@ describe("processTurn", () => {
         narrativeText: expect.any(String),
       })
     );
+  });
+
+  it("D-02/D-03 emits finalizing_turn and waits for rollback-critical post-turn work before done", async () => {
+    setupMocks({
+      streamParts: [
+        { type: "text-delta", text: "The goblin falls." },
+        {
+          type: "tool-result",
+          toolName: "offer_quick_actions",
+          input: {
+            actions: [{ label: "Loot", action: "Loot the goblin" }],
+          },
+          output: {
+            success: true,
+            result: {
+              actions: [{ label: "Loot", action: "Loot the goblin" }],
+            },
+          },
+        },
+      ],
+    });
+
+    let resolvePostTurn: (() => void) | null = null;
+    const onPostTurn = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolvePostTurn = resolve;
+        }),
+    );
+
+    const generator = processTurn(createTestOptions({ onPostTurn }));
+    const observedTypes: string[] = [];
+
+    for (let i = 0; i < 8; i += 1) {
+      const step = await generator.next();
+      if (step.done) break;
+      observedTypes.push(step.value.type);
+      if (step.value.type === "finalizing_turn") {
+        break;
+      }
+    }
+
+    expect(observedTypes).toContain("finalizing_turn");
+    expect(onPostTurn).toHaveBeenCalledTimes(1);
+
+    let doneResolved = false;
+    const pendingDone = generator.next().then((result) => {
+      doneResolved = true;
+      return result;
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(doneResolved).toBe(false);
+
+    resolvePostTurn?.();
+
+    const doneStep = await pendingDone;
+    expect(doneStep.done).toBe(false);
+    expect(doneStep.value).toEqual({
+      type: "done",
+      data: { tick: 6 },
+    });
+  });
+
+  it("D-14 fails the turn if rollback-critical finalization exceeds the hard timeout", async () => {
+    vi.useFakeTimers();
+
+    try {
+      setupMocks({
+        streamParts: [
+          { type: "text-delta", text: "The goblin falls." },
+          {
+            type: "tool-result",
+            toolName: "offer_quick_actions",
+            input: {
+              actions: [{ label: "Loot", action: "Loot the goblin" }],
+            },
+            output: {
+              success: true,
+              result: {
+                actions: [{ label: "Loot", action: "Loot the goblin" }],
+              },
+            },
+          },
+        ],
+      });
+
+      const generator = processTurn(
+        createTestOptions({
+          onPostTurn: () => new Promise<void>(() => undefined),
+        }),
+      );
+
+      let sawFinalizing = false;
+      for (let i = 0; i < 8; i += 1) {
+        const step = await generator.next();
+        if (step.done) break;
+        if (step.value.type === "finalizing_turn") {
+          sawFinalizing = true;
+          break;
+        }
+      }
+
+      expect(sawFinalizing).toBe(true);
+
+      const pendingDone = generator.next();
+      await vi.advanceTimersByTimeAsync(60_001);
+
+      await expect(pendingDone).rejects.toThrow(/finalization/i);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   describe("movement in turn processing", () => {
