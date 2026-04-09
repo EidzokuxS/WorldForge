@@ -105,6 +105,30 @@ export default function GamePage() {
     [],
   );
 
+  const rollbackRetryBoundary = useCallback(
+    async (campaignId: string, fallbackPremise: string, cause: unknown) => {
+      const rolledBackMessages = messagesRef.current.slice(
+        0,
+        Math.max(0, messagesRef.current.length - 2),
+      );
+
+      messagesRef.current = rolledBackMessages;
+      setMessages(rolledBackMessages);
+      setLastOracleResult(null);
+      setHasLiveTurnSnapshot(false);
+      clearQuickActionState();
+
+      try {
+        await restoreGameplayState(campaignId, fallbackPremise);
+      } catch {
+        if (getErrorMessage(cause, "").includes("Nothing to retry")) {
+          setHasLiveTurnSnapshot(false);
+        }
+      }
+    },
+    [clearQuickActionState, restoreGameplayState],
+  );
+
   useEffect(() => {
     let cancelled = false;
 
@@ -312,6 +336,7 @@ export default function GamePage() {
       return [...next, { role: "assistant" as const, content: "" }];
     });
     let turnCompleted = false;
+    let retryStreamError: string | null = null;
 
     try {
       const response = await chatRetry(activeCampaign.id);
@@ -351,25 +376,15 @@ export default function GamePage() {
           }
         },
         onError: (error) => {
-          toast.error("Retry error", { description: error });
+          retryStreamError = error;
         },
       });
-    } catch (error) {
-      const rolledBackMessages = messagesRef.current.slice(
-        0,
-        Math.max(0, messagesRef.current.length - 2),
-      );
-      messagesRef.current = rolledBackMessages;
-      setMessages(rolledBackMessages);
-      setHasLiveTurnSnapshot(false);
 
-      try {
-        await restoreGameplayState(activeCampaign.id, activeCampaign.premise);
-      } catch {
-        if (getErrorMessage(error, "").includes("Nothing to retry")) {
-          setHasLiveTurnSnapshot(false);
-        }
+      if (retryStreamError) {
+        throw new Error(retryStreamError);
       }
+    } catch (error) {
+      await rollbackRetryBoundary(activeCampaign.id, activeCampaign.premise, error);
 
       toast.error("Failed to retry", {
         description: getErrorMessage(error, "Unknown streaming error."),
