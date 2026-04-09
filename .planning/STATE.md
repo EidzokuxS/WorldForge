@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
-status: completed
-stopped_at: Phase 40 context gathered after user discussion
-last_updated: "2026-04-09T05:40:30.376Z"
-last_activity: 2026-04-09
+status: executing
+stopped_at: Completed 40-01-PLAN.md
+last_updated: "2026-04-09T17:48:42.7841496Z"
+last_activity: 2026-04-09 -- Completed 40-01 plan execution
 progress:
   total_phases: 8
   completed_phases: 2
-  total_plans: 5
-  completed_plans: 5
-  percent: 100
+  total_plans: 7
+  completed_plans: 6
+  percent: 86
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-08)
 
 **Core value:** The LLM is the narrator, never the engine. Mechanical truth stays in backend code so outcomes remain consistent, inspectable, and recoverable.
-**Current focus:** Phase 40 — live-reflection-&-progression-triggers
+**Current focus:** Phase 40 — live-reflection-progression-triggers
 
 ## Current Position
 
-Phase: 40
-Plan: Not started
-Status: Phase 39 complete — next phase ready for discuss/plan
-Last activity: 2026-04-09
+Phase: 40 (live-reflection-progression-triggers) — EXECUTING
+Plan: 2 of 2
+Status: Ready to execute
+Last activity: 2026-04-09 -- Completed 40-01 plan execution
 
-Progress: [██████████] 100%
+Progress: [█████████░] 86%
 
 ## Performance Metrics
 
@@ -45,11 +45,11 @@ Progress: [██████████] 100%
 
 **Recent Execution:**
 
+- Phase `40` Plan `01` — duration `6 min`, tasks `2`, files `9`
 - Phase `39` Plan `03` — duration `10 min`, tasks `2`, files `2`
 - Phase `39` Plan `02` — duration `6 min`, tasks `2`, files `6`
 - Phase `39` Plan `01` — duration `5 min`, tasks `2`, files `7`
 - Phase `37` Plan `01` — duration `8 min`, tasks `2`, files `3`
-- Phase `37` Plan `02` — duration `4 min`, tasks `2`, files `4`
 
 ## Accumulated Context
 
@@ -78,6 +78,8 @@ Recent decisions affecting current work:
 - [Phase 39]: The frontend now models gameplay readiness as idle, streaming, or finalizing so narration completion no longer implies turn completion. — This keeps retry/undo and input readiness aligned with the backend finalization contract instead of guessing from a single streaming flag.
 - [Phase 39]: Retry SSE onError is captured and rethrown after parseTurnSSE resolves so /game can keep one rollback cleanup path.
 - [Phase 39]: Retry failure cleanup clears buffered quick actions and stale optimistic retry UI before the page returns to idle.
+- [Phase 40]: Reflection budget now accumulates directly on committed episodic-event writes through one campaign-scoped NPC-only seam.
+- [Phase 40]: Present-NPC act still piggybacks through log_event, while speak and off-screen updates call the shared accumulator directly to avoid double-counting.
 
 ### Pending Todos
 
@@ -90,6 +92,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-09T05:40:30.373Z
-Stopped at: Phase 40 context gathered after user discussion
-Resume file: .planning/phases/40-live-reflection-progression-triggers/40-CONTEXT.md
+Last session: 2026-04-09T17:48:02.437Z
+Stopped at: Completed 40-01-PLAN.md
+Resume file: .planning/phases/40-live-reflection-progression-triggers/40-02-PLAN.md

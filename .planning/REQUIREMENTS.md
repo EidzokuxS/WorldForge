@@ -16,7 +16,7 @@ Requirements for the gameplay-fidelity milestone. Each maps to roadmap phases.
 
 ### Simulation Fidelity
 
-- [ ] **SIMF-01**: Reflection trigger accumulation occurs in live runtime so NPC beliefs, goals, relationship drift, and progression can actually fire under normal play.
+- [x] **SIMF-01**: Reflection trigger accumulation occurs in live runtime so NPC beliefs, goals, relationship drift, and progression can actually fire under normal play.
 - [x] **SIMF-02**: Post-turn simulation has an honest player-visible completion boundary, so world updates do not silently continue after the turn is presented as finished.
 - [ ] **SIMF-03**: World-state mutations from NPC autonomy, reflection, and faction simulation remain coherent with rollback, retry, and checkpoint restore behavior.
 
@@ -62,7 +62,7 @@ Explicitly excluded from this milestone to keep it reconciliation-driven.
 | RINT-02 | Phase 39 | Complete |
 | RINT-03 | Phase 41 | Pending |
 | RINT-04 | Phase 38 | Pending |
-| SIMF-01 | Phase 40 | Pending |
+| SIMF-01 | Phase 40 | Complete |
 | SIMF-02 | Phase 39 | Complete |
 | SIMF-03 | Phase 41 | Pending |
 | GSEM-01 | Phase 42 | Pending |

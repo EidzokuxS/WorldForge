@@ -74,7 +74,7 @@ Plans:
   3. Reflection-driven progression happens through the normal gameplay loop instead of requiring manual repair steps or one-off scripts.
 **Plans**: 2 plans
 Plans:
-- [ ] 40-01-PLAN.md — Wire live reflection-budget accumulation onto authoritative gameplay, present-NPC, and off-screen episodic-event writes.
+- [x] 40-01-PLAN.md — Wire live reflection-budget accumulation onto authoritative gameplay, present-NPC, and off-screen episodic-event writes.
 - [ ] 40-02-PLAN.md — Lock threshold-crossed post-turn reflection in tests and harden the reflection agent toward structured-state-first outcomes.
 
 ### Phase 41: Checkpoint-Complete Simulation Restore
@@ -124,7 +124,7 @@ Plans:
 | 37. Campaign-Loaded Gameplay Transport | 2/2 | Complete   | 2026-04-08 |
 | 38. Authoritative Inventory & Equipment State | 0/TBD | Not started | - |
 | 39. Honest Turn Boundary, Retry & Undo | 3/3 | Complete    | 2026-04-09 |
-| 40. Live Reflection & Progression Triggers | 0/2 | Not started | - |
+| 40. Live Reflection & Progression Triggers | 1/2 | In Progress|  |
 | 41. Checkpoint-Complete Simulation Restore | 0/TBD | Not started | - |
 | 42. Targeted Oracle & Start-Condition Runtime Effects | 0/TBD | Not started | - |
 | 43. Travel & Location-State Contract Resolution | 0/TBD | Not started | - |
