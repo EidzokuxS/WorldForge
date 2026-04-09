@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
 status: verifying
-stopped_at: Completed 39-02-PLAN.md
-last_updated: "2026-04-09T03:46:29.532Z"
+stopped_at: Completed 39-03-PLAN.md
+last_updated: "2026-04-09T04:53:11.795Z"
 last_activity: 2026-04-09
 progress:
   total_phases: 8
   completed_phases: 2
-  total_plans: 4
-  completed_plans: 4
+  total_plans: 5
+  completed_plans: 5
   percent: 100
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 ## Current Position
 
 Phase: 39 (honest-turn-boundary-retry-undo) — EXECUTING
-Plan: 2 of 2
+Plan: 1 of 1
 Status: Phase complete — ready for verification
 Last activity: 2026-04-09
 
@@ -45,6 +45,7 @@ Progress: [██████████] 100%
 
 **Recent Execution:**
 
+- Phase `39` Plan `03` — duration `10 min`, tasks `2`, files `2`
 - Phase `39` Plan `02` — duration `6 min`, tasks `2`, files `6`
 - Phase `39` Plan `01` — duration `5 min`, tasks `2`, files `7`
 - Phase `37` Plan `01` — duration `8 min`, tasks `2`, files `3`
@@ -75,6 +76,8 @@ Recent decisions affecting current work:
 - [Phase 39]: Failed retry restores the visible pre-turn boundary immediately from committed message history, then refreshes history and world data from the backend. — The UI needs a deterministic honest fallback even if optimistic retry state or refresh timing would otherwise leave stale completion affordances on screen.
 - [Phase 39]: Quick actions stay buffered until authoritative done, which keeps retry/undo and follow-up actions aligned with the backend rollback boundary. — Showing or enabling quick actions before done would present narration completion as turn completion and let the UI get ahead of the rollback-safe boundary.
 - [Phase 39]: The frontend now models gameplay readiness as idle, streaming, or finalizing so narration completion no longer implies turn completion. — This keeps retry/undo and input readiness aligned with the backend finalization contract instead of guessing from a single streaming flag.
+- [Phase 39]: Retry SSE onError is captured and rethrown after parseTurnSSE resolves so /game can keep one rollback cleanup path.
+- [Phase 39]: Retry failure cleanup clears buffered quick actions and stale optimistic retry UI before the page returns to idle.
 
 ### Pending Todos
 
@@ -87,6 +90,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-09T03:46:29.529Z
-Stopped at: Completed 39-02-PLAN.md
+Last session: 2026-04-09T04:53:11.795Z
+Stopped at: Completed 39-03-PLAN.md
 Resume file: None

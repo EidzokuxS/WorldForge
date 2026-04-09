@@ -18,7 +18,7 @@ v1.1 is a reconciliation milestone built from the [Phase 36 handoff](/R:/Project
 
 - [x] **Phase 37: Campaign-Loaded Gameplay Transport** - Remove active-session coupling from gameplay routes. (completed 2026-04-08)
 - [ ] **Phase 38: Authoritative Inventory & Equipment State** - Collapse runtime item truth onto one persistence model.
-- [ ] **Phase 39: Honest Turn Boundary, Retry & Undo** - Make the player-visible turn boundary match the authoritative rollback boundary.
+- [x] **Phase 39: Honest Turn Boundary, Retry & Undo** - Make the player-visible turn boundary match the authoritative rollback boundary. (completed 2026-04-09)
 - [ ] **Phase 40: Live Reflection & Progression Triggers** - Turn dormant reflection scaffolding into observable runtime behavior.
 - [ ] **Phase 41: Checkpoint-Complete Simulation Restore** - Restore full campaign runtime state, including simulation metadata and post-turn world mutations.
 - [ ] **Phase 42: Targeted Oracle & Start-Condition Runtime Effects** - Make target-aware rulings and structured starts mechanically real in live play.
@@ -62,7 +62,7 @@ Plans:
 Plans:
 - [x] 39-01-PLAN.md — Move rollback-critical post-turn work inside the authoritative completion boundary and restore whole campaign rollback bundles.
 - [x] 39-02-PLAN.md — Consume the honest completion contract in `/game` with explicit turn phases, buffered quick actions, and rollback-safe retry recovery.
-- [ ] 39-03-PLAN.md — Route backend-style retry SSE errors through the same `/game` rollback cleanup path and cover the real SSE regression.
+- [x] 39-03-PLAN.md — Route backend-style retry SSE errors through the same `/game` rollback cleanup path and cover the real SSE regression.
 
 ### Phase 40: Live Reflection & Progression Triggers
 **Goal**: Reflection and progression become live runtime mechanics that actually trigger during normal play.
@@ -120,7 +120,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 37. Campaign-Loaded Gameplay Transport | 2/2 | Complete   | 2026-04-08 |
 | 38. Authoritative Inventory & Equipment State | 0/TBD | Not started | - |
-| 39. Honest Turn Boundary, Retry & Undo | 2/3 | In progress | - |
+| 39. Honest Turn Boundary, Retry & Undo | 3/3 | Complete   | 2026-04-09 |
 | 40. Live Reflection & Progression Triggers | 0/TBD | Not started | - |
 | 41. Checkpoint-Complete Simulation Restore | 0/TBD | Not started | - |
 | 42. Targeted Oracle & Start-Condition Runtime Effects | 0/TBD | Not started | - |
