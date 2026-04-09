@@ -6,6 +6,7 @@ import {
   chatRetry,
   chatUndo,
   deleteLoreCardById,
+  parseTurnSSE,
   readErrorMessage,
   updateLoreCard,
 } from "../api";
@@ -138,6 +139,7 @@ describe("gameplay API helpers", () => {
     const history = {
       messages: [{ role: "assistant", content: "Welcome back." }],
       premise: "A haunted frontier.",
+      hasLiveTurnSnapshot: false,
     };
 
     fetchMock.mockResolvedValue(
@@ -235,5 +237,76 @@ describe("gameplay API helpers", () => {
         newContent: "New content",
       }),
     });
+  });
+});
+
+describe("parseTurnSSE", () => {
+  function createStream(payload: string): ReadableStream<Uint8Array> {
+    const encoder = new TextEncoder();
+    return new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(payload));
+        controller.close();
+      },
+    });
+  }
+
+  it("dispatches a dedicated finalization callback before done", async () => {
+    const onFinalizing = vi.fn();
+    const onDone = vi.fn();
+
+    await parseTurnSSE(
+      createStream([
+        'event: narrative',
+        'data: {"text":"The gate trembles."}',
+        "",
+        "event: finalizing_turn",
+        "data: {}",
+        "",
+        "event: done",
+        "data: {}",
+        "",
+      ].join("\n")),
+      {
+        onNarrative: vi.fn(),
+        onOracleResult: vi.fn(),
+        onStateUpdate: vi.fn(),
+        onQuickActions: vi.fn(),
+        onFinalizing,
+        onDone,
+        onError: vi.fn(),
+      },
+    );
+
+    expect(onFinalizing).toHaveBeenCalledTimes(1);
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(onFinalizing.mock.invocationCallOrder[0]).toBeLessThan(onDone.mock.invocationCallOrder[0]);
+  });
+
+  it("ignores finalizing_turn safely when the optional callback is omitted", async () => {
+    const onDone = vi.fn();
+
+    await expect(
+      parseTurnSSE(
+        createStream([
+          "event: finalizing_turn",
+          "data: {}",
+          "",
+          "event: done",
+          "data: {}",
+          "",
+        ].join("\n")),
+        {
+          onNarrative: vi.fn(),
+          onOracleResult: vi.fn(),
+          onStateUpdate: vi.fn(),
+          onQuickActions: vi.fn(),
+          onDone,
+          onError: vi.fn(),
+        },
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(onDone).toHaveBeenCalledTimes(1);
   });
 });
