@@ -413,7 +413,11 @@ describe("GamePage", () => {
     mockedChatHistory.mockResolvedValue(completedHistory as never);
     mockedGetWorld.mockResolvedValue(fakeWorldData as never);
     mockedChatRetry.mockResolvedValue(createStreamResponse() as never);
-    mockedParseTurnSSE.mockRejectedValueOnce(new Error("Retry replay failed"));
+    mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
+      handlers.onNarrative("The gate shudders but does not yield.");
+      handlers.onQuickActions([{ label: "Force it open", action: "Force it open" }]);
+      handlers.onError("Retry replay failed");
+    });
 
     render(<GamePage />);
 
@@ -425,13 +429,18 @@ describe("GamePage", () => {
     fireEvent.click(screen.getByText("Retry turn"));
 
     await waitFor(() => {
-      expect(screen.queryByText("Open the gate")).not.toBeInTheDocument();
+      expect(screen.getByText("You wake inside the ruin.")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("You wake inside the ruin.")).toBeInTheDocument();
+    expect(screen.queryByText("Open the gate")).not.toBeInTheDocument();
     expect(screen.queryByText("The gate grinds open.")).not.toBeInTheDocument();
+    expect(screen.queryByText("The gate shudders but does not yield.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Force it open")).not.toBeInTheDocument();
     expect(screen.queryByText("Retry turn")).not.toBeInTheDocument();
     expect(mockedToast.error).toHaveBeenCalledWith("Failed to retry", {
+      description: "Retry replay failed",
+    });
+    expect(mockedToast.error).not.toHaveBeenCalledWith("Retry error", {
       description: "Retry replay failed",
     });
     expect(screen.getByText("Submit action")).toBeEnabled();
