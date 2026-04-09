@@ -5,43 +5,7 @@
 
 **Date:** 2026-04-09
 **Phase:** 40-live-reflection-progression-triggers
-**Areas discussed:** Reflection signal source, cadence semantics, consequence priority, player-facing visibility
-
----
-
-## Reflection Signal Source
-
-| Option | Description | Selected |
-|--------|-------------|----------|
-| Live event-driven accumulation | Feed reflection from normal episodic events and post-turn simulation writes already produced by gameplay. | ✓ |
-| Separate reflection-only event pipeline | Add a new parallel tracking path just for reflection triggers. | |
-| Manual / repair-driven accumulation | Use scripts, admin repair, or bespoke hooks to push NPCs over the threshold. | |
-
-**Selection basis:** The current runtime already writes importance-bearing episodic events, while `unprocessedImportance` has no live accumulation path. Reusing the committed event flow fixes the missing seam without inventing a second source of truth.
-
----
-
-## Cadence Semantics
-
-| Option | Description | Selected |
-|--------|-------------|----------|
-| Ordinary-play reachable | Repeated notable interactions across a short arc should be enough to trigger reflection. | ✓ |
-| Rare dramatic only | Reflection should fire only for exceptional, campaign-level drama. | |
-| High-frequency ambient | Reflection should trigger from minor scene noise and frequent routine actions. | |
-
-**Selection basis:** Phase 40 exists to make reflection operational, so “rare enough to almost never happen” fails the milestone. At the same time, trivial every-turn firing would drown the system in low-value churn.
-
----
-
-## Consequence Priority
-
-| Option | Description | Selected |
-|--------|-------------|----------|
-| Beliefs/goals/relationships first | Make the core reflection outputs behavior-driving state changes; treat wealth/skill upgrades as stronger-evidence secondary effects. | ✓ |
-| All progression outputs equal | Wealth, skills, goals, and relationships are treated with the same trigger weight. | |
-| Wealth/skill first | Emphasize visible progression tiers before social/cognitive state shifts. | |
-
-**Selection basis:** Beliefs, goals, and relationships most directly affect later NPC behavior. They are the clearest proof that reflection became live. Wealth/skill upgrades remain valuable, but they should not become noisy pseudo-XP.
+**Areas discussed:** Player-facing visibility, progression semantics
 
 ---
 
@@ -49,20 +13,35 @@
 
 | Option | Description | Selected |
 |--------|-------------|----------|
-| Diegetic-first | Let players observe reflection through changed behavior, changed relationships, and changed follow-up scenes, with at most subtle UI support. | ✓ |
+| Diegetic-first + secondary debug surface | Main signal comes through NPC behavior; a low-prominence card/modal drill-down may exist for inspection/debugging. | ✓ |
 | Explicit meta notification | Show overt “NPC reflected / progression triggered” system notices. | |
 | Mostly hidden | Keep reflection almost entirely invisible, even when it materially changes future behavior. | |
 
-**Selection basis:** The game’s tone and architecture fit world-state consequences better than gamified popups. Completely hiding it would make Phase 40 hard to validate in play, so a light supporting signal remains acceptable if planning needs it.
+**User answer:** “Через поведение NPC + где-то неяввно в карточке персонажа в доп модалке чтобы можно было посмотреть что-то мейби? Для отладки.”
+**Notes:** Main product signal stays diegetic. Extra visibility is acceptable only as a secondary/debug aid, not as the primary gameplay language.
+
+---
+
+## Progression Semantics
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Logic-first | Progression should fire when the evidence makes sense in-world, not to satisfy a target frequency. | ✓ |
+| Rare by design | Keep progression intentionally scarce as a product goal. | |
+| Frequent by design | Keep progression intentionally common as a product goal. | |
+
+**User correction:** When offered “rare” as a framing, the user rejected it: “Оно не должно меняться часто или редко, оно должноменяться логично.”
+**Notes:** Planning should optimize for evidence quality, not target frequency. Heavier changes like wealth/skill tier shifts should still require stronger proof than lighter belief/goal/relationship changes.
 
 ---
 
 ## the agent's Discretion
 
+- Reflection signal source and accumulation seam
 - Exact formula translating committed event importance into `unprocessedImportance`
 - Exact threshold after live accumulation exists
 - Exact evidence bar for wealth and skill upgrades
-- Whether subtle UI support is needed beyond diegetic behavior
+- Exact implementation of the secondary debug/inspection surface
 
 ## Deferred Ideas
 

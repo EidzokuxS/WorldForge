@@ -11,7 +11,7 @@ Turn dormant reflection/progression scaffolding into live gameplay behavior that
 This phase covers:
 - how reflection signal enters runtime from normal play
 - what kinds of NPC changes Phase 40 must make operational first
-- how often reflection/progression should be allowed to surface in normal play
+- under what evidence conditions reflection/progression should surface in normal play
 - how visible those changes should be to the player through the ordinary gameplay loop
 
 This phase does **not** cover:
@@ -33,16 +33,16 @@ This phase does **not** cover:
 ### Cadence And Threshold Semantics
 - **D-04:** Reflection should become reachable through ordinary short arcs of notable interaction, not only through rare dramatic spikes and not through trivial every-turn noise.
 - **D-05:** “Live” for this phase means a player can realistically trigger reflection by repeatedly dealing with the same NPC across normal play, without admin intervention or bespoke testing hooks.
-- **D-06:** Exact numeric thresholds, weighting, and accumulation math stay flexible for planning and implementation; the locked product contract is cadence, not a hard legacy constant.
+- **D-06:** Reflection/progression should not be tuned around target frequency as a product goal. It should fire when the accumulated evidence makes sense in-world. Exact numeric thresholds, weighting, and accumulation math stay flexible for planning and implementation.
 
 ### Consequence Priority
 - **D-07:** The first-class reflection outcomes for Phase 40 are belief changes, goal changes, and relationship drift, because those are the most legible downstream behavior drivers.
-- **D-08:** Wealth-tier and skill-tier progression remain in scope, but they are secondary outcomes and should require stronger evidence than ordinary belief/goal updates.
+- **D-08:** Wealth-tier and skill-tier progression remain in scope, but they are secondary outcomes and should require materially stronger evidence than ordinary belief/goal/relationship updates.
 - **D-09:** Phase 40 must favor durable structured-state changes that later prompts and runtime systems can consume, not one-off flavor text or debug-only counters.
 
 ### Player-Facing Visibility
 - **D-10:** Reflection should be primarily visible through changed NPC behavior, changed goals, changed relationships, and changed follow-up scene consequences rather than through loud meta-system popups.
-- **D-11:** The UI/runtime may expose subtle confirmation that the world has advanced, but the player should infer most reflection results diegetically from later turns.
+- **D-11:** A secondary low-prominence inspection/debug surface is acceptable from a character/NPC card via an extra modal or drill-down, but it must remain subordinate to diegetic gameplay signaling.
 - **D-12:** Reflection/progression must happen inside the normal gameplay loop established by Phase 39, so players observe its consequences through standard turn flow rather than through manual repair steps or offline scripts.
 
 ### Scope Guardrails
@@ -53,7 +53,7 @@ This phase does **not** cover:
 ### Codex's Discretion
 - Exact accumulation algorithm from committed events to `unprocessedImportance`
 - Exact threshold value after live runtime wiring exists
-- Whether reflection changes are surfaced through scene copy only or through a small supporting UI hint
+- Exact shape of the low-prominence debug/inspection surface
 - Exact evidence rules for when wealth/skill upgrades are strong enough to fire
 
 </decisions>
@@ -122,9 +122,10 @@ This phase does **not** cover:
 <specifics>
 ## Specific Ideas
 
-- The user explicitly delegated the technical seam decisions here; this context locks pragmatic defaults instead of reopening low-value implementation debates.
+- The user explicitly delegated the technical seam decisions here, but kept two product constraints: reflection should read primarily through NPC behavior, and any explicit surface should be secondary/debug-oriented.
 - The phase should optimize for “this actually starts happening in play” before “this is perfectly balanced.”
 - Reflection should feel like the world quietly changing its mind, not like a progression system shouting at the player every few turns.
+- The user explicitly rejected “rare vs frequent” as the product framing for progression. The correct framing is whether a change is logically justified by accumulated evidence.
 
 </specifics>
 
