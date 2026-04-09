@@ -475,7 +475,6 @@ describe("processTurn", () => {
     }
 
     expect(observedTypes).toContain("finalizing_turn");
-    expect(onPostTurn).toHaveBeenCalledTimes(1);
 
     let doneResolved = false;
     const pendingDone = generator.next().then((result) => {
@@ -485,6 +484,7 @@ describe("processTurn", () => {
 
     await Promise.resolve();
     await Promise.resolve();
+    expect(onPostTurn).toHaveBeenCalledTimes(1);
     expect(doneResolved).toBe(false);
 
     resolvePostTurn?.();
@@ -539,9 +539,10 @@ describe("processTurn", () => {
       expect(sawFinalizing).toBe(true);
 
       const pendingDone = generator.next();
+      const pendingAssertion = expect(pendingDone).rejects.toThrow(/finalization/i);
       await vi.advanceTimersByTimeAsync(60_001);
 
-      await expect(pendingDone).rejects.toThrow(/finalization/i);
+      await pendingAssertion;
     } finally {
       vi.useRealTimers();
     }

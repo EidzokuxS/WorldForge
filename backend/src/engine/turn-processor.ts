@@ -37,6 +37,7 @@ export interface TurnEvent {
     | "state_update"
     | "quick_actions"
     | "auto_checkpoint"
+    | "finalizing_turn"
     | "done"
     | "error";
   data: unknown;
@@ -62,6 +63,31 @@ export interface TurnSummary {
   oracleResult: OracleResult;
   toolCalls: Array<{ tool: string; args: unknown; result: unknown }>;
   narrativeText: string;
+}
+
+const TURN_FINALIZATION_TIMEOUT_MS = 60_000;
+
+function withTimeout<T>(
+  work: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(message));
+    }, timeoutMs);
+
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 // -- Movement detection -------------------------------------------------------
@@ -566,26 +592,25 @@ export async function* processTurn(
     ]);
   }
   const newTick = incrementTick(campaignId);
+  const summary: TurnSummary = {
+    tick: newTick,
+    oracleResult,
+    toolCalls: toolCallResults,
+    narrativeText,
+  };
 
-  // 12. Yield done
-  yield { type: "done", data: { tick: newTick } };
-
-  // 13. Post-turn callback (fire-and-forget — do NOT await so the SSE stream
-  //     closes immediately after yielding 'done', keeping isStreaming accurate)
   if (onPostTurn) {
-    const summary: TurnSummary = {
-      tick: newTick,
-      oracleResult,
-      toolCalls: toolCallResults,
-      narrativeText,
+    yield {
+      type: "finalizing_turn",
+      data: { tick: newTick, stage: "rollback_critical" },
     };
 
-    void (async () => {
-      try {
-        await onPostTurn(summary);
-      } catch (error) {
-        log.warn("Post-turn callback failed", error);
-      }
-    })();
+    await withTimeout(
+      Promise.resolve(onPostTurn(summary)),
+      TURN_FINALIZATION_TIMEOUT_MS,
+      "Rollback-critical finalization timed out.",
+    );
   }
+
+  yield { type: "done", data: { tick: newTick } };
 }

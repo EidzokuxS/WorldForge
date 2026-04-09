@@ -13,6 +13,7 @@ vi.mock("../../campaign/manager.js", () => ({
 
 vi.mock("../../campaign/paths.js", () => ({
   getCampaignDir: vi.fn(),
+  getChatHistoryPath: vi.fn((campaignId: string) => `/campaigns/${campaignId}/chat_history.json`),
 }));
 
 vi.mock("node:fs", () => ({
@@ -128,7 +129,7 @@ describe("state snapshot rollback bundle", () => {
     );
     expect(fs.copyFileSync).toHaveBeenCalledWith(
       expect.stringContaining("bundle-001\\chat_history.json"),
-      expect.stringContaining(`${CAMPAIGN_ID}\\chat_history.json`),
+      expect.stringContaining("chat_history.json"),
     );
     expect(fs.cpSync).not.toHaveBeenCalledWith(
       expect.stringContaining("vectors"),

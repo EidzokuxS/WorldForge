@@ -222,6 +222,7 @@ export async function createCampaign(
 export async function loadCampaign(id: string): Promise<CampaignMeta> {
   assertSafeId(id);
   ensureCampaignsDir();
+  activeCampaign = null;
 
   const campaignDir = getCampaignDir(id);
   if (!fs.existsSync(campaignDir)) {
