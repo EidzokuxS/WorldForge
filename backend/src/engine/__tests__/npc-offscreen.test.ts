@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const accumulateReflectionBudgetMock = vi.fn();
+
 // Mock all external dependencies before imports
 vi.mock("../../db/index.js", () => ({
   getDb: vi.fn(),
@@ -17,6 +19,10 @@ vi.mock("ai", () => ({
 
 vi.mock("../../ai/provider-registry.js", () => ({
   createModel: vi.fn().mockReturnValue("mock-model"),
+}));
+
+vi.mock("../reflection-budget.js", () => ({
+  accumulateReflectionBudget: accumulateReflectionBudgetMock,
 }));
 
 import {
@@ -293,7 +299,7 @@ describe("applyOffscreenUpdate", () => {
           campaignId: storedNpc.campaignId,
           persona: storedNpc.persona,
           tags: storedNpc.tags,
-          tier: storedNpc.tier,
+          tier: storedNpc.tier as "temporary" | "persistent" | "key",
           currentLocationId: storedNpc.currentLocationId,
           goals: storedNpc.goals,
           beliefs: storedNpc.beliefs,
@@ -325,5 +331,50 @@ describe("applyOffscreenUpdate", () => {
     );
     // Should store episodic event
     expect(storeEpisodicEvent).toHaveBeenCalled();
+  });
+
+  it("increments reflection budget after committed off-screen event writes", async () => {
+    setupMockDb({
+      locationByName: { id: "loc-003", name: "Castle Keep" },
+    });
+
+    const storedNpc = createMockNpc();
+    await applyOffscreenUpdate(
+      CAMPAIGN_ID,
+      {
+        npcId: "npc-001",
+        npcName: "Lord Blackwood",
+        currentGoals: '{"short_term":["gather allies"],"long_term":["seize the throne"]}',
+        currentCharacterRecord: storedNpc.characterRecord as string,
+        storedRecord: {
+          campaignId: storedNpc.campaignId,
+          persona: storedNpc.persona,
+          tags: storedNpc.tags,
+          tier: storedNpc.tier as "temporary" | "persistent" | "key",
+          currentLocationId: storedNpc.currentLocationId,
+          goals: storedNpc.goals,
+          beliefs: storedNpc.beliefs,
+          unprocessedImportance: 0,
+          inactiveTicks: 0,
+          createdAt: 0,
+          characterRecord: storedNpc.characterRecord,
+          derivedTags: storedNpc.derivedTags,
+        },
+      },
+      {
+        npcName: "Lord Blackwood",
+        newLocation: "Castle Keep",
+        actionSummary: "Moved to the castle to meet allies",
+        goalProgress: "Formed alliance with Duke",
+      },
+      10,
+    );
+
+    expect(storeEpisodicEvent).toHaveBeenCalled();
+    expect(accumulateReflectionBudgetMock).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      ["Lord Blackwood"],
+      3,
+    );
   });
 });

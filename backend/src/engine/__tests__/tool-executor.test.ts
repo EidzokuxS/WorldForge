@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 
+const accumulateReflectionBudgetMock = vi.fn();
+
 // Mock modules before imports
 vi.mock("../../db/index.js", () => ({
   getDb: vi.fn(),
@@ -7,6 +9,10 @@ vi.mock("../../db/index.js", () => ({
 
 vi.mock("../../vectors/episodic-events.js", () => ({
   storeEpisodicEvent: vi.fn(),
+}));
+
+vi.mock("../reflection-budget.js", () => ({
+  accumulateReflectionBudget: accumulateReflectionBudgetMock,
 }));
 
 import { executeToolCall } from "../tool-executor.js";
@@ -258,6 +264,23 @@ describe("executeToolCall", () => {
           participants: ["Gandalf", "Balrog"],
           tick: TICK,
         })
+      );
+    });
+
+    it("accumulates reflection budget after committed log_event writes", async () => {
+      (storeEpisodicEvent as Mock).mockResolvedValue("event-234");
+
+      const result = await executeToolCall(CAMPAIGN_ID, "log_event", {
+        text: "Greta and Balrog clash on the bridge",
+        importance: 8,
+        participants: ["Greta", "Balrog"],
+      }, TICK);
+
+      expect(result.success).toBe(true);
+      expect(accumulateReflectionBudgetMock).toHaveBeenCalledWith(
+        CAMPAIGN_ID,
+        ["Greta", "Balrog"],
+        8,
       );
     });
   });

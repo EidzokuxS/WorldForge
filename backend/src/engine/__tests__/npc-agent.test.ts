@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const accumulateReflectionBudgetMock = vi.fn();
+
 // Mock all external dependencies before imports
 vi.mock("../../db/index.js", () => ({
   getDb: vi.fn(),
@@ -44,6 +46,10 @@ vi.mock("ai", () => ({
 
 vi.mock("../../ai/provider-registry.js", () => ({
   createModel: vi.fn().mockReturnValue("mock-model"),
+}));
+
+vi.mock("../reflection-budget.js", () => ({
+  accumulateReflectionBudget: accumulateReflectionBudgetMock,
 }));
 
 import { createNpcAgentTools } from "../npc-tools.js";
@@ -309,6 +315,44 @@ describe("createNpcAgentTools", () => {
     expect(result).toHaveProperty("dialogue", "Welcome to my shop!");
     expect(callOracle).not.toHaveBeenCalled();
     expect(storeEpisodicEvent).toHaveBeenCalled();
+  });
+
+  it("increments reflection budget when present-NPC dialogue commits an episodic event", async () => {
+    setupMockDb({});
+
+    const tools = createNpcAgentTools(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
+
+    await tools.speak.execute!(
+      { dialogue: "We need allies before dawn.", target: "Hero" },
+      { toolCallId: "tc2", messages: [], abortSignal: undefined as unknown as AbortSignal }
+    );
+
+    expect(storeEpisodicEvent).toHaveBeenCalled();
+    expect(accumulateReflectionBudgetMock).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      ["Greta the Merchant", "Hero"],
+      3,
+    );
+  });
+
+  it("avoids double-counting reflection budget when present-NPC act piggybacks through log_event", async () => {
+    setupMockDb({});
+    const tools = createNpcAgentTools(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
+
+    await tools.act.execute!(
+      { action: "broker a risky deal" },
+      { toolCallId: "tc3", messages: [], abortSignal: undefined as unknown as AbortSignal }
+    );
+
+    expect(executeToolCall).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      "log_event",
+      expect.objectContaining({
+        participants: ["Greta the Merchant"],
+      }),
+      TICK,
+    );
+    expect(accumulateReflectionBudgetMock).not.toHaveBeenCalled();
   });
 });
 
