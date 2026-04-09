@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { accumulateReflectionBudgetMock } = vi.hoisted(() => ({
+const { accumulateReflectionBudgetMock, getRelationshipGraphMock } = vi.hoisted(() => ({
   accumulateReflectionBudgetMock: vi.fn(),
+  getRelationshipGraphMock: vi.fn(),
 }));
 
 // Mock all external dependencies before imports
@@ -32,7 +33,7 @@ vi.mock("../tool-executor.js", () => ({
 }));
 
 vi.mock("../graph-queries.js", () => ({
-  getRelationshipGraph: vi.fn().mockReturnValue([]),
+  getRelationshipGraph: getRelationshipGraphMock,
 }));
 
 vi.mock("ai", () => ({
@@ -375,6 +376,7 @@ describe("tickPresentNpcs", () => {
 describe("tickNpcAgent", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getRelationshipGraphMock.mockReturnValue([]);
   });
 
   it("builds NPC prompts from canonical record fields before falling back to legacy blobs", async () => {
@@ -414,5 +416,106 @@ describe("tickNpcAgent", () => {
     expect(systemPrompt).not.toContain("legacy belief");
     expect(systemPrompt).not.toContain("Legacy persona/goals/beliefs blobs are authoritative");
     expect(systemPrompt).not.toContain("Use the legacy tags/persona blob as your main worldview");
+  });
+
+  it("reads reflected canonical beliefs, goals, and relationships on later turns", async () => {
+    getRelationshipGraphMock.mockReturnValue([
+      {
+        entityName: "Greta the Merchant",
+        relationships: [
+          {
+            targetName: "Elara",
+            tags: ["Trusted Ally"],
+            reason: "Elara protected the bazaar from raiders",
+          },
+        ],
+      },
+    ]);
+
+    setupMockDb({
+      npc: createMockNpc({
+        beliefs: '["legacy belief"]',
+        goals: '{"short_term":["legacy goal"],"long_term":[]}',
+        characterRecord: JSON.stringify({
+          identity: {
+            id: NPC_ID,
+            campaignId: CAMPAIGN_ID,
+            role: "npc",
+            tier: "key",
+            displayName: "Greta the Merchant",
+            canonicalStatus: "original",
+          },
+          profile: {
+            species: "",
+            gender: "",
+            ageText: "",
+            appearance: "",
+            backgroundSummary: "",
+            personaSummary: "A patient fixer who trades in favors.",
+          },
+          socialContext: {
+            factionId: null,
+            factionName: null,
+            homeLocationId: null,
+            homeLocationName: null,
+            currentLocationId: LOCATION_ID,
+            currentLocationName: "Market Square",
+            relationshipRefs: ["rel-elara"],
+            socialStatus: ["connected"],
+            originMode: "native",
+          },
+          motivations: {
+            shortTermGoals: ["Protect Elara's trade route"],
+            longTermGoals: ["Bind the market's allies together"],
+            beliefs: ["Elara honors her bargains"],
+            drives: ["Profit"],
+            frictions: ["Watched by rivals"],
+          },
+          capabilities: {
+            traits: ["Observant"],
+            skills: [{ name: "Negotiation", tier: "Master" }],
+            flaws: ["Secretive"],
+            specialties: [],
+            wealthTier: "Wealthy",
+          },
+          state: {
+            hp: 5,
+            conditions: ["Hidden"],
+            statusFlags: [],
+            activityState: "active",
+          },
+          loadout: {
+            inventorySeed: [],
+            equippedItemRefs: [],
+            currencyNotes: "",
+            signatureItems: [],
+          },
+          startConditions: {},
+          provenance: {
+            sourceKind: "worldgen",
+            importMode: null,
+            templateId: null,
+            archetypePrompt: null,
+            worldgenOrigin: "scaffold",
+            legacyTags: ["merchant", "shrewd", "wealthy"],
+          },
+        }),
+      }),
+      npcsAtLocation: [],
+      player: { name: "Elara" },
+    });
+
+    await tickNpcAgent(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
+
+    const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
+    expect(systemPrompt).toContain("Your beliefs: [Elara honors her bargains]");
+    expect(systemPrompt).toContain(
+      "Your goals:\n  - [short] Protect Elara's trade route\n  - [long] Bind the market's allies together",
+    );
+    expect(systemPrompt).toContain(
+      "Your relationships:\nGreta the Merchant --[Trusted Ally]--> Elara (Elara protected the bazaar from raiders)",
+    );
+    expect(systemPrompt).not.toContain("legacy belief");
+    expect(systemPrompt).not.toContain("legacy goal");
   });
 });

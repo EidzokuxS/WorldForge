@@ -76,6 +76,10 @@ import {
   processTurn,
   captureSnapshot,
   restoreSnapshot,
+  checkAndTriggerReflections,
+  tickPresentNpcs,
+  simulateOffscreenNpcs,
+  tickFactions,
 } from "../../engine/index.js";
 import chatRoutes from "../chat.js";
 
@@ -93,6 +97,10 @@ const mockedGetDb = vi.mocked(getDb);
 const mockedProcessTurn = vi.mocked(processTurn);
 const mockedCaptureSnapshot = vi.mocked(captureSnapshot);
 const mockedRestoreSnapshot = vi.mocked(restoreSnapshot);
+const mockedCheckAndTriggerReflections = vi.mocked(checkAndTriggerReflections);
+const mockedTickPresentNpcs = vi.mocked(tickPresentNpcs);
+const mockedSimulateOffscreenNpcs = vi.mocked(simulateOffscreenNpcs);
+const mockedTickFactions = vi.mocked(tickFactions);
 
 // ---------------------------------------------------------------------------
 // App setup
@@ -126,7 +134,7 @@ function setupStoryteller() {
   } as any);
 }
 
-function setupDbMock(player: { hp: number } | null = { hp: 5 }) {
+function setupDbMock(player: { hp: number; currentLocationId?: string | null } | null = { hp: 5, currentLocationId: "loc-001" }) {
   const query = {
     from: vi.fn(),
     where: vi.fn(),
@@ -336,6 +344,81 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(historyRes.status).toBe(200);
     const body = await historyRes.json();
     expect(body.hasLiveTurnSnapshot).toBe(true);
+  });
+
+  it("triggers reflection during post-turn finalization", async () => {
+    setupStoryteller();
+    setupDbMock();
+    const orderedCalls: string[] = [];
+
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
+      id: campaignId,
+      name: `Campaign ${campaignId}`,
+      createdAt: "2026-01-01",
+    }) as any);
+    mockedCaptureSnapshot.mockImplementation((campaignId) => ({
+      campaignId,
+      spawnedNpcIds: [],
+      spawnedItemIds: [],
+      revealedLocationIds: [],
+      createdRelationshipIds: [],
+      createdChronicleIds: [],
+    }) as any);
+    mockedTickPresentNpcs.mockImplementation(async () => {
+      orderedCalls.push("tickPresentNpcs");
+      return [];
+    });
+    mockedSimulateOffscreenNpcs.mockImplementation(async () => {
+      orderedCalls.push("simulateOffscreenNpcs");
+      return [];
+    });
+    mockedCheckAndTriggerReflections.mockImplementation(async () => {
+      orderedCalls.push("checkAndTriggerReflections");
+      return [];
+    });
+    mockedTickFactions.mockImplementation(async () => {
+      orderedCalls.push("tickFactions");
+      return [];
+    });
+    mockedProcessTurn.mockImplementation(({ onPostTurn }) =>
+      (async function* () {
+        yield { type: "oracle_result", data: { outcome: "strong_hit" } } as any;
+        orderedCalls.push("finalizing_turn");
+        yield { type: "finalizing_turn", data: { stage: "rollback_critical" } } as any;
+        await onPostTurn?.({
+          tick: 2,
+          toolCalls: [],
+        } as any);
+        orderedCalls.push("done");
+        yield { type: "done", data: { tick: 2 } } as any;
+      })(),
+    );
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Press Greta about the raiders",
+        intent: "Press Greta about the raiders",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("event: finalizing_turn");
+    expect(body).toContain("event: done");
+    expect(body.indexOf("event: finalizing_turn")).toBeLessThan(body.indexOf("event: done"));
+    expect(orderedCalls).toEqual([
+      "finalizing_turn",
+      "tickPresentNpcs",
+      "simulateOffscreenNpcs",
+      "checkAndTriggerReflections",
+      "tickFactions",
+      "done",
+    ]);
   });
 
   it("keeps undo snapshots isolated by campaignId", async () => {

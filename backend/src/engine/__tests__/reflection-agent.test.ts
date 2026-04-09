@@ -327,12 +327,57 @@ describe("runReflection", () => {
     expect(systemPrompt).toContain("Current beliefs: [Every debt can be collected]");
     expect(systemPrompt).toContain("Current goals:\n  - [short] Stabilize the bazaar\n  - [long] Own the market district");
     expect(systemPrompt).toContain("Recent evidence:");
+    expect(systemPrompt).toContain(
+      "Beliefs, goals, and relationships are the first-class outcomes for ordinary reflection.",
+    );
+    expect(systemPrompt).toContain(
+      "Prefer durable structured-state updates over flavor-only narration or debug counters.",
+    );
     expect(systemPrompt).toContain("Wealth changes require significant trade/loot events.");
     expect(systemPrompt).toContain("Skill upgrades require 3+ successful uses of that skill.");
+    expect(systemPrompt).toContain(
+      "Wealth and skill upgrades require materially stronger evidence than ordinary belief, goal, or relationship drift.",
+    );
     expect(systemPrompt).not.toContain("Legacy merchant persona");
     expect(systemPrompt).not.toContain("legacy belief");
     expect(systemPrompt).not.toContain("Use the legacy persona/goals/beliefs blobs as the main worldview");
     expect(systemPrompt).not.toContain("Use tag-only worldview updates");
+  });
+
+  it("beliefs, goals, and relationships first when reflection decides what to change", async () => {
+    setupMockDb({});
+    const { generateText } = await import("ai");
+
+    await runReflection(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER, {
+      ...JUDGE_PROVIDER,
+      id: "embedder-provider",
+    });
+
+    const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
+    expect(systemPrompt).toContain(
+      "Beliefs, goals, and relationships are the first-class outcomes for ordinary reflection.",
+    );
+    expect(systemPrompt).toContain(
+      "Prefer durable structured-state updates over flavor-only narration or debug counters.",
+    );
+  });
+
+  it("materially stronger evidence keeps wealth and skill progression secondary", async () => {
+    setupMockDb({});
+    const { generateText } = await import("ai");
+
+    await runReflection(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER, {
+      ...JUDGE_PROVIDER,
+      id: "embedder-provider",
+    });
+
+    const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
+    expect(systemPrompt).toContain(
+      "Wealth and skill upgrades require materially stronger evidence than ordinary belief, goal, or relationship drift.",
+    );
+    expect(systemPrompt).toContain("Wealth changes require significant trade/loot events.");
+    expect(systemPrompt).toContain("Skill upgrades require 3+ successful uses of that skill.");
+    expect(systemPrompt).toContain("If nothing significant has changed, you may choose not to call any tools.");
   });
 });
 
