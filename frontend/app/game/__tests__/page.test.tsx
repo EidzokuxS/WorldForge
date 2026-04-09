@@ -421,8 +421,8 @@ describe("GamePage", () => {
       expect(screen.getByText("Retry turn")).toBeInTheDocument();
     });
 
+    mockedChatHistory.mockResolvedValue(restoredBoundaryHistory as never);
     fireEvent.click(screen.getByText("Retry turn"));
-    mockedChatHistory.mockResolvedValueOnce(restoredBoundaryHistory as never);
 
     await waitFor(() => {
       expect(screen.queryByText("Open the gate")).not.toBeInTheDocument();

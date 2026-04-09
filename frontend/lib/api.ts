@@ -81,6 +81,7 @@ const LAST_ACTIVE_CAMPAIGN_KEY = "worldforge:lastActiveCampaignId";
 export type ChatHistoryResponse = {
   messages: ChatMessage[];
   premise: string;
+  hasLiveTurnSnapshot: boolean;
 };
 
 // ───── Raw types (internal) ─────
@@ -441,6 +442,7 @@ export interface TurnSSEHandlers {
   onOracleResult: (result: { chance: number; roll: number; outcome: string; reasoning: string }) => void;
   onStateUpdate: (update: { tool: string; args: unknown; result: unknown }) => void;
   onQuickActions: (actions: Array<{ label: string; action: string }>) => void;
+  onFinalizing?: () => void;
   onDone: () => void;
   onError: (error: string) => void;
 }
@@ -451,6 +453,32 @@ export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: T
   let buffer = "";
   let currentEvent = "";
   let currentData = "";
+
+  const dispatchCurrentEvent = () => {
+    if (!currentEvent || !currentData) {
+      currentEvent = "";
+      currentData = "";
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(currentData);
+      switch (currentEvent) {
+        case "narrative": handlers.onNarrative(parsed.text); break;
+        case "oracle_result": handlers.onOracleResult(parsed); break;
+        case "state_update": handlers.onStateUpdate(parsed); break;
+        case "quick_actions": handlers.onQuickActions(parsed.actions ?? parsed.result?.actions ?? []); break;
+        case "finalizing_turn": handlers.onFinalizing?.(); break;
+        case "done": handlers.onDone(); break;
+        case "error": handlers.onError(parsed.error ?? "Unknown error"); break;
+      }
+    } catch {
+      // Skip malformed events.
+    }
+
+    currentEvent = "";
+    currentData = "";
+  };
 
   for (;;) {
     const { done, value } = await reader.read();
@@ -465,24 +493,22 @@ export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: T
       } else if (line.startsWith("data:")) {
         currentData += line.slice(5).trim();
       } else if (line === "") {
-        if (currentEvent && currentData) {
-          try {
-            const parsed = JSON.parse(currentData);
-            switch (currentEvent) {
-              case "narrative": handlers.onNarrative(parsed.text); break;
-              case "oracle_result": handlers.onOracleResult(parsed); break;
-              case "state_update": handlers.onStateUpdate(parsed); break;
-              case "quick_actions": handlers.onQuickActions(parsed.actions ?? parsed.result?.actions ?? []); break;
-              case "done": handlers.onDone(); break;
-              case "error": handlers.onError(parsed.error ?? "Unknown error"); break;
-            }
-          } catch { /* skip malformed events */ }
-        }
-        currentEvent = "";
-        currentData = "";
+        dispatchCurrentEvent();
       }
     }
   }
+
+  if (buffer.length > 0) {
+    for (const line of buffer.split("\n")) {
+      if (line.startsWith("event:")) {
+        currentEvent = line.slice(6).trim();
+      } else if (line.startsWith("data:")) {
+        currentData += line.slice(5).trim();
+      }
+    }
+  }
+
+  dispatchCurrentEvent();
 }
 
 // ───── SSE Stream Parser ─────

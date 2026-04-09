@@ -12,6 +12,7 @@ interface ActionBarProps {
   value: string;
   disabled?: boolean;
   isLoading: boolean;
+  turnPhase?: "idle" | "streaming" | "finalizing";
   onChange: (value: string) => void;
   onSubmit: () => void;
 }
@@ -27,6 +28,7 @@ export function ActionBar({
   value,
   disabled = false,
   isLoading,
+  turnPhase = isLoading ? "streaming" : "idle",
   onChange,
   onSubmit,
 }: ActionBarProps) {
@@ -58,6 +60,11 @@ export function ActionBar({
             rows={1}
             className="min-h-10 resize-none font-serif italic pr-16"
           />
+          {turnPhase === "finalizing" ? (
+            <p className="mt-2 pr-16 text-xs italic text-muted-foreground">
+              The world is still settling. You can act again when the turn is fully resolved.
+            </p>
+          ) : null}
           {value.length > 0 && (
             <span
               className={`absolute bottom-1.5 right-2 text-[10px] tabular-nums ${getCounterColor(value.length)}`}

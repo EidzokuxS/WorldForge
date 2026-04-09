@@ -9,6 +9,7 @@ interface NarrativeLogProps {
   messages: ChatMessage[];
   premise: string;
   isStreaming: boolean;
+  turnPhase?: "idle" | "streaming" | "finalizing";
   onRetry?: () => void;
   onUndo?: () => void;
   onEdit?: (index: number, content: string) => void;
@@ -19,6 +20,7 @@ export function NarrativeLog({
   messages,
   premise,
   isStreaming,
+  turnPhase = isStreaming ? "streaming" : "idle",
   onRetry,
   onUndo,
   onEdit,
@@ -190,11 +192,16 @@ export function NarrativeLog({
               })
             )}
 
-            {isStreaming && (
+            {turnPhase === "streaming" ? (
               <p className="font-serif text-sm italic text-muted-foreground">
                 The storyteller is weaving the scene...
               </p>
-            )}
+            ) : null}
+            {turnPhase === "finalizing" ? (
+              <p className="font-serif text-sm italic text-muted-foreground">
+                The world is still resolving. Retry and undo unlock when the turn is complete.
+              </p>
+            ) : null}
           </div>
         </ScrollArea>
       </div>

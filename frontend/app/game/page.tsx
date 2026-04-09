@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { LocationPanel } from "@/components/game/location-panel";
@@ -34,7 +34,6 @@ import {
   chatRetry,
   chatUndo,
   getActiveCampaign,
-  type ChatHistoryResponse,
   getRememberedCampaignId,
   getImageUrl,
   getWorldData,
@@ -43,18 +42,24 @@ import {
 } from "@/lib/api";
 import type { WorldData } from "@/lib/api-types";
 
+type TurnPhase = "idle" | "streaming" | "finalizing";
+type QuickAction = { label: string; action: string };
+
 export default function GamePage() {
   const router = useRouter();
   const [activeCampaign, setActiveCampaign] = useState<CampaignMeta | null>(null);
   const [premise, setPremise] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
-  const [isStreaming, setIsStreaming] = useState(false);
+  const [turnPhase, setTurnPhase] = useState<TurnPhase>("idle");
   const [isInitializing, setIsInitializing] = useState(true);
+  const [hasLiveTurnSnapshot, setHasLiveTurnSnapshot] = useState(false);
   const [lastOracleResult, setLastOracleResult] = useState<OracleResultData | null>(null);
-  const [quickActions, setQuickActions] = useState<Array<{ label: string; action: string }>>([]);
+  const [quickActions, setQuickActions] = useState<QuickAction[]>([]);
   const [worldData, setWorldData] = useState<WorldData | null>(null);
   const [checkpointOpen, setCheckpointOpen] = useState(false);
+  const bufferedQuickActionsRef = useRef<QuickAction[]>([]);
+  const messagesRef = useRef<ChatMessage[]>([]);
 
   const refreshWorldData = useCallback(
     async (campaignId: string) => {
@@ -64,6 +69,38 @@ export default function GamePage() {
       } catch {
         // Non-critical — keep existing data on refresh failure
       }
+    },
+    [],
+  );
+
+  const clearQuickActionState = useCallback(() => {
+    bufferedQuickActionsRef.current = [];
+    setQuickActions([]);
+  }, []);
+
+  const bufferQuickActions = useCallback((actions: QuickAction[]) => {
+    bufferedQuickActionsRef.current = actions;
+    setQuickActions([]);
+  }, []);
+
+  const revealBufferedQuickActions = useCallback(() => {
+    setQuickActions(bufferedQuickActionsRef.current);
+  }, []);
+
+  const restoreGameplayState = useCallback(
+    async (campaignId: string, fallbackPremise: string) => {
+      const [history, world] = await Promise.all([
+        chatHistory(campaignId),
+        getWorldData(campaignId),
+      ]);
+      const safeMessages = Array.isArray(history.messages)
+        ? history.messages.filter(isChatMessage)
+        : [];
+
+      setMessages(safeMessages);
+      setPremise(history.premise || fallbackPremise);
+      setHasLiveTurnSnapshot(history.hasLiveTurnSnapshot);
+      setWorldData(world);
     },
     [],
   );
@@ -89,21 +126,7 @@ export default function GamePage() {
 
         if (cancelled) return;
         setActiveCampaign(campaign);
-
-        const [history, world] = await Promise.all([
-          chatHistory(campaign.id),
-          getWorldData(campaign.id),
-        ]);
-
-        if (cancelled) return;
-
-        const safeMessages = Array.isArray(history.messages)
-          ? history.messages.filter(isChatMessage)
-          : [];
-
-        setMessages(safeMessages);
-        setPremise(history.premise || campaign.premise);
-        setWorldData(world);
+        await restoreGameplayState(campaign.id, campaign.premise);
       } catch (error) {
         toast.error("Failed to load game state", {
           description: getErrorMessage(error, "Unknown initialization error."),
@@ -121,7 +144,11 @@ export default function GamePage() {
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [restoreGameplayState, router]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   // Derived state for panels
   const player = worldData?.player ?? null;
@@ -168,6 +195,7 @@ export default function GamePage() {
   }, [activeCampaign, player]);
 
   const canInteract = Boolean(activeCampaign) && !isInitializing;
+  const isTurnBusy = turnPhase !== "idle";
 
   const updateAssistantContent = (text: string) => {
     setMessages((current) => {
@@ -181,14 +209,15 @@ export default function GamePage() {
   };
 
   const submitAction = async (actionText: string) => {
-    if (!actionText || isStreaming || !activeCampaign) return;
+    if (!actionText || isTurnBusy || !activeCampaign) return;
 
-    setIsStreaming(true);
+    setTurnPhase("streaming");
     setLastOracleResult(null);
-    setQuickActions([]);
+    clearQuickActionState();
 
     // Track whether we successfully started receiving narrative data
     let streamStarted = false;
+    let turnCompleted = false;
 
     try {
       const response = await chatAction(activeCampaign.id, actionText, actionText, "");
@@ -219,9 +248,16 @@ export default function GamePage() {
           }
         },
         onQuickActions: (actions) => {
-          setQuickActions(actions);
+          bufferQuickActions(actions);
+        },
+        onFinalizing: () => {
+          setTurnPhase("finalizing");
         },
         onDone: () => {
+          turnCompleted = true;
+          setTurnPhase("idle");
+          setHasLiveTurnSnapshot(true);
+          revealBufferedQuickActions();
           // Refresh world data after every completed turn to sync all panels
           if (activeCampaign) {
             void refreshWorldData(activeCampaign.id);
@@ -253,16 +289,18 @@ export default function GamePage() {
         description: getErrorMessage(error, "Unknown streaming error."),
       });
     } finally {
-      setIsStreaming(false);
+      if (!turnCompleted) {
+        setTurnPhase("idle");
+      }
     }
   };
 
   const handleRetry = async () => {
-    if (isStreaming || !activeCampaign) return;
+    if (isTurnBusy || !activeCampaign) return;
 
-    setIsStreaming(true);
+    setTurnPhase("streaming");
     setLastOracleResult(null);
-    setQuickActions([]);
+    clearQuickActionState();
 
     // Remove last assistant message (optimistic UI)
     setMessages((current) => {
@@ -273,6 +311,7 @@ export default function GamePage() {
       // Add empty assistant placeholder
       return [...next, { role: "assistant" as const, content: "" }];
     });
+    let turnCompleted = false;
 
     try {
       const response = await chatRetry(activeCampaign.id);
@@ -297,9 +336,16 @@ export default function GamePage() {
           }
         },
         onQuickActions: (actions) => {
-          setQuickActions(actions);
+          bufferQuickActions(actions);
+        },
+        onFinalizing: () => {
+          setTurnPhase("finalizing");
         },
         onDone: () => {
+          turnCompleted = true;
+          setTurnPhase("idle");
+          setHasLiveTurnSnapshot(true);
+          revealBufferedQuickActions();
           if (activeCampaign) {
             void refreshWorldData(activeCampaign.id);
           }
@@ -309,26 +355,34 @@ export default function GamePage() {
         },
       });
     } catch (error) {
-      // Remove empty placeholder on error
-      setMessages((current) => {
-        const next = [...current];
-        const lastMessage = next[next.length - 1];
-        if (lastMessage?.role === "assistant" && !lastMessage.content.trim()) {
-          next.pop();
+      const rolledBackMessages = messagesRef.current.slice(
+        0,
+        Math.max(0, messagesRef.current.length - 2),
+      );
+      messagesRef.current = rolledBackMessages;
+      setMessages(rolledBackMessages);
+      setHasLiveTurnSnapshot(false);
+
+      try {
+        await restoreGameplayState(activeCampaign.id, activeCampaign.premise);
+      } catch {
+        if (getErrorMessage(error, "").includes("Nothing to retry")) {
+          setHasLiveTurnSnapshot(false);
         }
-        return next;
-      });
+      }
 
       toast.error("Failed to retry", {
         description: getErrorMessage(error, "Unknown streaming error."),
       });
     } finally {
-      setIsStreaming(false);
+      if (!turnCompleted) {
+        setTurnPhase("idle");
+      }
     }
   };
 
   const handleUndo = async () => {
-    if (isStreaming || !activeCampaign) return;
+    if (isTurnBusy || !activeCampaign) return;
 
     try {
       await chatUndo(activeCampaign.id);
@@ -341,13 +395,17 @@ export default function GamePage() {
         }
         return next;
       });
-      setQuickActions([]);
+      clearQuickActionState();
       setLastOracleResult(null);
+      setHasLiveTurnSnapshot(false);
       if (activeCampaign) {
         void refreshWorldData(activeCampaign.id);
       }
       toast.success("Last action undone");
     } catch (error) {
+      if (getErrorMessage(error, "").includes("Nothing to undo")) {
+        setHasLiveTurnSnapshot(false);
+      }
       toast.error("Failed to undo", {
         description: getErrorMessage(error, "Unknown error."),
       });
@@ -374,7 +432,10 @@ export default function GamePage() {
   };
 
   const canRetryUndo =
-    !isStreaming && messages.length >= 2 && messages[messages.length - 1]?.role === "assistant";
+    hasLiveTurnSnapshot &&
+    turnPhase === "idle" &&
+    messages.length >= 2 &&
+    messages[messages.length - 1]?.role === "assistant";
 
   const handleSubmitAction = () => {
     const playerAction = input.trim();
@@ -384,12 +445,12 @@ export default function GamePage() {
   };
 
   const handleQuickAction = (actionText: string) => {
-    if (isStreaming) return;
+    if (isTurnBusy) return;
     void submitAction(actionText);
   };
 
   const handleMove = (targetLocationName: string) => {
-    if (isStreaming) return;
+    if (isTurnBusy) return;
     void submitAction(`go to ${targetLocationName}`);
   };
 
@@ -459,14 +520,15 @@ export default function GamePage() {
           npcsHere={npcsHere}
           itemsHere={itemsHere}
           onMove={handleMove}
-          disabled={isStreaming}
+          disabled={isTurnBusy}
         />
         <div className="flex flex-1 flex-col overflow-hidden">
           <OraclePanel result={lastOracleResult} />
           <NarrativeLog
             messages={messages}
             premise={premise}
-            isStreaming={isStreaming}
+            isStreaming={turnPhase === "streaming"}
+            turnPhase={turnPhase}
             onRetry={handleRetry}
             onUndo={handleUndo}
             onEdit={handleEdit}
@@ -484,14 +546,15 @@ export default function GamePage() {
       <QuickActions
         actions={quickActions}
         onAction={handleQuickAction}
-        disabled={isStreaming}
+        disabled={isTurnBusy}
       />
       <ActionBar
         value={input}
         onChange={setInput}
         onSubmit={handleSubmitAction}
-        isLoading={isStreaming}
-        disabled={!canInteract}
+        isLoading={isTurnBusy}
+        disabled={!canInteract || isTurnBusy}
+        turnPhase={turnPhase}
       />
       {activeCampaign && (
         <CheckpointPanel
