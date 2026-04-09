@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
-status: executing
-stopped_at: Completed 39-01-PLAN.md
-last_updated: "2026-04-09T03:30:38.675Z"
+status: verifying
+stopped_at: Completed 39-02-PLAN.md
+last_updated: "2026-04-09T03:46:29.532Z"
 last_activity: 2026-04-09
 progress:
   total_phases: 8
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 4
-  completed_plans: 3
+  completed_plans: 4
   percent: 100
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 
 Phase: 39 (honest-turn-boundary-retry-undo) — EXECUTING
 Plan: 2 of 2
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-04-09
 
 Progress: [██████████] 100%
@@ -45,6 +45,7 @@ Progress: [██████████] 100%
 
 **Recent Execution:**
 
+- Phase `39` Plan `02` — duration `6 min`, tasks `2`, files `6`
 - Phase `39` Plan `01` — duration `5 min`, tasks `2`, files `7`
 - Phase `37` Plan `01` — duration `8 min`, tasks `2`, files `3`
 - Phase `37` Plan `02` — duration `4 min`, tasks `2`, files `4`
@@ -71,6 +72,9 @@ Recent decisions affecting current work:
 - [Phase 39]: Rollback-critical post-turn failure must prevent a turn from being presented as successfully complete.
 - [Phase 39]: The backend now emits finalizing_turn after narration and only emits done after rollback-critical post-turn simulation completes.
 - [Phase 39]: Last-turn retry and undo now restore a single SQLite-safe bundle of state.db, config.json, and chat_history.json while explicitly excluding campaigns/{id}/vectors/.
+- [Phase 39]: Failed retry restores the visible pre-turn boundary immediately from committed message history, then refreshes history and world data from the backend. — The UI needs a deterministic honest fallback even if optimistic retry state or refresh timing would otherwise leave stale completion affordances on screen.
+- [Phase 39]: Quick actions stay buffered until authoritative done, which keeps retry/undo and follow-up actions aligned with the backend rollback boundary. — Showing or enabling quick actions before done would present narration completion as turn completion and let the UI get ahead of the rollback-safe boundary.
+- [Phase 39]: The frontend now models gameplay readiness as idle, streaming, or finalizing so narration completion no longer implies turn completion. — This keeps retry/undo and input readiness aligned with the backend finalization contract instead of guessing from a single streaming flag.
 
 ### Pending Todos
 
@@ -83,6 +87,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-09T03:30:38.673Z
-Stopped at: Completed 39-01-PLAN.md
+Last session: 2026-04-09T03:46:29.529Z
+Stopped at: Completed 39-02-PLAN.md
 Resume file: None
