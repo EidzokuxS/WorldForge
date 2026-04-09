@@ -91,6 +91,8 @@ export async function runReflection(
     DERIVED_RUNTIME_TAGS_RULE,
     `Based on these events, update your beliefs, goals, and relationships.`,
     `Only make changes that are clearly supported by the evidence.`,
+    `Beliefs, goals, and relationships are the first-class outcomes for ordinary reflection.`,
+    `Prefer durable structured-state updates over flavor-only narration or debug counters.`,
     ``,
     `Current profile: ${npcRecord.profile.personaSummary}`,
     `Current social context: location=${npcRecord.socialContext.currentLocationName ?? npc.currentLocationId ?? "unknown"}; status=[${npcRecord.socialContext.socialStatus.join(", ") || "none"}]`,
@@ -101,8 +103,10 @@ export async function runReflection(
       ? `\nRecent evidence:\n${recentEvents.join("\n")}`
       : "\nRecent evidence:\nNo recent events recorded.",
     ``,
+    `Ordinary interaction arcs should usually resolve through belief, goal, or relationship drift using the structured-state tools.`,
+    `Wealth and skill upgrades require materially stronger evidence than ordinary belief, goal, or relationship drift.`,
     `You may upgrade wealth tiers (Destitute -> Poor -> Comfortable -> Wealthy -> Obscenely Rich) or skill tiers (Novice -> Skilled -> Master) when evidence clearly supports it. Wealth changes require significant trade/loot events. Skill upgrades require 3+ successful uses of that skill.`,
-    `Use the tools to update your beliefs, goals, relationships, wealth, and skills as needed.`,
+    `Use the tools to update your beliefs, goals, relationships, wealth, and skills as needed, but prefer set_belief, set_goal, drop_goal, and set_relationship unless the evidence strongly justifies progression.`,
     `If nothing significant has changed, you may choose not to call any tools.`,
   ]
     .filter(Boolean)
