@@ -10,14 +10,14 @@ Requirements for the gameplay-fidelity milestone. Each maps to roadmap phases.
 ### Runtime Integrity
 
 - [x] **RINT-01**: Player can resume gameplay routes (`history`, `action`, `retry`, `undo`, `edit`) after reload using campaign identity, without depending on an in-memory active campaign session.
-- [ ] **RINT-02**: Retry and undo restore the same authoritative world boundary the player experienced as the completed turn, including post-turn simulation effects.
+- [x] **RINT-02**: Retry and undo restore the same authoritative world boundary the player experienced as the completed turn, including post-turn simulation effects.
 - [ ] **RINT-03**: Checkpoint save/load restores all campaign-authoritative runtime state, including `config.json`-backed values such as current tick and related campaign runtime metadata.
 - [ ] **RINT-04**: Inventory and equipment have one authoritative persistence model that gameplay, prompts, checkpoints, and UI all read and mutate consistently.
 
 ### Simulation Fidelity
 
 - [ ] **SIMF-01**: Reflection trigger accumulation occurs in live runtime so NPC beliefs, goals, relationship drift, and progression can actually fire under normal play.
-- [ ] **SIMF-02**: Post-turn simulation has an honest player-visible completion boundary, so world updates do not silently continue after the turn is presented as finished.
+- [x] **SIMF-02**: Post-turn simulation has an honest player-visible completion boundary, so world updates do not silently continue after the turn is presented as finished.
 - [ ] **SIMF-03**: World-state mutations from NPC autonomy, reflection, and faction simulation remain coherent with rollback, retry, and checkpoint restore behavior.
 
 ### Gameplay Semantics
@@ -59,11 +59,11 @@ Explicitly excluded from this milestone to keep it reconciliation-driven.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | RINT-01 | Phase 37 | Complete |
-| RINT-02 | Phase 39 | Pending |
+| RINT-02 | Phase 39 | Complete |
 | RINT-03 | Phase 41 | Pending |
 | RINT-04 | Phase 38 | Pending |
 | SIMF-01 | Phase 40 | Pending |
-| SIMF-02 | Phase 39 | Pending |
+| SIMF-02 | Phase 39 | Complete |
 | SIMF-03 | Phase 41 | Pending |
 | GSEM-01 | Phase 42 | Pending |
 | GSEM-02 | Phase 42 | Pending |

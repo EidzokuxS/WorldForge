@@ -116,7 +116,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 37. Campaign-Loaded Gameplay Transport | 2/2 | Complete   | 2026-04-08 |
 | 38. Authoritative Inventory & Equipment State | 0/TBD | Not started | - |
-| 39. Honest Turn Boundary, Retry & Undo | 0/TBD | Not started | - |
+| 39. Honest Turn Boundary, Retry & Undo | 1/2 | In Progress|  |
 | 40. Live Reflection & Progression Triggers | 0/TBD | Not started | - |
 | 41. Checkpoint-Complete Simulation Restore | 0/TBD | Not started | - |
 | 42. Targeted Oracle & Start-Condition Runtime Effects | 0/TBD | Not started | - |

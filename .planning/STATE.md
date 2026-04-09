@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
-status: planning
-stopped_at: Phase 39 context gathered
-last_updated: "2026-04-08T18:03:09.631Z"
-last_activity: 2026-04-08
+status: executing
+stopped_at: Completed 39-01-PLAN.md
+last_updated: "2026-04-09T03:30:38.675Z"
+last_activity: 2026-04-09
 progress:
   total_phases: 8
   completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
+  total_plans: 4
+  completed_plans: 3
   percent: 100
 ---
 
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 
 ## Current Position
 
-Phase: 39 (honest-turn-boundary-retry-undo) — DISCUSSING
-Plan: not planned yet
-Status: Context gathered — ready for planning
-Last activity: 2026-04-08
+Phase: 39 (honest-turn-boundary-retry-undo) — EXECUTING
+Plan: 2 of 2
+Status: Ready to execute
+Last activity: 2026-04-09
 
 Progress: [██████████] 100%
 
@@ -45,6 +45,7 @@ Progress: [██████████] 100%
 
 **Recent Execution:**
 
+- Phase `39` Plan `01` — duration `5 min`, tasks `2`, files `7`
 - Phase `37` Plan `01` — duration `8 min`, tasks `2`, files `3`
 - Phase `37` Plan `02` — duration `4 min`, tasks `2`, files `4`
 
@@ -68,6 +69,8 @@ Recent decisions affecting current work:
 - [Phase 39]: A turn is only complete after rollback-critical post-turn world mutations finish; embeddings and image generation remain auxiliary.
 - [Phase 39]: Retry and undo stay single-step in this phase, but must restore the same authoritative pre-turn boundary the player experienced.
 - [Phase 39]: Rollback-critical post-turn failure must prevent a turn from being presented as successfully complete.
+- [Phase 39]: The backend now emits finalizing_turn after narration and only emits done after rollback-critical post-turn simulation completes.
+- [Phase 39]: Last-turn retry and undo now restore a single SQLite-safe bundle of state.db, config.json, and chat_history.json while explicitly excluding campaigns/{id}/vectors/.
 
 ### Pending Todos
 
@@ -80,6 +83,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-08T18:03:09.628Z
-Stopped at: Phase 39 context gathered
-Resume file: .planning/phases/39-honest-turn-boundary-retry-undo/39-CONTEXT.md
+Last session: 2026-04-09T03:30:38.673Z
+Stopped at: Completed 39-01-PLAN.md
+Resume file: None
