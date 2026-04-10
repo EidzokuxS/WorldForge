@@ -1,33 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const mockSearchEpisodicEvents = vi.fn();
+const mockReadPendingCommittedEvents = vi.fn();
+
 // Mock all external dependencies before imports
 vi.mock("../../db/index.js", () => ({
   getDb: vi.fn(),
 }));
 
 vi.mock("../../vectors/episodic-events.js", () => ({
-  searchEpisodicEvents: vi.fn().mockResolvedValue([
-    {
-      id: "evt-1",
-      text: "Greta sold rare goods to the adventurer",
-      tick: 3,
-      location: "Market Square",
-      participants: ["Greta the Merchant", "player"],
-      importance: 5,
-      type: "event",
-      vector: [0.1, 0.2],
-    },
-    {
-      id: "evt-2",
-      text: "Greta was threatened by bandits",
-      tick: 4,
-      location: "Market Square",
-      participants: ["Greta the Merchant", "Bandit Leader"],
-      importance: 7,
-      type: "event",
-      vector: [0.3, 0.4],
-    },
-  ]),
+  searchEpisodicEvents: (...args: unknown[]) => mockSearchEpisodicEvents(...args),
+  readPendingCommittedEvents: (...args: unknown[]) => mockReadPendingCommittedEvents(...args),
 }));
 
 vi.mock("../../vectors/embeddings.js", () => ({
@@ -283,6 +266,29 @@ describe("createReflectionTools", () => {
 describe("runReflection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSearchEpisodicEvents.mockResolvedValue([
+      {
+        id: "evt-1",
+        text: "Greta sold rare goods to the adventurer",
+        tick: 3,
+        location: "Market Square",
+        participants: ["Greta the Merchant", "player"],
+        importance: 5,
+        type: "event",
+        vector: [0.1, 0.2],
+      },
+      {
+        id: "evt-2",
+        text: "Greta was threatened by bandits",
+        tick: 4,
+        location: "Market Square",
+        participants: ["Greta the Merchant", "Bandit Leader"],
+        importance: 7,
+        type: "event",
+        vector: [0.3, 0.4],
+      },
+    ]);
+    mockReadPendingCommittedEvents.mockReturnValue([]);
   });
 
   it("calls Judge LLM with NPC episodic events and resets unprocessedImportance to 0", async () => {
@@ -378,6 +384,37 @@ describe("runReflection", () => {
     expect(systemPrompt).toContain("Wealth changes require significant trade/loot events.");
     expect(systemPrompt).toContain("Skill upgrades require 3+ successful uses of that skill.");
     expect(systemPrompt).toContain("If nothing significant has changed, you may choose not to call any tools.");
+  });
+
+  it("uses same-turn pending evidence in Recent evidence when current-turn events are not embedded yet", async () => {
+    setupMockDb({});
+    mockSearchEpisodicEvents.mockResolvedValue([]);
+    mockReadPendingCommittedEvents.mockReturnValue([
+      {
+        id: "evt-pending",
+        text: "Greta the Merchant privately promises the player safe passage tonight.",
+        tick: TICK,
+        location: "Market Square",
+        participants: ["Greta the Merchant", "player"],
+        importance: 8,
+        type: "dialogue",
+      },
+    ]);
+
+    const { generateText } = await import("ai");
+
+    await runReflection(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER, {
+      ...JUDGE_PROVIDER,
+      id: "embedder-provider",
+    });
+
+    expect(mockReadPendingCommittedEvents).toHaveBeenCalledWith(CAMPAIGN_ID, TICK);
+    const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
+    expect(systemPrompt).toContain("Recent evidence:");
+    expect(systemPrompt).toContain(
+      `[Tick ${TICK}] Greta the Merchant privately promises the player safe passage tonight.`,
+    );
+    expect(systemPrompt).not.toContain("No recent events recorded.");
   });
 });
 

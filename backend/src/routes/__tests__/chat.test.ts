@@ -59,6 +59,14 @@ vi.mock("../../ai/with-model-fallback.js", () => ({
   resolveFallbackProvider: vi.fn(() => null),
 }));
 
+const mockEmbedAndUpdateEvent = vi.fn();
+const mockDrainPendingCommittedEvents = vi.fn();
+
+vi.mock("../../vectors/episodic-events.js", () => ({
+  embedAndUpdateEvent: (...args: unknown[]) => mockEmbedAndUpdateEvent(...args),
+  drainPendingCommittedEvents: (...args: unknown[]) => mockDrainPendingCommittedEvents(...args),
+}));
+
 import { callStoryteller } from "../../ai/index.js";
 import {
   getActiveCampaign,
@@ -160,6 +168,7 @@ function createTurnStream(events: Array<{ type: string; data: unknown }>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockDrainPendingCommittedEvents.mockReturnValue([]);
 });
 
 // ---------------------------------------------------------------------------
@@ -419,6 +428,109 @@ describe("Campaign-loaded gameplay transport", () => {
       "tickFactions",
       "done",
     ]);
+  });
+
+  it("drains queued committed events for non-log_event writers after reflection finalization", async () => {
+    setupStoryteller();
+    setupDbMock();
+    const orderedCalls: string[] = [];
+
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
+      id: campaignId,
+      name: `Campaign ${campaignId}`,
+      createdAt: "2026-01-01",
+    }) as any);
+    mockedCaptureSnapshot.mockImplementation((campaignId) => ({
+      campaignId,
+      spawnedNpcIds: [],
+      spawnedItemIds: [],
+      revealedLocationIds: [],
+      createdRelationshipIds: [],
+      createdChronicleIds: [],
+    }) as any);
+    mockedTickPresentNpcs.mockImplementation(async () => {
+      orderedCalls.push("tickPresentNpcs");
+      return [];
+    });
+    mockedSimulateOffscreenNpcs.mockImplementation(async () => {
+      orderedCalls.push("simulateOffscreenNpcs");
+      return [];
+    });
+    mockedCheckAndTriggerReflections.mockImplementation(async () => {
+      orderedCalls.push("checkAndTriggerReflections");
+      return [];
+    });
+    mockedTickFactions.mockImplementation(async () => {
+      orderedCalls.push("tickFactions");
+      return [];
+    });
+    mockDrainPendingCommittedEvents.mockReturnValue([
+      {
+        id: "evt-speak",
+        text: 'Greta the Merchant said to player: "Keep your voice down."',
+        tick: 2,
+        location: "Market Square",
+        participants: ["Greta the Merchant", "player"],
+        importance: 3,
+        type: "dialogue",
+      },
+      {
+        id: "evt-offscreen",
+        text: "[Off-screen] Greta the Merchant: bribed the watch captain",
+        tick: 2,
+        location: "Harbor Watch",
+        participants: ["Greta the Merchant"],
+        importance: 3,
+        type: "npc_offscreen",
+      },
+    ]);
+    mockedProcessTurn.mockImplementation(({ onPostTurn }) =>
+      (async function* () {
+        yield { type: "finalizing_turn", data: { stage: "rollback_critical" } } as any;
+        await onPostTurn?.({
+          tick: 2,
+          toolCalls: [],
+        } as any);
+        yield { type: "done", data: { tick: 2 } } as any;
+      })(),
+    );
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Ask Greta what changed",
+        intent: "Ask Greta what changed",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(orderedCalls).toEqual([
+      "tickPresentNpcs",
+      "simulateOffscreenNpcs",
+      "checkAndTriggerReflections",
+      "tickFactions",
+    ]);
+    expect(mockDrainPendingCommittedEvents).toHaveBeenCalledWith(CAMPAIGN_ID, 2);
+    expect(mockEmbedAndUpdateEvent).toHaveBeenCalledTimes(2);
+    expect(mockEmbedAndUpdateEvent).toHaveBeenNthCalledWith(
+      1,
+      "evt-speak",
+      'Greta the Merchant said to player: "Keep your voice down."',
+      expect.objectContaining({ model: expect.any(String) }),
+    );
+    expect(mockEmbedAndUpdateEvent).toHaveBeenNthCalledWith(
+      2,
+      "evt-offscreen",
+      "[Off-screen] Greta the Merchant: bribed the watch captain",
+      expect.objectContaining({ model: expect.any(String) }),
+    );
   });
 
   it("keeps undo snapshots isolated by campaignId", async () => {
