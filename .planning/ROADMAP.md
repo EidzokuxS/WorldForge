@@ -19,7 +19,7 @@ v1.1 is a reconciliation milestone built from the [Phase 36 handoff](/R:/Project
 - [x] **Phase 37: Campaign-Loaded Gameplay Transport** - Remove active-session coupling from gameplay routes. (completed 2026-04-08)
 - [ ] **Phase 38: Authoritative Inventory & Equipment State** - Collapse runtime item truth onto one persistence model.
 - [x] **Phase 39: Honest Turn Boundary, Retry & Undo** - Make the player-visible turn boundary match the authoritative rollback boundary. (completed 2026-04-09)
-- [ ] **Phase 40: Live Reflection & Progression Triggers** - Turn dormant reflection scaffolding into observable runtime behavior.
+- [x] **Phase 40: Live Reflection & Progression Triggers** - Turn dormant reflection scaffolding into observable runtime behavior. (completed 2026-04-10)
 - [ ] **Phase 41: Checkpoint-Complete Simulation Restore** - Restore full campaign runtime state, including simulation metadata and post-turn world mutations.
 - [ ] **Phase 42: Targeted Oracle & Start-Condition Runtime Effects** - Make target-aware rulings and structured starts mechanically real in live play.
 - [ ] **Phase 43: Travel & Location-State Contract Resolution** - Implement or explicitly deprecate the remaining location/time gameplay promises.
@@ -76,7 +76,7 @@ Plans:
 Plans:
 - [x] 40-01-PLAN.md — Wire live reflection-budget accumulation onto authoritative gameplay, present-NPC, and off-screen episodic-event writes.
 - [x] 40-02-PLAN.md — Lock threshold-crossed post-turn reflection in tests and harden the reflection agent toward structured-state-first outcomes.
-- [ ] 40-03-PLAN.md — Close the same-turn evidence handoff gap so reflection can read newly committed events before embeddings exist and auxiliary embedding reuses that shared queue for all writers.
+- [x] 40-03-PLAN.md — Close the same-turn evidence handoff gap so reflection can read newly committed events before embeddings exist and auxiliary embedding reuses that shared queue for all writers.
 
 ### Phase 41: Checkpoint-Complete Simulation Restore
 **Goal**: Checkpoints restore full campaign-authoritative runtime state and keep NPC/world simulation coherent across restore flows.
@@ -125,7 +125,7 @@ Plans:
 | 37. Campaign-Loaded Gameplay Transport | 2/2 | Complete   | 2026-04-08 |
 | 38. Authoritative Inventory & Equipment State | 0/TBD | Not started | - |
 | 39. Honest Turn Boundary, Retry & Undo | 3/3 | Complete    | 2026-04-09 |
-| 40. Live Reflection & Progression Triggers | 2/3 | In progress | - |
+| 40. Live Reflection & Progression Triggers | 3/3 | Complete   | 2026-04-10 |
 | 41. Checkpoint-Complete Simulation Restore | 0/TBD | Not started | - |
 | 42. Targeted Oracle & Start-Condition Runtime Effects | 0/TBD | Not started | - |
 | 43. Travel & Location-State Contract Resolution | 0/TBD | Not started | - |

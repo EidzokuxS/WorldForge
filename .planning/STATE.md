@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
 status: verifying
-stopped_at: Completed 40-02-PLAN.md
-last_updated: "2026-04-09T17:55:38.022Z"
-last_activity: 2026-04-09 -- Completed 40-02 plan execution
+stopped_at: Completed 40-03-PLAN.md
+last_updated: "2026-04-10T03:46:09Z"
+last_activity: 2026-04-10 -- Completed 40-03 plan execution
 progress:
   total_phases: 8
   completed_phases: 3
-  total_plans: 7
-  completed_plans: 7
+  total_plans: 8
+  completed_plans: 8
   percent: 100
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 ## Current Position
 
 Phase: 40 (live-reflection-progression-triggers) — VERIFYING
-Plan: 2 of 2
+Plan: 3 of 3
 Status: Phase complete — ready for verification
-Last activity: 2026-04-09 -- Completed 40-02 plan execution
+Last activity: 2026-04-10 -- Completed 40-03 plan execution
 
 Progress: [██████████] 100%
 
@@ -45,6 +45,7 @@ Progress: [██████████] 100%
 
 **Recent Execution:**
 
+- Phase `40` Plan `03` — duration `4 min`, tasks `2`, files `6`
 - Phase `40` Plan `02` — duration `4 min`, tasks `2`, files `4`
 - Phase `40` Plan `01` — duration `6 min`, tasks `2`, files `9`
 - Phase `39` Plan `03` — duration `10 min`, tasks `2`, files `2`
@@ -82,6 +83,8 @@ Recent decisions affecting current work:
 - [Phase 40]: Present-NPC act still piggybacks through log_event, while speak and off-screen updates call the shared accumulator directly to avoid double-counting.
 - [Phase 40]: Reflection prompts now explicitly treat beliefs, goals, and relationships as the default durable outcomes of ordinary play.
 - [Phase 40]: Wealth and skill upgrades remain available, but only behind materially stronger evidence thresholds than ordinary interaction arcs.
+- [Phase 40]: Reflection reads same-turn committed evidence directly instead of making embeddings rollback-critical.
+- [Phase 40]: Every writer that already calls storeEpisodicEvent now joins one queued handoff that post-turn auxiliary embedding drains after reflection.
 
 ### Pending Todos
 
@@ -94,6 +97,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-09T17:55:38.020Z
-Stopped at: Completed 40-02-PLAN.md
+Last session: 2026-04-10T03:47:25.634Z
+Stopped at: Completed 40-03-PLAN.md
 Resume file: None
