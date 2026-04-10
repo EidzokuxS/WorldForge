@@ -17,7 +17,65 @@ export interface EpisodicEvent {
   vector: number[];
 }
 
+export interface PendingCommittedEvent {
+  id: string;
+  text: string;
+  tick: number;
+  location: string;
+  participants: string[];
+  importance: number;
+  type: string;
+}
+
 const TABLE_NAME = "episodic_events";
+const pendingCommittedEvents = new Map<string, PendingCommittedEvent[]>();
+
+function clonePendingCommittedEvent(event: PendingCommittedEvent): PendingCommittedEvent {
+  return {
+    ...event,
+    participants: [...event.participants],
+  };
+}
+
+function queuePendingCommittedEvent(campaignId: string, event: PendingCommittedEvent): void {
+  const queue = pendingCommittedEvents.get(campaignId) ?? [];
+  queue.push(event);
+  pendingCommittedEvents.set(campaignId, queue);
+}
+
+export function readPendingCommittedEvents(
+  campaignId: string,
+  tick: number,
+): PendingCommittedEvent[] {
+  return (pendingCommittedEvents.get(campaignId) ?? [])
+    .filter((event) => event.tick === tick)
+    .map(clonePendingCommittedEvent);
+}
+
+export function drainPendingCommittedEvents(
+  campaignId: string,
+  tick: number,
+): PendingCommittedEvent[] {
+  const queue = pendingCommittedEvents.get(campaignId) ?? [];
+  const drained: PendingCommittedEvent[] = [];
+  const remaining: PendingCommittedEvent[] = [];
+
+  for (const event of queue) {
+    if (event.tick === tick) {
+      drained.push(event);
+    } else {
+      remaining.push(event);
+    }
+  }
+
+  if (remaining.length > 0) {
+    pendingCommittedEvents.set(campaignId, remaining);
+  } else {
+    pendingCommittedEvents.delete(campaignId);
+  }
+
+  return drained.map(clonePendingCommittedEvent);
+}
 
 /**
  * Store an episodic event in LanceDB for later semantic retrieval.
@@ -25,7 +83,7 @@ const TABLE_NAME = "episodic_events";
  * Returns the generated event ID.
  */
 export async function storeEpisodicEvent(
-  _campaignId: string,
+  campaignId: string,
   event: Omit<EpisodicEvent, "id" | "vector">
 ): Promise<string> {
   const id = crypto.randomUUID();
@@ -52,6 +110,15 @@ export async function storeEpisodicEvent(
     await db.createTable(TABLE_NAME, [row as unknown as Record<string, unknown>]);
   }
 
+  queuePendingCommittedEvent(campaignId, {
+    id,
+    text: event.text,
+    tick: event.tick,
+    location: event.location,
+    participants: [...event.participants],
+    importance: event.importance,
+    type: event.type || "event",
+  });
   log.info(`Stored episodic event ${id} (tick=${event.tick}, importance=${event.importance})`);
   return id;
 }

@@ -13,7 +13,10 @@ import { getDb } from "../db/index.js";
 import { npcs } from "../db/schema.js";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
 import { createReflectionTools } from "./reflection-tools.js";
-import { searchEpisodicEvents } from "../vectors/episodic-events.js";
+import {
+  readPendingCommittedEvents,
+  searchEpisodicEvents,
+} from "../vectors/episodic-events.js";
 import { embedTexts } from "../vectors/embeddings.js";
 import { createLogger } from "../lib/index.js";
 import { hydrateStoredNpcRecord } from "../character/record-adapters.js";
@@ -64,14 +67,33 @@ export async function runReflection(
   const npcRecord = hydrateStoredNpcRecord(npc);
   const runtimeTags = deriveRuntimeCharacterTags(npcRecord);
 
-  // 2. Search episodic events involving this NPC (fetch more for reflection: 10)
-  let recentEvents: string[] = [];
+  // 2. Merge same-turn committed evidence with semantic retrieval.
+  const npcName = npcRecord.identity.displayName.toLowerCase();
+  const recentEvents: string[] = [];
+  const recentEventKeys = new Set<string>();
+  const pushRecentEvidence = (event: { tick: number; text: string }) => {
+    const key = `${event.tick}:${event.text}`;
+    if (recentEventKeys.has(key)) {
+      return;
+    }
+    recentEventKeys.add(key);
+    recentEvents.push(`[Tick ${event.tick}] ${event.text}`);
+  };
+
+  for (const event of readPendingCommittedEvents(campaignId, tick)) {
+    if (event.participants.some((participant) => participant.toLowerCase() === npcName)) {
+      pushRecentEvidence(event);
+    }
+  }
+
   if (embedderProvider) {
     try {
       const queryVector = await embedTexts([npcRecord.identity.displayName], embedderProvider);
       if (queryVector[0] && queryVector[0].length > 0) {
         const events = await searchEpisodicEvents(queryVector[0], tick, 10);
-        recentEvents = events.map((e) => `[Tick ${e.tick}] ${e.text}`);
+        for (const event of events) {
+          pushRecentEvidence(event);
+        }
       }
     } catch (err) {
       log.warn(`Failed to search episodic events for ${npcRecord.identity.displayName}`, err);

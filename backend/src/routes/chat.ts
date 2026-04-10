@@ -33,7 +33,10 @@ import {
 import { createLogger } from "../lib/index.js";
 import { processTurn, captureSnapshot, restoreSnapshot, tickPresentNpcs, simulateOffscreenNpcs, checkAndTriggerReflections, tickFactions, sanitizeNarrative } from "../engine/index.js";
 import type { TurnSnapshot, TurnSummary } from "../engine/index.js";
-import { embedAndUpdateEvent } from "../vectors/episodic-events.js";
+import {
+  drainPendingCommittedEvents,
+  embedAndUpdateEvent,
+} from "../vectors/episodic-events.js";
 import type { Settings } from "../settings/index.js";
 import type { ProviderConfig } from "../ai/provider-registry.js";
 import { resolveFallbackProvider } from "../ai/with-model-fallback.js";
@@ -110,20 +113,14 @@ function queueAuxiliaryPostTurnWork(
 ): void {
   void (async () => {
     try {
-      const logEvents = summary.toolCalls.filter((tc) => tc.tool === "log_event");
       const emb = resolveEmbedder(settings);
       const embedderAvailable = !("error" in emb);
+      const pendingCommittedEvents = drainPendingCommittedEvents(campaignId, summary.tick);
 
-      if (logEvents.length > 0 && embedderAvailable) {
-        for (const logEvent of logEvents) {
-          const toolResult = logEvent.result as Record<string, unknown> | undefined;
-          const inner = toolResult?.result as Record<string, unknown> | undefined;
-          const eventId = inner?.eventId as string | undefined;
-          const text = (logEvent.args as Record<string, unknown>)?.text as string | undefined;
-          if (!eventId || !text) continue;
-
+      if (pendingCommittedEvents.length > 0 && embedderAvailable) {
+        for (const event of pendingCommittedEvents) {
           try {
-            await embedAndUpdateEvent(eventId, text, emb.resolved.provider);
+            await embedAndUpdateEvent(event.id, event.text, emb.resolved.provider);
           } catch (err) {
             log.warn("Failed to embed episodic event", err);
           }

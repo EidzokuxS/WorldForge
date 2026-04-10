@@ -435,6 +435,19 @@ describe("Campaign-loaded gameplay transport", () => {
     setupDbMock();
     const orderedCalls: string[] = [];
 
+    mockedLoadSettings.mockReturnValue({
+      judge: { providerId: "p1", model: "judge-model", temperature: 0.1, maxTokens: 1024 },
+      storyteller: { providerId: "p1", model: "st-model", temperature: 0.7, maxTokens: 2048 },
+      embedder: { providerId: "p1", model: "embed-model", temperature: 0.1, maxTokens: 256 },
+      providers: [{ id: "p1", name: "P1", baseUrl: "http://localhost:1234", apiKey: "", defaultModel: "m", isBuiltin: false }],
+      fallback: { providerId: "", model: "", timeoutMs: 1000, retryCount: 0 },
+    } as any);
+    mockedResolveRole.mockReturnValue({
+      provider: { baseUrl: "http://localhost:1234", apiKey: "", model: "embed-model" },
+      temperature: 0.1,
+      maxTokens: 256,
+    } as any);
+
     mockedGetActive.mockReturnValue(null as any);
     mockedLoadCampaign.mockImplementation(async (campaignId) => ({
       id: campaignId,
