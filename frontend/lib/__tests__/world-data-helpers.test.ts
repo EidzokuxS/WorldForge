@@ -1,10 +1,15 @@
-import { describe, it, expect } from "vitest";
-import type { CharacterDraft } from "@worldforge/shared";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import type {
+  CharacterDraft,
+  LocationKind,
+  LocationPersistence,
+} from "@worldforge/shared";
 import {
   buildIdMaps,
   buildRelationshipMaps,
   toEditableScaffold,
 } from "../world-data-helpers";
+import { getWorldData } from "../api";
 import type { WorldData, LoreCardItem } from "../api-types";
 
 /** Minimal WorldData fixture with 2 locations, 1 faction, 2 NPCs, 2 relationships. */
@@ -89,6 +94,130 @@ function makeWorldData(overrides?: Partial<WorldData>): WorldData {
   };
 }
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("WorldData location typing", () => {
+  it("reuses shared location lifecycle vocabulary", () => {
+    type WorldLocation = WorldData["locations"][number];
+
+    expectTypeOf<WorldLocation["locationKind"]>().toEqualTypeOf<
+      LocationKind | null | undefined
+    >();
+    expectTypeOf<WorldLocation["persistence"]>().toEqualTypeOf<
+      LocationPersistence | null | undefined
+    >();
+  });
+});
+
+describe("getWorldData", () => {
+  it("parses connected paths and recent happenings while deriving compatibility connectedTo from the path graph", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        locations: [
+          {
+            id: "loc-1",
+            campaignId: "c1",
+            name: "Shibuya Crossing",
+            description: "Macro hub",
+            tags: JSON.stringify(["urban"]),
+            isStarting: true,
+            kind: "macro",
+            persistence: "persistent",
+            connectedPaths: [
+              {
+                edgeId: "edge-1",
+                toLocationId: "loc-2",
+                toLocationName: "Shibuya Station",
+                travelCost: 2,
+              },
+            ],
+            recentHappenings: [
+              {
+                id: "event-1",
+                locationId: "loc-1",
+                sourceLocationId: "scene-1",
+                anchorLocationId: "loc-1",
+                eventType: "ephemeral_scene",
+                summary: "A rooftop clash spilled cursed residue into the crossing.",
+                tick: 12,
+                importance: 4,
+                archivedAtTick: 13,
+                createdAt: 1700000000000,
+              },
+            ],
+          },
+        ],
+        npcs: [],
+        factions: [],
+        relationships: [],
+        items: [],
+        player: null,
+        personaTemplates: [],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const world = await getWorldData("c1");
+
+    expect(world.locations[0]).toMatchObject({
+      connectedTo: ["loc-2"],
+      connectedPaths: [
+        {
+          edgeId: "edge-1",
+          toLocationId: "loc-2",
+          toLocationName: "Shibuya Station",
+          travelCost: 2,
+        },
+      ],
+      recentHappenings: [
+        expect.objectContaining({
+          summary: "A rooftop clash spilled cursed residue into the crossing.",
+        }),
+      ],
+      locationKind: "macro",
+      persistence: "persistent",
+    });
+  });
+
+  it("keeps richer world fields optional enough for older payloads", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        locations: [
+          {
+            id: "loc-1",
+            campaignId: "c1",
+            name: "Old Tavern",
+            description: "Compatibility payload",
+            tags: JSON.stringify(["safe"]),
+            connectedTo: JSON.stringify(["loc-2"]),
+            isStarting: true,
+          },
+        ],
+        npcs: [],
+        factions: [],
+        relationships: [],
+        items: [],
+        player: null,
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const world = await getWorldData("c1");
+
+    expect(world.locations[0]).toMatchObject({
+      connectedTo: ["loc-2"],
+      connectedPaths: [],
+      recentHappenings: [],
+      locationKind: null,
+      persistence: null,
+    });
+  });
+});
+
 describe("buildIdMaps", () => {
   const world = makeWorldData();
   const maps = buildIdMaps(world);
@@ -169,6 +298,46 @@ describe("toEditableScaffold", () => {
 
     expect(scaffold.locations[0].connectedTo).toEqual(["Market"]);
     expect(scaffold.locations[1].connectedTo).toEqual(["Tavern"]);
+  });
+
+  it("prefers connected path destinations over stale connectedTo compatibility arrays", () => {
+    const world = makeWorldData({
+      locations: [
+        {
+          id: "loc-1",
+          campaignId: "c1",
+          name: "Tavern",
+          description: "A cozy tavern",
+          tags: ["safe"],
+          connectedTo: ["stale-edge"],
+          connectedPaths: [
+            {
+              edgeId: "edge-1",
+              toLocationId: "loc-2",
+              toLocationName: "Market",
+              travelCost: 2,
+            },
+          ],
+          recentHappenings: [],
+          isStarting: true,
+        },
+        {
+          id: "loc-2",
+          campaignId: "c1",
+          name: "Market",
+          description: "A busy market",
+          tags: ["trade"],
+          connectedTo: [],
+          connectedPaths: [],
+          recentHappenings: [],
+          isStarting: false,
+        },
+      ],
+    });
+
+    const scaffold = toEditableScaffold(world, "A test premise", lore);
+
+    expect(scaffold.locations[0].connectedTo).toEqual(["Market"]);
   });
 
   it("maps NPC currentLocationId to locationName", () => {
