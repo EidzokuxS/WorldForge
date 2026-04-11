@@ -376,12 +376,19 @@ export function getActiveCampaign(): CampaignMeta | null {
 }
 
 export function incrementTick(campaignId: string): number {
+  return advanceCampaignTick(campaignId, 1);
+}
+
+export function advanceCampaignTick(campaignId: string, tickDelta: number): number {
   assertSafeId(campaignId);
+  if (!Number.isInteger(tickDelta) || tickDelta < 0) {
+    throw new AppError("Tick advance must be a non-negative integer.", 400);
+  }
   const config = readCampaignConfig(campaignId);
   const prevTick = config.currentTick ?? 0;
-  const nextTick = prevTick + 1;
+  const nextTick = prevTick + tickDelta;
   updateCampaignConfig(campaignId, (current) => ({ ...current, currentTick: nextTick }));
-  log.info(`Tick incremented: ${prevTick} -> ${nextTick}`);
+  log.info(`Tick advanced: ${prevTick} -> ${nextTick} (+${tickDelta})`);
   return nextTick;
 }
 

@@ -10,6 +10,7 @@ export {
   savePremiseDivergence,
   loadPremiseDivergence,
   getActiveCampaign,
+  advanceCampaignTick,
   incrementTick,
   listPersonaTemplates,
   getPersonaTemplate,
