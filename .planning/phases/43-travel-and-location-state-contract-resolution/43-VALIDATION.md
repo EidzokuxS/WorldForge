@@ -19,8 +19,8 @@ created: 2026-04-11
 |----------|-------|
 | **Framework** | vitest |
 | **Config file** | `backend/vitest.config.ts`; `frontend/vitest.config.ts` |
-| **Quick run command** | `npm --prefix backend test -- src/engine/__tests__/location-graph.test.ts src/engine/__tests__/turn-processor.test.ts src/engine/__tests__/npc-agent.test.ts src/vectors/__tests__/episodic-events.test.ts src/engine/__tests__/tool-executor.test.ts src/routes/__tests__/campaigns.test.ts src/engine/__tests__/prompt-assembler.test.ts` |
-| **Full suite command** | `npm --prefix backend test -- src/engine/__tests__/location-graph.test.ts src/engine/__tests__/turn-processor.test.ts src/engine/__tests__/npc-agent.test.ts src/vectors/__tests__/episodic-events.test.ts src/engine/__tests__/tool-executor.test.ts src/routes/__tests__/campaigns.test.ts src/engine/__tests__/prompt-assembler.test.ts && npm --prefix frontend exec vitest run lib/__tests__/world-data-helpers.test.ts app/game/__tests__/page.test.tsx components/game/__tests__/location-panel.test.tsx` |
+| **Quick run command** | `npm --prefix backend test -- src/worldgen/__tests__/scaffold-saver.test.ts src/engine/__tests__/location-graph.test.ts src/engine/__tests__/turn-processor.test.ts src/engine/__tests__/npc-agent.test.ts src/engine/__tests__/tool-executor.test.ts src/vectors/__tests__/episodic-events.test.ts src/campaign/__tests__/checkpoints.test.ts src/routes/__tests__/campaigns.test.ts src/engine/__tests__/prompt-assembler.test.ts` |
+| **Full suite command** | `npm --prefix backend test -- src/worldgen/__tests__/scaffold-saver.test.ts src/engine/__tests__/location-graph.test.ts src/engine/__tests__/turn-processor.test.ts src/engine/__tests__/npc-agent.test.ts src/engine/__tests__/tool-executor.test.ts src/vectors/__tests__/episodic-events.test.ts src/campaign/__tests__/checkpoints.test.ts src/routes/__tests__/campaigns.test.ts src/engine/__tests__/prompt-assembler.test.ts && npm --prefix frontend exec vitest run lib/__tests__/world-data-helpers.test.ts app/game/__tests__/page.test.tsx components/game/__tests__/location-panel.test.tsx` |
 | **Estimated runtime** | ~120 seconds |
 
 ---
@@ -31,6 +31,7 @@ created: 2026-04-11
 - **After every plan wave:** Run the combined command for the just-finished wave; at the phase gate run the full suite command above.
 - **Before `$gsd-verify-work`:** backend phase-targeted suite and relevant frontend rendering tests must be green.
 - **Max feedback latency:** ~30 seconds per task sample, ~120 seconds at wave/phase gates.
+- **Review-driven additions:** Phase 43 verification now explicitly samples migration/worldgen compatibility (`scaffold-saver`), shared tool/inline movement resolution (`tool-executor`), and checkpoint restore retention for location recent happenings (`checkpoints.test.ts`).
 
 ---
 
@@ -38,12 +39,12 @@ created: 2026-04-11
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| 43-01-01 | 01 | 1 | GSEM-03, GSEM-04 | contract | `rg -n "LocationKind|LocationPersistence|location_edges|location_recent_events|parent_location_id|archived_at_tick" shared/src/types.ts backend/src/db/schema.ts` | ✅ existing | ⬜ pending |
+| 43-01-01 | 01 | 1 | GSEM-03, GSEM-04 | contract+migration | `npm --prefix backend exec vitest run src/worldgen/__tests__/scaffold-saver.test.ts` | ✅ existing | ⬜ pending |
 | 43-01-02 | 01 | 1 | GSEM-03, GSEM-04 | regression | `npm --prefix backend test -- src/engine/__tests__/location-graph.test.ts src/engine/__tests__/turn-processor.test.ts src/engine/__tests__/npc-agent.test.ts src/routes/__tests__/campaigns.test.ts src/engine/__tests__/prompt-assembler.test.ts` | ✅ existing+new | ⬜ pending |
 | 43-02-01 | 02 | 2 | GSEM-03 | unit | `npm --prefix backend exec vitest run src/engine/__tests__/location-graph.test.ts` | ✅ existing | ⬜ pending |
-| 43-02-02 | 02 | 2 | GSEM-03 | integration | `npm --prefix backend test -- src/engine/__tests__/turn-processor.test.ts src/engine/__tests__/npc-agent.test.ts` | ✅ existing | ⬜ pending |
+| 43-02-02 | 02 | 2 | GSEM-03 | integration | `npm --prefix backend test -- src/engine/__tests__/turn-processor.test.ts src/engine/__tests__/npc-agent.test.ts src/engine/__tests__/tool-executor.test.ts` | ✅ existing | ⬜ pending |
 | 43-03-01 | 03 | 3 | GSEM-04 | unit | `npm --prefix backend exec vitest run src/vectors/__tests__/episodic-events.test.ts src/engine/__tests__/tool-executor.test.ts` | ✅ existing+new | ⬜ pending |
-| 43-03-02 | 03 | 3 | GSEM-04 | integration | `npm --prefix backend exec vitest run src/vectors/__tests__/episodic-events.test.ts src/engine/__tests__/tool-executor.test.ts` | ✅ existing+new | ⬜ pending |
+| 43-03-02 | 03 | 3 | GSEM-04 | integration+restore | `npm --prefix backend exec vitest run src/vectors/__tests__/episodic-events.test.ts src/engine/__tests__/tool-executor.test.ts src/campaign/__tests__/checkpoints.test.ts` | ✅ existing+new | ⬜ pending |
 | 43-04-01 | 04 | 4 | GSEM-04 | route | `npm --prefix backend test -- src/routes/__tests__/campaigns.test.ts` | ✅ existing | ⬜ pending |
 | 43-04-02 | 04 | 4 | GSEM-04 | prompt | `npm --prefix backend test -- src/engine/__tests__/prompt-assembler.test.ts` | ✅ existing | ⬜ pending |
 | 43-05-01 | 05 | 5 | GSEM-03, GSEM-04 | frontend-unit | `npm --prefix frontend exec vitest run lib/__tests__/world-data-helpers.test.ts` | ✅ existing | ⬜ pending |
