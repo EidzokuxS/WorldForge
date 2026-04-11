@@ -22,7 +22,7 @@ v1.1 is a reconciliation milestone built from the [Phase 36 handoff](/R:/Project
 - [x] **Phase 40: Live Reflection & Progression Triggers** - Turn dormant reflection scaffolding into observable runtime behavior. (completed 2026-04-10)
 - [x] **Phase 41: Checkpoint-Complete Simulation Restore** - Restore full campaign runtime state, including simulation metadata and post-turn world mutations. (completed 2026-04-11)
 - [x] **Phase 42: Targeted Oracle & Start-Condition Runtime Effects** - Make target-aware rulings and structured starts mechanically real in live play. (completed 2026-04-11)
-- [ ] **Phase 43: Travel & Location-State Contract Resolution** - Implement or explicitly deprecate the remaining location/time gameplay promises.
+- [x] **Phase 43: Travel & Location-State Contract Resolution** - Implement or explicitly deprecate the remaining location/time gameplay promises. (completed 2026-04-11)
 - [ ] **Phase 44: Gameplay Docs Baseline Alignment** - Rewrite gameplay docs into an honest planning baseline for the repaired runtime.
 
 ## Phase Details
@@ -119,7 +119,7 @@ Plans:
 - [x] 43-03-PLAN.md — Implement authoritative write-through location recent happenings and ephemeral-scene consequence retention.
 - [x] 43-04-PLAN.md — Expose normalized path and location-history reads through backend world and prompt surfaces.
 - [x] 43-05-PLAN.md — Parse and render the repaired travel and location-history contract on `/game`.
-- [ ] 43-06-PLAN.md — Close current-location travel/no-op handling and separate fresh-vs-legacy regression guardrails.
+- [x] 43-06-PLAN.md — Close current-location travel/no-op handling and separate fresh-vs-legacy regression guardrails.
 
 ### Phase 44: Gameplay Docs Baseline Alignment
 **Goal**: Gameplay docs become an honest planning baseline for the repaired runtime instead of a mixed set of stale and live claims.
@@ -141,5 +141,5 @@ Plans:
 | 40. Live Reflection & Progression Triggers | 3/3 | Complete   | 2026-04-10 |
 | 41. Checkpoint-Complete Simulation Restore | 2/2 | Complete | 2026-04-11 |
 | 42. Targeted Oracle & Start-Condition Runtime Effects | 2/2 | Complete   | 2026-04-11 |
-| 43. Travel & Location-State Contract Resolution | 5/6 | In Progress|  |
+| 43. Travel & Location-State Contract Resolution | 6/6 | Complete   | 2026-04-11 |
 | 44. Gameplay Docs Baseline Alignment | 0/TBD | Not started | - |

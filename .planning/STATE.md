@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
 status: executing
-stopped_at: Completed 43-04-PLAN.md
-last_updated: "2026-04-11T16:33:02.411Z"
-last_activity: 2026-04-11
+stopped_at: Completed 43-06-PLAN.md
+last_updated: "2026-04-11T17:30:38.676Z"
+last_activity: 2026-04-11 -- Completed 43-06 and Phase 43
 progress:
   total_phases: 8
-  completed_phases: 5
-  total_plans: 17
-  completed_plans: 16
-  percent: 94
+  completed_phases: 6
+  total_plans: 18
+  completed_plans: 18
+  percent: 100
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-08)
 
 **Core value:** The LLM is the narrator, never the engine. Mechanical truth stays in backend code so outcomes remain consistent, inspectable, and recoverable.
-**Current focus:** Phase 43 — travel-and-location-state-contract-resolution
+**Current focus:** Phase 43 complete — travel-and-location-state-contract-resolution closed, Phase 44 next
 
 ## Current Position
 
-Phase: 43 (travel-and-location-state-contract-resolution) — EXECUTING
-Plan: 5 of 5
-Status: Ready to execute
-Last activity: 2026-04-11
+Phase: 43 (travel-and-location-state-contract-resolution) — COMPLETE
+Plan: 6 of 6
+Status: Ready for Phase 44 planning/execution
+Last activity: 2026-04-11 -- Completed 43-06 and Phase 43
 
-Progress: [█████████░] 94%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -45,6 +45,7 @@ Progress: [█████████░] 94%
 
 **Recent Execution:**
 
+- Phase `43` Plan `06` — duration `4 min`, tasks `2`, files `6`
 - Phase `43` Plan `04` — duration `6 min`, tasks `2`, files `5`
 - Phase `43` Plan `03` — duration `10 min`, tasks `2`, files `16`
 - Phase `43` Plan `02` — duration `13 min`, tasks `2`, files `11`
@@ -111,6 +112,11 @@ Recent decisions affecting current work:
 - [Phase 43]: World payload locations now expose connectedPaths and recentHappenings instead of raw connectedTo compatibility data.
 - [Phase 43]: Prompt scene context reads current-location recent happenings from location-events.ts and bounds them to five events or the last 50 ticks.
 - [Phase 43]: location-events.ts now owns both single-location and batched recent-history reads so API and prompt assembly share one read authority.
+- [Phase 43]: Frontend location parsing now prefers connectedPaths-derived compatibility views over raw connectedTo adjacency strings.
+- [Phase 43]: The location panel always renders Recent Happenings, including an explicit empty state when no local history exists.
+- [Phase 43]: The `/game` page now filters self-target travel options in both connectedPaths and connectedTo branches so stale compatibility data cannot reintroduce current-location travel affordances.
+- [Phase 43]: Current-location movement now short-circuits at the transport layer with a deterministic no-op acknowledgment instead of emitting location_change or flowing through Oracle/Storyteller arrival behavior.
+- [Phase 43]: Fresh scaffold adjacency now suppresses self-loop edges and self-target compatibility projections so fresh-runtime regressions stay distinct from legacy/manual self-travel paths.
 
 ### Pending Todos
 
@@ -123,6 +129,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-11T16:33:02.408Z
-Stopped at: Completed 43-04-PLAN.md
+Last session: 2026-04-11T17:30:38.673Z
+Stopped at: Completed 43-06-PLAN.md
 Resume file: None
