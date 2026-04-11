@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
-status: planning
-stopped_at: Phase 44 context gathered
-last_updated: "2026-04-11T18:10:07.743Z"
-last_activity: 2026-04-11 -- Completed 43-06 and Phase 43
+status: executing
+stopped_at: Completed 44-gameplay-docs-baseline-alignment-01-PLAN.md
+last_updated: "2026-04-11T19:22:58.572Z"
+last_activity: 2026-04-11
 progress:
   total_phases: 8
   completed_phases: 6
-  total_plans: 18
-  completed_plans: 18
-  percent: 100
+  total_plans: 21
+  completed_plans: 20
+  percent: 90
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-08)
 
 **Core value:** The LLM is the narrator, never the engine. Mechanical truth stays in backend code so outcomes remain consistent, inspectable, and recoverable.
-**Current focus:** Phase 43 complete — travel-and-location-state-contract-resolution closed, Phase 44 next
+**Current focus:** Phase 44 — gameplay-docs-baseline-alignment
 
 ## Current Position
 
-Phase: 43 (travel-and-location-state-contract-resolution) — COMPLETE
-Plan: 6 of 6
-Status: Ready for Phase 44 planning/execution
-Last activity: 2026-04-11 -- Completed 43-06 and Phase 43
+Phase: 44 (gameplay-docs-baseline-alignment) — EXECUTING
+Plan: 3 of 3
+Status: Ready to execute
+Last activity: 2026-04-11
 
-Progress: [██████████] 100%
+Progress: [█████████░] 90%
 
 ## Performance Metrics
 
@@ -45,6 +45,7 @@ Progress: [██████████] 100%
 
 **Recent Execution:**
 
+- Phase `44` Plan `01` — duration `8 min`, tasks `2`, files `4`
 - Phase `43` Plan `06` — duration `4 min`, tasks `2`, files `6`
 - Phase `43` Plan `04` — duration `6 min`, tasks `2`, files `5`
 - Phase `43` Plan `03` — duration `10 min`, tasks `2`, files `16`
@@ -117,6 +118,9 @@ Recent decisions affecting current work:
 - [Phase 43]: The `/game` page now filters self-target travel options in both connectedPaths and connectedTo branches so stale compatibility data cannot reintroduce current-location travel affordances.
 - [Phase 43]: Current-location movement now short-circuits at the transport layer with a deterministic no-op acknowledgment instead of emitting location_change or flowing through Oracle/Storyteller arrival behavior.
 - [Phase 43]: Fresh scaffold adjacency now suppresses self-loop edges and self-target compatibility projections so fresh-runtime regressions stay distinct from legacy/manual self-travel paths.
+- [Phase 44]: Concept docs now state product boundaries and defer detailed gameplay and runtime truth to mechanics.md and memory.md. — This prevents top-level docs from competing with the normative runtime baseline.
+- [Phase 44]: The stack doc now documents gameplay transport as REST plus SSE rather than WebSocket gameplay truth. — frontend/lib/api.ts and /game already consume targeted REST routes with SSE parsing, so the technical reference had to match live transport.
+- [Phase 44]: The legacy player-character-creation plan remains available only as historical context with an explicit superseded note. — Keeping the old plan discoverable is acceptable only if it no longer masquerades as current gameplay authority.
 
 ### Pending Todos
 
@@ -129,6 +133,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-11T18:10:07.740Z
-Stopped at: Phase 44 context gathered
-Resume file: .planning/phases/44-gameplay-docs-baseline-alignment/44-CONTEXT.md
+Last session: 2026-04-11T19:21:40.443Z
+Stopped at: Completed 44-gameplay-docs-baseline-alignment-01-PLAN.md
+Resume file: None

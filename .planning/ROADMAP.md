@@ -131,7 +131,7 @@ Plans:
   3. Gameplay docs describe the real retrieval, memory, and prompt contracts accurately enough to serve as the next planning baseline without another reconciliation pass.
 **Plans**: 3 plans
 Plans:
-- [ ] 44-01-PLAN.md — Reframe high-level docs authority, setup/handoff wording, and top-level deprecations in `concept.md`, `tech_stack.md`, and the historical player-creation plan.
+- [x] 44-01-PLAN.md — Reframe high-level docs authority, setup/handoff wording, and top-level deprecations in `concept.md`, `tech_stack.md`, and the historical player-creation plan.
 - [ ] 44-02-PLAN.md — Rewrite `mechanics.md` into the normative gameplay baseline for canonical state, target-aware Oracle support, bounded opening effects, reflection, and travel/location semantics.
 - [ ] 44-03-PLAN.md — Rewrite `memory.md` to the live runtime/retrieval contract and record a claim-by-claim resolution map for all elevated Phase 36 Group B/C items.
 
@@ -146,4 +146,4 @@ Plans:
 | 41. Checkpoint-Complete Simulation Restore | 2/2 | Complete | 2026-04-11 |
 | 42. Targeted Oracle & Start-Condition Runtime Effects | 2/2 | Complete   | 2026-04-11 |
 | 43. Travel & Location-State Contract Resolution | 6/6 | Complete   | 2026-04-11 |
-| 44. Gameplay Docs Baseline Alignment | 0/TBD | Not started | - |
+| 44. Gameplay Docs Baseline Alignment | 1/3 | In Progress|  |
