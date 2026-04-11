@@ -1,7 +1,7 @@
 ---
 phase: 43
 reviewers: [gemini, claude]
-reviewed_at: 2026-04-11T17:37:45.1651951+03:00
+reviewed_at: 2026-04-11T18:15:02.3414545+03:00
 plans_reviewed: [43-01-PLAN.md, 43-02-PLAN.md, 43-03-PLAN.md, 43-04-PLAN.md, 43-05-PLAN.md]
 ---
 
@@ -9,30 +9,32 @@ plans_reviewed: [43-01-PLAN.md, 43-02-PLAN.md, 43-03-PLAN.md, 43-04-PLAN.md, 43-
 
 ## Gemini Review
 
-# Phase 43 Plan Review: Travel & Location-State Contract Resolution
+This review covers the 5 implementation plans for **Phase 43: Travel & Location-State Contract Resolution**.
 
-## Summary
-The implementation plans for Phase 43 are exceptionally well-structured and directly address the core fidelity gaps identified in Phase 36. By treating this as a systemic repair of the location model rather than isolated feature patches, the plans ensure that travel cost and local history become authoritative, rollback-safe runtime mechanics. The transition from a flat `connectedTo` JSON field to a normalized `location_edges` table is the correct architectural move to support believable traversal and multi-tick time advancement.
+### Summary
+The plans provide a comprehensive and architecturally sound roadmap for transforming the current "teleport-based" movement into a defensible graph-based traversal system with persistent local history. By shifting from a flat JSON adjacency list to a normalized edge table and explicit location classes (Macro, Sublocation, Ephemeral), the implementation ensures that travel time and revisit history are mechanically "true" rather than just prose. The strategy of using a write-through SQLite projection for local events—linked to episodic memory—is particularly strong as it guarantees consistency with the project's strict rollback/undo/checkpoint requirements.
 
-## Strengths
-- **Architectural Integrity**: Moving the graph authority to a normalized `location_edges` table allows for first-class `travelCost` and path resolution, satisfying `GSEM-03` without over-engineering.
-- **Authoritative History**: The use of a SQLite-backed `location_recent_events` projection (Plan 03) ensures that revisit-facing history survives checkpoint restores and rollback, fulfilling the "mechanical truth" mandate.
-- **Ephemeral Node Lifecycle**: The plans explicitly address the transition of ephemeral scene nodes (D-13), ensuring their consequences survive anchoring to persistent macro locations even after the node itself expires.
-- **TDD Focus**: Plan 01 Task 2 focuses on locking regressions before implementation, which is critical for ensuring that the new graph logic doesn't regress into the old teleportation behavior.
-- **Shared Contracts**: Consistent use of `@worldforge/shared` types ensures the backend and frontend stay aligned on the new three-class location taxonomy (macro, sublocation, scene).
+### Strengths
+*   **Normalized Schema Design**: Moving from `connectedTo` JSON strings to a `location_edges` table with explicit `travelCost` is the correct engineering choice. it enables clean pathfinding and weight-based travel without ad-hoc string parsing.
+*   **Unified Traversal Contract**: Plan 02 correctly forces both the Player turn loop and NPC agents through the same `location-graph.ts` authority, preventing semantic drift where NPCs might "teleport" while the player is forced to spend time.
+*   **Ephemeral Scene Archiving**: The "anchor" logic (Plan 01/03) for scene-born locations (like a temporary alley encounter) ensures that world consequences are not lost when the temporary node is cleaned up, solving a major continuity risk.
+*   **Restoration Fidelity**: Explicitly including `location_recent_events` in the checkpoint and rollback logic (Plan 03) maintains the "mechanical truth" core value, ensuring that local history doesn't become "hallucinated" after a reload.
+*   **Proactive TDD**: The inclusion of Wave 1 failing regressions for path-bound travel and local history (Plan 01) ensures that implementation cannot "cheat" by falling back to simpler instant movement.
 
-## Concerns
-- **Archive Trigger Mechanism (Severity: LOW)**: Plan 03 mentions "archiving a scene node," but it is not explicitly clear where the *trigger* for expiration/archiving lives. While the resolver handles "expired" nodes by tick comparison, a cleanup hook or explicit "close scene" tool might be needed to finalize state mutations before archiving.
-- **Pathfinding Complexity (Severity: LOW)**: While the sandbox is currently a graph of reasonable size, the plan should explicitly favor a simple BFS/Dijkstra implementation for `resolveTravelPath` to avoid "transit simulator" scope creep (D-10).
-- **NPC Movement Cost (Severity: LOW)**: Plan 02 Task 2 notes that NPCs use the same resolver but "may not separately advance global tick." Ensure that if an NPC "beats" a player to a location via a shorter path, the simulation handles that chronological delta correctly.
+### Concerns
+*   **Tick-Jump Side Effects (MEDIUM)**: Plan 02 Task 1 advances the global campaign tick by the `totalCost` of travel. While honest, this may trigger "one-off" events in NPC/Faction simulation that were meant to happen during the intermediate ticks. The plans assume simulation runs once at the boundary; if there are threshold-critical events (e.g., "bomb explodes at T=10") and travel jumps from T=8 to T=12, the system must ensure these boundaries are still evaluated.
+*   **Migration Complexity (LOW)**: The backfill in Plan 01 for existing campaigns must handle cases where the old `connectedTo` JSON might be malformed or missing. The additive approach is safe, but the backfill script needs to be robust.
+*   **Pathfinding Edge Cases (LOW)**: If the graph has cycles or unintended shortcuts, the `resolveTravelPath` helper needs a bounded search (e.g., BFS/Dijkstra) to avoid infinite loops or confusing path selections. The plan assumes a "believable" path but doesn't specify the algorithm.
 
-## Suggestions
-- **Explicit Bidirectional Tooling**: In Plan 02 Task 2, ensure the `reveal_location` update explicitly handles the creation of the bidirectional edge in the `location_edges` table to match existing worldgen assumptions.
-- **Recent Happenings Depth**: In Plan 04 Task 2, specify a default "recency window" (e.g., last 5 events or last 50 ticks) for the `Recent happenings here` prompt section to prevent context window bloat in high-activity locations.
-- **UI "Travel Time" Visual**: In Plan 05 Task 2, consider adding a brief "Time passing..." or "Traveling..." state/indicator if a move action results in a large tick jump (cost > 1), providing the "observable cost" required by Success Criteria 1.
+### Suggestions
+*   **Tick-Advancement Policy**: In Plan 02, clarify whether intermediate simulation "ticks" should be simulated individually if travel time is large (e.g., a 10-turn journey) or if a single "summed" simulation tick is acceptable. For v1.1 fidelity, a single boundary simulation is likely sufficient, but it should be explicitly noted in the `onPostTurn` handling.
+*   **Path Summary UI**: In Plan 05, when showing connected paths, consider a "Via..." summary if the path spans multiple nodes (e.g., "To: Castle [3 turns] via Market Square") to make the graph-traversal visible to the player.
+*   **Default Travel Formula**: Standardize the default edge cost (e.g., 1 turn for sublocations, 2-3 for macro locations) during the worldgen backfill to ensure a consistent experience across all campaign types.
 
-## Risk Assessment: LOW
-The plans are highly grounded in the existing technical stack and follow established project patterns (Drizzle, Hono, Vitest). The scope is tightly guarded against over-engineering a full geographic simulation while ensuring the documented promises become mechanically real. The primary risk is simple logical errors in graph traversal, which is well-mitigated by the comprehensive validation strategy.
+### Risk Assessment: LOW
+The risks are low because the plans strictly adhere to the stack (Drizzle/SQLite) and build upon the already-verified checkpoint/restore seams from Phase 41. The phased approach—contract first, logic second, read surfaces last—prevents "broken middle" states. The primary risk is purely gameplay balance (how "fast" travel feels), which is easily tunable via the normalized edge weights once the system is live.
+
+**Verdict: Approved. The plans are ready for execution.**
 
 ---
 
@@ -42,173 +44,193 @@ The plans are highly grounded in the existing technical stack and follow establi
 
 ## Overall Phase Assessment
 
-The 5-plan decomposition is well-structured and follows a sound dependency chain: contract definition (01) → graph implementation (02) → event projection (03) → backend read surfaces (04) → frontend rendering (05). The wave-based ordering respects real data dependencies. The phase correctly treats this as a unified location-system repair rather than two disconnected patches.
+Phase 43 is a well-structured location-system repair split across 5 plans in dependency order: contract definition → travel graph → local history writes → backend reads → frontend rendering. The wave structure is sound and the dependency chain is honest. The plans are thorough, perhaps overly so for what is fundamentally a schema extension + movement rewrite + event projection + two read surfaces.
 
 ---
 
-## Plan 43-01: Shared Contract & Backend Regressions
+## Plan 43-01: Shared Contract, Schema, Migration, Regressions
 
 ### Summary
-Defines the authoritative location taxonomy in shared types and Drizzle schema, then writes failing tests that pin the Phase 43 behavioral contract before implementation begins. This is the foundational plan that all others depend on.
+Defines the shared type vocabulary, extends SQLite schema with typed locations/edges/events, adds migration backfill for existing campaigns, updates worldgen, and writes failing tests for later plans. This is the foundation plan — everything else depends on it.
 
 ### Strengths
-- Writing the contract and failing tests before implementation is the right order — prevents scope drift during later plans
-- Shared types in `@worldforge/shared` prevent backend/frontend vocabulary divergence
-- Keeping `connectedTo` as a compatibility column during migration is pragmatic
-- The `must_haves` section has concrete grep-verifiable acceptance criteria
+- Correctly front-loads the contract definition before implementation starts
+- Explicit backfill path for pre-Phase-43 campaigns prevents data loss
+- TDD approach for Task 2 locks behavior before implementation
+- `must_haves` section is concrete and grep-verifiable
+- Keeps `connectedTo` as bounded compatibility projection rather than ripping it out
 
 ### Concerns
-- **MEDIUM**: The plan adds new columns to `locations` and two new tables (`location_edges`, `location_recent_events`) but does not mention migration strategy. The project uses `runMigrations()` in `backend/src/db/migrate.ts`. Existing campaigns have SQLite databases with the old schema. If `runMigrations` relies on Drizzle's push or custom SQL, the executor needs to know whether to write a migration script or rely on Drizzle's column-add behavior. Existing `locations` rows will have `NULL` for `kind`, `persistence`, etc. unless defaults are specified or a backfill runs.
-- **MEDIUM**: Task 2's acceptance criterion says tests should "fail only because the Phase 43 implementation is not wired yet." This is a fragile expectation for TDD — tests that import non-existent modules (`location-graph.ts`) will fail at import time, not at assertion time, which may confuse the executor about whether the failure is "expected." The plan should clarify whether stub modules should be created or whether tests should mock the not-yet-existing seams.
-- **LOW**: The plan says `anchorLocationId` goes on the `locations` table, but the research suggested it for the archive/cleanup path. Having both `parentLocationId` and `anchorLocationId` on the locations table needs clearer semantics — `parent` is hierarchical (macro → sublocation), `anchor` is for consequence spillover. The executor could conflate them.
+- **MEDIUM**: Task 1 touches 5 files including schema, migration, worldgen saver, and shared types in one "auto" task. That's a lot of surface for a single atomic commit. If the migration backfill has a bug, it contaminates the entire task.
+- **MEDIUM**: The plan says Task 2 tests should "fail only because the Phase 43 implementation is not wired yet" — but this is fragile. Tests that import non-existent modules (`location-graph.ts`) will fail at import time, not at assertion time. The plan should clarify whether these tests mock the not-yet-created modules or use a different strategy.
+- **LOW**: No explicit guidance on how `connectedTo` stays in sync with `location_edges` during the transition period. Plans 02-04 will read from edges, but other code (worldgen review, world-review UI) may still read `connectedTo`. A stale projection could cause UI/backend drift.
+- **LOW**: The migration backfill populating `location_edges` from `connectedTo` JSON — does it handle malformed JSON in existing campaigns? The current `connectedTo` is a plain string column with no validation beyond "it should be JSON."
 
 ### Suggestions
-- Add a note about migration handling: either explicit `ALTER TABLE` in `migrate.ts` with safe defaults, or confirmation that Drizzle push handles column additions with defaults on existing databases
-- Specify that Task 2 should create minimal stub files (empty exports) for `location-graph.ts` so tests fail at assertion level, not at import resolution
-- Clarify the `parentLocationId` vs `anchorLocationId` distinction in the task action text — one sentence is enough
+- Split Task 1 into two: (a) shared types + schema extension, (b) migration/backfill + worldgen saver. The schema is the contract; the migration is the compatibility story. Conflating them risks a messy revert if backfill logic is wrong.
+- For Task 2, explicitly state whether tests will mock the not-yet-created `location-graph.ts` module or test against the schema/types only. "Fails because implementation isn't wired" needs a concrete strategy.
+- Add a brief note about `connectedTo` sync strategy: will `scaffold-saver` write both `connectedTo` AND `location_edges`, or only edges with a derived projection?
 
 ### Risk Assessment: **LOW-MEDIUM**
-The contract definition itself is sound. The migration gap is the main operational risk — if the executor doesn't handle it, existing campaigns will break on next load.
+The plan is solid but Task 1 scope is wide for a single commit. The TDD regression locking in Task 2 is the right call but needs clearer import/mock strategy for not-yet-created modules.
 
 ---
 
-## Plan 43-02: Graph Traversal & Travel-Time Implementation
+## Plan 43-02: Authoritative Graph Traversal & Travel-Time Cost
 
 ### Summary
-Implements the authoritative graph resolver, wires player and NPC movement through it, and replaces adjacency-only instant movement with path-bound cost-bearing travel.
+Creates `location-graph.ts` as the shared path resolver, rewires player/NPC/tool movement to use it, and makes travel consume explicit tick cost. This is the GSEM-03 implementation plan.
 
 ### Strengths
-- Clean separation: Task 1 builds the resolver + tick-advance primitive, Task 2 wires all movement consumers
-- Explicitly requires NPC movement to share the same resolver — prevents the common pitfall of diverging player/NPC movement rules
-- `reveal_location` is updated to create normalized edge rows, not just mutate `connectedTo` JSON
-- The plan correctly scopes out UI work — backend only
+- Clean separation: Task 1 builds the resolver, Task 2 wires all consumers
+- Explicit treatment of the "multi-tick advance" question: travel advances tick by `totalCost` once, post-turn simulation runs at the resulting boundary — no synthetic intermediate turns
+- NPC movement shares the same resolver for reachability but doesn't independently advance the global tick — correct asymmetry
+- Both player movement entry points (inline detection in turn-processor, storyteller `move_to` in tool-executor) are explicitly unified through one destination resolver
+- `reveal_location` is updated to write normalized edges, not just adjacency JSON
 
 ### Concerns
-- **HIGH**: The current `turn-processor.ts` movement flow (lines 357-424) uses LLM-based `detectMovement()` to identify travel intent, then does direct DB queries against `connectedTo`. The plan says to replace this with `resolveTravelPath`, but `detectMovement` returns a destination name string, not a location ID. The resolver needs a name→ID resolution step that the plan doesn't explicitly mention. If the executor doesn't handle this, movement detection will break.
-- **HIGH**: Travel consuming multiple ticks per turn is a significant gameplay change. Currently, each turn increments tick by exactly 1, and post-turn simulation (reflection, off-screen NPCs, faction ticks) keys off tick intervals. If a player travels 3 edges (cost=3), does the tick advance by 3? If so, this could trigger multiple off-screen simulation rounds in a single player turn, which may produce unexpected NPC behavior cascades. The plan mentions `advanceCampaignTick` but doesn't address the simulation interaction.
-- **MEDIUM**: The `tool-executor.ts` `handleMoveTo` function (line 751) and the `turn-processor.ts` inline movement (line 358) are two separate movement paths for the player. The plan should explicitly state whether both paths are being consolidated or whether `handleMoveTo` (tool call) and inline movement detection remain separate entry points that both route through the graph resolver.
-- **LOW**: The plan doesn't mention what happens when no path exists between two locations (disconnected graph components). The resolver returns null, but the player-facing error message should be meaningful ("You can't reach X from here" vs. "Destination not reachable").
+- **HIGH**: The plan says player travel advances campaign tick by `totalCost`. But `turn-processor.ts` currently calls `incrementTick(campaignId)` at the end of the turn (line 644). If travel also advances tick by cost, and then the normal turn-end increment fires, the player loses an extra tick. The plan must explicitly address how travel-tick-advance interacts with the existing end-of-turn `incrementTick`. Does travel replace it? Does it add to it? Does the turn-end increment become `+0` for travel turns?
+- **HIGH**: The `detectMovement` function (turn-processor.ts:127) uses an LLM call to determine if a player action is movement. If the LLM says "yes, destination is X" but X is 3 hops away with cost 5, the Oracle still evaluates the action as if it were a normal turn. But the player hasn't "done" anything mechanically — they just traveled. Does the Oracle call still fire? Does it evaluate "walking to X" and produce a strong_hit/miss? The plan doesn't address how travel interacts with the existing Oracle → Storyteller pipeline. This is a significant gameplay question.
+- **MEDIUM**: Path resolution for "multi-edge" travel — what algorithm? BFS? Dijkstra? The plan says "believable graph path" but a simple BFS finding shortest hop count ignores `travelCost` weighting. If edges have different costs, you need cost-weighted shortest path. The research recommends "start with explicit per-edge integer cost" but the resolver algorithm isn't specified.
+- **MEDIUM**: What happens if the player tries to move somewhere that requires traversing an ephemeral scene node that has been archived? The plan says "archived ephemeral scene nodes are not treated as normal traversal targets" — but if they were the only path between two persistent locations, archiving them severs the graph. Is this intended?
+- **LOW**: `advanceCampaignTick` is added to `manager.ts` and exported from `campaign/index.ts`. The existing `incrementTick` already does `currentTick + 1`. Adding a second tick-mutation path creates a subtle race risk if both are called in the same turn.
 
 ### Suggestions
-- Add explicit guidance about the name→ID resolution step in the movement flow, since `detectMovement` returns a name string
-- Address the tick-advance × simulation interaction: either cap travel-time advancement to not trigger intermediate simulation rounds, or explicitly document that multi-tick travel may trigger off-screen simulation and that this is intended
-- Clarify whether `handleMoveTo` (tool-executor) and inline movement (turn-processor) are being merged into one path or kept as two entry points sharing the resolver
-- Consider whether travel cost should be surfaced in the `state_update` SSE event so the frontend can show "Traveled 3 ticks" before the turn continues
+- **Critical**: Add explicit guidance on how travel-tick-advance composes with the existing end-of-turn `incrementTick`. Recommended: travel replaces the normal increment for that turn, so `incrementTick` at turn-end checks if travel already advanced and skips/adjusts accordingly.
+- **Critical**: Address the Oracle/Storyteller interaction for travel turns. Options: (a) movement bypasses Oracle entirely and just narrates the journey, (b) Oracle evaluates the travel action like any other but outcome only affects flavor, (c) the plan explicitly defers this to "current behavior" and documents the limitation. Any of these is fine, but silence is a bug.
+- Specify the path algorithm: cost-weighted BFS (Dijkstra) or simple hop-count BFS. For a text RPG with integer costs, Dijkstra on a small graph is trivial and correct.
+- Clarify graph connectivity after scene archival: do archived scene edges get cleaned up, or do they remain as "discovered but inactive" paths?
 
 ### Risk Assessment: **MEDIUM-HIGH**
-The graph resolver itself is straightforward, but the gameplay interaction between multi-tick travel and the existing simulation loop is under-specified and could produce surprising runtime behavior.
+The travel-tick and Oracle interaction gaps are real gameplay bugs waiting to happen. The graph resolver itself is straightforward, but the integration with the existing turn pipeline needs explicit seam documentation.
 
 ---
 
-## Plan 43-03: Location Recent-Events Projection
+## Plan 43-03: Write-Through Location Recent Happenings
 
 ### Summary
-Creates the write-through location-local history projection and integrates all authoritative event writers (player log_event, NPC dialogue, off-screen simulation, faction events) with the new seam.
+Creates `location-events.ts` as the projection seam, wires all runtime writers (player events, NPC dialogue/actions, off-screen simulation, faction tools) to write location-local history rows, and adds checkpoint restore coverage. This is the GSEM-04 write side.
 
 ### Strengths
-- Correct approach: SQLite projection from authoritative events, not vector-search-only
-- `sourceEventId` traceability preserves the link to episodic events without duplicating the full event
-- Ephemeral scene anchor semantics are explicitly addressed
-- Two-task split (create seam → integrate all writers) is a clean separation
+- Correct architectural choice: SQLite projection from authoritative events, not vector-only
+- Explicit traceability via `sourceEventId` linking back to episodic events
+- Ephemeral scene consequence retention through anchor semantics is well-specified
+- Checkpoint restore coverage is included in the same plan, not deferred
+- Two-task split (seam + core writers first, then remaining writers + restore coverage) is sensible
 
 ### Concerns
-- **MEDIUM**: The plan modifies 6 source files in Task 1 alone, plus creates a new module. The TDD cycle for this many files in a single task may be unwieldy. The executor might end up with a single massive commit covering `location-events.ts` creation + modifications to `tool-executor.ts`, `npc-tools.ts`, `npc-offscreen.ts`, `faction-tools.ts`, and `episodic-events.ts`. Task 2 then modifies the same files again. The boundary between Task 1 and Task 2 is unclear — what does Task 1 wire and what does Task 2 finish?
-- **MEDIUM**: The `storeEpisodicEvent` callers currently pass `location: ""` in many places (see `npc-tools.ts` line 125, `tool-executor.ts` line 548). The plan says to make location metadata "concrete whenever runtime state knows it," but some callers genuinely don't have a location context (e.g., off-screen NPC events where the NPC's location is resolved inside the function). The plan should clarify what happens when location context is unavailable — does the projection skip, use a sentinel, or resolve from actor state?
-- **LOW**: The plan doesn't mention the `chronicle` table entries. Faction tools write chronicle entries with location context (`targetLocation`). Should chronicle entries also project into location-recent-events, or is that deferred?
+- **MEDIUM**: Task 1 says to update `storeEpisodicEvent` callers so location metadata is concrete. But `storeEpisodicEvent` currently takes `location: string` (a free-text field, often empty string — see episodic-events.ts:201). Converting this to concrete `locationId` requires every caller to resolve location context. The plan says "when a caller lacks an explicit location... skip projection rather than writing fake sentinel locations." This is correct, but the sheer number of callers (tool-executor `log_event`, npc-tools `speak`, npc-offscreen, faction-tools) means Task 1 scope creep is likely if the executor tries to handle all of them.
+- **MEDIUM**: The plan modifies `storeEpisodicEvent` itself to project into `location_recent_events`. But `storeEpisodicEvent` writes to LanceDB (vector store), while `location_recent_events` is in SQLite (campaign state.db). These are different databases. The projection write needs the campaign's SQLite db handle, which `storeEpisodicEvent` currently doesn't receive — it only gets `campaignId` and uses `getVectorDb()`. Adding a SQLite write inside a LanceDB write function creates a coupling concern.
+- **LOW**: Two tasks both modify the same files (`tool-executor.ts`, `episodic-events.ts`). If Task 1's commit changes the module interface and Task 2 depends on it, the TDD red-green cycle for Task 2 may conflict with Task 1's green state.
 
 ### Suggestions
-- Sharpen the Task 1 / Task 2 boundary: Task 1 creates the seam + integrates `tool-executor` (player-facing) writers. Task 2 integrates NPC/faction/off-screen writers. This would make each task independently testable.
-- Add explicit handling for unknown/empty location context: either skip projection or resolve from actor's `currentLocationId`
-- State whether chronicle entries with `targetLocation` should also feed the projection
+- Consider having `recordLocationRecentEvent` as a separate call alongside `storeEpisodicEvent` rather than inside it, to keep the LanceDB writer and SQLite writer independent. Callers that know location context call both; callers that don't skip the projection.
+- Explicitly state whether the projection write uses `getDb()` (campaign SQLite) or needs a db handle passed in. This matters for testability.
+- Clarify Task 1 vs Task 2 boundary: Task 1 should create the seam + wire the player-facing `log_event` path only. Task 2 should wire NPC/faction/offscreen writers and add restore coverage. The current plan says roughly this, but the acceptance criteria overlap.
 
 ### Risk Assessment: **MEDIUM**
-The design is sound but the task boundaries are soft. The executor might either duplicate work across tasks or leave gaps.
+The core design is sound. The cross-database projection (LanceDB event → SQLite projection) needs explicit coupling guidance. Task scope overlap risk is minor.
 
 ---
 
-## Plan 43-04: Backend Read Surfaces
+## Plan 43-04: Backend Read Surfaces (API + Prompt Assembly)
 
 ### Summary
-Exposes the location-history projection and normalized path data through the world API and prompt assembly, completing the backend half of GSEM-04.
+Updates the world API to expose `connectedPaths` and `recentHappenings` per location, and extends prompt assembly to surface current-location recent history. This is the GSEM-04 read side.
 
 ### Strengths
-- Both API and prompt assembly consume the same seam — no divergence
-- The prompt section is bounded ("short meaningful window") instead of dumping full history
-- Test behaviors explicitly cover the empty-state case
-- Clean dependency on Plans 02 and 03
+- Clean read-side-only plan — no write-side changes
+- Both API and prompt assembly read the same seam, preventing drift
+- Explicit batch-loading guidance to avoid N+1 queries per location
+- Prompt section is bounded (5 events, truncation-safe) to avoid crowding higher-priority context
+- Archived scene spillover is explicitly included in both read surfaces
 
 ### Concerns
-- **MEDIUM**: The `interfaces` block references `assembleScenePrompt(...)` but the actual function in `prompt-assembler.ts` is `assemblePrompt()`, and the scene section is built by `buildSceneSection()` (line 371). The executor should know to extend `buildSceneSection` rather than looking for a non-existent `assembleScenePrompt`.
-- **LOW**: The world API currently returns locations as a flat array (line 84-88 of `campaigns.ts`). Adding `connectedPaths` and `recentHappenings` per location means the route handler needs to query the graph and events tables for each location. For campaigns with many locations, this could be N+1 queries. The plan should suggest batch loading.
-- **LOW**: The prompt assembly token budget system (`allocateBudgets`, `truncateToFit`) already manages section priorities. Adding a "Recent happenings here" section needs a priority assignment. The plan doesn't specify where it falls in the priority hierarchy.
+- **MEDIUM**: The world API currently returns `locations: worldLocations` as raw DB rows (campaigns.ts:86-88). Adding `connectedPaths` and `recentHappenings` per location means either: (a) enriching each location object inline (N+1 risk if not batched), or (b) adding separate top-level arrays. The plan says "batch-load" but doesn't specify the payload shape. If it's `locations[].connectedPaths` (inline enrichment), the frontend must handle the new shape. If it's a separate `locationPaths` map, the frontend wiring is different. This should be explicit.
+- **LOW**: The prompt assembly `Recent happenings here` section competes for token budget with existing SCENE, NPC STATES, and WORLD STATE sections. The plan says "truncation-safe" but doesn't specify the priority number. Given that SCENE is priority 2 (non-truncatable) and WORLD STATE is priority 3, where does local happenings sit? If it's inside SCENE (extending `buildSceneSection`), it inherits non-truncatable status. If it's a separate section, it needs its own priority.
+- **LOW**: No explicit treatment of what happens when a location has 100+ recent events. The plan says "cap to 5 most recent" but should also mention the DB query uses `ORDER BY tick DESC LIMIT 5` or similar to avoid scanning the full table.
 
 ### Suggestions
-- Fix the interface reference from `assembleScenePrompt` to `buildSceneSection` or `assemblePrompt`
-- Suggest batch loading: query all edges and recent events for the campaign once, then distribute per-location, rather than N+1
-- Specify that the recent-happenings prompt section should have priority 2-3 (alongside SCENE) and `canTruncate: true`
+- Specify the API payload shape: recommend inline `locations[].connectedPaths` and `locations[].recentHappenings` with batch loading via two campaign-wide queries (all edges, recent events grouped by location), then map-join in the route handler.
+- State the prompt section priority explicitly. Recommend: a separate `LOCATION HISTORY` section at priority 5-6 (truncatable), rather than embedding it in the non-truncatable SCENE section.
+- Add `LIMIT` + `ORDER BY` guidance for the recent-events query.
 
 ### Risk Assessment: **LOW**
-This is the most straightforward plan. The concerns are operational, not architectural.
+This is the simplest plan in the phase. The main risk is payload shape ambiguity, which is easily resolved during implementation.
 
 ---
 
-## Plan 43-05: Frontend Rendering
+## Plan 43-05: Frontend Parsing & Gameplay Rendering
 
 ### Summary
-Updates frontend types, parsing, and the location panel to render travel cost and recent happenings on `/game`.
+Updates frontend types/parsing to consume the richer backend payload, adds travel cost display and recent happenings to the location panel, and wires `/game` to show travel feedback.
 
 ### Strengths
-- Correctly handles backward compatibility: world-review helpers still derive legacy name-only views from the new structure
-- Reuses shared types from `@worldforge/shared` instead of duplicating
-- Keeps the move interaction simple (`go to {name}`) — no over-engineering
-- Tests cover both the parsing layer and the rendering layer
+- Backward-compatible: richer fields are optional/nullable so older payloads still work
+- Explicit compatibility story for world-review surfaces that still need name-only `connectedTo`
+- Two-task split: (1) parsing/helpers, (2) rendering — clean separation
+- Location panel gets honest empty state for happenings instead of silence
+- Travel feedback on `/game` (transient status line for multi-tick moves) is included
 
 ### Concerns
-- **MEDIUM**: The current `LocationPanel` receives `connectedLocations: Array<{ id: string; name: string }>` and the `page.tsx` derives this from `currentLocation.connectedTo.map(id => ...)`. The plan changes this to `connectedPaths` which includes `travelCost`. But the `onMove` callback still sends `go to {locationName}` as a chat action (line 468 of `page.tsx`). This means the player sees travel cost in the UI but can't influence it — they just click and the backend handles it. That's fine, but the plan should confirm this is intentional and not just an oversight. If travel takes 3 ticks, does the player see "Traveling... (3 ticks)" before the turn resolves?
-- **MEDIUM**: The `WorldData` type in `api-types.ts` is used by world-review pages (campaign creation flow), not just `/game`. Adding `connectedPaths` and `recentHappenings` to the type means the world-review scaffold editor needs to handle these fields too, or they'll be undefined during creation (before any gameplay happens). The plan mentions compatibility but should explicitly state that these fields are optional/nullable in the type.
-- **LOW**: The plan doesn't mention the `state_update` SSE event for `location_change`. Currently this event carries `locationId` and `locationName` (line 398-405 of `turn-processor.ts`). Should it also carry `travelCost` so the UI can show travel feedback during the turn?
+- **MEDIUM**: The current `connectedLocations` derivation in `page.tsx:185-191` maps `connectedTo` IDs to location objects. Plan 43-05 replaces this with `connectedPaths` which presumably has `{ destinationId, destinationName, travelCost }` shape. But `onMove` (line 467) dispatches `go to ${targetLocationName}` as a player action — this feeds back into the LLM movement detection pipeline. If travel cost is 3 ticks, the player says "go to X", the backend resolves the path and advances 3 ticks, but the LLM still processes the action through Oracle. The frontend rendering of "travel feedback" must account for the fact that the actual movement resolution happens server-side during the turn pipeline, not at button-click time. The plan should clarify the timing.
+- **LOW**: The plan says `location-panel.tsx` renders `Recent Happenings` — but the current panel is a narrow 250px sidebar (`lg:w-[250px]`). Adding another section with event summaries could make it very long. No UX guidance on scroll behavior or section collapsibility.
+- **LOW**: The `WorldData` interface in `api-types.ts` has `connectedTo: string[]` as a required field. Making `connectedPaths` optional alongside it is fine for backward compat, but the plan should specify whether `connectedTo` is still populated or becomes empty when `connectedPaths` is present.
 
 ### Suggestions
-- Make `connectedPaths` and `recentHappenings` optional in the `WorldData` location type so world-review pages don't break
-- Clarify whether multi-tick travel produces any intermediate UI feedback (loading state, travel narrative) or if it's invisible to the player
-- Consider adding `travelCost` to the `location_change` state_update event
+- Clarify travel feedback timing: the frontend shows a transient "Traveling to X (3 ticks)" message from the `state_update` SSE event, not from button click. This is already how `location_change` works, so the plan just needs to confirm the pattern.
+- Recommend keeping `connectedTo` populated as a compatibility field until all frontend consumers are migrated, then deprecate it.
+- Consider max-height or collapsible section for Recent Happenings in the narrow sidebar.
 
-### Risk Assessment: **LOW-MEDIUM**
-The frontend work is well-scoped but the multi-tick travel UX is under-specified. The player might not understand why a turn took 3 ticks instead of 1.
+### Risk Assessment: **LOW**
+Standard frontend wiring work. The travel feedback timing is the only subtlety and it follows existing patterns.
 
 ---
 
 ## Cross-Plan Concerns
 
-### 1. Migration Strategy (HIGH)
-None of the 5 plans address how existing campaigns migrate to the new schema. The `locations` table gets new columns, and two new tables are added. Existing `state.db` files need `ALTER TABLE` or Drizzle push handling. **This should be explicitly addressed in Plan 01.**
+### 1. Travel Turn Pipeline Integration (HIGH)
+**Across Plans 02 and 05**: The biggest gap in the entire phase is how travel interacts with the existing Oracle → Storyteller → post-turn-simulation pipeline. Currently:
+1. Player says "go to X"
+2. `detectMovement` (LLM call) identifies destination
+3. If adjacent and connected, player location updates immediately
+4. Oracle evaluates the action
+5. Storyteller narrates
+6. Post-turn simulation runs
+7. Tick increments by 1
 
-### 2. Multi-Tick Travel × Simulation Interaction (HIGH)
-If travel costs 3 ticks, and off-screen NPC simulation fires every 5 ticks, a player who was at tick 4 and travels 3 ticks now lands at tick 7 — triggering the tick-5 simulation batch. The plans don't address whether this is intentional. **Plan 02 needs to decide: does travel advance the global tick counter, or does it apply cost as a separate "travel time" concept?**
+Phase 43 changes step 3 to "resolve path, advance tick by cost." But steps 4-7 still fire. Does the Oracle evaluate "traveling 3 ticks to the Market"? Does the Storyteller narrate a journey? Does post-turn simulation see the jumped tick and potentially fire multiple reflection/faction cycles?
 
-### 3. Worldgen Integration (MEDIUM)
-The scaffold generator (`scaffold-generator.ts`) creates locations without `kind`, `parentLocationId`, or edges in `location_edges`. After Phase 43, newly generated worlds need to populate these fields. None of the plans address worldgen compatibility. This might be acceptable if Plan 01's defaults handle it (all generated locations default to `macro` with edges auto-derived from `connectedTo`), but it should be stated explicitly.
+**Recommendation**: Plan 02 should include explicit guidance: "Travel turns still fire the full pipeline once. Oracle evaluates the travel action. Storyteller narrates arrival. Post-turn simulation runs once at the resulting tick. No intermediate per-edge subturns."
 
-### 4. Checkpoint/Restore Coverage (MEDIUM)
-The plans mention that location-recent-events must survive restore (D-14), but no plan explicitly adds test coverage for checkpoint save → load → verify location-recent-events survive. Plan 03 or 04 should include this regression.
+### 2. Drizzle Migration Strategy (MEDIUM)
+**Plan 01**: The plan says `migrate.ts` handles additive schema changes. But Drizzle uses file-based migrations in `backend/drizzle/`. The current `runMigrations()` runs all migration files. Adding new columns to `locations` and new tables requires generating a new migration file via `npm run db:generate`. The plan doesn't mention this — it says to modify `migrate.ts` directly. If the executor adds columns via raw SQL in `migrate.ts` instead of a proper Drizzle migration, it will conflict with the Drizzle migration system.
 
-### 5. `connectedTo` Deprecation Timeline (LOW)
-Plan 01 keeps `connectedTo` as compatibility. Plans 02-05 build on normalized edges. But no plan removes or fully deprecates `connectedTo`. This is fine for Phase 43, but the tech debt should be tracked.
+**Recommendation**: Clarify whether Phase 43 schema changes go through Drizzle migration files (preferred) or through a manual `migrate.ts` hook. The existing `migrate.ts` just calls `migrate(getDb(), { migrationsFolder })`, suggesting Drizzle migrations are the intended path.
+
+### 3. Test Mock Complexity (MEDIUM)
+**Plans 01-04**: The existing test files use extensive manual mock databases (e.g., `campaigns.test.ts` has 5 levels of chained mock calls). Adding `connectedPaths`, `recentHappenings`, and `location_edges` to these mocks will make them significantly more complex. The Phase 43 regression tests will be brittle if they depend on mock call ordering.
+
+**Recommendation**: Consider introducing a lightweight test helper that creates an in-memory SQLite database with the Phase 43 schema, rather than extending the existing chain-mock pattern. This would make tests more realistic and less fragile.
+
+### 4. `connectedTo` Deprecation Timeline (LOW)
+**Across all plans**: `connectedTo` is kept as a "compatibility projection" but no plan specifies when it stops being written or read. Without an explicit deprecation timeline, it will persist indefinitely as a second source of truth.
+
+**Recommendation**: Add a note in Plan 01 or 05 that `connectedTo` should be removed or made read-only in Phase 44 (docs alignment phase).
 
 ---
 
-## Final Risk Summary
+## Final Verdict
 
-| Plan | Risk | Key Concern |
-|------|------|-------------|
-| 43-01 | LOW-MEDIUM | Migration strategy for existing campaigns |
-| 43-02 | MEDIUM-HIGH | Multi-tick travel × simulation interaction |
-| 43-03 | MEDIUM | Task boundary clarity |
-| 43-04 | LOW | Minor interface reference error |
-| 43-05 | LOW-MEDIUM | Multi-tick travel UX gap |
-| **Phase overall** | **MEDIUM** | Migration + multi-tick simulation are the two systemic risks |
+| Plan | Risk | Ready to Execute? |
+|------|------|-------------------|
+| 43-01 | LOW-MEDIUM | Yes, with Task 1 scope clarification |
+| 43-02 | **MEDIUM-HIGH** | Needs tick-advance + Oracle interaction guidance first |
+| 43-03 | MEDIUM | Yes, with cross-db coupling clarification |
+| 43-04 | LOW | Yes |
+| 43-05 | LOW | Yes |
 
-**Recommendation**: Address migration strategy in Plan 01 and the tick-advance × simulation interaction in Plan 02 before execution begins. The rest of the concerns are manageable during implementation.
+**Phase-level risk: MEDIUM.** The plans are well-structured and the dependency chain is correct. The critical gap is Plan 43-02's silence on how multi-tick travel composes with the existing turn pipeline (Oracle evaluation, tick increment, post-turn simulation). Fixing that gap before execution would prevent a gameplay-visible bug that's harder to repair retroactively.
 
 ---
 
@@ -220,33 +242,37 @@ Skipped for independence because the current runtime is Codex.
 
 ## Consensus Summary
 
-Both external reviewers agree the phase is structurally sound and correctly scoped as a unified location-system repair rather than two isolated patches. The 5-plan split is seen as coherent, dependency-correct, and appropriately bounded against over-engineering.
+The post-`--reviews` plan set is still judged structurally strong: both external reviewers agree the phase remains a coherent, bounded location-system repair with the right dependency chain and the correct architectural move toward normalized edges plus authoritative location-local history.
 
 ### Agreed Strengths
-- The phase decomposition is strong: contract first, then traversal, then persistence, then read surfaces, then frontend.
-- Normalizing the graph away from flat `connectedTo` adjacency is the right architectural direction for honest travel-time mechanics.
-- A SQLite-backed per-location recent-happenings projection is the correct authority for revisit-safe, rollback-safe local history.
-- The phase stays bounded: it does not drift into full map rendering, route planning, or full rumor simulation.
+- The 5-plan decomposition remains sound and dependency-correct.
+- Normalized edge-based travel plus SQLite-backed local history is still the right authority model.
+- Ephemeral-scene consequence retention and rollback/checkpoint alignment remain strong parts of the design.
+- The phase still stays bounded and does not drift into map-rendering or transit-sim scope.
 
 ### Agreed Concerns
-- Travel UX and semantics around multi-tick movement still need sharper explicitness:
-  - what exactly the player sees when travel costs more than 1 tick
-  - how travel cost interacts with the existing simulation cadence
-- Some execution details should be made more explicit before implementation:
-  - migration/backfill handling for existing campaigns
-  - exact movement entry-point consolidation or sharing
-  - bounded recent-happenings read windows so prompts/UI do not bloat
+- Multi-tick travel semantics are better than before but still need one last explicit seam:
+  - how travel composes with the existing turn pipeline
+  - whether the normal end-of-turn tick increment is replaced or adjusted on travel turns
+  - whether Oracle/Storyteller still process travel turns as ordinary turns
+- Migration/backfill details remain important:
+  - malformed legacy `connectedTo` JSON
+  - exact migration path through the existing Drizzle migration system
+- A few compatibility details should still be stated crisply:
+  - `connectedTo` sync/deprecation timeline
+  - optional payload behavior on frontend/world-review surfaces
+  - query/prompt bounding for large location histories
 
 ### Divergent Views
-- `Gemini` rates the overall phase risk as `LOW`, treating the remaining issues as manageable implementation detail.
-- `Claude` rates the phase `MEDIUM`, mainly because migration and multi-tick-travel × simulation interaction are not yet explicit enough.
-- `Claude` raised additional operational concerns not echoed by `Gemini`:
-  - worldgen compatibility with new location metadata
-  - restore-specific regression coverage for location recent events
-  - optionality/backward compatibility for richer frontend world payloads
+- `Gemini` now rates the phase `LOW` risk and effectively approves execution, seeing the remaining issues as tuning/documentation detail.
+- `Claude` still rates the phase `MEDIUM`, mainly because travel-turn composition with the current Oracle → Storyteller → post-turn pipeline is not explicit enough.
+- `Claude` also raises secondary concerns not emphasized by `Gemini`:
+  - Drizzle migration-file vs ad-hoc migration-path clarity
+  - test fragility from expanding existing deep mock patterns
+  - explicit `connectedTo` deprecation tracking
 
 ### Highest-Priority Follow-Up For `--reviews`
-If this feedback is incorporated into replanning, the most important additions are:
-- make migration/default/backfill handling explicit in `43-01`
-- decide and state the authoritative contract for multi-tick travel versus global simulation cadence in `43-02`
-- tighten/clarify travel feedback and compatibility behavior in `43-05`
+If this second review pass is incorporated into replanning, the most important additions are:
+- make the travel-turn pipeline contract explicit in `43-02`
+- clarify whether schema changes go through generated Drizzle migrations versus custom migration hooks in `43-01`
+- tighten the compatibility/deprecation note for `connectedTo` so it does not become a permanent dual authority
