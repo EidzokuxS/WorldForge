@@ -113,12 +113,19 @@ export function createNpcAgentTools(
       execute: async ({ dialogue, target }) => {
         const db = getDb();
         const npc = db
-          .select({ name: npcs.name })
+          .select({ name: npcs.name, currentLocationId: npcs.currentLocationId })
           .from(npcs)
           .where(eq(npcs.id, npcId))
           .get();
 
         const npcName = npc?.name ?? "Unknown NPC";
+        const currentLocation = npc?.currentLocationId
+          ? db
+              .select({ name: locations.name })
+              .from(locations)
+              .where(eq(locations.id, npc.currentLocationId))
+              .get()
+          : null;
         const participants = [npcName];
         if (target) participants.push(target);
 
@@ -127,7 +134,7 @@ export function createNpcAgentTools(
           await storeEpisodicEvent(campaignId, {
             text: `${npcName} said to ${target ?? "everyone"}: "${dialogue}"`,
             tick,
-            location: "",
+            location: currentLocation?.name ?? "",
             participants,
             importance: 3,
             type: "dialogue",

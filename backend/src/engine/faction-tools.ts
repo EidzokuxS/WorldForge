@@ -14,6 +14,7 @@ import { getDb } from "../db/index.js";
 import { factions, locations, chronicle } from "../db/schema.js";
 import { createLogger } from "../lib/index.js";
 import { parseTags } from "./parse-helpers.js";
+import { recordLocationRecentEvent } from "./location-events.js";
 
 const log = createLogger("faction-tools");
 
@@ -104,6 +105,17 @@ export function createFactionTools(campaignId: string, tick: number) {
             createdAt: Date.now(),
           })
           .run();
+
+        if (targetLocation) {
+          recordLocationRecentEvent({
+            campaignId,
+            locationRef: targetLocation,
+            tick,
+            eventType: "faction_action",
+            summary: chronicleText,
+            importance: 4,
+          });
+        }
 
         log.info(`Faction action: ${action} -> ${changes.length} tag change(s)`);
         return { success: true, changes, chronicleEntryId: entryId };
@@ -244,6 +256,15 @@ export function createFactionTools(campaignId: string, tick: number) {
               .run();
 
             locationsAffected++;
+
+            recordLocationRecentEvent({
+              campaignId,
+              locationRef: locName,
+              tick,
+              eventType: `world_${eventType}`,
+              summary: chronicleText,
+              importance: 4,
+            });
           }
         }
 

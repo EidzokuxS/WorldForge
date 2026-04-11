@@ -218,11 +218,36 @@ export async function applyOffscreenUpdate(
   }
 
   // -- Store episodic event (best-effort) --
+  const eventLocationName =
+    resolvedLocationName ??
+    update.newLocation ??
+    (npcCtx.currentCharacterRecord
+      ? hydrateStoredNpcRecord({
+          id: npcCtx.npcId,
+          campaignId,
+          name: npcCtx.npcName,
+          persona: npcCtx.storedRecord?.persona ?? "",
+          tags: npcCtx.storedRecord?.tags ?? "[]",
+          tier: npcCtx.storedRecord?.tier ?? "key",
+          currentLocationId: npcCtx.storedRecord?.currentLocationId ?? null,
+          goals:
+            npcCtx.storedRecord?.goals ??
+            '{"short_term":[],"long_term":[]}',
+          beliefs: npcCtx.storedRecord?.beliefs ?? "[]",
+          unprocessedImportance: npcCtx.storedRecord?.unprocessedImportance ?? 0,
+          inactiveTicks: npcCtx.storedRecord?.inactiveTicks ?? 0,
+          createdAt: npcCtx.storedRecord?.createdAt ?? 0,
+          characterRecord: npcCtx.currentCharacterRecord,
+          derivedTags: npcCtx.storedRecord?.derivedTags ?? null,
+        }).socialContext.currentLocationName
+      : null) ??
+    "";
+
   try {
     await storeEpisodicEvent(campaignId, {
       text: `[Off-screen] ${npcCtx.npcName}: ${update.actionSummary}`,
       tick,
-      location: update.newLocation ?? "unknown",
+      location: eventLocationName,
       participants: [npcCtx.npcName],
       importance: 3,
       type: "npc_offscreen",
