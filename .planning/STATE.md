@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
 status: executing
-stopped_at: Phase 42 discussion captured
-last_updated: "2026-04-11T14:43:00+03:00"
-last_activity: 2026-04-11 -- Captured Phase 42 targeted-oracle/start-condition context
+stopped_at: Phase 42 planned
+last_updated: "2026-04-11T15:06:00+03:00"
+last_activity: 2026-04-11 -- Planned Phase 42 targeted-oracle/start-condition runtime effects
 progress:
   total_phases: 8
   completed_phases: 4
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 ## Current Position
 
 Phase: 42 (targeted-oracle-and-start-condition-runtime-effects) — READY
-Plan: 0 of TBD
-Status: Phase 42 discussion captured — ready for planning
-Last activity: 2026-04-11 -- Captured Phase 42 targeted-oracle/start-condition context
+Plan: 0 of 2
+Status: Phase 42 planned — ready for execution
+Last activity: 2026-04-11 -- Planned Phase 42 targeted-oracle/start-condition runtime effects
 
 Progress: [██████████] 100%
 
@@ -99,6 +99,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-11T14:43:00+03:00
-Stopped at: Phase 42 discussion captured
-Resume file: .planning/phases/42-targeted-oracle-and-start-condition-runtime-effects/42-CONTEXT.md
+Last session: 2026-04-11T15:06:00+03:00
+Stopped at: Phase 42 planned
+Resume file: .planning/phases/42-targeted-oracle-and-start-condition-runtime-effects/42-01-PLAN.md
