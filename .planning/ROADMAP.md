@@ -112,12 +112,13 @@ Plans:
   1. If travel time remains in scope, moving between locations shows a consistent turn or tick cost the player can observe; otherwise the docs no longer claim that it exists.
   2. If per-location recent happenings remain in scope, revisiting a location exposes location-local state/history that matches recent events; otherwise the docs no longer claim that it exists.
   3. The chosen contract stays consistent with retry, undo, and checkpoint restore rather than existing only as prose.
-**Plans**: 4 plans
+**Plans**: 5 plans
 Plans:
 - [ ] 43-01-PLAN.md — Define the shared location contract, normalized schema surface, and backend regressions for travel plus location-local history.
 - [ ] 43-02-PLAN.md — Implement authoritative graph traversal, travel-time cost, and shared player/NPC movement semantics.
-- [ ] 43-03-PLAN.md — Implement write-through location recent happenings, ephemeral-scene consequence retention, and backend read surfaces.
-- [ ] 43-04-PLAN.md — Parse and render the repaired travel and location-history contract on `/game`.
+- [ ] 43-03-PLAN.md — Implement authoritative write-through location recent happenings and ephemeral-scene consequence retention.
+- [ ] 43-04-PLAN.md — Expose normalized path and location-history reads through backend world and prompt surfaces.
+- [ ] 43-05-PLAN.md — Parse and render the repaired travel and location-history contract on `/game`.
 
 ### Phase 44: Gameplay Docs Baseline Alignment
 **Goal**: Gameplay docs become an honest planning baseline for the repaired runtime instead of a mixed set of stale and live claims.
