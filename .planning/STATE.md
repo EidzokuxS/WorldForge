@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
-status: verifying
-stopped_at: Completed 40-03-PLAN.md
-last_updated: "2026-04-10T03:46:09Z"
-last_activity: 2026-04-10 -- Completed 40-03 plan execution
+status: planning
+stopped_at: Phase 41 context gathered
+last_updated: "2026-04-11T10:20:58.2548057Z"
+last_activity: 2026-04-11 -- Captured Phase 41 context
 progress:
   total_phases: 8
   completed_phases: 3
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-08)
 
 **Core value:** The LLM is the narrator, never the engine. Mechanical truth stays in backend code so outcomes remain consistent, inspectable, and recoverable.
-**Current focus:** Phase 40 — live-reflection-progression-triggers
+**Current focus:** Phase 41 — checkpoint-complete-simulation-restore
 
 ## Current Position
 
-Phase: 40 (live-reflection-progression-triggers) — VERIFYING
-Plan: 3 of 3
-Status: Phase complete — ready for verification
-Last activity: 2026-04-10 -- Completed 40-03 plan execution
+Phase: 41 (checkpoint-complete-simulation-restore) — PLANNING
+Plan: 0 of TBD
+Status: Context gathered — ready for planning
+Last activity: 2026-04-11 -- Captured Phase 41 context
 
 Progress: [██████████] 100%
 
@@ -97,6 +97,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-10T03:47:25.634Z
-Stopped at: Completed 40-03-PLAN.md
-Resume file: None
+Last session: 2026-04-11T10:20:36.782Z
+Stopped at: Phase 41 context gathered
+Resume file: .planning/phases/41-checkpoint-complete-simulation-restore/41-CONTEXT.md
