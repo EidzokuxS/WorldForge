@@ -146,4 +146,4 @@ Plans:
 | 41. Checkpoint-Complete Simulation Restore | 2/2 | Complete | 2026-04-11 |
 | 42. Targeted Oracle & Start-Condition Runtime Effects | 2/2 | Complete   | 2026-04-11 |
 | 43. Travel & Location-State Contract Resolution | 6/6 | Complete   | 2026-04-11 |
-| 44. Gameplay Docs Baseline Alignment | 3/3 | Complete   | 2026-04-11 |
+| 44. Gameplay Docs Baseline Alignment | 3/3 | Complete    | 2026-04-11 |
