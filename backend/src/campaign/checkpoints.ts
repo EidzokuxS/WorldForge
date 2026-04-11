@@ -1,16 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
-import { connectDb, closeDb, getSqliteConnection } from "../db/index.js";
-import { runMigrations } from "../db/migrate.js";
-import { openVectorDb, closeVectorDb } from "../vectors/connection.js";
 import { AppError } from "../lib/index.js";
 import {
   assertSafeId,
-  getCampaignDir,
-  getChatHistoryPath,
   getCheckpointsDir,
   getCheckpointDir,
 } from "./paths.js";
+import {
+  captureCampaignBundle,
+  restoreCampaignBundle,
+} from "./restore-bundle.js";
 
 export type CheckpointMeta = {
   id: string;
@@ -41,24 +40,7 @@ export async function createCheckpoint(
   fs.mkdirSync(checkpointDir, { recursive: true });
 
   try {
-    // SQLite safe backup via better-sqlite3
-    const backupDest = path.join(checkpointDir, "state.db");
-    await getSqliteConnection().backup(backupDest);
-
-    // Copy vectors directory
-    const campaignDir = getCampaignDir(campaignId);
-    const vectorsSource = path.join(campaignDir, "vectors");
-    const vectorsDest = path.join(checkpointDir, "vectors");
-    if (fs.existsSync(vectorsSource)) {
-      fs.cpSync(vectorsSource, vectorsDest, { recursive: true });
-    }
-
-    // Copy chat history
-    const chatSource = getChatHistoryPath(campaignId);
-    const chatDest = path.join(checkpointDir, "chat_history.json");
-    if (fs.existsSync(chatSource)) {
-      fs.copyFileSync(chatSource, chatDest);
-    }
+    await captureCampaignBundle(campaignId, checkpointDir, { includeVectors: true });
 
     // Write metadata
     const meta: CheckpointMeta = {
@@ -130,39 +112,7 @@ export async function loadCheckpoint(
   const meta = JSON.parse(
     fs.readFileSync(metaPath, "utf-8")
   ) as CheckpointMeta;
-
-  // Disconnect current connections
-  closeDb();
-  closeVectorDb();
-
-  const campaignDir = getCampaignDir(campaignId);
-  const dbPath = path.join(campaignDir, "state.db");
-
-  // Restore state.db
-  const checkpointDb = path.join(checkpointDir, "state.db");
-  if (fs.existsSync(checkpointDb)) {
-    fs.copyFileSync(checkpointDb, dbPath);
-  }
-
-  // Restore vectors
-  const checkpointVectors = path.join(checkpointDir, "vectors");
-  const campaignVectors = path.join(campaignDir, "vectors");
-  if (fs.existsSync(checkpointVectors)) {
-    fs.rmSync(campaignVectors, { recursive: true, force: true });
-    fs.cpSync(checkpointVectors, campaignVectors, { recursive: true });
-  }
-
-  // Restore chat history
-  const checkpointChat = path.join(checkpointDir, "chat_history.json");
-  const campaignChat = getChatHistoryPath(campaignId);
-  if (fs.existsSync(checkpointChat)) {
-    fs.copyFileSync(checkpointChat, campaignChat);
-  }
-
-  // Reconnect
-  connectDb(dbPath);
-  runMigrations();
-  await openVectorDb(campaignId);
+  await restoreCampaignBundle(campaignId, checkpointDir, { includeVectors: true });
 
   return meta;
 }

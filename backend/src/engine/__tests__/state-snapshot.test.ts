@@ -13,6 +13,7 @@ vi.mock("../../campaign/manager.js", () => ({
 
 vi.mock("../../campaign/paths.js", () => ({
   getCampaignDir: vi.fn(),
+  getCampaignConfigPath: vi.fn((campaignId: string) => `/campaigns/${campaignId}/config.json`),
   getChatHistoryPath: vi.fn((campaignId: string) => `/campaigns/${campaignId}/chat_history.json`),
 }));
 
@@ -110,11 +111,7 @@ describe("state snapshot rollback bundle", () => {
     const snapshot = {
       campaignId: CAMPAIGN_ID,
       bundleDir: "/campaigns/test-campaign-123/.turn-boundaries/bundle-001",
-      spawnedNpcIds: [],
-      spawnedItemIds: [],
-      revealedLocationIds: [],
-      createdRelationshipIds: [],
-      createdChronicleIds: [],
+      capturedAt: Date.now(),
     } as Awaited<ReturnType<typeof captureSnapshot>>;
 
     await restoreSnapshot(CAMPAIGN_ID, snapshot);
@@ -125,11 +122,11 @@ describe("state snapshot rollback bundle", () => {
     );
     expect(fs.copyFileSync).toHaveBeenCalledWith(
       expect.stringContaining("bundle-001\\config.json"),
-      expect.stringContaining(`${CAMPAIGN_ID}\\config.json`),
+      expect.stringContaining(`${CAMPAIGN_ID}/config.json`),
     );
     expect(fs.copyFileSync).toHaveBeenCalledWith(
       expect.stringContaining("bundle-001\\chat_history.json"),
-      expect.stringContaining("chat_history.json"),
+      expect.stringContaining(`${CAMPAIGN_ID}/chat_history.json`),
     );
     expect(fs.cpSync).not.toHaveBeenCalledWith(
       expect.stringContaining("vectors"),
@@ -142,11 +139,7 @@ describe("state snapshot rollback bundle", () => {
     const snapshot = {
       campaignId: CAMPAIGN_ID,
       bundleDir: "/campaigns/test-campaign-123/.turn-boundaries/bundle-001",
-      spawnedNpcIds: [],
-      spawnedItemIds: [],
-      revealedLocationIds: [],
-      createdRelationshipIds: [],
-      createdChronicleIds: [],
+      capturedAt: Date.now(),
     } as Awaited<ReturnType<typeof captureSnapshot>>;
 
     await restoreSnapshot(CAMPAIGN_ID, snapshot);

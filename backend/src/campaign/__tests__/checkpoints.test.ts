@@ -6,6 +6,7 @@ import fs from "node:fs";
 vi.mock("../paths.js", () => ({
   assertSafeId: vi.fn(),
   getCampaignDir: vi.fn((id: string) => `/campaigns/${id}`),
+  getCampaignConfigPath: vi.fn((id: string) => `/campaigns/${id}/config.json`),
   getChatHistoryPath: vi.fn((id: string) => `/campaigns/${id}/chat_history.json`),
   getCheckpointsDir: vi.fn((id: string) => `/campaigns/${id}/checkpoints`),
   getCheckpointDir: vi.fn(
@@ -28,6 +29,14 @@ vi.mock("../../db/migrate.js", () => ({
 vi.mock("../../vectors/connection.js", () => ({
   openVectorDb: vi.fn(async () => ({})),
   closeVectorDb: vi.fn(),
+}));
+
+vi.mock("../manager.js", () => ({
+  loadCampaign: vi.fn(async (campaignId: string) => ({
+    id: campaignId,
+    name: "Loaded Campaign",
+    createdAt: 1,
+  })),
 }));
 
 vi.mock("../../lib/index.js", () => {
@@ -53,6 +62,7 @@ import { closeDb, connectDb } from "../../db/index.js";
 import { openVectorDb, closeVectorDb } from "../../vectors/connection.js";
 import { runMigrations } from "../../db/migrate.js";
 import { AppError } from "../../lib/index.js";
+import { loadCampaign } from "../manager.js";
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -117,6 +127,21 @@ describe("createCheckpoint", () => {
     expect(copySpy).toHaveBeenCalledWith(
       expect.stringContaining("chat_history.json"),
       expect.stringContaining("chat_history.json")
+    );
+  });
+
+  it("copies config.json into the authoritative checkpoint bundle", async () => {
+    vi.spyOn(fs, "mkdirSync").mockImplementation(() => "");
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "cpSync").mockImplementation(() => {});
+    const copySpy = vi.spyOn(fs, "copyFileSync").mockImplementation(() => {});
+    vi.spyOn(fs, "writeFileSync").mockImplementation(() => {});
+
+    await createCheckpoint("camp-1");
+
+    expect(copySpy).toHaveBeenCalledWith(
+      expect.stringContaining("config.json"),
+      expect.stringContaining("config.json")
     );
   });
 
@@ -296,10 +321,12 @@ describe("loadCheckpoint", () => {
       { recursive: true }
     );
 
-    // Reconnect
-    expect(connectDb).toHaveBeenCalled();
-    expect(runMigrations).toHaveBeenCalled();
-    expect(openVectorDb).toHaveBeenCalledWith("camp-1");
+    // Restore config and reopen through campaign manager
+    expect(copySpy).toHaveBeenCalledWith(
+      expect.stringContaining("config.json"),
+      expect.stringContaining("config.json")
+    );
+    expect(loadCampaign).toHaveBeenCalledWith("camp-1");
 
     expect(result.id).toBe("cp-1");
   });
