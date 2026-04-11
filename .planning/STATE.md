@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
 status: executing
-stopped_at: Completed 43-01-PLAN.md
-last_updated: "2026-04-11T15:47:47.324Z"
-last_activity: 2026-04-11 -- Completed Phase 43 Plan 01
+stopped_at: Completed 43-02-PLAN.md
+last_updated: "2026-04-11T16:07:55.977Z"
+last_activity: 2026-04-11
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 17
-  completed_plans: 13
-  percent: 76
+  completed_plans: 14
+  percent: 82
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 ## Current Position
 
 Phase: 43 (travel-and-location-state-contract-resolution) — EXECUTING
-Plan: 2 of 5
-Status: Executing Phase 43
-Last activity: 2026-04-11 -- Completed Phase 43 Plan 01
+Plan: 3 of 5
+Status: Ready to execute
+Last activity: 2026-04-11
 
-Progress: [████████░░] 76%
+Progress: [████████░░] 82%
 
 ## Performance Metrics
 
@@ -45,6 +45,7 @@ Progress: [████████░░] 76%
 
 **Recent Execution:**
 
+- Phase `43` Plan `02` — duration `13 min`, tasks `2`, files `11`
 - Phase `43` Plan `01` — duration `9 min`, tasks `2`, files `14`
 - Phase `40` Plan `03` — duration `4 min`, tasks `2`, files `6`
 - Phase `40` Plan `02` — duration `4 min`, tasks `2`, files `4`
@@ -99,6 +100,9 @@ Recent decisions affecting current work:
 - [Phase 43]: Temporary scene locations may expire as nodes, but their consequences must persist into world state and memory.
 - [Phase 43]: Phase 43 keeps locations.connectedTo as a read-only compatibility projection while location_edges becomes the authoritative travel graph.
 - [Phase 43]: Phase 43 starts with failing backend regressions for multi-edge travel cost, connectedPaths payloads, and location-local recent happenings before implementation wiring.
+- [Phase 43]: Successful player travel now calls advanceCampaignTick(totalCost) and skips the normal end-of-turn increment for that turn.
+- [Phase 43]: Inline movement detection, storyteller move_to, and NPC move_to all resolve destination names through the same canonical location-graph seam before any pathing runs.
+- [Phase 43]: reveal_location creates ephemeral scene nodes plus normalized bidirectional edge rows while keeping locations.connectedTo as a compatibility projection.
 
 ### Pending Todos
 
@@ -111,6 +115,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-11T15:47:47.324Z
-Stopped at: Completed 43-01-PLAN.md
+Last session: 2026-04-11T16:07:23.071Z
+Stopped at: Completed 43-02-PLAN.md
 Resume file: None

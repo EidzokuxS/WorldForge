@@ -115,7 +115,7 @@ Plans:
 **Plans**: 5 plans
 Plans:
 - [x] 43-01-PLAN.md — Define the shared location contract, normalized schema surface, and backend regressions for travel plus location-local history.
-- [ ] 43-02-PLAN.md — Implement authoritative graph traversal, travel-time cost, and shared player/NPC movement semantics.
+- [x] 43-02-PLAN.md — Implement authoritative graph traversal, travel-time cost, and shared player/NPC movement semantics.
 - [ ] 43-03-PLAN.md — Implement authoritative write-through location recent happenings and ephemeral-scene consequence retention.
 - [ ] 43-04-PLAN.md — Expose normalized path and location-history reads through backend world and prompt surfaces.
 - [ ] 43-05-PLAN.md — Parse and render the repaired travel and location-history contract on `/game`.
@@ -140,5 +140,5 @@ Plans:
 | 40. Live Reflection & Progression Triggers | 3/3 | Complete   | 2026-04-10 |
 | 41. Checkpoint-Complete Simulation Restore | 2/2 | Complete | 2026-04-11 |
 | 42. Targeted Oracle & Start-Condition Runtime Effects | 2/2 | Complete   | 2026-04-11 |
-| 43. Travel & Location-State Contract Resolution | 1/5 | In Progress|  |
+| 43. Travel & Location-State Contract Resolution | 2/5 | In Progress|  |
 | 44. Gameplay Docs Baseline Alignment | 0/TBD | Not started | - |
