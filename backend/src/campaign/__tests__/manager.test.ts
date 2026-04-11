@@ -72,6 +72,7 @@ import {
   listCampaigns,
   readCampaignConfig,
   markGenerationComplete,
+  advanceCampaignTick,
   incrementTick,
   getActiveCampaign,
   saveIpContext,
@@ -521,6 +522,25 @@ describe("incrementTick", () => {
     );
     const data = JSON.parse(configCall![1] as string);
     expect(data.currentTick).toBe(6);
+  });
+});
+
+describe("advanceCampaignTick", () => {
+  it("writes an explicit tick delta instead of hard-coding a single increment", () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "readFileSync").mockReturnValue(
+      JSON.stringify({ name: "Test", premise: "P", createdAt: 1000, currentTick: 5 })
+    );
+    const writeSpy = vi.spyOn(fs, "writeFileSync").mockImplementation(() => {});
+
+    const result = advanceCampaignTick("test-id", 3);
+
+    expect(result).toBe(8);
+    const configCall = writeSpy.mock.calls.find(
+      (c) => typeof c[0] === "string" && c[0].includes("config.json")
+    );
+    const data = JSON.parse(configCall![1] as string);
+    expect(data.currentTick).toBe(8);
   });
 });
 
