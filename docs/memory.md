@@ -1,211 +1,191 @@
-# WorldForge: Memory & Data Architecture
+# WorldForge: Memory, Retrieval, and Restore Contract
 
-## Overview
+`docs/memory.md` is the normative runtime baseline for storage, retrieval, prompt assembly, and restore behavior. When prose and implementation diverge, backend code wins.
 
-The game has two storage systems and a prompt assembly layer:
+## Runtime Overview
 
-```
-┌─────────────────────────────────────────┐
-│           PROMPT ASSEMBLY               │
-│  (context compilation + formatting)     │
-├──────────────┬──────────────────────────┤
-│   SQLite     │     Vector DB            │
-│              │     (LanceDB)           │
-│              │                          │
-│ • Player     │ • Episodic events        │
-│ • NPCs       │ • Lore cards (Lexicon)   │
-│ • Locations   │                         │
-│ • Items      │ Retrieval:               │
-│ • Factions   │ sim×0.4+rec×0.3+imp×0.3  │
-│ • Chronicle  │                          │
-│ • Relation   │                          │
-│ •   tags     │                          │
-│ • NPC goals  │                          │
-│ • NPC beliefs│                          │
-└──────────────┴──────────────────────────┘
-```
+WorldForge has three cooperating runtime layers:
 
-SQLite is the **source of truth** — structured, queryable, file-based. The LLM cannot contradict it.
+- **SQLite** for authoritative structured state
+- **LanceDB** for semantic retrieval
+- **Prompt assembly** for the bounded context passed into Oracle-adjacent narration
 
-Vector DB is the **semantic memory** — episodic events and lore, retrieved by meaning.
+SQLite remains the source of truth for player, NPC, location, faction, relationship, chronicle, and item state. LanceDB augments that state with retrievable lore cards and episodic events; it does not replace authoritative records.
 
-## Factual State (SQLite)
+## Authoritative Structured State
 
 ### Player State
-- HP (1–5 scale: 5 = healthy, 0 = GM decides consequences)
-- Tags (dynamic array: traits, skills, flaws, status effects, wealth tier)
-- Equipped items
-- Current location node
 
-### Inventory
-A strict table of items. Each item has a name, tags, and belongs to either a character or a location node (dropped on the floor). If the Storyteller references an item not in the inventory, the backend rejects it.
+The live player baseline is assembled from the canonical player record plus SQLite-backed runtime state:
 
-### NPCs
-- Persona & Appearance (text, read-only after creation — used by Storyteller and image gen)
-- Tags (dynamic, same categories as player)
-- Current location node
-- Tier (temporary / persistent / key)
-- Goals (short-term, long-term)
-- Beliefs (synthesized by Reflection Agent)
-- Location history (recent ticks, for information flow)
+- HP on a 1-5 scale
+- current location
+- canonical start-condition data and derived opening effects
+- equipped and signature item references from the canonical loadout
+- inventory rows from the `items` table
+- derived runtime tags as compatibility shorthand
 
-### Locations
-- Name and description
-- Structural tags (`[Ruins, Ash, Dangerous]` or `[Warm, Crowded, Well-Lit]`)
-- Connected nodes (edges in the location graph)
-- Entities present (characters, items)
-- Local event log (recent events at this location)
+If live item rows exist, prompt assembly prefers those rows. If the player has no persisted owned items yet, prompt assembly can fall back to the canonical inventory seed as a compatibility snapshot.
 
-### Factions
-- Name, tags, goals, assets (owned location nodes)
-- Chronicle entries specific to this faction
+### Inventory and Equipment
 
-### Relationships
-A table of relationship tags between any two entities. Tags describe the nature of the relationship: `[Trusted Ally]`, `[Suspicious]`, `[Sworn Enemy]`, `[Owes a Debt]`, `[Fears]`, `[Respects]`. No numeric scores — the Reflection Agent sets and updates relationship tags based on events.
+Live gameplay uses the `items` table plus canonical records together. Tool-mediated transfers and spawns write explicit item ownership or location rows in SQLite, and prompt assembly reads those rows back into player and scene state.
 
-### World Chronicle
-An ordered list of major events. Each entry has a timestamp (in-game tick) and text. The Chronicle grows over the campaign and provides global context to all LLM agents.
+**Bounded pending note:** Phase 38 still tracks the remaining `inventory authority` seam. The current contract is honest but not final: gameplay has coherent item ownership rows and canonical loadout data, yet the docs do not claim one fully closed authority model beyond that bounded partial truth.
 
-## Episodic Memory (Vector DB)
+The backend does **not** act as a blanket narration filter for every hypothetical nonexistent object mentioned in prose. The narrower truthful guarantee is:
 
-Every significant action, conversation, and event is summarized into a short factual sentence and stored as a vector embedding.
+- specific **tool call** handlers resolve named entities, items, and locations against SQLite
+- invalid references return structured **error results**
+- storyteller instructions tell the narrator not to mention player items that are not present in `[PLAYER STATE]`
 
-### Entry Structure
-```json
-{
-  "text": "Player threw sand in the guard's eyes. Guard is temporarily blinded.",
-  "metadata": {
-    "tick": 42,
-    "location": "East Gate",
-    "participants": ["player", "guard_7"],
-    "importance": 4,
-    "type": "action"
-  }
-}
+That means backend validation is strong where tool execution resolves concrete names, but it is not a universal free-text rejection layer for every imagined object mention.
+
+### NPCs, Locations, Factions, and Relationships
+
+SQLite also owns:
+
+- NPC records, including canonical beliefs, goals, relationships, location, and derived tags
+- location records plus graph connectivity, present items, and location-local recent happenings
+- faction tags, goals, and chronicle-facing state
+- qualitative relationship rows between entities
+- recent world chronicle entries
+
+Prompt assembly reads this state directly when building `[NPC STATES]`, `[SCENE]`, `[WORLD STATE]`, and relationship context.
+
+## Episodic Memory
+
+Episodic memory stores summarized events in LanceDB plus supporting metadata:
+
+- `tick`
+- `location`
+- `participants`
+- `importance`
+- `type`
+
+### Importance and Writes
+
+Event importance is **caller-supplied importance**, not LLM-scored importance at write time. Writers such as `log_event` pass the value directly when storing the event, and that same importance contributes to reflection-budget accumulation.
+
+### Same-Turn Evidence
+
+Committed episodic writes can matter before embeddings exist. The live contract is:
+
+- event text is committed first
+- same-turn committed evidence is queued in memory by campaign and tick
+- reflection can read that committed evidence immediately
+- auxiliary embedding can drain the same queue later without becoming rollback-critical
+
+This preserves an honest turn boundary: reflection can see the turn's evidence even if vector embedding has not happened yet.
+
+### Retrieval
+
+When a query vector is available, episodic retrieval uses composite scoring:
+
+`similarity * 0.4 + recency * 0.3 + importance * 0.3`
+
+Prompt assembly retrieves the **top 5** episodic events for the current action query and surfaces them in `[EPISODIC MEMORY]`.
+
+## Lore Retrieval
+
+Lore cards live in a separate LanceDB collection from episodic events.
+
+The live lore contract is intentionally narrow:
+
+- lore search is **vector-only**
+- prompt assembly retrieves the **top 3** lore cards
+- retrieved cards are formatted into `[LORE CONTEXT]`
+
+This document does not claim keyword-assisted lore retrieval, wiki URL ingest, or unlimited lore dumps as part of the runtime baseline.
+
+## Reflection Contract
+
+Reflection is a SQLite-backed structured-state maintenance pass, not a free-floating flavor generator.
+
+- NPCs accumulate `unprocessedImportance`
+- reflection triggers at threshold `10`
+- reflection reads same-turn committed evidence first and semantic episodic retrieval second
+- ordinary outcomes should primarily update beliefs, goals, and relationships
+- wealth or skill upgrades require materially stronger evidence than ordinary interaction arcs
+
+The outputs of reflection are written back into canonical NPC state, which later prompt assembly exposes through `[NPC STATES]`.
+
+## Prompt Assembly Contract
+
+Prompt assembly compiles live runtime state into named sections. The active section names are:
+
+- `[SYSTEM RULES]`
+- `[WORLD PREMISE]`
+- `[SCENE]`
+- `[WORLD STATE]`
+- `[PLAYER STATE]`
+- `[NPC STATES]`
+- `[RELATIONSHIPS]`
+- `[ACTION RESULT]`
+- `[LORE CONTEXT]`
+- `[EPISODIC MEMORY]`
+- `[RECENT CONVERSATION]`
+
+Two drift corrections matter here:
+
+- the live block is `[EPISODIC MEMORY]`, not the legacy retrieved-memories name
+- the live NPC block is `[NPC STATES]`, matching the actual prompt assembler
+
+### Section Semantics
+
+- `[PLAYER STATE]` includes canonical-record-derived tags, opening-state effects, equipped items, signature items, and the current inventory view.
+- `[SCENE]` includes the current location, scene items, connected paths, and location-local recent happenings.
+- `[NPC STATES]` describes NPCs actually present at the player's location, including persona, beliefs, goals, wealth shorthand, and relationship context.
+- `[LORE CONTEXT]` injects the top 3 vector-only lore cards.
+- `[EPISODIC MEMORY]` injects the top 5 composite-ranked episodic memories.
+- `[ACTION RESULT]` contains the already-resolved Oracle chance, roll, outcome, and reasoning for narration.
+
+## Turn Finalization Boundary
+
+The player-visible turn boundary is stricter than "the storyteller finished speaking."
+
+- narration streams first
+- the backend can emit `finalizing_turn`
+- rollback-critical post-turn work runs before authoritative completion
+- `done` is the safe boundary for the next interaction
+
+Rollback-critical finalization includes present-NPC updates, off-screen NPC simulation, reflection, and faction ticks. Auxiliary embedding and optional image generation happen later and do not redefine turn completion.
+
+## Save, Load, Checkpoints, and Restore
+
+A campaign is stored as a local directory with bounded authoritative files:
+
+```text
+campaigns/{campaignId}/
+  state.db
+  config.json
+  chat_history.json
+  vectors/
 ```
 
-### Importance Scoring
-When an event is logged, a fast LLM rates it 1–10:
-- 1 — trivial (buying bread, small talk)
-- 5 — notable (winning a fight, making an ally)
-- 10 — world-changing (killing a king, destroying a city)
+### File Roles
 
-### Retrieval Strategy
-When building context for any LLM agent, the backend retrieves the most relevant episodic memories using a **composite score**:
+- `state.db` stores authoritative SQLite runtime state
+- `config.json` stores campaign-level runtime configuration such as current tick and premise-bearing metadata
+- `chat_history.json` stores persisted recent conversation
+- `vectors/` stores LanceDB data for lore cards and episodic events
 
-```
-Score = (Vector Similarity × 0.4) + (Recency × 0.3) + (Importance × 0.3)
-```
+### Authoritative Bundle Contract
 
-This ensures:
-- Relevant memories surface even if they're old.
-- Recent events are prioritized for immediate context.
-- High-importance events persist in recall regardless of time.
+The shared restore-bundle seam captures and restores:
 
-The backend fetches the **top 3–5** entries for standard prompts, more for reflection phases.
+- `state.db`
+- `config.json`
+- `chat_history.json`
+- `vectors/` only where the specific restore flow includes vectors
 
-## World Lexicon (Lore RAG)
+This matters because not every restore flow has the same scope:
 
-A separate collection in the Vector DB dedicated to **world knowledge** — the rules of the universe.
+- **checkpoint create/load** includes vectors
+- **turn-boundary retry/undo restore** uses the same bundle contract for `state.db`, `config.json`, and `chat_history.json`, but intentionally excludes vectors
 
-### The Global Premise
-A 2–3 sentence anchor injected into **every** prompt. It never changes after world generation.
+Checkpoint restore also clears campaign-scoped runtime state such as active-turn guards, last-turn snapshots, and pending same-turn committed evidence before reopening the restored branch.
 
-> `[UNIVERSE: Naruto. Shinobi villages govern the world through Chakra — spiritual/physical energy. Technology is 1990s analog. Guns do not exist. Tone: high-action anime with life-or-death stakes.]`
+## Operating Rule
 
-### Lore Cards
-Structured knowledge entries. Each card defines a concept, location, faction, ability, or rule.
-
-```json
-{
-  "term": "Sharingan",
-  "definition": "A visual jutsu of the Uchiha clan. Grants heightened perception and the ability to copy techniques. Manifests as red eyes with tomoe patterns.",
-  "category": "ability"
-}
-```
-
-### Lore Retrieval
-When the player or NPC mentions a term, the backend searches the Lore collection by keyword + vector similarity. Matching cards are injected into a `[LORE CONTEXT]` block in the prompt. Only the 2–3 most relevant cards per turn — no wiki dumps.
-
-### Lore Ingestion
-Three methods (see `concept.md` World Generation for details):
-1. **Auto-extraction** — LLM generates 30–50 lore cards from the world premise during setup.
-2. **WorldBook import** — SillyTavern worldbooks loaded directly.
-3. **Wiki scraper** — user pastes a Fandom URL, backend scrapes and chunks into lore cards.
-
-## NPC Reflections
-
-Triggered when an NPC's cumulative unprocessed event importance exceeds a threshold (sum ≥ 15). This means reflection runs more often during dramatic events and less during quiet periods — no fixed timer. Results are stored **back in SQLite** as structured data — not in a separate graph database.
-
-### How It Works
-1. Backend tracks each NPC's unprocessed importance sum. When it exceeds the threshold, retrieves the recent episodic entries involving this NPC.
-2. Reflection Agent reads them and uses its tools:
-   - `set_belief("The player is reckless and dangerous", evidence: ["Memory #12", "Memory #18"])`
-   - `set_goal("Avoid traveling alone with the player", priority: "short-term")`
-   - `set_relationship("player", "Distrusts", "Witnessed player's cruelty to prisoners")`
-3. Backend writes these to the NPC's SQLite record.
-
-Next time this NPC is in a scene, the backend includes their beliefs and goals in the prompt. The Storyteller uses this to inform the NPC's behavior — no need to re-read thousands of raw memories.
-
-## Prompt Assembly
-
-When the Storyteller generates a response, the backend constructs a structured prompt from multiple sources:
-
-```
-[SYSTEM RULES]
-You are a ruthless Game Master. Acknowledge mechanical outcomes
-and factual state above all else.
-
-[WORLD PREMISE]
-{global_premise}
-
-[SCENE]
-Location: {current_node.name} ({current_node.tags})
-Present: {entities_in_node}
-
-[PLAYER STATE]
-HP: {hp}/5 | Tags: {tags} | Equipped: {items}
-
-[NPC STATE (if in scene)]
-{npc.name}: {npc.tags}, Believes: {npc.beliefs}, Goal: {npc.current_goal}
-Relationship to Player: {relationship.tags}
-
-[LORE CONTEXT]
-{relevant_lore_cards}
-
-[RETRIEVED MEMORIES]
-{top_episodic_memories}
-
-[RECENT CONVERSATION]
-{last_5_turns}
-
-[ACTION RESULT]
-Player action: "{action_text}"
-Oracle ruling: {chance}% → {outcome} (Strong Hit/Weak Hit/Miss)
-
-[TASK]
-Narrate the outcome. Use your tools to update world state as needed.
-```
-
-The system prompt instructs the Storyteller to translate tags and state into vivid sensory description. No separate translation layer needed — the LLM natively understands `[Ruins, Ash]` as desolation and `HP: 1/5` as critically wounded.
-
-## Save / Load System
-
-A campaign is a directory. Both SQLite and LanceDB are file-based — saving is automatic (data is already on disk).
-
-```
-campaigns/
-  my-naruto-world/
-    state.db           ← SQLite: all structured data
-    vectors/            ← LanceDB persist directory
-    config.json         ← AI provider settings, world premise
-    chat_history.json   ← last N conversation turns
-```
-
-### Operations
-- **New Campaign** — creates directory, runs World Generation pipeline, initializes empty DBs.
-- **Load Campaign** — opens the directory, connects to existing DBs.
-- **Checkpoint** — snapshot of `state.db` + `memories/` into a timestamped subdirectory. Used for death recovery or "what if" branching.
-- **Delete Campaign** — removes the directory.
-
-No cloud saves, no accounts. Everything is local files.
+Future planning should treat this file as the truthful baseline for storage, retrieval, prompt sections, and restore semantics. If a later phase changes retrieval counts, prompt block names, or restore scope, update this document explicitly rather than letting older wording linger.
