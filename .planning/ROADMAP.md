@@ -86,7 +86,10 @@ Plans:
   1. Saving and loading a checkpoint restores the same gameplay state, current tick, and other campaign runtime metadata present when the checkpoint was created.
   2. After checkpoint restore, later turns reflect the restored simulation state rather than mutations from the discarded timeline.
   3. Retry, undo, and checkpoint load keep NPC autonomy, reflection, and faction updates aligned with the same restored campaign boundary.
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 41-01-PLAN.md — Converge checkpoint and turn-boundary restore onto one config-inclusive authoritative bundle contract.
+- [ ] 41-02-PLAN.md — Clear discarded-timeline runtime state so checkpoint load, retry, and undo stay on the same restored simulation boundary.
 
 ### Phase 42: Targeted Oracle & Start-Condition Runtime Effects
 **Goal**: Oracle rulings and early gameplay mechanics use real target context and structured start-condition state.
