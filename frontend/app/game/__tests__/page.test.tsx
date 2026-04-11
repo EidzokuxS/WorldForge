@@ -272,6 +272,18 @@ function renderReadyGame(history = fakeChatHistory) {
   });
 }
 
+function renderReadyGameWithWorld(worldData: typeof fakeWorldData, history = fakeChatHistory) {
+  mockedGetActive.mockResolvedValue(fakeCampaign as never);
+  mockedChatHistory.mockResolvedValue(history as never);
+  mockedGetWorld.mockResolvedValue(worldData as never);
+
+  render(<GamePage />);
+
+  return waitFor(() => {
+    expect(screen.getByTestId("location-panel")).toBeInTheDocument();
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockedGetRememberedCampaignId.mockReturnValue(null);
@@ -330,6 +342,110 @@ describe("GamePage", () => {
     expect(screen.getByTestId("location-path-count")).toHaveTextContent("1");
     expect(screen.getByTestId("location-path-names")).toHaveTextContent("Dark Forest:2");
     expect(screen.getByTestId("recent-happenings-count")).toHaveTextContent("1");
+  });
+
+  it("filters the current location out of authoritative connectedPaths travel options", async () => {
+    const worldData = {
+      ...fakeWorldData,
+      locations: [
+        {
+          ...fakeWorldData.locations[0],
+          connectedPaths: [
+            {
+              edgeId: "edge-self",
+              toLocationId: "loc-1",
+              toLocationName: "Town Square",
+              travelCost: 0,
+              discovered: true,
+            },
+            {
+              edgeId: "edge-1",
+              toLocationId: "loc-2",
+              toLocationName: "Dark Forest",
+              travelCost: 2,
+              discovered: true,
+            },
+          ],
+        },
+        fakeWorldData.locations[1],
+      ],
+    };
+
+    await renderReadyGameWithWorld(worldData);
+
+    expect(screen.getByTestId("location-path-count")).toHaveTextContent("1");
+    expect(screen.getByTestId("location-path-names")).toHaveTextContent("Dark Forest:2");
+    expect(screen.getByTestId("location-path-names")).not.toHaveTextContent("Town Square:0");
+  });
+
+  it("filters the current location out of legacy connectedTo travel options", async () => {
+    const worldData = {
+      ...fakeWorldData,
+      locations: [
+        {
+          ...fakeWorldData.locations[0],
+          connectedTo: ["loc-1", "loc-2"],
+          connectedPaths: [],
+        },
+        fakeWorldData.locations[1],
+      ],
+    };
+
+    await renderReadyGameWithWorld(worldData);
+
+    expect(screen.getByTestId("location-path-count")).toHaveTextContent("1");
+    expect(screen.getByTestId("location-path-names")).toHaveTextContent("Dark Forest:?");
+    expect(screen.getByTestId("location-path-names")).not.toHaveTextContent("Town Square:?");
+  });
+
+  it("keeps legitimate destinations and travel cost metadata after self-target filtering", async () => {
+    const worldData = {
+      ...fakeWorldData,
+      locations: [
+        {
+          ...fakeWorldData.locations[0],
+          connectedPaths: [
+            {
+              edgeId: "edge-self",
+              toLocationId: "loc-1",
+              toLocationName: "Town Square",
+              travelCost: 0,
+              discovered: true,
+            },
+            {
+              edgeId: "edge-1",
+              toLocationId: "loc-2",
+              toLocationName: "Dark Forest",
+              travelCost: 2,
+              discovered: true,
+            },
+            {
+              edgeId: "edge-2",
+              toLocationId: "loc-3",
+              toLocationName: "Moonlit Path",
+              travelCost: 1,
+              discovered: true,
+            },
+          ],
+        },
+        fakeWorldData.locations[1],
+        {
+          id: "loc-3",
+          name: "Moonlit Path",
+          description: "A winding lane lit by pale lanterns.",
+          tags: [],
+          connectedTo: ["loc-1"],
+          connectedPaths: [],
+          recentHappenings: [],
+        },
+      ],
+    };
+
+    await renderReadyGameWithWorld(worldData);
+
+    expect(screen.getByTestId("location-path-count")).toHaveTextContent("2");
+    expect(screen.getByTestId("location-path-names")).toHaveTextContent("Dark Forest:2");
+    expect(screen.getByTestId("location-path-names")).toHaveTextContent("Moonlit Path:1");
   });
 
   it("loads the remembered campaign before fetching explicit campaign history on reload", async () => {
