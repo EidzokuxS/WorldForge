@@ -410,7 +410,12 @@ describe("createNpcAgentTools", () => {
     expect(result).toHaveProperty("spoke", true);
     expect(result).toHaveProperty("dialogue", "Welcome to my shop!");
     expect(callOracle).not.toHaveBeenCalled();
-    expect(storeEpisodicEvent).toHaveBeenCalled();
+    expect(storeEpisodicEvent).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      expect.objectContaining({
+        location: "Market Square",
+      }),
+    );
   });
 
   it("increments reflection budget when present-NPC dialogue commits an episodic event", async () => {

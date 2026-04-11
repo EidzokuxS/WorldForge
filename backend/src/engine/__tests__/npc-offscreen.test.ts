@@ -379,4 +379,49 @@ describe("applyOffscreenUpdate", () => {
       3,
     );
   });
+
+  it("falls back to the NPC's authoritative current location when no newLocation is provided", async () => {
+    setupMockDb({
+      locationByName: null,
+    });
+
+    const storedNpc = createMockNpc();
+    await applyOffscreenUpdate(
+      CAMPAIGN_ID,
+      {
+        npcId: "npc-001",
+        npcName: "Lord Blackwood",
+        currentGoals: '{"short_term":["gather allies"],"long_term":["seize the throne"]}',
+        currentCharacterRecord: storedNpc.characterRecord as string,
+        storedRecord: {
+          campaignId: storedNpc.campaignId,
+          persona: storedNpc.persona,
+          tags: storedNpc.tags,
+          tier: storedNpc.tier as "temporary" | "persistent" | "key",
+          currentLocationId: storedNpc.currentLocationId,
+          goals: storedNpc.goals,
+          beliefs: storedNpc.beliefs,
+          unprocessedImportance: 0,
+          inactiveTicks: 0,
+          createdAt: 0,
+          characterRecord: storedNpc.characterRecord,
+          derivedTags: storedNpc.derivedTags,
+        },
+      },
+      {
+        npcName: "Lord Blackwood",
+        newLocation: null,
+        actionSummary: "Held a covert strategy meeting in the council hall",
+        goalProgress: null,
+      },
+      10,
+    );
+
+    expect(storeEpisodicEvent).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      expect.objectContaining({
+        location: "Council Hall",
+      }),
+    );
+  });
 });

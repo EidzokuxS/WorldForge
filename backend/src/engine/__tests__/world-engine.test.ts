@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const { recordLocationRecentEventMock } = vi.hoisted(() => ({
+  recordLocationRecentEventMock: vi.fn(),
+}));
+
 // Mock all external dependencies before imports
 vi.mock("../../db/index.js", () => ({
   getDb: vi.fn(),
@@ -13,6 +17,11 @@ vi.mock("ai", () => ({
 
 vi.mock("../../ai/provider-registry.js", () => ({
   createModel: vi.fn().mockReturnValue("mock-model"),
+}));
+
+vi.mock("../location-events.js", () => ({
+  recordLocationRecentEvent: recordLocationRecentEventMock,
+  listRecentLocationEvents: vi.fn(),
 }));
 
 import { createFactionTools } from "../faction-tools.js";
@@ -199,6 +208,66 @@ describe("createFactionTools", () => {
     const chronicleEntry = insertedValues[0]!;
     expect(chronicleEntry.text).toContain("[WORLD EVENT]");
     expect(chronicleEntry.text).toContain("Earthquake strikes the capital");
+  });
+
+  it("faction_action writes a location recent-event projection when targetLocation is concrete", async () => {
+    const faction = createMockFaction();
+    setupMockDb({
+      factions: [faction],
+      locationByName: {
+        id: "loc-west",
+        name: "Westmarch",
+        tags: '["frontier"]',
+      },
+    });
+
+    const tools = createFactionTools(CAMPAIGN_ID, TICK);
+    await tools.faction_action.execute!(
+      {
+        action: "Fortified Westmarch",
+        outcome: "Raised new barricades at the western gate",
+        targetLocation: "Westmarch",
+        tagChanges: [],
+      },
+      {} as never,
+    );
+
+    expect(recordLocationRecentEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        campaignId: CAMPAIGN_ID,
+        locationRef: "Westmarch",
+        tick: TICK,
+      }),
+    );
+  });
+
+  it("declare_world_event projects recent happenings for each affected location", async () => {
+    setupMockDb({
+      factions: [],
+      locationByName: {
+        id: "loc-east",
+        name: "Eastmarch",
+        tags: '["frontier"]',
+      },
+    });
+
+    const tools = createFactionTools(CAMPAIGN_ID, TICK);
+    await tools.declare_world_event.execute!(
+      {
+        event: "Plague sweeps the eastern provinces",
+        eventType: "plague" as const,
+        affectedLocations: ["Eastmarch"],
+      },
+      {} as never,
+    );
+
+    expect(recordLocationRecentEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        campaignId: CAMPAIGN_ID,
+        locationRef: "Eastmarch",
+        tick: TICK,
+      }),
+    );
   });
 
   it("add_chronicle_entry tool inserts chronicle row", async () => {

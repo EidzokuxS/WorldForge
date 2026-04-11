@@ -348,6 +348,32 @@ describe("loadCheckpoint", () => {
 
     expect(result.id).toBe("cp-1");
   });
+
+  it("restores state.db before reopening the campaign so persisted location_recent_events survive", async () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "readFileSync").mockReturnValue(
+      JSON.stringify({
+        id: "cp-1",
+        name: "Save",
+        description: "",
+        createdAt: 1000,
+        auto: false,
+      })
+    );
+    const copySpy = vi.spyOn(fs, "copyFileSync").mockImplementation(() => {});
+    vi.spyOn(fs, "cpSync").mockImplementation(() => {});
+    vi.spyOn(fs, "rmSync").mockImplementation(() => {});
+
+    await loadCheckpoint("camp-1", "cp-1");
+
+    const stateRestoreOrder = copySpy.mock.calls.find(
+      (call) => String(call[0]).includes("state.db") && String(call[1]).includes("state.db"),
+    );
+    expect(stateRestoreOrder).toBeDefined();
+    expect(copySpy.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(loadCampaign).mock.invocationCallOrder[0],
+    );
+  });
 });
 
 describe("deleteCheckpoint", () => {
