@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
 status: executing
-stopped_at: Completed 43-02-PLAN.md
-last_updated: "2026-04-11T16:07:55.977Z"
+stopped_at: Completed 43-03-PLAN.md
+last_updated: "2026-04-11T16:22:16.027Z"
 last_activity: 2026-04-11
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 17
-  completed_plans: 14
-  percent: 82
+  completed_plans: 15
+  percent: 88
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 ## Current Position
 
 Phase: 43 (travel-and-location-state-contract-resolution) — EXECUTING
-Plan: 3 of 5
+Plan: 4 of 5
 Status: Ready to execute
 Last activity: 2026-04-11
 
-Progress: [████████░░] 82%
+Progress: [█████████░] 88%
 
 ## Performance Metrics
 
@@ -45,6 +45,7 @@ Progress: [████████░░] 82%
 
 **Recent Execution:**
 
+- Phase `43` Plan `03` — duration `10 min`, tasks `2`, files `16`
 - Phase `43` Plan `02` — duration `13 min`, tasks `2`, files `11`
 - Phase `43` Plan `01` — duration `9 min`, tasks `2`, files `14`
 - Phase `40` Plan `03` — duration `4 min`, tasks `2`, files `6`
@@ -103,6 +104,9 @@ Recent decisions affecting current work:
 - [Phase 43]: Successful player travel now calls advanceCampaignTick(totalCost) and skips the normal end-of-turn increment for that turn.
 - [Phase 43]: Inline movement detection, storyteller move_to, and NPC move_to all resolve destination names through the same canonical location-graph seam before any pathing runs.
 - [Phase 43]: reveal_location creates ephemeral scene nodes plus normalized bidirectional edge rows while keeping locations.connectedTo as a compatibility projection.
+- [Phase 43]: Episodic commits remain the only source-traceable path into location-local history; storeEpisodicEvent writes through to SQLite projections instead of duplicating writer logic.
+- [Phase 43]: Anchored spillover is resolved at write time so archived ephemeral scenes can disappear without forcing downstream readers to reconstruct local-history consequences.
+- [Phase 43]: Faction and world simulation writers call the shared location-history seam directly only when they have concrete target locations and no episodic source event exists.
 
 ### Pending Todos
 
@@ -115,6 +119,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-11T16:07:23.071Z
-Stopped at: Completed 43-02-PLAN.md
+Last session: 2026-04-11T16:22:16.023Z
+Stopped at: Completed 43-03-PLAN.md
 Resume file: None
