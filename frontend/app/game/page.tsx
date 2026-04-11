@@ -45,6 +45,55 @@ import type { WorldData } from "@/lib/api-types";
 type TurnPhase = "idle" | "streaming" | "finalizing";
 type QuickAction = { label: string; action: string };
 
+type TravelFeedbackState = {
+  locationId: string;
+  locationName: string;
+  travelCost: number;
+  path: string[];
+};
+
+function getLocationChangeUpdate(update: unknown): TravelFeedbackState | null {
+  if (!update || typeof update !== "object") {
+    return null;
+  }
+
+  const maybeLocationChange = update as {
+    type?: unknown;
+    locationId?: unknown;
+    locationName?: unknown;
+    travelCost?: unknown;
+    path?: unknown;
+  };
+
+  if (
+    maybeLocationChange.type !== "location_change"
+    || typeof maybeLocationChange.locationId !== "string"
+    || typeof maybeLocationChange.locationName !== "string"
+    || typeof maybeLocationChange.travelCost !== "number"
+    || !Array.isArray(maybeLocationChange.path)
+  ) {
+    return null;
+  }
+
+  return {
+    locationId: maybeLocationChange.locationId,
+    locationName: maybeLocationChange.locationName,
+    travelCost: maybeLocationChange.travelCost,
+    path: maybeLocationChange.path.filter(
+      (step): step is string => typeof step === "string",
+    ),
+  };
+}
+
+function formatTravelFeedback(feedback: TravelFeedbackState): string {
+  const tickLabel = feedback.travelCost === 1 ? "1 tick" : `${feedback.travelCost} ticks`;
+  const pathSummary = feedback.path.length > 0
+    ? ` via ${feedback.path.join(" -> ")}`
+    : "";
+
+  return `Travel complete: ${feedback.locationName} reached in ${tickLabel}${pathSummary}.`;
+}
+
 export default function GamePage() {
   const router = useRouter();
   const [activeCampaign, setActiveCampaign] = useState<CampaignMeta | null>(null);
@@ -58,6 +107,7 @@ export default function GamePage() {
   const [quickActions, setQuickActions] = useState<QuickAction[]>([]);
   const [worldData, setWorldData] = useState<WorldData | null>(null);
   const [checkpointOpen, setCheckpointOpen] = useState(false);
+  const [travelFeedback, setTravelFeedback] = useState<string | null>(null);
   const bufferedQuickActionsRef = useRef<QuickAction[]>([]);
   const messagesRef = useRef<ChatMessage[]>([]);
 
@@ -182,12 +232,28 @@ export default function GamePage() {
     return worldData.locations.find((l) => l.id === player.currentLocationId) ?? null;
   }, [worldData, player]);
 
-  const connectedLocations = useMemo(() => {
+  const connectedPaths = useMemo(() => {
     if (!worldData || !currentLocation) return [];
+    if ((currentLocation.connectedPaths?.length ?? 0) > 0) {
+      return currentLocation.connectedPaths!.map((path) => ({
+        id: path.toLocationId,
+        name: path.toLocationName
+          ?? worldData.locations.find((location) => location.id === path.toLocationId)?.name
+          ?? path.toLocationId,
+        travelCost: path.travelCost,
+        pathSummary: null,
+      }));
+    }
+
     return currentLocation.connectedTo
-      .map((id) => worldData.locations.find((l) => l.id === id))
-      .filter((l): l is NonNullable<typeof l> => Boolean(l))
-      .map((l) => ({ id: l.id, name: l.name }));
+      .map((id) => worldData.locations.find((location) => location.id === id))
+      .filter((location): location is NonNullable<typeof location> => Boolean(location))
+      .map((location) => ({
+        id: location.id,
+        name: location.name,
+        travelCost: null,
+        pathSummary: null,
+      }));
   }, [worldData, currentLocation]);
 
   const npcsHere = useMemo(() => {
@@ -237,6 +303,7 @@ export default function GamePage() {
 
     setTurnPhase("streaming");
     setLastOracleResult(null);
+    setTravelFeedback(null);
     clearQuickActionState();
 
     // Track whether we successfully started receiving narrative data
@@ -265,7 +332,11 @@ export default function GamePage() {
         onOracleResult: (result) => {
           setLastOracleResult(result as OracleResultData);
         },
-        onStateUpdate: () => {
+        onStateUpdate: (update) => {
+          const locationChange = getLocationChangeUpdate(update);
+          if (locationChange) {
+            setTravelFeedback(formatTravelFeedback(locationChange));
+          }
           // Refresh world data on any state change (movement, spawn, item transfer, etc.)
           if (activeCampaign) {
             void refreshWorldData(activeCampaign.id);
@@ -324,6 +395,7 @@ export default function GamePage() {
 
     setTurnPhase("streaming");
     setLastOracleResult(null);
+    setTravelFeedback(null);
     clearQuickActionState();
 
     // Remove last assistant message (optimistic UI)
@@ -355,7 +427,11 @@ export default function GamePage() {
         onOracleResult: (result) => {
           setLastOracleResult(result as OracleResultData);
         },
-        onStateUpdate: () => {
+        onStateUpdate: (update) => {
+          const locationChange = getLocationChangeUpdate(update);
+          if (locationChange) {
+            setTravelFeedback(formatTravelFeedback(locationChange));
+          }
           if (activeCampaign) {
             void refreshWorldData(activeCampaign.id);
           }
@@ -412,6 +488,7 @@ export default function GamePage() {
       });
       clearQuickActionState();
       setLastOracleResult(null);
+      setTravelFeedback(null);
       setHasLiveTurnSnapshot(false);
       if (activeCampaign) {
         void refreshWorldData(activeCampaign.id);
@@ -528,10 +605,15 @@ export default function GamePage() {
           Saves
         </Button>
       </div>
+      {travelFeedback ? (
+        <div className="border-b border-border bg-muted/40 px-4 py-2 text-sm text-foreground/85">
+          {travelFeedback}
+        </div>
+      ) : null}
       <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">
         <LocationPanel
           location={currentLocation}
-          connectedLocations={connectedLocations}
+          connectedPaths={connectedPaths}
           npcsHere={npcsHere}
           itemsHere={itemsHere}
           onMove={handleMove}

@@ -2,14 +2,27 @@
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 
+type ConnectedPathView = {
+  id: string;
+  name: string;
+  pathSummary?: string | null;
+  travelCost?: number | null;
+};
+
 interface LocationPanelProps {
   location: {
     id: string;
     name: string;
     description: string;
     tags: string[];
+    recentHappenings?: Array<{
+      id: string;
+      summary: string;
+      tick: number;
+      eventType: string;
+    }>;
   } | null;
-  connectedLocations: Array<{ id: string; name: string }>;
+  connectedPaths: ConnectedPathView[];
   npcsHere: Array<{ id: string; name: string; tier: string }>;
   itemsHere: Array<{ id: string; name: string }>;
   onMove: (locationName: string) => void;
@@ -18,7 +31,7 @@ interface LocationPanelProps {
 
 export function LocationPanel({
   location,
-  connectedLocations,
+  connectedPaths,
   npcsHere,
   itemsHere,
   onMove,
@@ -38,6 +51,16 @@ export function LocationPanel({
       </aside>
     );
   }
+
+  const recentHappenings = location.recentHappenings ?? [];
+
+  const formatTravelCost = (travelCost?: number | null) => {
+    if (travelCost == null) {
+      return null;
+    }
+
+    return travelCost === 1 ? "1 tick" : `${travelCost} ticks`;
+  };
 
   return (
     <aside className="flex w-full flex-col border-r border-border bg-card lg:w-[250px]">
@@ -63,6 +86,28 @@ export function LocationPanel({
               </div>
             )}
             <p className="mt-2 text-sm text-foreground/90">{location.description}</p>
+          </div>
+
+          <div>
+            <h4 className="text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground">
+              Recent Happenings
+            </h4>
+            {recentHappenings.length > 0 ? (
+              <ul className="mt-2 space-y-2">
+                {recentHappenings.map((event) => (
+                  <li key={event.id} className="space-y-1 text-sm">
+                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                      Tick {event.tick}
+                    </p>
+                    <p>{event.summary}</p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-2 text-sm text-muted-foreground">
+                No recent happenings recorded here yet.
+              </p>
+            )}
           </div>
 
           {npcsHere.length > 0 && (
@@ -98,22 +143,33 @@ export function LocationPanel({
             </div>
           )}
 
-          {connectedLocations.length > 0 && (
+          {connectedPaths.length > 0 && (
             <div>
               <h4 className="text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground">
                 Paths
               </h4>
               <ul className="mt-2 space-y-1">
-                {connectedLocations.map((loc) => (
-                  <li key={loc.id}>
+                {connectedPaths.map((path) => (
+                  <li key={path.id} className="space-y-1">
                     <button
                       type="button"
                       disabled={disabled}
-                      onClick={() => onMove(loc.name)}
+                      onClick={() => onMove(path.name)}
                       className="text-sm text-primary underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline"
                     >
-                      {loc.name}
+                      {path.name}
                     </button>
+                    {(formatTravelCost(path.travelCost) || path.pathSummary) ? (
+                      <p className="text-xs text-muted-foreground">
+                        {formatTravelCost(path.travelCost) ? (
+                          <span>{formatTravelCost(path.travelCost)}</span>
+                        ) : null}
+                        {formatTravelCost(path.travelCost) && path.pathSummary ? (
+                          <span> • </span>
+                        ) : null}
+                        {path.pathSummary ? <span>{path.pathSummary}</span> : null}
+                      </p>
+                    ) : null}
                   </li>
                 ))}
               </ul>
