@@ -235,17 +235,20 @@ export default function GamePage() {
   const connectedPaths = useMemo(() => {
     if (!worldData || !currentLocation) return [];
     if ((currentLocation.connectedPaths?.length ?? 0) > 0) {
-      return currentLocation.connectedPaths!.map((path) => ({
-        id: path.toLocationId,
-        name: path.toLocationName
-          ?? worldData.locations.find((location) => location.id === path.toLocationId)?.name
-          ?? path.toLocationId,
-        travelCost: path.travelCost,
-        pathSummary: null,
-      }));
+      return currentLocation.connectedPaths!
+        .filter((path) => path.toLocationId !== currentLocation.id)
+        .map((path) => ({
+          id: path.toLocationId,
+          name: path.toLocationName
+            ?? worldData.locations.find((location) => location.id === path.toLocationId)?.name
+            ?? path.toLocationId,
+          travelCost: path.travelCost,
+          pathSummary: null,
+        }));
     }
 
     return currentLocation.connectedTo
+      .filter((id) => id !== currentLocation.id)
       .map((id) => worldData.locations.find((location) => location.id === id))
       .filter((location): location is NonNullable<typeof location> => Boolean(location))
       .map((location) => ({
