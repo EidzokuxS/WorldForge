@@ -22,6 +22,15 @@ vi.mock("../../db/index.js", () => ({
   getDb: vi.fn(),
 }));
 
+vi.mock("../../engine/location-events.js", () => ({
+  listRecentLocationEventsForLocations: vi.fn(),
+}));
+
+vi.mock("../../engine/location-graph.js", () => ({
+  listConnectedPaths: vi.fn(),
+  loadLocationGraph: vi.fn(),
+}));
+
 vi.mock("../../lib/index.js", () => ({
   getErrorMessage: vi.fn((_err: unknown, fallback: string) => fallback),
   getErrorStatus: vi.fn(() => 500),
@@ -49,6 +58,8 @@ import {
   readCampaignConfig,
 } from "../../campaign/index.js";
 import { getDb } from "../../db/index.js";
+import { listRecentLocationEventsForLocations } from "../../engine/location-events.js";
+import { listConnectedPaths, loadLocationGraph } from "../../engine/location-graph.js";
 import campaignRoutes from "../campaigns.js";
 
 const mockedList = vi.mocked(listCampaigns);
@@ -57,6 +68,11 @@ const mockedLoad = vi.mocked(loadCampaign);
 const mockedDelete = vi.mocked(deleteCampaign);
 const mockedGetActive = vi.mocked(getActiveCampaign);
 const mockedGetDb = vi.mocked(getDb);
+const mockedListRecentLocationEventsForLocations = vi.mocked(
+  listRecentLocationEventsForLocations,
+);
+const mockedListConnectedPaths = vi.mocked(listConnectedPaths);
+const mockedLoadLocationGraph = vi.mocked(loadLocationGraph);
 const mockedReadConfig = vi.mocked(readCampaignConfig);
 
 // ---------------------------------------------------------------------------
@@ -70,6 +86,12 @@ const CAMPAIGN_ID = "abc-123";
 beforeEach(() => {
   vi.clearAllMocks();
   mockedReadConfig.mockReturnValue({ personaTemplates: [] } as any);
+  mockedLoadLocationGraph.mockReturnValue({
+    locations: [],
+    edges: [],
+  } as any);
+  mockedListConnectedPaths.mockReturnValue([]);
+  mockedListRecentLocationEventsForLocations.mockReturnValue({});
 });
 
 // ---------------------------------------------------------------------------
@@ -576,6 +598,66 @@ describe("GET /:id/world", () => {
       .mockReturnValueOnce([])
       .mockReturnValueOnce([]);
 
+    mockedLoadLocationGraph.mockReturnValue({
+      locations: [
+        {
+          id: "loc-1",
+          name: "Shibuya Crossing",
+          kind: "macro",
+          persistence: "persistent",
+          archivedAtTick: null,
+          expiresAtTick: null,
+        },
+        {
+          id: "loc-2",
+          name: "Shibuya Station",
+          kind: "persistent_sublocation",
+          persistence: "persistent",
+          archivedAtTick: null,
+          expiresAtTick: null,
+        },
+      ],
+      edges: [
+        {
+          id: "edge-1",
+          fromLocationId: "loc-1",
+          toLocationId: "loc-2",
+          travelCost: 1,
+          discovered: true,
+        },
+      ],
+    } as any);
+    mockedListConnectedPaths.mockImplementation(({ fromLocationId }) =>
+      fromLocationId === "loc-1"
+        ? [
+            {
+              edgeId: "edge-1",
+              locationId: "loc-2",
+              locationName: "Shibuya Station",
+              travelCost: 1,
+            },
+          ]
+        : [],
+    );
+    mockedListRecentLocationEventsForLocations.mockReturnValue({
+      "loc-1": [
+        {
+          id: "event-1",
+          campaignId: CAMPAIGN_ID,
+          locationId: "loc-1",
+          sourceLocationId: "scene-1",
+          anchorLocationId: "loc-1",
+          sourceEventId: "evt-episodic-1",
+          eventType: "ephemeral_scene",
+          summary: "A rooftop clash spilled cursed residue into the crossing.",
+          tick: 12,
+          importance: 4,
+          archivedAtTick: 13,
+          createdAt: 1700000000000,
+        },
+      ],
+    });
+
     mockedGetDb.mockReturnValue({
       select: mockSelect,
     } as any);
@@ -587,7 +669,9 @@ describe("GET /:id/world", () => {
     expect(body.locations[0]).toMatchObject({
       connectedPaths: [
         {
+          edgeId: "edge-1",
           toLocationId: "loc-2",
+          toLocationName: "Shibuya Station",
           travelCost: 1,
         },
       ],
@@ -598,5 +682,95 @@ describe("GET /:id/world", () => {
       ],
     });
     expect(body.locations[0].connectedTo).toBeUndefined();
+    expect(mockedLoadLocationGraph).toHaveBeenCalledWith({ campaignId: CAMPAIGN_ID });
+    expect(mockedListRecentLocationEventsForLocations).toHaveBeenCalledWith({
+      campaignId: CAMPAIGN_ID,
+      locationIds: ["loc-1"],
+      limitPerLocation: 5,
+    });
+    expect(mockedListConnectedPaths).toHaveBeenCalledWith({
+      campaignId: CAMPAIGN_ID,
+      fromLocationId: "loc-1",
+      edges: expect.any(Array),
+      locations: expect.any(Array),
+    });
+  });
+
+  it("returns bounded empty fallback arrays when a location has no graph edges or local history", async () => {
+    mockedGetActive.mockReturnValue({
+      id: CAMPAIGN_ID,
+      name: "Test",
+      createdAt: "2026-01-01",
+      generationComplete: true,
+    } as any);
+
+    const mockAll = vi.fn();
+    const mockWhere = vi.fn(() => ({ all: mockAll }));
+    const mockFrom = vi.fn(() => ({ where: mockWhere }));
+    const mockSelect = vi.fn(() => ({ from: mockFrom }));
+
+    mockAll
+      .mockReturnValueOnce([
+        {
+          id: "loc-1",
+          name: "Shibuya Crossing",
+          description: "Macro hub",
+          connectedTo: '["loc-2"]',
+        },
+        {
+          id: "loc-2",
+          name: "Quiet Shrine",
+          description: "Still and empty",
+          connectedTo: "[]",
+        },
+      ])
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([]);
+
+    mockedLoadLocationGraph.mockReturnValue({
+      locations: [
+        {
+          id: "loc-1",
+          name: "Shibuya Crossing",
+          kind: "macro",
+          persistence: "persistent",
+          archivedAtTick: null,
+          expiresAtTick: null,
+        },
+        {
+          id: "loc-2",
+          name: "Quiet Shrine",
+          kind: "persistent_sublocation",
+          persistence: "persistent",
+          archivedAtTick: null,
+          expiresAtTick: null,
+        },
+      ],
+      edges: [],
+    } as any);
+    mockedListRecentLocationEventsForLocations.mockReturnValue({});
+
+    mockedGetDb.mockReturnValue({
+      select: mockSelect,
+    } as any);
+
+    const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/world`);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.locations).toEqual([
+      expect.objectContaining({
+        id: "loc-1",
+        connectedPaths: [],
+        recentHappenings: [],
+      }),
+      expect.objectContaining({
+        id: "loc-2",
+        connectedPaths: [],
+        recentHappenings: [],
+      }),
+    ]);
   });
 });
