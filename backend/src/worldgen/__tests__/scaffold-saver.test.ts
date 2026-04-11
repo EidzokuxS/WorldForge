@@ -281,6 +281,37 @@ describe("saveScaffoldToDb", () => {
     }
   });
 
+  it("skips self-loop edges and self-target compatibility adjacency for fresh scaffold persistence", () => {
+    const scaffold = buildScaffold();
+    scaffold.locations[0] = {
+      ...scaffold.locations[0]!,
+      connectedTo: ["Castle Keep", "Dark Forest"],
+    };
+
+    saveScaffoldToDb("campaign-1", scaffold);
+
+    const edgeInserts = dbCalls.filter(
+      (c) => c.op === "insert" && c.table === "location_edges",
+    );
+    expect(edgeInserts).toHaveLength(2);
+    expect(edgeInserts).not.toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          fromLocationId: "uuid-1",
+          toLocationId: "uuid-1",
+        }),
+      }),
+    );
+
+    const locationUpdates = dbCalls.filter(
+      (c) => c.op === "update" && c.table === "locations",
+    );
+    const firstConnected = JSON.parse(
+      (locationUpdates[0]!.data as Record<string, unknown>).connectedTo as string,
+    ) as string[];
+    expect(firstConnected).toEqual(["uuid-2"]);
+  });
+
   it("insertFactions creates rows with name, tags/goals/assets as JSON", () => {
     saveScaffoldToDb("campaign-1", buildScaffold());
     const factionInserts = dbCalls.filter(

@@ -965,6 +965,149 @@ describe("processTurn", () => {
       expect(advanceCampaignTick).toHaveBeenCalledWith(CAMPAIGN_ID, 1);
     });
 
+    it("treats travel to the current location as a deterministic no-op", async () => {
+      vi.mocked(safeGenerateObject).mockResolvedValue({
+        object: { isMovement: true, destination: "Town Square" },
+      } as never);
+
+      const playerRow = {
+        id: "player-1",
+        campaignId: CAMPAIGN_ID,
+        name: "Hero",
+        tags: '["warrior"]',
+        equippedItems: "[]",
+        race: "Human",
+        gender: "",
+        age: "",
+        appearance: "",
+        currentLocationId: "loc-1",
+        characterRecord: JSON.stringify({
+          identity: {
+            id: "player-1",
+            campaignId: CAMPAIGN_ID,
+            role: "player",
+            tier: "key",
+            displayName: "Hero",
+            canonicalStatus: "original",
+          },
+          profile: {
+            species: "Human",
+            gender: "",
+            ageText: "",
+            appearance: "",
+            backgroundSummary: "",
+            personaSummary: "",
+          },
+          socialContext: {
+            factionId: null,
+            factionName: null,
+            homeLocationId: null,
+            homeLocationName: null,
+            currentLocationId: "loc-1",
+            currentLocationName: "Town Square",
+            relationshipRefs: [],
+            socialStatus: [],
+            originMode: "resident",
+          },
+          motivations: {
+            shortTermGoals: [],
+            longTermGoals: [],
+            beliefs: [],
+            drives: [],
+            frictions: [],
+          },
+          capabilities: {
+            traits: [],
+            skills: [],
+            flaws: [],
+            specialties: [],
+            wealthTier: null,
+          },
+          state: {
+            hp: 5,
+            conditions: [],
+            statusFlags: [],
+            activityState: "active",
+          },
+          loadout: {
+            inventorySeed: [],
+            equippedItemRefs: [],
+            currencyNotes: "",
+            signatureItems: [],
+          },
+          startConditions: {},
+          provenance: {
+            sourceKind: "generator",
+            importMode: null,
+            templateId: null,
+            archetypePrompt: null,
+            worldgenOrigin: null,
+            legacyTags: [],
+          },
+        }),
+        derivedTags: "[]",
+      };
+      const currentLocation = {
+        id: "loc-1",
+        campaignId: CAMPAIGN_ID,
+        name: "Town Square",
+        description: "A bustling square",
+        tags: '["urban"]',
+        connectedTo: '["loc-2"]',
+        isStarting: true,
+      };
+      const edgeRows = [
+        {
+          id: "edge-1",
+          campaignId: CAMPAIGN_ID,
+          fromLocationId: "loc-1",
+          toLocationId: "loc-2",
+          travelCost: 1,
+          discovered: true,
+        },
+      ];
+
+      const mockDb = createEntityLookupDb({
+        playerRow,
+        locationRows: [currentLocation],
+        edgeRows,
+      });
+
+      (getDb as Mock).mockReturnValue(mockDb);
+      (readCampaignConfig as Mock).mockReturnValue({ currentTick: 5 });
+
+      const events = await collectEvents(
+        processTurn(
+          createTestOptions({
+            playerAction: "go to Town Square",
+            intent: "Travel to Town Square",
+            method: "walking back to the square",
+          }),
+        ),
+      );
+
+      expect(events).toEqual([
+        { type: "narrative", data: { text: "You remain at Town Square." } },
+        { type: "done", data: { tick: 5 } },
+      ]);
+      expect(events).not.toContainEqual(
+        expect.objectContaining({
+          type: "state_update",
+          data: expect.objectContaining({ type: "location_change" }),
+        }),
+      );
+      expect(appendChatMessages).toHaveBeenNthCalledWith(1, CAMPAIGN_ID, [
+        { role: "user", content: "go to Town Square" },
+      ]);
+      expect(appendChatMessages).toHaveBeenNthCalledWith(2, CAMPAIGN_ID, [
+        { role: "assistant", content: "You remain at Town Square." },
+      ]);
+      expect(callOracle).not.toHaveBeenCalled();
+      expect(streamText).not.toHaveBeenCalled();
+      expect(advanceCampaignTick).not.toHaveBeenCalled();
+      expect(incrementTick).not.toHaveBeenCalled();
+    });
+
     it("does not block movement to non-connected location, passes through to Oracle", async () => {
       vi.mocked(safeGenerateObject).mockResolvedValue({ object: { isMovement: true, destination: "the tavern" } } as never);
 
