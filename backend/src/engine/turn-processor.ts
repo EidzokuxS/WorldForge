@@ -456,6 +456,15 @@ export async function* processTurn(
     });
 
     if (destination && player.currentLocationId) {
+      if (destination.locationId === player.currentLocationId) {
+        const noOpNarrative = `You remain at ${destination.locationName}.`;
+        appendChatMessages(campaignId, [{ role: "user", content: playerAction }]);
+        appendChatMessages(campaignId, [{ role: "assistant", content: noOpNarrative }]);
+        yield { type: "narrative", data: { text: noOpNarrative } };
+        yield { type: "done", data: { tick: currentTick } };
+        return;
+      }
+
       const travelPath = resolveTravelPath({
         campaignId,
         fromLocationId: player.currentLocationId,

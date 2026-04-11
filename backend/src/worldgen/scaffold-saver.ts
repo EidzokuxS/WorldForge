@@ -92,6 +92,7 @@ function updateAdjacency(
     for (const connectionName of location.connectedTo) {
       const connectionId = locationIds.get(connectionName);
       if (!connectionId) continue;
+      if (connectionId === locationId) continue;
 
       adjacency.get(locationId)!.add(connectionId);
       if (!adjacency.has(connectionId)) {
@@ -102,7 +103,9 @@ function updateAdjacency(
   }
 
   for (const [locationId, connectedSet] of adjacency) {
-    for (const targetId of connectedSet) {
+    const connectedTargets = [...connectedSet].filter((targetId) => targetId !== locationId);
+
+    for (const targetId of connectedTargets) {
       tx.insert(locationEdges)
         .values({
           id: crypto.randomUUID(),
@@ -116,7 +119,7 @@ function updateAdjacency(
     }
 
     tx.update(locations)
-      .set({ connectedTo: JSON.stringify([...connectedSet]) })
+      .set({ connectedTo: JSON.stringify(connectedTargets) })
       .where(eq(locations.id, locationId))
       .run();
   }
