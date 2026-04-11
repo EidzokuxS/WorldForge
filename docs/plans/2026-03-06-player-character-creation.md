@@ -1,5 +1,10 @@
 # Player Character Creation — Implementation Plan
 
+> **Historical note**
+> This plan is retained as design history and is **superseded** as a live gameplay baseline. For current runtime truth, use `docs/mechanics.md` and `docs/memory.md`.
+>
+> It predates the canonical `CharacterRecord` contract, structured `startConditions`, bounded opening-state runtime effects, and the still-open Phase 38 inventory/equipment authority seam. Read it as historical implementation context, not current product authority.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Build a character creation page where users describe a character in free text, have AI parse it into structured data, edit the result, and proceed to the game.
