@@ -4,18 +4,12 @@ import { locationEdges, locations } from "../db/schema.js";
 
 export type LocationGraphLocation = Pick<
   typeof locations.$inferSelect,
-  | "id"
-  | "campaignId"
-  | "name"
-  | "kind"
-  | "persistence"
-  | "archivedAtTick"
-  | "expiresAtTick"
+  "id" | "name" | "kind" | "persistence" | "archivedAtTick" | "expiresAtTick"
 >;
 
 export type LocationGraphEdge = Pick<
   typeof locationEdges.$inferSelect,
-  "id" | "campaignId" | "fromLocationId" | "toLocationId" | "travelCost" | "discovered"
+  "id" | "fromLocationId" | "toLocationId" | "travelCost" | "discovered"
 >;
 
 export type ResolvedLocationTarget = {
@@ -351,6 +345,9 @@ export function listConnectedPaths({
     .filter((edge) => includeUndiscovered || edge.discovered)
     .map((edge) => {
       const target = locationById.get(edge.toLocationId);
+      if (!target) {
+        return null;
+      }
       if (!isTraversableLocation(target, currentTick, allowArchived)) {
         return null;
       }

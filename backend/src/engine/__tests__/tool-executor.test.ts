@@ -29,12 +29,14 @@ const TICK = 5;
 function mockEntity(entity: { id: string; name: string; tags: string }) {
   return {
     get: vi.fn().mockReturnValue(entity),
+    all: vi.fn().mockReturnValue([entity]),
   };
 }
 
 function mockNoEntity() {
   return {
     get: vi.fn().mockReturnValue(undefined),
+    all: vi.fn().mockReturnValue([]),
   };
 }
 
@@ -442,6 +444,7 @@ describe("executeToolCall", () => {
             return {
               where: vi.fn().mockReturnValue({
                 get: vi.fn().mockReturnValue(existingLocation),
+                all: vi.fn().mockReturnValue([existingLocation]),
               }),
             };
           }
@@ -449,6 +452,7 @@ describe("executeToolCall", () => {
           return {
             where: vi.fn().mockReturnValue({
               get: vi.fn().mockReturnValue({ ...existingLocation, connectedTo: "[]" }),
+              all: vi.fn().mockReturnValue([{ ...existingLocation, connectedTo: "[]" }]),
             }),
           };
         }),

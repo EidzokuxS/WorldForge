@@ -13,6 +13,7 @@ import {
   players,
   npcs,
   locations,
+  locationEdges,
   items,
   factions,
   relationships,
@@ -30,6 +31,12 @@ import {
   projectNpcRecord,
   projectPlayerRecord,
 } from "../character/record-adapters.js";
+import {
+  listConnectedPaths,
+  loadLocationGraph,
+  resolveLocationTarget,
+  resolveTravelPath,
+} from "./location-graph.js";
 
 const log = createLogger("tool-executor");
 
@@ -696,7 +703,10 @@ function handleRevealLocation(
   const tags = args.tags as string[];
   const connectedToName = args.connectedToName as string;
 
-  const existingLocation = resolveEntity(campaignId, connectedToName, "location");
+  const existingLocation = resolveLocationTarget({
+    targetName: connectedToName,
+    locations: loadLocationGraph({ campaignId }).locations,
+  });
   if (!existingLocation) {
     return { success: false, error: `Connected location not found: ${connectedToName}` };
   }
@@ -711,17 +721,41 @@ function handleRevealLocation(
       campaignId,
       name,
       description,
+      kind: "ephemeral_scene",
+      anchorLocationId: existingLocation.locationId,
+      persistence: "ephemeral",
       tags: JSON.stringify(tags),
       isStarting: false,
-      connectedTo: JSON.stringify([existingLocation.id]),
+      connectedTo: JSON.stringify([existingLocation.locationId]),
     })
+    .run();
+
+  db.insert(locationEdges)
+    .values([
+      {
+        id: crypto.randomUUID(),
+        campaignId,
+        fromLocationId: existingLocation.locationId,
+        toLocationId: id,
+        travelCost: 1,
+        discovered: true,
+      },
+      {
+        id: crypto.randomUUID(),
+        campaignId,
+        fromLocationId: id,
+        toLocationId: existingLocation.locationId,
+        travelCost: 1,
+        discovered: true,
+      },
+    ])
     .run();
 
   // Update existing location's connectedTo to include new location (bidirectional)
   const existingRow = db
     .select({ connectedTo: locations.connectedTo })
     .from(locations)
-    .where(eq(locations.id, existingLocation.id))
+    .where(eq(locations.id, existingLocation.locationId))
     .get();
 
   const existingConnections = existingRow
@@ -739,18 +773,19 @@ function handleRevealLocation(
 
   db.update(locations)
     .set({ connectedTo: JSON.stringify(existingConnections) })
-    .where(eq(locations.id, existingLocation.id))
+    .where(eq(locations.id, existingLocation.locationId))
     .run();
 
   return {
     success: true,
-    result: { id, name, connectedTo: existingLocation.name },
+    result: { id, name, connectedTo: existingLocation.locationName },
   };
 }
 
 function handleMoveTo(
   campaignId: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  tick: number,
 ): ToolResult {
   const targetLocationName = args.targetLocationName as string;
 
@@ -764,43 +799,38 @@ function handleMoveTo(
   if (!player) return { success: false, error: "No player found" };
   if (!player.currentLocationId) return { success: false, error: "Player has no current location" };
 
-  // Resolve destination by name (case-insensitive)
-  const destination = db
-    .select()
-    .from(locations)
-    .where(
-      sql`${locations.campaignId} = ${campaignId} AND LOWER(${locations.name}) = LOWER(${targetLocationName})`
-    )
-    .get();
+  const locationGraph = loadLocationGraph({ campaignId });
+  const destination = resolveLocationTarget({
+    targetName: targetLocationName,
+    locations: locationGraph.locations,
+    currentTick: tick,
+  });
 
   if (!destination) return { success: false, error: `Location not found: ${targetLocationName}` };
 
-  // Check connectivity
   const currentLoc = db
-    .select({ connectedTo: locations.connectedTo })
+    .select({ id: locations.id, name: locations.name })
     .from(locations)
     .where(eq(locations.id, player.currentLocationId))
     .get();
 
-  let connectedIds: string[] = [];
-  if (currentLoc) {
-    try {
-      connectedIds = JSON.parse(currentLoc.connectedTo) as string[];
-    } catch {
-      connectedIds = [];
-    }
-  }
+  const travelPath = resolveTravelPath({
+    campaignId,
+    fromLocationId: player.currentLocationId,
+    toLocationId: destination.locationId,
+    edges: locationGraph.edges,
+    locations: locationGraph.locations,
+    currentTick: tick,
+  });
 
-  if (!connectedIds.includes(destination.id)) {
-    // List available paths for LLM retry
-    const allLocs = db
-      .select({ id: locations.id, name: locations.name })
-      .from(locations)
-      .where(eq(locations.campaignId, campaignId))
-      .all();
-    const reachable = allLocs
-      .filter((l) => connectedIds.includes(l.id))
-      .map((l) => l.name);
+  if (!travelPath) {
+    const reachable = listConnectedPaths({
+      campaignId,
+      fromLocationId: player.currentLocationId,
+      edges: locationGraph.edges,
+      locations: locationGraph.locations,
+      currentTick: tick,
+    }).map((path) => path.locationName);
     return {
       success: false,
       error: `${targetLocationName} is not connected to current location. Available paths: ${reachable.join(", ")}`,
@@ -808,8 +838,9 @@ function handleMoveTo(
   }
 
   // Move player
+  const destinationName = destination.locationName;
   const updatedPlayer = hydrateStoredPlayerRecord(player, {
-    currentLocationName: destination.name,
+    currentLocationName: destinationName,
   });
 
   db.update(players)
@@ -817,16 +848,28 @@ function handleMoveTo(
       ...updatedPlayer,
       socialContext: {
         ...updatedPlayer.socialContext,
-        currentLocationId: destination.id,
-        currentLocationName: destination.name,
+        currentLocationId: destination.locationId,
+        currentLocationName: destinationName,
       },
     }))
     .where(eq(players.id, player.id))
     .run();
 
+  const locationNameById = new Map(
+    locationGraph.locations.map((location) => [location.id, location.name]),
+  );
+  const path = travelPath.locationIds
+    .map((locationId) => locationNameById.get(locationId))
+    .filter((locationName): locationName is string => Boolean(locationName));
+
   return {
     success: true,
-    result: { locationId: destination.id, locationName: destination.name },
+    result: {
+      locationId: destination.locationId,
+      locationName: destinationName,
+      travelCost: travelPath.totalTravelCost,
+      path,
+    },
   };
 }
 
@@ -1001,7 +1044,7 @@ export async function executeToolCall(
       case "set_condition":
         return await handleSetCondition(campaignId, args, outcomeTier);
       case "move_to":
-        return await handleMoveTo(campaignId, args);
+        return await handleMoveTo(campaignId, args, tick);
       case "transfer_item":
         return await handleTransferItem(campaignId, args);
       default:

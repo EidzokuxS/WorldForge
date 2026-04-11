@@ -16,6 +16,7 @@ import { createStorytellerTools } from "./tool-schemas.js";
 import {
   getChatHistory,
   appendChatMessages,
+  advanceCampaignTick,
   incrementTick,
   readCampaignConfig,
 } from "../campaign/index.js";
@@ -30,6 +31,12 @@ import {
 import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
 import { resolveActionTargetContext } from "./target-context.js";
 import { applyStartConditionEffects } from "./start-condition-runtime.js";
+import {
+  listConnectedPaths,
+  loadLocationGraph,
+  resolveLocationTarget,
+  resolveTravelPath,
+} from "./location-graph.js";
 
 const log = createLogger("turn-processor");
 
@@ -70,7 +77,9 @@ export interface TurnSummary {
   narrativeText: string;
 }
 
-const TURN_FINALIZATION_TIMEOUT_MS = 60_000;
+// Finalization is authoritative turn work. Give it a long ceiling instead of
+// rolling back a turn mid-reflection or mid-simulation.
+const TURN_FINALIZATION_TIMEOUT_MS = 20 * 60_000;
 
 function persistPlayerRuntimeRecord(
   db: ReturnType<typeof getDb>,
@@ -109,6 +118,85 @@ function withTimeout<T>(
       },
     );
   });
+}
+
+type SuccessfulTravel = {
+  locationId: string;
+  locationName: string;
+  travelCost: number;
+  tickAdvance: number;
+  path: string[];
+};
+
+function persistPlayerLocation(
+  db: ReturnType<typeof getDb>,
+  player: typeof players.$inferSelect,
+  locationId: string,
+  locationName: string,
+) {
+  const updatedPlayer = hydrateStoredPlayerRecord(player, {
+    currentLocationName: locationName,
+  });
+
+  db.update(players)
+    .set(
+      projectPlayerRecord({
+        ...updatedPlayer,
+        socialContext: {
+          ...updatedPlayer.socialContext,
+          currentLocationId: locationId,
+          currentLocationName: locationName,
+        },
+      }),
+    )
+    .where(eq(players.id, player.id))
+    .run();
+}
+
+function getPathNames(locationIds: string[], allLocations: readonly typeof locations.$inferSelect[]) {
+  const nameById = new Map(allLocations.map((location) => [location.id, location.name]));
+  return locationIds
+    .map((locationId) => nameById.get(locationId))
+    .filter((locationName): locationName is string => Boolean(locationName));
+}
+
+function getSuccessfulMoveToolResult(result: unknown): SuccessfulTravel | null {
+  if (!result || typeof result !== "object") {
+    return null;
+  }
+
+  const toolResult = result as {
+    success?: boolean;
+    result?: {
+      locationId?: unknown;
+      locationName?: unknown;
+      travelCost?: unknown;
+      path?: unknown;
+    };
+  };
+
+  if (!toolResult.success || !toolResult.result || typeof toolResult.result !== "object") {
+    return null;
+  }
+
+  const travelCost = toolResult.result.travelCost;
+  const path = toolResult.result.path;
+  if (
+    typeof toolResult.result.locationId !== "string" ||
+    typeof toolResult.result.locationName !== "string" ||
+    typeof travelCost !== "number" ||
+    !Array.isArray(path)
+  ) {
+    return null;
+  }
+
+  return {
+    locationId: toolResult.result.locationId,
+    locationName: toolResult.result.locationName,
+    travelCost,
+    tickAdvance: travelCost,
+    path: path.filter((step): step is string => typeof step === "string"),
+  };
 }
 
 // -- Movement detection -------------------------------------------------------
@@ -307,6 +395,7 @@ export async function* processTurn(
   let sceneContext = "";
   let runtimePlayerRecord: ReturnType<typeof hydrateStoredPlayerRecord> | null = null;
   let oracleLocationId: string | null = player?.currentLocationId ?? null;
+  let successfulTravel: SuccessfulTravel | null = null;
 
   if (player) {
     const openingState = applyStartConditionEffects(
@@ -354,66 +443,80 @@ export async function* processTurn(
   // 1b. Detect movement and handle location change
   const movementDestination = await detectMovement(playerAction, judgeProvider);
   if (movementDestination && player) {
-    const destName = movementDestination.toLowerCase();
-
-    // Find destination by name (case-insensitive)
     const allLocations = db
       .select()
       .from(locations)
       .where(eq(locations.campaignId, campaignId))
       .all();
-
-    const destination = allLocations.find(
-      (loc) => loc.name.toLowerCase() === destName
-    );
+    const locationGraph = loadLocationGraph({ campaignId });
+    const destination = resolveLocationTarget({
+      targetName: movementDestination,
+      locations: allLocations,
+      currentTick,
+    });
 
     if (destination && player.currentLocationId) {
-      // Get current location to check connections
-      const currentLocation = db
-        .select()
-        .from(locations)
-        .where(eq(locations.id, player.currentLocationId))
-        .get();
+      const travelPath = resolveTravelPath({
+        campaignId,
+        fromLocationId: player.currentLocationId,
+        toLocationId: destination.locationId,
+        edges: locationGraph.edges,
+        locations: allLocations,
+        currentTick,
+      });
 
-      if (currentLocation) {
-        let connectedIds: string[] = [];
-        try {
-          connectedIds = JSON.parse(currentLocation.connectedTo) as string[];
-        } catch {
-          connectedIds = [];
-        }
-
-        if (connectedIds.includes(destination.id)) {
-          // Connected -- update player location
-          db.update(players)
-            .set({ currentLocationId: destination.id })
-            .where(eq(players.id, player.id))
-            .run();
-
-          // Update in-memory reference for rest of turn
-          player.currentLocationId = destination.id;
-
-          yield {
-            type: "state_update",
-            data: {
-              type: "location_change",
-              locationId: destination.id,
-              locationName: destination.name,
+      const destinationLocation = allLocations.find((location) => location.id === destination.locationId);
+      if (travelPath && destinationLocation) {
+        persistPlayerLocation(db, player, destinationLocation.id, destinationLocation.name);
+        player.currentLocationId = destinationLocation.id;
+        oracleLocationId = destinationLocation.id;
+        if (runtimePlayerRecord) {
+          runtimePlayerRecord = {
+            ...runtimePlayerRecord,
+            socialContext: {
+              ...runtimePlayerRecord.socialContext,
+              currentLocationId: destinationLocation.id,
+              currentLocationName: destinationLocation.name,
             },
           };
+        }
 
-          // Update scene context for Oracle
-          sceneContext = `${destination.name}: ${destination.description}`;
-          try {
-            environmentTags = JSON.parse(destination.tags) as string[];
-          } catch {
-            environmentTags = [];
-          }
-        } else {
-          // Not connected -- add available paths to scene context for Oracle
-          const reachableNames = allLocations
-            .filter((loc) => connectedIds.includes(loc.id))
-            .map((loc) => loc.name);
+        successfulTravel = {
+          locationId: destinationLocation.id,
+          locationName: destinationLocation.name,
+          travelCost: travelPath.totalTravelCost,
+          tickAdvance: travelPath.totalTravelCost,
+          path: getPathNames(travelPath.locationIds, allLocations),
+        };
+
+        yield {
+          type: "state_update",
+          data: {
+            type: "location_change",
+            locationId: successfulTravel.locationId,
+            locationName: successfulTravel.locationName,
+            travelCost: successfulTravel.travelCost,
+            tickAdvance: successfulTravel.tickAdvance,
+            path: successfulTravel.path,
+          },
+        };
+
+        sceneContext = `${destinationLocation.name}: ${destinationLocation.description}`;
+        try {
+          environmentTags = JSON.parse(destinationLocation.tags) as string[];
+        } catch {
+          environmentTags = [];
+        }
+      } else {
+        const reachableNames = listConnectedPaths({
+          campaignId,
+          fromLocationId: player.currentLocationId,
+          edges: locationGraph.edges,
+          locations: allLocations,
+          currentTick,
+        }).map((path) => `${path.locationName} (${path.travelCost})`);
+
+        if (reachableNames.length > 0) {
           sceneContext += `\nAvailable paths from here: ${reachableNames.join(", ")}`;
         }
       }
@@ -450,6 +553,7 @@ export async function* processTurn(
   const assembled = await assemblePrompt({
     campaignId,
     contextWindow,
+    includeRecentConversation: false,
     actionResult: oracleResult,
     embedderResult,
     playerAction,
@@ -534,6 +638,24 @@ export async function* processTurn(
       if (toolName === "offer_quick_actions") {
         quickActionsEmitted = true;
         events.push({ type: "quick_actions", data: toolOutput });
+      } else if (toolName === "move_to") {
+        const moveResult = getSuccessfulMoveToolResult(toolOutput);
+        if (moveResult) {
+          successfulTravel = moveResult;
+          events.push({
+            type: "state_update",
+            data: {
+              type: "location_change",
+              locationId: moveResult.locationId,
+              locationName: moveResult.locationName,
+              travelCost: moveResult.travelCost,
+              tickAdvance: moveResult.tickAdvance,
+              path: moveResult.path,
+            },
+          });
+        } else {
+          events.push({ type: "state_update", data: toolResult });
+        }
       } else {
         events.push({ type: "state_update", data: toolResult });
       }
@@ -638,7 +760,10 @@ export async function* processTurn(
       { role: "assistant", content: narrativeText },
     ]);
   }
-  const newTick = incrementTick(campaignId);
+  const newTick =
+    successfulTravel && successfulTravel.tickAdvance > 0
+      ? advanceCampaignTick(campaignId, successfulTravel.tickAdvance)
+      : incrementTick(campaignId);
 
   if (player) {
     const storedPlayer = db

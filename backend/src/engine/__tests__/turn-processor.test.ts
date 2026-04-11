@@ -756,8 +756,9 @@ describe("processTurn", () => {
     expect(onPostTurn).toHaveBeenCalledTimes(1);
     expect(doneResolved).toBe(false);
 
-    if (resolvePostTurn) {
-      resolvePostTurn();
+    const finishPostTurn = resolvePostTurn as (() => void) | null;
+    if (finishPostTurn) {
+      finishPostTurn();
     }
 
     const doneStep = await pendingDone;
@@ -822,8 +823,9 @@ describe("processTurn", () => {
 
       expect(settled).toBe(false);
 
-      if (resolvePostTurn) {
-        resolvePostTurn();
+      const finishPostTurn = resolvePostTurn as (() => void) | null;
+      if (finishPostTurn) {
+        finishPostTurn();
       }
       const doneStep = await pendingDone;
       expect(doneStep.done).toBe(false);
@@ -862,6 +864,24 @@ describe("processTurn", () => {
       };
 
       const allLocations = [currentLocation, destLocation];
+      const edgeRows = [
+        {
+          id: "edge-1",
+          campaignId: CAMPAIGN_ID,
+          fromLocationId: "loc-1",
+          toLocationId: "loc-2",
+          travelCost: 1,
+          discovered: true,
+        },
+        {
+          id: "edge-2",
+          campaignId: CAMPAIGN_ID,
+          fromLocationId: "loc-2",
+          toLocationId: "loc-1",
+          travelCost: 1,
+          discovered: true,
+        },
+      ];
 
       // Track which table is being queried via from()
       let lastFromTable: unknown = null;
@@ -887,6 +907,12 @@ describe("processTurn", () => {
               all: vi.fn().mockReturnValue(allLocations),
             };
           }
+          if (lastFromTable === (locationEdges as unknown)) {
+            return {
+              get: vi.fn().mockReturnValue(edgeRows[0]),
+              all: vi.fn().mockReturnValue(edgeRows),
+            };
+          }
           return {
             get: vi.fn().mockReturnValue(null),
             all: vi.fn().mockReturnValue([]),
@@ -906,6 +932,7 @@ describe("processTurn", () => {
       (assemblePrompt as Mock).mockResolvedValue(mockAssembledPrompt());
       (getChatHistory as Mock).mockReturnValue([]);
       (readCampaignConfig as Mock).mockReturnValue({ currentTick: 5 });
+      (advanceCampaignTick as Mock).mockReturnValue(6);
       (incrementTick as Mock).mockReturnValue(6);
       (createStorytellerTools as Mock).mockReturnValue({});
       (streamText as Mock).mockReturnValue({
@@ -931,7 +958,11 @@ describe("processTurn", () => {
         type: "location_change",
         locationId: "loc-2",
         locationName: "The Tavern",
+        travelCost: 1,
+        tickAdvance: 1,
+        path: ["Town Square", "The Tavern"],
       });
+      expect(advanceCampaignTick).toHaveBeenCalledWith(CAMPAIGN_ID, 1);
     });
 
     it("does not block movement to non-connected location, passes through to Oracle", async () => {

@@ -22,6 +22,12 @@ import {
   projectNpcRecord,
 } from "../character/record-adapters.js";
 import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
+import {
+  listConnectedPaths,
+  loadLocationGraph,
+  resolveLocationTarget,
+  resolveTravelPath,
+} from "./location-graph.js";
 
 const log = createLogger("npc-tools");
 
@@ -155,54 +161,82 @@ export function createNpcAgentTools(
           return { error: "NPC has no current location" };
         }
 
-        // Load current location for adjacency check
+        const locationGraph = loadLocationGraph({ campaignId });
         const currentLoc = db
-          .select({ id: locations.id, name: locations.name, connectedTo: locations.connectedTo })
+          .select({ id: locations.id, name: locations.name })
           .from(locations)
           .where(eq(locations.id, npc.currentLocationId))
           .get();
 
         if (!currentLoc) return { error: "Current location not found" };
 
-        const connectedIds = parseTags(currentLoc.connectedTo);
-
-        // Resolve target location by name (case-insensitive)
-        const targetLoc = db
-          .select({ id: locations.id, name: locations.name })
-          .from(locations)
-          .where(
-            sql`${locations.campaignId} = ${campaignId} AND LOWER(${locations.name}) = LOWER(${targetLocation})`
-          )
-          .get();
+        const targetLoc = resolveLocationTarget({
+          targetName: targetLocation,
+          locations: locationGraph.locations,
+          currentTick: tick,
+        });
 
         if (!targetLoc) {
           return { error: `Location not found: ${targetLocation}` };
         }
 
-        // Check adjacency
-        if (!connectedIds.includes(targetLoc.id)) {
-          return { error: `Not adjacent: ${currentLoc.name} is not connected to ${targetLoc.name}` };
+        const travelPath = resolveTravelPath({
+          campaignId,
+          fromLocationId: npc.currentLocationId,
+          toLocationId: targetLoc.locationId,
+          edges: locationGraph.edges,
+          locations: locationGraph.locations,
+          currentTick: tick,
+        });
+
+        if (!travelPath) {
+          const reachable = listConnectedPaths({
+            campaignId,
+            fromLocationId: npc.currentLocationId,
+            edges: locationGraph.edges,
+            locations: locationGraph.locations,
+            currentTick: tick,
+          }).map((path) => path.locationName);
+
+          return {
+            error: `Not adjacent: ${currentLoc.name} is not connected to ${targetLoc.locationName}${
+              reachable.length > 0 ? `. Available paths: ${reachable.join(", ")}` : ""
+            }`,
+          };
         }
 
         // Update NPC location
         const npcRecord = hydrateStoredNpcRecord(npc, {
-          currentLocationName: targetLoc.name,
+          currentLocationName: targetLoc.locationName,
         });
         db.update(npcs)
           .set(projectNpcRecord({
             ...npcRecord,
             socialContext: {
               ...npcRecord.socialContext,
-              currentLocationId: targetLoc.id,
-              currentLocationName: targetLoc.name,
+              currentLocationId: targetLoc.locationId,
+              currentLocationName: targetLoc.locationName,
             },
           }))
           .where(eq(npcs.id, npcId))
           .run();
 
-        log.info(`${npc.name} moved from ${currentLoc.name} to ${targetLoc.name}`);
+        const locationNameById = new Map(
+          locationGraph.locations.map((location) => [location.id, location.name]),
+        );
+        const path = travelPath.locationIds
+          .map((locationId) => locationNameById.get(locationId))
+          .filter((locationName): locationName is string => Boolean(locationName));
 
-        return { moved: true, from: currentLoc.name, to: targetLoc.name };
+        log.info(`${npc.name} moved from ${currentLoc.name} to ${targetLoc.locationName}`);
+
+        return {
+          moved: true,
+          from: currentLoc.name,
+          to: targetLoc.locationName,
+          travelCost: travelPath.totalTravelCost,
+          path,
+        };
       },
     }),
 
