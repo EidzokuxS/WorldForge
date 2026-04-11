@@ -31,7 +31,7 @@ created: 2026-04-11
 - **After every plan wave:** Run the combined command for the just-finished wave; at the phase gate run the full suite command above.
 - **Before `$gsd-verify-work`:** backend phase-targeted suite and relevant frontend rendering tests must be green.
 - **Max feedback latency:** ~30 seconds per task sample, ~120 seconds at wave/phase gates.
-- **Review-driven additions:** Phase 43 verification now explicitly samples migration/worldgen compatibility (`scaffold-saver`), shared tool/inline movement resolution (`tool-executor`), and checkpoint restore retention for location recent happenings (`checkpoints.test.ts`).
+- **Review-driven additions:** Phase 43 verification now explicitly samples migration/worldgen compatibility (`scaffold-saver`), shared tool/inline movement resolution (`tool-executor`), travel-turn pipeline composition in `turn-processor` (travel cost replaces normal end-of-turn `+1`, Oracle/Storyteller still run once, post-turn simulation observes the resulting boundary), and checkpoint restore retention for location recent happenings (`checkpoints.test.ts`).
 
 ---
 
