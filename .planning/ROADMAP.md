@@ -129,7 +129,11 @@ Plans:
   1. Every Phase 36 Group B and Group C gameplay claim covered by this milestone is resolved as implemented behavior or explicit deprecation.
   2. Gameplay docs explain the live structured character and runtime model accurately, including where derived tags are shorthand instead of canonical state.
   3. Gameplay docs describe the real retrieval, memory, and prompt contracts accurately enough to serve as the next planning baseline without another reconciliation pass.
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 44-01-PLAN.md — Reframe high-level docs authority, setup/handoff wording, and top-level deprecations in `concept.md`, `tech_stack.md`, and the historical player-creation plan.
+- [ ] 44-02-PLAN.md — Rewrite `mechanics.md` into the normative gameplay baseline for canonical state, target-aware Oracle support, bounded opening effects, reflection, and travel/location semantics.
+- [ ] 44-03-PLAN.md — Rewrite `memory.md` to the live runtime/retrieval contract and record a claim-by-claim resolution map for all elevated Phase 36 Group B/C items.
 
 ## Progress
 
