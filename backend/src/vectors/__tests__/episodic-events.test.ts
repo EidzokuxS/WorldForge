@@ -110,6 +110,7 @@ describe("episodic-events", () => {
     mockGetVectorDb.mockReset();
     mockEmbedTexts.mockReset();
     mockGetDb.mockReset();
+    mockGetDb.mockReturnValue(createMockCampaignDb({ location: null }).db);
     clearPendingCommittedEvents("campaign-1");
     clearPendingCommittedEvents("campaign-live");
     clearPendingCommittedEvents("campaign-other");

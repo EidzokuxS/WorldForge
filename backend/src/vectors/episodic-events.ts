@@ -4,6 +4,7 @@ import { getVectorDb } from "./connection.js";
 import { embedTexts } from "./embeddings.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import { createLogger } from "../lib/index.js";
+import { recordLocationRecentEvent } from "../engine/location-events.js";
 
 const log = createLogger("episodic-events");
 
@@ -213,6 +214,16 @@ export async function storeEpisodicEvent(
 
   const table = await ensureEpisodicEventsTable();
   await table.add([row as unknown as Record<string, unknown>]);
+
+  recordLocationRecentEvent({
+    campaignId,
+    locationRef: event.location,
+    tick: event.tick,
+    eventType: event.type || "event",
+    summary: event.text,
+    importance: event.importance,
+    sourceEventId: id,
+  });
 
   queuePendingCommittedEvent(campaignId, {
     id,

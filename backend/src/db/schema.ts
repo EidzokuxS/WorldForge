@@ -107,6 +107,7 @@ export const locationRecentEvents = sqliteTable(
     anchorLocationId: text("anchor_location_id").references(() => locations.id, {
       onDelete: "set null",
     }),
+    sourceEventId: text("source_event_id"),
     eventType: text("event_type").notNull(),
     summary: text("summary").notNull(),
     tick: integer("tick").notNull(),
@@ -126,6 +127,7 @@ export const locationRecentEvents = sqliteTable(
       table.sourceLocationId,
       table.tick
     ),
+    index("idx_location_recent_events_source_event").on(table.sourceEventId),
   ]
 );
 

@@ -548,12 +548,25 @@ async function handleLogEvent(
   const text = args.text as string;
   const importance = args.importance as number;
   const participants = args.participants as string[];
+  const db = getDb();
+  const player = db
+    .select({ currentLocationId: players.currentLocationId })
+    .from(players)
+    .where(eq(players.campaignId, campaignId))
+    .get();
+  const playerLocation = player?.currentLocationId
+    ? db
+        .select({ name: locations.name })
+        .from(locations)
+        .where(eq(locations.id, player.currentLocationId))
+        .get()
+    : null;
 
   try {
     const eventId = await storeEpisodicEvent(campaignId, {
       text,
       tick,
-      location: "",
+      location: playerLocation?.name ?? "",
       participants,
       importance,
       type: "event",
