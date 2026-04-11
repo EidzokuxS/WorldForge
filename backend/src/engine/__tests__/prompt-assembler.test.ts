@@ -10,6 +10,10 @@ vi.mock("../../db/index.js", () => ({
   getDb: vi.fn(),
 }));
 
+vi.mock("../location-events.js", () => ({
+  listRecentLocationEvents: vi.fn(),
+}));
+
 vi.mock("../../vectors/lore-cards.js", () => ({
   searchLoreCards: vi.fn(),
 }));
@@ -21,6 +25,7 @@ vi.mock("../../vectors/embeddings.js", () => ({
 import { assemblePrompt, type AssembleOptions } from "../prompt-assembler.js";
 import { readCampaignConfig, getChatHistory } from "../../campaign/index.js";
 import { getDb } from "../../db/index.js";
+import { listRecentLocationEvents } from "../location-events.js";
 import { searchLoreCards } from "../../vectors/lore-cards.js";
 import { embedTexts } from "../../vectors/embeddings.js";
 import {
@@ -33,6 +38,8 @@ import {
   factions as factionsTable,
   locationRecentEvents as locationRecentEventsTable,
 } from "../../db/schema.js";
+
+const mockedListRecentLocationEvents = vi.mocked(listRecentLocationEvents);
 
 // Helper to create a mock Drizzle DB that returns data based on table reference identity
 function createMockDb(overrides: {
@@ -106,6 +113,7 @@ describe("assemblePrompt", () => {
     vi.mocked(getChatHistory).mockReturnValue([]);
 
     vi.mocked(getDb).mockReturnValue(createMockDb() as unknown as ReturnType<typeof getDb>);
+    mockedListRecentLocationEvents.mockReturnValue([]);
   });
 
   it("returns formatted string containing [SYSTEM RULES] and [WORLD PREMISE]", async () => {
@@ -285,29 +293,72 @@ describe("assemblePrompt", () => {
             connectedTo: '["loc-2"]',
           },
         ],
-        locationRecentEvents: [
-          {
-            id: "evt-1",
-            campaignId: "test-campaign-123",
-            locationId: "loc-1",
-            sourceLocationId: "scene-1",
-            anchorLocationId: "loc-1",
-            eventType: "ephemeral_scene",
-            summary: "The archived ephemeral scene left cursed residue on the crossing.",
-            tick: 14,
-            importance: 4,
-            archivedAtTick: 15,
-            createdAt: 1700000000000,
-          },
-        ],
       }) as unknown as ReturnType<typeof getDb>
     );
+    mockedListRecentLocationEvents.mockReturnValue([
+      {
+        id: "evt-1",
+        campaignId: "test-campaign-123",
+        locationId: "loc-1",
+        sourceLocationId: "scene-1",
+        anchorLocationId: "loc-1",
+        sourceEventId: "episodic-1",
+        eventType: "ephemeral_scene",
+        summary: "The archived ephemeral scene left cursed residue on the crossing.",
+        tick: 14,
+        importance: 4,
+        archivedAtTick: 15,
+        createdAt: 1700000000000,
+      },
+    ]);
 
     const result = await assemblePrompt(defaultOptions);
 
     expect(result.formatted).toContain("Recent happenings here:");
     expect(result.formatted).toContain("archived ephemeral scene");
     expect(result.formatted).toContain("cursed residue on the crossing");
+    expect(mockedListRecentLocationEvents).toHaveBeenCalledWith({
+      campaignId: "test-campaign-123",
+      locationRef: "loc-1",
+      limit: 5,
+    });
+  });
+
+  it("uses an honest bounded fallback when the current location has no recent history", async () => {
+    vi.mocked(getDb).mockReturnValue(
+      createMockDb({
+        players: [
+          {
+            id: "p1",
+            campaignId: "test-campaign-123",
+            name: "Elara",
+            race: "Human",
+            gender: "",
+            age: "",
+            appearance: "",
+            hp: 5,
+            tags: "[]",
+            equippedItems: "[]",
+            currentLocationId: "loc-1",
+          },
+        ],
+        locations: [
+          {
+            id: "loc-1",
+            campaignId: "test-campaign-123",
+            name: "Quiet Shrine",
+            description: "Still and empty.",
+            tags: '["macro"]',
+            connectedTo: "[]",
+          },
+        ],
+      }) as unknown as ReturnType<typeof getDb>,
+    );
+    mockedListRecentLocationEvents.mockReturnValue([]);
+
+    const result = await assemblePrompt(defaultOptions);
+
+    expect(result.formatted).toContain("Recent happenings here: none in the last 50 ticks.");
   });
 
   it("uses double newlines between sections", async () => {
