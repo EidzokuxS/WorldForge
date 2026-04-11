@@ -32,8 +32,28 @@ vi.mock("sonner", () => ({
   },
 }));
 
+const mockLocationPanel = vi.fn(
+  ({
+    connectedPaths,
+    location,
+  }: {
+    connectedPaths?: Array<{ id: string; name: string; travelCost?: number | null }>;
+    location?: { recentHappenings?: Array<{ id: string; summary: string }> } | null;
+  }) => (
+    <div data-testid="location-panel">
+      <div data-testid="location-path-count">{connectedPaths?.length ?? 0}</div>
+      <div data-testid="location-path-names">
+        {(connectedPaths ?? []).map((path) => `${path.name}:${path.travelCost ?? "?"}`).join("|")}
+      </div>
+      <div data-testid="recent-happenings-count">
+        {location?.recentHappenings?.length ?? 0}
+      </div>
+    </div>
+  ),
+);
+
 vi.mock("@/components/game/location-panel", () => ({
-  LocationPanel: () => <div data-testid="location-panel" />,
+  LocationPanel: (props: unknown) => mockLocationPanel(props as never),
 }));
 vi.mock("@/components/game/narrative-log", () => ({
   NarrativeLog: ({
@@ -178,8 +198,45 @@ const fakeWorldData = {
     hp: 5,
   },
   locations: [
-    { id: "loc-1", name: "Town Square", tags: [], connectedTo: ["loc-2"] },
-    { id: "loc-2", name: "Dark Forest", tags: [], connectedTo: ["loc-1"] },
+    {
+      id: "loc-1",
+      name: "Town Square",
+      description: "The plaza at the city center.",
+      tags: [],
+      connectedTo: ["loc-stale"],
+      connectedPaths: [
+        {
+          edgeId: "edge-1",
+          toLocationId: "loc-2",
+          toLocationName: "Dark Forest",
+          travelCost: 2,
+          discovered: true,
+        },
+      ],
+      recentHappenings: [
+        {
+          id: "event-1",
+          locationId: "loc-1",
+          sourceLocationId: null,
+          anchorLocationId: null,
+          eventType: "scene",
+          summary: "The fountain still glows from last night's ritual.",
+          tick: 12,
+          importance: 3,
+          archivedAtTick: null,
+          createdAt: 1700000000000,
+        },
+      ],
+    },
+    {
+      id: "loc-2",
+      name: "Dark Forest",
+      description: "Dense trees press close around the path.",
+      tags: [],
+      connectedTo: ["loc-1"],
+      connectedPaths: [],
+      recentHappenings: [],
+    },
   ],
   npcs: [],
   factions: [],
@@ -265,6 +322,14 @@ describe("GamePage", () => {
     await renderReadyGame();
 
     expect(screen.getByTestId("checkpoint-panel")).toBeInTheDocument();
+  });
+
+  it("wires connected paths and recent happenings from worldData into the location panel", async () => {
+    await renderReadyGame();
+
+    expect(screen.getByTestId("location-path-count")).toHaveTextContent("1");
+    expect(screen.getByTestId("location-path-names")).toHaveTextContent("Dark Forest:2");
+    expect(screen.getByTestId("recent-happenings-count")).toHaveTextContent("1");
   });
 
   it("loads the remembered campaign before fetching explicit campaign history on reload", async () => {
@@ -386,6 +451,54 @@ describe("GamePage", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Ask for details")).toBeInTheDocument();
+    });
+  });
+
+  it("does not infer travel feedback from the submitted action before a location_change event arrives", async () => {
+    await renderReadyGame();
+    mockedChatAction.mockResolvedValue(createStreamResponse() as never);
+    mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
+      handlers.onNarrative("You head for the treeline.");
+      handlers.onDone();
+    });
+
+    fireEvent.change(screen.getByLabelText("Action input"), {
+      target: { value: "go to Dark Forest" },
+    });
+    fireEvent.click(screen.getByText("Submit action"));
+
+    await waitFor(() => {
+      expect(mockedParseTurnSSE).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.queryByText(/Travel complete:/)).not.toBeInTheDocument();
+  });
+
+  it("surfaces travel feedback from streamed location_change state updates", async () => {
+    await renderReadyGame();
+    mockedChatAction.mockResolvedValue(createStreamResponse() as never);
+    mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
+      handlers.onStateUpdate({
+        type: "location_change",
+        locationId: "loc-2",
+        locationName: "Dark Forest",
+        travelCost: 2,
+        tickAdvance: 2,
+        path: ["Town Square", "Moonlit Path", "Dark Forest"],
+      });
+      handlers.onDone();
+    });
+
+    fireEvent.change(screen.getByLabelText("Action input"), {
+      target: { value: "go to Dark Forest" },
+    });
+    fireEvent.click(screen.getByText("Submit action"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          "Travel complete: Dark Forest reached in 2 ticks via Town Square -> Moonlit Path -> Dark Forest."
+        )
+      ).toBeInTheDocument();
     });
   });
 

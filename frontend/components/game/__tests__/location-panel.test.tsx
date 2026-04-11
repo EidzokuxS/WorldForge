@@ -13,7 +13,12 @@ const makeLocation = (overrides = {}) => ({
 
 const defaultProps = {
   location: null,
-  connectedLocations: [] as Array<{ id: string; name: string }>,
+  connectedPaths: [] as Array<{
+    id: string;
+    name: string;
+    pathSummary?: string | null;
+    travelCost?: number | null;
+  }>,
   npcsHere: [] as Array<{ id: string; name: string; tier: string }>,
   itemsHere: [] as Array<{ id: string; name: string }>,
   onMove: vi.fn(),
@@ -73,34 +78,69 @@ describe("LocationPanel", () => {
 
   it("renders connected locations as clickable paths", async () => {
     const onMove = vi.fn();
-    const connectedLocations = [
-      { id: "loc2", name: "Dark Alley" },
-      { id: "loc3", name: "Castle Gate" },
+    const connectedPaths = [
+      { id: "loc2", name: "Dark Alley", travelCost: 2, pathSummary: "via the lantern market" },
+      { id: "loc3", name: "Castle Gate", travelCost: 1 },
     ];
     render(
       <LocationPanel
         {...defaultProps}
         location={makeLocation()}
-        connectedLocations={connectedLocations}
+        connectedPaths={connectedPaths}
         onMove={onMove}
       />
     );
     const alleyButton = screen.getByRole("button", { name: "Dark Alley" });
     await userEvent.click(alleyButton);
     expect(onMove).toHaveBeenCalledWith("Dark Alley");
+    expect(screen.getByText("2 ticks")).toBeInTheDocument();
+    expect(screen.getByText("via the lantern market")).toBeInTheDocument();
   });
 
   it("disables path buttons when disabled is true", () => {
-    const connectedLocations = [{ id: "loc2", name: "Dark Alley" }];
+    const connectedPaths = [{ id: "loc2", name: "Dark Alley", travelCost: 1 }];
     render(
       <LocationPanel
         {...defaultProps}
         location={makeLocation()}
-        connectedLocations={connectedLocations}
+        connectedPaths={connectedPaths}
         disabled={true}
       />
     );
     const button = screen.getByRole("button", { name: "Dark Alley" });
     expect(button).toBeDisabled();
+  });
+
+  it("renders recent happenings for the current location", () => {
+    render(
+      <LocationPanel
+        {...defaultProps}
+        location={makeLocation({
+          recentHappenings: [
+            {
+              id: "event-1",
+              summary: "A rooftop duel scattered cursed ash across the square.",
+              tick: 12,
+              eventType: "ephemeral_scene",
+            },
+          ],
+        })}
+      />
+    );
+
+    expect(screen.getByText("Recent Happenings")).toBeInTheDocument();
+    expect(
+      screen.getByText("A rooftop duel scattered cursed ash across the square.")
+    ).toBeInTheDocument();
+    expect(screen.getByText("Tick 12")).toBeInTheDocument();
+  });
+
+  it("renders an explicit empty state when no recent happenings are recorded", () => {
+    render(<LocationPanel {...defaultProps} location={makeLocation({ recentHappenings: [] })} />);
+
+    expect(screen.getByText("Recent Happenings")).toBeInTheDocument();
+    expect(
+      screen.getByText("No recent happenings recorded here yet.")
+    ).toBeInTheDocument();
   });
 });
