@@ -34,6 +34,7 @@ import {
 } from "../character/record-adapters.js";
 import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
 import { buildStorytellerContract } from "./storyteller-contract.js";
+import { deriveStartConditionEffects } from "./start-condition-runtime.js";
 
 const log = createLogger("prompt-assembler");
 
@@ -285,6 +286,7 @@ export async function compressConversation(
 
 function buildPlayerStateSection(
   campaignId: string,
+  currentTick: number,
 ): PromptSection | null {
   const db = getDb();
   const player = db
@@ -296,11 +298,22 @@ function buildPlayerStateSection(
   if (!player) return null;
 
   const playerRecord = hydrateStoredPlayerRecord(player);
-  const tags = deriveRuntimeCharacterTags(playerRecord);
-  const equipped = playerRecord.loadout.equippedItemRefs;
-  const signatureItems = playerRecord.loadout.signatureItems;
-  const wealthTag = playerRecord.capabilities.wealthTier;
-  const startConditions = playerRecord.startConditions;
+  const openingState = deriveStartConditionEffects(playerRecord, {
+    currentTick,
+    currentLocationId: player.currentLocationId,
+  });
+  const effectivePlayerRecord = {
+    ...playerRecord,
+    state: {
+      ...playerRecord.state,
+      statusFlags: openingState.activeStatusFlags,
+    },
+  };
+  const tags = deriveRuntimeCharacterTags(effectivePlayerRecord);
+  const equipped = effectivePlayerRecord.loadout.equippedItemRefs;
+  const signatureItems = effectivePlayerRecord.loadout.signatureItems;
+  const wealthTag = effectivePlayerRecord.capabilities.wealthTier;
+  const startConditions = effectivePlayerRecord.startConditions;
 
   // Query player's inventory (items owned by this player)
   const playerItems = db
@@ -336,6 +349,7 @@ function buildPlayerStateSection(
     startConditions.startingVisibility
       ? `Visibility: ${startConditions.startingVisibility}`
       : null,
+    ...openingState.promptLines,
     equipped.length > 0 ? `Equipped: ${equipped.join(", ")}` : null,
     signatureItems.length > 0 ? `Signature Items: ${signatureItems.join(", ")}` : null,
     inventoryLine,
@@ -722,7 +736,7 @@ export async function assemblePrompt(
   };
 
   // 3. Player state
-  const playerSection = buildPlayerStateSection(campaignId);
+  const playerSection = buildPlayerStateSection(campaignId, currentTick);
 
   // Get player's location for scene/NPC queries
   const db = getDb();

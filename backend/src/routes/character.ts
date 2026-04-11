@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import crypto from "node:crypto";
 import type { CharacterDraft } from "@worldforge/shared";
 import { getErrorMessage, getErrorStatus } from "../lib/index.js";
+import { readCampaignConfig } from "../campaign/index.js";
 import { loadSettings } from "../settings/index.js";
 import { resolveStartingLocation } from "../worldgen/index.js";
 import { parseCharacterDescription, generateCharacter, generateCharacterFromArchetype, mapV2CardToCharacter, parseNpcDescription, mapV2CardToNpc, generateNpcFromArchetype, researchArchetype } from "../character/index.js";
@@ -11,6 +12,7 @@ import {
   toLegacyNpcDraft,
   toLegacyPlayerCharacter,
 } from "../character/record-adapters.js";
+import { applyStartConditionEffects } from "../engine/start-condition-runtime.js";
 import { getDb } from "../db/index.js";
 import { items, locations, players } from "../db/schema.js";
 import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
@@ -250,7 +252,7 @@ app.post("/save-character", async (c) => {
 
     const playerId = crypto.randomUUID();
     const canonicalLoadout = deriveCanonicalLoadout(draft);
-    const characterRecord = createCharacterRecordFromDraft(
+    const draftRecord = createCharacterRecordFromDraft(
       {
         ...draft,
         socialContext: {
@@ -269,6 +271,11 @@ app.post("/save-character", async (c) => {
         campaignId,
       },
     );
+    const currentTick = readCampaignConfig(campaignId).currentTick ?? 0;
+    const { record: characterRecord } = applyStartConditionEffects(draftRecord, {
+      currentTick,
+      currentLocationId: matchedLocation.id,
+    });
     const projection = projectPlayerRecord(characterRecord);
 
     db.insert(players)

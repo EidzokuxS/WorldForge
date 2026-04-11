@@ -23,9 +23,13 @@ import { getDb } from "../db/index.js";
 import { players, locations } from "../db/schema.js";
 import type { ResolveResult } from "../ai/index.js";
 import { createLogger } from "../lib/index.js";
-import { hydrateStoredPlayerRecord } from "../character/record-adapters.js";
+import {
+  hydrateStoredPlayerRecord,
+  projectPlayerRecord,
+} from "../character/record-adapters.js";
 import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
 import { resolveActionTargetContext } from "./target-context.js";
+import { applyStartConditionEffects } from "./start-condition-runtime.js";
 
 const log = createLogger("turn-processor");
 
@@ -67,6 +71,22 @@ export interface TurnSummary {
 }
 
 const TURN_FINALIZATION_TIMEOUT_MS = 60_000;
+
+function persistPlayerRuntimeRecord(
+  db: ReturnType<typeof getDb>,
+  playerId: string,
+  campaignId: string,
+  record: ReturnType<typeof hydrateStoredPlayerRecord>,
+) {
+  const projection = projectPlayerRecord(record);
+  db.update(players)
+    .set({
+      ...projection,
+      campaignId,
+    })
+    .where(eq(players.id, playerId))
+    .run();
+}
 
 function withTimeout<T>(
   work: Promise<T>,
@@ -274,6 +294,8 @@ export async function* processTurn(
 
   // 1. Query game state
   const db = getDb();
+  const config = readCampaignConfig(campaignId);
+  const currentTick = config.currentTick ?? 0;
   const player = db
     .select()
     .from(players)
@@ -283,21 +305,35 @@ export async function* processTurn(
   let actorTags: string[] = [];
   let environmentTags: string[] = [];
   let sceneContext = "";
+  let runtimePlayerRecord: ReturnType<typeof hydrateStoredPlayerRecord> | null = null;
+  let oracleLocationId: string | null = player?.currentLocationId ?? null;
 
   if (player) {
-    const playerRecord = hydrateStoredPlayerRecord(player);
-    actorTags = deriveRuntimeCharacterTags(playerRecord);
+    const openingState = applyStartConditionEffects(
+      hydrateStoredPlayerRecord(player),
+      {
+        currentTick,
+        currentLocationId: player.currentLocationId,
+      },
+    );
+    runtimePlayerRecord = openingState.record;
+    actorTags = deriveRuntimeCharacterTags(runtimePlayerRecord);
+    oracleLocationId = runtimePlayerRecord.socialContext.currentLocationId;
 
-    // Include HP status in scene context for Oracle to factor in
-    if (playerRecord.state.hp < 5) {
-      sceneContext += ` Actor HP: ${playerRecord.state.hp}/5.`;
+    if (openingState.changed) {
+      persistPlayerRuntimeRecord(db, player.id, campaignId, runtimePlayerRecord);
     }
 
-    if (player.currentLocationId) {
+    // Include HP status in scene context for Oracle to factor in
+    if (runtimePlayerRecord.state.hp < 5) {
+      sceneContext += ` Actor HP: ${runtimePlayerRecord.state.hp}/5.`;
+    }
+
+    if (oracleLocationId) {
       const location = db
         .select()
         .from(locations)
-        .where(eq(locations.id, player.currentLocationId))
+        .where(eq(locations.id, oracleLocationId))
         .get();
 
       if (location) {
@@ -308,6 +344,10 @@ export async function* processTurn(
         }
         sceneContext = `${location.name}: ${location.description}`;
       }
+    }
+
+    for (const line of openingState.effects.sceneContextLines) {
+      sceneContext += `${sceneContext ? "\n" : ""}${line}`;
     }
   }
 
@@ -428,9 +468,6 @@ export async function* processTurn(
   appendChatMessages(campaignId, [{ role: "user", content: playerAction }]);
 
   // 7. Get current tick
-  const config = readCampaignConfig(campaignId);
-  const currentTick = config.currentTick ?? 0;
-
   // 8. Create tools (pass outcomeTier so set_condition can enforce HP guard)
   const tools = createStorytellerTools(campaignId, currentTick, oracleResult.outcome);
 
@@ -602,6 +639,35 @@ export async function* processTurn(
     ]);
   }
   const newTick = incrementTick(campaignId);
+
+  if (player) {
+    const storedPlayer = db
+      .select()
+      .from(players)
+      .where(eq(players.id, player.id))
+      .get();
+
+    if (storedPlayer) {
+      const nextOpeningState = applyStartConditionEffects(
+        hydrateStoredPlayerRecord(storedPlayer),
+        {
+          currentTick: newTick,
+          currentLocationId: storedPlayer.currentLocationId,
+          playerAction,
+        },
+      );
+
+      if (nextOpeningState.changed) {
+        persistPlayerRuntimeRecord(
+          db,
+          storedPlayer.id,
+          storedPlayer.campaignId,
+          nextOpeningState.record,
+        );
+      }
+    }
+  }
+
   const summary: TurnSummary = {
     tick: newTick,
     oracleResult,
