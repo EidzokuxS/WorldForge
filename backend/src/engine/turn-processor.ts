@@ -25,6 +25,7 @@ import type { ResolveResult } from "../ai/index.js";
 import { createLogger } from "../lib/index.js";
 import { hydrateStoredPlayerRecord } from "../character/record-adapters.js";
 import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
+import { resolveActionTargetContext } from "./target-context.js";
 
 const log = createLogger("turn-processor");
 
@@ -380,13 +381,22 @@ export async function* processTurn(
     // If destination not found at all -- pass through to Oracle/Storyteller (might reveal_location)
   }
 
+  const targetContext = await resolveActionTargetContext({
+    campaignId,
+    playerAction,
+    intent,
+    method,
+    judgeProvider,
+    movementDestination,
+  });
+
   // 2. Call Oracle
   const oracleResult = await callOracle(
     {
       intent,
       method,
       actorTags,
-      targetTags: [],
+      targetTags: targetContext.targetTags,
       environmentTags,
       sceneContext,
     },
