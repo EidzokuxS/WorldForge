@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
-status: executing
-stopped_at: Completed 44-02-PLAN.md
-last_updated: "2026-04-11T19:22:58.894Z"
+status: verifying
+stopped_at: Completed 44-03-PLAN.md
+last_updated: "2026-04-11T19:31:21.451Z"
 last_activity: 2026-04-11
 progress:
   total_phases: 8
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 21
-  completed_plans: 20
+  completed_plans: 21
   percent: 90
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 
 Phase: 44 (gameplay-docs-baseline-alignment) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-04-11
 
 Progress: [█████████░] 90%
@@ -125,6 +125,9 @@ Recent decisions affecting current work:
 - [Phase 44]: docs/mechanics.md now treats canonical records as the gameplay authority and derived tags as shorthand or compatibility output.
 - [Phase 44]: Reflection wording now deprecates the old threshold-15 claim in favor of the live threshold sum >= 10 and structured-state-first outcomes.
 - [Phase 44]: Travel, location history, and world-information-flow are documented through connectedPaths, recent happenings, and bounded prompt context instead of omniscience claims.
+- [Phase 44]: docs/memory.md now documents top-3 vector-only lore, top-5 episodic retrieval, caller-supplied importance, and checkpoint-complete bundle restore as the normative runtime baseline.
+- [Phase 44]: Inventory/equipment wording stays explicitly bounded: live behavior uses SQLite item rows plus canonical records, while Phase 38 remains the pending authority seam.
+- [Phase 44]: Phase 36 Group B/C proof lives in a phase-local checklist keyed to claim IDs instead of a narrative closeout.
 
 ### Pending Todos
 
@@ -137,6 +140,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-11T19:22:58.890Z
-Stopped at: Completed 44-02-PLAN.md
+Last session: 2026-04-11T19:31:21.448Z
+Stopped at: Completed 44-03-PLAN.md
 Resume file: None

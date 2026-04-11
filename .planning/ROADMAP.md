@@ -23,7 +23,7 @@ v1.1 is a reconciliation milestone built from the [Phase 36 handoff](/R:/Project
 - [x] **Phase 41: Checkpoint-Complete Simulation Restore** - Restore full campaign runtime state, including simulation metadata and post-turn world mutations. (completed 2026-04-11)
 - [x] **Phase 42: Targeted Oracle & Start-Condition Runtime Effects** - Make target-aware rulings and structured starts mechanically real in live play. (completed 2026-04-11)
 - [x] **Phase 43: Travel & Location-State Contract Resolution** - Implement or explicitly deprecate the remaining location/time gameplay promises. (completed 2026-04-11)
-- [ ] **Phase 44: Gameplay Docs Baseline Alignment** - Rewrite gameplay docs into an honest planning baseline for the repaired runtime.
+- [x] **Phase 44: Gameplay Docs Baseline Alignment** - Rewrite gameplay docs into an honest planning baseline for the repaired runtime. (completed 2026-04-11)
 
 ## Phase Details
 
@@ -133,7 +133,7 @@ Plans:
 Plans:
 - [x] 44-01-PLAN.md — Reframe high-level docs authority, setup/handoff wording, and top-level deprecations in `concept.md`, `tech_stack.md`, and the historical player-creation plan.
 - [x] 44-02-PLAN.md — Rewrite `mechanics.md` into the normative gameplay baseline for canonical state, target-aware Oracle support, bounded opening effects, reflection, and travel/location semantics.
-- [ ] 44-03-PLAN.md — Rewrite `memory.md` to the live runtime/retrieval contract and record a claim-by-claim resolution map for all elevated Phase 36 Group B/C items.
+- [x] 44-03-PLAN.md — Rewrite `memory.md` to the live runtime/retrieval contract and record a claim-by-claim resolution map for all elevated Phase 36 Group B/C items.
 
 ## Progress
 
@@ -146,4 +146,4 @@ Plans:
 | 41. Checkpoint-Complete Simulation Restore | 2/2 | Complete | 2026-04-11 |
 | 42. Targeted Oracle & Start-Condition Runtime Effects | 2/2 | Complete   | 2026-04-11 |
 | 43. Travel & Location-State Contract Resolution | 6/6 | Complete   | 2026-04-11 |
-| 44. Gameplay Docs Baseline Alignment | 2/3 | In Progress|  |
+| 44. Gameplay Docs Baseline Alignment | 3/3 | Complete   | 2026-04-11 |
