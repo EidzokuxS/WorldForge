@@ -31,6 +31,7 @@ import {
   relationships as relationshipsTable,
   chronicle as chronicleTable,
   factions as factionsTable,
+  locationRecentEvents as locationRecentEventsTable,
 } from "../../db/schema.js";
 
 // Helper to create a mock Drizzle DB that returns data based on table reference identity
@@ -42,6 +43,7 @@ function createMockDb(overrides: {
   relationships?: Record<string, unknown>[];
   chronicle?: Record<string, unknown>[];
   factions?: Record<string, unknown>[];
+  locationRecentEvents?: Record<string, unknown>[];
 } = {}) {
   // Map table references to override keys
   const tableMap = new Map<unknown, Record<string, unknown>[]>([
@@ -52,6 +54,7 @@ function createMockDb(overrides: {
     [relationshipsTable, overrides.relationships ?? []],
     [chronicleTable, overrides.chronicle ?? []],
     [factionsTable, overrides.factions ?? []],
+    [locationRecentEventsTable, overrides.locationRecentEvents ?? []],
   ]);
 
   const selectFn = vi.fn().mockImplementation((_columns?: unknown) => ({
@@ -238,6 +241,73 @@ describe("assemblePrompt", () => {
     const result = await assemblePrompt(defaultOptions);
     expect(result.formatted).toContain("[RECENT CONVERSATION]");
     expect(result.formatted).toContain("I open the door");
+  });
+
+  it("can omit recent conversation when the caller already supplies message history separately", async () => {
+    vi.mocked(getChatHistory).mockReturnValue([
+      { role: "user", content: "I open the door" },
+      { role: "assistant", content: "The door creaks open revealing a dark corridor." },
+    ]);
+
+    const result = await assemblePrompt({
+      ...defaultOptions,
+      includeRecentConversation: false,
+    });
+
+    expect(result.sections.find((section) => section.name === "RECENT CONVERSATION")).toBeUndefined();
+  });
+
+  it("surfaces recent happenings for the current location, including archived ephemeral scene spillover", async () => {
+    vi.mocked(getDb).mockReturnValue(
+      createMockDb({
+        players: [
+          {
+            id: "p1",
+            campaignId: "test-campaign-123",
+            name: "Elara",
+            race: "Human",
+            gender: "",
+            age: "",
+            appearance: "",
+            hp: 5,
+            tags: "[]",
+            equippedItems: "[]",
+            currentLocationId: "loc-1",
+          },
+        ],
+        locations: [
+          {
+            id: "loc-1",
+            campaignId: "test-campaign-123",
+            name: "Shibuya Crossing",
+            description: "A loud macro location packed with civilians.",
+            tags: '["macro"]',
+            connectedTo: '["loc-2"]',
+          },
+        ],
+        locationRecentEvents: [
+          {
+            id: "evt-1",
+            campaignId: "test-campaign-123",
+            locationId: "loc-1",
+            sourceLocationId: "scene-1",
+            anchorLocationId: "loc-1",
+            eventType: "ephemeral_scene",
+            summary: "The archived ephemeral scene left cursed residue on the crossing.",
+            tick: 14,
+            importance: 4,
+            archivedAtTick: 15,
+            createdAt: 1700000000000,
+          },
+        ],
+      }) as unknown as ReturnType<typeof getDb>
+    );
+
+    const result = await assemblePrompt(defaultOptions);
+
+    expect(result.formatted).toContain("Recent happenings here:");
+    expect(result.formatted).toContain("archived ephemeral scene");
+    expect(result.formatted).toContain("cursed residue on the crossing");
   });
 
   it("uses double newlines between sections", async () => {

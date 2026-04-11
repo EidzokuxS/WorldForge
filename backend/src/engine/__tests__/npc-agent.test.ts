@@ -290,6 +290,55 @@ describe("createNpcAgentTools", () => {
     expect(mockDb.run).toHaveBeenCalled();
   });
 
+  it("move_to shares the travel cost contract with player movement for multi-edge destinations", async () => {
+    const npc = createMockNpc({
+      currentLocationId: "loc-001",
+    });
+    const currentLocation = createMockLocation({
+      id: "loc-001",
+      name: "Shibuya Crossing",
+      connectedTo: '["loc-002"]',
+    });
+    const targetLocation = {
+      id: "loc-003",
+      name: "Tokyo Jujutsu High",
+      connectedTo: '["loc-002"]',
+    };
+
+    let getCallCount = 0;
+    const mockDb = {
+      select: vi.fn().mockReturnThis(),
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      update: vi.fn().mockReturnThis(),
+      set: vi.fn().mockReturnThis(),
+      run: vi.fn(),
+      get: vi.fn().mockImplementation(() => {
+        getCallCount += 1;
+        if (getCallCount === 1) return npc;
+        if (getCallCount === 2) return currentLocation;
+        if (getCallCount === 3) return targetLocation;
+        return null;
+      }),
+      all: vi.fn().mockReturnValue([]),
+    };
+    (getDb as ReturnType<typeof vi.fn>).mockReturnValue(mockDb);
+
+    const tools = createNpcAgentTools(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
+    const result = await tools.move_to.execute!(
+      { targetLocation: "Tokyo Jujutsu High" },
+      { toolCallId: "tc-phase43", messages: [], abortSignal: undefined as unknown as AbortSignal }
+    );
+
+    expect(result).toEqual({
+      moved: true,
+      from: "Shibuya Crossing",
+      to: "Tokyo Jujutsu High",
+      travelCost: 2,
+      path: ["Shibuya Crossing", "Hidden Station Platform", "Tokyo Jujutsu High"],
+    });
+  });
+
   it("update_own_goal replaces old goal with new goal", async () => {
     const mockDb = setupMockDb({});
 

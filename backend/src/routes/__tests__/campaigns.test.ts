@@ -548,4 +548,55 @@ describe("GET /:id/world", () => {
     expect(body.npcs[0]?.npc?.tier).toBe("supporting");
     expect(body.npcs[0]?.draft?.identity?.tier).toBe("persistent");
   });
+
+  it("returns connectedPaths and recent happenings for each location instead of raw connectedTo IDs alone", async () => {
+    mockedGetActive.mockReturnValue({
+      id: CAMPAIGN_ID,
+      name: "Test",
+      createdAt: "2026-01-01",
+      generationComplete: true,
+    } as any);
+
+    const mockAll = vi.fn();
+    const mockWhere = vi.fn(() => ({ all: mockAll }));
+    const mockFrom = vi.fn(() => ({ where: mockWhere }));
+    const mockSelect = vi.fn(() => ({ from: mockFrom }));
+
+    mockAll
+      .mockReturnValueOnce([
+        {
+          id: "loc-1",
+          name: "Shibuya Crossing",
+          description: "Macro hub",
+          connectedTo: '["loc-2"]',
+        },
+      ])
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([]);
+
+    mockedGetDb.mockReturnValue({
+      select: mockSelect,
+    } as any);
+
+    const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/world`);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.locations[0]).toMatchObject({
+      connectedPaths: [
+        {
+          toLocationId: "loc-2",
+          travelCost: 1,
+        },
+      ],
+      recentHappenings: [
+        expect.objectContaining({
+          summary: "A rooftop clash spilled cursed residue into the crossing.",
+        }),
+      ],
+    });
+    expect(body.locations[0].connectedTo).toBeUndefined();
+  });
 });

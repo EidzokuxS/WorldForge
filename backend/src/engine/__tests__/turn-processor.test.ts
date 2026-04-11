@@ -591,6 +591,7 @@ describe("processTurn", () => {
     expect(assemblePrompt).toHaveBeenCalledWith(
       expect.objectContaining({
         campaignId: CAMPAIGN_ID,
+        includeRecentConversation: false,
         actionResult: oracleResult,
       })
     );
@@ -725,7 +726,9 @@ describe("processTurn", () => {
     expect(onPostTurn).toHaveBeenCalledTimes(1);
     expect(doneResolved).toBe(false);
 
-    resolvePostTurn?.();
+    if (resolvePostTurn) {
+      resolvePostTurn();
+    }
 
     const doneStep = await pendingDone;
     expect(doneStep.done).toBe(false);
@@ -735,7 +738,7 @@ describe("processTurn", () => {
     });
   });
 
-  it("D-14 fails the turn if rollback-critical finalization exceeds the hard timeout", async () => {
+  it("does not fail rollback-critical finalization after 60 seconds of legitimate work", async () => {
     vi.useFakeTimers();
 
     try {
@@ -758,9 +761,13 @@ describe("processTurn", () => {
         ],
       });
 
+      let resolvePostTurn: (() => void) | null = null;
       const generator = processTurn(
         createTestOptions({
-          onPostTurn: () => new Promise<void>(() => undefined),
+          onPostTurn: () =>
+            new Promise<void>((resolve) => {
+              resolvePostTurn = resolve;
+            }),
         }),
       );
 
@@ -776,11 +783,24 @@ describe("processTurn", () => {
 
       expect(sawFinalizing).toBe(true);
 
-      const pendingDone = generator.next();
-      const pendingAssertion = expect(pendingDone).rejects.toThrow(/finalization/i);
+      let settled = false;
+      const pendingDone = generator.next().then((result) => {
+        settled = true;
+        return result;
+      });
       await vi.advanceTimersByTimeAsync(60_001);
 
-      await pendingAssertion;
+      expect(settled).toBe(false);
+
+      if (resolvePostTurn) {
+        resolvePostTurn();
+      }
+      const doneStep = await pendingDone;
+      expect(doneStep.done).toBe(false);
+      expect(doneStep.value).toEqual({
+        type: "done",
+        data: { tick: 6 },
+      });
     } finally {
       vi.useRealTimers();
     }
@@ -1286,7 +1306,80 @@ describe("processTurn", () => {
     expect(streamArgs.system).not.toContain("After narration, you MUST call offer_quick_actions");
     expect(streamArgs.system).not.toContain("light hit = -1");
   });
-});
+
+  it("uses resolveTravelPath travel cost for multi-edge movement instead of adjacency-only teleport movement", async () => {
+    vi.mocked(safeGenerateObject).mockResolvedValue({
+      object: { isMovement: true, destination: "Tokyo Jujutsu High" },
+    } as never);
+
+    const mockDb = createEntityLookupDb({
+      playerRow: createOpeningPlayerRow({ currentLocationId: "loc-shibuya" }),
+      locationRows: [
+        {
+          id: "loc-shibuya",
+          campaignId: CAMPAIGN_ID,
+          name: "Shibuya Crossing",
+          description: "A packed district of neon and pedestrian flow.",
+          tags: '["macro"]',
+          connectedTo: '["loc-station"]',
+          isStarting: true,
+        },
+        {
+          id: "loc-station",
+          campaignId: CAMPAIGN_ID,
+          name: "Hidden Station Platform",
+          description: "A persistent sublocation below the district.",
+          tags: '["persistent_sublocation"]',
+          connectedTo: '["loc-shibuya","loc-school"]',
+          isStarting: false,
+        },
+        {
+          id: "loc-school",
+          campaignId: CAMPAIGN_ID,
+          name: "Tokyo Jujutsu High",
+          description: "A hilltop academy beyond the city rail lines.",
+          tags: '["macro"]',
+          connectedTo: '["loc-station"]',
+          isStarting: false,
+        },
+      ],
+    });
+
+    (getDb as Mock).mockReturnValue(mockDb);
+    (callOracle as Mock).mockResolvedValue(mockOracleResult());
+    (assemblePrompt as Mock).mockResolvedValue(mockAssembledPrompt());
+    (getChatHistory as Mock).mockReturnValue([]);
+    (readCampaignConfig as Mock).mockReturnValue({ currentTick: 12 });
+    (incrementTick as Mock).mockReturnValue(13);
+    (createStorytellerTools as Mock).mockReturnValue({});
+    (streamText as Mock).mockReturnValue({
+      fullStream: createMockFullStream([
+        { type: "text-delta", text: "You make the long trip to the academy." },
+      ]),
+      text: Promise.resolve("You make the long trip to the academy."),
+    });
+
+    const events = await collectEvents(
+      processTurn(
+        createTestOptions({
+          playerAction: "Travel to Tokyo Jujutsu High",
+          intent: "Travel to Tokyo Jujutsu High",
+          method: "taking the fastest believable route",
+        }),
+      ),
+    );
+
+    expect(events).toContainEqual({
+      type: "state_update",
+      data: {
+        type: "location_change",
+        locationId: "loc-school",
+        locationName: "Tokyo Jujutsu High",
+        travelCost: 2,
+        path: ["Shibuya Crossing", "Hidden Station Platform", "Tokyo Jujutsu High"],
+      },
+    });
+  });
 
   describe("target-aware oracle", () => {
     it("passes non-empty targetTags for supported character targets instead of the old empty-target seam", async () => {
@@ -1554,3 +1647,4 @@ describe("processTurn", () => {
       );
     });
   });
+});
