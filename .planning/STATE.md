@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
 status: executing
-stopped_at: Completed 43-03-PLAN.md
-last_updated: "2026-04-11T16:22:16.027Z"
+stopped_at: Completed 43-04-PLAN.md
+last_updated: "2026-04-11T16:33:02.411Z"
 last_activity: 2026-04-11
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 17
-  completed_plans: 15
-  percent: 88
+  completed_plans: 16
+  percent: 94
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 ## Current Position
 
 Phase: 43 (travel-and-location-state-contract-resolution) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
 Last activity: 2026-04-11
 
-Progress: [█████████░] 88%
+Progress: [█████████░] 94%
 
 ## Performance Metrics
 
@@ -45,6 +45,7 @@ Progress: [█████████░] 88%
 
 **Recent Execution:**
 
+- Phase `43` Plan `04` — duration `6 min`, tasks `2`, files `5`
 - Phase `43` Plan `03` — duration `10 min`, tasks `2`, files `16`
 - Phase `43` Plan `02` — duration `13 min`, tasks `2`, files `11`
 - Phase `43` Plan `01` — duration `9 min`, tasks `2`, files `14`
@@ -107,6 +108,9 @@ Recent decisions affecting current work:
 - [Phase 43]: Episodic commits remain the only source-traceable path into location-local history; storeEpisodicEvent writes through to SQLite projections instead of duplicating writer logic.
 - [Phase 43]: Anchored spillover is resolved at write time so archived ephemeral scenes can disappear without forcing downstream readers to reconstruct local-history consequences.
 - [Phase 43]: Faction and world simulation writers call the shared location-history seam directly only when they have concrete target locations and no episodic source event exists.
+- [Phase 43]: World payload locations now expose connectedPaths and recentHappenings instead of raw connectedTo compatibility data.
+- [Phase 43]: Prompt scene context reads current-location recent happenings from location-events.ts and bounds them to five events or the last 50 ticks.
+- [Phase 43]: location-events.ts now owns both single-location and batched recent-history reads so API and prompt assembly share one read authority.
 
 ### Pending Todos
 
@@ -119,6 +123,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-11T16:22:16.023Z
-Stopped at: Completed 43-03-PLAN.md
+Last session: 2026-04-11T16:33:02.408Z
+Stopped at: Completed 43-04-PLAN.md
 Resume file: None
