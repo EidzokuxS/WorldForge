@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
 status: executing
-stopped_at: Completed 42-01-PLAN.md
-last_updated: "2026-04-11T12:40:45.998Z"
+stopped_at: Completed 42-02-PLAN.md
+last_updated: "2026-04-11T13:09:03.451Z"
 last_activity: 2026-04-11
 progress:
   total_phases: 8
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 12
-  completed_plans: 11
+  completed_plans: 12
   percent: 100
 ---
 
@@ -25,9 +25,9 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 
 ## Current Position
 
-Phase: 42 (targeted-oracle-and-start-condition-runtime-effects) — READY
-Plan: 1 of 2
-Status: Ready to execute
+Phase: 42 (targeted-oracle-and-start-condition-runtime-effects) — COMPLETE
+Plan: 2 of 2
+Status: Completed
 Last activity: 2026-04-11
 
 Progress: [██████████] 100%
@@ -89,6 +89,9 @@ Recent decisions affecting current work:
 - [Phase 41]: Restore-time campaign invalidation clears live-turn snapshots, active-turn guards, and same-turn committed evidence before reopening the restored branch.
 - [Phase 42]: Parsed intent/method text now wins for player target resolution before any classifier fallback runs.
 - [Phase 42]: Player Oracle target tags now derive from canonical character records or normalized stored entity tags depending on target type.
+- [Phase 42]: Active opening effects now live through player state.statusFlags and deterministic re-derivation from canonical startConditions.
+- [Phase 42]: Immediate situations are normalized once into a small bounded opening-effect set instead of free-form per-turn interpretation.
+- [Phase 42]: Opening-state effects expire deterministically on first location change, explicit resolution, or a three-tick ceiling.
 
 ### Pending Todos
 
@@ -101,6 +104,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-11T12:40:45.995Z
-Stopped at: Completed 42-01-PLAN.md
+Last session: 2026-04-11T13:09:03.448Z
+Stopped at: Completed 42-02-PLAN.md
 Resume file: None

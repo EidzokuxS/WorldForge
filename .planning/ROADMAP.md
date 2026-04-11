@@ -21,7 +21,7 @@ v1.1 is a reconciliation milestone built from the [Phase 36 handoff](/R:/Project
 - [x] **Phase 39: Honest Turn Boundary, Retry & Undo** - Make the player-visible turn boundary match the authoritative rollback boundary. (completed 2026-04-09)
 - [x] **Phase 40: Live Reflection & Progression Triggers** - Turn dormant reflection scaffolding into observable runtime behavior. (completed 2026-04-10)
 - [x] **Phase 41: Checkpoint-Complete Simulation Restore** - Restore full campaign runtime state, including simulation metadata and post-turn world mutations. (completed 2026-04-11)
-- [ ] **Phase 42: Targeted Oracle & Start-Condition Runtime Effects** - Make target-aware rulings and structured starts mechanically real in live play.
+- [x] **Phase 42: Targeted Oracle & Start-Condition Runtime Effects** - Make target-aware rulings and structured starts mechanically real in live play. (completed 2026-04-11)
 - [ ] **Phase 43: Travel & Location-State Contract Resolution** - Implement or explicitly deprecate the remaining location/time gameplay promises.
 - [ ] **Phase 44: Gameplay Docs Baseline Alignment** - Rewrite gameplay docs into an honest planning baseline for the repaired runtime.
 
@@ -102,7 +102,7 @@ Plans:
 **Plans**: 2 plans
 Plans:
 - [x] 42-01-PLAN.md — Resolve supported player-action targets into real Oracle context with honest fallback for unsupported cases.
-- [ ] 42-02-PLAN.md — Turn structured start conditions into bounded early-game runtime mechanics that survive restore flows.
+- [x] 42-02-PLAN.md — Turn structured start conditions into bounded early-game runtime mechanics that survive restore flows.
 
 ### Phase 43: Travel & Location-State Contract Resolution
 **Goal**: Travel/time and per-location recent-happenings promises are either real runtime mechanics or explicitly removed from the active product contract.
@@ -133,6 +133,6 @@ Plans:
 | 39. Honest Turn Boundary, Retry & Undo | 3/3 | Complete    | 2026-04-09 |
 | 40. Live Reflection & Progression Triggers | 3/3 | Complete   | 2026-04-10 |
 | 41. Checkpoint-Complete Simulation Restore | 2/2 | Complete | 2026-04-11 |
-| 42. Targeted Oracle & Start-Condition Runtime Effects | 1/2 | In Progress|  |
+| 42. Targeted Oracle & Start-Condition Runtime Effects | 2/2 | Complete   | 2026-04-11 |
 | 43. Travel & Location-State Contract Resolution | 0/TBD | Not started | - |
 | 44. Gameplay Docs Baseline Alignment | 0/TBD | Not started | - |
