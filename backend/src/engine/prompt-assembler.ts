@@ -35,6 +35,7 @@ import {
 import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
 import { buildStorytellerContract } from "./storyteller-contract.js";
 import { deriveStartConditionEffects } from "./start-condition-runtime.js";
+import { listRecentLocationEvents } from "./location-events.js";
 
 const log = createLogger("prompt-assembler");
 
@@ -51,6 +52,8 @@ export interface AssembleOptions {
   campaignId: string;
   /** Model's context window in tokens. */
   contextWindow: number;
+  /** Whether to include chat history in the assembled system prompt. */
+  includeRecentConversation?: boolean;
   /** Oracle result (optional -- not available for Oracle call itself). */
   actionResult?: {
     chance: number;
@@ -369,6 +372,7 @@ function buildPlayerStateSection(
 function buildSceneSection(
   campaignId: string,
   locationId: string | null,
+  currentTick: number,
 ): PromptSection | null {
   if (!locationId) return null;
 
@@ -426,6 +430,19 @@ function buildSceneSection(
     // Invalid connectedTo JSON -- skip
   }
 
+  const recentHappenings = listRecentLocationEvents({
+    campaignId,
+    locationRef: locationId,
+    limit: 5,
+  }).filter((event) => event.tick >= currentTick - 50);
+  const recentHappeningsLines =
+    recentHappenings.length > 0
+      ? [
+          "Recent happenings here:",
+          ...recentHappenings.map((event) => `- [Tick ${event.tick}] ${event.summary}`),
+        ]
+      : ["Recent happenings here: none in the last 50 ticks."];
+
   const lines = [
     `Location: ${location.name}`,
     location.description,
@@ -439,6 +456,7 @@ function buildSceneSection(
     connectedNames.length > 0
       ? `Connected paths: ${connectedNames.join(", ")}`
       : null,
+    ...recentHappeningsLines,
   ].filter(Boolean);
 
   const content = lines.join("\n");
@@ -448,7 +466,7 @@ function buildSceneSection(
     priority: 2,
     content,
     estimatedTokens: estimateTokens(content),
-    canTruncate: false,
+    canTruncate: true,
   };
 }
 
@@ -707,7 +725,15 @@ function buildWorldStateSection(
 export async function assemblePrompt(
   options: AssembleOptions,
 ): Promise<AssembledPrompt> {
-  const { campaignId, contextWindow, actionResult, embedderResult, playerAction, judgeRole } =
+  const {
+    campaignId,
+    contextWindow,
+    includeRecentConversation = true,
+    actionResult,
+    embedderResult,
+    playerAction,
+    judgeRole,
+  } =
     options;
 
   const budgets = allocateBudgets(contextWindow);
@@ -748,7 +774,7 @@ export async function assemblePrompt(
   const locationId = player?.currentLocationId ?? null;
 
   // 4. Scene
-  const sceneSection = buildSceneSection(campaignId, locationId);
+  const sceneSection = buildSceneSection(campaignId, locationId, currentTick);
 
   // 4.5. World state (chronicle + factions)
   const worldStateSection = buildWorldStateSection(campaignId);
@@ -803,7 +829,9 @@ export async function assemblePrompt(
   // 10. Smart conversation compression (replaces naive tail-slicing)
   const conversationBudget = budgets.recentConversation ?? Math.floor(contextWindow * 0.20);
   const history = getChatHistory(campaignId);
-  const conversationSection = await compressConversation(history, conversationBudget, judgeRole);
+  const conversationSection = includeRecentConversation
+    ? await compressConversation(history, conversationBudget, judgeRole)
+    : null;
 
   // Collect all non-null sections
   const allSections: PromptSection[] = [
