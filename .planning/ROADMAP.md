@@ -20,7 +20,7 @@ v1.1 is a reconciliation milestone built from the [Phase 36 handoff](/R:/Project
 - [ ] **Phase 38: Authoritative Inventory & Equipment State** - Collapse runtime item truth onto one persistence model.
 - [x] **Phase 39: Honest Turn Boundary, Retry & Undo** - Make the player-visible turn boundary match the authoritative rollback boundary. (completed 2026-04-09)
 - [x] **Phase 40: Live Reflection & Progression Triggers** - Turn dormant reflection scaffolding into observable runtime behavior. (completed 2026-04-10)
-- [ ] **Phase 41: Checkpoint-Complete Simulation Restore** - Restore full campaign runtime state, including simulation metadata and post-turn world mutations.
+- [x] **Phase 41: Checkpoint-Complete Simulation Restore** - Restore full campaign runtime state, including simulation metadata and post-turn world mutations. (completed 2026-04-11)
 - [ ] **Phase 42: Targeted Oracle & Start-Condition Runtime Effects** - Make target-aware rulings and structured starts mechanically real in live play.
 - [ ] **Phase 43: Travel & Location-State Contract Resolution** - Implement or explicitly deprecate the remaining location/time gameplay promises.
 - [ ] **Phase 44: Gameplay Docs Baseline Alignment** - Rewrite gameplay docs into an honest planning baseline for the repaired runtime.
@@ -88,8 +88,8 @@ Plans:
   3. Retry, undo, and checkpoint load keep NPC autonomy, reflection, and faction updates aligned with the same restored campaign boundary.
 **Plans**: 2 plans
 Plans:
-- [ ] 41-01-PLAN.md — Converge checkpoint and turn-boundary restore onto one config-inclusive authoritative bundle contract.
-- [ ] 41-02-PLAN.md — Clear discarded-timeline runtime state so checkpoint load, retry, and undo stay on the same restored simulation boundary.
+- [x] 41-01-PLAN.md — Converge checkpoint and turn-boundary restore onto one config-inclusive authoritative bundle contract.
+- [x] 41-02-PLAN.md — Clear discarded-timeline runtime state so checkpoint load, retry, and undo stay on the same restored simulation boundary.
 
 ### Phase 42: Targeted Oracle & Start-Condition Runtime Effects
 **Goal**: Oracle rulings and early gameplay mechanics use real target context and structured start-condition state.
@@ -129,7 +129,7 @@ Plans:
 | 38. Authoritative Inventory & Equipment State | 0/TBD | Not started | - |
 | 39. Honest Turn Boundary, Retry & Undo | 3/3 | Complete    | 2026-04-09 |
 | 40. Live Reflection & Progression Triggers | 3/3 | Complete   | 2026-04-10 |
-| 41. Checkpoint-Complete Simulation Restore | 0/TBD | Not started | - |
+| 41. Checkpoint-Complete Simulation Restore | 2/2 | Complete | 2026-04-11 |
 | 42. Targeted Oracle & Start-Condition Runtime Effects | 0/TBD | Not started | - |
 | 43. Travel & Location-State Contract Resolution | 0/TBD | Not started | - |
 | 44. Gameplay Docs Baseline Alignment | 0/TBD | Not started | - |

@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
-status: planning
-stopped_at: Phase 41 context gathered
-last_updated: "2026-04-11T10:20:58.2548057Z"
-last_activity: 2026-04-11 -- Captured Phase 41 context
+status: executing
+stopped_at: Phase 41 completed
+last_updated: "2026-04-11T14:29:00+03:00"
+last_activity: 2026-04-11 -- Completed Phase 41 checkpoint-complete restore
 progress:
   total_phases: 8
-  completed_phases: 3
-  total_plans: 8
-  completed_plans: 8
+  completed_phases: 4
+  total_plans: 10
+  completed_plans: 10
   percent: 100
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-08)
 
 **Core value:** The LLM is the narrator, never the engine. Mechanical truth stays in backend code so outcomes remain consistent, inspectable, and recoverable.
-**Current focus:** Phase 41 — checkpoint-complete-simulation-restore
+**Current focus:** Phase 42 — targeted-oracle-and-start-condition-runtime-effects
 
 ## Current Position
 
-Phase: 41 (checkpoint-complete-simulation-restore) — PLANNING
+Phase: 42 (targeted-oracle-and-start-condition-runtime-effects) — READY
 Plan: 0 of TBD
-Status: Context gathered — ready for planning
-Last activity: 2026-04-11 -- Captured Phase 41 context
+Status: Phase 41 complete — ready for Phase 42 discussion/planning
+Last activity: 2026-04-11 -- Completed Phase 41 checkpoint-complete restore
 
 Progress: [██████████] 100%
 
@@ -37,7 +37,7 @@ Progress: [██████████] 100%
 **Current Snapshot:**
 
 - Active roadmap phases: 8
-- Completed phases: 36
+- Completed phases: 37
 - Planned or in-progress phases: 8
 - Total plans tracked: 110
 - Completed plans: 110
@@ -85,6 +85,8 @@ Recent decisions affecting current work:
 - [Phase 40]: Wealth and skill upgrades remain available, but only behind materially stronger evidence thresholds than ordinary interaction arcs.
 - [Phase 40]: Reflection reads same-turn committed evidence directly instead of making embeddings rollback-critical.
 - [Phase 40]: Every writer that already calls storeEpisodicEvent now joins one queued handoff that post-turn auxiliary embedding drains after reflection.
+- [Phase 41]: Checkpoints and Phase 39 restore now share one authoritative bundle contract for `state.db`, `config.json`, and `chat_history.json`, with vectors included only for checkpoints.
+- [Phase 41]: Restore-time campaign invalidation clears live-turn snapshots, active-turn guards, and same-turn committed evidence before reopening the restored branch.
 
 ### Pending Todos
 
@@ -97,6 +99,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-11T10:20:36.782Z
-Stopped at: Phase 41 context gathered
-Resume file: .planning/phases/41-checkpoint-complete-simulation-restore/41-CONTEXT.md
+Last session: 2026-04-11T14:29:00+03:00
+Stopped at: Phase 41 completed
+Resume file: .planning/phases/41-checkpoint-complete-simulation-restore/41-VERIFICATION.md
