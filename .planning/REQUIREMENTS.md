@@ -30,7 +30,7 @@ Requirements for the gameplay-fidelity milestone. Each maps to roadmap phases.
 ### Documentation Alignment
 
 - [x] **DOCA-01**: Every gameplay claim elevated by Phase 36 Group B and Group C is resolved as either implemented behavior or an explicit deprecation in docs.
-- [ ] **DOCA-02**: Gameplay docs describe the live structured character/runtime model accurately, including the role of derived tags versus canonical character data.
+- [x] **DOCA-02**: Gameplay docs describe the live structured character/runtime model accurately, including the role of derived tags versus canonical character data.
 - [ ] **DOCA-03**: Gameplay docs describe the real retrieval, memory, and prompt contracts accurately enough to serve as a planning baseline for later milestones.
 
 ## v1.2+ Candidate Requirements
@@ -70,7 +70,7 @@ Explicitly excluded from this milestone to keep it reconciliation-driven.
 | GSEM-03 | Phase 43 | Complete |
 | GSEM-04 | Phase 43 | Complete |
 | DOCA-01 | Phase 44 | Complete |
-| DOCA-02 | Phase 44 | Pending |
+| DOCA-02 | Phase 44 | Complete |
 | DOCA-03 | Phase 44 | Pending |
 
 **Coverage:**

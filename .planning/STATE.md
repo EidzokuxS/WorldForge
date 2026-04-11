@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
 status: executing
-stopped_at: Completed 44-gameplay-docs-baseline-alignment-01-PLAN.md
-last_updated: "2026-04-11T19:22:58.572Z"
+stopped_at: Completed 44-02-PLAN.md
+last_updated: "2026-04-11T19:22:58.894Z"
 last_activity: 2026-04-11
 progress:
   total_phases: 8
@@ -45,6 +45,7 @@ Progress: [█████████░] 90%
 
 **Recent Execution:**
 
+- Phase `44` Plan `02` — duration `5 min`, tasks `2`, files `1`
 - Phase `44` Plan `01` — duration `8 min`, tasks `2`, files `4`
 - Phase `43` Plan `06` — duration `4 min`, tasks `2`, files `6`
 - Phase `43` Plan `04` — duration `6 min`, tasks `2`, files `5`
@@ -121,6 +122,9 @@ Recent decisions affecting current work:
 - [Phase 44]: Concept docs now state product boundaries and defer detailed gameplay and runtime truth to mechanics.md and memory.md. — This prevents top-level docs from competing with the normative runtime baseline.
 - [Phase 44]: The stack doc now documents gameplay transport as REST plus SSE rather than WebSocket gameplay truth. — frontend/lib/api.ts and /game already consume targeted REST routes with SSE parsing, so the technical reference had to match live transport.
 - [Phase 44]: The legacy player-character-creation plan remains available only as historical context with an explicit superseded note. — Keeping the old plan discoverable is acceptable only if it no longer masquerades as current gameplay authority.
+- [Phase 44]: docs/mechanics.md now treats canonical records as the gameplay authority and derived tags as shorthand or compatibility output.
+- [Phase 44]: Reflection wording now deprecates the old threshold-15 claim in favor of the live threshold sum >= 10 and structured-state-first outcomes.
+- [Phase 44]: Travel, location history, and world-information-flow are documented through connectedPaths, recent happenings, and bounded prompt context instead of omniscience claims.
 
 ### Pending Todos
 
@@ -133,6 +137,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-11T19:21:40.443Z
-Stopped at: Completed 44-gameplay-docs-baseline-alignment-01-PLAN.md
+Last session: 2026-04-11T19:22:58.890Z
+Stopped at: Completed 44-02-PLAN.md
 Resume file: None
