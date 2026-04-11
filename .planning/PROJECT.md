@@ -19,7 +19,9 @@ The shipped baseline includes:
 - unified character ontology, structured start conditions, canonical loadouts, and persona templates
 - desktop-first non-game shell for launcher, creation, review, and character authoring
 
-The next milestone should start from the docs-to-runtime reconciliation in [36-HANDOFF.md](/R:/Projects/WorldForge/.planning/phases/36-gameplay-docs-to-runtime-reconciliation-audit/36-HANDOFF.md), not from old assumptions.
+`v1.1 Gameplay Fidelity` is now mostly executed. Phases `37`, `39`, `40`, `41`, `42`, `43`, and `44` are complete. The remaining open milestone phase is `38`, which still owns authoritative inventory and equipment state.
+
+The milestone still starts from the docs-to-runtime reconciliation in [36-HANDOFF.md](/R:/Projects/WorldForge/.planning/phases/36-gameplay-docs-to-runtime-reconciliation-audit/36-HANDOFF.md), not from old assumptions.
 
 ## Current Milestone: v1.1 Gameplay Fidelity
 
@@ -74,4 +76,4 @@ The next milestone should start from the docs-to-runtime reconciliation in [36-H
 | Integrity repair before gameplay expansion | New mechanics on top of untrusted runtime state would create false progress | ✓ Good |
 
 ---
-*Last updated: 2026-04-08 after starting v1.1 Gameplay Fidelity*
+*Last updated: 2026-04-11 after Phase 44 completion*
