@@ -1,75 +1,136 @@
 # WorldForge: Game Mechanics
 
-## Tag-Based System
+## Authority Model
 
-The game uses **descriptive tags** instead of traditional numerical stats (Str, Dex, Int). Tags are the universal language — everything in the game world is described by them: characters, factions, locations, items.
+`docs/mechanics.md` is the normative gameplay baseline for live mechanics. Backend code remains authoritative when prose and implementation diverge.
 
-### Tag Categories
+The player and NPC state model is now **canonical-record-first**. A structured record (`CharacterRecord`) is the source of truth for character identity, motivations, capabilities, state, loadout, and start conditions. Derived tags still matter, but they are **compatibility output** for prompts, Oracle context, and older runtime surfaces rather than the authored ontology.
 
-- **Traits:** `[Uchiha Clan Member]`, `[Cyborg Implant]`, `[One-Eyed]`
-- **Skills:** `[Master Swordsman]`, `[Novice Alchemist]`, `[Skilled Pyromancer]`
-- **Flaws:** `[Wanted by the Law]`, `[Phobia of Spiders]`, `[Exhausted]`
-- **Status:** `[Blinded, 2 turns]`, `[Poisoned]`, `[Inspired]`
-- **Structural (locations):** `[Ruins]`, `[Heavy Rain]`, `[Anti-Magic Zone]`
-- **Faction:** `[Militaristic]`, `[Hidden]`, `[Food Scarce]`
+### Canonical Character State
+
+Characters no longer operate as flat tag bags. The authoritative layer is a structured record, and the runtime projects compact shorthand from it when needed.
+
+- **Authoritative:** canonical identity, profile, social context, motivations, capabilities, state, loadout, and `startConditions`
+- **Derived:** runtime tag lists assembled from the structured record for prompt compactness and compatibility
+- **Still tag-native:** items, locations, factions, and some scene/world surfaces continue to expose tags directly
+
+This is the active replacement for the old “tag-based system” claim. Tags are still useful, but they are no longer the whole ontology for characters.
 
 ### Minimal Numerics
 
-Only one value is tracked as a number:
-- **HP (1–5)** — a simple health scale. 5 = healthy, 1 = near death, 0 = the GM decides consequences (see Death section).
+Only a small number of mechanics remain numeric in the live contract:
 
-Everything else is tags, including:
-- **Wealth** — tag tiers: `[Destitute]`, `[Poor]`, `[Comfortable]`, `[Wealthy]`, `[Obscenely Rich]`. Trading is a narrative action resolved by the Oracle ("Can this character afford this?"), not a balance sheet.
-- **Skills** — descriptive tiers: `[Novice Pyromancer]` → `[Skilled Pyromancer]` → `[Master Pyromancer]`. Progression happens through the Reflection Agent, not XP counters.
-- **Relationships** — qualitative tags: `[Trusted Ally]`, `[Suspicious]`, `[Sworn Enemy]`, `[Owes a Debt]`. No numeric scores.
+- **HP (1-5)** is still the primary explicit character meter. `5` is healthy, `1` is near collapse, and `0` hands the outcome to the narration-plus-mechanics boundary described in the defeat rules.
+
+Everything else is mostly qualitative or record-backed:
+
+- **Wealth** uses descriptive tiers such as `[Poor]`, `[Comfortable]`, or `[Wealthy]`.
+- **Skills** remain descriptive tiers such as `[Novice Pyromancer]`, `[Skilled Pyromancer]`, or `[Master Pyromancer]`.
+- **Relationships** remain qualitative states such as `[Trusted Ally]` or `[Sworn Enemy]`.
+- **Status** can appear as derived tags, but the live runtime also stores structured `conditions` and `statusFlags`.
+
+### Derived Tags and Compatibility Views
+
+Derived tags are intentionally lossy shorthand. The runtime composes them from the canonical structured record and uses them where compactness is useful:
+
+- prompt assembly
+- Oracle actor context
+- compatibility projections for older tables and payloads
+
+They should be read as a snapshot, not as the authored source of truth. Future planning should prefer the structured record over any flat tag projection.
+
+### Bounded Pending Seam: Inventory Authority
+
+Inventory and equipment behavior is more coherent than the pre-v1.1 baseline, but it is not documented as fully closed authority yet. Live gameplay currently uses the `items` table plus canonical records together, and Phase 38 remains the explicit pending seam for final inventory authority. Do not treat tag projections or old equipped-item strings as the final gameplay contract.
 
 ## The Probability Oracle
 
-When a player attempts any non-trivial action, the **Oracle** — a fast, cheap LLM — evaluates the probability of success.
+When a player attempts a non-trivial action, the **Oracle** evaluates chance and returns a bounded mechanical ruling that the backend resolves before narration.
 
 ### The Oracle Flow
 
-1. Player states their action: *"I use [Skilled Aeromancer] to create a vacuum around the torch-wielding guard."*
-2. Backend assembles the **Oracle Payload**:
-   - **Intent & Method:** What and how.
-   - **Actor tags:** Positive capabilities + negative debuffs.
-   - **Target tags:** Defenses, resistances, strengths.
-   - **Environment tags:** Local node conditions.
-3. Oracle LLM returns: `{ "chance": 65, "reasoning": "A Skilled Aeromancer can manipulate air in a confined space, but the guard's torch provides heat that resists vacuum formation." }`
-4. Backend rolls D100 and determines a **3-tier outcome**:
-   - **Strong Hit** (roll ≤ chance × 0.5) — full success, possible bonus effect.
-   - **Weak Hit** (roll ≤ chance) — success with a complication, cost, or partial result.
-   - **Miss** (roll > chance) — failure with consequences.
-5. Storyteller LLM receives the tier and narrates accordingly.
+1. The player states an action.
+2. The backend assembles the Oracle payload from live runtime state:
+   - **Intent and method:** what the player is trying to do and how.
+   - **Actor context:** capabilities, conditions, and other relevant shorthand projected from the canonical record.
+   - **Target context:** live target-aware support for **character, item, and location/object** targets when a concrete supported target resolves.
+   - **Environment and scene context:** current location state plus any prompt-visible opening constraints.
+3. The Oracle returns structured output such as `{ "chance": 65, "reasoning": "..." }`.
+4. The backend rolls D100 and resolves a three-tier outcome:
+   - **Strong Hit**: roll <= chance x 0.5
+   - **Weak Hit**: roll <= chance
+   - **Miss**: roll > chance
+5. The Storyteller narrates from that tier and from the already-resolved backend state.
 
-### Why Oracle, Not Fixed Math
+### Target-Aware Boundaries
 
-A hardcoded dictionary of weight interactions (`[Fire] vs [Ice] = +20%`) cannot scale in an open-ended sandbox. The Oracle natively understands creative combinations: mixing `[Pocket Sand]` with `[Wind Magic]`, using `[Cooking Skill]` to improvise a poison. It evaluates context, not just keywords.
+The live target-aware contract is intentionally bounded.
+
+- Supported target-aware rulings are implemented for **character, item, and location/object** targets.
+- Target-aware support depends on resolving a concrete supported entity from parsed intent/method text, movement context, or a bounded classifier fallback.
+- If the action does not resolve a supported target, the Oracle falls back honestly to non-targeted evaluation with empty target tags.
+- The document does **not** claim a generic faction-targeting vertical or universal target-tag coverage for every noun the player can mention.
+
+This replaces the older wording that implied target tags always existed implicitly.
+
+### Why Oracle Instead of Fixed Interaction Math
+
+The live product still prefers context-sensitive evaluation over a hardcoded interaction grid. The Oracle sees structured state plus compatibility shorthand and can weigh unusual combinations without requiring a giant hand-authored modifier table.
 
 ### Oracle Configuration
 
-The Oracle is configured separately from the Storyteller in the UI settings:
-- **Provider/Model:** A fast, cheap model (e.g., GPT-4o-mini, Claude Haiku, Llama 3 8B).
-- **Temperature:** Defaults to `0.0` for consistent, logical rulings.
+The Oracle remains a separate Judge-role configuration in the UI:
+
+- **Provider/model:** usually a fast, cheap model
+- **Temperature:** typically `0.0` for stable rulings
+
+## Opening-State Runtime Effects
+
+Structured start conditions are now bounded live mechanics, not flavor-only setup text. The canonical player record can carry:
+
+- `arrivalMode`
+- `startingVisibility`
+- `entryPressure`
+- `companions`
+- `immediateSituation`
+
+The runtime derives opening-state effects from those fields into status flags, prompt lines, and scene constraints.
+
+### What the Runtime Guarantees
+
+- `arrivalMode` affects how the opening scene is framed and which constraints are immediately visible.
+- `startingVisibility` determines whether the player begins noticed, expected, hidden, or otherwise socially exposed.
+- `entryPressure` adds concrete early-scene pressure such as surveillance, urgency, or hostile scrutiny.
+- `companions` are carried through as prompt-visible presence/context, not as a full party-management system.
+- `immediateSituation` is normalized into a small bounded opening-effect set rather than reinterpreted freely every turn.
+
+The live contract is status-flag-backed and prompt-visible. It is **not** a free-form rules engine and it does not claim generic long-horizon scenario simulation from arbitrary setup prose.
+
+### Expiry Rules
+
+Opening effects are temporary by design. They expire deterministically on the first matching condition:
+
+- location change away from the canonical opening location
+- explicit resolution through the player action that addresses the opening constraint
+- the **three-tick** ceiling
+
+This is the replacement for older narration-only start-condition wording. Opening-state pressure is real, but intentionally bounded.
 
 ## Soft-Fail System
 
-Nothing is hard-blocked. A peasant trying to cast a fireball? The Oracle assigns a near-zero chance. The backend rolls. If (miracle) it succeeds — the world just got interesting. If it fails — the GM narrates the humiliating consequence.
+Nothing in the action layer is hard-blocked purely because a move is unlikely. The Oracle can assign a near-zero chance, the backend still resolves the roll, and the resulting failure or miracle success becomes world state plus narration.
 
-This keeps the sandbox open while maintaining consequences. Players can always try anything; the world always reacts logically.
+This keeps the sandbox open without pretending every action is equally plausible.
 
 ## Death & Defeat
 
-**HP reaching 0 does not automatically mean death.** When a character's HP drops to zero, the Storyteller GM determines the narrative outcome based on context:
+**HP reaching 0 does not automatically mean death.** The live runtime still treats defeat as context-dependent.
 
-- A bar brawl → unconsciousness, waking up in an alley.
-- A duel with a rival → captured, held prisoner.
-- A fight against a dragon → death, unless the situation offers an escape.
-- An assassination → almost certainly lethal.
+- A bar brawl can end in unconsciousness.
+- A duel can end in capture.
+- A lethal encounter can still end in death if the situation supports it.
 
-The GM considers the attacker's intent, the situation, and the drama. Death is meaningful because it's earned, not mechanical.
-
-Saves and checkpoints (see `memory.md`) allow the player to reload if they disagree with the outcome.
+Narration decides the fictional outcome, but it does so on top of backend-owned mechanics and persistent world state. Saves and checkpoints in `docs/memory.md` remain the player recovery path when the outcome is unacceptable.
 
 ## Character System (3 Tiers)
 
