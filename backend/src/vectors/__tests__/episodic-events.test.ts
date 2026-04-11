@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockGetVectorDb = vi.fn();
 const mockEmbedTexts = vi.fn();
+const mockGetDb = vi.fn();
 
 vi.mock("../connection.js", () => ({
   getVectorDb: () => mockGetVectorDb(),
@@ -9,6 +10,10 @@ vi.mock("../connection.js", () => ({
 
 vi.mock("../embeddings.js", () => ({
   embedTexts: (...args: unknown[]) => mockEmbedTexts(...args),
+}));
+
+vi.mock("../../db/index.js", () => ({
+  getDb: () => mockGetDb(),
 }));
 
 vi.mock("../../lib/index.js", () => ({
@@ -75,10 +80,36 @@ function createMockDb({
   return { db, table, queryBuilder, vectorSearchBuilder };
 }
 
+function createMockCampaignDb({
+  location,
+}: {
+  location?: Record<string, unknown> | null;
+} = {}) {
+  const insertRun = vi.fn();
+  const insertValues = vi.fn().mockReturnValue({ run: insertRun });
+  const insert = vi.fn().mockReturnValue({ values: insertValues });
+
+  const selectGet = vi.fn().mockReturnValue(location);
+  const where = vi.fn().mockReturnValue({ get: selectGet });
+  const from = vi.fn().mockReturnValue({ where });
+  const select = vi.fn().mockReturnValue({ from });
+
+  return {
+    db: {
+      select,
+      insert,
+    },
+    insertValues,
+    insertRun,
+    selectGet,
+  };
+}
+
 describe("episodic-events", () => {
   beforeEach(() => {
     mockGetVectorDb.mockReset();
     mockEmbedTexts.mockReset();
+    mockGetDb.mockReset();
     clearPendingCommittedEvents("campaign-1");
     clearPendingCommittedEvents("campaign-live");
     clearPendingCommittedEvents("campaign-other");
@@ -207,6 +238,47 @@ describe("episodic-events", () => {
           type: "dialogue",
         }),
       ]);
+    });
+
+    it("writes a SQLite-backed location projection row with source traceability and anchored archived-scene spillover", async () => {
+      const { db: vectorDb } = createMockDb();
+      const { db: campaignDb, insertValues } = createMockCampaignDb({
+        location: {
+          id: "scene-1",
+          campaignId: "campaign-1",
+          name: "Collapsed Tunnel",
+          kind: "ephemeral_scene",
+          persistence: "ephemeral",
+          anchorLocationId: "loc-anchor",
+          archivedAtTick: 15,
+        },
+      });
+      mockGetVectorDb.mockReturnValue(vectorDb);
+      mockGetDb.mockReturnValue(campaignDb);
+
+      await storeEpisodicEvent("campaign-1", {
+        text: "The tunnel collapse left cursed residue in the crossing.",
+        tick: 14,
+        location: "Collapsed Tunnel",
+        participants: ["Elara"],
+        importance: 6,
+        type: "event",
+      });
+
+      expect(insertValues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          campaignId: "campaign-1",
+          locationId: "loc-anchor",
+          sourceLocationId: "scene-1",
+          anchorLocationId: "loc-anchor",
+          eventType: "event",
+          summary: "The tunnel collapse left cursed residue in the crossing.",
+          tick: 14,
+          importance: 6,
+          archivedAtTick: 15,
+          sourceEventId: expect.any(String),
+        }),
+      );
     });
 
     it("keeps pending evidence campaign-scoped and tick-scoped, and drain clears queued committed events", async () => {

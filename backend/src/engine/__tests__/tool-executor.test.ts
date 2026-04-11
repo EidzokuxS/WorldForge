@@ -287,6 +287,59 @@ describe("executeToolCall", () => {
         8,
       );
     });
+
+    it("attaches the player's concrete current location when runtime state knows it", async () => {
+      const selectCallCount = { n: 0 };
+      const db = {
+        select: vi.fn().mockReturnThis(),
+        from: vi.fn().mockImplementation(() => {
+          selectCallCount.n += 1;
+
+          if (selectCallCount.n === 1) {
+            return {
+              where: vi.fn().mockReturnValue({
+                get: vi.fn().mockReturnValue({
+                  id: "player-1",
+                  campaignId: CAMPAIGN_ID,
+                  name: "Hero",
+                  currentLocationId: "loc-1",
+                }),
+              }),
+            };
+          }
+
+          return {
+            where: vi.fn().mockReturnValue({
+              get: vi.fn().mockReturnValue({
+                id: "loc-1",
+                campaignId: CAMPAIGN_ID,
+                name: "Town Square",
+              }),
+            }),
+          };
+        }),
+        update: vi.fn(),
+        insert: vi.fn(),
+      };
+      (getDb as Mock).mockReturnValue(db);
+      (storeEpisodicEvent as Mock).mockResolvedValue("event-345");
+
+      const result = await executeToolCall(CAMPAIGN_ID, "log_event", {
+        text: "The square bell rang out over the crowd.",
+        importance: 5,
+        participants: ["Hero"],
+      }, TICK);
+
+      expect(result.success).toBe(true);
+      expect(storeEpisodicEvent).toHaveBeenCalledWith(
+        CAMPAIGN_ID,
+        expect.objectContaining({
+          text: "The square bell rang out over the crowd.",
+          location: "Town Square",
+          tick: TICK,
+        }),
+      );
+    });
   });
 
   // -- offer_quick_actions ----------------------------------------------------
