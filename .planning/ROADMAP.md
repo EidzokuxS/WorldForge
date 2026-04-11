@@ -101,7 +101,7 @@ Plans:
   3. Reload, retry, and checkpoint restore preserve those target-aware and start-condition-driven mechanics.
 **Plans**: 2 plans
 Plans:
-- [ ] 42-01-PLAN.md — Resolve supported player-action targets into real Oracle context with honest fallback for unsupported cases.
+- [x] 42-01-PLAN.md — Resolve supported player-action targets into real Oracle context with honest fallback for unsupported cases.
 - [ ] 42-02-PLAN.md — Turn structured start conditions into bounded early-game runtime mechanics that survive restore flows.
 
 ### Phase 43: Travel & Location-State Contract Resolution
@@ -133,6 +133,6 @@ Plans:
 | 39. Honest Turn Boundary, Retry & Undo | 3/3 | Complete    | 2026-04-09 |
 | 40. Live Reflection & Progression Triggers | 3/3 | Complete   | 2026-04-10 |
 | 41. Checkpoint-Complete Simulation Restore | 2/2 | Complete | 2026-04-11 |
-| 42. Targeted Oracle & Start-Condition Runtime Effects | 0/2 | Not started | - |
+| 42. Targeted Oracle & Start-Condition Runtime Effects | 1/2 | In Progress|  |
 | 43. Travel & Location-State Contract Resolution | 0/TBD | Not started | - |
 | 44. Gameplay Docs Baseline Alignment | 0/TBD | Not started | - |

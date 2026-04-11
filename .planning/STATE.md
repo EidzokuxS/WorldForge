@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
 status: executing
-stopped_at: Phase 42 planned
-last_updated: "2026-04-11T15:06:00+03:00"
-last_activity: 2026-04-11 -- Planned Phase 42 targeted-oracle/start-condition runtime effects
+stopped_at: Completed 42-01-PLAN.md
+last_updated: "2026-04-11T12:40:45.998Z"
+last_activity: 2026-04-11
 progress:
   total_phases: 8
   completed_phases: 4
-  total_plans: 10
-  completed_plans: 10
+  total_plans: 12
+  completed_plans: 11
   percent: 100
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 ## Current Position
 
 Phase: 42 (targeted-oracle-and-start-condition-runtime-effects) — READY
-Plan: 0 of 2
-Status: Phase 42 planned — ready for execution
-Last activity: 2026-04-11 -- Planned Phase 42 targeted-oracle/start-condition runtime effects
+Plan: 1 of 2
+Status: Ready to execute
+Last activity: 2026-04-11
 
 Progress: [██████████] 100%
 
@@ -87,6 +87,8 @@ Recent decisions affecting current work:
 - [Phase 40]: Every writer that already calls storeEpisodicEvent now joins one queued handoff that post-turn auxiliary embedding drains after reflection.
 - [Phase 41]: Checkpoints and Phase 39 restore now share one authoritative bundle contract for `state.db`, `config.json`, and `chat_history.json`, with vectors included only for checkpoints.
 - [Phase 41]: Restore-time campaign invalidation clears live-turn snapshots, active-turn guards, and same-turn committed evidence before reopening the restored branch.
+- [Phase 42]: Parsed intent/method text now wins for player target resolution before any classifier fallback runs.
+- [Phase 42]: Player Oracle target tags now derive from canonical character records or normalized stored entity tags depending on target type.
 
 ### Pending Todos
 
@@ -99,6 +101,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-11T15:06:00+03:00
-Stopped at: Phase 42 planned
-Resume file: .planning/phases/42-targeted-oracle-and-start-condition-runtime-effects/42-01-PLAN.md
+Last session: 2026-04-11T12:40:45.995Z
+Stopped at: Completed 42-01-PLAN.md
+Resume file: None

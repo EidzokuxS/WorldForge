@@ -22,7 +22,7 @@ Requirements for the gameplay-fidelity milestone. Each maps to roadmap phases.
 
 ### Gameplay Semantics
 
-- [ ] **GSEM-01**: Oracle evaluation includes target-aware context when the player acts against a concrete entity, rather than always judging actions with empty target tags.
+- [x] **GSEM-01**: Oracle evaluation includes target-aware context when the player acts against a concrete entity, rather than always judging actions with empty target tags.
 - [ ] **GSEM-02**: Start conditions affect early gameplay mechanically and persistently, not only as prompt flavor text.
 - [ ] **GSEM-03**: Travel/time semantics promised by current docs are either implemented as runtime mechanics or removed from the active product contract.
 - [ ] **GSEM-04**: Per-location recent-happenings state promised by current docs is either implemented as runtime state or removed from the active product contract.
@@ -65,7 +65,7 @@ Explicitly excluded from this milestone to keep it reconciliation-driven.
 | SIMF-01 | Phase 40 | Complete |
 | SIMF-02 | Phase 39 | Complete |
 | SIMF-03 | Phase 41 | Pending |
-| GSEM-01 | Phase 42 | Pending |
+| GSEM-01 | Phase 42 | Complete |
 | GSEM-02 | Phase 42 | Pending |
 | GSEM-03 | Phase 43 | Pending |
 | GSEM-04 | Phase 43 | Pending |
