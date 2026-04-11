@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
 status: executing
-stopped_at: Completed 42-02-PLAN.md
-last_updated: "2026-04-11T13:09:03.451Z"
+stopped_at: Discussing Phase 43
+last_updated: "2026-04-11T13:48:00.000Z"
 last_activity: 2026-04-11
 progress:
   total_phases: 8
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-08)
 
 **Core value:** The LLM is the narrator, never the engine. Mechanical truth stays in backend code so outcomes remain consistent, inspectable, and recoverable.
-**Current focus:** Phase 42 — targeted-oracle-and-start-condition-runtime-effects
+**Current focus:** Phase 43 — travel-and-location-state-contract-resolution
 
 ## Current Position
 
-Phase: 42 (targeted-oracle-and-start-condition-runtime-effects) — COMPLETE
-Plan: 2 of 2
-Status: Completed
+Phase: 43 (travel-and-location-state-contract-resolution) — DISCUSS
+Plan: 0 of TBD
+Status: Context captured
 Last activity: 2026-04-11
 
 Progress: [██████████] 100%
@@ -92,6 +92,10 @@ Recent decisions affecting current work:
 - [Phase 42]: Active opening effects now live through player state.statusFlags and deterministic re-derivation from canonical startConditions.
 - [Phase 42]: Immediate situations are normalized once into a small bounded opening-effect set instead of free-form per-turn interpretation.
 - [Phase 42]: Opening-state effects expire deterministically on first location change, explicit resolution, or a three-tick ceiling.
+- [Phase 43]: Travel time remains part of the live product contract and should not be deprecated.
+- [Phase 43]: Phase 43 must be planned as a minimal complete location-system repair, not as two isolated doc-gap patches.
+- [Phase 43]: The intended location model distinguishes macro locations, persistent sublocations, and ephemeral scene locations with explicit lifetime semantics.
+- [Phase 43]: Temporary scene locations may expire as nodes, but their consequences must persist into world state and memory.
 
 ### Pending Todos
 
@@ -104,6 +108,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-11T13:09:03.448Z
-Stopped at: Completed 42-02-PLAN.md
+Last session: 2026-04-11T13:48:00.000Z
+Stopped at: Discussing Phase 43
 Resume file: None
