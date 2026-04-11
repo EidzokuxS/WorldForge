@@ -24,8 +24,8 @@ Requirements for the gameplay-fidelity milestone. Each maps to roadmap phases.
 
 - [x] **GSEM-01**: Oracle evaluation includes target-aware context when the player acts against a concrete entity, rather than always judging actions with empty target tags.
 - [x] **GSEM-02**: Start conditions affect early gameplay mechanically and persistently, not only as prompt flavor text.
-- [ ] **GSEM-03**: Travel/time semantics promised by current docs are either implemented as runtime mechanics or removed from the active product contract.
-- [ ] **GSEM-04**: Per-location recent-happenings state promised by current docs is either implemented as runtime state or removed from the active product contract.
+- [x] **GSEM-03**: Travel/time semantics promised by current docs are either implemented as runtime mechanics or removed from the active product contract.
+- [x] **GSEM-04**: Per-location recent-happenings state promised by current docs is either implemented as runtime state or removed from the active product contract.
 
 ### Documentation Alignment
 
@@ -67,8 +67,8 @@ Explicitly excluded from this milestone to keep it reconciliation-driven.
 | SIMF-03 | Phase 41 | Pending |
 | GSEM-01 | Phase 42 | Complete |
 | GSEM-02 | Phase 42 | Complete |
-| GSEM-03 | Phase 43 | Pending |
-| GSEM-04 | Phase 43 | Pending |
+| GSEM-03 | Phase 43 | Complete |
+| GSEM-04 | Phase 43 | Complete |
 | DOCA-01 | Phase 44 | Pending |
 | DOCA-02 | Phase 44 | Pending |
 | DOCA-03 | Phase 44 | Pending |

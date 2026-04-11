@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
 status: executing
-stopped_at: Discussing Phase 43
-last_updated: "2026-04-11T13:48:00.000Z"
-last_activity: 2026-04-11
+stopped_at: Completed 43-01-PLAN.md
+last_updated: "2026-04-11T15:47:47.324Z"
+last_activity: 2026-04-11 -- Completed Phase 43 Plan 01
 progress:
   total_phases: 8
   completed_phases: 5
-  total_plans: 12
-  completed_plans: 12
-  percent: 100
+  total_plans: 17
+  completed_plans: 13
+  percent: 76
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 
 ## Current Position
 
-Phase: 43 (travel-and-location-state-contract-resolution) — DISCUSS
-Plan: 0 of TBD
-Status: Context captured
-Last activity: 2026-04-11
+Phase: 43 (travel-and-location-state-contract-resolution) — EXECUTING
+Plan: 2 of 5
+Status: Executing Phase 43
+Last activity: 2026-04-11 -- Completed Phase 43 Plan 01
 
-Progress: [██████████] 100%
+Progress: [████████░░] 76%
 
 ## Performance Metrics
 
@@ -45,6 +45,7 @@ Progress: [██████████] 100%
 
 **Recent Execution:**
 
+- Phase `43` Plan `01` — duration `9 min`, tasks `2`, files `14`
 - Phase `40` Plan `03` — duration `4 min`, tasks `2`, files `6`
 - Phase `40` Plan `02` — duration `4 min`, tasks `2`, files `4`
 - Phase `40` Plan `01` — duration `6 min`, tasks `2`, files `9`
@@ -96,6 +97,8 @@ Recent decisions affecting current work:
 - [Phase 43]: Phase 43 must be planned as a minimal complete location-system repair, not as two isolated doc-gap patches.
 - [Phase 43]: The intended location model distinguishes macro locations, persistent sublocations, and ephemeral scene locations with explicit lifetime semantics.
 - [Phase 43]: Temporary scene locations may expire as nodes, but their consequences must persist into world state and memory.
+- [Phase 43]: Phase 43 keeps locations.connectedTo as a read-only compatibility projection while location_edges becomes the authoritative travel graph.
+- [Phase 43]: Phase 43 starts with failing backend regressions for multi-edge travel cost, connectedPaths payloads, and location-local recent happenings before implementation wiring.
 
 ### Pending Todos
 
@@ -108,6 +111,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-11T13:48:00.000Z
-Stopped at: Discussing Phase 43
+Last session: 2026-04-11T15:47:47.324Z
+Stopped at: Completed 43-01-PLAN.md
 Resume file: None
