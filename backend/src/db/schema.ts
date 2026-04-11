@@ -1,4 +1,5 @@
 import {
+  type AnySQLiteColumn,
   check,
   index,
   integer,
@@ -25,13 +26,107 @@ export const locations = sqliteTable(
       .references(() => campaigns.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     description: text("description").notNull(),
+    kind: text("kind", {
+      enum: ["macro", "persistent_sublocation", "ephemeral_scene"],
+    })
+      .notNull()
+      .default("macro"),
+    // Hierarchical containment for macro -> sublocation relationships.
+    parentLocationId: text("parent_location_id").references(
+      (): AnySQLiteColumn => locations.id,
+      { onDelete: "set null" }
+    ),
+    // Spillover anchor for ephemeral scenes whose consequences persist nearby.
+    anchorLocationId: text("anchor_location_id").references(
+      (): AnySQLiteColumn => locations.id,
+      { onDelete: "set null" }
+    ),
+    persistence: text("persistence", { enum: ["persistent", "ephemeral"] })
+      .notNull()
+      .default("persistent"),
+    expiresAtTick: integer("expires_at_tick"),
+    archivedAtTick: integer("archived_at_tick"),
     tags: text("tags").notNull().default("[]"),
     isStarting: integer("is_starting", { mode: "boolean" })
       .notNull()
       .default(false),
+    // Compatibility projection during the Phase 43 reader migration.
     connectedTo: text("connected_to").notNull().default("[]"),
   },
-  (table) => [index("idx_locations_campaign").on(table.campaignId)]
+  (table) => [
+    index("idx_locations_campaign").on(table.campaignId),
+    index("idx_locations_campaign_kind").on(table.campaignId, table.kind),
+    index("idx_locations_parent_location").on(table.parentLocationId),
+    index("idx_locations_anchor_location").on(table.anchorLocationId),
+  ]
+);
+
+export const locationEdges = sqliteTable(
+  "location_edges",
+  {
+    id: text("id").primaryKey(),
+    campaignId: text("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    fromLocationId: text("from_location_id")
+      .notNull()
+      .references(() => locations.id, { onDelete: "cascade" }),
+    toLocationId: text("to_location_id")
+      .notNull()
+      .references(() => locations.id, { onDelete: "cascade" }),
+    travelCost: integer("travel_cost").notNull().default(1),
+    discovered: integer("discovered", { mode: "boolean" })
+      .notNull()
+      .default(true),
+  },
+  (table) => [
+    index("idx_location_edges_campaign").on(table.campaignId),
+    index("idx_location_edges_from").on(table.campaignId, table.fromLocationId),
+    index("idx_location_edges_to").on(table.campaignId, table.toLocationId),
+    uniqueIndex("location_edges_campaign_from_to_unique").on(
+      table.campaignId,
+      table.fromLocationId,
+      table.toLocationId
+    ),
+  ]
+);
+
+export const locationRecentEvents = sqliteTable(
+  "location_recent_events",
+  {
+    id: text("id").primaryKey(),
+    campaignId: text("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    locationId: text("location_id")
+      .notNull()
+      .references(() => locations.id, { onDelete: "cascade" }),
+    sourceLocationId: text("source_location_id").references(() => locations.id, {
+      onDelete: "set null",
+    }),
+    anchorLocationId: text("anchor_location_id").references(() => locations.id, {
+      onDelete: "set null",
+    }),
+    eventType: text("event_type").notNull(),
+    summary: text("summary").notNull(),
+    tick: integer("tick").notNull(),
+    importance: integer("importance").notNull().default(1),
+    archivedAtTick: integer("archived_at_tick"),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    index("idx_location_recent_events_campaign").on(table.campaignId),
+    index("idx_location_recent_events_location_tick").on(
+      table.campaignId,
+      table.locationId,
+      table.tick
+    ),
+    index("idx_location_recent_events_source_location_tick").on(
+      table.campaignId,
+      table.sourceLocationId,
+      table.tick
+    ),
+  ]
 );
 
 export const players = sqliteTable(

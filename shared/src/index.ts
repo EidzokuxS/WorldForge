@@ -19,6 +19,11 @@ export type {
   WorldbookLibraryItemSummary,
   CampaignWorldbookSelection,
   CampaignMeta,
+  LocationKind,
+  LocationPersistence,
+  LocationConnectedPathSummary,
+  LocationRecentHappeningSummary,
+  LocationGraphNodeSummary,
   CharacterImportMode,
   CharacterRole,
   CharacterTier,
@@ -52,6 +57,8 @@ export type {
 } from "./types.js";
 
 export {
+  LOCATION_KINDS,
+  LOCATION_PERSISTENCE_MODES,
   CHARACTER_WEALTH_TIERS,
   CHARACTER_SKILL_TIERS,
 } from "./types.js";

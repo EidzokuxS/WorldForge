@@ -160,6 +160,60 @@ export interface CampaignMeta {
   generationComplete?: boolean;
 }
 
+export const LOCATION_KINDS = [
+  "macro",
+  "persistent_sublocation",
+  "ephemeral_scene",
+] as const;
+
+export type LocationKind = (typeof LOCATION_KINDS)[number];
+
+export const LOCATION_PERSISTENCE_MODES = [
+  "persistent",
+  "ephemeral",
+] as const;
+
+export type LocationPersistence = (typeof LOCATION_PERSISTENCE_MODES)[number];
+
+export interface LocationConnectedPathSummary {
+  edgeId: string;
+  toLocationId: string;
+  travelCost: number;
+  discovered: boolean;
+}
+
+export interface LocationRecentHappeningSummary {
+  id: string;
+  locationId: string;
+  sourceLocationId: string | null;
+  anchorLocationId: string | null;
+  eventType: string;
+  summary: string;
+  tick: number;
+  importance: number;
+  archivedAtTick: number | null;
+  createdAt: number;
+}
+
+export interface LocationGraphNodeSummary {
+  id: string;
+  campaignId: string;
+  name: string;
+  description: string;
+  kind: LocationKind;
+  parentLocationId: string | null;
+  anchorLocationId: string | null;
+  persistence: LocationPersistence;
+  expiresAtTick: number | null;
+  archivedAtTick: number | null;
+  tags: string[];
+  isStarting: boolean;
+  connectedPaths: LocationConnectedPathSummary[];
+  recentHappenings: LocationRecentHappeningSummary[];
+  /** Legacy compatibility projection while Phase 43 migrates readers off raw adjacency. */
+  connectedToLocationIds?: string[];
+}
+
 export const CHARACTER_WEALTH_TIERS = [
   "Destitute",
   "Poor",

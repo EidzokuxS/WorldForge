@@ -22,6 +22,11 @@ vi.mock("node:crypto", () => ({
 vi.mock("../../db/schema.js", () => ({
   campaigns: { _name: "campaigns" },
   locations: { _name: "locations", id: "locations.id" },
+  locationEdges: { _name: "location_edges", campaignId: "location_edges.campaignId" },
+  locationRecentEvents: {
+    _name: "location_recent_events",
+    campaignId: "location_recent_events.campaignId",
+  },
   factions: { _name: "factions" },
   npcs: { _name: "npcs" },
   relationships: { _name: "relationships", campaignId: "relationships.campaignId" },
@@ -212,14 +217,16 @@ describe("saveScaffoldToDb", () => {
   it("clearExistingScaffold deletes relationships, npcs, factions, locations in order", () => {
     saveScaffoldToDb("campaign-1", buildScaffold());
     const deletes = dbCalls.filter((c) => c.op === "delete");
-    expect(deletes.length).toBe(4);
+    expect(deletes.length).toBe(6);
     expect(deletes[0]!.table).toBe("relationships");
     expect(deletes[1]!.table).toBe("npcs");
     expect(deletes[2]!.table).toBe("factions");
-    expect(deletes[3]!.table).toBe("locations");
+    expect(deletes[3]!.table).toBe("location_recent_events");
+    expect(deletes[4]!.table).toBe("location_edges");
+    expect(deletes[5]!.table).toBe("locations");
   });
 
-  it("insertLocations creates one row per location with correct fields", () => {
+  it("insertLocations creates one row per location with Phase 43 default fields", () => {
     saveScaffoldToDb("campaign-1", buildScaffold());
     const locationInserts = dbCalls.filter(
       (c) => c.op === "insert" && c.table === "locations",
@@ -232,10 +239,16 @@ describe("saveScaffoldToDb", () => {
     expect(first.description).toBe("A fortified castle atop a hill.");
     expect(first.tags).toBe(JSON.stringify(["fortified", "military"]));
     expect(first.isStarting).toBe(true);
+    expect(first.kind).toBe("macro");
+    expect(first.parentLocationId).toBeNull();
+    expect(first.anchorLocationId).toBeNull();
+    expect(first.persistence).toBe("persistent");
+    expect(first.expiresAtTick).toBeNull();
+    expect(first.archivedAtTick).toBeNull();
     expect(first.connectedTo).toBe("[]");
   });
 
-  it("updateAdjacency creates bidirectional connections", () => {
+  it("updateAdjacency creates bidirectional compatibility projection", () => {
     saveScaffoldToDb("campaign-1", buildScaffold());
     const locationUpdates = dbCalls.filter(
       (c) => c.op === "update" && c.table === "locations",
@@ -251,6 +264,21 @@ describe("saveScaffoldToDb", () => {
     // uuid-1 is Castle Keep, uuid-2 is Dark Forest
     expect(firstConnected).toContain("uuid-2");
     expect(secondConnected).toContain("uuid-1");
+  });
+
+  it("updateAdjacency inserts normalized location edges with default travel cost", () => {
+    saveScaffoldToDb("campaign-1", buildScaffold());
+    const edgeInserts = dbCalls.filter(
+      (c) => c.op === "insert" && c.table === "location_edges",
+    );
+
+    expect(edgeInserts.length).toBe(2);
+    for (const edge of edgeInserts) {
+      const data = edge.data as Record<string, unknown>;
+      expect(data.campaignId).toBe("campaign-1");
+      expect(data.travelCost).toBe(1);
+      expect(data.discovered).toBe(true);
+    }
   });
 
   it("insertFactions creates rows with name, tags/goals/assets as JSON", () => {

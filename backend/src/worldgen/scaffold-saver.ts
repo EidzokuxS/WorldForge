@@ -10,6 +10,8 @@ import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
 import {
   campaigns,
   factions,
+  locationEdges,
+  locationRecentEvents,
   locations,
   npcs,
   relationships,
@@ -34,6 +36,10 @@ function clearExistingScaffold({ tx, campaignId }: BaseContext): void {
   tx.delete(relationships).where(eq(relationships.campaignId, campaignId)).run();
   tx.delete(npcs).where(eq(npcs.campaignId, campaignId)).run();
   tx.delete(factions).where(eq(factions.campaignId, campaignId)).run();
+  tx.delete(locationRecentEvents)
+    .where(eq(locationRecentEvents.campaignId, campaignId))
+    .run();
+  tx.delete(locationEdges).where(eq(locationEdges.campaignId, campaignId)).run();
   tx.delete(locations).where(eq(locations.campaignId, campaignId)).run();
 }
 
@@ -51,6 +57,13 @@ function insertLocations(
         campaignId,
         name: location.name,
         description: location.description,
+        kind: "macro",
+        parentLocationId: null,
+        // Worldgen creates persistent geography only; runtime scenes can anchor later.
+        anchorLocationId: null,
+        persistence: "persistent",
+        expiresAtTick: null,
+        archivedAtTick: null,
         tags: JSON.stringify(location.tags),
         isStarting: location.isStarting ?? false,
         connectedTo: "[]",
@@ -62,6 +75,7 @@ function insertLocations(
 
 function updateAdjacency(
   tx: Tx,
+  campaignId: string,
   scaffoldLocations: WorldScaffold["locations"],
   locationIds: Map<string, string>,
 ): void {
@@ -88,6 +102,19 @@ function updateAdjacency(
   }
 
   for (const [locationId, connectedSet] of adjacency) {
+    for (const targetId of connectedSet) {
+      tx.insert(locationEdges)
+        .values({
+          id: crypto.randomUUID(),
+          campaignId,
+          fromLocationId: locationId,
+          toLocationId: targetId,
+          travelCost: 1,
+          discovered: true,
+        })
+        .run();
+    }
+
     tx.update(locations)
       .set({ connectedTo: JSON.stringify([...connectedSet]) })
       .where(eq(locations.id, locationId))
@@ -232,7 +259,7 @@ export function saveScaffoldToDb(
     clearExistingScaffold(base);
 
     const locationIds = insertLocations(base, scaffold.locations);
-    updateAdjacency(tx, scaffold.locations, locationIds);
+    updateAdjacency(tx, campaignId, scaffold.locations, locationIds);
 
     const factionIds = insertFactions(base, scaffold.factions);
     const npcIds = insertNpcs(base, scaffold.npcs, locationIds);
