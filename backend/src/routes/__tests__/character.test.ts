@@ -31,6 +31,7 @@ vi.mock("../../settings/index.js", () => ({
 vi.mock("../../campaign/index.js", () => ({
   getActiveCampaign: vi.fn(),
   loadCampaign: vi.fn(),
+  readCampaignConfig: vi.fn(() => ({ currentTick: 0 })),
 }));
 
 vi.mock("../../ai/index.js", () => ({
@@ -73,13 +74,14 @@ import {
   generateNpcFromArchetype,
   researchArchetype,
 } from "../../character/index.js";
-import { getActiveCampaign, loadCampaign } from "../../campaign/index.js";
+import { getActiveCampaign, loadCampaign, readCampaignConfig } from "../../campaign/index.js";
 import { getDb } from "../../db/index.js";
 import { resolveStartingLocation } from "../../worldgen/index.js";
 import characterRoutes from "../character.js";
 
 const mockedGetActive = vi.mocked(getActiveCampaign);
 const mockedLoadCampaign = vi.mocked(loadCampaign);
+const mockedReadCampaignConfig = vi.mocked(readCampaignConfig);
 const mockedGetDb = vi.mocked(getDb);
 const mockedParseChar = vi.mocked(parseCharacterDescription);
 const mockedParseNpc = vi.mocked(parseNpcDescription);
@@ -162,6 +164,7 @@ function createMockDbForResolveNames() {
 beforeEach(() => {
   vi.clearAllMocks();
   mockedLoadCampaign.mockRejectedValue(new Error("not found"));
+  mockedReadCampaignConfig.mockReturnValue({ currentTick: 0 } as any);
 });
 
 function makePlayerDraft(overrides: Record<string, unknown> = {}) {
@@ -686,6 +689,76 @@ describe("POST /api/worldgen/save-character", () => {
     expect(insertPayload).toBeDefined();
     expect(insertPayload?.characterRecord).toBeDefined();
     expect(insertPayload?.derivedTags).toBeDefined();
+  });
+
+  it("materializes bounded opening-state status flags when saving structured start conditions", async () => {
+    setActiveCampaign();
+    const { mockValues } = createMockDb({
+      locations: [{ id: "loc-1", name: "Tavern" }],
+    });
+
+    const draft = makePlayerDraft({
+      socialContext: {
+        factionId: null,
+        factionName: null,
+        homeLocationId: null,
+        homeLocationName: null,
+        currentLocationId: null,
+        currentLocationName: "Tavern",
+        relationshipRefs: [],
+        socialStatus: [],
+        originMode: "outsider",
+      },
+      startConditions: {
+        startLocationId: "loc-1",
+        arrivalMode: "on-foot",
+        immediateSituation: "A tail is closing in as she slips through the market crowd.",
+        entryPressure: ["under watch", "clock running out"],
+        companions: ["Mira"],
+        startingVisibility: "noticed",
+        resolvedNarrative: "You arrive in the market with a tail behind you.",
+        sourcePrompt: "Start in the market while being followed.",
+      },
+    });
+
+    const res = await app.request("/api/worldgen/save-character", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        draft,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+
+    const firstInsertCall = mockValues.mock.calls[0] as unknown as [Record<string, unknown>] | undefined;
+    const insertPayload = firstInsertCall?.[0];
+    const characterRecord = JSON.parse(String(insertPayload?.characterRecord ?? "{}")) as {
+      startConditions: Record<string, unknown>;
+      state: { statusFlags: string[] };
+      socialContext: { currentLocationId: string | null; currentLocationName: string | null };
+    };
+
+    expect(characterRecord.socialContext.currentLocationId).toBe("loc-1");
+    expect(characterRecord.startConditions).toMatchObject({
+      startLocationId: "loc-1",
+      arrivalMode: "on-foot",
+      startingVisibility: "noticed",
+      entryPressure: ["under watch", "clock running out"],
+      companions: ["Mira"],
+      immediateSituation: "A tail is closing in as she slips through the market crowd.",
+    });
+    expect(characterRecord.state.statusFlags).toEqual(
+      expect.arrayContaining([
+        "Opening: Arrival - On Foot",
+        "Opening: Visibility - Noticed",
+        "Opening: Pressure - Under Watch",
+        "Opening: Pressure - Clock Running Out",
+        "Opening: Companion Present",
+        "Opening: Situation - Pursued",
+      ]),
+    );
   });
 
   it("loads the campaign by id when active session is missing", async () => {

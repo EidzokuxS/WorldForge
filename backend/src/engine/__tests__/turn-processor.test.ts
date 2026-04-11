@@ -306,6 +306,109 @@ function createEntityLookupDb(options: {
   return mockDb;
 }
 
+function createOpeningPlayerRow(overrides: {
+  currentTick?: number;
+  currentLocationId?: string;
+  startLocationId?: string;
+  statusFlags?: string[];
+  immediateSituation?: string;
+  entryPressure?: string[];
+  companions?: string[];
+  startingVisibility?: string;
+  arrivalMode?: string;
+} = {}) {
+  const currentLocationId = overrides.currentLocationId ?? "loc-1";
+  const startLocationId = overrides.startLocationId ?? "loc-1";
+
+  return {
+    id: "player-1",
+    campaignId: CAMPAIGN_ID,
+    name: "Hero",
+    hp: 5,
+    tags: '["legacy-only"]',
+    equippedItems: "[]",
+    race: "Human",
+    gender: "",
+    age: "",
+    appearance: "",
+    currentLocationId,
+    characterRecord: JSON.stringify({
+      identity: {
+        id: "player-1",
+        campaignId: CAMPAIGN_ID,
+        role: "player",
+        tier: "key",
+        displayName: "Hero",
+        canonicalStatus: "original",
+      },
+      profile: {
+        species: "Human",
+        gender: "",
+        ageText: "",
+        appearance: "",
+        backgroundSummary: "",
+        personaSummary: "",
+      },
+      socialContext: {
+        factionId: null,
+        factionName: null,
+        homeLocationId: null,
+        homeLocationName: null,
+        currentLocationId,
+        currentLocationName: "Town Square",
+        relationshipRefs: [],
+        socialStatus: [],
+        originMode: "outsider",
+      },
+      motivations: {
+        shortTermGoals: [],
+        longTermGoals: [],
+        beliefs: [],
+        drives: [],
+        frictions: [],
+      },
+      capabilities: {
+        traits: ["Brave"],
+        skills: [{ name: "Swordsman", tier: "Skilled" }],
+        flaws: [],
+        specialties: [],
+        wealthTier: null,
+      },
+      state: {
+        hp: 5,
+        conditions: [],
+        statusFlags: overrides.statusFlags ?? [],
+        activityState: "active",
+      },
+      loadout: {
+        inventorySeed: [],
+        equippedItemRefs: [],
+        currencyNotes: "",
+        signatureItems: [],
+      },
+      startConditions: {
+        startLocationId,
+        arrivalMode: overrides.arrivalMode ?? "on-foot",
+        immediateSituation:
+          overrides.immediateSituation
+          ?? "A tail is closing in as you push through the market crowd.",
+        entryPressure: overrides.entryPressure ?? ["under watch", "clock running out"],
+        companions: overrides.companions ?? ["Mira"],
+        startingVisibility: overrides.startingVisibility ?? "noticed",
+      },
+      provenance: {
+        sourceKind: "generator",
+        importMode: null,
+        templateId: null,
+        archetypePrompt: null,
+        worldgenOrigin: null,
+        legacyTags: [],
+      },
+    }),
+    derivedTags: "[]",
+  };
+}
+
 async function collectEvents(generator: AsyncGenerator<TurnEvent>): Promise<TurnEvent[]> {
   const events: TurnEvent[] = [];
   for await (const event of generator) {
@@ -1026,6 +1129,140 @@ describe("processTurn", () => {
       expect.anything(),
       null,
     );
+  });
+
+  it("translates structured start conditions into opening-scene Oracle modifiers and companion context", async () => {
+    setupMocks();
+    const playerRow = createOpeningPlayerRow();
+    const mockDb = createEntityLookupDb({
+      playerRow,
+      locationRows: [
+        {
+          id: "loc-1",
+          campaignId: CAMPAIGN_ID,
+          name: "Town Square",
+          description: "A busy square ringed by food stalls.",
+          tags: '["urban", "crowded"]',
+          connectedTo: "[]",
+          isStarting: true,
+        },
+      ],
+    });
+
+    (getDb as Mock).mockReturnValue(mockDb);
+    (readCampaignConfig as Mock).mockReturnValue({ currentTick: 0 });
+
+    await collectEvents(
+      processTurn(
+        createTestOptions({
+          playerAction: "Slip between the stalls and keep moving",
+          intent: "Escape the tail in the market",
+          method: "quick evasive movement",
+        }),
+      ),
+    );
+
+    expect(callOracle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorTags: expect.arrayContaining([
+          "Opening: Arrival - On Foot",
+          "Opening: Visibility - Noticed",
+          "Opening: Pressure - Under Watch",
+          "Opening: Pressure - Clock Running Out",
+          "Opening: Companion Present",
+          "Opening: Situation - Pursued",
+        ]),
+        sceneContext: expect.stringContaining("Opening Companions: Mira"),
+      }),
+      expect.anything(),
+      null,
+    );
+
+    expect(callOracle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sceneContext: expect.stringContaining("Opening Constraints:"),
+      }),
+      expect.anything(),
+      null,
+    );
+  });
+
+  it("expires opening-state flags after the early-turn ceiling for the next persisted turn boundary", async () => {
+    setupMocks();
+    const playerRow = createOpeningPlayerRow({
+      statusFlags: [
+        "Opening: Arrival - On Foot",
+        "Opening: Visibility - Noticed",
+        "Opening: Pressure - Under Watch",
+        "Opening: Companion Present",
+        "Opening: Situation - Pursued",
+      ],
+    });
+    const mockDb = createEntityLookupDb({ playerRow });
+
+    (getDb as Mock).mockReturnValue(mockDb);
+    (readCampaignConfig as Mock).mockReturnValue({ currentTick: 2 });
+    (incrementTick as Mock).mockReturnValue(3);
+
+    await collectEvents(processTurn(createTestOptions()));
+
+    expect(mockDb.update).toHaveBeenCalled();
+  });
+
+  it("clears opening-state flags for persisted player state after a connected location change", async () => {
+    setupMocks();
+    vi.mocked(safeGenerateObject).mockResolvedValue({
+      object: { isMovement: true, destination: "Safehouse" },
+    } as never);
+
+    const playerRow = createOpeningPlayerRow({
+      currentLocationId: "loc-1",
+      startLocationId: "loc-1",
+      statusFlags: [
+        "Opening: Arrival - On Foot",
+        "Opening: Visibility - Noticed",
+        "Opening: Pressure - Under Watch",
+        "Opening: Companion Present",
+        "Opening: Situation - Pursued",
+      ],
+    });
+    const mockDb = createEntityLookupDb({
+      playerRow,
+      locationRows: [
+        {
+          id: "loc-1",
+          campaignId: CAMPAIGN_ID,
+          name: "Town Square",
+          description: "A busy square ringed by food stalls.",
+          tags: '["urban", "crowded"]',
+          connectedTo: '["loc-2"]',
+          isStarting: true,
+        },
+        {
+          id: "loc-2",
+          campaignId: CAMPAIGN_ID,
+          name: "Safehouse",
+          description: "A shuttered safehouse down a side alley.",
+          tags: '["hidden", "indoors"]',
+          connectedTo: '["loc-1"]',
+          isStarting: false,
+        },
+      ],
+    });
+    (getDb as Mock).mockReturnValue(mockDb);
+    (readCampaignConfig as Mock).mockReturnValue({ currentTick: 1 });
+
+    await collectEvents(
+      processTurn(
+        createTestOptions({
+          playerAction: "Go to the Safehouse",
+          intent: "Travel to the Safehouse",
+          method: "moving quickly toward the Safehouse",
+        }),
+      ),
+    );
+
+    expect(mockDb.update).toHaveBeenCalled();
   });
 
   it("keeps narration directives outcome-specific instead of re-authoring generic tool policy", async () => {
