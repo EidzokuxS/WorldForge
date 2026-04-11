@@ -62,6 +62,7 @@ import { callOracle } from "../oracle.js";
 import { executeToolCall } from "../tool-executor.js";
 import { storeEpisodicEvent } from "../../vectors/episodic-events.js";
 import { generateText } from "ai";
+import { npcs, locations, locationEdges, players, items } from "../../db/schema.js";
 
 const CAMPAIGN_ID = "test-campaign-123";
 const NPC_ID = "npc-001";
@@ -173,19 +174,47 @@ function createMockLocation(overrides: Record<string, unknown> = {}) {
 function setupMockDb(options: {
   npc?: Record<string, unknown> | null;
   location?: Record<string, unknown> | null;
+  graphLocations?: Record<string, unknown>[];
+  graphEdges?: Record<string, unknown>[];
   npcsAtLocation?: Record<string, unknown>[];
   player?: Record<string, unknown> | null;
   adjacentLocation?: Record<string, unknown> | null;
 }) {
   const mockNpc = options.npc !== undefined ? options.npc : createMockNpc();
   const mockLocation = options.location !== undefined ? options.location : createMockLocation();
+  const graphLocations = options.graphLocations ?? [mockLocation, options.adjacentLocation ?? null].filter(
+    (row): row is Record<string, unknown> => row != null,
+  );
+  const graphEdges =
+    options.graphEdges ??
+    graphLocations.flatMap((location) => {
+      const connectedTo = (() => {
+        try {
+          return JSON.parse(String(location.connectedTo ?? "[]")) as string[];
+        } catch {
+          return [];
+        }
+      })();
+      return connectedTo.map((targetId, index) => ({
+        id: `edge-${String(location.id)}-${targetId}-${index}`,
+        campaignId: CAMPAIGN_ID,
+        fromLocationId: String(location.id),
+        toLocationId: targetId,
+        travelCost: 1,
+        discovered: true,
+      }));
+    });
   const npcsAtLoc = options.npcsAtLocation ?? [];
   const mockPlayer = options.player ?? null;
   const adjacentLoc = options.adjacentLocation ?? null;
 
+  let lastFromTable: unknown = null;
   const db = {
     select: vi.fn().mockReturnThis(),
-    from: vi.fn().mockReturnThis(),
+    from: vi.fn().mockImplementation((table: unknown) => {
+      lastFromTable = table;
+      return db;
+    }),
     where: vi.fn().mockReturnThis(),
     update: vi.fn().mockReturnThis(),
     set: vi.fn().mockReturnThis(),
@@ -202,19 +231,35 @@ function setupMockDb(options: {
   let allCallCount = 0;
 
   db.get.mockImplementation(() => {
-    getCallCount++;
-    // First .get() call = NPC lookup, second = location lookup, third = adjacent location
-    if (getCallCount === 1) return mockNpc;
-    if (getCallCount === 2) return mockLocation;
-    if (getCallCount === 3) return adjacentLoc;
+    if (lastFromTable === (npcs as unknown)) {
+      return mockNpc;
+    }
+    if (lastFromTable === (locations as unknown)) {
+      getCallCount++;
+      if (getCallCount === 1) return mockLocation;
+      if (getCallCount === 2) return adjacentLoc;
+      return mockLocation;
+    }
     return null;
   });
 
   db.all.mockImplementation(() => {
-    allCallCount++;
-    // First .all() = NPCs at location query, second = players at location, third+ = items
-    if (allCallCount === 1) return npcsAtLoc;
-    if (allCallCount === 2) return mockPlayer ? [mockPlayer] : [];
+    if (lastFromTable === (locations as unknown)) {
+      return graphLocations;
+    }
+    if (lastFromTable === (locationEdges as unknown)) {
+      return graphEdges;
+    }
+    if (lastFromTable === (npcs as unknown)) {
+      allCallCount++;
+      return allCallCount === 1 ? npcsAtLoc : [];
+    }
+    if (lastFromTable === (players as unknown)) {
+      return mockPlayer ? [mockPlayer] : [];
+    }
+    if (lastFromTable === (items as unknown)) {
+      return [];
+    }
     return [];
   });
 
@@ -299,30 +344,28 @@ describe("createNpcAgentTools", () => {
       name: "Shibuya Crossing",
       connectedTo: '["loc-002"]',
     });
+    const stationLocation = {
+      id: "loc-002",
+      campaignId: CAMPAIGN_ID,
+      name: "Hidden Station Platform",
+      description: "A persistent sublocation below the district.",
+      tags: '["persistent_sublocation"]',
+      connectedTo: '["loc-001","loc-003"]',
+    };
     const targetLocation = {
       id: "loc-003",
+      campaignId: CAMPAIGN_ID,
       name: "Tokyo Jujutsu High",
+      description: "A hilltop academy beyond the city rail lines.",
+      tags: '["macro"]',
       connectedTo: '["loc-002"]',
     };
-
-    let getCallCount = 0;
-    const mockDb = {
-      select: vi.fn().mockReturnThis(),
-      from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      update: vi.fn().mockReturnThis(),
-      set: vi.fn().mockReturnThis(),
-      run: vi.fn(),
-      get: vi.fn().mockImplementation(() => {
-        getCallCount += 1;
-        if (getCallCount === 1) return npc;
-        if (getCallCount === 2) return currentLocation;
-        if (getCallCount === 3) return targetLocation;
-        return null;
-      }),
-      all: vi.fn().mockReturnValue([]),
-    };
-    (getDb as ReturnType<typeof vi.fn>).mockReturnValue(mockDb);
+    const mockDb = setupMockDb({
+      npc,
+      location: currentLocation,
+      adjacentLocation: targetLocation,
+      graphLocations: [currentLocation, stationLocation, targetLocation],
+    });
 
     const tools = createNpcAgentTools(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
     const result = await tools.move_to.execute!(
@@ -337,6 +380,7 @@ describe("createNpcAgentTools", () => {
       travelCost: 2,
       path: ["Shibuya Crossing", "Hidden Station Platform", "Tokyo Jujutsu High"],
     });
+    expect(mockDb.run).toHaveBeenCalled();
   });
 
   it("update_own_goal replaces old goal with new goal", async () => {

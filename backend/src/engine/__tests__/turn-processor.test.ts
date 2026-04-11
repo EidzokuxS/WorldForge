@@ -17,6 +17,7 @@ vi.mock("../prompt-assembler.js", () => ({
 vi.mock("../../campaign/index.js", () => ({
   getChatHistory: vi.fn(),
   appendChatMessages: vi.fn(),
+  advanceCampaignTick: vi.fn(),
   incrementTick: vi.fn(),
   readCampaignConfig: vi.fn(),
 }));
@@ -46,6 +47,7 @@ import { assemblePrompt } from "../prompt-assembler.js";
 import {
   getChatHistory,
   appendChatMessages,
+  advanceCampaignTick,
   incrementTick,
   readCampaignConfig,
 } from "../../campaign/index.js";
@@ -53,7 +55,7 @@ import { createStorytellerTools } from "../tool-schemas.js";
 import { streamText } from "ai";
 import { safeGenerateObject } from "../../ai/generate-object-safe.js";
 import { getDb } from "../../db/index.js";
-import { players, locations, npcs, items } from "../../db/schema.js";
+import { players, locations, locationEdges, npcs, items } from "../../db/schema.js";
 
 // -- Helpers ------------------------------------------------------------------
 
@@ -130,6 +132,7 @@ function setupMocks(options: {
   const mockDb = createEntityLookupDb({});
   (getDb as Mock).mockReturnValue(mockDb);
 
+  (advanceCampaignTick as Mock).mockReturnValue(6);
   // Mock Oracle
   (callOracle as Mock).mockResolvedValue(oracleResult);
 
@@ -163,6 +166,7 @@ function setupMocks(options: {
 function createEntityLookupDb(options: {
   playerRow?: Record<string, unknown>;
   locationRows?: Array<Record<string, unknown>>;
+  edgeRows?: Array<Record<string, unknown>>;
   npcRows?: Array<Record<string, unknown>>;
   itemRows?: Array<Record<string, unknown>>;
 }) {
@@ -255,6 +259,26 @@ function createEntityLookupDb(options: {
       isStarting: false,
     },
   ];
+  const edgeRows =
+    options.edgeRows ??
+    locationRows.flatMap((location) => {
+      const connectedTo = (() => {
+        try {
+          return JSON.parse(String(location.connectedTo ?? "[]")) as string[];
+        } catch {
+          return [];
+        }
+      })();
+
+      return connectedTo.map((targetId, index) => ({
+        id: `edge-${String(location.id)}-${targetId}-${index}`,
+        campaignId: CAMPAIGN_ID,
+        fromLocationId: String(location.id),
+        toLocationId: targetId,
+        travelCost: 1,
+        discovered: true,
+      }));
+    });
   const npcRows = options.npcRows ?? [];
   const itemRows = options.itemRows ?? [];
   let lastFromTable: unknown = null;
@@ -275,6 +299,12 @@ function createEntityLookupDb(options: {
         return {
           get: vi.fn().mockReturnValue(locationRows[0] ?? null),
           all: vi.fn().mockReturnValue(locationRows),
+        };
+      }
+      if (lastFromTable === (locationEdges as unknown)) {
+        return {
+          get: vi.fn().mockReturnValue(edgeRows[0] ?? null),
+          all: vi.fn().mockReturnValue(edgeRows),
         };
       }
       if (lastFromTable === (npcs as unknown)) {
@@ -1350,6 +1380,7 @@ describe("processTurn", () => {
     (assemblePrompt as Mock).mockResolvedValue(mockAssembledPrompt());
     (getChatHistory as Mock).mockReturnValue([]);
     (readCampaignConfig as Mock).mockReturnValue({ currentTick: 12 });
+    (advanceCampaignTick as Mock).mockReturnValue(14);
     (incrementTick as Mock).mockReturnValue(13);
     (createStorytellerTools as Mock).mockReturnValue({});
     (streamText as Mock).mockReturnValue({
@@ -1376,9 +1407,12 @@ describe("processTurn", () => {
         locationId: "loc-school",
         locationName: "Tokyo Jujutsu High",
         travelCost: 2,
+        tickAdvance: 2,
         path: ["Shibuya Crossing", "Hidden Station Platform", "Tokyo Jujutsu High"],
       },
     });
+    expect(advanceCampaignTick).toHaveBeenCalledWith(CAMPAIGN_ID, 2);
+    expect(incrementTick).not.toHaveBeenCalled();
   });
 
   describe("target-aware oracle", () => {

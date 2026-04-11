@@ -480,6 +480,7 @@ describe("executeToolCall", () => {
       });
       expect(insertRun).toHaveBeenCalled();
       expect(updateRun).toHaveBeenCalled();
+      expect(db.insert).toHaveBeenCalledTimes(2);
     });
 
     it("returns error if connectedTo location not found", async () => {
