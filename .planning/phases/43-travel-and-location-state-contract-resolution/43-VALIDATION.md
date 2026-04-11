@@ -49,8 +49,8 @@ created: 2026-04-11
 | 43-04-02 | 04 | 4 | GSEM-04 | prompt | `npm --prefix backend test -- src/engine/__tests__/prompt-assembler.test.ts` | ✅ existing | ⬜ pending |
 | 43-05-01 | 05 | 5 | GSEM-03, GSEM-04 | frontend-unit | `npm --prefix frontend exec vitest run lib/__tests__/world-data-helpers.test.ts` | ✅ existing | ⬜ pending |
 | 43-05-02 | 05 | 5 | GSEM-03, GSEM-04 | frontend-component | `npm --prefix frontend exec vitest run app/game/__tests__/page.test.tsx components/game/__tests__/location-panel.test.tsx` | ✅ existing | ⬜ pending |
-| 43-06-01 | 06 | 1 | GSEM-03, GSEM-04 | frontend-regression | `npm --prefix frontend exec vitest run app/game/__tests__/page.test.tsx` | ✅ existing | ⬜ pending |
-| 43-06-02 | 06 | 1 | GSEM-03, GSEM-04 | backend-regression | `npm --prefix backend test -- src/engine/__tests__/turn-processor.test.ts src/worldgen/__tests__/scaffold-saver.test.ts` | ✅ existing | ⬜ pending |
+| 43-06-01 | 06 | 6 | GSEM-03 | frontend-regression | `npm --prefix frontend exec vitest run app/game/__tests__/page.test.tsx` | ✅ existing | ⬜ pending |
+| 43-06-02 | 06 | 6 | GSEM-03 | backend-regression | `npm --prefix backend test -- src/engine/__tests__/turn-processor.test.ts src/worldgen/__tests__/scaffold-saver.test.ts` | ✅ existing | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
