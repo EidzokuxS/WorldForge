@@ -18,6 +18,16 @@ export interface WorldIdMaps {
   readonly npcIdToName: ReadonlyMap<string, string>;
 }
 
+function getConnectedLocationIds(
+  location: WorldData["locations"][number],
+): string[] {
+  if ((location.connectedPaths?.length ?? 0) > 0) {
+    return location.connectedPaths!.map((path) => path.toLocationId);
+  }
+
+  return location.connectedTo ?? [];
+}
+
 function mapDraftTierToScaffoldTier(
   tier: CharacterDraft["identity"]["tier"] | null | undefined,
 ): ScaffoldNpc["tier"] | null {
@@ -108,7 +118,7 @@ export function toEditableScaffold(
       description: loc.description,
       tags: loc.tags,
       isStarting: loc.isStarting,
-      connectedTo: loc.connectedTo
+      connectedTo: getConnectedLocationIds(loc)
         .map((id) => idMaps.locationIdToName.get(id))
         .filter((n): n is string => n != null),
     })),

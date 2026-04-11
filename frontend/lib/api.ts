@@ -35,8 +35,16 @@ import type {
   ResolveStartConditionsResult,
   WorldBookImportResult,
   WorldbookLibraryItem,
+  WorldLocationConnectedPath,
+  WorldLocationRecentHappening,
 } from "./api-types";
-import type { CharacterDraft, CharacterRecord, ChatMessage } from "@worldforge/shared";
+import type {
+  CharacterDraft,
+  CharacterRecord,
+  ChatMessage,
+  LocationKind,
+  LocationPersistence,
+} from "@worldforge/shared";
 import {
   characterDraftToParsedCharacter,
   characterDraftToScaffoldNpc,
@@ -92,9 +100,18 @@ interface RawWorldData {
     campaignId: string;
     name: string;
     description: string;
-    tags: string;
-    connectedTo: string;
+    tags: unknown;
+    connectedTo?: unknown;
+    connectedPaths?: unknown;
+    recentHappenings?: unknown;
     isStarting: boolean;
+    kind?: LocationKind | null;
+    locationKind?: LocationKind | null;
+    parentLocationId?: string | null;
+    anchorLocationId?: string | null;
+    persistence?: LocationPersistence | null;
+    expiresAtTick?: number | null;
+    archivedAtTick?: number | null;
   }>;
   npcs: Array<{
     id: string;
@@ -163,7 +180,15 @@ interface RawWorldData {
 
 // ───── Helpers ─────
 
-function parseJsonArray(value: string): string[] {
+function parseJsonArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string");
+  }
+
+  if (typeof value !== "string") {
+    return [];
+  }
+
   try {
     const parsed = JSON.parse(value) as unknown;
     return Array.isArray(parsed)
@@ -176,9 +201,9 @@ function parseJsonArray(value: string): string[] {
 
 const EMPTY_NPC_GOALS = { short_term: [] as string[], long_term: [] as string[] };
 
-function parseNpcGoals(value: string): { short_term: string[]; long_term: string[] } {
+function parseNpcGoals(value: unknown): { short_term: string[]; long_term: string[] } {
   try {
-    const parsed = JSON.parse(value) as unknown;
+    const parsed = typeof value === "string" ? JSON.parse(value) as unknown : value;
     if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
       const obj = parsed as Record<string, unknown>;
       return {
@@ -189,6 +214,113 @@ function parseNpcGoals(value: string): { short_term: string[]; long_term: string
     return EMPTY_NPC_GOALS;
   } catch {
     return EMPTY_NPC_GOALS;
+  }
+}
+
+function parseNullableNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function parseLocationKind(value: unknown): LocationKind | null {
+  return value === "macro"
+    || value === "persistent_sublocation"
+    || value === "ephemeral_scene"
+    ? value
+    : null;
+}
+
+function parseLocationPersistence(value: unknown): LocationPersistence | null {
+  return value === "persistent" || value === "ephemeral" ? value : null;
+}
+
+function parseWorldLocationConnectedPaths(value: unknown): WorldLocationConnectedPath[] {
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) as unknown : value;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.flatMap((item) => {
+      if (typeof item !== "object" || item === null) {
+        return [];
+      }
+
+      const path = item as Record<string, unknown>;
+      const edgeId = typeof path.edgeId === "string" ? path.edgeId : null;
+      const toLocationId = typeof path.toLocationId === "string"
+        ? path.toLocationId
+        : typeof path.locationId === "string"
+          ? path.locationId
+          : null;
+      const travelCost = typeof path.travelCost === "number" && Number.isFinite(path.travelCost)
+        ? path.travelCost
+        : null;
+
+      if (!edgeId || !toLocationId || travelCost == null) {
+        return [];
+      }
+
+      return [{
+        edgeId,
+        toLocationId,
+        toLocationName: typeof path.toLocationName === "string"
+          ? path.toLocationName
+          : typeof path.locationName === "string"
+            ? path.locationName
+            : null,
+        travelCost,
+        discovered: typeof path.discovered === "boolean" ? path.discovered : true,
+      }];
+    });
+  } catch {
+    return [];
+  }
+}
+
+function parseWorldLocationRecentHappenings(value: unknown): WorldLocationRecentHappening[] {
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) as unknown : value;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.flatMap((item) => {
+      if (typeof item !== "object" || item === null) {
+        return [];
+      }
+
+      const event = item as Record<string, unknown>;
+      const id = typeof event.id === "string" ? event.id : null;
+      const locationId = typeof event.locationId === "string" ? event.locationId : null;
+      const eventType = typeof event.eventType === "string" ? event.eventType : null;
+      const summary = typeof event.summary === "string" ? event.summary : null;
+      const tick = typeof event.tick === "number" && Number.isFinite(event.tick) ? event.tick : null;
+      const importance = typeof event.importance === "number" && Number.isFinite(event.importance)
+        ? event.importance
+        : null;
+      const createdAt = typeof event.createdAt === "number" && Number.isFinite(event.createdAt)
+        ? event.createdAt
+        : null;
+
+      if (!id || !locationId || !eventType || !summary || tick == null || importance == null || createdAt == null) {
+        return [];
+      }
+
+      return [{
+        id,
+        locationId,
+        sourceLocationId: typeof event.sourceLocationId === "string" ? event.sourceLocationId : null,
+        anchorLocationId: typeof event.anchorLocationId === "string" ? event.anchorLocationId : null,
+        eventType,
+        summary,
+        tick,
+        importance,
+        archivedAtTick: parseNullableNumber(event.archivedAtTick),
+        createdAt,
+      }];
+    });
+  } catch {
+    return [];
   }
 }
 
@@ -212,11 +344,30 @@ function normalizeCharacterResult(raw: CharacterResult | ({ role: "player"; draf
 
 function parseWorldData(raw: RawWorldData): WorldData {
   return {
-    locations: raw.locations.map((loc) => ({
-      ...loc,
-      tags: parseJsonArray(loc.tags),
-      connectedTo: parseJsonArray(loc.connectedTo),
-    })),
+    locations: raw.locations.map((loc) => {
+      const connectedPaths = parseWorldLocationConnectedPaths(loc.connectedPaths);
+      const connectedTo = connectedPaths.length > 0
+        ? connectedPaths.map((path) => path.toLocationId)
+        : parseJsonArray(loc.connectedTo);
+
+      return {
+        id: loc.id,
+        campaignId: loc.campaignId,
+        name: loc.name,
+        description: loc.description,
+        tags: parseJsonArray(loc.tags),
+        connectedTo,
+        connectedPaths,
+        recentHappenings: parseWorldLocationRecentHappenings(loc.recentHappenings),
+        isStarting: loc.isStarting,
+        locationKind: parseLocationKind(loc.locationKind ?? loc.kind),
+        parentLocationId: typeof loc.parentLocationId === "string" ? loc.parentLocationId : null,
+        anchorLocationId: typeof loc.anchorLocationId === "string" ? loc.anchorLocationId : null,
+        persistence: parseLocationPersistence(loc.persistence),
+        expiresAtTick: parseNullableNumber(loc.expiresAtTick),
+        archivedAtTick: parseNullableNumber(loc.archivedAtTick),
+      };
+    }),
     npcs: raw.npcs.map((npc) => ({
       ...npc,
       tags: parseJsonArray(npc.tags),

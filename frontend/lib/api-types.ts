@@ -3,16 +3,46 @@ import type {
   CanonicalLoadoutPreview,
   CharacterDraft,
   CharacterRecord,
+  LocationConnectedPathSummary,
+  LocationKind,
+  LocationPersistence,
+  LocationRecentHappeningSummary,
   PersonaTemplate,
   PersonaTemplateSummary,
   ResolvedStartConditions,
 } from "@worldforge/shared";
 export type {
   CanonicalLoadoutPreview,
+  LocationKind,
+  LocationPersistence,
   PersonaTemplate,
   PersonaTemplateSummary,
   ResolvedStartConditions,
 } from "@worldforge/shared";
+
+export type WorldLocationConnectedPath = LocationConnectedPathSummary & {
+  toLocationName?: string | null;
+};
+
+export type WorldLocationRecentHappening = LocationRecentHappeningSummary;
+
+export interface WorldLocation {
+  id: string;
+  campaignId: string;
+  name: string;
+  description: string;
+  tags: string[];
+  connectedTo: string[];
+  connectedPaths?: WorldLocationConnectedPath[];
+  recentHappenings?: WorldLocationRecentHappening[];
+  isStarting: boolean;
+  locationKind?: LocationKind | null;
+  parentLocationId?: string | null;
+  anchorLocationId?: string | null;
+  persistence?: LocationPersistence | null;
+  expiresAtTick?: number | null;
+  archivedAtTick?: number | null;
+}
 
 export interface TestConnectionRequest {
   baseUrl: string;
@@ -62,15 +92,7 @@ export interface GenerationProgress {
 }
 
 export interface WorldData {
-  locations: Array<{
-    id: string;
-    campaignId: string;
-    name: string;
-    description: string;
-    tags: string[];
-    connectedTo: string[];
-    isStarting: boolean;
-  }>;
+  locations: WorldLocation[];
   npcs: Array<{
     id: string;
     campaignId: string;
