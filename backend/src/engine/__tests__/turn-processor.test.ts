@@ -53,7 +53,7 @@ import { createStorytellerTools } from "../tool-schemas.js";
 import { streamText } from "ai";
 import { safeGenerateObject } from "../../ai/generate-object-safe.js";
 import { getDb } from "../../db/index.js";
-import { players, locations, npcs } from "../../db/schema.js";
+import { players, locations, npcs, items } from "../../db/schema.js";
 
 // -- Helpers ------------------------------------------------------------------
 
@@ -127,18 +127,7 @@ function setupMocks(options: {
   ];
 
   // Mock DB
-  const mockDb = {
-    select: vi.fn().mockReturnThis(),
-    from: vi.fn().mockReturnThis(),
-    where: vi.fn().mockReturnValue({
-      get: vi.fn().mockReturnValue({
-        id: "player-1",
-        name: "Hero",
-        tags: '["warrior"]',
-        currentLocationId: "loc-1",
-      }),
-    }),
-  };
+  const mockDb = createEntityLookupDb({});
   (getDb as Mock).mockReturnValue(mockDb);
 
   // Mock Oracle
@@ -169,6 +158,152 @@ function setupMocks(options: {
   });
 
   return { oracleResult, mockDb };
+}
+
+function createEntityLookupDb(options: {
+  playerRow?: Record<string, unknown>;
+  locationRows?: Array<Record<string, unknown>>;
+  npcRows?: Array<Record<string, unknown>>;
+  itemRows?: Array<Record<string, unknown>>;
+}) {
+  const playerRow = options.playerRow ?? {
+    id: "player-1",
+    campaignId: CAMPAIGN_ID,
+    name: "Hero",
+    hp: 5,
+    tags: '["legacy-only"]',
+    equippedItems: "[]",
+    race: "Human",
+    gender: "",
+    age: "",
+    appearance: "",
+    currentLocationId: "loc-1",
+    characterRecord: JSON.stringify({
+      identity: {
+        id: "player-1",
+        campaignId: CAMPAIGN_ID,
+        role: "player",
+        tier: "key",
+        displayName: "Hero",
+        canonicalStatus: "original",
+      },
+      profile: {
+        species: "Human",
+        gender: "",
+        ageText: "",
+        appearance: "",
+        backgroundSummary: "",
+        personaSummary: "",
+      },
+      socialContext: {
+        factionId: null,
+        factionName: null,
+        homeLocationId: null,
+        homeLocationName: null,
+        currentLocationId: "loc-1",
+        currentLocationName: "Town Square",
+        relationshipRefs: [],
+        socialStatus: [],
+        originMode: "resident",
+      },
+      motivations: {
+        shortTermGoals: [],
+        longTermGoals: [],
+        beliefs: [],
+        drives: ["Determined"],
+        frictions: [],
+      },
+      capabilities: {
+        traits: ["Brave"],
+        skills: [{ name: "Swordsman", tier: "Skilled" }],
+        flaws: [],
+        specialties: [],
+        wealthTier: null,
+      },
+      state: {
+        hp: 5,
+        conditions: [],
+        statusFlags: [],
+        activityState: "active",
+      },
+      loadout: {
+        inventorySeed: [],
+        equippedItemRefs: [],
+        currencyNotes: "",
+        signatureItems: [],
+      },
+      startConditions: {},
+      provenance: {
+        sourceKind: "generator",
+        importMode: null,
+        templateId: null,
+        archetypePrompt: null,
+        worldgenOrigin: null,
+        legacyTags: [],
+      },
+    }),
+    derivedTags: "[]",
+  };
+  const locationRows = options.locationRows ?? [
+    {
+      id: "loc-1",
+      campaignId: CAMPAIGN_ID,
+      name: "Town Square",
+      description: "A bustling square",
+      tags: '["urban", "crowded"]',
+      connectedTo: "[]",
+      isStarting: false,
+    },
+  ];
+  const npcRows = options.npcRows ?? [];
+  const itemRows = options.itemRows ?? [];
+  let lastFromTable: unknown = null;
+  const mockDb = {
+    select: vi.fn().mockReturnThis(),
+    from: vi.fn().mockImplementation((table: unknown) => {
+      lastFromTable = table;
+      return mockDb;
+    }),
+    where: vi.fn().mockImplementation(() => {
+      if (lastFromTable === (players as unknown)) {
+        return {
+          get: vi.fn().mockReturnValue(playerRow),
+          all: vi.fn().mockReturnValue([playerRow]),
+        };
+      }
+      if (lastFromTable === (locations as unknown)) {
+        return {
+          get: vi.fn().mockReturnValue(locationRows[0] ?? null),
+          all: vi.fn().mockReturnValue(locationRows),
+        };
+      }
+      if (lastFromTable === (npcs as unknown)) {
+        return {
+          get: vi.fn().mockReturnValue(npcRows[0] ?? null),
+          all: vi.fn().mockReturnValue(npcRows),
+        };
+      }
+      if (lastFromTable === (items as unknown)) {
+        return {
+          get: vi.fn().mockReturnValue(itemRows[0] ?? null),
+          all: vi.fn().mockReturnValue(itemRows),
+        };
+      }
+      return {
+        get: vi.fn().mockReturnValue(null),
+        all: vi.fn().mockReturnValue([]),
+      };
+    }),
+    update: vi.fn().mockImplementation(() => ({
+      set: vi.fn().mockImplementation(() => ({
+        where: vi.fn().mockImplementation(() => ({
+          run: vi.fn(),
+        })),
+      })),
+    })),
+  };
+
+  return mockDb;
 }
 
 async function collectEvents(generator: AsyncGenerator<TurnEvent>): Promise<TurnEvent[]> {
@@ -915,3 +1050,270 @@ describe("processTurn", () => {
     expect(streamArgs.system).not.toContain("light hit = -1");
   });
 });
+
+  describe("target-aware oracle", () => {
+    it("passes non-empty targetTags for supported character targets instead of the old empty-target seam", async () => {
+      setupMocks();
+      const mockDb = createEntityLookupDb({
+        npcRows: [
+          {
+            id: "npc-1",
+            campaignId: CAMPAIGN_ID,
+            name: "Goblin Raider",
+            persona: "Hostile scout",
+            tags: '["legacy-only"]',
+            tier: "persistent",
+            currentLocationId: "loc-1",
+            goals: '{"short_term":[],"long_term":[]}',
+            beliefs: "[]",
+            unprocessedImportance: 0,
+            inactiveTicks: 0,
+            createdAt: 0,
+            characterRecord: JSON.stringify({
+              identity: {
+                id: "npc-1",
+                campaignId: CAMPAIGN_ID,
+                role: "npc",
+                tier: "persistent",
+                displayName: "Goblin Raider",
+                canonicalStatus: "original",
+              },
+              profile: {
+                species: "Goblin",
+                gender: "",
+                ageText: "",
+                appearance: "",
+                backgroundSummary: "",
+                personaSummary: "Hostile scout",
+              },
+              socialContext: {
+                factionId: null,
+                factionName: null,
+                homeLocationId: null,
+                homeLocationName: null,
+                currentLocationId: "loc-1",
+                currentLocationName: "Town Square",
+                relationshipRefs: [],
+                socialStatus: ["Raider"],
+                originMode: "unknown",
+              },
+              motivations: {
+                shortTermGoals: [],
+                longTermGoals: [],
+                beliefs: [],
+                drives: ["Cruel"],
+                frictions: [],
+              },
+              capabilities: {
+                traits: ["Agile"],
+                skills: [{ name: "Dagger Fighting", tier: "Skilled" }],
+                flaws: [],
+                specialties: [],
+                wealthTier: null,
+              },
+              state: {
+                hp: 5,
+                conditions: ["Hidden"],
+                statusFlags: [],
+                activityState: "active",
+              },
+              loadout: {
+                inventorySeed: [],
+                equippedItemRefs: [],
+                currencyNotes: "",
+                signatureItems: [],
+              },
+              startConditions: {},
+              provenance: {
+                sourceKind: "generator",
+                importMode: null,
+                templateId: null,
+                archetypePrompt: null,
+                worldgenOrigin: null,
+                legacyTags: [],
+              },
+            }),
+            derivedTags: "[]",
+          },
+        ],
+      });
+
+      (getDb as Mock).mockReturnValue(mockDb);
+
+      await collectEvents(
+        processTurn(
+          createTestOptions({
+            playerAction: "Strike the Goblin Raider with my sword",
+            intent: "Strike the Goblin Raider",
+            method: "Skilled sword slash at Goblin Raider",
+          }),
+        ),
+      );
+
+      expect(callOracle).toHaveBeenCalledWith(
+        expect.objectContaining({
+          targetTags: expect.arrayContaining([
+            "Agile",
+            "Skilled Dagger Fighting",
+            "Hidden",
+            "Raider",
+            "Cruel",
+          ]),
+        }),
+        expect.anything(),
+        null,
+      );
+    });
+
+    it("passes normalized stored tags for supported item and location/object targets", async () => {
+      setupMocks();
+
+      const itemDb = createEntityLookupDb({
+        itemRows: [
+          {
+            id: "item-1",
+            campaignId: CAMPAIGN_ID,
+            name: "Moon Key",
+            tags: '["Ancient", "Silver", "Locked-Door Key"]',
+            ownerId: null,
+            locationId: "loc-1",
+          },
+        ],
+      });
+      (getDb as Mock).mockReturnValue(itemDb);
+
+      await collectEvents(
+        processTurn(
+          createTestOptions({
+            playerAction: "Use the Moon Key on the sealed gate",
+            intent: "Use the Moon Key",
+            method: "Press the Moon Key into the lock",
+          }),
+        ),
+      );
+
+      expect(callOracle).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          targetTags: ["Ancient", "Silver", "Locked-Door Key"],
+        }),
+        expect.anything(),
+        null,
+      );
+
+      const locationDb = createEntityLookupDb({
+        locationRows: [
+          {
+            id: "loc-1",
+            campaignId: CAMPAIGN_ID,
+            name: "Town Square",
+            description: "A bustling square",
+            tags: '["urban", "crowded"]',
+            connectedTo: "[]",
+            isStarting: false,
+          },
+          {
+            id: "loc-2",
+            campaignId: CAMPAIGN_ID,
+            name: "Signal Tower",
+            description: "An old relay station",
+            tags: '["elevated", "exposed", "arcane-device"]',
+            connectedTo: "[]",
+            isStarting: false,
+          },
+        ],
+      });
+      (getDb as Mock).mockReturnValue(locationDb);
+
+      await collectEvents(
+        processTurn(
+          createTestOptions({
+            playerAction: "Inspect the Signal Tower for weak points",
+            intent: "Inspect the Signal Tower",
+            method: "Careful survey of Signal Tower",
+          }),
+        ),
+      );
+
+      expect(callOracle).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          targetTags: ["elevated", "exposed", "arcane-device"],
+        }),
+        expect.anything(),
+        null,
+      );
+    });
+
+    it("keeps unsupported target fallback honest with targetTags: []", async () => {
+      setupMocks();
+      const mockDb = createEntityLookupDb({});
+      (getDb as Mock).mockReturnValue(mockDb);
+
+      await collectEvents(
+        processTurn(
+          createTestOptions({
+            playerAction: "Attack the impossible shimmer",
+            intent: "Attack the impossible shimmer",
+            method: "Wild swing at the impossible shimmer",
+          }),
+        ),
+      );
+
+      expect(callOracle).toHaveBeenCalledWith(
+        expect.objectContaining({
+          targetTags: [],
+        }),
+        expect.anything(),
+        null,
+      );
+    });
+
+    it("does not run a second target parser when movement already resolved the destination target candidate", async () => {
+      setupMocks();
+      vi.mocked(safeGenerateObject).mockResolvedValue({
+        object: { isMovement: true, destination: "Signal Tower" },
+      } as never);
+
+      const mockDb = createEntityLookupDb({
+        locationRows: [
+          {
+            id: "loc-1",
+            campaignId: CAMPAIGN_ID,
+            name: "Town Square",
+            description: "A bustling square",
+            tags: '["urban", "crowded"]',
+            connectedTo: '["loc-2"]',
+            isStarting: false,
+          },
+          {
+            id: "loc-2",
+            campaignId: CAMPAIGN_ID,
+            name: "Signal Tower",
+            description: "An old relay station",
+            tags: '["elevated", "exposed"]',
+            connectedTo: '["loc-1"]',
+            isStarting: false,
+          },
+        ],
+      });
+      (getDb as Mock).mockReturnValue(mockDb);
+
+      await collectEvents(
+        processTurn(
+          createTestOptions({
+            playerAction: "Go to the Signal Tower",
+            intent: "Travel to the Signal Tower",
+            method: "walking to Signal Tower",
+          }),
+        ),
+      );
+
+      expect(safeGenerateObject).toHaveBeenCalledTimes(1);
+      expect(callOracle).toHaveBeenCalledWith(
+        expect.objectContaining({
+          targetTags: ["elevated", "exposed"],
+        }),
+        expect.anything(),
+        null,
+      );
+    });
+  });

@@ -181,6 +181,25 @@ describe("callOracle", () => {
     expect(prompt).toContain("Environment: [dim-light, quiet]");
   });
 
+  it("keeps targetTags as a first-class oracle payload field even when fallback is honest and empty", async () => {
+    vi.mocked(generateText).mockResolvedValue({
+      text: '{"chance":40,"reasoning":"No concrete target context was resolved."}',
+    } as never);
+
+    await callOracle(
+      {
+        ...mockPayload,
+        targetTags: [],
+      },
+      mockProvider,
+    );
+
+    const callArgs = vi.mocked(generateText).mock.calls[0]![0] as Record<string, unknown>;
+    const prompt = String(callArgs.prompt ?? "");
+
+    expect(prompt).toContain("Target: []");
+  });
+
   it("calls createModel with the provided provider config", async () => {
     vi.mocked(generateText).mockResolvedValue({
       text: '{"chance":50,"reasoning":"test"}',
