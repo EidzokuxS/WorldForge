@@ -25,6 +25,8 @@ import {
   toLegacyNpcDraft,
   toLegacyPlayerCharacter,
 } from "../character/record-adapters.js";
+import { listRecentLocationEventsForLocations } from "../engine/location-events.js";
+import { listConnectedPaths, loadLocationGraph } from "../engine/location-graph.js";
 
 const app = new Hono();
 
@@ -109,13 +111,37 @@ app.get("/:id/world", async (c) => {
       .from(items)
       .where(eq(items.campaignId, id))
       .all();
+    const locationGraph = loadLocationGraph({ campaignId: id });
+    const recentEventsByLocationId = listRecentLocationEventsForLocations({
+      campaignId: id,
+      locationIds: worldLocations.map((location) => location.id),
+      limitPerLocation: 5,
+    });
+    const normalizedWorldLocations = worldLocations.map((location) => {
+      const { connectedTo: _connectedTo, ...worldLocation } = location;
+      return {
+        ...worldLocation,
+        connectedPaths: listConnectedPaths({
+          campaignId: id,
+          fromLocationId: location.id,
+          edges: locationGraph.edges,
+          locations: locationGraph.locations,
+        }).map((path) => ({
+          edgeId: path.edgeId,
+          toLocationId: path.locationId,
+          toLocationName: path.locationName,
+          travelCost: path.travelCost,
+        })),
+        recentHappenings: recentEventsByLocationId[location.id] ?? [],
+      };
+    });
     const playerRow = worldPlayer[0] ?? null;
     const playerRecord = playerRow ? hydrateStoredPlayerRecord(playerRow) : null;
     const playerDraft = playerRecord ? toCharacterDraft(playerRecord) : null;
     const personaTemplates = readCampaignConfig(id).personaTemplates ?? [];
 
     return c.json({
-      locations: worldLocations,
+      locations: normalizedWorldLocations,
       npcs: worldNpcs.map((row) => {
         const record = hydrateStoredNpcRecord(row);
         return {

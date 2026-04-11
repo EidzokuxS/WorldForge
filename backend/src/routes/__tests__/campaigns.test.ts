@@ -433,7 +433,14 @@ describe("GET /:id/world", () => {
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.locations).toEqual(worldData.locations);
+    expect(body.locations).toEqual([
+      expect.objectContaining({
+        id: 1,
+        name: "Forest",
+        connectedPaths: [],
+        recentHappenings: [],
+      }),
+    ]);
     expect(body.npcs).toHaveLength(1);
     expect(body.npcs[0]).toMatchObject(worldData.npcs[0]);
     expect(body.npcs[0]).toHaveProperty("characterRecord");
