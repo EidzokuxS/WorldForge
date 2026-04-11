@@ -19,6 +19,7 @@ vi.mock("../../lib/index.js", () => ({
 }));
 
 import {
+  clearPendingCommittedEvents,
   computeCompositeScore,
   drainPendingCommittedEvents,
   embedAndUpdateEvent,
@@ -32,11 +33,13 @@ function createMockDb({
   queryRows = [],
   vectorRows = [],
   vectorSearchThrows = false,
+  schemaFields = ["id", "text", "tick", "location", "participants", "importance", "type"],
 }: {
   hasTable?: boolean;
   queryRows?: Record<string, unknown>[];
   vectorRows?: Record<string, unknown>[];
   vectorSearchThrows?: boolean;
+  schemaFields?: string[];
 } = {}) {
   const queryBuilder = {
     where: vi.fn().mockReturnThis(),
@@ -54,14 +57,19 @@ function createMockDb({
   const table = {
     add: vi.fn().mockResolvedValue(undefined),
     delete: vi.fn().mockResolvedValue(undefined),
+    update: vi.fn().mockResolvedValue(undefined),
     query: vi.fn().mockReturnValue(queryBuilder),
     vectorSearch: vi.fn().mockReturnValue(vectorSearchBuilder),
+    schema: vi.fn().mockResolvedValue({
+      fields: schemaFields.map((name) => ({ name })),
+    }),
   };
 
   const db = {
     tableNames: vi.fn().mockResolvedValue(hasTable ? ["episodic_events"] : []),
     openTable: vi.fn().mockResolvedValue(table),
-    createTable: vi.fn().mockResolvedValue(table),
+    createEmptyTable: vi.fn().mockResolvedValue(table),
+    dropTable: vi.fn().mockResolvedValue(undefined),
   };
 
   return { db, table, queryBuilder, vectorSearchBuilder };
@@ -71,6 +79,10 @@ describe("episodic-events", () => {
   beforeEach(() => {
     mockGetVectorDb.mockReset();
     mockEmbedTexts.mockReset();
+    clearPendingCommittedEvents("campaign-1");
+    clearPendingCommittedEvents("campaign-live");
+    clearPendingCommittedEvents("campaign-other");
+    clearPendingCommittedEvents("campaign-clear");
   });
 
   describe("computeCompositeScore", () => {
@@ -119,8 +131,8 @@ describe("episodic-events", () => {
   });
 
   describe("storeEpisodicEvent", () => {
-    it("creates the first episodic row without a vector field", async () => {
-      const { db } = createMockDb();
+    it("creates an empty episodic table with stable schema, then adds the first row without a vector field", async () => {
+      const { db, table } = createMockDb();
       mockGetVectorDb.mockReturnValue(db);
 
       await storeEpisodicEvent("campaign-1", {
@@ -132,7 +144,8 @@ describe("episodic-events", () => {
         type: "combat",
       });
 
-      const rows = db.createTable.mock.calls[0]?.[1] as Array<Record<string, unknown>>;
+      expect(db.createEmptyTable).toHaveBeenCalledTimes(1);
+      const rows = table.add.mock.calls[0]?.[0] as Array<Record<string, unknown>>;
       expect(rows).toHaveLength(1);
       expect(rows[0]).not.toHaveProperty("vector");
       expect(rows[0]).toMatchObject({
@@ -161,7 +174,14 @@ describe("episodic-events", () => {
       const rows = table.add.mock.calls[0]?.[0] as Array<Record<string, unknown>>;
       expect(rows).toHaveLength(1);
       expect(rows[0]).not.toHaveProperty("vector");
-      expect(rows[0]?.text).toBe("A bell rang in the tower.");
+      expect(rows[0]).toMatchObject({
+        text: "A bell rang in the tower.",
+        tick: 13,
+        location: "Tower",
+        participants: ["Hero"],
+        importance: 4,
+        type: "event",
+      });
     });
 
     it("queues same-turn pending evidence for committed events without requiring embeddings", async () => {
@@ -239,10 +259,48 @@ describe("episodic-events", () => {
         expect.objectContaining({ text: "Wrong campaign evidence." }),
       ]);
     });
+
+    it("clears all queued committed events for one campaign regardless of tick", async () => {
+      const { db } = createMockDb();
+      mockGetVectorDb.mockReturnValue(db);
+
+      await storeEpisodicEvent("campaign-clear", {
+        text: "Tick 20 event.",
+        tick: 20,
+        location: "Bazaar",
+        participants: ["Greta the Merchant"],
+        importance: 4,
+        type: "event",
+      });
+      await storeEpisodicEvent("campaign-clear", {
+        text: "Tick 21 event.",
+        tick: 21,
+        location: "Bazaar",
+        participants: ["Greta the Merchant"],
+        importance: 4,
+        type: "event",
+      });
+      await storeEpisodicEvent("campaign-other", {
+        text: "Other campaign event.",
+        tick: 20,
+        location: "Elsewhere",
+        participants: ["Other NPC"],
+        importance: 9,
+        type: "event",
+      });
+
+      clearPendingCommittedEvents("campaign-clear");
+
+      expect(readPendingCommittedEvents("campaign-clear", 20)).toEqual([]);
+      expect(readPendingCommittedEvents("campaign-clear", 21)).toEqual([]);
+      expect(readPendingCommittedEvents("campaign-other", 20)).toEqual([
+        expect.objectContaining({ text: "Other campaign event." }),
+      ]);
+    });
   });
 
   describe("embedAndUpdateEvent", () => {
-    it("re-adds the stored row with the generated vector", async () => {
+    it("updates the stored row with the generated vector", async () => {
       const existing = {
         id: "evt-1",
         text: "The signal cut out.",
@@ -261,19 +319,78 @@ describe("episodic-events", () => {
         model: "test-model",
       } as never);
 
-      expect(table.delete).toHaveBeenCalledWith("id = 'evt-1'");
-      expect(table.add).toHaveBeenCalledWith([
+      expect(table.update).toHaveBeenCalledWith({
+        where: "id = 'evt-1'",
+        values: { vector: [0.25, 0.75] },
+      });
+    });
+
+    it("migrates legacy tables without a vector column before updating embeddings", async () => {
+      const existing = {
+        id: "evt-2",
+        text: "The signal cut out again.",
+        tick: 7,
+        location: "Listening Post",
+        participants: {
+          toArray: () => ["Aria", "Greta"],
+          isValid: vi.fn(),
+        },
+        importance: 9,
+        type: "event",
+      };
+      const { db, table } = createMockDb({
+        hasTable: true,
+        queryRows: [existing],
+        schemaFields: ["id", "text", "tick", "location", "participants", "importance", "type"],
+      });
+      mockGetVectorDb.mockReturnValue(db);
+      mockEmbedTexts.mockResolvedValue([[0.5, 0.5]]);
+
+      await embedAndUpdateEvent("evt-2", "The signal cut out again.", {
+        id: "embedder",
+        model: "test-model",
+      } as never);
+
+      expect(db.dropTable).toHaveBeenCalledWith("episodic_events");
+      const migratedTable = await db.createEmptyTable.mock.results[0]?.value;
+      expect(migratedTable.add).toHaveBeenCalledWith([
         {
-          ...existing,
-          vector: [0.25, 0.75],
+          id: "evt-2",
+          text: "The signal cut out again.",
+          tick: 7,
+          location: "Listening Post",
+          participants: ["Aria", "Greta"],
+          importance: 9,
+          type: "event",
         },
       ]);
+      expect(migratedTable.update).toHaveBeenCalledWith({
+        where: "id = 'evt-2'",
+        values: { vector: [0.5, 0.5] },
+      });
     });
   });
 
   describe("searchEpisodicEvents", () => {
+    it("returns an empty list without running vectorSearch when the table schema lacks a vector column", async () => {
+      const { db, table } = createMockDb({
+        hasTable: true,
+        schemaFields: ["id", "text", "tick", "location", "participants", "importance", "type"],
+      });
+      mockGetVectorDb.mockReturnValue(db);
+
+      const results = await searchEpisodicEvents([0.1, 0.2], 20, 5);
+
+      expect(table.vectorSearch).not.toHaveBeenCalled();
+      expect(results).toEqual([]);
+    });
+
     it("returns an empty list when vectorSearch fails before vectors exist", async () => {
-      const { db, table } = createMockDb({ hasTable: true, vectorSearchThrows: true });
+      const { db, table } = createMockDb({
+        hasTable: true,
+        vectorSearchThrows: true,
+        schemaFields: ["id", "text", "tick", "location", "participants", "importance", "type", "vector"],
+      });
       mockGetVectorDb.mockReturnValue(db);
 
       const results = await searchEpisodicEvents([0.1, 0.2], 20, 5);

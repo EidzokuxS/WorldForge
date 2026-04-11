@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { Field, FixedSizeList, Float32, Int32, List, Schema, Utf8 } from "apache-arrow";
 import { getVectorDb } from "./connection.js";
 import { embedTexts } from "./embeddings.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
@@ -29,6 +30,113 @@ export interface PendingCommittedEvent {
 
 const TABLE_NAME = "episodic_events";
 const pendingCommittedEvents = new Map<string, PendingCommittedEvent[]>();
+
+function createBaseSchema(): Schema {
+  return new Schema([
+    new Field("id", new Utf8(), false),
+    new Field("text", new Utf8(), false),
+    new Field("tick", new Int32(), false),
+    new Field("location", new Utf8(), false),
+    new Field("participants", new List(new Field("item", new Utf8(), true)), false),
+    new Field("importance", new Int32(), false),
+    new Field("type", new Utf8(), false),
+  ]);
+}
+
+function createVectorSchema(vectorDimension: number): Schema {
+  return new Schema([
+    ...createBaseSchema().fields,
+    new Field(
+      "vector",
+      new FixedSizeList(vectorDimension, new Field("item", new Float32(), true)),
+      true,
+    ),
+  ]);
+}
+
+function normalizeStoredEventRowWithoutVector(
+  row: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    id: String(row.id),
+    text: String(row.text),
+    tick: Number(row.tick ?? 0),
+    location: String(row.location ?? ""),
+    participants: normalizeStringArray(row.participants),
+    importance: Number(row.importance ?? 0),
+    type: String(row.type ?? "event"),
+  };
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item));
+  }
+
+  if (typeof value === "string") {
+    return [value];
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+
+    if (typeof record.toArray === "function") {
+      const arrayValue = (record.toArray as () => unknown[] | undefined).call(value);
+      if (Array.isArray(arrayValue)) {
+        return arrayValue.map((item) => String(item));
+      }
+    }
+
+    const iterator = (value as { [Symbol.iterator]?: () => Iterator<unknown> })[Symbol.iterator];
+    if (typeof iterator === "function") {
+      return Array.from(value as Iterable<unknown>, (item) => String(item));
+    }
+  }
+
+  return [];
+}
+
+async function tableHasVectorColumn(table: { schema(): Promise<{ fields: Array<{ name: string }> }> }): Promise<boolean> {
+  const schema = await table.schema();
+  return schema.fields.some((field) => field.name === "vector");
+}
+
+async function ensureEpisodicEventsTable(
+  vectorDimension?: number,
+): Promise<Awaited<ReturnType<ReturnType<typeof getVectorDb>["openTable"]>>> {
+  const db = getVectorDb();
+  const tableNames = await db.tableNames();
+
+  if (!tableNames.includes(TABLE_NAME)) {
+    if (vectorDimension && vectorDimension > 0) {
+      return db.createEmptyTable(TABLE_NAME, createVectorSchema(vectorDimension));
+    }
+    return db.createEmptyTable(TABLE_NAME, createBaseSchema());
+  }
+
+  const table = await db.openTable(TABLE_NAME);
+  if (!vectorDimension || vectorDimension <= 0) {
+    return table;
+  }
+
+  if (await tableHasVectorColumn(table)) {
+    return table;
+  }
+
+  const existingRows = await table.query().toArray();
+  await db.dropTable(TABLE_NAME);
+
+  const migratedTable = await db.createEmptyTable(TABLE_NAME, createVectorSchema(vectorDimension));
+  if (existingRows.length > 0) {
+    await migratedTable.add(
+      existingRows.map((row) =>
+        normalizeStoredEventRowWithoutVector(row as Record<string, unknown>),
+      ),
+    );
+  }
+
+  return migratedTable;
+}
 
 function clonePendingCommittedEvent(event: PendingCommittedEvent): PendingCommittedEvent {
   return {
@@ -77,6 +185,10 @@ export function drainPendingCommittedEvents(
   return drained.map(clonePendingCommittedEvent);
 }
 
+export function clearPendingCommittedEvents(campaignId: string): void {
+  pendingCommittedEvents.delete(campaignId);
+}
+
 /**
  * Store an episodic event in LanceDB for later semantic retrieval.
  * Vector field is empty (embedding deferred to post-turn async).
@@ -88,10 +200,7 @@ export async function storeEpisodicEvent(
 ): Promise<string> {
   const id = crypto.randomUUID();
 
-  const db = getVectorDb();
-
   // Store WITHOUT vector column — embedding is deferred to post-turn async.
-  // An empty vector [] causes "Failed to infer data type for field vector" on createTable.
   const row = {
     id,
     text: event.text,
@@ -102,13 +211,8 @@ export async function storeEpisodicEvent(
     type: event.type || "event",
   };
 
-  const tableNames = await db.tableNames();
-  if (tableNames.includes(TABLE_NAME)) {
-    const table = await db.openTable(TABLE_NAME);
-    await table.add([row as unknown as Record<string, unknown>]);
-  } else {
-    await db.createTable(TABLE_NAME, [row as unknown as Record<string, unknown>]);
-  }
+  const table = await ensureEpisodicEventsTable();
+  await table.add([row as unknown as Record<string, unknown>]);
 
   queuePendingCommittedEvent(campaignId, {
     id,
@@ -160,18 +264,7 @@ export async function embedAndUpdateEvent(
     return;
   }
 
-  const db = getVectorDb();
-
-  const tableNames = await db.tableNames();
-  if (!tableNames.includes(TABLE_NAME)) {
-    log.warn(`Table ${TABLE_NAME} not found when updating event ${eventId}`);
-    return;
-  }
-
-  const table = await db.openTable(TABLE_NAME);
-
-  // LanceDB: delete old row, re-add with vector
-  // First, query the existing row to preserve metadata
+  const table = await ensureEpisodicEventsTable(vector.length);
   const rows = await table
     .query()
     .where(`id = '${eventId}'`)
@@ -182,11 +275,10 @@ export async function embedAndUpdateEvent(
     return;
   }
 
-  const existing = rows[0] as Record<string, unknown>;
-  const updatedRow = { ...existing, vector };
-
-  await table.delete(`id = '${eventId}'`);
-  await table.add([updatedRow]);
+  await table.update({
+    where: `id = '${eventId}'`,
+    values: { vector },
+  });
 
   log.info(`Embedded episodic event ${eventId} (dim=${vector.length})`);
 }
@@ -208,6 +300,9 @@ export async function searchEpisodicEvents(
   }
 
   const table = await db.openTable(TABLE_NAME);
+  if (!(await tableHasVectorColumn(table))) {
+    return [];
+  }
 
   // Over-fetch for composite re-ranking.
   // vectorSearch will fail if no rows have a vector column yet (all embeddings deferred).

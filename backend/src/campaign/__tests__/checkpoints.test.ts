@@ -39,6 +39,14 @@ vi.mock("../manager.js", () => ({
   })),
 }));
 
+vi.mock("../runtime-state.js", () => ({
+  clearCampaignRuntimeState: vi.fn(),
+}));
+
+vi.mock("../../vectors/episodic-events.js", () => ({
+  clearPendingCommittedEvents: vi.fn(),
+}));
+
 vi.mock("../../lib/index.js", () => {
   class AppError extends Error {
     status: number;
@@ -63,6 +71,8 @@ import { openVectorDb, closeVectorDb } from "../../vectors/connection.js";
 import { runMigrations } from "../../db/migrate.js";
 import { AppError } from "../../lib/index.js";
 import { loadCampaign } from "../manager.js";
+import { clearCampaignRuntimeState } from "../runtime-state.js";
+import { clearPendingCommittedEvents } from "../../vectors/episodic-events.js";
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -326,7 +336,15 @@ describe("loadCheckpoint", () => {
       expect.stringContaining("config.json"),
       expect.stringContaining("config.json")
     );
+    expect(clearCampaignRuntimeState).toHaveBeenCalledWith("camp-1");
+    expect(clearPendingCommittedEvents).toHaveBeenCalledWith("camp-1");
     expect(loadCampaign).toHaveBeenCalledWith("camp-1");
+    expect(
+      vi.mocked(clearCampaignRuntimeState).mock.invocationCallOrder[0]
+    ).toBeLessThan(vi.mocked(loadCampaign).mock.invocationCallOrder[0]);
+    expect(
+      vi.mocked(clearPendingCommittedEvents).mock.invocationCallOrder[0]
+    ).toBeLessThan(vi.mocked(loadCampaign).mock.invocationCallOrder[0]);
 
     expect(result.id).toBe("cp-1");
   });

@@ -10,6 +10,8 @@ import {
   captureCampaignBundle,
   restoreCampaignBundle,
 } from "./restore-bundle.js";
+import { clearCampaignRuntimeState } from "./runtime-state.js";
+import { clearPendingCommittedEvents } from "../vectors/episodic-events.js";
 
 export type CheckpointMeta = {
   id: string;
@@ -112,6 +114,9 @@ export async function loadCheckpoint(
   const meta = JSON.parse(
     fs.readFileSync(metaPath, "utf-8")
   ) as CheckpointMeta;
+
+  clearCampaignRuntimeState(campaignId);
+  clearPendingCommittedEvents(campaignId);
   await restoreCampaignBundle(campaignId, checkpointDir, { includeVectors: true });
 
   return meta;

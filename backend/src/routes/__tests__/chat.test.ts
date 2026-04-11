@@ -61,10 +61,38 @@ vi.mock("../../ai/with-model-fallback.js", () => ({
 
 const mockEmbedAndUpdateEvent = vi.fn();
 const mockDrainPendingCommittedEvents = vi.fn();
+const runtimeSnapshots = new Map<string, unknown>();
+const runtimeActiveTurns = new Set<string>();
 
 vi.mock("../../vectors/episodic-events.js", () => ({
   embedAndUpdateEvent: (...args: unknown[]) => mockEmbedAndUpdateEvent(...args),
   drainPendingCommittedEvents: (...args: unknown[]) => mockDrainPendingCommittedEvents(...args),
+}));
+
+vi.mock("../../campaign/runtime-state.js", () => ({
+  tryBeginTurn: (campaignId: string) => {
+    if (runtimeActiveTurns.has(campaignId)) {
+      return false;
+    }
+    runtimeActiveTurns.add(campaignId);
+    return true;
+  },
+  endTurn: (campaignId: string) => {
+    runtimeActiveTurns.delete(campaignId);
+  },
+  hasActiveTurn: (campaignId: string) => runtimeActiveTurns.has(campaignId),
+  setLastTurnSnapshot: (campaignId: string, snapshot: unknown) => {
+    runtimeSnapshots.set(campaignId, snapshot);
+  },
+  getLastTurnSnapshot: (campaignId: string) => runtimeSnapshots.get(campaignId),
+  clearLastTurnSnapshot: (campaignId: string) => {
+    runtimeSnapshots.delete(campaignId);
+  },
+  hasLiveTurnSnapshot: (campaignId: string) => runtimeSnapshots.has(campaignId),
+  clearCampaignRuntimeState: (campaignId: string) => {
+    runtimeActiveTurns.delete(campaignId);
+    runtimeSnapshots.delete(campaignId);
+  },
 }));
 
 import { callStoryteller } from "../../ai/index.js";
@@ -169,6 +197,8 @@ function createTurnStream(events: Array<{ type: string; data: unknown }>) {
 beforeEach(() => {
   vi.clearAllMocks();
   mockDrainPendingCommittedEvents.mockReturnValue([]);
+  runtimeSnapshots.clear();
+  runtimeActiveTurns.clear();
 });
 
 // ---------------------------------------------------------------------------

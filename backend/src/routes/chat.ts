@@ -37,6 +37,15 @@ import {
   drainPendingCommittedEvents,
   embedAndUpdateEvent,
 } from "../vectors/episodic-events.js";
+import {
+  clearLastTurnSnapshot,
+  endTurn,
+  getLastTurnSnapshot,
+  hasActiveTurn,
+  hasLiveTurnSnapshot,
+  setLastTurnSnapshot,
+  tryBeginTurn,
+} from "../campaign/runtime-state.js";
 import type { Settings } from "../settings/index.js";
 import type { ProviderConfig } from "../ai/provider-registry.js";
 import { resolveFallbackProvider } from "../ai/with-model-fallback.js";
@@ -53,10 +62,6 @@ import {
 const log = createLogger("chat");
 
 const app = new Hono();
-
-// -- Module-level state for last turn (in-memory only) ------------------------
-
-const lastTurnSnapshots = new Map<string, TurnSnapshot>();
 
 /**
  * Rollback-critical work must finish before the turn is marked done.
@@ -248,7 +253,7 @@ app.get("/history", async (c) => {
     return c.json({
       messages,
       premise,
-      hasLiveTurnSnapshot: lastTurnSnapshots.has(campaignId),
+      hasLiveTurnSnapshot: hasLiveTurnSnapshot(campaignId),
     });
   } catch (error) {
     return c.json(
@@ -343,6 +348,7 @@ app.post("/", async (c) => {
 // -- POST /action — Full turn cycle via SSE (Oracle + Storyteller + tools) ----
 
 app.post("/action", async (c) => {
+  let turnStartedForCampaign: string | null = null;
   try {
     const result = await parseBody(c, chatActionBodySchema);
     if ("response" in result) return result.response;
@@ -350,6 +356,10 @@ app.post("/action", async (c) => {
     const { campaignId, playerAction, intent, method } = result.data;
     const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
+    if (!tryBeginTurn(campaignId)) {
+      return c.json({ error: "The world is still settling. Wait for the turn to finish." }, 409);
+    }
+    turnStartedForCampaign = campaignId;
 
     const settings = loadSettings();
 
@@ -440,21 +450,27 @@ app.post("/action", async (c) => {
         }
 
         // Turn completed successfully -- store snapshot for potential undo/retry
-        lastTurnSnapshots.set(campaignId, snapshot);
+        setLastTurnSnapshot(campaignId, snapshot);
       } catch (error) {
         try {
           await restoreSnapshot(campaignId, snapshot);
         } catch (restoreError) {
           log.error("Failed to restore pre-turn boundary after action failure", restoreError);
         }
-        lastTurnSnapshots.delete(campaignId);
+        clearLastTurnSnapshot(campaignId);
         await stream.writeSSE({
           event: "error",
           data: JSON.stringify({ error: getErrorMessage(error, "Turn processing failed.") }),
         });
+      } finally {
+        endTurn(campaignId);
+        turnStartedForCampaign = null;
       }
     });
   } catch (error) {
+    if (turnStartedForCampaign) {
+      endTurn(turnStartedForCampaign);
+    }
     return c.json(
       { error: getErrorMessage(error, "Action request failed.") },
       getErrorStatus(error)
@@ -465,6 +481,7 @@ app.post("/action", async (c) => {
 // -- POST /retry — Re-roll the last turn with same player action --------------
 
 app.post("/retry", async (c) => {
+  let turnStartedForCampaign: string | null = null;
   try {
     const result = await parseBody(c, chatRetryBodySchema);
     if ("response" in result) return result.response;
@@ -472,13 +489,21 @@ app.post("/retry", async (c) => {
     const { campaignId } = result.data;
     const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
+    if (!tryBeginTurn(campaignId)) {
+      return c.json({ error: "The world is still settling. Wait for the turn to finish." }, 409);
+    }
+    turnStartedForCampaign = campaignId;
 
-    const previousSnapshot = lastTurnSnapshots.get(campaignId);
+    const previousSnapshot = getLastTurnSnapshot(campaignId);
     if (!previousSnapshot) {
+      endTurn(campaignId);
+      turnStartedForCampaign = null;
       return c.json({ error: "Nothing to retry." }, 400);
     }
     const playerAction = getLastPlayerAction(campaignId);
     if (!playerAction) {
+      endTurn(campaignId);
+      turnStartedForCampaign = null;
       return c.json({ error: "No player action found to retry." }, 400);
     }
 
@@ -545,21 +570,27 @@ app.post("/retry", async (c) => {
           });
         }
 
-        lastTurnSnapshots.set(campaignId, previousSnapshot);
+        setLastTurnSnapshot(campaignId, previousSnapshot);
       } catch (error) {
         try {
           await restoreSnapshot(campaignId, previousSnapshot);
         } catch (restoreError) {
           log.error("Failed to restore pre-turn boundary after retry failure", restoreError);
         }
-        lastTurnSnapshots.delete(campaignId);
+        clearLastTurnSnapshot(campaignId);
         await stream.writeSSE({
           event: "error",
           data: JSON.stringify({ error: getErrorMessage(error, "Retry failed.") }),
         });
+      } finally {
+        endTurn(campaignId);
+        turnStartedForCampaign = null;
       }
     });
   } catch (error) {
+    if (turnStartedForCampaign) {
+      endTurn(turnStartedForCampaign);
+    }
     return c.json(
       { error: getErrorMessage(error, "Retry request failed.") },
       getErrorStatus(error)
@@ -577,8 +608,11 @@ app.post("/undo", async (c) => {
     const { campaignId } = result.data;
     const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
+    if (hasActiveTurn(campaignId)) {
+      return c.json({ error: "The world is still settling. Wait for the turn to finish." }, 409);
+    }
 
-    const previousSnapshot = lastTurnSnapshots.get(campaignId);
+    const previousSnapshot = getLastTurnSnapshot(campaignId);
     if (!previousSnapshot) {
       return c.json({ error: "Nothing to undo." }, 400);
     }
@@ -587,7 +621,7 @@ app.post("/undo", async (c) => {
     await restoreSnapshot(campaignId, previousSnapshot);
 
     // Single-step undo only
-    lastTurnSnapshots.delete(campaignId);
+    clearLastTurnSnapshot(campaignId);
 
     return c.json({ success: true, messagesRemoved: 2 });
   } catch (error) {
