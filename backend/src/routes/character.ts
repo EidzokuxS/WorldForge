@@ -284,6 +284,7 @@ app.post("/save-character", async (c) => {
         id: playerId,
         campaignId,
         ...projection,
+        currentSceneLocationId: matchedLocation.id,
       })
       .run();
 

@@ -588,6 +588,96 @@ describe("processTurn", () => {
     expect(narrativeStep.value.type).toBe("narrative");
   });
 
+  it("falls back to broad location for local scene scope when legacy campaigns have no narrower scene field yet", async () => {
+    setupMocks();
+    const playerRow = {
+      ...createOpeningPlayerRow({ currentLocationId: "loc-1" }),
+      currentSceneLocationId: null,
+    } as Record<string, unknown>;
+    const mockDb = createEntityLookupDb({ playerRow });
+    (getDb as Mock).mockReturnValue(mockDb);
+
+    let capturedSummary: { currentLocationId: string | null; currentSceneScopeId: string | null } | null = null;
+
+    await collectEvents(
+      processTurn(
+        createTestOptions({
+          onBeforeVisibleNarration: (summary) => {
+            capturedSummary = {
+              currentLocationId: summary.currentLocationId,
+              currentSceneScopeId: summary.currentSceneScopeId,
+            };
+          },
+        }),
+      ),
+    );
+
+    expect(capturedSummary).toEqual({
+      currentLocationId: "loc-1",
+      currentSceneScopeId: "loc-1",
+    });
+    expect(mockDb.update).toHaveBeenCalled();
+  });
+
+  it("sets local scene scope to the destination on authoritative player movement", async () => {
+    setupMocks();
+    vi.mocked(safeGenerateObject).mockResolvedValue({
+      object: { isMovement: true, destination: "Signal Tower" },
+    } as never);
+
+    const playerRow = {
+      ...createOpeningPlayerRow({ currentLocationId: "loc-1" }),
+      currentSceneLocationId: null,
+    };
+    const mockDb = createEntityLookupDb({
+      playerRow,
+      locationRows: [
+        {
+          id: "loc-1",
+          campaignId: CAMPAIGN_ID,
+          name: "Town Square",
+          description: "A bustling square",
+          tags: '["urban"]',
+          connectedTo: '["loc-2"]',
+          isStarting: false,
+        },
+        {
+          id: "loc-2",
+          campaignId: CAMPAIGN_ID,
+          name: "Signal Tower",
+          description: "An old relay station",
+          tags: '["elevated"]',
+          connectedTo: '["loc-1"]',
+          isStarting: false,
+        },
+      ],
+    });
+    (getDb as Mock).mockReturnValue(mockDb);
+
+    let capturedSummary: { currentLocationId: string | null; currentSceneScopeId: string | null } | null = null;
+
+    await collectEvents(
+      processTurn(
+        createTestOptions({
+          playerAction: "Go to the Signal Tower",
+          intent: "Travel to the Signal Tower",
+          method: "walking to Signal Tower",
+          onBeforeVisibleNarration: (summary) => {
+            capturedSummary = {
+              currentLocationId: summary.currentLocationId,
+              currentSceneScopeId: summary.currentSceneScopeId,
+            };
+          },
+        }),
+      ),
+    );
+
+    expect(capturedSummary).toEqual({
+      currentLocationId: "loc-2",
+      currentSceneScopeId: "loc-2",
+    });
+  });
+
   it("yields state_update events for tool results", async () => {
     setupMocks({
       streamParts: [

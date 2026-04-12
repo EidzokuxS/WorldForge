@@ -57,6 +57,13 @@
       "when": 1775971237950,
       "tag": "0007_spooky_warlock",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1775989473666,
+      "tag": "0008_dusty_tana_nile",
+      "breakpoints": true
     }
   ]
 }

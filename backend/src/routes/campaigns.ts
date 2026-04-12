@@ -49,6 +49,13 @@ function toWorldPlayerInventoryItem(item: {
   };
 }
 
+function toWorldSceneScopeId(row: {
+  currentLocationId: string | null;
+  currentSceneLocationId: string | null;
+}) {
+  return row.currentSceneLocationId ?? row.currentLocationId ?? null;
+}
+
 app.get("/", (c) => {
   try {
     return c.json(listCampaigns());
@@ -168,6 +175,7 @@ app.get("/:id/world", async (c) => {
         const record = hydrateStoredNpcRecord(row);
         return {
           ...row,
+          sceneScopeId: toWorldSceneScopeId(row),
           characterRecord: record,
           draft: toCharacterDraft(record),
           npc: toLegacyNpcDraft(record),
@@ -178,6 +186,7 @@ app.get("/:id/world", async (c) => {
       player: playerRow && playerRecord
         ? {
             ...playerRow,
+            sceneScopeId: toWorldSceneScopeId(playerRow),
             characterRecord: playerRecord,
             draft: playerDraft,
             inventory: playerInventory?.carried.map(toWorldPlayerInventoryItem) ?? [],

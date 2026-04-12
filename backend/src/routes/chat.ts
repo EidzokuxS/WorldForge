@@ -124,7 +124,8 @@ async function runLocalPresentSceneSettlement(
   judgeProvider: ProviderConfig,
   summary: HiddenTurnSummary,
 ): Promise<void> {
-  if (!summary.currentLocationId) {
+  const sceneScopeId = summary.currentSceneScopeId ?? summary.currentLocationId;
+  if (!sceneScopeId) {
     return;
   }
 
@@ -135,7 +136,7 @@ async function runLocalPresentSceneSettlement(
     campaignId,
     summary.predictedTick,
     judgeProvider,
-    summary.currentLocationId,
+    sceneScopeId,
     embedderProvider,
   );
 }

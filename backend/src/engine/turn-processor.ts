@@ -95,6 +95,7 @@ export interface HiddenTurnSummary {
   currentTick: number;
   predictedTick: number;
   currentLocationId: string | null;
+  currentSceneScopeId: string | null;
   oracleResult: OracleResult;
   toolCalls: Array<{ tool: string; args: unknown; result: unknown }>;
   openingScene: boolean;
@@ -160,6 +161,57 @@ type SuccessfulTravel = {
   path: string[];
 };
 
+function resolveSceneScopeId(
+  currentLocationId: string | null | undefined,
+  currentSceneLocationId: string | null | undefined,
+): string | null {
+  return currentSceneLocationId ?? currentLocationId ?? null;
+}
+
+function syncPlayerRecordLocation(
+  record: ReturnType<typeof hydrateStoredPlayerRecord>,
+  locationId: string,
+  locationName: string,
+) {
+  return {
+    ...record,
+    socialContext: {
+      ...record.socialContext,
+      currentLocationId: locationId,
+      currentLocationName: locationName,
+    },
+  };
+}
+
+function ensurePlayerSceneScopeAlignment(
+  db: ReturnType<typeof getDb>,
+  player: typeof players.$inferSelect | undefined,
+): string | null {
+  if (!player) {
+    return null;
+  }
+
+  const resolvedSceneScopeId = resolveSceneScopeId(
+    player.currentLocationId,
+    player.currentSceneLocationId,
+  );
+
+  if (
+    player.currentLocationId
+    && resolvedSceneScopeId
+    && player.currentSceneLocationId !== resolvedSceneScopeId
+    && typeof (db as { update?: unknown }).update === "function"
+  ) {
+    db.update(players)
+      .set({ currentSceneLocationId: resolvedSceneScopeId })
+      .where(eq(players.id, player.id))
+      .run();
+    player.currentSceneLocationId = resolvedSceneScopeId;
+  }
+
+  return resolvedSceneScopeId;
+}
+
 function persistPlayerLocation(
   db: ReturnType<typeof getDb>,
   player: typeof players.$inferSelect,
@@ -172,17 +224,15 @@ function persistPlayerLocation(
 
   db.update(players)
     .set(
-      projectPlayerRecord({
-        ...updatedPlayer,
-        socialContext: {
-          ...updatedPlayer.socialContext,
-          currentLocationId: locationId,
-          currentLocationName: locationName,
-        },
-      }),
+      {
+        ...projectPlayerRecord(syncPlayerRecordLocation(updatedPlayer, locationId, locationName)),
+        currentSceneLocationId: locationId,
+      },
     )
     .where(eq(players.id, player.id))
     .run();
+
+  player.currentSceneLocationId = locationId;
 }
 
 function getPathNames(locationIds: string[], allLocations: readonly typeof locations.$inferSelect[]) {
@@ -430,12 +480,14 @@ export async function* processTurn(
     .from(players)
     .where(eq(players.campaignId, campaignId))
     .get();
+  const initialSceneScopeId = ensurePlayerSceneScopeAlignment(db, player ?? undefined);
 
   let actorTags: string[] = [];
   let environmentTags: string[] = [];
   let sceneContext = "";
   let runtimePlayerRecord: ReturnType<typeof hydrateStoredPlayerRecord> | null = null;
   let oracleLocationId: string | null = player?.currentLocationId ?? null;
+  let currentSceneScopeId: string | null = initialSceneScopeId;
   let successfulTravel: SuccessfulTravel | null = null;
 
   if (player) {
@@ -519,16 +571,15 @@ export async function* processTurn(
       if (travelPath && destinationLocation) {
         persistPlayerLocation(db, player, destinationLocation.id, destinationLocation.name);
         player.currentLocationId = destinationLocation.id;
+        player.currentSceneLocationId = destinationLocation.id;
         oracleLocationId = destinationLocation.id;
+        currentSceneScopeId = destinationLocation.id;
         if (runtimePlayerRecord) {
-          runtimePlayerRecord = {
-            ...runtimePlayerRecord,
-            socialContext: {
-              ...runtimePlayerRecord.socialContext,
-              currentLocationId: destinationLocation.id,
-              currentLocationName: destinationLocation.name,
-            },
-          };
+          runtimePlayerRecord = syncPlayerRecordLocation(
+            runtimePlayerRecord,
+            destinationLocation.id,
+            destinationLocation.name,
+          );
         }
 
         successfulTravel = {
@@ -788,6 +839,14 @@ export async function* processTurn(
       .where(eq(players.campaignId, campaignId))
       .get()?.currentLocationId
     ?? null;
+  currentSceneScopeId =
+    successfulTravel?.locationId
+    ?? db
+      .select({ currentSceneLocationId: players.currentSceneLocationId })
+      .from(players)
+      .where(eq(players.campaignId, campaignId))
+      .get()?.currentSceneLocationId
+    ?? currentLocationId;
 
   yield {
     type: "scene-settling",
@@ -802,6 +861,7 @@ export async function* processTurn(
     currentTick,
     predictedTick,
     currentLocationId,
+    currentSceneScopeId,
     oracleResult,
     toolCalls: toolCallResults,
     openingScene: options.openingScene ?? false,
@@ -951,6 +1011,13 @@ export async function* processOpeningScene(
     contextWindow = 8192,
   } = options;
 
+  const db = getDb();
+  const player = db
+    .select()
+    .from(players)
+    .where(eq(players.campaignId, campaignId))
+    .get();
+  ensurePlayerSceneScopeAlignment(db, player ?? undefined);
   const currentTick = readCampaignConfig(campaignId).currentTick ?? 0;
 
   yield {

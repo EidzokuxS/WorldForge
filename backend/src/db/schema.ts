@@ -149,6 +149,7 @@ export const players = sqliteTable(
     tags: text("tags").notNull().default("[]"),
     equippedItems: text("equipped_items").notNull().default("[]"),
     currentLocationId: text("current_location_id").references(() => locations.id),
+    currentSceneLocationId: text("current_scene_location_id").references(() => locations.id),
   },
   (table) => [
     check("players_hp_range_check", sql`${table.hp} >= 0 AND ${table.hp} <= 5`),
@@ -172,6 +173,7 @@ export const npcs = sqliteTable(
       enum: ["temporary", "persistent", "key"],
     }).notNull(),
     currentLocationId: text("current_location_id").references(() => locations.id),
+    currentSceneLocationId: text("current_scene_location_id").references(() => locations.id),
     goals: text("goals").notNull().default('{"short_term":[],"long_term":[]}'),
     beliefs: text("beliefs").notNull().default("[]"),
     unprocessedImportance: integer("unprocessed_importance").notNull().default(0),

@@ -111,12 +111,14 @@ function createMutableInventoryDb(options?: {
   players?: Array<Record<string, unknown>>;
   npcs?: Array<Record<string, unknown>>;
   locations?: Array<Record<string, unknown>>;
+  locationEdges?: Array<Record<string, unknown>>;
   items?: MutableInventoryItem[];
 }) {
   const state = {
     players: options?.players ?? [],
     npcs: options?.npcs ?? [],
     locations: options?.locations ?? [],
+    locationEdges: options?.locationEdges ?? [],
     items: options?.items ?? [],
     updateTables: [] as string[],
     insertedItems: [] as MutableInventoryItem[],
@@ -132,6 +134,8 @@ function createMutableInventoryDb(options?: {
         return state.npcs;
       case "locations":
         return state.locations;
+      case "location_edges":
+        return state.locationEdges;
       case "items":
         return state.items;
       default:
@@ -513,6 +517,25 @@ describe("executeToolCall", () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("Location not found");
+    });
+
+    it("initializes spawned NPCs with local scene scope aligned to their entry location", async () => {
+      const { db, state } = createMutableInventoryDb({
+        locations: [{ id: "loc-1", name: "Tavern", tags: "[]" }],
+      });
+      (getDb as Mock).mockReturnValue(db);
+
+      const result = await executeToolCall(CAMPAIGN_ID, "spawn_npc", {
+        name: "Bartender",
+        tags: ["friendly", "merchant"],
+        locationName: "Tavern",
+      }, TICK);
+
+      expect(result.success).toBe(true);
+      expect(state.npcs[0]).toMatchObject({
+        currentLocationId: "loc-1",
+        currentSceneLocationId: "loc-1",
+      });
     });
   });
 
@@ -1051,6 +1074,139 @@ describe("executeToolCall", () => {
         ).carried.map((item) => item.name),
       ).toEqual(["Iron Sword"]);
       expect(state.updateTables).toEqual(["items"]);
+    });
+  });
+
+  describe("move_to", () => {
+    it("realigns player scene scope to the destination on authoritative movement", async () => {
+      const { db, state } = createMutableInventoryDb({
+        players: [{
+          id: "player-1",
+          campaignId: CAMPAIGN_ID,
+          name: "Hero",
+          race: "Human",
+          gender: "",
+          age: "",
+          appearance: "",
+          hp: 5,
+          tags: "[]",
+          equippedItems: "[]",
+          currentLocationId: "loc-1",
+          currentSceneLocationId: null,
+          characterRecord: JSON.stringify({
+            identity: {
+              id: "player-1",
+              campaignId: CAMPAIGN_ID,
+              role: "player",
+              tier: "key",
+              displayName: "Hero",
+              canonicalStatus: "original",
+            },
+            profile: {
+              species: "Human",
+              gender: "",
+              ageText: "",
+              appearance: "",
+              backgroundSummary: "",
+              personaSummary: "",
+            },
+            socialContext: {
+              factionId: null,
+              factionName: null,
+              homeLocationId: null,
+              homeLocationName: null,
+              currentLocationId: "loc-1",
+              currentLocationName: "Town Square",
+              relationshipRefs: [],
+              socialStatus: [],
+              originMode: "resident",
+            },
+            motivations: {
+              shortTermGoals: [],
+              longTermGoals: [],
+              beliefs: [],
+              drives: [],
+              frictions: [],
+            },
+            capabilities: {
+              traits: [],
+              skills: [],
+              flaws: [],
+              specialties: [],
+              wealthTier: null,
+            },
+            state: {
+              hp: 5,
+              conditions: [],
+              statusFlags: [],
+              activityState: "active",
+            },
+            loadout: {
+              inventorySeed: [],
+              equippedItemRefs: [],
+              currencyNotes: "",
+              signatureItems: [],
+            },
+            startConditions: {},
+            provenance: {
+              sourceKind: "generator",
+              importMode: null,
+              templateId: null,
+              archetypePrompt: null,
+              worldgenOrigin: null,
+              legacyTags: [],
+            },
+          }),
+          derivedTags: "[]",
+        }],
+        locations: [
+          {
+            id: "loc-1",
+            campaignId: CAMPAIGN_ID,
+            name: "Town Square",
+            description: "A busy square",
+            tags: "[]",
+            connectedTo: '["loc-2"]',
+          },
+          {
+            id: "loc-2",
+            campaignId: CAMPAIGN_ID,
+            name: "Signal Tower",
+            description: "An old relay station",
+            tags: "[]",
+            connectedTo: '["loc-1"]',
+          },
+        ],
+        locationEdges: [
+          {
+            id: "edge-1",
+            campaignId: CAMPAIGN_ID,
+            fromLocationId: "loc-1",
+            toLocationId: "loc-2",
+            travelCost: 1,
+            discovered: true,
+          },
+          {
+            id: "edge-2",
+            campaignId: CAMPAIGN_ID,
+            fromLocationId: "loc-2",
+            toLocationId: "loc-1",
+            travelCost: 1,
+            discovered: true,
+          },
+        ],
+      });
+      (getDb as Mock).mockReturnValue(db);
+
+      const result = await executeToolCall(CAMPAIGN_ID, "move_to", {
+        targetLocationName: "Signal Tower",
+      }, TICK);
+
+      expect(result.success).toBe(true);
+      expect(state.players[0]).toMatchObject({
+        currentLocationId: "loc-2",
+        currentSceneLocationId: "loc-2",
+      });
     });
   });
 

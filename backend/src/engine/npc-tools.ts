@@ -217,14 +217,17 @@ export function createNpcAgentTools(
           currentLocationName: targetLoc.locationName,
         });
         db.update(npcs)
-          .set(projectNpcRecord({
-            ...npcRecord,
-            socialContext: {
-              ...npcRecord.socialContext,
-              currentLocationId: targetLoc.locationId,
-              currentLocationName: targetLoc.locationName,
-            },
-          }))
+          .set({
+            ...projectNpcRecord({
+              ...npcRecord,
+              socialContext: {
+                ...npcRecord.socialContext,
+                currentLocationId: targetLoc.locationId,
+                currentLocationName: targetLoc.locationName,
+              },
+            }),
+            currentSceneLocationId: targetLoc.locationId,
+          })
           .where(eq(npcs.id, npcId))
           .run();
 

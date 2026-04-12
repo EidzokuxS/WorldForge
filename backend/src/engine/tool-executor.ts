@@ -642,6 +642,7 @@ function handleSpawnNpc(
       id,
       campaignId,
       ...npcProjection,
+      currentSceneLocationId: location.id,
       unprocessedImportance: 0,
       inactiveTicks: 0,
       createdAt: Date.now(),
@@ -869,14 +870,17 @@ function handleMoveTo(
   });
 
   db.update(players)
-    .set(projectPlayerRecord({
-      ...updatedPlayer,
-      socialContext: {
-        ...updatedPlayer.socialContext,
-        currentLocationId: destination.locationId,
-        currentLocationName: destinationName,
-      },
-    }))
+    .set({
+      ...projectPlayerRecord({
+        ...updatedPlayer,
+        socialContext: {
+          ...updatedPlayer.socialContext,
+          currentLocationId: destination.locationId,
+          currentLocationName: destinationName,
+        },
+      }),
+      currentSceneLocationId: destination.locationId,
+    })
     .where(eq(players.id, player.id))
     .run();
 

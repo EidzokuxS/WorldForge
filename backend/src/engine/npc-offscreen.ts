@@ -50,6 +50,7 @@ export interface NpcContext {
     tags: string;
     tier: "temporary" | "persistent" | "key";
     currentLocationId: string | null;
+    currentSceneLocationId?: string | null;
     goals: string;
     beliefs: string;
     unprocessedImportance: number;
@@ -105,6 +106,7 @@ export async function applyOffscreenUpdate(
   let locationChanged = false;
   let goalsUpdated = false;
   let resolvedLocationId = npcCtx.storedRecord?.currentLocationId ?? null;
+  let resolvedSceneLocationId = npcCtx.storedRecord?.currentSceneLocationId ?? resolvedLocationId;
   let resolvedLocationName: string | null = null;
 
   // -- Resolve and apply location change --
@@ -123,6 +125,7 @@ export async function applyOffscreenUpdate(
     if (loc) {
       locationChanged = true;
       resolvedLocationId = loc.id;
+      resolvedSceneLocationId = loc.id;
       resolvedLocationName = loc.name;
       log.info(`${npcCtx.npcName} moved to ${loc.name}`);
     } else {
@@ -175,6 +178,7 @@ export async function applyOffscreenUpdate(
     db.update(npcs)
       .set({
         currentLocationId: resolvedLocationId,
+        currentSceneLocationId: resolvedSceneLocationId,
         persona: legacyNpc.persona,
         tags: JSON.stringify(legacyNpc.tags),
         goals: JSON.stringify({
@@ -211,6 +215,7 @@ export async function applyOffscreenUpdate(
     db.update(npcs)
       .set({
         currentLocationId: resolvedLocationId,
+        currentSceneLocationId: resolvedSceneLocationId,
         inactiveTicks: 0,
       })
       .where(eq(npcs.id, npcCtx.npcId))
@@ -305,6 +310,7 @@ export async function simulateOffscreenNpcs(
       tags: npcs.tags,
       tier: npcs.tier,
       currentLocationId: npcs.currentLocationId,
+      currentSceneLocationId: npcs.currentSceneLocationId,
       goals: npcs.goals,
       beliefs: npcs.beliefs,
       unprocessedImportance: npcs.unprocessedImportance,
@@ -394,6 +400,7 @@ export async function simulateOffscreenNpcs(
         tags: npc.tags,
         tier: npc.tier,
         currentLocationId: npc.currentLocationId,
+        currentSceneLocationId: npc.currentSceneLocationId,
         goals: npc.goals,
         beliefs: npc.beliefs,
         unprocessedImportance: npc.unprocessedImportance,
