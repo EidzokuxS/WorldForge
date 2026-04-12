@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
-status: planning
-stopped_at: Phase 45 research and plans created
-last_updated: "2026-04-12T10:10:00.000Z"
+status: executing
+stopped_at: Completed 45-01-PLAN.md
+last_updated: "2026-04-12T07:39:30.459Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 14
   completed_phases: 8
-  total_plans: 24
-  completed_plans: 24
+  total_plans: 27
+  completed_plans: 25
   percent: 57
 ---
 
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-12)
 
 **Core value:** The LLM is the narrator, never the engine. Mechanical truth stays in backend code so outcomes remain consistent, inspectable, and recoverable.
-**Current focus:** Phase 45 execution prep after research and planning
+**Current focus:** Phase 45 — authoritative-scene-assembly-and-start-of-play-runtime
 
 ## Current Position
 
-Phase: 45-authoritative-scene-assembly-and-start-of-play-runtime — PLANNED
-Plan: 45-01, 45-02, 45-03
-Status: Research and plan set complete; ready for execution
+Phase: 45 (authoritative-scene-assembly-and-start-of-play-runtime) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
 Last activity: 2026-04-12
 
 Progress: [██████░░░░] 57%
@@ -142,6 +142,8 @@ Recent decisions affecting current work:
 - [Phase 38]: The /api/campaigns/:id/world payload now emits structured authoritative player item rows because frontend-only parsing could not satisfy the authoritative inventory UI contract.
 - [Milestone]: v1.1 remains open until baseline live gameplay feel is acceptable, even though the original reconciliation tranche (37-44) is complete.
 - [Milestone]: Follow-on phases 45-50 own the remaining live gameplay gaps around scene authority, encounter scope, writing quality, character fidelity, research grounding, and gameplay text readability.
+- [Phase 45]: Phase 45 starts from runtime-sequencing regressions, not prompt-only wording assertions.
+- [Phase 45]: Opening-surface regressions are pinned at both NarrativeLog and /game so premise fallback cannot survive in one layer.
 
 ### Pending Todos
 
@@ -154,6 +156,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-12T06:35:00.000Z
-Stopped at: Extended v1.1 with phases 45-50 from live gameplay findings
+Last session: 2026-04-12T07:39:30.455Z
+Stopped at: Completed 45-01-PLAN.md
 Resume file: None
