@@ -108,13 +108,45 @@ interface ParsedLegacyTags {
 }
 
 function normalizeCharacterDraftRecord<T extends CharacterDraft | CharacterRecord>(record: T): T {
+  const baseFacts = normalizeBaseFacts(record);
+  const behavioralCore = normalizeBehavioralCore(record);
+  const liveDynamics = normalizeLiveDynamics(record);
+
   return {
     ...record,
     identity: {
       ...record.identity,
-      baseFacts: normalizeBaseFacts(record),
-      behavioralCore: normalizeBehavioralCore(record),
-      liveDynamics: normalizeLiveDynamics(record),
+      baseFacts,
+      behavioralCore,
+      liveDynamics,
+    },
+    profile: {
+      ...record.profile,
+      backgroundSummary: record.profile.backgroundSummary || baseFacts.biography,
+      personaSummary: record.profile.personaSummary || behavioralCore.selfImage,
+    },
+    motivations: {
+      ...record.motivations,
+      shortTermGoals:
+        record.motivations.shortTermGoals.length > 0
+          ? record.motivations.shortTermGoals
+          : [...liveDynamics.activeGoals],
+      longTermGoals:
+        record.motivations.longTermGoals.length > 0
+          ? record.motivations.longTermGoals
+          : [],
+      beliefs:
+        record.motivations.beliefs.length > 0
+          ? record.motivations.beliefs
+          : [...liveDynamics.beliefDrift],
+      drives:
+        record.motivations.drives.length > 0
+          ? record.motivations.drives
+          : [...behavioralCore.motives],
+      frictions:
+        record.motivations.frictions.length > 0
+          ? record.motivations.frictions
+          : [...liveDynamics.currentStrains],
     },
     sourceBundle: normalizeSourceBundle(record.sourceBundle),
     continuity: normalizeContinuity(record.continuity),
@@ -636,16 +668,18 @@ export function toLegacyPlayerCharacterWithInventory(
   record: CharacterRecord,
   inventoryView?: AuthoritativeInventoryView,
 ): PlayerCharacter {
+  const normalized = normalizeCharacterDraftRecord(record);
   return {
-    name: record.identity.displayName,
-    race: record.profile.species,
-    gender: record.profile.gender,
-    age: record.profile.ageText,
-    appearance: record.profile.appearance,
-    tags: deriveRuntimeCharacterTags(record),
-    hp: record.state.hp,
-    equippedItems: inventoryView?.compatibility.equippedItemRefs ?? record.loadout.equippedItemRefs,
-    locationName: record.socialContext.currentLocationName ?? "",
+    name: normalized.identity.displayName,
+    race: normalized.profile.species,
+    gender: normalized.profile.gender,
+    age: normalized.profile.ageText,
+    appearance: normalized.profile.appearance,
+    tags: deriveRuntimeCharacterTags(normalized),
+    hp: normalized.state.hp,
+    equippedItems:
+      inventoryView?.compatibility.equippedItemRefs ?? normalized.loadout.equippedItemRefs,
+    locationName: normalized.socialContext.currentLocationName ?? "",
   };
 }
 
@@ -674,8 +708,9 @@ export function projectPlayerRecordWithInventory(
   record: CharacterRecord,
   inventoryView?: AuthoritativeInventoryView,
 ): PlayerRecordProjection {
-  const legacy = toLegacyPlayerCharacterWithInventory(record, inventoryView);
-  const derivedTags = deriveRuntimeCharacterTags(record);
+  const normalized = normalizeCharacterDraftRecord(record);
+  const legacy = toLegacyPlayerCharacterWithInventory(normalized, inventoryView);
+  const derivedTags = deriveRuntimeCharacterTags(normalized);
 
   return {
     name: legacy.name,
@@ -686,25 +721,26 @@ export function projectPlayerRecordWithInventory(
     hp: legacy.hp,
     tags: JSON.stringify(legacy.tags),
     equippedItems: JSON.stringify(legacy.equippedItems),
-    currentLocationId: record.socialContext.currentLocationId,
-    characterRecord: JSON.stringify(record),
+    currentLocationId: normalized.socialContext.currentLocationId,
+    characterRecord: JSON.stringify(normalized),
     derivedTags: JSON.stringify(derivedTags),
   };
 }
 
 export function toLegacyNpcDraft(record: CharacterRecord): ScaffoldNpc {
-  const tier = mapRecordTierToScaffoldTier(record.identity.tier);
+  const normalized = normalizeCharacterDraftRecord(record);
+  const tier = mapRecordTierToScaffoldTier(normalized.identity.tier);
 
   return {
-    name: record.identity.displayName,
-    persona: record.profile.personaSummary,
-    tags: deriveRuntimeCharacterTags(record),
+    name: normalized.identity.displayName,
+    persona: normalized.profile.personaSummary,
+    tags: deriveRuntimeCharacterTags(normalized),
     goals: {
-      shortTerm: [...record.motivations.shortTermGoals],
-      longTerm: [...record.motivations.longTermGoals],
+      shortTerm: [...normalized.motivations.shortTermGoals],
+      longTerm: [...normalized.motivations.longTermGoals],
     },
-    locationName: record.socialContext.currentLocationName ?? "",
-    factionName: record.socialContext.factionName,
+    locationName: normalized.socialContext.currentLocationName ?? "",
+    factionName: normalized.socialContext.factionName,
     tier,
   };
 }
@@ -722,25 +758,26 @@ export interface NpcRecordProjection {
 }
 
 export function projectNpcRecord(record: CharacterRecord): NpcRecordProjection {
-  const legacy = toLegacyNpcDraft(record);
-  const derivedTags = deriveRuntimeCharacterTags(record);
+  const normalized = normalizeCharacterDraftRecord(record);
+  const legacy = toLegacyNpcDraft(normalized);
+  const derivedTags = deriveRuntimeCharacterTags(normalized);
 
   return {
     name: legacy.name,
     persona: legacy.persona,
     tags: JSON.stringify(legacy.tags),
-    tier: record.identity.tier === "key"
+    tier: normalized.identity.tier === "key"
       ? "key"
-      : record.identity.tier === "temporary"
+      : normalized.identity.tier === "temporary"
         ? "temporary"
         : "persistent",
-    currentLocationId: record.socialContext.currentLocationId,
+    currentLocationId: normalized.socialContext.currentLocationId,
     goals: JSON.stringify({
       short_term: legacy.goals.shortTerm,
       long_term: legacy.goals.longTerm,
     }),
-    beliefs: JSON.stringify(record.motivations.beliefs),
-    characterRecord: JSON.stringify(record),
+    beliefs: JSON.stringify(normalized.motivations.beliefs),
+    characterRecord: JSON.stringify(normalized),
     derivedTags: JSON.stringify(derivedTags),
   };
 }
