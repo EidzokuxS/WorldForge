@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
 status: executing
-stopped_at: Completed 47-01-PLAN.md
-last_updated: "2026-04-12T13:50:43.068Z"
+stopped_at: Completed 47-02-SUMMARY.md
+last_updated: "2026-04-12T14:07:02.330Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 14
   completed_phases: 10
   total_plans: 34
-  completed_plans: 32
+  completed_plans: 33
   percent: 100
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-12)
 ## Current Position
 
 Phase: 47 (storyteller-output-quality-and-anti-slop-prompting) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-04-12
 
@@ -71,6 +71,8 @@ Progress: [██████████] 100%
 - Phase `39` Plan `03` — duration `10 min`, tasks `2`, files `2`
 - Phase `39` Plan `02` — duration `6 min`, tasks `2`, files `6`
 - Phase `39` Plan `01` — duration `5 min`, tasks `2`, files `7`
+
+| Phase 47 P02 | 7 | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -173,6 +175,8 @@ Recent decisions affecting current work:
 - [Phase 47]: Do not create per-provider prompt dashboards; keep GLM support as one overlay option on shared OpenAI-compatible path.
 - [Phase 47]: Preserve existing createModel(config) behavior by default and gate storyteller-specific behavior with explicit options.
 - [Phase 47]: Keep hidden-tool-driving and final-visible passes sharing one preset source to avoid divergent doctrine.
+- [Phase 47]: Use deterministic runtime signals for storyteller scene mode instead of fuzzy heuristics.
+- [Phase 47]: Keep one bounded GLM overlay per passage by extending existing storyteller contracts; no rewrite stage.
 
 ### Pending Todos
 
@@ -185,6 +189,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-12T13:50:43.065Z
-Stopped at: Completed 47-01-PLAN.md
+Last session: 2026-04-12T14:07:02.327Z
+Stopped at: Completed 47-02-SUMMARY.md
 Resume file: None
