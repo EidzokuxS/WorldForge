@@ -165,9 +165,12 @@ Plans:
   1. Large locations no longer imply universal co-presence; only actually present or perceivable entities enter the live scene.
   2. NPCs do not reason or react as if every actor in the broader location has already been met.
   3. Scene-local knowledge and encounter context derive from proximity, presence, and perception rather than flat location membership.
-**Plans**: 0 plans
+**Plans**: 4 plans
 Plans:
-- [ ] TBD (run `$gsd-plan-phase 46` to break down)
+- [ ] 46-01-PLAN.md — Lock the encounter-scope contract in failing backend and `/game` regressions before changing runtime behavior.
+- [ ] 46-02-PLAN.md — Add the shared scene-scope seam, durable local-scope state, and authoritative lifecycle sync on movement/arrival paths.
+- [ ] 46-03-PLAN.md — Rewire scene assembly, prompts, present-NPC settlement, and off-screen routing to shared presence/awareness/knowledge truth.
+- [ ] 46-04-PLAN.md — Expose scene-scoped world reads and rewire `/game` to immediate-scene participants instead of broad-location membership.
 
 ### Phase 47: Storyteller Output Quality & Anti-Slop Prompting
 **Goal**: Lift live RP writing quality through research-backed storyteller prompting, model settings, and anti-slop controls.
@@ -230,7 +233,7 @@ Plans:
 | 43. Travel & Location-State Contract Resolution | 6/6 | Complete | 2026-04-11 |
 | 44. Gameplay Docs Baseline Alignment | 3/3 | Complete | 2026-04-11 |
 | 45. Authoritative Scene Assembly & Start-of-Play Runtime | 3/3 | Complete    | 2026-04-12 |
-| 46. Encounter Scope, Presence & Knowledge Boundaries | 0/0 | Planned | — |
+| 46. Encounter Scope, Presence & Knowledge Boundaries | 0/4 | Planned | — |
 | 47. Storyteller Output Quality & Anti-Slop Prompting | 0/0 | Planned | — |
 | 48. Character Identity Fidelity & Canonical Modeling | 0/0 | Planned | — |
 | 49. Search Grounding & In-Game Research Semantics | 0/0 | Planned | — |

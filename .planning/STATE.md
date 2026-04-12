@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
-status: verifying
-stopped_at: Phase 46 context gathered
-last_updated: "2026-04-12T09:05:43.689Z"
+status: planning
+stopped_at: Phase 46 planning complete
+last_updated: "2026-04-12T09:38:00.000Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 14
   completed_phases: 9
-  total_plans: 27
+  total_plans: 31
   completed_plans: 27
-  percent: 100
+  percent: 87
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-12)
 
 **Core value:** The LLM is the narrator, never the engine. Mechanical truth stays in backend code so outcomes remain consistent, inspectable, and recoverable.
-**Current focus:** Phase 45 — authoritative-scene-assembly-and-start-of-play-runtime
+**Current focus:** Phase 46 — encounter-scope-presence-and-knowledge-boundaries
 
 ## Current Position
 
 Phase: 46
-Plan: Not started
-Status: Phase complete — ready for verification
+Plan: Planned
+Status: Ready for execution
 Last activity: 2026-04-12
 
-Progress: [██████████] 100%
+Progress: [████████░░] 87%
 
 ## Performance Metrics
 
@@ -39,9 +39,9 @@ Progress: [██████████] 100%
 - Active roadmap phases: 14
 - Completed phases: 45
 - Planned or in-progress phases: 5
-- Total plans tracked: 27
+- Total plans tracked: 31
 - Completed plans: 27
-- Pending plans: phases `46-50` still await plan breakdown
+- Pending plans: Phase `46` has `4` queued plans; phases `47-50` still await plan breakdown
 
 **Recent Execution:**
 
@@ -164,5 +164,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-04-12T09:05:43.686Z
-Stopped at: Phase 46 context gathered
-Resume file: .planning/phases/46-encounter-scope-presence-and-knowledge-boundaries/46-CONTEXT.md
+Stopped at: Phase 46 planning complete
+Resume file: .planning/phases/46-encounter-scope-presence-and-knowledge-boundaries/46-01-PLAN.md
