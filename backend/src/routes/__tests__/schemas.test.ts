@@ -1861,6 +1861,208 @@ describe("canonical character schemas", () => {
   });
 });
 
+describe("phase 48 richer identity schemas", () => {
+  const richerDraft = {
+    identity: {
+      role: "npc" as const,
+      tier: "key" as const,
+      displayName: "Captain Mire",
+      canonicalStatus: "known_ip_canonical" as const,
+      baseFacts: {
+        biography: "A veteran signal-station commander.",
+        socialRole: ["warden", "captain"],
+        hardConstraints: ["Will not abandon the station"],
+      },
+      behavioralCore: {
+        motives: ["Protect the valley"],
+        pressureResponses: ["Turns colder under pressure"],
+        taboos: ["Will not lie to subordinates"],
+        attachments: ["The station crew"],
+        selfImage: "Guardian of the northern line",
+      },
+      liveDynamics: {
+        activeGoals: ["Hold the barricade"],
+        beliefDrift: ["The valley can still be saved"],
+        currentStrains: ["Running out of supplies"],
+        earnedChanges: ["Started trusting the player"],
+      },
+    },
+    profile: {
+      species: "Human",
+      gender: "Female",
+      ageText: "42",
+      appearance: "Storm-scarred uniform and frost-burned hands.",
+      backgroundSummary: "Raised inside the watchtowers of the north.",
+      personaSummary: "Commanding, clipped, and exhausted.",
+    },
+    socialContext: {
+      factionId: "faction-wardens",
+      factionName: "Wardens",
+      homeLocationId: "loc-station",
+      homeLocationName: "Signal Station",
+      currentLocationId: "loc-barricade",
+      currentLocationName: "North Barricade",
+      relationshipRefs: [],
+      socialStatus: ["Respected"],
+      originMode: "resident" as const,
+    },
+    motivations: {
+      shortTermGoals: ["Hold the barricade"],
+      longTermGoals: ["Restore order in the valley"],
+      beliefs: ["The station can still be saved"],
+      drives: ["Duty"],
+      frictions: ["Suspicious of outsiders"],
+    },
+    capabilities: {
+      traits: ["Connected"],
+      skills: [{ name: "Negotiator", tier: "Master" as const }],
+      flaws: ["Cold-blooded"],
+      specialties: ["Signal doctrine"],
+      wealthTier: "Comfortable" as const,
+    },
+    state: {
+      hp: 5,
+      conditions: [],
+      statusFlags: [],
+      activityState: "active",
+    },
+    loadout: {
+      inventorySeed: ["Signal key"],
+      equippedItemRefs: ["Officer Saber"],
+      currencyNotes: "",
+      signatureItems: ["Signal key"],
+    },
+    startConditions: {},
+    provenance: {
+      sourceKind: "import" as const,
+      importMode: "outsider" as const,
+      templateId: null,
+      archetypePrompt: null,
+      worldgenOrigin: "known-ip",
+      legacyTags: ["legacy"],
+    },
+    sourceBundle: {
+      canonSources: [
+        {
+          kind: "canon",
+          label: "Episode Guide",
+          excerpt: "Captain Mire held the station through three winters.",
+        },
+      ],
+      secondarySources: [
+        {
+          kind: "card",
+          label: "Community card",
+          excerpt: "Voice is dry, clipped, and tired.",
+        },
+      ],
+      synthesis: {
+        owner: "worldforge",
+        strategy: "canon-facts-authoritative",
+        notes: ["Merged canon history with secondary voice cues."],
+      },
+    },
+    continuity: {
+      identityInertia: "anchored",
+      protectedCore: ["Will not abandon the station"],
+      mutableSurface: ["Trust in the player"],
+      changePressureNotes: ["Major defeats can force realignment."],
+    },
+  };
+
+  it("preserves richer identity, source bundle, and continuity across draft and record schemas", () => {
+    const draftResult = characterDraftSchema.safeParse(richerDraft);
+    expect(draftResult.success).toBe(true);
+    if (draftResult.success) {
+      expect(draftResult.data.identity.baseFacts.biography).toBe(
+        "A veteran signal-station commander.",
+      );
+      expect(draftResult.data.identity.behavioralCore.motives).toEqual([
+        "Protect the valley",
+      ]);
+      expect(draftResult.data.identity.liveDynamics.activeGoals).toEqual([
+        "Hold the barricade",
+      ]);
+      expect(draftResult.data.sourceBundle?.canonSources[0]?.label).toBe("Episode Guide");
+      expect(draftResult.data.continuity?.identityInertia).toBe("anchored");
+    }
+
+    const recordResult = characterRecordSchema.safeParse({
+      ...richerDraft,
+      identity: {
+        ...richerDraft.identity,
+        id: "npc-1",
+        campaignId: "camp-1",
+      },
+    });
+    expect(recordResult.success).toBe(true);
+    if (recordResult.success) {
+      expect(recordResult.data.identity.baseFacts.hardConstraints).toEqual([
+        "Will not abandon the station",
+      ]);
+      expect(recordResult.data.sourceBundle?.secondarySources[0]?.label).toBe(
+        "Community card",
+      );
+    }
+  });
+
+  it("accepts persona template patches that target richer identity and fidelity seams", () => {
+    const result = personaTemplatePatchSchema.safeParse({
+      identity: {
+        baseFacts: {
+          biography: "Now serving the storm watch.",
+        },
+        behavioralCore: {
+          motives: ["Protect the valley"],
+        },
+        liveDynamics: {
+          activeGoals: ["Hold the barricade"],
+        },
+      },
+      sourceBundle: {
+        synthesis: {
+          notes: ["Reinforced canon wording."],
+        },
+      },
+      continuity: {
+        protectedCore: ["Will not abandon the station"],
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.identity?.baseFacts?.biography).toBe(
+        "Now serving the storm watch.",
+      );
+      expect(result.data.sourceBundle?.synthesis?.notes).toEqual([
+        "Reinforced canon wording.",
+      ]);
+      expect(result.data.continuity?.protectedCore).toEqual([
+        "Will not abandon the station",
+      ]);
+    }
+  });
+
+  it("keeps richer identity fields when draft-backed save payloads materialize compatibility aliases", () => {
+    const result = saveCharacterSchema.safeParse({
+      campaignId: "camp-1",
+      draft: richerDraft,
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.draft.identity.liveDynamics.currentStrains).toEqual([
+        "Running out of supplies",
+      ]);
+      expect(result.data.draft.sourceBundle?.synthesis?.owner).toBe("worldforge");
+      expect(result.data.draft.continuity?.mutableSurface).toEqual([
+        "Trust in the player",
+      ]);
+      expect(result.data.character.tags).toContain("Connected");
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // resolveStartingLocationSchema
 // ---------------------------------------------------------------------------
