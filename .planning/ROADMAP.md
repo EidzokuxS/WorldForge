@@ -28,7 +28,7 @@ v1.1 started as a reconciliation milestone built from the [Phase 36 handoff](/R:
 - [x] **Phase 46: Encounter Scope, Presence & Knowledge Boundaries** - Stop treating large locations like one tiny room and constrain scene knowledge to actual encounter/perception scope. (completed 2026-04-12)
 - [ ] **Phase 47: Storyteller Output Quality & Anti-Slop Prompting** - Research and tune storyteller prompting/model settings for materially better RP writing quality.
 - [x] **Phase 48: Character Identity Fidelity & Canonical Modeling** - Preserve distinctive identity/personality details in runtime character modeling, especially for imported and canonical characters. (completed 2026-04-12)
-- [ ] **Phase 49: Search Grounding & In-Game Research Semantics** - Make worldgen and live-game research ask for the right facts with focused retrieval intent.
+- [x] **Phase 49: Search Grounding & In-Game Research Semantics** - Make worldgen and live-game research ask for the right facts with focused retrieval intent. (completed 2026-04-12)
 - [ ] **Phase 50: Gameplay Text Presentation & Rich Readability** - Improve gameplay text rendering, typography, and rich-text affordances for both input and narration.
 
 ## Phase Details
@@ -213,7 +213,7 @@ Plans:
 Plans:
 - [x] 49-01-PLAN.md — Add explicit worldgen retrieval-intent planning and keep world canon on the existing `ipContext` reuse lane.
 - [x] 49-02-PLAN.md — Attach durable grounded character and power profiles to the existing Phase 48 character record lane.
-- [ ] 49-03-PLAN.md — Add bounded gameplay lookup semantics and align research settings copy with the broadened grounding scope.
+- [x] 49-03-PLAN.md — Add bounded gameplay lookup semantics and align research settings copy with the broadened grounding scope.
 
 ### Phase 50: Gameplay Text Presentation & Rich Readability
 **Goal**: Make gameplay text surfaces materially easier to read and scan through better formatting, typography, and rich-text affordances.
@@ -243,5 +243,5 @@ Plans:
 | 46. Encounter Scope, Presence & Knowledge Boundaries | 4/4 | Complete   | 2026-04-12 |
 | 47. Storyteller Output Quality & Anti-Slop Prompting | 2/3 | In Progress|  |
 | 48. Character Identity Fidelity & Canonical Modeling | 4/4 | Complete    | 2026-04-12 |
-| 49. Search Grounding & In-Game Research Semantics | 2/3 | In Progress|  |
+| 49. Search Grounding & In-Game Research Semantics | 3/3 | Complete   | 2026-04-12 |
 | 50. Gameplay Text Presentation & Rich Readability | 0/0 | Planned | — |
