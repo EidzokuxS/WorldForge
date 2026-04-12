@@ -37,6 +37,7 @@ import {
   buildStorytellerContract,
   type StorytellerPass,
 } from "./storyteller-contract.js";
+import type { StorytellerSceneMode } from "./storyteller-presets.js";
 import { deriveStartConditionEffects } from "./start-condition-runtime.js";
 import { listRecentLocationEvents } from "./location-events.js";
 import { loadAuthoritativeInventoryView } from "../inventory/authority.js";
@@ -167,10 +168,129 @@ const RUNTIME_SCENE_RULES = `Runtime narration rules:
 - Skill tiers are Novice < Skilled < Master. Higher skill tier gives better odds on relevant actions.
 - Use the terminology, concepts, and naming conventions from the world premise and lore context. If the world has specific terms for abilities, locations, or social structures, use those terms consistently instead of generic fantasy equivalents.`;
 
-function buildSystemRules(pass: StorytellerPass): string {
+const STORYTELLER_SCENE_TAG_MAP: Record<StorytellerSceneMode, string[]> = {
+  combat: ["combat", "battle", "hostile", "danger", "hazard"],
+  dialogue: ["dialogue", "social", "conversation", "talk", "negotiat", "council"],
+  horror: ["horror", "terror", "eerie", "haunted", "nightmare", "uncanny"],
+  quiet: ["quiet", "stealth", "low-activity", "observation", "ambient", "sneak"],
+  default: [],
+};
+
+const STORYTELLER_OUTCOME_COMBAT_SIGNALS = [
+  "critical",
+  "crit",
+  "strong_hit",
+  "weak_hit",
+  "hit",
+  "strike",
+  "damage",
+  "attac",
+  "blow",
+  "stab",
+  "slash",
+  "smash",
+  "knee",
+  "knock",
+];
+
+const STORYTELLER_OPENING_HORROR_PRESSURE = [
+  "under watch",
+  "clock running out",
+  "panic",
+  "pursued",
+  "threat",
+  "hostile",
+  "ambush",
+];
+
+const STORYTELLER_OPENING_QUIET_PRESSURE = ["calm", "soft", "stilled", "silent", "distant"];
+
+function normalizeText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function hasAnyTokenMatch(texts: string[], tokens: string[]): boolean {
+  return texts.some((text) => {
+    const normalized = normalizeText(text);
+    return tokens.some((token) => normalized.includes(normalizeText(token)));
+  });
+}
+
+function classifyStorytellerSceneMode(opts: {
+  sceneAssembly?: SceneAssembly;
+  actionResult?: AssembleOptions["actionResult"];
+  playerAction?: string;
+}): StorytellerSceneMode {
+  const outcome = opts.actionResult?.outcome ?? "";
+  const playerAction = opts.playerAction ?? "";
+  const tags = opts.sceneAssembly?.currentScene?.tags?.map(normalizeText) ?? [];
+  const sceneEffects = opts.sceneAssembly?.sceneEffects ?? [];
+  const recentContext = opts.sceneAssembly?.recentContext?.map((entry) => entry.summary) ?? [];
+  const hintSignals = opts.sceneAssembly?.awareness.hintSignals ?? [];
+  const openingPressure = opts.sceneAssembly?.openingState?.entryPressure ?? [];
+  const openingContext = [
+    opts.sceneAssembly?.openingState?.immediateSituation ?? "",
+    ...(opts.sceneAssembly?.openingState?.sceneContextLines ?? []),
+    ...(opts.sceneAssembly?.openingState?.promptLines ?? []),
+  ];
+
+  const factText = [
+    outcome,
+    playerAction,
+    ...sceneEffects.map((effect) => `${effect.summary} ${effect.causalDetail ?? ""}`),
+    ...recentContext,
+    ...hintSignals,
+    ...openingContext,
+    ...openingPressure,
+  ];
+
+  // Fixed-priority, bounded watermark style: explicit combat pass first from outcome/effects.
+  if (hasAnyTokenMatch([outcome], STORYTELLER_OUTCOME_COMBAT_SIGNALS)) {
+    return "combat";
+  }
+
+  const hasPhysicalEffect = sceneEffects.some((effect) =>
+    effect.kind === "state_change" &&
+    hasAnyTokenMatch([effect.summary, effect.causalDetail ?? ""], ["damage", "hp", "hit", "strike", "attack", "blow"]),
+  );
+  if (hasPhysicalEffect) {
+    return "combat";
+  }
+
+  // Dialogue and combat pressure from direct player/action intent and visible scene markers.
+  if (hasAnyTokenMatch([playerAction], ["say", "talk", "ask", "reply", "negotiat", "dialogu"])) {
+    return "dialogue";
+  }
+
+  if (hasAnyTokenMatch(tags, STORYTELLER_SCENE_TAG_MAP.dialogue)) {
+    return "dialogue";
+  }
+
+  if (hasAnyTokenMatch([...sceneEffects.map((effect) => effect.summary), ...recentContext], STORYTELLER_SCENE_TAG_MAP.horror)) {
+    return "horror";
+  }
+
+  if (hasAnyTokenMatch(openingPressure, STORYTELLER_OPENING_HORROR_PRESSURE)) {
+    return "horror";
+  }
+
+  if (
+    hasAnyTokenMatch([...tags, ...openingPressure, ...factText], STORYTELLER_SCENE_TAG_MAP.quiet) ||
+    hasAnyTokenMatch([...openingPressure, ...factText], STORYTELLER_OPENING_QUIET_PRESSURE)
+  ) {
+    return "quiet";
+  }
+
+  return "default";
+}
+
+function buildSystemRules(
+  pass: StorytellerPass,
+  sceneMode: StorytellerSceneMode = "default",
+): string {
   return [
     OUTPUT_RULES,
-    buildStorytellerContract({ pass }),
+    buildStorytellerContract({ pass, sceneMode, includeGlmOverlay: true }),
     RUNTIME_SCENE_RULES,
   ].join("\n\n");
 }
@@ -908,7 +1028,12 @@ export async function assemblePrompt(
   const budgets = allocateBudgets(contextWindow);
   const responseHeadroom = budgets.responseHeadroom ?? Math.floor(contextWindow * 0.25);
   const effectiveMax = contextWindow - responseHeadroom;
-  const systemRules = buildSystemRules(storytellerPass);
+  const storytellerSceneMode = classifyStorytellerSceneMode({
+    sceneAssembly,
+    actionResult,
+    playerAction,
+  });
+  const systemRules = buildSystemRules(storytellerPass, storytellerSceneMode);
 
   // 1. System rules (never truncate)
   const systemSection: PromptSection = {
@@ -1095,6 +1220,11 @@ export async function assembleFinalNarrationPrompt(options: {
     playerAction: options.playerAction,
     judgeRole: options.judgeRole,
   });
+  const storytellerSceneMode = classifyStorytellerSceneMode({
+    sceneAssembly: options.sceneAssembly,
+    actionResult: options.actionResult,
+    playerAction: options.playerAction,
+  });
 
   const prompt = [
     assembledBase.formatted,
@@ -1132,7 +1262,11 @@ Keep the output bounded to what the player can perceive in this scene.`,
   ].join("\n\n");
 
   return {
-    system: buildStorytellerContract({ pass: "final-visible" }),
+    system: buildStorytellerContract({
+      pass: "final-visible",
+      sceneMode: storytellerSceneMode,
+      includeGlmOverlay: true,
+    }),
     prompt,
     assembledBase,
   };

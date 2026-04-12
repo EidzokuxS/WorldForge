@@ -27,6 +27,7 @@ import {
   assemblePrompt,
   type AssembleOptions,
 } from "../prompt-assembler.js";
+import type { SceneAssembly } from "../scene-assembly.js";
 import { readCampaignConfig, getChatHistory } from "../../campaign/index.js";
 import { getDb } from "../../db/index.js";
 import { listRecentLocationEvents } from "../location-events.js";
@@ -101,6 +102,58 @@ const defaultOptions: AssembleOptions = {
   campaignId: "test-campaign-123",
   contextWindow: 8192,
 };
+
+const baseAwarenessSnapshot = {
+  contract: {
+    clear: "Full present-scene actor context. Identity and direct interaction are justified.",
+    hint: "Bounded indirect presence signal only. No identity leakage in player-facing surfaces.",
+    none: "Outside encounter scope for this consumer. Omit from player-facing prompt surfaces.",
+  },
+  byNpcName: {},
+  clearNpcNames: [],
+  hintSignals: [],
+};
+
+const createSceneAssembly = (
+  sceneModeHints: {
+  tags?: string[];
+  sceneEffects?: SceneAssembly["sceneEffects"];
+    openingState?: {
+      active: boolean;
+      entryPressure?: string[];
+      immediateSituation?: string | null;
+      promptLines?: string[];
+      sceneContextLines?: string[];
+    } | null;
+    playerAction?: string;
+  } = {},
+) => ({
+  openingScene: false,
+  openingState: sceneModeHints.openingState
+    ? {
+      active: sceneModeHints.openingState.active,
+      locationId: "scene-1",
+      locationName: "Scenario Hall",
+      arrivalMode: null,
+      startingVisibility: "noticed",
+      immediateSituation: sceneModeHints.openingState.immediateSituation ?? null,
+      entryPressure: sceneModeHints.openingState.entryPressure ?? [],
+      promptLines: sceneModeHints.openingState.promptLines ?? [],
+      sceneContextLines: sceneModeHints.openingState.sceneContextLines ?? [],
+    }
+    : null,
+  currentScene: {
+    id: "scene-1",
+    name: "Scenario Hall",
+    description: "A tense platform with no clear boundaries.",
+    tags: sceneModeHints.tags ?? [],
+  },
+  presentNpcNames: [],
+  awareness: baseAwarenessSnapshot,
+  recentContext: [],
+  sceneEffects: (sceneModeHints.sceneEffects as SceneAssembly["sceneEffects"]) ?? [],
+  playerPerceivableConsequences: [],
+});
 
 describe("assemblePrompt", () => {
   beforeEach(() => {
@@ -1274,5 +1327,118 @@ describe("assemblePrompt", () => {
     expect(systemRules!.content).not.toContain(
       "All characters, items, locations, and factions use a tag-based system",
     );
+  });
+
+  it.each([
+    {
+      label: "combat",
+      sceneAssembly: createSceneAssembly({
+        tags: ["combat"],
+      }),
+      actionResult: {
+        chance: 95,
+        roll: 19,
+        outcome: "strong_hit",
+        reasoning: "A decisive strike lands.",
+      },
+      expectedLine: "Combat mode:",
+      expectedBaseline: "Narration length is bounded.",
+    },
+    {
+      label: "dialogue",
+      sceneAssembly: createSceneAssembly({
+        tags: ["dialogue"],
+      }),
+      playerAction: "I say we should negotiate and talk.",
+      expectedLine: "Dialogue mode:",
+      expectedBaseline: "Narration length is bounded.",
+    },
+    {
+      label: "quiet",
+      sceneAssembly: createSceneAssembly({
+        tags: ["quiet"],
+      }),
+      playerAction: "I wait and watch the lanterns fade.",
+      expectedLine: "quiet scene:",
+      expectedBaseline: "Concrete nouns and actions are mandatory.",
+    },
+    {
+      label: "horror",
+      sceneAssembly: createSceneAssembly({
+        openingState: {
+          active: true,
+          entryPressure: ["under watch", "clock running out"],
+          immediateSituation: "A pressure shift gathers above the stairs.",
+          promptLines: ["Opening Pressure: under watch, clocks failing"],
+        },
+      }),
+      actionResult: {
+        chance: 55,
+        roll: 55,
+        outcome: "neutral",
+        reasoning: "The environment is unnerving.",
+      },
+      expectedLine: "Horror mode:",
+      expectedBaseline: "Narration length is bounded.",
+    },
+  ])(
+    "applies scene-adaptive $label guidance while keeping anti-slop baseline",
+    async ({ sceneAssembly, playerAction, actionResult, expectedLine, expectedBaseline }) => {
+      const result = await assemblePrompt({
+        ...defaultOptions,
+        storytellerPass: "hidden-tool-driving",
+        sceneAssembly,
+        playerAction: playerAction as string | undefined,
+        actionResult: actionResult as AssembleOptions["actionResult"] | undefined,
+      });
+
+      const systemRules = result.sections.find((section) => section.name === "SYSTEM RULES")?.content ?? "";
+
+      expect(systemRules).toContain(expectedLine);
+      expect(systemRules).toContain(expectedBaseline);
+      expect(systemRules).toContain("Keep anti-repetition");
+      expect(systemRules.toLowerCase()).toContain("do not claim knowledge beyond player perception");
+    },
+  );
+
+  it("injects the same bounded GLM preset into hidden and final-visible systems", async () => {
+    const hiddenPrompt = await assemblePrompt({
+      ...defaultOptions,
+      storytellerPass: "hidden-tool-driving",
+      sceneAssembly: createSceneAssembly({
+        tags: ["combat"],
+      }),
+      actionResult: {
+        chance: 80,
+        roll: 20,
+        outcome: "critical",
+        reasoning: "A critical blow lands.",
+      },
+      playerAction: "I launch a flurry of blows",
+    });
+
+    const finalPrompt = await assembleFinalNarrationPrompt({
+      campaignId: defaultOptions.campaignId,
+      contextWindow: defaultOptions.contextWindow,
+      sceneAssembly: createSceneAssembly({
+        tags: ["combat"],
+        openingState: {
+          active: false,
+        },
+      }),
+      actionResult: {
+        chance: 80,
+        roll: 20,
+        outcome: "critical",
+        reasoning: "A critical blow lands.",
+      },
+      playerAction: "I launch a flurry of blows",
+    });
+
+    expect(hiddenPrompt.sections.find((section) => section.name === "SYSTEM RULES")?.content).toContain(
+      "GLM overlay: short, concrete turns are required.",
+    );
+    expect(finalPrompt.system).toContain("GLM visible pass overlay: stay tightly bounded and concrete.");
+    expect(finalPrompt.system).toContain("Narration length is bounded.");
   });
 });
