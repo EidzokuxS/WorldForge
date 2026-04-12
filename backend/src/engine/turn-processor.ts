@@ -744,7 +744,10 @@ export async function* processTurn(
 
   async function runHiddenPassWithModel(provider: ProviderConfig): Promise<TurnEvent[]> {
     const hiddenResult = streamText({
-      model: createModel(provider),
+      model: createModel(provider, {
+        role: "storyteller",
+        familyHint: "glm",
+      }),
       system: hiddenSystemPrompt,
       messages: storyMessages,
       tools,
@@ -908,7 +911,10 @@ export async function* processTurn(
 
   async function runFinalNarrationWithModel(provider: ProviderConfig) {
     return generateText({
-      model: createModel(provider),
+      model: createModel(provider, {
+        role: "storyteller",
+        familyHint: "glm",
+      }),
       system: finalNarrationPrompt.system,
       prompt: finalNarrationPrompt.prompt,
       temperature: storytellerTemperature,
@@ -1055,7 +1061,10 @@ export async function* processOpeningScene(
 
   async function runOpeningNarration(provider: ProviderConfig) {
     return generateText({
-      model: createModel(provider),
+      model: createModel(provider, {
+        role: "storyteller",
+        familyHint: "glm",
+      }),
       system: finalNarrationPrompt.system,
       prompt: finalNarrationPrompt.prompt,
       temperature: storytellerTemperature,

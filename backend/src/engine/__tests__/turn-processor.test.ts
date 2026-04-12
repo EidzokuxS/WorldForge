@@ -81,7 +81,12 @@ vi.mock("../../ai/provider-registry.js", () => ({
   createModel: vi.fn().mockReturnValue("mock-model"),
 }));
 
-import { processTurn, type HiddenTurnSummary, type TurnEvent } from "../turn-processor.js";
+import {
+  processTurn,
+  processOpeningScene,
+  type HiddenTurnSummary,
+  type TurnEvent,
+} from "../turn-processor.js";
 import { callOracle } from "../oracle.js";
 import {
   assembleFinalNarrationPrompt,
@@ -97,8 +102,11 @@ import {
 import { createStorytellerTools } from "../tool-schemas.js";
 import { generateText, streamText } from "ai";
 import { safeGenerateObject } from "../../ai/generate-object-safe.js";
+import { createModel } from "../../ai/provider-registry.js";
 import { getDb } from "../../db/index.js";
 import { players, locations, locationEdges, npcs, items } from "../../db/schema.js";
+
+const mockedCreateModel = vi.mocked(createModel);
 
 // -- Helpers ------------------------------------------------------------------
 
@@ -536,6 +544,24 @@ describe("processTurn", () => {
     const narrativeEvents = events.filter((e) => e.type === "narrative");
     expect(narrativeEvents).toHaveLength(1);
     expect(narrativeEvents[0]!.data).toEqual({ text: "The goblin falls." });
+  });
+
+  it("uses storyteller model role and GLM family for hidden and final narration passes", async () => {
+    setupMocks({
+      streamParts: [{ type: "text-delta", text: "A blade cuts the air." }],
+    });
+
+    await collectEvents(processTurn(createTestOptions()));
+
+    const storytellerCalls = mockedCreateModel.mock.calls.filter(
+      ([, options]) => options?.role === "storyteller" && options?.familyHint === "glm",
+    );
+
+    expect(storytellerCalls).toHaveLength(2);
+
+    for (const [providerArg] of storytellerCalls) {
+      expect(providerArg).toMatchObject({ id: "test", name: "Test", model: "test-model" });
+    }
   });
 
   it("defers visible narration until authoritative scene settlement", async () => {
@@ -2080,5 +2106,56 @@ describe("processTurn", () => {
         null,
       );
     });
+  });
+});
+
+describe("processOpeningScene", () => {
+  it("uses storyteller model role and GLM family for opening narration", async () => {
+    const playerRow = createOpeningPlayerRow();
+    (getDb as Mock).mockReturnValue(
+      createEntityLookupDb({
+        playerRow,
+        locationRows: [
+          {
+            id: "loc-1",
+            campaignId: CAMPAIGN_ID,
+            name: "Town Square",
+            description: "A welcoming square with low conversation.",
+            tags: '["urban"]',
+            connectedTo: "[]",
+          },
+        ],
+      }),
+    );
+    (readCampaignConfig as Mock).mockReturnValue({ currentTick: 5 });
+    (assembleFinalNarrationPrompt as Mock).mockResolvedValue({
+      system: "Opening visible system",
+      prompt: "Opening visible prompt",
+      assembledBase: { formatted: "Opening prompt", sections: [], totalTokens: 42, budgetUsed: 4 },
+    });
+    (generateText as Mock).mockResolvedValue({ text: "Lanternlight spills into the market." });
+
+    const events = await collectEvents(
+      processOpeningScene({
+        campaignId: CAMPAIGN_ID,
+        storytellerProvider: {
+          id: "test",
+          name: "Test",
+          baseUrl: "http://localhost",
+          apiKey: "key",
+          model: "test-model",
+        },
+        storytellerTemperature: 0.8,
+        storytellerMaxTokens: 1600,
+      }),
+    );
+
+    expect(mockedCreateModel).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "test", name: "Test", model: "test-model" }),
+      { role: "storyteller", familyHint: "glm" },
+    );
+    expect(events).toEqual(
+      expect.arrayContaining([{ type: "narrative", data: { text: "Lanternlight spills into the market." } }]),
+    );
   });
 });
