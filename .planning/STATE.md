@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-11)
 
 **Core value:** The LLM is the narrator, never the engine. Mechanical truth stays in backend code so outcomes remain consistent, inspectable, and recoverable.
-**Current focus:** Phase 38 — authoritative-inventory-and-equipment-state
+**Current focus:** v1.1 milestone closeout verification
 
 ## Current Position
 
-Phase: 38 (authoritative-inventory-and-equipment-state) — EXECUTING
-Plan: 3 of 3
-Status: Phase complete — ready for verification
+Phase: milestone closeout (v1.1)
+Plan: deferred manual verification
+Status: All phases complete — final closeout checks pending
 Last activity: 2026-04-12
 
 Progress: [██████████] 100%
