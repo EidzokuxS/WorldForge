@@ -17,7 +17,7 @@ v1.1 is a reconciliation milestone built from the [Phase 36 handoff](/R:/Project
 - Decimal phases remain reserved for urgent insertions between planned integers.
 
 - [x] **Phase 37: Campaign-Loaded Gameplay Transport** - Remove active-session coupling from gameplay routes. (completed 2026-04-08)
-- [ ] **Phase 38: Authoritative Inventory & Equipment State** - Collapse runtime item truth onto one persistence model.
+- [x] **Phase 38: Authoritative Inventory & Equipment State** - Collapse runtime item truth onto one persistence model. (completed 2026-04-12)
 - [x] **Phase 39: Honest Turn Boundary, Retry & Undo** - Make the player-visible turn boundary match the authoritative rollback boundary. (completed 2026-04-09)
 - [x] **Phase 40: Live Reflection & Progression Triggers** - Turn dormant reflection scaffolding into observable runtime behavior. (completed 2026-04-10)
 - [x] **Phase 41: Checkpoint-Complete Simulation Restore** - Restore full campaign runtime state, including simulation metadata and post-turn world mutations. (completed 2026-04-11)
@@ -52,7 +52,7 @@ Plans:
 Plans:
 - [x] 38-01-PLAN.md — Define authoritative item-row equipment metadata, legacy backfill, and reload/restore migration tests.
 - [x] 38-02-PLAN.md — Rewire backend prompt, world, and compatibility readers to the shared authoritative inventory seam.
-- [ ] 38-03-PLAN.md — Rewire frontend world parsing and `/game` inventory/equipment rendering to the authoritative backend contract.
+- [x] 38-03-PLAN.md — Rewire frontend world parsing and `/game` inventory/equipment rendering to the authoritative backend contract.
 
 ### Phase 39: Honest Turn Boundary, Retry & Undo
 **Goal**: The turn the player sees as complete is the same authoritative world boundary used by retry and undo.
@@ -144,7 +144,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 37. Campaign-Loaded Gameplay Transport | 2/2 | Complete   | 2026-04-08 |
-| 38. Authoritative Inventory & Equipment State | 2/3 | In Progress|  |
+| 38. Authoritative Inventory & Equipment State | 3/3 | Complete   | 2026-04-12 |
 | 39. Honest Turn Boundary, Retry & Undo | 3/3 | Complete    | 2026-04-09 |
 | 40. Live Reflection & Progression Triggers | 3/3 | Complete   | 2026-04-10 |
 | 41. Checkpoint-Complete Simulation Restore | 2/2 | Complete | 2026-04-11 |
