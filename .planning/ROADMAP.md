@@ -194,9 +194,12 @@ Plans:
   1. Key/canonical characters retain distinctive personality, motives, and behavioral constraints instead of flattening into generic summaries.
   2. Imported/card-based characters preserve salient identity details that later influence goals, planning, and reactions.
   3. Runtime character structure captures the information needed for believable behavior, not just creation-time flavor.
-**Plans**: 0 plans
+**Plans**: 4 plans
 Plans:
-- [ ] TBD (run `$gsd-plan-phase 48` to break down)
+- [ ] 48-01-PLAN.md — Extend the shared character lane with richer identity layers, route schema/materialization contracts, and compatibility-safe hydration.
+- [ ] 48-02-PLAN.md — Rebuild generation/import/template seams and lock parse/save/load/world payload character contracts to the richer identity model.
+- [ ] 48-03-PLAN.md — Rewire prompt assembly, NPC runtime, and reflection to consume richer identity truth with continuity boundaries.
+- [ ] 48-04-PLAN.md — Preserve richer identity through bounded frontend draft/editor seams without a major UI redesign.
 
 ### Phase 49: Search Grounding & In-Game Research Semantics
 **Goal**: Make worldgen and live gameplay research ask for the right facts with focused retrieval intent rather than vague blended searches.
@@ -237,6 +240,6 @@ Plans:
 | 45. Authoritative Scene Assembly & Start-of-Play Runtime | 3/3 | Complete    | 2026-04-12 |
 | 46. Encounter Scope, Presence & Knowledge Boundaries | 4/4 | Complete   | 2026-04-12 |
 | 47. Storyteller Output Quality & Anti-Slop Prompting | 2/3 | In Progress|  |
-| 48. Character Identity Fidelity & Canonical Modeling | 0/0 | Planned | — |
+| 48. Character Identity Fidelity & Canonical Modeling | 0/4 | Planned | — |
 | 49. Search Grounding & In-Game Research Semantics | 0/0 | Planned | — |
 | 50. Gameplay Text Presentation & Rich Readability | 0/0 | Planned | — |
