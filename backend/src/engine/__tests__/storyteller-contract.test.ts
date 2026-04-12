@@ -5,6 +5,40 @@ import {
   STORYTELLER_TOOL_SUPPORT_RULES,
   buildStorytellerContract,
 } from "../storyteller-contract.js";
+import {
+  buildStorytellerBaselinePreset,
+  buildStorytellerGlmOverlay,
+  type StorytellerSceneMode,
+  type StorytellerPass,
+} from "../storyteller-presets.js";
+
+const REJECTED_PATTERNS = [
+  /\{\{[^}]+\}\}/,
+  /\{\$[^}]+\}/,
+  /{{\s*setvar\b/i,
+  /\{\{\s*if\b/i,
+  /\bignore\s+all\s+prior\s+instructions\b/i,
+  /\bact\s+as\s+someone\b/i,
+  /\bYOU\s+ARE\s+Celia\b/i,
+  /\bpersona shell\b/i,
+  /jailbreak/i,
+];
+
+function assertNoRejectedMotifs(value: string): void {
+  for (const rejected of REJECTED_PATTERNS) {
+    expect(rejected.test(value)).toBe(false);
+  }
+}
+
+function buildContractPresetSample(
+  pass: StorytellerPass,
+  sceneMode: StorytellerSceneMode = "default",
+): string {
+  return [
+    buildStorytellerBaselinePreset({ pass, sceneMode }),
+    buildStorytellerGlmOverlay({ pass, sceneMode }),
+  ].join("\n\n");
+}
 
 describe("storyteller-contract", () => {
   it("separates worldview, canonical context, and tool support into distinct blocks", () => {
@@ -36,5 +70,17 @@ describe("storyteller-contract", () => {
     expect(STORYTELLER_CONTEXT_RULES).not.toContain("offer_quick_actions");
     expect(STORYTELLER_WORLD_RULES).not.toContain("light hit = -1");
     expect(STORYTELLER_CONTEXT_RULES).not.toContain("light hit = -1");
+  });
+
+  it("produces a preset-style seam for hidden and final passes without banned artifacts", () => {
+    const hidden = buildContractPresetSample("hidden-tool-driving");
+    const final = buildContractPresetSample("final-visible", "horror");
+
+    expect(hidden).toContain("simulate scene-state");
+    expect(hidden).toContain("GLM");
+    expect(final).toContain("visible");
+
+    assertNoRejectedMotifs(hidden);
+    assertNoRejectedMotifs(final);
   });
 });
