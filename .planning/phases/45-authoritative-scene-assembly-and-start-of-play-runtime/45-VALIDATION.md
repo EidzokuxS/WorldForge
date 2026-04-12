@@ -30,7 +30,7 @@ created: 2026-04-12
 | Suite | Purpose | Automated Command | Estimated Runtime |
 |-------|---------|-------------------|-------------------|
 | `phase-45-backend-smoke` | turn ordering, scene assembly, duplicate suppression, and rollback-safe narration sequencing | `npm --prefix backend exec vitest run src/engine/__tests__/turn-processor.test.ts src/engine/__tests__/prompt-assembler.test.ts src/routes/__tests__/chat.test.ts` | ~20s |
-| `phase-45-frontend-smoke` | `/game` opening surface and narrative presentation contract | `npm --prefix frontend exec vitest run components/game/__tests__/narrative-log.test.tsx app/game/__tests__/page.test.tsx` | ~12s |
+| `phase-45-frontend-smoke` | `/game` opening surface, active opening-generation path, and narrative presentation contract | `npm --prefix frontend exec vitest run components/game/__tests__/narrative-log.test.tsx app/game/__tests__/page.test.tsx` | ~12s |
 | `phase-45-full-smoke` | backend + frontend scene contract together | `npm --prefix backend exec vitest run src/engine/__tests__/turn-processor.test.ts src/engine/__tests__/prompt-assembler.test.ts src/routes/__tests__/chat.test.ts && npm --prefix frontend exec vitest run components/game/__tests__/narrative-log.test.tsx app/game/__tests__/page.test.tsx` | ~35s |
 
 ---
@@ -53,6 +53,7 @@ created: 2026-04-12
 | 45-02-01 | 02 | 2 | SCEN-01 | integration | `npm --prefix backend exec vitest run src/engine/__tests__/turn-processor.test.ts src/routes/__tests__/chat.test.ts` | ✅ | ⬜ pending |
 | 45-02-02 | 02 | 2 | SCEN-01 | integration | `npm --prefix backend exec vitest run src/engine/__tests__/prompt-assembler.test.ts src/engine/__tests__/turn-processor.test.ts` | ✅ | ⬜ pending |
 | 45-03-01 | 03 | 3 | SCEN-01 | regression | `npm --prefix frontend exec vitest run components/game/__tests__/narrative-log.test.tsx app/game/__tests__/page.test.tsx` | ✅ | ⬜ pending |
+| 45-03-02 | 03 | 3 | SCEN-01 | integration | `npm --prefix frontend exec vitest run app/game/__tests__/page.test.tsx -t "requests opening scene when campaign has no assistant messages"` | ✅ | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -62,6 +63,7 @@ created: 2026-04-12
 
 - [ ] `turn-processor.test.ts` gets explicit coverage for deferred visible narration and duplicate-block suppression.
 - [ ] `narrative-log.test.tsx` and `page.test.tsx` get explicit coverage for “premise is not opening narration”.
+- [ ] Opening-scene generation has explicit regression coverage so removing premise fallback cannot degrade into an empty log with no backend request.
 - [ ] If a dedicated `scene-assembly.ts` helper is introduced, either add a direct unit test or cover it transitively through `turn-processor.test.ts`.
 
 ---
@@ -73,6 +75,7 @@ created: 2026-04-12
 | First playable scene feels runtime-grounded rather than like a lore dump | SCEN-01 | Requires product judgment on actual prose feel | Start a fresh campaign, land on `/game`, and verify the first visible scene text reads like a concrete scene at a place under pressure, not a recap of the world premise. |
 | Same-turn local reactions visibly line up with what the player perceives | SCEN-01 | Needs live feel across player action and local NPC response | Trigger a scene with a present key NPC and confirm the resulting narration reads like one settled scene instead of “your action happened, then the world updated later”. |
 | Catastrophic perceivable spillover can enter scene narration without omniscient exposition | SCEN-01 | Hard to prove from narrow unit tests alone | In a scenario with a clearly perceivable neighboring event, confirm the scene text includes the perceivable consequence without acting like the player magically knows the unseen details. |
+| Long hidden-pass/opening generation still reads as intentional progress rather than a frozen screen | SCEN-01 | Requires UX judgment on quality-first latency handling | Force a slower hidden/opening pass and confirm `/game` shows explicit scene-settling/opening progress copy instead of a blank or apparently broken state. |
 
 ---
 
