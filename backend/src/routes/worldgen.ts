@@ -1,6 +1,12 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import type { IpResearchContext, PremiseDivergence } from "@worldforge/shared";
+import type { z } from "zod";
+import type {
+  CharacterDraft,
+  CharacterTier,
+  IpResearchContext,
+  PremiseDivergence,
+} from "@worldforge/shared";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import type { SearchConfig } from "../lib/web-search.js";
 import {
@@ -29,6 +35,7 @@ import {
   suggestSingleSeed,
   suggestWorldSeeds,
 } from "../worldgen/index.js";
+import type { WorldScaffold } from "../worldgen/types.js";
 import { parseBody, requireActiveCampaign, requireLoadedCampaign, resolveGenerator, resolveEmbedder } from "./helpers.js";
 import { resolveFallbackProvider } from "../ai/with-model-fallback.js";
 import { createLogger } from "../lib/index.js";
@@ -60,6 +67,62 @@ import { worldbookLibraryImportSchema } from "./schemas.js";
 import { evaluateResearchSufficiency } from "../worldgen/ip-researcher.js";
 
 const app = new Hono();
+
+type SaveEditsScaffold = z.infer<typeof saveEditsSchema>["scaffold"];
+
+function normalizeCharacterTier(tier: string): CharacterTier {
+  switch (tier) {
+    case "temporary":
+    case "persistent":
+    case "key":
+    case "supporting":
+      return tier;
+    default:
+      return "supporting";
+  }
+}
+
+function normalizeSavedScaffold(scaffold: SaveEditsScaffold): WorldScaffold {
+  return {
+    refinedPremise: scaffold.refinedPremise,
+    locations: scaffold.locations.map((location) => ({
+      ...location,
+      tags: [...location.tags],
+      connectedTo: [...location.connectedTo],
+    })),
+    factions: scaffold.factions.map((faction) => ({
+      ...faction,
+      tags: [...faction.tags],
+      goals: [...faction.goals],
+      assets: [...faction.assets],
+      territoryNames: [...faction.territoryNames],
+    })),
+    npcs: scaffold.npcs.map((npc): WorldScaffold["npcs"][number] => ({
+      name: npc.name,
+      persona: npc.persona,
+      tags: [...npc.tags],
+      goals: {
+        shortTerm: [...npc.goals.shortTerm],
+        longTerm: [...npc.goals.longTerm],
+      },
+      locationName: npc.locationName,
+      factionName: npc.factionName ?? null,
+      tier: npc.tier,
+      draft: npc.draft
+        ? ({
+            ...npc.draft,
+            identity: {
+              ...npc.draft.identity,
+              tier: normalizeCharacterTier(npc.draft.identity.tier),
+            },
+          } satisfies CharacterDraft)
+        : undefined,
+    })),
+    loreCards: scaffold.loreCards.map((card) => ({
+      ...card,
+    })),
+  };
+}
 
 app.get("/debug/progress", (c) => {
   return c.json(listWorldgenOperations());
@@ -449,9 +512,9 @@ app.post("/regenerate-section", async (c) => {
 
     const { section } = result.data;
     const searchConfig = buildResearchSearchConfig(gen.resolved);
-    const refinementPremise = result.data.refinedPremise ?? campaign.premise;
 
     if (ipContext && section !== "premise") {
+      const refinementPremise = result.data.refinedPremise;
       const enrichedIpContext = await evaluateResearchSufficiency(
         ipContext,
         section,
@@ -498,7 +561,8 @@ app.post("/save-edits", async (c) => {
     const result = await parseBody(c, saveEditsSchema);
     if ("response" in result) return result.response;
 
-    const { campaignId, scaffold } = result.data;
+    const { campaignId } = result.data;
+    const scaffold = normalizeSavedScaffold(result.data.scaffold);
     const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
 
