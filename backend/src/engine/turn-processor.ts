@@ -397,6 +397,253 @@ export function sanitizeNarrative(raw: string): string {
   return text.trim();
 }
 
+type VisibleNarrationFailure =
+  | "repeated_lead"
+  | "residual_leak"
+  | "instruction_echo"
+  | "slop_cluster";
+
+const HIGH_SIGNAL_SLOP_PATTERNS: ReadonlyArray<{ code: string; pattern: RegExp }> = [
+  {
+    code: "announcement_opener",
+    pattern:
+      /\b(?:here'?s the thing|the truth is|let me be clear|make no mistake|let that sink in)\b/iu,
+  },
+  {
+    code: "binary_contrast",
+    pattern:
+      /\b(?:the answer|the problem|the question|it(?:'s| is)|this)\s+(?:isn['’]?t|is not)\b[^.!?\n]{0,120}[.!?]\s*(?:it(?:'s| is)|but)\b/iu,
+  },
+  {
+    code: "rhetorical_setup",
+    pattern: /\b(?:think about it|here'?s what i mean|what if)\b/iu,
+  },
+];
+
+function applyVisibleNarrationFilters(raw: string): string {
+  return collapseRepeatedNarrationBlocks(sanitizeNarrative(raw));
+}
+
+function normalizeNarrationFingerprint(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractParagraphs(text: string): string[] {
+  return text
+    .split(/\n\s*\n/g)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+}
+
+function extractLeadSentence(paragraph: string): string {
+  const firstSentence = paragraph.match(/^(.{1,220}?[.!?…])(?:\s|$)/u)?.[1] ?? paragraph;
+  return normalizeNarrationFingerprint(firstSentence).slice(0, 180);
+}
+
+function hasRepeatedLead(text: string): boolean {
+  const paragraphs = extractParagraphs(text);
+  if (paragraphs.length < 2) {
+    return false;
+  }
+
+  const firstLead = extractLeadSentence(paragraphs[0] ?? "");
+  if (!firstLead || firstLead.length < 20) {
+    return false;
+  }
+
+  return paragraphs
+    .slice(1)
+    .some((paragraph) => extractLeadSentence(paragraph) === firstLead);
+}
+
+function hasResidualNarrativeLeak(text: string): boolean {
+  if (LEAKED_HEADERS.some((header) => text.includes(header))) {
+    return true;
+  }
+
+  return TOOL_CALL_LEAK_PATTERNS.some((pattern) => {
+    const probe = new RegExp(pattern.source, pattern.flags);
+    return probe.test(text);
+  });
+}
+
+function extractInstructionEchoCandidates(...sources: Array<string | undefined>): string[] {
+  return sources
+    .flatMap((source) => (source ?? "").split(/\n+/))
+    .map((line) => line.replace(/^[-*\d.)\s]+/, "").trim())
+    .filter((line) => line.length >= 24 && line.length <= 220)
+    .filter((line) =>
+      /^(?:do not|don't|never|keep|prefer|use|advance|write|stay|avoid|limit|narrate|describe|let)\b/i.test(
+        line,
+      ),
+    );
+}
+
+function hasInstructionEcho(
+  text: string,
+  promptContext: { system: string; prompt: string },
+): boolean {
+  const normalizedText = normalizeNarrationFingerprint(text);
+  if (!normalizedText) {
+    return false;
+  }
+
+  return extractInstructionEchoCandidates(promptContext.system, promptContext.prompt).some(
+    (candidate) => {
+      const normalizedCandidate = normalizeNarrationFingerprint(candidate);
+      return normalizedCandidate.length >= 24 && normalizedText.includes(normalizedCandidate);
+    },
+  );
+}
+
+function hasHighSignalSlopCluster(text: string): boolean {
+  const matchCount = HIGH_SIGNAL_SLOP_PATTERNS.reduce((count, { pattern }) => {
+    const probe = new RegExp(pattern.source, pattern.flags);
+    return count + (probe.test(text) ? 1 : 0);
+  }, 0);
+  return matchCount >= 2;
+}
+
+function detectVisibleNarrationFailures(
+  text: string,
+  promptContext: { system: string; prompt: string },
+): VisibleNarrationFailure[] {
+  const failures: VisibleNarrationFailure[] = [];
+
+  if (!text) {
+    failures.push("residual_leak");
+    return failures;
+  }
+
+  if (hasRepeatedLead(text)) {
+    failures.push("repeated_lead");
+  }
+  if (hasResidualNarrativeLeak(text)) {
+    failures.push("residual_leak");
+  }
+  if (hasInstructionEcho(text, promptContext)) {
+    failures.push("instruction_echo");
+  }
+  if (hasHighSignalSlopCluster(text)) {
+    failures.push("slop_cluster");
+  }
+
+  return failures;
+}
+
+function buildVisibleNarrationRetryAddendum(
+  failures: readonly VisibleNarrationFailure[],
+): string {
+  const guidance: string[] = [
+    "Reissue the final visible narration only once.",
+    "Do not restart the scene from the top.",
+  ];
+
+  if (failures.includes("repeated_lead")) {
+    guidance.push("Do not repeat the opening beat or first sentence in later paragraphs.");
+  }
+  if (failures.includes("residual_leak")) {
+    guidance.push("Do not include headers, bracketed sections, or tool-call syntax in visible prose.");
+  }
+  if (failures.includes("instruction_echo")) {
+    guidance.push("Do not quote or paraphrase narrator instructions inside the visible prose.");
+  }
+  if (failures.includes("slop_cluster")) {
+    guidance.push("Cut announcement openers, rhetorical setups, and binary contrast phrasing.");
+  }
+
+  return `\n\n[FINAL VISIBLE PASS CORRECTION]\n${guidance.map((line) => `- ${line}`).join("\n")}`;
+}
+
+function scoreVisibleNarrationCandidate(
+  text: string,
+  failures: readonly VisibleNarrationFailure[],
+): number {
+  return text.length - failures.length * 1000;
+}
+
+async function runVisibleNarrationWithGuard(args: {
+  label: "final" | "opening";
+  provider: ProviderConfig;
+  fallbackProvider?: ProviderConfig | null;
+  system: string;
+  prompt: string;
+  storytellerTemperature: number;
+  storytellerMaxTokens: number;
+}): Promise<{ text: string; retried: boolean; failures: VisibleNarrationFailure[] }> {
+  const {
+    label,
+    provider,
+    fallbackProvider,
+    system,
+    prompt,
+    storytellerTemperature,
+    storytellerMaxTokens,
+  } = args;
+
+  async function runNarrationPass(activeProvider: ProviderConfig, promptText: string) {
+    return generateText({
+      model: createModel(activeProvider, {
+        role: "storyteller",
+        familyHint: "glm",
+      }),
+      system,
+      prompt: promptText,
+      temperature: storytellerTemperature,
+      maxOutputTokens: storytellerMaxTokens,
+    });
+  }
+
+  let activeProvider = provider;
+  let initialResult;
+  try {
+    initialResult = await runNarrationPass(activeProvider, prompt);
+  } catch (error) {
+    if (!fallbackProvider) {
+      throw new Error(
+        label === "opening"
+          ? "Opening scene generation failed before visible narration could be produced."
+          : "Final visible narration failed after authoritative scene settlement.",
+      );
+    }
+
+    log.warn(
+      label === "opening"
+        ? "Opening scene generation failed, retrying with fallback provider"
+        : "Final narration pass failed, retrying with fallback provider",
+      error,
+    );
+    activeProvider = fallbackProvider;
+    initialResult = await runNarrationPass(activeProvider, prompt);
+  }
+
+  const initialText = applyVisibleNarrationFilters(initialResult.text);
+  const initialFailures = detectVisibleNarrationFailures(initialText, { system, prompt });
+  if (initialFailures.length === 0) {
+    return { text: initialText, retried: false, failures: [] };
+  }
+
+  const retryPrompt = `${prompt}${buildVisibleNarrationRetryAddendum(initialFailures)}`;
+
+  try {
+    const retryResult = await runNarrationPass(activeProvider, retryPrompt);
+    const retryText = applyVisibleNarrationFilters(retryResult.text);
+    const retryFailures = detectVisibleNarrationFailures(retryText, { system, prompt });
+
+    if (scoreVisibleNarrationCandidate(retryText, retryFailures) >= scoreVisibleNarrationCandidate(initialText, initialFailures)) {
+      return { text: retryText, retried: true, failures: retryFailures };
+    }
+  } catch (retryError) {
+    log.warn("Visible narration quality retry failed; keeping first visible pass", retryError);
+  }
+
+  return { text: initialText, retried: true, failures: initialFailures };
+}
+
 // -- Outcome instructions -----------------------------------------------------
 
 const OUTCOME_INSTRUCTIONS: Record<string, string> = {
@@ -909,36 +1156,18 @@ export async function* processTurn(
     },
   };
 
-  async function runFinalNarrationWithModel(provider: ProviderConfig) {
-    return generateText({
-      model: createModel(provider, {
-        role: "storyteller",
-        familyHint: "glm",
-      }),
-      system: finalNarrationPrompt.system,
-      prompt: finalNarrationPrompt.prompt,
-      temperature: storytellerTemperature,
-      maxOutputTokens: storytellerMaxTokens,
-    });
-  }
-
-  let finalNarrationResult;
-  try {
-    finalNarrationResult = await runFinalNarrationWithModel(storytellerProvider);
-  } catch (finalNarrationError) {
-    if (!fallbackProvider) {
-      throw new Error("Final visible narration failed after authoritative scene settlement.");
-    }
-
-    log.warn("Final narration pass failed, retrying with fallback provider", finalNarrationError);
-    finalNarrationResult = await runFinalNarrationWithModel(fallbackProvider);
-  }
-
-  const narrativeText = collapseRepeatedNarrationBlocks(
-    sanitizeNarrative(finalNarrationResult.text),
-  );
+  const finalNarration = await runVisibleNarrationWithGuard({
+    label: "final",
+    provider: storytellerProvider,
+    fallbackProvider,
+    system: finalNarrationPrompt.system,
+    prompt: finalNarrationPrompt.prompt,
+    storytellerTemperature,
+    storytellerMaxTokens,
+  });
+  const narrativeText = finalNarration.text;
   log.info(
-    `Visible narration complete: hiddenDraft=${hiddenNarrative.length} chars, final=${narrativeText.length} chars`,
+    `Visible narration complete: hiddenDraft=${hiddenNarrative.length} chars, final=${narrativeText.length} chars, retried=${finalNarration.retried}, failures=${finalNarration.failures.join(",") || "none"}`,
   );
 
   if (narrativeText) {
@@ -1059,33 +1288,19 @@ export async function* processOpeningScene(
     },
   };
 
-  async function runOpeningNarration(provider: ProviderConfig) {
-    return generateText({
-      model: createModel(provider, {
-        role: "storyteller",
-        familyHint: "glm",
-      }),
-      system: finalNarrationPrompt.system,
-      prompt: finalNarrationPrompt.prompt,
-      temperature: storytellerTemperature,
-      maxOutputTokens: storytellerMaxTokens,
-    });
-  }
+  const openingNarration = await runVisibleNarrationWithGuard({
+    label: "opening",
+    provider: storytellerProvider,
+    fallbackProvider,
+    system: finalNarrationPrompt.system,
+    prompt: finalNarrationPrompt.prompt,
+    storytellerTemperature,
+    storytellerMaxTokens,
+  });
+  const narrativeText = openingNarration.text;
 
-  let openingResult;
-  try {
-    openingResult = await runOpeningNarration(storytellerProvider);
-  } catch (openingError) {
-    if (!fallbackProvider) {
-      throw new Error("Opening scene generation failed before visible narration could be produced.");
-    }
-
-    log.warn("Opening scene generation failed, retrying with fallback provider", openingError);
-    openingResult = await runOpeningNarration(fallbackProvider);
-  }
-
-  const narrativeText = collapseRepeatedNarrationBlocks(
-    sanitizeNarrative(openingResult.text),
+  log.info(
+    `Opening narration complete: final=${narrativeText.length} chars, retried=${openingNarration.retried}, failures=${openingNarration.failures.join(",") || "none"}`,
   );
 
   if (narrativeText) {

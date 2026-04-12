@@ -385,6 +385,51 @@ describe("Targeted gameplay route campaignId validation", () => {
 });
 
 describe("Campaign-loaded gameplay transport", () => {
+  it("streams only one visible narrative event for a settled action turn", async () => {
+    setupStoryteller();
+    setupDbMock();
+
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
+      id: campaignId,
+      name: `Campaign ${campaignId}`,
+      createdAt: "2026-01-01",
+    }) as any);
+    mockedCaptureSnapshot.mockImplementation((campaignId) => ({
+      campaignId,
+      spawnedNpcIds: [],
+      spawnedItemIds: [],
+      revealedLocationIds: [],
+      createdRelationshipIds: [],
+      createdChronicleIds: [],
+    }) as any);
+    mockedProcessTurn.mockImplementation(() =>
+      createTurnStream([
+        { type: "oracle_result", data: { outcome: "weak_hit" } },
+        { type: "scene-settling", data: { phase: "final-narration" } },
+        { type: "narrative", data: { text: "Nanami let the warning land before he moved." } },
+        { type: "finalizing_turn", data: { stage: "rollback_critical" } },
+        { type: "done", data: { tick: 2 } },
+      ]),
+    );
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Press Nanami for an answer",
+        intent: "Press Nanami for an answer",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body.match(/event: narrative/g)).toHaveLength(1);
+    expect(body).toContain("Nanami let the warning land before he moved.");
+  });
+
   it("loads history by explicit campaignId when no campaign is active", async () => {
     mockedGetActive.mockReturnValue(null as any);
     mockedLoadCampaign.mockResolvedValue({

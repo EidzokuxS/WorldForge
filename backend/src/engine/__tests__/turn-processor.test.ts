@@ -929,6 +929,108 @@ describe("processTurn", () => {
     );
   });
 
+  it("retries the final visible pass once when the model echoes narrator instructions", async () => {
+    setupMocks();
+    (assembleFinalNarrationPrompt as Mock).mockResolvedValue({
+      system: "Visible system",
+      prompt: [
+        "Advance the scene every paragraph.",
+        "Do not repeat an emotional realization once it has landed.",
+      ].join("\n"),
+      assembledBase: mockAssembledPrompt(),
+    });
+    (generateText as Mock)
+      .mockResolvedValueOnce({
+        text: "Advance the scene every paragraph. Do not repeat an emotional realization once it has landed.",
+      })
+      .mockResolvedValueOnce({
+        text: "Steel rang once.\n\nNanami stepped aside and let the warning stand.",
+      });
+
+    const events = await collectEvents(processTurn(createTestOptions()));
+
+    expect(generateText).toHaveBeenCalledTimes(2);
+    expect((generateText as Mock).mock.calls[1]?.[0]?.prompt).toContain(
+      "[FINAL VISIBLE PASS CORRECTION]",
+    );
+    expect(events.filter((event) => event.type === "narrative")).toEqual([
+      {
+        type: "narrative",
+        data: { text: "Steel rang once.\n\nNanami stepped aside and let the warning stand." },
+      },
+    ]);
+  });
+
+  it("retries the final visible pass once when the opening lead restarts in a later paragraph", async () => {
+    setupMocks();
+    (generateText as Mock)
+      .mockResolvedValueOnce({
+        text: [
+          "The tunnel held its breath.",
+          "The tunnel held its breath. Water clicked somewhere deeper in the dark.",
+        ].join("\n\n"),
+      })
+      .mockResolvedValueOnce({
+        text: [
+          "The tunnel held its breath.",
+          "Water clicked somewhere deeper in the dark.",
+        ].join("\n\n"),
+      });
+
+    const events = await collectEvents(processTurn(createTestOptions()));
+
+    expect(generateText).toHaveBeenCalledTimes(2);
+    expect(events.filter((event) => event.type === "narrative")).toEqual([
+      {
+        type: "narrative",
+        data: { text: "The tunnel held its breath.\n\nWater clicked somewhere deeper in the dark." },
+      },
+    ]);
+  });
+
+  it("retries the final visible pass once for a high-signal slop cluster", async () => {
+    setupMocks();
+    (generateText as Mock)
+      .mockResolvedValueOnce({
+        text: "Here's the thing: The answer isn't force. It's patience.",
+      })
+      .mockResolvedValueOnce({
+        text: "Force would only wake the nest. Patience kept the passage quiet.",
+      });
+
+    await collectEvents(processTurn(createTestOptions()));
+
+    expect(generateText).toHaveBeenCalledTimes(2);
+    expect(appendChatMessages).toHaveBeenLastCalledWith(CAMPAIGN_ID, [
+      {
+        role: "assistant",
+        content: "Force would only wake the nest. Patience kept the passage quiet.",
+      },
+    ]);
+  });
+
+  it("does not add a retry when sanitizeNarrative and duplicate collapse already fix the output", async () => {
+    setupMocks();
+    (generateText as Mock).mockResolvedValueOnce({
+      text: [
+        "The market square falls silent.",
+        "The market square falls silent.",
+        "[NPC STATES]",
+        "Hidden state that should never reach the player.",
+      ].join("\n\n"),
+    });
+
+    await collectEvents(processTurn(createTestOptions()));
+
+    expect(generateText).toHaveBeenCalledTimes(1);
+    expect(appendChatMessages).toHaveBeenLastCalledWith(CAMPAIGN_ID, [
+      {
+        role: "assistant",
+        content: "The market square falls silent.",
+      },
+    ]);
+  });
+
   it("increments tick after completion", async () => {
     setupMocks();
     const options = createTestOptions();
