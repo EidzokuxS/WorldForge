@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
-status: planning
-stopped_at: Phase 49 discuss complete; ready to plan grounded search and research semantics
-last_updated: "2026-04-12T18:28:00.000Z"
+status: executing
+stopped_at: Completed 49-01-PLAN.md
+last_updated: "2026-04-12T19:37:15.723Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 14
   completed_phases: 12
-  total_plans: 38
-  completed_plans: 38
+  total_plans: 41
+  completed_plans: 39
   percent: 100
 ---
 
@@ -25,9 +25,9 @@ See: .planning/PROJECT.md (updated 2026-04-12)
 
 ## Current Position
 
-Phase: 49 (search-grounding-and-in-game-research-semantics)
-Plan: Not started
-Status: Discuss complete; ready to plan grounded search, research reuse, and power-profile semantics
+Phase: 49 (search-grounding-and-in-game-research-semantics) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
 Last activity: 2026-04-12
 
 Progress: [██████████] 100%
@@ -78,6 +78,7 @@ Progress: [██████████] 100%
 | Phase 48 P02 | 18 min | 3 tasks | 13 files |
 | Phase 48-character-identity-fidelity-and-canonical-modeling P04 | 8 min | 2 tasks | 8 files |
 | Phase 48-character-identity-fidelity-and-canonical-modeling P03 | 10 min | 2 tasks | 10 files |
+| Phase 49 P01 | 7 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -198,6 +199,9 @@ Recent decisions affecting current work:
 - [Phase 48-character-identity-fidelity-and-canonical-modeling]: Runtime prompts now treat base facts, behavioral core, live dynamics, and continuity as character truth while tags remain compatibility shorthand.
 - [Phase 48-character-identity-fidelity-and-canonical-modeling]: Off-screen NPC simulation is bounded to a compact richer identity slice per actor instead of serializing full records into batch prompts.
 - [Phase 48-character-identity-fidelity-and-canonical-modeling]: Deeper identity edits now require explicit promote_identity_change evidence thresholds while ordinary reflection writes stay in live dynamics.
+- [Phase 49]: Phase 49 worldgen canon research now uses one typed retrieval-intent authority instead of a competing free-form planner inside ip-researcher.
+- [Phase 49]: Known-IP fallback keeps the focused job list in the LLM prompt so planner success never collapses back into one vague canon query.
+- [Phase 49]: Regenerate-section enriches and persists canon only through saveIpContext/loadIpContext instead of introducing a second world-canon store.
 
 ### Pending Todos
 
@@ -210,6 +214,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-12T17:35:17.755Z
-Stopped at: Phase 49 discuss complete; ready to plan grounded search and research semantics
+Last session: 2026-04-12T19:37:15.719Z
+Stopped at: Completed 49-01-PLAN.md
 Resume file: None
