@@ -5,6 +5,7 @@ import {
 } from "@worldforge/shared";
 import type {
   CharacterGroundingProfile,
+  CharacterRecord,
   CanonicalLoadoutPreview,
   PersonaTemplate,
   PersonaTemplateSummary,
@@ -628,13 +629,13 @@ function materializeDraftRecord(
 }
 
 function recordToDraft(
-  record: z.infer<typeof characterRecordSchema>,
+  record: CharacterRecord,
 ): z.infer<typeof characterDraftSchema> {
   const { id: _id, campaignId: _campaignId, ...identity } = record.identity;
-  return {
+  return characterDraftSchema.parse({
     ...record,
     identity,
-  };
+  });
 }
 
 function legacyCharacterToDraft(

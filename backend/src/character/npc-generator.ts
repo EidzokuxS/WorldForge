@@ -1,6 +1,9 @@
 import { safeGenerateObject as generateObject } from "../ai/generate-object-safe.js";
 import { z } from "zod";
-import type { CharacterDraft } from "@worldforge/shared";
+import type {
+  CharacterDraft,
+  CharacterIdentitySourceCitation,
+} from "@worldforge/shared";
 import { createModel } from "../ai/index.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import { buildV2CardSections } from "./v2-sections.js";
@@ -175,38 +178,42 @@ function buildImportedNpcSourceBundle(opts: {
   scenario: string;
   v2Tags: string[];
 }): CharacterDraft["sourceBundle"] {
+  const secondarySources: CharacterIdentitySourceCitation[] = [
+    {
+      kind: "card",
+      label: "Card description",
+      excerpt: opts.description,
+    },
+    {
+      kind: "card",
+      label: "Card personality",
+      excerpt: opts.personality,
+    },
+    ...(opts.scenario
+      ? [
+          {
+            kind: "card" as const,
+            label: "Card scenario",
+            excerpt: opts.scenario,
+          },
+        ]
+      : []),
+    ...(opts.v2Tags.length > 0
+      ? [
+          {
+            kind: "card" as const,
+            label: "Card tags",
+            excerpt: opts.v2Tags.join(", "),
+          },
+        ]
+      : []),
+  ];
+
   return {
     canonSources: [],
-    secondarySources: [
-      {
-        kind: "card",
-        label: "Card description",
-        excerpt: opts.description,
-      },
-      {
-        kind: "card",
-        label: "Card personality",
-        excerpt: opts.personality,
-      },
-      ...(opts.scenario
-        ? [
-            {
-              kind: "card" as const,
-              label: "Card scenario",
-              excerpt: opts.scenario,
-            },
-          ]
-        : []),
-      ...(opts.v2Tags.length > 0
-        ? [
-            {
-              kind: "card" as const,
-              label: "Card tags",
-              excerpt: opts.v2Tags.join(", "),
-            },
-          ]
-        : []),
-    ].filter((source) => source.excerpt.trim().length > 0),
+    secondarySources: secondarySources.filter(
+      (source) => source.excerpt.trim().length > 0,
+    ),
     synthesis: {
       owner: "WorldForge",
       strategy: "flat-output-then-deterministic-npc-mapping",
