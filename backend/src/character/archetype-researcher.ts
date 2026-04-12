@@ -1,8 +1,10 @@
 import { generateText, stepCountIs, type ToolSet } from "ai";
 import { createModel } from "../ai/index.js";
+import type { CharacterDraft, CharacterGroundingProfile } from "@worldforge/shared";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import type { ResearchConfig } from "@worldforge/shared";
 import { createLogger, withMcpClient } from "../lib/index.js";
+import { synthesizeGroundedCharacterProfile } from "./grounded-character-profile.js";
 
 const log = createLogger("archetype-researcher");
 
@@ -42,4 +44,37 @@ export async function researchArchetype(opts: {
     log.error("Archetype research failed entirely");
     return null;
   }
+}
+
+export function synthesizeArchetypeGrounding(opts: {
+  archetype: string;
+  draft: CharacterDraft;
+  researchContext: string | null;
+}): CharacterGroundingProfile | undefined {
+  return synthesizeGroundedCharacterProfile({
+    draft: opts.draft,
+    summaryHint: `${opts.archetype}: ${firstNonEmpty([
+      opts.researchContext,
+      opts.draft.profile.backgroundSummary,
+      opts.draft.profile.personaSummary,
+    ])}`,
+    evidenceText: opts.researchContext,
+    evidenceKind: "research",
+    evidenceLabel: "Archetype research",
+    uncertaintyNotes: [
+      opts.researchContext
+        ? "Archetype research grounding stays bounded to the retrieved summary plus stored character evidence."
+        : "No external research summary was available; the grounded profile stays bounded to the generated character draft.",
+    ],
+  });
+}
+
+function firstNonEmpty(values: Array<string | null | undefined>): string {
+  for (const value of values) {
+    if (value?.trim()) {
+      return value.trim();
+    }
+  }
+
+  return "Grounded character profile";
 }

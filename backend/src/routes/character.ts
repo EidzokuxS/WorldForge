@@ -6,6 +6,7 @@ import { readCampaignConfig } from "../campaign/index.js";
 import { loadSettings } from "../settings/index.js";
 import { resolveStartingLocation } from "../worldgen/index.js";
 import { parseCharacterDescription, generateCharacter, generateCharacterFromArchetype, mapV2CardToCharacter, parseNpcDescription, mapV2CardToNpc, generateNpcFromArchetype, researchArchetype } from "../character/index.js";
+import { synthesizeArchetypeGrounding } from "../character/archetype-researcher.js";
 import {
   createCharacterRecordFromDraft,
   projectPlayerRecord,
@@ -13,6 +14,7 @@ import {
   toLegacyNpcDraft,
   toLegacyPlayerCharacter,
 } from "../character/record-adapters.js";
+import { synthesizeGroundedCharacterProfile } from "../character/grounded-character-profile.js";
 import { applyStartConditionEffects } from "../engine/start-condition-runtime.js";
 import { getDb } from "../db/index.js";
 import { items, locations, players } from "../db/schema.js";
@@ -106,6 +108,26 @@ function createSavedCharacterResponse(
   };
 }
 
+function attachGroundingSafely(
+  draft: CharacterDraft,
+  build: () => CharacterDraft["grounding"] | undefined,
+): CharacterDraft {
+  try {
+    const grounding = build();
+    if (!grounding) {
+      return draft;
+    }
+
+    return {
+      ...draft,
+      grounding,
+    };
+  } catch (error) {
+    log.warn("Grounding synthesis failed; returning character payload without grounding.", error);
+    return draft;
+  }
+}
+
 app.post("/parse-character", async (c) => {
   try {
     const result = await parseBody(c, parseCharacterSchema);
@@ -183,7 +205,18 @@ app.post("/research-character", async (c) => {
         locationNames: ctx.names.locationNames, factionNames: ctx.names.factionNames,
         role: ctx.gen, researchContext,
       });
-      return c.json(createDraftResponse(campaignId, draft));
+      return c.json(
+        createDraftResponse(
+          campaignId,
+          attachGroundingSafely(draft, () =>
+            synthesizeArchetypeGrounding({
+              archetype,
+              draft,
+              researchContext,
+            }),
+          ),
+        ),
+      );
     }
 
     const draft = await generateCharacterFromArchetype({
@@ -191,7 +224,18 @@ app.post("/research-character", async (c) => {
       locationNames: ctx.names.locationNames, factionNames: ctx.names.factionNames,
       role: ctx.gen, researchContext,
     });
-    return c.json(createDraftResponse(campaignId, draft));
+    return c.json(
+      createDraftResponse(
+        campaignId,
+        attachGroundingSafely(draft, () =>
+          synthesizeArchetypeGrounding({
+            archetype,
+            draft,
+            researchContext,
+          }),
+        ),
+      ),
+    );
   } catch (error) {
     return c.json({ error: getErrorMessage(error, "Failed to research character.") }, getErrorStatus(error));
   }
@@ -213,7 +257,39 @@ app.post("/import-v2-card", async (c) => {
         locationNames: ctx.names.locationNames, factionNames: ctx.names.factionNames,
         role: ctx.gen,
       });
-      return c.json(createDraftResponse(campaignId, draft));
+      return c.json(
+        createDraftResponse(
+          campaignId,
+          attachGroundingSafely(draft, () =>
+            synthesizeGroundedCharacterProfile({
+              draft,
+              summaryHint: `${name}: ${description}`,
+              evidenceText: description,
+              evidenceKind: "card",
+              evidenceLabel: "V2 card description",
+              extraSources: [
+                personality
+                  ? {
+                    kind: "card",
+                    label: "V2 card personality",
+                    excerpt: personality,
+                  }
+                  : null,
+                scenario
+                  ? {
+                    kind: "card",
+                    label: "V2 card scenario",
+                    excerpt: scenario,
+                  }
+                  : null,
+              ].filter(Boolean) as NonNullable<CharacterDraft["grounding"]>["sources"],
+              uncertaintyNotes: [
+                "Import grounding stayed on the bounded card and stored-source lane; no live search was used by default.",
+              ],
+            }),
+          ),
+        ),
+      );
     }
 
     const draft = await mapV2CardToCharacter({
@@ -221,7 +297,39 @@ app.post("/import-v2-card", async (c) => {
       premise: ctx.campaign.premise, locationNames: ctx.names.locationNames,
       role: ctx.gen,
     });
-    return c.json(createDraftResponse(campaignId, draft));
+    return c.json(
+      createDraftResponse(
+        campaignId,
+        attachGroundingSafely(draft, () =>
+          synthesizeGroundedCharacterProfile({
+            draft,
+            summaryHint: `${name}: ${description}`,
+            evidenceText: description,
+            evidenceKind: "card",
+            evidenceLabel: "V2 card description",
+            extraSources: [
+              personality
+                ? {
+                  kind: "card",
+                  label: "V2 card personality",
+                  excerpt: personality,
+                }
+                : null,
+              scenario
+                ? {
+                  kind: "card",
+                  label: "V2 card scenario",
+                  excerpt: scenario,
+                }
+                : null,
+            ].filter(Boolean) as NonNullable<CharacterDraft["grounding"]>["sources"],
+            uncertaintyNotes: [
+              "Import grounding stayed on the bounded card and stored-source lane; no live search was used by default.",
+            ],
+          }),
+        ),
+      ),
+    );
   } catch (error) {
     return c.json({ error: getErrorMessage(error, "Failed to import V2 card.") }, getErrorStatus(error));
   }
