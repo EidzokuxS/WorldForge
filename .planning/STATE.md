@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
-status: planning
-stopped_at: Phase 48 plan set revised to own backend schema/route boundaries and persona-template seams
-last_updated: "2026-04-12T18:19:00.000Z"
+status: executing
+stopped_at: Completed 48-01-PLAN.md
+last_updated: "2026-04-12T16:47:36.559Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 14
   completed_phases: 11
-  total_plans: 34
-  completed_plans: 34
+  total_plans: 38
+  completed_plans: 35
   percent: 100
 ---
 
@@ -25,9 +25,9 @@ See: .planning/PROJECT.md (updated 2026-04-12)
 
 ## Current Position
 
-Phase: 48 (character-identity-fidelity-and-canonical-modeling) — READY
-Plan: planned
-Status: Phase 48 planning revised for checker blockers; execute the updated wave-ordered plans
+Phase: 48 (character-identity-fidelity-and-canonical-modeling) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
 Last activity: 2026-04-12
 
 Progress: [██████████] 100%
@@ -74,6 +74,7 @@ Progress: [██████████] 100%
 
 | Phase 47 P02 | 7 | 2 tasks | 4 files |
 | Phase 47 P03 | 8 | 2 tasks | 4 files |
+| Phase 48 P01 | 8 min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -182,6 +183,9 @@ Recent decisions affecting current work:
 - [Phase 48]: Key/canonical characters use a stricter fidelity path, but not a rigid role-lock; preserve internal logic while allowing earned change over time.
 - [Phase 48]: Canonical truth uses three layers: base facts, behavioral core, and live campaign dynamics.
 - [Phase 48]: Canonical facts come from canon-facing sources; community cards are secondary cues for feel and voice, and WorldForge owns the final structured synthesis.
+- [Phase 48]: Keep one shared CharacterDraft/CharacterRecord ontology and layer richer identity inside identity instead of creating a canonical-only record type.
+- [Phase 48]: Store canon fidelity as optional sourceBundle and continuity extensions on the shared record so imported and key characters gain provenance without forking the lane.
+- [Phase 48]: Derive legacy persona, goals, and beliefs compatibility views from normalized rich identity when shallow fields are stale.
 
 ### Pending Todos
 
@@ -194,6 +198,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-12T18:19:00.000Z
-Stopped at: Phase 48 plan set revised to own backend schema/route boundaries and persona-template seams
+Last session: 2026-04-12T16:47:36.555Z
+Stopped at: Completed 48-01-PLAN.md
 Resume file: None
