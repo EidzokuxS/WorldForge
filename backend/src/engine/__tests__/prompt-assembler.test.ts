@@ -22,7 +22,11 @@ vi.mock("../../vectors/embeddings.js", () => ({
   embedTexts: vi.fn(),
 }));
 
-import { assemblePrompt, type AssembleOptions } from "../prompt-assembler.js";
+import {
+  assembleFinalNarrationPrompt,
+  assemblePrompt,
+  type AssembleOptions,
+} from "../prompt-assembler.js";
 import { readCampaignConfig, getChatHistory } from "../../campaign/index.js";
 import { getDb } from "../../db/index.js";
 import { listRecentLocationEvents } from "../location-events.js";
@@ -487,11 +491,75 @@ describe("assemblePrompt", () => {
       },
     ]);
 
-    const result = await assemblePrompt(defaultOptions);
+    const result = await assembleFinalNarrationPrompt({
+      campaignId: "test-campaign-123",
+      contextWindow: 8192,
+      sceneAssembly: {
+        openingScene: true,
+        openingState: {
+          active: true,
+          locationId: "loc-1",
+          locationName: "Ash Market",
+          arrivalMode: "on-foot",
+          startingVisibility: "noticed",
+          immediateSituation:
+            "City watch lanterns sweep the market while you keep the satchel hidden.",
+          entryPressure: ["under watch", "clock running out"],
+          promptLines: ["Opening Pressure: under watch, clock running out"],
+          sceneContextLines: ["Opening Constraints: The market is already under close scrutiny."],
+        },
+        currentScene: {
+          id: "loc-1",
+          name: "Ash Market",
+          description:
+            "Canvas stalls sag under smoke while merchants whisper behind shuttered lamps.",
+          tags: ["market", "tense"],
+        },
+        presentNpcNames: ["Mira"],
+        recentContext: [
+          {
+            tick: 14,
+            summary: "A warning bell and bootsteps ripple through the stalls nearby.",
+            source: "location_recent_event",
+          },
+        ],
+        sceneEffects: [
+          {
+            id: "effect-1",
+            kind: "opening",
+            source: "opening_state",
+            summary:
+              "City watch lanterns sweep the market while you keep the satchel hidden.",
+            perceivable: true,
+            actor: "player",
+            target: null,
+            locationId: "loc-1",
+            causalDetail: "Opening state remains active.",
+          },
+          {
+            id: "effect-2",
+            kind: "environment",
+            source: "recent_context",
+            summary: "A warning bell and bootsteps ripple through the stalls nearby.",
+            perceivable: true,
+            actor: null,
+            target: null,
+            locationId: "loc-1",
+            causalDetail: "Player-perceivable same-turn spillover.",
+          },
+        ],
+        playerPerceivableConsequences: [
+          "City watch lanterns sweep the market while you keep the satchel hidden.",
+          "A warning bell and bootsteps ripple through the stalls nearby.",
+        ],
+      },
+    });
 
-    expect(result.formatted).toContain("City watch lanterns sweep the market while you keep the satchel hidden.");
-    expect(result.formatted).toContain("A warning bell and bootsteps ripple through the stalls nearby.");
-    expect(result.formatted).toContain("player-perceivable");
+    expect(result.prompt).toContain("[OPENING STATE]");
+    expect(result.prompt).toContain("City watch lanterns sweep the market while you keep the satchel hidden.");
+    expect(result.prompt).toContain("[SCENE EFFECTS]");
+    expect(result.prompt).toContain("A warning bell and bootsteps ripple through the stalls nearby.");
+    expect(result.prompt).toContain("player-perceivable=yes");
   });
 
   it("uses double newlines between sections", async () => {

@@ -12,6 +12,35 @@ vi.mock("../oracle.js", () => ({
 
 vi.mock("../prompt-assembler.js", () => ({
   assemblePrompt: vi.fn(),
+  assembleFinalNarrationPrompt: vi.fn(),
+}));
+
+vi.mock("../scene-assembly.js", () => ({
+  assembleAuthoritativeScene: vi.fn().mockReturnValue({
+    openingScene: false,
+    openingState: null,
+    currentScene: {
+      id: "loc-1",
+      name: "Town Square",
+      description: "A bustling square",
+      tags: ["urban"],
+    },
+    presentNpcNames: [],
+    recentContext: [],
+    sceneEffects: [],
+    playerPerceivableConsequences: [],
+  }),
+  collapseRepeatedNarrationBlocks: vi.fn((text: string) =>
+    text
+      .split(/\n\s*\n/g)
+      .filter((block, index, blocks) => {
+        const normalized = block.trim().toLowerCase();
+        const previous = blocks[index - 1]?.trim().toLowerCase();
+        return Boolean(normalized) && normalized !== previous;
+      })
+      .join("\n\n")
+      .trim(),
+  ),
 }));
 
 vi.mock("../../campaign/index.js", () => ({
@@ -28,6 +57,7 @@ vi.mock("../tool-schemas.js", () => ({
 
 // Mock the ai module
 vi.mock("ai", () => ({
+  generateText: vi.fn(),
   streamText: vi.fn(),
   stepCountIs: vi.fn().mockReturnValue({ type: "step-count", count: 2 }),
   tool: vi.fn((def: unknown) => def),
@@ -43,7 +73,10 @@ vi.mock("../../ai/provider-registry.js", () => ({
 
 import { processTurn, type TurnEvent } from "../turn-processor.js";
 import { callOracle } from "../oracle.js";
-import { assemblePrompt } from "../prompt-assembler.js";
+import {
+  assembleFinalNarrationPrompt,
+  assemblePrompt,
+} from "../prompt-assembler.js";
 import {
   getChatHistory,
   appendChatMessages,
@@ -52,7 +85,7 @@ import {
   readCampaignConfig,
 } from "../../campaign/index.js";
 import { createStorytellerTools } from "../tool-schemas.js";
-import { streamText } from "ai";
+import { generateText, streamText } from "ai";
 import { safeGenerateObject } from "../../ai/generate-object-safe.js";
 import { getDb } from "../../db/index.js";
 import { players, locations, locationEdges, npcs, items } from "../../db/schema.js";
@@ -138,6 +171,11 @@ function setupMocks(options: {
 
   // Mock assemblePrompt
   (assemblePrompt as Mock).mockResolvedValue(mockAssembledPrompt());
+  (assembleFinalNarrationPrompt as Mock).mockResolvedValue({
+    system: "Final narration system",
+    prompt: "Final narration prompt",
+    assembledBase: mockAssembledPrompt(),
+  });
 
   // Mock chat history
   (getChatHistory as Mock).mockReturnValue([
@@ -158,6 +196,12 @@ function setupMocks(options: {
   (streamText as Mock).mockReturnValue({
     fullStream: createMockFullStream(streamParts),
     text: Promise.resolve("The goblin falls."),
+  });
+  (generateText as Mock).mockResolvedValue({
+    text: streamParts
+      .filter((part) => part.type === "text-delta")
+      .map((part) => String(part.text ?? ""))
+      .join(""),
   });
 
   return { oracleResult, mockDb };
@@ -468,7 +512,7 @@ describe("processTurn", () => {
     });
   });
 
-  it("yields narrative events with text for each text chunk", async () => {
+  it("yields one final visible narration event after the hidden pass completes", async () => {
     setupMocks({
       streamParts: [
         { type: "text-delta", text: "The goblin " },
@@ -480,9 +524,8 @@ describe("processTurn", () => {
     const events = await collectEvents(processTurn(options));
 
     const narrativeEvents = events.filter((e) => e.type === "narrative");
-    expect(narrativeEvents).toHaveLength(2);
-    expect(narrativeEvents[0]!.data).toEqual({ text: "The goblin " });
-    expect(narrativeEvents[1]!.data).toEqual({ text: "falls." });
+    expect(narrativeEvents).toHaveLength(1);
+    expect(narrativeEvents[0]!.data).toEqual({ text: "The goblin falls." });
   });
 
   it("defers visible narration until authoritative scene settlement", async () => {
@@ -493,34 +536,56 @@ describe("processTurn", () => {
       ],
     });
 
-    let resolvePostTurn: (() => void) | null = null;
+    let resolveSceneSettlement: (() => void) | null = null;
     const generator = processTurn(
       createTestOptions({
-        onPostTurn: () =>
+        onBeforeVisibleNarration: () =>
           new Promise<void>((resolve) => {
-            resolvePostTurn = resolve;
+            resolveSceneSettlement = resolve;
           }),
       }),
     );
-    const observedTypesBeforeFinalizing: string[] = [];
+    const observedTypesBeforeNarrative: string[] = [];
 
     for (let i = 0; i < 6; i += 1) {
       const step = await generator.next();
       if (step.done) {
         break;
       }
-      if (step.value.type === "finalizing_turn") {
+      observedTypesBeforeNarrative.push(step.value.type);
+      if (
+        step.value.type === "scene-settling"
+        && (step.value.data as { phase?: string }).phase === "local-present-scene"
+      ) {
         break;
       }
-      observedTypesBeforeFinalizing.push(step.value.type);
     }
 
-    expect(observedTypesBeforeFinalizing).not.toContain("narrative");
+    expect(observedTypesBeforeNarrative).not.toContain("narrative");
+    expect(observedTypesBeforeNarrative).toContain("scene-settling");
 
-    const finishPostTurn = resolvePostTurn as (() => void) | null;
-    if (finishPostTurn) {
-      finishPostTurn();
+    let narrativeResolved = false;
+    const pendingNarrative = generator.next().then((result) => {
+      narrativeResolved = true;
+      return result;
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(narrativeResolved).toBe(false);
+
+    const finishSceneSettlement = resolveSceneSettlement as (() => void) | null;
+    if (finishSceneSettlement) {
+      finishSceneSettlement();
     }
+
+    const narrationPhaseStep = await pendingNarrative;
+    expect(narrationPhaseStep.done).toBe(false);
+    expect(narrationPhaseStep.value.type).toBe("scene-settling");
+
+    const narrativeStep = await generator.next();
+    expect(narrativeStep.done).toBe(false);
+    expect(narrativeStep.value.type).toBe("narrative");
   });
 
   it("yields state_update events for tool results", async () => {

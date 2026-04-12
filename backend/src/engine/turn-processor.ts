@@ -5,13 +5,16 @@
  * (route handler) to stream events to the client as they happen.
  */
 
-import { streamText, stepCountIs } from "ai";
+import { generateText, streamText, stepCountIs } from "ai";
 import { safeGenerateObject as generateObject } from "../ai/generate-object-safe.js";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
 import { callOracle, type OracleResult } from "./oracle.js";
-import { assemblePrompt } from "./prompt-assembler.js";
+import {
+  assembleFinalNarrationPrompt,
+  assemblePrompt,
+} from "./prompt-assembler.js";
 import { createStorytellerTools } from "./tool-schemas.js";
 import {
   getChatHistory,
@@ -37,6 +40,11 @@ import {
   resolveLocationTarget,
   resolveTravelPath,
 } from "./location-graph.js";
+import {
+  assembleAuthoritativeScene,
+  collapseRepeatedNarrationBlocks,
+  type SceneAssembly,
+} from "./scene-assembly.js";
 
 const log = createLogger("turn-processor");
 
@@ -45,6 +53,7 @@ const log = createLogger("turn-processor");
 export interface TurnEvent {
   type:
     | "oracle_result"
+    | "scene-settling"
     | "narrative"
     | "state_update"
     | "quick_actions"
@@ -67,7 +76,19 @@ export interface TurnOptions {
   embedderResult?: ResolveResult;
   fallbackProvider?: ProviderConfig | null;
   contextWindow?: number;
+  openingScene?: boolean;
+  onBeforeVisibleNarration?: (summary: HiddenTurnSummary) => void | Promise<void>;
   onPostTurn?: (summary: TurnSummary) => void | Promise<void>;
+}
+
+export interface HiddenTurnSummary {
+  currentTick: number;
+  predictedTick: number;
+  currentLocationId: string | null;
+  oracleResult: OracleResult;
+  toolCalls: Array<{ tool: string; args: unknown; result: unknown }>;
+  openingScene: boolean;
+  sceneAssembly?: SceneAssembly;
 }
 
 export interface TurnSummary {
@@ -75,6 +96,7 @@ export interface TurnSummary {
   oracleResult: OracleResult;
   toolCalls: Array<{ tool: string; args: unknown; result: unknown }>;
   narrativeText: string;
+  sceneAssembly?: SceneAssembly;
 }
 
 // Finalization is authoritative turn work. Give it a long ceiling instead of
@@ -197,6 +219,15 @@ function getSuccessfulMoveToolResult(result: unknown): SuccessfulTravel | null {
     tickAdvance: travelCost,
     path: path.filter((step): step is string => typeof step === "string"),
   };
+}
+
+function predictNextTick(
+  currentTick: number,
+  successfulTravel: SuccessfulTravel | null,
+): number {
+  return successfulTravel && successfulTravel.tickAdvance > 0
+    ? currentTick + successfulTravel.tickAdvance
+    : currentTick + 1;
 }
 
 // -- Movement detection -------------------------------------------------------
@@ -558,10 +589,11 @@ export async function* processTurn(
 
   yield { type: "oracle_result", data: oracleResult };
 
-  // 3. Assemble prompt
+  // 3. Assemble hidden tool-driving prompt
   const assembled = await assemblePrompt({
     campaignId,
     contextWindow,
+    storytellerPass: "hidden-tool-driving",
     includeRecentConversation: false,
     actionResult: oracleResult,
     embedderResult,
@@ -569,10 +601,11 @@ export async function* processTurn(
     judgeRole: { provider: judgeProvider, temperature: 0.1, maxTokens: 1024 },
   });
 
-  // 4. Build system prompt with outcome instructions
+  // 4. Build hidden tool-driving prompt with outcome instructions
   const outcomeInstruction =
     OUTCOME_INSTRUCTIONS[oracleResult.outcome] ?? "";
-  const systemPrompt = `${assembled.formatted}\n\n[NARRATION DIRECTIVE]\n${outcomeInstruction}`;
+  const hiddenSystemPrompt =
+    `${assembled.formatted}\n\n[HIDDEN TOOL-DRIVING PASS]\nResolve tools and authoritative state before any visible narration exists.\n\n[NARRATION DIRECTIVE]\n${outcomeInstruction}`;
 
   // 5. Get chat history
   const chatHistory = getChatHistory(campaignId);
@@ -580,62 +613,38 @@ export async function* processTurn(
   // 6. Persist user message
   appendChatMessages(campaignId, [{ role: "user", content: playerAction }]);
 
-  // 7. Get current tick
-  // 8. Create tools (pass outcomeTier so set_condition can enforce HP guard)
+  // 7. Create tools (pass outcomeTier so set_condition can enforce HP guard)
   const tools = createStorytellerTools(campaignId, currentTick, oracleResult.outcome);
 
-  // 9. Call Storyteller with streaming
+  // 8. Call hidden storyteller pass. This may stream internally for tool execution,
+  // but visible narration is deferred until scene settlement completes.
   const storyMessages = [
     ...chatHistory.slice(-20),
     { role: "user" as const, content: playerAction },
   ];
 
-  const model = createModel(storytellerProvider);
-  const result = streamText({
-    model,
-    system: systemPrompt,
-    messages: storyMessages,
-    tools,
-    stopWhen: stepCountIs(3),
-    temperature: storytellerTemperature,
-    maxOutputTokens: storytellerMaxTokens,
-  });
+  yield {
+    type: "scene-settling",
+    data: {
+      stage: "scene-settling",
+      phase: options.openingScene ? "opening-hidden-pass" : "hidden-tool-driving",
+    },
+  };
 
-  // 10. Iterate fullStream, yield events
-  // Stream narrative deltas but detect metadata leaks in real-time.
-  // Once a leaked header is detected, stop streaming narrative text.
-  let rawNarrative = "";
-  let leakDetected = false;
+  let hiddenNarrative = "";
   let quickActionsEmitted = false;
-  let narrativeStarted = false;
   const toolCallResults: Array<{
     tool: string;
     args: unknown;
     result: unknown;
   }> = [];
 
-  /**
-   * Process a single stream part: yield events, track state.
-   * Returns yielded TurnEvents for the caller to yield.
-   */
-  function processStreamPart(
+  function processHiddenStreamPart(
     part: { type: string; [key: string]: unknown },
   ): TurnEvent[] {
     const events: TurnEvent[] = [];
     if (part.type === "text-delta") {
-      const text = part.text as string;
-      narrativeStarted = true;
-      rawNarrative += text;
-      if (!leakDetected) {
-        const hasLeak = LEAKED_HEADERS.some((h) => rawNarrative.includes(h));
-        if (hasLeak) {
-          leakDetected = true;
-          sanitizeNarrative(rawNarrative);
-          log.warn("Metadata leak detected in Storyteller output, truncating narrative");
-        } else {
-          events.push({ type: "narrative", data: { text } });
-        }
-      }
+      hiddenNarrative += String(part.text ?? "");
     } else if (part.type === "tool-result") {
       const toolName = (part as Record<string, unknown>).toolName as string;
       const args = (part as Record<string, unknown>).input;
@@ -672,56 +681,55 @@ export async function* processTurn(
     return events;
   }
 
-  try {
-    for await (const part of result.fullStream) {
-      const events = processStreamPart(part as { type: string });
-      for (const event of events) {
-        yield event;
-      }
+  async function runHiddenPassWithModel(provider: ProviderConfig): Promise<TurnEvent[]> {
+    const hiddenResult = streamText({
+      model: createModel(provider),
+      system: hiddenSystemPrompt,
+      messages: storyMessages,
+      tools,
+      stopWhen: stepCountIs(3),
+      temperature: storytellerTemperature,
+      maxOutputTokens: storytellerMaxTokens,
+    });
+
+    const emittedEvents: TurnEvent[] = [];
+    for await (const part of hiddenResult.fullStream) {
+      const events = processHiddenStreamPart(part as { type: string });
+      emittedEvents.push(...events);
     }
-  } catch (streamError) {
-    if (!narrativeStarted && fallbackProvider) {
-      log.warn("Storyteller stream failed before narrative, retrying with fallback", streamError);
-      // Reset state for retry
-      rawNarrative = "";
-      leakDetected = false;
-      quickActionsEmitted = false;
-      narrativeStarted = false;
-      toolCallResults.length = 0;
+    return emittedEvents;
+  }
 
-      const fallbackModel = createModel(fallbackProvider);
-      const fallbackResult = streamText({
-        model: fallbackModel,
-        system: systemPrompt,
-        messages: storyMessages,
-        tools,
-        stopWhen: stepCountIs(3),
-        temperature: storytellerTemperature,
-        maxOutputTokens: storytellerMaxTokens,
-      });
+  try {
+    for (const event of await runHiddenPassWithModel(storytellerProvider)) {
+      yield event;
+    }
+  } catch (hiddenPassError) {
+    if (!fallbackProvider) {
+      throw new Error("Hidden tool-driving pass failed before visible narration could be generated.");
+    }
 
-      for await (const part of fallbackResult.fullStream) {
-        const events = processStreamPart(part as { type: string });
-        for (const event of events) {
-          yield event;
-        }
-      }
-    } else {
-      throw streamError;
+    log.warn("Hidden storyteller pass failed, retrying with fallback provider", hiddenPassError);
+    hiddenNarrative = "";
+    quickActionsEmitted = false;
+    toolCallResults.length = 0;
+    for (const event of await runHiddenPassWithModel(fallbackProvider)) {
+      yield event;
     }
   }
 
-  // 10b. Fallback quick actions if Storyteller didn't call offer_quick_actions
+  // 9. Fallback quick actions if Storyteller didn't call offer_quick_actions.
   if (!quickActionsEmitted) {
     // Gather NPC names at player's current location for contextual suggestions
     let locationName = "";
     const npcNames: string[] = [];
     try {
-      if (player?.currentLocationId) {
+      const fallbackLocationId = successfulTravel?.locationId ?? player?.currentLocationId ?? null;
+      if (fallbackLocationId) {
         const loc = db
           .select()
           .from(locations)
-          .where(eq(locations.id, player.currentLocationId))
+          .where(eq(locations.id, fallbackLocationId))
           .get();
         if (loc) locationName = loc.name;
 
@@ -729,7 +737,7 @@ export async function* processTurn(
         const presentNpcs = db
           .select({ name: npcs.name })
           .from(npcs)
-          .where(eq(npcs.currentLocationId, player.currentLocationId))
+          .where(eq(npcs.currentLocationId, fallbackLocationId))
           .all();
         for (const npc of presentNpcs) {
           npcNames.push(npc.name);
@@ -761,14 +769,106 @@ export async function* processTurn(
     yield { type: "auto_checkpoint", data: { reason: "HP dropped to danger zone" } };
   }
 
-  // 11. Sanitize narrative and persist
-  const narrativeText = sanitizeNarrative(rawNarrative);
-  log.info(`Stream complete: raw=${rawNarrative.length} chars, sanitized=${narrativeText.length} chars, leakDetected=${leakDetected}`);
+  const predictedTick = predictNextTick(currentTick, successfulTravel);
+  const currentLocationId =
+    successfulTravel?.locationId
+    ?? db
+      .select({ currentLocationId: players.currentLocationId })
+      .from(players)
+      .where(eq(players.campaignId, campaignId))
+      .get()?.currentLocationId
+    ?? null;
+
+  yield {
+    type: "scene-settling",
+    data: {
+      stage: "scene-settling",
+      phase: options.openingScene ? "opening-local-scene" : "local-present-scene",
+      tick: predictedTick,
+    },
+  };
+
+  const hiddenSummary: HiddenTurnSummary = {
+    currentTick,
+    predictedTick,
+    currentLocationId,
+    oracleResult,
+    toolCalls: toolCallResults,
+    openingScene: options.openingScene ?? false,
+  };
+
+  if (options.onBeforeVisibleNarration) {
+    await withTimeout(
+      Promise.resolve(options.onBeforeVisibleNarration(hiddenSummary)),
+      TURN_FINALIZATION_TIMEOUT_MS,
+      "Local scene settlement timed out before final narration.",
+    );
+  }
+
+  const sceneAssembly = assembleAuthoritativeScene({
+    campaignId,
+    currentLocationId,
+    pendingEventTicks: [currentTick, predictedTick],
+    toolCalls: toolCallResults,
+    openingScene: options.openingScene ?? false,
+  });
+  hiddenSummary.sceneAssembly = sceneAssembly;
+
+  const finalNarrationPrompt = await assembleFinalNarrationPrompt({
+    campaignId,
+    contextWindow,
+    sceneAssembly,
+    actionResult: oracleResult,
+    embedderResult,
+    playerAction,
+    judgeRole: { provider: judgeProvider, temperature: 0.1, maxTokens: 1024 },
+  });
+
+  yield {
+    type: "scene-settling",
+    data: {
+      stage: "scene-settling",
+      phase: options.openingScene ? "opening-final-narration" : "final-narration",
+      opening: options.openingScene ?? false,
+    },
+  };
+
+  async function runFinalNarrationWithModel(provider: ProviderConfig) {
+    return generateText({
+      model: createModel(provider),
+      system: finalNarrationPrompt.system,
+      prompt: finalNarrationPrompt.prompt,
+      temperature: storytellerTemperature,
+      maxOutputTokens: storytellerMaxTokens,
+    });
+  }
+
+  let finalNarrationResult;
+  try {
+    finalNarrationResult = await runFinalNarrationWithModel(storytellerProvider);
+  } catch (finalNarrationError) {
+    if (!fallbackProvider) {
+      throw new Error("Final visible narration failed after authoritative scene settlement.");
+    }
+
+    log.warn("Final narration pass failed, retrying with fallback provider", finalNarrationError);
+    finalNarrationResult = await runFinalNarrationWithModel(fallbackProvider);
+  }
+
+  const narrativeText = collapseRepeatedNarrationBlocks(
+    sanitizeNarrative(finalNarrationResult.text),
+  );
+  log.info(
+    `Visible narration complete: hiddenDraft=${hiddenNarrative.length} chars, final=${narrativeText.length} chars`,
+  );
+
   if (narrativeText) {
+    yield { type: "narrative", data: { text: narrativeText } };
     appendChatMessages(campaignId, [
       { role: "assistant", content: narrativeText },
     ]);
   }
+
   const newTick =
     successfulTravel && successfulTravel.tickAdvance > 0
       ? advanceCampaignTick(campaignId, successfulTravel.tickAdvance)
@@ -807,6 +907,7 @@ export async function* processTurn(
     oracleResult,
     toolCalls: toolCallResults,
     narrativeText,
+    sceneAssembly,
   };
 
   if (onPostTurn) {

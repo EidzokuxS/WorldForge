@@ -33,10 +33,14 @@ import {
   hydrateStoredPlayerRecord,
 } from "../character/record-adapters.js";
 import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
-import { buildStorytellerContract } from "./storyteller-contract.js";
+import {
+  buildStorytellerContract,
+  type StorytellerPass,
+} from "./storyteller-contract.js";
 import { deriveStartConditionEffects } from "./start-condition-runtime.js";
 import { listRecentLocationEvents } from "./location-events.js";
 import { loadAuthoritativeInventoryView } from "../inventory/authority.js";
+import type { SceneAssembly } from "./scene-assembly.js";
 
 const log = createLogger("prompt-assembler");
 
@@ -53,6 +57,7 @@ export interface AssembleOptions {
   campaignId: string;
   /** Model's context window in tokens. */
   contextWindow: number;
+  storytellerPass?: StorytellerPass;
   /** Whether to include chat history in the assembled system prompt. */
   includeRecentConversation?: boolean;
   /** Oracle result (optional -- not available for Oracle call itself). */
@@ -68,6 +73,12 @@ export interface AssembleOptions {
   playerAction?: string;
   /** Judge role for LLM-based importance detection during compression. */
   judgeRole?: ResolvedRole;
+}
+
+export interface FinalNarrationPrompt {
+  system: string;
+  prompt: string;
+  assembledBase: AssembledPrompt;
 }
 
 // -- LLM-based importance detection for smart compression --------------------
@@ -145,11 +156,13 @@ const RUNTIME_SCENE_RULES = `Runtime narration rules:
 - Skill tiers are Novice < Skilled < Master. Higher skill tier gives better odds on relevant actions.
 - Use the terminology, concepts, and naming conventions from the world premise and lore context. If the world has specific terms for abilities, locations, or social structures, use those terms consistently instead of generic fantasy equivalents.`;
 
-const SYSTEM_RULES = [
-  OUTPUT_RULES,
-  buildStorytellerContract(),
-  RUNTIME_SCENE_RULES,
-].join("\n\n");
+function buildSystemRules(pass: StorytellerPass): string {
+  return [
+    OUTPUT_RULES,
+    buildStorytellerContract({ pass }),
+    RUNTIME_SCENE_RULES,
+  ].join("\n\n");
+}
 
 
 // -- Smart conversation compression -----------------------------------------
@@ -729,6 +742,7 @@ export async function assemblePrompt(
   const {
     campaignId,
     contextWindow,
+    storytellerPass = "hidden-tool-driving",
     includeRecentConversation = true,
     actionResult,
     embedderResult,
@@ -740,13 +754,14 @@ export async function assemblePrompt(
   const budgets = allocateBudgets(contextWindow);
   const responseHeadroom = budgets.responseHeadroom ?? Math.floor(contextWindow * 0.25);
   const effectiveMax = contextWindow - responseHeadroom;
+  const systemRules = buildSystemRules(storytellerPass);
 
   // 1. System rules (never truncate)
   const systemSection: PromptSection = {
     name: "SYSTEM RULES",
     priority: 0,
-    content: SYSTEM_RULES,
-    estimatedTokens: estimateTokens(SYSTEM_RULES),
+    content: systemRules,
+    estimatedTokens: estimateTokens(systemRules),
     canTruncate: false,
   };
 
@@ -867,6 +882,95 @@ export async function assemblePrompt(
     totalTokens,
     budgetUsed,
     formatted,
+  };
+}
+
+function formatListSection(name: string, values: string[], emptyState: string): string {
+  const lines = values.length > 0 ? values.map((value) => `- ${value}`) : [`- ${emptyState}`];
+  return `[${name}]\n${lines.join("\n")}`;
+}
+
+function formatOpeningState(sceneAssembly: SceneAssembly): string {
+  const openingState = sceneAssembly.openingState;
+  if (!openingState) {
+    return "[OPENING STATE]\n- No structured opening state is active.";
+  }
+
+  const lines = [
+    openingState.active ? "Structured opening state is active." : "Structured opening state has expired.",
+    openingState.locationName ? `Opening location: ${openingState.locationName}` : null,
+    openingState.arrivalMode ? `Arrival mode: ${openingState.arrivalMode}` : null,
+    openingState.startingVisibility ? `Visibility: ${openingState.startingVisibility}` : null,
+    openingState.immediateSituation ? `Immediate situation: ${openingState.immediateSituation}` : null,
+    openingState.entryPressure.length > 0
+      ? `Entry pressure: ${openingState.entryPressure.join(", ")}`
+      : null,
+    ...openingState.promptLines,
+    ...openingState.sceneContextLines,
+  ].filter((line): line is string => Boolean(line));
+
+  return `[OPENING STATE]\n${lines.map((line) => `- ${line}`).join("\n")}`;
+}
+
+export async function assembleFinalNarrationPrompt(options: {
+  campaignId: string;
+  contextWindow: number;
+  sceneAssembly: SceneAssembly;
+  actionResult?: AssembleOptions["actionResult"];
+  embedderResult?: ResolveResult;
+  playerAction?: string;
+  judgeRole?: ResolvedRole;
+}): Promise<FinalNarrationPrompt> {
+  const assembledBase = await assemblePrompt({
+    campaignId: options.campaignId,
+    contextWindow: options.contextWindow,
+    storytellerPass: "final-visible",
+    includeRecentConversation: true,
+    actionResult: options.actionResult,
+    embedderResult: options.embedderResult,
+    playerAction: options.playerAction,
+    judgeRole: options.judgeRole,
+  });
+
+  const prompt = [
+    assembledBase.formatted,
+    formatOpeningState(options.sceneAssembly),
+    formatListSection(
+      "SCENE EFFECTS",
+      options.sceneAssembly.sceneEffects.map(
+        (effect) =>
+          `${effect.summary} [source=${effect.source}; kind=${effect.kind}; player-perceivable=${effect.perceivable ? "yes" : "no"}]`,
+      ),
+      "No authoritative scene effects were assembled.",
+    ),
+    formatListSection(
+      "PLAYER-PERCEIVABLE CONSEQUENCES",
+      options.sceneAssembly.playerPerceivableConsequences,
+      "No additional player-perceivable consequences are in scope.",
+    ),
+    formatListSection(
+      "RECENT LOCAL CONTEXT",
+      options.sceneAssembly.recentContext.map(
+        (entry) => `[Tick ${entry.tick}] ${entry.summary} (${entry.source})`,
+      ),
+      "No recent local context is relevant.",
+    ),
+    formatListSection(
+      "PRESENT ACTORS",
+      options.sceneAssembly.presentNpcNames,
+      "No other present actors are confirmed in the current scene.",
+    ),
+    `[FINAL NARRATION TASK]
+Write one final narration pass from the settled opening state, current scene, scene effects, and player-perceivable consequences.
+Do not invent material events outside these authoritative inputs.
+Do not write tool syntax or metadata.
+Keep the output bounded to what the player can perceive in this scene.`,
+  ].join("\n\n");
+
+  return {
+    system: buildStorytellerContract({ pass: "final-visible" }),
+    prompt,
+    assembledBase,
   };
 }
 

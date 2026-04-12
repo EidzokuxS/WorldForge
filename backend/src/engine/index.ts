@@ -7,11 +7,12 @@ export {
 
 export type { PromptSection } from "./token-budget.js";
 
-export { assemblePrompt } from "./prompt-assembler.js";
+export { assemblePrompt, assembleFinalNarrationPrompt } from "./prompt-assembler.js";
 
 export type {
   AssembledPrompt,
   AssembleOptions,
+  FinalNarrationPrompt,
 } from "./prompt-assembler.js";
 
 export {
@@ -30,10 +31,24 @@ export type {
 export { processTurn, detectMovement, sanitizeNarrative } from "./turn-processor.js";
 
 export type {
+  HiddenTurnSummary,
   TurnEvent,
   TurnOptions,
   TurnSummary,
 } from "./turn-processor.js";
+
+export {
+  assembleAuthoritativeScene,
+  collapseRepeatedNarrationBlocks,
+} from "./scene-assembly.js";
+
+export type {
+  AssembleSceneOptions,
+  AuthoritativeOpeningState,
+  AuthoritativeSceneContext,
+  SceneAssembly,
+  SceneEffect,
+} from "./scene-assembly.js";
 
 export { createStorytellerTools } from "./tool-schemas.js";
 
