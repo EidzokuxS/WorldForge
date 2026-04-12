@@ -83,4 +83,26 @@ describe("storyteller-contract", () => {
     assertNoRejectedMotifs(hidden);
     assertNoRejectedMotifs(final);
   });
+
+  it("adds GLM overlay text only when requested and shares preset source across passes", () => {
+    const hiddenPlain = buildStorytellerContract({ pass: "hidden-tool-driving" });
+    const hiddenWithOverlay = buildStorytellerContract({
+      pass: "hidden-tool-driving",
+      includeGlmOverlay: true,
+    });
+    const finalWithOverlay = buildStorytellerContract({
+      pass: "final-visible",
+      includeGlmOverlay: true,
+    });
+
+    expect(hiddenPlain).toContain("Do not speak or decide for the player");
+    expect(hiddenPlain).not.toContain("preserve sampler behavior");
+
+    expect(hiddenWithOverlay).toContain("cut repetitive loops");
+    expect(hiddenWithOverlay).toContain("preserve sampler behavior");
+
+    expect(finalWithOverlay).toContain("Write one final narration");
+    expect(finalWithOverlay).toContain("visible pass");
+    expect(finalWithOverlay).not.toContain("Do not speak or decide for the player");
+  });
 });

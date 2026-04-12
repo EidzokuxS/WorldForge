@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { ProviderConfig } from "../provider-registry.js";
+import type { ModelCreationOptions, ProviderConfig } from "../provider-registry.js";
 
 // Mock both SDK providers before importing the module under test
 const mockOpenAIChatFn = vi.fn();
@@ -14,6 +14,22 @@ vi.mock("@ai-sdk/openai", () => ({
 
 vi.mock("@ai-sdk/anthropic", () => ({
   createAnthropic: mockCreateAnthropic,
+}));
+
+const mockDefaultSettingsMiddleware = vi.fn((options) => ({
+  specificationVersion: "v3" as const,
+  _tag: "defaultSettings",
+  options,
+}));
+const mockWrapLanguageModel = vi.fn(({ model, middleware }) => ({
+  modelId: "wrapped-model",
+  baseModel: model,
+  middleware,
+}));
+
+vi.mock("ai", () => ({
+  defaultSettingsMiddleware: mockDefaultSettingsMiddleware,
+  wrapLanguageModel: mockWrapLanguageModel,
 }));
 
 // Import after mocks are set up
@@ -285,5 +301,130 @@ describe("createModel", () => {
     const result = createModel(config);
 
     expect(result).toBe(fakeModel);
+  });
+
+  it("preserves default reasoning middleware behavior for non-storyteller callers", () => {
+    const fakeModel = { modelId: "glm-5.1" };
+    mockOpenAIChatFn.mockReturnValue(fakeModel);
+
+    const config: ProviderConfig = {
+      id: "glm",
+      name: "ZAI",
+      baseUrl: "https://api.z.ai/api/paas/v4",
+      apiKey: "key",
+      model: "GLM-5.1",
+    };
+
+    const result = createModel(config) as { baseModel: unknown };
+
+    expect(mockWrapLanguageModel).toHaveBeenCalledTimes(1);
+    expect(result.baseModel).toBe(fakeModel);
+  });
+
+  it("wraps reasoning-capable OpenAI-compatible models with reasoning settings", () => {
+    const fakeModel = { modelId: "glm-5.1" };
+    mockOpenAIChatFn.mockReturnValue(fakeModel);
+
+    const config: ProviderConfig = {
+      id: "glm",
+      name: "ZAI",
+      baseUrl: "https://api.z.ai/api/paas/v4",
+      apiKey: "key",
+      model: "GLM-5.1",
+    };
+
+    const result = createModel(config) as {
+      baseModel: unknown;
+      middleware: Array<{
+        specificationVersion: "v3";
+        transformParams?: (options: { params: Record<string, unknown> }) => Promise<Record<string, unknown>>;
+        _tag?: string;
+        options?: unknown;
+      }>;
+    };
+
+    expect(mockWrapLanguageModel).toHaveBeenCalledTimes(1);
+    expect(result.baseModel).toBe(fakeModel);
+    expect(mockDefaultSettingsMiddleware).toHaveBeenCalledWith({
+      settings: {
+        providerOptions: {
+          openai: {
+            forceReasoning: true,
+            reasoningEffort: "high",
+          },
+        },
+      },
+    });
+    expect(result.middleware).toHaveLength(2);
+  });
+
+  it("keeps storyteller GLM requests off the default reasoning wrapper when explicit", () => {
+    const fakeModel = { modelId: "glm-5.1" };
+    mockOpenAIChatFn.mockReturnValue(fakeModel);
+
+    const config: ProviderConfig = {
+      id: "glm",
+      name: "ZAI",
+      baseUrl: "https://api.z.ai/api/paas/v4",
+      apiKey: "key",
+      model: "GLM-5.1",
+    };
+
+    const options: ModelCreationOptions = { role: "storyteller", familyHint: "glm" };
+    const result = createModel(config, options);
+
+    expect(mockWrapLanguageModel).not.toHaveBeenCalled();
+    expect(result).toBe(fakeModel);
+  });
+
+  it("can explicitly request non-glm behavior for storyteller role", () => {
+    const fakeModel = { modelId: "glm-5.1" };
+    mockOpenAIChatFn.mockReturnValue(fakeModel);
+
+    const config: ProviderConfig = {
+      id: "glm",
+      name: "ZAI",
+      baseUrl: "https://api.z.ai/api/paas/v4",
+      apiKey: "key",
+      model: "GLM-5.1",
+    };
+
+    const options: ModelCreationOptions = { role: "storyteller", familyHint: "baseline" };
+    const result = createModel(config, options);
+
+    expect(mockWrapLanguageModel).toHaveBeenCalledTimes(1);
+    expect((result as { baseModel: unknown }).baseModel).toBe(fakeModel);
+  });
+
+  it("strips temperature from reasoning-model call params", async () => {
+    const fakeModel = { modelId: "glm-5.1" };
+    mockOpenAIChatFn.mockReturnValue(fakeModel);
+
+    const config: ProviderConfig = {
+      id: "glm",
+      name: "GLM",
+      baseUrl: "https://api.z.ai/api/paas/v4",
+      apiKey: "key",
+      model: "GLM-5.1",
+    };
+
+    const result = createModel(config) as {
+      middleware: Array<{
+        specificationVersion: "v3";
+        transformParams?: (options: { params: Record<string, unknown> }) => Promise<Record<string, unknown>>;
+      }>;
+    };
+
+    const transform = result.middleware[1]?.transformParams;
+    expect(transform).toBeTypeOf("function");
+
+    const transformed = await transform!({
+      params: { temperature: 0.7, maxOutputTokens: 1024, providerOptions: { openai: { forceReasoning: true } } },
+    });
+
+    expect(transformed).toEqual({
+      maxOutputTokens: 1024,
+      providerOptions: { openai: { forceReasoning: true } },
+    });
   });
 });

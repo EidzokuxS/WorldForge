@@ -3,6 +3,11 @@ import {
   DERIVED_RUNTIME_TAGS_RULE,
   START_CONDITIONS_CONTRACT,
 } from "../character/prompt-contract.js";
+import {
+  buildStorytellerBaselinePreset,
+  buildStorytellerGlmOverlay,
+  type StorytellerSceneMode,
+} from "./storyteller-presets.js";
 
 export const STORYTELLER_WORLD_RULES = [
   "Your output must be narrative prose only.",
@@ -50,6 +55,8 @@ interface BuildStorytellerContractOptions {
   includeWorldRules?: boolean;
   includeContextRules?: boolean;
   includeToolSupportRules?: boolean;
+  includeGlmOverlay?: boolean;
+  sceneMode?: StorytellerSceneMode;
 }
 
 export function buildStorytellerContract(
@@ -60,9 +67,21 @@ export function buildStorytellerContract(
     pass === "final-visible"
       ? FINAL_VISIBLE_NARRATION_RULES
       : HIDDEN_TOOL_DRIVING_RULES;
+  const presetSource = buildStorytellerBaselinePreset({
+    pass,
+    sceneMode: options.sceneMode,
+  });
+  const presetOverlay = options.includeGlmOverlay
+    ? buildStorytellerGlmOverlay({
+      pass,
+      sceneMode: options.sceneMode,
+    })
+    : null;
 
   return [
     passSpecificRules,
+    presetSource,
+    options.includeGlmOverlay ? presetOverlay : null,
     options.includeWorldRules === false ? null : STORYTELLER_WORLD_RULES,
     options.includeContextRules === false ? null : STORYTELLER_CONTEXT_RULES,
     options.includeToolSupportRules === false
