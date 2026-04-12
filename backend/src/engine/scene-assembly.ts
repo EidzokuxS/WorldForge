@@ -9,7 +9,6 @@ import {
   AWARENESS_BAND_CONTRACT,
   getObserverAwareness,
   inferPresenceVisibility,
-  normalizePresenceKey,
   resolveScenePresence,
   resolveStoredSceneScopeId,
   type PresenceSnapshot,
