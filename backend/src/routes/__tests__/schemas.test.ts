@@ -2061,6 +2061,60 @@ describe("phase 48 richer identity schemas", () => {
       expect(result.data.character.tags).toContain("Connected");
     }
   });
+
+  it("derives save-edits compatibility persona and goals from richer identity layers when shallow draft fields are empty", () => {
+    const result = saveEditsSchema.safeParse({
+      campaignId: "camp-1",
+      scaffold: {
+        refinedPremise: "Signals whisper through the alpine dark.",
+        locations: [
+          {
+            name: "Signal Station",
+            description: "A frozen relay tower above the valley.",
+            tags: ["Cold"],
+            isStarting: true,
+            connectedTo: [],
+          },
+        ],
+        factions: [],
+        npcs: [
+          {
+            draft: {
+              ...richerDraft,
+              profile: {
+                ...richerDraft.profile,
+                personaSummary: "",
+              },
+              motivations: {
+                ...richerDraft.motivations,
+                shortTermGoals: [],
+                longTermGoals: [],
+                beliefs: [],
+                drives: [],
+                frictions: [],
+              },
+            },
+            locationName: "Signal Station",
+            factionName: "Wardens",
+            tier: "key",
+          },
+        ],
+        loreCards: [],
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.scaffold.npcs[0]?.persona).toBe("Guardian of the northern line");
+      expect(result.data.scaffold.npcs[0]?.goals).toEqual({
+        shortTerm: ["Hold the barricade"],
+        longTerm: [],
+      });
+      expect(result.data.scaffold.npcs[0]?.draft.identity.liveDynamics.beliefDrift).toEqual([
+        "The valley can still be saved",
+      ]);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

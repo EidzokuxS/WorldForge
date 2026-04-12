@@ -5,6 +5,7 @@ import {
 } from "../runtime-tags.js";
 import {
   projectPlayerRecord,
+  projectNpcRecord,
   fromLegacyNpcRow,
   fromLegacyPlayerRow,
   toLegacyNpcDraft,
@@ -261,6 +262,111 @@ describe("record adapters", () => {
     expect(legacyPlayer.equippedItems).toEqual(["Iron Sword"]);
     expect(JSON.parse(projection.equippedItems)).toEqual(["Iron Sword"]);
     expect(legacyPlayer.equippedItems).not.toEqual(["Legacy Bow"]);
+  });
+
+  it("derives legacy npc persona, goals, and beliefs from the richer identity model when shallow fields are stale", () => {
+    const record: CharacterRecord = {
+      identity: {
+        id: "npc-4",
+        campaignId: "camp-1",
+        role: "npc",
+        tier: "key",
+        displayName: "Captain Mire",
+        canonicalStatus: "known_ip_canonical",
+        baseFacts: {
+          biography: "A veteran signal-station commander.",
+          socialRole: ["npc", "warden"],
+          hardConstraints: ["Will not abandon the station"],
+        },
+        behavioralCore: {
+          motives: ["Protect the valley"],
+          pressureResponses: ["Turns colder under pressure"],
+          taboos: [],
+          attachments: ["The station crew"],
+          selfImage: "Guardian of the northern line",
+        },
+        liveDynamics: {
+          activeGoals: ["Hold the barricade"],
+          beliefDrift: ["The valley can still be saved"],
+          currentStrains: ["Running out of supplies"],
+          earnedChanges: [],
+        },
+      },
+      profile: {
+        species: "Human",
+        gender: "Female",
+        ageText: "42",
+        appearance: "",
+        backgroundSummary: "",
+        personaSummary: "",
+      },
+      socialContext: {
+        factionId: "faction-wardens",
+        factionName: "Wardens",
+        homeLocationId: null,
+        homeLocationName: null,
+        currentLocationId: "loc-barricade",
+        currentLocationName: "North Barricade",
+        relationshipRefs: [],
+        socialStatus: [],
+        originMode: "resident",
+      },
+      motivations: {
+        shortTermGoals: [],
+        longTermGoals: [],
+        beliefs: [],
+        drives: [],
+        frictions: [],
+      },
+      capabilities: {
+        traits: ["Connected"],
+        skills: [],
+        flaws: [],
+        specialties: [],
+        wealthTier: "Comfortable",
+      },
+      state: {
+        hp: 5,
+        conditions: [],
+        statusFlags: [],
+        activityState: "active",
+      },
+      loadout: {
+        inventorySeed: [],
+        equippedItemRefs: [],
+        currencyNotes: "",
+        signatureItems: [],
+      },
+      startConditions: {},
+      provenance: {
+        sourceKind: "import",
+        importMode: "outsider",
+        templateId: null,
+        archetypePrompt: null,
+        worldgenOrigin: "known-ip",
+        legacyTags: ["legacy"],
+      },
+      continuity: {
+        identityInertia: "anchored",
+        protectedCore: ["Will not abandon the station"],
+        mutableSurface: ["Trust in the player"],
+        changePressureNotes: ["Major defeats can force realignment."],
+      },
+    };
+
+    const legacyNpc = toLegacyNpcDraft(record);
+    const projection = projectNpcRecord(record);
+
+    expect(legacyNpc.persona).toBe("Guardian of the northern line");
+    expect(legacyNpc.goals).toEqual({
+      shortTerm: ["Hold the barricade"],
+      longTerm: [],
+    });
+    expect(JSON.parse(projection.goals)).toEqual({
+      short_term: ["Hold the barricade"],
+      long_term: [],
+    });
+    expect(JSON.parse(projection.beliefs)).toEqual(["The valley can still be saved"]);
   });
 });
 
