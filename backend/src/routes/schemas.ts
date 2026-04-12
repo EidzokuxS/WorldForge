@@ -4,9 +4,11 @@ import {
   CHARACTER_WEALTH_TIERS,
 } from "@worldforge/shared";
 import type {
+  CharacterGroundingProfile,
   CanonicalLoadoutPreview,
   PersonaTemplate,
   PersonaTemplateSummary,
+  PowerProfile,
   ResolvedStartConditions,
 } from "@worldforge/shared";
 import {
@@ -428,6 +430,30 @@ const characterContinuitySchema = z.object({
   changePressureNotes: z.array(z.string()).default([]),
 });
 
+const powerProfileSchema = z.object({
+  attack: z.string().default(""),
+  speed: z.string().default(""),
+  durability: z.string().default(""),
+  range: z.string().default(""),
+  strengths: z.array(z.string()).default([]),
+  constraints: z.array(z.string()).default([]),
+  vulnerabilities: z.array(z.string()).default([]),
+  uncertaintyNotes: z.array(z.string()).default([]),
+}) satisfies z.ZodType<PowerProfile>;
+
+const characterGroundingSchema = z.object({
+  summary: z.string().default(""),
+  facts: z.array(z.string()).default([]),
+  abilities: z.array(z.string()).default([]),
+  constraints: z.array(z.string()).default([]),
+  signatureMoves: z.array(z.string()).default([]),
+  strongPoints: z.array(z.string()).default([]),
+  vulnerabilities: z.array(z.string()).default([]),
+  uncertaintyNotes: z.array(z.string()).default([]),
+  powerProfile: powerProfileSchema.optional(),
+  sources: z.array(characterSourceCitationSchema).default([]),
+}) satisfies z.ZodType<CharacterGroundingProfile>;
+
 export const personaTemplatePatchSchema = z.object({
   identity: z.object({
     role: characterRoleSchema.optional(),
@@ -552,6 +578,7 @@ export const characterDraftSchema = z.object({
   loadout: characterLoadoutSchema,
   startConditions: characterStartConditionsSchema.default({}),
   provenance: characterProvenanceSchema,
+  grounding: characterGroundingSchema.optional(),
   sourceBundle: characterSourceBundleSchema.optional(),
   continuity: characterContinuitySchema.optional(),
 });
@@ -849,6 +876,7 @@ export const importV2CardSchema = z.object({
   scenario: z.string().default(""),
   tags: z.array(z.string()).default([]),
   importMode: z.enum(["native", "outsider"]).default("native"),
+  grounding: characterGroundingSchema.optional(),
   ...characterRoleFields,
 }).refine(keyRoleLocationRefine.refinement, keyRoleLocationRefine.options);
 

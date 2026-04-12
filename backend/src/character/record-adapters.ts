@@ -1,13 +1,16 @@
 import type {
   CharacterDraft,
+  CharacterGroundingProfile,
   CharacterIdentityBaseFacts,
   CharacterIdentityBehavioralCore,
   CharacterIdentityLiveDynamics,
+  CharacterIdentitySourceCitation,
   CharacterImportMode,
   CharacterRecord,
   CharacterSkill,
   CharacterTier,
   CharacterWealthTier,
+  PowerProfile,
   PlayerCharacter,
 } from "@worldforge/shared";
 import { CHARACTER_SKILL_TIERS, CHARACTER_WEALTH_TIERS } from "@worldforge/shared";
@@ -148,9 +151,62 @@ function normalizeCharacterDraftRecord<T extends CharacterDraft | CharacterRecor
           ? record.motivations.frictions
           : [...liveDynamics.currentStrains],
     },
+    grounding: normalizeGrounding(record.grounding),
     sourceBundle: normalizeSourceBundle(record.sourceBundle),
     continuity: normalizeContinuity(record.continuity),
   };
+}
+
+function normalizeGrounding(
+  grounding: CharacterGroundingProfile | undefined,
+): CharacterGroundingProfile | undefined {
+  if (!grounding) {
+    return undefined;
+  }
+
+  return {
+    summary: grounding.summary.trim(),
+    facts: dedupeStrings(grounding.facts),
+    abilities: dedupeStrings(grounding.abilities),
+    constraints: dedupeStrings(grounding.constraints),
+    signatureMoves: dedupeStrings(grounding.signatureMoves),
+    strongPoints: dedupeStrings(grounding.strongPoints),
+    vulnerabilities: dedupeStrings(grounding.vulnerabilities),
+    uncertaintyNotes: dedupeStrings(grounding.uncertaintyNotes),
+    powerProfile: normalizePowerProfile(grounding.powerProfile),
+    sources: normalizeGroundingSources(grounding.sources),
+  };
+}
+
+function normalizePowerProfile(
+  profile: PowerProfile | undefined,
+): PowerProfile | undefined {
+  if (!profile) {
+    return undefined;
+  }
+
+  return {
+    attack: profile.attack.trim(),
+    speed: profile.speed.trim(),
+    durability: profile.durability.trim(),
+    range: profile.range.trim(),
+    strengths: dedupeStrings(profile.strengths),
+    constraints: dedupeStrings(profile.constraints),
+    vulnerabilities: dedupeStrings(profile.vulnerabilities),
+    uncertaintyNotes: dedupeStrings(profile.uncertaintyNotes),
+  };
+}
+
+function normalizeGroundingSources(
+  sources: CharacterIdentitySourceCitation[],
+): CharacterIdentitySourceCitation[] {
+  return sources
+    .map((source) => ({
+      ...source,
+      label: source.label.trim(),
+      excerpt: source.excerpt.trim(),
+    }))
+    .filter((source) => source.label.length > 0 && source.excerpt.length > 0);
 }
 
 function normalizeBaseFacts(

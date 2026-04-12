@@ -311,6 +311,30 @@ export interface CharacterContinuityPolicy {
   changePressureNotes: string[];
 }
 
+export interface PowerProfile {
+  attack: string;
+  speed: string;
+  durability: string;
+  range: string;
+  strengths: string[];
+  constraints: string[];
+  vulnerabilities: string[];
+  uncertaintyNotes: string[];
+}
+
+export interface CharacterGroundingProfile {
+  summary: string;
+  facts: string[];
+  abilities: string[];
+  constraints: string[];
+  signatureMoves: string[];
+  strongPoints: string[];
+  vulnerabilities: string[];
+  uncertaintyNotes: string[];
+  powerProfile?: PowerProfile;
+  sources: CharacterIdentitySourceCitation[];
+}
+
 export interface CharacterIdentityDraft {
   role: CharacterRole;
   tier: CharacterTier;
@@ -427,6 +451,7 @@ export interface CharacterDraft {
   loadout: CharacterLoadout;
   startConditions: CharacterStartConditions;
   provenance: CharacterProvenance;
+  grounding?: CharacterGroundingProfile;
   sourceBundle?: CharacterSourceBundle;
   continuity?: CharacterContinuityPolicy;
 }
@@ -441,6 +466,7 @@ export interface CharacterRecord {
   loadout: CharacterLoadout;
   startConditions: CharacterStartConditions;
   provenance: CharacterProvenance;
+  grounding?: CharacterGroundingProfile;
   sourceBundle?: CharacterSourceBundle;
   continuity?: CharacterContinuityPolicy;
 }

@@ -39,6 +39,8 @@ export type {
   CharacterSourceBundle,
   CharacterContinuityInertia,
   CharacterContinuityPolicy,
+  PowerProfile,
+  CharacterGroundingProfile,
   CharacterIdentityDraft,
   CharacterIdentity,
   CharacterProfile,
