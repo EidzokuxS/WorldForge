@@ -125,6 +125,10 @@ export const chatUndoBodySchema = z.object({
   campaignId: campaignIdSchema,
 });
 
+export const chatOpeningBodySchema = z.object({
+  campaignId: campaignIdSchema,
+});
+
 const createCampaignBaseSchema = z.object({
   name: z
     .string()

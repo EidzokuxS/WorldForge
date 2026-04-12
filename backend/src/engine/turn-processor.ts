@@ -81,6 +81,16 @@ export interface TurnOptions {
   onPostTurn?: (summary: TurnSummary) => void | Promise<void>;
 }
 
+export interface OpeningSceneOptions {
+  campaignId: string;
+  storytellerProvider: ProviderConfig;
+  storytellerTemperature: number;
+  storytellerMaxTokens: number;
+  embedderResult?: ResolveResult;
+  fallbackProvider?: ProviderConfig | null;
+  contextWindow?: number;
+}
+
 export interface HiddenTurnSummary {
   currentTick: number;
   predictedTick: number;
@@ -798,6 +808,8 @@ export async function* processTurn(
   };
 
   if (options.onBeforeVisibleNarration) {
+    // The chat route injects tickPresentNpcs() here so present-scene settlement
+    // happens before the final narration pass instead of during post-turn finalization.
     await withTimeout(
       Promise.resolve(options.onBeforeVisibleNarration(hiddenSummary)),
       TURN_FINALIZATION_TIMEOUT_MS,
@@ -924,4 +936,84 @@ export async function* processTurn(
   }
 
   yield { type: "done", data: { tick: newTick } };
+}
+
+export async function* processOpeningScene(
+  options: OpeningSceneOptions,
+): AsyncGenerator<TurnEvent> {
+  const {
+    campaignId,
+    storytellerProvider,
+    storytellerTemperature,
+    storytellerMaxTokens,
+    embedderResult,
+    fallbackProvider,
+    contextWindow = 8192,
+  } = options;
+
+  const currentTick = readCampaignConfig(campaignId).currentTick ?? 0;
+
+  yield {
+    type: "scene-settling",
+    data: {
+      stage: "scene-settling",
+      phase: "opening",
+    },
+  };
+
+  const sceneAssembly = assembleAuthoritativeScene({
+    campaignId,
+    pendingEventTicks: [currentTick],
+    toolCalls: [],
+    openingScene: true,
+  });
+
+  const finalNarrationPrompt = await assembleFinalNarrationPrompt({
+    campaignId,
+    contextWindow,
+    sceneAssembly,
+    embedderResult,
+  });
+
+  yield {
+    type: "scene-settling",
+    data: {
+      stage: "scene-settling",
+      phase: "opening-final-narration",
+      opening: true,
+    },
+  };
+
+  async function runOpeningNarration(provider: ProviderConfig) {
+    return generateText({
+      model: createModel(provider),
+      system: finalNarrationPrompt.system,
+      prompt: finalNarrationPrompt.prompt,
+      temperature: storytellerTemperature,
+      maxOutputTokens: storytellerMaxTokens,
+    });
+  }
+
+  let openingResult;
+  try {
+    openingResult = await runOpeningNarration(storytellerProvider);
+  } catch (openingError) {
+    if (!fallbackProvider) {
+      throw new Error("Opening scene generation failed before visible narration could be produced.");
+    }
+
+    log.warn("Opening scene generation failed, retrying with fallback provider", openingError);
+    openingResult = await runOpeningNarration(fallbackProvider);
+  }
+
+  const narrativeText = collapseRepeatedNarrationBlocks(
+    sanitizeNarrative(openingResult.text),
+  );
+
+  if (narrativeText) {
+    appendChatMessages(campaignId, [{ role: "assistant", content: narrativeText }]);
+    yield { type: "narrative", data: { text: narrativeText } };
+  }
+
+  yield { type: "done", data: { tick: currentTick, opening: true } };
 }

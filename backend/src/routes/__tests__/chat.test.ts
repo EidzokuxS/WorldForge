@@ -46,6 +46,7 @@ vi.mock("../../db/index.js", () => ({
 
 vi.mock("../../engine/index.js", () => ({
   processTurn: vi.fn(),
+  processOpeningScene: vi.fn(),
   captureSnapshot: vi.fn(),
   restoreSnapshot: vi.fn(),
   tickPresentNpcs: vi.fn(),
@@ -109,6 +110,7 @@ import { loadSettings } from "../../settings/index.js";
 import { resolveRoleModel } from "../../ai/index.js";
 import { getDb } from "../../db/index.js";
 import {
+  processOpeningScene,
   processTurn,
   captureSnapshot,
   restoreSnapshot,
@@ -131,6 +133,7 @@ const mockedLoadSettings = vi.mocked(loadSettings);
 const mockedResolveRole = vi.mocked(resolveRoleModel);
 const mockedGetDb = vi.mocked(getDb);
 const mockedProcessTurn = vi.mocked(processTurn);
+const mockedProcessOpeningScene = vi.mocked(processOpeningScene);
 const mockedCaptureSnapshot = vi.mocked(captureSnapshot);
 const mockedRestoreSnapshot = vi.mocked(restoreSnapshot);
 const mockedCheckAndTriggerReflections = vi.mocked(checkAndTriggerReflections);
@@ -255,6 +258,68 @@ describe("GET /chat/history", () => {
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body).toHaveProperty("error");
+  });
+});
+
+describe("POST /chat/opening", () => {
+  it("streams an authoritative opening scene when the campaign has no assistant messages yet", async () => {
+    setupStoryteller();
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockResolvedValue({
+      id: CAMPAIGN_ID,
+      name: "Loaded Campaign",
+      createdAt: "2026-01-01",
+    } as any);
+    mockedGetHistory.mockReturnValue([{ role: "user", content: "Premise setup only." }] as any);
+    mockedProcessOpeningScene.mockImplementation(() =>
+      createTurnStream([
+        { type: "scene-settling", data: { phase: "opening" } },
+        { type: "narrative", data: { text: "Lanternlight cuts across Ash Market as the watch closes in." } },
+        { type: "done", data: { tick: 0, opening: true } },
+      ]),
+    );
+
+    const res = await app.request("/chat/opening", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("event: scene-settling");
+    expect(body).toContain("event: narrative");
+    expect(body).toContain("Lanternlight cuts across Ash Market");
+    expect(mockedProcessOpeningScene).toHaveBeenCalledWith(
+      expect.objectContaining({
+        campaignId: CAMPAIGN_ID,
+      }),
+    );
+  });
+
+  it("rejects opening generation when an assistant message already exists", async () => {
+    setupStoryteller();
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockResolvedValue({
+      id: CAMPAIGN_ID,
+      name: "Loaded Campaign",
+      createdAt: "2026-01-01",
+    } as any);
+    mockedGetHistory.mockReturnValue([
+      { role: "user", content: "Look around." },
+      { role: "assistant", content: "The market glares back at you." },
+    ] as any);
+
+    const res = await app.request("/chat/opening", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toBe("Opening scene already exists for this campaign.");
+    expect(mockedProcessOpeningScene).not.toHaveBeenCalled();
   });
 });
 
@@ -420,9 +485,18 @@ describe("Campaign-loaded gameplay transport", () => {
       orderedCalls.push("tickFactions");
       return [];
     });
-    mockedProcessTurn.mockImplementation(({ onPostTurn }) =>
+    mockedProcessTurn.mockImplementation(({ onBeforeVisibleNarration, onPostTurn }) =>
       (async function* () {
         yield { type: "oracle_result", data: { outcome: "strong_hit" } } as any;
+        yield { type: "scene-settling", data: { phase: "local-present-scene" } } as any;
+        await onBeforeVisibleNarration?.({
+          currentTick: 1,
+          predictedTick: 2,
+          currentLocationId: "loc-001",
+          oracleResult: { outcome: "strong_hit" },
+          toolCalls: [],
+          openingScene: false,
+        } as any);
         orderedCalls.push("finalizing_turn");
         yield { type: "finalizing_turn", data: { stage: "rollback_critical" } } as any;
         await onPostTurn?.({
@@ -451,8 +525,8 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(body).toContain("event: done");
     expect(body.indexOf("event: finalizing_turn")).toBeLessThan(body.indexOf("event: done"));
     expect(orderedCalls).toEqual([
-      "finalizing_turn",
       "tickPresentNpcs",
+      "finalizing_turn",
       "simulateOffscreenNpcs",
       "checkAndTriggerReflections",
       "tickFactions",
@@ -528,8 +602,17 @@ describe("Campaign-loaded gameplay transport", () => {
         type: "npc_offscreen",
       },
     ]);
-    mockedProcessTurn.mockImplementation(({ onPostTurn }) =>
+    mockedProcessTurn.mockImplementation(({ onBeforeVisibleNarration, onPostTurn }) =>
       (async function* () {
+        yield { type: "scene-settling", data: { phase: "local-present-scene" } } as any;
+        await onBeforeVisibleNarration?.({
+          currentTick: 1,
+          predictedTick: 2,
+          currentLocationId: "loc-001",
+          oracleResult: { outcome: "strong_hit" },
+          toolCalls: [],
+          openingScene: false,
+        } as any);
         yield { type: "finalizing_turn", data: { stage: "rollback_critical" } } as any;
         await onPostTurn?.({
           tick: 2,

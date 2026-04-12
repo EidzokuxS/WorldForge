@@ -27,12 +27,27 @@ import {
   chatActionBodySchema,
   chatEditBodySchema,
   chatHistoryQuerySchema,
+  chatOpeningBodySchema,
   chatRetryBodySchema,
   chatUndoBodySchema,
 } from "./schemas.js";
 import { createLogger } from "../lib/index.js";
-import { processTurn, captureSnapshot, restoreSnapshot, tickPresentNpcs, simulateOffscreenNpcs, checkAndTriggerReflections, tickFactions, sanitizeNarrative } from "../engine/index.js";
-import type { TurnSnapshot, TurnSummary } from "../engine/index.js";
+import {
+  processOpeningScene,
+  processTurn,
+  captureSnapshot,
+  restoreSnapshot,
+  tickPresentNpcs,
+  simulateOffscreenNpcs,
+  checkAndTriggerReflections,
+  tickFactions,
+  sanitizeNarrative,
+} from "../engine/index.js";
+import type {
+  HiddenTurnSummary,
+  TurnSnapshot,
+  TurnSummary,
+} from "../engine/index.js";
 import {
   drainPendingCommittedEvents,
   embedAndUpdateEvent,
@@ -85,14 +100,6 @@ async function runRollbackCriticalPostTurn(
     .get();
 
   if (player?.currentLocationId) {
-    await tickPresentNpcs(
-      campaignId,
-      summary.tick,
-      judgeProvider,
-      player.currentLocationId,
-      embedderProvider,
-    );
-
     await simulateOffscreenNpcs(
       campaignId,
       summary.tick,
@@ -109,6 +116,28 @@ async function runRollbackCriticalPostTurn(
   );
 
   await tickFactions(campaignId, summary.tick, judgeProvider);
+}
+
+async function runLocalPresentSceneSettlement(
+  settings: Settings,
+  campaignId: string,
+  judgeProvider: ProviderConfig,
+  summary: HiddenTurnSummary,
+): Promise<void> {
+  if (!summary.currentLocationId) {
+    return;
+  }
+
+  const emb = resolveEmbedder(settings);
+  const embedderProvider = !("error" in emb) ? emb.resolved.provider : undefined;
+
+  await tickPresentNpcs(
+    campaignId,
+    summary.predictedTick,
+    judgeProvider,
+    summary.currentLocationId,
+    embedderProvider,
+  );
 }
 
 function queueAuxiliaryPostTurnWork(
@@ -235,6 +264,20 @@ function buildOnPostTurn(
   };
 }
 
+function buildOnBeforeVisibleNarration(
+  settings: Settings,
+  campaignId: string,
+  judgeProvider: ProviderConfig,
+): ((summary: HiddenTurnSummary) => Promise<void>) | undefined {
+  return async (summary: HiddenTurnSummary) => {
+    await runLocalPresentSceneSettlement(settings, campaignId, judgeProvider, summary);
+  };
+}
+
+function campaignHasAssistantMessages(campaignId: string): boolean {
+  return getChatHistory(campaignId).some((message) => message.role === "assistant");
+}
+
 // -- GET /history -------------------------------------------------------------
 
 app.get("/history", async (c) => {
@@ -259,6 +302,77 @@ app.get("/history", async (c) => {
     return c.json(
       { error: getErrorMessage(error, "Failed to read chat history.") },
       getErrorStatus(error)
+    );
+  }
+});
+
+// -- POST /opening — Authoritative opening-scene generation via SSE ----------
+
+app.post("/opening", async (c) => {
+  let turnStartedForCampaign: string | null = null;
+  try {
+    const result = await parseBody(c, chatOpeningBodySchema);
+    if ("response" in result) return result.response;
+
+    const { campaignId } = result.data;
+    const campaign = await requireLoadedCampaign(c, campaignId);
+    if (campaign instanceof Response) return campaign;
+    if (!tryBeginTurn(campaignId)) {
+      return c.json({ error: "The world is still settling. Wait for the turn to finish." }, 409);
+    }
+    turnStartedForCampaign = campaignId;
+
+    if (campaignHasAssistantMessages(campaignId)) {
+      endTurn(campaignId);
+      turnStartedForCampaign = null;
+      return c.json({ error: "Opening scene already exists for this campaign." }, 409);
+    }
+
+    const settings = loadSettings();
+    const stResult = resolveStoryteller(settings);
+    if ("error" in stResult) {
+      return c.json({ error: stResult.error }, stResult.status);
+    }
+
+    const embedderResult = resolveEmbedder(settings);
+    const fallbackProvider = resolveFallbackProvider(settings.fallback, settings.providers);
+
+    c.header("Cache-Control", "no-cache, no-transform");
+
+    return streamSSE(c, async (stream) => {
+      try {
+        const openingGenerator = processOpeningScene({
+          campaignId,
+          storytellerProvider: stResult.resolved.provider,
+          storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
+          storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
+          embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
+          fallbackProvider,
+        });
+
+        for await (const event of openingGenerator) {
+          await stream.writeSSE({
+            event: event.type,
+            data: JSON.stringify(event.data),
+          });
+        }
+      } catch (error) {
+        await stream.writeSSE({
+          event: "error",
+          data: JSON.stringify({ error: getErrorMessage(error, "Opening scene generation failed.") }),
+        });
+      } finally {
+        endTurn(campaignId);
+        turnStartedForCampaign = null;
+      }
+    });
+  } catch (error) {
+    if (turnStartedForCampaign) {
+      endTurn(turnStartedForCampaign);
+    }
+    return c.json(
+      { error: getErrorMessage(error, "Opening request failed.") },
+      getErrorStatus(error),
     );
   }
 });
@@ -423,6 +537,11 @@ app.post("/action", async (c) => {
           storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
           embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
           fallbackProvider,
+          onBeforeVisibleNarration: buildOnBeforeVisibleNarration(
+            settings,
+            campaignId,
+            judgeResult.resolved.provider,
+          ),
           onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider),
         });
 
@@ -544,6 +663,11 @@ app.post("/retry", async (c) => {
           storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
           embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
           fallbackProvider,
+          onBeforeVisibleNarration: buildOnBeforeVisibleNarration(
+            settings,
+            campaignId,
+            judgeResult.resolved.provider,
+          ),
           onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider),
         });
 
