@@ -629,6 +629,11 @@ export function suggestSeed(
 // ───── Turn SSE Parser ─────
 
 export interface TurnSSEHandlers {
+  onSceneSettling?: (status: {
+    stage?: string;
+    phase?: string;
+    opening?: boolean;
+  }) => void;
   onNarrative: (text: string) => void;
   onOracleResult: (result: { chance: number; roll: number; outcome: string; reasoning: string }) => void;
   onStateUpdate: (update: { tool: string; args: unknown; result: unknown }) => void;
@@ -655,6 +660,7 @@ export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: T
     try {
       const parsed = JSON.parse(currentData);
       switch (currentEvent) {
+        case "scene-settling": handlers.onSceneSettling?.(parsed); break;
         case "narrative": handlers.onNarrative(parsed.text); break;
         case "oracle_result": handlers.onOracleResult(parsed); break;
         case "state_update": handlers.onStateUpdate(parsed); break;
@@ -1067,6 +1073,10 @@ export function chatAction(
     intent,
     method,
   });
+}
+
+export function chatOpening(campaignId: string): Promise<Response> {
+  return apiStreamPost("/api/chat/opening", { campaignId });
 }
 
 export function chatRetry(campaignId: string): Promise<Response> {

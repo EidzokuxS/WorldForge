@@ -12,13 +12,26 @@ describe("NarrativeLog", () => {
 
   it("shows default empty state when no messages and no premise", () => {
     render(<NarrativeLog {...defaultProps} />);
-    expect(screen.getByText("Begin your adventure...")).toBeInTheDocument();
+    expect(
+      screen.getByText("Begin your adventure when the opening scene is ready.")
+    ).toBeInTheDocument();
   });
 
   it("does not render premise as opening narration and keeps a neutral opening placeholder when no assistant messages exist", () => {
     render(<NarrativeLog {...defaultProps} premise="You awake in a dungeon." />);
     expect(screen.queryByText("You awake in a dungeon.")).not.toBeInTheDocument();
-    expect(screen.getByText("Begin your adventure...")).toBeInTheDocument();
+    expect(
+      screen.getByText("Begin your adventure when the opening scene is ready.")
+    ).toBeInTheDocument();
+  });
+
+  it("shows explicit opening progress copy while the runtime generates the first scene", () => {
+    render(<NarrativeLog {...defaultProps} sceneProgress="opening" />);
+    expect(
+      screen.getByText(
+        "The opening scene is taking shape. The runtime is grounding your first moment before narration appears."
+      )
+    ).toBeInTheDocument();
   });
 
   it("renders user messages with > prefix", () => {

@@ -10,6 +10,7 @@ interface NarrativeLogProps {
   premise: string;
   isStreaming: boolean;
   turnPhase?: "idle" | "streaming" | "finalizing";
+  sceneProgress?: "opening" | "scene-settling" | null;
   onRetry?: () => void;
   onUndo?: () => void;
   onEdit?: (index: number, content: string) => void;
@@ -18,9 +19,10 @@ interface NarrativeLogProps {
 
 export function NarrativeLog({
   messages,
-  premise,
+  premise: _premise,
   isStreaming,
   turnPhase = isStreaming ? "streaming" : "idle",
+  sceneProgress = null,
   onRetry,
   onUndo,
   onEdit,
@@ -82,7 +84,7 @@ export function NarrativeLog({
           <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-6 px-6 py-8 lg:px-12">
             {messages.length === 0 ? (
               <p className="pt-12 font-serif text-lg italic leading-relaxed text-muted-foreground">
-                {premise || "Begin your adventure..."}
+                Begin your adventure when the opening scene is ready.
               </p>
             ) : (
               messages.map((message, index) => {
@@ -195,6 +197,16 @@ export function NarrativeLog({
             {turnPhase === "streaming" ? (
               <p className="font-serif text-sm italic text-muted-foreground">
                 The storyteller is weaving the scene...
+              </p>
+            ) : null}
+            {sceneProgress === "opening" ? (
+              <p className="font-serif text-sm italic text-muted-foreground">
+                The opening scene is taking shape. The runtime is grounding your first moment before narration appears.
+              </p>
+            ) : null}
+            {sceneProgress === "scene-settling" ? (
+              <p className="font-serif text-sm italic text-muted-foreground">
+                The scene is still settling into place before the narration begins.
               </p>
             ) : null}
             {turnPhase === "finalizing" ? (

@@ -14,6 +14,7 @@ vi.mock("@/lib/api", () => ({
   chatAction: vi.fn(),
   chatEdit: vi.fn(),
   chatHistory: vi.fn(),
+  chatOpening: vi.fn(),
   chatRetry: vi.fn(),
   chatUndo: vi.fn(),
   getActiveCampaign: vi.fn(),
@@ -61,27 +62,34 @@ vi.mock("@/components/game/narrative-log", () => ({
     isStreaming,
     messages,
     onRetry,
-    premise,
+    sceneProgress,
     turnPhase,
   }: {
     canRetryUndo?: boolean;
     isStreaming?: boolean;
     messages?: Array<{ role: string; content: string }>;
     onRetry?: () => void;
-    premise?: string;
+    sceneProgress?: "opening" | "scene-settling" | null;
     turnPhase?: "idle" | "streaming" | "finalizing";
   }) => (
     <div data-testid="narrative-log">
       <div data-testid="turn-phase">
         {turnPhase ?? (isStreaming ? "streaming" : "idle")}
       </div>
+      <div data-testid="scene-progress">{sceneProgress ?? "none"}</div>
       {messages?.length ? (
         messages.map((message, index) => (
           <p key={`${message.role}-${index}`}>{message.content}</p>
         ))
       ) : (
-        <p>{premise || "Begin your adventure..."}</p>
+        <p>Begin your adventure when the opening scene is ready.</p>
       )}
+      {sceneProgress === "opening" ? (
+        <p>The opening scene is taking shape. The runtime is grounding your first moment before narration appears.</p>
+      ) : null}
+      {sceneProgress === "scene-settling" ? (
+        <p>The scene is still settling into place before the narration begins.</p>
+      ) : null}
       {turnPhase === "finalizing" ? (
         <p>The world is still resolving. Retry and undo unlock when the turn is complete.</p>
       ) : null}
@@ -170,6 +178,7 @@ import {
   apiGet,
   chatAction,
   chatHistory,
+  chatOpening,
   chatRetry,
   getActiveCampaign,
   getRememberedCampaignId,
@@ -185,6 +194,7 @@ const mockedGetWorld = vi.mocked(getWorldData);
 const mockedApiGet = vi.mocked(apiGet);
 const mockedChatAction = vi.mocked(chatAction);
 const mockedChatHistory = vi.mocked(chatHistory);
+const mockedChatOpening = vi.mocked(chatOpening);
 const mockedChatRetry = vi.mocked(chatRetry);
 const mockedGetRememberedCampaignId = vi.mocked(getRememberedCampaignId);
 const mockedLoadCampaign = vi.mocked(loadCampaign);
@@ -330,6 +340,7 @@ describe("GamePage", () => {
   });
 
   it("does not render premise as opening narration and keeps a neutral opening placeholder on /game when no assistant messages exist", async () => {
+    mockedChatOpening.mockResolvedValue(createStreamResponse() as never);
     await renderReadyGame({
       messages: [],
       premise: "You awake in a dungeon.",
@@ -337,7 +348,58 @@ describe("GamePage", () => {
     });
 
     expect(screen.queryByText("You awake in a dungeon.")).not.toBeInTheDocument();
-    expect(screen.getByText("Begin your adventure...")).toBeInTheDocument();
+    expect(
+      screen.getByText("Begin your adventure when the opening scene is ready.")
+    ).toBeInTheDocument();
+  });
+
+  it("requests opening scene generation when the campaign has no assistant messages", async () => {
+    mockedChatOpening.mockResolvedValue(createStreamResponse() as never);
+
+    await renderReadyGame({
+      messages: [],
+      premise: "A dark world",
+      hasLiveTurnSnapshot: false,
+    });
+
+    await waitFor(() => {
+      expect(mockedChatOpening).toHaveBeenCalledWith(fakeCampaign.id);
+    });
+  });
+
+  it("shows opening progress separately from finalizing while the first scene is being generated", async () => {
+    mockedChatOpening.mockResolvedValue(createStreamResponse() as never);
+    let releaseOpening: (() => void) | null = null;
+    mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
+      handlers.onSceneSettling?.({ phase: "opening-hidden-pass", opening: true });
+      await new Promise<void>((resolve) => {
+        releaseOpening = resolve;
+      });
+      handlers.onNarrative("Lanternlight cuts across the market.");
+      handlers.onDone();
+    });
+
+    await renderReadyGame({
+      messages: [],
+      premise: "A dark world",
+      hasLiveTurnSnapshot: false,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("scene-progress")).toHaveTextContent("opening");
+    });
+    expect(
+      screen.getByText(
+        "The opening scene is taking shape. The runtime is grounding your first moment before narration appears."
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByText("The world is still resolving. Retry and undo unlock when the turn is complete.")).not.toBeInTheDocument();
+
+    releaseOpening?.();
+
+    await waitFor(() => {
+      expect(screen.getByText("Lanternlight cuts across the market.")).toBeInTheDocument();
+    });
   });
 
   it("renders toolbar with Title, Settings, and Saves buttons", async () => {

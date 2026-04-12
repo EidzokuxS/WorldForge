@@ -31,6 +31,7 @@ import {
   chatAction,
   chatEdit,
   chatHistory,
+  chatOpening,
   chatRetry,
   chatUndo,
   getActiveCampaign,
@@ -44,6 +45,7 @@ import type { WorldData } from "@/lib/api-types";
 
 type TurnPhase = "idle" | "streaming" | "finalizing";
 type QuickAction = { label: string; action: string };
+type SceneProgress = "opening" | "scene-settling" | null;
 
 type TravelFeedbackState = {
   locationId: string;
@@ -101,6 +103,7 @@ export default function GamePage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [turnPhase, setTurnPhase] = useState<TurnPhase>("idle");
+  const [sceneProgress, setSceneProgress] = useState<SceneProgress>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const [hasLiveTurnSnapshot, setHasLiveTurnSnapshot] = useState(false);
   const [lastOracleResult, setLastOracleResult] = useState<OracleResultData | null>(null);
@@ -110,6 +113,7 @@ export default function GamePage() {
   const [travelFeedback, setTravelFeedback] = useState<string | null>(null);
   const bufferedQuickActionsRef = useRef<QuickAction[]>([]);
   const messagesRef = useRef<ChatMessage[]>([]);
+  const openingRequestCampaignRef = useRef<string | null>(null);
 
   const refreshWorldData = useCallback(
     async (campaignId: string) => {
@@ -126,6 +130,19 @@ export default function GamePage() {
   const clearQuickActionState = useCallback(() => {
     bufferedQuickActionsRef.current = [];
     setQuickActions([]);
+  }, []);
+
+  const upsertAssistantMessage = useCallback((content: string) => {
+    setMessages((current) => {
+      const next = [...current];
+      const lastIndex = next.length - 1;
+      if (lastIndex >= 0 && next[lastIndex].role === "assistant") {
+        next[lastIndex] = { ...next[lastIndex], content };
+        return next;
+      }
+
+      return [...next, { role: "assistant", content }];
+    });
   }, []);
 
   const bufferQuickActions = useCallback((actions: QuickAction[]) => {
@@ -151,8 +168,75 @@ export default function GamePage() {
       setPremise(history.premise || fallbackPremise);
       setHasLiveTurnSnapshot(history.hasLiveTurnSnapshot);
       setWorldData(world);
+
+      return {
+        messages: safeMessages,
+        hasAssistantMessage: safeMessages.some((message) => message.role === "assistant"),
+      };
     },
     [],
+  );
+
+  const applySceneSettlingStatus = useCallback((status?: { phase?: string; opening?: boolean }) => {
+    const phase = status?.phase ?? "";
+    const isOpeningPhase = status?.opening === true || phase.startsWith("opening");
+    setSceneProgress(isOpeningPhase ? "opening" : "scene-settling");
+    setTurnPhase("idle");
+  }, []);
+
+  const requestOpeningScene = useCallback(
+    async (campaignId: string) => {
+      if (openingRequestCampaignRef.current === campaignId) {
+        return;
+      }
+
+      openingRequestCampaignRef.current = campaignId;
+      setSceneProgress("opening");
+      setTurnPhase("idle");
+
+      let openingNarrative = "";
+      let openingFailed: string | null = null;
+
+      try {
+        const response = await chatOpening(campaignId);
+        if (!response.body) {
+          throw new Error("Empty opening scene stream.");
+        }
+
+        await parseTurnSSE(response.body, {
+          onSceneSettling: applySceneSettlingStatus,
+          onNarrative: (text) => {
+            openingNarrative += text;
+            setSceneProgress(null);
+            setTurnPhase("streaming");
+            upsertAssistantMessage(openingNarrative);
+          },
+          onOracleResult: () => {},
+          onStateUpdate: () => {},
+          onQuickActions: () => {},
+          onDone: () => {
+            setSceneProgress(null);
+            setTurnPhase("idle");
+            void refreshWorldData(campaignId);
+          },
+          onError: (error) => {
+            openingFailed = error;
+          },
+        });
+
+        if (openingFailed) {
+          throw new Error(openingFailed);
+        }
+      } catch (error) {
+        openingRequestCampaignRef.current = null;
+        setSceneProgress(null);
+        setTurnPhase("idle");
+        toast.error("Failed to generate opening scene", {
+          description: getErrorMessage(error, "Unknown opening scene error."),
+        });
+      }
+    },
+    [applySceneSettlingStatus, refreshWorldData, upsertAssistantMessage],
   );
 
   const rollbackRetryBoundary = useCallback(
@@ -200,7 +284,10 @@ export default function GamePage() {
 
         if (cancelled) return;
         setActiveCampaign(campaign);
-        await restoreGameplayState(campaign.id, campaign.premise);
+        const restored = await restoreGameplayState(campaign.id, campaign.premise);
+        if (!cancelled && !restored.hasAssistantMessage) {
+          void requestOpeningScene(campaign.id);
+        }
       } catch (error) {
         toast.error("Failed to load game state", {
           description: getErrorMessage(error, "Unknown initialization error."),
@@ -218,7 +305,7 @@ export default function GamePage() {
     return () => {
       cancelled = true;
     };
-  }, [restoreGameplayState, router]);
+  }, [requestOpeningScene, restoreGameplayState, router]);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -284,29 +371,17 @@ export default function GamePage() {
   }, [activeCampaign, player]);
 
   const canInteract = Boolean(activeCampaign) && !isInitializing;
-  const isTurnBusy = turnPhase !== "idle";
-
-  const updateAssistantContent = (text: string) => {
-    setMessages((current) => {
-      const next = [...current];
-      const lastIndex = next.length - 1;
-      if (lastIndex >= 0 && next[lastIndex].role === "assistant") {
-        next[lastIndex] = { ...next[lastIndex], content: text };
-      }
-      return next;
-    });
-  };
+  const isTurnBusy = turnPhase !== "idle" || sceneProgress !== null;
 
   const submitAction = async (actionText: string) => {
     if (!actionText || isTurnBusy || !activeCampaign) return;
 
-    setTurnPhase("streaming");
+    setTurnPhase("idle");
+    setSceneProgress("scene-settling");
     setLastOracleResult(null);
     setTravelFeedback(null);
     clearQuickActionState();
 
-    // Track whether we successfully started receiving narrative data
-    let streamStarted = false;
     let turnCompleted = false;
 
     try {
@@ -318,15 +393,17 @@ export default function GamePage() {
 
       // Only add messages to chat once the stream connection succeeds
       const userMessage: ChatMessage = { role: "user", content: actionText };
-      setMessages((current) => [...current, userMessage, { role: "assistant", content: "" }]);
-      streamStarted = true;
+      setMessages((current) => [...current, userMessage]);
 
       let narrativeText = "";
 
       await parseTurnSSE(response.body, {
+        onSceneSettling: applySceneSettlingStatus,
         onNarrative: (text) => {
           narrativeText += text;
-          updateAssistantContent(narrativeText);
+          setSceneProgress(null);
+          setTurnPhase("streaming");
+          upsertAssistantMessage(narrativeText);
         },
         onOracleResult: (result) => {
           setLastOracleResult(result as OracleResultData);
@@ -345,10 +422,12 @@ export default function GamePage() {
           bufferQuickActions(actions);
         },
         onFinalizing: () => {
+          setSceneProgress(null);
           setTurnPhase("finalizing");
         },
         onDone: () => {
           turnCompleted = true;
+          setSceneProgress(null);
           setTurnPhase("idle");
           setHasLiveTurnSnapshot(true);
           revealBufferedQuickActions();
@@ -362,28 +441,25 @@ export default function GamePage() {
         },
       });
     } catch (error) {
-      if (streamStarted) {
-        // Remove empty assistant placeholder if stream failed after messages were added
-        setMessages((current) => {
-          const next = [...current];
-          const lastMessage = next[next.length - 1];
-          if (lastMessage?.role === "assistant" && !lastMessage.content.trim()) {
-            next.pop();
-          }
-          // Also remove the user message that triggered the failed turn
-          const prevMessage = next[next.length - 1];
-          if (prevMessage?.role === "user") {
-            next.pop();
-          }
-          return next;
-        });
-      }
+      setMessages((current) => {
+        const next = [...current];
+        const lastMessage = next[next.length - 1];
+        if (lastMessage?.role === "assistant") {
+          next.pop();
+        }
+        const prevMessage = next[next.length - 1];
+        if (prevMessage?.role === "user" && prevMessage.content === actionText) {
+          next.pop();
+        }
+        return next;
+      });
 
       toast.error("Failed to generate narrative", {
         description: getErrorMessage(error, "Unknown streaming error."),
       });
     } finally {
       if (!turnCompleted) {
+        setSceneProgress(null);
         setTurnPhase("idle");
       }
     }
@@ -392,7 +468,8 @@ export default function GamePage() {
   const handleRetry = async () => {
     if (isTurnBusy || !activeCampaign) return;
 
-    setTurnPhase("streaming");
+    setTurnPhase("idle");
+    setSceneProgress("scene-settling");
     setLastOracleResult(null);
     setTravelFeedback(null);
     clearQuickActionState();
@@ -403,8 +480,7 @@ export default function GamePage() {
       if (next.length > 0 && next[next.length - 1].role === "assistant") {
         next.pop();
       }
-      // Add empty assistant placeholder
-      return [...next, { role: "assistant" as const, content: "" }];
+      return next;
     });
     let turnCompleted = false;
     let retryStreamError: string | null = null;
@@ -419,9 +495,12 @@ export default function GamePage() {
       let narrativeText = "";
 
       await parseTurnSSE(response.body, {
+        onSceneSettling: applySceneSettlingStatus,
         onNarrative: (text) => {
           narrativeText += text;
-          updateAssistantContent(narrativeText);
+          setSceneProgress(null);
+          setTurnPhase("streaming");
+          upsertAssistantMessage(narrativeText);
         },
         onOracleResult: (result) => {
           setLastOracleResult(result as OracleResultData);
@@ -439,10 +518,12 @@ export default function GamePage() {
           bufferQuickActions(actions);
         },
         onFinalizing: () => {
+          setSceneProgress(null);
           setTurnPhase("finalizing");
         },
         onDone: () => {
           turnCompleted = true;
+          setSceneProgress(null);
           setTurnPhase("idle");
           setHasLiveTurnSnapshot(true);
           revealBufferedQuickActions();
@@ -466,6 +547,7 @@ export default function GamePage() {
       });
     } finally {
       if (!turnCompleted) {
+        setSceneProgress(null);
         setTurnPhase("idle");
       }
     }
@@ -625,6 +707,7 @@ export default function GamePage() {
             premise={premise}
             isStreaming={turnPhase === "streaming"}
             turnPhase={turnPhase}
+            sceneProgress={sceneProgress}
             onRetry={handleRetry}
             onUndo={handleUndo}
             onEdit={handleEdit}
