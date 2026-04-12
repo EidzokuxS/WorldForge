@@ -48,7 +48,11 @@ Plans:
   1. Player sees the same carried and equipped items before and after reload, with no fallback-only items appearing in prompts or gameplay state.
   2. Picking up, dropping, equipping, or unequipping an item updates one authoritative runtime state that later turns also read.
   3. Starting loadout, live inventory changes, checkpoints, and restored gameplay all reflect the same item truth instead of diverging models.
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 38-01-PLAN.md — Define authoritative item-row equipment metadata, legacy backfill, and reload/restore migration tests.
+- [ ] 38-02-PLAN.md — Rewire backend prompt, world, and compatibility readers to the shared authoritative inventory seam.
+- [ ] 38-03-PLAN.md — Rewire frontend world parsing and `/game` inventory/equipment rendering to the authoritative backend contract.
 
 ### Phase 39: Honest Turn Boundary, Retry & Undo
 **Goal**: The turn the player sees as complete is the same authoritative world boundary used by retry and undo.
