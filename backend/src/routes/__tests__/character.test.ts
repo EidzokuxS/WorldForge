@@ -15,6 +15,14 @@ vi.mock("../../character/index.js", () => ({
   researchArchetype: vi.fn(),
 }));
 
+vi.mock("../../character/archetype-researcher.js", () => ({
+  synthesizeArchetypeGrounding: vi.fn(),
+}));
+
+vi.mock("../../character/grounded-character-profile.js", () => ({
+  synthesizeGroundedCharacterProfile: vi.fn(),
+}));
+
 vi.mock("../../db/index.js", () => ({
   getDb: vi.fn(),
 }));
@@ -74,6 +82,8 @@ import {
   generateNpcFromArchetype,
   researchArchetype,
 } from "../../character/index.js";
+import { synthesizeArchetypeGrounding } from "../../character/archetype-researcher.js";
+import { synthesizeGroundedCharacterProfile } from "../../character/grounded-character-profile.js";
 import { getActiveCampaign, loadCampaign, readCampaignConfig } from "../../campaign/index.js";
 import { getDb } from "../../db/index.js";
 import { resolveStartingLocation } from "../../worldgen/index.js";
@@ -92,6 +102,8 @@ const mockedMapV2Char = vi.mocked(mapV2CardToCharacter);
 const mockedMapV2Npc = vi.mocked(mapV2CardToNpc);
 const mockedResearchArchetype = vi.mocked(researchArchetype);
 const mockedResolveStart = vi.mocked(resolveStartingLocation);
+const mockedSynthesizeArchetypeGrounding = vi.mocked(synthesizeArchetypeGrounding);
+const mockedSynthesizeGroundedCharacterProfile = vi.mocked(synthesizeGroundedCharacterProfile);
 
 // ---------------------------------------------------------------------------
 // App setup
@@ -165,6 +177,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockedLoadCampaign.mockRejectedValue(new Error("not found"));
   mockedReadCampaignConfig.mockReturnValue({ currentTick: 0 } as any);
+  mockedSynthesizeArchetypeGrounding.mockReturnValue(undefined as any);
+  mockedSynthesizeGroundedCharacterProfile.mockReturnValue(undefined as any);
 });
 
 function makePlayerDraft(overrides: Record<string, unknown> = {}) {
@@ -321,6 +335,45 @@ function makeNpcDraft(overrides: Record<string, unknown> = {}) {
         signatureItems: [],
       },
     }),
+    ...overrides,
+  };
+}
+
+function makeGrounding(overrides: Record<string, unknown> = {}) {
+  return {
+    summary: "Canon-grounded battlefield commander with bounded human-scale reach.",
+    facts: [
+      "Held the signal station through repeated sieges.",
+      "Prioritizes civilian evacuation over reckless offense.",
+    ],
+    abilities: ["Command presence", "Signal doctrine"],
+    constraints: ["Human physiology", "Needs support assets for area control"],
+    signatureMoves: ["Relay flare fallback"],
+    strongPoints: ["Discipline", "Tactical reading"],
+    vulnerabilities: ["Can be isolated", "Limited solo offense"],
+    uncertaintyNotes: ["Combat output remains bounded by sparse canon feats."],
+    powerProfile: {
+      attack: "Human-scale martial threat backed by command support.",
+      speed: "Veteran reactions with no superhuman feats.",
+      durability: "Human durability with siege-hardened endurance.",
+      range: "Short personal reach, extended by relay support.",
+      strengths: ["Discipline", "Tactical reading"],
+      constraints: ["Needs allies or equipment for area control"],
+      vulnerabilities: ["Can be isolated", "Limited solo offense"],
+      uncertaintyNotes: ["Battlefield support contributes heavily to peak performance."],
+    },
+    sources: [
+      {
+        kind: "canon",
+        label: "Station Chronicle",
+        excerpt: "Captain Mire held the relay through the final evacuation.",
+      },
+      {
+        kind: "research",
+        label: "Archetype research",
+        excerpt: "Commander archetype notes stress battlefield control and duty.",
+      },
+    ],
     ...overrides,
   };
 }
@@ -508,6 +561,7 @@ describe("POST /api/worldgen/research-character", () => {
       },
     });
     mockedGenCharArch.mockResolvedValue(fakeDraft as any);
+    mockedSynthesizeArchetypeGrounding.mockReturnValue(makeGrounding() as any);
 
     const res = await app.request("/api/worldgen/research-character", {
       method: "POST",
@@ -521,8 +575,40 @@ describe("POST /api/worldgen/research-character", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.role).toBe("player");
-    expect(body.draft).toEqual(fakeDraft);
+    expect(body.draft.grounding).toEqual(makeGrounding());
+    expect(body.characterRecord.grounding).toEqual(makeGrounding());
     expect(body.character).toMatchObject({ name: "Blade" });
+    expect(body.characterRecord.sourceBundle.secondarySources[0]?.label).toBe(
+      "Generator concept",
+    );
+  });
+
+  it("degrades gracefully when research grounding synthesis fails", async () => {
+    setActiveCampaign();
+    createMockDbForResolveNames();
+    mockedResearchArchetype.mockResolvedValue("swordmaster notes");
+    const fakeDraft = makePlayerDraft();
+    mockedGenCharArch.mockResolvedValue(fakeDraft as any);
+    mockedSynthesizeArchetypeGrounding.mockImplementation(() => {
+      throw new Error("grounding failed");
+    });
+
+    const res = await app.request("/api/worldgen/research-character", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        archetype: "Swordmaster",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.draft.grounding).toBeUndefined();
+    expect(body.characterRecord.grounding).toBeUndefined();
+    expect(body.characterRecord.sourceBundle.secondarySources[0]?.label).toBe(
+      "Generator concept",
+    );
   });
 });
 
@@ -551,6 +637,17 @@ describe("POST /api/worldgen/import-v2-card", () => {
       },
     });
     mockedMapV2Char.mockResolvedValue(fakeDraft as any);
+    mockedSynthesizeGroundedCharacterProfile.mockReturnValue(
+      makeGrounding({
+        sources: [
+          {
+            kind: "card",
+            label: "V2 card description",
+            excerpt: "A mysterious traveler",
+          },
+        ],
+      }) as any,
+    );
 
     const res = await app.request("/api/worldgen/import-v2-card", {
       method: "POST",
@@ -561,11 +658,21 @@ describe("POST /api/worldgen/import-v2-card", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.role).toBe("player");
-    expect(body.draft).toEqual(fakeDraft);
+    expect(body.draft.grounding?.sources).toEqual([
+      {
+        kind: "card",
+        label: "V2 card description",
+        excerpt: "A mysterious traveler",
+      },
+    ]);
+    expect(body.characterRecord.grounding?.powerProfile.constraints).toEqual([
+      "Needs allies or equipment for area control",
+    ]);
     expect(body.characterRecord.identity.baseFacts.biography).toBe(
       "A wandering swordsman.",
     );
     expect(body.character).toMatchObject({ name: "Raven" });
+    expect(mockedResearchArchetype).not.toHaveBeenCalled();
     expect(mockedMapV2Char).toHaveBeenCalledWith(
       expect.objectContaining({
         name: "Raven",
@@ -586,6 +693,7 @@ describe("POST /api/worldgen/import-v2-card", () => {
       },
     });
     mockedMapV2Npc.mockResolvedValue(fakeDraft as any);
+    mockedSynthesizeGroundedCharacterProfile.mockReturnValue(makeGrounding() as any);
 
     const res = await app.request("/api/worldgen/import-v2-card", {
       method: "POST",
@@ -600,9 +708,13 @@ describe("POST /api/worldgen/import-v2-card", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.role).toBe("key");
-    expect(body.draft).toEqual(fakeDraft);
+    expect(body.draft.grounding?.summary).toContain("Canon-grounded");
+    expect(body.characterRecord.grounding?.uncertaintyNotes).toEqual([
+      "Combat output remains bounded by sparse canon feats.",
+    ]);
     expect(body.characterRecord.continuity.identityInertia).toBe("flexible");
     expect(body.npc).toMatchObject({ name: "Raven" });
+    expect(mockedResearchArchetype).not.toHaveBeenCalled();
     expect(mockedMapV2Npc).toHaveBeenCalledWith(
       expect.objectContaining({
         name: "Raven",
@@ -650,6 +762,30 @@ describe("POST /api/worldgen/import-v2-card", () => {
         importMode: "outsider",
       })
     );
+  });
+
+  it("still succeeds when import grounding synthesis fails", async () => {
+    setActiveCampaign();
+    createMockDbForResolveNames();
+    mockedMapV2Char.mockResolvedValue(makePlayerDraft() as any);
+    mockedSynthesizeGroundedCharacterProfile.mockImplementation(() => {
+      throw new Error("import grounding failed");
+    });
+
+    const res = await app.request("/api/worldgen/import-v2-card", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(v2Body),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.draft.grounding).toBeUndefined();
+    expect(body.characterRecord.grounding).toBeUndefined();
+    expect(body.characterRecord.sourceBundle.secondarySources[0]?.label).toBe(
+      "Generator concept",
+    );
+    expect(mockedResearchArchetype).not.toHaveBeenCalled();
   });
 });
 
