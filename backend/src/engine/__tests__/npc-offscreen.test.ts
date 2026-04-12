@@ -250,6 +250,22 @@ describe("simulateOffscreenNpcs", () => {
     expect(results[0]!.npcName).toBe("Lord Blackwood");
     expect(results[0]!.actionSummary).toBe("Plotted in his study");
   });
+
+  it("routes same broad-location actors through off-screen handling when encounter scope says they are outside the local scene", async () => {
+    setupMockDb({
+      offscreenNpcs: [],
+    });
+
+    const results = await simulateOffscreenNpcs(
+      CAMPAIGN_ID,
+      10,
+      JUDGE_PROVIDER,
+      PLAYER_LOCATION_ID,
+    );
+
+    expect(generateText).toHaveBeenCalledOnce();
+    expect(results).toHaveLength(1);
+  });
 });
 
 describe("parseOffscreenUpdates", () => {

@@ -469,6 +469,22 @@ describe("tickPresentNpcs", () => {
 
     expect(results).toEqual([]);
   });
+
+  it("uses encounter scope instead of same broad location membership when selecting present NPCs", async () => {
+    setupMockDb({
+      npcsAtLocation: [
+        createMockNpc({
+          name: "Satoru Gojo",
+          currentLocationId: LOCATION_ID,
+          derivedTags: '["encounter scope mismatch","same broad location"]',
+        }),
+      ],
+    });
+
+    const results = await tickPresentNpcs(CAMPAIGN_ID, TICK, JUDGE_PROVIDER, LOCATION_ID);
+
+    expect(results).toEqual([]);
+  });
 });
 
 describe("tickNpcAgent", () => {
@@ -615,5 +631,28 @@ describe("tickNpcAgent", () => {
     );
     expect(systemPrompt).not.toContain("legacy belief");
     expect(systemPrompt).not.toContain("legacy goal");
+  });
+
+  it("filters nearby entities by encounter scope and justified knowledge basis instead of same broad location membership", async () => {
+    setupMockDb({
+      npcsAtLocation: [
+        {
+          name: "Megumi Fushiguro",
+          tags: '["ally","encounter scope","knowledge basis: perceived_now"]',
+        },
+        {
+          name: "Satoru Gojo",
+          tags: '["same broad location","outside encounter scope","knowledge basis: none"]',
+        },
+      ],
+      player: { name: "Yuji Itadori" },
+    });
+
+    await tickNpcAgent(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
+
+    const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
+    expect(systemPrompt).toContain("Nearby entities:");
+    expect(systemPrompt).toContain("Megumi Fushiguro");
+    expect(systemPrompt).not.toContain("Satoru Gojo");
   });
 });

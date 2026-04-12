@@ -534,6 +534,66 @@ describe("Campaign-loaded gameplay transport", () => {
     ]);
   });
 
+  it("uses local scene scope instead of broad currentLocationId for pre-visible scene scope settlement", async () => {
+    setupStoryteller();
+    setupDbMock();
+
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
+      id: campaignId,
+      name: `Campaign ${campaignId}`,
+      createdAt: "2026-01-01",
+    }) as any);
+    mockedCaptureSnapshot.mockImplementation((campaignId) => ({
+      campaignId,
+      spawnedNpcIds: [],
+      spawnedItemIds: [],
+      revealedLocationIds: [],
+      createdRelationshipIds: [],
+      createdChronicleIds: [],
+    }) as any);
+    mockedProcessTurn.mockImplementation(({ onBeforeVisibleNarration, onPostTurn }) =>
+      (async function* () {
+        yield { type: "scene-settling", data: { phase: "local-present-scene" } } as any;
+        await onBeforeVisibleNarration?.({
+          currentTick: 1,
+          predictedTick: 2,
+          currentLocationId: "shibuya-district",
+          currentSceneScopeId: "platform-7",
+          oracleResult: { outcome: "strong_hit" },
+          toolCalls: [],
+          openingScene: false,
+        } as any);
+        await onPostTurn?.({
+          tick: 2,
+          toolCalls: [],
+        } as any);
+        yield { type: "done", data: { tick: 2 } } as any;
+      })(),
+    );
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Hold the platform",
+        intent: "Hold the platform",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(mockedTickPresentNpcs).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      2,
+      expect.any(Object),
+      "platform-7",
+      undefined,
+    );
+  });
+
   it("drains queued committed events for non-log_event writers after reflection finalization", async () => {
     setupStoryteller();
     setupDbMock();

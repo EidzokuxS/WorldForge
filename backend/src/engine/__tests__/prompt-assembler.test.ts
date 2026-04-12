@@ -562,6 +562,304 @@ describe("assemblePrompt", () => {
     expect(result.prompt).toContain("player-perceivable=yes");
   });
 
+  it("filters encounter scope so same broad-location actors do not enter visible or hidden prompt context while hidden but present actors stay as awareness hints", async () => {
+    vi.mocked(readCampaignConfig).mockReturnValue({
+      name: "Encounter Scope Campaign",
+      premise: "Shibuya breaks into several immediate scenes at once.",
+      currentTick: 21,
+      createdAt: Date.now(),
+      generationComplete: true,
+    });
+
+    vi.mocked(getDb).mockReturnValue(
+      createMockDb({
+        players: [
+          {
+            id: "p1",
+            campaignId: "test-campaign-123",
+            name: "Yuji",
+            hp: 5,
+            tags: "[]",
+            equippedItems: "[]",
+            currentLocationId: "loc-1",
+            characterRecord: JSON.stringify({
+              identity: {
+                id: "p1",
+                campaignId: "test-campaign-123",
+                role: "player",
+                tier: "key",
+                displayName: "Yuji",
+                canonicalStatus: "original",
+              },
+              profile: {
+                species: "Human",
+                gender: "",
+                ageText: "",
+                appearance: "",
+                backgroundSummary: "",
+                personaSummary: "",
+              },
+              socialContext: {
+                factionId: null,
+                factionName: null,
+                homeLocationId: null,
+                homeLocationName: null,
+                currentLocationId: "loc-1",
+                currentLocationName: "Shibuya Station",
+                relationshipRefs: [],
+                socialStatus: [],
+                originMode: "resident",
+              },
+              motivations: {
+                shortTermGoals: [],
+                longTermGoals: [],
+                beliefs: [],
+                drives: [],
+                frictions: [],
+              },
+              capabilities: {
+                traits: [],
+                skills: [],
+                flaws: [],
+                specialties: [],
+                wealthTier: null,
+              },
+              state: {
+                hp: 5,
+                conditions: [],
+                statusFlags: [],
+                activityState: "active",
+              },
+              loadout: {
+                inventorySeed: [],
+                equippedItemRefs: [],
+                currencyNotes: "",
+                signatureItems: [],
+              },
+              startConditions: {},
+              provenance: {
+                sourceKind: "generator",
+                importMode: null,
+                templateId: null,
+                archetypePrompt: null,
+                worldgenOrigin: null,
+                legacyTags: [],
+              },
+            }),
+          },
+        ],
+        locations: [
+          {
+            id: "loc-1",
+            campaignId: "test-campaign-123",
+            name: "Shibuya Station",
+            description: "A district-scale location with several active encounter pockets.",
+            tags: '["macro"]',
+            connectedTo: "[]",
+          },
+        ],
+        npcs: [
+          {
+            id: "n1",
+            campaignId: "test-campaign-123",
+            name: "Nanami",
+            persona: "Focused and direct",
+            tags: '["sorcerer"]',
+            tier: "key",
+            currentLocationId: "loc-1",
+            goals: '{"short_term":["Protect Yuji"],"long_term":[]}',
+            beliefs: '["Stay on mission"]',
+            characterRecord: JSON.stringify({
+              identity: {
+                id: "n1",
+                campaignId: "test-campaign-123",
+                role: "npc",
+                tier: "key",
+                displayName: "Nanami",
+                canonicalStatus: "original",
+              },
+              profile: {
+                species: "Human",
+                gender: "",
+                ageText: "",
+                appearance: "",
+                backgroundSummary: "",
+                personaSummary: "Focused and direct",
+              },
+              socialContext: {
+                factionId: null,
+                factionName: null,
+                homeLocationId: null,
+                homeLocationName: null,
+                currentLocationId: "loc-1",
+                currentLocationName: "Shibuya Station",
+                relationshipRefs: [],
+                socialStatus: [],
+                originMode: "resident",
+              },
+              motivations: {
+                shortTermGoals: ["Protect Yuji"],
+                longTermGoals: [],
+                beliefs: ["Stay on mission"],
+                drives: [],
+                frictions: [],
+              },
+              capabilities: {
+                traits: [],
+                skills: [],
+                flaws: [],
+                specialties: [],
+                wealthTier: null,
+              },
+              state: {
+                hp: 5,
+                conditions: [],
+                statusFlags: [],
+                activityState: "active",
+              },
+              loadout: {
+                inventorySeed: [],
+                equippedItemRefs: [],
+                currencyNotes: "",
+                signatureItems: [],
+              },
+              startConditions: {},
+              provenance: {
+                sourceKind: "generator",
+                importMode: null,
+                templateId: null,
+                archetypePrompt: null,
+                worldgenOrigin: null,
+                legacyTags: [],
+              },
+            }),
+            derivedTags: '["sorcerer"]',
+          },
+          {
+            id: "n2",
+            campaignId: "test-campaign-123",
+            name: "Gojo",
+            persona: "Watching from another encounter pocket",
+            tags: '["sorcerer","same-broad-location-only"]',
+            tier: "key",
+            currentLocationId: "loc-1",
+            goals: '{"short_term":["Observe from the rooftop"],"long_term":[]}',
+            beliefs: '["Do not reveal yourself yet"]',
+            characterRecord: JSON.stringify({
+              identity: {
+                id: "n2",
+                campaignId: "test-campaign-123",
+                role: "npc",
+                tier: "key",
+                displayName: "Gojo",
+                canonicalStatus: "original",
+              },
+              profile: {
+                species: "Human",
+                gender: "",
+                ageText: "",
+                appearance: "",
+                backgroundSummary: "",
+                personaSummary: "Watching from another encounter pocket",
+              },
+              socialContext: {
+                factionId: null,
+                factionName: null,
+                homeLocationId: null,
+                homeLocationName: null,
+                currentLocationId: "loc-1",
+                currentLocationName: "Shibuya Station",
+                relationshipRefs: [],
+                socialStatus: [],
+                originMode: "resident",
+              },
+              motivations: {
+                shortTermGoals: ["Observe from the rooftop"],
+                longTermGoals: [],
+                beliefs: ["Do not reveal yourself yet"],
+                drives: [],
+                frictions: [],
+              },
+              capabilities: {
+                traits: [],
+                skills: [],
+                flaws: [],
+                specialties: [],
+                wealthTier: null,
+              },
+              state: {
+                hp: 5,
+                conditions: ["Hidden"],
+                statusFlags: [],
+                activityState: "active",
+              },
+              loadout: {
+                inventorySeed: [],
+                equippedItemRefs: [],
+                currencyNotes: "",
+                signatureItems: [],
+              },
+              startConditions: {},
+              provenance: {
+                sourceKind: "generator",
+                importMode: null,
+                templateId: null,
+                archetypePrompt: null,
+                worldgenOrigin: null,
+                legacyTags: [],
+              },
+            }),
+            derivedTags: '["sorcerer","same-broad-location-only"]',
+          },
+        ],
+      }) as unknown as ReturnType<typeof getDb>,
+    );
+
+    const result = await assembleFinalNarrationPrompt({
+      campaignId: "test-campaign-123",
+      contextWindow: 8192,
+      sceneAssembly: {
+        openingScene: false,
+        openingState: null,
+        currentScene: {
+          id: "scene-platform-7",
+          name: "Platform 7",
+          description: "A concrete platform inside the larger station district.",
+          tags: ["encounter-scope"],
+        },
+        presentNpcNames: ["Nanami"],
+        recentContext: [
+          {
+            tick: 21,
+            summary: "A pressure shift suggests someone hidden but present above the platform.",
+            source: "location_recent_event",
+          },
+        ],
+        sceneEffects: [
+          {
+            id: "scope-1",
+            kind: "environment",
+            source: "recent_context",
+            summary: "A pressure shift suggests someone hidden but present above the platform.",
+            perceivable: true,
+            actor: null,
+            target: null,
+            locationId: "scene-platform-7",
+            causalDetail: "Encounter scope should hint without revealing identity.",
+          },
+        ],
+        playerPerceivableConsequences: [
+          "Nanami squares up beside you.",
+          "A pressure shift suggests someone hidden but present above the platform.",
+        ],
+      },
+    });
+
+    expect(result.prompt).toContain("Nanami");
+    expect(result.prompt).toContain("hidden but present");
+    expect(result.prompt).not.toContain("Gojo");
+  });
+
   it("uses double newlines between sections", async () => {
     const result = await assemblePrompt(defaultOptions);
     // At minimum, [SYSTEM RULES] and [WORLD PREMISE] should be separated by double newline
