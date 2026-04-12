@@ -79,6 +79,60 @@ function CompactTextarea({
   );
 }
 
+function formatCanonicalStatus(
+  status: CharacterDraft["identity"]["canonicalStatus"],
+): string {
+  switch (status) {
+    case "known_ip_canonical":
+      return "Known IP Canonical";
+    case "known_ip_diverged":
+      return "Known IP Diverged";
+    case "imported":
+      return "Imported";
+    default:
+      return "Original";
+  }
+}
+
+function getIdentityFidelitySummary(draft: CharacterDraft) {
+  const selfImage = draft.identity.behavioralCore?.selfImage?.trim() ?? "";
+  const activeGoals = (draft.identity.liveDynamics?.activeGoals ?? [])
+    .map((goal) => goal.trim())
+    .filter(Boolean)
+    .slice(0, 2);
+  const sourceLabels = Array.from(
+    new Set(
+      [
+        ...(draft.sourceBundle?.canonSources ?? []),
+        ...(draft.sourceBundle?.secondarySources ?? []),
+      ]
+        .map((citation) => citation.label.trim())
+        .filter(Boolean),
+    ),
+  ).slice(0, 3);
+  const continuityLabel = draft.continuity
+    ? `${draft.continuity.identityInertia.charAt(0).toUpperCase()}${draft.continuity.identityInertia.slice(1)} continuity`
+    : null;
+  const changePressureNote = draft.continuity?.changePressureNotes?.find((note) => note.trim()) ?? null;
+  const hasFidelitySignals = Boolean(
+    draft.identity.canonicalStatus !== "original"
+    || selfImage
+    || activeGoals.length > 0
+    || sourceLabels.length > 0
+    || continuityLabel,
+  );
+
+  return {
+    hasFidelitySignals,
+    canonicalStatusLabel: formatCanonicalStatus(draft.identity.canonicalStatus),
+    continuityLabel,
+    selfImage,
+    activeGoals,
+    sourceLabels,
+    changePressureNote,
+  };
+}
+
 function CharacterCardInner({
   draft,
   locationNames,
@@ -128,6 +182,7 @@ function CharacterCardInner({
   }
 
   const loadoutToRender = previewLoadout?.loadout ?? local.loadout;
+  const identityFidelity = getIdentityFidelitySummary(local);
 
   return (
     <div className="flex flex-col gap-[clamp(20px,1.8vw,36px)] border border-border/30 rounded-lg bg-zinc-900 p-[clamp(20px,1.8vw,36px)]">
@@ -207,6 +262,64 @@ function CharacterCardInner({
           </div>
         </div>
       </div>
+
+      {identityFidelity.hasFidelitySignals && (
+        <div className="flex flex-col gap-[clamp(10px,0.8vw,16px)] rounded-lg border border-zinc-700/50 bg-zinc-800/30 p-[clamp(12px,1vw,18px)]">
+          <SectionLabel>Identity Fidelity</SectionLabel>
+          <div className="grid gap-[clamp(10px,0.8vw,16px)] md:grid-cols-2">
+            <div className="flex flex-col gap-1">
+              <FieldLabel>Canon Status</FieldLabel>
+              <p className="text-[13px] text-zinc-300">
+                {identityFidelity.canonicalStatusLabel}
+              </p>
+            </div>
+            {identityFidelity.continuityLabel && (
+              <div className="flex flex-col gap-1">
+                <FieldLabel>Continuity</FieldLabel>
+                <p className="text-[13px] text-zinc-300">
+                  {identityFidelity.continuityLabel}
+                </p>
+              </div>
+            )}
+          </div>
+          {identityFidelity.selfImage && (
+            <div className="flex flex-col gap-1">
+              <FieldLabel>Core Self-Image</FieldLabel>
+              <p className="text-[13px] leading-6 text-zinc-300">
+                {identityFidelity.selfImage}
+              </p>
+            </div>
+          )}
+          {identityFidelity.activeGoals.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <FieldLabel>Live Identity Pressure</FieldLabel>
+              <p className="text-[13px] text-zinc-300">
+                {identityFidelity.activeGoals.join(" · ")}
+              </p>
+            </div>
+          )}
+          {identityFidelity.sourceLabels.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <FieldLabel>Source Signals</FieldLabel>
+              <div className="flex flex-wrap gap-2">
+                {identityFidelity.sourceLabels.map((label) => (
+                  <span
+                    key={label}
+                    className="rounded-full border border-zinc-700/60 px-2 py-1 text-[12px] text-zinc-400"
+                  >
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {identityFidelity.changePressureNote && (
+            <p className="text-[12px] text-zinc-500">
+              {identityFidelity.changePressureNote}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* ── CAPABILITIES ── */}
       <div className="flex flex-col gap-[clamp(10px,0.8vw,16px)]">
