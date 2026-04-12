@@ -19,18 +19,18 @@ created: 2026-04-12
 |----------|-------|
 | **Framework** | Vitest 3.2.4 |
 | **Config file** | `vitest.config.ts`, `backend/vitest.config.ts`, `frontend/vitest.config.ts` |
-| **Quick run command** | `npx vitest run backend/src/routes/__tests__/schemas.test.ts backend/src/character/__tests__/generator.test.ts backend/src/character/__tests__/persona-templates.test.ts backend/src/routes/__tests__/character.test.ts backend/src/routes/__tests__/persona-templates.test.ts backend/src/routes/__tests__/campaigns.test.ts backend/src/engine/__tests__/npc-agent.test.ts backend/src/engine/__tests__/reflection-agent.test.ts frontend/lib/__tests__/character-drafts.test.ts frontend/components/character-creation/__tests__/character-card.test.tsx` |
+| **Quick run command** | `npm --prefix frontend run typecheck && npx vitest run backend/src/character/__tests__/record-adapters.test.ts backend/src/character/__tests__/record-adapters.identity.test.ts backend/src/routes/__tests__/schemas.test.ts backend/src/character/__tests__/generator.test.ts backend/src/character/__tests__/npc-generator.test.ts backend/src/character/__tests__/persona-templates.test.ts backend/src/routes/__tests__/character.test.ts backend/src/routes/__tests__/persona-templates.test.ts backend/src/routes/__tests__/campaigns.test.ts backend/src/engine/__tests__/npc-agent.test.ts backend/src/engine/__tests__/npc-offscreen.test.ts backend/src/engine/__tests__/prompt-assembler.character-identity.test.ts backend/src/engine/__tests__/reflection-agent.test.ts backend/src/engine/__tests__/reflection-agent.identity-boundaries.test.ts frontend/lib/__tests__/character-drafts.test.ts frontend/components/character-creation/__tests__/character-card.identity.test.tsx` |
 | **Full suite command** | `npx vitest run` |
-| **Estimated runtime** | ~90 seconds |
+| **Estimated runtime** | ~90 seconds full combined run; task-local samples should stay under ~30 seconds |
 
 ---
 
 ## Sampling Rate
 
-- **After every task commit:** Run `npx vitest run backend/src/routes/__tests__/schemas.test.ts backend/src/character/__tests__/generator.test.ts backend/src/character/__tests__/persona-templates.test.ts backend/src/routes/__tests__/character.test.ts backend/src/routes/__tests__/persona-templates.test.ts backend/src/routes/__tests__/campaigns.test.ts backend/src/engine/__tests__/npc-agent.test.ts backend/src/engine/__tests__/reflection-agent.test.ts frontend/lib/__tests__/character-drafts.test.ts frontend/components/character-creation/__tests__/character-card.test.tsx`
+- **After every task commit:** Run that task's own `<automated>` verify command from the plan file. Do not use the full combined phase smoke as the default per-task sample.
 - **After every plan wave:** Run `npx vitest run`
 - **Before `$gsd-verify-work`:** Full suite must be green
-- **Max feedback latency:** 90 seconds
+- **Max feedback latency:** 30 seconds for task-local sampling, ~90 seconds only at wave/phase gates
 
 ---
 
@@ -39,13 +39,13 @@ created: 2026-04-12
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
 | 48-01-01 | 01 | 1 | CHARF-01 | unit | `npx vitest run backend/src/character/__tests__/record-adapters.identity.test.ts backend/src/routes/__tests__/schemas.test.ts` | ❌ W0 | ⬜ pending |
-| 48-01-02 | 01 | 1 | CHARF-01 | unit | `npx vitest run backend/src/character/__tests__/record-adapters.test.ts backend/src/character/__tests__/record-adapters.identity.test.ts backend/src/routes/__tests__/schemas.test.ts` | ⚠️ partial | ⬜ pending |
+| 48-01-02 | 01 | 1 | CHARF-01 | unit | `npx vitest run backend/src/character/__tests__/record-adapters.test.ts backend/src/character/__tests__/record-adapters.identity.test.ts backend/src/routes/__tests__/schemas.test.ts` | ⚠️ partial - must include pre-Phase-48 saved-record backfill case | ⬜ pending |
 | 48-02-01 | 02 | 2 | CHARF-01 | unit | `npx vitest run backend/src/character/__tests__/generator.test.ts` | ✅ red baseline exists | ⬜ pending |
 | 48-02-02 | 02 | 2 | CHARF-01 | unit | `npx vitest run backend/src/character/__tests__/generator.test.ts backend/src/character/__tests__/npc-generator.test.ts backend/src/routes/__tests__/character.test.ts backend/src/routes/__tests__/campaigns.test.ts` | ⚠️ partial | ⬜ pending |
 | 48-02-03 | 02 | 2 | CHARF-01 | unit | `npx vitest run backend/src/character/__tests__/persona-templates.test.ts backend/src/routes/__tests__/persona-templates.test.ts` | ⚠️ partial | ⬜ pending |
-| 48-03-01 | 03 | 3 | CHARF-01 | unit | `npx vitest run backend/src/engine/__tests__/npc-agent.test.ts backend/src/engine/__tests__/npc-offscreen.test.ts backend/src/engine/__tests__/prompt-assembler.character-identity.test.ts` | ⚠️ partial | ⬜ pending |
+| 48-03-01 | 03 | 3 | CHARF-01 | unit | `npx vitest run backend/src/engine/__tests__/npc-agent.test.ts backend/src/engine/__tests__/npc-offscreen.test.ts backend/src/engine/__tests__/prompt-assembler.character-identity.test.ts` | ⚠️ partial - must cover bounded off-screen identity slice | ⬜ pending |
 | 48-03-02 | 03 | 3 | CHARF-01 | unit | `npx vitest run backend/src/engine/__tests__/reflection-agent.test.ts backend/src/engine/__tests__/reflection-agent.identity-boundaries.test.ts` | ⚠️ partial | ⬜ pending |
-| 48-04-01 | 04 | 3 | CHARF-01 | unit | `npx vitest run frontend/lib/__tests__/character-drafts.test.ts` | ✅ exists | ⬜ pending |
+| 48-04-01 | 04 | 3 | CHARF-01 | unit | `npm --prefix frontend run typecheck && npx vitest run frontend/lib/__tests__/character-drafts.test.ts` | ✅ exists | ⬜ pending |
 | 48-04-02 | 04 | 3 | CHARF-01 | unit | `npx vitest run frontend/lib/__tests__/character-drafts.test.ts frontend/components/character-creation/__tests__/character-card.identity.test.tsx` | ⚠️ partial | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
@@ -68,23 +68,31 @@ Existing suites that need Phase 48 additions rather than brand-new files remain 
 | Existing Test File | Owning Task | Required Additions |
 |--------------------|-------------|--------------------|
 | `backend/src/routes/__tests__/schemas.test.ts` | `48-01-01` and `48-01-02` | Add network-boundary assertions for `baseFacts`, `behavioralCore`, `liveDynamics`, `sourceBundle`, and `continuity` |
+| `backend/src/character/__tests__/record-adapters.test.ts` | `48-01-02` | Add deterministic backfill coverage for pre-Phase-48 stored `characterRecord` JSON with no richer identity fields present |
 | `backend/src/routes/__tests__/character.test.ts` | `48-02-02` | Add parse/generate/import/save assertions that richer fields survive route responses |
 | `backend/src/routes/__tests__/campaigns.test.ts` | `48-02-02` | Add world-payload assertions that player/NPC drafts and records retain richer fields |
 | `backend/src/character/__tests__/persona-templates.test.ts` | `48-02-03` | Add regression coverage that template application patches richer identity layers |
 | `backend/src/routes/__tests__/persona-templates.test.ts` | `48-02-03` | Add API-boundary coverage for richer template application results |
 | `backend/src/character/__tests__/npc-generator.test.ts` | `48-02-02` | Add canonical/import assertions that richer structure replaces thin persona/tag truth |
+| `backend/src/character/__tests__/generator.test.ts` | `48-02-01` | Lock the explicit decision that LLM output stays flatter/safer and is deterministically mapped into the richer identity model |
+| `backend/src/engine/__tests__/npc-offscreen.test.ts` | `48-03-01` | Add bounded-token-budget coverage for off-screen identity slices so richer context does not explode batch prompts |
+| `frontend/components/world-review/npcs-section.tsx` | `48-04-01` | Typecheck compatibility scope check for expanded `CharacterDraft` / `ScaffoldNpc` seams |
 
 ## Wave 0 Requirements
 
 - [ ] `backend/src/character/__tests__/record-adapters.identity.test.ts` — verifies richer identity hydration and compatibility projection
+- [ ] `backend/src/character/__tests__/record-adapters.test.ts` additions — verify deterministic backfill from pre-Phase-48 stored `characterRecord` JSON into richer layers
 - [ ] `backend/src/routes/__tests__/schemas.test.ts` additions — verify route schemas/materializers preserve richer identity fields across the backend API boundary
 - [ ] `backend/src/character/__tests__/npc-generator.test.ts` additions — verifies canonical/card import produces richer structure, not only legacy persona/tags
+- [ ] `backend/src/character/__tests__/generator.test.ts` additions — verify flatter generator output is deterministically mapped into the richer three-layer model
 - [ ] `backend/src/routes/__tests__/character.test.ts` additions — verify parse/generate/import/save character routes preserve richer identity payloads
 - [ ] `backend/src/routes/__tests__/campaigns.test.ts` additions — verify world payload player/NPC character contracts preserve richer identity payloads
 - [ ] `backend/src/character/__tests__/persona-templates.test.ts` additions — verify template application patches richer identity layers instead of thin persona/tag truth
 - [ ] `backend/src/routes/__tests__/persona-templates.test.ts` additions — verify persona-template route responses preserve richer identity/source-bundle payloads
 - [ ] `backend/src/engine/__tests__/prompt-assembler.character-identity.test.ts` — verifies narration context includes richer identity slices
+- [ ] `backend/src/engine/__tests__/npc-offscreen.test.ts` additions — verify off-screen identity context stays bounded for token budget while remaining richer than tag/goals-only prompts
 - [ ] `backend/src/engine/__tests__/reflection-agent.identity-boundaries.test.ts` — verifies live updates stay in the mutable layer unless explicitly promoted
+- [ ] `npm --prefix frontend run typecheck` — verify expanded shared draft types do not silently break `frontend/components/world-review/npcs-section.tsx`
 - [ ] `frontend/components/character-creation/__tests__/character-card.identity.test.tsx` — verifies UI adapters do not drop new fields silently
 
 ---
