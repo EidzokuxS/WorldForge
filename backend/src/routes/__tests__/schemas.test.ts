@@ -1,13 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
 import type {
-  CharacterGroundingProfile as BarrelCharacterGroundingProfile,
-  PowerProfile as BarrelPowerProfile,
+  CharacterGroundingProfile,
+  PowerProfile,
 } from "@worldforge/shared";
-import type {
-  CharacterGroundingProfile as DirectCharacterGroundingProfile,
-  PowerProfile as DirectPowerProfile,
-} from "../../../../shared/src/types.js";
 import {
   chatBodySchema,
   seedCategorySchema,
@@ -40,17 +36,6 @@ import {
 } from "../schemas.js";
 import { parseBody, zodFirstError } from "../helpers.js";
 import { npcs, players } from "../../db/schema.js";
-
-type AssertEqual<A, B> =
-  (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2)
-    ? true
-    : false;
-
-const barrelGroundingTypeParity: AssertEqual<
-  DirectCharacterGroundingProfile,
-  BarrelCharacterGroundingProfile
-> = true;
-const barrelPowerTypeParity: AssertEqual<DirectPowerProfile, BarrelPowerProfile> = true;
 
 // ---------------------------------------------------------------------------
 // seedCategorySchema
@@ -1704,7 +1689,7 @@ describe("importV2CardSchema", () => {
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.grounding?.powerProfile.vulnerabilities).toEqual([
+      expect(result.data.grounding?.powerProfile?.vulnerabilities).toEqual([
         "Can be rushed before shields are active",
       ]);
     }
@@ -1816,6 +1801,31 @@ describe("canonical character schemas", () => {
         },
       }).success,
     ).toBe(true);
+  });
+
+  it("materializes legacy save-character payloads onto the current shared draft lane", () => {
+    const result = saveCharacterSchema.safeParse({
+      campaignId: "camp-1",
+      character: {
+        name: "Aria Bloodthorn",
+        race: "Human",
+        gender: "Female",
+        age: "18",
+        appearance: "Violet eyes and raven hair.",
+        tags: ["Observant", "Poor"],
+        hp: 4,
+        equippedItems: ["Iron Sword"],
+        locationName: "Signal Station",
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.draft.identity.baseFacts.biography).toBe("");
+      expect(result.data.draft.identity.behavioralCore.selfImage).toBe("");
+      expect(result.data.draft.identity.liveDynamics.activeGoals).toEqual([]);
+      expect(result.data.draft.socialContext.currentLocationName).toBe("Signal Station");
+    }
   });
 
   it("preserves supporting tier for draft-backed save-edits NPC payloads", () => {
@@ -2179,9 +2189,6 @@ describe("phase 48 richer identity schemas", () => {
 });
 
 describe("phase 49 grounding schemas", () => {
-  void barrelGroundingTypeParity;
-  void barrelPowerTypeParity;
-
   const grounding = {
     summary:
       "Canon-grounded station commander with battlefield leadership and bounded human-scale power.",
@@ -2212,7 +2219,7 @@ describe("phase 49 grounding schemas", () => {
         excerpt: "Captain Mire held the relay until the last evacuation horn.",
       },
     ],
-  } satisfies DirectCharacterGroundingProfile;
+  } satisfies CharacterGroundingProfile;
 
   const draft = {
     identity: {
@@ -2283,7 +2290,7 @@ describe("phase 49 grounding schemas", () => {
     expect(draftResult.success).toBe(true);
     if (draftResult.success) {
       expect(draftResult.data.grounding?.summary).toContain("Canon-grounded");
-      expect(draftResult.data.grounding?.powerProfile.constraints).toEqual([
+      expect(draftResult.data.grounding?.powerProfile?.constraints).toEqual([
         "Needs allies or equipment for area control",
       ]);
       expect(draftResult.data.grounding?.sources[0]?.label).toBe("Station Chronicle");
@@ -2299,7 +2306,7 @@ describe("phase 49 grounding schemas", () => {
     });
     expect(recordResult.success).toBe(true);
     if (recordResult.success) {
-      expect(recordResult.data.grounding?.powerProfile.vulnerabilities).toEqual([
+      expect(recordResult.data.grounding?.powerProfile?.vulnerabilities).toEqual([
         "Vulnerable when isolated",
       ]);
     }

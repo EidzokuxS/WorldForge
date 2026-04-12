@@ -419,6 +419,7 @@ describe("Campaign-loaded gameplay transport", () => {
       answer: "Gojo overwhelms close-range opponents through Infinity and Domain Expansion.",
       citations: [
         {
+          kind: "research",
           label: "Character grounding",
           excerpt: "Infinity prevents direct contact while his domain overloads the target.",
         },
@@ -454,6 +455,7 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(body).toContain("event: lookup_result");
     expect(body).toContain("event: done");
     expect(body).toContain("Gojo overwhelms close-range opponents");
+    expect(body).toContain("\"kind\":\"research\"");
     expect(body).not.toContain("event: scene-settling");
     expect(body).not.toContain("event: oracle_result");
     expect(body).not.toContain("event: narrative");
