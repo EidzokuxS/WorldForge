@@ -71,7 +71,7 @@ vi.mock("../../ai/provider-registry.js", () => ({
   createModel: vi.fn().mockReturnValue("mock-model"),
 }));
 
-import { processTurn, type TurnEvent } from "../turn-processor.js";
+import { processTurn, type HiddenTurnSummary, type TurnEvent } from "../turn-processor.js";
 import { callOracle } from "../oracle.js";
 import {
   assembleFinalNarrationPrompt,
@@ -602,7 +602,7 @@ describe("processTurn", () => {
     await collectEvents(
       processTurn(
         createTestOptions({
-          onBeforeVisibleNarration: (summary) => {
+          onBeforeVisibleNarration: (summary: HiddenTurnSummary) => {
             capturedSummary = {
               currentLocationId: summary.currentLocationId,
               currentSceneScopeId: summary.currentSceneScopeId,
@@ -662,7 +662,7 @@ describe("processTurn", () => {
           playerAction: "Go to the Signal Tower",
           intent: "Travel to the Signal Tower",
           method: "walking to Signal Tower",
-          onBeforeVisibleNarration: (summary) => {
+          onBeforeVisibleNarration: (summary: HiddenTurnSummary) => {
             capturedSummary = {
               currentLocationId: summary.currentLocationId,
               currentSceneScopeId: summary.currentSceneScopeId,

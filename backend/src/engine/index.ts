@@ -56,6 +56,20 @@ export type {
   SceneEffect,
 } from "./scene-assembly.js";
 
+export {
+  resolveScenePresence,
+  resolveStoredSceneScopeId,
+} from "./scene-presence.js";
+
+export type {
+  AwarenessBand,
+  KnowledgeBasis,
+  PresenceActorInput,
+  PresenceSnapshot,
+  PriorKnowledgeInput,
+  ResolveScenePresenceOptions,
+} from "./scene-presence.js";
+
 export { createStorytellerTools } from "./tool-schemas.js";
 
 export { executeToolCall } from "./tool-executor.js";

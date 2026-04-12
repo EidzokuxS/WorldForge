@@ -6,6 +6,11 @@ import { hydrateStoredPlayerRecord } from "../character/record-adapters.js";
 import { deriveStartConditionEffects } from "./start-condition-runtime.js";
 import { listRecentLocationEvents } from "./location-events.js";
 import {
+  resolveScenePresence,
+  resolveStoredSceneScopeId,
+  type PresenceSnapshot,
+} from "./scene-presence.js";
+import {
   readPendingCommittedEvents,
   type PendingCommittedEvent,
 } from "../vectors/episodic-events.js";
@@ -65,6 +70,7 @@ export interface SceneAssembly {
 export interface AssembleSceneOptions {
   campaignId: string;
   currentLocationId?: string | null;
+  currentSceneScopeId?: string | null;
   pendingEventTicks: number[];
   toolCalls: Array<{ tool: string; args: unknown; result: unknown }>;
   openingScene?: boolean;
@@ -180,16 +186,21 @@ function buildOpeningState(campaignId: string): AuthoritativeOpeningState | null
 function buildCurrentScene(
   campaignId: string,
   currentLocationId?: string | null,
+  currentSceneScopeId?: string | null,
 ): AuthoritativeSceneContext | null {
   const db = getDb();
-  const locationId =
-    currentLocationId
-    ?? db
-      .select({ currentLocationId: players.currentLocationId })
-      .from(players)
-      .where(eq(players.campaignId, campaignId))
-      .get()?.currentLocationId
-    ?? null;
+  const playerLocation = db
+    .select({
+      currentLocationId: players.currentLocationId,
+      currentSceneLocationId: players.currentSceneLocationId,
+    })
+    .from(players)
+    .where(eq(players.campaignId, campaignId))
+    .get();
+  const locationId = resolveStoredSceneScopeId(
+    currentLocationId ?? playerLocation?.currentLocationId ?? null,
+    currentSceneScopeId ?? playerLocation?.currentSceneLocationId ?? null,
+  );
 
   if (!locationId) {
     return null;
@@ -374,28 +385,126 @@ function summarizeCommittedEvent(
   };
 }
 
-function buildPresentNpcNames(
-  campaignId: string,
-  currentScene: AuthoritativeSceneContext | null,
-): string[] {
-  if (!currentScene) {
-    return [];
+function inferNpcVisibility(
+  npc: Pick<typeof npcs.$inferSelect, "tags">,
+): { visibility: "clear" | "hint" | "hidden"; awarenessHint: string | null } {
+  const tags = parseStringArray(npc.tags).map((tag) => tag.toLowerCase());
+  if (tags.some((tag) => tag === "hidden" || tag === "concealed" || tag === "disguised")) {
+    return {
+      visibility: "hidden",
+      awarenessHint: "Something concealed is nearby.",
+    };
   }
 
-  return getDb()
-    .select({ name: npcs.name })
+  if (tags.some((tag) => tag === "obscured" || tag === "faint" || tag === "distant")) {
+    return {
+      visibility: "hint",
+      awarenessHint: "You catch only a partial sign of movement nearby.",
+    };
+  }
+
+  return { visibility: "clear", awarenessHint: null };
+}
+
+function buildScenePresence(
+  campaignId: string,
+  currentScene: AuthoritativeSceneContext | null,
+  currentLocationId?: string | null,
+): {
+  snapshot: PresenceSnapshot | null;
+  presentNpcNames: string[];
+} {
+  const db = getDb();
+  const player = db
+    .select({
+      id: players.id,
+      currentLocationId: players.currentLocationId,
+      currentSceneLocationId: players.currentSceneLocationId,
+    })
+    .from(players)
+    .where(eq(players.campaignId, campaignId))
+    .get();
+
+  if (!currentScene || !player) {
+    return { snapshot: null, presentNpcNames: [] };
+  }
+
+  const broadLocationId = currentLocationId ?? player.currentLocationId ?? null;
+  const playerSceneScopeId = resolveStoredSceneScopeId(
+    broadLocationId,
+    player.currentSceneLocationId ?? currentScene.id,
+  );
+
+  if (!broadLocationId || !playerSceneScopeId) {
+    return { snapshot: null, presentNpcNames: [] };
+  }
+
+  const npcRows = db
+    .select({
+      id: npcs.id,
+      name: npcs.name,
+      currentLocationId: npcs.currentLocationId,
+      currentSceneLocationId: npcs.currentSceneLocationId,
+      tags: npcs.tags,
+    })
     .from(npcs)
-    .where(eq(npcs.currentLocationId, currentScene.id))
-    .all()
+    .where(eq(npcs.campaignId, campaignId))
+    .all();
+
+  const snapshot = resolveScenePresence({
+    playerActorId: player.id,
+    broadLocationId,
+    sceneScopeId: playerSceneScopeId,
+    actors: [
+      {
+        actorId: player.id,
+        actorType: "player",
+        broadLocationId,
+        sceneScopeId: playerSceneScopeId,
+        visibility: "clear",
+      },
+      ...npcRows.map((npc) => {
+        const visibility = inferNpcVisibility(npc);
+        return {
+          actorId: npc.id,
+          actorType: "npc" as const,
+          broadLocationId: npc.currentLocationId,
+          sceneScopeId: npc.currentSceneLocationId,
+          visibility: visibility.visibility,
+          awarenessHint: visibility.awarenessHint,
+        };
+      }),
+    ],
+  });
+
+  const playerKey = player.id.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  const presentNpcNames = npcRows
+    .filter((npc) => snapshot.presentActorIds.includes(npc.id))
+    .filter(
+      (npc) => snapshot.awarenessByObserver[playerKey]?.[
+        npc.id.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "")
+      ] === "clear",
+    )
     .map((npc) => npc.name);
+
+  return { snapshot, presentNpcNames };
 }
 
 export function assembleAuthoritativeScene(
   options: AssembleSceneOptions,
 ): SceneAssembly {
   const openingState = buildOpeningState(options.campaignId);
-  const currentScene = buildCurrentScene(options.campaignId, options.currentLocationId);
-  const presentNpcNames = buildPresentNpcNames(options.campaignId, currentScene);
+  const currentScene = buildCurrentScene(
+    options.campaignId,
+    options.currentLocationId,
+    options.currentSceneScopeId,
+  );
+  const scenePresence = buildScenePresence(
+    options.campaignId,
+    currentScene,
+    options.currentLocationId,
+  );
+  const presentNpcNames = scenePresence.presentNpcNames;
 
   const pendingEvents = [...new Set(options.pendingEventTicks)]
     .flatMap((tick) => readPendingCommittedEvents(options.campaignId, tick));
@@ -478,6 +587,7 @@ export function assembleAuthoritativeScene(
     playerPerceivableConsequences: uniqueSummaries([
       ...sceneEffects,
       ...recentContext.map((entry) => entry.summary),
+      ...(scenePresence.snapshot?.playerAwarenessHints ?? []),
       ...presentNpcNames.map((name) => `${name} is present in the current scene.`),
     ]),
   };

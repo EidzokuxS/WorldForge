@@ -880,6 +880,7 @@ export async function* processTurn(
   const sceneAssembly = assembleAuthoritativeScene({
     campaignId,
     currentLocationId,
+    currentSceneScopeId,
     pendingEventTicks: [currentTick, predictedTick],
     toolCalls: toolCallResults,
     openingScene: options.openingScene ?? false,
@@ -1030,6 +1031,7 @@ export async function* processOpeningScene(
 
   const sceneAssembly = assembleAuthoritativeScene({
     campaignId,
+    currentSceneScopeId: player?.currentSceneLocationId ?? player?.currentLocationId ?? null,
     pendingEventTicks: [currentTick],
     toolCalls: [],
     openingScene: true,
