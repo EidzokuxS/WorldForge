@@ -4,11 +4,11 @@
 
 - ✅ **v1.0 Living Sandbox** — phases `1-36`, shipped `2026-04-08`
   Archives: [roadmap](/R:/Projects/WorldForge/.planning/milestones/v1.0-ROADMAP.md), [requirements](/R:/Projects/WorldForge/.planning/milestones/v1.0-REQUIREMENTS.md), [audit](/R:/Projects/WorldForge/.planning/milestones/v1.0-MILESTONE-AUDIT.md)
-- 🚧 **v1.1 Gameplay Fidelity** — phases `37-44`, planned `2026-04-08`
+- 🚧 **v1.1 Gameplay Fidelity** — phases `37-50`, extended `2026-04-12`
 
 ## Overview
 
-v1.1 is a reconciliation milestone built from the [Phase 36 handoff](/R:/Projects/WorldForge/.planning/phases/36-gameplay-docs-to-runtime-reconciliation-audit/36-HANDOFF.md), not a new-feature brainstorm. The milestone repairs gameplay-runtime trust first: campaign-loaded transport, authoritative state, honest turn and simulation boundaries, and complete checkpoint restore. After the integrity seams are trustworthy, the remaining documented gameplay mechanics and docs are aligned to the live product contract.
+v1.1 started as a reconciliation milestone built from the [Phase 36 handoff](/R:/Projects/WorldForge/.planning/phases/36-gameplay-docs-to-runtime-reconciliation-audit/36-HANDOFF.md), not a new-feature brainstorm. The first tranche repaired gameplay-runtime trust: campaign-loaded transport, authoritative state, honest turn and simulation boundaries, complete checkpoint restore, and docs alignment. Live gameplay then surfaced a second tranche of work around scene authority, encounter scope, storyteller quality, character fidelity, research grounding, and text readability. The milestone stays open until baseline gameplay feel is acceptable, not merely until the original reconciliation checklist is exhausted.
 
 ## Phases
 
@@ -24,6 +24,12 @@ v1.1 is a reconciliation milestone built from the [Phase 36 handoff](/R:/Project
 - [x] **Phase 42: Targeted Oracle & Start-Condition Runtime Effects** - Make target-aware rulings and structured starts mechanically real in live play. (completed 2026-04-11)
 - [x] **Phase 43: Travel & Location-State Contract Resolution** - Implement or explicitly deprecate the remaining location/time gameplay promises. (completed 2026-04-11)
 - [x] **Phase 44: Gameplay Docs Baseline Alignment** - Rewrite gameplay docs into an honest planning baseline for the repaired runtime. (completed 2026-04-11)
+- [ ] **Phase 45: Authoritative Scene Assembly & Start-of-Play Runtime** - Make turn output single-pass, runtime-driven, and grounded in actual opening/location state instead of duplicated or premise-dump narration.
+- [ ] **Phase 46: Encounter Scope, Presence & Knowledge Boundaries** - Stop treating large locations like one tiny room and constrain scene knowledge to actual encounter/perception scope.
+- [ ] **Phase 47: Storyteller Output Quality & Anti-Slop Prompting** - Research and tune storyteller prompting/model settings for materially better RP writing quality.
+- [ ] **Phase 48: Character Identity Fidelity & Canonical Modeling** - Preserve distinctive identity/personality details in runtime character modeling, especially for imported and canonical characters.
+- [ ] **Phase 49: Search Grounding & In-Game Research Semantics** - Make worldgen and live-game research ask for the right facts with focused retrieval intent.
+- [ ] **Phase 50: Gameplay Text Presentation & Rich Readability** - Improve gameplay text rendering, typography, and rich-text affordances for both input and narration.
 
 ## Phase Details
 
@@ -139,15 +145,93 @@ Plans:
 - [x] 44-02-PLAN.md — Rewrite `mechanics.md` into the normative gameplay baseline for canonical state, target-aware Oracle support, bounded opening effects, reflection, and travel/location semantics.
 - [x] 44-03-PLAN.md — Rewrite `memory.md` to the live runtime/retrieval contract and record a claim-by-claim resolution map for all elevated Phase 36 Group B/C items.
 
+### Phase 45: Authoritative Scene Assembly & Start-of-Play Runtime
+**Goal**: Make player-visible turn text a single runtime-grounded scene output instead of duplicated prose, premise dumps, or narration emitted before authoritative local changes settle.
+**Depends on**: Phase 39, Phase 41, Phase 42, Phase 43
+**Requirements**: SCEN-01
+**Success Criteria** (what must be TRUE):
+  1. Generated turn output no longer repeats scene blocks or restarts the same beat mid-response.
+  2. Start-of-play text is derived from actual start location, start conditions, and immediate local events instead of echoing the premise as the opening message.
+  3. The final narrated turn is assembled after authoritative local world/NPC changes for the perceivable scene, not as a parallel pre-simulation guess.
+**Plans**: 0 plans
+Plans:
+- [ ] TBD (run `$gsd-plan-phase 45` to break down)
+
+### Phase 46: Encounter Scope, Presence & Knowledge Boundaries
+**Goal**: Constrain scene participation and knowledge to actual encounter/perception scope so big locations stop behaving like one tiny room.
+**Depends on**: Phase 43, Phase 45
+**Requirements**: SCEN-02
+**Success Criteria** (what must be TRUE):
+  1. Large locations no longer imply universal co-presence; only actually present or perceivable entities enter the live scene.
+  2. NPCs do not reason or react as if every actor in the broader location has already been met.
+  3. Scene-local knowledge and encounter context derive from proximity, presence, and perception rather than flat location membership.
+**Plans**: 0 plans
+Plans:
+- [ ] TBD (run `$gsd-plan-phase 46` to break down)
+
+### Phase 47: Storyteller Output Quality & Anti-Slop Prompting
+**Goal**: Lift live RP writing quality through research-backed storyteller prompting, model settings, and anti-slop controls.
+**Depends on**: Phase 45, Phase 46
+**Requirements**: WRIT-01
+**Success Criteria** (what must be TRUE):
+  1. Storyteller output materially reduces purple prose, generic AI smell, and empty dramatic inflation during normal play.
+  2. Prompting and presets are grounded in explicit research on working RP patterns for current target models, especially `GLM-5`.
+  3. Higher writing quality does not regress engine truthfulness, action clarity, or runtime determinism.
+**Plans**: 0 plans
+Plans:
+- [ ] TBD (run `$gsd-plan-phase 47` to break down)
+
+### Phase 48: Character Identity Fidelity & Canonical Modeling
+**Goal**: Rebuild runtime character modeling so native, imported, and canonical characters preserve the details that actually make them behave distinctly.
+**Depends on**: Phase 42, Phase 47
+**Requirements**: CHARF-01
+**Success Criteria** (what must be TRUE):
+  1. Key/canonical characters retain distinctive personality, motives, and behavioral constraints instead of flattening into generic summaries.
+  2. Imported/card-based characters preserve salient identity details that later influence goals, planning, and reactions.
+  3. Runtime character structure captures the information needed for believable behavior, not just creation-time flavor.
+**Plans**: 0 plans
+Plans:
+- [ ] TBD (run `$gsd-plan-phase 48` to break down)
+
+### Phase 49: Search Grounding & In-Game Research Semantics
+**Goal**: Make worldgen and live gameplay research ask for the right facts with focused retrieval intent rather than vague blended searches.
+**Depends on**: Phase 47, Phase 48
+**Requirements**: RES-01
+**Success Criteria** (what must be TRUE):
+  1. Search/query generation decomposes mixed-premise asks into narrow, retrievable information needs.
+  2. Live gameplay can ground fact lookups, power comparisons, or event clarification without contaminating scenes with unfocused research blobs.
+  3. Search-grounded context improves relevance and usefulness for both worldgen and runtime play.
+**Plans**: 0 plans
+Plans:
+- [ ] TBD (run `$gsd-plan-phase 49` to break down)
+
+### Phase 50: Gameplay Text Presentation & Rich Readability
+**Goal**: Make gameplay text surfaces materially easier to read and scan through better formatting, typography, and rich-text affordances.
+**Depends on**: Phase 45, Phase 47
+**Requirements**: UX-01
+**Success Criteria** (what must be TRUE):
+  1. Generated narration and player input render with improved readability rather than dense hard-to-scan plain blocks.
+  2. Rich-text affordances improve emphasis and structure without obscuring stream behavior or gameplay state.
+  3. Presentation changes stay consistent across `/game` and preserve correctness of gameplay updates.
+**Plans**: 0 plans
+Plans:
+- [ ] TBD (run `$gsd-plan-phase 50` to break down)
+
 ## Progress
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 37. Campaign-Loaded Gameplay Transport | 2/2 | Complete   | 2026-04-08 |
-| 38. Authoritative Inventory & Equipment State | 3/3 | Complete   | 2026-04-12 |
-| 39. Honest Turn Boundary, Retry & Undo | 3/3 | Complete    | 2026-04-09 |
-| 40. Live Reflection & Progression Triggers | 3/3 | Complete   | 2026-04-10 |
+| 37. Campaign-Loaded Gameplay Transport | 2/2 | Complete | 2026-04-08 |
+| 38. Authoritative Inventory & Equipment State | 3/3 | Complete | 2026-04-12 |
+| 39. Honest Turn Boundary, Retry & Undo | 3/3 | Complete | 2026-04-09 |
+| 40. Live Reflection & Progression Triggers | 3/3 | Complete | 2026-04-10 |
 | 41. Checkpoint-Complete Simulation Restore | 2/2 | Complete | 2026-04-11 |
-| 42. Targeted Oracle & Start-Condition Runtime Effects | 2/2 | Complete   | 2026-04-11 |
-| 43. Travel & Location-State Contract Resolution | 6/6 | Complete   | 2026-04-11 |
-| 44. Gameplay Docs Baseline Alignment | 3/3 | Complete    | 2026-04-11 |
+| 42. Targeted Oracle & Start-Condition Runtime Effects | 2/2 | Complete | 2026-04-11 |
+| 43. Travel & Location-State Contract Resolution | 6/6 | Complete | 2026-04-11 |
+| 44. Gameplay Docs Baseline Alignment | 3/3 | Complete | 2026-04-11 |
+| 45. Authoritative Scene Assembly & Start-of-Play Runtime | 0/0 | Planned | — |
+| 46. Encounter Scope, Presence & Knowledge Boundaries | 0/0 | Planned | — |
+| 47. Storyteller Output Quality & Anti-Slop Prompting | 0/0 | Planned | — |
+| 48. Character Identity Fidelity & Canonical Modeling | 0/0 | Planned | — |
+| 49. Search Grounding & In-Game Research Semantics | 0/0 | Planned | — |
+| 50. Gameplay Text Presentation & Rich Readability | 0/0 | Planned | — |

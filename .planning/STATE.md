@@ -2,46 +2,46 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
-status: verifying
-stopped_at: Completed 38-03-PLAN.md
-last_updated: "2026-04-12T05:51:31.369Z"
+status: planning
+stopped_at: Extended v1.1 with phases 45-50 from live gameplay findings
+last_updated: "2026-04-12T06:35:00.000Z"
 last_activity: 2026-04-12
 progress:
-  total_phases: 8
+  total_phases: 14
   completed_phases: 8
   total_plans: 24
   completed_plans: 24
-  percent: 100
+  percent: 57
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-11)
+See: .planning/PROJECT.md (updated 2026-04-12)
 
 **Core value:** The LLM is the narrator, never the engine. Mechanical truth stays in backend code so outcomes remain consistent, inspectable, and recoverable.
-**Current focus:** v1.1 milestone closeout verification
+**Current focus:** v1.1 phase expansion planning from live gameplay findings
 
 ## Current Position
 
-Phase: milestone closeout (v1.1)
-Plan: deferred manual verification
-Status: All phases complete — final closeout checks pending
+Phase: roadmap extension (45-50) — PLANNING
+Plan: new gameplay-quality phase cluster
+Status: Original reconciliation tranche complete; milestone extended for live gameplay quality
 Last activity: 2026-04-12
 
-Progress: [██████████] 100%
+Progress: [██████░░░░] 57%
 
 ## Performance Metrics
 
 **Current Snapshot:**
 
-- Active roadmap phases: 8
-- Completed phases: 37
-- Planned or in-progress phases: 8
-- Total plans tracked: 110
-- Completed plans: 110
-- Pending plans: TBD until phase planning
+- Active roadmap phases: 14
+- Completed phases: 44
+- Planned or in-progress phases: 6
+- Total plans tracked: 24
+- Completed plans: 24
+- Pending plans: phases 45-50 not planned yet
 
 **Recent Execution:**
 
@@ -140,6 +140,8 @@ Recent decisions affecting current work:
 - [Phase 38]: legacy equippedItems compatibility is retained only as a one-way projection derived from authoritative item rows
 - [Phase 38]: Frontend /game now consumes player.inventory and player.equipment as the authoritative UI contract, while legacy equippedItems remains compatibility-only.
 - [Phase 38]: The /api/campaigns/:id/world payload now emits structured authoritative player item rows because frontend-only parsing could not satisfy the authoritative inventory UI contract.
+- [Milestone]: v1.1 remains open until baseline live gameplay feel is acceptable, even though the original reconciliation tranche (37-44) is complete.
+- [Milestone]: Follow-on phases 45-50 own the remaining live gameplay gaps around scene authority, encounter scope, writing quality, character fidelity, research grounding, and gameplay text readability.
 
 ### Pending Todos
 
@@ -152,6 +154,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-12T05:51:31.366Z
-Stopped at: Completed 38-03-PLAN.md
+Last session: 2026-04-12T06:35:00.000Z
+Stopped at: Extended v1.1 with phases 45-50 from live gameplay findings
 Resume file: None

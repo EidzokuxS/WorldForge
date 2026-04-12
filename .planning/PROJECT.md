@@ -19,18 +19,21 @@ The shipped baseline includes:
 - unified character ontology, structured start conditions, canonical loadouts, and persona templates
 - desktop-first non-game shell for launcher, creation, review, and character authoring
 
-`v1.1 Gameplay Fidelity` is now mostly executed. Phases `37`, `39`, `40`, `41`, `42`, `43`, and `44` are complete. The remaining open milestone phase is `38`, which still owns authoritative inventory and equipment state.
+The original `v1.1 Gameplay Fidelity` reconciliation tranche (`37-44`) is complete. The milestone remains open and is now extended with follow-on gameplay-quality phases (`45-50`) driven by live gameplay findings rather than docs reconciliation alone.
 
 The milestone still starts from the docs-to-runtime reconciliation in [36-HANDOFF.md](/R:/Projects/WorldForge/.planning/phases/36-gameplay-docs-to-runtime-reconciliation-audit/36-HANDOFF.md), not from old assumptions.
 
 ## Current Milestone: v1.1 Gameplay Fidelity
 
-**Goal:** Bring live gameplay runtime into honest alignment with the documented design baseline from Phase 36, starting with integrity-critical seams before feature expansion.
+**Goal:** Bring live gameplay runtime into honest alignment with the documented design baseline from Phase 36, then keep iterating until baseline live gameplay feel is acceptable in practice.
 
 **Target features:**
 - runtime integrity: session-decoupled gameplay routes, authoritative inventory/equipment state, honest rollback/retry, and complete checkpoint fidelity
 - live simulation fidelity: reflection/progression that actually triggers, post-turn simulation with a trustworthy player-visible turn boundary, and target-aware Oracle context
 - mechanics and docs reconciliation: implement or explicitly deprecate documented gameplay claims around travel, location event state, retrieval semantics, and start-condition runtime effects
+- scene authority: single-pass turn synthesis, runtime-driven opening scenes, and encounter/perception scoping instead of flat location dumps
+- narrative quality: better storyteller prompting, reduced purple prose/AI smell, and stronger text presentation/readability
+- character and research fidelity: stronger canonical/imported character identity modeling plus better search grounding in worldgen and live play
 
 ## Requirements
 
@@ -74,6 +77,7 @@ The milestone still starts from the docs-to-runtime reconciliation in [36-HANDOF
 | Desktop-first non-game shell | Creation/review/character flows needed coherence before more feature growth | ✓ Good |
 | Next gameplay milestone must be docs-to-runtime-driven | Phase 36 proved assumptions had drifted from live wiring | ✓ Good |
 | Integrity repair before gameplay expansion | New mechanics on top of untrusted runtime state would create false progress | ✓ Good |
+| `v1.1` stays open until gameplay baseline feels acceptable in live use | Formal reconciliation alone is not enough if live play still exposes major scene, writing, search, or character-fidelity gaps | ✓ Active |
 
 ---
-*Last updated: 2026-04-11 after Phase 44 completion*
+*Last updated: 2026-04-12 after extending v1.1 with follow-on gameplay-quality phases*
