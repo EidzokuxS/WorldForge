@@ -56,6 +56,10 @@ vi.mock("../../engine/index.js", () => ({
   sanitizeNarrative: vi.fn((text: string) => text),
 }));
 
+vi.mock("../../engine/grounded-lookup.js", () => ({
+  runGroundedLookup: vi.fn(),
+}));
+
 vi.mock("../../ai/with-model-fallback.js", () => ({
   resolveFallbackProvider: vi.fn(() => null),
 }));
@@ -119,6 +123,7 @@ import {
   simulateOffscreenNpcs,
   tickFactions,
 } from "../../engine/index.js";
+import { runGroundedLookup } from "../../engine/grounded-lookup.js";
 import chatRoutes from "../chat.js";
 
 const mockedGetActive = vi.mocked(getActiveCampaign);
@@ -140,6 +145,7 @@ const mockedCheckAndTriggerReflections = vi.mocked(checkAndTriggerReflections);
 const mockedTickPresentNpcs = vi.mocked(tickPresentNpcs);
 const mockedSimulateOffscreenNpcs = vi.mocked(simulateOffscreenNpcs);
 const mockedTickFactions = vi.mocked(tickFactions);
+const mockedRunGroundedLookup = vi.mocked(runGroundedLookup);
 
 // ---------------------------------------------------------------------------
 // App setup
@@ -382,9 +388,125 @@ describe("Targeted gameplay route campaignId validation", () => {
     const body = await res.json();
     expect(body.error).toBe("campaignId is required.");
   });
+
+  it("rejects /chat/lookup without campaignId", async () => {
+    const res = await app.request("/chat/lookup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        lookupKind: "character_canon_fact",
+        subject: "Satoru Gojo",
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("campaignId is required.");
+  });
 });
 
 describe("Campaign-loaded gameplay transport", () => {
+  it("routes explicit grounded lookups through /chat/lookup without invoking the normal turn pipeline", async () => {
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockResolvedValue({
+      id: CAMPAIGN_ID,
+      name: "Loaded Campaign",
+      createdAt: "2026-01-01",
+    } as any);
+    mockedRunGroundedLookup.mockResolvedValue({
+      lookupKind: "power_profile",
+      subject: "Satoru Gojo",
+      answer: "Gojo overwhelms close-range opponents through Infinity and Domain Expansion.",
+      citations: [
+        {
+          label: "Character grounding",
+          excerpt: "Infinity prevents direct contact while his domain overloads the target.",
+        },
+      ],
+      uncertaintyNotes: [
+        "Cross-setting scaling remains bounded to stored grounded cues.",
+      ],
+      sceneImpact: "Clarifies the factual baseline without advancing the scene.",
+    });
+
+    const res = await app.request("/chat/lookup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        lookupKind: "power_profile",
+        subject: "Satoru Gojo",
+        compareAgainst: "Ryomen Sukuna",
+        question: "Who has the stronger battle control kit?",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(mockedRunGroundedLookup).toHaveBeenCalledWith({
+      campaignId: CAMPAIGN_ID,
+      lookupKind: "power_profile",
+      subject: "Satoru Gojo",
+      compareAgainst: "Ryomen Sukuna",
+      question: "Who has the stronger battle control kit?",
+    });
+    expect(mockedProcessTurn).not.toHaveBeenCalled();
+    expect(body).toContain("event: lookup_result");
+    expect(body).toContain("event: done");
+    expect(body).toContain("Gojo overwhelms close-range opponents");
+    expect(body).not.toContain("event: scene-settling");
+    expect(body).not.toContain("event: oracle_result");
+    expect(body).not.toContain("event: narrative");
+    expect(body).not.toContain("event: state_update");
+    expect(body).not.toContain("event: quick_actions");
+  });
+
+  it("accepts canon fact, event clarification, and power comparison lookups through the dedicated schema", async () => {
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockResolvedValue({
+      id: CAMPAIGN_ID,
+      name: "Loaded Campaign",
+      createdAt: "2026-01-01",
+    } as any);
+    mockedRunGroundedLookup.mockResolvedValue({
+      lookupKind: "world_canon_fact",
+      subject: "Shibuya Incident",
+      answer: "Bounded lookup answer.",
+      citations: [],
+      uncertaintyNotes: [],
+      sceneImpact: "Lookup only.",
+    });
+
+    const payloads = [
+      {
+        campaignId: CAMPAIGN_ID,
+        lookupKind: "world_canon_fact",
+        subject: "Jujutsu High barriers",
+      },
+      {
+        campaignId: CAMPAIGN_ID,
+        lookupKind: "event_clarification",
+        subject: "Shibuya Incident",
+        question: "What triggered the civilian lockdown?",
+      },
+      {
+        campaignId: CAMPAIGN_ID,
+        lookupKind: "power_profile",
+        subject: "Satoru Gojo",
+        compareAgainst: "Ryomen Sukuna",
+      },
+    ];
+
+    for (const payload of payloads) {
+      const res = await app.request("/chat/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      expect(res.status).toBe(200);
+    }
+  });
+
   it("streams only one visible narrative event for a settled action turn", async () => {
     setupStoryteller();
     setupDbMock();

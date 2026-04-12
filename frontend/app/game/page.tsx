@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { LocationPanel } from "@/components/game/location-panel";
@@ -31,6 +32,7 @@ import {
   chatAction,
   chatEdit,
   chatHistory,
+  chatLookup,
   chatOpening,
   chatRetry,
   chatUndo,
@@ -41,6 +43,7 @@ import {
   loadCampaign,
   parseTurnSSE,
 } from "@/lib/api";
+import type { ChatLookupRequest, LookupKind, LookupResultEvent } from "@/lib/api";
 import type { WorldCurrentScene, WorldData } from "@/lib/api-types";
 
 type TurnPhase = "idle" | "streaming" | "finalizing";
@@ -147,6 +150,63 @@ function buildScenePanelData(
     broadLocationName: currentScene.broadLocationName ?? currentLocation?.name ?? null,
     hintSignals: currentScene.awareness.hintSignals,
   };
+}
+
+function parseExplicitLookupCommand(value: string): ChatLookupRequest | null {
+  const trimmed = value.trim();
+  const lower = trimmed.toLowerCase();
+
+  if (lower.startsWith("/compare ")) {
+    const comparisonBody = trimmed.slice("/compare".length).trim();
+    const match = comparisonBody.match(/^(.+?)\s+(?:vs\.?|versus)\s+(.+)$/i);
+    if (!match) {
+      return comparisonBody
+        ? { lookupKind: "power_profile", subject: comparisonBody }
+        : null;
+    }
+
+    return {
+      lookupKind: "power_profile",
+      subject: match[1].trim(),
+      compareAgainst: match[2].trim(),
+    };
+  }
+
+  if (!lower.startsWith("/lookup ")) {
+    return null;
+  }
+
+  const lookupBody = trimmed.slice("/lookup".length).trim();
+  if (!lookupBody) {
+    return null;
+  }
+
+  const prefixedKinds: Array<{ prefix: string; lookupKind: LookupKind }> = [
+    { prefix: "world:", lookupKind: "world_canon_fact" },
+    { prefix: "event:", lookupKind: "event_clarification" },
+    { prefix: "character:", lookupKind: "character_canon_fact" },
+  ];
+
+  for (const entry of prefixedKinds) {
+    if (lookupBody.toLowerCase().startsWith(entry.prefix)) {
+      const subject = lookupBody.slice(entry.prefix.length).trim();
+      return subject
+        ? {
+            lookupKind: entry.lookupKind,
+            subject,
+          }
+        : null;
+    }
+  }
+
+  return {
+    lookupKind: "character_canon_fact",
+    subject: lookupBody,
+  };
+}
+
+function formatLookupAssistantMessage(result: Pick<LookupResultEvent, "lookupKind" | "answer">): string {
+  return `[Lookup: ${result.lookupKind}] ${result.answer}`;
 }
 
 export default function GamePage() {
@@ -436,8 +496,116 @@ export default function GamePage() {
   const canInteract = Boolean(activeCampaign) && !isInitializing;
   const isTurnBusy = turnPhase !== "idle" || sceneProgress !== null;
 
+  const submitLookup = async (
+    commandText: string,
+    lookupRequest: ChatLookupRequest,
+  ) => {
+    if (!commandText || isTurnBusy || !activeCampaign) return;
+
+    setSceneProgress(null);
+    setTurnPhase("streaming");
+    setLastOracleResult(null);
+    setTravelFeedback(null);
+    clearQuickActionState();
+
+    let lookupCompleted = false;
+    let lookupError: string | null = null;
+
+    try {
+      const response = await chatLookup(activeCampaign.id, lookupRequest);
+
+      if (!response.body) {
+        throw new Error("Empty lookup response stream.");
+      }
+
+      const userMessage: ChatMessage = { role: "user", content: commandText };
+      flushSync(() => {
+        setMessages((current) => {
+          const next = [...current, userMessage];
+          messagesRef.current = next;
+          return next;
+        });
+      });
+
+      await parseTurnSSE(response.body, {
+        onLookupResult: (result) => {
+          setTurnPhase("streaming");
+          const assistantContent = formatLookupAssistantMessage(result);
+          flushSync(() => {
+            setMessages((current) => {
+              const next = [...current];
+              const lastMessage = next[next.length - 1];
+
+              if (lastMessage?.role !== "user" || lastMessage.content !== commandText) {
+                next.push({ role: "user", content: commandText });
+              }
+
+              const nextLastIndex = next.length - 1;
+              if (nextLastIndex >= 0 && next[nextLastIndex].role === "assistant") {
+                next[nextLastIndex] = {
+                  ...next[nextLastIndex],
+                  content: assistantContent,
+                };
+              } else {
+                next.push({ role: "assistant", content: assistantContent });
+              }
+
+              messagesRef.current = next;
+              return next;
+            });
+          });
+        },
+        onNarrative: () => {},
+        onOracleResult: () => {},
+        onStateUpdate: () => {},
+        onQuickActions: () => {},
+        onDone: () => {
+          lookupCompleted = true;
+          setTurnPhase("idle");
+        },
+        onError: (error) => {
+          lookupError = error;
+        },
+      });
+
+      if (lookupError) {
+        throw new Error(lookupError);
+      }
+    } catch (error) {
+      flushSync(() => {
+        setMessages((current) => {
+          const next = [...current];
+          const lastMessage = next[next.length - 1];
+          if (lastMessage?.role === "assistant") {
+            next.pop();
+          }
+          const prevMessage = next[next.length - 1];
+          if (prevMessage?.role === "user" && prevMessage.content === commandText) {
+            next.pop();
+          }
+          messagesRef.current = next;
+          return next;
+        });
+      });
+
+      toast.error("Failed to resolve lookup", {
+        description: getErrorMessage(error, "Unknown lookup error."),
+      });
+    } finally {
+      if (!lookupCompleted) {
+        setTurnPhase("idle");
+      }
+    }
+  };
+
   const submitAction = async (actionText: string) => {
     if (!actionText || isTurnBusy || !activeCampaign) return;
+
+    const lookupRequest = parseExplicitLookupCommand(actionText);
+    if (lookupRequest) {
+      await submitLookup(actionText, lookupRequest);
+      return;
+    }
 
     setTurnPhase("idle");
     setSceneProgress("scene-settling");

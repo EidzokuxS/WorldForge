@@ -14,6 +14,7 @@ vi.mock("@/lib/api", () => ({
   chatAction: vi.fn(),
   chatEdit: vi.fn(),
   chatHistory: vi.fn(),
+  chatLookup: vi.fn(),
   chatOpening: vi.fn(),
   chatRetry: vi.fn(),
   chatUndo: vi.fn(),
@@ -67,8 +68,9 @@ const mockLocationPanel = vi.fn(
 vi.mock("@/components/game/location-panel", () => ({
   LocationPanel: (props: unknown) => mockLocationPanel(props as never),
 }));
-vi.mock("@/components/game/narrative-log", () => ({
-  NarrativeLog: ({
+const narrativeLogMessageSnapshots: string[][] = [];
+const mockNarrativeLog = vi.fn(
+  ({
     canRetryUndo,
     isStreaming,
     messages,
@@ -83,37 +85,48 @@ vi.mock("@/components/game/narrative-log", () => ({
     sceneProgress?: "opening" | "scene-settling" | null;
     turnPhase?: "idle" | "streaming" | "finalizing";
   }) => (
-    <div data-testid="narrative-log">
-      <div data-testid="turn-phase">
-        {turnPhase ?? (isStreaming ? "streaming" : "idle")}
-      </div>
-      <div data-testid="scene-progress">{sceneProgress ?? "none"}</div>
-      {messages?.length ? (
-        messages.map((message, index) => (
-          <p key={`${message.role}-${index}`}>{message.content}</p>
-        ))
-      ) : (
-        <p>Begin your adventure when the opening scene is ready.</p>
-      )}
-      {sceneProgress === "opening" ? (
-        <p>The opening scene is taking shape. The runtime is grounding your first moment before narration appears.</p>
-      ) : null}
-      {sceneProgress === "scene-settling" ? (
-        <p>The scene is still settling into place before the narration begins.</p>
-      ) : null}
-      {turnPhase === "finalizing" ? (
-        <p>The world is still resolving. Retry and undo unlock when the turn is complete.</p>
-      ) : null}
-      {turnPhase !== "finalizing" && isStreaming ? (
-        <p>The storyteller is weaving the scene...</p>
-      ) : null}
-      {canRetryUndo ? (
-        <button type="button" onClick={onRetry}>
-          Retry turn
-        </button>
-      ) : null}
-    </div>
+    (() => {
+      narrativeLogMessageSnapshots.push(
+        (messages ?? []).map((message) => message.content),
+      );
+
+      return (
+        <div data-testid="narrative-log">
+          <div data-testid="turn-phase">
+            {turnPhase ?? (isStreaming ? "streaming" : "idle")}
+          </div>
+          <div data-testid="scene-progress">{sceneProgress ?? "none"}</div>
+          {messages?.length ? (
+            messages.map((message, index) => (
+              <p key={`${message.role}-${index}`}>{message.content}</p>
+            ))
+          ) : (
+            <p>Begin your adventure when the opening scene is ready.</p>
+          )}
+          {sceneProgress === "opening" ? (
+            <p>The opening scene is taking shape. The runtime is grounding your first moment before narration appears.</p>
+          ) : null}
+          {sceneProgress === "scene-settling" ? (
+            <p>The scene is still settling into place before the narration begins.</p>
+          ) : null}
+          {turnPhase === "finalizing" ? (
+            <p>The world is still resolving. Retry and undo unlock when the turn is complete.</p>
+          ) : null}
+          {turnPhase !== "finalizing" && isStreaming ? (
+            <p>The storyteller is weaving the scene...</p>
+          ) : null}
+          {canRetryUndo ? (
+            <button type="button" onClick={onRetry}>
+              Retry turn
+            </button>
+          ) : null}
+        </div>
+      );
+    })()
   ),
+);
+vi.mock("@/components/game/narrative-log", () => ({
+  NarrativeLog: (props: unknown) => mockNarrativeLog(props as never),
 }));
 const mockCharacterPanel = vi.fn(() => <div data-testid="character-panel" />);
 vi.mock("@/components/game/character-panel", () => ({
@@ -189,6 +202,7 @@ import {
   apiGet,
   chatAction,
   chatHistory,
+  chatLookup,
   chatOpening,
   chatRetry,
   getActiveCampaign,
@@ -205,6 +219,7 @@ const mockedGetWorld = vi.mocked(getWorldData);
 const mockedApiGet = vi.mocked(apiGet);
 const mockedChatAction = vi.mocked(chatAction);
 const mockedChatHistory = vi.mocked(chatHistory);
+const mockedChatLookup = vi.mocked(chatLookup);
 const mockedChatOpening = vi.mocked(chatOpening);
 const mockedChatRetry = vi.mocked(chatRetry);
 const mockedGetRememberedCampaignId = vi.mocked(getRememberedCampaignId);
@@ -315,6 +330,7 @@ function renderReadyGameWithWorld(worldData: typeof fakeWorldData, history = fak
 
 beforeEach(() => {
   vi.clearAllMocks();
+  narrativeLogMessageSnapshots.length = 0;
   mockedGetRememberedCampaignId.mockReturnValue(null);
   mockedParseTurnSSE.mockImplementation(async (_body, handlers) => {
     handlers.onDone();
@@ -634,6 +650,49 @@ describe("GamePage", () => {
 
     await waitFor(() => {
       expect(mockedChatRetry).toHaveBeenCalledWith(fakeCampaign.id);
+    });
+  });
+
+  it("routes slash lookups through chatLookup and renders the factual answer in the existing log", async () => {
+    await renderReadyGame();
+    mockedChatLookup.mockResolvedValue(createStreamResponse() as never);
+    mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
+      (handlers as typeof handlers & {
+        onLookupResult?: (result: {
+          answer: string;
+          lookupKind: string;
+          subject: string;
+        }) => void;
+      }).onLookupResult?.({
+        lookupKind: "character_canon_fact",
+        subject: "Satoru Gojo",
+        answer: "Satoru Gojo is the strongest modern jujutsu sorcerer in the stored canon baseline.",
+      });
+      handlers.onDone();
+    });
+
+    fireEvent.change(screen.getByLabelText("Action input"), {
+      target: { value: "/lookup Satoru Gojo" },
+    });
+    fireEvent.click(screen.getByText("Submit action"));
+
+    await waitFor(() => {
+      expect(mockedChatLookup).toHaveBeenCalledWith(fakeCampaign.id, {
+        lookupKind: "character_canon_fact",
+        subject: "Satoru Gojo",
+      });
+    });
+    expect(mockedChatAction).not.toHaveBeenCalled();
+    await waitFor(() => {
+      const renderedLookupState = narrativeLogMessageSnapshots.some((snapshot) =>
+        JSON.stringify(snapshot) === JSON.stringify([
+          "Look around",
+          "You see a bustling town square.",
+          "/lookup Satoru Gojo",
+          "[Lookup: character_canon_fact] Satoru Gojo is the strongest modern jujutsu sorcerer in the stored canon baseline.",
+        ]));
+
+      expect(renderedLookupState).toBe(true);
     });
   });
 

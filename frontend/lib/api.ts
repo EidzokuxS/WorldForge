@@ -95,6 +95,28 @@ export type ChatHistoryResponse = {
   hasLiveTurnSnapshot: boolean;
 };
 
+export type LookupKind =
+  | "world_canon_fact"
+  | "character_canon_fact"
+  | "power_profile"
+  | "event_clarification";
+
+export interface ChatLookupRequest {
+  lookupKind: LookupKind;
+  subject: string;
+  compareAgainst?: string;
+  question?: string;
+}
+
+export interface LookupResultEvent {
+  lookupKind: LookupKind;
+  subject: string;
+  answer: string;
+  citations: Array<{ kind?: string; label: string; excerpt: string }>;
+  uncertaintyNotes: string[];
+  sceneImpact: string;
+}
+
 // ───── Raw types (internal) ─────
 
 interface RawWorldData {
@@ -699,6 +721,7 @@ export interface TurnSSEHandlers {
     phase?: string;
     opening?: boolean;
   }) => void;
+  onLookupResult?: (result: LookupResultEvent) => void;
   onNarrative: (text: string) => void;
   onOracleResult: (result: { chance: number; roll: number; outcome: string; reasoning: string }) => void;
   onStateUpdate: (update: { tool: string; args: unknown; result: unknown }) => void;
@@ -726,6 +749,7 @@ export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: T
       const parsed = JSON.parse(currentData);
       switch (currentEvent) {
         case "scene-settling": handlers.onSceneSettling?.(parsed); break;
+        case "lookup_result": handlers.onLookupResult?.(parsed); break;
         case "narrative": handlers.onNarrative(parsed.text); break;
         case "oracle_result": handlers.onOracleResult(parsed); break;
         case "state_update": handlers.onStateUpdate(parsed); break;
@@ -1137,6 +1161,16 @@ export function chatAction(
     playerAction,
     intent,
     method,
+  });
+}
+
+export function chatLookup(
+  campaignId: string,
+  request: ChatLookupRequest,
+): Promise<Response> {
+  return apiStreamPost("/api/chat/lookup", {
+    campaignId,
+    ...request,
   });
 }
 

@@ -119,6 +119,21 @@ export const chatActionBodySchema = z.object({
   method: z.string().max(500).default(""),
 });
 
+export const lookupKindSchema = z.enum([
+  "world_canon_fact",
+  "character_canon_fact",
+  "power_profile",
+  "event_clarification",
+]);
+
+export const chatLookupBodySchema = z.object({
+  campaignId: campaignIdSchema,
+  lookupKind: lookupKindSchema,
+  subject: z.string().trim().min(1).max(300),
+  compareAgainst: z.string().trim().min(1).max(300).optional(),
+  question: z.string().trim().min(1).max(1000).optional(),
+});
+
 export const chatRetryBodySchema = z.object({
   campaignId: campaignIdSchema,
 });

@@ -27,6 +27,7 @@ import {
   chatActionBodySchema,
   chatEditBodySchema,
   chatHistoryQuerySchema,
+  chatLookupBodySchema,
   chatOpeningBodySchema,
   chatRetryBodySchema,
   chatUndoBodySchema,
@@ -73,6 +74,7 @@ import {
   cacheImage,
   imageExists,
 } from "../images/index.js";
+import { runGroundedLookup } from "../engine/grounded-lookup.js";
 
 const log = createLogger("chat");
 
@@ -599,6 +601,54 @@ app.post("/action", async (c) => {
     return c.json(
       { error: getErrorMessage(error, "Action request failed.") },
       getErrorStatus(error)
+    );
+  }
+});
+
+// -- POST /lookup — Explicit grounded lookup via dedicated SSE -----------------
+
+app.post("/lookup", async (c) => {
+  try {
+    const result = await parseBody(c, chatLookupBodySchema);
+    if ("response" in result) return result.response;
+
+    const { campaignId, lookupKind, subject, compareAgainst, question } = result.data;
+    const campaign = await requireLoadedCampaign(c, campaignId);
+    if (campaign instanceof Response) return campaign;
+
+    c.header("Cache-Control", "no-cache, no-transform");
+
+    return streamSSE(c, async (stream) => {
+      try {
+        const lookup = await runGroundedLookup({
+          campaignId,
+          lookupKind,
+          subject,
+          compareAgainst,
+          question,
+        });
+
+        await stream.writeSSE({
+          event: "lookup_result",
+          data: JSON.stringify(lookup),
+        });
+        await stream.writeSSE({
+          event: "done",
+          data: JSON.stringify({ lookup: true }),
+        });
+      } catch (error) {
+        await stream.writeSSE({
+          event: "error",
+          data: JSON.stringify({
+            error: getErrorMessage(error, "Lookup failed."),
+          }),
+        });
+      }
+    });
+  } catch (error) {
+    return c.json(
+      { error: getErrorMessage(error, "Lookup request failed.") },
+      getErrorStatus(error),
     );
   }
 });
