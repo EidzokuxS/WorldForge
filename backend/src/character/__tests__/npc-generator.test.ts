@@ -30,12 +30,17 @@ const fakeRole = {
 
 const fakeNpc = {
   name: "Grom",
-  persona: "A gruff blacksmith with a secret past.",
+  race: "Human",
+  gender: "Male",
+  age: "Middle-aged",
+  appearance: "Broad-shouldered with soot-darkened arms.",
+  backgroundSummary: "A respected blacksmith whose forge quietly doubles as a meeting point for old war allies.",
+  personaSummary: "Gruff and unsentimental at first glance, but fiercely protective of people he considers his own.",
   tags: ["Blacksmith", "Gruff", "Secretive"],
-  goals: {
-    shortTerm: ["Forge a legendary blade"],
-    longTerm: ["Avenge his family"],
-  },
+  drives: ["Protect the last people he still trusts"],
+  frictions: ["Falls back on suspicion whenever war memories flare up"],
+  shortTermGoals: ["Forge a legendary blade"],
+  longTermGoals: ["Avenge his family"],
   locationName: "Ironhaven",
   factionName: null,
 };
@@ -58,14 +63,24 @@ describe("parseNpcDescription", () => {
 
     expect(result.identity.role).toBe("npc");
     expect(result.identity.displayName).toBe("Grom");
-    expect(result.profile.personaSummary).toContain("blacksmith");
+    expect(result.identity.baseFacts?.biography).toContain("blacksmith");
+    expect(result.identity.behavioralCore?.motives).toEqual([
+      "Protect the last people he still trusts",
+    ]);
+    expect(result.identity.liveDynamics?.activeGoals).toEqual([
+      "Forge a legendary blade",
+      "Avenge his family",
+    ]);
     expect(result.motivations.shortTermGoals).toEqual(["Forge a legendary blade"]);
 
     const prompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>)
       .prompt as string;
     expect(prompt).toContain("identity, profile, socialContext, motivations, capabilities, state, loadout, startConditions, provenance");
+    expect(prompt).toContain("baseFacts + behavioralCore define who the character is");
+    expect(prompt).toContain("liveDynamics records earned campaign change");
     expect(prompt).toContain("socialContext");
     expect(prompt).toContain("motivations");
+    expect(prompt).toContain("sourceBundle");
     expect(prompt).not.toContain("persona/tags/goals/location/faction");
   });
 });
@@ -96,12 +111,16 @@ describe("mapV2CardToNpc", () => {
       "Remote Researcher",
       "Pattern Analysis",
     ]);
+    expect(result.sourceBundle?.secondarySources).toHaveLength(4);
+    expect(result.continuity?.identityInertia).toBe("anchored");
 
     const prompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>)
       .prompt as string;
     expect(prompt).toContain("CHARACTER NAME: Grom");
     expect(prompt).toContain("shared draft pipeline");
-    expect(prompt).toContain("socialContext");
+    expect(prompt).toContain("secondary cues");
+    expect(prompt).toContain("sourceBundle");
+    expect(prompt).toContain("continuity");
     expect(prompt).not.toContain("persona/tags/goals/location/faction");
   });
 });
@@ -126,6 +145,7 @@ describe("generateNpcFromArchetype", () => {
     expect(prompt).toContain("profile");
     expect(prompt).toContain("motivations");
     expect(prompt).toContain("socialContext");
+    expect(prompt).toContain("Do NOT emit nested baseFacts, behavioralCore, liveDynamics");
     expect(prompt).not.toContain("persona/tags/goals/location/faction");
   });
 });

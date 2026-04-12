@@ -174,6 +174,24 @@ function makePlayerDraft(overrides: Record<string, unknown> = {}) {
       tier: "key",
       displayName: "Hero",
       canonicalStatus: "original",
+      baseFacts: {
+        biography: "A wandering swordsman.",
+        socialRole: ["player"],
+        hardConstraints: ["Protect innocent travelers"],
+      },
+      behavioralCore: {
+        motives: ["Keep moving before the past catches up"],
+        pressureResponses: ["Shuts down before trusting strangers"],
+        taboos: ["Abandoning a companion"],
+        attachments: ["The old family blade"],
+        selfImage: "Quiet but determined.",
+      },
+      liveDynamics: {
+        activeGoals: ["Find work", "Restore family honor"],
+        beliefDrift: [],
+        currentStrains: ["Guarded"],
+        earnedChanges: [],
+      },
     },
     profile: {
       species: "Human",
@@ -228,6 +246,27 @@ function makePlayerDraft(overrides: Record<string, unknown> = {}) {
       archetypePrompt: null,
       worldgenOrigin: null,
       legacyTags: [],
+    },
+    sourceBundle: {
+      canonSources: [],
+      secondarySources: [
+        {
+          kind: "runtime",
+          label: "Generator concept",
+          excerpt: "A wandering swordsman.",
+        },
+      ],
+      synthesis: {
+        owner: "WorldForge",
+        strategy: "test-fixture",
+        notes: ["Route tests should preserve richer identity payloads."],
+      },
+    },
+    continuity: {
+      identityInertia: "flexible",
+      protectedCore: ["identity.baseFacts"],
+      mutableSurface: ["identity.liveDynamics"],
+      changePressureNotes: ["Player drafts may change through play."],
     },
     ...overrides,
   };
@@ -306,6 +345,15 @@ describe("POST /api/worldgen/parse-character", () => {
     const body = await res.json();
     expect(body.role).toBe("player");
     expect(body.draft).toEqual(fakeDraft);
+    expect(body.characterRecord.identity.baseFacts.biography).toBe(
+      "A wandering swordsman.",
+    );
+    expect(body.characterRecord.identity.behavioralCore.motives).toEqual([
+      "Keep moving before the past catches up",
+    ]);
+    expect(body.characterRecord.sourceBundle.secondarySources[0]?.label).toBe(
+      "Generator concept",
+    );
     expect(body.character).toMatchObject({
       name: "Hero",
       race: "Human",
@@ -336,6 +384,12 @@ describe("POST /api/worldgen/parse-character", () => {
     const body = await res.json();
     expect(body.role).toBe("key");
     expect(body.draft).toEqual(fakeDraft);
+    expect(body.characterRecord.identity.baseFacts.biography).toBe(
+      "Veteran sentry.",
+    );
+    expect(body.characterRecord.identity.behavioralCore.motives).toEqual([
+      "Duty-bound",
+    ]);
     expect(body.npc).toMatchObject({
       name: "Guard",
       persona: "Stoic and suspicious.",
@@ -380,6 +434,10 @@ describe("POST /api/worldgen/generate-character", () => {
     const body = await res.json();
     expect(body.role).toBe("player");
     expect(body.draft).toEqual(fakeDraft);
+    expect(body.characterRecord.identity.liveDynamics.activeGoals).toEqual([
+      "Find work",
+      "Restore family honor",
+    ]);
     expect(body.character).toMatchObject({
       name: "Ranger",
       race: "Elf",
@@ -422,6 +480,9 @@ describe("POST /api/worldgen/generate-character", () => {
     const body = await res.json();
     expect(body.role).toBe("key");
     expect(body.draft).toEqual(fakeDraft);
+    expect(body.characterRecord.identity.behavioralCore.selfImage).toBe(
+      "Greedy but personable.",
+    );
     expect(body.npc).toMatchObject({
       name: "Merchant",
       persona: "Greedy but personable.",
@@ -501,6 +562,9 @@ describe("POST /api/worldgen/import-v2-card", () => {
     const body = await res.json();
     expect(body.role).toBe("player");
     expect(body.draft).toEqual(fakeDraft);
+    expect(body.characterRecord.identity.baseFacts.biography).toBe(
+      "A wandering swordsman.",
+    );
     expect(body.character).toMatchObject({ name: "Raven" });
     expect(mockedMapV2Char).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -537,6 +601,7 @@ describe("POST /api/worldgen/import-v2-card", () => {
     const body = await res.json();
     expect(body.role).toBe("key");
     expect(body.draft).toEqual(fakeDraft);
+    expect(body.characterRecord.continuity.identityInertia).toBe("flexible");
     expect(body.npc).toMatchObject({ name: "Raven" });
     expect(mockedMapV2Npc).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -623,6 +688,29 @@ describe("POST /api/worldgen/save-character", () => {
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(body).toHaveProperty("playerId");
+    expect(body).toHaveProperty("draft");
+    expect(body).toHaveProperty("characterRecord");
+    expect(body.characterRecord.identity.baseFacts).toEqual(
+      expect.objectContaining({
+        biography: "",
+        socialRole: expect.any(Array),
+        hardConstraints: expect.any(Array),
+      }),
+    );
+    expect(body.characterRecord.identity.behavioralCore).toEqual(
+      expect.objectContaining({
+        motives: expect.any(Array),
+        pressureResponses: expect.any(Array),
+        selfImage: expect.any(String),
+      }),
+    );
+    expect(body.characterRecord.identity.liveDynamics).toEqual(
+      expect.objectContaining({
+        activeGoals: expect.any(Array),
+        beliefDrift: expect.any(Array),
+        currentStrains: expect.any(Array),
+      }),
+    );
     expect(typeof body.playerId).toBe("string");
   });
 

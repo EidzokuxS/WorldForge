@@ -146,6 +146,42 @@ function buildWorldCurrentScene(args: {
   };
 }
 
+function buildWorldNpcPayload(
+  row: Parameters<typeof hydrateStoredNpcRecord>[0],
+) {
+  const record = hydrateStoredNpcRecord(row);
+  return {
+    ...row,
+    sceneScopeId: toWorldSceneScopeId(row),
+    characterRecord: record,
+    draft: toCharacterDraft(record),
+    npc: toLegacyNpcDraft(record),
+  };
+}
+
+function buildWorldPlayerPayload(args: {
+  campaignId: string;
+  row: NonNullable<Parameters<typeof toWorldSceneScopeId>[0]>;
+  playerRecord: ReturnType<typeof hydrateStoredPlayerRecord>;
+}) {
+  const playerInventory = loadAuthoritativeInventoryView(args.campaignId, args.row.id);
+  return {
+    ...args.row,
+    sceneScopeId: toWorldSceneScopeId(args.row),
+    characterRecord: args.playerRecord,
+    draft: toCharacterDraft(args.playerRecord),
+    inventory: playerInventory?.carried.map(toWorldPlayerInventoryItem) ?? [],
+    equipment: playerInventory?.equipped.map(toWorldPlayerInventoryItem) ?? [],
+    inventoryItems: playerInventory?.carried.map((item) => item.name) ?? [],
+    equippedItems: playerInventory?.compatibility.equippedItemRefs ?? [],
+    signatureItems: playerInventory?.compatibility.signatureItems ?? [],
+    character: toLegacyPlayerCharacterWithInventory(
+      args.playerRecord,
+      playerInventory ?? undefined,
+    ),
+  };
+}
+
 app.get("/", (c) => {
   try {
     return c.json(listCampaigns());
@@ -253,10 +289,6 @@ app.get("/:id/world", async (c) => {
     });
     const playerRow = worldPlayer[0] ?? null;
     const playerRecord = playerRow ? hydrateStoredPlayerRecord(playerRow) : null;
-    const playerInventory = playerRow
-      ? loadAuthoritativeInventoryView(id, playerRow.id)
-      : null;
-    const playerDraft = playerRecord ? toCharacterDraft(playerRecord) : null;
     const personaTemplates = readCampaignConfig(id).personaTemplates ?? [];
     const currentScene = buildWorldCurrentScene({
       player: playerRow,
@@ -268,30 +300,16 @@ app.get("/:id/world", async (c) => {
       locations: normalizedWorldLocations,
       currentScene,
       npcs: worldNpcs.map((row) => {
-        const record = hydrateStoredNpcRecord(row);
-        return {
-          ...row,
-          sceneScopeId: toWorldSceneScopeId(row),
-          characterRecord: record,
-          draft: toCharacterDraft(record),
-          npc: toLegacyNpcDraft(record),
-        };
+        return buildWorldNpcPayload(row);
       }),
       factions: worldFactions,
       relationships: worldRelationships,
       player: playerRow && playerRecord
-        ? {
-            ...playerRow,
-            sceneScopeId: toWorldSceneScopeId(playerRow),
-            characterRecord: playerRecord,
-            draft: playerDraft,
-            inventory: playerInventory?.carried.map(toWorldPlayerInventoryItem) ?? [],
-            equipment: playerInventory?.equipped.map(toWorldPlayerInventoryItem) ?? [],
-            inventoryItems: playerInventory?.carried.map((item) => item.name) ?? [],
-            equippedItems: playerInventory?.compatibility.equippedItemRefs ?? [],
-            signatureItems: playerInventory?.compatibility.signatureItems ?? [],
-            character: toLegacyPlayerCharacterWithInventory(playerRecord, playerInventory ?? undefined),
-          }
+        ? buildWorldPlayerPayload({
+            campaignId: id,
+            row: playerRow,
+            playerRecord,
+          })
         : null,
       personaTemplates,
       items: worldItems,

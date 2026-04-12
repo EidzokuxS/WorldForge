@@ -9,6 +9,7 @@ import { parseCharacterDescription, generateCharacter, generateCharacterFromArch
 import {
   createCharacterRecordFromDraft,
   projectPlayerRecord,
+  toCharacterDraft,
   toLegacyNpcDraft,
   toLegacyPlayerCharacter,
 } from "../character/record-adapters.js";
@@ -78,6 +79,7 @@ function createDraftResponse(
   if (draft.identity.role === "npc") {
     return {
       role: "key" as const,
+      characterRecord: record,
       draft,
       npc: toLegacyNpcDraft(record),
     };
@@ -85,8 +87,22 @@ function createDraftResponse(
 
   return {
     role: "player" as const,
+    characterRecord: record,
     draft,
     character: toLegacyPlayerCharacter(record),
+  };
+}
+
+function createSavedCharacterResponse(
+  playerId: string,
+  characterRecord: ReturnType<typeof createCharacterRecordFromDraft>,
+) {
+  return {
+    ok: true,
+    playerId,
+    characterRecord,
+    draft: toCharacterDraft(characterRecord),
+    character: toLegacyPlayerCharacter(characterRecord),
   };
 }
 
@@ -322,7 +338,7 @@ app.post("/save-character", async (c) => {
       })();
     }
 
-    return c.json({ ok: true, playerId });
+    return c.json(createSavedCharacterResponse(playerId, characterRecord));
   } catch (error) {
     return c.json(
       { error: getErrorMessage(error, "Failed to save character.") },

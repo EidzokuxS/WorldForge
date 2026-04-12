@@ -31,6 +31,10 @@ vi.mock("../../engine/location-graph.js", () => ({
   loadLocationGraph: vi.fn(),
 }));
 
+vi.mock("../../inventory/authority.js", () => ({
+  loadAuthoritativeInventoryView: vi.fn(() => null),
+}));
+
 vi.mock("../../lib/index.js", () => ({
   getErrorMessage: vi.fn((_err: unknown, fallback: string) => fallback),
   getErrorStatus: vi.fn(() => 500),
@@ -60,6 +64,7 @@ import {
 import { getDb } from "../../db/index.js";
 import { listRecentLocationEventsForLocations } from "../../engine/location-events.js";
 import { listConnectedPaths, loadLocationGraph } from "../../engine/location-graph.js";
+import { loadAuthoritativeInventoryView } from "../../inventory/authority.js";
 import campaignRoutes from "../campaigns.js";
 
 const mockedList = vi.mocked(listCampaigns);
@@ -73,6 +78,7 @@ const mockedListRecentLocationEventsForLocations = vi.mocked(
 );
 const mockedListConnectedPaths = vi.mocked(listConnectedPaths);
 const mockedLoadLocationGraph = vi.mocked(loadLocationGraph);
+const mockedLoadAuthoritativeInventoryView = vi.mocked(loadAuthoritativeInventoryView);
 const mockedReadConfig = vi.mocked(readCampaignConfig);
 
 // ---------------------------------------------------------------------------
@@ -91,8 +97,259 @@ beforeEach(() => {
     edges: [],
   } as any);
   mockedListConnectedPaths.mockReturnValue([]);
+  mockedLoadAuthoritativeInventoryView.mockReturnValue(null as any);
   mockedListRecentLocationEventsForLocations.mockReturnValue({});
 });
+
+function makeStoredPlayerRow() {
+  const characterRecord = {
+    identity: {
+      id: "player-1",
+      campaignId: CAMPAIGN_ID,
+      role: "player",
+      tier: "key",
+      displayName: "Hero",
+      canonicalStatus: "original",
+      baseFacts: {
+        biography: "A wandering swordsman.",
+        socialRole: ["player"],
+        hardConstraints: ["Protect innocent travelers"],
+      },
+      behavioralCore: {
+        motives: ["Keep moving before the past catches up"],
+        pressureResponses: ["Shuts down before trusting strangers"],
+        taboos: ["Abandoning a companion"],
+        attachments: ["The old family blade"],
+        selfImage: "Quiet but determined.",
+      },
+      liveDynamics: {
+        activeGoals: ["Find work", "Restore family honor"],
+        beliefDrift: [],
+        currentStrains: ["Guarded"],
+        earnedChanges: [],
+      },
+    },
+    profile: {
+      species: "Human",
+      gender: "Male",
+      ageText: "25",
+      appearance: "Tall",
+      backgroundSummary: "A wandering swordsman.",
+      personaSummary: "Quiet but determined.",
+    },
+    socialContext: {
+      factionId: null,
+      factionName: null,
+      homeLocationId: null,
+      homeLocationName: null,
+      currentLocationId: "loc-1",
+      currentLocationName: "Forest",
+      relationshipRefs: [],
+      socialStatus: [],
+      originMode: "native",
+    },
+    motivations: {
+      shortTermGoals: ["Find work"],
+      longTermGoals: ["Restore family honor"],
+      beliefs: [],
+      drives: ["Keep moving before the past catches up"],
+      frictions: ["Guarded"],
+    },
+    capabilities: {
+      traits: ["Brave"],
+      skills: [],
+      flaws: [],
+      specialties: [],
+      wealthTier: "Poor",
+    },
+    state: {
+      hp: 5,
+      conditions: [],
+      statusFlags: [],
+      activityState: "idle",
+    },
+    loadout: {
+      inventorySeed: ["Sword"],
+      equippedItemRefs: ["Sword"],
+      currencyNotes: "",
+      signatureItems: ["Sword"],
+    },
+    startConditions: {},
+    provenance: {
+      sourceKind: "generator",
+      importMode: null,
+      templateId: null,
+      archetypePrompt: null,
+      worldgenOrigin: null,
+      legacyTags: ["Brave"],
+    },
+    sourceBundle: {
+      canonSources: [],
+      secondarySources: [
+        {
+          kind: "runtime",
+          label: "Generator concept",
+          excerpt: "A wandering swordsman.",
+        },
+      ],
+      synthesis: {
+        owner: "WorldForge",
+        strategy: "test-fixture",
+        notes: ["Preserve richer route payloads."],
+      },
+    },
+    continuity: {
+      identityInertia: "flexible",
+      protectedCore: ["identity.baseFacts"],
+      mutableSurface: ["identity.liveDynamics"],
+      changePressureNotes: ["Player drafts may change through play."],
+    },
+  };
+
+  return {
+    id: "player-1",
+    campaignId: CAMPAIGN_ID,
+    name: "Hero",
+    race: "Human",
+    gender: "Male",
+    age: "25",
+    appearance: "Tall",
+    hp: 5,
+    tags: "[]",
+    equippedItems: "[\"Sword\"]",
+    currentLocationId: "loc-1",
+    currentSceneLocationId: "loc-1",
+    characterRecord: JSON.stringify(characterRecord),
+    derivedTags: "[\"Brave\"]",
+  };
+}
+
+function makeStoredNpcRow() {
+  const characterRecord = {
+    identity: {
+      id: "npc-1",
+      campaignId: CAMPAIGN_ID,
+      role: "npc",
+      tier: "key",
+      displayName: "Signal Runner Toma",
+      canonicalStatus: "imported",
+      baseFacts: {
+        biography: "Carries messages through the storm.",
+        socialRole: ["npc", "Courier"],
+        hardConstraints: ["Never abandon a message mid-run"],
+      },
+      behavioralCore: {
+        motives: ["Keep the valley connected"],
+        pressureResponses: ["Runs harder when cornered"],
+        taboos: [],
+        attachments: ["The mountain relay crews"],
+        selfImage: "Lean, alert, and always one step from sprinting.",
+      },
+      liveDynamics: {
+        activeGoals: ["Deliver the warning", "Keep the valley connected"],
+        beliefDrift: [],
+        currentStrains: ["Trusts very few outsiders"],
+        earnedChanges: [],
+      },
+    },
+    profile: {
+      species: "Human",
+      gender: "",
+      ageText: "",
+      appearance: "",
+      backgroundSummary: "Carries messages through the storm.",
+      personaSummary: "Lean, alert, and always one step from sprinting.",
+    },
+    socialContext: {
+      factionId: null,
+      factionName: null,
+      homeLocationId: null,
+      homeLocationName: null,
+      currentLocationId: "loc-1",
+      currentLocationName: "Forest",
+      relationshipRefs: [],
+      socialStatus: [],
+      originMode: "outsider",
+    },
+    motivations: {
+      shortTermGoals: ["Deliver the warning"],
+      longTermGoals: ["Keep the valley connected"],
+      beliefs: [],
+      drives: ["Keep the valley connected"],
+      frictions: ["Trusts very few outsiders"],
+    },
+    capabilities: {
+      traits: ["Remote Researcher"],
+      skills: [],
+      flaws: [],
+      specialties: [],
+      wealthTier: null,
+    },
+    state: {
+      hp: 5,
+      conditions: [],
+      statusFlags: [],
+      activityState: "idle",
+    },
+    loadout: {
+      inventorySeed: [],
+      equippedItemRefs: [],
+      currencyNotes: "",
+      signatureItems: [],
+    },
+    startConditions: {},
+    provenance: {
+      sourceKind: "import",
+      importMode: "outsider",
+      templateId: null,
+      archetypePrompt: null,
+      worldgenOrigin: null,
+      legacyTags: ["Remote Researcher"],
+    },
+    sourceBundle: {
+      canonSources: [],
+      secondarySources: [
+        {
+          kind: "card",
+          label: "Card description",
+          excerpt: "Carries messages through the storm.",
+        },
+      ],
+      synthesis: {
+        owner: "WorldForge",
+        strategy: "flat-output-then-deterministic-npc-mapping",
+        notes: ["Imported NPCs preserve secondary cues separately."],
+      },
+    },
+    continuity: {
+      identityInertia: "anchored",
+      protectedCore: ["identity.baseFacts", "identity.behavioralCore"],
+      mutableSurface: ["identity.liveDynamics"],
+      changePressureNotes: ["Imported NPCs should not drift on trivial cues."],
+    },
+  };
+
+  return {
+    id: "npc-1",
+    campaignId: CAMPAIGN_ID,
+    name: "Signal Runner Toma",
+    persona: "Carries messages through the storm.",
+    tags: "[]",
+    tier: "key",
+    currentLocationId: "loc-1",
+    currentSceneLocationId: "loc-1",
+    goals: JSON.stringify({
+      short_term: ["Deliver the warning"],
+      long_term: ["Keep the valley connected"],
+    }),
+    beliefs: "[]",
+    unprocessedImportance: 0,
+    inactiveTicks: 0,
+    createdAt: 0,
+    characterRecord: JSON.stringify(characterRecord),
+    derivedTags: "[\"Remote Researcher\"]",
+  };
+}
 
 // ---------------------------------------------------------------------------
 // GET /api/campaigns
@@ -701,6 +958,64 @@ describe("GET /:id/world", () => {
       edges: expect.any(Array),
       locations: expect.any(Array),
     });
+  });
+
+  it("preserves richer player and npc identity payloads across the world route boundary", async () => {
+    mockedGetActive.mockReturnValue({
+      id: CAMPAIGN_ID,
+      name: "Test",
+      createdAt: "2026-01-01",
+      generationComplete: true,
+    } as any);
+
+    const mockAll = vi.fn();
+    const mockWhere = vi.fn(() => ({ all: mockAll }));
+    const mockFrom = vi.fn(() => ({ where: mockWhere }));
+    const mockSelect = vi.fn(() => ({ from: mockFrom }));
+
+    mockAll
+      .mockReturnValueOnce([
+        {
+          id: "loc-1",
+          name: "Forest",
+          description: "Dark pines and wet stone.",
+          connectedTo: "[]",
+        },
+      ])
+      .mockReturnValueOnce([makeStoredNpcRow()])
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([makeStoredPlayerRow()]);
+
+    mockedGetDb.mockReturnValue({
+      select: mockSelect,
+    } as any);
+
+    const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/world`);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.player.characterRecord.identity.baseFacts.biography).toBe(
+      "A wandering swordsman.",
+    );
+    expect(body.player.characterRecord.identity.behavioralCore.motives).toEqual([
+      "Keep moving before the past catches up",
+    ]);
+    expect(body.player.characterRecord.sourceBundle.secondarySources[0].label).toBe(
+      "Generator concept",
+    );
+    expect(body.player.draft.continuity.identityInertia).toBe("flexible");
+    expect(body.npcs[0].characterRecord.identity.baseFacts.biography).toBe(
+      "Carries messages through the storm.",
+    );
+    expect(body.npcs[0].characterRecord.identity.liveDynamics.activeGoals).toEqual([
+      "Deliver the warning",
+      "Keep the valley connected",
+    ]);
+    expect(body.npcs[0].draft.sourceBundle.secondarySources[0].label).toBe(
+      "Card description",
+    );
+    expect(body.npcs[0].draft.continuity.identityInertia).toBe("anchored");
   });
 
   it("returns bounded empty fallback arrays when a location has no graph edges or local history", async () => {
