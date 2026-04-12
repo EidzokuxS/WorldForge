@@ -4,6 +4,7 @@ import {
   hydrateStoredPlayerRecord,
   fromLegacyNpcRow,
   fromLegacyPlayerRow,
+  projectPlayerRecord,
 } from "../record-adapters.js";
 
 describe("record adapters richer identity hydration", () => {
@@ -289,5 +290,245 @@ describe("record adapters richer identity hydration", () => {
       protectedCore: ["Will not abandon the station"],
       mutableSurface: ["Trust in the player"],
     });
+  });
+
+  it("round-trips grounded canon and power profiles through persisted player records", () => {
+    const stored = {
+      identity: {
+        id: "player-grounded",
+        campaignId: "camp-1",
+        role: "player",
+        tier: "key",
+        displayName: "Aria Bloodthorn",
+        canonicalStatus: "known_ip_canonical",
+      },
+      profile: {
+        species: "Human",
+        gender: "Female",
+        ageText: "18",
+        appearance: "Violet eyes and raven hair.",
+        backgroundSummary: "Raised in the border watch.",
+        personaSummary: "Dry humor covering old grief.",
+      },
+      socialContext: {
+        factionId: null,
+        factionName: null,
+        homeLocationId: null,
+        homeLocationName: null,
+        currentLocationId: "loc-1",
+        currentLocationName: "Signal Station",
+        relationshipRefs: [],
+        socialStatus: [],
+        originMode: "native",
+      },
+      motivations: {
+        shortTermGoals: ["Reach the tower"],
+        longTermGoals: ["Decode the buried signal"],
+        beliefs: ["The storm is hiding something"],
+        drives: ["Duty"],
+        frictions: ["Guarded"],
+      },
+      capabilities: {
+        traits: ["Observant"],
+        skills: [],
+        flaws: [],
+        specialties: [],
+        wealthTier: "Poor",
+      },
+      state: {
+        hp: 4,
+        conditions: [],
+        statusFlags: [],
+        activityState: "active",
+      },
+      loadout: {
+        inventorySeed: ["Iron Sword"],
+        equippedItemRefs: ["Iron Sword"],
+        currencyNotes: "",
+        signatureItems: [],
+      },
+      startConditions: {},
+      provenance: {
+        sourceKind: "import",
+        importMode: "native",
+        templateId: null,
+        archetypePrompt: null,
+        worldgenOrigin: "known-ip",
+        legacyTags: ["legacy"],
+      },
+      grounding: {
+        summary:
+          "Border-watch courier with storm-signal training and a canon-confirmed relay background.",
+        facts: [
+          "Served in the alpine border watch.",
+          "Knows relay-signal procedures.",
+        ],
+        abilities: ["Signal decoding", "Relay sprinting"],
+        constraints: ["Limited combat training"],
+        signatureMoves: ["Improvised signal reroutes"],
+        strongPoints: ["Situational awareness"],
+        vulnerabilities: ["Overextends when civilians are at risk"],
+        uncertaintyNotes: [
+          "Combat ceiling is inferred from sparse canon references.",
+        ],
+        powerProfile: {
+          attack: "Street-level with improvised weapons.",
+          speed: "Above-average human runner.",
+          durability: "Human endurance with exposure training.",
+          range: "Line-of-sight tools and relay gear.",
+          strengths: ["Fast under pressure", "Reads tactical terrain quickly"],
+          constraints: ["Requires equipment for long-range signaling"],
+          vulnerabilities: ["Can be overwhelmed by sustained melee pressure"],
+          uncertaintyNotes: [
+            "No direct canon feat establishes prolonged combat performance.",
+          ],
+        },
+        sources: [
+          {
+            kind: "canon",
+            label: "Signal Station dossier",
+            excerpt: "Aria was trained on relay equipment before the winter collapse.",
+          },
+        ],
+      },
+    };
+
+    const record = hydrateStoredPlayerRecord(
+      {
+        id: "player-grounded",
+        campaignId: "camp-1",
+        name: "Aria Bloodthorn",
+        race: "Human",
+        gender: "Female",
+        age: "18",
+        appearance: "Violet eyes and raven hair.",
+        hp: 4,
+        tags: JSON.stringify(["Poor", "Observant"]),
+        equippedItems: JSON.stringify(["Iron Sword"]),
+        currentLocationId: "loc-1",
+        characterRecord: JSON.stringify(stored),
+      },
+      { currentLocationName: "Signal Station" },
+    ) as Record<string, any>;
+
+    expect(record.grounding.summary).toContain("canon-confirmed");
+    expect(record.grounding.powerProfile.constraints).toEqual([
+      "Requires equipment for long-range signaling",
+    ]);
+    expect(record.grounding.powerProfile.vulnerabilities).toEqual([
+      "Can be overwhelmed by sustained melee pressure",
+    ]);
+    expect(record.grounding.sources[0]).toMatchObject({
+      kind: "canon",
+      label: "Signal Station dossier",
+    });
+
+    const projected = projectPlayerRecord(record as any);
+    const rehydrated = hydrateStoredPlayerRecord(
+      {
+        id: "player-grounded",
+        campaignId: "camp-1",
+        name: projected.name,
+        race: projected.race,
+        gender: projected.gender,
+        age: projected.age,
+        appearance: projected.appearance,
+        hp: projected.hp,
+        tags: projected.tags,
+        equippedItems: projected.equippedItems,
+        currentLocationId: projected.currentLocationId,
+        derivedTags: projected.derivedTags,
+        characterRecord: projected.characterRecord,
+      },
+      { currentLocationName: "Signal Station" },
+    ) as Record<string, any>;
+
+    expect(rehydrated.grounding).toEqual(record.grounding);
+  });
+
+  it("keeps legacy stored records valid when grounding is absent", () => {
+    const record = hydrateStoredPlayerRecord(
+      {
+        id: "player-no-grounding",
+        campaignId: "camp-1",
+        name: "Aria Bloodthorn",
+        race: "Human",
+        gender: "Female",
+        age: "18",
+        appearance: "Violet eyes and raven hair.",
+        hp: 4,
+        tags: JSON.stringify(["Poor", "Observant"]),
+        equippedItems: JSON.stringify(["Iron Sword"]),
+        currentLocationId: "loc-1",
+        characterRecord: JSON.stringify({
+          identity: {
+            id: "player-no-grounding",
+            campaignId: "camp-1",
+            role: "player",
+            tier: "key",
+            displayName: "Aria Bloodthorn",
+            canonicalStatus: "original",
+          },
+          profile: {
+            species: "Human",
+            gender: "Female",
+            ageText: "18",
+            appearance: "Violet eyes and raven hair.",
+            backgroundSummary: "",
+            personaSummary: "",
+          },
+          socialContext: {
+            factionId: null,
+            factionName: null,
+            homeLocationId: null,
+            homeLocationName: null,
+            currentLocationId: "loc-1",
+            currentLocationName: "Signal Station",
+            relationshipRefs: [],
+            socialStatus: [],
+            originMode: "native",
+          },
+          motivations: {
+            shortTermGoals: [],
+            longTermGoals: [],
+            beliefs: [],
+            drives: [],
+            frictions: [],
+          },
+          capabilities: {
+            traits: ["Observant"],
+            skills: [],
+            flaws: [],
+            specialties: [],
+            wealthTier: "Poor",
+          },
+          state: {
+            hp: 4,
+            conditions: [],
+            statusFlags: [],
+            activityState: "active",
+          },
+          loadout: {
+            inventorySeed: ["Iron Sword"],
+            equippedItemRefs: ["Iron Sword"],
+            currencyNotes: "",
+            signatureItems: [],
+          },
+          startConditions: {},
+          provenance: {
+            sourceKind: "generator",
+            importMode: null,
+            templateId: null,
+            archetypePrompt: null,
+            worldgenOrigin: null,
+            legacyTags: ["legacy"],
+          },
+        }),
+      },
+      { currentLocationName: "Signal Station" },
+    ) as Record<string, any>;
+
+    expect(record.grounding).toBeUndefined();
+    expect(record.identity.displayName).toBe("Aria Bloodthorn");
   });
 });

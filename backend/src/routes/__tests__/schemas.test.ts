@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
+import type {
+  CharacterGroundingProfile as BarrelCharacterGroundingProfile,
+  PowerProfile as BarrelPowerProfile,
+} from "@worldforge/shared";
+import type {
+  CharacterGroundingProfile as DirectCharacterGroundingProfile,
+  PowerProfile as DirectPowerProfile,
+} from "../../../../shared/src/types.js";
 import {
   chatBodySchema,
   seedCategorySchema,
@@ -32,6 +40,17 @@ import {
 } from "../schemas.js";
 import { parseBody, zodFirstError } from "../helpers.js";
 import { npcs, players } from "../../db/schema.js";
+
+type AssertEqual<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2)
+    ? true
+    : false;
+
+const barrelGroundingTypeParity: AssertEqual<
+  DirectCharacterGroundingProfile,
+  BarrelCharacterGroundingProfile
+> = true;
+const barrelPowerTypeParity: AssertEqual<DirectPowerProfile, BarrelPowerProfile> = true;
 
 // ---------------------------------------------------------------------------
 // seedCategorySchema
@@ -1648,6 +1667,48 @@ describe("importV2CardSchema", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("accepts optional grounding on the same payload seam as researched drafts", () => {
+    const result = importV2CardSchema.safeParse({
+      campaignId: "abc-123",
+      name: "Elara",
+      description: "A mysterious sorceress.",
+      grounding: {
+        summary: "Canon-grounded frost mage with bounded battlefield reach.",
+        facts: ["Specializes in cold-linked spellwork."],
+        abilities: ["Cryomancy"],
+        constraints: ["Requires focus to sustain area effects"],
+        signatureMoves: ["Ice-lance barrage"],
+        strongPoints: ["Area denial"],
+        vulnerabilities: ["Fatigues when overextending mana output"],
+        uncertaintyNotes: ["True upper limit varies across sources."],
+        powerProfile: {
+          attack: "Building-scale area spells under ideal setup.",
+          speed: "Human reactions with spell-assisted repositioning.",
+          durability: "Normal human durability with magical shielding bursts.",
+          range: "Long range when line of sight is available.",
+          strengths: ["Area denial", "Battlefield control"],
+          constraints: ["Needs casting windows"],
+          vulnerabilities: ["Can be rushed before shields are active"],
+          uncertaintyNotes: ["Shield uptime is inconsistently described."],
+        },
+        sources: [
+          {
+            kind: "card",
+            label: "Community card",
+            excerpt: "Known for freezing a watchtower approach in seconds.",
+          },
+        ],
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.grounding?.powerProfile.vulnerabilities).toEqual([
+        "Can be rushed before shields are active",
+      ]);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -2112,6 +2173,134 @@ describe("phase 48 richer identity schemas", () => {
       });
       expect(result.data.scaffold.npcs[0]?.draft.identity.liveDynamics.beliefDrift).toEqual([
         "The valley can still be saved",
+      ]);
+    }
+  });
+});
+
+describe("phase 49 grounding schemas", () => {
+  void barrelGroundingTypeParity;
+  void barrelPowerTypeParity;
+
+  const grounding = {
+    summary:
+      "Canon-grounded station commander with battlefield leadership and bounded human-scale power.",
+    facts: [
+      "Held the northern signal station through repeated sieges.",
+      "Coordinates retreat and relay doctrine under pressure.",
+    ],
+    abilities: ["Command presence", "Signal doctrine", "Field tactics"],
+    constraints: ["Human physiology", "Limited reach without support"],
+    signatureMoves: ["Coordinated fallback with relay flares"],
+    strongPoints: ["Battlefield control", "Morale under siege"],
+    vulnerabilities: ["Can be overrun by superior force"],
+    uncertaintyNotes: ["Solo combat ceiling is only lightly attested in canon."],
+    powerProfile: {
+      attack: "Human-scale martial threat with command support.",
+      speed: "Normal human speed with veteran battlefield timing.",
+      durability: "Human durability with siege-hardened endurance.",
+      range: "Short personal reach, extended by support assets.",
+      strengths: ["Command discipline", "Endurance", "Tactical reading"],
+      constraints: ["Needs allies or equipment for area control"],
+      vulnerabilities: ["Vulnerable when isolated"],
+      uncertaintyNotes: ["Support-asset dependence varies by source."],
+    },
+    sources: [
+      {
+        kind: "canon" as const,
+        label: "Station Chronicle",
+        excerpt: "Captain Mire held the relay until the last evacuation horn.",
+      },
+    ],
+  } satisfies DirectCharacterGroundingProfile;
+
+  const draft = {
+    identity: {
+      role: "npc" as const,
+      tier: "key" as const,
+      displayName: "Captain Mire",
+      canonicalStatus: "known_ip_canonical" as const,
+    },
+    profile: {
+      species: "Human",
+      gender: "Female",
+      ageText: "42",
+      appearance: "Storm-scarred uniform and frost-burned hands.",
+      backgroundSummary: "Raised inside the watchtowers of the north.",
+      personaSummary: "Commanding, clipped, and exhausted.",
+    },
+    socialContext: {
+      factionId: "faction-wardens",
+      factionName: "Wardens",
+      homeLocationId: "loc-station",
+      homeLocationName: "Signal Station",
+      currentLocationId: "loc-barricade",
+      currentLocationName: "North Barricade",
+      relationshipRefs: [],
+      socialStatus: ["Respected"],
+      originMode: "resident" as const,
+    },
+    motivations: {
+      shortTermGoals: ["Hold the barricade"],
+      longTermGoals: ["Restore order in the valley"],
+      beliefs: ["The station can still be saved"],
+      drives: ["Duty"],
+      frictions: ["Suspicious of outsiders"],
+    },
+    capabilities: {
+      traits: ["Connected"],
+      skills: [{ name: "Negotiator", tier: "Master" as const }],
+      flaws: ["Cold-blooded"],
+      specialties: ["Signal doctrine"],
+      wealthTier: "Comfortable" as const,
+    },
+    state: {
+      hp: 5,
+      conditions: [],
+      statusFlags: [],
+      activityState: "active",
+    },
+    loadout: {
+      inventorySeed: ["Signal key"],
+      equippedItemRefs: ["Officer Saber"],
+      currencyNotes: "",
+      signatureItems: ["Signal key"],
+    },
+    startConditions: {},
+    provenance: {
+      sourceKind: "import" as const,
+      importMode: "outsider" as const,
+      templateId: null,
+      archetypePrompt: null,
+      worldgenOrigin: "known-ip",
+      legacyTags: ["legacy"],
+    },
+    grounding,
+  };
+
+  it("preserves grounding across draft and record schemas", () => {
+    const draftResult = characterDraftSchema.safeParse(draft);
+    expect(draftResult.success).toBe(true);
+    if (draftResult.success) {
+      expect(draftResult.data.grounding?.summary).toContain("Canon-grounded");
+      expect(draftResult.data.grounding?.powerProfile.constraints).toEqual([
+        "Needs allies or equipment for area control",
+      ]);
+      expect(draftResult.data.grounding?.sources[0]?.label).toBe("Station Chronicle");
+    }
+
+    const recordResult = characterRecordSchema.safeParse({
+      ...draft,
+      identity: {
+        ...draft.identity,
+        id: "npc-1",
+        campaignId: "camp-1",
+      },
+    });
+    expect(recordResult.success).toBe(true);
+    if (recordResult.success) {
+      expect(recordResult.data.grounding?.powerProfile.vulnerabilities).toEqual([
+        "Vulnerable when isolated",
       ]);
     }
   });
