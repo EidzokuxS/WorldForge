@@ -247,11 +247,78 @@ export type CharacterWealthTier = (typeof CHARACTER_WEALTH_TIERS)[number];
 
 export type CharacterSkillTier = (typeof CHARACTER_SKILL_TIERS)[number];
 
+/**
+ * D-07/D-08: stable facts define what remains true about the character even
+ * when live campaign dynamics shift.
+ */
+export interface CharacterIdentityBaseFacts {
+  biography: string;
+  socialRole: string[];
+  hardConstraints: string[];
+}
+
+/**
+ * D-07/D-08: the behavioral core captures durable motives and pressure logic,
+ * not short-lived scene state.
+ */
+export interface CharacterIdentityBehavioralCore {
+  motives: string[];
+  pressureResponses: string[];
+  taboos: string[];
+  attachments: string[];
+  selfImage: string;
+}
+
+/**
+ * D-07/D-08: live dynamics track what this campaign run has changed without
+ * overwriting the deeper identity baseline.
+ */
+export interface CharacterIdentityLiveDynamics {
+  activeGoals: string[];
+  beliefDrift: string[];
+  currentStrains: string[];
+  earnedChanges: string[];
+}
+
+export type CharacterIdentitySourceKind = "canon" | "card" | "research" | "runtime";
+
+export interface CharacterIdentitySourceCitation {
+  kind: CharacterIdentitySourceKind;
+  label: string;
+  excerpt: string;
+}
+
+/**
+ * D-11/D-13: canon-facing sources and secondary cues are preserved, but the
+ * runtime identity remains a WorldForge-owned synthesis.
+ */
+export interface CharacterSourceBundle {
+  canonSources: CharacterIdentitySourceCitation[];
+  secondarySources: CharacterIdentitySourceCitation[];
+  synthesis: {
+    owner: string;
+    strategy: string;
+    notes: string[];
+  };
+}
+
+export type CharacterContinuityInertia = "flexible" | "anchored" | "strict";
+
+export interface CharacterContinuityPolicy {
+  identityInertia: CharacterContinuityInertia;
+  protectedCore: string[];
+  mutableSurface: string[];
+  changePressureNotes: string[];
+}
+
 export interface CharacterIdentityDraft {
   role: CharacterRole;
   tier: CharacterTier;
   displayName: string;
   canonicalStatus: CharacterCanonicalStatus;
+  baseFacts?: CharacterIdentityBaseFacts;
+  behavioralCore?: CharacterIdentityBehavioralCore;
+  liveDynamics?: CharacterIdentityLiveDynamics;
 }
 
 export interface CharacterIdentity extends CharacterIdentityDraft {
@@ -360,6 +427,8 @@ export interface CharacterDraft {
   loadout: CharacterLoadout;
   startConditions: CharacterStartConditions;
   provenance: CharacterProvenance;
+  sourceBundle?: CharacterSourceBundle;
+  continuity?: CharacterContinuityPolicy;
 }
 
 export interface CharacterRecord {
@@ -372,9 +441,16 @@ export interface CharacterRecord {
   loadout: CharacterLoadout;
   startConditions: CharacterStartConditions;
   provenance: CharacterProvenance;
+  sourceBundle?: CharacterSourceBundle;
+  continuity?: CharacterContinuityPolicy;
 }
 
 export interface CharacterDraftPatch {
+  identity?: Partial<Omit<CharacterIdentityDraft, "baseFacts" | "behavioralCore" | "liveDynamics">> & {
+    baseFacts?: Partial<CharacterIdentityBaseFacts>;
+    behavioralCore?: Partial<CharacterIdentityBehavioralCore>;
+    liveDynamics?: Partial<CharacterIdentityLiveDynamics>;
+  };
   profile?: Partial<CharacterProfile>;
   socialContext?: Partial<CharacterSocialContext>;
   motivations?: Partial<CharacterMotivations>;
@@ -382,6 +458,10 @@ export interface CharacterDraftPatch {
   state?: Partial<CharacterState>;
   loadout?: Partial<CharacterLoadout>;
   startConditions?: Partial<CharacterStartConditions>;
+  sourceBundle?: Partial<Omit<CharacterSourceBundle, "synthesis">> & {
+    synthesis?: Partial<CharacterSourceBundle["synthesis"]>;
+  };
+  continuity?: Partial<CharacterContinuityPolicy>;
   provenance?: Partial<
     Pick<CharacterProvenance, "templateId" | "archetypePrompt" | "worldgenOrigin">
   >;

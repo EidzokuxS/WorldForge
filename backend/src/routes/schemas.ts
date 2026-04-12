@@ -288,11 +288,52 @@ const characterRelationshipRefSchema = z.object({
   reason: z.string().default(""),
 });
 
+// D-07/D-08: stable identity layers are explicit, while live dynamics track
+// change inside the current campaign run.
+const characterIdentityBaseFactsSchema = z.object({
+  biography: z.string().default(""),
+  socialRole: z.array(z.string()).default([]),
+  hardConstraints: z.array(z.string()).default([]),
+});
+
+const characterIdentityBehavioralCoreSchema = z.object({
+  motives: z.array(z.string()).default([]),
+  pressureResponses: z.array(z.string()).default([]),
+  taboos: z.array(z.string()).default([]),
+  attachments: z.array(z.string()).default([]),
+  selfImage: z.string().default(""),
+});
+
+const characterIdentityLiveDynamicsSchema = z.object({
+  activeGoals: z.array(z.string()).default([]),
+  beliefDrift: z.array(z.string()).default([]),
+  currentStrains: z.array(z.string()).default([]),
+  earnedChanges: z.array(z.string()).default([]),
+});
+
 const characterIdentityDraftSchema = z.object({
   role: characterRoleSchema,
   tier: characterTierSchema,
   displayName: z.string().min(1),
   canonicalStatus: canonicalStatusSchema,
+  baseFacts: characterIdentityBaseFactsSchema.default({
+    biography: "",
+    socialRole: [],
+    hardConstraints: [],
+  }),
+  behavioralCore: characterIdentityBehavioralCoreSchema.default({
+    motives: [],
+    pressureResponses: [],
+    taboos: [],
+    attachments: [],
+    selfImage: "",
+  }),
+  liveDynamics: characterIdentityLiveDynamicsSchema.default({
+    activeGoals: [],
+    beliefDrift: [],
+    currentStrains: [],
+    earnedChanges: [],
+  }),
 });
 
 const characterProfileSchema = z.object({
@@ -362,7 +403,41 @@ export const characterStartConditionsSchema = z.object({
   sourcePrompt: z.string().nullable().optional(),
 });
 
+// D-11/D-13: preserve canon-facing sources and secondary cues while keeping
+// WorldForge's synthesis as the runtime truth.
+const characterSourceCitationSchema = z.object({
+  kind: z.enum(["canon", "card", "research", "runtime"]),
+  label: z.string().min(1),
+  excerpt: z.string().min(1),
+});
+
+const characterSourceBundleSchema = z.object({
+  canonSources: z.array(characterSourceCitationSchema).default([]),
+  secondarySources: z.array(characterSourceCitationSchema).default([]),
+  synthesis: z.object({
+    owner: z.string().min(1).default("worldforge"),
+    strategy: z.string().min(1).default("worldforge-owned-synthesis"),
+    notes: z.array(z.string()).default([]),
+  }),
+});
+
+const characterContinuitySchema = z.object({
+  identityInertia: z.enum(["flexible", "anchored", "strict"]).default("anchored"),
+  protectedCore: z.array(z.string()).default([]),
+  mutableSurface: z.array(z.string()).default([]),
+  changePressureNotes: z.array(z.string()).default([]),
+});
+
 export const personaTemplatePatchSchema = z.object({
+  identity: z.object({
+    role: characterRoleSchema.optional(),
+    tier: characterTierSchema.optional(),
+    displayName: z.string().min(1).optional(),
+    canonicalStatus: canonicalStatusSchema.optional(),
+    baseFacts: characterIdentityBaseFactsSchema.partial().optional(),
+    behavioralCore: characterIdentityBehavioralCoreSchema.partial().optional(),
+    liveDynamics: characterIdentityLiveDynamicsSchema.partial().optional(),
+  }).partial().optional(),
   profile: characterProfileSchema.partial().optional(),
   socialContext: characterSocialContextSchema.partial().optional(),
   motivations: characterMotivationsSchema.partial().optional(),
@@ -370,6 +445,16 @@ export const personaTemplatePatchSchema = z.object({
   state: characterStateSchema.partial().optional(),
   loadout: characterLoadoutSchema.partial().optional(),
   startConditions: characterStartConditionsSchema.partial().optional(),
+  sourceBundle: z.object({
+    canonSources: z.array(characterSourceCitationSchema).optional(),
+    secondarySources: z.array(characterSourceCitationSchema).optional(),
+    synthesis: z.object({
+      owner: z.string().min(1).optional(),
+      strategy: z.string().min(1).optional(),
+      notes: z.array(z.string()).optional(),
+    }).partial().optional(),
+  }).partial().optional(),
+  continuity: characterContinuitySchema.partial().optional(),
   provenance: z.object({
     templateId: z.string().nullable().optional(),
     archetypePrompt: z.string().nullable().optional(),
@@ -467,6 +552,8 @@ export const characterDraftSchema = z.object({
   loadout: characterLoadoutSchema,
   startConditions: characterStartConditionsSchema.default({}),
   provenance: characterProvenanceSchema,
+  sourceBundle: characterSourceBundleSchema.optional(),
+  continuity: characterContinuitySchema.optional(),
 });
 
 export const characterRecordSchema = characterDraftSchema.extend({
