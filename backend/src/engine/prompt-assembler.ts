@@ -36,6 +36,7 @@ import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
 import { buildStorytellerContract } from "./storyteller-contract.js";
 import { deriveStartConditionEffects } from "./start-condition-runtime.js";
 import { listRecentLocationEvents } from "./location-events.js";
+import { loadAuthoritativeInventoryView } from "../inventory/authority.js";
 
 const log = createLogger("prompt-assembler");
 
@@ -312,24 +313,16 @@ function buildPlayerStateSection(
       statusFlags: openingState.activeStatusFlags,
     },
   };
+  const authoritativeInventory = loadAuthoritativeInventoryView(campaignId, player.id);
   const tags = deriveRuntimeCharacterTags(effectivePlayerRecord);
-  const equipped = effectivePlayerRecord.loadout.equippedItemRefs;
-  const signatureItems = effectivePlayerRecord.loadout.signatureItems;
+  const carriedItems = authoritativeInventory.carried.map((item) => item.name);
+  const equipped = authoritativeInventory.compatibility.equippedItemRefs;
+  const signatureItems = authoritativeInventory.compatibility.signatureItems;
   const wealthTag = effectivePlayerRecord.capabilities.wealthTier;
   const startConditions = effectivePlayerRecord.startConditions;
-
-  // Query player's inventory (items owned by this player)
-  const playerItems = db
-    .select({ name: items.name })
-    .from(items)
-    .where(eq(items.ownerId, player.id))
-    .all();
-  const fallbackInventory = playerRecord.loadout.inventorySeed;
-  const inventoryLine = playerItems.length > 0
-    ? `Inventory: ${playerItems.map((i) => i.name).join(", ")}`
-    : fallbackInventory.length > 0
-      ? `Inventory Snapshot: ${fallbackInventory.join(", ")}`
-      : "Inventory: (empty)";
+  const inventoryLine = carriedItems.length > 0
+    ? `Inventory: ${carriedItems.join(", ")}`
+    : "Inventory: (empty)";
 
   const lines = [
     `Name: ${playerRecord.identity.displayName}`,
@@ -402,13 +395,11 @@ function buildSceneSection(
   // Query items owned by NPCs at this location
   const npcEquipmentLines: string[] = [];
   for (const npc of npcRows) {
-    const npcItems = db
-      .select({ name: items.name })
-      .from(items)
-      .where(eq(items.ownerId, npc.id))
-      .all();
-    if (npcItems.length > 0) {
-      npcEquipmentLines.push(`  ${npc.name}: ${npcItems.map((i) => i.name).join(", ")}`);
+    const npcInventory = loadAuthoritativeInventoryView(campaignId, npc.id);
+    if (npcInventory.items.length > 0) {
+      npcEquipmentLines.push(
+        `  ${npc.name}: ${npcInventory.items.map((item) => item.name).join(", ")}`,
+      );
     }
   }
 
@@ -494,6 +485,7 @@ function buildNpcStatesSection(
 
   const npcBlocks = npcRows.map((npc) => {
     const npcRecord = hydrateStoredNpcRecord(npc);
+    const authoritativeInventory = loadAuthoritativeInventoryView(campaignId, npc.id);
     const tags = deriveRuntimeCharacterTags(npcRecord);
     const goals = [
       ...npcRecord.motivations.shortTermGoals,
@@ -509,6 +501,15 @@ function buildNpcStatesSection(
       tags.length > 0 ? `  Tags: ${tags.join(", ")}` : null,
       goals.length > 0 ? `  Goals: ${goals.join("; ")}` : null,
       beliefs.length > 0 ? `  Beliefs: ${beliefs.join(", ")}` : null,
+      authoritativeInventory.compatibility.equippedItemRefs.length > 0
+        ? `  Equipped: ${authoritativeInventory.compatibility.equippedItemRefs.join(", ")}`
+        : null,
+      authoritativeInventory.carried.length > 0
+        ? `  Inventory: ${authoritativeInventory.carried.map((item) => item.name).join(", ")}`
+        : null,
+      authoritativeInventory.compatibility.signatureItems.length > 0
+        ? `  Signature Items: ${authoritativeInventory.compatibility.signatureItems.join(", ")}`
+        : null,
     ].filter(Boolean);
 
     // Enrich with relationship graph data

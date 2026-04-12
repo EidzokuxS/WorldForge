@@ -10,6 +10,7 @@ import type {
 import { CHARACTER_SKILL_TIERS, CHARACTER_WEALTH_TIERS } from "@worldforge/shared";
 import type { ScaffoldNpc } from "../worldgen/types.js";
 import { deriveRuntimeCharacterTags } from "./runtime-tags.js";
+import type { AuthoritativeInventoryView } from "../inventory/authority.js";
 
 const CONDITION_TAGS = new Set([
   "bleeding",
@@ -549,7 +550,17 @@ export function hydrateStoredNpcRecord(
   };
 }
 
-export function toLegacyPlayerCharacter(record: CharacterRecord): PlayerCharacter {
+export function toLegacyPlayerCharacter(
+  record: CharacterRecord,
+  inventoryView?: AuthoritativeInventoryView,
+): PlayerCharacter {
+  return toLegacyPlayerCharacterWithInventory(record, inventoryView);
+}
+
+export function toLegacyPlayerCharacterWithInventory(
+  record: CharacterRecord,
+  inventoryView?: AuthoritativeInventoryView,
+): PlayerCharacter {
   return {
     name: record.identity.displayName,
     race: record.profile.species,
@@ -558,7 +569,7 @@ export function toLegacyPlayerCharacter(record: CharacterRecord): PlayerCharacte
     appearance: record.profile.appearance,
     tags: deriveRuntimeCharacterTags(record),
     hp: record.state.hp,
-    equippedItems: record.loadout.equippedItemRefs,
+    equippedItems: inventoryView?.compatibility.equippedItemRefs ?? record.loadout.equippedItemRefs,
     locationName: record.socialContext.currentLocationName ?? "",
   };
 }
@@ -577,8 +588,18 @@ export interface PlayerRecordProjection {
   derivedTags: string;
 }
 
-export function projectPlayerRecord(record: CharacterRecord): PlayerRecordProjection {
-  const legacy = toLegacyPlayerCharacter(record);
+export function projectPlayerRecord(
+  record: CharacterRecord,
+  inventoryView?: AuthoritativeInventoryView,
+): PlayerRecordProjection {
+  return projectPlayerRecordWithInventory(record, inventoryView);
+}
+
+export function projectPlayerRecordWithInventory(
+  record: CharacterRecord,
+  inventoryView?: AuthoritativeInventoryView,
+): PlayerRecordProjection {
+  const legacy = toLegacyPlayerCharacterWithInventory(record, inventoryView);
   const derivedTags = deriveRuntimeCharacterTags(record);
 
   return {

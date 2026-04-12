@@ -23,10 +23,11 @@ import {
   hydrateStoredPlayerRecord,
   toCharacterDraft,
   toLegacyNpcDraft,
-  toLegacyPlayerCharacter,
+  toLegacyPlayerCharacterWithInventory,
 } from "../character/record-adapters.js";
 import { listRecentLocationEventsForLocations } from "../engine/location-events.js";
 import { listConnectedPaths, loadLocationGraph } from "../engine/location-graph.js";
+import { loadAuthoritativeInventoryView } from "../inventory/authority.js";
 
 const app = new Hono();
 
@@ -137,6 +138,9 @@ app.get("/:id/world", async (c) => {
     });
     const playerRow = worldPlayer[0] ?? null;
     const playerRecord = playerRow ? hydrateStoredPlayerRecord(playerRow) : null;
+    const playerInventory = playerRow
+      ? loadAuthoritativeInventoryView(id, playerRow.id)
+      : null;
     const playerDraft = playerRecord ? toCharacterDraft(playerRecord) : null;
     const personaTemplates = readCampaignConfig(id).personaTemplates ?? [];
 
@@ -158,7 +162,10 @@ app.get("/:id/world", async (c) => {
             ...playerRow,
             characterRecord: playerRecord,
             draft: playerDraft,
-            character: toLegacyPlayerCharacter(playerRecord),
+            inventoryItems: playerInventory?.carried.map((item) => item.name) ?? [],
+            equippedItems: playerInventory?.compatibility.equippedItemRefs ?? [],
+            signatureItems: playerInventory?.compatibility.signatureItems ?? [],
+            character: toLegacyPlayerCharacterWithInventory(playerRecord, playerInventory ?? undefined),
           }
         : null,
       personaTemplates,
