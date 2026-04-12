@@ -35,9 +35,11 @@ import type {
   ResolveStartConditionsResult,
   WorldBookImportResult,
   WorldbookLibraryItem,
+  WorldCurrentScene,
   WorldLocationConnectedPath,
   WorldLocationRecentHappening,
   WorldPlayerInventoryItem,
+  WorldSceneAwarenessBand,
 } from "./api-types";
 import type {
   CharacterDraft,
@@ -96,6 +98,7 @@ export type ChatHistoryResponse = {
 // ───── Raw types (internal) ─────
 
 interface RawWorldData {
+  currentScene?: unknown;
   locations: Array<{
     id: string;
     campaignId: string;
@@ -122,6 +125,7 @@ interface RawWorldData {
     tags: string;
     tier: string;
     currentLocationId: string | null;
+    sceneScopeId?: string | null;
     goals: string;
     beliefs: string;
     characterRecord?: CharacterRecord | null;
@@ -165,6 +169,7 @@ interface RawWorldData {
     inventory?: unknown;
     equipment?: unknown;
     currentLocationId: string | null;
+    sceneScopeId?: string | null;
     characterRecord?: CharacterRecord | null;
     draft?: CharacterDraft | null;
     character?: ParsedCharacter | null;
@@ -362,6 +367,41 @@ function parseWorldPlayerInventoryItems(value: unknown): WorldPlayerInventoryIte
   }
 }
 
+function parseWorldSceneAwarenessBand(value: unknown): WorldSceneAwarenessBand {
+  return value === "clear" || value === "hint" ? value : "none";
+}
+
+function parseWorldCurrentScene(value: unknown): WorldCurrentScene | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const scene = value as Record<string, unknown>;
+  const awareness = typeof scene.awareness === "object" && scene.awareness !== null
+    ? scene.awareness as Record<string, unknown>
+    : {};
+  const rawByNpcId = typeof awareness.byNpcId === "object" && awareness.byNpcId !== null
+    ? awareness.byNpcId as Record<string, unknown>
+    : {};
+
+  return {
+    id: typeof scene.id === "string" ? scene.id : null,
+    name: typeof scene.name === "string" ? scene.name : null,
+    broadLocationId: typeof scene.broadLocationId === "string" ? scene.broadLocationId : null,
+    broadLocationName: typeof scene.broadLocationName === "string" ? scene.broadLocationName : null,
+    sceneNpcIds: parseJsonArray(scene.sceneNpcIds),
+    clearNpcIds: parseJsonArray(scene.clearNpcIds),
+    awareness: {
+      byNpcId: Object.fromEntries(
+        Object.entries(rawByNpcId)
+          .filter(([npcId]) => npcId.length > 0)
+          .map(([npcId, band]) => [npcId, parseWorldSceneAwarenessBand(band)]),
+      ),
+      hintSignals: parseJsonArray(awareness.hintSignals),
+    },
+  };
+}
+
 function normalizeCharacterResult(raw: CharacterResult | ({ role: "player"; draft?: CharacterDraft; character?: ParsedCharacter } | { role: "key"; draft?: CharacterDraft; npc?: ScaffoldNpc })) : CharacterResult {
   if (raw.role === "player") {
     const draft = raw.draft ?? raw.character?.draft ?? parsedCharacterToDraft(raw.character as ParsedCharacter);
@@ -382,6 +422,7 @@ function normalizeCharacterResult(raw: CharacterResult | ({ role: "player"; draf
 
 function parseWorldData(raw: RawWorldData): WorldData {
   return {
+    currentScene: parseWorldCurrentScene(raw.currentScene),
     locations: raw.locations.map((loc) => {
       const connectedPaths = parseWorldLocationConnectedPaths(loc.connectedPaths);
       const connectedTo = connectedPaths.length > 0
@@ -411,6 +452,7 @@ function parseWorldData(raw: RawWorldData): WorldData {
       tags: parseJsonArray(npc.tags),
       goals: parseNpcGoals(npc.goals),
       beliefs: parseJsonArray(npc.beliefs),
+      sceneScopeId: typeof npc.sceneScopeId === "string" ? npc.sceneScopeId : npc.currentLocationId,
       characterRecord: npc.characterRecord ?? null,
       draft: npc.draft ?? (npc.characterRecord ? characterRecordToDraft(npc.characterRecord) : npc.npc?.draft ?? null),
       npc: npc.npc ?? (npc.draft ? characterDraftToScaffoldNpc(npc.draft) : npc.characterRecord ? characterDraftToScaffoldNpc(characterRecordToDraft(npc.characterRecord)) : null),
@@ -436,6 +478,9 @@ function parseWorldData(raw: RawWorldData): WorldData {
           equippedItems: parseJsonArray(raw.player.equippedItems),
           inventory: parseWorldPlayerInventoryItems(raw.player.inventory),
           equipment: parseWorldPlayerInventoryItems(raw.player.equipment),
+          sceneScopeId: typeof raw.player.sceneScopeId === "string"
+            ? raw.player.sceneScopeId
+            : raw.player.currentLocationId,
           characterRecord: raw.player.characterRecord ?? null,
           draft: raw.player.draft ?? (raw.player.characterRecord ? characterRecordToDraft(raw.player.characterRecord) : raw.player.character?.draft ?? null),
           character: raw.player.character ?? (raw.player.draft ? characterDraftToParsedCharacter(raw.player.draft) : raw.player.characterRecord ? characterDraftToParsedCharacter(characterRecordToDraft(raw.player.characterRecord)) : null),

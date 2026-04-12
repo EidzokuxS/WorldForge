@@ -41,7 +41,7 @@ import {
   loadCampaign,
   parseTurnSSE,
 } from "@/lib/api";
-import type { WorldData } from "@/lib/api-types";
+import type { WorldCurrentScene, WorldData } from "@/lib/api-types";
 
 type TurnPhase = "idle" | "streaming" | "finalizing";
 type QuickAction = { label: string; action: string };
@@ -94,6 +94,59 @@ function formatTravelFeedback(feedback: TravelFeedbackState): string {
     : "";
 
   return `Travel complete: ${feedback.locationName} reached in ${tickLabel}${pathSummary}.`;
+}
+
+function getAuthoritativeSceneNpcs(worldData: WorldData): Array<{ id: string; name: string; tier: string }> {
+  const currentScene = worldData.currentScene;
+  if (!currentScene) {
+    return [];
+  }
+
+  const npcById = new Map(worldData.npcs.map((npc) => [npc.id, npc]));
+  const clearNpcIds = currentScene.clearNpcIds.length > 0
+    ? currentScene.clearNpcIds
+    : currentScene.sceneNpcIds.filter((npcId) => currentScene.awareness.byNpcId[npcId] === "clear");
+
+  return clearNpcIds
+    .map((npcId) => npcById.get(npcId))
+    .filter((npc): npc is NonNullable<typeof npc> => Boolean(npc))
+    .map((npc) => ({ id: npc.id, name: npc.name, tier: npc.tier }));
+}
+
+function getFallbackSceneNpcs(worldData: WorldData): Array<{ id: string; name: string; tier: string }> {
+  const player = worldData.player;
+  if (!player?.currentLocationId) {
+    return [];
+  }
+
+  const playerSceneScopeId = player.sceneScopeId ?? player.currentLocationId;
+  const sceneScopedNpcs = worldData.npcs
+    .filter((npc) => (npc.sceneScopeId ?? npc.currentLocationId) === playerSceneScopeId)
+    .map((npc) => ({ id: npc.id, name: npc.name, tier: npc.tier }));
+
+  if (sceneScopedNpcs.length > 0) {
+    return sceneScopedNpcs;
+  }
+
+  return worldData.npcs
+    .filter((npc) => npc.currentLocationId === player.currentLocationId)
+    .map((npc) => ({ id: npc.id, name: npc.name, tier: npc.tier }));
+}
+
+function buildScenePanelData(
+  currentScene: WorldCurrentScene | null,
+  currentLocation: { id: string; name: string } | null,
+) {
+  if (!currentScene) {
+    return null;
+  }
+
+  return {
+    id: currentScene.id,
+    name: currentScene.name,
+    broadLocationName: currentScene.broadLocationName ?? currentLocation?.name ?? null,
+    hintSignals: currentScene.awareness.hintSignals,
+  };
 }
 
 export default function GamePage() {
@@ -319,6 +372,11 @@ export default function GamePage() {
     return worldData.locations.find((l) => l.id === player.currentLocationId) ?? null;
   }, [worldData, player]);
 
+  const currentScene = useMemo(
+    () => (worldData?.currentScene ?? null),
+    [worldData],
+  );
+
   const connectedPaths = useMemo(() => {
     if (!worldData || !currentLocation) return [];
     if ((currentLocation.connectedPaths?.length ?? 0) > 0) {
@@ -347,11 +405,16 @@ export default function GamePage() {
   }, [worldData, currentLocation]);
 
   const npcsHere = useMemo(() => {
-    if (!worldData || !player?.currentLocationId) return [];
-    return worldData.npcs
-      .filter((npc) => npc.currentLocationId === player.currentLocationId)
-      .map((npc) => ({ id: npc.id, name: npc.name, tier: npc.tier }));
-  }, [worldData, player]);
+    if (!worldData) return [];
+    return currentScene
+      ? getAuthoritativeSceneNpcs(worldData)
+      : getFallbackSceneNpcs(worldData);
+  }, [currentScene, worldData]);
+
+  const scenePanelData = useMemo(
+    () => buildScenePanelData(currentScene, currentLocation),
+    [currentLocation, currentScene],
+  );
 
   const itemsHere = useMemo(() => {
     if (!worldData || !player?.currentLocationId) return [];
@@ -694,6 +757,7 @@ export default function GamePage() {
       <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">
         <LocationPanel
           location={currentLocation}
+          scene={scenePanelData}
           connectedPaths={connectedPaths}
           npcsHere={npcsHere}
           itemsHere={itemsHere}

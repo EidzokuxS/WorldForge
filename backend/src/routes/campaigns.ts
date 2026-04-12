@@ -28,6 +28,11 @@ import {
 import { listRecentLocationEventsForLocations } from "../engine/location-events.js";
 import { listConnectedPaths, loadLocationGraph } from "../engine/location-graph.js";
 import { loadAuthoritativeInventoryView } from "../inventory/authority.js";
+import {
+  getObserverAwareness,
+  inferPresenceVisibility,
+  resolveScenePresence,
+} from "../engine/scene-presence.js";
 
 const app = new Hono();
 
@@ -54,6 +59,91 @@ function toWorldSceneScopeId(row: {
   currentSceneLocationId: string | null;
 }) {
   return row.currentSceneLocationId ?? row.currentLocationId ?? null;
+}
+
+function buildWorldCurrentScene(args: {
+  player: {
+    id: string;
+    currentLocationId: string | null;
+    currentSceneLocationId: string | null;
+  } | null;
+  npcs: Array<{
+    id: string;
+    name: string;
+    currentLocationId: string | null;
+    currentSceneLocationId: string | null;
+    tags: string;
+  }>;
+  locations: Array<{
+    id: string;
+    name: string;
+  }>;
+}) {
+  const player = args.player;
+  if (!player || !player.currentLocationId) {
+    return null;
+  }
+
+  const sceneScopeId = toWorldSceneScopeId(player);
+  if (!sceneScopeId) {
+    return null;
+  }
+
+  const presenceSnapshot = resolveScenePresence({
+    playerActorId: player.id,
+    broadLocationId: player.currentLocationId,
+    sceneScopeId,
+    actors: [
+      {
+        actorId: player.id,
+        actorType: "player",
+        broadLocationId: player.currentLocationId,
+        sceneScopeId,
+        visibility: "clear",
+      },
+      ...args.npcs.map((npc) => {
+        const visibility = inferPresenceVisibility(npc.tags);
+        return {
+          actorId: npc.id,
+          actorType: "npc" as const,
+          broadLocationId: npc.currentLocationId,
+          sceneScopeId: npc.currentSceneLocationId,
+          visibility: visibility.visibility,
+          awarenessHint: visibility.awarenessHint,
+        };
+      }),
+    ],
+  });
+
+  const npcIds = new Set(args.npcs.map((npc) => npc.id));
+  const sceneNpcIds = presenceSnapshot.presentActorIds.filter(
+    (actorId) => actorId !== player.id && npcIds.has(actorId),
+  );
+  const clearNpcIds = sceneNpcIds.filter(
+    (npcId) => getObserverAwareness(presenceSnapshot, player.id, npcId) === "clear",
+  );
+  const awarenessByNpcId = Object.fromEntries(
+    sceneNpcIds.map((npcId) => [
+      npcId,
+      getObserverAwareness(presenceSnapshot, player.id, npcId),
+    ]),
+  );
+  const broadLocation =
+    args.locations.find((location) => location.id === player.currentLocationId) ?? null;
+  const sceneLocation = args.locations.find((location) => location.id === sceneScopeId) ?? broadLocation;
+
+  return {
+    id: sceneLocation?.id ?? sceneScopeId,
+    name: sceneLocation?.name ?? null,
+    broadLocationId: broadLocation?.id ?? player.currentLocationId,
+    broadLocationName: broadLocation?.name ?? null,
+    sceneNpcIds,
+    clearNpcIds,
+    awareness: {
+      byNpcId: awarenessByNpcId,
+      hintSignals: [...presenceSnapshot.playerAwarenessHints],
+    },
+  };
 }
 
 app.get("/", (c) => {
@@ -168,9 +258,15 @@ app.get("/:id/world", async (c) => {
       : null;
     const playerDraft = playerRecord ? toCharacterDraft(playerRecord) : null;
     const personaTemplates = readCampaignConfig(id).personaTemplates ?? [];
+    const currentScene = buildWorldCurrentScene({
+      player: playerRow,
+      npcs: worldNpcs,
+      locations: normalizedWorldLocations,
+    });
 
     return c.json({
       locations: normalizedWorldLocations,
+      currentScene,
       npcs: worldNpcs.map((row) => {
         const record = hydrateStoredNpcRecord(row);
         return {

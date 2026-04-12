@@ -13,6 +13,7 @@ const makeLocation = (overrides = {}) => ({
 
 const defaultProps = {
   location: null,
+  scene: null,
   connectedPaths: [] as Array<{
     id: string;
     name: string;
@@ -64,21 +65,46 @@ describe("LocationPanel", () => {
     expect(screen.getByText("(passing)")).toBeInTheDocument();
   });
 
-  it("renders People Here from encounter scope rather than everyone in the same broad location", () => {
+  it("renders the immediate scene label separately from the broad location", () => {
     render(
       <LocationPanel
         {...defaultProps}
         location={makeLocation()}
+        scene={{
+          id: "scene-platform-7",
+          name: "Platform 7",
+          broadLocationName: "Town Square",
+          hintSignals: [],
+        }}
         npcsHere={[
-          { id: "n1", name: "Nobara Kugisaki", tier: "key", encounterScope: "present" },
-          { id: "n2", name: "Satoru Gojo", tier: "key", encounterScope: "same broad location only" },
-        ] as Array<{ id: string; name: string; tier: string }>}
+          { id: "n1", name: "Nobara Kugisaki", tier: "key" },
+        ]}
       />
     );
 
+    expect(screen.getByText("Immediate Scene: Platform 7")).toBeInTheDocument();
+    expect(screen.getByText(/within Town Square/)).toBeInTheDocument();
     expect(screen.getByText("People Here")).toBeInTheDocument();
     expect(screen.getByText(/Nobara Kugisaki/)).toBeInTheDocument();
-    expect(screen.queryByText(/Satoru Gojo/)).not.toBeInTheDocument();
+  });
+
+  it("renders bounded nearby signs for hint-band awareness without naming hidden actors", () => {
+    render(
+      <LocationPanel
+        {...defaultProps}
+        location={makeLocation()}
+        scene={{
+          id: "scene-platform-7",
+          name: "Platform 7",
+          broadLocationName: "Town Square",
+          hintSignals: ["A pressure shift crawls along the platform edge."],
+        }}
+        npcsHere={[]}
+      />
+    );
+
+    expect(screen.getByText("Nearby Signs")).toBeInTheDocument();
+    expect(screen.getByText(/A pressure shift crawls along the platform edge\./)).toBeInTheDocument();
   });
 
   it("renders items at location", () => {

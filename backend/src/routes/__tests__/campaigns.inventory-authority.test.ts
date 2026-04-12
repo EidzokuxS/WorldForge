@@ -215,4 +215,103 @@ describe("GET /api/campaigns/:id/world authoritative inventory", () => {
       expect.objectContaining({ name: "Lantern" }),
     ]);
   });
+
+  it("returns an explicit bounded currentScene payload for immediate-scene participants", async () => {
+    (getDb as Mock).mockReturnValue(
+      createMockDb({
+        locations: [
+          {
+            id: "loc-1",
+            campaignId: "abc-123",
+            name: "Shibuya Station",
+            description: "A crowded district hub.",
+            connectedTo: "[]",
+          },
+          {
+            id: "scene-platform-7",
+            campaignId: "abc-123",
+            name: "Platform 7",
+            description: "The local encounter pocket beneath the station.",
+            connectedTo: "[]",
+          },
+        ],
+        players: [
+          {
+            id: "player-1",
+            campaignId: "abc-123",
+            name: "Yuji Itadori",
+            race: "Human",
+            gender: "",
+            age: "",
+            appearance: "",
+            hp: 5,
+            tags: "[]",
+            equippedItems: "[]",
+            currentLocationId: "loc-1",
+            currentSceneLocationId: "scene-platform-7",
+          },
+        ],
+        npcs: [
+          {
+            id: "npc-1",
+            campaignId: "abc-123",
+            name: "Nobara Kugisaki",
+            persona: "",
+            tags: "[]",
+            tier: "key",
+            currentLocationId: "loc-1",
+            currentSceneLocationId: "scene-platform-7",
+            goals: "{\"short_term\":[],\"long_term\":[]}",
+            beliefs: "[]",
+          },
+          {
+            id: "npc-2",
+            campaignId: "abc-123",
+            name: "Hidden Presence",
+            persona: "",
+            tags: "[\"hidden\"]",
+            tier: "key",
+            currentLocationId: "loc-1",
+            currentSceneLocationId: "scene-platform-7",
+            goals: "{\"short_term\":[],\"long_term\":[]}",
+            beliefs: "[]",
+          },
+          {
+            id: "npc-3",
+            campaignId: "abc-123",
+            name: "Gojo Elsewhere",
+            persona: "",
+            tags: "[]",
+            tier: "key",
+            currentLocationId: "loc-1",
+            currentSceneLocationId: "scene-rooftop",
+            goals: "{\"short_term\":[],\"long_term\":[]}",
+            beliefs: "[]",
+          },
+        ],
+        items: [],
+      }) as unknown as ReturnType<typeof getDb>,
+    );
+
+    const response = await app.request("/api/campaigns/abc-123/world");
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    expect(body.currentScene).toEqual({
+      id: "scene-platform-7",
+      name: "Platform 7",
+      broadLocationId: "loc-1",
+      broadLocationName: "Shibuya Station",
+      sceneNpcIds: ["npc-1", "npc-2"],
+      clearNpcIds: ["npc-1"],
+      awareness: {
+        byNpcId: {
+          "npc-1": "clear",
+          "npc-2": "hint",
+        },
+        hintSignals: ["Something concealed is nearby."],
+      },
+    });
+  });
 });

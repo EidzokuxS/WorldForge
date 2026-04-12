@@ -38,16 +38,21 @@ const mockLocationPanel = vi.fn(
     connectedPaths,
     location,
     npcsHere,
+    scene,
   }: {
     connectedPaths?: Array<{ id: string; name: string; travelCost?: number | null }>;
     location?: { recentHappenings?: Array<{ id: string; summary: string }> } | null;
     npcsHere?: Array<{ id: string; name: string }>;
+    scene?: { name?: string | null; broadLocationName?: string | null; hintSignals?: string[] } | null;
   }) => (
     <div data-testid="location-panel">
       <div data-testid="location-path-count">{connectedPaths?.length ?? 0}</div>
       <div data-testid="location-path-names">
         {(connectedPaths ?? []).map((path) => `${path.name}:${path.travelCost ?? "?"}`).join("|")}
       </div>
+      <div data-testid="location-scene-name">{scene?.name ?? "none"}</div>
+      <div data-testid="location-scene-broad-name">{scene?.broadLocationName ?? "none"}</div>
+      <div data-testid="location-scene-hints">{(scene?.hintSignals ?? []).join("|")}</div>
       <div data-testid="recent-happenings-count">
         {location?.recentHappenings?.length ?? 0}
       </div>
@@ -217,6 +222,7 @@ const fakeWorldData = {
     id: "player-1",
     name: "Hero",
     currentLocationId: "loc-1",
+    sceneScopeId: "loc-1",
     tags: [],
     hp: 5,
   },
@@ -433,27 +439,35 @@ describe("GamePage", () => {
   it("treats People Here as encounter scope instead of same broad location membership on /game", async () => {
     const worldData = {
       ...fakeWorldData,
-      locations: [
-        {
-          ...fakeWorldData.locations[0],
-          visibleSceneNpcIds: ["npc-1"],
+      currentScene: {
+        id: "scene-platform-7",
+        name: "Platform 7",
+        broadLocationId: "loc-1",
+        broadLocationName: "Town Square",
+        sceneNpcIds: ["npc-1", "npc-2"],
+        clearNpcIds: ["npc-1"],
+        awareness: {
+          byNpcId: {
+            "npc-1": "clear",
+            "npc-2": "hint",
+          },
+          hintSignals: ["A pressure shift moves along the platform edge."],
         },
-        fakeWorldData.locations[1],
-      ],
+      },
       npcs: [
         {
           id: "npc-1",
           name: "Nobara Kugisaki",
           tier: "key",
           currentLocationId: "loc-1",
-          encounterScope: "present",
+          sceneScopeId: "scene-platform-7",
         },
         {
           id: "npc-2",
           name: "Satoru Gojo",
           tier: "key",
           currentLocationId: "loc-1",
-          encounterScope: "same broad location only",
+          sceneScopeId: "scene-platform-7",
         },
       ],
     };
@@ -463,6 +477,11 @@ describe("GamePage", () => {
     expect(screen.getByTestId("location-people-count")).toHaveTextContent("1");
     expect(screen.getByTestId("location-people-names")).toHaveTextContent("Nobara Kugisaki");
     expect(screen.getByTestId("location-people-names")).not.toHaveTextContent("Satoru Gojo");
+    expect(screen.getByTestId("location-scene-name")).toHaveTextContent("Platform 7");
+    expect(screen.getByTestId("location-scene-broad-name")).toHaveTextContent("Town Square");
+    expect(screen.getByTestId("location-scene-hints")).toHaveTextContent(
+      "A pressure shift moves along the platform edge."
+    );
   });
 
   it("filters the current location out of authoritative connectedPaths travel options", async () => {

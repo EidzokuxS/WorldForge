@@ -22,6 +22,12 @@ interface LocationPanelProps {
       eventType: string;
     }>;
   } | null;
+  scene?: {
+    id: string | null;
+    name: string | null;
+    broadLocationName: string | null;
+    hintSignals?: string[];
+  } | null;
   connectedPaths: ConnectedPathView[];
   npcsHere: Array<{ id: string; name: string; tier: string }>;
   itemsHere: Array<{ id: string; name: string }>;
@@ -31,6 +37,7 @@ interface LocationPanelProps {
 
 export function LocationPanel({
   location,
+  scene,
   connectedPaths,
   npcsHere,
   itemsHere,
@@ -73,6 +80,14 @@ export function LocationPanel({
         <div className="space-y-4">
           <div>
             <h3 className="text-base font-semibold">{location.name}</h3>
+            {scene?.name ? (
+              <p className="mt-1 text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                Immediate Scene: {scene.name}
+                {scene.broadLocationName && scene.broadLocationName !== scene.name ? (
+                  <span> · within {scene.broadLocationName}</span>
+                ) : null}
+              </p>
+            ) : null}
             {location.tags.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1">
                 {location.tags.map((tag) => (
@@ -109,6 +124,21 @@ export function LocationPanel({
               </p>
             )}
           </div>
+
+          {scene?.hintSignals && scene.hintSignals.length > 0 ? (
+            <div>
+              <h4 className="text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                Nearby Signs
+              </h4>
+              <ul className="mt-2 space-y-1">
+                {scene.hintSignals.map((signal, index) => (
+                  <li key={`${signal}-${index}`} className="text-sm text-muted-foreground">
+                    • {signal}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
           {npcsHere.length > 0 && (
             <div>

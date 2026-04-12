@@ -6,6 +6,7 @@ import {
   chatRetry,
   chatUndo,
   deleteLoreCardById,
+  getWorldData,
   parseTurnSSE,
   readErrorMessage,
   updateLoreCard,
@@ -237,6 +238,87 @@ describe("gameplay API helpers", () => {
         newContent: "New content",
       }),
     });
+  });
+
+  it("getWorldData preserves explicit currentScene payload fields and scene-scoped fallback ids", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({
+        currentScene: {
+          id: "scene-platform-7",
+          name: "Platform 7",
+          broadLocationId: "loc-shibuya-station",
+          broadLocationName: "Shibuya Station",
+          sceneNpcIds: ["npc-1", "npc-2"],
+          clearNpcIds: ["npc-1"],
+          awareness: {
+            byNpcId: {
+              "npc-1": "clear",
+              "npc-2": "hint",
+            },
+            hintSignals: ["A pressure shift crawls along the far edge of the platform."],
+          },
+        },
+        locations: [],
+        npcs: [
+          {
+            id: "npc-1",
+            campaignId: "camp-1",
+            name: "Nobara Kugisaki",
+            persona: "",
+            tags: "[]",
+            tier: "key",
+            currentLocationId: "loc-shibuya-station",
+            sceneScopeId: "scene-platform-7",
+            goals: "{\"short_term\":[],\"long_term\":[]}",
+            beliefs: "[]",
+          },
+        ],
+        factions: [],
+        relationships: [],
+        items: [],
+        player: {
+          id: "player-1",
+          campaignId: "camp-1",
+          name: "Yuji Itadori",
+          race: "",
+          gender: "",
+          age: "",
+          appearance: "",
+          hp: 5,
+          tags: "[]",
+          equippedItems: "[]",
+          inventory: [],
+          equipment: [],
+          currentLocationId: "loc-shibuya-station",
+          sceneScopeId: "scene-platform-7",
+        },
+        personaTemplates: [],
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const world = await getWorldData("camp-1");
+
+    expect(world.currentScene).toEqual({
+      id: "scene-platform-7",
+      name: "Platform 7",
+      broadLocationId: "loc-shibuya-station",
+      broadLocationName: "Shibuya Station",
+      sceneNpcIds: ["npc-1", "npc-2"],
+      clearNpcIds: ["npc-1"],
+      awareness: {
+        byNpcId: {
+          "npc-1": "clear",
+          "npc-2": "hint",
+        },
+        hintSignals: ["A pressure shift crawls along the far edge of the platform."],
+      },
+    });
+    expect(world.npcs[0]?.sceneScopeId).toBe("scene-platform-7");
+    expect(world.player?.sceneScopeId).toBe("scene-platform-7");
   });
 });
 

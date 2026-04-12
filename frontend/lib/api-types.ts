@@ -26,6 +26,21 @@ export type WorldLocationConnectedPath = LocationConnectedPathSummary & {
 
 export type WorldLocationRecentHappening = LocationRecentHappeningSummary;
 
+export type WorldSceneAwarenessBand = "none" | "hint" | "clear";
+
+export interface WorldCurrentScene {
+  id: string | null;
+  name: string | null;
+  broadLocationId: string | null;
+  broadLocationName: string | null;
+  sceneNpcIds: string[];
+  clearNpcIds: string[];
+  awareness: {
+    byNpcId: Record<string, WorldSceneAwarenessBand>;
+    hintSignals: string[];
+  };
+}
+
 export interface WorldLocation {
   id: string;
   campaignId: string;
@@ -101,6 +116,7 @@ export interface GenerationProgress {
 }
 
 export interface WorldData {
+  currentScene: WorldCurrentScene | null;
   locations: WorldLocation[];
   npcs: Array<{
     id: string;
@@ -110,6 +126,7 @@ export interface WorldData {
     tags: string[];
     tier: string;
     currentLocationId: string | null;
+    sceneScopeId: string | null;
     goals: { short_term: string[]; long_term: string[] };
     beliefs: string[];
     characterRecord?: CharacterRecord | null;
@@ -153,6 +170,7 @@ export interface WorldData {
     inventory: WorldPlayerInventoryItem[];
     equipment: WorldPlayerInventoryItem[];
     currentLocationId: string | null;
+    sceneScopeId: string | null;
     characterRecord?: CharacterRecord | null;
     draft?: CharacterDraft | null;
     character?: ParsedCharacter | null;
