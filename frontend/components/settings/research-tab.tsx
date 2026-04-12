@@ -28,8 +28,8 @@ export function ResearchTab({ settings, setSettings }: ResearchTabProps) {
       <div className="mb-[clamp(12px,1vw,20px)]">
         <div className="text-[clamp(14px,1vw,18px)] font-semibold">Research Agent</div>
         <div className="text-[clamp(11px,0.75vw,13px)] text-muted-foreground">
-          Configure the AI research agent that gathers information about known
-          IPs and settings before world generation.
+          Configure the AI research agent that supports world formation,
+          character grounding, and live clarification for known IP campaigns.
         </div>
       </div>
       <div className="space-y-[clamp(8px,0.7vw,14px)]">
@@ -37,8 +37,9 @@ export function ResearchTab({ settings, setSettings }: ResearchTabProps) {
           <div>
             <p className="text-sm font-medium">Enable research agent</p>
             <p className="text-xs text-muted-foreground">
-              When enabled, the generator will research known IPs before
-              building the world scaffold.
+              When enabled, the system can research canon during world
+              formation, resolve character grounding, and answer live
+              clarification lookups in play.
             </p>
           </div>
           <Switch

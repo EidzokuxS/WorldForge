@@ -48,6 +48,10 @@ describe("ResearchTab", () => {
 
     expect(screen.getByText("Research Agent")).toBeInTheDocument();
     expect(screen.getByText("Enable research agent")).toBeInTheDocument();
+    expect(screen.getAllByText(/world formation/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/character grounding/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/live clarification/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/before world generation/i)).not.toBeInTheDocument();
     expect(screen.getByRole("switch")).toBeInTheDocument();
   });
 
