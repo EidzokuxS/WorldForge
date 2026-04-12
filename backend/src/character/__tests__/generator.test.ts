@@ -104,11 +104,14 @@ describe("parseCharacterDescription", () => {
     const prompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>)
       .prompt as string;
     expect(prompt).toContain("identity, profile, socialContext, motivations, capabilities, state, loadout, startConditions, provenance");
+    expect(prompt).toContain("baseFacts + behavioralCore define who the character is");
+    expect(prompt).toContain("liveDynamics records earned campaign change");
     expect(prompt).toContain("copy it verbatim");
+    expect(prompt).toContain("Do NOT emit nested baseFacts, behavioralCore, liveDynamics");
     expect(prompt).not.toContain("Use the tag-only system");
   });
 
-  it("uses rich schema prompt with backgroundSummary, personaSummary, drives, frictions, and goals", async () => {
+  it("uses a flatter schema prompt that gathers authored facts and only captures motivations when explicitly authored", async () => {
     mockGenerateObject.mockResolvedValueOnce({ object: fakeCharacter });
 
     await parseCharacterDescription({
@@ -126,6 +129,7 @@ describe("parseCharacterDescription", () => {
     expect(prompt).toContain("frictions");
     expect(prompt).toContain("shortTermGoals");
     expect(prompt).toContain("longTermGoals");
+    expect(prompt).toContain("leave drives, frictions, shortTermGoals, and longTermGoals empty");
     expect(prompt).toContain("Default to 5 for a fresh character");
     expect(prompt).not.toContain("tag-only system");
   });
@@ -157,6 +161,8 @@ describe("generateCharacter", () => {
     expect(prompt).toContain("The Guild");
     expect(prompt).toContain("backgroundSummary");
     expect(prompt).toContain("personaSummary");
+    expect(prompt).toContain("behavior cues");
+    expect(prompt).toContain("live pressures");
     expect(prompt).toContain("Default to 5 for a fresh character");
     expect(prompt).not.toContain("tag-only system");
   });
@@ -189,6 +195,8 @@ describe("mapV2CardToCharacter", () => {
       .prompt as string;
     expect(prompt).toContain("CHARACTER NAME: Aria");
     expect(prompt).toContain("shared draft pipeline");
+    expect(prompt).toContain("sourceBundle");
+    expect(prompt).toContain("secondary cues");
     expect(prompt).toContain("Keep outsider/native status");
     expect(prompt).not.toContain("tag-only system");
   });
@@ -214,6 +222,7 @@ describe("generateCharacterFromArchetype", () => {
     expect(prompt).toContain("profile");
     expect(prompt).toContain("capabilities");
     expect(prompt).toContain("provenance");
+    expect(prompt).toContain("Do NOT emit nested baseFacts, behavioralCore, liveDynamics");
     expect(prompt).not.toContain("tag-only system");
   });
 });
