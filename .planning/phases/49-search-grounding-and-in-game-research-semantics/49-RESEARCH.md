@@ -295,16 +295,16 @@ return {
 |----------|-------|
 | Framework | Vitest 3.2.4 |
 | Config file | `vitest.config.ts`, `backend/vitest.config.ts`, `frontend/vitest.config.ts` |
-| Quick run command | `npx vitest run backend/src/worldgen/__tests__/ip-researcher.test.ts backend/src/character/__tests__/archetype-researcher.test.ts backend/src/routes/__tests__/character.test.ts backend/src/routes/__tests__/worldgen.test.ts backend/src/engine/__tests__/prompt-assembler.test.ts backend/src/routes/__tests__/chat.test.ts frontend/components/settings/__tests__/research-tab.test.ts` |
+| Quick run command | `npx vitest run backend/src/worldgen/__tests__/ip-researcher.test.ts backend/src/character/__tests__/archetype-researcher.test.ts backend/src/routes/__tests__/character.test.ts backend/src/routes/__tests__/worldgen.test.ts backend/src/engine/__tests__/prompt-assembler.test.ts backend/src/engine/__tests__/turn-processor.test.ts backend/src/routes/__tests__/chat.test.ts frontend/components/settings/__tests__/research-tab.test.tsx` |
 | Full suite command | `npx vitest run` |
 
 ### Phase Requirements -> Test Map
 | Req ID | Behavior | Test Type | Automated Command | File Exists? |
 |--------|----------|-----------|-------------------|-------------|
 | RES-01 | Worldgen search planning decomposes mixed asks into narrow retrievable units and reuses cached canon correctly | unit/integration | `npx vitest run backend/src/worldgen/__tests__/ip-researcher.test.ts backend/src/routes/__tests__/worldgen.test.ts` | ✅ partial |
-| RES-01 | Character research produces durable canon/power grounding instead of only archetype prose | unit/integration | `npx vitest run backend/src/character/__tests__/archetype-researcher.test.ts backend/src/routes/__tests__/character.test.ts` | ✅ partial |
-| RES-01 | Runtime lookup path grounds fact/event/power clarification without bloating scene narration | unit/integration | `npx vitest run backend/src/engine/__tests__/prompt-assembler.test.ts backend/src/routes/__tests__/chat.test.ts` | ✅ partial |
-| RES-01 | Research settings/UI copy stays aligned with broadened grounding scope | frontend unit | `npx vitest run frontend/components/settings/__tests__/research-tab.test.ts` | ✅ |
+| RES-01 | Character research plus import seams produce durable canon/power grounding instead of only archetype prose or raw imported card data | unit/integration | `npx vitest run backend/src/character/__tests__/archetype-researcher.test.ts backend/src/routes/__tests__/character.test.ts` | ✅ partial |
+| RES-01 | Runtime lookup path grounds fact/event/power clarification without bloating scene narration | unit/integration | `npx vitest run backend/src/engine/__tests__/prompt-assembler.test.ts backend/src/engine/__tests__/turn-processor.test.ts backend/src/routes/__tests__/chat.test.ts` | ✅ partial |
+| RES-01 | Research settings/UI copy stays aligned with broadened grounding scope | frontend unit | `npx vitest run frontend/components/settings/__tests__/research-tab.test.tsx` | ✅ |
 
 ### Sampling Rate
 - **Per task commit:** run the task-local command from the plan
@@ -314,9 +314,9 @@ return {
 ### Wave 0 Gaps
 - [ ] Add explicit mixed-premise query-decomposition assertions to `backend/src/worldgen/__tests__/ip-researcher.test.ts`
 - [ ] Add durable character/power-grounding coverage in `backend/src/character/__tests__/archetype-researcher.test.ts`
-- [ ] Add route-level assertions for any new grounded profile/lookup payloads in `backend/src/routes/__tests__/character.test.ts` and `backend/src/routes/__tests__/worldgen.test.ts`
-- [ ] Add runtime lookup boundary tests so scene prompts do not absorb raw research blobs
-- [ ] Add frontend/settings assertions if research scope language expands beyond worldgen-only copy
+- [ ] Add route-level assertions for new grounded profile/lookup payloads in `backend/src/routes/__tests__/character.test.ts` and `backend/src/routes/__tests__/worldgen.test.ts`, including `/api/worldgen/import-v2-card` durability coverage
+- [ ] Add runtime lookup boundary tests in `backend/src/engine/__tests__/prompt-assembler.test.ts` and `backend/src/engine/__tests__/turn-processor.test.ts` so scene prompts do not absorb raw research blobs
+- [ ] Add frontend/settings assertions in `frontend/components/settings/__tests__/research-tab.test.tsx` if research scope language expands beyond worldgen-only copy
 
 ## Sources
 
