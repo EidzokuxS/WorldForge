@@ -115,8 +115,17 @@ export async function runReflection(
     `Only make changes that are clearly supported by the evidence.`,
     `Beliefs, goals, and relationships are the first-class outcomes for ordinary reflection.`,
     `Prefer durable structured-state updates over flavor-only narration or debug counters.`,
+    `Live dynamics are the default mutation surface for ordinary reflection.`,
+    `Update active goals, belief drift, current strains, and relationships before considering deeper identity edits.`,
+    `Deeper identity changes require explicit promotion with multiple strong evidence points.`,
     ``,
     `Current profile: ${npcRecord.profile.personaSummary}`,
+    `Current base facts: biography=${npcRecord.identity.baseFacts?.biography ?? "none"}; roles=[${npcRecord.identity.baseFacts?.socialRole.join(", ") || "none"}]; constraints=[${npcRecord.identity.baseFacts?.hardConstraints.join(", ") || "none"}]`,
+    `Current behavioral core: motives=[${npcRecord.identity.behavioralCore?.motives.join(", ") || "none"}]; pressure=[${npcRecord.identity.behavioralCore?.pressureResponses.join(", ") || "none"}]; self-image=${npcRecord.identity.behavioralCore?.selfImage || "none"}`,
+    `Current live dynamics: goals=[${npcRecord.identity.liveDynamics?.activeGoals.join(", ") || "none"}]; belief drift=[${npcRecord.identity.liveDynamics?.beliefDrift.join(", ") || "none"}]; strains=[${npcRecord.identity.liveDynamics?.currentStrains.join(", ") || "none"}]; earned changes=[${npcRecord.identity.liveDynamics?.earnedChanges.join(", ") || "none"}]`,
+    npcRecord.continuity
+      ? `Continuity policy: identity inertia=${npcRecord.continuity.identityInertia}; protected core=[${npcRecord.continuity.protectedCore.join(", ") || "none"}]; mutable surface=[${npcRecord.continuity.mutableSurface.join(", ") || "none"}]`
+      : null,
     `Current social context: location=${npcRecord.socialContext.currentLocationName ?? npc.currentLocationId ?? "unknown"}; status=[${npcRecord.socialContext.socialStatus.join(", ") || "none"}]`,
     `Current capabilities/state shorthand: tags=[${runtimeTags.join(", ")}]`,
     `Current beliefs: [${npcRecord.motivations.beliefs.join(", ")}]`,
@@ -129,6 +138,7 @@ export async function runReflection(
     `Wealth and skill upgrades require materially stronger evidence than ordinary belief, goal, or relationship drift.`,
     `You may upgrade wealth tiers (Destitute -> Poor -> Comfortable -> Wealthy -> Obscenely Rich) or skill tiers (Novice -> Skilled -> Master) when evidence clearly supports it. Wealth changes require significant trade/loot events. Skill upgrades require 3+ successful uses of that skill.`,
     `Use the tools to update your beliefs, goals, relationships, wealth, and skills as needed, but prefer set_belief, set_goal, drop_goal, and set_relationship unless the evidence strongly justifies progression.`,
+    `Use promote_identity_change only when repeated, material evidence justifies modifying behavioralCore or baseFacts.`,
     `If nothing significant has changed, you may choose not to call any tools.`,
   ]
     .filter(Boolean)
@@ -163,7 +173,8 @@ export async function runReflection(
   }
 
   // 6. Reset unprocessedImportance to 0
-  db.update(npcs)
+  getDb()
+    .update(npcs)
     .set({ unprocessedImportance: 0 })
     .where(eq(npcs.id, npcId))
     .run();
