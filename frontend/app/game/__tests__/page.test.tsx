@@ -37,9 +37,11 @@ const mockLocationPanel = vi.fn(
   ({
     connectedPaths,
     location,
+    npcsHere,
   }: {
     connectedPaths?: Array<{ id: string; name: string; travelCost?: number | null }>;
     location?: { recentHappenings?: Array<{ id: string; summary: string }> } | null;
+    npcsHere?: Array<{ id: string; name: string }>;
   }) => (
     <div data-testid="location-panel">
       <div data-testid="location-path-count">{connectedPaths?.length ?? 0}</div>
@@ -48,6 +50,10 @@ const mockLocationPanel = vi.fn(
       </div>
       <div data-testid="recent-happenings-count">
         {location?.recentHappenings?.length ?? 0}
+      </div>
+      <div data-testid="location-people-count">{npcsHere?.length ?? 0}</div>
+      <div data-testid="location-people-names">
+        {(npcsHere ?? []).map((npc) => npc.name).join("|")}
       </div>
     </div>
   ),
@@ -422,6 +428,41 @@ describe("GamePage", () => {
     expect(screen.getByTestId("location-path-count")).toHaveTextContent("1");
     expect(screen.getByTestId("location-path-names")).toHaveTextContent("Dark Forest:2");
     expect(screen.getByTestId("recent-happenings-count")).toHaveTextContent("1");
+  });
+
+  it("treats People Here as encounter scope instead of same broad location membership on /game", async () => {
+    const worldData = {
+      ...fakeWorldData,
+      locations: [
+        {
+          ...fakeWorldData.locations[0],
+          visibleSceneNpcIds: ["npc-1"],
+        },
+        fakeWorldData.locations[1],
+      ],
+      npcs: [
+        {
+          id: "npc-1",
+          name: "Nobara Kugisaki",
+          tier: "key",
+          currentLocationId: "loc-1",
+          encounterScope: "present",
+        },
+        {
+          id: "npc-2",
+          name: "Satoru Gojo",
+          tier: "key",
+          currentLocationId: "loc-1",
+          encounterScope: "same broad location only",
+        },
+      ],
+    };
+
+    await renderReadyGameWithWorld(worldData as typeof fakeWorldData);
+
+    expect(screen.getByTestId("location-people-count")).toHaveTextContent("1");
+    expect(screen.getByTestId("location-people-names")).toHaveTextContent("Nobara Kugisaki");
+    expect(screen.getByTestId("location-people-names")).not.toHaveTextContent("Satoru Gojo");
   });
 
   it("filters the current location out of authoritative connectedPaths travel options", async () => {

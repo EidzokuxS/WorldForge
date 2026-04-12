@@ -64,6 +64,23 @@ describe("LocationPanel", () => {
     expect(screen.getByText("(passing)")).toBeInTheDocument();
   });
 
+  it("renders People Here from encounter scope rather than everyone in the same broad location", () => {
+    render(
+      <LocationPanel
+        {...defaultProps}
+        location={makeLocation()}
+        npcsHere={[
+          { id: "n1", name: "Nobara Kugisaki", tier: "key", encounterScope: "present" },
+          { id: "n2", name: "Satoru Gojo", tier: "key", encounterScope: "same broad location only" },
+        ] as Array<{ id: string; name: string; tier: string }>}
+      />
+    );
+
+    expect(screen.getByText("People Here")).toBeInTheDocument();
+    expect(screen.getByText(/Nobara Kugisaki/)).toBeInTheDocument();
+    expect(screen.queryByText(/Satoru Gojo/)).not.toBeInTheDocument();
+  });
+
   it("renders items at location", () => {
     const itemsHere = [{ id: "it1", name: "Rusty Key" }];
     render(
