@@ -27,7 +27,7 @@ v1.1 started as a reconciliation milestone built from the [Phase 36 handoff](/R:
 - [x] **Phase 45: Authoritative Scene Assembly & Start-of-Play Runtime** - Make turn output single-pass, runtime-driven, and grounded in actual opening/location state instead of duplicated or premise-dump narration. (completed 2026-04-12)
 - [x] **Phase 46: Encounter Scope, Presence & Knowledge Boundaries** - Stop treating large locations like one tiny room and constrain scene knowledge to actual encounter/perception scope. (completed 2026-04-12)
 - [ ] **Phase 47: Storyteller Output Quality & Anti-Slop Prompting** - Research and tune storyteller prompting/model settings for materially better RP writing quality.
-- [ ] **Phase 48: Character Identity Fidelity & Canonical Modeling** - Preserve distinctive identity/personality details in runtime character modeling, especially for imported and canonical characters.
+- [x] **Phase 48: Character Identity Fidelity & Canonical Modeling** - Preserve distinctive identity/personality details in runtime character modeling, especially for imported and canonical characters. (completed 2026-04-12)
 - [ ] **Phase 49: Search Grounding & In-Game Research Semantics** - Make worldgen and live-game research ask for the right facts with focused retrieval intent.
 - [ ] **Phase 50: Gameplay Text Presentation & Rich Readability** - Improve gameplay text rendering, typography, and rich-text affordances for both input and narration.
 
@@ -198,7 +198,7 @@ Plans:
 Plans:
 - [x] 48-01-PLAN.md — Extend the shared character lane with richer identity layers, route schema/materialization contracts, and compatibility-safe hydration.
 - [x] 48-02-PLAN.md — Rebuild generation/import/template seams and lock parse/save/load/world payload character contracts to the richer identity model.
-- [ ] 48-03-PLAN.md — Rewire prompt assembly, NPC runtime, and reflection to consume richer identity truth with continuity boundaries.
+- [x] 48-03-PLAN.md — Rewire prompt assembly, NPC runtime, and reflection to consume richer identity truth with continuity boundaries.
 - [x] 48-04-PLAN.md — Preserve richer identity through bounded frontend draft/editor seams without a major UI redesign.
 
 ### Phase 49: Search Grounding & In-Game Research Semantics
@@ -240,6 +240,6 @@ Plans:
 | 45. Authoritative Scene Assembly & Start-of-Play Runtime | 3/3 | Complete    | 2026-04-12 |
 | 46. Encounter Scope, Presence & Knowledge Boundaries | 4/4 | Complete   | 2026-04-12 |
 | 47. Storyteller Output Quality & Anti-Slop Prompting | 2/3 | In Progress|  |
-| 48. Character Identity Fidelity & Canonical Modeling | 3/4 | In Progress|  |
+| 48. Character Identity Fidelity & Canonical Modeling | 4/4 | Complete   | 2026-04-12 |
 | 49. Search Grounding & In-Game Research Semantics | 0/0 | Planned | — |
 | 50. Gameplay Text Presentation & Rich Readability | 0/0 | Planned | — |

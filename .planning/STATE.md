@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
-status: executing
-stopped_at: Completed 48-04-PLAN.md
-last_updated: "2026-04-12T17:24:10.023Z"
+status: verifying
+stopped_at: Completed 48-03-PLAN.md
+last_updated: "2026-04-12T17:26:39.596Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 14
-  completed_phases: 11
+  completed_phases: 12
   total_plans: 38
-  completed_plans: 37
+  completed_plans: 38
   percent: 100
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-04-12)
 
 Phase: 48 (character-identity-fidelity-and-canonical-modeling) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-04-12
 
 Progress: [██████████] 100%
@@ -77,6 +77,7 @@ Progress: [██████████] 100%
 | Phase 48 P01 | 8 min | 2 tasks | 8 files |
 | Phase 48 P02 | 18 min | 3 tasks | 13 files |
 | Phase 48-character-identity-fidelity-and-canonical-modeling P04 | 8 min | 2 tasks | 8 files |
+| Phase 48-character-identity-fidelity-and-canonical-modeling P03 | 10 min | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -194,6 +195,9 @@ Recent decisions affecting current work:
 - [Phase 48-character-identity-fidelity-and-canonical-modeling]: Frontend draft adapters now derive compatibility persona/goals from richer identity only when shallow fields are empty.
 - [Phase 48-character-identity-fidelity-and-canonical-modeling]: CharacterCard surfaces canonical status, continuity, core self-image, live pressure, and source cues as a compact read-only fidelity block instead of adding deep edit controls.
 - [Phase 48-character-identity-fidelity-and-canonical-modeling]: Frontend typecheck now rebuilds shared typings first and excludes test mocks so plan verification remains meaningful.
+- [Phase 48-character-identity-fidelity-and-canonical-modeling]: Runtime prompts now treat base facts, behavioral core, live dynamics, and continuity as character truth while tags remain compatibility shorthand.
+- [Phase 48-character-identity-fidelity-and-canonical-modeling]: Off-screen NPC simulation is bounded to a compact richer identity slice per actor instead of serializing full records into batch prompts.
+- [Phase 48-character-identity-fidelity-and-canonical-modeling]: Deeper identity edits now require explicit promote_identity_change evidence thresholds while ordinary reflection writes stay in live dynamics.
 
 ### Pending Todos
 
@@ -206,6 +210,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-12T17:24:10.020Z
-Stopped at: Completed 48-04-PLAN.md
+Last session: 2026-04-12T17:26:39.593Z
+Stopped at: Completed 48-03-PLAN.md
 Resume file: None
