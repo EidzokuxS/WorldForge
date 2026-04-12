@@ -93,7 +93,7 @@ describe("CharacterForm", () => {
     });
 
     await user.click(combo);
-    await user.click(screen.getByText(/Outsider \/ popadanets/i));
+    await user.click(screen.getByText(/^Outsider$/i));
 
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     await user.upload(input, file);

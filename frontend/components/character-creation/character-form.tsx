@@ -71,7 +71,7 @@ export function CharacterForm({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="native">Native resident</SelectItem>
-              <SelectItem value="outsider">Outsider / popadanets</SelectItem>
+              <SelectItem value="outsider">Outsider</SelectItem>
             </SelectContent>
           </Select>
           {fileInput}
@@ -166,7 +166,7 @@ export function CharacterForm({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="native">Native resident</SelectItem>
-              <SelectItem value="outsider">Outsider / popadanets</SelectItem>
+              <SelectItem value="outsider">Outsider</SelectItem>
             </SelectContent>
           </Select>
 

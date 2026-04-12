@@ -112,7 +112,7 @@ export function normalizeImportedTags(
 export function buildImportModeGuidance(mode: CharacterImportMode): string {
   if (mode === "outsider") {
     return [
-      "- IMPORT MODE: outsider / popadanets.",
+      "- IMPORT MODE: outsider.",
       "- Treat this character as someone who arrived from outside the setting with their own prior history intact.",
       "- Preserve the fact that they are not native to this world, but adapt their current role, goals, and social friction to the campaign's lore.",
       "- Their outsider status belongs in persona/backstory/goals, not as cheap metadata tags like Offworld Origin.",

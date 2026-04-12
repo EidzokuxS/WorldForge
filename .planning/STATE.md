@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
 status: planning
-stopped_at: Extended v1.1 with phases 45-50 from live gameplay findings
-last_updated: "2026-04-12T06:35:00.000Z"
+stopped_at: Phase 45 discuss captured authoritative scene assembly decisions
+last_updated: "2026-04-12T09:20:00.000Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 14
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-12)
 
 **Core value:** The LLM is the narrator, never the engine. Mechanical truth stays in backend code so outcomes remain consistent, inspectable, and recoverable.
-**Current focus:** v1.1 phase expansion planning from live gameplay findings
+**Current focus:** Phase 45 planning prep after discuss
 
 ## Current Position
 
-Phase: roadmap extension (45-50) — PLANNING
-Plan: new gameplay-quality phase cluster
-Status: Original reconciliation tranche complete; milestone extended for live gameplay quality
+Phase: 45-authoritative-scene-assembly-and-start-of-play-runtime — DISCUSSED
+Plan: capture authoritative scene assembly contract before planning
+Status: Phase 45 discuss complete; ready to plan
 Last activity: 2026-04-12
 
 Progress: [██████░░░░] 57%

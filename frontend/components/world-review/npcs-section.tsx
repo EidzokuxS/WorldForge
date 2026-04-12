@@ -571,7 +571,7 @@ export function NpcsSection({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="native">Native resident</SelectItem>
-                <SelectItem value="outsider">Outsider / popadanets</SelectItem>
+                <SelectItem value="outsider">Outsider</SelectItem>
               </SelectContent>
             </Select>
 
