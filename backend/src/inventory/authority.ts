@@ -34,6 +34,12 @@ export type AuthoritativeInventoryView = {
   compatibility: AuthoritativeInventoryCompatibility;
 };
 
+export const DEFAULT_AUTHORITATIVE_ITEM_STATE = {
+  equipState: "carried" as InventoryEquipState,
+  equippedSlot: null as string | null,
+  isSignature: false,
+};
+
 export function normalizeInventoryItemName(value: string): string {
   return value.trim().replace(/\s+/g, " ");
 }
@@ -132,6 +138,24 @@ export function toAuthoritativeItemSeed(
     equipState: equipped ? "equipped" : "carried",
     equippedSlot: equipped ? "equipped" : null,
     isSignature: item.slot === "signature" || item.tags.includes("signature"),
+  };
+}
+
+export function resolveCharacterTransferState(input: {
+  equipState?: InventoryEquipState | undefined;
+  equippedSlot?: string | null | undefined;
+}): Pick<AuthoritativeItemRow, "equipState" | "equippedSlot"> {
+  const equipState = input.equipState ?? DEFAULT_AUTHORITATIVE_ITEM_STATE.equipState;
+  return {
+    equipState,
+    equippedSlot: equipState === "equipped" ? input.equippedSlot ?? null : null,
+  };
+}
+
+export function resolveLocationTransferState(): Pick<AuthoritativeItemRow, "equipState" | "equippedSlot"> {
+  return {
+    equipState: DEFAULT_AUTHORITATIVE_ITEM_STATE.equipState,
+    equippedSlot: DEFAULT_AUTHORITATIVE_ITEM_STATE.equippedSlot,
   };
 }
 

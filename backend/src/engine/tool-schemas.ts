@@ -8,8 +8,29 @@
 import { z } from "zod";
 import { tool } from "ai";
 import { executeToolCall } from "./tool-executor.js";
+import { INVENTORY_EQUIP_STATES } from "../inventory/authority.js";
 
 const entityTypeEnum = z.enum(["player", "npc", "location", "item", "faction"]);
+const inventoryEquipStateEnum = z.enum(INVENTORY_EQUIP_STATES);
+const transferItemInputSchema = z.discriminatedUnion("targetType", [
+  z.object({
+    itemName: z.string().describe("Name of the item to transfer"),
+    targetName: z.string().describe("Name of the character to receive the item"),
+    targetType: z.literal("character").describe("Transfer to a character"),
+    equipState: inventoryEquipStateEnum
+      .optional()
+      .describe("Optional carry/equip intent. Omit to keep the item carried."),
+    equippedSlot: z
+      .string()
+      .optional()
+      .describe("Optional explicit slot when equipState is equipped"),
+  }),
+  z.object({
+    itemName: z.string().describe("Name of the item to transfer"),
+    targetName: z.string().describe("Name of the location to receive the item"),
+    targetType: z.literal("location").describe("Transfer to a location"),
+  }),
+]);
 
 /**
  * Create Storyteller tools bound to a specific campaign and tick.
@@ -175,12 +196,8 @@ export function createStorytellerTools(campaignId: string, tick: number, outcome
 
     transfer_item: tool({
       description:
-        "Transfer an existing item to a different character or location. Clears previous ownership.",
-      inputSchema: z.object({
-        itemName: z.string().describe("Name of the item to transfer"),
-        targetName: z.string().describe("Name of the character or location to receive the item"),
-        targetType: z.enum(["character", "location"]).describe("Whether the target is a character or location"),
-      }),
+        "Transfer an existing item to a different character or location. Character targets can optionally equip the item; location targets always drop it carried and unequipped.",
+      inputSchema: transferItemInputSchema,
       execute: async (args) =>
         executeToolCall(campaignId, "transfer_item", args, tick),
     }),

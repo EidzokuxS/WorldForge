@@ -37,6 +37,12 @@ import {
   resolveLocationTarget,
   resolveTravelPath,
 } from "./location-graph.js";
+import {
+  DEFAULT_AUTHORITATIVE_ITEM_STATE,
+  type InventoryEquipState,
+  resolveCharacterTransferState,
+  resolveLocationTransferState,
+} from "../inventory/authority.js";
 
 const log = createLogger("tool-executor");
 
@@ -673,6 +679,9 @@ function handleSpawnItem(
         name,
         tags: JSON.stringify(tags),
         ownerId: character.id,
+        equipState: DEFAULT_AUTHORITATIVE_ITEM_STATE.equipState,
+        equippedSlot: DEFAULT_AUTHORITATIVE_ITEM_STATE.equippedSlot,
+        isSignature: DEFAULT_AUTHORITATIVE_ITEM_STATE.isSignature,
       })
       .run();
 
@@ -695,6 +704,9 @@ function handleSpawnItem(
         name,
         tags: JSON.stringify(tags),
         locationId: location.id,
+        equipState: DEFAULT_AUTHORITATIVE_ITEM_STATE.equipState,
+        equippedSlot: DEFAULT_AUTHORITATIVE_ITEM_STATE.equippedSlot,
+        isSignature: DEFAULT_AUTHORITATIVE_ITEM_STATE.isSignature,
       })
       .run();
 
@@ -969,6 +981,8 @@ function handleTransferItem(
   const itemName = args.itemName as string;
   const targetName = args.targetName as string;
   const targetType = args.targetType as string;
+  const equipState = args.equipState as InventoryEquipState | undefined;
+  const equippedSlot = args.equippedSlot as string | undefined;
 
   const db = getDb();
 
@@ -991,14 +1005,30 @@ function handleTransferItem(
       return { success: false, error: `Character not found: ${targetName}` };
     }
 
+    const nextState = resolveCharacterTransferState({
+      equipState,
+      equippedSlot,
+    });
+
     db.update(items)
-      .set({ ownerId: character.id, locationId: null })
+      .set({
+        ownerId: character.id,
+        locationId: null,
+        equipState: nextState.equipState,
+        equippedSlot: nextState.equippedSlot,
+      })
       .where(eq(items.id, item.id))
       .run();
 
     return {
       success: true,
-      result: { item: item.name, target: character.name, action: "transferred to character" },
+      result: {
+        item: item.name,
+        target: character.name,
+        action: nextState.equipState === "equipped" ? "equipped" : "carried",
+        equipState: nextState.equipState,
+        equippedSlot: nextState.equippedSlot,
+      },
     };
   }
 
@@ -1008,14 +1038,27 @@ function handleTransferItem(
       return { success: false, error: `Location not found: ${targetName}` };
     }
 
+    const nextState = resolveLocationTransferState();
+
     db.update(items)
-      .set({ ownerId: null, locationId: location.id })
+      .set({
+        ownerId: null,
+        locationId: location.id,
+        equipState: nextState.equipState,
+        equippedSlot: nextState.equippedSlot,
+      })
       .where(eq(items.id, item.id))
       .run();
 
     return {
       success: true,
-      result: { item: item.name, target: location.name, action: "transferred to location" },
+      result: {
+        item: item.name,
+        target: location.name,
+        action: "dropped",
+        equipState: nextState.equipState,
+        equippedSlot: nextState.equippedSlot,
+      },
     };
   }
 

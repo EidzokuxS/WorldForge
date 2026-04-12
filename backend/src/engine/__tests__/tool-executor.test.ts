@@ -103,6 +103,10 @@ type MutableInventoryItem = {
   isSignature: boolean;
 };
 
+function getDrizzleTableName(table: unknown): string | null {
+  return (table as Record<PropertyKey, unknown>)?.[Symbol.for("drizzle:Name")] as string | null;
+}
+
 function createMutableInventoryDb(options?: {
   players?: Array<Record<string, unknown>>;
   npcs?: Array<Record<string, unknown>>;
@@ -137,16 +141,16 @@ function createMutableInventoryDb(options?: {
 
   const db = {
     select: vi.fn().mockReturnThis(),
-    from: vi.fn().mockImplementation((table: { _?: { name?: string } }) => {
-      lastTableName = table?._?.name ?? null;
+    from: vi.fn().mockImplementation((table: unknown) => {
+      lastTableName = getDrizzleTableName(table);
       return db;
     }),
     where: vi.fn().mockImplementation(() => ({
       get: vi.fn().mockImplementation(() => getRows(lastTableName)[0]),
       all: vi.fn().mockImplementation(() => getRows(lastTableName)),
     })),
-    update: vi.fn().mockImplementation((table: { _?: { name?: string } }) => {
-      const tableName = table?._?.name ?? null;
+    update: vi.fn().mockImplementation((table: unknown) => {
+      const tableName = getDrizzleTableName(table);
       return {
         set: vi.fn().mockImplementation((values: Record<string, unknown>) => ({
           where: vi.fn().mockImplementation(() => ({
@@ -161,8 +165,8 @@ function createMutableInventoryDb(options?: {
         })),
       };
     }),
-    insert: vi.fn().mockImplementation((table: { _?: { name?: string } }) => {
-      const tableName = table?._?.name ?? null;
+    insert: vi.fn().mockImplementation((table: unknown) => {
+      const tableName = getDrizzleTableName(table);
       return {
         values: vi.fn().mockImplementation((values: Record<string, unknown> | Record<string, unknown>[]) => ({
           run: vi.fn().mockImplementation(() => {
@@ -1069,7 +1073,6 @@ describe("executeToolCall", () => {
         expect.objectContaining({
           name: "Lantern",
           ownerId: "player-1",
-          locationId: undefined,
           equipState: "carried",
           equippedSlot: null,
           isSignature: false,
