@@ -209,9 +209,11 @@ Plans:
   1. Search/query generation decomposes mixed-premise asks into narrow, retrievable information needs.
   2. Live gameplay can ground fact lookups, power comparisons, or event clarification without contaminating scenes with unfocused research blobs.
   3. Search-grounded context improves relevance and usefulness for both worldgen and runtime play.
-**Plans**: 0 plans
+**Plans**: 3 plans
 Plans:
-- [ ] TBD (run `$gsd-plan-phase 49` to break down)
+- [ ] 49-01-PLAN.md — Add explicit worldgen retrieval-intent planning and keep world canon on the existing `ipContext` reuse lane.
+- [ ] 49-02-PLAN.md — Attach durable grounded character and power profiles to the existing Phase 48 character record lane.
+- [ ] 49-03-PLAN.md — Add bounded gameplay lookup semantics and align research settings copy with the broadened grounding scope.
 
 ### Phase 50: Gameplay Text Presentation & Rich Readability
 **Goal**: Make gameplay text surfaces materially easier to read and scan through better formatting, typography, and rich-text affordances.
