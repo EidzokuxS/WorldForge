@@ -175,15 +175,16 @@ describe("createReflectionTools", () => {
     vi.clearAllMocks();
   });
 
-  it("returns 6 tools: set_belief, set_goal, drop_goal, set_relationship, upgrade_wealth, upgrade_skill", () => {
+  it("returns 7 tools including explicit deeper-identity promotion", () => {
     const tools = createReflectionTools(CAMPAIGN_ID, NPC_ID);
     expect(tools).toHaveProperty("set_belief");
     expect(tools).toHaveProperty("set_goal");
     expect(tools).toHaveProperty("drop_goal");
     expect(tools).toHaveProperty("set_relationship");
+    expect(tools).toHaveProperty("promote_identity_change");
     expect(tools).toHaveProperty("upgrade_wealth");
     expect(tools).toHaveProperty("upgrade_skill");
-    expect(Object.keys(tools)).toHaveLength(6);
+    expect(Object.keys(tools)).toHaveLength(7);
   });
 
   it("set_belief appends a new belief to NPC beliefs JSON", async () => {
@@ -415,6 +416,21 @@ describe("runReflection", () => {
       `[Tick ${TICK}] Greta the Merchant privately promises the player safe passage tonight.`,
     );
     expect(systemPrompt).not.toContain("No recent events recorded.");
+  });
+
+  it("frames ordinary reflection as live-dynamics-first and reserves deeper identity change for explicit promotion", async () => {
+    setupMockDb({});
+    const { generateText } = await import("ai");
+
+    await runReflection(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER, {
+      ...JUDGE_PROVIDER,
+      id: "embedder-provider",
+    });
+
+    const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
+    expect(systemPrompt).toContain("Live dynamics are the default mutation surface for ordinary reflection.");
+    expect(systemPrompt).toContain("Update active goals, belief drift, current strains, and relationships before considering deeper identity edits.");
+    expect(systemPrompt).toContain("Deeper identity changes require explicit promotion with multiple strong evidence points.");
   });
 });
 
