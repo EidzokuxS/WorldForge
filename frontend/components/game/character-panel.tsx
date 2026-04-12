@@ -1,6 +1,7 @@
 "use client";
 
 import { ScrollArea } from "@/components/ui/scroll-area";
+import type { WorldPlayerInventoryItem } from "@/lib/api-types";
 
 interface CharacterPanelProps {
   player: {
@@ -12,15 +13,32 @@ interface CharacterPanelProps {
     appearance: string;
     hp: number;
     tags: string[];
-    equippedItems: string[];
     currentLocationId: string | null;
   } | null;
-  items: Array<{ id: string; name: string; tags: string[] }>;
+  carriedItems: WorldPlayerInventoryItem[];
+  equippedItems: WorldPlayerInventoryItem[];
   locationName: string | null;
   portraitUrl?: string;
 }
 
-export function CharacterPanel({ player, items, locationName, portraitUrl }: CharacterPanelProps) {
+function renderItemMeta(item: WorldPlayerInventoryItem): string | null {
+  const meta = [...item.tags];
+  if (item.isSignature && !meta.includes("signature")) {
+    meta.push("signature");
+  }
+  if (item.equippedSlot && !meta.includes(item.equippedSlot)) {
+    meta.push(item.equippedSlot);
+  }
+  return meta.length > 0 ? meta.join(", ") : null;
+}
+
+export function CharacterPanel({
+  player,
+  carriedItems,
+  equippedItems,
+  locationName,
+  portraitUrl,
+}: CharacterPanelProps) {
   if (!player) {
     return (
       <aside className="flex w-full flex-col border-l border-border bg-card lg:w-[280px]">
@@ -107,35 +125,42 @@ export function CharacterPanel({ player, items, locationName, portraitUrl }: Cha
             </div>
           )}
 
-          {player.equippedItems.length > 0 && (
-            <div>
-              <h4 className="text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground">
-                Equipment
-              </h4>
+          <div>
+            <h4 className="text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground">
+              Equipment
+            </h4>
+            {equippedItems.length > 0 ? (
               <ul className="mt-2 space-y-1">
-                {player.equippedItems.map((item) => (
-                  <li key={item} className="text-sm">
-                    • {item}
+                {equippedItems.map((item) => (
+                  <li key={item.id} className="text-sm">
+                    • {item.name}
+                    {renderItemMeta(item) ? (
+                      <span className="ml-1 text-xs text-muted-foreground">
+                        ({renderItemMeta(item)})
+                      </span>
+                    ) : null}
                   </li>
                 ))}
               </ul>
-            </div>
-          )}
+            ) : (
+              <p className="mt-1 text-xs italic text-muted-foreground">(none equipped)</p>
+            )}
+          </div>
 
           <div>
             <h4 className="text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground">
               Inventory
             </h4>
-            {items.length > 0 ? (
+            {carriedItems.length > 0 ? (
               <ul className="mt-2 space-y-1">
-                {items.map((item) => (
+                {carriedItems.map((item) => (
                   <li key={item.id} className="text-sm">
                     • {item.name}
-                    {item.tags.length > 0 && (
+                    {renderItemMeta(item) ? (
                       <span className="ml-1 text-xs text-muted-foreground">
-                        ({item.tags.join(", ")})
+                        ({renderItemMeta(item)})
                       </span>
-                    )}
+                    ) : null}
                   </li>
                 ))}
               </ul>

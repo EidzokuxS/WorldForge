@@ -144,9 +144,39 @@ describe("GET /api/campaigns/:id/world authoritative inventory", () => {
     );
     (loadAuthoritativeInventoryView as Mock).mockReturnValue({
       items: [],
-      carried: [{ name: "Bedroll" }],
-      equipped: [{ name: "Iron Sword" }],
-      signature: [{ name: "Family Compass" }],
+      carried: [{
+        id: "item-bedroll",
+        campaignId: "abc-123",
+        name: "Bedroll",
+        tags: '["gear"]',
+        ownerId: "player-1",
+        locationId: null,
+        equipState: "carried",
+        equippedSlot: null,
+        isSignature: false,
+      }],
+      equipped: [{
+        id: "item-sword",
+        campaignId: "abc-123",
+        name: "Iron Sword",
+        tags: '["weapon"]',
+        ownerId: "player-1",
+        locationId: null,
+        equipState: "equipped",
+        equippedSlot: "hand",
+        isSignature: false,
+      }],
+      signature: [{
+        id: "item-compass",
+        campaignId: "abc-123",
+        name: "Family Compass",
+        tags: '["heirloom"]',
+        ownerId: "player-1",
+        locationId: null,
+        equipState: "carried",
+        equippedSlot: null,
+        isSignature: true,
+      }],
       compatibility: {
         inventorySeed: ["Bedroll"],
         equippedItemRefs: ["Iron Sword"],
@@ -162,6 +192,20 @@ describe("GET /api/campaigns/:id/world authoritative inventory", () => {
     const body = await response.json();
 
     expect(loadAuthoritativeInventoryView).toHaveBeenCalledWith("abc-123", "player-1");
+    expect(body.player.inventory).toEqual([
+      expect.objectContaining({
+        name: "Bedroll",
+        equipState: "carried",
+        isSignature: false,
+      }),
+    ]);
+    expect(body.player.equipment).toEqual([
+      expect.objectContaining({
+        name: "Iron Sword",
+        equipState: "equipped",
+        isSignature: false,
+      }),
+    ]);
     expect(body.player.inventoryItems).toEqual(["Bedroll"]);
     expect(body.player.equippedItems).toEqual(["Iron Sword"]);
     expect(body.player.signatureItems).toEqual(["Family Compass"]);

@@ -273,12 +273,8 @@ export default function GamePage() {
       .map((item) => ({ id: item.id, name: item.name }));
   }, [worldData, player]);
 
-  const playerItems = useMemo(() => {
-    if (!worldData || !player) return [];
-    return worldData.items
-      .filter((item) => item.ownerId === player.id)
-      .map((item) => ({ id: item.id, name: item.name, tags: item.tags }));
-  }, [worldData, player]);
+  const playerCarriedItems = useMemo(() => player?.inventory ?? [], [player]);
+  const playerEquippedItems = useMemo(() => player?.equipment ?? [], [player]);
 
   const locationName = currentLocation?.name ?? null;
 
@@ -637,7 +633,8 @@ export default function GamePage() {
         </div>
         <CharacterPanel
           player={player}
-          items={playerItems}
+          carriedItems={playerCarriedItems}
+          equippedItems={playerEquippedItems}
           locationName={locationName}
           portraitUrl={portraitUrl}
         />

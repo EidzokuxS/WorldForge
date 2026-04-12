@@ -37,6 +37,7 @@ import type {
   WorldbookLibraryItem,
   WorldLocationConnectedPath,
   WorldLocationRecentHappening,
+  WorldPlayerInventoryItem,
 } from "./api-types";
 import type {
   CharacterDraft,
@@ -161,6 +162,8 @@ interface RawWorldData {
     hp: number;
     tags: string;
     equippedItems: string;
+    inventory?: unknown;
+    equipment?: unknown;
     currentLocationId: string | null;
     characterRecord?: CharacterRecord | null;
     draft?: CharacterDraft | null;
@@ -324,6 +327,41 @@ function parseWorldLocationRecentHappenings(value: unknown): WorldLocationRecent
   }
 }
 
+function parseWorldPlayerInventoryItems(value: unknown): WorldPlayerInventoryItem[] {
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) as unknown : value;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.flatMap((item) => {
+      if (typeof item !== "object" || item === null) {
+        return [];
+      }
+
+      const row = item as Record<string, unknown>;
+      const id = typeof row.id === "string" ? row.id : null;
+      const name = typeof row.name === "string" ? row.name : null;
+      const equipState = row.equipState === "equipped" ? "equipped" : row.equipState === "carried" ? "carried" : null;
+
+      if (!id || !name || !equipState) {
+        return [];
+      }
+
+      return [{
+        id,
+        name,
+        tags: parseJsonArray(row.tags),
+        equipState,
+        equippedSlot: typeof row.equippedSlot === "string" ? row.equippedSlot : null,
+        isSignature: row.isSignature === true || row.isSignature === 1,
+      }];
+    });
+  } catch {
+    return [];
+  }
+}
+
 function normalizeCharacterResult(raw: CharacterResult | ({ role: "player"; draft?: CharacterDraft; character?: ParsedCharacter } | { role: "key"; draft?: CharacterDraft; npc?: ScaffoldNpc })) : CharacterResult {
   if (raw.role === "player") {
     const draft = raw.draft ?? raw.character?.draft ?? parsedCharacterToDraft(raw.character as ParsedCharacter);
@@ -396,6 +434,8 @@ function parseWorldData(raw: RawWorldData): WorldData {
           ...raw.player,
           tags: parseJsonArray(raw.player.tags),
           equippedItems: parseJsonArray(raw.player.equippedItems),
+          inventory: parseWorldPlayerInventoryItems(raw.player.inventory),
+          equipment: parseWorldPlayerInventoryItems(raw.player.equipment),
           characterRecord: raw.player.characterRecord ?? null,
           draft: raw.player.draft ?? (raw.player.characterRecord ? characterRecordToDraft(raw.player.characterRecord) : raw.player.character?.draft ?? null),
           character: raw.player.character ?? (raw.player.draft ? characterDraftToParsedCharacter(raw.player.draft) : raw.player.characterRecord ? characterDraftToParsedCharacter(characterRecordToDraft(raw.player.characterRecord)) : null),

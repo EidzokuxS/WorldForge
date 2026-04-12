@@ -44,6 +44,15 @@ export interface WorldLocation {
   archivedAtTick?: number | null;
 }
 
+export interface WorldPlayerInventoryItem {
+  id: string;
+  name: string;
+  tags: string[];
+  equipState: "carried" | "equipped";
+  equippedSlot: string | null;
+  isSignature: boolean;
+}
+
 export interface TestConnectionRequest {
   baseUrl: string;
   apiKey: string;
@@ -141,6 +150,8 @@ export interface WorldData {
     hp: number;
     tags: string[];
     equippedItems: string[];
+    inventory: WorldPlayerInventoryItem[];
+    equipment: WorldPlayerInventoryItem[];
     currentLocationId: string | null;
     characterRecord?: CharacterRecord | null;
     draft?: CharacterDraft | null;

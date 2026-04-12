@@ -31,6 +31,24 @@ import { loadAuthoritativeInventoryView } from "../inventory/authority.js";
 
 const app = new Hono();
 
+function toWorldPlayerInventoryItem(item: {
+  id: string;
+  name: string;
+  tags: string;
+  equipState: "carried" | "equipped";
+  equippedSlot: string | null;
+  isSignature: boolean;
+}) {
+  return {
+    id: item.id,
+    name: item.name,
+    tags: item.tags,
+    equipState: item.equipState,
+    equippedSlot: item.equippedSlot,
+    isSignature: item.isSignature,
+  };
+}
+
 app.get("/", (c) => {
   try {
     return c.json(listCampaigns());
@@ -162,6 +180,8 @@ app.get("/:id/world", async (c) => {
             ...playerRow,
             characterRecord: playerRecord,
             draft: playerDraft,
+            inventory: playerInventory?.carried.map(toWorldPlayerInventoryItem) ?? [],
+            equipment: playerInventory?.equipped.map(toWorldPlayerInventoryItem) ?? [],
             inventoryItems: playerInventory?.carried.map((item) => item.name) ?? [],
             equippedItems: playerInventory?.compatibility.equippedItemRefs ?? [],
             signatureItems: playerInventory?.compatibility.signatureItems ?? [],
