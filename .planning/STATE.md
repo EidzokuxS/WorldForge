@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
 status: executing
-stopped_at: Completed 49-01-PLAN.md
-last_updated: "2026-04-12T19:37:15.723Z"
+stopped_at: Completed 49-02-PLAN.md
+last_updated: "2026-04-12T19:52:28.454Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 14
   completed_phases: 12
   total_plans: 41
-  completed_plans: 39
+  completed_plans: 40
   percent: 100
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-12)
 ## Current Position
 
 Phase: 49 (search-grounding-and-in-game-research-semantics) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-04-12
 
@@ -79,6 +79,7 @@ Progress: [██████████] 100%
 | Phase 48-character-identity-fidelity-and-canonical-modeling P04 | 8 min | 2 tasks | 8 files |
 | Phase 48-character-identity-fidelity-and-canonical-modeling P03 | 10 min | 2 tasks | 10 files |
 | Phase 49 P01 | 7 min | 2 tasks | 5 files |
+| Phase 49 P02 | 11 min | 2 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -202,6 +203,9 @@ Recent decisions affecting current work:
 - [Phase 49]: Phase 49 worldgen canon research now uses one typed retrieval-intent authority instead of a competing free-form planner inside ip-researcher.
 - [Phase 49]: Known-IP fallback keeps the focused job list in the LLM prompt so planner success never collapses back into one vague canon query.
 - [Phase 49]: Regenerate-section enriches and persists canon only through saveIpContext/loadIpContext instead of introducing a second world-canon store.
+- [Phase 49]: Import grounding stays on the bounded card/sourceBundle lane and never triggers live search by default; failures omit grounding rather than failing the route.
+- [Phase 49]: Archetype research keeps returning prose for existing callers while a parallel grounding wrapper synthesizes durable canon and power artifacts for the route seam.
+- [Phase 49]: Grounding and power semantics extend the Phase 48 CharacterDraft/CharacterRecord lane as an optional field instead of creating a detached research store.
 
 ### Pending Todos
 
@@ -214,6 +218,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-12T19:37:15.719Z
-Stopped at: Completed 49-01-PLAN.md
+Last session: 2026-04-12T19:52:28.450Z
+Stopped at: Completed 49-02-PLAN.md
 Resume file: None

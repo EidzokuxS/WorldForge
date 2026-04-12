@@ -212,7 +212,7 @@ Plans:
 **Plans**: 3 plans
 Plans:
 - [x] 49-01-PLAN.md — Add explicit worldgen retrieval-intent planning and keep world canon on the existing `ipContext` reuse lane.
-- [ ] 49-02-PLAN.md — Attach durable grounded character and power profiles to the existing Phase 48 character record lane.
+- [x] 49-02-PLAN.md — Attach durable grounded character and power profiles to the existing Phase 48 character record lane.
 - [ ] 49-03-PLAN.md — Add bounded gameplay lookup semantics and align research settings copy with the broadened grounding scope.
 
 ### Phase 50: Gameplay Text Presentation & Rich Readability
@@ -243,5 +243,5 @@ Plans:
 | 46. Encounter Scope, Presence & Knowledge Boundaries | 4/4 | Complete   | 2026-04-12 |
 | 47. Storyteller Output Quality & Anti-Slop Prompting | 2/3 | In Progress|  |
 | 48. Character Identity Fidelity & Canonical Modeling | 4/4 | Complete    | 2026-04-12 |
-| 49. Search Grounding & In-Game Research Semantics | 1/3 | In Progress|  |
+| 49. Search Grounding & In-Game Research Semantics | 2/3 | In Progress|  |
 | 50. Gameplay Text Presentation & Rich Readability | 0/0 | Planned | — |
