@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-12)
 
 **Core value:** The LLM is the narrator, never the engine. Mechanical truth stays in backend code so outcomes remain consistent, inspectable, and recoverable.
-**Current focus:** Phase 46 — encounter-scope-presence-and-knowledge-boundaries
+**Current focus:** Phase 47 — storyteller-output-quality-and-anti-slop-prompting
 
 ## Current Position
 
-Phase: 46 (encounter-scope-presence-and-knowledge-boundaries) — VERIFYING
-Plan: 4 of 4
-Status: Phase complete — ready for verification
+Phase: 47 (storyteller-output-quality-and-anti-slop-prompting) — DISCUSS COMPLETE
+Plan: 0 of 0
+Status: Context captured — ready for planning
 Last activity: 2026-04-12
 
 Progress: [██████████] 100%
