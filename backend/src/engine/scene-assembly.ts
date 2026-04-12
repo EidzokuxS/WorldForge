@@ -6,6 +6,10 @@ import { hydrateStoredPlayerRecord } from "../character/record-adapters.js";
 import { deriveStartConditionEffects } from "./start-condition-runtime.js";
 import { listRecentLocationEvents } from "./location-events.js";
 import {
+  AWARENESS_BAND_CONTRACT,
+  getObserverAwareness,
+  inferPresenceVisibility,
+  normalizePresenceKey,
   resolveScenePresence,
   resolveStoredSceneScopeId,
   type PresenceSnapshot,
@@ -58,6 +62,12 @@ export interface SceneAssembly {
   openingState: AuthoritativeOpeningState | null;
   currentScene: AuthoritativeSceneContext | null;
   presentNpcNames: string[];
+  awareness: {
+    contract: typeof AWARENESS_BAND_CONTRACT;
+    byNpcName: Record<string, "clear" | "hint" | "none">;
+    clearNpcNames: string[];
+    hintSignals: string[];
+  };
   recentContext: Array<{
     tick: number;
     summary: string;
@@ -385,27 +395,6 @@ function summarizeCommittedEvent(
   };
 }
 
-function inferNpcVisibility(
-  npc: Pick<typeof npcs.$inferSelect, "tags">,
-): { visibility: "clear" | "hint" | "hidden"; awarenessHint: string | null } {
-  const tags = parseStringArray(npc.tags).map((tag) => tag.toLowerCase());
-  if (tags.some((tag) => tag === "hidden" || tag === "concealed" || tag === "disguised")) {
-    return {
-      visibility: "hidden",
-      awarenessHint: "Something concealed is nearby.",
-    };
-  }
-
-  if (tags.some((tag) => tag === "obscured" || tag === "faint" || tag === "distant")) {
-    return {
-      visibility: "hint",
-      awarenessHint: "You catch only a partial sign of movement nearby.",
-    };
-  }
-
-  return { visibility: "clear", awarenessHint: null };
-}
-
 function buildScenePresence(
   campaignId: string,
   currentScene: AuthoritativeSceneContext | null,
@@ -413,6 +402,7 @@ function buildScenePresence(
 ): {
   snapshot: PresenceSnapshot | null;
   presentNpcNames: string[];
+  awareness: SceneAssembly["awareness"];
 } {
   const db = getDb();
   const player = db
@@ -426,7 +416,16 @@ function buildScenePresence(
     .get();
 
   if (!currentScene || !player) {
-    return { snapshot: null, presentNpcNames: [] };
+    return {
+      snapshot: null,
+      presentNpcNames: [],
+      awareness: {
+        contract: AWARENESS_BAND_CONTRACT,
+        byNpcName: {},
+        clearNpcNames: [],
+        hintSignals: [],
+      },
+    };
   }
 
   const broadLocationId = currentLocationId ?? player.currentLocationId ?? null;
@@ -436,7 +435,16 @@ function buildScenePresence(
   );
 
   if (!broadLocationId || !playerSceneScopeId) {
-    return { snapshot: null, presentNpcNames: [] };
+    return {
+      snapshot: null,
+      presentNpcNames: [],
+      awareness: {
+        contract: AWARENESS_BAND_CONTRACT,
+        byNpcName: {},
+        clearNpcNames: [],
+        hintSignals: [],
+      },
+    };
   }
 
   const npcRows = db
@@ -464,7 +472,7 @@ function buildScenePresence(
         visibility: "clear",
       },
       ...npcRows.map((npc) => {
-        const visibility = inferNpcVisibility(npc);
+        const visibility = inferPresenceVisibility(npc.tags);
         return {
           actorId: npc.id,
           actorType: "npc" as const,
@@ -477,17 +485,26 @@ function buildScenePresence(
     ],
   });
 
-  const playerKey = player.id.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-  const presentNpcNames = npcRows
+  const awarenessByNpcName = Object.fromEntries(
+    npcRows
+      .filter((npc) => snapshot.presentActorIds.includes(npc.id))
+      .map((npc) => [npc.name, getObserverAwareness(snapshot, player.id, npc.id)]),
+  );
+  const clearNpcNames = npcRows
     .filter((npc) => snapshot.presentActorIds.includes(npc.id))
-    .filter(
-      (npc) => snapshot.awarenessByObserver[playerKey]?.[
-        npc.id.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "")
-      ] === "clear",
-    )
+    .filter((npc) => getObserverAwareness(snapshot, player.id, npc.id) === "clear")
     .map((npc) => npc.name);
 
-  return { snapshot, presentNpcNames };
+  return {
+    snapshot,
+    presentNpcNames: clearNpcNames,
+    awareness: {
+      contract: AWARENESS_BAND_CONTRACT,
+      byNpcName: awarenessByNpcName,
+      clearNpcNames,
+      hintSignals: [...snapshot.playerAwarenessHints],
+    },
+  };
 }
 
 export function assembleAuthoritativeScene(
@@ -582,12 +599,13 @@ export function assembleAuthoritativeScene(
     openingState,
     currentScene,
     presentNpcNames,
+    awareness: scenePresence.awareness,
     recentContext,
     sceneEffects: typedSceneEffects,
     playerPerceivableConsequences: uniqueSummaries([
       ...sceneEffects,
       ...recentContext.map((entry) => entry.summary),
-      ...(scenePresence.snapshot?.playerAwarenessHints ?? []),
+      ...scenePresence.awareness.hintSignals,
       ...presentNpcNames.map((name) => `${name} is present in the current scene.`),
     ]),
   };

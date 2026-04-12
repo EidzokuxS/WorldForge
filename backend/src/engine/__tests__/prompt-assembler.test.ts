@@ -516,6 +516,18 @@ describe("assemblePrompt", () => {
           tags: ["market", "tense"],
         },
         presentNpcNames: ["Mira"],
+        awareness: {
+          contract: {
+            clear: "Full present-scene actor context. Identity and direct interaction are justified.",
+            hint: "Bounded indirect presence signal only. No identity leakage in player-facing surfaces.",
+            none: "Outside encounter scope for this consumer. Omit from player-facing prompt surfaces.",
+          },
+          byNpcName: {
+            Mira: "clear",
+          },
+          clearNpcNames: ["Mira"],
+          hintSignals: [],
+        },
         recentContext: [
           {
             tick: 14,
@@ -562,7 +574,7 @@ describe("assemblePrompt", () => {
     expect(result.prompt).toContain("player-perceivable=yes");
   });
 
-  it("filters encounter scope so same broad-location actors do not enter visible or hidden prompt context while hidden but present actors stay as awareness hints", async () => {
+  it("keeps hidden but present actors in hidden prompt context while excluding same broad-location outsiders", async () => {
     vi.mocked(readCampaignConfig).mockReturnValue({
       name: "Encounter Scope Campaign",
       premise: "Shibuya breaks into several immediate scenes at once.",
@@ -582,6 +594,7 @@ describe("assemblePrompt", () => {
             tags: "[]",
             equippedItems: "[]",
             currentLocationId: "loc-1",
+            currentSceneLocationId: "scene-platform-7",
             characterRecord: JSON.stringify({
               identity: {
                 id: "p1",
@@ -650,6 +663,14 @@ describe("assemblePrompt", () => {
         ],
         locations: [
           {
+            id: "scene-platform-7",
+            campaignId: "test-campaign-123",
+            name: "Platform 7",
+            description: "A concrete platform inside the larger station district.",
+            tags: '["encounter-scope"]',
+            connectedTo: "[]",
+          },
+          {
             id: "loc-1",
             campaignId: "test-campaign-123",
             name: "Shibuya Station",
@@ -667,6 +688,7 @@ describe("assemblePrompt", () => {
             tags: '["sorcerer"]',
             tier: "key",
             currentLocationId: "loc-1",
+            currentSceneLocationId: "scene-platform-7",
             goals: '{"short_term":["Protect Yuji"],"long_term":[]}',
             beliefs: '["Stay on mission"]',
             characterRecord: JSON.stringify({
@@ -736,18 +758,96 @@ describe("assemblePrompt", () => {
             derivedTags: '["sorcerer"]',
           },
           {
-            id: "n2",
+            id: "n-hidden",
+            campaignId: "test-campaign-123",
+            name: "Choso",
+            persona: "Concealed on the catwalk directly above the platform",
+            tags: '["sorcerer","hidden"]',
+            tier: "key",
+            currentLocationId: "loc-1",
+            currentSceneLocationId: "scene-platform-7",
+            goals: '{"short_term":["Hold position above Yuji"],"long_term":[]}',
+            beliefs: '["Do not reveal yourself yet"]',
+            characterRecord: JSON.stringify({
+              identity: {
+                id: "n-hidden",
+                campaignId: "test-campaign-123",
+                role: "npc",
+                tier: "key",
+                displayName: "Choso",
+                canonicalStatus: "original",
+              },
+              profile: {
+                species: "Human",
+                gender: "",
+                ageText: "",
+                appearance: "",
+                backgroundSummary: "",
+                personaSummary: "Concealed on the catwalk directly above the platform",
+              },
+              socialContext: {
+                factionId: null,
+                factionName: null,
+                homeLocationId: null,
+                homeLocationName: null,
+                currentLocationId: "loc-1",
+                currentLocationName: "Shibuya Station",
+                relationshipRefs: [],
+                socialStatus: [],
+                originMode: "resident",
+              },
+              motivations: {
+                shortTermGoals: ["Hold position above Yuji"],
+                longTermGoals: [],
+                beliefs: ["Do not reveal yourself yet"],
+                drives: [],
+                frictions: [],
+              },
+              capabilities: {
+                traits: [],
+                skills: [],
+                flaws: [],
+                specialties: [],
+                wealthTier: null,
+              },
+              state: {
+                hp: 5,
+                conditions: ["Hidden"],
+                statusFlags: [],
+                activityState: "active",
+              },
+              loadout: {
+                inventorySeed: [],
+                equippedItemRefs: [],
+                currencyNotes: "",
+                signatureItems: [],
+              },
+              startConditions: {},
+              provenance: {
+                sourceKind: "generator",
+                importMode: null,
+                templateId: null,
+                archetypePrompt: null,
+                worldgenOrigin: null,
+                legacyTags: [],
+              },
+            }),
+            derivedTags: '["sorcerer","hidden"]',
+          },
+          {
+            id: "n-outside",
             campaignId: "test-campaign-123",
             name: "Gojo",
             persona: "Watching from another encounter pocket",
             tags: '["sorcerer","same-broad-location-only"]',
             tier: "key",
             currentLocationId: "loc-1",
+            currentSceneLocationId: "rooftop-overwatch",
             goals: '{"short_term":["Observe from the rooftop"],"long_term":[]}',
             beliefs: '["Do not reveal yourself yet"]',
             characterRecord: JSON.stringify({
               identity: {
-                id: "n2",
+                id: "n-outside",
                 campaignId: "test-campaign-123",
                 role: "npc",
                 tier: "key",
@@ -815,6 +915,22 @@ describe("assemblePrompt", () => {
       }) as unknown as ReturnType<typeof getDb>,
     );
 
+    const hiddenPrompt = await assemblePrompt({
+      campaignId: "test-campaign-123",
+      contextWindow: 8192,
+      storytellerPass: "hidden-tool-driving",
+      includeRecentConversation: false,
+    });
+
+    expect(hiddenPrompt.formatted).toContain("[ENCOUNTER SCOPE]");
+    expect(hiddenPrompt.formatted).toContain("Immediate encounter: Platform 7");
+    expect(hiddenPrompt.formatted).toContain("clear=Full present-scene actor context");
+    expect(hiddenPrompt.formatted).toContain("hint=Bounded indirect presence signal only");
+    expect(hiddenPrompt.formatted).toContain("Nanami");
+    expect(hiddenPrompt.formatted).toContain("Choso");
+    expect(hiddenPrompt.formatted).toContain("Encounter awareness: hint");
+    expect(hiddenPrompt.formatted).not.toContain("Gojo");
+
     const result = await assembleFinalNarrationPrompt({
       campaignId: "test-campaign-123",
       contextWindow: 8192,
@@ -828,6 +944,19 @@ describe("assemblePrompt", () => {
           tags: ["encounter-scope"],
         },
         presentNpcNames: ["Nanami"],
+        awareness: {
+          contract: {
+            clear: "Full present-scene actor context. Identity and direct interaction are justified.",
+            hint: "Bounded indirect presence signal only. No identity leakage in player-facing surfaces.",
+            none: "Outside encounter scope for this consumer. Omit from player-facing prompt surfaces.",
+          },
+          byNpcName: {
+            Nanami: "clear",
+            Choso: "hint",
+          },
+          clearNpcNames: ["Nanami"],
+          hintSignals: ["A pressure shift suggests someone hidden but present above the platform."],
+        },
         recentContext: [
           {
             tick: 21,
@@ -857,6 +986,7 @@ describe("assemblePrompt", () => {
 
     expect(result.prompt).toContain("Nanami");
     expect(result.prompt).toContain("hidden but present");
+    expect(result.prompt).not.toContain("Choso");
     expect(result.prompt).not.toContain("Gojo");
   });
 

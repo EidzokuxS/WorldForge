@@ -41,6 +41,14 @@ import { deriveStartConditionEffects } from "./start-condition-runtime.js";
 import { listRecentLocationEvents } from "./location-events.js";
 import { loadAuthoritativeInventoryView } from "../inventory/authority.js";
 import type { SceneAssembly } from "./scene-assembly.js";
+import {
+  AWARENESS_BAND_CONTRACT,
+  getObserverAwareness,
+  inferPresenceVisibility,
+  resolveScenePresence,
+  resolveStoredSceneScopeId,
+  type PresenceSnapshot,
+} from "./scene-presence.js";
 
 const log = createLogger("prompt-assembler");
 
@@ -58,6 +66,7 @@ export interface AssembleOptions {
   /** Model's context window in tokens. */
   contextWindow: number;
   storytellerPass?: StorytellerPass;
+  sceneAssembly?: SceneAssembly;
   /** Whether to include chat history in the assembled system prompt. */
   includeRecentConversation?: boolean;
   /** Oracle result (optional -- not available for Oracle call itself). */
@@ -141,8 +150,10 @@ CRITICAL OUTPUT RULES (MANDATORY — VIOLATION MEANS FAILURE):
 
 const RUNTIME_SCENE_RULES = `Runtime narration rules:
 - Do not hallucinate items, NPCs, or locations that have not been established.
-- If the [NPC STATES] section lists NPCs, those NPCs ARE PRESENT at the player's location. Include them in your narration. Do not claim they are absent.
-- When Key NPCs are present at the player's location (listed in [NPC STATES]), you MUST acknowledge their presence and have them react to the player's action. Key NPCs are autonomous characters with goals and beliefs — they should speak, react, or take action based on their persona and the situation. Do NOT ignore NPCs listed in [NPC STATES].
+- [ENCOUNTER SCOPE] is authoritative for who is in the immediate scene and how much of them the player can perceive.
+- If the [NPC STATES] section lists NPCs, those NPCs are the fully present actors for this encounter scope. Include them in your narration. Do not claim they are absent.
+- When Key NPCs are listed in [NPC STATES], you MUST acknowledge their presence and have them react to the player's action. Key NPCs are autonomous characters with goals and beliefs — they should speak, react, or take action based on their persona and the situation. Do NOT ignore NPCs listed in [NPC STATES].
+- If [ENCOUNTER SCOPE] reports hint-band awareness, treat it as indirect presence only. Do not reveal identity in visible narration unless runtime consequences justify that reveal.
 - If a Key NPC's goals or beliefs conflict with the player's action, narrate the NPC's reaction (objection, interference, support). NPCs are not passive scenery.
 - After moving to a new location, describe the new location using its tags and description from [SCENE]. Mention any NPCs or items present at the new location.
 - When a character reaches HP 0, narrate a contextual outcome based on the situation:
@@ -474,24 +485,160 @@ function buildSceneSection(
   };
 }
 
-function buildNpcStatesSection(
-  campaignId: string,
-  locationId: string | null,
-): PromptSection | null {
-  const db = getDb();
+interface EncounterPromptContext {
+  broadLocationId: string | null;
+  sceneId: string | null;
+  sceneName: string | null;
+  playerId: string | null;
+  snapshot: PresenceSnapshot | null;
+  npcRows: Array<typeof npcs.$inferSelect>;
+  hintSignals: string[];
+}
 
-  // Get NPCs at player's location if known, otherwise all campaign NPCs
-  const npcRows = locationId
+function buildEncounterPromptContext(
+  campaignId: string,
+  sceneAssembly?: SceneAssembly,
+): EncounterPromptContext {
+  const db = getDb();
+  const player = db
+    .select()
+    .from(players)
+    .where(eq(players.campaignId, campaignId))
+    .get();
+  const broadLocationId = player?.currentLocationId ?? null;
+  const sceneId =
+    sceneAssembly?.currentScene?.id
+    ?? resolveStoredSceneScopeId(
+      broadLocationId,
+      player?.currentSceneLocationId ?? null,
+    );
+  const sceneRow = sceneId
+    ? db
+        .select({ name: locations.name })
+        .from(locations)
+        .where(eq(locations.id, sceneId))
+        .get()
+    : null;
+  const npcRows = broadLocationId
     ? db
         .select()
         .from(npcs)
-        .where(eq(npcs.currentLocationId, locationId))
+        .where(eq(npcs.currentLocationId, broadLocationId))
         .all()
     : [];
 
+  const snapshot =
+    player?.id && broadLocationId && sceneId
+      ? resolveScenePresence({
+          playerActorId: player.id,
+          broadLocationId,
+          sceneScopeId: sceneId,
+          actors: [
+            {
+              actorId: player.id,
+              actorType: "player",
+              broadLocationId,
+              sceneScopeId: sceneId,
+              visibility: "clear",
+            },
+            ...npcRows.map((npc) => {
+              const visibility = inferPresenceVisibility(npc.tags);
+              return {
+                actorId: npc.id,
+                actorType: "npc" as const,
+                broadLocationId: npc.currentLocationId,
+                sceneScopeId: npc.currentSceneLocationId,
+                visibility: visibility.visibility,
+                awarenessHint: visibility.awarenessHint,
+              };
+            }),
+          ],
+        })
+      : null;
+
+  return {
+    broadLocationId,
+    sceneId,
+    sceneName: sceneAssembly?.currentScene?.name ?? sceneRow?.name ?? null,
+    playerId: player?.id ?? null,
+    snapshot,
+    npcRows,
+    hintSignals: sceneAssembly?.awareness.hintSignals ?? snapshot?.playerAwarenessHints ?? [],
+  };
+}
+
+function buildEncounterScopeSection(
+  encounter: EncounterPromptContext,
+  storytellerPass: StorytellerPass,
+): PromptSection | null {
+  if (!encounter.sceneId && encounter.hintSignals.length === 0) {
+    return null;
+  }
+
+  const clearActors =
+    encounter.snapshot && encounter.playerId
+      ? encounter.npcRows
+          .filter((npc) => encounter.snapshot?.presentActorIds.includes(npc.id))
+          .filter((npc) => getObserverAwareness(encounter.snapshot!, encounter.playerId!, npc.id) === "clear")
+          .map((npc) => npc.name)
+      : [];
+
+  const lines = [
+    encounter.sceneName
+      ? `Immediate encounter: ${encounter.sceneName}`
+      : "Immediate encounter: unresolved",
+    encounter.broadLocationId && encounter.sceneId && encounter.broadLocationId !== encounter.sceneId
+      ? `Broad location anchor: ${encounter.broadLocationId}`
+      : null,
+    `Awareness contract: clear=${AWARENESS_BAND_CONTRACT.clear}`,
+    `Awareness contract: hint=${AWARENESS_BAND_CONTRACT.hint}`,
+    `Awareness contract: none=${AWARENESS_BAND_CONTRACT.none}`,
+    clearActors.length > 0 ? `Clear actors: ${clearActors.join(", ")}` : "Clear actors: none",
+    encounter.hintSignals.length > 0
+      ? `Hint signals: ${encounter.hintSignals.join(" | ")}`
+      : "Hint signals: none",
+    storytellerPass === "hidden-tool-driving"
+      ? "Hidden pass rule: hint-band actors remain real participants in the scene model, but visible narration may expose only bounded indirect cues until runtime consequences reveal more."
+      : "Final visible rule: narrate only what the player can perceive from clear actors and hint signals.",
+  ].filter((line): line is string => Boolean(line));
+
+  const content = lines.map((line) => `- ${line}`).join("\n");
+
+  return {
+    name: "ENCOUNTER SCOPE",
+    priority: 2,
+    content,
+    estimatedTokens: estimateTokens(content),
+    canTruncate: true,
+  };
+}
+
+function buildNpcStatesSection(
+  campaignId: string,
+  encounter: EncounterPromptContext,
+  storytellerPass: StorytellerPass,
+): PromptSection | null {
+  const npcRows =
+    encounter.snapshot && encounter.playerId
+      ? encounter.npcRows.filter((npc) => {
+          if (!encounter.snapshot?.presentActorIds.includes(npc.id)) {
+            return false;
+          }
+
+          const awareness = getObserverAwareness(
+            encounter.snapshot,
+            encounter.playerId,
+            npc.id,
+          );
+
+          return storytellerPass === "hidden-tool-driving"
+            ? awareness !== "none"
+            : awareness === "clear";
+        })
+      : [];
+
   if (npcRows.length === 0) return null;
 
-  // Get relationship graph for all NPCs at the location
   const npcIds = npcRows.map((n) => n.id);
   const graphNodes = getRelationshipGraph(campaignId, npcIds, 2);
   const graphMap = new Map(graphNodes.map((g) => [g.entityId, g]));
@@ -506,9 +653,15 @@ function buildNpcStatesSection(
     ];
     const beliefs = npcRecord.motivations.beliefs;
     const npcWealthTag = npcRecord.capabilities.wealthTier;
+    const awareness =
+      encounter.snapshot && encounter.playerId
+        ? getObserverAwareness(encounter.snapshot, encounter.playerId, npc.id)
+        : "clear";
 
     const lines = [
       `- ${npcRecord.identity.displayName} (${npcRecord.identity.tier})`,
+      `  Encounter awareness: ${awareness}`,
+      `  Awareness meaning: ${AWARENESS_BAND_CONTRACT[awareness]}`,
       `  Persona: ${npcRecord.profile.personaSummary}`,
       npcWealthTag ? `  Wealth: ${npcWealthTag}` : null,
       tags.length > 0 ? `  Tags: ${tags.join(", ")}` : null,
@@ -743,6 +896,7 @@ export async function assemblePrompt(
     campaignId,
     contextWindow,
     storytellerPass = "hidden-tool-driving",
+    sceneAssembly,
     includeRecentConversation = true,
     actionResult,
     embedderResult,
@@ -782,31 +936,39 @@ export async function assemblePrompt(
 
   // Get player's location for scene/NPC queries
   const db = getDb();
+  const encounter = buildEncounterPromptContext(campaignId, sceneAssembly);
   const player = db
     .select()
     .from(players)
     .where(eq(players.campaignId, campaignId))
     .get();
-  const locationId = player?.currentLocationId ?? null;
 
   // 4. Scene
-  const sceneSection = buildSceneSection(campaignId, locationId, currentTick);
+  const sceneSection = buildSceneSection(campaignId, encounter.sceneId, currentTick);
+  const encounterSection = buildEncounterScopeSection(encounter, storytellerPass);
 
   // 4.5. World state (chronicle + factions)
   const worldStateSection = buildWorldStateSection(campaignId);
 
   // 5. NPC states (enriched with relationship graph)
-  const npcSection = buildNpcStatesSection(campaignId, locationId);
+  const npcSection = buildNpcStatesSection(campaignId, encounter, storytellerPass);
 
   // 6. Player relationships (fallback -- NPC-NPC rels are in NPC states now)
-  const npcIds = locationId
-    ? db
-        .select({ id: npcs.id })
-        .from(npcs)
-        .where(eq(npcs.currentLocationId, locationId))
-        .all()
-        .map((n) => n.id)
-    : [];
+  const npcIds =
+    encounter.snapshot && encounter.playerId
+      ? encounter.npcRows
+          .filter((npc) => {
+            const awareness = getObserverAwareness(
+              encounter.snapshot!,
+              encounter.playerId!,
+              npc.id,
+            );
+            return storytellerPass === "hidden-tool-driving"
+              ? awareness !== "none"
+              : awareness === "clear";
+          })
+          .map((npc) => npc.id)
+      : [];
   const relSection = buildRelationshipsSection(
     campaignId,
     player?.id ?? null,
@@ -853,6 +1015,7 @@ export async function assemblePrompt(
   const allSections: PromptSection[] = [
     systemSection,
     premiseSection,
+    ...(encounterSection ? [encounterSection] : []),
     ...(sceneSection ? [sceneSection] : []),
     ...(worldStateSection ? [worldStateSection] : []),
     ...(playerSection ? [playerSection] : []),
@@ -925,6 +1088,7 @@ export async function assembleFinalNarrationPrompt(options: {
     campaignId: options.campaignId,
     contextWindow: options.contextWindow,
     storytellerPass: "final-visible",
+    sceneAssembly: options.sceneAssembly,
     includeRecentConversation: true,
     actionResult: options.actionResult,
     embedderResult: options.embedderResult,

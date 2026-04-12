@@ -1,5 +1,11 @@
 export type AwarenessBand = "none" | "hint" | "clear";
 
+export const AWARENESS_BAND_CONTRACT: Record<AwarenessBand, string> = {
+  clear: "Full present-scene actor context. Identity and direct interaction are justified.",
+  hint: "Bounded indirect presence signal only. No identity leakage in player-facing surfaces.",
+  none: "Outside encounter scope for this consumer. Omit from player-facing prompt surfaces.",
+};
+
 export type KnowledgeBasis =
   | "none"
   | "perceived_now"
@@ -39,7 +45,7 @@ export interface ResolveScenePresenceOptions {
   priorKnowledge?: PriorKnowledgeInput[];
 }
 
-function normalizePresenceKey(value: string): string {
+export function normalizePresenceKey(value: string): string {
   return value.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }
 
@@ -63,6 +69,61 @@ function dedupeStrings(values: Array<string | null | undefined>): string[] {
   }
 
   return result;
+}
+
+export interface PresenceVisibilityState {
+  visibility: "clear" | "hint" | "hidden";
+  awarenessHint: string | null;
+}
+
+function parseLowercaseTags(rawTags: string | string[] | null | undefined): string[] {
+  if (Array.isArray(rawTags)) {
+    return rawTags
+      .filter((tag): tag is string => typeof tag === "string")
+      .map((tag) => tag.toLowerCase());
+  }
+
+  if (typeof rawTags !== "string" || rawTags.trim().length === 0) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(rawTags) as unknown;
+    if (Array.isArray(parsed)) {
+      return parsed
+        .filter((tag): tag is string => typeof tag === "string")
+        .map((tag) => tag.toLowerCase());
+    }
+  } catch {
+    // Ignore malformed tag blobs and fall back to heuristics below.
+  }
+
+  return rawTags
+    .split(",")
+    .map((tag) => tag.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+export function inferPresenceVisibility(
+  rawTags: string | string[] | null | undefined,
+): PresenceVisibilityState {
+  const tags = parseLowercaseTags(rawTags);
+
+  if (tags.some((tag) => tag === "hidden" || tag === "concealed" || tag === "disguised")) {
+    return {
+      visibility: "hidden",
+      awarenessHint: "Something concealed is nearby.",
+    };
+  }
+
+  if (tags.some((tag) => tag === "obscured" || tag === "faint" || tag === "distant")) {
+    return {
+      visibility: "hint",
+      awarenessHint: "You catch only a partial sign of movement nearby.",
+    };
+  }
+
+  return { visibility: "clear", awarenessHint: null };
 }
 
 export function resolveStoredSceneScopeId(
@@ -94,6 +155,30 @@ function resolveAwareness(
   }
 
   return "clear";
+}
+
+export function getObserverAwareness(
+  snapshot: PresenceSnapshot,
+  observerActorId: string,
+  subjectActorId: string,
+): AwarenessBand {
+  return (
+    snapshot.awarenessByObserver[normalizePresenceKey(observerActorId)]?.[
+      normalizePresenceKey(subjectActorId)
+    ] ?? "none"
+  );
+}
+
+export function getObserverKnowledgeBasis(
+  snapshot: PresenceSnapshot,
+  observerActorId: string,
+  subjectActorId: string,
+): KnowledgeBasis {
+  return (
+    snapshot.knowledgeBasisByObserver[normalizePresenceKey(observerActorId)]?.[
+      normalizePresenceKey(subjectActorId)
+    ] ?? "none"
+  );
 }
 
 export function resolveScenePresence(

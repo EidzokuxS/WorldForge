@@ -26,6 +26,16 @@ vi.mock("../scene-assembly.js", () => ({
       tags: ["urban"],
     },
     presentNpcNames: [],
+    awareness: {
+      contract: {
+        clear: "Full present-scene actor context. Identity and direct interaction are justified.",
+        hint: "Bounded indirect presence signal only. No identity leakage in player-facing surfaces.",
+        none: "Outside encounter scope for this consumer. Omit from player-facing prompt surfaces.",
+      },
+      byNpcName: {},
+      clearNpcNames: [],
+      hintSignals: [],
+    },
     recentContext: [],
     sceneEffects: [],
     playerPerceivableConsequences: [],
