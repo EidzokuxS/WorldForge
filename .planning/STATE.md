@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
 status: verifying
-stopped_at: Completed 49-03-PLAN.md
-last_updated: "2026-04-12T20:16:04.624Z"
+stopped_at: Completed 49-04-PLAN.md
+last_updated: "2026-04-12T20:42:38.301Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 14
   completed_phases: 13
-  total_plans: 41
-  completed_plans: 41
+  total_plans: 42
+  completed_plans: 42
   percent: 100
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-12)
 ## Current Position
 
 Phase: 49 (search-grounding-and-in-game-research-semantics) — EXECUTING
-Plan: 3 of 3
+Plan: 4 of 4
 Status: Phase complete — ready for verification
 Last activity: 2026-04-12
 
@@ -81,6 +81,7 @@ Progress: [██████████] 100%
 | Phase 49 P01 | 7 min | 2 tasks | 5 files |
 | Phase 49 P02 | 11 min | 2 tasks | 11 files |
 | Phase 49 P03 | 2m 30s | 2 tasks | 9 files |
+| Phase 49-search-grounding-and-in-game-research-semantics P04 | 10 min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -210,6 +211,9 @@ Recent decisions affecting current work:
 - [Phase 49]: Explicit gameplay lookup stays on /api/chat/lookup so ordinary /api/chat/action narration keeps the Phase 47 visible-output contract.
 - [Phase 49]: Lookup responses use a factual lookup_result -> done SSE stream and render as tagged assistant entries in the existing log instead of a new UI surface.
 - [Phase 49]: Research settings copy now describes runtime grounding responsibilities, not just pre-worldgen research.
+- [Phase 49-search-grounding-and-in-game-research-semantics]: Worldgen save-edits now normalizes route payloads into the existing WorldScaffold contract instead of loosening shared scaffold types.
+- [Phase 49-search-grounding-and-in-game-research-semantics]: Legacy record-to-draft adapters now materialize through characterDraftSchema.parse so the shared draft lane remains the authority for defaults and compatibility.
+- [Phase 49-search-grounding-and-in-game-research-semantics]: Imported-card and lookup fixtures keep the shared literal citation kind contract instead of widening or bypassing CharacterIdentitySourceCitation.
 
 ### Pending Todos
 
@@ -222,6 +226,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-12T20:16:04.621Z
-Stopped at: Completed 49-03-PLAN.md
+Last session: 2026-04-12T20:42:38.298Z
+Stopped at: Completed 49-04-PLAN.md
 Resume file: None

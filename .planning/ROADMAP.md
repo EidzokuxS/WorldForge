@@ -243,5 +243,5 @@ Plans:
 | 46. Encounter Scope, Presence & Knowledge Boundaries | 4/4 | Complete   | 2026-04-12 |
 | 47. Storyteller Output Quality & Anti-Slop Prompting | 2/3 | In Progress|  |
 | 48. Character Identity Fidelity & Canonical Modeling | 4/4 | Complete    | 2026-04-12 |
-| 49. Search Grounding & In-Game Research Semantics | 3/3 | Complete   | 2026-04-12 |
+| 49. Search Grounding & In-Game Research Semantics | 4/4 | Complete   | 2026-04-12 |
 | 50. Gameplay Text Presentation & Rich Readability | 0/0 | Planned | — |
