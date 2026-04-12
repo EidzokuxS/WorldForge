@@ -37,7 +37,7 @@ Requirements for the gameplay-fidelity milestone. Each maps to roadmap phases.
 
 - [x] **SCEN-01**: Player-visible turn text is a single-pass scene assembled from authoritative runtime state, without repeated output blocks or raw-premise opening dumps.
 - [x] **SCEN-02**: Scene participation and knowledge follow encounter/perception scope, so large locations do not behave like one small room and NPCs do not over-know unseen actors.
-- [ ] **WRIT-01**: Storyteller output quality is tuned for playable RP, with research-backed prompting/model settings that materially reduce purple prose and obvious AI smell.
+- [x] **WRIT-01**: Storyteller output quality is tuned for playable RP, with research-backed prompting/model settings that materially reduce purple prose and obvious AI smell.
 - [ ] **CHARF-01**: Character runtime modeling preserves distinctive personality, motives, and identity details for both native and imported/canonical characters.
 - [ ] **RES-01**: Search and research flows use explicit retrieval intent in both worldgen and live gameplay, producing focused, useful grounded context instead of vague blended queries.
 - [ ] **UX-01**: Gameplay text surfaces present player input and generated narration with materially better readability, formatting, and rich-text affordances.
@@ -83,7 +83,7 @@ Explicitly excluded from this milestone to keep it reconciliation-driven.
 | DOCA-03 | Phase 44 | Complete |
 | SCEN-01 | Phase 45 | Complete |
 | SCEN-02 | Phase 46 | Complete |
-| WRIT-01 | Phase 47 | Pending |
+| WRIT-01 | Phase 47 | Complete |
 | CHARF-01 | Phase 48 | Pending |
 | RES-01 | Phase 49 | Pending |
 | UX-01 | Phase 50 | Pending |

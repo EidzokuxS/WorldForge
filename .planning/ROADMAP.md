@@ -182,7 +182,7 @@ Plans:
   3. Higher writing quality does not regress engine truthfulness, action clarity, or runtime determinism.
 **Plans**: 3 plans
 Plans:
-- [ ] 47-01-PLAN.md — Create the backend-owned storyteller preset layer, contract assembly, and bounded GLM storyteller model seam.
+- [x] 47-01-PLAN.md — Create the backend-owned storyteller preset layer, contract assembly, and bounded GLM storyteller model seam.
 - [ ] 47-02-PLAN.md — Wire the preset layer into prompt assembly and live storyteller runtime calls without adding a rewrite stack.
 - [ ] 47-03-PLAN.md — Add only the evidence-backed final-visible quality guard and close the phase with live GLM smoke verification.
 
@@ -236,7 +236,7 @@ Plans:
 | 44. Gameplay Docs Baseline Alignment | 3/3 | Complete | 2026-04-11 |
 | 45. Authoritative Scene Assembly & Start-of-Play Runtime | 3/3 | Complete    | 2026-04-12 |
 | 46. Encounter Scope, Presence & Knowledge Boundaries | 4/4 | Complete   | 2026-04-12 |
-| 47. Storyteller Output Quality & Anti-Slop Prompting | 0/3 | Planned | — |
+| 47. Storyteller Output Quality & Anti-Slop Prompting | 1/3 | In Progress|  |
 | 48. Character Identity Fidelity & Canonical Modeling | 0/0 | Planned | — |
 | 49. Search Grounding & In-Game Research Semantics | 0/0 | Planned | — |
 | 50. Gameplay Text Presentation & Rich Readability | 0/0 | Planned | — |
