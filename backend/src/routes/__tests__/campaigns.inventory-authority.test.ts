@@ -1,0 +1,174 @@
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { Hono } from "hono";
+
+vi.mock("../../campaign/index.js", () => ({
+  assertSafeId: vi.fn(),
+  createCampaign: vi.fn(),
+  deleteCampaign: vi.fn(),
+  getActiveCampaign: vi.fn(),
+  listCampaigns: vi.fn(),
+  loadCampaign: vi.fn(),
+  readCampaignConfig: vi.fn(),
+  createCheckpoint: vi.fn(),
+  listCheckpoints: vi.fn(),
+  loadCheckpoint: vi.fn(),
+  deleteCheckpoint: vi.fn(),
+}));
+
+vi.mock("../../db/index.js", () => ({
+  getDb: vi.fn(),
+}));
+
+vi.mock("../../engine/location-events.js", () => ({
+  listRecentLocationEventsForLocations: vi.fn().mockReturnValue({}),
+}));
+
+vi.mock("../../engine/location-graph.js", () => ({
+  listConnectedPaths: vi.fn().mockReturnValue([]),
+  loadLocationGraph: vi.fn().mockReturnValue({ locations: [], edges: [] }),
+}));
+
+vi.mock("../../inventory/authority.js", async () => {
+  const actual = await vi.importActual<typeof import("../../inventory/authority.js")>("../../inventory/authority.js");
+  return {
+    ...actual,
+    loadAuthoritativeInventoryView: vi.fn(),
+  };
+});
+
+import { getActiveCampaign, readCampaignConfig } from "../../campaign/index.js";
+import { getDb } from "../../db/index.js";
+import { loadAuthoritativeInventoryView } from "../../inventory/authority.js";
+import campaignRoutes from "../campaigns.js";
+import {
+  locations as locationsTable,
+  npcs as npcsTable,
+  factions as factionsTable,
+  relationships as relationshipsTable,
+  players as playersTable,
+  items as itemsTable,
+} from "../../db/schema.js";
+
+function createMockDb(overrides: {
+  locations?: Record<string, unknown>[];
+  npcs?: Record<string, unknown>[];
+  factions?: Record<string, unknown>[];
+  relationships?: Record<string, unknown>[];
+  players?: Record<string, unknown>[];
+  items?: Record<string, unknown>[];
+} = {}) {
+  const tableMap = new Map<unknown, Record<string, unknown>[]>([
+    [locationsTable, overrides.locations ?? []],
+    [npcsTable, overrides.npcs ?? []],
+    [factionsTable, overrides.factions ?? []],
+    [relationshipsTable, overrides.relationships ?? []],
+    [playersTable, overrides.players ?? []],
+    [itemsTable, overrides.items ?? []],
+  ]);
+
+  const selectFn = vi.fn().mockImplementation(() => ({
+    from: vi.fn().mockImplementation((table: unknown) => {
+      const data = tableMap.get(table) ?? [];
+      return {
+        where: vi.fn().mockReturnValue({
+          all: vi.fn().mockReturnValue(data),
+          get: vi.fn().mockReturnValue(data[0]),
+        }),
+        all: vi.fn().mockReturnValue(data),
+        get: vi.fn().mockReturnValue(data[0]),
+      };
+    }),
+  }));
+
+  return { select: selectFn };
+}
+
+const app = new Hono();
+app.route("/api/campaigns", campaignRoutes);
+
+describe("GET /api/campaigns/:id/world authoritative inventory", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (getActiveCampaign as Mock).mockReturnValue({
+      id: "abc-123",
+      name: "Test",
+      createdAt: "2026-01-01",
+      generationComplete: true,
+    });
+    (readCampaignConfig as Mock).mockReturnValue({ personaTemplates: [] });
+    (getDb as Mock).mockReturnValue(
+      createMockDb({
+        locations: [
+          {
+            id: "loc-1",
+            campaignId: "abc-123",
+            name: "Town Square",
+            description: "Stone and wind.",
+            connectedTo: "[]",
+          },
+        ],
+        players: [
+          {
+            id: "player-1",
+            campaignId: "abc-123",
+            name: "Hero",
+            race: "Human",
+            gender: "",
+            age: "",
+            appearance: "",
+            hp: 5,
+            tags: "[]",
+            equippedItems: '["Legacy Bow"]',
+            currentLocationId: "loc-1",
+          },
+        ],
+        items: [
+          {
+            id: "item-world-1",
+            campaignId: "abc-123",
+            name: "Iron Sword",
+            tags: '["weapon"]',
+            ownerId: "player-1",
+            locationId: null,
+          },
+          {
+            id: "item-world-2",
+            campaignId: "abc-123",
+            name: "Lantern",
+            tags: '["utility"]',
+            ownerId: null,
+            locationId: "loc-1",
+          },
+        ],
+      }) as unknown as ReturnType<typeof getDb>,
+    );
+    (loadAuthoritativeInventoryView as Mock).mockReturnValue({
+      items: [],
+      carried: [{ name: "Bedroll" }],
+      equipped: [{ name: "Iron Sword" }],
+      signature: [{ name: "Family Compass" }],
+      compatibility: {
+        inventorySeed: ["Bedroll"],
+        equippedItemRefs: ["Iron Sword"],
+        signatureItems: ["Family Compass"],
+      },
+    });
+  });
+
+  it("returns player inventory, equipped, and signature arrays from the authoritative inventory seam while preserving top-level world items", async () => {
+    const response = await app.request("/api/campaigns/abc-123/world");
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    expect(loadAuthoritativeInventoryView).toHaveBeenCalledWith("abc-123", "player-1");
+    expect(body.player.inventoryItems).toEqual(["Bedroll"]);
+    expect(body.player.equippedItems).toEqual(["Iron Sword"]);
+    expect(body.player.signatureItems).toEqual(["Family Compass"]);
+    expect(body.player.equippedItems).not.toEqual(["Legacy Bow"]);
+    expect(body.items).toEqual([
+      expect.objectContaining({ name: "Iron Sword" }),
+      expect.objectContaining({ name: "Lantern" }),
+    ]);
+  });
+});

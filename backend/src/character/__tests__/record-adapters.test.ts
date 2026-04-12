@@ -4,11 +4,13 @@ import {
   deriveRuntimeCharacterTags,
 } from "../runtime-tags.js";
 import {
+  projectPlayerRecord,
   fromLegacyNpcRow,
   fromLegacyPlayerRow,
   toLegacyNpcDraft,
   toLegacyPlayerCharacter,
 } from "../record-adapters.js";
+import { buildAuthoritativeInventoryView } from "../../inventory/authority.js";
 
 describe("record adapters", () => {
   it("hydrates legacy player and npc rows into one shared CharacterRecord shape", () => {
@@ -202,6 +204,63 @@ describe("record adapters", () => {
       { name: "Tactician", tier: "Skilled" },
     ]);
     expect(record.motivations.longTermGoals).toEqual(["Rebuild the militia"]);
+  });
+
+  it("derives legacy equippedItems compatibility output from authoritative inventory instead of record.loadout", () => {
+    const record = fromLegacyPlayerRow(
+      {
+        id: "player-1",
+        campaignId: "camp-1",
+        name: "Aria Bloodthorn",
+        race: "Human",
+        gender: "Female",
+        age: "18",
+        appearance: "Violet eyes and raven hair.",
+        hp: 4,
+        tags: JSON.stringify(["Poor", "Observant"]),
+        equippedItems: JSON.stringify(["Legacy Bow"]),
+        currentLocationId: "loc-1",
+      },
+      { currentLocationName: "Signal Station" },
+    );
+
+    const authoritativeInventory = buildAuthoritativeInventoryView([
+      {
+        id: "item-1",
+        campaignId: "camp-1",
+        name: "Iron Sword",
+        tags: "[]",
+        ownerId: "player-1",
+        locationId: null,
+        equipState: "equipped",
+        equippedSlot: "main-hand",
+        isSignature: false,
+      },
+      {
+        id: "item-2",
+        campaignId: "camp-1",
+        name: "Family Compass",
+        tags: "[]",
+        ownerId: "player-1",
+        locationId: null,
+        equipState: "carried",
+        equippedSlot: null,
+        isSignature: true,
+      },
+    ]);
+
+    const legacyPlayer = (toLegacyPlayerCharacter as unknown as (
+      record: CharacterRecord,
+      inventory: ReturnType<typeof buildAuthoritativeInventoryView>,
+    ) => ReturnType<typeof toLegacyPlayerCharacter>)(record, authoritativeInventory);
+    const projection = (projectPlayerRecord as unknown as (
+      record: CharacterRecord,
+      inventory: ReturnType<typeof buildAuthoritativeInventoryView>,
+    ) => ReturnType<typeof projectPlayerRecord>)(record, authoritativeInventory);
+
+    expect(legacyPlayer.equippedItems).toEqual(["Iron Sword"]);
+    expect(JSON.parse(projection.equippedItems)).toEqual(["Iron Sword"]);
+    expect(legacyPlayer.equippedItems).not.toEqual(["Legacy Bow"]);
   });
 });
 
