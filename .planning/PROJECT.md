@@ -21,7 +21,7 @@ The shipped baseline includes:
 
 The original `v1.1 Gameplay Fidelity` reconciliation tranche (`37-44`) is complete. The milestone remains open and is now extended with follow-on gameplay-quality phases (`45-50`) driven by live gameplay findings rather than docs reconciliation alone.
 
-`Phase 45` is now complete: opening scenes and turn narration are assembled from authoritative runtime state through a single visible scene pass, not premise dumps or pre-settlement narration.
+`Phase 48` is now complete: runtime character modeling preserves richer identity layers, continuity, and source-bundle fidelity across generation, persistence, prompts, reflection, and the bounded frontend draft/editor seam.
 
 The milestone still starts from the docs-to-runtime reconciliation in [36-HANDOFF.md](/R:/Projects/WorldForge/.planning/phases/36-gameplay-docs-to-runtime-reconciliation-audit/36-HANDOFF.md), not from old assumptions.
 
@@ -82,4 +82,4 @@ The milestone still starts from the docs-to-runtime reconciliation in [36-HANDOF
 | `v1.1` stays open until gameplay baseline feels acceptable in live use | Formal reconciliation alone is not enough if live play still exposes major scene, writing, search, or character-fidelity gaps | ✓ Active |
 
 ---
-*Last updated: 2026-04-12 after Phase 45 completion*
+*Last updated: 2026-04-12 after Phase 48 completion*
