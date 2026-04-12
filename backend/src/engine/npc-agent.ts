@@ -28,6 +28,7 @@ import {
   resolveScenePresence,
   resolveStoredSceneScopeId,
 } from "./scene-presence.js";
+import type { CharacterRecord } from "@worldforge/shared";
 
 const log = createLogger("npc-agent");
 
@@ -73,6 +74,7 @@ export async function tickNpcAgent(
     npc.currentLocationId,
     npc.currentSceneLocationId ?? null,
   );
+  const identityPrompt = buildNpcIdentityPrompt(npcRecord);
 
   // 2. Load NPC's current location
   let locationName = "Unknown location";
@@ -251,6 +253,7 @@ export async function tickNpcAgent(
     DERIVED_RUNTIME_TAGS_RULE,
     `Your profile: ${npcRecord.profile.personaSummary}`,
     `Your traits: [${npcTags.join(", ")}]`,
+    ...identityPrompt,
     `Current social context: location=${locationName}; status=[${npcRecord.socialContext.socialStatus.join(", ") || "none"}]; drives=[${npcRecord.motivations.drives.join(", ") || "none"}]; frictions=[${npcRecord.motivations.frictions.join(", ") || "none"}]`,
     `Your goals:\n${goalsText}`,
     `Your beliefs: [${beliefs.join(", ")}]`,
@@ -391,4 +394,72 @@ export async function tickPresentNpcs(
   }
 
   return results;
+}
+
+function formatNpcIdentityList(label: string, values: string[]): string | null {
+  if (values.length === 0) return null;
+  return `${label}: ${values.join("; ")}`;
+}
+
+function buildNpcIdentityPrompt(record: CharacterRecord): string[] {
+  const baseFacts = record.identity.baseFacts;
+  const behavioralCore = record.identity.behavioralCore;
+  const liveDynamics = record.identity.liveDynamics;
+  const continuity = record.continuity;
+
+  const lines = [
+    "Base facts:",
+    [
+      baseFacts?.biography ? `- Biography: ${baseFacts.biography}` : null,
+      formatNpcIdentityList("Social roles", baseFacts?.socialRole ?? []),
+      formatNpcIdentityList("Hard constraints", baseFacts?.hardConstraints ?? []),
+    ]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => value.startsWith("- ") ? value : `- ${value}`),
+    "Behavioral core:",
+    [
+      formatNpcIdentityList("Enduring motives", behavioralCore?.motives ?? []),
+      formatNpcIdentityList("Pressure responses", behavioralCore?.pressureResponses ?? []),
+      formatNpcIdentityList("Taboos", behavioralCore?.taboos ?? []),
+      formatNpcIdentityList("Attachments", behavioralCore?.attachments ?? []),
+      behavioralCore?.selfImage ? `Self-image: ${behavioralCore.selfImage}` : null,
+    ]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => `- ${value}`),
+    "Live dynamics:",
+    [
+      formatNpcIdentityList("Active goals", liveDynamics?.activeGoals ?? []),
+      formatNpcIdentityList("Belief drift", liveDynamics?.beliefDrift ?? []),
+      formatNpcIdentityList("Current strains", liveDynamics?.currentStrains ?? []),
+      formatNpcIdentityList("Earned changes", liveDynamics?.earnedChanges ?? []),
+    ]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => `- ${value}`),
+  ].flat();
+
+  if (
+    continuity
+    && (
+      record.identity.tier === "key"
+      || record.identity.canonicalStatus !== "original"
+      || continuity.identityInertia !== "flexible"
+    )
+  ) {
+    lines.push(
+      "Continuity / fidelity:",
+      `- identity inertia=${continuity.identityInertia}`,
+      ...(continuity.protectedCore.length > 0
+        ? [`- protected core: ${continuity.protectedCore.join("; ")}`]
+        : []),
+      ...(continuity.mutableSurface.length > 0
+        ? [`- mutable surface: ${continuity.mutableSurface.join("; ")}`]
+        : []),
+      ...(continuity.changePressureNotes.length > 0
+        ? [`- change pressure: ${continuity.changePressureNotes.join("; ")}`]
+        : []),
+      "- Apply pressure and scene fallout to live dynamics before concluding that deeper identity has changed.",
+    );
+  }
+
+  return lines;
 }

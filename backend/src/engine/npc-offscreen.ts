@@ -22,8 +22,10 @@ import {
 } from "../character/record-adapters.js";
 import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
 import { resolveStoredSceneScopeId } from "./scene-presence.js";
+import type { CharacterRecord } from "@worldforge/shared";
 
 const log = createLogger("npc-offscreen");
+const OFFSCREEN_IDENTITY_LIST_LIMIT = 2;
 
 // -- Types --------------------------------------------------------------------
 
@@ -60,6 +62,59 @@ export interface NpcContext {
     characterRecord?: string | null;
     derivedTags?: string | null;
   };
+}
+
+function takeBoundedIdentitySlice(values: string[]): string[] {
+  return values.map((value) => value.trim()).filter(Boolean).slice(0, OFFSCREEN_IDENTITY_LIST_LIMIT);
+}
+
+function formatBoundedIdentityList(label: string, values: string[]): string | null {
+  const bounded = takeBoundedIdentitySlice(values);
+  if (bounded.length === 0) return null;
+  return `${label}: ${bounded.join("; ")}`;
+}
+
+function buildOffscreenIdentitySummary(record: CharacterRecord): string[] {
+  const baseFacts = record.identity.baseFacts;
+  const behavioralCore = record.identity.behavioralCore;
+  const liveDynamics = record.identity.liveDynamics;
+  const continuity = record.continuity;
+
+  return [
+    [
+      baseFacts?.biography ? `Base facts: ${baseFacts.biography}` : null,
+      formatBoundedIdentityList("Roles", baseFacts?.socialRole ?? []),
+      formatBoundedIdentityList("Constraints", baseFacts?.hardConstraints ?? []),
+    ]
+      .filter((value): value is string => Boolean(value))
+      .join(" | "),
+    [
+      formatBoundedIdentityList("Enduring motives", behavioralCore?.motives ?? []),
+      formatBoundedIdentityList("Pressure responses", behavioralCore?.pressureResponses ?? []),
+      formatBoundedIdentityList("Attachments", behavioralCore?.attachments ?? []),
+      behavioralCore?.selfImage ? `Self-image: ${behavioralCore.selfImage}` : null,
+    ]
+      .filter((value): value is string => Boolean(value))
+      .join(" | "),
+    [
+      formatBoundedIdentityList("Active goals", liveDynamics?.activeGoals ?? []),
+      formatBoundedIdentityList("Current strains", liveDynamics?.currentStrains ?? []),
+      formatBoundedIdentityList("Belief drift", liveDynamics?.beliefDrift ?? []),
+      formatBoundedIdentityList("Earned changes", liveDynamics?.earnedChanges ?? []),
+    ]
+      .filter((value): value is string => Boolean(value))
+      .join(" | "),
+    continuity
+      ? [
+          `Continuity: identity inertia=${continuity.identityInertia}`,
+          formatBoundedIdentityList("protected core", continuity.protectedCore),
+          formatBoundedIdentityList("mutable surface", continuity.mutableSurface),
+          formatBoundedIdentityList("change pressure", continuity.changePressureNotes),
+        ]
+          .filter((value): value is string => Boolean(value))
+          .join(" | ")
+      : null,
+  ].filter((value): value is string => Boolean(value));
 }
 
 // -- Zod schema for LLM output -----------------------------------------------
@@ -359,6 +414,7 @@ export async function simulateOffscreenNpcs(
   const npcSummaries = offscreenKeyNpcs.map((npc) => {
     const npcRecord = hydrateStoredNpcRecord(npc);
     const tags = deriveRuntimeCharacterTags(npcRecord);
+    const identitySummary = buildOffscreenIdentitySummary(npcRecord);
 
     // Resolve location name
     let locationName = npcRecord.socialContext.currentLocationName ?? "Unknown";
@@ -373,6 +429,7 @@ export async function simulateOffscreenNpcs(
 
     return [
       `- Name: ${npcRecord.identity.displayName}`,
+      ...identitySummary.map((line) => `  ${line}`),
       `  Persona: ${npcRecord.profile.personaSummary}`,
       `  Traits: [${tags.join(", ")}]`,
       `  Location: ${locationName}`,
@@ -384,7 +441,8 @@ export async function simulateOffscreenNpcs(
   const systemPrompt = [
     "You are the world simulation engine for a text RPG.",
     "For each NPC listed below, determine what they have been doing off-screen since the last simulation.",
-    "Consider their persona, traits, location, and goals when deciding their actions.",
+    "Keep each NPC to a bounded identity slice: base facts, enduring motives, pressure responses, live goals/strains, and continuity cues only.",
+    "Use the richer identity slice plus compatibility shorthand when deciding actions. Do not dump the full record or source bundle.",
     "Each NPC update MUST describe something SPECIFIC they did — name locations, actions, and consequences. Do NOT use vague summaries like 'continued pursuing goals' or 'maintained their position'. Example good update: 'Traveled to the Sporeworks to negotiate a spore trade deal with the fungal workers.' Example bad update: 'Continued working toward their goals.'",
     "Return a structured update for each NPC.",
     "",

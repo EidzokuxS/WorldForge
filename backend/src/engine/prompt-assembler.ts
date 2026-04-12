@@ -9,7 +9,7 @@
  */
 
 import { eq, desc } from "drizzle-orm";
-import type { ChatMessage } from "@worldforge/shared";
+import type { CharacterRecord, ChatMessage } from "@worldforge/shared";
 import { safeGenerateObject as generateObject } from "../ai/generate-object-safe.js";
 import { z } from "zod";
 import { createModel } from "../ai/provider-registry.js";
@@ -467,6 +467,11 @@ function buildPlayerStateSection(
   const inventoryLine = carriedItems.length > 0
     ? `Inventory: ${carriedItems.join(", ")}`
     : "Inventory: (empty)";
+  const identityLines = buildRuntimeIdentityLines(effectivePlayerRecord, {
+    includeContinuity:
+      Boolean(effectivePlayerRecord.continuity)
+      || effectivePlayerRecord.identity.tier === "key",
+  });
 
   const lines = [
     `Name: ${playerRecord.identity.displayName}`,
@@ -489,6 +494,7 @@ function buildPlayerStateSection(
     startConditions.startingVisibility
       ? `Visibility: ${startConditions.startingVisibility}`
       : null,
+    ...identityLines,
     ...openingState.promptLines,
     equipped.length > 0 ? `Equipped: ${equipped.join(", ")}` : null,
     signatureItems.length > 0 ? `Signature Items: ${signatureItems.join(", ")}` : null,
@@ -777,6 +783,13 @@ function buildNpcStatesSection(
       encounter.snapshot && encounter.playerId
         ? getObserverAwareness(encounter.snapshot, encounter.playerId, npc.id)
         : "clear";
+    const identityLines = buildRuntimeIdentityLines(npcRecord, {
+      indent: "  ",
+      includeContinuity:
+        Boolean(npcRecord.continuity)
+        || npcRecord.identity.tier === "key"
+        || npcRecord.identity.canonicalStatus !== "original",
+    });
 
     const lines = [
       `- ${npcRecord.identity.displayName} (${npcRecord.identity.tier})`,
@@ -784,6 +797,7 @@ function buildNpcStatesSection(
       `  Awareness meaning: ${AWARENESS_BAND_CONTRACT[awareness]}`,
       `  Persona: ${npcRecord.profile.personaSummary}`,
       npcWealthTag ? `  Wealth: ${npcWealthTag}` : null,
+      ...identityLines,
       tags.length > 0 ? `  Tags: ${tags.join(", ")}` : null,
       goals.length > 0 ? `  Goals: ${goals.join("; ")}` : null,
       beliefs.length > 0 ? `  Beliefs: ${beliefs.join(", ")}` : null,
@@ -1299,4 +1313,72 @@ function safeParseGoals(raw: string): string[] {
   } catch {
     return [];
   }
+}
+
+function formatIdentityField(label: string, values: string[]): string | null {
+  if (values.length === 0) return null;
+  return `${label}: ${values.join("; ")}`;
+}
+
+function buildRuntimeIdentityLines(
+  record: CharacterRecord,
+  options: {
+    indent?: string;
+    includeContinuity?: boolean;
+  } = {},
+): string[] {
+  const indent = options.indent ?? "";
+  const baseFacts = record.identity.baseFacts;
+  const behavioralCore = record.identity.behavioralCore;
+  const liveDynamics = record.identity.liveDynamics;
+  const continuity = record.continuity;
+
+  const lines = [
+    [
+      baseFacts?.biography ? `biography=${baseFacts.biography}` : null,
+      formatIdentityField("roles", baseFacts?.socialRole ?? []),
+      formatIdentityField("constraints", baseFacts?.hardConstraints ?? []),
+    ]
+      .filter((value): value is string => Boolean(value))
+      .join(" | "),
+    [
+      formatIdentityField("motives", behavioralCore?.motives ?? []),
+      formatIdentityField("pressure", behavioralCore?.pressureResponses ?? []),
+      formatIdentityField("taboos", behavioralCore?.taboos ?? []),
+      formatIdentityField("attachments", behavioralCore?.attachments ?? []),
+      behavioralCore?.selfImage ? `self-image=${behavioralCore.selfImage}` : null,
+    ]
+      .filter((value): value is string => Boolean(value))
+      .join(" | "),
+    [
+      formatIdentityField("goals", liveDynamics?.activeGoals ?? []),
+      formatIdentityField("belief drift", liveDynamics?.beliefDrift ?? []),
+      formatIdentityField("strains", liveDynamics?.currentStrains ?? []),
+      formatIdentityField("earned changes", liveDynamics?.earnedChanges ?? []),
+    ]
+      .filter((value): value is string => Boolean(value))
+      .join(" | "),
+  ];
+
+  const formatted = [
+    lines[0] ? `${indent}Base Facts: ${lines[0]}` : null,
+    lines[1] ? `${indent}Behavioral Core: ${lines[1]}` : null,
+    lines[2] ? `${indent}Live Dynamics: ${lines[2]}` : null,
+  ].filter((value): value is string => Boolean(value));
+
+  if (options.includeContinuity && continuity) {
+    const continuitySummary = [
+      `identityInertia=${continuity.identityInertia}`,
+      formatIdentityField("protected", continuity.protectedCore),
+      formatIdentityField("mutable", continuity.mutableSurface),
+      formatIdentityField("change pressure", continuity.changePressureNotes),
+    ]
+      .filter((value): value is string => Boolean(value))
+      .join(" | ");
+    if (continuitySummary) {
+      formatted.push(`${indent}Continuity: ${continuitySummary}`);
+    }
+  }
+
+  return formatted;
 }
