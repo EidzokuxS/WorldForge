@@ -20,6 +20,7 @@ vi.mock("../reflection-budget.js", () => ({
 import { executeToolCall } from "../tool-executor.js";
 import { getDb } from "../../db/index.js";
 import { storeEpisodicEvent } from "../../vectors/episodic-events.js";
+import { buildAuthoritativeInventoryView } from "../../inventory/authority.js";
 
 const CAMPAIGN_ID = "test-campaign-123";
 const TICK = 5;
@@ -88,6 +89,100 @@ function createMockDb(options: {
   };
 
   return { db, updateRun, insertRun, upsertRun };
+}
+
+type MutableInventoryItem = {
+  id: string;
+  campaignId: string;
+  name: string;
+  tags: string;
+  ownerId: string | null;
+  locationId: string | null;
+  equipState: "carried" | "equipped";
+  equippedSlot: string | null;
+  isSignature: boolean;
+};
+
+function createMutableInventoryDb(options?: {
+  players?: Array<Record<string, unknown>>;
+  npcs?: Array<Record<string, unknown>>;
+  locations?: Array<Record<string, unknown>>;
+  items?: MutableInventoryItem[];
+}) {
+  const state = {
+    players: options?.players ?? [],
+    npcs: options?.npcs ?? [],
+    locations: options?.locations ?? [],
+    items: options?.items ?? [],
+    updateTables: [] as string[],
+    insertedItems: [] as MutableInventoryItem[],
+  };
+
+  let lastTableName: string | null = null;
+
+  const getRows = (tableName: string | null): Array<Record<string, unknown>> => {
+    switch (tableName) {
+      case "players":
+        return state.players;
+      case "npcs":
+        return state.npcs;
+      case "locations":
+        return state.locations;
+      case "items":
+        return state.items;
+      default:
+        return [];
+    }
+  };
+
+  const db = {
+    select: vi.fn().mockReturnThis(),
+    from: vi.fn().mockImplementation((table: { _?: { name?: string } }) => {
+      lastTableName = table?._?.name ?? null;
+      return db;
+    }),
+    where: vi.fn().mockImplementation(() => ({
+      get: vi.fn().mockImplementation(() => getRows(lastTableName)[0]),
+      all: vi.fn().mockImplementation(() => getRows(lastTableName)),
+    })),
+    update: vi.fn().mockImplementation((table: { _?: { name?: string } }) => {
+      const tableName = table?._?.name ?? null;
+      return {
+        set: vi.fn().mockImplementation((values: Record<string, unknown>) => ({
+          where: vi.fn().mockImplementation(() => ({
+            run: vi.fn().mockImplementation(() => {
+              state.updateTables.push(tableName ?? "unknown");
+              const row = getRows(tableName)[0];
+              if (row) {
+                Object.assign(row, values);
+              }
+            }),
+          })),
+        })),
+      };
+    }),
+    insert: vi.fn().mockImplementation((table: { _?: { name?: string } }) => {
+      const tableName = table?._?.name ?? null;
+      return {
+        values: vi.fn().mockImplementation((values: Record<string, unknown> | Record<string, unknown>[]) => ({
+          run: vi.fn().mockImplementation(() => {
+            const rows = Array.isArray(values) ? values : [values];
+            const destination = getRows(tableName);
+            for (const row of rows) {
+              const inserted = { ...row };
+              destination.push(inserted);
+              if (tableName === "items") {
+                state.insertedItems.push(inserted as MutableInventoryItem);
+              }
+            }
+          }),
+          onConflictDoUpdate: vi.fn().mockReturnValue({ run: vi.fn() }),
+        })),
+      };
+    }),
+  };
+
+  return { db, state };
 }
 
 // -- Tests --------------------------------------------------------------------
@@ -797,6 +892,194 @@ describe("executeToolCall", () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("not found");
+    });
+
+    it("defaults character-target pickup to carried on the authoritative item row", async () => {
+      const { db, state } = createMutableInventoryDb({
+        players: [{ id: "player-1", name: "Hero", hp: 5 }],
+        items: [{
+          id: "item-1",
+          campaignId: CAMPAIGN_ID,
+          name: "Iron Sword",
+          tags: '["weapon"]',
+          ownerId: null,
+          locationId: "loc-1",
+          equipState: "carried",
+          equippedSlot: null,
+          isSignature: false,
+        }],
+      });
+      (getDb as Mock).mockReturnValue(db);
+
+      const result = await executeToolCall(CAMPAIGN_ID, "transfer_item", {
+        itemName: "Iron Sword",
+        targetName: "Hero",
+        targetType: "character",
+      }, TICK);
+
+      expect(result.success).toBe(true);
+      expect(state.items[0]).toMatchObject({
+        ownerId: "player-1",
+        locationId: null,
+        equipState: "carried",
+        equippedSlot: null,
+      });
+      expect(
+        buildAuthoritativeInventoryView(
+          state.items.filter((item) => item.ownerId === "player-1"),
+        ).carried.map((item) => item.name),
+      ).toEqual(["Iron Sword"]);
+      expect(state.updateTables).toEqual(["items"]);
+    });
+
+    it("equips an item by mutating the same authoritative row instead of a legacy projection", async () => {
+      const { db, state } = createMutableInventoryDb({
+        players: [{ id: "player-1", name: "Hero", hp: 5 }],
+        items: [{
+          id: "item-1",
+          campaignId: CAMPAIGN_ID,
+          name: "Iron Sword",
+          tags: '["weapon"]',
+          ownerId: null,
+          locationId: "loc-1",
+          equipState: "carried",
+          equippedSlot: null,
+          isSignature: false,
+        }],
+      });
+      (getDb as Mock).mockReturnValue(db);
+
+      const result = await executeToolCall(CAMPAIGN_ID, "transfer_item", {
+        itemName: "Iron Sword",
+        targetName: "Hero",
+        targetType: "character",
+        equipState: "equipped",
+        equippedSlot: "main-hand",
+      }, TICK);
+
+      expect(result.success).toBe(true);
+      expect(state.items[0]).toMatchObject({
+        ownerId: "player-1",
+        locationId: null,
+        equipState: "equipped",
+        equippedSlot: "main-hand",
+      });
+      expect(
+        buildAuthoritativeInventoryView(
+          state.items.filter((item) => item.ownerId === "player-1"),
+        ).equipped.map((item) => item.name),
+      ).toEqual(["Iron Sword"]);
+      expect(state.updateTables).toEqual(["items"]);
+    });
+
+    it("drops an item to a location and clears equipped metadata on the authoritative row", async () => {
+      const { db, state } = createMutableInventoryDb({
+        players: [{ id: "player-1", name: "Hero", hp: 5 }],
+        locations: [{ id: "loc-1", name: "Town Square", tags: "[]" }],
+        items: [{
+          id: "item-1",
+          campaignId: CAMPAIGN_ID,
+          name: "Iron Sword",
+          tags: '["weapon"]',
+          ownerId: "player-1",
+          locationId: null,
+          equipState: "equipped",
+          equippedSlot: "main-hand",
+          isSignature: false,
+        }],
+      });
+      (getDb as Mock).mockReturnValue(db);
+
+      const result = await executeToolCall(CAMPAIGN_ID, "transfer_item", {
+        itemName: "Iron Sword",
+        targetName: "Town Square",
+        targetType: "location",
+      }, TICK);
+
+      expect(result.success).toBe(true);
+      expect(state.items[0]).toMatchObject({
+        ownerId: null,
+        locationId: "loc-1",
+        equipState: "carried",
+        equippedSlot: null,
+      });
+      expect(
+        buildAuthoritativeInventoryView(
+          state.items.filter((item) => item.ownerId === "player-1"),
+        ).items,
+      ).toHaveLength(0);
+      expect(state.updateTables).toEqual(["items"]);
+    });
+
+    it("unequips a same-owner item back to carried state when equip intent is omitted", async () => {
+      const { db, state } = createMutableInventoryDb({
+        players: [{ id: "player-1", name: "Hero", hp: 5 }],
+        items: [{
+          id: "item-1",
+          campaignId: CAMPAIGN_ID,
+          name: "Iron Sword",
+          tags: '["weapon"]',
+          ownerId: "player-1",
+          locationId: null,
+          equipState: "equipped",
+          equippedSlot: "main-hand",
+          isSignature: false,
+        }],
+      });
+      (getDb as Mock).mockReturnValue(db);
+
+      const result = await executeToolCall(CAMPAIGN_ID, "transfer_item", {
+        itemName: "Iron Sword",
+        targetName: "Hero",
+        targetType: "character",
+      }, TICK);
+
+      expect(result.success).toBe(true);
+      expect(state.items[0]).toMatchObject({
+        ownerId: "player-1",
+        locationId: null,
+        equipState: "carried",
+        equippedSlot: null,
+      });
+      expect(
+        buildAuthoritativeInventoryView(
+          state.items.filter((item) => item.ownerId === "player-1"),
+        ).carried.map((item) => item.name),
+      ).toEqual(["Iron Sword"]);
+      expect(state.updateTables).toEqual(["items"]);
+    });
+  });
+
+  describe("spawn_item authoritative defaults", () => {
+    it("creates character-owned items with explicit carried, unequipped, non-signature metadata", async () => {
+      const { db, state } = createMutableInventoryDb({
+        players: [{ id: "player-1", name: "Hero", hp: 5 }],
+      });
+      (getDb as Mock).mockReturnValue(db);
+
+      const result = await executeToolCall(CAMPAIGN_ID, "spawn_item", {
+        name: "Lantern",
+        tags: ["utility"],
+        ownerName: "Hero",
+        ownerType: "character",
+      }, TICK);
+
+      expect(result.success).toBe(true);
+      expect(state.insertedItems).toContainEqual(
+        expect.objectContaining({
+          name: "Lantern",
+          ownerId: "player-1",
+          locationId: undefined,
+          equipState: "carried",
+          equippedSlot: null,
+          isSignature: false,
+        }),
+      );
+      expect(
+        buildAuthoritativeInventoryView(
+          state.items.filter((item) => item.ownerId === "player-1"),
+        ).carried.map((item) => item.name),
+      ).toEqual(["Lantern"]);
     });
   });
 
