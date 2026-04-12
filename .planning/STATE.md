@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
 status: executing
-stopped_at: Completed 47-03-SUMMARY.md; live GLM quality smoke deferred to milestone closeout
-last_updated: "2026-04-12T14:20:00.000Z"
+stopped_at: Captured Phase 48 context and discussion decisions; ready to plan character identity fidelity work
+last_updated: "2026-04-12T15:25:00.000Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 14
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-04-12)
 ## Current Position
 
 Phase: 48 (character-identity-fidelity-and-canonical-modeling) — READY
-Plan: discuss / plan
-Status: Phase 47 automated execution complete; manual prose smoke deferred to milestone closeout
+Plan: planning
+Status: Phase 48 discuss complete; planning is the next step
 Last activity: 2026-04-12
 
 Progress: [██████████] 100%
@@ -46,7 +46,7 @@ Progress: [██████████] 100%
 - Planned or in-progress phases: 4
 - Total plans tracked: 31
 - Completed plans: 31
-- Pending plans: phases `47-50` still await plan breakdown
+- Pending plans: phases `48-50` still await plan breakdown
 
 **Recent Execution:**
 
@@ -178,6 +178,10 @@ Recent decisions affecting current work:
 - [Phase 47]: Keep hidden-tool-driving and final-visible passes sharing one preset source to avoid divergent doctrine.
 - [Phase 47]: Use deterministic runtime signals for storyteller scene mode instead of fuzzy heuristics.
 - [Phase 47]: Keep one bounded GLM overlay per passage by extending existing storyteller contracts; no rewrite stage.
+- [Phase 48]: Character modeling must preserve a real identity core instead of collapsing into short summaries, tags, and generic goals.
+- [Phase 48]: Key/canonical characters use a stricter fidelity path, but not a rigid role-lock; preserve internal logic while allowing earned change over time.
+- [Phase 48]: Canonical truth uses three layers: base facts, behavioral core, and live campaign dynamics.
+- [Phase 48]: Canonical facts come from canon-facing sources; community cards are secondary cues for feel and voice, and WorldForge owns the final structured synthesis.
 
 ### Pending Todos
 
@@ -190,6 +194,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-12T14:20:00.000Z
-Stopped at: Completed 47-03-SUMMARY.md; manual GLM smoke moved to closeout checklist
+Last session: 2026-04-12T15:25:00.000Z
+Stopped at: Captured Phase 48 context and discussion decisions; ready to plan character identity fidelity work
 Resume file: None
