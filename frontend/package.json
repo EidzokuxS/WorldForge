@@ -6,7 +6,8 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "npm --prefix ../shared run build && tsc --noEmit -p tsconfig.typecheck.json"
   },
   "dependencies": {
     "@worldforge/shared": "*",

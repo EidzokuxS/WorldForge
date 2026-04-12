@@ -402,19 +402,39 @@ function parseWorldCurrentScene(value: unknown): WorldCurrentScene | null {
   };
 }
 
-function normalizeCharacterResult(raw: CharacterResult | ({ role: "player"; draft?: CharacterDraft; character?: ParsedCharacter } | { role: "key"; draft?: CharacterDraft; npc?: ScaffoldNpc })) : CharacterResult {
+function normalizeCharacterResult(
+  raw: CharacterResult | ({
+    role: "player";
+    draft?: CharacterDraft;
+    character?: ParsedCharacter;
+    characterRecord?: CharacterRecord | null;
+  } | {
+    role: "key";
+    draft?: CharacterDraft;
+    npc?: ScaffoldNpc;
+    characterRecord?: CharacterRecord | null;
+  }),
+): CharacterResult {
   if (raw.role === "player") {
-    const draft = raw.draft ?? raw.character?.draft ?? parsedCharacterToDraft(raw.character as ParsedCharacter);
+    const draft = raw.draft
+      ?? (raw.characterRecord ? characterRecordToDraft(raw.characterRecord) : null)
+      ?? raw.character?.draft
+      ?? parsedCharacterToDraft(raw.character as ParsedCharacter);
     return {
       role: "player",
+      characterRecord: raw.characterRecord ?? null,
       draft,
       character: raw.character ?? characterDraftToParsedCharacter(draft),
     };
   }
 
-  const draft = raw.draft ?? raw.npc?.draft ?? scaffoldNpcToDraft(raw.npc as ScaffoldNpc);
+  const draft = raw.draft
+    ?? (raw.characterRecord ? characterRecordToDraft(raw.characterRecord) : null)
+    ?? raw.npc?.draft
+    ?? scaffoldNpcToDraft(raw.npc as ScaffoldNpc);
   return {
     role: "key",
+    characterRecord: raw.characterRecord ?? null,
     draft,
     npc: raw.npc ?? characterDraftToScaffoldNpc(draft),
   };

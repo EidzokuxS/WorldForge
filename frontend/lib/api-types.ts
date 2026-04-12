@@ -267,9 +267,14 @@ export interface ParsedCharacter {
   draft?: CharacterDraft;
 }
 
+type CharacterResultEnvelope = {
+  draft: CharacterDraft;
+  characterRecord?: CharacterRecord | null;
+};
+
 export type CharacterResult =
-  | { role: "player"; draft: CharacterDraft; character: ParsedCharacter }
-  | { role: "key"; draft: CharacterDraft; npc: ScaffoldNpc };
+  | ({ role: "player"; character: ParsedCharacter } & CharacterResultEnvelope)
+  | ({ role: "key"; npc: ScaffoldNpc } & CharacterResultEnvelope);
 
 export type PersonaTemplateRecord = PersonaTemplate;
 export type PersonaTemplateListResult = {
@@ -277,8 +282,14 @@ export type PersonaTemplateListResult = {
 };
 
 export type ApplyPersonaTemplateResult =
-  | { draft: CharacterDraft; character: ParsedCharacter; personaTemplate: PersonaTemplateSummary }
-  | { draft: CharacterDraft; npc: ScaffoldNpc; personaTemplate: PersonaTemplateSummary };
+  | ({
+      character: ParsedCharacter;
+      personaTemplate: PersonaTemplateSummary;
+    } & CharacterResultEnvelope)
+  | ({
+      npc: ScaffoldNpc;
+      personaTemplate: PersonaTemplateSummary;
+    } & CharacterResultEnvelope);
 
 export type ResolveStartConditionsResult = ResolvedStartConditions;
 export type LoadoutPreviewResult = CanonicalLoadoutPreview;

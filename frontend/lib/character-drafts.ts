@@ -35,19 +35,208 @@ function mergeDefined<T extends object>(base: T, patch?: Partial<T>): T {
   };
 }
 
+function firstNonEmpty(...values: Array<string | null | undefined>): string {
+  for (const value of values) {
+    if (typeof value !== "string") {
+      continue;
+    }
+
+    const normalized = value.trim();
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return "";
+}
+
+function firstNonEmptyList(...lists: Array<readonly string[] | null | undefined>): string[] {
+  for (const list of lists) {
+    if (!list) {
+      continue;
+    }
+
+    const normalized = dedupeStrings([...list]);
+    if (normalized.length > 0) {
+      return normalized;
+    }
+  }
+
+  return [];
+}
+
+function normalizeSourceBundle(
+  sourceBundle: CharacterDraft["sourceBundle"],
+): CharacterDraft["sourceBundle"] {
+  if (!sourceBundle) {
+    return undefined;
+  }
+
+  return {
+    canonSources: sourceBundle.canonSources.map((citation) => ({
+      ...citation,
+      label: citation.label.trim(),
+      excerpt: citation.excerpt.trim(),
+    })),
+    secondarySources: sourceBundle.secondarySources.map((citation) => ({
+      ...citation,
+      label: citation.label.trim(),
+      excerpt: citation.excerpt.trim(),
+    })),
+    synthesis: {
+      ...sourceBundle.synthesis,
+      owner: sourceBundle.synthesis.owner.trim(),
+      strategy: sourceBundle.synthesis.strategy.trim(),
+      notes: dedupeStrings(sourceBundle.synthesis.notes),
+    },
+  };
+}
+
+function normalizeContinuity(
+  continuity: CharacterDraft["continuity"],
+): CharacterDraft["continuity"] {
+  if (!continuity) {
+    return undefined;
+  }
+
+  return {
+    identityInertia: continuity.identityInertia,
+    protectedCore: dedupeStrings(continuity.protectedCore),
+    mutableSurface: dedupeStrings(continuity.mutableSurface),
+    changePressureNotes: dedupeStrings(continuity.changePressureNotes),
+  };
+}
+
+function normalizeCharacterDraft(draft: CharacterDraft): CharacterDraft {
+  const baseFacts = {
+    biography: firstNonEmpty(
+      draft.identity.baseFacts?.biography,
+      draft.profile.backgroundSummary,
+    ),
+    socialRole: dedupeStrings([
+      ...(draft.identity.baseFacts?.socialRole ?? []),
+      draft.identity.role,
+      draft.socialContext.factionName ?? "",
+    ]),
+    hardConstraints: dedupeStrings(draft.identity.baseFacts?.hardConstraints ?? []),
+  };
+  const behavioralCore = {
+    motives: firstNonEmptyList(
+      draft.identity.behavioralCore?.motives,
+      draft.motivations.drives,
+    ),
+    pressureResponses: firstNonEmptyList(
+      draft.identity.behavioralCore?.pressureResponses,
+      draft.motivations.frictions,
+    ),
+    taboos: dedupeStrings(draft.identity.behavioralCore?.taboos ?? []),
+    attachments: firstNonEmptyList(
+      draft.identity.behavioralCore?.attachments,
+      draft.socialContext.relationshipRefs.map((ref) => ref.entityName),
+    ),
+    selfImage: firstNonEmpty(
+      draft.identity.behavioralCore?.selfImage,
+      draft.profile.personaSummary,
+      draft.profile.backgroundSummary,
+    ),
+  };
+  const liveDynamics = {
+    activeGoals: firstNonEmptyList(
+      draft.identity.liveDynamics?.activeGoals,
+      [...draft.motivations.shortTermGoals, ...draft.motivations.longTermGoals],
+    ),
+    beliefDrift: firstNonEmptyList(
+      draft.identity.liveDynamics?.beliefDrift,
+      draft.motivations.beliefs,
+    ),
+    currentStrains: firstNonEmptyList(
+      draft.identity.liveDynamics?.currentStrains,
+      draft.motivations.frictions,
+    ),
+    earnedChanges: dedupeStrings(draft.identity.liveDynamics?.earnedChanges ?? []),
+  };
+
+  return {
+    ...draft,
+    identity: {
+      ...draft.identity,
+      baseFacts,
+      behavioralCore,
+      liveDynamics,
+    },
+    profile: {
+      ...draft.profile,
+      backgroundSummary: firstNonEmpty(
+        draft.profile.backgroundSummary,
+        baseFacts.biography,
+      ),
+      personaSummary: firstNonEmpty(
+        draft.profile.personaSummary,
+        behavioralCore.selfImage,
+        baseFacts.biography,
+      ),
+    },
+    socialContext: {
+      ...draft.socialContext,
+      socialStatus: dedupeStrings(draft.socialContext.socialStatus),
+    },
+    motivations: {
+      ...draft.motivations,
+      shortTermGoals: firstNonEmptyList(
+        draft.motivations.shortTermGoals,
+        liveDynamics.activeGoals,
+      ),
+      longTermGoals: dedupeStrings(draft.motivations.longTermGoals),
+      beliefs: firstNonEmptyList(
+        draft.motivations.beliefs,
+        liveDynamics.beliefDrift,
+      ),
+      drives: firstNonEmptyList(
+        draft.motivations.drives,
+        behavioralCore.motives,
+      ),
+      frictions: firstNonEmptyList(
+        draft.motivations.frictions,
+        liveDynamics.currentStrains,
+      ),
+    },
+    capabilities: {
+      ...draft.capabilities,
+      traits: dedupeStrings(draft.capabilities.traits),
+      flaws: dedupeStrings(draft.capabilities.flaws),
+      specialties: dedupeStrings(draft.capabilities.specialties),
+    },
+    state: {
+      ...draft.state,
+      conditions: dedupeStrings(draft.state.conditions),
+      statusFlags: dedupeStrings(draft.state.statusFlags),
+    },
+    loadout: {
+      ...draft.loadout,
+      inventorySeed: dedupeStrings(draft.loadout.inventorySeed),
+      equippedItemRefs: dedupeStrings(draft.loadout.equippedItemRefs),
+      signatureItems: dedupeStrings(draft.loadout.signatureItems),
+    },
+    sourceBundle: normalizeSourceBundle(draft.sourceBundle),
+    continuity: normalizeContinuity(draft.continuity),
+  };
+}
+
 function buildDerivedTagsFromDraft(draft: CharacterDraft): string[] {
+  const normalizedDraft = normalizeCharacterDraft(draft);
+
   return dedupeStrings([
-    ...draft.capabilities.traits,
-    ...draft.capabilities.skills.map((skill) =>
+    ...normalizedDraft.capabilities.traits,
+    ...normalizedDraft.capabilities.skills.map((skill) =>
       skill.tier ? `${skill.tier} ${skill.name}` : skill.name
     ),
-    ...draft.capabilities.flaws,
-    ...(draft.capabilities.wealthTier ? [draft.capabilities.wealthTier] : []),
-    ...draft.state.conditions,
-    ...draft.state.statusFlags,
-    ...draft.socialContext.socialStatus,
-    ...draft.motivations.drives,
-    ...draft.motivations.frictions,
+    ...normalizedDraft.capabilities.flaws,
+    ...(normalizedDraft.capabilities.wealthTier ? [normalizedDraft.capabilities.wealthTier] : []),
+    ...normalizedDraft.state.conditions,
+    ...normalizedDraft.state.statusFlags,
+    ...normalizedDraft.socialContext.socialStatus,
+    ...normalizedDraft.motivations.drives,
+    ...normalizedDraft.motivations.frictions,
   ]);
 }
 
@@ -92,42 +281,46 @@ export function characterRecordToDraft(record: CharacterRecord): CharacterDraft 
   const { id, campaignId, ...identity } = record.identity;
   void id;
   void campaignId;
-  return {
+  return normalizeCharacterDraft({
     ...record,
     identity,
-  };
+  });
 }
 
 export function characterDraftToParsedCharacter(
   draft: CharacterDraft,
 ): ParsedCharacter {
+  const normalizedDraft = normalizeCharacterDraft(draft);
+
   return {
-    name: draft.identity.displayName,
-    race: draft.profile.species,
-    gender: draft.profile.gender,
-    age: draft.profile.ageText,
-    appearance: draft.profile.appearance,
-    tags: buildDerivedTagsFromDraft(draft),
-    hp: draft.state.hp,
-    equippedItems: [...draft.loadout.equippedItemRefs],
-    locationName: draft.socialContext.currentLocationName ?? "",
-    draft,
+    name: normalizedDraft.identity.displayName,
+    race: normalizedDraft.profile.species,
+    gender: normalizedDraft.profile.gender,
+    age: normalizedDraft.profile.ageText,
+    appearance: normalizedDraft.profile.appearance,
+    tags: buildDerivedTagsFromDraft(normalizedDraft),
+    hp: normalizedDraft.state.hp,
+    equippedItems: [...normalizedDraft.loadout.equippedItemRefs],
+    locationName: normalizedDraft.socialContext.currentLocationName ?? "",
+    draft: normalizedDraft,
   };
 }
 
 export function characterDraftToScaffoldNpc(draft: CharacterDraft): ScaffoldNpc {
+  const normalizedDraft = normalizeCharacterDraft(draft);
+
   return {
-    name: draft.identity.displayName,
-    persona: draft.profile.personaSummary,
-    tags: buildDerivedTagsFromDraft(draft),
+    name: normalizedDraft.identity.displayName,
+    persona: normalizedDraft.profile.personaSummary,
+    tags: buildDerivedTagsFromDraft(normalizedDraft),
     goals: {
-      shortTerm: [...draft.motivations.shortTermGoals],
-      longTerm: [...draft.motivations.longTermGoals],
+      shortTerm: [...normalizedDraft.motivations.shortTermGoals],
+      longTerm: [...normalizedDraft.motivations.longTermGoals],
     },
-    locationName: draft.socialContext.currentLocationName ?? "",
-    factionName: draft.socialContext.factionName,
-    tier: mapDraftTierToScaffoldTier(draft.identity.tier),
-    draft,
+    locationName: normalizedDraft.socialContext.currentLocationName ?? "",
+    factionName: normalizedDraft.socialContext.factionName,
+    tier: mapDraftTierToScaffoldTier(normalizedDraft.identity.tier),
+    draft: normalizedDraft,
   };
 }
 
@@ -161,6 +354,24 @@ export function parsedCharacterToDraft(character: ParsedCharacter): CharacterDra
       tier: "key" as const,
       displayName: character.name,
       canonicalStatus: "original" as const,
+      baseFacts: {
+        biography: "",
+        socialRole: ["player"],
+        hardConstraints: [],
+      },
+      behavioralCore: {
+        motives: [],
+        pressureResponses: [],
+        taboos: [],
+        attachments: [],
+        selfImage: "",
+      },
+      liveDynamics: {
+        activeGoals: [],
+        beliefDrift: [],
+        currentStrains: [],
+        earnedChanges: [],
+      },
     },
     profile: {
       species: character.race,
@@ -218,7 +429,7 @@ export function parsedCharacterToDraft(character: ParsedCharacter): CharacterDra
     },
   };
 
-  return {
+  return normalizeCharacterDraft({
     ...base,
     identity: {
       ...base.identity,
@@ -257,7 +468,7 @@ export function parsedCharacterToDraft(character: ParsedCharacter): CharacterDra
       ...base.provenance,
       legacyTags: [...character.tags],
     },
-  };
+  });
 }
 
 export function scaffoldNpcToDraft(npc: ScaffoldNpc): CharacterDraft {
@@ -268,6 +479,26 @@ export function scaffoldNpcToDraft(npc: ScaffoldNpc): CharacterDraft {
       tier: mapScaffoldTierToDraftTier(tier),
       displayName: npc.name,
       canonicalStatus: "original" as const,
+      baseFacts: {
+        biography: "",
+        socialRole: ["npc", ...(npc.factionName ? [npc.factionName] : [])],
+        hardConstraints: [],
+      },
+      behavioralCore: {
+        motives: [],
+        pressureResponses: [],
+        taboos: [],
+        attachments: [],
+        selfImage: npc.persona,
+      },
+      liveDynamics: {
+        activeGoals: [
+          ...dedupeStrings([...npc.goals.shortTerm, ...npc.goals.longTerm]),
+        ],
+        beliefDrift: [],
+        currentStrains: [],
+        earnedChanges: [],
+      },
     },
     profile: {
       species: "",
@@ -325,7 +556,7 @@ export function scaffoldNpcToDraft(npc: ScaffoldNpc): CharacterDraft {
     },
   };
 
-  return syncScaffoldTierToDraft({
+  return syncScaffoldTierToDraft(normalizeCharacterDraft({
     ...base,
     identity: {
       ...base.identity,
@@ -350,14 +581,14 @@ export function scaffoldNpcToDraft(npc: ScaffoldNpc): CharacterDraft {
       ...base.provenance,
       legacyTags: [...npc.tags],
     },
-  }, tier);
+  }), tier);
 }
 
 export function createEmptyNpcDraft(
   locationName: string,
   tier: ScaffoldNpc["tier"],
 ): CharacterDraft {
-  return {
+  return normalizeCharacterDraft({
     identity: {
       role: "npc",
       tier: mapScaffoldTierToDraftTier(tier),
@@ -418,5 +649,5 @@ export function createEmptyNpcDraft(
       worldgenOrigin: null,
       legacyTags: [],
     },
-  };
+  });
 }

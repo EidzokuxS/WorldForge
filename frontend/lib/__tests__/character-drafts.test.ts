@@ -82,6 +82,8 @@ function makeNpcDraft(
       legacyTags: [],
       ...overrides?.provenance,
     },
+    sourceBundle: overrides?.sourceBundle,
+    continuity: overrides?.continuity,
   };
 }
 
