@@ -476,12 +476,19 @@ describe("tickPresentNpcs", () => {
         createMockNpc({
           name: "Satoru Gojo",
           currentLocationId: LOCATION_ID,
+          currentSceneLocationId: "rooftop-overwatch",
           derivedTags: '["encounter scope mismatch","same broad location"]',
         }),
       ],
     });
 
-    const results = await tickPresentNpcs(CAMPAIGN_ID, TICK, JUDGE_PROVIDER, LOCATION_ID);
+    const results = await tickPresentNpcs(
+      CAMPAIGN_ID,
+      TICK,
+      JUDGE_PROVIDER,
+      LOCATION_ID,
+      "platform-7",
+    );
 
     expect(results).toEqual([]);
   });
@@ -502,7 +509,12 @@ describe("tickNpcAgent", () => {
         beliefs: '["legacy belief"]',
       }),
       npcsAtLocation: [],
-      player: { name: "Elara" },
+      player: {
+        id: "player-1",
+        name: "Elara",
+        currentLocationId: LOCATION_ID,
+        currentSceneLocationId: LOCATION_ID,
+      },
     });
 
     await tickNpcAgent(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
@@ -616,7 +628,12 @@ describe("tickNpcAgent", () => {
         }),
       }),
       npcsAtLocation: [],
-      player: { name: "Elara" },
+      player: {
+        id: "player-1",
+        name: "Elara",
+        currentLocationId: LOCATION_ID,
+        currentSceneLocationId: LOCATION_ID,
+      },
     });
 
     await tickNpcAgent(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
@@ -637,15 +654,26 @@ describe("tickNpcAgent", () => {
     setupMockDb({
       npcsAtLocation: [
         {
+          id: "npc-megumi",
           name: "Megumi Fushiguro",
           tags: '["ally","encounter scope","knowledge basis: perceived_now"]',
+          currentLocationId: LOCATION_ID,
+          currentSceneLocationId: LOCATION_ID,
         },
         {
+          id: "npc-gojo",
           name: "Satoru Gojo",
           tags: '["same broad location","outside encounter scope","knowledge basis: none"]',
+          currentLocationId: LOCATION_ID,
+          currentSceneLocationId: "rooftop-overwatch",
         },
       ],
-      player: { name: "Yuji Itadori" },
+      player: {
+        id: "player-1",
+        name: "Yuji Itadori",
+        currentLocationId: LOCATION_ID,
+        currentSceneLocationId: LOCATION_ID,
+      },
     });
 
     await tickNpcAgent(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
@@ -653,6 +681,7 @@ describe("tickNpcAgent", () => {
     const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
     expect(systemPrompt).toContain("Nearby entities:");
     expect(systemPrompt).toContain("Megumi Fushiguro");
+    expect(systemPrompt).toContain("knowledge=perceived_now");
     expect(systemPrompt).not.toContain("Satoru Gojo");
   });
 });

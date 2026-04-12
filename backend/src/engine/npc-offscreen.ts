@@ -21,6 +21,7 @@ import {
   toLegacyNpcDraft,
 } from "../character/record-adapters.js";
 import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
+import { resolveStoredSceneScopeId } from "./scene-presence.js";
 
 const log = createLogger("npc-offscreen");
 
@@ -291,6 +292,7 @@ export async function simulateOffscreenNpcs(
   tick: number,
   judgeProvider: ProviderConfig,
   playerLocationId: string,
+  playerSceneScopeId?: string,
   interval = 5,
 ): Promise<AppliedOffscreenUpdate[]> {
   // -- Check tick interval --
@@ -300,7 +302,12 @@ export async function simulateOffscreenNpcs(
 
   const db = getDb();
 
-  // -- Query off-screen Key NPCs --
+  const resolvedPlayerSceneScopeId = resolveStoredSceneScopeId(
+    playerLocationId,
+    playerSceneScopeId,
+  );
+
+  // -- Query key NPCs, then drop the current encounter scope instead of the full broad location --
   const offscreenKeyNpcs = db
     .select({
       id: npcs.id,
@@ -324,16 +331,29 @@ export async function simulateOffscreenNpcs(
       and(
         eq(npcs.campaignId, campaignId),
         eq(npcs.tier, "key"),
-        sql`${npcs.currentLocationId} != ${playerLocationId}`
       )
     )
-    .all();
+    .all()
+    .filter((npc) => {
+      if (npc.currentLocationId !== playerLocationId) {
+        return true;
+      }
+
+      const npcSceneScopeId = resolveStoredSceneScopeId(
+        npc.currentLocationId,
+        npc.currentSceneLocationId ?? null,
+      );
+
+      return npcSceneScopeId !== resolvedPlayerSceneScopeId;
+    });
 
   if (offscreenKeyNpcs.length === 0) {
     return [];
   }
 
-  log.info(`Simulating ${offscreenKeyNpcs.length} off-screen Key NPC(s) at tick ${tick}`);
+  log.info(
+    `Simulating ${offscreenKeyNpcs.length} off-screen Key NPC(s) outside scene scope ${resolvedPlayerSceneScopeId ?? playerLocationId} at tick ${tick}`,
+  );
 
   // -- Build NPC summaries for batch prompt --
   const npcSummaries = offscreenKeyNpcs.map((npc) => {
@@ -368,6 +388,9 @@ export async function simulateOffscreenNpcs(
     "Each NPC update MUST describe something SPECIFIC they did — name locations, actions, and consequences. Do NOT use vague summaries like 'continued pursuing goals' or 'maintained their position'. Example good update: 'Traveled to the Sporeworks to negotiate a spore trade deal with the fungal workers.' Example bad update: 'Continued working toward their goals.'",
     "Return a structured update for each NPC.",
     "",
+    `Player broad location: ${playerLocationId}`,
+    `Player scene scope: ${resolvedPlayerSceneScopeId ?? playerLocationId}`,
+    "Same broad-location actors outside the player's immediate scene still count as off-screen here.",
     "NPCs:",
     ...npcSummaries,
   ].join("\n");

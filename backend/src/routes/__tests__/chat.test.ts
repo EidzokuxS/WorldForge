@@ -173,7 +173,11 @@ function setupStoryteller() {
   } as any);
 }
 
-function setupDbMock(player: { hp: number; currentLocationId?: string | null } | null = { hp: 5, currentLocationId: "loc-001" }) {
+function setupDbMock(
+  player:
+    | { hp: number; currentLocationId?: string | null; currentSceneLocationId?: string | null }
+    | null = { hp: 5, currentLocationId: "loc-001", currentSceneLocationId: "loc-001" },
+) {
   const query = {
     from: vi.fn(),
     where: vi.fn(),
@@ -589,6 +593,7 @@ describe("Campaign-loaded gameplay transport", () => {
       CAMPAIGN_ID,
       2,
       expect.any(Object),
+      "shibuya-district",
       "platform-7",
       undefined,
     );

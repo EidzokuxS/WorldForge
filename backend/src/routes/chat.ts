@@ -94,7 +94,10 @@ async function runRollbackCriticalPostTurn(
   const { eq } = await import("drizzle-orm");
 
   const player = db
-    .select({ currentLocationId: players.currentLocationId })
+    .select({
+      currentLocationId: players.currentLocationId,
+      currentSceneLocationId: players.currentSceneLocationId,
+    })
     .from(players)
     .where(eq(players.campaignId, campaignId))
     .get();
@@ -105,6 +108,7 @@ async function runRollbackCriticalPostTurn(
       summary.tick,
       judgeProvider,
       player.currentLocationId,
+      player.currentSceneLocationId ?? undefined,
     );
   }
 
@@ -136,6 +140,7 @@ async function runLocalPresentSceneSettlement(
     campaignId,
     summary.predictedTick,
     judgeProvider,
+    summary.currentLocationId ?? sceneScopeId,
     sceneScopeId,
     embedderProvider,
   );

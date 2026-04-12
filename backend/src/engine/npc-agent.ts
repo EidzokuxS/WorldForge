@@ -8,7 +8,7 @@
  */
 
 import { generateText, stepCountIs } from "ai";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { npcs, locations, players } from "../db/schema.js";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
@@ -21,6 +21,13 @@ import { parseTags } from "./parse-helpers.js";
 import { hydrateStoredNpcRecord } from "../character/record-adapters.js";
 import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
 import { DERIVED_RUNTIME_TAGS_RULE } from "../character/prompt-contract.js";
+import {
+  getObserverAwareness,
+  getObserverKnowledgeBasis,
+  inferPresenceVisibility,
+  resolveScenePresence,
+  resolveStoredSceneScopeId,
+} from "./scene-presence.js";
 
 const log = createLogger("npc-agent");
 
@@ -62,16 +69,20 @@ export async function tickNpcAgent(
   const npcRecord = hydrateStoredNpcRecord(npc);
   const npcTags = deriveRuntimeCharacterTags(npcRecord);
   const beliefs = npcRecord.motivations.beliefs;
+  const npcSceneScopeId = resolveStoredSceneScopeId(
+    npc.currentLocationId,
+    npc.currentSceneLocationId ?? null,
+  );
 
   // 2. Load NPC's current location
   let locationName = "Unknown location";
   let locationDesc = "";
 
-  if (npc.currentLocationId) {
+  if (npcSceneScopeId) {
     const loc = db
       .select()
       .from(locations)
-      .where(eq(locations.id, npc.currentLocationId))
+      .where(eq(locations.id, npcSceneScopeId))
       .get();
 
     if (loc) {
@@ -83,21 +94,32 @@ export async function tickNpcAgent(
   // 3. Load nearby entities
   const nearbyNpcs = npc.currentLocationId
     ? db
-        .select({ name: npcs.name, tags: npcs.tags })
+        .select({
+          id: npcs.id,
+          name: npcs.name,
+          tags: npcs.tags,
+          currentLocationId: npcs.currentLocationId,
+          currentSceneLocationId: npcs.currentSceneLocationId,
+        })
         .from(npcs)
         .where(
           and(
             eq(npcs.campaignId, campaignId),
             eq(npcs.currentLocationId, npc.currentLocationId),
-            sql`${npcs.id} != ${npcId}`
           )
         )
         .all()
     : [];
+  const nearbyOtherNpcs = nearbyNpcs.filter((nearbyNpc) => nearbyNpc.id !== npcId);
 
   const nearbyPlayers = npc.currentLocationId
     ? db
-        .select({ name: players.name })
+        .select({
+          id: players.id,
+          name: players.name,
+          currentLocationId: players.currentLocationId,
+          currentSceneLocationId: players.currentSceneLocationId,
+        })
         .from(players)
         .where(
           and(
@@ -107,11 +129,92 @@ export async function tickNpcAgent(
         )
         .all()
     : [];
+  const nearbyPlayersWithPresenceIds = nearbyPlayers.filter(
+    (
+      player,
+    ): player is typeof player & {
+      id: string;
+      currentLocationId: string;
+      currentSceneLocationId?: string | null;
+    } => typeof player.id === "string" && typeof player.currentLocationId === "string",
+  );
 
-  const nearbyEntities = [
-    ...nearbyPlayers.map((p) => p.name),
-    ...nearbyNpcs.map((n) => `${n.name} [${parseTags(n.tags).join(", ")}]`),
-  ];
+  const presenceSnapshot =
+    npc.currentLocationId && npcSceneScopeId
+      ? resolveScenePresence({
+          playerActorId: nearbyPlayersWithPresenceIds[0]?.id ?? npc.id,
+          broadLocationId: npc.currentLocationId,
+          sceneScopeId: npcSceneScopeId,
+          actors: [
+            ...nearbyPlayersWithPresenceIds.map((player) => ({
+              actorId: player.id,
+              actorType: "player" as const,
+              broadLocationId: player.currentLocationId,
+              sceneScopeId: player.currentSceneLocationId,
+              visibility: "clear" as const,
+            })),
+            {
+              actorId: npc.id,
+              actorType: "npc" as const,
+              broadLocationId: npc.currentLocationId,
+              sceneScopeId: npc.currentSceneLocationId,
+              visibility: inferPresenceVisibility(npc.tags).visibility,
+              awarenessHint: inferPresenceVisibility(npc.tags).awarenessHint,
+            },
+            ...nearbyOtherNpcs.map((nearbyNpc) => {
+              const visibility = inferPresenceVisibility(nearbyNpc.tags);
+              return {
+                actorId: nearbyNpc.id,
+                actorType: "npc" as const,
+                broadLocationId: nearbyNpc.currentLocationId,
+                sceneScopeId: nearbyNpc.currentSceneLocationId,
+                visibility: visibility.visibility,
+                awarenessHint: visibility.awarenessHint,
+              };
+            }),
+          ],
+        })
+      : null;
+
+  const nearbyEntities: string[] = [];
+  if (presenceSnapshot) {
+    for (const player of nearbyPlayersWithPresenceIds) {
+      const awareness = getObserverAwareness(presenceSnapshot, npc.id, player.id);
+      if (awareness === "clear") {
+        const knowledge = getObserverKnowledgeBasis(presenceSnapshot, npc.id, player.id);
+        nearbyEntities.push(
+          `${player.name} [awareness=${awareness}; knowledge=${knowledge}]`,
+        );
+      }
+    }
+
+    for (const nearbyNpc of nearbyOtherNpcs) {
+      const awareness = getObserverAwareness(
+        presenceSnapshot,
+        npc.id,
+        nearbyNpc.id,
+      );
+      const knowledge = getObserverKnowledgeBasis(
+        presenceSnapshot,
+        npc.id,
+        nearbyNpc.id,
+      );
+
+      if (awareness === "clear") {
+        nearbyEntities.push(
+          `${nearbyNpc.name} [${parseTags(nearbyNpc.tags).join(", ")}; awareness=${awareness}; knowledge=${knowledge}]`,
+        );
+        continue;
+      }
+
+      if (awareness === "hint") {
+        const visibility = inferPresenceVisibility(nearbyNpc.tags);
+        nearbyEntities.push(
+          `Unidentified nearby presence [awareness=hint; knowledge=${knowledge}; signal=${visibility.awarenessHint ?? "Something is nearby."}]`,
+        );
+      }
+    }
+  }
 
   // 4. Search episodic events involving this NPC (best-effort)
   let recentMemories: string[] = [];
@@ -153,6 +256,7 @@ export async function tickNpcAgent(
     `Your beliefs: [${beliefs.join(", ")}]`,
     ``,
     `Current scene: ${locationName} — ${locationDesc}`,
+    `Nearby entities follow encounter scope plus justified knowledge only: clear=full context, hint=indirect cue, none=omit.`,
     nearbyEntities.length > 0
       ? `Nearby entities:\n- ${nearbyEntities.join("\n- ")}`
       : `You are alone.`,
@@ -223,13 +327,23 @@ export async function tickPresentNpcs(
   tick: number,
   judgeProvider: ProviderConfig,
   playerLocationId: string,
+  playerSceneScopeId?: string,
   embedderProvider?: ProviderConfig,
 ): Promise<NpcTickResult[]> {
   const db = getDb();
+  const resolvedSceneScopeId = resolveStoredSceneScopeId(
+    playerLocationId,
+    playerSceneScopeId,
+  );
 
-  // Query key NPCs at player's location
+  // Query key NPCs in the player's broad location, then keep only encounter-scope matches.
   const keyNpcs = db
-    .select({ id: npcs.id, name: npcs.name })
+    .select({
+      id: npcs.id,
+      name: npcs.name,
+      currentLocationId: npcs.currentLocationId,
+      currentSceneLocationId: npcs.currentSceneLocationId,
+    })
     .from(npcs)
     .where(
       and(
@@ -238,11 +352,20 @@ export async function tickPresentNpcs(
         eq(npcs.currentLocationId, playerLocationId)
       )
     )
-    .all();
+    .all()
+    .filter((npc) => {
+      const npcSceneScopeId = resolveStoredSceneScopeId(
+        npc.currentLocationId,
+        npc.currentSceneLocationId ?? null,
+      );
+      return npcSceneScopeId === resolvedSceneScopeId;
+    });
 
   if (keyNpcs.length === 0) return [];
 
-  log.info(`Ticking ${keyNpcs.length} key NPC(s) at location ${playerLocationId}`);
+  log.info(
+    `Ticking ${keyNpcs.length} key NPC(s) in scene scope ${resolvedSceneScopeId ?? playerLocationId}`,
+  );
 
   const results: NpcTickResult[] = [];
 

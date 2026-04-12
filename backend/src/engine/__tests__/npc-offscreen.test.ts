@@ -208,6 +208,7 @@ describe("simulateOffscreenNpcs", () => {
       7,
       JUDGE_PROVIDER,
       PLAYER_LOCATION_ID,
+      undefined,
       5,
     );
 
@@ -253,7 +254,24 @@ describe("simulateOffscreenNpcs", () => {
 
   it("routes same broad-location actors through off-screen handling when encounter scope says they are outside the local scene", async () => {
     setupMockDb({
-      offscreenNpcs: [],
+      offscreenNpcs: [
+        createMockNpc({
+          currentLocationId: PLAYER_LOCATION_ID,
+          currentSceneLocationId: "rooftop-overwatch",
+        }),
+      ],
+    });
+    (generateText as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      text: JSON.stringify({
+        updates: [
+          {
+            npcName: "Lord Blackwood",
+            newLocation: null,
+            actionSummary: "Watched the platform from the rooftop pocket",
+            goalProgress: null,
+          },
+        ],
+      }),
     });
 
     const results = await simulateOffscreenNpcs(
@@ -261,9 +279,13 @@ describe("simulateOffscreenNpcs", () => {
       10,
       JUDGE_PROVIDER,
       PLAYER_LOCATION_ID,
+      "platform-7",
     );
 
     expect(generateText).toHaveBeenCalledOnce();
+    const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
+    expect(systemPrompt).toContain("Player scene scope: platform-7");
+    expect(systemPrompt).toContain("Same broad-location actors outside the player's immediate scene still count as off-screen here.");
     expect(results).toHaveLength(1);
   });
 });
