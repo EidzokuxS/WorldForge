@@ -6,6 +6,11 @@ import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import type { GenerateScaffoldRequest } from "./types.js";
 import { createLogger } from "../lib/index.js";
 import { webSearch, type SearchConfig } from "../lib/web-search.js";
+import {
+  buildWorldgenResearchPlan,
+  type WorldgenResearchJob,
+  type WorldgenResearchPlan,
+} from "./retrieval-intent.js";
 
 const log = createLogger("ip-researcher");
 
@@ -180,109 +185,54 @@ const ipResearchContextSchema = z.object({
 // MCP primary path
 // ---------------------------------------------------------------------------
 
-// Schema for LLM to decide what to research next
-const researchPlanSchema = z.object({
-  queries: z.array(z.string()).min(1).describe(
-    "Search queries to look up. Each query should target a specific aspect of the franchise that needs clarification."
-  ),
-  knownFromOverview: z.array(z.string()).describe(
-    "Key facts already clear from the overview — no need to search for these."
-  ),
-});
+function formatAttemptedJobs(plan: WorldgenResearchPlan): string {
+  return plan.jobs
+    .map((job, index) => `${index + 1}. [${job.topic}] ${job.query} — ${job.purpose}`)
+    .join("\n");
+}
 
-function formatResults(query: string, results: { title: string; description: string; url: string }[]): string {
-  return `## "${query}"\n${results.map((r) => `- **${r.title}**: ${r.description} (${r.url})`).join("\n")}`;
+function formatResults(job: WorldgenResearchJob, results: { title: string; description: string; url: string }[]): string {
+  return [
+    `## ${job.topic}`,
+    `QUERY: "${job.query}"`,
+    `PURPOSE: ${job.purpose}`,
+    results.map((r) => `- **${r.title}**: ${r.description} (${r.url})`).join("\n"),
+  ].join("\n");
 }
 
 async function researchViaWebSearch(
   franchise: string,
+  premise: string,
   role: ResolvedRole,
   searchConfig: SearchConfig,
+  maxSearchSteps: number,
 ): Promise<IpResearchContext> {
+  const plan = buildWorldgenResearchPlan({
+    franchise,
+    premise,
+    maxJobs: maxSearchSteps,
+  });
   const allSearchResults: string[] = [];
 
-  // ── Phase 1: Broad overview search ──
-  log.info(`Research phase 1: broad overview for "${franchise}"`);
-  let overviewText = "";
-  try {
-    const overviewResults = await webSearch(`${franchise} world lore overview wiki`, searchConfig, 10);
-    if (overviewResults.length > 0) {
-      overviewText = formatResults(`${franchise} overview`, overviewResults);
-      allSearchResults.push(overviewText);
-      log.info(`Overview: ${overviewResults.length} results`);
-    }
-  } catch (err) {
-    log.warn("Overview search failed", err);
-  }
+  log.info(`Planned ${plan.jobs.length} focused retrieval jobs for "${franchise}"`);
 
-  // ── Phase 2: LLM reads overview, decides what to deep-dive ──
-  let deepDiveQueries: string[] = [];
-
-  if (overviewText) {
+  for (const job of plan.jobs) {
     try {
-      const { object: plan } = await generateObject({
-        model: createModel(role.provider),
-        schema: researchPlanSchema,
-        prompt: `You are researching the franchise "${franchise}" for a tabletop RPG world generator.
-
-Here is a broad overview from web search:
-
-${overviewText}
-
-Based on this, what SPECIFIC topics still need deeper research? Focus on what's essential for worldbuilding:
-- Geography, regions, notable locations
-- Races, species, creatures
-- Factions, nations, political structure
-- Power system (magic, technology, abilities)
-- Key characters and their roles
-- Major conflicts and historical events
-- Flora, fauna, environment, climate
-
-List what you already know from the overview (no need to search again) and generate targeted search queries for gaps. Each query should be specific, e.g. "${franchise} hidden villages map" not just "${franchise} locations".`,
-        temperature: 0.2,
-      });
-
-      deepDiveQueries = plan.queries;
-      if (plan.knownFromOverview.length > 0) {
-        log.info(`Already known from overview: ${plan.knownFromOverview.length} facts`);
-      }
-      log.info(`Phase 2: ${deepDiveQueries.length} deep-dive queries planned`);
-    } catch (err) {
-      log.warn("Research planning failed, using default queries", err);
-      deepDiveQueries = [
-        `${franchise} races species factions`,
-        `${franchise} power system magic abilities`,
-        `${franchise} geography locations map`,
-      ];
-    }
-  } else {
-    // Overview failed — use broad defaults
-    deepDiveQueries = [
-      `${franchise} world setting lore`,
-      `${franchise} races factions characters`,
-      `${franchise} power system geography`,
-    ];
-  }
-
-  // ── Phase 3: Execute deep-dive searches ──
-  for (const query of deepDiveQueries) {
-    try {
-      const results = await webSearch(query, searchConfig, 8);
+      const results = await webSearch(job.query, searchConfig, 8);
       if (results.length > 0) {
-        allSearchResults.push(formatResults(query, results));
-        log.info(`Deep-dive: ${results.length} results for "${query}"`);
+        allSearchResults.push(formatResults(job, results));
+        log.info(`Focused search: ${results.length} results for [${job.topic}] "${job.query}"`);
       }
     } catch (err) {
-      log.warn(`Deep-dive search failed: "${query}"`, err);
+      log.warn(`Focused search failed for [${job.topic}] "${job.query}"`, err);
     }
   }
 
   if (allSearchResults.length === 0) {
-    log.warn("All searches failed, falling back to LLM knowledge");
-    return researchViaLLM(franchise, role);
+    log.warn(`All focused searches failed for "${franchise}". Attempted jobs:\n${formatAttemptedJobs(plan)}`);
+    return researchViaLLM(franchise, role, plan);
   }
 
-  // ── Phase 4: LLM compiles everything into structured context ──
   const searchText = allSearchResults.join("\n\n");
 
   const { object } = await generateObject({
@@ -294,7 +244,7 @@ Web search results:
 
 ${searchText}
 
-Compile ALL relevant worldbuilding information into structured data. Be thorough — this will be used to generate an RPG world. Include:
+Compile ALL relevant worldbuilding information into structured data. Be thorough — this will be used to generate an RPG world. Preserve the distinctions between the focused retrieval jobs instead of collapsing them into one vague summary. Include:
 - Geography & notable locations
 - Races, species, creatures
 - Factions, nations, organizations
@@ -325,13 +275,22 @@ Every fact should be a complete, self-contained sentence.`,
 
 async function researchViaLLM(
   franchise: string,
-  role: ResolvedRole
+  role: ResolvedRole,
+  plan?: WorldgenResearchPlan,
 ): Promise<IpResearchContext> {
+  const focusedJobsBlock = plan?.jobs.length
+    ? `Focused retrieval jobs:
+${plan.jobs.map((job) => `- ${job.query} — ${job.purpose}`).join("\n")}
+
+Use these focused retrieval jobs as the structure for your answer. Do not collapse them into one blended canon blob.
+
+`
+    : "";
   const prompt = `You are an expert on tabletop RPGs and popular fiction franchises.
 
 Provide a structured lore overview for the franchise: "${franchise}"
 
-Focus on information useful for building a custom RPG world inspired by this IP:
+${focusedJobsBlock}Focus on information useful for building a custom RPG world inspired by this IP:
 - KEY FACTS: geography & locations, races & species, factions & nations, power/magic system, key characters, historical events, creatures, cultural elements (up to 30, one sentence each)
 - TONAL NOTES: atmospheric/genre descriptors for the world's feel (up to 8 phrases)`;
 
@@ -394,11 +353,19 @@ export async function researchKnownIP(
   log.info(`Detected franchise: "${franchise}" — starting research (maxSteps=${maxSearchSteps}, provider=${searchProvider})`);
 
   try {
-    return await researchViaWebSearch(franchise, role, searchConfig);
+    return await researchViaWebSearch(franchise, req.premise, role, searchConfig, maxSearchSteps);
   } catch (error) {
     log.warn("Web research failed, falling back to LLM knowledge", error);
     try {
-      return await researchViaLLM(franchise, role);
+      return await researchViaLLM(
+        franchise,
+        role,
+        buildWorldgenResearchPlan({
+          franchise,
+          premise: req.premise,
+          maxJobs: maxSearchSteps,
+        }),
+      );
     } catch (llmError) {
       log.error("Research failed entirely (web + LLM)", llmError);
       return null;
@@ -468,29 +435,54 @@ If insufficient, suggest up to 3 targeted search queries to fill the gaps.`,
       return ipContext;
     }
 
-    // Run targeted searches for missing topics
-    log.info(`Research gaps for ${step}: ${evaluation.missingTopics.join(", ")} — searching...`);
+    const plan = buildWorldgenResearchPlan({
+      franchise: ipContext.franchise,
+      premise,
+      step,
+      missingTopics: evaluation.missingTopics,
+      maxJobs: 3,
+    });
+
+    if (plan.jobs.length === 0) {
+      return ipContext;
+    }
+
+    log.info(`Research gaps for ${step}. Focused jobs:\n${formatAttemptedJobs(plan)}`);
     const newFacts: string[] = [];
 
-    for (const topic of evaluation.missingTopics) {
+    for (const job of plan.jobs) {
       try {
-        const results = await webSearch(topic, searchConfig, 5);
+        const results = await webSearch(job.query, searchConfig, 5);
         if (results.length > 0) {
-          // Extract facts from search results via LLM
           const snippets = results.map((r) => `${r.title}: ${r.description}`).join("\n");
           const { object: extracted } = await generateObject({
             model: createModel(role.provider),
             schema: z.object({
               facts: z.array(z.string()).max(5).describe("Key facts extracted from search results"),
             }),
-            prompt: `Extract key CANONICAL facts about "${ipContext.franchise}" relevant to ${step} from these search results:\n\n${snippets}\n\nRULES:\n- Only include facts from the OFFICIAL canon (manga, anime, games by the original creators).\n- EXCLUDE fan-made content, fan wikis speculation, filler episodes, non-canon movies, and fan theories.\n- Each fact must name specific canonical entities (places, characters, organizations).\n- Only include facts that are NOT already known:\n${ipContext.keyFacts.slice(0, 10).map((f) => `- ${f}`).join("\n")}`,
+            prompt: `Extract key CANONICAL facts about "${ipContext.franchise}" relevant to ${step} from these search results.
+
+RETRIEVAL JOB
+- Topic: ${job.topic}
+- Purpose: ${job.purpose}
+- Query: ${job.query}
+
+SEARCH RESULTS
+${snippets}
+
+RULES:
+- Only include facts from the OFFICIAL canon (manga, anime, games by the original creators).
+- EXCLUDE fan-made content, fan wikis speculation, filler episodes, non-canon movies, and fan theories.
+- Each fact must name specific canonical entities (places, characters, organizations).
+- Only include facts that are NOT already known:
+${ipContext.keyFacts.slice(0, 10).map((f) => `- ${f}`).join("\n")}`,
             temperature: 0.1,
             maxOutputTokens: 32000,
           });
           newFacts.push(...extracted.facts);
         }
       } catch (err) {
-        log.warn(`Sufficiency search failed for "${topic}": ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`Sufficiency search failed for "${job.query}": ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
