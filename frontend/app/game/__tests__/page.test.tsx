@@ -61,21 +61,27 @@ vi.mock("@/components/game/narrative-log", () => ({
     isStreaming,
     messages,
     onRetry,
+    premise,
     turnPhase,
   }: {
     canRetryUndo?: boolean;
     isStreaming?: boolean;
     messages?: Array<{ role: string; content: string }>;
     onRetry?: () => void;
+    premise?: string;
     turnPhase?: "idle" | "streaming" | "finalizing";
   }) => (
     <div data-testid="narrative-log">
       <div data-testid="turn-phase">
         {turnPhase ?? (isStreaming ? "streaming" : "idle")}
       </div>
-      {messages?.map((message, index) => (
-        <p key={`${message.role}-${index}`}>{message.content}</p>
-      ))}
+      {messages?.length ? (
+        messages.map((message, index) => (
+          <p key={`${message.role}-${index}`}>{message.content}</p>
+        ))
+      ) : (
+        <p>{premise || "Begin your adventure..."}</p>
+      )}
       {turnPhase === "finalizing" ? (
         <p>The world is still resolving. Retry and undo unlock when the turn is complete.</p>
       ) : null}
@@ -321,6 +327,17 @@ describe("GamePage", () => {
     expect(screen.getByTestId("action-bar")).toBeInTheDocument();
     expect(screen.getByTestId("oracle-panel")).toBeInTheDocument();
     expect(screen.getByTestId("quick-actions")).toBeInTheDocument();
+  });
+
+  it("does not render premise as opening narration and keeps a neutral opening placeholder on /game when no assistant messages exist", async () => {
+    await renderReadyGame({
+      messages: [],
+      premise: "You awake in a dungeon.",
+      hasLiveTurnSnapshot: false,
+    });
+
+    expect(screen.queryByText("You awake in a dungeon.")).not.toBeInTheDocument();
+    expect(screen.getByText("Begin your adventure...")).toBeInTheDocument();
   });
 
   it("renders toolbar with Title, Settings, and Saves buttons", async () => {

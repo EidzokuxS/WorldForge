@@ -15,9 +15,10 @@ describe("NarrativeLog", () => {
     expect(screen.getByText("Begin your adventure...")).toBeInTheDocument();
   });
 
-  it("shows premise text when provided and no messages", () => {
+  it("does not render premise as opening narration and keeps a neutral opening placeholder when no assistant messages exist", () => {
     render(<NarrativeLog {...defaultProps} premise="You awake in a dungeon." />);
-    expect(screen.getByText("You awake in a dungeon.")).toBeInTheDocument();
+    expect(screen.queryByText("You awake in a dungeon.")).not.toBeInTheDocument();
+    expect(screen.getByText("Begin your adventure...")).toBeInTheDocument();
   });
 
   it("renders user messages with > prefix", () => {
