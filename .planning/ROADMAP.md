@@ -25,7 +25,7 @@ v1.1 started as a reconciliation milestone built from the [Phase 36 handoff](/R:
 - [x] **Phase 43: Travel & Location-State Contract Resolution** - Implement or explicitly deprecate the remaining location/time gameplay promises. (completed 2026-04-11)
 - [x] **Phase 44: Gameplay Docs Baseline Alignment** - Rewrite gameplay docs into an honest planning baseline for the repaired runtime. (completed 2026-04-11)
 - [x] **Phase 45: Authoritative Scene Assembly & Start-of-Play Runtime** - Make turn output single-pass, runtime-driven, and grounded in actual opening/location state instead of duplicated or premise-dump narration. (completed 2026-04-12)
-- [ ] **Phase 46: Encounter Scope, Presence & Knowledge Boundaries** - Stop treating large locations like one tiny room and constrain scene knowledge to actual encounter/perception scope.
+- [x] **Phase 46: Encounter Scope, Presence & Knowledge Boundaries** - Stop treating large locations like one tiny room and constrain scene knowledge to actual encounter/perception scope. (completed 2026-04-12)
 - [ ] **Phase 47: Storyteller Output Quality & Anti-Slop Prompting** - Research and tune storyteller prompting/model settings for materially better RP writing quality.
 - [ ] **Phase 48: Character Identity Fidelity & Canonical Modeling** - Preserve distinctive identity/personality details in runtime character modeling, especially for imported and canonical characters.
 - [ ] **Phase 49: Search Grounding & In-Game Research Semantics** - Make worldgen and live-game research ask for the right facts with focused retrieval intent.
@@ -170,7 +170,7 @@ Plans:
 - [x] 46-01-PLAN.md — Lock the encounter-scope contract in failing backend and `/game` regressions before changing runtime behavior.
 - [x] 46-02-PLAN.md — Add the shared scene-scope seam, durable local-scope state, and authoritative lifecycle sync on movement/arrival paths.
 - [x] 46-03-PLAN.md — Rewire scene assembly, prompts, present-NPC settlement, and off-screen routing to shared presence/awareness/knowledge truth.
-- [ ] 46-04-PLAN.md — Expose scene-scoped world reads and rewire `/game` to immediate-scene participants instead of broad-location membership.
+- [x] 46-04-PLAN.md — Expose scene-scoped world reads and rewire `/game` to immediate-scene participants instead of broad-location membership.
 
 ### Phase 47: Storyteller Output Quality & Anti-Slop Prompting
 **Goal**: Lift live RP writing quality through research-backed storyteller prompting, model settings, and anti-slop controls.
@@ -233,7 +233,7 @@ Plans:
 | 43. Travel & Location-State Contract Resolution | 6/6 | Complete | 2026-04-11 |
 | 44. Gameplay Docs Baseline Alignment | 3/3 | Complete | 2026-04-11 |
 | 45. Authoritative Scene Assembly & Start-of-Play Runtime | 3/3 | Complete    | 2026-04-12 |
-| 46. Encounter Scope, Presence & Knowledge Boundaries | 3/4 | In Progress|  |
+| 46. Encounter Scope, Presence & Knowledge Boundaries | 4/4 | Complete   | 2026-04-12 |
 | 47. Storyteller Output Quality & Anti-Slop Prompting | 0/0 | Planned | — |
 | 48. Character Identity Fidelity & Canonical Modeling | 0/0 | Planned | — |
 | 49. Search Grounding & In-Game Research Semantics | 0/0 | Planned | — |

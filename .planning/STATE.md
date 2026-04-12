@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
-status: executing
-stopped_at: Completed 46-03-PLAN.md
-last_updated: "2026-04-12T10:53:20.558Z"
+status: verifying
+stopped_at: Completed 46-04-PLAN.md
+last_updated: "2026-04-12T11:05:13.190Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 14
-  completed_phases: 9
+  completed_phases: 10
   total_plans: 31
-  completed_plans: 30
-  percent: 97
+  completed_plans: 31
+  percent: 100
 ---
 
 # Project State
@@ -25,26 +25,27 @@ See: .planning/PROJECT.md (updated 2026-04-12)
 
 ## Current Position
 
-Phase: 46 (encounter-scope-presence-and-knowledge-boundaries) — EXECUTING
+Phase: 46 (encounter-scope-presence-and-knowledge-boundaries) — VERIFYING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-04-12
 
-Progress: [██████████] 97%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Current Snapshot:**
 
 - Active roadmap phases: 14
-- Completed phases: 45
-- Planned or in-progress phases: 5
+- Completed phases: 46
+- Planned or in-progress phases: 4
 - Total plans tracked: 31
-- Completed plans: 30
-- Pending plans: Phase `46` has `1` remaining plan; phases `47-50` still await plan breakdown
+- Completed plans: 31
+- Pending plans: phases `47-50` still await plan breakdown
 
 **Recent Execution:**
 
+- Phase `46` Plan `04` — duration `9 min`, tasks `1`, files `9`
 - Phase `46` Plan `03` — duration `12 min`, tasks `2`, files `10`
 - Phase `46` Plan `02` — duration `15 min`, tasks `2`, files `16`
 - Phase `46` Plan `01` — duration `6 min`, tasks `2`, files `7`
@@ -161,6 +162,9 @@ Recent decisions affecting current work:
 - [Phase 46]: Hidden tool-driving prompts keep hint-band actors in encounter scope, while final-visible prompts surface only clear actors plus bounded hint signals.
 - [Phase 46]: Present-NPC and off-screen routing now treat broad location plus current scene scope as the local/on-screen boundary instead of broad co-location alone.
 - [Phase 46]: NPC nearby context now includes explicit awareness and knowledge labels from the shared presence snapshot instead of same-location omniscience.
+- [Phase 46]: The backend /world route now emits one bounded currentScene object with sceneNpcIds, clearNpcIds, and awareness instead of forcing /game to infer scene truth from broad-location membership.
+- [Phase 46]: The /game page treats currentScene as authoritative and only falls back to sceneScopeId or currentLocationId when currentScene is absent during transitional reads.
+- [Phase 46]: The location panel keeps the broad location as the main place description while showing the immediate scene label and bounded hint signals separately.
 
 ### Pending Todos
 
@@ -173,6 +177,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-12T10:53:20.555Z
-Stopped at: Completed 46-03-PLAN.md
+Last session: 2026-04-12T11:05:13.187Z
+Stopped at: Completed 46-04-PLAN.md
 Resume file: None
