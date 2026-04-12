@@ -1040,6 +1040,121 @@ describe("POST /api/worldgen/save-edits", () => {
     );
   });
 
+  it("re-extracts lore from the same normalized scaffold shape that gets persisted", async () => {
+    mockedSaveScaffoldToDb.mockReturnValue(undefined as any);
+    mockedMarkGenComplete.mockReturnValue(undefined as any);
+    mockedDeleteLore.mockResolvedValue(undefined as any);
+    mockedExtractLoreCards.mockResolvedValue([
+      {
+        term: "Quartermaster Hale",
+        definition: "Keeps the castle stores running.",
+        category: "npc",
+      },
+    ] as any);
+    mockedStoreLore.mockResolvedValue(undefined as any);
+
+    const res = await app.request("/api/worldgen/save-edits", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        scaffold: {
+          ...validScaffold,
+          npcs: [
+            {
+              draft: {
+                identity: {
+                  role: "npc",
+                  tier: "supporting",
+                  displayName: "Quartermaster Hale",
+                  canonicalStatus: "original",
+                },
+                profile: {
+                  species: "",
+                  gender: "",
+                  ageText: "",
+                  appearance: "",
+                  backgroundSummary: "",
+                  personaSummary: "Keeps the stores ledger balanced.",
+                },
+                socialContext: {
+                  factionId: null,
+                  factionName: "Castle Guard",
+                  homeLocationId: null,
+                  homeLocationName: null,
+                  currentLocationId: null,
+                  currentLocationName: "Castle",
+                  relationshipRefs: [],
+                  socialStatus: [],
+                  originMode: "resident",
+                },
+                motivations: {
+                  shortTermGoals: ["Count the rations"],
+                  longTermGoals: ["Keep the garrison supplied"],
+                  beliefs: [],
+                  drives: [],
+                  frictions: [],
+                },
+                capabilities: {
+                  traits: [],
+                  skills: [],
+                  flaws: [],
+                  specialties: [],
+                  wealthTier: null,
+                },
+                state: {
+                  hp: 5,
+                  conditions: [],
+                  statusFlags: [],
+                  activityState: "active",
+                },
+                loadout: {
+                  inventorySeed: [],
+                  equippedItemRefs: [],
+                  currencyNotes: "",
+                  signatureItems: [],
+                },
+                startConditions: {},
+                provenance: {
+                  sourceKind: "worldgen",
+                  importMode: null,
+                  templateId: null,
+                  archetypePrompt: null,
+                  worldgenOrigin: null,
+                  legacyTags: [],
+                },
+              },
+              locationName: "Castle",
+              factionName: "Castle Guard",
+              tier: "supporting",
+            },
+          ],
+        },
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const normalizedScaffold = mockedSaveScaffoldToDb.mock.calls.at(-1)?.[1];
+    expect(normalizedScaffold).toBeDefined();
+    expect(mockedExtractLoreCards).toHaveBeenCalledWith(
+      expect.objectContaining({
+        npcs: [
+          expect.objectContaining({
+            name: "Quartermaster Hale",
+            tier: "supporting",
+            draft: expect.objectContaining({
+              identity: expect.objectContaining({
+                tier: "supporting",
+              }),
+            }),
+          }),
+        ],
+      }),
+      fakeResolvedRole,
+    );
+    expect(mockedExtractLoreCards.mock.calls.at(-1)?.[0]).toBe(normalizedScaffold);
+  });
+
   it("materializes supporting draft state for legacy supporting save-edits NPC payloads", async () => {
     mockedSaveScaffoldToDb.mockReturnValue(undefined as any);
     mockedMarkGenComplete.mockReturnValue(undefined as any);
@@ -1338,6 +1453,34 @@ describe("POST /api/worldgen/regenerate-section", () => {
     const body = await res.json();
     expect(body).toEqual({ refinedPremise: "New refined premise" });
     expect(mockedGenerateRefinedPremise).toHaveBeenCalled();
+  });
+
+  it("skips targeted research sufficiency for premise regeneration and keeps the cached ipContext lane untouched", async () => {
+    const cachedIpContext = {
+      franchise: "Naruto",
+      keyFacts: ["Konohagakure is a hidden village."],
+      tonalNotes: ["Shonen action"],
+      source: "mcp" as const,
+    };
+
+    mockedLoadIpContext.mockReturnValue(cachedIpContext as any);
+    mockedGenerateRefinedPremise.mockResolvedValue("New refined premise" as any);
+
+    const res = await app.request("/api/worldgen/regenerate-section", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID, section: "premise" }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ refinedPremise: "New refined premise" });
+    expect(mockedEvaluateResearchSufficiency).not.toHaveBeenCalled();
+    expect(mockedSaveIpContext).not.toHaveBeenCalled();
+    expect(mockedGenerateRefinedPremise).toHaveBeenCalledWith(
+      expect.anything(),
+      cachedIpContext,
+      undefined,
+    );
   });
 
   it("calls generateLocationsStep for section=locations", async () => {
