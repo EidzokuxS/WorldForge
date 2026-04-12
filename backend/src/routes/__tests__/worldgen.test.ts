@@ -128,6 +128,10 @@ import { deleteCampaignLore, storeLoreCards } from "../../vectors/lore-cards.js"
 import { loadSettings } from "../../settings/index.js";
 import { resolveRoleModel } from "../../ai/index.js";
 import { resolveFallbackProvider } from "../../ai/with-model-fallback.js";
+import {
+  researchKnownIP,
+  evaluateResearchSufficiency,
+} from "../../worldgen/ip-researcher.js";
 import worldgenRoutes from "../worldgen.js";
 
 // Typed mocks
@@ -151,6 +155,8 @@ const mockedStoreLore = vi.mocked(storeLoreCards);
 const mockedLoadSettings = vi.mocked(loadSettings);
 const mockedResolveRoleModel = vi.mocked(resolveRoleModel);
 const mockedResolveFallback = vi.mocked(resolveFallbackProvider);
+const mockedResearchKnownIP = vi.mocked(researchKnownIP);
+const mockedEvaluateResearchSufficiency = vi.mocked(evaluateResearchSufficiency);
 const mockedParseWorldBook = vi.mocked(parseWorldBook);
 const mockedClassifyEntries = vi.mocked(classifyEntries);
 const mockedImportClassifiedEntries = vi.mocked(importClassifiedEntries);
@@ -670,6 +676,54 @@ describe("POST /api/worldgen/generate", () => {
       expect.any(Function),
     );
     expect(mockedSaveIpContext).toHaveBeenCalledWith(CAMPAIGN_ID, enrichedIpContext);
+  });
+
+  it("prefers request-body ipContext over cached campaign context and skips fresh research", async () => {
+    const requestIpContext = {
+      franchise: "Naruto",
+      keyFacts: ["Konohagakure is a hidden village."],
+      tonalNotes: ["Shonen action"],
+      source: "mcp" as const,
+    };
+    const cachedIpContext = {
+      franchise: "Bleach",
+      keyFacts: ["Soul Reapers protect Karakura Town."],
+      tonalNotes: ["Stylized supernatural action"],
+      source: "mcp" as const,
+    };
+
+    mockedLoadIpContext.mockReturnValue(cachedIpContext as any);
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "A shinobi world",
+        locations: [
+          { name: "Konohagakure", description: "Village", tags: [], isStarting: true, connectedTo: [] },
+        ],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: requestIpContext,
+    } as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID, ipContext: requestIpContext }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+
+    expect(mockedResearchKnownIP).not.toHaveBeenCalled();
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({ ipContext: requestIpContext }),
+      expect.any(Function),
+    );
+    expect(mockedGenerateWorldScaffold).not.toHaveBeenCalledWith(
+      expect.objectContaining({ ipContext: cachedIpContext }),
+      expect.any(Function),
+    );
   });
 
   it("rebuilds ipContext from saved worldbook selection when cache is empty", async () => {
@@ -1304,6 +1358,52 @@ describe("POST /api/worldgen/regenerate-section", () => {
     const body = await res.json();
     expect(body).toEqual({ locations: locs });
     expect(mockedGenerateLocations).toHaveBeenCalled();
+  });
+
+  it("reuses cached ipContext before on-demand research and saves targeted regenerate enrichment back through the same lane", async () => {
+    const cachedIpContext = {
+      franchise: "Naruto",
+      keyFacts: ["Konohagakure is a hidden village."],
+      tonalNotes: ["Shonen action"],
+      source: "mcp" as const,
+    };
+    const enrichedIpContext = {
+      ...cachedIpContext,
+      keyFacts: [...cachedIpContext.keyFacts, "Sunagakure is a major allied hidden village."],
+    };
+    const locs = [{ name: "Forest", description: "Dense", tags: [], isStarting: false, connectedTo: [] }];
+
+    mockedLoadIpContext.mockReturnValue(cachedIpContext as any);
+    mockedEvaluateResearchSufficiency.mockResolvedValue(enrichedIpContext as any);
+    mockedGenerateLocations.mockResolvedValue(locs as any);
+
+    const res = await app.request("/api/worldgen/regenerate-section", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        section: "locations",
+        refinedPremise: "A dark world",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ locations: locs });
+    expect(mockedResearchKnownIP).not.toHaveBeenCalled();
+    expect(mockedEvaluateResearchSufficiency).toHaveBeenCalledWith(
+      cachedIpContext,
+      "locations",
+      "A dark world",
+      fakeResolvedRole,
+      fakeSettings.research,
+    );
+    expect(mockedGenerateLocations).toHaveBeenCalledWith(
+      expect.anything(),
+      "A dark world",
+      enrichedIpContext,
+      undefined,
+    );
+    expect(mockedSaveIpContext).toHaveBeenCalledWith(CAMPAIGN_ID, enrichedIpContext);
   });
 
   it("calls generateFactionsStep for section=factions", async () => {
