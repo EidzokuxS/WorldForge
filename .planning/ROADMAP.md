@@ -229,7 +229,7 @@ Plans:
 | 42. Targeted Oracle & Start-Condition Runtime Effects | 2/2 | Complete | 2026-04-11 |
 | 43. Travel & Location-State Contract Resolution | 6/6 | Complete | 2026-04-11 |
 | 44. Gameplay Docs Baseline Alignment | 3/3 | Complete | 2026-04-11 |
-| 45. Authoritative Scene Assembly & Start-of-Play Runtime | 3/3 | Complete   | 2026-04-12 |
+| 45. Authoritative Scene Assembly & Start-of-Play Runtime | 3/3 | Complete    | 2026-04-12 |
 | 46. Encounter Scope, Presence & Knowledge Boundaries | 0/0 | Planned | — |
 | 47. Storyteller Output Quality & Anti-Slop Prompting | 0/0 | Planned | — |
 | 48. Character Identity Fidelity & Canonical Modeling | 0/0 | Planned | — |
