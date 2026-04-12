@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
-status: planning
-stopped_at: Phase 46 planning complete
-last_updated: "2026-04-12T09:38:00.000Z"
+status: executing
+stopped_at: Completed 46-01-PLAN.md
+last_updated: "2026-04-12T10:12:53.841Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 14
   completed_phases: 9
   total_plans: 31
-  completed_plans: 27
-  percent: 87
+  completed_plans: 28
+  percent: 90
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-04-12)
 
 ## Current Position
 
-Phase: 46
-Plan: Planned
-Status: Ready for execution
-Last activity: 2026-04-12
+Phase: 46 (encounter-scope-presence-and-knowledge-boundaries) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
+Last activity: 2026-04-12 -- Completed Phase 46 Plan 01
 
-Progress: [████████░░] 87%
+Progress: [█████████░] 90%
 
 ## Performance Metrics
 
@@ -40,11 +40,12 @@ Progress: [████████░░] 87%
 - Completed phases: 45
 - Planned or in-progress phases: 5
 - Total plans tracked: 31
-- Completed plans: 27
-- Pending plans: Phase `46` has `4` queued plans; phases `47-50` still await plan breakdown
+- Completed plans: 28
+- Pending plans: Phase `46` has `3` remaining plans; phases `47-50` still await plan breakdown
 
 **Recent Execution:**
 
+- Phase `46` Plan `01` — duration `6 min`, tasks `2`, files `7`
 - Phase `45` Plan `03` — duration `8 min`, tasks `1`, files `5`
 - Phase `45` Plan `02` — duration `5 min`, tasks `2`, files `10`
 - Phase `38` Plan `03` — duration `8 min`, tasks `2`, files `9`
@@ -151,6 +152,8 @@ Recent decisions affecting current work:
 - [Phase 45]: Present-scene NPC settlement now runs before the final narration pass, while off-screen NPC, reflection, and faction work stays inside rollback-critical post-narration finalization.
 - [Phase 45]: Frontend opening scenes now request `/api/chat/opening` when assistant history is empty instead of rendering premise fallback.
 - [Phase 45]: The `/game` UI now treats `scene-settling` as a separate progress state from post-narration `finalizing_turn`.
+- [Phase 46]: Phase 46 begins with explicit red regressions for encounter scope instead of prose complaints or prompt-only assertions.
+- [Phase 46]: Presence, awareness, and knowledge basis are now treated as separate test-layer contracts across backend scene assembly, NPC routing, and /game visible presence.
 
 ### Pending Todos
 
@@ -163,6 +166,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-12T09:05:43.686Z
-Stopped at: Phase 46 planning complete
-Resume file: .planning/phases/46-encounter-scope-presence-and-knowledge-boundaries/46-01-PLAN.md
+Last session: 2026-04-12T10:12:53.838Z
+Stopped at: Completed 46-01-PLAN.md
+Resume file: .planning/phases/46-encounter-scope-presence-and-knowledge-boundaries/46-02-PLAN.md
