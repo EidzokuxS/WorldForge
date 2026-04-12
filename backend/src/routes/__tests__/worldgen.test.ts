@@ -1395,7 +1395,12 @@ describe("POST /api/worldgen/regenerate-section", () => {
       "locations",
       "A dark world",
       fakeResolvedRole,
-      fakeSettings.research,
+      {
+        provider: "brave",
+        braveApiKey: undefined,
+        zaiApiKey: undefined,
+        llmProvider: fakeResolvedRole.provider,
+      },
     );
     expect(mockedGenerateLocations).toHaveBeenCalledWith(
       expect.anything(),

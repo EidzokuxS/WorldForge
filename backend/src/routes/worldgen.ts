@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { IpResearchContext, PremiseDivergence } from "@worldforge/shared";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
+import type { SearchConfig } from "../lib/web-search.js";
 import {
   readCampaignConfig,
   markGenerationComplete,
@@ -56,6 +57,7 @@ import {
   importWorldbookToLibrary,
 } from "../worldbook-library/index.js";
 import { worldbookLibraryImportSchema } from "./schemas.js";
+import { evaluateResearchSufficiency } from "../worldgen/ip-researcher.js";
 
 const app = new Hono();
 
@@ -79,6 +81,16 @@ async function resolvePremiseDivergence(
     savePremiseDivergence(campaignId, premiseDivergence);
   }
   return premiseDivergence;
+}
+
+function buildResearchSearchConfig(role: ResolvedRole): SearchConfig {
+  const settings = loadSettings();
+  return {
+    provider: settings.research.searchProvider ?? "brave",
+    braveApiKey: settings.research.braveApiKey,
+    zaiApiKey: settings.research.zaiApiKey,
+    llmProvider: role.provider,
+  };
 }
 
 app.post("/roll-seeds", async (c) => {
@@ -416,8 +428,8 @@ app.post("/regenerate-section", async (c) => {
     const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
 
-    // Load cached IP research for section regeneration
-    const ipContext = loadIpContext(campaignId);
+    // Load cached IP research for section regeneration.
+    let ipContext = loadIpContext(campaignId);
     const premiseDivergence = await resolvePremiseDivergence(
       campaignId,
       ipContext,
@@ -436,6 +448,22 @@ app.post("/regenerate-section", async (c) => {
     };
 
     const { section } = result.data;
+    const searchConfig = buildResearchSearchConfig(gen.resolved);
+    const refinementPremise = result.data.refinedPremise ?? campaign.premise;
+
+    if (ipContext && section !== "premise") {
+      const enrichedIpContext = await evaluateResearchSufficiency(
+        ipContext,
+        section,
+        refinementPremise,
+        gen.resolved,
+        searchConfig,
+      );
+      if (enrichedIpContext.keyFacts.length > ipContext.keyFacts.length) {
+        saveIpContext(campaignId, enrichedIpContext);
+      }
+      ipContext = enrichedIpContext;
+    }
 
     switch (section) {
       case "premise": {
