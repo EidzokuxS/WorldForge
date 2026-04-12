@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
 status: active
-stopped_at: Phase 44 verified and closed
-last_updated: "2026-04-11T19:40:00.000Z"
-last_activity: 2026-04-11
+stopped_at: Phase 38 discussion captured
+last_updated: "2026-04-12T12:15:00.000Z"
+last_activity: 2026-04-12
 progress:
   total_phases: 8
   completed_phases: 7
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-04-11)
 
 Phase: 38
 Plan: Not planned
-Status: Next remaining phase after Phase 44 completion
-Last activity: 2026-04-11
+Status: Discuss complete; ready for planning
+Last activity: 2026-04-12
 
 Progress: [█████████░] 90%
 
@@ -118,6 +118,8 @@ Recent decisions affecting current work:
 - [Phase 43]: The location panel always renders Recent Happenings, including an explicit empty state when no local history exists.
 - [Phase 43]: The `/game` page now filters self-target travel options in both connectedPaths and connectedTo branches so stale compatibility data cannot reintroduce current-location travel affordances.
 - [Phase 43]: Current-location movement now short-circuits at the transport layer with a deterministic no-op acknowledgment instead of emitting location_change or flowing through Oracle/Storyteller arrival behavior.
+- [Phase 38]: After campaign start, `items` becomes the only runtime source of truth for player and NPC inventory/equipment state. `characterRecord.loadout` remains creation provenance only.
+- [Phase 38]: Equip-state must live on authoritative item rows, while legacy `equippedItems` survives only as transitional compatibility projection during migration/deprecation.
 - [Phase 43]: Fresh scaffold adjacency now suppresses self-loop edges and self-target compatibility projections so fresh-runtime regressions stay distinct from legacy/manual self-travel paths.
 - [Phase 44]: Concept docs now state product boundaries and defer detailed gameplay and runtime truth to mechanics.md and memory.md. — This prevents top-level docs from competing with the normative runtime baseline.
 - [Phase 44]: The stack doc now documents gameplay transport as REST plus SSE rather than WebSocket gameplay truth. — frontend/lib/api.ts and /game already consume targeted REST routes with SSE parsing, so the technical reference had to match live transport.
