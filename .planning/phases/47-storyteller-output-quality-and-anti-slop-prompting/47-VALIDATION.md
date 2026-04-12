@@ -47,7 +47,7 @@ created: 2026-04-12
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| 47-01-01 | 01 | 1 | WRIT-01 | regression | `npm --prefix backend exec vitest run src/engine/__tests__/storyteller-presets.test.ts src/engine/__tests__/storyteller-contract.test.ts src/ai/__tests__/provider-registry.test.ts` | ✅ / W0 | ⬜ pending |
+| 47-01-01 | 01 | 1 | WRIT-01 | regression | `npm --prefix backend exec vitest run src/engine/__tests__/storyteller-presets.test.ts src/engine/__tests__/storyteller-contract.test.ts src/ai/__tests__/provider-registry.test.ts` | ❌ / W0 | ⬜ pending |
 | 47-01-02 | 01 | 1 | WRIT-01 | regression | `npm --prefix backend exec vitest run src/engine/__tests__/prompt-assembler.test.ts` | ✅ | ⬜ pending |
 | 47-02-01 | 02 | 2 | WRIT-01 | integration | `npm --prefix backend exec vitest run src/engine/__tests__/storyteller-contract.test.ts src/engine/__tests__/prompt-assembler.test.ts src/engine/__tests__/turn-processor.test.ts` | ✅ | ⬜ pending |
 | 47-02-02 | 02 | 2 | WRIT-01 | integration | `npm --prefix backend exec vitest run src/ai/__tests__/provider-registry.test.ts src/routes/__tests__/chat.test.ts` | ✅ | ⬜ pending |
@@ -59,6 +59,8 @@ created: 2026-04-12
 ---
 
 ## Wave 0 Requirements
+
+Wave 0 is intentionally completed inside `47-01-01` and `47-01-02`; `wave_0_complete: false` reflects the current pre-execution state, not a missing planning artifact.
 
 - [ ] Add `backend/src/engine/__tests__/storyteller-presets.test.ts` for baseline vs GLM overlay extraction and motif portability.
 - [ ] Extend `backend/src/engine/__tests__/storyteller-contract.test.ts` for adaptive scene-mode language, anti-slop guardrails, and no-omniscience wording.
