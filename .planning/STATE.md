@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
-status: active
-stopped_at: Phase 38 discussion captured
-last_updated: "2026-04-12T12:15:00.000Z"
+status: executing
+stopped_at: Completed 38-01-PLAN.md
+last_updated: "2026-04-12T05:23:51.010Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 8
   completed_phases: 7
-  total_plans: 21
-  completed_plans: 21
+  total_plans: 24
+  completed_plans: 22
   percent: 90
 ---
 
@@ -25,9 +25,9 @@ See: .planning/PROJECT.md (updated 2026-04-11)
 
 ## Current Position
 
-Phase: 38
-Plan: Not planned
-Status: Discuss complete; ready for planning
+Phase: 38 (authoritative-inventory-and-equipment-state) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
 Last activity: 2026-04-12
 
 Progress: [█████████░] 90%
@@ -130,6 +130,9 @@ Recent decisions affecting current work:
 - [Phase 44]: docs/memory.md now documents top-3 vector-only lore, top-5 episodic retrieval, caller-supplied importance, and checkpoint-complete bundle restore as the normative runtime baseline.
 - [Phase 44]: Inventory/equipment wording stays explicitly bounded: live behavior uses SQLite item rows plus canonical records, while Phase 38 remains the pending authority seam.
 - [Phase 44]: Phase 36 Group B/C proof lives in a phase-local checklist keyed to claim IDs instead of a narrative closeout.
+- [Phase 38-authoritative-inventory-equipment-state]: Item rows now carry explicit equipState, equippedSlot, and isSignature fields as the minimum inventory authority contract.
+- [Phase 38-authoritative-inventory-equipment-state]: loadCampaign() now reruns idempotent inventory backfill so direct load, checkpoint, retry, and undo reopen flows share one authority seam.
+- [Phase 38-authoritative-inventory-equipment-state]: Legacy characterRecord.loadout and players.equippedItems remain compatibility projections only and are rewritten from authoritative item rows on reopen.
 
 ### Pending Todos
 
@@ -142,6 +145,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-11T19:31:21.448Z
-Stopped at: Completed 44-03-PLAN.md
+Last session: 2026-04-12T05:23:51.007Z
+Stopped at: Completed 38-01-PLAN.md
 Resume file: None

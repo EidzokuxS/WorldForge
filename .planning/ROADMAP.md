@@ -50,7 +50,7 @@ Plans:
   3. Starting loadout, live inventory changes, checkpoints, and restored gameplay all reflect the same item truth instead of diverging models.
 **Plans**: 3 plans
 Plans:
-- [ ] 38-01-PLAN.md — Define authoritative item-row equipment metadata, legacy backfill, and reload/restore migration tests.
+- [x] 38-01-PLAN.md — Define authoritative item-row equipment metadata, legacy backfill, and reload/restore migration tests.
 - [ ] 38-02-PLAN.md — Rewire backend prompt, world, and compatibility readers to the shared authoritative inventory seam.
 - [ ] 38-03-PLAN.md — Rewire frontend world parsing and `/game` inventory/equipment rendering to the authoritative backend contract.
 
@@ -144,7 +144,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 37. Campaign-Loaded Gameplay Transport | 2/2 | Complete   | 2026-04-08 |
-| 38. Authoritative Inventory & Equipment State | 0/TBD | Not started | - |
+| 38. Authoritative Inventory & Equipment State | 1/3 | In Progress|  |
 | 39. Honest Turn Boundary, Retry & Undo | 3/3 | Complete    | 2026-04-09 |
 | 40. Live Reflection & Progression Triggers | 3/3 | Complete   | 2026-04-10 |
 | 41. Checkpoint-Complete Simulation Restore | 2/2 | Complete | 2026-04-11 |
