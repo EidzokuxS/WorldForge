@@ -90,8 +90,9 @@ vi.mock("@/components/game/narrative-log", () => ({
     </div>
   ),
 }));
+const mockCharacterPanel = vi.fn(() => <div data-testid="character-panel" />);
 vi.mock("@/components/game/character-panel", () => ({
-  CharacterPanel: () => <div data-testid="character-panel" />,
+  CharacterPanel: (props: unknown) => mockCharacterPanel(props as never),
 }));
 vi.mock("@/components/game/lore-panel", () => ({
   LorePanel: () => <div data-testid="lore-panel" />,
@@ -495,6 +496,68 @@ describe("GamePage", () => {
     await waitFor(() => {
       expect(mockedChatRetry).toHaveBeenCalledWith(fakeCampaign.id);
     });
+  });
+
+  it("passes authoritative carried and equipped collections into CharacterPanel instead of deriving player inventory from world.items", async () => {
+    const worldData = {
+      ...fakeWorldData,
+      items: [
+        {
+          id: "legacy-bow",
+          name: "Legacy Bow",
+          tags: ["weapon"],
+          ownerId: "player-1",
+          locationId: null,
+        },
+        {
+          id: "ground-lantern",
+          name: "Ground Lantern",
+          tags: ["utility"],
+          ownerId: null,
+          locationId: "loc-1",
+        },
+      ],
+      player: {
+        ...fakeWorldData.player,
+        equippedItems: ["Legacy Bow"],
+        inventory: [
+          {
+            id: "item-bedroll",
+            name: "Bedroll",
+            tags: ["gear"],
+            equipState: "carried",
+            equippedSlot: null,
+            isSignature: false,
+          },
+        ],
+        equipment: [
+          {
+            id: "item-sword",
+            name: "Iron Sword",
+            tags: ["weapon"],
+            equipState: "equipped",
+            equippedSlot: "hand",
+            isSignature: true,
+          },
+        ],
+      },
+    };
+
+    await renderReadyGameWithWorld(worldData as typeof fakeWorldData);
+
+    await waitFor(() => {
+      expect(mockCharacterPanel).toHaveBeenCalled();
+    });
+
+    const lastCall = mockCharacterPanel.mock.calls.at(-1)?.[0] as {
+      carriedItems?: Array<{ id: string; name: string }>;
+      equippedItems?: Array<{ id: string; name: string }>;
+      items?: Array<{ id: string; name: string }>;
+    };
+
+    expect(lastCall.carriedItems?.map((item) => item.name)).toEqual(["Bedroll"]);
+    expect(lastCall.equippedItems?.map((item) => item.name)).toEqual(["Iron Sword"]);
+    expect(lastCall.items).toBeUndefined();
   });
 
   it("does not expose retry controls for reloaded history without a live snapshot", async () => {

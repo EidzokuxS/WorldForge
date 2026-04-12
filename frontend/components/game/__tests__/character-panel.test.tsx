@@ -95,6 +95,49 @@ describe("CharacterPanel", () => {
     expect(screen.getByText(/Enchanted Staff/)).toBeInTheDocument();
   });
 
+  it("renders authoritative equipped and carried collections from explicit props", () => {
+    const props = {
+      player: {
+        id: "p1",
+        name: "Elara",
+        race: "Elf",
+        gender: "Female",
+        age: "120",
+        appearance: "Silver hair, emerald eyes",
+        hp: 3,
+        tags: ["brave", "arcane"],
+        currentLocationId: "loc1",
+      },
+      equippedItems: [
+        {
+          id: "eq-1",
+          name: "Moonlit Staff",
+          tags: ["weapon", "signature"],
+          equipState: "equipped",
+          equippedSlot: "hand",
+          isSignature: true,
+        },
+      ],
+      carriedItems: [
+        {
+          id: "inv-1",
+          name: "Healing Potion",
+          tags: ["consumable", "rare"],
+          equipState: "carried",
+          equippedSlot: null,
+          isSignature: false,
+        },
+      ],
+      locationName: null,
+    } as any;
+
+    render(<CharacterPanel {...props} />);
+
+    expect(screen.getByText("Moonlit Staff")).toBeInTheDocument();
+    expect(screen.getByText("Healing Potion")).toBeInTheDocument();
+    expect(screen.getByText("(consumable, rare)")).toBeInTheDocument();
+  });
+
   it("renders inventory items with tags", () => {
     const items = [
       { id: "i1", name: "Healing Potion", tags: ["consumable", "rare"] },
@@ -118,6 +161,29 @@ describe("CharacterPanel", () => {
         locationName={null}
       />
     );
+    expect(screen.getByText("(empty)")).toBeInTheDocument();
+  });
+
+  it("keeps empty states working when authoritative carried and equipped collections are empty", () => {
+    const props = {
+      player: {
+        id: "p1",
+        name: "Elara",
+        race: "Elf",
+        gender: "Female",
+        age: "120",
+        appearance: "Silver hair, emerald eyes",
+        hp: 3,
+        tags: ["brave", "arcane"],
+        currentLocationId: "loc1",
+      },
+      equippedItems: [],
+      carriedItems: [],
+      locationName: null,
+    } as any;
+
+    render(<CharacterPanel {...props} />);
+
     expect(screen.getByText("(empty)")).toBeInTheDocument();
   });
 
