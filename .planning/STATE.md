@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
 status: executing
-stopped_at: Completed 46-02-PLAN.md
-last_updated: "2026-04-12T13:30:28Z"
+stopped_at: Completed 46-03-PLAN.md
+last_updated: "2026-04-12T10:53:20.558Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 14
   completed_phases: 9
   total_plans: 31
-  completed_plans: 29
-  percent: 94
+  completed_plans: 30
+  percent: 97
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-04-12)
 ## Current Position
 
 Phase: 46 (encounter-scope-presence-and-knowledge-boundaries) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-04-12
 
-Progress: [█████████░] 94%
+Progress: [██████████] 97%
 
 ## Performance Metrics
 
@@ -40,11 +40,12 @@ Progress: [█████████░] 94%
 - Completed phases: 45
 - Planned or in-progress phases: 5
 - Total plans tracked: 31
-- Completed plans: 29
-- Pending plans: Phase `46` has `2` remaining plans; phases `47-50` still await plan breakdown
+- Completed plans: 30
+- Pending plans: Phase `46` has `1` remaining plan; phases `47-50` still await plan breakdown
 
 **Recent Execution:**
 
+- Phase `46` Plan `03` — duration `12 min`, tasks `2`, files `10`
 - Phase `46` Plan `02` — duration `15 min`, tasks `2`, files `16`
 - Phase `46` Plan `01` — duration `6 min`, tasks `2`, files `7`
 - Phase `45` Plan `03` — duration `8 min`, tasks `1`, files `5`
@@ -157,6 +158,9 @@ Recent decisions affecting current work:
 - [Phase 46]: Presence, awareness, and knowledge basis are now treated as separate test-layer contracts across backend scene assembly, NPC routing, and /game visible presence.
 - [Phase 46]: Persist local scene scope as nullable actor state while deriving awareness and knowledge at read time.
 - [Phase 46]: Movement and arrival writers set scene scope immediately so scene membership never relies on later backfill.
+- [Phase 46]: Hidden tool-driving prompts keep hint-band actors in encounter scope, while final-visible prompts surface only clear actors plus bounded hint signals.
+- [Phase 46]: Present-NPC and off-screen routing now treat broad location plus current scene scope as the local/on-screen boundary instead of broad co-location alone.
+- [Phase 46]: NPC nearby context now includes explicit awareness and knowledge labels from the shared presence snapshot instead of same-location omniscience.
 
 ### Pending Todos
 
@@ -169,6 +173,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-12T10:30:03.401Z
-Stopped at: Completed 46-02-PLAN.md
-Resume file: .planning/phases/46-encounter-scope-presence-and-knowledge-boundaries/46-03-PLAN.md
+Last session: 2026-04-12T10:53:20.555Z
+Stopped at: Completed 46-03-PLAN.md
+Resume file: None
