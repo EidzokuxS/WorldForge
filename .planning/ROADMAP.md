@@ -197,7 +197,7 @@ Plans:
 **Plans**: 4 plans
 Plans:
 - [x] 48-01-PLAN.md — Extend the shared character lane with richer identity layers, route schema/materialization contracts, and compatibility-safe hydration.
-- [ ] 48-02-PLAN.md — Rebuild generation/import/template seams and lock parse/save/load/world payload character contracts to the richer identity model.
+- [x] 48-02-PLAN.md — Rebuild generation/import/template seams and lock parse/save/load/world payload character contracts to the richer identity model.
 - [ ] 48-03-PLAN.md — Rewire prompt assembly, NPC runtime, and reflection to consume richer identity truth with continuity boundaries.
 - [ ] 48-04-PLAN.md — Preserve richer identity through bounded frontend draft/editor seams without a major UI redesign.
 
@@ -240,6 +240,6 @@ Plans:
 | 45. Authoritative Scene Assembly & Start-of-Play Runtime | 3/3 | Complete    | 2026-04-12 |
 | 46. Encounter Scope, Presence & Knowledge Boundaries | 4/4 | Complete   | 2026-04-12 |
 | 47. Storyteller Output Quality & Anti-Slop Prompting | 2/3 | In Progress|  |
-| 48. Character Identity Fidelity & Canonical Modeling | 1/4 | In Progress|  |
+| 48. Character Identity Fidelity & Canonical Modeling | 2/4 | In Progress|  |
 | 49. Search Grounding & In-Game Research Semantics | 0/0 | Planned | — |
 | 50. Gameplay Text Presentation & Rich Readability | 0/0 | Planned | — |

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
 status: executing
-stopped_at: Completed 48-01-PLAN.md
-last_updated: "2026-04-12T16:47:36.559Z"
+stopped_at: Completed 48-02-PLAN.md
+last_updated: "2026-04-12T17:07:09.202Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 14
   completed_phases: 11
   total_plans: 38
-  completed_plans: 35
+  completed_plans: 36
   percent: 100
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-12)
 ## Current Position
 
 Phase: 48 (character-identity-fidelity-and-canonical-modeling) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-04-12
 
@@ -75,6 +75,7 @@ Progress: [██████████] 100%
 | Phase 47 P02 | 7 | 2 tasks | 4 files |
 | Phase 47 P03 | 8 | 2 tasks | 4 files |
 | Phase 48 P01 | 8 min | 2 tasks | 8 files |
+| Phase 48 P02 | 18 min | 3 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -186,6 +187,9 @@ Recent decisions affecting current work:
 - [Phase 48]: Keep one shared CharacterDraft/CharacterRecord ontology and layer richer identity inside identity instead of creating a canonical-only record type.
 - [Phase 48]: Store canon fidelity as optional sourceBundle and continuity extensions on the shared record so imported and key characters gain provenance without forking the lane.
 - [Phase 48]: Derive legacy persona, goals, and beliefs compatibility views from normalized rich identity when shallow fields are stale.
+- [Phase 48]: Generator and NPC creation now keep the LLM output flat and deterministic, then lift it into baseFacts, behavioralCore, and liveDynamics in backend adapters.
+- [Phase 48]: Character and campaign routes now return richer characterRecord and draft payloads additively alongside legacy compatibility aliases.
+- [Phase 48]: Persona templates now patch richer identity, sourceBundle, and continuity seams without erasing imported or canonical provenance.
 
 ### Pending Todos
 
@@ -198,6 +202,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-12T16:47:36.555Z
-Stopped at: Completed 48-01-PLAN.md
+Last session: 2026-04-12T17:07:09.199Z
+Stopped at: Completed 48-02-PLAN.md
 Resume file: None
