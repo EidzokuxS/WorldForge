@@ -361,6 +361,139 @@ describe("assemblePrompt", () => {
     expect(result.formatted).toContain("Recent happenings here: none in the last 50 ticks.");
   });
 
+  it("builds final narration context from scene effects, opening state, and player-perceivable consequences instead of a premise-only fallback", async () => {
+    vi.mocked(readCampaignConfig).mockReturnValue({
+      name: "Opening Scene Campaign",
+      premise: "A disgraced courier carries state secrets through a city on the brink of revolt.",
+      currentTick: 14,
+      createdAt: Date.now(),
+      generationComplete: true,
+    });
+
+    vi.mocked(getDb).mockReturnValue(
+      createMockDb({
+        players: [
+          {
+            id: "p1",
+            campaignId: "test-campaign-123",
+            name: "Iria",
+            race: "Human",
+            gender: "",
+            age: "",
+            appearance: "",
+            hp: 5,
+            tags: "[]",
+            equippedItems: "[]",
+            currentLocationId: "loc-1",
+            characterRecord: JSON.stringify({
+              identity: {
+                id: "p1",
+                campaignId: "test-campaign-123",
+                role: "player",
+                tier: "key",
+                displayName: "Iria",
+                canonicalStatus: "original",
+              },
+              profile: {
+                species: "Human",
+                gender: "",
+                ageText: "",
+                appearance: "",
+                backgroundSummary: "",
+                personaSummary: "",
+              },
+              socialContext: {
+                factionId: null,
+                factionName: null,
+                homeLocationId: null,
+                homeLocationName: null,
+                currentLocationId: "loc-1",
+                currentLocationName: "Ash Market",
+                relationshipRefs: [],
+                socialStatus: [],
+                originMode: "outsider",
+              },
+              motivations: {
+                shortTermGoals: [],
+                longTermGoals: [],
+                beliefs: [],
+                drives: [],
+                frictions: [],
+              },
+              capabilities: {
+                traits: [],
+                skills: [],
+                flaws: [],
+                specialties: [],
+                wealthTier: null,
+              },
+              state: {
+                hp: 5,
+                conditions: [],
+                statusFlags: [],
+                activityState: "active",
+              },
+              loadout: {
+                inventorySeed: [],
+                equippedItemRefs: [],
+                currencyNotes: "",
+                signatureItems: [],
+              },
+              startConditions: {
+                startLocationId: "loc-1",
+                arrivalMode: "on-foot",
+                immediateSituation: "City watch lanterns sweep the market while you keep the satchel hidden.",
+                entryPressure: ["under watch", "clock running out"],
+                companions: [],
+                startingVisibility: "noticed",
+              },
+              provenance: {
+                sourceKind: "generator",
+                importMode: null,
+                templateId: null,
+                archetypePrompt: null,
+                worldgenOrigin: null,
+                legacyTags: [],
+              },
+            }),
+          },
+        ],
+        locations: [
+          {
+            id: "loc-1",
+            campaignId: "test-campaign-123",
+            name: "Ash Market",
+            description: "Canvas stalls sag under smoke while merchants whisper behind shuttered lamps.",
+            tags: '["market", "tense"]',
+            connectedTo: "[]",
+          },
+        ],
+      }) as unknown as ReturnType<typeof getDb>,
+    );
+    mockedListRecentLocationEvents.mockReturnValue([
+      {
+        id: "evt-2",
+        campaignId: "test-campaign-123",
+        locationId: "loc-1",
+        sourceLocationId: "loc-1",
+        anchorLocationId: "loc-1",
+        sourceEventId: "episodic-2",
+        eventType: "scene_effect",
+        summary: "A warning bell and bootsteps ripple through the stalls nearby.",
+        tick: 14,
+        importance: 3,
+        archivedAtTick: null,
+        createdAt: 1700000000000,
+      },
+    ]);
+
+    const result = await assemblePrompt(defaultOptions);
+
+    expect(result.formatted).toContain("City watch lanterns sweep the market while you keep the satchel hidden.");
+    expect(result.formatted).toContain("A warning bell and bootsteps ripple through the stalls nearby.");
+    expect(result.formatted).toContain("player-perceivable");
+  });
+
   it("uses double newlines between sections", async () => {
     const result = await assemblePrompt(defaultOptions);
     // At minimum, [SYSTEM RULES] and [WORLD PREMISE] should be separated by double newline

@@ -485,6 +485,44 @@ describe("processTurn", () => {
     expect(narrativeEvents[1]!.data).toEqual({ text: "falls." });
   });
 
+  it("defers visible narration until authoritative scene settlement", async () => {
+    setupMocks({
+      streamParts: [
+        { type: "text-delta", text: "Steel rings out in the square. " },
+        { type: "text-delta", text: "The crowd recoils." },
+      ],
+    });
+
+    let resolvePostTurn: (() => void) | null = null;
+    const generator = processTurn(
+      createTestOptions({
+        onPostTurn: () =>
+          new Promise<void>((resolve) => {
+            resolvePostTurn = resolve;
+          }),
+      }),
+    );
+    const observedTypesBeforeFinalizing: string[] = [];
+
+    for (let i = 0; i < 6; i += 1) {
+      const step = await generator.next();
+      if (step.done) {
+        break;
+      }
+      if (step.value.type === "finalizing_turn") {
+        break;
+      }
+      observedTypesBeforeFinalizing.push(step.value.type);
+    }
+
+    expect(observedTypesBeforeFinalizing).not.toContain("narrative");
+
+    const finishPostTurn = resolvePostTurn as (() => void) | null;
+    if (finishPostTurn) {
+      finishPostTurn();
+    }
+  });
+
   it("yields state_update events for tool results", async () => {
     setupMocks({
       streamParts: [
@@ -674,6 +712,29 @@ describe("processTurn", () => {
       expect.arrayContaining([
         expect.objectContaining({ role: "assistant" }),
       ])
+    );
+  });
+
+  it("suppresses repeated narration blocks in the final visible narration", async () => {
+    setupMocks({
+      streamParts: [
+        { type: "text-delta", text: "The market square falls silent.\n\n" },
+        { type: "text-delta", text: "The market square falls silent.\n\n" },
+        { type: "text-delta", text: "A bell tolls somewhere beyond the smoke." },
+      ],
+    });
+
+    await collectEvents(processTurn(createTestOptions()));
+
+    expect(appendChatMessages).toHaveBeenLastCalledWith(
+      CAMPAIGN_ID,
+      [
+        {
+          role: "assistant",
+          content:
+            "The market square falls silent.\n\nA bell tolls somewhere beyond the smoke.",
+        },
+      ],
     );
   });
 
