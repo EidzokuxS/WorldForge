@@ -20,8 +20,9 @@ created: 2026-04-12
 | **Framework** | Vitest 3.2.4 |
 | **Config file** | `vitest.config.ts`, `backend/vitest.config.ts`, `frontend/vitest.config.ts` |
 | **Task-local run rule** | Use the per-task commands in the verification map below; each task-local sample must stay at or under ~30 seconds. |
-| **Wave aggregate smoke** | `npx vitest run backend/src/worldgen/__tests__/ip-researcher.test.ts backend/src/character/__tests__/archetype-researcher.test.ts backend/src/routes/__tests__/character.test.ts backend/src/routes/__tests__/worldgen.test.ts backend/src/engine/__tests__/prompt-assembler.test.ts backend/src/engine/__tests__/turn-processor.test.ts backend/src/routes/__tests__/chat.test.ts frontend/components/settings/__tests__/research-tab.test.tsx` |
+| **Wave aggregate smoke** | `npx vitest run backend/src/worldgen/__tests__/ip-researcher.test.ts backend/src/character/__tests__/archetype-researcher.test.ts backend/src/routes/__tests__/character.test.ts backend/src/routes/__tests__/worldgen.test.ts backend/src/routes/__tests__/schemas.test.ts backend/src/engine/__tests__/prompt-assembler.test.ts backend/src/engine/__tests__/turn-processor.test.ts backend/src/routes/__tests__/chat.test.ts frontend/components/settings/__tests__/research-tab.test.tsx` |
 | **Full suite command** | `npx vitest run` |
+| **Phase 49 typecheck gap gate** | `node -e "const { spawnSync } = require('node:child_process'); const run = spawnSync('npm', ['--prefix', 'backend', 'run', 'typecheck', '--', '--pretty', 'false'], { encoding: 'utf8', shell: true }); const out = (run.stdout || '') + (run.stderr || ''); process.stdout.write(out); const targets = ['src/routes/worldgen.ts(', 'src/routes/schemas.ts(', 'src/character/npc-generator.ts(', 'src/routes/__tests__/chat.test.ts(', 'src/routes/__tests__/schemas.test.ts(']; process.exit(targets.some((target) => out.includes(target)) ? 1 : 0);"` |
 | **Estimated runtime** | `<=30s` for task-local samples, `~45s` for the wave aggregate smoke, longer for full suite |
 
 ---
@@ -46,6 +47,8 @@ created: 2026-04-12
 | 49-02-02 | 02 | 2 | RES-01 | integration | `npx vitest run backend/src/character/__tests__/archetype-researcher.test.ts backend/src/routes/__tests__/character.test.ts` | ✅ partial | ⬜ pending |
 | 49-03-01 | 03 | 3 | RES-01 | integration | `npx vitest run backend/src/routes/__tests__/chat.test.ts frontend/app/game/__tests__/page.test.tsx` | ✅ partial | ⬜ pending |
 | 49-03-02 | 03 | 3 | RES-01 | frontend unit | `npx vitest run frontend/components/settings/__tests__/research-tab.test.tsx` | ✅ | ⬜ pending |
+| 49-04-01 | 04 | 4 | RES-01 | targeted typecheck | `node -e "const { spawnSync } = require('node:child_process'); const run = spawnSync('npm', ['--prefix', 'backend', 'run', 'typecheck', '--', '--pretty', 'false'], { encoding: 'utf8', shell: true }); const out = (run.stdout || '') + (run.stderr || ''); process.stdout.write(out); process.exit(out.includes('src/routes/worldgen.ts(') ? 1 : 0);"` | ✅ | ⬜ pending |
+| 49-04-02 | 04 | 4 | RES-01 | targeted typecheck | `node -e "const { spawnSync } = require('node:child_process'); const run = spawnSync('npm', ['--prefix', 'backend', 'run', 'typecheck', '--', '--pretty', 'false'], { encoding: 'utf8', shell: true }); const out = (run.stdout || '') + (run.stderr || ''); process.stdout.write(out); const targets = ['src/routes/schemas.ts(', 'src/character/npc-generator.ts(', 'src/routes/__tests__/chat.test.ts(', 'src/routes/__tests__/schemas.test.ts(']; process.exit(targets.some((target) => out.includes(target)) ? 1 : 0);"` | ✅ | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ partial*
 
