@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
 status: executing
-stopped_at: Completed 48-02-PLAN.md
-last_updated: "2026-04-12T17:07:09.202Z"
+stopped_at: Completed 48-04-PLAN.md
+last_updated: "2026-04-12T17:24:10.023Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 14
   completed_phases: 11
   total_plans: 38
-  completed_plans: 36
+  completed_plans: 37
   percent: 100
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-12)
 ## Current Position
 
 Phase: 48 (character-identity-fidelity-and-canonical-modeling) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-04-12
 
@@ -76,6 +76,7 @@ Progress: [██████████] 100%
 | Phase 47 P03 | 8 | 2 tasks | 4 files |
 | Phase 48 P01 | 8 min | 2 tasks | 8 files |
 | Phase 48 P02 | 18 min | 3 tasks | 13 files |
+| Phase 48-character-identity-fidelity-and-canonical-modeling P04 | 8 min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -190,6 +191,9 @@ Recent decisions affecting current work:
 - [Phase 48]: Generator and NPC creation now keep the LLM output flat and deterministic, then lift it into baseFacts, behavioralCore, and liveDynamics in backend adapters.
 - [Phase 48]: Character and campaign routes now return richer characterRecord and draft payloads additively alongside legacy compatibility aliases.
 - [Phase 48]: Persona templates now patch richer identity, sourceBundle, and continuity seams without erasing imported or canonical provenance.
+- [Phase 48-character-identity-fidelity-and-canonical-modeling]: Frontend draft adapters now derive compatibility persona/goals from richer identity only when shallow fields are empty.
+- [Phase 48-character-identity-fidelity-and-canonical-modeling]: CharacterCard surfaces canonical status, continuity, core self-image, live pressure, and source cues as a compact read-only fidelity block instead of adding deep edit controls.
+- [Phase 48-character-identity-fidelity-and-canonical-modeling]: Frontend typecheck now rebuilds shared typings first and excludes test mocks so plan verification remains meaningful.
 
 ### Pending Todos
 
@@ -202,6 +206,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-12T17:07:09.199Z
-Stopped at: Completed 48-02-PLAN.md
+Last session: 2026-04-12T17:24:10.020Z
+Stopped at: Completed 48-04-PLAN.md
 Resume file: None
