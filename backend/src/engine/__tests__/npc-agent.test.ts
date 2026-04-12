@@ -586,7 +586,14 @@ describe("tickNpcAgent", () => {
             homeLocationName: null,
             currentLocationId: LOCATION_ID,
             currentLocationName: "Market Square",
-            relationshipRefs: ["rel-elara"],
+            relationshipRefs: [
+              {
+                entityId: "player-1",
+                entityName: "Elara",
+                type: "Trusted Ally",
+                reason: "Elara protected the bazaar from raiders",
+              },
+            ],
             socialStatus: ["connected"],
             originMode: "native",
           },
@@ -648,6 +655,119 @@ describe("tickNpcAgent", () => {
     );
     expect(systemPrompt).not.toContain("legacy belief");
     expect(systemPrompt).not.toContain("legacy goal");
+  });
+
+  it("builds NPC planning prompts from behavioral core, live dynamics, and continuity cues for anchored characters", async () => {
+    setupMockDb({
+      npc: createMockNpc({
+        characterRecord: JSON.stringify({
+          identity: {
+            id: NPC_ID,
+            campaignId: CAMPAIGN_ID,
+            role: "npc",
+            tier: "key",
+            displayName: "Greta the Merchant",
+            canonicalStatus: "known_ip_canonical",
+            baseFacts: {
+              biography: "A broker holding the bazaar's faction web together.",
+              socialRole: ["market broker", "quiet fixer"],
+              hardConstraints: ["Will not expose her ledger network"],
+            },
+            behavioralCore: {
+              motives: ["Keep leverage over every faction at the market"],
+              pressureResponses: ["Becomes icily polite", "Trades information before coin"],
+              taboos: ["Will not beg"],
+              attachments: ["The bazaar families"],
+              selfImage: "The hinge the market swings on.",
+            },
+            liveDynamics: {
+              activeGoals: ["Protect Elara's trade route", "Expose the registry leak"],
+              beliefDrift: ["Elara might be a reliable ally"],
+              currentStrains: ["Watched by rivals", "Two favors from collapse"],
+              earnedChanges: ["Now risks inventory to cover refugees"],
+            },
+          },
+          profile: {
+            species: "",
+            gender: "",
+            ageText: "",
+            appearance: "",
+            backgroundSummary: "",
+            personaSummary: "A patient fixer who trades in favors.",
+          },
+          socialContext: {
+            factionId: null,
+            factionName: null,
+            homeLocationId: null,
+            homeLocationName: null,
+            currentLocationId: LOCATION_ID,
+            currentLocationName: "Market Square",
+            relationshipRefs: [],
+            socialStatus: ["connected"],
+            originMode: "native",
+          },
+          motivations: {
+            shortTermGoals: ["Protect Elara's trade route"],
+            longTermGoals: ["Bind the market's allies together"],
+            beliefs: ["Elara honors her bargains"],
+            drives: ["Profit"],
+            frictions: ["Watched by rivals"],
+          },
+          capabilities: {
+            traits: ["Observant"],
+            skills: [{ name: "Negotiation", tier: "Master" }],
+            flaws: ["Secretive"],
+            specialties: [],
+            wealthTier: "Wealthy",
+          },
+          state: {
+            hp: 5,
+            conditions: ["Hidden"],
+            statusFlags: [],
+            activityState: "active",
+          },
+          loadout: {
+            inventorySeed: [],
+            equippedItemRefs: [],
+            currencyNotes: "",
+            signatureItems: [],
+          },
+          startConditions: {},
+          continuity: {
+            identityInertia: "anchored",
+            protectedCore: ["identity.baseFacts", "identity.behavioralCore"],
+            mutableSurface: ["identity.liveDynamics"],
+            changePressureNotes: ["Superficial scenes should update strain before core identity."],
+          },
+          provenance: {
+            sourceKind: "worldgen",
+            importMode: null,
+            templateId: null,
+            archetypePrompt: null,
+            worldgenOrigin: "scaffold",
+            legacyTags: ["merchant", "shrewd", "wealthy"],
+          },
+        }),
+      }),
+      npcsAtLocation: [],
+      player: {
+        id: "player-1",
+        name: "Elara",
+        currentLocationId: LOCATION_ID,
+        currentSceneLocationId: LOCATION_ID,
+      },
+    });
+
+    await tickNpcAgent(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
+
+    const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
+    expect(systemPrompt).toContain("Behavioral core:");
+    expect(systemPrompt).toContain("Enduring motives: Keep leverage over every faction at the market");
+    expect(systemPrompt).toContain("Pressure responses: Becomes icily polite; Trades information before coin");
+    expect(systemPrompt).toContain("Live dynamics:");
+    expect(systemPrompt).toContain("Current strains: Watched by rivals; Two favors from collapse");
+    expect(systemPrompt).toContain("Continuity / fidelity:");
+    expect(systemPrompt).toContain("identity inertia=anchored");
   });
 
   it("filters nearby entities by encounter scope and justified knowledge basis instead of same broad location membership", async () => {

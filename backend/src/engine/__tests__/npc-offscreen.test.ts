@@ -288,6 +288,130 @@ describe("simulateOffscreenNpcs", () => {
     expect(systemPrompt).toContain("Same broad-location actors outside the player's immediate scene still count as off-screen here.");
     expect(results).toHaveLength(1);
   });
+
+  it("uses a bounded richer identity slice instead of persona-plus-tags-only off-screen summaries", async () => {
+    setupMockDb({
+      offscreenNpcs: [
+        createMockNpc({
+          characterRecord: JSON.stringify({
+            identity: {
+              id: "npc-001",
+              campaignId: CAMPAIGN_ID,
+              role: "npc",
+              tier: "key",
+              displayName: "Lord Blackwood",
+              canonicalStatus: "known_ip_canonical",
+              baseFacts: {
+                biography: "A council noble balancing ambition against public order.",
+                socialRole: ["council noble", "court conspirator"],
+                hardConstraints: ["Cannot expose his pact with the regent"],
+              },
+              behavioralCore: {
+                motives: ["Secure lasting leverage over the succession"],
+                pressureResponses: ["Becomes ceremonially polite", "Moves through proxies first"],
+                taboos: ["Will not beg for mercy"],
+                attachments: ["His house name", "His daughter"],
+                selfImage: "The only adult left in a room of opportunists.",
+              },
+              liveDynamics: {
+                activeGoals: ["Secure the council vote", "Quiet the riot wards"],
+                beliefDrift: ["The market unrest may be useful if controlled"],
+                currentStrains: ["Paranoid", "Watching for betrayal"],
+                earnedChanges: ["Now funds informants outside the palace"],
+              },
+            },
+            profile: {
+              species: "",
+              gender: "",
+              ageText: "",
+              appearance: "",
+              backgroundSummary: "",
+              personaSummary: "A calculating noble who hides panic behind manners.",
+            },
+            socialContext: {
+              factionId: null,
+              factionName: null,
+              homeLocationId: null,
+              homeLocationName: null,
+              currentLocationId: "loc-002",
+              currentLocationName: "Council Hall",
+              relationshipRefs: [],
+              socialStatus: ["noble"],
+              originMode: "native",
+            },
+            motivations: {
+              shortTermGoals: ["Secure the council vote"],
+              longTermGoals: ["Take the throne"],
+              beliefs: ["Power rewards patience"],
+              drives: ["Ambition"],
+              frictions: ["Paranoid"],
+            },
+            capabilities: {
+              traits: ["Strategic"],
+              skills: [{ name: "Intrigue", tier: "Master" }],
+              flaws: ["Cruel"],
+              specialties: [],
+              wealthTier: "Wealthy",
+            },
+            state: {
+              hp: 5,
+              conditions: ["Hidden"],
+              statusFlags: [],
+              activityState: "active",
+            },
+            loadout: {
+              inventorySeed: [],
+              equippedItemRefs: [],
+              currencyNotes: "",
+              signatureItems: [],
+            },
+            startConditions: {},
+            continuity: {
+              identityInertia: "anchored",
+              protectedCore: ["identity.baseFacts", "identity.behavioralCore"],
+              mutableSurface: ["identity.liveDynamics"],
+              changePressureNotes: ["Use strain/progress updates before rewriting the core persona."],
+            },
+            provenance: {
+              sourceKind: "worldgen",
+              importMode: null,
+              templateId: null,
+              archetypePrompt: null,
+              worldgenOrigin: "scaffold",
+              legacyTags: ["noble", "cunning", "wealthy"],
+            },
+          }),
+        }),
+      ],
+    });
+    (generateText as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      text: JSON.stringify({
+        updates: [
+          {
+            npcName: "Lord Blackwood",
+            newLocation: null,
+            actionSummary: "Brokered a covert pledge from two wavering councilors.",
+            goalProgress: "Secured new leverage over the succession vote",
+          },
+        ],
+      }),
+    });
+
+    await simulateOffscreenNpcs(
+      CAMPAIGN_ID,
+      10,
+      JUDGE_PROVIDER,
+      PLAYER_LOCATION_ID,
+    );
+
+    const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
+    expect(systemPrompt).toContain("Keep each NPC to a bounded identity slice");
+    expect(systemPrompt).toContain("Enduring motives");
+    expect(systemPrompt).toContain("Pressure responses");
+    expect(systemPrompt).toContain("Current strains");
+    expect(systemPrompt).toContain("Continuity: identity inertia=anchored");
+    expect(systemPrompt).not.toContain("serialize the full richer record");
+  });
 });
 
 describe("parseOffscreenUpdates", () => {
