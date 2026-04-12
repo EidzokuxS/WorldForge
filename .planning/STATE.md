@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
-status: executing
-stopped_at: Completed 45-01-PLAN.md
-last_updated: "2026-04-12T07:39:30.459Z"
+status: verifying
+stopped_at: Completed 45-03-PLAN.md
+last_updated: "2026-04-12T08:10:39.844Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 14
-  completed_phases: 8
+  completed_phases: 9
   total_plans: 27
-  completed_plans: 25
-  percent: 57
+  completed_plans: 27
+  percent: 100
 ---
 
 # Project State
@@ -26,25 +26,27 @@ See: .planning/PROJECT.md (updated 2026-04-12)
 ## Current Position
 
 Phase: 45 (authoritative-scene-assembly-and-start-of-play-runtime) — EXECUTING
-Plan: 2 of 3
-Status: Ready to execute
+Plan: 3 of 3
+Status: Phase complete — ready for verification
 Last activity: 2026-04-12
 
-Progress: [██████░░░░] 57%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
 **Current Snapshot:**
 
 - Active roadmap phases: 14
-- Completed phases: 44
-- Planned or in-progress phases: 6
-- Total plans tracked: 24
-- Completed plans: 24
-- Pending plans: phases 45-50 not planned yet
+- Completed phases: 45
+- Planned or in-progress phases: 5
+- Total plans tracked: 27
+- Completed plans: 27
+- Pending plans: phases `46-50` still await plan breakdown
 
 **Recent Execution:**
 
+- Phase `45` Plan `03` — duration `8 min`, tasks `1`, files `5`
+- Phase `45` Plan `02` — duration `5 min`, tasks `2`, files `10`
 - Phase `38` Plan `03` — duration `8 min`, tasks `2`, files `9`
 - Phase `38` Plan `02` — duration `7 min`, tasks `3`, files `13`
 - Phase `44` Plan `02` — duration `5 min`, tasks `2`, files `1`
@@ -144,6 +146,11 @@ Recent decisions affecting current work:
 - [Milestone]: Follow-on phases 45-50 own the remaining live gameplay gaps around scene authority, encounter scope, writing quality, character fidelity, research grounding, and gameplay text readability.
 - [Phase 45]: Phase 45 starts from runtime-sequencing regressions, not prompt-only wording assertions.
 - [Phase 45]: Opening-surface regressions are pinned at both NarrativeLog and /game so premise fallback cannot survive in one layer.
+- [Phase 45]: Campaigns with no assistant history must request an opening scene through a dedicated backend SSE path instead of premise fallback.
+- [Phase 45]: Hidden tool-driving resolution and visible narration now run as separate storyteller passes so no partial hidden prose can leak into persisted assistant output.
+- [Phase 45]: Present-scene NPC settlement now runs before the final narration pass, while off-screen NPC, reflection, and faction work stays inside rollback-critical post-narration finalization.
+- [Phase 45]: Frontend opening scenes now request `/api/chat/opening` when assistant history is empty instead of rendering premise fallback.
+- [Phase 45]: The `/game` UI now treats `scene-settling` as a separate progress state from post-narration `finalizing_turn`.
 
 ### Pending Todos
 
@@ -156,6 +163,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-12T07:39:30.455Z
-Stopped at: Completed 45-01-PLAN.md
+Last session: 2026-04-12T08:00:41.500Z
+Stopped at: Completed 45-03-PLAN.md
 Resume file: None
