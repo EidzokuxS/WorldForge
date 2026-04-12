@@ -204,11 +204,11 @@ describe("authoritative inventory schema contract", () => {
       );
       expect(itemColumns.find((column) => column.name === "equip_state")).toMatchObject({
         notnull: 1,
-        dflt_value: '"carried"',
+        dflt_value: "'carried'",
       });
       expect(itemColumns.find((column) => column.name === "is_signature")).toMatchObject({
         notnull: 1,
-        dflt_value: "0",
+        dflt_value: "false",
       });
 
     } finally {

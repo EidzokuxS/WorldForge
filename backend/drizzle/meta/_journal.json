@@ -50,6 +50,13 @@
       "when": 1775924166574,
       "tag": "0006_gigantic_chronomancer",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1775971237950,
+      "tag": "0007_spooky_warlock",
+      "breakpoints": true
     }
   ]
 }

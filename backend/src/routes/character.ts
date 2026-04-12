@@ -26,6 +26,7 @@ import {
   ensureImageDir,
   cacheImage,
 } from "../images/index.js";
+import { toAuthoritativeItemSeed } from "../inventory/index.js";
 
 const log = createLogger("character-route");
 import {
@@ -289,14 +290,9 @@ app.post("/save-character", async (c) => {
     if (canonicalLoadout.items.length > 0) {
       db.insert(items)
         .values(
-          canonicalLoadout.items.map((item) => ({
-            id: crypto.randomUUID(),
-            campaignId,
-            name: item.name,
-            tags: JSON.stringify(item.tags),
-            ownerId: playerId,
-            locationId: null,
-          })),
+          canonicalLoadout.items.map((item) =>
+            toAuthoritativeItemSeed(campaignId, playerId, item),
+          ),
         )
         .run();
     }

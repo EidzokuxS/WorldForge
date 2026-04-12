@@ -17,6 +17,7 @@ import { AppError } from "../lib/index.js";
 import { assertSafeId, CAMPAIGNS_DIR, getCampaignConfigPath, getCampaignDir } from "./paths.js";
 import { openVectorDb, closeVectorDb } from "../vectors/index.js";
 import { createLogger } from "../lib/index.js";
+import { ensureCampaignInventoryAuthority } from "../inventory/index.js";
 
 const log = createLogger("campaign-manager");
 
@@ -267,6 +268,7 @@ export async function loadCampaign(id: string): Promise<CampaignMeta> {
       throw new AppError("Campaign record could not be loaded.", 500);
     }
 
+    ensureCampaignInventoryAuthority(id);
     await openVectorDb(id);
 
     const meta: CampaignMeta = {

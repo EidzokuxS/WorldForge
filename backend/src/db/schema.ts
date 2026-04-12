@@ -192,6 +192,13 @@ export const items = sqliteTable(
     tags: text("tags").notNull().default("[]"),
     ownerId: text("owner_id"),
     locationId: text("location_id").references(() => locations.id),
+    equipState: text("equip_state", {
+      enum: ["carried", "equipped"],
+    }).notNull().default("carried"),
+    equippedSlot: text("equipped_slot"),
+    isSignature: integer("is_signature", { mode: "boolean" })
+      .notNull()
+      .default(false),
   },
   (table) => [index("idx_items_campaign").on(table.campaignId)]
 );
