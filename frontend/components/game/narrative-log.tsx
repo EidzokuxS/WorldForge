@@ -4,6 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import { RotateCcw, Undo2, Check, X } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { ChatMessage } from "@worldforge/shared";
+import {
+  deriveGameMessageKind,
+  stripLookupPrefix,
+  type GameMessageKind,
+} from "@/lib/gameplay-text";
+import { RichTextMessage } from "./rich-text-message";
+import { SpecialMessageBlock } from "./special-message-block";
 
 interface NarrativeLogProps {
   messages: ChatMessage[];
@@ -77,6 +84,40 @@ export function NarrativeLog({
     return -1;
   })();
 
+  const progressMessages = [
+    (isStreaming || turnPhase === "streaming") &&
+      "The storyteller is weaving the scene...",
+    sceneProgress === "opening" &&
+      "The opening scene is taking shape. The runtime is grounding your first moment before narration appears.",
+    sceneProgress === "scene-settling" &&
+      "The scene is still settling into place before the narration begins.",
+    turnPhase === "finalizing" &&
+      "The world is still resolving. Retry and undo unlock when the turn is complete.",
+  ].filter((message): message is string => Boolean(message));
+
+  const renderSupportMessage = (kind: GameMessageKind, content: string) => {
+    const normalizedContent =
+      kind === "lookup" || kind === "compare"
+        ? stripLookupPrefix(content)
+        : content;
+
+    if (
+      kind === "lookup" ||
+      kind === "compare" ||
+      kind === "system" ||
+      kind === "mechanical" ||
+      kind === "progress"
+    ) {
+      return <SpecialMessageBlock kind={kind} content={normalizedContent} />;
+    }
+
+    return (
+      <article className="mx-auto w-full max-w-2xl rounded-[1.75rem] border border-white/8 bg-white/[0.03] px-6 py-6 shadow-[0_28px_60px_-32px_rgba(0,0,0,0.85)]">
+        <RichTextMessage content={content} variant="narration" />
+      </article>
+    );
+  };
+
   return (
     <section className="flex-1 overflow-hidden">
       <div ref={containerRef} className="h-full">
@@ -88,28 +129,33 @@ export function NarrativeLog({
               </p>
             ) : (
               messages.map((message, index) => {
+                const kind = deriveGameMessageKind(message.role, message.content);
+                const isAssistant = message.role === "assistant";
+
                 if (message.role === "user") {
                   return (
-                    <div key={`${message.role}-${index}`} className="pl-3">
-                      <p className="whitespace-pre-wrap font-serif text-sm italic leading-relaxed text-mystic">
-                        {`> ${message.content}`}
-                      </p>
+                    <div
+                      key={`${message.role}-${index}`}
+                      className="flex justify-end"
+                    >
+                      <div className="max-w-[85%] rounded-[1.5rem] rounded-tr-md border border-white/10 bg-white/[0.045] px-5 py-4 shadow-[0_18px_40px_-28px_rgba(0,0,0,0.8)]">
+                        <RichTextMessage
+                          content={message.content}
+                          variant="player"
+                        />
+                      </div>
                     </div>
                   );
                 }
 
                 if (message.role === "system") {
                   return (
-                    <p
-                      key={`${message.role}-${index}`}
-                      className="whitespace-pre-wrap border-l border-border pl-3 text-sm italic leading-relaxed text-muted-foreground"
-                    >
-                      {message.content}
-                    </p>
+                    <div key={`${message.role}-${index}`}>
+                      <SpecialMessageBlock kind="system" content={message.content} />
+                    </div>
                   );
                 }
 
-                // Assistant message
                 const isLastAssistant = index === lastAssistantIndex;
                 const isEditing = editingIndex === index;
                 const wasEdited = editedIndices.has(index);
@@ -149,13 +195,13 @@ export function NarrativeLog({
                       </div>
                     ) : (
                       <>
-                        <p
+                        <div
                           onClick={() => startEditing(index, message.content)}
-                          className="cursor-pointer whitespace-pre-wrap font-serif text-base leading-relaxed text-foreground hover:bg-accent/30 rounded-md transition-colors px-1 -mx-1"
+                          className="cursor-pointer rounded-2xl transition-colors hover:bg-accent/20"
                           title="Click to edit"
                         >
-                          {message.content}
-                        </p>
+                          {renderSupportMessage(kind, message.content)}
+                        </div>
                         {wasEdited && (
                           <span className="mt-1 inline-block text-xs italic text-muted-foreground">
                             (edited)
@@ -165,7 +211,11 @@ export function NarrativeLog({
                     )}
 
                     {/* Retry/Undo buttons on last assistant message */}
-                    {isLastAssistant && canRetryUndo && !isStreaming && !isEditing && (
+                    {isAssistant &&
+                      isLastAssistant &&
+                      canRetryUndo &&
+                      !isStreaming &&
+                      !isEditing && (
                       <div className="mt-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                         {onRetry && (
                           <button
@@ -193,27 +243,13 @@ export function NarrativeLog({
                 );
               })
             )}
-
-            {turnPhase === "streaming" ? (
-              <p className="font-serif text-sm italic text-muted-foreground">
-                The storyteller is weaving the scene...
-              </p>
-            ) : null}
-            {sceneProgress === "opening" ? (
-              <p className="font-serif text-sm italic text-muted-foreground">
-                The opening scene is taking shape. The runtime is grounding your first moment before narration appears.
-              </p>
-            ) : null}
-            {sceneProgress === "scene-settling" ? (
-              <p className="font-serif text-sm italic text-muted-foreground">
-                The scene is still settling into place before the narration begins.
-              </p>
-            ) : null}
-            {turnPhase === "finalizing" ? (
-              <p className="font-serif text-sm italic text-muted-foreground">
-                The world is still resolving. Retry and undo unlock when the turn is complete.
-              </p>
-            ) : null}
+            {progressMessages.map((message, index) => (
+              <SpecialMessageBlock
+                key={`progress-${index}`}
+                kind="progress"
+                content={message}
+              />
+            ))}
           </div>
         </ScrollArea>
       </div>
