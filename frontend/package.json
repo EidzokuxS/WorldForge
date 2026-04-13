@@ -10,6 +10,7 @@
     "typecheck": "npm --prefix ../shared run build && tsc --noEmit -p tsconfig.typecheck.json"
   },
   "dependencies": {
+    "@tailwindcss/typography": "^0.5.19",
     "@worldforge/shared": "*",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -18,7 +19,9 @@
     "radix-ui": "^1.4.3",
     "react": "19.2.3",
     "react-dom": "19.2.3",
+    "react-markdown": "^10.1.0",
     "react-resizable-panels": "^4.7.6",
+    "remark-gfm": "^4.0.1",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.5.0"
   },
