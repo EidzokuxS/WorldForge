@@ -20,7 +20,7 @@ created: 2026-04-13
 | **Framework** | Vitest 3.2.4 |
 | **Config file** | `vitest.config.ts`, `frontend/vitest.config.ts`, `backend/vitest.config.ts` |
 | **Task-local run rule** | Use the per-task commands in the verification map below; each task-local sample must stay at or under ~30 seconds. |
-| **Wave aggregate smoke** | `npx vitest run frontend/components/game/__tests__/narrative-log.test.tsx frontend/components/game/__tests__/action-bar.test.tsx frontend/app/game/__tests__/page.test.tsx frontend/lib/__tests__/api.test.ts frontend/app/(non-game)/settings/__tests__/page.test.tsx backend/src/routes/__tests__/settings.test.ts` |
+| **Wave aggregate smoke** | `npx vitest run frontend/components/game/__tests__/rich-text-message.test.tsx frontend/components/game/__tests__/narrative-log.test.tsx frontend/components/game/__tests__/action-bar.test.tsx frontend/app/game/__tests__/page.test.tsx frontend/lib/__tests__/api.test.ts frontend/app/(non-game)/settings/__tests__/page.test.tsx backend/src/routes/__tests__/settings.test.ts` |
 | **Full suite command** | `npm run typecheck && npx vitest run` |
 | **Estimated runtime** | `<=30s` for task-local samples, `~45s` for the wave aggregate smoke, longer for the full suite |
 
@@ -40,13 +40,14 @@ created: 2026-04-13
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| 50-01-01 | 01 | 1 | UX-01 | frontend unit | `npx vitest run frontend/components/game/__tests__/narrative-log.test.tsx` | ✅ | ⬜ pending |
-| 50-01-02 | 01 | 1 | UX-01 | frontend integration | `npx vitest run frontend/app/game/__tests__/page.test.tsx frontend/lib/__tests__/api.test.ts` | ✅ | ⬜ pending |
-| 50-02-01 | 02 | 2 | UX-01 | frontend unit | `npx vitest run frontend/components/game/__tests__/action-bar.test.tsx frontend/components/game/__tests__/narrative-log.test.tsx` | ✅ | ⬜ pending |
+| 50-01-01 | 01 | 1 | UX-01 | frontend unit | `npm ls --workspace frontend react-markdown remark-gfm @tailwindcss/typography && npx vitest run frontend/components/game/__tests__/rich-text-message.test.tsx` | ➕ introduced by 50-01-01 | ⬜ pending |
+| 50-01-02 | 01 | 1 | UX-01 | frontend integration | `npx vitest run frontend/components/game/__tests__/narrative-log.test.tsx` | ✅ | ⬜ pending |
+| 50-02-01 | 02 | 2 | UX-01 | frontend unit | `npx vitest run frontend/components/game/__tests__/action-bar.test.tsx frontend/app/game/__tests__/page.test.tsx` | ✅ | ⬜ pending |
 | 50-02-02 | 02 | 2 | UX-01 | frontend integration | `npx vitest run frontend/app/game/__tests__/page.test.tsx frontend/lib/__tests__/api.test.ts` | ✅ | ⬜ pending |
 | 50-03-01 | 03 | 1 | UX-01 | shared/backend integration | `npx vitest run backend/src/routes/__tests__/settings.test.ts` | ✅ | ⬜ pending |
 | 50-03-02 | 03 | 1 | UX-01 | frontend unit | `npx vitest run frontend/app/(non-game)/settings/__tests__/page.test.tsx` | ✅ | ⬜ pending |
-| 50-04-01 | 04 | 3 | UX-01 | backend/frontend integration | `npx vitest run backend/src/routes/__tests__/chat.test.ts frontend/lib/__tests__/api.test.ts` | ✅ | ⬜ pending |
+| 50-04-01 | 04 | 3 | UX-01 | backend/frontend integration | `npx vitest run backend/src/engine/__tests__/turn-processor.test.ts backend/src/routes/__tests__/chat.test.ts frontend/lib/__tests__/api.test.ts` | ✅ | ⬜ pending |
+| 50-04-01A | 04 | 3 | UX-01 | checkpoint smoke | `npx vitest run backend/src/engine/__tests__/turn-processor.test.ts backend/src/routes/__tests__/chat.test.ts frontend/lib/__tests__/api.test.ts` | ✅ | ⬜ pending |
 | 50-04-02 | 04 | 3 | UX-01 | frontend integration | `npx vitest run frontend/components/game/__tests__/narrative-log.test.tsx frontend/app/game/__tests__/page.test.tsx` | ✅ | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ partial*
@@ -55,12 +56,13 @@ created: 2026-04-13
 
 ## Wave 0 Requirements
 
-- [ ] Extend `frontend/components/game/__tests__/narrative-log.test.tsx` for bounded RP rich-text rendering, special block separation, and stream-safe partial markup behavior
+- [ ] Add `frontend/components/game/__tests__/rich-text-message.test.tsx` in Task `50-01-01`; it is introduced by Phase 50 and owns bounded RP rich-text rendering, dedicated compare/power-profile labeling, and stream-safe partial markup behavior
+- [ ] Extend `frontend/components/game/__tests__/narrative-log.test.tsx` for special block separation, compare non-fallback behavior, and stream-safe message-surface wiring
 - [ ] Extend `frontend/components/game/__tests__/action-bar.test.tsx` for sticky/input-shell affordances and lightweight markup guidance without WYSIWYG behavior
 - [ ] Extend `frontend/app/game/__tests__/page.test.tsx` to prove `/game` keeps lookup/progress/stream correctness under richer message surfaces
 - [ ] Extend `frontend/lib/__tests__/api.test.ts` only if Phase 50 introduces additive rendering metadata or reasoning-bearing transport parsing
 - [ ] Extend `frontend/app/(non-game)/settings/__tests__/page.test.tsx` and `backend/src/routes/__tests__/settings.test.ts` for the persisted raw-reasoning toggle
-- [ ] Add one focused component test if Phase 50 introduces a new `rich-text-message.tsx` or special-block renderer
+- [ ] Keep special-block coverage inside the new `frontend/components/game/__tests__/rich-text-message.test.tsx` suite introduced by Task `50-01-01`; do not assume a pre-existing rich-text renderer test file
 
 ---
 
