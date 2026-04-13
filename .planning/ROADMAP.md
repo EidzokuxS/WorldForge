@@ -32,7 +32,7 @@ v1.1 started as a reconciliation milestone built from the [Phase 36 handoff](/R:
 - [x] **Phase 50: Gameplay Text Presentation & Rich Readability** - Improve gameplay text rendering, typography, and rich-text affordances for both input and narration. (completed 2026-04-13)
 - [x] **Phase 51: Persistent Worldgen Research Frame & DNA-Aware Retrieval** - Persist worldgen research intent once and steer follow-up canon lookup from DNA/task context instead of rebuilding blended searches from raw user prose. (completed 2026-04-13)
 - [x] **Phase 52: Advanced Character Inspector & Full Record Visibility** - Expose the full character record in authoring/review UI so grounding, power, continuity, and provenance are inspectable without manual DB access. (completed 2026-04-13)
-- [ ] **Phase 53: Gameplay Route Convergence & Reload-Stable Research Log** - Close remaining alternate gameplay route bypasses and make explicit lookup/compare replies survive history reload.
+- [x] **Phase 53: Gameplay Route Convergence & Reload-Stable Research Log** - Close remaining alternate gameplay route bypasses and make explicit lookup/compare replies survive history reload. (completed 2026-04-13)
 - [ ] **Phase 54: Draft-Backed NPC Edit Persistence & Review Convergence** - Make World Review edits to draft-backed NPCs persist through save/load instead of silently losing top-level changes.
 - [ ] **Phase 55: Gap-Proof Verification Matrix & Closeout Truth Alignment** - Close the remaining route-matrix blind spots and make milestone closeout artifacts reflect the actual late-phase defect history.
 
@@ -272,7 +272,7 @@ Plans:
 **Plans**: 2 plans
 Plans:
 - [x] 53-01-PLAN.md — Retire the legacy `/api/chat` bypass and persist factual lookup exchanges on the authoritative chat-history lane.
-- [ ] 53-02-PLAN.md — Rehydrate persisted lookup/compare entries on `/game` and close the stream-plus-reload route matrix.
+- [x] 53-02-PLAN.md — Rehydrate persisted lookup/compare entries on `/game` and close the stream-plus-reload route matrix.
 
 ### Phase 54: Draft-Backed NPC Edit Persistence & Review Convergence
 **Goal**: Make World Review edits converge onto one authoritative draft/scaffold lane so generated, imported, and researched NPCs do not silently lose manual edits on save/load.
@@ -283,9 +283,10 @@ Plans:
   1. Editing name, persona, tags, and goals for a draft-backed NPC survives save/load and matches what the user last saw in World Review.
   2. Save-edits and scaffold persistence use one converged truth for draft-backed NPCs instead of preferring stale draft payloads over visible edits.
   3. The advanced inspector remains additive and read-only while normal authoring/review save flows stay trustworthy.
-**Plans**: 0 plans
+**Plans**: 2 plans
 Plans:
-- [ ] TBD (run `$gsd-plan-phase 54` to break down)
+- [ ] 54-01-PLAN.md — Converge the backend draft-backed NPC save boundary and prove the route -> save -> load -> world-payload round-trip.
+- [ ] 54-02-PLAN.md — Prove the repaired backend truth lands in World Review reload without reopening inspector/editor scope.
 
 ### Phase 55: Gap-Proof Verification Matrix & Closeout Truth Alignment
 **Goal**: Close the remaining verification blind spots and make milestone closeout/state artifacts accurately describe the actual fixed product.
@@ -320,6 +321,6 @@ Plans:
 | 50. Gameplay Text Presentation & Rich Readability | 4/4 | Complete   | 2026-04-13 |
 | 51. Persistent Worldgen Research Frame & DNA-Aware Retrieval | 2/2 | Complete | 2026-04-13 |
 | 52. Advanced Character Inspector & Full Record Visibility | 1/1 | Complete | 2026-04-13 |
-| 53. Gameplay Route Convergence & Reload-Stable Research Log | 1/2 | In Progress|  |
+| 53. Gameplay Route Convergence & Reload-Stable Research Log | 2/2 | Complete | 2026-04-13 |
 | 54. Draft-Backed NPC Edit Persistence & Review Convergence | 0/0 | Pending |  |
 | 55. Gap-Proof Verification Matrix & Closeout Truth Alignment | 0/0 | Pending |  |
