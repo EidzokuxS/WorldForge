@@ -1,7 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Provider, RoleConfig, FallbackConfig, ResearchConfig, Settings } from "@worldforge/shared";
+import type {
+  Provider,
+  RoleConfig,
+  FallbackConfig,
+  ResearchConfig,
+  Settings,
+  UiConfig,
+} from "@worldforge/shared";
 import {
   BUILTIN_PROVIDER_PRESETS,
   NONE_PROVIDER_ID,
@@ -163,6 +170,20 @@ function normalizeResearchConfig(
   };
 }
 
+function normalizeUiConfig(
+  value: unknown,
+  defaults: UiConfig
+): UiConfig {
+  const source = isRecord(value) ? value : {};
+
+  return {
+    showRawReasoning:
+      typeof source.showRawReasoning === "boolean"
+        ? source.showRawReasoning
+        : defaults.showRawReasoning,
+  };
+}
+
 export function rebindProviderReferences(settings: Settings): Settings {
   const providers = mergeBuiltinProviders(settings.providers);
   const defaults = createDefaultSettings();
@@ -222,6 +243,7 @@ export function rebindProviderReferences(settings: Settings): Settings {
       providerId: imageProviderId,
       stylePrompt: settings.images.stylePrompt || defaults.images.stylePrompt,
     },
+    ui: normalizeUiConfig(settings.ui, defaults.ui),
   };
 }
 
@@ -263,6 +285,7 @@ export function normalizeSettings(value: unknown): Settings {
       enabled: Boolean(imagesSource.enabled),
     },
     research: normalizeResearchConfig(value.research, defaults.research),
+    ui: normalizeUiConfig(value.ui, defaults.ui),
   };
 }
 

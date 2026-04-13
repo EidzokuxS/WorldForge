@@ -94,5 +94,8 @@ export function createDefaultSettings(): Settings {
       braveApiKey: "",
       zaiApiKey: "",
     },
+    ui: {
+      showRawReasoning: false,
+    },
   };
 }

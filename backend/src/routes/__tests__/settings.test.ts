@@ -155,6 +155,7 @@ describe("POST /api/settings", () => {
       fallback: { providerId: "p1", model: "m1", timeoutMs: 30000, retryCount: 2 },
       images: { enabled: false, providerId: "none", model: "", stylePrompt: "" },
       research: { enabled: true, maxSearchSteps: 10 },
+      ui: { showRawReasoning: true },
     };
     mockedSave.mockImplementation(() => {
       throw new Error("write error");

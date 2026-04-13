@@ -92,6 +92,9 @@ export const settingsPayloadSchema = z.object({
     braveApiKey: z.string().optional(),
     zaiApiKey: z.string().optional(),
   }).strip(),
+  ui: z.object({
+    showRawReasoning: z.boolean(),
+  }).strip(),
 }).strip();
 
 // --- Endpoint schemas ---

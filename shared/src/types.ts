@@ -40,6 +40,10 @@ export interface ResearchConfig {
   zaiApiKey?: string;
 }
 
+export interface UiConfig {
+  showRawReasoning: boolean;
+}
+
 export type PremiseDivergenceMode = "canonical" | "coexisting" | "diverged";
 
 export type PremiseDivergenceProtagonistKind = "canonical" | "custom";
@@ -80,6 +84,7 @@ export interface Settings {
   fallback: FallbackConfig;
   images: ImageConfig;
   research: ResearchConfig;
+  ui: UiConfig;
 }
 
 /** Cached IP research context — persisted in campaign config.json */
