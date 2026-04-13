@@ -102,6 +102,7 @@ vi.mock("../../campaign/runtime-state.js", () => ({
 
 import { callStoryteller } from "../../ai/index.js";
 import {
+  appendChatMessages,
   getActiveCampaign,
   getCampaignPremise,
   getChatHistory,
@@ -127,6 +128,7 @@ import { runGroundedLookup } from "../../engine/grounded-lookup.js";
 import chatRoutes from "../chat.js";
 
 const mockedGetActive = vi.mocked(getActiveCampaign);
+const mockedAppendChatMessages = vi.mocked(appendChatMessages);
 const mockedGetPremise = vi.mocked(getCampaignPremise);
 const mockedGetHistory = vi.mocked(getChatHistory);
 const mockedLoadCampaign = vi.mocked(loadCampaign);
@@ -154,6 +156,7 @@ const app = new Hono();
 app.route("/chat", chatRoutes);
 
 const CAMPAIGN_ID = "campaign-42";
+const chatHistoryByCampaign = new Map<string, Array<{ role: string; content: string }>>();
 
 function activateCampaign() {
   mockedGetActive.mockReturnValue({
@@ -212,6 +215,15 @@ beforeEach(() => {
   mockDrainPendingCommittedEvents.mockReturnValue([]);
   runtimeSnapshots.clear();
   runtimeActiveTurns.clear();
+  chatHistoryByCampaign.clear();
+  mockedAppendChatMessages.mockImplementation((campaignId, messages) => {
+    const existing = chatHistoryByCampaign.get(campaignId) ?? [];
+    existing.push(...messages);
+    chatHistoryByCampaign.set(campaignId, existing);
+  });
+  mockedGetHistory.mockImplementation((campaignId) => {
+    return [...(chatHistoryByCampaign.get(campaignId) ?? [])] as any;
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -461,6 +473,115 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(body).not.toContain("event: narrative");
     expect(body).not.toContain("event: state_update");
     expect(body).not.toContain("event: quick_actions");
+  });
+
+  it("persists lookup exchanges to /chat/history without creating a live turn snapshot", async () => {
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockResolvedValue({
+      id: CAMPAIGN_ID,
+      name: "Loaded Campaign",
+      createdAt: "2026-01-01",
+    } as any);
+    mockedRunGroundedLookup.mockResolvedValue({
+      lookupKind: "character_canon_fact",
+      subject: "Satoru Gojo",
+      answer: "Gojo is the strongest active sorcerer prior to his sealing.",
+      citations: [],
+      uncertaintyNotes: [],
+      sceneImpact: "Lookup only.",
+    });
+
+    const res = await app.request("/chat/lookup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        lookupKind: "character_canon_fact",
+        subject: "Satoru Gojo",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const streamBody = await res.text();
+    expect(streamBody).toContain("event: lookup_result");
+    expect(streamBody).toContain("event: done");
+    expect(streamBody).not.toContain("event: oracle_result");
+    expect(streamBody).not.toContain("event: narrative");
+    expect(mockedAppendChatMessages).toHaveBeenCalledWith(CAMPAIGN_ID, [
+      { role: "user", content: "/lookup character: Satoru Gojo" },
+      {
+        role: "assistant",
+        content:
+          "[Lookup: character_canon_fact] Gojo is the strongest active sorcerer prior to his sealing.",
+      },
+    ]);
+
+    const historyRes = await app.request(`/chat/history?campaignId=${CAMPAIGN_ID}`);
+
+    expect(historyRes.status).toBe(200);
+    const historyBody = await historyRes.json();
+    expect(historyBody.hasLiveTurnSnapshot).toBe(false);
+    expect(historyBody.messages).toEqual([
+      { role: "user", content: "/lookup character: Satoru Gojo" },
+      {
+        role: "assistant",
+        content:
+          "[Lookup: character_canon_fact] Gojo is the strongest active sorcerer prior to his sealing.",
+      },
+    ]);
+  });
+
+  it("persists compare exchanges on the same history lane with factual compare entries", async () => {
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockResolvedValue({
+      id: CAMPAIGN_ID,
+      name: "Loaded Campaign",
+      createdAt: "2026-01-01",
+    } as any);
+    mockedRunGroundedLookup.mockResolvedValue({
+      lookupKind: "power_profile",
+      subject: "Satoru Gojo",
+      answer: "Gojo owns range control, while Sukuna threatens the broader finishing ceiling.",
+      citations: [],
+      uncertaintyNotes: [],
+      sceneImpact: "Lookup only.",
+    });
+
+    const res = await app.request("/chat/lookup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        lookupKind: "power_profile",
+        subject: "Satoru Gojo",
+        compareAgainst: "Ryomen Sukuna",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(mockedAppendChatMessages).toHaveBeenCalledWith(CAMPAIGN_ID, [
+      { role: "user", content: "/compare Satoru Gojo vs Ryomen Sukuna" },
+      {
+        role: "assistant",
+        content:
+          "[Lookup: compare] Gojo owns range control, while Sukuna threatens the broader finishing ceiling.",
+      },
+    ]);
+
+    const historyRes = await app.request(`/chat/history?campaignId=${CAMPAIGN_ID}`);
+
+    expect(historyRes.status).toBe(200);
+    const historyBody = await historyRes.json();
+    expect(historyBody.hasLiveTurnSnapshot).toBe(false);
+    expect(historyBody.messages).toEqual([
+      { role: "user", content: "/compare Satoru Gojo vs Ryomen Sukuna" },
+      {
+        role: "assistant",
+        content:
+          "[Lookup: compare] Gojo owns range control, while Sukuna threatens the broader finishing ceiling.",
+      },
+    ]);
   });
 
   it("accepts canon fact, event clarification, and power comparison lookups through the dedicated schema", async () => {
@@ -1115,90 +1236,27 @@ describe("Campaign-loaded gameplay transport", () => {
 // POST /chat
 // ---------------------------------------------------------------------------
 describe("POST /chat", () => {
-  it("streams storyteller response", async () => {
-    activateCampaign();
-    setupStoryteller();
-    mockedGetPremise.mockReturnValue("A world of wonder.");
-    mockedGetHistory.mockReturnValue([]);
-
-    // Mock callStoryteller to return a fake stream response
-    const fakeStream = new ReadableStream({
-      start(controller) {
-        controller.enqueue(new TextEncoder().encode("The story continues..."));
-        controller.close();
-      },
-    });
-    mockedCallStoryteller.mockReturnValue({
-      toTextStreamResponse: vi.fn(() =>
-        new Response(fakeStream, {
-          headers: {
-            "Content-Type": "text/plain; charset=utf-8",
-            "Cache-Control": "no-cache, no-transform",
-          },
-        })
-      ),
-    } as any);
-
+  it("returns 410 Gone and never reaches the legacy storyteller bypass", async () => {
     const res = await app.request("/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ playerAction: "I open the door." }),
     });
 
-    expect(res.status).toBe(200);
-    expect(res.headers.get("Content-Type")).toContain("text/plain");
-    const text = await res.text();
-    expect(text).toBe("The story continues...");
-    expect(mockedCallStoryteller).toHaveBeenCalledOnce();
+    expect(res.status).toBe(410);
+    expect(mockedCallStoryteller).not.toHaveBeenCalled();
+    expect(mockedAppendChatMessages).not.toHaveBeenCalled();
   });
 
-  it("returns 400 when no active campaign", async () => {
-    mockedGetActive.mockReturnValue(null as any);
-
-    const res = await app.request("/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ playerAction: "test" }),
-    });
-
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.error).toBe("No active campaign loaded.");
-  });
-
-  it("returns 400 for empty playerAction", async () => {
-    const res = await app.request("/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ playerAction: "   " }),
-    });
-
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body).toHaveProperty("error");
-  });
-
-  it("returns 400 for missing playerAction", async () => {
-    const res = await app.request("/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
-
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body).toHaveProperty("error");
-  });
-
-  it("returns 400 for invalid JSON body", async () => {
+  it("hard-fails before body validation or campaign lookup", async () => {
     const res = await app.request("/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: "not json",
     });
 
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body).toHaveProperty("error");
+    expect(res.status).toBe(410);
+    expect(mockedGetActive).not.toHaveBeenCalled();
+    expect(mockedCallStoryteller).not.toHaveBeenCalled();
   });
 });

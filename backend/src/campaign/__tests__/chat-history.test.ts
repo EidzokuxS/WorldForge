@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import fs from "node:fs";
+import { formatLookupLogEntry } from "@worldforge/shared";
 
 vi.mock("../manager.js", () => ({
   readCampaignConfig: vi.fn(() => ({ premise: "Test premise" })),
@@ -73,5 +74,63 @@ describe("appendChatMessages", () => {
     expect(writeSpy).toHaveBeenCalledOnce();
     const written = JSON.parse(writeSpy.mock.calls[0][1] as string) as unknown[];
     expect(written).toHaveLength(2);
+  });
+
+  it("round-trips persisted lookup command and factual reply through getChatHistory", () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(false);
+    const writeSpy = vi.spyOn(fs, "writeFileSync").mockImplementation(() => {});
+
+    appendChatMessages("test-id", [
+      { role: "user", content: "/lookup character: Satoru Gojo" },
+      {
+        role: "assistant",
+        content: formatLookupLogEntry(
+          "character_canon_fact",
+          "Gojo teaches at Tokyo Jujutsu High before the Shibuya Incident.",
+        ),
+      },
+    ]);
+
+    const persisted = writeSpy.mock.calls[0]?.[1] as string;
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "readFileSync").mockReturnValue(persisted);
+
+    expect(getChatHistory("test-id")).toEqual([
+      { role: "user", content: "/lookup character: Satoru Gojo" },
+      {
+        role: "assistant",
+        content:
+          "[Lookup: character_canon_fact] Gojo teaches at Tokyo Jujutsu High before the Shibuya Incident.",
+      },
+    ]);
+  });
+
+  it("round-trips compare lookup entries through the same history lane", () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(false);
+    const writeSpy = vi.spyOn(fs, "writeFileSync").mockImplementation(() => {});
+
+    appendChatMessages("test-id", [
+      { role: "user", content: "/compare Satoru Gojo vs Ryomen Sukuna" },
+      {
+        role: "assistant",
+        content: formatLookupLogEntry(
+          "compare",
+          "Gojo controls spacing more cleanly, while Sukuna brings the harsher finishing ceiling.",
+        ),
+      },
+    ]);
+
+    const persisted = writeSpy.mock.calls[0]?.[1] as string;
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "readFileSync").mockReturnValue(persisted);
+
+    expect(getChatHistory("test-id")).toEqual([
+      { role: "user", content: "/compare Satoru Gojo vs Ryomen Sukuna" },
+      {
+        role: "assistant",
+        content:
+          "[Lookup: compare] Gojo controls spacing more cleanly, while Sukuna brings the harsher finishing ceiling.",
+      },
+    ]);
   });
 });
