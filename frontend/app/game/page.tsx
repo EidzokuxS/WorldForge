@@ -867,16 +867,21 @@ export default function GamePage() {
   }
 
   return (
-    <div className="flex h-screen flex-col">
+    <div
+      data-testid="game-shell"
+      className="relative flex min-h-screen flex-col overflow-hidden bg-zinc-950 text-zinc-100"
+    >
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(244,244,245,0.08),_transparent_40%),linear-gradient(180deg,_rgba(24,24,27,0.98),_rgba(9,9,11,1))]" />
+      <div className="pointer-events-none absolute inset-y-0 left-1/2 hidden w-[38rem] -translate-x-1/2 bg-[radial-gradient(circle_at_center,_rgba(255,255,255,0.05),_transparent_68%)] blur-3xl xl:block" />
       {/* Toolbar */}
-      <div className="flex items-center justify-between border-b border-border bg-card px-4 py-1.5">
+      <div className="relative z-10 flex items-center justify-between border-b border-white/8 bg-zinc-950/80 px-4 py-2 backdrop-blur-xl">
         <div className="flex items-center gap-1">
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 gap-1.5 text-xs"
+                className="h-8 gap-1.5 text-xs text-zinc-300 hover:bg-white/5 hover:text-white"
               >
                 <Home className="h-3.5 w-3.5" />
                 Title
@@ -900,7 +905,7 @@ export default function GamePage() {
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 gap-1.5 text-xs"
+            className="h-8 gap-1.5 text-xs text-zinc-300 hover:bg-white/5 hover:text-white"
             onClick={() => router.push("/settings")}
           >
             <Settings className="h-3.5 w-3.5" />
@@ -910,7 +915,7 @@ export default function GamePage() {
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 gap-1.5 text-xs"
+          className="h-8 gap-1.5 text-xs text-zinc-300 hover:bg-white/5 hover:text-white"
           onClick={() => setCheckpointOpen(true)}
         >
           <Save className="h-3.5 w-3.5" />
@@ -918,56 +923,81 @@ export default function GamePage() {
         </Button>
       </div>
       {travelFeedback ? (
-        <div className="border-b border-border bg-muted/40 px-4 py-2 text-sm text-foreground/85">
+        <div className="relative z-10 border-b border-white/8 bg-amber-500/10 px-4 py-2 text-sm text-amber-100/90 backdrop-blur-xl">
           {travelFeedback}
         </div>
       ) : null}
-      <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">
-        <LocationPanel
-          location={currentLocation}
-          scene={scenePanelData}
-          connectedPaths={connectedPaths}
-          npcsHere={npcsHere}
-          itemsHere={itemsHere}
-          onMove={handleMove}
-          disabled={isTurnBusy}
-        />
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <OraclePanel result={lastOracleResult} />
-          <NarrativeLog
-            messages={messages}
-            premise={premise}
-            isStreaming={turnPhase === "streaming"}
-            turnPhase={turnPhase}
-            sceneProgress={sceneProgress}
-            onRetry={handleRetry}
-            onUndo={handleUndo}
-            onEdit={handleEdit}
-            canRetryUndo={canRetryUndo}
-          />
+      <div className="relative z-10 flex flex-1 flex-col overflow-hidden px-3 pb-3 pt-3 sm:px-4 lg:px-5">
+        <div className="mx-auto flex h-full w-full max-w-[1720px] flex-col gap-4 xl:grid xl:grid-cols-[minmax(280px,320px)_minmax(0,1fr)_minmax(280px,320px)] xl:items-start">
+          <div className="order-2 min-h-0 xl:order-1 xl:h-full xl:w-full">
+            <LocationPanel
+              location={currentLocation}
+              scene={scenePanelData}
+              connectedPaths={connectedPaths}
+              npcsHere={npcsHere}
+              itemsHere={itemsHere}
+              onMove={handleMove}
+              disabled={isTurnBusy}
+            />
+          </div>
+          <section
+            data-testid="game-reader-column"
+            className="order-1 flex min-h-0 flex-1 flex-col gap-4 xl:order-2 xl:h-full"
+          >
+            <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(39,39,42,0.78),rgba(18,18,21,0.96))] shadow-[0_30px_80px_rgba(0,0,0,0.45)]">
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),transparent)]" />
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-[linear-gradient(180deg,transparent,rgba(9,9,11,0.92))]" />
+              <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+                <OraclePanel result={lastOracleResult} />
+                <NarrativeLog
+                  messages={messages}
+                  premise={premise}
+                  isStreaming={turnPhase === "streaming"}
+                  turnPhase={turnPhase}
+                  sceneProgress={sceneProgress}
+                  onRetry={handleRetry}
+                  onUndo={handleUndo}
+                  onEdit={handleEdit}
+                  canRetryUndo={canRetryUndo}
+                />
+              </div>
+            </div>
+            <div
+              data-testid="game-action-dock"
+              className="sticky bottom-0 z-20 -mt-10 pb-1 pt-10"
+            >
+              <div className="overflow-hidden rounded-[24px] border border-white/10 bg-zinc-950/88 shadow-[0_20px_60px_rgba(0,0,0,0.5)] backdrop-blur-2xl">
+                <div className="pointer-events-none h-10 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),transparent)]" />
+                <QuickActions
+                  actions={quickActions}
+                  onAction={handleQuickAction}
+                  disabled={isTurnBusy}
+                />
+                <ActionBar
+                  value={input}
+                  onChange={setInput}
+                  onSubmit={handleSubmitAction}
+                  isLoading={isTurnBusy}
+                  disabled={!canInteract || isTurnBusy}
+                  turnPhase={turnPhase}
+                />
+              </div>
+            </div>
+          </section>
+          <div className="order-3 min-h-0 xl:h-full xl:w-full">
+            <div className="flex h-full flex-col gap-4">
+              <CharacterPanel
+                player={player}
+                carriedItems={playerCarriedItems}
+                equippedItems={playerEquippedItems}
+                locationName={locationName}
+                portraitUrl={portraitUrl}
+              />
+              <LorePanel campaignId={activeCampaign?.id ?? null} />
+            </div>
+          </div>
         </div>
-        <CharacterPanel
-          player={player}
-          carriedItems={playerCarriedItems}
-          equippedItems={playerEquippedItems}
-          locationName={locationName}
-          portraitUrl={portraitUrl}
-        />
-        <LorePanel campaignId={activeCampaign?.id ?? null} />
       </div>
-      <QuickActions
-        actions={quickActions}
-        onAction={handleQuickAction}
-        disabled={isTurnBusy}
-      />
-      <ActionBar
-        value={input}
-        onChange={setInput}
-        onSubmit={handleSubmitAction}
-        isLoading={isTurnBusy}
-        disabled={!canInteract || isTurnBusy}
-        turnPhase={turnPhase}
-      />
       {activeCampaign && (
         <CheckpointPanel
           campaignId={activeCampaign.id}

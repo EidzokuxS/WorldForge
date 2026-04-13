@@ -40,9 +40,18 @@ export function ActionBar({
     !isLoading;
 
   return (
-    <div className="border-t border-border bg-card/90 px-4 py-3 backdrop-blur-sm">
-      <div className="mx-auto flex max-w-3xl items-start gap-2">
-        <div className="relative flex-1">
+    <div className="px-4 pb-4 pt-3 sm:px-5">
+      <div className="mx-auto flex max-w-3xl flex-col gap-3">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[11px] font-medium uppercase tracking-[0.28em] text-zinc-500">
+            Your action
+          </p>
+          <p className="text-[11px] text-zinc-500">
+            Plain text input. Shift+Enter adds a new line.
+          </p>
+        </div>
+        <div className="flex items-end gap-3">
+          <div className="relative flex-1">
           <Textarea
             value={value}
             onChange={(event) => onChange(event.target.value)}
@@ -54,38 +63,42 @@ export function ActionBar({
                 }
               }
             }}
-            placeholder="Describe your action..."
+            placeholder="Detail your next action..."
             disabled={disabled || isLoading}
             maxLength={MAX_ACTION_LENGTH}
-            rows={1}
-            className="min-h-10 resize-none font-serif italic pr-16"
+            rows={4}
+            className="min-h-[112px] resize-none border-zinc-800/80 bg-zinc-950/80 pr-16 font-sans text-sm leading-6 text-zinc-100 placeholder:text-zinc-500 focus-visible:border-zinc-600 focus-visible:ring-zinc-700/50"
           />
-          {turnPhase === "finalizing" ? (
-            <p className="mt-2 pr-16 text-xs italic text-muted-foreground">
-              The world is still settling. You can act again when the turn is fully resolved.
-            </p>
-          ) : null}
           {value.length > 0 && (
             <span
-              className={`absolute bottom-1.5 right-2 text-[10px] tabular-nums ${getCounterColor(value.length)}`}
+              className={`absolute bottom-2 right-3 text-[10px] tabular-nums ${getCounterColor(value.length)}`}
             >
               {value.length}/{MAX_ACTION_LENGTH}
             </span>
           )}
+          </div>
+          <Button
+            size="icon"
+            variant="secondary"
+            onClick={onSubmit}
+            disabled={!canSubmit}
+            className="mb-1 h-11 w-11 shrink-0 rounded-xl border border-zinc-700/80 bg-zinc-100 text-zinc-950 hover:bg-white"
+          >
+            {isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
+          </Button>
         </div>
-        <Button
-          size="icon"
-          variant="secondary"
-          onClick={onSubmit}
-          disabled={!canSubmit}
-          className="mt-0.5"
-        >
-          {isLoading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Send className="h-4 w-4" />
-          )}
-        </Button>
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 pr-1">
+          <p className="text-[11px] text-zinc-500">{'RP markup: "speech", *action*, **emphasis**'}</p>
+          {turnPhase === "finalizing" ? (
+            <p className="text-[11px] text-amber-200/80">
+              The world is still settling. You can act again when the turn is fully resolved.
+            </p>
+          ) : null}
+        </div>
       </div>
     </div>
   );
