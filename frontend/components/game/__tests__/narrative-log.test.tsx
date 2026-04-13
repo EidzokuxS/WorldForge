@@ -34,30 +34,38 @@ describe("NarrativeLog", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders user messages with > prefix", () => {
+  it("renders assistant narration as a reader surface, player actions as a distinct block, and support messages separately", () => {
     const messages: ChatMessage[] = [
-      { role: "user", content: "I open the door" },
-    ];
-    render(<NarrativeLog {...defaultProps} messages={messages} />);
-    expect(screen.getByText("> I open the door")).toBeInTheDocument();
-  });
-
-  it("renders assistant messages", () => {
-    const messages: ChatMessage[] = [
-      { role: "assistant", content: "The door creaks open slowly." },
-    ];
-    render(<NarrativeLog {...defaultProps} messages={messages} />);
-    expect(
-      screen.getByText("The door creaks open slowly.")
-    ).toBeInTheDocument();
-  });
-
-  it("renders system messages", () => {
-    const messages: ChatMessage[] = [
+      { role: "assistant", content: 'The door yields.\n\n*Cold air spills out.*' },
+      { role: "user", content: '"Stay behind me."\n\n*I raise the lantern.*' },
       { role: "system", content: "Game paused." },
+      { role: "assistant", content: "[Lookup: faction] The wardens keep watch." },
+    ];
+    const { container } = render(
+      <NarrativeLog {...defaultProps} messages={messages} />
+    );
+
+    expect(container.querySelector("article")).not.toBeNull();
+    expect(screen.getByText('"Stay behind me."')).toBeInTheDocument();
+    expect(screen.queryByText('> "Stay behind me."')).not.toBeInTheDocument();
+    expect(screen.getByText("System")).toBeInTheDocument();
+    expect(screen.getByText("Lookup")).toBeInTheDocument();
+    expect(screen.getByText("The wardens keep watch.")).toBeInTheDocument();
+    expect(screen.queryByText(/\[Lookup:/)).not.toBeInTheDocument();
+  });
+
+  it("renders power_profile lookups as a dedicated compare block instead of a generic lookup label", () => {
+    const messages: ChatMessage[] = [
+      {
+        role: "assistant",
+        content: "[Lookup: power_profile] Speed: Hypersonic",
+      },
     ];
     render(<NarrativeLog {...defaultProps} messages={messages} />);
-    expect(screen.getByText("Game paused.")).toBeInTheDocument();
+
+    expect(screen.getByText("Power Profile")).toBeInTheDocument();
+    expect(screen.queryByText(/^Lookup$/i)).not.toBeInTheDocument();
+    expect(screen.getByText("Speed: Hypersonic")).toBeInTheDocument();
   });
 
   it("shows streaming indicator when isStreaming is true", () => {
@@ -81,8 +89,32 @@ describe("NarrativeLog", () => {
       { role: "user", content: "I enter the cave" },
     ];
     render(<NarrativeLog {...defaultProps} messages={messages} />);
-    expect(screen.getByText("> I look around")).toBeInTheDocument();
+    expect(screen.getByText("I look around")).toBeInTheDocument();
     expect(screen.getByText("You see a dark cave.")).toBeInTheDocument();
-    expect(screen.getByText("> I enter the cave")).toBeInTheDocument();
+    expect(screen.getByText("I enter the cave")).toBeInTheDocument();
+  });
+
+  it("keeps streaming, opening, and finalizing statuses outside story prose as compact status blocks", () => {
+    render(
+      <NarrativeLog
+        {...defaultProps}
+        turnPhase="finalizing"
+        sceneProgress="opening"
+        isStreaming={true}
+      />
+    );
+
+    expect(screen.getByText("The storyteller is weaving the scene...")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "The opening scene is taking shape. The runtime is grounding your first moment before narration appears."
+      )
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "The world is still resolving. Retry and undo unlock when the turn is complete."
+      )
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("Status").length).toBeGreaterThanOrEqual(3);
   });
 });
