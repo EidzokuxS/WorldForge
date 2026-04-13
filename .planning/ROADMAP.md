@@ -223,9 +223,12 @@ Plans:
   1. Generated narration and player input render with improved readability rather than dense hard-to-scan plain blocks.
   2. Rich-text affordances improve emphasis and structure without obscuring stream behavior or gameplay state.
   3. Presentation changes stay consistent across `/game` and preserve correctness of gameplay updates.
-**Plans**: 0 plans
+**Plans**: 4 plans
 Plans:
-- [ ] TBD (run `$gsd-plan-phase 50` to break down)
+- [ ] 50-01-PLAN.md — Build the bounded rich-text renderer, safe RP formatting helpers, and role-aware gameplay log blocks.
+- [ ] 50-02-PLAN.md — Apply the hybrid concept shell, sticky input, and panel readability treatment to `/game`.
+- [ ] 50-03-PLAN.md — Add the persisted `ui.showRawReasoning` settings contract and dedicated Gameplay toggle UI.
+- [ ] 50-04-PLAN.md — Add separate reasoning transport and the optional `/game` disclosure rendering for provider reasoning.
 
 ## Progress
 
@@ -244,4 +247,4 @@ Plans:
 | 47. Storyteller Output Quality & Anti-Slop Prompting | 2/3 | In Progress|  |
 | 48. Character Identity Fidelity & Canonical Modeling | 4/4 | Complete    | 2026-04-12 |
 | 49. Search Grounding & In-Game Research Semantics | 4/4 | Complete    | 2026-04-12 |
-| 50. Gameplay Text Presentation & Rich Readability | 0/0 | Planned | — |
+| 50. Gameplay Text Presentation & Rich Readability | 0/4 | Planned | — |

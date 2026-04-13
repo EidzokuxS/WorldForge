@@ -44,8 +44,10 @@ created: 2026-04-13
 | 50-01-02 | 01 | 1 | UX-01 | frontend integration | `npx vitest run frontend/app/game/__tests__/page.test.tsx frontend/lib/__tests__/api.test.ts` | ✅ | ⬜ pending |
 | 50-02-01 | 02 | 2 | UX-01 | frontend unit | `npx vitest run frontend/components/game/__tests__/action-bar.test.tsx frontend/components/game/__tests__/narrative-log.test.tsx` | ✅ | ⬜ pending |
 | 50-02-02 | 02 | 2 | UX-01 | frontend integration | `npx vitest run frontend/app/game/__tests__/page.test.tsx frontend/lib/__tests__/api.test.ts` | ✅ | ⬜ pending |
-| 50-03-01 | 03 | 3 | UX-01 | shared/backend integration | `npx vitest run frontend/app/(non-game)/settings/__tests__/page.test.tsx backend/src/routes/__tests__/settings.test.ts` | ✅ | ⬜ pending |
-| 50-03-02 | 03 | 3 | UX-01 | frontend integration | `npx vitest run frontend/app/game/__tests__/page.test.tsx frontend/components/game/__tests__/narrative-log.test.tsx` | ✅ | ⬜ pending |
+| 50-03-01 | 03 | 1 | UX-01 | shared/backend integration | `npx vitest run backend/src/routes/__tests__/settings.test.ts` | ✅ | ⬜ pending |
+| 50-03-02 | 03 | 1 | UX-01 | frontend unit | `npx vitest run frontend/app/(non-game)/settings/__tests__/page.test.tsx` | ✅ | ⬜ pending |
+| 50-04-01 | 04 | 3 | UX-01 | backend/frontend integration | `npx vitest run backend/src/routes/__tests__/chat.test.ts frontend/lib/__tests__/api.test.ts` | ✅ | ⬜ pending |
+| 50-04-02 | 04 | 3 | UX-01 | frontend integration | `npx vitest run frontend/components/game/__tests__/narrative-log.test.tsx frontend/app/game/__tests__/page.test.tsx` | ✅ | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ partial*
 
