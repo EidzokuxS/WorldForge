@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
 status: executing
-stopped_at: Completed 50-01-PLAN.md
-last_updated: "2026-04-13T05:03:20.202Z"
+stopped_at: Completed 50-02-PLAN.md
+last_updated: "2026-04-13T05:16:10.003Z"
 last_activity: 2026-04-13
 progress:
   total_phases: 14
   completed_phases: 13
   total_plans: 46
-  completed_plans: 44
+  completed_plans: 45
   percent: 100
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-12)
 ## Current Position
 
 Phase: 50 (gameplay-text-presentation-and-rich-readability) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-04-13
 
@@ -84,6 +84,7 @@ Progress: [██████████] 100%
 | Phase 49-search-grounding-and-in-game-research-semantics P04 | 10 min | 2 tasks | 6 files |
 | Phase 50-gameplay-text-presentation-and-rich-readability P03 | 12 min | 2 tasks | 8 files |
 | Phase 50 P01 | 6 min | 2 tasks | 9 files |
+| Phase 50 P02 | 5 min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -221,6 +222,9 @@ Recent decisions affecting current work:
 - [Phase 50]: Gameplay RP formatting stays render-time only via a bounded react-markdown subset — This preserves raw chat history while preventing broad markdown and HTML behavior in the gameplay log.
 - [Phase 50]: [Lookup: power_profile] stays on a dedicated compare or power-profile surface instead of a generic lookup badge — Phase 49 persists compare answers through lookup-prefixed assistant messages, so Phase 50 upgrades presentation without changing stored message format.
 - [Phase 50]: Streaming, opening, and finalizing copy now render as compact progress blocks outside the reader prose surface — Phase 45 status truth stays intact, but support-block treatment keeps runtime progress readable and separate from narration.
+- [Phase 50]: The /game action surface stays a normal textarea with a lightweight RP markup hint instead of adding formatting controls or WYSIWYG behavior.
+- [Phase 50]: The central log, quick actions, and input now live inside one reader shell and sticky dock, but all turn-phase, retry, travel, and SSE contracts remain untouched.
+- [Phase 50]: The location rail keeps the broad location as the main place text while the immediate scene remains a separate bounded layer, preserving the Phase 46 scene-truth contract.
 
 ### Pending Todos
 
@@ -233,6 +237,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-13T05:03:20.199Z
-Stopped at: Completed 50-01-PLAN.md
+Last session: 2026-04-13T05:16:09.998Z
+Stopped at: Completed 50-02-PLAN.md
 Resume file: None
