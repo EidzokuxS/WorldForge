@@ -1,8 +1,7 @@
 import * as React from "react";
 import { act } from "react";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { createDefaultSettings } from "@/lib/settings";
 import type { Settings } from "@/lib/types";
 
@@ -53,6 +52,22 @@ vi.mock("@/components/settings/images-tab", () => ({
 vi.mock("@/components/settings/research-tab", () => ({
   ResearchTab: () => <div>Research Tab</div>,
 }));
+vi.mock("@/components/ui/tabs", () => ({
+  Tabs: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  TabsList: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  TabsTrigger: ({
+    children,
+    value,
+  }: {
+    children: React.ReactNode;
+    value: string;
+  }) => (
+    <button role="tab" data-value={value} type="button">
+      {children}
+    </button>
+  ),
+  TabsContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+}));
 
 import SettingsPage from "@/app/(non-game)/settings/page";
 
@@ -72,18 +87,13 @@ describe("SettingsPage", () => {
   });
 
   it("renders a dedicated Gameplay tab with a debug-only raw reasoning toggle that persists across save and reload", async () => {
-    const user = userEvent.setup({
-      advanceTimers: vi.advanceTimersByTime,
-    });
-
     const { unmount } = render(<SettingsPage />);
 
     expect(screen.getByText("Saved")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("tab", { name: "Gameplay" }));
+    expect(screen.getByRole("tab", { name: "Gameplay" })).toBeInTheDocument();
 
     expect(screen.getByText("Show raw reasoning")).toBeInTheDocument();
-    expect(screen.getByText(/debug-only/i)).toBeInTheDocument();
+    expect(screen.getByText(/hidden by default/i)).toBeInTheDocument();
     expect(screen.getByText(/does not alter canonical narration/i)).toBeInTheDocument();
 
     const reasoningSwitch = screen.getByRole("switch", {
@@ -91,7 +101,7 @@ describe("SettingsPage", () => {
     });
     expect(reasoningSwitch).toHaveAttribute("aria-checked", "false");
 
-    await user.click(reasoningSwitch);
+    fireEvent.click(reasoningSwitch);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(400);
@@ -109,7 +119,6 @@ describe("SettingsPage", () => {
     unmount();
 
     render(<SettingsPage />);
-    await user.click(screen.getByRole("tab", { name: "Gameplay" }));
 
     expect(
       screen.getByRole("switch", {

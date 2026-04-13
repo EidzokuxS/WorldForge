@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProvidersTab } from "@/components/settings/providers-tab";
 import { RolesTab } from "@/components/settings/roles-tab";
 import { ImagesTab } from "@/components/settings/images-tab";
+import { GameplayTab } from "@/components/settings/gameplay-tab";
 import { ResearchTab } from "@/components/settings/research-tab";
 
 export default function SettingsPage() {
@@ -64,6 +65,7 @@ export default function SettingsPage() {
           <TabsTrigger value="providers">Providers</TabsTrigger>
           <TabsTrigger value="roles">Roles</TabsTrigger>
           <TabsTrigger value="images">Images</TabsTrigger>
+          <TabsTrigger value="gameplay">Gameplay</TabsTrigger>
           <TabsTrigger value="research">Research</TabsTrigger>
         </TabsList>
 
@@ -76,6 +78,9 @@ export default function SettingsPage() {
           </TabsContent>
           <TabsContent value="images" className="mt-0">
             <ImagesTab settings={settings} setSettings={setSettings} />
+          </TabsContent>
+          <TabsContent value="gameplay" className="mt-0">
+            <GameplayTab settings={settings} setSettings={setSettings} />
           </TabsContent>
           <TabsContent value="research" className="mt-0">
             <ResearchTab settings={settings} setSettings={setSettings} />
