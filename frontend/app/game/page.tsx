@@ -28,6 +28,7 @@ import {
 import type { CampaignMeta, ChatMessage } from "@worldforge/shared";
 import { isChatMessage } from "@worldforge/shared";
 import { getErrorMessage } from "@/lib/settings";
+import { useSettings } from "@/lib/use-settings";
 import {
   chatAction,
   chatEdit,
@@ -49,6 +50,7 @@ import type { WorldCurrentScene, WorldData } from "@/lib/api-types";
 type TurnPhase = "idle" | "streaming" | "finalizing";
 type QuickAction = { label: string; action: string };
 type SceneProgress = "opening" | "scene-settling" | null;
+type DisplayChatMessage = ChatMessage & { debugReasoning?: string | null };
 
 type TravelFeedbackState = {
   locationId: string;
@@ -209,14 +211,20 @@ function formatLookupAssistantMessage(result: Pick<LookupResultEvent, "lookupKin
   return `[Lookup: ${result.lookupKind}] ${result.answer}`;
 }
 
+function toDisplayMessages(messages: ChatMessage[]): DisplayChatMessage[] {
+  return messages.map((message) => ({ ...message, debugReasoning: null }));
+}
+
 export default function GamePage() {
   const router = useRouter();
+  const { settings } = useSettings();
   const [activeCampaign, setActiveCampaign] = useState<CampaignMeta | null>(null);
   const [premise, setPremise] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<DisplayChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [turnPhase, setTurnPhase] = useState<TurnPhase>("idle");
   const [sceneProgress, setSceneProgress] = useState<SceneProgress>(null);
+  const [showRawReasoning, setShowRawReasoning] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
   const [hasLiveTurnSnapshot, setHasLiveTurnSnapshot] = useState(false);
   const [lastOracleResult, setLastOracleResult] = useState<OracleResultData | null>(null);
@@ -225,7 +233,7 @@ export default function GamePage() {
   const [checkpointOpen, setCheckpointOpen] = useState(false);
   const [travelFeedback, setTravelFeedback] = useState<string | null>(null);
   const bufferedQuickActionsRef = useRef<QuickAction[]>([]);
-  const messagesRef = useRef<ChatMessage[]>([]);
+  const messagesRef = useRef<DisplayChatMessage[]>([]);
   const openingRequestCampaignRef = useRef<string | null>(null);
 
   const refreshWorldData = useCallback(
@@ -254,7 +262,25 @@ export default function GamePage() {
         return next;
       }
 
-      return [...next, { role: "assistant", content }];
+      return [...next, { role: "assistant", content, debugReasoning: null }];
+    });
+  }, []);
+
+  const attachReasoningToLatestAssistant = useCallback((payload: { text: string }) => {
+    const reasoningText = payload.text.trim();
+    if (!reasoningText) {
+      return;
+    }
+
+    setMessages((current) => {
+      const next = [...current];
+      for (let index = next.length - 1; index >= 0; index -= 1) {
+        if (next[index]?.role === "assistant") {
+          next[index] = { ...next[index], debugReasoning: reasoningText };
+          break;
+        }
+      }
+      return next;
     });
   }, []);
 
@@ -267,6 +293,10 @@ export default function GamePage() {
     setQuickActions(bufferedQuickActionsRef.current);
   }, []);
 
+  useEffect(() => {
+    setShowRawReasoning(settings.ui.showRawReasoning);
+  }, [settings.ui.showRawReasoning]);
+
   const restoreGameplayState = useCallback(
     async (campaignId: string, fallbackPremise: string) => {
       const [history, world] = await Promise.all([
@@ -276,15 +306,16 @@ export default function GamePage() {
       const safeMessages = Array.isArray(history.messages)
         ? history.messages.filter(isChatMessage)
         : [];
+      const displayMessages = toDisplayMessages(safeMessages);
 
-      setMessages(safeMessages);
+      setMessages(displayMessages);
       setPremise(history.premise || fallbackPremise);
       setHasLiveTurnSnapshot(history.hasLiveTurnSnapshot);
       setWorldData(world);
 
       return {
-        messages: safeMessages,
-        hasAssistantMessage: safeMessages.some((message) => message.role === "assistant"),
+        messages: displayMessages,
+        hasAssistantMessage: displayMessages.some((message) => message.role === "assistant"),
       };
     },
     [],
@@ -324,6 +355,7 @@ export default function GamePage() {
             setTurnPhase("streaming");
             upsertAssistantMessage(openingNarrative);
           },
+          onReasoning: attachReasoningToLatestAssistant,
           onOracleResult: () => {},
           onStateUpdate: () => {},
           onQuickActions: () => {},
@@ -547,7 +579,7 @@ export default function GamePage() {
                   content: assistantContent,
                 };
               } else {
-                next.push({ role: "assistant", content: assistantContent });
+                next.push({ role: "assistant", content: assistantContent, debugReasoning: null });
               }
 
               messagesRef.current = next;
@@ -636,6 +668,7 @@ export default function GamePage() {
           setTurnPhase("streaming");
           upsertAssistantMessage(narrativeText);
         },
+        onReasoning: attachReasoningToLatestAssistant,
         onOracleResult: (result) => {
           setLastOracleResult(result as OracleResultData);
         },
@@ -733,6 +766,7 @@ export default function GamePage() {
           setTurnPhase("streaming");
           upsertAssistantMessage(narrativeText);
         },
+        onReasoning: attachReasoningToLatestAssistant,
         onOracleResult: (result) => {
           setLastOracleResult(result as OracleResultData);
         },
@@ -955,6 +989,7 @@ export default function GamePage() {
                   isStreaming={turnPhase === "streaming"}
                   turnPhase={turnPhase}
                   sceneProgress={sceneProgress}
+                  showRawReasoning={showRawReasoning}
                   onRetry={handleRetry}
                   onUndo={handleUndo}
                   onEdit={handleEdit}

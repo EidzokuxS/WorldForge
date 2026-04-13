@@ -8,6 +8,12 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mockPush, replace: mockReplace }),
 }));
 
+const mockUseSettings = vi.fn();
+
+vi.mock("@/lib/use-settings", () => ({
+  useSettings: () => mockUseSettings(),
+}));
+
 vi.mock("@/lib/api", () => ({
   apiGet: vi.fn(),
   apiStreamPost: vi.fn(),
@@ -76,13 +82,15 @@ const mockNarrativeLog = vi.fn(
     messages,
     onRetry,
     sceneProgress,
+    showRawReasoning,
     turnPhase,
   }: {
     canRetryUndo?: boolean;
     isStreaming?: boolean;
-    messages?: Array<{ role: string; content: string }>;
+    messages?: Array<{ role: string; content: string; debugReasoning?: string | null }>;
     onRetry?: () => void;
     sceneProgress?: "opening" | "scene-settling" | null;
+    showRawReasoning?: boolean;
     turnPhase?: "idle" | "streaming" | "finalizing";
   }) => (
     (() => {
@@ -103,6 +111,22 @@ const mockNarrativeLog = vi.fn(
           ) : (
             <p>Begin your adventure when the opening scene is ready.</p>
           )}
+          {showRawReasoning
+            ? messages
+                ?.filter(
+                  (message) =>
+                    message.role === "assistant"
+                    && typeof message.debugReasoning === "string"
+                    && message.debugReasoning.trim().length > 0
+                    && !message.content.startsWith("[Lookup:"),
+                )
+                .map((message, index) => (
+                  <div key={`reasoning-${index}`}>
+                    <p>Raw reasoning</p>
+                    <p>{message.debugReasoning}</p>
+                  </div>
+                ))
+            : null}
           {sceneProgress === "opening" ? (
             <p>The opening scene is taking shape. The runtime is grounding your first moment before narration appears.</p>
           ) : null}
@@ -330,10 +354,28 @@ function renderReadyGameWithWorld(worldData: typeof fakeWorldData, history = fak
   });
 }
 
+function getLatestNarrativeLogProps() {
+  return mockNarrativeLog.mock.calls.at(-1)?.[0] as
+    | {
+        messages?: Array<{ role: string; content: string; debugReasoning?: string | null }>;
+        showRawReasoning?: boolean;
+      }
+    | undefined;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   narrativeLogMessageSnapshots.length = 0;
   mockedGetRememberedCampaignId.mockReturnValue(null);
+  mockUseSettings.mockReturnValue({
+    settings: {
+      ui: { showRawReasoning: false },
+    },
+    isLoading: false,
+    isSaving: false,
+    setSettings: vi.fn(),
+    save: vi.fn(),
+  });
   mockedParseTurnSSE.mockImplementation(async (_body, handlers) => {
     handlers.onDone();
   });
@@ -700,6 +742,101 @@ describe("GamePage", () => {
         ]));
 
       expect(renderedLookupState).toBe(true);
+    });
+  });
+
+  it("shows Raw reasoning under the current assistant message only when settings.ui.showRawReasoning is enabled", async () => {
+    mockUseSettings.mockReturnValue({
+      settings: {
+        ui: { showRawReasoning: true },
+      },
+      isLoading: false,
+      isSaving: false,
+      setSettings: vi.fn(),
+      save: vi.fn(),
+    });
+    mockedChatOpening.mockResolvedValue(createStreamResponse() as never);
+    let releaseOpening: (() => void) | null = null;
+    mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
+      await new Promise<void>((resolve) => {
+        releaseOpening = () => {
+          handlers.onNarrative("Lanternlight cuts across the market.");
+          handlers.onReasoning?.({
+            text: "The model separated visible narration from the private reasoning lane.",
+          });
+          handlers.onDone();
+          resolve();
+        };
+      });
+    });
+
+    await renderReadyGame({
+      messages: [],
+      premise: "A dark world",
+      hasLiveTurnSnapshot: false,
+    });
+
+    await waitFor(() => {
+      expect(mockedChatOpening).toHaveBeenCalledWith(fakeCampaign.id);
+      expect(mockedParseTurnSSE).toHaveBeenCalledTimes(1);
+    });
+
+    releaseOpening?.();
+
+    await waitFor(() => {
+      const latestNarrativeLog = getLatestNarrativeLogProps();
+
+      expect(latestNarrativeLog?.showRawReasoning).toBe(true);
+      expect(latestNarrativeLog?.messages?.map((message) => message.content)).toContain(
+        "Lanternlight cuts across the market.",
+      );
+      expect(
+        latestNarrativeLog?.messages?.find((message) => message.role === "assistant")
+          ?.debugReasoning,
+      ).toBe("The model separated visible narration from the private reasoning lane.");
+    });
+  });
+
+  it("does not show Raw reasoning when the persisted toggle is off even if a reasoning event arrives", async () => {
+    mockedChatOpening.mockResolvedValue(createStreamResponse() as never);
+    let releaseOpening: (() => void) | null = null;
+    mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
+      await new Promise<void>((resolve) => {
+        releaseOpening = () => {
+          handlers.onNarrative("Lanternlight cuts across the market.");
+          handlers.onReasoning?.({
+            text: "This should stay hidden while the toggle is off.",
+          });
+          handlers.onDone();
+          resolve();
+        };
+      });
+    });
+
+    await renderReadyGame({
+      messages: [],
+      premise: "A dark world",
+      hasLiveTurnSnapshot: false,
+    });
+
+    await waitFor(() => {
+      expect(mockedChatOpening).toHaveBeenCalledWith(fakeCampaign.id);
+      expect(mockedParseTurnSSE).toHaveBeenCalledTimes(1);
+    });
+
+    releaseOpening?.();
+
+    await waitFor(() => {
+      const latestNarrativeLog = getLatestNarrativeLogProps();
+
+      expect(latestNarrativeLog?.showRawReasoning).toBe(false);
+      expect(latestNarrativeLog?.messages?.map((message) => message.content)).toContain(
+        "Lanternlight cuts across the market.",
+      );
+      expect(
+        latestNarrativeLog?.messages?.find((message) => message.role === "assistant")
+          ?.debugReasoning,
+      ).toBe("This should stay hidden while the toggle is off.");
     });
   });
 

@@ -117,4 +117,54 @@ describe("NarrativeLog", () => {
     ).toBeInTheDocument();
     expect(screen.getAllByText("Status").length).toBeGreaterThanOrEqual(3);
   });
+
+  it("renders a Raw reasoning disclosure only for assistant narration when enabled and populated", () => {
+    const messages: Array<ChatMessage & { debugReasoning?: string | null }> = [
+      { role: "assistant", content: "The wardens close in.", debugReasoning: "Model compared the local threat cues before settling on visible prose." },
+      { role: "user", content: "I step back.", debugReasoning: "should never render" },
+      { role: "assistant", content: "[Lookup: faction] The wardens keep watch.", debugReasoning: "lookup should not render reasoning" },
+    ];
+
+    render(
+      <NarrativeLog
+        {...defaultProps}
+        messages={messages}
+        showRawReasoning={true}
+      />,
+    );
+
+    expect(screen.getByText("Raw reasoning")).toBeInTheDocument();
+    expect(
+      screen.getByText("Model compared the local threat cues before settling on visible prose."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("should never render")).not.toBeInTheDocument();
+    expect(screen.queryByText("lookup should not render reasoning")).not.toBeInTheDocument();
+  });
+
+  it("does not render an empty reasoning disclosure when disabled or absent", () => {
+    const messages: Array<ChatMessage & { debugReasoning?: string | null }> = [
+      { role: "assistant", content: "The wardens close in.", debugReasoning: "Hidden chain-of-thought." },
+      { role: "assistant", content: "Only visible prose remains.", debugReasoning: "   " },
+    ];
+
+    const { rerender } = render(
+      <NarrativeLog
+        {...defaultProps}
+        messages={messages}
+        showRawReasoning={false}
+      />,
+    );
+
+    expect(screen.queryByText("Raw reasoning")).not.toBeInTheDocument();
+
+    rerender(
+      <NarrativeLog
+        {...defaultProps}
+        messages={[messages[1]!]}
+        showRawReasoning={true}
+      />,
+    );
+
+    expect(screen.queryByText("Raw reasoning")).not.toBeInTheDocument();
+  });
 });

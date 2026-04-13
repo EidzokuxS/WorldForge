@@ -13,11 +13,12 @@ import { RichTextMessage } from "./rich-text-message";
 import { SpecialMessageBlock } from "./special-message-block";
 
 interface NarrativeLogProps {
-  messages: ChatMessage[];
+  messages: Array<ChatMessage & { debugReasoning?: string | null }>;
   premise: string;
   isStreaming: boolean;
   turnPhase?: "idle" | "streaming" | "finalizing";
   sceneProgress?: "opening" | "scene-settling" | null;
+  showRawReasoning?: boolean;
   onRetry?: () => void;
   onUndo?: () => void;
   onEdit?: (index: number, content: string) => void;
@@ -30,6 +31,7 @@ export function NarrativeLog({
   isStreaming,
   turnPhase = isStreaming ? "streaming" : "idle",
   sceneProgress = null,
+  showRawReasoning = false,
   onRetry,
   onUndo,
   onEdit,
@@ -131,6 +133,15 @@ export function NarrativeLog({
               messages.map((message, index) => {
                 const kind = deriveGameMessageKind(message.role, message.content);
                 const isAssistant = message.role === "assistant";
+                const reasoningText =
+                  typeof message.debugReasoning === "string"
+                    ? message.debugReasoning.trim()
+                    : "";
+                const showReasoningDisclosure =
+                  isAssistant
+                  && kind === "narration"
+                  && showRawReasoning
+                  && reasoningText.length > 0;
 
                 if (message.role === "user") {
                   return (
@@ -207,6 +218,18 @@ export function NarrativeLog({
                             (edited)
                           </span>
                         )}
+                        {showReasoningDisclosure ? (
+                          <details className="mt-3 overflow-hidden rounded-2xl border border-white/10 bg-black/20">
+                            <summary className="cursor-pointer list-none px-4 py-3 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-300">
+                              Raw reasoning
+                            </summary>
+                            <div className="border-t border-white/10 px-4 py-3">
+                              <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/35 p-3 font-mono text-xs leading-6 text-zinc-200">
+                                {reasoningText}
+                              </pre>
+                            </div>
+                          </details>
+                        ) : null}
                       </>
                     )}
 
