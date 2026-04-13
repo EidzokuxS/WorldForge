@@ -40,7 +40,7 @@ Requirements for the gameplay-fidelity milestone. Each maps to roadmap phases.
 - [x] **WRIT-01**: Storyteller output quality is tuned for playable RP, with research-backed prompting/model settings that materially reduce purple prose and obvious AI smell.
 - [x] **CHARF-01**: Character runtime modeling preserves distinctive personality, motives, and identity details for both native and imported/canonical characters.
 - [x] **RES-01**: Search and research flows use explicit retrieval intent in both worldgen and live gameplay, producing focused, useful grounded context instead of vague blended queries.
-- [ ] **UX-01**: Gameplay text surfaces present player input and generated narration with materially better readability, formatting, and rich-text affordances.
+- [x] **UX-01**: Gameplay text surfaces present player input and generated narration with materially better readability, formatting, and rich-text affordances.
 
 ## v1.2+ Candidate Requirements
 
@@ -86,7 +86,7 @@ Explicitly excluded from this milestone to keep it reconciliation-driven.
 | WRIT-01 | Phase 47 | Complete |
 | CHARF-01 | Phase 48 | Complete |
 | RES-01 | Phase 49 | Complete |
-| UX-01 | Phase 50 | Pending |
+| UX-01 | Phase 50 | Complete |
 
 **Coverage:**
 - v1.1 requirements: 20 total
