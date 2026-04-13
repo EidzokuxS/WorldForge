@@ -14,14 +14,17 @@ describe("ActionBar", () => {
   it("renders textarea with placeholder", () => {
     render(<ActionBar {...defaultProps} />);
     expect(
-      screen.getByPlaceholderText("Describe your action...")
+      screen.getByPlaceholderText("Detail your next action...")
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('RP markup: "speech", *action*, **emphasis**')
     ).toBeInTheDocument();
   });
 
   it("calls onChange when user types", async () => {
     const onChange = vi.fn();
     render(<ActionBar {...defaultProps} onChange={onChange} />);
-    const textarea = screen.getByPlaceholderText("Describe your action...");
+    const textarea = screen.getByPlaceholderText("Detail your next action...");
     fireEvent.change(textarea, { target: { value: "attack" } });
     expect(onChange).toHaveBeenCalledWith("attack");
   });
@@ -53,7 +56,7 @@ describe("ActionBar", () => {
     render(
       <ActionBar {...defaultProps} value="attack" onSubmit={onSubmit} />
     );
-    const textarea = screen.getByPlaceholderText("Describe your action...");
+    const textarea = screen.getByPlaceholderText("Detail your next action...");
     fireEvent.keyDown(textarea, { key: "Enter", shiftKey: false });
     expect(onSubmit).toHaveBeenCalledOnce();
   });
@@ -63,7 +66,7 @@ describe("ActionBar", () => {
     render(
       <ActionBar {...defaultProps} value="attack" onSubmit={onSubmit} />
     );
-    const textarea = screen.getByPlaceholderText("Describe your action...");
+    const textarea = screen.getByPlaceholderText("Detail your next action...");
     fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
     expect(onSubmit).not.toHaveBeenCalled();
   });
@@ -75,7 +78,7 @@ describe("ActionBar", () => {
 
   it("disables textarea and button when isLoading is true", () => {
     render(<ActionBar {...defaultProps} value="attack" isLoading={true} />);
-    const textarea = screen.getByPlaceholderText("Describe your action...");
+    const textarea = screen.getByPlaceholderText("Detail your next action...");
     expect(textarea).toBeDisabled();
     const button = screen.getByRole("button");
     expect(button).toBeDisabled();
@@ -83,9 +86,17 @@ describe("ActionBar", () => {
 
   it("disables textarea and button when disabled prop is true", () => {
     render(<ActionBar {...defaultProps} value="attack" disabled={true} />);
-    const textarea = screen.getByPlaceholderText("Describe your action...");
+    const textarea = screen.getByPlaceholderText("Detail your next action...");
     expect(textarea).toBeDisabled();
     const button = screen.getByRole("button");
     expect(button).toBeDisabled();
+  });
+
+  it("shows the finalizing warning while the turn is still resolving", () => {
+    render(<ActionBar {...defaultProps} value="attack" turnPhase="finalizing" />);
+
+    expect(
+      screen.getByText("The world is still settling. You can act again when the turn is fully resolved.")
+    ).toBeInTheDocument();
   });
 });

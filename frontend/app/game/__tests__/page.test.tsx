@@ -156,9 +156,11 @@ vi.mock("@/components/game/action-bar", () => ({
       <textarea
         aria-label="Action input"
         disabled={disabled || isLoading}
+        placeholder="Detail your next action..."
         value={value}
         onChange={(event) => onChange(event.target.value)}
       />
+      <p>RP markup: "speech", *action*, **emphasis**</p>
       <button
         type="button"
         disabled={disabled || isLoading}
@@ -359,12 +361,17 @@ describe("GamePage", () => {
   it("renders full game layout after initialization", async () => {
     await renderReadyGame();
 
+    expect(screen.getByTestId("game-shell")).toBeInTheDocument();
+    expect(screen.getByTestId("game-reader-column")).toBeInTheDocument();
+    expect(screen.getByTestId("game-action-dock")).toBeInTheDocument();
     expect(screen.getByTestId("narrative-log")).toBeInTheDocument();
     expect(screen.getByTestId("character-panel")).toBeInTheDocument();
     expect(screen.getByTestId("lore-panel")).toBeInTheDocument();
     expect(screen.getByTestId("action-bar")).toBeInTheDocument();
     expect(screen.getByTestId("oracle-panel")).toBeInTheDocument();
     expect(screen.getByTestId("quick-actions")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Detail your next action...")).toBeInTheDocument();
+    expect(screen.getByText('RP markup: "speech", *action*, **emphasis**')).toBeInTheDocument();
   });
 
   it("does not render premise as opening narration and keeps a neutral opening placeholder on /game when no assistant messages exist", async () => {
