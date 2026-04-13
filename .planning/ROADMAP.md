@@ -4,11 +4,11 @@
 
 - ✅ **v1.0 Living Sandbox** — phases `1-36`, shipped `2026-04-08`
   Archives: [roadmap](/R:/Projects/WorldForge/.planning/milestones/v1.0-ROADMAP.md), [requirements](/R:/Projects/WorldForge/.planning/milestones/v1.0-REQUIREMENTS.md), [audit](/R:/Projects/WorldForge/.planning/milestones/v1.0-MILESTONE-AUDIT.md)
-- 🚧 **v1.1 Gameplay Fidelity** — phases `37-50`, extended `2026-04-12`
+- 🚧 **v1.1 Gameplay Fidelity** — phases `37-55`, extended `2026-04-13`
 
 ## Overview
 
-v1.1 started as a reconciliation milestone built from the [Phase 36 handoff](/R:/Projects/WorldForge/.planning/phases/36-gameplay-docs-to-runtime-reconciliation-audit/36-HANDOFF.md), not a new-feature brainstorm. The first tranche repaired gameplay-runtime trust: campaign-loaded transport, authoritative state, honest turn and simulation boundaries, complete checkpoint restore, and docs alignment. Live gameplay then surfaced a second tranche of work around scene authority, encounter scope, storyteller quality, character fidelity, research grounding, and text readability. The milestone stays open until baseline gameplay feel is acceptable, not merely until the original reconciliation checklist is exhausted.
+v1.1 started as a reconciliation milestone built from the [Phase 36 handoff](/R:/Projects/WorldForge/.planning/phases/36-gameplay-docs-to-runtime-reconciliation-audit/36-HANDOFF.md), not a new-feature brainstorm. The first tranche repaired gameplay-runtime trust: campaign-loaded transport, authoritative state, honest turn and simulation boundaries, complete checkpoint restore, and docs alignment. Live gameplay then surfaced a second tranche of work around scene authority, encounter scope, storyteller quality, character fidelity, research grounding, and text readability. A later milestone audit found remaining route-matrix gaps and closeout-proof drift, so the milestone now includes explicit gap-closure phases `53-55`. The milestone stays open until baseline gameplay feel is acceptable and the audited gaps are closed, not merely until the original reconciliation checklist is exhausted.
 
 ## Phases
 
@@ -26,10 +26,15 @@ v1.1 started as a reconciliation milestone built from the [Phase 36 handoff](/R:
 - [x] **Phase 44: Gameplay Docs Baseline Alignment** - Rewrite gameplay docs into an honest planning baseline for the repaired runtime. (completed 2026-04-11)
 - [x] **Phase 45: Authoritative Scene Assembly & Start-of-Play Runtime** - Make turn output single-pass, runtime-driven, and grounded in actual opening/location state instead of duplicated or premise-dump narration. (completed 2026-04-12)
 - [x] **Phase 46: Encounter Scope, Presence & Knowledge Boundaries** - Stop treating large locations like one tiny room and constrain scene knowledge to actual encounter/perception scope. (completed 2026-04-12)
-- [ ] **Phase 47: Storyteller Output Quality & Anti-Slop Prompting** - Research and tune storyteller prompting/model settings for materially better RP writing quality.
+- [x] **Phase 47: Storyteller Output Quality & Anti-Slop Prompting** - Research and tune storyteller prompting/model settings for materially better RP writing quality. (completed 2026-04-12)
 - [x] **Phase 48: Character Identity Fidelity & Canonical Modeling** - Preserve distinctive identity/personality details in runtime character modeling, especially for imported and canonical characters. (completed 2026-04-12)
 - [x] **Phase 49: Search Grounding & In-Game Research Semantics** - Make worldgen and live-game research ask for the right facts with focused retrieval intent. (completed 2026-04-12)
 - [x] **Phase 50: Gameplay Text Presentation & Rich Readability** - Improve gameplay text rendering, typography, and rich-text affordances for both input and narration. (completed 2026-04-13)
+- [x] **Phase 51: Persistent Worldgen Research Frame & DNA-Aware Retrieval** - Persist worldgen research intent once and steer follow-up canon lookup from DNA/task context instead of rebuilding blended searches from raw user prose. (completed 2026-04-13)
+- [x] **Phase 52: Advanced Character Inspector & Full Record Visibility** - Expose the full character record in authoring/review UI so grounding, power, continuity, and provenance are inspectable without manual DB access. (completed 2026-04-13)
+- [ ] **Phase 53: Gameplay Route Convergence & Reload-Stable Research Log** - Close remaining alternate gameplay route bypasses and make explicit lookup/compare replies survive history reload.
+- [ ] **Phase 54: Draft-Backed NPC Edit Persistence & Review Convergence** - Make World Review edits to draft-backed NPCs persist through save/load instead of silently losing top-level changes.
+- [ ] **Phase 55: Gap-Proof Verification Matrix & Closeout Truth Alignment** - Close the remaining route-matrix blind spots and make milestone closeout artifacts reflect the actual late-phase defect history.
 
 ## Phase Details
 
@@ -184,7 +189,7 @@ Plans:
 Plans:
 - [x] 47-01-PLAN.md — Create the backend-owned storyteller preset layer, contract assembly, and bounded GLM storyteller model seam.
 - [x] 47-02-PLAN.md — Wire the preset layer into prompt assembly and live storyteller runtime calls without adding a rewrite stack.
-- [ ] 47-03-PLAN.md — Add only the evidence-backed final-visible quality guard and close the phase with live GLM smoke verification.
+- [x] 47-03-PLAN.md — Add only the evidence-backed final-visible quality guard and close the phase with live GLM smoke verification.
 
 ### Phase 48: Character Identity Fidelity & Canonical Modeling
 **Goal**: Rebuild runtime character modeling so native, imported, and canonical characters preserve the details that actually make them behave distinctly.
@@ -230,6 +235,71 @@ Plans:
 - [x] 50-03-PLAN.md — Add the persisted `ui.showRawReasoning` settings contract and dedicated Gameplay toggle UI.
 - [x] 50-04-PLAN.md — Add separate reasoning transport and the optional `/game` disclosure rendering for provider reasoning.
 
+### Phase 51: Persistent Worldgen Research Frame & DNA-Aware Retrieval
+**Goal**: Stop rebuilding worldgen research intent from raw user prose on every step by persisting one campaign/worldgen research frame and using it to steer DNA-aware follow-up canon lookup.
+**Depends on**: Phase 49
+**Requirements**: RES-02
+**Success Criteria** (what must be TRUE):
+  1. Raw `knownIP` input is treated as a hint and canonicalized before worldgen research, so user prose does not become the franchise key or search subject verbatim.
+  2. Worldgen generation/regeneration persists one research frame derived from canon, divergence, and chosen World DNA, then reuses it for step-specific sufficiency checks.
+  3. Targeted worldgen follow-up research asks for concise missing canon facts shaped by the active DNA/task context instead of rebuilding a blended world query on every step.
+**Plans**: 2 plans
+Plans:
+- [x] 51-01-PLAN.md — Persist a worldgen research frame in campaign config and thread it through generate/regenerate worldgen seams.
+- [x] 51-02-PLAN.md — Make sufficiency and retrieval planning DNA-aware while keeping follow-up jobs concise and canonical.
+
+### Phase 52: Advanced Character Inspector & Full Record Visibility
+**Goal**: Surface the full structured character record in review/authoring UI so NPC fidelity, grounding, and power semantics are inspectable without direct database queries.
+**Depends on**: Phase 48, Phase 49, Phase 50
+**Requirements**: UX-02
+**Success Criteria** (what must be TRUE):
+  1. World Review NPC cards expose the richer identity, grounding, power, source, continuity, and provenance data already stored on the shared character record.
+  2. The advanced inspector reads the same `draft` / `characterRecord` truth already returned by backend world payloads instead of inventing a parallel frontend model.
+  3. The inspector remains additive and read-only, so world save/edit flows keep their existing scaffold contract.
+**Plans**: 1 plan
+Plans:
+- [x] 52-01-PLAN.md — Preserve full record metadata through the editable scaffold and render a read-only advanced inspector on NPC review cards.
+
+### Phase 53: Gameplay Route Convergence & Reload-Stable Research Log
+**Goal**: Remove the remaining legacy gameplay-route bypasses and make explicit grounded research behave like a real, reload-stable part of the game log.
+**Depends on**: Phase 45, Phase 47, Phase 49
+**Requirements**: SCEN-01, WRIT-01, RES-01
+**Gap Closure:** Closes milestone-audit gaps around the legacy plain-text `/api/chat` bypass and non-persisted `/lookup` / `/compare` replies.
+**Success Criteria** (what must be TRUE):
+  1. No live gameplay route can bypass the authoritative scene-assembly and storyteller-quality seams that Phases 45 and 47 established.
+  2. `/lookup` and `/compare` replies survive history reload and remain separate from ordinary scene-turn narration.
+  3. The gameplay route matrix explicitly proves action, retry, opening, and lookup behavior across stream plus reload boundaries.
+**Plans**: 2 plans
+Plans:
+- [x] 53-01-PLAN.md — Retire the legacy `/api/chat` bypass and persist factual lookup exchanges on the authoritative chat-history lane.
+- [ ] 53-02-PLAN.md — Rehydrate persisted lookup/compare entries on `/game` and close the stream-plus-reload route matrix.
+
+### Phase 54: Draft-Backed NPC Edit Persistence & Review Convergence
+**Goal**: Make World Review edits converge onto one authoritative draft/scaffold lane so generated, imported, and researched NPCs do not silently lose manual edits on save/load.
+**Depends on**: Phase 48, Phase 49, Phase 52
+**Requirements**: UX-02
+**Gap Closure:** Closes milestone-audit gaps around draft-backed NPC edit loss in authoring/review flows.
+**Success Criteria** (what must be TRUE):
+  1. Editing name, persona, tags, and goals for a draft-backed NPC survives save/load and matches what the user last saw in World Review.
+  2. Save-edits and scaffold persistence use one converged truth for draft-backed NPCs instead of preferring stale draft payloads over visible edits.
+  3. The advanced inspector remains additive and read-only while normal authoring/review save flows stay trustworthy.
+**Plans**: 0 plans
+Plans:
+- [ ] TBD (run `$gsd-plan-phase 54` to break down)
+
+### Phase 55: Gap-Proof Verification Matrix & Closeout Truth Alignment
+**Goal**: Close the remaining verification blind spots and make milestone closeout/state artifacts accurately describe the actual fixed product.
+**Depends on**: Phase 46, Phase 47, Phase 48, Phase 50, Phase 51, Phase 52, Phase 53, Phase 54
+**Requirements**: SCEN-02, WRIT-01, DOCA-03
+**Gap Closure:** Closes milestone-audit blind spots around save-character scene-scope proof, opening-scene storyteller smoke, and stale milestone/phase verification records.
+**Success Criteria** (what must be TRUE):
+  1. The save-character start-of-play path is explicitly covered in the encounter-scope verification matrix.
+  2. Storyteller live smoke and milestone closeout include opening-scene prose, not only ordinary turn categories.
+  3. ROADMAP, STATE, closeout checklist, and late-phase verification artifacts reflect the real defect history and current semantics instead of stale intermediate states.
+**Plans**: 0 plans
+Plans:
+- [ ] TBD (run `$gsd-plan-phase 55` to break down)
+
 ## Progress
 
 | Phase | Plans Complete | Status | Completed |
@@ -244,7 +314,12 @@ Plans:
 | 44. Gameplay Docs Baseline Alignment | 3/3 | Complete | 2026-04-11 |
 | 45. Authoritative Scene Assembly & Start-of-Play Runtime | 3/3 | Complete    | 2026-04-12 |
 | 46. Encounter Scope, Presence & Knowledge Boundaries | 4/4 | Complete   | 2026-04-12 |
-| 47. Storyteller Output Quality & Anti-Slop Prompting | 2/3 | In Progress|  |
+| 47. Storyteller Output Quality & Anti-Slop Prompting | 3/3 | Complete | 2026-04-12 |
 | 48. Character Identity Fidelity & Canonical Modeling | 4/4 | Complete    | 2026-04-12 |
 | 49. Search Grounding & In-Game Research Semantics | 4/4 | Complete    | 2026-04-12 |
 | 50. Gameplay Text Presentation & Rich Readability | 4/4 | Complete   | 2026-04-13 |
+| 51. Persistent Worldgen Research Frame & DNA-Aware Retrieval | 2/2 | Complete | 2026-04-13 |
+| 52. Advanced Character Inspector & Full Record Visibility | 1/1 | Complete | 2026-04-13 |
+| 53. Gameplay Route Convergence & Reload-Stable Research Log | 1/2 | In Progress|  |
+| 54. Draft-Backed NPC Edit Persistence & Review Convergence | 0/0 | Pending |  |
+| 55. Gap-Proof Verification Matrix & Closeout Truth Alignment | 0/0 | Pending |  |

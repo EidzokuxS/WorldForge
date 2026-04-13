@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
-status: verifying
-stopped_at: Phase 50 automated verification complete
-last_updated: "2026-04-13T05:23:00.000Z"
+status: Milestone audit found confirmed implementation gaps; gap-closure phases 53-55 were created
+stopped_at: Gap-closure phases 53-55 created from v1.1 milestone audit
+last_updated: "2026-04-13T11:39:28.869Z"
 last_activity: 2026-04-13
 progress:
-  total_phases: 14
+  total_phases: 19
   completed_phases: 14
-  total_plans: 46
-  completed_plans: 46
-  percent: 100
+  total_plans: 51
+  completed_plans: 47
+  percent: 84
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-12)
 
 **Core value:** The LLM is the narrator, never the engine. Mechanical truth stays in backend code so outcomes remain consistent, inspectable, and recoverable.
-**Current focus:** v1.1 milestone closeout verification
+**Current focus:** v1.1 gap-closure planning from milestone audit
 
 ## Current Position
 
-Phase: 50 (gameplay-text-presentation-and-rich-readability) — VERIFIED (human needed)
-Plan: 4 of 4
-Status: Automated verification passed; milestone-closeout manual checks remain
+Phase: 53 (gameplay-route-convergence-and-reload-stable-research-log) — PLANNED
+Plan: 0 of 0
+Status: Milestone audit found confirmed implementation gaps; gap-closure phases 53-55 were created
 Last activity: 2026-04-13
 
-Progress: [██████████] 100%
+Progress: [████████░░] 84%
 
 ## Performance Metrics
 
@@ -41,12 +41,12 @@ Progress: [██████████] 100%
 
 **Current Snapshot:**
 
-- Active roadmap phases: 14
-- Completed phases: 46
-- Planned or in-progress phases: 4
-- Total plans tracked: 31
-- Completed plans: 31
-- Pending plans: none; milestone closeout now owns the remaining manual gameplay verification for phases `38`, `40`, `43`, `46`, `47`, `48`, `49`, and `50`
+- Active roadmap phases: 19
+- Completed phases: 16
+- Planned or in-progress phases: 3
+- Total plans tracked: 49
+- Completed plans: 49
+- Pending plans: gap-closure phases `53`, `54`, and `55` now own the remaining confirmed implementation gaps and verification blind spots from the milestone audit
 
 **Recent Execution:**
 
@@ -229,6 +229,7 @@ Recent decisions affecting current work:
 - [Phase 50]: The installed ai@6.0.106 seam is reasoningText, emitted once after visible narration finalization and before done.
 - [Phase 50]: Raw reasoning stays as local assistant-only debug metadata in /game instead of widening shared ChatMessage or persisted history.
 - [Phase 50]: The disclosure uses native <details> under narration-only assistant messages and stays hidden for lookups, progress blocks, user text, and empty payloads.
+- [Phase 53]: Legacy POST /api/chat now returns 410 Gone so narrated gameplay cannot bypass the authoritative route family.
 
 ### Pending Todos
 
@@ -241,6 +242,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-13T05:23:00.000Z
-Stopped at: Phase 50 automated verification complete
-Resume file: .planning/v1.1-MILESTONE-CLOSEOUT-CHECKLIST.md
+Last session: 2026-04-13T11:35:00.000Z
+Stopped at: Gap-closure phases 53-55 created from v1.1 milestone audit
+Resume file: .planning/v1.1-MILESTONE-AUDIT.md

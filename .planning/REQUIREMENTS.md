@@ -31,16 +31,18 @@ Requirements for the gameplay-fidelity milestone. Each maps to roadmap phases.
 
 - [x] **DOCA-01**: Every gameplay claim elevated by Phase 36 Group B and Group C is resolved as either implemented behavior or an explicit deprecation in docs.
 - [x] **DOCA-02**: Gameplay docs describe the live structured character/runtime model accurately, including the role of derived tags versus canonical character data.
-- [x] **DOCA-03**: Gameplay docs describe the real retrieval, memory, and prompt contracts accurately enough to serve as a planning baseline for later milestones.
+- [ ] **DOCA-03**: Gameplay docs describe the real retrieval, memory, and prompt contracts accurately enough to serve as a planning baseline for later milestones.
 
 ### Live Gameplay Quality
 
 - [x] **SCEN-01**: Player-visible turn text is a single-pass scene assembled from authoritative runtime state, without repeated output blocks or raw-premise opening dumps.
-- [x] **SCEN-02**: Scene participation and knowledge follow encounter/perception scope, so large locations do not behave like one small room and NPCs do not over-know unseen actors.
+- [ ] **SCEN-02**: Scene participation and knowledge follow encounter/perception scope, so large locations do not behave like one small room and NPCs do not over-know unseen actors.
 - [x] **WRIT-01**: Storyteller output quality is tuned for playable RP, with research-backed prompting/model settings that materially reduce purple prose and obvious AI smell.
 - [x] **CHARF-01**: Character runtime modeling preserves distinctive personality, motives, and identity details for both native and imported/canonical characters.
 - [x] **RES-01**: Search and research flows use explicit retrieval intent in both worldgen and live gameplay, producing focused, useful grounded context instead of vague blended queries.
+- [x] **RES-02**: Worldgen research reuses one persisted campaign/worldgen grounding frame, so DNA-aware follow-up research does not rebuild franchise intent or search shape from raw user prose on every step.
 - [x] **UX-01**: Gameplay text surfaces present player input and generated narration with materially better readability, formatting, and rich-text affordances.
+- [ ] **UX-02**: Authoring/review UI exposes the full structured character record for important actors, including grounding and power-profile data, without requiring direct database inspection.
 
 ## v1.2+ Candidate Requirements
 
@@ -80,19 +82,21 @@ Explicitly excluded from this milestone to keep it reconciliation-driven.
 | GSEM-04 | Phase 43 | Complete |
 | DOCA-01 | Phase 44 | Complete |
 | DOCA-02 | Phase 44 | Complete |
-| DOCA-03 | Phase 44 | Complete |
-| SCEN-01 | Phase 45 | Complete |
-| SCEN-02 | Phase 46 | Complete |
-| WRIT-01 | Phase 47 | Complete |
+| DOCA-03 | Phase 55 | Pending |
+| SCEN-01 | Phase 53 | Complete |
+| SCEN-02 | Phase 55 | Pending |
+| WRIT-01 | Phase 53 | Complete |
 | CHARF-01 | Phase 48 | Complete |
-| RES-01 | Phase 49 | Complete |
+| RES-01 | Phase 53 | Complete |
+| RES-02 | Phase 51 | Complete |
 | UX-01 | Phase 50 | Complete |
+| UX-02 | Phase 54 | Pending |
 
 **Coverage:**
-- v1.1 requirements: 20 total
-- Mapped to phases: 20
+- v1.1 requirements: 22 total
+- Mapped to phases: 22
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-04-08*
-*Last updated: 2026-04-12 after extending v1.1 with follow-on gameplay-quality requirements*
+*Last updated: 2026-04-13 after milestone gap-planning reopened late-phase requirements*
