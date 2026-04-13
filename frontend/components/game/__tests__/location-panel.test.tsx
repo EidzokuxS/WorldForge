@@ -186,4 +186,20 @@ describe("LocationPanel", () => {
       screen.getByText("No recent happenings recorded here yet.")
     ).toBeInTheDocument();
   });
+
+  it("keeps scan-friendly People Here and Paths sections visible with explicit empty states", () => {
+    render(
+      <LocationPanel
+        {...defaultProps}
+        location={makeLocation({ recentHappenings: [] })}
+        npcsHere={[]}
+        connectedPaths={[]}
+      />
+    );
+
+    expect(screen.getByText("People Here")).toBeInTheDocument();
+    expect(screen.getByText("No one is immediately in focus here.")).toBeInTheDocument();
+    expect(screen.getByText("Paths")).toBeInTheDocument();
+    expect(screen.getByText("No obvious paths branch from this immediate scene.")).toBeInTheDocument();
+  });
 });
