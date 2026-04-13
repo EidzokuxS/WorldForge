@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
-status: executing
-stopped_at: Completed 50-02-PLAN.md
-last_updated: "2026-04-13T05:16:10.003Z"
+status: verifying
+stopped_at: Completed 50-04-PLAN.md
+last_updated: "2026-04-13T05:34:51.324Z"
 last_activity: 2026-04-13
 progress:
   total_phases: 14
-  completed_phases: 13
+  completed_phases: 14
   total_plans: 46
-  completed_plans: 45
+  completed_plans: 46
   percent: 100
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-04-12)
 
 Phase: 50 (gameplay-text-presentation-and-rich-readability) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-04-13
 
 Progress: [██████████] 100%
@@ -85,6 +85,7 @@ Progress: [██████████] 100%
 | Phase 50-gameplay-text-presentation-and-rich-readability P03 | 12 min | 2 tasks | 8 files |
 | Phase 50 P01 | 6 min | 2 tasks | 9 files |
 | Phase 50 P02 | 5 min | 2 tasks | 8 files |
+| Phase 50 P04 | 12 min | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -225,6 +226,9 @@ Recent decisions affecting current work:
 - [Phase 50]: The /game action surface stays a normal textarea with a lightweight RP markup hint instead of adding formatting controls or WYSIWYG behavior.
 - [Phase 50]: The central log, quick actions, and input now live inside one reader shell and sticky dock, but all turn-phase, retry, travel, and SSE contracts remain untouched.
 - [Phase 50]: The location rail keeps the broad location as the main place text while the immediate scene remains a separate bounded layer, preserving the Phase 46 scene-truth contract.
+- [Phase 50]: The installed ai@6.0.106 seam is reasoningText, emitted once after visible narration finalization and before done.
+- [Phase 50]: Raw reasoning stays as local assistant-only debug metadata in /game instead of widening shared ChatMessage or persisted history.
+- [Phase 50]: The disclosure uses native <details> under narration-only assistant messages and stays hidden for lookups, progress blocks, user text, and empty payloads.
 
 ### Pending Todos
 
@@ -237,6 +241,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-13T05:16:09.998Z
-Stopped at: Completed 50-02-PLAN.md
+Last session: 2026-04-13T05:34:51.321Z
+Stopped at: Completed 50-04-PLAN.md
 Resume file: None

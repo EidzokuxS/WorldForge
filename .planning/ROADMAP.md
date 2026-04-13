@@ -29,7 +29,7 @@ v1.1 started as a reconciliation milestone built from the [Phase 36 handoff](/R:
 - [ ] **Phase 47: Storyteller Output Quality & Anti-Slop Prompting** - Research and tune storyteller prompting/model settings for materially better RP writing quality.
 - [x] **Phase 48: Character Identity Fidelity & Canonical Modeling** - Preserve distinctive identity/personality details in runtime character modeling, especially for imported and canonical characters. (completed 2026-04-12)
 - [x] **Phase 49: Search Grounding & In-Game Research Semantics** - Make worldgen and live-game research ask for the right facts with focused retrieval intent. (completed 2026-04-12)
-- [ ] **Phase 50: Gameplay Text Presentation & Rich Readability** - Improve gameplay text rendering, typography, and rich-text affordances for both input and narration.
+- [x] **Phase 50: Gameplay Text Presentation & Rich Readability** - Improve gameplay text rendering, typography, and rich-text affordances for both input and narration. (completed 2026-04-13)
 
 ## Phase Details
 
@@ -228,7 +228,7 @@ Plans:
 - [x] 50-01-PLAN.md — Build the bounded rich-text renderer, safe RP formatting helpers, and role-aware gameplay log blocks.
 - [x] 50-02-PLAN.md — Apply the hybrid concept shell, sticky input, and panel readability treatment to `/game`.
 - [x] 50-03-PLAN.md — Add the persisted `ui.showRawReasoning` settings contract and dedicated Gameplay toggle UI.
-- [ ] 50-04-PLAN.md — Add separate reasoning transport and the optional `/game` disclosure rendering for provider reasoning.
+- [x] 50-04-PLAN.md — Add separate reasoning transport and the optional `/game` disclosure rendering for provider reasoning.
 
 ## Progress
 
@@ -247,4 +247,4 @@ Plans:
 | 47. Storyteller Output Quality & Anti-Slop Prompting | 2/3 | In Progress|  |
 | 48. Character Identity Fidelity & Canonical Modeling | 4/4 | Complete    | 2026-04-12 |
 | 49. Search Grounding & In-Game Research Semantics | 4/4 | Complete    | 2026-04-12 |
-| 50. Gameplay Text Presentation & Rich Readability | 3/4 | In Progress|  |
+| 50. Gameplay Text Presentation & Rich Readability | 4/4 | Complete   | 2026-04-13 |
