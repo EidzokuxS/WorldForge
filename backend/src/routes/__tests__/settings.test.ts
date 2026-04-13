@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
+import { createDefaultSettings } from "@worldforge/shared";
+import { normalizeSettings } from "../../settings/manager.js";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -9,15 +11,20 @@ vi.mock("../../settings/index.js", () => ({
   saveSettings: vi.fn(),
 }));
 
-vi.mock("../../lib/index.js", () => ({
-  getErrorMessage: vi.fn((_err: unknown, fallback: string) => fallback),
-  getErrorStatus: vi.fn(() => 500),
-  createLogger: vi.fn(() => ({
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  })),
-}));
+vi.mock("../../lib/index.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/index.js")>();
+
+  return {
+    ...actual,
+    getErrorMessage: vi.fn((_err: unknown, fallback: string) => fallback),
+    getErrorStatus: vi.fn(() => 500),
+    createLogger: vi.fn(() => ({
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    })),
+  };
+});
 
 // Must also mock helpers dependencies so the import chain doesn't pull in real modules
 vi.mock("../../ai/index.js", () => ({
@@ -53,8 +60,13 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 describe("GET /api/settings", () => {
   it("returns settings as JSON", async () => {
-    const fakeSettings = { judge: { temperature: 0.3 }, providers: [] };
-    mockedLoad.mockReturnValue(fakeSettings as any);
+    const fakeSettings = {
+      ...createDefaultSettings(),
+      ui: {
+        showRawReasoning: true,
+      },
+    };
+    mockedLoad.mockReturnValue(fakeSettings);
 
     const res = await app.request("/api/settings");
 
@@ -88,9 +100,10 @@ describe("POST /api/settings", () => {
       storyteller: { providerId: "p1", model: "m1", temperature: 0.7, maxTokens: 2048 },
       generator: { providerId: "p1", model: "m1", temperature: 0.9, maxTokens: 4096 },
       embedder: { providerId: "p1", model: "m1", temperature: 0, maxTokens: 512 },
-      fallback: { providerId: "p1", model: "m1", temperature: 0.5, maxTokens: 1024, timeoutMs: 30000, retryCount: 2 },
+      fallback: { providerId: "p1", model: "m1", timeoutMs: 30000, retryCount: 2 },
       images: { enabled: false, providerId: "none", model: "", stylePrompt: "" },
       research: { enabled: true, maxSearchSteps: 10 },
+      ui: { showRawReasoning: true },
     };
     const savedResult = { ...input, normalized: true };
     mockedSave.mockReturnValue(savedResult as any);
@@ -105,6 +118,7 @@ describe("POST /api/settings", () => {
     const body = await res.json();
     expect(body).toEqual(savedResult);
     expect(mockedSave).toHaveBeenCalledOnce();
+    expect(mockedSave).toHaveBeenCalledWith(input);
   });
 
   it("returns 400 for invalid JSON body", async () => {
@@ -138,7 +152,7 @@ describe("POST /api/settings", () => {
       storyteller: { providerId: "p1", model: "m1", temperature: 0.7, maxTokens: 2048 },
       generator: { providerId: "p1", model: "m1", temperature: 0.9, maxTokens: 4096 },
       embedder: { providerId: "p1", model: "m1", temperature: 0, maxTokens: 512 },
-      fallback: { providerId: "p1", model: "m1", temperature: 0.5, maxTokens: 1024, timeoutMs: 30000, retryCount: 2 },
+      fallback: { providerId: "p1", model: "m1", timeoutMs: 30000, retryCount: 2 },
       images: { enabled: false, providerId: "none", model: "", stylePrompt: "" },
       research: { enabled: true, maxSearchSteps: 10 },
     };
@@ -155,5 +169,26 @@ describe("POST /api/settings", () => {
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body).toHaveProperty("error");
+  });
+});
+
+describe("settings contract defaults", () => {
+  it("defaults ui.showRawReasoning to false", () => {
+    expect(createDefaultSettings()).toMatchObject({
+      ui: {
+        showRawReasoning: false,
+      },
+    });
+  });
+
+  it("normalizes missing ui.showRawReasoning back to false for legacy payloads", () => {
+    const legacyPayload = {
+      ...createDefaultSettings(),
+    };
+    delete (legacyPayload as Partial<typeof legacyPayload>).ui;
+
+    const normalized = normalizeSettings(legacyPayload);
+
+    expect(normalized.ui.showRawReasoning).toBe(false);
   });
 });
