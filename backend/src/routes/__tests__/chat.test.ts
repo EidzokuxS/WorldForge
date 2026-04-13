@@ -216,6 +216,13 @@ beforeEach(() => {
   runtimeSnapshots.clear();
   runtimeActiveTurns.clear();
   chatHistoryByCampaign.clear();
+  mockedGetPremise.mockReturnValue("A dark fantasy world.");
+  mockedGetActive.mockReturnValue(null as any);
+  mockedLoadCampaign.mockResolvedValue({
+    id: CAMPAIGN_ID,
+    name: "Loaded Campaign",
+    createdAt: "2026-01-01",
+  } as any);
   mockedAppendChatMessages.mockImplementation((campaignId, messages) => {
     const existing = chatHistoryByCampaign.get(campaignId) ?? [];
     existing.push(...messages);

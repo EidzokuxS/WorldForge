@@ -81,6 +81,10 @@ export {
   isLocalProvider,
 } from "./settings.js";
 
-export { isChatMessage } from "./chat.js";
+export {
+  formatLookupLogEntry,
+  isChatMessage,
+  parseLookupLogEntry,
+} from "./chat.js";
 
 export { getErrorMessage } from "./errors.js";

@@ -1,12 +1,10 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { callStoryteller } from "../ai/index.js";
-import type { ChatMessage } from "@worldforge/shared";
+import { buildLookupHistoryMessages } from "../campaign/chat-history.js";
 import {
   appendChatMessages,
-  getCampaignPremise,
   getChatHistory,
-  getActiveCampaign,
+  getCampaignPremise,
   replaceChatMessage,
   getLastPlayerAction,
   createCheckpoint,
@@ -23,7 +21,6 @@ import {
   zodFirstError,
 } from "./helpers.js";
 import {
-  chatBodySchema,
   chatActionBodySchema,
   chatEditBodySchema,
   chatHistoryQuerySchema,
@@ -42,7 +39,6 @@ import {
   simulateOffscreenNpcs,
   checkAndTriggerReflections,
   tickFactions,
-  sanitizeNarrative,
 } from "../engine/index.js";
 import type {
   HiddenTurnSummary,
@@ -304,6 +300,41 @@ async function writeTurnEventSSE(
   });
 }
 
+function toPersistedLookupKind(
+  lookupKind: string,
+  compareAgainst?: string,
+): string {
+  return lookupKind === "power_profile" && compareAgainst ? "compare" : lookupKind;
+}
+
+function buildLookupCommandText({
+  lookupKind,
+  subject,
+  compareAgainst,
+  question,
+}: {
+  lookupKind: string;
+  subject: string;
+  compareAgainst?: string;
+  question?: string;
+}): string {
+  if (lookupKind === "power_profile") {
+    const comparison = compareAgainst
+      ? `/compare ${subject} vs ${compareAgainst}`
+      : `/compare ${subject}`;
+    return question ? `${comparison} :: ${question}` : comparison;
+  }
+
+  const lookupPrefixByKind: Record<string, string> = {
+    world_canon_fact: "world",
+    event_clarification: "event",
+    character_canon_fact: "character",
+  };
+  const prefix = lookupPrefixByKind[lookupKind] ?? "character";
+  const command = `/lookup ${prefix}: ${subject}`;
+  return question ? `${command} :: ${question}` : command;
+}
+
 // -- GET /history -------------------------------------------------------------
 
 app.get("/history", async (c) => {
@@ -403,83 +434,12 @@ app.post("/opening", async (c) => {
 // -- POST / (legacy plain-text streaming) -------------------------------------
 
 app.post("/", async (c) => {
-  try {
-    const result = await parseBody(c, chatBodySchema);
-    if ("response" in result) return result.response;
-
-    const { playerAction } = result.data;
-    const activeCampaign = getActiveCampaign();
-    if (!activeCampaign) {
-      return c.json({ error: "No active campaign loaded." }, 400);
-    }
-
-    const stResult = resolveStoryteller(loadSettings());
-    if ("error" in stResult) {
-      return c.json({ error: stResult.error }, stResult.status);
-    }
-
-    const { provider, temperature, maxTokens } = stResult.resolved;
-
-    let worldPremise: string;
-    let chatHistory: ChatMessage[] = [];
-    try {
-      worldPremise = getCampaignPremise(activeCampaign.id);
-      chatHistory = getChatHistory(activeCampaign.id);
-    } catch (error) {
-      return c.json(
-        { error: getErrorMessage(error, "Failed to load chat context.") },
-        getErrorStatus(error)
-      );
-    }
-
-    const userMessage: ChatMessage = { role: "user", content: playerAction };
-
-    // Fire-and-forget: persist user message without blocking the stream.
-    try {
-      appendChatMessages(activeCampaign.id, [userMessage]);
-    } catch (error) {
-      log.error("Failed to persist user message", error);
-    }
-
-    const streamResult = callStoryteller({
-      playerAction,
-      worldPremise,
-      chatHistory,
-      temperature: clamp(temperature, 0, 2),
-      maxTokens: clamp(maxTokens, 1, 32000),
-      provider,
-      onFinish: async ({ text }) => {
-        const assistantMessage: ChatMessage = {
-          role: "assistant",
-          content: sanitizeNarrative(text),
-        };
-        for (let attempt = 0; attempt < 3; attempt++) {
-          try {
-            appendChatMessages(activeCampaign.id, [assistantMessage]);
-            return;
-          } catch (error) {
-            if (attempt === 2) {
-              log.error("Failed to persist assistant message after 3 attempts", error);
-            } else {
-              await new Promise((r) => setTimeout(r, 50));
-            }
-          }
-        }
-      },
-    });
-
-    return streamResult.toTextStreamResponse({
-      headers: {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Cache-Control": "no-cache, no-transform",
-      },
-    });
-  } catch (error) {
-    return c.json(
-      { error: getErrorMessage(error, "Chat request failed.") },
-      getErrorStatus(error)
-    );
-  }
+  return c.json(
+    {
+      error: "Legacy POST /api/chat has been retired. Use /api/chat/action, /api/chat/opening, or /api/chat/lookup.",
+    },
+    410,
+  );
 });
 
 // -- POST /action — Full turn cycle via SSE (Oracle + Storyteller + tools) ----
@@ -639,6 +599,18 @@ app.post("/lookup", async (c) => {
           compareAgainst,
           question,
         });
+        const persistedMessages = buildLookupHistoryMessages(
+          buildLookupCommandText({
+            lookupKind,
+            subject,
+            compareAgainst,
+            question,
+          }),
+          toPersistedLookupKind(lookup.lookupKind, compareAgainst),
+          lookup.answer,
+        );
+
+        appendChatMessages(campaignId, persistedMessages);
 
         await stream.writeSSE({
           event: "lookup_result",

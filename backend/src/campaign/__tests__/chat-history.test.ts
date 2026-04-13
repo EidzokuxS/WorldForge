@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import fs from "node:fs";
-import { formatLookupLogEntry } from "@worldforge/shared";
 
 vi.mock("../manager.js", () => ({
   readCampaignConfig: vi.fn(() => ({ premise: "Test premise" })),
@@ -10,7 +9,12 @@ vi.mock("../paths.js", () => ({
   getChatHistoryPath: vi.fn((id: string) => `/tmp/test-${id}/chat_history.json`),
 }));
 
-import { getCampaignPremise, getChatHistory, appendChatMessages } from "../chat-history.js";
+import {
+  appendChatMessages,
+  buildLookupHistoryMessages,
+  getCampaignPremise,
+  getChatHistory,
+} from "../chat-history.js";
 
 describe("getCampaignPremise", () => {
   it("returns premise from campaign config", () => {
@@ -81,14 +85,11 @@ describe("appendChatMessages", () => {
     const writeSpy = vi.spyOn(fs, "writeFileSync").mockImplementation(() => {});
 
     appendChatMessages("test-id", [
-      { role: "user", content: "/lookup character: Satoru Gojo" },
-      {
-        role: "assistant",
-        content: formatLookupLogEntry(
-          "character_canon_fact",
-          "Gojo teaches at Tokyo Jujutsu High before the Shibuya Incident.",
-        ),
-      },
+      ...buildLookupHistoryMessages(
+        "/lookup character: Satoru Gojo",
+        "character_canon_fact",
+        "Gojo teaches at Tokyo Jujutsu High before the Shibuya Incident.",
+      ),
     ]);
 
     const persisted = writeSpy.mock.calls[0]?.[1] as string;
@@ -110,14 +111,11 @@ describe("appendChatMessages", () => {
     const writeSpy = vi.spyOn(fs, "writeFileSync").mockImplementation(() => {});
 
     appendChatMessages("test-id", [
-      { role: "user", content: "/compare Satoru Gojo vs Ryomen Sukuna" },
-      {
-        role: "assistant",
-        content: formatLookupLogEntry(
-          "compare",
-          "Gojo controls spacing more cleanly, while Sukuna brings the harsher finishing ceiling.",
-        ),
-      },
+      ...buildLookupHistoryMessages(
+        "/compare Satoru Gojo vs Ryomen Sukuna",
+        "compare",
+        "Gojo controls spacing more cleanly, while Sukuna brings the harsher finishing ceiling.",
+      ),
     ]);
 
     const persisted = writeSpy.mock.calls[0]?.[1] as string;
