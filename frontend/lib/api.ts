@@ -723,6 +723,7 @@ export interface TurnSSEHandlers {
   }) => void;
   onLookupResult?: (result: LookupResultEvent) => void;
   onNarrative: (text: string) => void;
+  onReasoning?: (payload: { text: string }) => void;
   onOracleResult: (result: { chance: number; roll: number; outcome: string; reasoning: string }) => void;
   onStateUpdate: (update: { tool: string; args: unknown; result: unknown }) => void;
   onQuickActions: (actions: Array<{ label: string; action: string }>) => void;
@@ -751,6 +752,7 @@ export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: T
         case "scene-settling": handlers.onSceneSettling?.(parsed); break;
         case "lookup_result": handlers.onLookupResult?.(parsed); break;
         case "narrative": handlers.onNarrative(parsed.text); break;
+        case "reasoning": handlers.onReasoning?.(parsed); break;
         case "oracle_result": handlers.onOracleResult(parsed); break;
         case "state_update": handlers.onStateUpdate(parsed); break;
         case "quick_actions": handlers.onQuickActions(parsed.actions ?? parsed.result?.actions ?? []); break;

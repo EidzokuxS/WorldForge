@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
+import { describe, it, expect, expectTypeOf, vi, beforeEach, type Mock } from "vitest";
 
 // -- Mocks --------------------------------------------------------------------
 
@@ -544,6 +544,57 @@ describe("processTurn", () => {
     const narrativeEvents = events.filter((e) => e.type === "narrative");
     expect(narrativeEvents).toHaveLength(1);
     expect(narrativeEvents[0]!.data).toEqual({ text: "The goblin falls." });
+  });
+
+  it("locks the installed ai generateText seam to reasoningText and emits reasoning after narration", async () => {
+    expectTypeOf<Awaited<ReturnType<typeof generateText>>>().toHaveProperty("reasoningText");
+    expectTypeOf<Awaited<ReturnType<typeof generateText>>["reasoningText"]>().toEqualTypeOf<
+      string | undefined
+    >();
+
+    setupMocks({
+      streamParts: [{ type: "text-delta", text: "The goblin falls." }],
+    });
+    (generateText as Mock).mockResolvedValue({
+      text: "The goblin falls.",
+      reasoningText: "The storyteller kept the visible prose separate from internal chain-of-thought.",
+    });
+
+    const events = await collectEvents(processTurn(createTestOptions()));
+
+    expect(events).toEqual(
+      expect.arrayContaining([
+        { type: "narrative", data: { text: "The goblin falls." } },
+        {
+          type: "reasoning",
+          data: {
+            text: "The storyteller kept the visible prose separate from internal chain-of-thought.",
+          },
+        },
+      ]),
+    );
+
+    const narrativeIndex = events.findIndex((event) => event.type === "narrative");
+    const reasoningIndex = events.findIndex((event) => event.type === "reasoning");
+    const doneIndex = events.findIndex((event) => event.type === "done");
+
+    expect(narrativeIndex).toBeGreaterThan(-1);
+    expect(reasoningIndex).toBeGreaterThan(narrativeIndex);
+    expect(doneIndex).toBeGreaterThan(reasoningIndex);
+  });
+
+  it("does not emit a reasoning event when generateText returns no separate reasoningText", async () => {
+    setupMocks({
+      streamParts: [{ type: "text-delta", text: "The goblin falls." }],
+    });
+    (generateText as Mock).mockResolvedValue({
+      text: "The goblin falls.",
+      reasoningText: undefined,
+    });
+
+    const events = await collectEvents(processTurn(createTestOptions()));
+
+    expect(events.some((event) => event.type === "reasoning")).toBe(false);
   });
 
   it("uses storyteller model role and GLM family for hidden and final narration passes", async () => {

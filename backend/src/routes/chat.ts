@@ -286,6 +286,24 @@ function campaignHasAssistantMessages(campaignId: string): boolean {
   return getChatHistory(campaignId).some((message) => message.role === "assistant");
 }
 
+async function writeTurnEventSSE(
+  stream: { writeSSE: (event: { event: string; data: string }) => Promise<void> },
+  event: { type: string; data: unknown },
+): Promise<void> {
+  if (event.type === "reasoning") {
+    await stream.writeSSE({
+      event: "reasoning",
+      data: JSON.stringify(event.data),
+    });
+    return;
+  }
+
+  await stream.writeSSE({
+    event: event.type,
+    data: JSON.stringify(event.data),
+  });
+}
+
 // -- GET /history -------------------------------------------------------------
 
 app.get("/history", async (c) => {
@@ -359,10 +377,7 @@ app.post("/opening", async (c) => {
         });
 
         for await (const event of openingGenerator) {
-          await stream.writeSSE({
-            event: event.type,
-            data: JSON.stringify(event.data),
-          });
+          await writeTurnEventSSE(stream, event);
         }
       } catch (error) {
         await stream.writeSSE({
@@ -570,10 +585,7 @@ app.post("/action", async (c) => {
             })();
           }
 
-          await stream.writeSSE({
-            event: event.type,
-            data: JSON.stringify(event.data),
-          });
+          await writeTurnEventSSE(stream, event);
         }
 
         // Turn completed successfully -- store snapshot for potential undo/retry
@@ -744,10 +756,7 @@ app.post("/retry", async (c) => {
             })();
           }
 
-          await stream.writeSSE({
-            event: event.type,
-            data: JSON.stringify(event.data),
-          });
+          await writeTurnEventSSE(stream, event);
         }
 
         setLastTurnSnapshot(campaignId, previousSnapshot);

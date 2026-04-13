@@ -391,4 +391,53 @@ describe("parseTurnSSE", () => {
 
     expect(onDone).toHaveBeenCalledTimes(1);
   });
+
+  it("dispatches reasoning on its own event lane without regressing lookup_result, narrative, or done", async () => {
+    const onLookupResult = vi.fn();
+    const onNarrative = vi.fn();
+    const onReasoning = vi.fn();
+    const onDone = vi.fn();
+
+    await parseTurnSSE(
+      createStream([
+        "event: lookup_result",
+        'data: {"lookupKind":"power_profile","subject":"Gojo","answer":"Bounded answer","citations":[],"uncertaintyNotes":[],"sceneImpact":"Lookup only."}',
+        "",
+        "event: narrative",
+        'data: {"text":"Infinity warps the air."}',
+        "",
+        "event: reasoning",
+        'data: {"text":"Provider reasoning stays outside canonical narration."}',
+        "",
+        "event: done",
+        "data: {}",
+        "",
+      ].join("\n")),
+      {
+        onLookupResult,
+        onNarrative,
+        onOracleResult: vi.fn(),
+        onReasoning,
+        onStateUpdate: vi.fn(),
+        onQuickActions: vi.fn(),
+        onDone,
+        onError: vi.fn(),
+      },
+    );
+
+    expect(onLookupResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lookupKind: "power_profile",
+        subject: "Gojo",
+      }),
+    );
+    expect(onNarrative).toHaveBeenCalledWith("Infinity warps the air.");
+    expect(onReasoning).toHaveBeenCalledWith({
+      text: "Provider reasoning stays outside canonical narration.",
+    });
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(onLookupResult.mock.invocationCallOrder[0]).toBeLessThan(onNarrative.mock.invocationCallOrder[0]);
+    expect(onNarrative.mock.invocationCallOrder[0]).toBeLessThan(onReasoning.mock.invocationCallOrder[0]);
+    expect(onReasoning.mock.invocationCallOrder[0]).toBeLessThan(onDone.mock.invocationCallOrder[0]);
+  });
 });

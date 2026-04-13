@@ -55,6 +55,7 @@ export interface TurnEvent {
     | "oracle_result"
     | "scene-settling"
     | "narrative"
+    | "reasoning"
     | "state_update"
     | "quick_actions"
     | "auto_checkpoint"
@@ -566,6 +567,11 @@ function scoreVisibleNarrationCandidate(
   return text.length - failures.length * 1000;
 }
 
+function normalizeReasoningText(reasoningText: string | undefined): string | undefined {
+  const trimmed = reasoningText?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 async function runVisibleNarrationWithGuard(args: {
   label: "final" | "opening";
   provider: ProviderConfig;
@@ -574,7 +580,12 @@ async function runVisibleNarrationWithGuard(args: {
   prompt: string;
   storytellerTemperature: number;
   storytellerMaxTokens: number;
-}): Promise<{ text: string; retried: boolean; failures: VisibleNarrationFailure[] }> {
+}): Promise<{
+  text: string;
+  reasoningText: string | undefined;
+  retried: boolean;
+  failures: VisibleNarrationFailure[];
+}> {
   const {
     label,
     provider,
@@ -622,9 +633,15 @@ async function runVisibleNarrationWithGuard(args: {
   }
 
   const initialText = applyVisibleNarrationFilters(initialResult.text);
+  const initialReasoningText = normalizeReasoningText(initialResult.reasoningText);
   const initialFailures = detectVisibleNarrationFailures(initialText, { system, prompt });
   if (initialFailures.length === 0) {
-    return { text: initialText, retried: false, failures: [] };
+    return {
+      text: initialText,
+      reasoningText: initialReasoningText,
+      retried: false,
+      failures: [],
+    };
   }
 
   const retryPrompt = `${prompt}${buildVisibleNarrationRetryAddendum(initialFailures)}`;
@@ -632,16 +649,27 @@ async function runVisibleNarrationWithGuard(args: {
   try {
     const retryResult = await runNarrationPass(activeProvider, retryPrompt);
     const retryText = applyVisibleNarrationFilters(retryResult.text);
+    const retryReasoningText = normalizeReasoningText(retryResult.reasoningText);
     const retryFailures = detectVisibleNarrationFailures(retryText, { system, prompt });
 
     if (scoreVisibleNarrationCandidate(retryText, retryFailures) >= scoreVisibleNarrationCandidate(initialText, initialFailures)) {
-      return { text: retryText, retried: true, failures: retryFailures };
+      return {
+        text: retryText,
+        reasoningText: retryReasoningText,
+        retried: true,
+        failures: retryFailures,
+      };
     }
   } catch (retryError) {
     log.warn("Visible narration quality retry failed; keeping first visible pass", retryError);
   }
 
-  return { text: initialText, retried: true, failures: initialFailures };
+  return {
+    text: initialText,
+    reasoningText: initialReasoningText,
+    retried: true,
+    failures: initialFailures,
+  };
 }
 
 // -- Outcome instructions -----------------------------------------------------
@@ -1166,6 +1194,7 @@ export async function* processTurn(
     storytellerMaxTokens,
   });
   const narrativeText = finalNarration.text;
+  const reasoningText = finalNarration.reasoningText;
   log.info(
     `Visible narration complete: hiddenDraft=${hiddenNarrative.length} chars, final=${narrativeText.length} chars, retried=${finalNarration.retried}, failures=${finalNarration.failures.join(",") || "none"}`,
   );
@@ -1175,6 +1204,10 @@ export async function* processTurn(
     appendChatMessages(campaignId, [
       { role: "assistant", content: narrativeText },
     ]);
+  }
+
+  if (reasoningText) {
+    yield { type: "reasoning", data: { text: reasoningText } };
   }
 
   const newTick =
@@ -1298,6 +1331,7 @@ export async function* processOpeningScene(
     storytellerMaxTokens,
   });
   const narrativeText = openingNarration.text;
+  const reasoningText = openingNarration.reasoningText;
 
   log.info(
     `Opening narration complete: final=${narrativeText.length} chars, retried=${openingNarration.retried}, failures=${openingNarration.failures.join(",") || "none"}`,
@@ -1306,6 +1340,10 @@ export async function* processOpeningScene(
   if (narrativeText) {
     appendChatMessages(campaignId, [{ role: "assistant", content: narrativeText }]);
     yield { type: "narrative", data: { text: narrativeText } };
+  }
+
+  if (reasoningText) {
+    yield { type: "reasoning", data: { text: reasoningText } };
   }
 
   yield { type: "done", data: { tick: currentTick, opening: true } };

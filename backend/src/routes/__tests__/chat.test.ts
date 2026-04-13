@@ -554,6 +554,51 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(body).toContain("Nanami let the warning land before he moved.");
   });
 
+  it("streams a separate reasoning SSE event without merging it into narrative", async () => {
+    setupStoryteller();
+    setupDbMock();
+
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
+      id: campaignId,
+      name: `Campaign ${campaignId}`,
+      createdAt: "2026-01-01",
+    }) as any);
+    mockedCaptureSnapshot.mockImplementation((campaignId) => ({
+      campaignId,
+      spawnedNpcIds: [],
+      spawnedItemIds: [],
+      revealedLocationIds: [],
+      createdRelationshipIds: [],
+      createdChronicleIds: [],
+    }) as any);
+    mockedProcessTurn.mockImplementation(() =>
+      createTurnStream([
+        { type: "narrative", data: { text: "Nanami let the warning land before he moved." } },
+        { type: "reasoning", data: { text: "Reasoning stays on a debug lane." } },
+        { type: "done", data: { tick: 2 } },
+      ]),
+    );
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Press Nanami for an answer",
+        intent: "Press Nanami for an answer",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("event: narrative");
+    expect(body).toContain("event: reasoning");
+    expect(body).toContain("Reasoning stays on a debug lane.");
+    expect(body).not.toContain("Nanami let the warning land before he moved.Reasoning stays on a debug lane.");
+  });
+
   it("loads history by explicit campaignId when no campaign is active", async () => {
     mockedGetActive.mockReturnValue(null as any);
     mockedLoadCampaign.mockResolvedValue({
