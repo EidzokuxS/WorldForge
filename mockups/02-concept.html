@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WorldForge — New Campaign</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared.css">
+<style>
+  .form-layout { display:grid; grid-template-columns:1fr clamp(240px, 18vw, 320px); gap:clamp(24px, 2vw, 48px); flex:1; }
+  .form-col { display:flex; flex-direction:column; gap:clamp(16px, 1.2vw, 24px); }
+  .form-col .stretch { flex:1; display:flex; flex-direction:column; }
+  .form-col .stretch textarea { flex:1; min-height:clamp(100px, 8vw, 180px); }
+  .toggle-row { display:flex; align-items:center; justify-content:space-between; }
+  .source-item { display:flex; align-items:center; justify-content:space-between; padding:clamp(8px, 0.6vw, 14px) clamp(10px, 0.8vw, 14px); border-radius:8px; cursor:pointer; transition:background 0.1s; border-bottom:1px solid var(--border); }
+  .source-item:last-of-type { border-bottom:none; }
+  .source-item:hover { background:var(--hover); }
+  .source-item.selected { background:rgba(230,62,0,0.06); }
+  .source-name { font-size:clamp(13px, 0.9vw, 16px); font-weight:500; color:var(--text); }
+  .source-meta { font-size:clamp(11px, 0.75vw, 14px); color:var(--text-dim); margin-top:2px; }
+  .source-check { width:clamp(16px, 1.1vw, 20px); height:clamp(16px, 1.1vw, 20px); border-radius:5px; border:2px solid rgba(255,255,255,0.15); flex-shrink:0; }
+  .source-item.selected .source-check { background:var(--blood); border-color:var(--blood); }
+  .step-indicator { font-size:clamp(12px, 0.85vw, 15px); color:var(--text-dim); font-weight:500; }
+</style>
+</head>
+<body>
+<div class="shell"><div class="shell-frame">
+  <nav class="sidebar">
+    <div class="sidebar-brand"><span class="logo">WorldForge</span></div>
+    <div class="nav">
+      <div class="nav-group-label">Workspace</div>
+      <div class="nav-items">
+        <a class="nav-item" href="01-launcher.html"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>Launchpad</a>
+        <a class="nav-item active" href="#"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>New Campaign</a>
+        <a class="nav-item" href="07-library.html"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/></svg>Library</a>
+        <a class="nav-item" href="06-settings.html"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>Settings</a>
+      </div>
+    </div>
+    <div class="sidebar-footer">v0.1.0</div>
+  </nav>
+  <div class="main">
+    <div class="page-header">
+      <h1>New Campaign</h1>
+      <span class="step-indicator">Step 1 / 2</span>
+    </div>
+    <div class="content">
+      <div class="form-layout">
+        <div class="form-col">
+          <div><label>Campaign Name</label><input type="text" placeholder="Give your campaign a name"></div>
+          <div class="stretch"><label>Premise</label><textarea placeholder="Describe your world: setting, tone, tensions, and what makes this campaign distinct."></textarea></div>
+          <div><label>Franchise / IP <span class="label-opt">optional</span></label><input type="text" placeholder="e.g. The Witcher, Naruto, Star Wars..."></div>
+          <div class="toggle-row"><label style="margin:0;">Research Mode</label><div class="toggle on"></div></div>
+        </div>
+        <div class="form-col">
+          <div class="section-label">Sources</div>
+          <div>
+            <div class="source-item selected"><div><div class="source-name">browser-worldbook</div><div class="source-meta">12 entries</div></div><div class="source-check"></div></div>
+            <div class="source-item"><div><div class="source-name">SCP-SP_Lorebrook</div><div class="source-meta">8 entries</div></div><div class="source-check"></div></div>
+            <div class="source-item"><div><div class="source-name">Voices_of_the_Void</div><div class="source-meta">15 entries</div></div><div class="source-check"></div></div>
+          </div>
+          <button class="btn btn-ghost" style="align-self:flex-start;">+ Import Worldbook</button>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bar">
+      <a class="btn btn-ghost" href="01-launcher.html">Cancel</a>
+      <a class="btn btn-primary" href="03-dna.html">Continue to DNA</a>
+    </div>
+  </div>
+</div></div>
+</body>
+</html>

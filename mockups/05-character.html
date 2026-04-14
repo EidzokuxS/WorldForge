@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WorldForge — Character</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared.css">
+<style>
+  .mode-tabs { display:flex; gap:clamp(4px, 0.3vw, 8px); margin-bottom:clamp(16px, 1.4vw, 28px); }
+  .mode-tab { padding:clamp(5px, 0.4vw, 8px) clamp(12px, 1vw, 18px); font-size:clamp(12px, 0.85vw, 15px); font-weight:500; color:var(--text-dim); border:1px solid var(--border); border-radius:6px; cursor:pointer; transition:all 0.12s; background:transparent; font-family:var(--font); }
+  .mode-tab:hover { border-color:rgba(255,255,255,0.12); color:var(--text-muted); }
+  .mode-tab.active { border-color:var(--blood); color:var(--bone); background:rgba(230,62,0,0.05); }
+  .char-layout { display:grid; grid-template-columns:1fr clamp(260px, 20vw, 340px); gap:clamp(24px, 2vw, 40px); flex:1; }
+  .form-section { margin-bottom:clamp(12px, 1vw, 20px); }
+  .form-row { display:grid; grid-template-columns:1fr 1fr; gap:clamp(8px, 0.7vw, 14px); }
+  .char-preview { position:sticky; top:0; padding-top:4px; }
+  .preview-name { font-family:var(--serif); font-size:clamp(18px, 1.4vw, 24px); font-weight:600; color:var(--bone); margin-bottom:2px; }
+  .preview-sub { font-size:clamp(12px, 0.85vw, 15px); color:var(--text-dim); margin-bottom:clamp(12px, 1vw, 20px); }
+  .preview-stat { display:flex; justify-content:space-between; padding:clamp(6px, 0.5vw, 10px) 0; border-bottom:1px solid var(--border); font-size:clamp(12px, 0.85vw, 15px); }
+  .preview-stat-label { color:var(--text-dim); }
+  .preview-stat-value { color:var(--text); font-weight:500; }
+  .hp-bar { display:flex; gap:3px; }
+  .hp { width:clamp(18px, 1.3vw, 24px); height:clamp(6px, 0.4vw, 8px); border-radius:3px; background:var(--blood); }
+  .hp.off { background:rgba(255,255,255,0.06); }
+  .preview-tags { display:flex; gap:4px; flex-wrap:wrap; margin-top:clamp(12px, 1vw, 18px); }
+</style>
+</head>
+<body>
+<div class="shell"><div class="shell-frame">
+  <nav class="sidebar">
+    <div class="sidebar-brand"><span class="logo">WorldForge</span></div>
+    <div class="nav">
+      <div class="nav-group-label">Workspace</div>
+      <div class="nav-items">
+        <a class="nav-item" href="01-launcher.html"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>Launchpad</a>
+        <a class="nav-item" href="02-concept.html"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>New Campaign</a>
+        <a class="nav-item" href="07-library.html"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/></svg>Library</a>
+        <a class="nav-item" href="06-settings.html"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>Settings</a>
+      </div>
+      <div class="nav-sep"></div>
+      <div class="nav-group-label">Campaign</div>
+      <div class="nav-items">
+        <a class="nav-item" href="04-review.html"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>World Review</a>
+        <a class="nav-item active" href="#"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 17.5 3 6V1.5h4.5L19 13"/></svg>Character</a>
+      </div>
+    </div>
+    <div class="sidebar-footer">v0.1.0</div>
+  </nav>
+  <div class="main">
+    <div class="page-header"><h1>Character</h1></div>
+    <div class="content">
+      <div class="mode-tabs"><button class="mode-tab active">Describe</button><button class="mode-tab">AI Generate</button><button class="mode-tab">Import Card</button></div>
+      <div class="char-layout">
+        <div>
+          <div class="form-section"><label>Character Description</label><textarea style="min-height:clamp(80px, 6vw, 140px);">A weathered ex-mercenary turned reluctant scholar. Scarred hands that once held a halberd now trace ancient texts in the Ember Library. Mid-40s, greying temples, perpetual frown.</textarea></div>
+          <div style="display:flex;gap:6px;margin-bottom:clamp(16px, 1.2vw, 24px);"><button class="btn btn-primary btn-sm">Parse</button><button class="btn btn-ghost btn-sm">Clear</button></div>
+          <div class="form-row"><div class="form-section"><label>Name</label><input type="text" value="Corvus Hale"></div><div class="form-section"><label>Race</label><input type="text" value="Human"></div></div>
+          <div class="form-row"><div class="form-section"><label>Age</label><input type="text" value="46"></div><div class="form-section"><label>Gender</label><input type="text" value="Male"></div></div>
+          <div class="form-section"><label>Appearance</label><textarea>Tall, lean build scarred from years of mercenary work. Greying temples, sharp dark eyes.</textarea></div>
+          <div class="form-section"><label>Background</label><textarea>Former sellsword who found purpose studying forbidden automata texts at the Ember Library.</textarea></div>
+          <div class="form-section"><label>Starting Location</label><select><option>Porto Vecchio (Starting)</option><option>The Ember Library</option><option>Valthryn Keep</option></select></div>
+        </div>
+        <div class="char-preview">
+          <div class="preview-name">Corvus Hale</div>
+          <div class="preview-sub">Human, 46, Male</div>
+          <div class="preview-stat"><span class="preview-stat-label">HP</span><span class="hp-bar"><span class="hp"></span><span class="hp"></span><span class="hp"></span><span class="hp off"></span><span class="hp off"></span></span></div>
+          <div class="preview-stat"><span class="preview-stat-label">Location</span><span class="preview-stat-value">Porto Vecchio</span></div>
+          <div class="preview-stat"><span class="preview-stat-label">Background</span><span class="preview-stat-value">Ex-mercenary scholar</span></div>
+          <div class="preview-tags"><span class="tag">Ex-mercenary</span><span class="tag">Scholar</span><span class="tag">Curious</span><span class="tag">Hidden blade</span><span class="tag">Automata obsession</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bar"><a class="btn btn-ghost" href="04-review.html">Back to Review</a><button class="btn btn-blood">Save & Begin Adventure</button></div>
+  </div>
+</div></div>
+</body>
+</html>

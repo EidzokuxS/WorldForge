@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WorldForge — Library</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared.css">
+<style>
+  .lib-header { display:grid; grid-template-columns:1fr 80px 100px 120px; padding:0 0 clamp(6px, 0.5vw, 10px); border-bottom:1px solid var(--border); font-size:clamp(10px, 0.7vw, 13px); font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em; }
+  .lib-row { display:grid; grid-template-columns:1fr 80px 100px 120px; align-items:center; padding:clamp(10px, 0.9vw, 18px) 0; border-bottom:1px solid var(--border); transition:background 0.1s; cursor:pointer; }
+  .lib-row:hover { background:var(--hover); margin:0 clamp(-6px, -0.5vw, -10px); padding-left:clamp(6px, 0.5vw, 10px); padding-right:clamp(6px, 0.5vw, 10px); border-radius:8px; }
+  .lib-row:last-child { border-bottom:none; }
+  .lib-name { font-size:clamp(14px, 1vw, 18px); font-weight:500; color:var(--text); }
+  .lib-meta { font-size:clamp(12px, 0.85vw, 15px); color:var(--text-dim); }
+  .lib-actions { display:flex; gap:4px; justify-content:flex-end; }
+</style>
+</head>
+<body>
+<div class="shell"><div class="shell-frame">
+  <nav class="sidebar">
+    <div class="sidebar-brand"><span class="logo">WorldForge</span></div>
+    <div class="nav">
+      <div class="nav-group-label">Workspace</div>
+      <div class="nav-items">
+        <a class="nav-item" href="01-launcher.html"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>Launchpad</a>
+        <a class="nav-item" href="02-concept.html"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>New Campaign</a>
+        <a class="nav-item active" href="#"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/></svg>Library</a>
+        <a class="nav-item" href="06-settings.html"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>Settings</a>
+      </div>
+    </div>
+    <div class="sidebar-footer">v0.1.0</div>
+  </nav>
+  <div class="main">
+    <div class="page-header"><h1>Source Library</h1><button class="btn btn-outline btn-sm">Import Worldbook</button></div>
+    <div class="content">
+      <div class="lib-header"><span>Name</span><span>Entries</span><span>Updated</span><span></span></div>
+      <div class="lib-row"><span class="lib-name">browser-worldbook</span><span class="lib-meta">12</span><span class="lib-meta">Mar 30</span><div class="lib-actions"><button class="btn btn-ghost btn-sm">Export</button><button class="btn btn-destructive btn-sm">Delete</button></div></div>
+      <div class="lib-row"><span class="lib-name">SCP-SP_Lorebrook_world_info</span><span class="lib-meta">8</span><span class="lib-meta">Mar 28</span><div class="lib-actions"><button class="btn btn-ghost btn-sm">Export</button><button class="btn btn-destructive btn-sm">Delete</button></div></div>
+      <div class="lib-row"><span class="lib-name">Voices_of_the_Void_LB_world_info</span><span class="lib-meta">15</span><span class="lib-meta">Mar 25</span><div class="lib-actions"><button class="btn btn-ghost btn-sm">Export</button><button class="btn btn-destructive btn-sm">Delete</button></div></div>
+    </div>
+  </div>
+</div></div>
+</body>
+</html>

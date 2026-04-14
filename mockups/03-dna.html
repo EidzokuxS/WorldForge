@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WorldForge — World DNA</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared.css">
+<style>
+  .header-right { display:flex; align-items:center; gap:clamp(8px, 0.7vw, 14px); }
+  .step-indicator { font-size:clamp(12px, 0.85vw, 15px); color:var(--text-dim); font-weight:500; }
+  .dna-grid { display:grid; grid-template-columns:1fr 1fr; gap:0; flex:1; }
+  .dna-item { padding:clamp(14px, 1.2vw, 24px) clamp(16px, 1.4vw, 28px); border-bottom:1px solid var(--border); border-right:1px solid var(--border); }
+  .dna-item:nth-child(2n) { border-right:none; }
+  .dna-item:nth-last-child(-n+2) { border-bottom:none; }
+  .dna-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:clamp(6px, 0.5vw, 12px); }
+  .dna-category { font-size:clamp(10px, 0.7vw, 13px); font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em; }
+  .dna-actions { display:flex; align-items:center; gap:clamp(4px, 0.3vw, 8px); }
+  textarea.dna-text { width:100%; background:transparent; border:none; padding:0; font-family:var(--font); font-size:clamp(13px, 0.9vw, 16px); color:var(--text); outline:none; resize:none; line-height:1.6; height:auto; min-height:auto; }
+  textarea.dna-text::placeholder { color:var(--text-dim); }
+</style>
+</head>
+<body>
+<div class="shell"><div class="shell-frame">
+  <nav class="sidebar">
+    <div class="sidebar-brand"><span class="logo">WorldForge</span></div>
+    <div class="nav">
+      <div class="nav-group-label">Workspace</div>
+      <div class="nav-items">
+        <a class="nav-item" href="01-launcher.html"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>Launchpad</a>
+        <a class="nav-item active" href="02-concept.html"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>New Campaign</a>
+        <a class="nav-item" href="07-library.html"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/></svg>Library</a>
+        <a class="nav-item" href="06-settings.html"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>Settings</a>
+      </div>
+    </div>
+    <div class="sidebar-footer">v0.1.0</div>
+  </nav>
+  <div class="main">
+    <div class="page-header">
+      <h1>World DNA</h1>
+      <div class="header-right"><span class="step-indicator">Step 2 / 2</span><button class="btn btn-outline btn-sm">Re-roll All</button></div>
+    </div>
+    <div class="content">
+      <div class="dna-grid">
+        <div class="dna-item"><div class="dna-header"><span class="dna-category">Epoch</span><div class="dna-actions"><button class="btn btn-ghost btn-sm">Re-roll</button><div class="toggle-sm on"></div></div></div><textarea class="dna-text" rows="3">Renaissance-era with emerging gunpowder technology and political intrigue between city-states</textarea></div>
+        <div class="dna-item"><div class="dna-header"><span class="dna-category">Tone</span><div class="dna-actions"><button class="btn btn-ghost btn-sm">Re-roll</button><div class="toggle-sm on"></div></div></div><textarea class="dna-text" rows="3">Grimdark with occasional dark humor, moral ambiguity over clear heroics</textarea></div>
+        <div class="dna-item"><div class="dna-header"><span class="dna-category">Power Level</span><div class="dna-actions"><button class="btn btn-ghost btn-sm">Re-roll</button><div class="toggle-sm on"></div></div></div><textarea class="dna-text" rows="3">Low-magic setting where cantrips are common but high sorcery is feared and persecuted</textarea></div>
+        <div class="dna-item"><div class="dna-header"><span class="dna-category">Conflict Axis</span><div class="dna-actions"><button class="btn btn-ghost btn-sm">Re-roll</button><div class="toggle-sm on"></div></div></div><textarea class="dna-text" rows="3">Merchants vs. noble houses, with the church playing both sides</textarea></div>
+        <div class="dna-item"><div class="dna-header"><span class="dna-category">Cultural Flavor</span><div class="dna-actions"><button class="btn btn-ghost btn-sm">Re-roll</button><div class="toggle-sm on"></div></div></div><textarea class="dna-text" rows="3">Mediterranean trading republics blended with Eastern European folklore</textarea></div>
+        <div class="dna-item"><div class="dna-header"><span class="dna-category">Wild Card</span><div class="dna-actions"><button class="btn btn-ghost btn-sm">Re-roll</button><div class="toggle-sm on"></div></div></div><textarea class="dna-text" rows="3">Ancient automata occasionally surface from buried ruins, feared as cursed relics</textarea></div>
+      </div>
+    </div>
+    <div class="footer-bar">
+      <a class="btn btn-ghost" href="02-concept.html">Back to Concept</a>
+      <button class="btn btn-primary">Generate World</button>
+    </div>
+  </div>
+</div></div>
+</body>
+</html>

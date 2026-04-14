@@ -1,0 +1,91 @@
+/* WorldForge Mockup — Shared Shell Styles */
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+:root {
+  --bg:#09090b; --surface:rgba(18,18,22,0.84); --rail:rgba(24,24,27,0.9);
+  --frame:rgba(10,10,12,0.82); --border:rgba(255,255,255,0.06);
+  --bone:#f8f9fa; --blood:#e63e00; --text:#f4f4f5;
+  --text-muted:#a1a1aa; --text-dim:#52525b;
+  --hover:rgba(255,255,255,0.04);
+  --input-bg:rgba(255,255,255,0.05); --input-border:rgba(255,255,255,0.1);
+  --font:'Inter',-apple-system,sans-serif; --serif:'Playfair Display',Georgia,serif;
+}
+html, body { height:100%; }
+body { font-family:var(--font); font-size:clamp(14px, 0.95vw, 18px); background:radial-gradient(circle at top left,rgba(230,62,0,0.10),transparent 28%),radial-gradient(circle at top right,rgba(59,130,246,0.05),transparent 24%),linear-gradient(180deg,#0e0e10 0%,#09090b 100%); color:var(--text); -webkit-font-smoothing:antialiased; }
+
+/* Shell */
+.shell { display:flex; height:100vh; max-width:1820px; margin:0 auto; padding:clamp(8px, 0.6vw, 16px); }
+.shell-frame { display:flex; flex:1; border-radius:16px; border:1px solid var(--border); background:var(--frame); overflow:hidden; backdrop-filter:blur(40px); }
+
+/* Sidebar */
+.sidebar { width:clamp(220px, 16vw, 300px); flex-shrink:0; background:var(--rail); border-right:1px solid var(--border); display:flex; flex-direction:column; }
+.sidebar-brand { padding:clamp(20px, 1.5vw, 32px) clamp(16px, 1.2vw, 24px) clamp(16px, 1vw, 24px); }
+.sidebar-brand .logo { font-size:clamp(14px, 1.1vw, 20px); font-weight:700; letter-spacing:0.2em; text-transform:uppercase; color:var(--blood); }
+.nav { padding:0 clamp(6px, 0.5vw, 12px); flex:1; }
+.nav-group-label { font-size:clamp(10px, 0.65vw, 13px); font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.22em; padding:0 12px clamp(6px, 0.5vw, 10px); }
+.nav-items { display:flex; flex-direction:column; gap:clamp(2px, 0.25vw, 6px); }
+.nav-item { display:flex; align-items:center; gap:clamp(10px, 0.8vw, 16px); padding:clamp(10px, 0.75vw, 16px); border-radius:12px; color:rgba(244,244,245,0.9); font-size:clamp(13px, 0.9vw, 17px); font-weight:500; cursor:pointer; transition:all 0.15s; text-decoration:none; }
+.nav-item:not(.active):hover { background:rgba(39,39,42,0.62); color:var(--bone); }
+.nav-item.active { background:rgba(230,62,0,0.16); color:var(--bone); box-shadow:inset 0 0 0 1px rgba(230,62,0,0.28), 0 12px 30px rgba(0,0,0,0.18); cursor:default; }
+.nav-icon { width:clamp(16px, 1.1vw, 22px); height:clamp(16px, 1.1vw, 22px); flex-shrink:0; }
+.nav-sep { height:1px; background:var(--border); margin:12px; }
+.sidebar-footer { padding:clamp(12px, 1vw, 20px) clamp(16px, 1.2vw, 24px); border-top:1px solid var(--border); font-size:clamp(11px, 0.7vw, 14px); color:var(--text-dim); }
+
+/* Main */
+.main { flex:1; min-width:0; background:var(--surface); display:flex; flex-direction:column; overflow:hidden; }
+.page-header { padding:clamp(20px, 1.8vw, 40px) clamp(28px, 2.5vw, 56px) 0; flex-shrink:0; display:flex; align-items:center; justify-content:space-between; }
+.page-header h1 { font-family:var(--serif); font-size:clamp(28px, 2.2vw, 44px); font-weight:600; color:var(--bone); letter-spacing:-0.02em; }
+.content { flex:1; padding:clamp(20px, 1.8vw, 40px) clamp(28px, 2.5vw, 56px); display:flex; flex-direction:column; min-height:0; overflow-y:auto; }
+
+/* Buttons */
+.btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; font-family:var(--font); font-size:clamp(13px, 0.9vw, 16px); font-weight:500; height:clamp(34px, 2.4vw, 44px); padding:0 clamp(14px, 1.1vw, 22px); border-radius:6px; border:none; cursor:pointer; transition:all 0.15s; text-decoration:none; white-space:nowrap; }
+.btn-primary { background:#f4f4f5; color:#09090b; }
+.btn-primary:hover { background:rgba(244,244,245,0.9); }
+.btn-outline { background:rgba(255,255,255,0.05); color:var(--text); border:1px solid rgba(255,255,255,0.1); box-shadow:0 1px 2px rgba(0,0,0,0.15); }
+.btn-outline:hover { background:rgba(255,255,255,0.08); }
+.btn-ghost { background:transparent; color:var(--text-muted); border:none; height:clamp(30px, 2vw, 38px); padding:0 clamp(10px, 0.8vw, 16px); }
+.btn-ghost:hover { background:rgba(255,255,255,0.05); }
+.btn-sm { height:clamp(30px, 2vw, 38px); padding:0 clamp(10px, 0.8vw, 16px); }
+.btn-destructive { background:transparent; color:#ef4444; border:none; height:clamp(30px, 2vw, 38px); padding:0 clamp(10px, 0.8vw, 16px); }
+.btn-destructive:hover { background:rgba(239,68,68,0.06); }
+.btn-blood { background:var(--blood); color:white; }
+.btn-blood:hover { background:#cc3600; }
+
+/* Footer */
+.footer-bar { padding:clamp(12px, 1vw, 20px) clamp(28px, 2.5vw, 56px); border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-shrink:0; }
+
+/* Forms */
+label { display:block; font-size:clamp(12px, 0.85vw, 15px); font-weight:500; color:var(--text-muted); margin-bottom:clamp(4px, 0.3vw, 8px); }
+.label-opt { color:var(--text-dim); font-weight:400; }
+input[type="text"], input[type="password"], textarea, select {
+  width:100%; background:var(--input-bg); border:1px solid var(--input-border); border-radius:6px;
+  padding:clamp(8px, 0.6vw, 12px) clamp(10px, 0.8vw, 14px); font-family:var(--font); font-size:clamp(13px, 0.9vw, 16px);
+  color:var(--text); transition:border-color 0.15s; outline:none; resize:vertical; height:clamp(34px, 2.4vw, 44px);
+}
+textarea { height:auto; min-height:clamp(34px, 2.4vw, 44px); line-height:1.6; }
+input:focus, textarea:focus, select:focus { border-color:rgba(255,255,255,0.2); }
+input::placeholder, textarea::placeholder { color:var(--text-dim); }
+select { cursor:pointer; appearance:none; background-image:url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23a1a1aa' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 12px center; padding-right:32px; }
+
+/* Tabs */
+.tabs { display:flex; gap:0; padding:0 clamp(28px, 2.5vw, 56px); border-bottom:1px solid var(--border); margin-top:clamp(12px, 1vw, 20px); flex-shrink:0; }
+.tab { padding:clamp(8px, 0.7vw, 14px) clamp(12px, 1vw, 18px); font-size:clamp(13px, 0.9vw, 16px); font-weight:500; color:var(--text-dim); cursor:pointer; border-bottom:2px solid transparent; transition:all 0.12s; margin-bottom:-1px; text-decoration:none; }
+.tab:hover { color:var(--text-muted); }
+.tab.active { color:var(--bone); border-bottom-color:var(--blood); }
+.tab-count { font-size:clamp(10px, 0.7vw, 13px); color:var(--text-dim); margin-left:4px; font-weight:400; }
+
+/* Section label */
+.section-label { font-size:clamp(11px, 0.7vw, 14px); font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:clamp(8px, 0.6vw, 14px); flex-shrink:0; }
+
+/* Toggle */
+.toggle { width:clamp(36px, 2.5vw, 44px); height:clamp(20px, 1.4vw, 24px); background:var(--text-dim); border-radius:12px; position:relative; cursor:pointer; transition:background 0.2s; flex-shrink:0; }
+.toggle.on { background:var(--blood); }
+.toggle::after { content:''; position:absolute; width:clamp(16px, 1.1vw, 20px); height:clamp(16px, 1.1vw, 20px); background:white; border-radius:50%; top:2px; left:2px; transition:transform 0.15s; }
+.toggle.on::after { transform:translateX(clamp(16px, 1.1vw, 20px)); }
+.toggle-sm { width:clamp(28px, 1.8vw, 34px); height:clamp(16px, 1vw, 18px); background:var(--text-dim); border-radius:9px; position:relative; cursor:pointer; transition:background 0.15s; display:inline-block; vertical-align:middle; }
+.toggle-sm.on { background:var(--blood); }
+.toggle-sm::after { content:''; position:absolute; width:clamp(12px, 0.8vw, 14px); height:clamp(12px, 0.8vw, 14px); background:white; border-radius:50%; top:2px; left:2px; transition:transform 0.15s; }
+.toggle-sm.on::after { transform:translateX(clamp(12px, 0.8vw, 16px)); }
+
+/* Tags */
+.tag { font-size:clamp(10px, 0.7vw, 13px); font-weight:500; padding:clamp(2px, 0.15vw, 4px) clamp(6px, 0.5vw, 10px); border-radius:4px; background:rgba(255,255,255,0.05); color:var(--text-dim); }
+.tag.accent { color:var(--blood); background:rgba(230,62,0,0.08); }

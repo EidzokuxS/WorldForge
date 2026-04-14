@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WorldForge — Settings</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared.css">
+<style>
+  .save-status { font-size:clamp(12px, 0.85vw, 15px); color:#22c55e; display:flex; align-items:center; gap:5px; font-weight:500; }
+  .save-dot { width:6px; height:6px; border-radius:50%; background:#22c55e; }
+  .provider-row { padding:clamp(14px, 1.2vw, 24px) 0; border-bottom:1px solid var(--border); }
+  .provider-row:last-child { border-bottom:none; }
+  .provider-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:clamp(10px, 0.8vw, 16px); }
+  .provider-name { font-size:clamp(14px, 1vw, 18px); font-weight:600; color:var(--bone); }
+  .provider-url { font-size:clamp(12px, 0.8vw, 14px); color:var(--text-dim); margin-top:2px; }
+  .provider-type { font-size:clamp(10px, 0.65vw, 12px); font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em; }
+  .provider-fields { display:grid; grid-template-columns:1fr 1fr; gap:clamp(8px, 0.7vw, 14px); margin-bottom:clamp(10px, 0.8vw, 16px); max-width:clamp(500px, 40vw, 700px); }
+  .provider-actions { display:flex; gap:clamp(4px, 0.3vw, 8px); align-items:center; }
+</style>
+</head>
+<body>
+<div class="shell"><div class="shell-frame">
+  <nav class="sidebar">
+    <div class="sidebar-brand"><span class="logo">WorldForge</span></div>
+    <div class="nav">
+      <div class="nav-group-label">Workspace</div>
+      <div class="nav-items">
+        <a class="nav-item" href="01-launcher.html"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>Launchpad</a>
+        <a class="nav-item" href="02-concept.html"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>New Campaign</a>
+        <a class="nav-item" href="07-library.html"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/></svg>Library</a>
+        <a class="nav-item active" href="#"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>Settings</a>
+      </div>
+    </div>
+    <div class="sidebar-footer">v0.1.0</div>
+  </nav>
+  <div class="main">
+    <div class="page-header"><h1>Settings</h1><div class="save-status"><span class="save-dot"></span>Saved</div></div>
+    <div class="tabs">
+      <a class="tab active" href="#">Providers</a>
+      <a class="tab" href="#">Roles</a>
+      <a class="tab" href="#">Images</a>
+      <a class="tab" href="#">Research</a>
+    </div>
+    <div class="content">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:clamp(6px, 0.5vw, 12px);"><button class="btn btn-outline btn-sm">+ Add Provider</button></div>
+      <div class="provider-row">
+        <div class="provider-header"><div><div class="provider-name">GLM (Z.AI)</div><div class="provider-url">https://open.bigmodel.cn/api/paas/v4</div></div><span class="provider-type">OpenAI-compatible</span></div>
+        <div class="provider-fields"><div><label>Default Model</label><input type="text" value="glm-4-plus"></div><div><label>API Key</label><input type="password" value="sk-xxxxxxxxxxxx"></div></div>
+        <div class="provider-actions"><button class="btn btn-outline btn-sm">Test Connection</button><button class="btn btn-ghost btn-sm">Edit</button><button class="btn btn-destructive btn-sm">Remove</button></div>
+      </div>
+      <div class="provider-row">
+        <div class="provider-header"><div><div class="provider-name">OpenRouter</div><div class="provider-url">https://openrouter.ai/api/v1</div></div><span class="provider-type">OpenRouter</span></div>
+        <div class="provider-fields"><div><label>Default Model</label><input type="text" value="qwen/qwen3-embedding-8b"></div><div><label>API Key</label><input type="password" value="sk-or-v1-xxxxxxxx"></div></div>
+        <div class="provider-actions"><button class="btn btn-outline btn-sm">Test Connection</button><button class="btn btn-ghost btn-sm">Edit</button><button class="btn btn-destructive btn-sm">Remove</button></div>
+      </div>
+      <div class="provider-row">
+        <div class="provider-header"><div><div class="provider-name">Anthropic</div><div class="provider-url">https://api.anthropic.com/v1</div></div><span class="provider-type">Built-in</span></div>
+        <div class="provider-fields"><div><label>Default Model</label><input type="text" value="claude-sonnet-4-6"></div><div><label>API Key</label><input type="password" value="sk-ant-xxxxxxxx"></div></div>
+        <div class="provider-actions"><button class="btn btn-outline btn-sm">Test Connection</button><button class="btn btn-ghost btn-sm">Edit</button><button class="btn btn-destructive btn-sm">Remove</button></div>
+      </div>
+    </div>
+  </div>
+</div></div>
+</body>
+</html>
