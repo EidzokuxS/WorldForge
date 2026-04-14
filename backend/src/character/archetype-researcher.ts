@@ -30,18 +30,9 @@ export async function researchArchetype(opts: {
         if (result.text?.trim()) return result.text;
         return null;
       },
-      async () => {
-        const result = await generateText({
-          model: createModel(opts.role.provider),
-          prompt: `Describe the character archetype "${opts.archetype}" for the shared CharacterDraft pipeline. Cover profile, motivations, capabilities, background hooks, social context cues, and signature traits in a compact research summary for an original RPG character.`,
-          temperature: opts.role.temperature,
-          maxOutputTokens: opts.role.maxTokens,
-        });
-        return result.text || null;
-      },
     );
-  } catch {
-    log.error("Archetype research failed entirely");
+  } catch (error) {
+    log.error("Archetype research failed entirely", error);
     return null;
   }
 }
@@ -51,6 +42,10 @@ export function synthesizeArchetypeGrounding(opts: {
   draft: CharacterDraft;
   researchContext: string | null;
 }): CharacterGroundingProfile | undefined {
+  if (!opts.researchContext?.trim()) {
+    return undefined;
+  }
+
   return synthesizeGroundedCharacterProfile({
     draft: opts.draft,
     summaryHint: `${opts.archetype}: ${firstNonEmpty([
@@ -62,9 +57,7 @@ export function synthesizeArchetypeGrounding(opts: {
     evidenceKind: "research",
     evidenceLabel: "Archetype research",
     uncertaintyNotes: [
-      opts.researchContext
-        ? "Archetype research grounding stays bounded to the retrieved summary plus stored character evidence."
-        : "No external research summary was available; the grounded profile stays bounded to the generated character draft.",
+      "Archetype research grounding is limited to the retrieved summary plus stored character evidence.",
     ],
   });
 }

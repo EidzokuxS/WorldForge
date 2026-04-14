@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createModel } from "../../ai/index.js";
 import type { IpResearchContext } from "@worldforge/shared";
 import { fromLegacyScaffoldNpc } from "../../character/record-adapters.js";
+import { enrichKnownIpWorldgenNpcDraft } from "../../character/known-ip-worldgen-research.js";
 import type { GenerateScaffoldRequest, GenerationProgress, ScaffoldNpc } from "../types.js";
 import { buildCharacterPromptContract } from "../../character/prompt-contract.js";
 import {
@@ -57,6 +58,18 @@ const npcDetailSingleSchema = z.object({
       }).transform((g) => ({ shortTerm: g.short_term, longTerm: g.long_term })),
     ])
     .catch({ shortTerm: ["Survive"], longTerm: ["Find purpose"] }),
+  selfImage: z
+    .string()
+    .default("")
+    .describe(
+      "1 sentence: how this character privately frames their own role, worth, or burden. Must not duplicate persona verbatim."
+    ),
+  socialRoles: z
+    .array(z.string())
+    .default([])
+    .describe(
+      "1-3 concise in-world roles or statuses, e.g. [Teacher], [Clan Heir], [Border Commander]. Do not include generic system labels like NPC or player."
+    ),
 });
 
 // ---------------------------------------------------------------------------
@@ -73,6 +86,16 @@ interface PlannedNpc {
 
 interface DetailedNpc {
   name: string;
+  persona: string;
+  tags: string[];
+  goals: { shortTerm: string[]; longTerm: string[] };
+  selfImage: string;
+  socialRoles: string[];
+}
+
+interface PreviousNpcDetailContext {
+  name: string;
+  tier: string;
   persona: string;
   tags: string[];
   goals: { shortTerm: string[]; longTerm: string[] };
@@ -267,6 +290,97 @@ function validateFaction(
   return null;
 }
 
+function buildPreviousNpcSection(
+  previouslyDetailed: PreviousNpcDetailContext[],
+  mode: "full" | "compact" | "none",
+): string {
+  if (mode === "none" || previouslyDetailed.length === 0) {
+    return "";
+  }
+
+  if (mode === "compact") {
+    return `ALREADY DETAILED NPCs:\n${previouslyDetailed.map((n) =>
+      `- ${n.name} (${n.tier}) [Tags: ${n.tags.slice(0, 3).join(", ")}]`
+    ).join("\n")}\n`;
+  }
+
+  return `ALREADY DETAILED NPCs:\n${previouslyDetailed.map((n) =>
+    `- ${n.name} (${n.tier}): ${n.persona} [Tags: ${n.tags.join(", ")}] [Goals: ${n.goals.shortTerm.join("; ")} / ${n.goals.longTerm.join("; ")}]`
+  ).join("\n")}\n`;
+}
+
+async function generateNpcDetail(opts: {
+  req: GenerateScaffoldRequest;
+  npc: PlannedNpc;
+  refinedPremise: string;
+  locationNames: string[];
+  factionNames: string[];
+  allPlanned: PlannedNpc[];
+  ipBlock: string;
+  knownIpContract: string;
+  divergenceBlock: string;
+  ipPersonaRule: string;
+  previouslyDetailed: PreviousNpcDetailContext[];
+}): Promise<z.infer<typeof npcDetailSingleSchema>> {
+  const attemptModes: Array<"full" | "compact" | "none"> = ["full", "compact", "none"];
+  let lastError: Error | undefined;
+
+  for (const mode of attemptModes) {
+    const previousSection = buildPreviousNpcSection(opts.previouslyDetailed, mode);
+    const prompt = `You are detailing a single NPC for a text RPG engine. The engine reads these fields mechanically -- follow the format exactly.
+
+WORLD PREMISE:
+${opts.refinedPremise}
+
+KNOWN LOCATIONS: ${opts.locationNames.join(", ")}
+KNOWN FACTIONS: ${opts.factionNames.join(", ")}
+ALL NPCs IN THIS WORLD: ${opts.allPlanned.map((n) => `${n.name} (${n.tier})`).join(", ")}
+${opts.ipBlock}
+${opts.knownIpContract ? `${opts.knownIpContract}\n` : ""}${opts.divergenceBlock ? `${opts.divergenceBlock}\n` : ""}
+${previousSection}
+NPC TO DETAIL NOW: "${opts.npc.name}" (${opts.npc.tier})
+Role: ${opts.npc.role}
+Location: ${opts.npc.locationName}, Faction: ${opts.npc.factionName ?? "none"}
+
+SHARED CONTRACT:
+${WORLDGEN_NPC_DETAIL_CONTRACT}
+
+FIELD INSTRUCTIONS:
+- persona: Exactly 2-3 sentences. Sentence 1 = who they are and their background. Sentence 2 = personality and how they treat others. Sentence 3 (optional) = a specific skill, secret, or relationship that matters for gameplay. Never write "mysterious" or "enigmatic" -- state concrete facts. Consider relationships with ALREADY DETAILED NPCs above -- reference them by name where relevant.
+- selfImage: Exactly 1 sentence in this character's own frame. What do they privately think they are, owe, protect, deserve, or refuse to become? This must add something new beyond persona.
+- socialRoles: 1-3 concise in-world roles/statuses. Good: [Teacher], [Special Grade Sorcerer], [Clan Heir], [Border Commander]. Bad: [NPC], [Character], [Important Person].
+- tags: Gameplay-relevant traits and skills. Format: [Trait] or [Skill]. Examples: [Master Swordsman], [Cynical], [Wealthy], [Poisoner], [Charismatic], [Illiterate]. 3-5 tags per NPC.
+- goals: An object with EXACTLY two keys: "shortTerm" and "longTerm".
+  - "shortTerm": array of 1-2 strings. Current objectives the character is actively pursuing RIGHT NOW.
+  - "longTerm": array of 1-2 strings. Life ambitions or multi-year plans.
+  - CRITICAL: The keys MUST be "shortTerm" and "longTerm" (camelCase).
+${opts.ipPersonaRule}
+
+OUTPUT LIMITS:
+- Keep persona under 120 words.
+- Keep selfImage to one sentence.
+- Return only the required JSON payload; do not include commentary.
+
+${buildStopSlopRules()}`;
+
+    try {
+      const detail = await generateObject({
+        model: createModel(opts.req.role.provider),
+        schema: npcDetailSingleSchema,
+        prompt,
+        temperature: Math.min(opts.req.role.temperature, 0.35),
+        maxOutputTokens: opts.req.role.maxTokens,
+        retries: 1,
+      });
+      return detail.object;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
+  }
+
+  throw lastError ?? new Error(`Failed to generate NPC detail for ${opts.npc.name}.`);
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -335,13 +449,7 @@ export async function generateNpcsStep(
 
   // Phase C: Detail all NPCs sequentially (per-entity, not batched)
   const allDetailed: DetailedNpc[] = [];
-  const previouslyDetailed: Array<{
-    name: string;
-    tier: string;
-    persona: string;
-    tags: string[];
-    goals: { shortTerm: string[]; longTerm: string[] };
-  }> = [];
+  const previouslyDetailed: PreviousNpcDetailContext[] = [];
 
   for (let i = 0; i < allPlanned.length; i++) {
     const npc = allPlanned[i]!;
@@ -360,70 +468,44 @@ export async function generateNpcsStep(
       );
     }
 
-    // Full detail of ALL previously detailed NPCs (per D-02) -- both key and supporting
-    const previousSection =
-      previouslyDetailed.length > 0
-        ? `ALREADY DETAILED NPCs:\n${previouslyDetailed.map((n) =>
-            `- ${n.name} (${n.tier}): ${n.persona} [Tags: ${n.tags.join(", ")}] [Goals: ${n.goals.shortTerm.join("; ")} / ${n.goals.longTerm.join("; ")}]`
-          ).join("\n")}\n`
-        : "";
-
-    // REVIEW FIX #3 (D-05): Include ALL canonical NPC, location, and faction names
-    const detail = await generateObject({
-      model: createModel(req.role.provider),
-      schema: npcDetailSingleSchema,
-      prompt: `You are detailing a single NPC for a text RPG engine. The engine reads these fields mechanically -- follow the format exactly.
-
-WORLD PREMISE:
-${refinedPremise}
-
-KNOWN LOCATIONS: ${locationNames.join(", ")}
-KNOWN FACTIONS: ${factionNames.join(", ")}
-ALL NPCs IN THIS WORLD: ${allPlanned.map((n) => `${n.name} (${n.tier})`).join(", ")}
-${ipBlock}
-${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}
-${previousSection}
-NPC TO DETAIL NOW: "${npc.name}" (${npc.tier})
-Role: ${npc.role}
-Location: ${npc.locationName}, Faction: ${npc.factionName ?? "none"}
-
-SHARED CONTRACT:
-${WORLDGEN_NPC_DETAIL_CONTRACT}
-
-FIELD INSTRUCTIONS:
-- persona: Exactly 2-3 sentences. Sentence 1 = who they are and their background. Sentence 2 = personality and how they treat others. Sentence 3 (optional) = a specific skill, secret, or relationship that matters for gameplay. Never write "mysterious" or "enigmatic" -- state concrete facts. Consider relationships with ALREADY DETAILED NPCs above -- reference them by name where relevant.
-- tags: Gameplay-relevant traits and skills. Format: [Trait] or [Skill]. Examples: [Master Swordsman], [Cynical], [Wealthy], [Poisoner], [Charismatic], [Illiterate]. 3-5 tags per NPC.
-- goals: An object with EXACTLY two keys: "shortTerm" and "longTerm".
-  - "shortTerm": array of 1-2 strings. Current objectives the character is actively pursuing RIGHT NOW.
-  - "longTerm": array of 1-2 strings. Life ambitions or multi-year plans.
-  - CRITICAL: The keys MUST be "shortTerm" and "longTerm" (camelCase).
-${ipPersonaRule}
-
-${buildStopSlopRules()}`,
-      temperature: req.role.temperature,
-      maxOutputTokens: req.role.maxTokens,
+    const detail = await generateNpcDetail({
+      req,
+      npc,
+      refinedPremise,
+      locationNames,
+      factionNames,
+      allPlanned,
+      ipBlock,
+      knownIpContract,
+      divergenceBlock,
+      ipPersonaRule,
+      previouslyDetailed,
     });
 
     // REVIEW FIX #6: Force planned name as authoritative
     allDetailed.push({
       name: npc.name, // From plan, NOT from LLM output
-      persona: detail.object.persona,
-      tags: detail.object.tags,
-      goals: detail.object.goals,
+      persona: detail.persona,
+      tags: detail.tags,
+      goals: detail.goals,
+      selfImage: detail.selfImage,
+      socialRoles: detail.socialRoles,
     });
 
     // Track for subsequent calls -- FULL detail, not truncated
     previouslyDetailed.push({
       name: npc.name, // Forced from plan
       tier: npc.tier,
-      persona: detail.object.persona,
-      tags: detail.object.tags,
-      goals: detail.object.goals,
+      persona: detail.persona,
+      tags: detail.tags,
+      goals: detail.goals,
     });
   }
 
   // Merge plan + detail data
-  const result: ScaffoldNpc[] = allDetailed.map((detail) => {
+  const result: ScaffoldNpc[] = [];
+
+  for (const detail of allDetailed) {
     const planEntry = allPlanned.find(
       (p) => p.name.toLowerCase() === detail.name.toLowerCase(),
     );
@@ -446,21 +528,82 @@ ${buildStopSlopRules()}`,
       tier,
     } satisfies ScaffoldNpc;
 
-    return {
-      ...legacyNpc,
-      draft: fromLegacyScaffoldNpc(legacyNpc, {
-        canonicalStatus,
-        sourceKind: "worldgen",
-        currentLocationName: locationName,
-        factionName,
-        originMode: "resident",
-      }),
+    const roleLabels = dedupeStrings([
+      ...detail.socialRoles,
+      planEntry?.role ?? "",
+      factionName ?? "",
+    ]);
+
+    let draft = fromLegacyScaffoldNpc(legacyNpc, {
+      canonicalStatus,
+      sourceKind: "worldgen",
+      currentLocationName: locationName,
+      factionName,
+      originMode: "resident",
+    });
+
+    draft = {
+      ...draft,
+      identity: {
+        ...draft.identity,
+        baseFacts: {
+          biography: draft.identity.baseFacts?.biography ?? "",
+          socialRole: roleLabels,
+          hardConstraints: draft.identity.baseFacts?.hardConstraints ?? [],
+        },
+        behavioralCore: {
+          motives: draft.identity.behavioralCore?.motives ?? [],
+          pressureResponses: draft.identity.behavioralCore?.pressureResponses ?? [],
+          taboos: draft.identity.behavioralCore?.taboos ?? [],
+          attachments: draft.identity.behavioralCore?.attachments ?? [],
+          selfImage: detail.selfImage.trim(),
+        },
+      },
     };
-  });
+
+    if (ipContext && tier === "key") {
+      draft = await enrichKnownIpWorldgenNpcDraft({
+        draft,
+        franchise: ipContext.franchise,
+        role: req.role,
+        research: req.research,
+        premise: refinedPremise,
+        premiseDivergence: req.premiseDivergence,
+      });
+    }
+
+    result.push({
+      ...legacyNpc,
+      draft: {
+        ...draft,
+        provenance: {
+          ...draft.provenance,
+          worldgenOrigin: planEntry?.role ?? null,
+        },
+      },
+    });
+  }
 
   // If additionalInstruction provided, it was already considered in the prompts
   // (unused in current flow but kept for signature compatibility)
   void additionalInstruction;
 
   return result;
+}
+function dedupeStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+
+  for (const value of values) {
+    const normalized = value.trim();
+    if (!normalized) continue;
+
+    const key = normalized.toLowerCase();
+    if (key === "npc" || key === "player" || seen.has(key)) continue;
+
+    seen.add(key);
+    deduped.push(normalized);
+  }
+
+  return deduped;
 }

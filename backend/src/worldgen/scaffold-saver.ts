@@ -4,6 +4,7 @@ import { getDb } from "../db/index.js";
 import {
   createCharacterRecordFromDraft,
   fromLegacyScaffoldNpc,
+  reconcileDraftBackedScaffoldNpc,
   toLegacyNpcDraft,
 } from "../character/record-adapters.js";
 import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
@@ -157,12 +158,17 @@ function insertNpcs(
     const id = crypto.randomUUID();
     npcIds.set(npc.name, id);
     const currentLocationId = locationIds.get(npc.locationName) ?? null;
-    const canonicalDraft = npc.draft ?? fromLegacyScaffoldNpc(npc, {
-      sourceKind: "worldgen",
-      currentLocationName: npc.locationName,
-      factionName: npc.factionName,
-      originMode: "resident",
-    });
+    const canonicalDraft = npc.draft
+      ? reconcileDraftBackedScaffoldNpc({
+          ...npc,
+          draft: npc.draft,
+        })
+      : fromLegacyScaffoldNpc(npc, {
+          sourceKind: "worldgen",
+          currentLocationName: npc.locationName,
+          factionName: npc.factionName,
+          originMode: "resident",
+        });
     const characterRecord = createCharacterRecordFromDraft(
       {
         ...canonicalDraft,

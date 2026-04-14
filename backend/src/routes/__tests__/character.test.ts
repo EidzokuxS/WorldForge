@@ -397,13 +397,16 @@ describe("POST /api/worldgen/parse-character", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.role).toBe("player");
-    expect(body.draft).toEqual(fakeDraft);
+    expect(body.draft).toMatchObject(fakeDraft);
     expect(body.characterRecord.identity.baseFacts.biography).toBe(
       "A wandering swordsman.",
     );
     expect(body.characterRecord.identity.behavioralCore.motives).toEqual([
       "Keep moving before the past catches up",
     ]);
+    expect(body.draft.grounding).toBeUndefined();
+    expect(body.characterRecord.grounding).toBeUndefined();
+    expect(mockedSynthesizeGroundedCharacterProfile).not.toHaveBeenCalled();
     expect(body.characterRecord.sourceBundle.secondarySources[0]?.label).toBe(
       "Generator concept",
     );
@@ -436,13 +439,16 @@ describe("POST /api/worldgen/parse-character", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.role).toBe("key");
-    expect(body.draft).toEqual(fakeDraft);
+    expect(body.draft).toMatchObject(fakeDraft);
     expect(body.characterRecord.identity.baseFacts.biography).toBe(
       "Veteran sentry.",
     );
     expect(body.characterRecord.identity.behavioralCore.motives).toEqual([
       "Duty-bound",
     ]);
+    expect(body.draft.grounding).toBeUndefined();
+    expect(body.characterRecord.grounding).toBeUndefined();
+    expect(mockedSynthesizeGroundedCharacterProfile).not.toHaveBeenCalled();
     expect(body.npc).toMatchObject({
       name: "Guard",
       persona: "Stoic and suspicious.",
@@ -486,11 +492,14 @@ describe("POST /api/worldgen/generate-character", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.role).toBe("player");
-    expect(body.draft).toEqual(fakeDraft);
+    expect(body.draft).toMatchObject(fakeDraft);
     expect(body.characterRecord.identity.liveDynamics.activeGoals).toEqual([
       "Find work",
       "Restore family honor",
     ]);
+    expect(body.draft.grounding).toBeUndefined();
+    expect(body.characterRecord.grounding).toBeUndefined();
+    expect(mockedSynthesizeGroundedCharacterProfile).not.toHaveBeenCalled();
     expect(body.character).toMatchObject({
       name: "Ranger",
       race: "Elf",
@@ -532,10 +541,13 @@ describe("POST /api/worldgen/generate-character", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.role).toBe("key");
-    expect(body.draft).toEqual(fakeDraft);
+    expect(body.draft).toMatchObject(fakeDraft);
     expect(body.characterRecord.identity.behavioralCore.selfImage).toBe(
       "Greedy but personable.",
     );
+    expect(body.draft.grounding).toBeUndefined();
+    expect(body.characterRecord.grounding).toBeUndefined();
+    expect(mockedSynthesizeGroundedCharacterProfile).not.toHaveBeenCalled();
     expect(body.npc).toMatchObject({
       name: "Merchant",
       persona: "Greedy but personable.",
@@ -810,7 +822,7 @@ describe("POST /api/worldgen/save-character", () => {
 
   it("saves player to DB and returns playerId", async () => {
     setActiveCampaign();
-    const { mockInsert, mockRun } = createMockDb({
+    const { mockValues } = createMockDb({
       locations: [{ id: "loc-1", name: "Tavern" }],
     });
 
@@ -847,6 +859,10 @@ describe("POST /api/worldgen/save-character", () => {
         currentStrains: expect.any(Array),
       }),
     );
+    const firstInsertCall = mockValues.mock.calls[0] as unknown as [Record<string, unknown>] | undefined;
+    const insertedPlayer = firstInsertCall?.[0];
+    expect(insertedPlayer?.currentLocationId).toBe("loc-1");
+    expect(insertedPlayer?.currentSceneLocationId).toBe("loc-1");
     expect(typeof body.playerId).toBe("string");
   });
 
@@ -870,6 +886,7 @@ describe("POST /api/worldgen/save-character", () => {
     const firstInsertCall = mockValues.mock.calls[0] as unknown as [Record<string, unknown>] | undefined;
     const insertedPlayer = firstInsertCall?.[0];
     expect(insertedPlayer?.currentLocationId).toBe("loc-1");
+    expect(insertedPlayer?.currentSceneLocationId).toBe("loc-1");
   });
 
   it("deletes existing player before inserting new one", async () => {

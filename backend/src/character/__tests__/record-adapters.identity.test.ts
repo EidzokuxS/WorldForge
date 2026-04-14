@@ -531,4 +531,111 @@ describe("record adapters richer identity hydration", () => {
     expect(record.grounding).toBeUndefined();
     expect(record.identity.displayName).toBe("Aria Bloodthorn");
   });
+
+  it("drops stored grounding that has no evidence sources", () => {
+    const record = hydrateStoredNpcRecord(
+      {
+        id: "npc-synthetic-grounding",
+        campaignId: "camp-1",
+        name: "Gojo Satoru",
+        persona: "Teacher and strongest sorcerer.",
+        tags: JSON.stringify(["Irreverent"]),
+        tier: "key",
+        currentLocationId: "loc-1",
+        goals: JSON.stringify({ short_term: ["Investigate"], long_term: ["Protect students"] }),
+        beliefs: JSON.stringify([]),
+        unprocessedImportance: 1,
+        inactiveTicks: 0,
+        createdAt: Date.now(),
+        characterRecord: JSON.stringify({
+          identity: {
+            id: "npc-synthetic-grounding",
+            campaignId: "camp-1",
+            role: "npc",
+            tier: "key",
+            displayName: "Gojo Satoru",
+            canonicalStatus: "known_ip_diverged",
+          },
+          profile: {
+            species: "Human",
+            gender: "Male",
+            ageText: "28",
+            appearance: "",
+            backgroundSummary: "",
+            personaSummary: "Teacher and strongest sorcerer.",
+          },
+          socialContext: {
+            factionId: null,
+            factionName: "Gojo Clan",
+            homeLocationId: null,
+            homeLocationName: null,
+            currentLocationId: "loc-1",
+            currentLocationName: "Tokyo Jujutsu College",
+            relationshipRefs: [],
+            socialStatus: [],
+            originMode: "resident",
+          },
+          motivations: {
+            shortTermGoals: ["Investigate"],
+            longTermGoals: ["Protect students"],
+            beliefs: [],
+            drives: ["Freedom"],
+            frictions: [],
+          },
+          capabilities: {
+            traits: ["Irreverent"],
+            skills: [],
+            flaws: [],
+            specialties: [],
+            wealthTier: null,
+          },
+          state: {
+            hp: 5,
+            conditions: [],
+            statusFlags: [],
+            activityState: "active",
+          },
+          loadout: {
+            inventorySeed: [],
+            equippedItemRefs: [],
+            currencyNotes: "",
+            signatureItems: [],
+          },
+          startConditions: {},
+          provenance: {
+            sourceKind: "worldgen",
+            importMode: null,
+            templateId: null,
+            archetypePrompt: null,
+            worldgenOrigin: "known-ip",
+            legacyTags: [],
+          },
+          grounding: {
+            summary: "Synthetic summary that should not survive hydration.",
+            facts: ["Synthetic fact"],
+            abilities: ["Synthetic ability"],
+            constraints: [],
+            signatureMoves: [],
+            strongPoints: [],
+            vulnerabilities: [],
+            uncertaintyNotes: ["No external research summary or imported evidence was available."],
+            powerProfile: {
+              attack: "Synthetic",
+              speed: "Synthetic",
+              durability: "Synthetic",
+              range: "Synthetic",
+              strengths: [],
+              constraints: [],
+              vulnerabilities: [],
+              uncertaintyNotes: [],
+            },
+            sources: [],
+          },
+        }),
+      },
+      { currentLocationName: "Tokyo Jujutsu College", factionName: "Gojo Clan" },
+    ) as Record<string, any>;
+
+    expect(record.grounding).toBeUndefined();
+  });
 });

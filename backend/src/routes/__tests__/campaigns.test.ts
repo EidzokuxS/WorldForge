@@ -1018,6 +1018,131 @@ describe("GET /:id/world", () => {
     expect(body.npcs[0].draft.continuity.identityInertia).toBe("anchored");
   });
 
+  it("world route draft-backed npc round-trip reload keeps characterRecord, draft, npc, and compatibility fields in sync", async () => {
+    mockedGetActive.mockReturnValue({
+      id: CAMPAIGN_ID,
+      name: "Test",
+      createdAt: "2026-01-01",
+      generationComplete: true,
+    } as any);
+
+    const persistedNpc = makeStoredNpcRow();
+    const persistedRecord = JSON.parse(persistedNpc.characterRecord) as Record<string, any>;
+    const editedShortTermGoals = ["Fortify the village", "Brief the scouts"];
+    const editedLongTermGoals = ["Keep the refugees alive", "Break the siege"];
+
+    persistedNpc.name = "Marshal Selene Voss";
+    persistedNpc.persona = "Now leads from the front and trusts the village scouts.";
+    persistedNpc.tags = JSON.stringify(["strategist", "scarred", "field medic"]);
+    persistedNpc.tier = "persistent";
+    persistedNpc.goals = JSON.stringify({
+      short_term: editedShortTermGoals,
+      long_term: editedLongTermGoals,
+    });
+    persistedNpc.characterRecord = JSON.stringify({
+      ...persistedRecord,
+      identity: {
+        ...persistedRecord.identity,
+        displayName: "Marshal Selene Voss",
+        tier: "supporting",
+        behavioralCore: {
+          ...persistedRecord.identity.behavioralCore,
+          motives: [],
+          pressureResponses: [],
+        },
+        liveDynamics: {
+          ...persistedRecord.identity.liveDynamics,
+          currentStrains: [],
+        },
+      },
+      profile: {
+        ...persistedRecord.profile,
+        personaSummary: "Now leads from the front and trusts the village scouts.",
+      },
+      socialContext: {
+        ...persistedRecord.socialContext,
+        factionName: "Free Company",
+        currentLocationName: "Forest",
+      },
+      motivations: {
+        ...persistedRecord.motivations,
+        shortTermGoals: editedShortTermGoals,
+        longTermGoals: editedLongTermGoals,
+        drives: [],
+        frictions: [],
+      },
+      capabilities: {
+        ...persistedRecord.capabilities,
+        traits: ["strategist", "scarred", "field medic"],
+      },
+    });
+
+    const mockAll = vi.fn();
+    const mockWhere = vi.fn(() => ({ all: mockAll }));
+    const mockFrom = vi.fn(() => ({ where: mockWhere }));
+    const mockSelect = vi.fn(() => ({ from: mockFrom }));
+
+    mockAll
+      .mockReturnValueOnce([
+        {
+          id: "loc-1",
+          name: "Forest",
+          description: "Dark pines and wet stone.",
+          connectedTo: "[]",
+        },
+      ])
+      .mockReturnValueOnce([persistedNpc])
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([makeStoredPlayerRow()]);
+
+    mockedGetDb.mockReturnValue({
+      select: mockSelect,
+    } as any);
+
+    const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/world`);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.npcs[0]).toMatchObject({
+      name: "Marshal Selene Voss",
+      persona: "Now leads from the front and trusts the village scouts.",
+      tier: "persistent",
+      characterRecord: {
+        identity: {
+          displayName: "Marshal Selene Voss",
+          tier: "supporting",
+        },
+      },
+      draft: {
+        identity: {
+          displayName: "Marshal Selene Voss",
+          tier: "supporting",
+        },
+        socialContext: {
+          currentLocationName: "Forest",
+          factionName: "Free Company",
+        },
+        motivations: {
+          shortTermGoals: editedShortTermGoals,
+          longTermGoals: editedLongTermGoals,
+        },
+      },
+      npc: {
+        name: "Marshal Selene Voss",
+        persona: "Now leads from the front and trusts the village scouts.",
+        tags: ["strategist", "scarred", "field medic"],
+        goals: {
+          shortTerm: editedShortTermGoals,
+          longTerm: editedLongTermGoals,
+        },
+        locationName: "Forest",
+        factionName: "Free Company",
+        tier: "supporting",
+      },
+    });
+  });
+
   it("returns bounded empty fallback arrays when a location has no graph edges or local history", async () => {
     mockedGetActive.mockReturnValue({
       id: CAMPAIGN_ID,

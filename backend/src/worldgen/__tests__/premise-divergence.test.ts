@@ -237,4 +237,55 @@ describe("interpretPremiseDivergence", () => {
     expect((mockGenerateObject.mock.calls[1]![0] as Record<string, unknown>).maxOutputTokens).toBe(8192);
   });
 
+  it("normalizes protagonist kind synonyms instead of failing structured output", async () => {
+    mockGenerateObject.mockImplementationOnce(async (input: { schema: { parse: (value: unknown) => unknown } }) => ({
+      object: input.schema.parse({
+        mode: "diverged",
+        protagonistRole: {
+          kind: "player character",
+          interpretation: "outsider",
+          canonicalCharacterName: null,
+          roleSummary: "The player arrives as a distinct newcomer.",
+        },
+        preservedCanonFacts: ["Naruto Uzumaki remains the canon protagonist of Konohagakure."],
+        changedCanonFacts: [],
+        currentStateDirectives: ["Keep the canon cast intact while introducing the player as a separate newcomer."],
+        ambiguityNotes: [],
+      }),
+    }));
+
+    const result = await interpretPremiseDivergence(
+      narutoContext,
+      "I arrive in the Naruto world as an outsider.",
+      fakeRole as never,
+    );
+
+    expect(result?.protagonistRole.kind).toBe("custom");
+  });
+
+  it("falls back to custom when the model emits an unknown protagonist kind label", async () => {
+    mockGenerateObject.mockImplementationOnce(async (input: { schema: { parse: (value: unknown) => unknown } }) => ({
+      object: input.schema.parse({
+        mode: "diverged",
+        protagonistRole: {
+          kind: "inserted lead",
+          interpretation: "replacement",
+          canonicalCharacterName: "Dr. Kel",
+          roleSummary: "The player's custom character displaces the canon lead.",
+        },
+        preservedCanonFacts: ["The signal base still sits in the same remote valley."],
+        changedCanonFacts: ["Dr. Kel is no longer the active station protagonist."],
+        currentStateDirectives: ["Treat the player character as the active station operator."],
+        ambiguityNotes: [],
+      }),
+    }));
+
+    const result = await interpretPremiseDivergence(
+      voicesOfTheVoidContext,
+      "Voices of the Void, but my own character takes over Dr Kel's role.",
+      fakeRole as never,
+    );
+
+    expect(result?.protagonistRole.kind).toBe("custom");
+  });
 });

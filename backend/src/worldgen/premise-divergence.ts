@@ -42,9 +42,40 @@ function dedupeLines(values: string[]): string[] {
   );
 }
 
-const protagonistKindSchema = z
-  .enum(["canonical", "custom", "player", "original"])
-  .transform((value) => (value === "canonical" ? "canonical" : "custom"));
+function normalizeProtagonistKind(value: unknown): "canonical" | "custom" {
+  const normalized = typeof value === "string" ? normalizeForMatch(value) : "";
+
+  if (!normalized) {
+    return "custom";
+  }
+
+  if (
+    normalized.includes("canonical") ||
+    normalized.includes("canon") ||
+    normalized === "source protagonist"
+  ) {
+    return "canonical";
+  }
+
+  if (
+    normalized.includes("custom") ||
+    normalized.includes("player") ||
+    normalized.includes("original") ||
+    normalized === "oc" ||
+    normalized.includes("outsider") ||
+    normalized.includes("self insert") ||
+    normalized.includes("self insert protagonist")
+  ) {
+    return "custom";
+  }
+
+  return "custom";
+}
+
+const protagonistKindSchema = z.preprocess(
+  (value) => normalizeProtagonistKind(value),
+  z.enum(["canonical", "custom"]),
+);
 
 const premiseDivergenceSchema = z.object({
   mode: z.enum(["canonical", "coexisting", "diverged"]),

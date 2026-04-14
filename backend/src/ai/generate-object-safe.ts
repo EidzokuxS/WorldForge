@@ -20,6 +20,50 @@ function extractJson(text: string): string {
   return text.trim();
 }
 
+function coerceObjectToString(data: unknown): unknown {
+  if (typeof data === "string") {
+    return data;
+  }
+
+  if (typeof data === "number" || typeof data === "boolean") {
+    return String(data);
+  }
+
+  if (typeof data !== "object" || data === null || Array.isArray(data)) {
+    return data;
+  }
+
+  const record = data as Record<string, unknown>;
+  const preferredKeys = [
+    "name",
+    "item",
+    "label",
+    "title",
+    "value",
+    "text",
+    "content",
+    "description",
+  ];
+
+  for (const key of preferredKeys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  const stringValues = Object.values(record)
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  if (stringValues.length === 1) {
+    return stringValues[0];
+  }
+
+  return data;
+}
+
 /**
  * Recursively coerce parsed JSON to match Zod schema expectations.
  * Handles: string → array (comma split), nested objects within arrays.
@@ -126,6 +170,10 @@ function coerceToSchema(data: unknown, schema: ZodType<any>): unknown {
   if (schemaType === "ZodEffects" || schemaType === "effects") {
     const inner = def.schema ?? def.innerType;
     if (inner) return coerceToSchema(data, inner);
+  }
+
+  if (schemaType === "ZodString" || schemaType === "string") {
+    return coerceObjectToString(data);
   }
 
   return data;

@@ -45,17 +45,19 @@ export function synthesizeGroundedCharacterProfile(
     ...options.draft.capabilities.flaws,
     ...(options.draft.identity.liveDynamics?.currentStrains ?? []),
   ]);
-  const uncertaintyNotes = dedupeStrings([
-    ...(options.uncertaintyNotes ?? []),
-    !options.evidenceText
-      ? "No external research summary or imported evidence was available; this profile stays bounded to the stored draft."
-      : "Power interpretation remains bounded to the available grounded evidence and may omit unstated feats.",
-  ]);
   const sources = normalizeSources([
     ...(options.draft.sourceBundle?.canonSources ?? []),
     ...(options.draft.sourceBundle?.secondarySources ?? []),
     ...(options.extraSources ?? []),
     buildEvidenceSource(options),
+  ]);
+  if (sources.length === 0) {
+    return undefined;
+  }
+
+  const uncertaintyNotes = dedupeStrings([
+    ...(options.uncertaintyNotes ?? []),
+    "Power interpretation remains limited to the attached evidence and may omit unstated feats.",
   ]);
   const summary = buildSummary(options, facts);
   const powerProfile = buildPowerProfile({
@@ -103,7 +105,7 @@ function buildSummary(
 
   return preferred
     ? preferred.trim()
-    : `${options.draft.identity.displayName} grounded profile remains intentionally bounded.`;
+    : options.draft.identity.displayName.trim();
 }
 
 function buildPowerProfile(input: {

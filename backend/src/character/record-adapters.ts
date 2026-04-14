@@ -164,6 +164,11 @@ function normalizeGrounding(
     return undefined;
   }
 
+  const sources = normalizeGroundingSources(grounding.sources);
+  if (sources.length === 0) {
+    return undefined;
+  }
+
   return {
     summary: grounding.summary.trim(),
     facts: dedupeStrings(grounding.facts),
@@ -174,7 +179,7 @@ function normalizeGrounding(
     vulnerabilities: dedupeStrings(grounding.vulnerabilities),
     uncertaintyNotes: dedupeStrings(grounding.uncertaintyNotes),
     powerProfile: normalizePowerProfile(grounding.powerProfile),
-    sources: normalizeGroundingSources(grounding.sources),
+    sources,
   };
 }
 
@@ -647,6 +652,85 @@ export function fromLegacyScaffoldNpc(
   );
 }
 
+export function reconcileDraftBackedScaffoldNpc(
+  npc: ScaffoldNpc & { draft: CharacterDraft },
+): CharacterDraft {
+  const editableTier = npc.tier ?? mapRecordTierToScaffoldTier(npc.draft.identity.tier);
+  const reconciledTier: CharacterDraft["identity"]["tier"] =
+    editableTier === "key" ? "key" : "supporting";
+  const editableDraft = fromLegacyScaffoldNpc(
+    {
+      ...npc,
+      tier: editableTier,
+    },
+    {
+      currentLocationName: npc.locationName,
+      factionName: npc.factionName,
+      sourceKind: npc.draft.provenance.sourceKind,
+      originMode: npc.draft.socialContext.originMode ?? "unknown",
+    },
+  );
+
+  return normalizeCharacterDraftRecord({
+    ...editableDraft,
+    identity: {
+      ...editableDraft.identity,
+      tier: reconciledTier,
+      canonicalStatus: npc.draft.identity.canonicalStatus,
+      baseFacts: npc.draft.identity.baseFacts,
+      behavioralCore: {
+        ...npc.draft.identity.behavioralCore,
+        motives: editableDraft.identity.behavioralCore.motives,
+        pressureResponses: editableDraft.identity.behavioralCore.pressureResponses,
+        selfImage: editableDraft.identity.behavioralCore.selfImage,
+      },
+      liveDynamics: {
+        ...npc.draft.identity.liveDynamics,
+        activeGoals: editableDraft.identity.liveDynamics.activeGoals,
+        currentStrains: editableDraft.identity.liveDynamics.currentStrains,
+      },
+    },
+    profile: {
+      ...npc.draft.profile,
+      personaSummary: editableDraft.profile.personaSummary,
+    },
+    socialContext: {
+      ...npc.draft.socialContext,
+      factionName: editableDraft.socialContext.factionName,
+      currentLocationName: editableDraft.socialContext.currentLocationName,
+      socialStatus: editableDraft.socialContext.socialStatus,
+    },
+    motivations: {
+      ...npc.draft.motivations,
+      shortTermGoals: editableDraft.motivations.shortTermGoals,
+      longTermGoals: editableDraft.motivations.longTermGoals,
+      drives: editableDraft.motivations.drives,
+      frictions: editableDraft.motivations.frictions,
+    },
+    capabilities: {
+      ...npc.draft.capabilities,
+      traits: editableDraft.capabilities.traits,
+      skills: editableDraft.capabilities.skills,
+      flaws: editableDraft.capabilities.flaws,
+      wealthTier: editableDraft.capabilities.wealthTier,
+    },
+    state: {
+      ...npc.draft.state,
+      conditions: editableDraft.state.conditions,
+      statusFlags: editableDraft.state.statusFlags,
+    },
+    provenance: {
+      ...npc.draft.provenance,
+      legacyTags: editableDraft.provenance.legacyTags,
+    },
+    loadout: npc.draft.loadout,
+    startConditions: npc.draft.startConditions,
+    grounding: npc.draft.grounding,
+    sourceBundle: npc.draft.sourceBundle,
+    continuity: npc.draft.continuity,
+  });
+}
+
 export function hydrateStoredNpcRecord(
   row: StoredNpcRow,
   opts: LegacyNpcOptions = {},
@@ -666,7 +750,9 @@ export function hydrateStoredNpcRecord(
       id: row.id,
       campaignId: row.campaignId,
       role: "npc",
-      tier: row.tier,
+      tier: row.tier === "persistent" && stored.identity.tier === "supporting"
+        ? "supporting"
+        : row.tier,
       displayName: stored.identity.displayName || row.name,
       canonicalStatus: opts.canonicalStatus ?? stored.identity.canonicalStatus,
     },

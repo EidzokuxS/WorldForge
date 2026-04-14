@@ -348,6 +348,106 @@ describe("saveScaffoldToDb", () => {
     expect(aldric.derivedTags).toBeDefined();
   });
 
+  it("draft-backed NPC edit convergence keeps save/load/world-payload round-trip fields aligned at the persistence seam", () => {
+    const scaffold = buildScaffold();
+    scaffold.npcs[0] = {
+      ...scaffold.npcs[0]!,
+      name: "Marshal Selene Voss",
+      persona: "Now leads from the front and trusts the village scouts.",
+      tags: ["strategist", "scarred", "field medic"],
+      goals: {
+        shortTerm: ["Fortify the village", "Brief the scouts"],
+        longTerm: ["Keep the refugees alive", "Break the siege"],
+      },
+      locationName: "Dark Forest",
+      factionName: null,
+      tier: "supporting",
+    };
+
+    saveScaffoldToDb("campaign-1", scaffold);
+
+    const npcInserts = dbCalls.filter(
+      (c) => c.op === "insert" && c.table === "npcs",
+    );
+    const persistedNpc = npcInserts[0]!.data as Record<string, unknown>;
+    const characterRecord = JSON.parse(persistedNpc.characterRecord as string) as {
+      identity: {
+        displayName: string;
+        tier: string;
+      };
+      profile: {
+        personaSummary: string;
+      };
+      socialContext: {
+        currentLocationId: string | null;
+        currentLocationName: string | null;
+        factionName: string | null;
+      };
+      motivations: {
+        shortTermGoals: string[];
+        longTermGoals: string[];
+      };
+    };
+
+    expect(persistedNpc.name).toBe("Marshal Selene Voss");
+    expect(persistedNpc.persona).toBe(
+      "Now leads from the front and trusts the village scouts.",
+    );
+    expect(JSON.parse(persistedNpc.tags as string)).toEqual([
+      "strategist",
+      "scarred",
+      "field medic",
+    ]);
+    expect(JSON.parse(persistedNpc.goals as string)).toEqual({
+      short_term: ["Fortify the village", "Brief the scouts"],
+      long_term: ["Keep the refugees alive", "Break the siege"],
+    });
+    expect(persistedNpc.tier).toBe("persistent");
+    expect(persistedNpc.currentLocationId).toBe("uuid-2");
+    expect(characterRecord.identity.displayName).toBe("Marshal Selene Voss");
+    expect(characterRecord.identity.tier).toBe("supporting");
+    expect(characterRecord.profile.personaSummary).toBe(
+      "Now leads from the front and trusts the village scouts.",
+    );
+    expect(characterRecord.socialContext).toMatchObject({
+      currentLocationId: "uuid-2",
+      currentLocationName: "Dark Forest",
+      factionName: null,
+    });
+    expect(characterRecord.motivations).toMatchObject({
+      shortTermGoals: ["Fortify the village", "Brief the scouts"],
+      longTermGoals: ["Keep the refugees alive", "Break the siege"],
+    });
+  });
+
+  it("persists worldgen NPCs without synthetic grounding or power profiles", () => {
+    saveScaffoldToDb("campaign-1", buildScaffold());
+    const npcInserts = dbCalls.filter(
+      (c) => c.op === "insert" && c.table === "npcs",
+    );
+
+    const aldric = JSON.parse((npcInserts[0]!.data as Record<string, unknown>).characterRecord as string) as {
+      grounding?: {
+        summary: string;
+        powerProfile?: {
+          attack: string;
+          uncertaintyNotes: string[];
+        };
+      };
+    };
+    const mira = JSON.parse((npcInserts[1]!.data as Record<string, unknown>).characterRecord as string) as {
+      grounding?: {
+        summary: string;
+        powerProfile?: {
+          attack: string;
+        };
+      };
+    };
+
+    expect(aldric.grounding).toBeUndefined();
+    expect(mira.grounding).toBeUndefined();
+  });
+
   it("NPC with unknown locationName gets null currentLocationId", () => {
     saveScaffoldToDb("campaign-1", buildScaffold());
     const npcInserts = dbCalls.filter(

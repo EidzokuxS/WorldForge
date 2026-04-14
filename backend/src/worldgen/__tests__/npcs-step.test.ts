@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockGenerateObject = vi.fn();
+const mockEnrichKnownIpWorldgenNpcDraft = vi.fn();
 
 vi.mock("../../ai/generate-object-safe.js", () => ({
   safeGenerateObject: (...args: unknown[]) => mockGenerateObject(...args),
@@ -8,6 +9,11 @@ vi.mock("../../ai/generate-object-safe.js", () => ({
 
 vi.mock("../../ai/index.js", () => ({
   createModel: vi.fn(() => "mock-model"),
+}));
+
+vi.mock("../../character/known-ip-worldgen-research.js", () => ({
+  enrichKnownIpWorldgenNpcDraft: (...args: unknown[]) =>
+    mockEnrichKnownIpWorldgenNpcDraft(...args),
 }));
 
 import { generateNpcsStep } from "../scaffold-steps/npcs-step.js";
@@ -32,6 +38,8 @@ const fakeReq = {
 describe("generateNpcsStep", () => {
   beforeEach(() => {
     mockGenerateObject.mockReset();
+    mockEnrichKnownIpWorldgenNpcDraft.mockReset();
+    mockEnrichKnownIpWorldgenNpcDraft.mockImplementation(async ({ draft }) => draft);
   });
 
   it("keeps world generation alive when the planning calls return fewer NPCs than requested", async () => {
@@ -62,26 +70,26 @@ describe("generateNpcsStep", () => {
       })
       .mockResolvedValueOnce({
         object: {
-          npcs: [
-            {
-              name: "Dr. Kel",
-              persona: "A sleep-deprived systems scientist who trusts data more than people. He keeps hearing patterns in the static and fears the station is already speaking back.",
-              tags: ["Signal Analyst", "Paranoid", "Exhausted"],
-              goals: {
-                shortTerm: ["Prove the newest signal burst came from outside the station"],
-                longTerm: ["Decode the source before Station Authority silences the evidence"],
-              },
-            },
-            {
-              name: "Mara Voss",
-              persona: "A smooth-talking broker who survives by knowing who is desperate and what they will trade. She plays all sides but quietly wants a path off the station before it collapses.",
-              tags: ["Smuggler", "Connected", "Pragmatic"],
-              goals: {
-                shortTerm: ["Sell forged dock passes before the next lockdown"],
-                longTerm: ["Secure enough leverage to escape the station alive"],
-              },
-            },
-          ],
+          persona: "A sleep-deprived systems scientist who trusts data more than people. He keeps hearing patterns in the static and fears the station is already speaking back.",
+          selfImage: "The only person listening closely enough to hear the station answer.",
+          socialRoles: ["Signal Array Custodian"],
+          tags: ["Signal Analyst", "Paranoid", "Exhausted"],
+          goals: {
+            shortTerm: ["Prove the newest signal burst came from outside the station"],
+            longTerm: ["Decode the source before Station Authority silences the evidence"],
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        object: {
+          persona: "A smooth-talking broker who survives by knowing who is desperate and what they will trade. She plays all sides but quietly wants a path off the station before it collapses.",
+          selfImage: "The broker everyone needs and nobody fully trusts.",
+          socialRoles: ["Dock Broker"],
+          tags: ["Smuggler", "Connected", "Pragmatic"],
+          goals: {
+            shortTerm: ["Sell forged dock passes before the next lockdown"],
+            longTerm: ["Secure enough leverage to escape the station alive"],
+          },
         },
       });
 
@@ -101,9 +109,16 @@ describe("generateNpcsStep", () => {
         factionName: "Station Authority",
         tier: "key",
         draft: expect.objectContaining({
+          grounding: undefined,
           identity: expect.objectContaining({
             role: "npc",
             displayName: "Dr. Kel",
+            baseFacts: expect.objectContaining({
+              socialRole: expect.arrayContaining(["Signal Array Custodian"]),
+            }),
+            behavioralCore: expect.objectContaining({
+              selfImage: "The only person listening closely enough to hear the station answer.",
+            }),
           }),
           socialContext: expect.objectContaining({
             currentLocationName: "Observation Deck",
@@ -117,9 +132,13 @@ describe("generateNpcsStep", () => {
         factionName: null,
         tier: "supporting",
         draft: expect.objectContaining({
+          grounding: undefined,
           identity: expect.objectContaining({
             role: "npc",
             displayName: "Mara Voss",
+            baseFacts: expect.objectContaining({
+              socialRole: expect.arrayContaining(["Dock Broker"]),
+            }),
           }),
         }),
       }),
@@ -154,26 +173,26 @@ describe("generateNpcsStep", () => {
       })
       .mockResolvedValueOnce({
         object: {
-          npcs: [
-            {
-              name: "Maxwell",
-              persona: "A careful supply runner who keeps the base alive through stubborn routine. He trusts the new operator more than the vanished command structure.",
-              tags: ["Driver", "Reliable", "Observant"],
-              goals: {
-                shortTerm: ["Keep the next supply run on schedule"],
-                longTerm: ["See the station survive the anomaly season"],
-              },
-            },
-            {
-              name: "Lena Orlov",
-              persona: "A hard-edged technician who sells access to restricted maintenance routes. She wants the new operator to succeed because the old chain of command failed her.",
-              tags: ["Technician", "Pragmatic", "Connected"],
-              goals: {
-                shortTerm: ["Trade safe routes for spare parts"],
-                longTerm: ["Build enough leverage to leave the valley"],
-              },
-            },
-          ],
+          persona: "A careful supply runner who keeps the base alive through stubborn routine. He trusts the new operator more than the vanished command structure.",
+          selfImage: "The last dependable line keeping Signal Base supplied.",
+          socialRoles: ["Supply Runner"],
+          tags: ["Driver", "Reliable", "Observant"],
+          goals: {
+            shortTerm: ["Keep the next supply run on schedule"],
+            longTerm: ["See the station survive the anomaly season"],
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        object: {
+          persona: "A hard-edged technician who sells access to restricted maintenance routes. She wants the new operator to succeed because the old chain of command failed her.",
+          selfImage: "The mechanic who survives by staying useful and indispensable.",
+          socialRoles: ["Maintenance Technician"],
+          tags: ["Technician", "Pragmatic", "Connected"],
+          goals: {
+            shortTerm: ["Trade safe routes for spare parts"],
+            longTerm: ["Build enough leverage to leave the valley"],
+          },
         },
       });
 
@@ -247,17 +266,14 @@ describe("generateNpcsStep", () => {
       })
       .mockResolvedValueOnce({
         object: {
-          npcs: [
-            {
-              name: "Dr. Kel",
-              persona: "A sleep-deprived systems scientist who trusts data more than people.",
-              tags: ["Signal Analyst", "Paranoid", "Exhausted"],
-              goals: {
-                shortTerm: ["Prove the newest signal burst came from outside the station"],
-                longTerm: ["Decode the source before Station Authority silences the evidence"],
-              },
-            },
-          ],
+          persona: "A sleep-deprived systems scientist who trusts data more than people.",
+          selfImage: "The analyst holding the station together by refusing to blink first.",
+          socialRoles: ["Signal Analyst"],
+          tags: ["Signal Analyst", "Paranoid", "Exhausted"],
+          goals: {
+            shortTerm: ["Prove the newest signal burst came from outside the station"],
+            longTerm: ["Decode the source before Station Authority silences the evidence"],
+          },
         },
       });
 
@@ -275,6 +291,97 @@ describe("generateNpcsStep", () => {
     expect(detailPrompt).toContain("profile");
     expect(detailPrompt).toContain("socialContext");
     expect(detailPrompt).toContain("motivations");
+    expect(detailPrompt).toContain("selfImage");
+    expect(detailPrompt).toContain("socialRoles");
     expect(detailPrompt).not.toContain("You are writing NPC reference cards for a text RPG engine.");
+  });
+
+  it("runs per-character research grounding for known-IP key NPCs when research is enabled", async () => {
+    mockGenerateObject
+      .mockResolvedValueOnce({
+        object: {
+          npcs: [
+            {
+              name: "Gojo Satoru",
+              role: "Teaches at Tokyo Jujutsu High while investigating border anomalies.",
+              locationName: "Tokyo Jujutsu High",
+              factionName: "Jujutsu Sorcerers",
+            },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({ object: { npcs: [] } })
+      .mockResolvedValueOnce({
+        object: {
+          persona:
+            "Gojo Satoru teaches at Tokyo Jujutsu High while openly defying conservative elders and shielding his students from political fallout.",
+          selfImage:
+            "The strongest wall standing between his students and a rotten jujutsu establishment.",
+          socialRoles: ["Teacher", "Special Grade Sorcerer"],
+          tags: ["[Six Eyes User]", "[Limitless Technique]", "[Protective Mentor]"],
+          goals: {
+            shortTerm: ["Contain the latest border incident before it reaches Tokyo"],
+            longTerm: ["Break the conservative elders' grip on jujutsu society"],
+          },
+        },
+      });
+    mockEnrichKnownIpWorldgenNpcDraft.mockImplementation(async ({ draft }) => ({
+      ...draft,
+      grounding: {
+        summary: "Canon-grounded Gojo profile",
+        facts: ["Special Grade jujutsu sorcerer"],
+        abilities: ["Six Eyes", "Limitless"],
+        constraints: [],
+        signatureMoves: ["Hollow Purple"],
+        strongPoints: ["Extreme combat superiority"],
+        vulnerabilities: [],
+        uncertaintyNotes: ["Bounded to retrieved canon summary."],
+        powerProfile: {
+          attack: "Overwhelming cursed technique output.",
+          speed: "High-speed combatant.",
+          durability: "Protected by Infinity.",
+          range: "Wide-area cursed technique reach.",
+          strengths: ["Extreme combat superiority"],
+          constraints: [],
+          vulnerabilities: [],
+          uncertaintyNotes: ["Bounded to retrieved canon summary."],
+        },
+        sources: [
+          {
+            kind: "canon",
+            label: "Jujutsu Kaisen wiki",
+            excerpt: "Gojo Satoru is a Special Grade jujutsu sorcerer...",
+          },
+        ],
+      },
+    }));
+
+    const result = await generateNpcsStep(
+      {
+        ...fakeReq,
+        research: { enabled: true, maxSearchSteps: 3, searchProvider: "duckduckgo" },
+      },
+      "Modern Japan houses Tokyo Jujutsu High and a hybrid curse-chakra conflict.",
+      ["Tokyo Jujutsu High"],
+      ["Jujutsu Sorcerers"],
+      {
+        franchise: "Jujutsu Kaisen",
+        keyFacts: ["Tokyo Jujutsu High trains jujutsu sorcerers."],
+        tonalNotes: ["urban supernatural action"],
+        canonicalNames: {
+          locations: ["Tokyo Jujutsu High"],
+          factions: ["Jujutsu Sorcerers"],
+          characters: ["Gojo Satoru"],
+        },
+        source: "search",
+      },
+    );
+
+    expect(mockEnrichKnownIpWorldgenNpcDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        franchise: "Jujutsu Kaisen",
+      }),
+    );
+    expect(result[0]?.draft?.grounding?.summary).toBe("Canon-grounded Gojo profile");
   });
 });

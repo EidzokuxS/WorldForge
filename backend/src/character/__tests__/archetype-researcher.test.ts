@@ -26,7 +26,7 @@ vi.mock("../../lib/index.js", () => ({
     warn: vi.fn(),
     error: vi.fn(),
   })),
-  withMcpClient: vi.fn(async (_fn: unknown, fallbackFn: () => Promise<unknown>) => fallbackFn()),
+  withMcpClient: vi.fn(async (fn: (tools: unknown) => Promise<unknown>) => fn({})),
 }));
 
 import {
@@ -52,7 +52,7 @@ describe("researchArchetype", () => {
     expect(mockGenerateText).not.toHaveBeenCalled();
   });
 
-  it("falls back to LLM when MCP fails", async () => {
+  it("returns researched text when MCP tool execution succeeds", async () => {
     mockGenerateText.mockResolvedValueOnce({
       text: "Rangers are skilled trackers and survivalists.",
     });
@@ -73,8 +73,9 @@ describe("researchArchetype", () => {
     expect(prompt).not.toContain("3-5 paragraphs suitable for inspiring an original RPG character");
   });
 
-  it("returns null when both MCP and LLM fallback fail", async () => {
-    mockGenerateText.mockRejectedValueOnce(new Error("LLM failed"));
+  it("returns null when MCP-backed research fails", async () => {
+    const { withMcpClient } = await import("../../lib/index.js");
+    vi.mocked(withMcpClient).mockRejectedValueOnce(new Error("MCP failed"));
 
     const result = await researchArchetype({
       archetype: "Unknown",
@@ -85,7 +86,7 @@ describe("researchArchetype", () => {
     expect(result).toBeNull();
   });
 
-  it("returns null when LLM returns empty text", async () => {
+  it("returns null when MCP-backed research returns empty text", async () => {
     mockGenerateText.mockResolvedValueOnce({ text: "" });
 
     const result = await researchArchetype({
@@ -238,12 +239,12 @@ describe("synthesizeArchetypeGrounding", () => {
     );
     expect(grounding?.uncertaintyNotes).toEqual(
       expect.arrayContaining([
-        expect.stringContaining("bounded"),
+        expect.stringContaining("limited to the retrieved summary"),
       ]),
     );
   });
 
-  it("keeps uncertainty explicit when research input is sparse", () => {
+  it("fails closed when no research summary is available", () => {
     const grounding = synthesizeArchetypeGrounding({
       archetype: "Unknown wanderer",
       researchContext: null,
@@ -252,17 +253,6 @@ describe("synthesizeArchetypeGrounding", () => {
       }),
     });
 
-    expect(grounding).toBeDefined();
-    expect(grounding?.sources).toEqual([]);
-    expect(grounding?.uncertaintyNotes).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining("No external research summary"),
-      ]),
-    );
-    expect(grounding?.powerProfile?.uncertaintyNotes).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining("bounded"),
-      ]),
-    );
+    expect(grounding).toBeUndefined();
   });
 });
