@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import { toast } from "sonner";
 
 import { getErrorMessage } from "@/lib/settings";
 import { useSettings } from "@/lib/use-settings";
+import type { Settings } from "@/lib/types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProvidersTab } from "@/components/settings/providers-tab";
 import { RolesTab } from "@/components/settings/roles-tab";
@@ -13,11 +14,20 @@ import { GameplayTab } from "@/components/settings/gameplay-tab";
 import { ResearchTab } from "@/components/settings/research-tab";
 
 export default function SettingsPage() {
-  const { settings, setSettings, isLoading, isSaving, save } = useSettings();
+  const { settings, setSettings, isLoading, isSaving, save, loadError } = useSettings();
   const lastPersistedRef = useRef<string | null>(null);
 
+  const safeSetSettings: Dispatch<SetStateAction<Settings>> = (next) => {
+    setSettings((current) => {
+      const resolved = typeof next === "function"
+        ? (next as (current: Settings) => Settings | undefined)(current)
+        : next;
+      return resolved ?? current;
+    });
+  };
+
   useEffect(() => {
-    if (isLoading) {
+    if (isLoading || loadError) {
       return;
     }
 
@@ -45,10 +55,22 @@ export default function SettingsPage() {
     return () => {
       window.clearTimeout(timeout);
     };
-  }, [isLoading, save, settings]);
+  }, [isLoading, loadError, save, settings]);
 
   if (isLoading) {
     return <p className="text-sm text-muted-foreground">Loading settings...</p>;
+  }
+
+  if (loadError) {
+    return (
+      <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+        <p className="text-sm font-medium text-destructive">Failed to load settings</p>
+        <p className="mt-1 text-sm text-muted-foreground">{loadError}</p>
+        <p className="mt-2 text-xs text-muted-foreground">
+          The page is read-blocked to avoid overwriting your persisted provider configuration with defaults.
+        </p>
+      </div>
+    );
   }
 
   return (
@@ -71,19 +93,19 @@ export default function SettingsPage() {
 
         <div className="flex-1 overflow-y-auto py-[clamp(20px,1.8vw,40px)]">
           <TabsContent value="providers" className="mt-0">
-            <ProvidersTab settings={settings} setSettings={setSettings} />
+            <ProvidersTab settings={settings} setSettings={safeSetSettings} />
           </TabsContent>
           <TabsContent value="roles" className="mt-0">
-            <RolesTab settings={settings} setSettings={setSettings} />
+            <RolesTab settings={settings} setSettings={safeSetSettings} />
           </TabsContent>
           <TabsContent value="images" className="mt-0">
-            <ImagesTab settings={settings} setSettings={setSettings} />
+            <ImagesTab settings={settings} setSettings={safeSetSettings} />
           </TabsContent>
           <TabsContent value="gameplay" className="mt-0">
-            <GameplayTab settings={settings} setSettings={setSettings} />
+            <GameplayTab settings={settings} setSettings={safeSetSettings} />
           </TabsContent>
           <TabsContent value="research" className="mt-0">
-            <ResearchTab settings={settings} setSettings={setSettings} />
+            <ResearchTab settings={settings} setSettings={safeSetSettings} />
           </TabsContent>
         </div>
       </Tabs>

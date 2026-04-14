@@ -175,9 +175,9 @@ describe("createDefaultSettings", () => {
     expect(settings).toHaveProperty("storyteller");
     expect(settings).toHaveProperty("generator");
     expect(settings).toHaveProperty("embedder");
-    expect(settings).toHaveProperty("fallback");
     expect(settings).toHaveProperty("images");
     expect(settings).toHaveProperty("research");
+    expect(settings).toHaveProperty("ui");
   });
 
   it("returns a new object on every call (no shared reference)", () => {
@@ -257,28 +257,6 @@ describe("createDefaultSettings", () => {
 
     it("has empty model string", () => {
       expect(settings.generator.model).toBe("");
-    });
-  });
-
-  // --- fallback ---
-
-  describe("fallback config", () => {
-    it("uses the first provider id", () => {
-      expect(settings.fallback.providerId).toBe(
-        BUILTIN_PROVIDER_PRESETS[0].id,
-      );
-    });
-
-    it("has model 'gpt-4o-mini'", () => {
-      expect(settings.fallback.model).toBe("gpt-4o-mini");
-    });
-
-    it("has timeoutMs 30000", () => {
-      expect(settings.fallback.timeoutMs).toBe(30_000);
-    });
-
-    it("has retryCount 1", () => {
-      expect(settings.fallback.retryCount).toBe(1);
     });
   });
 

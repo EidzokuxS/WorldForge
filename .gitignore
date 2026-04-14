@@ -51,3 +51,9 @@ scorecard.png
 .gitnexus
 AGENTS.md
 start.bat
+
+# Local scratch artifacts
+.tmp-lancedb-test*/
+tmp/
+settings.json.bak
+*.lnk

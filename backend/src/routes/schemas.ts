@@ -16,6 +16,7 @@ import {
   createCharacterRecordFromDraft,
   fromLegacyNpcRow,
   fromLegacyPlayerRow,
+  reconcileDraftBackedScaffoldNpc,
   toLegacyNpcDraft,
   toLegacyPlayerCharacter,
 } from "../character/record-adapters.js";
@@ -73,12 +74,6 @@ export const settingsPayloadSchema = z.object({
   storyteller: roleConfigSchema,
   generator: roleConfigSchema,
   embedder: roleConfigSchema,
-  fallback: z.object({
-    providerId: z.string(),
-    model: z.string(),
-    timeoutMs: z.number(),
-    retryCount: z.number(),
-  }).strip(),
   images: z.object({
     providerId: z.string(),
     model: z.string(),
@@ -762,7 +757,6 @@ const scaffoldFactionSchema = z.object({
 
 const scaffoldNpcSchema = z
   .union([
-    scaffoldNpcLegacySchema,
     scaffoldNpcLegacySchema.extend({
       draft: characterDraftSchema,
     }),
@@ -772,18 +766,41 @@ const scaffoldNpcSchema = z
       factionName: z.string().nullable().optional(),
       tier: z.enum(["key", "supporting"]).optional(),
     }),
+    scaffoldNpcLegacySchema,
   ])
   .transform((input) => {
     if ("draft" in input) {
-      const legacy = toLegacyNpcDraft(
+      const legacyFromDraft = toLegacyNpcDraft(
         materializeDraftRecord("draft-campaign", input.draft),
       );
+      const editableNpc = "name" in input
+        ? {
+            ...input,
+            locationName: input.locationName ?? legacyFromDraft.locationName,
+            factionName: input.factionName ?? legacyFromDraft.factionName,
+            tier: input.tier ?? legacyFromDraft.tier,
+          }
+        : {
+            ...legacyFromDraft,
+            locationName: input.locationName ?? legacyFromDraft.locationName,
+            factionName: input.factionName ?? legacyFromDraft.factionName,
+            tier: input.tier ?? legacyFromDraft.tier,
+            draft: input.draft,
+          };
+      const reconciledDraft = reconcileDraftBackedScaffoldNpc({
+        ...editableNpc,
+        draft: input.draft,
+      });
+      const legacy = toLegacyNpcDraft(
+        materializeDraftRecord("draft-campaign", reconciledDraft),
+      );
+
       return {
         ...legacy,
-        locationName: input.locationName ?? legacy.locationName,
-        factionName: input.factionName ?? legacy.factionName,
-        tier: input.tier ?? legacy.tier,
-        draft: input.draft,
+        locationName: editableNpc.locationName ?? legacy.locationName,
+        factionName: editableNpc.factionName ?? legacy.factionName,
+        tier: editableNpc.tier ?? legacy.tier,
+        draft: reconciledDraft,
       };
     }
 

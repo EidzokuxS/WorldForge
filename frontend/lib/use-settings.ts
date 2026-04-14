@@ -11,6 +11,7 @@ export function useSettings() {
   );
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -19,10 +20,17 @@ export function useSettings() {
       .then((loaded) => {
         if (mounted) {
           setSettings(loaded);
+          setLoadError(null);
         }
       })
-      .catch(() => {
-        // Keep default settings if request fails.
+      .catch((error) => {
+        if (mounted) {
+          setLoadError(
+            error instanceof Error
+              ? error.message
+              : "Failed to load settings."
+          );
+        }
       })
       .finally(() => {
         if (mounted) {
@@ -46,5 +54,5 @@ export function useSettings() {
     }
   }, []);
 
-  return { settings, setSettings, isLoading, isSaving, save };
+  return { settings, setSettings, isLoading, isSaving, save, loadError };
 }

@@ -3,18 +3,8 @@
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { testRole } from "@/lib/api";
-import { clamp } from "@/lib/clamp";
 import { getErrorMessage } from "@/lib/settings";
 import type { RoleConfig, Settings } from "@/lib/types";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { RoleConfigCard, type RoleName } from "@/components/settings/role-config-card";
 
 const ROLE_META: Record<RoleName, { title: string; description: string }> = {
@@ -126,100 +116,6 @@ export function RolesTab({ settings, setSettings }: RolesTabProps) {
           onTestRole={() => void handleTestRole(role)}
         />
       ))}
-
-      <div className="rounded-lg border border-border/40 p-[clamp(16px,1.4vw,28px)]">
-        <div className="mb-[clamp(12px,1vw,20px)]">
-          <div className="text-[clamp(14px,1vw,18px)] font-semibold">Fallback</div>
-          <div className="text-[clamp(11px,0.75vw,13px)] text-muted-foreground">
-            Global provider fallback and timeout behavior.
-          </div>
-        </div>
-        <div className="grid gap-[clamp(12px,1vw,20px)] md:grid-cols-2">
-          <div className="space-y-2">
-            <Label>Fallback Provider</Label>
-            <Select
-              value={settings.fallback.providerId}
-              onValueChange={(value: string) =>
-                updateSettings((current) => ({
-                  ...current,
-                  fallback: { ...current.fallback, providerId: value },
-                }))
-              }
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select provider" />
-              </SelectTrigger>
-              <SelectContent>
-                {settings.providers.map((provider) => (
-                  <SelectItem key={provider.id} value={provider.id}>
-                    {provider.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Fallback Model</Label>
-            <Input
-              value={settings.fallback.model}
-              onChange={(event) =>
-                updateSettings((current) => ({
-                  ...current,
-                  fallback: { ...current.fallback, model: event.target.value },
-                }))
-              }
-              placeholder="gpt-4o-mini"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Global timeout (ms)</Label>
-            <Input
-              type="number"
-              min={1000}
-              max={120000}
-              value={settings.fallback.timeoutMs}
-              onChange={(event) =>
-                updateSettings((current) => ({
-                  ...current,
-                  fallback: {
-                    ...current.fallback,
-                    timeoutMs: clamp(
-                      Number.parseInt(event.target.value || "0", 10) || 30000,
-                      1000,
-                      120000
-                    ),
-                  },
-                }))
-              }
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Retry count</Label>
-            <Input
-              type="number"
-              min={0}
-              max={10}
-              value={settings.fallback.retryCount}
-              onChange={(event) =>
-                updateSettings((current) => ({
-                  ...current,
-                  fallback: {
-                    ...current.fallback,
-                    retryCount: clamp(
-                      Number.parseInt(event.target.value || "0", 10) || 0,
-                      0,
-                      10
-                    ),
-                  },
-                }))
-              }
-            />
-          </div>
-        </div>
-      </div>
     </>
   );
 }

@@ -5,6 +5,8 @@ import { ResearchTab } from "../research-tab";
 import type { Settings } from "@/lib/types";
 
 function createMockSettings(overrides: Partial<Settings> = {}): Settings {
+  const { ui: overrideUi, ...rest } = overrides;
+
   return {
     providers: [
       {
@@ -20,12 +22,6 @@ function createMockSettings(overrides: Partial<Settings> = {}): Settings {
     storyteller: { providerId: "prov-1", temperature: 0.8, maxTokens: 4000 },
     generator: { providerId: "prov-1", temperature: 0.7, maxTokens: 4000 },
     embedder: { providerId: "prov-1", temperature: 0, maxTokens: 0 },
-    fallback: {
-      providerId: "prov-1",
-      model: "test-model",
-      timeoutMs: 30000,
-      retryCount: 2,
-    },
     images: {
       providerId: "",
       model: "",
@@ -37,7 +33,8 @@ function createMockSettings(overrides: Partial<Settings> = {}): Settings {
       maxSearchSteps: 5,
       searchProvider: "duckduckgo",
     },
-    ...overrides,
+    ui: overrideUi ?? { showRawReasoning: false },
+    ...rest,
   };
 }
 

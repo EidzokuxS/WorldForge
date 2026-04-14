@@ -19,6 +19,8 @@ vi.mock("sonner", () => ({
 function createMockSettings(
   overrides: Partial<Settings> = {}
 ): Settings {
+  const { ui: overrideUi, ...rest } = overrides;
+
   return {
     providers: [
       {
@@ -54,12 +56,6 @@ function createMockSettings(
       temperature: 0,
       maxTokens: 0,
     },
-    fallback: {
-      providerId: "builtin-openai",
-      model: "gpt-4o-mini",
-      timeoutMs: 30000,
-      retryCount: 2,
-    },
     images: {
       providerId: "",
       model: "",
@@ -71,7 +67,8 @@ function createMockSettings(
       maxSearchSteps: 3,
       searchProvider: "duckduckgo",
     },
-    ...overrides,
+    ui: overrideUi ?? { showRawReasoning: false },
+    ...rest,
   };
 }
 

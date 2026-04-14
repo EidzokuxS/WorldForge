@@ -458,7 +458,15 @@ function normalizeCharacterResult(
     role: "key",
     characterRecord: raw.characterRecord ?? null,
     draft,
-    npc: raw.npc ?? characterDraftToScaffoldNpc(draft),
+    npc: raw.npc
+      ? {
+          ...raw.npc,
+          characterRecord: raw.characterRecord ?? raw.npc.characterRecord ?? null,
+        }
+      : {
+          ...characterDraftToScaffoldNpc(draft),
+          characterRecord: raw.characterRecord ?? null,
+        },
   };
 }
 
@@ -573,7 +581,7 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!res.ok) {
     throw new Error(await readErrorMessage(res));

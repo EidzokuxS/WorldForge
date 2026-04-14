@@ -18,7 +18,6 @@ export async function testProviderConnection(
     await generateText({
       model,
       prompt: "Respond with exactly one word: hello",
-      maxOutputTokens: 10,
     });
 
     return {

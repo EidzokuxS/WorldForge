@@ -14,13 +14,6 @@ export interface RoleConfig {
   maxTokens: number;
 }
 
-export interface FallbackConfig {
-  providerId: string;
-  model: string;
-  timeoutMs: number;
-  retryCount: number;
-}
-
 export interface ImageConfig {
   providerId: string;
   model: string;
@@ -81,7 +74,6 @@ export interface Settings {
   storyteller: RoleConfig;
   generator: RoleConfig;
   embedder: RoleConfig;
-  fallback: FallbackConfig;
   images: ImageConfig;
   research: ResearchConfig;
   ui: UiConfig;

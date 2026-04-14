@@ -1,9 +1,9 @@
 export type {
   Provider,
   RoleConfig,
-  FallbackConfig,
   ImageConfig,
   ResearchConfig,
+  UiConfig,
   SearchProvider,
   PremiseDivergenceMode,
   PremiseDivergenceProtagonistKind,

@@ -1199,9 +1199,9 @@ describe("settingsPayloadSchema", () => {
     storyteller: { providerId: "p1", temperature: 0.8, maxTokens: 1024 },
     generator: { providerId: "p1", temperature: 0.7, maxTokens: 2048 },
     embedder: { providerId: "p1", temperature: 0, maxTokens: 512 },
-    fallback: { providerId: "p1", model: "m1", timeoutMs: 30000, retryCount: 2 },
     images: { providerId: "p1", model: "dall-e", stylePrompt: "fantasy", enabled: false },
     research: { enabled: true, maxSearchSteps: 10 },
+    ui: { showRawReasoning: false },
   });
 
   it("accepts a complete valid settings object", () => {
@@ -1226,12 +1226,6 @@ describe("settingsPayloadSchema", () => {
 
   it("rejects missing judge role", () => {
     const { judge: _, ...rest } = validSettings();
-    const result = settingsPayloadSchema.safeParse(rest);
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects missing fallback config", () => {
-    const { fallback: _, ...rest } = validSettings();
     const result = settingsPayloadSchema.safeParse(rest);
     expect(result.success).toBe(false);
   });

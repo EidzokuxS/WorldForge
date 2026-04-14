@@ -312,8 +312,8 @@ export function ProvidersTab({ settings, setSettings }: ProvidersTabProps) {
                       <AlertDialogHeader>
                         <AlertDialogTitle>Delete provider?</AlertDialogTitle>
                         <AlertDialogDescription>
-                          This will remove {provider.name}. Any role using it
-                          will fallback to an available provider.
+                          This will remove {provider.name}. Roles still pointing
+                          at it will need to be reassigned explicitly.
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>

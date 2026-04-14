@@ -75,12 +75,6 @@ export function createDefaultSettings(): Settings {
       temperature: 0,
       maxTokens: 512,
     },
-    fallback: {
-      providerId: defaultProviderId,
-      model: "gpt-4o-mini",
-      timeoutMs: 30000,
-      retryCount: 1,
-    },
     images: {
       providerId: NONE_PROVIDER_ID,
       model: "",

@@ -8,6 +8,7 @@ import type { Settings } from "@/lib/types";
 const saveSpy = vi.fn<(next: Settings) => Promise<Settings>>();
 
 let persistedSettings: Settings;
+let loadError: string | null;
 
 function buildSettings(): Settings {
   return {
@@ -36,6 +37,7 @@ vi.mock("@/lib/use-settings", () => ({
       isLoading: false,
       isSaving: false,
       save: saveSpy,
+      loadError,
     };
   },
 }));
@@ -75,6 +77,7 @@ describe("SettingsPage", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     persistedSettings = buildSettings();
+    loadError = null;
     saveSpy.mockReset();
     saveSpy.mockImplementation(async (next) => {
       persistedSettings = next;
@@ -125,5 +128,16 @@ describe("SettingsPage", () => {
         name: "Show raw reasoning",
       })
     ).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("blocks the page when settings failed to load so defaults cannot be autosaved over persisted config", () => {
+    loadError = "Settings file contains invalid JSON.";
+
+    render(<SettingsPage />);
+
+    expect(screen.getByText("Failed to load settings")).toBeInTheDocument();
+    expect(screen.getByText(/invalid json/i)).toBeInTheDocument();
+    expect(screen.queryByText("Providers Tab")).not.toBeInTheDocument();
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 });
