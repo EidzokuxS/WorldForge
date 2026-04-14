@@ -111,7 +111,7 @@ Each task was committed atomically:
 
 ## Issues Encountered
 
-- `gitnexus detect_changes` remained unavailable after re-indexing because the local LadybugDB artifact was missing. Git-based verification and targeted test suites were used instead.
+- `gitnexus detect_changes` remained unavailable during execution because the local graph database at `.gitnexus/kuzu` was missing while stale metadata kept normal `analyze` on the fast path. This was later repaired with `npx gitnexus analyze --force .`; Git-based verification and targeted test suites were used at execution time.
 
 ## User Setup Required
 

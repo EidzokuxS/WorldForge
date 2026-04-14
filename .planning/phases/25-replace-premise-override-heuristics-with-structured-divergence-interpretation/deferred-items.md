@@ -1,0 +1,3 @@
+- `frontend/app/character-creation/page.tsx`: existing `string | null` -> `string` type errors at lines 41-42 block full frontend typecheck but are outside Plan 25-01 scope.
+- `frontend/app/world-review/page.tsx`: existing `string | null` -> `string` type errors at lines 46-48 block full frontend typecheck but are outside Plan 25-01 scope.
+- `frontend/components/title/__tests__/new-campaign-dialog.test.tsx`: existing mock shape mismatch on `campaignFranchise` blocks full frontend typecheck but is outside Plan 25-01 scope.

@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
-status: Milestone audit found confirmed implementation gaps; gap-closure phases 53-55 were created
-stopped_at: Gap-closure phases 53-55 created from v1.1 milestone audit
-last_updated: "2026-04-13T11:39:28.869Z"
-last_activity: 2026-04-13
+status: planning
+stopped_at: Phase 57 added; awaiting phase planning
+last_updated: "2026-04-14T10:50:00.000Z"
+last_activity: 2026-04-14 -- Phase 57 added for imported/generated character grounding and import override instructions
 progress:
-  total_phases: 19
-  completed_phases: 14
-  total_plans: 51
-  completed_plans: 47
-  percent: 84
+  total_phases: 21
+  completed_phases: 20
+  total_plans: 55
+  completed_plans: 55
+  percent: 95
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-12)
 
 **Core value:** The LLM is the narrator, never the engine. Mechanical truth stays in backend code so outcomes remain consistent, inspectable, and recoverable.
-**Current focus:** v1.1 gap-closure planning from milestone audit
+**Current focus:** Plan Phase 57 before resuming milestone closeout
 
 ## Current Position
 
-Phase: 53 (gameplay-route-convergence-and-reload-stable-research-log) — PLANNED
-Plan: 0 of 0
-Status: Milestone audit found confirmed implementation gaps; gap-closure phases 53-55 were created
-Last activity: 2026-04-13
+Phase: 57 (imported-generated-character-grounding-pipeline-with-import-override-instructions) — PENDING
+Plan: not planned yet
+Status: New follow-up phase added for imported/generated character grounding, OC ability extraction/estimation, and optional import override instructions
+Last activity: 2026-04-14 -- Phase 57 added for imported/generated character grounding and import override instructions
 
-Progress: [████████░░] 84%
+Progress: [█████████░] 95%
 
 ## Performance Metrics
 
@@ -41,14 +41,17 @@ Progress: [████████░░] 84%
 
 **Current Snapshot:**
 
-- Active roadmap phases: 19
-- Completed phases: 16
-- Planned or in-progress phases: 3
-- Total plans tracked: 49
-- Completed plans: 49
-- Pending plans: gap-closure phases `53`, `54`, and `55` now own the remaining confirmed implementation gaps and verification blind spots from the milestone audit
+- Active roadmap phases: 21
+- Completed phases: 20
+- Planned or in-progress phases: 1
+- Total plans tracked: 55
+- Completed plans: 55
+- Pending plans: Phase 57 not planned yet
 
 **Recent Execution:**
+
+- Phase `53` Plan `02` — duration `~20 min`, tasks `3`, files `7`
+- Phase `53` Plan `01` — duration `~8 min`, tasks `3`, files `7`
 
 - Phase `46` Plan `04` — duration `9 min`, tasks `1`, files `9`
 - Phase `46` Plan `03` — duration `12 min`, tasks `2`, files `10`
@@ -230,6 +233,12 @@ Recent decisions affecting current work:
 - [Phase 50]: Raw reasoning stays as local assistant-only debug metadata in /game instead of widening shared ChatMessage or persisted history.
 - [Phase 50]: The disclosure uses native <details> under narration-only assistant messages and stays hidden for lookups, progress blocks, user text, and empty payloads.
 - [Phase 53]: Legacy POST /api/chat now returns 410 Gone so narrated gameplay cannot bypass the authoritative route family.
+- [Phase 57]: Imported and generated characters now need the same grounded ability/power pipeline as known-IP worldgen NPCs, with canon research for canonical characters and bounded card-derived extraction/estimation for OC imports.
+- [Phase 57]: Card import needs an optional user-authored override/instruction field so unwanted canon or lore slices can be ignored or replaced during import.
+
+### Roadmap Evolution
+
+- Phase 57 added: Imported & Generated Character Grounding Pipeline With Import Override Instructions
 
 ### Pending Todos
 
@@ -242,6 +251,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-13T11:35:00.000Z
-Stopped at: Gap-closure phases 53-55 created from v1.1 milestone audit
-Resume file: .planning/v1.1-MILESTONE-AUDIT.md
+Last session: 2026-04-13T12:10:00.000Z
+Stopped at: Phase 56 in progress; removing semantic fallback paths from runtime/worldgen/settings
+Resume file: .planning/ROADMAP.md

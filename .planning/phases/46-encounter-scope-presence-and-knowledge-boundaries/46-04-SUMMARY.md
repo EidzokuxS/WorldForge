@@ -86,7 +86,7 @@ None - plan executed exactly as written.
 
 ## Issues Encountered
 
-- `gitnexus` MCP `query`/`detect_changes` remained unavailable due a missing local LadybugDB artifact even after `npx gitnexus analyze`. Verification used targeted route/frontend tests plus direct source inspection instead.
+- `gitnexus` MCP `query`/`detect_changes` were unavailable during execution because `.gitnexus/kuzu` was missing while stale metadata still let plain `npx gitnexus analyze` report "Already up to date". This was later repaired with `npx gitnexus analyze --force .`; verification for the plan itself used targeted route/frontend tests plus direct source inspection.
 - `gsd-tools state record-metric` failed to parse the existing `STATE.md` metrics section, so the final progress percentage and recent execution entry were updated manually after the standard state/roadmap commands completed.
 
 ## User Setup Required

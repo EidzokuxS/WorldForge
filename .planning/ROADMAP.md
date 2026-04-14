@@ -33,8 +33,9 @@ v1.1 started as a reconciliation milestone built from the [Phase 36 handoff](/R:
 - [x] **Phase 51: Persistent Worldgen Research Frame & DNA-Aware Retrieval** - Persist worldgen research intent once and steer follow-up canon lookup from DNA/task context instead of rebuilding blended searches from raw user prose. (completed 2026-04-13)
 - [x] **Phase 52: Advanced Character Inspector & Full Record Visibility** - Expose the full character record in authoring/review UI so grounding, power, continuity, and provenance are inspectable without manual DB access. (completed 2026-04-13)
 - [x] **Phase 53: Gameplay Route Convergence & Reload-Stable Research Log** - Close remaining alternate gameplay route bypasses and make explicit lookup/compare replies survive history reload. (completed 2026-04-13)
-- [ ] **Phase 54: Draft-Backed NPC Edit Persistence & Review Convergence** - Make World Review edits to draft-backed NPCs persist through save/load instead of silently losing top-level changes.
-- [ ] **Phase 55: Gap-Proof Verification Matrix & Closeout Truth Alignment** - Close the remaining route-matrix blind spots and make milestone closeout artifacts reflect the actual late-phase defect history.
+- [x] **Phase 54: Draft-Backed NPC Edit Persistence & Review Convergence** - Make World Review edits to draft-backed NPCs persist through save/load instead of silently losing top-level changes. (completed 2026-04-13)
+- [x] **Phase 55: Gap-Proof Verification Matrix & Closeout Truth Alignment** - Close the remaining route-matrix blind spots and make milestone closeout artifacts reflect the actual late-phase defect history. (completed 2026-04-13)
+- [x] **Phase 56: Fail-Closed Runtime & Worldgen Fallback Removal** - Remove semantic fallback paths that substitute synthetic content, backup providers, or surrogate runtime behavior where the game should instead fail closed or surface explicit absence. Late hardening on `2026-04-14` also closed the real known-IP worldgen replacement path and removed magic-number output caps from live worldgen/research runtime calls. (completed 2026-04-13, hardened 2026-04-14)
 
 ## Phase Details
 
@@ -285,8 +286,8 @@ Plans:
   3. The advanced inspector remains additive and read-only while normal authoring/review save flows stay trustworthy.
 **Plans**: 2 plans
 Plans:
-- [ ] 54-01-PLAN.md — Converge the backend draft-backed NPC save boundary and prove the route -> save -> load -> world-payload round-trip.
-- [ ] 54-02-PLAN.md — Prove the repaired backend truth lands in World Review reload without reopening inspector/editor scope.
+- [x] 54-01-PLAN.md — Converge the backend draft-backed NPC save boundary and prove the route -> save -> load -> world-payload round-trip.
+- [x] 54-02-PLAN.md — Prove the repaired backend truth lands in World Review reload without reopening inspector/editor scope.
 
 ### Phase 55: Gap-Proof Verification Matrix & Closeout Truth Alignment
 **Goal**: Close the remaining verification blind spots and make milestone closeout/state artifacts accurately describe the actual fixed product.
@@ -297,9 +298,22 @@ Plans:
   1. The save-character start-of-play path is explicitly covered in the encounter-scope verification matrix.
   2. Storyteller live smoke and milestone closeout include opening-scene prose, not only ordinary turn categories.
   3. ROADMAP, STATE, closeout checklist, and late-phase verification artifacts reflect the real defect history and current semantics instead of stale intermediate states.
+**Plans**: 2 plans
+Plans:
+- [x] 55-01-PLAN.md — Close the missing proof chain for save-character scene-scope initialization and opening-scene storyteller smoke coverage.
+- [x] 55-02-PLAN.md — Align roadmap/state/closeout and late-phase verification artifacts to the actual defect history and current semantics.
+
+### Phase 56: Fail-Closed Runtime & Worldgen Fallback Removal
+**Goal**: Remove semantic fallback behavior so runtime and worldgen either produce the intended grounded result or surface explicit absence/error instead of silently substituting surrogate output.
+**Depends on**: Phase 48, Phase 49, Phase 50, Phase 51, Phase 55
+**Requirements**: TRUTH-01
+**Success Criteria** (what must be TRUE):
+  1. Canonical/worldgen NPCs no longer receive synthetic draft-derived grounding or power profiles that masquerade as researched truth.
+  2. Storyteller, Oracle, and worldgen no longer silently fail over to backup providers/models or server-side surrogate content when the intended path fails or omits data.
+  3. Settings and UI stop advertising semantic fallback behavior and instead expose only honest controls and states.
 **Plans**: 0 plans
 Plans:
-- [ ] TBD (run `$gsd-plan-phase 55` to break down)
+- [ ] TBD (post-55 gap phase; planned and executed inline for this fix)
 
 ## Progress
 
@@ -322,5 +336,16 @@ Plans:
 | 51. Persistent Worldgen Research Frame & DNA-Aware Retrieval | 2/2 | Complete | 2026-04-13 |
 | 52. Advanced Character Inspector & Full Record Visibility | 1/1 | Complete | 2026-04-13 |
 | 53. Gameplay Route Convergence & Reload-Stable Research Log | 2/2 | Complete | 2026-04-13 |
-| 54. Draft-Backed NPC Edit Persistence & Review Convergence | 0/0 | Pending |  |
-| 55. Gap-Proof Verification Matrix & Closeout Truth Alignment | 0/0 | Pending |  |
+| 54. Draft-Backed NPC Edit Persistence & Review Convergence | 2/2 | Complete   | 2026-04-13 |
+| 55. Gap-Proof Verification Matrix & Closeout Truth Alignment | 2/2 | Complete    | 2026-04-13 |
+| 56. Fail-Closed Runtime & Worldgen Fallback Removal | 0/0 | Pending | - |
+
+### Phase 57: Imported & Generated Character Grounding Pipeline With Import Override Instructions
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 56
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 57 to break down)

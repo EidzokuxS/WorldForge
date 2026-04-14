@@ -3,6 +3,7 @@ phase: 48-character-identity-fidelity-and-canonical-modeling
 verified: 2026-04-12T17:32:45.4417990Z
 status: human_needed
 score: 3/3 must-haves verified
+reverified: 2026-04-13T10:05:24.5346649Z
 human_verification:
   - test: "Imported/canonical identity persistence across live play"
     expected: "A recognizable imported or canonical character keeps distinctive motives, constraints, and reaction logic after save/load and several turns, with continuity anchoring change instead of flattening personality."
@@ -14,7 +15,7 @@ human_verification:
 **Phase Goal:** Rebuild runtime character modeling so native, imported, and canonical characters preserve the details that actually make them behave distinctly.
 **Verified:** 2026-04-12T17:32:45.4417990Z
 **Status:** human_needed
-**Re-verification:** No — initial verification
+**Re-verification:** Yes — 2026-04-13 route-matrix gap closure for worldgen NPC grounding/power synthesis
 
 ## Goal Achievement
 
@@ -24,7 +25,7 @@ human_verification:
 | --- | --- | --- | --- |
 | 1 | Key/canonical characters retain distinctive personality, motives, and behavioral constraints instead of flattening into generic summaries. | ✓ VERIFIED | Shared identity layers exist in `shared/src/types.ts`; continuity/source-bundle normalization exists in `backend/src/character/canonical-source-bundle.ts`; runtime prompts/planning read `baseFacts`, `behavioralCore`, `liveDynamics`, and `continuity` in `backend/src/engine/prompt-assembler.ts`, `backend/src/engine/npc-agent.ts`, and `backend/src/engine/npc-offscreen.ts`; runtime tests passed. |
 | 2 | Imported/card-based characters preserve salient identity details that later influence goals, planning, and reactions. | ✓ VERIFIED | Import/generation prompt doctrine explicitly preserves canon-facing facts and secondary cues in `backend/src/character/prompt-contract.ts`, `backend/src/character/generator.ts`, and `backend/src/character/npc-generator.ts`; route and campaign payload tests prove `sourceBundle`/`continuity` survive parse/import/save/load boundaries. |
-| 3 | Runtime character structure captures the information needed for believable behavior, not just creation-time flavor. | ✓ VERIFIED | Backend schemas materialize richer identity in `backend/src/routes/schemas.ts`; reflection writes land in `liveDynamics` and deeper change is gated by `promote_identity_change` in `backend/src/engine/reflection-tools.ts`; frontend adapters/editor preserve richer fields in `frontend/lib/character-drafts.ts`, `frontend/lib/api.ts`, and `frontend/components/character-creation/character-card.tsx`. |
+| 3 | Runtime character structure captures the information needed for believable behavior, not just creation-time flavor. | ✓ VERIFIED | Backend schemas materialize richer identity in `backend/src/routes/schemas.ts`; reflection writes land in `liveDynamics` and deeper change is gated by `promote_identity_change` in `backend/src/engine/reflection-tools.ts`; worldgen NPCs now receive bounded `grounding/powerProfile` synthesis via `backend/src/character/worldgen-grounding.ts`, `backend/src/worldgen/scaffold-steps/npcs-step.ts`, and `backend/src/worldgen/scaffold-saver.ts`; frontend adapters/editor preserve richer fields in `frontend/lib/character-drafts.ts`, `frontend/lib/api.ts`, and `frontend/components/character-creation/character-card.tsx`. |
 
 **Score:** 3/3 truths verified
 
@@ -46,6 +47,7 @@ human_verification:
 | `backend/src/engine/npc-agent.ts` | NPC planning from richer identity | ✓ VERIFIED | Hydrates stored NPC record and builds planning context from richer fields. |
 | `backend/src/engine/npc-offscreen.ts` | Bounded off-screen identity slice | ✓ VERIFIED | Uses hydrated richer records and a bounded identity summary instead of full dump/tag-only reasoning. |
 | `backend/src/engine/reflection-tools.ts` | Live-dynamics-first reflection writes | ✓ VERIFIED | `set_belief`/`set_goal` mutate `liveDynamics`; deeper edits require `promote_identity_change`. |
+| `backend/src/character/worldgen-grounding.ts` | Bounded worldgen grounding/power synthesis | ✓ VERIFIED | Worldgen NPC drafts now synthesize bounded `grounding` and `powerProfile` before persistence, with save-time fallback if scaffold drafts arrive legacy-flat. |
 | `frontend/lib/api.ts` | Frontend payload normalization | ✓ VERIFIED | Preserves richer drafts/records and falls back through draft converters instead of flattening. |
 | `frontend/lib/character-drafts.ts` | Frontend round-trip helpers | ✓ VERIFIED | Normalizes richer identity, source bundle, and continuity while deriving compatibility views. |
 | `frontend/components/character-creation/character-card.tsx` | Bounded editor preserving fidelity | ✓ VERIFIED | Keeps draft-backed editing and surfaces read-only identity fidelity cues without redesigning the editor. |
@@ -67,6 +69,8 @@ human_verification:
 | `backend/src/character/runtime-tags.ts` | `backend/src/engine/prompt-assembler.ts` | Tags remain derived shorthand | ✓ WIRED | `gsd-tools verify key-links` passed |
 | `backend/src/character/record-adapters.ts` | `backend/src/engine/npc-agent.ts` | Runtime planning hydrates richer records first | ✓ WIRED | `gsd-tools verify key-links` passed |
 | `backend/src/engine/reflection-agent.ts` | `backend/src/engine/reflection-tools.ts` | Reflection agent uses guarded live-dynamics/deeper-change tools | ✓ WIRED | `gsd-tools verify key-links` passed |
+| `backend/src/worldgen/scaffold-steps/npcs-step.ts` | `backend/src/character/worldgen-grounding.ts` | Generated worldgen NPC drafts gain bounded grounding/power synthesis | ✓ WIRED | Reverification confirmed worldgen NPC drafts now carry `grounding.powerProfile` |
+| `backend/src/worldgen/scaffold-saver.ts` | `backend/src/character/worldgen-grounding.ts` | Save-time fallback backfills grounding for legacy-flat worldgen NPC drafts | ✓ WIRED | Reverification confirmed persisted NPC `characterRecord` now includes bounded `grounding/powerProfile` |
 | `frontend/lib/api.ts` | `frontend/lib/character-drafts.ts` | Normalized API payloads preserve richer identity before projection | ✓ WIRED | `gsd-tools verify key-links` passed |
 | `frontend/lib/character-drafts.ts` | `frontend/components/character-creation/character-card.tsx` | Existing editor consumes richer draft | ✓ WIRED | `gsd-tools verify key-links` passed |
 | `frontend/lib/api-types.ts` | `frontend/components/world-review/npcs-section.tsx` | Expanded draft types still satisfy world-review seam | ✓ WIRED | `gsd-tools verify key-links` passed |
@@ -82,6 +86,8 @@ human_verification:
 | `backend/src/engine/prompt-assembler.ts` | Player/NPC identity prompt slices | Hydrated stored player/NPC records | Yes | ✓ FLOWING |
 | `backend/src/engine/npc-offscreen.ts` | Bounded off-screen identity summary | Hydrated stored NPC records | Yes | ✓ FLOWING |
 | `backend/src/engine/reflection-tools.ts` | `liveDynamics` updates and earned promotions | Stored NPC record loaded from DB and persisted back via `projectNpcRecord()` | Yes | ✓ FLOWING |
+| `backend/src/worldgen/scaffold-steps/npcs-step.ts` | `draft.grounding` / `draft.grounding.powerProfile` | Worldgen NPC draft synthesis from scaffold detail + bounded grounding helper | Yes | ✓ FLOWING |
+| `backend/src/worldgen/scaffold-saver.ts` | Persisted NPC `characterRecord.grounding` | Save-time fallback through `attachWorldgenNpcGrounding()` before `createCharacterRecordFromDraft()` | Yes | ✓ FLOWING |
 | `frontend/lib/api.ts` | `draft` / `characterRecord` normalization | Backend API payloads | Yes | ✓ FLOWING |
 | `frontend/lib/character-drafts.ts` | Parsed/scaffold compatibility projections | Incoming richer `CharacterDraft` / `CharacterRecord` | Yes | ✓ FLOWING |
 | `frontend/components/character-creation/character-card.tsx` | `local` draft / identity fidelity panel | `draft` prop from API-normalized richer draft | Yes | ✓ FLOWING |
@@ -95,6 +101,7 @@ human_verification:
 | Runtime prompts, off-screen simulation, and reflection boundaries consume richer identity | `npx vitest run backend/src/engine/__tests__/npc-agent.test.ts backend/src/engine/__tests__/npc-offscreen.test.ts backend/src/engine/__tests__/prompt-assembler.character-identity.test.ts backend/src/engine/__tests__/reflection-agent.test.ts backend/src/engine/__tests__/reflection-agent.identity-boundaries.test.ts` | `45 passed` | ✓ PASS |
 | Frontend expanded draft types still typecheck | `npm --prefix frontend run typecheck` | Shared build + frontend typecheck passed | ✓ PASS |
 | Frontend round-trip/editor seams preserve fidelity metadata | `npx vitest run frontend/lib/__tests__/character-drafts.test.ts frontend/components/character-creation/__tests__/character-card.identity.test.tsx` | `9 passed` | ✓ PASS |
+| Worldgen NPCs persist bounded grounding/power across scaffold generation and save/load readback | `npx vitest run backend/src/worldgen/__tests__/npcs-step.test.ts backend/src/worldgen/__tests__/scaffold-saver.test.ts backend/src/routes/__tests__/campaigns.test.ts` | `42 passed` | ✓ PASS |
 
 ### Requirements Coverage
 
@@ -119,9 +126,10 @@ human_verification:
 
 ### Gaps Summary
 
-No code or wiring gaps were found in the Phase 48 implementation. The only remaining verification item is the manual gameplay-feel acceptance check defined by the phase validation contract, so automated verification is complete but final sign-off still needs a human run.
+Initial verification missed one real route-matrix gap: worldgen NPCs were not receiving bounded `grounding/powerProfile` synthesis, so imported/researched characters had richer stored records than worldgen-generated NPCs. That gap is now closed via `backend/src/character/worldgen-grounding.ts`, invoked during both scaffold generation and scaffold save fallback. The only remaining verification item is still the manual gameplay-feel acceptance check defined by the phase validation contract.
 
 ---
 
 _Verified: 2026-04-12T17:32:45.4417990Z_  
-_Verifier: Claude (gsd-verifier)_
+_Re-verified: 2026-04-13T10:05:24.5346649Z_  
+_Verifier: Claude (gsd-verifier), plus 2026-04-13 gap-closure rerun_

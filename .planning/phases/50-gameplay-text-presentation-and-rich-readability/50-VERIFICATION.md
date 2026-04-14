@@ -132,6 +132,8 @@ No orphaned Phase 50 requirements were found. `UX-01` is the only requirement ma
 
 No code or wiring gaps were found. Phase 50 is structurally implemented and well-covered by tests, but the goal statement includes subjective readability/scanability claims that still need human confirmation in the live `/game` UI.
 
+Post-closeout fallout note: after initial verification, the settings path exposed repaired integration debt around persisted provider/settings safety and `ui.showRawReasoning` shared-build mismatch. Those fixes did not change the Phase 50 product contract, but they are part of the real late-phase defect history and should be treated as already-repaired follow-up work rather than omitted from milestone closeout context.
+
 ---
 
 _Verified: 2026-04-13T05:41:02Z_

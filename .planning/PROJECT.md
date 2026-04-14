@@ -19,9 +19,9 @@ The shipped baseline includes:
 - unified character ontology, structured start conditions, canonical loadouts, and persona templates
 - desktop-first non-game shell for launcher, creation, review, and character authoring
 
-The original `v1.1 Gameplay Fidelity` reconciliation tranche (`37-44`) is complete. The milestone remains open and is now extended with follow-on gameplay-quality phases (`45-50`) driven by live gameplay findings rather than docs reconciliation alone.
+The original `v1.1 Gameplay Fidelity` reconciliation tranche (`37-44`) is complete. Follow-on gameplay-quality phases (`45-50`) and the later gap-closure phases (`53-55`) are also now complete, so all planned `v1.1` implementation work is finished.
 
-`Phase 48` is now complete: runtime character modeling preserves richer identity layers, continuity, and source-bundle fidelity across generation, persistence, prompts, reflection, and the bounded frontend draft/editor seam.
+`Phase 55` is now complete: the last route-matrix blind spots and closeout-truth drift were closed. The milestone is no longer waiting on additional implementation work; it is waiting on integrated manual closeout/UAT.
 
 The milestone still starts from the docs-to-runtime reconciliation in [36-HANDOFF.md](/R:/Projects/WorldForge/.planning/phases/36-gameplay-docs-to-runtime-reconciliation-audit/36-HANDOFF.md), not from old assumptions.
 
@@ -49,11 +49,7 @@ The milestone still starts from the docs-to-runtime reconciliation in [36-HANDOF
 
 ### Active
 
-- [ ] Gameplay runtime matches the integrity baseline established by Phase 36 before new gameplay expansion
-- [ ] Session-coupled gameplay seams are removed from turn, history, retry, undo, and edit flows
-- [ ] Checkpoints, rollback, and retry restore one coherent authoritative world boundary
-- [ ] Reflection/progression and post-turn simulation become trustworthy live mechanics instead of half-wired background systems
-- [ ] Documented gameplay claims that are still intended are implemented; stale ones are explicitly deprecated
+- [ ] Integrated closeout/UAT confirms that the repaired `v1.1` gameplay baseline feels acceptable in live play
 
 ### Out of Scope
 
@@ -82,4 +78,4 @@ The milestone still starts from the docs-to-runtime reconciliation in [36-HANDOF
 | `v1.1` stays open until gameplay baseline feels acceptable in live use | Formal reconciliation alone is not enough if live play still exposes major scene, writing, search, or character-fidelity gaps | ✓ Active |
 
 ---
-*Last updated: 2026-04-12 after Phase 48 completion*
+*Last updated: 2026-04-13 after Phase 55 completion*

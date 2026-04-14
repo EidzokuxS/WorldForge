@@ -10,6 +10,9 @@ human_verification:
   - test: "Dialogue and quiet scene output lose assistant smell"
     expected: "Dialogue and quiet scenes reduce purple prose, meta phrasing, and generic assistant cadence without flattening scene truth."
     why_human: "Prompt and guard seams are proven mechanically, but prose quality is not fully machine-verifiable."
+  - test: "Opening-scene prose stays scene-driven and non-generic"
+    expected: "Opening narration avoids premise-dump prose, repeated lead, generic welcome framing, instruction echo, and early identity leakage."
+    why_human: "Opening narration now routes through the same storyteller seam, but live quality still requires product judgment."
   - test: "Eerie/tension scenes stay bounded and non-omniscient"
     expected: "Tension-heavy scenes use signals and consequence rather than melodrama, while keeping encounter-scope knowledge limits."
     why_human: "This is a narrative-feel check across live GLM samples, not just a structural contract."
@@ -43,7 +46,7 @@ human_verification:
 | `backend/src/engine/prompt-assembler.ts` | Scene-adaptive prompt assembly using the preset seam | ✓ VERIFIED | Present and covered by `prompt-assembler.test.ts`. |
 | `backend/src/engine/turn-processor.ts` | Bounded final-visible guard with at most one retry | ✓ VERIFIED | Present and covered by `turn-processor.test.ts`. |
 | `backend/src/routes/__tests__/chat.test.ts` | SSE route stays single-pass for visible narration | ✓ VERIFIED | Added explicit single-`narrative` transport coverage. |
-| `.planning/phases/47-storyteller-output-quality-and-anti-slop-prompting/47-SMOKE-CHECKLIST.md` | Live GLM review rubric | ✓ VERIFIED | Present and keyed to the exact failure modes guarded in code. |
+| `.planning/phases/47-storyteller-output-quality-and-anti-slop-prompting/47-SMOKE-CHECKLIST.md` | Live GLM review rubric | ✓ VERIFIED | Present and keyed to the exact failure modes guarded in code, including a distinct opening-scene prose check. |
 
 ### Behavioral Spot-Checks
 
@@ -59,10 +62,12 @@ Use [47-SMOKE-CHECKLIST.md](R:\Projects\WorldForge\.planning\phases\47-storytell
 
 1. combat/action-heavy narration
 2. dialogue/negotiation narration
-3. quiet scene-setting narration
-4. eerie or tension-heavy narration
+3. opening-scene prose
+4. quiet scene-setting narration
+5. eerie or tension-heavy narration
 
 Expected:
+- no premise-dump or generic welcome-style opening
 - no repeated lead paragraph
 - no prompt/header/tool leakage
 - no instruction echo
@@ -71,7 +76,7 @@ Expected:
 
 ### Gaps Summary
 
-No implementation blocker remains for `WRIT-01`. The remaining gap is product-level prose judgment on live GLM output, which by milestone policy is deferred to end-of-milestone closeout instead of blocking the engineering phase immediately.
+No implementation blocker remains for `WRIT-01`. The remaining gap is product-level prose judgment on live GLM output, including opening-scene prose quality, which by milestone policy is deferred to end-of-milestone closeout instead of blocking the engineering phase immediately.
 
 ---
 

@@ -83,7 +83,7 @@ None - plan executed exactly as written.
 
 ## Issues Encountered
 
-- GitNexus resource context was available, but structured query/context helpers still failed locally after reindexing because the LadybugDB path was missing. Source reads and direct targeted test work were sufficient, so execution continued without blocking.
+- GitNexus resource context was available, but structured query/context helpers initially failed because the local graph database was missing at `.gitnexus/kuzu` while stale `meta.json` still marked the repo up to date. This was later repaired with `npx gitnexus analyze --force .`; source reads and direct targeted test work were sufficient at execution time.
 
 ## User Setup Required
 

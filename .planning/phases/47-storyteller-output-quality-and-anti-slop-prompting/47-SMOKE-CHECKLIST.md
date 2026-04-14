@@ -4,7 +4,7 @@ Use the configured GLM storyteller path and judge the visible narration only. Th
 
 ## Approval Rule
 
-Mark the phase `approved` only if all four scene types pass and none of the failure modes below show up in a way that breaks immersion.
+Mark the phase `approved` only if all five scene types pass and none of the failure modes below show up in a way that breaks immersion.
 
 ## Failure Modes This Phase Guards
 
@@ -16,25 +16,31 @@ Mark the phase `approved` only if all four scene types pass and none of the fail
 
 ## Scene Checks
 
-### 1. Combat / action-heavy turn
+### 1. Opening-scene prose
+
+- Does the first opening scene read like live scene truth instead of a premise dump or lore preamble?
+- Does it avoid repeated-lead opening beats, generic "welcome to this world" framing, and instruction echo?
+- Does it preserve knowledge limits instead of revealing identity, intent, or hidden actors too early?
+
+### 2. Combat / action-heavy turn
 
 - Does the text move through concrete action and consequence instead of pausing to editorialize?
 - Does it avoid restarting the same beat after impact lands?
 - Does it stay readable under pressure instead of inflating into purple prose?
 
-### 2. Dialogue / negotiation turn
+### 3. Dialogue / negotiation turn
 
 - Does the prose let the conversation carry the scene instead of narrating around it?
 - Do emotional beats land once instead of being restated?
 - Does the narrator avoid assistant-like meta phrasing or instruction echo?
 
-### 3. Quiet / scene-setting turn
+### 4. Quiet / scene-setting turn
 
 - Does it establish the place with specific details instead of generic atmosphere filler?
 - Does it stay restrained instead of writing like a dramatic monologue?
 - Does it avoid "Here's the thing", "The truth is", and similar announcement openers?
 
-### 4. Eerie / tension-heavy turn
+### 5. Eerie / tension-heavy turn
 
 - Does it create tension through signals, pacing, and consequence rather than melodramatic inflation?
 - Does it preserve knowledge limits and hidden presence boundaries?
@@ -55,4 +61,5 @@ Mark the phase `approved` only if all four scene types pass and none of the fail
 - [ ] dialogue approved
 - [ ] quiet approved
 - [ ] eerie approved
+- [ ] opening approved
 - [ ] phase 47 approved
