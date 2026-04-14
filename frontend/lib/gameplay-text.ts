@@ -1,4 +1,4 @@
-import type { ChatRole } from "@worldforge/shared";
+import { parseLookupLogEntry, type ChatRole } from "@worldforge/shared";
 
 export type GameMessageKind =
   | "narration"
@@ -8,8 +8,6 @@ export type GameMessageKind =
   | "compare"
   | "mechanical"
   | "progress";
-
-const LOOKUP_PREFIX_PATTERN = /^\[Lookup:\s*([^\]]+)\]\s*/i;
 
 const PROGRESS_PATTERNS = [
   /^the storyteller is weaving the scene/i,
@@ -38,11 +36,13 @@ export function deriveGameMessageKind(
   }
 
   const trimmed = content.trim();
-  const lookupMatch = trimmed.match(LOOKUP_PREFIX_PATTERN);
+  const lookupEntry = parseLookupLogEntry(trimmed);
 
-  if (lookupMatch) {
-    const lookupKind = lookupMatch[1].trim().toLowerCase();
-    return lookupKind === "power_profile" ? "compare" : "lookup";
+  if (lookupEntry) {
+    const lookupKind = lookupEntry.lookupKind.trim().toLowerCase();
+    return lookupKind === "power_profile" || lookupKind === "compare"
+      ? "compare"
+      : "lookup";
   }
 
   if (PROGRESS_PATTERNS.some((pattern) => pattern.test(trimmed))) {
@@ -57,7 +57,7 @@ export function deriveGameMessageKind(
 }
 
 export function stripLookupPrefix(content: string): string {
-  return content.replace(LOOKUP_PREFIX_PATTERN, "").trimStart();
+  return parseLookupLogEntry(content)?.answer.trimStart() ?? content;
 }
 
 export function splitGameplayParagraphs(content: string): string[] {

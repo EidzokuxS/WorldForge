@@ -68,6 +68,22 @@ describe("NarrativeLog", () => {
     expect(screen.getByText("Speed: Hypersonic")).toBeInTheDocument();
   });
 
+  it("renders persisted compare entries through the same Power Profile block", () => {
+    const messages: ChatMessage[] = [
+      {
+        role: "assistant",
+        content: "[Lookup: compare] Gojo controls space while Sukuna owns the harsher finishing ceiling.",
+      },
+    ];
+    render(<NarrativeLog {...defaultProps} messages={messages} />);
+
+    expect(screen.getByText("Power Profile")).toBeInTheDocument();
+    expect(screen.queryByText(/^Lookup$/i)).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Gojo controls space while Sukuna owns the harsher finishing ceiling."),
+    ).toBeInTheDocument();
+  });
+
   it("shows streaming indicator when isStreaming is true", () => {
     render(<NarrativeLog {...defaultProps} isStreaming={true} />);
     expect(

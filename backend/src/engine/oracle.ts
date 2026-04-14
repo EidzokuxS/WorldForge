@@ -3,14 +3,13 @@
  *
  * Evaluates action probability via Judge LLM (generateObject with Zod schema,
  * temperature 0), rolls D100, resolves 3-tier outcome (strong_hit / weak_hit / miss).
- * Never returns chance 0 or 100. Retries with Fallback role on primary failure.
+ * Never returns chance 0 or 100.
  */
 
 import crypto from "node:crypto";
 import { z } from "zod";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
 import { safeGenerateObject } from "../ai/generate-object-safe.js";
-import { withModelFallback } from "../ai/with-model-fallback.js";
 
 // -- Types -------------------------------------------------------------------
 
@@ -131,18 +130,7 @@ async function executeOracleCall(
 export async function callOracle(
   payload: OraclePayload,
   provider: ProviderConfig,
-  fallbackProvider?: ProviderConfig | null
 ): Promise<OracleResult> {
   const userPrompt = buildOraclePrompt(payload);
-
-  if (fallbackProvider) {
-    return withModelFallback(
-      () => executeOracleCall(provider, userPrompt),
-      () => executeOracleCall(fallbackProvider, userPrompt),
-      "oracle:callOracle"
-    );
-  }
-
-  // No fallback configured — just call primary, let error propagate
   return executeOracleCall(provider, userPrompt);
 }

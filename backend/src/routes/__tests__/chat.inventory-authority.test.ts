@@ -57,7 +57,7 @@ vi.mock("../../settings/index.js", () => ({
         isBuiltin: false,
       },
     ],
-    fallback: { providerId: "", model: "", timeoutMs: 1000, retryCount: 0 },
+    ui: { showRawReasoning: false },
   })),
 }));
 
@@ -82,10 +82,6 @@ vi.mock("../../engine/index.js", () => ({
   checkAndTriggerReflections: vi.fn(async () => []),
   tickFactions: vi.fn(async () => []),
   sanitizeNarrative: vi.fn((text: string) => text),
-}));
-
-vi.mock("../../ai/with-model-fallback.js", () => ({
-  resolveFallbackProvider: vi.fn(() => null),
 }));
 
 vi.mock("../../vectors/episodic-events.js", () => ({

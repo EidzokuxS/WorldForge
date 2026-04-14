@@ -819,66 +819,16 @@ describe("processTurn", () => {
     });
   });
 
-  it("emits server-side fallback quick actions when storyteller omits the tool call", async () => {
+  it("does not invent quick actions when storyteller omits the tool call", async () => {
     setupMocks({
       streamParts: [
         { type: "text-delta", text: "The signal room falls quiet." },
       ],
     });
 
-    let lastFromTable: unknown = null;
-    const mockDb = {
-      select: vi.fn().mockReturnThis(),
-      from: vi.fn().mockImplementation((table: unknown) => {
-        lastFromTable = table;
-        return mockDb;
-      }),
-      where: vi.fn().mockImplementation(() => {
-        if (lastFromTable === (players as unknown)) {
-          return {
-            get: vi.fn().mockReturnValue({
-              id: "player-1",
-              name: "Hero",
-              tags: '["warrior"]',
-              currentLocationId: "loc-1",
-            }),
-          };
-        }
-        if (lastFromTable === (locations as unknown)) {
-          return {
-            get: vi.fn().mockReturnValue({
-              id: "loc-1",
-              name: "Signal Room",
-            }),
-          };
-        }
-        if (lastFromTable === (npcs as unknown)) {
-          return {
-            all: vi.fn().mockReturnValue([{ name: "Dr. Sato" }]),
-          };
-        }
-        return {
-          get: vi.fn().mockReturnValue(null),
-          all: vi.fn().mockReturnValue([]),
-        };
-      }),
-    };
-    (getDb as Mock).mockReturnValue(mockDb);
-
     const events = await collectEvents(processTurn(createTestOptions()));
 
-    const quickActions = events.filter((e) => e.type === "quick_actions");
-    expect(quickActions).toHaveLength(1);
-    expect(quickActions[0]!.data).toEqual({
-      success: true,
-      result: {
-        actions: [
-          { label: "Talk to Dr. Sato", action: "Talk to Dr. Sato" },
-          { label: "Look around", action: "Look around Signal Room for anything noteworthy" },
-          { label: "Press the advantage", action: "Press the advantage and continue forward" },
-        ],
-      },
-    });
+    expect(events.some((event) => event.type === "quick_actions")).toBe(false);
   });
 
   it("yields done event as last event with tick", async () => {
@@ -1599,22 +1549,21 @@ describe("processTurn", () => {
     });
   });
 
-  it("still yields oracle result on Oracle failure (fallback)", async () => {
-    // Oracle has its own fallback -- callOracle always returns a result
-    const fallbackResult = {
+  it("yields whatever oracle result the oracle layer returns without adding turn-level fallback behavior", async () => {
+    const oracleResult = {
       chance: 50,
       roll: 42,
       outcome: "weak_hit" as const,
-      reasoning: "Oracle unavailable -- using coin flip fallback",
+      reasoning: "Tight opening, partial success.",
     };
-    setupMocks({ oracleResult: fallbackResult });
+    setupMocks({ oracleResult });
     const options = createTestOptions();
 
     const events = await collectEvents(processTurn(options));
 
     expect(events[0]).toEqual({
       type: "oracle_result",
-      data: fallbackResult,
+      data: oracleResult,
     });
   });
 
@@ -1756,7 +1705,6 @@ describe("processTurn", () => {
         ],
       }),
       expect.anything(),
-      null,
     );
   });
 
@@ -1804,7 +1752,6 @@ describe("processTurn", () => {
         sceneContext: expect.stringContaining("Opening Companions: Mira"),
       }),
       expect.anything(),
-      null,
     );
 
     expect(callOracle).toHaveBeenCalledWith(
@@ -1812,7 +1759,6 @@ describe("processTurn", () => {
         sceneContext: expect.stringContaining("Opening Constraints:"),
       }),
       expect.anything(),
-      null,
     );
   });
 
@@ -2104,7 +2050,6 @@ describe("processTurn", () => {
           ]),
         }),
         expect.anything(),
-        null,
       );
     });
 
@@ -2140,7 +2085,6 @@ describe("processTurn", () => {
           targetTags: ["Ancient", "Silver", "Locked-Door Key"],
         }),
         expect.anything(),
-        null,
       );
 
       const locationDb = createEntityLookupDb({
@@ -2182,7 +2126,6 @@ describe("processTurn", () => {
           targetTags: ["elevated", "exposed", "arcane-device"],
         }),
         expect.anything(),
-        null,
       );
     });
 
@@ -2206,7 +2149,6 @@ describe("processTurn", () => {
           targetTags: [],
         }),
         expect.anything(),
-        null,
       );
     });
 
@@ -2256,7 +2198,6 @@ describe("processTurn", () => {
           targetTags: ["elevated", "exposed"],
         }),
         expect.anything(),
-        null,
       );
     });
   });

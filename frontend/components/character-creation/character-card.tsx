@@ -58,17 +58,20 @@ function CompactTextarea({
   onChange,
   placeholder,
   maxLength,
+  minH,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
   maxLength?: number;
+  minH?: string;
 }) {
   return (
     <textarea
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
+      style={minH ? { minHeight: minH } : undefined}
       className={cn(
         "min-h-[72px] w-full resize-y rounded-md border px-3 py-2 outline-none",
         "bg-zinc-800 border-zinc-700 text-[clamp(14px,1vw,16px)] text-zinc-200 placeholder:text-zinc-600",

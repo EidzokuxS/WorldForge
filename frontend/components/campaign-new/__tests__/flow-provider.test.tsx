@@ -18,9 +18,9 @@ vi.mock("@/lib/settings", () => ({
     storyteller: { providerId: "", model: "", temperature: 0, maxTokens: 0 },
     generator: { providerId: "", model: "", temperature: 0, maxTokens: 0 },
     embedder: { providerId: "", model: "", temperature: 0, maxTokens: 0 },
-    fallback: { providerId: "", model: "", timeoutMs: 0, retryCount: 0 },
     images: { providerId: "", model: "", stylePrompt: "", enabled: false },
     research: { enabled: false, maxSearchSteps: 0, searchProvider: "duckduckgo" },
+    ui: { showRawReasoning: false },
   })),
 }));
 
@@ -154,9 +154,9 @@ describe("CampaignNewFlowProvider", () => {
       storyteller: { providerId: "", model: "", temperature: 0, maxTokens: 0 },
       generator: { providerId: "", model: "", temperature: 0, maxTokens: 0 },
       embedder: { providerId: "", model: "", temperature: 0, maxTokens: 0 },
-      fallback: { providerId: "", model: "", timeoutMs: 0, retryCount: 0 },
       images: { providerId: "", model: "", stylePrompt: "", enabled: false },
       research: { enabled: false, maxSearchSteps: 0, searchProvider: "duckduckgo" },
+      ui: { showRawReasoning: false },
     });
   });
 

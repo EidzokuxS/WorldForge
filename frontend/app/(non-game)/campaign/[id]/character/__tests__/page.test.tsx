@@ -65,7 +65,7 @@ beforeEach(() => {
 });
 
 describe("CharacterCreationPage", () => {
-  it("renders character form, no-draft message, and action buttons", async () => {
+  it("renders the empty-state character launcher with a back link", async () => {
     mockedLoadCampaign.mockResolvedValue({
       id: "campaign-1",
       name: "Arcadia",
@@ -80,8 +80,7 @@ describe("CharacterCreationPage", () => {
       expect(screen.getByTestId("character-form")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("Use the entry methods above to parse, generate, or import a character.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save & Begin Adventure" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Save & Begin Adventure" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to Review" })).toBeInTheDocument();
   });
 

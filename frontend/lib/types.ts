@@ -6,7 +6,6 @@ export type {
   PremiseDivergence,
   Provider,
   RoleConfig,
-  FallbackConfig,
   ImageConfig,
   ResearchConfig,
   Settings,

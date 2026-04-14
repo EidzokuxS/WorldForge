@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
+import { parseLookupLogEntry } from "@worldforge/shared";
 import { buildLookupHistoryMessages } from "../campaign/chat-history.js";
 import {
   appendChatMessages,
@@ -60,7 +61,6 @@ import {
 } from "../campaign/runtime-state.js";
 import type { Settings } from "../settings/index.js";
 import type { ProviderConfig } from "../ai/provider-registry.js";
-import { resolveFallbackProvider } from "../ai/with-model-fallback.js";
 import {
   generateImage,
   resolveImageProvider,
@@ -279,7 +279,9 @@ function buildOnBeforeVisibleNarration(
 }
 
 function campaignHasAssistantMessages(campaignId: string): boolean {
-  return getChatHistory(campaignId).some((message) => message.role === "assistant");
+  return getChatHistory(campaignId).some(
+    (message) => message.role === "assistant" && !parseLookupLogEntry(message.content),
+  );
 }
 
 async function writeTurnEventSSE(
@@ -392,8 +394,6 @@ app.post("/opening", async (c) => {
     }
 
     const embedderResult = resolveEmbedder(settings);
-    const fallbackProvider = resolveFallbackProvider(settings.fallback, settings.providers);
-
     c.header("Cache-Control", "no-cache, no-transform");
 
     return streamSSE(c, async (stream) => {
@@ -404,7 +404,6 @@ app.post("/opening", async (c) => {
           storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
           storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
           embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
-          fallbackProvider,
         });
 
         for await (const event of openingGenerator) {
@@ -475,9 +474,6 @@ app.post("/action", async (c) => {
     // Resolve Embedder (optional -- used for lore search)
     const embedderResult = resolveEmbedder(settings);
 
-    // Resolve Fallback provider (optional -- used for Oracle/Storyteller retry)
-    const fallbackProvider = resolveFallbackProvider(settings.fallback, settings.providers);
-
     // Auto-checkpoint before dangerous turns (HP <= 2)
     try {
       const db = (await import("../db/index.js")).getDb();
@@ -519,7 +515,6 @@ app.post("/action", async (c) => {
           storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
           storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
           embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
-          fallbackProvider,
           onBeforeVisibleNarration: buildOnBeforeVisibleNarration(
             settings,
             campaignId,
@@ -683,9 +678,6 @@ app.post("/retry", async (c) => {
     // Resolve Embedder (optional)
     const embedderResult = resolveEmbedder(settings);
 
-    // Resolve Fallback provider (optional -- used for Oracle/Storyteller retry)
-    const fallbackProvider = resolveFallbackProvider(settings.fallback, settings.providers);
-
     await restoreSnapshot(campaignId, previousSnapshot);
 
     c.header("Cache-Control", "no-cache, no-transform");
@@ -702,7 +694,6 @@ app.post("/retry", async (c) => {
           storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
           storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
           embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
-          fallbackProvider,
           onBeforeVisibleNarration: buildOnBeforeVisibleNarration(
             settings,
             campaignId,

@@ -60,10 +60,6 @@ vi.mock("../../engine/grounded-lookup.js", () => ({
   runGroundedLookup: vi.fn(),
 }));
 
-vi.mock("../../ai/with-model-fallback.js", () => ({
-  resolveFallbackProvider: vi.fn(() => null),
-}));
-
 const mockEmbedAndUpdateEvent = vi.fn();
 const mockDrainPendingCommittedEvents = vi.fn();
 const runtimeSnapshots = new Map<string, unknown>();
@@ -172,7 +168,7 @@ function setupStoryteller() {
     storyteller: { providerId: "p1", model: "st-model", temperature: 0.7, maxTokens: 2048 },
     embedder: { providerId: "", model: "", temperature: 0.1, maxTokens: 256 },
     providers: [{ id: "p1", name: "P1", baseUrl: "http://localhost:1234", apiKey: "", defaultModel: "m", isBuiltin: false }],
-    fallback: { providerId: "", model: "", timeoutMs: 1000, retryCount: 0 },
+    ui: { showRawReasoning: false },
   } as any);
 
   mockedResolveRole.mockReturnValue({
@@ -349,6 +345,47 @@ describe("POST /chat/opening", () => {
     const body = await res.json();
     expect(body.error).toBe("Opening scene already exists for this campaign.");
     expect(mockedProcessOpeningScene).not.toHaveBeenCalled();
+  });
+
+  it("still allows opening generation when prior assistant history is factual lookup only", async () => {
+    setupStoryteller();
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockResolvedValue({
+      id: CAMPAIGN_ID,
+      name: "Loaded Campaign",
+      createdAt: "2026-01-01",
+    } as any);
+    mockedGetHistory.mockReturnValue([
+      { role: "user", content: "/lookup character: Satoru Gojo" },
+      {
+        role: "assistant",
+        content:
+          "[Lookup: character_canon_fact] Gojo remains sealed until the Prison Realm opens.",
+      },
+    ] as any);
+    mockedProcessOpeningScene.mockImplementation(() =>
+      createTurnStream([
+        { type: "scene-settling", data: { phase: "opening" } },
+        { type: "narrative", data: { text: "The station groans awake around you." } },
+        { type: "done", data: { tick: 0, opening: true } },
+      ]),
+    );
+
+    const res = await app.request("/chat/opening", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("event: narrative");
+    expect(body).toContain("The station groans awake around you.");
+    expect(mockedProcessOpeningScene).toHaveBeenCalledWith(
+      expect.objectContaining({
+        campaignId: CAMPAIGN_ID,
+      }),
+    );
   });
 });
 
@@ -951,7 +988,7 @@ describe("Campaign-loaded gameplay transport", () => {
       storyteller: { providerId: "p1", model: "st-model", temperature: 0.7, maxTokens: 2048 },
       embedder: { providerId: "p1", model: "embed-model", temperature: 0.1, maxTokens: 256 },
       providers: [{ id: "p1", name: "P1", baseUrl: "http://localhost:1234", apiKey: "", defaultModel: "m", isBuiltin: false }],
-      fallback: { providerId: "", model: "", timeoutMs: 1000, retryCount: 0 },
+      ui: { showRawReasoning: false },
     } as any);
     mockedResolveRole.mockReturnValue({
       provider: { baseUrl: "http://localhost:1234", apiKey: "", model: "embed-model" },

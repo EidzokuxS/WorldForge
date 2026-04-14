@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import type {
   CharacterDraft,
+  CharacterRecord,
   LocationKind,
   LocationPersistence,
 } from "@worldforge/shared";
@@ -13,8 +14,9 @@ import { getWorldData } from "../api";
 import type { WorldData, LoreCardItem } from "../api-types";
 
 /** Minimal WorldData fixture with 2 locations, 1 faction, 2 NPCs, 2 relationships. */
-function makeWorldData(overrides?: Partial<WorldData>): WorldData {
+function makeWorldData(overrides: Record<string, unknown> = {}): WorldData {
   return {
+    currentScene: null,
     locations: [
       {
         id: "loc-1",
@@ -44,6 +46,7 @@ function makeWorldData(overrides?: Partial<WorldData>): WorldData {
         tags: ["friendly"],
         tier: "key",
         currentLocationId: "loc-1",
+        sceneScopeId: null,
         goals: { short_term: ["serve drinks"], long_term: ["retire"] },
         beliefs: [],
       },
@@ -55,6 +58,7 @@ function makeWorldData(overrides?: Partial<WorldData>): WorldData {
         tags: ["mysterious"],
         tier: "temporary",
         currentLocationId: null,
+        sceneScopeId: null,
         goals: { short_term: [], long_term: [] },
         beliefs: [],
       },
@@ -110,6 +114,130 @@ describe("WorldData location typing", () => {
     >();
   });
 });
+
+function makeCharacterRecord(overrides?: Partial<CharacterRecord>): CharacterRecord {
+  const typedOverrides = overrides ?? {};
+
+  return {
+    identity: {
+      id: "npc-1",
+      campaignId: "c1",
+      role: "npc",
+      tier: "key",
+      displayName: "Bartender",
+      canonicalStatus: "original",
+      baseFacts: {
+        biography: "Keeps the tavern running.",
+        socialRole: ["innkeeper"],
+        hardConstraints: ["Protect the staff"],
+      },
+      behavioralCore: {
+        motives: ["Keep the peace"],
+        pressureResponses: ["Stall for time"],
+        taboos: ["Betray guests"],
+        attachments: ["Tavern regulars"],
+        selfImage: "Steady host",
+      },
+      liveDynamics: {
+        activeGoals: ["Observe newcomers"],
+        beliefDrift: [],
+        currentStrains: [],
+        earnedChanges: [],
+      },
+    },
+    profile: {
+      species: "Human",
+      gender: "",
+      ageText: "",
+      appearance: "",
+      backgroundSummary: "Local fixture",
+      personaSummary: "Friendly innkeeper",
+    },
+    socialContext: {
+      factionId: null,
+      factionName: null,
+      homeLocationId: "loc-1",
+      homeLocationName: "Tavern",
+      currentLocationId: "loc-1",
+      currentLocationName: "Tavern",
+      relationshipRefs: [],
+      socialStatus: [],
+      originMode: "resident",
+    },
+    motivations: {
+      shortTermGoals: ["Serve drinks"],
+      longTermGoals: ["Retire"],
+      beliefs: [],
+      drives: [],
+      frictions: [],
+    },
+    capabilities: {
+      traits: ["Observant"],
+      skills: [],
+      flaws: ["Soft-hearted"],
+      specialties: ["Defusing fights"],
+      wealthTier: null,
+    },
+    state: {
+      hp: 5,
+      conditions: [],
+      statusFlags: [],
+      activityState: "active",
+    },
+    loadout: {
+      inventorySeed: [],
+      equippedItemRefs: [],
+      currencyNotes: "",
+      signatureItems: [],
+    },
+    startConditions: {},
+    provenance: {
+      sourceKind: "worldgen",
+      importMode: null,
+      templateId: null,
+      archetypePrompt: null,
+      worldgenOrigin: null,
+      legacyTags: [],
+    },
+    grounding: {
+      summary: "Grounded from local tavern role.",
+      facts: ["Runs the tavern."],
+      abilities: ["Reads a room"],
+      constraints: ["No combat feats"],
+      signatureMoves: ["Defuse tension"],
+      strongPoints: ["Social read"],
+      vulnerabilities: ["Overprotective"],
+      uncertaintyNotes: ["Bounded to tavern-scale evidence."],
+      powerProfile: {
+        attack: "Minimal direct attack profile.",
+        speed: "Normal human reactions.",
+        durability: "Unremarkable.",
+        range: "Close social context only.",
+        strengths: ["Social read"],
+        constraints: ["No combat feats"],
+        vulnerabilities: ["Overprotective"],
+        uncertaintyNotes: ["Bounded profile."],
+      },
+      sources: [],
+    },
+    sourceBundle: {
+      canonSources: [],
+      secondarySources: [],
+      synthesis: {
+        owner: "worldforge",
+        strategy: "worldforge-owned-synthesis",
+        notes: [],
+      },
+    },
+    continuity: {
+      identityInertia: "anchored",
+      protectedCore: ["Protect guests"],
+      mutableSurface: ["Mood"],
+      changePressureNotes: ["Requires sustained betrayal."],
+    },
+    ...typedOverrides,
+  };
+}
 
 describe("getWorldData", () => {
   it("parses connected paths and recent happenings while deriving compatibility connectedTo from the path graph", async () => {
@@ -215,6 +343,37 @@ describe("getWorldData", () => {
       locationKind: null,
       persistence: null,
     });
+  });
+});
+
+describe("toEditableScaffold", () => {
+  it("preserves characterRecord on scaffold NPCs so advanced review surfaces can inspect grounding", () => {
+    const record = makeCharacterRecord();
+    const world = makeWorldData({
+      npcs: [
+        {
+          id: "npc-1",
+          campaignId: "c1",
+          name: "Bartender",
+          persona: "Friendly innkeeper",
+          tags: ["friendly"],
+          tier: "key",
+          currentLocationId: "loc-1",
+          goals: { short_term: ["serve drinks"], long_term: ["retire"] },
+          beliefs: [],
+          characterRecord: record,
+          draft: undefined,
+          npc: undefined,
+        },
+      ],
+    });
+
+    const scaffold = toEditableScaffold(world, "Premise", []);
+
+    expect(scaffold.npcs[0]?.characterRecord).toEqual(record);
+    expect(scaffold.npcs[0]?.characterRecord?.grounding?.powerProfile?.attack).toBe(
+      "Minimal direct attack profile.",
+    );
   });
 });
 
@@ -494,6 +653,136 @@ describe("toEditableScaffold", () => {
     });
     expect(scaffold.npcs[0].tags).toContain("observant");
     expect(scaffold.npcs[0].tags).toContain("Order");
+  });
+
+  it("preserves characterRecord on editable NPCs so advanced review surfaces can inspect full metadata", () => {
+    const characterRecord: CharacterRecord = {
+      identity: {
+        id: "npc-1",
+        campaignId: "c1",
+        role: "npc",
+        tier: "key",
+        displayName: "Grounded Bartender",
+        canonicalStatus: "known_ip_diverged",
+        baseFacts: {
+          biography: "Runs a rumor exchange out of the tavern cellar.",
+          socialRole: ["broker"],
+          hardConstraints: ["Won't betray paying clients."],
+        },
+        behavioralCore: {
+          motives: ["Protect the cellar network"],
+          pressureResponses: ["Clams up under direct threats"],
+          taboos: ["Selling out allies"],
+          attachments: ["The tavern staff"],
+          selfImage: "A careful broker with too many secrets.",
+        },
+        liveDynamics: {
+          activeGoals: ["Keep the network hidden"],
+          beliefDrift: [],
+          currentStrains: ["Heat from local sorcerers"],
+          earnedChanges: [],
+        },
+      },
+      profile: {
+        species: "",
+        gender: "",
+        ageText: "",
+        appearance: "",
+        backgroundSummary: "",
+        personaSummary: "A broker with one eye on every table.",
+      },
+      socialContext: {
+        factionId: null,
+        factionName: "Guild",
+        homeLocationId: null,
+        homeLocationName: null,
+        currentLocationId: "loc-1",
+        currentLocationName: "Tavern",
+        relationshipRefs: [],
+        socialStatus: [],
+        originMode: "resident",
+      },
+      motivations: {
+        shortTermGoals: ["Keep the network hidden"],
+        longTermGoals: ["Outlast the crackdown"],
+        beliefs: [],
+        drives: [],
+        frictions: [],
+      },
+      capabilities: {
+        traits: ["observant"],
+        skills: [],
+        flaws: ["paranoid"],
+        specialties: ["networking"],
+        wealthTier: null,
+      },
+      state: {
+        hp: 5,
+        conditions: [],
+        statusFlags: [],
+        activityState: "active",
+      },
+      loadout: {
+        inventorySeed: [],
+        equippedItemRefs: [],
+        currencyNotes: "",
+        signatureItems: [],
+      },
+      startConditions: {},
+      provenance: {
+        sourceKind: "worldgen",
+        importMode: null,
+        templateId: null,
+        archetypePrompt: null,
+        worldgenOrigin: null,
+        legacyTags: [],
+      },
+      grounding: {
+        summary: "Canon-grounded around rumor brokerage and barrier-safe smuggling.",
+        facts: ["Runs exchanges in the tavern cellar."],
+        abilities: ["Information brokerage"],
+        constraints: ["Won't betray paying clients."],
+        signatureMoves: ["Rumor exchange"],
+        strongPoints: ["Social leverage"],
+        vulnerabilities: ["Heat from local sorcerers"],
+        uncertaintyNotes: [],
+        powerProfile: {
+          attack: "Low direct lethality.",
+          speed: "Normal human speed.",
+          durability: "Fragile outside of allies.",
+          range: "Influence travels through contacts.",
+          strengths: ["Social leverage"],
+          constraints: ["Won't betray paying clients."],
+          vulnerabilities: ["Heat from local sorcerers"],
+          uncertaintyNotes: [],
+        },
+        sources: [],
+      },
+    };
+
+    const scaffold = toEditableScaffold(
+      makeWorldData({
+        npcs: [
+          {
+            id: "npc-1",
+            campaignId: "c1",
+            name: "Grounded Bartender",
+            persona: "Friendly innkeeper",
+            tags: ["friendly"],
+            tier: "key",
+            currentLocationId: "loc-1",
+            goals: { short_term: ["serve drinks"], long_term: ["retire"] },
+            beliefs: [],
+            characterRecord,
+          },
+        ],
+      }),
+      "",
+      [],
+    );
+
+    expect(scaffold.npcs[0].characterRecord).toEqual(characterRecord);
+    expect(scaffold.npcs[0].characterRecord?.grounding?.powerProfile?.attack).toBe("Low direct lethality.");
   });
 
   it("prefers draft.identity.tier over legacy row tier when both are present", () => {

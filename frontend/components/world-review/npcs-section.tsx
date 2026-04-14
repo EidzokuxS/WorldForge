@@ -22,11 +22,13 @@ import { parseCharacter, importV2Card, researchCharacter } from "@/lib/api";
 import {
   characterDraftToScaffoldNpc,
   createEmptyNpcDraft,
+  scaffoldNpcToDraft,
   syncScaffoldTierToDraft,
 } from "@/lib/character-drafts";
 import type { CharacterImportMode } from "@/lib/types";
 import type { ScaffoldNpc } from "@/lib/api";
 import type { PersonaTemplateSummary } from "@/lib/api-types";
+import { CharacterRecordInspector } from "@/components/world-review/character-record-inspector";
 
 interface NpcsSectionProps {
   npcs: ScaffoldNpc[];
@@ -142,7 +144,10 @@ export function NpcsSection({
     try {
       const result = await parseCharacter(campaignId, descriptionText, "key", locationNames, factionNames);
       if (result.role !== "key") throw new Error("Unexpected response");
-      const npc = assignUid(syncNpcTier(result.npc, creationTier));
+      const npc = assignUid(syncNpcTier({
+        ...result.npc,
+        characterRecord: result.characterRecord ?? result.npc.characterRecord ?? null,
+      }, creationTier));
       onChange([...npcs, npc]);
       setDescriptionText("");
       setAddMode(null);
@@ -186,7 +191,10 @@ export function NpcsSection({
           },
         );
         if (result.role !== "key") throw new Error("Unexpected response");
-        const npc = assignUid(syncNpcTier(result.npc, creationTier));
+        const npc = assignUid(syncNpcTier({
+          ...result.npc,
+          characterRecord: result.characterRecord ?? result.npc.characterRecord ?? null,
+        }, creationTier));
         onChange([...npcs, npc]);
         setAddMode(null);
         toast.success(`NPC "${npc.name}" imported`);
@@ -207,7 +215,10 @@ export function NpcsSection({
     try {
       const result = await researchCharacter(campaignId, archetypeText, "key", locationNames, factionNames);
       if (result.role !== "key") throw new Error("Unexpected response");
-      const npc = assignUid(syncNpcTier(result.npc, creationTier));
+      const npc = assignUid(syncNpcTier({
+        ...result.npc,
+        characterRecord: result.characterRecord ?? result.npc.characterRecord ?? null,
+      }, creationTier));
       onChange([...npcs, npc]);
       setArchetypeText("");
       setAddMode(null);
@@ -414,6 +425,11 @@ export function NpcsSection({
                 </div>
               </div>
             </div>
+
+            <CharacterRecordInspector
+              draft={npc.draft ? scaffoldNpcToDraft(npc) : null}
+              characterRecord={npc.characterRecord ?? null}
+            />
 
             {/* Location / Faction footer */}
             <div className="mt-auto grid grid-cols-2 gap-4 border-t border-white/[0.06] pt-[clamp(8px,0.6vw,14px)]">

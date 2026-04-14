@@ -26,7 +26,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import type { CampaignMeta, ChatMessage } from "@worldforge/shared";
-import { isChatMessage } from "@worldforge/shared";
+import { formatLookupLogEntry, isChatMessage } from "@worldforge/shared";
 import { getErrorMessage } from "@/lib/settings";
 import { useSettings } from "@/lib/use-settings";
 import {
@@ -46,6 +46,7 @@ import {
 } from "@/lib/api";
 import type { ChatLookupRequest, LookupKind, LookupResultEvent } from "@/lib/api";
 import type { WorldCurrentScene, WorldData } from "@/lib/api-types";
+import { deriveGameMessageKind } from "@/lib/gameplay-text";
 
 type TurnPhase = "idle" | "streaming" | "finalizing";
 type QuickAction = { label: string; action: string };
@@ -207,12 +208,27 @@ function parseExplicitLookupCommand(value: string): ChatLookupRequest | null {
   };
 }
 
-function formatLookupAssistantMessage(result: Pick<LookupResultEvent, "lookupKind" | "answer">): string {
-  return `[Lookup: ${result.lookupKind}] ${result.answer}`;
+function formatLookupAssistantMessage(
+  request: ChatLookupRequest,
+  result: Pick<LookupResultEvent, "lookupKind" | "answer">,
+): string {
+  const persistedKind =
+    result.lookupKind === "power_profile" && request.compareAgainst
+      ? "compare"
+      : result.lookupKind;
+  return formatLookupLogEntry(persistedKind, result.answer);
 }
 
 function toDisplayMessages(messages: ChatMessage[]): DisplayChatMessage[] {
   return messages.map((message) => ({ ...message, debugReasoning: null }));
+}
+
+function hasNarratedAssistantMessage(messages: ChatMessage[]): boolean {
+  return messages.some(
+    (message) =>
+      message.role === "assistant"
+      && deriveGameMessageKind(message.role, message.content) === "narration",
+  );
 }
 
 export default function GamePage() {
@@ -315,7 +331,7 @@ export default function GamePage() {
 
       return {
         messages: displayMessages,
-        hasAssistantMessage: displayMessages.some((message) => message.role === "assistant"),
+        hasNarratedAssistantMessage: hasNarratedAssistantMessage(displayMessages),
       };
     },
     [],
@@ -430,7 +446,7 @@ export default function GamePage() {
         if (cancelled) return;
         setActiveCampaign(campaign);
         const restored = await restoreGameplayState(campaign.id, campaign.premise);
-        if (!cancelled && !restored.hasAssistantMessage) {
+        if (!cancelled && !restored.hasNarratedAssistantMessage) {
           void requestOpeningScene(campaign.id);
         }
       } catch (error) {
@@ -562,7 +578,7 @@ export default function GamePage() {
       await parseTurnSSE(response.body, {
         onLookupResult: (result) => {
           setTurnPhase("streaming");
-          const assistantContent = formatLookupAssistantMessage(result);
+          const assistantContent = formatLookupAssistantMessage(lookupRequest, result);
           flushSync(() => {
             setMessages((current) => {
               const next = [...current];

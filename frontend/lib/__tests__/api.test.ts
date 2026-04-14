@@ -3,6 +3,7 @@ import {
   chatAction,
   chatEdit,
   chatHistory,
+  chatLookup,
   chatRetry,
   chatUndo,
   deleteLoreCardById,
@@ -195,6 +196,32 @@ describe("gameplay API helpers", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ campaignId: "campaign-42" }),
+    });
+  });
+
+  it("chatLookup is a streaming helper and sends campaignId plus the lookup payload", async () => {
+    const response = new Response("event: done\ndata: {}\n\n", {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    });
+
+    fetchMock.mockResolvedValue(response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(chatLookup("campaign-42", {
+      lookupKind: "power_profile",
+      subject: "Satoru Gojo",
+      compareAgainst: "Ryomen Sukuna",
+    })).resolves.toBe(response);
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost:3001/api/chat/lookup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: "campaign-42",
+        lookupKind: "power_profile",
+        subject: "Satoru Gojo",
+        compareAgainst: "Ryomen Sukuna",
+      }),
     });
   });
 

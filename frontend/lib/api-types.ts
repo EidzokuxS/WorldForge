@@ -229,6 +229,8 @@ export interface ScaffoldNpc {
   factionName: string | null;
   tier: "key" | "supporting";
   draft?: CharacterDraft;
+  /** Frontend-only cache for advanced review/inspection. Stripped by backend Zod validation. */
+  characterRecord?: CharacterRecord | null;
   /** Frontend-only stable key for React rendering. Stripped by backend Zod validation. */
   _uid?: string;
 }

@@ -152,9 +152,9 @@ const mockNarrativeLog = vi.fn(
 vi.mock("@/components/game/narrative-log", () => ({
   NarrativeLog: (props: unknown) => mockNarrativeLog(props as never),
 }));
-const mockCharacterPanel = vi.fn(() => <div data-testid="character-panel" />);
+const mockCharacterPanel = vi.fn((_props: unknown) => <div data-testid="character-panel" />);
 vi.mock("@/components/game/character-panel", () => ({
-  CharacterPanel: (props: unknown) => mockCharacterPanel(props as never),
+  CharacterPanel: (props: unknown) => mockCharacterPanel(props),
 }));
 vi.mock("@/components/game/lore-panel", () => ({
   LorePanel: () => <div data-testid="lore-panel" />,
@@ -342,7 +342,7 @@ function renderReadyGame(history = fakeChatHistory) {
   });
 }
 
-function renderReadyGameWithWorld(worldData: typeof fakeWorldData, history = fakeChatHistory) {
+function renderReadyGameWithWorld(worldData: unknown, history = fakeChatHistory) {
   mockedGetActive.mockResolvedValue(fakeCampaign as never);
   mockedChatHistory.mockResolvedValue(history as never);
   mockedGetWorld.mockResolvedValue(worldData as never);
@@ -444,9 +444,29 @@ describe("GamePage", () => {
     });
   });
 
+  it("still requests opening scene generation when history only contains factual lookup assistant entries", async () => {
+    mockedChatOpening.mockResolvedValue(createStreamResponse() as never);
+
+    await renderReadyGame({
+      messages: [
+        { role: "user" as const, content: "/lookup character: Satoru Gojo" },
+        {
+          role: "assistant" as const,
+          content: "[Lookup: character_canon_fact] Gojo remains sealed until the Prison Realm opens.",
+        },
+      ],
+      premise: "A dark world",
+      hasLiveTurnSnapshot: false,
+    });
+
+    await waitFor(() => {
+      expect(mockedChatOpening).toHaveBeenCalledWith(fakeCampaign.id);
+    });
+  });
+
   it("shows opening progress separately from finalizing while the first scene is being generated", async () => {
     mockedChatOpening.mockResolvedValue(createStreamResponse() as never);
-    let releaseOpening: (() => void) | null = null;
+    let releaseOpening: (() => void) | undefined;
     mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
       handlers.onSceneSettling?.({ phase: "opening-hidden-pass", opening: true });
       await new Promise<void>((resolve) => {
@@ -472,7 +492,9 @@ describe("GamePage", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText("The world is still resolving. Retry and undo unlock when the turn is complete.")).not.toBeInTheDocument();
 
-    releaseOpening?.();
+    if (releaseOpening) {
+      releaseOpening();
+    }
 
     await waitFor(() => {
       expect(screen.getByText("Lanternlight cuts across the market.")).toBeInTheDocument();
@@ -537,7 +559,7 @@ describe("GamePage", () => {
       ],
     };
 
-    await renderReadyGameWithWorld(worldData as typeof fakeWorldData);
+    await renderReadyGameWithWorld(worldData);
 
     expect(screen.getByTestId("location-people-count")).toHaveTextContent("1");
     expect(screen.getByTestId("location-people-names")).toHaveTextContent("Nobara Kugisaki");
@@ -745,6 +767,81 @@ describe("GamePage", () => {
     });
   });
 
+  it("routes slash compare requests through chatLookup and keeps the live assistant message on the persisted compare contract", async () => {
+    await renderReadyGame();
+    mockedChatLookup.mockResolvedValue(createStreamResponse() as never);
+    mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
+      (handlers as typeof handlers & {
+        onLookupResult?: (result: {
+          answer: string;
+          lookupKind: string;
+          subject: string;
+        }) => void;
+      }).onLookupResult?.({
+        lookupKind: "power_profile",
+        subject: "Satoru Gojo",
+        answer: "Gojo controls spacing more cleanly, while Sukuna brings the harsher finishing ceiling.",
+      });
+      handlers.onDone();
+    });
+
+    fireEvent.change(screen.getByLabelText("Action input"), {
+      target: { value: "/compare Satoru Gojo vs Ryomen Sukuna" },
+    });
+    fireEvent.click(screen.getByText("Submit action"));
+
+    await waitFor(() => {
+      expect(mockedChatLookup).toHaveBeenCalledWith(fakeCampaign.id, {
+        lookupKind: "power_profile",
+        subject: "Satoru Gojo",
+        compareAgainst: "Ryomen Sukuna",
+      });
+    });
+
+    await waitFor(() => {
+      const renderedCompareState = narrativeLogMessageSnapshots.some((snapshot) =>
+        JSON.stringify(snapshot) === JSON.stringify([
+          "Look around",
+          "You see a bustling town square.",
+          "/compare Satoru Gojo vs Ryomen Sukuna",
+          "[Lookup: compare] Gojo controls spacing more cleanly, while Sukuna brings the harsher finishing ceiling.",
+        ]));
+
+      expect(renderedCompareState).toBe(true);
+    });
+  });
+
+  it("rehydrates persisted lookup and compare history alongside their raw slash-command user messages after reload", async () => {
+    await renderReadyGame({
+      messages: [
+        { role: "user" as const, content: "/lookup character: Satoru Gojo" },
+        {
+          role: "assistant" as const,
+          content: "[Lookup: character_canon_fact] Gojo remains sealed until the Prison Realm opens.",
+        },
+        { role: "user" as const, content: "/compare Satoru Gojo vs Ryomen Sukuna" },
+        {
+          role: "assistant" as const,
+          content: "[Lookup: compare] Gojo controls spacing more cleanly, while Sukuna brings the harsher finishing ceiling.",
+        },
+      ],
+      premise: "A dark world",
+      hasLiveTurnSnapshot: false,
+    });
+
+    await waitFor(() => {
+      const renderedReloadState = narrativeLogMessageSnapshots.some((snapshot) =>
+        JSON.stringify(snapshot) === JSON.stringify([
+          "/lookup character: Satoru Gojo",
+          "[Lookup: character_canon_fact] Gojo remains sealed until the Prison Realm opens.",
+          "/compare Satoru Gojo vs Ryomen Sukuna",
+          "[Lookup: compare] Gojo controls spacing more cleanly, while Sukuna brings the harsher finishing ceiling.",
+        ]));
+
+      expect(renderedReloadState).toBe(true);
+    });
+  });
+
   it("shows Raw reasoning under the current assistant message only when settings.ui.showRawReasoning is enabled", async () => {
     mockUseSettings.mockReturnValue({
       settings: {
@@ -756,7 +853,7 @@ describe("GamePage", () => {
       save: vi.fn(),
     });
     mockedChatOpening.mockResolvedValue(createStreamResponse() as never);
-    let releaseOpening: (() => void) | null = null;
+    let releaseOpening: (() => void) | undefined;
     mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
       await new Promise<void>((resolve) => {
         releaseOpening = () => {
@@ -781,7 +878,9 @@ describe("GamePage", () => {
       expect(mockedParseTurnSSE).toHaveBeenCalledTimes(1);
     });
 
-    releaseOpening?.();
+    if (releaseOpening) {
+      releaseOpening();
+    }
 
     await waitFor(() => {
       const latestNarrativeLog = getLatestNarrativeLogProps();
@@ -799,7 +898,7 @@ describe("GamePage", () => {
 
   it("does not show Raw reasoning when the persisted toggle is off even if a reasoning event arrives", async () => {
     mockedChatOpening.mockResolvedValue(createStreamResponse() as never);
-    let releaseOpening: (() => void) | null = null;
+    let releaseOpening: (() => void) | undefined;
     mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
       await new Promise<void>((resolve) => {
         releaseOpening = () => {
@@ -824,7 +923,9 @@ describe("GamePage", () => {
       expect(mockedParseTurnSSE).toHaveBeenCalledTimes(1);
     });
 
-    releaseOpening?.();
+    if (releaseOpening) {
+      releaseOpening();
+    }
 
     await waitFor(() => {
       const latestNarrativeLog = getLatestNarrativeLogProps();
@@ -885,13 +986,13 @@ describe("GamePage", () => {
       },
     };
 
-    await renderReadyGameWithWorld(worldData as typeof fakeWorldData);
+    await renderReadyGameWithWorld(worldData);
 
     await waitFor(() => {
       expect(mockCharacterPanel).toHaveBeenCalled();
     });
 
-    const lastCall = mockCharacterPanel.mock.calls.at(-1)?.[0] as {
+    const lastCall = (mockCharacterPanel.mock.calls.at(-1)?.[0] ?? {}) as {
       carriedItems?: Array<{ id: string; name: string }>;
       equippedItems?: Array<{ id: string; name: string }>;
       items?: Array<{ id: string; name: string }>;
@@ -912,7 +1013,7 @@ describe("GamePage", () => {
     await renderReadyGame();
     mockedChatAction.mockResolvedValue(createStreamResponse() as never);
 
-    let finishTurn: (() => void) | null = null;
+    let finishTurn: (() => void) | undefined;
     mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
       handlers.onNarrative("The gate shudders open.");
       handlers.onQuickActions([{ label: "Press forward", action: "Press forward" }]);
@@ -937,7 +1038,9 @@ describe("GamePage", () => {
     expect(screen.queryByText("The storyteller is weaving the scene...")).not.toBeInTheDocument();
     expect(screen.getByText("Submit action")).toBeDisabled();
 
-    finishTurn?.();
+    if (finishTurn) {
+      finishTurn();
+    }
     await waitFor(() => {
       expect(screen.getByText("Retry turn")).toBeInTheDocument();
     });
@@ -947,7 +1050,7 @@ describe("GamePage", () => {
     await renderReadyGame();
     mockedChatAction.mockResolvedValue(createStreamResponse() as never);
 
-    let releaseDone: (() => void) | null = null;
+    let releaseDone: (() => void) | undefined;
     mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
       handlers.onNarrative("The scouts return.");
       handlers.onQuickActions([{ label: "Ask for details", action: "Ask for details" }]);
@@ -968,7 +1071,9 @@ describe("GamePage", () => {
     });
     expect(screen.queryByText("Ask for details")).not.toBeInTheDocument();
 
-    releaseDone?.();
+    if (releaseDone) {
+      releaseDone();
+    }
 
     await waitFor(() => {
       expect(screen.getByText("Ask for details")).toBeInTheDocument();
@@ -1005,7 +1110,7 @@ describe("GamePage", () => {
         travelCost: 2,
         tickAdvance: 2,
         path: ["Town Square", "Moonlit Path", "Dark Forest"],
-      });
+      } as never);
       handlers.onDone();
     });
 

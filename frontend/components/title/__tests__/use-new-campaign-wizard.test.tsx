@@ -77,9 +77,9 @@ const SETTINGS: Settings = {
   storyteller: { providerId: "generator", model: "test-model", temperature: 0.8, maxTokens: 256 },
   generator: { providerId: "generator", model: "test-model", temperature: 0.8, maxTokens: 256 },
   embedder: { providerId: "generator", model: "test-model", temperature: 0, maxTokens: 64 },
-  fallback: { providerId: "", model: "", timeoutMs: 1000, retryCount: 0 },
   images: { providerId: "", model: "", stylePrompt: "", enabled: false },
   research: { enabled: true, maxSearchSteps: 3, searchProvider: "duckduckgo" },
+  ui: { showRawReasoning: false },
 };
 
 const LIBRARY_ITEMS: WorldbookLibraryItem[] = [

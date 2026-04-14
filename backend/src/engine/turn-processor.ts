@@ -75,7 +75,6 @@ export interface TurnOptions {
   storytellerTemperature: number;
   storytellerMaxTokens: number;
   embedderResult?: ResolveResult;
-  fallbackProvider?: ProviderConfig | null;
   contextWindow?: number;
   openingScene?: boolean;
   onBeforeVisibleNarration?: (summary: HiddenTurnSummary) => void | Promise<void>;
@@ -88,7 +87,6 @@ export interface OpeningSceneOptions {
   storytellerTemperature: number;
   storytellerMaxTokens: number;
   embedderResult?: ResolveResult;
-  fallbackProvider?: ProviderConfig | null;
   contextWindow?: number;
 }
 
@@ -575,7 +573,6 @@ function normalizeReasoningText(reasoningText: string | undefined): string | und
 async function runVisibleNarrationWithGuard(args: {
   label: "final" | "opening";
   provider: ProviderConfig;
-  fallbackProvider?: ProviderConfig | null;
   system: string;
   prompt: string;
   storytellerTemperature: number;
@@ -589,7 +586,6 @@ async function runVisibleNarrationWithGuard(args: {
   const {
     label,
     provider,
-    fallbackProvider,
     system,
     prompt,
     storytellerTemperature,
@@ -609,28 +605,7 @@ async function runVisibleNarrationWithGuard(args: {
     });
   }
 
-  let activeProvider = provider;
-  let initialResult;
-  try {
-    initialResult = await runNarrationPass(activeProvider, prompt);
-  } catch (error) {
-    if (!fallbackProvider) {
-      throw new Error(
-        label === "opening"
-          ? "Opening scene generation failed before visible narration could be produced."
-          : "Final visible narration failed after authoritative scene settlement.",
-      );
-    }
-
-    log.warn(
-      label === "opening"
-        ? "Opening scene generation failed, retrying with fallback provider"
-        : "Final narration pass failed, retrying with fallback provider",
-      error,
-    );
-    activeProvider = fallbackProvider;
-    initialResult = await runNarrationPass(activeProvider, prompt);
-  }
+  const initialResult = await runNarrationPass(provider, prompt);
 
   const initialText = applyVisibleNarrationFilters(initialResult.text);
   const initialReasoningText = normalizeReasoningText(initialResult.reasoningText);
@@ -647,7 +622,7 @@ async function runVisibleNarrationWithGuard(args: {
   const retryPrompt = `${prompt}${buildVisibleNarrationRetryAddendum(initialFailures)}`;
 
   try {
-    const retryResult = await runNarrationPass(activeProvider, retryPrompt);
+    const retryResult = await runNarrationPass(provider, retryPrompt);
     const retryText = applyVisibleNarrationFilters(retryResult.text);
     const retryReasoningText = normalizeReasoningText(retryResult.reasoningText);
     const retryFailures = detectVisibleNarrationFailures(retryText, { system, prompt });
@@ -682,50 +657,6 @@ const OUTCOME_INSTRUCTIONS: Record<string, string> = {
   miss: "The player FAILED. Narrate the failure clearly and unambiguously. In combat: the attack misses or is blocked and the opposition seizes the initiative. Persuasion miss means refusal, dismissal, or hostility. Search miss means nothing useful is found or new danger is stirred up. Information miss means the answer is blocked, false, or dangerously incomplete. NEVER narrate the NPC being 'intrigued', 'persuaded', 'considering', or 'impressed' on a miss. The failure must be OBVIOUS to the reader. Include concrete consequences. If HP reaches 0 during the consequence, narrate the death/defeat/KO outcome immediately and do not continue the fight.",
 };
 
-// -- Fallback quick actions ---------------------------------------------------
-
-interface SceneInfo {
-  locationName: string;
-  npcNames: string[];
-}
-
-/**
- * Build 3 contextual quick action suggestions as a server-side fallback
- * when the Storyteller fails to call offer_quick_actions.
- */
-function buildFallbackQuickActions(
-  playerAction: string,
-  outcomeTier: string,
-  context: SceneInfo,
-): Array<{ label: string; action: string }> {
-  const actions: Array<{ label: string; action: string }> = [];
-
-  // 1. NPC interaction (if NPCs present) or exploration
-  if (context.npcNames.length > 0) {
-    const npc = context.npcNames[0]!;
-    actions.push({ label: `Talk to ${npc}`, action: `Talk to ${npc}` });
-  } else {
-    actions.push({ label: "Call out", action: "Call out to see if anyone is nearby" });
-  }
-
-  // 2. Always: observation/exploration
-  actions.push({
-    label: "Look around",
-    action: `Look around ${context.locationName || "the area"} for anything noteworthy`,
-  });
-
-  // 3. Outcome-based suggestion
-  if (outcomeTier === "miss") {
-    actions.push({ label: "Try again carefully", action: "Try again, this time more carefully" });
-  } else if (outcomeTier === "strong_hit") {
-    actions.push({ label: "Press the advantage", action: "Press the advantage and continue forward" });
-  } else {
-    actions.push({ label: "Proceed cautiously", action: "Proceed cautiously, staying alert" });
-  }
-
-  return actions;
-}
-
 // -- Main processor -----------------------------------------------------------
 
 export async function* processTurn(
@@ -741,7 +672,6 @@ export async function* processTurn(
     storytellerTemperature,
     storytellerMaxTokens,
     embedderResult,
-    fallbackProvider,
     contextWindow = 8192,
     onPostTurn,
   } = options;
@@ -919,8 +849,7 @@ export async function* processTurn(
       environmentTags,
       sceneContext,
     },
-    judgeProvider,
-    fallbackProvider ?? null
+    judgeProvider
   );
 
   yield { type: "oracle_result", data: oracleResult };
@@ -1044,55 +973,7 @@ export async function* processTurn(
       yield event;
     }
   } catch (hiddenPassError) {
-    if (!fallbackProvider) {
-      throw new Error("Hidden tool-driving pass failed before visible narration could be generated.");
-    }
-
-    log.warn("Hidden storyteller pass failed, retrying with fallback provider", hiddenPassError);
-    hiddenNarrative = "";
-    quickActionsEmitted = false;
-    toolCallResults.length = 0;
-    for (const event of await runHiddenPassWithModel(fallbackProvider)) {
-      yield event;
-    }
-  }
-
-  // 9. Fallback quick actions if Storyteller didn't call offer_quick_actions.
-  if (!quickActionsEmitted) {
-    // Gather NPC names at player's current location for contextual suggestions
-    let locationName = "";
-    const npcNames: string[] = [];
-    try {
-      const fallbackLocationId = successfulTravel?.locationId ?? player?.currentLocationId ?? null;
-      if (fallbackLocationId) {
-        const loc = db
-          .select()
-          .from(locations)
-          .where(eq(locations.id, fallbackLocationId))
-          .get();
-        if (loc) locationName = loc.name;
-
-        const { npcs } = await import("../db/schema.js");
-        const presentNpcs = db
-          .select({ name: npcs.name })
-          .from(npcs)
-          .where(eq(npcs.currentLocationId, fallbackLocationId))
-          .all();
-        for (const npc of presentNpcs) {
-          npcNames.push(npc.name);
-        }
-      }
-    } catch {
-      // Best-effort — fallback works even without NPC data
-    }
-
-    const fallbackActions = buildFallbackQuickActions(
-      playerAction,
-      oracleResult.outcome,
-      { locationName, npcNames },
-    );
-    log.info("Storyteller omitted offer_quick_actions — using server-side fallback");
-    yield { type: "quick_actions", data: { success: true, result: { actions: fallbackActions } } };
+    throw new Error("Hidden tool-driving pass failed before visible narration could be generated.");
   }
 
   // 10c. Reactive auto-checkpoint if HP dropped to danger zone (2 or below) during turn
@@ -1187,7 +1068,6 @@ export async function* processTurn(
   const finalNarration = await runVisibleNarrationWithGuard({
     label: "final",
     provider: storytellerProvider,
-    fallbackProvider,
     system: finalNarrationPrompt.system,
     prompt: finalNarrationPrompt.prompt,
     storytellerTemperature,
@@ -1276,7 +1156,6 @@ export async function* processOpeningScene(
     storytellerTemperature,
     storytellerMaxTokens,
     embedderResult,
-    fallbackProvider,
     contextWindow = 8192,
   } = options;
 
@@ -1324,7 +1203,6 @@ export async function* processOpeningScene(
   const openingNarration = await runVisibleNarrationWithGuard({
     label: "opening",
     provider: storytellerProvider,
-    fallbackProvider,
     system: finalNarrationPrompt.system,
     prompt: finalNarrationPrompt.prompt,
     storytellerTemperature,

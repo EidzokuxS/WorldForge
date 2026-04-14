@@ -154,6 +154,7 @@ export function toEditableScaffold(
           : ""),
         factionName: draftNpc?.factionName ?? npcFaction.get(npc.name) ?? null,
         tier,
+        characterRecord: npc.characterRecord ?? null,
         ...(draft ? { draft } : {}),
       };
     }),
