@@ -52,6 +52,8 @@ vi.mock("../../campaign/index.js", () => ({
   loadIpContext: vi.fn(() => null),
   savePremiseDivergence: vi.fn(),
   loadPremiseDivergence: vi.fn(() => null),
+  saveWorldgenResearchFrame: vi.fn(),
+  loadWorldgenResearchFrame: vi.fn(() => null),
   getActiveCampaign: vi.fn(),
   loadCampaign: vi.fn(),
 }));
@@ -68,10 +70,6 @@ vi.mock("../../settings/index.js", () => ({
 vi.mock("../../ai/index.js", () => ({
   resolveRoleModel: vi.fn(),
   createModel: vi.fn(),
-}));
-
-vi.mock("../../ai/with-model-fallback.js", () => ({
-  resolveFallbackProvider: vi.fn(),
 }));
 
 vi.mock("../../lib/index.js", () => ({
@@ -123,11 +121,12 @@ import {
   loadIpContext,
   savePremiseDivergence,
   loadPremiseDivergence,
+  saveWorldgenResearchFrame,
+  loadWorldgenResearchFrame,
 } from "../../campaign/index.js";
 import { deleteCampaignLore, storeLoreCards } from "../../vectors/lore-cards.js";
 import { loadSettings } from "../../settings/index.js";
 import { resolveRoleModel } from "../../ai/index.js";
-import { resolveFallbackProvider } from "../../ai/with-model-fallback.js";
 import {
   researchKnownIP,
   evaluateResearchSufficiency,
@@ -150,11 +149,12 @@ const mockedSaveIpContext = vi.mocked(saveIpContext);
 const mockedLoadIpContext = vi.mocked(loadIpContext);
 const mockedSavePremiseDivergence = vi.mocked(savePremiseDivergence);
 const mockedLoadPremiseDivergence = vi.mocked(loadPremiseDivergence);
+const mockedSaveWorldgenResearchFrame = vi.mocked(saveWorldgenResearchFrame);
+const mockedLoadWorldgenResearchFrame = vi.mocked(loadWorldgenResearchFrame);
 const mockedDeleteLore = vi.mocked(deleteCampaignLore);
 const mockedStoreLore = vi.mocked(storeLoreCards);
 const mockedLoadSettings = vi.mocked(loadSettings);
 const mockedResolveRoleModel = vi.mocked(resolveRoleModel);
-const mockedResolveFallback = vi.mocked(resolveFallbackProvider);
 const mockedResearchKnownIP = vi.mocked(researchKnownIP);
 const mockedEvaluateResearchSufficiency = vi.mocked(evaluateResearchSufficiency);
 const mockedParseWorldBook = vi.mocked(parseWorldBook);
@@ -184,9 +184,9 @@ const fakeSettings = {
   storyteller: { providerId: "p1", model: "m1", temperature: 0.8, maxTokens: 1024 },
   judge: { providerId: "p1", model: "m1", temperature: 0, maxTokens: 512 },
   embedder: { providerId: "p1", model: "m1", temperature: 0, maxTokens: 512 },
-  fallback: { providerId: "", model: "", timeoutMs: 30000, retryCount: 2 },
   images: { providerId: "", model: "", stylePrompt: "", enabled: false },
   research: { enabled: false, maxSearchSteps: 3 },
+  ui: { showRawReasoning: false },
 } as any;
 
 const fakeResolvedRole = {
@@ -199,7 +199,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockedLoadSettings.mockReturnValue(fakeSettings);
   mockedResolveRoleModel.mockReturnValue(fakeResolvedRole as any);
-  mockedResolveFallback.mockReturnValue(null as any);
   mockedGetActiveCampaign.mockReturnValue({
     id: CAMPAIGN_ID,
     name: "Test Campaign",
@@ -307,8 +306,7 @@ describe("POST /api/worldgen/suggest-seeds", () => {
     );
   });
 
-  it("accepts empty premise and lets the route apply its fallback premise", async () => {
-    mockedSuggestWorldSeeds.mockResolvedValue({ seeds: { geography: "Ruins" } } as any);
+  it("rejects empty premise when no world knowledge context is available", async () => {
 
     const res = await app.request("/api/worldgen/suggest-seeds", {
       method: "POST",
@@ -316,12 +314,11 @@ describe("POST /api/worldgen/suggest-seeds", () => {
       body: JSON.stringify({ premise: "   " }),
     });
 
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.geography).toBe("Ruins");
-    expect(mockedSuggestWorldSeeds).toHaveBeenCalledWith(
-      expect.objectContaining({ premise: "An original fantasy world" })
-    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: "Premise is required when no world knowledge context is available.",
+    });
+    expect(mockedSuggestWorldSeeds).not.toHaveBeenCalled();
   });
 
   it("returns a hidden _premiseDivergence artifact from suggestWorldSeeds", async () => {
@@ -465,6 +462,69 @@ describe("POST /api/worldgen/suggest-seed", () => {
 // POST /api/worldgen/generate
 // ---------------------------------------------------------------------------
 describe("POST /api/worldgen/generate", () => {
+  it("builds and persists a worldgen research frame from cached ipContext, divergence, and seeds", async () => {
+    const ipContext = {
+      franchise: "Jujutsu Kaisen",
+      keyFacts: ["Shibuya is a major Tokyo district."],
+      tonalNotes: ["Urban occult action"],
+      source: "mcp" as const,
+    };
+    const premiseDivergence = {
+      mode: "diverged",
+      protagonistRole: {
+        kind: "custom",
+        interpretation: "outsider",
+        canonicalCharacterName: null,
+        roleSummary: "The player arrives as an outsider with a Naruto-style power overlay.",
+      },
+      preservedCanonFacts: ["Shibuya remains an active cursed-energy hotspot."],
+      changedCanonFacts: ["Chakra techniques now coexist with cursed techniques."],
+      currentStateDirectives: ["Treat chakra-capable outsiders as part of the live power ecosystem."],
+      ambiguityNotes: [],
+    };
+
+    mockedLoadIpContext.mockReturnValue(ipContext as any);
+    mockedLoadPremiseDivergence.mockReturnValue(premiseDivergence as any);
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "Shibuya burns under two intertwined power systems.",
+        locations: [{ name: "Shibuya", description: "District", tags: [], isStarting: true, connectedTo: [] }],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(mockedSaveWorldgenResearchFrame).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      expect.objectContaining({
+        franchise: "Jujutsu Kaisen",
+        divergenceMode: "diverged",
+        dnaConstraints: expect.arrayContaining(["Geography: Mountains"]),
+      }),
+    );
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({
+        researchFrame: expect.objectContaining({
+          franchise: "Jujutsu Kaisen",
+          stepFocus: expect.objectContaining({
+            locations: expect.arrayContaining([expect.stringContaining("Geography: Mountains")]),
+          }),
+        }),
+      }),
+      expect.any(Function),
+    );
+  });
+
   it("computes premiseDivergence once during generate and reuses the cached artifact during later regeneration", async () => {
     const ipContext = {
       franchise: "Voices of the Void",
@@ -914,6 +974,157 @@ describe("POST /api/worldgen/save-edits", () => {
     loreCards: [],
   };
 
+  function buildDraftBackedNpcEditConvergencePayload() {
+    return {
+      name: "Marshal Selene Voss",
+      persona: "Now leads from the front and trusts the village scouts.",
+      tags: ["strategist", "scarred", "field medic"],
+      goals: {
+        shortTerm: ["Fortify the village", "Brief the scouts"],
+        longTerm: ["Keep the refugees alive", "Break the siege"],
+      },
+      locationName: "Village",
+      factionName: "Free Company",
+      tier: "supporting" as const,
+      // The visible card fields above are the user's latest edits; the nested
+      // draft intentionally carries stale pre-edit values from the audited bug.
+      draft: {
+        identity: {
+          role: "npc" as const,
+          tier: "key" as const,
+          displayName: "Captain Aldric",
+          canonicalStatus: "imported" as const,
+          baseFacts: {
+            biography: "A veteran commander from the old garrison.",
+            socialRole: ["Commander"],
+            hardConstraints: ["Never abandon the walls"],
+          },
+          behavioralCore: {
+            motives: ["Hold the castle"],
+            pressureResponses: ["Digs in under pressure"],
+            taboos: ["Leaving civilians behind"],
+            attachments: ["The old garrison banner"],
+            selfImage: "A stern commander who never bends.",
+          },
+          liveDynamics: {
+            activeGoals: ["Defend the gate"],
+            beliefDrift: ["Order must come first"],
+            currentStrains: ["Haunted by the last siege"],
+            earnedChanges: ["Kept the garrison standing"],
+          },
+        },
+        profile: {
+          species: "Human",
+          gender: "",
+          ageText: "",
+          appearance: "",
+          backgroundSummary: "A veteran commander from the old garrison.",
+          personaSummary: "A stern commander who never bends.",
+        },
+        socialContext: {
+          factionId: null,
+          factionName: "Iron Guard",
+          homeLocationId: null,
+          homeLocationName: null,
+          currentLocationId: null,
+          currentLocationName: "Castle",
+          relationshipRefs: [],
+          socialStatus: [],
+          originMode: "resident" as const,
+        },
+        motivations: {
+          shortTermGoals: ["Defend the gate"],
+          longTermGoals: ["Hold the castle"],
+          beliefs: ["Order must come first"],
+          drives: ["Hold the castle"],
+          frictions: ["Haunted by the last siege"],
+        },
+        capabilities: {
+          traits: ["Veteran"],
+          skills: [{ name: "Tactics", tier: "Skilled" as const }],
+          flaws: [],
+          specialties: [],
+          wealthTier: null,
+        },
+        state: {
+          hp: 5,
+          conditions: [],
+          statusFlags: [],
+          activityState: "active",
+        },
+        loadout: {
+          inventorySeed: [],
+          equippedItemRefs: [],
+          currencyNotes: "",
+          signatureItems: [],
+        },
+        startConditions: {},
+        provenance: {
+          sourceKind: "import" as const,
+          importMode: "outsider" as const,
+          templateId: null,
+          archetypePrompt: null,
+          worldgenOrigin: null,
+          legacyTags: ["veteran"],
+        },
+        grounding: {
+          summary: "Imported grounding summary",
+          facts: ["Won the siege of Red Vale"],
+          abilities: ["Organizes shield lines"],
+          constraints: ["Needs supply lines"],
+          signatureMoves: ["Shield wall feint"],
+          strongPoints: ["Battlefield command"],
+          vulnerabilities: ["Overextends to protect civilians"],
+          uncertaintyNotes: ["Some canon beats diverge"],
+          powerProfile: {
+            attack: "Measured",
+            speed: "Average",
+            durability: "High",
+            range: "Short",
+            strengths: ["Discipline"],
+            constraints: ["Needs formation"],
+            vulnerabilities: ["Protective instincts"],
+            uncertaintyNotes: ["Imported card contradicts one war journal"],
+          },
+          sources: [
+            {
+              kind: "card" as const,
+              label: "Import Card",
+              excerpt: "Old card excerpt",
+            },
+          ],
+        },
+        sourceBundle: {
+          canonSources: [
+            {
+              kind: "canon" as const,
+              label: "War Journal",
+              excerpt: "Captain Aldric held the walls.",
+            },
+          ],
+          secondarySources: [
+            {
+              kind: "card" as const,
+              label: "Import Card",
+              excerpt: "Old card excerpt",
+            },
+          ],
+          synthesis: {
+            owner: "worldforge",
+            strategy: "worldforge-owned-synthesis",
+            notes: ["Preserve canon-facing metadata across edit convergence."],
+          },
+        },
+        continuity: {
+          identityInertia: "anchored" as const,
+          protectedCore: ["identity.baseFacts", "identity.behavioralCore"],
+          mutableSurface: ["identity.liveDynamics"],
+          changePressureNotes: ["Only visible shallow card edits should change here."],
+        },
+      },
+    };
+  }
+
   it("calls saveScaffoldToDb and markGenerationComplete", async () => {
     mockedSaveScaffoldToDb.mockReturnValue(undefined as any);
     mockedMarkGenComplete.mockReturnValue(undefined as any);
@@ -932,6 +1143,77 @@ describe("POST /api/worldgen/save-edits", () => {
     expect(body).toEqual({ ok: true });
     expect(mockedSaveScaffoldToDb).toHaveBeenCalledWith(CAMPAIGN_ID, validScaffold);
     expect(mockedMarkGenComplete).toHaveBeenCalledWith(CAMPAIGN_ID, "A refined dark world");
+  });
+
+  it("draft-backed NPC edit convergence preserves visible shallow edits across the save/load/world-payload round-trip at the route boundary", async () => {
+    mockedSaveScaffoldToDb.mockReturnValue(undefined as any);
+    mockedMarkGenComplete.mockReturnValue(undefined as any);
+    mockedDeleteLore.mockResolvedValue(undefined as any);
+    mockedExtractLoreCards.mockResolvedValue([] as any);
+    mockedStoreLore.mockResolvedValue(undefined as any);
+
+    const res = await app.request("/api/worldgen/save-edits", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        scaffold: {
+          ...validScaffold,
+          npcs: [buildDraftBackedNpcEditConvergencePayload()],
+        },
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(mockedSaveScaffoldToDb).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      expect.objectContaining({
+        npcs: [
+          expect.objectContaining({
+            name: "Marshal Selene Voss",
+            persona: "Now leads from the front and trusts the village scouts.",
+            tags: ["strategist", "scarred", "field medic"],
+            goals: {
+              shortTerm: ["Fortify the village", "Brief the scouts"],
+              longTerm: ["Keep the refugees alive", "Break the siege"],
+            },
+            locationName: "Village",
+            factionName: "Free Company",
+            tier: "supporting",
+            draft: expect.objectContaining({
+              identity: expect.objectContaining({
+                displayName: "Marshal Selene Voss",
+                tier: "supporting",
+              }),
+              profile: expect.objectContaining({
+                personaSummary: "Now leads from the front and trusts the village scouts.",
+              }),
+              socialContext: expect.objectContaining({
+                currentLocationName: "Village",
+                factionName: "Free Company",
+              }),
+              motivations: expect.objectContaining({
+                shortTermGoals: ["Fortify the village", "Brief the scouts"],
+                longTermGoals: ["Keep the refugees alive", "Break the siege"],
+              }),
+              grounding: expect.objectContaining({
+                summary: "Imported grounding summary",
+              }),
+              sourceBundle: expect.objectContaining({
+                canonSources: [
+                  expect.objectContaining({
+                    label: "War Journal",
+                  }),
+                ],
+              }),
+              continuity: expect.objectContaining({
+                identityInertia: "anchored",
+              }),
+            }),
+          }),
+        ],
+      }),
+    );
   });
 
   it("normalizes draft-backed supporting NPC payloads without tier regression", async () => {
@@ -1544,6 +1826,10 @@ describe("POST /api/worldgen/regenerate-section", () => {
         zaiApiKey: undefined,
         llmProvider: fakeResolvedRole.provider,
       },
+      expect.objectContaining({
+        franchise: "Naruto",
+        divergenceMode: "diverged",
+      }),
     );
     expect(mockedGenerateLocations).toHaveBeenCalledWith(
       expect.anything(),
@@ -1595,6 +1881,15 @@ describe("POST /api/worldgen/regenerate-section", () => {
     const body = await res.json();
     expect(body).toEqual({ npcs });
     expect(mockedGenerateNpcs).toHaveBeenCalled();
+    const args = mockedGenerateNpcs.mock.calls[0];
+    expect(args?.[0]).toEqual(
+      expect.objectContaining({
+        research: fakeSettings.research,
+      }),
+    );
+    expect(args?.[1]).toBe("A dark world");
+    expect(args?.[2]).toEqual(["Castle"]);
+    expect(args?.[3]).toEqual(["Rebels"]);
   });
 
   it("returns 400 for unknown section", async () => {

@@ -44,35 +44,31 @@ const HTTP_MCP_CONFIGS: Partial<Record<SearchProvider, HttpMcpConfig>> = {
 };
 
 /**
- * Runs `fn` with DuckDuckGo MCP tools, falling back to `fallbackFn` on any
- * error (timeout, transport failure, etc.). The MCP client is always closed.
+ * Runs `fn` with DuckDuckGo MCP tools. Errors are propagated; callers decide
+ * how to surface or handle absence explicitly.
  *
  * @deprecated Use `withSearchMcp` for configurable search provider support.
  */
 export async function withMcpClient<T>(
   fn: (tools: ToolSet) => Promise<T>,
-  fallbackFn: () => Promise<T>,
 ): Promise<T> {
-  return withSearchMcp("duckduckgo", fn, fallbackFn);
+  return withSearchMcp("duckduckgo", fn);
 }
 
 /**
- * Runs `fn` with search MCP tools from the specified provider, falling back
- * to `fallbackFn` on any error (timeout, transport failure, etc.).
- * The MCP client is always closed.
+ * Runs `fn` with search MCP tools from the specified provider.
+ * The MCP client is always closed. Errors are propagated.
  */
 export async function withSearchMcp<T>(
   provider: SearchProvider,
   fn: (tools: ToolSet) => Promise<T>,
-  fallbackFn: () => Promise<T>,
   apiKey?: string,
 ): Promise<T> {
   const httpConfig = HTTP_MCP_CONFIGS[provider];
   const stdioConfig = STDIO_MCP_CONFIGS[provider];
 
   if (!httpConfig && !stdioConfig) {
-    log.warn(`No MCP config for provider "${provider}", using fallback`);
-    return fallbackFn();
+    throw new Error(`No MCP config for provider "${provider}"`);
   }
 
   try {
@@ -82,8 +78,7 @@ export async function withSearchMcp<T>(
       // HTTP-based remote MCP (e.g. Z.AI)
       const key = apiKey || process.env[httpConfig.apiKeyEnv] || "";
       if (!key) {
-        log.warn(`MCP[${provider}] requires API key (${httpConfig.apiKeyEnv}), using fallback`);
-        return fallbackFn();
+        throw new Error(`MCP[${provider}] requires API key (${httpConfig.apiKeyEnv})`);
       }
 
       mcpClient = await Promise.race([
@@ -126,7 +121,7 @@ export async function withSearchMcp<T>(
       await mcpClient.close();
     }
   } catch (error) {
-    log.warn(`MCP[${provider}] failed (${(error as Error).message}), using fallback`);
-    return fallbackFn();
+    log.warn(`MCP[${provider}] failed (${(error as Error).message})`);
+    throw error;
   }
 }

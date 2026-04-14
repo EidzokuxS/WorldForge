@@ -6,6 +6,7 @@ import type {
 } from "@worldforge/shared";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import type { WorldSeeds } from "./seed-roller.js";
+import type { WorldgenResearchFrame } from "./research-frame.js";
 
 export interface GenerateScaffoldRequest {
   campaignId: string;
@@ -13,12 +14,12 @@ export interface GenerateScaffoldRequest {
   premise: string;
   seeds?: Partial<WorldSeeds>;
   role: ResolvedRole;
-  /** Optional fallback role for retrying lore extraction when primary model fails. */
-  fallbackRole?: ResolvedRole;
   /** Pre-cached IP research context from suggest-seeds phase. Loaded from config.json. */
   ipContext?: IpResearchContext | null;
   /** Structured divergence interpretation cached beside ipContext. */
   premiseDivergence?: PremiseDivergence | null;
+  /** Persisted worldgen research frame used to steer task-specific follow-up research. */
+  researchFrame?: WorldgenResearchFrame | null;
   /** Research config for sufficiency checks — provider + API keys. */
   research?: ResearchConfig;
   /** Optional Judge role for inter-stage validation. If not provided, validation is skipped. */

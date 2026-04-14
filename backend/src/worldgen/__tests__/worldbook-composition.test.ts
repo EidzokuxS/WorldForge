@@ -173,7 +173,7 @@ describe("composeWorldbookLibraryRecords", () => {
     // Second call: filterRelevantEntries — keep only 3 of 10
     mockSafeGenerateObject.mockResolvedValueOnce({
       object: {
-        relevantEntries: ["SCP-100", "SCP-103", "SCP-107"],
+        relevantIndices: [0, 3, 7],
         reasoning: "These three relate to the void theme",
       },
     });
@@ -198,7 +198,7 @@ describe("composeWorldbookLibraryRecords", () => {
     expect(mockSafeGenerateObject).toHaveBeenCalledTimes(2);
   });
 
-  it("filter failure falls back to including all supplementary entries", async () => {
+  it("fails closed when supplementary relevance filtering fails", async () => {
     const primary = buildRecord({
       id: "wb-primary",
       displayName: "Alpha Archive",
@@ -222,16 +222,12 @@ describe("composeWorldbookLibraryRecords", () => {
     // Second call: filterRelevantEntries throws
     mockSafeGenerateObject.mockRejectedValueOnce(new Error("LLM unavailable"));
 
-    const result = await composeWorldbookLibraryRecords(
-      [primary, supplementary],
-      "A campaign in the Alpha Archive world",
-    );
-
-    // All entries included (fallback behavior)
-    expect(result.ipContext.keyFacts).toHaveLength(3);
-    expect(result.ipContext.keyFacts).toContainEqual(expect.stringContaining("Hero"));
-    expect(result.ipContext.keyFacts).toContainEqual(expect.stringContaining("Villain"));
-    expect(result.ipContext.keyFacts).toContainEqual(expect.stringContaining("Sidekick"));
+    await expect(
+      composeWorldbookLibraryRecords(
+        [primary, supplementary],
+        "A campaign in the Alpha Archive world",
+      ),
+    ).rejects.toThrow("Failed to filter supplementary worldbook entries.");
   });
 
   it("single worldbook skips filtering entirely", async () => {
@@ -282,7 +278,7 @@ describe("composeWorldbookLibraryRecords", () => {
     // filterRelevantEntries returns only 1 Norse entry
     mockSafeGenerateObject.mockResolvedValueOnce({
       object: {
-        relevantEntries: ["Odin"],
+        relevantIndices: [0],
         reasoning: "Odin parallels Arthur as a wise king figure",
       },
     });

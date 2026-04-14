@@ -23,6 +23,7 @@ import {
 import { extractLoreCards } from "./lore-extractor.js";
 import { evaluateResearchSufficiency } from "./ip-researcher.js";
 import { interpretPremiseDivergence } from "./premise-divergence.js";
+import type { WorldgenResearchFrame } from "./research-frame.js";
 import { createLogger } from "../lib/index.js";
 import type { IpResearchContext, PremiseDivergence } from "@worldforge/shared";
 import type { SearchConfig } from "../lib/web-search.js";
@@ -56,6 +57,7 @@ function buildSearchConfig(req: GenerateScaffoldRequest): SearchConfig | undefin
 /** Run sufficiency check if ipContext is available, return enriched context */
 async function checkSufficiency(
   ipContext: IpResearchContext | null,
+  researchFrame: WorldgenResearchFrame | null | undefined,
   step: "locations" | "factions" | "npcs",
   premise: string,
   req: GenerateScaffoldRequest,
@@ -63,7 +65,7 @@ async function checkSufficiency(
   if (!ipContext) return null;
 
   const searchConfig = buildSearchConfig(req);
-  return evaluateResearchSufficiency(ipContext, step, premise, req.role, searchConfig);
+  return evaluateResearchSufficiency(ipContext, step, premise, req.role, searchConfig, researchFrame);
 }
 
 /** Build context block for validation prompts */
@@ -222,7 +224,7 @@ export async function generateWorldScaffold(
   currentStep++;
 
   // Step 1: Locations (with sufficiency check)
-  ipContext = await checkSufficiency(ipContext, "locations", refinedPremise, req);
+  ipContext = await checkSufficiency(ipContext, req.researchFrame, "locations", refinedPremise, req);
   let locations = await generateLocationsStep(
     requestWithDivergence, refinedPremise, ipContext,
     undefined, // additionalInstruction
@@ -250,7 +252,7 @@ export async function generateWorldScaffold(
   const locationNames = locations.map((l) => l.name);
 
   // Step 3: Factions (with sufficiency check)
-  ipContext = await checkSufficiency(ipContext, "factions", refinedPremise, req);
+  ipContext = await checkSufficiency(ipContext, req.researchFrame, "factions", refinedPremise, req);
   let factions = await generateFactionsStep(
     requestWithDivergence, refinedPremise, locationNames, ipContext,
     undefined,
@@ -278,7 +280,7 @@ export async function generateWorldScaffold(
   const factionNames = factions.map((f) => f.name);
 
   // Step 5: NPCs (with sufficiency check)
-  ipContext = await checkSufficiency(ipContext, "npcs", refinedPremise, req);
+  ipContext = await checkSufficiency(ipContext, req.researchFrame, "npcs", refinedPremise, req);
   let npcs = await generateNpcsStep(
     requestWithDivergence, refinedPremise, locationNames, factionNames, ipContext,
     undefined,
@@ -327,7 +329,7 @@ export async function generateWorldScaffold(
   // Step 8: Lore extraction (4 category calls)
   const baseScaffold: WorldScaffold = { refinedPremise, locations, factions, npcs, loreCards: [] as ExtractedLoreCard[] };
   const loreCards = await extractLoreCards(
-    baseScaffold, req.role, req.fallbackRole, ipContext, premiseDivergence,
+    baseScaffold, req.role, ipContext, premiseDivergence,
     onProgress, currentStep, totalSteps,
   );
   log.info(`Extracted ${loreCards.length} lore cards`);

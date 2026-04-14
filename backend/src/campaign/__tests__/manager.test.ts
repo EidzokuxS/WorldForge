@@ -41,6 +41,10 @@ vi.mock("../../vectors/index.js", () => ({
   closeVectorDb: vi.fn(async () => {}),
 }));
 
+vi.mock("../../inventory/index.js", () => ({
+  ensureCampaignInventoryAuthority: vi.fn(),
+}));
+
 vi.mock("../../worldgen/index.js", () => ({
   parseWorldSeeds: vi.fn((s: unknown) => s),
 }));
@@ -79,6 +83,8 @@ import {
   loadIpContext,
   savePremiseDivergence,
   loadPremiseDivergence,
+  saveWorldgenResearchFrame,
+  loadWorldgenResearchFrame,
 } from "../manager.js";
 import { closeDb } from "../../db/index.js";
 import { openVectorDb, closeVectorDb } from "../../vectors/index.js";
@@ -713,6 +719,7 @@ describe("premiseDivergence persistence", () => {
         excludedCharacters: ["Dr. Kel"],
       },
       premiseDivergence,
+      worldgenResearchFrame: undefined,
       personaTemplates: [],
       worldbookSelection: undefined,
       currentTick: undefined,
@@ -753,10 +760,64 @@ describe("premiseDivergence persistence", () => {
       ipContext: cachedIpContext,
       premiseDivergence,
       worldbookSelection,
+      worldgenResearchFrame: undefined,
       personaTemplates: [],
       currentTick: undefined,
       seeds: undefined,
     });
+  });
+});
+
+describe("worldgenResearchFrame persistence", () => {
+  const worldgenResearchFrame = {
+    version: 1 as const,
+    franchise: "Jujutsu Kaisen",
+    premise: "A JJK world with a Naruto power overlay.",
+    divergenceMode: "diverged" as const,
+    overlayNotes: ["Naruto-style chakra techniques coexist with cursed energy use."],
+    dnaConstraints: ["Geography: Shibuya tunnel warzone", "Political Structure: clan-backed sorcerer councils"],
+    stepFocus: {
+      locations: ["Geography: Shibuya tunnel warzone"],
+      factions: ["Political Structure: clan-backed sorcerer councils"],
+      npcs: ["Central Conflict: sorcerers versus curse users under chakra pressure"],
+    },
+  };
+
+  it("saveWorldgenResearchFrame writes the frame beside existing campaign config", () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "readFileSync").mockReturnValue(
+      JSON.stringify({
+        name: "Test",
+        premise: "P",
+        createdAt: 1000,
+        ipContext: { franchise: "Jujutsu Kaisen", keyFacts: [], tonalNotes: [], source: "mcp" },
+      }),
+    );
+    const writeSpy = vi.spyOn(fs, "writeFileSync").mockImplementation(() => {});
+
+    saveWorldgenResearchFrame("test-id", worldgenResearchFrame);
+
+    const configCall = writeSpy.mock.calls.find(
+      (c) => typeof c[0] === "string" && c[0].includes("config.json"),
+    );
+    expect(configCall).toBeDefined();
+    const data = JSON.parse(configCall![1] as string);
+    expect(data.worldgenResearchFrame).toEqual(worldgenResearchFrame);
+    expect(data.ipContext.franchise).toBe("Jujutsu Kaisen");
+  });
+
+  it("loadWorldgenResearchFrame returns cached frame when present", () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "readFileSync").mockReturnValue(
+      JSON.stringify({
+        name: "Test",
+        premise: "P",
+        createdAt: 1000,
+        worldgenResearchFrame,
+      }),
+    );
+
+    expect(loadWorldgenResearchFrame("test-id")).toEqual(worldgenResearchFrame);
   });
 });
 

@@ -13,7 +13,7 @@ import type { ProviderConfig } from "../ai/provider-registry.js";
 export interface MCPResearchResult {
     /** Synthesised lore context, ready to inject into generation prompts */
     context: string;
-    /** URLs or source identifiers collected during research (empty for LLM-only path) */
+    /** URLs or source identifiers collected during research */
     sources: string[];
     /** Raw LLM output before synthesis */
     raw: string;
@@ -42,10 +42,6 @@ function resolveGeneratorProvider(settings: Settings): ProviderConfig {
     };
 }
 
-// ---------------------------------------------------------------------------
-// LLM-only fallback
-// ---------------------------------------------------------------------------
-
 const llmResearchSchema = z.object({
     context: z
         .string()
@@ -56,51 +52,6 @@ const llmResearchSchema = z.object({
         .array(z.string())
         .describe("Source names or references used (empty array if unknown)"),
 });
-
-async function performLLMOnlyResearch(
-    queries: string[],
-    providerConfig: ProviderConfig,
-    temperature: number,
-    maxOutputTokens: number
-): Promise<MCPResearchResult> {
-    const searchList = queries.map((q, i) => `${i + 1}. ${q}`).join("\n");
-
-    const prompt = `You are a franchise lore researcher for a tabletop RPG world generator.
-
-Research the following topics using your internal knowledge:
-${searchList}
-
-Synthesise your findings into a comprehensive world-building context covering:
-- Key factions, races, and power structures
-- Magic or technology systems
-- Tone and atmosphere
-- Notable historical events or conflicts
-- Signature locations
-
-Be specific and factual. Aim for ≤400 words of context.`;
-
-    const { object } = await generateObject({
-        model: createModel(providerConfig),
-        schema: llmResearchSchema,
-        prompt,
-        temperature,
-        maxOutputTokens,
-    });
-
-    console.log(
-        `[mcp-research] LLM-only research complete (${object.context.length} chars)`
-    );
-
-    return {
-        context: object.context,
-        sources: object.sources,
-        raw: object.context,
-    };
-}
-
-// ---------------------------------------------------------------------------
-// MCP primary path
-// ---------------------------------------------------------------------------
 
 /** How long to wait (ms) for the MCP subprocess to initialise */
 const MCP_INIT_TIMEOUT_MS = 20_000;
@@ -203,8 +154,7 @@ Rewrite these notes as a clean, structured world-building context (≤400 words)
 
 /**
  * Perform autonomous web research on the provided queries using the DuckDuckGo
- * MCP server subprocess. Falls back to LLM-only research if the MCP server
- * fails to start or encounters an error.
+ * MCP server subprocess. Fails closed if grounded retrieval is unavailable.
  *
  * @param queries  - Search topics (e.g. ["Warhammer 40k factions", "40k lore overview"])
  * @param settings - App settings; uses the `generator` role for LLM calls
@@ -218,20 +168,6 @@ export async function performMCPResearch(
     }
 
     const providerConfig = resolveGeneratorProvider(settings);
-    const { temperature, maxTokens } = settings.generator;
-
-    try {
-        return await performMCPResearchInternal(queries, providerConfig, temperature);
-    } catch (mcpError) {
-        console.warn(
-            `[mcp-research] MCP failed (${(mcpError as Error).message}), falling back to LLM-only research`
-        );
-
-        return await performLLMOnlyResearch(
-            queries,
-            providerConfig,
-            temperature,
-            maxTokens
-        );
-    }
+    const { temperature } = settings.generator;
+    return performMCPResearchInternal(queries, providerConfig, temperature);
 }

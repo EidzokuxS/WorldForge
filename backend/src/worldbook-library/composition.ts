@@ -146,7 +146,7 @@ async function detectPrimarySource(
     return match ?? null;
   } catch (error) {
     log.error("detectPrimarySource FAILED", error);
-    return null;
+    throw new AppError("Failed to detect the primary worldbook source.", 500);
   }
 }
 
@@ -245,8 +245,8 @@ async function filterRelevantEntries(
 
     return result;
   } catch (error) {
-    log.error("filterRelevantEntries FAILED — returning null (caller will include all as fallback)", error);
-    return null;
+    log.error("filterRelevantEntries FAILED", error);
+    throw new AppError("Failed to filter supplementary worldbook entries.", 500);
   }
 }
 
@@ -299,9 +299,8 @@ export async function composeWorldbookLibraryRecords(
     if (!primarySourceName || record.displayName === primarySourceName) {
       return record.entries;
     }
-    // LLM filter failed entirely (null) — fallback: include all supplementary entries
+    // If no relevance map exists, filtering was never activated for this composition.
     if (relevanceMap === null) {
-      log.warn(`getFilteredEntries "${record.displayName}": filter was null (LLM failure), including all ${record.entries.length} entries`);
       return record.entries;
     }
     // LLM filter succeeded — apply it (may return 0 entries if LLM deemed none relevant)

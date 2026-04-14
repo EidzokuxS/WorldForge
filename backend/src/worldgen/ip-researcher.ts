@@ -5,12 +5,15 @@ import { createModel } from "../ai/index.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import type { GenerateScaffoldRequest } from "./types.js";
 import { createLogger } from "../lib/index.js";
+import { clampTokens } from "../lib/clamp.js";
 import { webSearch, type SearchConfig } from "../lib/web-search.js";
 import {
   buildWorldgenResearchPlan,
   type WorldgenResearchJob,
   type WorldgenResearchPlan,
 } from "./retrieval-intent.js";
+import type { WorldgenResearchFrame } from "./research-frame.js";
+import { buildWorldgenResearchFrameBlock } from "./research-frame.js";
 
 const log = createLogger("ip-researcher");
 
@@ -62,9 +65,7 @@ async function detectFranchise(
   role: ResolvedRole,
   searchConfig: SearchConfig,
 ): Promise<string | null> {
-  if (knownIP?.trim()) {
-    return knownIP.trim();
-  }
+  const knownIpHint = knownIP?.trim() || null;
 
   try {
     const { object } = await generateObject({
@@ -74,8 +75,10 @@ async function detectFranchise(
 
 Campaign name: "${name}"
 Premise: "${premise}"
+${knownIpHint ? `IP field hint: "${knownIpHint}"` : ""}
 
 Consider: character names, location names, faction names, magic systems, terminology, plot elements that match existing media. Even subtle references count (e.g. mentioning "Sasuke" or "chakra" implies Naruto, "lightsaber" implies Star Wars).
+If an IP field hint is present, treat it as a clue, not canonical truth. Extract the underlying franchise name if one exists. Do not repeat long descriptive prose from the field unless that exact prose is the official title.
 
 If you're not sure — that's fine. Set confidence to "likely" or "unknown" and provide a searchQuery so we can verify via web search. Better to search and confirm than to miss a reference.`,
       temperature: 0.1,
@@ -88,10 +91,11 @@ If you're not sure — that's fine. Set confidence to "likely" or "unknown" and 
     }
 
     // Has a search query → verify via web search
-    if (object.searchQuery) {
-      log.info(`Franchise uncertain (${object.confidence}), verifying via search: "${object.searchQuery}"`);
+    const verificationQuery = object.searchQuery ?? knownIpHint;
+    if (verificationQuery) {
+      log.info(`Franchise uncertain (${object.confidence}), verifying via search: "${verificationQuery}"`);
       const verified = await verifyFranchiseViaSearch(
-        object.searchQuery,
+        verificationQuery,
         object.franchise,
         premise,
         role,
@@ -128,8 +132,8 @@ async function verifyFranchiseViaSearch(
     const results = await webSearch(searchQuery, searchConfig, 5);
 
     if (results.length === 0) {
-      log.info("No search results for franchise verification, using LLM candidate");
-      return candidateFranchise;
+      log.warn("No search results for franchise verification; refusing to assume the candidate franchise is correct");
+      return null;
     }
 
     const searchText = results
@@ -153,8 +157,8 @@ QUESTION: Does the user's PREMISE actually describe this franchise's world?
 
     return object.isKnownIP ? object.franchise : null;
   } catch (error) {
-    log.warn("Franchise verification search failed, using LLM candidate", error);
-    return candidateFranchise;
+    log.warn("Franchise verification search failed; refusing to trust the unverified LLM candidate", error);
+    return null;
   }
 }
 
@@ -229,8 +233,9 @@ async function researchViaWebSearch(
   }
 
   if (allSearchResults.length === 0) {
-    log.warn(`All focused searches failed for "${franchise}". Attempted jobs:\n${formatAttemptedJobs(plan)}`);
-    return researchViaLLM(franchise, role, plan);
+    throw new Error(
+      `All focused searches failed for "${franchise}". Attempted jobs:\n${formatAttemptedJobs(plan)}`,
+    );
   }
 
   const searchText = allSearchResults.join("\n\n");
@@ -266,50 +271,6 @@ Every fact should be a complete, self-contained sentence.`,
     tonalNotes: object.tonalNotes,
     canonicalNames: object.canonicalNames,
     source: "mcp" as const,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// LLM fallback path
-// ---------------------------------------------------------------------------
-
-async function researchViaLLM(
-  franchise: string,
-  role: ResolvedRole,
-  plan?: WorldgenResearchPlan,
-): Promise<IpResearchContext> {
-  const focusedJobsBlock = plan?.jobs.length
-    ? `Focused retrieval jobs:
-${plan.jobs.map((job) => `- ${job.query} — ${job.purpose}`).join("\n")}
-
-Use these focused retrieval jobs as the structure for your answer. Do not collapse them into one blended canon blob.
-
-`
-    : "";
-  const prompt = `You are an expert on tabletop RPGs and popular fiction franchises.
-
-Provide a structured lore overview for the franchise: "${franchise}"
-
-${focusedJobsBlock}Focus on information useful for building a custom RPG world inspired by this IP:
-- KEY FACTS: geography & locations, races & species, factions & nations, power/magic system, key characters, historical events, creatures, cultural elements (up to 30, one sentence each)
-- TONAL NOTES: atmospheric/genre descriptors for the world's feel (up to 8 phrases)`;
-
-  const { object } = await generateObject({
-    model: createModel(role.provider),
-    schema: ipResearchContextSchema,
-    prompt,
-    temperature: 0.3,
-    maxOutputTokens: role.maxTokens,
-  });
-
-  log.info(`LLM fallback research complete for "${franchise}": ${object.keyFacts.length} facts`);
-
-  return {
-    franchise: object.franchise,
-    keyFacts: object.keyFacts,
-    tonalNotes: object.tonalNotes,
-    canonicalNames: object.canonicalNames,
-    source: "llm",
   };
 }
 
@@ -355,21 +316,8 @@ export async function researchKnownIP(
   try {
     return await researchViaWebSearch(franchise, req.premise, role, searchConfig, maxSearchSteps);
   } catch (error) {
-    log.warn("Web research failed, falling back to LLM knowledge", error);
-    try {
-      return await researchViaLLM(
-        franchise,
-        role,
-        buildWorldgenResearchPlan({
-          franchise,
-          premise: req.premise,
-          maxJobs: maxSearchSteps,
-        }),
-      );
-    } catch (llmError) {
-      log.error("Research failed entirely (web + LLM)", llmError);
-      return null;
-    }
+    log.error("Known-IP research failed without a valid grounded result", error);
+    throw error;
   }
 }
 
@@ -382,7 +330,7 @@ const sufficiencySchema = z.object({
     "true if the existing facts provide enough detail to generate this section accurately"
   ),
   missingTopics: z.array(z.string()).max(3).describe(
-    "Up to 3 specific topics that need more research for this section. Each should be a concrete search query."
+    "Up to 3 short research gaps that need more canon grounding for this section. Each item should be a concise fact topic, not a full search query and not a restatement of the user premise or IP field."
   ),
 });
 
@@ -397,6 +345,7 @@ export async function evaluateResearchSufficiency(
   premise: string,
   role: ResolvedRole,
   searchConfig?: SearchConfig,
+  researchFrame?: WorldgenResearchFrame | null,
 ): Promise<IpResearchContext> {
   const stepDescriptions: Record<string, string> = {
     locations: "geographic locations, cities, landmarks, terrain, and spatial layout",
@@ -405,12 +354,14 @@ export async function evaluateResearchSufficiency(
   };
 
   try {
+    const frameBlock = buildWorldgenResearchFrameBlock(researchFrame, step);
     const { object: evaluation } = await generateObject({
       model: createModel(role.provider),
       schema: sufficiencySchema,
       prompt: `You are evaluating whether existing research about "${ipContext.franchise}" is sufficient to generate ${stepDescriptions[step]} for a world scaffold.
 
 PREMISE: "${premise}"
+${frameBlock ? `\n${frameBlock}\n` : ""}
 
 EXISTING RESEARCH (${ipContext.keyFacts.length} facts):
 ${ipContext.keyFacts.map((f) => `- ${f}`).join("\n")}
@@ -419,10 +370,17 @@ Is this enough to generate accurate, detailed ${step} for this franchise? Consid
 - Do we know enough specific ${step} from the source material?
 - Are there major ${step} missing that would make the generation inaccurate?
 - Would a fan notice obvious omissions?
+- If WORLDGEN RESEARCH FRAME is present, judge sufficiency against those active DNA and divergence constraints, not only against generic canon.
 
-If insufficient, suggest up to 3 targeted search queries to fill the gaps.`,
+If insufficient, suggest up to 3 short missing fact topics to fill the gaps.
+Rules for missingTopics:
+- 2-10 words each when possible
+- name the missing canon fact domain, entity, region, event, rule, or relationship
+- do not paste the raw IP field, raw premise, or long prose from WORLDGEN RESEARCH FRAME
+- bad: "Jujutsu Kaisen world, but there's a Naruto power system as well canonical locations..."
+- good: "Shibuya underground layout", "Five Great Nations geography", "Akatsuki regional influence"`,
       temperature: 0.2,
-      maxOutputTokens: 32000,
+      maxOutputTokens: clampTokens(role.maxTokens),
     });
 
     if (evaluation.sufficient || evaluation.missingTopics.length === 0) {
@@ -440,6 +398,7 @@ If insufficient, suggest up to 3 targeted search queries to fill the gaps.`,
       premise,
       step,
       missingTopics: evaluation.missingTopics,
+      researchFrame,
       maxJobs: 3,
     });
 
@@ -466,6 +425,7 @@ RETRIEVAL JOB
 - Topic: ${job.topic}
 - Purpose: ${job.purpose}
 - Query: ${job.query}
+${frameBlock ? `\n${frameBlock}\n` : ""}
 
 SEARCH RESULTS
 ${snippets}
@@ -474,10 +434,11 @@ RULES:
 - Only include facts from the OFFICIAL canon (manga, anime, games by the original creators).
 - EXCLUDE fan-made content, fan wikis speculation, filler episodes, non-canon movies, and fan theories.
 - Each fact must name specific canonical entities (places, characters, organizations).
+- Prefer facts that help with the active WORLDGEN RESEARCH FRAME and current ${step} step.
 - Only include facts that are NOT already known:
 ${ipContext.keyFacts.slice(0, 10).map((f) => `- ${f}`).join("\n")}`,
             temperature: 0.1,
-            maxOutputTokens: 32000,
+            maxOutputTokens: clampTokens(role.maxTokens),
           });
           newFacts.push(...extracted.facts);
         }

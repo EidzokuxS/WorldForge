@@ -1,3 +1,5 @@
+import type { WorldgenResearchFrame } from "./research-frame.js";
+
 export const RETRIEVAL_INTENTS = [
   "world_canon_fact",
   "character_canon_fact",
@@ -34,6 +36,7 @@ export interface BuildWorldgenResearchPlanInput {
   premise: string;
   step?: "locations" | "factions" | "npcs";
   missingTopics?: string[];
+  researchFrame?: WorldgenResearchFrame | null;
   maxJobs?: number;
 }
 
@@ -59,23 +62,55 @@ const NPC_PATTERN = /\b(character|characters|npc|npcs|leader|leaders|mentor|ment
 const RULES_PATTERN = /\b(power|powers|system|systems|ability|abilities|magic|spell|spells|chakra|jutsu|technique|techniques|technology|weapon|weapons|rule|rules|limit|limits|constraint|constraints|weakness|weaknesses|transformation|transformations)\b/i;
 const HISTORY_PATTERN = /\b(history|historical|timeline|event|events|war|wars|battle|battles|rebellion|rebellions|uprising|uprisings|incident|incidents|aftermath|era|eras|fall|collapse|crisis|crises|before|after)\b/i;
 
+function sanitizeMissingTopic(missingTopic: string): string {
+  return missingTopic
+    .replace(/^focus on:\s*/i, "")
+    .replace(/^search(?: for)?\s*/i, "")
+    .replace(/^look up\s*/i, "")
+    .replace(/^research\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 160);
+}
+
+function getFocusContext(
+  researchFrame: WorldgenResearchFrame | null | undefined,
+  topic: WorldgenResearchTopic,
+): string | undefined {
+  if (!researchFrame) return undefined;
+
+  const values = topic === "locations"
+    ? researchFrame.stepFocus.locations
+    : topic === "factions"
+      ? researchFrame.stepFocus.factions
+      : topic === "npcs"
+        ? researchFrame.stepFocus.npcs
+        : [...researchFrame.overlayNotes, ...researchFrame.dnaConstraints];
+
+  if (values.length === 0) return undefined;
+  return values.slice(0, 2).join(" | ");
+}
+
 function buildJob(
   franchise: string,
   topic: WorldgenResearchTopic,
   missingTopic?: string,
+  researchFrame?: WorldgenResearchFrame | null,
 ): WorldgenResearchJob {
-  const suffix = missingTopic?.trim()
-    ? `${TOPIC_QUERY_STEMS[topic]} ${missingTopic.trim()}`
+  const normalizedMissingTopic = missingTopic ? sanitizeMissingTopic(missingTopic) : undefined;
+  const suffix = normalizedMissingTopic
+    ? `${TOPIC_QUERY_STEMS[topic]} ${normalizedMissingTopic}`
     : TOPIC_QUERY_STEMS[topic];
+  const focusContext = getFocusContext(researchFrame, topic);
 
   return {
     intent: "world_canon_fact",
     topic,
-    purpose: missingTopic?.trim()
-      ? `${TOPIC_PURPOSES[topic]} Focus on: ${missingTopic.trim()}.`
-      : TOPIC_PURPOSES[topic],
+    purpose: normalizedMissingTopic
+      ? `${TOPIC_PURPOSES[topic]} Focus on: ${normalizedMissingTopic}.${focusContext ? ` Current world focus: ${focusContext}.` : ""}`
+      : `${TOPIC_PURPOSES[topic]}${focusContext ? ` Current world focus: ${focusContext}.` : ""}`,
     query: `${franchise} ${suffix}`.trim(),
-    missingTopic: missingTopic?.trim() || undefined,
+    missingTopic: normalizedMissingTopic || undefined,
   };
 }
 
@@ -137,9 +172,10 @@ export function buildWorldgenResearchPlan(
           input.franchise,
           classifyMissingTopic(missingTopic, input.step),
           missingTopic,
+          input.researchFrame,
         ),
       )
-    : derivePremiseTopics(input.premise).map((topic) => buildJob(input.franchise, topic)))
+    : derivePremiseTopics(input.premise).map((topic) => buildJob(input.franchise, topic, undefined, input.researchFrame)))
     .filter((job) => {
       const key = `${job.topic}:${job.missingTopic ?? job.query}`.toLowerCase();
       if (seen.has(key)) return false;

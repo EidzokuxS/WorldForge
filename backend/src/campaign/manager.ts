@@ -18,6 +18,7 @@ import { assertSafeId, CAMPAIGNS_DIR, getCampaignConfigPath, getCampaignDir } fr
 import { openVectorDb, closeVectorDb } from "../vectors/index.js";
 import { createLogger } from "../lib/index.js";
 import { ensureCampaignInventoryAuthority } from "../inventory/index.js";
+import type { WorldgenResearchFrame } from "../worldgen/research-frame.js";
 
 const log = createLogger("campaign-manager");
 
@@ -29,6 +30,7 @@ type CampaignConfigFile = {
   seeds?: WorldSeeds;
   ipContext?: IpResearchContext;
   premiseDivergence?: PremiseDivergence;
+  worldgenResearchFrame?: WorldgenResearchFrame;
   worldbookSelection?: CampaignWorldbookSelection[];
   personaTemplates?: PersonaTemplate[];
   generationComplete?: boolean;
@@ -68,6 +70,7 @@ export function readCampaignConfig(campaignId: string): CampaignConfigFile {
     seeds: parseWorldSeeds(parsed.seeds) ?? undefined,
     ipContext: parsed.ipContext ?? undefined,
     premiseDivergence: parsed.premiseDivergence ?? undefined,
+    worldgenResearchFrame: parsed.worldgenResearchFrame ?? undefined,
     worldbookSelection: Array.isArray(parsed.worldbookSelection)
       ? parsed.worldbookSelection
       : undefined,
@@ -368,6 +371,25 @@ export function loadPremiseDivergence(campaignId: string): PremiseDivergence | n
   try {
     const config = readCampaignConfig(campaignId);
     return config.premiseDivergence ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveWorldgenResearchFrame(
+  campaignId: string,
+  worldgenResearchFrame: WorldgenResearchFrame,
+): void {
+  assertSafeId(campaignId);
+  updateCampaignConfig(campaignId, (config) => ({ ...config, worldgenResearchFrame }));
+  log.info(`Saved worldgenResearchFrame for "${worldgenResearchFrame.franchise}" to campaign ${campaignId}`);
+}
+
+export function loadWorldgenResearchFrame(campaignId: string): WorldgenResearchFrame | null {
+  assertSafeId(campaignId);
+  try {
+    const config = readCampaignConfig(campaignId);
+    return config.worldgenResearchFrame ?? null;
   } catch {
     return null;
   }

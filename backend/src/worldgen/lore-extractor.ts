@@ -1,7 +1,6 @@
 import { safeGenerateObject as generateObject } from "../ai/generate-object-safe.js";
 import { z } from "zod";
 import { createModel } from "../ai/index.js";
-import { withModelFallback } from "../ai/with-model-fallback.js";
 import { createLogger } from "../lib/index.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import type { IpResearchContext, PremiseDivergence } from "@worldforge/shared";
@@ -162,7 +161,6 @@ const MAX_RETRIES = 2;
 
 async function extractCategoryLore(
   role: ResolvedRole,
-  fallbackRole: ResolvedRole | undefined,
   prompt: string,
   schema: z.ZodType,
   reducedSchema: z.ZodType,
@@ -210,36 +208,9 @@ async function extractCategoryLore(
       (card) => allowedCategories.includes(card.category),
     );
   } catch (reducedError) {
-    const lastPrimaryError = reducedError;
-
-    // Fallback model attempt
-    if (fallbackRole) {
-      try {
-        log.info(`Attempting ${categoryLabel} lore extraction with fallback model`);
-        return await withModelFallback(
-          async () => { throw lastPrimaryError; },
-          async () => {
-            const fbResult = await generateObject({
-              model: createModel(fallbackRole.provider),
-              schema: reducedSchema,
-              prompt,
-              temperature: fallbackRole.temperature,
-              maxOutputTokens: fallbackRole.maxTokens,
-            });
-            return (fbResult.object as { loreCards: ExtractedLoreCard[] }).loreCards.filter(
-              (card) => allowedCategories.includes(card.category),
-            );
-          },
-          `lore-extraction:${categoryLabel}`,
-        );
-      } catch (fallbackError) {
-        log.error(`${categoryLabel} lore extraction failed with fallback model too`, fallbackError);
-      }
-    }
-
     // Category extraction is best-effort: log and return empty
     log.warn(
-      `${categoryLabel} lore extraction failed entirely after all attempts: ${lastError?.message ?? "unknown"}`,
+      `${categoryLabel} lore extraction failed entirely after retries and reduced schema: ${reducedError instanceof Error ? reducedError.message : lastError?.message ?? "unknown"}`,
     );
     return [];
   }
@@ -247,7 +218,6 @@ async function extractCategoryLore(
 
 async function extractLocationLore(
   role: ResolvedRole,
-  fallbackRole: ResolvedRole | undefined,
   blocks: SharedPromptBlocks,
 ): Promise<ExtractedLoreCard[]> {
   const header = buildSharedPromptHeader(blocks);
@@ -268,12 +238,11 @@ ${blocks.ipQualityRule}
 ${blocks.slopRules}`;
 
   const reducedSchema = z.object({ loreCards: z.array(loreCardSchema).min(1).max(10) });
-  return extractCategoryLore(role, fallbackRole, prompt, locationLoreSchema, reducedSchema, LOCATION_LORE_CATEGORIES, "location");
+  return extractCategoryLore(role, prompt, locationLoreSchema, reducedSchema, LOCATION_LORE_CATEGORIES, "location");
 }
 
 async function extractFactionLore(
   role: ResolvedRole,
-  fallbackRole: ResolvedRole | undefined,
   blocks: SharedPromptBlocks,
 ): Promise<ExtractedLoreCard[]> {
   const header = buildSharedPromptHeader(blocks);
@@ -294,12 +263,11 @@ ${blocks.ipQualityRule}
 ${blocks.slopRules}`;
 
   const reducedSchema = z.object({ loreCards: z.array(loreCardSchema).min(1).max(10) });
-  return extractCategoryLore(role, fallbackRole, prompt, factionLoreSchema, reducedSchema, FACTION_LORE_CATEGORIES, "faction");
+  return extractCategoryLore(role, prompt, factionLoreSchema, reducedSchema, FACTION_LORE_CATEGORIES, "faction");
 }
 
 async function extractNpcLore(
   role: ResolvedRole,
-  fallbackRole: ResolvedRole | undefined,
   blocks: SharedPromptBlocks,
 ): Promise<ExtractedLoreCard[]> {
   const header = buildSharedPromptHeader(blocks);
@@ -320,12 +288,11 @@ ${blocks.ipQualityRule}
 ${blocks.slopRules}`;
 
   const reducedSchema = z.object({ loreCards: z.array(loreCardSchema).min(1).max(10) });
-  return extractCategoryLore(role, fallbackRole, prompt, npcLoreSchema, reducedSchema, NPC_LORE_CATEGORIES, "npc");
+  return extractCategoryLore(role, prompt, npcLoreSchema, reducedSchema, NPC_LORE_CATEGORIES, "npc");
 }
 
 async function extractConceptLore(
   role: ResolvedRole,
-  fallbackRole: ResolvedRole | undefined,
   blocks: SharedPromptBlocks,
 ): Promise<ExtractedLoreCard[]> {
   const header = buildSharedPromptHeader(blocks);
@@ -351,7 +318,7 @@ ${blocks.ipQualityRule}
 ${blocks.slopRules}`;
 
   const reducedSchema = z.object({ loreCards: z.array(loreCardSchema).min(3).max(15) });
-  return extractCategoryLore(role, fallbackRole, prompt, conceptLoreSchema, reducedSchema, CONCEPT_LORE_CATEGORIES, "concept");
+  return extractCategoryLore(role, prompt, conceptLoreSchema, reducedSchema, CONCEPT_LORE_CATEGORIES, "concept");
 }
 
 // ---------------------------------------------------------------------------
@@ -361,7 +328,6 @@ ${blocks.slopRules}`;
 export async function extractLoreCards(
   scaffold: WorldScaffold,
   role: ResolvedRole,
-  fallbackRole?: ResolvedRole,
   ipContext?: IpResearchContext | null,
   premiseDivergence?: PremiseDivergence | null,
   onProgress?: (progress: GenerationProgress) => void,
@@ -380,19 +346,19 @@ export async function extractLoreCards(
 
   // 1. Location lore
   reportSubProgress(onProgress, step, total, "Extracting lore...", 0, CATEGORY_COUNT, "Location lore");
-  const locationCards = await extractLocationLore(role, fallbackRole, blocks);
+  const locationCards = await extractLocationLore(role, blocks);
 
   // 2. Faction lore
   reportSubProgress(onProgress, step, total, "Extracting lore...", 1, CATEGORY_COUNT, "Faction lore");
-  const factionCards = await extractFactionLore(role, fallbackRole, blocks);
+  const factionCards = await extractFactionLore(role, blocks);
 
   // 3. NPC lore
   reportSubProgress(onProgress, step, total, "Extracting lore...", 2, CATEGORY_COUNT, "NPC lore");
-  const npcCards = await extractNpcLore(role, fallbackRole, blocks);
+  const npcCards = await extractNpcLore(role, blocks);
 
   // 4. Concept/ability/item/event lore
   reportSubProgress(onProgress, step, total, "Extracting lore...", 3, CATEGORY_COUNT, "World systems lore");
-  const conceptCards = await extractConceptLore(role, fallbackRole, blocks);
+  const conceptCards = await extractConceptLore(role, blocks);
 
   // Merge and deduplicate by term (case-insensitive)
   const allCards = [...locationCards, ...factionCards, ...npcCards, ...conceptCards];

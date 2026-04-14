@@ -6,6 +6,7 @@ import type {
   CharacterTier,
   IpResearchContext,
   PremiseDivergence,
+  WorldSeeds,
 } from "@worldforge/shared";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import type { SearchConfig } from "../lib/web-search.js";
@@ -16,7 +17,10 @@ import {
   loadIpContext,
   savePremiseDivergence,
   loadPremiseDivergence,
+  saveWorldgenResearchFrame,
+  loadWorldgenResearchFrame,
 } from "../campaign/index.js";
+import { reconcileDraftBackedScaffoldNpc } from "../character/record-adapters.js";
 import { getErrorMessage, getErrorStatus } from "../lib/index.js";
 import { loadSettings } from "../settings/index.js";
 import {
@@ -36,8 +40,8 @@ import {
   suggestWorldSeeds,
 } from "../worldgen/index.js";
 import type { WorldScaffold } from "../worldgen/types.js";
+import { buildWorldgenResearchFrame } from "../worldgen/research-frame.js";
 import { parseBody, requireActiveCampaign, requireLoadedCampaign, resolveGenerator, resolveEmbedder } from "./helpers.js";
-import { resolveFallbackProvider } from "../ai/with-model-fallback.js";
 import { createLogger } from "../lib/index.js";
 
 const log = createLogger("worldgen-route");
@@ -97,27 +101,36 @@ function normalizeSavedScaffold(scaffold: SaveEditsScaffold): WorldScaffold {
       assets: [...faction.assets],
       territoryNames: [...faction.territoryNames],
     })),
-    npcs: scaffold.npcs.map((npc): WorldScaffold["npcs"][number] => ({
-      name: npc.name,
-      persona: npc.persona,
-      tags: [...npc.tags],
-      goals: {
-        shortTerm: [...npc.goals.shortTerm],
-        longTerm: [...npc.goals.longTerm],
-      },
-      locationName: npc.locationName,
-      factionName: npc.factionName ?? null,
-      tier: npc.tier,
-      draft: npc.draft
-        ? ({
-            ...npc.draft,
-            identity: {
-              ...npc.draft.identity,
-              tier: normalizeCharacterTier(npc.draft.identity.tier),
-            },
-          } satisfies CharacterDraft)
-        : undefined,
-    })),
+    npcs: scaffold.npcs.map((npc): WorldScaffold["npcs"][number] => {
+      const reconciledDraft = npc.draft
+        ? reconcileDraftBackedScaffoldNpc({
+            ...npc,
+            draft: npc.draft,
+          })
+        : undefined;
+
+      return {
+        name: npc.name,
+        persona: npc.persona,
+        tags: [...npc.tags],
+        goals: {
+          shortTerm: [...npc.goals.shortTerm],
+          longTerm: [...npc.goals.longTerm],
+        },
+        locationName: npc.locationName,
+        factionName: npc.factionName ?? null,
+        tier: npc.tier,
+        draft: reconciledDraft
+          ? ({
+              ...reconciledDraft,
+              identity: {
+                ...reconciledDraft.identity,
+                tier: normalizeCharacterTier(reconciledDraft.identity.tier),
+              },
+            } satisfies CharacterDraft)
+          : undefined,
+      };
+    }),
     loreCards: scaffold.loreCards.map((card) => ({
       ...card,
     })),
@@ -154,6 +167,27 @@ function buildResearchSearchConfig(role: ResolvedRole): SearchConfig {
     zaiApiKey: settings.research.zaiApiKey,
     llmProvider: role.provider,
   };
+}
+
+function resolveWorldgenResearchFrame(
+  campaignId: string,
+  ipContext: IpResearchContext | null,
+  premise: string,
+  premiseDivergence: PremiseDivergence | null,
+  seeds?: Partial<WorldSeeds>,
+) {
+  if (!ipContext) {
+    return null;
+  }
+
+  const frame = buildWorldgenResearchFrame({
+    franchise: ipContext.franchise,
+    premise,
+    premiseDivergence,
+    seeds,
+  });
+  saveWorldgenResearchFrame(campaignId, frame);
+  return frame;
 }
 
 app.post("/roll-seeds", async (c) => {
@@ -231,9 +265,15 @@ app.post("/suggest-seeds", async (c) => {
       }
     }
 
-    // If no premise provided but worldbook exists, generate premise from worldbook
-    const premise = result.data.premise?.trim() ||
-      (ipContext ? `A world based on the ${ipContext.franchise} setting` : "An original fantasy world");
+    const explicitPremise = result.data.premise?.trim() ?? "";
+    const premise = explicitPremise ||
+      (ipContext ? `A world based on the ${ipContext.franchise} setting` : "");
+    if (!premise) {
+      return c.json(
+        { error: "Premise is required when no world knowledge context is available." },
+        400,
+      );
+    }
     debugOperation.setLabel("Generating World DNA suggestions...");
     const { seeds, premiseDivergence } = await suggestWorldSeeds({
       premise,
@@ -311,14 +351,6 @@ app.post("/generate", async (c) => {
       return c.json({ error: gen.error }, gen.status);
     }
 
-    // Resolve Fallback role for lore extraction retry
-    const fallbackProviderConfig = resolveFallbackProvider(settings.fallback, settings.providers);
-    const fallbackRole = fallbackProviderConfig ? {
-      provider: fallbackProviderConfig,
-      temperature: gen.resolved.temperature,
-      maxTokens: gen.resolved.maxTokens,
-    } : undefined;
-
     return streamSSE(c, async (stream) => {
       const keepaliveTimer = setInterval(() => {
         void stream.writeSSE({
@@ -341,6 +373,7 @@ app.post("/generate", async (c) => {
         }
         let ipContext = bodyIpContext ?? loadIpContext(campaignId);
         let premiseDivergence = bodyPremiseDivergence ?? loadPremiseDivergence(campaignId);
+        let researchFrame = loadWorldgenResearchFrame(campaignId);
 
         if (!ipContext) {
           const config = readCampaignConfig(campaignId);
@@ -384,6 +417,13 @@ app.post("/generate", async (c) => {
           gen.resolved,
           premiseDivergence,
         );
+        researchFrame = resolveWorldgenResearchFrame(
+          campaignId,
+          ipContext,
+          campaign.premise,
+          premiseDivergence,
+          campaign.seeds,
+        );
 
         const { scaffold, enrichedIpContext } = await generateWorldScaffold(
           {
@@ -392,9 +432,9 @@ app.post("/generate", async (c) => {
             premise: campaign.premise,
             seeds: campaign.seeds,
             role: gen.resolved,
-            fallbackRole,
             ipContext,
             premiseDivergence,
+            researchFrame,
             research: settings.research,
           },
           async (progress) => {
@@ -500,6 +540,13 @@ app.post("/regenerate-section", async (c) => {
       gen.resolved,
       loadPremiseDivergence(campaignId),
     );
+    const researchFrame = resolveWorldgenResearchFrame(
+      campaignId,
+      ipContext,
+      campaign.premise,
+      premiseDivergence,
+      campaign.seeds,
+    );
 
     const req = {
       campaignId: campaign.id,
@@ -508,6 +555,8 @@ app.post("/regenerate-section", async (c) => {
       seeds: campaign.seeds,
       role: gen.resolved,
       premiseDivergence,
+      researchFrame,
+      research: settings.research,
     };
 
     const { section } = result.data;
@@ -521,6 +570,7 @@ app.post("/regenerate-section", async (c) => {
         refinementPremise,
         gen.resolved,
         searchConfig,
+        researchFrame,
       );
       if (enrichedIpContext.keyFacts.length > ipContext.keyFacts.length) {
         saveIpContext(campaignId, enrichedIpContext);

@@ -9,6 +9,8 @@ export {
   loadIpContext,
   savePremiseDivergence,
   loadPremiseDivergence,
+  saveWorldgenResearchFrame,
+  loadWorldgenResearchFrame,
   getActiveCampaign,
   advanceCampaignTick,
   incrementTick,

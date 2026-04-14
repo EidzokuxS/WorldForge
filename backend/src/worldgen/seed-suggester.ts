@@ -206,7 +206,7 @@ ${buildStopSlopRules()}`;
       schema: z.object({ value: z.array(z.string()).min(2).max(3) }),
       prompt,
       temperature: req.role.temperature,
-      maxOutputTokens: 32000,
+      maxOutputTokens: clampTokens(req.role.maxTokens),
     });
     return result.object.value;
   }
@@ -216,7 +216,7 @@ ${buildStopSlopRules()}`;
     schema: z.object({ value: z.string() }),
     prompt,
     temperature: req.role.temperature,
-    maxOutputTokens: 32000,
+    maxOutputTokens: clampTokens(req.role.maxTokens),
   });
   return result.object.value;
 }

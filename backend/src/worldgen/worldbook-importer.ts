@@ -273,7 +273,7 @@ export async function classifyEntries(
       allClassified.push(
         ...await classifyBatchEntries(batch, role, {
           compact: true,
-          maxOutputTokens: clampTokens(Math.max(role.maxTokens, 8192)),
+          maxOutputTokens: clampTokens(role.maxTokens),
         }),
       );
       continue;
@@ -288,7 +288,7 @@ export async function classifyEntries(
       allClassified.push(
         ...(await classifyBatchEntries([entry], role, {
           compact: true,
-          maxOutputTokens: clampTokens(Math.min(Math.max(role.maxTokens, 1024), 4096)),
+          maxOutputTokens: clampTokens(role.maxTokens),
         })),
       );
     }

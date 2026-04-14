@@ -63,17 +63,17 @@ describe("extractLoreCards", () => {
   });
 
   it("returns lore cards from generateObject", async () => {
-    mockGenerateObject.mockResolvedValueOnce({
+    mockGenerateObject.mockResolvedValue({
       object: { loreCards: fakeLoreCards },
     });
 
     const result = await extractLoreCards(fakeScaffold, fakeRole);
     expect(result).toEqual(fakeLoreCards);
-    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+    expect(mockGenerateObject).toHaveBeenCalledTimes(4);
   });
 
   it("includes scaffold context in the prompt", async () => {
-    mockGenerateObject.mockResolvedValueOnce({
+    mockGenerateObject.mockResolvedValue({
       object: { loreCards: [] },
     });
 
@@ -88,14 +88,13 @@ describe("extractLoreCards", () => {
   });
 
   it("grounds lore extraction in political divergence while preserving untouched canon", async () => {
-    mockGenerateObject.mockResolvedValueOnce({
+    mockGenerateObject.mockResolvedValue({
       object: { loreCards: fakeLoreCards },
     });
 
     await extractLoreCards(
       fakeScaffold,
       fakeRole,
-      undefined,
       {
         franchise: "Naruto",
         keyFacts: [
@@ -139,14 +138,13 @@ describe("extractLoreCards", () => {
   });
 
   it("keeps canonical Star Wars institutions explicit when Order 66 fails", async () => {
-    mockGenerateObject.mockResolvedValueOnce({
+    mockGenerateObject.mockResolvedValue({
       object: { loreCards: fakeLoreCards },
     });
 
     await extractLoreCards(
       fakeScaffold,
       fakeRole,
-      undefined,
       {
         franchise: "Star Wars",
         keyFacts: [
@@ -197,7 +195,7 @@ describe("extractLoreCards", () => {
   });
 
   it("adds the shared character/start guardrail without turning lore extraction into a character generator", async () => {
-    mockGenerateObject.mockResolvedValueOnce({
+    mockGenerateObject.mockResolvedValue({
       object: { loreCards: fakeLoreCards },
     });
 

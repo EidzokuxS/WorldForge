@@ -123,11 +123,13 @@ describe("researchKnownIP", () => {
     });
 
     describe("explicit knownIP field takes priority", () => {
-        it("uses knownIP value directly without LLM franchise detection", async () => {
+        it("treats knownIP as a hint and still extracts the canonical franchise name", async () => {
+            vi.mocked(safeGenerateObject)
+                .mockResolvedValueOnce({ object: { confidence: "certain", franchise: "Custom Franchise", searchQuery: null } } as never)
+                .mockResolvedValueOnce({
+                    object: { franchise: "Custom Franchise", keyFacts: ["fact1"], tonalNotes: ["tone1"] },
+                } as never);
             mockedWebSearch.mockResolvedValue([{ title: "Custom", description: "Custom franchise", url: "https://example.com" }]);
-            vi.mocked(safeGenerateObject).mockResolvedValue({
-                object: { franchise: "Custom Franchise", keyFacts: ["fact1"], tonalNotes: ["tone1"] },
-            } as never);
 
             const result = await researchKnownIP(
                 makeReq({ knownIP: "Custom Franchise", premise: "totally original premise" }),
@@ -136,41 +138,60 @@ describe("researchKnownIP", () => {
 
             expect(result).not.toBeNull();
             expect(result?.franchise).toBe("Custom Franchise");
-            // safeGenerateObject should NOT be called for franchise detection (only for research parsing)
-            // The first call should be research parsing, not detection
+        });
+
+        it("does not reuse long prose from knownIP as the canonical franchise string", async () => {
+            vi.mocked(safeGenerateObject)
+                .mockResolvedValueOnce({
+                    object: {
+                        confidence: "likely",
+                        franchise: "Jujutsu Kaisen",
+                        searchQuery: "Jujutsu Kaisen canon world geography",
+                    },
+                } as never)
+                .mockResolvedValueOnce({
+                    object: {
+                        isKnownIP: true,
+                        franchise: "Jujutsu Kaisen",
+                    },
+                } as never)
+                .mockResolvedValueOnce({
+                    object: {
+                        franchise: "Jujutsu Kaisen",
+                        keyFacts: ["Shibuya is a major Tokyo district."],
+                        tonalNotes: ["Urban occult action"],
+                    },
+                } as never);
+            mockedWebSearch.mockResolvedValue([{ title: "JJK", description: "canon world", url: "https://example.com/jjk" }]);
+
+            const result = await researchKnownIP(
+                makeReq({ knownIP: "Jujutsu Kaisen world, but there's a Naruto power system as well", premise: "Shibuya with chakra users." }),
+                fakeRole,
+            );
+
+            expect(result?.franchise).toBe("Jujutsu Kaisen");
         });
     });
 
-    describe("DDG search failure → LLM fallback", () => {
-        it("falls back to LLM when DDG search fails", async () => {
+    describe("DDG search failure → fail closed", () => {
+        it("throws when grounded web research fails", async () => {
             vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { confidence: "certain", franchise: "Naruto", searchQuery: null } } as never);
             mockedWebSearch.mockRejectedValue(new Error("DDG anomaly"));
-            // LLM fallback research
-            vi.mocked(safeGenerateObject).mockResolvedValue({
-                object: { franchise: "Naruto", keyFacts: ["Ninja world"], tonalNotes: ["Shonen action"] },
-            } as never);
 
-            const result = await researchKnownIP(
+            await expect(researchKnownIP(
                 makeReq({ premise: "A world of ninjas and chakra" }),
                 fakeRole
-            );
-
-            expect(result).not.toBeNull();
-            expect(result?.franchise).toBe("Naruto");
-            expect(result?.source).toBe("llm");
+            )).rejects.toThrow("All focused searches failed");
         });
 
-        it("returns null when both DDG and LLM fallback fail", async () => {
+        it("throws when DDG research fails after franchise detection", async () => {
             vi.mocked(safeGenerateObject).mockResolvedValueOnce({ object: { confidence: "certain", franchise: "Unknown", searchQuery: null } } as never);
             mockedWebSearch.mockRejectedValue(new Error("DDG anomaly"));
-            vi.mocked(safeGenerateObject).mockRejectedValue(new Error("LLM failed"));
 
-            const result = await researchKnownIP(
+            await expect(researchKnownIP(
                 makeReq({ premise: "Obscure franchise" }),
                 fakeRole
-            );
-
-            expect(result).toBeNull();
+            )).rejects.toThrow("All focused searches failed");
         });
     });
 
@@ -236,6 +257,19 @@ describe("researchKnownIP", () => {
                 tonalNotes: ["Shonen action"],
                 source: "mcp" as const,
             };
+            const researchFrame = {
+                version: 1 as const,
+                franchise: "Naruto",
+                premise: "A shinobi world recovering from war.",
+                divergenceMode: "diverged" as const,
+                overlayNotes: ["A chakra overlay intensifies post-war travel routes."],
+                dnaConstraints: ["Geography: Land of Fire frontier routes"],
+                stepFocus: {
+                    locations: ["Geography: Land of Fire frontier routes", "Environment: war-scarred border zones"],
+                    factions: ["Political Structure: village alliances under strain"],
+                    npcs: ["Central Conflict: veterans and prodigies contest the peace"],
+                },
+            };
 
             vi.mocked(safeGenerateObject)
                 .mockResolvedValueOnce({
@@ -264,6 +298,7 @@ describe("researchKnownIP", () => {
                 "A shinobi world recovering from war.",
                 fakeRole,
                 MOCK_RESEARCH_CONFIG,
+                researchFrame,
             );
 
             expect(mockedWebSearch).toHaveBeenCalledTimes(2);
@@ -272,6 +307,9 @@ describe("researchKnownIP", () => {
                 expect.stringMatching(/^Naruto .*major hidden villages/i),
             ]);
             expect(mockedWebSearch.mock.calls.every(([query]) => !String(query).includes("world lore overview"))).toBe(true);
+            const sufficiencyPrompt = vi.mocked(safeGenerateObject).mock.calls[0]?.[0]?.prompt;
+            expect(sufficiencyPrompt).toContain("WORLDGEN RESEARCH FRAME");
+            expect(sufficiencyPrompt).toContain("Geography: Land of Fire frontier routes");
             expect(result.keyFacts).toEqual(
                 expect.arrayContaining([
                     "The Land of Fire contains Konohagakure and key frontier routes.",
@@ -280,39 +318,19 @@ describe("researchKnownIP", () => {
             );
         });
 
-        it("keeps attempted retrieval jobs explicit when focused search falls back to LLM research", async () => {
+        it("keeps attempted retrieval jobs explicit when focused search fails", async () => {
             vi.mocked(safeGenerateObject)
                 .mockResolvedValueOnce({
                     object: { confidence: "certain", franchise: "Naruto", searchQuery: null },
-                } as never)
-                .mockResolvedValueOnce({
-                    object: {
-                        franchise: "Naruto",
-                        keyFacts: ["Konohagakure is a hidden village."],
-                        tonalNotes: ["Shonen action"],
-                        canonicalNames: {
-                            locations: ["Konohagakure"],
-                            factions: ["Akatsuki"],
-                            characters: ["Naruto Uzumaki"],
-                        },
-                    },
                 } as never);
             mockedWebSearch.mockRejectedValue(new Error("search down"));
 
-            const result = await researchKnownIP(
+            await expect(researchKnownIP(
                 makeReq({
                     premise: "A campaign about hidden villages, Akatsuki politics, chakra limits, and the Fourth Shinobi War.",
                 }),
                 fakeRole,
-            );
-
-            expect(result?.source).toBe("llm");
-            const fallbackPrompt = vi.mocked(safeGenerateObject).mock.calls.at(-1)?.[0]?.prompt;
-            expect(fallbackPrompt).toContain("Focused retrieval jobs");
-            expect(fallbackPrompt).toContain("Naruto canonical locations");
-            expect(fallbackPrompt).toContain("Naruto canonical factions");
-            expect(fallbackPrompt).toContain("Naruto canonical power system");
-            expect(fallbackPrompt).not.toContain("Naruto world lore overview wiki");
+            )).rejects.toThrow(/Attempted jobs:/i);
         });
     });
 });
