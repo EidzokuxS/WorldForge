@@ -1,6 +1,0 @@
-{"step":1,"surface":"sse","type":"scene-settling","data":{"phase":"local-present-scene"},"authority":"current player-facing turn is still open"}
-{"step":2,"surface":"sse","type":"finalizing_turn","data":{"stage":"rollback_critical"},"authority":"route is entering required pre-done finalization"}
-{"step":3,"surface":"engine","type":"simulation.proposals.queued","data":{"proposalTypes":["npc_offscreen_updates","npc_reflection_updates","faction_world_updates"],"baseWorldVersion":0},"authority":"state-bearing offscreen work is proposal-only"}
-{"step":4,"surface":"runtime","type":"snapshot.saved","data":{"beforeDone":true},"authority":"retry/undo snapshot exists before client receives done"}
-{"step":5,"surface":"sse","type":"done","data":{"tick":5,"worldVersion":0,"worldTimeMinutes":5},"authority":"client may send the next action against this explicit world boundary"}
-{"step":6,"surface":"auxiliary","type":"embedding.image.cache","data":{"afterDone":true},"authority":"non-authoritative auxiliary artifacts only"}

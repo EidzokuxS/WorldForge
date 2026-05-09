@@ -1,5 +1,0 @@
-{"case":"false-claim","route":"claim","truthStatus":"claimed","expectedFrameLane":"belief","assertion":"A false or unverified claim is delivered as actor-local belief/claim with provenance, not as world truth."}
-{"case":"direct-observation","route":"direct_observation","truthStatus":"observed","expectedFrameLane":"belief","assertion":"Observation records preserve source event ids, authority trace ids, and subject refs before entering an actor frame."}
-{"case":"reflection-belief","route":"belief","truthStatus":"believed","expectedFrameLane":"belief","assertion":"Reflection set_belief updates legacy NPC beliefs and also writes a provenance-rich actor knowledge row."}
-{"case":"rollback-invalidation","route":"memory","truthStatus":"believed","expectedFrameLane":"none-after-restore","assertion":"Knowledge whose base/valid/observed world version is after a restored snapshot is invalidated and filtered from retrieval."}
-{"case":"due-report","route":"report_message","truthStatus":"reported","expectedFrameLane":"report","assertion":"Source-backed reports can be retrieved by structured refs/query and passed into ActorFrame under reports without full history dumping."}

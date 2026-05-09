@@ -34,6 +34,7 @@ yarn-error.log*
 # Tasks (local workflow)
 tasks/
 rpi/
+.planning/
 
 # E2E test artifacts
 e2e/
@@ -41,11 +42,15 @@ qa-results/
 qa-screenshots/
 backend/e2e/
 backend/logs/
+pinchtab/
 
 # Tool configs
+.agents/
 .claude/
+.codex/
 .serena/
 .desloppify/
+.playwright-cli/
 .playwright-mcp/
 scorecard.png
 .gitnexus

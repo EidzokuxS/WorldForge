@@ -1,8 +1,0 @@
-
-> frontend@0.1.0 typecheck
-> npm --prefix ../shared run build && tsc --noEmit -p tsconfig.typecheck.json
-
-
-> @worldforge/shared@0.1.0 build
-> tsc
-

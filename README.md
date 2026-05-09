@@ -10,7 +10,7 @@ You can chase the main disaster, pick a fight with someone stronger than you, be
 
 That is the core fantasy: **a text RPG where the player and the world use the same rules.**
 
-![WorldForge launchpad](output/playwright/worldforge-v4-final/2560-title.png)
+![WorldForge launchpad](docs/assets/readme/launchpad-2560.png)
 
 ## Why This Exists
 
@@ -47,7 +47,7 @@ WorldForge can help turn that into:
 - a player character;
 - an opening scene you can actually play.
 
-![World generation](output/playwright/worldforge-v4-final/2560-worldgen.png)
+![World generation](docs/assets/readme/worldgen-2560.png)
 
 ## How It Feels In Play
 
@@ -70,7 +70,7 @@ Only after the world has been settled does the narrator write the final prose yo
 
 That separation matters. The narrator is not allowed to invent permanent facts just because a sentence would sound cooler. It describes the visible result of the turn.
 
-![Play surface](output/playwright/worldforge-v4-final/2560-play.png)
+![Play surface](docs/assets/readme/play-2560.png)
 
 ## The Living World Idea
 
@@ -104,7 +104,7 @@ It is more like this:
 
 The backend is the part that remembers where people are, what exists, what changed, what is private, and what has been committed. The AI handles meaning, judgment, and improvisation. They are meant to work together instead of pretending one side can do everything.
 
-![World review](output/playwright/worldforge-v4-final/2560-review.png)
+![World review](docs/assets/readme/review-2560.png)
 
 ## Current State
 
