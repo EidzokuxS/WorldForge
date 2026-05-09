@@ -1,14 +1,18 @@
-import { safeGenerateObject as generateObject } from "../../ai/generate-object-safe.js";
+import {
+  isSafeGenerateObjectError,
+  safeGenerateObject as generateObject,
+} from "../../ai/generate-object-safe.js";
 import { z } from "zod";
 import { generateText } from "ai";
 import { createModel } from "../../ai/index.js";
 import {
-  buildIpContextBlock,
   buildKnownIpGenerationContract,
   buildPremiseDivergenceBlock,
   buildSeedConstraints,
   buildStopSlopRules,
+  buildWorldgenResearchContextBlock,
 } from "./prompt-utils.js";
+import { buildPremiseRefinementPromptContract } from "../prompt-contracts.js";
 import type { IpResearchContext } from "../ip-researcher.js";
 import type { GenerateScaffoldRequest } from "../types.js";
 
@@ -46,16 +50,29 @@ export async function generateRefinedPremiseStep(
   additionalInstruction?: string,
 ): Promise<string> {
   const seedConstraints = buildSeedConstraints(req.seeds);
-  const ipBlock = buildIpContextBlock(ipContext);
+  const researchArtifact = req.researchArtifact ?? null;
+  const ipBlock = buildWorldgenResearchContextBlock({
+    researchArtifact,
+    ipContext,
+    target: "refined premise",
+  });
   const premiseDivergence = req.premiseDivergence ?? null;
   const divergenceBlock = buildPremiseDivergenceBlock(premiseDivergence);
-  const knownIpContract = buildKnownIpGenerationContract(
-    ipContext,
-    premiseDivergence,
-    "refined premise",
-  );
+  const knownIpContract = researchArtifact
+    ? ""
+    : buildKnownIpGenerationContract(
+        ipContext,
+        premiseDivergence,
+        "refined premise",
+      );
+  const researchRule = researchArtifact
+    ? "3. If research context is present, summarize the present world state by following its source usage rules. Do not collapse sources into one franchise baseline."
+    : "3. For known IPs: summarize the present world state by combining LEGACY IP REFERENCE + PREMISE DIVERGENCE. Do not fall back to a blind source synopsis or reintroduce changed facts.";
+  const outputContract = buildPremiseRefinementPromptContract();
 
   const prompt = `You are a world-state summarizer for a text RPG engine.
+
+${outputContract}
 
 PLAYER CONCEPT:
 Name: ${req.name}
@@ -67,7 +84,7 @@ YOUR TASK: Write exactly 2-3 sentences describing the current state of this worl
 RULES:
 1. Describe the world AS IT EXISTS RIGHT NOW — not a plot synopsis, not a story hook. What does a bird's-eye view of this world show today?
 2. Preserve every character relationship the user stated VERBATIM. If the user wrote "A trained by B, C by D" — output those exact pairings unchanged. Do not swap, merge, or reinterpret them.
-3. For known IPs: summarize the present world state by combining FRANCHISE REFERENCE + PREMISE DIVERGENCE. Do not fall back to a blind canon synopsis or reintroduce changed facts.
+${researchRule}
 4. If WORLD DNA constraints are listed above, weave ALL of them into the premise. None may be omitted.
 5. Preserve unchanged canon explicitly when it matters. Only alter facts, roles, allegiances, or relationships that the divergence block says have changed.
 6. Do not write hooks like "but little do they know..." or "the stage is set for...". State facts about the world's current condition.${additionalInstruction ? `\n\nADDITIONAL USER INSTRUCTION:\n${additionalInstruction}` : ""}
@@ -87,12 +104,7 @@ ${buildStopSlopRules()}`;
 
     return result.object.refinedPremise;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const shouldRetryAsText =
-      message.includes("safeGenerateObject fallback: invalid JSON")
-      || message.includes("safeGenerateObject fallback: Zod validation failed");
-
-    if (!shouldRetryAsText) {
+    if (!isSafeGenerateObjectError(error)) {
       throw error;
     }
 

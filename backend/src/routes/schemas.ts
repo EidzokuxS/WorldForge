@@ -2,14 +2,19 @@ import { z } from "zod";
 import {
   CHARACTER_SKILL_TIERS,
   CHARACTER_WEALTH_TIERS,
+  AP_DURABILITY_TIERS,
+  SPEED_TIERS,
+  INTELLIGENCE_TIERS,
+  normalizeApDurTier,
+  normalizeSpeedTier,
+  normalizeIntelligenceTier,
 } from "@worldforge/shared";
 import type {
-  CharacterGroundingProfile,
+  CharacterDraft,
   CharacterRecord,
   CanonicalLoadoutPreview,
   PersonaTemplate,
   PersonaTemplateSummary,
-  PowerProfile,
   ResolvedStartConditions,
 } from "@worldforge/shared";
 import {
@@ -20,6 +25,7 @@ import {
   toLegacyNpcDraft,
   toLegacyPlayerCharacter,
 } from "../character/record-adapters.js";
+import { worldgenResearchArtifactSchema } from "../worldgen/research-artifact.js";
 import { LORE_CATEGORIES } from "../worldgen/types.js";
 import { WORLDBOOK_ENTRY_TYPES } from "../worldgen/worldbook-importer.js";
 
@@ -68,6 +74,23 @@ const roleConfigSchema = z.object({
   maxTokens: z.number().int().default(1024),
 });
 
+// --- Observability (Phase 58) ---
+
+export const observabilityRoleTogglesSchema = z.object({
+  judge: z.boolean(),
+  storyteller: z.boolean(),
+  oracle: z.boolean(),
+  npcAgent: z.boolean(),
+  reflection: z.boolean(),
+  embedder: z.boolean(),
+}).strip();
+
+export const observabilityConfigSchema = z.object({
+  enabled: z.boolean(),
+  dumpFullPrompts: z.boolean(),
+  roles: observabilityRoleTogglesSchema,
+}).strip();
+
 export const settingsPayloadSchema = z.object({
   providers: z.array(providerSchema),
   judge: roleConfigSchema,
@@ -90,7 +113,58 @@ export const settingsPayloadSchema = z.object({
   ui: z.object({
     showRawReasoning: z.boolean(),
   }).strip(),
+  observability: observabilityConfigSchema.optional(),
 }).strip();
+
+// --- VS Battles Power Scaling schemas (Phase 57) ---
+
+const coercedApDurTierSchema = z.preprocess(
+  (val) => {
+    if (typeof val !== "string") return val;
+    return normalizeApDurTier(val) ?? val;
+  },
+  z.enum(AP_DURABILITY_TIERS),
+);
+
+const coercedSpeedTierSchema = z.preprocess(
+  (val) => {
+    if (typeof val !== "string") return val;
+    return normalizeSpeedTier(val) ?? val;
+  },
+  z.enum(SPEED_TIERS),
+);
+
+const coercedIntelligenceTierSchema = z.preprocess(
+  (val) => {
+    if (typeof val !== "string") return val;
+    return normalizeIntelligenceTier(val) ?? val;
+  },
+  z.enum(INTELLIGENCE_TIERS),
+);
+
+export const tierRankSchema = <T extends z.ZodTypeAny>(tierSchema: T) =>
+  z.object({ tier: tierSchema, rank: z.number().int().min(1).max(10) });
+
+export const haxAbilitySchema = z.object({
+  name: z.string().min(1),
+  type: z.string().min(1),
+  bypassTier: coercedApDurTierSchema.nullable(),
+  limitations: z.array(z.string()),
+});
+
+export const characterVulnerabilitySchema = z.object({
+  description: z.string().min(1),
+  severity: z.enum(["minor", "major", "critical"]),
+});
+
+export const powerStatsSchema = z.object({
+  attackPotency: tierRankSchema(coercedApDurTierSchema),
+  speed: tierRankSchema(coercedSpeedTierSchema),
+  durability: tierRankSchema(coercedApDurTierSchema),
+  intelligence: tierRankSchema(coercedIntelligenceTierSchema),
+  hax: z.array(haxAbilitySchema),
+  vulnerabilities: z.array(characterVulnerabilitySchema),
+});
 
 // --- Endpoint schemas ---
 
@@ -228,9 +302,17 @@ const premiseDivergenceSchema = z.object({
   ambiguityNotes: z.array(z.string()),
 }).nullable().optional();
 
+const worldgenResearchArtifactPayloadSchema = worldgenResearchArtifactSchema.nullable().optional();
+
 export const createCampaignSchema = createCampaignBaseSchema.extend({
   ipContext: ipContextSchema,
   premiseDivergence: premiseDivergenceSchema,
+  worldgenSourceHint: z
+    .string()
+    .transform((s) => s.trim())
+    .pipe(z.string().min(1))
+    .optional(),
+  worldgenResearchEnabled: z.boolean().optional(),
   worldbookSelection: z.array(worldbookSelectionSchema).optional(),
 });
 
@@ -242,6 +324,7 @@ export const suggestSeedSchema = z.object({
   category: seedCategorySchema,
   ipContext: ipContextSchema,
   premiseDivergence: premiseDivergenceSchema,
+  researchArtifact: worldgenResearchArtifactPayloadSchema,
 });
 
 export const generateWorldSchema = z.object({
@@ -251,6 +334,7 @@ export const generateWorldSchema = z.object({
     .pipe(z.string().min(1, "campaignId is required.")),
   ipContext: ipContextSchema,
   premiseDivergence: premiseDivergenceSchema,
+  researchArtifact: worldgenResearchArtifactPayloadSchema,
 });
 
 export const testProviderSchema = z.object({
@@ -313,18 +397,29 @@ const characterIdentityBaseFactsSchema = z.object({
 });
 
 const characterIdentityBehavioralCoreSchema = z.object({
-  motives: z.array(z.string()).default([]),
-  pressureResponses: z.array(z.string()).default([]),
-  taboos: z.array(z.string()).default([]),
+  motives: z.array(z.string()).optional(),
+  pressureResponses: z.array(z.string()).optional(),
+  taboos: z.array(z.string()).optional(),
   attachments: z.array(z.string()).default([]),
   selfImage: z.string().default(""),
 });
 
 const characterIdentityLiveDynamicsSchema = z.object({
+  attachments: z.array(z.string()).default([]),
   activeGoals: z.array(z.string()).default([]),
   beliefDrift: z.array(z.string()).default([]),
   currentStrains: z.array(z.string()).default([]),
   earnedChanges: z.array(z.string()).default([]),
+});
+
+export const characterPersonalitySchema = z.object({
+  summary: z.string().max(400).default(""),
+  voice: z.string().max(600).default(""),
+  decisionStyle: z.string().max(400).default(""),
+  worldview: z.string().max(400).default(""),
+  internalContradictions: z.array(z.string().max(300)).max(5).default([]),
+  personalMythology: z.string().max(400).default(""),
+  sampleLines: z.array(z.string().max(300)).max(3).default([]),
 });
 
 const characterIdentityDraftSchema = z.object({
@@ -345,11 +440,13 @@ const characterIdentityDraftSchema = z.object({
     selfImage: "",
   }),
   liveDynamics: characterIdentityLiveDynamicsSchema.default({
+    attachments: [],
     activeGoals: [],
     beliefDrift: [],
     currentStrains: [],
     earnedChanges: [],
   }),
+  personality: characterPersonalitySchema.optional(),
 });
 
 const characterProfileSchema = z.object({
@@ -387,9 +484,9 @@ const characterMotivationsSchema = z.object({
 });
 
 const characterCapabilitiesSchema = z.object({
-  traits: z.array(z.string()).default([]),
+  traits: z.array(z.string()).optional(),
   skills: z.array(characterSkillSchema).default([]),
-  flaws: z.array(z.string()).default([]),
+  flaws: z.array(z.string()).optional(),
   specialties: z.array(z.string()).default([]),
   wealthTier: characterWealthTierSchema.nullable(),
 });
@@ -419,55 +516,6 @@ export const characterStartConditionsSchema = z.object({
   sourcePrompt: z.string().nullable().optional(),
 });
 
-// D-11/D-13: preserve canon-facing sources and secondary cues while keeping
-// WorldForge's synthesis as the runtime truth.
-const characterSourceCitationSchema = z.object({
-  kind: z.enum(["canon", "card", "research", "runtime"]),
-  label: z.string().min(1),
-  excerpt: z.string().min(1),
-});
-
-const characterSourceBundleSchema = z.object({
-  canonSources: z.array(characterSourceCitationSchema).default([]),
-  secondarySources: z.array(characterSourceCitationSchema).default([]),
-  synthesis: z.object({
-    owner: z.string().min(1).default("worldforge"),
-    strategy: z.string().min(1).default("worldforge-owned-synthesis"),
-    notes: z.array(z.string()).default([]),
-  }),
-});
-
-const characterContinuitySchema = z.object({
-  identityInertia: z.enum(["flexible", "anchored", "strict"]).default("anchored"),
-  protectedCore: z.array(z.string()).default([]),
-  mutableSurface: z.array(z.string()).default([]),
-  changePressureNotes: z.array(z.string()).default([]),
-});
-
-const powerProfileSchema = z.object({
-  attack: z.string().default(""),
-  speed: z.string().default(""),
-  durability: z.string().default(""),
-  range: z.string().default(""),
-  strengths: z.array(z.string()).default([]),
-  constraints: z.array(z.string()).default([]),
-  vulnerabilities: z.array(z.string()).default([]),
-  uncertaintyNotes: z.array(z.string()).default([]),
-}) satisfies z.ZodType<PowerProfile>;
-
-const characterGroundingSchema = z.object({
-  summary: z.string().default(""),
-  facts: z.array(z.string()).default([]),
-  abilities: z.array(z.string()).default([]),
-  constraints: z.array(z.string()).default([]),
-  signatureMoves: z.array(z.string()).default([]),
-  strongPoints: z.array(z.string()).default([]),
-  vulnerabilities: z.array(z.string()).default([]),
-  uncertaintyNotes: z.array(z.string()).default([]),
-  powerProfile: powerProfileSchema.optional(),
-  sources: z.array(characterSourceCitationSchema).default([]),
-}) satisfies z.ZodType<CharacterGroundingProfile>;
-
 export const personaTemplatePatchSchema = z.object({
   identity: z.object({
     role: characterRoleSchema.optional(),
@@ -477,6 +525,7 @@ export const personaTemplatePatchSchema = z.object({
     baseFacts: characterIdentityBaseFactsSchema.partial().optional(),
     behavioralCore: characterIdentityBehavioralCoreSchema.partial().optional(),
     liveDynamics: characterIdentityLiveDynamicsSchema.partial().optional(),
+    personality: characterPersonalitySchema.partial().optional(),
   }).partial().optional(),
   profile: characterProfileSchema.partial().optional(),
   socialContext: characterSocialContextSchema.partial().optional(),
@@ -485,16 +534,7 @@ export const personaTemplatePatchSchema = z.object({
   state: characterStateSchema.partial().optional(),
   loadout: characterLoadoutSchema.partial().optional(),
   startConditions: characterStartConditionsSchema.partial().optional(),
-  sourceBundle: z.object({
-    canonSources: z.array(characterSourceCitationSchema).optional(),
-    secondarySources: z.array(characterSourceCitationSchema).optional(),
-    synthesis: z.object({
-      owner: z.string().min(1).optional(),
-      strategy: z.string().min(1).optional(),
-      notes: z.array(z.string()).optional(),
-    }).partial().optional(),
-  }).partial().optional(),
-  continuity: characterContinuitySchema.partial().optional(),
+  powerStats: powerStatsSchema.partial().optional(),
   provenance: z.object({
     templateId: z.string().nullable().optional(),
     archetypePrompt: z.string().nullable().optional(),
@@ -579,7 +619,7 @@ const characterProvenanceSchema = z.object({
   templateId: z.string().nullable(),
   archetypePrompt: z.string().nullable(),
   worldgenOrigin: z.string().nullable(),
-  legacyTags: z.array(z.string()).default([]),
+  legacyTags: z.array(z.string()).optional(),
 });
 
 export const characterDraftSchema = z.object({
@@ -592,9 +632,7 @@ export const characterDraftSchema = z.object({
   loadout: characterLoadoutSchema,
   startConditions: characterStartConditionsSchema.default({}),
   provenance: characterProvenanceSchema,
-  grounding: characterGroundingSchema.optional(),
-  sourceBundle: characterSourceBundleSchema.optional(),
-  continuity: characterContinuitySchema.optional(),
+  powerStats: powerStatsSchema.optional(),
 });
 
 export const characterRecordSchema = characterDraftSchema.extend({
@@ -618,7 +656,7 @@ const legacyCharacterSchema = z.object({
 
 function materializeDraftRecord(
   campaignId: string,
-  draft: z.infer<typeof characterDraftSchema>,
+  draft: CharacterDraft,
 ) {
   return createCharacterRecordFromDraft(draft, {
     id: `draft:${draft.identity.displayName || "character"}`,
@@ -668,6 +706,7 @@ const scaffoldNpcLegacySchema = z.object({
     longTerm: z.array(z.string()),
   }),
   locationName: z.string(),
+  sceneLocationName: z.string().nullable().optional(),
   factionName: z.string().nullable(),
   tier: z.enum(["key", "supporting"]).optional(),
 });
@@ -713,6 +752,16 @@ function legacyNpcToDraft(
 
 // --- World review schemas ---
 
+const scaffoldLocationSchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  tags: z.array(z.string()),
+  isStarting: z.boolean(),
+  connectedTo: z.array(z.string()),
+  kind: z.enum(["macro", "persistent_sublocation"]).optional(),
+  parentLocationName: z.string().nullable().optional(),
+});
+
 const regenerateSectionBaseSchema = z.object({
   campaignId: z.string().min(1),
   additionalInstruction: z.string().optional(),
@@ -735,17 +784,10 @@ export const regenerateSectionSchema = z.discriminatedUnion("section", [
     section: z.literal("npcs"),
     refinedPremise: z.string().min(1),
     locationNames: z.array(z.string()),
+    locations: z.array(scaffoldLocationSchema).optional(),
     factionNames: z.array(z.string()),
   }),
 ]);
-
-const scaffoldLocationSchema = z.object({
-  name: z.string(),
-  description: z.string(),
-  tags: z.array(z.string()),
-  isStarting: z.boolean(),
-  connectedTo: z.array(z.string()),
-});
 
 const scaffoldFactionSchema = z.object({
   name: z.string(),
@@ -763,6 +805,7 @@ const scaffoldNpcSchema = z
     z.object({
       draft: characterDraftSchema,
       locationName: z.string().optional(),
+      sceneLocationName: z.string().nullable().optional(),
       factionName: z.string().nullable().optional(),
       tier: z.enum(["key", "supporting"]).optional(),
     }),
@@ -783,6 +826,7 @@ const scaffoldNpcSchema = z
         : {
             ...legacyFromDraft,
             locationName: input.locationName ?? legacyFromDraft.locationName,
+            sceneLocationName: input.sceneLocationName ?? legacyFromDraft.sceneLocationName,
             factionName: input.factionName ?? legacyFromDraft.factionName,
             tier: input.tier ?? legacyFromDraft.tier,
             draft: input.draft,
@@ -798,6 +842,7 @@ const scaffoldNpcSchema = z
       return {
         ...legacy,
         locationName: editableNpc.locationName ?? legacy.locationName,
+        sceneLocationName: editableNpc.sceneLocationName,
         factionName: editableNpc.factionName ?? legacy.factionName,
         tier: editableNpc.tier ?? legacy.tier,
         draft: reconciledDraft,
@@ -879,6 +924,11 @@ const characterRoleFields = {
   role: roleField,
   locationNames: z.array(z.string()).optional(),
   factionNames: z.array(z.string()).optional(),
+  overrideText: z
+    .string()
+    .trim()
+    .max(2000, "overrideText must be <= 2000 characters.")
+    .optional(),
 } as const;
 
 const keyRoleLocationRefine = {
@@ -911,8 +961,8 @@ export const importV2CardSchema = z.object({
   personality: z.string().default(""),
   scenario: z.string().default(""),
   tags: z.array(z.string()).default([]),
+  mesExample: z.string().default(""),
   importMode: z.enum(["native", "outsider"]).default("native"),
-  grounding: characterGroundingSchema.optional(),
   ...characterRoleFields,
 }).refine(keyRoleLocationRefine.refinement, keyRoleLocationRefine.options);
 

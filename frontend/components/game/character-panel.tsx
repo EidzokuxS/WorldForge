@@ -11,7 +11,7 @@ interface CharacterPanelProps {
     gender: string;
     age: string;
     appearance: string;
-    hp: number;
+    hp?: number | null;
     tags: string[];
     currentLocationId: string | null;
   } | null;
@@ -29,7 +29,7 @@ function renderItemMeta(item: WorldPlayerInventoryItem): string | null {
   if (item.equippedSlot && !meta.includes(item.equippedSlot)) {
     meta.push(item.equippedSlot);
   }
-  return meta.length > 0 ? meta.join(", ") : null;
+  return meta.length > 0 ? `(${meta.join(", ")})` : null;
 }
 
 export function CharacterPanel({
@@ -58,6 +58,8 @@ export function CharacterPanel({
 
   const sectionLabelClass = "text-[10px] font-medium uppercase tracking-[0.24em] text-zinc-500";
   const itemCardClass = "rounded-2xl border border-white/8 bg-black/20 px-4 py-3";
+  const vitality = typeof player.hp === "number" ? player.hp : null;
+  const clampedVitality = vitality === null ? null : Math.max(0, Math.min(5, vitality));
 
   return (
     <aside className="flex w-full flex-col overflow-hidden rounded-[24px] border border-white/10 bg-white/[0.04] shadow-[0_18px_50px_rgba(0,0,0,0.25)] backdrop-blur-xl xl:h-full">
@@ -95,26 +97,28 @@ export function CharacterPanel({
               </p>
             )}
             <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl border border-white/8 bg-black/20 px-4 py-3">
-                <p className={sectionLabelClass}>Vitality</p>
-                <div className="mt-2 flex items-center gap-1">
-                  {Array.from({ length: 5 }, (_, i) => (
-                    <span
-                      key={i}
-                      className={`text-base ${
-                        i < player.hp
-                          ? "text-red-400 drop-shadow-[0_0_4px_rgba(248,113,113,0.45)]"
-                          : "text-zinc-700"
-                      }`}
-                    >
-                      &#9829;
+              {clampedVitality !== null ? (
+                <div className="rounded-2xl border border-white/8 bg-black/20 px-4 py-3">
+                  <p className={sectionLabelClass}>Vitality</p>
+                  <div className="mt-2 flex items-center gap-1">
+                    {Array.from({ length: 5 }, (_, i) => (
+                      <span
+                        key={i}
+                        className={`text-base ${
+                          i < clampedVitality
+                            ? "text-red-400 drop-shadow-[0_0_4px_rgba(248,113,113,0.45)]"
+                            : "text-zinc-700"
+                        }`}
+                      >
+                        &#9829;
+                      </span>
+                    ))}
+                    <span className="ml-1 text-xs text-zinc-500">
+                      {vitality}/5
                     </span>
-                  ))}
-                  <span className="ml-1 text-xs text-zinc-500">
-                    {player.hp}/5
-                  </span>
+                  </div>
                 </div>
-              </div>
+              ) : null}
               {locationName ? (
                 <div className="rounded-2xl border border-white/8 bg-black/20 px-4 py-3">
                   <p className={sectionLabelClass}>Location</p>

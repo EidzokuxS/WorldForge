@@ -7,6 +7,7 @@ import { createDefaultSettings } from "@/lib/settings";
 import type { Settings } from "@/lib/types";
 import { useNewCampaignWizard } from "@/components/title/use-new-campaign-wizard";
 import {
+  CAMPAIGN_NEW_FLOW_CLEARED_EVENT,
   clearCampaignNewFlowSession,
   isCampaignNewFlowSessionEmpty,
   readCampaignNewFlowSession,
@@ -56,7 +57,19 @@ export function CampaignNewFlowProvider({ children }: { children: React.ReactNod
 
   React.useEffect(() => {
     wizard.handleOpenChange(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only open
   }, []);
+
+  React.useEffect(() => {
+    function handleFreshStart() {
+      wizard.resetFlow();
+    }
+
+    window.addEventListener(CAMPAIGN_NEW_FLOW_CLEARED_EVENT, handleFreshStart);
+    return () => {
+      window.removeEventListener(CAMPAIGN_NEW_FLOW_CLEARED_EVENT, handleFreshStart);
+    };
+  }, [wizard]);
 
   React.useEffect(() => {
     const phase =
@@ -78,6 +91,7 @@ export function CampaignNewFlowProvider({ children }: { children: React.ReactNod
       researchEnabled: wizard.researchEnabled,
       selectedWorldbooks: wizard.selectedWorldbooks,
       dnaState: wizard.dnaState,
+      researchArtifact: wizard.researchArtifact,
       step: wizard.step,
       phase,
       generationProgress: wizard.generationProgress,
@@ -98,6 +112,7 @@ export function CampaignNewFlowProvider({ children }: { children: React.ReactNod
     wizard.generationProgress,
     wizard.isGenerating,
     wizard.isSuggesting,
+    wizard.researchArtifact,
     wizard.researchEnabled,
     wizard.selectedWorldbooks,
     wizard.step,

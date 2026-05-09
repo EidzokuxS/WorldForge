@@ -212,31 +212,77 @@ export function ProvidersTab({ settings, setSettings }: ProvidersTabProps) {
 
   return (
     <>
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          Manage AI provider endpoints and API keys.
-        </p>
-        <Button onClick={openCreateProviderDialog}>
-          <Plus className="h-4 w-4" />
-          Add Provider
-        </Button>
-      </div>
+      <section className="wf-set-group">
+        <div className="wf-set-group-head">
+          <div>
+            <h2 className="wf-set-group-h">Providers</h2>
+            <p className="wf-set-group-sub">
+              Connect model endpoints once, then assign them to engine roles.
+            </p>
+          </div>
+          <Button className="wf-settings-primary-action" onClick={openCreateProviderDialog}>
+            <Plus className="h-4 w-4" />
+            Add Provider
+          </Button>
+        </div>
 
-      <div className="space-y-[clamp(12px,1vw,20px)]">
-        {settings.providers.map((provider) => (
-          <div key={provider.id} className="rounded-lg border border-border/40 p-[clamp(16px,1.4vw,28px)]">
-            <div className="mb-[clamp(12px,1vw,20px)] flex items-start justify-between gap-3">
-              <div>
-                <div className="text-[clamp(14px,1vw,18px)] font-semibold text-bone">{provider.name}</div>
-                <div className="mt-0.5 text-[clamp(11px,0.75vw,13px)] text-muted-foreground">
-                  {provider.baseUrl}
-                </div>
+        <div className="wf-provider-grid" aria-label="Configured providers">
+          {settings.providers.map((provider) => (
+            <button
+              key={provider.id}
+              type="button"
+              className="wf-provider-summary-card"
+              data-status={provider.apiKey ? "connected" : "configured"}
+              onClick={() => openEditProviderDialog(provider)}
+            >
+              <div className="wf-provider-card-head">
+                <span className="wf-provider-card-h">{provider.name}</span>
+                <span className="wf-provider-card-pill">
+                  {provider.isBuiltin ? "built-in" : "custom"}
+                </span>
               </div>
-              <Badge variant={provider.isBuiltin ? "secondary" : "outline"}>
-                {provider.isBuiltin ? "Built-in" : "Custom"}
-              </Badge>
+              <div className="wf-provider-card-sub">
+                {provider.isBuiltin
+                  ? `Built-in ${provider.name} endpoint preset.`
+                  : "Custom OpenAI-compatible endpoint."}
+              </div>
+              <div className="wf-provider-card-meta">
+                {provider.baseUrl} · {provider.defaultModel || "provider default"}
+              </div>
+            </button>
+          ))}
+
+          <button
+            type="button"
+            className="wf-provider-summary-card"
+            data-kind="add"
+            onClick={openCreateProviderDialog}
+          >
+            <div className="wf-provider-card-head">
+              <span className="wf-provider-card-h">+ Custom provider</span>
             </div>
-            <div className="space-y-[clamp(8px,0.7vw,14px)]">
+            <div className="wf-provider-card-sub">
+              Add an OpenAI-compatible base URL, API key, and model.
+            </div>
+            <div className="wf-provider-card-meta">base url · api key · model</div>
+          </button>
+        </div>
+
+        <div className="wf-set-subhead">Provider details</div>
+
+        <div className="wf-settings-list">
+          {settings.providers.map((provider) => (
+            <div key={provider.id} className="wf-set-card wf-provider-detail-card">
+              <div className="wf-set-card-head">
+                <div>
+                  <div className="wf-set-card-h">{provider.name}</div>
+                  <div className="wf-set-card-sub">{provider.baseUrl}</div>
+                </div>
+                <Badge className="wf-provider-pill" variant={provider.isBuiltin ? "secondary" : "outline"}>
+                  {provider.isBuiltin ? "Built-in" : "Custom"}
+                </Badge>
+              </div>
+              <div className="wf-settings-form-stack">
               <div className="space-y-1">
                 <Label htmlFor={`default-model-${provider.id}`}>
                   Default Model
@@ -333,6 +379,7 @@ export function ProvidersTab({ settings, setSettings }: ProvidersTabProps) {
           </div>
         ))}
       </div>
+      </section>
 
       <ProviderDialog
         open={dialogOpen}

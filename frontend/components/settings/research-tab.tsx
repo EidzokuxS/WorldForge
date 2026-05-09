@@ -24,19 +24,21 @@ export function ResearchTab({ settings, setSettings }: ResearchTabProps) {
   };
 
   return (
-    <div className="rounded-lg border border-border/40 p-[clamp(16px,1.4vw,28px)]">
-      <div className="mb-[clamp(12px,1vw,20px)]">
-        <div className="text-[clamp(14px,1vw,18px)] font-semibold">Research Agent</div>
-        <div className="text-[clamp(11px,0.75vw,13px)] text-muted-foreground">
-          Configure the AI research agent that supports world formation,
-          character grounding, and live clarification for known IP campaigns.
+    <section className="wf-set-group">
+      <div className="wf-set-group-head">
+        <div>
+          <h2 className="wf-set-group-h">Research</h2>
+          <p className="wf-set-group-sub">
+            Configure the AI research agent that supports world formation,
+            character grounding, and live clarification for known IP campaigns.
+          </p>
         </div>
       </div>
-      <div className="space-y-[clamp(8px,0.7vw,14px)]">
-        <div className="flex items-center justify-between">
+      <div className="wf-settings-list">
+        <div className="wf-set-row">
           <div>
-            <p className="text-sm font-medium">Enable research agent</p>
-            <p className="text-xs text-muted-foreground">
+            <p className="wf-set-row-h">Enable research agent</p>
+            <p className="wf-set-row-sub">
               When enabled, the system can research canon during world
               formation, resolve character grounding, and answer live
               clarification lookups in play.
@@ -53,7 +55,14 @@ export function ResearchTab({ settings, setSettings }: ResearchTabProps) {
           />
         </div>
 
-        <div className="max-w-xs space-y-2">
+        <div className="wf-set-row">
+          <div>
+            <div className="wf-set-row-h">Max search steps</div>
+            <div className="wf-set-row-sub">
+              Maximum number of search iterations, clamped from 1 to 100.
+            </div>
+          </div>
+          <div className="wf-settings-control-stack">
           <Label htmlFor="maxSearchSteps">Max search steps</Label>
           <Input
             id="maxSearchSteps"
@@ -77,9 +86,15 @@ export function ResearchTab({ settings, setSettings }: ResearchTabProps) {
             Maximum number of search iterations the research agent can perform
             (1–100).
           </p>
+          </div>
         </div>
 
-        <div className="max-w-xs space-y-2">
+        <div className="wf-set-row">
+          <div>
+            <div className="wf-set-row-h">Search Provider</div>
+            <div className="wf-set-row-sub">Backend source for franchise research.</div>
+          </div>
+          <div className="wf-settings-control-stack">
           <Label htmlFor="searchProvider">Search Provider</Label>
           <Select
             value={settings.research.searchProvider ?? "brave"}
@@ -106,10 +121,16 @@ export function ResearchTab({ settings, setSettings }: ResearchTabProps) {
             Search backend for franchise research. Brave requires a free API key.
             DuckDuckGo may be blocked. Z.AI uses MCP tool calling.
           </p>
+          </div>
         </div>
 
         {settings.research.searchProvider === "brave" && (
-          <div className="max-w-xs space-y-2">
+          <div className="wf-set-row">
+            <div>
+              <div className="wf-set-row-h">Brave Search API Key</div>
+              <div className="wf-set-row-sub">Credential for Brave Search API.</div>
+            </div>
+            <div className="wf-settings-control-stack">
             <Label htmlFor="braveApiKey">Brave Search API Key</Label>
             <Input
               id="braveApiKey"
@@ -138,11 +159,17 @@ export function ResearchTab({ settings, setSettings }: ResearchTabProps) {
               </a>
               {" "}— $5 free credits/month (~1000 searches).
             </p>
+            </div>
           </div>
         )}
 
         {settings.research.searchProvider === "zai" && (
-          <div className="max-w-xs space-y-2">
+          <div className="wf-set-row">
+            <div>
+              <div className="wf-set-row-h">Z.AI API Key</div>
+              <div className="wf-set-row-sub">Credential for Z.AI search MCP.</div>
+            </div>
+            <div className="wf-settings-control-stack">
             <Label htmlFor="zaiApiKey">Z.AI API Key</Label>
             <Input
               id="zaiApiKey"
@@ -170,9 +197,10 @@ export function ResearchTab({ settings, setSettings }: ResearchTabProps) {
                 z.ai
               </a>
             </p>
+            </div>
           </div>
         )}
       </div>
-    </div>
+    </section>
   );
 }

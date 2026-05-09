@@ -27,8 +27,10 @@ vi.mock("../../db/schema.js", () => ({
     _name: "location_recent_events",
     campaignId: "location_recent_events.campaignId",
   },
+  items: { _name: "items", campaignId: "items.campaignId" },
   factions: { _name: "factions" },
   npcs: { _name: "npcs" },
+  players: { _name: "players", campaignId: "players.campaignId" },
   relationships: { _name: "relationships", campaignId: "relationships.campaignId" },
 }));
 
@@ -85,8 +87,14 @@ vi.mock("../../db/index.js", () => ({
 }));
 
 // ---- Import after mocks ----
+import type { PowerStats } from "@worldforge/shared";
 import { saveScaffoldToDb } from "../scaffold-saver.js";
 import type { WorldScaffold } from "../types.js";
+import {
+  DENSE_LOCATION_EXPECTED,
+  makeDenseLocationScaffold,
+  type DenseLocationWorldScaffold,
+} from "./fixtures/dense-location-scaffold.js";
 
 // ---- Test data ----
 function buildScaffold(): WorldScaffold {
@@ -203,6 +211,54 @@ function buildScaffold(): WorldScaffold {
   };
 }
 
+function getLocationInserts(): Array<Record<string, unknown>> {
+  return dbCalls
+    .filter((c) => c.op === "insert" && c.table === "locations")
+    .map((c) => c.data as Record<string, unknown>);
+}
+
+function getLocationByName(name: string): Record<string, unknown> {
+  const row = getLocationInserts().find((location) => location.name === name);
+  if (!row) {
+    throw new Error(`Missing location insert for ${name}`);
+  }
+  return row;
+}
+
+function getEdgeInserts(): Array<Record<string, unknown>> {
+  return dbCalls
+    .filter((c) => c.op === "insert" && c.table === "location_edges")
+    .map((c) => c.data as Record<string, unknown>);
+}
+
+function getLocationConnectedProjection(
+  locationId: string,
+): string[] {
+  const locationUpdate = dbCalls
+    .filter((c) => c.op === "update" && c.table === "locations")
+    .find((c) => c.where && JSON.stringify(c.where).includes(locationId));
+  if (!locationUpdate) {
+    return [];
+  }
+  return JSON.parse(
+    (locationUpdate.data as Record<string, unknown>).connectedTo as string,
+  ) as string[];
+}
+
+function getNpcInserts(): Array<Record<string, unknown>> {
+  return dbCalls
+    .filter((c) => c.op === "insert" && c.table === "npcs")
+    .map((c) => c.data as Record<string, unknown>);
+}
+
+function getNpcByName(name: string): Record<string, unknown> {
+  const row = getNpcInserts().find((npc) => npc.name === name);
+  if (!row) {
+    throw new Error(`Missing NPC insert for ${name}`);
+  }
+  return row;
+}
+
 describe("saveScaffoldToDb", () => {
   beforeEach(() => {
     dbCalls.length = 0;
@@ -214,9 +270,21 @@ describe("saveScaffoldToDb", () => {
     expect(dbCalls.length).toBeGreaterThan(0);
   });
 
-  it("clearExistingScaffold deletes relationships, npcs, factions, locations in order", () => {
+  it("clearExistingScaffold clears player/item location refs before deleting scaffold tables", () => {
     saveScaffoldToDb("campaign-1", buildScaffold());
+    const playerReset = dbCalls.find(
+      (c) => c.op === "update" && c.table === "players",
+    );
+    const itemReset = dbCalls.find(
+      (c) => c.op === "update" && c.table === "items",
+    );
     const deletes = dbCalls.filter((c) => c.op === "delete");
+
+    expect(playerReset?.data).toEqual({
+      currentLocationId: null,
+      currentSceneLocationId: null,
+    });
+    expect(itemReset?.data).toEqual({ locationId: null });
     expect(deletes.length).toBe(6);
     expect(deletes[0]!.table).toBe("relationships");
     expect(deletes[1]!.table).toBe("npcs");
@@ -246,6 +314,94 @@ describe("saveScaffoldToDb", () => {
     expect(first.expiresAtTick).toBeNull();
     expect(first.archivedAtTick).toBeNull();
     expect(first.connectedTo).toBe("[]");
+  });
+
+  it("persists explicit dense scaffold sublocations with parent ids", () => {
+    saveScaffoldToDb("campaign-1", makeDenseLocationScaffold());
+
+    const macro = getLocationByName(DENSE_LOCATION_EXPECTED.macro);
+    expect(macro.kind).toBe("macro");
+    expect(macro.parentLocationId).toBeNull();
+
+    for (const expected of DENSE_LOCATION_EXPECTED.sublocations) {
+      const sublocation = getLocationByName(expected.name);
+      expect(sublocation.kind).toBe("persistent_sublocation");
+      expect(sublocation.parentLocationId).toBe(macro.id);
+      expect(sublocation.persistence).toBe("persistent");
+      expect(JSON.parse(sublocation.tags as string)).toContain("persistent_sublocation");
+    }
+  });
+
+  it("adds containment travel edges between macro and sublocation rows without relying on connectedTo", () => {
+    const scaffold = makeDenseLocationScaffold();
+    scaffold.locations = scaffold.locations.map((location) => ({
+      ...location,
+      connectedTo: [],
+    }));
+
+    saveScaffoldToDb("campaign-1", scaffold);
+
+    const macro = getLocationByName(DENSE_LOCATION_EXPECTED.macro);
+    const sublocation = getLocationByName("Station Concourse");
+    const edgeInserts = getEdgeInserts();
+    expect(edgeInserts).toContainEqual(
+      expect.objectContaining({
+        fromLocationId: macro.id,
+        toLocationId: sublocation.id,
+      }),
+    );
+    expect(edgeInserts).toContainEqual(
+      expect.objectContaining({
+        fromLocationId: sublocation.id,
+        toLocationId: macro.id,
+      }),
+    );
+    expect(getLocationConnectedProjection(macro.id as string)).toContain(
+      sublocation.id,
+    );
+    expect(getLocationConnectedProjection(sublocation.id as string)).toContain(
+      macro.id,
+    );
+  });
+
+  it("rejects duplicate scaffold location names before persistence maps are built", () => {
+    const scaffold = makeDenseLocationScaffold();
+    scaffold.locations = [
+      scaffold.locations[0]!,
+      {
+        ...scaffold.locations[1]!,
+        name: scaffold.locations[0]!.name,
+      },
+    ];
+
+    expect(() =>
+      saveScaffoldToDb("campaign-1", scaffold as DenseLocationWorldScaffold),
+    ).toThrow(/duplicate scaffold location name/i);
+    expect(dbCalls.some((c) => c.op === "insert" && c.table === "locations")).toBe(
+      false,
+    );
+  });
+
+  it("keeps legacy flat scaffold locations macro-compatible", () => {
+    saveScaffoldToDb("campaign-1", buildScaffold());
+
+    for (const location of getLocationInserts()) {
+      expect(location.kind).toBe("macro");
+      expect(location.parentLocationId).toBeNull();
+      expect(location.persistence).toBe("persistent");
+    }
+  });
+
+  it("rejects persistent sublocations with invalid explicit parent references", () => {
+    const scaffold = makeDenseLocationScaffold();
+    scaffold.locations[1] = {
+      ...scaffold.locations[1]!,
+      parentLocationName: "Missing Parent Location",
+    };
+
+    expect(() =>
+      saveScaffoldToDb("campaign-1", scaffold as DenseLocationWorldScaffold),
+    ).toThrow(/parentLocationName/i);
   });
 
   it("updateAdjacency creates bidirectional compatibility projection", () => {
@@ -348,6 +504,120 @@ describe("saveScaffoldToDb", () => {
     expect(aldric.derivedTags).toBeDefined();
   });
 
+  it("persists NPC broad location and scene placement for persistent sublocations", () => {
+    saveScaffoldToDb("campaign-1", makeDenseLocationScaffold());
+
+    const macro = getLocationByName(DENSE_LOCATION_EXPECTED.macro);
+    const station = getLocationByName("Station Concourse");
+    const warden = getNpcByName("Transit Warden");
+    const characterRecord = JSON.parse(warden.characterRecord as string) as {
+      socialContext: {
+        currentLocationId: string | null;
+        currentLocationName: string | null;
+      };
+    };
+
+    expect(warden.currentLocationId).toBe(macro.id);
+    expect(warden.currentSceneLocationId).toBe(station.id);
+    expect(characterRecord.socialContext).toMatchObject({
+      currentLocationId: macro.id,
+      currentLocationName: DENSE_LOCATION_EXPECTED.macro,
+    });
+  });
+
+  it("persists macro scene placement as broad and scene ids on the macro row", () => {
+    const scaffold = makeDenseLocationScaffold();
+    scaffold.npcs[0] = {
+      ...scaffold.npcs[0]!,
+      locationName: "Market Approach",
+      sceneLocationName: "Market Approach",
+    };
+
+    saveScaffoldToDb("campaign-1", scaffold);
+
+    const market = getLocationByName("Market Approach");
+    const warden = getNpcByName("Transit Warden");
+    expect(warden.currentLocationId).toBe(market.id);
+    expect(warden.currentSceneLocationId).toBe(market.id);
+  });
+
+  it("resolves broad-only sublocation NPC placement to parent macro plus scene id", () => {
+    const scaffold = makeDenseLocationScaffold();
+    scaffold.npcs[0] = {
+      ...scaffold.npcs[0]!,
+      locationName: "Station Concourse",
+      sceneLocationName: null,
+    };
+
+    saveScaffoldToDb("campaign-1", scaffold as DenseLocationWorldScaffold);
+
+    const macro = getLocationByName(DENSE_LOCATION_EXPECTED.macro);
+    const station = getLocationByName("Station Concourse");
+    const warden = getNpcByName("Transit Warden");
+    const characterRecord = JSON.parse(warden.characterRecord as string) as {
+      socialContext: {
+        currentLocationId: string | null;
+        currentLocationName: string | null;
+      };
+    };
+    expect(warden.currentLocationId).toBe(macro.id);
+    expect(warden.currentSceneLocationId).toBe(station.id);
+    expect(characterRecord.socialContext).toMatchObject({
+      currentLocationId: macro.id,
+      currentLocationName: DENSE_LOCATION_EXPECTED.macro,
+    });
+  });
+
+  it("persists sibling sublocation NPCs under one broad macro with distinct scene ids", () => {
+    saveScaffoldToDb("campaign-1", makeDenseLocationScaffold());
+
+    const macro = getLocationByName(DENSE_LOCATION_EXPECTED.macro);
+    const rooftop = getLocationByName("Rooftop Service Corridor");
+    const platform = getLocationByName("Underground Platform");
+    const runner = getNpcByName("Signal Runner");
+    const medic = getNpcByName("Platform Medic");
+
+    expect(runner.currentLocationId).toBe(macro.id);
+    expect(medic.currentLocationId).toBe(macro.id);
+    expect(runner.currentSceneLocationId).toBe(rooftop.id);
+    expect(medic.currentSceneLocationId).toBe(platform.id);
+    expect(runner.currentSceneLocationId).not.toBe(medic.currentSceneLocationId);
+  });
+
+  it("rejects scene sublocation placement when explicit broad location conflicts with parent macro", () => {
+    const scaffold = makeDenseLocationScaffold();
+    scaffold.npcs[0] = {
+      ...scaffold.npcs[0]!,
+      locationName: "Market Approach",
+      sceneLocationName: "Station Concourse",
+    };
+
+    expect(() =>
+      saveScaffoldToDb("campaign-1", scaffold as DenseLocationWorldScaffold),
+    ).toThrow(/sceneLocationName.*locationName|locationName.*sceneLocationName/i);
+  });
+
+  it("rejects invalid explicit sceneLocationName before NPC persistence", () => {
+    const scaffold = makeDenseLocationScaffold();
+    scaffold.npcs[0] = {
+      ...scaffold.npcs[0]!,
+      sceneLocationName: "Missing Service Tunnel",
+    };
+
+    expect(() =>
+      saveScaffoldToDb("campaign-1", scaffold as DenseLocationWorldScaffold),
+    ).toThrow(/sceneLocationName/i);
+    expect(getNpcInserts()).toHaveLength(0);
+  });
+
+  it("keeps omitted sceneLocationName compatible with legacy broad-only placement", () => {
+    saveScaffoldToDb("campaign-1", buildScaffold());
+
+    const aldric = getNpcByName("Captain Aldric");
+    expect(aldric.currentLocationId).toBe(getLocationByName("Castle Keep").id);
+    expect(aldric.currentSceneLocationId).toBeNull();
+  });
+
   it("draft-backed NPC edit convergence keeps save/load/world-payload round-trip fields aligned at the persistence seam", () => {
     const scaffold = buildScaffold();
     scaffold.npcs[0] = {
@@ -418,6 +688,76 @@ describe("saveScaffoldToDb", () => {
       shortTermGoals: ["Fortify the village", "Brief the scouts"],
       longTermGoals: ["Keep the refugees alive", "Break the siege"],
     });
+  });
+
+  it("reconcileDraftBackedScaffoldNpc preserves draft.powerStats on supporting-tier round-trip", () => {
+    const scaffold = buildScaffold();
+    const supportingPowerStats: PowerStats = {
+      attackPotency: { tier: "Wall", rank: 4 },
+      speed: { tier: "Superhuman", rank: 3 },
+      durability: { tier: "Wall", rank: 4 },
+      intelligence: { tier: "Gifted", rank: 6 },
+      hax: [
+        {
+          name: "Hidden Route Memory",
+          type: "Information Analysis",
+          bypassTier: null,
+          limitations: ["Only applies to paths Mira has walked before"],
+        },
+      ],
+      vulnerabilities: [
+        {
+          description: "Breaks rhythm when cut off from landmarks.",
+          severity: "major" as const,
+        },
+      ],
+    };
+
+    scaffold.npcs[1] = {
+      ...scaffold.npcs[1]!,
+      draft: {
+        ...scaffold.npcs[0]!.draft!,
+        identity: {
+          ...scaffold.npcs[0]!.draft!.identity,
+          tier: "supporting",
+          displayName: "Mira the Wanderer",
+        },
+        profile: {
+          ...scaffold.npcs[0]!.draft!.profile,
+          personaSummary: "A mysterious traveler with no allegiance.",
+        },
+        socialContext: {
+          ...scaffold.npcs[0]!.draft!.socialContext,
+          factionName: null,
+          currentLocationId: null,
+          currentLocationName: "Unknown Village",
+        },
+        motivations: {
+          ...scaffold.npcs[0]!.draft!.motivations,
+          shortTermGoals: ["Find shelter"],
+          longTermGoals: ["Discover the truth"],
+        },
+        powerStats: supportingPowerStats,
+      },
+    };
+
+    saveScaffoldToDb("campaign-1", scaffold);
+
+    const npcInserts = dbCalls.filter(
+      (c) => c.op === "insert" && c.table === "npcs",
+    );
+    const persistedNpc = npcInserts.find(
+      (c) => (c.data as Record<string, unknown>).name === "Mira the Wanderer",
+    )!.data as Record<string, unknown>;
+    const characterRecord = JSON.parse(persistedNpc.characterRecord as string) as {
+      identity: {
+        tier: string;
+      };
+      powerStats?: typeof supportingPowerStats;
+    };
+
+    expect(characterRecord.identity.tier).toBe("supporting");
+    expect(characterRecord.powerStats).toEqual(supportingPowerStats);
   });
 
   it("persists worldgen NPCs without synthetic grounding or power profiles", () => {
@@ -495,6 +835,25 @@ describe("saveScaffoldToDb", () => {
     expect(rel.reason).toContain("Iron Guard");
   });
 
+  it("deduplicates membership relationships when duplicate scaffold NPC names resolve to the same entity", () => {
+    const scaffold = buildScaffold();
+    scaffold.npcs.push({
+      ...scaffold.npcs[0]!,
+      persona: "Duplicate source row for the same generated character.",
+    });
+
+    saveScaffoldToDb("campaign-1", scaffold);
+    const relInserts = dbCalls.filter(
+      (c) => c.op === "insert" && c.table === "relationships",
+    );
+    const memberRels = relInserts.filter((c) => {
+      const data = c.data as Record<string, unknown>;
+      return (data.tags as string).includes("Member");
+    });
+
+    expect(memberRels.length).toBe(1);
+  });
+
   it("NPC with no factionName skips membership relationship", () => {
     saveScaffoldToDb("campaign-1", buildScaffold());
     const relInserts = dbCalls.filter(
@@ -528,6 +887,25 @@ describe("saveScaffoldToDb", () => {
     expect(rel.tags).toBe(JSON.stringify(["Controls"]));
     expect(rel.reason).toContain("Iron Guard");
     expect(rel.reason).toContain("Castle Keep");
+  });
+
+  it("deduplicates territory relationships when duplicate scaffold factions resolve to the same entity", () => {
+    const scaffold = buildScaffold();
+    scaffold.factions.push({
+      ...scaffold.factions[0]!,
+      goals: ["Duplicate source row for the same faction."],
+    });
+
+    saveScaffoldToDb("campaign-1", scaffold);
+    const relInserts = dbCalls.filter(
+      (c) => c.op === "insert" && c.table === "relationships",
+    );
+    const territoryRels = relInserts.filter((c) => {
+      const data = c.data as Record<string, unknown>;
+      return (data.tags as string).includes("Controls");
+    });
+
+    expect(territoryRels.length).toBe(1);
   });
 
   it("updates campaign premise via tx.update(campaigns).set({premise, updatedAt})", () => {

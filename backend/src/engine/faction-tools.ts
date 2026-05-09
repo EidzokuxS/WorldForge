@@ -88,6 +88,13 @@ export function createFactionTools(campaignId: string, tick: number) {
               .set({ tags: JSON.stringify(currentTags) })
               .where(eq(table.id, row.id))
               .run();
+            log.event("db.write", {
+              table: "dynamic",
+              subTable: change.entity,
+              op: "update",
+              rowId: row.id,
+              rowName: row.name,
+            });
 
             changes.push(`${change.entity} "${row.name}": +[${change.addTags.join(",")}] -[${change.removeTags.join(",")}]`);
           }
@@ -105,6 +112,12 @@ export function createFactionTools(campaignId: string, tick: number) {
             createdAt: Date.now(),
           })
           .run();
+        log.event("db.write", {
+          table: "chronicle",
+          op: "insert",
+          rowId: entryId,
+          rowName: null,
+        });
 
         if (targetLocation) {
           recordLocationRecentEvent({
@@ -117,6 +130,13 @@ export function createFactionTools(campaignId: string, tick: number) {
           });
         }
 
+        log.event("faction.tick", {
+          action,
+          outcome,
+          targetLocation: targetLocation ?? null,
+          tagChangeCount: changes.length,
+          chronicleEntryId: entryId,
+        });
         log.info(`Faction action: ${action} -> ${changes.length} tag change(s)`);
         return { success: true, changes, chronicleEntryId: entryId };
       },
@@ -166,6 +186,12 @@ export function createFactionTools(campaignId: string, tick: number) {
           .set({ goals: JSON.stringify(goals) })
           .where(eq(factions.id, faction.id))
           .run();
+        log.event("db.write", {
+          table: "factions",
+          op: "update",
+          rowId: faction.id,
+          rowName: faction.name,
+        });
 
         log.info(`Faction "${factionName}": goal updated "${oldGoal}" -> "${newGoal}"`);
         return { updated: true, goals };
@@ -191,6 +217,12 @@ export function createFactionTools(campaignId: string, tick: number) {
             createdAt: Date.now(),
           })
           .run();
+        log.event("db.write", {
+          table: "chronicle",
+          op: "insert",
+          rowId: entryId,
+          rowName: null,
+        });
 
         log.info(`Chronicle entry added: "${text.substring(0, 50)}..."`);
         return { entryId };
@@ -225,6 +257,12 @@ export function createFactionTools(campaignId: string, tick: number) {
             createdAt: Date.now(),
           })
           .run();
+        log.event("db.write", {
+          table: "chronicle",
+          op: "insert",
+          rowId: entryId,
+          rowName: null,
+        });
 
         // 2. Apply event tag to affected locations
         let locationsAffected = 0;
@@ -254,6 +292,12 @@ export function createFactionTools(campaignId: string, tick: number) {
               .set({ tags: JSON.stringify(currentTags) })
               .where(eq(locations.id, loc.id))
               .run();
+            log.event("db.write", {
+              table: "locations",
+              op: "update",
+              rowId: loc.id,
+              rowName: loc.name,
+            });
 
             locationsAffected++;
 

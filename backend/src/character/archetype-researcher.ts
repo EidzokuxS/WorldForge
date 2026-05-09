@@ -1,10 +1,8 @@
 import { generateText, stepCountIs, type ToolSet } from "ai";
 import { createModel } from "../ai/index.js";
-import type { CharacterDraft, CharacterGroundingProfile } from "@worldforge/shared";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import type { ResearchConfig } from "@worldforge/shared";
-import { createLogger, withMcpClient } from "../lib/index.js";
-import { synthesizeGroundedCharacterProfile } from "./grounded-character-profile.js";
+import { createLogger, withSearchMcp } from "../lib/index.js";
 
 const log = createLogger("archetype-researcher");
 
@@ -18,13 +16,14 @@ export async function researchArchetype(opts: {
   const maxSteps = opts.research.maxSearchSteps ?? 3;
 
   try {
-    return await withMcpClient(
+    return await withSearchMcp(
+      opts.research.searchProvider,
       async (tools: ToolSet) => {
         const result = await generateText({
           model: createModel(opts.role.provider),
           tools,
           stopWhen: stepCountIs(maxSteps),
-          prompt: `Research the character archetype "${opts.archetype}" to support a shared CharacterDraft pipeline. Summarize the archetype in sections that feed canonical drafting: profile, motivations, capabilities, background hooks, social context cues, and signature traits. Keep the summary concrete enough to inspire an original RPG character without copying canon wholesale.`,
+          prompt: `Research the character archetype "${opts.archetype}" to support a shared CharacterDraft pipeline. Summarize the archetype in sections that feed canonical drafting: profile, motivations, capabilities, background hooks, social context cues, signature traits, personality, voice samples (direct quotes if canon, paraphrased otherwise), decision style, worldview, notable contradictions, and mythology phrase. Keep the summary concrete enough to inspire an original RPG character without copying canon wholesale.`,
           temperature: opts.role.temperature,
         });
         if (result.text?.trim()) return result.text;
@@ -37,37 +36,9 @@ export async function researchArchetype(opts: {
   }
 }
 
-export function synthesizeArchetypeGrounding(opts: {
-  archetype: string;
-  draft: CharacterDraft;
-  researchContext: string | null;
-}): CharacterGroundingProfile | undefined {
-  if (!opts.researchContext?.trim()) {
-    return undefined;
-  }
-
-  return synthesizeGroundedCharacterProfile({
-    draft: opts.draft,
-    summaryHint: `${opts.archetype}: ${firstNonEmpty([
-      opts.researchContext,
-      opts.draft.profile.backgroundSummary,
-      opts.draft.profile.personaSummary,
-    ])}`,
-    evidenceText: opts.researchContext,
-    evidenceKind: "research",
-    evidenceLabel: "Archetype research",
-    uncertaintyNotes: [
-      "Archetype research grounding is limited to the retrieved summary plus stored character evidence.",
-    ],
-  });
-}
-
-function firstNonEmpty(values: Array<string | null | undefined>): string {
-  for (const value of values) {
-    if (value?.trim()) {
-      return value.trim();
-    }
-  }
-
-  return "Grounded character profile";
-}
+// synthesizeArchetypePowerStats removed in Phase 60-04: PowerStats assessment
+// is now performed by the ingestion pipeline's Stage 4 dispatcher
+// (backend/src/character/ingestion/power-assessor.ts), which routes through
+// either enrichKnownIpWorldgenNpcDraft (canon) or assessOriginalCharacterPowerStats
+// (original/imported). The old fail-closed `undefined` return was a placeholder
+// that never belonged in the pipeline-era runtime.

@@ -16,6 +16,8 @@ Characters no longer operate as flat tag bags. The authoritative layer is a stru
 
 This is the active replacement for the old “tag-based system” claim. Tags are still useful, but they are no longer the whole ontology for characters.
 
+Phase 63 adds a first-class `personality` block to character identity. The authored fields are `summary`, `voice`, `decisionStyle`, `worldview`, `internalContradictions`, `personalMythology`, and `sampleLines`, giving the runtime a compact interiority model instead of explicit `motives`, `pressureResponses`, and `taboos` lists. Those legacy fields remain readable for migration compatibility, but they are no longer the target shape for newly synthesized identity. On V2/V3 card import, the card's `mes_example` field is parsed into `personality.sampleLines`, so the canonical record keeps actual in-character lines rather than only abstract tags.
+
 ### Minimal Numerics
 
 Only a small number of mechanics remain numeric in the live contract:
@@ -144,8 +146,12 @@ Persistent NPCs have durable world existence. Their canonical records, memories,
 Key characters are the most simulation-heavy NPC tier. They are the main consumers of reflection and world-state carry-through, and their **belief**, **goal**, and **relationship** state is expected to evolve over time through committed events.
 
 **Simulation:**
-- Key characters **present with the player** can act through individual runtime seams during the active turn boundary.
-- Key characters **off-screen** can still receive batched simulation updates, but the resulting committed state must flow back through backend-owned memory, location, and relationship seams rather than existing only as prose.
+- Key characters are represented as durable actor-process rows. Existing `key` NPCs are backfilled into that process table; `persistent` NPCs join it only through explicit promotion; `temporary` NPCs are not silently upgraded.
+- Key characters **present with the player** are classified as before-done work because they can affect the current visible scene.
+- Key characters **off-screen** wake by world time, reports, urgency, deadlines, exposed-scope catch-up, and agency debt rather than by being polled every player turn.
+- Detached/off-screen actor work creates versioned proposals first. The resulting state must commit later through the authority/version seam and flow back through backend-owned memory, location, and relationship records rather than existing only as prose.
+- Present key-character reactions now have an explicit actor decision seam: the scheduler builds an `ActorFrame`, the model returns an `ActorDecisionPacket` that cites only ActorFrame facts, and backend-validated actor tools emit normal authoritative `ToolResult` records. The actor can decide its own visible reaction or movement; it does not narrate the scene, decide for the player, or bypass backend truth.
+- Contested actor-vs-actor or actor-vs-player outcomes use `request_contested_outcome` before the model treats an attack, restraint, escape, pursuit, or defense as settled. The tool returns backend-owned matchup/bounds and records that adjudication as authority; concrete HP, movement, inventory, tag, relationship, or durable-memory changes still require later successful tools.
 
 ### Promotion & Import
 
@@ -200,6 +206,10 @@ An ephemeral location can expire or archive as a node, but its consequences do n
 ## World Engine (Macro-Simulation)
 
 The world still changes independently of the player. Factions act, events happen, and the global situation shifts between turns and across longer horizons.
+
+Current Phase 88 boundary note: detached post-turn macro work is proposal-first. Off-screen NPC ticks, reflection scans, and faction ticks may be queued after the visible turn is settled, but they cannot directly rewrite the already delivered world version. A proposal must still pass base-version, write-scope, and expiry checks before it becomes committed world state.
+
+Key actor scheduling is now separate from old batch polling. The scheduler decides whether an actor sleeps, continues a deterministic plan, requires current-scene before-done handling, or emits a proposal-after-done job. Current-scene actor execution consumes that schedule through validated ActorDecisionPacket/tool-result authority instead of writing state from free prose.
 
 ### Macro Ticks
 
@@ -256,6 +266,7 @@ Temperature is a per-call parameter, not a per-role configuration. This eliminat
 | `remove_tag(entity, tag)` | Remove a tag from any entity |
 | `set_relationship(a, b, tag, reason)` | Set relationship tag between two entities |
 | `set_condition(target, condition)` | Set HP condition (damage/heal via 5-point scale) |
+| `request_contested_outcome(actor, target, mode, intent, stakes)` | Ask backend rules for the allowed/prohibited bounds of an attack, restraint, escape, pursuit, defense, or other active contest. This does not change HP, position, inventory, tags, relationships, or memory by itself. |
 | `add_chronicle_entry(text)` | Add to the World Chronicle |
 | `log_event(text, importance, participants)` | Log a significant event with **caller-supplied importance** and participant names for episodic memory and reflection budget updates |
 | `offer_quick_actions(actions[])` | Generate context-sensitive action buttons for the player |
@@ -269,6 +280,7 @@ The backend deterministically handles inventory transfers, time advancement, can
 | `act(action_text)` | Declare the NPC's action (processed through Oracle like player actions) |
 | `speak(dialogue)` | Say something in the current scene |
 | `move_to(target_node)` | Travel through the authoritative location graph, using resolved pathing and **travel cost**, with already-there movement treated as a zero-cost **no-op** |
+| `request_contested_outcome(actor, target, mode, intent, stakes)` | Request backend-owned bounds before treating an active contest as resolved. Concrete aftermath must be committed by separate tools. |
 | `update_own_goal(old, new)` | Change own short-term or long-term goal |
 
 **Reflection context** (Judge role) — triggered when an NPC's cumulative unprocessed event importance reaches the live threshold **sum >= 10**. Reflection reads same-turn committed evidence first, then merges semantic memory when available. Its default job is structured-state maintenance, not flashy progression:

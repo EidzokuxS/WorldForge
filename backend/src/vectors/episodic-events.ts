@@ -214,6 +214,12 @@ export async function storeEpisodicEvent(
 
   const table = await ensureEpisodicEventsTable();
   await table.add([row as unknown as Record<string, unknown>]);
+  log.event("vector.write", {
+    store: "episodic_events",
+    op: "add",
+    count: 1,
+    rowId: id,
+  });
 
   recordLocationRecentEvent({
     campaignId,
@@ -289,6 +295,12 @@ export async function embedAndUpdateEvent(
   await table.update({
     where: `id = '${eventId}'`,
     values: { vector },
+  });
+  log.event("vector.write", {
+    store: "episodic_events",
+    op: "update",
+    count: 1,
+    rowId: eventId,
   });
 
   log.info(`Embedded episodic event ${eventId} (dim=${vector.length})`);

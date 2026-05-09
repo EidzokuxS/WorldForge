@@ -6,6 +6,11 @@ import {
   type LanguageModelMiddleware,
   wrapLanguageModel,
 } from "ai";
+import {
+  buildStructuredOutputModelMetadata,
+  rememberStructuredOutputModelMetadata,
+  type StructuredOutputTransport,
+} from "./structured-output-capabilities.js";
 
 export type ProviderProtocol = "openai-compatible" | "anthropic-compatible";
 
@@ -106,6 +111,22 @@ export function createModel(
 ): LanguageModel {
   const protocol = resolveProviderProtocol(config);
   const baseURL = normalizeBaseUrl(config.baseUrl);
+  const rememberModelMetadata = (
+    model: LanguageModel,
+    transport: StructuredOutputTransport,
+  ) => {
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: config.id,
+        providerName: config.name,
+        model: config.model,
+        protocol,
+        baseUrl: baseURL,
+        transport,
+      }),
+    );
+  };
 
   if (protocol === "anthropic-compatible") {
     const authToken = config.apiKey.trim().replace(/^Bearer\s+/i, "") || "anthropic";
@@ -116,7 +137,9 @@ export function createModel(
         "x-api-key": authToken,
       },
     });
-    return provider(config.model);
+    const model = provider(config.model);
+    rememberModelMetadata(model, "anthropic-messages");
+    return model;
   }
 
   const provider = createOpenAI({
@@ -127,6 +150,7 @@ export function createModel(
   // Use Chat Completions API (not Responses API) for broad provider compatibility.
   // The Responses API is OpenAI-specific and fails on OpenRouter, Ollama, etc.
   const model = provider.chat(config.model);
+  rememberModelMetadata(model, "chat-completions");
   const bypassReasoning = shouldBypassReasoningForStoryteller(config, options);
 
   if (bypassReasoning) {
@@ -137,8 +161,10 @@ export function createModel(
     return model;
   }
 
-  return wrapLanguageModel({
+  const wrappedModel = wrapLanguageModel({
     model,
     middleware: reasoningMiddleware(),
   });
+  rememberModelMetadata(wrappedModel, "chat-completions");
+  return wrappedModel;
 }

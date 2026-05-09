@@ -4,15 +4,16 @@ import { createModel } from "../ai/index.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import { clampTokens } from "../lib/index.js";
 import type { SeedCategory } from "./seed-roller.js";
-import type { IpResearchContext, PremiseDivergence } from "@worldforge/shared";
+import type { IpResearchContext, PremiseDivergence, WorldgenResearchArtifactV2 } from "@worldforge/shared";
 import { interpretPremiseDivergence } from "./premise-divergence.js";
 import {
   buildCharacterStartGuardrail,
-  buildIpContextBlock,
   buildKnownIpGenerationContract,
   buildPremiseDivergenceBlock,
   buildStopSlopRules,
+  buildWorldgenResearchContextBlock,
 } from "./scaffold-steps/prompt-utils.js";
+import { buildSeedSuggestionPromptContract } from "./prompt-contracts.js";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -24,6 +25,7 @@ export interface SuggestSeedsRequest {
   role: ResolvedRole;
   ipContext?: IpResearchContext | null;
   premiseDivergence?: PremiseDivergence | null;
+  researchArtifact?: WorldgenResearchArtifactV2 | null;
   research?: { enabled: boolean; searchProvider?: string; braveApiKey?: string; zaiApiKey?: string; maxSearchSteps?: number };
 }
 
@@ -88,8 +90,11 @@ export async function suggestWorldSeeds(
   ipContext: IpResearchContext | null;
   premiseDivergence: PremiseDivergence | null;
 }> {
-  const ipContext = req.ipContext ?? null;
-  const premiseDivergence = req.premiseDivergence
+  const researchArtifact = req.researchArtifact ?? null;
+  const ipContext = researchArtifact ? null : req.ipContext ?? null;
+  const premiseDivergence = researchArtifact
+    ? null
+    : req.premiseDivergence
     ?? await interpretPremiseDivergence(ipContext, req.premise, req.role);
   const results: Partial<Record<SeedCategory, DnaCategoryResult>> = {};
   const accumulated: string[] = [];
@@ -97,14 +102,23 @@ export async function suggestWorldSeeds(
   for (const { key, label } of DNA_CATEGORIES) {
     const isCultural = key === "culturalFlavor";
 
-    const ipInstruction = ipContext
-      ? `This world is the ${ipContext.franchise} universe. Define its current ${label.toLowerCase()} by starting from canon and then applying only the interpreted divergence consequences. Use the franchise's own terminology.`
-      : `This is an original world. Generate a specific, concrete ${label.toLowerCase()} that follows logically from the premise.`;
+    const ipInstruction = researchArtifact
+      ? `Use the approved research context below to define the current ${label.toLowerCase()} from the raw premise and artifact-authored source usage rules.`
+      : ipContext
+        ? `This world is the ${ipContext.franchise} universe. Define its current ${label.toLowerCase()} by starting from canon and then applying only the interpreted divergence consequences. Use the franchise's own terminology.`
+        : `This is an original world. Generate a specific, concrete ${label.toLowerCase()} that follows logically from the premise.`;
 
-    const ipBlock = buildIpContextBlock(ipContext);
+    const ipBlock = buildWorldgenResearchContextBlock({
+      researchArtifact,
+      ipContext,
+      target: `${label} DNA`,
+    });
     const divergenceBlock = buildPremiseDivergenceBlock(premiseDivergence);
-    const knownIpContract = buildKnownIpGenerationContract(ipContext, premiseDivergence, `${label} DNA`);
+    const knownIpContract = researchArtifact
+      ? ""
+      : buildKnownIpGenerationContract(ipContext, premiseDivergence, `${label} DNA`);
     const characterStartGuardrail = buildCharacterStartGuardrail();
+    const outputContract = buildSeedSuggestionPromptContract();
 
     const accumulatedSection = accumulated.length > 0
       ? `\nALREADY ESTABLISHED DNA:\n${accumulated.join("\n")}\n\nYour ${label.toLowerCase()} MUST be consistent with the above. Do not contradict established DNA.`
@@ -113,6 +127,8 @@ export async function suggestWorldSeeds(
     const constraint = categoryConstraints[key] ?? "";
 
     const prompt = `You are defining the ${label} of a world for a text RPG engine.
+
+${outputContract}
 
 ${ipInstruction}
 ${constraint ? `${constraint}\n` : ""}${ipBlock}
@@ -179,19 +195,31 @@ export async function suggestSingleSeed(
   }
 ): Promise<string | string[]> {
   const isCultural = req.category === "culturalFlavor";
-  const ipContext = req.ipContext ?? null;
-  const premiseDivergence = req.premiseDivergence
+  const researchArtifact = req.researchArtifact ?? null;
+  const ipContext = researchArtifact ? null : req.ipContext ?? null;
+  const premiseDivergence = researchArtifact
+    ? null
+    : req.premiseDivergence
     ?? await interpretPremiseDivergence(ipContext, req.premise, req.role);
-  const ipBlock = buildIpContextBlock(ipContext);
-  const divergenceBlock = buildPremiseDivergenceBlock(premiseDivergence);
-  const knownIpContract = buildKnownIpGenerationContract(
+  const ipBlock = buildWorldgenResearchContextBlock({
+    researchArtifact,
     ipContext,
-    premiseDivergence,
-    `${req.category} DNA`,
-  );
+    target: `${req.category} DNA`,
+  });
+  const divergenceBlock = buildPremiseDivergenceBlock(premiseDivergence);
+  const knownIpContract = researchArtifact
+    ? ""
+    : buildKnownIpGenerationContract(
+        ipContext,
+        premiseDivergence,
+        `${req.category} DNA`,
+      );
   const characterStartGuardrail = buildCharacterStartGuardrail();
+  const outputContract = buildSeedSuggestionPromptContract();
 
   const prompt = `Define the ${req.category} (${categoryDescriptions[req.category]}) for a text RPG world.
+${outputContract}
+
 ${ipBlock}
 ${knownIpContract ? `${knownIpContract}\n` : ""}${divergenceBlock ? `${divergenceBlock}\n` : ""}
 ${characterStartGuardrail}

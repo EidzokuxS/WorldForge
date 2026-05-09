@@ -10,15 +10,17 @@ import type {
   IpResearchContext,
   PersonaTemplate,
   PremiseDivergence,
+  WorldgenResearchArtifactV2,
   WorldSeeds,
 } from "@worldforge/shared";
 import { parseWorldSeeds } from "../worldgen/index.js";
 import { AppError } from "../lib/index.js";
-import { assertSafeId, CAMPAIGNS_DIR, getCampaignConfigPath, getCampaignDir } from "./paths.js";
+import { assertSafeId, getCampaignsDir, getCampaignConfigPath, getCampaignDir } from "./paths.js";
 import { openVectorDb, closeVectorDb } from "../vectors/index.js";
 import { createLogger } from "../lib/index.js";
 import { ensureCampaignInventoryAuthority } from "../inventory/index.js";
 import type { WorldgenResearchFrame } from "../worldgen/research-frame.js";
+import { parseWorldgenResearchArtifact } from "../worldgen/research-artifact.js";
 
 const log = createLogger("campaign-manager");
 
@@ -31,6 +33,9 @@ type CampaignConfigFile = {
   ipContext?: IpResearchContext;
   premiseDivergence?: PremiseDivergence;
   worldgenResearchFrame?: WorldgenResearchFrame;
+  worldgenResearchArtifact?: WorldgenResearchArtifactV2;
+  worldgenSourceHint?: string;
+  worldgenResearchEnabled?: boolean;
   worldbookSelection?: CampaignWorldbookSelection[];
   personaTemplates?: PersonaTemplate[];
   generationComplete?: boolean;
@@ -42,8 +47,9 @@ type CampaignConfigFile = {
 let activeCampaign: CampaignMeta | null = null;
 
 function ensureCampaignsDir() {
-  if (!fs.existsSync(CAMPAIGNS_DIR)) {
-    fs.mkdirSync(CAMPAIGNS_DIR, { recursive: true });
+  const dir = getCampaignsDir();
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
   }
 }
 
@@ -71,6 +77,17 @@ export function readCampaignConfig(campaignId: string): CampaignConfigFile {
     ipContext: parsed.ipContext ?? undefined,
     premiseDivergence: parsed.premiseDivergence ?? undefined,
     worldgenResearchFrame: parsed.worldgenResearchFrame ?? undefined,
+    worldgenResearchArtifact: parsed.worldgenResearchArtifact
+      ? parseWorldgenResearchArtifact(parsed.worldgenResearchArtifact)
+      : undefined,
+    worldgenSourceHint:
+      typeof parsed.worldgenSourceHint === "string" && parsed.worldgenSourceHint.trim()
+        ? parsed.worldgenSourceHint.trim()
+        : undefined,
+    worldgenResearchEnabled:
+      typeof parsed.worldgenResearchEnabled === "boolean"
+        ? parsed.worldgenResearchEnabled
+        : undefined,
     worldbookSelection: Array.isArray(parsed.worldbookSelection)
       ? parsed.worldbookSelection
       : undefined,
@@ -119,7 +136,7 @@ export function listCampaigns(): CampaignMeta[] {
   ensureCampaignsDir();
 
   const entries = fs
-    .readdirSync(CAMPAIGNS_DIR, { withFileTypes: true })
+    .readdirSync(getCampaignsDir(), { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith("_"));
 
   const campaignsList: CampaignMeta[] = [];
@@ -151,6 +168,8 @@ export async function createCampaign(
   initialContext?: {
     ipContext?: IpResearchContext | null;
     premiseDivergence?: PremiseDivergence | null;
+    worldgenSourceHint?: string | null;
+    worldgenResearchEnabled?: boolean | null;
     worldbookSelection?: CampaignWorldbookSelection[] | null;
   },
 ): Promise<CampaignMeta> {
@@ -193,6 +212,11 @@ export async function createCampaign(
       seeds,
       ipContext: initialContext?.ipContext ?? undefined,
       premiseDivergence: initialContext?.premiseDivergence ?? undefined,
+      worldgenSourceHint: initialContext?.worldgenSourceHint?.trim() || undefined,
+      worldgenResearchEnabled:
+        typeof initialContext?.worldgenResearchEnabled === "boolean"
+          ? initialContext.worldgenResearchEnabled
+          : undefined,
       worldbookSelection: initialContext?.worldbookSelection ?? undefined,
       personaTemplates: [],
       generationComplete: false,
@@ -390,6 +414,33 @@ export function loadWorldgenResearchFrame(campaignId: string): WorldgenResearchF
   try {
     const config = readCampaignConfig(campaignId);
     return config.worldgenResearchFrame ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveWorldgenResearchArtifact(
+  campaignId: string,
+  worldgenResearchArtifact: WorldgenResearchArtifactV2,
+): void {
+  assertSafeId(campaignId);
+  const parsedArtifact = parseWorldgenResearchArtifact(worldgenResearchArtifact);
+  updateCampaignConfig(campaignId, (config) => ({
+    ...config,
+    worldgenResearchArtifact: parsedArtifact,
+  }));
+  log.info(
+    `Saved worldgenResearchArtifact v${parsedArtifact.version} (${parsedArtifact.researchBrief.searchJobs.length} search jobs) to campaign ${campaignId}`,
+  );
+}
+
+export function loadWorldgenResearchArtifact(
+  campaignId: string,
+): WorldgenResearchArtifactV2 | null {
+  assertSafeId(campaignId);
+  try {
+    const config = readCampaignConfig(campaignId);
+    return config.worldgenResearchArtifact ?? null;
   } catch {
     return null;
   }

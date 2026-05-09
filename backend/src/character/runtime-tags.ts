@@ -23,13 +23,13 @@ function skillToTag(skill: CharacterRecord["capabilities"]["skills"][number]) {
 export function deriveRuntimeCharacterTags(record: CharacterRecord): string[] {
   const tags: string[] = [];
 
-  for (const value of record.capabilities.traits) {
+  for (const value of record.capabilities.traits ?? []) {
     pushUnique(tags, value);
   }
   for (const value of record.capabilities.skills) {
     pushUnique(tags, skillToTag(value));
   }
-  for (const value of record.capabilities.flaws) {
+  for (const value of record.capabilities.flaws ?? []) {
     pushUnique(tags, value);
   }
   if (record.capabilities.wealthTier) {

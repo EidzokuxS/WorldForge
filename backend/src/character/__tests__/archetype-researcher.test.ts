@@ -26,13 +26,10 @@ vi.mock("../../lib/index.js", () => ({
     warn: vi.fn(),
     error: vi.fn(),
   })),
-  withMcpClient: vi.fn(async (fn: (tools: unknown) => Promise<unknown>) => fn({})),
+  withSearchMcp: vi.fn(async (_provider: string, fn: (tools: unknown) => Promise<unknown>) => fn({})),
 }));
 
-import {
-  researchArchetype,
-  synthesizeArchetypeGrounding,
-} from "../archetype-researcher.js";
+import { researchArchetype } from "../archetype-researcher.js";
 
 const fakeRole = {
   provider: { id: "test", name: "Test Provider", baseUrl: "https://example.com", apiKey: "sk-test", model: "gpt-4" },
@@ -74,8 +71,8 @@ describe("researchArchetype", () => {
   });
 
   it("returns null when MCP-backed research fails", async () => {
-    const { withMcpClient } = await import("../../lib/index.js");
-    vi.mocked(withMcpClient).mockRejectedValueOnce(new Error("MCP failed"));
+    const { withSearchMcp } = await import("../../lib/index.js");
+    vi.mocked(withSearchMcp).mockRejectedValueOnce(new Error("MCP failed"));
 
     const result = await researchArchetype({
       archetype: "Unknown",
@@ -99,31 +96,13 @@ describe("researchArchetype", () => {
   });
 });
 
-function makeDraft(overrides: Partial<CharacterDraft> = {}): CharacterDraft {
+function makeDraft(): CharacterDraft {
   return {
     identity: {
       role: "player",
       tier: "key",
       displayName: "Captain Mire",
       canonicalStatus: "known_ip_canonical",
-      baseFacts: {
-        biography: "A veteran signal-station commander.",
-        socialRole: ["captain", "warden"],
-        hardConstraints: ["Will not abandon the station"],
-      },
-      behavioralCore: {
-        motives: ["Protect the valley"],
-        pressureResponses: ["Turns colder under pressure"],
-        taboos: ["Will not lie to subordinates"],
-        attachments: ["The station crew"],
-        selfImage: "Guardian of the northern line",
-      },
-      liveDynamics: {
-        activeGoals: ["Hold the barricade"],
-        beliefDrift: ["The valley can still be saved"],
-        currentStrains: ["Running out of supplies"],
-        earnedChanges: [],
-      },
     },
     profile: {
       species: "Human",
@@ -179,80 +158,10 @@ function makeDraft(overrides: Partial<CharacterDraft> = {}): CharacterDraft {
       worldgenOrigin: "known-ip",
       legacyTags: ["legacy"],
     },
-    sourceBundle: {
-      canonSources: [
-        {
-          kind: "canon",
-          label: "Station Chronicle",
-          excerpt: "Captain Mire held the relay through the final evacuation.",
-        },
-      ],
-      secondarySources: [
-        {
-          kind: "card",
-          label: "Community notes",
-          excerpt: "Voice is clipped, exhausted, and iron-hard.",
-        },
-      ],
-      synthesis: {
-        owner: "worldforge",
-        strategy: "canon-forward",
-        notes: ["Merged canon history with voice cues."],
-      },
-    },
-    continuity: {
-      identityInertia: "anchored",
-      protectedCore: ["Will not abandon the station"],
-      mutableSurface: ["Trust in the player"],
-      changePressureNotes: ["Repeated defeats may break command certainty."],
-    },
-    ...overrides,
   };
 }
 
-describe("synthesizeArchetypeGrounding", () => {
-  it("converts research context into durable canon and power grounding", () => {
-    const grounding = synthesizeArchetypeGrounding({
-      archetype: "Signal-station commander",
-      researchContext:
-        "Captain Mire is known for holding the northern relay through repeated sieges. Canon sources stress battlefield command, relay tactics, and a refusal to abandon civilians.",
-      draft: makeDraft(),
-    });
-
-    expect(grounding).toBeDefined();
-    expect(grounding?.summary).toContain("Signal-station commander");
-    expect(grounding?.facts).toContain("A veteran signal-station commander.");
-    expect(grounding?.signatureMoves).toEqual(
-      expect.arrayContaining(["Signal doctrine", "Command under siege"]),
-    );
-    expect(grounding?.powerProfile?.strengths).toEqual(
-      expect.arrayContaining(["Disciplined", "Tactical"]),
-    );
-    expect(grounding?.powerProfile?.constraints).toEqual(
-      expect.arrayContaining(["Will not abandon the station"]),
-    );
-    expect(grounding?.sources).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ kind: "canon", label: "Station Chronicle" }),
-        expect.objectContaining({ kind: "research", label: "Archetype research" }),
-      ]),
-    );
-    expect(grounding?.uncertaintyNotes).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining("limited to the retrieved summary"),
-      ]),
-    );
-  });
-
-  it("fails closed when no research summary is available", () => {
-    const grounding = synthesizeArchetypeGrounding({
-      archetype: "Unknown wanderer",
-      researchContext: null,
-      draft: makeDraft({
-        sourceBundle: undefined,
-      }),
-    });
-
-    expect(grounding).toBeUndefined();
-  });
-});
+// describe("synthesizeArchetypePowerStats") removed in Phase 60-04: the function
+// was deleted. PowerStats assessment is now performed by the ingestion pipeline's
+// Stage 4 dispatcher (backend/src/character/ingestion/power-assessor.ts). See
+// ingestion/__tests__/power-assessor.test.ts and assess-original.test.ts.

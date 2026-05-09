@@ -33,6 +33,7 @@ function mergeIdentity(
     baseFacts,
     behavioralCore,
     liveDynamics,
+    personality,
     ...identityPatch
   } = patch;
 
@@ -54,47 +55,22 @@ function mergeIdentity(
       selfImage: "",
     }, behavioralCore),
     liveDynamics: mergeDefined(base.liveDynamics ?? {
+      attachments: [],
       activeGoals: [],
       beliefDrift: [],
       currentStrains: [],
       earnedChanges: [],
     }, liveDynamics),
+    personality: mergeDefined(base.personality ?? {
+      summary: "",
+      voice: "",
+      decisionStyle: "",
+      worldview: "",
+      internalContradictions: [],
+      personalMythology: "",
+      sampleLines: [],
+    }, personality),
   };
-}
-
-function mergeSourceBundle(
-  base: CharacterDraft["sourceBundle"],
-  patch?: CharacterDraftPatch["sourceBundle"],
-): CharacterDraft["sourceBundle"] {
-  if (!base && !patch) {
-    return undefined;
-  }
-
-  return {
-    canonSources: patch?.canonSources ?? base?.canonSources ?? [],
-    secondarySources: patch?.secondarySources ?? base?.secondarySources ?? [],
-    synthesis: mergeDefined(base?.synthesis ?? {
-      owner: "WorldForge",
-      strategy: "",
-      notes: [],
-    }, patch?.synthesis),
-  };
-}
-
-function mergeContinuity(
-  base: CharacterDraft["continuity"],
-  patch?: CharacterDraftPatch["continuity"],
-): CharacterDraft["continuity"] {
-  if (!base && !patch) {
-    return undefined;
-  }
-
-  return mergeDefined(base ?? {
-    identityInertia: "flexible",
-    protectedCore: [],
-    mutableSurface: [],
-    changePressureNotes: [],
-  }, patch);
 }
 
 export function applyPersonaTemplatePatch(
@@ -112,8 +88,6 @@ export function applyPersonaTemplatePatch(
     state: mergeDefined(draft.state, patch.state),
     loadout: mergeDefined(draft.loadout, patch.loadout),
     startConditions: mergeDefined(draft.startConditions, patch.startConditions),
-    sourceBundle: mergeSourceBundle(draft.sourceBundle, patch.sourceBundle),
-    continuity: mergeContinuity(draft.continuity, patch.continuity),
     provenance: {
       ...draft.provenance,
       ...(patch.provenance ?? {}),

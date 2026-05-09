@@ -95,7 +95,7 @@ export function ActionBar({
           <p className="text-[11px] text-zinc-500">{'RP markup: "speech", *action*, **emphasis**'}</p>
           {turnPhase === "finalizing" ? (
             <p className="text-[11px] text-amber-200/80">
-              The world is still settling. You can act again when the turn is fully resolved.
+              The GM is applying world changes. You can act again when the turn is fully resolved.
             </p>
           ) : null}
         </div>

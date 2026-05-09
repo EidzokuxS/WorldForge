@@ -14,7 +14,7 @@ import { getDb } from "../db/index.js";
 import { npcs, locations } from "../db/schema.js";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
 import { storeEpisodicEvent } from "../vectors/episodic-events.js";
-import { createLogger } from "../lib/index.js";
+import { createLogger, withRole } from "../lib/index.js";
 import { accumulateReflectionBudget } from "./reflection-budget.js";
 import {
   hydrateStoredNpcRecord,
@@ -22,6 +22,7 @@ import {
 } from "../character/record-adapters.js";
 import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
 import { resolveStoredSceneScopeId } from "./scene-presence.js";
+import { buildNpcOffscreenPromptContract } from "./prompt-contracts.js";
 import type { CharacterRecord } from "@worldforge/shared";
 
 const log = createLogger("npc-offscreen");
@@ -74,12 +75,11 @@ function formatBoundedIdentityList(label: string, values: string[]): string | nu
   return `${label}: ${bounded.join("; ")}`;
 }
 
-function buildOffscreenIdentitySummary(record: CharacterRecord): string[] {
+export function buildOffscreenIdentitySummary(record: CharacterRecord): string[] {
   const baseFacts = record.identity.baseFacts;
   const behavioralCore = record.identity.behavioralCore;
   const liveDynamics = record.identity.liveDynamics;
-  const continuity = record.continuity;
-
+  const personality = record.identity.personality;
   return [
     [
       baseFacts?.biography ? `Base facts: ${baseFacts.biography}` : null,
@@ -89,9 +89,16 @@ function buildOffscreenIdentitySummary(record: CharacterRecord): string[] {
       .filter((value): value is string => Boolean(value))
       .join(" | "),
     [
-      formatBoundedIdentityList("Enduring motives", behavioralCore?.motives ?? []),
-      formatBoundedIdentityList("Pressure responses", behavioralCore?.pressureResponses ?? []),
-      formatBoundedIdentityList("Attachments", behavioralCore?.attachments ?? []),
+      formatBoundedIdentityList(
+        "Personality summary",
+        personality?.summary ? [personality.summary] : [],
+      ),
+      formatBoundedIdentityList("Voice", personality?.voice ? [personality.voice] : []),
+      formatBoundedIdentityList(
+        "Internal contradictions",
+        personality?.internalContradictions ?? [],
+      ),
+      formatBoundedIdentityList("Attachments", liveDynamics?.attachments ?? []),
       behavioralCore?.selfImage ? `Self-image: ${behavioralCore.selfImage}` : null,
     ]
       .filter((value): value is string => Boolean(value))
@@ -104,30 +111,27 @@ function buildOffscreenIdentitySummary(record: CharacterRecord): string[] {
     ]
       .filter((value): value is string => Boolean(value))
       .join(" | "),
-    continuity
-      ? [
-          `Continuity: identity inertia=${continuity.identityInertia}`,
-          formatBoundedIdentityList("protected core", continuity.protectedCore),
-          formatBoundedIdentityList("mutable surface", continuity.mutableSurface),
-          formatBoundedIdentityList("change pressure", continuity.changePressureNotes),
-        ]
-          .filter((value): value is string => Boolean(value))
-          .join(" | ")
-      : null,
   ].filter((value): value is string => Boolean(value));
 }
 
 // -- Zod schema for LLM output -----------------------------------------------
 
+const OFFSCREEN_NPC_NAME_MAX = 120;
+const OFFSCREEN_LOCATION_MAX = 120;
+const OFFSCREEN_ACTION_SUMMARY_MAX = 260;
+const OFFSCREEN_GOAL_PROGRESS_MAX = 180;
+
+const offscreenUpdateItemSchema = z.object({
+  npcName: z.string().max(OFFSCREEN_NPC_NAME_MAX),
+  newLocation: z.string().max(OFFSCREEN_LOCATION_MAX).nullable(),
+  actionSummary: z.string().max(OFFSCREEN_ACTION_SUMMARY_MAX),
+  goalProgress: z.string().max(OFFSCREEN_GOAL_PROGRESS_MAX).nullable(),
+});
+
+const offscreenUpdatesArraySchema = z.array(offscreenUpdateItemSchema);
+
 const offscreenUpdateSchema = z.object({
-  updates: z.array(
-    z.object({
-      npcName: z.string(),
-      newLocation: z.string().nullable(),
-      actionSummary: z.string(),
-      goalProgress: z.string().nullable(),
-    })
-  ),
+  updates: offscreenUpdatesArraySchema,
 });
 
 // -- Pure helpers (exported for testability) -----------------------------------
@@ -136,9 +140,16 @@ const offscreenUpdateSchema = z.object({
  * Parse raw LLM output into typed OffscreenUpdate array.
  */
 export function parseOffscreenUpdates(
-  raw: Array<{ npcName: string; newLocation: string | null; actionSummary: string; goalProgress: string | null }>
+  raw: Array<{ npcName: string; newLocation: string | null; actionSummary: string; goalProgress: string | null }>,
+  maxUpdates?: number,
 ): OffscreenUpdate[] {
-  return raw.map((r) => ({
+  const schema =
+    typeof maxUpdates === "number"
+      ? offscreenUpdatesArraySchema.max(maxUpdates)
+      : offscreenUpdatesArraySchema;
+  const parsed = schema.parse(raw);
+
+  return parsed.map((r) => ({
     npcName: r.npcName,
     newLocation: r.newLocation ?? null,
     actionSummary: r.actionSummary,
@@ -248,6 +259,12 @@ export async function applyOffscreenUpdate(
       })
       .where(eq(npcs.id, npcCtx.npcId))
       .run();
+    log.event("db.write", {
+      table: "npcs",
+      op: "update",
+      rowId: npcCtx.npcId,
+      rowName: npcCtx.npcName,
+    });
 
     goalsUpdated = Boolean(update.goalProgress);
   } else {
@@ -262,6 +279,12 @@ export async function applyOffscreenUpdate(
           .set({ goals: JSON.stringify(goals) })
           .where(eq(npcs.id, npcCtx.npcId))
           .run();
+        log.event("db.write", {
+          table: "npcs",
+          op: "update",
+          rowId: npcCtx.npcId,
+          rowName: npcCtx.npcName,
+        });
         goalsUpdated = true;
       } catch {
         log.warn(`Failed to parse goals for ${npcCtx.npcName}`);
@@ -276,6 +299,12 @@ export async function applyOffscreenUpdate(
       })
       .where(eq(npcs.id, npcCtx.npcId))
       .run();
+    log.event("db.write", {
+      table: "npcs",
+      op: "update",
+      rowId: npcCtx.npcId,
+      rowName: npcCtx.npcName,
+    });
   }
 
   // -- Store episodic event (best-effort) --
@@ -354,6 +383,26 @@ export async function simulateOffscreenNpcs(
   if (tick % interval !== 0) {
     return [];
   }
+
+  return withRole("npcAgent", () =>
+    simulateOffscreenNpcsInternal(
+      campaignId,
+      tick,
+      judgeProvider,
+      playerLocationId,
+      playerSceneScopeId,
+    ),
+  );
+}
+
+async function simulateOffscreenNpcsInternal(
+  campaignId: string,
+  tick: number,
+  judgeProvider: ProviderConfig,
+  playerLocationId: string,
+  playerSceneScopeId?: string,
+): Promise<AppliedOffscreenUpdate[]> {
+  const batchStart = Date.now();
 
   const db = getDb();
 
@@ -441,10 +490,12 @@ export async function simulateOffscreenNpcs(
   const systemPrompt = [
     "You are the world simulation engine for a text RPG.",
     "For each NPC listed below, determine what they have been doing off-screen since the last simulation.",
-    "Keep each NPC to a bounded identity slice: base facts, enduring motives, pressure responses, live goals/strains, and continuity cues only.",
-    "Use the richer identity slice plus compatibility shorthand when deciding actions. Do not dump the full record or source bundle.",
+    "Keep each NPC to a bounded identity slice: base facts, personality summary/voice/contradictions, self-image, and live goals/strains only.",
+    "Use the richer identity slice plus compatibility shorthand when deciding actions.",
     "Each NPC update MUST describe something SPECIFIC they did — name locations, actions, and consequences. Do NOT use vague summaries like 'continued pursuing goals' or 'maintained their position'. Example good update: 'Traveled to the Sporeworks to negotiate a spore trade deal with the fungal workers.' Example bad update: 'Continued working toward their goals.'",
     "Return a structured update for each NPC.",
+    "",
+    buildNpcOffscreenPromptContract(),
     "",
     `Player broad location: ${playerLocationId}`,
     `Player scene scope: ${resolvedPlayerSceneScopeId ?? playerLocationId}`,
@@ -465,7 +516,7 @@ export async function simulateOffscreenNpcs(
   });
 
   // -- Parse and apply updates --
-  const parsed = parseOffscreenUpdates(object.updates);
+  const parsed = parseOffscreenUpdates(object.updates, offscreenKeyNpcs.length);
 
   // Map NPC names to their DB context
   const npcContextMap = new Map<string, NpcContext>();
@@ -510,6 +561,11 @@ export async function simulateOffscreenNpcs(
     }
   }
 
+  log.event("npcOffscreen.batch", {
+    npcCount: offscreenKeyNpcs.length,
+    appliedCount: results.length,
+    durationMs: Date.now() - batchStart,
+  });
   log.info(`Off-screen simulation complete: ${results.length} updates applied`);
   return results;
 }

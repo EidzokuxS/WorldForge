@@ -1,320 +1,258 @@
 # WorldForge
 
-**AI-Driven Text RPG Sandbox with LLM Game Master**
+**A text RPG sandbox where the world keeps playing too.**
 
-A text-based RPG engine where an AI serves exclusively as the narrator while all mechanical outcomes (probability, inventory, movement, health) are processed by a deterministic backend engine. The player defines a universe — original or from a known franchise — and lives inside it as the sole protagonist.
+WorldForge lets you turn a premise into a playable world: an original setting, a strange crossover, a "what if" version of a story you already know, or something completely yours.
 
-No main quest. The world evolves independently: key characters pursue their own goals, factions clash, events ripple outward.
+You are not reading a novel about that world. You wake up inside it and start making choices.
 
-## Features
+You can chase the main disaster, pick a fight with someone stronger than you, become a courier, hide in a hotel, ask awkward questions, or waste an afternoon eating ice cream. The point is that the world is not waiting politely for you to become important. People have goals. Factions have pressure. Rumors spread. Consequences pile up offscreen and eventually reach you.
 
-- **AI = narrator, engine = law.** The LLM generates prose. All mechanics — probabilities, dice rolls, inventory, HP — are handled by code
-- **Probability Oracle.** Player actions are evaluated by a Judge model → D100 roll → 3-tier outcome (Strong Hit / Weak Hit / Miss)
-- **Tag system.** Characters, NPCs, locations, factions, items — everything is described by semantic tags. Only numeric value: HP (1–5)
-- **Soft-fail.** Nothing is blocked. A peasant can attempt to cast a fireball — they'll get a near-zero chance and the GM will narrate the humiliating failure
-- **Living world.** Key NPCs act autonomously: speak, move, pursue goals. Factions run macro-ticks: seize territories, declare wars
-- **World generation.** 9-stage pipeline: IP research → World DNA → locations → factions → NPCs → inter-stage validation → lore cards → player character
-- **Semantic memory.** LanceDB stores episodic events and lore cards. Context assembly respects token budgets
-- **Character import.** Full SillyTavern V2/V3 card support (JSON and PNG)
-- **25+ LLM providers.** OpenAI, Anthropic, OpenRouter, Ollama, LM Studio, vLLM, and more via Vercel AI SDK
+That is the core fantasy: **a text RPG where the player and the world use the same rules.**
+
+![WorldForge launchpad](output/playwright/worldforge-v4-final/2560-title.png)
+
+## Why This Exists
+
+Most AI roleplay tools are great at conversation, but the world often behaves like a stage set. NPCs appear when needed, forget what matters, and stop existing when the player leaves the room.
+
+WorldForge is trying to build a different kind of RPG:
+
+- The player is one person inside the world, not the only thing that matters.
+- Important NPCs can remember, plan, move, fail, and change things.
+- Factions can act through resources, territory, orders, and reports.
+- Hidden information stays hidden until the player has a real way to learn it.
+- The AI can be creative, but durable changes go through game rules and saved state.
+
+Think of it like a tabletop game with a tireless game master, a living campaign notebook, and a referee that does not let the story accidentally rewrite reality.
+
+## What You Can Do
+
+Start with a sentence:
+
+> Jujutsu Kaisen before Shibuya, but the Naruto chakra system exists too.
+
+Or:
+
+> A generation ship where the captain is dead, the cargo is awake, and mercy has become a law nobody understands anymore.
+
+WorldForge can help turn that into:
+
+- a playable premise;
+- world DNA: the few rules that make this world itself;
+- locations with relationships and movement logic;
+- factions with goals and pressure;
+- key NPCs with wants, memory, and private knowledge;
+- lore cards and world facts;
+- a player character;
+- an opening scene you can actually play.
+
+![World generation](output/playwright/worldforge-v4-final/2560-worldgen.png)
+
+## How It Feels In Play
+
+You type what your character does.
+
+The game master reads it like a human would: intent first, literal words second. If you bluff, it treats that as a bluff. If you claim something false, the world records that you claimed it, not that it became true. If you try to learn a secret, the game checks whether you actually have a path to know it.
+
+Then the game changes the world through tools:
+
+- move a character;
+- add an event;
+- update a relationship;
+- reveal a clue;
+- create a rumor;
+- wake an NPC or faction process;
+- record a memory;
+- change a location, item, injury, or threat.
+
+Only after the world has been settled does the narrator write the final prose you see.
+
+That separation matters. The narrator is not allowed to invent permanent facts just because a sentence would sound cooler. It describes the visible result of the turn.
+
+![Play surface](output/playwright/worldforge-v4-final/2560-play.png)
+
+## The Living World Idea
+
+WorldForge does not try to run a full expensive AI brain for every person on every turn. That would be slow, noisy, and wildly expensive.
+
+Instead, it gives the world layers:
+
+- **Key NPCs** are the important people. They can have goals, private knowledge, plans, memories, and moments where they wake up and act.
+- **Persistent NPCs** remain real and remembered, but do not need a full independent decision every turn.
+- **Temporary NPCs** can exist for a scene, support a location, then fade unless they become important.
+- **Factions** act like organized forces: they have resources, reports, doctrine, territories, and operations.
+- **World threads** track bigger ongoing changes: investigations, raids, shortages, rituals, disasters, political moves, training arcs.
+
+The target is simple to say and hard to build:
+
+**If you leave the room, the world should still be able to matter.**
+
+## What Makes It Different From A Chatbot
+
+The AI is not just writing the next paragraph.
+
+It is more like this:
+
+1. Understand what the player is trying to do.
+2. Look at the visible world state.
+3. Decide what should happen and what needs to be checked.
+4. Ask the backend to perform concrete game actions.
+5. Let the backend save the real state.
+6. Give the narrator only the truth the player is allowed to see.
+7. Continue from that saved world next turn.
+
+The backend is the part that remembers where people are, what exists, what changed, what is private, and what has been committed. The AI handles meaning, judgment, and improvisation. They are meant to work together instead of pretending one side can do everything.
+
+![World review](output/playwright/worldforge-v4-final/2560-review.png)
+
+## Current State
+
+WorldForge is in active development.
+
+The app already has:
+
+- a local campaign app;
+- campaign generation with optional source books and worldbooks;
+- World DNA cards;
+- generated locations, factions, NPCs, lore, placement, and relationships;
+- player character creation and character-card import;
+- a screen where you can play turns;
+- provider settings for OpenAI-compatible and Anthropic-compatible endpoints;
+- a dark editorial interface being migrated through the app;
+- logic for key NPCs, factions, world threads, narration that does not see hidden facts, and safer saved turns.
+
+This is still an early project, not a polished packaged game. Expect sharp edges. The goal is not a demo that only survives one happy path; the goal is a long-running RPG sandbox that can take strange player choices seriously.
 
 ## Quick Start
 
-### Prerequisites
+### Requirements
 
-- **Node.js 20+**
-- **npm**
-- **LLM API key** (OpenAI, Anthropic, OpenRouter, Z.AI, or local Ollama/LM Studio)
+- Node.js 20+
+- npm
+- at least one configured LLM provider
 
-### Installation
+### Install
 
 ```bash
 git clone https://github.com/EidzokuxS/WorldForge.git
 cd WorldForge
-
-npm install    # installs all dependencies + auto-builds shared package
+npm install
 ```
 
-### Running
+### Run
 
 ```bash
-# Both servers at once (backend :3001 + frontend :3000)
+# Backend on :3001 and frontend on :3000
 npm run dev
-
-# Or separately in two terminals:
-npm run dev:backend
-npm run dev:frontend
 ```
 
-Open **http://localhost:3000** in your browser.
+Open [http://localhost:3000](http://localhost:3000).
 
-### First Launch
+### First Setup
 
-1. Go to **Settings** → **Providers** → add your LLM provider (API key + endpoint)
-2. Go to **Settings** → **Roles** → assign models to Judge, Storyteller, Generator, Embedder
-3. Return to title screen → **New Campaign** → enter a premise → play
+1. Open **Settings -> Providers** and add an OpenAI-compatible or Anthropic-compatible endpoint.
+2. Open **Settings -> Roles** and assign models for Judge, Storyteller, Generator, and Embedder.
+3. Create a new campaign.
+4. Review the generated world.
+5. Create or import a player character.
+6. Start playing.
 
-## Configuration
+## Model Roles, In Plain English
 
-### LLM Providers
+WorldForge uses a few model roles because one prompt should not do every job.
 
-Configured via **Settings → Providers** in the UI.
+| Role | Plain meaning |
+| --- | --- |
+| **Judge** | The main game master brain. It understands the turn and decides what game actions are needed. |
+| **Storyteller** | The prose writer. It turns already-decided events into readable fiction. |
+| **Generator** | The world builder. It makes DNA, locations, factions, lore, and characters. |
+| **Embedder** | The search helper. It helps find relevant memories and lore. |
 
-| Provider | Endpoint | Example Model | Type |
-|----------|----------|---------------|------|
-| OpenAI | api.openai.com | gpt-4o, gpt-4o-mini | Cloud |
-| Anthropic | api.anthropic.com | claude-sonnet, claude-haiku | Cloud |
-| OpenRouter | openrouter.ai/api/v1 | any of 200+ models | Cloud (multi) |
-| Z.AI (GLM) | api.z.ai | glm-4.7-flash | Cloud |
-| Ollama | localhost:11434 | llama3, mistral | Local |
-| LM Studio | localhost:1234 | any GGUF | Local |
+For long games, the Judge model needs enough output and reasoning budget. WorldForge is built around quality turns, not tiny arbitrary response caps.
 
-### AI Roles
+## Technical Shape
 
-4 roles — each with its own provider and model:
-
-| Role | Purpose | Recommended Temperature |
-|------|---------|------------------------|
-| **Judge** | Probability evaluation (structured JSON) | 0.0–0.5 |
-| **Storyteller** | Narrative generation (prose) | 0.7–1.0 |
-| **Generator** | World and character generation | 0.7 |
-| **Embedder** | Vector embeddings | 0.0 |
-
-Judge can run on cheap/fast models (gpt-4o-mini, Haiku). Storyteller needs a flagship model (gpt-4o, Sonnet, GLM-4.7).
-
-## How It Works
-
-### Turn Anatomy
-
-```
-Player enters action
-    ↓
-Context assembly (location, NPCs, lore, history)
-    ↓
-Judge evaluates probability (0–100%)
-    ↓
-Backend rolls D100
-    ↓
-Outcome: Strong Hit / Weak Hit / Miss
-    ↓
-Storyteller narrates result + calls tools
-    ↓
-Engine updates state (HP, tags, location, inventory)
-    ↓
-Display: narrative + Oracle panel + quick actions
+```text
+Player action
+  -> bounded world frame
+  -> AI game master decision
+  -> concrete tool checklist
+  -> backend state changes
+  -> memory / lore / wake signals
+  -> visible narration packet
+  -> final prose
 ```
 
-### Tag System
+Useful rules:
 
-All semantic attributes are tags:
-- **Traits:** skills, flaws, magical abilities (`Skilled Negotiator`, `Arrogant`)
-- **Status:** temporary conditions (`Poisoned`, `Inspired`)
-- **Relationships:** social connections (`Trusted by Eldric`, `Enemy of the Gray Cult`)
-- **Wealth:** economic tier (`Destitute` → `Wealthy` → `Obscenely Rich`)
+- A player lie becomes a claim, not a fact.
+- Private names and secrets are not safe just because they exist in the database.
+- Failed tool actions must not appear in narration as if they happened.
+- Background world work cannot silently rewrite a turn that was already returned to the player.
 
-### HP
+## Data
 
-- **1–5 scale** (not 0–100)
-- HP = 0 → GM determines outcome (death is not automatic — depends on context)
-- Auto-checkpoint before lethal encounters
+Campaign data is local:
 
-### NPCs
-
-3 tiers:
-- **Key Characters** — full AI agents with goals, beliefs, reflection. Act autonomously each turn
-- **Persistent** — tracked in DB with history, but don't act independently
-- **Temporary** — extras, refreshed each turn
-
-### Factions
-
-Factions run macro-ticks every N in-game days: seize territories, generate world events, update the chronicle.
-
-### World Generation
-
-9-stage pipeline with real-time SSE progress:
-
-1. **Research** (optional) — for known IPs: Brave web search + LLM fallback
-2. **World DNA** (optional) — 6 uniqueness categories: geographic archetype, political structure, central conflict, cultural flavor, environment, wildcard element
-3. **Worldbook composition** (optional) — multi-source worldbook support with LLM-based primary/supplementary source detection and entry filtering
-4. **Scaffold** — AI generates locations, factions, NPCs one entity at a time, constrained by DNA and worldbook context
-5. **Validation** — Judge model runs inter-stage and cross-stage consistency checks (bounded 3-round loops)
-6. **Lore cards** — category-specific extraction (locations, factions, NPCs, concepts) stored in LanceDB
-7. **Player character** — 3 modes: text description, AI generation, V2/V3 card import
-
-### Memory & Context
-
-- **Episodic memory** — each turn's events stored in LanceDB with embeddings. Composite scoring: similarity×0.4 + recency×0.3 + importance×0.3
-- **Lore cards** — semantic search via LanceDB
-- **Relationship graph** — 2-hop BFS traversal across SQLite for context enrichment
-- **Context compression** — first messages + last N turns + anomalous events within token budget
-- **Chat history** — persisted to disk, survives page reload
-
-### Checkpoints
-
-- **Manual save** — snapshot of state.db + vectors + chat_history
-- **Auto-checkpoint** — before lethal encounters (HP ≤ 2)
-- **Load** — rollback to saved state
-- **Branching** — "what if" exploration of alternative paths
-
-## Tech Stack
-
-### Frontend
-
-| Package | Version | Purpose |
-|---------|---------|---------|
-| Next.js | 16.1.6 | App Router, SSR |
-| React | 19.2.3 | Component framework |
-| Tailwind CSS | 4.x | Utility-first styling |
-| shadcn/ui | 3.8.5 | UI components |
-| Radix UI | 1.4.3 | Headless primitives |
-| lucide-react | 0.576.0 | Icons |
-
-### Backend
-
-| Package | Version | Purpose |
-|---------|---------|---------|
-| Hono | 4.12.3 | Web framework |
-| Drizzle ORM | 0.45.1 | Type-safe SQL |
-| better-sqlite3 | 12.6.2 | SQLite driver |
-| Zod | 4.3.6 | Schema validation |
-| ai (Vercel) | 6.0.106 | Streaming, tool calling, 25+ providers |
-| @lancedb/lancedb | 0.26.2 | Embedded vector DB |
-
-## Project Structure
-
+```text
+campaigns/{campaignId}/
+  config.json
+  chat_history.json
+  state.db
+  vectors/
+  checkpoints/
+  logs/
 ```
-worldforge/
-├── shared/                     ← @worldforge/shared — types, constants
-├── frontend/                   ← Next.js frontend
-│   ├── app/                    ← Pages (title, game, settings, character, review)
-│   ├── components/
-│   │   ├── game/               ← NarrativeLog, ActionBar, OraclePanel, CharacterPanel,
-│   │   │                         LocationPanel, LorePanel, CheckpointPanel, QuickActions
-│   │   ├── title/              ← TitleScreen, new-campaign-dialog
-│   │   ├── campaign-new/       ← concept-workspace, dna-workspace
-│   │   ├── character-creation/ ← CharacterForm, CharacterCard
-│   │   └── world-review/       ← PremiseSection, LocationsSection, FactionsSection,
-│   │                             NpcsSection, LoreSection
-│   └── lib/                    ← api.ts, settings.ts, v2-card-parser.ts
-│
-├── backend/                    ← Hono backend
-│   └── src/
-│       ├── ai/                 ← provider-registry, storyteller, oracle, prompt-assembler
-│       ├── engine/             ← npc-agent, world-engine, reflection-agent, turn-processor
-│       ├── campaign/           ← manager, chat-history, checkpoints
-│       ├── character/          ← generator, npc-generator, archetype-researcher
-│       ├── worldgen/           ← scaffold-generator, seed-roller, ip-researcher
-│       ├── vectors/            ← episodic-events, lore-cards, embeddings
-│       ├── db/                 ← schema, index, migrate
-│       ├── settings/           ← manager
-│       ├── routes/             ← campaigns, chat, ai, worldgen, settings, images
-│       └── lib/                ← errors, type-guards
-│
-├── campaigns/                  ← User data (gitignored)
-│   └── {uuid}/                 ← state.db, config.json, chat_history.json, vectors/
-│
-└── docs/                       ← Design documentation
-```
+
+- SQLite stores the authoritative world state.
+- LanceDB stores semantic vectors for lore and episodic memory.
+- JSON files store campaign metadata, role links, generated context, and chat.
+- Campaign data is gitignored.
 
 ## Development Commands
 
 ```bash
+# Root
+npm run dev                  # backend + frontend
+npm run build                # shared + frontend + backend
+npm run typecheck            # frontend lint + backend typecheck
+
 # Backend
-cd backend && npm run dev          # Dev server on :3001
-npm --prefix backend run typecheck # Type check
-npm --prefix backend run test      # Tests
+npm --prefix backend run dev
+npm --prefix backend run dev:stable
+npm --prefix backend run test
+npm --prefix backend run typecheck
+npm --prefix backend run structured-output:conformance
+npm --prefix backend run db:generate
+npm --prefix backend run db:push
 
 # Frontend
-cd frontend && npm run dev         # Dev server on :3000
-npm --prefix frontend run lint     # Linting
-
-# Database
-npm --prefix backend run db:generate  # Drizzle migrations
-npm --prefix backend run db:push      # Apply migrations
+npm --prefix frontend run dev
+npm --prefix frontend run lint
+npm --prefix frontend run typecheck
+npm --prefix frontend run visual:v4
 ```
 
-## Architecture
+## Stack
 
-### Principles
+| Area | Tools |
+| --- | --- |
+| Frontend | Next.js 16, React 19, Tailwind 4, shadcn, Radix UI, lucide-react |
+| Backend | Hono, Drizzle ORM, better-sqlite3, Zod, AI SDK, LanceDB, pino |
+| Storage | local campaign folders, SQLite, LanceDB vectors |
 
-1. **LLM = narrator.** All mechanical outcomes are backend code
-2. **Structured tool calling.** All AI agent interactions use Zod-validated tool schemas
-3. **SQLite = source of truth.** LanceDB is semantic memory only
-4. **Tags, not numbers.** Only numeric value: HP (1–5)
-5. **Soft-fail.** No blocked actions — only consequences
+## Repo Map
 
-### Database
-
-**SQLite** (8 tables): campaigns, players, npcs, locations, items, factions, relationships, chronicle
-
-**LanceDB** (vector storage): episodic_events, lore_cards
-
-### Streaming
-
-- SSE for world generation progress and narrative streaming
-- Typed events: `narrative`, `oracle_result`, `state_update`, `quick_actions`, `done`
-
-## Contributing
-
-### Branch Structure
-
-| Branch | Purpose |
-|--------|---------|
-| `main` | Stable releases — always working |
-| `develop` | Mirrors main after squash-merge |
-| `codex/*` | Active development branches |
-
-### Workflow
-
-1. Fork the repo
-2. Create a branch from `main`:
-   ```bash
-   git checkout main
-   git checkout -b codex/your-feature
-   ```
-3. Make changes, commit with conventional commits:
-   ```
-   feat: add support for Ollama embeddings
-   fix: Oracle timeout on slow providers
-   refactor: extract prompt builder into separate module
-   ```
-4. Squash-merge into `main`, force-push `develop` to match
-
-### Code Guidelines
-
-- **TypeScript strict mode** — no `any`, no implicit returns
-- **Immutability** — always create new objects, never mutate
-- **Zod validation** — all API inputs and AI tool schemas validated
-- **Small files** — 200-400 lines typical, 800 max
-- **No console.log** — use `createLogger()` from `lib/`
-- **Error handling** — outer try/catch in route handlers, `AppError` for status codes
-
-### Running Tests
-
-```bash
-npm --prefix backend run test        # unit tests
-npm --prefix backend run typecheck   # type check
-npm --prefix frontend run lint       # linting
+```text
+WorldForge/
+  shared/                  shared types and constants
+  frontend/                Next.js app and game UI
+  backend/                 API, campaign state, worldgen, GM runtime, tools
+  campaigns/               local user data, gitignored
+  docs/                    architecture, design, handoff, and research notes
 ```
-
-### Adding a New LLM Tool
-
-1. Define Zod schema in `backend/src/engine/tool-schemas.ts`
-2. Add handler in `backend/src/engine/tool-executor.ts`
-3. Register in Storyteller tool list in `backend/src/ai/storyteller.ts`
-4. Add DB migration if tool modifies state
-
-### Adding a New API Endpoint
-
-1. Create or extend route file in `backend/src/routes/`
-2. Use `parseBody()` for input validation
-3. Wrap handler in try/catch with `getErrorStatus()`
-4. Register route in `backend/src/index.ts`
 
 ## License
 
-AGPL-3.0 — see [LICENSE](LICENSE). Free to use, modify, and distribute, but all derivative works must remain open-source under the same license. Commercial licensing available on request.
-
----
-
-*[Русская версия](README.ru.md)*
+AGPL-3.0. See [LICENSE](LICENSE).

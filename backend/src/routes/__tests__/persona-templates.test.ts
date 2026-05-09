@@ -56,6 +56,7 @@ const TEMPLATE: PersonaTemplate = {
         selfImage: "Dry wit hiding hard-earned caution.",
       },
       liveDynamics: {
+        attachments: [],
         currentStrains: ["Distrusts authority"],
       },
     },
@@ -93,6 +94,7 @@ function makeDraft(role: CharacterDraft["identity"]["role"] = "player"): Charact
         selfImage: "Baseline persona",
       },
       liveDynamics: {
+        attachments: [],
         activeGoals: ["Keep moving", "Stay alive"],
         beliefDrift: [],
         currentStrains: [],
@@ -154,27 +156,6 @@ function makeDraft(role: CharacterDraft["identity"]["role"] = "player"): Charact
       archetypePrompt: null,
       worldgenOrigin: null,
       legacyTags: [],
-    },
-    sourceBundle: {
-      canonSources: [],
-      secondarySources: [
-        {
-          kind: "runtime",
-          label: "Baseline concept",
-          excerpt: "Baseline background",
-        },
-      ],
-      synthesis: {
-        owner: "WorldForge",
-        strategy: "test-fixture",
-        notes: ["Persona templates should not erase source provenance."],
-      },
-    },
-    continuity: {
-      identityInertia: "anchored",
-      protectedCore: ["identity.baseFacts", "identity.behavioralCore"],
-      mutableSurface: ["identity.liveDynamics"],
-      changePressureNotes: ["Change should be earned."],
     },
   };
 }
@@ -278,10 +259,6 @@ describe("personaTemplateRoutes", () => {
     expect(body.draft.identity.liveDynamics.currentStrains).toEqual([
       "Distrusts authority",
     ]);
-    expect(body.draft.sourceBundle.secondarySources[0].label).toBe(
-      "Baseline concept",
-    );
-    expect(body.draft.continuity.identityInertia).toBe("anchored");
     expect(body.characterRecord.identity.baseFacts.biography).toBe(
       "Years on the wind-scoured frontier.",
     );
@@ -294,7 +271,7 @@ describe("personaTemplateRoutes", () => {
     });
   });
 
-  it("does not erase sourceBundle or continuity when applying a template to an imported npc draft", async () => {
+  it("applies a template to an imported npc draft and returns npc payload", async () => {
     setLoadedCampaign();
     mockedGetPersonaTemplate.mockReturnValue(TEMPLATE as never);
 
@@ -314,14 +291,6 @@ describe("personaTemplateRoutes", () => {
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.draft.sourceBundle.secondarySources[0].label).toBe(
-      "Baseline concept",
-    );
-    expect(body.draft.continuity.identityInertia).toBe("anchored");
-    expect(body.characterRecord.sourceBundle.secondarySources[0].label).toBe(
-      "Baseline concept",
-    );
-    expect(body.characterRecord.continuity.identityInertia).toBe("anchored");
     expect(body.npc).toMatchObject({
       name: "Watchman Orren",
     });

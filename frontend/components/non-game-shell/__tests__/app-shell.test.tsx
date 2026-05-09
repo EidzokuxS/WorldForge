@@ -1,9 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+
+const navigationMock = vi.hoisted(() => ({
+  push: vi.fn(),
+}));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/settings",
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => navigationMock,
 }));
 
 vi.mock("@/components/non-game-shell/campaign-status-provider", () => ({
@@ -26,24 +31,44 @@ vi.mock("@/lib/api", () => ({
 import React from "react";
 import { AppShell } from "@/components/non-game-shell/app-shell";
 
+const FLOW_KEY = "worldforge.campaign-new-flow";
+
+function writeDraftSession() {
+  window.sessionStorage.setItem(FLOW_KEY, JSON.stringify({
+    version: 1,
+    campaignName: "Draft Mercy",
+    campaignPremise: "A saved forge draft",
+    campaignFranchise: "",
+    researchEnabled: true,
+    selectedWorldbooks: [],
+    dnaState: null,
+    researchArtifact: null,
+    step: 1,
+    phase: { kind: "idle" },
+    generationProgress: null,
+  }));
+}
+
 describe("AppShell", () => {
-  it("renders the outer frame, navigation rail, main panel, and page header", () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+    navigationMock.push.mockClear();
+  });
+
+  it("renders the V4 rail, route topbar, and main stage", () => {
     render(
       <AppShell>
         <div>Settings body</div>
       </AppShell>,
     );
 
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Settings");
+    expect(document.querySelector(".wf-v4-crumb")).toHaveTextContent("Settings");
     expect(screen.getByRole("main")).toHaveTextContent("Settings body");
 
     const main = screen.getByRole("main");
-    expect(main.closest("[data-shell-region='main-panel']")).not.toBeNull();
+    expect(main.closest(".wf-v4-stage")).not.toBeNull();
 
-    const outerFrame = document.querySelector("[data-shell-region='outer-frame']");
-    expect(outerFrame).not.toBeNull();
-
-    const navRail = document.querySelector("[data-shell-region='navigation-rail']");
+    const navRail = document.querySelector(".wf-v4-rail");
     expect(navRail).not.toBeNull();
 
     expect(document.querySelector("[data-shell-region='action-tray']")).toBeNull();
@@ -65,5 +90,33 @@ describe("AppShell", () => {
     const main = screen.getByRole("main");
     expect(within(main).getByText("Child slot")).toBeInTheDocument();
     expect(within(main).queryByLabelText(/campaign name/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps draft resume separate from destructive new campaign start", async () => {
+    writeDraftSession();
+    const user = userEvent.setup();
+
+    render(
+      <AppShell>
+        <div>Settings body</div>
+      </AppShell>,
+    );
+
+    expect(screen.getByRole("link", { name: "Resume draft" })).toHaveAttribute("href", "/campaign/new");
+
+    await user.click(screen.getByRole("link", { name: "New campaign" }));
+    expect(await screen.findByText("Start a new campaign?")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Keep draft" }));
+    expect(window.sessionStorage.getItem(FLOW_KEY)).toContain("Draft Mercy");
+    expect(navigationMock.push).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("link", { name: "New campaign" }));
+    await user.click(await screen.findByRole("button", { name: "Start over" }));
+
+    await waitFor(() => {
+      expect(window.sessionStorage.getItem(FLOW_KEY)).toBeNull();
+    });
+    expect(navigationMock.push).toHaveBeenCalledWith("/campaign/new");
   });
 });

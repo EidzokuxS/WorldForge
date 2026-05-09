@@ -152,14 +152,18 @@ function setupMockDb(options: {
 }) {
   const mockNpc = options.npc !== undefined ? options.npc : createMockNpc();
   const npcsAboveThreshold = options.npcsAboveThreshold ?? [];
+  const run = vi.fn();
+  const values = vi.fn().mockReturnValue({ run });
 
   const db = {
     select: vi.fn().mockReturnThis(),
     from: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
+    insert: vi.fn().mockReturnValue({ values }),
     update: vi.fn().mockReturnThis(),
     set: vi.fn().mockReturnThis(),
-    run: vi.fn(),
+    values,
+    run,
     get: vi.fn().mockReturnValue(mockNpc),
     all: vi.fn().mockReturnValue(npcsAboveThreshold),
   };

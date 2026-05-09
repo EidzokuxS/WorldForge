@@ -12,14 +12,16 @@ import { eq, sql } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { npcs, players } from "../db/schema.js";
 import { executeToolCall } from "./tool-executor.js";
+import { recordActorKnowledge } from "./knowledge-model.js";
 import { createLogger } from "../lib/index.js";
 import {
+  blankPersonality,
   hydrateStoredNpcRecord,
   hydrateStoredPlayerRecord,
   projectNpcRecord,
   projectPlayerRecord,
 } from "../character/record-adapters.js";
-import type { CharacterRecord } from "@worldforge/shared";
+import type { CharacterPersonality, CharacterRecord } from "@worldforge/shared";
 
 const log = createLogger("reflection-tools");
 
@@ -34,7 +36,6 @@ export const SKILL_TIERS = ["Novice", "Skilled", "Master"] as const;
 export const RELATIONSHIP_TAGS = ["Trusted Ally", "Friendly", "Neutral", "Suspicious", "Hostile", "Sworn Enemy"] as const;
 
 type EntityType = "player" | "npc";
-type DeepIdentityAxis = "self_image" | "core_motive" | "hard_constraint";
 
 function resolveEntityForUpgrade(
   campaignId: string,
@@ -93,6 +94,12 @@ function persistResolvedEntity(
       .set(projectPlayerRecord(entity.record))
       .where(eq(players.id, entity.id))
       .run();
+    log.event("db.write", {
+      table: "players",
+      op: "update",
+      rowId: entity.id,
+      rowName: entity.record.identity?.displayName ?? null,
+    });
     return;
   }
 
@@ -100,6 +107,12 @@ function persistResolvedEntity(
     .set(projectNpcRecord(entity.record))
     .where(eq(npcs.id, entity.id))
     .run();
+  log.event("db.write", {
+    table: "npcs",
+    op: "update",
+    rowId: entity.id,
+    rowName: entity.record.identity?.displayName ?? null,
+  });
 }
 
 function dedupeCaseInsensitive(values: string[]): string[] {
@@ -122,12 +135,31 @@ function capTrailing(values: string[], max: number): string[] {
   return values.length > max ? values.slice(values.length - max) : values;
 }
 
+function mergeDefined<T extends object>(base: T, patch?: Partial<T>): T {
+  if (!patch) {
+    return { ...base };
+  }
+
+  return {
+    ...base,
+    ...Object.fromEntries(
+      Object.entries(patch).filter(([, value]) => value !== undefined),
+    ),
+  };
+}
+
 function persistNpcReflectionRecord(npcId: string, record: CharacterRecord) {
   getDb()
     .update(npcs)
     .set(projectNpcRecord(record))
     .where(eq(npcs.id, npcId))
     .run();
+  log.event("db.write", {
+    table: "npcs",
+    op: "update",
+    rowId: npcId,
+    rowName: record.identity?.displayName ?? null,
+  });
 }
 
 function updateLiveDynamicsBeliefs(record: CharacterRecord, belief: string): CharacterRecord {
@@ -150,6 +182,7 @@ function updateLiveDynamicsBeliefs(record: CharacterRecord, belief: string): Cha
       ...record.identity,
       liveDynamics: {
         ...record.identity.liveDynamics,
+        attachments: record.identity.liveDynamics?.attachments ?? [],
         activeGoals: record.identity.liveDynamics?.activeGoals ?? [],
         beliefDrift,
         currentStrains: record.identity.liveDynamics?.currentStrains ?? [],
@@ -186,6 +219,7 @@ function updateLiveDynamicsGoals(
       ...record.identity,
       liveDynamics: {
         ...record.identity.liveDynamics,
+        attachments: record.identity.liveDynamics?.attachments ?? [],
         activeGoals,
         beliefDrift: record.identity.liveDynamics?.beliefDrift ?? [],
         currentStrains: record.identity.liveDynamics?.currentStrains ?? [],
@@ -218,6 +252,7 @@ function dropLiveDynamicsGoal(record: CharacterRecord, goal: string): CharacterR
       ...record.identity,
       liveDynamics: {
         ...record.identity.liveDynamics,
+        attachments: record.identity.liveDynamics?.attachments ?? [],
         activeGoals,
         beliefDrift: record.identity.liveDynamics?.beliefDrift ?? [],
         currentStrains: record.identity.liveDynamics?.currentStrains ?? [],
@@ -227,18 +262,35 @@ function dropLiveDynamicsGoal(record: CharacterRecord, goal: string): CharacterR
   };
 }
 
-function minimumEvidenceForPromotion(record: CharacterRecord): number {
-  const inertia = record.continuity?.identityInertia ?? "flexible";
-  if (inertia === "strict") return 3;
-  if (inertia === "anchored") return 2;
-  return 1;
-}
+const REQUIRED_EVIDENCE = 1;
 
-function summarizeEarnedChange(axis: DeepIdentityAxis, previousValue: string | undefined, nextValue: string, whyNow: string): string {
-  const previous = previousValue?.trim();
-  return previous
-    ? `${axis}: ${previous} -> ${nextValue} | ${whyNow}`
-    : `${axis}: ${nextValue} | ${whyNow}`;
+type PromoteIdentityChangeInput = {
+  personality?: Partial<CharacterPersonality>;
+  liveDynamicsAttachments?: string[];
+  selfImage?: string;
+  hardConstraints?: string[];
+  whyNow: string;
+};
+
+function summarizePromotedIdentityChange(
+  input: PromoteIdentityChangeInput,
+): string {
+  const changes: string[] = [];
+
+  if (input.personality && Object.keys(input.personality).length > 0) {
+    changes.push("personality");
+  }
+  if (input.liveDynamicsAttachments) {
+    changes.push("attachments");
+  }
+  if (input.selfImage) {
+    changes.push("self-image");
+  }
+  if (input.hardConstraints) {
+    changes.push("hard-constraints");
+  }
+
+  return `identity-promotion: ${changes.join(", ") || "none"} | ${input.whyNow}`;
 }
 
 function appendEarnedIdentityChange(record: CharacterRecord, summary: string): CharacterRecord {
@@ -248,6 +300,7 @@ function appendEarnedIdentityChange(record: CharacterRecord, summary: string): C
       ...record.identity,
       liveDynamics: {
         ...record.identity.liveDynamics,
+        attachments: record.identity.liveDynamics?.attachments ?? [],
         activeGoals: record.identity.liveDynamics?.activeGoals ?? [],
         beliefDrift: record.identity.liveDynamics?.beliefDrift ?? [],
         currentStrains: record.identity.liveDynamics?.currentStrains ?? [],
@@ -262,84 +315,59 @@ function appendEarnedIdentityChange(record: CharacterRecord, summary: string): C
 
 function promoteIdentityChange(
   record: CharacterRecord,
-  axis: DeepIdentityAxis,
-  previousValue: string | undefined,
-  newValue: string,
-  whyNow: string,
+  input: PromoteIdentityChangeInput,
 ): CharacterRecord {
-  const summary = summarizeEarnedChange(axis, previousValue, newValue, whyNow);
-  let nextRecord = appendEarnedIdentityChange(record, summary);
+  const nextRecord = appendEarnedIdentityChange(
+    record,
+    summarizePromotedIdentityChange(input),
+  );
 
-  if (axis === "self_image") {
-    nextRecord = {
-      ...nextRecord,
-      profile: {
-        ...nextRecord.profile,
-        personaSummary: newValue,
+  return {
+    ...nextRecord,
+    profile: {
+      ...nextRecord.profile,
+      personaSummary: input.selfImage ?? nextRecord.profile.personaSummary,
+    },
+    identity: {
+      ...nextRecord.identity,
+      personality: mergeDefined(
+        nextRecord.identity.personality ?? blankPersonality(),
+        input.personality,
+      ),
+      liveDynamics: {
+        ...nextRecord.identity.liveDynamics,
+        attachments:
+          input.liveDynamicsAttachments
+          ?? nextRecord.identity.liveDynamics?.attachments
+          ?? [],
+        activeGoals: nextRecord.identity.liveDynamics?.activeGoals ?? [],
+        beliefDrift: nextRecord.identity.liveDynamics?.beliefDrift ?? [],
+        currentStrains: nextRecord.identity.liveDynamics?.currentStrains ?? [],
+        earnedChanges: nextRecord.identity.liveDynamics?.earnedChanges ?? [],
       },
-      identity: {
-        ...nextRecord.identity,
-        behavioralCore: {
-          ...nextRecord.identity.behavioralCore,
-          motives: nextRecord.identity.behavioralCore?.motives ?? [],
-          pressureResponses: nextRecord.identity.behavioralCore?.pressureResponses ?? [],
-          taboos: nextRecord.identity.behavioralCore?.taboos ?? [],
-          attachments: nextRecord.identity.behavioralCore?.attachments ?? [],
-          selfImage: newValue,
-        },
+      behavioralCore: {
+        ...nextRecord.identity.behavioralCore,
+        motives: nextRecord.identity.behavioralCore?.motives ?? [],
+        pressureResponses: nextRecord.identity.behavioralCore?.pressureResponses ?? [],
+        taboos: nextRecord.identity.behavioralCore?.taboos ?? [],
+        attachments:
+          nextRecord.identity.behavioralCore?.attachments
+          ?? nextRecord.identity.liveDynamics?.attachments
+          ?? [],
+        selfImage: input.selfImage ?? nextRecord.identity.behavioralCore?.selfImage ?? "",
       },
-    };
-  }
-
-  if (axis === "core_motive") {
-    const motives = dedupeCaseInsensitive(
-      [
-        ...(nextRecord.identity.behavioralCore?.motives ?? []),
-        newValue,
-      ].filter((entry) => entry.toLowerCase() !== (previousValue ?? "").toLowerCase()),
-    );
-    nextRecord = {
-      ...nextRecord,
-      motivations: {
-        ...nextRecord.motivations,
-        drives: motives,
+      baseFacts: {
+        ...nextRecord.identity.baseFacts,
+        biography:
+          nextRecord.identity.baseFacts?.biography
+          ?? nextRecord.profile.backgroundSummary,
+        socialRole: nextRecord.identity.baseFacts?.socialRole ?? [],
+        hardConstraints: input.hardConstraints
+          ? dedupeCaseInsensitive(input.hardConstraints)
+          : nextRecord.identity.baseFacts?.hardConstraints ?? [],
       },
-      identity: {
-        ...nextRecord.identity,
-        behavioralCore: {
-          ...nextRecord.identity.behavioralCore,
-          motives,
-          pressureResponses: nextRecord.identity.behavioralCore?.pressureResponses ?? [],
-          taboos: nextRecord.identity.behavioralCore?.taboos ?? [],
-          attachments: nextRecord.identity.behavioralCore?.attachments ?? [],
-          selfImage: nextRecord.identity.behavioralCore?.selfImage ?? nextRecord.profile.personaSummary,
-        },
-      },
-    };
-  }
-
-  if (axis === "hard_constraint") {
-    const hardConstraints = dedupeCaseInsensitive(
-      [
-        ...(nextRecord.identity.baseFacts?.hardConstraints ?? []),
-        newValue,
-      ].filter((entry) => entry.toLowerCase() !== (previousValue ?? "").toLowerCase()),
-    );
-    nextRecord = {
-      ...nextRecord,
-      identity: {
-        ...nextRecord.identity,
-        baseFacts: {
-          ...nextRecord.identity.baseFacts,
-          biography: nextRecord.identity.baseFacts?.biography ?? nextRecord.profile.backgroundSummary,
-          socialRole: nextRecord.identity.baseFacts?.socialRole ?? [],
-          hardConstraints,
-        },
-      },
-    };
-  }
-
-  return nextRecord;
+    },
+  };
 }
 
 // -- Tool factory -------------------------------------------------------------
@@ -348,6 +376,16 @@ function promoteIdentityChange(
  * Create Reflection Agent tools bound to a specific NPC and campaign.
  */
 export function createReflectionTools(campaignId: string, npcId: string) {
+  const personalityPatchSchema = z.object({
+    summary: z.string().optional(),
+    voice: z.string().optional(),
+    decisionStyle: z.string().optional(),
+    worldview: z.string().optional(),
+    internalContradictions: z.array(z.string()).optional(),
+    personalMythology: z.string().optional(),
+    sampleLines: z.array(z.string()).optional(),
+  }).strict();
+
   return {
     set_belief: tool({
       description:
@@ -356,7 +394,7 @@ export function createReflectionTools(campaignId: string, npcId: string) {
         belief: z.string().describe("The belief statement"),
         evidence: z.array(z.string()).describe("Event references supporting this belief"),
       }),
-      execute: async ({ belief }) => {
+      execute: async ({ belief, evidence }) => {
         const db = getDb();
 
         const npc = db
@@ -368,10 +406,27 @@ export function createReflectionTools(campaignId: string, npcId: string) {
         if (!npc) return { error: "NPC not found" };
 
         const npcRecord = hydrateStoredNpcRecord(npc);
-        persistNpcReflectionRecord(npcId, updateLiveDynamicsBeliefs(npcRecord, belief));
+        const updatedRecord = updateLiveDynamicsBeliefs(npcRecord, belief);
+        persistNpcReflectionRecord(npcId, updatedRecord);
+        const knowledge = recordActorKnowledge({
+          campaignId,
+          actorId: npcId,
+          route: "belief",
+          truthStatus: "believed",
+          statement: belief,
+          subjectRefs: [npcId],
+          sourceEventIds: evidence,
+          confidence: 70,
+          reliability: 65,
+          metadata: { source: "reflection:set_belief" },
+        });
 
         log.info(`NPC ${npcId}: set belief "${belief}"`);
-        return { updated: true, beliefs: updateLiveDynamicsBeliefs(npcRecord, belief).motivations.beliefs };
+        return {
+          updated: true,
+          knowledgeId: knowledge.id,
+          beliefs: updatedRecord.motivations.beliefs,
+        };
       },
     }),
 
@@ -480,15 +535,23 @@ export function createReflectionTools(campaignId: string, npcId: string) {
 
     promote_identity_change: tool({
       description:
-        "Promote an earned deeper identity change after multiple strong evidence points. This is the only tool allowed to alter behavioralCore or baseFacts.",
+        "Promote an earned deeper identity change after multiple strong evidence points. This is the only tool allowed to alter personality, self-image, attachments, or baseFacts.",
       inputSchema: z.object({
-        axis: z.enum(["self_image", "core_motive", "hard_constraint"]).describe("Which deeper identity surface should change"),
-        previousValue: z.string().optional().describe("Optional previous value being replaced"),
-        newValue: z.string().describe("The new deeper identity value"),
+        personality: personalityPatchSchema.optional().describe("Partial personality fields to promote into durable identity."),
+        liveDynamicsAttachments: z.array(z.string()).optional().describe("Replace live dynamics attachments with the promoted attachment list."),
+        selfImage: z.string().optional().describe("Optional promoted self-image value."),
+        hardConstraints: z.array(z.string()).optional().describe("Optional replacement hard-constraint list."),
         evidence: z.array(z.string()).describe("Multiple concrete evidence points supporting the promotion"),
         whyNow: z.string().describe("Why the accumulated evidence justifies a deeper identity shift now"),
-      }),
-      execute: async ({ axis, previousValue, newValue, evidence, whyNow }) => {
+      }).strict(),
+      execute: async ({
+        personality,
+        liveDynamicsAttachments,
+        selfImage,
+        hardConstraints,
+        evidence,
+        whyNow,
+      }) => {
         const npc = getDb()
           .select()
           .from(npcs)
@@ -498,29 +561,31 @@ export function createReflectionTools(campaignId: string, npcId: string) {
         if (!npc) return { error: "NPC not found" };
 
         const npcRecord = hydrateStoredNpcRecord(npc);
-        const requiredEvidence = minimumEvidenceForPromotion(npcRecord);
         const strongEvidence = evidence.map((entry) => entry.trim()).filter(Boolean);
 
-        if (strongEvidence.length < requiredEvidence || whyNow.trim().length < 24) {
+        if (strongEvidence.length < REQUIRED_EVIDENCE || whyNow.trim().length < 24) {
           return {
-            error: `Deeper identity changes require multiple strong evidence points. Need ${requiredEvidence}, got ${strongEvidence.length}.`,
+            error: `Deeper identity changes require multiple strong evidence points. Need ${REQUIRED_EVIDENCE}, got ${strongEvidence.length}.`,
           };
         }
 
         const updatedRecord = promoteIdentityChange(
           npcRecord,
-          axis,
-          previousValue,
-          newValue.trim(),
-          whyNow.trim(),
+          {
+            personality,
+            liveDynamicsAttachments,
+            selfImage: selfImage?.trim() || undefined,
+            hardConstraints,
+            whyNow: whyNow.trim(),
+          },
         );
         persistNpcReflectionRecord(npcId, updatedRecord);
 
-        log.info(`NPC ${npcId}: promoted ${axis} -> "${newValue}"`);
+        log.info(`NPC ${npcId}: promoted personality/baseFacts change`);
         return {
           updated: true,
-          axis,
-          newValue,
+          personality: updatedRecord.identity.personality,
+          liveDynamicsAttachments: updatedRecord.identity.liveDynamics?.attachments ?? [],
           earnedChanges: updatedRecord.identity.liveDynamics?.earnedChanges ?? [],
         };
       },

@@ -1,0 +1,736 @@
+[20:16:44.831] [32mINFO[39m: [36mbackfill.start[39m
+    [35mtag[39m: "backfill-personality"
+    [35mevent[39m: "backfill.start"
+    [35mpayload[39m: {
+      "campaignCount": 1,
+      "dryRun": true,
+      "batchSize": 5
+    }
+[20:16:44.838] [32mINFO[39m: [36mbackfill.campaign_start[39m
+    [35mtag[39m: "backfill-personality"
+    [35mevent[39m: "backfill.campaign_start"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "totalRecords": 15,
+      "dryRun": true,
+      "batchSize": 5
+    }
+[20:16:44.838] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-6d250cfb-e208-4868-a487-889b150e70ca"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "6d250cfb-e208-4868-a487-889b150e70ca",
+      "kind": "npc"
+    }
+[20:16:44.850] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-a2a48899-4453-4d27-8b68-4f21af7c33c8"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "a2a48899-4453-4d27-8b68-4f21af7c33c8",
+      "kind": "npc"
+    }
+[20:16:44.850] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-bcbd80ef-506f-4578-90ca-4bcfcde7b7d3"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "bcbd80ef-506f-4578-90ca-4bcfcde7b7d3",
+      "kind": "npc"
+    }
+[20:16:44.851] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-3cc51f21-6e54-4cb5-aa35-a9acd5a4f461"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "3cc51f21-6e54-4cb5-aa35-a9acd5a4f461",
+      "kind": "npc"
+    }
+[20:16:44.851] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-c0571f70-c1d5-4018-b27a-89d76e07bf96"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "c0571f70-c1d5-4018-b27a-89d76e07bf96",
+      "kind": "npc"
+    }
+[20:17:31.214] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-6d250cfb-e208-4868-a487-889b150e70ca"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": false,
+      "error": "safeGenerateObject: Zod validation failed.\nErrors: [personalMythology] Too big: expected string to have <=400 characters\nRaw (first 500 chars): {\n  \"summary\": \"The strongest sorcerer alive masks deep conviction beneath playful arrogance, using humor as both weapon and shield while quietly working to dismantle the corrupt institution he serves from within.\",\n  \"voice\": \"Casual and teasing to the point of flippancy, even in life-or-death situations. Uses informal speech, rhetorical questions, and ",
+      "latencyMs": 46375
+    }
+[20:17:31.215] [33mWARN[39m: [36msafeGenerateObject attempt 1/3 failed, retrying in 2000ms: safeGenerateObject: Zod validation failed.
+Errors: [personalMythology] Too big: expected string to have <=400 characters
+Raw (first 500 chars): {
+  "summary": "The strongest sorcerer alive masks deep [39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-6d250cfb-e208-4868-a487-889b150e70ca"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+{"campaignId":"b89467e4-4c6a-422d-82d9-8e948b356dae","recordId":"bcbd80ef-506f-4578-90ca-4bcfcde7b7d3","kind":"npc","action":"dry_run_backfill","personalitySummary":"A reserved and pragmatic first-grade sorcerer who operates on the principle that protecting others requires no justification or calculation of worth, Megumi channels quiet intensity through strategic summoning of his Ten Shadows shikigami while deliberately distancing himself from the political expectations of his Zenin heritage."}
+[20:17:32.242] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-bcbd80ef-506f-4578-90ca-4bcfcde7b7d3"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 47391
+    }
+[20:17:32.315] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-3cc51f21-6e54-4cb5-aa35-a9acd5a4f461"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": false,
+      "error": "safeGenerateObject: Zod validation failed.\nErrors: [summary] Too big: expected string to have <=400 characters\nRaw (first 500 chars): {\n  \"summary\": \"A fierce and unapologetic first-year jujutsu sorcerer from rural Japan who channels cursed energy through nails and hammer via her Straw Doll Technique, driven by a desire to prove her worth in Tokyo and reunite with her childhood friend Saori. Masks deep loyalty and vulnerability beneath sharp wit, blunt assessments, and absolute refusal to weigh ",
+      "latencyMs": 47464
+    }
+[20:17:32.316] [33mWARN[39m: [36msafeGenerateObject attempt 1/3 failed, retrying in 2000ms: safeGenerateObject: Zod validation failed.
+Errors: [summary] Too big: expected string to have <=400 characters
+Raw (first 500 chars): {
+  "summary": "A fierce and unapologetic first-year jujutsu sorce[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-3cc51f21-6e54-4cb5-aa35-a9acd5a4f461"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+{"campaignId":"b89467e4-4c6a-422d-82d9-8e948b356dae","recordId":"c0571f70-c1d5-4018-b27a-89d76e07bf96","kind":"npc","action":"dry_run_backfill","personalitySummary":"An ancient sorcerer turned immortal cursed spirit who embodies predatory malevolence wrapped in deceptive composure, viewing all existence through a lens of absolute hierarchy with himself supreme above all"}
+[20:17:34.926] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-c0571f70-c1d5-4018-b27a-89d76e07bf96"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 50075
+    }
+{"campaignId":"b89467e4-4c6a-422d-82d9-8e948b356dae","recordId":"a2a48899-4453-4d27-8b68-4f21af7c33c8","kind":"npc","action":"dry_run_backfill","personalitySummary":"A warm and earnest first-year jujutsu sorcerer who carries the Curse King's soul inside his own body, driven by his grandfather's dying wish to help others and ensure no one dies alone. Processes trauma through forward motion rather than reflection, masking deeper fears about his own purpose and eventual death with genuine kindness and a readiness to sacrifice himself."}
+[20:17:39.331] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-a2a48899-4453-4d27-8b68-4f21af7c33c8"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 54481
+    }
+{"campaignId":"b89467e4-4c6a-422d-82d9-8e948b356dae","recordId":"6d250cfb-e208-4868-a487-889b150e70ca","kind":"npc","action":"dry_run_backfill","personalitySummary":"The strongest sorcerer alive masks revolutionary conviction beneath a playful, infuriating exterior, treating existence as a game he's already won while quietly engineering a future where his students won't need saving."}
+[20:18:10.314] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-6d250cfb-e208-4868-a487-889b150e70ca"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 2,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 37095
+    }
+[20:18:35.525] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-3cc51f21-6e54-4cb5-aa35-a9acd5a4f461"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 2,
+      "model": "GLM-5.1",
+      "success": false,
+      "error": "safeGenerateObject: Zod validation failed.\nErrors: [personalMythology] Too big: expected string to have <=400 characters\nRaw (first 500 chars): {\n  \"summary\": \"A blunt, fiercely confident sorcerer who masks rural insecurities and deep loyalty behind sharp humor and unapologetic conviction, refusing to weigh human worth on any scale while carving her identity in Tokyo on her own terms.\",\n  \"voice\": \"Direct, unfiltered, and sharp-edged with a dry wit that cuts through tension. Speaks with rural fr",
+      "latencyMs": 61204
+    }
+[20:18:35.525] [33mWARN[39m: [36msafeGenerateObject attempt 2/3 failed, retrying in 2000ms: safeGenerateObject: Zod validation failed.
+Errors: [personalMythology] Too big: expected string to have <=400 characters
+Raw (first 500 chars): {
+  "summary": "A blunt, fiercely confident sorcerer who[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-3cc51f21-6e54-4cb5-aa35-a9acd5a4f461"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+[20:19:17.802] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-3cc51f21-6e54-4cb5-aa35-a9acd5a4f461"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 3,
+      "model": "GLM-5.1",
+      "success": false,
+      "error": "safeGenerateObject: Zod validation failed.\nErrors: [personalMythology] Too big: expected string to have <=400 characters\nRaw (first 500 chars): {\n  \"summary\": \"A brash, confident first-year jujutsu sorcerer who fled her rural village for Tokyo's freedom, Nobara masks deep-seated vulnerabilities and attachment beneath sharp wit and stubborn self-reliance, treating loyalty as non-negotiable once given and refusing to weigh human lives on any scale before acting.\",\n  \"voice\": \"Blunt, direct, and un",
+      "latencyMs": 40262
+    }
+[20:19:17.802] [31mERROR[39m: [36msafeGenerateObject failed after 3 attempts[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-3cc51f21-6e54-4cb5-aa35-a9acd5a4f461"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+[20:19:17.803] [33mWARN[39m: [36mingestion stage "backfill" attempt 1/3 failed[39m
+    [35mtag[39m: "ingestion-retry"
+    [35mturnId[39m: "backfill-3cc51f21-6e54-4cb5-aa35-a9acd5a4f461"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mpayload[39m: {
+      "name": "Error",
+      "message": "safeGenerateObject: Zod validation failed.\nErrors: [personalMythology] Too big: expected string to have <=400 characters\nRaw (first 500 chars): {\n  \"summary\": \"A brash, confident first-year jujutsu sorcerer who fled her rural village for Tokyo's freedom, Nobara masks deep-seated vulnerabilities and attachment beneath sharp wit and stubborn self-reliance, treating loyalty as non-negotiable once given and refusing to weigh human lives on any scale before acting.\",\n  \"voice\": \"Blunt, direct, and unapologetically opinionated with a sharp tongue that cuts through pretense. Frequent sarcasm and casual boasting layered over genuine conviction.",
+      "stack": "Error: safeGenerateObject: Zod validation failed.\nErrors: [personalMythology] Too big: expected string to have <=400 characters\nRaw (first 500 chars): {\n  \"summary\": \"A brash, confident first-year jujutsu sorcerer who fled her rural village for Tokyo's freedom, Nobara masks deep-seated vulnerabilities and attachment beneath sharp wit and stubborn self-reliance, treating loyalty as non-negotiable once given and refusing to weigh human lives on any scale before acting.\",\n  \"voice\": \"Blunt, direct, and unapologetically opinionated with a sharp tongue that cuts through pretense. Frequent sarcasm and casual boasting layered over genuine conviction.\n    at attemptGenerate (R:\Projects\WorldForge\backend\src\ai\generate-object-safe.ts:373:9)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async safeGenerateObject (R:\Projects\WorldForge\backend\src\ai\generate-object-safe.ts:400:22)\n    at async withPipelineRetry (R:\Projects\WorldForge\backend\src\character\ingestion\retry.ts:16:14)\n    at async processRow (R:\Projects\WorldForge\backend\src\scripts\backfill-personality.ts:276:24)\n    at async Promise.all (index 3)\n    at async processCampaign (R:\Projects\WorldForge\backend\src\scripts\backfill-personality.ts:415:28)\n    at async runBackfill (R:\Projects\WorldForge\backend\src\scripts\backfill-personality.ts:477:31)\n    at async main (R:\Projects\WorldForge\backend\src\scripts\backfill-personality.ts:505:18)"
+    }
+[20:19:55.480] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-3cc51f21-6e54-4cb5-aa35-a9acd5a4f461"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": false,
+      "error": "safeGenerateObject: Zod validation failed.\nErrors: [worldview] Too big: expected string to have <=400 characters\nRaw (first 500 chars): {\n  \"summary\": \"A brash, fashion-forward first-year jujutsu sorcerer from a rural village who channels fierce determination and blunt honesty through her Straw Doll Technique, driven by a refusal to accept small-town stagnation and an unshakable loyalty to those she claims as her own.\",\n  \"voice\": \"Sharp-tongued and unapologetically confident, with a penchant fo",
+      "latencyMs": 37164
+    }
+[20:19:55.481] [33mWARN[39m: [36msafeGenerateObject attempt 1/3 failed, retrying in 2000ms: safeGenerateObject: Zod validation failed.
+Errors: [worldview] Too big: expected string to have <=400 characters
+Raw (first 500 chars): {
+  "summary": "A brash, fashion-forward first-year jujutsu sorc[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-3cc51f21-6e54-4cb5-aa35-a9acd5a4f461"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+[20:20:41.445] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-3cc51f21-6e54-4cb5-aa35-a9acd5a4f461"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 2,
+      "model": "GLM-5.1",
+      "success": false,
+      "error": "safeGenerateObject: Zod validation failed.\nErrors: [summary] Too big: expected string to have <=400 characters\nRaw (first 500 chars): {\n  \"summary\": \"A brash and unapologetically confident first-year jujutsu sorcerer who escaped rural village life for Tokyo, wielding her Straw Doll Technique with the same blunt force she applies to every conversation. Nobara masks deep insecurities about her past and self-worth beneath sharp humor and refusal to hesitate, treating loyalty as a zero-calculation p",
+      "latencyMs": 43951
+    }
+[20:20:41.445] [33mWARN[39m: [36msafeGenerateObject attempt 2/3 failed, retrying in 2000ms: safeGenerateObject: Zod validation failed.
+Errors: [summary] Too big: expected string to have <=400 characters
+Raw (first 500 chars): {
+  "summary": "A brash and unapologetically confident first-year [39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-3cc51f21-6e54-4cb5-aa35-a9acd5a4f461"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+[20:21:24.104] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-3cc51f21-6e54-4cb5-aa35-a9acd5a4f461"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 3,
+      "model": "GLM-5.1",
+      "success": false,
+      "error": "safeGenerateObject: Zod validation failed.\nErrors: [personalMythology] Too big: expected string to have <=400 characters\nRaw (first 500 chars): {\n  \"summary\": \"A fierce and unapologetically confident first-year jujutsu sorcerer who masks deep vulnerability beneath sharp humor and blunt honesty, driven by an unwavering determination to prove her worth on her own terms while refusing to let anyone else define the value of the people she protects.\",\n  \"voice\": \"Sharp-tongued and direct with casual ",
+      "latencyMs": 40644
+    }
+[20:21:24.104] [31mERROR[39m: [36msafeGenerateObject failed after 3 attempts[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-3cc51f21-6e54-4cb5-aa35-a9acd5a4f461"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+[20:21:24.104] [33mWARN[39m: [36mingestion stage "backfill" attempt 2/3 failed[39m
+    [35mtag[39m: "ingestion-retry"
+    [35mturnId[39m: "backfill-3cc51f21-6e54-4cb5-aa35-a9acd5a4f461"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mpayload[39m: {
+      "name": "Error",
+      "message": "safeGenerateObject: Zod validation failed.\nErrors: [personalMythology] Too big: expected string to have <=400 characters\nRaw (first 500 chars): {\n  \"summary\": \"A fierce and unapologetically confident first-year jujutsu sorcerer who masks deep vulnerability beneath sharp humor and blunt honesty, driven by an unwavering determination to prove her worth on her own terms while refusing to let anyone else define the value of the people she protects.\",\n  \"voice\": \"Sharp-tongued and direct with casual profanity and biting sarcasm; speaks her mind without filtering and peppers conversations with dry observations about others' shortcomings. Her ",
+      "stack": "Error: safeGenerateObject: Zod validation failed.\nErrors: [personalMythology] Too big: expected string to have <=400 characters\nRaw (first 500 chars): {\n  \"summary\": \"A fierce and unapologetically confident first-year jujutsu sorcerer who masks deep vulnerability beneath sharp humor and blunt honesty, driven by an unwavering determination to prove her worth on her own terms while refusing to let anyone else define the value of the people she protects.\",\n  \"voice\": \"Sharp-tongued and direct with casual profanity and biting sarcasm; speaks her mind without filtering and peppers conversations with dry observations about others' shortcomings. Her \n    at attemptGenerate (R:\Projects\WorldForge\backend\src\ai\generate-object-safe.ts:373:9)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async safeGenerateObject (R:\Projects\WorldForge\backend\src\ai\generate-object-safe.ts:400:22)\n    at async withPipelineRetry (R:\Projects\WorldForge\backend\src\character\ingestion\retry.ts:16:14)\n    at async processRow (R:\Projects\WorldForge\backend\src\scripts\backfill-personality.ts:276:24)\n    at async Promise.all (index 3)\n    at async processCampaign (R:\Projects\WorldForge\backend\src\scripts\backfill-personality.ts:415:28)\n    at async runBackfill (R:\Projects\WorldForge\backend\src\scripts\backfill-personality.ts:477:31)\n    at async main (R:\Projects\WorldForge\backend\src\scripts\backfill-personality.ts:505:18)"
+    }
+{"campaignId":"b89467e4-4c6a-422d-82d9-8e948b356dae","recordId":"3cc51f21-6e54-4cb5-aa35-a9acd5a4f461","kind":"npc","action":"dry_run_backfill","personalitySummary":"A sharp-tongued, fiercely loyal first-year jujutsu sorcerer who escaped rural life for Tokyo and refuses to calculate anyone's worth before choosing to protect them. Masks deep vulnerability—abandonment fears, provincial shame, longing for Saori—behind unapologetic confidence, cutting humor, and performative self-sufficiency."}
+[20:22:01.298] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-3cc51f21-6e54-4cb5-aa35-a9acd5a4f461"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 36194
+    }
+[20:22:01.299] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-cac8be2e-b1eb-445e-a293-ce529770cdcc"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "cac8be2e-b1eb-445e-a293-ce529770cdcc",
+      "kind": "npc"
+    }
+[20:22:01.299] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-36bf1350-0d29-4032-bc8a-c57d552832fc"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "36bf1350-0d29-4032-bc8a-c57d552832fc",
+      "kind": "npc"
+    }
+[20:22:01.300] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-3c3c0b81-2759-4478-b769-5fe4faac0d32"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "3c3c0b81-2759-4478-b769-5fe4faac0d32",
+      "kind": "npc"
+    }
+[20:22:01.300] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-d18040b9-ecd2-4bfc-a0c1-f57efcd3ab42"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "d18040b9-ecd2-4bfc-a0c1-f57efcd3ab42",
+      "kind": "npc"
+    }
+[20:22:01.300] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-a85a69c3-6a6a-447c-ab9f-ebc96e79359d"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "a85a69c3-6a6a-447c-ab9f-ebc96e79359d",
+      "kind": "npc"
+    }
+{"campaignId":"b89467e4-4c6a-422d-82d9-8e948b356dae","recordId":"cac8be2e-b1eb-445e-a293-ce529770cdcc","kind":"npc","action":"dry_run_backfill","personalitySummary":"A sadistic cursed spirit who views humans as playthings and research materials, driven by an intellectual fixation on the soul's malleability. Mahito masks cruelty behind childlike curiosity, treating agony as educational and murder as methodology. His playful demeanor vanishes when genuinely threatened, revealing the cold predator beneath."}
+[20:22:33.953] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-cac8be2e-b1eb-445e-a293-ce529770cdcc"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 32654
+    }
+{"campaignId":"b89467e4-4c6a-422d-82d9-8e948b356dae","recordId":"a85a69c3-6a6a-447c-ab9f-ebc96e79359d","kind":"npc","action":"dry_run_backfill","personalitySummary":"An advanced sentient cursed corpse who serves as a warm, protective mentor to underclassmen at Tokyo Jujutsu High. Panda balances combat training duties with a deeper philosophical mission to prove that cursed corpses possess genuine consciousness deserving of recognition, carrying forward Principal Yaga's legacy through both action and existence."}
+[20:22:36.031] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-a85a69c3-6a6a-447c-ab9f-ebc96e79359d"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 34730
+    }
+{"campaignId":"b89467e4-4c6a-422d-82d9-8e948b356dae","recordId":"36bf1350-0d29-4032-bc8a-c57d552832fc","kind":"npc","action":"dry_run_backfill","personalitySummary":"A suspended Tokyo Jujutsu High third-year who rejected institutional authority to build an underground gambling fight empire, treating combat as entertainment and human connections as wagers. His charismatic hustler persona masks a shrewd operational mind constantly calculating odds and profit margins."}
+[20:22:37.309] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-36bf1350-0d29-4032-bc8a-c57d552832fc"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 36009
+    }
+[20:22:44.188] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-3c3c0b81-2759-4478-b769-5fe4faac0d32"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": false,
+      "error": "safeGenerateObject: Zod validation failed.\nErrors: [summary] Too big: expected string to have <=400 characters; [decisionStyle] Too big: expected string to have <=400 characters; [personalMythology] Too big: expected string to have <=400 characters\nRaw (first 500 chars): {\n  \"summary\": \"Tengen is an ancient immortal who has transcended individual identity through millennia of isolation, functioning primarily as a living barrier infrastructure rather than a person. They observe the world through ",
+      "latencyMs": 42888
+    }
+[20:22:44.188] [33mWARN[39m: [36msafeGenerateObject attempt 1/3 failed, retrying in 2000ms: safeGenerateObject: Zod validation failed.
+Errors: [summary] Too big: expected string to have <=400 characters; [decisionStyle] Too big: expected string to have <=400 characters; [personalMythology] T[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-3c3c0b81-2759-4478-b769-5fe4faac0d32"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+[20:23:17.731] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-d18040b9-ecd2-4bfc-a0c1-f57efcd3ab42"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": false,
+      "error": "safeGenerateObject: Zod validation failed.\nErrors: [summary] Too big: expected string to have <=400 characters; [personalMythology] Too big: expected string to have <=400 characters; [sampleLines.0] Too big: expected string to have <=300 characters; [sampleLines.1] Too big: expected string to have <=300 characters\nRaw (first 500 chars): {\n  \"summary\": \"A battle-scarred former operative running a concealed dojo in Tokyo Prefecture, Kakashi buries lethal competence beneath deliberate casualness an",
+      "latencyMs": 76431
+    }
+[20:23:17.731] [33mWARN[39m: [36msafeGenerateObject attempt 1/3 failed, retrying in 2000ms: safeGenerateObject: Zod validation failed.
+Errors: [summary] Too big: expected string to have <=400 characters; [personalMythology] Too big: expected string to have <=400 characters; [sampleLines.0] T[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-d18040b9-ecd2-4bfc-a0c1-f57efcd3ab42"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+[20:23:31.372] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-3c3c0b81-2759-4478-b769-5fe4faac0d32"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 2,
+      "model": "GLM-5.1",
+      "success": false,
+      "error": "safeGenerateObject: Zod validation failed.\nErrors: [worldview] Too big: expected string to have <=400 characters\nRaw (first 500 chars): {\n  \"summary\": \"An immortal jujutsu sorcerer who has sacrificed their humanity to serve as the living anchor of Japan's barrier network, viewing the world through centuries of isolated observation while their sense of self slowly dissolves under the weight of eternal duty.\",\n  \"voice\": \"Clinical and measured, delivering information with precise detachment—speaks",
+      "latencyMs": 45175
+    }
+[20:23:31.372] [33mWARN[39m: [36msafeGenerateObject attempt 2/3 failed, retrying in 2000ms: safeGenerateObject: Zod validation failed.
+Errors: [worldview] Too big: expected string to have <=400 characters
+Raw (first 500 chars): {
+  "summary": "An immortal jujutsu sorcerer who has sacrificed [39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-3c3c0b81-2759-4478-b769-5fe4faac0d32"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+{"campaignId":"b89467e4-4c6a-422d-82d9-8e948b356dae","recordId":"d18040b9-ecd2-4bfc-a0c1-f57efcd3ab42","kind":"npc","action":"dry_run_backfill","personalitySummary":"A battle-scarred former elite operative turned reluctant mentor who concealed a technique-copying Sharingan behind casual indifference, Kakashi trains independent chakra practitioners in Tokyo's shadow while navigating the territorial tensions between hidden chakra users and the jujutsu establishment, driven by accumulated loss and the determination that no more students die under his instruction."}
+[20:24:08.339] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-d18040b9-ecd2-4bfc-a0c1-f57efcd3ab42"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 2,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 48600
+    }
+{"campaignId":"b89467e4-4c6a-422d-82d9-8e948b356dae","recordId":"3c3c0b81-2759-4478-b769-5fe4faac0d32","kind":"npc","action":"dry_run_backfill","personalitySummary":"Tengen is an ancient immortal sorcerer who has become more barrier than person after millennia of isolation, existing as a living conduit for the protective network that hides jujutsu society while their sense of self slowly dissolves into the walls they maintain."}
+[20:24:18.271] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-3c3c0b81-2759-4478-b769-5fe4faac0d32"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 3,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 44885
+    }
+[20:24:18.272] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-2f90383b-f653-4797-a87c-814fb33e1ac9"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "2f90383b-f653-4797-a87c-814fb33e1ac9",
+      "kind": "npc"
+    }
+[20:24:18.272] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-ba34e889-19c9-4862-ac9a-7fceec9ae27a"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "ba34e889-19c9-4862-ac9a-7fceec9ae27a",
+      "kind": "npc"
+    }
+[20:24:18.273] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-51e86c17-8f3f-4133-90b9-cb9950431d92"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "51e86c17-8f3f-4133-90b9-cb9950431d92",
+      "kind": "npc"
+    }
+[20:24:18.273] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-1a9d49f8-7beb-470b-8d67-7429f6f1f915"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "1a9d49f8-7beb-470b-8d67-7429f6f1f915",
+      "kind": "npc"
+    }
+[20:24:18.273] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-a10e0968-6d5c-44b5-bad4-e29e4145d3aa"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "a10e0968-6d5c-44b5-bad4-e29e4145d3aa",
+      "kind": "player"
+    }
+{"campaignId":"b89467e4-4c6a-422d-82d9-8e948b356dae","recordId":"2f90383b-f653-4797-a87c-814fb33e1ac9","kind":"npc","action":"dry_run_backfill","personalitySummary":"Principal of Tokyo Jujutsu High and master cursed corpse fabricator who enforces institutional discipline while secretly nurturing radical beliefs about constructed consciousness. Gates advanced resources behind combat competence evaluations, treating student readiness as a matter of life and death in Tokyo's overlap zones."}
+[20:24:48.126] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-2f90383b-f653-4797-a87c-814fb33e1ac9"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 29854
+    }
+{"campaignId":"b89467e4-4c6a-422d-82d9-8e948b356dae","recordId":"a10e0968-6d5c-44b5-bad4-e29e4145d3aa","kind":"player","action":"dry_run_backfill","personalitySummary":"A pragmatic survivor who navigates the space between legitimate commerce and black-market necessity, haunted by what she witnessed in the void-scar. Mira trades in information and hard-to-find goods, trusting her instincts over authority and viewing moral compromises as the cost of staying alive in a universe that doesn't care about fairness."}
+[20:24:49.035] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-a10e0968-6d5c-44b5-bad4-e29e4145d3aa"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 30762
+    }
+[20:24:54.510] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-ba34e889-19c9-4862-ac9a-7fceec9ae27a"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": false,
+      "error": "safeGenerateObject: Zod validation failed.\nErrors: [summary] Too big: expected string to have <=400 characters; [sampleLines.0] Too big: expected string to have <=300 characters; [sampleLines.1] Too big: expected string to have <=300 characters\nRaw (first 500 chars): {\n  \"summary\": \"A calculating clan patriarch who masks shrewd geopolitical maneuvering beneath physician's bedside manner, Agari Kaisen treats every interaction as a diagnostic session where he identifies what the other party needs ",
+      "latencyMs": 36237
+    }
+[20:24:54.510] [33mWARN[39m: [36msafeGenerateObject attempt 1/3 failed, retrying in 2000ms: safeGenerateObject: Zod validation failed.
+Errors: [summary] Too big: expected string to have <=400 characters; [sampleLines.0] Too big: expected string to have <=300 characters; [sampleLines.1] Too b[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-ba34e889-19c9-4862-ac9a-7fceec9ae27a"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+{"campaignId":"b89467e4-4c6a-422d-82d9-8e948b356dae","recordId":"1a9d49f8-7beb-470b-8d67-7429f6f1f915","kind":"npc","action":"dry_run_backfill","personalitySummary":"A methodical, transactional cartographer who has positioned himself as Tokyo's sole comprehensive Void Scar intelligence source, trading equally with jujutsu sorcerers and chakra practitioners while privately investigating whether the consciousness entity beneath the Yamanote Line can be understood, controlled, or must be destroyed."}
+[20:25:03.595] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-1a9d49f8-7beb-470b-8d67-7429f6f1f915"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 45322
+    }
+[20:25:05.901] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-51e86c17-8f3f-4133-90b9-cb9950431d92"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": false,
+      "error": "safeGenerateObject: Zod validation failed.\nErrors: [worldview] Too big: expected string to have <=400 characters\nRaw (first 500 chars): {\n  \"summary\": \"A disciplined semi-grade 1 sorcerer and Kyoto Jujutsu High instructor who champions traditional ritual techniques over brute force, maintaining strict professional formality while harboring deep-seated resentment toward Gojo Satoru's mockery and Tokyo Jujutsu High's dismissive attitude toward Kyoto's methodical approach to jujutsu.\",\n  \"voice\": \"",
+      "latencyMs": 47628
+    }
+[20:25:05.901] [33mWARN[39m: [36msafeGenerateObject attempt 1/3 failed, retrying in 2000ms: safeGenerateObject: Zod validation failed.
+Errors: [worldview] Too big: expected string to have <=400 characters
+Raw (first 500 chars): {
+  "summary": "A disciplined semi-grade 1 sorcerer and Kyoto Ju[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-51e86c17-8f3f-4133-90b9-cb9950431d92"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+{"campaignId":"b89467e4-4c6a-422d-82d9-8e948b356dae","recordId":"51e86c17-8f3f-4133-90b9-cb9950431d92","kind":"npc","action":"dry_run_backfill","personalitySummary":"A disciplined semi-grade 1 sorcerer and Kyoto Jujutsu High instructor who channels ritual song to amplify allied capabilities and reinforce defensive barriers, professionally prideful and easily irritated by Tokyo's dismissive attitude toward traditional methods."}
+[20:25:39.959] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-51e86c17-8f3f-4133-90b9-cb9950431d92"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 2,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 32056
+    }
+[20:25:44.080] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-ba34e889-19c9-4862-ac9a-7fceec9ae27a"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 2,
+      "model": "GLM-5.1",
+      "success": false,
+      "error": "safeGenerateObject: Zod validation failed.\nErrors: [summary] Too big: expected string to have <=400 characters\nRaw (first 500 chars): {\n  \"summary\": \"A pragmatic patriarch who treats every interaction like a surgical procedure—precise, measured, and focused on keeping his patient (the Kedōin Clan) stable. Kaisen extends professional warmth only as far as leverage permits, viewing relationships through the lens of mutual utility rather than sentiment. His neutrality isn't ideological conviction b",
+      "latencyMs": 47561
+    }
+[20:25:44.080] [33mWARN[39m: [36msafeGenerateObject attempt 2/3 failed, retrying in 2000ms: safeGenerateObject: Zod validation failed.
+Errors: [summary] Too big: expected string to have <=400 characters
+Raw (first 500 chars): {
+  "summary": "A pragmatic patriarch who treats every interaction[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-ba34e889-19c9-4862-ac9a-7fceec9ae27a"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+{"campaignId":"b89467e4-4c6a-422d-82d9-8e948b356dae","recordId":"ba34e889-19c9-4862-ac9a-7fceec9ae27a","kind":"npc","action":"dry_run_backfill","personalitySummary":"Agari Kaisen is the pragmatic head of the Kedōin Clan who has survived in the shadows between jujutsu society and independent chakra communities by making his family medically indispensable to all sides. He speaks softly, negotiates precisely, and never lets sentiment cloud his calculations regarding clan preservation."}
+[20:26:16.213] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-ba34e889-19c9-4862-ac9a-7fceec9ae27a"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 3,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 30130
+    }
+[20:26:16.214] [32mINFO[39m: [36mbackfill.campaign_complete[39m
+    [35mtag[39m: "backfill-personality"
+    [35mevent[39m: "backfill.campaign_complete"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "written": 15,
+      "skipped": 0,
+      "failed": 0,
+      "changed": 0
+    }
+[20:26:16.214] [32mINFO[39m: [36mbackfill.finished[39m
+    [35mtag[39m: "backfill-personality"
+    [35mevent[39m: "backfill.finished"
+    [35mpayload[39m: {
+      "written": 15,
+      "skipped": 0,
+      "failed": 0,
+      "changed": 0,
+      "campaignsProcessed": 1
+    }

@@ -159,6 +159,12 @@ function derivePremiseTopics(premise: string): WorldgenResearchTopic[] {
   return [...topics];
 }
 
+/**
+ * Legacy-only deterministic planner for old single-source IpResearchContext flows.
+ *
+ * The Phase 71 v2 research artifact path must use LLM-authored search jobs from
+ * WorldgenResearchArtifactV2 instead of deriving semantic source roles here.
+ */
 export function buildWorldgenResearchPlan(
   input: BuildWorldgenResearchPlanInput,
 ): WorldgenResearchPlan {

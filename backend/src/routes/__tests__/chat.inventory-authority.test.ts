@@ -26,6 +26,13 @@ vi.mock("../../campaign/index.js", () => ({
   getLastPlayerAction: vi.fn(() => "Retry the duel"),
   createCheckpoint: vi.fn(),
   pruneAutoCheckpoints: vi.fn(),
+  // Phase 58-03: chat.ts reads currentTick from this at turn.begin.
+  readCampaignConfig: vi.fn(() => ({
+    name: "Test",
+    premise: "",
+    createdAt: 0,
+    currentTick: 0,
+  })),
 }));
 
 vi.mock("../../lib/index.js", () => ({
@@ -39,7 +46,46 @@ vi.mock("../../lib/index.js", () => ({
     error: vi.fn(),
     warn: vi.fn(),
     debug: vi.fn(),
+    event: vi.fn(),
   })),
+  runWithTurnContext: <T,>(_ctx: unknown, fn: () => T): T => fn(),
+  getTurnContext: vi.fn(() => undefined),
+  withRole: <T,>(_role: unknown, fn: () => T): T => fn(),
+}));
+
+vi.mock("../../lib/logger-setup.js", () => ({
+  rootPino: {
+    flush: vi.fn(),
+    child: () => ({
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    }),
+  },
+  shouldLogRole: vi.fn(() => true),
+  getObservabilityConfigSnapshot: vi.fn(() => ({
+    enabled: true,
+    dumpFullPrompts: false,
+    roles: {
+      judge: true,
+      storyteller: true,
+      oracle: true,
+      npcAgent: true,
+      reflection: true,
+      embedder: true,
+      tool: true,
+      prompt: true,
+    },
+  })),
+  getLogRoot: vi.fn(() => ""),
+}));
+
+vi.mock("../../lib/sse-hash.js", () => ({
+  sha256Prefix: vi.fn(() => "deadbeefcafef00d"),
+  isDeltaType: vi.fn(() => false),
+  getOrCreateAggregator: vi.fn(() => ({ record: vi.fn() })),
+  finalizeAggregators: vi.fn(() => []),
 }));
 
 vi.mock("../../settings/index.js", () => ({
@@ -81,6 +127,18 @@ vi.mock("../../engine/index.js", () => ({
   simulateOffscreenNpcs: vi.fn(async () => []),
   checkAndTriggerReflections: vi.fn(async () => []),
   tickFactions: vi.fn(async () => []),
+  queuePostTurnSimulationProposals: vi.fn((input: { campaignId: string }) => ({
+    campaignId: input.campaignId,
+    baseWorldVersion: 0,
+    worldTimeMinutes: 0,
+    queued: [],
+  })),
+  buildDoneBoundaryData: vi.fn((_campaignId: string, data: unknown) => ({
+    ...(data && typeof data === "object" && !Array.isArray(data) ? data as Record<string, unknown> : { value: data }),
+    worldVersion: 0,
+    worldTimeMinutes: 0,
+  })),
+  readWorldClock: vi.fn((campaignId: string) => ({ campaignId, worldVersion: 0, worldTimeMinutes: 0, currentTick: 0, updatedAt: 0 })),
   sanitizeNarrative: vi.fn((text: string) => text),
 }));
 
@@ -168,7 +226,7 @@ describe("Phase 38 retry/undo reopen seam", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ success: true, messagesRemoved: 2 });
+    expect(await response.json()).toEqual({ ok: true, messagesRemoved: 2 });
     expect(mockedRestoreSnapshot).toHaveBeenCalledWith("campaign-38", previousSnapshot);
   });
 });

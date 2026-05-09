@@ -26,6 +26,11 @@ export type RecordLocationRecentEventInput = {
   summary: string;
   importance: number;
   sourceEventId?: string | null;
+  threadId?: string | null;
+  surfaceRoute?: string | null;
+  visibility?: LocationRecentEventSummary["visibility"];
+  knowledgeRoute?: string | null;
+  hiddenCauseTerms?: readonly string[];
   createdAt?: number;
 };
 
@@ -73,6 +78,24 @@ function resolveLocationProjection(
   return toLocationProjection(location);
 }
 
+function stringifyStringArray(values: readonly string[] | undefined): string {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const value of values ?? []) {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    normalized.push(trimmed);
+  }
+  return JSON.stringify(normalized);
+}
+
 export function recordLocationRecentEvent(
   input: RecordLocationRecentEventInput,
 ): LocationRecentEventSummary | null {
@@ -81,18 +104,23 @@ export function recordLocationRecentEvent(
     return null;
   }
 
-  const row: typeof locationRecentEvents.$inferInsert = {
+  const row: LocationRecentEventSummary = {
     id: crypto.randomUUID(),
     campaignId: input.campaignId,
     locationId: projection.locationId,
-    sourceLocationId: projection.sourceLocationId,
-    anchorLocationId: projection.anchorLocationId,
+    sourceLocationId: projection.sourceLocationId ?? null,
+    anchorLocationId: projection.anchorLocationId ?? null,
     sourceEventId: input.sourceEventId ?? null,
+    threadId: input.threadId ?? null,
     eventType: input.eventType,
     summary: input.summary,
+    surfaceRoute: input.surfaceRoute ?? null,
+    visibility: input.visibility ?? "player_perceivable",
+    knowledgeRoute: input.knowledgeRoute ?? null,
+    hiddenCauseTerms: stringifyStringArray(input.hiddenCauseTerms),
     tick: input.tick,
     importance: input.importance,
-    archivedAtTick: projection.archivedAtTick,
+    archivedAtTick: projection.archivedAtTick ?? null,
     createdAt: input.createdAt ?? Date.now(),
   };
 

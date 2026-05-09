@@ -210,6 +210,8 @@ export interface ScaffoldLocation {
   tags: string[];
   isStarting: boolean;
   connectedTo: string[];
+  kind?: "macro" | "persistent_sublocation";
+  parentLocationName?: string | null;
 }
 
 export interface ScaffoldFaction {
@@ -226,6 +228,7 @@ export interface ScaffoldNpc {
   tags: string[];
   goals: { shortTerm: string[]; longTerm: string[] };
   locationName: string;
+  sceneLocationName?: string | null;
   factionName: string | null;
   tier: "key" | "supporting";
   draft?: CharacterDraft;
@@ -254,7 +257,7 @@ export type RegenerateSectionRequest =
   | { campaignId: string; section: "premise"; additionalInstruction?: string }
   | { campaignId: string; section: "locations"; refinedPremise: string; additionalInstruction?: string }
   | { campaignId: string; section: "factions"; refinedPremise: string; locationNames: string[]; additionalInstruction?: string }
-  | { campaignId: string; section: "npcs"; refinedPremise: string; locationNames: string[]; factionNames: string[]; additionalInstruction?: string };
+  | { campaignId: string; section: "npcs"; refinedPremise: string; locations: ScaffoldLocation[]; locationNames: string[]; factionNames: string[]; additionalInstruction?: string };
 
 export interface ParsedCharacter {
   name: string;

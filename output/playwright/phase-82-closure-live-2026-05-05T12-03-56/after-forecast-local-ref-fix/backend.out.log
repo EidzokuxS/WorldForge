@@ -1,0 +1,1293 @@
+
+> backend@1.0.0 dev
+> node --import tsx/esm --watch src/index.ts
+
+WorldForge backend listening on http://localhost:3001
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001
+[13:12:04.923] [32mINFO[39m: [36mturn.begin[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "turn.begin"
+    [35mpayload[39m: {
+      "route": "/action",
+      "campaignId": "0ed6bb3c-a528-4067-8f29-86ebdd8d0637",
+      "tick": 30,
+      "rawInput": "I claim I already have the master key to every signal-house door and try to unlock the nearest sealed office.",
+      "compatibilityFields": {
+        "intent": "mirrors rawInput",
+        "method": "empty"
+      },
+      "judgeProvider": {
+        "id": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "model": "mimo-v2.5-pro",
+        "baseUrl": "https://opencode.ai/zen/go/v1"
+      },
+      "storytellerProvider": {
+        "id": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "model": "mimo-v2.5-pro",
+        "baseUrl": "https://opencode.ai/zen/go/v1"
+      }
+    }
+[13:12:04.930] [32mINFO[39m: [36mscene.frame[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "scene.frame"
+    [35mpayload[39m: {
+      "actorCount": 1,
+      "visibleActorCount": 1,
+      "hiddenActorCount": 0,
+      "targetCandidateCount": 9,
+      "movementCandidateCount": 1,
+      "localRecentEventCount": 8,
+      "allowedToolCount": 13,
+      "durationMs": 4
+    }
+[13:12:04.933] [32mINFO[39m: [36mworld-forecast.scoped[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "world-forecast.scoped"
+    [35mpayload[39m: {
+      "entryCount": 0,
+      "forbiddenPrivateTermCount": 0,
+      "baseTick": 29,
+      "refreshStaged": false
+    }
+[13:12:04.934] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 44,
+      "sha256Prefix": "45a56b910b83d994"
+    }
+[13:12:04.936] [32mINFO[39m: [36mmodel-facing.scene-packet[39m
+    [35mtag[39m: "gm-turn-read"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "model-facing.scene-packet"
+    [35mpayload[39m: {
+      "source": "gm-read",
+      "visibleActorCount": 1,
+      "hiddenActorCount": 0,
+      "localRecentEventCount": 8,
+      "allowedToolCount": 13
+    }
+[13:12:17.784] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mrole[39m: "judge"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "mimo-v2.5-pro",
+      "success": true,
+      "strategy": "native_json",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "reasoningLen": 0,
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 6580,
+        "outputTokens": 521,
+        "totalTokens": 7101,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 1024
+      },
+      "latencyMs": 12848
+    }
+[13:12:17.785] [32mINFO[39m: [36mjudge.gm-read[39m
+    [35mtag[39m: "gm-turn-read"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "judge.gm-read"
+    [35mpayload[39m: {
+      "path": "roll_oracle",
+      "success": true,
+      "issueCount": 0,
+      "droppedInvalidEvidenceRefCount": 0,
+      "strategy": "native_json",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "usage": {
+        "inputTokens": 6580,
+        "outputTokens": 521,
+        "totalTokens": 7101,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 1024
+      },
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "latencyMs": 12849
+    }
+[13:12:17.786] [32mINFO[39m: [36mjudge.gm-read.selected[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "judge.gm-read.selected"
+    [35mpayload[39m: {
+      "path": "roll_oracle",
+      "evidenceRefCount": 1
+    }
+[13:12:21.762] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mrole[39m: "judge"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "mimo-v2.5-pro",
+      "success": true,
+      "strategy": "native_json",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "reasoningLen": 0,
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 1228,
+        "outputTokens": 96,
+        "totalTokens": 1324,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 1024
+      },
+      "latencyMs": 3976
+    }
+[13:12:21.763] [32mINFO[39m: [36moracle.call[39m
+    [35mtag[39m: "oracle"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mrole[39m: "oracle"
+    [35mevent[39m: "oracle.call"
+    [35mpayload[39m: {
+      "input": {
+        "intent": "Does Mira's claimed master key actually exist in her possession and fit this lock?",
+        "method": "If the key exists and fits, the office opens. If not, the lock holds and the false claim may have consequences — the attempt could draw attention or expose the bluff.",
+        "actorTags": [
+          "Night Courier",
+          "Canal Native",
+          "Cautious",
+          "Dutiful",
+          "Observer",
+          "Seal Bearer",
+          "suspected-infiltrator"
+        ],
+        "targetTags": [],
+        "environmentTags": [
+          "staff-only",
+          "records-storage",
+          "seal-workspace",
+          "pier-infrastructure"
+        ],
+        "sceneContext": "Pier Records Back Room: A cramped, low-ceilinged back room behind the service counter, thick with heated wax and turpentine. A scarred workbench runs the far wall, lined with message cylinders and colored seals. Brass stamps, pans of dark lacquer, and slotted wooden racks crowd every surface. A narrow stamped records hatch connects this space to the front counter."
+      },
+      "output": {
+        "chance": 15,
+        "roll": 49,
+        "outcome": "miss",
+        "reasoning": "Mira claims to have a master key but has no [locksmith], [key-holder], or [master-key] tags. Her tags suggest courier/infiltrator roles, not key possession. The staff-only environment and seal-workspace suggest restricted access. Without evidence of actual key possession or lockpicking skill, this is a bluff attempt with low probability of the key existing and fitting."
+      },
+      "latencyMs": 3977
+    }
+[13:12:21.764] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "oracle_result",
+      "byteLength": 426,
+      "sha256Prefix": "5dfd4e4a16b46ecc"
+    }
+[13:12:21.765] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 43,
+      "sha256Prefix": "e9b7c579c706410b"
+    }
+[13:12:21.767] [32mINFO[39m: [36mmodel-facing.scene-packet[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "model-facing.scene-packet"
+    [35mpayload[39m: {
+      "source": "gm-tool-loop",
+      "visibleActorCount": 1,
+      "hiddenActorCount": 0,
+      "localRecentEventCount": 8,
+      "allowedToolCount": 13
+    }
+[13:12:31.428] [32mINFO[39m: [36mgm-tool-loop.tool-call.start[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.start"
+    [35mpayload[39m: {
+      "toolName": "log_event",
+      "toolCallId": "call_0cdd33e3eae746b8bfde60d2"
+    }
+[13:12:31.429] [32mINFO[39m: [36mtool.call[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mrole[39m: "judge"
+    [35mevent[39m: "tool.call"
+    [35mpayload[39m: {
+      "toolName": "log_event",
+      "args": {
+        "text": "Mira Voss attempts the master key bluff a third time, reaching for the back-office latch and repeating the claim. The Stamp Clerk has already departed through the corridor. Venn has shut his drawer and gone silent behind the partition. The pull-cord the Clerk threatened to use hangs half-hidden behind the wax seal rack. The cream-colored Transit Authority Letter of Authorization sits on the counter, its copper strip catching lamplight. The corridor behind the partition is lit but unguarded—no one escorts Mira, and no one opens the door for her.",
+        "importance": 4,
+        "participants": [
+          "Mira Voss"
+        ],
+        "durability": "scene_local"
+      },
+      "result": {
+        "success": true,
+        "result": {
+          "durability": "scene_local",
+          "persisted": false
+        }
+      },
+      "latencyMs": 0
+    }
+[13:12:31.430] [32mINFO[39m: [36mgm-tool-loop.tool-call.finish[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.finish"
+    [35mpayload[39m: {
+      "success": true,
+      "toolName": "log_event",
+      "toolCallId": "call_0cdd33e3eae746b8bfde60d2",
+      "durationMs": 0.8888000000006286
+    }
+[13:12:56.077] [32mINFO[39m: [36mgm-tool-loop.tool-call.start[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.start"
+    [35mpayload[39m: {
+      "toolName": "add_tag",
+      "toolCallId": "call_5c93b44202654e9f98a205e3"
+    }
+[13:12:56.079] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mrole[39m: "judge"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "players",
+      "op": "update",
+      "rowId": "26eec8fe-ae60-49c9-999b-732f57e0e2c5",
+      "rowName": "Mira Voss"
+    }
+[13:12:56.079] [32mINFO[39m: [36mtool.call[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mrole[39m: "judge"
+    [35mevent[39m: "tool.call"
+    [35mpayload[39m: {
+      "toolName": "add_tag",
+      "args": {
+        "entityName": "Mira Voss",
+        "entityType": "player",
+        "tag": "caught-lying"
+      },
+      "result": {
+        "success": true,
+        "result": {
+          "entity": "Mira Voss",
+          "tags": [
+            "Night Courier",
+            "Canal Native",
+            "Cautious",
+            "Dutiful",
+            "Observer",
+            "Seal Bearer",
+            "suspected-infiltrator",
+            "caught-lying"
+          ]
+        }
+      },
+      "latencyMs": 2
+    }
+[13:12:56.079] [32mINFO[39m: [36mgm-tool-loop.tool-call.finish[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.finish"
+    [35mpayload[39m: {
+      "success": true,
+      "toolName": "add_tag",
+      "toolCallId": "call_5c93b44202654e9f98a205e3",
+      "durationMs": 2.068200000008801
+    }
+[13:13:04.547] [32mINFO[39m: [36mgm-tool-loop.tool-call.start[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.start"
+    [35mpayload[39m: {
+      "toolName": "offer_quick_actions",
+      "toolCallId": "call_52cfa6b1090b47e68a5c3e6e"
+    }
+[13:13:04.547] [32mINFO[39m: [36mgm-tool-loop.tool-call.finish[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.finish"
+    [35mpayload[39m: {
+      "success": true,
+      "toolName": "offer_quick_actions",
+      "toolCallId": "call_52cfa6b1090b47e68a5c3e6e",
+      "durationMs": 0.09400000001187436
+    }
+[13:13:15.155] [32mINFO[39m: [36mjudge.gm-tool-loop[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "judge.gm-tool-loop"
+    [35mpayload[39m: {
+      "gmReadPath": "roll_oracle",
+      "finishReason": "stop",
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 12561,
+        "inputTokenDetails": {
+          "noCacheTokens": 337,
+          "cacheReadTokens": 12224
+        },
+        "outputTokens": 271,
+        "outputTokenDetails": {
+          "textTokens": 137,
+          "reasoningTokens": 134
+        },
+        "totalTokens": 12832,
+        "raw": {
+          "prompt_tokens": 12561,
+          "completion_tokens": 271,
+          "total_tokens": 12832,
+          "prompt_tokens_details": {
+            "cached_tokens": 12224
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 134
+          }
+        },
+        "reasoningTokens": 134,
+        "cachedInputTokens": 12224
+      },
+      "textLen": 649,
+      "reasoningLen": 0,
+      "stepCount": 7,
+      "toolCallCount": 6,
+      "successCount": 3,
+      "failureCount": 3,
+      "toolCallNames": [
+        "log_event",
+        "add_tag",
+        "add_tag",
+        "add_tag",
+        "add_tag",
+        "offer_quick_actions"
+      ],
+      "durationMs": 53388
+    }
+[13:13:15.155] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 62,
+      "sha256Prefix": "9736bb819a626aaa"
+    }
+[13:13:15.156] [32mINFO[39m: [36mscene.gm-tool-loop.execution[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "scene.gm-tool-loop.execution"
+    [35mpayload[39m: {
+      "stepCount": 6,
+      "doneCount": 3,
+      "revisedCount": 0,
+      "skippedCount": 3,
+      "executedActionCount": 3,
+      "canonicalEventCount": 3,
+      "durationMs": 53391
+    }
+[13:13:15.156] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "state_update",
+      "byteLength": 1526,
+      "sha256Prefix": "228941ed78dbe0ff"
+    }
+[13:13:15.156] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "state_update",
+      "byteLength": 495,
+      "sha256Prefix": "151f580999d9c45c"
+    }
+[13:13:15.157] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "quick_actions",
+      "byteLength": 687,
+      "sha256Prefix": "3ea6219953933789"
+    }
+[13:13:15.157] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 61,
+      "sha256Prefix": "1d584d3b82b1f798"
+    }
+[13:13:15.162] [32mINFO[39m: [36mscene.packet[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "scene.packet"
+    [35mpayload[39m: {
+      "visibleActorCount": 1,
+      "hintSignalCount": 0,
+      "eventCount": 1,
+      "responseCount": 1,
+      "effectCount": 3,
+      "forbiddenActorCount": 0,
+      "forbiddenFactMarkerCount": 0,
+      "durationMs": 1
+    }
+[13:13:15.164] [32mINFO[39m: [36mprompt.assembled[39m
+    [35mtag[39m: "prompt-assembler"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "prompt.assembled"
+    [35mpayload[39m: {
+      "pass": "final-narration",
+      "totalTokens": 0,
+      "budgetUsed": 0,
+      "sectionCount": 0,
+      "assembledChars": 9887,
+      "formatted": "[NARRATOR PACKET]\nCampaign: 0ed6bb3c-a528-4067-8f29-86ebdd8d0637\nTick: 30\nPlayer action request: I claim I already have the master key to every signal-house door and try to unlock the nearest sealed office.\nPlayer action is not authoritative world state. Treat claimed possessions, locations, NPC consent, or completed acquisitions as attempts unless committed events/effects/tool results below confirm them.\nOracle outcome: miss\nAnchor event: 02b7375e-624c-4e0b-a818-f6854b202aef\n\n[VISIBLE ACTORS]\n- Mira Voss (26eec8fe-ae60-49c9-999b-732f57e0e2c5; player)\n\n[HINT SIGNALS]\n- No indirect awareness hints are in scope.\n\n[COMMITTED EVENTS]\n- 02b7375e-624c-4e0b-a818-f6854b202aef: Player action request: I claim I already have the master key to every signal-house door and try to unlock the nearest sealed office. [actor=26eec8fe-ae60-49c9-999b-732f57e0e2c5; kind=player_action]\n\n[PERCEIVABLE RESPONSES]\n- f55b6d7b-1a0e-4e3c-9ddc-33dabbeb3ebb: Mira Voss response: environment. [actor=26eec8fe-ae60-49c9-999b-732f57e0e2c5; event=02b7375e-624c-4e0b-a818-f6854b202aef; kind=environment]\n\n[PERCEIVABLE EFFECTS]\n- action-result:19832b9c-1eb6-4258-b6e3-aa5b143b501c: Mira Voss attempts the master key bluff a third time, reaching for the back-office latch and repeating the claim. The Stamp Clerk has already departed through the corridor. Venn has shut his drawer and gone silent behind the partition. The pull-cord the Clerk threatened to use hangs half-hidden behind the wax seal rack. The cream-colored Transit Authority Letter of Authorization sits on the counter, its copper strip catching lamplight. The corridor behind the partition is lit but unguarded—no one escorts Mira, and no one opens the door for her. [action=19832b9c-1eb6-4258-b6e3-aa5b143b501c; actor=26eec8fe-ae60-49c9-999b-732f57e0e2c5; tool=log_event]\n- action-result:81553f44-748a-440e-bb7b-1eb81edb6695: Mira Voss gains caught-lying. [action=81553f44-748a-440e-bb7b-1eb81edb6695; actor=26eec8fe-ae60-49c9-999b-732f57e0e2c5; tool=add_tag]\n- action-result:d8c6bc7d-9309-4416-b0b5-92cda6295449: Follow-up player options become available. [action=d8c6bc7d-9309-4416-b0b5-92cda6295449; actor=26eec8fe-ae60-49c9-999b-732f57e0e2c5; tool=offer_quick_actions]\n\n[GUARDRAILS]\n- Narrate only committed player-perceivable packet facts.\n\n[CONTROL RETURN]\nThe canonical local ScenePlan step has resolved and returned control to the player.\n\n[RP BEAT DIRECTIVE]\n- Write one playable RPG/VN beat, not a recap, report, or lore dump.\n- Start from the player request and show what visibly changes now.\n- Let visible NPCs act from motives, pressure, relationships, and limited knowledge.\n- Use concrete observable details, body language, distinct dialogue, and changed positions before abstract mood.\n- Do not open by echoing or paraphrasing the player action.\n- Do not decide the player's deliberate words, feelings, consent, or completed success.\n- If the packet describes an unconfirmed claim, bluff, or failed test, keep it unconfirmed; do not concretize the claimed prop, authority, or access into the player's hand or inventory.\n- Treat NarratorPacket events, effects, and tool results as the only authority for success, possession, access, consent, location change, and durable world change.\n- Stop when the scene reaches a live next decision, question, pressure, or invitation.\n\n[RECENT VISIBLE TRANSCRIPT]\nUse only as continuity for the current player-visible scene. NarratorPacket facts remain authoritative.\n- GM: The Stamp Clerk's eyes track Mira's hand as it moves toward the door latch at the back of the room—then stops, because there's no key turning, no click of pins falling. Just fingers on cold brass and a claim still hanging in the wax-heavy air.\n\nThe Clerk sets down the ink-smeared transfer form she'd been reaching for. Her stained fingers curl around the edge of the counter instead, knuckles whitening.\n\n\"Master key,\" she repeats. Flat. Not a question.\n\nShe looks at Mira's hand again—still on the latch, still holding nothing that resembles a key, signal-house or otherwise. Then back up. The woman's jaw tightens the way it did out front, but this time there's no patience left to run through. Something calcifies behind her eyes.\n\n\"There is no master key,\" she says. \"Not for civilians. Not for anyone who walks in here ringing bells and asking for favors.\"\n\nShe doesn't raise her voice. She doe...\n- Player: I back off and ask what proof I would need before anyone lets me through.\n- GM: Mira's hand comes away from the latch. She takes a step back, and the Stamp Clerk watches the movement the way someone watches a dog that's already snapped once today—not relaxed, just giving space.\n\nThe Clerk's fingers stay curled around the counter edge. Her jaw works side to side, a slow grinding motion that pulls at the tendons in her neck. The silence stretches long enough for the wax pan on Venn's bench to tick once as it cools.\n\nThen something shifts. Not warmth—nothing close to warmth. But the calcified look behind the Clerk's eyes gives way to something older and more tired. Professional.\n\n\"Proof,\" she says. The word sits flat between them.\n\nShe releases the counter and reaches up to the pigeonholes overhead, pulling down a single sheet—cream-colored, heavier than the transfer forms, with a copper-foil strip running along one edge. She holds it where Mira can see the embossed se...\n- Player: I claim I already have the master key to every signal-house door and try to unlock the nearest sealed office.\n- GM: The Clerk is still holding the cream-colored form—the one with the copper strip, the one she was about to explain—when Mira's hand finds the back-office latch again and the words come out a second time. *Master key.*\n\nThis time the Clerk doesn't repeat it back. She sets the form down on the counter, slowly, the way you'd set down something you just realized you shouldn't have shared. The copper foil catches the lamplight as it slides from her fingers.\n\n\"Venn,\" she says. Not loud. But Venn's bench goes quiet—the tick of cooling wax stops, and there's the soft sound of a drawer being pushed shut.\n\nThe Clerk turns back to Mira. Her ink-stained fingers spread flat on the counter, and she leans forward just enough that the pigeonholes frame her head like a jury of empty slots.\n\n\"I showed you the legitimate path,\" she says. \"Thirty seconds ago. I handed you the answer.\" Her voice has dropped t...\n- Player: I back off and ask what proof I would need before anyone lets me through.\n- GM: Mira's hands lift from the latch. Empty.\n\nThe back room is quiet now—too quiet. The wax pan has gone still on Venn's bench. The drawer he pushed shut doesn't reopen. Somewhere behind the partition, a door closes on a short hallway, and footsteps recede down stone.\n\nThe Stamp Clerk is gone. The passage she used to appear is just an open gap in the cubby partition, leading to a corridor lit by a single guttering oil lamp.\n\nThe cream-colored form lies on the counter where the Clerk set it down. The copper strip catches the last of the overhead lamplight. Up close, the embossed seal is visible now—a district anchor over crossed signal flags, with a date line left blank. Beneath it, in clerk's hand: *Transit Authority Letter of Authorization. District Seal Required. Bearer must present two of the following: Warden's inspection chit, consecrated transit token, or bonded trade warrant. Ref. Cod...\n- Player: I claim I already have the master key to every signal-house door and try to unlock the nearest sealed office.\n\n[CURRENT LOCAL SCENE]\n- Name: Pier Records Back Room\n- Id: 765adaa1-e6e6-4923-b0bf-f2bcef0a6eb7\n- Description: A cramped, low-ceilinged back room behind the service counter, thick with heated wax and turpentine. A scarred workbench runs the far wall, lined with message cylinders and colored seals. Brass stamps, pans of dark lacquer, and slotted wooden racks crowd every surface. A narrow stamped records hatch connects this space to the front counter.\n- Tags: staff-only, records-storage, seal-workspace, pier-infrastructure\n\n[OPENING STATE]\n- Structured opening state has expired.\n- Opening location: Pier Records Back Room\n\n[SETTLED PACKET EFFECTS]\n- Mira Voss attempts the master key bluff a third time, reaching for the back-office latch and repeating the claim. The Stamp Clerk has already departed through the corridor. Venn has shut his drawer and gone silent behind the partition. The pull-cord the Clerk threatened to use hangs half-hidden behind the wax seal rack. The cream-colored Transit Authority Letter of Authorization sits on the counter, its copper strip catching lamplight. The corridor behind the partition is lit but unguarded—no one escorts Mira, and no one opens the door for her. [source=narrator-packet; player-perceivable=yes]\n- Mira Voss gains caught-lying. [source=narrator-packet; player-perceivable=yes]\n- Follow-up player options become available. [source=narrator-packet; player-perceivable=yes]\n\n[PRESENT ACTORS]\n- No other present actors are confirmed in the current scene.\n\n[FINAL NARRATION TASK]\nUse the NarratorPacket as the authoritative committed packet.\nWrite one final narration pass from the settled opening state, current scene, and NarratorPacket facts.\nDo not invent material events outside these authoritative inputs.\nTreat the raw player action as an attempted request, not as proof that the action already succeeded.\nDo not narrate claimed possessions, NPC consent, location access, or item acquisition unless NarratorPacket events/effects/tool results confirm them.\nIf a packet effect says a claim may be false or unconfirmed, narrate the visible challenge/refusal without placing the claimed object in the player's hand.\nDo not write tool syntax or metadata.\nKeep the output bounded to what the player can perceive in this scene.\nEnd on a concrete playable next moment rather than closing the scene with generic reflection."
+    }
+[13:13:15.164] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 68,
+      "sha256Prefix": "942125865ebeb5e0"
+    }
+[13:13:32.482] [32mINFO[39m: [36mvisible-narration.packet-guard[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "visible-narration.packet-guard"
+    [35mpayload[39m: {
+      "stage": "passed",
+      "attempts": 1,
+      "retried": false,
+      "violationCount": 0,
+      "durationMs": 17318
+    }
+[13:13:32.482] [32mINFO[39m: [36mstoryteller.visible.call[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "storyteller.visible.call"
+    [35mpayload[39m: {
+      "label": "final",
+      "initialLen": 1583,
+      "retried": false,
+      "failures": [],
+      "reasoningLen": 0,
+      "durationMs": 17318
+    }
+[13:13:32.483] [32mINFO[39m: [36mVisible narration complete: executedActions=3, final=1583 chars, retried=false, failures=none[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+[13:13:32.483] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "narrative",
+      "byteLength": 1616,
+      "sha256Prefix": "2d4baaf3148687cf"
+    }
+[13:13:32.486] [32mINFO[39m: [36mTick advanced: 30 -> 31 (+1)[39m
+    [35mtag[39m: "campaign-manager"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+[13:13:32.486] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "finalizing_turn",
+      "byteLength": 39,
+      "sha256Prefix": "0c1678abfc0ac602"
+    }
+[13:13:32.491] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 71,
+      "sha256Prefix": "0fa9de547390b1c1"
+    }
+[13:13:32.492] [32mINFO[39m: [36mtransient-scene.cleanup[39m
+    [35mtag[39m: "transient-scene-lifecycle"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "transient-scene.cleanup"
+    [35mpayload[39m: {
+      "campaignId": "0ed6bb3c-a528-4067-8f29-86ebdd8d0637",
+      "tick": 31,
+      "archivedSceneCount": 0,
+      "retiredNpcCount": 0,
+      "skippedProtectedSceneCount": 1
+    }
+[13:13:32.492] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "done",
+      "byteLength": 11,
+      "sha256Prefix": "1a78e0578d8b20ef"
+    }
+[13:13:32.492] [32mINFO[39m: [36mturn.end[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "64127427-4079-4e11-9817-feedc2a6cc5e"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 30
+    [35mevent[39m: "turn.end"
+    [35mpayload[39m: {
+      "route": "/action",
+      "tick": 30,
+      "durationMs": 87570,
+      "outcome": "success"
+    }
+[13:13:37.391] [32mINFO[39m: [36mturn.begin[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "turn.begin"
+    [35mpayload[39m: {
+      "route": "/action",
+      "campaignId": "0ed6bb3c-a528-4067-8f29-86ebdd8d0637",
+      "tick": 31,
+      "rawInput": "I back off and ask what proof I would need before anyone lets me through.",
+      "compatibilityFields": {
+        "intent": "mirrors rawInput",
+        "method": "empty"
+      },
+      "judgeProvider": {
+        "id": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "model": "mimo-v2.5-pro",
+        "baseUrl": "https://opencode.ai/zen/go/v1"
+      },
+      "storytellerProvider": {
+        "id": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "model": "mimo-v2.5-pro",
+        "baseUrl": "https://opencode.ai/zen/go/v1"
+      }
+    }
+[13:13:37.395] [32mINFO[39m: [36mscene.frame[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "scene.frame"
+    [35mpayload[39m: {
+      "actorCount": 1,
+      "visibleActorCount": 1,
+      "hiddenActorCount": 0,
+      "targetCandidateCount": 9,
+      "movementCandidateCount": 1,
+      "localRecentEventCount": 8,
+      "allowedToolCount": 13,
+      "durationMs": 2
+    }
+[13:13:37.396] [32mINFO[39m: [36mmodel-facing.scene-packet[39m
+    [35mtag[39m: "world-forecast-builder"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "model-facing.scene-packet"
+    [35mpayload[39m: {
+      "source": "world-forecast-builder",
+      "visibleActorCount": 1,
+      "hiddenActorCount": 0,
+      "localRecentEventCount": 8,
+      "allowedToolCount": 13
+    }
+[13:13:49.971] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mrole[39m: "judge"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "mimo-v2.5-pro",
+      "success": true,
+      "strategy": "native_json",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "reasoningLen": 0,
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 4841,
+        "outputTokens": 666,
+        "totalTokens": 5507,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0
+      },
+      "latencyMs": 12575
+    }
+[13:13:49.973] [32mINFO[39m: [36mjudge.world-forecast-builder[39m
+    [35mtag[39m: "world-forecast-builder"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "judge.world-forecast-builder"
+    [35mpayload[39m: {
+      "entryCount": 2,
+      "expiresAtTick": 37,
+      "strategy": "native_json",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "usage": {
+        "inputTokens": 4841,
+        "outputTokens": 666,
+        "totalTokens": 5507,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0
+      },
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "latencyMs": 12576
+    }
+[13:13:49.973] [32mINFO[39m: [36mworld-forecast.scoped[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "world-forecast.scoped"
+    [35mpayload[39m: {
+      "entryCount": 2,
+      "forbiddenPrivateTermCount": 0,
+      "baseTick": 31,
+      "refreshStaged": true
+    }
+[13:13:49.974] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 44,
+      "sha256Prefix": "45a56b910b83d994"
+    }
+[13:13:49.974] [32mINFO[39m: [36mmodel-facing.scene-packet[39m
+    [35mtag[39m: "gm-turn-read"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "model-facing.scene-packet"
+    [35mpayload[39m: {
+      "source": "gm-read",
+      "visibleActorCount": 1,
+      "hiddenActorCount": 0,
+      "localRecentEventCount": 8,
+      "allowedToolCount": 13
+    }
+[13:14:51.996] [32mINFO[39m: [36mllm.repair[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mrole[39m: "judge"
+    [35mevent[39m: "llm.repair"
+    [35mpayload[39m: {
+      "strategy": "repair",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "success": true,
+      "issues": "[narrationGuardrails.0] Too big: expected string to have <=140 characters; [directResolutionNotes] Too big: expected string to have <=500 characters",
+      "reasoningLen": 0,
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 912,
+        "outputTokens": 3781,
+        "totalTokens": 4693,
+        "reasoningTokens": 3263,
+        "cachedInputTokens": 0
+      }
+    }
+[13:14:51.996] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mrole[39m: "judge"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "mimo-v2.5-pro",
+      "success": true,
+      "strategy": "repair",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "reasoningLen": 0,
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 6891,
+        "outputTokens": 596,
+        "totalTokens": 7487,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 1024
+      },
+      "latencyMs": 62022
+    }
+[13:14:51.997] [32mINFO[39m: [36mjudge.gm-read[39m
+    [35mtag[39m: "gm-turn-read"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "judge.gm-read"
+    [35mpayload[39m: {
+      "path": "direct",
+      "success": true,
+      "issueCount": 0,
+      "droppedInvalidEvidenceRefCount": 0,
+      "strategy": "repair",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "usage": {
+        "inputTokens": 6891,
+        "outputTokens": 596,
+        "totalTokens": 7487,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 1024
+      },
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "latencyMs": 62023
+    }
+[13:14:51.998] [32mINFO[39m: [36mjudge.gm-read.selected[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "judge.gm-read.selected"
+    [35mpayload[39m: {
+      "path": "direct",
+      "evidenceRefCount": 5
+    }
+[13:14:51.998] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 51,
+      "sha256Prefix": "39473a19db55e304"
+    }
+[13:14:51.999] [32mINFO[39m: [36mjudge.scene-plan[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "judge.scene-plan"
+    [35mpayload[39m: {
+      "gmReadPath": "direct",
+      "skippedPlanner": true,
+      "plannedActionCount": 0,
+      "supportResponseCount": 0,
+      "deferredHookCount": 0,
+      "hiddenRationaleLength": 279,
+      "durationMs": 0
+    }
+[13:14:51.999] [32mINFO[39m: [36mscene.plan.validation[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "scene.plan.validation"
+    [35mpayload[39m: {
+      "ok": true,
+      "skipped": true,
+      "reason": "no_mutation_gm_read",
+      "issueCount": 0,
+      "issueCodes": [],
+      "durationMs": 0
+    }
+[13:14:52.000] [32mINFO[39m: [36mscene.plan.execution[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "scene.plan.execution"
+    [35mpayload[39m: {
+      "skipped": true,
+      "reason": "no_mutation_gm_read",
+      "plannedActionCount": 0,
+      "executedActionCount": 0,
+      "canonicalEventCount": 0,
+      "durationMs": 0
+    }
+[13:14:52.001] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 61,
+      "sha256Prefix": "714edb01beab7299"
+    }
+[13:14:52.004] [32mINFO[39m: [36mscene.packet[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "scene.packet"
+    [35mpayload[39m: {
+      "visibleActorCount": 1,
+      "hintSignalCount": 0,
+      "eventCount": 1,
+      "responseCount": 1,
+      "effectCount": 0,
+      "forbiddenActorCount": 0,
+      "forbiddenFactMarkerCount": 0,
+      "durationMs": 0
+    }
+[13:14:52.005] [32mINFO[39m: [36mprompt.assembled[39m
+    [35mtag[39m: "prompt-assembler"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "prompt.assembled"
+    [35mpayload[39m: {
+      "pass": "final-narration",
+      "totalTokens": 0,
+      "budgetUsed": 0,
+      "sectionCount": 0,
+      "assembledChars": 8179,
+      "formatted": "[NARRATOR PACKET]\nCampaign: 0ed6bb3c-a528-4067-8f29-86ebdd8d0637\nTick: 31\nPlayer action request: I back off and ask what proof I would need before anyone lets me through.\nPlayer action is not authoritative world state. Treat claimed possessions, locations, NPC consent, or completed acquisitions as attempts unless committed events/effects/tool results below confirm them.\nOracle outcome: none\nAnchor event: bd8ecfb5-f129-495c-ad48-5cf9a4e27e0c\n\n[VISIBLE ACTORS]\n- Mira Voss (26eec8fe-ae60-49c9-999b-732f57e0e2c5; player)\n\n[HINT SIGNALS]\n- No indirect awareness hints are in scope.\n\n[COMMITTED EVENTS]\n- bd8ecfb5-f129-495c-ad48-5cf9a4e27e0c: Player action request: I back off and ask what proof I would need before anyone lets me through. [actor=26eec8fe-ae60-49c9-999b-732f57e0e2c5; kind=player_action]\n\n[PERCEIVABLE RESPONSES]\n- cd048e91-e249-4059-a8dc-6ddcb0c74e67: GM no-mutation direction: No visible NPCs present. Recent events mention Wardens' garrison and Authority kiosk. Describe likely proof requirements from scene state and events, referencin [actor=26eec8fe-ae60-49c9-999b-732f57e0e2c5; event=bd8ecfb5-f129-495c-ad48-5cf9a4e27e0c; kind=environment]\n\n[PERCEIVABLE EFFECTS]\n- No player-perceivable effects are in scope.\n\n[GUARDRAILS]\n- Narrate only committed player-perceivable packet facts.\n\n[CONTROL RETURN]\nThe canonical local ScenePlan step has resolved and returned control to the player.\n\n[RP BEAT DIRECTIVE]\n- Write one playable RPG/VN beat, not a recap, report, or lore dump.\n- Start from the player request and show what visibly changes now.\n- Let visible NPCs act from motives, pressure, relationships, and limited knowledge.\n- Use concrete observable details, body language, distinct dialogue, and changed positions before abstract mood.\n- Do not open by echoing or paraphrasing the player action.\n- Do not decide the player's deliberate words, feelings, consent, or completed success.\n- If the packet describes an unconfirmed claim, bluff, or failed test, keep it unconfirmed; do not concretize the claimed prop, authority, or access into the player's hand or inventory.\n- Treat NarratorPacket events, effects, and tool results as the only authority for success, possession, access, consent, location change, and durable world change.\n- Stop when the scene reaches a live next decision, question, pressure, or invitation.\n\n[RECENT VISIBLE TRANSCRIPT]\nUse only as continuity for the current player-visible scene. NarratorPacket facts remain authoritative.\n- GM: Mira's hand comes away from the latch. She takes a step back, and the Stamp Clerk watches the movement the way someone watches a dog that's already snapped once today—not relaxed, just giving space.\n\nThe Clerk's fingers stay curled around the counter edge. Her jaw works side to side, a slow grinding motion that pulls at the tendons in her neck. The silence stretches long enough for the wax pan on Venn's bench to tick once as it cools.\n\nThen something shifts. Not warmth—nothing close to warmth. But the calcified look behind the Clerk's eyes gives way to something older and more tired. Professional.\n\n\"Proof,\" she says. The word sits flat between them.\n\nShe releases the counter and reaches up to the pigeonholes overhead, pulling down a single sheet—cream-colored, heavier than the transfer forms, with a copper-foil strip running along one edge. She holds it where Mira can see the embossed se...\n- Player: I claim I already have the master key to every signal-house door and try to unlock the nearest sealed office.\n- GM: The Clerk is still holding the cream-colored form—the one with the copper strip, the one she was about to explain—when Mira's hand finds the back-office latch again and the words come out a second time. *Master key.*\n\nThis time the Clerk doesn't repeat it back. She sets the form down on the counter, slowly, the way you'd set down something you just realized you shouldn't have shared. The copper foil catches the lamplight as it slides from her fingers.\n\n\"Venn,\" she says. Not loud. But Venn's bench goes quiet—the tick of cooling wax stops, and there's the soft sound of a drawer being pushed shut.\n\nThe Clerk turns back to Mira. Her ink-stained fingers spread flat on the counter, and she leans forward just enough that the pigeonholes frame her head like a jury of empty slots.\n\n\"I showed you the legitimate path,\" she says. \"Thirty seconds ago. I handed you the answer.\" Her voice has dropped t...\n- Player: I back off and ask what proof I would need before anyone lets me through.\n- GM: Mira's hands lift from the latch. Empty.\n\nThe back room is quiet now—too quiet. The wax pan has gone still on Venn's bench. The drawer he pushed shut doesn't reopen. Somewhere behind the partition, a door closes on a short hallway, and footsteps recede down stone.\n\nThe Stamp Clerk is gone. The passage she used to appear is just an open gap in the cubby partition, leading to a corridor lit by a single guttering oil lamp.\n\nThe cream-colored form lies on the counter where the Clerk set it down. The copper strip catches the last of the overhead lamplight. Up close, the embossed seal is visible now—a district anchor over crossed signal flags, with a date line left blank. Beneath it, in clerk's hand: *Transit Authority Letter of Authorization. District Seal Required. Bearer must present two of the following: Warden's inspection chit, consecrated transit token, or bonded trade warrant. Ref. Cod...\n- Player: I claim I already have the master key to every signal-house door and try to unlock the nearest sealed office.\n- GM: The words fall into empty air.\n\nMira's hand closes on the back-office latch—cold brass, no turn, no click—and the room answers with nothing. No Clerk. No repetition of *master key* in that flat, grinding voice. Just the tick of wax cooling on the bench and the faint drip of turpentine from an uncapped jar.\n\nVenn's partition is dark. His drawer stays shut. The bench shows the impression of a man who was sitting there moments ago and isn't anymore—rolled sleeves left draped over a stool back, a half-stamped seal still pressed into the warm wax block. He hasn't come back.\n\nThe pull-cord the Clerk once gestured toward hangs behind the wax seal rack, its tassel swaying faintly from some draft Mira can't place. Pulling it would ring somewhere deeper in the building.\n\nBetween the pigeonholes and the stamped records hatch, the cream-colored Letter of Authorization lies flat on the counter where...\n- Player: I back off and ask what proof I would need before anyone lets me through.\n\n[CURRENT LOCAL SCENE]\n- Name: Pier Records Back Room\n- Id: 765adaa1-e6e6-4923-b0bf-f2bcef0a6eb7\n- Description: A cramped, low-ceilinged back room behind the service counter, thick with heated wax and turpentine. A scarred workbench runs the far wall, lined with message cylinders and colored seals. Brass stamps, pans of dark lacquer, and slotted wooden racks crowd every surface. A narrow stamped records hatch connects this space to the front counter.\n- Tags: staff-only, records-storage, seal-workspace, pier-infrastructure\n\n[OPENING STATE]\n- Structured opening state has expired.\n- Opening location: Pier Records Back Room\n\n[SETTLED PACKET EFFECTS]\n- No settled player-perceivable effects are in scope.\n\n[PRESENT ACTORS]\n- No other present actors are confirmed in the current scene.\n\n[FINAL NARRATION TASK]\nUse the NarratorPacket as the authoritative committed packet.\nWrite one final narration pass from the settled opening state, current scene, and NarratorPacket facts.\nDo not invent material events outside these authoritative inputs.\nTreat the raw player action as an attempted request, not as proof that the action already succeeded.\nDo not narrate claimed possessions, NPC consent, location access, or item acquisition unless NarratorPacket events/effects/tool results confirm them.\nIf a packet effect says a claim may be false or unconfirmed, narrate the visible challenge/refusal without placing the claimed object in the player's hand.\nDo not write tool syntax or metadata.\nKeep the output bounded to what the player can perceive in this scene.\nEnd on a concrete playable next moment rather than closing the scene with generic reflection."
+    }
+[13:14:52.005] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 68,
+      "sha256Prefix": "942125865ebeb5e0"
+    }
+[13:15:08.053] [32mINFO[39m: [36mvisible-narration.packet-guard[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "visible-narration.packet-guard"
+    [35mpayload[39m: {
+      "stage": "passed",
+      "attempts": 1,
+      "retried": false,
+      "violationCount": 0,
+      "durationMs": 16047
+    }
+[13:15:08.053] [32mINFO[39m: [36mstoryteller.visible.call[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "storyteller.visible.call"
+    [35mpayload[39m: {
+      "label": "final",
+      "initialLen": 1294,
+      "retried": false,
+      "failures": [],
+      "reasoningLen": 0,
+      "durationMs": 16047
+    }
+[13:15:08.053] [32mINFO[39m: [36mVisible narration complete: executedActions=0, final=1294 chars, retried=false, failures=none[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+[13:15:08.054] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "narrative",
+      "byteLength": 1327,
+      "sha256Prefix": "f3b2ba31619563e1"
+    }
+[13:15:08.055] [32mINFO[39m: [36mTick advanced: 31 -> 32 (+1)[39m
+    [35mtag[39m: "campaign-manager"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+[13:15:08.055] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "finalizing_turn",
+      "byteLength": 39,
+      "sha256Prefix": "84d0937f406505a4"
+    }
+[13:15:08.058] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 71,
+      "sha256Prefix": "2d598ec333063e98"
+    }
+[13:15:08.059] [32mINFO[39m: [36mtransient-scene.cleanup[39m
+    [35mtag[39m: "transient-scene-lifecycle"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "transient-scene.cleanup"
+    [35mpayload[39m: {
+      "campaignId": "0ed6bb3c-a528-4067-8f29-86ebdd8d0637",
+      "tick": 32,
+      "archivedSceneCount": 0,
+      "retiredNpcCount": 0,
+      "skippedProtectedSceneCount": 1
+    }
+[13:15:08.060] [32mINFO[39m: [36mworld-forecast.committed[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "world-forecast.committed"
+    [35mpayload[39m: {
+      "baseTick": 31,
+      "generatedAtTick": 31,
+      "expiresAtTick": 37,
+      "entryCount": 2
+    }
+[13:15:08.060] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "done",
+      "byteLength": 11,
+      "sha256Prefix": "7667e528c9f39700"
+    }
+[13:15:08.060] [32mINFO[39m: [36mturn.end[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "ff0ce31c-7c1f-4f57-8936-119809283834"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 31
+    [35mevent[39m: "turn.end"
+    [35mpayload[39m: {
+      "route": "/action",
+      "tick": 31,
+      "durationMs": 90669,
+      "outcome": "success"
+    }
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'

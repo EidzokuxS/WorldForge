@@ -100,22 +100,33 @@ export function RolesTab({ settings, setSettings }: RolesTabProps) {
   };
 
   return (
-    <>
-      {(["judge", "storyteller", "generator", "embedder"] as const).map((role) => (
-        <RoleConfigCard
-          key={role}
-          roleName={role}
-          title={ROLE_META[role].title}
-          description={ROLE_META[role].description}
-          config={settings[role]}
-          providers={settings.providers}
-          resolvedProvider={providerById.get(settings[role].providerId)}
-          isTesting={testingRoles[role]}
-          hideAdvanced={role === "embedder"}
-          onConfigChange={(update) => handleRoleConfigChange(role, update)}
-          onTestRole={() => void handleTestRole(role)}
-        />
-      ))}
-    </>
+    <section className="wf-set-group">
+      <div className="wf-set-group-head">
+        <div>
+          <h2 className="wf-set-group-h">Roles</h2>
+          <p className="wf-set-group-sub">
+            Assign each engine role to a provider and optional model override.
+          </p>
+        </div>
+      </div>
+
+      <div className="wf-settings-list">
+        {(["judge", "storyteller", "generator", "embedder"] as const).map((role) => (
+          <RoleConfigCard
+            key={role}
+            roleName={role}
+            title={ROLE_META[role].title}
+            description={ROLE_META[role].description}
+            config={settings[role]}
+            providers={settings.providers}
+            resolvedProvider={providerById.get(settings[role].providerId)}
+            isTesting={testingRoles[role]}
+            hideAdvanced={role === "embedder"}
+            onConfigChange={(update) => handleRoleConfigChange(role, update)}
+            onTestRole={() => void handleTestRole(role)}
+          />
+        ))}
+      </div>
+    </section>
   );
 }

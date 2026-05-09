@@ -12,21 +12,29 @@ import { eq, and } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { npcs, locations, players } from "../db/schema.js";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
+import { extractReasoningText } from "../ai/extract-reasoning-text.js";
 import { createNpcAgentTools } from "./npc-tools.js";
 import { getRelationshipGraph } from "./graph-queries.js";
 import { searchEpisodicEvents } from "../vectors/episodic-events.js";
 import { embedTexts } from "../vectors/embeddings.js";
-import { createLogger } from "../lib/index.js";
-import { parseTags } from "./parse-helpers.js";
+import { createLogger, withRole } from "../lib/index.js";
+import { parseTags, collectToolCalls } from "./parse-helpers.js";
 import { hydrateStoredNpcRecord } from "../character/record-adapters.js";
 import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
 import { DERIVED_RUNTIME_TAGS_RULE } from "../character/prompt-contract.js";
+import {
+  buildCombatEnvelope,
+  deriveCombatPosture,
+  type CombatantCombatSnapshot,
+  type NpcCombatPosture,
+} from "./combat-envelope.js";
 import {
   getObserverAwareness,
   getObserverKnowledgeBasis,
   inferPresenceVisibility,
   resolveScenePresence,
   resolveStoredSceneScopeId,
+  type PresenceSnapshot,
 } from "./scene-presence.js";
 import type { CharacterRecord } from "@worldforge/shared";
 
@@ -39,6 +47,82 @@ export interface NpcTickResult {
   npcName: string;
   toolCalls: Array<{ tool: string; args: unknown; result: unknown }>;
   error?: string;
+}
+
+interface PrimaryCombatTargetCandidate {
+  actorId: string;
+  actorType: "player" | "npc";
+  snapshot: CombatantCombatSnapshot;
+}
+
+function scorePrimaryCombatTarget(candidate: PrimaryCombatTargetCandidate): number {
+  const powerStats = candidate.snapshot.powerStats;
+  if (!powerStats) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  const kindBias = candidate.actorType === "player" ? 10_000 : 0;
+  return (
+    kindBias
+    + powerStats.attackPotency.rank * 100
+    + powerStats.speed.rank * 10
+    + powerStats.hax.length
+  );
+}
+
+function selectPrimaryCombatTarget(
+  npcId: string,
+  presenceSnapshot: PresenceSnapshot | null,
+  candidates: readonly PrimaryCombatTargetCandidate[],
+): PrimaryCombatTargetCandidate | null {
+  if (!presenceSnapshot) {
+    return null;
+  }
+
+  return candidates
+    .filter((candidate) => Boolean(candidate.snapshot.powerStats))
+    .filter(
+      (candidate) => getObserverAwareness(presenceSnapshot, npcId, candidate.actorId) === "clear",
+    )
+    .sort((left, right) => scorePrimaryCombatTarget(right) - scorePrimaryCombatTarget(left))[0] ?? null;
+}
+
+function formatCombatPostureBlock(posture: NpcCombatPosture): string {
+  return [
+    "[COMBAT POSTURE]",
+    `Primary target: ${posture.vsLabel}`,
+    `Posture: ${posture.posture}`,
+    `Matchup: ${posture.matchup}`,
+    `Can win direct exchange: ${posture.canWin ? "yes" : "no"}`,
+    ...(posture.mustAvoid.length > 0
+      ? [`Hazards: ${posture.mustAvoid.join("; ")}`]
+      : []),
+    ...(posture.exposedTargetVulnerabilities.length > 0
+      ? [
+          `Live vulnerabilities: ${posture.exposedTargetVulnerabilities.join("; ")}`,
+        ]
+      : []),
+    ...posture.guidanceLines.map((line) => `- ${line}`),
+  ].join("\n");
+}
+
+function extractCombatSnapshotFromRecord(
+  fallbackLabel: string,
+  rawCharacterRecord: string | null | undefined,
+): CombatantCombatSnapshot {
+  if (!rawCharacterRecord) {
+    return { label: fallbackLabel, powerStats: null };
+  }
+
+  try {
+    const parsed = JSON.parse(rawCharacterRecord) as Partial<CharacterRecord>;
+    return {
+      label: parsed.identity?.displayName?.trim() || fallbackLabel,
+      powerStats: parsed.powerStats ?? null,
+    };
+  } catch {
+    return { label: fallbackLabel, powerStats: null };
+  }
 }
 
 // -- Core NPC tick ------------------------------------------------------------
@@ -54,9 +138,21 @@ export async function tickNpcAgent(
   judgeProvider: ProviderConfig,
   embedderProvider?: ProviderConfig,
 ): Promise<NpcTickResult> {
+  return withRole("npcAgent", () =>
+    tickNpcAgentInternal(campaignId, npcId, tick, judgeProvider, embedderProvider),
+  );
+}
+
+async function tickNpcAgentInternal(
+  campaignId: string,
+  npcId: string,
+  tick: number,
+  judgeProvider: ProviderConfig,
+  embedderProvider?: ProviderConfig,
+): Promise<NpcTickResult> {
+  const tickStart = Date.now();
   const db = getDb();
 
-  // 1. Load NPC
   const npc = db
     .select()
     .from(npcs)
@@ -76,7 +172,6 @@ export async function tickNpcAgent(
   );
   const identityPrompt = buildNpcIdentityPrompt(npcRecord);
 
-  // 2. Load NPC's current location
   let locationName = "Unknown location";
   let locationDesc = "";
 
@@ -93,13 +188,13 @@ export async function tickNpcAgent(
     }
   }
 
-  // 3. Load nearby entities
   const nearbyNpcs = npc.currentLocationId
     ? db
         .select({
           id: npcs.id,
           name: npcs.name,
           tags: npcs.tags,
+          characterRecord: npcs.characterRecord,
           currentLocationId: npcs.currentLocationId,
           currentSceneLocationId: npcs.currentSceneLocationId,
         })
@@ -119,6 +214,7 @@ export async function tickNpcAgent(
         .select({
           id: players.id,
           name: players.name,
+          characterRecord: players.characterRecord,
           currentLocationId: players.currentLocationId,
           currentSceneLocationId: players.currentSceneLocationId,
         })
@@ -141,6 +237,7 @@ export async function tickNpcAgent(
     } => typeof player.id === "string" && typeof player.currentLocationId === "string",
   );
 
+  const selfPresence = inferPresenceVisibility(npc.tags);
   const presenceSnapshot =
     npc.currentLocationId && npcSceneScopeId
       ? resolveScenePresence({
@@ -160,8 +257,8 @@ export async function tickNpcAgent(
               actorType: "npc" as const,
               broadLocationId: npc.currentLocationId,
               sceneScopeId: npc.currentSceneLocationId,
-              visibility: inferPresenceVisibility(npc.tags).visibility,
-              awarenessHint: inferPresenceVisibility(npc.tags).awarenessHint,
+              visibility: selfPresence.visibility,
+              awarenessHint: selfPresence.awarenessHint,
             },
             ...nearbyOtherNpcs.map((nearbyNpc) => {
               const visibility = inferPresenceVisibility(nearbyNpc.tags);
@@ -218,7 +315,58 @@ export async function tickNpcAgent(
     }
   }
 
-  // 4. Search episodic events involving this NPC (best-effort)
+  const primaryCombatTarget = selectPrimaryCombatTarget(
+    npc.id,
+    presenceSnapshot,
+    [
+      ...nearbyPlayersWithPresenceIds.map((player) => ({
+        actorId: player.id,
+        actorType: "player" as const,
+        snapshot: extractCombatSnapshotFromRecord(player.name, player.characterRecord),
+      })),
+      ...nearbyOtherNpcs.map((nearbyNpc) => ({
+        actorId: nearbyNpc.id,
+        actorType: "npc" as const,
+        snapshot: extractCombatSnapshotFromRecord(
+          nearbyNpc.name,
+          nearbyNpc.characterRecord,
+        ),
+      })),
+    ],
+  );
+
+  const combatEnvelope =
+    npcRecord.powerStats && primaryCombatTarget?.snapshot.powerStats
+      ? buildCombatEnvelope({
+          actor: {
+            label: npcRecord.identity.displayName,
+            powerStats: npcRecord.powerStats,
+          },
+          target: primaryCombatTarget.snapshot,
+          hostileAction: true,
+          actionText: `Hostile engagement against ${primaryCombatTarget.snapshot.label}`,
+        })
+      : null;
+
+  const combatPosture = combatEnvelope
+    ? deriveCombatPosture(combatEnvelope, { vsLabel: primaryCombatTarget!.snapshot.label })
+    : null;
+
+  if (combatPosture) {
+    log.event("combat.posture.derived", {
+      source: "npc",
+      npcId,
+      npcName: npcRecord.identity.displayName,
+      vsLabel: combatPosture.vsLabel,
+      posture: combatPosture.posture,
+      matchup: combatPosture.matchup,
+      canWin: combatPosture.canWin,
+      guidanceCount: combatPosture.guidanceLines.length,
+      mustAvoidCount: combatPosture.mustAvoid.length,
+      vulnerabilityCount: combatPosture.exposedTargetVulnerabilities.length,
+    });
+  }
+
   let recentMemories: string[] = [];
   if (embedderProvider) {
     try {
@@ -232,7 +380,6 @@ export async function tickNpcAgent(
     }
   }
 
-  // 5. Load relationship graph
   const graph = getRelationshipGraph(campaignId, [npcId], 1);
   const relationshipLines = graph.flatMap((node) =>
     node.relationships.map(
@@ -240,7 +387,6 @@ export async function tickNpcAgent(
     )
   );
 
-  // 6. Build system prompt
   const goalsText = [
     ...npcRecord.motivations.shortTermGoals.map((g) => `  - [short] ${g}`),
     ...npcRecord.motivations.longTermGoals.map((g) => `  - [long] ${g}`),
@@ -269,8 +415,9 @@ export async function tickNpcAgent(
     relationshipLines.length > 0
       ? `Your relationships:\n${relationshipLines.join("\n")}`
       : "",
+    combatPosture ? formatCombatPostureBlock(combatPosture) : null,
     ``,
-    `Decide your next action. You SHOULD take at least one action when other characters are present — passing (no tools) should only happen if truly nothing warrants action.`,
+    `Decide whether you have a meaningful next action. Act only when your goals, relationships, pressure, or the current scene justify it; passing is valid when restraint, watching, waiting, or silence is the honest character choice.`,
     ``,
     `You may:`,
     `- act(action) — attempt an action (will be evaluated for success via dice roll)`,
@@ -278,12 +425,11 @@ export async function tickNpcAgent(
     `- move_to(location) — travel to an adjacent location`,
     `- update_own_goal(old, new) — revise your goals based on events`,
     ``,
-    `Choose ONE action that best serves your current goals. Prioritize interaction with present characters over doing nothing.`,
+    `Choose at most ONE action that best serves your current goals. Prefer a small believable beat over forced activity.`,
   ]
     .filter(Boolean)
     .join("\n");
 
-  // 7. Call Judge LLM with NPC tools
   const model = createModel(judgeProvider);
   const tools = createNpcAgentTools(campaignId, npcId, tick, judgeProvider);
 
@@ -296,21 +442,39 @@ export async function tickNpcAgent(
     prompt: `What do you do this turn?`,
   });
 
-  // 8. Collect tool call results
-  const toolCalls: Array<{ tool: string; args: unknown; result: unknown }> = [];
-  for (const step of result.steps ?? []) {
-    const calls = step.toolCalls ?? [];
-    const results = step.toolResults ?? [];
-    for (let i = 0; i < calls.length; i++) {
-      const tc = calls[i]!;
-      toolCalls.push({
-        tool: tc.toolName,
-        args: (tc as unknown as Record<string, unknown>).input ?? (tc as unknown as Record<string, unknown>).args ?? {},
-        result: (results[i] as unknown as Record<string, unknown>)?.output ?? (results[i] as unknown as Record<string, unknown>)?.result ?? null,
-      });
-    }
+  const toolCalls = collectToolCalls(result.steps ?? []);
+
+  const reasoningText = extractReasoningText(result);
+
+  log.event("npcAgent.decision", {
+    npcId,
+    npcName: npcRecord.identity.displayName,
+    finishReason: result.finishReason,
+    responseModel: result.response?.modelId ?? null,
+    usage: result.usage ?? null,
+    textLen: result.text.length,
+    textPreview: result.text ? result.text.slice(0, 500) : null,
+    reasoningLen: reasoningText?.length ?? 0,
+    toolCallNames: toolCalls.map((call) => call.tool),
+  });
+
+  if (reasoningText) {
+    log.event("npcAgent.reasoning", {
+      npcId,
+      npcName: npcRecord.identity.displayName,
+      reasoningText,
+      responseModel: result.response?.modelId ?? null,
+      usage: result.usage ?? null,
+    });
   }
 
+  log.event("npcAgent.tick", {
+    npcId,
+    npcName: npcRecord.identity.displayName,
+    toolCallCount: toolCalls.length,
+    toolCallNames: toolCalls.map((call) => call.tool),
+    durationMs: Date.now() - tickStart,
+  });
   log.info(
     `${npcRecord.identity.displayName} tick complete: ${toolCalls.length} tool call(s)`,
   );
@@ -334,10 +498,21 @@ export async function tickPresentNpcs(
   embedderProvider?: ProviderConfig,
 ): Promise<NpcTickResult[]> {
   const db = getDb();
-  const resolvedSceneScopeId = resolveStoredSceneScopeId(
-    playerLocationId,
-    playerSceneScopeId,
-  );
+  let resolvedSceneScopeId = playerSceneScopeId ?? null;
+  if (resolvedSceneScopeId && resolvedSceneScopeId === playerLocationId) {
+    const scopeLocation = db
+      .select({ kind: locations.kind })
+      .from(locations)
+      .where(eq(locations.id, resolvedSceneScopeId))
+      .get();
+    if (scopeLocation?.kind === "macro") {
+      resolvedSceneScopeId = null;
+    }
+  }
+
+  if (!resolvedSceneScopeId) {
+    return [];
+  }
 
   // Query key NPCs in the player's broad location, then keep only encounter-scope matches.
   const keyNpcs = db
@@ -357,11 +532,7 @@ export async function tickPresentNpcs(
     )
     .all()
     .filter((npc) => {
-      const npcSceneScopeId = resolveStoredSceneScopeId(
-        npc.currentLocationId,
-        npc.currentSceneLocationId ?? null,
-      );
-      return npcSceneScopeId === resolvedSceneScopeId;
+      return npc.currentSceneLocationId === resolvedSceneScopeId;
     });
 
   if (keyNpcs.length === 0) return [];
@@ -401,12 +572,11 @@ function formatNpcIdentityList(label: string, values: string[]): string | null {
   return `${label}: ${values.join("; ")}`;
 }
 
-function buildNpcIdentityPrompt(record: CharacterRecord): string[] {
+export function buildNpcIdentityPrompt(record: CharacterRecord): string[] {
   const baseFacts = record.identity.baseFacts;
   const behavioralCore = record.identity.behavioralCore;
   const liveDynamics = record.identity.liveDynamics;
-  const continuity = record.continuity;
-
+  const personality = record.identity.personality;
   const lines = [
     "Base facts:",
     [
@@ -416,12 +586,27 @@ function buildNpcIdentityPrompt(record: CharacterRecord): string[] {
     ]
       .filter((value): value is string => Boolean(value))
       .map((value) => value.startsWith("- ") ? value : `- ${value}`),
-    "Behavioral core:",
+    "Personality:",
     [
-      formatNpcIdentityList("Enduring motives", behavioralCore?.motives ?? []),
-      formatNpcIdentityList("Pressure responses", behavioralCore?.pressureResponses ?? []),
-      formatNpcIdentityList("Taboos", behavioralCore?.taboos ?? []),
-      formatNpcIdentityList("Attachments", behavioralCore?.attachments ?? []),
+      formatNpcIdentityList(
+        "Personality summary",
+        personality?.summary ? [personality.summary] : [],
+      ),
+      formatNpcIdentityList("Voice", personality?.voice ? [personality.voice] : []),
+      formatNpcIdentityList(
+        "Decision style",
+        personality?.decisionStyle ? [personality.decisionStyle] : [],
+      ),
+      formatNpcIdentityList(
+        "Worldview",
+        personality?.worldview ? [personality.worldview] : [],
+      ),
+      formatNpcIdentityList(
+        "Internal contradictions",
+        personality?.internalContradictions ?? [],
+      ),
+      formatNpcIdentityList("Sample lines", personality?.sampleLines ?? []),
+      formatNpcIdentityList("Attachments", liveDynamics?.attachments ?? []),
       behavioralCore?.selfImage ? `Self-image: ${behavioralCore.selfImage}` : null,
     ]
       .filter((value): value is string => Boolean(value))
@@ -436,30 +621,6 @@ function buildNpcIdentityPrompt(record: CharacterRecord): string[] {
       .filter((value): value is string => Boolean(value))
       .map((value) => `- ${value}`),
   ].flat();
-
-  if (
-    continuity
-    && (
-      record.identity.tier === "key"
-      || record.identity.canonicalStatus !== "original"
-      || continuity.identityInertia !== "flexible"
-    )
-  ) {
-    lines.push(
-      "Continuity / fidelity:",
-      `- identity inertia=${continuity.identityInertia}`,
-      ...(continuity.protectedCore.length > 0
-        ? [`- protected core: ${continuity.protectedCore.join("; ")}`]
-        : []),
-      ...(continuity.mutableSurface.length > 0
-        ? [`- mutable surface: ${continuity.mutableSurface.join("; ")}`]
-        : []),
-      ...(continuity.changePressureNotes.length > 0
-        ? [`- change pressure: ${continuity.changePressureNotes.join("; ")}`]
-        : []),
-      "- Apply pressure and scene fallout to live dynamics before concluding that deeper identity has changed.",
-    );
-  }
 
   return lines;
 }

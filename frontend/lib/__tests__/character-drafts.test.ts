@@ -82,8 +82,6 @@ function makeNpcDraft(
       legacyTags: [],
       ...overrides?.provenance,
     },
-    sourceBundle: overrides?.sourceBundle,
-    continuity: overrides?.continuity,
   };
 }
 
@@ -154,41 +152,13 @@ describe("characterDraftToScaffoldNpc", () => {
           earnedChanges: ["Started trusting the rookie quartermaster"],
         },
       },
-      sourceBundle: {
-        canonSources: [
-          {
-            kind: "canon",
-            label: "Harbor Chronicle",
-            excerpt: "Mira held the breakwater through the Black Tide.",
-          },
-        ],
-        secondarySources: [
-          {
-            kind: "card",
-            label: "Community Character Card",
-            excerpt: "Gruff protector with a rigid code.",
-          },
-        ],
-        synthesis: {
-          owner: "worldforge",
-          strategy: "merge",
-          notes: ["Preserve watch-captain continuity."],
-        },
-      },
-      continuity: {
-        identityInertia: "anchored",
-        protectedCore: ["identity.baseFacts", "identity.behavioralCore"],
-        mutableSurface: ["identity.liveDynamics"],
-        changePressureNotes: ["Needs sustained civic betrayal before deeper drift."],
-      },
     });
 
     const scaffoldNpc = characterDraftToScaffoldNpc(richIdentityDraft);
 
     expect(scaffoldNpc.persona).toBe("A wall between the harbor and chaos.");
     expect(scaffoldNpc.goals.shortTerm).toEqual(["Find the vanished customs ledger"]);
-    expect(scaffoldNpc.draft?.sourceBundle?.canonSources[0]?.label).toBe("Harbor Chronicle");
-    expect(scaffoldNpc.draft?.continuity?.identityInertia).toBe("anchored");
+    expect(scaffoldNpc.draft).toBeDefined();
   });
 });
 
@@ -232,6 +202,72 @@ describe("scaffoldNpcToDraft", () => {
     expect(result.identity.tier).toBe("supporting");
     expect(result.profile.personaSummary).toBe("Knows every crate in the harbor");
   });
+
+  it("preserves backend known-IP canonical identity from scaffold NPC drafts", () => {
+    const result = scaffoldNpcToDraft({
+      name: "Satoru Gojo",
+      persona: "A peerless jujutsu teacher whose confidence bends every room.",
+      tags: ["sorcerer"],
+      goals: { shortTerm: ["Protect the students"], longTerm: ["Reform jujutsu society"] },
+      locationName: "Tokyo Jujutsu High",
+      factionName: "Jujutsu High",
+      tier: "key",
+      draft: makeNpcDraft({
+        identity: {
+          role: "npc",
+          tier: "key",
+          displayName: "Satoru Gojo",
+          canonicalStatus: "known_ip_canonical",
+          baseFacts: {
+            biography: "Canon Jujutsu Kaisen sorcerer anchored by the research artifact.",
+            socialRole: ["Teacher", "Special grade sorcerer"],
+            hardConstraints: ["Must remain recognizable as Satoru Gojo"],
+          },
+          behavioralCore: {
+            motives: ["Protect the next generation"],
+            pressureResponses: ["Turns playful when threatened"],
+            taboos: ["Abandoning students"],
+            attachments: ["Tokyo Jujutsu High"],
+            selfImage: "The strongest modern sorcerer.",
+          },
+          liveDynamics: {
+            attachments: ["Tokyo Jujutsu High"],
+            activeGoals: ["Protect the students"],
+            beliefDrift: [],
+            currentStrains: [],
+            earnedChanges: [],
+          },
+        },
+      }),
+    });
+
+    expect(result.identity.canonicalStatus).toBe("known_ip_canonical");
+    expect(result.identity.displayName).toBe("Satoru Gojo");
+  });
+
+  it("round-trips known-IP scaffold draft identity without downgrading to original", () => {
+    const draft = scaffoldNpcToDraft({
+      name: "Satoru Gojo",
+      persona: "A peerless jujutsu teacher whose confidence bends every room.",
+      tags: ["sorcerer"],
+      goals: { shortTerm: ["Protect the students"], longTerm: ["Reform jujutsu society"] },
+      locationName: "Tokyo Jujutsu High",
+      factionName: "Jujutsu High",
+      tier: "key",
+      draft: makeNpcDraft({
+        identity: {
+          role: "npc",
+          tier: "key",
+          displayName: "Satoru Gojo",
+          canonicalStatus: "known_ip_canonical",
+        },
+      }),
+    });
+
+    const scaffoldNpc = characterDraftToScaffoldNpc(draft);
+
+    expect(scaffoldNpc.draft?.identity.canonicalStatus).toBe("known_ip_canonical");
+  });
 });
 
 describe("createEmptyNpcDraft", () => {
@@ -241,11 +277,13 @@ describe("createEmptyNpcDraft", () => {
 
     expect(supportingDraft.identity.tier).toBe("supporting");
     expect(keyDraft.identity.tier).toBe("key");
+    expect(supportingDraft.identity.canonicalStatus).toBe("original");
+    expect(keyDraft.identity.canonicalStatus).toBe("original");
   });
 });
 
 describe("player draft round-trips", () => {
-  it("preserves backend-owned source and continuity metadata across parsed-character save/load projections", () => {
+  it("preserves identity metadata across parsed-character save/load projections", () => {
     const draft: CharacterDraft = {
       identity: {
         role: "player",
@@ -327,33 +365,6 @@ describe("player draft round-trips", () => {
         worldgenOrigin: null,
         legacyTags: ["wardcraft", "noble"],
       },
-      sourceBundle: {
-        canonSources: [
-          {
-            kind: "research",
-            label: "Vale Succession Notes",
-            excerpt: "Aria fled with the seal.",
-          },
-        ],
-        secondarySources: [
-          {
-            kind: "card",
-            label: "Imported Card",
-            excerpt: "Proud exile with clipped manners.",
-          },
-        ],
-        synthesis: {
-          owner: "worldforge",
-          strategy: "merge",
-          notes: ["Imported outsider canon."],
-        },
-      },
-      continuity: {
-        identityInertia: "anchored",
-        protectedCore: ["identity.baseFacts", "identity.behavioralCore"],
-        mutableSurface: ["identity.liveDynamics"],
-        changePressureNotes: ["Needs earned reconciliation before softening."],
-      },
     };
 
     const parsedCharacter = characterDraftToParsedCharacter(draft);
@@ -372,11 +383,6 @@ describe("player draft round-trips", () => {
     );
     expect(nextDraft.identity.liveDynamics?.activeGoals).toEqual([
       "Reach the archive before the inquisitors",
-    ]);
-    expect(nextDraft.sourceBundle?.secondarySources[0]?.label).toBe("Imported Card");
-    expect(nextDraft.continuity?.protectedCore).toEqual([
-      "identity.baseFacts",
-      "identity.behavioralCore",
     ]);
     expect(nextDraft.socialContext.currentLocationName).toBe("Archive Atrium");
     expect(nextDraft.state.hp).toBe(3);

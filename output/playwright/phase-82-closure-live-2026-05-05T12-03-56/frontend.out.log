@@ -1,0 +1,34 @@
+
+> frontend@0.1.0 dev
+> next dev -p 3000
+
+▲ Next.js 16.1.6 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://198.18.0.1:3000
+
+✓ Starting...
+✓ Ready in 843ms
+ GET / 200 in 906ms (compile: 728ms, render: 178ms)
+ GET / 200 in 914ms (compile: 703ms, render: 211ms)
+ GET / 200 in 911ms (compile: 742ms, render: 168ms)
+ GET /game 200 in 207ms (compile: 121ms, render: 87ms)
+ GET /game 200 in 27ms (compile: 3ms, render: 23ms)
+ GET /game 200 in 23ms (compile: 2ms, render: 20ms)
+ GET /game 200 in 25ms (compile: 2ms, render: 23ms)
+ GET /game 200 in 20ms (compile: 1955µs, render: 18ms)
+ GET /game 200 in 26ms (compile: 3ms, render: 24ms)
+ GET /game 200 in 22ms (compile: 2ms, render: 20ms)
+ GET /game 200 in 31ms (compile: 3ms, render: 28ms)
+ GET /game 200 in 21ms (compile: 1908µs, render: 19ms)
+ GET /game 200 in 20ms (compile: 1692µs, render: 18ms)
+ GET /game 200 in 22ms (compile: 1807µs, render: 20ms)
+ GET /game 200 in 20ms (compile: 1623µs, render: 18ms)
+ GET /game 200 in 20ms (compile: 1806µs, render: 18ms)
+ GET /game 200 in 22ms (compile: 2ms, render: 20ms)
+ GET /game 200 in 24ms (compile: 1973µs, render: 22ms)
+ GET /game 200 in 34ms (compile: 1836µs, render: 33ms)
+ GET /game 200 in 22ms (compile: 1886µs, render: 20ms)
+ GET /game 200 in 21ms (compile: 2ms, render: 18ms)
+ GET /game 200 in 24ms (compile: 1852µs, render: 22ms)
+ GET /game 200 in 22ms (compile: 1811µs, render: 20ms)
+ GET /game 200 in 23ms (compile: 1721µs, render: 22ms)

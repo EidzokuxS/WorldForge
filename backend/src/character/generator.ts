@@ -3,8 +3,7 @@ import { z } from "zod";
 import type { CharacterDraft, PlayerCharacter } from "@worldforge/shared";
 import { createModel } from "../ai/index.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
-import { buildV2CardSections } from "./v2-sections.js";
-import { buildImportModeGuidance, normalizeImportedTags } from "./import-utils.js";
+import { normalizeImportedTags } from "./import-utils.js";
 import type { CharacterImportMode } from "./import-utils.js";
 import { buildCharacterPromptContract } from "./prompt-contract.js";
 import { fromLegacyPlayerCharacter, fromRichParsedCharacter } from "./record-adapters.js";
@@ -40,7 +39,7 @@ const characterSchema = z.object({
     .describe("Name of the starting location from KNOWN LOCATIONS that best fits this character"),
 });
 
-const richCharacterSchema = z.object({
+export const richCharacterSchema = z.object({
   name: z.string().describe("Character's full name"),
   race: z.string().max(100).default("").describe("Character's race or species. Empty if unspecified."),
   gender: z.string().max(100).default("").describe("Character's gender. Empty if unspecified."),
@@ -48,6 +47,13 @@ const richCharacterSchema = z.object({
   appearance: z.string().max(1000).default("").describe("Brief physical description in 1-3 sentences."),
   backgroundSummary: z.string().max(2000).default("").describe("1-2 sentences — where they come from, what brought them here. Soft hooks, not rigid backstory."),
   personaSummary: z.string().max(2000).default("").describe("1-2 sentences — first impression, how others perceive them. Not a personality prescription."),
+  personalitySummary: z.string().max(400).default(""),
+  personalityVoice: z.string().max(600).default(""),
+  personalityDecisionStyle: z.string().max(400).default(""),
+  personalityWorldview: z.string().max(400).default(""),
+  personalityContradictions: z.array(z.string().max(300)).max(3).default([]),
+  personalityMythology: z.string().max(400).default(""),
+  personalitySampleLines: z.array(z.string().max(300)).min(0).max(3).default([]),
   tags: z
     .array(z.string())
     .min(3)
@@ -77,20 +83,17 @@ const richCharacterSchema = z.object({
     .describe("Name of the starting location from KNOWN LOCATIONS that best fits this character"),
 });
 
-function buildFlatOutputStrategy(options?: {
+export function buildFlatOutputStrategy(options?: {
   preservePlayerAgency?: boolean;
-  includeSourceBundleGuidance?: boolean;
 }): string {
   return [
-    "- Return only the flat generator fields from the schema: name, race, gender, age, appearance, backgroundSummary, personaSummary, drives, frictions, shortTermGoals, longTermGoals, tags, hp, equippedItems, locationName.",
+    "- Return only the flat generator fields from the schema: name, race, gender, age, appearance, backgroundSummary, personaSummary, personalitySummary, personalityVoice, personalityDecisionStyle, personalityWorldview, personalityContradictions, personalityMythology, personalitySampleLines, drives, frictions, shortTermGoals, longTermGoals, tags, hp, equippedItems, locationName.",
     "- Treat backgroundSummary as authored biography facts that WorldForge can lift into baseFacts without losing explicit wording.",
     "- Treat personaSummary as outward read and self-image cues, not the whole truth of the character.",
+    "- Use personalitySummary, personalityVoice, personalityDecisionStyle, personalityWorldview, personalityContradictions, personalityMythology, personalitySampleLines to author interiority. These lift into identity.personality. MUST produce AT LEAST 2 sampleLines that are actual quotable sentences in the character's voice (not descriptions). 3 sampleLines preferred.",
     "- Use drives and frictions for durable motives and pressure cues that WorldForge can lift into behavioralCore.",
     "- Use shortTermGoals and longTermGoals for current direction and pressure that WorldForge can lift into liveDynamics.",
-    "- Do NOT emit nested baseFacts, behavioralCore, liveDynamics, sourceBundle, or continuity objects directly.",
-    options?.includeSourceBundleGuidance
-      ? "- When source material exists, keep canon-facing facts primary and use card voice/feel only as secondary cues that inform the flat output without overwriting canon or authored facts."
-      : null,
+    "- Do NOT emit nested baseFacts, behavioralCore, or liveDynamics objects directly.",
     options?.preservePlayerAgency
       ? "- If the source does not explicitly establish player motivations or conflicts, leave drives, frictions, shortTermGoals, and longTermGoals empty instead of inventing rigid player truth."
       : null,
@@ -131,7 +134,7 @@ function toCharacterDraft(
   });
 }
 
-function toCharacterDraftFromRich(
+export function toCharacterDraftFromRich(
   character: z.infer<typeof richCharacterSchema>,
   opts?: {
     importMode?: CharacterImportMode | null;
@@ -189,6 +192,8 @@ REQUIREMENTS:
 - appearance: 1-3 sentences describing physical features — build, hair, distinguishing marks.
 - backgroundSummary: 1-2 sentences capturing stable biography facts, authored backstory, and what brought them here. Preserve explicit authored facts verbatim where supplied.
 - personaSummary: 1-2 sentences capturing outward read, voice, and self-image cues that help WorldForge build richer identity truth. Do not collapse the whole character into a thin vibe line.
+- personalitySummary: 1-2 sentences describing the character's interiority, not just their public vibe.
+- personalitySampleLines: provide 2-3 actual quotable lines in the character's voice drawn from the biography phrasing when possible. They must be spoken sentences, not descriptions.
 - drives: capture explicit durable motives only when the user authored them. Otherwise leave EMPTY array [].
 - frictions: capture explicit pressure points or internal tensions only when the user authored them. Otherwise leave EMPTY array [].
 - shortTermGoals: capture explicit immediate aims only when the user authored them. Otherwise leave EMPTY array [].
@@ -213,79 +218,10 @@ REQUIREMENTS:
   });
 }
 
-export async function mapV2CardToCharacter(opts: {
-  name: string;
-  description: string;
-  personality: string;
-  scenario: string;
-  v2Tags: string[];
-  importMode: CharacterImportMode;
-  premise: string;
-  locationNames: string[];
-  role: ResolvedRole;
-}): Promise<ParsedCharacter> {
-  const sections = buildV2CardSections(opts);
-
-  const prompt = `You are converting a SillyTavern character card into structured RPG data.
-
-SHARED CHARACTER CONTRACT:
-${buildCharacterPromptContract({
-  roleEmphasis:
-    "Imported characters must preserve canon-facing facts, outsider/native context, and secondary card cues through the shared draft pipeline without creating a separate canonical ontology.",
-  includeCanonicalLoadout: false,
-})}
-
-FLAT OUTPUT STRATEGY:
-${buildFlatOutputStrategy({ includeSourceBundleGuidance: true })}
-
-WORLD PREMISE:
-${opts.premise}
-
-KNOWN LOCATIONS (pick one as locationName):
-${opts.locationNames.map((n) => `- ${n}`).join("\n")}
-
-${sections}
-
-REQUIREMENTS:
-- Keep the character's name as "${opts.name}".
-- Integrate the character according to the chosen import mode through the shared draft pipeline.
-- race: character's race/species fitting the world (leave empty if truly unknown).
-- gender: character's gender (leave empty if truly unknown).
-- age: if the source card has an explicit age, preserve it exactly. Otherwise use a descriptive age.
-- appearance: 1-3 sentences describing physical features — build, hair, distinguishing marks.
-- backgroundSummary: 1-2 sentences preserving stable biography, canon-facing facts, and outsider/native context from the source material. Keep hard facts distinct from secondary cues.
-- personaSummary: 1-2 sentences capturing outward read, voice, and behavioral feel from the card's personality/scenario fields. Treat those as secondary cues, not the only truth.
-- drives: capture durable motives from the source material when present; use [] only if truly absent.
-- frictions: capture enduring pressure points or internal conflict from the source material when present; use [] only if truly absent.
-- shortTermGoals: capture current aims or momentum visible in the source material when present; use [] only if truly absent.
-- longTermGoals: capture durable ambitions or direction from the source material when present; use [] only if truly absent.
-- Convert description + personality into WorldForge tags (4-8 tags).
-- Tags must match the same house style as normal WorldForge generation: short Title Case traits, roles, skills, flaws, or background markers.
-- Prefer 1-3 word tags like Veteran Scout, Fearless, Signal Analyst, Noble-born.
-- Avoid trope/meta sludge, fandom metadata, POV markers, formatting labels, or literal copies of source hyphen-tags.
-- Preserve canon-facing facts and secondary cues so WorldForge can store sourceBundle-style provenance separately from the final structured synthesis.
-- Keep outsider/native status in the biography when relevant, not as tags like Offworld Origin.
-- HP: Default to 5 for a fresh character unless the description implies injury or frailty.
-- equippedItems: extract mentioned weapons, armor, tools, possessions (0-6 items).
-- locationName MUST be one of KNOWN LOCATIONS — pick the most fitting one.
-- Keep tags evocative and concise: Master Thief, not Is good at stealing things.
-- Do NOT wrap tags in square brackets.
-- Source tags from SillyTavern are meta-tags — use as context, don't copy verbatim.
-${buildImportModeGuidance(opts.importMode)}`;
-
-  const result = await generateObject({
-    model: createModel(opts.role.provider),
-    schema: richCharacterSchema,
-    prompt,
-    temperature: opts.role.temperature,
-    maxOutputTokens: opts.role.maxTokens,
-  });
-
-  return toCharacterDraftFromRich(result.object, {
-    importMode: opts.importMode,
-    canonicalStatus: "imported",
-  });
-}
+// mapV2CardToCharacter removed in Phase 60-04: V2 cards are now INPUT to the
+// ingestCharacterDraft pipeline, not a parallel field-mapping path. The
+// synthesizer in backend/src/character/ingestion/synthesizer.ts handles V2
+// cards as a PRIORITY 2 source with override-wins priority merge rules.
 
 export async function generateCharacter(opts: {
   premise: string;
@@ -324,6 +260,7 @@ REQUIREMENTS:
 - appearance: 1-3 sentences describing physical features — build, hair, distinguishing marks.
 - backgroundSummary: 1-2 sentences capturing the stable biography and authored facts WorldForge should treat as base truth.
 - personaSummary: 1-2 sentences capturing outward read, self-image, and behavioral cues rather than a generic one-line vibe.
+- personality*: voice + sampleLines MUST match WORLD premise tone and genre.
 - drives: durable motives that explain what this protagonist fundamentally wants.
 - frictions: pressure responses or internal tensions that create believable conflict.
 - shortTermGoals: immediate aims that establish current momentum.

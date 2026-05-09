@@ -47,6 +47,7 @@ import type {
   ChatMessage,
   LocationKind,
   LocationPersistence,
+  WorldgenResearchArtifactV2,
 } from "@worldforge/shared";
 import {
   characterDraftToParsedCharacter,
@@ -554,6 +555,50 @@ export async function readErrorMessage(response: Response): Promise<string> {
   return response.statusText || "Request failed";
 }
 
+/**
+ * Phase 61 — typed error carrying the ingestion pipeline's structured 502 payload.
+ * Backend emits `{ error, stage, attempts }` via `pipelineErrorResponse` in
+ * `backend/src/routes/character.ts` whenever `IngestionPipelineError` is thrown.
+ * Preserving stage+attempts on the frontend lets `PipelineErrorBanner` render a
+ * targeted "Retry {stage}" UI instead of a generic toast.
+ */
+export class IngestionError extends Error {
+  constructor(
+    message: string,
+    public stage?: "extract" | "classify" | "research" | "synthesize" | "power_assess",
+    public attempts?: number,
+  ) {
+    super(message);
+    this.name = "IngestionError";
+  }
+}
+
+/**
+ * Read an error response and return either a typed IngestionError (when the
+ * backend included a `stage` field) or a plain Error with the extracted message.
+ * Falls back to statusText when the body is not JSON.
+ */
+export async function readIngestionError(response: Response): Promise<Error> {
+  try {
+    const payload = (await response.json()) as {
+      error?: string;
+      stage?: string;
+      attempts?: number;
+    };
+    if (payload.stage) {
+      return new IngestionError(
+        payload.error ?? "Request failed",
+        payload.stage as IngestionError["stage"],
+        payload.attempts,
+      );
+    }
+    if (payload.error) return new Error(payload.error);
+  } catch {
+    // Fall through to statusText fallback.
+  }
+  return new Error(response.statusText || "Request failed");
+}
+
 export async function apiGet<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`);
   if (!res.ok) {
@@ -584,7 +629,7 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!res.ok) {
-    throw new Error(await readErrorMessage(res));
+    throw await readIngestionError(res);
   }
   return (await res.json()) as T;
 }
@@ -691,8 +736,16 @@ export function suggestSeeds(
     selectedWorldbooks?: CampaignWorldbookSelection[];
     worldbookEntries?: ClassifiedWorldBookEntry[];
   }
-): Promise<WorldSeeds & { _ipContext?: IpContext | null; _premiseDivergence?: PremiseDivergence | null }> {
-  return apiPost<WorldSeeds & { _ipContext?: IpContext | null; _premiseDivergence?: PremiseDivergence | null }>("/api/worldgen/suggest-seeds", {
+): Promise<WorldSeeds & {
+  _ipContext?: IpResearchContext | null;
+  _premiseDivergence?: PremiseDivergence | null;
+  _researchArtifact?: WorldgenResearchArtifactV2 | null;
+}> {
+  return apiPost<WorldSeeds & {
+    _ipContext?: IpResearchContext | null;
+    _premiseDivergence?: PremiseDivergence | null;
+    _researchArtifact?: WorldgenResearchArtifactV2 | null;
+  }>("/api/worldgen/suggest-seeds", {
     premise,
     name: opts?.name,
     franchise: opts?.franchise,
@@ -702,23 +755,26 @@ export function suggestSeeds(
   });
 }
 
-/** @deprecated Use IpResearchContext from @/lib/types */
-export type IpContext = IpResearchContext;
 export type PremiseDivergenceContext = PremiseDivergence;
 export type WorldbookSelection = CampaignWorldbookSelection;
 
 export function suggestSeed(
   premise: string,
   category: SeedCategory,
-  ipContext?: IpContext | null,
+  ipContext?: IpResearchContext | null,
   premiseDivergence?: PremiseDivergence | null,
+  researchArtifact?: WorldgenResearchArtifactV2 | null,
 ): Promise<RollSeedResult> {
-  return apiPost<RollSeedResult>("/api/worldgen/suggest-seed", {
+  const body: Record<string, unknown> = {
     premise,
     category,
     ipContext: ipContext ?? null,
     premiseDivergence: premiseDivergence ?? null,
-  });
+  };
+  if (researchArtifact) {
+    body.researchArtifact = researchArtifact;
+  }
+  return apiPost<RollSeedResult>("/api/worldgen/suggest-seed", body);
 }
 
 // ───── Turn SSE Parser ─────
@@ -735,10 +791,17 @@ export interface TurnSSEHandlers {
   onOracleResult: (result: { chance: number; roll: number; outcome: string; reasoning: string }) => void;
   onStateUpdate: (update: { tool: string; args: unknown; result: unknown }) => void;
   onQuickActions: (actions: Array<{ label: string; action: string }>) => void;
-  onFinalizing?: () => void;
+  onFinalizing?: (status?: {
+    stage?: string;
+    phase?: string;
+    tick?: number;
+  }) => void;
   onDone: () => void;
   onError: (error: string) => void;
 }
+
+const TURN_STREAM_EMPTY_NARRATION_ERROR = "Turn finished without visible narration. Please retry.";
+const TURN_STREAM_INCOMPLETE_ERROR = "Turn stream ended before completion.";
 
 export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: TurnSSEHandlers): Promise<void> {
   const reader = body.getReader();
@@ -746,6 +809,11 @@ export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: T
   let buffer = "";
   let currentEvent = "";
   let currentData = "";
+  let hasVisibleNarrative = false;
+  let hasDoneEvent = false;
+  let hasErrorEvent = false;
+  let hasLookupResult = false;
+  let requiresVisibleNarrative = false;
 
   const dispatchCurrentEvent = () => {
     if (!currentEvent || !currentData) {
@@ -758,15 +826,37 @@ export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: T
       const parsed = JSON.parse(currentData);
       switch (currentEvent) {
         case "scene-settling": handlers.onSceneSettling?.(parsed); break;
-        case "lookup_result": handlers.onLookupResult?.(parsed); break;
-        case "narrative": handlers.onNarrative(parsed.text); break;
+        case "lookup_result":
+          hasLookupResult = true;
+          handlers.onLookupResult?.(parsed);
+          break;
+        case "narrative":
+          if (typeof parsed.text === "string" && parsed.text.trim().length > 0) {
+            hasVisibleNarrative = true;
+          }
+          handlers.onNarrative(parsed.text);
+          break;
         case "reasoning": handlers.onReasoning?.(parsed); break;
         case "oracle_result": handlers.onOracleResult(parsed); break;
         case "state_update": handlers.onStateUpdate(parsed); break;
         case "quick_actions": handlers.onQuickActions(parsed.actions ?? parsed.result?.actions ?? []); break;
-        case "finalizing_turn": handlers.onFinalizing?.(); break;
-        case "done": handlers.onDone(); break;
-        case "error": handlers.onError(parsed.error ?? "Unknown error"); break;
+        case "finalizing_turn":
+          requiresVisibleNarrative = true;
+          handlers.onFinalizing?.(parsed);
+          break;
+        case "done":
+          hasDoneEvent = true;
+          if (requiresVisibleNarrative && !hasVisibleNarrative) {
+            hasErrorEvent = true;
+            handlers.onError(TURN_STREAM_EMPTY_NARRATION_ERROR);
+            break;
+          }
+          handlers.onDone();
+          break;
+        case "error":
+          hasErrorEvent = true;
+          handlers.onError(parsed.error ?? "Unknown error");
+          break;
       }
     } catch {
       // Skip malformed events.
@@ -805,6 +895,10 @@ export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: T
   }
 
   dispatchCurrentEvent();
+
+  if (!hasDoneEvent && !hasErrorEvent && !hasVisibleNarrative && !hasLookupResult) {
+    handlers.onError(TURN_STREAM_INCOMPLETE_ERROR);
+  }
 }
 
 // ───── SSE Stream Parser ─────
@@ -890,8 +984,9 @@ async function parseSSEStream<T>(body: ReadableStream<Uint8Array>, handlers: SSE
 export async function generateWorld(
   campaignId: string,
   onProgress?: (progress: GenerationProgress) => void,
-  ipContext?: IpContext | null,
+  ipContext?: IpResearchContext | null,
   premiseDivergence?: PremiseDivergence | null,
+  researchArtifact?: WorldgenResearchArtifactV2 | null,
 ): Promise<GenerateWorldResult> {
   const body: Record<string, unknown> = { campaignId };
   if (ipContext) {
@@ -899,6 +994,9 @@ export async function generateWorld(
   }
   if (premiseDivergence) {
     body.premiseDivergence = premiseDivergence;
+  }
+  if (researchArtifact) {
+    body.researchArtifact = researchArtifact;
   }
   const res = await fetch(`${API_BASE}/api/worldgen/generate`, {
     method: "POST",
@@ -1028,9 +1126,11 @@ export function parseCharacter(
   role: "player" | "key" = "player",
   locationNames?: string[],
   factionNames?: string[],
+  overrideText?: string,
 ): Promise<CharacterResult> {
   return apiPost<CharacterResult>("/api/worldgen/parse-character", {
     campaignId, concept, role, locationNames, factionNames,
+    ...(overrideText ? { overrideText } : {}),
   }).then(normalizeCharacterResult);
 }
 
@@ -1039,9 +1139,11 @@ export function generateCharacter(
   role: "player" | "key" = "player",
   locationNames?: string[],
   factionNames?: string[],
+  overrideText?: string,
 ): Promise<CharacterResult> {
   return apiPost<CharacterResult>("/api/worldgen/generate-character", {
     campaignId, role, locationNames, factionNames,
+    ...(overrideText ? { overrideText } : {}),
   }).then(normalizeCharacterResult);
 }
 
@@ -1051,9 +1153,11 @@ export function researchCharacter(
   role: "player" | "key" = "player",
   locationNames?: string[],
   factionNames?: string[],
+  overrideText?: string,
 ): Promise<CharacterResult> {
   return apiPost<CharacterResult>("/api/worldgen/research-character", {
     campaignId, archetype, role, locationNames, factionNames,
+    ...(overrideText ? { overrideText } : {}),
   }).then(normalizeCharacterResult);
 }
 
@@ -1065,9 +1169,11 @@ export function importV2Card(
     importMode?: CharacterImportMode;
     locationNames?: string[];
     factionNames?: string[];
+    overrideText?: string;
   },
 ): Promise<CharacterResult> {
   const role = options?.role ?? "player";
+  const overrideText = options?.overrideText;
   return apiPost<CharacterResult>("/api/worldgen/import-v2-card", {
     campaignId,
     ...card,
@@ -1075,6 +1181,7 @@ export function importV2Card(
     importMode: options?.importMode ?? "native",
     locationNames: options?.locationNames,
     factionNames: options?.factionNames,
+    ...(overrideText ? { overrideText } : {}),
   }).then(normalizeCharacterResult);
 }
 
@@ -1192,8 +1299,8 @@ export function chatRetry(campaignId: string): Promise<Response> {
   return apiStreamPost("/api/chat/retry", { campaignId });
 }
 
-export function chatUndo(campaignId: string): Promise<{ success: boolean; messagesRemoved: number }> {
-  return apiPost<{ success: boolean; messagesRemoved: number }>("/api/chat/undo", {
+export function chatUndo(campaignId: string): Promise<{ ok: boolean; messagesRemoved: number }> {
+  return apiPost<{ ok: boolean; messagesRemoved: number }>("/api/chat/undo", {
     campaignId,
   });
 }
@@ -1202,8 +1309,8 @@ export function chatEdit(
   campaignId: string,
   messageIndex: number,
   newContent: string,
-): Promise<{ success: boolean }> {
-  return apiPost<{ success: boolean }>("/api/chat/edit", {
+): Promise<{ ok: boolean }> {
+  return apiPost<{ ok: boolean }>("/api/chat/edit", {
     campaignId,
     messageIndex,
     newContent,

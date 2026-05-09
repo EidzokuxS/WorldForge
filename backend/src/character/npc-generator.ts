@@ -2,13 +2,15 @@ import { safeGenerateObject as generateObject } from "../ai/generate-object-safe
 import { z } from "zod";
 import type {
   CharacterDraft,
-  CharacterIdentitySourceCitation,
 } from "@worldforge/shared";
 import { createModel } from "../ai/index.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
-import { buildV2CardSections } from "./v2-sections.js";
-import { buildImportModeGuidance, normalizeImportedTags } from "./import-utils.js";
+import { normalizeImportedTags } from "./import-utils.js";
 import type { CharacterImportMode } from "./import-utils.js";
+import {
+  mapFlatPersonalityToNested,
+  personalityFieldSchema,
+} from "./personality-schema.js";
 import { fromLegacyScaffoldNpc } from "./record-adapters.js";
 import { buildCharacterPromptContract } from "./prompt-contract.js";
 
@@ -28,6 +30,7 @@ const npcSchema = z.object({
     .max(2000)
     .default("")
     .describe("Outward read, self-image, and behavioral cues that can lift into behavioralCore."),
+  ...personalityFieldSchema.shape,
   tags: z.array(z.string()).min(3).max(10),
   drives: z.array(z.string()).default([]),
   frictions: z.array(z.string()).default([]),
@@ -42,26 +45,21 @@ type FlatGeneratedNpc = z.infer<typeof npcSchema>;
 export type GeneratedNpc = CharacterDraft;
 
 const NPC_DRAFT_CONTRACT = buildCharacterPromptContract({
+  marker: "npc-character.v1",
   roleEmphasis:
     "For NPC drafting, use the shared draft pipeline: keep identity, profile, socialContext, motivations, capabilities, state, loadout, startConditions, and provenance coherent for one world-facing character.",
 });
 
-function buildNpcFlatOutputStrategy(options?: {
-  includeSourceBundleGuidance?: boolean;
-}): string {
+function buildNpcFlatOutputStrategy(): string {
   return [
-    "- Return only the flat NPC generator fields from the schema: name, race, gender, age, appearance, backgroundSummary, personaSummary, drives, frictions, shortTermGoals, longTermGoals, tags, locationName, factionName.",
-    "- backgroundSummary should preserve stable biography, role, and continuity facts that WorldForge can lift into baseFacts.",
+    "- Return only the flat NPC generator fields from the schema: name, race, gender, age, appearance, backgroundSummary, personaSummary, personalitySummary, personalityVoice, personalityDecisionStyle, personalityWorldview, personalityContradictions, personalityMythology, personalitySampleLines, drives, frictions, shortTermGoals, longTermGoals, tags, locationName, factionName.",
+    "- backgroundSummary should preserve stable biography and role facts that WorldForge can lift into baseFacts.",
     "- personaSummary should capture outward read, self-image, and behavioral feel instead of acting as the whole truth.",
+    "- personalitySummary, personalityVoice, personalityDecisionStyle, personalityWorldview, personalityContradictions, personalityMythology, and personalitySampleLines lift into identity.personality. Provide at least 2 spoken sampleLines in the NPC's voice when source material supports it.",
     "- drives and frictions should capture durable motives and pressure cues that WorldForge can lift into behavioralCore.",
     "- shortTermGoals and longTermGoals should capture current momentum that WorldForge can lift into liveDynamics.",
-    "- Do NOT emit nested baseFacts, behavioralCore, liveDynamics, sourceBundle, or continuity objects directly.",
-    options?.includeSourceBundleGuidance
-      ? "- When source material exists, keep canon-facing facts primary and use card voice/feel only as secondary cues that inform the flat output without overwriting canon or authored facts."
-      : null,
-  ]
-    .filter((value): value is string => Boolean(value))
-    .join("\n");
+    "- Do NOT emit nested baseFacts, behavioralCore, or liveDynamics objects directly.",
+  ].join("\n");
 }
 
 function toNpcDraft(
@@ -70,8 +68,6 @@ function toNpcDraft(
     importMode?: CharacterImportMode | null;
     canonicalStatus?: CharacterDraft["identity"]["canonicalStatus"];
     sourceKind?: CharacterDraft["provenance"]["sourceKind"];
-    sourceBundle?: CharacterDraft["sourceBundle"];
-    continuity?: CharacterDraft["continuity"];
   },
 ): CharacterDraft {
   const normalizedTags = normalizeImportedTags(npc.tags, {
@@ -111,15 +107,17 @@ function toNpcDraft(
         socialRole,
         hardConstraints: draft.identity.baseFacts?.hardConstraints ?? [],
       },
+      personality: mapFlatPersonalityToNested(npc),
       behavioralCore: {
-        motives: dedupeStrings(npc.drives),
-        pressureResponses: dedupeStrings(npc.frictions),
+        motives: draft.identity.behavioralCore?.motives ?? [],
+        pressureResponses: draft.identity.behavioralCore?.pressureResponses ?? [],
         taboos: draft.identity.behavioralCore?.taboos ?? [],
         attachments: draft.identity.behavioralCore?.attachments ?? [],
         selfImage:
           npc.personaSummary || draft.identity.behavioralCore?.selfImage || "",
       },
       liveDynamics: {
+        attachments: draft.identity.liveDynamics?.attachments ?? [],
         activeGoals: dedupeStrings([
           ...npc.shortTermGoals,
           ...npc.longTermGoals,
@@ -149,8 +147,6 @@ function toNpcDraft(
       ...draft.provenance,
       legacyTags: normalizedTags,
     },
-    sourceBundle: opts?.sourceBundle,
-    continuity: opts?.continuity,
   };
 }
 
@@ -170,82 +166,6 @@ function dedupeStrings(values: string[]): string[] {
   }
 
   return deduped;
-}
-
-function buildImportedNpcSourceBundle(opts: {
-  description: string;
-  personality: string;
-  scenario: string;
-  v2Tags: string[];
-}): CharacterDraft["sourceBundle"] {
-  const secondarySources: CharacterIdentitySourceCitation[] = [
-    {
-      kind: "card",
-      label: "Card description",
-      excerpt: opts.description,
-    },
-    {
-      kind: "card",
-      label: "Card personality",
-      excerpt: opts.personality,
-    },
-    ...(opts.scenario
-      ? [
-          {
-            kind: "card" as const,
-            label: "Card scenario",
-            excerpt: opts.scenario,
-          },
-        ]
-      : []),
-    ...(opts.v2Tags.length > 0
-      ? [
-          {
-            kind: "card" as const,
-            label: "Card tags",
-            excerpt: opts.v2Tags.join(", "),
-          },
-        ]
-      : []),
-  ];
-
-  return {
-    canonSources: [],
-    secondarySources: secondarySources.filter(
-      (source) => source.excerpt.trim().length > 0,
-    ),
-    synthesis: {
-      owner: "WorldForge",
-      strategy: "flat-output-then-deterministic-npc-mapping",
-      notes: [
-        "Canon-facing facts and secondary cues stay distinct inside the shared source bundle.",
-        "Compatibility persona, tags, and goals are derived after richer identity mapping.",
-      ],
-    },
-  };
-}
-
-function buildImportedNpcContinuity(
-  importMode: CharacterImportMode,
-): CharacterDraft["continuity"] {
-  return {
-    identityInertia: "anchored",
-    protectedCore: [
-      "identity.baseFacts",
-      "identity.behavioralCore",
-      "sourceBundle.secondarySources",
-    ],
-    mutableSurface: [
-      "identity.liveDynamics",
-      "motivations.shortTermGoals",
-      "socialContext.currentLocationName",
-    ],
-    changePressureNotes: [
-      importMode === "outsider"
-        ? "Preserve outsider continuity and off-setting history unless play earns deeper change."
-        : "Preserve native-setting continuity and existing role logic unless play earns deeper change.",
-    ],
-  };
 }
 
 export async function parseNpcDescription(opts: {
@@ -277,7 +197,7 @@ ${opts.description}
 
 REQUIREMENTS:
 - Extract or infer a name. If none given, create one fitting the world.
-- Use the canonical field groups to reason about profile, socialContext, motivations, capabilities, sourceBundle, continuity, and provenance before WorldForge projects any compatibility aliases.
+- Use the canonical field groups to reason about profile, socialContext, motivations, capabilities, and provenance before WorldForge projects any compatibility aliases.
 - race/gender/age/appearance: preserve explicit authored facts when present; otherwise use concise setting-fitting values or empty strings when genuinely unknown.
 - backgroundSummary: 2-3 sentences capturing stable biography, world role, and facts that should survive as base truth.
 - personaSummary: 2-3 sentences capturing outward read, self-image, and behavior cues without collapsing the NPC into a thin vibe line.
@@ -299,74 +219,10 @@ REQUIREMENTS:
   return toNpcDraft(result.object, { sourceKind: "player-input" });
 }
 
-export async function mapV2CardToNpc(opts: {
-  name: string;
-  description: string;
-  personality: string;
-  scenario: string;
-  v2Tags: string[];
-  importMode: CharacterImportMode;
-  premise: string;
-  locationNames: string[];
-  factionNames: string[];
-  role: ResolvedRole;
-}): Promise<GeneratedNpc> {
-  const sections = buildV2CardSections(opts);
-
-  const prompt = `You are converting a SillyTavern character card into a structured NPC for a text RPG.
-
-SHARED CHARACTER CONTRACT:
-${NPC_DRAFT_CONTRACT}
-
-FLAT OUTPUT STRATEGY:
-${buildNpcFlatOutputStrategy({ includeSourceBundleGuidance: true })}
-
-WORLD PREMISE:
-${opts.premise}
-
-KNOWN LOCATIONS (pick one as locationName):
-${opts.locationNames.map((n) => `- ${n}`).join("\n")}
-
-KNOWN FACTIONS (pick one as factionName, or null if independent):
-${opts.factionNames.map((n) => `- ${n}`).join("\n")}
-
-${sections}
-
-REQUIREMENTS:
-- Keep the character's name as "${opts.name}".
-- Use the shared draft pipeline to keep profile, socialContext, motivations, capabilities, sourceBundle, continuity, and provenance consistent before projecting any compatibility output.
-- race/gender/age/appearance: preserve explicit card facts when present; otherwise use concise setting-fitting values or empty strings when genuinely unknown.
-- backgroundSummary: 2-3 sentences preserving stable biography, canon-facing facts when present, and outsider/native context from the source material.
-- personaSummary: 2-3 sentences from description + personality fields, adapted to the chosen import mode. Treat card voice and feel as secondary cues, not primary truth.
-- drives: durable motives drawn from the source material when present.
-- frictions: pressure responses or internal tensions drawn from the source material when present.
-- shortTermGoals: 1-3 current objectives inferred from description/personality/scenario when present.
-- longTermGoals: 1-2 durable ambitions inferred from description/personality/scenario when present.
-- tags: convert traits into evocative WorldForge tags (4-8).
-- Tags must match the same house style as normal WorldForge generation: short Title Case role, trait, flaw, or skill tags.
-- Prefer 1-3 word tags like Field Medic, Fearless, Signal Analyst, Noble-born.
-- Avoid trope/meta sludge, fandom metadata, POV markers, formatting labels, or literal copies of source hyphen-tags.
-- Preserve canon-facing facts and secondary cues separately so WorldForge can carry sourceBundle-style provenance without creating a separate canonical ontology.
-- Keep outsider/native status in the biography and goals when relevant, not as tags like Offworld Origin.
-- locationName MUST be one of KNOWN LOCATIONS.
-- factionName: one of KNOWN FACTIONS or null.
-- Source tags from SillyTavern are meta-tags — use as context, don't copy verbatim.
-${buildImportModeGuidance(opts.importMode)}`;
-
-  const result = await generateObject({
-    model: createModel(opts.role.provider),
-    schema: npcSchema,
-    prompt,
-    temperature: opts.role.temperature,
-    maxOutputTokens: opts.role.maxTokens,
-  });
-  return toNpcDraft(result.object, {
-    importMode: opts.importMode,
-    canonicalStatus: "imported",
-    sourceBundle: buildImportedNpcSourceBundle(opts),
-    continuity: buildImportedNpcContinuity(opts.importMode),
-  });
-}
+// mapV2CardToNpc removed in Phase 60-04: V2 cards are now INPUT to the
+// ingestCharacterDraft pipeline, not a parallel field-mapping path. The
+// synthesizer in backend/src/character/ingestion/synthesizer.ts handles V2
+// cards as a PRIORITY 2 source with override-wins priority merge rules.
 
 export async function generateNpcFromArchetype(opts: {
   archetype: string;
@@ -403,7 +259,7 @@ ${researchBlock}
 REQUIREMENTS:
 - Create a WHOLLY ORIGINAL character inspired by the archetype — new name, new backstory.
 - Do NOT copy the archetype directly. Capture the essence, not the specifics.
-- Use the shared draft pipeline to keep profile, socialContext, motivations, capabilities, continuity, and provenance aligned while projecting compatibility aliases only after richer mapping.
+- Use the shared draft pipeline to keep profile, socialContext, motivations, capabilities, and provenance aligned while projecting compatibility aliases only after richer mapping.
 - race/gender/age/appearance: concise setting-fitting facts or empty strings when genuinely unknown.
 - backgroundSummary: 2-3 sentences capturing stable biography, world role, and facts that should survive as base truth.
 - personaSummary: 2-3 sentences capturing outward read, self-image, and behavior cues rather than a generic archetype label.

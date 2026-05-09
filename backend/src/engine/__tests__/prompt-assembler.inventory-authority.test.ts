@@ -128,6 +128,7 @@ describe("assemblePrompt authoritative inventory reads", () => {
             campaignId: "test-campaign-123",
             name: "Hero",
             currentLocationId: "loc-1",
+            currentSceneLocationId: "loc-1",
           },
         ],
         locations: [
@@ -138,6 +139,7 @@ describe("assemblePrompt authoritative inventory reads", () => {
             description: "Stone and wind.",
             tags: "[]",
             connectedTo: "[]",
+            kind: "persistent_sublocation",
           },
         ],
         npcs: [
@@ -146,6 +148,7 @@ describe("assemblePrompt authoritative inventory reads", () => {
             campaignId: "test-campaign-123",
             name: "Captain Mire",
             currentLocationId: "loc-1",
+            currentSceneLocationId: "loc-1",
           },
         ],
       }) as unknown as ReturnType<typeof getDb>,

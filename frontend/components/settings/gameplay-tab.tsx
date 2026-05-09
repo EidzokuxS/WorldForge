@@ -15,21 +15,23 @@ export function GameplayTab({ settings, setSettings }: GameplayTabProps) {
   };
 
   return (
-    <div className="rounded-lg border border-border/40 p-[clamp(16px,1.4vw,28px)]">
-      <div className="mb-[clamp(12px,1vw,20px)]">
-        <div className="text-[clamp(14px,1vw,18px)] font-semibold">Gameplay Debug</div>
-        <p className="text-[clamp(11px,0.75vw,13px)] text-muted-foreground">
-          Debug-only controls for inspecting optional provider output without
-          changing the canonical play surface.
-        </p>
+    <section className="wf-set-group">
+      <div className="wf-set-group-head">
+        <div>
+          <h2 className="wf-set-group-h">Gameplay</h2>
+          <p className="wf-set-group-sub">
+            Debug-only controls for inspecting optional provider output without
+            changing the canonical play surface.
+          </p>
+        </div>
       </div>
 
-      <div className="flex items-start justify-between gap-4 rounded-lg border border-border/50 bg-muted/20 p-4">
+      <div className="wf-set-row">
         <div className="space-y-2">
-          <Label htmlFor="showRawReasoning" className="text-sm font-medium">
+          <Label htmlFor="showRawReasoning" className="wf-set-row-h">
             Show raw reasoning
           </Label>
-          <p className="text-xs text-muted-foreground">
+          <p className="wf-set-row-sub">
             Debug-only. Hidden by default. When a provider exposes separate
             reasoning, this only reveals that raw block and does not alter
             canonical narration.
@@ -49,6 +51,6 @@ export function GameplayTab({ settings, setSettings }: GameplayTabProps) {
           }
         />
       </div>
-    </div>
+    </section>
   );
 }

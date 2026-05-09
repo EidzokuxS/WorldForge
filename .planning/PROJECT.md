@@ -19,9 +19,9 @@ The shipped baseline includes:
 - unified character ontology, structured start conditions, canonical loadouts, and persona templates
 - desktop-first non-game shell for launcher, creation, review, and character authoring
 
-The original `v1.1 Gameplay Fidelity` reconciliation tranche (`37-44`) is complete. Follow-on gameplay-quality phases (`45-50`) and the later gap-closure phases (`53-55`) are also now complete, so all planned `v1.1` implementation work is finished.
+The original `v1.1 Gameplay Fidelity` reconciliation tranche (`37-44`) is complete. Follow-on gameplay-quality phases (`45-50`), the later gap-closure phases (`53-55`), the UI fidelity follow-up phases (`58-62`), and the later runtime causality phases through `Phase 70` are now complete, so all currently planned `v1.1` implementation work is finished.
 
-`Phase 55` is now complete: the last route-matrix blind spots and closeout-truth drift were closed. The milestone is no longer waiting on additional implementation work; it is waiting on integrated manual closeout/UAT.
+`Phase 70` is now complete: normal player-visible turns build a deterministic SceneFrame, keep Oracle as bounded outcome authority, ask a judge-lane Scene Planner for one structured ScenePlan, validate and execute allowed changes in backend code, and give the storyteller only a player-perceivable NarratorPacket for final prose. The milestone is no longer waiting on additional implementation work; it is waiting on integrated manual closeout/UAT.
 
 The milestone still starts from the docs-to-runtime reconciliation in [36-HANDOFF.md](/R:/Projects/WorldForge/.planning/phases/36-gameplay-docs-to-runtime-reconciliation-audit/36-HANDOFF.md), not from old assumptions.
 
@@ -33,7 +33,7 @@ The milestone still starts from the docs-to-runtime reconciliation in [36-HANDOF
 - runtime integrity: session-decoupled gameplay routes, authoritative inventory/equipment state, honest rollback/retry, and complete checkpoint fidelity
 - live simulation fidelity: reflection/progression that actually triggers, post-turn simulation with a trustworthy player-visible turn boundary, and target-aware Oracle context
 - mechanics and docs reconciliation: implement or explicitly deprecate documented gameplay claims around travel, location event state, retrieval semantics, and start-condition runtime effects
-- scene authority: single-pass turn synthesis, runtime-driven opening scenes, and encounter/perception scoping instead of flat location dumps
+- scene authority: single-pass turn synthesis, runtime-driven opening scenes, encounter/perception scoping instead of flat location dumps, and ScenePlan-based normal visible turns
 - narrative quality: better storyteller prompting, reduced purple prose/AI smell, and stronger text presentation/readability
 - character and research fidelity: stronger canonical/imported character identity modeling plus better search grounding in worldgen and live play
 
@@ -78,4 +78,4 @@ The milestone still starts from the docs-to-runtime reconciliation in [36-HANDOF
 | `v1.1` stays open until gameplay baseline feels acceptable in live use | Formal reconciliation alone is not enough if live play still exposes major scene, writing, search, or character-fidelity gaps | ✓ Active |
 
 ---
-*Last updated: 2026-04-13 after Phase 55 completion*
+*Last updated: 2026-04-25 after Phase 70 completion*

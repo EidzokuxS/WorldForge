@@ -1,0 +1,462 @@
+[20:26:54.341] [32mINFO[39m: [36mbackfill.start[39m
+    [35mtag[39m: "backfill-personality"
+    [35mevent[39m: "backfill.start"
+    [35mpayload[39m: {
+      "campaignCount": 1,
+      "dryRun": false,
+      "batchSize": 5
+    }
+[20:26:54.348] [32mINFO[39m: [36mbackfill.campaign_start[39m
+    [35mtag[39m: "backfill-personality"
+    [35mevent[39m: "backfill.campaign_start"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "totalRecords": 15,
+      "dryRun": false,
+      "batchSize": 5
+    }
+[20:26:54.349] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-6d250cfb-e208-4868-a487-889b150e70ca"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "6d250cfb-e208-4868-a487-889b150e70ca",
+      "kind": "npc"
+    }
+[20:26:54.360] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-a2a48899-4453-4d27-8b68-4f21af7c33c8"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "a2a48899-4453-4d27-8b68-4f21af7c33c8",
+      "kind": "npc"
+    }
+[20:26:54.361] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-bcbd80ef-506f-4578-90ca-4bcfcde7b7d3"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "bcbd80ef-506f-4578-90ca-4bcfcde7b7d3",
+      "kind": "npc"
+    }
+[20:26:54.361] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-3cc51f21-6e54-4cb5-aa35-a9acd5a4f461"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "3cc51f21-6e54-4cb5-aa35-a9acd5a4f461",
+      "kind": "npc"
+    }
+[20:26:54.361] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-c0571f70-c1d5-4018-b27a-89d76e07bf96"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "c0571f70-c1d5-4018-b27a-89d76e07bf96",
+      "kind": "npc"
+    }
+[20:27:30.060] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-a2a48899-4453-4d27-8b68-4f21af7c33c8"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 35699
+    }
+[20:27:30.062] [32mINFO[39m: [36mbackfill.backup[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-a2a48899-4453-4d27-8b68-4f21af7c33c8"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.backup"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "a2a48899-4453-4d27-8b68-4f21af7c33c8",
+      "path": "R:\Projects\WorldForge\campaigns\b89467e4-4c6a-422d-82d9-8e948b356dae\logs\backfill-backup-a2a48899-4453-4d27-8b68-4f21af7c33c8-2026-04-18T17-27-30.061Z.json"
+    }
+[20:27:30.064] [32mINFO[39m: [36mbackfill.write[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-a2a48899-4453-4d27-8b68-4f21af7c33c8"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.write"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "a2a48899-4453-4d27-8b68-4f21af7c33c8",
+      "kind": "npc"
+    }
+[20:27:32.566] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-3cc51f21-6e54-4cb5-aa35-a9acd5a4f461"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 38205
+    }
+[20:27:32.567] [32mINFO[39m: [36mbackfill.backup[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-3cc51f21-6e54-4cb5-aa35-a9acd5a4f461"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.backup"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "3cc51f21-6e54-4cb5-aa35-a9acd5a4f461",
+      "path": "R:\Projects\WorldForge\campaigns\b89467e4-4c6a-422d-82d9-8e948b356dae\logs\backfill-backup-3cc51f21-6e54-4cb5-aa35-a9acd5a4f461-2026-04-18T17-27-32.567Z.json"
+    }
+[20:27:32.568] [32mINFO[39m: [36mbackfill.write[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-3cc51f21-6e54-4cb5-aa35-a9acd5a4f461"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.write"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "3cc51f21-6e54-4cb5-aa35-a9acd5a4f461",
+      "kind": "npc"
+    }
+[20:27:34.085] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-6d250cfb-e208-4868-a487-889b150e70ca"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 39736
+    }
+[20:27:34.087] [32mINFO[39m: [36mbackfill.backup[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-6d250cfb-e208-4868-a487-889b150e70ca"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.backup"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "6d250cfb-e208-4868-a487-889b150e70ca",
+      "path": "R:\Projects\WorldForge\campaigns\b89467e4-4c6a-422d-82d9-8e948b356dae\logs\backfill-backup-6d250cfb-e208-4868-a487-889b150e70ca-2026-04-18T17-27-34.086Z.json"
+    }
+[20:27:34.087] [32mINFO[39m: [36mbackfill.write[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-6d250cfb-e208-4868-a487-889b150e70ca"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.write"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "6d250cfb-e208-4868-a487-889b150e70ca",
+      "kind": "npc"
+    }
+[20:27:36.185] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-c0571f70-c1d5-4018-b27a-89d76e07bf96"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": false,
+      "error": "safeGenerateObject: Zod validation failed.\nErrors: [worldview] Too big: expected string to have <=400 characters\nRaw (first 500 chars): {\n  \"summary\": \"An ancient sorcerer reborn as the King of Curses, currently trapped within Itadori Yuji's body as a fragmented consciousness seeking full restoration. Sukuna embodies malevolent patience and absolute contempt for all forms of life, viewing existence through a lens of hierarchical dominance where strength alone determines worth.\",\n  \"voice\": \"Spea",
+      "latencyMs": 41822
+    }
+[20:27:36.185] [33mWARN[39m: [36msafeGenerateObject attempt 1/3 failed, retrying in 2000ms: safeGenerateObject: Zod validation failed.
+Errors: [worldview] Too big: expected string to have <=400 characters
+Raw (first 500 chars): {
+  "summary": "An ancient sorcerer reborn as the King of Curses[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-c0571f70-c1d5-4018-b27a-89d76e07bf96"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+[20:27:40.339] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-bcbd80ef-506f-4578-90ca-4bcfcde7b7d3"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 45978
+    }
+[20:27:40.341] [32mINFO[39m: [36mbackfill.backup[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-bcbd80ef-506f-4578-90ca-4bcfcde7b7d3"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.backup"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "bcbd80ef-506f-4578-90ca-4bcfcde7b7d3",
+      "path": "R:\Projects\WorldForge\campaigns\b89467e4-4c6a-422d-82d9-8e948b356dae\logs\backfill-backup-bcbd80ef-506f-4578-90ca-4bcfcde7b7d3-2026-04-18T17-27-40.340Z.json"
+    }
+[20:27:40.341] [32mINFO[39m: [36mbackfill.write[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-bcbd80ef-506f-4578-90ca-4bcfcde7b7d3"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.write"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "bcbd80ef-506f-4578-90ca-4bcfcde7b7d3",
+      "kind": "npc"
+    }
+[20:28:05.420] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-c0571f70-c1d5-4018-b27a-89d76e07bf96"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 2,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 27221
+    }
+[20:28:05.421] [32mINFO[39m: [36mbackfill.backup[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-c0571f70-c1d5-4018-b27a-89d76e07bf96"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.backup"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "c0571f70-c1d5-4018-b27a-89d76e07bf96",
+      "path": "R:\Projects\WorldForge\campaigns\b89467e4-4c6a-422d-82d9-8e948b356dae\logs\backfill-backup-c0571f70-c1d5-4018-b27a-89d76e07bf96-2026-04-18T17-28-05.420Z.json"
+    }
+[20:28:05.422] [32mINFO[39m: [36mbackfill.write[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-c0571f70-c1d5-4018-b27a-89d76e07bf96"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.write"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "c0571f70-c1d5-4018-b27a-89d76e07bf96",
+      "kind": "npc"
+    }
+[20:28:05.422] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-cac8be2e-b1eb-445e-a293-ce529770cdcc"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "cac8be2e-b1eb-445e-a293-ce529770cdcc",
+      "kind": "npc"
+    }
+[20:28:05.423] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-36bf1350-0d29-4032-bc8a-c57d552832fc"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "36bf1350-0d29-4032-bc8a-c57d552832fc",
+      "kind": "npc"
+    }
+[20:28:05.423] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-3c3c0b81-2759-4478-b769-5fe4faac0d32"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "3c3c0b81-2759-4478-b769-5fe4faac0d32",
+      "kind": "npc"
+    }
+[20:28:05.423] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-d18040b9-ecd2-4bfc-a0c1-f57efcd3ab42"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "d18040b9-ecd2-4bfc-a0c1-f57efcd3ab42",
+      "kind": "npc"
+    }
+[20:28:05.424] [32mINFO[39m: [36mbackfill.synthesize[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-a85a69c3-6a6a-447c-ab9f-ebc96e79359d"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.synthesize"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "a85a69c3-6a6a-447c-ab9f-ebc96e79359d",
+      "kind": "npc"
+    }
+[20:28:33.884] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-36bf1350-0d29-4032-bc8a-c57d552832fc"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 28461
+    }
+[20:28:33.885] [32mINFO[39m: [36mbackfill.backup[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-36bf1350-0d29-4032-bc8a-c57d552832fc"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.backup"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "36bf1350-0d29-4032-bc8a-c57d552832fc",
+      "path": "R:\Projects\WorldForge\campaigns\b89467e4-4c6a-422d-82d9-8e948b356dae\logs\backfill-backup-36bf1350-0d29-4032-bc8a-c57d552832fc-2026-04-18T17-28-33.885Z.json"
+    }
+[20:28:33.886] [32mINFO[39m: [36mbackfill.write[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-36bf1350-0d29-4032-bc8a-c57d552832fc"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.write"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "36bf1350-0d29-4032-bc8a-c57d552832fc",
+      "kind": "npc"
+    }
+[20:28:46.978] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-cac8be2e-b1eb-445e-a293-ce529770cdcc"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": false,
+      "error": "safeGenerateObject: Zod validation failed.\nErrors: [summary] Too big: expected string to have <=400 characters; [worldview] Too big: expected string to have <=400 characters; [personalMythology] Too big: expected string to have <=400 characters\nRaw (first 500 chars): {\n  \"summary\": \"A special grade cursed spirit born from collective human hatred, Mahito embodies sadistic curiosity disguised as childlike playfulness. He views all living beings as experimental material for understanding the soul's",
+      "latencyMs": 41556
+    }
+[20:28:46.978] [33mWARN[39m: [36msafeGenerateObject attempt 1/3 failed, retrying in 2000ms: safeGenerateObject: Zod validation failed.
+Errors: [summary] Too big: expected string to have <=400 characters; [worldview] Too big: expected string to have <=400 characters; [personalMythology] Too b[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-cac8be2e-b1eb-445e-a293-ce529770cdcc"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+[20:28:47.307] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-a85a69c3-6a6a-447c-ab9f-ebc96e79359d"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 41882
+    }
+[20:28:47.308] [32mINFO[39m: [36mbackfill.backup[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-a85a69c3-6a6a-447c-ab9f-ebc96e79359d"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.backup"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "a85a69c3-6a6a-447c-ab9f-ebc96e79359d",
+      "path": "R:\Projects\WorldForge\campaigns\b89467e4-4c6a-422d-82d9-8e948b356dae\logs\backfill-backup-a85a69c3-6a6a-447c-ab9f-ebc96e79359d-2026-04-18T17-28-47.307Z.json"
+    }
+[20:28:47.308] [32mINFO[39m: [36mbackfill.write[39m
+    [35mtag[39m: "backfill-personality"
+    [35mturnId[39m: "backfill-a85a69c3-6a6a-447c-ab9f-ebc96e79359d"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "backfill.write"
+    [35mpayload[39m: {
+      "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+      "recordId": "a85a69c3-6a6a-447c-ab9f-ebc96e79359d",
+      "kind": "npc"
+    }
+[20:28:56.915] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-3c3c0b81-2759-4478-b769-5fe4faac0d32"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": false,
+      "error": "safeGenerateObject: invalid JSON. Raw: ```json\n{\n  \"summary\": \"A millennial immortal whose consciousness has become interwoven with Japan's barrier infrastructure, Tengen exists as more concept than person—watching across centuries through the fluctuations of protective walls rather than through mortal eyes. Their clinical detachment conceals the slow erosion of self that immortality demands, viewing the world as a tapestry of pressures, thresholds, and structural integrity where individual live",
+      "latencyMs": 51492
+    }
+[20:28:56.915] [33mWARN[39m: [36msafeGenerateObject attempt 1/3 failed, retrying in 2000ms: safeGenerateObject: invalid JSON. Raw: ```json
+{
+  "summary": "A millennial immortal whose consciousness has become interwoven with Japan's barrier infrastructure, Tengen exists as more concept than p[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "backfill-3c3c0b81-2759-4478-b769-5fe4faac0d32"
+    [35mcampaignId[39m: "b89467e4-4c6a-422d-82d9-8e948b356dae"
+    [35mtick[39m: 0
+    [35mrole[39m: "tool"

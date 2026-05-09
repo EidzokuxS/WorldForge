@@ -1,0 +1,288 @@
+Loaded cached credentials.
+[AgentRegistry] Error loading user agent: Failed to load agent from C:\Users\robra\.gemini\agents\gsd-debugger.md: Validation failed: Agent Definition:
+: Unrecognized key(s) in object: 'permissionMode'
+Agent loading error: Failed to load agent from C:\Users\robra\.gemini\agents\gsd-debugger.md: Validation failed: Agent Definition:
+: Unrecognized key(s) in object: 'permissionMode'[AgentRegistry] Error loading user agent: Failed to load agent from C:\Users\robra\.gemini\agents\gsd-executor.md: Validation failed: Agent Definition:
+: Unrecognized key(s) in object: 'permissionMode'
+Agent loading error: Failed to load agent from C:\Users\robra\.gemini\agents\gsd-executor.md: Validation failed: Agent Definition:
+: Unrecognized key(s) in object: 'permissionMode'Skill "skill-creator" from "C:\Users\robra\.agents\skills\skill-creator\SKILL.md" is overriding the built-in skill.
+Error executing tool run_shell_command: Tool "run_shell_command" not found. Did you mean one of: "grep_search", "cli_help", "read_file"?
+Error executing tool glob: params must have required property 'pattern'
+Error executing tool glob: params must have required property 'pattern'
+Error executing tool glob: params must have required property 'pattern'
+Error executing tool glob: params must have required property 'pattern'
+Error executing tool glob: params must have required property 'pattern'
+Error executing tool glob: params must have required property 'pattern'
+Error executing tool grep_search: params must have required property 'pattern'
+Error executing tool codebase_investigator: params must have required property 'objective'
+Error executing tool list_directory: params must have required property 'dir_path'
+Error executing tool grep_search: params must have required property 'pattern'
+Error executing tool grep_search: params must have required property 'pattern'
+Attempt 1 failed with status 429. Retrying with backoff... GaxiosError: [{
+  "error": {
+    "code": 429,
+    "message": "No capacity available for model gemini-3.1-pro-preview on the server",
+    "errors": [
+      {
+        "message": "No capacity available for model gemini-3.1-pro-preview on the server",
+        "domain": "global",
+        "reason": "rateLimitExceeded"
+      }
+    ],
+    "status": "RESOURCE_EXHAUSTED",
+    "details": [
+      {
+        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+        "reason": "MODEL_CAPACITY_EXHAUSTED",
+        "domain": "cloudcode-pa.googleapis.com",
+        "metadata": {
+          "model": "gemini-3.1-pro-preview"
+        }
+      }
+    ]
+  }
+}
+]
+    at Gaxios._request (C:\Users\robra\AppData\Roaming\npm\node_modules\@google\gemini-cli\node_modules\gaxios\build\src\gaxios.js:142:23)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async OAuth2Client.requestAsync (C:\Users\robra\AppData\Roaming\npm\node_modules\@google\gemini-cli\node_modules\google-auth-library\build\src\auth\oauth2client.js:429:18)
+    at async CodeAssistServer.requestStreamingPost (file:///C:/Users/robra/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/server.js:261:21)
+    at async CodeAssistServer.generateContentStream (file:///C:/Users/robra/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/server.js:53:27)
+    at async file:///C:/Users/robra/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/loggingContentGenerator.js:285:26
+    at async file:///C:/Users/robra/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/telemetry/trace.js:81:20
+    at async retryWithBackoff (file:///C:/Users/robra/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/utils/retry.js:130:28)
+    at async GeminiChat.makeApiCallAndProcessStream (file:///C:/Users/robra/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:445:32)
+    at async GeminiChat.streamWithRetries (file:///C:/Users/robra/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:265:40) {
+  config: {
+    url: 'https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse',
+    method: 'POST',
+    params: { alt: 'sse' },
+    headers: {
+      'Content-Type': 'application/json',
+      'User-Agent': 'GeminiCLI/0.33.0/gemini-3.1-pro-preview (win32; x64) google-api-nodejs-client/9.15.1',
+      Authorization: '<<REDACTED> - See `errorRedactor` option in `gaxios` for configuration>.',
+      'x-goog-api-client': 'gl-node/23.11.0'
+    },
+    responseType: 'stream',
+    body: '<<REDACTED> - See `errorRedactor` option in `gaxios` for configuration>.',
+    signal: AbortSignal { aborted: false },
+    retry: false,
+    paramsSerializer: [Function: paramsSerializer],
+    validateStatus: [Function: validateStatus],
+    errorRedactor: [Function: defaultErrorRedactor]
+  },
+  response: {
+    config: {
+      url: 'https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse',
+      method: 'POST',
+      params: [Object],
+      headers: [Object],
+      responseType: 'stream',
+      body: '<<REDACTED> - See `errorRedactor` option in `gaxios` for configuration>.',
+      signal: [AbortSignal],
+      retry: false,
+      paramsSerializer: [Function: paramsSerializer],
+      validateStatus: [Function: validateStatus],
+      errorRedactor: [Function: defaultErrorRedactor]
+    },
+    data: '[{\n' +
+      '  "error": {\n' +
+      '    "code": 429,\n' +
+      '    "message": "No capacity available for model gemini-3.1-pro-preview on the server",\n' +
+      '    "errors": [\n' +
+      '      {\n' +
+      '        "message": "No capacity available for model gemini-3.1-pro-preview on the server",\n' +
+      '        "domain": "global",\n' +
+      '        "reason": "rateLimitExceeded"\n' +
+      '      }\n' +
+      '    ],\n' +
+      '    "status": "RESOURCE_EXHAUSTED",\n' +
+      '    "details": [\n' +
+      '      {\n' +
+      '        "@type": "type.googleapis.com/google.rpc.ErrorInfo",\n' +
+      '        "reason": "MODEL_CAPACITY_EXHAUSTED",\n' +
+      '        "domain": "cloudcode-pa.googleapis.com",\n' +
+      '        "metadata": {\n' +
+      '          "model": "gemini-3.1-pro-preview"\n' +
+      '        }\n' +
+      '      }\n' +
+      '    ]\n' +
+      '  }\n' +
+      '}\n' +
+      ']',
+    headers: {
+      'alt-svc': 'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000',
+      'content-length': '630',
+      'content-type': 'application/json; charset=UTF-8',
+      date: 'Tue, 05 May 2026 04:27:55 GMT',
+      server: 'ESF',
+      'server-timing': 'gfet4t7; dur=6125',
+      vary: 'Origin, X-Origin, Referer',
+      'x-cloudaicompanion-trace-id': 'b70a969ebbf457ca',
+      'x-content-type-options': 'nosniff',
+      'x-frame-options': 'SAMEORIGIN',
+      'x-xss-protection': '0'
+    },
+    status: 429,
+    statusText: 'Too Many Requests',
+    request: {
+      responseURL: 'https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse'
+    }
+  },
+  error: undefined,
+  status: 429,
+  [Symbol(gaxios-gaxios-error)]: '6.7.1'
+}
+Attempt 2 failed with status 429. Retrying with backoff... GaxiosError: [{
+  "error": {
+    "code": 429,
+    "message": "No capacity available for model gemini-3.1-pro-preview on the server",
+    "errors": [
+      {
+        "message": "No capacity available for model gemini-3.1-pro-preview on the server",
+        "domain": "global",
+        "reason": "rateLimitExceeded"
+      }
+    ],
+    "status": "RESOURCE_EXHAUSTED",
+    "details": [
+      {
+        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+        "reason": "MODEL_CAPACITY_EXHAUSTED",
+        "domain": "cloudcode-pa.googleapis.com",
+        "metadata": {
+          "model": "gemini-3.1-pro-preview"
+        }
+      }
+    ]
+  }
+}
+]
+    at Gaxios._request (C:\Users\robra\AppData\Roaming\npm\node_modules\@google\gemini-cli\node_modules\gaxios\build\src\gaxios.js:142:23)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async OAuth2Client.requestAsync (C:\Users\robra\AppData\Roaming\npm\node_modules\@google\gemini-cli\node_modules\google-auth-library\build\src\auth\oauth2client.js:429:18)
+    at async CodeAssistServer.requestStreamingPost (file:///C:/Users/robra/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/server.js:261:21)
+    at async CodeAssistServer.generateContentStream (file:///C:/Users/robra/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/server.js:53:27)
+    at async file:///C:/Users/robra/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/loggingContentGenerator.js:285:26
+    at async file:///C:/Users/robra/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/telemetry/trace.js:81:20
+    at async retryWithBackoff (file:///C:/Users/robra/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/utils/retry.js:130:28)
+    at async GeminiChat.makeApiCallAndProcessStream (file:///C:/Users/robra/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:445:32)
+    at async GeminiChat.streamWithRetries (file:///C:/Users/robra/AppData/Roaming/npm/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/core/geminiChat.js:265:40) {
+  config: {
+    url: 'https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse',
+    method: 'POST',
+    params: { alt: 'sse' },
+    headers: {
+      'Content-Type': 'application/json',
+      'User-Agent': 'GeminiCLI/0.33.0/gemini-3.1-pro-preview (win32; x64) google-api-nodejs-client/9.15.1',
+      Authorization: '<<REDACTED> - See `errorRedactor` option in `gaxios` for configuration>.',
+      'x-goog-api-client': 'gl-node/23.11.0'
+    },
+    responseType: 'stream',
+    body: '<<REDACTED> - See `errorRedactor` option in `gaxios` for configuration>.',
+    signal: AbortSignal { aborted: false },
+    retry: false,
+    paramsSerializer: [Function: paramsSerializer],
+    validateStatus: [Function: validateStatus],
+    errorRedactor: [Function: defaultErrorRedactor]
+  },
+  response: {
+    config: {
+      url: 'https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse',
+      method: 'POST',
+      params: [Object],
+      headers: [Object],
+      responseType: 'stream',
+      body: '<<REDACTED> - See `errorRedactor` option in `gaxios` for configuration>.',
+      signal: [AbortSignal],
+      retry: false,
+      paramsSerializer: [Function: paramsSerializer],
+      validateStatus: [Function: validateStatus],
+      errorRedactor: [Function: defaultErrorRedactor]
+    },
+    data: '[{\n' +
+      '  "error": {\n' +
+      '    "code": 429,\n' +
+      '    "message": "No capacity available for model gemini-3.1-pro-preview on the server",\n' +
+      '    "errors": [\n' +
+      '      {\n' +
+      '        "message": "No capacity available for model gemini-3.1-pro-preview on the server",\n' +
+      '        "domain": "global",\n' +
+      '        "reason": "rateLimitExceeded"\n' +
+      '      }\n' +
+      '    ],\n' +
+      '    "status": "RESOURCE_EXHAUSTED",\n' +
+      '    "details": [\n' +
+      '      {\n' +
+      '        "@type": "type.googleapis.com/google.rpc.ErrorInfo",\n' +
+      '        "reason": "MODEL_CAPACITY_EXHAUSTED",\n' +
+      '        "domain": "cloudcode-pa.googleapis.com",\n' +
+      '        "metadata": {\n' +
+      '          "model": "gemini-3.1-pro-preview"\n' +
+      '        }\n' +
+      '      }\n' +
+      '    ]\n' +
+      '  }\n' +
+      '}\n' +
+      ']',
+    headers: {
+      'alt-svc': 'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000',
+      'content-length': '630',
+      'content-type': 'application/json; charset=UTF-8',
+      date: 'Tue, 05 May 2026 04:28:06 GMT',
+      server: 'ESF',
+      'server-timing': 'gfet4t7; dur=6557',
+      vary: 'Origin, X-Origin, Referer',
+      'x-cloudaicompanion-trace-id': '1b25b502ea947f6c',
+      'x-content-type-options': 'nosniff',
+      'x-frame-options': 'SAMEORIGIN',
+      'x-xss-protection': '0'
+    },
+    status: 429,
+    statusText: 'Too Many Requests',
+    request: {
+      responseURL: 'https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse'
+    }
+  },
+  error: undefined,
+  status: 429,
+  [Symbol(gaxios-gaxios-error)]: '6.7.1'
+}
+### Read-Only Review Findings
+
+**1. Playable GM Loop & Sequential Checklist Flow**
+- **Status:** PASS
+- **Files:** `turn-processor.ts`, `gm-action-checklist.ts`
+- **Findings:** The architecture successfully splits the loop into a compact `GM Read` and a conditional `Action Checklist`. The checklist strictly enforces `< 6` steps and validates `dependsOnStepIds` to prevent forward dependencies. `candidateToolRequest` cleanly isolates GM intent from blind backend execution.
+
+**2. GM Read Clarity, NPC Autonomy & Player Agency**
+- **Status:** PASS
+- **Files:** `prompt-contracts.ts`, `gm-turn-read.ts`
+- **Findings:** Prompt contracts are explicit and excellent. They hard-lock player agency (`"never decide the player's deliberate words... or success"`) and enforce NPC autonomy (`"Read their likely reaction from visible records... not from a prewritten plot"`). Forbidden keys (`actionids`, `payload`, etc.) are heavily guarded.
+
+**3. NarratorPacket Authority**
+- **Status:** PASS
+- **Files:** `narrator-packet.ts`, `prompt-assembler.ts`
+- **Findings:** The prompt clearly establishes the packet as the only source of truth: `"Player action is not authoritative world state. Treat claimed possessions... as attempts unless committed events... confirm them."`
+
+**4. Generic Committed UUID Prose**
+- **Status:** **BLOCKING**
+- **Severity:** HIGH
+- **Files:** `backend/src/engine/narrator-packet.ts` (Line 150-ish)
+- **Findings:** Inside `summarizeActionResult()`, there are specific extractors for `log_event` and `set_relationship`. However, it falls back to:
+  ```typescript
+  return `Committed ${result.toolName} result ${result.actionId}.`;
+  ```
+  For tools like `transfer_item`, `add_tag`, `move_to`, or `set_condition` (which do not have a `text`, `summary`, or `reason` property in their input payload), this fallback will inject literal backend UUIDs and generic engine prose into the `[PERCEIVABLE EFFECTS]` block. This directly violates the "no generic committed UUID prose" requirement and risks the Narrator hallucinating backend UUIDs into the story.
+
+**5. Tests**
+- **Status:** PASS
+- **Files:** `__tests__/gm-action-checklist.test.ts`, `__tests__/gm-turn-read.test.ts`
+- **Findings:** Thorough Zod refinements and contract tests correctly capture failures for over-cap steps, out-of-bounds references, and payload violations.
+
+### Conclusion & Residual Playtest Risks
+The patch is structurally sound and ready for the playtest **except for the UUID fallback blocker**.
+
+**Residual Risks to watch during playtest (once unblocked):**
+1. **Semantic Context Loss:** If you fix the UUID blocker by simply removing the fallback, tools like `transfer_item` might pass silently without giving the Narrator enough context about *what* was transferred. You likely need a semantic formatter switch statement for the remaining tools (e.g., `"Item transferred to target."` or `"Tag added to entity."`) using the known input shapes.
+2. **Checklist Token Limit:** `runGmActionChecklist` specifies `maxOutputTokens: 1800`. If a GM maxes out all 6 allowed steps and generates verbose `candidateToolRequest` objects, it might brush up against this cap and truncate mid-JSON. Monitoring token usage on high-complexity turns is recommended.

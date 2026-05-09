@@ -70,7 +70,6 @@ async function tickSingleFaction(
     )
     .all();
 
-  // Load recent chronicle entries
   const recentChronicle = db
     .select({ tick: chronicle.tick, text: chronicle.text })
     .from(chronicle)
@@ -79,7 +78,6 @@ async function tickSingleFaction(
     .limit(10)
     .all();
 
-  // Build system prompt
   const territoryText = ownedLocations.length > 0
     ? ownedLocations.map((l) => `  - ${l.name} [${parseTags(l.tags).join(", ")}]`).join("\n")
     : "  (no controlled territory)";
@@ -122,7 +120,6 @@ async function tickSingleFaction(
     `Use tools to execute your decision. Your faction_action MUST include a SPECIFIC, OBSERVABLE change — territory gained/lost, resource acquired/depleted, alliance formed/broken, attack launched, fortification built. Vague actions like "continued to plan" or "monitored the situation" are NOT acceptable. Name specific locations, NPCs, or resources affected.`,
   ].join("\n");
 
-  // Call Judge LLM with faction tools
   const model = createModel(judgeProvider);
   const tools = createFactionTools(campaignId, tick);
 
@@ -135,7 +132,6 @@ async function tickSingleFaction(
     prompt: `What does "${faction.name}" do this period?`,
   });
 
-  // Collect tool call results
   const toolCalls: Array<{ tool: string; args: unknown; result: unknown }> = [];
   for (const step of result.steps ?? []) {
     const calls = step.toolCalls ?? [];
@@ -182,7 +178,6 @@ export async function tickFactions(
 
   const db = getDb();
 
-  // Query all factions for this campaign
   const allFactions = db
     .select({
       id: factions.id,

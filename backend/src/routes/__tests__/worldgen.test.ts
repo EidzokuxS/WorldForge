@@ -1,5 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Hono } from "hono";
+import { IngestionPipelineError } from "../../character/ingestion/errors.js";
+import {
+  cloneJjkNarutoArtifact,
+  makeArtifactWith,
+} from "../../worldgen/__tests__/fixtures/jjk-naruto-artifact.js";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -42,7 +47,9 @@ vi.mock("../../worldbook-library/index.js", () => ({
 
 vi.mock("../../worldgen/ip-researcher.js", () => ({
   researchKnownIP: vi.fn(() => Promise.resolve(null)),
+  researchWorldgenArtifact: vi.fn(() => Promise.resolve(null)),
   evaluateResearchSufficiency: vi.fn((ctx: unknown) => Promise.resolve(ctx)),
+  evaluateResearchArtifactSufficiency: vi.fn((artifact: unknown) => Promise.resolve(artifact)),
 }));
 
 vi.mock("../../campaign/index.js", () => ({
@@ -54,6 +61,8 @@ vi.mock("../../campaign/index.js", () => ({
   loadPremiseDivergence: vi.fn(() => null),
   saveWorldgenResearchFrame: vi.fn(),
   loadWorldgenResearchFrame: vi.fn(() => null),
+  saveWorldgenResearchArtifact: vi.fn(),
+  loadWorldgenResearchArtifact: vi.fn(() => null),
   getActiveCampaign: vi.fn(),
   loadCampaign: vi.fn(),
 }));
@@ -123,13 +132,17 @@ import {
   loadPremiseDivergence,
   saveWorldgenResearchFrame,
   loadWorldgenResearchFrame,
+  saveWorldgenResearchArtifact,
+  loadWorldgenResearchArtifact,
 } from "../../campaign/index.js";
 import { deleteCampaignLore, storeLoreCards } from "../../vectors/lore-cards.js";
 import { loadSettings } from "../../settings/index.js";
 import { resolveRoleModel } from "../../ai/index.js";
 import {
   researchKnownIP,
+  researchWorldgenArtifact,
   evaluateResearchSufficiency,
+  evaluateResearchArtifactSufficiency,
 } from "../../worldgen/ip-researcher.js";
 import worldgenRoutes from "../worldgen.js";
 
@@ -151,12 +164,16 @@ const mockedSavePremiseDivergence = vi.mocked(savePremiseDivergence);
 const mockedLoadPremiseDivergence = vi.mocked(loadPremiseDivergence);
 const mockedSaveWorldgenResearchFrame = vi.mocked(saveWorldgenResearchFrame);
 const mockedLoadWorldgenResearchFrame = vi.mocked(loadWorldgenResearchFrame);
+const mockedSaveWorldgenResearchArtifact = vi.mocked(saveWorldgenResearchArtifact);
+const mockedLoadWorldgenResearchArtifact = vi.mocked(loadWorldgenResearchArtifact);
 const mockedDeleteLore = vi.mocked(deleteCampaignLore);
 const mockedStoreLore = vi.mocked(storeLoreCards);
 const mockedLoadSettings = vi.mocked(loadSettings);
 const mockedResolveRoleModel = vi.mocked(resolveRoleModel);
 const mockedResearchKnownIP = vi.mocked(researchKnownIP);
+const mockedResearchWorldgenArtifact = vi.mocked(researchWorldgenArtifact);
 const mockedEvaluateResearchSufficiency = vi.mocked(evaluateResearchSufficiency);
+const mockedEvaluateResearchArtifactSufficiency = vi.mocked(evaluateResearchArtifactSufficiency);
 const mockedParseWorldBook = vi.mocked(parseWorldBook);
 const mockedClassifyEntries = vi.mocked(classifyEntries);
 const mockedImportClassifiedEntries = vi.mocked(importClassifiedEntries);
@@ -214,6 +231,14 @@ beforeEach(() => {
     createdAt: "2026-01-01",
   } as any);
   mockedReadCampaignConfig.mockReturnValue({} as any);
+  mockedLoadIpContext.mockReturnValue(null as any);
+  mockedLoadPremiseDivergence.mockReturnValue(null as any);
+  mockedLoadWorldgenResearchFrame.mockReturnValue(null as any);
+  mockedLoadWorldgenResearchArtifact.mockReturnValue(null as any);
+  mockedResearchKnownIP.mockResolvedValue(null as any);
+  mockedResearchWorldgenArtifact.mockResolvedValue(null as any);
+  mockedEvaluateResearchSufficiency.mockImplementation((ctx: any) => Promise.resolve(ctx));
+  mockedEvaluateResearchArtifactSufficiency.mockImplementation((artifact: any) => Promise.resolve(artifact));
 });
 
 // ---------------------------------------------------------------------------
@@ -434,6 +459,119 @@ describe("POST /api/worldgen/suggest-seeds", () => {
       expect.objectContaining({ ipContext }),
     );
   });
+
+  it("returns a v2 research artifact for automatic known-IP research without synthesizing legacy _ipContext", async () => {
+    const artifact = cloneJjkNarutoArtifact();
+    mockedResearchWorldgenArtifact.mockResolvedValue(artifact as any);
+    mockedSuggestWorldSeeds.mockResolvedValue({
+      seeds: {
+        geography: "Tokyo curse districts shaped by chakra flow",
+        politicalStructure: "Jujutsu authorities",
+        centralConflict: "Sorcerer clans debate imported chakra use",
+        culturalFlavor: ["urban occult", "martial discipline"],
+        environment: "Neon rain and curse residue",
+        wildcard: "Chakra seals disturb cursed barriers",
+      },
+      premiseDivergence: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/suggest-seeds", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        premise: "Jujutsu Kaisen world with Naruto power system",
+        name: "Cursed Chakra",
+        franchise: "Jujutsu Kaisen / Naruto",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body._researchArtifact).toEqual(artifact);
+    expect(body._ipContext).toBeNull();
+    expect(mockedResearchWorldgenArtifact).toHaveBeenCalledWith(
+      {
+        premise: "Jujutsu Kaisen world with Naruto power system",
+        name: "Cursed Chakra",
+        knownIP: "Jujutsu Kaisen / Naruto",
+        research: fakeSettings.research,
+      },
+      fakeResolvedRole,
+      fakeSettings.research.maxSearchSteps,
+    );
+    expect(mockedResearchKnownIP).not.toHaveBeenCalled();
+    expect(mockedSuggestWorldSeeds).toHaveBeenCalledWith(
+      expect.objectContaining({
+        premise: "Jujutsu Kaisen world with Naruto power system",
+        ipContext: null,
+        researchArtifact: artifact,
+      }),
+    );
+  });
+
+  it("runs v2 artifact research from premise even when the franchise field is empty", async () => {
+    const artifact = cloneJjkNarutoArtifact();
+    mockedResearchWorldgenArtifact.mockResolvedValue(artifact as any);
+    mockedSuggestWorldSeeds.mockResolvedValue({
+      seeds: { geography: "Tokyo curse districts shaped by chakra flow" },
+      premiseDivergence: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/suggest-seeds", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        premise: "Jujutsu Kaisen world with Naruto power system",
+        name: "Naruto x JJK",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body._researchArtifact).toEqual(artifact);
+    expect(mockedResearchWorldgenArtifact).toHaveBeenCalledWith(
+      {
+        premise: "Jujutsu Kaisen world with Naruto power system",
+        name: "Naruto x JJK",
+        knownIP: undefined,
+        research: fakeSettings.research,
+      },
+      fakeResolvedRole,
+      fakeSettings.research.maxSearchSteps,
+    );
+    expect(mockedSuggestWorldSeeds).toHaveBeenCalledWith(
+      expect.objectContaining({
+        researchArtifact: artifact,
+        ipContext: null,
+      }),
+    );
+  });
+
+  it("does not run artifact research for DNA suggestions when research is disabled", async () => {
+    mockedSuggestWorldSeeds.mockResolvedValue({
+      seeds: { geography: "Tokyo curse districts shaped by chakra flow" },
+      premiseDivergence: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/suggest-seeds", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        premise: "Jujutsu Kaisen world with Naruto power system",
+        name: "Naruto x JJK",
+        research: false,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(mockedResearchWorldgenArtifact).not.toHaveBeenCalled();
+    expect(mockedSuggestWorldSeeds).toHaveBeenCalledWith(
+      expect.objectContaining({
+        researchArtifact: null,
+        ipContext: null,
+      }),
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -455,6 +593,82 @@ describe("POST /api/worldgen/suggest-seed", () => {
     expect(mockedSuggestSingleSeed).toHaveBeenCalledWith(
       expect.objectContaining({ premise: "Arid world", category: "geography" })
     );
+  });
+
+  it("accepts a v2 research artifact and passes it into suggestSingleSeed", async () => {
+    const artifact = cloneJjkNarutoArtifact();
+    mockedSuggestSingleSeed.mockResolvedValue("Tokyo Jujutsu High wards with chakra seal routes" as any);
+
+    const res = await app.request("/api/worldgen/suggest-seed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        premise: "Jujutsu Kaisen world with Naruto power system",
+        category: "geography",
+        researchArtifact: artifact,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      category: "geography",
+      value: "Tokyo Jujutsu High wards with chakra seal routes",
+    });
+    expect(mockedSuggestSingleSeed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        premise: "Jujutsu Kaisen world with Naruto power system",
+        category: "geography",
+        researchArtifact: artifact,
+      }),
+    );
+  });
+
+  it("ignores legacy context fields when a v2 research artifact is present", async () => {
+    const artifact = cloneJjkNarutoArtifact();
+    const legacyIpContext = {
+      franchise: "Legacy mixed canon",
+      keyFacts: ["Stale village politics should not enter the artifact lane."],
+      tonalNotes: ["stale legacy tone"],
+      source: "mcp" as const,
+    };
+    const legacyPremiseDivergence = {
+      mode: "coexisting",
+      protagonistRole: {
+        kind: "custom",
+        interpretation: "coexisting",
+        canonicalCharacterName: null,
+        roleSummary: "Legacy divergence from an old seed request.",
+      },
+      preservedCanonFacts: ["Legacy canon fact."],
+      changedCanonFacts: [],
+      currentStateDirectives: ["Use stale context."],
+      ambiguityNotes: [],
+    };
+    mockedSuggestSingleSeed.mockResolvedValue("Artifact-owned geography" as any);
+
+    const res = await app.request("/api/worldgen/suggest-seed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        premise: "Jujutsu Kaisen world with Naruto power system",
+        category: "geography",
+        ipContext: legacyIpContext,
+        premiseDivergence: legacyPremiseDivergence,
+        researchArtifact: artifact,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const request = mockedSuggestSingleSeed.mock.calls[0]?.[0] as any;
+    expect(request).toEqual(
+      expect.objectContaining({
+        premise: "Jujutsu Kaisen world with Naruto power system",
+        category: "geography",
+        researchArtifact: artifact,
+      }),
+    );
+    expect(request.ipContext).toBeUndefined();
+    expect(request.premiseDivergence).toBeUndefined();
   });
 });
 
@@ -523,6 +737,489 @@ describe("POST /api/worldgen/generate", () => {
       }),
       expect.any(Function),
     );
+  });
+
+  it("accepts a v2 research artifact body, saves it, and passes it into scaffold generation without legacy research frames", async () => {
+    const artifact = cloneJjkNarutoArtifact();
+
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "Shibuya burns under two intertwined power systems.",
+        locations: [{ name: "Shibuya", description: "District", tags: [], isStarting: true, connectedTo: [] }],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID, ipContext: null, researchArtifact: artifact }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(mockedSaveWorldgenResearchArtifact).toHaveBeenCalledWith(CAMPAIGN_ID, artifact);
+    expect(mockedResearchKnownIP).not.toHaveBeenCalled();
+    expect(mockedSaveWorldgenResearchFrame).not.toHaveBeenCalled();
+    expect(mockedLoadWorldgenResearchFrame).not.toHaveBeenCalled();
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ipContext: null,
+        researchArtifact: artifact,
+        researchFrame: null,
+      }),
+      expect.any(Function),
+    );
+  });
+
+  it("loads a cached v2 research artifact when generate omits browser pass-through", async () => {
+    const artifact = cloneJjkNarutoArtifact();
+
+    mockedLoadWorldgenResearchArtifact.mockReturnValue(artifact as any);
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "Cached artifact world",
+        locations: [{ name: "Tokyo Jujutsu High", description: "School", tags: [], isStarting: true, connectedTo: [] }],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(mockedLoadWorldgenResearchArtifact).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(mockedResearchWorldgenArtifact).not.toHaveBeenCalled();
+    expect(mockedResearchKnownIP).not.toHaveBeenCalled();
+    expect(mockedSaveWorldgenResearchFrame).not.toHaveBeenCalled();
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({ researchArtifact: artifact }),
+      expect.any(Function),
+    );
+  });
+
+  it("treats null request artifacts as omitted and keeps stored artifact authority over stale legacy fields", async () => {
+    const artifact = cloneJjkNarutoArtifact();
+    const staleLegacyContext = {
+      franchise: "Naruto and Jujutsu Kaisen",
+      keyFacts: ["Hidden Cloud Village politics should not enter the artifact lane."],
+      tonalNotes: ["stale legacy tone"],
+      source: "mcp" as const,
+    };
+    const staleLegacyDivergence = {
+      mode: "coexisting",
+      protagonistRole: {
+        kind: "custom",
+        interpretation: "coexisting",
+        canonicalCharacterName: null,
+        roleSummary: "Legacy divergence from an old nullable request.",
+      },
+      preservedCanonFacts: ["Legacy Naruto villages remain cached."],
+      changedCanonFacts: [],
+      currentStateDirectives: ["Use the legacy mixed context."],
+      ambiguityNotes: [],
+    };
+
+    mockedLoadWorldgenResearchArtifact.mockReturnValue(artifact as any);
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "Stored artifact wins",
+        locations: [{ name: "Tokyo Jujutsu High", description: "School", tags: [], isStarting: true, connectedTo: [] }],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        researchArtifact: null,
+        ipContext: staleLegacyContext,
+        premiseDivergence: staleLegacyDivergence,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(mockedLoadWorldgenResearchArtifact).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(mockedSaveWorldgenResearchArtifact).not.toHaveBeenCalledWith(CAMPAIGN_ID, null);
+    expect(mockedSaveIpContext).not.toHaveBeenCalled();
+    expect(mockedSavePremiseDivergence).not.toHaveBeenCalled();
+    expect(mockedLoadIpContext).not.toHaveBeenCalled();
+    expect(mockedLoadPremiseDivergence).not.toHaveBeenCalled();
+    expect(mockedLoadWorldgenResearchFrame).not.toHaveBeenCalled();
+    expect(mockedResearchWorldgenArtifact).not.toHaveBeenCalled();
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ipContext: null,
+        premiseDivergence: null,
+        researchFrame: null,
+        researchArtifact: artifact,
+      }),
+      expect.any(Function),
+    );
+  });
+
+  it("uses a stored v2 artifact as the only research lane when legacy context is also cached", async () => {
+    const artifact = cloneJjkNarutoArtifact();
+    const cachedIpContext = {
+      franchise: "Naruto and Jujutsu Kaisen",
+      keyFacts: ["Hidden Mist Village and Tokyo Jujutsu High are both present."],
+      tonalNotes: ["mixed canon"],
+      source: "mcp" as const,
+    };
+    const cachedPremiseDivergence = {
+      mode: "coexisting",
+      protagonistRole: {
+        kind: "custom",
+        interpretation: "coexisting",
+        canonicalCharacterName: null,
+        roleSummary: "Legacy cached divergence from the old mixed-canon lane.",
+      },
+      preservedCanonFacts: ["Legacy Naruto villages remain cached."],
+      changedCanonFacts: [],
+      currentStateDirectives: ["Use the legacy mixed context."],
+      ambiguityNotes: [],
+    };
+
+    mockedLoadWorldgenResearchArtifact.mockReturnValue(artifact as any);
+    mockedLoadIpContext.mockReturnValue(cachedIpContext as any);
+    mockedLoadPremiseDivergence.mockReturnValue(cachedPremiseDivergence as any);
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "Artifact-only world",
+        locations: [{ name: "Tokyo Jujutsu High", description: "School", tags: [], isStarting: true, connectedTo: [] }],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(mockedLoadWorldgenResearchArtifact).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(mockedLoadIpContext).not.toHaveBeenCalled();
+    expect(mockedLoadPremiseDivergence).not.toHaveBeenCalled();
+    expect(mockedInterpretPremiseDivergence).not.toHaveBeenCalled();
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ipContext: null,
+        premiseDivergence: null,
+        researchFrame: null,
+        researchArtifact: artifact,
+      }),
+      expect.any(Function),
+    );
+  });
+
+  it("does not save or forward body legacy context when a body artifact exists", async () => {
+    const artifact = cloneJjkNarutoArtifact();
+    const bodyIpContext = {
+      franchise: "Naruto and Jujutsu Kaisen",
+      keyFacts: ["Five Great Nations are cached in a legacy request body."],
+      tonalNotes: ["mixed canon"],
+      source: "mcp" as const,
+    };
+    const bodyPremiseDivergence = {
+      mode: "coexisting",
+      protagonistRole: {
+        kind: "custom",
+        interpretation: "coexisting",
+        canonicalCharacterName: null,
+        roleSummary: "Legacy request-body divergence from the old lane.",
+      },
+      preservedCanonFacts: ["Legacy Naruto political geography remains cached."],
+      changedCanonFacts: [],
+      currentStateDirectives: ["Use legacy mixed context."],
+      ambiguityNotes: [],
+    };
+
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "Artifact-only body world",
+        locations: [{ name: "Tokyo Jujutsu High", description: "School", tags: [], isStarting: true, connectedTo: [] }],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        ipContext: bodyIpContext,
+        premiseDivergence: bodyPremiseDivergence,
+        researchArtifact: artifact,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(mockedSaveWorldgenResearchArtifact).toHaveBeenCalledWith(CAMPAIGN_ID, artifact);
+    expect(mockedSaveIpContext).not.toHaveBeenCalled();
+    expect(mockedSavePremiseDivergence).not.toHaveBeenCalled();
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ipContext: null,
+        premiseDivergence: null,
+        researchFrame: null,
+        researchArtifact: artifact,
+      }),
+      expect.any(Function),
+    );
+  });
+
+  it("saves the single enriched v2 research artifact returned by world scaffold generation", async () => {
+    const artifact = cloneJjkNarutoArtifact();
+    const enrichedArtifact = makeArtifactWith((draft) => {
+      draft.generatedContext.keyFacts.push("Kyoto Jujutsu High can support second-stage faction generation.");
+    });
+
+    mockedLoadWorldgenResearchArtifact.mockReturnValue(artifact as any);
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "Cached artifact world",
+        locations: [{ name: "Tokyo Jujutsu High", description: "School", tags: [], isStarting: true, connectedTo: [] }],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: null,
+      researchArtifact: enrichedArtifact,
+    } as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(mockedSaveWorldgenResearchArtifact).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      enrichedArtifact,
+    );
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({ researchArtifact: artifact }),
+      expect.any(Function),
+    );
+  });
+
+  it("re-runs v2 artifact research when generate has no body artifact and no cached artifact", async () => {
+    const artifact = cloneJjkNarutoArtifact();
+
+    mockedResearchWorldgenArtifact.mockResolvedValue(artifact as any);
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "Re-researched artifact world",
+        locations: [{ name: "Tokyo Jujutsu High", description: "School", tags: [], isStarting: true, connectedTo: [] }],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(mockedResearchWorldgenArtifact).toHaveBeenCalledWith(
+      { premise: "A dark world", name: "Test Campaign", research: fakeSettings.research },
+      fakeResolvedRole,
+      fakeSettings.research.maxSearchSteps,
+    );
+    expect(mockedSaveWorldgenResearchArtifact).toHaveBeenCalledWith(CAMPAIGN_ID, artifact);
+    expect(mockedResearchKnownIP).not.toHaveBeenCalled();
+    expect(mockedSaveWorldgenResearchFrame).not.toHaveBeenCalled();
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({ researchArtifact: artifact }),
+      expect.any(Function),
+    );
+  });
+
+  it("clears stale loaded legacy fields when on-demand v2 artifact research succeeds", async () => {
+    const artifact = cloneJjkNarutoArtifact();
+    const stalePremiseDivergence = {
+      mode: "diverged",
+      protagonistRole: {
+        kind: "custom",
+        interpretation: "replacement",
+        canonicalCharacterName: "Old Hero",
+        roleSummary: "Stale divergence from a previous legacy generation.",
+      },
+      preservedCanonFacts: ["Old cached canon fact."],
+      changedCanonFacts: ["Old cached change."],
+      currentStateDirectives: ["Follow old legacy directives."],
+      ambiguityNotes: [],
+    };
+    const staleResearchFrame = {
+      franchise: "Legacy Frame",
+      premise: "Old premise",
+      divergenceMode: "diverged",
+      keyFacts: ["Old frame fact."],
+      stepFocus: {},
+    };
+
+    mockedLoadIpContext.mockReturnValue(null as any);
+    mockedLoadPremiseDivergence.mockReturnValue(stalePremiseDivergence as any);
+    mockedLoadWorldgenResearchFrame.mockReturnValue(staleResearchFrame as any);
+    mockedResearchWorldgenArtifact.mockResolvedValue(artifact as any);
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "On-demand artifact world",
+        locations: [{ name: "Tokyo Jujutsu High", description: "School", tags: [], isStarting: true, connectedTo: [] }],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(mockedResearchWorldgenArtifact).toHaveBeenCalled();
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ipContext: null,
+        premiseDivergence: null,
+        researchFrame: null,
+        researchArtifact: artifact,
+      }),
+      expect.any(Function),
+    );
+  });
+
+  it("passes saved worldgen source hint into on-demand v2 artifact research", async () => {
+    const artifact = cloneJjkNarutoArtifact();
+    mockedReadCampaignConfig.mockReturnValue({
+      worldgenSourceHint: "Jujutsu Kaisen / Naruto",
+      worldgenResearchEnabled: true,
+    } as any);
+    mockedResearchWorldgenArtifact.mockResolvedValue(artifact as any);
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "On-demand hinted artifact world",
+        locations: [{ name: "Tokyo Jujutsu High", description: "School", tags: [], isStarting: true, connectedTo: [] }],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(mockedResearchWorldgenArtifact).toHaveBeenCalledWith(
+      {
+        premise: "A dark world",
+        name: "Test Campaign",
+        knownIP: "Jujutsu Kaisen / Naruto",
+        research: fakeSettings.research,
+      },
+      fakeResolvedRole,
+      fakeSettings.research.maxSearchSteps,
+    );
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({
+        researchArtifact: artifact,
+        ipContext: null,
+      }),
+      expect.any(Function),
+    );
+  });
+
+  it("skips on-demand v2 artifact research when the campaign saved research disabled", async () => {
+    mockedReadCampaignConfig.mockReturnValue({
+      worldgenSourceHint: "Jujutsu Kaisen / Naruto",
+      worldgenResearchEnabled: false,
+    } as any);
+    mockedGenerateWorldScaffold.mockResolvedValue({
+      scaffold: {
+        refinedPremise: "No research world",
+        locations: [{ name: "Original Start", description: "Start", tags: [], isStarting: true, connectedTo: [] }],
+        factions: [],
+        npcs: [],
+        loreCards: [],
+      },
+      enrichedIpContext: null,
+    } as any);
+
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(mockedResearchWorldgenArtifact).not.toHaveBeenCalled();
+    expect(mockedGenerateWorldScaffold).toHaveBeenCalledWith(
+      expect.objectContaining({
+        researchArtifact: null,
+        ipContext: null,
+      }),
+      expect.any(Function),
+    );
+  });
+
+  it("rejects malformed v2 research artifacts before persistence or generation", async () => {
+    const res = await app.request("/api/worldgen/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        researchArtifact: {
+          version: 2,
+          rawPremise: "too incomplete",
+        },
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(mockedSaveWorldgenResearchArtifact).not.toHaveBeenCalled();
+    expect(mockedGenerateWorldScaffold).not.toHaveBeenCalled();
   });
 
   it("computes premiseDivergence once during generate and reuses the cached artifact during later regeneration", async () => {
@@ -1145,6 +1842,98 @@ describe("POST /api/worldgen/save-edits", () => {
     expect(mockedMarkGenComplete).toHaveBeenCalledWith(CAMPAIGN_ID, "A refined dark world");
   });
 
+  it("persists dense location hierarchy and NPC scene placement through save-edits normalization", async () => {
+    mockedSaveScaffoldToDb.mockReturnValue(undefined as any);
+    mockedMarkGenComplete.mockReturnValue(undefined as any);
+    mockedDeleteLore.mockResolvedValue(undefined as any);
+    mockedExtractLoreCards.mockResolvedValue([] as any);
+    mockedStoreLore.mockResolvedValue(undefined as any);
+
+    const res = await app.request("/api/worldgen/save-edits", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        scaffold: {
+          ...validScaffold,
+          locations: [
+            {
+              name: "Castle",
+              description: "Big castle",
+              tags: ["fortified"],
+              isStarting: true,
+              connectedTo: ["Castle Bailey"],
+              kind: "macro",
+              parentLocationName: null,
+            },
+            {
+              name: "Castle Bailey",
+              description: "The inner yard where scenes actually happen.",
+              tags: ["courtyard"],
+              isStarting: false,
+              connectedTo: ["Castle"],
+              kind: "persistent_sublocation",
+              parentLocationName: "Castle",
+            },
+          ],
+          npcs: [
+            {
+              name: "Gate Warden Mira",
+              persona: "Keeps watch over the bailey gate.",
+              tags: ["warden"],
+              goals: {
+                shortTerm: ["Secure the gate"],
+                longTerm: ["Keep the castle alive"],
+              },
+              locationName: "Castle",
+              sceneLocationName: "Castle Bailey",
+              factionName: null,
+              tier: "supporting",
+            },
+            {
+              ...buildDraftBackedNpcEditConvergencePayload(),
+              locationName: "Castle",
+              sceneLocationName: "Castle Bailey",
+            },
+          ],
+        },
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(mockedSaveScaffoldToDb).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      expect.objectContaining({
+        locations: [
+          expect.objectContaining({
+            name: "Castle",
+            kind: "macro",
+            parentLocationName: null,
+            connectedTo: ["Castle Bailey"],
+          }),
+          expect.objectContaining({
+            name: "Castle Bailey",
+            kind: "persistent_sublocation",
+            parentLocationName: "Castle",
+            connectedTo: ["Castle"],
+          }),
+        ],
+        npcs: [
+          expect.objectContaining({
+            name: "Gate Warden Mira",
+            locationName: "Castle",
+            sceneLocationName: "Castle Bailey",
+          }),
+          expect.objectContaining({
+            name: "Marshal Selene Voss",
+            locationName: "Castle",
+            sceneLocationName: "Castle Bailey",
+          }),
+        ],
+      }),
+    );
+  });
+
   it("draft-backed NPC edit convergence preserves visible shallow edits across the save/load/world-payload round-trip at the route boundary", async () => {
     mockedSaveScaffoldToDb.mockReturnValue(undefined as any);
     mockedMarkGenComplete.mockReturnValue(undefined as any);
@@ -1195,19 +1984,6 @@ describe("POST /api/worldgen/save-edits", () => {
               motivations: expect.objectContaining({
                 shortTermGoals: ["Fortify the village", "Brief the scouts"],
                 longTermGoals: ["Keep the refugees alive", "Break the siege"],
-              }),
-              grounding: expect.objectContaining({
-                summary: "Imported grounding summary",
-              }),
-              sourceBundle: expect.objectContaining({
-                canonSources: [
-                  expect.objectContaining({
-                    label: "War Journal",
-                  }),
-                ],
-              }),
-              continuity: expect.objectContaining({
-                identityInertia: "anchored",
               }),
             }),
           }),
@@ -1433,8 +2209,116 @@ describe("POST /api/worldgen/save-edits", () => {
         ],
       }),
       fakeResolvedRole,
+      {
+        ipContext: null,
+        premiseDivergence: null,
+        researchArtifact: null,
+      },
     );
     expect(mockedExtractLoreCards.mock.calls.at(-1)?.[0]).toBe(normalizedScaffold);
+  });
+
+  it("passes stored v2 artifact context into lore re-extraction without legacy context", async () => {
+    const artifact = cloneJjkNarutoArtifact();
+    const cachedIpContext = {
+      franchise: "Naruto and Jujutsu Kaisen",
+      keyFacts: ["Hidden Cloud Village remains cached from legacy data."],
+      tonalNotes: ["mixed canon"],
+      source: "mcp" as const,
+    };
+    const cachedPremiseDivergence = {
+      mode: "coexisting",
+      protagonistRole: {
+        kind: "custom",
+        interpretation: "coexisting",
+        canonicalCharacterName: null,
+        roleSummary: "Legacy cached divergence.",
+      },
+      preservedCanonFacts: ["Legacy Naruto political context is cached."],
+      changedCanonFacts: [],
+      currentStateDirectives: [],
+      ambiguityNotes: [],
+    };
+
+    mockedLoadWorldgenResearchArtifact.mockReturnValue(artifact as any);
+    mockedLoadIpContext.mockReturnValue(cachedIpContext as any);
+    mockedLoadPremiseDivergence.mockReturnValue(cachedPremiseDivergence as any);
+    mockedSaveScaffoldToDb.mockReturnValue(undefined as any);
+    mockedMarkGenComplete.mockReturnValue(undefined as any);
+    mockedDeleteLore.mockResolvedValue(undefined as any);
+    mockedExtractLoreCards.mockResolvedValue([] as any);
+    mockedStoreLore.mockResolvedValue(undefined as any);
+
+    const res = await app.request("/api/worldgen/save-edits", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID, scaffold: validScaffold }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(mockedLoadWorldgenResearchArtifact).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(mockedLoadIpContext).not.toHaveBeenCalled();
+    expect(mockedLoadPremiseDivergence).not.toHaveBeenCalled();
+    expect(mockedExtractLoreCards).toHaveBeenCalledWith(
+      expect.anything(),
+      fakeResolvedRole,
+      {
+        ipContext: null,
+        premiseDivergence: null,
+        researchArtifact: artifact,
+      },
+    );
+  });
+
+  it("passes legacy context into lore re-extraction when no artifact exists", async () => {
+    const cachedIpContext = {
+      franchise: "Voices of the Void",
+      keyFacts: ["The signal base sits in a remote valley."],
+      tonalNotes: ["lonely"],
+      source: "mcp" as const,
+    };
+    const cachedPremiseDivergence = {
+      mode: "diverged",
+      protagonistRole: {
+        kind: "custom",
+        interpretation: "replacement",
+        canonicalCharacterName: "Dr. Kel",
+        roleSummary: "The player replaces Dr. Kel.",
+      },
+      preservedCanonFacts: ["The signal base remains active."],
+      changedCanonFacts: ["Dr. Kel is absent."],
+      currentStateDirectives: [],
+      ambiguityNotes: [],
+    };
+
+    mockedLoadWorldgenResearchArtifact.mockReturnValue(null as any);
+    mockedLoadIpContext.mockReturnValue(cachedIpContext as any);
+    mockedLoadPremiseDivergence.mockReturnValue(cachedPremiseDivergence as any);
+    mockedSaveScaffoldToDb.mockReturnValue(undefined as any);
+    mockedMarkGenComplete.mockReturnValue(undefined as any);
+    mockedDeleteLore.mockResolvedValue(undefined as any);
+    mockedExtractLoreCards.mockResolvedValue([] as any);
+    mockedStoreLore.mockResolvedValue(undefined as any);
+
+    const res = await app.request("/api/worldgen/save-edits", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID, scaffold: validScaffold }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(mockedLoadWorldgenResearchArtifact).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(mockedLoadIpContext).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(mockedLoadPremiseDivergence).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(mockedExtractLoreCards).toHaveBeenCalledWith(
+      expect.anything(),
+      fakeResolvedRole,
+      {
+        ipContext: cachedIpContext,
+        premiseDivergence: cachedPremiseDivergence,
+        researchArtifact: null,
+      },
+    );
   });
 
   it("materializes supporting draft state for legacy supporting save-edits NPC payloads", async () => {
@@ -1717,7 +2601,7 @@ describe("POST /api/worldgen/regenerate-section", () => {
     expect(mockedLoadPremiseDivergence).toHaveBeenCalledWith(CAMPAIGN_ID);
     expect(mockedGenerateRefinedPremise).toHaveBeenCalledWith(
       expect.objectContaining({ premiseDivergence: cachedPremiseDivergence }),
-      expect.anything(),
+      null,
       undefined,
     );
   });
@@ -1783,6 +2667,184 @@ describe("POST /api/worldgen/regenerate-section", () => {
     const body = await res.json();
     expect(body).toEqual({ locations: locs });
     expect(mockedGenerateLocations).toHaveBeenCalled();
+  });
+
+  it("loads cached v2 research artifact for section regeneration and passes it through request context", async () => {
+    const artifact = cloneJjkNarutoArtifact();
+    const locs = [{ name: "Tokyo Jujutsu High", description: "School", tags: [], isStarting: false, connectedTo: [] }];
+
+    mockedLoadWorldgenResearchArtifact.mockReturnValue(artifact as any);
+    mockedGenerateLocations.mockResolvedValue(locs as any);
+
+    const res = await app.request("/api/worldgen/regenerate-section", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        section: "locations",
+        refinedPremise: "A dark world",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ locations: locs });
+    expect(mockedLoadWorldgenResearchArtifact).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(mockedResearchKnownIP).not.toHaveBeenCalled();
+    expect(mockedEvaluateResearchSufficiency).not.toHaveBeenCalled();
+    expect(mockedGenerateLocations).toHaveBeenCalledWith(
+      expect.objectContaining({ researchArtifact: artifact }),
+      "A dark world",
+      null,
+      undefined,
+    );
+  });
+
+  it("uses a stored v2 artifact as the only research lane when regenerating with legacy context cached", async () => {
+    const artifact = cloneJjkNarutoArtifact();
+    const cachedIpContext = {
+      franchise: "Naruto and Jujutsu Kaisen",
+      keyFacts: ["Hidden Mist Village remains cached from a legacy generated world."],
+      tonalNotes: ["mixed canon"],
+      source: "mcp" as const,
+    };
+    const cachedPremiseDivergence = {
+      mode: "coexisting",
+      protagonistRole: {
+        kind: "custom",
+        interpretation: "coexisting",
+        canonicalCharacterName: null,
+        roleSummary: "Legacy cached divergence from the old mixed-canon lane.",
+      },
+      preservedCanonFacts: ["Legacy Naruto villages remain cached."],
+      changedCanonFacts: [],
+      currentStateDirectives: ["Use the legacy mixed context."],
+      ambiguityNotes: [],
+    };
+    const locs = [{ name: "Tokyo Jujutsu High", description: "School", tags: [], isStarting: false, connectedTo: [] }];
+
+    mockedLoadWorldgenResearchArtifact.mockReturnValue(artifact as any);
+    mockedLoadIpContext.mockReturnValue(cachedIpContext as any);
+    mockedLoadPremiseDivergence.mockReturnValue(cachedPremiseDivergence as any);
+    mockedGenerateLocations.mockResolvedValue(locs as any);
+
+    const res = await app.request("/api/worldgen/regenerate-section", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        section: "locations",
+        refinedPremise: "A dark world",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ locations: locs });
+    expect(mockedLoadWorldgenResearchArtifact).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(mockedLoadIpContext).not.toHaveBeenCalled();
+    expect(mockedLoadPremiseDivergence).not.toHaveBeenCalled();
+    expect(mockedInterpretPremiseDivergence).not.toHaveBeenCalled();
+    expect(mockedEvaluateResearchSufficiency).not.toHaveBeenCalled();
+    expect(mockedGenerateLocations).toHaveBeenCalledWith(
+      expect.objectContaining({
+        premiseDivergence: null,
+        researchFrame: null,
+        researchArtifact: artifact,
+      }),
+      "A dark world",
+      null,
+      undefined,
+    );
+  });
+
+  it("uses v2 artifact sufficiency for section regeneration and saves enriched artifact back", async () => {
+    const artifact = cloneJjkNarutoArtifact();
+    const enrichedArtifact = makeArtifactWith((draft) => {
+      draft.generatedContext.keyFacts.push("Kyoto Jujutsu High provides a second sorcerer-institution anchor.");
+    });
+    const locs = [{ name: "Kyoto Jujutsu High", description: "School", tags: [], isStarting: false, connectedTo: [] }];
+
+    mockedLoadWorldgenResearchArtifact.mockReturnValue(artifact as any);
+    mockedEvaluateResearchArtifactSufficiency.mockResolvedValue(enrichedArtifact as any);
+    mockedGenerateLocations.mockResolvedValue(locs as any);
+
+    const res = await app.request("/api/worldgen/regenerate-section", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        section: "locations",
+        refinedPremise: "A dark world",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ locations: locs });
+    expect(mockedEvaluateResearchSufficiency).not.toHaveBeenCalled();
+    expect(mockedEvaluateResearchArtifactSufficiency).toHaveBeenCalledWith(
+      artifact,
+      "locations",
+      "A dark world",
+      fakeResolvedRole,
+      {
+        provider: "brave",
+        braveApiKey: undefined,
+        zaiApiKey: undefined,
+        llmProvider: fakeResolvedRole.provider,
+      },
+    );
+    expect(mockedSaveWorldgenResearchArtifact).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      enrichedArtifact,
+    );
+    expect(mockedGenerateLocations).toHaveBeenCalledWith(
+      expect.objectContaining({ researchArtifact: enrichedArtifact }),
+      "A dark world",
+      null,
+      undefined,
+    );
+  });
+
+  it("keeps v2 artifact enrichment idempotent across save, reload, and enrich-again", async () => {
+    const initialArtifact = cloneJjkNarutoArtifact();
+    const newFact = "Kyoto Jujutsu High provides a second sorcerer-institution anchor.";
+    let storedArtifact = initialArtifact;
+    const locs = [{ name: "Kyoto Jujutsu High", description: "School", tags: [], isStarting: false, connectedTo: [] }];
+
+    mockedLoadWorldgenResearchArtifact.mockImplementation(() => storedArtifact as any);
+    mockedSaveWorldgenResearchArtifact.mockImplementation((_, artifact) => {
+      storedArtifact = artifact as typeof initialArtifact;
+    });
+    mockedEvaluateResearchArtifactSufficiency.mockImplementation(async (artifact: any) => {
+      if (artifact.generatedContext.keyFacts.includes(newFact)) {
+        return artifact;
+      }
+      return {
+        ...artifact,
+        generatedContext: {
+          ...artifact.generatedContext,
+          keyFacts: [...artifact.generatedContext.keyFacts, newFact],
+        },
+      };
+    });
+    mockedGenerateLocations.mockResolvedValue(locs as any);
+
+    for (let i = 0; i < 2; i++) {
+      const res = await app.request("/api/worldgen/regenerate-section", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          campaignId: CAMPAIGN_ID,
+          section: "locations",
+          refinedPremise: "A dark world",
+        }),
+      });
+      expect(res.status).toBe(200);
+      await res.json();
+    }
+
+    expect(storedArtifact.generatedContext.keyFacts.filter((fact) => fact === newFact)).toHaveLength(1);
+    expect(mockedSaveWorldgenResearchArtifact).toHaveBeenCalledTimes(1);
+    expect(mockedEvaluateResearchSufficiency).not.toHaveBeenCalled();
   });
 
   it("reuses cached ipContext before on-demand research and saves targeted regenerate enrichment back through the same lane", async () => {
@@ -1861,9 +2923,16 @@ describe("POST /api/worldgen/regenerate-section", () => {
     expect(mockedGenerateFactions).toHaveBeenCalled();
   });
 
-  it("calls generateNpcsStep for section=npcs", async () => {
-    const npcs = [{ name: "Guard", persona: "Loyal", tags: [], goals: { shortTerm: [], longTerm: [] }, locationName: "Castle", factionName: null }];
+  // Route-wiring transparency check only. Does NOT prove P64-R5 runtime behavior.
+  // P64-R5 is proven by the real-step integration test below, which mocks only
+  // the safeGenerateObject seam and runs the real generateNpcsStep implementation.
+  it("calls generateNpcsStep for section=npcs (route-wiring only)", async () => {
+    const npcs = [{ name: "Guard", persona: "Loyal", tags: [], goals: { shortTerm: [], longTerm: [] }, locationName: "Castle", sceneLocationName: "Castle Throne Room", factionName: null }];
     mockedGenerateNpcs.mockResolvedValue(npcs as any);
+    const locations = [
+      { name: "Castle", description: "Fortress", tags: [], isStarting: true, connectedTo: ["Castle Throne Room"], kind: "macro", parentLocationName: null },
+      { name: "Castle Throne Room", description: "Audience chamber", tags: [], isStarting: false, connectedTo: ["Castle"], kind: "persistent_sublocation", parentLocationName: "Castle" },
+    ];
 
     const res = await app.request("/api/worldgen/regenerate-section", {
       method: "POST",
@@ -1872,7 +2941,8 @@ describe("POST /api/worldgen/regenerate-section", () => {
         campaignId: CAMPAIGN_ID,
         section: "npcs",
         refinedPremise: "A dark world",
-        locationNames: ["Castle"],
+        locationNames: ["Castle", "Castle Throne Room"],
+        locations,
         factionNames: ["Rebels"],
       }),
     });
@@ -1888,7 +2958,7 @@ describe("POST /api/worldgen/regenerate-section", () => {
       }),
     );
     expect(args?.[1]).toBe("A dark world");
-    expect(args?.[2]).toEqual(["Castle"]);
+    expect(args?.[2]).toEqual(locations);
     expect(args?.[3]).toEqual(["Rebels"]);
   });
 
@@ -1902,5 +2972,549 @@ describe("POST /api/worldgen/regenerate-section", () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body).toHaveProperty("error");
+  });
+});
+
+describe("/api/worldgen/regenerate-section section=npcs — real step integration (P64-R5)", () => {
+  afterEach(() => {
+    vi.resetModules();
+    vi.doUnmock("../../worldgen/index.js");
+    vi.doUnmock("../../ai/generate-object-safe.js");
+    vi.doUnmock("../../character/ingestion/assess-original.js");
+  });
+
+  it("returns a full nested personality pack when the route runs the real generateNpcsStep with only the LLM seam mocked", async () => {
+    vi.resetModules();
+    vi.doUnmock("../../worldgen/index.js");
+    vi.doMock("../../ai/generate-object-safe.js", () => ({
+      safeGenerateObject: vi.fn(),
+    }));
+    vi.doMock("../../character/ingestion/assess-original.js", async () => {
+      const actual = await vi.importActual<any>(
+        "../../character/ingestion/assess-original.js",
+      );
+      return {
+        ...actual,
+        assessOriginalCharacterPowerStats: vi.fn(async ({ draft }: any) => ({
+          ...draft,
+          powerStats: {
+            attackPotency: { tier: "Wall", rank: 4 },
+            speed: { tier: "Street", rank: 4 },
+            durability: { tier: "Wall", rank: 4 },
+            intelligence: { tier: "Gifted", rank: 5 },
+            hax: [],
+            vulnerabilities: [],
+          },
+        })),
+      };
+    });
+
+    const settingsModule = await import("../../settings/index.js");
+    const aiModule = await import("../../ai/index.js");
+    const campaignModule = await import("../../campaign/index.js");
+    const generateObjectModule = await import("../../ai/generate-object-safe.js");
+
+    vi.mocked(settingsModule.loadSettings).mockReturnValue(fakeSettings);
+    vi.mocked(aiModule.resolveRoleModel).mockReturnValue(fakeResolvedRole as any);
+    vi.mocked(aiModule.createModel).mockReturnValue({ id: "mock-model" } as any);
+    vi.mocked(campaignModule.getActiveCampaign).mockReturnValue({
+      id: CAMPAIGN_ID,
+      name: "Test Campaign",
+      premise: "A dark world",
+      seeds: { geography: "Mountains" },
+      createdAt: "2026-01-01",
+    } as any);
+    vi.mocked(campaignModule.loadCampaign).mockResolvedValue({
+      id: CAMPAIGN_ID,
+      name: "Test Campaign",
+      premise: "A dark world",
+      seeds: { geography: "Mountains" },
+      createdAt: "2026-01-01",
+    } as any);
+    vi.mocked(campaignModule.readCampaignConfig).mockReturnValue({} as any);
+    vi.mocked(campaignModule.loadIpContext).mockReturnValue(null);
+    vi.mocked(campaignModule.loadPremiseDivergence).mockReturnValue(null);
+    vi.mocked(campaignModule.loadWorldgenResearchFrame).mockReturnValue(null);
+
+    const mockedSafeGenerateObject = vi.mocked(generateObjectModule.safeGenerateObject);
+    mockedSafeGenerateObject
+      .mockResolvedValueOnce({
+        object: {
+          npcs: [
+            {
+              name: "Guard",
+              role: "Gate warden",
+              locationName: "Castle",
+              factionName: null,
+            },
+          ],
+        },
+      } as any)
+      .mockResolvedValueOnce({
+        object: { npcs: [] },
+      } as any)
+      .mockResolvedValueOnce({
+        object: {
+          persona: "A stoic gate warden who has served the Castle for twenty years.",
+          selfImage: "The last man who still keeps his post.",
+          socialRoles: ["Gate Warden"],
+          tags: ["Disciplined", "Watchful", "Loyal"],
+          goals: {
+            shortTerm: ["Hold the gate through the night"],
+            longTerm: ["Retire with honor intact"],
+          },
+          personalitySummary: "Stoic guard with a private grudge against his captain",
+          personalityVoice: "Terse, repeats the rulebook to himself under his breath",
+          personalityDecisionStyle: "Defers to protocol unless protocol fails him",
+          personalityWorldview: "Order is the only thing standing between people and ruin",
+          personalityContradictions: [
+            "Believes loyalty is absolute, but secretly resents his captain for three long years.",
+          ],
+          personalityMythology: "The last man who kept his post when the others fled",
+          personalitySampleLines: [
+            "Stand down. I will not ask again.",
+            "Protocol says you leave through the west gate. Use it.",
+          ],
+        },
+      } as any);
+
+    const { default: worldgenRoutesReal } = await import("../worldgen.js");
+    const realApp = new Hono();
+    realApp.route("/api/worldgen", worldgenRoutesReal);
+
+    const res = await realApp.request("/api/worldgen/regenerate-section", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        section: "npcs",
+        refinedPremise: "A dark world",
+        locationNames: ["Castle"],
+        factionNames: ["Rebels"],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(mockedSafeGenerateObject).toHaveBeenCalledTimes(3);
+
+    const body = await res.json();
+    expect(body.npcs).toHaveLength(1);
+    expect(body.npcs[0].draft).toBeDefined();
+
+    const personality = body.npcs[0].draft.identity.personality;
+    expect(personality.summary).toBe("Stoic guard with a private grudge against his captain");
+    expect(personality.voice).toBe(
+      "Terse, repeats the rulebook to himself under his breath",
+    );
+    expect(personality.decisionStyle).toBe(
+      "Defers to protocol unless protocol fails him",
+    );
+    expect(personality.worldview).toBe(
+      "Order is the only thing standing between people and ruin",
+    );
+    expect(personality.internalContradictions).toEqual([
+      "Believes loyalty is absolute, but secretly resents his captain for three long years.",
+    ]);
+    expect(personality.personalMythology).toBe(
+      "The last man who kept his post when the others fled",
+    );
+    expect(personality.sampleLines).toEqual([
+      "Stand down. I will not ask again.",
+      "Protocol says you leave through the west gate. Use it.",
+    ]);
+  });
+});
+
+describe("/api/worldgen/regenerate-section section=npcs — Phase 65 PowerStats enrichment (P65-R5)", () => {
+  const knownIpContext = {
+    franchise: "Naruto",
+    keyFacts: ["Konohagakure is a hidden village."],
+    tonalNotes: ["Shonen action"],
+    source: "mcp" as const,
+  };
+
+  function makePowerStats(anchor: string) {
+    return {
+      attackPotency: { tier: "Wall", rank: 5 },
+      speed: { tier: "Street", rank: 4 },
+      durability: { tier: "Wall", rank: 5 },
+      intelligence: { tier: "Gifted", rank: 6 },
+      hax: [],
+      vulnerabilities: [
+        {
+          description: `${anchor} loses their edge when isolated from allied support.`,
+          severity: "major" as const,
+        },
+      ],
+    };
+  }
+
+  function makeNpcDetail(persona: string) {
+    return {
+      persona,
+      selfImage: "Keeps the line steady when everyone else is wavering.",
+      socialRoles: ["Gate Watch"],
+      tags: ["Disciplined", "Watchful", "Loyal"],
+      goals: {
+        shortTerm: ["Hold the gate through the night"],
+        longTerm: ["Retire with honor intact"],
+      },
+      personalitySummary:
+        "A practical defender who treats panic as a luxury nobody can afford.",
+      personalityVoice:
+        "Short commands, dry humor, and measured pauses before bad news.",
+      personalityDecisionStyle:
+        "Locks down the risk first, then solves the second-order mess.",
+      personalityWorldview:
+        "Order is the thin line between frightened people and collapse.",
+      personalityContradictions: [
+        "Preaches discipline, but bends the rules whenever rookies are at risk.",
+      ],
+      personalityMythology:
+        "If they keep the watch steady, the city still deserves dawn.",
+      personalitySampleLines: [
+        "Hold formation. Panic is louder than the breach.",
+        "You can argue after sunrise. Tonight you follow the signal fire.",
+      ],
+    };
+  }
+
+  async function setupRealRegenerateRoute(opts: {
+    ipContext: typeof knownIpContext | null;
+    researchEnabled: boolean;
+    mockKnownIp?: boolean;
+    mockOriginal?: boolean;
+  }) {
+    vi.resetModules();
+    vi.doUnmock("../../worldgen/index.js");
+    vi.doMock("../../ai/generate-object-safe.js", () => ({
+      safeGenerateObject: vi.fn(),
+    }));
+
+    if (opts.mockKnownIp) {
+      vi.doMock("../../character/known-ip-worldgen-research.js", async () => {
+        const actual = await vi.importActual<any>(
+          "../../character/known-ip-worldgen-research.js",
+        );
+        return {
+          ...actual,
+          enrichKnownIpWorldgenNpcDraft: vi.fn(),
+        };
+      });
+    }
+
+    if (opts.mockOriginal) {
+      vi.doMock("../../character/ingestion/assess-original.js", async () => {
+        const actual = await vi.importActual<any>(
+          "../../character/ingestion/assess-original.js",
+        );
+        return {
+          ...actual,
+          assessOriginalCharacterPowerStats: vi.fn(),
+        };
+      });
+    }
+
+    const settingsModule = await import("../../settings/index.js");
+    const aiModule = await import("../../ai/index.js");
+    const campaignModule = await import("../../campaign/index.js");
+    const ipResearcherModule = await import("../../worldgen/ip-researcher.js");
+    const generateObjectModule = await import(
+      "../../ai/generate-object-safe.js"
+    );
+    const libModule = await import("../../lib/index.js");
+    const knownIpModule = opts.mockKnownIp
+      ? await import("../../character/known-ip-worldgen-research.js")
+      : null;
+    const originalModule = opts.mockOriginal
+      ? await import("../../character/ingestion/assess-original.js")
+      : null;
+
+    vi.mocked(settingsModule.loadSettings).mockReturnValue({
+      ...fakeSettings,
+      research: {
+        ...fakeSettings.research,
+        enabled: opts.researchEnabled,
+      },
+    } as any);
+    vi.mocked(aiModule.resolveRoleModel).mockReturnValue(fakeResolvedRole as any);
+    vi.mocked(aiModule.createModel).mockReturnValue({ id: "mock-model" } as any);
+    vi.mocked(campaignModule.getActiveCampaign).mockReturnValue({
+      id: CAMPAIGN_ID,
+      name: "Test Campaign",
+      premise: "A dark world",
+      seeds: { geography: "Mountains" },
+      createdAt: "2026-01-01",
+    } as any);
+    vi.mocked(campaignModule.loadCampaign).mockResolvedValue({
+      id: CAMPAIGN_ID,
+      name: "Test Campaign",
+      premise: "A dark world",
+      seeds: { geography: "Mountains" },
+      createdAt: "2026-01-01",
+    } as any);
+    vi.mocked(campaignModule.readCampaignConfig).mockReturnValue({} as any);
+    vi.mocked(campaignModule.loadIpContext).mockReturnValue(opts.ipContext);
+    vi.mocked(campaignModule.loadPremiseDivergence).mockReturnValue(
+      opts.ipContext
+        ? {
+            mode: "canonical",
+            protagonistRole: {
+              kind: "canonical",
+              interpretation: "canonical",
+              canonicalCharacterName: null,
+              roleSummary: "No protagonist divergence is cached for this test.",
+            },
+            preservedCanonFacts: [],
+            changedCanonFacts: [],
+            currentStateDirectives: [],
+            ambiguityNotes: [],
+          }
+        : null,
+    );
+    vi.mocked(campaignModule.loadWorldgenResearchFrame).mockReturnValue(null);
+    vi.mocked(ipResearcherModule.evaluateResearchSufficiency).mockResolvedValue(
+      opts.ipContext as any,
+    );
+    vi.mocked(libModule.getErrorMessage).mockImplementation(
+      (error: unknown, fallback?: string) =>
+        error instanceof Error ? error.message : (fallback ?? "Unknown error"),
+    );
+
+    const { default: worldgenRoutesReal } = await import("../worldgen.js");
+    const realApp = new Hono();
+    realApp.route("/api/worldgen", worldgenRoutesReal);
+
+    return {
+      realApp,
+      mockedSafeGenerateObject: vi.mocked(generateObjectModule.safeGenerateObject),
+      mockedKnownIpEnrichment:
+        knownIpModule &&
+        vi.mocked(knownIpModule.enrichKnownIpWorldgenNpcDraft),
+      mockedOriginalAssessment:
+        originalModule &&
+        vi.mocked(originalModule.assessOriginalCharacterPowerStats),
+    };
+  }
+
+  afterEach(() => {
+    vi.resetModules();
+    vi.doUnmock("../../worldgen/index.js");
+    vi.doUnmock("../../ai/generate-object-safe.js");
+    vi.doUnmock("../../character/known-ip-worldgen-research.js");
+    vi.doUnmock("../../character/ingestion/assess-original.js");
+  });
+
+  it("enriches power stats for both known-IP tiers through the real HTTP route when research.enabled=true", async () => {
+    const { realApp, mockedSafeGenerateObject, mockedKnownIpEnrichment } =
+      await setupRealRegenerateRoute({
+        ipContext: knownIpContext,
+        researchEnabled: true,
+        mockKnownIp: true,
+      });
+
+    mockedSafeGenerateObject
+      .mockResolvedValueOnce({
+        object: {
+          npcs: [
+            {
+              name: "Guard Captain Ryo",
+              role: "Village gate captain",
+              locationName: "Castle",
+              factionName: "Rebels",
+            },
+          ],
+        },
+      } as any)
+      .mockResolvedValueOnce({
+        object: {
+          npcs: [
+            {
+              name: "Quartermaster Mina",
+              role: "Supply runner",
+              locationName: "Castle",
+              factionName: null,
+            },
+          ],
+        },
+      } as any)
+      .mockResolvedValueOnce({
+        object: makeNpcDetail(
+          "A battle-tested captain who reads a crowd faster than a map.",
+        ),
+      } as any)
+      .mockResolvedValueOnce({
+        object: makeNpcDetail(
+          "A wiry quartermaster who can turn scarcity into routine.",
+        ),
+      } as any);
+
+    mockedKnownIpEnrichment?.mockImplementation(async ({ draft }: any) => ({
+      ...draft,
+      powerStats: makePowerStats(draft.identity.displayName),
+    }));
+
+    const res = await realApp.request("/api/worldgen/regenerate-section", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        section: "npcs",
+        refinedPremise: "A hidden village under siege.",
+        locationNames: ["Castle"],
+        factionNames: ["Rebels"],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.npcs).toHaveLength(2);
+    expect(body.npcs[0].tier).toBe("key");
+    expect(body.npcs[1].tier).toBe("supporting");
+    expect(body.npcs[0].draft?.powerStats).not.toBeNull();
+    expect(body.npcs[1].draft?.powerStats).not.toBeNull();
+    expect(body.npcs[0].draft.powerStats.vulnerabilities[0].description).toContain(
+      "Guard Captain Ryo",
+    );
+    expect(body.npcs[1].draft.powerStats.vulnerabilities[0].description).toContain(
+      "Quartermaster Mina",
+    );
+    expect(mockedKnownIpEnrichment).toHaveBeenCalledTimes(2);
+  });
+
+  it("enriches power stats for both original-world tiers through the real HTTP route", async () => {
+    const { realApp, mockedSafeGenerateObject, mockedOriginalAssessment } =
+      await setupRealRegenerateRoute({
+        ipContext: null,
+        researchEnabled: false,
+        mockOriginal: true,
+      });
+
+    mockedSafeGenerateObject
+      .mockResolvedValueOnce({
+        object: {
+          npcs: [
+            {
+              name: "Marshal Thorn",
+              role: "Frontline commander",
+              locationName: "Castle",
+              factionName: "Rebels",
+            },
+          ],
+        },
+      } as any)
+      .mockResolvedValueOnce({
+        object: {
+          npcs: [
+            {
+              name: "Lantern Vey",
+              role: "Signal courier",
+              locationName: "Castle",
+              factionName: null,
+            },
+          ],
+        },
+      } as any)
+      .mockResolvedValueOnce({
+        object: makeNpcDetail(
+          "A scarred commander who turns every retreat into a new line of defense.",
+        ),
+      } as any)
+      .mockResolvedValueOnce({
+        object: makeNpcDetail(
+          "A courier who remembers every alley and every lie told in it.",
+        ),
+      } as any);
+
+    mockedOriginalAssessment?.mockImplementation(async ({ draft }: any) => ({
+      ...draft,
+      powerStats: makePowerStats(draft.identity.displayName),
+    }));
+
+    const res = await realApp.request("/api/worldgen/regenerate-section", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        section: "npcs",
+        refinedPremise: "A besieged city-state where every watchfire matters.",
+        locationNames: ["Castle"],
+        factionNames: ["Rebels"],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.npcs).toHaveLength(2);
+    expect(body.npcs[0].tier).toBe("key");
+    expect(body.npcs[1].tier).toBe("supporting");
+    expect(body.npcs[0].draft?.powerStats).not.toBeNull();
+    expect(body.npcs[1].draft?.powerStats).not.toBeNull();
+    expect(body.npcs[0].draft.powerStats.vulnerabilities[0].description).toContain(
+      "Marshal Thorn",
+    );
+    expect(body.npcs[1].draft.powerStats.vulnerabilities[0].description).toContain(
+      "Lantern Vey",
+    );
+    expect(mockedOriginalAssessment).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails closed at the HTTP boundary when original-world power assessment exhausts", async () => {
+    const { realApp, mockedSafeGenerateObject, mockedOriginalAssessment } =
+      await setupRealRegenerateRoute({
+        ipContext: null,
+        researchEnabled: false,
+        mockOriginal: true,
+      });
+
+    mockedSafeGenerateObject
+      .mockResolvedValueOnce({
+        object: {
+          npcs: [
+            {
+              name: "Thornwatch Jalen",
+              role: "Wall sentry",
+              locationName: "Castle",
+              factionName: null,
+            },
+          ],
+        },
+      } as any)
+      .mockResolvedValueOnce({
+        object: { npcs: [] },
+      } as any)
+      .mockResolvedValueOnce({
+        object: makeNpcDetail(
+          "A sleepless sentry who treats silence like an incoming attack.",
+        ),
+      } as any);
+
+    mockedOriginalAssessment?.mockRejectedValue(
+      new IngestionPipelineError({
+        stage: "power_assess",
+        attempts: 3,
+        cause: new Error("assessment seam exploded"),
+        message:
+          'Ingestion stage "power_assess" failed after 3 attempts: assessment seam exploded',
+      }),
+    );
+
+    const res = await realApp.request("/api/worldgen/regenerate-section", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        section: "npcs",
+        refinedPremise: "A quiet wall before the signal horns start.",
+        locationNames: ["Castle"],
+        factionNames: [],
+      }),
+    });
+
+    expect(res.ok).toBe(false);
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toContain('Ingestion stage "power_assess" failed after 3 attempts');
+    expect(body).not.toHaveProperty("npcs");
   });
 });

@@ -1,0 +1,233 @@
+{
+  "campaignId": "b89467e4-4c6a-422d-82d9-8e948b356dae",
+  "npcs": 14,
+  "players": 1,
+  "missingCount": 15,
+  "rows": [
+    {
+      "id": "6d250cfb-e208-4868-a487-889b150e70ca",
+      "name": "Gojo Satoru",
+      "kind": "npc",
+      "personalitySummary": "",
+      "personality": {
+        "summary": "",
+        "voice": "",
+        "decisionStyle": "",
+        "worldview": "",
+        "internalContradictions": [],
+        "personalMythology": "",
+        "sampleLines": []
+      }
+    },
+    {
+      "id": "a2a48899-4453-4d27-8b68-4f21af7c33c8",
+      "name": "Itadori Yuji",
+      "kind": "npc",
+      "personalitySummary": "",
+      "personality": {
+        "summary": "",
+        "voice": "",
+        "decisionStyle": "",
+        "worldview": "",
+        "internalContradictions": [],
+        "personalMythology": "",
+        "sampleLines": []
+      }
+    },
+    {
+      "id": "bcbd80ef-506f-4578-90ca-4bcfcde7b7d3",
+      "name": "Megumi Fushiguro",
+      "kind": "npc",
+      "personalitySummary": "",
+      "personality": {
+        "summary": "",
+        "voice": "",
+        "decisionStyle": "",
+        "worldview": "",
+        "internalContradictions": [],
+        "personalMythology": "",
+        "sampleLines": []
+      }
+    },
+    {
+      "id": "3cc51f21-6e54-4cb5-aa35-a9acd5a4f461",
+      "name": "Nobara Kugisaki",
+      "kind": "npc",
+      "personalitySummary": "",
+      "personality": {
+        "summary": "",
+        "voice": "",
+        "decisionStyle": "",
+        "worldview": "",
+        "internalContradictions": [],
+        "personalMythology": "",
+        "sampleLines": []
+      }
+    },
+    {
+      "id": "c0571f70-c1d5-4018-b27a-89d76e07bf96",
+      "name": "Sukuna (Ryomen Sukuna)",
+      "kind": "npc",
+      "personalitySummary": "",
+      "personality": {
+        "summary": "",
+        "voice": "",
+        "decisionStyle": "",
+        "worldview": "",
+        "internalContradictions": [],
+        "personalMythology": "",
+        "sampleLines": []
+      }
+    },
+    {
+      "id": "cac8be2e-b1eb-445e-a293-ce529770cdcc",
+      "name": "Mahito",
+      "kind": "npc",
+      "personalitySummary": "",
+      "personality": {
+        "summary": "",
+        "voice": "",
+        "decisionStyle": "",
+        "worldview": "",
+        "internalContradictions": [],
+        "personalMythology": "",
+        "sampleLines": []
+      }
+    },
+    {
+      "id": "36bf1350-0d29-4032-bc8a-c57d552832fc",
+      "name": "Kinji Hakari",
+      "kind": "npc",
+      "personalitySummary": "",
+      "personality": {
+        "summary": "",
+        "voice": "",
+        "decisionStyle": "",
+        "worldview": "",
+        "internalContradictions": [],
+        "personalMythology": "",
+        "sampleLines": []
+      }
+    },
+    {
+      "id": "3c3c0b81-2759-4478-b769-5fe4faac0d32",
+      "name": "Tengen",
+      "kind": "npc",
+      "personalitySummary": "",
+      "personality": {
+        "summary": "",
+        "voice": "",
+        "decisionStyle": "",
+        "worldview": "",
+        "internalContradictions": [],
+        "personalMythology": "",
+        "sampleLines": []
+      }
+    },
+    {
+      "id": "d18040b9-ecd2-4bfc-a0c1-f57efcd3ab42",
+      "name": "Kakashi Hatake",
+      "kind": "npc",
+      "personalitySummary": "",
+      "personality": {
+        "summary": "",
+        "voice": "",
+        "decisionStyle": "",
+        "worldview": "",
+        "internalContradictions": [],
+        "personalMythology": "",
+        "sampleLines": []
+      }
+    },
+    {
+      "id": "a85a69c3-6a6a-447c-ab9f-ebc96e79359d",
+      "name": "Panda",
+      "kind": "npc",
+      "personalitySummary": "",
+      "personality": {
+        "summary": "",
+        "voice": "",
+        "decisionStyle": "",
+        "worldview": "",
+        "internalContradictions": [],
+        "personalMythology": "",
+        "sampleLines": []
+      }
+    },
+    {
+      "id": "2f90383b-f653-4797-a87c-814fb33e1ac9",
+      "name": "Yaga Masamichi",
+      "kind": "npc",
+      "personalitySummary": "",
+      "personality": {
+        "summary": "",
+        "voice": "",
+        "decisionStyle": "",
+        "worldview": "",
+        "internalContradictions": [],
+        "personalMythology": "",
+        "sampleLines": []
+      }
+    },
+    {
+      "id": "ba34e889-19c9-4862-ac9a-7fceec9ae27a",
+      "name": "Agari Kaisen",
+      "kind": "npc",
+      "personalitySummary": "",
+      "personality": {
+        "summary": "",
+        "voice": "",
+        "decisionStyle": "",
+        "worldview": "",
+        "internalContradictions": [],
+        "personalMythology": "",
+        "sampleLines": []
+      }
+    },
+    {
+      "id": "51e86c17-8f3f-4133-90b9-cb9950431d92",
+      "name": "Utahime Iori",
+      "kind": "npc",
+      "personalitySummary": "",
+      "personality": {
+        "summary": "",
+        "voice": "",
+        "decisionStyle": "",
+        "worldview": "",
+        "internalContradictions": [],
+        "personalMythology": "",
+        "sampleLines": []
+      }
+    },
+    {
+      "id": "1a9d49f8-7beb-470b-8d67-7429f6f1f915",
+      "name": "Ito Seiji",
+      "kind": "npc",
+      "personalitySummary": "",
+      "personality": {
+        "summary": "",
+        "voice": "",
+        "decisionStyle": "",
+        "worldview": "",
+        "internalContradictions": [],
+        "personalMythology": "",
+        "sampleLines": []
+      }
+    },
+    {
+      "id": "a10e0968-6d5c-44b5-bad4-e29e4145d3aa",
+      "name": "Mira Vale",
+      "kind": "player",
+      "personalitySummary": "",
+      "personality": {
+        "summary": "",
+        "voice": "",
+        "decisionStyle": "",
+        "worldview": "",
+        "internalContradictions": [],
+        "personalMythology": "",
+        "sampleLines": []
+      }
+    }
+  ]
+}

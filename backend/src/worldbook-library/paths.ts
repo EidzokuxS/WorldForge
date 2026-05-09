@@ -1,5 +1,5 @@
 import path from "node:path";
-import { CAMPAIGNS_DIR } from "../campaign/paths.js";
+import { getCampaignsDir } from "../campaign/paths.js";
 import { AppError } from "../lib/index.js";
 
 export const WORLDBOOK_LIBRARY_DIRNAME = "_worldbook-library";
@@ -11,7 +11,7 @@ export function assertSafeWorldbookLibraryId(id: string): void {
 }
 
 export function getWorldbookLibraryDir(): string {
-  return path.join(CAMPAIGNS_DIR, WORLDBOOK_LIBRARY_DIRNAME);
+  return path.join(getCampaignsDir(), WORLDBOOK_LIBRARY_DIRNAME);
 }
 
 export function getWorldbookLibraryIndexPath(): string {

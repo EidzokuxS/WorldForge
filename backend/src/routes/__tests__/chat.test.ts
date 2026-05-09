@@ -20,6 +20,13 @@ vi.mock("../../campaign/index.js", () => ({
   getLastPlayerAction: vi.fn(),
   createCheckpoint: vi.fn(),
   pruneAutoCheckpoints: vi.fn(),
+  // Phase 58-03: chat.ts reads currentTick from this at turn.begin.
+  readCampaignConfig: vi.fn(() => ({
+    name: "Test",
+    premise: "",
+    createdAt: 0,
+    currentTick: 0,
+  })),
 }));
 
 vi.mock("../../lib/index.js", () => ({
@@ -33,7 +40,49 @@ vi.mock("../../lib/index.js", () => ({
     error: vi.fn(),
     warn: vi.fn(),
     debug: vi.fn(),
+    event: vi.fn(),
   })),
+  // Phase 58-03: chat.ts wraps the streamSSE body in these to attach
+  // turnId/campaignId/tick to every downstream log record. Tests that
+  // stub the lib barrel must provide pass-through fakes.
+  runWithTurnContext: <T,>(_ctx: unknown, fn: () => T): T => fn(),
+  getTurnContext: vi.fn(() => undefined),
+  withRole: <T,>(_role: unknown, fn: () => T): T => fn(),
+}));
+
+vi.mock("../../lib/logger-setup.js", () => ({
+  rootPino: {
+    flush: vi.fn(),
+    child: () => ({
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    }),
+  },
+  shouldLogRole: vi.fn(() => true),
+  getObservabilityConfigSnapshot: vi.fn(() => ({
+    enabled: true,
+    dumpFullPrompts: false,
+    roles: {
+      judge: true,
+      storyteller: true,
+      oracle: true,
+      npcAgent: true,
+      reflection: true,
+      embedder: true,
+      tool: true,
+      prompt: true,
+    },
+  })),
+  getLogRoot: vi.fn(() => ""),
+}));
+
+vi.mock("../../lib/sse-hash.js", () => ({
+  sha256Prefix: vi.fn(() => "deadbeefcafef00d"),
+  isDeltaType: vi.fn(() => false),
+  getOrCreateAggregator: vi.fn(() => ({ record: vi.fn() })),
+  finalizeAggregators: vi.fn(() => []),
 }));
 
 vi.mock("../../settings/index.js", () => ({
@@ -53,6 +102,13 @@ vi.mock("../../engine/index.js", () => ({
   simulateOffscreenNpcs: vi.fn(),
   checkAndTriggerReflections: vi.fn(),
   tickFactions: vi.fn(),
+  queuePostTurnSimulationProposals: vi.fn(),
+  buildDoneBoundaryData: vi.fn((_campaignId: string, data: unknown) => ({
+    ...(data && typeof data === "object" && !Array.isArray(data) ? data as Record<string, unknown> : { value: data }),
+    worldVersion: 0,
+    worldTimeMinutes: 0,
+  })),
+  readWorldClock: vi.fn(() => ({ campaignId: CAMPAIGN_ID, worldVersion: 0, worldTimeMinutes: 0, currentTick: 0, updatedAt: 0 })),
   sanitizeNarrative: vi.fn((text: string) => text),
 }));
 
@@ -119,6 +175,8 @@ import {
   tickPresentNpcs,
   simulateOffscreenNpcs,
   tickFactions,
+  queuePostTurnSimulationProposals,
+  buildDoneBoundaryData,
 } from "../../engine/index.js";
 import { runGroundedLookup } from "../../engine/grounded-lookup.js";
 import chatRoutes from "../chat.js";
@@ -143,6 +201,8 @@ const mockedCheckAndTriggerReflections = vi.mocked(checkAndTriggerReflections);
 const mockedTickPresentNpcs = vi.mocked(tickPresentNpcs);
 const mockedSimulateOffscreenNpcs = vi.mocked(simulateOffscreenNpcs);
 const mockedTickFactions = vi.mocked(tickFactions);
+const mockedQueuePostTurnSimulationProposals = vi.mocked(queuePostTurnSimulationProposals);
+const mockedBuildDoneBoundaryData = vi.mocked(buildDoneBoundaryData);
 const mockedRunGroundedLookup = vi.mocked(runGroundedLookup);
 
 // ---------------------------------------------------------------------------
@@ -227,6 +287,17 @@ beforeEach(() => {
   mockedGetHistory.mockImplementation((campaignId) => {
     return [...(chatHistoryByCampaign.get(campaignId) ?? [])] as any;
   });
+  mockedQueuePostTurnSimulationProposals.mockReturnValue({
+    campaignId: CAMPAIGN_ID,
+    baseWorldVersion: 0,
+    worldTimeMinutes: 0,
+    queued: [],
+  } as any);
+  mockedBuildDoneBoundaryData.mockImplementation((_campaignId, data) => ({
+    ...(data && typeof data === "object" && !Array.isArray(data) ? data as Record<string, unknown> : { value: data }),
+    worldVersion: 0,
+    worldTimeMinutes: 0,
+  }));
 });
 
 // ---------------------------------------------------------------------------
@@ -458,6 +529,98 @@ describe("Targeted gameplay route campaignId validation", () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toBe("campaignId is required.");
+  });
+});
+
+describe("turn lock cleanup on provider resolution errors", () => {
+  const provider = {
+    id: "p1",
+    name: "P1",
+    baseUrl: "http://localhost:1234",
+    apiKey: "",
+    defaultModel: "m",
+    isBuiltin: false,
+  };
+
+  function mockSettings(overrides: {
+    judgeProviderId?: string;
+    storytellerProviderId?: string;
+  } = {}) {
+    mockedLoadSettings.mockReturnValue({
+      judge: {
+        providerId: overrides.judgeProviderId ?? "p1",
+        model: "judge-model",
+        temperature: 0.1,
+        maxTokens: 1024,
+      },
+      storyteller: {
+        providerId: overrides.storytellerProviderId ?? "p1",
+        model: "st-model",
+        temperature: 0.7,
+        maxTokens: 2048,
+      },
+      embedder: { providerId: "", model: "", temperature: 0.1, maxTokens: 256 },
+      providers: [provider],
+      ui: { showRawReasoning: false },
+    } as any);
+    mockedResolveRole.mockReturnValue({
+      provider: { baseUrl: provider.baseUrl, apiKey: provider.apiKey, model: "model" },
+      temperature: 0.1,
+      maxTokens: 1024,
+    } as any);
+  }
+
+  it("releases /chat/opening lock when storyteller resolution fails", async () => {
+    mockSettings({ storytellerProviderId: "" });
+
+    const res = await app.request("/chat/opening", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(runtimeActiveTurns.has(CAMPAIGN_ID)).toBe(false);
+    expect(mockedProcessOpeningScene).not.toHaveBeenCalled();
+  });
+
+  it("releases /chat/action lock when judge resolution fails", async () => {
+    mockSettings({ judgeProviderId: "" });
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Press for an answer",
+        intent: "Press for an answer",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(runtimeActiveTurns.has(CAMPAIGN_ID)).toBe(false);
+    expect(mockedProcessTurn).not.toHaveBeenCalled();
+  });
+
+  it("releases /chat/retry lock when storyteller resolution fails after judge resolves", async () => {
+    mockSettings({ storytellerProviderId: "" });
+    runtimeSnapshots.set(CAMPAIGN_ID, {
+      campaignId: CAMPAIGN_ID,
+      bundleDir: "previous-turn-boundary",
+      capturedAt: 1,
+    });
+    mockedGetLastPlayerAction.mockReturnValue("Retry the last move");
+
+    const res = await app.request("/chat/retry", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(runtimeActiveTurns.has(CAMPAIGN_ID)).toBe(false);
+    expect(mockedProcessTurn).not.toHaveBeenCalled();
   });
 });
 
@@ -833,7 +996,7 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(body.hasLiveTurnSnapshot).toBe(true);
   });
 
-  it("triggers reflection during post-turn finalization", async () => {
+  it("records post-turn world simulation as proposals before done without direct detached mutations", async () => {
     setupStoryteller();
     setupDbMock();
     const orderedCalls: string[] = [];
@@ -852,34 +1015,28 @@ describe("Campaign-loaded gameplay transport", () => {
       createdRelationshipIds: [],
       createdChronicleIds: [],
     }) as any);
-    mockedTickPresentNpcs.mockImplementation(async () => {
-      orderedCalls.push("tickPresentNpcs");
-      return [];
+    mockedQueuePostTurnSimulationProposals.mockImplementation(() => {
+      orderedCalls.push("queuePostTurnSimulationProposals");
+      return {
+        campaignId: CAMPAIGN_ID,
+        baseWorldVersion: 7,
+        worldTimeMinutes: 11,
+        queued: [
+          {
+            proposalId: "proposal-1",
+            campaignId: CAMPAIGN_ID,
+            proposalType: "npc_reflection_updates",
+            baseWorldVersion: 7,
+            writeScopes: ["npc:memory"],
+            status: "pending",
+          },
+        ],
+      } as any;
     });
-    mockedSimulateOffscreenNpcs.mockImplementation(async () => {
-      orderedCalls.push("simulateOffscreenNpcs");
-      return [];
-    });
-    mockedCheckAndTriggerReflections.mockImplementation(async () => {
-      orderedCalls.push("checkAndTriggerReflections");
-      return [];
-    });
-    mockedTickFactions.mockImplementation(async () => {
-      orderedCalls.push("tickFactions");
-      return [];
-    });
-    mockedProcessTurn.mockImplementation(({ onBeforeVisibleNarration, onPostTurn }) =>
+    mockedProcessTurn.mockImplementation(({ onPostTurn }) =>
       (async function* () {
         yield { type: "oracle_result", data: { outcome: "strong_hit" } } as any;
         yield { type: "scene-settling", data: { phase: "local-present-scene" } } as any;
-        await onBeforeVisibleNarration?.({
-          currentTick: 1,
-          predictedTick: 2,
-          currentLocationId: "loc-001",
-          oracleResult: { outcome: "strong_hit" },
-          toolCalls: [],
-          openingScene: false,
-        } as any);
         orderedCalls.push("finalizing_turn");
         yield { type: "finalizing_turn", data: { stage: "rollback_critical" } } as any;
         await onPostTurn?.({
@@ -907,17 +1064,28 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(body).toContain("event: finalizing_turn");
     expect(body).toContain("event: done");
     expect(body.indexOf("event: finalizing_turn")).toBeLessThan(body.indexOf("event: done"));
+    expect(orderedCalls.indexOf("done")).toBeGreaterThan(orderedCalls.indexOf("finalizing_turn"));
+    await new Promise((resolve) => setTimeout(resolve, 10));
     expect(orderedCalls).toEqual([
-      "tickPresentNpcs",
       "finalizing_turn",
-      "simulateOffscreenNpcs",
-      "checkAndTriggerReflections",
-      "tickFactions",
+      "queuePostTurnSimulationProposals",
       "done",
     ]);
+    expect(mockedQueuePostTurnSimulationProposals).toHaveBeenCalledWith(
+      expect.objectContaining({
+        campaignId: CAMPAIGN_ID,
+        tick: 2,
+        playerLocationId: "loc-001",
+        playerSceneScopeId: "loc-001",
+      }),
+    );
+    expect(mockedSimulateOffscreenNpcs).not.toHaveBeenCalled();
+    expect(mockedCheckAndTriggerReflections).not.toHaveBeenCalled();
+    expect(mockedTickFactions).not.toHaveBeenCalled();
+    expect(mockedTickPresentNpcs).not.toHaveBeenCalled();
   });
 
-  it("uses local scene scope instead of broad currentLocationId for pre-visible scene scope settlement", async () => {
+  it("does not inject a pre-visible scene scope settlement callback into action turns", async () => {
     setupStoryteller();
     setupDbMock();
 
@@ -935,25 +1103,16 @@ describe("Campaign-loaded gameplay transport", () => {
       createdRelationshipIds: [],
       createdChronicleIds: [],
     }) as any);
-    mockedProcessTurn.mockImplementation(({ onBeforeVisibleNarration, onPostTurn }) =>
+    let processTurnOptions: Parameters<typeof processTurn>[0] | null = null;
+    mockedProcessTurn.mockImplementation((options) => {
+      processTurnOptions = options;
+      return (
       (async function* () {
         yield { type: "scene-settling", data: { phase: "local-present-scene" } } as any;
-        await onBeforeVisibleNarration?.({
-          currentTick: 1,
-          predictedTick: 2,
-          currentLocationId: "shibuya-district",
-          currentSceneScopeId: "platform-7",
-          oracleResult: { outcome: "strong_hit" },
-          toolCalls: [],
-          openingScene: false,
-        } as any);
-        await onPostTurn?.({
-          tick: 2,
-          toolCalls: [],
-        } as any);
         yield { type: "done", data: { tick: 2 } } as any;
-      })(),
-    );
+      })()
+      );
+    });
 
     const res = await app.request("/chat/action", {
       method: "POST",
@@ -968,14 +1127,14 @@ describe("Campaign-loaded gameplay transport", () => {
 
     expect(res.status).toBe(200);
     await res.text();
-    expect(mockedTickPresentNpcs).toHaveBeenCalledWith(
-      CAMPAIGN_ID,
-      2,
-      expect.any(Object),
-      "shibuya-district",
-      "platform-7",
-      undefined,
+    expect(processTurnOptions).toEqual(
+      expect.objectContaining({
+        onPostTurn: expect.any(Function),
+      }),
     );
+    expect(processTurnOptions).not.toHaveProperty("onBeforeVisibleNarration");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(mockedTickPresentNpcs).not.toHaveBeenCalled();
   });
 
   it("drains queued committed events for non-log_event writers after reflection finalization", async () => {
@@ -1010,21 +1169,14 @@ describe("Campaign-loaded gameplay transport", () => {
       createdRelationshipIds: [],
       createdChronicleIds: [],
     }) as any);
-    mockedTickPresentNpcs.mockImplementation(async () => {
-      orderedCalls.push("tickPresentNpcs");
-      return [];
-    });
-    mockedSimulateOffscreenNpcs.mockImplementation(async () => {
-      orderedCalls.push("simulateOffscreenNpcs");
-      return [];
-    });
-    mockedCheckAndTriggerReflections.mockImplementation(async () => {
-      orderedCalls.push("checkAndTriggerReflections");
-      return [];
-    });
-    mockedTickFactions.mockImplementation(async () => {
-      orderedCalls.push("tickFactions");
-      return [];
+    mockedQueuePostTurnSimulationProposals.mockImplementation(() => {
+      orderedCalls.push("queuePostTurnSimulationProposals");
+      return {
+        campaignId: CAMPAIGN_ID,
+        baseWorldVersion: 0,
+        worldTimeMinutes: 0,
+        queued: [],
+      } as any;
     });
     mockDrainPendingCommittedEvents.mockReturnValue([
       {
@@ -1046,17 +1198,9 @@ describe("Campaign-loaded gameplay transport", () => {
         type: "npc_offscreen",
       },
     ]);
-    mockedProcessTurn.mockImplementation(({ onBeforeVisibleNarration, onPostTurn }) =>
+    mockedProcessTurn.mockImplementation(({ onPostTurn }) =>
       (async function* () {
         yield { type: "scene-settling", data: { phase: "local-present-scene" } } as any;
-        await onBeforeVisibleNarration?.({
-          currentTick: 1,
-          predictedTick: 2,
-          currentLocationId: "loc-001",
-          oracleResult: { outcome: "strong_hit" },
-          toolCalls: [],
-          openingScene: false,
-        } as any);
         yield { type: "finalizing_turn", data: { stage: "rollback_critical" } } as any;
         await onPostTurn?.({
           tick: 2,
@@ -1079,14 +1223,13 @@ describe("Campaign-loaded gameplay transport", () => {
 
     expect(res.status).toBe(200);
     await res.text();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
-    expect(orderedCalls).toEqual([
-      "tickPresentNpcs",
-      "simulateOffscreenNpcs",
-      "checkAndTriggerReflections",
-      "tickFactions",
-    ]);
+    expect(orderedCalls).toEqual(["queuePostTurnSimulationProposals"]);
+    expect(mockedSimulateOffscreenNpcs).not.toHaveBeenCalled();
+    expect(mockedCheckAndTriggerReflections).not.toHaveBeenCalled();
+    expect(mockedTickFactions).not.toHaveBeenCalled();
+    expect(mockedTickPresentNpcs).not.toHaveBeenCalled();
     expect(mockDrainPendingCommittedEvents).toHaveBeenCalledWith(CAMPAIGN_ID, 2);
     expect(mockEmbedAndUpdateEvent).toHaveBeenCalledTimes(2);
     expect(mockEmbedAndUpdateEvent).toHaveBeenNthCalledWith(

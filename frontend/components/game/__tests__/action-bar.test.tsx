@@ -96,7 +96,7 @@ describe("ActionBar", () => {
     render(<ActionBar {...defaultProps} value="attack" turnPhase="finalizing" />);
 
     expect(
-      screen.getByText("The world is still settling. You can act again when the turn is fully resolved.")
+      screen.getByText("The GM is applying world changes. You can act again when the turn is fully resolved.")
     ).toBeInTheDocument();
   });
 });

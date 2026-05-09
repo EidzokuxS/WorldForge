@@ -1,6 +1,9 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { npcs } from "../db/schema.js";
+import { createLogger } from "../lib/index.js";
+
+const log = createLogger("reflection-budget");
 
 function normalizeParticipantName(name: string): string | null {
   const normalized = name.trim().toLowerCase();
@@ -48,5 +51,11 @@ export async function accumulateReflectionBudget(
       .set({ unprocessedImportance: npc.unprocessedImportance + importance })
       .where(eq(npcs.id, npc.id))
       .run();
+    log.event("db.write", {
+      table: "npcs",
+      op: "update",
+      rowId: npc.id,
+      rowName: npc.name,
+    });
   }
 }

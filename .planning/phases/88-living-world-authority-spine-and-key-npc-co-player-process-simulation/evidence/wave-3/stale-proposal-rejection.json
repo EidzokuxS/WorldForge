@@ -1,0 +1,61 @@
+{
+  "phase": 88,
+  "wave": 3,
+  "artifact": "stale-proposal-rejection",
+  "date": "2026-05-07",
+  "sourceTests": [
+    "backend/src/engine/__tests__/simulation-queue.test.ts",
+    "backend/src/engine/__tests__/turn-boundary-authority.test.ts"
+  ],
+  "cases": [
+    {
+      "name": "valid proposal commits",
+      "baseWorldVersion": 0,
+      "currentWorldVersionAtCommit": 0,
+      "result": {
+        "status": "committed",
+        "committedWorldVersion": 1
+      }
+    },
+    {
+      "name": "stale proposal rejects after world advances",
+      "baseWorldVersion": 1,
+      "currentWorldVersionAtCommit": 2,
+      "result": {
+        "status": "rejected",
+        "reason": "stale_base_world_version"
+      }
+    },
+    {
+      "name": "conflicting write scope rejects",
+      "baseWorldVersion": 2,
+      "blockedWriteScopes": ["npc:state"],
+      "proposalWriteScopes": ["npc:state"],
+      "result": {
+        "status": "rejected",
+        "reason": "conflicting_write_scope"
+      }
+    },
+    {
+      "name": "expired proposal rejects",
+      "baseWorldVersion": 2,
+      "worldTimeMinutes": 10,
+      "expiresAtWorldTimeMinutes": 5,
+      "result": {
+        "status": "rejected",
+        "reason": "expired"
+      }
+    },
+    {
+      "name": "proposal created before done cannot commit after a later tool commit",
+      "doneBoundaryWorldVersion": 0,
+      "currentWorldVersionAtCommit": 1,
+      "result": {
+        "status": "rejected",
+        "reason": "stale_base_world_version",
+        "persistedRejectionReason": "stale_base_world_version"
+      }
+    }
+  ],
+  "invariant": "A proposal created from an older world version cannot mutate the current world silently. It must commit through version validation, reject, or be explicitly rebased by a later wave."
+}

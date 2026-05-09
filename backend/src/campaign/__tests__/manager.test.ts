@@ -5,7 +5,7 @@ import fs from "node:fs";
 
 vi.mock("../paths.js", () => ({
   assertSafeId: vi.fn(),
-  CAMPAIGNS_DIR: "/campaigns",
+  getCampaignsDir: () => "/campaigns",
   getCampaignDir: vi.fn((id: string) => `/campaigns/${id}`),
   getCampaignConfigPath: vi.fn((id: string) => `/campaigns/${id}/config.json`),
 }));
@@ -85,10 +85,13 @@ import {
   loadPremiseDivergence,
   saveWorldgenResearchFrame,
   loadWorldgenResearchFrame,
+  saveWorldgenResearchArtifact,
+  loadWorldgenResearchArtifact,
 } from "../manager.js";
 import { closeDb } from "../../db/index.js";
 import { openVectorDb, closeVectorDb } from "../../vectors/index.js";
 import { AppError } from "../../lib/index.js";
+import { jjkWithNarutoPowerSystemArtifact } from "../../worldgen/__tests__/fixtures/jjk-naruto-artifact.js";
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -322,6 +325,25 @@ describe("createCampaign", () => {
     expect(configData.ipContext).toEqual(ipContext);
     expect(configData.premiseDivergence).toEqual(premiseDivergence);
     expect(configData.worldbookSelection).toEqual(worldbookSelection);
+  });
+
+  it("persists worldgen source hint and research flag in config.json", async () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "mkdirSync").mockImplementation(() => "");
+    const writeSpy = vi.spyOn(fs, "writeFileSync").mockImplementation(() => {});
+
+    await createCampaign("My Game", "JJK world with Naruto chakra", undefined, {
+      worldgenSourceHint: " Jujutsu Kaisen / Naruto ",
+      worldgenResearchEnabled: false,
+    });
+
+    const configCall = writeSpy.mock.calls.find(
+      (c) => typeof c[0] === "string" && c[0].includes("config.json"),
+    );
+    expect(configCall).toBeDefined();
+    const configData = JSON.parse(configCall![1] as string);
+    expect(configData.worldgenSourceHint).toBe("Jujutsu Kaisen / Naruto");
+    expect(configData.worldgenResearchEnabled).toBe(false);
   });
 
   it("connects DB, runs migrations, and inserts campaign row", async () => {
@@ -818,6 +840,136 @@ describe("worldgenResearchFrame persistence", () => {
     );
 
     expect(loadWorldgenResearchFrame("test-id")).toEqual(worldgenResearchFrame);
+  });
+});
+
+describe("worldgenResearchArtifact persistence", () => {
+  const legacyIpContext = {
+    franchise: "Jujutsu Kaisen",
+    keyFacts: ["Tokyo Jujutsu High coordinates sorcerer missions."],
+    tonalNotes: ["Urban occult action"],
+    canonicalNames: {
+      locations: ["Tokyo Jujutsu High"],
+      factions: ["Jujutsu Headquarters"],
+      characters: ["Yuji Itadori"],
+    },
+    source: "mcp" as const,
+  };
+
+  const premiseDivergence = {
+    mode: "diverged" as const,
+    protagonistRole: {
+      kind: "custom" as const,
+      interpretation: "coexisting" as const,
+      canonicalCharacterName: null,
+      roleSummary: "A custom sorcerer enters a mixed power-system premise.",
+    },
+    preservedCanonFacts: ["Tokyo Jujutsu High remains the world basis."],
+    changedCanonFacts: ["Naruto chakra mechanics are imported as a power overlay."],
+    currentStateDirectives: ["Do not import Naruto geography as world structure."],
+    ambiguityNotes: [],
+  };
+
+  const worldgenResearchFrame = {
+    version: 1 as const,
+    franchise: "Jujutsu Kaisen",
+    premise: "A JJK world with a Naruto power overlay.",
+    divergenceMode: "diverged" as const,
+    overlayNotes: ["Naruto-style chakra techniques coexist with cursed energy use."],
+    dnaConstraints: ["Geography: Tokyo occult school network"],
+    stepFocus: {
+      locations: ["Geography: Tokyo occult school network"],
+      factions: ["Political Structure: Jujutsu Headquarters"],
+      npcs: ["Central Conflict: sorcerers versus curse users under chakra pressure"],
+    },
+  };
+
+  it("readCampaignConfig returns a valid v2 worldgenResearchArtifact when present", () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "readFileSync").mockReturnValue(
+      JSON.stringify({
+        name: "Test",
+        premise: "Jujutsu Kaisen world with Naruto power system",
+        createdAt: 1000,
+        worldgenResearchArtifact: jjkWithNarutoPowerSystemArtifact,
+      }),
+    );
+
+    expect(readCampaignConfig("test-id")).toMatchObject({
+      name: "Test",
+      premise: "Jujutsu Kaisen world with Naruto power system",
+      worldgenResearchArtifact: jjkWithNarutoPowerSystemArtifact,
+    });
+  });
+
+  it("saveWorldgenResearchArtifact writes the artifact beside legacy config fields", () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "readFileSync").mockReturnValue(
+      JSON.stringify({
+        name: "Test",
+        premise: "P",
+        createdAt: 1000,
+        ipContext: legacyIpContext,
+        premiseDivergence,
+        worldgenResearchFrame,
+      }),
+    );
+    const writeSpy = vi.spyOn(fs, "writeFileSync").mockImplementation(() => {});
+
+    saveWorldgenResearchArtifact("test-id", jjkWithNarutoPowerSystemArtifact);
+
+    const configCall = writeSpy.mock.calls.find(
+      (c) => typeof c[0] === "string" && c[0].includes("config.json"),
+    );
+    expect(configCall).toBeDefined();
+    const data = JSON.parse(configCall![1] as string);
+    expect(data.worldgenResearchArtifact).toEqual(jjkWithNarutoPowerSystemArtifact);
+    expect(data.ipContext).toEqual(legacyIpContext);
+    expect(data.premiseDivergence).toEqual(premiseDivergence);
+    expect(data.worldgenResearchFrame).toEqual(worldgenResearchFrame);
+  });
+
+  it("loadWorldgenResearchArtifact returns null when only legacy fields exist", () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "readFileSync").mockReturnValue(
+      JSON.stringify({
+        name: "Test",
+        premise: "P",
+        createdAt: 1000,
+        ipContext: legacyIpContext,
+        premiseDivergence,
+        worldgenResearchFrame,
+      }),
+    );
+
+    expect(loadWorldgenResearchArtifact("test-id")).toBeNull();
+  });
+
+  it("reading a legacy config does not write to disk or mutate file contents", () => {
+    const legacyConfig = JSON.stringify({
+      name: "Test",
+      premise: "P",
+      createdAt: 1000,
+      ipContext: legacyIpContext,
+      premiseDivergence,
+      worldgenResearchFrame,
+    });
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "readFileSync").mockReturnValue(legacyConfig);
+    const writeSpy = vi.spyOn(fs, "writeFileSync").mockImplementation(() => {});
+
+    const config = readCampaignConfig("test-id");
+
+    expect(config.worldgenResearchArtifact).toBeUndefined();
+    expect(writeSpy).not.toHaveBeenCalled();
+    expect(JSON.parse(legacyConfig)).toEqual({
+      name: "Test",
+      premise: "P",
+      createdAt: 1000,
+      ipContext: legacyIpContext,
+      premiseDivergence,
+      worldgenResearchFrame,
+    });
   });
 });
 

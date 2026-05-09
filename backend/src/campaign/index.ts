@@ -11,6 +11,8 @@ export {
   loadPremiseDivergence,
   saveWorldgenResearchFrame,
   loadWorldgenResearchFrame,
+  saveWorldgenResearchArtifact,
+  loadWorldgenResearchArtifact,
   getActiveCampaign,
   advanceCampaignTick,
   incrementTick,
@@ -31,7 +33,7 @@ export {
 
 export {
   assertSafeId,
-  CAMPAIGNS_DIR,
+  getCampaignsDir,
   getCampaignDir,
   getCampaignConfigPath,
   getChatHistoryPath,

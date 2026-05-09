@@ -1,0 +1,83 @@
+{
+  "phase": 88,
+  "wave": "88-01",
+  "artifact": "world-version-sequence",
+  "verified_by": [
+    "backend/src/engine/__tests__/living-world-authority.test.ts",
+    "backend/src/engine/__tests__/tool-executor-authority.test.ts"
+  ],
+  "sequence": [
+    {
+      "step": 1,
+      "operation": "ensureWorldClock",
+      "input": {
+        "campaignId": "authority-test-campaign",
+        "currentTick": 7
+      },
+      "expectedClock": {
+        "worldVersion": 0,
+        "worldTimeMinutes": 7,
+        "currentTick": 7
+      }
+    },
+    {
+      "step": 2,
+      "operation": "commitAuthorityTrace",
+      "baseWorldVersion": 0,
+      "sourceEntity": {
+        "type": "player",
+        "id": "player-1"
+      },
+      "elapsedWorldTimeMinutes": 3,
+      "stateDeltaRefs": [
+        "event-1"
+      ],
+      "expectedAuthority": {
+        "baseWorldVersion": 0,
+        "resultWorldVersion": 1,
+        "worldTimeMinutes": 10,
+        "elapsedWorldTimeMinutes": 3
+      }
+    },
+    {
+      "step": 3,
+      "operation": "validateBaseWorldVersion",
+      "baseWorldVersion": 0,
+      "expectedResult": "WorldVersionConflictError before mutation"
+    },
+    {
+      "step": 4,
+      "operation": "executeToolCall:add_chronicle_entry",
+      "baseWorldVersion": 0,
+      "expectedAuthority": {
+        "baseWorldVersion": 0,
+        "resultWorldVersion": 1,
+        "worldTimeMinutes": 4,
+        "stateDeltaRefs": [
+          "chronicle:<generated>"
+        ]
+      },
+      "expectedContextUpdate": {
+        "authority.baseWorldVersion": 1
+      }
+    },
+    {
+      "step": 5,
+      "operation": "executeToolCall:add_chronicle_entry",
+      "baseWorldVersion": 0,
+      "expectedResult": {
+        "success": false,
+        "status": "failure",
+        "failureReason": "Stale world version",
+        "chronicleRowsAfterFailure": 1,
+        "authorityTraceRowsAfterFailure": 1
+      }
+    }
+  ],
+  "invariants": [
+    "Every state-bearing authoritative commit advances the campaign worldVersion by exactly one.",
+    "worldTimeMinutes is the scheduling authority and currentTick follows it for compatibility.",
+    "A stale baseWorldVersion is rejected before the tool handler can mutate campaign state.",
+    "Sequential tool execution updates the in-memory authority base after each successful mutation."
+  ]
+}

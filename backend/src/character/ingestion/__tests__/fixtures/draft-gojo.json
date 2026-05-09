@@ -1,0 +1,9 @@
+{
+  "identity": { "displayName": "Gojo Satoru", "race": "Human", "gender": "male", "age": "28", "appearance": "White hair, blue eyes" },
+  "profile": { "backgroundSummary": "Strongest modern sorcerer.", "personaSummary": "Cocky teacher at Jujutsu High." },
+  "motivations": { "drives": ["protect students"], "frictions": ["political pressure"], "shortTermGoals": ["train Yuji"], "longTermGoals": ["reform jujutsu society"] },
+  "capabilities": { "traits": ["Limitless User", "Six Eyes"], "skills": [{ "tier": "Master", "name": "Spatial Manipulation" }] },
+  "loadout": { "equippedItems": [], "locationName": "Jujutsu High" },
+  "hp": 5,
+  "provenance": { "sourceKind": "v2-card", "canonicalStatus": "known_ip_canonical" }
+}

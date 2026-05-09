@@ -3,6 +3,10 @@ import path from "node:path";
 import { getCampaignDir } from "../campaign/paths.js";
 import { captureCampaignBundle, restoreCampaignBundle } from "../campaign/restore-bundle.js";
 import { createLogger } from "../lib/index.js";
+import {
+  invalidateAuthorityAfterRestore,
+  readWorldClock,
+} from "./living-world-authority.js";
 
 const log = createLogger("state-snapshot");
 
@@ -37,6 +41,13 @@ export async function restoreSnapshot(
 ): Promise<void> {
   await restoreCampaignBundle(campaignId, snapshot.bundleDir, {
     includeVectors: false,
+  });
+  const restoredClock = readWorldClock(campaignId);
+  invalidateAuthorityAfterRestore({
+    campaignId,
+    restoredWorldVersion: restoredClock.worldVersion,
+    restoredWorldTimeMinutes: restoredClock.worldTimeMinutes,
+    reason: "turn snapshot restored",
   });
   log.info(
     `Snapshot restored for campaign ${campaignId} from ${snapshot.bundleDir}`,

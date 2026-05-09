@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
+  ObservabilityConfig,
   Provider,
   RoleConfig,
   ResearchConfig,
@@ -14,6 +15,11 @@ import {
   createDefaultSettings,
 } from "@worldforge/shared";
 import { isRecord } from "../lib/index.js";
+// DIRECT import — bypasses the lib/index.js barrel to prevent a cycle
+// (barrel imports logger.ts, logger.ts imports logger-setup.ts, and manager.ts
+// would otherwise complete the loop via barrel → logger-setup → barrel).
+import { configureObservability } from "../lib/logger-setup.js";
+import { observabilityConfigSchema } from "../routes/schemas.js";
 
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -160,6 +166,33 @@ function normalizeUiConfig(
   };
 }
 
+/**
+ * Phase 58 — observability normalizer.
+ *
+ * MISSING is OK (pre-upgrade settings file) — fill with defaults.
+ * PRESENT but malformed is an ERROR — throw with Zod issue list per CLAUDE.md
+ * "NO SILENT DEGRADATION". Callers can either fix the offending field or
+ * remove the observability block to accept defaults.
+ */
+function normalizeObservabilityConfig(
+  value: unknown,
+  defaults: ObservabilityConfig,
+): ObservabilityConfig {
+  if (value === undefined || value === null) return defaults;
+
+  const parsed = observabilityConfigSchema.safeParse(value);
+  if (!parsed.success) {
+    const issues = parsed.error.issues
+      .map((i) => `${i.path.join(".")}: ${i.message}`)
+      .join("; ");
+    throw new Error(
+      `[settings] observability block in settings.json is malformed: ${issues}. ` +
+        `Fix or remove the observability section to accept defaults.`,
+    );
+  }
+  return parsed.data;
+}
+
 export function rebindProviderReferences(settings: Settings): Settings {
   const providers = mergeBuiltinProviders(settings.providers);
   const defaults = createDefaultSettings();
@@ -183,6 +216,10 @@ export function rebindProviderReferences(settings: Settings): Settings {
       stylePrompt: settings.images.stylePrompt || defaults.images.stylePrompt,
     },
     ui: normalizeUiConfig(settings.ui, defaults.ui),
+    observability: normalizeObservabilityConfig(
+      settings.observability,
+      defaults.observability,
+    ),
   };
 }
 
@@ -223,7 +260,19 @@ export function normalizeSettings(value: unknown): Settings {
     },
     research: normalizeResearchConfig(value.research, defaults.research),
     ui: normalizeUiConfig(value.ui, defaults.ui),
+    observability: normalizeObservabilityConfig(
+      value.observability,
+      defaults.observability,
+    ),
   };
+}
+
+function applyObservabilityRuntime(settings: Settings): void {
+  configureObservability({
+    enabled: settings.observability.enabled,
+    dumpFullPrompts: settings.observability.dumpFullPrompts,
+    roles: settings.observability.roles,
+  });
 }
 
 function readSettingsText(): string | null {
@@ -267,6 +316,7 @@ export function loadSettings(): Settings {
   if (!fs.existsSync(SETTINGS_PATH)) {
     const defaults = createDefaultSettings();
     writeSettingsFile(defaults);
+    applyObservabilityRuntime(defaults);
     return defaults;
   }
 
@@ -290,11 +340,13 @@ export function loadSettings(): Settings {
   if (normalizedText !== rawText) {
     writeSettingsFile(normalized, { backupCurrent: true });
   }
+  applyObservabilityRuntime(normalized);
   return normalized;
 }
 
 export function saveSettings(value: unknown): Settings {
   const normalized = rebindProviderReferences(normalizeSettings(value));
   writeSettingsFile(normalized, { backupCurrent: true });
+  applyObservabilityRuntime(normalized);
   return normalized;
 }

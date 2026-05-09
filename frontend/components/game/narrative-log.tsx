@@ -14,7 +14,6 @@ import { SpecialMessageBlock } from "./special-message-block";
 
 interface NarrativeLogProps {
   messages: Array<ChatMessage & { debugReasoning?: string | null }>;
-  premise: string;
   isStreaming: boolean;
   turnPhase?: "idle" | "streaming" | "finalizing";
   sceneProgress?: "opening" | "scene-settling" | null;
@@ -27,7 +26,6 @@ interface NarrativeLogProps {
 
 export function NarrativeLog({
   messages,
-  premise: _premise,
   isStreaming,
   turnPhase = isStreaming ? "streaming" : "idle",
   sceneProgress = null,
@@ -92,7 +90,7 @@ export function NarrativeLog({
     sceneProgress === "opening" &&
       "The opening scene is taking shape. The runtime is grounding your first moment before narration appears.",
     sceneProgress === "scene-settling" &&
-      "The scene is still settling into place before the narration begins.",
+      "The GM is applying world changes before the narration begins.",
     turnPhase === "finalizing" &&
       "The world is still resolving. Retry and undo unlock when the turn is complete.",
   ].filter((message): message is string => Boolean(message));

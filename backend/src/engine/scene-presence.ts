@@ -43,6 +43,7 @@ export interface ResolveScenePresenceOptions {
   sceneScopeId?: string | null;
   actors: PresenceActorInput[];
   priorKnowledge?: PriorKnowledgeInput[];
+  allowBroadLocationFallback?: boolean;
 }
 
 export function normalizePresenceKey(value: string): string {
@@ -133,6 +134,18 @@ export function resolveStoredSceneScopeId(
   return currentSceneLocationId ?? broadLocationId ?? null;
 }
 
+function resolvePresenceSceneScopeId(input: {
+  broadLocationId: string | null | undefined;
+  sceneScopeId: string | null | undefined;
+  allowBroadLocationFallback: boolean;
+}): string | null {
+  if (input.allowBroadLocationFallback) {
+    return resolveStoredSceneScopeId(input.broadLocationId, input.sceneScopeId);
+  }
+
+  return input.sceneScopeId ?? null;
+}
+
 function resolveAwareness(
   observerActorId: string,
   subject: PresenceActorInput,
@@ -184,16 +197,27 @@ export function getObserverKnowledgeBasis(
 export function resolveScenePresence(
   options: ResolveScenePresenceOptions,
 ): PresenceSnapshot {
-  const sceneScopeId = resolveStoredSceneScopeId(
-    options.broadLocationId,
-    options.sceneScopeId,
-  );
+  const allowBroadLocationFallback = options.allowBroadLocationFallback ?? false;
+  const sceneScopeId = resolvePresenceSceneScopeId({
+    broadLocationId: options.broadLocationId,
+    sceneScopeId: options.sceneScopeId,
+    allowBroadLocationFallback,
+  });
 
   const presentActors = options.actors.filter((actor) => {
-    const actorSceneScopeId = resolveStoredSceneScopeId(
-      actor.broadLocationId,
-      actor.sceneScopeId,
-    );
+    const actorSceneScopeId = resolvePresenceSceneScopeId({
+      broadLocationId: actor.broadLocationId,
+      sceneScopeId: actor.sceneScopeId,
+      allowBroadLocationFallback,
+    });
+
+    if (actor.actorId === options.playerActorId) {
+      return actor.broadLocationId === options.broadLocationId;
+    }
+
+    if (!sceneScopeId || !actorSceneScopeId) {
+      return false;
+    }
 
     return (
       actor.broadLocationId === options.broadLocationId

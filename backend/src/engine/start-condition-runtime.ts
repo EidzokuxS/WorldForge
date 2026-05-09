@@ -1,4 +1,5 @@
 import type { CharacterRecord } from "@worldforge/shared";
+import { toTitleCase } from "../lib/string-utils.js";
 
 const OPENING_PREFIX = "Opening:";
 const OPENING_EFFECT_TICK_CEILING = 3;
@@ -101,14 +102,6 @@ function pushUnique(target: string[], value: string | null | undefined): void {
   }
 }
 
-function toTitleCase(value: string): string {
-  return value
-    .trim()
-    .split(/[\s_-]+/)
-    .filter(Boolean)
-    .map((part) => part[0]!.toUpperCase() + part.slice(1).toLowerCase())
-    .join(" ");
-}
 
 function normalizePhrase(value: string): string {
   return value.trim().replace(/\s+/g, " ");

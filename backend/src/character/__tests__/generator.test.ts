@@ -13,9 +13,14 @@ vi.mock("../../ai/index.js", () => ({
 import {
   generateCharacter,
   generateCharacterFromArchetype,
-  mapV2CardToCharacter,
   parseCharacterDescription,
 } from "../generator.js";
+import {
+  DETERMINISTIC_MAPPING_RULE,
+  FLAT_OUTPUT_ADAPTER_RULE,
+  RICHER_IDENTITY_TRUTH_RULE,
+  buildCharacterPromptContract,
+} from "../prompt-contract.js";
 
 const fakeRole = {
   provider: {
@@ -65,6 +70,25 @@ beforeEach(() => {
 });
 
 describe("parseCharacterDescription", () => {
+  it("emits an exact character structured-output contract with examples and caps", () => {
+    const contract = buildCharacterPromptContract();
+
+    expect(contract).toContain("STRUCTURED_OUTPUT_CONTRACT: character.v1");
+    expect(contract).toContain("Return only the flat generator fields from the schema");
+    expect(contract).toContain("name, race, gender, age, appearance");
+    expect(contract).toContain("personalitySampleLines");
+    expect(contract).toContain("equippedItems");
+    expect(contract).toContain("locationName");
+    expect(contract).toContain("string caps");
+    expect(contract).toContain("arrays max 6");
+    expect(contract).toContain("optional fields may be empty strings or empty arrays");
+    expect(contract).toContain("Minimal valid output");
+    expect(contract).toContain('"name": "Kael"');
+    expect(contract).toContain("Invalid example");
+    expect(contract).toContain("Do NOT emit nested baseFacts");
+    expect(contract).toContain("WorldForge deterministically maps");
+  });
+
   it("returns a canonical character draft while preserving explicit authored profile fields", async () => {
     mockGenerateObject.mockResolvedValueOnce({
       object: {
@@ -104,10 +128,11 @@ describe("parseCharacterDescription", () => {
     const prompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>)
       .prompt as string;
     expect(prompt).toContain("identity, profile, socialContext, motivations, capabilities, state, loadout, startConditions, provenance");
-    expect(prompt).toContain("baseFacts + behavioralCore define who the character is");
+    expect(prompt).toContain(RICHER_IDENTITY_TRUTH_RULE);
     expect(prompt).toContain("liveDynamics records earned campaign change");
     expect(prompt).toContain("copy it verbatim");
-    expect(prompt).toContain("Do NOT emit nested baseFacts, behavioralCore, liveDynamics");
+    expect(prompt).toContain(FLAT_OUTPUT_ADAPTER_RULE);
+    expect(prompt).toContain(DETERMINISTIC_MAPPING_RULE);
     expect(prompt).not.toContain("Use the tag-only system");
   });
 
@@ -168,39 +193,10 @@ describe("generateCharacter", () => {
   });
 });
 
-describe("mapV2CardToCharacter", () => {
-  it("keeps import prompts on the shared draft contract and normalizes imported tags", async () => {
-    mockGenerateObject.mockResolvedValueOnce({
-      object: {
-        ...fakeLegacyCharacter,
-        tags: ["[mind-controller]", "fearless-operative", "female", "offworld-origin"],
-      },
-    });
-
-    const result = await mapV2CardToCharacter({
-      name: "Aria",
-      description: "A wandering bard.",
-      personality: "Cheerful.",
-      scenario: "Lost.",
-      v2Tags: ["female"],
-      importMode: "outsider",
-      premise: "Fantasy.",
-      locationNames: ["Ironhaven"],
-      role: fakeRole,
-    });
-
-    expect(result.capabilities.traits).toEqual(["Mind Controller", "Fearless Operative"]);
-
-    const prompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>)
-      .prompt as string;
-    expect(prompt).toContain("CHARACTER NAME: Aria");
-    expect(prompt).toContain("shared draft pipeline");
-    expect(prompt).toContain("sourceBundle");
-    expect(prompt).toContain("secondary cues");
-    expect(prompt).toContain("Keep outsider/native status");
-    expect(prompt).not.toContain("tag-only system");
-  });
-});
+// describe("mapV2CardToCharacter") removed in Phase 60-04: mapV2CardToCharacter
+// was deleted. V2 import is now handled by the ingestion pipeline via
+// synthesizeDraftFromSources (see character/ingestion/__tests__/synthesizer.test.ts)
+// and proven at the HTTP layer by routes/__tests__/character.test.ts.
 
 describe("generateCharacterFromArchetype", () => {
   it("includes archetype research while keeping canonical draft vocabulary", async () => {
@@ -222,7 +218,7 @@ describe("generateCharacterFromArchetype", () => {
     expect(prompt).toContain("profile");
     expect(prompt).toContain("capabilities");
     expect(prompt).toContain("provenance");
-    expect(prompt).toContain("Do NOT emit nested baseFacts, behavioralCore, liveDynamics");
+    expect(prompt).toContain(FLAT_OUTPUT_ADAPTER_RULE);
     expect(prompt).not.toContain("tag-only system");
   });
 });

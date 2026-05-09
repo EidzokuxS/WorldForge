@@ -43,8 +43,84 @@ import {
   factions as factionsTable,
   locationRecentEvents as locationRecentEventsTable,
 } from "../../db/schema.js";
+import {
+  buildNarratorPacket,
+  type CanonicalTurnPacket,
+  type NarratorPacket,
+} from "../narrator-packet.js";
+import type { SceneFrame } from "../scene-frame.js";
 
 const mockedListRecentLocationEvents = vi.mocked(listRecentLocationEvents);
+
+type EqualityFilter = {
+  key: string;
+  value: unknown;
+};
+
+function rowKeyForColumn(columnName: string): string | null {
+  switch (columnName) {
+    case "campaign_id":
+      return "campaignId";
+    case "current_location_id":
+      return "currentLocationId";
+    case "current_scene_location_id":
+      return "currentSceneLocationId";
+    case "location_id":
+      return "locationId";
+    case "owner_id":
+      return "ownerId";
+    case "id":
+    case "name":
+      return columnName;
+    default:
+      return null;
+  }
+}
+
+function collectEqualityFilters(condition: unknown): EqualityFilter[] {
+  const chunks = (condition as { queryChunks?: unknown[] } | null)?.queryChunks;
+  if (!Array.isArray(chunks)) {
+    return [];
+  }
+
+  const filters: EqualityFilter[] = [];
+  for (let index = 0; index < chunks.length; index += 1) {
+    const chunk = chunks[index] as {
+      name?: string;
+      queryChunks?: unknown[];
+    } | null;
+    if (chunk?.queryChunks) {
+      filters.push(...collectEqualityFilters(chunk));
+      continue;
+    }
+
+    const key = typeof chunk?.name === "string" ? rowKeyForColumn(chunk.name) : null;
+    const maybeParam = chunks[index + 2] as { value?: unknown; constructor?: { name?: string } } | null;
+    if (key && maybeParam?.constructor?.name === "Param") {
+      filters.push({ key, value: maybeParam.value });
+    }
+  }
+
+  return filters;
+}
+
+function applyWhereFilter(
+  rows: Record<string, unknown>[],
+  condition: unknown,
+): Record<string, unknown>[] {
+  const filters = collectEqualityFilters(condition);
+  if (filters.length === 0) {
+    return rows;
+  }
+
+  return rows.filter((row) =>
+    filters.every(({ key, value }) =>
+      Object.prototype.hasOwnProperty.call(row, key)
+        ? row[key] === value
+        : true,
+    ),
+  );
+}
 
 // Helper to create a mock Drizzle DB that returns data based on table reference identity
 function createMockDb(overrides: {
@@ -72,17 +148,21 @@ function createMockDb(overrides: {
   const selectFn = vi.fn().mockImplementation((_columns?: unknown) => ({
     from: vi.fn().mockImplementation((table: unknown) => {
       const data = tableMap.get(table) ?? [];
-      return {
-        where: vi.fn().mockReturnValue({
-          orderBy: vi.fn().mockReturnValue({
-            limit: vi.fn().mockReturnValue({
-              all: vi.fn().mockReturnValue(data),
-            }),
-            all: vi.fn().mockReturnValue(data),
+      const queryForRows = (rows: Record<string, unknown>[]) => ({
+        orderBy: vi.fn().mockReturnValue({
+          limit: vi.fn().mockReturnValue({
+            all: vi.fn().mockReturnValue(rows),
           }),
-          all: vi.fn().mockReturnValue(data),
-          get: vi.fn().mockReturnValue(data[0]),
+          all: vi.fn().mockReturnValue(rows),
         }),
+        all: vi.fn().mockReturnValue(rows),
+        get: vi.fn().mockReturnValue(rows[0]),
+      });
+
+      return {
+        where: vi.fn().mockImplementation((condition: unknown) =>
+          queryForRows(applyWhereFilter(data, condition)),
+        ),
         orderBy: vi.fn().mockReturnValue({
           limit: vi.fn().mockReturnValue({
             all: vi.fn().mockReturnValue(data),
@@ -116,8 +196,10 @@ const baseAwarenessSnapshot = {
 
 const createSceneAssembly = (
   sceneModeHints: {
-  tags?: string[];
-  sceneEffects?: SceneAssembly["sceneEffects"];
+    tags?: string[];
+    sceneEffects?: SceneAssembly["sceneEffects"];
+    sceneDirection?: SceneAssembly["sceneDirection"];
+    playerPerceivableSceneDirection?: SceneAssembly["playerPerceivableSceneDirection"];
     openingState?: {
       active: boolean;
       entryPressure?: string[];
@@ -149,11 +231,169 @@ const createSceneAssembly = (
     tags: sceneModeHints.tags ?? [],
   },
   presentNpcNames: [],
+  sceneDirection: sceneModeHints.sceneDirection ?? null,
+  playerPerceivableSceneDirection: sceneModeHints.playerPerceivableSceneDirection ?? null,
   awareness: baseAwarenessSnapshot,
   recentContext: [],
   sceneEffects: (sceneModeHints.sceneEffects as SceneAssembly["sceneEffects"]) ?? [],
   playerPerceivableConsequences: [],
 });
+
+const packetPlayerId = "11111111-1111-4111-8111-111111111111";
+const packetClearActorId = "22222222-2222-4222-8222-222222222222";
+const packetHintActorId = "33333333-3333-4333-8333-333333333333";
+const packetHiddenActorId = "44444444-4444-4444-8444-444444444444";
+const packetEventId = "55555555-5555-4555-8555-555555555555";
+const packetResponseId = "66666666-6666-4666-8666-666666666666";
+const packetActionId = "77777777-7777-4777-8777-777777777777";
+const packetLocationId = "88888888-8888-4888-8888-888888888888";
+
+function createNarratorPacket(
+  packetOverrides: Partial<CanonicalTurnPacket> = {},
+): NarratorPacket {
+  const frame: SceneFrame = {
+    campaignId: "test-campaign-123",
+    tick: 33,
+    playerActorId: packetPlayerId,
+    currentLocationId: packetLocationId,
+    currentSceneScopeId: packetLocationId,
+    playerAction: "I keep my palms open.",
+    roster: {
+      active: [
+        {
+          id: packetPlayerId,
+          type: "player",
+          label: "Iria",
+          locationId: packetLocationId,
+          sceneScopeId: packetLocationId,
+          awareness: "clear",
+        },
+        {
+          id: packetClearActorId,
+          type: "npc",
+          label: "Mira",
+          locationId: packetLocationId,
+          sceneScopeId: packetLocationId,
+          awareness: "clear",
+        },
+      ],
+      support: [
+        {
+          id: packetHintActorId,
+          type: "npc",
+          label: "hint actor",
+          locationId: packetLocationId,
+          sceneScopeId: packetLocationId,
+          awareness: "hint",
+          awarenessHint: "A shutter shifts above the alley.",
+        },
+      ],
+      background: [
+        {
+          id: packetHiddenActorId,
+          type: "npc",
+          label: "hidden actor",
+          locationId: packetLocationId,
+          sceneScopeId: null,
+          awareness: "none",
+        },
+      ],
+    },
+    perception: {
+      playerAwarenessHints: ["A shutter shifts above the alley."],
+      actorAwareness: {
+        [packetPlayerId]: {
+          [packetClearActorId]: "clear",
+          [packetHintActorId]: "hint",
+          [packetHiddenActorId]: "none",
+        },
+      },
+      forbiddenActorIds: [packetHintActorId, packetHiddenActorId],
+      forbiddenActorLabels: ["hint actor", "hidden actor"],
+    },
+    recentEvents: [],
+    targetCandidates: [],
+    movementCandidates: [],
+    deferredHooks: [],
+    allowedTools: ["log_event"],
+    oracle: { outcome: "weak_hit" },
+  };
+  const canonicalTurnPacket: CanonicalTurnPacket = {
+    campaignId: "test-campaign-123",
+    tick: 33,
+    playerAction: "I keep my palms open.",
+    oracleOutcome: "weak_hit",
+    narratorFacts: {
+      anchorEventId: packetEventId,
+      eventIds: [packetEventId],
+      responseIds: [packetResponseId],
+      actionIds: [packetActionId],
+      toolResultRefs: [{ actionId: packetActionId, toolName: "log_event" }],
+    },
+    anchorEvent: {
+      id: packetEventId,
+      actorId: packetPlayerId,
+      kind: "player_action",
+      summary: "Iria keeps both palms open.",
+      perceivableByPlayer: true,
+    },
+    events: [
+      {
+        id: packetEventId,
+        actorId: packetPlayerId,
+        kind: "player_action",
+        summary: "Iria keeps both palms open.",
+        perceivableByPlayer: true,
+      },
+    ],
+    responses: [
+      {
+        id: packetResponseId,
+        actorId: packetClearActorId,
+        responseKind: "gesture",
+        eventId: packetEventId,
+        summary: "Mira lowers the knife without dropping her guard.",
+        visibleToPlayer: true,
+      },
+    ],
+    effects: [
+      {
+        id: `effect-${packetActionId}`,
+        actionId: packetActionId,
+        actorId: packetClearActorId,
+        toolName: "log_event",
+        summary: "Mira lowers the knife without dropping her guard.",
+        perceivableByPlayer: true,
+        toolResult: { success: true, result: { eventId: packetEventId } },
+      },
+    ],
+    actionResults: [
+      {
+        order: 0,
+        actionId: packetActionId,
+        actionRef: packetActionId,
+        actorId: packetClearActorId,
+        toolName: "log_event",
+        input: {
+          text: "Mira lowers the knife without dropping her guard.",
+          importance: 4,
+          participants: ["Mira", "Iria"],
+        },
+        args: {
+          text: "Mira lowers the knife without dropping her guard.",
+          importance: 4,
+          participants: ["Mira", "Iria"],
+        },
+        result: { success: true, result: { eventId: packetEventId } },
+      },
+    ],
+    guardrails: ["Use the committed packet only."],
+    controlReturnReason: "Return control after Mira's immediate visible response.",
+    ...packetOverrides,
+  };
+
+  return buildNarratorPacket({ frame, canonicalTurnPacket });
+}
 
 describe("assemblePrompt", () => {
   beforeEach(() => {
@@ -360,6 +600,11 @@ describe("assemblePrompt", () => {
         sourceLocationId: "scene-1",
         anchorLocationId: "loc-1",
         sourceEventId: "episodic-1",
+        threadId: null,
+        surfaceRoute: null,
+        visibility: "player_perceivable",
+        knowledgeRoute: null,
+        hiddenCauseTerms: "[]",
         eventType: "ephemeral_scene",
         summary: "The archived ephemeral scene left cursed residue on the crossing.",
         tick: 14,
@@ -535,6 +780,11 @@ describe("assemblePrompt", () => {
         sourceLocationId: "loc-1",
         anchorLocationId: "loc-1",
         sourceEventId: "episodic-2",
+        threadId: null,
+        surfaceRoute: null,
+        visibility: "player_perceivable",
+        knowledgeRoute: null,
+        hiddenCauseTerms: "[]",
         eventType: "scene_effect",
         summary: "A warning bell and bootsteps ripple through the stalls nearby.",
         tick: 14,
@@ -569,6 +819,8 @@ describe("assemblePrompt", () => {
           tags: ["market", "tense"],
         },
         presentNpcNames: ["Mira"],
+        sceneDirection: null,
+        playerPerceivableSceneDirection: null,
         awareness: {
           contract: {
             clear: "Full present-scene actor context. Identity and direct interaction are justified.",
@@ -997,6 +1249,8 @@ describe("assemblePrompt", () => {
           tags: ["encounter-scope"],
         },
         presentNpcNames: ["Nanami"],
+        sceneDirection: null,
+        playerPerceivableSceneDirection: null,
         awareness: {
           contract: {
             clear: "Full present-scene actor context. Identity and direct interaction are justified.",
@@ -1041,6 +1295,506 @@ describe("assemblePrompt", () => {
     expect(result.prompt).toContain("hidden but present");
     expect(result.prompt).not.toContain("Choso");
     expect(result.prompt).not.toContain("Gojo");
+  });
+
+  it("includes same-scene NPC equipment when broad location is the parent macro and excludes sibling equipment", async () => {
+    vi.mocked(readCampaignConfig).mockReturnValue({
+      name: "Dense Runtime Prompt Campaign",
+      premise: "A dense transit ward has multiple current scene pockets.",
+      currentTick: 31,
+      createdAt: Date.now(),
+      generationComplete: true,
+    });
+
+    vi.mocked(getDb).mockReturnValue(
+      createMockDb({
+        players: [
+          {
+            id: "p-scoped",
+            campaignId: "test-campaign-123",
+            name: "Mara",
+            race: "Human",
+            gender: "",
+            age: "",
+            appearance: "",
+            hp: 5,
+            tags: "[]",
+            equippedItems: "[]",
+            currentLocationId: "macro-transit",
+            currentSceneLocationId: "scene-concourse",
+            characterRecord: "{}",
+            derivedTags: "[]",
+          },
+        ],
+        locations: [
+          {
+            id: "macro-transit",
+            campaignId: "test-campaign-123",
+            name: "Dense Transit Ward",
+            description: "A macro transit ward containing separate persistent spaces.",
+            tags: '["macro"]',
+            connectedTo: '["scene-concourse","scene-rooftop"]',
+          },
+          {
+            id: "scene-concourse",
+            campaignId: "test-campaign-123",
+            name: "Station Concourse",
+            description: "The immediate sublocation where the player is standing.",
+            tags: '["persistent_sublocation"]',
+            connectedTo: '["macro-transit"]',
+          },
+          {
+            id: "scene-rooftop",
+            campaignId: "test-campaign-123",
+            name: "Rooftop Service Corridor",
+            description: "A sibling sublocation above the concourse.",
+            tags: '["persistent_sublocation"]',
+            connectedTo: '["macro-transit"]',
+          },
+        ],
+        npcs: [
+          {
+            id: "npc-same-scene",
+            campaignId: "test-campaign-123",
+            name: "Concourse Warden",
+            persona: "Watching the same concourse as the player.",
+            tags: '["clear"]',
+            tier: "key",
+            currentLocationId: "macro-transit",
+            currentSceneLocationId: "scene-concourse",
+            goals: '{"short_term":["Keep the concourse orderly"],"long_term":[]}',
+            beliefs: "[]",
+            unprocessedImportance: 0,
+            inactiveTicks: 0,
+            createdAt: 1,
+            characterRecord: "{}",
+            derivedTags: '["clear"]',
+          },
+          {
+            id: "npc-sibling-scene",
+            campaignId: "test-campaign-123",
+            name: "Rooftop Runner",
+            persona: "Working in a different sublocation under the same macro.",
+            tags: '["clear"]',
+            tier: "persistent",
+            currentLocationId: "macro-transit",
+            currentSceneLocationId: "scene-rooftop",
+            goals: '{"short_term":["Relay rooftop status"],"long_term":[]}',
+            beliefs: "[]",
+            unprocessedImportance: 0,
+            inactiveTicks: 0,
+            createdAt: 1,
+            characterRecord: "{}",
+            derivedTags: '["clear"]',
+          },
+        ],
+        items: [
+          {
+            id: "item-scene-map",
+            campaignId: "test-campaign-123",
+            name: "Concourse route map",
+            tags: "[]",
+            ownerId: null,
+            locationId: "scene-concourse",
+            equipState: "carried",
+            equippedSlot: null,
+            isSignature: false,
+          },
+          {
+            id: "item-same-baton",
+            campaignId: "test-campaign-123",
+            name: "Signal baton",
+            tags: "[]",
+            ownerId: "npc-same-scene",
+            locationId: null,
+            equipState: "equipped",
+            equippedSlot: "hand",
+            isSignature: false,
+          },
+          {
+            id: "item-sibling-lens",
+            campaignId: "test-campaign-123",
+            name: "Rooftop lens",
+            tags: "[]",
+            ownerId: "npc-sibling-scene",
+            locationId: null,
+            equipState: "equipped",
+            equippedSlot: "hand",
+            isSignature: false,
+          },
+        ],
+      }) as unknown as ReturnType<typeof getDb>,
+    );
+
+    const result = await assemblePrompt({
+      ...defaultOptions,
+      storytellerPass: "hidden-tool-driving",
+      includeRecentConversation: false,
+    });
+
+    const sceneSection = result.sections.find((section) => section.name === "SCENE");
+    expect(sceneSection?.content).toContain("Location: Station Concourse");
+    expect(sceneSection?.content).toContain("Items here: Concourse route map");
+    expect(sceneSection?.content).toContain("Concourse Warden: Signal baton");
+    expect(sceneSection?.content).not.toContain("Rooftop Runner");
+    expect(sceneSection?.content).not.toContain("Rooftop lens");
+
+    expect(result.formatted).toContain("Clear actors: Concourse Warden");
+    expect(result.formatted).not.toContain("Clear actors: Concourse Warden, Rooftop Runner");
+  });
+
+  it("keeps encounter actors visible when the player is stored at a persistent sublocation", async () => {
+    vi.mocked(readCampaignConfig).mockReturnValue({
+      name: "Persistent Sublocation Prompt Campaign",
+      premise: "A pier sits inside a larger canal district.",
+      currentTick: 32,
+      createdAt: Date.now(),
+      generationComplete: true,
+    });
+
+    vi.mocked(getDb).mockReturnValue(
+      createMockDb({
+        players: [
+          {
+            id: "p-pier",
+            campaignId: "test-campaign-123",
+            name: "Mira",
+            race: "Human",
+            gender: "",
+            age: "",
+            appearance: "",
+            hp: 5,
+            tags: "[]",
+            equippedItems: "[]",
+            currentLocationId: "scene-pier",
+            currentSceneLocationId: "scene-pier",
+            characterRecord: "{}",
+            derivedTags: "[]",
+          },
+        ],
+        locations: [
+          {
+            id: "macro-canal",
+            campaignId: "test-campaign-123",
+            name: "Canal Market District",
+            description: "A broad canal district.",
+            kind: "macro",
+            parentLocationId: null,
+            tags: '["macro"]',
+            connectedTo: '["scene-pier"]',
+          },
+          {
+            id: "scene-pier",
+            campaignId: "test-campaign-123",
+            name: "Lantern-Lit Gondola Pier",
+            description: "The immediate pier under the market district.",
+            kind: "persistent_sublocation",
+            parentLocationId: "macro-canal",
+            tags: '["persistent_sublocation"]',
+            connectedTo: '["macro-canal"]',
+          },
+          {
+            id: "scene-rooftop",
+            campaignId: "test-campaign-123",
+            name: "Rooftop Service Corridor",
+            description: "A sibling sublocation.",
+            kind: "persistent_sublocation",
+            parentLocationId: "macro-canal",
+            tags: '["persistent_sublocation"]',
+            connectedTo: '["macro-canal"]',
+          },
+        ],
+        npcs: [
+          {
+            id: "npc-gondolier",
+            campaignId: "test-campaign-123",
+            name: "Gondolier",
+            persona: "Waiting at the pier.",
+            tags: '["clear"]',
+            tier: "temporary",
+            currentLocationId: "macro-canal",
+            currentSceneLocationId: "scene-pier",
+            goals: '{"short_term":["Name the route marker"],"long_term":[]}',
+            beliefs: "[]",
+            unprocessedImportance: 0,
+            inactiveTicks: 0,
+            createdAt: 1,
+            characterRecord: "{}",
+            derivedTags: '["clear"]',
+          },
+          {
+            id: "npc-rooftop",
+            campaignId: "test-campaign-123",
+            name: "Rooftop Runner",
+            persona: "Working in another pocket.",
+            tags: '["clear"]',
+            tier: "persistent",
+            currentLocationId: "macro-canal",
+            currentSceneLocationId: "scene-rooftop",
+            goals: '{"short_term":["Relay rooftop status"],"long_term":[]}',
+            beliefs: "[]",
+            unprocessedImportance: 0,
+            inactiveTicks: 0,
+            createdAt: 1,
+            characterRecord: "{}",
+            derivedTags: '["clear"]',
+          },
+        ],
+      }) as unknown as ReturnType<typeof getDb>,
+    );
+
+    const result = await assemblePrompt({
+      ...defaultOptions,
+      storytellerPass: "hidden-tool-driving",
+      includeRecentConversation: false,
+    });
+
+    expect(result.formatted).toContain("Immediate encounter: Lantern-Lit Gondola Pier");
+    expect(result.formatted).toContain("Broad location anchor: macro-canal");
+    expect(result.formatted).toContain("Clear actors: Gondolier");
+    expect(result.formatted).not.toContain("Clear actors: Gondolier, Rooftop Runner");
+  });
+
+  it("uses NarratorPacket as authoritative final-visible packet without leaking hidden fields or backend guard metadata", async () => {
+    const narratorPacket = createNarratorPacket();
+
+    const result = await assembleFinalNarrationPrompt({
+      campaignId: "test-campaign-123",
+      contextWindow: 8192,
+      sceneAssembly: createSceneAssembly(),
+      narratorPacket,
+    });
+
+    expect(result.prompt).toContain("[NARRATOR PACKET]");
+    expect(result.prompt).toContain("[RP BEAT DIRECTIVE]");
+    expect(result.prompt).toContain("one playable RPG/VN beat");
+    expect(result.prompt).toContain("Treat NarratorPacket events, effects, and tool results as the only authority");
+    expect(result.prompt).toContain("keep it unconfirmed");
+    expect(result.prompt).toContain("Stop when the scene reaches a live next decision");
+    expect(result.prompt).toContain("Use the NarratorPacket as the authoritative committed packet.");
+    expect(result.prompt).toMatch(/\[PRESENT ACTORS\]\n- Mira\b/);
+    expect(result.prompt).not.toContain("No other present actors are confirmed in the current scene.");
+    expect(result.prompt).toContain("Player action request:");
+    expect(result.prompt).toContain("player-supplied claims, not authoritative world state");
+    expect(result.prompt).toContain("Treat the raw player action as an attempted request");
+    expect(result.prompt).toContain("Do not narrate claimed possessions");
+    expect(result.prompt).toContain("without placing the claimed object in the player's hand");
+    expect(result.prompt).toContain("When the packet has no perceivable effects");
+    expect(result.prompt).toContain("do not introduce any reusable prop, route, hazard, document, authority, promise, injury, movement, changed position, or new named fact");
+    expect(result.prompt).toContain("If NarratorPacket has no perceivable effects");
+    expect(result.prompt).toContain("keep the beat alive through existing visible actors");
+    expect(result.prompt).toContain("End on a concrete playable next moment");
+    expect(result.prompt).toContain("Iria keeps both palms open.");
+    expect(result.prompt).toContain("Mira lowers the knife without dropping her guard.");
+    expect(result.prompt).not.toContain("hiddenRationale");
+    expect(result.prompt).not.toContain("plannedActions");
+    expect(result.prompt).not.toContain("hidden actor");
+    expect(result.prompt).not.toContain("hint actor");
+    expect(result.prompt).not.toContain("forbiddenActorNames");
+    expect(result.prompt).not.toContain("forbiddenFactMarkers");
+    expect(result.prompt).not.toContain(`hidden-actor:${packetHiddenActorId}`);
+  });
+
+  it("isolates NarratorPacket final-visible prompts from sceneAssembly failed or skipped effect prose", async () => {
+    const narratorPacket = createNarratorPacket();
+    const sceneAssembly = createSceneAssembly({
+      sceneEffects: [
+        {
+          id: "failed-effect",
+          kind: "state_change",
+          source: "recent_context",
+          summary: "FAILED SENTINEL: the locked door opens and the alarm goes silent.",
+          perceivable: true,
+          actor: null,
+          target: null,
+          locationId: "scene-1",
+          causalDetail: "This came from a failed tool-step expectation.",
+        },
+        {
+          id: "hidden-effect",
+          kind: "state_change",
+          source: "recent_context",
+          summary: "HIDDEN SENTINEL: a private offscreen actor changes rooms.",
+          perceivable: false,
+          actor: null,
+          target: null,
+          locationId: "scene-1",
+          causalDetail: "This is not player-facing.",
+        },
+      ],
+    }) as SceneAssembly;
+    sceneAssembly.playerPerceivableConsequences = [
+      "SKIPPED SENTINEL: Mira finds a spare key.",
+    ];
+
+    const result = await assembleFinalNarrationPrompt({
+      campaignId: "test-campaign-123",
+      contextWindow: 8192,
+      sceneAssembly,
+      narratorPacket,
+    });
+
+    expect(result.prompt).toContain("[SETTLED PACKET EFFECTS]");
+    expect(result.prompt).toContain("Mira lowers the knife without dropping her guard.");
+    expect(result.prompt).not.toContain("[SCENE EFFECTS]");
+    expect(result.prompt).not.toContain("[PLAYER-PERCEIVABLE CONSEQUENCES]");
+    expect(result.prompt).not.toContain("FAILED SENTINEL");
+    expect(result.prompt).not.toContain("HIDDEN SENTINEL");
+    expect(result.prompt).not.toContain("SKIPPED SENTINEL");
+  });
+
+  it("isolates NarratorPacket final-visible prompts from broad world memory and recent conversation", async () => {
+    vi.mocked(readCampaignConfig).mockReturnValue({
+      name: "Outpost Leak Regression",
+      premise: "Forest Outpost exists elsewhere in the campaign.",
+      createdAt: Date.now(),
+      currentTick: 44,
+      generationComplete: true,
+    });
+    vi.mocked(getChatHistory).mockReturnValue([
+      { role: "assistant", content: "Earlier, Forest Outpost reported a quiet dinner." },
+      { role: "user", content: "I pay the cafe clerk and sit by the window." },
+      { role: "assistant", content: "The cafe clerk starts the griddle and coffee drips behind the counter." },
+      { role: "user", content: "Continue scene." },
+    ]);
+    vi.mocked(getDb).mockReturnValue(
+      createMockDb({
+        chronicle: [
+          { tick: 43, text: "Forest Outpost changed its watch rotation." },
+        ],
+        factions: [
+          { id: "f1", name: "Forest Outpost Watch", tags: "[]", goals: "[]" },
+        ],
+      }) as unknown as ReturnType<typeof getDb>,
+    );
+
+    const sceneAssembly = createSceneAssembly() as SceneAssembly;
+    sceneAssembly.currentScene = {
+      id: "shibuya-scene",
+      name: "Shibuya Kissaten",
+      description: "A narrow cafe booth under warm lights.",
+      tags: ["urban", "cafe"],
+    };
+    sceneAssembly.presentNpcNames = ["Cafe Clerk"];
+    sceneAssembly.recentContext = [
+      {
+        tick: 44,
+        summary: "Tiamat calls out for service at the Forest Outpost.",
+        source: "location_recent_event",
+      },
+    ];
+    const narratorPacket = createNarratorPacket();
+    narratorPacket.forbiddenPrivateTerms = ["Forest Outpost"];
+
+    const result = await assembleFinalNarrationPrompt({
+      campaignId: "test-campaign-123",
+      contextWindow: 8192,
+      sceneAssembly,
+      narratorPacket,
+      playerAction: "I ask how much the coffee costs.",
+    });
+
+    expect(result.prompt).toContain("Shibuya Kissaten");
+    expect(result.prompt).toMatch(/\[PRESENT ACTORS\]\n- Mira\b/);
+    expect(result.prompt).not.toContain("[PRESENT ACTORS]\n- Cafe Clerk");
+    expect(result.prompt).toContain("[RECENT VISIBLE TRANSCRIPT]");
+    expect(result.prompt).toContain("The cafe clerk starts the griddle and coffee drips behind the counter.");
+    expect(result.prompt).not.toContain("[RECENT LOCAL CONTEXT]");
+    expect(result.prompt).not.toContain("Forest Outpost");
+    expect(result.assembledBase.formatted).not.toContain("Forest Outpost");
+    expect(result.assembledBase.sections.find((section) => section.name === "WORLD STATE")).toBeUndefined();
+    expect(result.assembledBase.sections.find((section) => section.name === "RECENT CONVERSATION")).toBeUndefined();
+  });
+
+  it("pins final narration language from the current player action over unrelated recent chat", async () => {
+    vi.mocked(readCampaignConfig).mockReturnValue({
+      name: "Urban Occult Crossover",
+      premise: "Tokyo sorcerers test a chakra anomaly before Shibuya.",
+      createdAt: Date.now(),
+      currentTick: 12,
+      generationComplete: true,
+    });
+    vi.mocked(getChatHistory).mockReturnValue([
+      { role: "assistant", content: "Клерк протирает стойку и смотрит на дверь." },
+      { role: "user", content: "продолжай" },
+    ]);
+
+    const result = await assembleFinalNarrationPrompt({
+      campaignId: "test-campaign-123",
+      contextWindow: 8192,
+      sceneAssembly: createSceneAssembly(),
+      playerAction: "I ask the cafe clerk how much the coffee costs.",
+    });
+
+    expect(result.system).toContain("SESSION RESPONSE LANGUAGE");
+    expect(result.system).toContain("Output language: English.");
+    expect(result.system).toContain("Do not switch language because of operator locale");
+    expect(result.prompt).toContain("SESSION RESPONSE LANGUAGE");
+    expect(result.prompt).toContain("Output language: English.");
+  });
+
+  it("omits hidden action result roll data from final-visible prompts", async () => {
+    const result = await assembleFinalNarrationPrompt({
+      campaignId: "test-campaign-123",
+      contextWindow: 8192,
+      sceneAssembly: createSceneAssembly(),
+      actionResult: {
+        chance: 75,
+        roll: 42,
+        outcome: "success",
+        reasoning: "Internal judge math should stay hidden.",
+      },
+      playerAction: "I press for an opening.",
+    });
+
+    expect(result.prompt).not.toMatch(/\n\[ACTION RESULT\]\n(?:Chance|Roll|Outcome|Reasoning):/);
+    expect(result.prompt).not.toContain("Chance: 75%");
+    expect(result.prompt).not.toContain("Roll: 42");
+    expect(result.prompt).not.toContain("Reasoning: Internal judge math should stay hidden.");
+    expect(result.assembledBase.sections.find((section) => section.name === "ACTION RESULT")).toBeUndefined();
+  });
+
+  it("does not expose context compression structured-output contracts to final-visible narration", async () => {
+    const result = await assembleFinalNarrationPrompt({
+      campaignId: "test-campaign-123",
+      contextWindow: 8192,
+      sceneAssembly: createSceneAssembly(),
+      playerAction: "I keep watch.",
+    });
+
+    expect(result.system).not.toContain("STRUCTURED_OUTPUT_CONTRACT: context-compression.v1");
+    expect(result.prompt).not.toContain("STRUCTURED_OUTPUT_CONTRACT: context-compression.v1");
+    expect(result.assembledBase.formatted).not.toContain("STRUCTURED_OUTPUT_CONTRACT: context-compression.v1");
+  });
+
+  it("throws pre-prompt when NarratorPacket prose contains a forbidden actor name or fact marker", async () => {
+    const unsafePacket = createNarratorPacket({
+      anchorEvent: {
+        id: packetEventId,
+        actorId: packetPlayerId,
+        kind: "player_action",
+        summary: `hidden actor leaked hidden-actor:${packetHiddenActorId}`,
+        perceivableByPlayer: true,
+      },
+      events: [
+        {
+          id: packetEventId,
+          actorId: packetPlayerId,
+          kind: "player_action",
+          summary: `hidden actor leaked hidden-actor:${packetHiddenActorId}`,
+          perceivableByPlayer: true,
+        },
+      ],
+    });
+
+    await expect(
+      assembleFinalNarrationPrompt({
+        campaignId: "test-campaign-123",
+        contextWindow: 8192,
+        sceneAssembly: createSceneAssembly(),
+        narratorPacket: unsafePacket,
+      }),
+    ).rejects.toThrow(/NarratorPacket prompt unsafe/);
   });
 
   it("uses double newlines between sections", async () => {
@@ -1272,6 +2026,7 @@ describe("assemblePrompt", () => {
             tags: '["legacy-player-only"]',
             equippedItems: '["legacy-bow"]',
             currentLocationId: "loc-1",
+            currentSceneLocationId: "loc-1",
           },
         ],
         locations: [
@@ -1282,6 +2037,7 @@ describe("assemblePrompt", () => {
             description: "A flooded plaza under a broken moon lens.",
             tags: '["quiet"]',
             connectedTo: "[]",
+            kind: "persistent_sublocation",
           },
         ],
         npcs: [
@@ -1295,6 +2051,7 @@ describe("assemblePrompt", () => {
             tags: '["legacy-npc-only"]',
             tier: "key",
             currentLocationId: "loc-1",
+            currentSceneLocationId: "loc-1",
             goals: '{"short_term":["legacy goal"],"long_term":[]}',
             beliefs: '["legacy belief"]',
           },
@@ -1440,5 +2197,84 @@ describe("assemblePrompt", () => {
     );
     expect(finalPrompt.system).toContain("GLM visible pass overlay: stay tightly bounded and concrete.");
     expect(finalPrompt.system).toContain("Narration length is bounded.");
+    expect(finalPrompt.system).toContain("plain scene truth first");
+    expect(finalPrompt.system).toContain("mundane or tourist turns");
+  });
+
+  it("injects hidden world-brain direction for tool-driving and filtered direction for final-visible narration", async () => {
+    const sceneDirection = {
+      situationSummary: "A tense contact pocket crystallizes around the newcomer.",
+      sceneQuestion: "Does Nanami hold the line or test the newcomer first?",
+      focalActorNames: ["Hero", "Nanami"],
+      backgroundActorNames: ["Choso"],
+      presenceReasons: [
+        {
+          actorName: "Hero",
+          reason: "The player arrival creates the local pivot.",
+          perceivable: true,
+        },
+        {
+          actorName: "Nanami",
+          reason: "Nanami is already in the encounter scope and tracking the disturbance.",
+          perceivable: true,
+        },
+        {
+          actorName: "Choso",
+          reason: "A hidden observer is tracking the scene from above.",
+          perceivable: false,
+        },
+      ],
+      causalBeats: [
+        {
+          summary: "Nanami measures intent before committing to escalation.",
+          perceivable: true,
+        },
+        {
+          summary: "A hidden observer is judging whether to surface.",
+          perceivable: false,
+        },
+      ],
+      narrationGuardrails: [
+        "Keep the narration anchored to the immediate exchange.",
+        "Do not reveal the hidden observer by name.",
+      ],
+    } satisfies NonNullable<SceneAssembly["sceneDirection"]>;
+
+    const sceneAssembly = createSceneAssembly({
+      sceneDirection,
+      playerPerceivableSceneDirection: {
+        ...sceneDirection,
+        presenceReasons: sceneDirection.presenceReasons.filter((reason) => reason.perceivable),
+        causalBeats: sceneDirection.causalBeats.filter((beat) => beat.perceivable),
+      },
+    });
+
+    const hiddenPrompt = await assemblePrompt({
+      ...defaultOptions,
+      storytellerPass: "hidden-tool-driving",
+      sceneAssembly,
+      worldBrainDirection: sceneDirection,
+    });
+
+    const finalPrompt = await assembleFinalNarrationPrompt({
+      campaignId: defaultOptions.campaignId,
+      contextWindow: defaultOptions.contextWindow,
+      sceneAssembly,
+    });
+
+    expect(hiddenPrompt.formatted).toContain("[WORLD-BRAIN DIRECTION]");
+    expect(hiddenPrompt.formatted).toContain("Background actors: Choso");
+    expect(hiddenPrompt.formatted).toContain("A hidden observer is judging whether to surface.");
+    expect(hiddenPrompt.formatted).toContain("Do not reveal the hidden observer by name.");
+
+    expect(finalPrompt.prompt).toContain("[SCENE DIRECTION]");
+    expect(finalPrompt.prompt).toContain("[NARRATION GUARDRAILS]");
+    expect(finalPrompt.prompt).toContain("First sentence must add new pressure");
+    expect(finalPrompt.prompt).toContain("one concrete line, gesture, decision, or refusal");
+    expect(finalPrompt.prompt).toContain("Nanami measures intent before committing to escalation.");
+    expect(finalPrompt.prompt).toContain("Focal actors: Hero, Nanami");
+    expect(finalPrompt.prompt).not.toContain("Background actors: Choso");
+    expect(finalPrompt.prompt).not.toContain("Choso");
+    expect(finalPrompt.prompt).not.toContain("A hidden observer is judging whether to surface.");
   });
 });

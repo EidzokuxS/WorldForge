@@ -1,0 +1,25 @@
+{
+  "fixtureId": "mimo-canonical-names-string",
+  "targetSchemaFamily": "generatedContext.v1",
+  "source": ".planning/phases/73-structured-output-stability-and-provider-conformance/73-RESEARCH.md:556; backend/src/ai/__tests__/generate-object-safe.test.ts:547",
+  "malformedObject": {
+    "keyFacts": [
+      "Tokyo Jujutsu High is a central Jujutsu Kaisen institution.",
+      "Chakra mechanics are imported as the power-system overlay."
+    ],
+    "tonalNotes": [
+      "Urban occult action"
+    ],
+    "citations": [
+      {
+        "jobId": "jjk-world-structure",
+        "note": "Tokyo Jujutsu High institution context."
+      },
+      {
+        "jobId": "naruto-power-system",
+        "note": "Chakra mechanics context."
+      }
+    ],
+    "canonicalNames": "Tokyo Jujutsu High, Kyoto Jujutsu High, Satoru Gojo, Naruto chakra"
+  }
+}

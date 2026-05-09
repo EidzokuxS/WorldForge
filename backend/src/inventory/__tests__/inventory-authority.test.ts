@@ -147,7 +147,7 @@ async function importManagerHarness(context: TempCampaignContext) {
   vi.doUnmock("../../lib/index.js");
   vi.doMock("../../campaign/paths.js", () => ({
     assertSafeId: vi.fn(),
-    CAMPAIGNS_DIR: context.campaignsDir,
+    getCampaignsDir: () => context.campaignsDir,
     getCampaignDir: (id: string) => path.join(context.campaignsDir, id),
     getCampaignConfigPath: (id: string) =>
       path.join(context.campaignsDir, id, "config.json"),

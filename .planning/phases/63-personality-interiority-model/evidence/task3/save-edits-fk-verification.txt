@@ -1,0 +1,31 @@
+Phase 63 / Task 3 save-edits FK verification
+Date: 2026-04-18
+Campaign: b89467e4-4c6a-422d-82d9-8e948b356dae
+
+Finding:
+- The earlier Advanced inspector concern was a false signal for sparse records.
+- The real blocker was save-edits failing when scaffold rewrite deleted locations still referenced by player/item location FKs.
+
+Fix under verification:
+- backend/src/worldgen/scaffold-saver.ts clears:
+  - players.currentLocationId
+  - players.currentSceneLocationId
+  - items.locationId
+  before deleting scaffold tables and locations.
+
+Targeted verification:
+- npm --prefix backend test -- run scaffold-saver
+  - PASS (26 tests)
+- npm --prefix backend run typecheck
+  - PASS
+- Real DB seam repro against campaigns/b89467e4-4c6a-422d-82d9-8e948b356dae/state.db
+  - connectDb(campaign state.db)
+  - build scaffold from live /api/campaigns/:id/world payload
+  - call saveScaffoldToDb(campaignId, scaffold)
+  - Result: { ok: true, locationCount: 7, npcCount: 14 }
+
+Conclusion:
+- The save-edits FOREIGN KEY failure is fixed at the persistence seam.
+- A fresh human verification pass is still required for the full UI flow:
+  - Continue to Character
+  - player CharacterCard PERSONALITY render

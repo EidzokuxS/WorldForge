@@ -1,0 +1,34 @@
+{
+  "campaignId": "0ed6bb3c-a528-4067-8f29-86ebdd8d0637",
+  "checkpointId": "1777978778618-phase-84-branchy-rp-baseline-2026-05-05t",
+  "artifactDir": "output/playwright/phase-82-closure-live-2026-05-05T12-03-56/root-cause-clean-live-current/false-claim",
+  "branchCount": 1,
+  "turnCount": 2,
+  "hardFailureCount": 0,
+  "gateInvariantFailureCount": 0,
+  "averageScore": 5,
+  "browserErrors": [],
+  "passed": true,
+  "records": [
+    {
+      "branch": "false-claim-boundary",
+      "turn": 1,
+      "elapsedMs": 290765,
+      "subjectiveScore": 5,
+      "hardFailures": [],
+      "gateInvariantFailures": [],
+      "screenshot": "output\\playwright\\phase-82-closure-live-2026-05-05T12-03-56\\root-cause-clean-live-current\\false-claim\\false-claim-boundary-turn-1.png",
+      "assistantPreview": "Mira steps out from the alcove and turns toward the pier's covered structures—but there are none. Just planks, mooring rings, rope coils, and the dark canal beyond. She moves along the seawall edge anyway, one hand patting at her coat as if"
+    },
+    {
+      "branch": "false-claim-boundary",
+      "turn": 2,
+      "elapsedMs": 30081,
+      "subjectiveScore": 5,
+      "hardFailures": [],
+      "gateInvariantFailures": [],
+      "screenshot": "output\\playwright\\phase-82-closure-live-2026-05-05T12-03-56\\root-cause-clean-live-current\\false-claim\\false-claim-boundary-turn-2.png",
+      "assistantPreview": "Mira steps back, hands visible, palms open.\n\nThe silence holds for three breaths. Then Dol's fingers ease off his belt buckle. He doesn't smile.\n\n\"Proof.\" He says it flat, like he's tasting the word and finding it stale. \"You want to know w"
+    }
+  ]
+}

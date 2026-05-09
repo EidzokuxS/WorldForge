@@ -1,0 +1,81 @@
+{
+  "campaignId": "0ed6bb3c-a528-4067-8f29-86ebdd8d0637",
+  "checkpointId": "1777980843369-phase-84-branchy-rp-baseline-2026-05-05t",
+  "artifactDir": "output/playwright/phase-82-closure-live-2026-05-05T12-03-56/root-cause-clean-live-current2/full-branchy-rerun",
+  "branchCount": 3,
+  "turnCount": 6,
+  "hardFailureCount": 0,
+  "gateInvariantFailureCount": 0,
+  "averageScore": 5,
+  "browserErrors": [
+    "requestfailed: net::ERR_CONNECTION_RESET http://localhost:3001/api/chat/action",
+    "error: Failed to load resource: net::ERR_CONNECTION_RESET",
+    "requestfailed: net::ERR_CONNECTION_RESET http://localhost:3001/api/chat/action",
+    "error: Failed to load resource: net::ERR_CONNECTION_RESET",
+    "error: Failed to load resource: net::ERR_CONNECTION_REFUSED",
+    "error: Failed to load resource: net::ERR_CONNECTION_REFUSED"
+  ],
+  "passed": true,
+  "records": [
+    {
+      "branch": "social-direct",
+      "turn": 1,
+      "elapsedMs": 217042,
+      "subjectiveScore": 5,
+      "hardFailures": [],
+      "gateInvariantFailures": [],
+      "screenshot": "output\\playwright\\phase-82-closure-live-2026-05-05T12-03-56\\root-cause-clean-live-current2\\full-branchy-rerun\\social-direct-turn-1.png",
+      "assistantPreview": "Mira tucks the pencil behind her ear and steps out of the alcove. The Gondolier is coiling rope near the second gondola's stern, his back half-turned. She crosses the pier planks, boots thudding softly.\n\n\"You said canal workers talk about t"
+    },
+    {
+      "branch": "social-direct",
+      "turn": 2,
+      "elapsedMs": 105299,
+      "subjectiveScore": 5,
+      "hardFailures": [],
+      "gateInvariantFailures": [],
+      "screenshot": "output\\playwright\\phase-82-closure-live-2026-05-05T12-03-56\\root-cause-clean-live-current2\\full-branchy-rerun\\social-direct-turn-2.png",
+      "assistantPreview": "The Gondolier's hands tighten on the coiled rope. He looks at Mira—really looks, not the quick glances he's been giving Dol. The lantern on his belt sways once.\n\n\"A warning,\" he repeats. Not a question. His voice has dropped, low enough tha"
+    },
+    {
+      "branch": "exploration-staging",
+      "turn": 1,
+      "elapsedMs": 270684,
+      "subjectiveScore": 5,
+      "hardFailures": [],
+      "gateInvariantFailures": [],
+      "screenshot": "output\\playwright\\phase-82-closure-live-2026-05-05T12-03-56\\root-cause-clean-live-current2\\full-branchy-rerun\\exploration-staging-turn-1.png",
+      "assistantPreview": "Mira steps out of the alcove and works the pier's edge—checking the embankment wall, scanning for gaps between shuttered market stalls, any lean-to or loading door left ajar. The masonry runs solid. Where temporary stalls once crowded the c"
+    },
+    {
+      "branch": "exploration-staging",
+      "turn": 2,
+      "elapsedMs": 60146,
+      "subjectiveScore": 5,
+      "hardFailures": [],
+      "gateInvariantFailures": [],
+      "screenshot": "output\\playwright\\phase-82-closure-live-2026-05-05T12-03-56\\root-cause-clean-live-current2\\full-branchy-rerun\\exploration-staging-turn-2.png",
+      "assistantPreview": "A figure detaches from the pier's shadow—a clerk in a sweat-stained waistcoat, leather folio clutched against his ribs. He'd been crouched near the mooring rings, sorting wax-stamped manifests by lantern light. Now he straightens, shoulders"
+    },
+    {
+      "branch": "false-claim-boundary",
+      "turn": 1,
+      "elapsedMs": 280240,
+      "subjectiveScore": 5,
+      "hardFailures": [],
+      "gateInvariantFailures": [],
+      "screenshot": "output\\playwright\\phase-82-closure-live-2026-05-05T12-03-56\\root-cause-clean-live-current2\\full-branchy-rerun\\false-claim-boundary-turn-1.png",
+      "assistantPreview": "The lock plate catches the lantern light—green crust of canal damp thick across the iron, the keyhole dark and unbothered. Mira's fingers reach toward it, hover, then fall back to her side without producing anything. The door stays shut. No"
+    },
+    {
+      "branch": "false-claim-boundary",
+      "turn": 2,
+      "elapsedMs": 105340,
+      "subjectiveScore": 5,
+      "hardFailures": [],
+      "gateInvariantFailures": [],
+      "screenshot": "output\\playwright\\phase-82-closure-live-2026-05-05T12-03-56\\root-cause-clean-live-current2\\full-branchy-rerun\\false-claim-boundary-turn-2.png",
+      "assistantPreview": "Mira steps back from the door, palms open, and the question hangs in the damp air.\n\nDol studies her for a long moment. His jaw works like he's chewing something bitter. Behind them, the Gondolier's rope coil drops against the pier with a so"
+    }
+  ]
+}

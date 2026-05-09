@@ -25,6 +25,17 @@ function makeDraft(): CharacterDraft {
         attachments: ["Her exhausted night watch"],
         selfImage: "A wall between the harbor and chaos.",
       },
+      personality: {
+        summary: "A harbor marshal who treats every shift like a siege line.",
+        voice: "Harsh dockside shorthand, no wasted words.",
+        decisionStyle: "Commits early and forces the district to keep up.",
+        worldview: "Ports collapse when people assume someone else is watching.",
+        internalContradictions: [
+          "Demands absolute honesty while hiding the breakwater death toll.",
+        ],
+        personalMythology: "If I hold the harbor, the city still breathes.",
+        sampleLines: ["Seal the north pier.", "No one leaves without a manifest."],
+      },
       liveDynamics: {
         activeGoals: ["Find the vanished customs ledger"],
         beliefDrift: ["Someone inside the watch is leaking routes"],
@@ -88,33 +99,6 @@ function makeDraft(): CharacterDraft {
       worldgenOrigin: null,
       legacyTags: ["marshal", "watch"],
     },
-    sourceBundle: {
-      canonSources: [
-        {
-          kind: "canon",
-          label: "Harbor Chronicle",
-          excerpt: "Mira held the breakwater through the Black Tide.",
-        },
-      ],
-      secondarySources: [
-        {
-          kind: "card",
-          label: "Community Character Card",
-          excerpt: "Gruff protector with a rigid code.",
-        },
-      ],
-      synthesis: {
-        owner: "worldforge",
-        strategy: "merge",
-        notes: ["Preserve watch-captain continuity."],
-      },
-    },
-    continuity: {
-      identityInertia: "anchored",
-      protectedCore: ["identity.baseFacts", "identity.behavioralCore"],
-      mutableSurface: ["identity.liveDynamics"],
-      changePressureNotes: ["Needs sustained civic betrayal before deeper drift."],
-    },
   };
 }
 
@@ -132,8 +116,11 @@ describe("CharacterCard identity fidelity", () => {
     expect(screen.getByText("Identity Fidelity")).toBeInTheDocument();
     expect(screen.getByText("Known IP Canonical")).toBeInTheDocument();
     expect(screen.getByText("A wall between the harbor and chaos.")).toBeInTheDocument();
-    expect(screen.getByText("Harbor Chronicle")).toBeInTheDocument();
-    expect(screen.getByText("Anchored continuity")).toBeInTheDocument();
+    expect(screen.getByText("Find the vanished customs ledger")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: /personality/i })).toBeInTheDocument();
+    expect(
+      screen.getByText("A harbor marshal who treats every shift like a siege line."),
+    ).toBeInTheDocument();
   });
 
   it("preserves backend-owned fidelity metadata when editing bounded fields", async () => {
@@ -161,7 +148,24 @@ describe("CharacterCard identity fidelity", () => {
     expect(nextDraft.identity.liveDynamics?.activeGoals).toEqual([
       "Find the vanished customs ledger",
     ]);
-    expect(nextDraft.sourceBundle?.canonSources[0]?.label).toBe("Harbor Chronicle");
-    expect(nextDraft.continuity?.identityInertia).toBe("anchored");
+    expect(nextDraft.identity.baseFacts?.biography).toBeTruthy();
+  });
+
+  it("does not render personality when the draft has no personality payload", () => {
+    const draft = makeDraft();
+    delete draft.identity.personality;
+
+    render(
+      <CharacterCard
+        draft={draft}
+        locationNames={LOCATION_NAMES}
+        onChange={vi.fn()}
+        onResolveStartingLocation={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("region", { name: /personality/i }),
+    ).not.toBeInTheDocument();
   });
 });

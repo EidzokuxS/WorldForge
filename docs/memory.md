@@ -105,6 +105,7 @@ Reflection is a SQLite-backed structured-state maintenance pass, not a free-floa
 - NPCs accumulate `unprocessedImportance`
 - reflection triggers at threshold `10`
 - reflection reads same-turn committed evidence first and semantic episodic retrieval second
+- detached post-turn reflection scans are recorded as versioned simulation proposals before later commits
 - ordinary outcomes should primarily update beliefs, goals, and relationships
 - wealth or skill upgrades require materially stronger evidence than ordinary interaction arcs
 
@@ -131,6 +132,8 @@ Two drift corrections matter here:
 - the live block is `[EPISODIC MEMORY]`, not the legacy retrieved-memories name
 - the live NPC block is `[NPC STATES]`, matching the actual prompt assembler
 
+Phase 63 also shifts the runtime identity readout away from flat behavioral lists. Prompt assembly now emits a `Personality:` section with `summary`, `voice`, `decision-style`, `worldview`, `internal-contradictions`, `personal-mythology`, and `sample-lines` instead of the older `Behavioral Core: motives | pressure | taboos` wording. During the migration window, `attachments` read from `liveDynamics.attachments` first and fall back to `behavioralCore.attachments` for legacy records, so backfilled and pre-backfill characters can coexist without prompt breakage.
+
 ### Section Semantics
 
 - `[PLAYER STATE]` includes canonical-record-derived tags, opening-state effects, equipped items, signature items, and the current inventory view.
@@ -147,9 +150,16 @@ The player-visible turn boundary is stricter than "the storyteller finished spea
 - narration streams first
 - the backend can emit `finalizing_turn`
 - rollback-critical post-turn work runs before authoritative completion
-- `done` is the safe boundary for the next interaction
+- `done` carries the current `worldVersion` and `worldTimeMinutes`
+- `done` is the safe boundary for the next interaction from that committed version
 
-Rollback-critical finalization includes present-NPC updates, off-screen NPC simulation, reflection, and faction ticks. Auxiliary embedding and optional image generation happen later and do not redefine turn completion.
+Rollback-critical finalization settles the current player-facing turn and queues any state-bearing off-screen simulation as versioned proposals. Detached work after `done` may embed already committed events, cache images, or hold pending proposals, but it must not directly mutate NPC, faction, location, memory, or world state for the version the player has already received.
+
+Off-screen NPC simulation, reflection scans, and faction/world ticks are therefore proposal-producing work during the Phase 88 migration window. A later commit path must validate the proposal's base world version, write scope, and expiry before it can become authoritative state. If the world has advanced, the proposal is rejected or rebased instead of being silently applied behind the player's next action.
+
+Key NPC actor processes add an explicit wake layer on top of this boundary. Short player turns do not poll every key NPC. Actor processes wake from world time, direct observation, reports, urgency, exposed-scope catch-up, deadlines, or agency debt; the scheduler then routes them as `required_before_done`, `proposal_after_done`, `deterministic_continuation`, or `sleeping`.
+
+For `required_before_done` present actors, the live turn builds an `ActorFrame`, asks for an `ActorDecisionPacket`, executes any requested actor tools through the same authoritative ToolResult/version seam, and only then builds the narrator packet. Failed actor tools stay explicit and non-mutating; successful actor tools become visible packet facts only through committed backend results.
 
 ## Save, Load, Checkpoints, and Restore
 

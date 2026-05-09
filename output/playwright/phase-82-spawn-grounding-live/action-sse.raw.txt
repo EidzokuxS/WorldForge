@@ -1,0 +1,55 @@
+event: scene-settling
+data: {"stage":"scene-settling","phase":"gm-read"}
+
+event: oracle_result
+data: {"chance":62,"roll":18,"outcome":"strong_hit","reasoning":"Mira has relevant tags: Night Courier (familiar with transit systems), Canal Native (local knowledge), Seal Bearer (may imply legitimacy), Observer (reads situations). Target is transactional and has route-knowledge. Environment is controlled and dangerous, with active warden inspections and contested access, adding significant risk and suspicion. The request is specific but plausible for a courier. No explicit deception or persuasion tag, relying on general competence and local knowledge."}
+
+event: scene-settling
+data: {"stage":"scene-settling","phase":"oracle"}
+
+event: scene-settling
+data: {"stage":"scene-settling","phase":"creating-local-scene"}
+
+event: scene-settling
+data: {"stage":"scene-settling","phase":"settling-tool-observation"}
+
+event: state_update
+data: {"order":0,"actionId":"1609edea-b049-4f35-992d-1c05ad87ba23","actionRef":"tool-call-2","actorId":"26eec8fe-ae60-49c9-999b-732f57e0e2c5","toolName":"reveal_location","input":{"name":"Pier Records Back Room","description":"A cramped, low-ceilinged back room behind the service counter, thick with heated wax and turpentine. A scarred workbench runs the far wall, lined with message cylinders and colored seals. Brass stamps, pans of dark lacquer, and slotted wooden racks crowd every surface. A narrow stamped records hatch connects this space to the front counter.","tags":["staff-only","records-storage","seal-workspace","pier-infrastructure"],"connectedToName":"current_scene"},"args":{"name":"Pier Records Back Room","description":"A cramped, low-ceilinged back room behind the service counter, thick with heated wax and turpentine. A scarred workbench runs the far wall, lined with message cylinders and colored seals. Brass stamps, pans of dark lacquer, and slotted wooden racks crowd every surface. A narrow stamped records hatch connects this space to the front counter.","tags":["staff-only","records-storage","seal-workspace","pier-infrastructure"],"connectedToName":"current_scene"},"result":{"success":true,"result":{"id":"765adaa1-e6e6-4923-b0bf-f2bcef0a6eb7","name":"Pier Records Back Room","connectedTo":"Lantern-Lit Gondola Pier","kind":"ephemeral_scene","parentLocationId":"e17520a7-2514-4cf6-9f22-b8849b3df8c8","anchorLocationId":"e17520a7-2514-4cf6-9f22-b8849b3df8c8","persistence":"ephemeral","expiresAtTick":27,"archivedAtTick":null}}}
+
+event: state_update
+data: {"type":"location_change","locationId":"765adaa1-e6e6-4923-b0bf-f2bcef0a6eb7","locationName":"Pier Records Back Room","travelCost":1,"tickAdvance":1,"path":["Lantern-Lit Gondola Pier","Pier Records Back Room"]}
+
+event: state_update
+data: {"order":2,"actionId":"edd785b2-17bd-441f-91c5-3a5f48296848","actionRef":"tool-call-4","actorId":"26eec8fe-ae60-49c9-999b-732f57e0e2c5","toolName":"spawn_item","input":{"name":"Stamped Route Chit","tags":["official-document","canal-transit","stamped","route-authorization","pier-issue"],"ownerName":"Pier Records Back Room","ownerType":"location"},"args":{"name":"Stamped Route Chit","tags":["official-document","canal-transit","stamped","route-authorization","pier-issue"],"ownerName":"Pier Records Back Room","ownerType":"location"},"result":{"success":true,"result":{"id":"c137cf1f-120f-40c5-a6d6-9eac70098272","name":"Stamped Route Chit","owner":"Pier Records Back Room","ownerType":"location"}}}
+
+event: state_update
+data: {"order":3,"actionId":"e81b3cce-f341-42b9-a509-4b80bf9b64a4","actionRef":"tool-call-5","actorId":"26eec8fe-ae60-49c9-999b-732f57e0e2c5","toolName":"transfer_item","input":{"itemName":"Stamped Route Chit","targetName":"Mira Voss","targetType":"character","equipState":"carried"},"args":{"itemName":"Stamped Route Chit","targetName":"Mira Voss","targetType":"character","equipState":"carried"},"result":{"success":true,"result":{"item":"Stamped Route Chit","target":"Mira Voss","action":"carried","equipState":"carried","equippedSlot":null}}}
+
+event: state_update
+data: {"order":4,"actionId":"cff1937d-d82f-4d25-8736-17ce16f9b269","actionRef":"tool-call-7","actorId":"26eec8fe-ae60-49c9-999b-732f57e0e2c5","toolName":"log_event","input":{"text":"Mira Voss entered the Pier Records Back Room through the stamped records hatch and found Venn the Seal-Presser at work. On a strong hit, Venn — though suspicious of strangers — recognized Mira's courier bearing and handed over a stamped route chit from the workbench without raising an alarm.","importance":5,"participants":["Mira Voss","Venn the Seal-Presser"],"durability":"scene_local"},"args":{"text":"Mira Voss entered the Pier Records Back Room through the stamped records hatch and found Venn the Seal-Presser at work. On a strong hit, Venn — though suspicious of strangers — recognized Mira's courier bearing and handed over a stamped route chit from the workbench without raising an alarm.","importance":5,"participants":["Mira Voss","Venn the Seal-Presser"],"durability":"scene_local"},"result":{"success":true,"result":{"durability":"scene_local","persisted":false}}}
+
+event: state_update
+data: {"order":5,"actionId":"52d384a6-e674-4ef3-a8b6-fde3ee40bdb5","actionRef":"tool-call-9","actorId":"26eec8fe-ae60-49c9-999b-732f57e0e2c5","toolName":"set_relationship","input":{"entityA":"Mira Voss","entityB":"Venn the Seal-Presser","tag":"suspicious-acquaintance","reason":"Venn handed Mira a stamped route chit after she entered the back room uninvited — suspicious but compliant."},"args":{"entityA":"Mira Voss","entityB":"Venn the Seal-Presser","tag":"suspicious-acquaintance","reason":"Venn handed Mira a stamped route chit after she entered the back room uninvited — suspicious but compliant."},"result":{"success":true,"result":{"entityA":"Mira Voss","entityB":"Venn the Seal-Presser","tag":"suspicious-acquaintance","reason":"Venn handed Mira a stamped route chit after she entered the back room uninvited — suspicious but compliant."}}}
+
+event: quick_actions
+data: {"success":true,"result":{"actions":[{"label":"Ask Venn about the route","action":"Ask Venn which route the chit is stamped for and whether it's safe past midnight"},{"label":"Examine the chit","action":"Look closely at the stamped route chit to read its details — route, time window, seal color"},{"label":"Head back to the pier","action":"Step back through the hatch to the front counter with the chit in hand"},{"label":"Ask about the seal work","action":"Ask Venn what she's pressing — the lacquer seals, the message cylinders, who they're for"}]}}
+
+event: scene-settling
+data: {"stage":"scene-settling","phase":"settled-packet","tick":25}
+
+event: scene-settling
+data: {"stage":"scene-settling","phase":"final-narration","opening":false}
+
+event: narrative
+data: {"text":"The records hatch swings inward on stiff hinges, and Mira steps through into wax-thick air.\n\nVenn's stamp freezes mid-press. She doesn't turn—just stops, the brass handle hovering over the dark green cake like a held breath. Three message cylinders wait in their slots. The pan of lacquer smells hot, almost sweet.\n\n\"Counter's out front,\" Venn says. Her voice has that dry rasp of someone who's talked to too many strangers today and would rather not add one more.\n\nBut Mira's already asking—about the chit, the real one, the stamped route.\n\nVenn's shoulders tighten. She sets the stamp down with a careful click, and for a moment Mira thinks she's going to call out to the Clerk, or reach for something under the bench. Instead, Venn turns just enough to look Mira over—not the way the Clerk did, checking for damage, but reading something in the cut of Mira's coat, the way she stands, the ink on her own fingers from hours of handling message slips.\n\nCourier hands. The recognition settles behind Venn's eyes without reaching her mouth.\n\nWithout a word, she reaches to the bench's far edge and slides a thin wooden rectangle across the scarred surface. Stamped. Wax-sealed at the corner. Route numbers burned into the grain in precise rows.\n\nVenn holds it out between two ink-dark fingers, still not fully turning. \"Take it and go. Front entrance next time.\"\n\nThe chit is smooth, well-worn along one edge where someone's thumb has rubbed it raw. The wax seal is intact—deep red, stamped with a pier insignia.\n\nThrough the hatch behind Mira, the Clerk's voice carries faint, still talking to Dol. The Gondolier's oar creaks against his boat's hull.\n\nVenn has already turned back to her work."}
+
+event: finalizing_turn
+data: {"tick":25,"stage":"rollback_critical"}
+
+event: scene-settling
+data: {"stage":"scene-settling","phase":"cleaning-transient-scene","tick":25}
+
+event: done
+data: {"tick":25}
+
+

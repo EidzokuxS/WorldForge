@@ -11,6 +11,10 @@ import { eq, sql } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { npcs, locations } from "../db/schema.js";
 import { callOracle, type OraclePayload } from "./oracle.js";
+import {
+  buildCombatEnvelope,
+  isHostileCombatAction,
+} from "./combat-envelope.js";
 import { executeToolCall } from "./tool-executor.js";
 import { storeEpisodicEvent } from "../vectors/episodic-events.js";
 import type { ProviderConfig } from "../ai/provider-registry.js";
@@ -28,6 +32,7 @@ import {
   resolveLocationTarget,
   resolveTravelPath,
 } from "./location-graph.js";
+import { resolveActionTargetContext } from "./target-context.js";
 
 const log = createLogger("npc-tools");
 
@@ -52,7 +57,6 @@ export function createNpcAgentTools(
       execute: async ({ action }) => {
         const db = getDb();
 
-        // Load NPC for actor tags
         const npc = db
           .select()
           .from(npcs)
@@ -63,8 +67,11 @@ export function createNpcAgentTools(
 
         const npcRecord = hydrateStoredNpcRecord(npc);
         const actorTags = deriveRuntimeCharacterTags(npcRecord);
+        const hostileAction = isHostileCombatAction({
+          actionText: action,
+          intent: action,
+        });
 
-        // Load location for environment tags
         let environmentTags: string[] = [];
         let sceneContext = "";
         if (npc.currentLocationId) {
@@ -80,18 +87,69 @@ export function createNpcAgentTools(
           }
         }
 
+        const targetContext = hostileAction
+          ? await resolveActionTargetContext({
+              campaignId,
+              playerAction: action,
+              intent: action,
+              method: "",
+              judgeProvider,
+            })
+          : null;
+
+        let combatEnvelope = null;
+        let combatEnvelopeReason: string | null = null;
+
+        if (!hostileAction) {
+          combatEnvelopeReason = "non_hostile_action";
+        } else if (targetContext?.targetType !== "character") {
+          combatEnvelopeReason = "non_character_target";
+        } else if (!npcRecord.powerStats) {
+          combatEnvelopeReason = "missing_actor_power";
+        } else if (!targetContext.combatSnapshot?.powerStats) {
+          combatEnvelopeReason = "missing_target_power";
+        } else {
+          combatEnvelope = buildCombatEnvelope({
+            actor: {
+              label: npcRecord.identity.displayName,
+              powerStats: npcRecord.powerStats,
+            },
+            target: targetContext.combatSnapshot,
+            hostileAction,
+            actionText: action,
+          });
+          if (!combatEnvelope) {
+            combatEnvelopeReason = "builder_returned_null";
+          }
+        }
+
+        log.event("combat.envelope", {
+          source: "npc",
+          hostileAction,
+          built: Boolean(combatEnvelope),
+          reason: combatEnvelopeReason,
+          targetLabel: targetContext?.targetLabel ?? null,
+          matchup: combatEnvelope?.matchup ?? null,
+          durabilityTierGap: combatEnvelope?.durabilityTierGap ?? null,
+          actorBypassesTarget: combatEnvelope?.actorBypassesTarget ?? null,
+          targetBypassesActor: combatEnvelope?.targetBypassesActor ?? null,
+        });
+
         const oraclePayload: OraclePayload = {
           intent: action,
           method: "",
           actorTags,
-          targetTags: [],
+          targetTags:
+            targetContext?.targetType === "character"
+              ? targetContext.targetTags
+              : [],
           environmentTags,
           sceneContext,
+          ...(combatEnvelope ? { combatEnvelope } : {}),
         };
 
         const oracleResult = await callOracle(oraclePayload, judgeProvider);
 
-        // On success, log the event
         const eventText = `${npc.name} attempted: ${action} (${oracleResult.outcome}, roll ${oracleResult.roll}/${oracleResult.chance})`;
         await executeToolCall(campaignId, "log_event", {
           text: eventText,
@@ -129,7 +187,6 @@ export function createNpcAgentTools(
         const participants = [npcName];
         if (target) participants.push(target);
 
-        // Store as episodic event
         try {
           await storeEpisodicEvent(campaignId, {
             text: `${npcName} said to ${target ?? "everyone"}: "${dialogue}"`,
@@ -157,7 +214,6 @@ export function createNpcAgentTools(
       execute: async ({ targetLocation }) => {
         const db = getDb();
 
-        // Load NPC's current location
         const npc = db
           .select()
           .from(npcs)
@@ -212,7 +268,6 @@ export function createNpcAgentTools(
           };
         }
 
-        // Update NPC location
         const npcRecord = hydrateStoredNpcRecord(npc, {
           currentLocationName: targetLoc.locationName,
         });
@@ -230,6 +285,12 @@ export function createNpcAgentTools(
           })
           .where(eq(npcs.id, npcId))
           .run();
+        log.event("db.write", {
+          table: "npcs",
+          op: "update",
+          rowId: npcId,
+          rowName: npc.name,
+        });
 
         const locationNameById = new Map(
           locationGraph.locations.map((location) => [location.id, location.name]),
@@ -276,7 +337,6 @@ export function createNpcAgentTools(
         };
         const goalList = goals[type];
 
-        // Find and replace, or append
         const idx = goalList.indexOf(oldGoal);
         if (idx >= 0) {
           goalList[idx] = newGoal;
@@ -295,6 +355,12 @@ export function createNpcAgentTools(
           }))
           .where(eq(npcs.id, npcId))
           .run();
+        log.event("db.write", {
+          table: "npcs",
+          op: "update",
+          rowId: npcId,
+          rowName: npc.name,
+        });
 
         return { updated: true, goals };
       },

@@ -93,7 +93,7 @@ function SidebarGroupLabel({
   return (
     <p
       data-slot="sidebar-group-label"
-      className={cn("px-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground", className)}
+      className={cn("px-3 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground", className)}
       {...props}
     />
   );
@@ -129,8 +129,8 @@ function SidebarMenuButton({
       data-slot="sidebar-menu-button"
       data-active={isActive}
       className={cn(
-        "flex w-full items-center gap-3 rounded-[calc(var(--shell-radius-panel)-0.5rem)] px-3 py-3 text-left text-sm font-medium text-sidebar-foreground/90 transition-all hover:[background:var(--shell-panel-muted)] hover:text-bone",
-        isActive && "[background:var(--shell-highlight)] text-bone [box-shadow:inset_0_0_0_1px_var(--shell-highlight-strong),0_12px_30px_rgba(0,0,0,0.18)]",
+        "flex w-full items-center gap-3 rounded-[var(--r-m)] px-3 py-2.5 text-left text-sm font-semibold text-sidebar-foreground/90 transition-all hover:[background:var(--shell-panel-muted)] hover:text-bone",
+        isActive && "[background:var(--shell-highlight)] text-bone [box-shadow:inset_2px_0_0_var(--ember),inset_0_0_0_1px_var(--shell-highlight-strong)]",
         className,
       )}
       {...props}

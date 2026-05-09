@@ -5,7 +5,6 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CampaignNewFlowProvider, useCampaignNewFlow } from "@/components/campaign-new/flow-provider";
-import { createEmptyDnaState } from "@/components/title/utils";
 
 vi.mock("@/lib/api", () => ({
   fetchSettings: vi.fn(),
@@ -41,6 +40,7 @@ vi.mock("@/components/title/use-new-campaign-wizard", async () => {
           selectedWorldbooks?: Array<{ id: string; displayName: string }>;
           dnaState?: ReturnType<typeof createEmptyDnaState> | null;
           step?: 1 | 2;
+          researchArtifact?: { rawPremise: string } | null;
         };
       },
     ) => {
@@ -52,6 +52,18 @@ vi.mock("@/components/title/use-new-campaign-wizard", async () => {
       const [selectedWorldbooks] = React.useState(initial?.selectedWorldbooks ?? []);
       const [step, setStep] = React.useState<1 | 2>(initial?.step ?? 1);
       const [dnaState, setDnaState] = React.useState(initial?.dnaState ?? null);
+      const [researchArtifact, setResearchArtifact] = React.useState(
+        initial?.researchArtifact ?? null,
+      );
+      function resetFlow() {
+        setCampaignName("");
+        setCampaignPremise("");
+        setCampaignFranchise("");
+        setResearchEnabled(true);
+        setStep(1);
+        setDnaState(null);
+        setResearchArtifact(null);
+      }
 
       return {
         open: true,
@@ -71,6 +83,7 @@ vi.mock("@/components/title/use-new-campaign-wizard", async () => {
         creatingCampaign: false,
         isGenerating: false,
         generationProgress: null,
+        researchArtifact,
         isSuggesting: false,
         suggestingCategory: null,
         canCreate: true,
@@ -83,6 +96,9 @@ vi.mock("@/components/title/use-new-campaign-wizard", async () => {
         handleCreateWithSeeds: vi.fn(),
         handleNextToDna: async () => {
           setStep(2);
+          setResearchArtifact({
+            rawPremise: "Jujutsu Kaisen world with Naruto power system",
+          });
           setDnaState((current: ReturnType<typeof createEmptyDnaState> | null) => {
             if (current) {
               return current;
@@ -111,12 +127,14 @@ vi.mock("@/components/title/use-new-campaign-wizard", async () => {
         handleCreateWithDna: vi.fn(),
         handleWorldbookUpload: vi.fn(),
         toggleWorldbookSelection: vi.fn(),
+        resetFlow,
       };
     },
   };
 });
 
 import { fetchSettings } from "@/lib/api";
+import { clearCampaignNewFlowSession } from "@/components/campaign-new/flow-session";
 
 const mockFetchSettings = vi.mocked(fetchSettings);
 
@@ -128,6 +146,9 @@ function FlowConsumer() {
       <div data-testid="campaign-premise">{flow.campaignPremise}</div>
       <div data-testid="campaign-step">{flow.step}</div>
       <div data-testid="dna-geography">{String(flow.dnaState?.geography.value ?? "")}</div>
+      <div data-testid="research-artifact">
+        {String(flow.researchArtifact?.rawPremise ?? "")}
+      </div>
       <button type="button" onClick={() => flow.setCampaignName("Arcadia")}>
         Set name
       </button>
@@ -181,6 +202,9 @@ describe("CampaignNewFlowProvider", () => {
     expect(screen.getByTestId("campaign-name")).toHaveTextContent("Arcadia");
     expect(screen.getByTestId("campaign-step")).toHaveTextContent("2");
     expect(screen.getByTestId("dna-geography")).toHaveTextContent("Storm coast");
+    expect(screen.getByTestId("research-artifact")).toHaveTextContent(
+      "Jujutsu Kaisen world with Naruto power system",
+    );
 
     firstRender.unmount();
 
@@ -197,5 +221,41 @@ describe("CampaignNewFlowProvider", () => {
     expect(screen.getByTestId("campaign-premise")).toHaveTextContent("A haunted coast.");
     expect(screen.getByTestId("campaign-step")).toHaveTextContent("2");
     expect(screen.getByTestId("dna-geography")).toHaveTextContent("Storm coast");
+    expect(screen.getByTestId("research-artifact")).toHaveTextContent(
+      "Jujutsu Kaisen world with Naruto power system",
+    );
+  });
+
+  it("clears live routed state when a fresh campaign start clears the stored draft", async () => {
+    render(
+      <CampaignNewFlowProvider>
+        <FlowConsumer />
+      </CampaignNewFlowProvider>,
+    );
+
+    await waitFor(() => {
+      expect(mockFetchSettings).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Set name" }));
+      fireEvent.click(screen.getByRole("button", { name: "Set premise" }));
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    });
+
+    await waitFor(() => {
+      expect(window.sessionStorage.getItem("worldforge.campaign-new-flow")).toContain("Arcadia");
+    });
+
+    act(() => {
+      clearCampaignNewFlowSession();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("campaign-name")).toHaveTextContent("");
+    });
+    expect(screen.getByTestId("campaign-premise")).toHaveTextContent("");
+    expect(screen.getByTestId("campaign-step")).toHaveTextContent("1");
+    expect(screen.getByTestId("dna-geography")).toHaveTextContent("");
   });
 });

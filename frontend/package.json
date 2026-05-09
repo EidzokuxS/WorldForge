@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "npm --prefix ../shared run build && tsc --noEmit -p tsconfig.typecheck.json"
+    "test": "vitest",
+    "typecheck": "npm --prefix ../shared run build && tsc --noEmit -p tsconfig.typecheck.json",
+    "visual:v4": "node scripts/visual-v4-smoke.mjs"
   },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.19",

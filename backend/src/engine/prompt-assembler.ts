@@ -9,7 +9,8 @@
  */
 
 import { eq, desc } from "drizzle-orm";
-import type { CharacterRecord, ChatMessage } from "@worldforge/shared";
+import type { CharacterRecord, ChatMessage, PowerStats } from "@worldforge/shared";
+import { formatTierRank } from "@worldforge/shared";
 import { safeGenerateObject as generateObject } from "../ai/generate-object-safe.js";
 import { z } from "zod";
 import { createModel } from "../ai/provider-registry.js";
@@ -28,20 +29,35 @@ import {
 } from "./token-budget.js";
 import { getRelationshipGraph } from "./graph-queries.js";
 import { createLogger } from "../lib/index.js";
+// Direct import (NOT via ../lib/index.js barrel) — Plan 58-01 cycle
+// prevention. prompt-dump must never be re-exported from lib/index.ts.
+import { writePromptSideCarIfEnabled } from "../lib/prompt-dump.js";
 import {
   hydrateStoredNpcRecord,
   hydrateStoredPlayerRecord,
 } from "../character/record-adapters.js";
 import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
+import { buildStorytellerContract } from "./storyteller-contract.js";
 import {
-  buildStorytellerContract,
-  type StorytellerPass,
-} from "./storyteller-contract.js";
-import type { StorytellerSceneMode } from "./storyteller-presets.js";
+  formatSessionLanguageContract,
+  inferSessionResponseLanguage,
+} from "./session-language.js";
+import type { StorytellerPass, StorytellerSceneMode } from "./storyteller-presets.js";
 import { deriveStartConditionEffects } from "./start-condition-runtime.js";
 import { listRecentLocationEvents } from "./location-events.js";
 import { loadAuthoritativeInventoryView } from "../inventory/authority.js";
 import type { SceneAssembly } from "./scene-assembly.js";
+import {
+  formatNarrativeOutcomeBoundsBlock,
+  type NarrativeOutcomeBounds,
+} from "./combat-envelope.js";
+import {
+  formatHiddenWorldBrainDirectionBlock,
+  formatPlayerPerceivableWorldBrainDirectionBlock,
+  formatWorldBrainNarrationGuardrails,
+  type WorldBrainSceneDirection,
+} from "./world-brain.js";
+import { buildJudgeAdjudicationContract } from "./hidden-adjudication.js";
 import {
   AWARENESS_BAND_CONTRACT,
   getObserverAwareness,
@@ -50,6 +66,15 @@ import {
   resolveStoredSceneScopeId,
   type PresenceSnapshot,
 } from "./scene-presence.js";
+import {
+  assertNarratorPacketPromptSafe,
+  type NarratorPacket,
+} from "./narrator-packet.js";
+import {
+  buildPlayerFacingPacketFromNarratorPacket,
+  formatPlayerFacingPacketForPrompt,
+} from "./player-facing-packet.js";
+import { buildContextCompressionPromptContract } from "./prompt-contracts.js";
 
 const log = createLogger("prompt-assembler");
 
@@ -83,6 +108,14 @@ export interface AssembleOptions {
   playerAction?: string;
   /** Judge role for LLM-based importance detection during compression. */
   judgeRole?: ResolvedRole;
+  /** Raw world-brain direction for hidden-pass consumption before scene assembly exists. */
+  worldBrainDirection?: WorldBrainSceneDirection;
+  /** Optional override for the top-level SYSTEM RULES section content. */
+  systemRulesOverride?: string;
+  /** Optional override for prompt.assembled pass label. */
+  passLogLabel?: string;
+  /** Optional override for prompt sidecar label. */
+  promptDumpLabel?: string;
 }
 
 export interface FinalNarrationPrompt {
@@ -91,11 +124,69 @@ export interface FinalNarrationPrompt {
   assembledBase: AssembledPrompt;
 }
 
+export interface JudgeAdjudicationPrompt {
+  system: string;
+  messages: Array<{ role: "user" | "assistant"; content: string }>;
+  assembledBase: AssembledPrompt;
+}
+
+function buildHiddenWorldBrainDirectionSection(
+  storytellerPass: StorytellerPass,
+  direction?: WorldBrainSceneDirection | null,
+): PromptSection | null {
+  if (!direction) {
+    return null;
+  }
+  if (storytellerPass === "final-visible") {
+    return null;
+  }
+  const content = formatHiddenWorldBrainDirectionBlock(direction);
+
+  return {
+    name: "WORLD-BRAIN DIRECTION",
+    priority: 3,
+    content,
+    estimatedTokens: estimateTokens(content),
+    canTruncate: false,
+  };
+}
+
+function buildVisibleWorldBrainSections(
+  direction?: WorldBrainSceneDirection | null,
+): PromptSection[] {
+  if (!direction) {
+    return [];
+  }
+
+  const sceneDirectionContent = formatPlayerPerceivableWorldBrainDirectionBlock(direction)
+    .replace(/^\[SCENE DIRECTION\]\n/, "");
+  const guardrailContent = formatWorldBrainNarrationGuardrails(direction)
+    .replace(/^\[NARRATION GUARDRAILS\]\n/, "");
+
+  return [
+    {
+      name: "SCENE DIRECTION",
+      priority: 3,
+      content: sceneDirectionContent,
+      estimatedTokens: estimateTokens(sceneDirectionContent),
+      canTruncate: false,
+    },
+    {
+      name: "NARRATION GUARDRAILS",
+      priority: 3,
+      content: guardrailContent,
+      estimatedTokens: estimateTokens(guardrailContent),
+      canTruncate: false,
+    },
+  ];
+}
+
 // -- LLM-based importance detection for smart compression --------------------
 
 const importantIndicesSchema = z.object({
   importantIndices: z
-    .array(z.number())
+    .array(z.number().int())
+    .max(12)
     .describe("Indices (0-based) of messages that are important enough to always keep in context"),
 });
 
@@ -118,16 +209,20 @@ async function detectImportantMessages(
     const { object } = await generateObject({
       model: createModel(judgeRole.provider),
       schema: importantIndicesSchema,
-      prompt: `You are reviewing RPG game messages to decide which are important enough to always keep in context during compression.
-
-Important messages include: combat encounters, death, major discoveries, betrayals, captures, escapes, plot twists, relationship changes, acquisition of powerful items, critical world events.
-Mundane actions (looking around, walking, casual greetings, routine conversation) are NOT important.
-Messages with [IMPORTANT] prefix are always important.
-
-Return the indices of important messages.
-
-Messages:
-${numbered.join("\n")}`,
+      prompt: [
+        "You are reviewing RPG game messages to decide which are important enough to always keep in context during compression.",
+        "",
+        buildContextCompressionPromptContract(),
+        "",
+        "Important messages include: combat encounters, death, major discoveries, betrayals, captures, escapes, plot twists, relationship changes, promises, commitments, open questions, named introductions, changed trust, acquired or lost access, acquisition of powerful items, critical world events.",
+        "Routine actions are usually unimportant only when they leave no relationship beat, promise, clue, question, changed access, emotional commitment, NPC boundary, or future hook.",
+        "Messages with [IMPORTANT] prefix are always important.",
+        "",
+        "Return the indices of important messages.",
+        "",
+        "Messages:",
+        numbered.join("\n"),
+      ].join("\n"),
       temperature: 0.1,
     });
 
@@ -430,6 +525,35 @@ export async function compressConversation(
   };
 }
 
+// -- Power stats helper -------------------------------------------------------
+
+/**
+ * Build a compact power stats line for prompt injection.
+ * Returns null if no powerStats present — callers skip the line entirely.
+ */
+export function buildPowerStatsLine(record: { powerStats?: PowerStats }): string | null {
+  const ps = record.powerStats;
+  if (!ps) return null;
+  const axes = [
+    `AP=${formatTierRank(ps.attackPotency)}`,
+    `Speed=${formatTierRank(ps.speed)}`,
+    `Dur=${formatTierRank(ps.durability)}`,
+    `Int=${formatTierRank(ps.intelligence)}`,
+  ].join(" | ");
+  const parts = [`Power: ${axes}`];
+  if (ps.hax.length > 0) {
+    parts.push(`Hax: ${ps.hax.map(h => {
+      const bypass = h.bypassTier ? `, bypasses ${h.bypassTier}` : "";
+      const limits = h.limitations.length > 0 ? `, limits: ${h.limitations.join("; ")}` : "";
+      return `${h.name} (${h.type}${bypass}${limits})`;
+    }).join("; ")}`);
+  }
+  if (ps.vulnerabilities.length > 0) {
+    parts.push(`Vulnerabilities: ${ps.vulnerabilities.map(v => `${v.description} (${v.severity})`).join("; ")}`);
+  }
+  return parts.join("\n");
+}
+
 // -- Section builders --------------------------------------------------------
 
 function buildPlayerStateSection(
@@ -467,11 +591,7 @@ function buildPlayerStateSection(
   const inventoryLine = carriedItems.length > 0
     ? `Inventory: ${carriedItems.join(", ")}`
     : "Inventory: (empty)";
-  const identityLines = buildRuntimeIdentityLines(effectivePlayerRecord, {
-    includeContinuity:
-      Boolean(effectivePlayerRecord.continuity)
-      || effectivePlayerRecord.identity.tier === "key",
-  });
+  const identityLines = buildRuntimeIdentityLines(effectivePlayerRecord);
 
   const lines = [
     `Name: ${playerRecord.identity.displayName}`,
@@ -482,6 +602,7 @@ function buildPlayerStateSection(
     `HP: ${playerRecord.state.hp}/5`,
     wealthTag ? `Wealth: ${wealthTag}` : null,
     tags.length > 0 ? `Tags: ${tags.join(", ")}` : null,
+    buildPowerStatsLine(playerRecord),
     startConditions.startLocationId
       ? `Start: ${startConditions.arrivalMode ?? "unknown arrival"} at ${playerRecord.socialContext.currentLocationName ?? "unknown location"}`
       : null,
@@ -516,6 +637,7 @@ function buildSceneSection(
   campaignId: string,
   locationId: string | null,
   currentTick: number,
+  encounter?: EncounterPromptContext,
 ): PromptSection | null {
   if (!locationId) return null;
 
@@ -535,12 +657,13 @@ function buildSceneSection(
     .where(eq(items.locationId, locationId))
     .all();
 
-  // Get NPCs at this location to query their equipment
-  const npcRows = db
-    .select({ id: npcs.id, name: npcs.name })
-    .from(npcs)
-    .where(eq(npcs.currentLocationId, locationId))
-    .all();
+  const npcRows =
+    getClearPresentNpcRows(encounter, locationId)
+    ?? db
+      .select({ id: npcs.id, name: npcs.name })
+      .from(npcs)
+      .where(eq(npcs.currentLocationId, locationId))
+      .all();
 
   // Query items owned by NPCs at this location
   const npcEquipmentLines: string[] = [];
@@ -621,6 +744,31 @@ interface EncounterPromptContext {
   hintSignals: string[];
 }
 
+type EncounterLocationRow = {
+  name: string;
+  kind: string | null;
+  parentLocationId: string | null;
+};
+
+function getClearPresentNpcRows(
+  encounter: EncounterPromptContext | undefined,
+  locationId: string,
+): Array<{ id: string; name: string }> | null {
+  if (!encounter?.snapshot || !encounter.playerId || encounter.sceneId !== locationId) {
+    return null;
+  }
+
+  const presentActorIds = new Set(encounter.snapshot.presentActorIds);
+
+  return encounter.npcRows
+    .filter((npc) => presentActorIds.has(npc.id))
+    .filter(
+      (npc) =>
+        getObserverAwareness(encounter.snapshot!, encounter.playerId!, npc.id) === "clear",
+    )
+    .map((npc) => ({ id: npc.id, name: npc.name }));
+}
+
 function buildEncounterPromptContext(
   campaignId: string,
   sceneAssembly?: SceneAssembly,
@@ -631,20 +779,57 @@ function buildEncounterPromptContext(
     .from(players)
     .where(eq(players.campaignId, campaignId))
     .get();
-  const broadLocationId = player?.currentLocationId ?? null;
+  const storedLocationId = player?.currentLocationId ?? null;
+  const storedLocationRow = storedLocationId
+    ? db
+        .select({
+          name: locations.name,
+          kind: locations.kind,
+          parentLocationId: locations.parentLocationId,
+        })
+        .from(locations)
+        .where(eq(locations.id, storedLocationId))
+        .get() as EncounterLocationRow | undefined
+    : null;
   const sceneId =
     sceneAssembly?.currentScene?.id
     ?? resolveStoredSceneScopeId(
-      broadLocationId,
+      storedLocationId,
       player?.currentSceneLocationId ?? null,
     );
   const sceneRow = sceneId
     ? db
-        .select({ name: locations.name })
+        .select({
+          name: locations.name,
+          kind: locations.kind,
+          parentLocationId: locations.parentLocationId,
+        })
         .from(locations)
         .where(eq(locations.id, sceneId))
-        .get()
+        .get() as EncounterLocationRow | undefined
     : null;
+  const broadLocationId =
+    sceneRow?.parentLocationId
+    ?? storedLocationRow?.parentLocationId
+    ?? storedLocationId;
+  let presenceSceneId = player?.currentSceneLocationId ?? sceneId ?? null;
+  if (presenceSceneId && presenceSceneId === broadLocationId) {
+    const presenceSceneRow =
+      sceneRow && sceneId === presenceSceneId
+        ? sceneRow
+        : db
+            .select({
+              name: locations.name,
+              kind: locations.kind,
+              parentLocationId: locations.parentLocationId,
+            })
+            .from(locations)
+            .where(eq(locations.id, presenceSceneId))
+            .get() as EncounterLocationRow | undefined;
+    if (presenceSceneRow?.kind === "macro") {
+      presenceSceneId = null;
+    }
+  }
   const npcRows = broadLocationId
     ? db
         .select()
@@ -654,17 +839,17 @@ function buildEncounterPromptContext(
     : [];
 
   const snapshot =
-    player?.id && broadLocationId && sceneId
+    player?.id && broadLocationId && presenceSceneId
       ? resolveScenePresence({
           playerActorId: player.id,
           broadLocationId,
-          sceneScopeId: sceneId,
+          sceneScopeId: presenceSceneId,
           actors: [
             {
               actorId: player.id,
               actorType: "player",
               broadLocationId,
-              sceneScopeId: sceneId,
+              sceneScopeId: presenceSceneId,
               visibility: "clear",
             },
             ...npcRows.map((npc) => {
@@ -744,18 +929,16 @@ function buildNpcStatesSection(
   encounter: EncounterPromptContext,
   storytellerPass: StorytellerPass,
 ): PromptSection | null {
+  const snapshot = encounter.snapshot;
+  const playerId = encounter.playerId;
   const npcRows =
-    encounter.snapshot && encounter.playerId
+    snapshot && playerId
       ? encounter.npcRows.filter((npc) => {
-          if (!encounter.snapshot?.presentActorIds.includes(npc.id)) {
+          if (!snapshot.presentActorIds.includes(npc.id)) {
             return false;
           }
 
-          const awareness = getObserverAwareness(
-            encounter.snapshot,
-            encounter.playerId,
-            npc.id,
-          );
+          const awareness = getObserverAwareness(snapshot, playerId, npc.id);
 
           return storytellerPass === "hidden-tool-driving"
             ? awareness !== "none"
@@ -783,13 +966,7 @@ function buildNpcStatesSection(
       encounter.snapshot && encounter.playerId
         ? getObserverAwareness(encounter.snapshot, encounter.playerId, npc.id)
         : "clear";
-    const identityLines = buildRuntimeIdentityLines(npcRecord, {
-      indent: "  ",
-      includeContinuity:
-        Boolean(npcRecord.continuity)
-        || npcRecord.identity.tier === "key"
-        || npcRecord.identity.canonicalStatus !== "original",
-    });
+    const identityLines = buildRuntimeIdentityLines(npcRecord, { indent: "  " });
 
     const lines = [
       `- ${npcRecord.identity.displayName} (${npcRecord.identity.tier})`,
@@ -810,6 +987,7 @@ function buildNpcStatesSection(
       authoritativeInventory.compatibility.signatureItems.length > 0
         ? `  Signature Items: ${authoritativeInventory.compatibility.signatureItems.join(", ")}`
         : null,
+      (() => { const pl = buildPowerStatsLine(npcRecord); return pl ? `  ${pl.split("\n").join("\n  ")}` : null; })(),
     ].filter(Boolean);
 
     // Enrich with relationship graph data
@@ -969,7 +1147,6 @@ function buildWorldStateSection(
     .limit(5)
     .all();
 
-  // Query all factions for this campaign
   const allFactions = db
     .select({
       id: factions.id,
@@ -981,14 +1158,12 @@ function buildWorldStateSection(
     .where(eq(factions.campaignId, campaignId))
     .all();
 
-  // If no chronicle and no factions, skip
   if (recentChronicle.length === 0 && allFactions.length === 0) {
     return null;
   }
 
   const lines: string[] = [];
 
-  // Chronicle entries (reversed to chronological order)
   if (recentChronicle.length > 0) {
     lines.push("Recent World Events:");
     const chronological = [...recentChronicle].reverse();
@@ -997,7 +1172,6 @@ function buildWorldStateSection(
     }
   }
 
-  // Faction summaries
   if (allFactions.length > 0) {
     if (lines.length > 0) lines.push("");
     lines.push("Active Factions:");
@@ -1036,8 +1210,11 @@ export async function assemblePrompt(
     embedderResult,
     playerAction,
     judgeRole,
-  } =
-    options;
+    worldBrainDirection,
+    systemRulesOverride,
+    passLogLabel,
+    promptDumpLabel,
+  } = options;
 
   const budgets = allocateBudgets(contextWindow);
   const responseHeadroom = budgets.responseHeadroom ?? Math.floor(contextWindow * 0.25);
@@ -1047,9 +1224,10 @@ export async function assemblePrompt(
     actionResult,
     playerAction,
   });
-  const systemRules = buildSystemRules(storytellerPass, storytellerSceneMode);
+  const systemRules =
+    systemRulesOverride
+    ?? buildSystemRules(storytellerPass, storytellerSceneMode);
 
-  // 1. System rules (never truncate)
   const systemSection: PromptSection = {
     name: "SYSTEM RULES",
     priority: 0,
@@ -1058,7 +1236,6 @@ export async function assemblePrompt(
     canTruncate: false,
   };
 
-  // 2. World premise
   const config = readCampaignConfig(campaignId);
   const premiseContent = config.premise;
   const currentTick = config.currentTick ?? 0;
@@ -1070,10 +1247,8 @@ export async function assemblePrompt(
     canTruncate: false,
   };
 
-  // 3. Player state
   const playerSection = buildPlayerStateSection(campaignId, currentTick);
 
-  // Get player's location for scene/NPC queries
   const db = getDb();
   const encounter = buildEncounterPromptContext(campaignId, sceneAssembly);
   const player = db
@@ -1082,14 +1257,23 @@ export async function assemblePrompt(
     .where(eq(players.campaignId, campaignId))
     .get();
 
-  // 4. Scene
-  const sceneSection = buildSceneSection(campaignId, encounter.sceneId, currentTick);
+  const sceneSection = buildSceneSection(campaignId, encounter.sceneId, currentTick, encounter);
   const encounterSection = buildEncounterScopeSection(encounter, storytellerPass);
+  const effectiveWorldBrainDirection =
+    storytellerPass === "final-visible"
+      ? sceneAssembly?.playerPerceivableSceneDirection ?? null
+      : worldBrainDirection ?? sceneAssembly?.sceneDirection ?? null;
+  const hiddenWorldBrainSection = buildHiddenWorldBrainDirectionSection(
+    storytellerPass,
+    effectiveWorldBrainDirection,
+  );
+  const visibleWorldBrainSections =
+    storytellerPass === "final-visible"
+      ? buildVisibleWorldBrainSections(effectiveWorldBrainDirection)
+      : [];
 
-  // 4.5. World state (chronicle + factions)
   const worldStateSection = buildWorldStateSection(campaignId);
 
-  // 5. NPC states (enriched with relationship graph)
   const npcSection = buildNpcStatesSection(campaignId, encounter, storytellerPass);
 
   // 6. Player relationships (fallback -- NPC-NPC rels are in NPC states now)
@@ -1114,7 +1298,6 @@ export async function assemblePrompt(
     npcIds,
   );
 
-  // 7. Action result (if provided)
   let actionSection: PromptSection | null = null;
   if (actionResult) {
     const content = [
@@ -1133,29 +1316,27 @@ export async function assemblePrompt(
     };
   }
 
-  // 8. Lore context (async)
   const loreSection = await buildLoreContextSection(embedderResult, playerAction);
 
-  // 9. Episodic memory (async)
   const episodicSection = await buildEpisodicMemorySection(
     embedderResult,
     playerAction,
     currentTick,
   );
 
-  // 10. Smart conversation compression (replaces naive tail-slicing)
   const conversationBudget = budgets.recentConversation ?? Math.floor(contextWindow * 0.20);
   const history = getChatHistory(campaignId);
   const conversationSection = includeRecentConversation
     ? await compressConversation(history, conversationBudget, judgeRole)
     : null;
 
-  // Collect all non-null sections
   const allSections: PromptSection[] = [
     systemSection,
     premiseSection,
     ...(encounterSection ? [encounterSection] : []),
     ...(sceneSection ? [sceneSection] : []),
+    ...(hiddenWorldBrainSection ? [hiddenWorldBrainSection] : []),
+    ...visibleWorldBrainSections,
     ...(worldStateSection ? [worldStateSection] : []),
     ...(playerSection ? [playerSection] : []),
     ...(npcSection ? [npcSection] : []),
@@ -1166,18 +1347,32 @@ export async function assemblePrompt(
     ...(conversationSection ? [conversationSection] : []),
   ];
 
-  // Apply truncation
   const finalSections = truncateToFit(allSections, effectiveMax);
 
-  // Calculate totals
   const totalTokens = finalSections.reduce((sum, s) => sum + s.estimatedTokens, 0);
   const budgetUsed = Math.round((totalTokens / contextWindow) * 100);
 
-  // Format output
   const formatted = finalSections
     .filter((s) => s.content.length > 0)
     .map((s) => `[${s.name}]\n${s.content}`)
     .join("\n\n");
+
+  log.event("prompt.assembled", {
+    pass: passLogLabel ?? storytellerPass,
+    totalTokens,
+    budgetUsed,
+    sectionCount: finalSections.length,
+    assembledChars: formatted.length,
+    formatted,
+  });
+
+  writePromptSideCarIfEnabled(
+    promptDumpLabel
+      ?? (storytellerPass === "final-visible"
+        ? "final-visible-base"
+        : "hidden-tool-driving"),
+    formatted,
+  );
 
   return {
     sections: finalSections,
@@ -1190,6 +1385,50 @@ export async function assemblePrompt(
 function formatListSection(name: string, values: string[], emptyState: string): string {
   const lines = values.length > 0 ? values.map((value) => `- ${value}`) : [`- ${emptyState}`];
   return `[${name}]\n${lines.join("\n")}`;
+}
+
+function includesAnyTerm(text: string, terms: readonly string[]): boolean {
+  const normalizedText = text.toLowerCase();
+  return terms.some((term) => {
+    const normalizedTerm = term.trim().toLowerCase();
+    return normalizedTerm.length > 0 && normalizedText.includes(normalizedTerm);
+  });
+}
+
+function buildRecentVisibleTranscriptSection(
+  campaignId: string,
+  narratorPacket: NarratorPacket,
+): string | null {
+  const forbiddenTerms = [
+    ...narratorPacket.forbiddenActorNames,
+    ...narratorPacket.forbiddenFactMarkers,
+    ...narratorPacket.forbiddenPrivateTerms,
+  ];
+  const lines = getChatHistory(campaignId)
+    .slice(-8)
+    .flatMap((message) => {
+      const content = message.content.trim();
+      if (!content) {
+        return [];
+      }
+      if (message.role !== "user" && includesAnyTerm(content, forbiddenTerms)) {
+        return [];
+      }
+
+      const speaker = message.role === "user" ? "Player (player-supplied claim)" : "GM";
+      const clipped = content.length > 900 ? `${content.slice(0, 900).trim()}...` : content;
+      return [`${speaker}: ${clipped}`];
+    });
+
+  if (lines.length === 0) {
+    return null;
+  }
+
+  return [
+    "[RECENT VISIBLE TRANSCRIPT]",
+    "Use only as continuity for the current player-visible scene. NarratorPacket facts remain authoritative.",
+    ...lines.map((line) => `- ${line}`),
+  ].join("\n");
 }
 
 function formatOpeningState(sceneAssembly: SceneAssembly): string {
@@ -1214,74 +1453,432 @@ function formatOpeningState(sceneAssembly: SceneAssembly): string {
   return `[OPENING STATE]\n${lines.map((line) => `- ${line}`).join("\n")}`;
 }
 
+function formatCurrentScene(sceneAssembly: SceneAssembly): string {
+  const currentScene = sceneAssembly.currentScene;
+  if (!currentScene) {
+    return "[CURRENT LOCAL SCENE]\n- No current local scene is available.";
+  }
+
+  const lines = [
+    `Name: ${currentScene.name}`,
+    `Id: ${currentScene.id}`,
+    currentScene.description ? `Description: ${currentScene.description}` : null,
+    currentScene.tags.length > 0 ? `Tags: ${currentScene.tags.join(", ")}` : null,
+  ].filter((line): line is string => Boolean(line));
+
+  return `[CURRENT LOCAL SCENE]\n${lines.map((line) => `- ${line}`).join("\n")}`;
+}
+
+function buildIsolatedFinalNarrationBase(): AssembledPrompt {
+  return {
+    sections: [],
+    totalTokens: 0,
+    budgetUsed: 0,
+    formatted: "",
+  };
+}
+
+function assertFinalNarrationPromptSafe(
+  sections: Array<{ name: string; content: string; sourceBoundaryChecked: boolean }>,
+  narratorPacket?: NarratorPacket,
+): void {
+  if (!narratorPacket) return;
+
+  const forbiddenTerms = [
+    ...narratorPacket.forbiddenActorNames,
+    ...narratorPacket.forbiddenFactMarkers,
+    ...narratorPacket.forbiddenPrivateTerms,
+  ];
+
+  for (const term of forbiddenTerms) {
+    const normalizedTerm = term.trim().toLowerCase();
+    if (!normalizedTerm) continue;
+    const leak = sections
+      .filter((section) => !section.sourceBoundaryChecked)
+      .find((section) => section.content.toLowerCase().includes(normalizedTerm));
+    if (leak) {
+      throw new Error(
+        `Final narration prompt contains forbidden private term from ${leak.name}: ${term}`,
+      );
+    }
+  }
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function collectNarratorPacketForbiddenTerms(narratorPacket?: NarratorPacket): string[] {
+  if (!narratorPacket) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const terms: string[] = [];
+  for (const term of [
+    ...narratorPacket.forbiddenActorNames,
+    ...narratorPacket.forbiddenFactMarkers,
+    ...narratorPacket.forbiddenPrivateTerms,
+  ]) {
+    const trimmed = term.trim();
+    const key = trimmed.toLowerCase();
+    if (!trimmed || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    terms.push(trimmed);
+  }
+  return terms;
+}
+
+function redactFinalNarrationUncheckedSections(
+  sections: Array<{ name: string; content: string; sourceBoundaryChecked: boolean }>,
+  narratorPacket?: NarratorPacket,
+): Array<{ name: string; content: string; sourceBoundaryChecked: boolean }> {
+  const forbiddenTerms = collectNarratorPacketForbiddenTerms(narratorPacket);
+  if (forbiddenTerms.length === 0) {
+    return sections;
+  }
+
+  return sections.map((section) => {
+    if (section.sourceBoundaryChecked) {
+      return section;
+    }
+
+    let content = section.content;
+    for (const term of forbiddenTerms) {
+      content = content.replace(
+        new RegExp(escapeRegExp(term), "gi"),
+        "[private term omitted]",
+      );
+    }
+    return { ...section, content };
+  });
+}
+
+function formatSettledPacketEffectsSection(narratorPacket: NarratorPacket): string {
+  return formatListSection(
+    "SETTLED PACKET EFFECTS",
+    narratorPacket.perceivableEffects.map(
+      (effect) =>
+        `${effect.summary} [source=narrator-packet; player-perceivable=yes]`,
+    ),
+    "No settled player-perceivable effects are in scope.",
+  );
+}
+
+function buildRpBeatDirective(narratorPacket?: NarratorPacket): string {
+  const authorityLine = narratorPacket
+    ? "Treat NarratorPacket events, effects, and tool results as the only authority for success, possession, access, consent, location change, and durable world change."
+    : "Treat assembled scene effects and player-perceivable consequences as the only authority for success, possession, access, consent, location change, and durable world change.";
+  const boundedNoEffectLine = narratorPacket
+    ? "If NarratorPacket has no perceivable effects, keep the beat alive through existing visible actors, already listed scene details, dialogue, refusal, posture, distance, attention, silence, or sensory color already implied by the current scene; do not add reusable props, new routes, doors, hazards, documents, authorities, promises, injuries, movement, changed positions, or new named facts unless the packet/current scene already names them."
+    : "If no authoritative scene effect is present, keep the beat alive through existing visible actors, already listed scene details, dialogue, refusal, posture, distance, attention, silence, or sensory color already implied by the current scene; do not add reusable props, new routes, doors, hazards, documents, authorities, promises, injuries, movement, changed positions, or new named facts unless assembled inputs already name them.";
+
+  return [
+    "[RP BEAT DIRECTIVE]",
+    "- Write one playable RPG/VN beat, not a recap, report, or lore dump.",
+    "- Start from the player request and show what visibly changes now.",
+    "- Let visible NPCs act from motives, pressure, relationships, and limited knowledge.",
+    "- First sentence must add new pressure, a visible reaction, or a fresh authoritative scene fact; do not spend it restating what the player just typed.",
+    "- If a present NPC matters to this beat and packet/current-scene facts support it, give one concrete line, gesture, decision, or refusal.",
+    "- Use concrete observable details, body language, distinct dialogue, and changed positions before abstract mood.",
+    "- Do not open by echoing or paraphrasing the player action.",
+    "- Do not decide the player's deliberate words, feelings, consent, or completed success.",
+    "- If the packet describes an unconfirmed claim, bluff, or failed test, keep it unconfirmed; do not concretize the claimed prop, authority, or access into the player's hand or inventory.",
+    `- ${authorityLine}`,
+    `- ${boundedNoEffectLine}`,
+    "- Stop when the scene reaches a live next decision, question, pressure, or invitation.",
+  ].join("\n");
+}
+
+function formatPresentActorsSection(
+  sceneAssembly: SceneAssembly,
+  narratorPacket?: NarratorPacket,
+): string {
+  const presentActorNames = narratorPacket
+    ? narratorPacket.visibleActors
+        .filter((actor) => actor.type !== "player")
+        .map((actor) => actor.label)
+    : sceneAssembly.presentNpcNames;
+
+  return formatListSection(
+    "PRESENT ACTORS",
+    presentActorNames,
+    "No other present actors are confirmed in the current scene.",
+  );
+}
+
 export async function assembleFinalNarrationPrompt(options: {
   campaignId: string;
   contextWindow: number;
   sceneAssembly: SceneAssembly;
+  narratorPacket?: NarratorPacket;
+  outcomeBounds?: NarrativeOutcomeBounds;
   actionResult?: AssembleOptions["actionResult"];
   embedderResult?: ResolveResult;
   playerAction?: string;
   judgeRole?: ResolvedRole;
 }): Promise<FinalNarrationPrompt> {
-  const assembledBase = await assemblePrompt({
-    campaignId: options.campaignId,
-    contextWindow: options.contextWindow,
-    storytellerPass: "final-visible",
-    sceneAssembly: options.sceneAssembly,
-    includeRecentConversation: true,
-    actionResult: options.actionResult,
-    embedderResult: options.embedderResult,
-    playerAction: options.playerAction,
-    judgeRole: options.judgeRole,
-  });
+  const assembledBase = options.narratorPacket
+    ? buildIsolatedFinalNarrationBase()
+    : await assemblePrompt({
+        campaignId: options.campaignId,
+        contextWindow: options.contextWindow,
+        storytellerPass: "final-visible",
+        sceneAssembly: options.sceneAssembly,
+        includeRecentConversation: true,
+        actionResult: undefined,
+        embedderResult: options.embedderResult,
+        playerAction: options.playerAction,
+        judgeRole: options.judgeRole,
+      });
   const storytellerSceneMode = classifyStorytellerSceneMode({
     sceneAssembly: options.sceneAssembly,
     actionResult: options.actionResult,
     playerAction: options.playerAction,
   });
-
-  const prompt = [
-    assembledBase.formatted,
-    formatOpeningState(options.sceneAssembly),
-    formatListSection(
-      "SCENE EFFECTS",
-      options.sceneAssembly.sceneEffects.map(
-        (effect) =>
-          `${effect.summary} [source=${effect.source}; kind=${effect.kind}; player-perceivable=${effect.perceivable ? "yes" : "no"}]`,
-      ),
-      "No authoritative scene effects were assembled.",
-    ),
-    formatListSection(
-      "PLAYER-PERCEIVABLE CONSEQUENCES",
-      options.sceneAssembly.playerPerceivableConsequences,
-      "No additional player-perceivable consequences are in scope.",
-    ),
-    formatListSection(
-      "RECENT LOCAL CONTEXT",
-      options.sceneAssembly.recentContext.map(
-        (entry) => `[Tick ${entry.tick}] ${entry.summary} (${entry.source})`,
-      ),
-      "No recent local context is relevant.",
-    ),
-    formatListSection(
-      "PRESENT ACTORS",
-      options.sceneAssembly.presentNpcNames,
-      "No other present actors are confirmed in the current scene.",
-    ),
-    `[FINAL NARRATION TASK]
+  const campaignConfig = readCampaignConfig(options.campaignId);
+  const recentConversation = getChatHistory(options.campaignId).slice(-8);
+  const responseLanguage = inferSessionResponseLanguage({
+    playerAction: options.playerAction,
+    campaignName: campaignConfig?.name,
+    campaignPremise: campaignConfig?.premise,
+    recentConversation,
+  });
+  const formattedNarratorPacket = options.narratorPacket
+    ? (() => {
+        assertNarratorPacketPromptSafe(options.narratorPacket);
+        return formatPlayerFacingPacketForPrompt(
+          buildPlayerFacingPacketFromNarratorPacket(options.narratorPacket),
+        );
+      })()
+    : null;
+  const finalNarrationTask = options.narratorPacket
+    ? `[FINAL NARRATION TASK]
+Use the NarratorPacket as the authoritative committed packet.
+Write one final narration pass from the settled opening state, current scene, and NarratorPacket facts.
+Do not invent material events outside these authoritative inputs.
+When the packet has no perceivable effects, answer with immediate visible reaction, dialogue, refusal, or local sensory color grounded in the current scene; do not introduce any reusable prop, route, hazard, document, authority, promise, injury, movement, changed position, or new named fact.
+Treat the raw player action as an attempted request, not as proof that the action already succeeded.
+Do not narrate claimed possessions, NPC consent, location access, or item acquisition unless NarratorPacket events/effects/tool results confirm them.
+If a packet effect says a claim may be false or unconfirmed, narrate the visible challenge/refusal without placing the claimed object in the player's hand.
+Do not write tool syntax or metadata.
+Keep the output bounded to what the player can perceive in this scene.
+End on a concrete playable next moment rather than closing the scene with generic reflection.`
+    : `[FINAL NARRATION TASK]
 Write one final narration pass from the settled opening state, current scene, scene effects, and player-perceivable consequences.
 Do not invent material events outside these authoritative inputs.
+When no player-perceivable effect is present, answer with immediate visible reaction, dialogue, refusal, or local sensory color grounded in the current scene; do not introduce any reusable prop, route, hazard, document, authority, promise, injury, movement, changed position, or new named fact.
 Do not write tool syntax or metadata.
-Keep the output bounded to what the player can perceive in this scene.`,
-  ].join("\n\n");
+Keep the output bounded to what the player can perceive in this scene.
+End on a concrete playable next moment rather than closing the scene with generic reflection.`;
+
+  const rawPromptSections = [
+    {
+      name: "assembled-base",
+      content: assembledBase.formatted,
+      sourceBoundaryChecked: false,
+    },
+    {
+      name: "session-language",
+      content: formatSessionLanguageContract(responseLanguage),
+      sourceBoundaryChecked: false,
+    },
+    formattedNarratorPacket
+      ? {
+          name: "player-facing-packet",
+          content: formattedNarratorPacket,
+          sourceBoundaryChecked: true,
+        }
+      : null,
+    {
+      name: "rp-beat-directive",
+      content: buildRpBeatDirective(options.narratorPacket),
+      sourceBoundaryChecked: false,
+    },
+    options.narratorPacket
+      ? (() => {
+          const content = buildRecentVisibleTranscriptSection(
+            options.campaignId,
+            options.narratorPacket,
+          );
+          return content
+            ? { name: "recent-visible-transcript", content, sourceBoundaryChecked: true }
+            : null;
+        })()
+      : null,
+    {
+      name: "current-local-scene",
+      content: formatCurrentScene(options.sceneAssembly),
+      sourceBoundaryChecked: false,
+    },
+    {
+      name: "opening-state",
+      content: formatOpeningState(options.sceneAssembly),
+      sourceBoundaryChecked: false,
+    },
+    options.narratorPacket
+      ? {
+          name: "settled-packet-effects",
+          content: formatSettledPacketEffectsSection(options.narratorPacket),
+          sourceBoundaryChecked: true,
+        }
+      : {
+          name: "scene-effects",
+          content: formatListSection(
+            "SCENE EFFECTS",
+            options.sceneAssembly.sceneEffects
+              .filter((effect) => effect.perceivable)
+              .map(
+                (effect) =>
+                  `${effect.summary} [source=${effect.source}; kind=${effect.kind}; player-perceivable=yes]`,
+              ),
+            "No authoritative scene effects were assembled.",
+          ),
+          sourceBoundaryChecked: false,
+        },
+    options.narratorPacket
+      ? null
+      : {
+          name: "player-perceivable-consequences",
+          content: formatListSection(
+            "PLAYER-PERCEIVABLE CONSEQUENCES",
+            options.sceneAssembly.playerPerceivableConsequences,
+            "No additional player-perceivable consequences are in scope.",
+          ),
+          sourceBoundaryChecked: false,
+        },
+    options.narratorPacket
+      ? null
+      : {
+          name: "recent-local-context",
+          content: formatListSection(
+            "RECENT LOCAL CONTEXT",
+            options.sceneAssembly.recentContext.map(
+              (entry) => `[Tick ${entry.tick}] ${entry.summary} (${entry.source})`,
+            ),
+            "No recent local context is relevant.",
+          ),
+          sourceBoundaryChecked: false,
+        },
+    {
+      name: "present-actors",
+      content: formatPresentActorsSection(options.sceneAssembly, options.narratorPacket),
+      sourceBoundaryChecked: Boolean(options.narratorPacket),
+    },
+    options.outcomeBounds
+      ? {
+          name: "outcome-bounds",
+          content: formatNarrativeOutcomeBoundsBlock(options.outcomeBounds),
+          sourceBoundaryChecked: false,
+        }
+      : null,
+    {
+      name: "final-narration-task",
+      content: finalNarrationTask,
+      sourceBoundaryChecked: false,
+    },
+  ].filter(
+    (
+      section,
+    ): section is { name: string; content: string; sourceBoundaryChecked: boolean } =>
+      Boolean(section?.content),
+  );
+
+  const promptSections = redactFinalNarrationUncheckedSections(
+    rawPromptSections,
+    options.narratorPacket,
+  );
+
+  assertFinalNarrationPromptSafe(promptSections, options.narratorPacket);
+
+  const prompt = promptSections.map((section) => section.content).join("\n\n");
+
+  const finalSystem = buildStorytellerContract({
+    pass: "final-visible",
+    sceneMode: storytellerSceneMode,
+    includeGlmOverlay: true,
+    responseLanguage,
+  });
+
+  log.event("prompt.assembled", {
+    pass: "final-narration",
+    totalTokens: assembledBase.totalTokens,
+    budgetUsed: assembledBase.budgetUsed,
+    sectionCount: assembledBase.sections.length,
+    assembledChars: prompt.length,
+    formatted: prompt,
+  });
+
+  writePromptSideCarIfEnabled("final-narration", prompt);
 
   return {
-    system: buildStorytellerContract({
-      pass: "final-visible",
-      sceneMode: storytellerSceneMode,
-      includeGlmOverlay: true,
-    }),
+    system: finalSystem,
     prompt,
+    assembledBase,
+  };
+}
+
+export async function assembleJudgeAdjudicationPrompt(options: {
+  campaignId: string;
+  contextWindow: number;
+  actionResult: NonNullable<AssembleOptions["actionResult"]>;
+  playerAction: string;
+  embedderResult?: ResolveResult;
+  judgeRole?: ResolvedRole;
+  worldBrainDirection?: WorldBrainSceneDirection;
+  outcomeBounds?: NarrativeOutcomeBounds;
+}): Promise<JudgeAdjudicationPrompt> {
+  const assembledBase = await assemblePrompt({
+    campaignId: options.campaignId,
+    contextWindow: options.contextWindow,
+    storytellerPass: "hidden-tool-driving",
+    includeRecentConversation: false,
+    actionResult: options.actionResult,
+    embedderResult: options.embedderResult,
+    playerAction: options.playerAction,
+    judgeRole: options.judgeRole,
+    worldBrainDirection: options.worldBrainDirection,
+    systemRulesOverride: [
+      OUTPUT_RULES,
+      buildJudgeAdjudicationContract(),
+      RUNTIME_SCENE_RULES,
+    ].join("\n\n"),
+    passLogLabel: "judge-adjudication",
+    promptDumpLabel: "judge-adjudication",
+  });
+
+  const system = [
+    assembledBase.formatted,
+    options.outcomeBounds
+      ? formatNarrativeOutcomeBoundsBlock(options.outcomeBounds)
+      : null,
+    `[JUDGE ADJUDICATION TASK]
+Return a structured adjudication plan for this turn.
+Treat [ACTION RESULT] as binding resolution authority.
+Treat [WORLD-BRAIN DIRECTION] as binding hidden scene-causality authority.
+Plan only backend actions that should actually execute.
+If no state mutation is justified, return an empty actions list.`,
+  ]
+    .filter((section): section is string => Boolean(section))
+    .join("\n\n");
+
+  const messages = [
+    ...getChatHistory(options.campaignId)
+      .slice(-20)
+      .filter(
+        (
+          message,
+        ): message is { role: "user" | "assistant"; content: string } =>
+          (message.role === "user" || message.role === "assistant") &&
+          typeof message.content === "string",
+      ),
+    { role: "user" as const, content: options.playerAction },
+  ];
+
+  return {
+    system,
+    messages,
     assembledBase,
   };
 }
@@ -1320,33 +1917,46 @@ function formatIdentityField(label: string, values: string[]): string | null {
   return `${label}: ${values.join("; ")}`;
 }
 
-function buildRuntimeIdentityLines(
+function buildPersonalityLines(
+  personality?: CharacterRecord["identity"]["personality"],
+): string {
+  const parts = [
+    personality?.summary ? `summary=${JSON.stringify(personality.summary)}` : null,
+    personality?.voice ? `voice=${JSON.stringify(personality.voice)}` : null,
+    personality?.decisionStyle
+      ? `decision-style=${JSON.stringify(personality.decisionStyle)}`
+      : null,
+    personality?.worldview ? `worldview=${JSON.stringify(personality.worldview)}` : null,
+    personality?.internalContradictions?.length
+      ? `internal-contradictions=${JSON.stringify(personality.internalContradictions)}`
+      : null,
+    personality?.personalMythology
+      ? `personal-mythology=${JSON.stringify(personality.personalMythology)}`
+      : null,
+    personality?.sampleLines?.length
+      ? `sample-lines=${JSON.stringify(personality.sampleLines)}`
+      : null,
+  ].filter((value): value is string => Boolean(value));
+
+  return parts.join("; ");
+}
+
+export function buildRuntimeIdentityLines(
   record: CharacterRecord,
   options: {
     indent?: string;
-    includeContinuity?: boolean;
   } = {},
 ): string[] {
   const indent = options.indent ?? "";
   const baseFacts = record.identity.baseFacts;
   const behavioralCore = record.identity.behavioralCore;
   const liveDynamics = record.identity.liveDynamics;
-  const continuity = record.continuity;
+  const personalityLine = buildPersonalityLines(record.identity.personality);
 
   const lines = [
     [
       baseFacts?.biography ? `biography=${baseFacts.biography}` : null,
       formatIdentityField("roles", baseFacts?.socialRole ?? []),
-      formatIdentityField("constraints", baseFacts?.hardConstraints ?? []),
-    ]
-      .filter((value): value is string => Boolean(value))
-      .join(" | "),
-    [
-      formatIdentityField("motives", behavioralCore?.motives ?? []),
-      formatIdentityField("pressure", behavioralCore?.pressureResponses ?? []),
-      formatIdentityField("taboos", behavioralCore?.taboos ?? []),
-      formatIdentityField("attachments", behavioralCore?.attachments ?? []),
-      behavioralCore?.selfImage ? `self-image=${behavioralCore.selfImage}` : null,
     ]
       .filter((value): value is string => Boolean(value))
       .join(" | "),
@@ -1362,23 +1972,18 @@ function buildRuntimeIdentityLines(
 
   const formatted = [
     lines[0] ? `${indent}Base Facts: ${lines[0]}` : null,
-    lines[1] ? `${indent}Behavioral Core: ${lines[1]}` : null,
-    lines[2] ? `${indent}Live Dynamics: ${lines[2]}` : null,
+    personalityLine ? `${indent}Personality: ${personalityLine}` : null,
+    behavioralCore?.selfImage
+      ? `${indent}self-image=${JSON.stringify(behavioralCore.selfImage)}`
+      : null,
+    liveDynamics?.attachments?.length
+      ? `${indent}attachments=${JSON.stringify(liveDynamics.attachments)}`
+      : null,
+    baseFacts?.hardConstraints?.length
+      ? `${indent}hard-constraints=${JSON.stringify(baseFacts.hardConstraints)}`
+      : null,
+    lines[1] ? `${indent}Live Dynamics: ${lines[1]}` : null,
   ].filter((value): value is string => Boolean(value));
-
-  if (options.includeContinuity && continuity) {
-    const continuitySummary = [
-      `identityInertia=${continuity.identityInertia}`,
-      formatIdentityField("protected", continuity.protectedCore),
-      formatIdentityField("mutable", continuity.mutableSurface),
-      formatIdentityField("change pressure", continuity.changePressureNotes),
-    ]
-      .filter((value): value is string => Boolean(value))
-      .join(" | ");
-    if (continuitySummary) {
-      formatted.push(`${indent}Continuity: ${continuitySummary}`);
-    }
-  }
 
   return formatted;
 }

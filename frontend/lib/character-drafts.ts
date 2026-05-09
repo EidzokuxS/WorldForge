@@ -65,48 +65,6 @@ function firstNonEmptyList(...lists: Array<readonly string[] | null | undefined>
   return [];
 }
 
-function normalizeSourceBundle(
-  sourceBundle: CharacterDraft["sourceBundle"],
-): CharacterDraft["sourceBundle"] {
-  if (!sourceBundle) {
-    return undefined;
-  }
-
-  return {
-    canonSources: sourceBundle.canonSources.map((citation) => ({
-      ...citation,
-      label: citation.label.trim(),
-      excerpt: citation.excerpt.trim(),
-    })),
-    secondarySources: sourceBundle.secondarySources.map((citation) => ({
-      ...citation,
-      label: citation.label.trim(),
-      excerpt: citation.excerpt.trim(),
-    })),
-    synthesis: {
-      ...sourceBundle.synthesis,
-      owner: sourceBundle.synthesis.owner.trim(),
-      strategy: sourceBundle.synthesis.strategy.trim(),
-      notes: dedupeStrings(sourceBundle.synthesis.notes),
-    },
-  };
-}
-
-function normalizeContinuity(
-  continuity: CharacterDraft["continuity"],
-): CharacterDraft["continuity"] {
-  if (!continuity) {
-    return undefined;
-  }
-
-  return {
-    identityInertia: continuity.identityInertia,
-    protectedCore: dedupeStrings(continuity.protectedCore),
-    mutableSurface: dedupeStrings(continuity.mutableSurface),
-    changePressureNotes: dedupeStrings(continuity.changePressureNotes),
-  };
-}
-
 function normalizeCharacterDraft(draft: CharacterDraft): CharacterDraft {
   const baseFacts = {
     biography: firstNonEmpty(
@@ -141,6 +99,10 @@ function normalizeCharacterDraft(draft: CharacterDraft): CharacterDraft {
     ),
   };
   const liveDynamics = {
+    attachments: firstNonEmptyList(
+      draft.identity.liveDynamics?.attachments,
+      behavioralCore.attachments,
+    ),
     activeGoals: firstNonEmptyList(
       draft.identity.liveDynamics?.activeGoals,
       [...draft.motivations.shortTermGoals, ...draft.motivations.longTermGoals],
@@ -202,8 +164,8 @@ function normalizeCharacterDraft(draft: CharacterDraft): CharacterDraft {
     },
     capabilities: {
       ...draft.capabilities,
-      traits: dedupeStrings(draft.capabilities.traits),
-      flaws: dedupeStrings(draft.capabilities.flaws),
+      traits: dedupeStrings(draft.capabilities.traits ?? []),
+      flaws: dedupeStrings(draft.capabilities.flaws ?? []),
       specialties: dedupeStrings(draft.capabilities.specialties),
     },
     state: {
@@ -217,8 +179,7 @@ function normalizeCharacterDraft(draft: CharacterDraft): CharacterDraft {
       equippedItemRefs: dedupeStrings(draft.loadout.equippedItemRefs),
       signatureItems: dedupeStrings(draft.loadout.signatureItems),
     },
-    sourceBundle: normalizeSourceBundle(draft.sourceBundle),
-    continuity: normalizeContinuity(draft.continuity),
+    ...(draft.powerStats ? { powerStats: draft.powerStats } : {}),
   };
 }
 
@@ -226,11 +187,11 @@ function buildDerivedTagsFromDraft(draft: CharacterDraft): string[] {
   const normalizedDraft = normalizeCharacterDraft(draft);
 
   return dedupeStrings([
-    ...normalizedDraft.capabilities.traits,
+    ...(normalizedDraft.capabilities.traits ?? []),
     ...normalizedDraft.capabilities.skills.map((skill) =>
       skill.tier ? `${skill.tier} ${skill.name}` : skill.name
     ),
-    ...normalizedDraft.capabilities.flaws,
+    ...(normalizedDraft.capabilities.flaws ?? []),
     ...(normalizedDraft.capabilities.wealthTier ? [normalizedDraft.capabilities.wealthTier] : []),
     ...normalizedDraft.state.conditions,
     ...normalizedDraft.state.statusFlags,
@@ -367,6 +328,7 @@ export function parsedCharacterToDraft(character: ParsedCharacter): CharacterDra
         selfImage: "",
       },
       liveDynamics: {
+        attachments: [],
         activeGoals: [],
         beliefDrift: [],
         currentStrains: [],
@@ -492,6 +454,7 @@ export function scaffoldNpcToDraft(npc: ScaffoldNpc): CharacterDraft {
         selfImage: npc.persona,
       },
       liveDynamics: {
+        attachments: [],
         activeGoals: [
           ...dedupeStrings([...npc.goals.shortTerm, ...npc.goals.longTerm]),
         ],

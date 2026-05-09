@@ -3,17 +3,22 @@ import { z } from "zod";
 import { createModel } from "../ai/index.js";
 import { createLogger } from "../lib/index.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
-import type { IpResearchContext, PremiseDivergence } from "@worldforge/shared";
+import type {
+  IpResearchContext,
+  PremiseDivergence,
+  WorldgenResearchArtifactV2,
+} from "@worldforge/shared";
 import { LORE_CATEGORIES } from "./types.js";
 import type { WorldScaffold, ExtractedLoreCard, GenerationProgress, LoreCategory } from "./types.js";
 import {
   buildCharacterStartGuardrail,
-  buildIpContextBlock,
+  buildWorldgenResearchContextBlock,
   buildKnownIpGenerationContract,
   buildPremiseDivergenceBlock,
   buildStopSlopRules,
   reportSubProgress,
 } from "./scaffold-steps/prompt-utils.js";
+import { buildLoreExtractionPromptContract } from "./prompt-contracts.js";
 
 const log = createLogger("lore-extractor");
 
@@ -110,31 +115,66 @@ interface SharedPromptBlocks {
   slopRules: string;
 }
 
+function formatSourceLabels(values: string[]): string {
+  return values.length > 0 ? values.join(", ") : "(none)";
+}
+
+function buildArtifactLoreRoutingRule(
+  artifact: WorldgenResearchArtifactV2 | null | undefined,
+): string {
+  if (!artifact) return "";
+
+  const powerSystemSources = artifact.researchBrief.sourceUsageRules
+    .filter((rule) => rule.useFor.includes("power_system"))
+    .map((rule) => rule.sourceLabel);
+  const nonPowerSystemSources = artifact.researchBrief.sourceUsageRules
+    .filter((rule) => !rule.useFor.includes("power_system"))
+    .map((rule) => rule.sourceLabel);
+  const toneOnlySources = artifact.researchBrief.sourceUsageRules
+    .filter((rule) => rule.role === "tone_overlay")
+    .map((rule) => rule.sourceLabel);
+
+  return `ARTIFACT LORE ROUTING:
+- Follow source usage rules exactly; they are artifact-authored data, not backend-inferred canon.
+- Ability lore may use only sources whose useFor includes power_system: ${formatSourceLabels(powerSystemSources)}
+- Do not create ability cards from sources without power_system use: ${formatSourceLabels(nonPowerSystemSources)}
+- Tone-only sources may affect mood and wording only: ${formatSourceLabels(toneOnlySources)}`;
+}
+
 function buildSharedBlocks(
   scaffold: WorldScaffold,
   ipContext: IpResearchContext | null,
   premiseDivergence: PremiseDivergence | null,
+  researchArtifact: WorldgenResearchArtifactV2 | null,
 ): SharedPromptBlocks {
   const context = formatScaffoldContext(scaffold);
-  const ipBlock = buildIpContextBlock(ipContext);
-  const divergenceBlock = buildPremiseDivergenceBlock(premiseDivergence);
-  const knownIpContract = buildKnownIpGenerationContract(
+  const ipBlock = buildWorldgenResearchContextBlock({
+    researchArtifact,
     ipContext,
-    premiseDivergence,
-    "lore cards",
-  );
+    target: "lore cards",
+  });
+  const divergenceBlock = buildPremiseDivergenceBlock(premiseDivergence);
+  const knownIpContract = researchArtifact
+    ? ""
+    : buildKnownIpGenerationContract(
+        ipContext,
+        premiseDivergence,
+        "lore cards",
+      );
   const characterStartGuardrail = buildCharacterStartGuardrail();
   const slopRules = buildStopSlopRules();
 
   const ipFactsSection =
-    ipContext?.keyFacts && ipContext.keyFacts.length > 0
-      ? `\nFRANCHISE REFERENCE FACTS (use as primary source for concept/ability/rule cards):\n${ipContext.keyFacts.map((f) => `  - ${f}`).join("\n")}\n`
+    !researchArtifact && ipContext?.keyFacts && ipContext.keyFacts.length > 0
+      ? `\nLEGACY SOURCE FACTS (use as primary source for concept/ability/rule cards):\n${ipContext.keyFacts.map((f) => `  - ${f}`).join("\n")}\n`
       : "";
 
-  const ipQualityRule = ipContext
-    ? `- For known IPs: concept/ability/rule cards MUST describe actual franchise systems, powers, and mechanics drawn from the REFERENCE FACTS above. Never invent systems that do not exist in the franchise canon.
+  const ipQualityRule = researchArtifact
+    ? buildArtifactLoreRoutingRule(researchArtifact)
+    : ipContext
+      ? `- For known IPs: concept/ability/rule cards MUST describe actual franchise systems, powers, and mechanics drawn from the REFERENCE FACTS above. Never invent systems that do not exist in the franchise canon.
 - For known IPs: when PREMISE DIVERGENCE changes one role, relationship, allegiance, or institution, update only lore affected by that change. Keep untouched canon facts explicit in the lore cards.`
-    : "";
+      : "";
 
   return {
     context,
@@ -221,7 +261,14 @@ async function extractLocationLore(
   blocks: SharedPromptBlocks,
 ): Promise<ExtractedLoreCard[]> {
   const header = buildSharedPromptHeader(blocks);
+  const outputContract = buildLoreExtractionPromptContract({
+    allowedCategories: LOCATION_LORE_CATEGORIES,
+    minCards: 3,
+    maxCards: 15,
+  });
   const prompt = `You are a world encyclopedia compiler. Extract structured lore cards about LOCATIONS from this RPG world scaffold.
+
+${outputContract}
 
 ${header}
 
@@ -246,7 +293,14 @@ async function extractFactionLore(
   blocks: SharedPromptBlocks,
 ): Promise<ExtractedLoreCard[]> {
   const header = buildSharedPromptHeader(blocks);
+  const outputContract = buildLoreExtractionPromptContract({
+    allowedCategories: FACTION_LORE_CATEGORIES,
+    minCards: 3,
+    maxCards: 15,
+  });
   const prompt = `You are a world encyclopedia compiler. Extract structured lore cards about FACTIONS from this RPG world scaffold.
+
+${outputContract}
 
 ${header}
 
@@ -271,7 +325,14 @@ async function extractNpcLore(
   blocks: SharedPromptBlocks,
 ): Promise<ExtractedLoreCard[]> {
   const header = buildSharedPromptHeader(blocks);
+  const outputContract = buildLoreExtractionPromptContract({
+    allowedCategories: NPC_LORE_CATEGORIES,
+    minCards: 3,
+    maxCards: 15,
+  });
   const prompt = `You are a world encyclopedia compiler. Extract structured lore cards about NPCs from this RPG world scaffold.
+
+${outputContract}
 
 ${header}
 
@@ -296,7 +357,14 @@ async function extractConceptLore(
   blocks: SharedPromptBlocks,
 ): Promise<ExtractedLoreCard[]> {
   const header = buildSharedPromptHeader(blocks);
+  const outputContract = buildLoreExtractionPromptContract({
+    allowedCategories: CONCEPT_LORE_CATEGORIES,
+    minCards: 5,
+    maxCards: 20,
+  });
   const prompt = `You are a world encyclopedia compiler. Extract structured lore cards about WORLD SYSTEMS from this RPG world scaffold.
+
+${outputContract}
 
 ${header}
 
@@ -325,39 +393,45 @@ ${blocks.slopRules}`;
 // Public API
 // ---------------------------------------------------------------------------
 
+export interface ExtractLoreCardsOptions {
+  ipContext?: IpResearchContext | null;
+  premiseDivergence?: PremiseDivergence | null;
+  onProgress?: (progress: GenerationProgress) => void;
+  progressStep?: number;
+  progressTotalSteps?: number;
+  researchArtifact?: WorldgenResearchArtifactV2 | null;
+}
+
 export async function extractLoreCards(
   scaffold: WorldScaffold,
   role: ResolvedRole,
-  ipContext?: IpResearchContext | null,
-  premiseDivergence?: PremiseDivergence | null,
-  onProgress?: (progress: GenerationProgress) => void,
-  progressStep?: number,
-  progressTotalSteps?: number,
+  opts?: ExtractLoreCardsOptions,
 ): Promise<ExtractedLoreCard[]> {
   const blocks = buildSharedBlocks(
     scaffold,
-    ipContext ?? null,
-    premiseDivergence ?? null,
+    opts?.ipContext ?? null,
+    opts?.premiseDivergence ?? null,
+    opts?.researchArtifact ?? null,
   );
 
-  const step = progressStep ?? 0;
-  const total = progressTotalSteps ?? 1;
+  const step = opts?.progressStep ?? 0;
+  const total = opts?.progressTotalSteps ?? 1;
   const CATEGORY_COUNT = 4;
 
   // 1. Location lore
-  reportSubProgress(onProgress, step, total, "Extracting lore...", 0, CATEGORY_COUNT, "Location lore");
+  reportSubProgress(opts?.onProgress, step, total, "Extracting lore...", 0, CATEGORY_COUNT, "Location lore");
   const locationCards = await extractLocationLore(role, blocks);
 
   // 2. Faction lore
-  reportSubProgress(onProgress, step, total, "Extracting lore...", 1, CATEGORY_COUNT, "Faction lore");
+  reportSubProgress(opts?.onProgress, step, total, "Extracting lore...", 1, CATEGORY_COUNT, "Faction lore");
   const factionCards = await extractFactionLore(role, blocks);
 
   // 3. NPC lore
-  reportSubProgress(onProgress, step, total, "Extracting lore...", 2, CATEGORY_COUNT, "NPC lore");
+  reportSubProgress(opts?.onProgress, step, total, "Extracting lore...", 2, CATEGORY_COUNT, "NPC lore");
   const npcCards = await extractNpcLore(role, blocks);
 
   // 4. Concept/ability/item/event lore
-  reportSubProgress(onProgress, step, total, "Extracting lore...", 3, CATEGORY_COUNT, "World systems lore");
+  reportSubProgress(opts?.onProgress, step, total, "Extracting lore...", 3, CATEGORY_COUNT, "World systems lore");
   const conceptCards = await extractConceptLore(role, blocks);
 
   // Merge and deduplicate by term (case-insensitive)

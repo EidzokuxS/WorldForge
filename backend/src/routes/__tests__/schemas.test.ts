@@ -1,9 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
-import type {
-  CharacterGroundingProfile,
-  PowerProfile,
-} from "@worldforge/shared";
 import {
   chatBodySchema,
   seedCategorySchema,
@@ -564,6 +560,19 @@ describe("suggestSeedSchema", () => {
         expect(result.success).toBe(true);
       }
     });
+
+    it("accepts an explicit null research artifact without assigning route semantics", () => {
+      const result = suggestSeedSchema.safeParse({
+        premise: "Fantasy world",
+        category: "geography",
+        researchArtifact: null,
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.researchArtifact).toBeNull();
+      }
+    });
   });
 
   describe("rejects invalid inputs", () => {
@@ -661,6 +670,18 @@ describe("generateWorldSchema", () => {
         },
       });
       expect(result.success).toBe(true);
+    });
+
+    it("accepts an explicit null research artifact without defining clear-artifact behavior", () => {
+      const result = generateWorldSchema.safeParse({
+        campaignId: "abc-123-def",
+        researchArtifact: null,
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.researchArtifact).toBeNull();
+      }
     });
 
     it("remains backward compatible with requests that only send ipContext", () => {
@@ -1306,6 +1327,49 @@ describe("settingsPayloadSchema", () => {
     (input100.research as Record<string, unknown>).maxSearchSteps = 100;
     expect(settingsPayloadSchema.safeParse(input100).success).toBe(true);
   });
+
+  // --- Phase 58: observability ---
+
+  const validObservability = () => ({
+    enabled: true,
+    dumpFullPrompts: false,
+    roles: {
+      judge: true,
+      storyteller: true,
+      oracle: true,
+      npcAgent: true,
+      reflection: true,
+      embedder: true,
+    },
+  });
+
+  it("accepts a complete observability block", () => {
+    const input = { ...validSettings(), observability: validObservability() };
+    const result = settingsPayloadSchema.safeParse(input);
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts missing observability (pre-upgrade frontend)", () => {
+    const result = settingsPayloadSchema.safeParse(validSettings());
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects malformed observability.enabled", () => {
+    const input = {
+      ...validSettings(),
+      observability: { ...validObservability(), enabled: "yes" },
+    };
+    const result = settingsPayloadSchema.safeParse(input);
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects observability missing a role toggle", () => {
+    const bad = validObservability();
+    delete (bad.roles as Record<string, unknown>).oracle;
+    const input = { ...validSettings(), observability: bad };
+    const result = settingsPayloadSchema.safeParse(input);
+    expect(result.success).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1647,45 +1711,16 @@ describe("importV2CardSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("accepts optional grounding on the same payload seam as researched drafts", () => {
+  it("no longer accepts grounding field (removed in Phase 57 — powerStats replaces grounding)", () => {
     const result = importV2CardSchema.safeParse({
       campaignId: "abc-123",
       name: "Elara",
       description: "A mysterious sorceress.",
-      grounding: {
-        summary: "Canon-grounded frost mage with bounded battlefield reach.",
-        facts: ["Specializes in cold-linked spellwork."],
-        abilities: ["Cryomancy"],
-        constraints: ["Requires focus to sustain area effects"],
-        signatureMoves: ["Ice-lance barrage"],
-        strongPoints: ["Area denial"],
-        vulnerabilities: ["Fatigues when overextending mana output"],
-        uncertaintyNotes: ["True upper limit varies across sources."],
-        powerProfile: {
-          attack: "Building-scale area spells under ideal setup.",
-          speed: "Human reactions with spell-assisted repositioning.",
-          durability: "Normal human durability with magical shielding bursts.",
-          range: "Long range when line of sight is available.",
-          strengths: ["Area denial", "Battlefield control"],
-          constraints: ["Needs casting windows"],
-          vulnerabilities: ["Can be rushed before shields are active"],
-          uncertaintyNotes: ["Shield uptime is inconsistently described."],
-        },
-        sources: [
-          {
-            kind: "card",
-            label: "Community card",
-            excerpt: "Known for freezing a watchtower approach in seconds.",
-          },
-        ],
-      },
     });
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.grounding?.powerProfile?.vulnerabilities).toEqual([
-        "Can be rushed before shields are active",
-      ]);
+      expect((result.data as Record<string, unknown>).grounding).toBeUndefined();
     }
   });
 });
@@ -1869,6 +1904,175 @@ describe("canonical character schemas", () => {
     }
   });
 
+  it("preserves explicit location hierarchy and legacy NPC scene placement in save-edits payloads", () => {
+    const result = saveEditsSchema.safeParse({
+      campaignId: "camp-1",
+      scaffold: {
+        refinedPremise: "Signals whisper through the alpine dark.",
+        locations: [
+          {
+            name: "Signal Station",
+            description: "A frozen relay tower above the valley.",
+            tags: ["Cold"],
+            isStarting: false,
+            connectedTo: ["Relay Roof"],
+            kind: "macro",
+            parentLocationName: null,
+          },
+          {
+            name: "Relay Roof",
+            description: "A wind-cut sublocation overlooking the valley.",
+            tags: ["Exposed"],
+            isStarting: true,
+            connectedTo: ["Signal Station"],
+            kind: "persistent_sublocation",
+            parentLocationName: "Signal Station",
+          },
+        ],
+        factions: [],
+        npcs: [
+          {
+            name: "Field Runner Iven",
+            persona: "Carries sealed messages through the blizzard.",
+            tags: ["fast", "reliable"],
+            goals: {
+              shortTerm: ["Deliver the dispatch"],
+              longTerm: ["Map every pass in the range"],
+            },
+            locationName: "Signal Station",
+            sceneLocationName: "Relay Roof",
+            factionName: null,
+            tier: "supporting",
+          },
+        ],
+        loreCards: [],
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.scaffold.locations[0]).toMatchObject({
+        kind: "macro",
+        parentLocationName: null,
+      });
+      expect(result.data.scaffold.locations[1]).toMatchObject({
+        kind: "persistent_sublocation",
+        parentLocationName: "Signal Station",
+      });
+      expect(result.data.scaffold.npcs[0]).toMatchObject({
+        locationName: "Signal Station",
+        sceneLocationName: "Relay Roof",
+      });
+    }
+  });
+
+  it("preserves scene placement through draft-backed save-edits NPC reconciliation", () => {
+    const result = saveEditsSchema.safeParse({
+      campaignId: "camp-1",
+      scaffold: {
+        refinedPremise: "Signals whisper through the alpine dark.",
+        locations: [
+          {
+            name: "Signal Station",
+            description: "A frozen relay tower above the valley.",
+            tags: ["Cold"],
+            isStarting: false,
+            connectedTo: ["Relay Roof"],
+            kind: "macro",
+            parentLocationName: null,
+          },
+          {
+            name: "Relay Roof",
+            description: "A wind-cut sublocation overlooking the valley.",
+            tags: ["Exposed"],
+            isStarting: true,
+            connectedTo: ["Signal Station"],
+            kind: "persistent_sublocation",
+            parentLocationName: "Signal Station",
+          },
+        ],
+        factions: [],
+        npcs: [
+          {
+            draft: {
+              ...draft,
+              identity: {
+                ...draft.identity,
+                role: "npc",
+                tier: "supporting",
+                displayName: "Captain Mire",
+              },
+              socialContext: {
+                ...draft.socialContext,
+                currentLocationName: "Signal Station",
+              },
+            },
+            locationName: "Signal Station",
+            sceneLocationName: "Relay Roof",
+            factionName: "Wardens",
+            tier: "supporting",
+          },
+        ],
+        loreCards: [],
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.scaffold.npcs[0]).toMatchObject({
+        name: "Captain Mire",
+        locationName: "Signal Station",
+        sceneLocationName: "Relay Roof",
+        factionName: "Wardens",
+        tier: "supporting",
+      });
+      expect(result.data.scaffold.npcs[0]?.draft.socialContext.currentLocationName).toBe(
+        "Signal Station",
+      );
+    }
+  });
+
+  it("keeps legacy flat save-edits scaffolds compatible when hierarchy fields are omitted", () => {
+    const result = saveEditsSchema.safeParse({
+      campaignId: "camp-1",
+      scaffold: {
+        refinedPremise: "Signals whisper through the alpine dark.",
+        locations: [
+          {
+            name: "Signal Station",
+            description: "A frozen relay tower above the valley.",
+            tags: ["Cold"],
+            isStarting: true,
+            connectedTo: [],
+          },
+        ],
+        factions: [],
+        npcs: [
+          {
+            name: "Field Runner Iven",
+            persona: "Carries sealed messages through the blizzard.",
+            tags: ["fast", "reliable"],
+            goals: {
+              shortTerm: ["Deliver the dispatch"],
+              longTerm: ["Map every pass in the range"],
+            },
+            locationName: "Signal Station",
+            factionName: null,
+            tier: "supporting",
+          },
+        ],
+        loreCards: [],
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.scaffold.locations[0]?.kind).toBeUndefined();
+      expect(result.data.scaffold.locations[0]?.parentLocationName).toBeUndefined();
+      expect(result.data.scaffold.npcs[0]?.sceneLocationName).toBeUndefined();
+    }
+  });
+
   it("materializes a canonical supporting draft for legacy supporting scaffold NPC payloads", () => {
     const result = saveEditsSchema.safeParse({
       campaignId: "camp-1",
@@ -2048,8 +2252,7 @@ describe("phase 48 richer identity schemas", () => {
       expect(draftResult.data.identity.liveDynamics.activeGoals).toEqual([
         "Hold the barricade",
       ]);
-      expect(draftResult.data.sourceBundle?.canonSources[0]?.label).toBe("Episode Guide");
-      expect(draftResult.data.continuity?.identityInertia).toBe("anchored");
+      // sourceBundle and continuity removed from draft schema (Phase 57)
     }
 
     const recordResult = characterRecordSchema.safeParse({
@@ -2065,9 +2268,7 @@ describe("phase 48 richer identity schemas", () => {
       expect(recordResult.data.identity.baseFacts.hardConstraints).toEqual([
         "Will not abandon the station",
       ]);
-      expect(recordResult.data.sourceBundle?.secondarySources[0]?.label).toBe(
-        "Community card",
-      );
+      // sourceBundle removed from record schema (Phase 57)
     }
   });
 
@@ -2084,14 +2285,6 @@ describe("phase 48 richer identity schemas", () => {
           activeGoals: ["Hold the barricade"],
         },
       },
-      sourceBundle: {
-        synthesis: {
-          notes: ["Reinforced canon wording."],
-        },
-      },
-      continuity: {
-        protectedCore: ["Will not abandon the station"],
-      },
     });
 
     expect(result.success).toBe(true);
@@ -2099,12 +2292,6 @@ describe("phase 48 richer identity schemas", () => {
       expect(result.data.identity?.baseFacts?.biography).toBe(
         "Now serving the storm watch.",
       );
-      expect(result.data.sourceBundle?.synthesis?.notes).toEqual([
-        "Reinforced canon wording.",
-      ]);
-      expect(result.data.continuity?.protectedCore).toEqual([
-        "Will not abandon the station",
-      ]);
     }
   });
 
@@ -2119,10 +2306,7 @@ describe("phase 48 richer identity schemas", () => {
       expect(result.data.draft.identity.liveDynamics.currentStrains).toEqual([
         "Running out of supplies",
       ]);
-      expect(result.data.draft.sourceBundle?.synthesis?.owner).toBe("worldforge");
-      expect(result.data.draft.continuity?.mutableSurface).toEqual([
-        "Trust in the player",
-      ]);
+      // sourceBundle and continuity removed from draft schema (Phase 57)
       expect(result.data.character.tags).toContain("Connected");
     }
   });
@@ -2175,45 +2359,31 @@ describe("phase 48 richer identity schemas", () => {
         shortTerm: ["Hold the barricade"],
         longTerm: [],
       });
-      expect(result.data.scaffold.npcs[0]?.draft.identity.liveDynamics.beliefDrift).toEqual([
+      expect(result.data.scaffold.npcs[0]?.draft.identity.liveDynamics?.beliefDrift).toEqual([
         "The valley can still be saved",
       ]);
     }
   });
 });
 
-describe("phase 49 grounding schemas", () => {
-  const grounding = {
-    summary:
-      "Canon-grounded station commander with battlefield leadership and bounded human-scale power.",
-    facts: [
-      "Held the northern signal station through repeated sieges.",
-      "Coordinates retreat and relay doctrine under pressure.",
-    ],
-    abilities: ["Command presence", "Signal doctrine", "Field tactics"],
-    constraints: ["Human physiology", "Limited reach without support"],
-    signatureMoves: ["Coordinated fallback with relay flares"],
-    strongPoints: ["Battlefield control", "Morale under siege"],
-    vulnerabilities: ["Can be overrun by superior force"],
-    uncertaintyNotes: ["Solo combat ceiling is only lightly attested in canon."],
-    powerProfile: {
-      attack: "Human-scale martial threat with command support.",
-      speed: "Normal human speed with veteran battlefield timing.",
-      durability: "Human durability with siege-hardened endurance.",
-      range: "Short personal reach, extended by support assets.",
-      strengths: ["Command discipline", "Endurance", "Tactical reading"],
-      constraints: ["Needs allies or equipment for area control"],
-      vulnerabilities: ["Vulnerable when isolated"],
-      uncertaintyNotes: ["Support-asset dependence varies by source."],
-    },
-    sources: [
+describe("phase 57 powerStats schemas", () => {
+  const powerStats = {
+    attackPotency: { tier: "City Block", rank: 8 },
+    speed: { tier: "Massively Hypersonic", rank: 7 },
+    durability: { tier: "City Block", rank: 9 },
+    intelligence: { tier: "Genius", rank: 8 },
+    hax: [
       {
-        kind: "canon" as const,
-        label: "Station Chronicle",
-        excerpt: "Captain Mire held the relay until the last evacuation horn.",
+        name: "Infinity",
+        type: "Spatial Manipulation",
+        bypassTier: "City",
+        limitations: ["Can be bypassed by Domain Expansion"],
       },
     ],
-  } satisfies CharacterGroundingProfile;
+    vulnerabilities: [
+      { description: "Political isolation", severity: "major" as const },
+    ],
+  };
 
   const draft = {
     identity: {
@@ -2276,18 +2446,16 @@ describe("phase 49 grounding schemas", () => {
       worldgenOrigin: "known-ip",
       legacyTags: ["legacy"],
     },
-    grounding,
+    powerStats,
   };
 
-  it("preserves grounding across draft and record schemas", () => {
+  it("preserves powerStats across draft and record schemas", () => {
     const draftResult = characterDraftSchema.safeParse(draft);
     expect(draftResult.success).toBe(true);
     if (draftResult.success) {
-      expect(draftResult.data.grounding?.summary).toContain("Canon-grounded");
-      expect(draftResult.data.grounding?.powerProfile?.constraints).toEqual([
-        "Needs allies or equipment for area control",
-      ]);
-      expect(draftResult.data.grounding?.sources[0]?.label).toBe("Station Chronicle");
+      expect(draftResult.data.powerStats?.attackPotency.tier).toBe("City Block");
+      expect(draftResult.data.powerStats?.hax[0]?.name).toBe("Infinity");
+      expect(draftResult.data.powerStats?.vulnerabilities[0]?.severity).toBe("major");
     }
 
     const recordResult = characterRecordSchema.safeParse({
@@ -2300,9 +2468,17 @@ describe("phase 49 grounding schemas", () => {
     });
     expect(recordResult.success).toBe(true);
     if (recordResult.success) {
-      expect(recordResult.data.grounding?.powerProfile?.vulnerabilities).toEqual([
-        "Vulnerable when isolated",
-      ]);
+      expect(recordResult.data.powerStats?.speed.tier).toBe("Massively Hypersonic");
+      expect(recordResult.data.powerStats?.intelligence.rank).toBe(8);
+    }
+  });
+
+  it("accepts draft without powerStats (undefined)", () => {
+    const { powerStats: _ps, ...draftWithout } = draft;
+    const result = characterDraftSchema.safeParse(draftWithout);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.powerStats).toBeUndefined();
     }
   });
 });
@@ -2545,5 +2721,151 @@ describe("phase 30 start and loadout schemas", () => {
     });
 
     expect(result.success).toBe(true);
+  });
+});
+
+// --- VS Battles Power Scaling schema tests (Phase 57) ---
+
+import {
+  powerStatsSchema,
+  haxAbilitySchema,
+  characterVulnerabilitySchema,
+} from "../schemas.js";
+
+describe("powerStatsSchema", () => {
+  const validPowerStats = {
+    attackPotency: { tier: "City", rank: 7 },
+    speed: { tier: "Hypersonic", rank: 5 },
+    durability: { tier: "Mountain", rank: 3 },
+    intelligence: { tier: "Genius", rank: 8 },
+    hax: [],
+    vulnerabilities: [],
+  };
+
+  it("accepts valid input with exact tier names", () => {
+    const result = powerStatsSchema.safeParse(validPowerStats);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.attackPotency.tier).toBe("City");
+      expect(result.data.speed.tier).toBe("Hypersonic");
+    }
+  });
+
+  it("normalizes variant tier names from LLM output", () => {
+    const variantInput = {
+      attackPotency: { tier: "city level", rank: 7 },
+      speed: { tier: "MHS+", rank: 5 },
+      durability: { tier: "planetary", rank: 3 },
+      intelligence: { tier: "super genius", rank: 8 },
+      hax: [],
+      vulnerabilities: [],
+    };
+    const result = powerStatsSchema.safeParse(variantInput);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.attackPotency.tier).toBe("City");
+      expect(result.data.speed.tier).toBe("Massively Hypersonic");
+      expect(result.data.durability.tier).toBe("Planet");
+      expect(result.data.intelligence.tier).toBe("Supergenius");
+    }
+  });
+
+  it("rejects completely unknown tier names", () => {
+    const invalid = {
+      ...validPowerStats,
+      attackPotency: { tier: "Cosmic Level", rank: 5 },
+    };
+    expect(powerStatsSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it("rejects unknown speed tier", () => {
+    const invalid = {
+      ...validPowerStats,
+      speed: { tier: "Ultra Fast", rank: 5 },
+    };
+    expect(powerStatsSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it("rejects rank below 1", () => {
+    const invalid = {
+      ...validPowerStats,
+      attackPotency: { tier: "City", rank: 0 },
+    };
+    expect(powerStatsSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it("rejects rank above 10", () => {
+    const invalid = {
+      ...validPowerStats,
+      attackPotency: { tier: "City", rank: 11 },
+    };
+    expect(powerStatsSchema.safeParse(invalid).success).toBe(false);
+  });
+});
+
+describe("haxAbilitySchema", () => {
+  it("accepts valid ability with bypass tier", () => {
+    const result = haxAbilitySchema.safeParse({
+      name: "Infinity",
+      type: "Spatial Manipulation",
+      bypassTier: "Universal",
+      limitations: ["Domain Expansion disables it"],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.bypassTier).toBe("Universal");
+    }
+  });
+
+  it("accepts ability with null bypass tier", () => {
+    const result = haxAbilitySchema.safeParse({
+      name: "Enhanced Senses",
+      type: "Sensory",
+      bypassTier: null,
+      limitations: [],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.bypassTier).toBeNull();
+    }
+  });
+
+  it("normalizes bypass tier variants", () => {
+    const result = haxAbilitySchema.safeParse({
+      name: "Reality Warp",
+      type: "Reality Manipulation",
+      bypassTier: "planetary",
+      limitations: [],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.bypassTier).toBe("Planet");
+    }
+  });
+});
+
+describe("characterVulnerabilitySchema", () => {
+  it("accepts valid vulnerability", () => {
+    const result = characterVulnerabilitySchema.safeParse({
+      description: "Weak to holy weapons",
+      severity: "major",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects invalid severity", () => {
+    const result = characterVulnerabilitySchema.safeParse({
+      description: "Weak to fire",
+      severity: "extreme",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects empty description", () => {
+    const result = characterVulnerabilitySchema.safeParse({
+      description: "",
+      severity: "minor",
+    });
+    expect(result.success).toBe(false);
   });
 });

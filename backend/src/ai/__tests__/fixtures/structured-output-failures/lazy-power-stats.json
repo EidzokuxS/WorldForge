@@ -1,0 +1,13 @@
+{
+  "fixtureId": "lazy-power-stats",
+  "targetSchemaFamily": "powerStats.v1",
+  "source": ".planning/phases/74-structured-prompt-contracts-and-model-facing-schema-hardenin/74-REVIEWS.md:297; backend/src/character/prompt-contract.ts:88",
+  "malformedObject": {
+    "attack": "godlike",
+    "speed": "fast",
+    "defense": "unknown",
+    "intelligence": "smart",
+    "hax": "many",
+    "vulnerabilities": "none"
+  }
+}

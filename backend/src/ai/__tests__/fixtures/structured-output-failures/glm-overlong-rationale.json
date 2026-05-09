@@ -1,0 +1,11 @@
+{
+  "fixtureId": "glm-overlong-rationale",
+  "targetSchemaFamily": "oracle.v1",
+  "source": ".planning/phases/74-structured-prompt-contracts-and-model-facing-schema-hardenin/74-REVIEWS.md:31; .planning/phases/74-structured-prompt-contracts-and-model-facing-schema-hardenin/74-03-PLAN.md:105",
+  "malformedObject": {
+    "outcome": "partial_success",
+    "confidence": 0.61,
+    "reasoning": "The model keeps narrating rationale beyond the contract cap by restating every visible condition, every inferred participant intent, every possible future consequence, and every hedge about uncertainty instead of returning the compact adjudication field. It continues to explain why each nearby character might react, why the player action might matter, why the source material could imply different outcomes, why the hidden state could change, and why the same decision should be considered from several angles. This text is intentionally sanitized, generic, and overlong so tests can lock the failure class without storing raw provider output or private scene data. The important defect is length and structure, not the specific fiction.",
+    "visibleResult": "The action partially works, but the scene remains unstable."
+  }
+}

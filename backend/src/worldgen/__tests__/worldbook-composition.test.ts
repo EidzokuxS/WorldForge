@@ -198,6 +198,57 @@ describe("composeWorldbookLibraryRecords", () => {
     expect(mockSafeGenerateObject).toHaveBeenCalledTimes(2);
   });
 
+  it("adds exact structured prompt contracts to source detection and relevance filtering", async () => {
+    const primary = buildRecord({
+      id: "wb-primary",
+      displayName: "Voices of the Void",
+      entries: [
+        { name: "Signal Tower", type: "location", summary: "A lonely relay site." },
+      ],
+    });
+    const supplementary = buildRecord({
+      id: "wb-supp",
+      displayName: "SCP Foundation",
+      entries: [
+        { name: "SCP-100", type: "character", summary: "A contained entity." },
+        { name: "SCP-101", type: "lore_general", summary: "A containment protocol." },
+      ],
+    });
+
+    mockSafeGenerateObject.mockResolvedValueOnce({
+      object: { primarySource: "Voices of the Void", reasoning: "Primary world" },
+    });
+    mockSafeGenerateObject.mockResolvedValueOnce({
+      object: {
+        relevantIndices: [0],
+        reasoning: "Entity is directly relevant",
+      },
+    });
+
+    await composeWorldbookLibraryRecords(
+      [primary, supplementary],
+      "A campaign set at a Voices of the Void relay site with one SCP crossover",
+    );
+
+    const sourcePrompt = String(mockSafeGenerateObject.mock.calls[0]?.[0]?.prompt ?? "");
+    expect(sourcePrompt).toContain("STRUCTURED_OUTPUT_CONTRACT: worldbook-composition.v1");
+    expect(sourcePrompt).toContain("{ \"primarySource\": \"Voices of the Void\", \"reasoning\":");
+    expect(sourcePrompt).toContain("Minimal valid output");
+    expect(sourcePrompt).toContain("Invalid example");
+    expect(sourcePrompt).toContain("Copy sourceName exactly from Available worldbook sources");
+    expect(sourcePrompt).toContain("Do not invent, rename, translate, or normalize source identity");
+    expect(sourcePrompt).toContain("reasoning <= 240 characters");
+
+    const filterPrompt = String(mockSafeGenerateObject.mock.calls[1]?.[0]?.prompt ?? "");
+    expect(filterPrompt).toContain("STRUCTURED_OUTPUT_CONTRACT: worldbook-composition.v1");
+    expect(filterPrompt).toContain("{ \"relevantIndices\": [0], \"reasoning\":");
+    expect(filterPrompt).toContain("relevantIndices must be an array of integer indices from the numbered list");
+    expect(filterPrompt).toContain("Minimal valid output");
+    expect(filterPrompt).toContain("Invalid example");
+    expect(filterPrompt).toContain("Do not return entry names, strings, source names, or objects inside relevantIndices");
+    expect(filterPrompt).toContain("Do not add lore not present in the numbered entries");
+  });
+
   it("fails closed when supplementary relevance filtering fails", async () => {
     const primary = buildRecord({
       id: "wb-primary",

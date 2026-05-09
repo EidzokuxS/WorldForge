@@ -17,6 +17,12 @@ import {
   readPendingCommittedEvents,
   type PendingCommittedEvent,
 } from "../vectors/episodic-events.js";
+import {
+  toPlayerPerceivableWorldBrainDirection,
+  type WorldBrainSceneDirection,
+  type WorldBrainSceneSeed,
+  type WorldBrainRunSource,
+} from "./world-brain.js";
 
 export interface SceneEffect {
   id: string;
@@ -61,6 +67,8 @@ export interface SceneAssembly {
   openingState: AuthoritativeOpeningState | null;
   currentScene: AuthoritativeSceneContext | null;
   presentNpcNames: string[];
+  sceneDirection: WorldBrainSceneDirection | null;
+  playerPerceivableSceneDirection: WorldBrainSceneDirection | null;
   awareness: {
     contract: typeof AWARENESS_BAND_CONTRACT;
     byNpcName: Record<string, "clear" | "hint" | "none">;
@@ -70,7 +78,7 @@ export interface SceneAssembly {
   recentContext: Array<{
     tick: number;
     summary: string;
-    source: "location_recent_event" | "committed_event";
+    source: "location_recent_event" | "world_thread_signal" | "committed_event";
   }>;
   sceneEffects: SceneEffect[];
   playerPerceivableConsequences: string[];
@@ -83,6 +91,8 @@ export interface AssembleSceneOptions {
   pendingEventTicks: number[];
   toolCalls: Array<{ tool: string; args: unknown; result: unknown }>;
   openingScene?: boolean;
+  playerLabel?: string | null;
+  sceneDirection?: WorldBrainSceneDirection | null;
 }
 
 function parseStringArray(value: unknown): string[] {
@@ -128,6 +138,48 @@ function uniqueSummaries(values: string[]): string[] {
   return unique;
 }
 
+function uniqueActorNames(values: Array<string | null | undefined>): string[] {
+  return uniqueSummaries(values.filter((value): value is string => typeof value === "string"));
+}
+
+function reconcileSceneDirection(
+  direction: WorldBrainSceneDirection,
+  options: {
+    playerLabel: string | null;
+    presentNpcNames: string[];
+    sceneEffects: SceneEffect[];
+  },
+): WorldBrainSceneDirection {
+  const visibleActorNames = new Set(
+    uniqueActorNames([
+      options.playerLabel,
+      ...options.presentNpcNames,
+      ...options.sceneEffects.flatMap((effect) => [effect.actor, effect.target]),
+    ]).map((name) => name.toLowerCase()),
+  );
+
+  const focalActorNames = uniqueActorNames(
+    direction.focalActorNames.filter((name) => visibleActorNames.has(name.toLowerCase())),
+  );
+  const backgroundActorNames = uniqueActorNames(
+    direction.backgroundActorNames.filter((name) => visibleActorNames.has(name.toLowerCase())),
+  ).filter((name) => !focalActorNames.some((focal) => focal.toLowerCase() === name.toLowerCase()));
+
+  return {
+    ...direction,
+    focalActorNames:
+      focalActorNames.length > 0
+        ? focalActorNames
+        : options.playerLabel
+          ? [options.playerLabel]
+          : direction.focalActorNames,
+    backgroundActorNames,
+    presenceReasons: direction.presenceReasons.filter((reason) =>
+      visibleActorNames.has(reason.actorName.toLowerCase()),
+    ),
+  };
+}
+
 export function collapseRepeatedNarrationBlocks(text: string): string {
   const blocks = text
     .split(/\n\s*\n/g)
@@ -151,6 +203,51 @@ export function collapseRepeatedNarrationBlocks(text: string): string {
   }
 
   return collapsed.join("\n\n").trim();
+}
+
+export function buildSceneDirectionSeed(
+  sceneAssembly: Pick<
+    SceneAssembly,
+    | "openingScene"
+    | "openingState"
+    | "currentScene"
+    | "presentNpcNames"
+    | "awareness"
+    | "recentContext"
+    | "sceneEffects"
+    | "playerPerceivableConsequences"
+  >,
+  options: {
+    runSource: WorldBrainRunSource;
+    playerLabel: string;
+    playerAction?: string;
+    intent?: string;
+    method?: string;
+    oracleOutcome?: string;
+    targetLabel?: string | null;
+  },
+): WorldBrainSceneSeed {
+  return {
+    runSource: options.runSource,
+    playerLabel: options.playerLabel,
+    sceneName: sceneAssembly.currentScene?.name ?? null,
+    sceneDescription: sceneAssembly.currentScene?.description ?? null,
+    sceneTags: sceneAssembly.currentScene?.tags ?? [],
+    immediateSituation: sceneAssembly.openingState?.immediateSituation ?? null,
+    entryPressure: sceneAssembly.openingState?.entryPressure ?? [],
+    openingPromptLines: sceneAssembly.openingState?.promptLines ?? [],
+    sceneContextLines: sceneAssembly.openingState?.sceneContextLines ?? [],
+    clearActorNames: sceneAssembly.presentNpcNames,
+    hintSignals: sceneAssembly.awareness.hintSignals,
+    recentContextSummaries: sceneAssembly.recentContext.map((entry) => entry.summary),
+    sceneEffectSummaries: sceneAssembly.sceneEffects.map((effect) => effect.summary),
+    playerPerceivableConsequences: sceneAssembly.playerPerceivableConsequences,
+    playerAction: options.playerAction,
+    intent: options.intent,
+    method: options.method,
+    oracleOutcome: options.oracleOutcome,
+    targetLabel: options.targetLabel ?? null,
+  };
 }
 
 function buildOpeningState(campaignId: string): AuthoritativeOpeningState | null {
@@ -242,9 +339,18 @@ function summarizeToolCall(
   const result = (toolCall.result ?? {}) as Record<string, unknown>;
   const inner = (result.result ?? {}) as Record<string, unknown>;
 
+  if (result.success !== true) {
+    return null;
+  }
+
   switch (toolCall.tool) {
     case "log_event":
-      if (typeof args.text === "string" && args.text.trim().length > 0) {
+      if (
+        inner.persisted === true
+        && inner.durability === "durable"
+        && typeof args.text === "string"
+        && args.text.trim().length > 0
+      ) {
         return {
           id: `tool-${index}`,
           kind: "player_action",
@@ -276,17 +382,43 @@ function summarizeToolCall(
       return null;
 
     case "spawn_npc":
-      if (typeof args.name === "string" && args.name.trim().length > 0) {
+      if (
+        currentScene
+        && typeof inner.locationId === "string"
+        && inner.locationId === currentScene.id
+        && typeof inner.name === "string"
+        && inner.name.trim().length > 0
+      ) {
         return {
           id: `tool-${index}`,
           kind: "npc_reaction",
           source: "tool_call",
-          summary: `${args.name} becomes visibly present in the scene.`,
+          summary: `${inner.name} becomes visibly present in the scene.`,
           perceivable: true,
-          actor: typeof args.name === "string" ? args.name : null,
+          actor: inner.name,
+          target: null,
+          locationId: currentScene.id,
+          causalDetail: "A new present-scene actor was introduced during hidden resolution.",
+        };
+      }
+      return null;
+
+    case "promote_npc":
+      if (typeof args.npcRef === "string" && args.npcRef.trim().length > 0) {
+        const tier =
+          typeof inner.newTier === "string" && inner.newTier.trim().length > 0
+            ? inner.newTier
+            : "future-relevant";
+        return {
+          id: `tool-${index}`,
+          kind: "npc_reaction",
+          source: "tool_call",
+          summary: `${args.npcRef} becomes ${tier} to the ongoing story.`,
+          perceivable: true,
+          actor: args.npcRef,
           target: null,
           locationId: currentScene?.id ?? null,
-          causalDetail: "A new present-scene actor was introduced during hidden resolution.",
+          causalDetail: "A temporary scene actor was promoted through authoritative runtime state.",
         };
       }
       return null;
@@ -428,10 +560,17 @@ function buildScenePresence(
   }
 
   const broadLocationId = currentLocationId ?? player.currentLocationId ?? null;
-  const playerSceneScopeId = resolveStoredSceneScopeId(
-    broadLocationId,
-    player.currentSceneLocationId ?? currentScene.id,
-  );
+  let playerSceneScopeId = player.currentSceneLocationId ?? null;
+  if (playerSceneScopeId && playerSceneScopeId === broadLocationId) {
+    const scopeLocation = db
+      .select({ kind: locations.kind })
+      .from(locations)
+      .where(eq(locations.id, playerSceneScopeId))
+      .get();
+    if (scopeLocation?.kind === "macro") {
+      playerSceneScopeId = null;
+    }
+  }
 
   if (!broadLocationId || !playerSceneScopeId) {
     return {
@@ -524,12 +663,24 @@ export function assembleAuthoritativeScene(
 
   const pendingEvents = [...new Set(options.pendingEventTicks)]
     .flatMap((tick) => readPendingCommittedEvents(options.campaignId, tick));
+  const committedEventPairs = pendingEvents
+    .map((event) => ({
+      event,
+      effect: summarizeCommittedEvent(event, currentScene),
+    }))
+    .filter((entry): entry is { event: PendingCommittedEvent; effect: SceneEffect } =>
+      Boolean(entry.effect),
+    );
+  const committedEventEffects = committedEventPairs.map((entry) => entry.effect);
   const recentLocationEvents = currentScene
     ? listRecentLocationEvents({
         campaignId: options.campaignId,
         locationRef: currentScene.id,
         limit: 5,
-      })
+      }).filter((event) =>
+        event.visibility === "player_perceivable"
+        || event.visibility === "local_signal",
+      )
     : [];
 
   const sceneEffects = uniqueSummaries([
@@ -540,10 +691,7 @@ export function assembleAuthoritativeScene(
       .map((toolCall, index) => summarizeToolCall(index, toolCall, currentScene))
       .filter((effect): effect is SceneEffect => Boolean(effect))
       .map((effect) => effect.summary),
-    ...pendingEvents
-      .map((event) => summarizeCommittedEvent(event, currentScene))
-      .filter((effect): effect is SceneEffect => Boolean(effect))
-      .map((effect) => effect.summary),
+    ...committedEventEffects.map((effect) => effect.summary),
   ]);
 
   const typedSceneEffects: SceneEffect[] = [
@@ -563,9 +711,7 @@ export function assembleAuthoritativeScene(
     ...options.toolCalls
       .map((toolCall, index) => summarizeToolCall(index, toolCall, currentScene))
       .filter((effect): effect is SceneEffect => Boolean(effect)),
-    ...pendingEvents
-      .map((event) => summarizeCommittedEvent(event, currentScene))
-      .filter((effect): effect is SceneEffect => Boolean(effect)),
+    ...committedEventEffects,
   ].filter(
     (effect, index, allEffects) =>
       allEffects.findIndex(
@@ -577,11 +723,11 @@ export function assembleAuthoritativeScene(
     ...recentLocationEvents.map((event) => ({
       tick: event.tick,
       summary: event.summary,
-      source: "location_recent_event" as const,
+      source: event.threadId ? "world_thread_signal" as const : "location_recent_event" as const,
     })),
-    ...pendingEvents.map((event) => ({
+    ...committedEventPairs.map(({ event, effect }) => ({
       tick: event.tick,
-      summary: event.text,
+      summary: effect.summary,
       source: "committed_event" as const,
     })),
   ].filter(
@@ -593,11 +739,23 @@ export function assembleAuthoritativeScene(
       ) === index,
   );
 
+  const sceneDirection = options.sceneDirection
+    ? reconcileSceneDirection(options.sceneDirection, {
+        playerLabel: options.playerLabel ?? null,
+        presentNpcNames,
+        sceneEffects: typedSceneEffects,
+      })
+    : null;
+
   return {
     openingScene: options.openingScene ?? false,
     openingState,
     currentScene,
     presentNpcNames,
+    sceneDirection,
+    playerPerceivableSceneDirection: sceneDirection
+      ? toPlayerPerceivableWorldBrainDirection(sceneDirection)
+      : null,
     awareness: scenePresence.awareness,
     recentContext,
     sceneEffects: typedSceneEffects,

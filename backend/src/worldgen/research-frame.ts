@@ -117,7 +117,7 @@ export function buildWorldgenResearchFrameBlock(
     : "  - (none)";
 
   return `WORLDGEN RESEARCH FRAME:
-  - Canonical subject: ${frame.franchise}
+  - Selected source: ${frame.franchise}
   - Divergence mode: ${frame.divergenceMode}
   - Premise snapshot: ${frame.premise}
 ACTIVE WORLD-STATE / OVERLAY NOTES:

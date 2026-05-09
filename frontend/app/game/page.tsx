@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -9,22 +9,20 @@ import { NarrativeLog } from "@/components/game/narrative-log";
 import { CharacterPanel } from "@/components/game/character-panel";
 import { LorePanel } from "@/components/game/lore-panel";
 import { CheckpointPanel } from "@/components/game/checkpoint-panel";
-import { ActionBar } from "@/components/game/action-bar";
-import { OraclePanel, type OracleResultData } from "@/components/game/oracle-panel";
-import { QuickActions } from "@/components/game/quick-actions";
-import { Home, Save, Settings } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
+import type { OracleResultData } from "@/components/game/oracle-panel";
+import { GameSceneShell } from "@/components/game/play-surface/game-scene-shell";
+import { SceneBackdrop } from "@/components/game/play-surface/scene-backdrop";
+import { SceneHUD, type SceneHUDStatus } from "@/components/game/play-surface/scene-hud";
+import { StageOverlay } from "@/components/game/play-surface/stage-overlay";
+import { NarrationDock } from "@/components/game/play-surface/narration-dock";
+import { ActionDock } from "@/components/game/play-surface/action-dock";
+import { WidgetRail } from "@/components/game/play-surface/widget-rail";
+import { DrawerHost, type DrawerSlots } from "@/components/game/play-surface/drawer-host";
+import { PresenceLayer } from "@/components/game/play-surface/presence-layer";
+import { InspectDrawer } from "@/components/game/play-surface/inspect-drawer";
+import { CONTINUE_ACTION_PAYLOAD } from "@/lib/display-beats";
+import { cn } from "@/lib/utils";
+import { useGamePlaySurfaceState } from "./use-game-play-surface-state";
 import type { CampaignMeta, ChatMessage } from "@worldforge/shared";
 import { formatLookupLogEntry, isChatMessage } from "@worldforge/shared";
 import { getErrorMessage } from "@/lib/settings";
@@ -51,7 +49,52 @@ import { deriveGameMessageKind } from "@/lib/gameplay-text";
 type TurnPhase = "idle" | "streaming" | "finalizing";
 type QuickAction = { label: string; action: string };
 type SceneProgress = "opening" | "scene-settling" | null;
+type SceneSettlingStatus = { phase?: string; opening?: boolean };
+type FinalizingTurnStatus = { stage?: string; phase?: string; tick?: number };
 type DisplayChatMessage = ChatMessage & { debugReasoning?: string | null };
+
+function StageContextCard({
+  label,
+  title,
+  children,
+  accent = false,
+}: {
+  label: string;
+  title?: string | null;
+  children?: ReactNode;
+  accent?: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-[10px] border border-white/10 bg-black/58 px-3.5 py-3 text-zinc-100 shadow-[0_16px_44px_rgba(0,0,0,0.3)] backdrop-blur-md",
+        accent && "border-[#E63E00]/35 bg-[#E63E00]/[0.08]",
+      )}
+    >
+      <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
+        {label}
+      </p>
+      {title ? (
+        <p className="mt-1 text-[15px] font-semibold leading-snug text-zinc-100">
+          {title}
+        </p>
+      ) : null}
+      {children ? (
+        <div className="mt-2 text-[13px] leading-5 text-zinc-300">
+          {children}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function StageChip({ children }: { children: ReactNode }) {
+  return (
+    <span className="rounded-full border border-white/10 bg-zinc-950/70 px-2.5 py-1 text-[11px] font-semibold text-zinc-300">
+      {children}
+    </span>
+  );
+}
 
 type TravelFeedbackState = {
   locationId: string;
@@ -231,22 +274,76 @@ function hasNarratedAssistantMessage(messages: ChatMessage[]): boolean {
   );
 }
 
+function renderInventoryDrawer(
+  carriedItems: NonNullable<WorldData["player"]>["inventory"],
+  equippedItems: NonNullable<WorldData["player"]>["equipment"],
+) {
+  const itemClass = "rounded-[8px] border border-white/10 bg-black/20 px-3 py-2";
+
+  return (
+    <div data-testid="inventory-drawer" className="space-y-5">
+      <section className="space-y-3">
+        <h3 className="text-[12px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+          Equipped
+        </h3>
+        {equippedItems.length > 0 ? (
+          <ul className="space-y-2">
+            {equippedItems.map((item) => (
+              <li key={item.id} className={itemClass}>
+                <p className="text-[16px] leading-6 text-zinc-100">{item.name}</p>
+                {item.equippedSlot || item.isSignature || item.tags.length > 0 ? (
+                  <p className="mt-1 text-[12px] leading-5 text-zinc-500">
+                    {[item.equippedSlot, item.isSignature ? "signature" : null, ...item.tags]
+                      .filter(Boolean)
+                      .join(" / ")}
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className={itemClass}>Nothing is visibly equipped.</p>
+        )}
+      </section>
+      <section className="space-y-3">
+        <h3 className="text-[12px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+          Carried
+        </h3>
+        {carriedItems.length > 0 ? (
+          <ul className="space-y-2">
+            {carriedItems.map((item) => (
+              <li key={item.id} className={itemClass}>
+                <p className="text-[16px] leading-6 text-zinc-100">{item.name}</p>
+                {item.tags.length > 0 ? (
+                  <p className="mt-1 text-[12px] leading-5 text-zinc-500">
+                    {item.tags.join(" / ")}
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className={itemClass}>You are not carrying anything visible right now.</p>
+        )}
+      </section>
+    </div>
+  );
+}
+
 export default function GamePage() {
   const router = useRouter();
   const { settings } = useSettings();
   const [activeCampaign, setActiveCampaign] = useState<CampaignMeta | null>(null);
-  const [premise, setPremise] = useState("");
   const [messages, setMessages] = useState<DisplayChatMessage[]>([]);
-  const [input, setInput] = useState("");
   const [turnPhase, setTurnPhase] = useState<TurnPhase>("idle");
   const [sceneProgress, setSceneProgress] = useState<SceneProgress>(null);
+  const [sceneProgressCopy, setSceneProgressCopy] = useState<string | null>(null);
   const [showRawReasoning, setShowRawReasoning] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
   const [hasLiveTurnSnapshot, setHasLiveTurnSnapshot] = useState(false);
   const [lastOracleResult, setLastOracleResult] = useState<OracleResultData | null>(null);
   const [quickActions, setQuickActions] = useState<QuickAction[]>([]);
   const [worldData, setWorldData] = useState<WorldData | null>(null);
-  const [checkpointOpen, setCheckpointOpen] = useState(false);
   const [travelFeedback, setTravelFeedback] = useState<string | null>(null);
   const bufferedQuickActionsRef = useRef<QuickAction[]>([]);
   const messagesRef = useRef<DisplayChatMessage[]>([]);
@@ -309,12 +406,29 @@ export default function GamePage() {
     setQuickActions(bufferedQuickActionsRef.current);
   }, []);
 
+  const finishCompletedTurn = useCallback(
+    (campaignId: string) => {
+      setSceneProgress("scene-settling");
+      setSceneProgressCopy("Syncing world state");
+      setTurnPhase("finalizing");
+      setHasLiveTurnSnapshot(true);
+      revealBufferedQuickActions();
+
+      void (async () => {
+        await refreshWorldData(campaignId);
+        setSceneProgress(null);
+        setTurnPhase("idle");
+      })();
+    },
+    [refreshWorldData, revealBufferedQuickActions],
+  );
+
   useEffect(() => {
     setShowRawReasoning(settings.ui.showRawReasoning);
   }, [settings.ui.showRawReasoning]);
 
   const restoreGameplayState = useCallback(
-    async (campaignId: string, fallbackPremise: string) => {
+    async (campaignId: string) => {
       const [history, world] = await Promise.all([
         chatHistory(campaignId),
         getWorldData(campaignId),
@@ -325,7 +439,6 @@ export default function GamePage() {
       const displayMessages = toDisplayMessages(safeMessages);
 
       setMessages(displayMessages);
-      setPremise(history.premise || fallbackPremise);
       setHasLiveTurnSnapshot(history.hasLiveTurnSnapshot);
       setWorldData(world);
 
@@ -337,11 +450,24 @@ export default function GamePage() {
     [],
   );
 
-  const applySceneSettlingStatus = useCallback((status?: { phase?: string; opening?: boolean }) => {
+  useEffect(() => {
+    if (sceneProgress === null) {
+      setSceneProgressCopy(null);
+    }
+  }, [sceneProgress]);
+
+  const applySceneSettlingStatus = useCallback((status?: SceneSettlingStatus) => {
     const phase = status?.phase ?? "";
     const isOpeningPhase = status?.opening === true || phase.startsWith("opening");
     setSceneProgress(isOpeningPhase ? "opening" : "scene-settling");
+    setSceneProgressCopy(getSceneProgressCopy(status));
     setTurnPhase("idle");
+  }, []);
+
+  const applyFinalizingStatus = useCallback((status?: FinalizingTurnStatus) => {
+    setSceneProgress("scene-settling");
+    setSceneProgressCopy(getFinalizingProgressCopy(status));
+    setTurnPhase("finalizing");
   }, []);
 
   const requestOpeningScene = useCallback(
@@ -352,6 +478,7 @@ export default function GamePage() {
 
       openingRequestCampaignRef.current = campaignId;
       setSceneProgress("opening");
+      setSceneProgressCopy("Grounding opening");
       setTurnPhase("idle");
 
       let openingNarrative = "";
@@ -397,7 +524,12 @@ export default function GamePage() {
         });
       }
     },
-    [applySceneSettlingStatus, refreshWorldData, upsertAssistantMessage],
+    [
+      applySceneSettlingStatus,
+      attachReasoningToLatestAssistant,
+      refreshWorldData,
+      upsertAssistantMessage,
+    ],
   );
 
   const rollbackRetryBoundary = useCallback(
@@ -414,7 +546,7 @@ export default function GamePage() {
       clearQuickActionState();
 
       try {
-        await restoreGameplayState(campaignId, fallbackPremise);
+        await restoreGameplayState(campaignId);
       } catch {
         if (getErrorMessage(cause, "").includes("Nothing to retry")) {
           setHasLiveTurnSnapshot(false);
@@ -445,7 +577,7 @@ export default function GamePage() {
 
         if (cancelled) return;
         setActiveCampaign(campaign);
-        const restored = await restoreGameplayState(campaign.id, campaign.premise);
+        const restored = await restoreGameplayState(campaign.id);
         if (!cancelled && !restored.hasNarratedAssistantMessage) {
           void requestOpeningScene(campaign.id);
         }
@@ -518,6 +650,16 @@ export default function GamePage() {
       ? getAuthoritativeSceneNpcs(worldData)
       : getFallbackSceneNpcs(worldData);
   }, [currentScene, worldData]);
+  const scenePresenceHints = currentScene?.awareness.hintSignals ?? [];
+  const offscreenAnchorCount = useMemo(() => {
+    if (!worldData || !currentScene) return 0;
+    const visibleIds = new Set(npcsHere.map((npc) => npc.id));
+    return worldData.npcs.filter((npc) => {
+      if (visibleIds.has(npc.id)) return false;
+      return npc.currentLocationId === currentScene.broadLocationId
+        && (npc.sceneScopeId ?? currentScene.id) !== currentScene.id;
+    }).length;
+  }, [currentScene, npcsHere, worldData]);
 
   const scenePanelData = useMemo(
     () => buildScenePanelData(currentScene, currentLocation),
@@ -543,6 +685,23 @@ export default function GamePage() {
 
   const canInteract = Boolean(activeCampaign) && !isInitializing;
   const isTurnBusy = turnPhase !== "idle" || sceneProgress !== null;
+  const playSurface = useGamePlaySurfaceState({
+    campaignId: activeCampaign?.id ?? null,
+    messages,
+    turnPhase,
+    sceneProgress,
+    oracleResult: lastOracleResult,
+    travelFeedback,
+    quickActions,
+  });
+  const selectedActor = useMemo(() => {
+    if (!worldData || !playSurface.selectedActorId) return null;
+    return worldData.npcs.find((npc) => npc.id === playSurface.selectedActorId) ?? null;
+  }, [playSurface.selectedActorId, worldData]);
+  const selectedActorLocation = useMemo(() => {
+    if (!worldData || !selectedActor?.currentLocationId) return null;
+    return worldData.locations.find((location) => location.id === selectedActor.currentLocationId) ?? null;
+  }, [selectedActor, worldData]);
 
   const submitLookup = async (
     commandText: string,
@@ -646,33 +805,63 @@ export default function GamePage() {
     }
   };
 
-  const submitAction = async (actionText: string) => {
-    if (!actionText || isTurnBusy || !activeCampaign) return;
+  const submitAction = async (
+    actionText: string,
+    onStreamAccepted?: () => void,
+  ): Promise<boolean> => {
+    if (!actionText || isTurnBusy || !activeCampaign) return false;
+    const campaignId = activeCampaign.id;
 
     const lookupRequest = parseExplicitLookupCommand(actionText);
     if (lookupRequest) {
       await submitLookup(actionText, lookupRequest);
-      return;
+      onStreamAccepted?.();
+      return true;
     }
 
     setTurnPhase("idle");
     setSceneProgress("scene-settling");
+    setSceneProgressCopy("Sending action");
     setLastOracleResult(null);
     setTravelFeedback(null);
     clearQuickActionState();
 
     let turnCompleted = false;
+    let actionStreamAccepted = false;
+    let actionStreamError: string | null = null;
+
+    const removeOptimisticActionMessages = () => {
+      setMessages((current) => {
+        const next = [...current];
+        const lastMessage = next[next.length - 1];
+        if (lastMessage?.role === "assistant") {
+          next.pop();
+        }
+        const prevMessage = next[next.length - 1];
+        if (prevMessage?.role === "user" && prevMessage.content === actionText) {
+          next.pop();
+        }
+        messagesRef.current = next;
+        return next;
+      });
+    };
 
     try {
-      const response = await chatAction(activeCampaign.id, actionText, actionText, "");
+      const response = await chatAction(campaignId, actionText, actionText, "");
 
       if (!response.body) {
         throw new Error("Empty response stream.");
       }
+      actionStreamAccepted = true;
+      onStreamAccepted?.();
 
       // Only add messages to chat once the stream connection succeeds
       const userMessage: ChatMessage = { role: "user", content: actionText };
-      setMessages((current) => [...current, userMessage]);
+      setMessages((current) => {
+        const next = [...current, userMessage];
+        messagesRef.current = next;
+        return next;
+      });
 
       let narrativeText = "";
 
@@ -694,55 +883,51 @@ export default function GamePage() {
             setTravelFeedback(formatTravelFeedback(locationChange));
           }
           // Refresh world data on any state change (movement, spawn, item transfer, etc.)
-          if (activeCampaign) {
-            void refreshWorldData(activeCampaign.id);
-          }
+          void refreshWorldData(campaignId);
         },
         onQuickActions: (actions) => {
           bufferQuickActions(actions);
         },
-        onFinalizing: () => {
-          setSceneProgress(null);
-          setTurnPhase("finalizing");
-        },
+        onFinalizing: applyFinalizingStatus,
         onDone: () => {
           turnCompleted = true;
-          setSceneProgress(null);
-          setTurnPhase("idle");
-          setHasLiveTurnSnapshot(true);
-          revealBufferedQuickActions();
-          // Refresh world data after every completed turn to sync all panels
-          if (activeCampaign) {
-            void refreshWorldData(activeCampaign.id);
-          }
+          finishCompletedTurn(campaignId);
         },
         onError: (error) => {
-          toast.error("Turn processing error", { description: error });
+          actionStreamError = error;
         },
       });
+
+      if (actionStreamError) {
+        throw new Error(actionStreamError);
+      }
     } catch (error) {
-      setMessages((current) => {
-        const next = [...current];
-        const lastMessage = next[next.length - 1];
-        if (lastMessage?.role === "assistant") {
-          next.pop();
+      clearQuickActionState();
+      setLastOracleResult(null);
+      setTravelFeedback(null);
+
+      if (actionStreamAccepted) {
+        try {
+          await restoreGameplayState(campaignId);
+        } catch {
+          removeOptimisticActionMessages();
+          setHasLiveTurnSnapshot(false);
         }
-        const prevMessage = next[next.length - 1];
-        if (prevMessage?.role === "user" && prevMessage.content === actionText) {
-          next.pop();
-        }
-        return next;
-      });
+      } else {
+        removeOptimisticActionMessages();
+      }
 
       toast.error("Failed to generate narrative", {
         description: getErrorMessage(error, "Unknown streaming error."),
       });
+      return false;
     } finally {
       if (!turnCompleted) {
         setSceneProgress(null);
         setTurnPhase("idle");
       }
     }
+    return true;
   };
 
   const handleRetry = async () => {
@@ -750,6 +935,7 @@ export default function GamePage() {
 
     setTurnPhase("idle");
     setSceneProgress("scene-settling");
+    setSceneProgressCopy("Retrying turn");
     setLastOracleResult(null);
     setTravelFeedback(null);
     clearQuickActionState();
@@ -798,19 +984,10 @@ export default function GamePage() {
         onQuickActions: (actions) => {
           bufferQuickActions(actions);
         },
-        onFinalizing: () => {
-          setSceneProgress(null);
-          setTurnPhase("finalizing");
-        },
+        onFinalizing: applyFinalizingStatus,
         onDone: () => {
           turnCompleted = true;
-          setSceneProgress(null);
-          setTurnPhase("idle");
-          setHasLiveTurnSnapshot(true);
-          revealBufferedQuickActions();
-          if (activeCampaign) {
-            void refreshWorldData(activeCampaign.id);
-          }
+          finishCompletedTurn(activeCampaign.id);
         },
         onError: (error) => {
           retryStreamError = error;
@@ -891,16 +1068,9 @@ export default function GamePage() {
     messages.length >= 2 &&
     messages[messages.length - 1]?.role === "assistant";
 
-  const handleSubmitAction = () => {
-    const playerAction = input.trim();
-    if (!playerAction) return;
-    setInput("");
-    void submitAction(playerAction);
-  };
-
-  const handleQuickAction = (actionText: string) => {
+  const handleContinueAction = () => {
     if (isTurnBusy) return;
-    void submitAction(actionText);
+    void submitAction(CONTINUE_ACTION_PAYLOAD);
   };
 
   const handleMove = (targetLocationName: string) => {
@@ -916,146 +1086,327 @@ export default function GamePage() {
     );
   }
 
-  return (
-    <div
-      data-testid="game-shell"
-      className="relative flex min-h-screen flex-col overflow-hidden bg-zinc-950 text-zinc-100"
-    >
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(244,244,245,0.08),_transparent_40%),linear-gradient(180deg,_rgba(24,24,27,0.98),_rgba(9,9,11,1))]" />
-      <div className="pointer-events-none absolute inset-y-0 left-1/2 hidden w-[38rem] -translate-x-1/2 bg-[radial-gradient(circle_at_center,_rgba(255,255,255,0.05),_transparent_68%)] blur-3xl xl:block" />
-      {/* Toolbar */}
-      <div className="relative z-10 flex items-center justify-between border-b border-white/8 bg-zinc-950/80 px-4 py-2 backdrop-blur-xl">
-        <div className="flex items-center gap-1">
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 gap-1.5 text-xs text-zinc-300 hover:bg-white/5 hover:text-white"
-              >
-                <Home className="h-3.5 w-3.5" />
-                Title
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Leave game?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Your progress is saved automatically. You can resume this campaign from the title screen.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={() => router.push("/")}>
-                  Go to Title
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 gap-1.5 text-xs text-zinc-300 hover:bg-white/5 hover:text-white"
-            onClick={() => router.push("/settings")}
-          >
-            <Settings className="h-3.5 w-3.5" />
-            Settings
-          </Button>
+  const hudStatus = getHudStatus(sceneProgress, turnPhase, playSurface.isAutoPlaying);
+  const turnProgressCopy = sceneProgressCopy
+    ?? (turnPhase === "finalizing" ? "Finalizing turn" : hudStatus);
+  const backdropSceneName = scenePanelData?.name ?? currentLocation?.name ?? null;
+  const backdropLocationName = scenePanelData?.broadLocationName ?? currentLocation?.name ?? null;
+  const selectedActorProfile = selectedActor?.characterRecord?.profile
+    ?? selectedActor?.draft?.profile
+    ?? null;
+  const characterPanelSubject = selectedActor
+    ? {
+        id: selectedActor.id,
+        name: selectedActor.name,
+        race: selectedActorProfile?.species ?? "",
+        gender: selectedActorProfile?.gender ?? "",
+        age: selectedActorProfile?.ageText ?? "",
+        appearance: selectedActorProfile?.appearance
+          || selectedActorProfile?.personaSummary
+          || selectedActor.persona,
+        hp: null,
+        tags: selectedActor.tags,
+        currentLocationId: selectedActor.currentLocationId,
+      }
+    : player;
+  const characterPanelCarriedItems = selectedActor ? [] : playerCarriedItems;
+  const characterPanelEquippedItems = selectedActor ? [] : playerEquippedItems;
+  const characterPanelLocationName = selectedActor
+    ? selectedActorLocation?.name ?? null
+    : locationName;
+  const latestDebugReasoning = [...messages]
+    .reverse()
+    .find((message) => message.role === "assistant" && message.debugReasoning?.trim())
+    ?.debugReasoning ?? null;
+  const inspectBeat = playSurface.currentBeat?.rawDetails
+    ? playSurface.currentBeat
+    : playSurface.beats.find((beat) => beat.rawDetails)
+      ?? playSurface.currentBeat;
+  const drawerSlots: DrawerSlots = {
+    log: (
+      <NarrativeLog
+        messages={messages}
+        isStreaming={turnPhase === "streaming"}
+        turnPhase={turnPhase}
+        sceneProgress={sceneProgress}
+        showRawReasoning={showRawReasoning}
+        onRetry={handleRetry}
+        onUndo={handleUndo}
+        onEdit={handleEdit}
+        canRetryUndo={canRetryUndo}
+      />
+    ),
+    world: (
+      <LocationPanel
+        location={currentLocation}
+        scene={scenePanelData}
+        connectedPaths={connectedPaths}
+        npcsHere={npcsHere}
+        itemsHere={itemsHere}
+        onMove={handleMove}
+        disabled={isTurnBusy}
+      />
+    ),
+    inventory: renderInventoryDrawer(playerCarriedItems, playerEquippedItems),
+    journal: <LorePanel campaignId={activeCampaign?.id ?? null} />,
+    character: (
+      <CharacterPanel
+        player={characterPanelSubject}
+        carriedItems={characterPanelCarriedItems}
+        equippedItems={characterPanelEquippedItems}
+        locationName={characterPanelLocationName}
+        portraitUrl={selectedActor ? undefined : portraitUrl}
+      />
+    ),
+    inspect: (
+      <InspectDrawer
+        currentBeat={inspectBeat}
+        oracleResult={lastOracleResult}
+        status={hudStatus}
+        showDebug={showRawReasoning}
+        debugReasoning={latestDebugReasoning}
+        stateSummary={travelFeedback}
+      />
+    ),
+    saves: activeCampaign ? (
+      <CheckpointPanel
+        campaignId={activeCampaign.id}
+        open={playSurface.activeDrawer === "saves"}
+        onClose={playSurface.closeDrawer}
+      />
+    ) : null,
+  };
+  const visibleActorCount = npcsHere.length;
+  const presenceTitle = visibleActorCount > 0
+    ? `${visibleActorCount} visible`
+    : scenePresenceHints.length > 0
+      ? "Something nearby"
+      : offscreenAnchorCount > 0
+        ? `${offscreenAnchorCount} not in sight`
+        : "No one visible";
+  const stageLeftSlot = (
+    <div className="space-y-3">
+      <StageContextCard
+        label="You"
+        title={player?.name ?? "Character"}
+        accent
+      >
+        <div className="flex flex-wrap gap-2">
+          {typeof player?.hp === "number" ? <StageChip>HP {player.hp}</StageChip> : null}
+          {playerEquippedItems.length > 0 ? <StageChip>{playerEquippedItems.length} equipped</StageChip> : null}
+          {playerCarriedItems.length > 0 ? <StageChip>{playerCarriedItems.length} carried</StageChip> : null}
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-8 gap-1.5 text-xs text-zinc-300 hover:bg-white/5 hover:text-white"
-          onClick={() => setCheckpointOpen(true)}
-        >
-          <Save className="h-3.5 w-3.5" />
-          Saves
-        </Button>
-      </div>
-      {travelFeedback ? (
-        <div className="relative z-10 border-b border-white/8 bg-amber-500/10 px-4 py-2 text-sm text-amber-100/90 backdrop-blur-xl">
-          {travelFeedback}
-        </div>
-      ) : null}
-      <div className="relative z-10 flex flex-1 flex-col overflow-hidden px-3 pb-3 pt-3 sm:px-4 lg:px-5">
-        <div className="mx-auto flex h-full w-full max-w-[1720px] flex-col gap-4 xl:grid xl:grid-cols-[minmax(280px,320px)_minmax(0,1fr)_minmax(280px,320px)] xl:items-start">
-          <div className="order-2 min-h-0 xl:order-1 xl:h-full xl:w-full">
-            <LocationPanel
-              location={currentLocation}
-              scene={scenePanelData}
-              connectedPaths={connectedPaths}
-              npcsHere={npcsHere}
-              itemsHere={itemsHere}
-              onMove={handleMove}
-              disabled={isTurnBusy}
-            />
-          </div>
-          <section
-            data-testid="game-reader-column"
-            className="order-1 flex min-h-0 flex-1 flex-col gap-4 xl:order-2 xl:h-full"
-          >
-            <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(39,39,42,0.78),rgba(18,18,21,0.96))] shadow-[0_30px_80px_rgba(0,0,0,0.45)]">
-              <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),transparent)]" />
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-[linear-gradient(180deg,transparent,rgba(9,9,11,0.92))]" />
-              <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-                <OraclePanel result={lastOracleResult} />
-                <NarrativeLog
-                  messages={messages}
-                  premise={premise}
-                  isStreaming={turnPhase === "streaming"}
-                  turnPhase={turnPhase}
-                  sceneProgress={sceneProgress}
-                  showRawReasoning={showRawReasoning}
-                  onRetry={handleRetry}
-                  onUndo={handleUndo}
-                  onEdit={handleEdit}
-                  canRetryUndo={canRetryUndo}
-                />
-              </div>
-            </div>
-            <div
-              data-testid="game-action-dock"
-              className="sticky bottom-0 z-20 -mt-10 pb-1 pt-10"
-            >
-              <div className="overflow-hidden rounded-[24px] border border-white/10 bg-zinc-950/88 shadow-[0_20px_60px_rgba(0,0,0,0.5)] backdrop-blur-2xl">
-                <div className="pointer-events-none h-10 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),transparent)]" />
-                <QuickActions
-                  actions={quickActions}
-                  onAction={handleQuickAction}
-                  disabled={isTurnBusy}
-                />
-                <ActionBar
-                  value={input}
-                  onChange={setInput}
-                  onSubmit={handleSubmitAction}
-                  isLoading={isTurnBusy}
-                  disabled={!canInteract || isTurnBusy}
-                  turnPhase={turnPhase}
-                />
-              </div>
-            </div>
-          </section>
-          <div className="order-3 min-h-0 xl:h-full xl:w-full">
-            <div className="flex h-full flex-col gap-4">
-              <CharacterPanel
-                player={player}
-                carriedItems={playerCarriedItems}
-                equippedItems={playerEquippedItems}
-                locationName={locationName}
-                portraitUrl={portraitUrl}
-              />
-              <LorePanel campaignId={activeCampaign?.id ?? null} />
-            </div>
-          </div>
-        </div>
-      </div>
-      {activeCampaign && (
-        <CheckpointPanel
-          campaignId={activeCampaign.id}
-          open={checkpointOpen}
-          onClose={() => setCheckpointOpen(false)}
-        />
-      )}
+      </StageContextCard>
+      <StageContextCard
+        label="Scene"
+        title={backdropSceneName ?? backdropLocationName ?? "Scene loading"}
+      >
+        {backdropLocationName && backdropLocationName !== backdropSceneName ? (
+          <p>{backdropLocationName}</p>
+        ) : null}
+        {connectedPaths.length > 0 ? (
+          <p className="mt-1 text-zinc-400">
+            {connectedPaths.length} route{connectedPaths.length === 1 ? "" : "s"} nearby
+          </p>
+        ) : null}
+      </StageContextCard>
     </div>
   );
+  const stageRightSlot = (
+    <div className="space-y-3">
+      <StageContextCard label="Presence" title={presenceTitle}>
+        {visibleActorCount > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {npcsHere.slice(0, 4).map((npc) => (
+              <button
+                key={npc.id}
+                type="button"
+                className="rounded-full border border-white/10 bg-zinc-950/70 px-2.5 py-1 text-left text-[11px] font-semibold text-zinc-200 transition hover:border-[#E63E00]/50 hover:text-white"
+                onClick={() => playSurface.selectActor(npc.id)}
+              >
+                {npc.name}
+              </button>
+            ))}
+            {visibleActorCount > 4 ? <StageChip>+{visibleActorCount - 4}</StageChip> : null}
+          </div>
+        ) : scenePresenceHints.length > 0 ? (
+          <p>{scenePresenceHints[0]}</p>
+        ) : offscreenAnchorCount > 0 ? (
+          <p>Same broad area, outside this immediate scene.</p>
+        ) : (
+          <p>The scene is quiet for now.</p>
+        )}
+        {visibleActorCount > 0 && scenePresenceHints.length > 0 ? (
+          <p className="mt-2 text-zinc-500">{scenePresenceHints[0]}</p>
+        ) : null}
+        {visibleActorCount > 0 && offscreenAnchorCount > 0 ? (
+          <p className="mt-2 text-zinc-500">
+            {offscreenAnchorCount} more in the same broad area, not in sight.
+          </p>
+        ) : null}
+      </StageContextCard>
+      {itemsHere.length > 0 ? (
+        <StageContextCard label="Objects" title={`${itemsHere.length} here`}>
+          <div className="flex flex-wrap gap-2">
+            {itemsHere.slice(0, 4).map((item) => (
+              <StageChip key={item.id}>{item.name}</StageChip>
+            ))}
+            {itemsHere.length > 4 ? <StageChip>+{itemsHere.length - 4}</StageChip> : null}
+          </div>
+        </StageContextCard>
+      ) : null}
+    </div>
+  );
+
+  return (
+    <GameSceneShell
+      backdrop={
+        <SceneBackdrop
+          sceneName={backdropSceneName}
+          broadLocationName={backdropLocationName}
+          description={currentLocation?.description ?? null}
+          tags={currentLocation?.tags ?? []}
+        />
+      }
+      hud={
+        <SceneHUD
+          sceneName={backdropSceneName}
+          broadLocationName={backdropLocationName}
+          status={hudStatus}
+          onHome={() => router.push("/")}
+          onSaves={() => playSurface.openDrawer("saves")}
+          onSettings={() => router.push("/settings")}
+        />
+      }
+      stageOverlay={
+        <StageOverlay
+          currentBeatId={playSurface.currentBeat?.id ?? null}
+          signals={playSurface.currentStageSignals}
+          onSignalInspect={() => playSurface.openDrawer("inspect")}
+        />
+      }
+      presenceSlot={
+        <PresenceLayer
+          visibleActors={npcsHere}
+          hintSignals={scenePresenceHints}
+          offscreenAnchorCount={offscreenAnchorCount}
+          selectedActorId={playSurface.selectedActorId}
+          onSelectActor={playSurface.selectActor}
+        />
+      }
+      leftStageSlot={stageLeftSlot}
+      rightStageSlot={stageRightSlot}
+      narrationDock={
+        <NarrationDock
+          beats={playSurface.beats}
+          currentBeatIndex={playSurface.currentBeatIndex}
+          isAutoPlaying={playSurface.isAutoPlaying}
+          onNextBeat={playSurface.handleNextBeat}
+          onToggleAuto={playSurface.handleToggleAuto}
+          onOpenLog={() => playSurface.openDrawer("log")}
+          isBusy={false}
+          statusCopy={isTurnBusy ? turnProgressCopy : undefined}
+        />
+      }
+      actionDock={
+        <ActionDock
+          value={playSurface.draft}
+          onChange={playSurface.setDraft}
+          onSubmitAction={(actionText) => {
+            void submitAction(actionText, playSurface.clearDraft);
+          }}
+          onContinue={handleContinueAction}
+          disabled={!canInteract}
+          isBusy={isTurnBusy}
+          turnPhase={turnPhase}
+          quickActions={quickActions}
+        />
+      }
+      widgetRail={
+        <WidgetRail
+          activeDrawer={playSurface.activeDrawer}
+          onOpenDrawer={playSurface.openDrawer}
+        />
+      }
+      drawerHost={
+        <DrawerHost
+          activeDrawer={playSurface.activeDrawer}
+          onClose={playSurface.closeDrawer}
+          slots={drawerSlots}
+          selectedActorName={selectedActor?.name ?? null}
+          playerName={player?.name ?? null}
+        />
+      }
+    />
+  );
+}
+
+function getHudStatus(
+  sceneProgress: SceneProgress,
+  turnPhase: TurnPhase,
+  isAutoPlaying: boolean,
+): SceneHUDStatus {
+  if (sceneProgress === "opening") return "Reading";
+  if (sceneProgress === "scene-settling") return "Thinking";
+  if (turnPhase === "streaming") return "Thinking";
+  if (turnPhase === "finalizing") return "Thinking";
+  if (isAutoPlaying) return "Auto";
+  return "Ready";
+}
+
+function getSceneProgressCopy(status?: SceneSettlingStatus): string {
+  const phase = status?.phase ?? "";
+
+  switch (phase) {
+    case "opening":
+      return "Grounding opening";
+    case "opening-local-scene":
+      return "Placing opening scene";
+    case "opening-final-narration":
+      return "Writing opening";
+    case "gm-read":
+      return "Reading scene";
+    case "oracle":
+      return "Resolving uncertainty";
+    case "gm-action-checklist":
+      return "Planning consequences";
+    case "tool-step":
+    case "gm-tool-steps":
+      return "Applying world changes";
+    case "creating-local-scene":
+      return "Creating local scene";
+    case "spawning-support-npc":
+      return "Adding support character";
+    case "promoting-support-npc":
+      return "Promoting support character";
+    case "settling-tool-observation":
+      return "Reading tool observation";
+    case "cleaning-transient-scene":
+      return "Cleaning transient scene";
+    case "settled-packet":
+      return "Syncing world truth";
+    case "gm-scene-plan":
+      return "GM choosing path";
+    case "judge-scene-plan":
+      return "Judge checking stakes";
+    case "judge-adjudication":
+      return "Judge resolving action";
+    case "local-present-scene":
+      return "Applying world changes";
+    case "final-narration":
+      return "Writing narration";
+    default:
+      return status?.opening ? "Grounding opening" : "Preparing scene";
+  }
+}
+
+function getFinalizingProgressCopy(status?: FinalizingTurnStatus): string {
+  const phase = status?.phase ?? status?.stage ?? "";
+
+  switch (phase) {
+    case "rollback_critical":
+      return "Syncing world simulation";
+    default:
+      return "Finalizing turn";
+  }
 }

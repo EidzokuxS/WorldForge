@@ -43,6 +43,10 @@ describe("storyteller-presets", () => {
     expect(preset).toContain("avoid repeating");
     expect(preset).toContain("bounded");
     expect(preset).toContain("Concrete nouns and actions");
+    expect(preset).toContain("one playable RPG beat");
+    expect(preset).toContain("NPCs are autonomous");
+    expect(preset).toContain("Respect player agency");
+    expect(preset).toContain("Do not recap");
 
     assertNoRejectedMotifs(preset);
   });
@@ -67,8 +71,11 @@ describe("storyteller-presets", () => {
 
     expect(combat).toContain("impactful action beats");
     expect(dialogue).toContain("speak");
+    expect(dialogue).toContain("distinct voices");
+    expect(dialogue).toContain("subtext");
     expect(horror).toContain("pressure");
     expect(quiet).toContain("quiet scene");
+    expect(quiet).toContain("visible change");
 
     assertNoRejectedMotifs(combat);
     assertNoRejectedMotifs(dialogue);
@@ -118,4 +125,3 @@ describe("storyteller-presets", () => {
     assertNoRejectedMotifs(contract);
   });
 });
-

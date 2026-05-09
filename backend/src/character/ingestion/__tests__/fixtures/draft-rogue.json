@@ -1,0 +1,9 @@
+{
+  "identity": { "displayName": "Serin Varn", "race": "Human", "gender": "female", "age": "late 20s", "appearance": "Lean cat-burglar" },
+  "profile": { "backgroundSummary": "Orphan climber of a port city's slate roofs.", "personaSummary": "Quiet, calculating, loyal to a tight crew." },
+  "motivations": { "drives": ["protect her crew"], "frictions": ["watch captain on her trail"], "shortTermGoals": ["tonight's heist"], "longTermGoals": ["buy her crew's freedom"] },
+  "capabilities": { "traits": ["Silent Mover", "Rooftop Expert"], "skills": [{ "tier": "Expert", "name": "Stealth" }, { "tier": "Adept", "name": "Climbing" }] },
+  "loadout": { "equippedItems": [{ "name": "Thieves' tools", "category": "tool" }], "locationName": "Port Docks" },
+  "hp": 5,
+  "provenance": { "sourceKind": "player-input", "canonicalStatus": "original" }
+}

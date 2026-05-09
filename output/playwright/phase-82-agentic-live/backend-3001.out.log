@@ -1,0 +1,1454 @@
+WorldForge backend listening on http://localhost:3001
+[10:02:54.029] [32mINFO[39m: [36mturn.begin[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mevent[39m: "turn.begin"
+    [35mpayload[39m: {
+      "route": "/action",
+      "campaignId": "0ed6bb3c-a528-4067-8f29-86ebdd8d0637",
+      "tick": 22,
+      "rawInput": "I ask the clerk which message route is safest after midnight.",
+      "compatibilityFields": {
+        "intent": "mirrors rawInput",
+        "method": "empty"
+      },
+      "judgeProvider": {
+        "id": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "model": "mimo-v2.5-pro",
+        "baseUrl": "https://opencode.ai/zen/go/v1"
+      },
+      "storytellerProvider": {
+        "id": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "model": "mimo-v2.5-pro",
+        "baseUrl": "https://opencode.ai/zen/go/v1"
+      }
+    }
+[10:02:54.038] [32mINFO[39m: [36mscene.frame[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mevent[39m: "scene.frame"
+    [35mpayload[39m: {
+      "actorCount": 8,
+      "visibleActorCount": 4,
+      "hiddenActorCount": 4,
+      "targetCandidateCount": 12,
+      "movementCandidateCount": 4,
+      "localRecentEventCount": 6,
+      "allowedToolCount": 12,
+      "durationMs": 6
+    }
+[10:02:54.041] [32mINFO[39m: [36mmodel-facing.scene-packet[39m
+    [35mtag[39m: "world-forecast-builder"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mevent[39m: "model-facing.scene-packet"
+    [35mpayload[39m: {
+      "source": "world-forecast-builder",
+      "visibleActorCount": 4,
+      "hiddenActorCount": 4,
+      "localRecentEventCount": 6,
+      "allowedToolCount": 12
+    }
+[10:05:25.329] [33mWARN[39m: [36msafeGenerateObject repair still failed Zod validation: [entries.0.baseTick] Invalid input: expected number, received undefined; [entries.0.playerFacingEligibility] Invalid option: expected one of "local_public"|"player_known_hint"|"never"; [entries.0.locality] Unrecognized keys: "type", "id"; [entries.0.advisoryText] Too big: expected string to have <=320 characters; [entries.0.preconditions.1] Too big: expected string to have <=120 characters; [entries.1.baseTick] Invalid input: expected number, received undefined; [entries.1.playerFacingEligibility] Invalid option: expected one of "local_public"|"player_known_hint"|"never"; [entries.1.locality] Unrecognized keys: "type", "id"[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mrole[39m: "judge"
+[10:07:47.926] [33mWARN[39m: [36msafeGenerateObject repair still failed Zod validation: [entries.0.id] Invalid input: expected string, received undefined; [entries.0.horizonTicks] Invalid input: expected number, received undefined; [entries.0.subjectRefs.0.type] Invalid option: expected one of "actor"|"location"|"scene"|"faction"|"item"|"clock"|"thread"; [entries.0.subjectRefs.0.id] Invalid input: expected string, received undefined; [entries.0.subjectRefs.0] Unrecognized key: "ref"; [entries.0.confidence] Invalid input: expected number, received undefined; [entries.0.locality] Unrecognized key: "refs"; [entries.0.advisorySignals.0.label] Invalid input: expected string, received undefined[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mrole[39m: "judge"
+[10:07:47.927] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mrole[39m: "judge"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "mimo-v2.5-pro",
+      "success": false,
+      "strategy": "full_retry",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": "native_json failed: safeGenerateObject native JSON output: Zod validation failed.\nErrors: [entries.0.id] Invalid input: expected string, received undefined; [entries.0.horizonTicks] Invalid input: expected number, received undefined; [entries.0.subjectRefs.0] Invalid input: expected object, received string; [entries.0.confidence] Invalid input: expected number, received undefined; [entries.0.privacy] Invalid option: expected one of \"public\"|\"player_known\"|\"private\"; [entries.0.locality] Invalid input: expected object, received undefined; [entries.0.advisoryText] Too big: expected string to have <=320 characters; [entries.0.preconditions.1] Too big: expected string to have <=120 characters",
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "error": "safeGenerateObject: Zod validation failed.\nErrors: [entries.0.id] Invalid input: expected string, received undefined; [entries.0.horizonTicks] Invalid input: expected number, received undefined; [entries.0.subjectRefs.0] Invalid input: expected object, received string; [entries.0.confidence] Invalid input: expected number, received undefined; [entries.0.locality] Invalid input: expected object, received undefined; [entries.0.preconditions] Invalid input: expected array, received string; [entries",
+      "reasoningLen": 0,
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 5433,
+        "outputTokens": 3623,
+        "totalTokens": 9056,
+        "reasoningTokens": 2705,
+        "cachedInputTokens": 5376
+      },
+      "latencyMs": 293886
+    }
+[10:07:47.927] [31mERROR[39m: [36msafeGenerateObject failed after 1 attempts[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mrole[39m: "judge"
+[10:07:47.927] [33mWARN[39m: [36mFailed to load scoped world forecast; continuing without forecast pressure[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mpayload[39m: {
+      "error": "safeGenerateObject: full_retry exhausted. safeGenerateObject: Zod validation failed.\nErrors: [entries.0.id] Invalid input: expected string, received undefined; [entries.0.horizonTicks] Invalid input: expected number, received undefined; [entries.0.subjectRefs.0] Invalid input: expected object, received string; [entries.0.confidence] Invalid input: expected number, received undefined; [entries.0.locality] Invalid input: expected object, received undefined; [entries.0.preconditions] Invalid input: expected array, received string; [entries.0.preconditions] Too big: expected string to have <=6 characters; [entries.0.advisorySignals.0] Invalid input: expected object, received string\nRaw (first 500 chars): {\n  \"expiresInTicks\": 12,\n  \"entries\": [\n    {\n      \"subjectRefs\": [\"location:e17520a7-2514-4cf6-9f22-b8849b3df8c8\"],\n      \"localityRefs\": [\"location:e17520a7-2514-4cf6-9f22-b8849b3df8c8\"],\n      \"privacy\": \"public\",\n      \"playerFacingEligibility\": \"local_public\",\n      \"advisoryText\": \"Warden guards are intensifying spot inspections of gondolas at the pier, focusing on couriers with lacquer-sealed messages, which could delay or threaten deliveries.\",\n      \"preconditions\": \"Warden Guardpost ",
+      "campaignId": "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    }
+[10:07:47.928] [32mINFO[39m: [36mworld-forecast.scoped[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mevent[39m: "world-forecast.scoped"
+    [35mpayload[39m: {
+      "entryCount": 0,
+      "forbiddenPrivateTermCount": 0,
+      "baseTick": 0,
+      "refreshStaged": false
+    }
+[10:07:47.928] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 44,
+      "sha256Prefix": "45a56b910b83d994"
+    }
+[10:07:47.930] [32mINFO[39m: [36mmodel-facing.scene-packet[39m
+    [35mtag[39m: "gm-turn-read"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mevent[39m: "model-facing.scene-packet"
+    [35mpayload[39m: {
+      "source": "gm-read",
+      "visibleActorCount": 4,
+      "hiddenActorCount": 4,
+      "localRecentEventCount": 6,
+      "allowedToolCount": 12
+    }
+[10:08:57.097] [32mINFO[39m: [36mllm.repair[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mrole[39m: "judge"
+    [35mevent[39m: "llm.repair"
+    [35mpayload[39m: {
+      "strategy": "repair",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "success": true,
+      "issues": "[directResolutionNotes] Too big: expected string to have <=500 characters",
+      "reasoningLen": 0,
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 908,
+        "outputTokens": 3632,
+        "totalTokens": 4540,
+        "reasoningTokens": 3039,
+        "cachedInputTokens": 0
+      }
+    }
+[10:08:57.098] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mrole[39m: "judge"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "mimo-v2.5-pro",
+      "success": true,
+      "strategy": "repair",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "reasoningLen": 0,
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 7852,
+        "outputTokens": 619,
+        "totalTokens": 8471,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 1024
+      },
+      "latencyMs": 69168
+    }
+[10:08:57.099] [32mINFO[39m: [36mjudge.gm-read[39m
+    [35mtag[39m: "gm-turn-read"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mevent[39m: "judge.gm-read"
+    [35mpayload[39m: {
+      "path": "direct",
+      "success": true,
+      "issueCount": 0,
+      "droppedInvalidEvidenceRefCount": 0,
+      "strategy": "repair",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "usage": {
+        "inputTokens": 7852,
+        "outputTokens": 619,
+        "totalTokens": 8471,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 1024
+      },
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "latencyMs": 69169
+    }
+[10:08:57.099] [32mINFO[39m: [36mjudge.gm-read.selected[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mevent[39m: "judge.gm-read.selected"
+    [35mpayload[39m: {
+      "path": "direct",
+      "evidenceRefCount": 2
+    }
+[10:08:57.100] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 51,
+      "sha256Prefix": "39473a19db55e304"
+    }
+[10:08:57.101] [32mINFO[39m: [36mjudge.scene-plan[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mevent[39m: "judge.scene-plan"
+    [35mpayload[39m: {
+      "gmReadPath": "direct",
+      "skippedPlanner": true,
+      "plannedActionCount": 0,
+      "supportResponseCount": 0,
+      "deferredHookCount": 0,
+      "hiddenRationaleLength": 280,
+      "durationMs": 0
+    }
+[10:08:57.101] [32mINFO[39m: [36mscene.plan.validation[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mevent[39m: "scene.plan.validation"
+    [35mpayload[39m: {
+      "ok": true,
+      "skipped": true,
+      "reason": "no_mutation_gm_read",
+      "issueCount": 0,
+      "issueCodes": [],
+      "durationMs": 0
+    }
+[10:08:57.101] [32mINFO[39m: [36mscene.plan.execution[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mevent[39m: "scene.plan.execution"
+    [35mpayload[39m: {
+      "skipped": true,
+      "reason": "no_mutation_gm_read",
+      "plannedActionCount": 0,
+      "executedActionCount": 0,
+      "canonicalEventCount": 0,
+      "durationMs": 0
+    }
+[10:08:57.102] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 61,
+      "sha256Prefix": "8b81da9dd134d667"
+    }
+[10:08:57.106] [32mINFO[39m: [36mscene.packet[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mevent[39m: "scene.packet"
+    [35mpayload[39m: {
+      "visibleActorCount": 4,
+      "hintSignalCount": 0,
+      "eventCount": 1,
+      "responseCount": 1,
+      "effectCount": 0,
+      "forbiddenActorCount": 4,
+      "forbiddenFactMarkerCount": 4,
+      "durationMs": 1
+    }
+[10:08:57.107] [32mINFO[39m: [36mprompt.assembled[39m
+    [35mtag[39m: "prompt-assembler"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mevent[39m: "prompt.assembled"
+    [35mpayload[39m: {
+      "pass": "final-narration",
+      "totalTokens": 0,
+      "budgetUsed": 0,
+      "sectionCount": 0,
+      "assembledChars": 8585,
+      "formatted": "[NARRATOR PACKET]\nCampaign: 0ed6bb3c-a528-4067-8f29-86ebdd8d0637\nTick: 22\nPlayer action request: I ask the clerk which message route is safest after midnight.\nPlayer action is not authoritative world state. Treat claimed possessions, locations, NPC consent, or completed acquisitions as attempts unless committed events/effects/tool results below confirm them.\nOracle outcome: none\nAnchor event: 23d8ae68-516b-44fd-ab99-01da4afe1d86\n\n[VISIBLE ACTORS]\n- Mira Voss (26eec8fe-ae60-49c9-999b-732f57e0e2c5; player)\n- Dol the Docksman (3d0becd2-7ef8-4164-8f0c-1062beb6cb2f; npc)\n- Gondolier (3c215f46-339a-469f-b6c3-26b342e247e6; npc)\n- Pier Clerk (1b788538-9e85-4c31-b8f5-3c1d45405ae7; npc)\n\n[HINT SIGNALS]\n- No indirect awareness hints are in scope.\n\n[COMMITTED EVENTS]\n- 23d8ae68-516b-44fd-ab99-01da4afe1d86: Player action request: I ask the clerk which message route is safest after midnight. [actor=26eec8fe-ae60-49c9-999b-732f57e0e2c5; kind=player_action]\n\n[PERCEIVABLE RESPONSES]\n- 548d60b6-90d0-48d9-9c72-46927bad064c: GM no-mutation direction: The Pier Clerk, tagged transactional and route-knowledge, can answer from local knowledge about post-midnight route safety, drawing on Warden chokepoints, Famil [actor=26eec8fe-ae60-49c9-999b-732f57e0e2c5; event=23d8ae68-516b-44fd-ab99-01da4afe1d86; kind=environment]\n\n[PERCEIVABLE EFFECTS]\n- No player-perceivable effects are in scope.\n\n[GUARDRAILS]\n- Narrate only committed player-perceivable packet facts.\n\n[CONTROL RETURN]\nThe canonical local ScenePlan step has resolved and returned control to the player.\n\n[RP BEAT DIRECTIVE]\n- Write one playable RPG/VN beat, not a recap, report, or lore dump.\n- Start from the player request and show what visibly changes now.\n- Let visible NPCs act from motives, pressure, relationships, and limited knowledge.\n- Use concrete observable details, body language, distinct dialogue, and changed positions before abstract mood.\n- Do not open by echoing or paraphrasing the player action.\n- Do not decide the player's deliberate words, feelings, consent, or completed success.\n- If the packet describes an unconfirmed claim, bluff, or failed test, keep it unconfirmed; do not concretize the claimed prop, authority, or access into the player's hand or inventory.\n- Treat NarratorPacket events, effects, and tool results as the only authority for success, possession, access, consent, location change, and durable world change.\n- Stop when the scene reaches a live next decision, question, pressure, or invitation.\n\n[RECENT VISIBLE TRANSCRIPT]\nUse only as continuity for the current player-visible scene. NarratorPacket facts remain authoritative.\n- GM: Mira's voice carries out over the water and finds no one.\n\nThere's no clerk at the pier. No counter, no ledger stand, no signal-board with posted routes—just the planks, the tied gondolas, and the two men who've been watching her hands since she first touched that lock. The question hangs in the lantern-glow like smoke without a fire to blame.\n\nDol's jaw tightens. His eyes cut to the Gondolier, then back to Mira, and something in his posture shifts—not anger, exactly, but the patience of a man who's been working a rope and just felt it fray another strand.\n\n\"There's no clerk here,\" he says. Low. Clipped. \"This is a transit pier, not a posting house.\"\n\nThe Gondolier adjusts his grip on the oar shaft. Water murmurs against the hull of his boat. The orange lantern on its mooring chain swings again, throwing long shadows across the embankment stones where the canal bank curves out of sight....\n- Player: I step toward the narrow service door behind the counter and look for whoever is working there.\n- GM: Mira moves past where a counter might have been—there's just a scar in the planks where one was bolted down, old screw-holes dark with salt rot—and toward a narrow door set into the pier's back wall. Planks, weathered gray, with a brass latch green from the canal air.\n\nThe latch rattles before she reaches it.\n\nThe door swings inward on a hinge that squeals once, and a woman steps through sideways, ducking under the low frame. She's short, broad-shouldered, wearing a stained canvas apron over a wool shirt, and she's carrying a wooden message-box under one arm—the kind with slotted compartments, each one sealed with a different color of wax. Her fingers are ink-stained to the second knuckle.\n\nShe doesn't look at Mira. Her eyes go straight to Dol.\n\n\"Sixteen minutes late,\" Dol says.\n\n\"Supply launch grounded on the south fork.\" The woman's voice is hoarse, the kind of rough that comes from sh...\n- Player: I ask the clerk which message route is safest after midnight.\n- GM: The Clerk's eyes stay on Dol a beat longer than they need to, like she's reading something off his posture that Mira can't guess at. Then those ink-dark fingers tighten around the message-box and she turns, looking Mira over the way someone checks a package for damage.\n\n\"Which route,\" she repeats. Not a question—more like she's weighing the words on a scale.\n\nThe message-box creaks under her arm. Through the slotted compartments, Mira can see strips of colored paper—pink, green, one that might be black—each one folded and sealed. The woman's apron smells of canal water and solvent.\n\n\"South fork's down,\" the Clerk says. \"Supply launch beached until the morning tide. That leaves the outer loop or the double-back through the mill quarter.\" She shifts the box to her hip. \"Outer loop stays lit till three. Mill quarter cuts dark at one unless you've got your own signal pattern.\"\n\nDol hasn't mo...\n- Player: I step toward the narrow service door behind the counter and look for whoever is working there.\n- GM: Mira takes a step toward the service door, but it's already ajar—no one behind it. The Clerk is standing three feet away, message-box propped against her hip, watching Mira with the flat attention of someone who's already answered the question and is waiting to see what gets done with it.\n\nDol hasn't moved. His arms are still crossed, boots planted on the scarred planks, and he's looking at the Clerk now instead of Mira. Something passes between them—not words, just a tightening around the woman's mouth and a slow blink that might mean *I know* or *not now*.\n\nThe Gondolier shifts his oar to the other shoulder. Water laps the hull of his boat. Down the canal, the mooring lantern swings and the shadows crawl across the embankment stones like something breathing.\n\n\"Outer loop or mill quarter,\" the Clerk says again, quieter this time, like she's offering it back as a choice instead of inform...\n- Player: I ask the clerk which message route is safest after midnight.\n\n[CURRENT LOCAL SCENE]\n- Name: Lantern-Lit Gondola Pier\n- Id: e17520a7-2514-4cf6-9f22-b8849b3df8c8\n- Description: A weathered wooden pier extends over a narrow, lantern-lit canal where four gondola boats are tied to iron rings. Gondoliers, licensed by the signal-house families, navigate the shifting waterways using coded lantern patterns to avoid submerged obstacles and unmapped turns. After midnight, the canal's banks physically shift, requiring the gondoliers to read new signal-house lantern patterns to find safe passage.\n- Tags: Nocturnal, Controlled by Signal-House Families, Shifting, Dangerous, signal_house_families_commercial_hub, subsidized_freight_active, gondola_operator_recruitment, lacquer_seal_delegation_present, warden_inspection_active, contested_access, consecrated_transit_zone, lacquer_artificer_station, chokepoint_lifted\n\n[OPENING STATE]\n- Structured opening state has expired.\n- Opening location: Lantern-Lit Gondola Pier\n\n[SETTLED PACKET EFFECTS]\n- No settled player-perceivable effects are in scope.\n\n[PRESENT ACTORS]\n- Dol the Docksman\n- Gondolier\n- Pier Clerk\n\n[FINAL NARRATION TASK]\nUse the NarratorPacket as the authoritative committed packet.\nWrite one final narration pass from the settled opening state, current scene, and NarratorPacket facts.\nDo not invent material events outside these authoritative inputs.\nTreat the raw player action as an attempted request, not as proof that the action already succeeded.\nDo not narrate claimed possessions, NPC consent, location access, or item acquisition unless NarratorPacket events/effects/tool results confirm them.\nIf a packet effect says a claim may be false or unconfirmed, narrate the visible challenge/refusal without placing the claimed object in the player's hand.\nDo not write tool syntax or metadata.\nKeep the output bounded to what the player can perceive in this scene.\nEnd on a concrete playable next moment rather than closing the scene with generic reflection."
+    }
+[10:08:57.108] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 68,
+      "sha256Prefix": "942125865ebeb5e0"
+    }
+[10:09:12.614] [32mINFO[39m: [36mvisible-narration.packet-guard[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mevent[39m: "visible-narration.packet-guard"
+    [35mpayload[39m: {
+      "stage": "passed",
+      "attempts": 1,
+      "retried": false,
+      "violationCount": 0,
+      "durationMs": 15506
+    }
+[10:09:12.615] [32mINFO[39m: [36mstoryteller.visible.call[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mevent[39m: "storyteller.visible.call"
+    [35mpayload[39m: {
+      "label": "final",
+      "initialLen": 1424,
+      "retried": false,
+      "failures": [],
+      "reasoningLen": 0,
+      "durationMs": 15507
+    }
+[10:09:12.615] [32mINFO[39m: [36mVisible narration complete: executedActions=0, final=1424 chars, retried=false, failures=none[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+[10:09:12.615] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "narrative",
+      "byteLength": 1463,
+      "sha256Prefix": "a64d07981ca78ee5"
+    }
+[10:09:12.617] [32mINFO[39m: [36mTick advanced: 22 -> 23 (+1)[39m
+    [35mtag[39m: "campaign-manager"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+[10:09:12.618] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "finalizing_turn",
+      "byteLength": 39,
+      "sha256Prefix": "59caca4214682742"
+    }
+[10:09:12.622] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 71,
+      "sha256Prefix": "1f07a34a9308c12d"
+    }
+[10:09:12.623] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "done",
+      "byteLength": 11,
+      "sha256Prefix": "bef26ad751d3c455"
+    }
+[10:09:12.624] [32mINFO[39m: [36mturn.end[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7463721c-e4cd-4ad5-a62f-89f3fde6e83c"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 22
+    [35mevent[39m: "turn.end"
+    [35mpayload[39m: {
+      "route": "/action",
+      "tick": 22,
+      "durationMs": 378596,
+      "outcome": "success"
+    }
+[10:09:37.508] [32mINFO[39m: [36mturn.begin[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "turn.begin"
+    [35mpayload[39m: {
+      "route": "/action",
+      "campaignId": "0ed6bb3c-a528-4067-8f29-86ebdd8d0637",
+      "tick": 23,
+      "rawInput": "I step through the narrow service door behind the counter and look for whoever is working in that back room.",
+      "compatibilityFields": {
+        "intent": "mirrors rawInput",
+        "method": "empty"
+      },
+      "judgeProvider": {
+        "id": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "model": "mimo-v2.5-pro",
+        "baseUrl": "https://opencode.ai/zen/go/v1"
+      },
+      "storytellerProvider": {
+        "id": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "model": "mimo-v2.5-pro",
+        "baseUrl": "https://opencode.ai/zen/go/v1"
+      }
+    }
+[10:09:37.512] [32mINFO[39m: [36mscene.frame[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "scene.frame"
+    [35mpayload[39m: {
+      "actorCount": 8,
+      "visibleActorCount": 4,
+      "hiddenActorCount": 4,
+      "targetCandidateCount": 12,
+      "movementCandidateCount": 4,
+      "localRecentEventCount": 6,
+      "allowedToolCount": 12,
+      "durationMs": 2
+    }
+[10:09:37.513] [32mINFO[39m: [36mmodel-facing.scene-packet[39m
+    [35mtag[39m: "world-forecast-builder"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "model-facing.scene-packet"
+    [35mpayload[39m: {
+      "source": "world-forecast-builder",
+      "visibleActorCount": 4,
+      "hiddenActorCount": 4,
+      "localRecentEventCount": 6,
+      "allowedToolCount": 12
+    }
+[10:11:20.660] [33mWARN[39m: [36msafeGenerateObject repair still failed Zod validation: [entries.0.id] Invalid input: expected string, received undefined; [entries.0.baseTick] Invalid input: expected number, received undefined; [entries.0.confidence] Invalid input: expected number, received undefined; [entries.0.privacy] Invalid option: expected one of "public"|"player_known"|"private"; [entries.0.playerFacingEligibility] Invalid option: expected one of "local_public"|"player_known_hint"|"never"; [entries.0.locality] Unrecognized keys: "type", "id"; [entries.0.advisoryText] Too big: expected string to have <=320 characters; [entries.0.advisorySignals.0.label] Invalid input: expected string, received undefined[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+[10:14:08.961] [33mWARN[39m: [36msafeGenerateObject repair still failed Zod validation: [entries.0.baseTick] Invalid input: expected number, received undefined; [entries.0.confidence] Invalid input: expected number, received undefined; [entries.0.privacy] Invalid option: expected one of "public"|"player_known"|"private"; [entries.0.playerFacingEligibility] Invalid option: expected one of "local_public"|"player_known_hint"|"never"; [entries.0.locality] Unrecognized keys: "type", "id"; [entries.0.advisoryText] Invalid input: expected string, received undefined; [entries.0.advisorySignals.0.label] Invalid input: expected string, received undefined; [entries.0.advisorySignals.0] Unrecognized key: "content"[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+[10:14:08.961] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "mimo-v2.5-pro",
+      "success": false,
+      "strategy": "full_retry",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": "native_json failed: safeGenerateObject native JSON output: Zod validation failed.\nErrors: [entries.0.id] Invalid input: expected string, received undefined; [entries.0.horizonTicks] Invalid input: expected number, received undefined; [entries.0.subjectRefs.0] Invalid input: expected object, received string; [entries.0.confidence] Invalid input: expected number, received undefined; [entries.0.locality] Invalid input: expected object, received undefined; [entries.0.advisoryText] Too big: expected string to have <=320 characters; [entries.0.advisorySignals.0] Invalid input: expected object, received string; [entries.0.advisorySignals.1] Invalid input: expected object, received string",
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "error": "safeGenerateObject: Zod validation failed.\nErrors: [entries.0.id] Invalid input: expected string, received undefined; [entries.0.horizonTicks] Invalid input: expected number, received undefined; [entries.0.subjectRefs.0] Invalid input: expected object, received string; [entries.0.confidence] Invalid input: expected number, received undefined; [entries.0.locality] Invalid input: expected object, received undefined; [entries.0.advisorySignals.0] Invalid input: expected object, received string; [en",
+      "reasoningLen": 0,
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 5433,
+        "outputTokens": 4695,
+        "totalTokens": 10128,
+        "reasoningTokens": 3900,
+        "cachedInputTokens": 0
+      },
+      "latencyMs": 271448
+    }
+[10:14:08.962] [31mERROR[39m: [36msafeGenerateObject failed after 1 attempts[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+[10:14:08.962] [33mWARN[39m: [36mFailed to load scoped world forecast; continuing without forecast pressure[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mpayload[39m: {
+      "error": "safeGenerateObject: full_retry exhausted. safeGenerateObject: Zod validation failed.\nErrors: [entries.0.id] Invalid input: expected string, received undefined; [entries.0.horizonTicks] Invalid input: expected number, received undefined; [entries.0.subjectRefs.0] Invalid input: expected object, received string; [entries.0.confidence] Invalid input: expected number, received undefined; [entries.0.locality] Invalid input: expected object, received undefined; [entries.0.advisorySignals.0] Invalid input: expected object, received string; [entries.0.privateTerms] Invalid input: expected array, received object; [entries.0] Unrecognized keys: \"campaignId\", \"localityRefs\"\nRaw (first 500 chars): {\n  \"expiresInTicks\": 12,\n  \"entries\": [\n    {\n      \"baseTick\": 23,\n      \"campaignId\": \"0ed6bb3c-a528-4067-8f29-86ebdd8d0637\",\n      \"subjectRefs\": [\"actor:3d0becd2-7ef8-4164-8f0c-1062beb6cb2f\"],\n      \"localityRefs\": [\"location:e17520a7-2514-4cf6-9f22-b8849b3df8c8\"],\n      \"privacy\": \"public\",\n      \"playerFacingEligibility\": \"local_public\",\n      \"advisoryText\": \"Warden inspection post at canal approach may delay or scrutinize gondola traffic, affecting courier schedules and cargo security.\"",
+      "campaignId": "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    }
+[10:14:08.962] [32mINFO[39m: [36mworld-forecast.scoped[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "world-forecast.scoped"
+    [35mpayload[39m: {
+      "entryCount": 0,
+      "forbiddenPrivateTermCount": 0,
+      "baseTick": 0,
+      "refreshStaged": false
+    }
+[10:14:08.963] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 44,
+      "sha256Prefix": "45a56b910b83d994"
+    }
+[10:14:08.963] [32mINFO[39m: [36mmodel-facing.scene-packet[39m
+    [35mtag[39m: "gm-turn-read"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "model-facing.scene-packet"
+    [35mpayload[39m: {
+      "source": "gm-read",
+      "visibleActorCount": 4,
+      "hiddenActorCount": 4,
+      "localRecentEventCount": 6,
+      "allowedToolCount": 12
+    }
+[10:14:21.099] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "mimo-v2.5-pro",
+      "success": true,
+      "strategy": "native_json",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "reasoningLen": 0,
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 7861,
+        "outputTokens": 667,
+        "totalTokens": 8528,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 1024
+      },
+      "latencyMs": 12136
+    }
+[10:14:21.099] [32mINFO[39m: [36mjudge.gm-read[39m
+    [35mtag[39m: "gm-turn-read"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "judge.gm-read"
+    [35mpayload[39m: {
+      "path": "tool_plan",
+      "success": true,
+      "issueCount": 0,
+      "droppedInvalidEvidenceRefCount": 0,
+      "strategy": "native_json",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "usage": {
+        "inputTokens": 7861,
+        "outputTokens": 667,
+        "totalTokens": 8528,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 1024
+      },
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "latencyMs": 12136
+    }
+[10:14:21.100] [32mINFO[39m: [36mjudge.gm-read.selected[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "judge.gm-read.selected"
+    [35mpayload[39m: {
+      "path": "tool_plan",
+      "evidenceRefCount": 2
+    }
+[10:14:21.101] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 49,
+      "sha256Prefix": "765120db7747c19b"
+    }
+[10:14:21.103] [32mINFO[39m: [36mmodel-facing.scene-packet[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "model-facing.scene-packet"
+    [35mpayload[39m: {
+      "source": "gm-tool-loop",
+      "visibleActorCount": 4,
+      "hiddenActorCount": 4,
+      "localRecentEventCount": 6,
+      "allowedToolCount": 12
+    }
+[10:14:34.846] [32mINFO[39m: [36mgm-tool-loop.tool-call.start[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.start"
+    [35mpayload[39m: {
+      "toolName": "reveal_location",
+      "toolCallId": "call_ba9f791227fb4f1faac40d73"
+    }
+[10:14:34.847] [32mINFO[39m: [36mtool.call[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "tool.call"
+    [35mpayload[39m: {
+      "toolName": "reveal_location",
+      "args": {
+        "name": "Pier Back Room",
+        "description": "A cramped workspace behind the service door—low ceiling, walls lined with slotted wooden racks holding sealed message cylinders. A scarred workbench dominates the center, its surface stained with rings of colored wax. Shelves hold jars of lacquer pigment, spools of binding cord, and brass seal-stamps hanging from hooks. The chemical tang of solvent mixes with canal damp. A single oil lamp throws hard shadows across everything.",
+        "tags": [
+          "workspace",
+          "message-sorting",
+          "lacquer-operations",
+          "dim-lighting"
+        ],
+        "connectedToName": "Lantern-Lit Gondola Pier"
+      },
+      "result": {
+        "success": false,
+        "error": "Tool grounding failed: input.connectedToName must reference a local/current location anchor; got an out-of-scope ref."
+      },
+      "latencyMs": 0
+    }
+[10:14:34.848] [32mINFO[39m: [36mgm-tool-loop.tool-call.finish[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.finish"
+    [35mpayload[39m: {
+      "success": true,
+      "toolName": "reveal_location",
+      "toolCallId": "call_ba9f791227fb4f1faac40d73",
+      "durationMs": 0.8388000000268221
+    }
+[10:14:52.292] [32mINFO[39m: [36mgm-tool-loop.tool-call.start[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.start"
+    [35mpayload[39m: {
+      "toolName": "spawn_npc",
+      "toolCallId": "call_fe9d2a06032040079150a394"
+    }
+[10:14:52.294] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "npcs",
+      "op": "insert",
+      "rowId": "a7898c98-75c3-41a8-ad82-11517c5acc07",
+      "rowName": "Venn the Seal-Presser"
+    }
+[10:14:52.294] [32mINFO[39m: [36mtool.call[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "tool.call"
+    [35mpayload[39m: {
+      "toolName": "spawn_npc",
+      "args": {
+        "name": "Venn the Seal-Presser",
+        "tags": [
+          "lacquer-artificer",
+          "seal-technician",
+          "signal-house-operative",
+          "meticulous",
+          "suspicious-of-strangers"
+        ],
+        "locationRef": "current_location"
+      },
+      "result": {
+        "success": true,
+        "result": {
+          "id": "a7898c98-75c3-41a8-ad82-11517c5acc07",
+          "name": "Venn the Seal-Presser",
+          "locationId": "e17520a7-2514-4cf6-9f22-b8849b3df8c8",
+          "locationName": "Lantern-Lit Gondola Pier",
+          "broadLocationId": "5bb03a70-cb59-448c-a017-748fbb4f130d",
+          "broadLocationName": "Canal Market District",
+          "sceneLocationId": "e17520a7-2514-4cf6-9f22-b8849b3df8c8",
+          "sceneLocationName": "Lantern-Lit Gondola Pier",
+          "tier": "temporary"
+        }
+      },
+      "latencyMs": 2
+    }
+[10:14:52.294] [32mINFO[39m: [36mgm-tool-loop.tool-call.finish[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.finish"
+    [35mpayload[39m: {
+      "success": true,
+      "toolName": "spawn_npc",
+      "toolCallId": "call_fe9d2a06032040079150a394",
+      "durationMs": 2.1282999999821186
+    }
+[10:14:59.276] [32mINFO[39m: [36mgm-tool-loop.tool-call.start[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.start"
+    [35mpayload[39m: {
+      "toolName": "log_event",
+      "toolCallId": "call_ea7a2ca073f74026b7c407d2"
+    }
+[10:14:59.276] [32mINFO[39m: [36mtool.call[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "tool.call"
+    [35mpayload[39m: {
+      "toolName": "log_event",
+      "args": {
+        "text": "Mira Voss stepped through the service door behind the pier counter into the back room, where she found Venn the Seal-Presser — a lacquer artificer working at a wax-stained workbench surrounded by message cylinders, seal-stamps, and jars of lacquer pigment. The back room serves as the pier's message-sorting and seal-authentication workspace.",
+        "importance": 4,
+        "participants": [
+          "Mira Voss",
+          "Venn the Seal-Presser"
+        ],
+        "durability": "durable",
+        "futureRelevance": "Mira has discovered the pier's back-room lacquer operation and met a Signal-House seal technician — a potential source of intelligence about authenticated message transit and the Families' commercial network."
+      },
+      "result": {
+        "success": false,
+        "error": "Tool grounding failed: input.participants.1 must reference a clear local actor participant; got an out-of-scope ref."
+      },
+      "latencyMs": 0
+    }
+[10:14:59.277] [32mINFO[39m: [36mgm-tool-loop.tool-call.finish[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.finish"
+    [35mpayload[39m: {
+      "success": true,
+      "toolName": "log_event",
+      "toolCallId": "call_ea7a2ca073f74026b7c407d2",
+      "durationMs": 0.713300000061281
+    }
+[10:15:03.710] [32mINFO[39m: [36mgm-tool-loop.tool-call.start[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.start"
+    [35mpayload[39m: {
+      "toolName": "log_event",
+      "toolCallId": "call_a44aded76be64f13a328a42a"
+    }
+[10:15:03.711] [32mINFO[39m: [36mtool.call[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "tool.call"
+    [35mpayload[39m: {
+      "toolName": "log_event",
+      "args": {
+        "text": "Mira Voss stepped through the service door behind the pier counter into the back room, where she found Venn the Seal-Presser — a lacquer artificer working at a wax-stained workbench surrounded by message cylinders, seal-stamps, and jars of lacquer pigment. The back room serves as the pier's message-sorting and seal-authentication workspace.",
+        "importance": 4,
+        "participants": [
+          "Mira Voss",
+          "Venn the Seal-Presser"
+        ],
+        "durability": "durable",
+        "futureRelevance": "Mira has discovered the pier's back-room lacquer operation and met a Signal-House seal technician — a potential source of intelligence about authenticated message transit and the Families' commercial network."
+      },
+      "result": {
+        "success": false,
+        "error": "Tool grounding failed: input.participants.1 must reference a clear local actor participant; got an out-of-scope ref."
+      },
+      "latencyMs": 0
+    }
+[10:15:03.711] [32mINFO[39m: [36mgm-tool-loop.tool-call.finish[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.finish"
+    [35mpayload[39m: {
+      "success": true,
+      "toolName": "log_event",
+      "toolCallId": "call_a44aded76be64f13a328a42a",
+      "durationMs": 0.3002000000560656
+    }
+[10:15:11.214] [32mINFO[39m: [36mgm-tool-loop.tool-call.start[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.start"
+    [35mpayload[39m: {
+      "toolName": "log_event",
+      "toolCallId": "call_c3664f56bf254526a6b1dadf"
+    }
+[10:15:11.215] [32mINFO[39m: [36mtool.call[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "tool.call"
+    [35mpayload[39m: {
+      "toolName": "log_event",
+      "args": {
+        "text": "Mira Voss stepped through the service door behind the pier counter into the back room, where she found a lacquer artificer — a seal-presser working at a wax-stained workbench surrounded by message cylinders, seal-stamps, and jars of lacquer pigment. The back room serves as the pier's message-sorting and seal-authentication workspace.",
+        "importance": 4,
+        "participants": [
+          "Mira Voss"
+        ],
+        "durability": "durable",
+        "futureRelevance": "Mira has discovered the pier's back-room lacquer operation and met a Signal-House seal technician — a potential source of intelligence about authenticated message transit and the Families' commercial network."
+      },
+      "result": {
+        "success": false,
+        "error": "Tool grounding failed: player-turn durable log_event cannot commit possession, access, item-use, or completed movement claims; use a concrete backend tool result or record the attempted/failed beat as scene_local."
+      },
+      "latencyMs": 0
+    }
+[10:15:11.215] [32mINFO[39m: [36mgm-tool-loop.tool-call.finish[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.finish"
+    [35mpayload[39m: {
+      "success": true,
+      "toolName": "log_event",
+      "toolCallId": "call_c3664f56bf254526a6b1dadf",
+      "durationMs": 0.6979000000283122
+    }
+[10:15:18.032] [32mINFO[39m: [36mgm-tool-loop.tool-call.start[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.start"
+    [35mpayload[39m: {
+      "toolName": "log_event",
+      "toolCallId": "call_64a30973e2084061b15c66ac"
+    }
+[10:15:18.033] [32mINFO[39m: [36mtool.call[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "tool.call"
+    [35mpayload[39m: {
+      "toolName": "log_event",
+      "args": {
+        "text": "Mira Voss stepped through the service door behind the pier counter into the back room, where she found Venn the Seal-Presser — a lacquer artificer working at a wax-stained workbench surrounded by message cylinders, seal-stamps, and jars of lacquer pigment. The back room serves as the pier's message-sorting and seal-authentication workspace.",
+        "importance": 4,
+        "participants": [
+          "Mira Voss"
+        ],
+        "durability": "scene_local"
+      },
+      "result": {
+        "success": true,
+        "result": {
+          "durability": "scene_local",
+          "persisted": false
+        }
+      },
+      "latencyMs": 0
+    }
+[10:15:18.033] [32mINFO[39m: [36mgm-tool-loop.tool-call.finish[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.finish"
+    [35mpayload[39m: {
+      "success": true,
+      "toolName": "log_event",
+      "toolCallId": "call_64a30973e2084061b15c66ac",
+      "durationMs": 0.42269999999552965
+    }
+[10:15:27.504] [32mINFO[39m: [36mgm-tool-loop.tool-call.start[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.start"
+    [35mpayload[39m: {
+      "toolName": "promote_npc",
+      "toolCallId": "call_e45ee2ebaca04543adaa889e"
+    }
+[10:15:27.504] [32mINFO[39m: [36mtool.call[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "tool.call"
+    [35mpayload[39m: {
+      "toolName": "promote_npc",
+      "args": {
+        "npcRef": "Venn the Seal-Presser",
+        "newTier": "persistent",
+        "reason": "Mira has entered the back room and encountered Venn directly — this is a face-to-face interaction with a Signal-House operative who controls access to the pier's lacquer authentication workspace. Future relevance for message route intelligence and Families network knowledge."
+      },
+      "result": {
+        "success": false,
+        "error": "Tool grounding failed: input.npcRef must reference a clear local NPC actor; got an out-of-scope ref."
+      },
+      "latencyMs": 0
+    }
+[10:15:27.504] [32mINFO[39m: [36mgm-tool-loop.tool-call.finish[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.finish"
+    [35mpayload[39m: {
+      "success": true,
+      "toolName": "promote_npc",
+      "toolCallId": "call_e45ee2ebaca04543adaa889e",
+      "durationMs": 0.21789999993052334
+    }
+[10:15:32.816] [32mINFO[39m: [36mgm-tool-loop.tool-call.start[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.start"
+    [35mpayload[39m: {
+      "toolName": "promote_npc",
+      "toolCallId": "call_c41bb42fab324412842e1b77"
+    }
+[10:15:32.816] [32mINFO[39m: [36mtool.call[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "tool.call"
+    [35mpayload[39m: {
+      "toolName": "promote_npc",
+      "args": {
+        "npcRef": "a7898c98-75c3-41a8-ad82-11517c5acc07",
+        "newTier": "persistent",
+        "reason": "Mira has entered the back room and encountered Venn directly — this is a face-to-face interaction with a Signal-House operative who controls access to the pier's lacquer authentication workspace. Future relevance for message route intelligence and Families network knowledge."
+      },
+      "result": {
+        "success": false,
+        "error": "Tool grounding failed: input.npcRef must reference a clear local NPC actor; got an out-of-scope ref."
+      },
+      "latencyMs": 0
+    }
+[10:15:32.817] [32mINFO[39m: [36mgm-tool-loop.tool-call.finish[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.finish"
+    [35mpayload[39m: {
+      "success": true,
+      "toolName": "promote_npc",
+      "toolCallId": "call_c41bb42fab324412842e1b77",
+      "durationMs": 0.28699999989476055
+    }
+[10:15:35.751] [32mINFO[39m: [36mgm-tool-loop.tool-call.start[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.start"
+    [35mpayload[39m: {
+      "toolName": "promote_npc",
+      "toolCallId": "call_07402d2e73574542bcab1b65"
+    }
+[10:15:35.751] [32mINFO[39m: [36mtool.call[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "tool.call"
+    [35mpayload[39m: {
+      "toolName": "promote_npc",
+      "args": {
+        "npcRef": "Venn the Seal-Presser",
+        "newTier": "persistent",
+        "reason": "Mira has entered the back room and encountered Venn directly — face-to-face interaction with a Signal-House operative who controls access to the pier's lacquer authentication workspace."
+      },
+      "result": {
+        "success": false,
+        "error": "Tool grounding failed: input.npcRef must reference a clear local NPC actor; got an out-of-scope ref."
+      },
+      "latencyMs": 0
+    }
+[10:15:35.752] [32mINFO[39m: [36mgm-tool-loop.tool-call.finish[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.finish"
+    [35mpayload[39m: {
+      "success": true,
+      "toolName": "promote_npc",
+      "toolCallId": "call_07402d2e73574542bcab1b65",
+      "durationMs": 0.6995999999344349
+    }
+[10:15:39.790] [32mINFO[39m: [36mjudge.gm-tool-loop[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "judge.gm-tool-loop"
+    [35mpayload[39m: {
+      "gmReadPath": "tool_plan",
+      "finishReason": "stop",
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 13728,
+        "inputTokenDetails": {
+          "noCacheTokens": 160,
+          "cacheReadTokens": 13568
+        },
+        "outputTokens": 94,
+        "outputTokenDetails": {
+          "textTokens": 60,
+          "reasoningTokens": 34
+        },
+        "totalTokens": 13822,
+        "raw": {
+          "prompt_tokens": 13728,
+          "completion_tokens": 94,
+          "total_tokens": 13822,
+          "prompt_tokens_details": {
+            "cached_tokens": 13568
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 34
+          }
+        },
+        "reasoningTokens": 34,
+        "cachedInputTokens": 13568
+      },
+      "textLen": 283,
+      "reasoningLen": 0,
+      "stepCount": 10,
+      "toolCallCount": 9,
+      "successCount": 2,
+      "failureCount": 7,
+      "toolCallNames": [
+        "reveal_location",
+        "spawn_npc",
+        "log_event",
+        "log_event",
+        "log_event",
+        "log_event",
+        "promote_npc",
+        "promote_npc",
+        "promote_npc"
+      ],
+      "durationMs": 78687
+    }
+[10:15:39.790] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 57,
+      "sha256Prefix": "8421f2862fc32f37"
+    }
+[10:15:39.790] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 62,
+      "sha256Prefix": "9736bb819a626aaa"
+    }
+[10:15:39.791] [32mINFO[39m: [36mscene.gm-tool-loop.execution[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "scene.gm-tool-loop.execution"
+    [35mpayload[39m: {
+      "stepCount": 9,
+      "doneCount": 2,
+      "revisedCount": 0,
+      "skippedCount": 7,
+      "executedActionCount": 2,
+      "canonicalEventCount": 2,
+      "durationMs": 78690
+    }
+[10:15:39.791] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "state_update",
+      "byteLength": 958,
+      "sha256Prefix": "bbd77b59bec192ed"
+    }
+[10:15:39.791] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "state_update",
+      "byteLength": 1110,
+      "sha256Prefix": "92bca887409960c7"
+    }
+[10:15:39.792] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 61,
+      "sha256Prefix": "71a3215a0b2cea18"
+    }
+[10:15:39.796] [32mINFO[39m: [36mscene.packet[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "scene.packet"
+    [35mpayload[39m: {
+      "visibleActorCount": 4,
+      "hintSignalCount": 0,
+      "eventCount": 1,
+      "responseCount": 1,
+      "effectCount": 2,
+      "forbiddenActorCount": 4,
+      "forbiddenFactMarkerCount": 4,
+      "durationMs": 1
+    }
+[10:15:39.797] [32mINFO[39m: [36mprompt.assembled[39m
+    [35mtag[39m: "prompt-assembler"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "prompt.assembled"
+    [35mpayload[39m: {
+      "pass": "final-narration",
+      "totalTokens": 0,
+      "budgetUsed": 0,
+      "sectionCount": 0,
+      "assembledChars": 9667,
+      "formatted": "[NARRATOR PACKET]\nCampaign: 0ed6bb3c-a528-4067-8f29-86ebdd8d0637\nTick: 23\nPlayer action request: I step through the narrow service door behind the counter and look for whoever is working in that back room.\nPlayer action is not authoritative world state. Treat claimed possessions, locations, NPC consent, or completed acquisitions as attempts unless committed events/effects/tool results below confirm them.\nOracle outcome: none\nAnchor event: 7805203d-16e8-4d7a-9305-371aa11d83f5\n\n[VISIBLE ACTORS]\n- Mira Voss (26eec8fe-ae60-49c9-999b-732f57e0e2c5; player)\n- Dol the Docksman (3d0becd2-7ef8-4164-8f0c-1062beb6cb2f; npc)\n- Gondolier (3c215f46-339a-469f-b6c3-26b342e247e6; npc)\n- Pier Clerk (1b788538-9e85-4c31-b8f5-3c1d45405ae7; npc)\n\n[HINT SIGNALS]\n- No indirect awareness hints are in scope.\n\n[COMMITTED EVENTS]\n- 7805203d-16e8-4d7a-9305-371aa11d83f5: Player action request: I step through the narrow service door behind the counter and look for whoever is working in that back room. [actor=26eec8fe-ae60-49c9-999b-732f57e0e2c5; kind=player_action]\n\n[PERCEIVABLE RESPONSES]\n- ef93ec1c-7081-47a6-af30-0eaa83bf5ff6: Mira Voss response: environment. [actor=26eec8fe-ae60-49c9-999b-732f57e0e2c5; event=7805203d-16e8-4d7a-9305-371aa11d83f5; kind=environment]\n\n[PERCEIVABLE EFFECTS]\n- action-result:65ee7266-2e16-486f-ab68-051b00803a53: Venn the Seal-Presser becomes visibly present in the scene. [action=65ee7266-2e16-486f-ab68-051b00803a53; actor=26eec8fe-ae60-49c9-999b-732f57e0e2c5; tool=spawn_npc]\n- action-result:1413a46a-9c7b-4142-97ad-e64d369b908e: Mira Voss stepped through the service door behind the pier counter into the back room, where she found Venn the Seal-Presser — a lacquer artificer working at a wax-stained workbench surrounded by message cylinders, seal-stamps, and jars of lacquer pigment. The back room serves as the pier's message-sorting and seal-authentication workspace. [action=1413a46a-9c7b-4142-97ad-e64d369b908e; actor=26eec8fe-ae60-49c9-999b-732f57e0e2c5; tool=log_event]\n\n[GUARDRAILS]\n- Narrate only committed player-perceivable packet facts.\n\n[CONTROL RETURN]\nThe canonical local ScenePlan step has resolved and returned control to the player.\n\n[RP BEAT DIRECTIVE]\n- Write one playable RPG/VN beat, not a recap, report, or lore dump.\n- Start from the player request and show what visibly changes now.\n- Let visible NPCs act from motives, pressure, relationships, and limited knowledge.\n- Use concrete observable details, body language, distinct dialogue, and changed positions before abstract mood.\n- Do not open by echoing or paraphrasing the player action.\n- Do not decide the player's deliberate words, feelings, consent, or completed success.\n- If the packet describes an unconfirmed claim, bluff, or failed test, keep it unconfirmed; do not concretize the claimed prop, authority, or access into the player's hand or inventory.\n- Treat NarratorPacket events, effects, and tool results as the only authority for success, possession, access, consent, location change, and durable world change.\n- Stop when the scene reaches a live next decision, question, pressure, or invitation.\n\n[RECENT VISIBLE TRANSCRIPT]\nUse only as continuity for the current player-visible scene. NarratorPacket facts remain authoritative.\n- GM: Mira moves past where a counter might have been—there's just a scar in the planks where one was bolted down, old screw-holes dark with salt rot—and toward a narrow door set into the pier's back wall. Planks, weathered gray, with a brass latch green from the canal air.\n\nThe latch rattles before she reaches it.\n\nThe door swings inward on a hinge that squeals once, and a woman steps through sideways, ducking under the low frame. She's short, broad-shouldered, wearing a stained canvas apron over a wool shirt, and she's carrying a wooden message-box under one arm—the kind with slotted compartments, each one sealed with a different color of wax. Her fingers are ink-stained to the second knuckle.\n\nShe doesn't look at Mira. Her eyes go straight to Dol.\n\n\"Sixteen minutes late,\" Dol says.\n\n\"Supply launch grounded on the south fork.\" The woman's voice is hoarse, the kind of rough that comes from sh...\n- Player: I ask the clerk which message route is safest after midnight.\n- GM: The Clerk's eyes stay on Dol a beat longer than they need to, like she's reading something off his posture that Mira can't guess at. Then those ink-dark fingers tighten around the message-box and she turns, looking Mira over the way someone checks a package for damage.\n\n\"Which route,\" she repeats. Not a question—more like she's weighing the words on a scale.\n\nThe message-box creaks under her arm. Through the slotted compartments, Mira can see strips of colored paper—pink, green, one that might be black—each one folded and sealed. The woman's apron smells of canal water and solvent.\n\n\"South fork's down,\" the Clerk says. \"Supply launch beached until the morning tide. That leaves the outer loop or the double-back through the mill quarter.\" She shifts the box to her hip. \"Outer loop stays lit till three. Mill quarter cuts dark at one unless you've got your own signal pattern.\"\n\nDol hasn't mo...\n- Player: I step toward the narrow service door behind the counter and look for whoever is working there.\n- GM: Mira takes a step toward the service door, but it's already ajar—no one behind it. The Clerk is standing three feet away, message-box propped against her hip, watching Mira with the flat attention of someone who's already answered the question and is waiting to see what gets done with it.\n\nDol hasn't moved. His arms are still crossed, boots planted on the scarred planks, and he's looking at the Clerk now instead of Mira. Something passes between them—not words, just a tightening around the woman's mouth and a slow blink that might mean *I know* or *not now*.\n\nThe Gondolier shifts his oar to the other shoulder. Water laps the hull of his boat. Down the canal, the mooring lantern swings and the shadows crawl across the embankment stones like something breathing.\n\n\"Outer loop or mill quarter,\" the Clerk says again, quieter this time, like she's offering it back as a choice instead of inform...\n- Player: I ask the clerk which message route is safest after midnight.\n- GM: The Clerk doesn't repeat herself. Her jaw works once, like she's chewing on something, and then she shifts the message-box from her hip to the crook of her elbow, freeing one ink-stained hand to tap a finger against the slotted lid. Pink seal. Green seal. Black seal.\n\n\"I just told you,\" she says. Low. No edge yet, but the patience is running thin enough to see through. \"Outer loop. Mill quarter. You want me to write it down?\"\n\nDol uncrosses his arms. He takes one step forward—not toward Mira, but toward the edge of the pier where his gondola rocks against its mooring rope. The movement is deliberate, the kind that says *we've been standing here too long* without opening his mouth.\n\nThe Gondolier reads it. He shifts his weight, oar balanced across both shoulders now, and glances down the canal where the orange lantern marks the first bend. His boat's bow nudges the pier with a soft knock....\n- Player: I step through the narrow service door behind the counter and look for whoever is working in that back room.\n\n[CURRENT LOCAL SCENE]\n- Name: Lantern-Lit Gondola Pier\n- Id: e17520a7-2514-4cf6-9f22-b8849b3df8c8\n- Description: A weathered wooden pier extends over a narrow, lantern-lit canal where four gondola boats are tied to iron rings. Gondoliers, licensed by the signal-house families, navigate the shifting waterways using coded lantern patterns to avoid submerged obstacles and unmapped turns. After midnight, the canal's banks physically shift, requiring the gondoliers to read new signal-house lantern patterns to find safe passage.\n- Tags: Nocturnal, Controlled by Signal-House Families, Shifting, Dangerous, signal_house_families_commercial_hub, subsidized_freight_active, gondola_operator_recruitment, lacquer_seal_delegation_present, warden_inspection_active, contested_access, consecrated_transit_zone, lacquer_artificer_station, chokepoint_lifted\n\n[OPENING STATE]\n- Structured opening state has expired.\n- Opening location: Lantern-Lit Gondola Pier\n\n[SETTLED PACKET EFFECTS]\n- Venn the Seal-Presser becomes visibly present in the scene. [source=narrator-packet; player-perceivable=yes]\n- Mira Voss stepped through the service door behind the pier counter into the back room, where she found Venn the Seal-Presser — a lacquer artificer working at a wax-stained workbench surrounded by message cylinders, seal-stamps, and jars of lacquer pigment. The back room serves as the pier's message-sorting and seal-authentication workspace. [source=narrator-packet; player-perceivable=yes]\n\n[PRESENT ACTORS]\n- Dol the Docksman\n- Gondolier\n- Pier Clerk\n\n[FINAL NARRATION TASK]\nUse the NarratorPacket as the authoritative committed packet.\nWrite one final narration pass from the settled opening state, current scene, and NarratorPacket facts.\nDo not invent material events outside these authoritative inputs.\nTreat the raw player action as an attempted request, not as proof that the action already succeeded.\nDo not narrate claimed possessions, NPC consent, location access, or item acquisition unless NarratorPacket events/effects/tool results confirm them.\nIf a packet effect says a claim may be false or unconfirmed, narrate the visible challenge/refusal without placing the claimed object in the player's hand.\nDo not write tool syntax or metadata.\nKeep the output bounded to what the player can perceive in this scene.\nEnd on a concrete playable next moment rather than closing the scene with generic reflection."
+    }
+[10:15:39.797] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 68,
+      "sha256Prefix": "942125865ebeb5e0"
+    }
+[10:15:57.216] [32mINFO[39m: [36mvisible-narration.packet-guard[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "visible-narration.packet-guard"
+    [35mpayload[39m: {
+      "stage": "passed",
+      "attempts": 1,
+      "retried": false,
+      "violationCount": 0,
+      "durationMs": 17419
+    }
+[10:15:57.216] [32mINFO[39m: [36mstoryteller.visible.call[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "storyteller.visible.call"
+    [35mpayload[39m: {
+      "label": "final",
+      "initialLen": 1759,
+      "retried": false,
+      "failures": [],
+      "reasoningLen": 0,
+      "durationMs": 17419
+    }
+[10:15:57.216] [32mINFO[39m: [36mVisible narration complete: executedActions=2, final=1759 chars, retried=false, failures=none[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+[10:15:57.217] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "narrative",
+      "byteLength": 1794,
+      "sha256Prefix": "865dbe00a21248d3"
+    }
+[10:15:57.219] [32mINFO[39m: [36mTick advanced: 23 -> 24 (+1)[39m
+    [35mtag[39m: "campaign-manager"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+[10:15:57.219] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "finalizing_turn",
+      "byteLength": 39,
+      "sha256Prefix": "56443a25bdb9e626"
+    }
+[10:15:57.222] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 71,
+      "sha256Prefix": "4100a2deb32bdd78"
+    }
+[10:15:57.223] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "done",
+      "byteLength": 11,
+      "sha256Prefix": "820cce41cf52a9fa"
+    }
+[10:15:57.223] [32mINFO[39m: [36mturn.end[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "70366102-bd6c-4722-a14d-90d5764913dd"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 23
+    [35mevent[39m: "turn.end"
+    [35mpayload[39m: {
+      "route": "/action",
+      "tick": 23,
+      "durationMs": 379715,
+      "outcome": "success"
+    }

@@ -16,7 +16,11 @@ vi.mock("../../lib/web-search.js", () => ({
   webSearch: (...args: unknown[]) => mockWebSearch(...args),
 }));
 
-import { enrichKnownIpWorldgenNpcDraft } from "../known-ip-worldgen-research.js";
+import {
+  enrichKnownIpWorldgenNpcDraft,
+  normalizeLlmPowerStats,
+} from "../known-ip-worldgen-research.js";
+import { buildPowerStatsPromptContract } from "../prompt-contract.js";
 
 const fakeRole = {
   provider: {
@@ -37,24 +41,6 @@ function makeDraft(): CharacterDraft {
       tier: "key",
       displayName: "Gojo Satoru",
       canonicalStatus: "known_ip_diverged",
-      baseFacts: {
-        biography: "",
-        socialRole: ["Teacher", "Jujutsu Sorcerer"],
-        hardConstraints: [],
-      },
-      behavioralCore: {
-        motives: [],
-        pressureResponses: [],
-        taboos: [],
-        attachments: [],
-        selfImage: "",
-      },
-      liveDynamics: {
-        activeGoals: ["Protect his students"],
-        beliefDrift: [],
-        currentStrains: [],
-        earnedChanges: [],
-      },
     },
     profile: {
       species: "Human",
@@ -119,6 +105,26 @@ describe("enrichKnownIpWorldgenNpcDraft", () => {
     mockWebSearch.mockReset();
   });
 
+  it("emits an exact power-stat contract with valid, minimal, and invalid examples", () => {
+    const contract = buildPowerStatsPromptContract();
+
+    expect(contract).toContain("STRUCTURED_OUTPUT_CONTRACT: power-stats.v1");
+    expect(contract).toContain("attackPotency: { tier: string, rank: 1-10 }");
+    expect(contract).toContain("speed: { tier: string, rank: 1-10 }");
+    expect(contract).toContain("durability: { tier: string, rank: 1-10 }");
+    expect(contract).toContain("intelligence: { tier: string, rank: 1-10 }");
+    expect(contract).toContain("hax: [{ name, type, bypassTier, limitations }]");
+    expect(contract).toContain("vulnerabilities: [{ description, severity }]");
+    expect(contract).toContain("bypassTier may be null");
+    expect(contract).toContain("hax and vulnerabilities may be empty arrays");
+    expect(contract).toContain("Rank within tier: Low = 1-3, Mid = 4-7, High = 8-10");
+    expect(contract).toContain("Minimal valid output");
+    expect(contract).toContain('"attackPotency": { "tier": "Street", "rank": 5 }');
+    expect(contract).toContain("Invalid example");
+    expect(contract).toContain("Do not return vague labels like \"strong\", \"godlike\", or \"unknown\"");
+    expect(contract).toContain("Do not invent feats, tiers, source roles, or canonical facts");
+  });
+
   it("fails closed when research is disabled", async () => {
     await expect(
       enrichKnownIpWorldgenNpcDraft({
@@ -131,7 +137,7 @@ describe("enrichKnownIpWorldgenNpcDraft", () => {
     ).rejects.toThrow(/requires research to be enabled/i);
   });
 
-  it("attaches canon-backed grounding, continuity, and self-image for known-IP key NPCs", async () => {
+  it("attaches PowerStats with VS Battles tiers from LLM assessment", async () => {
     mockWebSearch.mockResolvedValueOnce([
       {
         title: "Satoru Gojo | Jujutsu Kaisen Wiki",
@@ -146,33 +152,28 @@ describe("enrichKnownIpWorldgenNpcDraft", () => {
     ]);
     mockGenerateObject.mockResolvedValueOnce({
       object: {
-        summary:
-          "Gojo Satoru is the strongest active jujutsu sorcerer, a teacher at Tokyo Jujutsu High, and the most destabilizing opponent of conservative jujutsu leadership.",
-        selfImage:
-          "He sees himself as the one person strong enough to protect the next generation and drag jujutsu society forward by force if necessary.",
-        socialRoles: ["Teacher", "Special Grade Sorcerer", "Gojo Clan Heir"],
-        facts: [
-          "Gojo teaches at Tokyo Jujutsu High.",
-          "He inherited both the Six Eyes and the Limitless technique.",
+        attackPotency: { tier: "City Block", rank: 8 },
+        speed: { tier: "Massively Hypersonic", rank: 7 },
+        durability: { tier: "City Block", rank: 9 },
+        intelligence: { tier: "Genius", rank: 8 },
+        hax: [
+          {
+            name: "Infinity",
+            type: "Spatial Manipulation",
+            bypassTier: "City",
+            limitations: ["Can be bypassed by Domain Expansion"],
+          },
+          {
+            name: "Unlimited Void",
+            type: "Domain Expansion",
+            bypassTier: null,
+            limitations: ["Requires hand signs", "Limited duration"],
+          },
         ],
-        abilities: ["Six Eyes", "Limitless", "Infinity", "Domain Expansion: Unlimited Void"],
-        constraints: ["Cannot reform the institution overnight through force alone."],
-        signatureMoves: ["Hollow Purple", "Unlimited Void"],
-        strongPoints: ["Overwhelming spatial control", "Reaction speed through Six Eyes"],
-        vulnerabilities: ["Political isolation", "Students become leverage against him"],
-        protectedCore: ["Protects promising students", "Refuses conservative jujutsu authority"],
-        mutableSurface: ["Current alliances", "Tactical restraint in public"],
-        changePressureNotes: ["Meaningful losses can make him more ruthless, not obedient."],
-        powerProfile: {
-          attack: "Possesses city-block to district-scale kill pressure through Hollow Purple and Blue/Red combinations.",
-          speed: "Top-tier combat reactions and initiative due to Six Eyes and technique mastery.",
-          durability: "Defensively anchored in Infinity rather than raw body tanking.",
-          range: "Controls close, mid, and long lines through spatial manipulation and domain pressure.",
-          strengths: ["Spatial denial", "Near-unmatched technique efficiency"],
-          constraints: ["Reliant on technique access and tactical awareness"],
-          vulnerabilities: ["Sealing, leverage through students, and institutional counterplay"],
-          uncertaintyNotes: ["Cross-franchise scaling remains bounded to attested canon feats."],
-        },
+        vulnerabilities: [
+          { description: "Political isolation from conservative jujutsu leadership", severity: "major" },
+          { description: "Students can be used as leverage against him", severity: "critical" },
+        ],
       },
     });
 
@@ -197,82 +198,98 @@ describe("enrichKnownIpWorldgenNpcDraft", () => {
       },
     });
 
-    expect(draft.identity.behavioralCore?.selfImage).toContain("protect the next generation");
-    expect(draft.identity.baseFacts?.socialRole).toEqual(
-      expect.arrayContaining(["Teacher", "Special Grade Sorcerer", "Gojo Clan Heir"]),
-    );
-    expect(draft.grounding?.abilities).toEqual(
-      expect.arrayContaining(["Six Eyes", "Limitless", "Infinity"]),
-    );
-    expect(draft.grounding?.powerProfile?.attack).toContain("Hollow Purple");
-    expect(draft.sourceBundle?.canonSources[0]?.label).toContain("Satoru Gojo");
-    expect(draft.continuity?.protectedCore).toEqual(
-      expect.arrayContaining(["Protects promising students"]),
-    );
+    // PowerStats should be attached
+    expect(draft.powerStats).toBeDefined();
+    expect(draft.powerStats?.attackPotency.tier).toBe("City Block");
+    expect(draft.powerStats?.attackPotency.rank).toBe(8);
+    expect(draft.powerStats?.speed.tier).toBe("Massively Hypersonic");
+    expect(draft.powerStats?.durability.tier).toBe("City Block");
+    expect(draft.powerStats?.intelligence.tier).toBe("Genius");
+    expect(draft.powerStats?.hax).toHaveLength(2);
+    expect(draft.powerStats?.hax[0]?.name).toBe("Infinity");
+    expect(draft.powerStats?.hax[0]?.bypassTier).toBe("City");
+    expect(draft.powerStats?.vulnerabilities).toHaveLength(2);
+    expect(draft.powerStats?.vulnerabilities[0]?.severity).toBe("major");
+
+    // Old fields should NOT be present
+    expect((draft as unknown as Record<string, unknown>).grounding).toBeUndefined();
+
+    // LLM prompt should include VS Battles tier names
+    const prompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>)
+      .prompt as string;
+    expect(prompt).toContain("STRUCTURED_OUTPUT_CONTRACT: power-stats.v1");
+    expect(prompt).toContain("Minimal valid output");
+    expect(prompt).toContain("Invalid example");
+    expect(prompt).toContain("Do not invent feats, tiers, source roles, or canonical facts");
+    expect(prompt).toContain("VS Battles");
+    expect(prompt).toContain("City Block");
+    expect(prompt).toContain("Massively Hypersonic");
+    expect(prompt).toContain("Genius");
   });
 
-  it("repairs malformed model output instead of failing the whole known-IP enrichment pass", async () => {
+  it("normalizes LLM tier output variants via coercion", async () => {
     mockWebSearch.mockResolvedValueOnce([
       {
         title: "Satoru Gojo | Jujutsu Kaisen Wiki",
-        description: "Special Grade sorcerer, teacher at Tokyo Jujutsu High, wielder of Limitless and Six Eyes.",
+        description: "Special Grade sorcerer",
         url: "https://example.com/gojo",
       },
     ]);
+    mockGenerateObject.mockResolvedValueOnce({
+      object: {
+        attackPotency: { tier: "city block", rank: 8 },
+        speed: { tier: "MHS+", rank: 7 },
+        durability: { tier: "city level", rank: 5 },
+        intelligence: { tier: "genius level", rank: 8 },
+        hax: [],
+        vulnerabilities: [],
+      },
+    });
+
+    const draft = await enrichKnownIpWorldgenNpcDraft({
+      draft: makeDraft(),
+      franchise: "Jujutsu Kaisen",
+      role: fakeRole,
+      research: { enabled: true, maxSearchSteps: 5, searchProvider: "duckduckgo" },
+      premise: "Jujutsu Kaisen.",
+    });
+
+    // Tier names should be normalized to canonical forms
+    expect(draft.powerStats?.attackPotency.tier).toBe("City Block");
+    expect(draft.powerStats?.speed.tier).toBe("Massively Hypersonic");
+    expect(draft.powerStats?.durability.tier).toBe("City");
+    expect(draft.powerStats?.intelligence.tier).toBe("Genius");
+  });
+
+  it("repairs malformed model output instead of failing the whole enrichment pass", async () => {
+    mockWebSearch.mockResolvedValueOnce([
+      {
+        title: "Satoru Gojo | Jujutsu Kaisen Wiki",
+        description: "Special Grade sorcerer, teacher at Tokyo Jujutsu High.",
+        url: "https://example.com/gojo",
+      },
+    ]);
+    // First call: malformed output
     mockGenerateObject
       .mockResolvedValueOnce({
         object: {
-          characterName: "Gojo Satoru",
-          franchise: "Naruto and Jujutsu Kaisen",
-          canonFacts: [
-            "Special Grade sorcerer and instructor at Tokyo Prefectural Jujutsu High School",
-            "Born into the Gojo Clan, inheriting both Six Eyes and Limitless cursed technique",
-          ],
-          abilities: {
-            traits: ["Six Eyes", "Limitless Technique"],
-            signature: ["Hollow Purple", "Unlimited Void"],
-          },
-          socialRoles: ["Teacher", "Special Grade Sorcerer"],
-          powerProfile: {
-            strengths: ["Spatial control", "Technique efficiency"],
-          },
+          attack: "City Block level",
+          speed: "MHS+",
+          defense: "City Block",
+          intelligence: "Genius",
         },
       })
+      // Repair call: proper format
       .mockResolvedValueOnce({
         object: {
-          identity: {
-            name: "Gojo Satoru",
-            selfImage:
-              "He sees himself as the one person strong enough to protect the next generation and drag jujutsu society forward by force if necessary.",
-            socialRoles: ["Teacher", "Special Grade Sorcerer", "Gojo Clan Heir"],
-          },
-          summary:
-            "Gojo Satoru is the strongest active jujutsu sorcerer, a teacher at Tokyo Jujutsu High, and the most destabilizing opponent of conservative jujutsu leadership.",
-          facts: [
-            "Gojo teaches at Tokyo Jujutsu High.",
-            "He inherited both the Six Eyes and the Limitless technique.",
+          attackPotency: { tier: "City Block", rank: 8 },
+          speed: { tier: "Massively Hypersonic", rank: 7 },
+          durability: { tier: "City Block", rank: 9 },
+          intelligence: { tier: "Genius", rank: 8 },
+          hax: [],
+          vulnerabilities: [
+            { description: "Sealing techniques", severity: "critical" },
           ],
-          abilities: {
-            core: ["Six Eyes", "Limitless", "Infinity"],
-            signature: ["Domain Expansion: Unlimited Void"],
-          },
-          constraints: ["Cannot reform the institution overnight through force alone."],
-          signatureMoves: ["Hollow Purple", "Unlimited Void"],
-          strongPoints: ["Overwhelming spatial control", "Reaction speed through Six Eyes"],
-          vulnerabilities: ["Political isolation", "Students become leverage against him"],
-          protectedCore: ["Protects promising students", "Refuses conservative jujutsu authority"],
-          mutableSurface: ["Current alliances", "Tactical restraint in public"],
-          changePressureNotes: ["Meaningful losses can make him more ruthless, not obedient."],
-          powerProfile: {
-            attack: "Possesses city-block to district-scale kill pressure through Hollow Purple and Blue/Red combinations.",
-            speed: "Top-tier combat reactions and initiative due to Six Eyes and technique mastery.",
-            durability: "Defensively anchored in Infinity rather than raw body tanking.",
-            range: "Controls close, mid, and long lines through spatial manipulation and domain pressure.",
-            strengths: ["Spatial denial", "Near-unmatched technique efficiency"],
-            constraints: ["Reliant on technique access and tactical awareness"],
-            vulnerabilities: ["Sealing, leverage through students, and institutional counterplay"],
-            uncertaintyNotes: ["Cross-franchise scaling remains bounded to attested canon feats."],
-          },
         },
       });
 
@@ -285,183 +302,136 @@ describe("enrichKnownIpWorldgenNpcDraft", () => {
     });
 
     expect(mockGenerateObject).toHaveBeenCalledTimes(2);
-    expect(draft.grounding?.powerProfile?.attack).toContain("Hollow Purple");
-    expect(draft.identity.behavioralCore?.selfImage).toContain("protect the next generation");
-    expect(draft.grounding?.abilities).toEqual(
-      expect.arrayContaining(["Six Eyes", "Limitless", "Infinity", "Domain Expansion: Unlimited Void"]),
-    );
-    expect(draft.identity.baseFacts?.socialRole).toEqual(
-      expect.arrayContaining(["Teacher", "Special Grade Sorcerer", "Gojo Clan Heir"]),
-    );
-    expect(draft.continuity?.protectedCore).toEqual(
-      expect.arrayContaining(["Protects promising students"]),
-    );
+    const repairPrompt = (mockGenerateObject.mock.calls[1]![0] as Record<string, unknown>)
+      .prompt as string;
+    expect(repairPrompt).toContain("STRUCTURED_OUTPUT_CONTRACT: power-stats.v1");
+    expect(repairPrompt).toContain("Malformed raw payload");
+    expect(repairPrompt).toContain("Do not return vague labels");
+    expect(repairPrompt).toContain("Use only facts from the raw payload and search results");
+    expect(draft.powerStats?.attackPotency.tier).toBe("City Block");
+    expect(draft.powerStats?.vulnerabilities).toHaveLength(1);
   });
 
-  it("caps overlong arrays before schema parse instead of crashing on max bounds", async () => {
+  it("requires power-stat repair to fail closed instead of inventing missing evidence", async () => {
     mockWebSearch.mockResolvedValueOnce([
       {
         title: "Satoru Gojo | Jujutsu Kaisen Wiki",
-        description: "Special Grade sorcerer, teacher at Tokyo Jujutsu High, wielder of Limitless and Six Eyes.",
-        url: "https://example.com/gojo",
-      },
-    ]);
-    mockGenerateObject.mockResolvedValueOnce({
-      object: {
-        summary:
-          "Gojo Satoru is the strongest active jujutsu sorcerer alive and a teacher at Tokyo Jujutsu High.",
-        selfImage:
-          "He sees himself as the pillar keeping the next generation alive long enough to surpass him.",
-        socialRoles: [
-          "Teacher",
-          "Special Grade Sorcerer",
-          "Gojo Clan Heir",
-          "Mentor",
-          "Political Disruptor",
-          "Extra Role That Should Be Trimmed",
-        ],
-        facts: [
-          "Fact 1",
-          "Fact 2",
-          "Fact 3",
-          "Fact 4",
-          "Fact 5",
-          "Fact 6",
-          "Fact 7",
-        ],
-        abilities: [
-          "Ability 1",
-          "Ability 2",
-          "Ability 3",
-          "Ability 4",
-          "Ability 5",
-          "Ability 6",
-          "Ability 7",
-          "Ability 8",
-          "Ability 9",
-        ],
-        constraints: ["Constraint 1", "Constraint 2", "Constraint 3", "Constraint 4", "Constraint 5", "Constraint 6"],
-        signatureMoves: ["Move 1", "Move 2", "Move 3", "Move 4", "Move 5", "Move 6"],
-        strongPoints: ["Strong 1", "Strong 2", "Strong 3", "Strong 4", "Strong 5", "Strong 6", "Strong 7"],
-        vulnerabilities: ["Weak 1", "Weak 2", "Weak 3", "Weak 4", "Weak 5", "Weak 6"],
-        protectedCore: ["Core 1", "Core 2", "Core 3", "Core 4", "Core 5", "Core 6", "Core 7"],
-        mutableSurface: ["Surface 1", "Surface 2", "Surface 3", "Surface 4", "Surface 5", "Surface 6"],
-        changePressureNotes: ["Note 1", "Note 2", "Note 3", "Note 4", "Note 5", "Note 6"],
-        powerProfile: {
-          attack: "Extreme offensive output.",
-          speed: "Top-tier reactions.",
-          durability: "Infinity-based defense.",
-          range: "Close to long range.",
-          strengths: ["Power strength 1", "Power strength 2"],
-          constraints: ["Power constraint 1", "Power constraint 2"],
-          vulnerabilities: ["Power weakness 1", "Power weakness 2"],
-          uncertaintyNotes: ["Power uncertainty 1", "Power uncertainty 2", "Power uncertainty 3", "Power uncertainty 4", "Power uncertainty 5", "Power uncertainty 6"],
-        },
-      },
-    });
-
-    const draft = await enrichKnownIpWorldgenNpcDraft({
-      draft: makeDraft(),
-      franchise: "Jujutsu Kaisen",
-      role: fakeRole,
-      research: { enabled: true, maxSearchSteps: 5, searchProvider: "duckduckgo" },
-      premise: "Jujutsu Kaisen with a Naruto power overlay.",
-    });
-
-    expect(draft.grounding?.facts).toHaveLength(6);
-    expect(draft.grounding?.abilities).toHaveLength(8);
-    expect(draft.identity.baseFacts?.socialRole).toHaveLength(5);
-    expect(draft.grounding?.signatureMoves).toHaveLength(5);
-    expect(draft.grounding?.strongPoints).toHaveLength(6);
-    expect(draft.grounding?.vulnerabilities).toHaveLength(5);
-    expect(draft.continuity?.protectedCore).toHaveLength(6);
-    expect(draft.continuity?.mutableSurface).toHaveLength(5);
-    expect(draft.continuity?.changePressureNotes).toHaveLength(5);
-  });
-
-  it("retries repair when the first repaired payload still misses required minimum counts", async () => {
-    mockWebSearch.mockResolvedValueOnce([
-      {
-        title: "Satoru Gojo | Jujutsu Kaisen Wiki",
-        description: "Special Grade sorcerer, teacher at Tokyo Jujutsu High, wielder of Limitless and Six Eyes.",
+        description: "Special Grade sorcerer, teacher at Tokyo Jujutsu High.",
         url: "https://example.com/gojo",
       },
     ]);
     mockGenerateObject
       .mockResolvedValueOnce({
         object: {
-          characterName: "Gojo Satoru",
-          canonFacts: [
-            "Special Grade sorcerer and instructor at Tokyo Prefectural Jujutsu High School",
-            "Inherited both Six Eyes and Limitless.",
-          ],
-          abilities: {
-            traits: ["Six Eyes"],
-          },
+          attack: "unknown",
+          speed: "unknown",
+          defense: "unknown",
+          intelligence: "unknown",
         },
       })
       .mockResolvedValueOnce({
         object: {
-          summary: "Gojo Satoru is the strongest active jujutsu sorcerer alive.",
-          identity: {
-            selfImage: "He sees himself as the pillar that keeps the next generation alive.",
-            socialRoles: ["Teacher"],
-          },
-          facts: [
-            "Gojo teaches at Tokyo Jujutsu High.",
-            "He inherited both the Six Eyes and the Limitless technique.",
-          ],
-          abilities: {
-            traits: ["Six Eyes"],
-          },
-          protectedCore: ["Protects promising students", "Rejects conservative authority"],
-          powerProfile: {
-            attack: "High-output offensive spatial techniques.",
-            speed: "Top-tier combat reactions.",
-            durability: "Infinity-based defense.",
-            range: "Close to long-range pressure.",
-          },
+          attack: "godlike",
+          speed: "fast",
+          defense: "durable",
+          intelligence: "smart",
         },
       })
       .mockResolvedValueOnce({
         object: {
-          summary: "Gojo Satoru is the strongest active jujutsu sorcerer alive.",
-          identity: {
-            selfImage: "He sees himself as the pillar that keeps the next generation alive.",
-            socialRoles: ["Teacher", "Special Grade Sorcerer"],
-          },
-          facts: [
-            "Gojo teaches at Tokyo Jujutsu High.",
-            "He inherited both the Six Eyes and the Limitless technique.",
-          ],
-          abilities: {
-            traits: ["Six Eyes", "Limitless"],
-            signature: ["Infinity"],
-          },
-          protectedCore: ["Protects promising students", "Rejects conservative authority"],
-          powerProfile: {
-            attack: "High-output offensive spatial techniques.",
-            speed: "Top-tier combat reactions.",
-            durability: "Infinity-based defense.",
-            range: "Close to long-range pressure.",
-          },
+          attack: "godlike",
+          speed: "fast",
+          defense: "durable",
+          intelligence: "smart",
+        },
+      })
+      .mockResolvedValueOnce({
+        object: {
+          attack: "godlike",
+          speed: "fast",
+          defense: "durable",
+          intelligence: "smart",
         },
       });
 
-    const draft = await enrichKnownIpWorldgenNpcDraft({
-      draft: makeDraft(),
-      franchise: "Jujutsu Kaisen",
-      role: fakeRole,
-      research: { enabled: true, maxSearchSteps: 5, searchProvider: "duckduckgo" },
-      premise: "Jujutsu Kaisen with a Naruto power overlay.",
-    });
+    await expect(
+      enrichKnownIpWorldgenNpcDraft({
+        draft: makeDraft(),
+        franchise: "Jujutsu Kaisen",
+        role: fakeRole,
+        research: { enabled: true, maxSearchSteps: 5, searchProvider: "duckduckgo" },
+        premise: "Jujutsu Kaisen.",
+      }),
+    ).rejects.toThrow();
 
-    expect(mockGenerateObject).toHaveBeenCalledTimes(3);
-    expect(draft.grounding?.abilities).toEqual(
-      expect.arrayContaining(["Six Eyes", "Limitless", "Infinity"]),
+    const repairPrompt = String(mockGenerateObject.mock.calls[1]?.[0]?.prompt ?? "");
+    expect(repairPrompt).toContain("STRUCTURED_OUTPUT_CONTRACT: power-stats.v1");
+    expect(repairPrompt).toContain("fail closed");
+    expect(repairPrompt).toContain("must never invent power facts");
+    expect(repairPrompt).toContain("Do not create new hax or vulnerabilities unless they are already supported");
+  });
+});
+
+describe("normalizeLlmPowerStats", () => {
+  function makeRawPowerStats(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      attackPotency: { tier: "City Block", rank: 8 },
+      speed: { tier: "Massively Hypersonic", rank: 7 },
+      durability: { tier: "City Block", rank: 9 },
+      intelligence: { tier: "Genius", rank: 8 },
+      hax: [],
+      vulnerabilities: [],
+      ...overrides,
+    };
+  }
+
+  it("throws when any axis has a valid tier but missing rank", () => {
+    expect(() =>
+      normalizeLlmPowerStats(
+        makeRawPowerStats({
+          attackPotency: { tier: "City Block" },
+        }),
+      ),
+    ).toThrow();
+  });
+
+  it.each([
+    ["unknown", "unknown"],
+    ["NaN", Number.NaN],
+    ["zero", 0],
+  ])("throws for invalid rank value %s", (_label, rank) => {
+    expect(() =>
+      normalizeLlmPowerStats(
+        makeRawPowerStats({
+          speed: { tier: "Massively Hypersonic", rank },
+        }),
+      ),
+    ).toThrow();
+  });
+
+  it("accepts valid integer ranks 1 through 10, including trimmed numeric strings", () => {
+    const parsed = normalizeLlmPowerStats(
+      makeRawPowerStats({
+        attackPotency: { tier: "City Block", rank: " 1 " },
+        speed: { tier: "Massively Hypersonic", rank: " 10 " },
+        durability: { tier: "City Block", rank: 4 },
+        intelligence: { tier: "Genius", rank: 6 },
+      }),
     );
-    expect(draft.identity.baseFacts?.socialRole).toEqual(
-      expect.arrayContaining(["Teacher", "Special Grade Sorcerer"]),
-    );
+
+    expect(parsed.attackPotency.rank).toBe(1);
+    expect(parsed.speed.rank).toBe(10);
+    expect(parsed.durability.rank).toBe(4);
+    expect(parsed.intelligence.rank).toBe(6);
+
+    for (let rank = 1; rank <= 10; rank += 1) {
+      expect(
+        normalizeLlmPowerStats(
+          makeRawPowerStats({
+            attackPotency: { tier: "City Block", rank },
+          }),
+        ).attackPotency.rank,
+      ).toBe(rank);
+    }
   });
 });

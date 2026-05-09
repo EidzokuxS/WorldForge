@@ -7,6 +7,7 @@ import type {
   WorldData,
   EditableScaffold,
   LoreCardItem,
+  ScaffoldLocation,
   ScaffoldNpc,
 } from "./api-types";
 import type { CharacterDraft } from "@worldforge/shared";
@@ -60,6 +61,16 @@ function resolveEditableNpcTier(
     ?? mapWorldRowTierToScaffoldTier(npc.tier)
     ?? "key"
   );
+}
+
+function mapWorldLocationKind(
+  kind: WorldData["locations"][number]["locationKind"],
+): ScaffoldLocation["kind"] | undefined {
+  if (kind === "macro" || kind === "persistent_sublocation") {
+    return kind;
+  }
+
+  return undefined;
 }
 
 /** Build ID-to-name lookup maps from raw world data. */
@@ -121,6 +132,10 @@ export function toEditableScaffold(
       connectedTo: getConnectedLocationIds(loc)
         .map((id) => idMaps.locationIdToName.get(id))
         .filter((n): n is string => n != null),
+      kind: mapWorldLocationKind(loc.locationKind),
+      parentLocationName: loc.parentLocationId
+        ? idMaps.locationIdToName.get(loc.parentLocationId) ?? null
+        : null,
     })),
     factions: world.factions.map((fac) => ({
       name: fac.name,
@@ -142,16 +157,21 @@ export function toEditableScaffold(
         : Array.isArray(goals.longTerm)
           ? (goals.longTerm as string[])
           : [];
-      const draftNpc = draft ? draftToEditableNpc(draft) : null;
+      const draftNpc = draft ? characterDraftToScaffoldNpc(draft) : null;
       const tier = resolveEditableNpcTier(npc);
+      const broadLocationName = npc.currentLocationId
+        ? idMaps.locationIdToName.get(npc.currentLocationId) ?? ""
+        : "";
+      const sceneLocationName = npc.sceneScopeId
+        ? idMaps.locationIdToName.get(npc.sceneScopeId) ?? null
+        : (npc.npc?.sceneLocationName ?? draftNpc?.sceneLocationName ?? null);
       return {
         name: draftNpc?.name ?? npc.name,
         persona: draftNpc?.persona ?? npc.persona,
         tags: draftNpc?.tags ?? npc.tags,
         goals: draftNpc?.goals ?? { shortTerm, longTerm },
-        locationName: draftNpc?.locationName ?? (npc.currentLocationId
-          ? idMaps.locationIdToName.get(npc.currentLocationId) ?? ""
-          : ""),
+        locationName: draftNpc?.locationName ?? broadLocationName,
+        sceneLocationName,
         factionName: draftNpc?.factionName ?? npcFaction.get(npc.name) ?? null,
         tier,
         characterRecord: npc.characterRecord ?? null,
@@ -165,8 +185,4 @@ export function toEditableScaffold(
     })),
     personaTemplates: world.personaTemplates,
   };
-}
-
-function draftToEditableNpc(draft: CharacterDraft) {
-  return characterDraftToScaffoldNpc(draft);
 }

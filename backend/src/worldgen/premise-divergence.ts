@@ -5,6 +5,7 @@ import { safeGenerateObject as generateObject } from "../ai/generate-object-safe
 import { createModel } from "../ai/index.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import { clampTokens, createLogger } from "../lib/index.js";
+import { buildPremiseDivergencePromptContract } from "./prompt-contracts.js";
 
 const log = createLogger("premise-divergence");
 
@@ -99,7 +100,10 @@ export async function interpretPremiseDivergence(
   if (!ipContext) return null;
 
   const canonicalCharacters = ipContext.canonicalNames?.characters ?? [];
+  const outputContract = buildPremiseDivergencePromptContract();
   const prompt = `You interpret how a player's campaign premise diverges from a known canon setting.
+
+${outputContract}
 
 FRANCHISE:
 ${ipContext.franchise}

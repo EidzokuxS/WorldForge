@@ -12,7 +12,7 @@ export function ReviewWorkspace({
   className,
 }: ReviewWorkspaceProps) {
   return (
-    <div className={cn("flex flex-1 flex-col min-h-0", className)}>
+    <div className={cn("flex flex-1 flex-col", className)}>
       {children}
     </div>
   );

@@ -28,10 +28,20 @@ function makeDraft(
         selfImage: "Baseline persona",
       },
       liveDynamics: {
+        attachments: [],
         activeGoals: ["Keep moving", "Stay alive"],
         beliefDrift: [],
         currentStrains: [],
         earnedChanges: [],
+      },
+      personality: {
+        summary: "Baseline interiority.",
+        voice: "Measured and plainspoken.",
+        decisionStyle: "Careful, but not hesitant.",
+        worldview: "Pragmatic and local.",
+        internalContradictions: ["Wants distance, but keeps taking responsibility."],
+        personalMythology: "Just another traveler trying to keep one promise.",
+        sampleLines: ["Keep your hood up and your head down."],
       },
     },
     profile: {
@@ -90,27 +100,6 @@ function makeDraft(
       worldgenOrigin: null,
       legacyTags: [],
     },
-    sourceBundle: {
-      canonSources: [],
-      secondarySources: [
-        {
-          kind: "runtime",
-          label: "Baseline concept",
-          excerpt: "Baseline background",
-        },
-      ],
-      synthesis: {
-        owner: "WorldForge",
-        strategy: "test-fixture",
-        notes: ["Persona templates should not erase source provenance."],
-      },
-    },
-    continuity: {
-      identityInertia: "anchored",
-      protectedCore: ["identity.baseFacts", "identity.behavioralCore"],
-      mutableSurface: ["identity.liveDynamics"],
-      changePressureNotes: ["Change should be earned."],
-    },
   };
 }
 
@@ -131,6 +120,7 @@ const TEMPLATE: PersonaTemplate = {
         selfImage: "Dry wit hiding hard-earned caution.",
       },
       liveDynamics: {
+        attachments: [],
         currentStrains: ["Distrusts authority"],
       },
     },
@@ -194,8 +184,7 @@ describe("persona templates", () => {
       "late",
       "under-equipped",
     ]);
-    expect(next.sourceBundle?.secondarySources[0]?.label).toBe("Baseline concept");
-    expect(next.continuity?.identityInertia).toBe("anchored");
+    // sourceBundle and continuity no longer managed by persona templates
   });
 
   it("creates lightweight summaries for list payloads without dropping scope metadata", () => {
@@ -209,5 +198,57 @@ describe("persona templates", () => {
       createdAt: TEMPLATE.createdAt,
       updatedAt: TEMPLATE.updatedAt,
     });
+  });
+
+  it("merges personality patches without disturbing untouched fields", () => {
+    const draft = makeDraft("player");
+
+    const next = applyPersonaTemplatePatch(draft, {
+      identity: {
+        personality: {
+          voice: "Dry, clipped, and a little dismissive.",
+        },
+      },
+    });
+
+    expect(next.identity.personality?.voice).toBe(
+      "Dry, clipped, and a little dismissive.",
+    );
+    expect(next.identity.personality?.summary).toBe("Baseline interiority.");
+    expect(next.identity.personality?.sampleLines).toEqual([
+      "Keep your hood up and your head down.",
+    ]);
+  });
+
+  it("leaves personality untouched when the patch omits it", () => {
+    const draft = makeDraft("npc");
+
+    const next = applyPersonaTemplatePatch(draft, {
+      identity: {
+        behavioralCore: {
+          selfImage: "Changed self-image only.",
+        },
+      },
+    });
+
+    expect(next.identity.behavioralCore?.selfImage).toBe("Changed self-image only.");
+    expect(next.identity.personality).toEqual(draft.identity.personality);
+  });
+
+  it("replaces personality sampleLines arrays instead of concatenating them", () => {
+    const draft = makeDraft("player");
+
+    const next = applyPersonaTemplatePatch(draft, {
+      identity: {
+        personality: {
+          sampleLines: ["Eyes up.", "Move clean."],
+        },
+      },
+    });
+
+    expect(next.identity.personality?.sampleLines).toEqual([
+      "Eyes up.",
+      "Move clean.",
+    ]);
   });
 });

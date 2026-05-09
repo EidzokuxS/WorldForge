@@ -65,6 +65,11 @@ export async function insertLoreCards(
     await db.dropTable(TABLE_NAME);
   }
   await db.createTable(TABLE_NAME, rows as unknown as Record<string, unknown>[]);
+  log.event("vector.write", {
+    store: "lore_cards",
+    op: "createTable",
+    count: rows.length,
+  });
 }
 
 export async function insertLoreCardsWithoutVectors(
@@ -84,6 +89,12 @@ export async function insertLoreCardsWithoutVectors(
     await db.dropTable(TABLE_NAME);
   }
   await db.createTable(TABLE_NAME, rows as unknown as Record<string, unknown>[]);
+  log.event("vector.write", {
+    store: "lore_cards",
+    op: "createTable",
+    count: rows.length,
+    withVectors: false,
+  });
 }
 
 export async function searchLoreCards(
@@ -138,6 +149,11 @@ export async function deleteCampaignLore(): Promise<void> {
   const tableNames = await db.tableNames();
   if (tableNames.includes(TABLE_NAME)) {
     await db.dropTable(TABLE_NAME);
+    log.event("vector.write", {
+      store: "lore_cards",
+      op: "dropTable",
+      count: 0,
+    });
   }
 }
 
@@ -191,6 +207,12 @@ export async function deleteLoreCardById(cardId: string): Promise<boolean> {
   }
 
   await table.delete(`id = '${escapeTableString(cardId)}'`);
+  log.event("vector.write", {
+    store: "lore_cards",
+    op: "delete",
+    count: 1,
+    rowId: cardId,
+  });
   return true;
 }
 

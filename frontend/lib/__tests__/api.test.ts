@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   chatAction,
   chatEdit,
@@ -7,12 +7,46 @@ import {
   chatRetry,
   chatUndo,
   deleteLoreCardById,
+  generateWorld,
+  generateCharacter,
   getWorldData,
+  importV2Card,
+  IngestionError,
+  parseCharacter,
   parseTurnSSE,
   readErrorMessage,
+  readIngestionError,
+  researchCharacter,
+  suggestSeed,
   updateLoreCard,
 } from "../api";
 import type { LoreCardItem, LoreCardUpdateInput } from "../api-types";
+import type { WorldgenResearchArtifactV2 } from "@worldforge/shared";
+
+const RESEARCH_ARTIFACT: WorldgenResearchArtifactV2 = {
+  version: 2,
+  rawPremise: "Jujutsu Kaisen world with Naruto power system",
+  rawKnownIP: "Jujutsu Kaisen",
+  researchBrief: {
+    interpretationSummary: "Use Jujutsu Kaisen as the world basis and Naruto as the power system overlay.",
+    ambiguityNotes: [],
+    sourceUsageRules: [],
+    searchJobs: [],
+  },
+  searchResults: [],
+  generatedContext: {
+    keyFacts: ["Tokyo Jujutsu High anchors the setting."],
+    tonalNotes: ["Occult action"],
+    canonicalNames: {
+      characters: ["Satoru Gojo"],
+    },
+  },
+  provenance: {
+    createdAt: "2026-04-26T00:00:00.000Z",
+    model: "test-model",
+    searchProvider: "test",
+  },
+};
 
 // ---------------------------------------------------------------------------
 // readErrorMessage
@@ -129,6 +163,62 @@ describe("lore item API helpers", () => {
   });
 });
 
+describe("worldgen API helpers", () => {
+  const fetchMock = vi.fn<typeof fetch>();
+
+  afterEach(() => {
+    fetchMock.mockReset();
+    vi.unstubAllGlobals();
+  });
+
+  function lastBody(): Record<string, unknown> {
+    const call = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
+    const init = call?.[1] as RequestInit | undefined;
+    return JSON.parse(String(init?.body));
+  }
+
+  it("suggestSeed includes a researchArtifact only when one exists", async () => {
+    fetchMock.mockImplementation(async () => new Response(
+      JSON.stringify({ category: "geography", value: "Tokyo wards" }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await suggestSeed("Premise", "geography", null, null, RESEARCH_ARTIFACT);
+    expect(lastBody()).toMatchObject({
+      premise: "Premise",
+      category: "geography",
+      researchArtifact: RESEARCH_ARTIFACT,
+    });
+
+    await suggestSeed("Premise", "geography", null, null, null);
+    expect(lastBody()).not.toHaveProperty("researchArtifact");
+  });
+
+  it("generateWorld includes a researchArtifact only when one exists", async () => {
+    fetchMock.mockImplementation(async () => new Response(
+      JSON.stringify({ startingLocation: "Tokyo Jujutsu High" }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await generateWorld("campaign-1", undefined, null, null, RESEARCH_ARTIFACT);
+    expect(lastBody()).toMatchObject({
+      campaignId: "campaign-1",
+      researchArtifact: RESEARCH_ARTIFACT,
+    });
+
+    await generateWorld("campaign-1", undefined, null, null, null);
+    expect(lastBody()).not.toHaveProperty("researchArtifact");
+  });
+});
+
 describe("gameplay API helpers", () => {
   const fetchMock = vi.fn<typeof fetch>();
 
@@ -226,7 +316,7 @@ describe("gameplay API helpers", () => {
   });
 
   it("chatUndo is a JSON helper and returns parsed undo results", async () => {
-    const undoResult = { success: true, messagesRemoved: 2 };
+    const undoResult = { ok: true, messagesRemoved: 2 };
 
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify(undoResult), {
@@ -245,7 +335,7 @@ describe("gameplay API helpers", () => {
   });
 
   it("chatEdit is a JSON helper and sends campaignId with the edit payload", async () => {
-    const editResult = { success: true };
+    const editResult = { ok: true };
 
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify(editResult), {
@@ -347,6 +437,89 @@ describe("gameplay API helpers", () => {
     expect(world.npcs[0]?.sceneScopeId).toBe("scene-platform-7");
     expect(world.player?.sceneScopeId).toBe("scene-platform-7");
   });
+
+  it("getWorldData keeps authoritative currentScene ids separate from same-broad NPC rows", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({
+        currentScene: {
+          id: "scene-platform-7",
+          name: "Platform 7",
+          broadLocationId: "loc-shibuya-station",
+          broadLocationName: "Shibuya Station",
+          sceneNpcIds: ["npc-clear", "npc-hint"],
+          clearNpcIds: ["npc-clear"],
+          awareness: {
+            byNpcId: {
+              "npc-clear": "clear",
+              "npc-hint": "hint",
+              "npc-sibling": "clear",
+            },
+            hintSignals: ["A cursed echo carries from another platform."],
+          },
+        },
+        locations: [],
+        npcs: [
+          {
+            id: "npc-clear",
+            campaignId: "camp-1",
+            name: "Concourse Warden",
+            persona: "",
+            tags: "[]",
+            tier: "supporting",
+            currentLocationId: "loc-shibuya-station",
+            sceneScopeId: "scene-platform-7",
+            goals: "{\"short_term\":[],\"long_term\":[]}",
+            beliefs: "[]",
+          },
+          {
+            id: "npc-sibling",
+            campaignId: "camp-1",
+            name: "Rooftop Lookout",
+            persona: "",
+            tags: "[]",
+            tier: "supporting",
+            currentLocationId: "loc-shibuya-station",
+            sceneScopeId: "scene-rooftop",
+            goals: "{\"short_term\":[],\"long_term\":[]}",
+            beliefs: "[]",
+          },
+        ],
+        factions: [],
+        relationships: [],
+        items: [],
+        player: {
+          id: "player-1",
+          campaignId: "camp-1",
+          name: "Yuji Itadori",
+          race: "",
+          gender: "",
+          age: "",
+          appearance: "",
+          hp: 5,
+          tags: "[]",
+          equippedItems: "[]",
+          inventory: [],
+          equipment: [],
+          currentLocationId: "loc-shibuya-station",
+          sceneScopeId: "scene-platform-7",
+        },
+        personaTemplates: [],
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const world = await getWorldData("camp-1");
+
+    expect(world.currentScene?.sceneNpcIds).toEqual(["npc-clear", "npc-hint"]);
+    expect(world.currentScene?.clearNpcIds).toEqual(["npc-clear"]);
+    expect(world.currentScene?.awareness.byNpcId["npc-sibling"]).toBe("clear");
+    expect(world.npcs.map((npc) => npc.id)).toEqual(["npc-clear", "npc-sibling"]);
+    expect(world.npcs[1]?.currentLocationId).toBe("loc-shibuya-station");
+    expect(world.npcs[1]?.sceneScopeId).toBe("scene-rooftop");
+  });
 });
 
 describe("parseTurnSSE", () => {
@@ -370,7 +543,7 @@ describe("parseTurnSSE", () => {
         'data: {"text":"The gate trembles."}',
         "",
         "event: finalizing_turn",
-        "data: {}",
+        "data: {\"stage\":\"rollback_critical\",\"tick\":7}",
         "",
         "event: done",
         "data: {}",
@@ -388,6 +561,7 @@ describe("parseTurnSSE", () => {
     );
 
     expect(onFinalizing).toHaveBeenCalledTimes(1);
+    expect(onFinalizing).toHaveBeenCalledWith({ stage: "rollback_critical", tick: 7 });
     expect(onDone).toHaveBeenCalledTimes(1);
     expect(onFinalizing.mock.invocationCallOrder[0]).toBeLessThan(onDone.mock.invocationCallOrder[0]);
   });
@@ -398,6 +572,9 @@ describe("parseTurnSSE", () => {
     await expect(
       parseTurnSSE(
         createStream([
+          'event: narrative',
+          'data: {"text":"The gate trembles."}',
+          "",
           "event: finalizing_turn",
           "data: {}",
           "",
@@ -417,6 +594,124 @@ describe("parseTurnSSE", () => {
     ).resolves.toBeUndefined();
 
     expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports done-without-visible-narrative as an accepted turn error", async () => {
+    const onNarrative = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+
+    await parseTurnSSE(
+      createStream([
+        "event: finalizing_turn",
+        "data: {\"stage\":\"commit\",\"tick\":8}",
+        "",
+        "event: done",
+        "data: {}",
+        "",
+      ].join("\n")),
+      {
+        onNarrative,
+        onOracleResult: vi.fn(),
+        onStateUpdate: vi.fn(),
+        onQuickActions: vi.fn(),
+        onFinalizing: vi.fn(),
+        onDone,
+        onError,
+      },
+    );
+
+    expect(onNarrative).not.toHaveBeenCalled();
+    expect(onDone).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith("Turn finished without visible narration. Please retry.");
+  });
+
+  it("does not count whitespace-only narrative as visible accepted turn text", async () => {
+    const onDone = vi.fn();
+    const onError = vi.fn();
+
+    await parseTurnSSE(
+      createStream([
+        "event: narrative",
+        'data: {"text":"   "}',
+        "",
+        "event: finalizing_turn",
+        "data: {\"stage\":\"commit\",\"tick\":8}",
+        "",
+        "event: done",
+        "data: {}",
+        "",
+      ].join("\n")),
+      {
+        onNarrative: vi.fn(),
+        onOracleResult: vi.fn(),
+        onStateUpdate: vi.fn(),
+        onQuickActions: vi.fn(),
+        onFinalizing: vi.fn(),
+        onDone,
+        onError,
+      },
+    );
+
+    expect(onDone).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith("Turn finished without visible narration. Please retry.");
+  });
+
+  it("reports a closed stream with no terminal event or narrative", async () => {
+    const onDone = vi.fn();
+    const onError = vi.fn();
+
+    await parseTurnSSE(
+      createStream([
+        "event: scene-settling",
+        "data: {\"stage\":\"scene_settling\"}",
+        "",
+      ].join("\n")),
+      {
+        onSceneSettling: vi.fn(),
+        onNarrative: vi.fn(),
+        onOracleResult: vi.fn(),
+        onStateUpdate: vi.fn(),
+        onQuickActions: vi.fn(),
+        onDone,
+        onError,
+      },
+    );
+
+    expect(onDone).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith("Turn stream ended before completion.");
+  });
+
+  it("keeps lookup-only done streams successful without narrative", async () => {
+    const onLookupResult = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+
+    await parseTurnSSE(
+      createStream([
+        "event: lookup_result",
+        'data: {"lookupKind":"power_profile","subject":"Gojo","answer":"Bounded answer","citations":[],"uncertaintyNotes":[],"sceneImpact":"Lookup only."}',
+        "",
+        "event: done",
+        "data: {}",
+        "",
+      ].join("\n")),
+      {
+        onLookupResult,
+        onNarrative: vi.fn(),
+        onOracleResult: vi.fn(),
+        onStateUpdate: vi.fn(),
+        onQuickActions: vi.fn(),
+        onDone,
+        onError,
+      },
+    );
+
+    expect(onLookupResult).toHaveBeenCalledTimes(1);
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
   });
 
   it("dispatches reasoning on its own event lane without regressing lookup_result, narrative, or done", async () => {
@@ -466,5 +761,175 @@ describe("parseTurnSSE", () => {
     expect(onLookupResult.mock.invocationCallOrder[0]).toBeLessThan(onNarrative.mock.invocationCallOrder[0]);
     expect(onNarrative.mock.invocationCallOrder[0]).toBeLessThan(onReasoning.mock.invocationCallOrder[0]);
     expect(onReasoning.mock.invocationCallOrder[0]).toBeLessThan(onDone.mock.invocationCallOrder[0]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 61 — IngestionError transport + overrideText forwarding
+// ---------------------------------------------------------------------------
+
+function makeJsonResponse(body: unknown, init: { status: number; statusText?: string }): Response {
+  return {
+    ok: init.status >= 200 && init.status < 300,
+    status: init.status,
+    statusText: init.statusText ?? "",
+    json: async () => body,
+  } as unknown as Response;
+}
+
+function makeBrokenJsonResponse(init: { status: number; statusText?: string }): Response {
+  return {
+    ok: init.status >= 200 && init.status < 300,
+    status: init.status,
+    statusText: init.statusText ?? "",
+    json: async () => {
+      throw new Error("not json");
+    },
+  } as unknown as Response;
+}
+
+describe("IngestionError transport", () => {
+  const fetchMock = vi.fn<typeof fetch>();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("readIngestionError parses 502 payload into IngestionError with stage+attempts", async () => {
+    const response = makeJsonResponse(
+      { error: "Draft synthesis failed", stage: "synthesize", attempts: 3 },
+      { status: 502 },
+    );
+    const err = await readIngestionError(response);
+    expect(err).toBeInstanceOf(IngestionError);
+    const ingestion = err as IngestionError;
+    expect(ingestion.stage).toBe("synthesize");
+    expect(ingestion.attempts).toBe(3);
+    expect(ingestion.message).toBe("Draft synthesis failed");
+  });
+
+  it("readIngestionError returns plain Error when payload has no stage", async () => {
+    const response = makeJsonResponse({ error: "bad input" }, { status: 400 });
+    const err = await readIngestionError(response);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(IngestionError);
+    expect(err.message).toBe("bad input");
+  });
+
+  it("readIngestionError falls back to statusText when JSON parse fails", async () => {
+    const response = makeBrokenJsonResponse({ status: 500, statusText: "Internal Server Error" });
+    const err = await readIngestionError(response);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(IngestionError);
+    expect(err.message).toBe("Internal Server Error");
+  });
+
+  it("apiPost throws IngestionError on 502 response (via parseCharacter)", async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeJsonResponse(
+        { error: "Power assessment failed", stage: "power_assess", attempts: 3 },
+        { status: 502 },
+      ),
+    );
+    await expect(
+      parseCharacter("camp-1", "concept", "player"),
+    ).rejects.toBeInstanceOf(IngestionError);
+  });
+});
+
+describe("overrideText forwarding", () => {
+  const fetchMock = vi.fn<typeof fetch>();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function mockOk() {
+    fetchMock.mockResolvedValueOnce(
+      makeJsonResponse(
+        {
+          role: "player",
+          character: { identity: { displayName: "Test" } },
+          draft: { identity: { displayName: "Test" } },
+        },
+        { status: 200 },
+      ),
+    );
+  }
+
+  function lastBody(): Record<string, unknown> {
+    const call = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
+    const init = call?.[1] as RequestInit | undefined;
+    return JSON.parse(String(init?.body));
+  }
+
+  it("parseCharacter forwards overrideText when provided", async () => {
+    mockOk();
+    await parseCharacter("camp-1", "concept", "player", [], [], "override text").catch(() => {});
+    expect(lastBody()).toMatchObject({ overrideText: "override text" });
+  });
+
+  it("parseCharacter omits overrideText when not provided", async () => {
+    mockOk();
+    await parseCharacter("camp-1", "concept", "player").catch(() => {});
+    expect(lastBody()).not.toHaveProperty("overrideText");
+  });
+
+  it("parseCharacter omits overrideText when explicitly empty string", async () => {
+    mockOk();
+    await parseCharacter("camp-1", "concept", "player", [], [], "").catch(() => {});
+    expect(lastBody()).not.toHaveProperty("overrideText");
+  });
+
+  it("generateCharacter forwards overrideText when provided", async () => {
+    mockOk();
+    await generateCharacter("camp-1", "player", [], [], "override instructions").catch(() => {});
+    expect(lastBody()).toMatchObject({ overrideText: "override instructions" });
+  });
+
+  it("researchCharacter forwards overrideText when provided", async () => {
+    mockOk();
+    await researchCharacter("camp-1", "archetype", "player", [], [], "override details").catch(() => {});
+    expect(lastBody()).toMatchObject({ overrideText: "override details" });
+  });
+
+  it("importV2Card forwards overrideText via options", async () => {
+    mockOk();
+    await importV2Card(
+      "camp-1",
+      {
+        name: "Test",
+        description: "Desc",
+        personality: "Pers",
+        scenario: "Scene",
+        tags: [],
+      },
+      { role: "player", overrideText: "override from import" },
+    ).catch(() => {});
+    expect(lastBody()).toMatchObject({ overrideText: "override from import" });
+  });
+
+  it("importV2Card omits overrideText when not provided via options", async () => {
+    mockOk();
+    await importV2Card(
+      "camp-1",
+      {
+        name: "Test",
+        description: "Desc",
+        personality: "Pers",
+        scenario: "Scene",
+        tags: [],
+      },
+      { role: "player" },
+    ).catch(() => {});
+    expect(lastBody()).not.toHaveProperty("overrideText");
   });
 });

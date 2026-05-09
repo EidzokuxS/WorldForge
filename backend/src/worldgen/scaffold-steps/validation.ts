@@ -4,6 +4,7 @@ import { createModel } from "../../ai/index.js";
 import { createLogger } from "../../lib/index.js";
 import type { ResolvedRole } from "../../ai/resolve-role-model.js";
 import type { ScaffoldLocation, ScaffoldFaction, ScaffoldNpc } from "../types.js";
+import { buildScaffoldValidationPromptContract } from "../prompt-contracts.js";
 
 const log = createLogger("validation");
 
@@ -71,7 +72,9 @@ export async function validateAndFixStage<T extends { name: string }>(
     const result = await safeGenerateObject({
       model: createModel(judgeRole.provider),
       schema: validationIssueSchema,
-      prompt: buildValidationPrompt(current),
+      prompt: `${buildScaffoldValidationPromptContract()}
+
+${buildValidationPrompt(current)}`,
       temperature: judgeRole.temperature,
       // No maxOutputTokens — let the model use its full output window
     });
@@ -196,6 +199,8 @@ function buildCrossStageValidationPrompt(
   contextBlock: string,
 ): string {
   return `You are a worldbuilding consistency auditor. Review ALL entities below for cross-stage coherence.
+
+${buildScaffoldValidationPromptContract()}
 
 ${contextBlock}
 

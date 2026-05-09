@@ -1,0 +1,72 @@
+{
+  "phase": 88,
+  "wave": "88-01",
+  "artifact": "job-proposal-ledger",
+  "verified_by": [
+    "backend/src/engine/__tests__/living-world-authority.test.ts"
+  ],
+  "tables_added": [
+    "world_clocks",
+    "simulation_jobs",
+    "simulation_proposals",
+    "actor_process_states",
+    "authority_traces"
+  ],
+  "ledger_flow": [
+    {
+      "record": "simulation_job",
+      "operation": "queueSimulationJob",
+      "baseWorldVersion": 0,
+      "scheduledWorldTimeMinutes": 8,
+      "sourceEntity": {
+        "type": "npc",
+        "id": "npc-1"
+      },
+      "initialStatus": "queued"
+    },
+    {
+      "record": "authority_trace",
+      "operation": "tool:move_to",
+      "baseWorldVersion": 0,
+      "resultWorldVersion": 1,
+      "elapsedWorldTimeMinutes": 2
+    },
+    {
+      "record": "simulation_proposal",
+      "operation": "recordSimulationProposal",
+      "baseWorldVersion": 1,
+      "proposedWorldVersion": 2,
+      "sourceEntity": {
+        "type": "npc",
+        "id": "npc-1"
+      },
+      "initialStatus": "pending"
+    },
+    {
+      "record": "actor_process_state",
+      "operation": "upsertActorProcessState",
+      "actorType": "npc",
+      "actorId": "npc-1",
+      "lastWorldVersion": 2,
+      "nextWakeWorldTimeMinutes": 9,
+      "initialStatus": "queued"
+    },
+    {
+      "record": "rollback_invalidation",
+      "operation": "invalidateAuthorityAfterRestore",
+      "restoredWorldVersion": 0,
+      "restoredWorldTimeMinutes": 5,
+      "expectedStatuses": {
+        "simulation_job": "canceled",
+        "simulation_proposal": "canceled",
+        "actor_process_state": "disabled"
+      }
+    }
+  ],
+  "schema_guards": [
+    "simulation jobs keep base/result version, scheduled/created world time, source entity, payload, cancellation reason, and supersession field.",
+    "simulation proposals keep base/proposed/committed version, source entity, optional originating job, payload, ToolResult link, and rejection reason.",
+    "actor process state is unique per campaign/actor type/actor id and carries last version plus wake-time memory.",
+    "authority traces are unique per campaign/resultWorldVersion to prevent duplicate authority commits for the same version."
+  ]
+}

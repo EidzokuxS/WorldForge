@@ -38,6 +38,15 @@ describe("record adapters richer identity hydration", () => {
       attachments: [],
       selfImage: "",
     });
+    expect(record.identity.personality).toMatchObject({
+      summary: "",
+      voice: "",
+      decisionStyle: "",
+      worldview: "",
+      internalContradictions: [],
+      personalMythology: "",
+      sampleLines: [],
+    });
     expect(record.identity.liveDynamics).toMatchObject({
       activeGoals: [],
       beliefDrift: [],
@@ -75,6 +84,15 @@ describe("record adapters richer identity hydration", () => {
     });
     expect(record.identity.behavioralCore).toMatchObject({
       selfImage: "A hard-edged commander who masks fear with discipline.",
+    });
+    expect(record.identity.personality).toMatchObject({
+      summary: "",
+      voice: "",
+      decisionStyle: "",
+      worldview: "",
+      internalContradictions: [],
+      personalMythology: "",
+      sampleLines: [],
     });
     expect(record.identity.liveDynamics).toMatchObject({
       activeGoals: ["Hold the barricade", "Restore order in the valley"],
@@ -411,39 +429,10 @@ describe("record adapters richer identity hydration", () => {
       { currentLocationName: "Signal Station" },
     ) as Record<string, any>;
 
-    expect(record.grounding.summary).toContain("canon-confirmed");
-    expect(record.grounding.powerProfile.constraints).toEqual([
-      "Requires equipment for long-range signaling",
-    ]);
-    expect(record.grounding.powerProfile.vulnerabilities).toEqual([
-      "Can be overwhelmed by sustained melee pressure",
-    ]);
-    expect(record.grounding.sources[0]).toMatchObject({
-      kind: "canon",
-      label: "Signal Station dossier",
-    });
-
-    const projected = projectPlayerRecord(record as any);
-    const rehydrated = hydrateStoredPlayerRecord(
-      {
-        id: "player-grounded",
-        campaignId: "camp-1",
-        name: projected.name,
-        race: projected.race,
-        gender: projected.gender,
-        age: projected.age,
-        appearance: projected.appearance,
-        hp: projected.hp,
-        tags: projected.tags,
-        equippedItems: projected.equippedItems,
-        currentLocationId: projected.currentLocationId,
-        derivedTags: projected.derivedTags,
-        characterRecord: projected.characterRecord,
-      },
-      { currentLocationName: "Signal Station" },
-    ) as Record<string, any>;
-
-    expect(rehydrated.grounding).toEqual(record.grounding);
+    // Phase 57: grounding is stripped by normalizeCharacterDraftRecord (fail-closed migration)
+    // Old records with grounding get powerStats: undefined instead of fake data
+    expect(record.grounding).toBeUndefined();
+    expect(record.powerStats).toBeUndefined();
   });
 
   it("keeps legacy stored records valid when grounding is absent", () => {

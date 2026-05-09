@@ -1,0 +1,24 @@
+locator.fill: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for getByRole('textbox', { name: 'Scene action' })[22m
+[2m    - locator resolved to <textarea rows="2" disabled maxlength="1000" data-slot="textarea" aria-label="Scene action" placeholder="Describe what you do next..." class="flex field-sizing-content w-full border px-3 py-2 shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 md:text-sm dark:bg-input/30 dark:aria-invalid:ring-destructive/40 min-h-[76px] resize-none rounded-md border-zinc-800/90 bg-z…></textarea>[22m
+[2m    - fill("I back off and ask what proof I would need before anyone lets me through.")[22m
+[2m  - attempting fill action[22m
+[2m    2 × waiting for element to be visible, enabled and editable[22m
+[2m      - element is not enabled[22m
+[2m    - retrying fill action[22m
+[2m    - waiting 20ms[22m
+[2m    2 × waiting for element to be visible, enabled and editable[22m
+[2m      - element is not enabled[22m
+[2m    - retrying fill action[22m
+[2m      - waiting 100ms[22m
+[2m    59 × waiting for element to be visible, enabled and editable[22m
+[2m       - element is not enabled[22m
+[2m     - retrying fill action[22m
+[2m       - waiting 500ms[22m
+
+    at submitAction (R:\Projects\WorldForge\e2e\84-rp-prompt-branchy-playtest.ts:206:18)
+    at runBranch (R:\Projects\WorldForge\e2e\84-rp-prompt-branchy-playtest.ts:256:11)
+    at async main (R:\Projects\WorldForge\e2e\84-rp-prompt-branchy-playtest.ts:326:26) {
+  name: 'TimeoutError'
+}

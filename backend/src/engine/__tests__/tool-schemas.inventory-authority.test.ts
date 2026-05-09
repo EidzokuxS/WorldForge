@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import type { z } from "zod";
 
 vi.mock("ai", () => ({
   tool: vi.fn((definition: unknown) => definition),
 }));
+
+type ZodLike<T> = z.ZodType<T>;
 
 vi.mock("../tool-executor.js", () => ({
   executeToolCall: vi.fn(),
@@ -24,7 +27,7 @@ describe("createStorytellerTools inventory authority", () => {
     expect(Object.keys(tools)).not.toContain("equip_item");
     expect(Object.keys(tools)).not.toContain("unequip_item");
 
-    const schema = tools.transfer_item.inputSchema;
+    const schema = tools.transfer_item.inputSchema as unknown as ZodLike<Record<string, unknown>>;
 
     expect(
       schema.safeParse({
@@ -52,7 +55,7 @@ describe("createStorytellerTools inventory authority", () => {
       }).success,
     ).toBe(true);
 
-    await tools.transfer_item.execute({
+    await (tools.transfer_item.execute as (args: unknown) => Promise<unknown>)({
       itemName: "Iron Sword",
       targetName: "Hero",
       targetType: "character",
@@ -71,6 +74,8 @@ describe("createStorytellerTools inventory authority", () => {
         equippedSlot: "main-hand",
       }),
       5,
+      undefined,
+      undefined,
     );
   });
 });

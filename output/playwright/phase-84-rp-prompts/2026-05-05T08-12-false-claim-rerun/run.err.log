@@ -1,0 +1,10 @@
+locator.fill: Error: strict mode violation: getByLabel('Scene action') resolved to 2 elements:
+    1) <section data-testid="action-dock" aria-label="Scene action controls" class="rounded-[10px] border border-white/10 bg-black/82 p-3 text-zinc-100 shadow-[0_18px_60px_rgba(0,0,0,0.42)] backdrop-blur-md">…</section> aka getByTestId('action-dock')
+    2) <textarea rows="2" maxlength="1000" data-slot="textarea" aria-label="Scene action" placeholder="Describe what you do next..." class="flex field-sizing-content w-full border px-3 py-2 shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 md:text-sm dark:bg-input/30 dark:aria-invalid:ring-destructive/40 min-h-[76px] resize-none rounded-md border-zinc-800/90 bg-zinc-950/8…></textarea> aka getByRole('textbox', { name: 'Scene action' })
+
+Call log:
+[2m  - waiting for getByLabel('Scene action')[22m
+
+    at submitAction (R:\Projects\WorldForge\e2e\84-rp-prompt-branchy-playtest.ts:206:18)
+    at runBranch (R:\Projects\WorldForge\e2e\84-rp-prompt-branchy-playtest.ts:256:11)
+    at async main (R:\Projects\WorldForge\e2e\84-rp-prompt-branchy-playtest.ts:326:26)

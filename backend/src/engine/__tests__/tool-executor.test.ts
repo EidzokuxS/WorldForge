@@ -18,12 +18,31 @@ vi.mock("../reflection-budget.js", () => ({
 }));
 
 import { executeToolCall } from "../tool-executor.js";
+import type { ToolExecutionContext } from "../tool-execution-context.js";
 import { getDb } from "../../db/index.js";
 import { storeEpisodicEvent } from "../../vectors/episodic-events.js";
 import { buildAuthoritativeInventoryView } from "../../inventory/authority.js";
 
 const CAMPAIGN_ID = "test-campaign-123";
 const TICK = 5;
+
+function createPlayerTurnContext(overrides: Partial<ToolExecutionContext> = {}): ToolExecutionContext {
+  return {
+    scope: "player_turn",
+    subjectActorId: "player-1",
+    subjectActorRefs: new Set(["player-1", "player"]),
+    currentLocationId: "loc-current",
+    currentSceneScopeId: "scene-current",
+    legalLocationRefs: new Set(["current_location", "current_scene", "loc-current", "scene-current"]),
+    legalActorRefs: new Set(["player-1", "player"]),
+    legalItemRefs: new Set(),
+    legalFactionRefs: new Set(),
+    currentLocationRefs: new Set(["current_location", "loc-current", "shibuya district"]),
+    currentSceneRefs: new Set(["current_scene", "scene-current", "kissaten alcove"]),
+    legalMovementRefs: new Set(),
+    ...overrides,
+  };
+}
 
 // -- Helpers ------------------------------------------------------------------
 
@@ -353,13 +372,34 @@ describe("executeToolCall", () => {
   // -- log_event --------------------------------------------------------------
 
   describe("log_event", () => {
+    it("defaults to scene_local and does not persist transient direct beats", async () => {
+      const result = await executeToolCall(CAMPAIGN_ID, "log_event", {
+        text: "Hero paid for coffee.",
+        importance: 2,
+        participants: ["Hero"],
+      }, TICK);
+
+      expect(result.success).toBe(true);
+      expect(result.result).toEqual({
+        durability: "scene_local",
+        persisted: false,
+      });
+      expect(storeEpisodicEvent).not.toHaveBeenCalled();
+      expect(accumulateReflectionBudgetMock).not.toHaveBeenCalled();
+      expect(getDb).not.toHaveBeenCalled();
+    });
+
     it("stores event metadata via storeEpisodicEvent and returns success", async () => {
+      const { db } = createMockDb({ entity: null });
+      (getDb as Mock).mockReturnValue(db);
       (storeEpisodicEvent as Mock).mockResolvedValue("event-123");
 
       const result = await executeToolCall(CAMPAIGN_ID, "log_event", {
         text: "Battle at the bridge",
         importance: 8,
         participants: ["Gandalf", "Balrog"],
+        durability: "durable",
+        futureRelevance: "This battle changes how both sides remember the bridge.",
       }, TICK);
 
       expect(result.success).toBe(true);
@@ -372,15 +412,24 @@ describe("executeToolCall", () => {
           tick: TICK,
         })
       );
+      expect(result.result).toMatchObject({
+        eventId: "event-123",
+        durability: "durable",
+        persisted: true,
+      });
     });
 
     it("accumulates reflection budget after committed log_event writes", async () => {
+      const { db } = createMockDb({ entity: null });
+      (getDb as Mock).mockReturnValue(db);
       (storeEpisodicEvent as Mock).mockResolvedValue("event-234");
 
       const result = await executeToolCall(CAMPAIGN_ID, "log_event", {
         text: "Greta and Balrog clash on the bridge",
         importance: 8,
         participants: ["Greta", "Balrog"],
+        durability: "durable",
+        futureRelevance: "The clash changes future reflection and relationship pressure.",
       }, TICK);
 
       expect(result.success).toBe(true);
@@ -431,6 +480,8 @@ describe("executeToolCall", () => {
         text: "The square bell rang out over the crowd.",
         importance: 5,
         participants: ["Hero"],
+        durability: "durable",
+        futureRelevance: "The bell marks a future-relevant public signal.",
       }, TICK);
 
       expect(result.success).toBe(true);
@@ -442,6 +493,21 @@ describe("executeToolCall", () => {
           tick: TICK,
         }),
       );
+    });
+
+    it("rejects durable log_event writes without a future relevance reason", async () => {
+      const result = await executeToolCall(CAMPAIGN_ID, "log_event", {
+        text: "Hero promised to return before dusk.",
+        importance: 7,
+        participants: ["Hero"],
+        durability: "durable",
+      }, TICK);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("futureRelevance");
+      expect(storeEpisodicEvent).not.toHaveBeenCalled();
+      expect(accumulateReflectionBudgetMock).not.toHaveBeenCalled();
+      expect(getDb).not.toHaveBeenCalled();
     });
   });
 
@@ -499,7 +565,8 @@ describe("executeToolCall", () => {
       expect(result.success).toBe(true);
       expect(result.result).toMatchObject({
         name: "Bartender",
-        location: "Tavern",
+        locationId: "loc-1",
+        locationName: "Tavern",
       });
       expect((result.result as { id: string }).id).toBeDefined();
       expect(insertRun).toHaveBeenCalled();
@@ -536,6 +603,250 @@ describe("executeToolCall", () => {
         currentLocationId: "loc-1",
         currentSceneLocationId: "loc-1",
       });
+    });
+
+    it("rejects player-turn remote locationName grounding before DB mutation", async () => {
+      const insertRun = vi.fn();
+      const db = {
+        select: vi.fn(),
+        from: vi.fn(),
+        where: vi.fn(),
+        update: vi.fn(),
+        insert: vi.fn().mockReturnValue({
+          values: vi.fn().mockReturnValue({ run: insertRun }),
+        }),
+      };
+      (getDb as Mock).mockReturnValue(db);
+
+      const result = await executeToolCall(CAMPAIGN_ID, "spawn_npc", {
+        name: "Outpost Cook",
+        tags: ["service-staff"],
+        locationName: "Okutama Safe Zone - Forest Outpost",
+      }, TICK, undefined, createPlayerTurnContext());
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Tool grounding failed");
+      expect(result.error).toContain("current scene/current location");
+      expect(insertRun).not.toHaveBeenCalled();
+      expect(db.insert).not.toHaveBeenCalled();
+    });
+
+    it("spawns with preferred locationRef and returns authoritative location metadata", async () => {
+      const { db, state } = createMutableInventoryDb({
+        locations: [{ id: "scene-current", name: "Kissaten Alcove", tags: "[]" }],
+      });
+      (getDb as Mock).mockReturnValue(db);
+
+      const result = await executeToolCall(CAMPAIGN_ID, "spawn_npc", {
+        name: "Counter Clerk",
+        tags: ["service-staff"],
+        locationRef: "current_scene",
+      }, TICK, undefined, createPlayerTurnContext());
+
+      expect(result.success).toBe(true);
+      expect(result.result).toMatchObject({
+        name: "Counter Clerk",
+        locationId: "scene-current",
+        locationName: "Kissaten Alcove",
+      });
+      expect(state.npcs[0]).toMatchObject({
+        currentLocationId: "scene-current",
+        currentSceneLocationId: "scene-current",
+      });
+    });
+
+    it("keeps broad location on the parent macro when spawning into the current sublocation scene", async () => {
+      const { db, state } = createMutableInventoryDb({
+        locations: [
+          {
+            id: "loc-current",
+            name: "Shibuya District",
+            kind: "macro",
+            parentLocationId: null,
+            tags: "[]",
+          },
+          {
+            id: "scene-current",
+            name: "Kissaten Alcove",
+            kind: "persistent_sublocation",
+            parentLocationId: "loc-current",
+            tags: "[]",
+          },
+        ],
+      });
+      (getDb as Mock).mockReturnValue(db);
+
+      const result = await executeToolCall(CAMPAIGN_ID, "spawn_npc", {
+        name: "Counter Clerk",
+        tags: ["service-staff"],
+        locationRef: "current_scene",
+      }, TICK, undefined, createPlayerTurnContext());
+
+      expect(result.success).toBe(true);
+      expect(result.result).toMatchObject({
+        name: "Counter Clerk",
+        locationId: "scene-current",
+        locationName: "Kissaten Alcove",
+        broadLocationId: "loc-current",
+        sceneLocationId: "scene-current",
+      });
+      expect(state.npcs[0]).toMatchObject({
+        currentLocationId: "loc-current",
+        currentSceneLocationId: "scene-current",
+        tier: "temporary",
+      });
+    });
+
+    it("allows player-turn NPC spawn into a runtime-observed local sublocation id", async () => {
+      const { db, state } = createMutableInventoryDb({
+        locations: [
+          {
+            id: "loc-current",
+            name: "Market Counter",
+            kind: "macro",
+            parentLocationId: null,
+            tags: "[]",
+          },
+          {
+            id: "loc-back-room",
+            name: "Back Room",
+            kind: "ephemeral_scene",
+            parentLocationId: "loc-current",
+            tags: "[]",
+          },
+        ],
+      });
+      (getDb as Mock).mockReturnValue(db);
+
+      const result = await executeToolCall(CAMPAIGN_ID, "spawn_npc", {
+        name: "Seal-Presser",
+        tags: ["support", "service-staff"],
+        locationId: "loc-back-room",
+      }, TICK, undefined, createPlayerTurnContext({
+        legalLocationRefs: new Set([
+          "current_location",
+          "current_scene",
+          "loc-current",
+          "scene-current",
+          "loc-back-room",
+          "back room",
+        ]),
+      }));
+
+      expect(result.success).toBe(true);
+      expect(result.result).toMatchObject({
+        name: "Seal-Presser",
+        locationId: "loc-back-room",
+        locationName: "Back Room",
+        broadLocationId: "loc-current",
+        sceneLocationId: "loc-back-room",
+      });
+      expect(state.npcs[0]).toMatchObject({
+        currentLocationId: "loc-current",
+        currentSceneLocationId: "loc-back-room",
+      });
+    });
+  });
+
+  // -- promote_npc ------------------------------------------------------------
+
+  describe("promote_npc", () => {
+    it("promotes a visible temporary support NPC upward without rewriting characterRecord", async () => {
+      const originalRecord = JSON.stringify({
+        identity: { id: "npc-runner", name: "Market Runner", tier: "temporary" },
+      });
+      const { db, state } = createMutableInventoryDb({
+        npcs: [
+          {
+            id: "npc-runner",
+            campaignId: CAMPAIGN_ID,
+            name: "Market Runner",
+            persona: "messenger",
+            characterRecord: originalRecord,
+            derivedTags: "[]",
+            tags: "[]",
+            tier: "temporary",
+            currentLocationId: "loc-current",
+            currentSceneLocationId: "scene-current",
+            goals: '{"short_term":[],"long_term":[]}',
+            beliefs: "[]",
+            unprocessedImportance: 0,
+            inactiveTicks: 0,
+            createdAt: 1,
+          },
+        ],
+      });
+      (getDb as Mock).mockReturnValue(db);
+
+      const result = await executeToolCall(CAMPAIGN_ID, "promote_npc", {
+        npcRef: "Market Runner",
+        newTier: "persistent",
+        reason: "The runner agreed to carry future messages.",
+      }, TICK, undefined, createPlayerTurnContext({
+        legalActorRefs: new Set(["player", "npc-runner", "market runner"]),
+      }));
+
+      expect(result.success).toBe(true);
+      expect(result.result).toMatchObject({
+        npcId: "npc-runner",
+        name: "Market Runner",
+        oldTier: "temporary",
+        newTier: "persistent",
+      });
+      expect(state.npcs[0]).toMatchObject({
+        tier: "persistent",
+        characterRecord: originalRecord,
+      });
+    });
+
+    it("rejects same-tier or downward promotion attempts", async () => {
+      const { db, state } = createMutableInventoryDb({
+        npcs: [
+          {
+            id: "npc-runner",
+            campaignId: CAMPAIGN_ID,
+            name: "Market Runner",
+            persona: "messenger",
+            characterRecord: "{}",
+            derivedTags: "[]",
+            tags: "[]",
+            tier: "persistent",
+            currentLocationId: "loc-current",
+            currentSceneLocationId: "scene-current",
+            goals: '{"short_term":[],"long_term":[]}',
+            beliefs: "[]",
+            unprocessedImportance: 0,
+            inactiveTicks: 0,
+            createdAt: 1,
+          },
+        ],
+      });
+      (getDb as Mock).mockReturnValue(db);
+
+      const result = await executeToolCall(CAMPAIGN_ID, "promote_npc", {
+        npcRef: "Market Runner",
+        newTier: "persistent",
+        reason: "No actual promotion happened.",
+      }, TICK, undefined, createPlayerTurnContext({
+        legalActorRefs: new Set(["player", "npc-runner", "market runner"]),
+      }));
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Can only promote upward");
+      expect(state.npcs[0]?.tier).toBe("persistent");
+    });
+
+    it("requires player-turn promotion targets to be visible local actors", async () => {
+      const result = await executeToolCall(CAMPAIGN_ID, "promote_npc", {
+        npcRef: "Hidden Watcher",
+        newTier: "persistent",
+        reason: "Hidden actors are not legal player-facing targets.",
+      }, TICK, undefined, createPlayerTurnContext({
+        legalActorRefs: new Set(["player"]),
+      }));
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Tool grounding failed");
     });
   });
 
@@ -597,6 +908,113 @@ describe("executeToolCall", () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("not found");
+    });
+
+    it("rejects player-turn item creation for hidden characters before DB mutation", async () => {
+      const result = await executeToolCall(CAMPAIGN_ID, "spawn_item", {
+        name: "Unsigned Pass",
+        tags: ["pass"],
+        ownerName: "Hidden Clerk",
+        ownerType: "character",
+      }, TICK, undefined, createPlayerTurnContext());
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Tool grounding failed");
+      expect(result.error).toContain("clear local actor");
+      expect(getDb).not.toHaveBeenCalled();
+    });
+
+    it("rejects player-turn item creation for remote locations before DB mutation", async () => {
+      const result = await executeToolCall(CAMPAIGN_ID, "spawn_item", {
+        name: "Remote Cache Key",
+        tags: ["key"],
+        ownerName: "Remote Vault",
+        ownerType: "location",
+      }, TICK, undefined, createPlayerTurnContext());
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Tool grounding failed");
+      expect(result.error).toContain("local/current location ref");
+      expect(getDb).not.toHaveBeenCalled();
+    });
+
+    it("allows item creation for visible actors and runtime-observed local locations", async () => {
+      const { db, state } = createMutableInventoryDb({
+        players: [
+          {
+            id: "player-1",
+            campaignId: CAMPAIGN_ID,
+            name: "Player",
+            tags: "[]",
+          },
+        ],
+        locations: [
+          {
+            id: "loc-back-room",
+            name: "Back Room",
+            kind: "ephemeral_scene",
+            parentLocationId: "loc-current",
+            tags: "[]",
+          },
+          {
+            id: "loc-current",
+            name: "Market Counter",
+            kind: "macro",
+            parentLocationId: null,
+            tags: "[]",
+          },
+        ],
+      });
+      (getDb as Mock).mockReturnValue(db);
+      const context = createPlayerTurnContext({
+        legalLocationRefs: new Set([
+          "current_location",
+          "current_scene",
+          "loc-current",
+          "scene-current",
+          "loc-back-room",
+          "back room",
+        ]),
+      });
+
+      const characterResult = await executeToolCall(CAMPAIGN_ID, "spawn_item", {
+        name: "Sealed Route Chit",
+        tags: ["route-token", "persistent"],
+        ownerName: "Player",
+        ownerType: "character",
+      }, TICK, undefined, context);
+      const locationResult = await executeToolCall(CAMPAIGN_ID, "spawn_item", {
+        name: "Ledger Stub",
+        tags: ["evidence", "persistent"],
+        ownerName: "Back Room",
+        ownerType: "location",
+      }, TICK, undefined, context);
+      const locationIdResult = await executeToolCall(CAMPAIGN_ID, "spawn_item", {
+        name: "Stamped Door Token",
+        tags: ["token", "persistent"],
+        ownerName: "loc-back-room",
+        ownerType: "location",
+      }, TICK, undefined, context);
+
+      expect(characterResult.success).toBe(true);
+      expect(locationResult.success).toBe(true);
+      expect(locationIdResult.success).toBe(true);
+      expect(state.insertedItems).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: "Sealed Route Chit",
+            ownerId: "player-1",
+          }),
+          expect.objectContaining({
+            name: "Ledger Stub",
+            locationId: "loc-back-room",
+          }),
+          expect.objectContaining({
+            name: "Stamped Door Token",
+            locationId: "loc-back-room",
+          }),
+        ]),
+      );
     });
   });
 
@@ -660,6 +1078,133 @@ describe("executeToolCall", () => {
       expect(insertRun).toHaveBeenCalled();
       expect(updateRun).toHaveBeenCalled();
       expect(db.insert).toHaveBeenCalledTimes(2);
+    });
+
+    it("creates a locally anchored ephemeral scene with lifetime metadata and authoritative refs", async () => {
+      const { db, state } = createMutableInventoryDb({
+        locations: [
+          {
+            id: "loc-current",
+            name: "Shibuya District",
+            kind: "macro",
+            parentLocationId: null,
+            anchorLocationId: null,
+            persistence: "persistent",
+            tags: "[]",
+            connectedTo: "[]",
+          },
+        ],
+      });
+      (getDb as Mock).mockReturnValue(db);
+
+      const result = await executeToolCall(CAMPAIGN_ID, "reveal_location", {
+        name: "Kissaten Service Counter",
+        description: "A narrow counter under the district cafe where orders and rumors trade hands.",
+        tags: ["service", "local-stage"],
+        connectedToName: "current_location",
+      }, TICK, undefined, createPlayerTurnContext({
+        currentSceneScopeId: null,
+        legalLocationRefs: new Set(["current_location", "loc-current"]),
+        currentSceneRefs: new Set(),
+      }));
+
+      expect(result.success).toBe(true);
+      const created = state.locations.find((location) => location.name === "Kissaten Service Counter");
+      expect(created).toMatchObject({
+        kind: "ephemeral_scene",
+        parentLocationId: "loc-current",
+        anchorLocationId: "loc-current",
+        persistence: "ephemeral",
+        archivedAtTick: null,
+      });
+      expect(created?.expiresAtTick).toBeGreaterThan(TICK);
+      expect(result.result).toMatchObject({
+        id: created?.id,
+        name: "Kissaten Service Counter",
+        kind: "ephemeral_scene",
+        parentLocationId: "loc-current",
+        anchorLocationId: "loc-current",
+        persistence: "ephemeral",
+        expiresAtTick: created?.expiresAtTick,
+        connectedTo: "Shibuya District",
+      });
+    });
+
+    it("accepts the current scene label as a reveal_location anchor without opening remote labels", async () => {
+      const { db, state } = createMutableInventoryDb({
+        locations: [
+          {
+            id: "loc-current",
+            name: "Shibuya District",
+            kind: "macro",
+            parentLocationId: null,
+            anchorLocationId: null,
+            persistence: "persistent",
+            tags: "[]",
+            connectedTo: "[]",
+          },
+          {
+            id: "scene-current",
+            name: "Kissaten Alcove",
+            kind: "persistent_sublocation",
+            parentLocationId: "loc-current",
+            anchorLocationId: null,
+            persistence: "persistent",
+            tags: "[]",
+            connectedTo: "[]",
+          },
+          {
+            id: "loc-remote",
+            name: "Forest Outpost",
+            kind: "macro",
+            parentLocationId: null,
+            anchorLocationId: null,
+            persistence: "persistent",
+            tags: "[]",
+            connectedTo: "[]",
+          },
+        ],
+      });
+      (getDb as Mock).mockReturnValue(db);
+
+      const context = createPlayerTurnContext({
+        currentLocationRefs: new Set(["current_location", "loc-current", "shibuya district"]),
+        currentSceneRefs: new Set(["current_scene", "scene-current", "kissaten alcove"]),
+        legalLocationRefs: new Set([
+          "current_location",
+          "current_scene",
+          "loc-current",
+          "shibuya district",
+          "scene-current",
+          "kissaten alcove",
+        ]),
+      });
+
+      const localResult = await executeToolCall(CAMPAIGN_ID, "reveal_location", {
+        name: "Kissaten Back Room",
+        description: "A cramped service room behind the alcove curtain.",
+        tags: ["service", "local-stage"],
+        connectedToName: "Kissaten Alcove",
+      }, TICK, undefined, context);
+      const remoteResult = await executeToolCall(CAMPAIGN_ID, "reveal_location", {
+        name: "Outpost Crawlspace",
+        description: "A crawlspace in a remote outpost.",
+        tags: ["remote"],
+        connectedToName: "Forest Outpost",
+      }, TICK, undefined, context);
+
+      expect(localResult.success).toBe(true);
+      expect(localResult.result).toMatchObject({
+        name: "Kissaten Back Room",
+        connectedTo: "Kissaten Alcove",
+      });
+      expect(state.locations.find((location) => location.name === "Kissaten Back Room")).toMatchObject({
+        parentLocationId: "scene-current",
+        anchorLocationId: "scene-current",
+      });
+      expect(remoteResult.success).toBe(false);
+      expect(remoteResult.error).toContain("Tool grounding failed");
+      expect(remoteResult.error).toContain("connectedToName");
     });
 
     it("returns error if connectedTo location not found", async () => {

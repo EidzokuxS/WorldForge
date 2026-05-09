@@ -1,0 +1,131 @@
+WorldForge backend listening on http://localhost:3001
+[21:21:10.749] [32mINFO[39m: [36mvector.write[39m
+    [35mtag[39m: "lore-cards"
+    [35mevent[39m: "vector.write"
+    [35mpayload[39m: {
+      "store": "lore_cards",
+      "op": "dropTable",
+      "count": 0
+    }
+[21:21:10.751] [32mINFO[39m: [36mbuildIpContextBlock: no ipContext provided[39m
+    [35mtag[39m: "prompt-utils"
+[21:21:41.121] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 30369
+    }
+[21:22:13.160] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 32038
+    }
+[21:22:50.911] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 37751
+    }
+[21:24:27.427] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 96515
+    }
+[21:25:32.642] [32mINFO[39m: [36membedder.call[39m
+    [35mtag[39m: "embeddings"
+    [35mevent[39m: "embedder.call"
+    [35mpayload[39m: {
+      "batchCount": 2,
+      "totalTexts": 53,
+      "model": "qwen/qwen3-embedding-8b",
+      "success": true,
+      "durationMs": 65214
+    }
+[21:25:32.702] [32mINFO[39m: [36mvector.write[39m
+    [35mtag[39m: "lore-cards"
+    [35mevent[39m: "vector.write"
+    [35mpayload[39m: {
+      "store": "lore_cards",
+      "op": "createTable",
+      "count": 53
+    }
+[21:27:33.995] [32mINFO[39m: [36mvector.write[39m
+    [35mtag[39m: "lore-cards"
+    [35mevent[39m: "vector.write"
+    [35mpayload[39m: {
+      "store": "lore_cards",
+      "op": "dropTable",
+      "count": 0
+    }
+[21:27:33.996] [32mINFO[39m: [36mbuildIpContextBlock: no ipContext provided[39m
+    [35mtag[39m: "prompt-utils"
+[21:28:24.405] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 50409
+    }
+[21:29:22.171] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 57766
+    }
+[21:30:48.578] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 86407
+    }
+[21:31:41.947] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "GLM-5.1",
+      "success": true,
+      "latencyMs": 53369
+    }
+[21:31:50.408] [32mINFO[39m: [36membedder.call[39m
+    [35mtag[39m: "embeddings"
+    [35mevent[39m: "embedder.call"
+    [35mpayload[39m: {
+      "batchCount": 1,
+      "totalTexts": 50,
+      "model": "qwen/qwen3-embedding-8b",
+      "success": true,
+      "durationMs": 8461
+    }
+[21:31:50.422] [32mINFO[39m: [36mvector.write[39m
+    [35mtag[39m: "lore-cards"
+    [35mevent[39m: "vector.write"
+    [35mpayload[39m: {
+      "store": "lore_cards",
+      "op": "createTable",
+      "count": 50
+    }
+
+Shutting down...

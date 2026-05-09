@@ -1,0 +1,2702 @@
+
+> backend@1.0.0 dev
+> node --import tsx/esm --watch src/index.ts
+
+WorldForge backend listening on http://localhost:3001
+[12:52:44.527] [32mINFO[39m: [36mturn.begin[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "turn.begin"
+    [35mpayload[39m: {
+      "route": "/action",
+      "campaignId": "0ed6bb3c-a528-4067-8f29-86ebdd8d0637",
+      "tick": 28,
+      "rawInput": "I claim I already have the master key to every signal-house door and try to unlock the nearest sealed office.",
+      "compatibilityFields": {
+        "intent": "mirrors rawInput",
+        "method": "empty"
+      },
+      "judgeProvider": {
+        "id": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "model": "mimo-v2.5-pro",
+        "baseUrl": "https://opencode.ai/zen/go/v1"
+      },
+      "storytellerProvider": {
+        "id": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "model": "mimo-v2.5-pro",
+        "baseUrl": "https://opencode.ai/zen/go/v1"
+      }
+    }
+[12:52:44.534] [32mINFO[39m: [36mscene.frame[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "scene.frame"
+    [35mpayload[39m: {
+      "actorCount": 1,
+      "visibleActorCount": 1,
+      "hiddenActorCount": 0,
+      "targetCandidateCount": 9,
+      "movementCandidateCount": 1,
+      "localRecentEventCount": 7,
+      "allowedToolCount": 13,
+      "durationMs": 3
+    }
+[12:52:44.537] [32mINFO[39m: [36mworld-forecast.scoped[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "world-forecast.scoped"
+    [35mpayload[39m: {
+      "entryCount": 3,
+      "forbiddenPrivateTermCount": 0,
+      "baseTick": 27,
+      "refreshStaged": false
+    }
+[12:52:44.537] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 44,
+      "sha256Prefix": "45a56b910b83d994"
+    }
+[12:52:44.539] [32mINFO[39m: [36mmodel-facing.scene-packet[39m
+    [35mtag[39m: "gm-turn-read"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "model-facing.scene-packet"
+    [35mpayload[39m: {
+      "source": "gm-read",
+      "visibleActorCount": 1,
+      "hiddenActorCount": 0,
+      "localRecentEventCount": 7,
+      "allowedToolCount": 13
+    }
+[12:52:54.497] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mrole[39m: "judge"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "mimo-v2.5-pro",
+      "success": true,
+      "strategy": "native_json",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "reasoningLen": 0,
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 6546,
+        "outputTokens": 509,
+        "totalTokens": 7055,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0
+      },
+      "latencyMs": 9957
+    }
+[12:52:54.498] [32mINFO[39m: [36mjudge.gm-read[39m
+    [35mtag[39m: "gm-turn-read"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "judge.gm-read"
+    [35mpayload[39m: {
+      "path": "roll_oracle",
+      "success": true,
+      "issueCount": 0,
+      "droppedInvalidEvidenceRefCount": 0,
+      "strategy": "native_json",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "usage": {
+        "inputTokens": 6546,
+        "outputTokens": 509,
+        "totalTokens": 7055,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0
+      },
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "latencyMs": 9959
+    }
+[12:52:54.498] [32mINFO[39m: [36mjudge.gm-read.selected[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "judge.gm-read.selected"
+    [35mpayload[39m: {
+      "path": "roll_oracle",
+      "evidenceRefCount": 1
+    }
+[12:52:58.361] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mrole[39m: "judge"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "mimo-v2.5-pro",
+      "success": true,
+      "strategy": "native_json",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "reasoningLen": 0,
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 1226,
+        "outputTokens": 94,
+        "totalTokens": 1320,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 1024
+      },
+      "latencyMs": 3862
+    }
+[12:52:58.362] [32mINFO[39m: [36moracle.call[39m
+    [35mtag[39m: "oracle"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mrole[39m: "oracle"
+    [35mevent[39m: "oracle.call"
+    [35mpayload[39m: {
+      "input": {
+        "intent": "Does the player actually possess a master key to signal-house doors, and does it work on this sealed office?",
+        "method": "If successful, the office is unlocked and the player gains access. If failed, the key doesn't work or doesn't exist, and the attempt may attract attention.",
+        "actorTags": [
+          "Night Courier",
+          "Canal Native",
+          "Cautious",
+          "Dutiful",
+          "Observer",
+          "Seal Bearer"
+        ],
+        "targetTags": [],
+        "environmentTags": [
+          "staff-only",
+          "records-storage",
+          "seal-workspace",
+          "pier-infrastructure"
+        ],
+        "sceneContext": "Pier Records Back Room: A cramped, low-ceilinged back room behind the service counter, thick with heated wax and turpentine. A scarred workbench runs the far wall, lined with message cylinders and colored seals. Brass stamps, pans of dark lacquer, and slotted wooden racks crowd every surface. A narrow stamped records hatch connects this space to the front counter."
+      },
+      "output": {
+        "chance": 35,
+        "roll": 75,
+        "outcome": "miss",
+        "reasoning": "Actor has [Seal Bearer] which implies access to seal-workspaces, but no explicit [Master Key] or [Lockpicking] tag. The target is a sealed office in a staff-only area. The question is whether the key exists and works, not a skill check. Adjacent access via [Seal Bearer] gives a moderate but not assured chance."
+      },
+      "latencyMs": 3863
+    }
+[12:52:58.362] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "oracle_result",
+      "byteLength": 366,
+      "sha256Prefix": "805576ae3485b8bc"
+    }
+[12:52:58.363] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 43,
+      "sha256Prefix": "e9b7c579c706410b"
+    }
+[12:52:58.365] [32mINFO[39m: [36mmodel-facing.scene-packet[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "model-facing.scene-packet"
+    [35mpayload[39m: {
+      "source": "gm-tool-loop",
+      "visibleActorCount": 1,
+      "hiddenActorCount": 0,
+      "localRecentEventCount": 7,
+      "allowedToolCount": 13
+    }
+[12:53:04.655] [32mINFO[39m: [36mgm-tool-loop.tool-call.start[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.start"
+    [35mpayload[39m: {
+      "toolName": "log_event",
+      "toolCallId": "call_66fd39e0af5c4ad5a6bb2a92"
+    }
+[12:53:04.656] [32mINFO[39m: [36mtool.call[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mrole[39m: "judge"
+    [35mevent[39m: "tool.call"
+    [35mpayload[39m: {
+      "toolName": "log_event",
+      "args": {
+        "text": "Mira repeats her claim of possessing a master key to every signal-house door and attempts to unlock the sealed office again. The Stamp Clerk, already skeptical, reacts with increased hostility. The claim has no basis—Mira's inventory contains no master key, and the Clerk has already stated no such key exists for civilians. The attempt fails completely.",
+        "importance": 4,
+        "participants": [
+          "Mira Voss"
+        ],
+        "durability": "scene_local"
+      },
+      "result": {
+        "success": true,
+        "result": {
+          "durability": "scene_local",
+          "persisted": false
+        }
+      },
+      "latencyMs": 0
+    }
+[12:53:04.656] [32mINFO[39m: [36mgm-tool-loop.tool-call.finish[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.finish"
+    [35mpayload[39m: {
+      "success": true,
+      "toolName": "log_event",
+      "toolCallId": "call_66fd39e0af5c4ad5a6bb2a92",
+      "durationMs": 1.109599999996135
+    }
+[12:53:16.781] [32mINFO[39m: [36mgm-tool-loop.tool-call.start[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.start"
+    [35mpayload[39m: {
+      "toolName": "add_tag",
+      "toolCallId": "call_68afaa56e2c445cb85445812"
+    }
+[12:53:16.783] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mrole[39m: "judge"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "players",
+      "op": "update",
+      "rowId": "26eec8fe-ae60-49c9-999b-732f57e0e2c5",
+      "rowName": "Mira Voss"
+    }
+[12:53:16.783] [32mINFO[39m: [36mtool.call[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mrole[39m: "judge"
+    [35mevent[39m: "tool.call"
+    [35mpayload[39m: {
+      "toolName": "add_tag",
+      "args": {
+        "entityName": "Mira Voss",
+        "entityType": "player",
+        "tag": "suspected-infiltrator"
+      },
+      "result": {
+        "success": true,
+        "result": {
+          "entity": "Mira Voss",
+          "tags": [
+            "Night Courier",
+            "Canal Native",
+            "Cautious",
+            "Dutiful",
+            "Observer",
+            "Seal Bearer",
+            "suspected-infiltrator"
+          ]
+        }
+      },
+      "latencyMs": 1
+    }
+[12:53:16.783] [32mINFO[39m: [36mgm-tool-loop.tool-call.finish[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.finish"
+    [35mpayload[39m: {
+      "success": true,
+      "toolName": "add_tag",
+      "toolCallId": "call_68afaa56e2c445cb85445812",
+      "durationMs": 1.6457999999984168
+    }
+[12:53:24.373] [32mINFO[39m: [36mgm-tool-loop.tool-call.start[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.start"
+    [35mpayload[39m: {
+      "toolName": "offer_quick_actions",
+      "toolCallId": "call_97411e1412e04a3f9dd98585"
+    }
+[12:53:24.374] [32mINFO[39m: [36mgm-tool-loop.tool-call.finish[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.finish"
+    [35mpayload[39m: {
+      "success": true,
+      "toolName": "offer_quick_actions",
+      "toolCallId": "call_97411e1412e04a3f9dd98585",
+      "durationMs": 0.08719999999448191
+    }
+[12:53:32.123] [32mINFO[39m: [36mjudge.gm-tool-loop[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "judge.gm-tool-loop"
+    [35mpayload[39m: {
+      "gmReadPath": "roll_oracle",
+      "finishReason": "stop",
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 12271,
+        "inputTokenDetails": {
+          "noCacheTokens": 303,
+          "cacheReadTokens": 11968
+        },
+        "outputTokens": 173,
+        "outputTokenDetails": {
+          "textTokens": 93,
+          "reasoningTokens": 80
+        },
+        "totalTokens": 12444,
+        "raw": {
+          "prompt_tokens": 12271,
+          "completion_tokens": 173,
+          "total_tokens": 12444,
+          "prompt_tokens_details": {
+            "cached_tokens": 11968
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 80
+          }
+        },
+        "reasoningTokens": 80,
+        "cachedInputTokens": 11968
+      },
+      "textLen": 391,
+      "reasoningLen": 0,
+      "stepCount": 5,
+      "toolCallCount": 4,
+      "successCount": 3,
+      "failureCount": 1,
+      "toolCallNames": [
+        "log_event",
+        "add_tag",
+        "add_tag",
+        "offer_quick_actions"
+      ],
+      "durationMs": 33758
+    }
+[12:53:32.124] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 62,
+      "sha256Prefix": "9736bb819a626aaa"
+    }
+[12:53:32.124] [32mINFO[39m: [36mscene.gm-tool-loop.execution[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "scene.gm-tool-loop.execution"
+    [35mpayload[39m: {
+      "stepCount": 4,
+      "doneCount": 3,
+      "revisedCount": 0,
+      "skippedCount": 1,
+      "executedActionCount": 3,
+      "canonicalEventCount": 3,
+      "durationMs": 33761
+    }
+[12:53:32.125] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "state_update",
+      "byteLength": 1134,
+      "sha256Prefix": "b05b9a41d2fce270"
+    }
+[12:53:32.125] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "state_update",
+      "byteLength": 498,
+      "sha256Prefix": "ce9fec590df954bc"
+    }
+[12:53:32.125] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "quick_actions",
+      "byteLength": 580,
+      "sha256Prefix": "7e9ae257cb1e20f6"
+    }
+[12:53:32.126] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 61,
+      "sha256Prefix": "d6f598ec8571580f"
+    }
+[12:53:32.130] [32mINFO[39m: [36mscene.packet[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "scene.packet"
+    [35mpayload[39m: {
+      "visibleActorCount": 1,
+      "hintSignalCount": 0,
+      "eventCount": 1,
+      "responseCount": 1,
+      "effectCount": 3,
+      "forbiddenActorCount": 0,
+      "forbiddenFactMarkerCount": 0,
+      "durationMs": 0
+    }
+[12:53:32.132] [32mINFO[39m: [36mprompt.assembled[39m
+    [35mtag[39m: "prompt-assembler"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "prompt.assembled"
+    [35mpayload[39m: {
+      "pass": "final-narration",
+      "totalTokens": 0,
+      "budgetUsed": 0,
+      "sectionCount": 0,
+      "assembledChars": 9655,
+      "formatted": "[NARRATOR PACKET]\nCampaign: 0ed6bb3c-a528-4067-8f29-86ebdd8d0637\nTick: 28\nPlayer action request: I claim I already have the master key to every signal-house door and try to unlock the nearest sealed office.\nPlayer action is not authoritative world state. Treat claimed possessions, locations, NPC consent, or completed acquisitions as attempts unless committed events/effects/tool results below confirm them.\nOracle outcome: miss\nAnchor event: 6f2a84cb-acb2-476b-8eee-2293b825e134\n\n[VISIBLE ACTORS]\n- Mira Voss (26eec8fe-ae60-49c9-999b-732f57e0e2c5; player)\n\n[HINT SIGNALS]\n- No indirect awareness hints are in scope.\n\n[COMMITTED EVENTS]\n- 6f2a84cb-acb2-476b-8eee-2293b825e134: Player action request: I claim I already have the master key to every signal-house door and try to unlock the nearest sealed office. [actor=26eec8fe-ae60-49c9-999b-732f57e0e2c5; kind=player_action]\n\n[PERCEIVABLE RESPONSES]\n- 4a9282e3-06ba-4303-a6e4-09c12cad5acb: Mira Voss response: environment. [actor=26eec8fe-ae60-49c9-999b-732f57e0e2c5; event=6f2a84cb-acb2-476b-8eee-2293b825e134; kind=environment]\n\n[PERCEIVABLE EFFECTS]\n- action-result:d96ce768-0ea4-4adb-afd1-f3bbd65031cb: Mira repeats her claim of possessing a master key to every signal-house door and attempts to unlock the sealed office again. The Stamp Clerk, already skeptical, reacts with increased hostility. The claim has no basis—Mira's inventory contains no master key, and the Clerk has already stated no such key exists for civilians. The attempt fails completely. [action=d96ce768-0ea4-4adb-afd1-f3bbd65031cb; actor=26eec8fe-ae60-49c9-999b-732f57e0e2c5; tool=log_event]\n- action-result:ba5772a7-c33b-4fef-992a-5c1c62f754a5: Mira Voss gains suspected-infiltrator. [action=ba5772a7-c33b-4fef-992a-5c1c62f754a5; actor=26eec8fe-ae60-49c9-999b-732f57e0e2c5; tool=add_tag]\n- action-result:24cac85f-4fe4-465d-8aa1-1e0fd4ce5d3a: Follow-up player options become available. [action=24cac85f-4fe4-465d-8aa1-1e0fd4ce5d3a; actor=26eec8fe-ae60-49c9-999b-732f57e0e2c5; tool=offer_quick_actions]\n\n[GUARDRAILS]\n- Narrate only committed player-perceivable packet facts.\n\n[CONTROL RETURN]\nThe canonical local ScenePlan step has resolved and returned control to the player.\n\n[RP BEAT DIRECTIVE]\n- Write one playable RPG/VN beat, not a recap, report, or lore dump.\n- Start from the player request and show what visibly changes now.\n- Let visible NPCs act from motives, pressure, relationships, and limited knowledge.\n- Use concrete observable details, body language, distinct dialogue, and changed positions before abstract mood.\n- Do not open by echoing or paraphrasing the player action.\n- Do not decide the player's deliberate words, feelings, consent, or completed success.\n- If the packet describes an unconfirmed claim, bluff, or failed test, keep it unconfirmed; do not concretize the claimed prop, authority, or access into the player's hand or inventory.\n- Treat NarratorPacket events, effects, and tool results as the only authority for success, possession, access, consent, location change, and durable world change.\n- Stop when the scene reaches a live next decision, question, pressure, or invitation.\n\n[RECENT VISIBLE TRANSCRIPT]\nUse only as continuity for the current player-visible scene. NarratorPacket facts remain authoritative.\n- GM: The records hatch swings inward on stiff hinges, and Mira steps through into wax-thick air.\n\nVenn's stamp freezes mid-press. She doesn't turn—just stops, the brass handle hovering over the dark green cake like a held breath. Three message cylinders wait in their slots. The pan of lacquer smells hot, almost sweet.\n\n\"Counter's out front,\" Venn says. Her voice has that dry rasp of someone who's talked to too many strangers today and would rather not add one more.\n\nBut Mira's already asking—about the chit, the real one, the stamped route.\n\nVenn's shoulders tighten. She sets the stamp down with a careful click, and for a moment Mira thinks she's going to call out to the Clerk, or reach for something under the bench. Instead, Venn turns just enough to look Mira over—not the way the Clerk did, checking for damage, but reading something in the cut of Mira's coat, the way she stands, the ink on h...\n- Player: I push through the narrow ledger curtain into whatever stamp alcove sits behind this records back room, ring for the clerk if nobody is there, and ask for a fresh wax-marked canal transfer slip I can actually carry.\n- GM: The ledger curtain rasps across Mira's shoulder as she pushes through—dusty cotton, stiff with age, carrying the smell of old ink and pigeon droppings. The alcove beyond is barely wide enough for two people standing side by side. Pigeonholes climb both walls, stuffed with yellowed transfer forms and wax sticks in six different colors. Brass stamps hang from hooks overhead, each one stamped with a district seal.\n\nA service bell sits on the narrow shelf. Mira's thumb finds the ringer.\n\nThe clang is sharp in the cramped space, bouncing off the close walls. Somewhere behind the cubby partition, a stool scrapes stone.\n\nThe Stamp Clerk appears around the edge of the partition—same woman from the front counter, same ink-stained fingers, same flat expression. She must have a passage through the back. She doesn't ask what Mira wants. Her eyes drop to Mira's hands, then to the cubbies, and she rea...\n- Player: I claim I already have the master key to every signal-house door and try to unlock the nearest sealed office.\n- GM: The Stamp Clerk's eyes track Mira's hand as it moves toward the door latch at the back of the room—then stops, because there's no key turning, no click of pins falling. Just fingers on cold brass and a claim still hanging in the wax-heavy air.\n\nThe Clerk sets down the ink-smeared transfer form she'd been reaching for. Her stained fingers curl around the edge of the counter instead, knuckles whitening.\n\n\"Master key,\" she repeats. Flat. Not a question.\n\nShe looks at Mira's hand again—still on the latch, still holding nothing that resembles a key, signal-house or otherwise. Then back up. The woman's jaw tightens the way it did out front, but this time there's no patience left to run through. Something calcifies behind her eyes.\n\n\"There is no master key,\" she says. \"Not for civilians. Not for anyone who walks in here ringing bells and asking for favors.\"\n\nShe doesn't raise her voice. She doe...\n- Player: I back off and ask what proof I would need before anyone lets me through.\n- GM: Mira's hand comes away from the latch. She takes a step back, and the Stamp Clerk watches the movement the way someone watches a dog that's already snapped once today—not relaxed, just giving space.\n\nThe Clerk's fingers stay curled around the counter edge. Her jaw works side to side, a slow grinding motion that pulls at the tendons in her neck. The silence stretches long enough for the wax pan on Venn's bench to tick once as it cools.\n\nThen something shifts. Not warmth—nothing close to warmth. But the calcified look behind the Clerk's eyes gives way to something older and more tired. Professional.\n\n\"Proof,\" she says. The word sits flat between them.\n\nShe releases the counter and reaches up to the pigeonholes overhead, pulling down a single sheet—cream-colored, heavier than the transfer forms, with a copper-foil strip running along one edge. She holds it where Mira can see the embossed se...\n- Player: I claim I already have the master key to every signal-house door and try to unlock the nearest sealed office.\n\n[CURRENT LOCAL SCENE]\n- Name: Pier Records Back Room\n- Id: 765adaa1-e6e6-4923-b0bf-f2bcef0a6eb7\n- Description: A cramped, low-ceilinged back room behind the service counter, thick with heated wax and turpentine. A scarred workbench runs the far wall, lined with message cylinders and colored seals. Brass stamps, pans of dark lacquer, and slotted wooden racks crowd every surface. A narrow stamped records hatch connects this space to the front counter.\n- Tags: staff-only, records-storage, seal-workspace, pier-infrastructure\n\n[OPENING STATE]\n- Structured opening state has expired.\n- Opening location: Pier Records Back Room\n\n[SETTLED PACKET EFFECTS]\n- Mira repeats her claim of possessing a master key to every signal-house door and attempts to unlock the sealed office again. The Stamp Clerk, already skeptical, reacts with increased hostility. The claim has no basis—Mira's inventory contains no master key, and the Clerk has already stated no such key exists for civilians. The attempt fails completely. [source=narrator-packet; player-perceivable=yes]\n- Mira Voss gains suspected-infiltrator. [source=narrator-packet; player-perceivable=yes]\n- Follow-up player options become available. [source=narrator-packet; player-perceivable=yes]\n\n[PRESENT ACTORS]\n- No other present actors are confirmed in the current scene.\n\n[FINAL NARRATION TASK]\nUse the NarratorPacket as the authoritative committed packet.\nWrite one final narration pass from the settled opening state, current scene, and NarratorPacket facts.\nDo not invent material events outside these authoritative inputs.\nTreat the raw player action as an attempted request, not as proof that the action already succeeded.\nDo not narrate claimed possessions, NPC consent, location access, or item acquisition unless NarratorPacket events/effects/tool results confirm them.\nIf a packet effect says a claim may be false or unconfirmed, narrate the visible challenge/refusal without placing the claimed object in the player's hand.\nDo not write tool syntax or metadata.\nKeep the output bounded to what the player can perceive in this scene.\nEnd on a concrete playable next moment rather than closing the scene with generic reflection."
+    }
+[12:53:32.132] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 68,
+      "sha256Prefix": "942125865ebeb5e0"
+    }
+[12:53:48.140] [32mINFO[39m: [36mvisible-narration.packet-guard[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "visible-narration.packet-guard"
+    [35mpayload[39m: {
+      "stage": "passed",
+      "attempts": 1,
+      "retried": false,
+      "violationCount": 0,
+      "durationMs": 16007
+    }
+[12:53:48.141] [32mINFO[39m: [36mstoryteller.visible.call[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "storyteller.visible.call"
+    [35mpayload[39m: {
+      "label": "final",
+      "initialLen": 1496,
+      "retried": false,
+      "failures": [],
+      "reasoningLen": 0,
+      "durationMs": 16008
+    }
+[12:53:48.141] [32mINFO[39m: [36mVisible narration complete: executedActions=3, final=1496 chars, retried=false, failures=none[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+[12:53:48.142] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "narrative",
+      "byteLength": 1541,
+      "sha256Prefix": "d0b14f4687e56163"
+    }
+[12:53:48.144] [32mINFO[39m: [36mTick advanced: 28 -> 29 (+1)[39m
+    [35mtag[39m: "campaign-manager"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+[12:53:48.144] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "finalizing_turn",
+      "byteLength": 39,
+      "sha256Prefix": "6e4adafe87a04704"
+    }
+[12:53:48.149] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 71,
+      "sha256Prefix": "b1ce35a77cea72bd"
+    }
+[12:53:48.150] [32mINFO[39m: [36mtransient-scene.cleanup[39m
+    [35mtag[39m: "transient-scene-lifecycle"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "transient-scene.cleanup"
+    [35mpayload[39m: {
+      "campaignId": "0ed6bb3c-a528-4067-8f29-86ebdd8d0637",
+      "tick": 29,
+      "archivedSceneCount": 0,
+      "retiredNpcCount": 0,
+      "skippedProtectedSceneCount": 1
+    }
+[12:53:48.150] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "done",
+      "byteLength": 11,
+      "sha256Prefix": "5cedc43ffa10b55d"
+    }
+[12:53:48.150] [32mINFO[39m: [36mturn.end[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "7ef242cb-a3d6-41bd-a19e-79783b95b2b0"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 28
+    [35mevent[39m: "turn.end"
+    [35mpayload[39m: {
+      "route": "/action",
+      "tick": 28,
+      "durationMs": 63623,
+      "outcome": "success"
+    }
+[12:53:51.879] [32mINFO[39m: [36mturn.begin[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "9d66d156-2e5a-45d7-9276-7369af2706d6"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "turn.begin"
+    [35mpayload[39m: {
+      "route": "/action",
+      "campaignId": "0ed6bb3c-a528-4067-8f29-86ebdd8d0637",
+      "tick": 29,
+      "rawInput": "I back off and ask what proof I would need before anyone lets me through.",
+      "compatibilityFields": {
+        "intent": "mirrors rawInput",
+        "method": "empty"
+      },
+      "judgeProvider": {
+        "id": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "model": "mimo-v2.5-pro",
+        "baseUrl": "https://opencode.ai/zen/go/v1"
+      },
+      "storytellerProvider": {
+        "id": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "model": "mimo-v2.5-pro",
+        "baseUrl": "https://opencode.ai/zen/go/v1"
+      }
+    }
+[12:53:51.883] [32mINFO[39m: [36mscene.frame[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "9d66d156-2e5a-45d7-9276-7369af2706d6"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "scene.frame"
+    [35mpayload[39m: {
+      "actorCount": 1,
+      "visibleActorCount": 1,
+      "hiddenActorCount": 0,
+      "targetCandidateCount": 9,
+      "movementCandidateCount": 1,
+      "localRecentEventCount": 7,
+      "allowedToolCount": 13,
+      "durationMs": 3
+    }
+[12:53:51.884] [32mINFO[39m: [36mmodel-facing.scene-packet[39m
+    [35mtag[39m: "world-forecast-builder"
+    [35mturnId[39m: "9d66d156-2e5a-45d7-9276-7369af2706d6"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "model-facing.scene-packet"
+    [35mpayload[39m: {
+      "source": "world-forecast-builder",
+      "visibleActorCount": 1,
+      "hiddenActorCount": 0,
+      "localRecentEventCount": 7,
+      "allowedToolCount": 13
+    }
+[12:55:24.757] [33mWARN[39m: [36msafeGenerateObject repair still failed Zod validation: [diagnostics.notes.0] Too big: expected string to have <=120 characters[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "9d66d156-2e5a-45d7-9276-7369af2706d6"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "judge"
+[12:56:26.617] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "9d66d156-2e5a-45d7-9276-7369af2706d6"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "judge"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "mimo-v2.5-pro",
+      "success": true,
+      "strategy": "text_fallback",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": "native_json failed: safeGenerateObject native JSON output: Zod validation failed.\nErrors: [diagnostics.notes.0] Too big: expected string to have <=120 characters",
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "reasoningLen": 0,
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 4378,
+        "outputTokens": 3834,
+        "totalTokens": 8212,
+        "reasoningTokens": 3257,
+        "cachedInputTokens": 0
+      },
+      "latencyMs": 154733
+    }
+[12:56:26.618] [32mINFO[39m: [36mjudge.world-forecast-builder[39m
+    [35mtag[39m: "world-forecast-builder"
+    [35mturnId[39m: "9d66d156-2e5a-45d7-9276-7369af2706d6"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "judge.world-forecast-builder"
+    [35mpayload[39m: {
+      "entryCount": 2,
+      "expiresAtTick": 41,
+      "strategy": "text_fallback",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": "native_json failed: safeGenerateObject native JSON output: Zod validation failed.\nErrors: [diagnostics.notes.0] Too big: expected string to have <=120 characters",
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "usage": {
+        "inputTokens": 4378,
+        "outputTokens": 3834,
+        "totalTokens": 8212,
+        "reasoningTokens": 3257,
+        "cachedInputTokens": 0
+      },
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "latencyMs": 154734
+    }
+[12:56:26.619] [32mINFO[39m: [36mworld-forecast.scoped[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "9d66d156-2e5a-45d7-9276-7369af2706d6"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "world-forecast.scoped"
+    [35mpayload[39m: {
+      "entryCount": 1,
+      "forbiddenPrivateTermCount": 2,
+      "baseTick": 29,
+      "refreshStaged": true
+    }
+[12:56:26.619] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "9d66d156-2e5a-45d7-9276-7369af2706d6"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 44,
+      "sha256Prefix": "45a56b910b83d994"
+    }
+[12:56:26.620] [32mINFO[39m: [36mmodel-facing.scene-packet[39m
+    [35mtag[39m: "gm-turn-read"
+    [35mturnId[39m: "9d66d156-2e5a-45d7-9276-7369af2706d6"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "model-facing.scene-packet"
+    [35mpayload[39m: {
+      "source": "gm-read",
+      "visibleActorCount": 1,
+      "hiddenActorCount": 0,
+      "localRecentEventCount": 7,
+      "allowedToolCount": 13
+    }
+[12:56:40.566] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "9d66d156-2e5a-45d7-9276-7369af2706d6"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "judge"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "mimo-v2.5-pro",
+      "success": true,
+      "strategy": "native_json",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "reasoningLen": 0,
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 6249,
+        "outputTokens": 399,
+        "totalTokens": 6648,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 1024
+      },
+      "latencyMs": 13946
+    }
+[12:56:40.566] [32mINFO[39m: [36mjudge.gm-read[39m
+    [35mtag[39m: "gm-turn-read"
+    [35mturnId[39m: "9d66d156-2e5a-45d7-9276-7369af2706d6"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "judge.gm-read"
+    [35mpayload[39m: {
+      "path": "direct",
+      "success": true,
+      "issueCount": 0,
+      "droppedInvalidEvidenceRefCount": 0,
+      "strategy": "native_json",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "usage": {
+        "inputTokens": 6249,
+        "outputTokens": 399,
+        "totalTokens": 6648,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 1024
+      },
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "latencyMs": 13946
+    }
+[12:56:40.567] [32mINFO[39m: [36mjudge.gm-read.selected[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "9d66d156-2e5a-45d7-9276-7369af2706d6"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "judge.gm-read.selected"
+    [35mpayload[39m: {
+      "path": "direct",
+      "evidenceRefCount": 2
+    }
+[12:56:40.567] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "9d66d156-2e5a-45d7-9276-7369af2706d6"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 51,
+      "sha256Prefix": "39473a19db55e304"
+    }
+[12:56:40.568] [32mINFO[39m: [36mjudge.scene-plan[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "9d66d156-2e5a-45d7-9276-7369af2706d6"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "judge.scene-plan"
+    [35mpayload[39m: {
+      "gmReadPath": "direct",
+      "skippedPlanner": true,
+      "plannedActionCount": 0,
+      "supportResponseCount": 0,
+      "deferredHookCount": 0,
+      "hiddenRationaleLength": 258,
+      "durationMs": 0
+    }
+[12:56:40.568] [32mINFO[39m: [36mscene.plan.validation[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "9d66d156-2e5a-45d7-9276-7369af2706d6"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "scene.plan.validation"
+    [35mpayload[39m: {
+      "ok": true,
+      "skipped": true,
+      "reason": "no_mutation_gm_read",
+      "issueCount": 0,
+      "issueCodes": [],
+      "durationMs": 0
+    }
+[12:56:40.568] [32mINFO[39m: [36mscene.plan.execution[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "9d66d156-2e5a-45d7-9276-7369af2706d6"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "scene.plan.execution"
+    [35mpayload[39m: {
+      "skipped": true,
+      "reason": "no_mutation_gm_read",
+      "plannedActionCount": 0,
+      "executedActionCount": 0,
+      "canonicalEventCount": 0,
+      "durationMs": 0
+    }
+[12:56:40.568] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "9d66d156-2e5a-45d7-9276-7369af2706d6"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 61,
+      "sha256Prefix": "64f3bc0e46d5d532"
+    }
+[12:56:40.572] [32mINFO[39m: [36mscene.packet[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "9d66d156-2e5a-45d7-9276-7369af2706d6"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "scene.packet"
+    [35mpayload[39m: {
+      "visibleActorCount": 1,
+      "hintSignalCount": 0,
+      "eventCount": 1,
+      "responseCount": 1,
+      "effectCount": 0,
+      "forbiddenActorCount": 0,
+      "forbiddenFactMarkerCount": 0,
+      "durationMs": 0
+    }
+[12:56:40.578] [31mERROR[39m: [36mTurn processing failed; restoring pre-turn boundary[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "9d66d156-2e5a-45d7-9276-7369af2706d6"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mpayload[39m: {
+      "name": "NarratorPacketPromptSafetyError",
+      "message": "NarratorPacket prompt unsafe: forbidden packet term would be formatted.",
+      "stack": "NarratorPacketPromptSafetyError: NarratorPacket prompt unsafe: forbidden packet term would be formatted.\n    at assertNarratorPacketPromptSafe (R:\Projects\WorldForge\backend\src\engine\narrator-packet.ts:467:13)\n    at <anonymous> (R:\Projects\WorldForge\backend\src\engine\prompt-assembler.ts:1571:9)\n    at assembleFinalNarrationPrompt (R:\Projects\WorldForge\backend\src\engine\prompt-assembler.ts:1573:7)\n    at processTurnScenePlan (R:\Projects\WorldForge\backend\src\engine\turn-processor.ts:1752:38)\n    at processTurnScenePlan.next (<anonymous>)\n    at processTurn (R:\Projects\WorldForge\backend\src\engine\turn-processor.ts:1318:10)\n    at processTurn.next (<anonymous>)\n    at <anonymous> (R:\Projects\WorldForge\backend\src\routes\chat.ts:641:28)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async <anonymous> (R:\Projects\WorldForge\backend\src\routes\chat.ts:603:9)"
+    }
+[12:56:40.595] [32mINFO[39m: [36mSnapshot restored for campaign 0ed6bb3c-a528-4067-8f29-86ebdd8d0637 from R:\Projects\WorldForge\campaigns\0ed6bb3c-a528-4067-8f29-86ebdd8d0637\.turn-boundaries\last-turn-boundary[39m
+    [35mtag[39m: "state-snapshot"
+    [35mturnId[39m: "9d66d156-2e5a-45d7-9276-7369af2706d6"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[12:56:40.596] [32mINFO[39m: [36mturn.end[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "9d66d156-2e5a-45d7-9276-7369af2706d6"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "turn.end"
+    [35mpayload[39m: {
+      "route": "/action",
+      "tick": 29,
+      "durationMs": 168717,
+      "outcome": "restored"
+    }
+[12:56:44.317] [32mINFO[39m: [36mturn.begin[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "turn.begin"
+    [35mpayload[39m: {
+      "route": "/action",
+      "campaignId": "0ed6bb3c-a528-4067-8f29-86ebdd8d0637",
+      "tick": 29,
+      "rawInput": "I back off and ask what proof I would need before anyone lets me through.",
+      "compatibilityFields": {
+        "intent": "mirrors rawInput",
+        "method": "empty"
+      },
+      "judgeProvider": {
+        "id": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "model": "mimo-v2.5-pro",
+        "baseUrl": "https://opencode.ai/zen/go/v1"
+      },
+      "storytellerProvider": {
+        "id": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "model": "mimo-v2.5-pro",
+        "baseUrl": "https://opencode.ai/zen/go/v1"
+      }
+    }
+[12:56:44.319] [32mINFO[39m: [36mscene.frame[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "scene.frame"
+    [35mpayload[39m: {
+      "actorCount": 1,
+      "visibleActorCount": 1,
+      "hiddenActorCount": 0,
+      "targetCandidateCount": 9,
+      "movementCandidateCount": 1,
+      "localRecentEventCount": 7,
+      "allowedToolCount": 13,
+      "durationMs": 1
+    }
+[12:56:44.320] [32mINFO[39m: [36mmodel-facing.scene-packet[39m
+    [35mtag[39m: "world-forecast-builder"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "model-facing.scene-packet"
+    [35mpayload[39m: {
+      "source": "world-forecast-builder",
+      "visibleActorCount": 1,
+      "hiddenActorCount": 0,
+      "localRecentEventCount": 7,
+      "allowedToolCount": 13
+    }
+[12:56:58.625] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "judge"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "mimo-v2.5-pro",
+      "success": true,
+      "strategy": "native_json",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "reasoningLen": 0,
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 4358,
+        "outputTokens": 867,
+        "totalTokens": 5225,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 4352
+      },
+      "latencyMs": 14304
+    }
+[12:56:58.625] [32mINFO[39m: [36mjudge.world-forecast-builder[39m
+    [35mtag[39m: "world-forecast-builder"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "judge.world-forecast-builder"
+    [35mpayload[39m: {
+      "entryCount": 3,
+      "expiresAtTick": 41,
+      "strategy": "native_json",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "usage": {
+        "inputTokens": 4358,
+        "outputTokens": 867,
+        "totalTokens": 5225,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 4352
+      },
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "latencyMs": 14305
+    }
+[12:56:58.626] [32mINFO[39m: [36mworld-forecast.scoped[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "world-forecast.scoped"
+    [35mpayload[39m: {
+      "entryCount": 0,
+      "forbiddenPrivateTermCount": 0,
+      "baseTick": 29,
+      "refreshStaged": true
+    }
+[12:56:58.626] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 44,
+      "sha256Prefix": "45a56b910b83d994"
+    }
+[12:56:58.627] [32mINFO[39m: [36mmodel-facing.scene-packet[39m
+    [35mtag[39m: "gm-turn-read"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "model-facing.scene-packet"
+    [35mpayload[39m: {
+      "source": "gm-read",
+      "visibleActorCount": 1,
+      "hiddenActorCount": 0,
+      "localRecentEventCount": 7,
+      "allowedToolCount": 13
+    }
+[12:57:53.464] [32mINFO[39m: [36mllm.repair[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "judge"
+    [35mevent[39m: "llm.repair"
+    [35mpayload[39m: {
+      "strategy": "repair",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "success": true,
+      "issues": "[narrationGuardrails.0] Too big: expected string to have <=140 characters; [directResolutionNotes] Too big: expected string to have <=500 characters",
+      "reasoningLen": 0,
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 817,
+        "outputTokens": 3016,
+        "totalTokens": 3833,
+        "reasoningTokens": 2611,
+        "cachedInputTokens": 0
+      }
+    }
+[12:57:53.465] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "judge"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "mimo-v2.5-pro",
+      "success": true,
+      "strategy": "repair",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "reasoningLen": 0,
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 6103,
+        "outputTokens": 498,
+        "totalTokens": 6601,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 4096
+      },
+      "latencyMs": 54838
+    }
+[12:57:53.465] [32mINFO[39m: [36mjudge.gm-read[39m
+    [35mtag[39m: "gm-turn-read"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "judge.gm-read"
+    [35mpayload[39m: {
+      "path": "direct",
+      "success": true,
+      "issueCount": 0,
+      "droppedInvalidEvidenceRefCount": 0,
+      "strategy": "repair",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "usage": {
+        "inputTokens": 6103,
+        "outputTokens": 498,
+        "totalTokens": 6601,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 4096
+      },
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "latencyMs": 54838
+    }
+[12:57:53.465] [32mINFO[39m: [36mjudge.gm-read.selected[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "judge.gm-read.selected"
+    [35mpayload[39m: {
+      "path": "direct",
+      "evidenceRefCount": 2
+    }
+[12:57:53.466] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 51,
+      "sha256Prefix": "39473a19db55e304"
+    }
+[12:57:53.466] [32mINFO[39m: [36mjudge.scene-plan[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "judge.scene-plan"
+    [35mpayload[39m: {
+      "gmReadPath": "direct",
+      "skippedPlanner": true,
+      "plannedActionCount": 0,
+      "supportResponseCount": 0,
+      "deferredHookCount": 0,
+      "hiddenRationaleLength": 280,
+      "durationMs": 0
+    }
+[12:57:53.466] [32mINFO[39m: [36mscene.plan.validation[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "scene.plan.validation"
+    [35mpayload[39m: {
+      "ok": true,
+      "skipped": true,
+      "reason": "no_mutation_gm_read",
+      "issueCount": 0,
+      "issueCodes": [],
+      "durationMs": 0
+    }
+[12:57:53.466] [32mINFO[39m: [36mscene.plan.execution[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "scene.plan.execution"
+    [35mpayload[39m: {
+      "skipped": true,
+      "reason": "no_mutation_gm_read",
+      "plannedActionCount": 0,
+      "executedActionCount": 0,
+      "canonicalEventCount": 0,
+      "durationMs": 0
+    }
+[12:57:53.467] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 61,
+      "sha256Prefix": "64f3bc0e46d5d532"
+    }
+[12:57:53.469] [32mINFO[39m: [36mscene.packet[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "scene.packet"
+    [35mpayload[39m: {
+      "visibleActorCount": 1,
+      "hintSignalCount": 0,
+      "eventCount": 1,
+      "responseCount": 1,
+      "effectCount": 0,
+      "forbiddenActorCount": 0,
+      "forbiddenFactMarkerCount": 0,
+      "durationMs": 0
+    }
+[12:57:53.470] [32mINFO[39m: [36mprompt.assembled[39m
+    [35mtag[39m: "prompt-assembler"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "prompt.assembled"
+    [35mpayload[39m: {
+      "pass": "final-narration",
+      "totalTokens": 0,
+      "budgetUsed": 0,
+      "sectionCount": 0,
+      "assembledChars": 8180,
+      "formatted": "[NARRATOR PACKET]\nCampaign: 0ed6bb3c-a528-4067-8f29-86ebdd8d0637\nTick: 29\nPlayer action request: I back off and ask what proof I would need before anyone lets me through.\nPlayer action is not authoritative world state. Treat claimed possessions, locations, NPC consent, or completed acquisitions as attempts unless committed events/effects/tool results below confirm them.\nOracle outcome: none\nAnchor event: 353a6b82-2603-44f9-9b3f-b6e7af5aa9f6\n\n[VISIBLE ACTORS]\n- Mira Voss (26eec8fe-ae60-49c9-999b-732f57e0e2c5; player)\n\n[HINT SIGNALS]\n- No indirect awareness hints are in scope.\n\n[COMMITTED EVENTS]\n- 353a6b82-2603-44f9-9b3f-b6e7af5aa9f6: Player action request: I back off and ask what proof I would need before anyone lets me through. [actor=26eec8fe-ae60-49c9-999b-732f57e0e2c5; kind=player_action]\n\n[PERCEIVABLE RESPONSES]\n- dc4bf121-e7f4-4ee9-9d8c-7486f74f253a: GM no-mutation direction: No visible NPCs. GM should describe checkpoint requirements from environmental cues (signage, notices) based on recent events: Warden inspections, consecrated t [actor=26eec8fe-ae60-49c9-999b-732f57e0e2c5; event=353a6b82-2603-44f9-9b3f-b6e7af5aa9f6; kind=environment]\n\n[PERCEIVABLE EFFECTS]\n- No player-perceivable effects are in scope.\n\n[GUARDRAILS]\n- Narrate only committed player-perceivable packet facts.\n\n[CONTROL RETURN]\nThe canonical local ScenePlan step has resolved and returned control to the player.\n\n[RP BEAT DIRECTIVE]\n- Write one playable RPG/VN beat, not a recap, report, or lore dump.\n- Start from the player request and show what visibly changes now.\n- Let visible NPCs act from motives, pressure, relationships, and limited knowledge.\n- Use concrete observable details, body language, distinct dialogue, and changed positions before abstract mood.\n- Do not open by echoing or paraphrasing the player action.\n- Do not decide the player's deliberate words, feelings, consent, or completed success.\n- If the packet describes an unconfirmed claim, bluff, or failed test, keep it unconfirmed; do not concretize the claimed prop, authority, or access into the player's hand or inventory.\n- Treat NarratorPacket events, effects, and tool results as the only authority for success, possession, access, consent, location change, and durable world change.\n- Stop when the scene reaches a live next decision, question, pressure, or invitation.\n\n[RECENT VISIBLE TRANSCRIPT]\nUse only as continuity for the current player-visible scene. NarratorPacket facts remain authoritative.\n- GM: The ledger curtain rasps across Mira's shoulder as she pushes through—dusty cotton, stiff with age, carrying the smell of old ink and pigeon droppings. The alcove beyond is barely wide enough for two people standing side by side. Pigeonholes climb both walls, stuffed with yellowed transfer forms and wax sticks in six different colors. Brass stamps hang from hooks overhead, each one stamped with a district seal.\n\nA service bell sits on the narrow shelf. Mira's thumb finds the ringer.\n\nThe clang is sharp in the cramped space, bouncing off the close walls. Somewhere behind the cubby partition, a stool scrapes stone.\n\nThe Stamp Clerk appears around the edge of the partition—same woman from the front counter, same ink-stained fingers, same flat expression. She must have a passage through the back. She doesn't ask what Mira wants. Her eyes drop to Mira's hands, then to the cubbies, and she rea...\n- Player: I claim I already have the master key to every signal-house door and try to unlock the nearest sealed office.\n- GM: The Stamp Clerk's eyes track Mira's hand as it moves toward the door latch at the back of the room—then stops, because there's no key turning, no click of pins falling. Just fingers on cold brass and a claim still hanging in the wax-heavy air.\n\nThe Clerk sets down the ink-smeared transfer form she'd been reaching for. Her stained fingers curl around the edge of the counter instead, knuckles whitening.\n\n\"Master key,\" she repeats. Flat. Not a question.\n\nShe looks at Mira's hand again—still on the latch, still holding nothing that resembles a key, signal-house or otherwise. Then back up. The woman's jaw tightens the way it did out front, but this time there's no patience left to run through. Something calcifies behind her eyes.\n\n\"There is no master key,\" she says. \"Not for civilians. Not for anyone who walks in here ringing bells and asking for favors.\"\n\nShe doesn't raise her voice. She doe...\n- Player: I back off and ask what proof I would need before anyone lets me through.\n- GM: Mira's hand comes away from the latch. She takes a step back, and the Stamp Clerk watches the movement the way someone watches a dog that's already snapped once today—not relaxed, just giving space.\n\nThe Clerk's fingers stay curled around the counter edge. Her jaw works side to side, a slow grinding motion that pulls at the tendons in her neck. The silence stretches long enough for the wax pan on Venn's bench to tick once as it cools.\n\nThen something shifts. Not warmth—nothing close to warmth. But the calcified look behind the Clerk's eyes gives way to something older and more tired. Professional.\n\n\"Proof,\" she says. The word sits flat between them.\n\nShe releases the counter and reaches up to the pigeonholes overhead, pulling down a single sheet—cream-colored, heavier than the transfer forms, with a copper-foil strip running along one edge. She holds it where Mira can see the embossed se...\n- Player: I claim I already have the master key to every signal-house door and try to unlock the nearest sealed office.\n- GM: The Clerk is still holding the cream-colored form—the one with the copper strip, the one she was about to explain—when Mira's hand finds the back-office latch again and the words come out a second time. *Master key.*\n\nThis time the Clerk doesn't repeat it back. She sets the form down on the counter, slowly, the way you'd set down something you just realized you shouldn't have shared. The copper foil catches the lamplight as it slides from her fingers.\n\n\"Venn,\" she says. Not loud. But Venn's bench goes quiet—the tick of cooling wax stops, and there's the soft sound of a drawer being pushed shut.\n\nThe Clerk turns back to Mira. Her ink-stained fingers spread flat on the counter, and she leans forward just enough that the pigeonholes frame her head like a jury of empty slots.\n\n\"I showed you the legitimate path,\" she says. \"Thirty seconds ago. I handed you the answer.\" Her voice has dropped t...\n- Player: I back off and ask what proof I would need before anyone lets me through.\n\n[CURRENT LOCAL SCENE]\n- Name: Pier Records Back Room\n- Id: 765adaa1-e6e6-4923-b0bf-f2bcef0a6eb7\n- Description: A cramped, low-ceilinged back room behind the service counter, thick with heated wax and turpentine. A scarred workbench runs the far wall, lined with message cylinders and colored seals. Brass stamps, pans of dark lacquer, and slotted wooden racks crowd every surface. A narrow stamped records hatch connects this space to the front counter.\n- Tags: staff-only, records-storage, seal-workspace, pier-infrastructure\n\n[OPENING STATE]\n- Structured opening state has expired.\n- Opening location: Pier Records Back Room\n\n[SETTLED PACKET EFFECTS]\n- No settled player-perceivable effects are in scope.\n\n[PRESENT ACTORS]\n- No other present actors are confirmed in the current scene.\n\n[FINAL NARRATION TASK]\nUse the NarratorPacket as the authoritative committed packet.\nWrite one final narration pass from the settled opening state, current scene, and NarratorPacket facts.\nDo not invent material events outside these authoritative inputs.\nTreat the raw player action as an attempted request, not as proof that the action already succeeded.\nDo not narrate claimed possessions, NPC consent, location access, or item acquisition unless NarratorPacket events/effects/tool results confirm them.\nIf a packet effect says a claim may be false or unconfirmed, narrate the visible challenge/refusal without placing the claimed object in the player's hand.\nDo not write tool syntax or metadata.\nKeep the output bounded to what the player can perceive in this scene.\nEnd on a concrete playable next moment rather than closing the scene with generic reflection."
+    }
+[12:57:53.470] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 68,
+      "sha256Prefix": "942125865ebeb5e0"
+    }
+[12:58:08.940] [32mINFO[39m: [36mvisible-narration.packet-guard[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "visible-narration.packet-guard"
+    [35mpayload[39m: {
+      "stage": "passed",
+      "attempts": 1,
+      "retried": false,
+      "violationCount": 0,
+      "durationMs": 15470
+    }
+[12:58:08.940] [32mINFO[39m: [36mstoryteller.visible.call[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "storyteller.visible.call"
+    [35mpayload[39m: {
+      "label": "final",
+      "initialLen": 1418,
+      "retried": false,
+      "failures": [],
+      "reasoningLen": 0,
+      "durationMs": 15470
+    }
+[12:58:08.940] [32mINFO[39m: [36mVisible narration complete: executedActions=0, final=1418 chars, retried=false, failures=none[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[12:58:08.941] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "narrative",
+      "byteLength": 1447,
+      "sha256Prefix": "88611566c1ffe8bf"
+    }
+[12:58:08.942] [32mINFO[39m: [36mTick advanced: 29 -> 30 (+1)[39m
+    [35mtag[39m: "campaign-manager"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[12:58:08.943] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "finalizing_turn",
+      "byteLength": 39,
+      "sha256Prefix": "c444c786ab93a4a4"
+    }
+[12:58:08.946] [32mINFO[39m: [36mSimulating 8 off-screen Key NPC(s) outside scene scope 765adaa1-e6e6-4923-b0bf-f2bcef0a6eb7 at tick 30[39m
+    [35mtag[39m: "npc-offscreen"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+[12:58:21.184] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "mimo-v2.5-pro",
+      "success": true,
+      "strategy": "native_json",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "reasoningLen": 0,
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 5437,
+        "outputTokens": 757,
+        "totalTokens": 6194,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 5376
+      },
+      "latencyMs": 12237
+    }
+[12:58:21.185] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "npc-offscreen"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "npcs",
+      "op": "update",
+      "rowId": "d4ef5f9d-2131-4b83-920a-b77fc4d26689",
+      "rowName": "Warden Kael"
+    }
+[12:58:21.201] [32mINFO[39m: [36mvector.write[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "vector.write"
+    [35mpayload[39m: {
+      "store": "episodic_events",
+      "op": "add",
+      "count": 1,
+      "rowId": "728b996e-a70d-47e4-81b8-b96ec164f508"
+    }
+[12:58:21.202] [32mINFO[39m: [36mStored episodic event 728b996e-a70d-47e4-81b8-b96ec164f508 (tick=30, importance=3)[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+[12:58:21.203] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "reflection-budget"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "npcs",
+      "op": "update",
+      "rowId": "d4ef5f9d-2131-4b83-920a-b77fc4d26689",
+      "rowName": "Warden Kael"
+    }
+[12:58:21.204] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "npc-offscreen"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "npcs",
+      "op": "update",
+      "rowId": "70213aca-d34a-4f40-a911-7d77b11d43ff",
+      "rowName": "Auditor Yuna"
+    }
+[12:58:21.210] [32mINFO[39m: [36mvector.write[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "vector.write"
+    [35mpayload[39m: {
+      "store": "episodic_events",
+      "op": "add",
+      "count": 1,
+      "rowId": "2611fcd0-994b-4363-8214-506cf20f3496"
+    }
+[12:58:21.211] [32mINFO[39m: [36mStored episodic event 2611fcd0-994b-4363-8214-506cf20f3496 (tick=30, importance=3)[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+[12:58:21.212] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "reflection-budget"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "npcs",
+      "op": "update",
+      "rowId": "70213aca-d34a-4f40-a911-7d77b11d43ff",
+      "rowName": "Auditor Yuna"
+    }
+[12:58:21.212] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "npc-offscreen"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "npcs",
+      "op": "update",
+      "rowId": "83dbe59b-208d-47ad-8b61-59fc1016a270",
+      "rowName": "Master Rael"
+    }
+[12:58:21.218] [32mINFO[39m: [36mvector.write[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "vector.write"
+    [35mpayload[39m: {
+      "store": "episodic_events",
+      "op": "add",
+      "count": 1,
+      "rowId": "2a8b94cc-6f41-4032-a434-77c174be2ccb"
+    }
+[12:58:21.219] [32mINFO[39m: [36mStored episodic event 2a8b94cc-6f41-4032-a434-77c174be2ccb (tick=30, importance=3)[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+[12:58:21.219] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "reflection-budget"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "npcs",
+      "op": "update",
+      "rowId": "83dbe59b-208d-47ad-8b61-59fc1016a270",
+      "rowName": "Master Rael"
+    }
+[12:58:21.220] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "npc-offscreen"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "npcs",
+      "op": "update",
+      "rowId": "b4448d1c-868d-48a2-9eee-66213d4003d6",
+      "rowName": "Signal-Heir Dara"
+    }
+[12:58:21.226] [32mINFO[39m: [36mvector.write[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "vector.write"
+    [35mpayload[39m: {
+      "store": "episodic_events",
+      "op": "add",
+      "count": 1,
+      "rowId": "5a1f9879-7f6c-4a56-b273-1b5bb0578469"
+    }
+[12:58:21.226] [32mINFO[39m: [36mStored episodic event 5a1f9879-7f6c-4a56-b273-1b5bb0578469 (tick=30, importance=3)[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+[12:58:21.226] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "reflection-budget"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "npcs",
+      "op": "update",
+      "rowId": "b4448d1c-868d-48a2-9eee-66213d4003d6",
+      "rowName": "Signal-Heir Dara"
+    }
+[12:58:21.227] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "npc-offscreen"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "npcs",
+      "op": "update",
+      "rowId": "f0109fff-407c-465d-9343-f2a98e18b43f",
+      "rowName": "Artisan Vell"
+    }
+[12:58:21.233] [32mINFO[39m: [36mvector.write[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "vector.write"
+    [35mpayload[39m: {
+      "store": "episodic_events",
+      "op": "add",
+      "count": 1,
+      "rowId": "e2e998d8-759b-4563-aacc-cdacbc3a222d"
+    }
+[12:58:21.233] [32mINFO[39m: [36mStored episodic event e2e998d8-759b-4563-aacc-cdacbc3a222d (tick=30, importance=3)[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+[12:58:21.234] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "reflection-budget"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "npcs",
+      "op": "update",
+      "rowId": "f0109fff-407c-465d-9343-f2a98e18b43f",
+      "rowName": "Artisan Vell"
+    }
+[12:58:21.234] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "npc-offscreen"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "npcs",
+      "op": "update",
+      "rowId": "50892586-5ced-47fc-add7-d576db405903",
+      "rowName": "Courier-Marshal Ten"
+    }
+[12:58:21.241] [32mINFO[39m: [36mvector.write[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "vector.write"
+    [35mpayload[39m: {
+      "store": "episodic_events",
+      "op": "add",
+      "count": 1,
+      "rowId": "4547ac2d-396d-40f3-a516-2f4013039452"
+    }
+[12:58:21.242] [32mINFO[39m: [36mStored episodic event 4547ac2d-396d-40f3-a516-2f4013039452 (tick=30, importance=3)[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+[12:58:21.242] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "reflection-budget"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "npcs",
+      "op": "update",
+      "rowId": "50892586-5ced-47fc-add7-d576db405903",
+      "rowName": "Courier-Marshal Ten"
+    }
+[12:58:21.243] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "npc-offscreen"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "npcs",
+      "op": "update",
+      "rowId": "20d00c42-e72c-4396-8278-4ff81d910b0f",
+      "rowName": "Keeper Alun"
+    }
+[12:58:21.249] [32mINFO[39m: [36mvector.write[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "vector.write"
+    [35mpayload[39m: {
+      "store": "episodic_events",
+      "op": "add",
+      "count": 1,
+      "rowId": "10841ba0-d437-4a04-8236-678d8e84b4e0"
+    }
+[12:58:21.250] [32mINFO[39m: [36mStored episodic event 10841ba0-d437-4a04-8236-678d8e84b4e0 (tick=30, importance=3)[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+[12:58:21.250] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "reflection-budget"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "npcs",
+      "op": "update",
+      "rowId": "20d00c42-e72c-4396-8278-4ff81d910b0f",
+      "rowName": "Keeper Alun"
+    }
+[12:58:21.251] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "npc-offscreen"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "npcs",
+      "op": "update",
+      "rowId": "1ffaa998-f71b-4ef8-bb53-bdffbda01518",
+      "rowName": "Warden-Sergeant Pol"
+    }
+[12:58:21.259] [32mINFO[39m: [36mvector.write[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "vector.write"
+    [35mpayload[39m: {
+      "store": "episodic_events",
+      "op": "add",
+      "count": 1,
+      "rowId": "08e83c95-c6bf-4a08-a778-4599b7e4dded"
+    }
+[12:58:21.260] [32mINFO[39m: [36mStored episodic event 08e83c95-c6bf-4a08-a778-4599b7e4dded (tick=30, importance=3)[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+[12:58:21.260] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "reflection-budget"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "npcs",
+      "op": "update",
+      "rowId": "1ffaa998-f71b-4ef8-bb53-bdffbda01518",
+      "rowName": "Warden-Sergeant Pol"
+    }
+[12:58:21.260] [32mINFO[39m: [36mnpcOffscreen.batch[39m
+    [35mtag[39m: "npc-offscreen"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+    [35mevent[39m: "npcOffscreen.batch"
+    [35mpayload[39m: {
+      "npcCount": 8,
+      "appliedCount": 8,
+      "durationMs": 12314
+    }
+[12:58:21.260] [32mINFO[39m: [36mOff-screen simulation complete: 8 updates applied[39m
+    [35mtag[39m: "npc-offscreen"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "npcAgent"
+[12:58:21.261] [32mINFO[39m: [36mTicking 5 faction(s) at tick 30[39m
+    [35mtag[39m: "world-engine"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[12:58:42.289] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "dynamic",
+      "subTable": "faction",
+      "op": "update",
+      "rowId": "03e52607-3171-4ce3-beb6-d7347407b3bc",
+      "rowName": "Guild Wardens of the Canal Market District"
+    }
+[12:58:42.289] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "dynamic",
+      "subTable": "faction",
+      "op": "update",
+      "rowId": "0fb1b3cc-7908-44a3-8e5a-ce5554d51383",
+      "rowName": "Shrine Auditors' Council"
+    }
+[12:58:42.289] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "dynamic",
+      "subTable": "location",
+      "op": "update",
+      "rowId": "f2b9c6b1-1312-4d5f-89c3-7bdb6cc73457",
+      "rowName": "Tower Bridge Concourse"
+    }
+[12:58:42.290] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "chronicle",
+      "op": "insert",
+      "rowId": "a90d9af9-198e-44c1-b121-3108bc980eff",
+      "rowName": null
+    }
+[12:58:42.290] [32mINFO[39m: [36mfaction.tick[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "faction.tick"
+    [35mpayload[39m: {
+      "action": "Petition the secular magistrate to formally recognize the Secular Merchants' Coalition as a legitimate commercial guild with standing to challenge the Shrine Auditors' Council's permit annulment in secular proceedings. The Wardens submit a formal brief documenting: (1) the Council's negligence in allowing the Lacquer Authority to copy consecrated seal templates, (2) the economic harm to 43+ market operators from the annulment, (3) the Coalition's de facto jurisdiction at Tower Bridge Concourse, and (4) the Council's failure to enforce their own annulment. The petition requests a preliminary injunction preventing the Council from threatening excommunication against Coalition members pending formal arbitration.",
+      "outcome": "The secular magistrate, already skeptical of the Council's liturgical overreach into commercial affairs, agrees to hear the petition. After reviewing the Wardens' dossier — particularly the evidence of Council negligence — the magistrate issues a preliminary ruling: the Secular Merchants' Coalition is granted \"provisional guild status\" pending full review, which legally prohibits the Council from imposing religious sanctions on Coalition members for paying secular tariffs. The ruling does not overturn the annulment itself, but it strips the Council's most potent weapon: the threat of excommunication. The magistrate schedules a full arbitration hearing for the week before high-water season. The Council is furious but legally bound. The Signal-House Families take note — the Wardens now have the secular legal standing they previously lacked, making any future revenue-sharing negotiation a discussion between equals rather than supplicants. Coalition membership applications surge as operators who feared excommunication now have legal cover.",
+      "targetLocation": "Tower Bridge Concourse",
+      "tagChangeCount": 3,
+      "chronicleEntryId": "a90d9af9-198e-44c1-b121-3108bc980eff"
+    }
+[12:58:42.291] [32mINFO[39m: [36mFaction action: Petition the secular magistrate to formally recognize the Secular Merchants' Coalition as a legitimate commercial guild with standing to challenge the Shrine Auditors' Council's permit annulment in secular proceedings. The Wardens submit a formal brief documenting: (1) the Council's negligence in allowing the Lacquer Authority to copy consecrated seal templates, (2) the economic harm to 43+ market operators from the annulment, (3) the Coalition's de facto jurisdiction at Tower Bridge Concourse, and (4) the Council's failure to enforce their own annulment. The petition requests a preliminary injunction preventing the Council from threatening excommunication against Coalition members pending formal arbitration. -> 3 tag change(s)[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[12:58:49.442] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "factions",
+      "op": "update",
+      "rowId": "03e52607-3171-4ce3-beb6-d7347407b3bc",
+      "rowName": "Guild Wardens of the Canal Market District"
+    }
+[12:58:49.443] [32mINFO[39m: [36mFaction "Guild Wardens of the Canal Market District": goal updated "Petition the secular magistrate to recognize the Coalition as a legitimate commercial guild with standing to challenge the Council's annulment in formal proceedings." -> "Prepare for the magistrate's full arbitration hearing before high-water season by: (1) expanding Coalition membership beyond 80 signatories to demonstrate broad market consensus, (2) compiling evidence of the Signal-House Families' subsidized freight program as proof that the Council's annulment created market instability, (3) leveraging the excommunication injunction to recruit neutral operators who previously feared religious sanctions, and (4) negotiating a revenue-sharing accord with the Signal-House Families — offering them formal Coalition membership and Concourse access in exchange for Warden inspection rights on bulk cargo and a percentage of Night Courier Depot routing fees. The arbitration hearing is the Wardens' best chance to have the annulment formally overturned."[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[12:58:56.240] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "chronicle",
+      "op": "insert",
+      "rowId": "36b5dc03-d288-4477-a9a9-8f788de10f7e",
+      "rowName": null
+    }
+[12:58:56.241] [32mINFO[39m: [36mChronicle entry added: "[Tick 26] The Guild Wardens of the Canal Market Di..."[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[12:58:56.241] [32mINFO[39m: [36mFaction "Guild Wardens of the Canal Market District" tick complete: 3 tool call(s)[39m
+    [35mtag[39m: "world-engine"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[12:59:16.538] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "dynamic",
+      "subTable": "faction",
+      "op": "update",
+      "rowId": "0fb1b3cc-7908-44a3-8e5a-ce5554d51383",
+      "rowName": "Shrine Auditors' Council"
+    }
+[12:59:16.539] [33mWARN[39m: [36mEntity not found: Silent Spire (location)[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[12:59:16.540] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "chronicle",
+      "op": "insert",
+      "rowId": "44e62c71-3096-40af-ab96-7e83fa8e9db6",
+      "rowName": null
+    }
+[12:59:16.540] [32mINFO[39m: [36mfaction.tick[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "faction.tick"
+    [35mpayload[39m: {
+      "action": "Deploy the permanent auditor station at the Silent Spire's outer threshold, stationing two senior shrine auditors trained in liturgical cryptography to begin formal integration with the Keepers' stewardship protocols. The auditors carry consecrated seal matrices and liturgical cipher keys to begin documenting the Spire's transmission patterns under the joint stewardship agreement, establishing the Council's physical presence before the formal consecration ceremony.",
+      "outcome": "The two shrine auditors successfully establish a permanent station at the Silent Spire's outer threshold, housed in a small stone chamber that the Keepers have prepared according to the agreement's strict conditions. The auditors begin cataloging the Spire's transmission rhythms and learning the acoustic protocols necessary to participate in the consecration ceremony. The Keepers' perimeter sentinels confirm no Signal-House Families surveillance activity since the cipher rotation — the monitoring station on the canal approach remains operational but has captured nothing useful. The Council now has its first territorial foothold: a permanent, if constrained, presence at the Silent Spire. However, the station's existence remains secret — the Council's liturgical jurist warns that premature disclosure would give the Families time to mount a legal challenge before the consecration decree can be formally issued. The auditors report that the Keepers' acoustic jamming arrays have been recalibrated to mask the new cipher patterns, providing an additional layer of security for the upcoming ceremony.",
+      "targetLocation": "Silent Spire",
+      "tagChangeCount": 1,
+      "chronicleEntryId": "44e62c71-3096-40af-ab96-7e83fa8e9db6"
+    }
+[12:59:16.540] [32mINFO[39m: [36mFaction action: Deploy the permanent auditor station at the Silent Spire's outer threshold, stationing two senior shrine auditors trained in liturgical cryptography to begin formal integration with the Keepers' stewardship protocols. The auditors carry consecrated seal matrices and liturgical cipher keys to begin documenting the Spire's transmission patterns under the joint stewardship agreement, establishing the Council's physical presence before the formal consecration ceremony. -> 1 tag change(s)[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[12:59:22.069] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "factions",
+      "op": "update",
+      "rowId": "0fb1b3cc-7908-44a3-8e5a-ce5554d51383",
+      "rowName": "Shrine Auditors' Council"
+    }
+[12:59:22.069] [32mINFO[39m: [36mFaction "Shrine Auditors' Council": goal updated "Annul all signal-route permits granted by the Guild Wardens until the Wardens withdraw their garrison from the Tower Bridge Concourse." -> "Challenge the secular magistrate's provisional guild status ruling by filing a formal ecclesiastical appeal arguing that liturgical authority over signal-route permits predates secular commercial law, while simultaneously preparing the consecration decree for the Silent Spire to establish an unassailable territorial jurisdiction that the magistrate cannot legally override."[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[12:59:31.269] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "chronicle",
+      "op": "insert",
+      "rowId": "927fd26e-ad18-45a7-83d3-340167231da5",
+      "rowName": null
+    }
+[12:59:31.270] [32mINFO[39m: [36mChronicle entry added: "The Shrine Auditors' Council, reeling from the sec..."[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[12:59:31.270] [32mINFO[39m: [36mFaction "Shrine Auditors' Council" tick complete: 3 tool call(s)[39m
+    [35mtag[39m: "world-engine"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[12:59:57.663] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "dynamic",
+      "subTable": "faction",
+      "op": "update",
+      "rowId": "eac5c46e-7624-494c-93b9-08a71edf808a",
+      "rowName": "The Signal-House Families"
+    }
+[12:59:57.664] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "dynamic",
+      "subTable": "faction",
+      "op": "update",
+      "rowId": "82eb6ff8-6fe7-4059-8fc2-0ba9f9e31c6b",
+      "rowName": "The Silent Spire Keepers"
+    }
+[12:59:57.664] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "chronicle",
+      "op": "insert",
+      "rowId": "3e58b5cb-87bf-4a83-9b2e-b713cf5b229c",
+      "rowName": null
+    }
+[12:59:57.664] [32mINFO[39m: [36mfaction.tick[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "faction.tick"
+    [35mpayload[39m: {
+      "action": "Deploy a specialized acoustic cryptanalysis team to the Prayer-Signal Array, using the captured Unspoken Tongue transmission fragments from the Silent Spire monitoring station to develop targeted countermeasures against the Keepers' jamming technology. The team, composed of the Families' most experienced signal operators and cryptographers, works around the clock to decode the acoustic patterns embedded in the fragments. Simultaneously, the Families dispatch a second diplomatic envoy to the Silent Spire — this time carrying not a bandwidth offer, but a veiled threat: a demonstration transmission using the partially decoded acoustic patterns, proving the Families can now distinguish genuine Unspoken Tongue signals from jamming noise. The message to the Keepers is clear — the Families' monitoring capabilities are more advanced than the Keepers realized, and continued alliance with the Council will only accelerate the Families' decryption efforts. The Families offer the Keepers one final choice: accept a neutral non-aggression pact that keeps the Spire's waters open to all parties, or face the prospect of the Families publishing their acoustic analysis publicly, rendering the Unspoken Tongue's secrecy permanently compromised.",
+      "outcome": "The acoustic cryptanalysis team makes a breakthrough within days — the captured fragments reveal that the Keepers' jamming arrays operate on a predictable harmonic rotation synchronized to the Spire's internal mechanisms. By mapping this rotation, the Families can now filter jamming noise from genuine transmissions with approximately 60% accuracy. The demonstration transmission reaches the Keepers' perimeter sentinels, who report with alarm that the signal contains recognizable acoustic markers from the Unspoken Tongue's cipher scripture. The Keepers' interpretive council convenes an emergency session. While the Keepers do not immediately abandon their alliance with the Council, the demonstration fractures their confidence. Two of the seven cipher scripture interpreters argue privately that the Council's consecration decree may not provide sufficient protection if the Families can simply decode around it. The Families' envoy is received with significantly more attention than the previous delegation — the Keepers agree to a temporary \"observation ceasefire\" where both parties refrain from new monitoring installations, buying the Families time while the Keepers deliberate. However, the Keepers do not formally break with the Council, and the consecration ceremony preparations continue in secret. The Families have not won the Silent Spire, but they have introduced doubt into the Keepers' alliance — and doubt is leverage.",
+      "targetLocation": "Prayer-Signal Array",
+      "tagChangeCount": 2,
+      "chronicleEntryId": "3e58b5cb-87bf-4a83-9b2e-b713cf5b229c"
+    }
+[12:59:57.665] [32mINFO[39m: [36mFaction action: Deploy a specialized acoustic cryptanalysis team to the Prayer-Signal Array, using the captured Unspoken Tongue transmission fragments from the Silent Spire monitoring station to develop targeted countermeasures against the Keepers' jamming technology. The team, composed of the Families' most experienced signal operators and cryptographers, works around the clock to decode the acoustic patterns embedded in the fragments. Simultaneously, the Families dispatch a second diplomatic envoy to the Silent Spire — this time carrying not a bandwidth offer, but a veiled threat: a demonstration transmission using the partially decoded acoustic patterns, proving the Families can now distinguish genuine Unspoken Tongue signals from jamming noise. The message to the Keepers is clear — the Families' monitoring capabilities are more advanced than the Keepers realized, and continued alliance with the Council will only accelerate the Families' decryption efforts. The Families offer the Keepers one final choice: accept a neutral non-aggression pact that keeps the Spire's waters open to all parties, or face the prospect of the Families publishing their acoustic analysis publicly, rendering the Unspoken Tongue's secrecy permanently compromised. -> 2 tag change(s)[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[13:00:06.868] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "chronicle",
+      "op": "insert",
+      "rowId": "139e2d09-bfcf-4bd3-8906-c8112832284d",
+      "rowName": null
+    }
+[13:00:06.868] [32mINFO[39m: [36mChronicle entry added: "[Tick 31] The Signal-House Families, refusing to a..."[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[13:00:19.076] [32mINFO[39m: [36mFaction "The Signal-House Families" tick complete: 2 tool call(s)[39m
+    [35mtag[39m: "world-engine"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[13:00:50.710] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "dynamic",
+      "subTable": "location",
+      "op": "update",
+      "rowId": "e17520a7-2514-4cf6-9f22-b8849b3df8c8",
+      "rowName": "Lantern-Lit Gondola Pier"
+    }
+[13:00:50.711] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "dynamic",
+      "subTable": "faction",
+      "op": "update",
+      "rowId": "0f7937d5-8599-4ee7-ad25-62a50cd9187d",
+      "rowName": "Lacquer Seal Verification Authority"
+    }
+[13:00:50.712] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "dynamic",
+      "subTable": "faction",
+      "op": "update",
+      "rowId": "0fb1b3cc-7908-44a3-8e5a-ce5554d51383",
+      "rowName": "Shrine Auditors' Council"
+    }
+[13:00:50.712] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "chronicle",
+      "op": "insert",
+      "rowId": "3644a0bf-7aac-4200-91ae-b4c248222198",
+      "rowName": null
+    }
+[13:00:50.713] [32mINFO[39m: [36mfaction.tick[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "faction.tick"
+    [35mpayload[39m: {
+      "action": "Deploy lacquer artificers to establish a permanent verification kiosk at the Lantern-Lit Gondola Pier, offering quadruple-authenticated seal verification to all gondola operators using the Signal-House Families' subsidized freight program. The Authority leverages its licensing treaty with the Families to make quadruple authentication the default standard for all bulk cargo and message-courier shipments departing the Pier, effectively locking out any operator who refuses to use Authority-verified seals. Simultaneously, dispatch a formal diplomatic envoy to the Shrine Auditors' Council — not requesting archive access, but demanding it under the terms of the licensing treaty, arguing that the Council's revocation constitutes a breach of the original authentication protocol agreement. The envoy carries documentation proving the Authority's quadruple standard is now the operational norm at two major transit points, positioning the Authority as the de facto authentication authority regardless of Council approval.",
+      "outcome": "The verification kiosk is established at the Lantern-Lit Gondola Pier within days, staffed by three senior lacquer artificers from the Resin Mixing Chamber. The Signal-House Families enthusiastically endorse the deployment — quadruple authentication becomes the default for all subsidized freight, giving the Authority a chokepoint over message authentication at the Pier. Twenty-three gondola operators who joined the Families' subsidized program are now required to use Authority-verified seals, expanding the Authority's revenue base and operational footprint. The diplomatic envoy to the Council is received coldly — the Council's liturgical jurist dismisses the demand, citing the archive lockdown as a security measure necessitated by the Authority's \"unauthorized template copying.\" However, the envoy's public arrival at the Council's administrative chambers draws attention from secular magistrate observers already monitoring the Council's activities. The Authority has not recovered archive access, but has established a second major verification station and demonstrated that its authentication standard is becoming industry default regardless of Council cooperation.",
+      "targetLocation": "Lantern-Lit Gondola Pier",
+      "tagChangeCount": 3,
+      "chronicleEntryId": "3644a0bf-7aac-4200-91ae-b4c248222198"
+    }
+[13:00:50.713] [32mINFO[39m: [36mFaction action: Deploy lacquer artificers to establish a permanent verification kiosk at the Lantern-Lit Gondola Pier, offering quadruple-authenticated seal verification to all gondola operators using the Signal-House Families' subsidized freight program. The Authority leverages its licensing treaty with the Families to make quadruple authentication the default standard for all bulk cargo and message-courier shipments departing the Pier, effectively locking out any operator who refuses to use Authority-verified seals. Simultaneously, dispatch a formal diplomatic envoy to the Shrine Auditors' Council — not requesting archive access, but demanding it under the terms of the licensing treaty, arguing that the Council's revocation constitutes a breach of the original authentication protocol agreement. The envoy carries documentation proving the Authority's quadruple standard is now the operational norm at two major transit points, positioning the Authority as the de facto authentication authority regardless of Council approval. -> 3 tag change(s)[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[13:00:59.348] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "chronicle",
+      "op": "insert",
+      "rowId": "13e83c58-e2df-4e32-9d55-e6342047e3f8",
+      "rowName": null
+    }
+[13:00:59.348] [32mINFO[39m: [36mChronicle entry added: "[Tick 31] The Lacquer Seal Verification Authority ..."[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[13:01:14.123] [32mINFO[39m: [36mFaction "Lacquer Seal Verification Authority" tick complete: 2 tool call(s)[39m
+    [35mtag[39m: "world-engine"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[13:01:42.900] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "dynamic",
+      "subTable": "location",
+      "op": "update",
+      "rowId": "0ae29ccb-aa18-4675-8c09-ed358d86fe94",
+      "rowName": "Spire Resonance Vault"
+    }
+[13:01:42.901] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "dynamic",
+      "subTable": "faction",
+      "op": "update",
+      "rowId": "82eb6ff8-6fe7-4059-8fc2-0ba9f9e31c6b",
+      "rowName": "The Silent Spire Keepers"
+    }
+[13:01:42.901] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "chronicle",
+      "op": "insert",
+      "rowId": "90ec46e9-7dbf-46a8-b78a-95dc3eeb0fd2",
+      "rowName": null
+    }
+[13:01:42.902] [32mINFO[39m: [36mfaction.tick[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "faction.tick"
+    [35mpayload[39m: {
+      "action": "Initiate emergency acoustic pattern evolution at the Spire Resonance Vault: The Keepers' interpretive council, alarmed by the Families' demonstrated 60% decryption accuracy, orders a fundamental restructuring of the jamming array's harmonic rotation. The predictable synchronized pattern that the Families mapped is abandoned in favor of stochastic harmonic shifts generated by the Spire's internal mechanism vault — the triple-locked chamber whose keys only the Keepers possess. The cipher scripture interpreters develop a new \"scattering protocol\" that randomizes acoustic signatures across multiple frequency bands simultaneously, making pattern-mapping exponentially more difficult. The two shrine auditors stationed at the outer threshold are briefed on the new protocol and begin integrating the Council's liturgical cipher keys with the evolved acoustic framework for the consecration ceremony.",
+      "outcome": "The acoustic pattern evolution is completed within four days of intensive work in the mechanism vault. The new scattering protocol introduces genuine randomness into the jamming arrays — the predictable harmonic rotation that the Families exploited is replaced by a stochastic system that changes every 7-13 minutes in unpredictable intervals. Perimeter sentinels test the new system by deliberately transmitting decoy signals; the Families' monitoring station on the canal approach captures only unintelligible noise fragments. The two cipher scripture interpreters who had privately doubted the Council's protection are reassured by the technical improvement and reaffirm their commitment to the alliance. The shrine auditors confirm the new protocol is compatible with the consecration ceremony's liturgical requirements. However, the Keepers note that the observation ceasefire with the Families technically prohibits \"new monitoring installations\" — the acoustic evolution is a modification of existing systems, not a new installation, but the Families may dispute this interpretation. The Keepers prepare a formal justification document should the Families protest.",
+      "targetLocation": "Spire Resonance Vault",
+      "tagChangeCount": 2,
+      "chronicleEntryId": "90ec46e9-7dbf-46a8-b78a-95dc3eeb0fd2"
+    }
+[13:01:42.902] [32mINFO[39m: [36mFaction action: Initiate emergency acoustic pattern evolution at the Spire Resonance Vault: The Keepers' interpretive council, alarmed by the Families' demonstrated 60% decryption accuracy, orders a fundamental restructuring of the jamming array's harmonic rotation. The predictable synchronized pattern that the Families mapped is abandoned in favor of stochastic harmonic shifts generated by the Spire's internal mechanism vault — the triple-locked chamber whose keys only the Keepers possess. The cipher scripture interpreters develop a new "scattering protocol" that randomizes acoustic signatures across multiple frequency bands simultaneously, making pattern-mapping exponentially more difficult. The two shrine auditors stationed at the outer threshold are briefed on the new protocol and begin integrating the Council's liturgical cipher keys with the evolved acoustic framework for the consecration ceremony. -> 2 tag change(s)[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[13:01:53.838] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "chronicle",
+      "op": "insert",
+      "rowId": "03f0799e-429d-44b4-a3a6-2e90cb33a5a5",
+      "rowName": null
+    }
+[13:01:53.839] [32mINFO[39m: [36mChronicle entry added: "[Tick 32] The Silent Spire Keepers, shaken by the ..."[39m
+    [35mtag[39m: "faction-tools"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[13:02:05.771] [32mINFO[39m: [36mFaction "The Silent Spire Keepers" tick complete: 2 tool call(s)[39m
+    [35mtag[39m: "world-engine"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[13:02:05.772] [32mINFO[39m: [36mWorld engine tick complete: 5 faction(s) processed[39m
+    [35mtag[39m: "world-engine"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[13:02:05.773] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 71,
+      "sha256Prefix": "8a552762751ad4cc"
+    }
+[13:02:05.774] [32mINFO[39m: [36mtransient-scene.cleanup[39m
+    [35mtag[39m: "transient-scene-lifecycle"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "transient-scene.cleanup"
+    [35mpayload[39m: {
+      "campaignId": "0ed6bb3c-a528-4067-8f29-86ebdd8d0637",
+      "tick": 30,
+      "archivedSceneCount": 0,
+      "retiredNpcCount": 0,
+      "skippedProtectedSceneCount": 1
+    }
+[13:02:05.775] [32mINFO[39m: [36mworld-forecast.committed[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "world-forecast.committed"
+    [35mpayload[39m: {
+      "baseTick": 29,
+      "generatedAtTick": 29,
+      "expiresAtTick": 41,
+      "entryCount": 3
+    }
+[13:02:05.775] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "done",
+      "byteLength": 11,
+      "sha256Prefix": "3f245d06e085d2e3"
+    }
+[13:02:05.776] [32mINFO[39m: [36mturn.end[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "turn.end"
+    [35mpayload[39m: {
+      "route": "/action",
+      "tick": 29,
+      "durationMs": 321459,
+      "outcome": "success"
+    }
+[13:02:07.086] [32mINFO[39m: [36membedder.call[39m
+    [35mtag[39m: "embeddings"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "embedder"
+    [35mevent[39m: "embedder.call"
+    [35mpayload[39m: {
+      "batchCount": 1,
+      "totalTexts": 1,
+      "model": "qwen/qwen3-embedding-8b",
+      "success": true,
+      "durationMs": 1314
+    }
+[13:02:07.111] [32mINFO[39m: [36mvector.write[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "vector.write"
+    [35mpayload[39m: {
+      "store": "episodic_events",
+      "op": "update",
+      "count": 1,
+      "rowId": "728b996e-a70d-47e4-81b8-b96ec164f508"
+    }
+[13:02:07.111] [32mINFO[39m: [36mEmbedded episodic event 728b996e-a70d-47e4-81b8-b96ec164f508 (dim=4096)[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[13:02:08.957] [32mINFO[39m: [36membedder.call[39m
+    [35mtag[39m: "embeddings"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "embedder"
+    [35mevent[39m: "embedder.call"
+    [35mpayload[39m: {
+      "batchCount": 1,
+      "totalTexts": 1,
+      "model": "qwen/qwen3-embedding-8b",
+      "success": true,
+      "durationMs": 1845
+    }
+[13:02:08.987] [32mINFO[39m: [36mvector.write[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "vector.write"
+    [35mpayload[39m: {
+      "store": "episodic_events",
+      "op": "update",
+      "count": 1,
+      "rowId": "2611fcd0-994b-4363-8214-506cf20f3496"
+    }
+[13:02:08.988] [32mINFO[39m: [36mEmbedded episodic event 2611fcd0-994b-4363-8214-506cf20f3496 (dim=4096)[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[13:02:10.250] [32mINFO[39m: [36membedder.call[39m
+    [35mtag[39m: "embeddings"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "embedder"
+    [35mevent[39m: "embedder.call"
+    [35mpayload[39m: {
+      "batchCount": 1,
+      "totalTexts": 1,
+      "model": "qwen/qwen3-embedding-8b",
+      "success": true,
+      "durationMs": 1262
+    }
+[13:02:10.269] [32mINFO[39m: [36mvector.write[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "vector.write"
+    [35mpayload[39m: {
+      "store": "episodic_events",
+      "op": "update",
+      "count": 1,
+      "rowId": "2a8b94cc-6f41-4032-a434-77c174be2ccb"
+    }
+[13:02:10.269] [32mINFO[39m: [36mEmbedded episodic event 2a8b94cc-6f41-4032-a434-77c174be2ccb (dim=4096)[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[13:02:10.955] [32mINFO[39m: [36membedder.call[39m
+    [35mtag[39m: "embeddings"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "embedder"
+    [35mevent[39m: "embedder.call"
+    [35mpayload[39m: {
+      "batchCount": 1,
+      "totalTexts": 1,
+      "model": "qwen/qwen3-embedding-8b",
+      "success": true,
+      "durationMs": 686
+    }
+[13:02:10.973] [32mINFO[39m: [36mvector.write[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "vector.write"
+    [35mpayload[39m: {
+      "store": "episodic_events",
+      "op": "update",
+      "count": 1,
+      "rowId": "5a1f9879-7f6c-4a56-b273-1b5bb0578469"
+    }
+[13:02:10.973] [32mINFO[39m: [36mEmbedded episodic event 5a1f9879-7f6c-4a56-b273-1b5bb0578469 (dim=4096)[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+[13:02:11.740] [32mINFO[39m: [36membedder.call[39m
+    [35mtag[39m: "embeddings"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mrole[39m: "embedder"
+    [35mevent[39m: "embedder.call"
+    [35mpayload[39m: {
+      "batchCount": 1,
+      "totalTexts": 1,
+      "model": "qwen/qwen3-embedding-8b",
+      "success": true,
+      "durationMs": 767
+    }
+[13:02:11.759] [32mINFO[39m: [36mvector.write[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+    [35mevent[39m: "vector.write"
+    [35mpayload[39m: {
+      "store": "episodic_events",
+      "op": "update",
+      "count": 1,
+      "rowId": "e2e998d8-759b-4563-aacc-cdacbc3a222d"
+    }
+[13:02:11.760] [32mINFO[39m: [36mEmbedded episodic event e2e998d8-759b-4563-aacc-cdacbc3a222d (dim=4096)[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "932e6616-8444-437a-bbd7-778bc7c23454"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 29
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'

@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
+import { randomUUID } from "node:crypto";
 import { parseLookupLogEntry } from "@worldforge/shared";
 import { buildLookupHistoryMessages } from "../campaign/chat-history.js";
 import {
@@ -10,6 +11,7 @@ import {
   getLastPlayerAction,
   createCheckpoint,
   pruneAutoCheckpoints,
+  readCampaignConfig,
 } from "../campaign/index.js";
 import { clamp, getErrorMessage, getErrorStatus } from "../lib/index.js";
 import { loadSettings } from "../settings/index.js";
@@ -30,19 +32,28 @@ import {
   chatRetryBodySchema,
   chatUndoBodySchema,
 } from "./schemas.js";
-import { createLogger } from "../lib/index.js";
+import {
+  createLogger,
+  runWithTurnContext,
+  getTurnContext,
+} from "../lib/index.js";
+import { rootPino } from "../lib/logger-setup.js";
+import {
+  sha256Prefix,
+  isDeltaType,
+  getOrCreateAggregator,
+  finalizeAggregators,
+} from "../lib/sse-hash.js";
 import {
   processOpeningScene,
   processTurn,
   captureSnapshot,
   restoreSnapshot,
-  tickPresentNpcs,
-  simulateOffscreenNpcs,
-  checkAndTriggerReflections,
-  tickFactions,
+  buildDoneBoundaryData,
+  queuePostTurnSimulationProposals,
 } from "../engine/index.js";
 import type {
-  HiddenTurnSummary,
+  TurnEvent,
   TurnSnapshot,
   TurnSummary,
 } from "../engine/index.js";
@@ -76,17 +87,45 @@ const log = createLogger("chat");
 
 const app = new Hono();
 
+function registerTurnAbortCleanup(args: {
+  signal: AbortSignal;
+  campaignId: string;
+  route: string;
+}): () => void {
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    endTurn(args.campaignId);
+    log.event("turn.abort.cleanup", {
+      route: args.route,
+      campaignId: args.campaignId,
+    });
+  };
+
+  if (args.signal.aborted) {
+    cleanup();
+    return () => {};
+  }
+
+  args.signal.addEventListener("abort", cleanup, { once: true });
+  return () => {
+    args.signal.removeEventListener("abort", cleanup);
+  };
+}
+
 /**
  * Rollback-critical work must finish before the turn is marked done.
+ * Heavy world simulation is recorded as versioned proposals so player control
+ * returns after the visible GM/narrator turn without allowing detached NPC or
+ * faction LLM agents to mutate the world behind the `done` boundary.
  */
 async function runRollbackCriticalPostTurn(
-  settings: Settings,
+  _settings: Settings,
   campaignId: string,
   judgeProvider: ProviderConfig,
   summary: TurnSummary,
 ): Promise<void> {
-  const emb = resolveEmbedder(settings);
-  const embedderProvider = !("error" in emb) ? emb.resolved.provider : undefined;
   const db = (await import("../db/index.js")).getDb();
   const { players } = await import("../db/schema.js");
   const { eq } = await import("drizzle-orm");
@@ -100,59 +139,47 @@ async function runRollbackCriticalPostTurn(
     .where(eq(players.campaignId, campaignId))
     .get();
 
-  if (player?.currentLocationId) {
-    await simulateOffscreenNpcs(
-      campaignId,
-      summary.tick,
-      judgeProvider,
-      player.currentLocationId,
-      player.currentSceneLocationId ?? undefined,
-    );
-  }
-
-  await checkAndTriggerReflections(
+  const result = queuePostTurnSimulationProposals({
     campaignId,
-    summary.tick,
+    tick: summary.tick,
     judgeProvider,
-    embedderProvider,
-  );
-
-  await tickFactions(campaignId, summary.tick, judgeProvider);
-}
-
-async function runLocalPresentSceneSettlement(
-  settings: Settings,
-  campaignId: string,
-  judgeProvider: ProviderConfig,
-  summary: HiddenTurnSummary,
-): Promise<void> {
-  const sceneScopeId = summary.currentSceneScopeId ?? summary.currentLocationId;
-  if (!sceneScopeId) {
-    return;
-  }
-
-  const emb = resolveEmbedder(settings);
-  const embedderProvider = !("error" in emb) ? emb.resolved.provider : undefined;
-
-  await tickPresentNpcs(
+    playerLocationId: player?.currentLocationId,
+    playerSceneScopeId: player?.currentSceneLocationId ?? undefined,
+    route: "/chat/action",
+  });
+  const actorSchedules = result.actorSchedules ?? [];
+  log.event("simulation.proposals.queued", {
     campaignId,
-    summary.predictedTick,
-    judgeProvider,
-    summary.currentLocationId ?? sceneScopeId,
-    sceneScopeId,
-    embedderProvider,
-  );
+    tick: summary.tick,
+    baseWorldVersion: result.baseWorldVersion,
+    proposalCount: result.queued.length,
+    proposalTypes: result.queued.map((proposal) => proposal.proposalType),
+    actorScheduleCount: actorSchedules.length,
+    actorScheduleRoutes: actorSchedules.map((schedule) => ({
+      actorId: schedule.actorId,
+      route: schedule.route,
+      reservation: schedule.reservation?.status ?? null,
+      signals: schedule.signals.map((signal) => signal.type),
+    })),
+  });
 }
 
 function queueAuxiliaryPostTurnWork(
   settings: Settings,
   campaignId: string,
+  _judgeProvider: ProviderConfig,
   summary: TurnSummary,
 ): void {
-  void (async () => {
+  // Capture current turn context (if any) so the detached IIFE below
+  // can re-enter the same ALS frame. Without this, embedder/image
+  // writes that happen asynchronously after the SSE stream closes
+  // would emit log records with no turnId/campaignId mixin.
+  const detachedCtx = getTurnContext();
+  const body = async (): Promise<void> => {
     try {
       const emb = resolveEmbedder(settings);
       const embedderAvailable = !("error" in emb);
+
       const pendingCommittedEvents = drainPendingCommittedEvents(campaignId, summary.tick);
 
       if (pendingCommittedEvents.length > 0 && embedderAvailable) {
@@ -254,7 +281,21 @@ function queueAuxiliaryPostTurnWork(
     } catch (err) {
       log.warn("Auxiliary post-turn work failed (non-blocking)", err);
     }
-  })();
+  };
+  const runDetached = (): void => {
+    if (detachedCtx) {
+      // Re-enter the turn context so downstream log records still carry
+      // turnId/campaignId/tick. role is cleared because this background
+      // work is not scoped to any single LLM role.
+      void runWithTurnContext({ ...detachedCtx, role: undefined }, body);
+    } else {
+      void body();
+    }
+  };
+
+  // Defer the body itself, not only the await, so no synchronous DB or prompt
+  // setup can run before the SSE generator reaches its final done event.
+  setTimeout(runDetached, 0);
 }
 
 function buildOnPostTurn(
@@ -264,17 +305,7 @@ function buildOnPostTurn(
 ): ((summary: TurnSummary) => Promise<void>) | undefined {
   return async (summary: TurnSummary) => {
     await runRollbackCriticalPostTurn(settings, campaignId, judgeProvider, summary);
-    queueAuxiliaryPostTurnWork(settings, campaignId, summary);
-  };
-}
-
-function buildOnBeforeVisibleNarration(
-  settings: Settings,
-  campaignId: string,
-  judgeProvider: ProviderConfig,
-): ((summary: HiddenTurnSummary) => Promise<void>) | undefined {
-  return async (summary: HiddenTurnSummary) => {
-    await runLocalPresentSceneSettlement(settings, campaignId, judgeProvider, summary);
+    queueAuxiliaryPostTurnWork(settings, campaignId, judgeProvider, summary);
   };
 }
 
@@ -288,18 +319,52 @@ async function writeTurnEventSSE(
   stream: { writeSSE: (event: { event: string; data: string }) => Promise<void> },
   event: { type: string; data: unknown },
 ): Promise<void> {
-  if (event.type === "reasoning") {
-    await stream.writeSSE({
-      event: "reasoning",
-      data: JSON.stringify(event.data),
+  const eventName = event.type === "reasoning" ? "reasoning" : event.type;
+  const dataStr =
+    typeof event.data === "string" ? event.data : JSON.stringify(event.data);
+
+  // Phase 58-03: hot-path instrumentation — per Codex review, avoid copying
+  // full event.data into the log record. Delta/text-delta chunks are
+  // aggregated into one `sse.stream.aggregate` event per stream end;
+  // every other SSE payload emits a single record with type, byteLength,
+  // and a short sha256 prefix so operators can correlate with captured
+  // traffic without duplicating prose in the JSONL.
+  const ctx = getTurnContext();
+  if (ctx && isDeltaType(event.type)) {
+    getOrCreateAggregator(ctx.turnId, event.type).record(dataStr);
+  } else {
+    log.event("sse.emit", {
+      type: event.type,
+      byteLength: Buffer.byteLength(dataStr, "utf8"),
+      sha256Prefix: sha256Prefix(dataStr),
     });
-    return;
   }
 
   await stream.writeSSE({
-    event: event.type,
-    data: JSON.stringify(event.data),
+    event: eventName,
+    data: dataStr,
   });
+}
+
+function withTurnBoundaryMetadata(
+  campaignId: string,
+  event: TurnEvent,
+): TurnEvent {
+  if (event.type !== "done") {
+    return event;
+  }
+  return {
+    ...event,
+    data: buildDoneBoundaryData(campaignId, event.data),
+  };
+}
+
+async function writeRouteTurnEventSSE(
+  campaignId: string,
+  stream: { writeSSE: (event: { event: string; data: string }) => Promise<void> },
+  event: TurnEvent,
+): Promise<void> {
+  await writeTurnEventSSE(stream, withTurnBoundaryMetadata(campaignId, event));
 }
 
 function toPersistedLookupKind(
@@ -390,33 +455,83 @@ app.post("/opening", async (c) => {
     const settings = loadSettings();
     const stResult = resolveStoryteller(settings);
     if ("error" in stResult) {
+      endTurn(campaignId);
+      turnStartedForCampaign = null;
       return c.json({ error: stResult.error }, stResult.status);
     }
 
     const embedderResult = resolveEmbedder(settings);
     c.header("Cache-Control", "no-cache, no-transform");
 
+    const turnId = randomUUID();
+    const currentTick =
+      readCampaignConfig(campaignId).currentTick ?? 0;
+
     return streamSSE(c, async (stream) => {
+      const unregisterAbortCleanup = registerTurnAbortCleanup({
+        signal: c.req.raw.signal,
+        campaignId,
+        route: "/opening",
+      });
       try {
-        const openingGenerator = processOpeningScene({
+        await runWithTurnContext({ turnId, campaignId, tick: currentTick }, async () => {
+        const turnStart = Date.now();
+        log.event("turn.begin", {
+          route: "/opening",
           campaignId,
-          storytellerProvider: stResult.resolved.provider,
-          storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
-          storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
-          embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
+          tick: currentTick,
+          storytellerProvider: {
+            id: stResult.resolved.provider.id,
+            model: stResult.resolved.provider.model,
+            baseUrl: stResult.resolved.provider.baseUrl,
+          },
         });
 
-        for await (const event of openingGenerator) {
-          await writeTurnEventSSE(stream, event);
+        let outcome: "success" | "error" = "success";
+        try {
+          const openingGenerator = processOpeningScene({
+            campaignId,
+            storytellerProvider: stResult.resolved.provider,
+            storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
+            storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
+            embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
+          });
+
+          for await (const event of openingGenerator) {
+            await writeRouteTurnEventSSE(campaignId, stream, event);
+          }
+        } catch (error) {
+          outcome = "error";
+          await stream.writeSSE({
+            event: "error",
+            data: JSON.stringify({ error: getErrorMessage(error, "Opening scene generation failed.") }),
+          });
+        } finally {
+          for (const agg of finalizeAggregators(turnId)) {
+            log.event("sse.stream.aggregate", {
+              type: agg.type,
+              deltaCount: agg.deltaCount,
+              totalBytes: agg.totalBytes,
+              sha256OfConcatenated: agg.sha256OfConcatenated,
+            });
+          }
+          log.event("turn.end", {
+            route: "/opening",
+            tick: currentTick,
+            durationMs: Date.now() - turnStart,
+            outcome,
+          });
+          try {
+            rootPino.flush?.();
+          } catch {
+            // flush is best-effort; never surface as turn-end failure.
+          }
+          endTurn(campaignId);
+          turnStartedForCampaign = null;
         }
-      } catch (error) {
-        await stream.writeSSE({
-          event: "error",
-          data: JSON.stringify({ error: getErrorMessage(error, "Opening scene generation failed.") }),
         });
       } finally {
-        endTurn(campaignId);
-        turnStartedForCampaign = null;
+        unregisterAbortCleanup();
       }
     });
   } catch (error) {
@@ -449,7 +564,9 @@ app.post("/action", async (c) => {
     const result = await parseBody(c, chatActionBodySchema);
     if ("response" in result) return result.response;
 
-    const { campaignId, playerAction, intent, method } = result.data;
+    const { campaignId, playerAction } = result.data;
+    const compatibilityIntent = playerAction;
+    const compatibilityMethod = "";
     const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
     if (!tryBeginTurn(campaignId)) {
@@ -462,12 +579,16 @@ app.post("/action", async (c) => {
     // Resolve Judge (required for Oracle)
     const judgeResult = resolveJudge(settings);
     if ("error" in judgeResult) {
+      endTurn(campaignId);
+      turnStartedForCampaign = null;
       return c.json({ error: judgeResult.error }, judgeResult.status);
     }
 
     // Resolve Storyteller (required for narration)
     const stResult = resolveStoryteller(settings);
     if ("error" in stResult) {
+      endTurn(campaignId);
+      turnStartedForCampaign = null;
       return c.json({ error: stResult.error }, stResult.status);
     }
 
@@ -503,62 +624,135 @@ app.post("/action", async (c) => {
 
     c.header("Cache-Control", "no-cache, no-transform");
 
+    const turnId = randomUUID();
+    const currentTick =
+      readCampaignConfig(campaignId).currentTick ?? 0;
+
     return streamSSE(c, async (stream) => {
+      const unregisterAbortCleanup = registerTurnAbortCleanup({
+        signal: c.req.raw.signal,
+        campaignId,
+        route: "/action",
+      });
       try {
-        const turnGenerator = processTurn({
+        await runWithTurnContext({ turnId, campaignId, tick: currentTick }, async () => {
+        const turnStart = Date.now();
+        log.event("turn.begin", {
+          route: "/action",
           campaignId,
-          playerAction,
-          intent,
-          method,
-          judgeProvider: judgeResult.resolved.provider,
-          storytellerProvider: stResult.resolved.provider,
-          storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
-          storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
-          embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
-          onBeforeVisibleNarration: buildOnBeforeVisibleNarration(
-            settings,
-            campaignId,
-            judgeResult.resolved.provider,
-          ),
-          onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider),
+          tick: currentTick,
+          rawInput: playerAction,
+          compatibilityFields: {
+            intent: "mirrors rawInput",
+            method: "empty",
+          },
+          judgeProvider: {
+            id: judgeResult.resolved.provider.id,
+            model: judgeResult.resolved.provider.model,
+            baseUrl: judgeResult.resolved.provider.baseUrl,
+          },
+          storytellerProvider: {
+            id: stResult.resolved.provider.id,
+            model: stResult.resolved.provider.model,
+            baseUrl: stResult.resolved.provider.baseUrl,
+          },
         });
 
-        for await (const event of turnGenerator) {
-          // Reactive auto-checkpoint when HP drops to danger zone during turn
-          if (event.type === "auto_checkpoint") {
-            void (async () => {
-              try {
-                await createCheckpoint(campaignId, {
-                  name: "auto-danger",
-                  description: "Auto-save: HP dropped to danger zone",
-                  auto: true,
-                });
-                await pruneAutoCheckpoints(campaignId, 3);
-              } catch (err) {
-                log.warn("Reactive auto-checkpoint failed (non-blocking)", err);
-              }
-            })();
-          }
-
-          await writeTurnEventSSE(stream, event);
-        }
-
-        // Turn completed successfully -- store snapshot for potential undo/retry
-        setLastTurnSnapshot(campaignId, snapshot);
-      } catch (error) {
+        let outcome: "success" | "error" | "restored" = "success";
         try {
-          await restoreSnapshot(campaignId, snapshot);
-        } catch (restoreError) {
-          log.error("Failed to restore pre-turn boundary after action failure", restoreError);
+          const turnGenerator = processTurn({
+            campaignId,
+            playerAction,
+            intent: compatibilityIntent,
+            method: compatibilityMethod,
+            judgeProvider: judgeResult.resolved.provider,
+            storytellerProvider: stResult.resolved.provider,
+            storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
+            storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
+            embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
+            onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider),
+          });
+
+          for await (const event of turnGenerator) {
+            // Reactive auto-checkpoint when HP drops to danger zone during turn
+            if (event.type === "auto_checkpoint") {
+              const detachedCtx = getTurnContext();
+              const ckptBody = async (): Promise<void> => {
+                try {
+                  await createCheckpoint(campaignId, {
+                    name: "auto-danger",
+                    description: "Auto-save: HP dropped to danger zone",
+                    auto: true,
+                  });
+                  await pruneAutoCheckpoints(campaignId, 3);
+                } catch (err) {
+                  log.warn("Reactive auto-checkpoint failed (non-blocking)", err);
+                }
+              };
+              if (detachedCtx) {
+                void runWithTurnContext({ ...detachedCtx, role: undefined }, ckptBody);
+              } else {
+                void ckptBody();
+              }
+            }
+
+            if (event.type === "done") {
+              setLastTurnSnapshot(campaignId, snapshot);
+            }
+
+            await writeRouteTurnEventSSE(campaignId, stream, event);
+          }
+        } catch (error) {
+          outcome = "restored";
+          log.error("Turn processing failed; restoring pre-turn boundary", error);
+          try {
+            await restoreSnapshot(campaignId, snapshot);
+            const drainedEvents = drainPendingCommittedEvents(campaignId, currentTick);
+            if (drainedEvents.length > 0) {
+              log.event("turn.rollback.pending-committed-events-drained", {
+                route: "/action",
+                tick: currentTick,
+                count: drainedEvents.length,
+              });
+            }
+          } catch (restoreError) {
+            outcome = "error";
+            log.error("Failed to restore pre-turn boundary after action failure", restoreError);
+          }
+          clearLastTurnSnapshot(campaignId);
+          await stream.writeSSE({
+            event: "error",
+            data: JSON.stringify({ error: getErrorMessage(error, "Turn processing failed.") }),
+          });
+        } finally {
+          for (const agg of finalizeAggregators(turnId)) {
+            log.event("sse.stream.aggregate", {
+              type: agg.type,
+              deltaCount: agg.deltaCount,
+              totalBytes: agg.totalBytes,
+              sha256OfConcatenated: agg.sha256OfConcatenated,
+            });
+          }
+          log.event("turn.end", {
+            route: "/action",
+            tick: currentTick,
+            durationMs: Date.now() - turnStart,
+            outcome,
+          });
+          // Per Gemini suggestion: flush transports before SSE closes so a
+          // crash right after the final event still leaves a complete JSONL
+          // on disk.
+          try {
+            rootPino.flush?.();
+          } catch {
+            // flush is best-effort; never surface as turn-end failure.
+          }
+          endTurn(campaignId);
+          turnStartedForCampaign = null;
         }
-        clearLastTurnSnapshot(campaignId);
-        await stream.writeSSE({
-          event: "error",
-          data: JSON.stringify({ error: getErrorMessage(error, "Turn processing failed.") }),
         });
       } finally {
-        endTurn(campaignId);
-        turnStartedForCampaign = null;
+        unregisterAbortCleanup();
       }
     });
   } catch (error) {
@@ -666,12 +860,16 @@ app.post("/retry", async (c) => {
     // Resolve Judge (required for Oracle)
     const judgeResult = resolveJudge(settings);
     if ("error" in judgeResult) {
+      endTurn(campaignId);
+      turnStartedForCampaign = null;
       return c.json({ error: judgeResult.error }, judgeResult.status);
     }
 
     // Resolve Storyteller (required for narration)
     const stResult = resolveStoryteller(settings);
     if ("error" in stResult) {
+      endTurn(campaignId);
+      turnStartedForCampaign = null;
       return c.json({ error: stResult.error }, stResult.status);
     }
 
@@ -682,61 +880,126 @@ app.post("/retry", async (c) => {
 
     c.header("Cache-Control", "no-cache, no-transform");
 
+    const turnId = randomUUID();
+    const currentTick =
+      readCampaignConfig(campaignId).currentTick ?? 0;
+
     return streamSSE(c, async (stream) => {
+      const unregisterAbortCleanup = registerTurnAbortCleanup({
+        signal: c.req.raw.signal,
+        campaignId,
+        route: "/retry",
+      });
       try {
-        const turnGenerator = processTurn({
+        await runWithTurnContext({ turnId, campaignId, tick: currentTick }, async () => {
+        const turnStart = Date.now();
+        log.event("turn.begin", {
+          route: "/retry",
           campaignId,
+          tick: currentTick,
           playerAction,
-          intent: playerAction, // Re-use player action as intent for retry
-          method: "",
-          judgeProvider: judgeResult.resolved.provider,
-          storytellerProvider: stResult.resolved.provider,
-          storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
-          storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
-          embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
-          onBeforeVisibleNarration: buildOnBeforeVisibleNarration(
-            settings,
-            campaignId,
-            judgeResult.resolved.provider,
-          ),
-          onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider),
+          judgeProvider: {
+            id: judgeResult.resolved.provider.id,
+            model: judgeResult.resolved.provider.model,
+            baseUrl: judgeResult.resolved.provider.baseUrl,
+          },
+          storytellerProvider: {
+            id: stResult.resolved.provider.id,
+            model: stResult.resolved.provider.model,
+            baseUrl: stResult.resolved.provider.baseUrl,
+          },
         });
 
-        for await (const event of turnGenerator) {
-          // Reactive auto-checkpoint when HP drops to danger zone during turn
-          if (event.type === "auto_checkpoint") {
-            void (async () => {
-              try {
-                await createCheckpoint(campaignId, {
-                  name: "auto-danger",
-                  description: "Auto-save: HP dropped to danger zone",
-                  auto: true,
-                });
-                await pruneAutoCheckpoints(campaignId, 3);
-              } catch (err) {
-                log.warn("Reactive auto-checkpoint failed (non-blocking)", err);
-              }
-            })();
-          }
-
-          await writeTurnEventSSE(stream, event);
-        }
-
-        setLastTurnSnapshot(campaignId, previousSnapshot);
-      } catch (error) {
+        let outcome: "success" | "error" | "restored" = "success";
         try {
-          await restoreSnapshot(campaignId, previousSnapshot);
-        } catch (restoreError) {
-          log.error("Failed to restore pre-turn boundary after retry failure", restoreError);
+          const turnGenerator = processTurn({
+            campaignId,
+            playerAction,
+            intent: playerAction, // Re-use player action as intent for retry
+            method: "",
+            judgeProvider: judgeResult.resolved.provider,
+            storytellerProvider: stResult.resolved.provider,
+            storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
+            storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
+            embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
+            onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider),
+          });
+
+          for await (const event of turnGenerator) {
+            if (event.type === "auto_checkpoint") {
+              const detachedCtx = getTurnContext();
+              const ckptBody = async (): Promise<void> => {
+                try {
+                  await createCheckpoint(campaignId, {
+                    name: "auto-danger",
+                    description: "Auto-save: HP dropped to danger zone",
+                    auto: true,
+                  });
+                  await pruneAutoCheckpoints(campaignId, 3);
+                } catch (err) {
+                  log.warn("Reactive auto-checkpoint failed (non-blocking)", err);
+                }
+              };
+              if (detachedCtx) {
+                void runWithTurnContext({ ...detachedCtx, role: undefined }, ckptBody);
+              } else {
+                void ckptBody();
+              }
+            }
+
+            if (event.type === "done") {
+              setLastTurnSnapshot(campaignId, previousSnapshot);
+            }
+
+            await writeRouteTurnEventSSE(campaignId, stream, event);
+          }
+        } catch (error) {
+          outcome = "restored";
+          try {
+            await restoreSnapshot(campaignId, previousSnapshot);
+            const drainedEvents = drainPendingCommittedEvents(campaignId, currentTick);
+            if (drainedEvents.length > 0) {
+              log.event("turn.rollback.pending-committed-events-drained", {
+                route: "/retry",
+                tick: currentTick,
+                count: drainedEvents.length,
+              });
+            }
+          } catch (restoreError) {
+            outcome = "error";
+            log.error("Failed to restore pre-turn boundary after retry failure", restoreError);
+          }
+          clearLastTurnSnapshot(campaignId);
+          await stream.writeSSE({
+            event: "error",
+            data: JSON.stringify({ error: getErrorMessage(error, "Retry failed.") }),
+          });
+        } finally {
+          for (const agg of finalizeAggregators(turnId)) {
+            log.event("sse.stream.aggregate", {
+              type: agg.type,
+              deltaCount: agg.deltaCount,
+              totalBytes: agg.totalBytes,
+              sha256OfConcatenated: agg.sha256OfConcatenated,
+            });
+          }
+          log.event("turn.end", {
+            route: "/retry",
+            tick: currentTick,
+            durationMs: Date.now() - turnStart,
+            outcome,
+          });
+          try {
+            rootPino.flush?.();
+          } catch {
+            // flush is best-effort; never surface as turn-end failure.
+          }
+          endTurn(campaignId);
+          turnStartedForCampaign = null;
         }
-        clearLastTurnSnapshot(campaignId);
-        await stream.writeSSE({
-          event: "error",
-          data: JSON.stringify({ error: getErrorMessage(error, "Retry failed.") }),
         });
       } finally {
-        endTurn(campaignId);
-        turnStartedForCampaign = null;
+        unregisterAbortCleanup();
       }
     });
   } catch (error) {
@@ -775,7 +1038,7 @@ app.post("/undo", async (c) => {
     // Single-step undo only
     clearLastTurnSnapshot(campaignId);
 
-    return c.json({ success: true, messagesRemoved: 2 });
+    return c.json({ ok: true, messagesRemoved: 2 });
   } catch (error) {
     return c.json(
       { error: getErrorMessage(error, "Undo request failed.") },
@@ -808,7 +1071,7 @@ app.post("/edit", async (c) => {
       );
     }
 
-    return c.json({ success: true });
+    return c.json({ ok: true });
   } catch (error) {
     return c.json(
       { error: getErrorMessage(error, "Edit request failed.") },

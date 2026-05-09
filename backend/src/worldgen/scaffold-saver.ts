@@ -11,16 +11,39 @@ import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
 import {
   campaigns,
   factions,
+  items,
   locationEdges,
   locationRecentEvents,
   locations,
   npcs,
+  players,
   relationships,
 } from "../db/schema.js";
 import type { WorldScaffold } from "./types.js";
 
 type DbInstance = ReturnType<typeof getDb>;
 type Tx = Parameters<Parameters<DbInstance["transaction"]>[0]>[0];
+type ScaffoldLocation = WorldScaffold["locations"][number];
+type ScaffoldLocationKind = NonNullable<ScaffoldLocation["kind"]>;
+
+interface LocationPersistenceEntry {
+  id: string;
+  location: ScaffoldLocation;
+  kind: ScaffoldLocationKind;
+  parentLocationId: string | null;
+}
+
+interface LocationPersistencePlan {
+  entries: LocationPersistenceEntry[];
+  locationIds: Map<string, string>;
+  locationEntriesByName: Map<string, LocationPersistenceEntry>;
+}
+
+interface NpcPlacement {
+  currentLocationId: string | null;
+  currentLocationName: string;
+  currentSceneLocationId: string | null;
+}
 
 interface BaseContext {
   tx: Tx;
@@ -31,9 +54,205 @@ interface InsertContext extends BaseContext {
   locationIds: Map<string, string>;
   factionIds: Map<string, string>;
   npcIds: Map<string, string>;
+  relationshipKeys: Set<string>;
+}
+
+function insertScaffoldRelationship(
+  ctx: InsertContext,
+  relationship: {
+    entityA: string;
+    entityB: string;
+    tags: string[];
+    reason: string;
+  },
+): void {
+  const key = `${relationship.entityA}\u0000${relationship.entityB}`;
+  if (ctx.relationshipKeys.has(key)) return;
+  ctx.relationshipKeys.add(key);
+
+  ctx.tx.insert(relationships)
+    .values({
+      id: crypto.randomUUID(),
+      campaignId: ctx.campaignId,
+      entityA: relationship.entityA,
+      entityB: relationship.entityB,
+      tags: JSON.stringify(relationship.tags),
+      reason: relationship.reason,
+    })
+    .run();
+}
+
+function normalizeLocationKind(location: ScaffoldLocation): ScaffoldLocationKind {
+  return location.kind === "persistent_sublocation"
+    ? "persistent_sublocation"
+    : "macro";
+}
+
+function buildLocationPersistencePlan(
+  scaffoldLocations: WorldScaffold["locations"],
+): LocationPersistencePlan {
+  const seenLocationNames = new Set<string>();
+  for (const location of scaffoldLocations) {
+    if (seenLocationNames.has(location.name)) {
+      throw new Error(`Duplicate scaffold location name "${location.name}".`);
+    }
+    seenLocationNames.add(location.name);
+  }
+
+  const locationIds = new Map<string, string>();
+  for (const location of scaffoldLocations) {
+    locationIds.set(location.name, crypto.randomUUID());
+  }
+
+  const kindsByName = new Map<string, ScaffoldLocationKind>();
+  for (const location of scaffoldLocations) {
+    kindsByName.set(location.name, normalizeLocationKind(location));
+  }
+
+  const entries: LocationPersistenceEntry[] = [];
+  const locationEntriesByName = new Map<string, LocationPersistenceEntry>();
+
+  for (const location of scaffoldLocations) {
+    const id = locationIds.get(location.name);
+    if (!id) {
+      throw new Error(`Missing generated location id for "${location.name}".`);
+    }
+
+    const kind = normalizeLocationKind(location);
+    const parentLocationName = location.parentLocationName ?? null;
+    let parentLocationId: string | null = null;
+
+    if (kind === "persistent_sublocation") {
+      if (!parentLocationName) {
+        throw new Error(
+          `Invalid parentLocationName for persistent sublocation "${location.name}".`,
+        );
+      }
+      const parentKind = kindsByName.get(parentLocationName);
+      const resolvedParentId = locationIds.get(parentLocationName);
+      if (!resolvedParentId || parentKind !== "macro") {
+        throw new Error(
+          `Invalid parentLocationName "${parentLocationName}" for persistent sublocation "${location.name}".`,
+        );
+      }
+      parentLocationId = resolvedParentId;
+    } else if (parentLocationName) {
+      throw new Error(
+        `Invalid parentLocationName "${parentLocationName}" for macro location "${location.name}".`,
+      );
+    }
+
+    const entry: LocationPersistenceEntry = {
+      id,
+      location,
+      kind,
+      parentLocationId,
+    };
+    entries.push(entry);
+    locationEntriesByName.set(location.name, entry);
+  }
+
+  return { entries, locationIds, locationEntriesByName };
+}
+
+function insertLocationEdge(
+  adjacency: Map<string, Set<string>>,
+  fromLocationId: string,
+  toLocationId: string,
+): void {
+  if (fromLocationId === toLocationId) return;
+  if (!adjacency.has(fromLocationId)) {
+    adjacency.set(fromLocationId, new Set());
+  }
+  adjacency.get(fromLocationId)!.add(toLocationId);
+}
+
+function resolveNpcPlacement(
+  npc: WorldScaffold["npcs"][number],
+  locationPlan: LocationPersistencePlan,
+): NpcPlacement {
+  const broadLocationEntry =
+    locationPlan.locationEntriesByName.get(npc.locationName) ?? null;
+  const broadLocationId = broadLocationEntry?.id ?? null;
+
+  if (npc.sceneLocationName == null) {
+    if (broadLocationEntry?.kind === "persistent_sublocation") {
+      if (!broadLocationEntry.parentLocationId) {
+        throw new Error(
+          `Invalid locationName "${npc.locationName}" for NPC "${npc.name}".`,
+        );
+      }
+      const parentEntry = locationPlan.entries.find(
+        (entry) => entry.id === broadLocationEntry.parentLocationId,
+      );
+      return {
+        currentLocationId: broadLocationEntry.parentLocationId,
+        currentLocationName: parentEntry?.location.name ?? npc.locationName,
+        currentSceneLocationId: broadLocationEntry.id,
+      };
+    }
+
+    return {
+      currentLocationId: broadLocationId,
+      currentLocationName: npc.locationName,
+      currentSceneLocationId: null,
+    };
+  }
+
+  const sceneLocationEntry = locationPlan.locationEntriesByName.get(
+    npc.sceneLocationName,
+  );
+  if (!sceneLocationEntry) {
+    throw new Error(
+      `Invalid sceneLocationName "${npc.sceneLocationName}" for NPC "${npc.name}".`,
+    );
+  }
+  if (!broadLocationId) {
+    throw new Error(
+      `Invalid locationName "${npc.locationName}" for NPC "${npc.name}" with sceneLocationName "${npc.sceneLocationName}".`,
+    );
+  }
+
+  if (sceneLocationEntry.kind === "macro") {
+    if (broadLocationId !== sceneLocationEntry.id) {
+      throw new Error(
+        `NPC "${npc.name}" locationName "${npc.locationName}" conflicts with sceneLocationName "${npc.sceneLocationName}".`,
+      );
+    }
+    return {
+      currentLocationId: sceneLocationEntry.id,
+      currentLocationName: npc.locationName,
+      currentSceneLocationId: sceneLocationEntry.id,
+    };
+  }
+
+  if (broadLocationId !== sceneLocationEntry.parentLocationId) {
+    throw new Error(
+      `NPC "${npc.name}" locationName "${npc.locationName}" conflicts with sceneLocationName "${npc.sceneLocationName}".`,
+    );
+  }
+
+  return {
+    currentLocationId: sceneLocationEntry.parentLocationId,
+    currentLocationName: npc.locationName,
+    currentSceneLocationId: sceneLocationEntry.id,
+  };
 }
 
 function clearExistingScaffold({ tx, campaignId }: BaseContext): void {
+  // Players and world items can outlive a scaffold rewrite, so clear location
+  // FKs before replacing the location table.
+  tx.update(players)
+    .set({
+      currentLocationId: null,
+      currentSceneLocationId: null,
+    })
+    .where(eq(players.campaignId, campaignId))
+    .run();
+  tx.update(items)
+    .set({ locationId: null })
+    .where(eq(items.campaignId, campaignId))
+    .run();
   tx.delete(relationships).where(eq(relationships.campaignId, campaignId)).run();
   tx.delete(npcs).where(eq(npcs.campaignId, campaignId)).run();
   tx.delete(factions).where(eq(factions.campaignId, campaignId)).run();
@@ -46,20 +265,23 @@ function clearExistingScaffold({ tx, campaignId }: BaseContext): void {
 
 function insertLocations(
   { tx, campaignId }: BaseContext,
-  scaffoldLocations: WorldScaffold["locations"]
+  locationPlan: LocationPersistencePlan,
 ): Map<string, string> {
-  const locationIds = new Map<string, string>();
-  for (const location of scaffoldLocations) {
-    const id = crypto.randomUUID();
-    locationIds.set(location.name, id);
+  const sortedEntries = [
+    ...locationPlan.entries.filter((entry) => entry.kind === "macro"),
+    ...locationPlan.entries.filter((entry) => entry.kind === "persistent_sublocation"),
+  ];
+
+  for (const entry of sortedEntries) {
+    const { id, location } = entry;
     tx.insert(locations)
       .values({
         id,
         campaignId,
         name: location.name,
         description: location.description,
-        kind: "macro",
-        parentLocationId: null,
+        kind: entry.kind,
+        parentLocationId: entry.parentLocationId,
         // Worldgen creates persistent geography only; runtime scenes can anchor later.
         anchorLocationId: null,
         persistence: "persistent",
@@ -71,35 +293,41 @@ function insertLocations(
       })
       .run();
   }
-  return locationIds;
+  return locationPlan.locationIds;
 }
 
 function updateAdjacency(
   tx: Tx,
   campaignId: string,
-  scaffoldLocations: WorldScaffold["locations"],
-  locationIds: Map<string, string>,
+  locationPlan: LocationPersistencePlan,
 ): void {
   const adjacency = new Map<string, Set<string>>();
 
-  for (const location of scaffoldLocations) {
-    const locationId = locationIds.get(location.name);
-    if (!locationId) continue;
+  for (const entry of locationPlan.entries) {
+    const location = entry.location;
+    const locationId = entry.id;
 
     if (!adjacency.has(locationId)) {
       adjacency.set(locationId, new Set());
     }
 
     for (const connectionName of location.connectedTo) {
-      const connectionId = locationIds.get(connectionName);
+      const connectionId = locationPlan.locationIds.get(connectionName);
       if (!connectionId) continue;
-      if (connectionId === locationId) continue;
 
-      adjacency.get(locationId)!.add(connectionId);
-      if (!adjacency.has(connectionId)) {
-        adjacency.set(connectionId, new Set());
-      }
-      adjacency.get(connectionId)!.add(locationId);
+      insertLocationEdge(adjacency, locationId, connectionId);
+      insertLocationEdge(adjacency, connectionId, locationId);
+    }
+
+    if (entry.kind === "persistent_sublocation" && entry.parentLocationId) {
+      insertLocationEdge(adjacency, entry.parentLocationId, entry.id);
+      insertLocationEdge(adjacency, entry.id, entry.parentLocationId);
+    }
+  }
+
+  for (const entry of locationPlan.entries) {
+    if (!adjacency.has(entry.id)) {
+      adjacency.set(entry.id, new Set());
     }
   }
 
@@ -117,7 +345,7 @@ function updateAdjacency(
           discovered: true,
         })
         .run();
-    }
+      }
 
     tx.update(locations)
       .set({ connectedTo: JSON.stringify(connectedTargets) })
@@ -151,13 +379,13 @@ function insertFactions(
 function insertNpcs(
   { tx, campaignId }: BaseContext,
   scaffoldNpcs: WorldScaffold["npcs"],
-  locationIds: Map<string, string>,
+  locationPlan: LocationPersistencePlan,
 ): Map<string, string> {
   const npcIds = new Map<string, string>();
   for (const npc of scaffoldNpcs) {
     const id = crypto.randomUUID();
     npcIds.set(npc.name, id);
-    const currentLocationId = locationIds.get(npc.locationName) ?? null;
+    const placement = resolveNpcPlacement(npc, locationPlan);
     const canonicalDraft = npc.draft
       ? reconcileDraftBackedScaffoldNpc({
           ...npc,
@@ -174,8 +402,8 @@ function insertNpcs(
         ...canonicalDraft,
         socialContext: {
           ...canonicalDraft.socialContext,
-          currentLocationId,
-          currentLocationName: npc.locationName,
+          currentLocationId: placement.currentLocationId,
+          currentLocationName: placement.currentLocationName,
         },
       },
       {
@@ -195,7 +423,8 @@ function insertNpcs(
         derivedTags: JSON.stringify(deriveRuntimeCharacterTags(characterRecord)),
         tags: JSON.stringify(legacyNpc.tags),
         tier: legacyNpc.tier === "key" ? "key" : "persistent",
-        currentLocationId,
+        currentLocationId: placement.currentLocationId,
+        currentSceneLocationId: placement.currentSceneLocationId,
         goals: JSON.stringify({
           short_term: legacyNpc.goals.shortTerm,
           long_term: legacyNpc.goals.longTerm,
@@ -218,16 +447,12 @@ function insertMembershipRelationships(
     const factionId = ctx.factionIds.get(npc.factionName);
     if (!npcId || !factionId) continue;
 
-    ctx.tx.insert(relationships)
-      .values({
-        id: crypto.randomUUID(),
-        campaignId: ctx.campaignId,
-        entityA: npcId,
-        entityB: factionId,
-        tags: JSON.stringify(["Member"]),
-        reason: `${npc.name} belongs to ${npc.factionName}`,
-      })
-      .run();
+    insertScaffoldRelationship(ctx, {
+      entityA: npcId,
+      entityB: factionId,
+      tags: ["Member"],
+      reason: `${npc.name} belongs to ${npc.factionName}`,
+    });
   }
 }
 
@@ -243,16 +468,12 @@ function insertTerritoryRelationships(
       const locationId = ctx.locationIds.get(territoryName);
       if (!locationId) continue;
 
-      ctx.tx.insert(relationships)
-        .values({
-          id: crypto.randomUUID(),
-          campaignId: ctx.campaignId,
-          entityA: factionId,
-          entityB: locationId,
-          tags: JSON.stringify(["Controls"]),
-          reason: `${faction.name} controls ${territoryName}`,
-        })
-        .run();
+      insertScaffoldRelationship(ctx, {
+        entityA: factionId,
+        entityB: locationId,
+        tags: ["Controls"],
+        reason: `${faction.name} controls ${territoryName}`,
+      });
     }
   }
 }
@@ -262,18 +483,25 @@ export function saveScaffoldToDb(
   scaffold: WorldScaffold
 ): void {
   const db = getDb();
+  const locationPlan = buildLocationPersistencePlan(scaffold.locations);
 
   db.transaction((tx) => {
     const base: BaseContext = { tx, campaignId };
     clearExistingScaffold(base);
 
-    const locationIds = insertLocations(base, scaffold.locations);
-    updateAdjacency(tx, campaignId, scaffold.locations, locationIds);
+    const locationIds = insertLocations(base, locationPlan);
+    updateAdjacency(tx, campaignId, locationPlan);
 
     const factionIds = insertFactions(base, scaffold.factions);
-    const npcIds = insertNpcs(base, scaffold.npcs, locationIds);
+    const npcIds = insertNpcs(base, scaffold.npcs, locationPlan);
 
-    const ctx: InsertContext = { ...base, locationIds, factionIds, npcIds };
+    const ctx: InsertContext = {
+      ...base,
+      locationIds,
+      factionIds,
+      npcIds,
+      relationshipKeys: new Set(),
+    };
     insertMembershipRelationships(ctx, scaffold.npcs);
     insertTerritoryRelationships(ctx, scaffold.factions);
 

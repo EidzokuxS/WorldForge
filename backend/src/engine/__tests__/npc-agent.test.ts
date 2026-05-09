@@ -1,8 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { accumulateReflectionBudgetMock, getRelationshipGraphMock } = vi.hoisted(() => ({
+const {
+  accumulateReflectionBudgetMock,
+  getRelationshipGraphMock,
+  logEventMock,
+  logInfoMock,
+  logWarnMock,
+  logErrorMock,
+} = vi.hoisted(() => ({
   accumulateReflectionBudgetMock: vi.fn(),
   getRelationshipGraphMock: vi.fn(),
+  logEventMock: vi.fn(),
+  logInfoMock: vi.fn(),
+  logWarnMock: vi.fn(),
+  logErrorMock: vi.fn(),
 }));
 
 // Mock all external dependencies before imports
@@ -32,6 +43,16 @@ vi.mock("../tool-executor.js", () => ({
   executeToolCall: vi.fn().mockResolvedValue({ success: true, result: {} }),
 }));
 
+vi.mock("../target-context.js", () => ({
+  resolveActionTargetContext: vi.fn().mockResolvedValue({
+    targetLabel: null,
+    targetType: "none",
+    targetTags: [],
+    source: "fallback",
+    fallbackReason: "No supported concrete target resolved",
+  }),
+}));
+
 vi.mock("../graph-queries.js", () => ({
   getRelationshipGraph: getRelationshipGraphMock,
 }));
@@ -55,10 +76,21 @@ vi.mock("../reflection-budget.js", () => ({
   accumulateReflectionBudget: accumulateReflectionBudgetMock,
 }));
 
+vi.mock("../../lib/index.js", () => ({
+  createLogger: vi.fn(() => ({
+    event: logEventMock,
+    info: logInfoMock,
+    warn: logWarnMock,
+    error: logErrorMock,
+  })),
+  withRole: vi.fn(async (_role: string, fn: () => unknown) => await fn()),
+}));
+
 import { createNpcAgentTools } from "../npc-tools.js";
 import { tickNpcAgent, tickPresentNpcs } from "../npc-agent.js";
 import { getDb } from "../../db/index.js";
 import { callOracle } from "../oracle.js";
+import { resolveActionTargetContext } from "../target-context.js";
 import { executeToolCall } from "../tool-executor.js";
 import { storeEpisodicEvent } from "../../vectors/episodic-events.js";
 import { generateText } from "ai";
@@ -155,6 +187,25 @@ function createMockNpc(overrides: Record<string, unknown> = {}) {
       },
     }),
     derivedTags: '["merchant","shrewd","wealthy"]',
+    ...overrides,
+  };
+}
+
+function createPoweredMockNpc(overrides: Record<string, unknown> = {}) {
+  const base = createMockNpc();
+  return {
+    ...base,
+    characterRecord: JSON.stringify({
+      ...JSON.parse(String(base.characterRecord)),
+      powerStats: {
+        attackPotency: { tier: "Town", rank: 6 },
+        speed: { tier: "Hypersonic", rank: 5 },
+        durability: { tier: "Town", rank: 5 },
+        intelligence: { tier: "Genius", rank: 6 },
+        hax: [],
+        vulnerabilities: [],
+      },
+    }),
     ...overrides,
   };
 }
@@ -295,6 +346,72 @@ describe("createNpcAgentTools", () => {
 
     expect(callOracle).toHaveBeenCalled();
     expect(result).toHaveProperty("oracleResult");
+  });
+
+  it("act passes combatEnvelope for hostile character-target actions when both sides have power stats", async () => {
+    setupMockDb({
+      npc: createPoweredMockNpc(),
+    });
+    vi.mocked(resolveActionTargetContext).mockResolvedValueOnce({
+      targetLabel: "Intruder",
+      targetType: "character",
+      targetTags: ["Fast", "Armed"],
+      combatSnapshot: {
+        label: "Intruder",
+        powerStats: {
+          attackPotency: { tier: "Building", rank: 5 },
+          speed: { tier: "Subsonic", rank: 4 },
+          durability: { tier: "Building", rank: 4 },
+          intelligence: { tier: "Gifted", rank: 4 },
+          hax: [],
+          vulnerabilities: [],
+        },
+      },
+      source: "parsed",
+      fallbackReason: null,
+    });
+
+    const tools = createNpcAgentTools(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
+
+    await tools.act.execute!(
+      { action: "Strike the intruder with a cursed blow" },
+      { toolCallId: "tc-hostile", messages: [], abortSignal: undefined as unknown as AbortSignal },
+    );
+
+    const oraclePayload = vi.mocked(callOracle).mock.calls.at(-1)?.[0] as
+      | Record<string, unknown>
+      | undefined;
+    expect(oraclePayload?.combatEnvelope).toMatchObject({
+      matchup: expect.any(String),
+      durabilityTierGap: expect.any(Number),
+    });
+    expect(oraclePayload?.targetTags).toEqual(["Fast", "Armed"]);
+  });
+
+  it("keeps non-character or no-power target behavior compatible by omitting combatEnvelope", async () => {
+    setupMockDb({
+      npc: createPoweredMockNpc(),
+    });
+    vi.mocked(resolveActionTargetContext).mockResolvedValueOnce({
+      targetLabel: "Moon Key",
+      targetType: "item",
+      targetTags: ["Ancient"],
+      source: "parsed",
+      fallbackReason: null,
+    });
+
+    const tools = createNpcAgentTools(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
+
+    await tools.act.execute!(
+      { action: "Strike the intruder with a cursed blow" },
+      { toolCallId: "tc-item", messages: [], abortSignal: undefined as unknown as AbortSignal },
+    );
+
+    const oraclePayload = vi.mocked(callOracle).mock.calls.at(-1)?.[0] as
+      | Record<string, unknown>
+      | undefined;
+    expect("combatEnvelope" in (oraclePayload ?? {})).toBe(false);
+    expect(oraclePayload?.targetTags).toEqual([]);
   });
 
   it("move_to validates destination is adjacent; rejects non-adjacent", async () => {
@@ -657,7 +774,7 @@ describe("tickNpcAgent", () => {
     expect(systemPrompt).not.toContain("legacy goal");
   });
 
-  it("builds NPC planning prompts from behavioral core, live dynamics, and continuity cues for anchored characters", async () => {
+  it("builds NPC planning prompts from behavioral core and live dynamics for key characters", async () => {
     setupMockDb({
       npc: createMockNpc({
         characterRecord: JSON.stringify({
@@ -674,17 +791,31 @@ describe("tickNpcAgent", () => {
               hardConstraints: ["Will not expose her ledger network"],
             },
             behavioralCore: {
-              motives: ["Keep leverage over every faction at the market"],
-              pressureResponses: ["Becomes icily polite", "Trades information before coin"],
-              taboos: ["Will not beg"],
+              motives: [],
+              pressureResponses: [],
+              taboos: [],
               attachments: ["The bazaar families"],
               selfImage: "The hinge the market swings on.",
             },
             liveDynamics: {
+              attachments: ["The bazaar families"],
               activeGoals: ["Protect Elara's trade route", "Expose the registry leak"],
               beliefDrift: ["Elara might be a reliable ally"],
               currentStrains: ["Watched by rivals", "Two favors from collapse"],
               earnedChanges: ["Now risks inventory to cover refugees"],
+            },
+            personality: {
+              summary: "A market broker who keeps power by reading weakness before anyone names it.",
+              voice: "Measured, dry, and always one implication ahead of the room.",
+              decisionStyle: "Tests leverage quietly, then moves all at once.",
+              worldview: "Security belongs to whoever can keep the ledger balanced.",
+              internalContradictions: [
+                "Protects the bazaar like family, but treats most loyalties as temporary currency.",
+              ],
+              personalMythology: "She is the hinge the market swings on, whether anyone thanks her or not.",
+              sampleLines: [
+                "Coin is loud. Favors are quieter, and they last longer.",
+              ],
             },
           },
           profile: {
@@ -733,12 +864,6 @@ describe("tickNpcAgent", () => {
             signatureItems: [],
           },
           startConditions: {},
-          continuity: {
-            identityInertia: "anchored",
-            protectedCore: ["identity.baseFacts", "identity.behavioralCore"],
-            mutableSurface: ["identity.liveDynamics"],
-            changePressureNotes: ["Superficial scenes should update strain before core identity."],
-          },
           provenance: {
             sourceKind: "worldgen",
             importMode: null,
@@ -761,13 +886,18 @@ describe("tickNpcAgent", () => {
     await tickNpcAgent(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
 
     const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
-    expect(systemPrompt).toContain("Behavioral core:");
-    expect(systemPrompt).toContain("Enduring motives: Keep leverage over every faction at the market");
-    expect(systemPrompt).toContain("Pressure responses: Becomes icily polite; Trades information before coin");
+    expect(systemPrompt).toContain("Personality:");
+    expect(systemPrompt).toContain(
+      "Personality summary: A market broker who keeps power by reading weakness before anyone names it.",
+    );
+    expect(systemPrompt).toContain(
+      "Voice: Measured, dry, and always one implication ahead of the room.",
+    );
     expect(systemPrompt).toContain("Live dynamics:");
     expect(systemPrompt).toContain("Current strains: Watched by rivals; Two favors from collapse");
-    expect(systemPrompt).toContain("Continuity / fidelity:");
-    expect(systemPrompt).toContain("identity inertia=anchored");
+    expect(systemPrompt).not.toContain("Enduring motives:");
+    expect(systemPrompt).not.toContain("Pressure responses:");
+    expect(systemPrompt).not.toContain("Taboos:");
   });
 
   it("filters nearby entities by encounter scope and justified knowledge basis instead of same broad location membership", async () => {
@@ -803,5 +933,268 @@ describe("tickNpcAgent", () => {
     expect(systemPrompt).toContain("Megumi Fushiguro");
     expect(systemPrompt).toContain("knowledge=perceived_now");
     expect(systemPrompt).not.toContain("Satoru Gojo");
+  });
+
+  it("injects COMBAT POSTURE when a clear-awareness powered target is present", async () => {
+    setupMockDb({
+      npc: createPoweredMockNpc(),
+      npcsAtLocation: [],
+      player: {
+        id: "player-1",
+        name: "Elara",
+        currentLocationId: LOCATION_ID,
+        currentSceneLocationId: LOCATION_ID,
+        characterRecord: JSON.stringify({
+          identity: {
+            id: "player-1",
+            campaignId: CAMPAIGN_ID,
+            role: "player",
+            tier: "key",
+            displayName: "Elara",
+            canonicalStatus: "imported",
+          },
+          profile: {
+            species: "",
+            gender: "",
+            ageText: "",
+            appearance: "",
+            backgroundSummary: "",
+            personaSummary: "A dangerous swordswoman.",
+          },
+          socialContext: {
+            factionId: null,
+            factionName: null,
+            homeLocationId: null,
+            homeLocationName: null,
+            currentLocationId: LOCATION_ID,
+            currentLocationName: "Market Square",
+            relationshipRefs: [],
+            socialStatus: [],
+            originMode: "native",
+          },
+          motivations: {
+            shortTermGoals: [],
+            longTermGoals: [],
+            beliefs: [],
+            drives: [],
+            frictions: [],
+          },
+          capabilities: {
+            traits: ["Swordswoman"],
+            skills: [],
+            flaws: [],
+            specialties: [],
+            wealthTier: null,
+          },
+          state: {
+            hp: 5,
+            conditions: [],
+            statusFlags: [],
+            activityState: "active",
+          },
+          loadout: {
+            inventorySeed: [],
+            equippedItemRefs: [],
+            currencyNotes: "",
+            signatureItems: [],
+          },
+          startConditions: {},
+          provenance: {
+            sourceKind: "import",
+            importMode: "manual",
+            templateId: null,
+            archetypePrompt: null,
+            worldgenOrigin: null,
+            legacyTags: [],
+          },
+          powerStats: {
+            attackPotency: { tier: "Building", rank: 5 },
+            speed: { tier: "Subsonic", rank: 4 },
+            durability: { tier: "Building", rank: 4 },
+            intelligence: { tier: "Gifted", rank: 4 },
+            hax: [],
+            vulnerabilities: [],
+          },
+        }),
+      },
+    });
+
+    await tickNpcAgent(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
+
+    const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
+    expect(systemPrompt).toContain("[COMBAT POSTURE]");
+    expect(systemPrompt).toContain("Primary target: Elara");
+    expect(systemPrompt).toContain("Can win direct exchange:");
+    expect(logEventMock).toHaveBeenCalledWith(
+      "combat.posture.derived",
+      expect.objectContaining({
+        source: "npc",
+        npcId: NPC_ID,
+        vsLabel: "Elara",
+      }),
+    );
+  });
+
+  it("keeps the pre-phase prompt path when no powered clear target exists", async () => {
+    setupMockDb({
+      npc: createPoweredMockNpc(),
+      npcsAtLocation: [],
+      player: {
+        id: "player-1",
+        name: "Elara",
+        currentLocationId: LOCATION_ID,
+        currentSceneLocationId: LOCATION_ID,
+      },
+    });
+
+    await tickNpcAgent(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
+
+    const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
+    expect(systemPrompt).not.toContain("[COMBAT POSTURE]");
+    expect(systemPrompt).toContain("Choose at most ONE action that best serves your current goals.");
+    expect(systemPrompt).toContain("passing is valid");
+    expect(logEventMock).not.toHaveBeenCalledWith(
+      "combat.posture.derived",
+      expect.anything(),
+    );
+  });
+
+  it("logs NPC decision reasoning with usage and tool names", async () => {
+    setupMockDb({
+      npcsAtLocation: [],
+      player: {
+        id: "player-1",
+        name: "Elara",
+        currentLocationId: LOCATION_ID,
+        currentSceneLocationId: LOCATION_ID,
+      },
+    });
+
+    vi.mocked(generateText).mockResolvedValueOnce({
+      text: "I move first and ask for leverage.",
+      reasoningText: "Greta prefers a probing opener that preserves optionality.",
+      finishReason: "stop",
+      response: {
+        modelId: "glm-5.1",
+      },
+      usage: {
+        inputTokens: 210,
+        outputTokens: 48,
+        totalTokens: 258,
+      },
+      steps: [
+        {
+          toolCalls: [
+            {
+              toolCallId: "tc-speak",
+              toolName: "speak",
+              input: {
+                dialogue: "Let's not waste each other's time.",
+                target: "Elara",
+              },
+            },
+          ],
+          toolResults: [
+            {
+              output: {
+                spoke: true,
+              },
+            },
+          ],
+        },
+      ],
+      toolCalls: [],
+      toolResults: [],
+    } as unknown as Awaited<ReturnType<typeof generateText>>);
+
+    await tickNpcAgent(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
+
+    expect(logEventMock).toHaveBeenCalledWith(
+      "npcAgent.decision",
+      expect.objectContaining({
+        npcId: NPC_ID,
+        npcName: "Greta the Merchant",
+        finishReason: "stop",
+        responseModel: "glm-5.1",
+        reasoningLen: "Greta prefers a probing opener that preserves optionality.".length,
+        toolCallNames: ["speak"],
+        usage: {
+          inputTokens: 210,
+          outputTokens: 48,
+          totalTokens: 258,
+        },
+      }),
+    );
+    expect(logEventMock).toHaveBeenCalledWith(
+      "npcAgent.reasoning",
+      expect.objectContaining({
+        npcId: NPC_ID,
+        npcName: "Greta the Merchant",
+        reasoningText: "Greta prefers a probing opener that preserves optionality.",
+        responseModel: "glm-5.1",
+        usage: {
+          inputTokens: 210,
+          outputTokens: 48,
+          totalTokens: 258,
+        },
+      }),
+    );
+  });
+
+  it("extracts NPC reasoning from Z.AI chat response body when reasoningText is empty", async () => {
+    setupMockDb({
+      npcsAtLocation: [],
+      player: {
+        id: "player-1",
+        name: "Elara",
+        currentLocationId: LOCATION_ID,
+        currentSceneLocationId: LOCATION_ID,
+      },
+    });
+
+    vi.mocked(generateText).mockResolvedValueOnce({
+      text: "I test the room before committing.",
+      reasoningText: undefined,
+      finishReason: "stop",
+      response: {
+        modelId: "glm-5.1",
+        body: {
+          choices: [
+            {
+              message: {
+                content: "I test the room before committing.",
+                reasoning_content: "Greta probes first because the stranger's intent is still unclear.",
+                role: "assistant",
+              },
+            },
+          ],
+        },
+      },
+      usage: {
+        inputTokens: 180,
+        outputTokens: 42,
+        totalTokens: 222,
+      },
+      steps: [],
+      toolCalls: [],
+      toolResults: [],
+    } as unknown as Awaited<ReturnType<typeof generateText>>);
+
+    await tickNpcAgent(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
+
+    expect(logEventMock).toHaveBeenCalledWith(
+      "npcAgent.decision",
+      expect.objectContaining({
+        npcId: NPC_ID,
+        reasoningLen: "Greta probes first because the stranger's intent is still unclear.".length,
+      }),
+    );
+    expect(logEventMock).toHaveBeenCalledWith(
+      "npcAgent.reasoning",
+      expect.objectContaining({
+        npcId: NPC_ID,
+        reasoningText: "Greta probes first because the stranger's intent is still unclear.",
+      }),
+    );
   });
 });

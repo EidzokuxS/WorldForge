@@ -1,0 +1,35 @@
+{
+  "wave": "88-02",
+  "artifact": "actor-frame-audit",
+  "status": "green",
+  "sourceRoutesCovered": [
+    "self_state",
+    "direct_observation",
+    "report_message",
+    "rumor",
+    "belief",
+    "memory",
+    "public_record",
+    "local_affordance"
+  ],
+  "implementedContracts": {
+    "ActorFrame": "POV packet with source-routed facts, legal tools, constraints, hidden-exclusion trace, and no output clipping.",
+    "CommandNodeFrame": "Faction/command packet with report, rumor, belief, and public-record provenance.",
+    "citationValidation": "ActorDecisionPacket citations must match fact ids present in the ActorFrame."
+  },
+  "redactionProof": {
+    "hiddenActorNameFixture": "Hidden Auditor",
+    "hintTextPreserved": "Paper clicks once behind the ledger wall.",
+    "hiddenIdentityFormatted": false,
+    "hiddenEventFormatted": false,
+    "hiddenExcludedCountMinimum": 2
+  },
+  "contextBudgetTrace": {
+    "diagnosticOnly": true,
+    "didClipModelOutput": false,
+    "hiddenExcludedCountMirrorsFrame": true
+  },
+  "tests": [
+    "backend/src/engine/__tests__/actor-frame.test.ts"
+  ]
+}

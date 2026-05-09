@@ -1,0 +1,33 @@
+{
+  "phase": 88,
+  "wave": 3,
+  "command": "mcp__gitnexus__detect_changes(scope=staged, repo=WorldForge)",
+  "result": {
+    "changed_count": 14,
+    "affected_count": 9,
+    "changed_files": 22,
+    "risk_level": "high"
+  },
+  "riskInterpretation": "High is expected because backend/src/routes/chat.ts is the central streaming turn route and GitNexus maps its detached closure as a broad body symbol. Context review found the real edited seam is buildOnPostTurn -> runRollbackCriticalPostTurn / queueAuxiliaryPostTurnWork plus done SSE metadata.",
+  "reviewedSymbols": [
+    "runRollbackCriticalPostTurn",
+    "queueAuxiliaryPostTurnWork",
+    "writeTurnEventSSE",
+    "body"
+  ],
+  "acceptedScope": [
+    "chat route turn boundary",
+    "simulation proposal queue/export surface",
+    "route mocks/tests",
+    "Phase 88 docs/evidence"
+  ],
+  "notEditedDespiteHighRisk": [
+    "commitAuthorityTrace"
+  ],
+  "verification": [
+    "targeted Wave 3 tests passed",
+    "route regressions passed",
+    "authority foundation regressions passed",
+    "backend typecheck passed"
+  ]
+}

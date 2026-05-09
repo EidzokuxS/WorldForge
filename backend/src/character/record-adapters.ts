@@ -1,26 +1,21 @@
 import type {
   CharacterDraft,
-  CharacterGroundingProfile,
   CharacterIdentityBaseFacts,
   CharacterIdentityBehavioralCore,
   CharacterIdentityLiveDynamics,
-  CharacterIdentitySourceCitation,
+  CharacterPersonality,
   CharacterImportMode,
   CharacterRecord,
   CharacterSkill,
   CharacterTier,
   CharacterWealthTier,
-  PowerProfile,
   PlayerCharacter,
+  PowerStats,
 } from "@worldforge/shared";
 import { CHARACTER_SKILL_TIERS, CHARACTER_WEALTH_TIERS } from "@worldforge/shared";
 import type { ScaffoldNpc } from "../worldgen/types.js";
 import { deriveRuntimeCharacterTags } from "./runtime-tags.js";
 import type { AuthoritativeInventoryView } from "../inventory/authority.js";
-import {
-  normalizeContinuity,
-  normalizeSourceBundle,
-} from "./canonical-source-bundle.js";
 
 const CONDITION_TAGS = new Set([
   "bleeding",
@@ -77,6 +72,7 @@ type LegacyNpcRow = {
   tags: string;
   tier: "temporary" | "persistent" | "key";
   currentLocationId: string | null;
+  currentSceneLocationId?: string | null;
   goals: string;
   beliefs: string;
   unprocessedImportance: number;
@@ -110,18 +106,65 @@ interface ParsedLegacyTags {
   legacyTags: string[];
 }
 
-function normalizeCharacterDraftRecord<T extends CharacterDraft | CharacterRecord>(record: T): T {
-  const baseFacts = normalizeBaseFacts(record);
-  const behavioralCore = normalizeBehavioralCore(record);
-  const liveDynamics = normalizeLiveDynamics(record);
+/**
+ * Strip legacy grounding fields from old records.
+ * Does NOT synthesize PowerStats -- old records get undefined powerStats.
+ * This is fail-closed: the UI shows "No power assessment" instead of fake data.
+ */
+function stripLegacyGroundingFields<T extends CharacterDraft | CharacterRecord>(
+  record: T,
+): Omit<T, "grounding"> & { powerStats?: PowerStats } {
+  const { grounding: _grounding, ...rest } = record as T & { grounding?: unknown };
+  return {
+    ...rest,
+    powerStats: (record as T & { powerStats?: PowerStats }).powerStats,
+  };
+}
+
+type DraftLegacyInput = {
+  identity: Omit<CharacterDraft["identity"], "baseFacts" | "behavioralCore" | "liveDynamics"> & {
+    baseFacts?: CharacterIdentityBaseFacts;
+    behavioralCore?: CharacterIdentityBehavioralCore;
+    liveDynamics?: CharacterIdentityLiveDynamics;
+    id?: string;
+    campaignId?: string;
+  };
+  profile: CharacterDraft["profile"];
+  socialContext: CharacterDraft["socialContext"];
+  motivations: CharacterDraft["motivations"];
+  capabilities: CharacterDraft["capabilities"];
+  state: CharacterDraft["state"];
+  loadout: CharacterDraft["loadout"];
+  startConditions: CharacterDraft["startConditions"];
+  provenance: CharacterDraft["provenance"];
+  powerStats?: PowerStats;
+};
+
+type DraftLegacyInputWithId = DraftLegacyInput & {
+  identity: DraftLegacyInput["identity"] & { id: string; campaignId: string };
+};
+
+function normalizeCharacterDraftRecord(record: CharacterRecord): CharacterRecord;
+function normalizeCharacterDraftRecord(record: CharacterDraft): CharacterDraft;
+function normalizeCharacterDraftRecord(record: DraftLegacyInputWithId): CharacterRecord;
+function normalizeCharacterDraftRecord(record: DraftLegacyInput): CharacterDraft;
+function normalizeCharacterDraftRecord(
+  record: DraftLegacyInput,
+): CharacterDraft | CharacterRecord {
+  const baseFacts = normalizeBaseFacts(record as CharacterDraft);
+  const behavioralCore = normalizeBehavioralCore(record as CharacterDraft);
+  const liveDynamics = normalizeLiveDynamics(record as CharacterDraft);
+  const personality = normalizePersonality(record as CharacterDraft);
+  const stripped = stripLegacyGroundingFields(record as CharacterDraft);
 
   return {
-    ...record,
+    ...stripped,
     identity: {
       ...record.identity,
       baseFacts,
       behavioralCore,
       liveDynamics,
+      personality,
     },
     profile: {
       ...record.profile,
@@ -145,73 +188,13 @@ function normalizeCharacterDraftRecord<T extends CharacterDraft | CharacterRecor
       drives:
         record.motivations.drives.length > 0
           ? record.motivations.drives
-          : [...behavioralCore.motives],
+          : [...(behavioralCore.motives ?? [])],
       frictions:
         record.motivations.frictions.length > 0
           ? record.motivations.frictions
           : [...liveDynamics.currentStrains],
     },
-    grounding: normalizeGrounding(record.grounding),
-    sourceBundle: normalizeSourceBundle(record.sourceBundle),
-    continuity: normalizeContinuity(record.continuity),
-  };
-}
-
-function normalizeGrounding(
-  grounding: CharacterGroundingProfile | undefined,
-): CharacterGroundingProfile | undefined {
-  if (!grounding) {
-    return undefined;
-  }
-
-  const sources = normalizeGroundingSources(grounding.sources);
-  if (sources.length === 0) {
-    return undefined;
-  }
-
-  return {
-    summary: grounding.summary.trim(),
-    facts: dedupeStrings(grounding.facts),
-    abilities: dedupeStrings(grounding.abilities),
-    constraints: dedupeStrings(grounding.constraints),
-    signatureMoves: dedupeStrings(grounding.signatureMoves),
-    strongPoints: dedupeStrings(grounding.strongPoints),
-    vulnerabilities: dedupeStrings(grounding.vulnerabilities),
-    uncertaintyNotes: dedupeStrings(grounding.uncertaintyNotes),
-    powerProfile: normalizePowerProfile(grounding.powerProfile),
-    sources,
-  };
-}
-
-function normalizePowerProfile(
-  profile: PowerProfile | undefined,
-): PowerProfile | undefined {
-  if (!profile) {
-    return undefined;
-  }
-
-  return {
-    attack: profile.attack.trim(),
-    speed: profile.speed.trim(),
-    durability: profile.durability.trim(),
-    range: profile.range.trim(),
-    strengths: dedupeStrings(profile.strengths),
-    constraints: dedupeStrings(profile.constraints),
-    vulnerabilities: dedupeStrings(profile.vulnerabilities),
-    uncertaintyNotes: dedupeStrings(profile.uncertaintyNotes),
-  };
-}
-
-function normalizeGroundingSources(
-  sources: CharacterIdentitySourceCitation[],
-): CharacterIdentitySourceCitation[] {
-  return sources
-    .map((source) => ({
-      ...source,
-      label: source.label.trim(),
-      excerpt: source.excerpt.trim(),
-    }))
-    .filter((source) => source.label.length > 0 && source.excerpt.length > 0);
+  } as unknown as CharacterDraft;
 }
 
 function normalizeBaseFacts(
@@ -231,18 +214,22 @@ function normalizeBaseFacts(
 function normalizeBehavioralCore(
   record: CharacterDraft | CharacterRecord,
 ): CharacterIdentityBehavioralCore {
+  const liveDynamics = record.identity.liveDynamics;
+  const behavioralCore = record.identity.behavioralCore;
+
   return {
-    motives: dedupeStrings(record.identity.behavioralCore?.motives ?? record.motivations.drives),
+    motives: dedupeStrings(behavioralCore?.motives ?? record.motivations.drives),
     pressureResponses: dedupeStrings(
-      record.identity.behavioralCore?.pressureResponses ?? record.motivations.frictions,
+      behavioralCore?.pressureResponses ?? record.motivations.frictions,
     ),
-    taboos: dedupeStrings(record.identity.behavioralCore?.taboos ?? []),
+    taboos: dedupeStrings(behavioralCore?.taboos ?? []),
     attachments: dedupeStrings(
-      record.identity.behavioralCore?.attachments
+      liveDynamics?.attachments
+      ?? behavioralCore?.attachments
       ?? record.socialContext.relationshipRefs.map((ref) => ref.entityName),
     ),
     selfImage:
-      record.identity.behavioralCore?.selfImage
+      behavioralCore?.selfImage
       ?? record.profile.personaSummary
       ?? record.profile.backgroundSummary
       ?? "",
@@ -253,6 +240,11 @@ function normalizeLiveDynamics(
   record: CharacterDraft | CharacterRecord,
 ): CharacterIdentityLiveDynamics {
   return {
+    attachments: dedupeStrings(
+      record.identity.liveDynamics?.attachments
+      ?? record.identity.behavioralCore?.attachments
+      ?? [],
+    ),
     activeGoals: dedupeStrings(
       record.identity.liveDynamics?.activeGoals
       ?? [...record.motivations.shortTermGoals, ...record.motivations.longTermGoals],
@@ -264,6 +256,27 @@ function normalizeLiveDynamics(
       record.identity.liveDynamics?.currentStrains ?? record.motivations.frictions,
     ),
     earnedChanges: dedupeStrings(record.identity.liveDynamics?.earnedChanges ?? []),
+  };
+}
+
+export function blankPersonality(): CharacterPersonality {
+  return {
+    summary: "",
+    voice: "",
+    decisionStyle: "",
+    worldview: "",
+    internalContradictions: [],
+    personalMythology: "",
+    sampleLines: [],
+  };
+}
+
+export function normalizePersonality(
+  record: CharacterDraft | CharacterRecord,
+): CharacterPersonality {
+  return {
+    ...blankPersonality(),
+    ...record.identity.personality,
   };
 }
 
@@ -396,6 +409,13 @@ export interface RichParsedCharacter {
   appearance: string;
   backgroundSummary: string;
   personaSummary: string;
+  personalitySummary: string;
+  personalityVoice: string;
+  personalityDecisionStyle: string;
+  personalityWorldview: string;
+  personalityContradictions: string[];
+  personalityMythology: string;
+  personalitySampleLines: string[];
   tags: string[];
   drives: string[];
   frictions: string[];
@@ -423,6 +443,15 @@ export function fromRichParsedCharacter(
       tier: "key",
       displayName: rich.name,
       canonicalStatus: opts.canonicalStatus ?? "original",
+      personality: {
+        summary: rich.personalitySummary,
+        voice: rich.personalityVoice,
+        decisionStyle: rich.personalityDecisionStyle,
+        worldview: rich.personalityWorldview,
+        internalContradictions: rich.personalityContradictions,
+        personalMythology: rich.personalityMythology,
+        sampleLines: rich.personalitySampleLines,
+      },
     },
     profile: {
       species: rich.race,
@@ -540,7 +569,7 @@ export function hydrateStoredPlayerRecord(
       ...stored.provenance,
       sourceKind: opts.sourceKind ?? stored.provenance.sourceKind,
       legacyTags: dedupeStrings([
-        ...stored.provenance.legacyTags,
+        ...(stored.provenance.legacyTags ?? []),
         ...safeParseStringArray(row.derivedTags ?? "[]"),
       ]),
     },
@@ -671,6 +700,25 @@ export function reconcileDraftBackedScaffoldNpc(
     },
   );
 
+  const EMPTY_CORE: CharacterIdentityBehavioralCore = {
+    motives: [],
+    pressureResponses: [],
+    taboos: [],
+    attachments: [],
+    selfImage: "",
+  };
+  const EMPTY_DYNAMICS: CharacterIdentityLiveDynamics = {
+    attachments: [],
+    activeGoals: [],
+    beliefDrift: [],
+    currentStrains: [],
+    earnedChanges: [],
+  };
+  const editableCore = editableDraft.identity.behavioralCore ?? EMPTY_CORE;
+  const editableDynamics = editableDraft.identity.liveDynamics ?? EMPTY_DYNAMICS;
+  const draftCore = npc.draft.identity.behavioralCore ?? EMPTY_CORE;
+  const draftDynamics = npc.draft.identity.liveDynamics ?? EMPTY_DYNAMICS;
+
   return normalizeCharacterDraftRecord({
     ...editableDraft,
     identity: {
@@ -678,16 +726,18 @@ export function reconcileDraftBackedScaffoldNpc(
       tier: reconciledTier,
       canonicalStatus: npc.draft.identity.canonicalStatus,
       baseFacts: npc.draft.identity.baseFacts,
+      personality:
+        npc.draft.identity.personality ?? editableDraft.identity.personality,
       behavioralCore: {
-        ...npc.draft.identity.behavioralCore,
-        motives: editableDraft.identity.behavioralCore.motives,
-        pressureResponses: editableDraft.identity.behavioralCore.pressureResponses,
-        selfImage: editableDraft.identity.behavioralCore.selfImage,
+        ...draftCore,
+        motives: editableCore.motives,
+        pressureResponses: editableCore.pressureResponses,
+        selfImage: editableCore.selfImage,
       },
       liveDynamics: {
-        ...npc.draft.identity.liveDynamics,
-        activeGoals: editableDraft.identity.liveDynamics.activeGoals,
-        currentStrains: editableDraft.identity.liveDynamics.currentStrains,
+        ...draftDynamics,
+        activeGoals: editableDynamics.activeGoals,
+        currentStrains: editableDynamics.currentStrains,
       },
     },
     profile: {
@@ -725,9 +775,7 @@ export function reconcileDraftBackedScaffoldNpc(
     },
     loadout: npc.draft.loadout,
     startConditions: npc.draft.startConditions,
-    grounding: npc.draft.grounding,
-    sourceBundle: npc.draft.sourceBundle,
-    continuity: npc.draft.continuity,
+    powerStats: npc.draft.powerStats,
   });
 }
 
@@ -792,7 +840,7 @@ export function hydrateStoredNpcRecord(
       ...stored.provenance,
       sourceKind: opts.sourceKind ?? stored.provenance.sourceKind,
       legacyTags: dedupeStrings([
-        ...stored.provenance.legacyTags,
+        ...(stored.provenance.legacyTags ?? []),
         ...safeParseStringArray(row.derivedTags ?? "[]"),
       ]),
     },

@@ -1,0 +1,1583 @@
+
+> backend@1.0.0 dev
+> node --import tsx/esm --watch src/index.ts
+
+WorldForge backend listening on http://localhost:3001
+[13:20:02.465] [32mINFO[39m: [36mturn.begin[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "turn.begin"
+    [35mpayload[39m: {
+      "route": "/action",
+      "campaignId": "0ed6bb3c-a528-4067-8f29-86ebdd8d0637",
+      "tick": 32,
+      "rawInput": "I claim I already have the master key to every signal-house door and try to unlock the nearest sealed office.",
+      "compatibilityFields": {
+        "intent": "mirrors rawInput",
+        "method": "empty"
+      },
+      "judgeProvider": {
+        "id": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "model": "mimo-v2.5-pro",
+        "baseUrl": "https://opencode.ai/zen/go/v1"
+      },
+      "storytellerProvider": {
+        "id": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "model": "mimo-v2.5-pro",
+        "baseUrl": "https://opencode.ai/zen/go/v1"
+      }
+    }
+[13:20:02.471] [32mINFO[39m: [36mscene.frame[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "scene.frame"
+    [35mpayload[39m: {
+      "actorCount": 1,
+      "visibleActorCount": 1,
+      "hiddenActorCount": 0,
+      "targetCandidateCount": 9,
+      "movementCandidateCount": 1,
+      "localRecentEventCount": 8,
+      "allowedToolCount": 13,
+      "durationMs": 3
+    }
+[13:20:02.474] [32mINFO[39m: [36mworld-forecast.scoped[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "world-forecast.scoped"
+    [35mpayload[39m: {
+      "entryCount": 2,
+      "forbiddenPrivateTermCount": 0,
+      "baseTick": 31,
+      "refreshStaged": false
+    }
+[13:20:02.475] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 44,
+      "sha256Prefix": "45a56b910b83d994"
+    }
+[13:20:02.477] [32mINFO[39m: [36mmodel-facing.scene-packet[39m
+    [35mtag[39m: "gm-turn-read"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "model-facing.scene-packet"
+    [35mpayload[39m: {
+      "source": "gm-read",
+      "visibleActorCount": 1,
+      "hiddenActorCount": 0,
+      "localRecentEventCount": 8,
+      "allowedToolCount": 13
+    }
+[13:20:14.329] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "mimo-v2.5-pro",
+      "success": true,
+      "strategy": "native_json",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "reasoningLen": 0,
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 6897,
+        "outputTokens": 586,
+        "totalTokens": 7483,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 1024
+      },
+      "latencyMs": 11852
+    }
+[13:20:14.330] [32mINFO[39m: [36mjudge.gm-read[39m
+    [35mtag[39m: "gm-turn-read"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "judge.gm-read"
+    [35mpayload[39m: {
+      "path": "roll_oracle",
+      "success": true,
+      "issueCount": 0,
+      "droppedInvalidEvidenceRefCount": 0,
+      "strategy": "native_json",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "usage": {
+        "inputTokens": 6897,
+        "outputTokens": 586,
+        "totalTokens": 7483,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 1024
+      },
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "latencyMs": 11853
+    }
+[13:20:14.330] [32mINFO[39m: [36mjudge.gm-read.selected[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "judge.gm-read.selected"
+    [35mpayload[39m: {
+      "path": "roll_oracle",
+      "evidenceRefCount": 1
+    }
+[13:20:44.575] [32mINFO[39m: [36mllm.repair[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "llm.repair"
+    [35mpayload[39m: {
+      "strategy": "repair",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "success": true,
+      "issues": "[reasoning] Too big: expected string to have <=500 characters",
+      "reasoningLen": 0,
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 482,
+        "outputTokens": 1730,
+        "totalTokens": 2212,
+        "reasoningTokens": 1657,
+        "cachedInputTokens": 0
+      }
+    }
+[13:20:44.575] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "mimo-v2.5-pro",
+      "success": true,
+      "strategy": "repair",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "reasoningLen": 0,
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 1250,
+        "outputTokens": 129,
+        "totalTokens": 1379,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 1024
+      },
+      "latencyMs": 30245
+    }
+[13:20:44.576] [32mINFO[39m: [36moracle.call[39m
+    [35mtag[39m: "oracle"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "oracle"
+    [35mevent[39m: "oracle.call"
+    [35mpayload[39m: {
+      "input": {
+        "intent": "Does Mira's claimed master key actually exist in her possession and fit this signal-house lock?",
+        "method": "If the key exists and works, she gains entry to the sealed office. If it doesn't exist or doesn't fit, she's exposed attempting unauthorized access — compounding her existing 'caught-lying' and 'suspected-infiltrator' tags.",
+        "actorTags": [
+          "Night Courier",
+          "Canal Native",
+          "Cautious",
+          "Dutiful",
+          "Observer",
+          "Seal Bearer",
+          "suspected-infiltrator",
+          "caught-lying"
+        ],
+        "targetTags": [],
+        "environmentTags": [
+          "staff-only",
+          "records-storage",
+          "seal-workspace",
+          "pier-infrastructure"
+        ],
+        "sceneContext": "Pier Records Back Room: A cramped, low-ceilinged back room behind the service counter, thick with heated wax and turpentine. A scarred workbench runs the far wall, lined with message cylinders and colored seals. Brass stamps, pans of dark lacquer, and slotted wooden racks crowd every surface. A narrow stamped records hatch connects this space to the front counter."
+      },
+      "output": {
+        "chance": 35,
+        "roll": 4,
+        "outcome": "strong_hit",
+        "reasoning": "Mira claims a master key exists, but lacks key-related tags. Her roles suggest pier familiarity, yet credibility is compromised by deception. Staff-only environment with seal-workspace implies access, but without confirmed key tags, the claim is dubious. Moderate chance due to access, low confidence from deception."
+      },
+      "latencyMs": 30246
+    }
+[13:20:44.576] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "oracle_result",
+      "byteLength": 376,
+      "sha256Prefix": "5f4c62163570a9a0"
+    }
+[13:20:44.578] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 43,
+      "sha256Prefix": "e9b7c579c706410b"
+    }
+[13:20:44.580] [32mINFO[39m: [36mmodel-facing.scene-packet[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "model-facing.scene-packet"
+    [35mpayload[39m: {
+      "source": "gm-tool-loop",
+      "visibleActorCount": 1,
+      "hiddenActorCount": 0,
+      "localRecentEventCount": 8,
+      "allowedToolCount": 13
+    }
+[13:20:57.620] [32mINFO[39m: [36mgm-tool-loop.tool-call.start[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.start"
+    [35mpayload[39m: {
+      "toolName": "reveal_location",
+      "toolCallId": "call_f3ccfa016c514e67a84e1603"
+    }
+[13:20:57.622] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "locations",
+      "op": "insert",
+      "rowId": "3562ad04-00f5-4921-ab7c-8afd2ea7aaa7",
+      "rowName": "Sealed Signal-House Office"
+    }
+[13:20:57.623] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "locationEdges",
+      "op": "insert",
+      "rowId": "765adaa1-e6e6-4923-b0bf-f2bcef0a6eb7<->3562ad04-00f5-4921-ab7c-8afd2ea7aaa7",
+      "rowName": "Pier Records Back Room<->Sealed Signal-House Office"
+    }
+[13:20:57.623] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "locations",
+      "op": "update",
+      "rowId": "765adaa1-e6e6-4923-b0bf-f2bcef0a6eb7",
+      "rowName": "Pier Records Back Room"
+    }
+[13:20:57.624] [32mINFO[39m: [36mtool.call[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "tool.call"
+    [35mpayload[39m: {
+      "toolName": "reveal_location",
+      "args": {
+        "name": "Sealed Signal-House Office",
+        "description": "A locked administrative office behind the back counter, accessed through a heavy brass-latched door. Inside: a narrow desk bolted to the wall, a wall-mounted signal log rack, a locked cabinet of cipher templates, and a single high window barred with iron. The air smells of old paper and lamp oil. This is where routing decisions are made and sealed—staff-only, and clearly unused in recent days.",
+        "tags": [
+          "interior",
+          "locked",
+          "staff-only",
+          "signal-house",
+          "administrative"
+        ],
+        "connectedToName": "current_location"
+      },
+      "result": {
+        "success": true,
+        "result": {
+          "id": "3562ad04-00f5-4921-ab7c-8afd2ea7aaa7",
+          "name": "Sealed Signal-House Office",
+          "connectedTo": "Pier Records Back Room",
+          "kind": "ephemeral_scene",
+          "parentLocationId": "765adaa1-e6e6-4923-b0bf-f2bcef0a6eb7",
+          "anchorLocationId": "765adaa1-e6e6-4923-b0bf-f2bcef0a6eb7",
+          "persistence": "ephemeral",
+          "expiresAtTick": 35,
+          "archivedAtTick": null
+        }
+      },
+      "latencyMs": 3
+    }
+[13:20:57.624] [32mINFO[39m: [36mgm-tool-loop.tool-call.finish[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.finish"
+    [35mpayload[39m: {
+      "success": true,
+      "toolName": "reveal_location",
+      "toolCallId": "call_f3ccfa016c514e67a84e1603",
+      "durationMs": 3.437999999994645
+    }
+[13:21:02.679] [32mINFO[39m: [36mgm-tool-loop.tool-call.start[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.start"
+    [35mpayload[39m: {
+      "toolName": "move_to",
+      "toolCallId": "call_4a749a0e24ea4366860befe9"
+    }
+[13:21:02.681] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "players",
+      "op": "update",
+      "rowId": "26eec8fe-ae60-49c9-999b-732f57e0e2c5",
+      "rowName": "Mira Voss"
+    }
+[13:21:02.682] [32mINFO[39m: [36mtool.call[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "tool.call"
+    [35mpayload[39m: {
+      "toolName": "move_to",
+      "args": {
+        "targetLocationName": "Sealed Signal-House Office"
+      },
+      "result": {
+        "success": true,
+        "result": {
+          "locationId": "3562ad04-00f5-4921-ab7c-8afd2ea7aaa7",
+          "locationName": "Sealed Signal-House Office",
+          "travelCost": 1,
+          "path": [
+            "Pier Records Back Room",
+            "Sealed Signal-House Office"
+          ]
+        }
+      },
+      "latencyMs": 3
+    }
+[13:21:02.682] [32mINFO[39m: [36mgm-tool-loop.tool-call.finish[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.finish"
+    [35mpayload[39m: {
+      "success": true,
+      "toolName": "move_to",
+      "toolCallId": "call_4a749a0e24ea4366860befe9",
+      "durationMs": 3.0014000000082888
+    }
+[13:21:09.486] [32mINFO[39m: [36mgm-tool-loop.tool-call.start[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.start"
+    [35mpayload[39m: {
+      "toolName": "log_event",
+      "toolCallId": "call_89ed214338654649955729b2"
+    }
+[13:21:09.502] [32mINFO[39m: [36mvector.write[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "vector.write"
+    [35mpayload[39m: {
+      "store": "episodic_events",
+      "op": "add",
+      "count": 1,
+      "rowId": "5af00f66-5372-4141-9cbd-587db988eed9"
+    }
+[13:21:09.503] [32mINFO[39m: [36mStored episodic event 5af00f66-5372-4141-9cbd-587db988eed9 (tick=32, importance=7)[39m
+    [35mtag[39m: "episodic-events"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+[13:21:09.503] [32mINFO[39m: [36mtool.call[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "tool.call"
+    [35mpayload[39m: {
+      "toolName": "log_event",
+      "args": {
+        "text": "Mira Voss claimed to possess a master key to all signal-house doors and, against all odds, the brass latch turned. She gained entry to the sealed Signal-House Office — a staff-only administrative room with a locked cipher cabinet, signal log rack, and wall-mounted routing desk. The room appears unused in recent days.",
+        "importance": 7,
+        "participants": [
+          "Mira Voss"
+        ],
+        "durability": "durable",
+        "futureRelevance": "Mira has unauthorized access to a sealed signal-house office containing cipher templates and routing logs. This could expose her further if discovered, or yield valuable intelligence about signal-house operations."
+      },
+      "result": {
+        "success": true,
+        "result": {
+          "eventId": "5af00f66-5372-4141-9cbd-587db988eed9",
+          "durability": "durable",
+          "persisted": true
+        }
+      },
+      "latencyMs": 17
+    }
+[13:21:09.504] [32mINFO[39m: [36mgm-tool-loop.tool-call.finish[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.finish"
+    [35mpayload[39m: {
+      "success": true,
+      "toolName": "log_event",
+      "toolCallId": "call_89ed214338654649955729b2",
+      "durationMs": 17.30319999999483
+    }
+[13:21:14.549] [32mINFO[39m: [36mgm-tool-loop.tool-call.start[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.start"
+    [35mpayload[39m: {
+      "toolName": "spawn_item",
+      "toolCallId": "call_d488275ebc064a21bd26e262"
+    }
+[13:21:14.550] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "items",
+      "op": "insert",
+      "rowId": "fd6402f9-dacf-4681-a4ce-6349e4984986",
+      "rowName": "Signal-House Master Key"
+    }
+[13:21:14.551] [32mINFO[39m: [36mtool.call[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "tool.call"
+    [35mpayload[39m: {
+      "toolName": "spawn_item",
+      "args": {
+        "name": "Signal-House Master Key",
+        "tags": [
+          "key",
+          "signal-house",
+          "master-access",
+          "brass",
+          "staff-issue"
+        ],
+        "ownerName": "Mira Voss",
+        "ownerType": "character"
+      },
+      "result": {
+        "success": true,
+        "result": {
+          "id": "fd6402f9-dacf-4681-a4ce-6349e4984986",
+          "name": "Signal-House Master Key",
+          "owner": "Mira Voss",
+          "ownerType": "character"
+        }
+      },
+      "latencyMs": 1
+    }
+[13:21:14.551] [32mINFO[39m: [36mgm-tool-loop.tool-call.finish[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.finish"
+    [35mpayload[39m: {
+      "success": true,
+      "toolName": "spawn_item",
+      "toolCallId": "call_d488275ebc064a21bd26e262",
+      "durationMs": 1.220100000005914
+    }
+[13:21:19.547] [32mINFO[39m: [36mgm-tool-loop.tool-call.start[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.start"
+    [35mpayload[39m: {
+      "toolName": "add_tag",
+      "toolCallId": "call_078dd38891984b0586e5a6d0"
+    }
+[13:21:19.548] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "players",
+      "op": "update",
+      "rowId": "26eec8fe-ae60-49c9-999b-732f57e0e2c5",
+      "rowName": "Mira Voss"
+    }
+[13:21:19.548] [32mINFO[39m: [36mtool.call[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "tool.call"
+    [35mpayload[39m: {
+      "toolName": "add_tag",
+      "args": {
+        "entityName": "Mira Voss",
+        "entityType": "player",
+        "tag": "unauthorized-access"
+      },
+      "result": {
+        "success": true,
+        "result": {
+          "entity": "Mira Voss",
+          "tags": [
+            "Night Courier",
+            "Canal Native",
+            "Cautious",
+            "Dutiful",
+            "Observer",
+            "Seal Bearer",
+            "suspected-infiltrator",
+            "caught-lying",
+            "unauthorized-access"
+          ]
+        }
+      },
+      "latencyMs": 1
+    }
+[13:21:19.548] [32mINFO[39m: [36mgm-tool-loop.tool-call.finish[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.finish"
+    [35mpayload[39m: {
+      "success": true,
+      "toolName": "add_tag",
+      "toolCallId": "call_078dd38891984b0586e5a6d0",
+      "durationMs": 1.4386999999987893
+    }
+[13:21:26.464] [32mINFO[39m: [36mgm-tool-loop.tool-call.start[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.start"
+    [35mpayload[39m: {
+      "toolName": "spawn_item",
+      "toolCallId": "call_e663e407df8849ad9c2b4e5a"
+    }
+[13:21:26.465] [32mINFO[39m: [36mdb.write[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "db.write"
+    [35mpayload[39m: {
+      "table": "items",
+      "op": "insert",
+      "rowId": "13d10844-da7a-4bbe-81cf-6f6b57c55837",
+      "rowName": "Locked Cipher Template Cabinet"
+    }
+[13:21:26.465] [32mINFO[39m: [36mtool.call[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "tool.call"
+    [35mpayload[39m: {
+      "toolName": "spawn_item",
+      "args": {
+        "name": "Locked Cipher Template Cabinet",
+        "tags": [
+          "furniture",
+          "locked",
+          "cipher-templates",
+          "signal-house",
+          "administrative",
+          "inspectable"
+        ],
+        "ownerName": "Sealed Signal-House Office",
+        "ownerType": "location"
+      },
+      "result": {
+        "success": true,
+        "result": {
+          "id": "13d10844-da7a-4bbe-81cf-6f6b57c55837",
+          "name": "Locked Cipher Template Cabinet",
+          "owner": "Sealed Signal-House Office",
+          "ownerType": "location"
+        }
+      },
+      "latencyMs": 0
+    }
+[13:21:26.465] [32mINFO[39m: [36mgm-tool-loop.tool-call.finish[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.finish"
+    [35mpayload[39m: {
+      "success": true,
+      "toolName": "spawn_item",
+      "toolCallId": "call_e663e407df8849ad9c2b4e5a",
+      "durationMs": 0.8660999999992782
+    }
+[13:21:32.545] [32mINFO[39m: [36mgm-tool-loop.tool-call.start[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.start"
+    [35mpayload[39m: {
+      "toolName": "log_event",
+      "toolCallId": "call_8c2efe9fdc374fa49b1224d1"
+    }
+[13:21:32.545] [32mINFO[39m: [36mtool.call[39m
+    [35mtag[39m: "tool-executor"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "tool.call"
+    [35mpayload[39m: {
+      "toolName": "log_event",
+      "args": {
+        "text": "The Stamp Clerk and Venn both vacated the back room before Mira's second attempt. With no witnesses present, Mira turned the brass latch on the back-office door — and it opened. Whether the key she claimed was real or the lock was simply unsecured, she is now inside the sealed office alone.",
+        "importance": 5,
+        "participants": [
+          "Mira Voss"
+        ],
+        "durability": "scene_local"
+      },
+      "result": {
+        "success": true,
+        "result": {
+          "durability": "scene_local",
+          "persisted": false
+        }
+      },
+      "latencyMs": 0
+    }
+[13:21:32.546] [32mINFO[39m: [36mgm-tool-loop.tool-call.finish[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mrole[39m: "judge"
+    [35mevent[39m: "gm-tool-loop.tool-call.finish"
+    [35mpayload[39m: {
+      "success": true,
+      "toolName": "log_event",
+      "toolCallId": "call_8c2efe9fdc374fa49b1224d1",
+      "durationMs": 0.20450000000710133
+    }
+[13:21:43.006] [32mINFO[39m: [36mjudge.gm-tool-loop[39m
+    [35mtag[39m: "gm-tool-loop"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "judge.gm-tool-loop"
+    [35mpayload[39m: {
+      "gmReadPath": "roll_oracle",
+      "finishReason": "stop",
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 13098,
+        "inputTokenDetails": {
+          "noCacheTokens": 170,
+          "cacheReadTokens": 12928
+        },
+        "outputTokens": 425,
+        "outputTokenDetails": {
+          "textTokens": 242,
+          "reasoningTokens": 183
+        },
+        "totalTokens": 13523,
+        "raw": {
+          "prompt_tokens": 13098,
+          "completion_tokens": 425,
+          "total_tokens": 13523,
+          "prompt_tokens_details": {
+            "cached_tokens": 12928
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 183
+          }
+        },
+        "reasoningTokens": 183,
+        "cachedInputTokens": 12928
+      },
+      "textLen": 1011,
+      "reasoningLen": 0,
+      "stepCount": 8,
+      "toolCallCount": 7,
+      "successCount": 7,
+      "failureCount": 0,
+      "toolCallNames": [
+        "reveal_location",
+        "move_to",
+        "log_event",
+        "spawn_item",
+        "add_tag",
+        "spawn_item",
+        "log_event"
+      ],
+      "durationMs": 58426
+    }
+[13:21:43.007] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 57,
+      "sha256Prefix": "ed0675a8ec384a73"
+    }
+[13:21:43.007] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 62,
+      "sha256Prefix": "9736bb819a626aaa"
+    }
+[13:21:43.008] [32mINFO[39m: [36mscene.gm-tool-loop.execution[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "scene.gm-tool-loop.execution"
+    [35mpayload[39m: {
+      "stepCount": 7,
+      "doneCount": 7,
+      "revisedCount": 0,
+      "skippedCount": 0,
+      "executedActionCount": 7,
+      "canonicalEventCount": 7,
+      "durationMs": 58430
+    }
+[13:21:43.008] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "state_update",
+      "byteLength": 1672,
+      "sha256Prefix": "7474b5788e981f89"
+    }
+[13:21:43.009] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "state_update",
+      "byteLength": 216,
+      "sha256Prefix": "ca842af650306207"
+    }
+[13:21:43.009] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "state_update",
+      "byteLength": 1566,
+      "sha256Prefix": "94e554df5189f4d6"
+    }
+[13:21:43.009] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "state_update",
+      "byteLength": 635,
+      "sha256Prefix": "01d5967f12c6082f"
+    }
+[13:21:43.009] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "state_update",
+      "byteLength": 531,
+      "sha256Prefix": "ee41705b40febbc3"
+    }
+[13:21:43.009] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "state_update",
+      "byteLength": 758,
+      "sha256Prefix": "7beafde2ae2a7ea1"
+    }
+[13:21:43.009] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "state_update",
+      "byteLength": 1008,
+      "sha256Prefix": "e8223a9e7fa0b15a"
+    }
+[13:21:43.010] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 61,
+      "sha256Prefix": "9f22a9e961c71e9e"
+    }
+[13:21:43.015] [32mINFO[39m: [36mscene.packet[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "scene.packet"
+    [35mpayload[39m: {
+      "visibleActorCount": 1,
+      "hintSignalCount": 0,
+      "eventCount": 1,
+      "responseCount": 1,
+      "effectCount": 7,
+      "forbiddenActorCount": 0,
+      "forbiddenFactMarkerCount": 0,
+      "durationMs": 1
+    }
+[13:21:43.016] [32mINFO[39m: [36mprompt.assembled[39m
+    [35mtag[39m: "prompt-assembler"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "prompt.assembled"
+    [35mpayload[39m: {
+      "pass": "final-narration",
+      "totalTokens": 0,
+      "budgetUsed": 0,
+      "sectionCount": 0,
+      "assembledChars": 11338,
+      "formatted": {
+        "_truncated": true,
+        "_sha256": "fff7192c630bb7237e3dd384058b42098b48d02a882d62f470473e40fbaea326",
+        "_length": 11338,
+        "_head": "[NARRATOR PACKET]\nCampaign: 0ed6bb3c-a528-4067-8f29-86ebdd8d0637\nTick: 32\nPlayer action request: I claim I already have the master key to every signal-house door and try to unlock the nearest sealed office.\nPlayer action is not authoritative world state. Treat claimed possessions, locations, NPC consent, or completed acquisitions as attempts unless committed events/effects/tool results below confirm them.\nOracle outcome: strong_hit\nAnchor event: 41808a34-6f01-433b-b982-fc5b687ac791\n\n[VISIBLE ACT",
+        "_tail": "arrate claimed possessions, NPC consent, location access, or item acquisition unless NarratorPacket events/effects/tool results confirm them.\nIf a packet effect says a claim may be false or unconfirmed, narrate the visible challenge/refusal without placing the claimed object in the player's hand.\nDo not write tool syntax or metadata.\nKeep the output bounded to what the player can perceive in this scene.\nEnd on a concrete playable next moment rather than closing the scene with generic reflection."
+      }
+    }
+[13:21:43.017] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 68,
+      "sha256Prefix": "942125865ebeb5e0"
+    }
+[13:22:00.731] [32mINFO[39m: [36mvisible-narration.packet-guard[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "visible-narration.packet-guard"
+    [35mpayload[39m: {
+      "stage": "passed",
+      "attempts": 1,
+      "retried": false,
+      "violationCount": 0,
+      "durationMs": 17714
+    }
+[13:22:00.731] [32mINFO[39m: [36mstoryteller.visible.call[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "storyteller.visible.call"
+    [35mpayload[39m: {
+      "label": "final",
+      "initialLen": 1768,
+      "retried": false,
+      "failures": [],
+      "reasoningLen": 0,
+      "durationMs": 17714
+    }
+[13:22:00.731] [32mINFO[39m: [36mVisible narration complete: executedActions=7, final=1768 chars, retried=false, failures=none[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+[13:22:00.732] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "narrative",
+      "byteLength": 1799,
+      "sha256Prefix": "ee526a57ac629262"
+    }
+[13:22:00.734] [32mINFO[39m: [36mTick advanced: 32 -> 33 (+1)[39m
+    [35mtag[39m: "campaign-manager"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+[13:22:00.735] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "finalizing_turn",
+      "byteLength": 39,
+      "sha256Prefix": "b1f292ffe559df59"
+    }
+[13:22:00.740] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 71,
+      "sha256Prefix": "1967d19e72e530ba"
+    }
+[13:22:00.741] [32mINFO[39m: [36mtransient-scene.cleanup[39m
+    [35mtag[39m: "transient-scene-lifecycle"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "transient-scene.cleanup"
+    [35mpayload[39m: {
+      "campaignId": "0ed6bb3c-a528-4067-8f29-86ebdd8d0637",
+      "tick": 33,
+      "archivedSceneCount": 1,
+      "retiredNpcCount": 0,
+      "skippedProtectedSceneCount": 0
+    }
+[13:22:00.741] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "done",
+      "byteLength": 11,
+      "sha256Prefix": "ee827c72343b5dc5"
+    }
+[13:22:00.742] [32mINFO[39m: [36mturn.end[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "015777d5-f29c-4daf-ab21-ba30dd5d365f"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 32
+    [35mevent[39m: "turn.end"
+    [35mpayload[39m: {
+      "route": "/action",
+      "tick": 32,
+      "durationMs": 118277,
+      "outcome": "success"
+    }
+[13:22:04.933] [32mINFO[39m: [36mturn.begin[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "49d99cad-f1b7-4485-a8f4-0b93d38ba0da"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 33
+    [35mevent[39m: "turn.begin"
+    [35mpayload[39m: {
+      "route": "/action",
+      "campaignId": "0ed6bb3c-a528-4067-8f29-86ebdd8d0637",
+      "tick": 33,
+      "rawInput": "I back off and ask what proof I would need before anyone lets me through.",
+      "compatibilityFields": {
+        "intent": "mirrors rawInput",
+        "method": "empty"
+      },
+      "judgeProvider": {
+        "id": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "model": "mimo-v2.5-pro",
+        "baseUrl": "https://opencode.ai/zen/go/v1"
+      },
+      "storytellerProvider": {
+        "id": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "model": "mimo-v2.5-pro",
+        "baseUrl": "https://opencode.ai/zen/go/v1"
+      }
+    }
+[13:22:04.937] [32mINFO[39m: [36mscene.frame[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "49d99cad-f1b7-4485-a8f4-0b93d38ba0da"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 33
+    [35mevent[39m: "scene.frame"
+    [35mpayload[39m: {
+      "actorCount": 1,
+      "visibleActorCount": 1,
+      "hiddenActorCount": 0,
+      "targetCandidateCount": 10,
+      "movementCandidateCount": 0,
+      "localRecentEventCount": 1,
+      "allowedToolCount": 13,
+      "durationMs": 2
+    }
+[13:22:04.938] [32mINFO[39m: [36mmodel-facing.scene-packet[39m
+    [35mtag[39m: "world-forecast-builder"
+    [35mturnId[39m: "49d99cad-f1b7-4485-a8f4-0b93d38ba0da"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 33
+    [35mevent[39m: "model-facing.scene-packet"
+    [35mpayload[39m: {
+      "source": "world-forecast-builder",
+      "visibleActorCount": 1,
+      "hiddenActorCount": 0,
+      "localRecentEventCount": 1,
+      "allowedToolCount": 13
+    }
+[13:22:16.378] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "49d99cad-f1b7-4485-a8f4-0b93d38ba0da"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 33
+    [35mrole[39m: "judge"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "mimo-v2.5-pro",
+      "success": true,
+      "strategy": "native_json",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "reasoningLen": 0,
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 2444,
+        "outputTokens": 629,
+        "totalTokens": 3073,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0
+      },
+      "latencyMs": 11440
+    }
+[13:22:16.380] [32mINFO[39m: [36mjudge.world-forecast-builder[39m
+    [35mtag[39m: "world-forecast-builder"
+    [35mturnId[39m: "49d99cad-f1b7-4485-a8f4-0b93d38ba0da"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 33
+    [35mevent[39m: "judge.world-forecast-builder"
+    [35mpayload[39m: {
+      "entryCount": 2,
+      "expiresAtTick": 39,
+      "strategy": "native_json",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "usage": {
+        "inputTokens": 2444,
+        "outputTokens": 629,
+        "totalTokens": 3073,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0
+      },
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "latencyMs": 11442
+    }
+[13:22:16.381] [32mINFO[39m: [36mworld-forecast.scoped[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "49d99cad-f1b7-4485-a8f4-0b93d38ba0da"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 33
+    [35mevent[39m: "world-forecast.scoped"
+    [35mpayload[39m: {
+      "entryCount": 2,
+      "forbiddenPrivateTermCount": 0,
+      "baseTick": 33,
+      "refreshStaged": true
+    }
+[13:22:16.381] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "49d99cad-f1b7-4485-a8f4-0b93d38ba0da"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 33
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 44,
+      "sha256Prefix": "45a56b910b83d994"
+    }
+[13:22:16.382] [32mINFO[39m: [36mmodel-facing.scene-packet[39m
+    [35mtag[39m: "gm-turn-read"
+    [35mturnId[39m: "49d99cad-f1b7-4485-a8f4-0b93d38ba0da"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 33
+    [35mevent[39m: "model-facing.scene-packet"
+    [35mpayload[39m: {
+      "source": "gm-read",
+      "visibleActorCount": 1,
+      "hiddenActorCount": 0,
+      "localRecentEventCount": 1,
+      "allowedToolCount": 13
+    }
+[13:22:24.913] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "49d99cad-f1b7-4485-a8f4-0b93d38ba0da"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 33
+    [35mrole[39m: "judge"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "mimo-v2.5-pro",
+      "success": true,
+      "strategy": "native_json",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "reasoningLen": 0,
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "usage": {
+        "inputTokens": 4473,
+        "outputTokens": 346,
+        "totalTokens": 4819,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 1024
+      },
+      "latencyMs": 8531
+    }
+[13:22:24.913] [32mINFO[39m: [36mjudge.gm-read[39m
+    [35mtag[39m: "gm-turn-read"
+    [35mturnId[39m: "49d99cad-f1b7-4485-a8f4-0b93d38ba0da"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 33
+    [35mevent[39m: "judge.gm-read"
+    [35mpayload[39m: {
+      "path": "clarification",
+      "success": true,
+      "issueCount": 0,
+      "droppedInvalidEvidenceRefCount": 0,
+      "strategy": "native_json",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "usage": {
+        "inputTokens": 4473,
+        "outputTokens": 346,
+        "totalTokens": 4819,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 1024
+      },
+      "responseModel": "xiaomi/mimo-v2.5-pro-20260422",
+      "latencyMs": 8531
+    }
+[13:22:24.914] [32mINFO[39m: [36mjudge.gm-read.selected[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "49d99cad-f1b7-4485-a8f4-0b93d38ba0da"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 33
+    [35mevent[39m: "judge.gm-read.selected"
+    [35mpayload[39m: {
+      "path": "clarification",
+      "evidenceRefCount": 1
+    }
+[13:22:24.914] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "49d99cad-f1b7-4485-a8f4-0b93d38ba0da"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 33
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 51,
+      "sha256Prefix": "39473a19db55e304"
+    }
+[13:22:24.915] [32mINFO[39m: [36mjudge.scene-plan[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "49d99cad-f1b7-4485-a8f4-0b93d38ba0da"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 33
+    [35mevent[39m: "judge.scene-plan"
+    [35mpayload[39m: {
+      "gmReadPath": "clarification",
+      "skippedPlanner": true,
+      "plannedActionCount": 0,
+      "supportResponseCount": 0,
+      "deferredHookCount": 0,
+      "hiddenRationaleLength": 279,
+      "durationMs": 0
+    }
+[13:22:24.915] [32mINFO[39m: [36mscene.plan.validation[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "49d99cad-f1b7-4485-a8f4-0b93d38ba0da"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 33
+    [35mevent[39m: "scene.plan.validation"
+    [35mpayload[39m: {
+      "ok": true,
+      "skipped": true,
+      "reason": "no_mutation_gm_read",
+      "issueCount": 0,
+      "issueCodes": [],
+      "durationMs": 0
+    }
+[13:22:24.915] [32mINFO[39m: [36mscene.plan.execution[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "49d99cad-f1b7-4485-a8f4-0b93d38ba0da"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 33
+    [35mevent[39m: "scene.plan.execution"
+    [35mpayload[39m: {
+      "skipped": true,
+      "reason": "no_mutation_gm_read",
+      "plannedActionCount": 0,
+      "executedActionCount": 0,
+      "canonicalEventCount": 0,
+      "durationMs": 0
+    }
+[13:22:24.916] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "49d99cad-f1b7-4485-a8f4-0b93d38ba0da"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 33
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "narrative",
+      "byteLength": 153,
+      "sha256Prefix": "3b52b00495cecc91"
+    }
+[13:22:24.916] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "49d99cad-f1b7-4485-a8f4-0b93d38ba0da"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 33
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "finalizing_turn",
+      "byteLength": 39,
+      "sha256Prefix": "b1f292ffe559df59"
+    }
+[13:22:24.917] [32mINFO[39m: [36mworld-forecast.committed[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "49d99cad-f1b7-4485-a8f4-0b93d38ba0da"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 33
+    [35mevent[39m: "world-forecast.committed"
+    [35mpayload[39m: {
+      "baseTick": 33,
+      "generatedAtTick": 33,
+      "expiresAtTick": 39,
+      "entryCount": 2
+    }
+[13:22:24.917] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "49d99cad-f1b7-4485-a8f4-0b93d38ba0da"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 33
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "done",
+      "byteLength": 11,
+      "sha256Prefix": "ee827c72343b5dc5"
+    }
+[13:22:24.917] [32mINFO[39m: [36mturn.end[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "49d99cad-f1b7-4485-a8f4-0b93d38ba0da"
+    [35mcampaignId[39m: "0ed6bb3c-a528-4067-8f29-86ebdd8d0637"
+    [35mtick[39m: 33
+    [35mevent[39m: "turn.end"
+    [35mpayload[39m: {
+      "route": "/action",
+      "tick": 33,
+      "durationMs": 19984,
+      "outcome": "success"
+    }
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+Restarting 'src/index.ts'
+Port 3001 busy, retrying in 1s... (3 left)
+Port 3001 busy, retrying in 1s... (2 left)
+Port 3001 busy, retrying in 1s... (1 left)
+Failed running 'src/index.ts'
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001
+Failed running 'src/index.ts'

@@ -189,6 +189,15 @@ describe("classifyEntries", () => {
     const callArgs = vi.mocked(generateObject).mock.calls[0]![0];
     expect(callArgs.prompt).toContain("Dragon");
     expect(callArgs.prompt).toContain("Castle");
+    expect(callArgs.prompt).toContain("STRUCTURED_OUTPUT_CONTRACT: worldbook-import.v1");
+    expect(callArgs.prompt).toContain("{ \"entries\": [{ \"name\": \"Dragon\", \"type\": \"bestiary\", \"summary\":");
+    expect(callArgs.prompt).toContain("Minimal valid output");
+    expect(callArgs.prompt).toContain("Invalid example");
+    expect(callArgs.prompt).toContain("type must be one of: character, location, faction, bestiary, lore_general");
+    expect(callArgs.prompt).toContain("summary <= 280 characters");
+    expect(callArgs.prompt).toContain("Return exactly one classified object per input entry");
+    expect(callArgs.prompt).toContain("Do not invent source identity, canon, factions, locations, or character facts");
+    expect(callArgs.prompt).toContain("Do not return entries as strings or a single object");
     expect(callArgs.model).toBe("mock-model");
     expect(callArgs.temperature).toBe(0.2);
   });

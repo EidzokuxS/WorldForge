@@ -286,6 +286,7 @@ describe("record adapters", () => {
           selfImage: "Guardian of the northern line",
         },
         liveDynamics: {
+          attachments: [],
           activeGoals: ["Hold the barricade"],
           beliefDrift: ["The valley can still be saved"],
           currentStrains: ["Running out of supplies"],
@@ -346,12 +347,6 @@ describe("record adapters", () => {
         worldgenOrigin: "known-ip",
         legacyTags: ["legacy"],
       },
-      continuity: {
-        identityInertia: "anchored",
-        protectedCore: ["Will not abandon the station"],
-        mutableSurface: ["Trust in the player"],
-        changePressureNotes: ["Major defeats can force realignment."],
-      },
     };
 
     const legacyNpc = toLegacyNpcDraft(record);
@@ -367,6 +362,113 @@ describe("record adapters", () => {
       long_term: [],
     });
     expect(JSON.parse(projection.beliefs)).toEqual(["The valley can still be saved"]);
+  });
+});
+
+describe("fail-closed migration: grounding -> powerStats", () => {
+  it("old record with grounding but no powerStats normalizes to powerStats undefined (not fake Human 5)", () => {
+    const record = fromLegacyPlayerRow(
+      {
+        id: "player-old",
+        campaignId: "camp-1",
+        name: "Old Hero",
+        race: "Human",
+        gender: "Male",
+        age: "30",
+        appearance: "Scarred face.",
+        hp: 5,
+        tags: JSON.stringify(["Brave"]),
+        equippedItems: JSON.stringify(["Sword"]),
+        currentLocationId: "loc-1",
+      },
+      { currentLocationName: "Town" },
+    );
+
+    // Simulate old stored record with grounding but no powerStats
+    const oldStored = {
+      ...record,
+      grounding: {
+        summary: "Some grounding data",
+        facts: ["fact1"],
+        abilities: ["ability1"],
+        constraints: [],
+        signatureMoves: [],
+        strongPoints: [],
+        vulnerabilities: [],
+        uncertaintyNotes: [],
+        sources: [],
+      },
+    };
+
+    const projection = projectPlayerRecord(oldStored as CharacterRecord);
+    const serialized = JSON.parse(projection.characterRecord);
+
+    // powerStats should be undefined (fail-closed), not synthesized
+    expect(serialized.powerStats).toBeUndefined();
+    // grounding should be stripped
+    expect(serialized.grounding).toBeUndefined();
+  });
+
+  it("new record with powerStats only passes through unchanged", () => {
+    const record = fromLegacyPlayerRow(
+      {
+        id: "player-new",
+        campaignId: "camp-1",
+        name: "New Hero",
+        race: "Human",
+        gender: "Female",
+        age: "25",
+        appearance: "Sharp eyes.",
+        hp: 5,
+        tags: JSON.stringify(["Clever"]),
+        equippedItems: JSON.stringify(["Staff"]),
+        currentLocationId: "loc-1",
+      },
+      { currentLocationName: "Tower" },
+    );
+
+    const withPowerStats = {
+      ...record,
+      powerStats: {
+        attackPotency: { tier: "City" as const, rank: 5 },
+        speed: { tier: "Hypersonic" as const, rank: 3 },
+        durability: { tier: "Building" as const, rank: 7 },
+        intelligence: { tier: "Genius" as const, rank: 6 },
+        hax: [],
+        vulnerabilities: [],
+      },
+    };
+
+    const projection = projectPlayerRecord(withPowerStats as CharacterRecord);
+    const serialized = JSON.parse(projection.characterRecord);
+
+    expect(serialized.powerStats).toEqual(withPowerStats.powerStats);
+    expect(serialized.grounding).toBeUndefined();
+  });
+
+  it("record with neither grounding nor powerStats has powerStats undefined", () => {
+    const record = fromLegacyPlayerRow(
+      {
+        id: "player-plain",
+        campaignId: "camp-1",
+        name: "Plain Hero",
+        race: "Human",
+        gender: "Male",
+        age: "20",
+        appearance: "Average build.",
+        hp: 5,
+        tags: JSON.stringify(["Average"]),
+        equippedItems: JSON.stringify([]),
+        currentLocationId: "loc-1",
+      },
+      { currentLocationName: "Village" },
+    );
+
+    const projection = projectPlayerRecord(record);
+    const serialized = JSON.parse(projection.characterRecord);
+
+    expect(serialized.powerStats).toBeUndefined();
+    expect(serialized.grounding).toBeUndefined();
   });
 });
 

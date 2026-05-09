@@ -1,119 +1,172 @@
 import { describe, it, expect, vi } from "vitest";
+import { useState } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { CharacterForm } from "../character-form";
+import { CharacterForm, type BusyState } from "../character-form";
 
-function renderForm(overrides: Partial<Parameters<typeof CharacterForm>[0]> = {}) {
-  const props = {
+type FormProps = Parameters<typeof CharacterForm>[0];
+
+function makeProps(overrides: Partial<FormProps> = {}): FormProps {
+  return {
+    busy: "idle" as BusyState,
+    overrideText: "",
+    onOverrideTextChange: vi.fn(),
     onParse: vi.fn(),
     onGenerate: vi.fn(),
+    onResearch: vi.fn(),
     onImport: vi.fn(),
-    parsing: false,
-    generating: false,
-    importing: false,
     ...overrides,
   };
-  return { ...render(<CharacterForm {...props} />), props };
 }
 
-describe("CharacterForm", () => {
-  it("renders the description textarea and all three action buttons", () => {
-    renderForm();
+function renderForm(overrides: Partial<FormProps> = {}) {
+  const props = makeProps(overrides);
+  const utils = render(<CharacterForm {...props} />);
+  return { ...utils, props };
+}
 
-    expect(
-      screen.getByPlaceholderText(/grizzled ex-soldier/i)
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /Parse Character/i })
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /AI Generate/i })
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /Import V2 Card/i })
-    ).toBeInTheDocument();
+function ControlledFormHarness({
+  initialOverride = "",
+  onSpyChange,
+  ...rest
+}: Partial<FormProps> & { initialOverride?: string; onSpyChange?: (v: string) => void }) {
+  const [override, setOverride] = useState(initialOverride);
+  return (
+    <CharacterForm
+      {...makeProps({
+        ...rest,
+        overrideText: override,
+        onOverrideTextChange: (v) => {
+          setOverride(v);
+          onSpyChange?.(v);
+        },
+      })}
+    />
+  );
+}
+
+describe("CharacterForm 4-mode surface", () => {
+  it("exposes four creation modes", () => {
+    renderForm();
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs).toHaveLength(4);
   });
 
-  it("disables Parse button when textarea is empty", () => {
+  it("defaults to parse mode in full variant", () => {
     renderForm();
-
-    const parseBtn = screen.getByRole("button", { name: /Parse Character/i });
-    expect(parseBtn).toBeDisabled();
+    const parseTab = screen.getByRole("tab", { name: /describe character/i });
+    expect(parseTab).toHaveAttribute("aria-selected", "true");
   });
 
-  it("enables Parse button when user types a description", async () => {
+  it("preserves description across mode switches", async () => {
     const user = userEvent.setup();
     renderForm();
 
-    const textarea = screen.getByPlaceholderText(/grizzled ex-soldier/i);
-    await user.type(textarea, "A brave warrior");
+    const textarea = screen.getByLabelText(/character description/i) as HTMLTextAreaElement;
+    await user.type(textarea, "a grizzled veteran");
+    expect(textarea.value).toBe("a grizzled veteran");
 
-    const parseBtn = screen.getByRole("button", { name: /Parse Character/i });
-    expect(parseBtn).toBeEnabled();
+    await user.click(screen.getByRole("tab", { name: /research archetype/i }));
+    expect(screen.queryByLabelText(/character description/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /describe character from free text/i }));
+    const restored = screen.getByLabelText(/character description/i) as HTMLTextAreaElement;
+    expect(restored.value).toBe("a grizzled veteran");
   });
 
-  it("calls onParse with trimmed text when Parse button is clicked", async () => {
+  it("preserves override text across mode switches", async () => {
+    const user = userEvent.setup();
+    const spy = vi.fn();
+    render(<ControlledFormHarness onSpyChange={spy} />);
+
+    const override = screen.getByLabelText(/override instructions/i) as HTMLTextAreaElement;
+    await user.type(override, "eyes are red not blue");
+    expect(override.value).toBe("eyes are red not blue");
+
+    await user.click(screen.getByRole("tab", { name: /generate character from scratch/i }));
+    const overrideAfter = screen.getByLabelText(/override instructions/i) as HTMLTextAreaElement;
+    expect(overrideAfter.value).toBe("eyes are red not blue");
+  });
+
+  it("calls onParse with trimmed description from parse mode", async () => {
     const user = userEvent.setup();
     const { props } = renderForm();
 
-    const textarea = screen.getByPlaceholderText(/grizzled ex-soldier/i);
-    await user.type(textarea, "  A brave warrior  ");
-    await user.click(screen.getByRole("button", { name: /Parse Character/i }));
+    const textarea = screen.getByLabelText(/character description/i);
+    await user.type(textarea, "  a brave warrior  ");
+    await user.click(screen.getByRole("button", { name: /parse character/i }));
 
-    expect(props.onParse).toHaveBeenCalledWith("A brave warrior");
+    expect(props.onParse).toHaveBeenCalledWith("a brave warrior");
   });
 
-  it("calls onGenerate when AI Generate button is clicked", async () => {
+  it("calls onGenerate from generate mode button", async () => {
     const user = userEvent.setup();
     const { props } = renderForm();
 
-    await user.click(screen.getByRole("button", { name: /AI Generate/i }));
-    expect(props.onGenerate).toHaveBeenCalled();
+    await user.click(screen.getByRole("tab", { name: /generate character from scratch/i }));
+    await user.click(screen.getByRole("button", { name: /^ai generate$/i }));
+
+    expect(props.onGenerate).toHaveBeenCalledTimes(1);
   });
 
-  it("shows loading text when parsing is in progress", () => {
-    renderForm({ parsing: true });
-
-    expect(screen.getByText("Parsing...")).toBeInTheDocument();
-  });
-
-  it("passes the selected import mode when importing a card", async () => {
+  it("calls onResearch with trimmed archetype", async () => {
     const user = userEvent.setup();
     const { props } = renderForm();
-    const file = new File(['{"name":"Kafka"}'], "kafka.json", { type: "application/json" });
-    const combo = screen.getByRole("combobox");
-    const originalScrollIntoView = Element.prototype.scrollIntoView;
 
-    Element.prototype.scrollIntoView = vi.fn();
+    await user.click(screen.getByRole("tab", { name: /research archetype/i }));
+    const archetypeInput = screen.getByLabelText(/archetype to research/i);
+    await user.type(archetypeInput, "  a court mage  ");
+    await user.click(screen.getByRole("button", { name: /^research archetype$/i }));
 
-    Object.defineProperties(combo, {
-      hasPointerCapture: { value: () => false },
-      setPointerCapture: { value: () => {} },
-      releasePointerCapture: { value: () => {} },
-    });
+    expect(props.onResearch).toHaveBeenCalledWith("a court mage");
+  });
 
-    await user.click(combo);
-    await user.click(screen.getByText(/^Outsider$/i));
+  it("calls onImport with file and importMode", async () => {
+    const user = userEvent.setup();
+    const { props } = renderForm();
 
+    await user.click(screen.getByRole("tab", { name: /import sillytavern/i }));
+    const file = new File(['{"name":"X"}'], "x.json", { type: "application/json" });
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     await user.upload(input, file);
 
-    expect(props.onImport).toHaveBeenCalledWith(file, "outsider");
-
-    Element.prototype.scrollIntoView = originalScrollIntoView;
+    expect(props.onImport).toHaveBeenCalledWith(file, "native");
   });
 
-  it("disables all buttons when busy (generating)", () => {
-    renderForm({ generating: true });
+  it("disables action buttons during busy state", () => {
+    renderForm({ busy: "parsing" });
+    const parseBtn = screen.getByRole("button", { name: /parsing/i });
+    expect(parseBtn).toBeDisabled();
+  });
 
-    expect(
-      screen.getByRole("button", { name: /Generating.../i })
-    ).toBeDisabled();
-    expect(
-      screen.getByRole("button", { name: /Parse Character/i })
-    ).toBeDisabled();
-    expect(
-      screen.getByRole("button", { name: /Import V2 Card/i })
-    ).toBeDisabled();
+  it("disables mode tabs during busy state", () => {
+    renderForm({ busy: "generating" });
+    for (const tab of screen.getAllByRole("tab")) {
+      expect(tab).toBeDisabled();
+    }
+  });
+
+  it("shows loading text when parsing is in progress", () => {
+    renderForm({ busy: "parsing" });
+    expect(screen.getByText(/parsing/i)).toBeInTheDocument();
+  });
+});
+
+describe("CharacterForm compact variant", () => {
+  it("wraps override text inside a collapsible details element", () => {
+    renderForm({ compact: true });
+
+    const details = document.querySelector("details");
+    expect(details).not.toBeNull();
+    expect(details).not.toHaveAttribute("open");
+    const summary = details?.querySelector("summary");
+    expect(summary?.textContent).toMatch(/override instructions/i);
+  });
+
+  it("compact variant has no default mode selected", () => {
+    renderForm({ compact: true });
+    for (const tab of screen.getAllByRole("tab")) {
+      expect(tab).toHaveAttribute("aria-selected", "false");
+    }
   });
 });

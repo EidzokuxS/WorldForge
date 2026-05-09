@@ -1,0 +1,82 @@
+- generic [active] [ref=e1]:
+  - main [ref=e14]:
+    - region "Shibuya District" [ref=e15]:
+      - generic [ref=e21]:
+        - heading "Shibuya District" [level=1] [ref=e22]
+        - paragraph [ref=e23]: Shibuya District is a densely packed commercial and entertainment ward covering approximately 15 square kilometers, characterized by its iconic scramble crossing, towering department stores, and a labyrinthine network of narrow alleys filled with izakayas and host clubs. The district is currently occupied by a mix of ordinary civilians by day and infiltrated by curse user alliances, unregistered chakra practitioners, and undercover Jujutsu High sorcerers by night. The convergence of both cursed energy and chakra pathways in the area has created unstable spatial rifts and intensified the localized 'noise' that masks the buildup for the planned October 31st catastrophe.
+        - text: Densely PopulatedEntertainment DistrictContested Territory
+    - generic [ref=e24]:
+      - generic [ref=e25]:
+        - button "Home" [ref=e26]:
+          - img
+        - heading "Shibuya District" [level=2] [ref=e29]
+      - navigation "Game controls" [ref=e30]:
+        - generic [ref=e31]: Settling
+        - button "Saves" [ref=e32]:
+          - img
+        - button "Settings" [ref=e33]:
+          - img
+    - generic:
+      - complementary [ref=e34]:
+        - generic [ref=e35]:
+          - generic [ref=e36]:
+            - paragraph [ref=e37]: You
+            - paragraph [ref=e38]: Tiamat
+            - generic [ref=e40]:
+              - generic [ref=e41]: HP 5
+              - generic [ref=e42]: 2 equipped
+              - generic [ref=e43]: 1 carried
+          - generic [ref=e44]:
+            - paragraph [ref=e45]: Scene
+            - paragraph [ref=e46]: Shibuya District
+            - paragraph [ref=e48]: 6 routes nearby
+      - complementary [ref=e49]:
+        - generic [ref=e51]:
+          - paragraph [ref=e52]: Presence
+          - paragraph [ref=e53]: 2 not in sight
+          - paragraph [ref=e55]: Same broad area, outside this immediate scene.
+    - region "Scene presence" [ref=e57]:
+      - paragraph [ref=e58]:
+        - img [ref=e59]
+        - generic [ref=e63]: 2 nearby, not visible
+    - generic:
+      - region "Current scene beat" [ref=e65]:
+        - generic [ref=e96]: Settling
+        - paragraph [ref=e69]: The neon wash of Shibuya bleeds across wet pavement—pachinko parlors, capsule hotels, a 24-hour convenience store buzzing with fluorescent light. Foot traffic has thinned since the dinner rush. Salarymen trail toward the station exits, collars loosened, briefcases swinging. A cluster of tourists consult their phones beneath the scramble crossing's suspended traffic lights, waiting for the signal to change.
+        - generic [ref=e70]:
+          - button "Next" [ref=e71]:
+            - img
+            - generic [ref=e72]: Next
+          - button "Auto" [ref=e73]:
+            - img
+            - generic [ref=e74]: Auto
+          - button "Log" [ref=e75]:
+            - img
+            - generic [ref=e76]: Log
+      - region "Scene action controls" [ref=e78]:
+        - generic [ref=e79]:
+          - textbox "Scene action" [disabled] [ref=e81]:
+            - /placeholder: Describe what you do next...
+          - generic [ref=e82]:
+            - button "Send action" [disabled]:
+              - img
+            - button "Continue" [disabled]
+    - navigation "Game tools" [ref=e85]:
+      - button "Log" [ref=e86]:
+        - img
+      - button "World" [ref=e87]:
+        - img
+      - button "Inventory" [ref=e88]:
+        - img
+      - button "Journal" [ref=e89]:
+        - img
+      - button "Character" [ref=e90]:
+        - img
+      - button "Inspect" [ref=e91]:
+        - img
+      - button "Saves" [ref=e92]:
+        - img
+  - region "Notifications alt+T"
+  - button "Open Next.js Dev Tools" [ref=e9] [cursor=pointer]:
+    - img [ref=e10]
+  - alert [ref=e13]

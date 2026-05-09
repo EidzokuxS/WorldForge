@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import type { PowerStats } from "@worldforge/shared";
 import { z } from "zod";
 import { safeGenerateObject } from "../ai/generate-object-safe.js";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
@@ -8,6 +9,7 @@ import { getDb } from "../db/index.js";
 import { factions, items, locations, npcs, players } from "../db/schema.js";
 import { createLogger } from "../lib/index.js";
 import { parseTags } from "./parse-helpers.js";
+import { buildTargetContextPromptContract } from "./prompt-contracts.js";
 
 const log = createLogger("target-context");
 
@@ -27,8 +29,14 @@ export interface ActionTargetContext {
   targetLabel: string | null;
   targetType: SupportedActionTargetType | "none";
   targetTags: string[];
+  combatSnapshot?: CharacterTargetCombatSnapshot;
   source: ActionTargetCandidate["source"] | "fallback";
   fallbackReason: string | null;
+}
+
+export interface CharacterTargetCombatSnapshot {
+  label: string;
+  powerStats: PowerStats;
 }
 
 interface ResolveActionTargetContextOptions {
@@ -172,6 +180,8 @@ async function detectCandidateByClassifier(
       schema: targetCandidateSchema,
       temperature: 0,
       prompt: [
+        buildTargetContextPromptContract(),
+        "",
         "Choose the single concrete target this action is directed at, if any.",
         "Only choose one of the listed names. If no supported concrete target is present, return nulls.",
         `Player action: ${options.playerAction}`,
@@ -188,14 +198,15 @@ async function detectCandidateByClassifier(
       ].join("\n"),
     });
 
-    if (!object.targetName || !object.targetType) {
+    const { targetName, targetType } = object;
+    if (!targetName || !targetType) {
       return null;
     }
 
     const match = candidates.find(
       (candidate) =>
-        candidate.type === object.targetType &&
-        normalizeText(candidate.name) === normalizeText(object.targetName),
+        candidate.type === targetType &&
+        normalizeText(candidate.name) === normalizeText(targetName),
     );
 
     if (!match) {
@@ -263,6 +274,26 @@ export function deriveTargetTags(
   }
 }
 
+function buildCharacterTargetContext(
+  label: string,
+  powerStats: PowerStats | undefined,
+  targetTags: string[],
+): ActionTargetContext {
+  return {
+    targetLabel: label,
+    targetType: "character",
+    targetTags,
+    combatSnapshot: powerStats
+      ? {
+          label,
+          powerStats,
+        }
+      : undefined,
+    source: "parsed",
+    fallbackReason: null,
+  };
+}
+
 function resolveCharacterTarget(
   campaignId: string,
   name: string,
@@ -278,13 +309,14 @@ function resolveCharacterTarget(
   );
   const player = playerRows.find((row) => normalizeText(row.name) === normalizedName);
   if (player) {
-    return {
-      targetLabel: player.name,
-      targetType: "character",
-      targetTags: deriveTargetTags("character", { ...player, characterRole: "player" }),
-      source: "parsed",
-      fallbackReason: null,
-    };
+    const playerRecord = hydrateStoredPlayerRecord(
+      player as Parameters<typeof hydrateStoredPlayerRecord>[0],
+    );
+    return buildCharacterTargetContext(
+      player.name,
+      playerRecord.powerStats,
+      deriveRuntimeCharacterTags(playerRecord),
+    );
   }
 
   const npcRows = readRows(
@@ -295,13 +327,14 @@ function resolveCharacterTarget(
   );
   const npc = npcRows.find((row) => normalizeText(row.name) === normalizedName);
   if (npc) {
-    return {
-      targetLabel: npc.name,
-      targetType: "character",
-      targetTags: deriveTargetTags("character", { ...npc, characterRole: "npc" }),
-      source: "parsed",
-      fallbackReason: null,
-    };
+    const npcRecord = hydrateStoredNpcRecord(
+      npc as Parameters<typeof hydrateStoredNpcRecord>[0],
+    );
+    return buildCharacterTargetContext(
+      npc.name,
+      npcRecord.powerStats,
+      deriveRuntimeCharacterTags(npcRecord),
+    );
   }
 
   return {

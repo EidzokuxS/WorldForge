@@ -40,6 +40,36 @@ describe("resolveScenePresence", () => {
     expect(snapshot.knowledgeBasisByObserver.player_1?.gojo).toBe("none");
   });
 
+  it("does not collapse missing scene scope into broad-location co-presence", async () => {
+    const { resolveScenePresence } = await import("../scene-presence.js");
+
+    const snapshot = resolveScenePresence({
+      playerActorId: "player-1",
+      broadLocationId: "shibuya-ward",
+      sceneScopeId: "shibuya-ward",
+      actors: [
+        {
+          actorId: "player-1",
+          actorType: "player",
+          broadLocationId: "shibuya-ward",
+          sceneScopeId: "shibuya-ward",
+          visibility: "clear",
+        },
+        {
+          actorId: "kafka",
+          actorType: "npc",
+          broadLocationId: "shibuya-ward",
+          sceneScopeId: null,
+          visibility: "clear",
+        },
+      ],
+    });
+
+    expect(snapshot.presentActorIds).toEqual(["player-1"]);
+    expect(snapshot.awarenessByObserver.player_1?.kafka).toBe("none");
+    expect(snapshot.knowledgeBasisByObserver.player_1?.kafka).toBe("none");
+  });
+
   it("keeps hidden but present actors inside presence while only surfacing awareness hints", async () => {
     const { resolveScenePresence } = await import("../scene-presence.js");
 

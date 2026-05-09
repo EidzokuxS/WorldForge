@@ -11,7 +11,13 @@ vi.mock("../../ai/index.js", () => ({
 }));
 
 import { interpretPremiseDivergence } from "../premise-divergence.js";
+import { generateRefinedPremiseStep } from "../scaffold-steps/premise-step.js";
+import {
+  buildPremiseDivergencePromptContract,
+  buildPremiseRefinementPromptContract,
+} from "../prompt-contracts.js";
 import type { IpResearchContext } from "../ip-researcher.js";
+import { jjkWithNarutoPowerSystemArtifact } from "./fixtures/jjk-naruto-artifact.js";
 
 const fakeRole = {
   provider: { id: "test", name: "Test Provider", baseUrl: "https://example.com", apiKey: "sk-test", model: "gpt-4" },
@@ -69,7 +75,55 @@ beforeEach(() => {
   mockGenerateObject.mockReset();
 });
 
+const forbiddenArtifactPromptPhrases = [
+  "This world is the Naruto universe",
+  "FRANCHISE REFERENCE",
+  "Build the canonical world",
+  "Canonical subject",
+];
+
+function legacyAuthorityLines(prompt: string): string[] {
+  return prompt
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => (
+      line.startsWith("LEGACY IP REFERENCE")
+      || line.startsWith("KNOWN-IP GENERATION CONTRACT")
+      || line.includes("Use this legacy IP reference")
+      || line.includes("Start from the LEGACY IP REFERENCE")
+      || line.includes("LEGACY IP REFERENCE + PREMISE DIVERGENCE")
+    ));
+}
+
 describe("interpretPremiseDivergence", () => {
+  it("has a premise-divergence prompt contract with exact shape and no backend canon inference", () => {
+    const contract = buildPremiseDivergencePromptContract();
+
+    expect(contract).toContain("STRUCTURED_OUTPUT_CONTRACT: premise-divergence.v1");
+    expect(contract).toContain("Required fields");
+    expect(contract).toContain("protagonistRole");
+    expect(contract).toContain("preservedCanonFacts");
+    expect(contract).toContain("currentStateDirectives");
+    expect(contract).toContain("Caps:");
+    expect(contract).toContain("nullable");
+    expect(contract).toContain("Valid example:");
+    expect(contract).toContain("Minimal valid output:");
+    expect(contract).toContain("Invalid example:");
+    expect(contract).toContain("backend must not infer premise canon");
+  });
+
+  it("returns null without calling the model when legacy IP context is absent", async () => {
+    await expect(
+      interpretPremiseDivergence(
+        null,
+        "Jujutsu Kaisen world with Naruto power system",
+        fakeRole as never,
+      ),
+    ).resolves.toBeNull();
+
+    expect(mockGenerateObject).not.toHaveBeenCalled();
+  });
+
   it("returns a diverged artifact for the motivating Voices of the Void replacement premise", async () => {
     mockGenerateObject.mockResolvedValueOnce({
       object: {
@@ -100,6 +154,15 @@ describe("interpretPremiseDivergence", () => {
     expect(result?.preservedCanonFacts).toContain("The signal base still sits in the same remote valley.");
     expect(result?.changedCanonFacts).toContain("Dr. Kel is not the active station protagonist in the current campaign state.");
     expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+    const prompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>).prompt as string;
+    expect(prompt).toContain("STRUCTURED_OUTPUT_CONTRACT: premise-divergence.v1");
+    expect(prompt.indexOf("STRUCTURED_OUTPUT_CONTRACT: premise-divergence.v1")).toBeLessThan(
+      prompt.indexOf("FRANCHISE:"),
+    );
+    expect(prompt).toContain("backend must not infer premise canon");
+    expect(prompt).toContain("Caps:");
+    expect(prompt).toContain("Minimal valid output:");
+    expect(prompt).toContain("Invalid example:");
     expect((mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>).maxOutputTokens).toBeUndefined();
   });
 
@@ -287,5 +350,108 @@ describe("interpretPremiseDivergence", () => {
     );
 
     expect(result?.protagonistRole.kind).toBe("custom");
+  });
+});
+
+describe("generateRefinedPremiseStep research artifact prompt boundary", () => {
+  const fakeReq = {
+    campaignId: "campaign-1",
+    name: "Test World",
+    premise: "Jujutsu Kaisen world with Naruto power system",
+    role: fakeRole,
+  };
+
+  it("has a premise-refinement prompt contract with explicit text fallback boundary", () => {
+    const contract = buildPremiseRefinementPromptContract();
+
+    expect(contract).toContain("STRUCTURED_OUTPUT_CONTRACT: premise-refinement.v1");
+    expect(contract).toContain("Required fields");
+    expect(contract).toContain("refinedPremise");
+    expect(contract).toContain("Caps:");
+    expect(contract).toContain("nullable");
+    expect(contract).toContain("Valid example:");
+    expect(contract).toContain("Minimal valid output:");
+    expect(contract).toContain("Invalid example:");
+    expect(contract).toContain("text-only compatibility fallback");
+    expect(contract).toContain("backend must not infer premise canon");
+  });
+
+  it("uses artifact source rules with null ipContext instead of legacy franchise wording", async () => {
+    mockGenerateObject.mockResolvedValueOnce({
+      object: {
+        refinedPremise:
+          "Tokyo Jujutsu High anchors a modern occult world while chakra-style control changes how sorcerers train and fight.",
+      },
+    });
+
+    await generateRefinedPremiseStep(
+      {
+        ...fakeReq,
+        researchArtifact: jjkWithNarutoPowerSystemArtifact,
+      } as never,
+      null,
+    );
+
+    const prompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>).prompt as string;
+    expect(prompt).toContain("STRUCTURED_OUTPUT_CONTRACT: premise-refinement.v1");
+    expect(prompt.indexOf("STRUCTURED_OUTPUT_CONTRACT: premise-refinement.v1")).toBeLessThan(
+      prompt.indexOf("PLAYER CONCEPT:"),
+    );
+    expect(prompt).toContain("text-only compatibility fallback");
+    expect(prompt).toContain("backend must not infer premise canon");
+    expect(prompt).toContain("Caps:");
+    expect(prompt).toContain("Minimal valid output:");
+    expect(prompt).toContain("Invalid example:");
+    expect(prompt).toContain("RESEARCH CONTEXT FOR REFINED PREMISE");
+    expect(prompt).toContain("Source usage rules:");
+    expect(prompt).toContain("Jujutsu Kaisen: role=world_basis");
+    expect(prompt).toContain("useFor=locations, factions, npcs, timeline");
+    expect(prompt).toContain("Naruto: role=mechanics_overlay");
+    expect(prompt).toContain("useFor=power_system");
+    for (const phrase of forbiddenArtifactPromptPhrases) {
+      expect(prompt).not.toContain(phrase);
+    }
+  });
+
+  it("keeps legacy no-artifact known-IP premise prompt authority wording stable", async () => {
+    mockGenerateObject.mockResolvedValueOnce({
+      object: {
+        refinedPremise:
+          "Konohagakure remains the central shinobi village while Naruto's canon cast and institutions stay intact.",
+      },
+    });
+
+    await generateRefinedPremiseStep(
+      {
+        ...fakeReq,
+        premise: "Naruto world",
+        researchArtifact: null,
+        premiseDivergence: {
+          mode: "canonical",
+          protagonistRole: {
+            kind: "canonical",
+            interpretation: "canonical",
+            canonicalCharacterName: null,
+            roleSummary: "The canon protagonist slot is unchanged.",
+          },
+          preservedCanonFacts: ["Naruto Uzumaki remains the canon protagonist of Konohagakure."],
+          changedCanonFacts: [],
+          currentStateDirectives: ["Keep the canon cast intact."],
+          ambiguityNotes: [],
+        },
+      } as never,
+      narutoContext,
+    );
+
+    const prompt = (mockGenerateObject.mock.calls[0]![0] as Record<string, unknown>).prompt as string;
+    expect(legacyAuthorityLines(prompt)).toMatchInlineSnapshot(`
+      [
+        "LEGACY IP REFERENCE (Naruto, verified via mcp):",
+        "1. Use this legacy IP reference as selected source context, with targeted modifications from the premise.",
+        "KNOWN-IP GENERATION CONTRACT FOR REFINED PREMISE:",
+        "- Start from the LEGACY IP REFERENCE as the explicit selected source baseline for Naruto.",
+        "3. For known IPs: summarize the present world state by combining LEGACY IP REFERENCE + PREMISE DIVERGENCE. Do not fall back to a blind source synopsis or reintroduce changed facts.",
+      ]
+    `);
   });
 });

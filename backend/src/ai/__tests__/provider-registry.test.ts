@@ -315,7 +315,7 @@ describe("createModel", () => {
       model: "GLM-5.1",
     };
 
-    const result = createModel(config) as { baseModel: unknown };
+    const result = createModel(config) as unknown as { baseModel: unknown };
 
     expect(mockWrapLanguageModel).toHaveBeenCalledTimes(1);
     expect(result.baseModel).toBe(fakeModel);
@@ -333,7 +333,7 @@ describe("createModel", () => {
       model: "GLM-5.1",
     };
 
-    const result = createModel(config) as {
+    const result = createModel(config) as unknown as {
       baseModel: unknown;
       middleware: Array<{
         specificationVersion: "v3";
@@ -393,7 +393,7 @@ describe("createModel", () => {
     const result = createModel(config, options);
 
     expect(mockWrapLanguageModel).toHaveBeenCalledTimes(1);
-    expect((result as { baseModel: unknown }).baseModel).toBe(fakeModel);
+    expect((result as unknown as { baseModel: unknown }).baseModel).toBe(fakeModel);
   });
 
   it("strips temperature from reasoning-model call params", async () => {
@@ -408,7 +408,7 @@ describe("createModel", () => {
       model: "GLM-5.1",
     };
 
-    const result = createModel(config) as {
+    const result = createModel(config) as unknown as {
       middleware: Array<{
         specificationVersion: "v3";
         transformParams?: (options: { params: Record<string, unknown> }) => Promise<Record<string, unknown>>;

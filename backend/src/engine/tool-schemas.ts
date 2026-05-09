@@ -8,10 +8,20 @@
 import { z } from "zod";
 import { tool } from "ai";
 import { executeToolCall } from "./tool-executor.js";
+import type { ToolExecutionContext } from "./tool-execution-context.js";
 import { INVENTORY_EQUIP_STATES } from "../inventory/authority.js";
 
 const entityTypeEnum = z.enum(["player", "npc", "location", "item", "faction"]);
+const eventDurabilityEnum = z.enum(["durable", "scene_local"]);
 const inventoryEquipStateEnum = z.enum(INVENTORY_EQUIP_STATES);
+const contestedOutcomeModeEnum = z.enum([
+  "attack",
+  "restrain",
+  "escape",
+  "pursue",
+  "defend",
+  "contest",
+]);
 const transferItemInputSchema = z.discriminatedUnion("targetType", [
   z.object({
     itemName: z.string().describe("Name of the item to transfer"),
@@ -32,97 +42,258 @@ const transferItemInputSchema = z.discriminatedUnion("targetType", [
   }),
 ]);
 
+const addTagInputSchema = z.object({
+  entityName: z.string().describe("Name of the entity to tag"),
+  entityType: entityTypeEnum,
+  tag: z.string().describe("The tag to add (lowercase, hyphenated)"),
+});
+
+const removeTagInputSchema = z.object({
+  entityName: z.string().describe("Name of the entity"),
+  entityType: entityTypeEnum,
+  tag: z.string().describe("The tag to remove"),
+});
+
+const setRelationshipInputSchema = z.object({
+  entityA: z.string().describe("Name of the first entity"),
+  entityB: z.string().describe("Name of the second entity"),
+  tag: z
+    .string()
+    .describe("Relationship tag (e.g. ally, enemy, mentor, rival)"),
+  reason: z
+    .string()
+    .describe("Brief reason for this relationship"),
+});
+
+const addChronicleEntryInputSchema = z.object({
+  text: z
+    .string()
+    .describe("Description of the event for the chronicle"),
+});
+
+const logEventInputSchema = z.object({
+  text: z.string().describe("Event description for memory"),
+  importance: z
+    .number()
+    .min(1)
+    .max(10)
+    .describe("Importance 1-10 (10 = world-changing, 1 = trivial)"),
+  participants: z
+    .array(z.string())
+    .describe("Clear local/current actor names from model-facing refs; omit transcript-only or offscreen names"),
+  durability: eventDurabilityEnum
+    .optional()
+    .describe("scene_local for transient/attempted/witnessed beats; durable only for future-relevant facts that do not grant possession, access, item use, or completed movement by themselves"),
+  futureRelevance: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Required when durability is durable: why this fact should matter later"),
+}).superRefine((data, ctx) => {
+  if (data.durability === "durable" && !data.futureRelevance?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["futureRelevance"],
+      message: "futureRelevance is required when durability is durable",
+    });
+  }
+});
+
+const advanceTimeInputSchema = z.object({
+  minutes: z
+    .number()
+    .int()
+    .min(1)
+    .max(525_600)
+    .describe("GM-estimated in-world minutes elapsed by the player action"),
+  reason: z
+    .string()
+    .trim()
+    .min(1)
+    .max(400)
+    .describe("Brief source-grounded reason this much time passed"),
+});
+
+const offerQuickActionsInputSchema = z.object({
+  actions: z
+    .array(
+      z.object({
+        label: z.string().describe("Short button label"),
+        action: z.string().describe("Full action text if selected"),
+      })
+    )
+    .min(3)
+    .max(5),
+});
+
+const spawnNpcInputSchema = z.object({
+  name: z.string().describe("NPC name"),
+  tags: z.array(z.string()).describe("Tags describing the NPC (role, trait, local function, state)"),
+  locationRef: z
+    .enum(["current_scene", "current_location"])
+    .optional()
+    .describe("Preferred local spawn target for GM turns after the backend has established where the scene is."),
+  locationId: z
+    .string()
+    .optional()
+    .describe("Exact location id only when exposed by the model-facing legal refs or returned by a successful reveal_location observation in this tool loop."),
+  locationName: z
+    .string()
+    .optional()
+    .describe("Legacy compatibility only; player turns may use only the current scene/current location name."),
+}).refine(
+  (data) => Boolean(data.locationRef ?? data.locationId ?? data.locationName),
+  { message: "locationRef, locationId, or locationName is required" },
+);
+
+const promoteNpcInputSchema = z.object({
+  npcRef: z.string().describe("Visible NPC id or name to promote"),
+  newTier: z.enum(["persistent", "key"]).describe("Promotion target tier"),
+  reason: z.string().min(1).describe("Brief source-grounded reason this NPC should persist"),
+});
+
+const spawnItemInputSchema = z.object({
+  name: z.string().describe("Concrete item name; only create tangible future-usable items, not incidental scenery."),
+  tags: z.array(z.string()).describe("Tags describing item function, state, visibility, and story relevance."),
+  ownerName: z.string().describe("Visible character or local location ref that the backend can resolve as the authoritative item owner."),
+  ownerType: z.enum(["character", "location"]).describe("Whether the owner is a character or location"),
+});
+
+const revealLocationInputSchema = z.object({
+  name: z.string().describe("Name of the new local sublocation or ephemeral scene."),
+  description: z.string().describe("Grounded description of the newly discovered local place."),
+  tags: z.array(z.string()).describe("Tags for locality, persistence, access, and scene function."),
+  connectedToName: z.string().describe("Existing local anchor. Prefer current_scene/current_location; otherwise copy an exact legal ref from the model-facing view, never a shortened paraphrase."),
+});
+
+const setConditionInputSchema = z.object({
+  targetName: z.string().describe("Name of the player character"),
+  delta: z.number().optional().describe("HP change: positive to heal, negative to damage"),
+  value: z.number().min(0).max(5).optional().describe("Set HP to this absolute value (0-5)"),
+}).refine(
+  (data) => data.delta !== undefined || data.value !== undefined,
+  { message: "Either delta or value must be provided" }
+);
+
+const requestContestedOutcomeInputSchema = z.object({
+  actorName: z.string().describe("Visible actor name or id attempting the contest"),
+  targetName: z.string().describe("Visible opposing actor name or id"),
+  mode: contestedOutcomeModeEnum.describe("Kind of contested pressure being requested"),
+  intent: z.string().min(1).max(400).describe("What the actor is trying to do now"),
+  stakes: z.string().min(1).max(400).describe("What would change if this contest lands"),
+  evidenceRefs: z
+    .array(z.string().min(1).max(200))
+    .max(8)
+    .default([])
+    .describe("ActorFrame/SceneFrame fact ids or exact visible refs supporting the contest"),
+});
+
+const moveToInputSchema = z.object({
+  targetLocationName: z
+    .string()
+    .describe("Name of the destination location (must be connected to current location)"),
+});
+
+export const runtimeToolInputSchemas = {
+  add_tag: addTagInputSchema,
+  remove_tag: removeTagInputSchema,
+  set_relationship: setRelationshipInputSchema,
+  add_chronicle_entry: addChronicleEntryInputSchema,
+  log_event: logEventInputSchema,
+  advance_time: advanceTimeInputSchema,
+  offer_quick_actions: offerQuickActionsInputSchema,
+  spawn_npc: spawnNpcInputSchema,
+  promote_npc: promoteNpcInputSchema,
+  spawn_item: spawnItemInputSchema,
+  reveal_location: revealLocationInputSchema,
+  request_contested_outcome: requestContestedOutcomeInputSchema,
+  set_condition: setConditionInputSchema,
+  move_to: moveToInputSchema,
+  transfer_item: transferItemInputSchema,
+} as const;
+
+export type RuntimeToolName = keyof typeof runtimeToolInputSchemas;
+
 /**
  * Create Storyteller tools bound to a specific campaign and tick.
  * Returns a tools object suitable for passing to streamText().
  */
-export function createStorytellerTools(campaignId: string, tick: number, outcomeTier?: string) {
+export function createStorytellerTools(
+  campaignId: string,
+  tick: number,
+  outcomeTier?: string,
+  executionContext?: ToolExecutionContext,
+) {
+  let executionQueue = Promise.resolve();
+  const executeRuntimeTool = (
+    toolName: RuntimeToolName,
+    args: Record<string, unknown>,
+    toolOutcomeTier?: string,
+  ) => {
+    const run = executionQueue.then(() =>
+      executeToolCall(
+        campaignId,
+        toolName,
+        args,
+        tick,
+        toolOutcomeTier,
+        executionContext,
+      ),
+    );
+    executionQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  };
+
   return {
     add_tag: tool({
       description:
         "Add a tag to an entity (player, NPC, location, item, or faction). Tags represent traits, states, skills, relationships.",
-      inputSchema: z.object({
-        entityName: z.string().describe("Name of the entity to tag"),
-        entityType: entityTypeEnum,
-        tag: z.string().describe("The tag to add (lowercase, hyphenated)"),
-      }),
-      execute: async (args) =>
-        executeToolCall(campaignId, "add_tag", args, tick),
+      inputSchema: addTagInputSchema,
+      execute: (args) => executeRuntimeTool("add_tag", args),
     }),
 
     remove_tag: tool({
       description:
         "Remove a tag from an entity. Use when a state, trait, or condition no longer applies.",
-      inputSchema: z.object({
-        entityName: z.string().describe("Name of the entity"),
-        entityType: entityTypeEnum,
-        tag: z.string().describe("The tag to remove"),
-      }),
-      execute: async (args) =>
-        executeToolCall(campaignId, "remove_tag", args, tick),
+      inputSchema: removeTagInputSchema,
+      execute: (args) => executeRuntimeTool("remove_tag", args),
     }),
 
     set_relationship: tool({
       description:
         "Set or update a relationship between two entities. Upserts -- creating or updating the relationship.",
-      inputSchema: z.object({
-        entityA: z.string().describe("Name of the first entity"),
-        entityB: z.string().describe("Name of the second entity"),
-        tag: z
-          .string()
-          .describe("Relationship tag (e.g. ally, enemy, mentor, rival)"),
-        reason: z
-          .string()
-          .describe("Brief reason for this relationship"),
-      }),
-      execute: async (args) =>
-        executeToolCall(campaignId, "set_relationship", args, tick),
+      inputSchema: setRelationshipInputSchema,
+      execute: (args) => executeRuntimeTool("set_relationship", args),
     }),
 
     add_chronicle_entry: tool({
       description:
         "Record a significant event in the campaign chronicle. Use for major story beats, discoveries, or turning points.",
-      inputSchema: z.object({
-        text: z
-          .string()
-          .describe("Description of the event for the chronicle"),
-      }),
-      execute: async (args) =>
-        executeToolCall(campaignId, "add_chronicle_entry", args, tick),
+      inputSchema: addChronicleEntryInputSchema,
+      execute: (args) => executeRuntimeTool("add_chronicle_entry", args),
     }),
 
     log_event: tool({
       description:
-        "Log an episodic event for memory retrieval. Use for any noteworthy occurrence that should be searchable later.",
-      inputSchema: z.object({
-        text: z.string().describe("Event description for memory"),
-        importance: z
-          .number()
-          .min(1)
-          .max(10)
-          .describe("Importance 1-10 (10 = world-changing, 1 = trivial)"),
-        participants: z
-          .array(z.string())
-          .describe("Names of entities involved"),
-      }),
-      execute: async (args) =>
-        executeToolCall(campaignId, "log_event", args, tick),
+        "Log a scene beat. Use scene_local for attempted, refused, witnessed, conversational, sensory/non-durable, or bluff beats. Use durable only for future-relevant facts that should matter later; never use durable log_event itself to grant possession, access, item use, route revelation, or completed movement.",
+      inputSchema: logEventInputSchema,
+      execute: (args) => executeRuntimeTool("log_event", args),
+    }),
+
+    advance_time: tool({
+      description:
+        "Advance the campaign clock when the player intentionally waits, travels, rests, shops, observes, or otherwise spends meaningful in-world time. The GM chooses minutes from the action and scene; backend only validates and commits the clock advance.",
+      inputSchema: advanceTimeInputSchema,
+      execute: (args) => executeRuntimeTool("advance_time", args),
     }),
 
     offer_quick_actions: tool({
       description:
         "Suggest 3-5 quick action options for the player to choose from. Keep the options varied, concrete, and grounded in the current scene, present NPCs, available items, and visible threats.",
-      inputSchema: z.object({
-        actions: z
-          .array(
-            z.object({
-              label: z.string().describe("Short button label"),
-              action: z.string().describe("Full action text if selected"),
-            })
-          )
-          .min(3)
-          .max(5),
-      }),
+      inputSchema: offerQuickActionsInputSchema,
       execute: async (args) => ({
         success: true as const,
         result: { actions: args.actions },
@@ -131,75 +302,58 @@ export function createStorytellerTools(campaignId: string, tick: number, outcome
 
     spawn_npc: tool({
       description:
-        "Spawn a new NPC into the scene at a specified location. The NPC is created as temporary tier.",
-      inputSchema: z.object({
-        name: z.string().describe("NPC name"),
-        tags: z.array(z.string()).describe("Tags describing the NPC (traits, roles, states)"),
-        locationName: z.string().describe("Name of the location where the NPC appears"),
-      }),
-      execute: async (args) =>
-        executeToolCall(campaignId, "spawn_npc", args, tick),
+        "Spawn a temporary support NPC only when a concrete local actor is needed for play or future pressure. Use current_scene/current_location or a location id returned by a successful reveal_location observation; never use assistant prose to introduce a continuing actor, and never use this to pretend an unrevealed room exists.",
+      inputSchema: spawnNpcInputSchema,
+      execute: (args) => executeRuntimeTool("spawn_npc", args),
+    }),
+
+    promote_npc: tool({
+      description:
+        "Promote a visible temporary NPC upward to persistent or key when the scene makes them future-relevant.",
+      inputSchema: promoteNpcInputSchema,
+      execute: (args) => executeRuntimeTool("promote_npc", args),
     }),
 
     spawn_item: tool({
       description:
-        "Spawn a new item, giving it to a character or placing it at a location.",
-      inputSchema: z.object({
-        name: z.string().describe("Item name"),
-        tags: z.array(z.string()).describe("Tags describing the item"),
-        ownerName: z.string().describe("Name of the character or location to receive the item"),
-        ownerType: z.enum(["character", "location"]).describe("Whether the owner is a character or location"),
-      }),
-      execute: async (args) =>
-        executeToolCall(campaignId, "spawn_item", args, tick),
+        "Spawn a tangible, persistent item that the player or visible actors can later inspect, use, own, carry, transfer, or owe action around. Do not leave future-relevant props or obligations only in assistant prose. Do not create casual props, set dressing, atmospheric details, or generic scenery.",
+      inputSchema: spawnItemInputSchema,
+      execute: (args) => executeRuntimeTool("spawn_item", args),
     }),
 
     reveal_location: tool({
       description:
-        "Reveal a new location and connect it to an existing location in the world graph.",
-      inputSchema: z.object({
-        name: z.string().describe("Name of the new location"),
-        description: z.string().describe("Description of the new location"),
-        tags: z.array(z.string()).describe("Tags for the new location"),
-        connectedToName: z.string().describe("Name of an existing location to connect to"),
-      }),
-      execute: async (args) =>
-        executeToolCall(campaignId, "reveal_location", args, tick),
+        "Reveal a new local sublocation/ephemeral scene and connect it to an existing legal local anchor. Use connectedToName current_scene/current_location unless copying an exact legal ref; use before moving into, populating, or making future-relevant a newly discovered room, back area, booth, alley mouth, recessed door, narrow stair, or other specific route/place.",
+      inputSchema: revealLocationInputSchema,
+      execute: (args) => executeRuntimeTool("reveal_location", args),
+    }),
+
+    request_contested_outcome: tool({
+      description:
+        "Ask the backend rules for bounded actor-vs-actor contest/combat authority before narrating or committing a hit, escape, capture, restraint, pursuit, or defense result. This returns allowed/prohibited consequences and does not itself change HP, position, inventory, tags, or relationships.",
+      inputSchema: requestContestedOutcomeInputSchema,
+      execute: (args) => executeRuntimeTool("request_contested_outcome", args),
     }),
 
     set_condition: tool({
       description:
-        "Modify a player character's HP. Use delta for relative damage or healing, or value for an absolute HP set. Only works on player characters, not NPCs.",
-      inputSchema: z.object({
-        targetName: z.string().describe("Name of the player character"),
-        delta: z.number().optional().describe("HP change: positive to heal, negative to damage"),
-        value: z.number().min(0).max(5).optional().describe("Set HP to this absolute value (0-5)"),
-      }).refine(
-        (data) => data.delta !== undefined || data.value !== undefined,
-        { message: "Either delta or value must be provided" }
-      ),
-      execute: async (args) =>
-        executeToolCall(campaignId, "set_condition", args, tick, outcomeTier),
+        "Modify a player character's HP when violence, injury, healing, or combat aftermath changes durable player condition. Use delta for relative damage or healing, or value for an absolute HP set. Only works on player characters, not NPCs.",
+      inputSchema: setConditionInputSchema,
+      execute: (args) => executeRuntimeTool("set_condition", args, outcomeTier),
     }),
 
     move_to: tool({
       description:
-        "Move the player to a connected location by targetLocationName when travel to an established destination succeeds.",
-      inputSchema: z.object({
-        targetLocationName: z
-          .string()
-          .describe("Name of the destination location (must be connected to current location)"),
-      }),
-      execute: async (args) =>
-        executeToolCall(campaignId, "move_to", args, tick),
+        "Move the player to a connected location by targetLocationName when travel to an established destination succeeds. Do not describe completed route traversal in assistant prose unless a successful move_to observation or existing state already supports it.",
+      inputSchema: moveToInputSchema,
+      execute: (args) => executeRuntimeTool("move_to", args),
     }),
 
     transfer_item: tool({
       description:
         "Transfer an existing item to a different character or location. Character targets can optionally equip the item; location targets always drop it carried and unequipped.",
       inputSchema: transferItemInputSchema,
-      execute: async (args) =>
-        executeToolCall(campaignId, "transfer_item", args, tick),
+      execute: (args) => executeRuntimeTool("transfer_item", args),
     }),
   };
 }

@@ -1,0 +1,48 @@
+event: scene-settling
+data: {"stage":"scene-settling","phase":"gm-read"}
+
+event: scene-settling
+data: {"stage":"scene-settling","phase":"gm-tool-loop"}
+
+event: scene-settling
+data: {"stage":"scene-settling","phase":"creating-local-scene"}
+
+event: scene-settling
+data: {"stage":"scene-settling","phase":"spawning-support-npc"}
+
+event: scene-settling
+data: {"stage":"scene-settling","phase":"settling-tool-observation"}
+
+event: state_update
+data: {"order":0,"actionId":"895e31ec-1a21-4554-8386-ab482e168fca","actionRef":"tool-call-2","actorId":"26eec8fe-ae60-49c9-999b-732f57e0e2c5","toolName":"reveal_location","input":{"name":"Stamp Alcove","description":"A cramped nook behind the records back room, barely wider than a closet. A brass service bell sits on a narrow shelf beside stacked ledger books. The walls are lined with pigeonhole cubbies holding blank transfer forms, wax sticks in various colors, and a row of brass stamps hanging from hooks. A single oil lamp gutters on a chain overhead, throwing sharp shadows across the ink-stained counter.","tags":["back-area","service-point","records-annex","stamp-station"],"connectedToName":"current_location"},"args":{"name":"Stamp Alcove","description":"A cramped nook behind the records back room, barely wider than a closet. A brass service bell sits on a narrow shelf beside stacked ledger books. The walls are lined with pigeonhole cubbies holding blank transfer forms, wax sticks in various colors, and a row of brass stamps hanging from hooks. A single oil lamp gutters on a chain overhead, throwing sharp shadows across the ink-stained counter.","tags":["back-area","service-point","records-annex","stamp-station"],"connectedToName":"current_location"},"result":{"success":true,"result":{"id":"e186eb0c-ee5d-4c42-b050-5b2948f02588","name":"Stamp Alcove","connectedTo":"Pier Records Back Room","kind":"ephemeral_scene","parentLocationId":"765adaa1-e6e6-4923-b0bf-f2bcef0a6eb7","anchorLocationId":"765adaa1-e6e6-4923-b0bf-f2bcef0a6eb7","persistence":"ephemeral","expiresAtTick":28,"archivedAtTick":null}}}
+
+event: state_update
+data: {"type":"location_change","locationId":"e186eb0c-ee5d-4c42-b050-5b2948f02588","locationName":"Stamp Alcove","travelCost":1,"tickAdvance":1,"path":["Pier Records Back Room","Stamp Alcove"]}
+
+event: state_update
+data: {"order":2,"actionId":"9f9b28c6-d26d-4e0c-9e7f-0bd6769edc0c","actionRef":"tool-call-4","actorId":"26eec8fe-ae60-49c9-999b-732f57e0e2c5","toolName":"spawn_npc","input":{"name":"Stamp Clerk","tags":["pier-staff","document-handler","wax-stamper","irritable","overworked"],"locationRef":"current_location"},"args":{"name":"Stamp Clerk","tags":["pier-staff","document-handler","wax-stamper","irritable","overworked"],"locationRef":"current_location"},"result":{"success":true,"result":{"id":"e9463d9f-4f3e-4bf5-b39c-df784e994149","name":"Stamp Clerk","locationId":"e186eb0c-ee5d-4c42-b050-5b2948f02588","locationName":"Stamp Alcove","broadLocationId":"765adaa1-e6e6-4923-b0bf-f2bcef0a6eb7","broadLocationName":"Pier Records Back Room","sceneLocationId":"e186eb0c-ee5d-4c42-b050-5b2948f02588","sceneLocationName":"Stamp Alcove","tier":"temporary"}}}
+
+event: state_update
+data: {"order":3,"actionId":"c3fffc18-a14a-448f-b2d9-08f2a0f6ca7d","actionRef":"tool-call-5","actorId":"26eec8fe-ae60-49c9-999b-732f57e0e2c5","toolName":"spawn_item","input":{"name":"Fresh Wax-Marked Canal Transfer Slip","tags":["official-document","canal-transit","wax-sealed","transfer-authorization","pier-issue","fresh-issue"],"ownerName":"Mira Voss","ownerType":"character"},"args":{"name":"Fresh Wax-Marked Canal Transfer Slip","tags":["official-document","canal-transit","wax-sealed","transfer-authorization","pier-issue","fresh-issue"],"ownerName":"Mira Voss","ownerType":"character"},"result":{"success":true,"result":{"id":"cafd9fa4-1a4a-49ce-b159-0237eec283ba","name":"Fresh Wax-Marked Canal Transfer Slip","owner":"Mira Voss","ownerType":"character"}}}
+
+event: state_update
+data: {"order":4,"actionId":"c80a40ce-94db-4a79-abb2-52092edfe7de","actionRef":"tool-call-7","actorId":"26eec8fe-ae60-49c9-999b-732f57e0e2c5","toolName":"log_event","input":{"text":"Mira pushed through a ledger curtain into the stamp alcove behind the pier records back room, rang the brass service bell, and obtained a fresh wax-marked canal transfer slip from the Stamp Clerk.","importance":3,"participants":["Mira Voss","Stamp Clerk"],"durability":"scene_local"},"args":{"text":"Mira pushed through a ledger curtain into the stamp alcove behind the pier records back room, rang the brass service bell, and obtained a fresh wax-marked canal transfer slip from the Stamp Clerk.","importance":3,"participants":["Mira Voss","Stamp Clerk"],"durability":"scene_local"},"result":{"success":true,"result":{"durability":"scene_local","persisted":false}}}
+
+event: scene-settling
+data: {"stage":"scene-settling","phase":"settled-packet","tick":26}
+
+event: scene-settling
+data: {"stage":"scene-settling","phase":"final-narration","opening":false}
+
+event: narrative
+data: {"text":"The ledger curtain rasps across Mira's shoulder as she pushes through—dusty cotton, stiff with age, carrying the smell of old ink and pigeon droppings. The alcove beyond is barely wide enough for two people standing side by side. Pigeonholes climb both walls, stuffed with yellowed transfer forms and wax sticks in six different colors. Brass stamps hang from hooks overhead, each one stamped with a district seal.\n\nA service bell sits on the narrow shelf. Mira's thumb finds the ringer.\n\nThe clang is sharp in the cramped space, bouncing off the close walls. Somewhere behind the cubby partition, a stool scrapes stone.\n\nThe Stamp Clerk appears around the edge of the partition—same woman from the front counter, same ink-stained fingers, same flat expression. She must have a passage through the back. She doesn't ask what Mira wants. Her eyes drop to Mira's hands, then to the cubbies, and she reaches past without ceremony to pull a single sheet from a pigeonhole marked with a green wax dot.\n\n\"You get one,\" the Clerk says. She lays the slip on the counter between them. It's smaller than a playing card, stiff vellum with a canal-route map printed in faded blue ink. The wax seal is still warm—fresh green, stamped with the Mill Quarter anchor mark. \"Green gets you through the outer locks after dusk. Don't lose it. They don't reprint.\"\n\nShe doesn't step back. Her hand stays on the counter edge, fingers splayed, like she's waiting to see if Mira has another question or if this is where things get complicated."}
+
+event: finalizing_turn
+data: {"tick":26,"stage":"rollback_critical"}
+
+event: scene-settling
+data: {"stage":"scene-settling","phase":"cleaning-transient-scene","tick":26}
+
+event: done
+data: {"tick":26}
+

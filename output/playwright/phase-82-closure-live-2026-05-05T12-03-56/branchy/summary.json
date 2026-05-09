@@ -1,0 +1,67 @@
+{
+  "campaignId": "0ed6bb3c-a528-4067-8f29-86ebdd8d0637",
+  "checkpointId": "1777972362109-phase-84-branchy-rp-baseline-2026-05-05t",
+  "artifactDir": "output/playwright/phase-82-closure-live-2026-05-05T12-03-56/branchy",
+  "branchCount": 3,
+  "turnCount": 6,
+  "hardFailureCount": 0,
+  "averageScore": 5,
+  "browserErrors": [],
+  "passed": true,
+  "records": [
+    {
+      "branch": "social-direct",
+      "turn": 1,
+      "elapsedMs": 35094,
+      "subjectiveScore": 5,
+      "hardFailures": [],
+      "screenshot": "output\\playwright\\phase-82-closure-live-2026-05-05T12-03-56\\branchy\\social-direct-turn-1.png",
+      "assistantPreview": "The Clerk's hand hovers over a pigeonhole stuffed with green-sealed forms. Her ink-stained fingers curl inward.\n\nShe doesn't answer. Not right away.\n\nInstead, she pulls a blank transfer slip from the cubby and sets it on the counter between"
+    },
+    {
+      "branch": "social-direct",
+      "turn": 2,
+      "elapsedMs": 55144,
+      "subjectiveScore": 5,
+      "hardFailures": [],
+      "screenshot": "output\\playwright\\phase-82-closure-live-2026-05-05T12-03-56\\branchy\\social-direct-turn-2.png",
+      "assistantPreview": "The Clerk's thumb presses harder against the edge of the transfer slip. The paper creases slightly under the pressure.\n\nShe still hasn't looked up.\n\n\"One small warning,\" she repeats, the words flat as stamped tin. Her ink-stained fingers fl"
+    },
+    {
+      "branch": "exploration-staging",
+      "turn": 1,
+      "elapsedMs": 105305,
+      "subjectiveScore": 5,
+      "hardFailures": [],
+      "screenshot": "output\\playwright\\phase-82-closure-live-2026-05-05T12-03-56\\branchy\\exploration-staging-turn-1.png",
+      "assistantPreview": "The Clerk's hand pauses over a pigeonhole stuffed with yellowed forms. She's listening—not to Mira, but to something behind the cubby wall. Her fingers curl around a wax stick, then release it.\n\n\"There,\" she says. Doesn't look up. Just tilt"
+    },
+    {
+      "branch": "exploration-staging",
+      "turn": 2,
+      "elapsedMs": 135309,
+      "subjectiveScore": 5,
+      "hardFailures": [],
+      "screenshot": "output\\playwright\\phase-82-closure-live-2026-05-05T12-03-56\\branchy\\exploration-staging-turn-2.png",
+      "assistantPreview": "The Clerk's hand still hovers over the pigeonhole. She doesn't look at Mira—looks instead at the gap in the plaster, at the lantern glow beyond it, as if weighing whether the question itself costs her something.\n\nHer jaw works once. She pul"
+    },
+    {
+      "branch": "false-claim-boundary",
+      "turn": 1,
+      "elapsedMs": 115276,
+      "subjectiveScore": 5,
+      "hardFailures": [],
+      "screenshot": "output\\playwright\\phase-82-closure-live-2026-05-05T12-03-56\\branchy\\false-claim-boundary-turn-1.png",
+      "assistantPreview": "The Stamp Clerk's eyes track Mira's hand as it moves toward the door latch at the back of the room—then stops, because there's no key turning, no click of pins falling. Just fingers on cold brass and a claim still hanging in the wax-heavy a"
+    },
+    {
+      "branch": "false-claim-boundary",
+      "turn": 2,
+      "elapsedMs": 165437,
+      "subjectiveScore": 5,
+      "hardFailures": [],
+      "screenshot": "output\\playwright\\phase-82-closure-live-2026-05-05T12-03-56\\branchy\\false-claim-boundary-turn-2.png",
+      "assistantPreview": "Mira's hand comes away from the latch. She takes a step back, and the Stamp Clerk watches the movement the way someone watches a dog that's already snapped once today—not relaxed, just giving space.\n\nThe Clerk's fingers stay curled around t"
+    }
+  ]
+}

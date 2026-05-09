@@ -9,11 +9,15 @@ vi.mock("../oracle.js", () => ({
 }));
 
 vi.mock("../prompt-assembler.js", () => ({
-  assemblePrompt: vi.fn(),
+  assembleJudgeAdjudicationPrompt: vi.fn(),
+  assembleFinalNarrationPrompt: vi.fn().mockResolvedValue({
+    system: "",
+    prompt: "",
+    totalTokens: 0,
+  }),
 }));
 
 vi.mock("../../campaign/index.js", () => ({
-  getChatHistory: vi.fn(),
   appendChatMessages: vi.fn(),
   advanceCampaignTick: vi.fn(),
   incrementTick: vi.fn(),
@@ -24,15 +28,41 @@ vi.mock("../../ai/provider-registry.js", () => ({
   createModel: vi.fn().mockReturnValue("mock-model"),
 }));
 
-vi.mock("../../ai/generate-object-safe.js", () => ({
-  safeGenerateObject: vi.fn().mockResolvedValue({
-    object: { isMovement: false, destination: null },
-  }),
+vi.mock("../hidden-adjudication.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../hidden-adjudication.js")>()),
+  runHiddenAdjudicationPlan: vi.fn(),
 }));
 
 vi.mock("../target-context.js", () => ({
   resolveActionTargetContext: vi.fn().mockResolvedValue({ targetTags: [] }),
 }));
+
+vi.mock("../world-brain.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../world-brain.js")>();
+  return {
+    ...actual,
+    runWorldBrainSceneDirection: vi.fn().mockResolvedValue({
+      situationSummary: "The player is readying a weapon already in the scene.",
+      sceneQuestion: "Does the player take possession of the weapon cleanly?",
+      focalActorNames: ["Hero"],
+      backgroundActorNames: [],
+      presenceReasons: [
+        {
+          actorName: "Hero",
+          reason: "The player is the only clear actor involved in the equip action.",
+          perceivable: true,
+        },
+      ],
+      causalBeats: [
+        {
+          summary: "The equip action is about authoritative inventory transfer, not social escalation.",
+          perceivable: true,
+        },
+      ],
+      narrationGuardrails: ["Keep the narration anchored to the equip action."],
+    }),
+  };
+});
 
 vi.mock("../../character/record-adapters.js", () => ({
   hydrateStoredPlayerRecord: vi.fn((row: { currentLocationId: string | null; hp?: number }) => ({
@@ -43,6 +73,16 @@ vi.mock("../../character/record-adapters.js", () => ({
     state: {
       hp: row.hp ?? 5,
       statusFlags: [],
+    },
+    startConditions: {
+      startLocationId: null,
+      arrivalMode: null,
+      immediateSituation: null,
+      entryPressure: [],
+      companions: [],
+      startingVisibility: null,
+      resolvedNarrative: null,
+      sourcePrompt: null,
     },
   })),
   projectPlayerRecord: vi.fn((record: unknown) => ({
@@ -62,6 +102,16 @@ vi.mock("../start-condition-runtime.js", () => ({
     changed: false,
     effects: { sceneContextLines: [] },
   })),
+  deriveStartConditionEffects: vi.fn(() => ({
+    isActive: false,
+    openingStatusFlags: [],
+    activeStatusFlags: [],
+    sceneFlags: [],
+    sceneContextLines: [],
+    promptLines: [],
+    companionNames: [],
+    expirationReason: "none",
+  })),
 }));
 
 vi.mock("../../lib/index.js", () => ({
@@ -69,26 +119,30 @@ vi.mock("../../lib/index.js", () => ({
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
+    debug: vi.fn(),
+    event: vi.fn(),
   })),
+  withRole: <T,>(_role: string, fn: () => T) => fn(),
 }));
 
 vi.mock("ai", () => ({
   tool: vi.fn((definition: unknown) => definition),
-  streamText: vi.fn(),
-  stepCountIs: vi.fn().mockReturnValue({ type: "step-count", count: 3 }),
+  generateText: vi.fn().mockResolvedValue({
+    text: "Hero readies the Iron Sword.",
+    toolCalls: [],
+  }),
 }));
 
-import { streamText } from "ai";
 import { getDb } from "../../db/index.js";
 import { callOracle } from "../oracle.js";
-import { assemblePrompt } from "../prompt-assembler.js";
+import { assembleJudgeAdjudicationPrompt } from "../prompt-assembler.js";
 import {
   appendChatMessages,
-  getChatHistory,
   incrementTick,
   readCampaignConfig,
 } from "../../campaign/index.js";
 import { processTurn, type TurnEvent } from "../turn-processor.js";
+import { runHiddenAdjudicationPlan } from "../hidden-adjudication.js";
 import { players, locations, items } from "../../db/schema.js";
 import { buildAuthoritativeInventoryView } from "../../inventory/authority.js";
 
@@ -172,6 +226,12 @@ function createMutableInventoryDb() {
     where: vi.fn().mockImplementation(() => ({
       get: vi.fn().mockImplementation(() => getRows(lastTableName)[0]),
       all: vi.fn().mockImplementation(() => getRows(lastTableName)),
+      orderBy: vi.fn().mockImplementation(() => ({
+        limit: vi.fn().mockImplementation(() => ({
+          all: vi.fn().mockReturnValue([]),
+        })),
+        all: vi.fn().mockReturnValue([]),
+      })),
     })),
     update: vi.fn().mockImplementation((table: unknown) => {
       const tableName = getDrizzleTableName(table);
@@ -216,21 +276,26 @@ describe("processTurn inventory authority", () => {
       outcome: "strong_hit",
       reasoning: "Test oracle result",
     });
-    (assemblePrompt as Mock).mockResolvedValue({
-      formatted: "System prompt",
-      sections: [],
-      totalTokens: 100,
-      budgetUsed: 10,
+    (assembleJudgeAdjudicationPrompt as Mock).mockResolvedValue({
+      system: "[ACTION RESULT]\n\nOutcome: strong_hit",
+      messages: [{ role: "user", content: "Ready the sword" }],
+      assembledBase: {
+        formatted: "System prompt",
+        sections: [],
+        totalTokens: 100,
+        budgetUsed: 10,
+      },
     });
-    (getChatHistory as Mock).mockReturnValue([]);
     (appendChatMessages as Mock).mockImplementation(() => {});
     (readCampaignConfig as Mock).mockReturnValue({ currentTick: 5 });
     (incrementTick as Mock).mockReturnValue(6);
   });
 
-  it("reaches the live storyteller transfer_item tool seam and mutates authoritative item rows", async () => {
+  it("reaches the live hidden adjudication transfer_item seam and mutates authoritative item rows", async () => {
     const { db, state } = createMutableInventoryDb();
     (getDb as Mock).mockReturnValue(db);
+    const previousScenePlanFlag = process.env.SCENE_PLAN_ENABLED;
+    process.env.SCENE_PLAN_ENABLED = "false";
 
     const transferArgs = {
       itemName: "Iron Sword",
@@ -240,47 +305,44 @@ describe("processTurn inventory authority", () => {
       equippedSlot: "main-hand",
     };
 
-    (streamText as Mock).mockImplementation(({ tools }: { tools: Record<string, { execute: (args: unknown) => Promise<unknown> }> }) => ({
-      fullStream: (async function* () {
-        const output = await tools.transfer_item.execute(transferArgs);
-        yield {
-          type: "tool-result",
-          toolName: "transfer_item",
-          input: transferArgs,
-          output,
-        };
-        yield {
-          type: "text-delta",
-          text: "Hero slides the sword into a ready grip.",
-        };
-      })(),
-      text: Promise.resolve("Hero slides the sword into a ready grip."),
-    }));
+    (runHiddenAdjudicationPlan as Mock).mockResolvedValue({
+      rationale: "Equip the sword before visible narration.",
+      actions: [{ toolName: "transfer_item", input: transferArgs }],
+    });
 
-    const events = await collectEvents(
-      processTurn({
-        campaignId: CAMPAIGN_ID,
-        playerAction: "Ready the sword",
-        intent: "Ready the sword",
-        method: "equipping the blade",
-        judgeProvider: {
-          id: "judge",
-          name: "Judge",
-          baseUrl: "http://localhost",
-          apiKey: "key",
-          model: "judge-model",
-        },
-        storytellerProvider: {
-          id: "storyteller",
-          name: "Storyteller",
-          baseUrl: "http://localhost",
-          apiKey: "key",
-          model: "storyteller-model",
-        },
-        storytellerTemperature: 0.8,
-        storytellerMaxTokens: 512,
-      }),
-    );
+    let events: TurnEvent[];
+    try {
+      events = await collectEvents(
+        processTurn({
+          campaignId: CAMPAIGN_ID,
+          playerAction: "Ready the sword",
+          intent: "Ready the sword",
+          method: "equipping the blade",
+          judgeProvider: {
+            id: "judge",
+            name: "Judge",
+            baseUrl: "http://localhost",
+            apiKey: "key",
+            model: "judge-model",
+          },
+          storytellerProvider: {
+            id: "storyteller",
+            name: "Storyteller",
+            baseUrl: "http://localhost",
+            apiKey: "key",
+            model: "storyteller-model",
+          },
+          storytellerTemperature: 0.8,
+          storytellerMaxTokens: 512,
+        }),
+      );
+    } finally {
+      if (previousScenePlanFlag === undefined) {
+        delete process.env.SCENE_PLAN_ENABLED;
+      } else {
+        process.env.SCENE_PLAN_ENABLED = previousScenePlanFlag;
+      }
+    }
 
     expect(events).toContainEqual({
       type: "state_update",

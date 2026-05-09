@@ -1,0 +1,22 @@
+[
+  {
+    "Name": "backend-typecheck",
+    "ExitCode": 0,
+    "Log": ".planning\\phases\\63-personality-interiority-model\\evidence\\task1\\backend-typecheck.log"
+  },
+  {
+    "Name": "backend-vitest-full",
+    "ExitCode": 0,
+    "Log": ".planning\\phases\\63-personality-interiority-model\\evidence\\task1\\backend-vitest-full.log"
+  },
+  {
+    "Name": "frontend-lint",
+    "ExitCode": 0,
+    "Log": ".planning\\phases\\63-personality-interiority-model\\evidence\\task1\\frontend-lint.log"
+  },
+  {
+    "Name": "frontend-vitest-full",
+    "ExitCode": 0,
+    "Log": ".planning\\phases\\63-personality-interiority-model\\evidence\\task1\\frontend-vitest-full.log"
+  }
+]

@@ -1,6 +1,7 @@
+import { toTitleCase, cleanTag } from "../lib/string-utils.js";
+
 export type CharacterImportMode = "native" | "outsider";
 
-const TAG_WORD_SEPARATOR = /[-_/]+/g;
 const TAG_NOISE = new Set([
   "anypov",
   "female",
@@ -16,28 +17,6 @@ const TAG_NOISE = new Set([
   "user",
 ]);
 
-function toTitleCase(value: string): string {
-  return value
-    .split(" ")
-    .filter(Boolean)
-    .map((word) => {
-      if (/^[A-Z0-9]{2,}$/.test(word)) {
-        return word;
-      }
-      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-    })
-    .join(" ");
-}
-
-function cleanTag(raw: string): string {
-  return raw
-    .trim()
-    .replace(/^[\[\]"'`#*]+|[\[\]"'`#*]+$/g, "")
-    .replace(TAG_WORD_SEPARATOR, " ")
-    .replace(/[^\p{L}\p{N}' ]+/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
 
 function isUsefulTag(tag: string): boolean {
   if (!tag) return false;

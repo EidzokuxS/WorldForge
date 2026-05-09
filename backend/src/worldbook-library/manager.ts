@@ -84,7 +84,11 @@ function sortItems(items: WorldbookLibraryItemSummary[]): WorldbookLibraryItemSu
 }
 
 function readJson<T>(filePath: string): T {
-  return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
+  } catch (error) {
+    throw new Error(`Failed to parse JSON from ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 function writeJson(filePath: string, value: unknown): void {

@@ -10,6 +10,13 @@ import crypto from "node:crypto";
 import { z } from "zod";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
 import { safeGenerateObject } from "../ai/generate-object-safe.js";
+import { createLogger, withRole } from "../lib/index.js";
+import type { CombatEnvelope } from "./combat-envelope.js";
+import { buildOraclePromptContract } from "./prompt-contracts.js";
+
+const log = createLogger("oracle");
+export const DURABILITY_NO_BYPASS_CLAMP_LINE =
+  "Clamp: actorBypassesTarget is false and durabilityTierGap >= 2. Unless the action explicitly exploits a listed vulnerability or setup angle, keep direct frontal force at 35% chance or lower.";
 
 // -- Types -------------------------------------------------------------------
 
@@ -22,6 +29,7 @@ export interface OraclePayload {
   targetTags: string[];
   environmentTags: string[];
   sceneContext: string;
+  combatEnvelope?: CombatEnvelope;
 }
 
 export interface OracleResult {
@@ -57,7 +65,11 @@ const ORACLE_SYSTEM_PROMPT = `You are the Oracle Judge for a text RPG. Your job 
 Given the actor's capabilities (tags), the target's attributes (tags), and the environmental conditions (tags), estimate the chance of success as a number from 1 to 99.
 
 Use only the provided actorTags, targetTags, environmentTags, and sceneContext as evidence snapshots.
+If a combatEnvelope block is present, treat it as backend-authored adjudication context for force matchup, speed pressure, bypass, and vulnerabilities.
 Do NOT widen this into narration, character creation, or world simulation.
+Do NOT decide that a claimed item, credential, authority, or access proof exists unless the supplied tags/context already say so.
+
+${buildOraclePromptContract()}
 
 Rules:
 - NEVER return 0 or 100. Nothing is impossible, nothing is guaranteed.
@@ -97,6 +109,25 @@ Target: []
 Environment: [forest, dry]
 -> { "chance": 12, "reasoning": "Actor has wind magic, not fire magic. No fire-related tags. Novice skill level. Attempting a technique outside their element gives very low odds." }`;
 
+function buildCombatEnvelopeBlock(envelope: CombatEnvelope): string {
+  const lines = [
+    "[Combat Envelope]",
+    `Matchup: ${envelope.matchup}`,
+    `durabilityTierGap: ${envelope.durabilityTierGap}`,
+    `speedTierGap: ${envelope.speedTierGap}`,
+    `intelligenceTierGap: ${envelope.intelligenceTierGap ?? "n/a"}`,
+    `actorBypassesTarget: ${String(envelope.actorBypassesTarget)}`,
+    `targetBypassesActor: ${String(envelope.targetBypassesActor)}`,
+    ...envelope.summaryLines.map((line) => `- ${line}`),
+  ];
+
+  if (!envelope.actorBypassesTarget && envelope.durabilityTierGap >= 2) {
+    lines.push(DURABILITY_NO_BYPASS_CLAMP_LINE);
+  }
+
+  return lines.join("\n");
+}
+
 function buildOraclePrompt(payload: OraclePayload): string {
   return [
     `Action: ${payload.intent}${payload.method ? ` via ${payload.method}` : ""}`,
@@ -104,27 +135,51 @@ function buildOraclePrompt(payload: OraclePayload): string {
     `Target: [${payload.targetTags.join(", ")}]`,
     `Environment: [${payload.environmentTags.join(", ")}]`,
     `Scene: ${payload.sceneContext}`,
+    ...(payload.combatEnvelope ? [buildCombatEnvelopeBlock(payload.combatEnvelope)] : []),
   ].join("\n");
 }
 
 async function executeOracleCall(
   provider: ProviderConfig,
-  userPrompt: string
+  userPrompt: string,
+  payload: OraclePayload,
 ): Promise<OracleResult> {
-  const model = createModel(provider);
-  const { object } = await safeGenerateObject({
-    model,
-    schema: oracleOutputSchema,
-    temperature: 0,
-    system: ORACLE_SYSTEM_PROMPT,
-    prompt: userPrompt,
-  });
+  return withRole("oracle", async () => {
+    const model = createModel(provider);
+    const startMs = Date.now();
+    try {
+      const { object } = await withRole("judge", () =>
+        safeGenerateObject({
+          model,
+          schema: oracleOutputSchema,
+          temperature: 0,
+          system: ORACLE_SYSTEM_PROMPT,
+          prompt: userPrompt,
+        }),
+      );
 
-  // Clamp as safety net even if Zod somehow passes out-of-range
-  const chance = Math.max(1, Math.min(99, object.chance));
-  const roll = rollD100();
-  const outcome = resolveOutcome(roll, chance);
-  return { chance, roll, outcome, reasoning: object.reasoning };
+      // Clamp as safety net even if Zod somehow passes out-of-range
+      const chance = Math.max(1, Math.min(99, object.chance));
+      const roll = rollD100();
+      const outcome = resolveOutcome(roll, chance);
+      const result: OracleResult = { chance, roll, outcome, reasoning: object.reasoning };
+
+      log.event("oracle.call", {
+        input: payload,
+        output: result,
+        latencyMs: Date.now() - startMs,
+      });
+
+      return result;
+    } catch (error) {
+      log.event("oracle.call", {
+        input: payload,
+        error: error instanceof Error ? error.message : String(error),
+        latencyMs: Date.now() - startMs,
+      });
+      throw error;
+    }
+  });
 }
 
 export async function callOracle(
@@ -132,5 +187,5 @@ export async function callOracle(
   provider: ProviderConfig,
 ): Promise<OracleResult> {
   const userPrompt = buildOraclePrompt(payload);
-  return executeOracleCall(provider, userPrompt);
+  return executeOracleCall(provider, userPrompt, payload);
 }

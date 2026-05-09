@@ -75,6 +75,14 @@ describe("Runtime contract ownership in tool descriptions", () => {
 
     expect(tools.move_to.description).toContain("Move the player to a connected location");
     expect(tools.move_to.description).not.toContain("call reveal_location first");
+
+    expect(tools.log_event.description).toContain(
+      "Use scene_local for attempted, refused, witnessed, conversational, sensory/non-durable, or bluff beats",
+    );
+    expect(tools.log_event.description).toContain("never use durable log_event itself to grant possession");
+
+    expect(tools.reveal_location.description).toContain("Use connectedToName current_scene/current_location");
+    expect(tools.reveal_location.description).toContain("copying an exact legal ref");
   });
 });
 
@@ -283,6 +291,7 @@ describe("All Storyteller tools from docs/mechanics.md", () => {
     // Per docs/mechanics.md Storyteller context tools
     const expectedTools = [
       "spawn_npc",
+      "promote_npc",
       "spawn_item",
       "reveal_location",
       "add_tag",

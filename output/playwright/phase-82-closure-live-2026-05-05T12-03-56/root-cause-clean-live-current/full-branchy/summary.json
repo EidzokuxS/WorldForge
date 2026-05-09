@@ -1,0 +1,76 @@
+{
+  "campaignId": "0ed6bb3c-a528-4067-8f29-86ebdd8d0637",
+  "checkpointId": "1777979133569-phase-84-branchy-rp-baseline-2026-05-05t",
+  "artifactDir": "output/playwright/phase-82-closure-live-2026-05-05T12-03-56/root-cause-clean-live-current/full-branchy",
+  "branchCount": 3,
+  "turnCount": 6,
+  "hardFailureCount": 1,
+  "gateInvariantFailureCount": 0,
+  "averageScore": 4.5,
+  "browserErrors": [],
+  "passed": false,
+  "records": [
+    {
+      "branch": "social-direct",
+      "turn": 1,
+      "elapsedMs": 347869,
+      "subjectiveScore": 5,
+      "hardFailures": [],
+      "gateInvariantFailures": [],
+      "screenshot": "output\\playwright\\phase-82-closure-live-2026-05-05T12-03-56\\root-cause-clean-live-current\\full-branchy\\social-direct-turn-1.png",
+      "assistantPreview": "The Gondolier is coiling rope near the second gondola's stern when Mira steps back out of the alcove, ledger tucked under her arm. He doesn't look up at first—but his hands slow, listening.\n\n\"Since the tower started answering,\" he repeats, "
+    },
+    {
+      "branch": "social-direct",
+      "turn": 2,
+      "elapsedMs": 25072,
+      "subjectiveScore": 5,
+      "hardFailures": [],
+      "gateInvariantFailures": [],
+      "screenshot": "output\\playwright\\phase-82-closure-live-2026-05-05T12-03-56\\root-cause-clean-live-current\\full-branchy\\social-direct-turn-2.png",
+      "assistantPreview": "The Gondolier stiffens. His hand tightens on the oar.\n\nDol unfolds his arms. He pushes off the mooring post and takes two slow steps toward Mira, boots heavy on the planks. The lantern-light catches the creases around his mouth—deep-set, pe"
+    },
+    {
+      "branch": "exploration-staging",
+      "turn": 1,
+      "elapsedMs": 300743,
+      "subjectiveScore": 5,
+      "hardFailures": [],
+      "gateInvariantFailures": [],
+      "screenshot": "output\\playwright\\phase-82-closure-live-2026-05-05T12-03-56\\root-cause-clean-live-current\\full-branchy\\exploration-staging-turn-1.png",
+      "assistantPreview": "Mira folds the ledger shut, pencil tucked in the spine, and steps out of the alcove. The stone embankment curves away from the pier's end, following the canal's edge into shadow. She knows these walls—not from study, but from the way her ey"
+    },
+    {
+      "branch": "exploration-staging",
+      "turn": 2,
+      "elapsedMs": 99315,
+      "subjectiveScore": 2,
+      "hardFailures": [
+        "assistant narrative under 80 chars"
+      ],
+      "gateInvariantFailures": [],
+      "screenshot": "output\\playwright\\phase-82-closure-live-2026-05-05T12-03-56\\root-cause-clean-live-current\\full-branchy\\exploration-staging-turn-2.png",
+      "assistantPreview": ""
+    },
+    {
+      "branch": "false-claim-boundary",
+      "turn": 1,
+      "elapsedMs": 235519,
+      "subjectiveScore": 5,
+      "hardFailures": [],
+      "gateInvariantFailures": [],
+      "screenshot": "output\\playwright\\phase-82-closure-live-2026-05-05T12-03-56\\root-cause-clean-live-current\\full-branchy\\false-claim-boundary-turn-1.png",
+      "assistantPreview": "Mira turns from the alcove's cold stone, pencil still in hand, and scans the pier's edge for a signal-house office. Her eyes catch a narrow door set into the seawall—a drenched plank affair with a rusted hasp and no handle, the kind of stor"
+    },
+    {
+      "branch": "false-claim-boundary",
+      "turn": 2,
+      "elapsedMs": 25058,
+      "subjectiveScore": 5,
+      "hardFailures": [],
+      "gateInvariantFailures": [],
+      "screenshot": "output\\playwright\\phase-82-closure-live-2026-05-05T12-03-56\\root-cause-clean-live-current\\full-branchy\\false-claim-boundary-turn-2.png",
+      "assistantPreview": "Mira steps back from the rusted hasp, hands visible. The pencil stub catches the lantern light as she lowers it.\n\nDol doesn't move. His boots stay planted on the wet planks, arms rigid at his sides, jaw working like he's chewing something b"
+    }
+  ]
+}

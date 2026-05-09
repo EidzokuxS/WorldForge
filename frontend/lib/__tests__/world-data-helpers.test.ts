@@ -199,41 +199,13 @@ function makeCharacterRecord(overrides?: Partial<CharacterRecord>): CharacterRec
       worldgenOrigin: null,
       legacyTags: [],
     },
-    grounding: {
-      summary: "Grounded from local tavern role.",
-      facts: ["Runs the tavern."],
-      abilities: ["Reads a room"],
-      constraints: ["No combat feats"],
-      signatureMoves: ["Defuse tension"],
-      strongPoints: ["Social read"],
-      vulnerabilities: ["Overprotective"],
-      uncertaintyNotes: ["Bounded to tavern-scale evidence."],
-      powerProfile: {
-        attack: "Minimal direct attack profile.",
-        speed: "Normal human reactions.",
-        durability: "Unremarkable.",
-        range: "Close social context only.",
-        strengths: ["Social read"],
-        constraints: ["No combat feats"],
-        vulnerabilities: ["Overprotective"],
-        uncertaintyNotes: ["Bounded profile."],
-      },
-      sources: [],
-    },
-    sourceBundle: {
-      canonSources: [],
-      secondarySources: [],
-      synthesis: {
-        owner: "worldforge",
-        strategy: "worldforge-owned-synthesis",
-        notes: [],
-      },
-    },
-    continuity: {
-      identityInertia: "anchored",
-      protectedCore: ["Protect guests"],
-      mutableSurface: ["Mood"],
-      changePressureNotes: ["Requires sustained betrayal."],
+    powerStats: {
+      attackPotency: { tier: "Human", rank: 3 },
+      speed: { tier: "Human", rank: 5 },
+      durability: { tier: "Human", rank: 4 },
+      intelligence: { tier: "Above Average", rank: 6 },
+      hax: [],
+      vulnerabilities: [{ description: "Overprotective of tavern guests", severity: "minor" }],
     },
     ...typedOverrides,
   };
@@ -347,7 +319,7 @@ describe("getWorldData", () => {
 });
 
 describe("toEditableScaffold", () => {
-  it("preserves characterRecord on scaffold NPCs so advanced review surfaces can inspect grounding", () => {
+  it("preserves characterRecord on scaffold NPCs so advanced review surfaces can inspect power stats", () => {
     const record = makeCharacterRecord();
     const world = makeWorldData({
       npcs: [
@@ -371,9 +343,7 @@ describe("toEditableScaffold", () => {
     const scaffold = toEditableScaffold(world, "Premise", []);
 
     expect(scaffold.npcs[0]?.characterRecord).toEqual(record);
-    expect(scaffold.npcs[0]?.characterRecord?.grounding?.powerProfile?.attack).toBe(
-      "Minimal direct attack profile.",
-    );
+    expect(scaffold.npcs[0]?.characterRecord?.powerStats?.attackPotency.tier).toBe("Human");
   });
 });
 
@@ -497,6 +467,70 @@ describe("toEditableScaffold", () => {
     const scaffold = toEditableScaffold(world, "A test premise", lore);
 
     expect(scaffold.locations[0].connectedTo).toEqual(["Market"]);
+  });
+
+  it("preserves dense location hierarchy and NPC scene placement in editable scaffolds", () => {
+    const world = makeWorldData({
+      locations: [
+        {
+          id: "loc-macro",
+          campaignId: "c1",
+          name: "Shibuya District",
+          description: "Macro urban area",
+          tags: ["urban"],
+          connectedTo: ["loc-scene"],
+          isStarting: true,
+          locationKind: "macro",
+          parentLocationId: null,
+        },
+        {
+          id: "loc-scene",
+          campaignId: "c1",
+          name: "Platform B5",
+          description: "A persistent underground scene",
+          tags: ["station"],
+          connectedTo: ["loc-macro"],
+          isStarting: false,
+          locationKind: "persistent_sublocation",
+          parentLocationId: "loc-macro",
+        },
+      ],
+      npcs: [
+        {
+          id: "npc-scoped",
+          campaignId: "c1",
+          name: "Station Warden",
+          persona: "Tracks every cursed train arrival.",
+          tags: ["warden"],
+          tier: "supporting",
+          currentLocationId: "loc-macro",
+          sceneScopeId: "loc-scene",
+          goals: { short_term: ["Seal Platform B5"], long_term: ["Keep Shibuya moving"] },
+          beliefs: [],
+        },
+      ],
+      relationships: [],
+    });
+
+    const scaffold = toEditableScaffold(world, "A test premise", lore);
+
+    expect(scaffold.locations[0]).toMatchObject({
+      name: "Shibuya District",
+      kind: "macro",
+      parentLocationName: null,
+      connectedTo: ["Platform B5"],
+    });
+    expect(scaffold.locations[1]).toMatchObject({
+      name: "Platform B5",
+      kind: "persistent_sublocation",
+      parentLocationName: "Shibuya District",
+      connectedTo: ["Shibuya District"],
+    });
+    expect(scaffold.npcs[0]).toMatchObject({
+      name: "Station Warden",
+      locationName: "Shibuya District",
+      sceneLocationName: "Platform B5",
+    });
   });
 
   it("maps NPC currentLocationId to locationName", () => {
@@ -737,26 +771,13 @@ describe("toEditableScaffold", () => {
         worldgenOrigin: null,
         legacyTags: [],
       },
-      grounding: {
-        summary: "Canon-grounded around rumor brokerage and barrier-safe smuggling.",
-        facts: ["Runs exchanges in the tavern cellar."],
-        abilities: ["Information brokerage"],
-        constraints: ["Won't betray paying clients."],
-        signatureMoves: ["Rumor exchange"],
-        strongPoints: ["Social leverage"],
-        vulnerabilities: ["Heat from local sorcerers"],
-        uncertaintyNotes: [],
-        powerProfile: {
-          attack: "Low direct lethality.",
-          speed: "Normal human speed.",
-          durability: "Fragile outside of allies.",
-          range: "Influence travels through contacts.",
-          strengths: ["Social leverage"],
-          constraints: ["Won't betray paying clients."],
-          vulnerabilities: ["Heat from local sorcerers"],
-          uncertaintyNotes: [],
-        },
-        sources: [],
+      powerStats: {
+        attackPotency: { tier: "Human", rank: 2 },
+        speed: { tier: "Human", rank: 5 },
+        durability: { tier: "Human", rank: 3 },
+        intelligence: { tier: "Gifted", rank: 4 },
+        hax: [],
+        vulnerabilities: [{ description: "Heat from local sorcerers", severity: "major" }],
       },
     };
 
@@ -782,7 +803,7 @@ describe("toEditableScaffold", () => {
     );
 
     expect(scaffold.npcs[0].characterRecord).toEqual(characterRecord);
-    expect(scaffold.npcs[0].characterRecord?.grounding?.powerProfile?.attack).toBe("Low direct lethality.");
+    expect(scaffold.npcs[0].characterRecord?.powerStats?.attackPotency.tier).toBe("Human");
   });
 
   it("prefers draft.identity.tier over legacy row tier when both are present", () => {

@@ -229,8 +229,8 @@ describe("createDefaultSettings", () => {
       expect(settings.storyteller.temperature).toBe(0.8);
     });
 
-    it("has maxTokens 1024", () => {
-      expect(settings.storyteller.maxTokens).toBe(1024);
+    it("has maxTokens 4096 for full RP narration", () => {
+      expect(settings.storyteller.maxTokens).toBe(4096);
     });
 
     it("has empty model string", () => {
@@ -316,6 +316,34 @@ describe("createDefaultSettings", () => {
 
     it("defaults searchProvider to 'brave'", () => {
       expect(settings.research.searchProvider).toBe("brave");
+    });
+  });
+
+  // --- observability (Phase 58) ---
+
+  describe("observability config", () => {
+    it("is enabled by default", () => {
+      expect(settings.observability.enabled).toBe(true);
+    });
+
+    it("defaults dumpFullPrompts to false", () => {
+      expect(settings.observability.dumpFullPrompts).toBe(false);
+    });
+
+    it("enables every role toggle by default", () => {
+      expect(settings.observability.roles.judge).toBe(true);
+      expect(settings.observability.roles.storyteller).toBe(true);
+      expect(settings.observability.roles.oracle).toBe(true);
+      expect(settings.observability.roles.npcAgent).toBe(true);
+      expect(settings.observability.roles.reflection).toBe(true);
+      expect(settings.observability.roles.embedder).toBe(true);
+    });
+
+    it("exposes exactly the 6 documented role keys", () => {
+      const keys = Object.keys(settings.observability.roles).sort();
+      expect(keys).toEqual(
+        ["embedder", "judge", "npcAgent", "oracle", "reflection", "storyteller"],
+      );
     });
   });
 

@@ -12,12 +12,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { StringListEditor } from "@/components/world-review/string-list-editor";
-import { TagEditor } from "@/components/world-review/tag-editor";
+import { PersonalitySection } from "@/components/world-review/personality-section";
 import { cn } from "@/lib/utils";
 import type {
   LoadoutPreviewResult,
   PersonaTemplateSummary,
 } from "@/lib/api-types";
+import { PowerStatsSection } from "./power-stats-section";
 
 interface CharacterCardProps {
   draft: CharacterDraft;
@@ -31,6 +32,14 @@ interface CharacterCardProps {
   onResolveStartingLocation: () => void;
   onPreviewLoadout?: () => void;
   onApplyPersonaTemplate?: (templateId: string) => void;
+  /**
+   * True when this draft was hydrated from a pre-Phase-60 database record
+   * (i.e. no `powerStats` were ever generated for it). Renders a muted
+   * "Not assessed (legacy record)" label instead of the full PowerStats
+   * block. Defaults to false — newly-ingested drafts always carry
+   * `powerStats` or the pipeline threw upstream.
+   */
+  isLegacyRecord?: boolean;
 }
 
 const HP_OPTIONS = [1, 2, 3, 4, 5];
@@ -103,36 +112,17 @@ function getIdentityFidelitySummary(draft: CharacterDraft) {
     .map((goal) => goal.trim())
     .filter(Boolean)
     .slice(0, 2);
-  const sourceLabels = Array.from(
-    new Set(
-      [
-        ...(draft.sourceBundle?.canonSources ?? []),
-        ...(draft.sourceBundle?.secondarySources ?? []),
-      ]
-        .map((citation) => citation.label.trim())
-        .filter(Boolean),
-    ),
-  ).slice(0, 3);
-  const continuityLabel = draft.continuity
-    ? `${draft.continuity.identityInertia.charAt(0).toUpperCase()}${draft.continuity.identityInertia.slice(1)} continuity`
-    : null;
-  const changePressureNote = draft.continuity?.changePressureNotes?.find((note) => note.trim()) ?? null;
   const hasFidelitySignals = Boolean(
     draft.identity.canonicalStatus !== "original"
     || selfImage
-    || activeGoals.length > 0
-    || sourceLabels.length > 0
-    || continuityLabel,
+    || activeGoals.length > 0,
   );
 
   return {
     hasFidelitySignals,
     canonicalStatusLabel: formatCanonicalStatus(draft.identity.canonicalStatus),
-    continuityLabel,
     selfImage,
     activeGoals,
-    sourceLabels,
-    changePressureNote,
   };
 }
 
@@ -148,6 +138,7 @@ function CharacterCardInner({
   onResolveStartingLocation,
   onPreviewLoadout,
   onApplyPersonaTemplate,
+  isLegacyRecord = false,
 }: CharacterCardProps) {
   // Local draft state — edits happen here, debounced to parent
   const [local, setLocal] = useState<CharacterDraft>(draft);
@@ -276,14 +267,6 @@ function CharacterCardInner({
                 {identityFidelity.canonicalStatusLabel}
               </p>
             </div>
-            {identityFidelity.continuityLabel && (
-              <div className="flex flex-col gap-1">
-                <FieldLabel>Continuity</FieldLabel>
-                <p className="text-[13px] text-zinc-300">
-                  {identityFidelity.continuityLabel}
-                </p>
-              </div>
-            )}
           </div>
           {identityFidelity.selfImage && (
             <div className="flex flex-col gap-1">
@@ -301,50 +284,29 @@ function CharacterCardInner({
               </p>
             </div>
           )}
-          {identityFidelity.sourceLabels.length > 0 && (
-            <div className="flex flex-col gap-1">
-              <FieldLabel>Source Signals</FieldLabel>
-              <div className="flex flex-wrap gap-2">
-                {identityFidelity.sourceLabels.map((label) => (
-                  <span
-                    key={label}
-                    className="rounded-full border border-zinc-700/60 px-2 py-1 text-[12px] text-zinc-400"
-                  >
-                    {label}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-          {identityFidelity.changePressureNote && (
-            <p className="text-[12px] text-zinc-500">
-              {identityFidelity.changePressureNote}
-            </p>
-          )}
         </div>
       )}
 
-      {/* ── CAPABILITIES ── */}
-      <div className="flex flex-col gap-[clamp(10px,0.8vw,16px)]">
-        <SectionLabel>Capabilities</SectionLabel>
-        <div className="grid gap-[clamp(16px,1.2vw,24px)] md:grid-cols-2">
-          <div className="flex flex-col gap-1">
-            <FieldLabel>Traits</FieldLabel>
-            <TagEditor
-              tags={local.capabilities.traits}
-              onChange={(traits) => patch("capabilities", { ...local.capabilities, traits })}
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <FieldLabel>Flaws</FieldLabel>
-            <TagEditor
-              tags={local.capabilities.flaws}
-              onChange={(flaws) => patch("capabilities", { ...local.capabilities, flaws })}
-            />
-          </div>
-        </div>
-      </div>
+      <PersonalitySection personality={local.identity.personality} />
 
+      {/* ── POWER STATS ── (read-only per Phase 61; see power-stats-section.tsx) */}
+      {local.powerStats ? (
+        <section
+          aria-labelledby="power-stats-heading"
+          className="flex flex-col gap-3 rounded-lg border border-zinc-800 bg-zinc-900/60 p-[clamp(14px,1.2vw,20px)]"
+        >
+          <PowerStatsSection powerStats={local.powerStats} />
+        </section>
+      ) : isLegacyRecord ? (
+        <section
+          aria-label="Power stats not assessed"
+          className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4"
+        >
+          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-600">
+            Power stats — not assessed (legacy record)
+          </span>
+        </section>
+      ) : null}
 
       {/* ── STATUS ── */}
       <div className="flex flex-col gap-[clamp(10px,0.8vw,16px)]">

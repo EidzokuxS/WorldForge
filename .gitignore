@@ -53,6 +53,10 @@ AGENTS.md
 start.bat
 
 # Local scratch artifacts
+output/
+.planning/phases/**/external-reviews/*.err.log
+.planning/phases/**/external-reviews/*pid*.json
+.planning/phases/**/external-reviews/run-*.ps1
 .tmp-lancedb-test*/
 tmp/
 settings.json.bak

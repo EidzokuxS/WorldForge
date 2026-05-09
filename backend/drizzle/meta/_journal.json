@@ -64,6 +64,27 @@
       "when": 1775989473666,
       "tag": "0008_dusty_tana_nile",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1778184084836,
+      "tag": "0009_living_world_authority",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1778213000000,
+      "tag": "0010_actor_knowledge",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1778220110916,
+      "tag": "0011_small_hitman",
+      "breakpoints": true
     }
   ]
 }

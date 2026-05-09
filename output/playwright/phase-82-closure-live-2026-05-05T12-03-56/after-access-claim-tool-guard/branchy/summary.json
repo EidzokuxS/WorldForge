@@ -1,0 +1,31 @@
+{
+  "campaignId": "0ed6bb3c-a528-4067-8f29-86ebdd8d0637",
+  "checkpointId": "1777976731046-phase-84-branchy-rp-baseline-2026-05-05t",
+  "artifactDir": "R:\\Projects\\WorldForge\\output\\playwright\\phase-82-closure-live-2026-05-05T12-03-56\\after-access-claim-tool-guard\\branchy",
+  "branchCount": 1,
+  "turnCount": 2,
+  "hardFailureCount": 0,
+  "averageScore": 5,
+  "browserErrors": [],
+  "passed": true,
+  "records": [
+    {
+      "branch": "false-claim-boundary",
+      "turn": 1,
+      "elapsedMs": 50190,
+      "subjectiveScore": 5,
+      "hardFailures": [],
+      "screenshot": "R:\\Projects\\WorldForge\\output\\playwright\\phase-82-closure-live-2026-05-05T12-03-56\\after-access-claim-tool-guard\\branchy\\false-claim-boundary-turn-1.png",
+      "assistantPreview": "The door stays open behind her, brass latch resting where it fell. Mira is already through—already standing in the narrow office with her boots on dusty floorboards and the crosshatch of iron-barred light falling across her hands.\n\nThe mast"
+    },
+    {
+      "branch": "false-claim-boundary",
+      "turn": 2,
+      "elapsedMs": 235554,
+      "subjectiveScore": 5,
+      "hardFailures": [],
+      "screenshot": "R:\\Projects\\WorldForge\\output\\playwright\\phase-82-closure-live-2026-05-05T12-03-56\\after-access-claim-tool-guard\\branchy\\false-claim-boundary-turn-2.png",
+      "assistantPreview": "Mira's voice bounces off the narrow walls and dies against the iron-barred window. No one answers. The office holds its silence like a held breath—the dusty desk, the cracked leather chair, the signal log rack with its faded quarter-spines "
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "wave": "88-02",
+  "status": "green",
+  "tracePolicy": {
+    "purpose": "Diagnose prompt pressure and hidden exclusions.",
+    "clipsModelOutput": false,
+    "clipsSemanticFacts": false,
+    "mayBlockUnsafePrompt": true
+  },
+  "traceFields": [
+    "label",
+    "estimatedInputTokens",
+    "visibleItemCount",
+    "hiddenExcludedCount",
+    "candidateItemCount",
+    "sectionCounts",
+    "didClipModelOutput",
+    "notes"
+  ],
+  "usedBy": [
+    "ActorFrame",
+    "CommandNodeFrame",
+    "PlayerFacingPacket"
+  ]
+}

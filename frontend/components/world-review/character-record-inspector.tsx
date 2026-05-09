@@ -1,7 +1,11 @@
 "use client";
 
 import type { ReactNode } from "react";
-import type { CharacterDraft, CharacterRecord } from "@worldforge/shared";
+import type {
+  CharacterDraft,
+  CharacterRecord,
+} from "@worldforge/shared";
+
 import { Badge } from "@/components/ui/badge";
 
 interface CharacterRecordInspectorProps {
@@ -24,22 +28,75 @@ function hasText(value: string | null | undefined): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function hasItems<T>(items: T[] | null | undefined): items is T[] {
-  return Array.isArray(items) && items.length > 0;
+function hasItems(
+  items: readonly (string | null | undefined)[] | null | undefined,
+): boolean {
+  if (!items || items.length === 0) return false;
+  return items.some((item) => typeof item === "string" && item.trim().length > 0);
 }
 
-function formatLabel(value: string): string {
-  return value
-    .replace(/([a-z])([A-Z])/g, "$1 $2")
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/^\w/, (char) => char.toUpperCase());
+function hasAnyComplementSection(d: CharacterDraft | CharacterRecord): boolean {
+  return (
+    hasText(d.identity?.baseFacts?.biography) ||
+    hasText(d.identity?.behavioralCore?.selfImage) ||
+    hasItems(d.identity?.baseFacts?.socialRole) ||
+    hasItems(d.identity?.baseFacts?.hardConstraints) ||
+    hasItems(d.socialContext?.socialStatus) ||
+    (Array.isArray(d.socialContext?.relationshipRefs) &&
+      d.socialContext.relationshipRefs.length > 0) ||
+    hasText(d.profile?.species) ||
+    hasText(d.profile?.gender) ||
+    hasText(d.profile?.ageText) ||
+    hasText(d.profile?.appearance) ||
+    hasText(d.profile?.backgroundSummary) ||
+    hasItems(d.identity?.liveDynamics?.beliefDrift) ||
+    hasItems(d.identity?.liveDynamics?.currentStrains) ||
+    hasItems(d.identity?.liveDynamics?.earnedChanges) ||
+    hasItems(d.motivations?.beliefs) ||
+    hasItems(d.motivations?.drives) ||
+    hasItems(d.motivations?.frictions) ||
+    (Array.isArray(d.capabilities?.skills) && d.capabilities.skills.length > 0) ||
+    hasItems(d.capabilities?.specialties) ||
+    hasText(d.capabilities?.wealthTier) ||
+    hasItems(d.state?.conditions) ||
+    hasItems(d.state?.statusFlags) ||
+    hasItems(d.loadout?.inventorySeed) ||
+    hasItems(d.loadout?.equippedItemRefs) ||
+    hasItems(d.loadout?.signatureItems) ||
+    hasText(d.loadout?.currencyNotes) ||
+    hasText(d.startConditions?.sourcePrompt) ||
+    hasText(d.startConditions?.arrivalMode) ||
+    hasText(d.startConditions?.startLocationId) ||
+    hasText(d.startConditions?.immediateSituation) ||
+    hasItems(d.startConditions?.entryPressure) ||
+    hasItems(d.startConditions?.companions) ||
+    hasText(d.startConditions?.startingVisibility) ||
+    hasText(d.startConditions?.resolvedNarrative) ||
+    Boolean(d.provenance?.importMode) ||
+    hasText(d.provenance?.worldgenOrigin)
+  );
+}
+
+function relationshipLabel(
+  ref: CharacterDraft["socialContext"]["relationshipRefs"][number],
+): string {
+  const entityName = ref.entityName?.trim() ?? "";
+  const entityId = ref.entityId?.trim() ?? "";
+  const relationType = ref.type?.trim() ?? "";
+  const reason = ref.reason?.trim() ?? "";
+
+  if (entityName && relationType) {
+    return `${entityName} (${relationType})`;
+  }
+
+  return entityName || entityId || relationType || reason;
 }
 
 function Section(props: { title: string; children: ReactNode; className?: string }) {
   return (
-    <section className={`space-y-3 rounded-xl border border-white/[0.06] bg-black/20 p-4 ${props.className ?? ""}`.trim()}>
+    <section
+      className={`space-y-3 rounded-xl border border-white/[0.06] bg-black/20 p-4 ${props.className ?? ""}`.trim()}
+    >
       <h4 className="font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-500">
         {props.title}
       </h4>
@@ -95,37 +152,6 @@ function ListBlock(props: { label: string; items: string[] }) {
   );
 }
 
-function SourceList(props: {
-  title: string;
-  items: Array<{ kind: string; label: string; excerpt: string }>;
-}) {
-  if (!hasItems(props.items)) return null;
-
-  return (
-    <Section title={props.title}>
-      <div className="space-y-3">
-        {props.items.map((item, index) => (
-          <div
-            key={`${item.kind}:${item.label}:${index}`}
-            className="space-y-1 rounded-lg border border-white/[0.05] bg-white/[0.02] p-3"
-          >
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge
-                variant="outline"
-                className="border-white/15 bg-transparent text-[10px] uppercase tracking-[0.12em] text-zinc-300"
-              >
-                {item.kind}
-              </Badge>
-              <span className="text-sm font-medium text-zinc-100">{item.label}</span>
-            </div>
-            <p className="text-sm leading-6 text-zinc-300">{item.excerpt}</p>
-          </div>
-        ))}
-      </div>
-    </Section>
-  );
-}
-
 export function CharacterRecordInspector({
   draft,
   characterRecord,
@@ -140,9 +166,6 @@ export function CharacterRecordInspector({
   const loadout = record?.loadout ?? draft?.loadout;
   const startConditions = record?.startConditions ?? draft?.startConditions;
   const provenance = record?.provenance ?? draft?.provenance;
-  const grounding = record?.grounding ?? draft?.grounding;
-  const sourceBundle = record?.sourceBundle ?? draft?.sourceBundle;
-  const continuity = record?.continuity ?? draft?.continuity;
 
   if (
     !identity ||
@@ -158,13 +181,19 @@ export function CharacterRecordInspector({
     return null;
   }
 
+  const complementSource = draft ?? (record as CharacterDraft | null);
+  const anyComplement = complementSource
+    ? hasAnyComplementSection(complementSource)
+    : false;
+
   const overviewBadges = dedupeStrings([
     identity.canonicalStatus,
-    `${identity.tier} ${identity.role}`,
     provenance.sourceKind,
-    socialContext.originMode ?? "",
-    continuity?.identityInertia ? `${continuity.identityInertia} continuity` : "",
+    provenance.importMode,
+    provenance.worldgenOrigin,
   ]);
+  const hasOverviewSection =
+    hasText(identity.baseFacts?.biography) || overviewBadges.length > 0;
 
   const skillLabels = capabilities.skills.map((skill) =>
     skill.tier ? `${skill.tier} ${skill.name}` : skill.name,
@@ -175,89 +204,84 @@ export function CharacterRecordInspector({
       return normalized !== "npc" && normalized !== "player";
     }),
   );
+  const relationshipLabels = dedupeStrings(
+    (socialContext.relationshipRefs ?? []).map(relationshipLabel),
+  );
   const selfImage = identity.behavioralCore?.selfImage?.trim() ?? "";
   const personaSummary = profile.personaSummary?.trim() ?? "";
   const hasDistinctSelfImage =
-    selfImage.length > 0 && selfImage.toLowerCase() !== personaSummary.toLowerCase();
-
-  const hasGrounding =
-    hasText(grounding?.summary) ||
-    hasItems(grounding?.facts) ||
-    hasItems(grounding?.abilities) ||
-    hasItems(grounding?.signatureMoves) ||
-    hasItems(grounding?.strongPoints) ||
-    hasItems(grounding?.vulnerabilities) ||
-    hasItems(grounding?.uncertaintyNotes);
-
-  const hasPowerProfile =
-    hasText(grounding?.powerProfile?.attack) ||
-    hasText(grounding?.powerProfile?.speed) ||
-    hasText(grounding?.powerProfile?.durability) ||
-    hasText(grounding?.powerProfile?.range) ||
-    hasItems(grounding?.powerProfile?.strengths) ||
-    hasItems(grounding?.powerProfile?.constraints) ||
-    hasItems(grounding?.powerProfile?.vulnerabilities) ||
-    hasItems(grounding?.powerProfile?.uncertaintyNotes);
-
-  const hasCapabilities =
-    hasItems(capabilities.traits) ||
-    hasItems(skillLabels) ||
-    hasItems(capabilities.specialties) ||
-    hasItems(capabilities.flaws) ||
-    hasText(capabilities.wealthTier);
-
-  const hasContinuity =
-    hasText(continuity?.identityInertia) ||
-    hasItems(continuity?.protectedCore) ||
-    hasItems(continuity?.mutableSurface) ||
-    hasItems(continuity?.changePressureNotes);
-
-  const hasSources =
-    hasItems(sourceBundle?.canonSources) ||
-    hasItems(sourceBundle?.secondarySources) ||
-    hasText(sourceBundle?.synthesis.owner) ||
-    hasText(sourceBundle?.synthesis.strategy) ||
-    hasItems(sourceBundle?.synthesis.notes);
+    selfImage.length > 0 &&
+    selfImage.toLowerCase() !== personaSummary.toLowerCase();
 
   const hasIdentitySection =
     hasDistinctSelfImage ||
     hasItems(displaySocialRoles) ||
-    hasItems(identity.behavioralCore?.motives) ||
-    hasItems(identity.behavioralCore?.pressureResponses) ||
-    hasItems(identity.behavioralCore?.taboos) ||
-    hasItems(identity.behavioralCore?.attachments) ||
-    hasItems(identity.baseFacts?.hardConstraints);
+    hasItems(identity.baseFacts?.hardConstraints) ||
+    hasItems(socialContext.socialStatus) ||
+    relationshipLabels.length > 0;
 
-  const hasDynamicsSection =
-    hasItems(identity.liveDynamics?.activeGoals) ||
-    hasItems(motivations.shortTermGoals) ||
-    hasItems(motivations.longTermGoals) ||
-    hasItems(identity.liveDynamics?.beliefDrift) ||
-    hasItems(motivations.beliefs) ||
-    hasItems(identity.liveDynamics?.currentStrains) ||
-    hasItems(motivations.frictions) ||
-    hasItems(identity.liveDynamics?.earnedChanges);
-
-  const runtimeMeta = [
-    { label: "Activity state", value: state.activityState },
-    ...(hasText(provenance.sourceKind) ? [{ label: "Source kind", value: provenance.sourceKind }] : []),
-    ...(hasText(provenance.importMode) ? [{ label: "Import mode", value: provenance.importMode }] : []),
-    ...(hasText(provenance.templateId) ? [{ label: "Template", value: provenance.templateId }] : []),
-    ...(hasText(startConditions.startLocationId) ? [{ label: "Start location", value: startConditions.startLocationId }] : []),
-    ...(hasText(socialContext.currentLocationName) ? [{ label: "Current location", value: socialContext.currentLocationName }] : []),
-    ...(hasText(socialContext.factionName) && socialContext.factionName !== "None"
-      ? [{ label: "Faction", value: socialContext.factionName }]
+  const profileMeta = [
+    ...(hasText(profile.species)
+      ? [{ label: "Species", value: profile.species }]
+      : []),
+    ...(hasText(profile.gender)
+      ? [{ label: "Gender", value: profile.gender }]
+      : []),
+    ...(hasText(profile.ageText)
+      ? [{ label: "Age", value: profile.ageText }]
       : []),
   ];
+  const hasProfileSection =
+    profileMeta.length > 0 ||
+    hasText(profile.appearance) ||
+    hasText(profile.backgroundSummary);
 
+  const hasDynamicsSection =
+    hasItems(identity.liveDynamics?.beliefDrift) ||
+    hasItems(identity.liveDynamics?.currentStrains) ||
+    hasItems(identity.liveDynamics?.earnedChanges) ||
+    hasItems(motivations.beliefs) ||
+    hasItems(motivations.drives) ||
+    hasItems(motivations.frictions);
+
+  const hasCapabilities =
+    hasItems(skillLabels) ||
+    hasItems(capabilities.specialties) ||
+    hasText(capabilities.wealthTier);
+
+  const runtimeMeta = [
+    { label: "HP", value: String(state.hp) },
+    ...(hasText(state.activityState)
+      ? [{ label: "Activity state", value: state.activityState }]
+      : []),
+  ];
   const hasRuntimeSection =
-    runtimeMeta.length > 0 ||
-    hasItems(state.conditions) ||
-    hasItems(state.statusFlags) ||
+    hasItems(state.conditions) || hasItems(state.statusFlags);
+
+  const hasLoadoutSection =
     hasItems(loadout.inventorySeed) ||
     hasItems(loadout.equippedItemRefs) ||
     hasItems(loadout.signatureItems) ||
-    hasText(startConditions.immediateSituation);
+    hasText(loadout.currencyNotes);
+
+  const startingMeta = [
+    ...(hasText(startConditions.arrivalMode)
+      ? [{ label: "Arrival mode", value: startConditions.arrivalMode }]
+      : []),
+    ...(hasText(startConditions.startLocationId)
+      ? [{ label: "Start location", value: startConditions.startLocationId }]
+      : []),
+    ...(hasText(startConditions.startingVisibility)
+      ? [{ label: "Starting visibility", value: startConditions.startingVisibility }]
+      : []),
+  ];
+  const hasStartingConditionsSection =
+    startingMeta.length > 0 ||
+    hasText(startConditions.sourcePrompt) ||
+    hasText(startConditions.immediateSituation) ||
+    hasItems(startConditions.entryPressure) ||
+    hasItems(startConditions.companions) ||
+    hasText(startConditions.resolvedNarrative);
 
   const rawPayload = JSON.stringify(
     {
@@ -268,6 +292,9 @@ export function CharacterRecordInspector({
     2,
   );
 
+  // Phase 63: section count reduced 10 -> 9 (Provenance removed from Advanced).
+  // See .planning/phases/63-personality-interiority-model/63-REVIEWS.md and P63-R5.
+  // Supersedes the Phase 62 10-section lock for this inspector contract.
   return (
     <details className="mt-4">
       <summary className="flex cursor-pointer list-none justify-end">
@@ -277,181 +304,191 @@ export function CharacterRecordInspector({
       </summary>
 
       <div className="mt-3 space-y-4 rounded-xl border border-white/[0.06] bg-zinc-950/40 p-4">
-        <Section title="Overview">
-          <div className="flex flex-wrap gap-2">
-            {overviewBadges.map((badge) => (
-              <Badge key={badge} variant="outline" className="border-white/15 bg-transparent text-zinc-200">
-                {badge}
-              </Badge>
-            ))}
-          </div>
-
-          <MetaGrid
-            items={[
-              { label: "Display name", value: identity.displayName },
-              { label: "Current location", value: socialContext.currentLocationName || "Unknown" },
-              ...(hasText(socialContext.factionName) && socialContext.factionName !== "None"
-                ? [{ label: "Faction", value: socialContext.factionName }]
-                : []),
-            ]}
-          />
-
-          {hasText(profile.personaSummary) ? <TextBlock label="Persona" value={profile.personaSummary} /> : null}
-          {hasText(identity.baseFacts?.biography) ? (
-            <TextBlock label="Biography" value={identity.baseFacts.biography} />
-          ) : null}
-        </Section>
-
-        {hasIdentitySection ? (
-          <Section title="Identity Core">
-            {hasDistinctSelfImage ? (
-              <TextBlock label="Self image" value={selfImage} />
-            ) : null}
-
-            <div className="space-y-4">
-              <ListBlock label="Social roles" items={displaySocialRoles} />
-              <ListBlock label="Motives" items={identity.behavioralCore?.motives ?? []} />
-              <ListBlock label="Pressure responses" items={identity.behavioralCore?.pressureResponses ?? []} />
-              <ListBlock label="Taboos" items={identity.behavioralCore?.taboos ?? []} />
-              <ListBlock label="Attachments" items={identity.behavioralCore?.attachments ?? []} />
-              <ListBlock label="Hard constraints" items={identity.baseFacts?.hardConstraints ?? []} />
-            </div>
-          </Section>
-        ) : null}
-
-        {hasDynamicsSection ? (
-          <Section title="Live Dynamics">
-            <div className="space-y-4">
-              <ListBlock label="Active goals" items={identity.liveDynamics?.activeGoals ?? motivations.shortTermGoals ?? []} />
-              <ListBlock label="Long-term goals" items={motivations.longTermGoals ?? []} />
-              <ListBlock label="Belief drift" items={identity.liveDynamics?.beliefDrift ?? motivations.beliefs ?? []} />
-              <ListBlock label="Current strains" items={identity.liveDynamics?.currentStrains ?? motivations.frictions ?? []} />
-              <ListBlock label="Earned changes" items={identity.liveDynamics?.earnedChanges ?? []} />
-            </div>
-          </Section>
-        ) : null}
-
-        {hasGrounding ? (
-          <Section title="Grounding">
-            {hasText(grounding?.summary) ? <TextBlock label="Summary" value={grounding.summary} /> : null}
-            <div className="space-y-4">
-              <ListBlock label="Facts" items={grounding?.facts ?? []} />
-              <ListBlock label="Abilities" items={grounding?.abilities ?? []} />
-              <ListBlock label="Signature moves" items={grounding?.signatureMoves ?? []} />
-              <ListBlock label="Strong points" items={grounding?.strongPoints ?? []} />
-              <ListBlock label="Vulnerabilities" items={grounding?.vulnerabilities ?? []} />
-              <ListBlock label="Uncertainty" items={grounding?.uncertaintyNotes ?? []} />
-            </div>
-          </Section>
-        ) : null}
-
-        {hasPowerProfile ? (
-          <Section title="Power Profile">
-            <MetaGrid
-              items={[
-                ...(hasText(grounding?.powerProfile?.attack)
-                  ? [{ label: "Attack", value: grounding!.powerProfile!.attack }]
-                  : []),
-                ...(hasText(grounding?.powerProfile?.speed)
-                  ? [{ label: "Speed", value: grounding!.powerProfile!.speed }]
-                  : []),
-                ...(hasText(grounding?.powerProfile?.durability)
-                  ? [{ label: "Durability", value: grounding!.powerProfile!.durability }]
-                  : []),
-                ...(hasText(grounding?.powerProfile?.range)
-                  ? [{ label: "Range", value: grounding!.powerProfile!.range }]
-                  : []),
-              ]}
-            />
-            <div className="space-y-4">
-              <ListBlock label="Strengths" items={grounding?.powerProfile?.strengths ?? []} />
-              <ListBlock label="Constraints" items={grounding?.powerProfile?.constraints ?? []} />
-              <ListBlock label="Vulnerabilities" items={grounding?.powerProfile?.vulnerabilities ?? []} />
-              <ListBlock label="Uncertainty" items={grounding?.powerProfile?.uncertaintyNotes ?? []} />
-            </div>
-          </Section>
-        ) : null}
-
-        {hasCapabilities ? (
-          <Section title="Capabilities">
-            <div className="space-y-4">
-              <ListBlock label="Traits" items={capabilities.traits} />
-              <ListBlock label="Skills" items={skillLabels} />
-              <ListBlock label="Specialties" items={capabilities.specialties} />
-              <ListBlock label="Flaws" items={capabilities.flaws} />
-              {hasText(capabilities.wealthTier) ? (
-                <div className="space-y-2">
-                  <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-500">
-                    Wealth
-                  </div>
-                  <div className="text-sm leading-6 text-zinc-100">{capabilities.wealthTier}</div>
-                </div>
-              ) : null}
-            </div>
-          </Section>
-        ) : null}
-
-        {hasContinuity ? (
-          <Section title="Continuity">
-            <MetaGrid
-              items={
-                continuity?.identityInertia
-                  ? [{ label: "Identity inertia", value: formatLabel(continuity.identityInertia) }]
-                  : []
-              }
-            />
-            <div className="space-y-4">
-              <ListBlock label="Protected core" items={continuity?.protectedCore ?? []} />
-              <ListBlock label="Mutable surface" items={continuity?.mutableSurface ?? []} />
-              <ListBlock label="Change pressure" items={continuity?.changePressureNotes ?? []} />
-            </div>
-          </Section>
-        ) : null}
-
-        {hasRuntimeSection ? (
-          <Section title="Runtime & Provenance">
-            <MetaGrid items={runtimeMeta} />
-
-            <div className="space-y-4">
-              <ListBlock label="Conditions" items={state.conditions} />
-              <ListBlock label="Status flags" items={state.statusFlags} />
-              <ListBlock label="Inventory seed" items={loadout.inventorySeed} />
-              <ListBlock label="Equipped refs" items={loadout.equippedItemRefs} />
-              <ListBlock label="Signature items" items={loadout.signatureItems} />
-            </div>
-
-            {hasText(startConditions.immediateSituation) ? (
-              <TextBlock label="Immediate situation" value={startConditions.immediateSituation} />
-            ) : null}
-          </Section>
-        ) : null}
-
-        {hasSources ? (
+        {anyComplement ? (
           <>
-            <div className="space-y-4">
-              <SourceList title="Canon Sources" items={sourceBundle?.canonSources ?? []} />
-              <SourceList title="Secondary Sources" items={sourceBundle?.secondarySources ?? []} />
-            </div>
+            {hasOverviewSection ? (
+              <Section title="Overview">
+                {overviewBadges.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {overviewBadges.map((badge) => (
+                      <Badge
+                        key={badge}
+                        variant="outline"
+                        className="border-white/15 bg-transparent text-zinc-200"
+                      >
+                        {badge}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : null}
 
-            {(hasText(sourceBundle?.synthesis.owner) ||
-              hasText(sourceBundle?.synthesis.strategy) ||
-              hasItems(sourceBundle?.synthesis.notes)) ? (
-              <Section title="Synthesis">
-                <MetaGrid
-                  items={[
-                    ...(hasText(sourceBundle?.synthesis.owner)
-                      ? [{ label: "Owner", value: sourceBundle!.synthesis.owner }]
-                      : []),
-                    ...(hasText(sourceBundle?.synthesis.strategy)
-                      ? [{ label: "Strategy", value: sourceBundle!.synthesis.strategy }]
-                      : []),
-                  ]}
+                {hasText(identity.baseFacts?.biography) ? (
+                  <TextBlock
+                    label="Biography"
+                    value={identity.baseFacts.biography}
+                  />
+                ) : null}
+              </Section>
+            ) : null}
+
+            {hasIdentitySection ? (
+              <Section title="Identity Core">
+                {hasDistinctSelfImage ? (
+                  <TextBlock label="Self image" value={selfImage} />
+                ) : null}
+
+                <div className="space-y-4">
+                  <ListBlock label="Social roles" items={displaySocialRoles} />
+                  <ListBlock
+                    label="Hard constraints"
+                    items={identity.baseFacts?.hardConstraints ?? []}
+                  />
+                  {hasItems(socialContext.socialStatus) ? (
+                    <ListBlock
+                      label="Social status"
+                      items={socialContext.socialStatus ?? []}
+                    />
+                  ) : null}
+                  {relationshipLabels.length > 0 ? (
+                    <ListBlock
+                      label="Relationships"
+                      items={relationshipLabels}
+                    />
+                  ) : null}
+                </div>
+              </Section>
+            ) : null}
+
+            {hasProfileSection ? (
+              <Section title="Profile">
+                <MetaGrid items={profileMeta} />
+                {hasText(profile.appearance) ? (
+                  <TextBlock label="Appearance" value={profile.appearance} />
+                ) : null}
+                {hasText(profile.backgroundSummary) ? (
+                  <TextBlock
+                    label="Background summary"
+                    value={profile.backgroundSummary}
+                  />
+                ) : null}
+              </Section>
+            ) : null}
+
+            {hasDynamicsSection ? (
+              <Section title="Live Dynamics">
+                <div className="space-y-4">
+                  <ListBlock
+                    label="Belief drift"
+                    items={identity.liveDynamics?.beliefDrift ?? []}
+                  />
+                  <ListBlock
+                    label="Current strains"
+                    items={identity.liveDynamics?.currentStrains ?? []}
+                  />
+                  <ListBlock
+                    label="Earned changes"
+                    items={identity.liveDynamics?.earnedChanges ?? []}
+                  />
+                  <ListBlock label="Beliefs" items={motivations.beliefs ?? []} />
+                  <ListBlock label="Drives" items={motivations.drives ?? []} />
+                  <ListBlock
+                    label="Frictions"
+                    items={motivations.frictions ?? []}
+                  />
+                </div>
+              </Section>
+            ) : null}
+
+            {hasCapabilities ? (
+              <Section title="Capabilities">
+                <div className="space-y-4">
+                  <ListBlock label="Skills" items={skillLabels} />
+                  <ListBlock
+                    label="Specialties"
+                    items={capabilities.specialties}
+                  />
+                  {hasText(capabilities.wealthTier) ? (
+                    <div className="space-y-2">
+                      <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-zinc-500">
+                        Wealth
+                      </div>
+                      <div className="text-sm leading-6 text-zinc-100">
+                        {capabilities.wealthTier}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </Section>
+            ) : null}
+
+            {hasRuntimeSection ? (
+              <Section title="Runtime & State">
+                <MetaGrid items={runtimeMeta} />
+
+                <div className="space-y-4">
+                  <ListBlock label="Conditions" items={state.conditions} />
+                  <ListBlock label="Status flags" items={state.statusFlags} />
+                </div>
+              </Section>
+            ) : null}
+
+            {hasLoadoutSection ? (
+              <Section title="Loadout">
+                <div className="space-y-4">
+                  <ListBlock label="Inventory seed" items={loadout.inventorySeed} />
+                  <ListBlock
+                    label="Equipped refs"
+                    items={loadout.equippedItemRefs}
+                  />
+                  <ListBlock
+                    label="Signature items"
+                    items={loadout.signatureItems}
+                  />
+                  {hasText(loadout.currencyNotes) ? (
+                    <TextBlock
+                      label="Currency notes"
+                      value={loadout.currencyNotes}
+                    />
+                  ) : null}
+                </div>
+              </Section>
+            ) : null}
+
+            {hasStartingConditionsSection ? (
+              <Section title="Starting Conditions">
+                <MetaGrid items={startingMeta} />
+                {hasText(startConditions.sourcePrompt) ? (
+                  <TextBlock
+                    label="Source prompt"
+                    value={startConditions.sourcePrompt}
+                  />
+                ) : null}
+                {hasText(startConditions.immediateSituation) ? (
+                  <TextBlock
+                    label="Immediate situation"
+                    value={startConditions.immediateSituation}
+                  />
+                ) : null}
+                <ListBlock
+                  label="Entry pressure"
+                  items={startConditions.entryPressure ?? []}
                 />
-                <ListBlock label="Notes" items={sourceBundle?.synthesis.notes ?? []} />
+                <ListBlock
+                  label="Companions"
+                  items={startConditions.companions ?? []}
+                />
+                {hasText(startConditions.resolvedNarrative) ? (
+                  <TextBlock
+                    label="Resolved narrative"
+                    value={startConditions.resolvedNarrative}
+                  />
+                ) : null}
               </Section>
             ) : null}
           </>
-        ) : null}
+        ) : (
+          <p className="text-sm text-zinc-500">No additional data</p>
+        )}
 
         <details className="rounded-lg border border-white/[0.06] bg-black/20">
           <summary className="cursor-pointer px-4 py-3 font-mono text-[10px] uppercase tracking-[0.14em] text-zinc-400">

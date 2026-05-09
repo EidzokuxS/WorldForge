@@ -1,0 +1,28 @@
+{
+  "fixtureId": "deepseek-scene-plan-missing-action",
+  "targetSchemaFamily": "semanticScenePlan.v1",
+  "source": ".planning/phases/74-structured-prompt-contracts-and-model-facing-schema-hardenin/74-REVIEWS.md:106; .planning/phases/74-structured-prompt-contracts-and-model-facing-schema-hardenin/74-CONTEXT.md:51",
+  "malformedObject": {
+    "sceneRead": "The player is facing a tense supernatural standoff.",
+    "narratorIntent": "Keep the next options concrete and local to the visible scene.",
+    "plannedActions": [
+      {
+        "actorRef": "player",
+        "toolName": "offer_quick_actions",
+        "input": {
+          "actions": [
+            {
+              "label": "Ask about the curse"
+            },
+            {
+              "label": "Check the ward"
+            },
+            {
+              "label": "Follow Gojo"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

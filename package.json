@@ -12,6 +12,8 @@
     "dev": "concurrently -k -n backend,frontend -c magenta,cyan \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
     "dev:frontend": "npm --prefix frontend run dev",
     "dev:backend": "npm --prefix backend run dev",
+    "dev:backend:stable": "npm --prefix backend run dev:stable",
+    "dev:playtest": "concurrently -k -n backend,frontend -c magenta,cyan \"npm --prefix backend run dev:stable\" \"npm --prefix frontend run dev\"",
     "build": "npm --prefix shared run build && npm --prefix frontend run build && npm --prefix backend run build",
     "typecheck": "npm --prefix frontend run lint && npm --prefix backend run typecheck"
   },

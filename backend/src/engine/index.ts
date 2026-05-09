@@ -74,7 +74,190 @@ export { createStorytellerTools } from "./tool-schemas.js";
 
 export { executeToolCall } from "./tool-executor.js";
 
-export type { ToolResult } from "./tool-executor.js";
+export type { ToolResult } from "./tool-result.js";
+
+export {
+  commitAuthorityTrace,
+  ensureWorldClock,
+  invalidateAuthorityAfterRestore,
+  queueSimulationJob,
+  readWorldClock,
+  recordSimulationProposal,
+  upsertActorProcessState,
+  validateBaseWorldVersion,
+} from "./living-world-authority.js";
+
+export type {
+  AuthoritySourceEntity,
+  WorldClockState,
+} from "./living-world-authority.js";
+
+export {
+  buildActorFrame,
+  buildCommandNodeFrame,
+  validateActorDecisionCitations,
+  assertActorDecisionCitations,
+} from "./actor-frame.js";
+
+export type {
+  ActorFactSourceRoute,
+  ActorFrame,
+  ActorFrameFact,
+  CommandNodeFrame,
+} from "./actor-frame.js";
+
+export {
+  actorDecisionPacketSchema,
+  assertActorDecisionPacket,
+  parseActorDecisionPacket,
+  validateActorDecisionPacket,
+} from "./actor-decision-packet.js";
+
+export type {
+  ActorDecisionPacket,
+  ActorDecisionToolRequest,
+  ActorDecisionPlanUpdate,
+  ActorDecisionTrigger,
+} from "./actor-decision-packet.js";
+
+export {
+  ACTOR_TURN_LEGAL_TOOLS,
+  executeActorDecisionPacket,
+  runRequiredActorDecisionPass,
+} from "./actor-tools.js";
+
+export type {
+  ExecuteActorDecisionPacketResult,
+  RunRequiredActorDecisionPassResult,
+} from "./actor-tools.js";
+
+export {
+  buildPlayerFacingPacketFromNarratorPacket,
+  assertPlayerFacingPacketPromptSafe,
+  formatPlayerFacingPacketForPrompt,
+} from "./player-facing-packet.js";
+
+export type {
+  PlayerFacingPacket,
+  PlayerFacingPacketAudit,
+  PlayerFacingPacketSourceRef,
+} from "./player-facing-packet.js";
+
+export {
+  buildContextBudgetTrace,
+  ContextBudgetViolationError,
+} from "./context-budget-trace.js";
+
+export type {
+  ContextBudgetTrace,
+  ContextBudgetViolation,
+} from "./context-budget-trace.js";
+
+export {
+  createTurnLatencyTrace,
+  recordParallelGroup,
+  recordSerializedLlmGroup,
+  recordTurnLatencyStage,
+  finalizeTurnLatencyTrace,
+} from "./turn-latency-trace.js";
+
+export type {
+  TurnLatencyTrace,
+  TurnLatencyDiagnostic,
+  TurnLatencyTraceStage,
+} from "./turn-latency-trace.js";
+
+export {
+  formatParallelismWriteScopeAudit,
+  planParallelSimulationGroups,
+  runParallelSimulationJobs,
+} from "./parallel-simulation-runner.js";
+
+export type {
+  ParallelSimulationJob,
+  ParallelSimulationJobResult,
+  ParallelSimulationRunResult,
+} from "./parallel-simulation-runner.js";
+
+export {
+  createSimulationProposal,
+  commitSimulationProposal,
+  parseSimulationProposalPayload,
+} from "./simulation-proposal.js";
+
+export type {
+  CommitSimulationProposalResult,
+  CreatedSimulationProposal,
+  SimulationProposalPayload,
+  SimulationProposalWriteScope,
+} from "./simulation-proposal.js";
+
+export {
+  buildDoneBoundaryData,
+  queuePostTurnSimulationProposals,
+  POST_TURN_SIMULATION_INTERVAL,
+} from "./simulation-queue.js";
+
+export type {
+  PostTurnSimulationQueueInput,
+  PostTurnSimulationQueueResult,
+} from "./simulation-queue.js";
+
+export {
+  backfillKeyActorProcessesForCampaign,
+  createInitialKeyActorProcessState,
+  listKeyActorProcessesForCampaign,
+  normalizeKeyActorProcessState,
+  promotePersistentNpcToActorProcess,
+  updateActorProcessAfterDecision,
+} from "./key-actor-process.js";
+
+export type {
+  ActorProcessRoute,
+  ActorProcessStatus,
+  ActorProcessUpdateResult,
+  BackfillKeyActorProcessesResult,
+  KeyActorInboxItem,
+  KeyActorInterrupt,
+  KeyActorPlanStep,
+  KeyActorProcess,
+  KeyActorProcessActor,
+  KeyActorProcessState,
+} from "./key-actor-process.js";
+
+export {
+  scheduleKeyActorProcessesForTurn,
+  classifyActorProcess,
+} from "./actor-scheduler.js";
+
+export type {
+  ActorScheduleDecision,
+  ScheduleKeyActorProcessesInput,
+  ScheduleKeyActorProcessesResult,
+} from "./actor-scheduler.js";
+
+export {
+  collectWakeSignals,
+  isActorInPlayerScene,
+} from "./wake-signals.js";
+
+export type {
+  WakeSignal,
+  WakeSignalInput,
+  WakeSignalType,
+} from "./wake-signals.js";
+
+export {
+  normalizeWriteScope,
+  reserveActorWriteScopes,
+  writeScopesConflict,
+} from "./simulation-write-scope.js";
+
+export type {
+  ActorWriteScopeJob,
+  ActorWriteScopeReservation,
+  SimulationActorWriteScope,
+} from "./simulation-write-scope.js";
 
 export { captureSnapshot, restoreSnapshot } from "./state-snapshot.js";
 

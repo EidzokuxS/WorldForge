@@ -44,18 +44,6 @@ const HTTP_MCP_CONFIGS: Partial<Record<SearchProvider, HttpMcpConfig>> = {
 };
 
 /**
- * Runs `fn` with DuckDuckGo MCP tools. Errors are propagated; callers decide
- * how to surface or handle absence explicitly.
- *
- * @deprecated Use `withSearchMcp` for configurable search provider support.
- */
-export async function withMcpClient<T>(
-  fn: (tools: ToolSet) => Promise<T>,
-): Promise<T> {
-  return withSearchMcp("duckduckgo", fn);
-}
-
-/**
  * Runs `fn` with search MCP tools from the specified provider.
  * The MCP client is always closed. Errors are propagated.
  */

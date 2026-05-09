@@ -25,6 +25,7 @@ import {
   toLegacyNpcDraft,
   toLegacyPlayerCharacterWithInventory,
 } from "../character/record-adapters.js";
+import { buildCompatibilityTags } from "./compatibility-tags.js";
 import { listRecentLocationEventsForLocations } from "../engine/location-events.js";
 import { listConnectedPaths, loadLocationGraph } from "../engine/location-graph.js";
 import { loadAuthoritativeInventoryView } from "../inventory/authority.js";
@@ -56,7 +57,7 @@ function toWorldPlayerInventoryItem(item: {
 
 function toWorldSceneScopeId(row: {
   currentLocationId: string | null;
-  currentSceneLocationId: string | null;
+  currentSceneLocationId?: string | null;
 }) {
   return row.currentSceneLocationId ?? row.currentLocationId ?? null;
 }
@@ -77,6 +78,8 @@ function buildWorldCurrentScene(args: {
   locations: Array<{
     id: string;
     name: string;
+    kind?: string | null;
+    parentLocationId?: string | null;
   }>;
 }) {
   const player = args.player;
@@ -88,17 +91,34 @@ function buildWorldCurrentScene(args: {
   if (!sceneScopeId) {
     return null;
   }
+  const storedBroadLocation =
+    args.locations.find((location) => location.id === player.currentLocationId) ?? null;
+  const sceneLocation =
+    args.locations.find((location) => location.id === sceneScopeId) ?? storedBroadLocation;
+  const parentBroadLocation = sceneLocation?.parentLocationId
+    ? args.locations.find((location) => location.id === sceneLocation.parentLocationId) ?? null
+    : null;
+  const broadLocation = parentBroadLocation ?? storedBroadLocation;
+  const broadLocationId = broadLocation?.id ?? player.currentLocationId;
+
+  let presenceSceneScopeId = player.currentSceneLocationId ?? null;
+  if (presenceSceneScopeId && presenceSceneScopeId === player.currentLocationId) {
+    const scopeLocation = args.locations.find((location) => location.id === presenceSceneScopeId);
+    if (scopeLocation?.kind === "macro") {
+      presenceSceneScopeId = null;
+    }
+  }
 
   const presenceSnapshot = resolveScenePresence({
     playerActorId: player.id,
-    broadLocationId: player.currentLocationId,
-    sceneScopeId,
+    broadLocationId,
+    sceneScopeId: presenceSceneScopeId,
     actors: [
       {
         actorId: player.id,
         actorType: "player",
-        broadLocationId: player.currentLocationId,
-        sceneScopeId,
+        broadLocationId,
+        sceneScopeId: presenceSceneScopeId,
         visibility: "clear",
       },
       ...args.npcs.map((npc) => {
@@ -128,14 +148,10 @@ function buildWorldCurrentScene(args: {
       getObserverAwareness(presenceSnapshot, player.id, npcId),
     ]),
   );
-  const broadLocation =
-    args.locations.find((location) => location.id === player.currentLocationId) ?? null;
-  const sceneLocation = args.locations.find((location) => location.id === sceneScopeId) ?? broadLocation;
-
   return {
     id: sceneLocation?.id ?? sceneScopeId,
     name: sceneLocation?.name ?? null,
-    broadLocationId: broadLocation?.id ?? player.currentLocationId,
+    broadLocationId,
     broadLocationName: broadLocation?.name ?? null,
     sceneNpcIds,
     clearNpcIds,
@@ -150,21 +166,26 @@ function buildWorldNpcPayload(
   row: Parameters<typeof hydrateStoredNpcRecord>[0],
 ) {
   const record = hydrateStoredNpcRecord(row);
+  const compatibilityTags = buildCompatibilityTags(record);
   return {
     ...row,
     sceneScopeId: toWorldSceneScopeId(row),
     characterRecord: record,
     draft: toCharacterDraft(record),
-    npc: toLegacyNpcDraft(record),
+    npc: {
+      ...toLegacyNpcDraft(record),
+      tags: compatibilityTags,
+    },
   };
 }
 
 function buildWorldPlayerPayload(args: {
   campaignId: string;
-  row: NonNullable<Parameters<typeof toWorldSceneScopeId>[0]>;
+  row: NonNullable<Parameters<typeof toWorldSceneScopeId>[0]> & { id: string };
   playerRecord: ReturnType<typeof hydrateStoredPlayerRecord>;
 }) {
   const playerInventory = loadAuthoritativeInventoryView(args.campaignId, args.row.id);
+  const compatibilityTags = buildCompatibilityTags(args.playerRecord);
   return {
     ...args.row,
     sceneScopeId: toWorldSceneScopeId(args.row),
@@ -175,10 +196,13 @@ function buildWorldPlayerPayload(args: {
     inventoryItems: playerInventory?.carried.map((item) => item.name) ?? [],
     equippedItems: playerInventory?.compatibility.equippedItemRefs ?? [],
     signatureItems: playerInventory?.compatibility.signatureItems ?? [],
-    character: toLegacyPlayerCharacterWithInventory(
-      args.playerRecord,
-      playerInventory ?? undefined,
-    ),
+    character: {
+      ...toLegacyPlayerCharacterWithInventory(
+        args.playerRecord,
+        playerInventory ?? undefined,
+      ),
+      tags: compatibilityTags,
+    },
   };
 }
 
@@ -198,10 +222,21 @@ app.post("/", async (c) => {
     const result = await parseBody(c, createCampaignSchema);
     if ("response" in result) return result.response;
 
-    const { name, premise, seeds, ipContext, premiseDivergence, worldbookSelection } = result.data;
+    const {
+      name,
+      premise,
+      seeds,
+      ipContext,
+      premiseDivergence,
+      worldbookSelection,
+      worldgenSourceHint,
+      worldgenResearchEnabled,
+    } = result.data;
     const campaign = await createCampaign(name, premise, seeds, {
       ipContext,
       premiseDivergence,
+      ...(worldgenSourceHint ? { worldgenSourceHint } : {}),
+      ...(typeof worldgenResearchEnabled === "boolean" ? { worldgenResearchEnabled } : {}),
       ...(Array.isArray(worldbookSelection) ? { worldbookSelection } : {}),
     });
     return c.json(campaign, 201);
@@ -463,7 +498,7 @@ app.post("/:id/npcs/:npcId/promote", async (c) => {
       .run();
 
     return c.json({
-      success: true,
+      ok: true,
       npcId: npc.id,
       name: npc.name,
       oldTier: npc.tier,

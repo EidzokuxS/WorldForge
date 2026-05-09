@@ -2,8 +2,9 @@ import { z } from "zod";
 import { safeGenerateObject } from "../../ai/generate-object-safe.js";
 import { createModel } from "../../ai/index.js";
 import {
-  buildIpContextBlock,
+  buildWorldgenResearchContextBlock,
   buildPremiseDivergenceBlock,
+  buildScaffoldPromptContract,
   buildStopSlopRules,
 } from "./prompt-utils.js";
 import type {
@@ -24,6 +25,28 @@ const locationRegenSchema = z.object({
   connectedTo: z.array(z.string()),
 });
 
+const SCAFFOLD_REGENERATION_PROMPT_CONTRACT = buildScaffoldPromptContract({
+  marker: "STRUCTURED_OUTPUT_CONTRACT: scaffold-regeneration.v1",
+  title: "Scaffold regeneration contract",
+  requiredFields:
+    'Location rewrites return "description", "tags", and "connectedTo". Faction rewrites return "tags", "goals", "assets", and "territoryNames". NPC rewrites return "persona", "tags", and "goals". Names, locationName, sceneLocationName, factionName, and tier remain caller-owned.',
+  nestedShapes:
+    'Location shape { "description": "...", "tags": ["School"], "connectedTo": ["Tokyo Jujutsu High"] }; faction shape { "goals": ["..."], "territoryNames": ["Tokyo Jujutsu High"] }; NPC shape { "persona": "...", "goals": { "shortTerm": ["..."], "longTerm": ["..."] } }. Existing sceneLocationName must remain an exact known location or sublocation when present.',
+  caps:
+    "Location tags 3-5 and connectedTo 1-3 valid names; faction goals/assets 1-3 each; NPC goals shortTerm/longTerm 1-3 each.",
+  nullableRules:
+    "Regeneration does not return names. Return arrays for tags, connectedTo, goals, assets, and territoryNames; use [] only where the schema permits an empty set.",
+  validMinimal:
+    '{ "description": "A guarded campus under renewed pressure.", "tags": ["School"], "connectedTo": ["Tokyo Jujutsu High"] }',
+  validExample:
+    '{ "persona": "The teacher shields students from institutional pressure.", "tags": ["Teacher"], "goals": { "shortTerm": ["Contain the incident"], "longTerm": ["Protect the students"] } }',
+  invalidExamples: [
+    '{ "name": "New Canon Name", "description": "Replaces the planned entity." }',
+    '{ "connectedTo": "Tokyo Jujutsu High", "territoryNames": "Tokyo Jujutsu High" }',
+    '{ "sourceRole": "backend inferred Naruto as world_basis" }',
+  ],
+});
+
 // ---------------------------------------------------------------------------
 // regenerateLocationEntity
 // ---------------------------------------------------------------------------
@@ -36,7 +59,11 @@ export async function regenerateLocationEntity(
   ipContext: IpResearchContext | null,
   currentLocations: readonly ScaffoldLocation[], // REVIEW FIX #4: current-round state, not stale
 ): Promise<ScaffoldLocation> {
-  const ipBlock = buildIpContextBlock(ipContext);
+  const researchBlock = buildWorldgenResearchContextBlock({
+    researchArtifact: req.researchArtifact,
+    ipContext,
+    target: "regeneration",
+  });
   const divergenceBlock = buildPremiseDivergenceBlock(req.premiseDivergence ?? null);
   const allNames = currentLocations.map(l => l.name);
   const otherLocations = currentLocations
@@ -50,9 +77,11 @@ export async function regenerateLocationEntity(
     schema: locationRegenSchema,
     prompt: `You are rewriting a location for a text RPG engine. Fix the specific issue described below.
 
+${SCAFFOLD_REGENERATION_PROMPT_CONTRACT}
+
 WORLD PREMISE:
 ${refinedPremise}
-${ipBlock}
+${researchBlock}
 ${divergenceBlock ? `${divergenceBlock}\n` : ""}
 ALL LOCATION NAMES: ${allNames.join(", ")}
 
@@ -111,7 +140,11 @@ export async function regenerateFactionEntity(
   ipContext: IpResearchContext | null,
   currentFactions: readonly ScaffoldFaction[], // REVIEW FIX #4
 ): Promise<ScaffoldFaction> {
-  const ipBlock = buildIpContextBlock(ipContext);
+  const researchBlock = buildWorldgenResearchContextBlock({
+    researchArtifact: req.researchArtifact,
+    ipContext,
+    target: "regeneration",
+  });
   const divergenceBlock = buildPremiseDivergenceBlock(req.premiseDivergence ?? null);
   // REVIEW FIX #3 (D-05): Include ALL canonical faction names
   const allFactionNames = currentFactions.map(f => f.name);
@@ -122,9 +155,11 @@ export async function regenerateFactionEntity(
     schema: factionRegenSchema,
     prompt: `You are rewriting a faction for a text RPG engine. Fix the specific issue described below.
 
+${SCAFFOLD_REGENERATION_PROMPT_CONTRACT}
+
 WORLD PREMISE:
 ${refinedPremise}
-${ipBlock}
+${researchBlock}
 ${divergenceBlock ? `${divergenceBlock}\n` : ""}
 KNOWN LOCATIONS: ${[...locationNames].join(", ")}
 ALL FACTION NAMES: ${allFactionNames.join(", ")}
@@ -193,7 +228,11 @@ export async function regenerateNpcEntity(
   ipContext: IpResearchContext | null,
   currentNpcs: readonly ScaffoldNpc[], // REVIEW FIX #4
 ): Promise<ScaffoldNpc> {
-  const ipBlock = buildIpContextBlock(ipContext);
+  const researchBlock = buildWorldgenResearchContextBlock({
+    researchArtifact: req.researchArtifact,
+    ipContext,
+    target: "regeneration",
+  });
   const divergenceBlock = buildPremiseDivergenceBlock(req.premiseDivergence ?? null);
   // REVIEW FIX #3 (D-05): Include ALL canonical NPC names
   const allNpcNames = currentNpcs.map(n => n.name);
@@ -204,9 +243,11 @@ export async function regenerateNpcEntity(
     schema: npcRegenSchema,
     prompt: `You are rewriting an NPC for a text RPG engine. Fix the specific issue described below.
 
+${SCAFFOLD_REGENERATION_PROMPT_CONTRACT}
+
 WORLD PREMISE:
 ${refinedPremise}
-${ipBlock}
+${researchBlock}
 ${divergenceBlock ? `${divergenceBlock}\n` : ""}
 KNOWN LOCATIONS: ${[...locationNames].join(", ")}
 KNOWN FACTIONS: ${[...factionNames].join(", ")}
@@ -214,6 +255,7 @@ ALL NPC NAMES: ${allNpcNames.join(", ")}
 
 NPC TO FIX: "${entity.name}" (${entity.tier ?? "unknown"})
 Location: ${entity.locationName}, Faction: ${entity.factionName ?? "none"}
+Scene: ${entity.sceneLocationName ?? "none"}
 Current persona: ${entity.persona}
 Current tags: ${entity.tags.join(", ")}
 Current goals: shortTerm=[${entity.goals.shortTerm.join("; ")}], longTerm=[${entity.goals.longTerm.join("; ")}]

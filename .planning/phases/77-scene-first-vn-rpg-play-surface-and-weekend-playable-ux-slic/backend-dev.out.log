@@ -1,0 +1,250 @@
+
+> backend@1.0.0 dev
+> node --import tsx/esm --watch src/index.ts
+
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001
+[03:32:03.668] [32mINFO[39m: [36mturn.begin[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "bb22d1ed-9830-4d4e-8481-6044715e9e61"
+    [35mcampaignId[39m: "ba59e102-e4a4-4923-a965-62feb5b7c7b6"
+    [35mtick[39m: 0
+    [35mevent[39m: "turn.begin"
+    [35mpayload[39m: {
+      "route": "/opening",
+      "campaignId": "ba59e102-e4a4-4923-a965-62feb5b7c7b6",
+      "tick": 0,
+      "storytellerProvider": {
+        "id": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "model": "mimo-v2.5-pro",
+        "baseUrl": "https://opencode.ai/zen/go/v1"
+      }
+    }
+[03:32:03.671] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "bb22d1ed-9830-4d4e-8481-6044715e9e61"
+    [35mcampaignId[39m: "ba59e102-e4a4-4923-a965-62feb5b7c7b6"
+    [35mtick[39m: 0
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 44,
+      "sha256Prefix": "6788a6f80502e050"
+    }
+[03:32:08.526] [32mINFO[39m: [36mllm.attempt[39m
+    [35mtag[39m: "generate-object-safe"
+    [35mturnId[39m: "bb22d1ed-9830-4d4e-8481-6044715e9e61"
+    [35mcampaignId[39m: "ba59e102-e4a4-4923-a965-62feb5b7c7b6"
+    [35mtick[39m: 0
+    [35mrole[39m: "judge"
+    [35mevent[39m: "llm.attempt"
+    [35mpayload[39m: {
+      "attemptNum": 1,
+      "model": "mimo-v2.5-pro",
+      "success": true,
+      "strategy": "native_json",
+      "primaryStrategy": "native_json",
+      "fallbackStrategy": "text_fallback",
+      "fallbackReason": null,
+      "capability": {
+        "requestedMode": "auto",
+        "primaryStrategy": "native_json",
+        "fallbackStrategy": "text_fallback",
+        "actualMode": "native_json",
+        "reason": "Resolved auto to native_json for provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions.",
+        "capabilityKey": "provider:custom-27a16e92-b482-45b9-8598-ebde43d05d34|providerName:OpenCode|model:mimo-v2.5-pro|protocol:openai-compatible|baseUrlFamily:opencode.ai|transport:chat-completions",
+        "providerId": "custom-27a16e92-b482-45b9-8598-ebde43d05d34",
+        "providerName": "OpenCode",
+        "model": "mimo-v2.5-pro",
+        "protocol": "openai-compatible",
+        "baseUrlFamily": "opencode.ai",
+        "transport": "chat-completions"
+      },
+      "reasoningLen": 0,
+      "responseModel": "mimo-v2.5-pro",
+      "usage": {
+        "inputTokens": 1057,
+        "outputTokens": 127,
+        "totalTokens": 1184,
+        "reasoningTokens": 0,
+        "cachedInputTokens": 0
+      },
+      "latencyMs": 4852
+    }
+[03:32:08.529] [32mINFO[39m: [36mworld-brain.scene-direction[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "bb22d1ed-9830-4d4e-8481-6044715e9e61"
+    [35mcampaignId[39m: "ba59e102-e4a4-4923-a965-62feb5b7c7b6"
+    [35mtick[39m: 0
+    [35mevent[39m: "world-brain.scene-direction"
+    [35mpayload[39m: {
+      "source": "opening-scene",
+      "ran": true,
+      "focalActorCount": 1,
+      "backgroundActorCount": 0,
+      "presenceReasonCount": 1,
+      "causalBeatCount": 0,
+      "perceivableBeatCount": 0,
+      "situationSummaryLength": 91,
+      "sceneQuestionLength": 48
+    }
+[03:32:08.533] [32mINFO[39m: [36mprompt.assembled[39m
+    [35mtag[39m: "prompt-assembler"
+    [35mturnId[39m: "bb22d1ed-9830-4d4e-8481-6044715e9e61"
+    [35mcampaignId[39m: "ba59e102-e4a4-4923-a965-62feb5b7c7b6"
+    [35mtick[39m: 0
+    [35mevent[39m: "prompt.assembled"
+    [35mpayload[39m: {
+      "pass": "final-visible",
+      "totalTokens": 2203,
+      "budgetUsed": 27,
+      "sectionCount": 5,
+      "assembledChars": 8900,
+      "formatted": "[SYSTEM RULES]\nYou are the Game Master of a text RPG. You narrate the world and its inhabitants.\n\nCRITICAL OUTPUT RULES (MANDATORY — VIOLATION MEANS FAILURE):\n1. Your output is ONLY narrative prose. NOTHING ELSE.\n2. FORBIDDEN in your output: any text in [BRACKETS], any section header, any metadata, any statistics, any chance/roll numbers, any system information, any HP values (like \"HP is now 3/5\").\n3. FORBIDDEN: echoing, repeating, or referencing [ACTION RESULT], [NPC STATES], [NARRATION DIRECTIVE], [RECENT CONVERSATION], [SCENE], [SYSTEM RULES], [WORLD PREMISE], [PLAYER STATE], [WORLD STATE], [LORE CONTEXT], [EPISODIC MEMORY], [RELATIONSHIPS], or ANY bracketed text.\n4. FORBIDDEN: fabricating dice rolls, chances, percentages, or outcome values. The outcome is already determined — narrate it as prose.\n5. If you are about to write a bracket \"[\" followed by a section name — STOP. That is system data, not narrative.\n\nThis is the final visible narration pass. Write one final narration from settled opening state, current scene facts, and player-perceivable scene effects. When [SCENE DIRECTION] and [NARRATION GUARDRAILS] are present, they are authoritative player-perceivable scene framing from the backend. Do not invent new material events, tool calls, or off-screen knowledge that is not already present in the assembled scene effects. Treat scene effects and opening state as authoritative bounded inputs for the final narration.\nKeep anti-repetition and anti-echo control active.\nConcrete nouns and actions are mandatory.\nNarration length is bounded.\nNo tool-syntax, no hidden metadata, no bracketed command text.\nDo not reveal simulation internals while describing the scene.\nUse the settled visible scene as the only basis for narration.\nsimulate scene-state consequences before visible narration.\nDo not invent facts that are not in the assembled scene input.\nkeep output bounded for one narration beat and avoid hidden systems language.\nConcrete nouns and actions are mandatory over vague adjectives.\ndo not claim knowledge beyond what the player can perceive.\navoid repeating conclusions once they have resolved.\nScene rhythm: show what changes and what is currently at stake.\nKeep calm or mundane moments specific and observable.\nGLM visible pass overlay: stay tightly bounded and concrete.\nNo tool-calling language in the final pass.\nReduce fluff so the scene stays readable and grounded.\nvisible pass sampler behavior should remain intact and bounded.\nGLM: prefer one-pass closure over looped elaboration.\nanti-echo controls are strongest with bounded turns.\nYour output must be narrative prose only. Do not echo bracketed system sections, metadata, roll numbers, or tool syntax. Narrate the provided outcome faithfully instead of inventing new mechanics. Produce exactly one continuous narration pass for the turn. Do not restart the scene or restate the same beat in alternate wording. Never contradict established scene facts, inventory truth, or the world premise.\nRead canonical character records before any shorthand view. Use canonical character records, current scene facts, and authored world state as the source context for narration. derived runtime tags are the compatibility shorthand, not the source model. Derived runtime tags, personaSummary, and shallow goals are compact compatibility views generated from the richer canonical fields. They support runtime shorthand, but they never replace the source-of-truth character semantics. startConditions is the authoritative opening-state object. Capture arrivalMode, immediateSituation, entryPressure, companions, startingVisibility, resolvedNarrative, and any saved location reference before adding compatibility aliases. Use canonical loadout guidance in CharacterLoadout and CanonicalLoadoutPreview terms: preserve loadout intent, derive canonical items, and surface audit plus warnings instead of ad hoc inventory prose.\n\nRuntime narration rules:\n- Do not hallucinate items, NPCs, or locations that have not been established.\n- [ENCOUNTER SCOPE] is authoritative for who is in the immediate scene and how much of them the player can perceive.\n- If the [NPC STATES] section lists NPCs, those NPCs are the fully present actors for this encounter scope. Include them in your narration. Do not claim they are absent.\n- When Key NPCs are listed in [NPC STATES], you MUST acknowledge their presence and have them react to the player's action. Key NPCs are autonomous characters with goals and beliefs — they should speak, react, or take action based on their persona and the situation. Do NOT ignore NPCs listed in [NPC STATES].\n- If [ENCOUNTER SCOPE] reports hint-band awareness, treat it as indirect presence only. Do not reveal identity in visible narration unless runtime consequences justify that reveal.\n- If a Key NPC's goals or beliefs conflict with the player's action, narrate the NPC's reaction (objection, interference, support). NPCs are not passive scenery.\n- After moving to a new location, describe the new location using its tags and description from [SCENE]. Mention any NPCs or items present at the new location.\n- When a character reaches HP 0, narrate a contextual outcome based on the situation:\n  - Non-lethal context (pit fight, bar brawl, sparring, training): knockout/submission/unconsciousness. Do NOT describe lethal wounds in non-lethal contexts.\n  - Lethal context (death match, assassination, monster attack): death is possible. Consider the attacker's intent, the setting, and dramatic alternatives (capture, last-second rescue, enemy mercy).\n  - NEVER automatically kill at HP 0 -- always consider context first.\n- NEVER reference items the player does not have in their inventory. Check [PLAYER STATE] Inventory before mentioning any item.\n- To give the player a new item, use the spawn_item tool first. Do NOT spawn an item that already exists in the player's inventory.\n- When the player trades or gives away an item, use the transfer_item tool. Do NOT just narrate the trade without using tools.\n- Character wealth tiers are Destitute < Poor < Comfortable < Wealthy < Obscenely Rich. Consider wealth tier when evaluating purchase, bribe, or trade actions.\n- Skill tiers are Novice < Skilled < Master. Higher skill tier gives better odds on relevant actions.\n- Use the terminology, concepts, and naming conventions from the world premise and lore context. If the world has specific terms for abilities, locations, or social structures, use those terms consistently instead of generic fantasy equivalents.\n\n[WORLD PREMISE]\nThe Jujutsu Kaisen world operates under a pre-Shibuya Incident timeline in modern Tokyo, where Jujutsu High acts as the shadow government and Satoru Gojo oversees sorcerer missions. Chakra and its five elemental natures now function as an active power system alongside cursed energy, with practitioners consciously projecting ambient chakra into the environment. A curse-user alliance is secretly gathering in Shibuya to prepare for their October 31st assault on Jujutsu High.\n\n[SCENE DIRECTION]\nSituation summary: The player is in an unknown scene, establishing the initial moment of the living-world RPG.\nScene question: What is the player's first action or perception?\nFocal actors: Player\nPresence reasons:\n- Player: The player is the sole actor present, anchoring the scene's beginning.\nCausal beats:\n- None.\n\n[NARRATION GUARDRAILS]\n- None.\n\n[WORLD STATE]\nActive Factions:\n- Jujutsu High: [Institutional, Secretive, Militaristic], Goals: [Maintain control over the Tokyo Metropolitan region's cursed spirit suppression operations, Secure and train a new generation of sorcerers to counter the growing curse-user threat, Intercept and dismantle the curse-user alliance gathering in Shibuya before October 31st]\n- Zenin Clan: [Traditionalist, Influential, Ruthless, Technique-Obsessed], Goals: [Secure the appointment of a Zenin clan member as the next head of Jujutsu High's administrative body, Intercept and acquire the cursed technique manifests stolen by the Shibuya Alliance before October 31st, Force the dissolution of the Gojo clan's veto power in the Three Families Council by the end of the fiscal year]\n- Shibuya Alliance: [Covert, Militaristic, Catastrophic], Goals: [Seal Satoru Gojo within Shibuya District on October 31st., Recruit additional curse users and cursed spirits to bolster numbers for the Shibuya operation., Steal or destroy cursed technique manifests from the Zenin Clan to weaken sorcerer countermeasures.]\n- Time Vessel Association: [Deceptive, Decentralized, Non-Sorcerer, Criminal], Goals: [Establish operational cells in Ginza Commercial District to bypass Jujutsu High jurisdiction., Recruit and protect non-sorcerer operatives within Shinjuku Station Entrance to gather intelligence on sorcerer movements., Secure a safe house in Ginza Courtyard Marriott for the recruitment of curse users by the end of the quarter.]"
+    }
+[03:32:08.533] [32mINFO[39m: [36mprompt.assembled[39m
+    [35mtag[39m: "prompt-assembler"
+    [35mturnId[39m: "bb22d1ed-9830-4d4e-8481-6044715e9e61"
+    [35mcampaignId[39m: "ba59e102-e4a4-4923-a965-62feb5b7c7b6"
+    [35mtick[39m: 0
+    [35mevent[39m: "prompt.assembled"
+    [35mpayload[39m: {
+      "pass": "final-narration",
+      "totalTokens": 2203,
+      "budgetUsed": 27,
+      "sectionCount": 5,
+      "assembledChars": 9593,
+      "formatted": "[SYSTEM RULES]\nYou are the Game Master of a text RPG. You narrate the world and its inhabitants.\n\nCRITICAL OUTPUT RULES (MANDATORY — VIOLATION MEANS FAILURE):\n1. Your output is ONLY narrative prose. NOTHING ELSE.\n2. FORBIDDEN in your output: any text in [BRACKETS], any section header, any metadata, any statistics, any chance/roll numbers, any system information, any HP values (like \"HP is now 3/5\").\n3. FORBIDDEN: echoing, repeating, or referencing [ACTION RESULT], [NPC STATES], [NARRATION DIRECTIVE], [RECENT CONVERSATION], [SCENE], [SYSTEM RULES], [WORLD PREMISE], [PLAYER STATE], [WORLD STATE], [LORE CONTEXT], [EPISODIC MEMORY], [RELATIONSHIPS], or ANY bracketed text.\n4. FORBIDDEN: fabricating dice rolls, chances, percentages, or outcome values. The outcome is already determined — narrate it as prose.\n5. If you are about to write a bracket \"[\" followed by a section name — STOP. That is system data, not narrative.\n\nThis is the final visible narration pass. Write one final narration from settled opening state, current scene facts, and player-perceivable scene effects. When [SCENE DIRECTION] and [NARRATION GUARDRAILS] are present, they are authoritative player-perceivable scene framing from the backend. Do not invent new material events, tool calls, or off-screen knowledge that is not already present in the assembled scene effects. Treat scene effects and opening state as authoritative bounded inputs for the final narration.\nKeep anti-repetition and anti-echo control active.\nConcrete nouns and actions are mandatory.\nNarration length is bounded.\nNo tool-syntax, no hidden metadata, no bracketed command text.\nDo not reveal simulation internals while describing the scene.\nUse the settled visible scene as the only basis for narration.\nsimulate scene-state consequences before visible narration.\nDo not invent facts that are not in the assembled scene input.\nkeep output bounded for one narration beat and avoid hidden systems language.\nConcrete nouns and actions are mandatory over vague adjectives.\ndo not claim knowledge beyond what the player can perceive.\navoid repeating conclusions once they have resolved.\nScene rhythm: show what changes and what is currently at stake.\nKeep calm or mundane moments specific and observable.\nGLM visible pass overlay: stay tightly bounded and concrete.\nNo tool-calling language in the final pass.\nReduce fluff so the scene stays readable and grounded.\nvisible pass sampler behavior should remain intact and bounded.\nGLM: prefer one-pass closure over looped elaboration.\nanti-echo controls are strongest with bounded turns.\nYour output must be narrative prose only. Do not echo bracketed system sections, metadata, roll numbers, or tool syntax. Narrate the provided outcome faithfully instead of inventing new mechanics. Produce exactly one continuous narration pass for the turn. Do not restart the scene or restate the same beat in alternate wording. Never contradict established scene facts, inventory truth, or the world premise.\nRead canonical character records before any shorthand view. Use canonical character records, current scene facts, and authored world state as the source context for narration. derived runtime tags are the compatibility shorthand, not the source model. Derived runtime tags, personaSummary, and shallow goals are compact compatibility views generated from the richer canonical fields. They support runtime shorthand, but they never replace the source-of-truth character semantics. startConditions is the authoritative opening-state object. Capture arrivalMode, immediateSituation, entryPressure, companions, startingVisibility, resolvedNarrative, and any saved location reference before adding compatibility aliases. Use canonical loadout guidance in CharacterLoadout and CanonicalLoadoutPreview terms: preserve loadout intent, derive canonical items, and surface audit plus warnings instead of ad hoc inventory prose.\n\nRuntime narration rules:\n- Do not hallucinate items, NPCs, or locations that have not been established.\n- [ENCOUNTER SCOPE] is authoritative for who is in the immediate scene and how much of them the player can perceive.\n- If the [NPC STATES] section lists NPCs, those NPCs are the fully present actors for this encounter scope. Include them in your narration. Do not claim they are absent.\n- When Key NPCs are listed in [NPC STATES], you MUST acknowledge their presence and have them react to the player's action. Key NPCs are autonomous characters with goals and beliefs — they should speak, react, or take action based on their persona and the situation. Do NOT ignore NPCs listed in [NPC STATES].\n- If [ENCOUNTER SCOPE] reports hint-band awareness, treat it as indirect presence only. Do not reveal identity in visible narration unless runtime consequences justify that reveal.\n- If a Key NPC's goals or beliefs conflict with the player's action, narrate the NPC's reaction (objection, interference, support). NPCs are not passive scenery.\n- After moving to a new location, describe the new location using its tags and description from [SCENE]. Mention any NPCs or items present at the new location.\n- When a character reaches HP 0, narrate a contextual outcome based on the situation:\n  - Non-lethal context (pit fight, bar brawl, sparring, training): knockout/submission/unconsciousness. Do NOT describe lethal wounds in non-lethal contexts.\n  - Lethal context (death match, assassination, monster attack): death is possible. Consider the attacker's intent, the setting, and dramatic alternatives (capture, last-second rescue, enemy mercy).\n  - NEVER automatically kill at HP 0 -- always consider context first.\n- NEVER reference items the player does not have in their inventory. Check [PLAYER STATE] Inventory before mentioning any item.\n- To give the player a new item, use the spawn_item tool first. Do NOT spawn an item that already exists in the player's inventory.\n- When the player trades or gives away an item, use the transfer_item tool. Do NOT just narrate the trade without using tools.\n- Character wealth tiers are Destitute < Poor < Comfortable < Wealthy < Obscenely Rich. Consider wealth tier when evaluating purchase, bribe, or trade actions.\n- Skill tiers are Novice < Skilled < Master. Higher skill tier gives better odds on relevant actions.\n- Use the terminology, concepts, and naming conventions from the world premise and lore context. If the world has specific terms for abilities, locations, or social structures, use those terms consistently instead of generic fantasy equivalents.\n\n[WORLD PREMISE]\nThe Jujutsu Kaisen world operates under a pre-Shibuya Incident timeline in modern Tokyo, where Jujutsu High acts as the shadow government and Satoru Gojo oversees sorcerer missions. Chakra and its five elemental natures now function as an active power system alongside cursed energy, with practitioners consciously projecting ambient chakra into the environment. A curse-user alliance is secretly gathering in Shibuya to prepare for their October 31st assault on Jujutsu High.\n\n[SCENE DIRECTION]\nSituation summary: The player is in an unknown scene, establishing the initial moment of the living-world RPG.\nScene question: What is the player's first action or perception?\nFocal actors: Player\nPresence reasons:\n- Player: The player is the sole actor present, anchoring the scene's beginning.\nCausal beats:\n- None.\n\n[NARRATION GUARDRAILS]\n- None.\n\n[WORLD STATE]\nActive Factions:\n- Jujutsu High: [Institutional, Secretive, Militaristic], Goals: [Maintain control over the Tokyo Metropolitan region's cursed spirit suppression operations, Secure and train a new generation of sorcerers to counter the growing curse-user threat, Intercept and dismantle the curse-user alliance gathering in Shibuya before October 31st]\n- Zenin Clan: [Traditionalist, Influential, Ruthless, Technique-Obsessed], Goals: [Secure the appointment of a Zenin clan member as the next head of Jujutsu High's administrative body, Intercept and acquire the cursed technique manifests stolen by the Shibuya Alliance before October 31st, Force the dissolution of the Gojo clan's veto power in the Three Families Council by the end of the fiscal year]\n- Shibuya Alliance: [Covert, Militaristic, Catastrophic], Goals: [Seal Satoru Gojo within Shibuya District on October 31st., Recruit additional curse users and cursed spirits to bolster numbers for the Shibuya operation., Steal or destroy cursed technique manifests from the Zenin Clan to weaken sorcerer countermeasures.]\n- Time Vessel Association: [Deceptive, Decentralized, Non-Sorcerer, Criminal], Goals: [Establish operational cells in Ginza Commercial District to bypass Jujutsu High jurisdiction., Recruit and protect non-sorcerer operatives within Shinjuku Station Entrance to gather intelligence on sorcerer movements., Secure a safe house in Ginza Courtyard Marriott for the recruitment of curse users by the end of the quarter.]\n\n[OPENING STATE]\n- No structured opening state is active.\n\n[SCENE EFFECTS]\n- No authoritative scene effects were assembled.\n\n[PLAYER-PERCEIVABLE CONSEQUENCES]\n- No additional player-perceivable consequences are in scope.\n\n[RECENT LOCAL CONTEXT]\n- No recent local context is relevant.\n\n[PRESENT ACTORS]\n- No other present actors are confirmed in the current scene.\n\n[FINAL NARRATION TASK]\nWrite one final narration pass from the settled opening state, current scene, scene effects, and player-perceivable consequences.\nDo not invent material events outside these authoritative inputs.\nDo not write tool syntax or metadata.\nKeep the output bounded to what the player can perceive in this scene."
+    }
+[03:32:08.533] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "bb22d1ed-9830-4d4e-8481-6044715e9e61"
+    [35mcampaignId[39m: "ba59e102-e4a4-4923-a965-62feb5b7c7b6"
+    [35mtick[39m: 0
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "scene-settling",
+      "byteLength": 75,
+      "sha256Prefix": "e8b8f30f4a2be1ce"
+    }
+[03:32:18.257] [32mINFO[39m: [36mstoryteller.visible.call[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "bb22d1ed-9830-4d4e-8481-6044715e9e61"
+    [35mcampaignId[39m: "ba59e102-e4a4-4923-a965-62feb5b7c7b6"
+    [35mtick[39m: 0
+    [35mevent[39m: "storyteller.visible.call"
+    [35mpayload[39m: {
+      "label": "opening",
+      "initialLen": 854,
+      "retried": false,
+      "failures": [],
+      "reasoningLen": 1203,
+      "finishReason": "stop",
+      "responseModel": "mimo-v2.5-pro",
+      "usage": {
+        "inputTokens": 2565,
+        "inputTokenDetails": {
+          "noCacheTokens": 2565,
+          "cacheReadTokens": 0
+        },
+        "outputTokens": 424,
+        "outputTokenDetails": {
+          "textTokens": 177,
+          "reasoningTokens": 247
+        },
+        "totalTokens": 2989,
+        "raw": {
+          "prompt_tokens": 2565,
+          "completion_tokens": 424,
+          "total_tokens": 2989,
+          "prompt_tokens_details": {},
+          "completion_tokens_details": {
+            "reasoning_tokens": 247
+          }
+        },
+        "reasoningTokens": 247,
+        "cachedInputTokens": 0
+      },
+      "durationMs": 9723
+    }
+[03:32:18.258] [32mINFO[39m: [36mOpening narration complete: final=854 chars, retried=false, failures=none[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "bb22d1ed-9830-4d4e-8481-6044715e9e61"
+    [35mcampaignId[39m: "ba59e102-e4a4-4923-a965-62feb5b7c7b6"
+    [35mtick[39m: 0
+[03:32:18.258] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "bb22d1ed-9830-4d4e-8481-6044715e9e61"
+    [35mcampaignId[39m: "ba59e102-e4a4-4923-a965-62feb5b7c7b6"
+    [35mtick[39m: 0
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "narrative",
+      "byteLength": 867,
+      "sha256Prefix": "fbc8f5f97012338c"
+    }
+[03:32:18.259] [32mINFO[39m: [36mstoryteller.reasoning[39m
+    [35mtag[39m: "turn-processor"
+    [35mturnId[39m: "bb22d1ed-9830-4d4e-8481-6044715e9e61"
+    [35mcampaignId[39m: "ba59e102-e4a4-4923-a965-62feb5b7c7b6"
+    [35mtick[39m: 0
+    [35mevent[39m: "storyteller.reasoning"
+    [35mpayload[39m: {
+      "label": "opening",
+      "reasoningText": "Hmm, this is the first scene of the game, and the player hasn't taken any action yet. The system prompt is very strict about not inventing facts, so I need to work with what's provided. The world is set in Jujutsu Kaisen's Tokyo before the Shibuya Incident, with chakra and cursed energy both active.\n\nOkay, the player's starting location isn't specified, but the scene direction says \"establishing the initial moment.\" That means I should create a simple, observable starting point that doesn't assume prior actions. Since the Shibuya Alliance is secretly gathering, maybe the player is in a public area where they might notice something subtle.\n\nI'll start with the player in a neutral Tokyo location - a train station makes sense since Shinjuku Station is mentioned in the Time Vessel Association's goals. The scene should feel mundane but hint at the underlying tension. I'll describe concrete sensory details: the station's noise, the crowd, the afternoon light. Then I'll end with a small anomaly - a brief, odd feeling or observation that could lead somewhere, without inventing plot points. This gives the player a clear starting moment to react to while staying within the provided world facts.",
+      "responseModel": "mimo-v2.5-pro",
+      "usage": {
+        "inputTokens": 2565,
+        "inputTokenDetails": {
+          "noCacheTokens": 2565,
+          "cacheReadTokens": 0
+        },
+        "outputTokens": 424,
+        "outputTokenDetails": {
+          "textTokens": 177,
+          "reasoningTokens": 247
+        },
+        "totalTokens": 2989,
+        "raw": {
+          "prompt_tokens": 2565,
+          "completion_tokens": 424,
+          "total_tokens": 2989,
+          "prompt_tokens_details": {},
+          "completion_tokens_details": {
+            "reasoning_tokens": 247
+          }
+        },
+        "reasoningTokens": 247,
+        "cachedInputTokens": 0
+      }
+    }
+[03:32:18.259] [32mINFO[39m: [36msse.emit[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "bb22d1ed-9830-4d4e-8481-6044715e9e61"
+    [35mcampaignId[39m: "ba59e102-e4a4-4923-a965-62feb5b7c7b6"
+    [35mtick[39m: 0
+    [35mevent[39m: "sse.emit"
+    [35mpayload[39m: {
+      "type": "done",
+      "byteLength": 25,
+      "sha256Prefix": "f51f39eaba2850be"
+    }
+[03:32:18.259] [32mINFO[39m: [36mturn.end[39m
+    [35mtag[39m: "chat"
+    [35mturnId[39m: "bb22d1ed-9830-4d4e-8481-6044715e9e61"
+    [35mcampaignId[39m: "ba59e102-e4a4-4923-a965-62feb5b7c7b6"
+    [35mtick[39m: 0
+    [35mevent[39m: "turn.end"
+    [35mpayload[39m: {
+      "route": "/opening",
+      "tick": 0,
+      "durationMs": 14591,
+      "outcome": "success"
+    }
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001
+Restarting 'src/index.ts'
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001

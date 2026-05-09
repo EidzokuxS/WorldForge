@@ -18,10 +18,11 @@ import {
   searchEpisodicEvents,
 } from "../vectors/episodic-events.js";
 import { embedTexts } from "../vectors/embeddings.js";
-import { createLogger } from "../lib/index.js";
+import { createLogger, withRole } from "../lib/index.js";
 import { hydrateStoredNpcRecord } from "../character/record-adapters.js";
 import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
 import { DERIVED_RUNTIME_TAGS_RULE } from "../character/prompt-contract.js";
+import { collectToolCalls } from "./parse-helpers.js";
 
 const log = createLogger("reflection-agent");
 
@@ -51,6 +52,19 @@ export async function runReflection(
   judgeProvider: ProviderConfig,
   embedderProvider?: ProviderConfig,
 ): Promise<ReflectionResult> {
+  return withRole("reflection", () =>
+    runReflectionInternal(campaignId, npcId, tick, judgeProvider, embedderProvider),
+  );
+}
+
+async function runReflectionInternal(
+  campaignId: string,
+  npcId: string,
+  tick: number,
+  judgeProvider: ProviderConfig,
+  embedderProvider?: ProviderConfig,
+): Promise<ReflectionResult> {
+  const reflectionStart = Date.now();
   const db = getDb();
 
   // 1. Load NPC
@@ -121,11 +135,8 @@ export async function runReflection(
     ``,
     `Current profile: ${npcRecord.profile.personaSummary}`,
     `Current base facts: biography=${npcRecord.identity.baseFacts?.biography ?? "none"}; roles=[${npcRecord.identity.baseFacts?.socialRole.join(", ") || "none"}]; constraints=[${npcRecord.identity.baseFacts?.hardConstraints.join(", ") || "none"}]`,
-    `Current behavioral core: motives=[${npcRecord.identity.behavioralCore?.motives.join(", ") || "none"}]; pressure=[${npcRecord.identity.behavioralCore?.pressureResponses.join(", ") || "none"}]; self-image=${npcRecord.identity.behavioralCore?.selfImage || "none"}`,
+    `Current personality: summary=${npcRecord.identity.personality?.summary || "none"}; voice=${npcRecord.identity.personality?.voice || "none"}; contradictions=[${npcRecord.identity.personality?.internalContradictions?.join(", ") || "none"}]; self-image=${npcRecord.identity.behavioralCore?.selfImage || "none"}`,
     `Current live dynamics: goals=[${npcRecord.identity.liveDynamics?.activeGoals.join(", ") || "none"}]; belief drift=[${npcRecord.identity.liveDynamics?.beliefDrift.join(", ") || "none"}]; strains=[${npcRecord.identity.liveDynamics?.currentStrains.join(", ") || "none"}]; earned changes=[${npcRecord.identity.liveDynamics?.earnedChanges.join(", ") || "none"}]`,
-    npcRecord.continuity
-      ? `Continuity policy: identity inertia=${npcRecord.continuity.identityInertia}; protected core=[${npcRecord.continuity.protectedCore.join(", ") || "none"}]; mutable surface=[${npcRecord.continuity.mutableSurface.join(", ") || "none"}]`
-      : null,
     `Current social context: location=${npcRecord.socialContext.currentLocationName ?? npc.currentLocationId ?? "unknown"}; status=[${npcRecord.socialContext.socialStatus.join(", ") || "none"}]`,
     `Current capabilities/state shorthand: tags=[${runtimeTags.join(", ")}]`,
     `Current beliefs: [${npcRecord.motivations.beliefs.join(", ")}]`,
@@ -138,7 +149,7 @@ export async function runReflection(
     `Wealth and skill upgrades require materially stronger evidence than ordinary belief, goal, or relationship drift.`,
     `You may upgrade wealth tiers (Destitute -> Poor -> Comfortable -> Wealthy -> Obscenely Rich) or skill tiers (Novice -> Skilled -> Master) when evidence clearly supports it. Wealth changes require significant trade/loot events. Skill upgrades require 3+ successful uses of that skill.`,
     `Use the tools to update your beliefs, goals, relationships, wealth, and skills as needed, but prefer set_belief, set_goal, drop_goal, and set_relationship unless the evidence strongly justifies progression.`,
-    `Use promote_identity_change only when repeated, material evidence justifies modifying behavioralCore or baseFacts.`,
+    `Use promote_identity_change only when repeated, material evidence justifies modifying personality or baseFacts.`,
     `If nothing significant has changed, you may choose not to call any tools.`,
   ]
     .filter(Boolean)
@@ -148,29 +159,19 @@ export async function runReflection(
   const model = createModel(judgeProvider);
   const tools = createReflectionTools(campaignId, npcId);
 
-  const result = await generateText({
-    model,
-    tools,
-    temperature: 0,
-    stopWhen: stepCountIs(3),
-    system: systemPrompt,
-    prompt: "Reflect on recent events and update your beliefs, goals, and relationships as appropriate.",
-  });
+  const result = await withRole("judge", () =>
+    generateText({
+      model,
+      tools,
+      temperature: 0,
+      stopWhen: stepCountIs(3),
+      system: systemPrompt,
+      prompt: "Reflect on recent events and update your beliefs, goals, and relationships as appropriate.",
+    }),
+  );
 
   // 5. Collect tool call results
-  const toolCalls: Array<{ tool: string; args: unknown; result: unknown }> = [];
-  for (const step of result.steps ?? []) {
-    const calls = step.toolCalls ?? [];
-    const results = step.toolResults ?? [];
-    for (let i = 0; i < calls.length; i++) {
-      const tc = calls[i]!;
-      toolCalls.push({
-        tool: tc.toolName,
-        args: (tc as unknown as Record<string, unknown>).input ?? (tc as unknown as Record<string, unknown>).args ?? {},
-        result: (results[i] as unknown as Record<string, unknown>)?.output ?? (results[i] as unknown as Record<string, unknown>)?.result ?? null,
-      });
-    }
-  }
+  const toolCalls = collectToolCalls(result.steps ?? []);
 
   // 6. Reset unprocessedImportance to 0
   getDb()
@@ -178,7 +179,19 @@ export async function runReflection(
     .set({ unprocessedImportance: 0 })
     .where(eq(npcs.id, npcId))
     .run();
+  log.event("db.write", {
+    table: "npcs",
+    op: "update",
+    rowId: npcId,
+    rowName: npcRecord.identity.displayName,
+  });
 
+  log.event("reflection.tick", {
+    npcId,
+    npcName: npcRecord.identity.displayName,
+    toolCallCount: toolCalls.length,
+    durationMs: Date.now() - reflectionStart,
+  });
   log.info(
     `${npcRecord.identity.displayName} reflection complete: ${toolCalls.length} tool call(s), importance reset to 0`,
   );

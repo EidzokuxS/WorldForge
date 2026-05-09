@@ -1,0 +1,5 @@
+{"case":"short_dialogue_distant_key_actor","worldTimeMinutes":0,"playerScene":"loc-main/scene-a","actor":"npc-away","signals":[],"route":"sleeping","reason":"no wake signal"}
+{"case":"present_key_actor","worldTimeMinutes":0,"playerScene":"loc-main/scene-a","actor":"npc-present","signals":["direct_observation"],"route":"required_before_done","reason":"present actor can affect the visible scene","reservation":"reserved"}
+{"case":"long_wait_distant_key_actor","worldTimeMinutes":35,"playerScene":"loc-main/scene-a","actor":"npc-away","signals":["due_time"],"route":"proposal_after_done","reason":"actor woke from due_time"}
+{"case":"same_broad_hidden_scope","worldTimeMinutes":0,"playerScene":"loc-main/scene-a","actor":"npc-nearby","signals":["exposed_scope_catch_up"],"route":"proposal_after_done","reason":"actor woke from exposed_scope_catch_up"}
+{"case":"two_present_actor_conflict","worldTimeMinutes":0,"playerScene":"loc-main/scene-a","actors":["npc-present-a","npc-present-b"],"routes":["required_before_done","required_before_done"],"reservations":["reserved","conflict_serialized"],"conflictScope":"location:loc-main:presence"}

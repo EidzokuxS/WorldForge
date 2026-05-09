@@ -37,6 +37,34 @@ export interface UiConfig {
   showRawReasoning: boolean;
 }
 
+/**
+ * Phase 58 — observability role keys. Used to toggle logging per LLM role.
+ * Note: `tool` and `prompt` are runtime-only pseudo-roles used inside logger-setup;
+ * the user-facing Settings surface is limited to real LLM-consuming roles.
+ */
+export type ObservabilityRoleKey =
+  | "judge"
+  | "storyteller"
+  | "oracle"
+  | "npcAgent"
+  | "reflection"
+  | "embedder";
+
+export interface ObservabilityRoleToggles {
+  judge: boolean;
+  storyteller: boolean;
+  oracle: boolean;
+  npcAgent: boolean;
+  reflection: boolean;
+  embedder: boolean;
+}
+
+export interface ObservabilityConfig {
+  enabled: boolean;
+  dumpFullPrompts: boolean;
+  roles: ObservabilityRoleToggles;
+}
+
 export type PremiseDivergenceMode = "canonical" | "coexisting" | "diverged";
 
 export type PremiseDivergenceProtagonistKind = "canonical" | "custom";
@@ -77,6 +105,7 @@ export interface Settings {
   images: ImageConfig;
   research: ResearchConfig;
   ui: UiConfig;
+  observability: ObservabilityConfig;
 }
 
 /** Cached IP research context — persisted in campaign config.json */
@@ -111,6 +140,72 @@ export interface IpResearchContext {
       characters?: string[];
     };
   }>;
+}
+
+export type WorldgenResearchUse = string;
+
+export type WorldgenSourceRole =
+  | "world_basis"
+  | "mechanics_overlay"
+  | "tone_overlay"
+  | "reference_only"
+  | "ambiguous";
+
+export interface WorldgenResearchSourceUsageRule {
+  sourceLabel: string;
+  role: WorldgenSourceRole;
+  useFor: WorldgenResearchUse[];
+  avoidFor: WorldgenResearchUse[];
+  rationale: string;
+}
+
+export interface WorldgenResearchSearchJob {
+  id: string;
+  sourceLabel: string;
+  query: string;
+  purpose: string;
+  useFor: WorldgenResearchUse[];
+}
+
+export interface WorldgenResearchSearchResult {
+  jobId: string;
+  title: string;
+  description: string;
+  url: string;
+}
+
+export interface WorldgenResearchCitation {
+  jobId?: string;
+  url?: string;
+  note: string;
+}
+
+export interface WorldgenResearchArtifactV2 {
+  version: 2;
+  rawPremise: string;
+  rawKnownIP?: string | null;
+  researchBrief: {
+    interpretationSummary: string;
+    ambiguityNotes: string[];
+    sourceUsageRules: WorldgenResearchSourceUsageRule[];
+    searchJobs: WorldgenResearchSearchJob[];
+  };
+  searchResults: WorldgenResearchSearchResult[];
+  generatedContext: {
+    keyFacts: string[];
+    tonalNotes: string[];
+    citations?: WorldgenResearchCitation[];
+    canonicalNames?: {
+      locations?: string[];
+      factions?: string[];
+      characters?: string[];
+    };
+  };
+  provenance: {
+    createdAt: string;
+    model?: string;
+    searchProvider?: string;
+  };
 }
 
 /**
@@ -259,9 +354,9 @@ export interface CharacterIdentityBaseFacts {
  * not short-lived scene state.
  */
 export interface CharacterIdentityBehavioralCore {
-  motives: string[];
-  pressureResponses: string[];
-  taboos: string[];
+  motives?: string[];
+  pressureResponses?: string[];
+  taboos?: string[];
   attachments: string[];
   selfImage: string;
 }
@@ -271,10 +366,21 @@ export interface CharacterIdentityBehavioralCore {
  * overwriting the deeper identity baseline.
  */
 export interface CharacterIdentityLiveDynamics {
+  attachments: string[];
   activeGoals: string[];
   beliefDrift: string[];
   currentStrains: string[];
   earnedChanges: string[];
+}
+
+export interface CharacterPersonality {
+  summary: string;
+  voice: string;
+  decisionStyle: string;
+  worldview: string;
+  internalContradictions: string[];
+  personalMythology: string;
+  sampleLines: string[];
 }
 
 export type CharacterIdentitySourceKind = "canon" | "card" | "research" | "runtime";
@@ -285,52 +391,6 @@ export interface CharacterIdentitySourceCitation {
   excerpt: string;
 }
 
-/**
- * D-11/D-13: canon-facing sources and secondary cues are preserved, but the
- * runtime identity remains a WorldForge-owned synthesis.
- */
-export interface CharacterSourceBundle {
-  canonSources: CharacterIdentitySourceCitation[];
-  secondarySources: CharacterIdentitySourceCitation[];
-  synthesis: {
-    owner: string;
-    strategy: string;
-    notes: string[];
-  };
-}
-
-export type CharacterContinuityInertia = "flexible" | "anchored" | "strict";
-
-export interface CharacterContinuityPolicy {
-  identityInertia: CharacterContinuityInertia;
-  protectedCore: string[];
-  mutableSurface: string[];
-  changePressureNotes: string[];
-}
-
-export interface PowerProfile {
-  attack: string;
-  speed: string;
-  durability: string;
-  range: string;
-  strengths: string[];
-  constraints: string[];
-  vulnerabilities: string[];
-  uncertaintyNotes: string[];
-}
-
-export interface CharacterGroundingProfile {
-  summary: string;
-  facts: string[];
-  abilities: string[];
-  constraints: string[];
-  signatureMoves: string[];
-  strongPoints: string[];
-  vulnerabilities: string[];
-  uncertaintyNotes: string[];
-  powerProfile?: PowerProfile;
-  sources: CharacterIdentitySourceCitation[];
-}
 
 export interface CharacterIdentityDraft {
   role: CharacterRole;
@@ -340,6 +400,7 @@ export interface CharacterIdentityDraft {
   baseFacts?: CharacterIdentityBaseFacts;
   behavioralCore?: CharacterIdentityBehavioralCore;
   liveDynamics?: CharacterIdentityLiveDynamics;
+  personality?: CharacterPersonality;
 }
 
 export interface CharacterIdentity extends CharacterIdentityDraft {
@@ -389,9 +450,9 @@ export interface CharacterSkill {
 }
 
 export interface CharacterCapabilities {
-  traits: string[];
+  traits?: string[];
   skills: CharacterSkill[];
-  flaws: string[];
+  flaws?: string[];
   specialties: string[];
   wealthTier: CharacterWealthTier | null;
 }
@@ -435,7 +496,7 @@ export interface CharacterProvenance {
   templateId: string | null;
   archetypePrompt: string | null;
   worldgenOrigin: string | null;
-  legacyTags: string[];
+  legacyTags?: string[];
 }
 
 export interface CharacterDraft {
@@ -448,9 +509,7 @@ export interface CharacterDraft {
   loadout: CharacterLoadout;
   startConditions: CharacterStartConditions;
   provenance: CharacterProvenance;
-  grounding?: CharacterGroundingProfile;
-  sourceBundle?: CharacterSourceBundle;
-  continuity?: CharacterContinuityPolicy;
+  powerStats?: PowerStats;
 }
 
 export interface CharacterRecord {
@@ -463,16 +522,17 @@ export interface CharacterRecord {
   loadout: CharacterLoadout;
   startConditions: CharacterStartConditions;
   provenance: CharacterProvenance;
-  grounding?: CharacterGroundingProfile;
-  sourceBundle?: CharacterSourceBundle;
-  continuity?: CharacterContinuityPolicy;
+  powerStats?: PowerStats;
 }
 
 export interface CharacterDraftPatch {
-  identity?: Partial<Omit<CharacterIdentityDraft, "baseFacts" | "behavioralCore" | "liveDynamics">> & {
+  identity?: Partial<
+    Omit<CharacterIdentityDraft, "baseFacts" | "behavioralCore" | "liveDynamics" | "personality">
+  > & {
     baseFacts?: Partial<CharacterIdentityBaseFacts>;
     behavioralCore?: Partial<CharacterIdentityBehavioralCore>;
     liveDynamics?: Partial<CharacterIdentityLiveDynamics>;
+    personality?: Partial<CharacterPersonality>;
   };
   profile?: Partial<CharacterProfile>;
   socialContext?: Partial<CharacterSocialContext>;
@@ -481,13 +541,10 @@ export interface CharacterDraftPatch {
   state?: Partial<CharacterState>;
   loadout?: Partial<CharacterLoadout>;
   startConditions?: Partial<CharacterStartConditions>;
-  sourceBundle?: Partial<Omit<CharacterSourceBundle, "synthesis">> & {
-    synthesis?: Partial<CharacterSourceBundle["synthesis"]>;
-  };
-  continuity?: Partial<CharacterContinuityPolicy>;
   provenance?: Partial<
     Pick<CharacterProvenance, "templateId" | "archetypePrompt" | "worldgenOrigin">
   >;
+  powerStats?: Partial<PowerStats>;
 }
 
 export type PersonaTemplateRoleScope = "player" | "npc" | "any";
@@ -537,3 +594,52 @@ export interface PlayerCharacter {
 }
 
 export type CharacterImportMode = "native" | "outsider";
+
+// --- VS Battles Power Scaling (Phase 57) ---
+
+export const AP_DURABILITY_TIERS = [
+  "Human", "Street", "Wall", "Building", "City Block", "Town",
+  "City", "Mountain", "Island", "Country", "Continental",
+  "Moon", "Planet", "Star", "Solar System", "Galaxy",
+  "Universal", "Multiversal+",
+] as const;
+export type ApDurabilityTier = (typeof AP_DURABILITY_TIERS)[number];
+
+export const SPEED_TIERS = [
+  "Human", "Superhuman", "Subsonic", "Supersonic", "Hypersonic",
+  "Massively Hypersonic", "Sub-Relativistic", "Relativistic",
+  "FTL", "MFTL", "Infinite",
+] as const;
+export type SpeedTier = (typeof SPEED_TIERS)[number];
+
+export const INTELLIGENCE_TIERS = [
+  "Average", "Above Average", "Gifted", "Genius",
+  "Extraordinary Genius", "Supergenius",
+] as const;
+export type IntelligenceTier = (typeof INTELLIGENCE_TIERS)[number];
+
+export interface TierRank<T extends string = string> {
+  tier: T;
+  rank: number; // 1-10 within tier
+}
+
+export interface HaxAbility {
+  name: string;
+  type: string; // e.g. "Spatial Manipulation"
+  bypassTier: ApDurabilityTier | null; // what durability this ignores
+  limitations: string[];
+}
+
+export interface CharacterVulnerability {
+  description: string;
+  severity: "minor" | "major" | "critical";
+}
+
+export interface PowerStats {
+  attackPotency: TierRank<ApDurabilityTier>;
+  speed: TierRank<SpeedTier>;
+  durability: TierRank<ApDurabilityTier>;
+  intelligence: TierRank<IntelligenceTier>;
+  hax: HaxAbility[];
+  vulnerabilities: CharacterVulnerability[];
+}

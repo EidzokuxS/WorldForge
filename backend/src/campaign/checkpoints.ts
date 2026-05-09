@@ -12,6 +12,10 @@ import {
 } from "./restore-bundle.js";
 import { clearCampaignRuntimeState } from "./runtime-state.js";
 import { clearPendingCommittedEvents } from "../vectors/episodic-events.js";
+import {
+  invalidateAuthorityAfterRestore,
+  readWorldClock,
+} from "../engine/living-world-authority.js";
 
 export type CheckpointMeta = {
   id: string;
@@ -118,6 +122,13 @@ export async function loadCheckpoint(
   clearCampaignRuntimeState(campaignId);
   clearPendingCommittedEvents(campaignId);
   await restoreCampaignBundle(campaignId, checkpointDir, { includeVectors: true });
+  const restoredClock = readWorldClock(campaignId);
+  invalidateAuthorityAfterRestore({
+    campaignId,
+    restoredWorldVersion: restoredClock.worldVersion,
+    restoredWorldTimeMinutes: restoredClock.worldTimeMinutes,
+    reason: "checkpoint restored",
+  });
 
   return meta;
 }

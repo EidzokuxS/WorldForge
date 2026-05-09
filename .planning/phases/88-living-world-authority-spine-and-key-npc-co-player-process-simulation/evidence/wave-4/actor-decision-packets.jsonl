@@ -1,0 +1,4 @@
+{"case":"valid-local-reaction","actorId":"npc-key","actorFrameFacts":["self:npc-key","scene:loc-a","move:loc-b"],"citedFactIds":["self:npc-key"],"requestedTools":[{"toolName":"log_event","durability":"scene_local"}],"expected":"accepted"}
+{"case":"invalid-hidden-fact","actorId":"npc-key","actorFrameFacts":["self:npc-key"],"citedFactIds":["self:npc-key","hidden:auditor"],"requestedTools":[],"expected":"rejected","reason":"cited fact is not present in ActorFrame"}
+{"case":"invalid-tool-shape","actorId":"npc-key","actorFrameFacts":["self:npc-key"],"requestedTools":[{"toolName":"log_event","input":{"text":"","importance":99}}],"expected":"rejected","reason":"runtime tool schema validation failed before execution"}
+{"case":"no-action-contract","actorId":"npc-key","actorFrameFacts":["self:npc-key"],"requestedTools":[],"noActionReason":"Watcher has no useful current move from the visible frame.","expected":"accepted"}

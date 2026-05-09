@@ -12,6 +12,7 @@ vi.mock("../../ai/provider-registry.js", () => ({
 import {
   compressConversation,
 } from "../prompt-assembler.js";
+import { buildContextCompressionPromptContract } from "../prompt-contracts.js";
 import { safeGenerateObject } from "../../ai/generate-object-safe.js";
 import type { ResolvedRole } from "../../ai/resolve-role-model.js";
 
@@ -39,6 +40,29 @@ function makeHistory(count: number): ChatMessage[] {
   }
   return msgs;
 }
+
+describe("context compression prompt contract helper", () => {
+  it("exposes indexed selection shape, caps, examples, and no fabricated content policy", () => {
+    const contract = buildContextCompressionPromptContract();
+
+    expect(contract).toContain("STRUCTURED_OUTPUT_CONTRACT: context-compression.v1");
+    expect(contract).toContain('{ "importantIndices": number[] }');
+    expect(contract).toContain("0-based indices");
+    expect(contract).toContain("max 12 selections");
+    expect(contract).toContain("select only indices from the numbered messages supplied below");
+    expect(contract).toContain("Do not summarize, rewrite, merge, or invent memory/lore content");
+    expect(contract).toContain("Compact valid example:");
+    expect(contract).toContain('{ "importantIndices": [0, 3] }');
+    expect(contract).toContain("Minimal valid output:");
+    expect(contract).toContain('{ "importantIndices": [] }');
+    expect(contract).toContain("Invalid examples:");
+    expect(contract).toContain("fabricated index");
+    expect(contract).toContain("summary string instead of indices");
+    expect(contract).toContain("Backend authority:");
+    expect(contract).toContain("backend consumes only selected existing indices");
+    expect(contract).toContain("must not accept fabricated memory, lore, indices, summaries, or canonical truth");
+  });
+});
 
 describe("compressConversation", () => {
   beforeEach(() => {
@@ -108,6 +132,28 @@ describe("compressConversation", () => {
     expect(content).toContain("Message 13");
     expect(content).toContain("attack");
     expect(content).toContain("killed");
+  });
+
+  it("sends the context compression contract before numbered middle messages", async () => {
+    const history = makeHistory(30);
+    vi.mocked(safeGenerateObject).mockResolvedValue({
+      object: { importantIndices: [] },
+    } as never);
+
+    await compressConversation(history, 400, MOCK_JUDGE_ROLE);
+
+    expect(safeGenerateObject).toHaveBeenCalledOnce();
+    const prompt = vi.mocked(safeGenerateObject).mock.calls[0]?.[0]?.prompt as string;
+    const contract = buildContextCompressionPromptContract();
+    expect(prompt).toContain(contract);
+    expect(prompt.indexOf("STRUCTURED_OUTPUT_CONTRACT: context-compression.v1")).toBeLessThan(
+      prompt.indexOf("Messages:"),
+    );
+    expect(prompt).toContain('{ "importantIndices": number[] }');
+    expect(prompt).toContain("max 12 selections");
+    expect(prompt).toContain("select only indices from the numbered messages supplied below");
+    expect(prompt).toContain("Do not summarize, rewrite, merge, or invent memory/lore content");
+    expect(prompt).toContain("must not accept fabricated memory, lore, indices, summaries, or canonical truth");
   });
 
   it("inserts omission marker where messages were dropped", async () => {

@@ -1,0 +1,8 @@
+
+> backend@1.0.0 dev
+> node --import tsx/esm --watch src/index.ts
+
+WorldForge backend listening on http://localhost:3001
+Restarting 'src/index.ts'
+WorldForge backend listening on http://localhost:3001
+Failed running 'src/index.ts'

@@ -1,4 +1,4 @@
-import type { StorytellerPass } from "./storyteller-contract.js";
+export type StorytellerPass = "hidden-tool-driving" | "final-visible";
 
 export type StorytellerSceneMode = "default" | "combat" | "dialogue" | "horror" | "quiet";
 
@@ -17,8 +17,12 @@ const PASS_MOTIFS: Record<StorytellerPass, string[]> = {
     "simulate scene-state consequences before narration.",
     "Do not speak or decide for the player.",
     "The narrator is a scene simulator, not a reflective narrator.",
+    "Treat the turn as one playable RPG beat: interpret the player request, move the scene forward, then leave a clear live situation for the player.",
+    "NPCs are autonomous scene actors with motives, limits, and incomplete information; let them react, refuse, question, help, or escalate from the local facts.",
+    "Respect player agency: never write the player's deliberate words, choices, feelings, or consent.",
     "Prioritize concrete nouns and actions over abstraction.",
     "do not claim knowledge beyond player perception.",
+    "Do not recap or paraphrase the player action before responding; answer with what changes now.",
     "avoid repeating the same emotional beat in alternate wording.",
     "Keep output bounded and paced: 1-3 compact paragraphs unless the scene demands more.",
   ],
@@ -26,9 +30,13 @@ const PASS_MOTIFS: Record<StorytellerPass, string[]> = {
     "Use the settled visible scene as the only basis for narration.",
     "simulate scene-state consequences before visible narration.",
     "Do not invent facts that are not in the assembled scene input.",
+    "Write one playable RPG beat, not a summary: visible change, NPC reaction, concrete pressure, then control returns.",
+    "Respect player agency: treat the player's input as an attempt unless settled packet facts confirm success.",
+    "NPCs should sound and act like people in the scene, not exposition kiosks.",
     "keep output bounded for one narration beat and avoid hidden systems language.",
     "Concrete nouns and actions are mandatory over vague adjectives.",
     "do not claim knowledge beyond what the player can perceive.",
+    "Do not recap or paraphrase the player action before responding; continue from it.",
     "avoid repeating conclusions once they have resolved.",
   ],
 };
@@ -46,6 +54,7 @@ const SCENE_MOTIFS: Record<StorytellerSceneMode, string[]> = {
   dialogue: [
     "Dialogue mode: speak in active conversation beats.",
     "Let exchanges drive the moment; keep reactions concrete.",
+    "Use distinct voices, subtext, interruptions, omissions, and short replies before monologues.",
     "Avoid decorative exposition overlays during dialogue.",
   ],
   horror: [
@@ -56,6 +65,7 @@ const SCENE_MOTIFS: Record<StorytellerSceneMode, string[]> = {
   quiet: [
     "quiet scene: keep scene texture, small gestures, and observed detail first.",
     "Quiet pacing should move with small, meaningful actions.",
+    "A quiet beat still needs a visible change, a choice, or a pressure shift.",
   ],
 };
 

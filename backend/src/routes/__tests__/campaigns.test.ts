@@ -544,6 +544,34 @@ describe("POST /api/campaigns", () => {
     );
   });
 
+  it("passes worldgen source hint and research flag through to createCampaign", async () => {
+    mockedCreate.mockResolvedValue({ id: CAMPAIGN_ID, name: "Test" } as any);
+
+    const res = await app.request("/api/campaigns", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Naruto x JJK",
+        premise: "JJK world with Naruto chakra.",
+        worldgenSourceHint: " Jujutsu Kaisen / Naruto ",
+        worldgenResearchEnabled: false,
+      }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(mockedCreate).toHaveBeenCalledWith(
+      "Naruto x JJK",
+      "JJK world with Naruto chakra.",
+      undefined,
+      {
+        ipContext: undefined,
+        premiseDivergence: undefined,
+        worldgenSourceHint: "Jujutsu Kaisen / Naruto",
+        worldgenResearchEnabled: false,
+      },
+    );
+  });
+
   it("returns 400 for empty name (whitespace only)", async () => {
     const res = await app.request("/api/campaigns", {
       method: "POST",
@@ -709,6 +737,66 @@ describe("GET /:id/world", () => {
     expect(body.player).toHaveProperty("characterRecord");
     expect(body.player).toHaveProperty("draft");
     expect(body.player).toHaveProperty("character");
+  });
+
+  it("keeps broad-only legacy rows compatible without treating them as immediate scene actors", async () => {
+    mockedGetActive.mockReturnValue({
+      id: CAMPAIGN_ID,
+      name: "Test",
+      createdAt: "2026-01-01",
+      generationComplete: true,
+    } as any);
+
+    const player = {
+      ...makeStoredPlayerRow(),
+      currentLocationId: "loc-1",
+      currentSceneLocationId: null,
+    };
+    const npc = {
+      ...makeStoredNpcRow(),
+      id: "npc-legacy",
+      currentLocationId: "loc-1",
+      currentSceneLocationId: null,
+    };
+    const mockAll = vi.fn();
+    const mockWhere = vi.fn(() => ({ all: mockAll }));
+    const mockFrom = vi.fn(() => ({ where: mockWhere }));
+    const mockSelect = vi.fn(() => ({ from: mockFrom }));
+
+    mockAll
+      .mockReturnValueOnce([
+        {
+          id: "loc-1",
+          name: "Forest",
+          description: "Dark pines and wet stone.",
+          kind: "macro",
+          parentLocationId: null,
+          connectedTo: "[]",
+        },
+      ])
+      .mockReturnValueOnce([npc])
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([player]);
+
+    mockedGetDb.mockReturnValue({
+      select: mockSelect,
+    } as any);
+
+    const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/world`);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.currentScene).toMatchObject({
+      id: "loc-1",
+      name: "Forest",
+      broadLocationId: "loc-1",
+      broadLocationName: "Forest",
+      sceneNpcIds: [],
+      clearNpcIds: [],
+    });
+    expect(body.player.sceneScopeId).toBe("loc-1");
+    expect(body.npcs[0].sceneScopeId).toBe("loc-1");
   });
 
   it("returns player as null when no player exists", async () => {
@@ -912,6 +1000,11 @@ describe("GET /:id/world", () => {
           sourceLocationId: "scene-1",
           anchorLocationId: "loc-1",
           sourceEventId: "evt-episodic-1",
+          threadId: null,
+          surfaceRoute: null,
+          visibility: "player_perceivable",
+          knowledgeRoute: null,
+          hiddenCauseTerms: "[]",
           eventType: "ephemeral_scene",
           summary: "A rooftop clash spilled cursed residue into the crossing.",
           tick: 12,
@@ -1001,6 +1094,7 @@ describe("GET /:id/world", () => {
     expect(body.player.characterRecord.identity.behavioralCore.motives).toEqual([
       "Keep moving before the past catches up",
     ]);
+    expect(body.player.character.tags).toEqual(["Brave", "Poor"]);
     expect(body.player.characterRecord.sourceBundle.secondarySources[0].label).toBe(
       "Generator concept",
     );
@@ -1012,6 +1106,7 @@ describe("GET /:id/world", () => {
       "Deliver the warning",
       "Keep the valley connected",
     ]);
+    expect(body.npcs[0].npc.tags).toEqual(["Remote Researcher"]);
     expect(body.npcs[0].draft.sourceBundle.secondarySources[0].label).toBe(
       "Card description",
     );
@@ -1131,7 +1226,7 @@ describe("GET /:id/world", () => {
       npc: {
         name: "Marshal Selene Voss",
         persona: "Now leads from the front and trusts the village scouts.",
-        tags: ["strategist", "scarred", "field medic"],
+        tags: ["Strategist", "Scarred", "Field Medic", "Remote Researcher"],
         goals: {
           shortTerm: editedShortTermGoals,
           longTerm: editedLongTermGoals,

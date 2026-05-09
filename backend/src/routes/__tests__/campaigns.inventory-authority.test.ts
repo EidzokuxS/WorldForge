@@ -314,4 +314,187 @@ describe("GET /api/campaigns/:id/world authoritative inventory", () => {
       },
     });
   });
+
+  it("scopes currentScene to the player's persistent sublocation and excludes sibling actors under the same macro", async () => {
+    (getDb as Mock).mockReturnValue(
+      createMockDb({
+        locations: [
+          {
+            id: "loc-macro",
+            campaignId: "abc-123",
+            name: "Dense Transit Ward",
+            description: "A macro transit district.",
+            kind: "macro",
+            parentLocationId: null,
+            connectedTo: "[]",
+          },
+          {
+            id: "loc-concourse",
+            campaignId: "abc-123",
+            name: "Station Concourse",
+            description: "The player's concrete starting scene.",
+            kind: "persistent_sublocation",
+            parentLocationId: "loc-macro",
+            connectedTo: "[]",
+          },
+          {
+            id: "loc-rooftop",
+            campaignId: "abc-123",
+            name: "Rooftop Service Corridor",
+            description: "A sibling scene under the same macro.",
+            kind: "persistent_sublocation",
+            parentLocationId: "loc-macro",
+            connectedTo: "[]",
+          },
+        ],
+        players: [
+          {
+            id: "player-1",
+            campaignId: "abc-123",
+            name: "Hero",
+            race: "Human",
+            gender: "",
+            age: "",
+            appearance: "",
+            hp: 5,
+            tags: "[]",
+            equippedItems: "[]",
+            currentLocationId: "loc-macro",
+            currentSceneLocationId: "loc-concourse",
+          },
+        ],
+        npcs: [
+          {
+            id: "npc-same-scene",
+            campaignId: "abc-123",
+            name: "Transit Warden",
+            persona: "",
+            tags: "[]",
+            tier: "key",
+            currentLocationId: "loc-macro",
+            currentSceneLocationId: "loc-concourse",
+            goals: "{\"short_term\":[],\"long_term\":[]}",
+            beliefs: "[]",
+          },
+          {
+            id: "npc-sibling-scene",
+            campaignId: "abc-123",
+            name: "Signal Runner",
+            persona: "",
+            tags: "[]",
+            tier: "key",
+            currentLocationId: "loc-macro",
+            currentSceneLocationId: "loc-rooftop",
+            goals: "{\"short_term\":[],\"long_term\":[]}",
+            beliefs: "[]",
+          },
+        ],
+        items: [],
+      }) as unknown as ReturnType<typeof getDb>,
+    );
+
+    const response = await app.request("/api/campaigns/abc-123/world");
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    expect(body.currentScene).toMatchObject({
+      id: "loc-concourse",
+      name: "Station Concourse",
+      broadLocationId: "loc-macro",
+      broadLocationName: "Dense Transit Ward",
+      sceneNpcIds: ["npc-same-scene"],
+      clearNpcIds: ["npc-same-scene"],
+      awareness: {
+        byNpcId: {
+          "npc-same-scene": "clear",
+        },
+      },
+    });
+    expect(body.currentScene.sceneNpcIds).not.toContain("npc-sibling-scene");
+    expect(body.currentScene.clearNpcIds).not.toContain("npc-sibling-scene");
+    expect(body.npcs.find((npc: { id: string }) => npc.id === "npc-same-scene")?.sceneScopeId)
+      .toBe("loc-concourse");
+    expect(body.npcs.find((npc: { id: string }) => npc.id === "npc-sibling-scene")?.sceneScopeId)
+      .toBe("loc-rooftop");
+  });
+
+  it("derives persistent sublocation broad scope so support NPCs placed at parent remain visible", async () => {
+    (getDb as Mock).mockReturnValue(
+      createMockDb({
+        locations: [
+          {
+            id: "loc-macro",
+            campaignId: "abc-123",
+            name: "Canal Market District",
+            description: "A macro canal district.",
+            kind: "macro",
+            parentLocationId: null,
+            connectedTo: "[]",
+          },
+          {
+            id: "loc-pier",
+            campaignId: "abc-123",
+            name: "Lantern-Lit Gondola Pier",
+            description: "A concrete pier scene.",
+            kind: "persistent_sublocation",
+            parentLocationId: "loc-macro",
+            connectedTo: "[]",
+          },
+        ],
+        players: [
+          {
+            id: "player-1",
+            campaignId: "abc-123",
+            name: "Hero",
+            race: "Human",
+            gender: "",
+            age: "",
+            appearance: "",
+            hp: 5,
+            tags: "[]",
+            equippedItems: "[]",
+            currentLocationId: "loc-pier",
+            currentSceneLocationId: "loc-pier",
+          },
+        ],
+        npcs: [
+          {
+            id: "npc-gondolier",
+            campaignId: "abc-123",
+            name: "Gondolier",
+            persona: "",
+            tags: "[]",
+            tier: "temporary",
+            currentLocationId: "loc-macro",
+            currentSceneLocationId: "loc-pier",
+            goals: "{\"short_term\":[],\"long_term\":[]}",
+            beliefs: "[]",
+          },
+        ],
+        items: [],
+      }) as unknown as ReturnType<typeof getDb>,
+    );
+
+    const response = await app.request("/api/campaigns/abc-123/world");
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    expect(body.currentScene).toMatchObject({
+      id: "loc-pier",
+      name: "Lantern-Lit Gondola Pier",
+      broadLocationId: "loc-macro",
+      broadLocationName: "Canal Market District",
+      sceneNpcIds: ["npc-gondolier"],
+      clearNpcIds: ["npc-gondolier"],
+      awareness: {
+        byNpcId: {
+          "npc-gondolier": "clear",
+        },
+      },
+    });
+    expect(body.npcs.find((npc: { id: string }) => npc.id === "npc-gondolier")?.sceneScopeId)
+      .toBe("loc-pier");
+  });
 });
