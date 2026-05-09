@@ -1258,3 +1258,11 @@
 **Ошибка**: I defaulted to an implementation map: routes, files, storage layers, symbols, and developer workflows. That is useful for contributors, but wrong for a general product wiki.
 
 **Правило**: Before writing public wiki/docs, identify the reader. For non-power users, lead with what the app is, how to start, what choices mean, what the world will/won't do, and gentle troubleshooting. Keep file paths, internals, and architecture out unless clearly requested.
+
+## 2026-05-09: Plain-language internals are still internals
+
+**Контекст**: After I swung the wiki toward a beginner player guide, the user clarified they wanted a capability map and under-the-hood explanation, just not written for power users.
+
+**Ошибка**: I treated "not technical" as "avoid inner workings." The real target was "explain inner workings in ordinary language": world creation, player turn processing, memory, factions, NPCs, and consequences.
+
+**Правило**: For public product wiki requests, separate "developer implementation detail" from "user-facing mental model." Include how systems work conceptually, but avoid file paths, route names, symbols, test harnesses, and contributor workflow unless explicitly requested.

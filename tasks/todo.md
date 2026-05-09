@@ -1,3 +1,22 @@
+# 2026-05-09 GitHub Wiki System Map Todo
+
+- [x] Inventory repository structure, package scripts, and existing architecture docs.
+- [x] Read GitNexus repo context, modules, processes, and targeted flow queries.
+- [x] Trace key backend/frontend files for gameplay, worldgen, storage, and API boundaries.
+- [x] Capture correction in `tasks/lessons.md`: this wiki is for non-power users, not developers.
+- [x] Rewrite first GitHub Wiki pass for ordinary readers.
+- [x] Capture correction in `tasks/lessons.md`: user wants plain-language internals/capability map, not only a beginner guide.
+- [x] Reshape wiki into capability map plus simple under-the-hood explanations.
+- [x] Verify wiki links, Markdown shape, and changed-file scope.
+
+Review:
+- In progress. This is documentation-only work; no runtime symbols are being edited.
+- Existing dirty files before this task: `README.md`, `README.ru.md`, and `tasks/lessons.md`.
+- Correction applied: first draft was too implementation-focused; the wiki should explain the product, gameplay, setup, and troubleshooting in plain language.
+- Second correction applied: include internal workings and detailed flows, but phrase them for non-power users.
+- Result: `docs/github-wiki/` now contains GitHub Wiki-style pages for capabilities, world creation, turn processing, memory/hidden information, NPCs/factions/consequences, setup, character creation, play, settings, troubleshooting, and FAQ.
+- Verification: local wiki links resolve; no old technical implementation pages remain in the wiki directory.
+
 # Phase 74 Structured Prompt Contract Todo
 
 # 2026-05-08 Phase 88 Wave 7 Final E2E Gate Todo
