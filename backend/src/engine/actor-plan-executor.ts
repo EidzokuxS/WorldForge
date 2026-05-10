@@ -232,6 +232,12 @@ function recordFailure(input: {
     preconditions: [
       "A failed deterministic offscreen step must be reviewed before new state is committed.",
     ],
+    dueAtWorldTimeMinutes: clockAfter.worldTimeMinutes,
+    priority: 8,
+    intendedTools: [{
+      name: "actor_replan_request",
+      reason: "deterministic_plan_failed",
+    }],
     provenance: { source: "actor-plan-executor", tick: input.tick },
     data: {
       failedPlan: input.process.state.activePlan,

@@ -92,6 +92,13 @@
       "when": 1778220110917,
       "tag": "0012_turn_runtime_resilience",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1778220110918,
+      "tag": "0013_proposal_lifecycle",
+      "breakpoints": true
     }
   ]
 }

@@ -106,6 +106,9 @@ function queueDeferredActorDecision(input: {
       baseWorldVersion: existing.baseWorldVersion,
       writeScopes: payload.writeScopes,
       status: "pending",
+      disposition: existing.proposalDisposition,
+      dueAtWorldTimeMinutes: existing.dueAtWorldTimeMinutes ?? payload.dueAtWorldTimeMinutes,
+      priority: existing.priority ?? payload.priority,
     };
   }
 
@@ -124,6 +127,12 @@ function queueDeferredActorDecision(input: {
     preconditions: [
       "Due actor work touching exposed scope must resolve through an actor decision before committing non-deterministic state.",
     ],
+    dueAtWorldTimeMinutes: clock.worldTimeMinutes,
+    priority: input.decision.signals[0]?.priority ?? 5,
+    intendedTools: [{
+      name: "actor_decision",
+      reason: input.phase,
+    }],
     provenance: {
       source: "due-world-work",
       tick: input.tick,

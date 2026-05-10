@@ -21,6 +21,7 @@ import {
   createSimulationProposal,
   parseSimulationProposalPayload,
   type CreatedSimulationProposal,
+  type SimulationProposalIntendedTool,
   type SimulationProposalWriteScope,
 } from "./simulation-proposal.js";
 
@@ -105,11 +106,13 @@ function enqueueProposal(input: {
   sourceEntity: AuthoritySourceEntity;
   priority?: number;
   tick: number;
+  worldTimeMinutes: number;
   route?: string;
   summary: string;
   readSet: readonly string[];
   writeScopes: readonly SimulationProposalWriteScope[];
   preconditions?: readonly string[];
+  intendedTools?: readonly SimulationProposalIntendedTool[];
   idempotencyKey?: string;
   payload: unknown;
 }): CreatedSimulationProposal {
@@ -141,6 +144,10 @@ function enqueueProposal(input: {
     readSet: input.readSet,
     writeScopes: input.writeScopes,
     preconditions: input.preconditions,
+    dueAtWorldTimeMinutes: input.worldTimeMinutes,
+    expiresAtWorldTimeMinutes: input.worldTimeMinutes + 24 * 60,
+    priority: input.priority ?? 0,
+    intendedTools: input.intendedTools,
     provenance: {
       source: "post-turn-simulation-queue",
       tick: input.tick,
@@ -191,6 +198,11 @@ function findReusableProposalByIdempotencyKey(
     baseWorldVersion: rows.baseWorldVersion,
     writeScopes: payload.writeScopes,
     status: rows.status,
+    disposition: rows.proposalDisposition === "pending" && rows.status === "committed"
+      ? "committed"
+      : rows.proposalDisposition,
+    dueAtWorldTimeMinutes: rows.dueAtWorldTimeMinutes ?? payload.dueAtWorldTimeMinutes,
+    priority: rows.priority ?? payload.priority,
   };
 }
 
@@ -237,6 +249,7 @@ export function queuePostTurnSimulationProposals(
         }),
         priority: schedule.signals[0]?.priority ?? 5,
         tick: input.tick,
+        worldTimeMinutes: clock.worldTimeMinutes,
         route: input.route,
         summary: `${schedule.actorName}: ${schedule.reason}`,
         readSet: [
@@ -248,6 +261,10 @@ export function queuePostTurnSimulationProposals(
         preconditions: [
           "Actor process proposals cannot mutate state until base world version and write scopes are validated.",
         ],
+        intendedTools: [{
+          name: "actor_decision",
+          reason: schedule.route,
+        }],
         payload: {
           tick: input.tick,
           provider,
@@ -272,6 +289,7 @@ export function queuePostTurnSimulationProposals(
         }),
         priority: 10,
         tick: input.tick,
+        worldTimeMinutes: clock.worldTimeMinutes,
         route: input.route,
         summary: "Evaluate key NPCs outside the player-visible scene without committing direct state.",
         readSet: [
@@ -281,6 +299,10 @@ export function queuePostTurnSimulationProposals(
         ],
         writeScopes: ["npc:state", "event:npc_offscreen", "memory:reflection_budget"],
         preconditions: ["Do not apply NPC moves, goals, events, or reflection budget until proposal commit validates base world version."],
+        intendedTools: [
+          { name: "npc_offscreen_update", reason: "interval_due" },
+          { name: "record_location_event", reason: "surface_offscreen_change" },
+        ],
         payload: {
           tick: input.tick,
           provider,
@@ -306,11 +328,13 @@ export function queuePostTurnSimulationProposals(
       }),
       priority: 5,
       tick: input.tick,
+      worldTimeMinutes: clock.worldTimeMinutes,
       route: input.route,
       summary: "Scan reflection-eligible NPCs and propose memory/belief/goal updates only.",
       readSet: [`tick:${input.tick}`, "npc:unprocessed_importance"],
       writeScopes: ["npc:memory", "npc:belief", "npc:goal", "npc:identity"],
       preconditions: ["Reflection tools cannot directly mutate NPC records from detached post-turn work."],
+      intendedTools: [{ name: "npc_reflection_update", reason: "post_turn_reflection_scan" }],
       payload: {
         tick: input.tick,
         provider,
@@ -334,6 +358,7 @@ export function queuePostTurnSimulationProposals(
         }),
         priority: 1,
         tick: input.tick,
+        worldTimeMinutes: clock.worldTimeMinutes,
         route: input.route,
         summary: "Evaluate faction command nodes through reports, standing orders, and resource ledgers before proposing any faction/world change.",
         readSet: [
@@ -346,6 +371,10 @@ export function queuePostTurnSimulationProposals(
         preconditions: [
           "Faction work cannot directly mutate state from detached post-turn work.",
           "A committed faction operation must cite a command node plus available report or standing order and validated resources.",
+        ],
+        intendedTools: [
+          { name: "faction_command_operation", reason: "interval_due" },
+          { name: "record_world_event", reason: "surface_faction_consequence" },
         ],
         payload: {
           tick: input.tick,

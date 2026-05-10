@@ -31,6 +31,22 @@ export const narratorAttemptStatusValues = [
   "succeeded",
 ] as const;
 
+export const simulationProposalDispositionValues = [
+  "pending",
+  "committed",
+  "rejected_invalid",
+  "expired_stale_version",
+  "deferred_not_due",
+  "superseded_by_new_event",
+  "needs_rebase",
+  "needs_actor_retry",
+] as const;
+
+export const simulationProposalExpiryPolicyValues = [
+  "reject_when_expired",
+  "ignore_expiry",
+] as const;
+
 export const campaigns = sqliteTable("campaigns", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -613,9 +629,21 @@ export const simulationProposals = sqliteTable(
     status: text("status", {
       enum: ["pending", "committed", "rejected", "canceled", "superseded"],
     }).notNull().default("pending"),
+    proposalDisposition: text("proposal_disposition", {
+      enum: simulationProposalDispositionValues,
+    }).notNull().default("pending"),
+    dispositionReason: text("disposition_reason"),
     baseWorldVersion: integer("base_world_version").notNull(),
     proposedWorldVersion: integer("proposed_world_version"),
     committedWorldVersion: integer("committed_world_version"),
+    dueAtWorldTimeMinutes: integer("due_at_world_time_minutes"),
+    expiryPolicy: text("expiry_policy", {
+      enum: simulationProposalExpiryPolicyValues,
+    }).notNull().default("reject_when_expired"),
+    priority: integer("priority").notNull().default(0),
+    intendedTools: text("intended_tools").notNull().default("[]"),
+    supersededByProposalId: text("superseded_by_proposal_id"),
+    lifecycleMetadata: text("lifecycle_metadata").notNull().default("{}"),
     sourceEntityType: text("source_entity_type").notNull(),
     sourceEntityId: text("source_entity_id"),
     payload: text("payload").notNull().default("{}"),
@@ -631,6 +659,15 @@ export const simulationProposals = sqliteTable(
     index("idx_simulation_proposals_base_version").on(
       table.campaignId,
       table.baseWorldVersion,
+    ),
+    index("idx_simulation_proposals_disposition").on(
+      table.campaignId,
+      table.proposalDisposition,
+    ),
+    index("idx_simulation_proposals_due_priority").on(
+      table.campaignId,
+      table.dueAtWorldTimeMinutes,
+      table.priority,
     ),
     uniqueIndex("simulation_proposals_campaign_idempotency_unique").on(
       table.campaignId,

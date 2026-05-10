@@ -20,6 +20,7 @@ import {
 import {
   commitSimulationProposal,
   createSimulationProposal,
+  parseSimulationProposalPayload,
 } from "../simulation-proposal.js";
 import {
   queuePostTurnSimulationProposals,
@@ -94,6 +95,22 @@ describe("simulation queue and proposal lifecycle", () => {
       "pending",
       "pending",
     ]);
+    expect(proposals.map((proposal) => proposal.proposalDisposition)).toEqual([
+      "pending",
+      "pending",
+      "pending",
+    ]);
+    expect(proposals.map((proposal) => proposal.dueAtWorldTimeMinutes)).toEqual([
+      result.worldTimeMinutes,
+      result.worldTimeMinutes,
+      result.worldTimeMinutes,
+    ]);
+    expect(proposals.map((proposal) => proposal.priority)).toEqual([10, 5, 1]);
+    const payloads = proposals.map((proposal) =>
+      parseSimulationProposalPayload(proposal.payload),
+    );
+    expect(payloads.every((payload) => payload.schemaVersion === 2)).toBe(true);
+    expect(payloads.every((payload) => payload.intendedTools.length > 0)).toBe(true);
     expect(proposals.map((proposal) => proposal.payload).join("\n")).not.toContain("secret-key");
     expect(proposals.map((proposal) => proposal.payload).join("\n")).toContain("factionRouting");
   });

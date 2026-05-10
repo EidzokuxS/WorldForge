@@ -50,6 +50,20 @@ export function writeScopesConflict(
   return true;
 }
 
+export function findConflictingWriteScope(input: {
+  writeScopes: readonly SimulationActorWriteScope[];
+  blockedWriteScopes: readonly SimulationActorWriteScope[];
+}): { writeScope: SimulationActorWriteScope; blockedWriteScope: SimulationActorWriteScope } | null {
+  for (const writeScope of input.writeScopes) {
+    for (const blockedWriteScope of input.blockedWriteScopes) {
+      if (writeScopesConflict(writeScope, blockedWriteScope)) {
+        return { writeScope, blockedWriteScope };
+      }
+    }
+  }
+  return null;
+}
+
 export function reserveActorWriteScopes(
   jobs: readonly ActorWriteScopeJob[],
 ): ActorWriteScopeReservation[] {

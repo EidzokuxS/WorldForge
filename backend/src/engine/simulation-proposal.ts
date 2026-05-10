@@ -7,6 +7,7 @@ import {
   readWorldClock,
   type AuthoritySourceEntity,
 } from "./living-world-authority.js";
+import { findConflictingWriteScope, writeScopesConflict } from "./simulation-write-scope.js";
 
 export type SimulationProposalWriteScope =
   | `npc:${string}`
@@ -17,12 +18,54 @@ export type SimulationProposalWriteScope =
   | `event:${string}`
   | `asset:${string}`;
 
+export type SimulationProposalStatus =
+  | "pending"
+  | "committed"
+  | "rejected"
+  | "canceled"
+  | "superseded";
+
+export type SimulationProposalDisposition =
+  | "pending"
+  | "committed"
+  | "rejected_invalid"
+  | "expired_stale_version"
+  | "deferred_not_due"
+  | "superseded_by_new_event"
+  | "needs_rebase"
+  | "needs_actor_retry";
+
+export type SimulationProposalPreflightDisposition =
+  | "ready_to_commit"
+  | "needs_rebase"
+  | "needs_actor_retry"
+  | "rejected_invalid"
+  | "expired_stale_version"
+  | "deferred_not_due"
+  | "superseded_by_new_event";
+
+export type SimulationProposalExpiryPolicy =
+  | "reject_when_expired"
+  | "ignore_expiry";
+
+export interface SimulationProposalIntendedTool {
+  name: string;
+  args?: Record<string, unknown>;
+  reason?: string;
+}
+
 export interface SimulationProposalPayload {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   summary: string;
   readSet: string[];
   writeScopes: SimulationProposalWriteScope[];
   preconditions: string[];
+  dueAtWorldTimeMinutes?: number;
+  expiryPolicy: SimulationProposalExpiryPolicy;
+  priority: number;
+  intendedTools: SimulationProposalIntendedTool[];
+  sourceJobId?: string | null;
+  sourceEntity?: AuthoritySourceEntity;
   provenance: {
     source: string;
     tick?: number;
@@ -44,6 +87,10 @@ export interface CreateSimulationProposalInput {
   readSet?: readonly string[];
   writeScopes?: readonly SimulationProposalWriteScope[];
   preconditions?: readonly string[];
+  dueAtWorldTimeMinutes?: number;
+  expiryPolicy?: SimulationProposalExpiryPolicy;
+  priority?: number;
+  intendedTools?: readonly SimulationProposalIntendedTool[];
   provenance: SimulationProposalPayload["provenance"];
   expiresAtWorldTimeMinutes?: number;
   data?: unknown;
@@ -56,13 +103,18 @@ export interface CreatedSimulationProposal {
   proposalType: string;
   baseWorldVersion: number;
   writeScopes: SimulationProposalWriteScope[];
-  status: "pending" | "committed" | "rejected" | "canceled" | "superseded";
+  status: SimulationProposalStatus;
+  disposition: SimulationProposalDisposition;
+  dueAtWorldTimeMinutes?: number;
+  priority: number;
 }
 
 export interface CommitSimulationProposalInput {
   campaignId: string;
   proposalId: string;
   blockedWriteScopes?: readonly SimulationProposalWriteScope[];
+  changedReadSetRefs?: readonly string[];
+  supersededByProposalId?: string | null;
   elapsedWorldTimeMinutes?: number;
 }
 
@@ -82,11 +134,40 @@ export type CommitSimulationProposalResult =
         | "not_pending"
         | "stale_base_world_version"
         | "expired"
-        | "conflicting_write_scope";
+        | "conflicting_write_scope"
+        | "deferred_not_due"
+        | "superseded_by_new_event"
+        | "needs_actor_retry"
+        | "rejected_invalid";
       baseWorldVersion?: number;
       currentWorldVersion?: number;
       writeScopes?: SimulationProposalWriteScope[];
+      disposition?: SimulationProposalDisposition;
     };
+
+export interface SimulationProposalPreflightInput {
+  status: SimulationProposalStatus;
+  baseWorldVersion: number;
+  currentWorldVersion: number;
+  currentWorldTimeMinutes: number;
+  payload: SimulationProposalPayload;
+  blockedWriteScopes?: readonly SimulationProposalWriteScope[];
+  changedReadSetRefs?: readonly string[];
+  supersededByProposalId?: string | null;
+}
+
+export interface SimulationProposalPreflightResult {
+  disposition: SimulationProposalPreflightDisposition;
+  reason: string;
+  baseWorldVersion: number;
+  currentWorldVersion: number;
+  currentWorldTimeMinutes: number;
+  writeScopes: SimulationProposalWriteScope[];
+  conflictingWriteScope?: string;
+  blockedWriteScope?: string;
+  materialReadSetRefs?: string[];
+  supersededByProposalId?: string;
+}
 
 type SimulationProposalRejectionReason = Extract<
   CommitSimulationProposalResult,
@@ -114,14 +195,73 @@ function parseStringArray(value: unknown): string[] {
     : [];
 }
 
+function parseOptionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function parseExpiryPolicy(value: unknown): SimulationProposalExpiryPolicy {
+  return value === "ignore_expiry"
+    ? "ignore_expiry"
+    : "reject_when_expired";
+}
+
+function parseSourceEntity(value: unknown): AuthoritySourceEntity | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.type !== "string") {
+    return undefined;
+  }
+  return {
+    type: record.type,
+    id: typeof record.id === "string" || record.id === null
+      ? record.id
+      : undefined,
+  };
+}
+
+function parseIntendedTools(value: unknown): SimulationProposalIntendedTool[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((item): SimulationProposalIntendedTool[] => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      return [];
+    }
+    const record = item as Record<string, unknown>;
+    if (typeof record.name !== "string" || record.name.trim().length === 0) {
+      return [];
+    }
+    return [{
+      name: record.name.trim(),
+      args: record.args && typeof record.args === "object" && !Array.isArray(record.args)
+        ? record.args as Record<string, unknown>
+        : undefined,
+      reason: typeof record.reason === "string" ? record.reason : undefined,
+    }];
+  });
+}
+
 export function parseSimulationProposalPayload(value: string): SimulationProposalPayload {
   const parsed = parseJsonRecord(value);
+  const sourceJobId = typeof parsed.sourceJobId === "string" || parsed.sourceJobId === null
+    ? parsed.sourceJobId
+    : undefined;
   return {
-    schemaVersion: 1,
+    schemaVersion: parsed.schemaVersion === 2 ? 2 : 1,
     summary: typeof parsed.summary === "string" ? parsed.summary : "",
     readSet: parseStringArray(parsed.readSet),
     writeScopes: parseStringArray(parsed.writeScopes) as SimulationProposalWriteScope[],
     preconditions: parseStringArray(parsed.preconditions),
+    dueAtWorldTimeMinutes: parseOptionalNumber(parsed.dueAtWorldTimeMinutes),
+    expiryPolicy: parseExpiryPolicy(parsed.expiryPolicy),
+    priority: parseOptionalNumber(parsed.priority) ?? 0,
+    intendedTools: parseIntendedTools(parsed.intendedTools),
+    sourceJobId,
+    sourceEntity: parseSourceEntity(parsed.sourceEntity),
     provenance:
       parsed.provenance && typeof parsed.provenance === "object" && !Array.isArray(parsed.provenance)
         ? parsed.provenance as SimulationProposalPayload["provenance"]
@@ -131,6 +271,52 @@ export function parseSimulationProposalPayload(value: string): SimulationProposa
         ? parsed.expiresAtWorldTimeMinutes
         : undefined,
     data: parsed.data,
+  };
+}
+
+function dispositionFromLegacyRow(input: {
+  status: SimulationProposalStatus;
+  proposalDisposition: SimulationProposalDisposition;
+  rejectionReason?: string | null;
+}): SimulationProposalDisposition {
+  if (input.proposalDisposition !== "pending") {
+    return input.proposalDisposition;
+  }
+  switch (input.status) {
+    case "committed":
+      return "committed";
+    case "superseded":
+      return "superseded_by_new_event";
+    case "rejected":
+      if (input.rejectionReason === "expired") {
+        return "expired_stale_version";
+      }
+      return "rejected_invalid";
+    case "canceled":
+      return "rejected_invalid";
+    case "pending":
+      return "pending";
+  }
+}
+
+function createdProposalFromRow(
+  row: typeof simulationProposals.$inferSelect,
+  payload: SimulationProposalPayload,
+): CreatedSimulationProposal {
+  return {
+    proposalId: row.id,
+    campaignId: row.campaignId,
+    proposalType: row.proposalType,
+    baseWorldVersion: row.baseWorldVersion,
+    writeScopes: payload.writeScopes,
+    status: row.status,
+    disposition: dispositionFromLegacyRow({
+      status: row.status,
+      proposalDisposition: row.proposalDisposition,
+      rejectionReason: row.rejectionReason,
+    }),
+    dueAtWorldTimeMinutes: row.dueAtWorldTimeMinutes ?? payload.dueAtWorldTimeMinutes,
+    priority: row.priority ?? payload.priority,
   };
 }
 
@@ -148,23 +334,22 @@ export function createSimulationProposal(
       .get();
     if (existing) {
       const existingPayload = parseSimulationProposalPayload(existing.payload);
-      return {
-        proposalId: existing.id,
-        campaignId: existing.campaignId,
-        proposalType: existing.proposalType,
-        baseWorldVersion: existing.baseWorldVersion,
-        writeScopes: existingPayload.writeScopes,
-        status: existing.status,
-      };
+      return createdProposalFromRow(existing, existingPayload);
     }
   }
 
   const payload: SimulationProposalPayload = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     summary: input.summary,
     readSet: [...(input.readSet ?? [])],
     writeScopes: [...(input.writeScopes ?? [])],
     preconditions: [...(input.preconditions ?? [])],
+    dueAtWorldTimeMinutes: input.dueAtWorldTimeMinutes,
+    expiryPolicy: input.expiryPolicy ?? "reject_when_expired",
+    priority: input.priority ?? 0,
+    intendedTools: [...(input.intendedTools ?? [])],
+    sourceJobId: input.jobId ?? null,
+    sourceEntity: input.sourceEntity,
     provenance: input.provenance,
     expiresAtWorldTimeMinutes: input.expiresAtWorldTimeMinutes,
     data: input.data ?? {},
@@ -180,6 +365,26 @@ export function createSimulationProposal(
     payload,
     toolResultId: input.toolResultId ?? null,
   });
+  getDb()
+    .update(simulationProposals)
+    .set({
+      proposalDisposition: "pending",
+      dispositionReason: null,
+      dueAtWorldTimeMinutes: payload.dueAtWorldTimeMinutes ?? null,
+      expiryPolicy: payload.expiryPolicy,
+      priority: payload.priority,
+      intendedTools: JSON.stringify(payload.intendedTools),
+      lifecycleMetadata: JSON.stringify({
+        readSet: payload.readSet,
+        writeScopes: payload.writeScopes,
+        preconditions: payload.preconditions,
+        sourceJobId: payload.sourceJobId ?? null,
+        sourceEntity: payload.sourceEntity ?? null,
+      }),
+      updatedAt: now(),
+    })
+    .where(eq(simulationProposals.id, proposalId))
+    .run();
   const row = getDb()
     .select()
     .from(simulationProposals)
@@ -189,28 +394,209 @@ export function createSimulationProposal(
     ? parseSimulationProposalPayload(row.payload)
     : payload;
 
+  return row
+    ? createdProposalFromRow(row, storedPayload)
+    : {
+        proposalId,
+        campaignId: input.campaignId,
+        proposalType: input.proposalType,
+        baseWorldVersion: input.baseWorldVersion,
+        writeScopes: storedPayload.writeScopes,
+        status: "pending",
+        disposition: "pending",
+        dueAtWorldTimeMinutes: storedPayload.dueAtWorldTimeMinutes,
+        priority: storedPayload.priority,
+      };
+}
+
+function invalidPreconditionReason(preconditions: readonly string[]): string | null {
+  for (const precondition of preconditions) {
+    const normalized = precondition.trim().toLowerCase();
+    if (
+      normalized.startsWith("invalid:")
+      || normalized.startsWith("reject:")
+      || normalized === "rejected_invalid"
+    ) {
+      return precondition;
+    }
+  }
+  return null;
+}
+
+function materialReadSetRefs(input: {
+  readSet: readonly string[];
+  changedReadSetRefs: readonly string[];
+}): string[] {
+  const changed = input.changedReadSetRefs
+    .map((ref) => ref.trim())
+    .filter(Boolean);
+  if (changed.length === 0) {
+    return [];
+  }
+  return input.readSet.filter((readRef) =>
+    changed.some((changedRef) =>
+      readRef === changedRef || writeScopesConflict(readRef, changedRef),
+    ),
+  );
+}
+
+export function classifySimulationProposalPreflight(
+  input: SimulationProposalPreflightInput,
+): SimulationProposalPreflightResult {
+  const base = {
+    baseWorldVersion: input.baseWorldVersion,
+    currentWorldVersion: input.currentWorldVersion,
+    currentWorldTimeMinutes: input.currentWorldTimeMinutes,
+    writeScopes: input.payload.writeScopes,
+  };
+
+  if (input.status === "superseded" || input.supersededByProposalId) {
+    return {
+      ...base,
+      disposition: "superseded_by_new_event",
+      reason: "proposal_superseded_by_new_event",
+      supersededByProposalId: input.supersededByProposalId ?? undefined,
+    };
+  }
+
+  if (input.status !== "pending") {
+    return {
+      ...base,
+      disposition: "rejected_invalid",
+      reason: `proposal_not_pending:${input.status}`,
+    };
+  }
+
+  if (
+    input.payload.expiresAtWorldTimeMinutes !== undefined
+    && input.payload.expiryPolicy !== "ignore_expiry"
+    && input.currentWorldTimeMinutes > input.payload.expiresAtWorldTimeMinutes
+  ) {
+    return {
+      ...base,
+      disposition: "expired_stale_version",
+      reason: "proposal_expired_before_commit",
+    };
+  }
+
+  if (
+    input.payload.dueAtWorldTimeMinutes !== undefined
+    && input.currentWorldTimeMinutes < input.payload.dueAtWorldTimeMinutes
+  ) {
+    return {
+      ...base,
+      disposition: "deferred_not_due",
+      reason: "proposal_due_time_not_reached",
+    };
+  }
+
+  const invalidPrecondition = invalidPreconditionReason(input.payload.preconditions);
+  if (invalidPrecondition) {
+    return {
+      ...base,
+      disposition: "rejected_invalid",
+      reason: invalidPrecondition,
+    };
+  }
+
+  const conflict = findConflictingWriteScope({
+    writeScopes: input.payload.writeScopes,
+    blockedWriteScopes: input.blockedWriteScopes ?? [],
+  });
+  if (conflict) {
+    return {
+      ...base,
+      disposition: "rejected_invalid",
+      reason: "conflicting_write_scope",
+      conflictingWriteScope: conflict.writeScope,
+      blockedWriteScope: conflict.blockedWriteScope,
+    };
+  }
+
+  if (input.currentWorldVersion !== input.baseWorldVersion) {
+    const materialRefs = materialReadSetRefs({
+      readSet: input.payload.readSet,
+      changedReadSetRefs: input.changedReadSetRefs ?? [],
+    });
+    if (materialRefs.length > 0) {
+      return {
+        ...base,
+        disposition: "needs_actor_retry",
+        reason: "material_read_set_changed",
+        materialReadSetRefs: materialRefs,
+      };
+    }
+    return {
+      ...base,
+      disposition: "needs_rebase",
+      reason: "stale_base_world_version_unaffected_read_set",
+    };
+  }
+
   return {
-    proposalId,
-    campaignId: input.campaignId,
-    proposalType: row?.proposalType ?? input.proposalType,
-    baseWorldVersion: row?.baseWorldVersion ?? input.baseWorldVersion,
-    writeScopes: storedPayload.writeScopes,
-    status: row?.status ?? "pending",
+    ...base,
+    disposition: "ready_to_commit",
+    reason: "proposal_ready_to_commit",
   };
 }
 
-function rejectProposal(
-  proposalId: string,
-  reason: SimulationProposalRejectionReason,
-): void {
+function legacyReasonFromPreflight(
+  preflight: SimulationProposalPreflightResult,
+): SimulationProposalRejectionReason {
+  switch (preflight.disposition) {
+    case "expired_stale_version":
+      return "expired";
+    case "deferred_not_due":
+      return "deferred_not_due";
+    case "superseded_by_new_event":
+      return "superseded_by_new_event";
+    case "needs_actor_retry":
+      return "needs_actor_retry";
+    case "needs_rebase":
+      return "stale_base_world_version";
+    case "rejected_invalid":
+      return preflight.reason === "conflicting_write_scope"
+        ? "conflicting_write_scope"
+        : "rejected_invalid";
+    case "ready_to_commit":
+      return "rejected_invalid";
+  }
+}
+
+function statusForRejectedPreflight(
+  disposition: SimulationProposalDisposition,
+): SimulationProposalStatus {
+  if (disposition === "deferred_not_due") {
+    return "pending";
+  }
+  if (disposition === "superseded_by_new_event") {
+    return "superseded";
+  }
+  return "rejected";
+}
+
+function applyPreflightDisposition(input: {
+  proposalId: string;
+  preflight: SimulationProposalPreflightResult;
+  rejectionReason: SimulationProposalRejectionReason;
+}): void {
+  const disposition = input.preflight.disposition === "ready_to_commit"
+    ? "pending"
+    : input.preflight.disposition;
   getDb()
     .update(simulationProposals)
     .set({
-      status: "rejected",
-      rejectionReason: reason,
+      status: statusForRejectedPreflight(disposition),
+      rejectionReason: input.rejectionReason,
+      proposalDisposition: disposition,
+      dispositionReason: input.preflight.reason,
+      supersededByProposalId: input.preflight.supersededByProposalId ?? null,
+      lifecycleMetadata: JSON.stringify({
+        preflight: input.preflight,
+      }),
       updatedAt: now(),
     })
-    .where(eq(simulationProposals.id, proposalId))
+    .where(eq(simulationProposals.id, input.proposalId))
     .run();
 }
 
@@ -241,47 +627,41 @@ export function commitSimulationProposal(
       reason: "not_pending",
       baseWorldVersion: proposal.baseWorldVersion,
       writeScopes: payload.writeScopes,
+      disposition: dispositionFromLegacyRow({
+        status: proposal.status,
+        proposalDisposition: proposal.proposalDisposition,
+        rejectionReason: proposal.rejectionReason,
+      }),
     };
   }
 
   const clock = readWorldClock(input.campaignId);
-  if (clock.worldVersion !== proposal.baseWorldVersion) {
-    rejectProposal(input.proposalId, "stale_base_world_version");
-    return {
-      status: "rejected",
-      proposalId: input.proposalId,
-      reason: "stale_base_world_version",
-      baseWorldVersion: proposal.baseWorldVersion,
-      currentWorldVersion: clock.worldVersion,
-      writeScopes: payload.writeScopes,
-    };
-  }
+  const preflight = classifySimulationProposalPreflight({
+    status: proposal.status,
+    baseWorldVersion: proposal.baseWorldVersion,
+    currentWorldVersion: clock.worldVersion,
+    currentWorldTimeMinutes: clock.worldTimeMinutes,
+    payload,
+    blockedWriteScopes: input.blockedWriteScopes,
+    changedReadSetRefs: input.changedReadSetRefs,
+    supersededByProposalId: input.supersededByProposalId ?? proposal.supersededByProposalId,
+  });
 
-  if (
-    payload.expiresAtWorldTimeMinutes !== undefined
-    && clock.worldTimeMinutes > payload.expiresAtWorldTimeMinutes
-  ) {
-    rejectProposal(input.proposalId, "expired");
+  if (preflight.disposition !== "ready_to_commit") {
+    const rejectionReason = legacyReasonFromPreflight(preflight);
+    applyPreflightDisposition({
+      proposalId: input.proposalId,
+      preflight,
+      rejectionReason,
+    });
     return {
       status: "rejected",
       proposalId: input.proposalId,
-      reason: "expired",
+      reason: rejectionReason,
       baseWorldVersion: proposal.baseWorldVersion,
       currentWorldVersion: clock.worldVersion,
       writeScopes: payload.writeScopes,
-    };
-  }
-
-  const blockedScopes = new Set(input.blockedWriteScopes ?? []);
-  if (payload.writeScopes.some((scope) => blockedScopes.has(scope))) {
-    rejectProposal(input.proposalId, "conflicting_write_scope");
-    return {
-      status: "rejected",
-      proposalId: input.proposalId,
-      reason: "conflicting_write_scope",
-      baseWorldVersion: proposal.baseWorldVersion,
-      currentWorldVersion: clock.worldVersion,
-      writeScopes: payload.writeScopes,
+      disposition: preflight.disposition,
     };
   }
 
@@ -301,6 +681,8 @@ export function commitSimulationProposal(
       summary: payload.summary,
       readSet: payload.readSet,
       preconditions: payload.preconditions,
+      intendedTools: payload.intendedTools,
+      proposalPreflight: preflight,
       provenance: payload.provenance,
     },
   });
@@ -310,7 +692,13 @@ export function commitSimulationProposal(
   db.update(simulationProposals)
     .set({
       status: "committed",
+      proposalDisposition: "committed",
+      dispositionReason: preflight.reason,
       committedWorldVersion,
+      lifecycleMetadata: JSON.stringify({
+        preflight,
+        authorityToolResultId: authority.toolResultId,
+      }),
       updatedAt: now(),
     })
     .where(eq(simulationProposals.id, input.proposalId))
