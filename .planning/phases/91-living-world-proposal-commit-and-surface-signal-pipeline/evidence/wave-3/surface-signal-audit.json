@@ -1,0 +1,123 @@
+{
+  "phase": 91,
+  "plan": "91-03",
+  "artifact": "surface-signal-audit",
+  "generatedAt": "2026-05-10",
+  "policyValues": [
+    "none",
+    "local_only",
+    "rumor",
+    "visible_modifier",
+    "direct_message",
+    "quest_hook",
+    "physical_trace",
+    "social_reaction"
+  ],
+  "contractChecks": {
+    "missingPolicy": "surface_signal_policy_missing_or_invalid",
+    "meaningfulCommitWithoutSurfaceSignal": "surface_signal_required_for_meaningful_offscreen_commit",
+    "noneWithoutReason": "surface_signal_none_requires_reason",
+    "hiddenCauseLeak": "Surface signal summary leaks hidden cause term"
+  },
+  "fixtures": [
+    {
+      "proposalType": "missing_surface",
+      "meaningfulOffscreenCommit": true,
+      "disposition": "rejected_invalid",
+      "toolExecution": "blocked_before_execution",
+      "chronicleRows": 0,
+      "authorityTraceRows": 0,
+      "sourceJobStatus": "failed"
+    },
+    {
+      "proposalType": "rumor_surface",
+      "meaningfulOffscreenCommit": true,
+      "disposition": "committed",
+      "surfacePolicy": "rumor",
+      "committedWorldVersion": 3,
+      "thread": {
+        "name": "Sealed cart rumor",
+        "visibility": "signal_only",
+        "currentLocationId": "loc-market",
+        "metadata": {
+          "sourceProposalId": "proposal id recorded on world_threads.metadata",
+          "surfacePolicy": "rumor"
+        }
+      },
+      "worldThreadEvent": {
+        "eventType": "surface_signal",
+        "surfaceRoute": "rumor",
+        "locationId": "loc-market",
+        "sourceEventIds": [
+          "event-cart"
+        ],
+        "sourceAuthorityTraceIds": "non-empty",
+        "summary": "Market porters whisper that a sealed cart left before dawn."
+      },
+      "locationRecentEvent": {
+        "eventType": "world_thread_signal",
+        "surfaceRoute": "rumor",
+        "visibility": "local_signal",
+        "knowledgeRoute": "rumor",
+        "sourceEventId": "world thread surface event id",
+        "summary": "Market porters whisper that a sealed cart left before dawn."
+      },
+      "blockedHiddenCauseTerms": [
+        "secret cult"
+      ]
+    },
+    {
+      "proposalType": "physical_trace_surface",
+      "meaningfulOffscreenCommit": true,
+      "disposition": "committed",
+      "surfacePolicy": "physical_trace",
+      "committedWorldVersion": 3,
+      "thread": {
+        "name": "Scuffed wax trail",
+        "visibility": "signal_only",
+        "currentLocationId": "loc-market",
+        "metadata": {
+          "sourceProposalId": "proposal id recorded on world_threads.metadata",
+          "surfacePolicy": "physical_trace"
+        }
+      },
+      "worldThreadEvent": {
+        "eventType": "surface_signal",
+        "surfaceRoute": "sensory",
+        "visibility": "signal_only",
+        "locationId": "loc-market",
+        "sourceEventIds": [
+          "event-footprints"
+        ],
+        "sourceAuthorityTraceIds": "non-empty",
+        "summary": "Scuffed wax marks lead away from the stall."
+      },
+      "locationRecentEvent": {
+        "eventType": "world_thread_signal",
+        "surfaceRoute": "sensory",
+        "visibility": "local_signal",
+        "knowledgeRoute": "direct_observation",
+        "sourceEventId": "world thread surface event id",
+        "summary": "Scuffed wax marks lead away from the stall."
+      },
+      "blockedHiddenCauseTerms": [
+        "assassin"
+      ]
+    },
+    {
+      "proposalType": "none_surface",
+      "meaningfulOffscreenCommit": true,
+      "disposition": "committed",
+      "surfacePolicy": "none",
+      "committedWorldVersion": 1,
+      "noSurfaceReason": "Internal accounting only; no player-discoverable signal.",
+      "worldThreadRows": 0,
+      "locationRecentEventRows": 0,
+      "metricsVisibility": "reason stored in simulation_proposals.lifecycle_metadata.surfaceSignal.noSurfaceReason"
+    }
+  ],
+  "verification": [
+    "npm --prefix backend run test -- src/engine/__tests__/proposal-surface-signals.test.ts src/engine/__tests__/world-thread.test.ts",
+    "npm --prefix backend run typecheck"
+  ]
+}

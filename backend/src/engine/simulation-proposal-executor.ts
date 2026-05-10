@@ -29,6 +29,13 @@ import {
   runtimeToolInputSchemas,
   type RuntimeToolName,
 } from "./tool-schemas.js";
+import {
+  applySurfaceSignalDecision,
+  proposalRequiresSurfaceSignal,
+  readSurfaceSignalDecisionFromData,
+  type SurfaceSignalApplyResult,
+  type SurfaceSignalDecision,
+} from "./surface-signal.js";
 
 export interface ExecuteDueSimulationProposalInput {
   campaignId: string;
@@ -222,6 +229,20 @@ function prepareTools(tools: readonly SimulationProposalIntendedTool[]): Prepare
     prepared.push(result);
   }
   return prepared;
+}
+
+function prepareSurfaceSignal(
+  payload: SimulationProposalPayload,
+): SurfaceSignalDecision | null | string {
+  try {
+    const decision = readSurfaceSignalDecisionFromData(payload.data);
+    if (!decision && proposalRequiresSurfaceSignal(payload.data)) {
+      return "surface_signal_required_for_meaningful_offscreen_commit";
+    }
+    return decision;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
 }
 
 function proposalStatusForDisposition(
@@ -608,6 +629,20 @@ export async function executeDueSimulationProposal(
       rebasedFromWorldVersion,
     });
   }
+  const surfaceSignalDecision = prepareSurfaceSignal(payload);
+  if (typeof surfaceSignalDecision === "string") {
+    return terminalResult({
+      row,
+      disposition: "rejected_invalid",
+      reason: surfaceSignalDecision,
+      metadata: {
+        preflight,
+        intendedTools,
+        phase: input.phase,
+      },
+      rebasedFromWorldVersion,
+    });
+  }
 
   const executed = await executePreparedTools({
     campaignId: input.campaignId,
@@ -631,17 +666,47 @@ export async function executeDueSimulationProposal(
     });
   }
 
-  const committedWorldVersion = readWorldClock(input.campaignId).worldVersion;
   const authorityTraceIds = authorityIdsFromResults(executed);
+  let surfaceSignal: SurfaceSignalApplyResult | null = null;
+  if (surfaceSignalDecision) {
+    try {
+      surfaceSignal = applySurfaceSignalDecision({
+        campaignId: input.campaignId,
+        proposalId: row.id,
+        tick: input.tick,
+        decision: surfaceSignalDecision,
+        authorityTraceIds,
+      });
+    } catch (error) {
+      return terminalResult({
+        row,
+        disposition: "rejected_invalid",
+        reason: error instanceof Error ? error.message : String(error),
+        metadata: {
+          preflight,
+          intendedTools,
+          phase: input.phase,
+          toolResults: executed.map((entry) => ({
+            toolName: entry.toolName,
+            success: entry.result.success,
+            authority: entry.result.authority,
+          })),
+        },
+        rebasedFromWorldVersion,
+      });
+    }
+  }
+  const finalWorldVersion = readWorldClock(input.campaignId).worldVersion;
   markProposalDisposition({
     row,
     disposition: "committed",
     reason: "intended_tools_executed",
-    resultWorldVersion: committedWorldVersion,
+    resultWorldVersion: finalWorldVersion,
     metadata: {
       preflight,
       intendedTools,
       phase: input.phase,
+      surfaceSignal,
       toolResults: executed.map((entry) => ({
         toolName: entry.toolName,
         success: entry.result.success,
@@ -656,7 +721,7 @@ export async function executeDueSimulationProposal(
     proposalId: row.id,
     proposalType: row.proposalType,
     disposition: "committed",
-    committedWorldVersion,
+    committedWorldVersion: finalWorldVersion,
     toolResults: executed,
     authorityTraceIds,
     sourceJobId: row.jobId,
