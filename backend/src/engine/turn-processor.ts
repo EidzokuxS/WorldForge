@@ -87,11 +87,17 @@ import {
   recordTurnLatencyStage,
 } from "./turn-latency-trace.js";
 import type { GmToolStepResult } from "./gm-tool-step.js";
+import { isObservationToolResult } from "./tool-result.js";
 import type {
   ExecutedScenePlan,
   ExecutedScenePlanActionResult,
 } from "./scene-plan-executor.js";
-import type { ScenePlan, SceneResponse } from "./scene-plan-schema.js";
+import {
+  scenePlanActionSchema,
+  type ScenePlan,
+  type ScenePlanAction,
+  type SceneResponse,
+} from "./scene-plan-schema.js";
 import {
   buildNarratorPacket,
   summarizeRuntimeToolResultForNarrator,
@@ -1047,9 +1053,22 @@ function successfulToolStepResults(
 ): GmToolStepResult[] {
   return stepResults.filter((result) =>
     result.result?.success === true
+    && !isObservationToolResult(result.result)
     && result.toolName !== null
     && result.candidateInput !== null,
   );
+}
+
+function buildScenePlanActionFromToolStep(
+  result: GmToolStepResult,
+  actorId: string,
+): ScenePlanAction {
+  return scenePlanActionSchema.parse({
+    id: randomUUID(),
+    actorId,
+    toolName: result.toolName,
+    input: result.candidateInput,
+  });
 }
 
 function getSuccessfulMoveToolStepResult(result: GmToolStepResult): SuccessfulTravel | null {
@@ -1091,12 +1110,9 @@ function buildScenePlanFromGmToolLoop(args: {
   const anchorEventId = randomUUID();
   const primaryResponseId = randomUUID();
   const successfulSteps = successfulToolStepResults(args.stepResults);
-  const plannedActions = successfulSteps.map((result): ScenePlan["plannedActions"][number] => ({
-    id: randomUUID(),
-    actorId,
-    toolName: result.toolName!,
-    input: result.candidateInput!,
-  }) as ScenePlan["plannedActions"][number]);
+  const plannedActions = successfulSteps.map((result) =>
+    buildScenePlanActionFromToolStep(result, actorId),
+  );
 
   return {
     actionInterpretation: {
@@ -1165,7 +1181,9 @@ function buildExecutedScenePlanFromGmToolLoop(args: {
   });
   const successfulTravel = successfulSteps.reduce<SuccessfulTravel | null>(
     (travel, result) => travel ?? (
-      result.toolName === "move_to" ? getSuccessfulMoveToolStepResult(result) : null
+      result.toolName === "move_to" || result.toolName === "move_actor"
+        ? getSuccessfulMoveToolStepResult(result)
+        : null
     ),
     null,
   );
@@ -1173,7 +1191,7 @@ function buildExecutedScenePlanFromGmToolLoop(args: {
     if (actionResult.toolName === "offer_quick_actions") {
       return { type: "quick_actions", data: actionResult.result };
     }
-    if (actionResult.toolName === "move_to") {
+    if (actionResult.toolName === "move_to" || actionResult.toolName === "move_actor") {
       const moveResult = getSuccessfulMoveToolStepResult({
         stepId: actionResult.actionRef,
         attempt: 1,

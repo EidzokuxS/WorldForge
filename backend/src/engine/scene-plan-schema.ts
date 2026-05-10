@@ -27,6 +27,11 @@ const runtimeToolNames = [
   "request_contested_outcome",
   "set_condition",
   "move_to",
+  "move_actor",
+  "create_minor_poi",
+  "create_scene_extra",
+  "start_search",
+  "record_player_intent",
   "transfer_item",
 ] as const satisfies readonly RuntimeToolName[];
 const runtimeToolNameSet = new Set<string>(runtimeToolNames);
@@ -184,6 +189,46 @@ export const scenePlanActionSchema = z.discriminatedUnion("toolName", [
       actorId: backendIdSchema,
       toolName: z.literal("move_to"),
       input: runtimeToolInputSchemas.move_to,
+    })
+    .strict(),
+  z
+    .object({
+      id: backendIdSchema,
+      actorId: backendIdSchema,
+      toolName: z.literal("move_actor"),
+      input: runtimeToolInputSchemas.move_actor,
+    })
+    .strict(),
+  z
+    .object({
+      id: backendIdSchema,
+      actorId: backendIdSchema,
+      toolName: z.literal("create_minor_poi"),
+      input: runtimeToolInputSchemas.create_minor_poi,
+    })
+    .strict(),
+  z
+    .object({
+      id: backendIdSchema,
+      actorId: backendIdSchema,
+      toolName: z.literal("create_scene_extra"),
+      input: runtimeToolInputSchemas.create_scene_extra,
+    })
+    .strict(),
+  z
+    .object({
+      id: backendIdSchema,
+      actorId: backendIdSchema,
+      toolName: z.literal("start_search"),
+      input: runtimeToolInputSchemas.start_search,
+    })
+    .strict(),
+  z
+    .object({
+      id: backendIdSchema,
+      actorId: backendIdSchema,
+      toolName: z.literal("record_player_intent"),
+      input: runtimeToolInputSchemas.record_player_intent,
     })
     .strict(),
   z

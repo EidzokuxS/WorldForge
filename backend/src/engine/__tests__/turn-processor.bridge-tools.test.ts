@@ -14,7 +14,9 @@ import {
   formatPlayerFacingPacketForPrompt,
 } from "../player-facing-packet.js";
 import type { SceneFrame } from "../scene-frame.js";
+import { scenePlanSchema } from "../scene-plan-schema.js";
 import { createPlayerTurnToolExecutionContext } from "../tool-execution-context.js";
+import { runtimeToolInputSchemas } from "../tool-schemas.js";
 
 const exactInput = "иду дальше по логичному маршруту и ищу чайную лавку";
 const playerId = "11111111-1111-4111-8111-111111111111";
@@ -270,13 +272,14 @@ function runDeterministicBridgeLedger(): ToolLedgerStep[] {
   expect(minorPoi.ok).toBe(true);
   push("create_minor_poi", minorPoi.ok, "validated", ["knowledge:public-tea-route"]);
 
-  const search = buildStartSearchResult({
+  const searchInput = runtimeToolInputSchemas.start_search.parse({
     actorRef: "Tourist Courier",
     query: "чайная лавка",
     scope: "current_location",
-    method: "follow_public_market_route",
+    method: "browse",
     intentSummary: exactInput,
-  }, context);
+  });
+  const search = buildStartSearchResult(searchInput, context);
   expect(search.ok).toBe(true);
   push("start_search", search.ok, "validated", ["create_minor_poi:Lantern Tea Stall"]);
 
@@ -465,5 +468,147 @@ describe("Phase 90 tourist/courier bridge acceptance", () => {
     expect(formatted).not.toContain("Hidden Tea Broker");
     expect(formatted).not.toContain("Hidden Tea Vault");
     expect(formatted).not.toContain("private vault tea room");
+  });
+
+  it("keeps observation-only lookup results out of visible settled consequences", () => {
+    const packet = buildNarratorPacket({
+      frame: createTouristCourierFrame(),
+      canonicalTurnPacket: {
+        campaignId: "campaign-90-04",
+        tick: 91,
+        playerAction: exactInput,
+        oracleOutcome: null,
+        narratorFacts: {
+          anchorEventId: "event-player-action",
+          eventIds: ["event-player-action"],
+          responseIds: [],
+          actionIds: ["action-lookup"],
+          toolResultRefs: [
+            { actionId: "action-lookup", toolName: "list_navigation_options" },
+          ],
+        },
+        anchorEvent: {
+          id: "event-player-action",
+          actorId: playerId,
+          kind: "player_action",
+          summary: "Tourist Courier looks for the public tea route.",
+          perceivableByPlayer: true,
+        },
+        events: [],
+        responses: [],
+        effects: [],
+        actionResults: [
+          {
+            order: 1,
+            actionId: "action-lookup",
+            actionRef: "lookup-navigation",
+            actorId: playerId,
+            toolName: "list_navigation_options",
+            input: {},
+            args: {},
+            result: {
+              success: true,
+              kind: "observation",
+              observationOnly: true,
+              result: { candidates: [{ label: "Tea Row" }] },
+            },
+          },
+        ],
+        guardrails: [],
+        controlReturnReason: "Return after internal lookup.",
+      },
+    });
+    const formatted = formatPlayerFacingPacketForPrompt(
+      buildPlayerFacingPacketFromNarratorPacket(packet),
+    );
+
+    expect(packet.perceivableEffects).toEqual([]);
+    expect(formatted).not.toContain("validated list navigation options consequence settles");
+    expect(formatted).not.toContain("Tea Row");
+  });
+
+  it("round-trips state-bearing bridge actions through the strict ScenePlan schema", () => {
+    const plan = scenePlanSchema.parse({
+      actionInterpretation: {
+        actorId: playerId,
+        intent: "follow the legal route and make the tea stall playable",
+        method: "tool_plan",
+        targetIds: [],
+      },
+      anchorEvent: {
+        id: "44444444-4444-4444-8444-444444444441",
+        actorId: playerId,
+        subjectIds: [],
+        kind: "player_action",
+      },
+      primaryResponse: {
+        id: "44444444-4444-4444-8444-444444444442",
+        actorId: playerId,
+        responseKind: "environment",
+        eventId: "44444444-4444-4444-8444-444444444441",
+        visibleToPlayer: true,
+      },
+      supportResponses: [],
+      plannedActions: [
+        {
+          id: "44444444-4444-4444-8444-444444444443",
+          actorId: playerId,
+          toolName: "move_actor",
+          input: {
+            actorRef: "Tourist Courier",
+            destinationRef: "Tea Row",
+            evidenceRefs: ["route-market-tea-row"],
+          },
+        },
+        {
+          id: "44444444-4444-4444-8444-444444444444",
+          actorId: playerId,
+          toolName: "create_minor_poi",
+          input: {
+            areaRef: "current_location",
+            poiType: "tea_stall",
+            name: "Lantern Tea Stall",
+            reason: "The public market route supports ordinary tea service.",
+          },
+        },
+      ],
+      deferredHooks: [],
+      narratorFacts: {
+        anchorEventId: "44444444-4444-4444-8444-444444444441",
+        eventIds: ["44444444-4444-4444-8444-444444444441"],
+        responseIds: ["44444444-4444-4444-8444-444444444442"],
+        actionIds: [
+          "44444444-4444-4444-8444-444444444443",
+          "44444444-4444-4444-8444-444444444444",
+        ],
+        toolResultRefs: [
+          {
+            actionId: "44444444-4444-4444-8444-444444444443",
+            toolName: "move_actor",
+          },
+          {
+            actionId: "44444444-4444-4444-8444-444444444444",
+            toolName: "create_minor_poi",
+          },
+        ],
+      },
+      hiddenRationale: "State-bearing bridge tools are schema-modeled explicitly.",
+    });
+
+    expect(plan.plannedActions.map((action) => action.toolName)).toEqual([
+      "move_actor",
+      "create_minor_poi",
+    ]);
+    expect(scenePlanSchema.safeParse({
+      ...plan,
+      plannedActions: [
+        {
+          id: "44444444-4444-4444-8444-444444444445",
+          actorId: playerId,
+          toolName: "list_navigation_options",
+          input: {},
+        },
+      ],
+    }).success).toBe(false);
   });
 });

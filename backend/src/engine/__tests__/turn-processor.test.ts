@@ -588,20 +588,21 @@ function setupMocks(options: {
 const SCENE_PLAN_EVENT_ID = "10000000-0000-4000-8000-000000000001";
 const SCENE_PLAN_RESPONSE_ID = "10000000-0000-4000-8000-000000000002";
 const SCENE_PLAN_ACTION_ID = "10000000-0000-4000-8000-000000000003";
+const SCENE_PLAN_PLAYER_ID = "10000000-0000-4000-8000-000000000010";
 
 function createScenePlanFrameMock() {
   return {
     campaignId: CAMPAIGN_ID,
     tick: 5,
-    playerActorId: "player-1",
+    playerActorId: SCENE_PLAN_PLAYER_ID,
     currentLocationId: "loc-1",
     currentSceneScopeId: "loc-1",
     playerAction: "I attack the goblin",
     roster: {
       active: [
         {
-          id: "player-1",
-          actorId: "player-1",
+          id: SCENE_PLAN_PLAYER_ID,
+          actorId: SCENE_PLAN_PLAYER_ID,
           type: "player",
           label: "Hero",
           locationId: "loc-1",
@@ -638,20 +639,20 @@ function createScenePlanFrameMock() {
 function createScenePlanMock() {
   return {
     actionInterpretation: {
-      actorId: "player-1",
+      actorId: SCENE_PLAN_PLAYER_ID,
       intent: "Attack the goblin",
       method: "sword swing",
       targetIds: [],
     },
     anchorEvent: {
       id: SCENE_PLAN_EVENT_ID,
-      actorId: "player-1",
-      subjectIds: ["player-1"],
+      actorId: SCENE_PLAN_PLAYER_ID,
+      subjectIds: [SCENE_PLAN_PLAYER_ID],
       kind: "player_action",
     },
     primaryResponse: {
       id: SCENE_PLAN_RESPONSE_ID,
-      actorId: "player-1",
+      actorId: SCENE_PLAN_PLAYER_ID,
       responseKind: "system",
       eventId: SCENE_PLAN_EVENT_ID,
       visibleToPlayer: true,
@@ -660,9 +661,14 @@ function createScenePlanMock() {
     plannedActions: [
       {
         id: SCENE_PLAN_ACTION_ID,
-        actorId: "player-1",
+        actorId: SCENE_PLAN_PLAYER_ID,
         toolName: "log_event",
-        input: { summary: "The scene records the player action." },
+        input: {
+          text: "The scene records the player action.",
+          importance: 3,
+          participants: ["Hero"],
+          durability: "scene_local",
+        },
       },
     ],
     deferredHooks: [],
@@ -721,7 +727,7 @@ function createNarratorPacketMock() {
     oracleOutcome: "strong_hit",
     anchorEvent: {
       id: SCENE_PLAN_EVENT_ID,
-      actorId: "player-1",
+      actorId: SCENE_PLAN_PLAYER_ID,
       kind: "player_action",
       summary: "Player action request.",
       perceivableByPlayer: true,
@@ -729,7 +735,7 @@ function createNarratorPacketMock() {
     perceivableEvents: [],
     perceivableResponses: [],
     perceivableEffects: [],
-    visibleActors: [{ id: "player-1", label: "Hero", type: "player" }],
+    visibleActors: [{ id: SCENE_PLAN_PLAYER_ID, label: "Hero", type: "player" }],
     hintSignals: [],
     guardrails: [],
     controlReturnReason: "Scene complete.",
@@ -747,7 +753,7 @@ function createGmReadMock(
     version: "gm-read.v1",
     situationSummary: "The player creates the next local beat.",
     sceneQuestion: "What changes in the immediate scene?",
-    focalActorRefs: ["player-1"],
+    focalActorRefs: [SCENE_PLAN_PLAYER_ID],
     backgroundActorRefs: [],
     actionInterpretation: {
       intent: "Attack the goblin",
@@ -757,7 +763,7 @@ function createGmReadMock(
     path: "tool_plan",
     turnIntent: "Plan a concrete local scene mutation.",
     rationale: "The GM selected a concrete tool-backed scene mutation.",
-    evidenceRefs: ["player-1"],
+    evidenceRefs: [SCENE_PLAN_PLAYER_ID],
     narrationGuardrails: ["Stay inside the visible scene."],
     ...overrides,
   };
@@ -3757,6 +3763,137 @@ describe("processTurn ScenePlan path", () => {
     ]);
   });
 
+  it("projects move_actor GM-loop movement as legacy location_change state", async () => {
+    setupMocks();
+    setupScenePlanMocks();
+    vi.mocked(runGmToolLoop).mockResolvedValueOnce({
+      intent: "Move the player along a legal public route.",
+      text: "",
+      rawToolCalls: [
+        {
+          tool: "move_actor",
+          args: {
+            actorRef: "Hero",
+            destinationRef: "Tea Row",
+            evidenceRefs: ["route-tea-row"],
+          },
+          result: {
+            success: true,
+            result: {
+              kind: "move_actor",
+              locationId: "loc-tea-row",
+              locationName: "Tea Row",
+              travelCost: 3,
+              path: ["Market", "Tea Row"],
+            },
+          },
+        },
+      ],
+      stepResults: [
+        {
+          stepId: "move-actor-step",
+          attempt: 1,
+          status: "done",
+          toolName: "move_actor",
+          candidateInput: {
+            actorRef: "Hero",
+            destinationRef: "Tea Row",
+            evidenceRefs: ["route-tea-row"],
+          },
+          validationError: null,
+          visibleEffect: "Hero moves to Tea Row.",
+          privateGuardTerms: [],
+          mutationRefs: ["loc-tea-row"],
+          settledAtTick: 5,
+          result: {
+            success: true,
+            result: {
+              kind: "move_actor",
+              locationId: "loc-tea-row",
+              locationName: "Tea Row",
+              travelCost: 3,
+              path: ["Market", "Tea Row"],
+            },
+          },
+        },
+      ],
+    } as never);
+
+    const events = await collectEvents(processTurn(createTestOptions()));
+    const locationChange = events.find(
+      (event) =>
+        event.type === "state_update"
+        && (event.data as Record<string, unknown>).type === "location_change",
+    );
+
+    expect(locationChange).toMatchObject({
+      type: "state_update",
+      data: {
+        type: "location_change",
+        locationId: "loc-tea-row",
+        locationName: "Tea Row",
+        travelCost: 3,
+        tickAdvance: 3,
+        path: ["Market", "Tea Row"],
+      },
+    });
+    expect(advanceCampaignTick).toHaveBeenCalledWith(CAMPAIGN_ID, 3);
+  });
+
+  it("keeps observation-only GM-loop lookups out of settled ScenePlan actions", async () => {
+    setupMocks();
+    setupScenePlanMocks();
+    vi.mocked(runGmToolLoop).mockResolvedValueOnce({
+      intent: "Look up the public route before deciding whether to mutate.",
+      text: "",
+      rawToolCalls: [
+        {
+          tool: "list_navigation_options",
+          args: {},
+          result: {
+            success: true,
+            kind: "observation",
+            observationOnly: true,
+            result: { candidates: [{ label: "Tea Row" }] },
+          },
+        },
+      ],
+      stepResults: [
+        {
+          stepId: "lookup-step",
+          attempt: 1,
+          status: "done",
+          toolName: "list_navigation_options",
+          candidateInput: {},
+          validationError: null,
+          visibleEffect: "Tea Row is a possible route.",
+          privateGuardTerms: [],
+          mutationRefs: [],
+          settledAtTick: 5,
+          result: {
+            success: true,
+            kind: "observation",
+            observationOnly: true,
+            result: { candidates: [{ label: "Tea Row" }] },
+          },
+        },
+      ],
+    } as never);
+
+    const events = await collectEvents(processTurn(createTestOptions()));
+    const persistedPacket = persistSettledTurnPacketMock.mock.calls[0]?.[0] as {
+      canonicalTurnPacket?: {
+        actionResults?: unknown[];
+        narratorFacts?: { actionIds?: string[]; toolResultRefs?: unknown[] };
+      };
+    } | undefined;
+
+    expect(events.filter((event) => event.type === "state_update")).toEqual([]);
+    expect(persistedPacket?.canonicalTurnPacket?.actionResults).toEqual([]);
+    expect(persistedPacket?.canonicalTurnPacket?.narratorFacts?.actionIds).toEqual([]);
+    expect(persistedPacket?.canonicalTurnPacket?.narratorFacts?.toolResultRefs).toEqual([]);
+  });
+
   it("refuses to start a new ScenePlan turn while narration is pending", async () => {
     setupMocks();
     assertNoPendingNarrationBeforeNewTurnMock.mockImplementationOnce(() => {
@@ -3780,10 +3917,10 @@ describe("processTurn ScenePlan path", () => {
       gmRead: createGmReadMock({
         path: "roll_oracle",
         rollRequest: {
-          actorRef: "player-1",
+          actorRef: SCENE_PLAN_PLAYER_ID,
           question: "Can the hero force the gate?",
           stakes: "Noise may draw attention.",
-          evidenceRefs: ["player-1"],
+          evidenceRefs: [SCENE_PLAN_PLAYER_ID],
         },
       }),
     });

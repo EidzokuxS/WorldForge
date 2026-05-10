@@ -113,6 +113,11 @@ const DISALLOWED_MINOR_POI_PATTERNS = [
   /\bforbidden\b/i,
   /\bheadquarters\b/i,
   /\blegendary\b/i,
+  /(?:секрет|тайн|скрыт)/iu,
+  /(?:убежищ|хранилищ|сейф|архив|проход)/iu,
+  /(?:фракц|штаб|баз[аы]|командн)/iu,
+  /(?:ключев|сюжетн|редк|легендарн|артефакт|оруж)/iu,
+  /(?:удаленн|дальн|за\s+кадр|вне\s+сцен)/iu,
 ];
 
 const DISALLOWED_EXTRA_PATTERNS = [
@@ -127,6 +132,10 @@ const DISALLOWED_EXTRA_PATTERNS = [
   /\bboss\b/i,
   /\blegendary\b/i,
   /\bprominent\b/i,
+  /(?:ключев|сюжетн|секрет|тайн|скрыт)/iu,
+  /(?:удаленн|дальн|за\s+кадр|вне\s+сцен)/iu,
+  /(?:фракц|лидер|глава|командир|босс|агент)/iu,
+  /(?:легендарн|важн|постоянн)/iu,
 ];
 
 export function isBridgeStateToolName(toolName: string): toolName is BridgeStateToolName {

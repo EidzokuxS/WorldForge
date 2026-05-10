@@ -141,6 +141,9 @@ describe("bridge state tool constraints", () => {
       "Rare Weapon Shop",
       "Key NPC Office",
       "Remote Plot-Critical Archive",
+      "секретное убежище фракции",
+      "ключевой персонаж чайной лавки",
+      "удаленная база фракции",
     ]) {
       const rejected = prepareCreateMinorPoiInput({
         areaRef: "current_location",
@@ -175,6 +178,12 @@ describe("bridge state tool constraints", () => {
       name: "Key NPC faction leader",
       reason: "The scene needs a key NPC.",
     }, context);
+    const russianFactionLeader = prepareCreateSceneExtraInput({
+      locationRef: "current_scene",
+      role: "support",
+      name: "лидер фракции",
+      reason: "Нужен ключевой персонаж фракции.",
+    }, context);
 
     expect(accepted.ok).toBe(true);
     if (accepted.ok) {
@@ -182,6 +191,7 @@ describe("bridge state tool constraints", () => {
     }
     expect(persistent.ok).toBe(false);
     expect(keyNpc.ok).toBe(false);
+    expect(russianFactionLeader.ok).toBe(false);
   });
 
   it("records search and player intent without inventing discovery or truth", () => {
@@ -235,13 +245,14 @@ describe("bridge state tool constraints", () => {
       persistence: "scene_local",
       reason: "A public market route supports ordinary tea service.",
     }, context);
-    const search = buildStartSearchResult({
+    const searchInput = runtimeToolInputSchemas.start_search.parse({
       actorRef: "Iria",
       query: "чайная лавка",
       scope: "current_location",
-      method: "follow_public_route",
+      method: "browse",
       intentSummary: "Look for public tea service after taking the route.",
-    }, context);
+    });
+    const search = buildStartSearchResult(searchInput, context);
     const hiddenTeaVault = prepareCreateMinorPoiInput({
       areaRef: "current_location",
       poiType: "tea_stall",

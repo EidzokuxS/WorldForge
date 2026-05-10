@@ -19,6 +19,7 @@ import {
 } from "../backend/src/engine/player-facing-packet.js";
 import type { SceneFrame } from "../backend/src/engine/scene-frame.js";
 import { createPlayerTurnToolExecutionContext } from "../backend/src/engine/tool-execution-context.js";
+import { runtimeToolInputSchemas } from "../backend/src/engine/tool-schemas.js";
 
 type Mode = "dry-run" | "live";
 
@@ -494,13 +495,14 @@ function runDryRun() {
   if (!minorPoi.ok) fail(`create_minor_poi validation failed: ${minorPoi.issue.message}`);
   addStep("create_minor_poi", "state", true, "validated", false, ["knowledge:public-tea-route"], "Constrained public tea stall validation accepted.");
 
-  const search = buildStartSearchResult({
+  const searchInput = runtimeToolInputSchemas.start_search.parse({
     actorRef: "Tourist Courier",
     query: "чайная лавка",
     scope: "current_location",
-    method: "follow_public_route",
+    method: "browse",
     intentSummary: exactInput,
-  }, context);
+  });
+  const search = buildStartSearchResult(searchInput, context);
   if (!search.ok) fail(`start_search validation failed: ${search.issue.message}`);
   addStep("start_search", "state", true, "validated", false, ["action-poi"], "Search intent recorded without discovery truth.");
 

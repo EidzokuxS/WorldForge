@@ -1,6 +1,7 @@
 import type { NarrativeOutcomeBounds } from "./combat-envelope.js";
 import type { SceneActor, SceneFrame } from "./scene-frame.js";
 import type { ToolResult } from "./tool-executor.js";
+import { isObservationToolResult } from "./tool-result.js";
 import type { RuntimeToolName } from "./tool-schemas.js";
 import { sourceBoundaryTermIsLeak } from "./source-boundary.js";
 
@@ -649,6 +650,7 @@ function collectPerceivableEffects(packet: CanonicalTurnPacket): CanonicalTurnPa
     .filter(
       (result) =>
         result.result.success
+        && !isObservationToolResult(result.result)
         && (
           actionIds.has(result.actionId)
           || toolResultRefs.has(`${result.actionId}:${result.toolName}`)
@@ -661,6 +663,7 @@ function collectPerceivableEffects(packet: CanonicalTurnPacket): CanonicalTurnPa
       (effect) =>
         effect.perceivableByPlayer
         && effect.toolResult?.success !== false
+        && !(effect.toolResult && isObservationToolResult(effect.toolResult))
         && (
           (effect.actionId ? actionIds.has(effect.actionId) : false)
           || (effect.actionId && effect.toolName
