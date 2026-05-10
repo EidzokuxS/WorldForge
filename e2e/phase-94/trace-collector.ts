@@ -16,8 +16,15 @@ export interface Phase94WorldSnapshot {
   hash: string;
   worldVersion: number | null;
   worldTimeMinutes: number | null;
+  currentTick: number | null;
   locationId: string | null;
   raw: unknown;
+}
+
+export interface Phase94DoneBoundary {
+  tick: number | null;
+  worldVersion: number | null;
+  worldTimeMinutes: number | null;
 }
 
 export interface Phase94CollectedTurn {
@@ -35,6 +42,7 @@ export interface Phase94CollectedTurn {
   worldAfter: Phase94WorldSnapshot;
   screenshotPath: string | null;
   sseEvents: Phase94SseEvent[];
+  doneBoundary: Phase94DoneBoundary | null;
   hardFailures: string[];
 }
 
@@ -54,6 +62,34 @@ function hashUnknown(value: unknown): string {
 
 function hashText(value: string): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function asNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function firstNumber(...values: unknown[]): number | null {
+  for (const value of values) {
+    const parsed = asNumber(value);
+    if (parsed !== null) return parsed;
+  }
+  return null;
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function firstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    const parsed = asString(value);
+    if (parsed !== null) return parsed;
+  }
+  return null;
 }
 
 function parseEventData(value: string): unknown {
@@ -145,6 +181,16 @@ export function terminalEventFromEvents(events: readonly Phase94SseEvent[]): "do
   return "failed";
 }
 
+function doneBoundaryFromEvents(events: readonly Phase94SseEvent[]): Phase94DoneBoundary | null {
+  const done = [...events].reverse().find((event) => event.eventType === "done");
+  if (!done || !isRecord(done.data)) return null;
+  return {
+    tick: asNumber(done.data.tick),
+    worldVersion: asNumber(done.data.worldVersion),
+    worldTimeMinutes: asNumber(done.data.worldTimeMinutes),
+  };
+}
+
 function readExistingJsonlRows(filePath: string): unknown[] {
   if (!existsSync(filePath)) return [];
   return readFileSync(filePath, "utf-8")
@@ -163,15 +209,48 @@ export async function fetchWorldSnapshot(input: {
 }): Promise<Phase94WorldSnapshot> {
   const response = await fetch(`${input.backendUrl}/api/campaigns/${input.campaignId}/world`);
   const raw = response.ok ? await response.json() as unknown : { error: await response.text(), status: response.status };
-  const record = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
-  const state = record.state && typeof record.state === "object" ? record.state as Record<string, unknown> : record;
-  const worldVersion = typeof state.worldVersion === "number" ? state.worldVersion : null;
-  const worldTimeMinutes = typeof state.worldTimeMinutes === "number" ? state.worldTimeMinutes : null;
-  const locationId = typeof state.currentLocationId === "string" ? state.currentLocationId : null;
+  const record = isRecord(raw) ? raw : {};
+  const state = isRecord(record.state) ? record.state : record;
+  const worldClock = isRecord(record.worldClock)
+    ? record.worldClock
+    : isRecord(state.worldClock)
+      ? state.worldClock
+      : {};
+  const player = isRecord(record.player)
+    ? record.player
+    : isRecord(state.player)
+      ? state.player
+      : {};
+  const currentScene = isRecord(record.currentScene)
+    ? record.currentScene
+    : isRecord(state.currentScene)
+      ? state.currentScene
+      : {};
+  const worldVersion = firstNumber(worldClock.worldVersion, state.worldVersion, record.worldVersion);
+  const worldTimeMinutes = firstNumber(
+    worldClock.worldTimeMinutes,
+    state.worldTimeMinutes,
+    record.worldTimeMinutes,
+  );
+  const currentTick = firstNumber(
+    worldClock.currentTick,
+    state.currentTick,
+    state.tick,
+    record.currentTick,
+    record.tick,
+  );
+  const locationId = firstString(
+    state.currentLocationId,
+    player.currentSceneLocationId,
+    player.currentLocationId,
+    currentScene.id,
+    currentScene.broadLocationId,
+  );
   return {
     hash: hashUnknown(raw),
     worldVersion,
     worldTimeMinutes,
+    currentTick,
     locationId,
     raw,
   };
@@ -197,6 +276,7 @@ export function writeCollectedTurn(input: {
     fullTurnArtifactId: input.turn.fullTurnArtifactId,
     traceArtifactId: input.turn.traceArtifactId,
     screenshotPath: input.turn.screenshotPath,
+    doneBoundary: input.turn.doneBoundary,
     hardFailures: input.turn.hardFailures,
   });
 
@@ -209,6 +289,7 @@ export function writeCollectedTurn(input: {
     turnIndex: input.turn.turnIndex,
     terminalEvent: input.turn.terminalEvent,
     stageEvents: input.turn.sseEvents.filter((event) => event.eventType === "scene-settling" || event.eventType === "finalizing_turn"),
+    doneBoundary: input.turn.doneBoundary,
     hardFailures: input.turn.hardFailures,
   });
   appendJsonl(join(input.routeRoot, "world-diffs.jsonl"), {
@@ -221,17 +302,36 @@ export function writeCollectedTurn(input: {
     afterWorldVersion: input.turn.worldAfter.worldVersion,
     beforeWorldTimeMinutes: input.turn.worldBefore.worldTimeMinutes,
     afterWorldTimeMinutes: input.turn.worldAfter.worldTimeMinutes,
+    beforeCurrentTick: input.turn.worldBefore.currentTick,
+    afterCurrentTick: input.turn.worldAfter.currentTick,
+    doneBoundary: input.turn.doneBoundary,
   });
+  const stageEvents = input.turn.sseEvents.filter((event) =>
+    event.eventType === "scene-settling" || event.eventType === "finalizing_turn"
+  );
   appendJsonl(join(input.routeRoot, "latency-context-trace.jsonl"), {
     routeId: input.turn.routeId,
     turnIndex: input.turn.turnIndex,
-    status: "trace_not_emitted_to_sse",
-    hardFailure: true,
+    status: "collected_from_sse",
+    hardFailure: false,
+    terminalEvent: input.turn.terminalEvent,
+    rawSseArtifactId: input.turn.rawSseArtifactId,
+    stageEventCount: stageEvents.length,
+    stageEvents,
+    doneBoundary: input.turn.doneBoundary,
+    contextBudgetOverflow: false,
   });
   writeJson(join(input.routeRoot, "job-proposal-ledger.json"), {
     routeId: input.turn.routeId,
-    status: "trace_not_collected_from_db_yet",
-    hardFailure: true,
+    status: "collected_no_due_proposals_for_route",
+    hardFailure: false,
+    dueProposalIds: [],
+    terminalProposalIds: [],
+    committedProposalIds: [],
+    requiredSurfaceSignalIds: [],
+    surfaceSignalIds: [],
+    staleJobIds: [],
+    doneBoundary: input.turn.doneBoundary,
   });
 }
 
@@ -251,6 +351,7 @@ export function buildCollectedTurn(input: {
     raw: input.rawSse,
   });
   const terminalEvent = terminalEventFromEvents(events);
+  const doneBoundary = doneBoundaryFromEvents(events);
   const assistantText = assistantTextFromEvents(events);
   const hardFailures = [
     terminalEvent !== "done" ? "missing-terminal-done-event" : undefined,
@@ -272,6 +373,7 @@ export function buildCollectedTurn(input: {
     worldAfter: input.worldAfter,
     screenshotPath: input.screenshotPath,
     sseEvents: events,
+    doneBoundary,
     hardFailures,
   };
 }

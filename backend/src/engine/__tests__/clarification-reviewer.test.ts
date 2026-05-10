@@ -163,6 +163,11 @@ describe("clarification reviewer", () => {
         "Уточните connected location.",
       ),
     ).toBe("russian_connected_location");
+    expect(
+      clarificationReviewerTestHooks.findParserLikePattern(
+        "Did you mean the legal movement paths visible from here (Tea Row), or something else?",
+      ),
+    ).toBe("did_you_mean_movement_options");
   });
 
   it("classifies the Russian tourist tea-stall turn as bridgeable", () => {
@@ -188,6 +193,43 @@ describe("clarification reviewer", () => {
       repaired: true,
       reason: "bridgeable_parser_like_clarification",
       parserLikePattern: "connected_location",
+    });
+  });
+
+  it("classifies did-you-mean movement options as parser-like when a fair bridge exists", () => {
+    expect(
+      classifyClarificationReview({
+        playerAction:
+          "I choose the clearly public path toward the courier depot and walk there slowly.",
+        frame: createFrame({
+          playerAction:
+            "I choose the clearly public path toward the courier depot and walk there slowly.",
+          movementCandidates: [
+            {
+              id: "route-courier-depot",
+              locationId: "loc-courier-depot",
+              label: "Night Courier Depot",
+              connected: true,
+              travelCost: 1,
+              path: ["Canal Market", "Night Courier Depot"],
+            },
+          ],
+        }),
+        gmRead: {
+          ...baseClarification,
+          actionInterpretation: {
+            intent: "follow the public path toward the courier depot",
+            targetRefs: [],
+          },
+          clarificationPrompt:
+            "Did you mean the legal movement paths visible from here (Night Courier Depot), or something else?",
+        },
+      }),
+    ).toMatchObject({
+      reviewed: true,
+      repaired: true,
+      reason: "bridgeable_parser_like_clarification",
+      parserLikePattern: "did_you_mean_movement_options",
     });
   });
 

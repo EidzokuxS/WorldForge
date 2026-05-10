@@ -433,6 +433,30 @@ describe("Phase 90 tourist/courier bridge acceptance", () => {
     expect(JSON.stringify(visibleGmRead)).not.toMatch(/connected location|exact route id|backend route/i);
   });
 
+  it("treats did-you-mean movement choices as repairable parser-like clarification", () => {
+    const frame = createTouristCourierFrame();
+    const review = classifyClarificationReview({
+      playerAction: "I follow the clearly public route toward Tea Row.",
+      frame,
+      gmRead: {
+        ...parserLikeClarification,
+        actionInterpretation: {
+          intent: "follow the clearly public route toward Tea Row",
+          targetRefs: [],
+        },
+        clarificationPrompt:
+          "Did you mean the legal movement paths visible from here (Tea Row), or something else?",
+      },
+    });
+
+    expect(review).toMatchObject({
+      reviewed: true,
+      repaired: true,
+      reason: "bridgeable_parser_like_clarification",
+      parserLikePattern: "did_you_mean_movement_options",
+    });
+  });
+
   it("runs the deterministic route, POI, known-fact, route-check, move, and minor-POI bridge sequence", () => {
     const ledger = runDeterministicBridgeLedger();
 

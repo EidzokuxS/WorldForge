@@ -32,6 +32,7 @@ export type ClarificationParserLikePattern =
   | "exact_location_or_route"
   | "exact_target_or_id"
   | "backend_target"
+  | "did_you_mean_movement_options"
   | "russian_location"
   | "russian_exact_route"
   | "russian_connected_location";
@@ -105,6 +106,11 @@ const parserLikePatterns: ReadonlyArray<{
   {
     code: "backend_target",
     pattern: /\b(?:backend|route|location)\s+(?:target|ref|id|string)\b/i,
+  },
+  {
+    code: "did_you_mean_movement_options",
+    pattern:
+      /\bdid\s+you\s+mean\b.{0,180}\b(?:legal\s+movement\s+paths?|movement\s+paths?|route|path|destination|location)\b/i,
   },
   {
     code: "russian_location",
@@ -265,6 +271,7 @@ export function classifyClarificationReview(args: {
   if (
     parserLikePattern === "connected_location"
     || parserLikePattern === "exact_location_or_route"
+    || parserLikePattern === "did_you_mean_movement_options"
     || parserLikePattern === "russian_location"
     || parserLikePattern === "russian_exact_route"
     || parserLikePattern === "russian_connected_location"

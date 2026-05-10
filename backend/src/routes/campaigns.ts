@@ -28,6 +28,7 @@ import {
 import { buildCompatibilityTags } from "./compatibility-tags.js";
 import { listRecentLocationEventsForLocations } from "../engine/location-events.js";
 import { listConnectedPaths, loadLocationGraph } from "../engine/location-graph.js";
+import { readWorldClock } from "../engine/living-world-authority.js";
 import { loadAuthoritativeInventoryView } from "../inventory/authority.js";
 import {
   getObserverAwareness,
@@ -330,10 +331,23 @@ app.get("/:id/world", async (c) => {
       npcs: worldNpcs,
       locations: normalizedWorldLocations,
     });
+    const worldClock = readWorldClock(id);
 
     return c.json({
       locations: normalizedWorldLocations,
       currentScene,
+      state: {
+        tick: worldClock.currentTick,
+        currentTick: worldClock.currentTick,
+        worldVersion: worldClock.worldVersion,
+        worldTimeMinutes: worldClock.worldTimeMinutes,
+        currentLocationId: playerRow?.currentLocationId ?? null,
+        currentSceneLocationId: playerRow?.currentSceneLocationId ?? null,
+      },
+      worldClock,
+      currentTick: worldClock.currentTick,
+      worldVersion: worldClock.worldVersion,
+      worldTimeMinutes: worldClock.worldTimeMinutes,
       npcs: worldNpcs.map((row) => {
         return buildWorldNpcPayload(row);
       }),

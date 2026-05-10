@@ -28,6 +28,10 @@ vi.mock("../../engine/location-graph.js", () => ({
   loadLocationGraph: vi.fn().mockReturnValue({ locations: [], edges: [] }),
 }));
 
+vi.mock("../../engine/living-world-authority.js", () => ({
+  readWorldClock: vi.fn(),
+}));
+
 vi.mock("../../inventory/authority.js", async () => {
   const actual = await vi.importActual<typeof import("../../inventory/authority.js")>("../../inventory/authority.js");
   return {
@@ -38,6 +42,7 @@ vi.mock("../../inventory/authority.js", async () => {
 
 import { getActiveCampaign, readCampaignConfig } from "../../campaign/index.js";
 import { getDb } from "../../db/index.js";
+import { readWorldClock } from "../../engine/living-world-authority.js";
 import { loadAuthoritativeInventoryView } from "../../inventory/authority.js";
 import campaignRoutes from "../campaigns.js";
 import {
@@ -96,6 +101,13 @@ describe("GET /api/campaigns/:id/world authoritative inventory", () => {
       generationComplete: true,
     });
     (readCampaignConfig as Mock).mockReturnValue({ personaTemplates: [] });
+    (readWorldClock as Mock).mockReturnValue({
+      campaignId: "abc-123",
+      worldVersion: 3,
+      worldTimeMinutes: 21,
+      currentTick: 21,
+      updatedAt: 123456,
+    });
     (getDb as Mock).mockReturnValue(
       createMockDb({
         locations: [

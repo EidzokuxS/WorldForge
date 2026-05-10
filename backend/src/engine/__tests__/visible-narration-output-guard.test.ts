@@ -498,6 +498,23 @@ describe("visible narration output guard", () => {
     expect(generateNarration).toHaveBeenCalledTimes(2);
   });
 
+  it("falls back to packet evidence when narration never returns draft JSON", async () => {
+    const packet = createPacket();
+    const generateNarration = vi.fn(() => "The captain waits, and the wall remains dark.");
+
+    const result = await runVisibleNarrationWithPacketGuard({
+      packet,
+      generateNarration,
+    });
+
+    expect(result.text).toBe(
+      "The Gate Captain warns that the bridge bell will ring soon.",
+    );
+    expect(result.guardAddendum).toBe("deterministic_fallback_from_packet_evidence");
+    expect(result.validation.ok).toBe(true);
+    expect(generateNarration).toHaveBeenCalledTimes(2);
+  });
+
   it("repairs malformed draft JSON instead of falling back to raw text", async () => {
     const packet = createPacket();
     const attempts: Array<{ attempt: number; guardAddendum: string | null }> = [];

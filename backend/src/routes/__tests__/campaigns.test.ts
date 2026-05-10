@@ -31,6 +31,10 @@ vi.mock("../../engine/location-graph.js", () => ({
   loadLocationGraph: vi.fn(),
 }));
 
+vi.mock("../../engine/living-world-authority.js", () => ({
+  readWorldClock: vi.fn(),
+}));
+
 vi.mock("../../inventory/authority.js", () => ({
   loadAuthoritativeInventoryView: vi.fn(() => null),
 }));
@@ -64,6 +68,7 @@ import {
 import { getDb } from "../../db/index.js";
 import { listRecentLocationEventsForLocations } from "../../engine/location-events.js";
 import { listConnectedPaths, loadLocationGraph } from "../../engine/location-graph.js";
+import { readWorldClock } from "../../engine/living-world-authority.js";
 import { loadAuthoritativeInventoryView } from "../../inventory/authority.js";
 import campaignRoutes from "../campaigns.js";
 
@@ -78,6 +83,7 @@ const mockedListRecentLocationEventsForLocations = vi.mocked(
 );
 const mockedListConnectedPaths = vi.mocked(listConnectedPaths);
 const mockedLoadLocationGraph = vi.mocked(loadLocationGraph);
+const mockedReadWorldClock = vi.mocked(readWorldClock);
 const mockedLoadAuthoritativeInventoryView = vi.mocked(loadAuthoritativeInventoryView);
 const mockedReadConfig = vi.mocked(readCampaignConfig);
 
@@ -99,6 +105,13 @@ beforeEach(() => {
   mockedListConnectedPaths.mockReturnValue([]);
   mockedLoadAuthoritativeInventoryView.mockReturnValue(null as any);
   mockedListRecentLocationEventsForLocations.mockReturnValue({});
+  mockedReadWorldClock.mockReturnValue({
+    campaignId: CAMPAIGN_ID,
+    worldVersion: 7,
+    worldTimeMinutes: 42,
+    currentTick: 42,
+    updatedAt: 123456,
+  });
 });
 
 function makeStoredPlayerRow() {
@@ -733,6 +746,22 @@ describe("GET /:id/world", () => {
     expect(body.npcs[0]).toHaveProperty("npc");
     expect(body.factions).toEqual(worldData.factions);
     expect(body.relationships).toEqual(worldData.relationships);
+    expect(body.worldClock).toEqual({
+      campaignId: CAMPAIGN_ID,
+      worldVersion: 7,
+      worldTimeMinutes: 42,
+      currentTick: 42,
+      updatedAt: 123456,
+    });
+    expect(body.state).toMatchObject({
+      tick: 42,
+      currentTick: 42,
+      worldVersion: 7,
+      worldTimeMinutes: 42,
+    });
+    expect(body.worldVersion).toBe(7);
+    expect(body.worldTimeMinutes).toBe(42);
+    expect(body.currentTick).toBe(42);
     expect(body.player).toMatchObject(worldData.player);
     expect(body.player).toHaveProperty("characterRecord");
     expect(body.player).toHaveProperty("draft");

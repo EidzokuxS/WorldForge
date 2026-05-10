@@ -69,9 +69,9 @@ const HARD_INVARIANTS_BY_ROUTE: Record<Phase94RouteId, Phase94HardInvariantId[]>
 
 const ACTIONS_BY_ROUTE: Record<Phase94RouteId, string[]> = {
   "tourist-courier": [
-    "I ask the nearest tea seller what route a courier should take to the old signal pier.",
-    "I follow the suggested route and look for small local obstacles rather than demanding a shortcut.",
-    "I rest briefly, then continue toward the next landmark if the scene makes it safe.",
+    "I stop walking, keep both hands visible, and ask the Lead Warden what proof will satisfy the credential demand so I can continue legally to the Night Courier Depot.",
+    "I slowly offer the sealed lacquer message and courier route logbook for inspection, asking whether that clears the public route to the Night Courier Depot.",
+    "If the wardens clear me, I proceed along the named public route; otherwise I wait in place and ask for a formal written citation.",
   ],
   "jjk-chakra-coin": [
     "I try to bleed a weak thread of chakra through the coin without drawing attention.",

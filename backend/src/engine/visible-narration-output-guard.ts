@@ -216,6 +216,13 @@ export async function runVisibleNarrationWithPacketGuard(
     args.onUnsafeAttempt?.({ attempt, validation: effectiveValidation });
   }
 
+  const fallback = buildDeterministicPacketNarrationFallback({
+    packet: args.packet,
+    attempts: maxAttempts,
+    lastValidation,
+  });
+  if (fallback) return fallback;
+
   throw new VisibleNarrationPacketGuardError(
     "Visible narration violated packet visibility constraints after retry.",
     lastValidation?.violations ?? [],
@@ -248,6 +255,116 @@ function buildVisibleNarrationRetryAddendum(
   }
 
   return GENERIC_VISIBLE_PACKET_RETRY_ADDENDUM;
+}
+
+function buildDeterministicPacketNarrationFallback(args: {
+  packet: NarratorPacket;
+  attempts: number;
+  lastValidation: VisibleNarrationPacketValidationResult | null;
+}): RunVisibleNarrationWithPacketGuardResult | null {
+  if (!isNarrationDraftRequired(args.packet)) return null;
+  if (
+    !args.lastValidation?.violations.some(
+      (violation) => violation.kind === "invalidNarrationDraft",
+    )
+  ) {
+    return null;
+  }
+  if (
+    args.lastValidation.violations.some(
+      (violation) => violation.kind !== "invalidNarrationDraft",
+    )
+  ) {
+    return null;
+  }
+
+  const draft = buildDeterministicNarrationDraft(args.packet);
+  const validation = validateVisibleNarrationAgainstPacket({
+    packet: args.packet,
+    text: draft.prose,
+    draft,
+  });
+  if (!validation.ok) return null;
+
+  return {
+    text: draft.prose,
+    attempts: args.attempts,
+    retried: true,
+    validation,
+    guardAddendum: "deterministic_fallback_from_packet_evidence",
+  };
+}
+
+function buildDeterministicNarrationDraft(packet: NarratorPacket): NarrationDraft {
+  const evidence = (packet.evidenceLedger ?? [])
+    .filter((entry) => isFallbackNarrationEvidenceCategory(entry.category))
+    .map((entry) => ({
+      ...entry,
+      sentence: normalizeFallbackSentence(entry.summary),
+    }))
+    .filter((entry) => entry.sentence.length > 0)
+    .slice(0, 3);
+
+  if (evidence.length === 0) {
+    const prose = "The immediate scene settles into a playable next moment.";
+    return {
+      prose,
+      claims: [{
+        id: "fallback-claim-playable-beat",
+        kind: "playable_beat",
+        summary: "The scene returns control on a playable next moment.",
+        requiresEvidence: false,
+        evidenceRefs: [],
+      }],
+      claimSpans: [{
+        id: "fallback-span-playable-beat",
+        spanText: prose,
+        claimIds: ["fallback-claim-playable-beat"],
+        requiresEvidence: false,
+      }],
+    };
+  }
+
+  const prose = evidence.map((entry) => entry.sentence).join(" ");
+  return {
+    prose,
+    claims: evidence.map((entry, index) => ({
+      id: `fallback-claim-${index + 1}`,
+      kind: fallbackClaimKind(entry.category),
+      summary: entry.summary,
+      requiresEvidence: true,
+      evidenceRefs: [entry.id],
+    })),
+    claimSpans: evidence.map((entry, index) => ({
+      id: `fallback-span-${index + 1}`,
+      spanText: entry.sentence,
+      claimIds: [`fallback-claim-${index + 1}`],
+      requiresEvidence: true,
+    })),
+  };
+}
+
+function isFallbackNarrationEvidenceCategory(category: string): boolean {
+  return category === "perceivable_effect"
+    || category === "perceivable_response"
+    || category === "committed_event"
+    || category === "oracle_outcome"
+    || category === "hint_signal"
+    || category === "world_thread_signal";
+}
+
+function fallbackClaimKind(category: string): NarrationClaim["kind"] {
+  if (category === "oracle_outcome") return "oracle_outcome";
+  if (category === "hint_signal" || category === "world_thread_signal") return "future_pressure";
+  return "playable_beat";
+}
+
+function normalizeFallbackSentence(value: string): string {
+  const compact = value
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (!compact) return "";
+  return /[.!?]$/u.test(compact) ? compact : `${compact}.`;
 }
 
 function buildVisibleNarrationDiagnostics(

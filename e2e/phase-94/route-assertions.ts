@@ -17,7 +17,7 @@ export interface Phase94RouteAssertionResult {
 }
 
 function containsParserLikeClarification(text: string): boolean {
-  return /which exact|exact id|clarify which|be more specific|which one do you mean|who are you actually|what are you actually/i.test(text);
+  return /which exact|exact id|clarify which|be more specific|which one do you mean|did you mean|legal movement paths|who are you actually|what are you actually/i.test(text);
 }
 
 function hasWorldProgress(turn: Phase94CollectedTurn): boolean {
@@ -32,7 +32,14 @@ function hasWorldProgress(turn: Phase94CollectedTurn): boolean {
   if (
     typeof turn.worldBefore.worldVersion === "number"
     && typeof turn.worldAfter.worldVersion === "number"
-    && turn.worldAfter.worldVersion >= turn.worldBefore.worldVersion
+    && turn.worldAfter.worldVersion > turn.worldBefore.worldVersion
+  ) {
+    return true;
+  }
+  if (
+    typeof turn.worldBefore.currentTick === "number"
+    && typeof turn.worldAfter.currentTick === "number"
+    && turn.worldAfter.currentTick > turn.worldBefore.currentTick
   ) {
     return true;
   }
