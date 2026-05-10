@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Gameplay Fidelity
 status: ready_to_plan
-last_updated: "2026-05-10T09:34:40.105Z"
+last_updated: "2026-05-10T14:09:52.7959745+03:00"
 last_activity: 2026-05-10
 progress:
   total_phases: 59
-  completed_phases: 40
+  completed_phases: 41
   total_plans: 260
-  completed_plans: 212
-  percent: 68
+  completed_plans: 217
+  percent: 69
 ---
 
 # Project State
@@ -20,11 +20,11 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-04-25)
 
 **Core value:** The LLM is the narrator, never the engine. All mechanical outcomes are resolved by backend code.
-**Current focus:** Phase 90 — Playable GM bridge tools for fuzzy player intent
+**Current focus:** Phase 92 — Key actor and faction scheduling repair
 
 ## Current Position
 
-Phase: 91
+Phase: 92
 Plan: Not started
 Status: Ready to plan
 
@@ -35,13 +35,14 @@ Progress: [████████░░] 82%
 ## Current Snapshot
 
 - Active roadmap phases: 43
-- Completed roadmap phases: 41 after Phase 89 verification
+- Completed roadmap phases: 41 after Phase 91 verification
 - Phase 89 plan status: 5/5 complete and verified
-- Pending closeout: Phase 90 through Phase 94 remain active execution/verification scope
+- Phase 91 plan status: 5/5 complete and verified
+- Pending closeout: Phase 92 through Phase 94 remain active execution/verification scope
 
 ## Open Work
 
-- Phase 90 starts the playable GM bridge-tool work: observation-only candidate tools first, then constrained state-bearing tools, fuzzy intent policy, and a tourist/courier acceptance gate.
+- Phase 92 starts key actor and faction scheduling repair: critical-path wake classification, due actor plan steps, JIT catch-up, private POV preservation, faction command scheduling, and cross-system acceptance proof.
 - Broader live gameplay validation is now active scope in Phase 86 rather than a vague follow-up.
 - Phase 83 has fresh frontend deterministic and responsive browser evidence; remaining visual work is polish depth, not a blocker to Phase 84.
 - Phase 72 is verified complete; automated evidence proves artifact authority propagation but not live subjective worldgen quality.
@@ -59,6 +60,7 @@ Progress: [████████░░] 82%
 
 ## Recent Updates
 
+- Phase 91 verified complete (2026-05-10): proposal lifecycle/preflight states, proposal executor/watchdog handling, surface-signal requirements, packet truth firewall metrics, and deterministic ignored-world-time proof are complete. The route script `e2e/91-proposal-backlog-route.ts` passed 15/15 checks, wrote DB/metrics proof under `output/playwright/phase-91-proposal-backlog/2026-05-10T11-05-49-064Z/`, and copied planning evidence to `evidence/wave-5/ignored-world-time-db-proof.json`. Focused proposal lifecycle/executor/surface/truth/metrics tests passed 19 tests, backend typecheck passed, diff check passed, GitNexus scope checks passed, and the index was refreshed.
 - Phase 90 completed execution (2026-05-10): 90-04 added deterministic tourist/courier acceptance for `иду дальше по логичному маршруту и ищу чайную лавку`, proving parser-like GM Read clarification repair, route/POI/known-fact lookup, hidden fact denial without mutation/leak, `move_actor`, constrained `create_minor_poi`, `start_search`, and source-backed PlayerFacingPacket narration. Required focused tests, dry-run e2e artifacts in `output/phase-90/`, backend typecheck, diff check, and GitNexus scope checks passed. Live route mutation remains unclaimed and gated.
 - Phase 88 verified complete (2026-05-09): `88-VERIFICATION.md`, `88-VERIFICATION-MATRIX.md`, and `evidence/wave-7/final-closeout.md` record green deterministic, integration, backend-suite, harness, and live clone-pool evidence. Final clone-pool proof passed 8 routes / 14 turns / 0 hard failures with no output clipping and no turn rollback events; external character-card import remains deferred out of the Phase 88 gate.
 - Phase 89 verified complete (2026-05-10): route/runtime resilience tests passed, backend typecheck and shared build passed, deterministic harness wrote `output/playwright/phase-89-runtime-resilience/summary.json` with status `passed`, and the live local harness wrote `output/playwright/phase-89-runtime-resilience-live/summary.json` after a real `/api/chat/action` completed with HTTP 200 and `event: done`. The live harness contract now sends `campaignId`, `playerAction`, `intent`, and `method`.

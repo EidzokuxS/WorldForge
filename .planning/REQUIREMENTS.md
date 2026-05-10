@@ -336,15 +336,15 @@ Verification: Phase 88 is verified complete by `88-VERIFICATION.md`, `88-VERIFIC
 
 ### Phase 91 — Living World Proposal Commit and Surface Signal Pipeline
 
-- [ ] **P91-R1**: Add explicit proposal terminal states: committed, rejected, expired, deferred, superseded, needs-rebase, and needs-retry.
-- [ ] **P91-R2**: Store proposal preconditions, base world version, read set, write scope, due time, intended tools, priority, and expiry policy.
-- [ ] **P91-R3**: Implement proposal commit/rebase/retry execution through backend-validated tools, never direct narration or uncommitted truth.
-- [ ] **P91-R4**: Resolve due visible proposals before SceneFrame assembly when their effects are current-POV relevant.
-- [ ] **P91-R5**: Add surface-signal policy for committed offscreen events and world threads.
-- [ ] **P91-R6**: Prevent proposals from entering SceneFrame, NarratorPacket, or player-facing prose as truth before commit.
-- [ ] **P91-R7**: Add watchdog/metrics for proposal terminal state ratio, commit ratio, stale jobs, and surface signal coverage.
-- [ ] **P91-R8**: Prove ignored-world-time routes produce committed events/thread updates/surface signals, not only proposal backlog.
-- [ ] **P91-R9**: Produce Phase 91 closeout evidence mapping proposal lifecycle, commit/surface metrics, packet truth firewall, and route artifacts to requirements.
+- [x] **P91-R1**: Add explicit proposal terminal states: committed, rejected, expired, deferred, superseded, needs-rebase, and needs-retry.
+- [x] **P91-R2**: Store proposal preconditions, base world version, read set, write scope, due time, intended tools, priority, and expiry policy.
+- [x] **P91-R3**: Implement proposal commit/rebase/retry execution through backend-validated tools, never direct narration or uncommitted truth.
+- [x] **P91-R4**: Resolve due visible proposals before SceneFrame assembly when their effects are current-POV relevant.
+- [x] **P91-R5**: Add surface-signal policy for committed offscreen events and world threads.
+- [x] **P91-R6**: Prevent proposals from entering SceneFrame, NarratorPacket, or player-facing prose as truth before commit.
+- [x] **P91-R7**: Add watchdog/metrics for proposal terminal state ratio, commit ratio, stale jobs, and surface signal coverage.
+- [x] **P91-R8**: Prove ignored-world-time routes produce committed events/thread updates/surface signals, not only proposal backlog.
+- [x] **P91-R9**: Produce Phase 91 closeout evidence mapping proposal lifecycle, commit/surface metrics, packet truth firewall, and route artifacts to requirements.
 
 ### Phase 92 — Key Actor and Faction Scheduling Repair
 
@@ -615,15 +615,15 @@ Explicitly excluded from this milestone to keep it reconciliation-driven.
 | P90-R5 | Phase 90 | Complete |
 | P90-R6 | Phase 90 | Complete |
 | P90-R7 | Phase 90 | Complete |
-| P91-R1 | Phase 91 | Planned |
-| P91-R2 | Phase 91 | Planned |
-| P91-R3 | Phase 91 | Planned |
-| P91-R4 | Phase 91 | Planned |
-| P91-R5 | Phase 91 | Planned |
-| P91-R6 | Phase 91 | Planned |
-| P91-R7 | Phase 91 | Planned |
-| P91-R8 | Phase 91 | Planned |
-| P91-R9 | Phase 91 | Planned |
+| P91-R1 | Phase 91 | Complete |
+| P91-R2 | Phase 91 | Complete |
+| P91-R3 | Phase 91 | Complete |
+| P91-R4 | Phase 91 | Complete |
+| P91-R5 | Phase 91 | Complete |
+| P91-R6 | Phase 91 | Complete |
+| P91-R7 | Phase 91 | Complete |
+| P91-R8 | Phase 91 | Complete |
+| P91-R9 | Phase 91 | Complete |
 | P92-R1 | Phase 92 | Planned |
 | P92-R2 | Phase 92 | Planned |
 | P92-R3 | Phase 92 | Planned |

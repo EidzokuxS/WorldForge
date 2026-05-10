@@ -865,14 +865,14 @@ Plans:
 **Goal:** Make background simulation produce committed living-world consequences instead of accumulating interesting but inert proposals. The phase must give simulation proposals terminal states, preconditions/read-set/write-scope, commit/rebase/retry/expiry policy, backend tool execution, stale-version handling, surface-signal decisions, and metrics proving proposals become committed events/facts/thread updates/location modifiers or explicit terminal states before they are visible as truth.
 **Requirements**: P91-R1, P91-R2, P91-R3, P91-R4, P91-R5, P91-R6, P91-R7, P91-R8, P91-R9
 **Depends on:** Phase 90
-**Plans:** 0/5 plans complete - PLANNED 2026-05-09
+**Plans:** 5/5 plans complete - VERIFIED 2026-05-10
 
 Plans:
-- [ ] 91-01-PLAN.md - Proposal lifecycle and preflight contract.
-- [ ] 91-02-PLAN.md - Proposal-to-tool commit executor.
-- [ ] 91-03-PLAN.md - Surface signal requirement.
-- [ ] 91-04-PLAN.md - Packet firewall and living-world metrics.
-- [ ] 91-05-PLAN.md - Ignored world-time acceptance gate.
+- [x] 91-01-PLAN.md - Proposal lifecycle and preflight contract.
+- [x] 91-02-PLAN.md - Proposal-to-tool commit executor.
+- [x] 91-03-PLAN.md - Surface signal requirement.
+- [x] 91-04-PLAN.md - Packet firewall and living-world metrics.
+- [x] 91-05-PLAN.md - Ignored world-time acceptance gate.
 
 ### Phase 92: Key actor and faction scheduling repair
 
