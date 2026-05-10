@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import type { NarratorPacket } from "../narrator-packet.js";
+import {
+  buildNarratorPacket,
+  type CanonicalTurnPacket,
+  type NarratorPacket,
+} from "../narrator-packet.js";
 import {
   buildPlayerFacingPacketFromNarratorPacket,
   formatPlayerFacingPacketForPrompt,
   PlayerFacingPacketSafetyError,
 } from "../player-facing-packet.js";
+import type { SceneFrame } from "../scene-frame.js";
 
 const playerId = "11111111-1111-4111-8111-111111111111";
 const visibleNpcId = "22222222-2222-4222-8222-222222222222";
@@ -118,6 +123,178 @@ function createNarratorPacket(): NarratorPacket {
   };
 }
 
+function createBridgeFrame(): SceneFrame {
+  return {
+    campaignId: "campaign-90-04",
+    tick: 90,
+    playerActorId: playerId,
+    currentLocationId: "loc-canal-market",
+    currentSceneScopeId: "scene-courier-counter",
+    currentLocationName: "Canal Market",
+    currentSceneScopeName: "Courier Counter",
+    playerAction: "иду дальше по логичному маршруту и ищу чайную лавку",
+    roster: {
+      active: [
+        {
+          id: playerId,
+          actorId: playerId,
+          type: "player" as const,
+          label: "Tourist Courier",
+          locationId: "loc-canal-market",
+          sceneScopeId: "scene-courier-counter",
+          awareness: "clear" as const,
+        },
+      ],
+      support: [],
+      background: [],
+    },
+    perception: {
+      playerAwarenessHints: ["A public market sign points toward Tea Row."],
+      actorAwareness: {},
+      forbiddenActorLabels: ["Hidden Tea Broker"],
+    },
+    recentEvents: [],
+    targetCandidates: [],
+    movementCandidates: [
+      {
+        id: "route-market-tea-row",
+        locationId: "loc-tea-row",
+        label: "Tea Row",
+        connected: true,
+        travelCost: 1,
+      },
+    ],
+    deferredHooks: [],
+    allowedTools: ["move_actor", "create_minor_poi", "start_search"],
+    oracle: null,
+  };
+}
+
+function createBridgeCanonicalTurnPacket(): CanonicalTurnPacket {
+  return {
+    campaignId: "campaign-90-04",
+    tick: 91,
+    playerAction: "иду дальше по логичному маршруту и ищу чайную лавку",
+    oracleOutcome: null,
+    narratorFacts: {
+      anchorEventId: "event-player-action",
+      eventIds: ["event-player-action"],
+      responseIds: [],
+      actionIds: ["action-move", "action-poi", "action-search", "action-hidden"],
+      toolResultRefs: [
+        { actionId: "action-move", toolName: "move_actor" },
+        { actionId: "action-poi", toolName: "create_minor_poi" },
+        { actionId: "action-search", toolName: "start_search" },
+        { actionId: "action-hidden", toolName: "create_minor_poi" },
+      ],
+    },
+    anchorEvent: {
+      id: "event-player-action",
+      actorId: playerId,
+      kind: "player_action",
+      summary: "Tourist Courier asks to follow the logical route and look for a tea stall.",
+      perceivableByPlayer: true,
+    },
+    events: [],
+    responses: [],
+    effects: [
+      {
+        id: "effect-hidden",
+        actionId: "action-hidden",
+        actorId: playerId,
+        toolName: "create_minor_poi",
+        summary: "Hidden Tea Broker opens a private vault tea room.",
+        perceivableByPlayer: true,
+        toolResult: {
+          success: false,
+          error: "unsupported_action_claim",
+          result: { denied: true },
+        },
+      },
+    ],
+    actionResults: [
+      {
+        order: 1,
+        actionId: "action-move",
+        actionRef: "move_actor",
+        actorId: playerId,
+        toolName: "move_actor",
+        input: {
+          actorRef: "Tourist Courier",
+          destinationRef: "Tea Row",
+        },
+        args: {},
+        result: {
+          success: true,
+          result: {
+            actorRef: "Tourist Courier",
+            locationName: "Tea Row",
+          },
+        },
+      },
+      {
+        order: 2,
+        actionId: "action-poi",
+        actionRef: "create_minor_poi",
+        actorId: playerId,
+        toolName: "create_minor_poi",
+        input: {
+          areaRef: "current_location",
+          poiType: "tea_stall",
+          name: "Lantern Tea Stall",
+        },
+        args: {},
+        result: {
+          success: true,
+          result: {
+            name: "Lantern Tea Stall",
+            connectedTo: "Canal Market",
+          },
+        },
+      },
+      {
+        order: 3,
+        actionId: "action-search",
+        actionRef: "start_search",
+        actorId: playerId,
+        toolName: "start_search",
+        input: {
+          actorRef: "Tourist Courier",
+          query: "чайная лавка",
+        },
+        args: {},
+        result: {
+          success: true,
+          result: {
+            actorRef: "Tourist Courier",
+            query: "чайная лавка",
+            found: false,
+            discoveryCreated: false,
+          },
+        },
+      },
+      {
+        order: 4,
+        actionId: "action-hidden",
+        actionRef: "create_minor_poi",
+        actorId: playerId,
+        toolName: "create_minor_poi",
+        input: { name: "Hidden Tea Vault" },
+        args: {},
+        result: {
+          success: false,
+          error: "unsupported_action_claim",
+          result: { denied: true },
+        },
+      },
+    ],
+    guardrails: [
+      "Only mention movement, tea stall, route, or search from successful tool results.",
+    ],
+    controlReturnReason: "Return control after grounded route and tea search setup.",
+  };
+}
+
 describe("PlayerFacingPacket", () => {
   it("formats only committed player-visible truth and omits raw canonical packet data", () => {
     const packet = buildPlayerFacingPacketFromNarratorPacket(createNarratorPacket());
@@ -213,5 +390,25 @@ describe("PlayerFacingPacket", () => {
 
     expect(formatted).toContain("unconfirmed claim about Hidden Auditor");
     expect(formatted).not.toContain("gave Mira a courier seal");
+  });
+
+  it("surfaces tourist route bridge facts only from successful tool results", () => {
+    const narratorPacket = buildNarratorPacket({
+      frame: createBridgeFrame(),
+      canonicalTurnPacket: createBridgeCanonicalTurnPacket(),
+      forbiddenPrivateTerms: ["Hidden Tea Vault", "private vault tea room"],
+    });
+    const packet = buildPlayerFacingPacketFromNarratorPacket(narratorPacket);
+    const formatted = formatPlayerFacingPacketForPrompt(packet);
+
+    expect(formatted).toContain("Tourist Courier moves to Tea Row");
+    expect(formatted).toContain("Lantern Tea Stall becomes reachable from Canal Market");
+    expect(formatted).toContain("starts searching for чайная лавка; no discovery is confirmed");
+    expect(formatted).toContain("perceivable_effect:action-result:action-move");
+    expect(formatted).toContain("perceivable_effect:action-result:action-poi");
+    expect(formatted).toContain("perceivable_effect:action-result:action-search");
+    expect(formatted).not.toContain("Hidden Tea Broker");
+    expect(formatted).not.toContain("Hidden Tea Vault");
+    expect(formatted).not.toContain("private vault tea room");
   });
 });
