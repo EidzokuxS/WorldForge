@@ -172,6 +172,14 @@ describe("GM Action Checklist contract", () => {
     expect(contract).toContain("Keep the same beat anchor from GM Read");
     expect(contract).toContain("Fewer steps are better");
     expect(contract).toContain("Do not fill all six steps by default");
+    expect(contract).toContain("Bridgeable tool_plan policy");
+    expect(contract).toContain("use lookup observation tools before state-bearing bridge tools");
+    expect(contract).toContain("Prefer legal low-risk advancement over parser-like questions");
+    expect(contract).toContain("list/find/check lookup steps before move_actor");
+    expect(contract).toContain("not say an exact backend string");
+    expect(contract).toContain("materially different risk/cost");
+    expect(contract).toContain("no fair playable bridge");
+    expect(contract.split("\n").length).toBeLessThanOrEqual(80);
   });
 
   it("accepts bounded tool and combat checklist shapes", () => {

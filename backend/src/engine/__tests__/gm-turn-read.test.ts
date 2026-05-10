@@ -212,6 +212,15 @@ describe("GM Read contract", () => {
     expect(contract).toContain("generic public role");
     expect(contract).toContain("vendor");
     expect(contract).toContain("use clarification only when the requested role cannot plausibly exist");
+    expect(contract).toContain("Fuzzy bridge policy");
+    expect(contract).toContain("bridge understandable low-risk navigation, search, and service-role intent");
+    expect(contract).toContain("not an exact backend string");
+    expect(contract).toContain("materially similar");
+    expect(contract).toContain("bounded diegetic 2-3 choice question");
+    expect(contract).toContain("Clarification is allowed only for materially different risk/cost");
+    expect(contract).toContain("mechanically important target identity");
+    expect(contract).toContain("no fair playable bridge");
+    expect(contract).toContain("Do not ask exact ID, backend target, route id, or connected-location questions");
     expect(contract).toContain("Public/commercial/institutional scenes should not stall");
     expect(contract).toContain("ordinary service worker is usually a plausible support NPC");
     expect(contract).toContain("Combat pressure is broader than explicit attack verbs");
@@ -219,6 +228,7 @@ describe("GM Read contract", () => {
     expect(contract).toContain("power-gap questions");
     expect(contract).toContain("Do not include concrete tool payloads");
     expect(contract).not.toContain("plannedActions shape");
+    expect(contract.split("\n").length).toBeLessThanOrEqual(95);
   });
 
   it("defines every GM-owned turn path without requiring concrete tool payloads", () => {
