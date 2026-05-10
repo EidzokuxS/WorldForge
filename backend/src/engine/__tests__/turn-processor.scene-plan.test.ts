@@ -15,6 +15,7 @@ import {
 } from "../scene-planner.js";
 import { runGmToolLoop } from "../gm-tool-loop.js";
 import { runGmRead } from "../gm-turn-read.js";
+import { reviewGmReadClarification } from "../clarification-reviewer.js";
 import { buildScopedForecastExcerpt } from "../world-forecast.js";
 import { executeToolCall } from "../tool-executor.js";
 import { executeScenePlan, ScenePlanExecutionError } from "../scene-plan-executor.js";
@@ -241,6 +242,7 @@ describe("turn processor ScenePlan contract", () => {
   it("imports the canonical contracts used by later processTurn wiring", () => {
     expect(runScenePlanner).toEqual(expect.any(Function));
     expect(runGmRead).toEqual(expect.any(Function));
+    expect(reviewGmReadClarification).toEqual(expect.any(Function));
     expect(runGmToolLoop).toEqual(expect.any(Function));
     expect(buildScopedForecastExcerpt).toEqual(expect.any(Function));
     expect(validateScenePlan).toEqual(expect.any(Function));
@@ -318,7 +320,7 @@ describe("turn processor ScenePlan contract", () => {
 
   it("passes bounded recent conversation into GM Read before path selection", () => {
     const source = extractScenePlanPathSource();
-    const gmReadStart = source.indexOf("const gmRead = await runGmRead({");
+    const gmReadStart = source.indexOf("let gmRead = await runGmRead({");
     const gmReadEnd = source.indexOf('log.event("judge.gm-read.selected"', gmReadStart);
     const gmReadCall = source.slice(gmReadStart, gmReadEnd);
 
@@ -328,6 +330,66 @@ describe("turn processor ScenePlan contract", () => {
     expect(source.indexOf("recentConversation: getChatHistory(campaignId).slice(-8)")).toBeLessThan(
       source.indexOf("runGmToolLoop"),
     );
+  });
+
+  it("reviews parser-like clarification before visible clarification can be appended", () => {
+    const source = extractScenePlanPathSource();
+    const gmReadStart = source.indexOf("let gmRead = await runGmRead({");
+    const reviewStart = source.indexOf("reviewGmReadClarification", gmReadStart);
+    const reviewGuardStart = source.lastIndexOf('if (gmRead.path === "clarification")', reviewStart);
+    const visibleClarificationStart = source.indexOf('if (gmRead.path === "clarification")', reviewStart + 1);
+    const safePromptStart = source.indexOf("safeClarificationPromptForFrame", visibleClarificationStart);
+    const reviewBlock = source.slice(reviewGuardStart, visibleClarificationStart);
+
+    expect(gmReadStart, "mutable GM Read assignment exists").toBeGreaterThanOrEqual(0);
+    expect(reviewStart, "clarification reviewer call exists").toBeGreaterThan(gmReadStart);
+    expect(reviewGuardStart, "review guard exists").toBeGreaterThan(gmReadStart);
+    expect(visibleClarificationStart, "visible clarification branch exists").toBeGreaterThan(
+      reviewStart,
+    );
+    expect(safePromptStart, "safe clarification prompt remains").toBeGreaterThan(
+      visibleClarificationStart,
+    );
+    expect(reviewBlock).toContain('if (gmRead.path === "clarification")');
+    expect(reviewBlock).toContain("clarificationReview.repaired");
+    expect(reviewBlock).toContain("gmRead = clarificationReview.gmRead");
+    expect(reviewBlock).toContain("judge.gm-read.clarification-review.selected");
+    expect(reviewBlock).toContain("parserLikePattern");
+    expect(reviewBlock).toContain("bridgeCandidateCount");
+    expect(reviewBlock).not.toContain("clarificationPrompt");
+    expect(reviewBlock).not.toContain("playerAction:");
+  });
+
+  it("continues repaired non-clarification through the normal Oracle/tool/narrator path", () => {
+    const source = extractScenePlanPathSource();
+    const reviewStart = source.indexOf("reviewGmReadClarification");
+    const reassignmentStart = source.indexOf("gmRead = clarificationReview.gmRead", reviewStart);
+    const targetContextStart = source.indexOf("const targetContext =", reviewStart);
+    const toolLoopStart = source.indexOf("runGmToolLoop", targetContextStart);
+    const visibleClarificationStart = source.indexOf('if (gmRead.path === "clarification")', toolLoopStart);
+
+    expect(reassignmentStart).toBeGreaterThan(reviewStart);
+    expect(targetContextStart).toBeGreaterThan(reviewStart);
+    expect(targetContextStart).toBeGreaterThan(reassignmentStart);
+    expect(toolLoopStart).toBeGreaterThan(targetContextStart);
+    expect(visibleClarificationStart).toBeGreaterThan(toolLoopStart);
+  });
+
+  it("records clarification review metrics in GM Read latency metadata without raw hidden terms", () => {
+    const source = extractScenePlanPathSource();
+    const reviewMetadataStart = source.indexOf("clarificationReviewMetadata");
+    const latencyStart = source.indexOf('stage: "gm_read"', reviewMetadataStart);
+    const latencyEnd = source.indexOf('kind: "gm_read"', latencyStart);
+    const latencyBlock = source.slice(latencyStart, latencyEnd);
+
+    expect(reviewMetadataStart).toBeGreaterThanOrEqual(0);
+    expect(latencyBlock).toContain("clarificationReviewed");
+    expect(latencyBlock).toContain("clarificationRepaired");
+    expect(latencyBlock).toContain("clarificationReviewReason");
+    expect(latencyBlock).toContain("clarificationParserLikePattern");
+    expect(latencyBlock).toContain("clarificationBridgeCandidateCount");
+    expect(latencyBlock).not.toContain("clarificationPrompt");
+    expect(latencyBlock).not.toContain("playerAction");
   });
 
   it("does not use background or movement candidates as scoped forecast refs", () => {
@@ -352,7 +414,11 @@ describe("turn processor ScenePlan contract", () => {
 
   it("redacts unsafe clarification prompts before chat append and narrative SSE", () => {
     const source = extractScenePlanPathSource();
-    const clarificationStart = source.indexOf('if (gmRead.path === "clarification")');
+    const executedEventsStart = source.indexOf("for (const event of executedPlan.emittedEvents)");
+    const clarificationStart = source.indexOf(
+      'if (gmRead.path === "clarification")',
+      executedEventsStart,
+    );
     const clarificationEnd = source.indexOf("const hpDropped", clarificationStart);
     const clarificationPath = source.slice(clarificationStart, clarificationEnd);
 

@@ -71,6 +71,7 @@ import {
   type SceneFrameTargetCandidate,
 } from "./scene-frame.js";
 import { runGmRead, type GmRead } from "./gm-turn-read.js";
+import { reviewGmReadClarification } from "./clarification-reviewer.js";
 import { runGmToolLoop } from "./gm-tool-loop.js";
 import { runRequiredActorDecisionPass } from "./actor-tools.js";
 import {
@@ -2663,7 +2664,7 @@ async function* processTurnScenePlan(
   };
 
   const gmReadStart = Date.now();
-  const gmRead = await runGmRead({
+  let gmRead = await runGmRead({
     provider: judgeProvider,
     playerAction,
     frame: sceneFrame,
@@ -2671,6 +2672,51 @@ async function* processTurnScenePlan(
     recentConversation: getChatHistory(campaignId).slice(-8),
     maxOutputTokens: storytellerMaxTokens,
   });
+  const originalGmReadPath = gmRead.path;
+  let clarificationReviewMetadata: {
+    reviewed: boolean;
+    repaired: boolean;
+    reason: string | null;
+    parserLikePattern: string | null;
+    bridgeCandidateCount: number;
+  } = {
+    reviewed: false,
+    repaired: false,
+    reason: null,
+    parserLikePattern: null,
+    bridgeCandidateCount: 0,
+  };
+
+  if (gmRead.path === "clarification") {
+    const clarificationReview = await reviewGmReadClarification({
+      provider: judgeProvider,
+      playerAction,
+      frame: sceneFrame,
+      gmRead,
+      scopedForecastExcerpt,
+      recentConversation: getChatHistory(campaignId).slice(-8),
+      maxOutputTokens: storytellerMaxTokens,
+    });
+    clarificationReviewMetadata = {
+      reviewed: true,
+      repaired: clarificationReview.repaired,
+      reason: clarificationReview.reason,
+      parserLikePattern: clarificationReview.parserLikePattern,
+      bridgeCandidateCount: clarificationReview.bridgeCandidateCount,
+    };
+    if (clarificationReview.repaired) {
+      gmRead = clarificationReview.gmRead;
+    }
+    log.event("judge.gm-read.clarification-review.selected", {
+      reviewed: clarificationReviewMetadata.reviewed,
+      repaired: clarificationReviewMetadata.repaired,
+      reason: clarificationReviewMetadata.reason,
+      parserLikePattern: clarificationReviewMetadata.parserLikePattern,
+      bridgeCandidateCount: clarificationReviewMetadata.bridgeCandidateCount,
+      originalPath: originalGmReadPath,
+      selectedPath: gmRead.path,
+    });
+  }
   const gmReadEnded = Date.now();
   recordTurnLatencyStage(latencyTrace, {
     stage: "gm_read",
@@ -2678,7 +2724,13 @@ async function* processTurnScenePlan(
     endedAt: gmReadEnded,
     metadata: {
       path: gmRead.path,
+      originalPath: originalGmReadPath,
       evidenceRefCount: gmRead.evidenceRefs.length,
+      clarificationReviewed: clarificationReviewMetadata.reviewed,
+      clarificationRepaired: clarificationReviewMetadata.repaired,
+      clarificationReviewReason: clarificationReviewMetadata.reason,
+      clarificationParserLikePattern: clarificationReviewMetadata.parserLikePattern,
+      clarificationBridgeCandidateCount: clarificationReviewMetadata.bridgeCandidateCount,
     },
   });
   recordSerializedLlmGroup(latencyTrace, {
@@ -2688,12 +2740,21 @@ async function* processTurnScenePlan(
     endedAt: gmReadEnded,
     metadata: {
       path: gmRead.path,
+      originalPath: originalGmReadPath,
       evidenceRefCount: gmRead.evidenceRefs.length,
+      clarificationReviewed: clarificationReviewMetadata.reviewed,
+      clarificationRepaired: clarificationReviewMetadata.repaired,
+      clarificationReviewReason: clarificationReviewMetadata.reason,
+      clarificationParserLikePattern: clarificationReviewMetadata.parserLikePattern,
+      clarificationBridgeCandidateCount: clarificationReviewMetadata.bridgeCandidateCount,
     },
   });
   log.event("judge.gm-read.selected", {
     path: gmRead.path,
+    originalPath: originalGmReadPath,
     evidenceRefCount: Array.isArray(gmRead.evidenceRefs) ? gmRead.evidenceRefs.length : 0,
+    clarificationReviewed: clarificationReviewMetadata.reviewed,
+    clarificationRepaired: clarificationReviewMetadata.repaired,
   });
 
   const targetContext =
@@ -2821,7 +2882,7 @@ async function* processTurnScenePlan(
   let scenePlan: ScenePlan;
   let executedPlan: ExecutedScenePlan;
 
-  if (noMutationGmRead) {
+  if (isNoMutationGmReadPath(gmRead)) {
     advanceSaga("tool_loop_running", "GM tool loop not required for no-mutation path.");
     scenePlan = buildNoMutationScenePlan({ frame: frameWithOracle, gmRead });
     executedPlan = buildNoMutationExecutedScenePlan({ frame: frameWithOracle, plan: scenePlan });
