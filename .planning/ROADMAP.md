@@ -879,14 +879,14 @@ Plans:
 **Goal:** Make key NPCs, persistent actors, and factions advance on truthful schedules without polling every entity every turn. The phase must implement critical-path actor selection, wake signals, due plan steps, agency debt, just-in-time catch-up before exposure, command/report/resource faction paths, and standing orders so offscreen actors can act from private POV and later leave discoverable consequences without freezing the world or exploding latency.
 **Requirements**: P92-R1, P92-R2, P92-R3, P92-R4, P92-R5, P92-R6, P92-R7, P92-R8
 **Depends on:** Phase 91
-**Plans:** 0/5 plans complete - PLANNED 2026-05-09
+**Plans:** 5/5 plans complete - VERIFIED 2026-05-10
 
 Plans:
-- [ ] 92-01-PLAN.md - Critical-path actor wake index.
-- [ ] 92-02-PLAN.md - Key NPC due plan steps and consequences.
-- [ ] 92-03-PLAN.md - JIT actor exposure catchup and private POV.
-- [ ] 92-04-PLAN.md - Faction command node scheduler and agent.
-- [ ] 92-05-PLAN.md - Cross-system acceptance proof.
+- [x] 92-01-PLAN.md - Critical-path actor wake index.
+- [x] 92-02-PLAN.md - Key NPC due plan steps and consequences.
+- [x] 92-03-PLAN.md - JIT actor exposure catchup and private POV.
+- [x] 92-04-PLAN.md - Faction command node scheduler and agent.
+- [x] 92-05-PLAN.md - Cross-system acceptance proof.
 
 ### Phase 93: Latency and context budget instrumentation
 

@@ -348,14 +348,14 @@ Verification: Phase 88 is verified complete by `88-VERIFICATION.md`, `88-VERIFIC
 
 ### Phase 92 — Key Actor and Faction Scheduling Repair
 
-- [ ] **P92-R1**: Classify actor/faction work by critical path so visible/current-scope catch-up runs before GM Read while distant work stays scheduled.
-- [ ] **P92-R2**: Wake key actors via world time, reports, direct observation, interrupts, deadlines, agency debt, and surface exposure, not per-turn polling.
-- [ ] **P92-R3**: Execute key NPC due plan steps from private ActorFrames with source-backed knowledge and backend-validated actor tools.
-- [ ] **P92-R4**: Implement faction command/report/resource paths for orders, operations, units, standing orders, and communication latency.
-- [ ] **P92-R5**: Add just-in-time catch-up before exposing unresolved actors, locations, or faction consequences to the player.
-- [ ] **P92-R6**: Preserve private names/facts/beliefs through viewer-specific identity and knowledge routes.
-- [ ] **P92-R7**: Prove offscreen key NPC/faction actions leave discoverable consequences without waking every NPC every turn.
-- [ ] **P92-R8**: Produce focused acceptance evidence proving key-actor and faction scenarios, private POV, and no every-NPC polling.
+- [x] **P92-R1**: Classify actor/faction work by critical path so visible/current-scope catch-up runs before GM Read while distant work stays scheduled.
+- [x] **P92-R2**: Wake key actors via world time, reports, direct observation, interrupts, deadlines, agency debt, and surface exposure, not per-turn polling.
+- [x] **P92-R3**: Execute key NPC due plan steps from private ActorFrames with source-backed knowledge and backend-validated actor tools.
+- [x] **P92-R4**: Implement faction command/report/resource paths for orders, operations, units, standing orders, and communication latency.
+- [x] **P92-R5**: Add just-in-time catch-up before exposing unresolved actors, locations, or faction consequences to the player.
+- [x] **P92-R6**: Preserve private names/facts/beliefs through viewer-specific identity and knowledge routes.
+- [x] **P92-R7**: Prove offscreen key NPC/faction actions leave discoverable consequences without waking every NPC every turn.
+- [x] **P92-R8**: Produce focused acceptance evidence proving key-actor and faction scenarios, private POV, and no every-NPC polling.
 
 ### Phase 93 — Latency and Context Budget Instrumentation
 
@@ -624,14 +624,14 @@ Explicitly excluded from this milestone to keep it reconciliation-driven.
 | P91-R7 | Phase 91 | Complete |
 | P91-R8 | Phase 91 | Complete |
 | P91-R9 | Phase 91 | Complete |
-| P92-R1 | Phase 92 | Planned |
-| P92-R2 | Phase 92 | Planned |
-| P92-R3 | Phase 92 | Planned |
-| P92-R4 | Phase 92 | Planned |
-| P92-R5 | Phase 92 | Planned |
-| P92-R6 | Phase 92 | Planned |
-| P92-R7 | Phase 92 | Planned |
-| P92-R8 | Phase 92 | Planned |
+| P92-R1 | Phase 92 | Complete |
+| P92-R2 | Phase 92 | Complete |
+| P92-R3 | Phase 92 | Complete |
+| P92-R4 | Phase 92 | Complete |
+| P92-R5 | Phase 92 | Complete |
+| P92-R6 | Phase 92 | Complete |
+| P92-R7 | Phase 92 | Complete |
+| P92-R8 | Phase 92 | Complete |
 | P93-R1 | Phase 93 | Planned |
 | P93-R2 | Phase 93 | Planned |
 | P93-R3 | Phase 93 | Planned |
