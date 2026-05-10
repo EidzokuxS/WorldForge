@@ -157,9 +157,10 @@ export function buildPhase94Manifest(input: {
   profile: string;
   turnsPerRoute: number;
   routes?: readonly Phase94RouteManifestEntry[];
+  requireAllRoutes?: boolean;
 }): Phase94ManifestArtifact {
   const routes = input.routes ?? getPhase94Routes();
-  assertPhase94ManifestValid(routes);
+  assertPhase94ManifestValid(routes, { requireAllRoutes: input.requireAllRoutes ?? true });
   return {
     phase: 94,
     runId: input.runId,

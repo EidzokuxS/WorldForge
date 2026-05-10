@@ -178,10 +178,10 @@ export function buildPhase94BaselinePool(options: Phase94BaselinePoolOptions): P
       cloneCampaignPath: clonePath,
       routeOutputRoot: resolve(options.outRoot, route.id),
       dryRun: options.dryRun,
-      status: options.dryRun ? "planned" : options.reuseBaselines ? "reused" : "created",
+      status: options.dryRun ? "planned" : "created",
     };
 
-    if (!options.dryRun && !options.reuseBaselines) {
+    if (!options.dryRun) {
       if (existsSync(clonePath)) {
         throw new Error(`Clone campaign target already exists: ${clonePath}`);
       }
@@ -204,6 +204,6 @@ export function buildPhase94BaselinePool(options: Phase94BaselinePoolOptions): P
     baselines: [...baselinesById.values()],
     routeClones,
   };
-  assertPhase94BaselinePoolValid(artifact);
+  assertPhase94BaselinePoolValid(artifact, { routeIds: options.routes.map((route) => route.id) });
   return artifact;
 }

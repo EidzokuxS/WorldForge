@@ -4,7 +4,7 @@
 - output root: R:\Projects\WorldForge\output\playwright\phase-94-focused\dry-run
 - dry run: true
 - no-shortcut guard: passed
-- loader note: `node --import tsx/esm` fails on Node 23 with `ERR_REQUIRE_CYCLE_MODULE`; verification used `node --import tsx`, which also works for existing e2e scripts.
+- loader note: node --import tsx is used on Node 23 because node --import tsx/esm fails with ERR_REQUIRE_CYCLE_MODULE.
 
 ## Guard Checked Files
 

@@ -158,7 +158,10 @@ function assertNonEmptyArray<T>(value: readonly T[] | undefined, label: string):
   }
 }
 
-export function assertPhase94ManifestValid(routes: readonly Phase94RouteManifestEntry[]): void {
+export function assertPhase94ManifestValid(
+  routes: readonly Phase94RouteManifestEntry[],
+  options: { requireAllRoutes?: boolean } = {},
+): void {
   const seen = new Set<string>();
   for (const route of routes) {
     if (!ROUTE_ID_SET.has(route.id)) {
@@ -191,15 +194,20 @@ export function assertPhase94ManifestValid(routes: readonly Phase94RouteManifest
       }
     }
   }
-  const missing = PHASE94_ROUTE_IDS.filter((routeId) => !seen.has(routeId));
-  if (missing.length > 0) {
-    throw new Error(`Phase 94 manifest is missing route ids: ${missing.join(", ")}.`);
+  if (options.requireAllRoutes ?? true) {
+    const missing = PHASE94_ROUTE_IDS.filter((routeId) => !seen.has(routeId));
+    if (missing.length > 0) {
+      throw new Error(`Phase 94 manifest is missing route ids: ${missing.join(", ")}.`);
+    }
   }
 }
 
-export function assertPhase94BaselinePoolValid(pool: Phase94BaselinePoolArtifact): void {
+export function assertPhase94BaselinePoolValid(
+  pool: Phase94BaselinePoolArtifact,
+  options: { routeIds?: readonly Phase94RouteId[] } = {},
+): void {
   const cloneRoutes = new Set(pool.routeClones.map((clone) => clone.routeId));
-  for (const routeId of PHASE94_ROUTE_IDS) {
+  for (const routeId of options.routeIds ?? PHASE94_ROUTE_IDS) {
     if (!cloneRoutes.has(routeId)) {
       throw new Error(`Baseline pool is missing route clone for ${routeId}.`);
     }

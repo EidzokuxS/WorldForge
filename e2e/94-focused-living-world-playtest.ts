@@ -30,6 +30,8 @@ interface GuardResult {
 }
 
 const DEFAULT_OUT_ROOT = "output/playwright/phase-94-focused/dry-run";
+const DEFAULT_BACKEND_URL = "http://localhost:3001";
+const DEFAULT_FRONTEND_URL = "http://localhost:3000";
 const PLANNING_PREFLIGHT_PATH = ".planning/phases/94-focused-living-world-playtest-and-runtime-acceptance-gate/evidence/wave-1/harness-preflight.md";
 
 function runId(): string {
@@ -125,6 +127,7 @@ function writeHarnessPreflight(input: {
     `- output root: ${input.outRoot}`,
     `- dry run: ${input.dryRun}`,
     `- no-shortcut guard: ${input.guard.status}`,
+    "- loader note: node --import tsx is used on Node 23 because node --import tsx/esm fails with ERR_REQUIRE_CYCLE_MODULE.",
     "",
     "## Guard Checked Files",
     "",
@@ -135,7 +138,6 @@ function writeHarnessPreflight(input: {
     input.guard.failures.length === 0
       ? "- none"
       : input.guard.failures.map((failure) => `- ${failure.file}: ${failure.patternId}`).join("\n"),
-    "",
   ];
   const markdown = `${lines.join("\n")}\n`;
   writeFileSync(resolve(input.outRoot, "harness-preflight.md"), markdown, "utf-8");
@@ -148,12 +150,14 @@ async function main(): Promise<void> {
   const id = runId();
   const outRoot = assertProjectRelativeOutput(args.outRoot);
   const routes = getPhase94Routes(args.routeIds);
-  assertPhase94ManifestValid(routes);
+  const requireAllRoutes = args.routeIds.length === PHASE94_ROUTE_IDS.length;
+  assertPhase94ManifestValid(routes, { requireAllRoutes });
   const manifest = buildPhase94Manifest({
     runId: id,
     profile: args.profile,
     turnsPerRoute: args.turnsPerRoute,
     routes,
+    requireAllRoutes,
   });
 
   if (args.manifestOnly) {
@@ -161,15 +165,14 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (!args.prepareBaselines) {
-    throw new Error("Phase 94 live route execution belongs to later waves; use --manifest-only or --prepare-baselines.");
-  }
-
   assertOutputWritable(outRoot);
   const guard = runNoShortcutGuard();
   if (guard.status !== "passed") {
     throw new Error(`Phase 94 no-shortcut guard failed: ${JSON.stringify(guard.failures)}`);
   }
+  const liveRunner = args.prepareBaselines
+    ? null
+    : (await import("./phase-94/live-runner.js")).runPhase94LiveRoutes;
   const pool = buildPhase94BaselinePool({
     routes,
     runId: id,
@@ -187,6 +190,17 @@ async function main(): Promise<void> {
     guard,
     dryRun: args.dryRun,
   });
+  if (!args.prepareBaselines) {
+    if (!liveRunner) throw new Error("Phase 94 live runner failed to load.");
+    await liveRunner({
+      routes,
+      baselinePool: pool,
+      outRoot,
+      backendUrl: process.env.PHASE94_BACKEND_URL ?? process.env.BACKEND_URL ?? DEFAULT_BACKEND_URL,
+      frontendUrl: process.env.PHASE94_FRONTEND_URL ?? process.env.FRONTEND_URL ?? DEFAULT_FRONTEND_URL,
+      turnsPerRoute: args.turnsPerRoute,
+    });
+  }
   console.log(JSON.stringify({
     phase: 94,
     runId: id,
