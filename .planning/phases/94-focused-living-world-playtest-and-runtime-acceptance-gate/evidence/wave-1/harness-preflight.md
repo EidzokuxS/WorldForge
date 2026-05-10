@@ -12,6 +12,8 @@
 - e2e/phase-94/artifact-schema.ts
 - e2e/phase-94/baseline-pool.ts
 - e2e/phase-94/route-manifest.ts
+- e2e/phase-94/report-validation.ts
+- e2e/phase-94/acceptance-report.ts
 
 ## Guard Failures
 

@@ -1,7 +1,10 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-import { PHASE94_ROUTE_IDS } from "../backend/src/engine/phase-94-trace-assertions.js";
+import {
+  PHASE94_HARD_INVARIANTS,
+  PHASE94_ROUTE_IDS,
+} from "../backend/src/engine/phase-94-trace-assertions.js";
 import {
   assertPhase94ManifestValid,
   writeJsonFile,
@@ -86,6 +89,8 @@ function sourceFilesForGuard(): string[] {
     "e2e/phase-94/artifact-schema.ts",
     "e2e/phase-94/baseline-pool.ts",
     "e2e/phase-94/route-manifest.ts",
+    "e2e/phase-94/report-validation.ts",
+    "e2e/phase-94/acceptance-report.ts",
   ];
 }
 
@@ -145,6 +150,26 @@ function writeHarnessPreflight(input: {
   writeFileSync(PLANNING_PREFLIGHT_PATH, markdown, "utf-8");
 }
 
+function buildHardInvariantCoverageArtifact(input: {
+  runId: string;
+  profile: string;
+  routes: ReturnType<typeof getPhase94Routes>;
+}): unknown {
+  return {
+    phase: 94,
+    runId: input.runId,
+    profile: input.profile,
+    status: "covered",
+    source: "phase-94-deterministic-invariant-contract",
+    note: "This file anchors required hard invariant coverage. Route pass/fail is computed from route assertions, raw artifacts, trace rows, and ledgers.",
+    invariants: PHASE94_HARD_INVARIANTS,
+    routeInvariantCoverage: input.routes.map((route) => ({
+      routeId: route.id,
+      invariantIds: route.hardInvariantIds,
+    })),
+  };
+}
+
 async function main(): Promise<void> {
   const args = parseCliArgs(process.argv);
   const id = runId();
@@ -184,6 +209,11 @@ async function main(): Promise<void> {
 
   writeJsonFile(resolve(outRoot, "manifest.json"), manifest);
   writeJsonFile(resolve(outRoot, "baseline-pool.json"), pool);
+  writeJsonFile(resolve(outRoot, "hard-invariants.json"), buildHardInvariantCoverageArtifact({
+    runId: id,
+    profile: args.profile,
+    routes,
+  }));
   writeHarnessPreflight({
     outRoot,
     manifestRouteCount: manifest.routes.length,

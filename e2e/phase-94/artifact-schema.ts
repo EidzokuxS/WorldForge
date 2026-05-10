@@ -109,9 +109,10 @@ export interface Phase94RouteResult {
 }
 
 export interface Phase94HardFailure {
-  routeId: Phase94RouteId;
-  turnId: string;
-  invariantId: Phase94HardInvariantId;
+  routeId: Phase94RouteId | "global";
+  turnId: string | null;
+  invariantId: Phase94HardInvariantId | string;
+  gate: string;
   reason: string;
   evidenceIds: string[];
 }
@@ -123,13 +124,69 @@ export interface Phase94SoftNote {
   notesPath: string;
 }
 
+export interface Phase94ReportDiagnostic {
+  severity: "hard" | "soft" | "info";
+  routeId: Phase94RouteId | "global";
+  gate: string;
+  message: string;
+  evidencePaths: string[];
+}
+
+export interface Phase94RouteValidationSummary {
+  routeId: Phase94RouteId;
+  status: "passed" | "failed" | "missing";
+  cloneCampaignId: string | null;
+  sourceCampaignId: string | null;
+  artifactRoot: string;
+  turnCount: number;
+  terminalDoneCount: number;
+  hardFailureCount: number;
+  missingArtifactCount: number;
+  unreadableArtifactCount: number;
+}
+
+export interface Phase94LivingWorldMetrics {
+  route_completion_ratio: number;
+  hard_failure_count: number;
+  missing_artifact_count: number;
+  oracle_persistence_failures: number;
+  narrator_repair_without_rollback_count: number;
+  proposal_terminal_state_ratio: number | null;
+  proposal_commit_ratio: number | null;
+  surface_signal_coverage: number | null;
+  stale_job_count: number;
+  unnecessary_clarification_rate: number;
+  parser_like_response_rate: number;
+  empty_assistant_text_count: number;
+  hidden_truth_leak_count: number;
+  avg_turn_latency_by_stage: Record<string, number>;
+  context_budget_overflow_count: number;
+}
+
+export interface Phase94LivingWorldAssertionsArtifact {
+  phase: 94;
+  runId: string;
+  generatedAt: string;
+  status: "passed" | "failed";
+  metrics: Phase94LivingWorldMetrics;
+  routeSummaries: Phase94RouteValidationSummary[];
+  diagnostics: Phase94ReportDiagnostic[];
+}
+
 export interface Phase94AcceptanceReport {
   phase: 94;
   runId: string;
+  generatedAt: string;
+  inputRoot: string;
+  profile: string;
+  requiredRouteMode: "full-matrix" | "manifest-subset";
   status: "passed" | "failed";
+  routeSummaries: Phase94RouteValidationSummary[];
   routeResults: Phase94RouteResult[];
   hardFailures: Phase94HardFailure[];
   softNotes: Phase94SoftNote[];
+  diagnostics: Phase94ReportDiagnostic[];
+  metrics: Phase94LivingWorldMetrics;
 }
 
 export const PHASE94_REQUIRED_ARTIFACTS: readonly Phase94ArtifactKind[] = [
