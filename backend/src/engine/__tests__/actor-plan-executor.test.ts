@@ -165,6 +165,12 @@ describe("actor plan executor", () => {
         kind: "travel",
         destinationLocationName: "Depot",
         summary: "Courier reaches the depot offscreen.",
+        surface: {
+          surfaceRoute: "rumor_or_sighting",
+          visibility: "local_signal",
+          knowledgeRoute: "witness_report",
+          hiddenCauseTerms: ["sealed patron"],
+        },
       },
     });
 
@@ -179,6 +185,13 @@ describe("actor plan executor", () => {
       status: "completed",
       actorId: "npc-key",
       processUpdateStatus: "updated",
+      surface: {
+        locationRef: "loc-b",
+        surfaceRoute: "rumor_or_sighting",
+        visibility: "local_signal",
+        knowledgeRoute: "witness_report",
+        hiddenCauseTerms: ["sealed patron"],
+      },
     });
     expect(
       getDb()
@@ -192,6 +205,10 @@ describe("actor plan executor", () => {
         locationId: "loc-b",
         eventType: "actor_plan_step",
         summary: "Courier reaches the depot offscreen.",
+        surfaceRoute: "rumor_or_sighting",
+        visibility: "local_signal",
+        knowledgeRoute: "witness_report",
+        hiddenCauseTerms: JSON.stringify(["sealed patron"]),
       }),
     ]);
     expect(getDb().select().from(authorityTraces).all()).toEqual([

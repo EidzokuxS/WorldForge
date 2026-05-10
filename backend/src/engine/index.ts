@@ -270,9 +270,11 @@ export type {
   KeyActorInboxItem,
   KeyActorInterrupt,
   KeyActorPlanStep,
+  KeyActorPlanSurfacePolicy,
   KeyActorProcess,
   KeyActorProcessActor,
   KeyActorProcessState,
+  KeyActorSurfaceVisibility,
 } from "./key-actor-process.js";
 
 export {

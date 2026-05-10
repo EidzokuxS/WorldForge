@@ -6,7 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { simulationProposals } from "../db/schema.js";
 import {
-  listKeyActorProcessesForCampaign,
+  listKeyActorProcessesByActorIds,
   type KeyActorProcess,
 } from "./key-actor-process.js";
 import {
@@ -27,6 +27,7 @@ import {
   resolveDueSimulationProposalsForScope,
   type ResolveDueSimulationProposalsForScopeResult,
 } from "./simulation-proposal-watchdog.js";
+import { consumeActorWakeSignals } from "./actor-wake-signals.js";
 
 export type DueWorldWorkPhase = "pre_scene_frame" | "pre_narrator_packet";
 
@@ -170,7 +171,10 @@ export function resolveDueWorldWorkForScope(
     elapsedWorldTimeMinutes: input.elapsedWorldTimeMinutes,
   });
   const processes = processByActorId(
-    listKeyActorProcessesForCampaign({ campaignId: input.campaignId }),
+    listKeyActorProcessesByActorIds({
+      campaignId: input.campaignId,
+      actorIds: schedule.decisions.map((decision) => decision.actorId),
+    }),
   );
   const executed: ExecuteActorPlanStepResult[] = [];
   const deferred: DeferredActorWork[] = [];
@@ -183,14 +187,20 @@ export function resolveDueWorldWorkForScope(
         skipped.push(decision);
         continue;
       }
-      executed.push(
-        executeActorPlanStep({
+      const result = executeActorPlanStep({
+        campaignId: input.campaignId,
+        tick: input.tick,
+        process,
+        baseWorldVersion: readWorldClock(input.campaignId).worldVersion,
+      });
+      executed.push(result);
+      if (result.status === "completed") {
+        consumeActorWakeSignals({
           campaignId: input.campaignId,
-          tick: input.tick,
-          process,
-          baseWorldVersion: readWorldClock(input.campaignId).worldVersion,
-        }),
-      );
+          actorIds: [decision.actorId],
+          worldTimeMinutes: readWorldClock(input.campaignId).worldTimeMinutes,
+        });
+      }
       continue;
     }
 

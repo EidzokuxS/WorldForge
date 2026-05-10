@@ -8,6 +8,7 @@ import {
 import {
   KEY_ACTOR_DEFAULT_WAKE_DELAY_MINUTES,
   updateActorProcessAfterDecision,
+  type KeyActorPlanSurfacePolicy,
   type KeyActorProcess,
   type KeyActorProcessState,
 } from "./key-actor-process.js";
@@ -46,9 +47,18 @@ export interface ExecuteActorPlanStepResult {
   authority?: ToolResultAuthority;
   eventIds: string[];
   stateDeltaRefs: string[];
+  surface?: ActorPlanStepSurface;
   failureReason?: string;
   replanProposalId?: string;
   processUpdateStatus?: ReturnType<typeof updateActorProcessAfterDecision>["status"];
+}
+
+export interface ActorPlanStepSurface {
+  locationRef: string | null;
+  surfaceRoute: string | null;
+  visibility: KeyActorPlanSurfacePolicy["visibility"];
+  knowledgeRoute: string | null;
+  hiddenCauseTerms: string[];
 }
 
 function nextProcessState(input: {
@@ -148,6 +158,7 @@ function recordActorEvent(input: {
   eventType: string;
   summary: string;
   importance?: number | null;
+  surface?: KeyActorPlanSurfacePolicy;
 }): string[] {
   const event = recordLocationRecentEvent({
     campaignId: input.campaignId,
@@ -156,8 +167,25 @@ function recordActorEvent(input: {
     eventType: input.eventType,
     summary: input.summary,
     importance: input.importance ?? 3,
+    surfaceRoute: input.surface?.surfaceRoute ?? "actor_plan_step",
+    visibility: input.surface?.visibility ?? "player_perceivable",
+    knowledgeRoute: input.surface?.knowledgeRoute ?? null,
+    hiddenCauseTerms: input.surface?.hiddenCauseTerms ?? [],
   });
   return event ? [event.id] : [];
+}
+
+function actorPlanSurface(input: {
+  locationRef: string | null;
+  surface?: KeyActorPlanSurfacePolicy;
+}): ActorPlanStepSurface {
+  return {
+    locationRef: input.locationRef,
+    surfaceRoute: input.surface?.surfaceRoute ?? "actor_plan_step",
+    visibility: input.surface?.visibility ?? "player_perceivable",
+    knowledgeRoute: input.surface?.knowledgeRoute ?? null,
+    hiddenCauseTerms: [...(input.surface?.hiddenCauseTerms ?? [])],
+  };
 }
 
 function rejectStale(input: {
@@ -194,6 +222,12 @@ function recordFailure(input: {
     eventType: "actor_plan_failure",
     summary: `${input.process.actor.name}'s offscreen plan stalls: ${input.reason}`,
     importance: 4,
+    surface: {
+      surfaceRoute: "actor_plan_failure",
+      visibility: "local_signal",
+      knowledgeRoute: null,
+      hiddenCauseTerms: [],
+    },
   });
   const authority = commitAuthorityTrace({
     campaignId: input.campaignId,
@@ -348,6 +382,10 @@ function executeTravel(input: ExecuteActorPlanStepInput): ExecuteActorPlanStepRe
 
   const summary = action.summary
     ?? `${input.process.actor.name} travels from ${findLocationName(actorLocationId) ?? "their previous location"} to ${destination.locationName}.`;
+  const surface = actorPlanSurface({
+    locationRef: destination.locationId,
+    surface: action.surface,
+  });
   const eventIds = recordActorEvent({
     campaignId: input.campaignId,
     tick: input.tick,
@@ -357,12 +395,14 @@ function executeTravel(input: ExecuteActorPlanStepInput): ExecuteActorPlanStepRe
     eventType: "actor_plan_step",
     summary,
     importance: 3,
+    surface: action.surface,
   });
   const clock = readWorldClock(input.campaignId);
   const stateDeltaRefs = [
     `npc:${input.process.actorId}:location`,
     `location:${actorLocationId}:presence`,
     `location:${destination.locationId}:presence`,
+    ...eventIds.map((eventId) => `event:${eventId}`),
   ];
   const authority = commitAuthorityTrace({
     campaignId: input.campaignId,
@@ -378,6 +418,8 @@ function executeTravel(input: ExecuteActorPlanStepInput): ExecuteActorPlanStepRe
       pathLocationIds: path.locationIds,
       edgeIds: path.edgeIds,
       summary,
+      surfaceRoute: surface.surfaceRoute,
+      visibility: surface.visibility,
     },
   });
   const clockAfter = readWorldClock(input.campaignId);
@@ -397,6 +439,7 @@ function executeTravel(input: ExecuteActorPlanStepInput): ExecuteActorPlanStepRe
     authority,
     eventIds,
     stateDeltaRefs,
+    surface,
     processUpdateStatus: processUpdate.status,
   };
 }
@@ -416,6 +459,10 @@ function executeRecordEvent(input: ExecuteActorPlanStepInput): ExecuteActorPlanS
     action.locationRef
     ?? input.process.actor.currentSceneLocationId
     ?? input.process.actor.currentLocationId;
+  const surface = actorPlanSurface({
+    locationRef,
+    surface: action.surface,
+  });
   const eventIds = recordActorEvent({
     campaignId: input.campaignId,
     tick: input.tick,
@@ -425,9 +472,13 @@ function executeRecordEvent(input: ExecuteActorPlanStepInput): ExecuteActorPlanS
     eventType: "actor_plan_step",
     summary: action.summary,
     importance: action.importance ?? 3,
+    surface: action.surface,
   });
   const clock = readWorldClock(input.campaignId);
-  const stateDeltaRefs = [`event:actor_plan_step`, `npc:${input.process.actorId}:process`];
+  const stateDeltaRefs = [
+    ...eventIds.map((eventId) => `event:${eventId}`),
+    `npc:${input.process.actorId}:process`,
+  ];
   const authority = commitAuthorityTrace({
     campaignId: input.campaignId,
     operation: "actor_plan:record_event",
@@ -440,6 +491,8 @@ function executeRecordEvent(input: ExecuteActorPlanStepInput): ExecuteActorPlanS
     metadata: {
       planId: input.process.state.activePlan?.id ?? null,
       summary: action.summary,
+      surfaceRoute: surface.surfaceRoute,
+      visibility: surface.visibility,
     },
   });
   const clockAfter = readWorldClock(input.campaignId);
@@ -459,6 +512,7 @@ function executeRecordEvent(input: ExecuteActorPlanStepInput): ExecuteActorPlanS
     authority,
     eventIds,
     stateDeltaRefs,
+    surface,
     processUpdateStatus: processUpdate.status,
   };
 }

@@ -282,6 +282,7 @@ export function consumeActorWakeSignals(input: {
   campaignId: string;
   actorIds?: readonly string[];
   signalIds?: readonly string[];
+  worldTimeMinutes?: number;
 }): number {
   const actorIds = [...new Set(input.actorIds ?? [])].filter(Boolean);
   const signalIds = [...new Set(input.signalIds ?? [])].filter(Boolean);
@@ -300,6 +301,12 @@ export function consumeActorWakeSignals(input: {
         eq(actorWakeSignals.status, "pending"),
         actorIds.length > 0 ? inArray(actorWakeSignals.actorId, actorIds) : undefined,
         signalIds.length > 0 ? inArray(actorWakeSignals.id, signalIds) : undefined,
+        input.worldTimeMinutes === undefined
+          ? undefined
+          : or(
+              isNull(actorWakeSignals.dueWorldTimeMinutes),
+              lte(actorWakeSignals.dueWorldTimeMinutes, input.worldTimeMinutes),
+            ),
       ),
     )
     .run();

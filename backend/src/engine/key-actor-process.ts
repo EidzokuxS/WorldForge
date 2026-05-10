@@ -31,23 +31,39 @@ export interface KeyActorPlanStep {
   action?: KeyActorDeterministicPlanAction | null;
 }
 
+export type KeyActorSurfaceVisibility =
+  | "player_perceivable"
+  | "local_signal"
+  | "report_only"
+  | "hidden";
+
+export interface KeyActorPlanSurfacePolicy {
+  surfaceRoute: string | null;
+  visibility: KeyActorSurfaceVisibility;
+  knowledgeRoute: string | null;
+  hiddenCauseTerms: string[];
+}
+
 export type KeyActorDeterministicPlanAction =
   | {
       kind: "travel";
       destinationLocationId?: string | null;
       destinationLocationName?: string | null;
       summary?: string | null;
+      surface?: KeyActorPlanSurfacePolicy;
     }
   | {
       kind: "wait";
       durationWorldTimeMinutes?: number | null;
       summary?: string | null;
+      surface?: KeyActorPlanSurfacePolicy;
     }
   | {
       kind: "record_event";
       summary: string;
       locationRef?: string | null;
       importance?: number | null;
+      surface?: KeyActorPlanSurfacePolicy;
     };
 
 export interface KeyActorInboxItem {
@@ -153,6 +169,33 @@ function parseStringArray(value: unknown): string[] {
     .filter(Boolean);
 }
 
+function normalizeSurfaceVisibility(value: unknown): KeyActorSurfaceVisibility {
+  return value === "local_signal"
+    || value === "report_only"
+    || value === "hidden"
+    || value === "player_perceivable"
+    ? value
+    : "player_perceivable";
+}
+
+function normalizeSurfacePolicy(record: Record<string, unknown>): KeyActorPlanSurfacePolicy {
+  const source = record.surface && typeof record.surface === "object" && !Array.isArray(record.surface)
+    ? record.surface as Record<string, unknown>
+    : record;
+  return {
+    surfaceRoute:
+      typeof source.surfaceRoute === "string" && source.surfaceRoute.trim()
+        ? source.surfaceRoute.trim()
+        : null,
+    visibility: normalizeSurfaceVisibility(source.visibility),
+    knowledgeRoute:
+      typeof source.knowledgeRoute === "string" && source.knowledgeRoute.trim()
+        ? source.knowledgeRoute.trim()
+        : null,
+    hiddenCauseTerms: parseStringArray(source.hiddenCauseTerms),
+  };
+}
+
 function parseGoals(goalsJson: string | null | undefined): string[] {
   const parsed = parseJsonRecord(goalsJson);
   return [
@@ -217,6 +260,7 @@ function normalizeDeterministicPlanAction(value: unknown): KeyActorDeterministic
       destinationLocationId: destinationLocationId || null,
       destinationLocationName: destinationLocationName || null,
       summary: summary || null,
+      surface: normalizeSurfacePolicy(record),
     };
   }
 
@@ -228,6 +272,7 @@ function normalizeDeterministicPlanAction(value: unknown): KeyActorDeterministic
           ? Math.max(0, Math.round(record.durationWorldTimeMinutes))
           : null,
       summary: summary || null,
+      surface: normalizeSurfacePolicy(record),
     };
   }
 
@@ -243,6 +288,7 @@ function normalizeDeterministicPlanAction(value: unknown): KeyActorDeterministic
         typeof record.importance === "number"
           ? Math.max(1, Math.min(10, Math.round(record.importance)))
           : null,
+      surface: normalizeSurfacePolicy(record),
     };
   }
 
