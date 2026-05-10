@@ -8,6 +8,7 @@ import { getDb } from "../db/index.js";
 import { items, locationEdges, locations, npcs, players } from "../db/schema.js";
 import { readPendingCommittedEvents } from "../vectors/episodic-events.js";
 import { buildCombatEnvelope, type CombatEnvelope } from "./combat-envelope.js";
+import { resolveActorExposureCatchup } from "./actor-exposure-catchup.js";
 import { listRecentLocationEvents } from "./location-events.js";
 import { parseTags } from "./parse-helpers.js";
 import {
@@ -155,6 +156,8 @@ export interface SceneFrameBuildOptions {
   playerAction: string;
   intent?: string;
   method?: string;
+  elapsedWorldTimeMinutes?: number;
+  runActorExposureCatchup?: boolean;
   roster?: SceneFrameRoster;
   perception?: SceneFramePerception;
   recentEvents?: SceneFrameRecentEvent[];
@@ -872,6 +875,16 @@ export async function buildSceneFrame(
   const tick = options.tick ?? campaignConfig.currentTick ?? 0;
   const currentLocationId = options.currentLocationId ?? player.currentLocationId ?? null;
   const currentSceneScopeId = options.currentSceneScopeId ?? player.currentSceneLocationId ?? null;
+  if (options.runActorExposureCatchup !== false) {
+    resolveActorExposureCatchup({
+      campaignId: options.campaignId,
+      tick,
+      playerLocationId: currentLocationId,
+      playerSceneScopeId: currentSceneScopeId,
+      elapsedWorldTimeMinutes: options.elapsedWorldTimeMinutes,
+      phase: "pre_scene_frame",
+    });
+  }
   const npcRows = readRowsByCampaign<NpcRow>(options.campaignId, npcs);
   const locationRows = readRowsByCampaign<LocationRow>(options.campaignId, locations);
   const edgeRows = readRowsByCampaign<LocationEdgeRow>(options.campaignId, locationEdges);

@@ -16,10 +16,21 @@ vi.mock("../../vectors/episodic-events.js", () => ({
   readPendingCommittedEvents: vi.fn(),
 }));
 
+vi.mock("../actor-exposure-catchup.js", () => ({
+  resolveActorExposureCatchup: vi.fn(() => ({
+    executed: [],
+    deferred: [],
+    skippedActorIds: [],
+    inspectedActorIds: [],
+    requiresFrameRefresh: false,
+  })),
+}));
+
 import { readCampaignConfig } from "../../campaign/index.js";
 import { getDb } from "../../db/index.js";
 import { items, locationEdges, locations, npcs, players } from "../../db/schema.js";
 import { readPendingCommittedEvents } from "../../vectors/episodic-events.js";
+import { resolveActorExposureCatchup } from "../actor-exposure-catchup.js";
 import { listRecentLocationEvents } from "../location-events.js";
 import {
   SCENE_FRAME_MOVEMENT_CANDIDATE_LIMIT,
@@ -285,6 +296,26 @@ describe("SceneFrame builder", () => {
         type: "dialogue",
       },
     ]);
+  });
+
+  it("runs actor exposure catchup before database-backed roster exposure", async () => {
+    const frame = await buildDbBackedFrame({ elapsedWorldTimeMinutes: 4 });
+
+    expect(resolveActorExposureCatchup).toHaveBeenCalledWith({
+      campaignId,
+      tick: 12,
+      playerLocationId: broadLocationId,
+      playerSceneScopeId: sceneScopeId,
+      elapsedWorldTimeMinutes: 4,
+      phase: "pre_scene_frame",
+    });
+    expect(frame.roster.active.map((actor) => actor.actorId)).toContain(clearNpcId);
+  });
+
+  it("respects callers that already performed actor exposure catchup", async () => {
+    await buildDbBackedFrame({ runActorExposureCatchup: false });
+
+    expect(resolveActorExposureCatchup).not.toHaveBeenCalled();
   });
 
   it("projects roster buckets from resolveScenePresence with stable actor IDs", async () => {

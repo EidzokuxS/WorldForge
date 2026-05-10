@@ -20,6 +20,7 @@ import {
 import {
   ensureWorldClock,
 } from "../living-world-authority.js";
+import { resolveActorExposureCatchup } from "../actor-exposure-catchup.js";
 import { resolveDueWorldWorkForScope } from "../due-world-work.js";
 
 const CAMPAIGN_ID = "offscreen-catchup-campaign";
@@ -240,5 +241,107 @@ describe("offscreen catch-up", () => {
 
     expect(secondResult.deferred).toHaveLength(1);
     expect(getDb().select().from(simulationProposals).all()).toHaveLength(1);
+  });
+
+  it("catches up visible deterministic actor plans before stale frame exposure", () => {
+    seedNpc({
+      id: "npc-visible",
+      name: "Visible Courier",
+      locationId: "loc-main",
+      sceneId: "scene-a",
+    });
+    backfillAndSetPlan("npc-visible", {
+      id: "plan-visible-leave",
+      summary: "PRIVATE MOONLIGHT ROUTE: Visible Courier leaves before the player looks.",
+      deterministic: true,
+      writeScopes: ["npc:npc-visible:state", "location:loc-away:presence"],
+      action: {
+        kind: "travel",
+        destinationLocationName: "Depot",
+        summary: "Visible Courier leaves the platform for the depot.",
+      },
+    });
+
+    const result = resolveActorExposureCatchup({
+      campaignId: CAMPAIGN_ID,
+      tick: 20,
+      playerLocationId: "loc-main",
+      playerSceneScopeId: "scene-a",
+      elapsedWorldTimeMinutes: 0,
+      phase: "pre_scene_frame",
+    });
+
+    expect(result.inspectedActorIds).toEqual(["npc-visible"]);
+    expect(result.executed).toEqual([
+      expect.objectContaining({ status: "completed", actorId: "npc-visible" }),
+    ]);
+    expect(result.requiresFrameRefresh).toBe(true);
+    expect(
+      getDb()
+        .select({ currentLocationId: npcs.currentLocationId })
+        .from(npcs)
+        .where(eq(npcs.id, "npc-visible"))
+        .get(),
+    ).toMatchObject({ currentLocationId: "loc-away" });
+    expect(JSON.stringify(result)).not.toContain("PRIVATE MOONLIGHT ROUTE");
+  });
+
+  it("defers visible non-deterministic actor work once without exposing private plan text", () => {
+    seedNpc({
+      id: "npc-visible",
+      name: "Visible Courier",
+      locationId: "loc-main",
+      sceneId: "scene-a",
+    });
+    backfillAndSetPlan("npc-visible", {
+      id: "plan-visible-choice",
+      summary: "PRIVATE OATH: Visible Courier chooses whether to betray the depot.",
+      deterministic: false,
+      writeScopes: ["npc:npc-visible:state"],
+    });
+
+    const first = resolveActorExposureCatchup({
+      campaignId: CAMPAIGN_ID,
+      tick: 20,
+      playerLocationId: "loc-main",
+      playerSceneScopeId: "scene-a",
+      elapsedWorldTimeMinutes: 0,
+      phase: "pre_scene_frame",
+    });
+    const second = resolveActorExposureCatchup({
+      campaignId: CAMPAIGN_ID,
+      tick: 20,
+      playerLocationId: "loc-main",
+      playerSceneScopeId: "scene-a",
+      elapsedWorldTimeMinutes: 0,
+      phase: "pre_scene_frame",
+    });
+
+    expect(first.executed).toEqual([]);
+    expect(first.deferred).toHaveLength(1);
+    expect(second.deferred).toHaveLength(1);
+    expect(
+      getDb()
+        .select({ currentLocationId: npcs.currentLocationId })
+        .from(npcs)
+        .where(eq(npcs.id, "npc-visible"))
+        .get(),
+    ).toMatchObject({ currentLocationId: "loc-main" });
+    expect(getDb().select().from(simulationProposals).all()).toEqual([
+      expect.objectContaining({
+        proposalType: "key_actor_exposure_decision",
+        status: "pending",
+        sourceEntityId: "npc-visible",
+      }),
+    ]);
+    expect(JSON.stringify({
+      executed: first.executed,
+      skippedActorIds: first.skippedActorIds,
+      inspectedActorIds: first.inspectedActorIds,
+      proposals: getDb().select({
+        proposalType: simulationProposals.proposalType,
+        sourceEntityId: simulationProposals.sourceEntityId,
+      }).from(simulationProposals).all(),
+    })).not.toContain("PRIVATE OATH");
   });
 });

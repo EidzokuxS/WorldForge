@@ -2618,6 +2618,7 @@ async function* processTurnScenePlan(
     playerAction,
     intent,
     method,
+    elapsedWorldTimeMinutes: 1,
   });
   const frameEnded = Date.now();
   recordTurnLatencyStage(latencyTrace, {
@@ -3230,6 +3231,7 @@ async function* processTurnScenePlan(
       playerAction,
       intent,
       method,
+      elapsedWorldTimeMinutes: successfulTravel?.travelCost ?? 1,
     });
     narratorFrame = {
       ...refreshedNarratorFrame,

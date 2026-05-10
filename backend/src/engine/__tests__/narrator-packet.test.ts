@@ -6,6 +6,7 @@ import {
   summarizeRuntimeToolResultForNarrator,
   type CanonicalTurnPacket,
 } from "../narrator-packet.js";
+import { buildModelFacingScenePacket } from "../model-facing-scene.js";
 import type { SceneFrame } from "../scene-frame.js";
 
 const playerId = "11111111-1111-4111-8111-111111111111";
@@ -196,6 +197,91 @@ describe("narrator packet settlement boundary", () => {
     );
     expect(formatNarratorPacketForPrompt(packet)).toContain("[EVIDENCE LEDGER]");
     expect(formatNarratorPacketForPrompt(packet)).toContain("perceivable_effect:effect-success");
+  });
+
+  it("keeps private POV terms out of player prompt and model-facing scene packets", () => {
+    const frame = createFrame();
+    frame.roster.active[1] = {
+      ...frame.roster.active[1]!,
+      label: "ash-cloaked captain",
+      summary: "A public-facing officer blocks the checkpoint.",
+    };
+    frame.roster.background = [
+      {
+        id: "npc-private-commander",
+        actorId: "npc-private-commander",
+        type: "npc",
+        label: "Commander Ilyra",
+        locationId,
+        sceneScopeId: locationId,
+        awareness: "none",
+        summary: "PRIVATE OATH: Commander Ilyra believes the Black Ledger is under the shrine.",
+      },
+    ];
+    frame.perception.forbiddenActorIds = ["npc-private-commander"];
+    frame.perception.forbiddenActorLabels = [
+      "Commander Ilyra",
+      "Black Ledger",
+      "PRIVATE OATH",
+      "pending proposal payload",
+    ];
+    frame.recentEvents = [
+      {
+        id: "visible-signal",
+        source: "location_recent_event",
+        summary: "A sealed report case rests behind the officer.",
+        tick: 12,
+        actorIds: [],
+        perceivableByPlayer: true,
+      },
+      {
+        id: "private-report",
+        source: "location_recent_event",
+        summary:
+          "Commander Ilyra hides the Black Ledger through a pending proposal payload.",
+        tick: 12,
+        actorIds: ["npc-private-commander"],
+        perceivableByPlayer: false,
+      },
+    ];
+    frame.targetCandidates = [
+      {
+        id: "actor:npc-private-commander",
+        type: "actor",
+        actorId: "npc-private-commander",
+        label: "Commander Ilyra",
+        awareness: "none",
+      },
+    ];
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    canonicalTurnPacket.anchorEvent.summary = "Iria studies the sealed report case.";
+    canonicalTurnPacket.events = [{
+      id: "visible-signal",
+      actorId: visibleNpcId,
+      kind: "environment",
+      summary: "A sealed report case rests behind the officer.",
+      perceivableByPlayer: true,
+    }];
+    canonicalTurnPacket.narratorFacts.eventIds = ["visible-signal"];
+
+    const narratorPacket = buildNarratorPacket({
+      frame,
+      canonicalTurnPacket,
+      forbiddenPrivateTerms: ["Commander Ilyra", "Black Ledger", "PRIVATE OATH"],
+    });
+    const modelFacingPacket = buildModelFacingScenePacket(frame);
+    const formatted = formatNarratorPacketForPrompt(narratorPacket);
+    const serializedModelView = JSON.stringify(modelFacingPacket.view);
+
+    expect(formatted).toContain("sealed report case");
+    expect(formatted).not.toContain("Commander Ilyra");
+    expect(formatted).not.toContain("Black Ledger");
+    expect(formatted).not.toContain("PRIVATE OATH");
+    expect(formatted).not.toContain("pending proposal payload");
+    expect(serializedModelView).not.toContain("Commander Ilyra");
+    expect(serializedModelView).not.toContain("Black Ledger");
+    expect(serializedModelView).not.toContain("PRIVATE OATH");
+    expect(serializedModelView).not.toContain("pending proposal payload");
   });
 
   it("uses concrete successful log_event text when no explicit effect was authored", () => {

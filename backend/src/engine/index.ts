@@ -289,6 +289,16 @@ export type {
 } from "./actor-scheduler.js";
 
 export {
+  resolveActorExposureCatchup,
+} from "./actor-exposure-catchup.js";
+
+export type {
+  DeferredActorExposureWork,
+  ResolveActorExposureCatchupInput,
+  ResolveActorExposureCatchupResult,
+} from "./actor-exposure-catchup.js";
+
+export {
   actorWakeSignalToWakeSignal,
   consumeActorWakeSignals,
   enqueueActorWakeSignal,
