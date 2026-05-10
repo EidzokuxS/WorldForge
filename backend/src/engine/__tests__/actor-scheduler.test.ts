@@ -1,11 +1,13 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, connectDb, getDb } from "../../db/index.js";
 import { runMigrations } from "../../db/migrate.js";
 import {
   campaigns,
+  actorProcessStates,
   locations,
   npcs,
 } from "../../db/schema.js";
@@ -15,6 +17,7 @@ import {
 } from "../living-world-authority.js";
 import { backfillKeyActorProcessesForCampaign } from "../key-actor-process.js";
 import { scheduleKeyActorProcessesForTurn } from "../actor-scheduler.js";
+import { enqueueActorWakeSignal } from "../actor-wake-signals.js";
 
 const CAMPAIGN_ID = "actor-scheduler-campaign";
 
@@ -74,6 +77,13 @@ function seedNpc(input: {
   }).run();
 }
 
+function setActorNextWake(actorId: string, nextWakeWorldTimeMinutes: number | null) {
+  getDb().update(actorProcessStates)
+    .set({ nextWakeWorldTimeMinutes })
+    .where(eq(actorProcessStates.actorId, actorId))
+    .run();
+}
+
 describe("actor scheduler", () => {
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-actor-scheduler-"));
@@ -113,12 +123,8 @@ describe("actor scheduler", () => {
       elapsedWorldTimeMinutes: 1,
     });
 
-    expect(schedule.decisions).toHaveLength(1);
-    expect(schedule.decisions[0]).toMatchObject({
-      actorId: "npc-away",
-      route: "sleeping",
-      reason: "no wake signal",
-    });
+    expect(schedule.candidateActorIds).toEqual([]);
+    expect(schedule.decisions).toEqual([]);
   });
 
   it("marks present key actors as required before the visible turn boundary", () => {
@@ -184,6 +190,7 @@ describe("actor scheduler", () => {
     expect(schedule).toMatchObject({
       baseWorldVersion: 1,
       worldTimeMinutes: 35,
+      candidateActorIds: ["npc-away"],
     });
     expect(schedule.decisions[0]).toMatchObject({
       actorId: "npc-away",
@@ -216,6 +223,47 @@ describe("actor scheduler", () => {
       actorId: "npc-nearby",
       route: "proposal_after_done",
       signals: [expect.objectContaining({ type: "exposed_scope_catch_up" })],
+    });
+  });
+
+  it("routes durable wake rows through the existing wake classifier", () => {
+    seedNpc({
+      id: "npc-signaled",
+      name: "Signaled Actor",
+      locationId: "loc-away",
+      sceneId: "scene-away",
+    });
+    backfillKeyActorProcessesForCampaign({
+      campaignId: CAMPAIGN_ID,
+      nextWakeDelayMinutes: 30,
+    });
+    enqueueActorWakeSignal({
+      campaignId: CAMPAIGN_ID,
+      actorId: "npc-signaled",
+      signalType: "report",
+      sourceType: "faction_report",
+      sourceId: "report-actor-signaled",
+      summary: "A report names the signaled actor.",
+      priority: 7,
+      dueWorldTimeMinutes: 0,
+    });
+
+    const schedule = scheduleKeyActorProcessesForTurn({
+      campaignId: CAMPAIGN_ID,
+      tick: 1,
+      playerLocationId: "loc-main",
+      playerSceneScopeId: "scene-a",
+      elapsedWorldTimeMinutes: 1,
+    });
+
+    expect(schedule.candidateActorIds).toEqual(["npc-signaled"]);
+    expect(schedule.decisions[0]).toMatchObject({
+      actorId: "npc-signaled",
+      route: "proposal_after_done",
+      signals: [expect.objectContaining({
+        type: "report",
+        sourceId: "report-actor-signaled",
+      })],
     });
   });
 
@@ -254,5 +302,53 @@ describe("actor scheduler", () => {
       status: "conflict_serialized",
       conflictsWithActorIds: ["npc-present-a"],
     });
+  });
+
+  it("selects only critical-path due and present actors among many sleepers", () => {
+    for (let index = 0; index < 40; index += 1) {
+      seedNpc({
+        id: `npc-sleeper-${index}`,
+        name: `Sleeper ${index}`,
+        locationId: "loc-away",
+        sceneId: "scene-away",
+      });
+    }
+    seedNpc({
+      id: "npc-due",
+      name: "Due Actor",
+      locationId: "loc-away",
+      sceneId: "scene-away",
+    });
+    seedNpc({
+      id: "npc-present",
+      name: "Present Actor",
+      locationId: "loc-main",
+      sceneId: "scene-a",
+    });
+    backfillKeyActorProcessesForCampaign({
+      campaignId: CAMPAIGN_ID,
+      nextWakeDelayMinutes: 500,
+    });
+    setActorNextWake("npc-due", 0);
+
+    const schedule = scheduleKeyActorProcessesForTurn({
+      campaignId: CAMPAIGN_ID,
+      tick: 1,
+      playerLocationId: "loc-main",
+      playerSceneScopeId: "scene-a",
+      elapsedWorldTimeMinutes: 1,
+    });
+
+    expect(new Set(schedule.candidateActorIds)).toEqual(new Set(["npc-due", "npc-present"]));
+    expect(schedule.decisions.map((decision) => decision.actorId).sort()).toEqual([
+      "npc-due",
+      "npc-present",
+    ]);
+    expect(schedule.decisions.map((decision) => decision.route).sort()).toEqual([
+      "proposal_after_done",
+      "required_before_done",
+    ]);
+    expect(schedule.candidateActorIds?.some((actorId) => actorId.startsWith("npc-sleeper-")))
+      .toBe(false);
   });
 });

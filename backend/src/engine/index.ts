@@ -253,6 +253,9 @@ export type {
 export {
   backfillKeyActorProcessesForCampaign,
   createInitialKeyActorProcessState,
+  listDueKeyActorProcessActorIds,
+  listKeyActorProcessActorIdsInScope,
+  listKeyActorProcessesByActorIds,
   listKeyActorProcessesForCampaign,
   normalizeKeyActorProcessState,
   promotePersistentNpcToActorProcess,
@@ -282,6 +285,22 @@ export type {
   ScheduleKeyActorProcessesInput,
   ScheduleKeyActorProcessesResult,
 } from "./actor-scheduler.js";
+
+export {
+  actorWakeSignalToWakeSignal,
+  consumeActorWakeSignals,
+  enqueueActorWakeSignal,
+  expireActorWakeSignals,
+  listCriticalActorWakeCandidates,
+  listPendingWakeSignalsForActors,
+} from "./actor-wake-signals.js";
+
+export type {
+  ActorWakeSignalActorType,
+  ActorWakeSignalRecord,
+  ActorWakeSignalStatus,
+  EnqueueActorWakeSignalInput,
+} from "./actor-wake-signals.js";
 
 export {
   collectWakeSignals,

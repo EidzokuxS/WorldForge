@@ -47,6 +47,24 @@ export const simulationProposalExpiryPolicyValues = [
   "ignore_expiry",
 ] as const;
 
+export const actorWakeSignalTypeValues = [
+  "due_time",
+  "direct_observation",
+  "report",
+  "rumor",
+  "urgency",
+  "exposed_scope_catch_up",
+  "deadline",
+  "agency_debt",
+  "inbox",
+] as const;
+
+export const actorWakeSignalStatusValues = [
+  "pending",
+  "consumed",
+  "expired",
+] as const;
+
 export const campaigns = sqliteTable("campaigns", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -708,6 +726,55 @@ export const actorProcessStates = sqliteTable(
       table.nextWakeWorldTimeMinutes,
     ),
   ]
+);
+
+export const actorWakeSignals = sqliteTable(
+  "actor_wake_signals",
+  {
+    id: text("id").primaryKey(),
+    campaignId: text("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    actorType: text("actor_type").notNull(),
+    actorId: text("actor_id").notNull(),
+    signalType: text("signal_type", {
+      enum: actorWakeSignalTypeValues,
+    }).notNull(),
+    sourceType: text("source_type").notNull(),
+    sourceId: text("source_id"),
+    summary: text("summary").notNull(),
+    priority: integer("priority").notNull().default(0),
+    requiredBeforeDone: integer("required_before_done", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    dueWorldTimeMinutes: integer("due_world_time_minutes"),
+    status: text("status", {
+      enum: actorWakeSignalStatusValues,
+    }).notNull().default("pending"),
+    payload: text("payload").notNull().default("{}"),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    index("idx_actor_wake_signals_campaign_status_due").on(
+      table.campaignId,
+      table.status,
+      table.dueWorldTimeMinutes,
+      table.priority,
+    ),
+    index("idx_actor_wake_signals_actor").on(
+      table.campaignId,
+      table.actorType,
+      table.actorId,
+      table.status,
+    ),
+    index("idx_actor_wake_signals_source").on(
+      table.campaignId,
+      table.sourceType,
+      table.sourceId,
+      table.signalType,
+    ),
+  ],
 );
 
 export const actorKnowledgeRecords = sqliteTable(

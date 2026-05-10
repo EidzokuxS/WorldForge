@@ -1,5 +1,8 @@
 import {
-  listKeyActorProcessesForCampaign,
+  backfillKeyActorProcessesForCampaign,
+  listDueKeyActorProcessActorIds,
+  listKeyActorProcessActorIdsInScope,
+  listKeyActorProcessesByActorIds,
   type ActorProcessRoute,
   type KeyActorInboxItem,
   type KeyActorProcess,
@@ -10,6 +13,11 @@ import {
   isActorInPlayerScene,
   type WakeSignal,
 } from "./wake-signals.js";
+import {
+  actorWakeSignalToWakeSignal,
+  listCriticalActorWakeCandidates,
+  listPendingWakeSignalsForActors,
+} from "./actor-wake-signals.js";
 import {
   reserveActorWriteScopes,
   type ActorWriteScopeReservation,
@@ -33,12 +41,14 @@ export interface ScheduleKeyActorProcessesInput {
   playerSceneScopeId?: string | null;
   elapsedWorldTimeMinutes?: number;
   reportsByActorId?: ReadonlyMap<string, readonly KeyActorInboxItem[]>;
+  explicitActorIds?: readonly string[];
 }
 
 export interface ScheduleKeyActorProcessesResult {
   campaignId: string;
   baseWorldVersion: number;
   worldTimeMinutes: number;
+  candidateActorIds?: string[];
   decisions: ActorScheduleDecision[];
 }
 
@@ -141,11 +151,60 @@ export function scheduleKeyActorProcessesForTurn(
   input: ScheduleKeyActorProcessesInput,
 ): ScheduleKeyActorProcessesResult {
   const clock = readWorldClock(input.campaignId);
-  const processes = listKeyActorProcessesForCampaign({
+  backfillKeyActorProcessesForCampaign({ campaignId: input.campaignId });
+  const candidateActorIds = new Set<string>();
+
+  for (const actorId of listDueKeyActorProcessActorIds({
     campaignId: input.campaignId,
-    backfill: true,
+    worldTimeMinutes: clock.worldTimeMinutes,
+  })) {
+    candidateActorIds.add(actorId);
+  }
+
+  for (const actorId of listKeyActorProcessActorIdsInScope({
+    campaignId: input.campaignId,
+    playerLocationId: input.playerLocationId,
+    playerSceneScopeId: input.playerSceneScopeId,
+    includeBroadLocation: (input.elapsedWorldTimeMinutes ?? 0) > 0,
+  })) {
+    candidateActorIds.add(actorId);
+  }
+
+  for (const actorId of input.reportsByActorId?.keys() ?? []) {
+    candidateActorIds.add(actorId);
+  }
+
+  for (const actorId of input.explicitActorIds ?? []) {
+    candidateActorIds.add(actorId);
+  }
+
+  const criticalWakeRows = listCriticalActorWakeCandidates({
+    campaignId: input.campaignId,
+    worldTimeMinutes: clock.worldTimeMinutes,
+    actorType: "npc",
   });
-  const decisions = processes.map((process) => {
+  for (const row of criticalWakeRows) {
+    candidateActorIds.add(row.actorId);
+  }
+
+  const candidateIds = [...candidateActorIds].sort();
+  const processes = listKeyActorProcessesByActorIds({
+    campaignId: input.campaignId,
+    actorIds: candidateIds,
+  });
+  const durableSignalsByActorId = new Map<string, WakeSignal[]>();
+  for (const row of listPendingWakeSignalsForActors({
+    campaignId: input.campaignId,
+    actorIds: candidateIds,
+    worldTimeMinutes: clock.worldTimeMinutes,
+    actorType: "npc",
+  })) {
+    const signals = durableSignalsByActorId.get(row.actorId) ?? [];
+    signals.push(actorWakeSignalToWakeSignal(row));
+    durableSignalsByActorId.set(row.actorId, signals);
+  }
+
+  const decisions = processes.flatMap((process) => {
     const signals = collectWakeSignals({
       process,
       worldVersion: clock.worldVersion,
@@ -154,13 +213,15 @@ export function scheduleKeyActorProcessesForTurn(
       playerSceneScopeId: input.playerSceneScopeId,
       elapsedWorldTimeMinutes: input.elapsedWorldTimeMinutes,
       reports: input.reportsByActorId?.get(process.actorId),
+      externalSignals: durableSignalsByActorId.get(process.actorId),
     });
-    return classifyActorProcess({
+    const decision = classifyActorProcess({
       process,
       signals,
       playerLocationId: input.playerLocationId,
       playerSceneScopeId: input.playerSceneScopeId,
     });
+    return decision.route === "sleeping" ? [] : [decision];
   });
 
   const reservable = decisions.filter((decision) => decision.writeScopes.length > 0);
@@ -177,6 +238,7 @@ export function scheduleKeyActorProcessesForTurn(
     campaignId: input.campaignId,
     baseWorldVersion: clock.worldVersion,
     worldTimeMinutes: clock.worldTimeMinutes,
+    candidateActorIds: candidateIds,
     decisions: decisions.map((decision) => ({
       ...decision,
       reservation: reservationByActor.get(decision.actorId),

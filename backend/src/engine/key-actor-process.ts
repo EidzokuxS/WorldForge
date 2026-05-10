@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, lte } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { actorProcessStates, npcs } from "../db/schema.js";
 import {
@@ -513,6 +513,121 @@ export function promotePersistentNpcToActorProcess(input: {
     },
   });
   return true;
+}
+
+function normalizeSceneScope(locationId?: string | null, sceneScopeId?: string | null): string | null {
+  if (!locationId) {
+    return null;
+  }
+  return sceneScopeId && sceneScopeId !== locationId ? sceneScopeId : locationId;
+}
+
+export function listDueKeyActorProcessActorIds(input: {
+  campaignId: string;
+  worldTimeMinutes: number;
+}): string[] {
+  return getDb()
+    .select({ actorId: actorProcessStates.actorId })
+    .from(actorProcessStates)
+    .where(
+      and(
+        eq(actorProcessStates.campaignId, input.campaignId),
+        eq(actorProcessStates.actorType, "npc"),
+        lte(actorProcessStates.nextWakeWorldTimeMinutes, input.worldTimeMinutes),
+      ),
+    )
+    .all()
+    .map((row) => row.actorId);
+}
+
+export function listKeyActorProcessActorIdsInScope(input: {
+  campaignId: string;
+  playerLocationId?: string | null;
+  playerSceneScopeId?: string | null;
+  includeBroadLocation?: boolean;
+}): string[] {
+  if (!input.playerLocationId) {
+    return [];
+  }
+
+  const rows = getDb()
+    .select({
+      id: npcs.id,
+      tier: npcs.tier,
+      currentLocationId: npcs.currentLocationId,
+      currentSceneLocationId: npcs.currentSceneLocationId,
+    })
+    .from(npcs)
+    .where(
+      and(
+        eq(npcs.campaignId, input.campaignId),
+        eq(npcs.currentLocationId, input.playerLocationId),
+      ),
+    )
+    .all();
+  const playerScope = normalizeSceneScope(input.playerLocationId, input.playerSceneScopeId);
+
+  return rows.flatMap((row) => {
+    if (row.tier !== "key" && row.tier !== "persistent") {
+      return [];
+    }
+    const actorScope = normalizeSceneScope(row.currentLocationId, row.currentSceneLocationId);
+    if (actorScope === playerScope || input.includeBroadLocation === true) {
+      return [row.id];
+    }
+    return [];
+  });
+}
+
+export function listKeyActorProcessesByActorIds(input: {
+  campaignId: string;
+  actorIds: readonly string[];
+  backfill?: boolean;
+}): KeyActorProcess[] {
+  const actorIds = [...new Set(input.actorIds)].filter(Boolean);
+  if (actorIds.length === 0) {
+    return [];
+  }
+  if (input.backfill === true) {
+    backfillKeyActorProcessesForCampaign({ campaignId: input.campaignId });
+  }
+
+  const rows = getDb()
+    .select()
+    .from(actorProcessStates)
+    .where(
+      and(
+        eq(actorProcessStates.campaignId, input.campaignId),
+        eq(actorProcessStates.actorType, "npc"),
+        inArray(actorProcessStates.actorId, actorIds),
+      ),
+    )
+    .all();
+  if (rows.length === 0) {
+    return [];
+  }
+  const actors = getDb()
+    .select()
+    .from(npcs)
+    .where(
+      and(
+        eq(npcs.campaignId, input.campaignId),
+        inArray(npcs.id, rows.map((row) => row.actorId)),
+      ),
+    )
+    .all();
+  const actorById = new Map(actors.map((actor) => [actor.id, actor]));
+
+  return rows.flatMap((row) => {
+    const actor = actorById.get(row.actorId);
+    if (!actor) {
+      return [];
+    }
+    if (actor.tier !== "key" && actor.tier !== "persistent") {
+      return [];
+    }
+    return [toActorProcess(row, actor)];
+  });
 }
 
 export function listKeyActorProcessesForCampaign(input: {

@@ -31,6 +31,7 @@ export interface WakeSignalInput {
   playerSceneScopeId?: string | null;
   elapsedWorldTimeMinutes?: number;
   reports?: readonly KeyActorInboxItem[];
+  externalSignals?: readonly WakeSignal[];
 }
 
 function normalizeSceneScope(locationId?: string | null, sceneScopeId?: string | null): string | null {
@@ -138,6 +139,8 @@ export function collectWakeSignals(input: WakeSignalInput): WakeSignal[] {
       sourceId: interrupt.id,
     });
   }
+
+  signals.push(...(input.externalSignals ?? []));
 
   return signals
     .sort((left, right) => right.priority - left.priority)
