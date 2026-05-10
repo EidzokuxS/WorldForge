@@ -9,6 +9,10 @@ import { items, locationEdges, locations, npcs, players } from "../db/schema.js"
 import { readPendingCommittedEvents } from "../vectors/episodic-events.js";
 import { buildCombatEnvelope, type CombatEnvelope } from "./combat-envelope.js";
 import { resolveActorExposureCatchup } from "./actor-exposure-catchup.js";
+import {
+  buildContextBudgetTrace,
+  type ContextBudgetTrace,
+} from "./context-budget-trace.js";
 import { listRecentLocationEvents } from "./location-events.js";
 import { parseTags } from "./parse-helpers.js";
 import {
@@ -143,6 +147,7 @@ export interface SceneFrame {
    */
   combatEnvelope?: CombatEnvelope | null;
   oracle: SceneFrameOracleInput | null;
+  contextBudgetTrace?: ContextBudgetTrace;
 }
 
 export interface SceneFrameBuildOptions {
@@ -297,6 +302,25 @@ function cloneRecentEvents(events: readonly SceneFrameRecentEvent[]): SceneFrame
   }));
 }
 
+function summarizeRecentEventOverflow(
+  selected: readonly SceneFrameRecentEvent[],
+  overflow: readonly SceneFrameRecentEvent[],
+): SceneFrameRecentEvent[] {
+  if (overflow.length === 0) {
+    return [...selected];
+  }
+  const sourceIds = uniqueStrings(overflow.map((event) => event.id));
+  const summary: SceneFrameRecentEvent = {
+    id: `summary:scene-frame-recent-events:${sourceIds.slice(0, 4).join(":")}`,
+    tick: Math.max(...overflow.map((event) => event.tick)),
+    summary: `${overflow.length} source-linked local events are summarized for frame budget. Sources: ${sourceIds.slice(0, 8).join(", ")}.`,
+    source: "committed_event",
+    actorIds: uniqueStrings(overflow.flatMap((event) => event.actorIds)),
+    perceivableByPlayer: overflow.some((event) => event.perceivableByPlayer),
+  };
+  return [...selected, summary];
+}
+
 function cloneTargetCandidates(
   candidates: readonly SceneFrameTargetCandidate[],
 ): SceneFrameTargetCandidate[] {
@@ -351,6 +375,31 @@ function normalizeFrame(input: {
   combatEnvelope?: CombatEnvelope | null;
   oracle?: SceneFrameOracleInput | null;
 }): SceneFrame {
+  const rawRecentEvents = cloneRecentEvents(input.recentEvents ?? []);
+  const recentEventOverflow = rawRecentEvents.length > SCENE_FRAME_RECENT_EVENT_LIMIT
+    ? rawRecentEvents.slice(SCENE_FRAME_RECENT_EVENT_LIMIT - 1)
+    : [];
+  const recentEvents = rawRecentEvents.length > SCENE_FRAME_RECENT_EVENT_LIMIT
+    ? summarizeRecentEventOverflow(
+        rawRecentEvents.slice(0, SCENE_FRAME_RECENT_EVENT_LIMIT - 1),
+        recentEventOverflow,
+      )
+    : rawRecentEvents;
+  const targetCandidateInputCount = input.targetCandidates?.length ?? 0;
+  const movementCandidateInputCount = input.movementCandidates?.length ?? 0;
+  const targetCandidates = cloneTargetCandidates(input.targetCandidates ?? []).slice(
+    0,
+    SCENE_FRAME_TARGET_CANDIDATE_LIMIT,
+  );
+  const movementCandidates = cloneMovementCandidates(input.movementCandidates ?? []).slice(
+    0,
+    SCENE_FRAME_MOVEMENT_CANDIDATE_LIMIT,
+  );
+  const hiddenExcludedCount = input.perception.forbiddenActorIds?.length ?? 0;
+  const excludedByBudgetCount =
+    Math.max(0, targetCandidateInputCount - targetCandidates.length)
+    + Math.max(0, movementCandidateInputCount - movementCandidates.length);
+  const sourceLinkedSummaryCount = recentEventOverflow.length > 0 ? 1 : 0;
   const frame: SceneFrame = {
     campaignId: input.campaignId,
     tick: input.tick,
@@ -366,21 +415,70 @@ function normalizeFrame(input: {
       background: cloneActors(input.roster.background),
     },
     perception: clonePerception(input.perception),
-    recentEvents: cloneRecentEvents(input.recentEvents ?? []).slice(
-      0,
-      SCENE_FRAME_RECENT_EVENT_LIMIT,
-    ),
-    targetCandidates: cloneTargetCandidates(input.targetCandidates ?? []).slice(
-      0,
-      SCENE_FRAME_TARGET_CANDIDATE_LIMIT,
-    ),
-    movementCandidates: cloneMovementCandidates(input.movementCandidates ?? []).slice(
-      0,
-      SCENE_FRAME_MOVEMENT_CANDIDATE_LIMIT,
-    ),
+    recentEvents,
+    targetCandidates,
+    movementCandidates,
     deferredHooks: cloneDeferredHooks(input.deferredHooks ?? []),
     allowedTools: buildAllowedTools(input.allowedTools),
     oracle: input.oracle ?? null,
+    contextBudgetTrace: buildContextBudgetTrace({
+      label: "SceneFrame",
+      frameType: "SceneFrame",
+      visibleTexts: [
+        input.currentLocationName ?? "",
+        input.currentSceneScopeName ?? "",
+        ...input.roster.active
+          .filter((actor) => actor.awareness === "clear")
+          .map((actor) => actor.label),
+        ...input.perception.playerAwarenessHints,
+        ...recentEvents.map((event) => event.summary),
+        ...targetCandidates.map((candidate) => candidate.label),
+        ...movementCandidates.map((candidate) => candidate.label),
+      ],
+      visibleItemCount:
+        input.roster.active.length
+        + input.roster.support.length
+        + recentEvents.length
+        + targetCandidates.length
+        + movementCandidates.length,
+      hiddenExcludedCount,
+      candidateItemCount:
+        input.roster.active.length
+        + input.roster.support.length
+        + input.roster.background.length
+        + rawRecentEvents.length
+        + targetCandidateInputCount
+        + movementCandidateInputCount,
+      selectedItemCount:
+        input.roster.active.length
+        + input.roster.support.length
+        + recentEvents.length
+        + targetCandidates.length
+        + movementCandidates.length
+        - sourceLinkedSummaryCount,
+      summarizedItemCount: recentEventOverflow.length,
+      excludedByVisibilityCount: hiddenExcludedCount,
+      excludedByBudgetCount,
+      sourceLinkedSummaryCount,
+      sectionCounts: {
+        activeActors: input.roster.active.length,
+        supportActors: input.roster.support.length,
+        backgroundActors: input.roster.background.length,
+        recentEvents: recentEvents.length,
+        targetCandidates: targetCandidates.length,
+        movementCandidates: movementCandidates.length,
+      },
+      sourceCoverage: {
+        sourceBackedCount: recentEvents.length,
+        routeCounts: recentEvents.reduce<Record<string, number>>((counts, event) => {
+          counts[event.source] = (counts[event.source] ?? 0) + 1;
+          return counts;
+        }, {}),
+      },
+      notes: [
+        "SceneFrame trace uses visible labels, player hints, and source-linked recent-event summaries only.",
+      ],
+    }),
   };
 
   if (input.oracleContext) {

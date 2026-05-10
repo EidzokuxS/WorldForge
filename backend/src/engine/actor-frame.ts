@@ -11,6 +11,7 @@ import {
   buildContextBudgetTrace,
   type ContextBudgetTrace,
 } from "./context-budget-trace.js";
+import { getFrameBudgetSpec, type ContextFrameType } from "./frame-budget.js";
 
 export type ActorFactSourceRoute =
   | "self_state"
@@ -20,7 +21,8 @@ export type ActorFactSourceRoute =
   | "belief"
   | "memory"
   | "public_record"
-  | "local_affordance";
+  | "local_affordance"
+  | "source_linked_summary";
 
 export interface ActorFrameFact {
   id: string;
@@ -118,6 +120,7 @@ export interface BuildCommandNodeFrameArgs {
   goals?: readonly string[];
   legalTools?: readonly RuntimeToolName[];
   constraints?: readonly string[];
+  hiddenExcludedCount?: number;
 }
 
 function uniqueStrings(values: Iterable<string | null | undefined>): string[] {
@@ -404,6 +407,81 @@ function routeCountsForFacts(facts: readonly ActorFrameFact[]): Record<string, n
   return counts;
 }
 
+function sourceRefsForFact(fact: ActorFrameFact): string[] {
+  return uniqueStrings([
+    fact.id,
+    ...(fact.sourceEventIds ?? []),
+    ...(fact.sourceKnowledgeIds ?? []),
+    ...(fact.authorityTraceIds ?? []),
+  ]);
+}
+
+function buildSourceLinkedSummaryFact(input: {
+  id: string;
+  textPrefix: string;
+  facts: readonly ActorFrameFact[];
+  worldVersion: number | null;
+}): ActorFrameFact | null {
+  if (input.facts.length === 0) {
+    return null;
+  }
+  const sourceRefs = uniqueStrings(input.facts.flatMap(sourceRefsForFact));
+  return {
+    id: input.id,
+    route: "source_linked_summary",
+    text: `${input.textPrefix} ${input.facts.length} records summarized for frame budget. Sources: ${sourceRefs.slice(0, 8).join(", ")}.`,
+    subjectRefs: uniqueStrings(input.facts.flatMap((fact) => fact.subjectRefs)),
+    confidence: Math.min(...input.facts.map((fact) => fact.confidence)),
+    reliability: Math.min(...input.facts.map((fact) => fact.reliability ?? fact.confidence)),
+    sourceEventIds: uniqueStrings(input.facts.flatMap((fact) => fact.sourceEventIds ?? [])),
+    sourceKnowledgeIds: uniqueStrings([
+      ...input.facts.map((fact) => fact.id),
+      ...input.facts.flatMap((fact) => fact.sourceKnowledgeIds ?? []),
+    ]),
+    authorityTraceIds: uniqueStrings(input.facts.flatMap((fact) => fact.authorityTraceIds ?? [])),
+    observedAtWorldVersion: input.worldVersion,
+  };
+}
+
+function applyFactBudget(input: {
+  facts: readonly ActorFrameFact[];
+  frameType: ContextFrameType;
+  summaryId: string;
+  summaryPrefix: string;
+  worldVersion: number | null;
+}): {
+  facts: ActorFrameFact[];
+  selectedItemCount: number;
+  summarizedItemCount: number;
+  sourceLinkedSummaryCount: number;
+} {
+  const budget = getFrameBudgetSpec(input.frameType);
+  if (input.facts.length <= budget.maxSelectedItems) {
+    return {
+      facts: [...input.facts],
+      selectedItemCount: input.facts.length,
+      summarizedItemCount: 0,
+      sourceLinkedSummaryCount: 0,
+    };
+  }
+
+  const selected = input.facts.slice(0, budget.maxSelectedItems);
+  const overflow = input.facts.slice(budget.maxSelectedItems);
+  const summary = buildSourceLinkedSummaryFact({
+    id: input.summaryId,
+    textPrefix: input.summaryPrefix,
+    facts: overflow,
+    worldVersion: input.worldVersion,
+  });
+
+  return {
+    facts: summary ? [...selected, summary] : selected,
+    selectedItemCount: selected.length,
+    summarizedItemCount: overflow.length,
+    sourceLinkedSummaryCount: summary ? 1 : 0,
+  };
+}
+
 export function buildActorFrame(args: BuildActorFrameArgs): ActorFrame {
   const observer = findActor(args.frame, args.actorId);
   const worldVersion = args.worldVersion ?? null;
@@ -457,19 +535,28 @@ export function buildActorFrame(args: BuildActorFrameArgs): ActorFrame {
     worldVersion,
   });
 
+  const budgeted = applyFactBudget({
+    facts,
+    frameType: "ActorFrame",
+    summaryId: `summary:actor-frame:${actorStableId(observer)}`,
+    summaryPrefix: "ActorFrame overflow:",
+    worldVersion,
+  });
+
   return {
     campaignId: args.frame.campaignId,
     worldVersion,
     observer: toActorRef(observer),
     playerActionRequest: args.frame.playerAction,
-    facts,
+    facts: budgeted.facts,
     legalTools: [...(args.legalTools ?? args.frame.allowedTools)],
     constraints: [...(args.constraints ?? [])],
     hiddenExcludedCount,
     contextBudgetTrace: buildContextBudgetTrace({
       label: "ActorFrame",
-      visibleTexts: facts.map((fact) => fact.text),
-      visibleItemCount: facts.length,
+      frameType: "ActorFrame",
+      visibleTexts: budgeted.facts.map((fact) => fact.text),
+      visibleItemCount: budgeted.facts.length,
       hiddenExcludedCount,
       candidateItemCount:
         args.frame.roster.active.length
@@ -478,14 +565,18 @@ export function buildActorFrame(args: BuildActorFrameArgs): ActorFrame {
         + args.frame.recentEvents.length
         + args.frame.targetCandidates.length
         + args.frame.movementCandidates.length,
+      selectedItemCount: budgeted.selectedItemCount,
+      summarizedItemCount: budgeted.summarizedItemCount,
+      excludedByVisibilityCount: hiddenExcludedCount,
+      sourceLinkedSummaryCount: budgeted.sourceLinkedSummaryCount,
       sectionCounts: {
-        facts: facts.length,
+        facts: budgeted.facts.length,
         legalTools: args.legalTools?.length ?? args.frame.allowedTools.length,
         constraints: args.constraints?.length ?? 0,
       },
       sourceCoverage: {
-        sourceBackedCount: facts.length,
-        routeCounts: routeCountsForFacts(facts),
+        sourceBackedCount: budgeted.facts.length,
+        routeCounts: routeCountsForFacts(budgeted.facts),
       },
       notes: [
         "ActorFrame is a POV packet. It records exclusions as trace metadata instead of leaking hidden entities.",
@@ -547,34 +638,47 @@ export function buildCommandNodeFrame(args: BuildCommandNodeFrameArgs): CommandN
     worldVersion,
   });
 
+  const budgeted = applyFactBudget({
+    facts,
+    frameType: "FactionCommandFrame",
+    summaryId: `summary:faction-command-frame:${args.commandNodeId}`,
+    summaryPrefix: "FactionCommandFrame overflow:",
+    worldVersion,
+  });
+
   return {
     campaignId: args.campaignId,
     worldVersion,
     commandNodeId: args.commandNodeId,
     label: args.label,
-    facts,
+    facts: budgeted.facts,
     goals: [...(args.goals ?? [])],
     legalTools: [...(args.legalTools ?? [])],
     constraints: [...(args.constraints ?? [])],
     contextBudgetTrace: buildContextBudgetTrace({
-      label: "CommandNodeFrame",
+      label: "FactionCommandFrame",
+      frameType: "FactionCommandFrame",
       visibleTexts: [
-        ...facts.map((fact) => fact.text),
+        ...budgeted.facts.map((fact) => fact.text),
         ...(args.goals ?? []),
         ...(args.constraints ?? []),
       ],
-      visibleItemCount: facts.length,
-      hiddenExcludedCount: 0,
+      visibleItemCount: budgeted.facts.length,
+      hiddenExcludedCount: args.hiddenExcludedCount ?? 0,
       candidateItemCount: facts.length,
+      selectedItemCount: budgeted.selectedItemCount,
+      summarizedItemCount: budgeted.summarizedItemCount,
+      excludedByVisibilityCount: args.hiddenExcludedCount ?? 0,
+      sourceLinkedSummaryCount: budgeted.sourceLinkedSummaryCount,
       sectionCounts: {
-        facts: facts.length,
+        facts: budgeted.facts.length,
         goals: args.goals?.length ?? 0,
         legalTools: args.legalTools?.length ?? 0,
         constraints: args.constraints?.length ?? 0,
       },
       sourceCoverage: {
-        sourceBackedCount: facts.length,
-        routeCounts: routeCountsForFacts(facts),
+        sourceBackedCount: budgeted.facts.length,
+        routeCounts: routeCountsForFacts(budgeted.facts),
       },
       notes: [
         "CommandNodeFrame facts are routed through report, rumor, belief, or public-record provenance.",

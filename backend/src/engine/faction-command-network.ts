@@ -904,6 +904,35 @@ function reportToExternalFact(report: FactionReportRecord): ActorFrameExternalFa
   };
 }
 
+function resourceToExternalFact(resource: FactionResourceRecord): ActorFrameExternalFactInput {
+  return {
+    id: `faction-resource:${resource.id}`,
+    route: "public_record",
+    text: `${resource.label}: ${resource.quantity} available, ${resource.reservedQuantity} reserved.`,
+    subjectRefs: [resource.id, resource.resourceKey],
+    confidence: 0.9,
+    reliability: 0.9,
+    sourceKnowledgeIds: [resource.id],
+  };
+}
+
+function operationToExternalFact(operation: FactionOperationRecord): ActorFrameExternalFactInput {
+  return {
+    id: `faction-operation:${operation.id}`,
+    route: "public_record",
+    text: `${operation.status} ${operation.operationKind}: ${operation.summary}`,
+    subjectRefs: [
+      operation.id,
+      operation.commandNodeId,
+      operation.targetLocationId ?? "",
+    ].filter(Boolean),
+    confidence: 0.75,
+    reliability: 0.75,
+    sourceKnowledgeIds: [operation.id, ...operation.requiredReportIds],
+    authorityTraceIds: operation.authorityTraceId ? [operation.authorityTraceId] : [],
+  };
+}
+
 export function buildFactionCommandNodeFrame(input: {
   campaignId: string;
   commandNodeId: string;
@@ -927,17 +956,47 @@ export function buildFactionCommandNodeFrame(input: {
     campaignId: input.campaignId,
     commandNodeId: input.commandNodeId,
   });
+  const resources = getDb()
+    .select()
+    .from(factionResources)
+    .where(
+      and(
+        eq(factionResources.campaignId, input.campaignId),
+        eq(factionResources.factionId, node.factionId),
+      ),
+    )
+    .all()
+    .map(hydrateResource);
+  const operations = getDb()
+    .select()
+    .from(factionOperations)
+    .where(
+      and(
+        eq(factionOperations.campaignId, input.campaignId),
+        eq(factionOperations.commandNodeId, input.commandNodeId),
+      ),
+    )
+    .all()
+    .map(hydrateOperation);
   return buildCommandNodeFrame({
     campaignId: input.campaignId,
     commandNodeId: input.commandNodeId,
     label: node.label,
     worldVersion: input.worldVersion ?? readWorldClock(input.campaignId).worldVersion,
     reports: reports.map(reportToExternalFact),
+    publicRecords: [
+      ...resources.map(resourceToExternalFact),
+      ...operations.map(operationToExternalFact),
+    ],
     goals: node.standingOrders,
     legalTools: ["log_event"],
     constraints: [
       "Faction operations require a command node, source report or standing order, and validated resources before state can change.",
       "Do not act on rumors as verified truth unless a later report or authority trace confirms them.",
     ],
+    hiddenExcludedCount: reports.reduce(
+      (total, report) => total + report.hiddenCauseTerms.length,
+      0,
+    ),
   });
 }

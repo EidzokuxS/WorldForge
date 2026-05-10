@@ -4,6 +4,7 @@ import {
   buildContextBudgetTrace,
   ContextBudgetViolationError,
 } from "../context-budget-trace.js";
+import { FRAME_BUDGET_SPECS } from "../frame-budget.js";
 
 describe("context budget trace", () => {
   it("records source coverage and retrieval counts without clipping model output", () => {
@@ -54,7 +55,110 @@ describe("context budget trace", () => {
     });
     expect(trace.fullHistoryDumpAttempted).toBe(false);
     expect(trace.didClipModelOutput).toBe(false);
+    expect(trace.selectedItemCount).toBe(2);
+    expect(trace.summarizedItemCount).toBe(0);
+    expect(trace.excludedByVisibilityCount).toBe(4);
+    expect(trace.excludedByBudgetCount).toBe(0);
+    expect(trace.overflowWarnings).toEqual([]);
     expect(trace.violations).toEqual([]);
+  });
+
+  it("defines shared frame budget specs for all Phase 93 frame and packet types", () => {
+    expect(Object.keys(FRAME_BUDGET_SPECS).sort()).toEqual([
+      "ActorFrame",
+      "FactionCommandFrame",
+      "NarratorPacket",
+      "OracleFrame",
+      "ReviewerPacket",
+      "SceneFrame",
+    ]);
+    for (const spec of Object.values(FRAME_BUDGET_SPECS)) {
+      expect(spec.targetTokens).toBeGreaterThan(0);
+      expect(spec.warningTokens).toBeGreaterThan(spec.targetTokens);
+      expect(spec.failTokens).toBeGreaterThan(spec.warningTokens);
+      expect(spec.maxSelectedItems).toBeGreaterThan(0);
+      expect(spec.maxSourceLinkedSummaries).toBeGreaterThan(0);
+    }
+  });
+
+  it("records selected, summarized, visibility-excluded, budget-excluded, and overflow warning counts", () => {
+    const trace = buildContextBudgetTrace({
+      label: "SceneFrame",
+      frameType: "SceneFrame",
+      visibleTexts: ["A source-linked summary of six old local reports."],
+      visibleItemCount: 4,
+      selectedItemCount: 3,
+      summarizedItemCount: 1,
+      sourceLinkedSummaryCount: 1,
+      hiddenExcludedCount: 2,
+      excludedByVisibilityCount: 2,
+      excludedByBudgetCount: 6,
+      candidateItemCount: 12,
+      sectionCounts: {
+        directRecords: 3,
+        sourceLinkedSummaries: 1,
+      },
+      sourceCoverage: {
+        sourceBackedCount: 4,
+        routeCounts: {
+          source_linked_summary: 1,
+          observation: 3,
+        },
+      },
+    });
+
+    expect(trace.frameType).toBe("SceneFrame");
+    expect(trace.budget).toMatchObject({ frameType: "SceneFrame" });
+    expect(trace.selectedItemCount).toBe(3);
+    expect(trace.summarizedItemCount).toBe(1);
+    expect(trace.sourceLinkedSummaryCount).toBe(1);
+    expect(trace.excludedByVisibilityCount).toBe(2);
+    expect(trace.excludedByBudgetCount).toBe(6);
+    expect(trace.overflowWarnings).toContainEqual(
+      expect.objectContaining({
+        code: "items_excluded_by_budget",
+        count: 6,
+      }),
+    );
+    expect(trace.didClipModelOutput).toBe(false);
+  });
+
+  it("fails closed on source-free summaries and generic budget slicing", () => {
+    expect(() =>
+      buildContextBudgetTrace({
+        label: "ReviewerPacket",
+        frameType: "ReviewerPacket",
+        visibleTexts: ["A compressed but uncited reviewer summary."],
+        visibleItemCount: 1,
+        summarizedItemCount: 1,
+        sourceLinkedSummaryCount: 0,
+        hiddenExcludedCount: 0,
+        candidateItemCount: 3,
+        sectionCounts: { summaries: 1 },
+        sourceCoverage: { sourceBackedCount: 1 },
+        genericBudgetSliceAttempted: true,
+      }),
+    ).toThrow(ContextBudgetViolationError);
+
+    try {
+      buildContextBudgetTrace({
+        label: "ReviewerPacket",
+        frameType: "ReviewerPacket",
+        visibleTexts: ["A compressed but uncited reviewer summary."],
+        visibleItemCount: 1,
+        summarizedItemCount: 1,
+        sourceLinkedSummaryCount: 0,
+        hiddenExcludedCount: 0,
+        candidateItemCount: 3,
+        sectionCounts: { summaries: 1 },
+        sourceCoverage: { sourceBackedCount: 1 },
+        genericBudgetSliceAttempted: true,
+      });
+    } catch (error) {
+      expect(error).toBeInstanceOf(ContextBudgetViolationError);
+      expect((error as ContextBudgetViolationError).violations.map((violation) => violation.code))
+        .toEqual(["summary_as_truth", "budget_slice"]);
+    }
   });
 
   it("fails closed on hidden truth, source-free facts, summary-as-truth, full history dumps, and output clipping", () => {

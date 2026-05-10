@@ -346,6 +346,62 @@ describe("SceneFrame builder", () => {
     expect(frame.perception.playerAwarenessHints).toContain(
       "You catch only a partial sign of movement nearby.",
     );
+    expect(frame.contextBudgetTrace).toMatchObject({
+      frameType: "SceneFrame",
+      hiddenExcludedCount: 2,
+      excludedByVisibilityCount: 2,
+    });
+    expect(frame.contextBudgetTrace?.didClipModelOutput).toBe(false);
+  });
+
+  it("summarizes over-budget recent events with source ids in the SceneFrame trace", async () => {
+    const recentEvents = Array.from({ length: SCENE_FRAME_RECENT_EVENT_LIMIT + 3 }, (_, index) => ({
+      id: `event-${index}`,
+      tick: index,
+      summary: `Visible source-backed event ${index}.`,
+      source: "committed_event" as const,
+      actorIds: [playerId],
+      perceivableByPlayer: true,
+    }));
+
+    const frame = await buildSceneFrame({
+      campaignId,
+      tick: 12,
+      playerActorId: playerId,
+      currentLocationId: broadLocationId,
+      currentSceneScopeId: sceneScopeId,
+      currentLocationName: "Market District",
+      currentSceneScopeName: "Bridge Checkpoint",
+      playerAction: "I scan the checkpoint.",
+      roster: {
+        active: [{
+          id: playerId,
+          actorId: playerId,
+          type: "player",
+          label: "Player",
+          locationId: broadLocationId,
+          sceneScopeId,
+          awareness: "clear",
+        }],
+        support: [],
+        background: [],
+      },
+      perception: { playerAwarenessHints: [], actorAwareness: {} },
+      recentEvents,
+      targetCandidates: [],
+      movementCandidates: [],
+      deferredHooks: [],
+      allowedTools: ["log_event"],
+    });
+
+    expect(frame.recentEvents).toHaveLength(SCENE_FRAME_RECENT_EVENT_LIMIT);
+    expect(frame.recentEvents.at(-1)?.summary).toContain("source-linked local events");
+    expect(frame.recentEvents.at(-1)?.summary).toContain("event-11");
+    expect(frame.contextBudgetTrace?.summarizedItemCount).toBe(4);
+    expect(frame.contextBudgetTrace?.sourceLinkedSummaryCount).toBe(1);
+    expect(frame.contextBudgetTrace?.overflowWarnings).toContainEqual(
+      expect.objectContaining({ code: "items_summarized_by_budget", count: 4 }),
+    );
   });
 
   it("keeps dense sublocation scene rosters scoped to the player's stored scene id", async () => {

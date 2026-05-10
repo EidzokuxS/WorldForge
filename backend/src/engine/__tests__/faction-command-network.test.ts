@@ -198,6 +198,49 @@ describe("faction command network", () => {
     expect(frame.constraints.join("\n")).toContain("command node");
   });
 
+  it("summarizes over-budget command frame records and counts hidden report terms as excluded", () => {
+    seedFaction(["Keep the market open.", "Protect the canal permit ledger."]);
+    const node = ensureFactionCommandNode({
+      campaignId: CAMPAIGN_ID,
+      factionId: FACTION_ID,
+    });
+    createFactionReport({
+      campaignId: CAMPAIGN_ID,
+      factionId: FACTION_ID,
+      commandNodeId: node.id,
+      route: "report_message",
+      summary: "A runner reports ordinary permit pressure at the market gate.",
+      sourceEventIds: ["event-visible-report"],
+      hiddenCauseTerms: ["secret patron"],
+    });
+    for (let index = 0; index < 34; index += 1) {
+      ensureFactionResource({
+        campaignId: CAMPAIGN_ID,
+        factionId: FACTION_ID,
+        resourceKey: `resource-${index}`,
+        label: `Resource ${index}`,
+        quantity: index + 1,
+      });
+    }
+
+    const frame = buildFactionCommandNodeFrame({
+      campaignId: CAMPAIGN_ID,
+      commandNodeId: node.id,
+    });
+    const factText = frame.facts.map((fact) => fact.text).join("\n");
+
+    expect(factText).toContain("Resource 0");
+    expect(factText).not.toContain("secret patron");
+    expect(frame.facts.some((fact) => fact.route === "source_linked_summary")).toBe(true);
+    expect(frame.contextBudgetTrace.frameType).toBe("FactionCommandFrame");
+    expect(frame.contextBudgetTrace.excludedByVisibilityCount).toBe(1);
+    expect(frame.contextBudgetTrace.summarizedItemCount).toBeGreaterThan(0);
+    expect(frame.contextBudgetTrace.sourceLinkedSummaryCount).toBe(1);
+    expect(frame.contextBudgetTrace.overflowWarnings).toContainEqual(
+      expect.objectContaining({ code: "items_summarized_by_budget" }),
+    );
+  });
+
   it("commits faction operations only after resource validation and emits local signals through authority", () => {
     seedFaction(["Keep the night market open unless a source-backed threat arrives."]);
     const node = ensureFactionCommandNode({

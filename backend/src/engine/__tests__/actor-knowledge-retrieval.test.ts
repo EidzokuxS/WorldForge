@@ -117,6 +117,50 @@ describe("actor knowledge retrieval", () => {
       sourceKnowledgeIds: [report.id],
       authorityTraceIds: ["trace-report"],
     });
+    expect(frame.facts.map((fact) => fact.text).join("\n")).not.toContain("rainstorm");
     expect(frame.contextBudgetTrace.visibleItemCount).toBeLessThanOrEqual(6);
+  });
+
+  it("filters private unavailable lexical matches before selection and summarizes overflow with source ids", () => {
+    recordActorKnowledge({
+      campaignId: CAMPAIGN_ID,
+      actorId: "npc-key",
+      route: "memory",
+      statement: "The bridge key is hidden in a private offscreen vault.",
+      subjectRefs: ["secret-vault"],
+      sourceKnowledgeIds: ["private-source"],
+      privacy: "private",
+    });
+    const records = Array.from({ length: 6 }, (_, index) =>
+      recordActorKnowledge({
+        campaignId: CAMPAIGN_ID,
+        actorId: "npc-key",
+        route: "report_message",
+        truthStatus: "reported",
+        statement: `Depot Seven bridge key report ${index}.`,
+        subjectRefs: ["loc-depot", `report-${index}`],
+        sourceEventIds: [`event-${index}`],
+        privacy: "shared",
+      }),
+    );
+
+    const retrieval = retrieveActorKnowledgeForFrame({
+      campaignId: CAMPAIGN_ID,
+      actorId: "npc-key",
+      frame: createSceneFrame(),
+      worldVersion: 0,
+      maxFacts: 2,
+    });
+    const visibleText = [
+      ...retrieval.reports.map((fact) => fact.text),
+      ...retrieval.memories.map((fact) => fact.text),
+    ].join("\n");
+
+    expect(visibleText).not.toContain("private offscreen vault");
+    expect(retrieval.trace.excludedByVisibilityCount).toBeGreaterThanOrEqual(1);
+    expect(retrieval.trace.summarizedItemCount).toBeGreaterThan(0);
+    expect(retrieval.trace.sourceLinkedSummaryCount).toBe(1);
+    const summary = retrieval.memories.find((fact) => fact.id?.startsWith("knowledge-summary:"));
+    expect(summary?.sourceKnowledgeIds).toContain(records[0]?.id);
   });
 });

@@ -166,8 +166,35 @@ describe("ActorFrame", () => {
     expect(factTexts).not.toContain("Hidden Auditor");
     expect(factTexts).not.toContain("sealed warrant");
     expect(frame.hiddenExcludedCount).toBeGreaterThanOrEqual(2);
+    expect(frame.contextBudgetTrace.frameType).toBe("ActorFrame");
+    expect(frame.contextBudgetTrace.selectedItemCount).toBe(frame.facts.length);
+    expect(frame.contextBudgetTrace.excludedByVisibilityCount).toBe(frame.hiddenExcludedCount);
     expect(frame.contextBudgetTrace.didClipModelOutput).toBe(false);
     expect(frame.contextBudgetTrace.hiddenExcludedCount).toBe(frame.hiddenExcludedCount);
+  });
+
+  it("summarizes over-budget ActorFrame facts with source ids instead of silently slicing", () => {
+    const frame = buildActorFrame({
+      frame: createFrame(),
+      actorId: keyNpcId,
+      worldVersion: 14,
+      memories: Array.from({ length: 40 }, (_, index) => ({
+        id: `memory-${index}`,
+        route: "memory" as const,
+        text: `Memory ${index} about depot work.`,
+        subjectRefs: [keyNpcId],
+        sourceKnowledgeIds: [`knowledge-${index}`],
+      })),
+    });
+
+    const summary = frame.facts.find((fact) => fact.route === "source_linked_summary");
+    expect(summary).toBeDefined();
+    expect(summary?.sourceKnowledgeIds).toContain("knowledge-39");
+    expect(frame.contextBudgetTrace.summarizedItemCount).toBeGreaterThan(0);
+    expect(frame.contextBudgetTrace.sourceLinkedSummaryCount).toBe(1);
+    expect(frame.contextBudgetTrace.overflowWarnings).toContainEqual(
+      expect.objectContaining({ code: "items_summarized_by_budget" }),
+    );
   });
 
   it("requires actor decisions to cite facts present in the frame", () => {
@@ -249,5 +276,6 @@ describe("ActorFrame", () => {
       goals: 1,
       legalTools: 1,
     });
+    expect(commandFrame.contextBudgetTrace.frameType).toBe("FactionCommandFrame");
   });
 });

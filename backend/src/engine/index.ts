@@ -152,9 +152,20 @@ export {
 } from "./context-budget-trace.js";
 
 export type {
+  ContextBudgetOverflowWarning,
   ContextBudgetTrace,
   ContextBudgetViolation,
 } from "./context-budget-trace.js";
+
+export {
+  FRAME_BUDGET_SPECS,
+  getFrameBudgetSpec,
+} from "./frame-budget.js";
+
+export type {
+  ContextFrameType,
+  FrameBudgetSpec,
+} from "./frame-budget.js";
 
 export {
   createTurnLatencyTrace,
