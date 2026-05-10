@@ -47,12 +47,17 @@ import {
 import {
   processOpeningScene,
   processTurn,
+  resumePendingTurnNarration,
   captureSnapshot,
   restoreSnapshot,
   buildDoneBoundaryData,
+  findPendingNarrationSaga,
+  NarrationRepairExhaustedError,
+  PendingNarrationError,
   queuePostTurnSimulationProposals,
 } from "../engine/index.js";
 import type {
+  TurnSagaRecord,
   TurnEvent,
   TurnSnapshot,
   TurnSummary,
@@ -146,6 +151,7 @@ async function runRollbackCriticalPostTurn(
     playerLocationId: player?.currentLocationId,
     playerSceneScopeId: player?.currentSceneLocationId ?? undefined,
     route: "/chat/action",
+    idempotencyKey: summary.idempotencyKey,
   });
   const actorSchedules = result.actorSchedules ?? [];
   log.event("simulation.proposals.queued", {
@@ -365,6 +371,107 @@ async function writeRouteTurnEventSSE(
   event: TurnEvent,
 ): Promise<void> {
   await writeTurnEventSSE(stream, withTurnBoundaryMetadata(campaignId, event));
+}
+
+function isNarrationLockConflict(error: unknown): boolean {
+  return error instanceof Error && error.name === "TurnSagaLockConflictError";
+}
+
+function isPendingNarrationError(error: unknown): error is PendingNarrationError {
+  return error instanceof PendingNarrationError
+    || (error instanceof Error && error.name === "PendingNarrationError");
+}
+
+function pendingNarrationData(
+  saga: Pick<TurnSagaRecord, "id" | "turnId" | "status"> | null,
+  message: string,
+) {
+  return {
+    error: message,
+    pendingNarration: true,
+    resumable: Boolean(saga),
+    sagaId: saga?.id,
+    turnId: saga?.turnId,
+    status: saga?.status,
+  };
+}
+
+async function streamPendingTurnNarration(args: {
+  campaignId: string;
+  saga: Pick<TurnSagaRecord, "id" | "turnId" | "status">;
+  stream: { writeSSE: (event: { event: string; data: string }) => Promise<void> };
+  storytellerProvider: ProviderConfig;
+  storytellerTemperature: number;
+  storytellerMaxTokens: number;
+  embedderResult?: ReturnType<typeof resolveEmbedder>;
+  onPostTurn?: (summary: TurnSummary) => void | Promise<void>;
+}): Promise<"resumed" | "pending"> {
+  try {
+    const generator = resumePendingTurnNarration({
+      campaignId: args.campaignId,
+      turnId: args.saga.turnId,
+      storytellerProvider: args.storytellerProvider,
+      storytellerTemperature: args.storytellerTemperature,
+      storytellerMaxTokens: args.storytellerMaxTokens,
+      embedderResult: args.embedderResult && !("error" in args.embedderResult)
+        ? args.embedderResult
+        : undefined,
+      onPostTurn: args.onPostTurn,
+    });
+
+    for await (const event of generator) {
+      await writeRouteTurnEventSSE(args.campaignId, args.stream, event);
+    }
+    return "resumed";
+  } catch (error) {
+    if (!isNarrationLockConflict(error)) {
+      throw error;
+    }
+    await writeTurnEventSSE(args.stream, {
+      type: "error",
+      data: pendingNarrationData(
+        args.saga,
+        "Pending narration is already being completed by another worker.",
+      ),
+    });
+    return "pending";
+  }
+}
+
+async function streamPendingNarrationBeforeRollback(args: {
+  campaignId: string;
+  stream: { writeSSE: (event: { event: string; data: string }) => Promise<void> };
+  storytellerProvider: ProviderConfig;
+  storytellerTemperature: number;
+  storytellerMaxTokens: number;
+  embedderResult?: ReturnType<typeof resolveEmbedder>;
+  onPostTurn?: (summary: TurnSummary) => void | Promise<void>;
+  pendingMessage: string;
+}): Promise<"none" | "resumed" | "pending"> {
+  const pending = findPendingNarrationSaga({ campaignId: args.campaignId });
+  if (!pending) {
+    return "none";
+  }
+
+  try {
+    return await streamPendingTurnNarration({
+      campaignId: args.campaignId,
+      saga: pending,
+      stream: args.stream,
+      storytellerProvider: args.storytellerProvider,
+      storytellerTemperature: args.storytellerTemperature,
+      storytellerMaxTokens: args.storytellerMaxTokens,
+      embedderResult: args.embedderResult,
+      onPostTurn: args.onPostTurn,
+    });
+  } catch (resumeError) {
+    log.error("Pending narration resume failed; preserving settled turn state", resumeError);
+    await writeTurnEventSSE(args.stream, {
+      type: "error",
+      data: pendingNarrationData(pending, args.pendingMessage),
+    });
+    return "pending";
+  }
 }
 
 function toPersistedLookupKind(
@@ -595,6 +702,41 @@ app.post("/action", async (c) => {
     // Resolve Embedder (optional -- used for lore search)
     const embedderResult = resolveEmbedder(settings);
 
+    const pendingSaga = findPendingNarrationSaga({ campaignId });
+    if (pendingSaga) {
+      c.header("Cache-Control", "no-cache, no-transform");
+      const turnId = randomUUID();
+      const currentTick = readCampaignConfig(campaignId).currentTick ?? 0;
+      return streamSSE(c, async (stream) => {
+        const unregisterAbortCleanup = registerTurnAbortCleanup({
+          signal: c.req.raw.signal,
+          campaignId,
+          route: "/action",
+        });
+        try {
+          await runWithTurnContext({ turnId, campaignId, tick: currentTick }, async () => {
+            try {
+              await streamPendingTurnNarration({
+                campaignId,
+                saga: pendingSaga,
+                stream,
+                storytellerProvider: stResult.resolved.provider,
+                storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
+                storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
+                embedderResult,
+                onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider),
+              });
+            } finally {
+              endTurn(campaignId);
+              turnStartedForCampaign = null;
+            }
+          });
+        } finally {
+          unregisterAbortCleanup();
+        }
+      });
+    }
+
     // Auto-checkpoint before dangerous turns (HP <= 2)
     try {
       const db = (await import("../db/index.js")).getDb();
@@ -658,7 +800,8 @@ app.post("/action", async (c) => {
           },
         });
 
-        let outcome: "success" | "error" | "restored" = "success";
+        let outcome: "success" | "error" | "restored" | "pending_resumed" | "pending" = "success";
+        let settledTurnRollbackShield = false;
         try {
           const turnGenerator = processTurn({
             campaignId,
@@ -697,12 +840,76 @@ app.post("/action", async (c) => {
             }
 
             if (event.type === "done") {
+              settledTurnRollbackShield = true;
               setLastTurnSnapshot(campaignId, snapshot);
             }
 
             await writeRouteTurnEventSSE(campaignId, stream, event);
           }
         } catch (error) {
+          if (isPendingNarrationError(error)) {
+            outcome = "pending_resumed";
+            const result = await streamPendingTurnNarration({
+              campaignId,
+              saga: error.pendingSaga,
+              stream,
+              storytellerProvider: stResult.resolved.provider,
+              storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
+              storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
+              embedderResult,
+              onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider),
+            });
+            if (result === "pending") {
+              outcome = "pending";
+            }
+            return;
+          }
+          if (error instanceof NarrationRepairExhaustedError) {
+            outcome = "pending";
+            const pending = findPendingNarrationSaga({ campaignId });
+            await writeTurnEventSSE(stream, {
+              type: "error",
+              data: pendingNarrationData(
+                pending,
+                getErrorMessage(error, "Narration is pending repair."),
+              ),
+            });
+            return;
+          }
+          const pendingResult = await streamPendingNarrationBeforeRollback({
+            campaignId,
+            stream,
+            storytellerProvider: stResult.resolved.provider,
+            storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
+            storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
+            embedderResult,
+            onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider),
+            pendingMessage: getErrorMessage(
+              error,
+              "Turn resolved but final narration is pending.",
+            ),
+          });
+          if (pendingResult !== "none") {
+            outcome = pendingResult === "resumed" ? "pending_resumed" : "pending";
+            return;
+          }
+          if (settledTurnRollbackShield) {
+            outcome = "error";
+            log.error("Turn failed after settled done boundary; preserving finalized state", error);
+            try {
+              await stream.writeSSE({
+                event: "error",
+                data: JSON.stringify({
+                  error: getErrorMessage(error, "Turn already settled; transport failed after finalization."),
+                  settled: true,
+                  recoverable: true,
+                }),
+              });
+            } catch (writeError) {
+              log.warn("Unable to report post-settlement action transport failure", writeError);
+            }
+            return;
+          }
           outcome = "restored";
           log.error("Turn processing failed; restoring pre-turn boundary", error);
           try {
@@ -842,19 +1049,6 @@ app.post("/retry", async (c) => {
     }
     turnStartedForCampaign = campaignId;
 
-    const previousSnapshot = getLastTurnSnapshot(campaignId);
-    if (!previousSnapshot) {
-      endTurn(campaignId);
-      turnStartedForCampaign = null;
-      return c.json({ error: "Nothing to retry." }, 400);
-    }
-    const playerAction = getLastPlayerAction(campaignId);
-    if (!playerAction) {
-      endTurn(campaignId);
-      turnStartedForCampaign = null;
-      return c.json({ error: "No player action found to retry." }, 400);
-    }
-
     const settings = loadSettings();
 
     // Resolve Judge (required for Oracle)
@@ -875,6 +1069,54 @@ app.post("/retry", async (c) => {
 
     // Resolve Embedder (optional)
     const embedderResult = resolveEmbedder(settings);
+
+    const pendingSaga = findPendingNarrationSaga({ campaignId });
+    if (pendingSaga) {
+      c.header("Cache-Control", "no-cache, no-transform");
+      const turnId = randomUUID();
+      const currentTick = readCampaignConfig(campaignId).currentTick ?? 0;
+      return streamSSE(c, async (stream) => {
+        const unregisterAbortCleanup = registerTurnAbortCleanup({
+          signal: c.req.raw.signal,
+          campaignId,
+          route: "/retry",
+        });
+        try {
+          await runWithTurnContext({ turnId, campaignId, tick: currentTick }, async () => {
+            try {
+              await streamPendingTurnNarration({
+                campaignId,
+                saga: pendingSaga,
+                stream,
+                storytellerProvider: stResult.resolved.provider,
+                storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
+                storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
+                embedderResult,
+                onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider),
+              });
+            } finally {
+              endTurn(campaignId);
+              turnStartedForCampaign = null;
+            }
+          });
+        } finally {
+          unregisterAbortCleanup();
+        }
+      });
+    }
+
+    const previousSnapshot = getLastTurnSnapshot(campaignId);
+    if (!previousSnapshot) {
+      endTurn(campaignId);
+      turnStartedForCampaign = null;
+      return c.json({ error: "Nothing to retry." }, 400);
+    }
+    const playerAction = getLastPlayerAction(campaignId);
+    if (!playerAction) {
+      endTurn(campaignId);
+      turnStartedForCampaign = null;
+      return c.json({ error: "No player action found to retry." }, 400);
+    }
 
     await restoreSnapshot(campaignId, previousSnapshot);
 
@@ -910,7 +1152,8 @@ app.post("/retry", async (c) => {
           },
         });
 
-        let outcome: "success" | "error" | "restored" = "success";
+        let outcome: "success" | "error" | "restored" | "pending_resumed" | "pending" = "success";
+        let settledTurnRollbackShield = false;
         try {
           const turnGenerator = processTurn({
             campaignId,
@@ -948,12 +1191,76 @@ app.post("/retry", async (c) => {
             }
 
             if (event.type === "done") {
+              settledTurnRollbackShield = true;
               setLastTurnSnapshot(campaignId, previousSnapshot);
             }
 
             await writeRouteTurnEventSSE(campaignId, stream, event);
           }
         } catch (error) {
+          if (isPendingNarrationError(error)) {
+            outcome = "pending_resumed";
+            const result = await streamPendingTurnNarration({
+              campaignId,
+              saga: error.pendingSaga,
+              stream,
+              storytellerProvider: stResult.resolved.provider,
+              storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
+              storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
+              embedderResult,
+              onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider),
+            });
+            if (result === "pending") {
+              outcome = "pending";
+            }
+            return;
+          }
+          if (error instanceof NarrationRepairExhaustedError) {
+            outcome = "pending";
+            const pending = findPendingNarrationSaga({ campaignId });
+            await writeTurnEventSSE(stream, {
+              type: "error",
+              data: pendingNarrationData(
+                pending,
+                getErrorMessage(error, "Narration is pending repair."),
+              ),
+            });
+            return;
+          }
+          const pendingResult = await streamPendingNarrationBeforeRollback({
+            campaignId,
+            stream,
+            storytellerProvider: stResult.resolved.provider,
+            storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
+            storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
+            embedderResult,
+            onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider),
+            pendingMessage: getErrorMessage(
+              error,
+              "Retry resolved but final narration is pending.",
+            ),
+          });
+          if (pendingResult !== "none") {
+            outcome = pendingResult === "resumed" ? "pending_resumed" : "pending";
+            return;
+          }
+          if (settledTurnRollbackShield) {
+            outcome = "error";
+            log.error("Retry failed after settled done boundary; preserving finalized state", error);
+            try {
+              await stream.writeSSE({
+                event: "error",
+                data: JSON.stringify({
+                  error: getErrorMessage(error, "Retry already settled; transport failed after finalization."),
+                  settled: true,
+                  recoverable: true,
+                }),
+              });
+            } catch (writeError) {
+              log.warn("Unable to report post-settlement retry transport failure", writeError);
+            }
+            return;
+          }
           outcome = "restored";
           try {
             await restoreSnapshot(campaignId, previousSnapshot);

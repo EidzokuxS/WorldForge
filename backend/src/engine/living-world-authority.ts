@@ -198,6 +198,7 @@ export function queueSimulationJob(input: {
   jobType: string;
   baseWorldVersion: number;
   sourceEntity: AuthoritySourceEntity;
+  idempotencyKey?: string | null;
   scheduledWorldTimeMinutes?: number;
   priority?: number;
   payload?: unknown;
@@ -206,14 +207,28 @@ export function queueSimulationJob(input: {
     campaignId: input.campaignId,
     baseWorldVersion: input.baseWorldVersion,
   });
+  if (input.idempotencyKey) {
+    const existing = getDb()
+      .select({ id: simulationJobs.id })
+      .from(simulationJobs)
+      .where(and(
+        eq(simulationJobs.campaignId, input.campaignId),
+        eq(simulationJobs.idempotencyKey, input.idempotencyKey),
+      ))
+      .get();
+    if (existing) {
+      return existing.id;
+    }
+  }
   const jobId = crypto.randomUUID();
   const timestamp = now();
-  getDb()
+  const insert = getDb()
     .insert(simulationJobs)
     .values({
       id: jobId,
       campaignId: input.campaignId,
       jobType: input.jobType,
+      idempotencyKey: input.idempotencyKey ?? null,
       status: "queued",
       priority: input.priority ?? 0,
       baseWorldVersion: clock.worldVersion,
@@ -228,9 +243,31 @@ export function queueSimulationJob(input: {
       supersededByJobId: null,
       createdAt: timestamp,
       updatedAt: timestamp,
-    })
-    .run();
-  return jobId;
+    });
+  const result = input.idempotencyKey
+    ? insert
+        .onConflictDoNothing({
+          target: [simulationJobs.campaignId, simulationJobs.idempotencyKey],
+        })
+        .run()
+    : insert.run();
+  if (result.changes === 1) {
+    return jobId;
+  }
+  const existing = input.idempotencyKey
+    ? getDb()
+        .select({ id: simulationJobs.id })
+        .from(simulationJobs)
+        .where(and(
+          eq(simulationJobs.campaignId, input.campaignId),
+          eq(simulationJobs.idempotencyKey, input.idempotencyKey),
+        ))
+        .get()
+    : null;
+  if (!existing) {
+    throw new Error(`Simulation job idempotency collision could not be resolved for campaign ${input.campaignId}.`);
+  }
+  return existing.id;
 }
 
 export function recordSimulationProposal(input: {
@@ -239,6 +276,7 @@ export function recordSimulationProposal(input: {
   baseWorldVersion: number;
   sourceEntity: AuthoritySourceEntity;
   jobId?: string | null;
+  idempotencyKey?: string | null;
   proposedWorldVersion?: number | null;
   payload?: unknown;
   toolResultId?: string | null;
@@ -247,15 +285,29 @@ export function recordSimulationProposal(input: {
     campaignId: input.campaignId,
     baseWorldVersion: input.baseWorldVersion,
   });
+  if (input.idempotencyKey) {
+    const existing = getDb()
+      .select({ id: simulationProposals.id })
+      .from(simulationProposals)
+      .where(and(
+        eq(simulationProposals.campaignId, input.campaignId),
+        eq(simulationProposals.idempotencyKey, input.idempotencyKey),
+      ))
+      .get();
+    if (existing) {
+      return existing.id;
+    }
+  }
   const proposalId = crypto.randomUUID();
   const timestamp = now();
-  getDb()
+  const insert = getDb()
     .insert(simulationProposals)
     .values({
       id: proposalId,
       campaignId: input.campaignId,
       jobId: input.jobId ?? null,
       proposalType: input.proposalType,
+      idempotencyKey: input.idempotencyKey ?? null,
       status: "pending",
       baseWorldVersion: clock.worldVersion,
       proposedWorldVersion: input.proposedWorldVersion ?? null,
@@ -268,9 +320,34 @@ export function recordSimulationProposal(input: {
       createdWorldTimeMinutes: clock.worldTimeMinutes,
       createdAt: timestamp,
       updatedAt: timestamp,
-    })
-    .run();
-  return proposalId;
+    });
+  const result = input.idempotencyKey
+    ? insert
+        .onConflictDoNothing({
+          target: [
+            simulationProposals.campaignId,
+            simulationProposals.idempotencyKey,
+          ],
+        })
+        .run()
+    : insert.run();
+  if (result.changes === 1) {
+    return proposalId;
+  }
+  const existing = input.idempotencyKey
+    ? getDb()
+        .select({ id: simulationProposals.id })
+        .from(simulationProposals)
+        .where(and(
+          eq(simulationProposals.campaignId, input.campaignId),
+          eq(simulationProposals.idempotencyKey, input.idempotencyKey),
+        ))
+        .get()
+    : null;
+  if (!existing) {
+    throw new Error(`Simulation proposal idempotency collision could not be resolved for campaign ${input.campaignId}.`);
+  }
+  return existing.id;
 }
 
 export function upsertActorProcessState(input: {

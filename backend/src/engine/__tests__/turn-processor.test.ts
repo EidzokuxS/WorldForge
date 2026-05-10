@@ -10,6 +10,22 @@ const {
   resolveDueWorldWorkForScopeMock,
   resolveDueWorldThreadWorkForScopeMock,
   runRequiredActorDecisionPassMock,
+  readWorldClockMock,
+  assertNoPendingNarrationBeforeNewTurnMock,
+  claimTurnSagaWorkerMock,
+  createTurnSagaMock,
+  getSettledTurnPacketMock,
+  getTurnSagaMock,
+  findLatestSuccessfulNarratorAttemptMock,
+  heartbeatTurnSagaWorkerMock,
+  markTurnSagaFinalizedMock,
+  markTurnSagaFinalizedIfNeededMock,
+  mergeTurnSagaProvenanceMock,
+  persistOracleDecisionMock,
+  persistSettledTurnPacketMock,
+  recordNarratorAttemptMock,
+  releaseTurnSagaWorkerMock,
+  transitionTurnSagaStatusMock,
 } = vi.hoisted(() => ({
   logEventMock: vi.fn(),
   logInfoMock: vi.fn(),
@@ -18,6 +34,22 @@ const {
   resolveDueWorldWorkForScopeMock: vi.fn(),
   resolveDueWorldThreadWorkForScopeMock: vi.fn(),
   runRequiredActorDecisionPassMock: vi.fn(),
+  readWorldClockMock: vi.fn(),
+  assertNoPendingNarrationBeforeNewTurnMock: vi.fn(),
+  claimTurnSagaWorkerMock: vi.fn(),
+  createTurnSagaMock: vi.fn(),
+  getSettledTurnPacketMock: vi.fn(),
+  getTurnSagaMock: vi.fn(),
+  findLatestSuccessfulNarratorAttemptMock: vi.fn(),
+  heartbeatTurnSagaWorkerMock: vi.fn(),
+  markTurnSagaFinalizedMock: vi.fn(),
+  markTurnSagaFinalizedIfNeededMock: vi.fn(),
+  mergeTurnSagaProvenanceMock: vi.fn(),
+  persistOracleDecisionMock: vi.fn(),
+  persistSettledTurnPacketMock: vi.fn(),
+  recordNarratorAttemptMock: vi.fn(),
+  releaseTurnSagaWorkerMock: vi.fn(),
+  transitionTurnSagaStatusMock: vi.fn(),
 }));
 
 vi.mock("../../db/index.js", () => ({
@@ -185,6 +217,44 @@ vi.mock("../actor-tools.js", () => ({
   runRequiredActorDecisionPass: runRequiredActorDecisionPassMock,
 }));
 
+vi.mock("../living-world-authority.js", () => ({
+  readWorldClock: readWorldClockMock,
+}));
+
+vi.mock("../turn-saga.js", () => ({
+  PENDING_NARRATION_STATUSES: [
+    "resolved_pending_narration",
+    "narrator_rendering",
+    "narrator_repairing",
+  ],
+  PendingSettledTurnNarrationError: class PendingSettledTurnNarrationError extends Error {
+    pendingSaga: unknown;
+    causeError: unknown;
+
+    constructor(pendingSaga: unknown, causeError?: unknown) {
+      super("Pending settled turn narration.");
+      this.name = "PendingSettledTurnNarrationError";
+      this.pendingSaga = pendingSaga;
+      this.causeError = causeError;
+    }
+  },
+  assertNoPendingNarrationBeforeNewTurn: assertNoPendingNarrationBeforeNewTurnMock,
+  claimTurnSagaWorker: claimTurnSagaWorkerMock,
+  createTurnSaga: createTurnSagaMock,
+  findLatestSuccessfulNarratorAttempt: findLatestSuccessfulNarratorAttemptMock,
+  getSettledTurnPacket: getSettledTurnPacketMock,
+  getTurnSaga: getTurnSagaMock,
+  markTurnSagaFinalized: markTurnSagaFinalizedMock,
+  heartbeatTurnSagaWorker: heartbeatTurnSagaWorkerMock,
+  markTurnSagaFinalizedIfNeeded: markTurnSagaFinalizedIfNeededMock,
+  mergeTurnSagaProvenance: mergeTurnSagaProvenanceMock,
+  persistOracleDecision: persistOracleDecisionMock,
+  persistSettledTurnPacket: persistSettledTurnPacketMock,
+  recordNarratorAttempt: recordNarratorAttemptMock,
+  releaseTurnSagaWorker: releaseTurnSagaWorkerMock,
+  transitionTurnSagaStatus: transitionTurnSagaStatusMock,
+}));
+
 vi.mock("../scene-plan-validator.js", () => {
   class ScenePlanValidationError extends Error {
     constructor(public readonly issues: Array<{ code: string; message: string; path: string }>) {
@@ -231,11 +301,14 @@ vi.mock("../../ai/provider-registry.js", () => ({
 import {
   detectMovement,
   detectVisibleNarrationFailures,
+  NarrationRepairExhaustedError,
   processTurn,
   processOpeningScene,
+  resumePendingTurnNarration,
   type HiddenTurnSummary,
   type TurnEvent,
 } from "../turn-processor.js";
+import { PendingSettledTurnNarrationError } from "../turn-saga.js";
 import { buildMovementDetectionPromptContract } from "../prompt-contracts.js";
 import { callOracle } from "../oracle.js";
 import {
@@ -375,6 +448,28 @@ function setupMocks(options: {
   // Mock DB
   const mockDb = createEntityLookupDb({});
   (getDb as Mock).mockReturnValue(mockDb);
+  setupTurnSagaMocks();
+  resolveDueWorldWorkForScopeMock.mockReturnValue({
+    phase: "pre_scene_frame",
+    executed: [],
+    deferred: [],
+    skipped: [],
+    worldThreads: {
+      executed: [],
+      deferred: [],
+      skipped: [],
+    },
+  });
+  resolveDueWorldThreadWorkForScopeMock.mockReturnValue({
+    executed: [],
+    deferred: [],
+    skipped: [],
+  });
+  runRequiredActorDecisionPassMock.mockReturnValue({
+    actionResults: [],
+    schedule: { decisions: [] },
+    decisions: [],
+  });
 
   (advanceCampaignTick as Mock).mockReturnValue(6);
   // Mock Oracle
@@ -409,6 +504,7 @@ function setupMocks(options: {
 
   // Mock readCampaignConfig
   (readCampaignConfig as Mock).mockReturnValue({ currentTick: 5 });
+  (getChatHistory as Mock).mockReturnValue([]);
 
   // Mock incrementTick
   (incrementTick as Mock).mockReturnValue(6);
@@ -733,6 +829,202 @@ function setupScenePlanMocks(options: {
   });
 
   return { frame, scenePlan, executedPlan, narratorPacket };
+}
+
+function setupTurnSagaMocks(overrides: {
+  status?: string;
+  turnId?: string;
+  provenance?: Record<string, unknown>;
+  settledPacket?: Record<string, unknown>;
+} = {}) {
+  type MockSagaRecord = {
+    id: string;
+    campaignId: string;
+    turnId: string;
+    playerId: string | null;
+    actionId: string | null;
+    actionText: string | null;
+    sourceAction: unknown;
+    status: string;
+    statusReason: string | null;
+    statusUpdatedAt: number;
+    activeLockToken: string | null;
+    activeWorkerId: string | null;
+    activeStartedAt: number | null;
+    requiresNarration: boolean;
+    baseWorldVersion: number;
+    resultWorldVersion: number | null;
+    oracleDecisionId: string | null;
+    settledTurnPacketId: string | null;
+    latestNarratorAttemptId: string | null;
+    provenance: Record<string, unknown>;
+    createdAt: number;
+    updatedAt: number;
+  };
+  let saga: MockSagaRecord = {
+    id: "saga-1",
+    campaignId: CAMPAIGN_ID,
+    turnId: overrides.turnId ?? "turn-1",
+    playerId: null,
+    actionId: null,
+    actionText: "I attack the goblin",
+    sourceAction: {},
+    status: overrides.status ?? "created",
+    statusReason: null,
+    statusUpdatedAt: 0,
+    activeLockToken: null,
+    activeWorkerId: null,
+    activeStartedAt: null,
+    requiresNarration: overrides.status !== undefined
+      ? ["resolved_pending_narration", "narrator_rendering", "narrator_repairing"].includes(overrides.status)
+      : false,
+    baseWorldVersion: 7,
+    resultWorldVersion: null,
+    oracleDecisionId: null,
+    settledTurnPacketId: null,
+    latestNarratorAttemptId: null,
+    provenance: overrides.provenance ?? {},
+    createdAt: 0,
+    updatedAt: 0,
+  };
+  const settledPacket = overrides.settledPacket ?? {
+    id: "packet-1",
+    campaignId: CAMPAIGN_ID,
+    sagaId: "saga-1",
+    turnId: saga.turnId,
+    oracleDecisionId: "oracle-decision-1",
+    canonicalTurnPacket: {},
+    narratorPacket: createNarratorPacketMock(),
+    sourceRefs: [],
+    acceptedToolResultRefs: [],
+    acceptedActorResultRefs: [],
+    dueWorldRefs: [],
+    requiresNarration: true,
+    baseWorldVersion: 7,
+    resultWorldVersion: 8,
+    createdAt: 0,
+    updatedAt: 0,
+  };
+
+  readWorldClockMock.mockReturnValue({
+    campaignId: CAMPAIGN_ID,
+    worldVersion: 7,
+    worldTimeMinutes: 5,
+    currentTick: 5,
+    updatedAt: 0,
+  });
+  assertNoPendingNarrationBeforeNewTurnMock.mockImplementation(() => undefined);
+  createTurnSagaMock.mockImplementation((input: { turnId?: string; baseWorldVersion?: number }) => {
+    saga = {
+      ...saga,
+      turnId: input.turnId ?? saga.turnId,
+      baseWorldVersion: input.baseWorldVersion ?? saga.baseWorldVersion,
+      status: "created",
+    };
+    return saga;
+  });
+  transitionTurnSagaStatusMock.mockImplementation((input: { toStatus: string; resultWorldVersion?: number | null }) => {
+    saga = {
+      ...saga,
+      status: input.toStatus,
+      resultWorldVersion: input.resultWorldVersion ?? saga.resultWorldVersion,
+    };
+    return saga;
+  });
+  persistOracleDecisionMock.mockImplementation(() => {
+    saga = { ...saga, oracleDecisionId: "oracle-decision-1" };
+    return { id: "oracle-decision-1", sagaId: saga.id };
+  });
+  persistSettledTurnPacketMock.mockImplementation(() => {
+    saga = {
+      ...saga,
+      status: "resolved_pending_narration",
+      requiresNarration: true,
+      settledTurnPacketId: "packet-1",
+      resultWorldVersion: 8,
+    };
+    return settledPacket;
+  });
+  getTurnSagaMock.mockImplementation(() => saga);
+  getSettledTurnPacketMock.mockImplementation(() => settledPacket);
+  claimTurnSagaWorkerMock.mockImplementation((input: { workerId: string; lockToken?: string }) => {
+    const lockToken = input.lockToken ?? "lock-token";
+    saga = {
+      ...saga,
+      activeLockToken: lockToken,
+      activeWorkerId: input.workerId,
+      activeStartedAt: 1,
+    };
+    return { saga, lockToken, workerId: input.workerId };
+  });
+  releaseTurnSagaWorkerMock.mockImplementation((input: { lockToken: string }) => {
+    if (saga.activeLockToken !== input.lockToken) {
+      throw new Error("lock conflict");
+    }
+    saga = {
+      ...saga,
+      activeLockToken: null,
+      activeWorkerId: null,
+      activeStartedAt: null,
+    };
+    return saga;
+  });
+  heartbeatTurnSagaWorkerMock.mockImplementation((input: { lockToken: string }) => {
+    if (saga.activeLockToken !== input.lockToken) {
+      throw new Error("lock conflict");
+    }
+    saga = { ...saga, activeStartedAt: Date.now() };
+    return saga;
+  });
+  findLatestSuccessfulNarratorAttemptMock.mockReturnValue(null);
+  mergeTurnSagaProvenanceMock.mockImplementation((input: { patch: Record<string, unknown> }) => {
+    const merge = (
+      base: Record<string, unknown>,
+      patch: Record<string, unknown>,
+    ): Record<string, unknown> => {
+      const merged = { ...base };
+      for (const [key, value] of Object.entries(patch)) {
+        const existing = merged[key];
+        merged[key] =
+          existing
+          && typeof existing === "object"
+          && !Array.isArray(existing)
+          && value
+          && typeof value === "object"
+          && !Array.isArray(value)
+            ? merge(existing as Record<string, unknown>, value as Record<string, unknown>)
+            : value;
+      }
+      return merged;
+    };
+    saga = { ...saga, provenance: merge(saga.provenance, input.patch) };
+    return saga;
+  });
+  recordNarratorAttemptMock.mockImplementation((input: { status: string }) => {
+    const id = `attempt-${recordNarratorAttemptMock.mock.calls.length + 1}`;
+    saga = { ...saga, latestNarratorAttemptId: id };
+    return { id, sagaId: saga.id, status: input.status };
+  });
+  markTurnSagaFinalizedMock.mockImplementation(() => {
+    saga = { ...saga, status: "finalized" };
+    return saga;
+  });
+  markTurnSagaFinalizedIfNeededMock.mockImplementation((input: { narratorAttemptId?: string }) => {
+    saga = {
+      ...saga,
+      status: "finalized",
+      latestNarratorAttemptId: input.narratorAttemptId ?? saga.latestNarratorAttemptId,
+    };
+    return saga;
+  });
+
+  return { get saga() { return saga; }, settledPacket };
+}
+
+function sagaStatusTransitions(): string[] {
+  return transitionTurnSagaStatusMock.mock.calls.map(
+    ([input]) => (input as { toStatus: string }).toStatus,
+  );
 }
 
 function createEntityLookupDb(options: {
@@ -1704,7 +1996,7 @@ describe("processTurn", () => {
     );
   });
 
-  it("suppresses repeated narration blocks in the final visible narration", async () => {
+  it("preserves repeated narration blocks when retry does not produce a better candidate", async () => {
     setupMocks({
       streamParts: [
         { type: "text-delta", text: "The market square falls silent.\n\n" },
@@ -1715,13 +2007,14 @@ describe("processTurn", () => {
 
     await collectEvents(processTurn(createTestOptions()));
 
+    expect(generateText).toHaveBeenCalledTimes(2);
     expect(appendChatMessages).toHaveBeenLastCalledWith(
       CAMPAIGN_ID,
       [
         {
           role: "assistant",
           content:
-            "The market square falls silent.\n\nA bell tolls somewhere beyond the smoke.",
+            "The market square falls silent.\n\nThe market square falls silent.\n\nA bell tolls somewhere beyond the smoke.",
         },
       ],
     );
@@ -1834,25 +2127,67 @@ describe("processTurn", () => {
     ]);
   });
 
-  it("does not add a retry when sanitizeNarrative and duplicate collapse already fix the output", async () => {
+  it("does not slice leaked [NPC STATES] into misleading partial narration", async () => {
     setupMocks();
-    (generateText as Mock).mockResolvedValueOnce({
-      text: [
-        "The market square falls silent.",
-        "The market square falls silent.",
-        "[NPC STATES]",
-        "Hidden state that should never reach the player.",
-      ].join("\n\n"),
-    });
+    (generateText as Mock)
+      .mockResolvedValueOnce({
+        text: [
+          "The market square falls silent.",
+          "[NPC STATES]",
+          "Hidden state that should never reach the player.",
+        ].join("\n\n"),
+      })
+      .mockResolvedValueOnce({
+        text: "A cart wheel creaks once. The crowd parts around the spilled apples.",
+      });
 
     await collectEvents(processTurn(createTestOptions()));
 
-    expect(generateText).toHaveBeenCalledTimes(1);
+    expect(generateText).toHaveBeenCalledTimes(2);
+    expect((generateText as Mock).mock.calls[1]?.[0]?.prompt).toContain(
+      "Do not include headers, bracketed sections, or tool-call syntax",
+    );
     expect(appendChatMessages).toHaveBeenLastCalledWith(CAMPAIGN_ID, [
       {
         role: "assistant",
-        content: "The market square falls silent.",
+        content: "A cart wheel creaks once. The crowd parts around the spilled apples.",
       },
+    ]);
+    expect(appendChatMessages).not.toHaveBeenCalledWith(CAMPAIGN_ID, [
+      { role: "assistant", content: "The market square falls silent." },
+    ]);
+  });
+
+  it("retries regex-only residual leaks but does not abort when retry still matches", async () => {
+    setupMocks();
+    const initialText = [
+      "The market square falls silent.",
+      "[NPC STATES]",
+      "Hidden state that should never reach the player.",
+    ].join("\n\n");
+    const retryText = [
+      "A cart wheel creaks once beside the spilled apples.",
+      "[NPC STATES]",
+      "The crowd keeps its distance from the shuttered stall.",
+    ].join("\n\n");
+    (generateText as Mock)
+      .mockResolvedValueOnce({ text: initialText })
+      .mockResolvedValueOnce({ text: retryText });
+
+    const events = await collectEvents(processTurn(createTestOptions()));
+
+    expect(generateText).toHaveBeenCalledTimes(2);
+    expect((generateText as Mock).mock.calls[1]?.[0]?.prompt).toContain(
+      "Do not include headers, bracketed sections, or tool-call syntax",
+    );
+    expect(events.filter((event) => event.type === "narrative")).toEqual([
+      {
+        type: "narrative",
+        data: { text: retryText },
+      },
+    ]);
+    expect(appendChatMessages).toHaveBeenLastCalledWith(CAMPAIGN_ID, [
+      { role: "assistant", content: retryText },
     ]);
   });
 
@@ -3338,6 +3673,18 @@ describe("processTurn ScenePlan path", () => {
     return callIndex >= 0 ? appendMock.mock.invocationCallOrder[callIndex] : undefined;
   }
 
+  function successfulNarratorAttemptId(): string {
+    const result = recordNarratorAttemptMock.mock.results.find((entry, index) => {
+      const input = recordNarratorAttemptMock.mock.calls[index]?.[0] as
+        | { status?: string }
+        | undefined;
+      return input?.status === "succeeded" && entry.type === "return";
+    })?.value as { id?: string } | undefined;
+
+    expect(result?.id).toEqual(expect.any(String));
+    return result!.id!;
+  }
+
   it("defaults to the GM tool loop and preserves execution/guard ordering before narrative SSE", async () => {
     setupMocks();
     setupScenePlanMocks();
@@ -3398,6 +3745,138 @@ describe("processTurn ScenePlan path", () => {
     expect(events.findIndex((event) => event.type === "narrative")).toBeGreaterThan(
       events.findIndex((event) => event.type === "scene-settling"),
     );
+    expect(sagaStatusTransitions()).toEqual([
+      "collecting_context",
+      "pre_turn_catchup",
+      "gm_reading",
+      "oracle_adjudicating",
+      "tool_loop_running",
+      "local_reaction_running",
+      "world_consequence_running",
+      "narrator_rendering",
+    ]);
+  });
+
+  it("refuses to start a new ScenePlan turn while narration is pending", async () => {
+    setupMocks();
+    assertNoPendingNarrationBeforeNewTurnMock.mockImplementationOnce(() => {
+      throw new Error("Campaign has pending narration.");
+    });
+
+    await expect(collectEvents(processTurn(createTestOptions()))).rejects.toThrow(
+      "Campaign has pending narration.",
+    );
+
+    expect(assertNoPendingNarrationBeforeNewTurnMock).toHaveBeenCalledWith({
+      campaignId: CAMPAIGN_ID,
+    });
+    expect(createTurnSagaMock).not.toHaveBeenCalled();
+    expect(buildSceneFrame).not.toHaveBeenCalled();
+  });
+
+  it("persists OracleDecision immediately after Oracle acceptance before tool loop and narration", async () => {
+    setupMocks();
+    setupScenePlanMocks({
+      gmRead: createGmReadMock({
+        path: "roll_oracle",
+        rollRequest: {
+          actorRef: "player-1",
+          question: "Can the hero force the gate?",
+          stakes: "Noise may draw attention.",
+          evidenceRefs: ["player-1"],
+        },
+      }),
+    });
+
+    const milestones: string[] = [];
+    vi.mocked(callOracle).mockImplementationOnce(async () => {
+      milestones.push("oracle accepted");
+      return mockOracleResult();
+    });
+    persistOracleDecisionMock.mockImplementationOnce(() => {
+      milestones.push("oracle decision persisted");
+      return { id: "oracle-decision-1", sagaId: "saga-1" };
+    });
+    vi.mocked(runGmToolLoop).mockImplementationOnce(async () => {
+      milestones.push("gm tool loop");
+      return {
+        intent: "Plan a concrete local scene mutation.",
+        text: "",
+        rawToolCalls: [],
+        stepResults: [],
+      } as never;
+    });
+
+    const events: TurnEvent[] = [];
+    for await (const event of processTurn(createTestOptions())) {
+      if (event.type === "oracle_result") {
+        milestones.push("oracle_result event");
+      }
+      events.push(event);
+    }
+
+    expect(persistOracleDecisionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: "Can the hero force the gate?",
+        stakes: "Noise may draw attention.",
+        outcome: "strong_hit",
+        baseWorldVersion: 7,
+        acceptedWorldVersion: 7,
+      }),
+    );
+    expect(milestones).toEqual([
+      "oracle accepted",
+      "oracle decision persisted",
+      "oracle_result event",
+      "gm tool loop",
+    ]);
+    expect(persistOracleDecisionMock.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(runVisibleNarrationWithPacketGuard).mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("persists SettledTurnPacket after packet construction and before final prompt/narration", async () => {
+    setupMocks();
+    setupScenePlanMocks();
+
+    await collectEvents(processTurn(createTestOptions()));
+
+    expect(claimTurnSagaWorkerMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sagaId: "saga-1",
+        workerId: expect.stringContaining("live-turn-narration:"),
+        allowStaleReclaim: false,
+      }),
+    );
+    expect(persistSettledTurnPacketMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lockToken: "lock-token",
+        canonicalTurnPacket: expect.any(Object),
+        narratorPacket: expect.any(Object),
+        requiresNarration: true,
+        baseWorldVersion: 7,
+        resultWorldVersion: 7,
+      }),
+    );
+    expect(vi.mocked(buildNarratorPacket).mock.invocationCallOrder[0]).toBeLessThan(
+      persistSettledTurnPacketMock.mock.invocationCallOrder[0]!,
+    );
+    expect(persistSettledTurnPacketMock.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(assembleFinalNarrationPrompt).mock.invocationCallOrder[0]!,
+    );
+    expect(persistSettledTurnPacketMock.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(runVisibleNarrationWithPacketGuard).mock.invocationCallOrder[0]!,
+    );
+    expect(heartbeatTurnSagaWorkerMock).toHaveBeenCalledWith({
+      sagaId: "saga-1",
+      lockToken: "lock-token",
+    });
+    expect(recordNarratorAttemptMock).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "succeeded", lockToken: "lock-token" }),
+    );
+    expect(markTurnSagaFinalizedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ lockToken: "lock-token" }),
+    );
   });
 
   it.each([
@@ -3457,6 +3936,35 @@ describe("processTurn ScenePlan path", () => {
       expect(packetArgs?.canonicalTurnPacket?.responses?.[0]?.summary).toContain(
         expectedGuidance as string,
       );
+      expect(persistSettledTurnPacketMock).toHaveBeenCalled();
+      expect(runVisibleNarrationWithPacketGuard).toHaveBeenCalled();
+      expect(sagaStatusTransitions()).toEqual([
+        "collecting_context",
+        "pre_turn_catchup",
+        "gm_reading",
+        "oracle_adjudicating",
+        "tool_loop_running",
+        "local_reaction_running",
+        "world_consequence_running",
+        "narrator_rendering",
+      ]);
+    } else {
+      expect(persistSettledTurnPacketMock).not.toHaveBeenCalled();
+      expect(runVisibleNarrationWithPacketGuard).not.toHaveBeenCalled();
+      expect(markTurnSagaFinalizedMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          reason: "Clarification returned without settled narration packet.",
+        }),
+      );
+      expect(sagaStatusTransitions()).toEqual([
+        "collecting_context",
+        "pre_turn_catchup",
+        "gm_reading",
+        "oracle_adjudicating",
+        "tool_loop_running",
+        "local_reaction_running",
+        "world_consequence_running",
+      ]);
     }
   });
 
@@ -3484,12 +3992,119 @@ describe("processTurn ScenePlan path", () => {
     const events = await collectEvents(processTurn(createTestOptions()));
 
     expect(runVisibleNarrationWithPacketGuard).toHaveBeenCalledTimes(2);
+    expect(recordNarratorAttemptMock).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "failed" }),
+    );
+    expect(recordNarratorAttemptMock).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "succeeded" }),
+    );
+    expect(markTurnSagaFinalizedMock).toHaveBeenCalled();
     expect(String(vi.mocked(generateText).mock.calls.at(-1)?.[0]?.prompt)).toContain(
       "[PACKET VISIBILITY RECOVERY]",
     );
     expect(assistantAppendCallOrder()).toBeDefined();
     expect(events.some((event) => event.type === "narrative")).toBe(true);
     expect(events.some((event) => event.type === "done")).toBe(true);
+  });
+
+  it("finalizes saga only after assistant append and normal post-narration tail", async () => {
+    setupMocks();
+    setupScenePlanMocks();
+    const onPostTurn = vi.fn();
+
+    await collectEvents(processTurn(createTestOptions({ onPostTurn })));
+
+    const markOrder = markTurnSagaFinalizedMock.mock.invocationCallOrder[0]!;
+    expect(assistantAppendCallOrder()).toBeLessThan(markOrder);
+    expect(vi.mocked(incrementTick).mock.invocationCallOrder[0]).toBeLessThan(markOrder);
+    expect(onPostTurn.mock.invocationCallOrder[0]).toBeLessThan(markOrder);
+    expect(onPostTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sagaId: "saga-1",
+        narratorAttemptId: successfulNarratorAttemptId(),
+        idempotencyKey: expect.stringContaining("post-turn:"),
+      }),
+    );
+    expect(markTurnSagaFinalizedMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        narratorAttemptId: successfulNarratorAttemptId(),
+        reason: "Final narration completed from settled packet.",
+      }),
+    );
+  });
+
+  it("records a durable assistant append checkpoint on the live path", async () => {
+    setupMocks();
+    setupScenePlanMocks();
+
+    await collectEvents(processTurn(createTestOptions()));
+
+    const narratorAttemptId = successfulNarratorAttemptId();
+    expect(mergeTurnSagaProvenanceMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sagaId: "saga-1",
+        lockToken: "lock-token",
+        patch: expect.objectContaining({
+          pendingNarrationResume: expect.objectContaining({
+            assistantAppend: expect.objectContaining({
+              narratorAttemptId,
+              deduped: false,
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(assistantAppendCallOrder()).toBeLessThan(
+      mergeTurnSagaProvenanceMock.mock.invocationCallOrder[0]!,
+    );
+    expect(mergeTurnSagaProvenanceMock.mock.invocationCallOrder[0]!).toBeLessThan(
+      markTurnSagaFinalizedMock.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("aborts post-narration tail side effects when the live narration lock is lost", async () => {
+    setupMocks();
+    setupScenePlanMocks();
+    const sagaState = setupTurnSagaMocks();
+    const onPostTurn = vi.fn();
+    let heartbeatCount = 0;
+    heartbeatTurnSagaWorkerMock.mockImplementation((input: { lockToken: string }) => {
+      heartbeatCount += 1;
+      if (heartbeatCount >= 4) {
+        throw new Error("lock conflict");
+      }
+      return sagaState.saga;
+    });
+
+    await expect(collectEvents(processTurn(createTestOptions({ onPostTurn })))).rejects.toThrow(
+      PendingSettledTurnNarrationError,
+    );
+
+    expect(appendChatMessages).toHaveBeenCalledWith(CAMPAIGN_ID, [
+      expect.objectContaining({ role: "assistant", content: expect.any(String) }),
+    ]);
+    expect(incrementTick).not.toHaveBeenCalled();
+    expect(advanceCampaignTick).not.toHaveBeenCalled();
+    expect(onPostTurn).not.toHaveBeenCalled();
+    expect(markTurnSagaFinalizedMock).not.toHaveBeenCalled();
+  });
+
+  it("surfaces generic post-settled live failures as typed pending narration", async () => {
+    setupMocks();
+    setupScenePlanMocks();
+    const onPostTurn = vi.fn(() => {
+      throw new Error("post-tail crashed after settled packet");
+    });
+
+    await expect(collectEvents(processTurn(createTestOptions({ onPostTurn })))).rejects.toThrow(
+      PendingSettledTurnNarrationError,
+    );
+
+    expect(persistSettledTurnPacketMock).toHaveBeenCalled();
+    expect(appendChatMessages).toHaveBeenCalledWith(CAMPAIGN_ID, [
+      expect.objectContaining({ role: "assistant", content: expect.any(String) }),
+    ]);
+    expect(markTurnSagaFinalizedMock).not.toHaveBeenCalled();
   });
 
   it("throws Storyteller output guard failures only after recovery regeneration also fails", async () => {
@@ -3504,11 +4119,576 @@ describe("processTurn ScenePlan path", () => {
       for await (const event of processTurn(createTestOptions())) {
         events.push(event);
       }
-    })()).rejects.toThrow("Visible narration violated packet visibility constraints after recovery.");
+    })()).rejects.toThrow(NarrationRepairExhaustedError);
 
     expect(assistantAppendCallOrder()).toBeUndefined();
+    expect(persistSettledTurnPacketMock).toHaveBeenCalled();
+    expect(recordNarratorAttemptMock).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "failed" }),
+    );
+    expect(recordNarratorAttemptMock).toHaveBeenCalledTimes(2);
     expect(events.some((event) => event.type === "narrative")).toBe(false);
     expect(events.some((event) => event.type === "done")).toBe(false);
+  });
+
+  it("surfaces pre-settled world consequence blockers without starting paid or narration work", async () => {
+    setupMocks();
+    setupTurnSagaMocks({ status: "world_consequence_running", turnId: "pending-turn" });
+    getSettledTurnPacketMock.mockReturnValue(null);
+
+    const events = await collectEvents(
+      resumePendingTurnNarration({
+        campaignId: CAMPAIGN_ID,
+        turnId: "pending-turn",
+        storytellerProvider: createTestOptions().storytellerProvider,
+        storytellerTemperature: 0.8,
+        storytellerMaxTokens: 2000,
+      }),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "error",
+        data: expect.objectContaining({
+          pendingNarration: true,
+          pendingSettledTurnPacket: true,
+          resumable: false,
+          sagaId: "saga-1",
+          turnId: "pending-turn",
+          status: "world_consequence_running",
+        }),
+      },
+    ]);
+    expect(claimTurnSagaWorkerMock).not.toHaveBeenCalled();
+    expect(assembleFinalNarrationPrompt).not.toHaveBeenCalled();
+    expect(runVisibleNarrationWithPacketGuard).not.toHaveBeenCalled();
+    expect(generateText).not.toHaveBeenCalled();
+    expect(callOracle).not.toHaveBeenCalled();
+    expect(runGmToolLoop).not.toHaveBeenCalled();
+  });
+
+  it("repairs a world consequence saga that already has a settled packet before narration", async () => {
+    setupMocks();
+    setupTurnSagaMocks({ status: "world_consequence_running", turnId: "pending-turn" });
+    vi.mocked(runVisibleNarrationWithPacketGuard).mockImplementation(async (args) => {
+      const text = await args.generateNarration({ attempt: 1, guardAddendum: null });
+      return {
+        text,
+        attempts: 1,
+        retried: false,
+        validation: { ok: true, violations: [] },
+        guardAddendum: null,
+      };
+    });
+    vi.mocked(generateText).mockResolvedValue({
+      text: "The recovered packet narrates cleanly.",
+    } as never);
+
+    const events = await collectEvents(
+      resumePendingTurnNarration({
+        campaignId: CAMPAIGN_ID,
+        turnId: "pending-turn",
+        storytellerProvider: createTestOptions().storytellerProvider,
+        storytellerTemperature: 0.8,
+        storytellerMaxTokens: 2000,
+      }),
+    );
+
+    expect(sagaStatusTransitions()).toEqual([
+      "resolved_pending_narration",
+      "narrator_rendering",
+    ]);
+    expect(runVisibleNarrationWithPacketGuard).toHaveBeenCalledTimes(1);
+    expect(recordNarratorAttemptMock).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "succeeded", lockToken: "lock-token" }),
+    );
+    expect(events).toEqual(
+      expect.arrayContaining([
+        { type: "narrative", data: { text: "The recovered packet narrates cleanly." } },
+        { type: "done", data: { tick: 6, resumed: true } },
+      ]),
+    );
+    expect(callOracle).not.toHaveBeenCalled();
+    expect(runGmToolLoop).not.toHaveBeenCalled();
+  });
+
+  it("resumes pending narration from settled artifacts without paid resolution work", async () => {
+    setupMocks();
+    setupTurnSagaMocks({ status: "resolved_pending_narration", turnId: "pending-turn" });
+    const onPostTurn = vi.fn();
+    vi.mocked(runVisibleNarrationWithPacketGuard).mockImplementation(async (args) => {
+      const text = await args.generateNarration({ attempt: 1, guardAddendum: null });
+      return {
+        text,
+        attempts: 1,
+        retried: false,
+        validation: { ok: true, violations: [] },
+        guardAddendum: null,
+      };
+    });
+    vi.mocked(generateText).mockResolvedValue({
+      text: "The settled scene resolves cleanly.",
+      reasoningText: "Resume reasoning stays private by default.",
+    } as never);
+
+    const events = await collectEvents(
+      resumePendingTurnNarration({
+        campaignId: CAMPAIGN_ID,
+        turnId: "pending-turn",
+        storytellerProvider: createTestOptions().storytellerProvider,
+        storytellerTemperature: 0.8,
+        storytellerMaxTokens: 2000,
+        onPostTurn,
+      }),
+    );
+
+    expect(getTurnSagaMock).toHaveBeenCalledWith({ campaignId: CAMPAIGN_ID, turnId: "pending-turn" });
+    expect(getSettledTurnPacketMock).toHaveBeenCalledWith({ campaignId: CAMPAIGN_ID, turnId: "pending-turn" });
+    expect(claimTurnSagaWorkerMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        campaignId: CAMPAIGN_ID,
+        turnId: "pending-turn",
+        allowStaleReclaim: true,
+        staleAfterMs: 300_000,
+      }),
+    );
+    expect(heartbeatTurnSagaWorkerMock).toHaveBeenCalledWith({
+      sagaId: "saga-1",
+      lockToken: "lock-token",
+    });
+    expect(releaseTurnSagaWorkerMock).toHaveBeenCalledWith({
+      sagaId: "saga-1",
+      lockToken: "lock-token",
+    });
+    expect(runVisibleNarrationWithPacketGuard).toHaveBeenCalledTimes(1);
+    expect(recordNarratorAttemptMock).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "succeeded", lockToken: "lock-token" }),
+    );
+    expect(callOracle).not.toHaveBeenCalled();
+    expect(runGmToolLoop).not.toHaveBeenCalled();
+    expect(runRequiredActorDecisionPassMock).not.toHaveBeenCalled();
+    expect(resolveDueWorldWorkForScopeMock).not.toHaveBeenCalled();
+    expect(incrementTick).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(onPostTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tick: 6,
+        narrativeText: "The settled scene resolves cleanly.",
+        sagaId: "saga-1",
+        narratorAttemptId: successfulNarratorAttemptId(),
+        idempotencyKey: expect.stringMatching(
+          /^post-turn:test-campaign-123:pending-turn:saga-1:attempt-\d+:6$/,
+        ),
+      }),
+    );
+    const markOrder = markTurnSagaFinalizedIfNeededMock.mock.invocationCallOrder[0]!;
+    expect(assistantAppendCallOrder()).toBeLessThan(markOrder);
+    expect(vi.mocked(incrementTick).mock.invocationCallOrder[0]).toBeLessThan(markOrder);
+    expect(onPostTurn.mock.invocationCallOrder[0]).toBeLessThan(markOrder);
+    expect(markTurnSagaFinalizedIfNeededMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        narratorAttemptId: successfulNarratorAttemptId(),
+        reason: "Final narration completed from settled packet.",
+        lockToken: "lock-token",
+      }),
+    );
+    expect(appendChatMessages).toHaveBeenCalledWith(CAMPAIGN_ID, [
+      expect.objectContaining({
+        role: "assistant",
+        content: "The settled scene resolves cleanly.",
+      }),
+    ]);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        { type: "narrative", data: { text: "The settled scene resolves cleanly." } },
+        { type: "finalizing_turn", data: { tick: 6, stage: "rollback_critical" } },
+        {
+          type: "scene-settling",
+          data: { stage: "scene-settling", phase: "cleaning-transient-scene", tick: 6 },
+        },
+        { type: "done", data: { tick: 6, resumed: true } },
+      ]),
+    );
+  });
+
+  it("refuses a locked pending narration before calling Storyteller", async () => {
+    setupMocks();
+    setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
+    claimTurnSagaWorkerMock.mockImplementationOnce(() => {
+      throw new Error("Turn saga saga-1 is already claimed by worker worker-1.");
+    });
+
+    await expect(collectEvents(
+      resumePendingTurnNarration({
+        campaignId: CAMPAIGN_ID,
+        turnId: "pending-turn",
+        storytellerProvider: createTestOptions().storytellerProvider,
+        storytellerTemperature: 0.8,
+        storytellerMaxTokens: 2000,
+      }),
+    )).rejects.toThrow(/already claimed/);
+
+    expect(findLatestSuccessfulNarratorAttemptMock).not.toHaveBeenCalled();
+    expect(runVisibleNarrationWithPacketGuard).not.toHaveBeenCalled();
+    expect(generateText).not.toHaveBeenCalled();
+    expect(releaseTurnSagaWorkerMock).not.toHaveBeenCalled();
+  });
+
+  it("releases the resume lock when claimed work fails before finalization", async () => {
+    setupMocks();
+    setupTurnSagaMocks({ status: "resolved_pending_narration", turnId: "pending-turn" });
+    getSettledTurnPacketMock.mockReturnValueOnce(null);
+
+    await expect(collectEvents(
+      resumePendingTurnNarration({
+        campaignId: CAMPAIGN_ID,
+        turnId: "pending-turn",
+        storytellerProvider: createTestOptions().storytellerProvider,
+        storytellerTemperature: 0.8,
+        storytellerMaxTokens: 2000,
+      }),
+    )).rejects.toThrow("SettledTurnPacket not found");
+
+    expect(heartbeatTurnSagaWorkerMock).toHaveBeenCalledWith({
+      sagaId: "saga-1",
+      lockToken: "lock-token",
+    });
+    expect(releaseTurnSagaWorkerMock).toHaveBeenCalledWith({
+      sagaId: "saga-1",
+      lockToken: "lock-token",
+    });
+    expect(runVisibleNarrationWithPacketGuard).not.toHaveBeenCalled();
+  });
+
+  it("reuses an existing successful narrator attempt on resume without calling Storyteller", async () => {
+    setupMocks();
+    setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
+    findLatestSuccessfulNarratorAttemptMock.mockReturnValue({
+      id: "attempt-existing",
+      campaignId: CAMPAIGN_ID,
+      sagaId: "saga-1",
+      settledTurnPacketId: "packet-1",
+      turnId: "pending-turn",
+      attemptIndex: 2,
+      status: "succeeded",
+      groundingResult: { ok: true },
+      finalText: "The already rendered narration lands cleanly.",
+      failureReason: null,
+      createdAt: 10,
+      updatedAt: 10,
+    });
+
+    const events = await collectEvents(
+      resumePendingTurnNarration({
+        campaignId: CAMPAIGN_ID,
+        turnId: "pending-turn",
+        storytellerProvider: createTestOptions().storytellerProvider,
+        storytellerTemperature: 0.8,
+        storytellerMaxTokens: 2000,
+      }),
+    );
+
+    expect(assembleFinalNarrationPrompt).not.toHaveBeenCalled();
+    expect(runVisibleNarrationWithPacketGuard).not.toHaveBeenCalled();
+    expect(generateText).not.toHaveBeenCalled();
+    expect(recordNarratorAttemptMock).not.toHaveBeenCalled();
+    expect(appendChatMessages).toHaveBeenCalledWith(CAMPAIGN_ID, [
+      {
+        role: "assistant",
+        content: "The already rendered narration lands cleanly.",
+        metadata: {
+          resumeNarration: {
+            sagaId: "saga-1",
+            narratorAttemptId: "attempt-existing",
+          },
+        },
+      },
+    ]);
+    expect(markTurnSagaFinalizedIfNeededMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sagaId: "saga-1",
+        narratorAttemptId: "attempt-existing",
+        reason: "Final narration resumed from successful narrator attempt.",
+      }),
+    );
+    expect(events).toEqual(
+      expect.arrayContaining([
+        { type: "narrative", data: { text: "The already rendered narration lands cleanly." } },
+        { type: "done", data: { tick: 6, resumed: true } },
+      ]),
+    );
+  });
+
+  it("appends current resume narration when older identical assistant text has no resume key", async () => {
+    setupMocks();
+    setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
+    findLatestSuccessfulNarratorAttemptMock.mockReturnValue({
+      id: "attempt-existing",
+      campaignId: CAMPAIGN_ID,
+      sagaId: "saga-1",
+      settledTurnPacketId: "packet-1",
+      turnId: "pending-turn",
+      attemptIndex: 1,
+      status: "succeeded",
+      groundingResult: { ok: true },
+      finalText: "The assistant line is already in chat.",
+      failureReason: null,
+      createdAt: 10,
+      updatedAt: 10,
+    });
+    vi.mocked(getChatHistory).mockReturnValue([
+      { role: "user", content: "I wait." },
+      { role: "assistant", content: "The assistant line is already in chat." },
+    ]);
+
+    await collectEvents(
+      resumePendingTurnNarration({
+        campaignId: CAMPAIGN_ID,
+        turnId: "pending-turn",
+        storytellerProvider: createTestOptions().storytellerProvider,
+        storytellerTemperature: 0.8,
+        storytellerMaxTokens: 2000,
+      }),
+    );
+
+    expect(appendChatMessages).toHaveBeenCalledWith(CAMPAIGN_ID, [
+      {
+        role: "assistant",
+        content: "The assistant line is already in chat.",
+        metadata: {
+          resumeNarration: {
+            sagaId: "saga-1",
+            narratorAttemptId: "attempt-existing",
+          },
+        },
+      },
+    ]);
+    expect(mergeTurnSagaProvenanceMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        patch: expect.objectContaining({
+          pendingNarrationResume: expect.objectContaining({
+            assistantAppend: expect.objectContaining({
+              narratorAttemptId: "attempt-existing",
+              deduped: false,
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(markTurnSagaFinalizedIfNeededMock).toHaveBeenCalled();
+  });
+
+  it("suppresses duplicate resume narration when same saga and narrator attempt key exists", async () => {
+    setupMocks();
+    setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
+    findLatestSuccessfulNarratorAttemptMock.mockReturnValue({
+      id: "attempt-existing",
+      campaignId: CAMPAIGN_ID,
+      sagaId: "saga-1",
+      settledTurnPacketId: "packet-1",
+      turnId: "pending-turn",
+      attemptIndex: 1,
+      status: "succeeded",
+      groundingResult: { ok: true },
+      finalText: "The assistant line is already in chat.",
+      failureReason: null,
+      createdAt: 10,
+      updatedAt: 10,
+    });
+    vi.mocked(getChatHistory).mockReturnValue([
+      { role: "user", content: "I wait." },
+      {
+        role: "assistant",
+        content: "Different stored wording still owns this exact append key.",
+        metadata: {
+          resumeNarration: {
+            sagaId: "saga-1",
+            narratorAttemptId: "attempt-existing",
+          },
+        },
+      },
+    ]);
+
+    await collectEvents(
+      resumePendingTurnNarration({
+        campaignId: CAMPAIGN_ID,
+        turnId: "pending-turn",
+        storytellerProvider: createTestOptions().storytellerProvider,
+        storytellerTemperature: 0.8,
+        storytellerMaxTokens: 2000,
+      }),
+    );
+
+    expect(appendChatMessages).not.toHaveBeenCalledWith(CAMPAIGN_ID, [
+      expect.objectContaining({
+        role: "assistant",
+        content: "The assistant line is already in chat.",
+      }),
+    ]);
+    expect(mergeTurnSagaProvenanceMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        patch: expect.objectContaining({
+          pendingNarrationResume: expect.objectContaining({
+            assistantAppend: expect.objectContaining({
+              narratorAttemptId: "attempt-existing",
+              deduped: true,
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(markTurnSagaFinalizedIfNeededMock).toHaveBeenCalled();
+  });
+
+  it("writes saga and narrator attempt metadata on successful resume append", async () => {
+    setupMocks();
+    setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
+    findLatestSuccessfulNarratorAttemptMock.mockReturnValue({
+      id: "attempt-existing",
+      campaignId: CAMPAIGN_ID,
+      sagaId: "saga-1",
+      settledTurnPacketId: "packet-1",
+      turnId: "pending-turn",
+      attemptIndex: 1,
+      status: "succeeded",
+      groundingResult: { ok: true },
+      finalText: "Metadata lands with the stored assistant line.",
+      failureReason: null,
+      createdAt: 10,
+      updatedAt: 10,
+    });
+
+    await collectEvents(
+      resumePendingTurnNarration({
+        campaignId: CAMPAIGN_ID,
+        turnId: "pending-turn",
+        storytellerProvider: createTestOptions().storytellerProvider,
+        storytellerTemperature: 0.8,
+        storytellerMaxTokens: 2000,
+      }),
+    );
+
+    expect(appendChatMessages).toHaveBeenCalledWith(CAMPAIGN_ID, [
+      {
+        role: "assistant",
+        content: "Metadata lands with the stored assistant line.",
+        metadata: {
+          resumeNarration: {
+            sagaId: "saga-1",
+            narratorAttemptId: "attempt-existing",
+          },
+        },
+      },
+    ]);
+  });
+
+  it("skips post-narration tail when resume checkpoint already completed it", async () => {
+    setupMocks();
+    setupTurnSagaMocks({
+      status: "narrator_rendering",
+      turnId: "pending-turn",
+      provenance: {
+        pendingNarrationResume: {
+          assistantAppend: { narratorAttemptId: "attempt-existing", completedAt: 10 },
+          postNarrationTail: { narratorAttemptId: "attempt-existing", tick: 9, completedAt: 11 },
+        },
+      },
+    });
+    const onPostTurn = vi.fn();
+    findLatestSuccessfulNarratorAttemptMock.mockReturnValue({
+      id: "attempt-existing",
+      campaignId: CAMPAIGN_ID,
+      sagaId: "saga-1",
+      settledTurnPacketId: "packet-1",
+      turnId: "pending-turn",
+      attemptIndex: 1,
+      status: "succeeded",
+      groundingResult: { ok: true },
+      finalText: "Tail already ran once.",
+      failureReason: null,
+      createdAt: 10,
+      updatedAt: 10,
+    });
+
+    const events = await collectEvents(
+      resumePendingTurnNarration({
+        campaignId: CAMPAIGN_ID,
+        turnId: "pending-turn",
+        storytellerProvider: createTestOptions().storytellerProvider,
+        storytellerTemperature: 0.8,
+        storytellerMaxTokens: 2000,
+        onPostTurn,
+      }),
+    );
+
+    expect(onPostTurn).not.toHaveBeenCalled();
+    expect(incrementTick).not.toHaveBeenCalled();
+    expect(events.some((event) => event.type === "finalizing_turn")).toBe(false);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        { type: "done", data: { tick: 9, resumed: true } },
+      ]),
+    );
+    expect(markTurnSagaFinalizedIfNeededMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sagaId: "saga-1",
+        narratorAttemptId: "attempt-existing",
+      }),
+    );
+  });
+
+  it("resumes after normal tail crash without advancing tick again and keeps post-turn idempotency key", async () => {
+    setupMocks();
+    setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
+    findLatestSuccessfulNarratorAttemptMock.mockReturnValue({
+      id: "attempt-existing",
+      campaignId: CAMPAIGN_ID,
+      sagaId: "saga-1",
+      settledTurnPacketId: "packet-1",
+      turnId: "pending-turn",
+      attemptIndex: 1,
+      status: "succeeded",
+      groundingResult: { ok: true },
+      finalText: "Tail ran before finalization.",
+      failureReason: null,
+      createdAt: 10,
+      updatedAt: 10,
+    });
+    vi.mocked(readCampaignConfig).mockReturnValue({ currentTick: 6 } as never);
+    const onPostTurn = vi.fn();
+
+    const events = await collectEvents(
+      resumePendingTurnNarration({
+        campaignId: CAMPAIGN_ID,
+        turnId: "pending-turn",
+        storytellerProvider: createTestOptions().storytellerProvider,
+        storytellerTemperature: 0.8,
+        storytellerMaxTokens: 2000,
+        onPostTurn,
+      }),
+    );
+
+    expect(incrementTick).not.toHaveBeenCalled();
+    expect(advanceCampaignTick).not.toHaveBeenCalled();
+    expect(onPostTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tick: 6,
+        sagaId: "saga-1",
+        narratorAttemptId: "attempt-existing",
+        idempotencyKey: "post-turn:test-campaign-123:pending-turn:saga-1:attempt-existing:6",
+      }),
+    );
+    expect(markTurnSagaFinalizedIfNeededMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sagaId: "saga-1",
+        narratorAttemptId: "attempt-existing",
+      }),
+    );
+    expect(events).toEqual(
+      expect.arrayContaining([
+        { type: "finalizing_turn", data: { tick: 6, stage: "rollback_critical" } },
+        { type: "done", data: { tick: 6, resumed: true } },
+      ]),
+    );
   });
 
   it("keeps tick advance and onPostTurn after guarded visible narration", async () => {

@@ -1584,6 +1584,14 @@ describe("assemblePrompt", () => {
     expect(result.prompt).toContain("If NarratorPacket has no perceivable effects");
     expect(result.prompt).toContain("keep the beat alive through existing visible actors");
     expect(result.prompt).toContain("End on a concrete playable next moment");
+    expect(result.prompt).toContain("[NARRATION DRAFT CONTRACT]");
+    expect(result.prompt).toContain("[PACKET EVIDENCE IDS]");
+    for (const entry of narratorPacket.evidenceLedger ?? []) {
+      expect(result.prompt).toContain(`- ${entry.id}`);
+    }
+    expect(result.prompt).toContain(`- tool_result:${packetActionId}:log_event`);
+    expect(result.system).toContain("Return exactly one JSON object; the prose field must contain narrative prose only.");
+    expect(result.system).not.toContain("Your output must be narrative prose only.");
     expect(result.prompt).toContain("Iria keeps both palms open.");
     expect(result.prompt).toContain("Mira lowers the knife without dropping her guard.");
     expect(result.prompt).not.toContain("hiddenRationale");

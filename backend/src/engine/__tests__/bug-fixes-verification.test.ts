@@ -10,7 +10,10 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { sanitizeNarrative } from "../turn-processor.js";
+import {
+  detectVisibleNarrationFailures,
+  sanitizeNarrative,
+} from "../turn-processor.js";
 
 // ---------------------------------------------------------------------------
 // Bug 1: HP guard on Strong Hit
@@ -99,52 +102,65 @@ describe("Bug 3: NPC engagement rules in prompt", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Bug 4: Tool-call sanitization
+// Bug 4: Tool-call leak detection without silent sanitization
 // ---------------------------------------------------------------------------
-describe("Bug 4: Tool-call text sanitization", () => {
-  it("strips print(default_api.xxx(...)) patterns", () => {
+describe("Bug 4: Tool-call leak detection", () => {
+  const promptContext = {
+    system: "Visible narration system.",
+    prompt: "Write final visible narration.",
+  };
+
+  it("detects print(default_api.xxx(...)) patterns without removing them", () => {
     const dirty = 'The hero charged forward. print(default_api.offer_quick_actions(actions=[{"label":"Attack"}])) He drew his sword.';
     const clean = sanitizeNarrative(dirty);
-    expect(clean).not.toContain("print(");
-    expect(clean).not.toContain("default_api");
+    expect(clean).toContain("print(");
+    expect(clean).toContain("default_api");
     expect(clean).toContain("hero charged forward");
+    expect(detectVisibleNarrationFailures(dirty, promptContext)).toContain("residual_leak");
   });
 
-  it("strips bare default_api.xxx(...) calls", () => {
+  it("detects bare default_api.xxx(...) calls without removing them", () => {
     const dirty = 'The knight strikes! default_api.set_condition(entity="player", delta=-1) Blood sprays.';
     const clean = sanitizeNarrative(dirty);
-    expect(clean).not.toContain("default_api");
+    expect(clean).toContain("default_api");
     expect(clean).toContain("knight strikes");
+    expect(detectVisibleNarrationFailures(dirty, promptContext)).toContain("residual_leak");
   });
 
-  it("strips known tool names with arguments", () => {
+  it("detects known tool names with arguments without removing them", () => {
     const dirty = 'He moved. move_to(targetLocationName="Market Square") The market was busy.';
     const clean = sanitizeNarrative(dirty);
-    expect(clean).not.toContain("move_to(");
+    expect(clean).toContain("move_to(");
     expect(clean).toContain("He moved");
+    expect(detectVisibleNarrationFailures(dirty, promptContext)).toContain("residual_leak");
   });
 
-  it("strips catch-all function-call-like syntax", () => {
+  it("detects catch-all function-call-like syntax without removing it", () => {
     const dirty = 'The spell fired. unknown_tool(param="value", count=3) Sparks flew.';
     const clean = sanitizeNarrative(dirty);
-    expect(clean).not.toContain("unknown_tool(");
+    expect(clean).toContain("unknown_tool(");
     expect(clean).toContain("spell fired");
+    expect(detectVisibleNarrationFailures(dirty, promptContext)).toContain("residual_leak");
   });
 
-  it("strips add_tag, remove_tag, transfer_item patterns", () => {
+  it("detects add_tag, remove_tag, transfer_item patterns", () => {
     const dirty1 = 'Gained power. add_tag(entityName="player", entityType="player", tag="Strong") Amazing.';
     const dirty2 = 'Lost curse. remove_tag(entityName="player", entityType="player", tag="Cursed") Freedom.';
     const dirty3 = 'Got sword. transfer_item(itemName="Sword", targetName="player", targetType="character") Nice.';
 
-    expect(sanitizeNarrative(dirty1)).not.toContain("add_tag(");
-    expect(sanitizeNarrative(dirty2)).not.toContain("remove_tag(");
-    expect(sanitizeNarrative(dirty3)).not.toContain("transfer_item(");
+    expect(sanitizeNarrative(dirty1)).toContain("add_tag(");
+    expect(sanitizeNarrative(dirty2)).toContain("remove_tag(");
+    expect(sanitizeNarrative(dirty3)).toContain("transfer_item(");
+    expect(detectVisibleNarrationFailures(dirty1, promptContext)).toContain("residual_leak");
+    expect(detectVisibleNarrationFailures(dirty2, promptContext)).toContain("residual_leak");
+    expect(detectVisibleNarrationFailures(dirty3, promptContext)).toContain("residual_leak");
   });
 
-  it("strips bare print(...) wrapping", () => {
+  it("detects bare print(...) wrapping without removing it", () => {
     const dirty = 'Hero wins. print("victory") The crowd cheers.';
     const clean = sanitizeNarrative(dirty);
-    expect(clean).not.toContain('print("');
+    expect(clean).toContain('print("');
+    expect(detectVisibleNarrationFailures(dirty, promptContext)).toContain("residual_leak");
   });
 
   it("preserves normal narrative text with no tool calls", () => {
@@ -152,11 +168,13 @@ describe("Bug 4: Tool-call text sanitization", () => {
     expect(sanitizeNarrative(clean)).toBe(clean);
   });
 
-  it("strips leaked section headers", () => {
+  it("detects leaked section headers without truncating later content", () => {
     const dirty = "The hero entered the tavern. [NPC STATES] Name: Bob, Tags: [Friendly]";
     const clean = sanitizeNarrative(dirty);
-    expect(clean).not.toContain("[NPC STATES]");
+    expect(clean).toContain("[NPC STATES]");
+    expect(clean).toContain("Name: Bob");
     expect(clean).toContain("entered the tavern");
+    expect(detectVisibleNarrationFailures(dirty, promptContext)).toContain("residual_leak");
   });
 });
 

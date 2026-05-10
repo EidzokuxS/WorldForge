@@ -1,11 +1,12 @@
 import type { ProviderConfig } from "../ai/provider-registry.js";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import {
   factionCommandNodes,
   factionReports,
   factionResources,
   factions,
+  simulationProposals,
 } from "../db/schema.js";
 import {
   queueSimulationJob,
@@ -18,6 +19,7 @@ import {
 } from "./actor-scheduler.js";
 import {
   createSimulationProposal,
+  parseSimulationProposalPayload,
   type CreatedSimulationProposal,
   type SimulationProposalWriteScope,
 } from "./simulation-proposal.js";
@@ -32,6 +34,7 @@ export interface PostTurnSimulationQueueInput {
   playerSceneScopeId?: string | null;
   route?: string;
   interval?: number;
+  idempotencyKey?: string;
 }
 
 export interface PostTurnSimulationQueueResult {
@@ -107,13 +110,22 @@ function enqueueProposal(input: {
   readSet: readonly string[];
   writeScopes: readonly SimulationProposalWriteScope[];
   preconditions?: readonly string[];
+  idempotencyKey?: string;
   payload: unknown;
 }): CreatedSimulationProposal {
+  const existing = input.idempotencyKey
+    ? findReusableProposalByIdempotencyKey(input.campaignId, input.idempotencyKey)
+    : null;
+  if (existing) {
+    return existing;
+  }
+
   const jobId = queueSimulationJob({
     campaignId: input.campaignId,
     jobType: input.jobType,
     baseWorldVersion: input.baseWorldVersion,
     sourceEntity: input.sourceEntity,
+    idempotencyKey: input.idempotencyKey,
     priority: input.priority ?? 0,
     payload: input.payload,
   });
@@ -124,6 +136,7 @@ function enqueueProposal(input: {
     baseWorldVersion: input.baseWorldVersion,
     sourceEntity: input.sourceEntity,
     jobId,
+    idempotencyKey: input.idempotencyKey,
     summary: input.summary,
     readSet: input.readSet,
     writeScopes: input.writeScopes,
@@ -132,9 +145,53 @@ function enqueueProposal(input: {
       source: "post-turn-simulation-queue",
       tick: input.tick,
       route: input.route,
+      idempotencyKey: input.idempotencyKey,
     },
     data: input.payload,
   });
+}
+
+function proposalIdempotencyKey(input: {
+  rootKey?: string;
+  proposalType: string;
+  sourceEntity: AuthoritySourceEntity;
+}): string | undefined {
+  if (!input.rootKey) {
+    return undefined;
+  }
+  return [
+    input.rootKey,
+    input.proposalType,
+    input.sourceEntity.type,
+    input.sourceEntity.id ?? "none",
+  ].join(":");
+}
+
+function findReusableProposalByIdempotencyKey(
+  campaignId: string,
+  idempotencyKey: string,
+): CreatedSimulationProposal | null {
+  const rows = getDb()
+    .select()
+    .from(simulationProposals)
+    .where(and(
+      eq(simulationProposals.campaignId, campaignId),
+      eq(simulationProposals.idempotencyKey, idempotencyKey),
+    ))
+    .get();
+
+  if (!rows) {
+    return null;
+  }
+  const payload = parseSimulationProposalPayload(rows.payload);
+  return {
+    proposalId: rows.id,
+    campaignId: rows.campaignId,
+    proposalType: rows.proposalType,
+    baseWorldVersion: rows.baseWorldVersion,
+    writeScopes: payload.writeScopes,
+    status: rows.status,
+  };
 }
 
 export function queuePostTurnSimulationProposals(
@@ -170,6 +227,14 @@ export function queuePostTurnSimulationProposals(
             ? "key_actor_deterministic_continuation"
             : "key_actor_decision",
         sourceEntity: { type: "npc", id: schedule.actorId },
+        idempotencyKey: proposalIdempotencyKey({
+          rootKey: input.idempotencyKey,
+          proposalType:
+            schedule.route === "deterministic_continuation"
+              ? "key_actor_deterministic_continuation"
+              : "key_actor_decision",
+          sourceEntity: { type: "npc", id: schedule.actorId },
+        }),
         priority: schedule.signals[0]?.priority ?? 5,
         tick: input.tick,
         route: input.route,
@@ -200,6 +265,11 @@ export function queuePostTurnSimulationProposals(
         jobType: "npc_offscreen_tick",
         proposalType: "npc_offscreen_updates",
         sourceEntity: { type: "system", id: "npc-offscreen" },
+        idempotencyKey: proposalIdempotencyKey({
+          rootKey: input.idempotencyKey,
+          proposalType: "npc_offscreen_updates",
+          sourceEntity: { type: "system", id: "npc-offscreen" },
+        }),
         priority: 10,
         tick: input.tick,
         route: input.route,
@@ -229,6 +299,11 @@ export function queuePostTurnSimulationProposals(
       jobType: "npc_reflection_scan",
       proposalType: "npc_reflection_updates",
       sourceEntity: { type: "system", id: "npc-reflection" },
+      idempotencyKey: proposalIdempotencyKey({
+        rootKey: input.idempotencyKey,
+        proposalType: "npc_reflection_updates",
+        sourceEntity: { type: "system", id: "npc-reflection" },
+      }),
       priority: 5,
       tick: input.tick,
       route: input.route,
@@ -252,6 +327,11 @@ export function queuePostTurnSimulationProposals(
         jobType: "faction_command_tick",
         proposalType: "faction_command_updates",
         sourceEntity: { type: "system", id: "faction-command-network" },
+        idempotencyKey: proposalIdempotencyKey({
+          rootKey: input.idempotencyKey,
+          proposalType: "faction_command_updates",
+          sourceEntity: { type: "system", id: "faction-command-network" },
+        }),
         priority: 1,
         tick: input.tick,
         route: input.route,

@@ -6,6 +6,7 @@
  */
 
 import { generateText } from "ai";
+import type { ChatMessage } from "@worldforge/shared";
 import { extractReasoningText, normalizeReasoningText } from "../ai/extract-reasoning-text.js";
 import { safeGenerateObject as generateObject } from "../ai/generate-object-safe.js";
 import { randomUUID } from "node:crypto";
@@ -50,7 +51,6 @@ import {
 import {
   assembleAuthoritativeScene,
   buildSceneDirectionSeed,
-  collapseRepeatedNarrationBlocks,
   type SceneAssembly,
 } from "./scene-assembly.js";
 import {
@@ -98,8 +98,32 @@ import {
   type CanonicalTurnPacketEffect,
   type CanonicalTurnPacketEvent,
   type CanonicalTurnPacketResponse,
+  type NarratorPacket,
 } from "./narrator-packet.js";
 import { runVisibleNarrationWithPacketGuard } from "./visible-narration-output-guard.js";
+import { readWorldClock } from "./living-world-authority.js";
+import {
+  claimTurnSagaWorker,
+  createTurnSaga,
+  assertNoPendingNarrationBeforeNewTurn,
+  findLatestSuccessfulNarratorAttempt,
+  getSettledTurnPacket,
+  getTurnSaga,
+  heartbeatTurnSagaWorker,
+  markTurnSagaFinalized,
+  markTurnSagaFinalizedIfNeeded,
+  mergeTurnSagaProvenance,
+  persistOracleDecision,
+  persistSettledTurnPacket,
+  PendingSettledTurnNarrationError,
+  PENDING_NARRATION_STATUSES,
+  recordNarratorAttempt,
+  releaseTurnSagaWorker,
+  transitionTurnSagaStatus,
+  type SettledTurnPacketRecord,
+  type TurnSagaRecord,
+  type TurnSagaStatus,
+} from "./turn-saga.js";
 import {
   buildScopedForecastExcerpt,
   loadWorldTrajectoryForecast,
@@ -114,12 +138,25 @@ import { cleanupTransientSceneObjects } from "./transient-scene-lifecycle.js";
 
 const log = createLogger("turn-processor");
 const VISIBLE_NARRATION_TRANSPORT_RETRY_LIMIT = 2;
+const PENDING_NARRATION_RESUME_CHECKPOINT_KEY = "pendingNarrationResume";
+const PENDING_NARRATION_WORKER_STALE_AFTER_MS = 5 * 60_000;
+const PENDING_NARRATION_WORKER_HEARTBEAT_MS = 60_000;
 const FINAL_VISIBLE_PACKET_GUARD_RECOVERY_ADDENDUM = [
   "The previous final visible narration failed packet visibility validation after its internal retries.",
   "Generate a fresh final narration from the same authoritative player-facing packet.",
   "Do not preserve wording from the failed draft.",
   "Omit any identity, fact marker, or private/source-boundary wording that is not explicitly player-visible in the packet.",
 ].join("\n");
+
+export class NarrationRepairExhaustedError extends Error {
+  constructor(
+    message: string,
+    public readonly causeError?: unknown,
+  ) {
+    super(message);
+    this.name = "NarrationRepairExhaustedError";
+  }
+}
 
 // -- Types --------------------------------------------------------------------
 
@@ -163,6 +200,17 @@ export interface OpeningSceneOptions {
   contextWindow?: number;
 }
 
+export interface ResumePendingNarrationOptions {
+  campaignId: string;
+  turnId: string;
+  storytellerProvider: ProviderConfig;
+  storytellerTemperature: number;
+  storytellerMaxTokens: number;
+  embedderResult?: ResolveResult;
+  contextWindow?: number;
+  onPostTurn?: (summary: TurnSummary) => void | Promise<void>;
+}
+
 export interface HiddenTurnSummary {
   currentTick: number;
   predictedTick: number;
@@ -176,6 +224,10 @@ export interface HiddenTurnSummary {
 }
 
 export interface TurnSummary {
+  turnId?: string;
+  sagaId?: string;
+  narratorAttemptId?: string;
+  idempotencyKey?: string;
   tick: number;
   oracleResult: OracleResult | null;
   toolCalls: Array<{ tool: string; args: unknown; result: unknown }>;
@@ -402,12 +454,6 @@ const LEAKED_HEADERS = [
   "[RELATIONSHIPS]",
 ];
 
-/**
- * Patterns that match tool-call syntax leaked into prose by models like Gemini Flash.
- * Examples:
- *   print(default_api.offer_quick_actions(actions=[...]))
- *   default_api.set_condition(entity="player", delta=-1)
- */
 const TOOL_CALL_LEAK_PATTERNS: RegExp[] = [
   // print(default_api.xxx(...)) — may span multiple lines
   /print\s*\(\s*default_api\.\w+\s*\([^)]*\)\s*\)/gs,
@@ -422,29 +468,7 @@ const TOOL_CALL_LEAK_PATTERNS: RegExp[] = [
 ];
 
 export function sanitizeNarrative(raw: string): string {
-  let text = raw;
-
-  // 1. Strip tool-call syntax that leaked into prose
-  for (const pattern of TOOL_CALL_LEAK_PATTERNS) {
-    text = text.replace(pattern, "");
-  }
-
-  // 2. Find the earliest occurrence of any leaked header and truncate
-  let earliestIdx = text.length;
-  for (const header of LEAKED_HEADERS) {
-    const idx = text.indexOf(header);
-    if (idx !== -1 && idx < earliestIdx) {
-      earliestIdx = idx;
-    }
-  }
-  if (earliestIdx < text.length) {
-    text = text.slice(0, earliestIdx);
-  }
-
-  // 3. Collapse excessive whitespace left by removals
-  text = text.replace(/\n{3,}/g, "\n\n");
-
-  return text.trim();
+  return raw.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 type VisibleNarrationFailure =
@@ -452,6 +476,11 @@ type VisibleNarrationFailure =
   | "residual_leak"
   | "instruction_echo"
   | "slop_cluster";
+
+const RETRY_PRIORITY_VISIBLE_NARRATION_FAILURES = new Set<VisibleNarrationFailure>([
+  "residual_leak",
+  "instruction_echo",
+]);
 
 const HIGH_SIGNAL_SLOP_PATTERNS: ReadonlyArray<{ code: string; pattern: RegExp }> = [
   {
@@ -471,7 +500,7 @@ const HIGH_SIGNAL_SLOP_PATTERNS: ReadonlyArray<{ code: string; pattern: RegExp }
 ];
 
 function applyVisibleNarrationFilters(raw: string): string {
-  return collapseRepeatedNarrationBlocks(sanitizeNarrative(raw));
+  return sanitizeNarrative(raw);
 }
 
 function normalizeNarrationFingerprint(text: string): string {
@@ -611,6 +640,12 @@ function buildVisibleNarrationRetryAddendum(
   return `\n\n[FINAL VISIBLE PASS CORRECTION]\n${guidance.map((line) => `- ${line}`).join("\n")}`;
 }
 
+function hasRetryPriorityVisibleNarrationFailure(
+  failures: readonly VisibleNarrationFailure[],
+): boolean {
+  return failures.some((failure) => RETRY_PRIORITY_VISIBLE_NARRATION_FAILURES.has(failure));
+}
+
 function scoreVisibleNarrationCandidate(
   text: string,
   failures: readonly VisibleNarrationFailure[],
@@ -700,7 +735,7 @@ async function runVisibleNarrationWithGuard(args: {
 
   const initialText = applyVisibleNarrationFilters(initialResult.text);
   const initialReasoningText = normalizeReasoningText(extractReasoningText(initialResult));
-  const initialFailures = detectVisibleNarrationFailures(initialText, { system, prompt });
+  const initialFailures = detectVisibleNarrationFailures(initialResult.text, { system, prompt });
   if (initialFailures.length === 0) {
     return {
       text: initialText,
@@ -714,14 +749,31 @@ async function runVisibleNarrationWithGuard(args: {
   }
 
   const retryPrompt = `${prompt}${buildVisibleNarrationRetryAddendum(initialFailures)}`;
+  const initialHasRetryPriorityFailure = hasRetryPriorityVisibleNarrationFailure(initialFailures);
 
   try {
     const retryResult = await runNarrationPass(provider, retryPrompt);
     const retryText = applyVisibleNarrationFilters(retryResult.text);
     const retryReasoningText = normalizeReasoningText(extractReasoningText(retryResult));
-    const retryFailures = detectVisibleNarrationFailures(retryText, { system, prompt });
+    const retryFailures = detectVisibleNarrationFailures(retryResult.text, { system, prompt });
+    const retryHasRetryPriorityFailure = hasRetryPriorityVisibleNarrationFailure(retryFailures);
 
-    if (scoreVisibleNarrationCandidate(retryText, retryFailures) >= scoreVisibleNarrationCandidate(initialText, initialFailures)) {
+    if (initialHasRetryPriorityFailure) {
+      return {
+        text: retryText,
+        reasoningText: retryReasoningText,
+        retried: true,
+        failures: retryFailures,
+        usage: retryResult.usage,
+        response: retryResult.response,
+        finishReason: retryResult.finishReason,
+      };
+    }
+
+    if (
+      !retryHasRetryPriorityFailure
+      && scoreVisibleNarrationCandidate(retryText, retryFailures) >= scoreVisibleNarrationCandidate(initialText, initialFailures)
+    ) {
       return {
         text: retryText,
         reasoningText: retryReasoningText,
@@ -733,6 +785,9 @@ async function runVisibleNarrationWithGuard(args: {
       };
     }
   } catch (retryError) {
+    if (initialHasRetryPriorityFailure) {
+      throw retryError;
+    }
     log.warn("Visible narration quality retry failed; keeping first visible pass", retryError);
   }
 
@@ -1387,6 +1442,550 @@ function logScenePlanPacket(packet: ReturnType<typeof buildNarratorPacket>, dura
   });
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function uniqueRefs(values: readonly (string | null | undefined)[]): string[] {
+  const seen = new Set<string>();
+  const refs: string[] = [];
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    refs.push(trimmed);
+  }
+  return refs;
+}
+
+function executedActionRefs(
+  actionResults: readonly ExecutedScenePlanActionResult[],
+): string[] {
+  return uniqueRefs(
+    actionResults.flatMap((result) => [
+      result.actionRef,
+      result.actionId,
+      `${result.toolName}:${result.actionId}`,
+    ]),
+  );
+}
+
+function dueWorldRefs(result: ResolveDueWorldWorkForScopeResult): string[] {
+  return uniqueRefs([
+    ...result.executed.flatMap((entry) => [
+      ...entry.eventIds,
+      ...entry.stateDeltaRefs,
+      entry.authority?.toolResultId,
+    ]),
+    ...result.deferred.map((entry) => entry.proposal.proposalId),
+    ...result.worldThreads.executed.flatMap((entry) => [
+      entry.thread.id,
+      entry.event.id,
+      entry.authority.toolResultId,
+    ]),
+    ...result.worldThreads.deferred.map((entry) => entry.thread.id),
+  ]);
+}
+
+function oracleDecisionInputFromGmRead(args: {
+  sagaId: string;
+  gmRead: GmRead;
+  oracleResult: OracleResult;
+  targetContext: SceneFrameOracleContext | null;
+  combatEnvelope: ReturnType<typeof buildCombatEnvelope> | null;
+  baseWorldVersion: number;
+  acceptedWorldVersion: number;
+}) {
+  const question = args.gmRead.path === "roll_oracle"
+    ? args.gmRead.rollRequest.question
+    : args.gmRead.path === "combat_transition"
+      ? args.gmRead.combatFraming
+      : args.gmRead.actionInterpretation.intent;
+  const stakes = args.gmRead.path === "roll_oracle"
+    ? args.gmRead.rollRequest.stakes
+    : args.gmRead.rationale;
+
+  return {
+    sagaId: args.sagaId,
+    question,
+    stakes,
+    outcome: args.oracleResult.outcome,
+    reasoning: args.oracleResult.reasoning,
+    mechanicalImplications: {
+      gmPath: args.gmRead.path,
+      actionInterpretation: args.gmRead.actionInterpretation,
+      combatEnvelope: args.combatEnvelope,
+    },
+    visibilityImplications: {
+      targetLabel: args.targetContext?.targetLabel ?? null,
+      targetType: args.targetContext?.targetType ?? null,
+      source: args.targetContext?.source ?? null,
+      evidenceRefs: args.gmRead.evidenceRefs,
+    },
+    confidence: args.oracleResult.chance,
+    chance: args.oracleResult.chance,
+    requiresToolCommit: true,
+    baseWorldVersion: args.baseWorldVersion,
+    acceptedWorldVersion: args.acceptedWorldVersion,
+    sourceRefs: args.gmRead.evidenceRefs,
+    decision: {
+      oracleResult: args.oracleResult,
+      gmReadPath: args.gmRead.path,
+      targetContext: args.targetContext,
+    },
+  } satisfies Parameters<typeof persistOracleDecision>[0];
+}
+
+function minimalSceneAssemblyFromNarratorPacket(packet: NarratorPacket): SceneAssembly {
+  return {
+    openingScene: false,
+    openingState: null,
+    currentScene: null,
+    presentNpcNames: packet.visibleActors
+      .filter((actor) => actor.type === "npc")
+      .map((actor) => actor.label),
+    sceneDirection: null,
+    playerPerceivableSceneDirection: null,
+    awareness: {
+      contract: {
+        clear: "Full present-scene actor context. Identity and direct interaction are justified.",
+        hint: "Bounded indirect presence signal only. No identity leakage in player-facing surfaces.",
+        none: "Outside encounter scope for this consumer. Omit from player-facing prompt surfaces.",
+      },
+      byNpcName: {},
+      clearNpcNames: packet.visibleActors
+        .filter((actor) => actor.type === "npc")
+        .map((actor) => actor.label),
+      hintSignals: packet.hintSignals,
+    },
+    recentContext: packet.perceivableEvents.map((event) => ({
+      tick: packet.tick,
+      summary: event.summary,
+      source: "committed_event",
+    })),
+    sceneEffects: packet.perceivableEffects.map((effect) => ({
+      id: effect.id,
+      kind: "environment",
+      source: "tool_call",
+      summary: effect.summary,
+      perceivable: true,
+      actor: effect.actorId ?? null,
+      target: null,
+      locationId: null,
+      causalDetail: effect.toolName ?? null,
+    })),
+    playerPerceivableConsequences: [
+      ...packet.perceivableResponses.map((response) => response.summary),
+      ...packet.perceivableEffects.map((effect) => effect.summary),
+    ],
+  };
+}
+
+function requireNarratorPacket(value: unknown): NarratorPacket {
+  if (
+    !value
+    || typeof value !== "object"
+    || Array.isArray(value)
+    || typeof (value as { campaignId?: unknown }).campaignId !== "string"
+    || typeof (value as { playerAction?: unknown }).playerAction !== "string"
+    || !Array.isArray((value as { visibleActors?: unknown }).visibleActors)
+  ) {
+    throw new Error("SettledTurnPacket contains an invalid narrator packet.");
+  }
+  return value as NarratorPacket;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getSuccessfulTravelFromToolResult(result: unknown): SuccessfulTravel | null {
+  if (!isObjectRecord(result) || result.success !== true || !isObjectRecord(result.result)) {
+    return null;
+  }
+
+  const payload = result.result;
+  if (
+    typeof payload.locationId !== "string"
+    || typeof payload.locationName !== "string"
+    || typeof payload.travelCost !== "number"
+    || !Array.isArray(payload.path)
+  ) {
+    return null;
+  }
+
+  const tickAdvance = typeof payload.tickAdvance === "number"
+    ? payload.tickAdvance
+    : payload.travelCost;
+
+  return {
+    locationId: payload.locationId,
+    locationName: payload.locationName,
+    travelCost: payload.travelCost,
+    tickAdvance,
+    path: payload.path.filter((entry): entry is string => typeof entry === "string"),
+  };
+}
+
+function getSuccessfulTravelFromCanonicalPacket(packet: unknown): SuccessfulTravel | null {
+  if (!isObjectRecord(packet) || !Array.isArray(packet.actionResults)) {
+    return null;
+  }
+
+  for (const actionResult of packet.actionResults) {
+    if (!isObjectRecord(actionResult) || actionResult.toolName !== "move_to") {
+      continue;
+    }
+
+    const travel = getSuccessfulTravelFromToolResult(actionResult.result);
+    if (travel) {
+      return travel;
+    }
+  }
+
+  return null;
+}
+
+function getToolCallResultsFromCanonicalPacket(packet: unknown): TurnToolCallResult[] {
+  if (!isObjectRecord(packet) || !Array.isArray(packet.actionResults)) {
+    return [];
+  }
+
+  return packet.actionResults.flatMap((actionResult) => {
+    if (!isObjectRecord(actionResult) || typeof actionResult.toolName !== "string") {
+      return [];
+    }
+
+    return [{
+      tool: actionResult.toolName,
+      args: actionResult.args ?? actionResult.input ?? {},
+      result: actionResult.result,
+    }];
+  });
+}
+
+function advanceNarrationTick(args: {
+  campaignId: string;
+  currentTick: number;
+  successfulTravel: SuccessfulTravel | null;
+  idempotentResume: boolean;
+}): number {
+  if (args.idempotentResume) {
+    const storedTick = readCampaignConfig(args.campaignId).currentTick ?? args.currentTick;
+    if (storedTick > args.currentTick) {
+      return storedTick;
+    }
+  }
+
+  return args.successfulTravel && args.successfulTravel.tickAdvance > 0
+    ? advanceCampaignTick(args.campaignId, args.successfulTravel.tickAdvance)
+    : incrementTick(args.campaignId);
+}
+
+function applyPostNarrationStartConditionEffects(args: {
+  db: ReturnType<typeof getDb>;
+  campaignId: string;
+  playerId?: string | null;
+  lookupPlayerByCampaign: boolean;
+  newTick: number;
+  playerAction: string;
+}): void {
+  const storedPlayer = args.playerId
+    ? args.db
+      .select()
+      .from(players)
+      .where(eq(players.id, args.playerId))
+      .get()
+    : args.lookupPlayerByCampaign
+      ? args.db
+        .select()
+        .from(players)
+        .where(eq(players.campaignId, args.campaignId))
+        .get()
+      : null;
+
+  if (!storedPlayer) {
+    return;
+  }
+
+  const nextOpeningState = applyStartConditionEffects(
+    hydrateStoredPlayerRecord(storedPlayer),
+    {
+      currentTick: args.newTick,
+      currentLocationId: storedPlayer.currentLocationId,
+      playerAction: args.playerAction,
+    },
+  );
+
+  if (nextOpeningState.changed) {
+    persistPlayerRuntimeRecord(
+      args.db,
+      storedPlayer.id,
+      storedPlayer.campaignId,
+      nextOpeningState.record,
+    );
+  }
+}
+
+async function* runPostNarrationFinalizationTail(args: {
+  campaignId: string;
+  turnId?: string;
+  sagaId?: string;
+  lockToken?: string;
+  narratorAttemptId?: string;
+  currentTick: number;
+  playerId?: string | null;
+  lookupPlayerByCampaign?: boolean;
+  playerAction: string;
+  successfulTravel: SuccessfulTravel | null;
+  oracleResult: OracleResult | null;
+  toolCallResults: TurnToolCallResult[];
+  narrativeText: string;
+  sceneAssembly?: SceneAssembly;
+  onPostTurn?: (summary: TurnSummary) => void | Promise<void>;
+  stagedForecast?: StagedWorldTrajectoryForecast | null;
+  idempotentResume?: boolean;
+  recordTransientCleanupStage?: (startedAt: number, tick: number) => void;
+  finishLatencyTrace?: () => void;
+}): AsyncGenerator<TurnEvent, { tick: number; summary: TurnSummary }, void> {
+  const db = getDb();
+  const heartbeat = () => {
+    if (args.sagaId && args.lockToken) {
+      heartbeatTurnSagaWorker({ sagaId: args.sagaId, lockToken: args.lockToken });
+    }
+  };
+  heartbeat();
+  const newTick = advanceNarrationTick({
+    campaignId: args.campaignId,
+    currentTick: args.currentTick,
+    successfulTravel: args.successfulTravel,
+    idempotentResume: args.idempotentResume ?? false,
+  });
+
+  heartbeat();
+  applyPostNarrationStartConditionEffects({
+    db,
+    campaignId: args.campaignId,
+    playerId: args.playerId,
+    lookupPlayerByCampaign: args.lookupPlayerByCampaign ?? false,
+    newTick,
+    playerAction: args.playerAction,
+  });
+
+  const summary: TurnSummary = {
+    turnId: args.turnId,
+    sagaId: args.sagaId,
+    narratorAttemptId: args.narratorAttemptId,
+    idempotencyKey: buildPostTurnIdempotencyKey({
+      campaignId: args.campaignId,
+      turnId: args.turnId,
+      sagaId: args.sagaId,
+      narratorAttemptId: args.narratorAttemptId,
+      tick: newTick,
+    }),
+    tick: newTick,
+    oracleResult: args.oracleResult,
+    toolCalls: args.toolCallResults,
+    narrativeText: args.narrativeText,
+    sceneAssembly: args.sceneAssembly,
+  };
+
+  if (args.onPostTurn) {
+    heartbeat();
+    yield {
+      type: "finalizing_turn",
+      data: { tick: newTick, stage: "rollback_critical" },
+    };
+
+    await Promise.resolve(args.onPostTurn(summary));
+    heartbeat();
+  }
+
+  heartbeat();
+  yield {
+    type: "scene-settling",
+    data: { stage: "scene-settling", phase: "cleaning-transient-scene", tick: newTick },
+  };
+  const cleanupStart = Date.now();
+  cleanupTransientSceneObjects(args.campaignId, newTick);
+  args.recordTransientCleanupStage?.(cleanupStart, newTick);
+
+  heartbeat();
+  commitStagedWorldForecast(args.campaignId, args.stagedForecast ?? null);
+  heartbeat();
+  args.finishLatencyTrace?.();
+
+  return { tick: newTick, summary };
+}
+
+async function renderSettledNarrationWithSaga(args: {
+  saga: TurnSagaRecord;
+  settledPacket: SettledTurnPacketRecord;
+  campaignId: string;
+  contextWindow: number;
+  sceneAssembly: SceneAssembly;
+  narratorPacket: NarratorPacket;
+  outcomeBounds?: ReturnType<typeof buildNarrativeOutcomeBounds> | null;
+  oracleResult?: OracleResult | null;
+  embedderResult?: ResolveResult;
+  playerAction: string;
+  storytellerProvider: ProviderConfig;
+  storytellerTemperature: number;
+  storytellerMaxTokens: number;
+  judgeProvider?: ProviderConfig;
+  lockToken?: string;
+}) {
+  let saga = args.saga;
+  if (saga.status === "resolved_pending_narration") {
+    saga = transitionTurnSagaStatus({
+      sagaId: saga.id,
+      toStatus: "narrator_rendering",
+      reason: "Rendering final narration from settled packet.",
+      lockToken: args.lockToken,
+    });
+  }
+
+  const finalNarrationPrompt = await assembleFinalNarrationPrompt({
+    campaignId: args.campaignId,
+    contextWindow: args.contextWindow,
+    sceneAssembly: args.sceneAssembly,
+    narratorPacket: args.narratorPacket,
+    outcomeBounds: args.outcomeBounds ?? undefined,
+    actionResult: args.oracleResult ?? undefined,
+    embedderResult: args.embedderResult,
+    playerAction: args.playerAction,
+    judgeRole: args.judgeProvider
+      ? { provider: args.judgeProvider, temperature: 0.1, maxTokens: 1024 }
+      : undefined,
+  });
+
+  let lastReasoningText: string | undefined;
+  let lastVisibleFailures: VisibleNarrationFailure[] = [];
+  let lastVisibleUsage: Awaited<ReturnType<typeof generateText>>["usage"] | undefined;
+  let lastVisibleFinishReason: Awaited<ReturnType<typeof generateText>>["finishReason"] | undefined;
+  let lastVisibleResponse: Awaited<ReturnType<typeof generateText>>["response"] | undefined;
+
+  async function runFinalPacketGuardedNarration(recoveryAddendum: string | null) {
+    return runVisibleNarrationWithPacketGuard({
+      packet: args.narratorPacket,
+      generateNarration: async ({ guardAddendum }) => {
+        const addenda = [
+          recoveryAddendum
+            ? `[PACKET VISIBILITY RECOVERY]\n${recoveryAddendum}`
+            : null,
+          guardAddendum
+            ? `[PACKET VISIBILITY CORRECTION]\n${guardAddendum}`
+            : null,
+        ].filter((entry): entry is string => Boolean(entry));
+        const activePrompt = addenda.length > 0
+          ? `${finalNarrationPrompt.prompt}\n\n${addenda.join("\n\n")}`
+          : finalNarrationPrompt.prompt;
+        const result = await withRole("storyteller", () =>
+          runVisibleNarrationWithGuard({
+            label: "final",
+            provider: args.storytellerProvider,
+            system: finalNarrationPrompt.system,
+            prompt: activePrompt,
+            storytellerTemperature: args.storytellerTemperature,
+            storytellerMaxTokens: args.storytellerMaxTokens,
+          }),
+        );
+        lastReasoningText = result.reasoningText;
+        lastVisibleFailures = result.failures;
+        lastVisibleUsage = result.usage;
+        lastVisibleFinishReason = result.finishReason;
+        lastVisibleResponse = result.response;
+        return result.text;
+      },
+      onUnsafeAttempt: ({ attempt, validation }) => {
+        log.event("visible-narration.packet-guard", {
+          stage: recoveryAddendum ? "recovery-unsafe-attempt" : "unsafe-attempt",
+          attempt,
+          violationCount: validation.violations.length,
+          violationKinds: validation.violations.map((violation) => violation.kind),
+        });
+      },
+    });
+  }
+
+  let guardedNarration: Awaited<ReturnType<typeof runVisibleNarrationWithPacketGuard>>;
+  let recovered = false;
+  try {
+    guardedNarration = await runFinalPacketGuardedNarration(null);
+  } catch (error) {
+    const failureReason = errorMessage(error);
+    recordNarratorAttempt({
+      sagaId: saga.id,
+      settledTurnPacketId: args.settledPacket.id,
+      status: "failed",
+      groundingResult: { ok: false, stage: "packet_guard", recovered: false },
+      failureReason,
+      lockToken: args.lockToken,
+    });
+    if (saga.status === "narrator_rendering") {
+      saga = transitionTurnSagaStatus({
+        sagaId: saga.id,
+        toStatus: "narrator_repairing",
+        reason: "First final narration guard call failed; retrying from settled packet.",
+        lockToken: args.lockToken,
+      });
+    }
+    log.warn(
+      "Final visible narration failed packet guard; regenerating storyteller output from the same packet before aborting turn",
+      error,
+    );
+    log.event("visible-narration.packet-guard", {
+      stage: "recovery-regenerate",
+      reason: failureReason,
+    });
+    recovered = true;
+    try {
+      guardedNarration = await runFinalPacketGuardedNarration(
+        FINAL_VISIBLE_PACKET_GUARD_RECOVERY_ADDENDUM,
+      );
+    } catch (recoveryError) {
+      recordNarratorAttempt({
+        sagaId: saga.id,
+        settledTurnPacketId: args.settledPacket.id,
+        status: "failed",
+        groundingResult: { ok: false, stage: "packet_guard", recovered: true },
+        failureReason: errorMessage(recoveryError),
+        lockToken: args.lockToken,
+      });
+      throw new NarrationRepairExhaustedError(
+        "Visible narration violated packet visibility constraints after recovery.",
+        recoveryError,
+      );
+    }
+  }
+
+  const narrativeText = guardedNarration.text;
+  assertNonEmptyFinalVisibleNarration(narrativeText);
+  const successAttempt = recordNarratorAttempt({
+    sagaId: saga.id,
+    settledTurnPacketId: args.settledPacket.id,
+    status: "succeeded",
+    groundingResult: guardedNarration.validation,
+    finalText: narrativeText,
+    lockToken: args.lockToken,
+  });
+
+  return {
+    finalNarrationPrompt,
+    guardedNarration,
+    narrativeText,
+    reasoningText: lastReasoningText,
+    lastVisibleFailures,
+    lastVisibleUsage,
+    lastVisibleFinishReason,
+    lastVisibleResponse,
+    narratorAttemptId: successAttempt.id,
+    finalizationReason: recovered
+      ? "Final narration recovered from settled packet."
+      : "Final narration completed from settled packet.",
+  };
+}
+
 function logDueWorldWork(
   result: ResolveDueWorldWorkForScopeResult,
   durationMs: number,
@@ -1413,6 +2012,205 @@ function hasVisibleDueWorldWork(result: ResolveDueWorldWorkForScopeResult): bool
     || result.worldThreads.deferred.length > 0;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function getResumeCheckpoint(
+  saga: TurnSagaRecord,
+  key: "assistantAppend" | "postNarrationTail",
+  narratorAttemptId: string,
+): Record<string, unknown> | null {
+  const root = asRecord(saga.provenance[PENDING_NARRATION_RESUME_CHECKPOINT_KEY]);
+  const checkpoint = asRecord(root?.[key]);
+  return checkpoint?.narratorAttemptId === narratorAttemptId ? checkpoint : null;
+}
+
+function mergeResumeCheckpoint(input: {
+  sagaId: string;
+  key: "assistantAppend" | "postNarrationTail";
+  narratorAttemptId: string;
+  fields?: Record<string, unknown>;
+  lockToken?: string;
+}): TurnSagaRecord {
+  return mergeTurnSagaProvenance({
+    sagaId: input.sagaId,
+    lockToken: input.lockToken,
+    patch: {
+      [PENDING_NARRATION_RESUME_CHECKPOINT_KEY]: {
+        [input.key]: {
+          narratorAttemptId: input.narratorAttemptId,
+          completedAt: Date.now(),
+          ...input.fields,
+        },
+      },
+    },
+  });
+}
+
+function startPendingNarrationWorkerHeartbeat(input: {
+  sagaId: string;
+  lockToken: string;
+}): {
+  stop: () => void;
+  heartbeat: () => void;
+  assertActive: () => void;
+} {
+  let lostLockError: unknown = null;
+  const heartbeat = () => {
+    if (lostLockError) {
+      throw lostLockError;
+    }
+    try {
+      heartbeatTurnSagaWorker(input);
+    } catch (error) {
+      lostLockError = error;
+      throw error;
+    }
+  };
+  // Heartbeat is abandoned-worker recovery, not a model/turn timeout: long live
+  // storyteller calls keep refreshing the lock, but a crashed worker stops here.
+  heartbeat();
+  const timer = setInterval(() => {
+    try {
+      heartbeat();
+    } catch (error) {
+      log.warn(
+        "Pending narration worker heartbeat lost saga lock; aborting fenced worker",
+        error,
+      );
+    }
+  }, PENDING_NARRATION_WORKER_HEARTBEAT_MS);
+  if (typeof timer === "object" && "unref" in timer) {
+    timer.unref();
+  }
+  return {
+    stop: () => clearInterval(timer),
+    heartbeat,
+    assertActive: () => {
+      if (lostLockError) {
+        throw lostLockError;
+      }
+    },
+  };
+}
+
+function chatMessageMatchesResumeNarrationKey(
+  message: ChatMessage,
+  sagaId: string,
+  narratorAttemptId: string,
+): boolean {
+  return message.role === "assistant"
+    && message.metadata?.resumeNarration?.sagaId === sagaId
+    && message.metadata.resumeNarration.narratorAttemptId === narratorAttemptId;
+}
+
+function chatHistoryHasAssistantNarrationAppendKey(input: {
+  campaignId: string;
+  sagaId: string;
+  narratorAttemptId: string;
+}): boolean {
+  return getChatHistory(input.campaignId).some((message) =>
+    chatMessageMatchesResumeNarrationKey(
+      message,
+      input.sagaId,
+      input.narratorAttemptId,
+    ),
+  );
+}
+
+function isPendingNarrationStatus(status: TurnSagaStatus): boolean {
+  return PENDING_NARRATION_STATUSES.includes(
+    status as typeof PENDING_NARRATION_STATUSES[number],
+  );
+}
+
+function buildPendingSettledTurnEvent(saga: TurnSagaRecord): TurnEvent {
+  return {
+    type: "error",
+    data: {
+      error:
+        "Turn resolution is already claimed but no settled narration packet is durable yet.",
+      pendingNarration: true,
+      pendingSettledTurnPacket: true,
+      resumable: false,
+      sagaId: saga.id,
+      turnId: saga.turnId,
+      status: saga.status,
+    },
+  };
+}
+
+function buildPostTurnIdempotencyKey(input: {
+  campaignId: string;
+  turnId?: string;
+  sagaId?: string;
+  narratorAttemptId?: string;
+  tick: number;
+}): string | undefined {
+  if (!input.turnId || !input.sagaId || !input.narratorAttemptId) {
+    return undefined;
+  }
+
+  return [
+    "post-turn",
+    input.campaignId,
+    input.turnId,
+    input.sagaId,
+    input.narratorAttemptId,
+    input.tick,
+  ].join(":");
+}
+
+function appendAssistantNarrationForResume(input: {
+  campaignId: string;
+  saga: TurnSagaRecord;
+  narratorAttemptId: string;
+  narrativeText: string;
+  lockToken?: string;
+}): TurnSagaRecord {
+  if (getResumeCheckpoint(input.saga, "assistantAppend", input.narratorAttemptId)) {
+    return input.saga;
+  }
+
+  if (input.lockToken) {
+    heartbeatTurnSagaWorker({ sagaId: input.saga.id, lockToken: input.lockToken });
+  }
+
+  const deduped = chatHistoryHasAssistantNarrationAppendKey({
+    campaignId: input.campaignId,
+    sagaId: input.saga.id,
+    narratorAttemptId: input.narratorAttemptId,
+  });
+  if (!deduped) {
+    appendChatMessages(input.campaignId, [
+      {
+        role: "assistant",
+        content: input.narrativeText,
+        metadata: {
+          resumeNarration: {
+            sagaId: input.saga.id,
+            narratorAttemptId: input.narratorAttemptId,
+          },
+        },
+      },
+    ]);
+  }
+
+  return mergeResumeCheckpoint({
+    sagaId: input.saga.id,
+    key: "assistantAppend",
+    narratorAttemptId: input.narratorAttemptId,
+    lockToken: input.lockToken,
+    fields: {
+      deduped,
+      finalTextTail: input.narrativeText.slice(-240),
+    },
+  });
+}
+
 export async function* processTurn(
   options: TurnOptions
 ): AsyncGenerator<TurnEvent> {
@@ -1422,6 +2220,198 @@ export async function* processTurn(
   }
 
   yield* processTurnScenePlan(options);
+}
+
+export async function* resumePendingTurnNarration(
+  options: ResumePendingNarrationOptions,
+): AsyncGenerator<TurnEvent> {
+  const {
+    campaignId,
+    turnId,
+    storytellerProvider,
+    storytellerTemperature,
+    storytellerMaxTokens,
+    embedderResult,
+    contextWindow = 8192,
+    onPostTurn,
+  } = options;
+  const saga = getTurnSaga({ campaignId, turnId });
+  if (!saga) {
+    throw new Error(`Pending turn saga not found for campaign ${campaignId}, turn ${turnId}.`);
+  }
+  if (
+    !isPendingNarrationStatus(saga.status)
+    && saga.status !== "world_consequence_running"
+  ) {
+    throw new Error(
+      `Turn ${turnId} is not pending narration; current status is ${saga.status}.`,
+    );
+  }
+
+  const settledPacketBeforeClaim = saga.status === "world_consequence_running"
+    ? getSettledTurnPacket({ campaignId, turnId })
+    : null;
+  if (saga.status === "world_consequence_running" && !settledPacketBeforeClaim) {
+    yield buildPendingSettledTurnEvent(saga);
+    return;
+  }
+
+  const claim = claimTurnSagaWorker({
+    campaignId,
+    turnId,
+    workerId: `resume-pending-narration:${randomUUID()}`,
+    allowStaleReclaim: true,
+    staleAfterMs: PENDING_NARRATION_WORKER_STALE_AFTER_MS,
+  });
+
+  let workerHeartbeat: ReturnType<typeof startPendingNarrationWorkerHeartbeat> | null = null;
+  try {
+    workerHeartbeat = startPendingNarrationWorkerHeartbeat({
+      sagaId: claim.saga.id,
+      lockToken: claim.lockToken,
+    });
+    const lockedSaga = claim.saga;
+    if (
+      !isPendingNarrationStatus(lockedSaga.status)
+      && lockedSaga.status !== "world_consequence_running"
+    ) {
+      throw new Error(
+        `Turn ${turnId} is not pending narration; current status is ${lockedSaga.status}.`,
+      );
+    }
+    const settledPacket = settledPacketBeforeClaim ?? getSettledTurnPacket({ campaignId, turnId });
+    if (!settledPacket) {
+      throw new Error(`SettledTurnPacket not found for pending turn ${turnId}.`);
+    }
+    const narratorPacket = requireNarratorPacket(settledPacket.narratorPacket);
+    const sceneAssembly = minimalSceneAssemblyFromNarratorPacket(narratorPacket);
+    let resumeSaga = lockedSaga.status === "world_consequence_running"
+      ? transitionTurnSagaStatus({
+          sagaId: lockedSaga.id,
+          toStatus: "resolved_pending_narration",
+          reason: "Recovered settled packet after stale world consequence boundary.",
+          lockToken: claim.lockToken,
+        })
+      : lockedSaga;
+
+    yield {
+      type: "scene-settling",
+      data: {
+        stage: "scene-settling",
+        phase: "final-narration",
+        resumed: true,
+      },
+    };
+
+    const successfulAttempt = findLatestSuccessfulNarratorAttempt({
+      sagaId: lockedSaga.id,
+      settledTurnPacketId: settledPacket.id,
+      campaignId,
+    });
+    const narration = successfulAttempt
+      ? {
+          narrativeText: successfulAttempt.finalText ?? "",
+          reasoningText: undefined,
+          narratorAttemptId: successfulAttempt.id,
+          finalizationReason: "Final narration resumed from successful narrator attempt.",
+        }
+      : await renderSettledNarrationWithSaga({
+          saga: resumeSaga,
+          settledPacket,
+          campaignId,
+          contextWindow,
+          sceneAssembly,
+          narratorPacket,
+          embedderResult,
+          playerAction: narratorPacket.playerAction,
+          storytellerProvider,
+          storytellerTemperature,
+          storytellerMaxTokens,
+          lockToken: claim.lockToken,
+        });
+
+    if (successfulAttempt && resumeSaga.status === "resolved_pending_narration") {
+      resumeSaga = transitionTurnSagaStatus({
+        sagaId: resumeSaga.id,
+        toStatus: "narrator_rendering",
+        reason: "Reusing completed narrator attempt for finalization.",
+        lockToken: claim.lockToken,
+      });
+    } else {
+      resumeSaga = getTurnSaga({ sagaId: resumeSaga.id }) ?? resumeSaga;
+    }
+
+    resumeSaga = appendAssistantNarrationForResume({
+      campaignId,
+      saga: resumeSaga,
+      narratorAttemptId: narration.narratorAttemptId,
+      narrativeText: narration.narrativeText,
+      lockToken: claim.lockToken,
+    });
+    yield { type: "narrative", data: { text: narration.narrativeText } };
+
+    if (shouldExposeReasoningSse() && narration.reasoningText) {
+      yield { type: "reasoning", data: { text: narration.reasoningText } };
+    }
+
+    let tick: number;
+    const tailCheckpoint = getResumeCheckpoint(
+      resumeSaga,
+      "postNarrationTail",
+      narration.narratorAttemptId,
+    );
+    if (tailCheckpoint) {
+      tick = typeof tailCheckpoint.tick === "number"
+        ? tailCheckpoint.tick
+        : readCampaignConfig(campaignId).currentTick ?? narratorPacket.tick;
+    } else {
+      workerHeartbeat.heartbeat();
+      const tailResult = yield* runPostNarrationFinalizationTail({
+        campaignId,
+        turnId,
+        sagaId: resumeSaga.id,
+        lockToken: claim.lockToken,
+        narratorAttemptId: narration.narratorAttemptId,
+        currentTick: narratorPacket.tick,
+        lookupPlayerByCampaign: true,
+        playerAction: narratorPacket.playerAction,
+        successfulTravel: getSuccessfulTravelFromCanonicalPacket(narratorPacket.canonicalTurnPacket),
+        oracleResult: null,
+        toolCallResults: getToolCallResultsFromCanonicalPacket(narratorPacket.canonicalTurnPacket),
+        narrativeText: narration.narrativeText,
+        sceneAssembly,
+        onPostTurn,
+        idempotentResume: true,
+      });
+      tick = tailResult.tick;
+      resumeSaga = mergeResumeCheckpoint({
+        sagaId: resumeSaga.id,
+        key: "postNarrationTail",
+        narratorAttemptId: narration.narratorAttemptId,
+        lockToken: claim.lockToken,
+        fields: { tick },
+      });
+    }
+
+    workerHeartbeat.heartbeat();
+    markTurnSagaFinalizedIfNeeded({
+      sagaId: lockedSaga.id,
+      narratorAttemptId: narration.narratorAttemptId,
+      reason: narration.finalizationReason,
+      lockToken: claim.lockToken,
+    });
+    yield { type: "done", data: { tick, resumed: true } };
+  } finally {
+    workerHeartbeat?.stop();
+    try {
+      releaseTurnSagaWorker({
+        sagaId: claim.saga.id,
+        lockToken: claim.lockToken,
+      });
+    } catch (error) {
+      log.warn("Pending narration worker could not release saga lock", error);
+    }
+  }
 }
 
 async function* processTurnScenePlan(
@@ -1450,12 +2440,38 @@ async function* processTurnScenePlan(
   const db = getDb();
   const config = readCampaignConfig(campaignId);
   const currentTick = config.currentTick ?? 0;
+  const baseWorldClock = readWorldClock(campaignId);
+  assertNoPendingNarrationBeforeNewTurn({ campaignId });
+  const turnId = randomUUID();
   const latencyTrace = createTurnLatencyTrace({
-    turnId: randomUUID(),
+    turnId,
     campaignId,
     tick: currentTick,
     turnClass: "normal",
   });
+  let turnSaga = createTurnSaga({
+    campaignId,
+    turnId,
+    actionText: playerAction,
+    sourceAction: { playerAction, intent, method },
+    baseWorldVersion: baseWorldClock.worldVersion,
+    requiresNarration: false,
+    provenance: { processor: "scene-plan", phase: "89-03" },
+  });
+  const advanceSaga = (
+    toStatus: TurnSagaStatus,
+    reason: string,
+    resultWorldVersion?: number | null,
+  ) => {
+    turnSaga = transitionTurnSagaStatus({
+      sagaId: turnSaga.id,
+      toStatus,
+      reason,
+      resultWorldVersion,
+    });
+    return turnSaga;
+  };
+  advanceSaga("collecting_context", "Collecting deterministic turn context.");
   const baseLatencyStages = [
     "pre_scene_frame_due_work",
     "scene_frame",
@@ -1535,6 +2551,7 @@ async function* processTurnScenePlan(
     }
   }
 
+  advanceSaga("pre_turn_catchup", "Resolving pre-turn catch-up work.");
   const preFrameDueWorkStart = Date.now();
   const preFrameDueWork = resolveDueWorldWorkForScope({
     campaignId,
@@ -1636,6 +2653,7 @@ async function* processTurnScenePlan(
     refreshStaged: stagedForecast !== null,
   });
 
+  advanceSaga("gm_reading", "Running GM Read.");
   yield {
     type: "scene-settling",
     data: {
@@ -1711,7 +2729,9 @@ async function* processTurnScenePlan(
         })
       : null;
   let oracleResult: OracleResult | null = null;
+  let oracleDecisionId: string | null = null;
   if (gmRead.path === "roll_oracle") {
+    advanceSaga("oracle_adjudicating", "Oracle adjudication requested by GM Read.");
     const oracleStart = Date.now();
     oracleResult = await callOracle(
       {
@@ -1745,6 +2765,21 @@ async function* processTurnScenePlan(
         chance: oracleResult.chance,
       },
     });
+    const acceptedWorldVersion = readWorldClock(campaignId).worldVersion;
+    const oracleDecision = persistOracleDecision(
+      oracleDecisionInputFromGmRead({
+        sagaId: turnSaga.id,
+        gmRead,
+        oracleResult,
+        targetContext,
+        combatEnvelope,
+        baseWorldVersion: baseWorldClock.worldVersion,
+        acceptedWorldVersion,
+      }),
+    );
+    oracleDecisionId = oracleDecision.id;
+  } else {
+    advanceSaga("oracle_adjudicating", "Oracle adjudication not required for GM Read path.");
   }
 
   if (oracleResult) {
@@ -1787,6 +2822,7 @@ async function* processTurnScenePlan(
   let executedPlan: ExecutedScenePlan;
 
   if (noMutationGmRead) {
+    advanceSaga("tool_loop_running", "GM tool loop not required for no-mutation path.");
     scenePlan = buildNoMutationScenePlan({ frame: frameWithOracle, gmRead });
     executedPlan = buildNoMutationExecutedScenePlan({ frame: frameWithOracle, plan: scenePlan });
     log.event("judge.scene-plan", {
@@ -1815,6 +2851,7 @@ async function* processTurnScenePlan(
       durationMs: 0,
     });
   } else {
+    advanceSaga("tool_loop_running", "Running GM tool loop.");
     latencyTrace.turnClass = "heavy";
     const executionStart = Date.now();
     const gmToolLoop = await runGmToolLoop({
@@ -1923,6 +2960,12 @@ async function* processTurnScenePlan(
   }
 
   if (gmRead.path === "clarification") {
+    advanceSaga("local_reaction_running", "Actor reactions not required for clarification.");
+    advanceSaga(
+      "world_consequence_running",
+      "No accepted world consequence; finalizing clarification without narration.",
+      readWorldClock(campaignId).worldVersion,
+    );
     const narrativeText = safeClarificationPromptForFrame(
       gmRead.clarificationPrompt,
       frameWithOracle,
@@ -1947,10 +2990,15 @@ async function* processTurnScenePlan(
       metadata: { path: gmRead.path },
     });
     finishLatencyTrace([...baseLatencyStages, "clarification_response"]);
+    markTurnSagaFinalized({
+      sagaId: turnSaga.id,
+      reason: "Clarification returned without settled narration packet.",
+    });
     yield { type: "done", data: { tick: currentTick } };
     return;
   }
 
+  advanceSaga("local_reaction_running", "Running local actor reaction pass.");
   yield {
     type: "scene-settling",
     data: {
@@ -2050,6 +3098,7 @@ async function* processTurnScenePlan(
       .get()?.currentSceneLocationId
     ?? null;
 
+  advanceSaga("world_consequence_running", "Resolving world consequences before narrator packet.");
   const preNarratorDueWorkStart = Date.now();
   const preNarratorDueWork = resolveDueWorldWorkForScope({
     campaignId,
@@ -2193,232 +3242,211 @@ async function* processTurnScenePlan(
   });
   logScenePlanPacket(narratorPacket, packetEnded - packetStart);
   hiddenSummary.sceneAssembly = sceneAssembly;
-
-  const finalPromptStart = Date.now();
-  const finalNarrationPrompt = await assembleFinalNarrationPrompt({
-    campaignId,
-    contextWindow,
-    sceneAssembly,
-    narratorPacket,
-    outcomeBounds: outcomeBounds ?? undefined,
-    actionResult: oracleResult ?? undefined,
-    embedderResult,
-    playerAction,
-    judgeRole: { provider: judgeProvider, temperature: 0.1, maxTokens: 1024 },
+  const liveClaim = claimTurnSagaWorker({
+    sagaId: turnSaga.id,
+    workerId: `live-turn-narration:${randomUUID()}`,
+    allowStaleReclaim: false,
   });
-  recordTurnLatencyStage(latencyTrace, {
-    stage: "final_prompt",
-    startedAt: finalPromptStart,
-    metadata: {
-      hasNarratorPacket: true,
-    },
+  const liveHeartbeat = startPendingNarrationWorkerHeartbeat({
+    sagaId: liveClaim.saga.id,
+    lockToken: liveClaim.lockToken,
   });
-
-  yield {
-    type: "scene-settling",
-    data: {
-      stage: "scene-settling",
-      phase: options.openingScene ? "opening-final-narration" : "final-narration",
-      opening: options.openingScene ?? false,
-    },
-  };
-
-  const visibleCallStart = Date.now();
-  let lastReasoningText: string | undefined;
-  let lastVisibleFailures: VisibleNarrationFailure[] = [];
-  let lastVisibleUsage: Awaited<ReturnType<typeof generateText>>["usage"] | undefined;
-  let lastVisibleFinishReason: Awaited<ReturnType<typeof generateText>>["finishReason"] | undefined;
-  let lastVisibleResponse: Awaited<ReturnType<typeof generateText>>["response"] | undefined;
-
-  async function runFinalPacketGuardedNarration(recoveryAddendum: string | null) {
-    return runVisibleNarrationWithPacketGuard({
-      packet: narratorPacket,
-      generateNarration: async ({ guardAddendum }) => {
-        const addenda = [
-          recoveryAddendum
-            ? `[PACKET VISIBILITY RECOVERY]\n${recoveryAddendum}`
-            : null,
-          guardAddendum
-            ? `[PACKET VISIBILITY CORRECTION]\n${guardAddendum}`
-            : null,
-        ].filter((entry): entry is string => Boolean(entry));
-        const activePrompt = addenda.length > 0
-          ? `${finalNarrationPrompt.prompt}\n\n${addenda.join("\n\n")}`
-          : finalNarrationPrompt.prompt;
-        const result = await withRole("storyteller", () =>
-          runVisibleNarrationWithGuard({
-            label: "final",
-            provider: storytellerProvider,
-            system: finalNarrationPrompt.system,
-            prompt: activePrompt,
-            storytellerTemperature,
-            storytellerMaxTokens,
-          }),
-        );
-        lastReasoningText = result.reasoningText;
-        lastVisibleFailures = result.failures;
-        lastVisibleUsage = result.usage;
-        lastVisibleFinishReason = result.finishReason;
-        lastVisibleResponse = result.response;
-        return result.text;
-      },
-      onUnsafeAttempt: ({ attempt, validation }) => {
-        log.event("visible-narration.packet-guard", {
-          stage: recoveryAddendum ? "recovery-unsafe-attempt" : "unsafe-attempt",
-          attempt,
-          violationCount: validation.violations.length,
-          violationKinds: validation.violations.map((violation) => violation.kind),
-        });
-      },
-    });
-  }
-
-  let guardedNarration: Awaited<ReturnType<typeof runVisibleNarrationWithPacketGuard>>;
+  let liveSettledPacket: SettledTurnPacketRecord | null = null;
   try {
-    guardedNarration = await runFinalPacketGuardedNarration(null);
-  } catch (error) {
-    log.warn(
-      "Final visible narration failed packet guard; regenerating storyteller output from the same packet before aborting turn",
-      error,
-    );
-    log.event("visible-narration.packet-guard", {
-      stage: "recovery-regenerate",
-      reason: error instanceof Error ? error.message : String(error),
+    turnSaga = liveClaim.saga;
+    const settledPacket = persistSettledTurnPacket({
+      sagaId: turnSaga.id,
+      lockToken: liveClaim.lockToken,
+      oracleDecisionId,
+      canonicalTurnPacket,
+      narratorPacket,
+      sourceRefs: uniqueRefs([
+        ...gmRead.evidenceRefs,
+        ...canonicalTurnPacket.narratorFacts.eventIds,
+        ...canonicalTurnPacket.narratorFacts.responseIds,
+        ...canonicalTurnPacket.narratorFacts.actionIds,
+      ]),
+      acceptedToolResultRefs: executedActionRefs(executedPlan.actionResults),
+      acceptedActorResultRefs: executedActionRefs(actorActionResults),
+      dueWorldRefs: uniqueRefs([
+        ...dueWorldRefs(preFrameDueWork),
+        ...dueWorldRefs(preNarratorDueWork),
+      ]),
+      requiresNarration: true,
+      baseWorldVersion: baseWorldClock.worldVersion,
+      resultWorldVersion: readWorldClock(campaignId).worldVersion,
     });
-    guardedNarration = await runFinalPacketGuardedNarration(
-      FINAL_VISIBLE_PACKET_GUARD_RECOVERY_ADDENDUM,
-    );
-  }
-  const visibleCallEnded = Date.now();
-  const narrativeText = guardedNarration.text;
-  const reasoningText = lastReasoningText;
-  assertNonEmptyFinalVisibleNarration(narrativeText);
-  recordTurnLatencyStage(latencyTrace, {
-    stage: "final_narration",
-    startedAt: visibleCallStart,
-    endedAt: visibleCallEnded,
-    metadata: {
-      attempts: guardedNarration.attempts,
-      retried: guardedNarration.retried,
-      outputChars: narrativeText.length,
-      finishReason: lastVisibleFinishReason ?? null,
-      responseModel: lastVisibleResponse?.modelId ?? null,
-    },
-  });
-  recordSerializedLlmGroup(latencyTrace, {
-    kind: "storyteller",
-    label: "final visible narration",
-    startedAt: visibleCallStart,
-    endedAt: visibleCallEnded,
-    llmCallCount: guardedNarration.attempts,
-    retryCount: Math.max(0, guardedNarration.attempts - 1),
-    usage: lastVisibleUsage,
-    outputChars: narrativeText.length,
-    metadata: {
-      retried: guardedNarration.retried,
-      finishReason: lastVisibleFinishReason ?? null,
-      responseModel: lastVisibleResponse?.modelId ?? null,
-      failures: lastVisibleFailures,
-    },
-  });
-  log.event("visible-narration.packet-guard", {
-    stage: "passed",
-    attempts: guardedNarration.attempts,
-    retried: guardedNarration.retried,
-    violationCount: guardedNarration.validation.violations.length,
-    durationMs: visibleCallEnded - visibleCallStart,
-  });
-  log.event("storyteller.visible.call", {
-    label: "final",
-    initialLen: narrativeText.length,
-    retried: guardedNarration.retried,
-    failures: lastVisibleFailures,
-    reasoningLen: reasoningText?.length ?? 0,
-    finishReason: lastVisibleFinishReason ?? null,
-    responseModel: lastVisibleResponse?.modelId ?? null,
-    usage: lastVisibleUsage ?? null,
-    durationMs: visibleCallEnded - visibleCallStart,
-  });
-  log.info(
-    `Visible narration complete: executedActions=${toolCallResults.length}, final=${narrativeText.length} chars, retried=${guardedNarration.retried}, failures=${lastVisibleFailures.join(",") || "none"}`,
-  );
+    liveSettledPacket = settledPacket;
+    turnSaga = getTurnSaga({ sagaId: turnSaga.id }) ?? turnSaga;
 
-  if (narrativeText) {
-    appendChatMessages(campaignId, [
-      { role: "assistant", content: narrativeText },
-    ]);
-    yield { type: "narrative", data: { text: narrativeText } };
-  }
-
-  if (shouldExposeReasoningSse() && reasoningText) {
-    yield { type: "reasoning", data: { text: reasoningText } };
-  }
-
-  const newTick =
-    successfulTravel && successfulTravel.tickAdvance > 0
-      ? advanceCampaignTick(campaignId, successfulTravel.tickAdvance)
-      : incrementTick(campaignId);
-
-  if (player) {
-    const storedPlayer = db
-      .select()
-      .from(players)
-      .where(eq(players.id, player.id))
-      .get();
-
-    if (storedPlayer) {
-      const nextOpeningState = applyStartConditionEffects(
-        hydrateStoredPlayerRecord(storedPlayer),
-        {
-          currentTick: newTick,
-          currentLocationId: storedPlayer.currentLocationId,
-          playerAction,
-        },
-      );
-
-      if (nextOpeningState.changed) {
-        persistPlayerRuntimeRecord(
-          db,
-          storedPlayer.id,
-          storedPlayer.campaignId,
-          nextOpeningState.record,
-        );
-      }
-    }
-  }
-
-  const summary: TurnSummary = {
-    tick: newTick,
-    oracleResult,
-    toolCalls: toolCallResults,
-    narrativeText,
-    sceneAssembly,
-  };
-
-  if (onPostTurn) {
     yield {
-      type: "finalizing_turn",
-      data: { tick: newTick, stage: "rollback_critical" },
+      type: "scene-settling",
+      data: {
+        stage: "scene-settling",
+        phase: options.openingScene ? "opening-final-narration" : "final-narration",
+        opening: options.openingScene ?? false,
+      },
     };
 
-    await Promise.resolve(onPostTurn(summary));
+    const finalPromptStart = Date.now();
+    const visibleCallStart = Date.now();
+    const narration = await renderSettledNarrationWithSaga({
+      saga: turnSaga,
+      settledPacket,
+      campaignId,
+      contextWindow,
+      sceneAssembly,
+      narratorPacket,
+      outcomeBounds,
+      oracleResult,
+      embedderResult,
+      playerAction,
+      storytellerProvider,
+      storytellerTemperature,
+      storytellerMaxTokens,
+      judgeProvider,
+      lockToken: liveClaim.lockToken,
+    });
+    liveHeartbeat.heartbeat();
+    const visibleCallEnded = Date.now();
+    const {
+      guardedNarration,
+      narrativeText,
+      reasoningText,
+      lastVisibleFailures,
+      lastVisibleUsage,
+      lastVisibleFinishReason,
+      lastVisibleResponse,
+    } = narration;
+    recordTurnLatencyStage(latencyTrace, {
+      stage: "final_prompt",
+      startedAt: finalPromptStart,
+      metadata: {
+        hasNarratorPacket: true,
+      },
+    });
+    recordTurnLatencyStage(latencyTrace, {
+      stage: "final_narration",
+      startedAt: visibleCallStart,
+      endedAt: visibleCallEnded,
+      metadata: {
+        attempts: guardedNarration.attempts,
+        retried: guardedNarration.retried,
+        outputChars: narrativeText.length,
+        finishReason: lastVisibleFinishReason ?? null,
+        responseModel: lastVisibleResponse?.modelId ?? null,
+      },
+    });
+    recordSerializedLlmGroup(latencyTrace, {
+      kind: "storyteller",
+      label: "final visible narration",
+      startedAt: visibleCallStart,
+      endedAt: visibleCallEnded,
+      llmCallCount: guardedNarration.attempts,
+      retryCount: Math.max(0, guardedNarration.attempts - 1),
+      usage: lastVisibleUsage,
+      outputChars: narrativeText.length,
+      metadata: {
+        retried: guardedNarration.retried,
+        finishReason: lastVisibleFinishReason ?? null,
+        responseModel: lastVisibleResponse?.modelId ?? null,
+        failures: lastVisibleFailures,
+      },
+    });
+    log.event("visible-narration.packet-guard", {
+      stage: "passed",
+      attempts: guardedNarration.attempts,
+      retried: guardedNarration.retried,
+      violationCount: guardedNarration.validation.violations.length,
+      durationMs: visibleCallEnded - visibleCallStart,
+    });
+    log.event("storyteller.visible.call", {
+      label: "final",
+      initialLen: narrativeText.length,
+      retried: guardedNarration.retried,
+      failures: lastVisibleFailures,
+      reasoningLen: reasoningText?.length ?? 0,
+      finishReason: lastVisibleFinishReason ?? null,
+      responseModel: lastVisibleResponse?.modelId ?? null,
+      usage: lastVisibleUsage ?? null,
+      durationMs: visibleCallEnded - visibleCallStart,
+    });
+    log.info(
+      `Visible narration complete: executedActions=${toolCallResults.length}, final=${narrativeText.length} chars, retried=${guardedNarration.retried}, failures=${lastVisibleFailures.join(",") || "none"}`,
+    );
+
+    if (narrativeText) {
+      turnSaga = appendAssistantNarrationForResume({
+        campaignId,
+        saga: turnSaga,
+        narratorAttemptId: narration.narratorAttemptId,
+        narrativeText,
+        lockToken: liveClaim.lockToken,
+      });
+      yield { type: "narrative", data: { text: narrativeText } };
+    }
+
+    if (shouldExposeReasoningSse() && reasoningText) {
+      yield { type: "reasoning", data: { text: reasoningText } };
+    }
+
+    const { tick: newTick } = yield* runPostNarrationFinalizationTail({
+      campaignId,
+      turnId: turnSaga.turnId,
+      sagaId: turnSaga.id,
+      lockToken: liveClaim.lockToken,
+      narratorAttemptId: narration.narratorAttemptId,
+      currentTick,
+      playerId: player?.id ?? null,
+      playerAction,
+      successfulTravel,
+      oracleResult,
+      toolCallResults,
+      narrativeText,
+      sceneAssembly,
+      onPostTurn,
+      stagedForecast,
+      recordTransientCleanupStage: (startedAt, tick) => {
+        recordTurnLatencyStage(latencyTrace, {
+          stage: "transient_cleanup",
+          startedAt,
+          metadata: { tick },
+        });
+      },
+      finishLatencyTrace,
+    });
+    liveHeartbeat.heartbeat();
+    markTurnSagaFinalized({
+      sagaId: turnSaga.id,
+      narratorAttemptId: narration.narratorAttemptId,
+      reason: narration.finalizationReason,
+      lockToken: liveClaim.lockToken,
+    });
+    yield { type: "done", data: { tick: newTick } };
+  } catch (error) {
+    const latestSaga = getTurnSaga({ sagaId: liveClaim.saga.id }) ?? turnSaga;
+    if (
+      !(error instanceof NarrationRepairExhaustedError)
+      && (
+        liveSettledPacket !== null
+        || latestSaga.settledTurnPacketId !== null
+        || isPendingNarrationStatus(latestSaga.status)
+      )
+    ) {
+      throw new PendingSettledTurnNarrationError(latestSaga, error);
+    }
+    throw error;
+  } finally {
+    liveHeartbeat.stop();
+    try {
+      releaseTurnSagaWorker({
+        sagaId: liveClaim.saga.id,
+        lockToken: liveClaim.lockToken,
+      });
+    } catch (error) {
+      log.warn("Live narration worker could not release saga lock", error);
+    }
   }
-
-  yield {
-    type: "scene-settling",
-    data: { stage: "scene-settling", phase: "cleaning-transient-scene", tick: newTick },
-  };
-  const cleanupStart = Date.now();
-  cleanupTransientSceneObjects(campaignId, newTick);
-  recordTurnLatencyStage(latencyTrace, {
-    stage: "transient_cleanup",
-    startedAt: cleanupStart,
-    metadata: { tick: newTick },
-  });
-
-  commitStagedWorldForecast(campaignId, stagedForecast);
-  finishLatencyTrace();
-  yield { type: "done", data: { tick: newTick } };
 }
 
 async function* processTurnLegacy(

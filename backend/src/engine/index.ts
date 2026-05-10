@@ -29,8 +29,10 @@ export type {
 } from "./oracle.js";
 
 export {
+  NarrationRepairExhaustedError,
   processTurn,
   processOpeningScene,
+  resumePendingTurnNarration,
   detectMovement,
   sanitizeNarrative,
 } from "./turn-processor.js";
@@ -38,6 +40,7 @@ export {
 export type {
   HiddenTurnSummary,
   OpeningSceneOptions,
+  ResumePendingNarrationOptions,
   TurnEvent,
   TurnOptions,
   TurnSummary,
@@ -191,6 +194,50 @@ export type {
   SimulationProposalPayload,
   SimulationProposalWriteScope,
 } from "./simulation-proposal.js";
+
+export {
+  PENDING_NARRATION_STATUSES,
+  TURN_SAGA_STATUSES,
+  PendingNarrationError,
+  TurnSagaNotFoundError,
+  TurnSagaTransitionError,
+  assertNoPendingNarrationBeforeNewTurn,
+  createTurnSaga,
+  findPendingNarrationSaga,
+  getSettledTurnPacket,
+  getTurnSaga,
+  findLatestSuccessfulNarratorAttempt,
+  heartbeatTurnSagaWorker,
+  markTurnSagaFailedStateCorruption,
+  markTurnSagaFinalized,
+  markTurnSagaFinalizedIfNeeded,
+  mergeTurnSagaProvenance,
+  persistOracleDecision,
+  persistSettledTurnPacket,
+  recordNarratorAttempt,
+  transitionTurnSagaStatus,
+  updateTurnSagaStatus,
+} from "./turn-saga.js";
+
+export type {
+  CreateTurnSagaInput,
+  GetSettledTurnPacketInput,
+  GetTurnSagaInput,
+  HeartbeatTurnSagaWorkerInput,
+  MarkTurnSagaFailedStateCorruptionInput,
+  MarkTurnSagaFinalizedInput,
+  MergeTurnSagaProvenanceInput,
+  NarratorAttemptRecord,
+  NarratorAttemptStatus,
+  OracleDecisionRecord,
+  PersistOracleDecisionInput,
+  PersistSettledTurnPacketInput,
+  RecordNarratorAttemptInput,
+  SettledTurnPacketRecord,
+  TransitionTurnSagaStatusInput,
+  TurnSagaRecord,
+  TurnSagaStatus,
+} from "./turn-saga.js";
 
 export {
   buildDoneBoundaryData,

@@ -12,6 +12,15 @@ const {
   runGmReadMock,
   runVisibleNarrationWithPacketGuardMock,
   safeGenerateObjectMock,
+  assertNoPendingNarrationBeforeNewTurnMock,
+  claimTurnSagaWorkerMock,
+  createTurnSagaMock,
+  getTurnSagaMock,
+  markTurnSagaFinalizedMock,
+  persistSettledTurnPacketMock,
+  recordNarratorAttemptMock,
+  releaseTurnSagaWorkerMock,
+  transitionTurnSagaStatusMock,
 } = vi.hoisted(() => ({
   appendChatMessagesMock: vi.fn(),
   advanceCampaignTickMock: vi.fn(),
@@ -24,6 +33,15 @@ const {
   runGmReadMock: vi.fn(),
   runVisibleNarrationWithPacketGuardMock: vi.fn(),
   safeGenerateObjectMock: vi.fn(),
+  assertNoPendingNarrationBeforeNewTurnMock: vi.fn(),
+  claimTurnSagaWorkerMock: vi.fn(),
+  createTurnSagaMock: vi.fn(),
+  getTurnSagaMock: vi.fn(),
+  markTurnSagaFinalizedMock: vi.fn(),
+  persistSettledTurnPacketMock: vi.fn(),
+  recordNarratorAttemptMock: vi.fn(),
+  releaseTurnSagaWorkerMock: vi.fn(),
+  transitionTurnSagaStatusMock: vi.fn(),
 }));
 
 vi.mock("ai", () => ({
@@ -186,6 +204,48 @@ vi.mock("../visible-narration-output-guard.js", () => ({
   runVisibleNarrationWithPacketGuard: runVisibleNarrationWithPacketGuardMock,
 }));
 
+vi.mock("../living-world-authority.js", () => ({
+  readWorldClock: vi.fn(() => ({
+    campaignId: "campaign-empty-narration",
+    worldVersion: 0,
+    worldTimeMinutes: 0,
+    currentTick: 5,
+    updatedAt: 0,
+  })),
+}));
+
+vi.mock("../turn-saga.js", () => ({
+  assertNoPendingNarrationBeforeNewTurn: assertNoPendingNarrationBeforeNewTurnMock,
+  claimTurnSagaWorker: claimTurnSagaWorkerMock,
+  createTurnSaga: createTurnSagaMock,
+  findLatestSuccessfulNarratorAttempt: vi.fn(() => null),
+  getSettledTurnPacket: vi.fn(),
+  getTurnSaga: getTurnSagaMock,
+  heartbeatTurnSagaWorker: vi.fn(),
+  markTurnSagaFinalized: markTurnSagaFinalizedMock,
+  markTurnSagaFinalizedIfNeeded: vi.fn(),
+  mergeTurnSagaProvenance: vi.fn(),
+  PendingSettledTurnNarrationError: class PendingSettledTurnNarrationError extends Error {
+    constructor(
+      public readonly pendingSaga: MockTurnSagaRecord,
+      public readonly causeError?: unknown,
+    ) {
+      super(`Campaign ${pendingSaga.campaignId} has pending narration for turn ${pendingSaga.turnId}.`);
+      this.name = "PendingSettledTurnNarrationError";
+    }
+  },
+  PENDING_NARRATION_STATUSES: [
+    "resolved_pending_narration",
+    "narrator_rendering",
+    "narrator_repairing",
+  ],
+  persistOracleDecision: vi.fn(() => ({ id: "oracle-empty-narration" })),
+  persistSettledTurnPacket: persistSettledTurnPacketMock,
+  recordNarratorAttempt: recordNarratorAttemptMock,
+  releaseTurnSagaWorker: releaseTurnSagaWorkerMock,
+  transitionTurnSagaStatus: transitionTurnSagaStatusMock,
+}));
+
 vi.mock("../world-forecast.js", () => ({
   buildScopedForecastExcerpt: vi.fn(() => ({
     entries: [],
@@ -305,6 +365,47 @@ async function collectEventsUntilError(generator: AsyncGenerator<TurnEvent>) {
   return { events, thrown };
 }
 
+function errorMessages(error: unknown): string[] {
+  const messages: string[] = [];
+  let current = error;
+  while (current && typeof current === "object") {
+    const message = current instanceof Error
+      ? current.message
+      : String((current as { message?: unknown }).message ?? "");
+    if (message) {
+      messages.push(message);
+    }
+    current = (current as { causeError?: unknown; cause?: unknown }).causeError
+      ?? (current as { cause?: unknown }).cause;
+  }
+  return messages;
+}
+
+type MockTurnSagaRecord = {
+  id: string;
+  campaignId: string;
+  turnId: string;
+  playerId: string | null;
+  actionId: string | null;
+  actionText: string | null;
+  sourceAction: unknown;
+  status: string;
+  statusReason: string | null;
+  statusUpdatedAt: number;
+  activeLockToken: string | null;
+  activeWorkerId: string | null;
+  activeStartedAt: number | null;
+  requiresNarration: boolean;
+  baseWorldVersion: number;
+  resultWorldVersion: number | null;
+  oracleDecisionId: string | null;
+  settledTurnPacketId: string | null;
+  latestNarratorAttemptId: string | null;
+  provenance: Record<string, unknown>;
+  createdAt: number;
+  updatedAt: number;
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   delete process.env.EXPOSE_LLM_REASONING;
@@ -324,6 +425,96 @@ beforeEach(() => {
   });
   incrementTickMock.mockReturnValue(6);
   advanceCampaignTickMock.mockReturnValue(6);
+  let saga: MockTurnSagaRecord = {
+    id: "saga-empty-narration",
+    campaignId: "campaign-empty-narration",
+    turnId: "turn-empty-narration",
+    playerId: null,
+    actionId: null,
+    actionText: "I wait and watch what changes.",
+    sourceAction: {},
+    status: "created",
+    statusReason: null,
+    statusUpdatedAt: 0,
+    activeLockToken: null,
+    activeWorkerId: null,
+    activeStartedAt: null,
+    requiresNarration: false,
+    baseWorldVersion: 0,
+    resultWorldVersion: null,
+    oracleDecisionId: null,
+    settledTurnPacketId: null,
+    latestNarratorAttemptId: null,
+    provenance: {},
+    createdAt: 0,
+    updatedAt: 0,
+  };
+  assertNoPendingNarrationBeforeNewTurnMock.mockImplementation(() => undefined);
+  claimTurnSagaWorkerMock.mockImplementation((input: { workerId: string; lockToken?: string }) => {
+    const lockToken = input.lockToken ?? "lock-empty-narration";
+    saga = {
+      ...saga,
+      activeLockToken: lockToken,
+      activeWorkerId: input.workerId,
+      activeStartedAt: 1,
+    };
+    return { saga, lockToken, workerId: input.workerId };
+  });
+  releaseTurnSagaWorkerMock.mockImplementation(() => {
+    saga = {
+      ...saga,
+      activeLockToken: null,
+      activeWorkerId: null,
+      activeStartedAt: null,
+    };
+    return saga;
+  });
+  createTurnSagaMock.mockImplementation(() => saga);
+  transitionTurnSagaStatusMock.mockImplementation((input: { toStatus: string }) => {
+    saga = { ...saga, status: input.toStatus };
+    return saga;
+  });
+  persistSettledTurnPacketMock.mockImplementation(() => {
+    saga = {
+      ...saga,
+      status: "resolved_pending_narration",
+      requiresNarration: true,
+      settledTurnPacketId: "packet-empty-narration",
+      resultWorldVersion: 0,
+    };
+    return {
+      id: "packet-empty-narration",
+      campaignId: "campaign-empty-narration",
+      sagaId: saga.id,
+      turnId: saga.turnId,
+      oracleDecisionId: null,
+      canonicalTurnPacket: {},
+      narratorPacket: {},
+      sourceRefs: [],
+      acceptedToolResultRefs: [],
+      acceptedActorResultRefs: [],
+      dueWorldRefs: [],
+      requiresNarration: true,
+      baseWorldVersion: 0,
+      resultWorldVersion: 0,
+      createdAt: 0,
+      updatedAt: 0,
+    };
+  });
+  getTurnSagaMock.mockImplementation(() => saga);
+  recordNarratorAttemptMock.mockImplementation((input: { status: string }) => {
+    const attempt = {
+      id: `attempt-empty-${recordNarratorAttemptMock.mock.calls.length + 1}`,
+      sagaId: saga.id,
+      status: input.status,
+    };
+    saga = { ...saga, latestNarratorAttemptId: attempt.id };
+    return attempt;
+  });
+  markTurnSagaFinalizedMock.mockImplementation(() => {
+    saga = { ...saga, status: "finalized" };
+    return saga;
+  });
   callOracleMock.mockResolvedValue({
     chance: 50,
     roll: 50,
@@ -369,7 +560,10 @@ describe("processTurn empty final narration", () => {
     );
 
     expect(thrown).toBeInstanceOf(Error);
-    expect(String((thrown as Error).message)).toContain("Final visible narration was empty");
+    expect((thrown as Error).name).toBe("PendingSettledTurnNarrationError");
+    expect(errorMessages(thrown).some((message) =>
+      message.includes("Final visible narration was empty")
+    )).toBe(true);
     expect(events.some((event) => event.type === "narrative")).toBe(false);
     expect(events.some((event) => event.type === "finalizing_turn")).toBe(false);
     expect(events.some((event) => event.type === "done")).toBe(false);
@@ -387,10 +581,15 @@ describe("processTurn empty final narration", () => {
   it("does not finalize the legacy path when final narration stays blank after retry", async () => {
     const onPostTurn = vi.fn();
     process.env.SCENE_PLAN_ENABLED = "false";
-    generateTextMock.mockResolvedValue({
-      text: "   ",
-      reasoningText: undefined,
-    });
+    generateTextMock
+      .mockResolvedValueOnce({
+        text: "",
+        reasoningText: undefined,
+      })
+      .mockResolvedValueOnce({
+        text: "   ",
+        reasoningText: undefined,
+      });
 
     const { events, thrown } = await collectEventsUntilError(
       processTurn(createOptions({ onPostTurn })),

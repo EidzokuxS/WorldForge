@@ -22,6 +22,14 @@ export const STORYTELLER_WORLD_RULES = [
   "Never contradict established scene facts, inventory truth, or the world premise.",
 ].join(" ");
 
+const STORYTELLER_DRAFT_JSON_WORLD_RULES = [
+  "Return exactly one JSON object; the prose field must contain narrative prose only.",
+  "Do not echo bracketed system sections, metadata, roll numbers, or tool syntax.",
+  "Narrate the provided outcome faithfully instead of inventing new mechanics.",
+  "Produce exactly one continuous narration pass for the turn. Do not restart the scene or restate the same beat in alternate wording.",
+  "Never contradict established scene facts, inventory truth, or the world premise.",
+].join(" ");
+
 export const STORYTELLER_RP_PLAY_RULES = [
   "Write one playable RPG/VN beat, not a recap, report, or backend explanation.",
   "Player agency is locked: never write the player's deliberate words, feelings, choices, consent, or completed success unless settled inputs confirm them.",
@@ -83,6 +91,7 @@ export type { StorytellerPass };
 
 interface BuildStorytellerContractOptions {
   pass?: StorytellerPass;
+  outputMode?: "prose" | "narration-draft-json";
   includeWorldRules?: boolean;
   includeContextRules?: boolean;
   includeToolSupportRules?: boolean;
@@ -95,6 +104,7 @@ export function buildStorytellerContract(
   options: BuildStorytellerContractOptions = {},
 ): string {
   const pass = options.pass ?? "hidden-tool-driving";
+  const outputMode = options.outputMode ?? "prose";
   const passSpecificRules =
     pass === "final-visible"
       ? FINAL_VISIBLE_NARRATION_RULES
@@ -117,7 +127,11 @@ export function buildStorytellerContract(
       : null,
     presetSource,
     options.includeGlmOverlay ? presetOverlay : null,
-    options.includeWorldRules === false ? null : STORYTELLER_WORLD_RULES,
+    options.includeWorldRules === false
+      ? null
+      : outputMode === "narration-draft-json"
+        ? STORYTELLER_DRAFT_JSON_WORLD_RULES
+        : STORYTELLER_WORLD_RULES,
     STORYTELLER_RP_PLAY_RULES,
     pass === "final-visible" ? STORYTELLER_PROSE_TECHNIQUE_RULES : null,
     options.includeContextRules === false ? null : STORYTELLER_CONTEXT_RULES,

@@ -174,6 +174,30 @@ describe("narrator packet settlement boundary", () => {
     expect(formatted).not.toContain("SKIPPED SENTINEL");
   });
 
+  it("builds a player-facing evidence ledger from settled visible packet sources", () => {
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket: createCanonicalTurnPacket(),
+    });
+
+    expect(packet.evidenceLedger?.map((entry) => entry.id)).toEqual(
+      expect.arrayContaining([
+        "player_action_request:player-action",
+        `anchor_event:${anchorEventId}`,
+        `committed_event:${anchorEventId}`,
+        `perceivable_response:${responseId}`,
+        "perceivable_effect:effect-success",
+        `tool_result:${successfulActionId}:log_event`,
+        `visible_actor:${playerId}`,
+        `visible_actor:${visibleNpcId}`,
+        "guardrail:1",
+        "control_return:current",
+      ]),
+    );
+    expect(formatNarratorPacketForPrompt(packet)).toContain("[EVIDENCE LEDGER]");
+    expect(formatNarratorPacketForPrompt(packet)).toContain("perceivable_effect:effect-success");
+  });
+
   it("uses concrete successful log_event text when no explicit effect was authored", () => {
     const canonicalTurnPacket = createCanonicalTurnPacket();
     canonicalTurnPacket.effects = [];

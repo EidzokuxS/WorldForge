@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { NarratorPacket } from "../narrator-packet.js";
+import type { NarrationDraft } from "../narration-grounding-guard.js";
 import {
   validateVisibleNarrationAgainstPacket,
   runVisibleNarrationWithPacketGuard,
@@ -50,6 +51,14 @@ function createPacket(): NarratorPacket {
       },
     ],
     hintSignals: ["A bowstring creaks somewhere out of sight."],
+    evidenceLedger: [
+      {
+        id: "perceivable_response:response-pressure",
+        category: "perceivable_response",
+        summary: "The Gate Captain warns that the bridge bell will ring soon.",
+        sourceId: "response-pressure",
+      },
+    ],
     guardrails: ["Do not reveal identities behind hint signals."],
     controlReturnReason: "Return control after the immediate response.",
     allowedVisibleActorNames: ["Player", "Gate Captain"],
@@ -82,6 +91,54 @@ function createPacket(): NarratorPacket {
       guardrails: ["Do not reveal identities behind hint signals."],
       controlReturnReason: "Return control after the immediate response.",
     },
+  };
+}
+
+function createGroundedDraft(overrides: Partial<NarrationDraft> = {}): NarrationDraft {
+  return {
+    prose: "The Gate Captain lowers his voice: the bridge bell will ring soon.",
+    claims: [
+      {
+        id: "claim-bridge-bell",
+        kind: "future_pressure",
+        summary: "The bridge bell creates near-future pressure.",
+        requiresEvidence: true,
+        evidenceRefs: ["perceivable_response:response-pressure"],
+      },
+    ],
+    claimSpans: [
+      {
+        id: "span-bridge-bell",
+        spanText: "the bridge bell will ring soon",
+        claimIds: ["claim-bridge-bell"],
+        requiresEvidence: true,
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function createThinGroundedDraft(overrides: Partial<NarrationDraft> = {}): NarrationDraft {
+  return {
+    prose: "Gate holds.",
+    claims: [
+      {
+        id: "claim-gate-holds",
+        kind: "playable_beat",
+        summary: "The gate holds as the visible playable beat.",
+        requiresEvidence: false,
+        evidenceRefs: [],
+      },
+    ],
+    claimSpans: [
+      {
+        id: "span-gate-holds",
+        spanText: "Gate holds.",
+        claimIds: ["claim-gate-holds"],
+        requiresEvidence: false,
+      },
+    ],
+    ...overrides,
   };
 }
 
@@ -133,7 +190,7 @@ describe("visible narration output guard", () => {
         return "The Hidden Archer watches from the parapet.";
       }
 
-      return "The captain's gaze flicks to the dark parapet.";
+      return JSON.stringify(createGroundedDraft());
     });
 
     const result = await runVisibleNarrationWithPacketGuard({
@@ -144,7 +201,7 @@ describe("visible narration output guard", () => {
     expect(VISIBLE_NARRATION_PACKET_GUARD_RETRY_LIMIT).toBe(1);
     expect(generateNarration).toHaveBeenCalledTimes(2);
     expect(result).toMatchObject({
-      text: "The captain's gaze flicks to the dark parapet.",
+      text: "The Gate Captain lowers his voice: the bridge bell will ring soon.",
       attempts: 2,
       retried: true,
     });
@@ -166,7 +223,7 @@ describe("visible narration output guard", () => {
         return "   ";
       }
 
-      return "The captain waits by the gate, palm resting near the latch.";
+      return JSON.stringify(createGroundedDraft());
     });
 
     const result = await runVisibleNarrationWithPacketGuard({
@@ -176,7 +233,7 @@ describe("visible narration output guard", () => {
 
     expect(generateNarration).toHaveBeenCalledTimes(2);
     expect(result).toMatchObject({
-      text: "The captain waits by the gate, palm resting near the latch.",
+      text: "The Gate Captain lowers his voice: the bridge bell will ring soon.",
       attempts: 2,
       retried: true,
     });
@@ -184,18 +241,268 @@ describe("visible narration output guard", () => {
     expect(attempts[1]?.guardAddendum).toContain("playable next moment");
   });
 
+  it("accepts short safe structured narration after one soft retry preference", async () => {
+    const packet = createPacket();
+    const attempts: Array<{ attempt: number; guardAddendum: string | null }> = [];
+    const generateNarration = vi.fn(({ attempt, guardAddendum }) => {
+      attempts.push({ attempt, guardAddendum });
+      return JSON.stringify(createThinGroundedDraft());
+    });
+
+    const result = await runVisibleNarrationWithPacketGuard({
+      packet,
+      generateNarration,
+    });
+
+    expect(generateNarration).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({
+      text: "Gate holds.",
+      attempts: 2,
+      retried: true,
+      validation: {
+        ok: true,
+        violations: [],
+        warnings: [{ kind: "thinNarration", term: "thin visible narration" }],
+      },
+    });
+    expect(result.validation.grounding).toMatchObject({
+      ok: true,
+      violations: [],
+      warnings: [{ kind: "thin_prose" }],
+    });
+    expect(attempts[1]?.guardAddendum).toContain("previous output was too thin");
+  });
+
+  it("returns accepted plain prose exactly without trimming", async () => {
+    const packet = createPacket();
+    packet.evidenceLedger = undefined;
+    const output = "\n  The captain waits by the gate.  \n";
+
+    const result = await runVisibleNarrationWithPacketGuard({
+      packet,
+      generateNarration: vi.fn(() => output),
+    });
+
+    expect(result.retried).toBe(false);
+    expect(result.text).toBe(output);
+  });
+
+  it("runs literal and empty packet checks before structured grounding repair", async () => {
+    const packet = createPacket();
+    const attempts: Array<{ attempt: number; guardAddendum: string | null }> = [];
+    const generateNarration = vi.fn(({ attempt, guardAddendum }) => {
+      attempts.push({ attempt, guardAddendum });
+
+      if (attempt === 1) {
+        return JSON.stringify(createGroundedDraft({
+          prose: "The Hidden Archer names the Forest Outpost.",
+          claims: [
+            {
+              id: "claim-unsupported",
+              kind: "future_pressure",
+              summary: "Unsupported pressure.",
+              requiresEvidence: true,
+              evidenceRefs: [],
+            },
+          ],
+        }));
+      }
+
+      return JSON.stringify(createGroundedDraft());
+    });
+
+    const result = await runVisibleNarrationWithPacketGuard({
+      packet,
+      generateNarration,
+    });
+
+    expect(result.text).toBe("The Gate Captain lowers his voice: the bridge bell will ring soon.");
+    expect(attempts[1]?.guardAddendum).toContain("visible packet");
+    expect(attempts[1]?.guardAddendum).not.toContain("claim-unsupported");
+    expect(attempts[1]?.guardAddendum).not.toContain("Hidden Archer");
+    expect(attempts[1]?.guardAddendum).not.toContain("Forest Outpost");
+  });
+
+  it("repairs unsupported structured grounding without leaking private terms", async () => {
+    const packet = createPacket();
+    const attempts: Array<{ attempt: number; guardAddendum: string | null }> = [];
+    const generateNarration = vi.fn(({ attempt, guardAddendum }) => {
+      attempts.push({ attempt, guardAddendum });
+
+      if (attempt === 1) {
+        return JSON.stringify(createGroundedDraft({
+          claims: [
+            {
+              id: "claim-unsupported",
+              kind: "future_pressure",
+              summary: "Unsupported pressure near the gate.",
+              requiresEvidence: true,
+              evidenceRefs: [],
+            },
+          ],
+        }));
+      }
+
+      return JSON.stringify(createGroundedDraft());
+    });
+
+    const result = await runVisibleNarrationWithPacketGuard({
+      packet,
+      generateNarration,
+    });
+
+    expect(result.retried).toBe(true);
+    expect(result.text).toBe("The Gate Captain lowers his voice: the bridge bell will ring soon.");
+    expect(attempts[1]?.guardAddendum).toContain("an evidence-required claim lacks evidenceRefs");
+    expect(attempts[1]?.guardAddendum).not.toContain("claim-unsupported");
+    expect(attempts[1]?.guardAddendum).not.toContain("Forest Outpost");
+    expect(attempts[1]?.guardAddendum).not.toContain("Hidden Archer");
+    expect(attempts[1]?.guardAddendum).not.toContain(`hidden-actor:${hiddenNpcId}`);
+  });
+
+  it("repairs unsupported claimSpan coverage omitted from claims", async () => {
+    const packet = createPacket();
+    const generateNarration = vi
+      .fn()
+      .mockReturnValueOnce(JSON.stringify(createGroundedDraft({
+        claims: [],
+        claimSpans: [
+          {
+            id: "span-bridge-bell",
+            spanText: "the bridge bell will ring soon",
+            claimIds: [],
+            requiresEvidence: true,
+          },
+        ],
+      })))
+      .mockReturnValueOnce(JSON.stringify(createGroundedDraft()));
+
+    const result = await runVisibleNarrationWithPacketGuard({
+      packet,
+      generateNarration,
+    });
+
+    expect(result.retried).toBe(true);
+    expect(result.validation.grounding?.ok).toBe(true);
+    expect(generateNarration).toHaveBeenCalledTimes(2);
+  });
+
   it("second forbidden Storyteller output throws before appendChatMessages", async () => {
     const packet = createPacket();
 
     const appendChatMessages = vi.fn();
+    const generateNarration = vi.fn(() => "The Hidden Archer stays named.");
 
-    await expect(
-      runVisibleNarrationWithPacketGuard({
+    let thrown: unknown;
+    try {
+      await runVisibleNarrationWithPacketGuard({
         packet,
-        generateNarration: vi.fn(() => "The Hidden Archer stays named."),
-      }),
-    ).rejects.toBeInstanceOf(VisibleNarrationPacketGuardError);
+        generateNarration,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(VisibleNarrationPacketGuardError);
+    expect(thrown).toMatchObject({
+      attempts: 2,
+      violations: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "forbiddenActorName",
+          term: "Hidden Archer",
+        }),
+      ]),
+    });
+    expect(generateNarration).toHaveBeenCalledTimes(2);
     expect(appendChatMessages).not.toHaveBeenCalled();
+  });
+
+  it("repairs non-JSON packet narration instead of accepting plain prose", async () => {
+    const packet = createPacket();
+    const attempts: Array<{ attempt: number; guardAddendum: string | null }> = [];
+    const generateNarration = vi.fn(({ attempt, guardAddendum }) => {
+      attempts.push({ attempt, guardAddendum });
+      return attempt === 1
+        ? "The captain waits, and the wall remains dark."
+        : JSON.stringify(createGroundedDraft());
+    });
+
+    const result = await runVisibleNarrationWithPacketGuard({
+      packet,
+      generateNarration,
+    });
+
+    expect(result.retried).toBe(true);
+    expect(result.text).toBe("The Gate Captain lowers his voice: the bridge bell will ring soon.");
+    expect(attempts[1]?.guardAddendum).toContain("valid NarrationDraft JSON object");
+    expect(generateNarration).toHaveBeenCalledTimes(2);
+  });
+
+  it("repairs malformed draft JSON instead of falling back to raw text", async () => {
+    const packet = createPacket();
+    const attempts: Array<{ attempt: number; guardAddendum: string | null }> = [];
+    const generateNarration = vi.fn(({ attempt, guardAddendum }) => {
+      attempts.push({ attempt, guardAddendum });
+      return attempt === 1
+        ? '{"prose":"The captain waits", "claims": ['
+        : JSON.stringify(createGroundedDraft());
+    });
+
+    const result = await runVisibleNarrationWithPacketGuard({
+      packet,
+      generateNarration,
+    });
+
+    expect(result.retried).toBe(true);
+    expect(result.text).toBe("The Gate Captain lowers his voice: the bridge bell will ring soon.");
+    expect(attempts[1]?.guardAddendum).toContain("valid NarrationDraft JSON object");
+  });
+
+  it("preserves legacy plain prose behavior when no evidence ledger contract is present", async () => {
+    const packet = createPacket();
+    packet.evidenceLedger = undefined;
+
+    const result = await runVisibleNarrationWithPacketGuard({
+      packet,
+      generateNarration: vi.fn(() => "The captain waits, and the wall remains dark."),
+    });
+
+    expect(result.retried).toBe(false);
+    expect(result.text).toBe("The captain waits, and the wall remains dark.");
+  });
+
+  it("rejects malformed draft JSON and unknown claim kinds at runtime", async () => {
+    const packet = createPacket();
+    const attempts: Array<{ attempt: number; guardAddendum: string | null }> = [];
+    const generateNarration = vi.fn(({ attempt, guardAddendum }) => {
+      attempts.push({ attempt, guardAddendum });
+
+      if (attempt === 1) {
+        return JSON.stringify({
+          ...createGroundedDraft(),
+          claims: [
+            {
+              id: "claim-bad-kind",
+              kind: "private_lore_dump",
+              summary: "Invalid claim kind.",
+              requiresEvidence: false,
+              evidenceRefs: [],
+            },
+          ],
+        });
+      }
+
+      return JSON.stringify(createGroundedDraft());
+    });
+
+    const result = await runVisibleNarrationWithPacketGuard({
+      packet,
+      generateNarration,
+    });
+
+    expect(result.retried).toBe(true);
+    expect(attempts[1]?.guardAddendum).toContain("valid NarrationDraft JSON object");
+    expect(attempts[1]?.guardAddendum).not.toContain("claim-bad-kind");
   });
 
   it("keeps final narration non-streaming and buffered so no SSE narrative event can emit before validation", async () => {
@@ -206,13 +513,13 @@ describe("visible narration output guard", () => {
       packet,
       generateNarration: async () => {
         emittedEvents.push("model-buffer-ready");
-        return "The captain waits, and the wall remains dark.";
+        return JSON.stringify(createGroundedDraft());
       },
     });
 
     expect(emittedEvents).toEqual(["model-buffer-ready"]);
     expect(emittedEvents).not.toContain("narrative");
     expect(emittedEvents).not.toContain("SSE");
-    expect(result.text).toBe("The captain waits, and the wall remains dark.");
+    expect(result.text).toBe("The Gate Captain lowers his voice: the bridge bell will ring soon.");
   });
 });

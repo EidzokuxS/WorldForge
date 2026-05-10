@@ -95,9 +95,23 @@ vi.mock("../../db/index.js", () => ({
 
 vi.mock("../../engine/index.js", () => ({
   processTurn: vi.fn(),
+  resumePendingTurnNarration: vi.fn(),
   processOpeningScene: vi.fn(),
   captureSnapshot: vi.fn(),
   restoreSnapshot: vi.fn(),
+  findPendingNarrationSaga: vi.fn(() => null),
+  PendingNarrationError: class PendingNarrationError extends Error {
+    constructor(public readonly pendingSaga: unknown) {
+      super("Pending narration.");
+      this.name = "PendingNarrationError";
+    }
+  },
+  NarrationRepairExhaustedError: class NarrationRepairExhaustedError extends Error {
+    constructor(message = "Narration repair exhausted.") {
+      super(message);
+      this.name = "NarrationRepairExhaustedError";
+    }
+  },
   tickPresentNpcs: vi.fn(),
   simulateOffscreenNpcs: vi.fn(),
   checkAndTriggerReflections: vi.fn(),
@@ -169,8 +183,12 @@ import { getDb } from "../../db/index.js";
 import {
   processOpeningScene,
   processTurn,
+  resumePendingTurnNarration,
   captureSnapshot,
   restoreSnapshot,
+  findPendingNarrationSaga,
+  PendingNarrationError,
+  NarrationRepairExhaustedError,
   checkAndTriggerReflections,
   tickPresentNpcs,
   simulateOffscreenNpcs,
@@ -194,9 +212,11 @@ const mockedLoadSettings = vi.mocked(loadSettings);
 const mockedResolveRole = vi.mocked(resolveRoleModel);
 const mockedGetDb = vi.mocked(getDb);
 const mockedProcessTurn = vi.mocked(processTurn);
+const mockedResumePendingTurnNarration = vi.mocked(resumePendingTurnNarration);
 const mockedProcessOpeningScene = vi.mocked(processOpeningScene);
 const mockedCaptureSnapshot = vi.mocked(captureSnapshot);
 const mockedRestoreSnapshot = vi.mocked(restoreSnapshot);
+const mockedFindPendingNarrationSaga = vi.mocked(findPendingNarrationSaga);
 const mockedCheckAndTriggerReflections = vi.mocked(checkAndTriggerReflections);
 const mockedTickPresentNpcs = vi.mocked(tickPresentNpcs);
 const mockedSimulateOffscreenNpcs = vi.mocked(simulateOffscreenNpcs);
@@ -298,6 +318,7 @@ beforeEach(() => {
     worldVersion: 0,
     worldTimeMinutes: 0,
   }));
+  mockedFindPendingNarrationSaga.mockReturnValue(null);
 });
 
 // ---------------------------------------------------------------------------
@@ -1356,6 +1377,208 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(historyBody.hasLiveTurnSnapshot).toBe(false);
   });
 
+  it("auto-resumes existing pending narration on /chat/action without starting paid turn work", async () => {
+    setupStoryteller();
+    const pendingSaga = {
+      id: "saga-pending-action",
+      turnId: "turn-pending-action",
+      status: "resolved_pending_narration",
+    } as any;
+
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
+      id: campaignId,
+      name: `Campaign ${campaignId}`,
+      createdAt: "2026-01-01",
+    }) as any);
+    mockedFindPendingNarrationSaga.mockReturnValue(pendingSaga);
+    mockedResumePendingTurnNarration.mockImplementation(() =>
+      createTurnStream([
+        { type: "narrative", data: { text: "The pending narration resumes." } },
+        { type: "done", data: { tick: 3, resumed: true } },
+      ]) as any,
+    );
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Start a new action",
+        intent: "Start a new action",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("The pending narration resumes.");
+    expect(mockedResumePendingTurnNarration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        campaignId: CAMPAIGN_ID,
+        turnId: "turn-pending-action",
+      }),
+    );
+    expect(mockedProcessTurn).not.toHaveBeenCalled();
+    expect(mockedCaptureSnapshot).not.toHaveBeenCalled();
+    expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("does not restore paid resolution when narrator repair is exhausted after settled packet", async () => {
+    setupStoryteller();
+    setupDbMock();
+    const snapshot = { bundleId: "pre-paid-resolution" } as any;
+    const pendingSaga = {
+      id: "saga-repair-pending",
+      turnId: "turn-repair-pending",
+      status: "narrator_repairing",
+    } as any;
+
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
+      id: campaignId,
+      name: `Campaign ${campaignId}`,
+      createdAt: "2026-01-01",
+    }) as any);
+    mockedCaptureSnapshot.mockReturnValue(snapshot);
+    mockedFindPendingNarrationSaga
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce(pendingSaga);
+    mockedProcessTurn.mockImplementation(() =>
+      (async function* () {
+        yield { type: "scene-settling", data: { phase: "final-narration" } } as any;
+        throw new NarrationRepairExhaustedError("Visible narration needs repair.");
+      })(),
+    );
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Force the gate",
+        intent: "Force the gate",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("event: error");
+    expect(body).toContain("\"pendingNarration\":true");
+    expect(body).toContain("\"resumable\":true");
+    expect(body).not.toContain("event: done");
+    expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("does not restore paid resolution when a generic post-settled error leaves pending narration", async () => {
+    setupStoryteller();
+    setupDbMock();
+    const snapshot = { bundleId: "pre-paid-generic-error" } as any;
+    const pendingSaga = {
+      id: "saga-generic-pending",
+      turnId: "turn-generic-pending",
+      status: "resolved_pending_narration",
+    } as any;
+
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
+      id: campaignId,
+      name: `Campaign ${campaignId}`,
+      createdAt: "2026-01-01",
+    }) as any);
+    mockedCaptureSnapshot.mockReturnValue(snapshot);
+    mockedFindPendingNarrationSaga
+      .mockReturnValueOnce(null)
+      .mockReturnValueOnce(pendingSaga);
+    mockedProcessTurn.mockImplementation(() =>
+      (async function* () {
+        yield { type: "scene-settling", data: { phase: "final-narration" } } as any;
+        throw new Error("post-settled narrator tail failed");
+      })(),
+    );
+    mockedResumePendingTurnNarration.mockImplementation(() => {
+      const error = new Error("worker owns pending narration");
+      error.name = "TurnSagaLockConflictError";
+      throw error;
+    });
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Force the gate",
+        intent: "Force the gate",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("event: error");
+    expect(body).toContain("\"pendingNarration\":true");
+    expect(body).toContain("\"resumable\":true");
+    expect(body).toContain("turn-generic-pending");
+    expect(mockedResumePendingTurnNarration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        campaignId: CAMPAIGN_ID,
+        turnId: "turn-generic-pending",
+      }),
+    );
+    expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("does not restore finalized paid state when /chat/action final done write fails", async () => {
+    setupStoryteller();
+    setupDbMock();
+    const snapshot = { bundleId: "pre-finalized-done-action" } as any;
+    let paidState = "pre-turn";
+
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
+      id: campaignId,
+      name: `Campaign ${campaignId}`,
+      createdAt: "2026-01-01",
+    }) as any);
+    mockedCaptureSnapshot.mockReturnValue(snapshot);
+    mockedRestoreSnapshot.mockImplementation(() => {
+      paidState = "rolled-back";
+      return undefined as any;
+    });
+    mockedBuildDoneBoundaryData.mockImplementation(() => {
+      throw new Error("final done write failed");
+    });
+    mockedProcessTurn.mockImplementation(() =>
+      (async function* () {
+        yield { type: "narrative", data: { text: "The paid result is already committed." } } as any;
+        paidState = "finalized";
+        yield { type: "done", data: { tick: 2 } } as any;
+      })(),
+    );
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Commit the costly turn",
+        intent: "Commit the costly turn",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("event: narrative");
+    expect(body).toContain("event: error");
+    expect(body).toContain("\"settled\":true");
+    expect(body).not.toContain("event: done");
+    expect(mockedProcessTurn).toHaveBeenCalledTimes(1);
+    expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
+    expect(paidState).toBe("finalized");
+  });
+
   it("D-04/D-05 restores the same bundle before and after a failed /chat/retry replay", async () => {
     setupStoryteller();
     setupDbMock();
@@ -1416,6 +1639,97 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(historyRes.status).toBe(200);
     const historyBody = await historyRes.json();
     expect(historyBody.hasLiveTurnSnapshot).toBe(false);
+  });
+
+  it("does not restore finalized paid state again when /chat/retry final done write fails", async () => {
+    setupStoryteller();
+    setupDbMock();
+    const previousSnapshot = { bundleId: "pre-finalized-done-retry" } as any;
+    let restoreCount = 0;
+    let paidState = "previous-turn";
+
+    runtimeSnapshots.set(CAMPAIGN_ID, previousSnapshot);
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
+      id: campaignId,
+      name: `Campaign ${campaignId}`,
+      createdAt: "2026-01-01",
+    }) as any);
+    mockedGetLastPlayerAction.mockReturnValue("Retry the costly turn");
+    mockedRestoreSnapshot.mockImplementation(() => {
+      restoreCount += 1;
+      paidState = restoreCount === 1 ? "retry-start-restored" : "rolled-back-after-done";
+      return undefined as any;
+    });
+    mockedBuildDoneBoundaryData.mockImplementation(() => {
+      throw new Error("retry final done write failed");
+    });
+    mockedProcessTurn.mockImplementation(() =>
+      (async function* () {
+        yield { type: "narrative", data: { text: "The retry result is committed." } } as any;
+        paidState = "retry-finalized";
+        yield { type: "done", data: { tick: 3 } } as any;
+      })(),
+    );
+
+    const res = await app.request("/chat/retry", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("event: narrative");
+    expect(body).toContain("event: error");
+    expect(body).toContain("\"settled\":true");
+    expect(body).not.toContain("event: done");
+    expect(mockedProcessTurn).toHaveBeenCalledTimes(1);
+    expect(mockedRestoreSnapshot).toHaveBeenCalledTimes(1);
+    expect(mockedRestoreSnapshot).toHaveBeenCalledWith(CAMPAIGN_ID, previousSnapshot);
+    expect(paidState).toBe("retry-finalized");
+  });
+
+  it("auto-resumes existing pending narration on /chat/retry without a retry snapshot", async () => {
+    setupStoryteller();
+    const pendingSaga = {
+      id: "saga-pending-retry",
+      turnId: "turn-pending-retry",
+      status: "resolved_pending_narration",
+    } as any;
+
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
+      id: campaignId,
+      name: `Campaign ${campaignId}`,
+      createdAt: "2026-01-01",
+    }) as any);
+    mockedFindPendingNarrationSaga.mockReturnValue(pendingSaga);
+    mockedResumePendingTurnNarration.mockImplementation(() =>
+      createTurnStream([
+        { type: "narrative", data: { text: "Retry waits for pending narration." } },
+        { type: "done", data: { tick: 4, resumed: true } },
+      ]) as any,
+    );
+
+    const res = await app.request("/chat/retry", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("Retry waits for pending narration.");
+    expect(mockedResumePendingTurnNarration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        campaignId: CAMPAIGN_ID,
+        turnId: "turn-pending-retry",
+      }),
+    );
+    expect(mockedProcessTurn).not.toHaveBeenCalled();
+    expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
+    expect(mockedGetLastPlayerAction).not.toHaveBeenCalled();
   });
 });
 

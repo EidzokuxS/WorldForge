@@ -14,6 +14,7 @@ import {
 import {
   commitAuthorityTrace,
   ensureWorldClock,
+  queueSimulationJob,
   readWorldClock,
 } from "../living-world-authority.js";
 import {
@@ -110,6 +111,125 @@ describe("simulation queue and proposal lifecycle", () => {
     expect(result.queued.map((proposal) => proposal.proposalType)).toEqual([
       "npc_reflection_updates",
     ]);
+  });
+
+  it("dedupes rollback-critical post-turn proposals by idempotency key", () => {
+    ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 5 });
+
+    const first = queuePostTurnSimulationProposals({
+      campaignId: CAMPAIGN_ID,
+      tick: 5,
+      judgeProvider: provider(),
+      playerLocationId: "loc-player",
+      playerSceneScopeId: "scene-player",
+      route: "/chat/action",
+      idempotencyKey: "post-turn:campaign:turn:saga:attempt:5",
+    });
+    const second = queuePostTurnSimulationProposals({
+      campaignId: CAMPAIGN_ID,
+      tick: 5,
+      judgeProvider: provider(),
+      playerLocationId: "loc-player",
+      playerSceneScopeId: "scene-player",
+      route: "/chat/action",
+      idempotencyKey: "post-turn:campaign:turn:saga:attempt:5",
+    });
+
+    expect(second.queued.map((proposal) => proposal.proposalId)).toEqual(
+      first.queued.map((proposal) => proposal.proposalId),
+    );
+    expect(getDb().select().from(simulationJobs).all()).toHaveLength(3);
+    expect(getDb().select().from(simulationJobs).all().map((job) => job.idempotencyKey).sort()).toEqual([
+      "post-turn:campaign:turn:saga:attempt:5:faction_command_updates:system:faction-command-network",
+      "post-turn:campaign:turn:saga:attempt:5:npc_offscreen_updates:system:npc-offscreen",
+      "post-turn:campaign:turn:saga:attempt:5:npc_reflection_updates:system:npc-reflection",
+    ]);
+    expect(getDb().select().from(simulationProposals).all()).toHaveLength(3);
+    expect(getDb().select().from(simulationProposals).all().map((proposal) => proposal.idempotencyKey).sort()).toEqual([
+      "post-turn:campaign:turn:saga:attempt:5:faction_command_updates:system:faction-command-network",
+      "post-turn:campaign:turn:saga:attempt:5:npc_offscreen_updates:system:npc-offscreen",
+      "post-turn:campaign:turn:saga:attempt:5:npc_reflection_updates:system:npc-reflection",
+    ]);
+  });
+
+  it("heals a crash gap when an idempotent job exists before its proposal", () => {
+    ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 2 });
+    const jobId = queueSimulationJob({
+      campaignId: CAMPAIGN_ID,
+      jobType: "npc_reflection_scan",
+      baseWorldVersion: 0,
+      sourceEntity: { type: "system", id: "npc-reflection" },
+      idempotencyKey: "post-turn:gap:2:npc_reflection_updates:system:npc-reflection",
+      priority: 5,
+      payload: { crashedAfterJobInsert: true },
+    });
+
+    const result = queuePostTurnSimulationProposals({
+      campaignId: CAMPAIGN_ID,
+      tick: 2,
+      judgeProvider: provider(),
+      playerLocationId: "loc-player",
+      route: "/chat/action",
+      idempotencyKey: "post-turn:gap:2",
+    });
+
+    expect(result.queued).toHaveLength(1);
+    expect(result.queued[0]).toMatchObject({
+      proposalType: "npc_reflection_updates",
+      status: "pending",
+    });
+    const jobs = getDb().select().from(simulationJobs).all();
+    const proposals = getDb().select().from(simulationProposals).all();
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({ id: jobId });
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]).toMatchObject({
+      jobId,
+      idempotencyKey: "post-turn:gap:2:npc_reflection_updates:system:npc-reflection",
+    });
+
+    const second = queuePostTurnSimulationProposals({
+      campaignId: CAMPAIGN_ID,
+      tick: 2,
+      judgeProvider: provider(),
+      playerLocationId: "loc-player",
+      route: "/chat/action",
+      idempotencyKey: "post-turn:gap:2",
+    });
+    expect(second.queued.map((proposal) => proposal.proposalId)).toEqual(
+      result.queued.map((proposal) => proposal.proposalId),
+    );
+    expect(getDb().select().from(simulationJobs).all()).toHaveLength(1);
+    expect(getDb().select().from(simulationProposals).all()).toHaveLength(1);
+  });
+
+  it("reuses an existing proposal row by idempotency key without payload scanning", () => {
+    ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 0 });
+
+    const first = createSimulationProposal({
+      campaignId: CAMPAIGN_ID,
+      proposalType: "npc_reflection_updates",
+      baseWorldVersion: 0,
+      sourceEntity: { type: "system", id: "test" },
+      idempotencyKey: "proposal-key-1",
+      summary: "First proposal.",
+      writeScopes: ["npc:memory"],
+      provenance: { source: "test", tick: 0, idempotencyKey: "legacy-payload-key" },
+    });
+    const second = createSimulationProposal({
+      campaignId: CAMPAIGN_ID,
+      proposalType: "npc_reflection_updates",
+      baseWorldVersion: 0,
+      sourceEntity: { type: "system", id: "test" },
+      idempotencyKey: "proposal-key-1",
+      summary: "Duplicate proposal.",
+      writeScopes: ["npc:belief"],
+      provenance: { source: "test", tick: 0, idempotencyKey: "different-payload-key" },
+    });
+
+    expect(second.proposalId).toBe(first.proposalId);
+    expect(second.writeScopes).toEqual(["npc:memory"]);
+    expect(getDb().select().from(simulationProposals).all()).toHaveLength(1);
   });
 
   it("commits valid proposals and rejects stale, conflicting, and expired proposals without hidden writes", () => {

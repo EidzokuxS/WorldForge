@@ -146,4 +146,16 @@ describe("storyteller-contract", () => {
     expect(contract).toContain("Do not switch language because of operator locale");
     expect(contract).toContain("plain scene truth first");
   });
+
+  it("uses a non-conflicting final-visible JSON draft output mode", () => {
+    const contract = buildStorytellerContract({
+      pass: "final-visible",
+      outputMode: "narration-draft-json",
+    });
+
+    expect(contract).toContain("Return exactly one JSON object");
+    expect(contract).toContain("prose field must contain narrative prose only");
+    expect(contract).not.toContain("Your output must be narrative prose only.");
+    expect(contract).toContain("plain scene truth first");
+  });
 });

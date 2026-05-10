@@ -9,6 +9,28 @@ import {
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
+export const turnSagaStatusValues = [
+  "created",
+  "collecting_context",
+  "pre_turn_catchup",
+  "gm_reading",
+  "oracle_adjudicating",
+  "tool_loop_running",
+  "local_reaction_running",
+  "world_consequence_running",
+  "resolved_pending_narration",
+  "narrator_rendering",
+  "narrator_repairing",
+  "finalized",
+  "failed_state_corruption",
+] as const;
+
+export const narratorAttemptStatusValues = [
+  "started",
+  "failed",
+  "succeeded",
+] as const;
+
 export const campaigns = sqliteTable("campaigns", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -553,6 +575,7 @@ export const simulationJobs = sqliteTable(
     priority: integer("priority").notNull().default(0),
     baseWorldVersion: integer("base_world_version").notNull(),
     resultWorldVersion: integer("result_world_version"),
+    idempotencyKey: text("idempotency_key"),
     scheduledWorldTimeMinutes: integer("scheduled_world_time_minutes").notNull(),
     createdWorldTimeMinutes: integer("created_world_time_minutes").notNull(),
     sourceEntityType: text("source_entity_type").notNull(),
@@ -570,6 +593,10 @@ export const simulationJobs = sqliteTable(
       table.scheduledWorldTimeMinutes,
     ),
     index("idx_simulation_jobs_base_version").on(table.campaignId, table.baseWorldVersion),
+    uniqueIndex("simulation_jobs_campaign_idempotency_unique").on(
+      table.campaignId,
+      table.idempotencyKey,
+    ),
   ]
 );
 
@@ -582,6 +609,7 @@ export const simulationProposals = sqliteTable(
       .references(() => campaigns.id, { onDelete: "cascade" }),
     jobId: text("job_id").references(() => simulationJobs.id, { onDelete: "set null" }),
     proposalType: text("proposal_type").notNull(),
+    idempotencyKey: text("idempotency_key"),
     status: text("status", {
       enum: ["pending", "committed", "rejected", "canceled", "superseded"],
     }).notNull().default("pending"),
@@ -603,6 +631,10 @@ export const simulationProposals = sqliteTable(
     index("idx_simulation_proposals_base_version").on(
       table.campaignId,
       table.baseWorldVersion,
+    ),
+    uniqueIndex("simulation_proposals_campaign_idempotency_unique").on(
+      table.campaignId,
+      table.idempotencyKey,
     ),
   ]
 );
@@ -735,5 +767,176 @@ export const authorityTraces = sqliteTable(
       table.resultWorldVersion,
     ),
     index("idx_authority_traces_tool_result").on(table.toolResultId),
+  ]
+);
+
+export const turnSagas = sqliteTable(
+  "turn_sagas",
+  {
+    id: text("id").primaryKey(),
+    campaignId: text("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    turnId: text("turn_id").notNull(),
+    playerId: text("player_id"),
+    actionId: text("action_id"),
+    actionText: text("action_text"),
+    sourceActionJson: text("source_action_json").notNull().default("{}"),
+    status: text("status", { enum: turnSagaStatusValues })
+      .notNull()
+      .default("created"),
+    statusReason: text("status_reason"),
+    statusUpdatedAt: integer("status_updated_at", { mode: "number" }).notNull(),
+    activeLockToken: text("active_lock_token"),
+    activeWorkerId: text("active_worker_id"),
+    activeStartedAt: integer("active_started_at", { mode: "number" }),
+    requiresNarration: integer("requires_narration", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    baseWorldVersion: integer("base_world_version").notNull(),
+    resultWorldVersion: integer("result_world_version"),
+    oracleDecisionId: text("oracle_decision_id"),
+    settledTurnPacketId: text("settled_turn_packet_id"),
+    latestNarratorAttemptId: text("latest_narrator_attempt_id"),
+    provenanceJson: text("provenance_json").notNull().default("{}"),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("turn_sagas_campaign_turn_unique").on(table.campaignId, table.turnId),
+    index("idx_turn_sagas_campaign_status").on(table.campaignId, table.status),
+    index("idx_turn_sagas_pending_narration").on(
+      table.campaignId,
+      table.requiresNarration,
+      table.status,
+    ),
+    index("idx_turn_sagas_base_version").on(table.campaignId, table.baseWorldVersion),
+  ]
+);
+
+export const oracleDecisions = sqliteTable(
+  "oracle_decisions",
+  {
+    id: text("id").primaryKey(),
+    campaignId: text("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    sagaId: text("saga_id")
+      .notNull()
+      .references(() => turnSagas.id, { onDelete: "cascade" }),
+    turnId: text("turn_id").notNull(),
+    question: text("question").notNull(),
+    stakes: text("stakes").notNull(),
+    outcome: text("outcome").notNull(),
+    reasoning: text("reasoning").notNull().default(""),
+    mechanicalImplicationsJson: text("mechanical_implications_json")
+      .notNull()
+      .default("[]"),
+    visibilityImplicationsJson: text("visibility_implications_json")
+      .notNull()
+      .default("[]"),
+    confidence: integer("confidence"),
+    chance: integer("chance"),
+    requiresToolCommit: integer("requires_tool_commit", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    baseWorldVersion: integer("base_world_version").notNull(),
+    acceptedWorldVersion: integer("accepted_world_version"),
+    sourceRefs: text("source_refs").notNull().default("[]"),
+    decisionJson: text("decision_json").notNull().default("{}"),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    index("idx_oracle_decisions_campaign_turn").on(table.campaignId, table.turnId),
+    index("idx_oracle_decisions_saga").on(table.sagaId),
+    index("idx_oracle_decisions_base_version").on(
+      table.campaignId,
+      table.baseWorldVersion,
+    ),
+  ]
+);
+
+export const settledTurnPackets = sqliteTable(
+  "settled_turn_packets",
+  {
+    id: text("id").primaryKey(),
+    campaignId: text("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    sagaId: text("saga_id")
+      .notNull()
+      .references(() => turnSagas.id, { onDelete: "cascade" }),
+    turnId: text("turn_id").notNull(),
+    oracleDecisionId: text("oracle_decision_id").references(
+      () => oracleDecisions.id,
+      { onDelete: "set null" },
+    ),
+    canonicalTurnPacketJson: text("canonical_turn_packet_json")
+      .notNull()
+      .default("{}"),
+    narratorPacketJson: text("narrator_packet_json").notNull().default("{}"),
+    sourceRefs: text("source_refs").notNull().default("[]"),
+    acceptedToolResultRefs: text("accepted_tool_result_refs")
+      .notNull()
+      .default("[]"),
+    acceptedActorResultRefs: text("accepted_actor_result_refs")
+      .notNull()
+      .default("[]"),
+    dueWorldRefs: text("due_world_refs").notNull().default("[]"),
+    requiresNarration: integer("requires_narration", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    baseWorldVersion: integer("base_world_version").notNull(),
+    resultWorldVersion: integer("result_world_version").notNull(),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("settled_turn_packets_saga_unique").on(table.sagaId),
+    index("idx_settled_turn_packets_campaign_turn").on(table.campaignId, table.turnId),
+    index("idx_settled_turn_packets_oracle").on(table.oracleDecisionId),
+    index("idx_settled_turn_packets_result_version").on(
+      table.campaignId,
+      table.resultWorldVersion,
+    ),
+  ]
+);
+
+export const narratorAttempts = sqliteTable(
+  "narrator_attempts",
+  {
+    id: text("id").primaryKey(),
+    campaignId: text("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    sagaId: text("saga_id")
+      .notNull()
+      .references(() => turnSagas.id, { onDelete: "cascade" }),
+    settledTurnPacketId: text("settled_turn_packet_id")
+      .notNull()
+      .references(() => settledTurnPackets.id, { onDelete: "cascade" }),
+    turnId: text("turn_id").notNull(),
+    attemptIndex: integer("attempt_index").notNull(),
+    status: text("status", { enum: narratorAttemptStatusValues })
+      .notNull()
+      .default("started"),
+    groundingResultJson: text("grounding_result_json").notNull().default("{}"),
+    finalText: text("final_text"),
+    failureReason: text("failure_reason"),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("narrator_attempts_saga_attempt_unique").on(
+      table.sagaId,
+      table.attemptIndex,
+    ),
+    index("idx_narrator_attempts_packet").on(table.settledTurnPacketId),
+    index("idx_narrator_attempts_campaign_turn").on(table.campaignId, table.turnId),
+    index("idx_narrator_attempts_campaign_status").on(
+      table.campaignId,
+      table.status,
+    ),
   ]
 );

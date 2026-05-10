@@ -226,9 +226,19 @@ export interface CampaignWorldbookSelection extends WorldbookLibraryItemSummary 
 
 export type ChatRole = "user" | "assistant" | "system";
 
+export interface ChatMessageResumeNarrationMetadata {
+  sagaId: string;
+  narratorAttemptId: string;
+}
+
+export interface ChatMessageMetadata {
+  resumeNarration?: ChatMessageResumeNarrationMetadata;
+}
+
 export interface ChatMessage {
   role: ChatRole;
   content: string;
+  metadata?: ChatMessageMetadata;
 }
 
 export interface WorldSeeds {

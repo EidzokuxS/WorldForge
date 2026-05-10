@@ -27,6 +27,7 @@ export interface SimulationProposalPayload {
     source: string;
     tick?: number;
     route?: string;
+    idempotencyKey?: string;
   };
   expiresAtWorldTimeMinutes?: number;
   data: unknown;
@@ -38,6 +39,7 @@ export interface CreateSimulationProposalInput {
   baseWorldVersion: number;
   sourceEntity: AuthoritySourceEntity;
   jobId?: string | null;
+  idempotencyKey?: string | null;
   summary: string;
   readSet?: readonly string[];
   writeScopes?: readonly SimulationProposalWriteScope[];
@@ -54,7 +56,7 @@ export interface CreatedSimulationProposal {
   proposalType: string;
   baseWorldVersion: number;
   writeScopes: SimulationProposalWriteScope[];
-  status: "pending";
+  status: "pending" | "committed" | "rejected" | "canceled" | "superseded";
 }
 
 export interface CommitSimulationProposalInput {
@@ -135,6 +137,28 @@ export function parseSimulationProposalPayload(value: string): SimulationProposa
 export function createSimulationProposal(
   input: CreateSimulationProposalInput,
 ): CreatedSimulationProposal {
+  if (input.idempotencyKey) {
+    const existing = getDb()
+      .select()
+      .from(simulationProposals)
+      .where(and(
+        eq(simulationProposals.campaignId, input.campaignId),
+        eq(simulationProposals.idempotencyKey, input.idempotencyKey),
+      ))
+      .get();
+    if (existing) {
+      const existingPayload = parseSimulationProposalPayload(existing.payload);
+      return {
+        proposalId: existing.id,
+        campaignId: existing.campaignId,
+        proposalType: existing.proposalType,
+        baseWorldVersion: existing.baseWorldVersion,
+        writeScopes: existingPayload.writeScopes,
+        status: existing.status,
+      };
+    }
+  }
+
   const payload: SimulationProposalPayload = {
     schemaVersion: 1,
     summary: input.summary,
@@ -152,17 +176,26 @@ export function createSimulationProposal(
     baseWorldVersion: input.baseWorldVersion,
     sourceEntity: input.sourceEntity,
     jobId: input.jobId ?? null,
+    idempotencyKey: input.idempotencyKey ?? null,
     payload,
     toolResultId: input.toolResultId ?? null,
   });
+  const row = getDb()
+    .select()
+    .from(simulationProposals)
+    .where(eq(simulationProposals.id, proposalId))
+    .get();
+  const storedPayload = row
+    ? parseSimulationProposalPayload(row.payload)
+    : payload;
 
   return {
     proposalId,
     campaignId: input.campaignId,
-    proposalType: input.proposalType,
-    baseWorldVersion: input.baseWorldVersion,
-    writeScopes: payload.writeScopes,
-    status: "pending",
+    proposalType: row?.proposalType ?? input.proposalType,
+    baseWorldVersion: row?.baseWorldVersion ?? input.baseWorldVersion,
+    writeScopes: storedPayload.writeScopes,
+    status: row?.status ?? "pending",
   };
 }
 

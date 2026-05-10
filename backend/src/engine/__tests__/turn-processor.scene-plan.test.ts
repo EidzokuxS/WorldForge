@@ -168,6 +168,17 @@ function extractScenePlanPathSource(): string {
   return source.slice(start, end);
 }
 
+function extractRenderSettledNarrationHelperSource(): string {
+  const source = readTurnProcessorSource();
+  const start = source.indexOf("async function renderSettledNarrationWithSaga");
+  const end = source.indexOf("function logDueWorldWork", start);
+
+  expect(start, "renderSettledNarrationWithSaga exists").toBeGreaterThanOrEqual(0);
+  expect(end, "logDueWorldWork follows render helper").toBeGreaterThan(start);
+
+  return source.slice(start, end);
+}
+
 function expectInOrder(source: string, names: readonly string[]) {
   const positions = names.map((name) => source.indexOf(name));
 
@@ -274,7 +285,12 @@ describe("turn processor ScenePlan contract", () => {
       "runGmToolLoop",
       "runRequiredActorDecisionPass",
       "buildNarratorPacket",
+      "renderSettledNarrationWithSaga",
+    ]);
+    expectInOrder(extractRenderSettledNarrationHelperSource(), [
       "assembleFinalNarrationPrompt",
+      "runVisibleNarrationWithPacketGuard",
+      "recordNarratorAttempt",
     ]);
   });
 
@@ -395,15 +411,14 @@ describe("turn processor ScenePlan contract", () => {
     const orderingProof =
       "ScenePlan ordering is frame-gm-read-optional-oracle-optional-gm-tool-loop-packet-narrate; buildSceneFrame before runGmRead; runGmRead before optional callOracle; runGmToolLoop before buildNarratorPacket; buildNarratorPacket before assembleFinalNarrationPrompt";
     const visibleNarrationProof =
-      "runGmToolLoop before assembleFinalNarrationPrompt; runVisibleNarrationWithPacketGuard before appendChatMessages; runVisibleNarrationWithPacketGuard before narrative SSE; unsafe guard failure yields no done";
+      "runGmToolLoop before renderSettledNarrationWithSaga; render helper assembles final prompt and runs packet guard before appendChatMessages; unsafe guard failure yields no done";
 
     expect(orderingProof).toContain("buildSceneFrame before runGmRead");
     expect(orderingProof).toContain("frame-gm-read-optional-oracle-optional-gm-tool-loop-packet-narrate");
     expect(orderingProof).toContain("runGmRead before optional callOracle");
     expect(orderingProof).toContain("runGmToolLoop before buildNarratorPacket");
-    expect(visibleNarrationProof).toContain("before assembleFinalNarrationPrompt");
-    expect(visibleNarrationProof).toContain("runVisibleNarrationWithPacketGuard before appendChatMessages");
-    expect(visibleNarrationProof).toContain("runVisibleNarrationWithPacketGuard before narrative SSE");
+    expect(visibleNarrationProof).toContain("before renderSettledNarrationWithSaga");
+    expect(visibleNarrationProof).toContain("packet guard before appendChatMessages");
     expect(visibleNarrationProof).toContain("no done");
     expectInOrder(source, [
       "buildSceneFrame",
@@ -411,15 +426,30 @@ describe("turn processor ScenePlan contract", () => {
       "runGmToolLoop",
       "runRequiredActorDecisionPass",
       "buildNarratorPacket",
+      "renderSettledNarrationWithSaga",
+    ]);
+    expectInOrder(extractRenderSettledNarrationHelperSource(), [
       "assembleFinalNarrationPrompt",
       "runVisibleNarrationWithPacketGuard",
+      "const narrativeText = guardedNarration.text",
+      "assertNonEmptyFinalVisibleNarration(narrativeText)",
+      "status: \"succeeded\"",
+      "finalText: narrativeText",
     ]);
-    expect(source.lastIndexOf("{ role: \"assistant\"")).toBeGreaterThan(
-      source.indexOf("runVisibleNarrationWithPacketGuard"),
+    const finalNarrationStart = source.indexOf("const narration = await renderSettledNarrationWithSaga");
+    const finalNarrationEnd = source.indexOf("const { tick: newTick }", finalNarrationStart);
+    const finalNarrationPath = source.slice(finalNarrationStart, finalNarrationEnd);
+
+    expect(finalNarrationStart, "final narration render call exists").toBeGreaterThanOrEqual(0);
+    expect(finalNarrationEnd, "finalization tail follows final narration").toBeGreaterThan(
+      finalNarrationStart,
     );
-    expect(source.lastIndexOf("yield { type: \"narrative\"")).toBeGreaterThan(
-      source.indexOf("runVisibleNarrationWithPacketGuard"),
-    );
+    expectInOrder(finalNarrationPath, [
+      "const narration = await renderSettledNarrationWithSaga",
+      "appendAssistantNarrationForResume",
+      "yield { type: \"narrative\"",
+    ]);
+    expect(finalNarrationPath).not.toContain("{ role: \"assistant\", content: narrativeText }");
   });
 
   it("keeps pure speech and Continue off the automatic Oracle path", () => {

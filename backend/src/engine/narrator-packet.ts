@@ -101,6 +101,27 @@ export interface NarratorPacketHintSignalSourceRef {
   kind: "hint_signal" | "world_thread_signal";
 }
 
+export type NarratorPacketEvidenceCategory =
+  | "player_action_request"
+  | "oracle_outcome"
+  | "anchor_event"
+  | "committed_event"
+  | "perceivable_response"
+  | "perceivable_effect"
+  | "visible_actor"
+  | "hint_signal"
+  | "world_thread_signal"
+  | "guardrail"
+  | "control_return"
+  | "tool_result";
+
+export interface NarratorPacketEvidence {
+  id: string;
+  category: NarratorPacketEvidenceCategory;
+  summary: string;
+  sourceId?: string;
+}
+
 export interface NarratorPacket {
   campaignId: string;
   tick: number;
@@ -113,6 +134,7 @@ export interface NarratorPacket {
   visibleActors: NarratorPacketActor[];
   hintSignals: string[];
   hintSignalSourceRefs?: NarratorPacketHintSignalSourceRef[];
+  evidenceLedger?: NarratorPacketEvidence[];
   guardrails: string[];
   controlReturnReason: string;
   allowedVisibleActorNames: string[];
@@ -203,6 +225,111 @@ function collectHintSignalSourceRefs(frame: SceneFrame): NarratorPacketHintSigna
       })),
     ...worldThreadSignals,
   ];
+}
+
+function evidenceId(category: NarratorPacketEvidenceCategory, id: string): string {
+  return `${category}:${id}`;
+}
+
+function collectEvidenceLedger(args: {
+  packet: CanonicalTurnPacket;
+  visibleActors: NarratorPacketActor[];
+  perceivableEvents: CanonicalTurnPacketEvent[];
+  perceivableResponses: CanonicalTurnPacketResponse[];
+  perceivableEffects: CanonicalTurnPacketEffect[];
+  hintSignals: string[];
+  hintSignalSourceRefs: NarratorPacketHintSignalSourceRef[];
+}): NarratorPacketEvidence[] {
+  const entries: NarratorPacketEvidence[] = [];
+  const add = (entry: NarratorPacketEvidence) => entries.push(entry);
+
+  add({
+    id: evidenceId("player_action_request", "player-action"),
+    category: "player_action_request",
+    summary: args.packet.playerAction,
+    sourceId: "player-action",
+  });
+  if (args.packet.oracleOutcome) {
+    add({
+      id: evidenceId("oracle_outcome", "oracle-outcome"),
+      category: "oracle_outcome",
+      summary: args.packet.oracleOutcome,
+      sourceId: "oracle-outcome",
+    });
+  }
+  add({
+    id: evidenceId("anchor_event", args.packet.anchorEvent.id),
+    category: "anchor_event",
+    summary: args.packet.anchorEvent.summary,
+    sourceId: args.packet.anchorEvent.id,
+  });
+  for (const event of args.perceivableEvents) {
+    add({
+      id: evidenceId("committed_event", event.id),
+      category: "committed_event",
+      summary: event.summary,
+      sourceId: event.id,
+    });
+  }
+  for (const response of args.perceivableResponses) {
+    add({
+      id: evidenceId("perceivable_response", response.id),
+      category: "perceivable_response",
+      summary: response.summary,
+      sourceId: response.id,
+    });
+  }
+  for (const effect of args.perceivableEffects) {
+    add({
+      id: evidenceId("perceivable_effect", effect.id),
+      category: "perceivable_effect",
+      summary: effect.summary,
+      sourceId: effect.id,
+    });
+    if (effect.actionId && effect.toolName) {
+      add({
+        id: evidenceId("tool_result", `${effect.actionId}:${effect.toolName}`),
+        category: "tool_result",
+        summary: `${formatToolName(effect.toolName)} result is player-perceivable through effect ${effect.id}.`,
+        sourceId: `${effect.actionId}:${effect.toolName}`,
+      });
+    }
+  }
+  for (const actor of args.visibleActors) {
+    add({
+      id: evidenceId("visible_actor", actor.id),
+      category: "visible_actor",
+      summary: actor.label,
+      sourceId: actor.id,
+    });
+  }
+  for (let index = 0; index < args.hintSignals.length; index += 1) {
+    const source = args.hintSignalSourceRefs[index];
+    const category = source?.kind ?? "hint_signal";
+    const sourceId = source?.id ?? `${index + 1}`;
+    add({
+      id: evidenceId(category, sourceId),
+      category,
+      summary: args.hintSignals[index]!,
+      sourceId,
+    });
+  }
+  for (let index = 0; index < args.packet.guardrails.length; index += 1) {
+    add({
+      id: evidenceId("guardrail", `${index + 1}`),
+      category: "guardrail",
+      summary: args.packet.guardrails[index]!,
+      sourceId: `${index + 1}`,
+    });
+  }
+  add({
+    id: evidenceId("control_return", "current"),
+    category: "control_return",
+    summary: args.packet.controlReturnReason,
+    sourceId: "current",
+  });
+
+  return uniqueById(entries);
 }
 
 function collectForbiddenActors(frame: SceneFrame): SceneActor[] {
@@ -498,18 +625,32 @@ function collectPerceivableEffects(packet: CanonicalTurnPacket): CanonicalTurnPa
 
 export function buildNarratorPacket(args: BuildNarratorPacketArgs): NarratorPacket {
   const visibleActors = collectVisibleActors(args.frame);
+  const perceivableEvents = collectPerceivableEvents(args.canonicalTurnPacket);
+  const perceivableResponses = collectPerceivableResponses(args.canonicalTurnPacket);
+  const perceivableEffects = collectPerceivableEffects(args.canonicalTurnPacket);
+  const hintSignals = collectHintSignals(args.frame);
+  const hintSignalSourceRefs = collectHintSignalSourceRefs(args.frame);
   const packet: NarratorPacket = {
     campaignId: args.canonicalTurnPacket.campaignId,
     tick: args.canonicalTurnPacket.tick,
     playerAction: args.canonicalTurnPacket.playerAction,
     oracleOutcome: args.canonicalTurnPacket.oracleOutcome,
     anchorEvent: args.canonicalTurnPacket.anchorEvent,
-    perceivableEvents: collectPerceivableEvents(args.canonicalTurnPacket),
-    perceivableResponses: collectPerceivableResponses(args.canonicalTurnPacket),
-    perceivableEffects: collectPerceivableEffects(args.canonicalTurnPacket),
+    perceivableEvents,
+    perceivableResponses,
+    perceivableEffects,
     visibleActors,
-    hintSignals: collectHintSignals(args.frame),
-    hintSignalSourceRefs: collectHintSignalSourceRefs(args.frame),
+    hintSignals,
+    hintSignalSourceRefs,
+    evidenceLedger: collectEvidenceLedger({
+      packet: args.canonicalTurnPacket,
+      visibleActors,
+      perceivableEvents,
+      perceivableResponses,
+      perceivableEffects,
+      hintSignals,
+      hintSignalSourceRefs,
+    }),
     guardrails: [...args.canonicalTurnPacket.guardrails],
     controlReturnReason: args.canonicalTurnPacket.controlReturnReason,
     allowedVisibleActorNames: visibleActors.map((actor) => actor.label),
@@ -640,6 +781,10 @@ function formatEffect(effect: CanonicalTurnPacketEffect): string {
   return `- ${effect.id}: ${effect.summary}${refs.length > 0 ? ` [${refs.join("; ")}]` : ""}`;
 }
 
+function formatEvidence(evidence: NarratorPacketEvidence): string {
+  return `- ${evidence.id} [category=${evidence.category}]`;
+}
+
 export function formatNarratorPacketForPrompt(packet: NarratorPacket): string {
   assertNarratorPacketPromptSafe(packet);
 
@@ -681,6 +826,11 @@ export function formatNarratorPacketForPrompt(packet: NarratorPacket): string {
     ...(packet.guardrails.length > 0
       ? packet.guardrails.map((guardrail) => `- ${guardrail}`)
       : ["- Stay within the committed packet."]),
+    "",
+    "[EVIDENCE LEDGER]",
+    ...((packet.evidenceLedger ?? []).length > 0
+      ? (packet.evidenceLedger ?? []).map(formatEvidence)
+      : ["- No packet evidence ids are in scope."]),
     "",
     "[CONTROL RETURN]",
     packet.controlReturnReason,

@@ -1566,6 +1566,24 @@ function formatSettledPacketEffectsSection(narratorPacket: NarratorPacket): stri
   );
 }
 
+function formatNarrationDraftContract(narratorPacket: NarratorPacket): string {
+  const evidenceLines = (narratorPacket.evidenceLedger ?? []).map(
+    (entry) => `- ${entry.id}`,
+  );
+
+  return [
+    "[NARRATION DRAFT CONTRACT]",
+    "Return a single JSON object, not markdown.",
+    "Shape: { \"prose\": string, \"claims\": [{ \"id\": string, \"kind\": \"actor_presence\" | \"object_presence\" | \"location_change\" | \"route_status\" | \"threat_hazard\" | \"future_pressure\" | \"inventory_status_change\" | \"oracle_outcome\" | \"playable_beat\", \"summary\": string, \"requiresEvidence\": boolean, \"evidenceRefs\": string[] }], \"claimSpans\": [{ \"id\": string, \"spanText\": string, \"claimIds\": string[], \"requiresEvidence\": boolean }] }.",
+    "Every concrete world, pressure, route, actor, object, status, oracle, or playable-beat statement in prose must appear as a claimSpan and map to declared claims.",
+    "When a claim requires packet support, set requiresEvidence=true and cite only ids from [PACKET EVIDENCE IDS].",
+    "For atmosphere or connective prose that does not assert a concrete world fact, use requiresEvidence=false on its span.",
+    "",
+    "[PACKET EVIDENCE IDS]",
+    ...(evidenceLines.length > 0 ? evidenceLines : ["- No packet evidence ids are in scope."]),
+  ].join("\n");
+}
+
 function buildRpBeatDirective(narratorPacket?: NarratorPacket): string {
   const authorityLine = narratorPacket
     ? "Treat NarratorPacket events, effects, and tool results as the only authority for success, possession, access, consent, location change, and durable world change."
@@ -1662,7 +1680,8 @@ When the packet has no perceivable effects, answer with immediate visible reacti
 Treat the raw player action as an attempted request, not as proof that the action already succeeded.
 Do not narrate claimed possessions, NPC consent, location access, or item acquisition unless NarratorPacket events/effects/tool results confirm them.
 If a packet effect says a claim may be false or unconfirmed, narrate the visible challenge/refusal without placing the claimed object in the player's hand.
-Do not write tool syntax or metadata.
+Return the final narration as the JSON draft object required by [NARRATION DRAFT CONTRACT]; put player-visible prose only in the prose field.
+Do not write tool syntax or backend metadata inside the prose field.
 Keep the output bounded to what the player can perceive in this scene.
 End on a concrete playable next moment rather than closing the scene with generic reflection.`
     : `[FINAL NARRATION TASK]
@@ -1766,6 +1785,13 @@ End on a concrete playable next moment rather than closing the scene with generi
       content: formatPresentActorsSection(options.sceneAssembly, options.narratorPacket),
       sourceBoundaryChecked: Boolean(options.narratorPacket),
     },
+    options.narratorPacket
+      ? {
+          name: "narration-draft-contract",
+          content: formatNarrationDraftContract(options.narratorPacket),
+          sourceBoundaryChecked: true,
+        }
+      : null,
     options.outcomeBounds
       ? {
           name: "outcome-bounds",
@@ -1794,12 +1820,15 @@ End on a concrete playable next moment rather than closing the scene with generi
 
   const prompt = promptSections.map((section) => section.content).join("\n\n");
 
-  const finalSystem = buildStorytellerContract({
-    pass: "final-visible",
-    sceneMode: storytellerSceneMode,
-    includeGlmOverlay: true,
-    responseLanguage,
-  });
+  const finalSystem = [
+    buildStorytellerContract({
+      pass: "final-visible",
+      sceneMode: storytellerSceneMode,
+      includeGlmOverlay: true,
+      responseLanguage,
+      outputMode: options.narratorPacket ? "narration-draft-json" : "prose",
+    }),
+  ].filter((section): section is string => Boolean(section)).join("\n");
 
   log.event("prompt.assembled", {
     pass: "final-narration",
