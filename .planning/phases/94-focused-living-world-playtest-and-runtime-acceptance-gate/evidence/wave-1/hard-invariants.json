@@ -1,0 +1,68 @@
+{
+  "phase": "94",
+  "plan": "94-01",
+  "status": "passed",
+  "command": "npm --prefix backend run test -- src/engine/__tests__/phase-94-runtime-invariants.test.ts",
+  "testFilesPassed": 1,
+  "testsPassed": 4,
+  "invariants": [
+    {
+      "id": "narrator-repair-no-turn-rollback",
+      "routeFamilies": ["jjk-chakra-coin", "narrator-repair-prose"]
+    },
+    {
+      "id": "oracle-decision-persistence",
+      "routeFamilies": ["jjk-chakra-coin", "combat-power"]
+    },
+    {
+      "id": "proposal-truth-boundary",
+      "routeFamilies": ["proposal-backlog-world-time", "hidden-truth-privacy"]
+    },
+    {
+      "id": "surface-pressure-provenance",
+      "routeFamilies": ["tourist-courier", "false-claim", "key-npc-faction-discovery"]
+    },
+    {
+      "id": "hidden-truth-privacy",
+      "routeFamilies": ["false-claim", "key-npc-faction-discovery", "hidden-truth-privacy"]
+    },
+    {
+      "id": "false-claim-truth-boundary",
+      "routeFamilies": ["false-claim"]
+    },
+    {
+      "id": "rollback-limit",
+      "routeFamilies": ["combat-power"]
+    },
+    {
+      "id": "long-turn-no-shortcuts",
+      "routeFamilies": ["tourist-courier", "narrator-repair-prose"]
+    },
+    {
+      "id": "terminal-artifact-coverage",
+      "routeFamilies": ["tourist-courier", "hidden-truth-privacy", "narrator-repair-prose"]
+    },
+    {
+      "id": "living-world-terminal-state",
+      "routeFamilies": ["proposal-backlog-world-time", "key-npc-faction-discovery"]
+    },
+    {
+      "id": "combat-power-consequence",
+      "routeFamilies": ["jjk-chakra-coin", "combat-power"]
+    },
+    {
+      "id": "world-version-integrity",
+      "routeFamilies": ["tourist-courier", "proposal-backlog-world-time"]
+    }
+  ],
+  "routeFamilies": [
+    "tourist-courier",
+    "jjk-chakra-coin",
+    "false-claim",
+    "proposal-backlog-world-time",
+    "key-npc-faction-discovery",
+    "combat-power",
+    "hidden-truth-privacy",
+    "narrator-repair-prose"
+  ]
+}
