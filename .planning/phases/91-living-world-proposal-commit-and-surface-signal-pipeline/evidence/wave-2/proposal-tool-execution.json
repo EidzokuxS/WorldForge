@@ -1,0 +1,124 @@
+{
+  "phase": 91,
+  "plan": "91-02",
+  "generatedAt": "2026-05-10",
+  "executorContract": {
+    "entrypoint": "executeDueSimulationProposal",
+    "watchdog": "resolveDueSimulationProposalsForScope",
+    "dueWorldWrapper": "resolveDueWorldWorkForScopeWithProposalWatchdog",
+    "metadataOnlyCommitRejected": true,
+    "intendedToolPolicy": "Only allowlisted runtime tools or typed adapters execute; unsupported proposal payload keys are ignored and unsupported intended tool names reject the proposal."
+  },
+  "fixtures": [
+    {
+      "case": "committed",
+      "proposalType": "chronicle_commit",
+      "sourceJobStatus": "completed",
+      "intendedTools": ["add_chronicle_entry"],
+      "preflightDisposition": "ready_to_commit",
+      "executedToolResults": [
+        {
+          "toolName": "add_chronicle_entry",
+          "success": true,
+          "authorityStateDeltaRefs": ["<chronicle entry id>"]
+        }
+      ],
+      "authorityTraceIds": ["<tool result authority id>"],
+      "finalProposalDisposition": "committed",
+      "committedWorldVersion": 1
+    },
+    {
+      "case": "deferred",
+      "proposalType": "deferred_proposal",
+      "sourceJobStatus": "queued",
+      "intendedTools": ["add_chronicle_entry"],
+      "preflightDisposition": "deferred_not_due",
+      "executedToolResults": [],
+      "authorityTraceIds": [],
+      "finalProposalDisposition": "deferred_not_due",
+      "committedWorldVersion": null
+    },
+    {
+      "case": "expired",
+      "proposalType": "expired_proposal",
+      "sourceJobStatus": "failed",
+      "intendedTools": ["add_chronicle_entry"],
+      "preflightDisposition": "expired_stale_version",
+      "executedToolResults": [],
+      "authorityTraceIds": [],
+      "finalProposalDisposition": "expired_stale_version",
+      "committedWorldVersion": null
+    },
+    {
+      "case": "superseded",
+      "proposalType": "superseded_proposal",
+      "sourceJobStatus": "superseded",
+      "intendedTools": ["add_chronicle_entry"],
+      "preflightDisposition": "superseded_by_new_event",
+      "supersededByProposalId": "proposal-newer",
+      "executedToolResults": [],
+      "authorityTraceIds": [],
+      "finalProposalDisposition": "superseded_by_new_event",
+      "committedWorldVersion": null
+    },
+    {
+      "case": "needs_rebase_then_committed",
+      "proposalType": "rebase_commit",
+      "sourceJobStatus": "completed",
+      "intendedTools": ["add_chronicle_entry"],
+      "preflightDisposition": "needs_rebase",
+      "rebasedFromWorldVersion": 0,
+      "rebasedToWorldVersion": 1,
+      "executedToolResults": [
+        {
+          "toolName": "add_chronicle_entry",
+          "success": true
+        }
+      ],
+      "authorityTraceIds": ["<tool result authority id>"],
+      "finalProposalDisposition": "committed",
+      "committedWorldVersion": 2
+    },
+    {
+      "case": "needs_actor_retry",
+      "proposalType": "actor_retry",
+      "sourceJobStatus": "failed",
+      "intendedTools": ["add_chronicle_entry"],
+      "preflightDisposition": "needs_actor_retry",
+      "materialReadSetRefs": ["npc:npc-retry:state"],
+      "executedToolResults": [],
+      "authorityTraceIds": [],
+      "finalProposalDisposition": "needs_actor_retry",
+      "committedWorldVersion": null
+    },
+    {
+      "case": "rejected_invalid_metadata_only",
+      "proposalType": "metadata_only",
+      "sourceJobStatus": "failed",
+      "intendedTools": [],
+      "preflightDisposition": "ready_to_commit",
+      "executedToolResults": [],
+      "authorityTraceIds": [],
+      "finalProposalDisposition": "rejected_invalid",
+      "reason": "metadata_only_commit_rejected",
+      "committedWorldVersion": null
+    },
+    {
+      "case": "rejected_invalid_tool_schema",
+      "proposalType": "invalid_tool",
+      "sourceJobStatus": "failed",
+      "intendedTools": ["add_chronicle_entry"],
+      "preflightDisposition": "ready_to_commit",
+      "executedToolResults": [],
+      "authorityTraceIds": [],
+      "finalProposalDisposition": "rejected_invalid",
+      "reason": "invalid_tool_args:add_chronicle_entry",
+      "committedWorldVersion": null
+    }
+  ],
+  "verification": [
+    "npm --prefix backend run test -- src/engine/__tests__/simulation-proposal-lifecycle.test.ts src/engine/__tests__/simulation-proposal-executor.test.ts src/engine/__tests__/simulation-queue.test.ts",
+    "npm --prefix backend run test -- src/engine/__tests__/offscreen-catchup.test.ts src/engine/__tests__/simulation-proposal-executor.test.ts",
+    "npm --prefix backend run typecheck"
+  ]
+}

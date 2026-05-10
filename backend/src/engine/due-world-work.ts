@@ -23,6 +23,10 @@ import {
   resolveDueWorldThreadWorkForScope,
   type ResolveDueWorldThreadWorkForScopeResult,
 } from "./world-thread-runner.js";
+import {
+  resolveDueSimulationProposalsForScope,
+  type ResolveDueSimulationProposalsForScopeResult,
+} from "./simulation-proposal-watchdog.js";
 
 export type DueWorldWorkPhase = "pre_scene_frame" | "pre_narrator_packet";
 
@@ -46,6 +50,11 @@ export interface ResolveDueWorldWorkForScopeResult {
   deferred: DeferredActorWork[];
   skipped: ActorScheduleDecision[];
   worldThreads: ResolveDueWorldThreadWorkForScopeResult;
+}
+
+export interface ResolveDueWorldWorkWithProposalWatchdogResult
+  extends ResolveDueWorldWorkForScopeResult {
+  proposals: ResolveDueSimulationProposalsForScopeResult;
 }
 
 function processByActorId(processes: readonly KeyActorProcess[]): Map<string, KeyActorProcess> {
@@ -207,5 +216,21 @@ export function resolveDueWorldWorkForScope(
     deferred,
     skipped,
     worldThreads,
+  };
+}
+
+export async function resolveDueWorldWorkForScopeWithProposalWatchdog(
+  input: ResolveDueWorldWorkForScopeInput,
+): Promise<ResolveDueWorldWorkWithProposalWatchdogResult> {
+  const proposals = await resolveDueSimulationProposalsForScope({
+    campaignId: input.campaignId,
+    tick: input.tick,
+    phase: input.phase,
+    playerLocationId: input.playerLocationId,
+    playerSceneScopeId: input.playerSceneScopeId,
+  });
+  return {
+    ...resolveDueWorldWorkForScope(input),
+    proposals,
   };
 }
