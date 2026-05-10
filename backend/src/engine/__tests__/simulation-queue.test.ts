@@ -7,6 +7,8 @@ import { closeDb, connectDb, getDb } from "../../db/index.js";
 import { runMigrations } from "../../db/migrate.js";
 import {
   campaigns,
+  factions,
+  locations,
   simulationJobs,
   simulationProposals,
   worldClocks,
@@ -25,6 +27,11 @@ import {
 import {
   queuePostTurnSimulationProposals,
 } from "../simulation-queue.js";
+import {
+  createFactionReport,
+  ensureFactionCommandNode,
+  ensureFactionResource,
+} from "../faction-command-network.js";
 
 const CAMPAIGN_ID = "simulation-queue-campaign";
 
@@ -39,6 +46,52 @@ function seedCampaign() {
     createdAt: timestamp,
     updatedAt: timestamp,
   }).run();
+}
+
+function seedFactionCommandNetwork() {
+  getDb().insert(locations).values({
+    id: "loc-market",
+    campaignId: CAMPAIGN_ID,
+    name: "Night Market",
+    description: "A market with faction reports.",
+    kind: "macro",
+    parentLocationId: null,
+    anchorLocationId: null,
+    persistence: "persistent",
+    expiresAtTick: null,
+    archivedAtTick: null,
+    tags: "[]",
+    isStarting: true,
+    connectedTo: "[]",
+  }).run();
+  getDb().insert(factions).values({
+    id: "faction-wardens",
+    campaignId: CAMPAIGN_ID,
+    name: "Market Wardens",
+    tags: "[]",
+    goals: "[]",
+    assets: "[]",
+  }).run();
+  const node = ensureFactionCommandNode({
+    campaignId: CAMPAIGN_ID,
+    factionId: "faction-wardens",
+    standingOrders: [],
+  });
+  ensureFactionResource({
+    campaignId: CAMPAIGN_ID,
+    factionId: "faction-wardens",
+    resourceKey: "patrols",
+    quantity: 2,
+  });
+  createFactionReport({
+    campaignId: CAMPAIGN_ID,
+    factionId: "faction-wardens",
+    commandNodeId: node.id,
+    route: "report_message",
+    summary: "A runner reports pressure at the night market.",
+    sourceLocationId: "loc-market",
+  });
+  return node;
 }
 
 function provider() {
@@ -128,6 +181,46 @@ describe("simulation queue and proposal lifecycle", () => {
     expect(result.queued.map((proposal) => proposal.proposalType)).toEqual([
       "npc_reflection_updates",
     ]);
+  });
+
+  it("routes scheduled faction work to command-node candidates instead of abstract faction mutation", () => {
+    ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 5 });
+    const node = seedFactionCommandNetwork();
+
+    const result = queuePostTurnSimulationProposals({
+      campaignId: CAMPAIGN_ID,
+      tick: 5,
+      judgeProvider: provider(),
+      playerLocationId: "loc-player",
+      route: "/chat/action",
+    });
+    const factionProposal = result.queued.find(
+      (proposal) => proposal.proposalType === "faction_command_updates",
+    );
+    if (!factionProposal) {
+      throw new Error("expected faction command proposal");
+    }
+    const row = getDb()
+      .select()
+      .from(simulationProposals)
+      .where(eq(simulationProposals.id, factionProposal.proposalId))
+      .get();
+    const payload = parseSimulationProposalPayload(row?.payload ?? "{}");
+    const data = payload.data as Record<string, unknown>;
+    const factionRouting = data.factionRouting as Record<string, unknown>;
+
+    expect(factionRouting.commandNodeCandidateIds).toEqual([node.id]);
+    expect(factionRouting.candidates).toEqual([
+      expect.objectContaining({
+        commandNodeId: node.id,
+        factionId: "faction-wardens",
+        reason: "available_report",
+        reportIds: expect.any(Array),
+        resourceKeys: ["patrols"],
+      }),
+    ]);
+    expect(payload.preconditions.join("\n")).toContain("command node");
+    expect(payload.writeScopes).toContain("faction:command_network");
   });
 
   it("dedupes rollback-critical post-turn proposals by idempotency key", () => {

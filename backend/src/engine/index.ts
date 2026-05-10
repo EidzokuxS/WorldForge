@@ -299,6 +299,31 @@ export type {
 } from "./actor-exposure-catchup.js";
 
 export {
+  scheduleFactionCommandNodes,
+} from "./faction-command-scheduler.js";
+
+export type {
+  FactionCommandDecisionCandidate,
+  FactionCommandResourceSummary,
+  FactionCommandRetryOperation,
+  ScheduleFactionCommandNodesInput,
+  ScheduleFactionCommandNodesResult,
+} from "./faction-command-scheduler.js";
+
+export {
+  runCommandNodeDecisionPass,
+} from "./command-node-agent.js";
+
+export type {
+  CommandNodeDecision,
+  CommandNodeDecisionResult,
+  DecideCommandNode,
+  DecideCommandNodeInput,
+  RunCommandNodeDecisionPassInput,
+  RunCommandNodeDecisionPassResult,
+} from "./command-node-agent.js";
+
+export {
   actorWakeSignalToWakeSignal,
   consumeActorWakeSignals,
   enqueueActorWakeSignal,

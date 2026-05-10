@@ -17,6 +17,7 @@ import {
   scheduleKeyActorProcessesForTurn,
   type ActorScheduleDecision,
 } from "./actor-scheduler.js";
+import { scheduleFactionCommandNodes } from "./faction-command-scheduler.js";
 import {
   createSimulationProposal,
   parseSimulationProposalPayload,
@@ -63,6 +64,15 @@ function buildFactionCommandRoutingSnapshot(campaignId: string): {
   commandNodeCount: number;
   availableReportCount: number;
   resourceRouteCount: number;
+  commandNodeCandidateIds: string[];
+  candidates: Array<{
+    commandNodeId: string;
+    factionId: string;
+    reason: string;
+    reportIds: string[];
+    standingOrderCount: number;
+    resourceKeys: string[];
+  }>;
   routingWarnings: string[];
 } {
   const db = getDb();
@@ -87,11 +97,21 @@ function buildFactionCommandRoutingSnapshot(campaignId: string): {
     .from(factionResources)
     .where(eq(factionResources.campaignId, campaignId))
     .all().length;
+  const schedule = scheduleFactionCommandNodes({ campaignId });
   return {
     factionCount,
     commandNodeCount,
     availableReportCount,
     resourceRouteCount,
+    commandNodeCandidateIds: schedule.candidates.map((candidate) => candidate.commandNodeId),
+    candidates: schedule.candidates.map((candidate) => ({
+      commandNodeId: candidate.commandNodeId,
+      factionId: candidate.factionId,
+      reason: candidate.reason,
+      reportIds: candidate.reports.map((report) => report.id),
+      standingOrderCount: candidate.standingOrders.length,
+      resourceKeys: candidate.resources.map((resource) => resource.resourceKey),
+    })),
     routingWarnings: commandNodeCount === 0 && factionCount > 0
       ? ["No faction command nodes exist yet; command-node proposals must seed routing before committing faction action."]
       : [],
