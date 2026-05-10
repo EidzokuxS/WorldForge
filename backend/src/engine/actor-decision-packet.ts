@@ -1,4 +1,9 @@
 import { z } from "zod";
+
+import {
+  BRIDGE_LOOKUP_TOOL_NAMES,
+  type BridgeLookupToolName,
+} from "./bridge-candidate-tools.js";
 import {
   runtimeToolInputSchemas,
   type RuntimeToolName,
@@ -11,9 +16,14 @@ const runtimeToolNames = Object.keys(runtimeToolInputSchemas) as [
   RuntimeToolName,
   ...RuntimeToolName[],
 ];
+type ActorDecisionRuntimeToolName = Exclude<RuntimeToolName, BridgeLookupToolName>;
+const bridgeLookupToolNameSet = new Set<string>(BRIDGE_LOOKUP_TOOL_NAMES);
+const actorDecisionRuntimeToolNames = runtimeToolNames.filter(
+  (toolName) => !bridgeLookupToolNameSet.has(toolName),
+) as [ActorDecisionRuntimeToolName, ...ActorDecisionRuntimeToolName[]];
 
 export interface ActorDecisionToolRequest {
-  toolName: RuntimeToolName;
+  toolName: ActorDecisionRuntimeToolName;
   purpose: string;
   input: Record<string, unknown>;
 }
@@ -44,7 +54,7 @@ export interface ActorDecisionPacket {
    * Legacy citation-only tests used this before Wave 4B. Keep it as a
    * compatibility alias while new execution uses requestedTools.
    */
-  proposedToolNames?: RuntimeToolName[];
+  proposedToolNames?: ActorDecisionRuntimeToolName[];
 }
 
 export interface ActorDecisionPacketFrameLike {
@@ -85,7 +95,7 @@ export class ActorDecisionPacketValidationError extends Error {
 
 const toolRequestSchema = z
   .object({
-    toolName: z.enum(runtimeToolNames),
+    toolName: z.enum(actorDecisionRuntimeToolNames),
     purpose: z.string().trim().min(1).max(300),
     input: z.record(z.string(), z.unknown()).default({}),
   })
@@ -135,7 +145,7 @@ export const actorDecisionPacketSchema = z
     planUpdates: z.array(planUpdateSchema).max(6).default([]),
     nextDecisionTrigger: nextDecisionTriggerSchema.optional(),
     noActionReason: z.string().trim().min(1).max(500).nullable().optional(),
-    proposedToolNames: z.array(z.enum(runtimeToolNames)).max(ACTOR_DECISION_MAX_TOOLS).optional(),
+    proposedToolNames: z.array(z.enum(actorDecisionRuntimeToolNames)).max(ACTOR_DECISION_MAX_TOOLS).optional(),
   })
   .strict()
   .superRefine((packet, ctx) => {

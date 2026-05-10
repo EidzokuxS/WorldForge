@@ -8,6 +8,38 @@ const hiddenAdjudicationToolNames = runtimeToolNames.filter(
 );
 
 const runtimeToolInputShapes = {
+  list_visible_affordances: [
+    '{ "scope"?: "current_scene"|"current_location"|"visible"|"known", "maxResults"?: integer 1-8 }',
+    "Observation-only lookup; returns visible/legal affordances and refs without world mutation.",
+  ],
+  list_navigation_options: [
+    '{ "actorRef"?: string, "fromLocationRef"?: string, "maxResults"?: integer 1-8 }',
+    "Observation-only lookup over visible legal movement options.",
+  ],
+  find_location_candidates: [
+    '{ "query": string, "scope"?: "current_scene"|"current_location"|"visible"|"known", "tags"?: string[], "maxResults"?: integer 1-8 }',
+    "Observation-only fuzzy lookup over visible legal location/movement refs.",
+  ],
+  find_object_candidates: [
+    '{ "query": string, "scope"?: "current_scene"|"current_location"|"visible"|"known", "tags"?: string[], "maxResults"?: integer 1-8 }',
+    "Observation-only fuzzy lookup over visible item/object refs.",
+  ],
+  find_actor_candidates: [
+    '{ "query": string, "relationHint"?: string, "scope"?: "current_scene"|"current_location"|"visible"|"known", "tags"?: string[], "maxResults"?: integer 1-8 }',
+    "Observation-only fuzzy lookup over clear visible actor refs only.",
+  ],
+  find_poi_candidates: [
+    '{ "query": string, "areaRef"?: string, "includePotential"?: boolean, "scope"?: "current_scene"|"current_location"|"visible"|"known", "tags"?: string[], "maxResults"?: integer 1-8 }',
+    "Observation-only POI lookup; potential hints are current-area only and still not world mutation.",
+  ],
+  inspect_known_fact: [
+    '{ "query"?: string, "ref"?: string, "scope"?: "current_scene"|"current_location"|"visible"|"known", "maxResults"?: integer 1-8 }',
+    "Observation-only fact lookup; returns only player-visible/player-known facts or a generic denial.",
+  ],
+  check_route: [
+    '{ "destinationRef": string, "actorRef"?: string, "mode"?: "walk"|"travel"|"follow_route"|"unknown" }',
+    "Observation-only route check over visible legal movement refs; hidden routes deny without names.",
+  ],
   add_tag: [
     '{ "entityName": string, "entityType": "player"|"npc"|"location"|"item"|"faction", "tag": string }',
     "Use lowercase, hyphenated tags already justified by the current scene.",
@@ -86,6 +118,14 @@ const runtimeToolInputShapes = {
 } satisfies Record<RuntimeToolName, string[]>;
 
 const runtimeToolExampleInputs = {
+  list_visible_affordances: '{ "scope": "visible", "maxResults": 6 }',
+  list_navigation_options: '{ "actorRef": "Player", "maxResults": 6 }',
+  find_location_candidates: '{ "query": "tea stall", "tags": ["shop"], "maxResults": 4 }',
+  find_object_candidates: '{ "query": "sealed letter", "maxResults": 4 }',
+  find_actor_candidates: '{ "query": "warden", "relationHint": "speaker", "maxResults": 3 }',
+  find_poi_candidates: '{ "query": "tea shop", "includePotential": true, "maxResults": 4 }',
+  inspect_known_fact: '{ "query": "bridge key", "scope": "known", "maxResults": 2 }',
+  check_route: '{ "actorRef": "Player", "destinationRef": "Old Shrine Road", "mode": "walk" }',
   add_tag: '{ "entityName": "Road Warden", "entityType": "npc", "tag": "alert" }',
   remove_tag:
     '{ "entityName": "Road Warden", "entityType": "npc", "tag": "distracted" }',

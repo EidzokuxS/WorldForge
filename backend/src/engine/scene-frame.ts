@@ -174,6 +174,14 @@ type LocationEdgeRow = typeof locationEdges.$inferSelect;
 type ItemRow = typeof items.$inferSelect;
 
 const EXECUTE_TOOL_SUPPORTED_TOOL_NAMES = new Set<RuntimeToolName>([
+  "list_visible_affordances",
+  "list_navigation_options",
+  "find_location_candidates",
+  "find_object_candidates",
+  "find_actor_candidates",
+  "find_poi_candidates",
+  "inspect_known_fact",
+  "check_route",
   "add_tag",
   "remove_tag",
   "set_relationship",

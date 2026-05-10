@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
 export type ToolResultStatus = "success" | "partial" | "failure";
+export type ToolResultKind = "mutation" | "observation";
 
 export type ToolResultSourceEntity = {
   type: string;
@@ -27,6 +28,8 @@ export interface ToolResultAuthority {
 export interface ToolResult {
   success: boolean;
   status?: ToolResultStatus;
+  kind?: ToolResultKind;
+  observationOnly?: boolean;
   result?: unknown;
   error?: string;
   authority?: ToolResultAuthority;
@@ -130,5 +133,25 @@ export function buildPartialToolResult(result: unknown, error?: string): ToolRes
     status: "partial",
     result,
     error,
+  };
+}
+
+export function isObservationToolResult(result: ToolResult): boolean {
+  return result.kind === "observation" || result.observationOnly === true;
+}
+
+export function buildObservationToolResult(input: {
+  success?: boolean;
+  result: unknown;
+  error?: string;
+}): ToolResult {
+  const success = input.success ?? true;
+  return {
+    success,
+    status: success ? "success" : "failure",
+    kind: "observation",
+    observationOnly: true,
+    result: input.result,
+    error: input.error,
   };
 }

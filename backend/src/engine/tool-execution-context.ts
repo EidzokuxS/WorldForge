@@ -3,6 +3,13 @@ import type { ActorFrame } from "./actor-frame.js";
 import type { ToolResult } from "./tool-result.js";
 import type { RuntimeToolName } from "./tool-schemas.js";
 import {
+  buildBridgeLookupSnapshot,
+  type BridgeKnownFactSnapshot,
+  type BridgeLookupSnapshot,
+} from "./bridge-candidate-tools.js";
+import { buildModelFacingScenePacket } from "./model-facing-scene.js";
+import { listActorKnowledge } from "./knowledge-model.js";
+import {
   readWorldClock,
   type AuthoritySourceEntity,
 } from "./living-world-authority.js";
@@ -28,6 +35,7 @@ export interface ToolExecutionContext {
   currentLocationRefs: Set<string>;
   currentSceneRefs: Set<string>;
   legalMovementRefs: Set<string>;
+  bridgeLookup?: BridgeLookupSnapshot;
 }
 
 export interface CreateActorTurnToolExecutionContextArgs {
@@ -160,6 +168,39 @@ function buildPlayerTurnAuthority(frame: SceneFrame): ToolExecutionContext["auth
   }
 }
 
+function readPlayerKnownFacts(
+  frame: SceneFrame,
+  worldVersion?: number | null,
+): BridgeKnownFactSnapshot[] {
+  try {
+    return listActorKnowledge({
+      campaignId: frame.campaignId,
+      actorId: frame.playerActorId,
+      worldVersion,
+      limit: 12,
+    }).map((record): BridgeKnownFactSnapshot => ({
+      id: `knowledge:${record.id}`,
+      summary: `${record.truthStatus}: ${record.statement}`,
+      visibilityRoute: "player_known",
+      confidence: Math.max(0, Math.min(1, record.confidence / 100)),
+      sourceRefs: [
+        record.id,
+        ...record.sourceEventIds,
+        ...record.sourceKnowledgeIds,
+        ...record.authorityTraceIds,
+      ],
+    }));
+  } catch (error) {
+    if (
+      error instanceof Error
+      && error.message.includes("Database not connected")
+    ) {
+      return [];
+    }
+    throw error;
+  }
+}
+
 export function createPlayerTurnToolExecutionContext(frame: SceneFrame): ToolExecutionContext {
   const subjectActorRefs = new Set<string>();
   const legalActorRefs = new Set<string>();
@@ -223,11 +264,18 @@ export function createPlayerTurnToolExecutionContext(frame: SceneFrame): ToolExe
     }
   }
 
+  const authority = buildPlayerTurnAuthority(frame);
+  const bridgeLookup = buildBridgeLookupSnapshot({
+    frame,
+    packet: buildModelFacingScenePacket(frame),
+    playerKnownFacts: readPlayerKnownFacts(frame, authority?.baseWorldVersion),
+  });
+
   return {
     scope: "player_turn",
     subjectActorId: frame.playerActorId,
     subjectActorRefs,
-    authority: buildPlayerTurnAuthority(frame),
+    authority,
     currentLocationId: frame.currentLocationId,
     currentSceneScopeId: frame.currentSceneScopeId,
     legalLocationRefs,
@@ -237,6 +285,7 @@ export function createPlayerTurnToolExecutionContext(frame: SceneFrame): ToolExe
     currentLocationRefs,
     currentSceneRefs,
     legalMovementRefs,
+    bridgeLookup,
   };
 }
 
@@ -313,6 +362,11 @@ export function createActorTurnToolExecutionContext(
     }
   }
 
+  const bridgeLookup = buildBridgeLookupSnapshot({
+    frame: sceneFrame,
+    packet: buildModelFacingScenePacket(sceneFrame),
+  });
+
   return {
     scope: "actor_turn",
     subjectActorId: actorFrame.observer.actorId,
@@ -334,6 +388,7 @@ export function createActorTurnToolExecutionContext(
     currentLocationRefs,
     currentSceneRefs,
     legalMovementRefs,
+    bridgeLookup,
   };
 }
 

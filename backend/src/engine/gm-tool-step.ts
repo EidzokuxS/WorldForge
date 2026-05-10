@@ -5,6 +5,11 @@ import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
 import { createLogger, getErrorMessage, withRole } from "../lib/index.js";
 import { executeToolCall, type ToolResult } from "./tool-executor.js";
 import {
+  executeBridgeCandidateTool,
+  isBridgeLookupToolName,
+} from "./bridge-candidate-tools.js";
+import { isObservationToolResult } from "./tool-result.js";
+import {
   dynamicCreationBudgetExceededError,
   dynamicCreationBudgetKey,
 } from "./gm-tool-budget.js";
@@ -223,6 +228,7 @@ function validateCandidateRequest(
 }
 
 function mutationRefsFromToolResult(result: ToolResult): string[] {
+  if (isObservationToolResult(result)) return [];
   const refs = new Set<string>();
   const visit = (value: unknown): void => {
     if (typeof value === "string" && value.trim()) {
@@ -359,14 +365,16 @@ async function executeSingleStep(input: {
     };
   }
 
-  const result = await executeToolCall(
-    input.campaignId,
-    candidate.toolName,
-    candidate.input,
-    input.tick,
-    undefined,
-    input.context,
-  );
+  const result = isBridgeLookupToolName(candidate.toolName)
+    ? executeBridgeCandidateTool(candidate.toolName, candidate.input, input.context)
+    : await executeToolCall(
+        input.campaignId,
+        candidate.toolName,
+        candidate.input,
+        input.tick,
+        undefined,
+        input.context,
+      );
 
   if (!result.success) {
     let toolRevisionError: string | null = null;
@@ -399,14 +407,16 @@ async function executeSingleStep(input: {
           input.forbiddenPrivateTerms,
         );
         if (!revisedValidationError) {
-          const revisedResult = await executeToolCall(
-            input.campaignId,
-            revised.toolName,
-            revised.input,
-            input.tick,
-            undefined,
-            input.context,
-          );
+          const revisedResult = isBridgeLookupToolName(revised.toolName)
+            ? executeBridgeCandidateTool(revised.toolName, revised.input, input.context)
+            : await executeToolCall(
+                input.campaignId,
+                revised.toolName,
+                revised.input,
+                input.tick,
+                undefined,
+                input.context,
+              );
           if (revisedResult.success) {
             return {
               candidateRequestCount,

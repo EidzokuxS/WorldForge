@@ -8,6 +8,7 @@ const {
   spawnNpcExecuteMock,
   spawnItemExecuteMock,
   advanceTimeExecuteMock,
+  findPoiCandidatesExecuteMock,
   executionContextMock,
 } = vi.hoisted(() => ({
   logEventMock: vi.fn(),
@@ -17,6 +18,7 @@ const {
   spawnNpcExecuteMock: vi.fn(),
   spawnItemExecuteMock: vi.fn(),
   advanceTimeExecuteMock: vi.fn(),
+  findPoiCandidatesExecuteMock: vi.fn(),
   executionContextMock: {
     scope: "player_turn",
     subjectActorId: "actor-player",
@@ -78,6 +80,7 @@ vi.mock("../tool-execution-context.js", async (importOriginal) => {
 
 vi.mock("../tool-schemas.js", () => ({
   createStorytellerTools: vi.fn(() => ({
+    find_poi_candidates: { description: "Find POI candidates tool", execute: findPoiCandidatesExecuteMock },
     log_event: { description: "Log event tool", execute: logEventExecuteMock },
     reveal_location: { description: "Reveal location tool", execute: revealLocationExecuteMock },
     move_to: { description: "Move to tool", execute: moveToExecuteMock },
@@ -176,6 +179,15 @@ describe("runGmToolLoop", () => {
     spawnNpcExecuteMock.mockResolvedValue({ success: true, result: { id: "npc-1" } });
     spawnItemExecuteMock.mockResolvedValue({ success: true, result: { id: "item-1" } });
     advanceTimeExecuteMock.mockResolvedValue({ success: true, result: { minutes: 60, clockAdvanced: true } });
+    findPoiCandidatesExecuteMock.mockResolvedValue({
+      success: true,
+      kind: "observation",
+      observationOnly: true,
+      result: {
+        observationOnly: true,
+        candidates: [{ ref: "location:tea-lane", label: "Tea Lane" }],
+      },
+    });
   });
 
   it("runs an AI SDK tool loop with only SceneFrame-allowed runtime tools", async () => {
@@ -368,6 +380,71 @@ describe("runGmToolLoop", () => {
       error: expect.stringContaining("private_source_boundary_term_in_tool_input"),
     });
     expect(logEventExecuteMock).not.toHaveBeenCalled();
+  });
+
+  it("exposes observation-only lookup tools through the live tool loop without mutation refs", async () => {
+    generateTextMock().mockResolvedValueOnce({
+      text: "",
+      finishReason: "stop",
+      response: null,
+      usage: null,
+      steps: [
+        {
+          toolCalls: [
+            {
+              toolName: "find_poi_candidates",
+              input: { query: "tea shop", includePotential: true },
+            },
+          ],
+          toolResults: [
+            {
+              output: {
+                success: true,
+                kind: "observation",
+                observationOnly: true,
+                result: {
+                  observationOnly: true,
+                  candidates: [{ ref: "location:tea-lane", label: "Tea Lane" }],
+                },
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = await runGmToolLoop({
+      campaignId: "campaign-1",
+      provider,
+      tick: 7,
+      playerAction: "I look for a tea shop along the logical route.",
+      frame: {
+        ...createFrame(),
+        allowedTools: ["find_poi_candidates"],
+      } as SceneFrame,
+      gmRead,
+    });
+
+    expect(generateText).toHaveBeenCalledWith(expect.objectContaining({
+      tools: {
+        find_poi_candidates: expect.objectContaining({
+          description: "Find POI candidates tool",
+          execute: expect.any(Function),
+        }),
+      },
+      activeTools: ["find_poi_candidates"],
+    }));
+    expect(result.stepResults).toEqual([
+      expect.objectContaining({
+        status: "done",
+        toolName: "find_poi_candidates",
+        mutationRefs: [],
+        result: expect.objectContaining({
+          kind: "observation",
+          observationOnly: true,
+        }),
+      }),
+    ]);
   });
 
   it("rejects access-granting tools for unconfirmed key or permit claims", async () => {

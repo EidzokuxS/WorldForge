@@ -9,6 +9,10 @@ import { z } from "zod";
 import { tool } from "ai";
 import { executeToolCall } from "./tool-executor.js";
 import type { ToolExecutionContext } from "./tool-execution-context.js";
+import {
+  executeBridgeCandidateTool,
+  type BridgeLookupToolName,
+} from "./bridge-candidate-tools.js";
 import { INVENTORY_EQUIP_STATES } from "../inventory/authority.js";
 
 const entityTypeEnum = z.enum(["player", "npc", "location", "item", "faction"]);
@@ -194,7 +198,54 @@ const moveToInputSchema = z.object({
     .describe("Name of the destination location (must be connected to current location)"),
 });
 
+const bridgeLookupScopeEnum = z.enum(["current_scene", "current_location", "visible", "known"]);
+const bridgeLookupMaxResults = z.number().int().min(1).max(8).optional();
+const bridgeCandidateQueryInputSchema = z.object({
+  query: z.string().trim().min(1).max(160).describe("Fuzzy player-facing words to match against visible/legal candidates"),
+  scope: bridgeLookupScopeEnum.optional().describe("Limit lookup to the current visible or known scope"),
+  tags: z.array(z.string().trim().min(1).max(80)).max(6).default([]),
+  maxResults: bridgeLookupMaxResults,
+});
+const listVisibleAffordancesInputSchema = z.object({
+  scope: bridgeLookupScopeEnum.optional().describe("Visible scope to summarize"),
+  maxResults: bridgeLookupMaxResults,
+});
+const listNavigationOptionsInputSchema = z.object({
+  actorRef: z.string().trim().min(1).max(160).optional(),
+  fromLocationRef: z.string().trim().min(1).max(160).optional(),
+  maxResults: bridgeLookupMaxResults,
+});
+const findActorCandidatesInputSchema = bridgeCandidateQueryInputSchema.extend({
+  relationHint: z.string().trim().min(1).max(160).optional(),
+});
+const findPoiCandidatesInputSchema = bridgeCandidateQueryInputSchema.extend({
+  areaRef: z.string().trim().min(1).max(160).optional(),
+  includePotential: z.boolean().default(false),
+});
+const inspectKnownFactInputSchema = z.object({
+  query: z.string().trim().min(1).max(220).optional(),
+  ref: z.string().trim().min(1).max(180).optional(),
+  scope: bridgeLookupScopeEnum.optional(),
+  maxResults: bridgeLookupMaxResults,
+}).refine(
+  (data) => Boolean(data.query ?? data.ref),
+  { message: "query or ref is required" },
+);
+const checkRouteInputSchema = z.object({
+  actorRef: z.string().trim().min(1).max(160).optional(),
+  destinationRef: z.string().trim().min(1).max(160),
+  mode: z.enum(["walk", "travel", "follow_route", "unknown"]).default("walk"),
+});
+
 export const runtimeToolInputSchemas = {
+  list_visible_affordances: listVisibleAffordancesInputSchema,
+  list_navigation_options: listNavigationOptionsInputSchema,
+  find_location_candidates: bridgeCandidateQueryInputSchema,
+  find_object_candidates: bridgeCandidateQueryInputSchema,
+  find_actor_candidates: findActorCandidatesInputSchema,
+  find_poi_candidates: findPoiCandidatesInputSchema,
+  inspect_known_fact: inspectKnownFactInputSchema,
+  check_route: checkRouteInputSchema,
   add_tag: addTagInputSchema,
   remove_tag: removeTagInputSchema,
   set_relationship: setRelationshipInputSchema,
@@ -246,8 +297,68 @@ export function createStorytellerTools(
     );
     return run;
   };
+  const executeBridgeLookupTool = (
+    toolName: BridgeLookupToolName,
+    args: Record<string, unknown>,
+  ) => executeBridgeCandidateTool(toolName, args, executionContext);
 
   return {
+    list_visible_affordances: tool({
+      description:
+        "Observation-only lookup. List current visible affordances, legal targets, legal movement, visible fact refs, and allowed tools without mutating world state.",
+      inputSchema: listVisibleAffordancesInputSchema,
+      execute: (args) => executeBridgeLookupTool("list_visible_affordances", args),
+    }),
+
+    list_navigation_options: tool({
+      description:
+        "Observation-only lookup. Return visible/legal navigation options from model-facing movement candidates; never invent or reveal hidden routes.",
+      inputSchema: listNavigationOptionsInputSchema,
+      execute: (args) => executeBridgeLookupTool("list_navigation_options", args),
+    }),
+
+    find_location_candidates: tool({
+      description:
+        "Observation-only lookup. Fuzzy-match visible legal locations and movement refs by player-facing words or tags.",
+      inputSchema: bridgeCandidateQueryInputSchema,
+      execute: (args) => executeBridgeLookupTool("find_location_candidates", args),
+    }),
+
+    find_object_candidates: tool({
+      description:
+        "Observation-only lookup. Fuzzy-match visible object/item candidates only; hidden/offscreen objects are denied by omission.",
+      inputSchema: bridgeCandidateQueryInputSchema,
+      execute: (args) => executeBridgeLookupTool("find_object_candidates", args),
+    }),
+
+    find_actor_candidates: tool({
+      description:
+        "Observation-only lookup. Fuzzy-match clear visible actor candidates only; hidden/offscreen actor names are never returned.",
+      inputSchema: findActorCandidatesInputSchema,
+      execute: (args) => executeBridgeLookupTool("find_actor_candidates", args),
+    }),
+
+    find_poi_candidates: tool({
+      description:
+        "Observation-only lookup. Find visible/current-area POI candidates or a generic potential local POI hint when explicitly requested.",
+      inputSchema: findPoiCandidatesInputSchema,
+      execute: (args) => executeBridgeLookupTool("find_poi_candidates", args),
+    }),
+
+    inspect_known_fact: tool({
+      description:
+        "Observation-only lookup. Inspect only player-visible or player-known facts; private/offscreen facts deny without naming them.",
+      inputSchema: inspectKnownFactInputSchema,
+      execute: (args) => executeBridgeLookupTool("inspect_known_fact", args),
+    }),
+
+    check_route: tool({
+      description:
+        "Observation-only lookup. Check whether a destination ref is already here or a visible legal movement route; illegal/hidden routes deny without leaks.",
+      inputSchema: checkRouteInputSchema,
+      execute: (args) => executeBridgeLookupTool("check_route", args),
+    }),
+
     add_tag: tool({
       description:
         "Add a tag to an entity (player, NPC, location, item, or faction). Tags represent traits, states, skills, relationships.",

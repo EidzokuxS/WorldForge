@@ -25,6 +25,7 @@ import {
 } from "./tool-execution-context.js";
 import { createStorytellerTools, type RuntimeToolName } from "./tool-schemas.js";
 import type { ToolResult } from "./tool-executor.js";
+import { isObservationToolResult } from "./tool-result.js";
 import type { GmToolStepResult } from "./gm-tool-step.js";
 import {
   dynamicCreationBudgetExceededError,
@@ -318,6 +319,8 @@ export function buildGmToolLoopPrompt(args: RunGmToolLoopArgs): string {
     "Call at most one runtime tool per assistant step. After each tool result, read the observation and decide the next needed tool.",
     "Stop once the needed backend observations are enough for the final narrator. Do not keep probing tools to improve prose.",
     "Do not write final player-facing narration here. The visible narrator runs after backend observations settle.",
+    "Use observation-only lookup tools for fuzzy low-risk intent before asking exact-ID questions. Read their observations, then choose a legal state tool or stop only if observation is enough.",
+    "Lookup observations never mutate world state and never reveal hidden/private/offscreen names; do not treat lookup candidates as completed movement or created facts.",
     "Do not satisfy future-relevant concrete pressure in assistant prose. If this pass introduces actors, props, obligations, routes, combat posture, danger changes, or aftermath that should matter later, it must be represented by successful existing runtime tools.",
     "If a tool returns success:false, do not restate the same invalid call. Correct it only if the model-facing scene refs make a legal correction obvious.",
     "Use only model-facing refs, visible actors, legal targets, legal movement, and allowed tools.",
@@ -453,6 +456,7 @@ function assertToolLoopTextGroundedByStateBearingObservation(
 }
 
 function mutationRefsFromToolResult(result: ToolResult): string[] {
+  if (isObservationToolResult(result)) return [];
   const refs = new Set<string>();
   const visit = (value: unknown): void => {
     if (typeof value === "string" && value.trim()) {

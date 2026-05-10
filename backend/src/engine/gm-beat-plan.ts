@@ -40,6 +40,7 @@ export const gmBeatPlanToolCategorySchema = z.enum([
   "inventory",
   "contest",
   "ui",
+  "lookup",
 ]);
 
 export const gmBeatPlanToolExecutionSchema = z.enum([
@@ -536,6 +537,15 @@ function uniqueCategories(values: readonly GmBeatPlanToolCategory[]): GmBeatPlan
 
 export function runtimeToolCategory(toolName: RuntimeToolName): GmBeatPlanToolCategory {
   switch (toolName) {
+    case "list_visible_affordances":
+    case "list_navigation_options":
+    case "find_location_candidates":
+    case "find_object_candidates":
+    case "find_actor_candidates":
+    case "find_poi_candidates":
+    case "inspect_known_fact":
+    case "check_route":
+      return "lookup";
     case "add_chronicle_entry":
     case "log_event":
       return "memory";

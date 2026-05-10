@@ -1,8 +1,32 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const { executeBridgeCandidateToolMock } = vi.hoisted(() => ({
+  executeBridgeCandidateToolMock: vi.fn(),
+}));
+
 vi.mock("../tool-executor.js", () => ({
   executeToolCall: vi.fn(),
 }));
+
+vi.mock("../bridge-candidate-tools.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../bridge-candidate-tools.js")>();
+  const lookupTools = new Set([
+    "list_visible_affordances",
+    "list_navigation_options",
+    "find_location_candidates",
+    "find_object_candidates",
+    "find_actor_candidates",
+    "find_poi_candidates",
+    "inspect_known_fact",
+    "check_route",
+  ]);
+  return {
+    ...actual,
+    executeBridgeCandidateTool: executeBridgeCandidateToolMock,
+    isBridgeLookupToolName: (toolName: string) => lookupTools.has(toolName),
+    BRIDGE_LOOKUP_TOOL_NAMES: [...lookupTools],
+  };
+});
 
 import type { GmActionChecklist } from "../gm-action-checklist.js";
 import { executeGmToolSteps } from "../gm-tool-step.js";
@@ -116,6 +140,16 @@ beforeEach(() => {
       actorName: "Road Warden",
     },
   });
+  executeBridgeCandidateToolMock.mockReturnValue({
+    success: true,
+    status: "success",
+    kind: "observation",
+    observationOnly: true,
+    result: {
+      observationOnly: true,
+      candidates: [{ ref: "actor:npc-warden", label: "Road Warden" }],
+    },
+  });
 });
 
 describe("executeGmToolSteps", () => {
@@ -152,6 +186,46 @@ describe("executeGmToolSteps", () => {
         subjectActorId: playerId,
       }),
     );
+  });
+
+  it("executes lookup candidates through observation dispatch instead of executeToolCall", async () => {
+    const frame = createFrame({ allowedTools: ["find_actor_candidates"] });
+    const lookupStep = logEventStep({
+      candidateToolRequest: {
+        toolName: "find_actor_candidates",
+        actorRef: "Player",
+        targetRefs: [],
+        input: {
+          query: "warden",
+          maxResults: 4,
+        },
+      },
+    });
+
+    const results = await executeGmToolSteps({
+      campaignId: frame.campaignId,
+      tick: frame.tick,
+      frame,
+      checklist: checklist([lookupStep]),
+    });
+
+    expect(results).toEqual([
+      expect.objectContaining({
+        status: "done",
+        toolName: "find_actor_candidates",
+        mutationRefs: [],
+        result: expect.objectContaining({
+          kind: "observation",
+          observationOnly: true,
+        }),
+      }),
+    ]);
+    expect(executeBridgeCandidateToolMock).toHaveBeenCalledWith(
+      "find_actor_candidates",
+      { query: "warden", maxResults: 4 },
+      expect.objectContaining({ scope: "player_turn" }),
+    );
+    expect(executeToolCall).not.toHaveBeenCalled();
   });
 
   it("fails closed when candidate tool is outside frame.allowedTools", async () => {
