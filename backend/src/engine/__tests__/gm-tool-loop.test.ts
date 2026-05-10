@@ -259,6 +259,35 @@ describe("runGmToolLoop", () => {
     ]);
   });
 
+  it("builds candidate refs from the model-facing view without hidden support actors", () => {
+    const frame = createFrame();
+    frame.roster.support = [
+      {
+        id: "actor-hidden-tea-broker",
+        actorId: "npc-hidden-tea-broker",
+        type: "npc",
+        label: "Hidden Tea Broker",
+        locationId: "loc-private-vault",
+        sceneScopeId: "loc-private-vault",
+        awareness: "none",
+      },
+    ];
+
+    const prompt = buildGmToolLoopPrompt({
+      campaignId: "campaign-1",
+      provider,
+      tick: 7,
+      playerAction: "I look for the tea stall.",
+      frame,
+      gmRead,
+    });
+
+    expect(prompt).toContain("CANDIDATE REFS FROM MODEL-FACING VIEW ONLY");
+    expect(prompt).not.toContain("Hidden Tea Broker");
+    expect(prompt).not.toContain("npc-hidden-tea-broker");
+    expect(prompt).not.toContain("actor-hidden-tea-broker");
+  });
+
   it("returns failed observations for repeated equivalent dynamic creation calls", async () => {
     generateTextMock().mockResolvedValueOnce({
       text: "",

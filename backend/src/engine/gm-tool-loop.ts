@@ -14,6 +14,7 @@ import {
 import {
   buildModelFacingSceneDiagnostics,
   buildModelFacingScenePacket,
+  type ModelFacingSceneView,
   redactModelFacingJson,
   shouldDropModelFacingText,
 } from "./model-facing-scene.js";
@@ -289,20 +290,20 @@ function scopedForecastForPrompt(
   };
 }
 
-function buildCandidateRefsForPrompt(frame: SceneFrame): unknown {
+function buildCandidateRefsForPrompt(view: ModelFacingSceneView): unknown {
   return {
-    actors: [...frame.roster.active, ...frame.roster.support].map((actor) => ({
+    actors: view.visibleActors.map((actor) => ({
       id: actor.id,
       actorId: actor.actorId,
       label: actor.label,
       awareness: actor.awareness,
     })),
-    targets: frame.targetCandidates.map((candidate) => ({
+    targets: view.legalTargets.map((candidate) => ({
       id: candidate.id,
       label: candidate.label,
       type: candidate.type,
     })),
-    movements: frame.movementCandidates.map((candidate) => ({
+    movements: view.legalMovement.map((candidate) => ({
       id: candidate.id,
       label: candidate.label,
     })),
@@ -356,7 +357,7 @@ export function buildGmToolLoopPrompt(args: RunGmToolLoopArgs): string {
     JSON.stringify(scenePacket.view, null, 2),
     "",
     "CANDIDATE REFS FROM MODEL-FACING VIEW ONLY",
-    JSON.stringify(buildCandidateRefsForPrompt(args.frame), null, 2),
+    JSON.stringify(buildCandidateRefsForPrompt(scenePacket.view), null, 2),
     "",
     "ALLOWED TOOLS",
     args.frame.allowedTools.length > 0
