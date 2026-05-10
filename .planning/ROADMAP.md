@@ -893,15 +893,15 @@ Plans:
 **Goal:** Make turn latency and model context spend inspectable and controllable through scheduling, budgets, and evidence-linked frames, not arbitrary duration caps or output truncation. The phase must add per-stage timing, L0-L4 critical-path classification, safe parallel retrieval/proposal groups, honest UI stage messages, explicit SceneFrame/OracleFrame/ActorFrame/FactionCommandFrame/NarratorPacket/ReviewerPacket budgets, source-linked summaries, visibility-gated retrieval, overflow warnings, and narrator redaction audits.
 **Requirements**: P93-R1, P93-R2, P93-R3, P93-R4, P93-R5, P93-R6, P93-R7, P93-R8
 **Depends on:** Phase 92
-**Plans:** 0/6 plans complete - PLANNED 2026-05-09
+**Plans:** 6/6 plans complete
 
 Plans:
-- [ ] 93-01-PLAN.md - Critical-path latency trace contract.
-- [ ] 93-02-PLAN.md - Safe parallel frame retrieval and actor proposal prep.
-- [ ] 93-03-PLAN.md - Shared frame budgets and retrieval overflow warnings.
-- [ ] 93-06-PLAN.md - Oracle and reviewer budget guard coverage.
-- [ ] 93-04-PLAN.md - Narrator packet budget and redaction audit.
-- [ ] 93-05-PLAN.md - Honest UI stage messages and final instrumentation gate.
+- [x] 93-01-PLAN.md - Critical-path latency trace contract.
+- [x] 93-02-PLAN.md - Safe parallel frame retrieval and actor proposal prep.
+- [x] 93-03-PLAN.md - Shared frame budgets and retrieval overflow warnings.
+- [x] 93-06-PLAN.md - Oracle and reviewer budget guard coverage.
+- [x] 93-04-PLAN.md - Narrator packet budget and redaction audit.
+- [x] 93-05-PLAN.md - Honest UI stage messages and final instrumentation gate.
 
 ### Phase 94: Focused living world playtest and runtime acceptance gate
 

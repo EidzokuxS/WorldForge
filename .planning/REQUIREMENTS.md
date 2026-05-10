@@ -359,14 +359,14 @@ Verification: Phase 88 is verified complete by `88-VERIFICATION.md`, `88-VERIFIC
 
 ### Phase 93 — Latency and Context Budget Instrumentation
 
-- [ ] **P93-R1**: Record per-stage timing and L0-L4 critical-path classification for player turns, actor work, faction work, and narration repair.
-- [ ] **P93-R2**: Identify safe parallel groups for retrieval and independent proposals without mutating stale versions.
-- [ ] **P93-R3**: Expose honest UI stage messages while hiding private actor/faction content.
-- [ ] **P93-R4**: Add explicit budgets for SceneFrame, OracleFrame, ActorFrame, FactionCommandFrame, NarratorPacket, and ReviewerPacket.
-- [ ] **P93-R5**: Use visibility-gated retrieval and source-linked summaries instead of dumping whole world state or silently truncating model output.
-- [ ] **P93-R6**: Add overflow warnings/redaction audits proving hidden proposals/private facts are excluded from narrator packets.
-- [ ] **P93-R7**: Prove latency/context traces explain slow turns without arbitrary model-duration caps, output truncation, or fake success.
-- [ ] **P93-R8**: Prove narrator redaction and UI stage copy are player-safe: hidden facts/proposals are counted as excluded and stage messages do not reveal private actor/faction content.
+- [x] **P93-R1**: Record per-stage timing and L0-L4 critical-path classification for player turns, actor work, faction work, and narration repair.
+- [x] **P93-R2**: Identify safe parallel groups for retrieval and independent proposals without mutating stale versions.
+- [x] **P93-R3**: Expose honest UI stage messages while hiding private actor/faction content.
+- [x] **P93-R4**: Add explicit budgets for SceneFrame, OracleFrame, ActorFrame, FactionCommandFrame, NarratorPacket, and ReviewerPacket.
+- [x] **P93-R5**: Use visibility-gated retrieval and source-linked summaries instead of dumping whole world state or silently truncating model output.
+- [x] **P93-R6**: Add overflow warnings/redaction audits proving hidden proposals/private facts are excluded from narrator packets.
+- [x] **P93-R7**: Prove latency/context traces explain slow turns without arbitrary model-duration caps, output truncation, or fake success.
+- [x] **P93-R8**: Prove narrator redaction and UI stage copy are player-safe: hidden facts/proposals are counted as excluded and stage messages do not reveal private actor/faction content.
 
 ### Phase 94 — Focused Living World Playtest and Runtime Acceptance Gate
 
