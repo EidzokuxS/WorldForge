@@ -1,0 +1,26 @@
+{
+  "phase": 90,
+  "plan": "90-04",
+  "mode": "dry-run",
+  "exactInput": "иду дальше по логичному маршруту и ищу чайную лавку",
+  "gmRead": {
+    "initialPath": "clarification",
+    "initialParserLikePattern": "which\\s+(?:connected\\s+)?location",
+    "reviewerRepaired": true,
+    "reviewerReason": "bridgeable_parser_like_clarification",
+    "visiblePath": "tool_plan"
+  },
+  "route": {
+    "from": "Canal Market",
+    "to": "Tea Row",
+    "routeId": "route-market-tea-row",
+    "moveActorValidated": true
+  },
+  "poi": {
+    "mode": "create_minor_poi",
+    "poiType": "tea_stall",
+    "name": "Lantern Tea Stall",
+    "visiblePublicFactRef": "knowledge:public-tea-route"
+  },
+  "result": "passed"
+}
