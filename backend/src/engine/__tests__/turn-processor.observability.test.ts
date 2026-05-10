@@ -246,6 +246,67 @@ describe("Turn observability — single turn seam coverage via REAL chat route",
       }),
     );
 
+    const latencyTraceEvent = events.find((e) => e.event === "turn.latency.trace");
+    expect(latencyTraceEvent).toBeDefined();
+    const latencyTrace = latencyTraceEvent?.payload as
+      | {
+          stages?: Array<Record<string, unknown>>;
+          serializedGroups?: Array<Record<string, unknown>>;
+          parallelGroups?: Array<Record<string, unknown>>;
+          diagnostics?: Array<Record<string, unknown>>;
+          didClipModelOutput?: unknown;
+        }
+      | undefined;
+    expect(latencyTrace?.didClipModelOutput).toBe(false);
+    expect(latencyTrace?.serializedGroups?.length).toBeGreaterThanOrEqual(2);
+    expect(Array.isArray(latencyTrace?.parallelGroups)).toBe(true);
+    const latencyStages = new Map(
+      (latencyTrace?.stages ?? []).map((stage) => [stage.stage, stage]),
+    );
+    expect(latencyStages.get("scene_frame")).toEqual(
+      expect.objectContaining({
+        criticality: "L0",
+        blocksPlayerResponse: true,
+        criticalPath: true,
+        sourceStageId: "scene_frame",
+        durationMs: expect.any(Number),
+      }),
+    );
+    expect(latencyStages.get("actor_reactions")).toEqual(
+      expect.objectContaining({
+        criticality: "L1",
+        blocksPlayerResponse: true,
+        criticalPath: true,
+      }),
+    );
+    expect(latencyStages.get("pre_narrator_due_work")).toEqual(
+      expect.objectContaining({
+        criticality: "L2",
+        blocksPlayerResponse: true,
+        criticalPath: true,
+      }),
+    );
+    expect(latencyStages.get("final_prompt")).toEqual(
+      expect.objectContaining({
+        criticality: "L0",
+        blocksPlayerResponse: true,
+        criticalPath: true,
+        durationMs: expect.any(Number),
+      }),
+    );
+    expect(latencyStages.get("final_narration")).toEqual(
+      expect.objectContaining({
+        criticality: "L0",
+        blocksPlayerResponse: true,
+        criticalPath: true,
+        durationMs: expect.any(Number),
+      }),
+    );
+    expect(
+      latencyTrace?.diagnostics?.some((diagnostic) => diagnostic.code === "output_clip_attempt"),
+    ).toBe(false);
+    assertCompactScenePlanPayload(latencyTrace);
+
     for (const event of [
       ...sceneFrameEvents,
       ...scenePlanEvents,

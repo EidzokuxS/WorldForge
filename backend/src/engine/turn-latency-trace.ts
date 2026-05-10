@@ -1,10 +1,27 @@
 import type { LivingWorldProposalMetrics } from "./living-world-metrics.js";
 
+export type TurnLatencyCriticality = "L0" | "L1" | "L2" | "L3" | "L4";
+
+export interface TurnLatencyStageClassification {
+  criticality: TurnLatencyCriticality;
+  blocksPlayerResponse: boolean;
+  criticalPath: boolean;
+  sourceStageId: string;
+  route?: string;
+  classificationReason?: string;
+}
+
 export interface TurnLatencyTraceStage {
   stage: string;
   startedAt: number;
   endedAt: number;
   durationMs: number;
+  criticality: TurnLatencyCriticality;
+  blocksPlayerResponse: boolean;
+  criticalPath: boolean;
+  sourceStageId: string;
+  route?: string;
+  classificationReason?: string;
   metadata: Record<string, unknown>;
 }
 
@@ -68,6 +85,8 @@ export interface TurnLatencyDiagnostic {
     | "retry_budget_exceeded"
     | "output_clip_attempt"
     | "missing_stage"
+    | "stage_classification_mismatch"
+    | "noncritical_blocking_stage"
     | "slow_stage";
   severity: "info" | "warning" | "error";
   message: string;
@@ -95,9 +114,124 @@ export interface TurnLatencyTrace {
   reflectionWaitMs: number;
   narratorWaitMs: number;
   proposalEffects: TurnLatencyProposalEffects;
-  didClipModelOutput: false;
+  didClipModelOutput: boolean;
   diagnostics: TurnLatencyDiagnostic[];
 }
+
+export interface TurnLatencyRequiredStage {
+  stage: string;
+  criticality?: TurnLatencyCriticality;
+  blocksPlayerResponse?: boolean;
+  criticalPath?: boolean;
+}
+
+const defaultStageClassifications: Record<string, TurnLatencyStageClassification> = {
+  pre_scene_frame_due_work: {
+    criticality: "L2",
+    blocksPlayerResponse: true,
+    criticalPath: true,
+    sourceStageId: "pre_scene_frame_due_work",
+    classificationReason: "Visible-scope due work can surface in the SceneFrame.",
+  },
+  scene_frame: {
+    criticality: "L0",
+    blocksPlayerResponse: true,
+    criticalPath: true,
+    sourceStageId: "scene_frame",
+    classificationReason: "SceneFrame is required to ground the current player turn.",
+  },
+  world_forecast: {
+    criticality: "L2",
+    blocksPlayerResponse: true,
+    criticalPath: true,
+    sourceStageId: "world_forecast",
+    classificationReason: "Scoped forecast is consumed by the current GM Read.",
+  },
+  gm_read: {
+    criticality: "L0",
+    blocksPlayerResponse: true,
+    criticalPath: true,
+    sourceStageId: "gm_read",
+    classificationReason: "GM Read interprets the current player action.",
+  },
+  oracle: {
+    criticality: "L0",
+    blocksPlayerResponse: true,
+    criticalPath: true,
+    sourceStageId: "oracle",
+    classificationReason: "Oracle is only called when immediate adjudication is required.",
+  },
+  gm_tool_loop: {
+    criticality: "L0",
+    blocksPlayerResponse: true,
+    criticalPath: true,
+    sourceStageId: "gm_tool_loop",
+    classificationReason: "Validated tool execution settles current-turn state.",
+  },
+  clarification_response: {
+    criticality: "L0",
+    blocksPlayerResponse: true,
+    criticalPath: true,
+    sourceStageId: "clarification_response",
+    classificationReason: "Clarification is the current visible response.",
+  },
+  actor_reactions: {
+    criticality: "L1",
+    blocksPlayerResponse: true,
+    criticalPath: true,
+    sourceStageId: "actor_reactions",
+    classificationReason: "Visible actor reactions can affect the current scene.",
+  },
+  pre_narrator_due_work: {
+    criticality: "L2",
+    blocksPlayerResponse: true,
+    criticalPath: true,
+    sourceStageId: "pre_narrator_due_work",
+    classificationReason: "Due work runs because consequences may surface before narration.",
+  },
+  narrator_frame_refresh: {
+    criticality: "L2",
+    blocksPlayerResponse: true,
+    criticalPath: true,
+    sourceStageId: "narrator_frame_refresh",
+    classificationReason: "Refreshed visible frame is needed after surfaced due work.",
+  },
+  narrator_packet: {
+    criticality: "L0",
+    blocksPlayerResponse: true,
+    criticalPath: true,
+    sourceStageId: "narrator_packet",
+    classificationReason: "NarratorPacket is the final visibility boundary.",
+  },
+  final_prompt: {
+    criticality: "L0",
+    blocksPlayerResponse: true,
+    criticalPath: true,
+    sourceStageId: "final_prompt",
+    classificationReason: "Final prompt assembly prepares the visible response.",
+  },
+  final_narration: {
+    criticality: "L0",
+    blocksPlayerResponse: true,
+    criticalPath: true,
+    sourceStageId: "final_narration",
+    classificationReason: "Final narration is the player-visible turn response.",
+  },
+  narrator_repair: {
+    criticality: "L0",
+    blocksPlayerResponse: true,
+    criticalPath: true,
+    sourceStageId: "narrator_repair",
+    classificationReason: "Narration repair protects the visible response boundary.",
+  },
+  transient_cleanup: {
+    criticality: "L4",
+    blocksPlayerResponse: false,
+    criticalPath: false,
+    sourceStageId: "transient_cleanup",
+    classificationReason: "Maintenance cleanup should not determine player-visible truth.",
+  },
+};
 
 export function createTurnLatencyTrace(input: {
   turnId: string;
@@ -199,19 +333,45 @@ export function recordTurnLatencyStage(
     stage: string;
     startedAt: number;
     endedAt?: number;
+    criticality?: TurnLatencyCriticality;
+    blocksPlayerResponse?: boolean;
+    criticalPath?: boolean;
+    sourceStageId?: string;
+    route?: string;
+    classificationReason?: string;
     metadata?: Record<string, unknown>;
   },
 ): TurnLatencyTraceStage {
   const endedAt = input.endedAt ?? Date.now();
+  const defaultClassification = classifyTurnLatencyStage(input.stage);
   const stage = {
     stage: input.stage,
     startedAt: input.startedAt,
     endedAt,
     durationMs: Math.max(0, endedAt - input.startedAt),
+    criticality: input.criticality ?? defaultClassification.criticality,
+    blocksPlayerResponse:
+      input.blocksPlayerResponse ?? defaultClassification.blocksPlayerResponse,
+    criticalPath: input.criticalPath ?? defaultClassification.criticalPath,
+    sourceStageId:
+      input.sourceStageId ?? defaultClassification.sourceStageId ?? input.stage,
+    route: input.route ?? defaultClassification.route,
+    classificationReason:
+      input.classificationReason ?? defaultClassification.classificationReason,
     metadata: { ...(input.metadata ?? {}) },
   };
   trace.stages.push(stage);
   return stage;
+}
+
+export function classifyTurnLatencyStage(stage: string): TurnLatencyStageClassification {
+  return defaultStageClassifications[stage] ?? {
+    criticality: "L3",
+    blocksPlayerResponse: false,
+    criticalPath: false,
+    sourceStageId: stage,
+    classificationReason: "Unmapped work defaults to non-blocking offscreen diagnostics.",
+  };
 }
 
 export function recordSerializedLlmGroup(
@@ -324,6 +484,7 @@ export function diagnoseTurnLatencyTrace(
     retryLimit?: number;
     slowStageMs?: number;
     requiredStages?: readonly string[];
+    requiredStageDefinitions?: readonly TurnLatencyRequiredStage[];
   } = {},
 ): TurnLatencyDiagnostic[] {
   const diagnostics: TurnLatencyDiagnostic[] = [];
@@ -361,14 +522,72 @@ export function diagnoseTurnLatencyTrace(
     });
   }
 
-  const stageNames = new Set(trace.stages.map((stage) => stage.stage));
-  for (const required of options.requiredStages ?? []) {
-    if (!stageNames.has(required)) {
+  const stagesByName = new Map(trace.stages.map((stage) => [stage.stage, stage]));
+  const requiredStageNames = new Set([
+    ...(options.requiredStages ?? []),
+    ...(options.requiredStageDefinitions ?? []).map((stage) => stage.stage),
+  ]);
+  for (const required of requiredStageNames) {
+    if (!stagesByName.has(required)) {
       diagnostics.push({
         code: "missing_stage",
         severity: "warning",
         message: `Latency trace did not record required stage '${required}'.`,
         metadata: { stage: required },
+      });
+    }
+  }
+
+  for (const expected of options.requiredStageDefinitions ?? []) {
+    const actual = stagesByName.get(expected.stage);
+    if (!actual) {
+      continue;
+    }
+    const mismatches: Record<string, unknown> = {};
+    if (expected.criticality && actual.criticality !== expected.criticality) {
+      mismatches.criticality = {
+        expected: expected.criticality,
+        actual: actual.criticality,
+      };
+    }
+    if (
+      typeof expected.blocksPlayerResponse === "boolean"
+      && actual.blocksPlayerResponse !== expected.blocksPlayerResponse
+    ) {
+      mismatches.blocksPlayerResponse = {
+        expected: expected.blocksPlayerResponse,
+        actual: actual.blocksPlayerResponse,
+      };
+    }
+    if (
+      typeof expected.criticalPath === "boolean"
+      && actual.criticalPath !== expected.criticalPath
+    ) {
+      mismatches.criticalPath = {
+        expected: expected.criticalPath,
+        actual: actual.criticalPath,
+      };
+    }
+    if (Object.keys(mismatches).length > 0) {
+      diagnostics.push({
+        code: "stage_classification_mismatch",
+        severity: "warning",
+        message: `Latency stage '${expected.stage}' did not match required critical-path classification.`,
+        metadata: { stage: expected.stage, mismatches },
+      });
+    }
+  }
+
+  for (const stage of trace.stages) {
+    if ((stage.criticality === "L3" || stage.criticality === "L4") && stage.blocksPlayerResponse) {
+      diagnostics.push({
+        code: "noncritical_blocking_stage",
+        severity: "warning",
+        message: `Latency stage '${stage.stage}' is ${stage.criticality} but marked as player-blocking.`,
+        metadata: {
+          stage: stage.stage,
+          criticality: stage.criticality,
+        },
       });
     }
   }

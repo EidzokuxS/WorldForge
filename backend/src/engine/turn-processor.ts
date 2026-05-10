@@ -85,6 +85,7 @@ import {
   recordParallelGroup,
   recordSerializedLlmGroup,
   recordTurnLatencyStage,
+  type TurnLatencyRequiredStage,
 } from "./turn-latency-trace.js";
 import type { GmToolStepResult } from "./gm-tool-step.js";
 import { isObservationToolResult } from "./tool-result.js";
@@ -1853,6 +1854,12 @@ async function renderSettledNarrationWithSaga(args: {
   storytellerMaxTokens: number;
   judgeProvider?: ProviderConfig;
   lockToken?: string;
+  recordPromptAssemblyStage?: (startedAt: number, endedAt: number) => void;
+  recordNarratorRepairStage?: (
+    startedAt: number,
+    endedAt: number,
+    metadata: Record<string, unknown>,
+  ) => void;
 }) {
   let saga = args.saga;
   if (saga.status === "resolved_pending_narration") {
@@ -1864,6 +1871,7 @@ async function renderSettledNarrationWithSaga(args: {
     });
   }
 
+  const promptAssemblyStart = Date.now();
   const finalNarrationPrompt = await assembleFinalNarrationPrompt({
     campaignId: args.campaignId,
     contextWindow: args.contextWindow,
@@ -1877,6 +1885,8 @@ async function renderSettledNarrationWithSaga(args: {
       ? { provider: args.judgeProvider, temperature: 0.1, maxTokens: 1024 }
       : undefined,
   });
+  const promptAssemblyEnded = Date.now();
+  args.recordPromptAssemblyStage?.(promptAssemblyStart, promptAssemblyEnded);
 
   let lastReasoningText: string | undefined;
   let lastVisibleFailures: VisibleNarrationFailure[] = [];
@@ -1929,8 +1939,11 @@ async function renderSettledNarrationWithSaga(args: {
 
   let guardedNarration: Awaited<ReturnType<typeof runVisibleNarrationWithPacketGuard>>;
   let recovered = false;
+  const narrationStartedAt = Date.now();
+  let narrationEndedAt = narrationStartedAt;
   try {
     guardedNarration = await runFinalPacketGuardedNarration(null);
+    narrationEndedAt = Date.now();
   } catch (error) {
     const failureReason = errorMessage(error);
     recordNarratorAttempt({
@@ -1958,11 +1971,18 @@ async function renderSettledNarrationWithSaga(args: {
       reason: failureReason,
     });
     recovered = true;
+    const repairStart = Date.now();
     try {
       guardedNarration = await runFinalPacketGuardedNarration(
         FINAL_VISIBLE_PACKET_GUARD_RECOVERY_ADDENDUM,
       );
+      narrationEndedAt = Date.now();
+      args.recordNarratorRepairStage?.(repairStart, narrationEndedAt, {
+        recovered: true,
+        reason: failureReason,
+      });
     } catch (recoveryError) {
+      narrationEndedAt = Date.now();
       recordNarratorAttempt({
         sagaId: saga.id,
         settledTurnPacketId: args.settledPacket.id,
@@ -1999,6 +2019,8 @@ async function renderSettledNarrationWithSaga(args: {
     lastVisibleFinishReason,
     lastVisibleResponse,
     narratorAttemptId: successAttempt.id,
+    narrationStartedAt,
+    narrationEndedAt,
     finalizationReason: recovered
       ? "Final narration recovered from settled packet."
       : "Final narration completed from settled packet.",
@@ -2491,24 +2513,26 @@ async function* processTurnScenePlan(
     return turnSaga;
   };
   advanceSaga("collecting_context", "Collecting deterministic turn context.");
-  const baseLatencyStages = [
-    "pre_scene_frame_due_work",
-    "scene_frame",
-    "world_forecast",
-    "gm_read",
-  ] as const;
-  const fullTurnLatencyStages = [
-    ...baseLatencyStages,
-    "actor_reactions",
-    "pre_narrator_due_work",
-    "narrator_packet",
-    "final_prompt",
-    "final_narration",
-  ] as const;
-  const finishLatencyTrace = (requiredStages: readonly string[] = fullTurnLatencyStages) => {
+  const baseLatencyStageDefinitions: readonly TurnLatencyRequiredStage[] = [
+    { stage: "pre_scene_frame_due_work", criticality: "L2", blocksPlayerResponse: true, criticalPath: true },
+    { stage: "scene_frame", criticality: "L0", blocksPlayerResponse: true, criticalPath: true },
+    { stage: "world_forecast", criticality: "L2", blocksPlayerResponse: true, criticalPath: true },
+    { stage: "gm_read", criticality: "L0", blocksPlayerResponse: true, criticalPath: true },
+  ];
+  const fullTurnLatencyStageDefinitions: readonly TurnLatencyRequiredStage[] = [
+    ...baseLatencyStageDefinitions,
+    { stage: "actor_reactions", criticality: "L1", blocksPlayerResponse: true, criticalPath: true },
+    { stage: "pre_narrator_due_work", criticality: "L2", blocksPlayerResponse: true, criticalPath: true },
+    { stage: "narrator_packet", criticality: "L0", blocksPlayerResponse: true, criticalPath: true },
+    { stage: "final_prompt", criticality: "L0", blocksPlayerResponse: true, criticalPath: true },
+    { stage: "final_narration", criticality: "L0", blocksPlayerResponse: true, criticalPath: true },
+  ];
+  const finishLatencyTrace = (
+    requiredStageDefinitions: readonly TurnLatencyRequiredStage[] = fullTurnLatencyStageDefinitions,
+  ) => {
     finalizeTurnLatencyTrace(latencyTrace, {
       diagnosticOptions: {
-        requiredStages,
+        requiredStageDefinitions,
       },
     });
     log.event("turn.latency.trace", latencyTrace);
@@ -3069,7 +3093,10 @@ async function* processTurnScenePlan(
       startedAt: gmReadEnded,
       metadata: { path: gmRead.path },
     });
-    finishLatencyTrace([...baseLatencyStages, "clarification_response"]);
+    finishLatencyTrace([
+      ...baseLatencyStageDefinitions,
+      { stage: "clarification_response", criticality: "L0", blocksPlayerResponse: true, criticalPath: true },
+    ]);
     markTurnSagaFinalized({
       sagaId: turnSaga.id,
       reason: "Clarification returned without settled narration packet.",
@@ -3369,8 +3396,6 @@ async function* processTurnScenePlan(
       },
     };
 
-    const finalPromptStart = Date.now();
-    const visibleCallStart = Date.now();
     const narration = await renderSettledNarrationWithSaga({
       saga: turnSaga,
       settledPacket,
@@ -3387,9 +3412,26 @@ async function* processTurnScenePlan(
       storytellerMaxTokens,
       judgeProvider,
       lockToken: liveClaim.lockToken,
+      recordPromptAssemblyStage: (startedAt, endedAt) => {
+        recordTurnLatencyStage(latencyTrace, {
+          stage: "final_prompt",
+          startedAt,
+          endedAt,
+          metadata: {
+            hasNarratorPacket: true,
+          },
+        });
+      },
+      recordNarratorRepairStage: (startedAt, endedAt, metadata) => {
+        recordTurnLatencyStage(latencyTrace, {
+          stage: "narrator_repair",
+          startedAt,
+          endedAt,
+          metadata,
+        });
+      },
     });
     liveHeartbeat.heartbeat();
-    const visibleCallEnded = Date.now();
     const {
       guardedNarration,
       narrativeText,
@@ -3400,16 +3442,9 @@ async function* processTurnScenePlan(
       lastVisibleResponse,
     } = narration;
     recordTurnLatencyStage(latencyTrace, {
-      stage: "final_prompt",
-      startedAt: finalPromptStart,
-      metadata: {
-        hasNarratorPacket: true,
-      },
-    });
-    recordTurnLatencyStage(latencyTrace, {
       stage: "final_narration",
-      startedAt: visibleCallStart,
-      endedAt: visibleCallEnded,
+      startedAt: narration.narrationStartedAt,
+      endedAt: narration.narrationEndedAt,
       metadata: {
         attempts: guardedNarration.attempts,
         retried: guardedNarration.retried,
@@ -3421,8 +3456,8 @@ async function* processTurnScenePlan(
     recordSerializedLlmGroup(latencyTrace, {
       kind: "storyteller",
       label: "final visible narration",
-      startedAt: visibleCallStart,
-      endedAt: visibleCallEnded,
+      startedAt: narration.narrationStartedAt,
+      endedAt: narration.narrationEndedAt,
       llmCallCount: guardedNarration.attempts,
       retryCount: Math.max(0, guardedNarration.attempts - 1),
       usage: lastVisibleUsage,
@@ -3439,7 +3474,7 @@ async function* processTurnScenePlan(
       attempts: guardedNarration.attempts,
       retried: guardedNarration.retried,
       violationCount: guardedNarration.validation.violations.length,
-      durationMs: visibleCallEnded - visibleCallStart,
+      durationMs: narration.narrationEndedAt - narration.narrationStartedAt,
     });
     log.event("storyteller.visible.call", {
       label: "final",
@@ -3450,7 +3485,7 @@ async function* processTurnScenePlan(
       finishReason: lastVisibleFinishReason ?? null,
       responseModel: lastVisibleResponse?.modelId ?? null,
       usage: lastVisibleUsage ?? null,
-      durationMs: visibleCallEnded - visibleCallStart,
+      durationMs: narration.narrationEndedAt - narration.narrationStartedAt,
     });
     log.info(
       `Visible narration complete: executedActions=${toolCallResults.length}, final=${narrativeText.length} chars, retried=${guardedNarration.retried}, failures=${lastVisibleFailures.join(",") || "none"}`,

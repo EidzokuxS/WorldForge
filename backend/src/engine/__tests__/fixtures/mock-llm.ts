@@ -370,6 +370,106 @@ export async function applyMocks(): Promise<void> {
         count: 1,
       });
 
+      if (source === "player-turn") {
+        log.event("turn.latency.trace", {
+          turnId: "mock-turn",
+          campaignId: "mock-campaign",
+          tick: 0,
+          turnClass: hostileAction ? "heavy" : "normal",
+          totalDurationMs: 120,
+          stages: [
+            {
+              stage: "pre_scene_frame_due_work",
+              criticality: "L2",
+              blocksPlayerResponse: true,
+              criticalPath: true,
+              sourceStageId: "pre_scene_frame_due_work",
+              durationMs: 2,
+              metadata: { executed: 0, deferred: 0 },
+            },
+            {
+              stage: "scene_frame",
+              criticality: "L0",
+              blocksPlayerResponse: true,
+              criticalPath: true,
+              sourceStageId: "scene_frame",
+              durationMs: 5,
+              metadata: { actorCount: 2 },
+            },
+            {
+              stage: "world_forecast",
+              criticality: "L2",
+              blocksPlayerResponse: true,
+              criticalPath: true,
+              sourceStageId: "world_forecast",
+              durationMs: 8,
+              metadata: { entryCount: 1 },
+            },
+            {
+              stage: "gm_read",
+              criticality: "L0",
+              blocksPlayerResponse: true,
+              criticalPath: true,
+              sourceStageId: "gm_read",
+              durationMs: 9,
+              metadata: { path: hostileAction ? "combat_transition" : "direct_response" },
+            },
+            {
+              stage: "actor_reactions",
+              criticality: "L1",
+              blocksPlayerResponse: true,
+              criticalPath: true,
+              sourceStageId: "actor_reactions",
+              durationMs: 6,
+              metadata: { decisionCount: 1 },
+            },
+            {
+              stage: "pre_narrator_due_work",
+              criticality: "L2",
+              blocksPlayerResponse: true,
+              criticalPath: true,
+              sourceStageId: "pre_narrator_due_work",
+              durationMs: 3,
+              metadata: { executed: 0, deferred: 0 },
+            },
+            {
+              stage: "narrator_packet",
+              criticality: "L0",
+              blocksPlayerResponse: true,
+              criticalPath: true,
+              sourceStageId: "narrator_packet",
+              durationMs: 3,
+              metadata: { eventCount: 1, effectCount: 1 },
+            },
+            {
+              stage: "final_prompt",
+              criticality: "L0",
+              blocksPlayerResponse: true,
+              criticalPath: true,
+              sourceStageId: "final_prompt",
+              durationMs: 4,
+              metadata: { hasNarratorPacket: true },
+            },
+            {
+              stage: "final_narration",
+              criticality: "L0",
+              blocksPlayerResponse: true,
+              criticalPath: true,
+              sourceStageId: "final_narration",
+              durationMs: 10,
+              metadata: { attempts: 1, retried: false },
+            },
+          ],
+          serializedGroups: [
+            { groupId: "gm-read", kind: "gm_read", durationMs: 9 },
+            { groupId: "storyteller", kind: "storyteller", durationMs: 10 },
+          ],
+          parallelGroups: [],
+          diagnostics: [],
+          didClipModelOutput: false,
+        });
+      }
+
       // --- done ------------------------------------------------------
       yield {
         type: "done",
@@ -380,8 +480,17 @@ export async function applyMocks(): Promise<void> {
     return {
       processTurn: vi.fn((options?: { playerAction?: string; intent?: string }) => simulateTurn(options, "player-turn")),
       processOpeningScene: vi.fn(() => simulateTurn(undefined, "opening-scene")),
+      resumePendingTurnNarration: vi.fn(async function* () {
+        yield {
+          type: "done",
+          data: { tick: 0, pending: false },
+        };
+      }),
       captureSnapshot: vi.fn(async () => ({ snapshot: "mock" })),
       restoreSnapshot: vi.fn(async () => undefined),
+      findPendingNarrationSaga: vi.fn(() => null),
+      NarrationRepairExhaustedError: class NarrationRepairExhaustedError extends Error {},
+      PendingNarrationError: class PendingNarrationError extends Error {},
       tickPresentNpcs: vi.fn(async () => undefined),
       simulateOffscreenNpcs: vi.fn(async () => undefined),
       checkAndTriggerReflections: vi.fn(async () => undefined),

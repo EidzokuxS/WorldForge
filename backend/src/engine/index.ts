@@ -168,6 +168,8 @@ export type {
   TurnLatencyTrace,
   TurnLatencyDiagnostic,
   TurnLatencyTraceStage,
+  TurnLatencyCriticality,
+  TurnLatencyRequiredStage,
 } from "./turn-latency-trace.js";
 
 export {

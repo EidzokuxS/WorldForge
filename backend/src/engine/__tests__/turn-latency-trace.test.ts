@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   addLivingWorldProposalMetricsToTrace,
   addTurnLatencyProposalEffects,
+  classifyTurnLatencyStage,
   createTurnLatencyTrace,
   finalizeTurnLatencyTrace,
   recordParallelGroup,
@@ -76,6 +77,10 @@ describe("turn latency trace", () => {
     expect(trace.stages[0]).toMatchObject({
       stage: "scene_frame",
       durationMs: 25,
+      criticality: "L0",
+      blocksPlayerResponse: true,
+      criticalPath: true,
+      sourceStageId: "scene_frame",
       metadata: { actorCount: 3 },
     });
     expect(trace.llmCallCount).toBe(3);
@@ -124,6 +129,175 @@ describe("turn latency trace", () => {
     expect(trace.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
       "serialized_group_budget_exceeded",
       "missing_stage",
+    ]);
+  });
+
+  it("records L0-L4 criticality, blocking status, and critical path metadata", () => {
+    const trace = createTurnLatencyTrace({
+      turnId: "turn-crit",
+      campaignId: "campaign-1",
+      tick: 10,
+      startedAt: 0,
+    });
+
+    recordTurnLatencyStage(trace, {
+      stage: "scene_frame",
+      startedAt: 1,
+      endedAt: 2,
+    });
+    recordTurnLatencyStage(trace, {
+      stage: "actor_reactions",
+      startedAt: 2,
+      endedAt: 3,
+    });
+    recordTurnLatencyStage(trace, {
+      stage: "pre_narrator_due_work",
+      startedAt: 3,
+      endedAt: 4,
+    });
+    recordTurnLatencyStage(trace, {
+      stage: "offscreen_actor_proposal",
+      startedAt: 4,
+      endedAt: 5,
+      sourceStageId: "actor-proposal:background",
+    });
+    recordTurnLatencyStage(trace, {
+      stage: "transient_cleanup",
+      startedAt: 5,
+      endedAt: 6,
+    });
+
+    expect(trace.stages.map((stage) => stage.criticality)).toEqual([
+      "L0",
+      "L1",
+      "L2",
+      "L3",
+      "L4",
+    ]);
+    expect(trace.stages.map((stage) => stage.blocksPlayerResponse)).toEqual([
+      true,
+      true,
+      true,
+      false,
+      false,
+    ]);
+    expect(trace.stages.map((stage) => stage.criticalPath)).toEqual([
+      true,
+      true,
+      true,
+      false,
+      false,
+    ]);
+    expect(trace.stages[3]).toMatchObject({
+      sourceStageId: "actor-proposal:background",
+      classificationReason: "Unmapped work defaults to non-blocking offscreen diagnostics.",
+    });
+    expect(classifyTurnLatencyStage("transient_cleanup")).toMatchObject({
+      criticality: "L4",
+      blocksPlayerResponse: false,
+      criticalPath: false,
+    });
+  });
+
+  it("diagnoses required stage classification mismatches and noncritical blocking work", () => {
+    const trace = createTurnLatencyTrace({
+      turnId: "turn-classification-warning",
+      campaignId: "campaign-1",
+      tick: 11,
+      startedAt: 0,
+    });
+
+    recordTurnLatencyStage(trace, {
+      stage: "actor_reactions",
+      startedAt: 1,
+      endedAt: 2,
+      criticality: "L3",
+      blocksPlayerResponse: true,
+      criticalPath: false,
+    });
+
+    finalizeTurnLatencyTrace(trace, {
+      endedAt: 10,
+      diagnosticOptions: {
+        requiredStageDefinitions: [
+          {
+            stage: "actor_reactions",
+            criticality: "L1",
+            blocksPlayerResponse: true,
+            criticalPath: true,
+          },
+        ],
+      },
+    });
+
+    expect(trace.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
+      "stage_classification_mismatch",
+      "noncritical_blocking_stage",
+    ]);
+    expect(trace.diagnostics[0]?.metadata).toMatchObject({
+      stage: "actor_reactions",
+      mismatches: {
+        criticality: { expected: "L1", actual: "L3" },
+        criticalPath: { expected: true, actual: false },
+      },
+    });
+  });
+
+  it("rejects output clipping as an invalid latency-control strategy", () => {
+    const trace = createTurnLatencyTrace({
+      turnId: "turn-clip",
+      campaignId: "campaign-1",
+      tick: 12,
+      startedAt: 0,
+    });
+    trace.didClipModelOutput = true;
+
+    finalizeTurnLatencyTrace(trace, { endedAt: 10 });
+
+    expect(trace.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "output_clip_attempt",
+        severity: "error",
+      }),
+    ]);
+  });
+
+  it("warns on heavy serialized pressure without aborting or clipping output", () => {
+    const trace = createTurnLatencyTrace({
+      turnId: "turn-heavy",
+      campaignId: "campaign-1",
+      tick: 13,
+      turnClass: "heavy",
+      startedAt: 0,
+    });
+
+    for (const kind of [
+      "world_forecast",
+      "gm_read",
+      "oracle",
+      "gm_tool_loop",
+      "actor_decision",
+      "storyteller",
+    ] as const) {
+      recordSerializedLlmGroup(trace, {
+        kind,
+        startedAt: 1,
+        endedAt: 2,
+      });
+    }
+
+    finalizeTurnLatencyTrace(trace, {
+      endedAt: 20,
+      diagnosticOptions: { heavySerializedGroupLimit: 5 },
+    });
+
+    expect(trace.didClipModelOutput).toBe(false);
+    expect(trace.totalDurationMs).toBe(20);
+    expect(trace.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "serialized_group_budget_exceeded",
+        severity: "warning",
+      }),
     ]);
   });
 
