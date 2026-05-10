@@ -82,4 +82,39 @@ describe("parallel simulation runner", () => {
       "after-a: completed; serializedAfter=safe-a",
     );
   });
+
+  it("keeps read-only jobs in the same group while conflicting proposal writes serialize", async () => {
+    const groups = planParallelSimulationGroups([
+      {
+        id: "scene-frame-read",
+        writeScopes: [],
+        run: () => "scene",
+      },
+      {
+        id: "actor-frame-read",
+        writeScopes: [],
+        run: () => "actor",
+      },
+      {
+        id: "proposal-a",
+        writeScopes: ["location:depot:item:ledger"],
+        run: () => "proposal-a",
+      },
+      {
+        id: "proposal-b",
+        writeScopes: ["location:depot"],
+        run: () => "proposal-b",
+      },
+    ]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups[0]?.jobs.map((job) => job.id)).toEqual([
+      "scene-frame-read",
+      "actor-frame-read",
+      "proposal-a",
+    ]);
+    expect(groups[0]?.writeScopes).toEqual(["location:depot:item:ledger"]);
+    expect(groups[1]?.jobs.map((job) => job.id)).toEqual(["proposal-b"]);
+    expect(groups[1]?.jobs[0]?.serializedAfterJobIds).toEqual(["proposal-a"]);
+  });
 });

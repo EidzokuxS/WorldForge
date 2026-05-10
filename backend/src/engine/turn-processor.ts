@@ -2042,6 +2042,9 @@ function logDueWorldWork(
     worldThreadExecutedCount: result.worldThreads.executed.length,
     worldThreadDeferredCount: result.worldThreads.deferred.length,
     worldThreadSkippedCount: result.worldThreads.skipped.length,
+    proposalPrepGroupCount: result.proposalPrepTrace.length,
+    proposalPrepSerializedFallbackCount: result.proposalPrepTrace
+      .reduce((total, group) => total + group.serializedFallbackCount, 0),
     durationMs,
   });
 }
@@ -2613,6 +2616,9 @@ async function* processTurnScenePlan(
       executed: preFrameDueWork.executed.length,
       deferred: preFrameDueWork.deferred.length,
       worldThreads: preFrameDueWork.worldThreads.executed.length,
+      proposalPrepGroupCount: preFrameDueWork.proposalPrepTrace.length,
+      proposalPrepSerializedFallbackCount: preFrameDueWork.proposalPrepTrace
+        .reduce((total, group) => total + group.serializedFallbackCount, 0),
     },
   });
   addTurnLatencyProposalEffects(latencyTrace, {
@@ -3125,6 +3131,7 @@ async function* processTurnScenePlan(
     maxOutputTokens: storytellerMaxTokens,
   });
   const actorPassEnded = Date.now();
+  const actorFrameRetrievalTrace = actorPass.parallelFrameRetrievalTrace ?? [];
   const actorParallelPrepTrace = actorPass.parallelPrepTrace ?? [];
   recordTurnLatencyStage(latencyTrace, {
     stage: "actor_reactions",
@@ -3134,9 +3141,25 @@ async function* processTurnScenePlan(
       scheduledCount: actorPass.schedule.decisions.length,
       decisionCount: actorPass.decisions.length,
       actionResultCount: actorPass.actionResults.length,
+      parallelFrameRetrievalGroupCount: actorFrameRetrievalTrace.length,
       parallelPrepGroupCount: actorParallelPrepTrace.length,
     },
   });
+  for (const group of actorFrameRetrievalTrace) {
+    recordParallelGroup(latencyTrace, {
+      groupId: `actor-frame-retrieval-${group.groupIndex + 1}`,
+      label: "actor frame retrieval",
+      startedAt: group.startedAt,
+      endedAt: group.endedAt,
+      jobCount: group.jobCount,
+      writeScopes: group.writeScopes,
+      serializedFallbackCount: group.serializedFallbackCount,
+      metadata: {
+        readOnly: true,
+        frameType: "ActorFrame",
+      },
+    });
+  }
   for (const group of actorParallelPrepTrace) {
     recordParallelGroup(latencyTrace, {
       groupId: `actor-prep-${group.groupIndex + 1}`,
@@ -3224,6 +3247,9 @@ async function* processTurnScenePlan(
       executed: preNarratorDueWork.executed.length,
       deferred: preNarratorDueWork.deferred.length,
       worldThreads: preNarratorDueWork.worldThreads.executed.length,
+      proposalPrepGroupCount: preNarratorDueWork.proposalPrepTrace.length,
+      proposalPrepSerializedFallbackCount: preNarratorDueWork.proposalPrepTrace
+        .reduce((total, group) => total + group.serializedFallbackCount, 0),
     },
   });
   addTurnLatencyProposalEffects(latencyTrace, {

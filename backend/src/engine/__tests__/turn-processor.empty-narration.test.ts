@@ -174,6 +174,8 @@ vi.mock("../actor-tools.js", () => ({
     schedule: { decisions: [] },
     decisions: [],
     actionResults: [],
+    parallelFrameRetrievalTrace: [],
+    parallelPrepTrace: [],
   })),
 }));
 
@@ -422,6 +424,7 @@ beforeEach(() => {
       deferred: [],
       skipped: [],
     },
+    proposalPrepTrace: [],
   });
   incrementTickMock.mockReturnValue(6);
   advanceCampaignTickMock.mockReturnValue(6);

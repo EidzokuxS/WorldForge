@@ -464,7 +464,29 @@ export async function applyMocks(): Promise<void> {
             { groupId: "gm-read", kind: "gm_read", durationMs: 9 },
             { groupId: "storyteller", kind: "storyteller", durationMs: 10 },
           ],
-          parallelGroups: [],
+          parallelGroups: [
+            {
+              groupId: "actor-frame-retrieval-1",
+              label: "actor frame retrieval",
+              durationMs: 5,
+              jobCount: 2,
+              writeScopes: [],
+              serializedFallbackCount: 0,
+              metadata: {
+                readOnly: true,
+                frameType: "ActorFrame",
+              },
+            },
+            {
+              groupId: "actor-prep-1",
+              label: "actor decision prep",
+              durationMs: 8,
+              jobCount: 1,
+              writeScopes: ["actor:npc-barkeep"],
+              serializedFallbackCount: 0,
+              metadata: {},
+            },
+          ],
           diagnostics: [],
           didClipModelOutput: false,
         });

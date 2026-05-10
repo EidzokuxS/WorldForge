@@ -215,6 +215,14 @@ describe("offscreen catch-up", () => {
 
     expect(result.executed).toEqual([]);
     expect(result.deferred).toHaveLength(1);
+    expect(result.proposalPrepTrace).toEqual([
+      expect.objectContaining({
+        groupIndex: 0,
+        jobCount: 1,
+        writeScopes: ["npc:npc-nearby:state", "location:loc-main:presence"],
+        serializedFallbackCount: 0,
+      }),
+    ]);
     expect(
       getDb()
         .select({ currentLocationId: npcs.currentLocationId })
@@ -240,6 +248,13 @@ describe("offscreen catch-up", () => {
     });
 
     expect(secondResult.deferred).toHaveLength(1);
+    expect(secondResult.proposalPrepTrace).toEqual([
+      expect.objectContaining({
+        jobCount: 1,
+        writeScopes: ["npc:npc-nearby:state", "location:loc-main:presence"],
+        serializedFallbackCount: 0,
+      }),
+    ]);
     expect(getDb().select().from(simulationProposals).all()).toHaveLength(1);
   });
 

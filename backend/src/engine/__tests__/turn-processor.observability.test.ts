@@ -260,6 +260,28 @@ describe("Turn observability — single turn seam coverage via REAL chat route",
     expect(latencyTrace?.didClipModelOutput).toBe(false);
     expect(latencyTrace?.serializedGroups?.length).toBeGreaterThanOrEqual(2);
     expect(Array.isArray(latencyTrace?.parallelGroups)).toBe(true);
+    expect(latencyTrace?.parallelGroups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          groupId: "actor-frame-retrieval-1",
+          label: "actor frame retrieval",
+          jobCount: 2,
+          writeScopes: [],
+          serializedFallbackCount: 0,
+          metadata: expect.objectContaining({
+            readOnly: true,
+            frameType: "ActorFrame",
+          }),
+        }),
+        expect.objectContaining({
+          groupId: "actor-prep-1",
+          label: "actor decision prep",
+          jobCount: 1,
+          writeScopes: ["actor:npc-barkeep"],
+          serializedFallbackCount: 0,
+        }),
+      ]),
+    );
     const latencyStages = new Map(
       (latencyTrace?.stages ?? []).map((stage) => [stage.stage, stage]),
     );

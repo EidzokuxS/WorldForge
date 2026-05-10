@@ -23,7 +23,10 @@ import {
   readWorldClock,
   type WorldClockState,
 } from "./living-world-authority.js";
-import { retrieveActorKnowledgeForFrame } from "./knowledge-retrieval.js";
+import {
+  retrieveActorKnowledgeForFrame,
+  type ActorKnowledgeRetrievalResult,
+} from "./knowledge-retrieval.js";
 import {
   scheduleKeyActorProcessesForTurn,
   type ActorScheduleDecision,
@@ -43,6 +46,7 @@ import {
   runParallelSimulationJobs,
   type ParallelSimulationRunTrace,
 } from "./parallel-simulation-runner.js";
+import { runFrameRetrievalJobs } from "./frame-retrieval-runner.js";
 
 const log = createLogger("actor-tools");
 
@@ -101,6 +105,7 @@ export interface RunRequiredActorDecisionPassResult {
   schedule: ScheduleKeyActorProcessesResult;
   decisions: ActorDecisionPassRecord[];
   actionResults: ExecutedScenePlanActionResult[];
+  parallelFrameRetrievalTrace: ParallelSimulationRunTrace[];
   parallelPrepTrace: ParallelSimulationRunTrace[];
 }
 
@@ -254,23 +259,17 @@ async function prepareActorDecision(input: {
   args: RunRequiredActorDecisionPassArgs;
   decision: ActorScheduleDecision;
   process: KeyActorProcess;
+  knowledge: ActorKnowledgeRetrievalResult;
 }): Promise<PreparedActorDecision> {
   const clockBefore = readWorldClock(input.args.campaignId);
-  const knowledge = retrieveActorKnowledgeForFrame({
-    campaignId: input.args.campaignId,
-    actorId: input.decision.actorId,
-    frame: input.args.sceneFrame,
-    worldVersion: clockBefore.worldVersion,
-    maxFacts: 12,
-  });
   const actorFrame = buildActorFrame({
     frame: input.args.sceneFrame,
     actorId: input.decision.actorId,
     worldVersion: clockBefore.worldVersion,
-    reports: knowledge.reports,
-    memories: knowledge.memories,
-    beliefs: knowledge.beliefs,
-    publicRecords: knowledge.publicRecords,
+    reports: input.knowledge.reports,
+    memories: input.knowledge.memories,
+    beliefs: input.knowledge.beliefs,
+    publicRecords: input.knowledge.publicRecords,
     legalTools: ACTOR_TURN_LEGAL_TOOLS,
     constraints: [
       `scheduler route: ${input.decision.route}`,
@@ -311,19 +310,82 @@ export async function runRequiredActorDecisionPass(
   const decisions: ActorDecisionPassRecord[] = [];
   const actionResults: ExecutedScenePlanActionResult[] = [];
   const requiredDecisions = requiredReservedDecisions(schedule);
+  const requiredDecisionProcesses = requiredDecisions.map((decision) => {
+    const process = processes.get(decision.actorId);
+    if (!process) {
+      throw new Error(`Required actor process disappeared before decision: ${decision.actorId}`);
+    }
+    return { decision, process };
+  });
+  const frameRetrievalRun = await runFrameRetrievalJobs(
+    requiredDecisionProcesses.map(({ decision }) => ({
+      id: `actor-frame:${decision.actorId}`,
+      label: `ActorFrame ${decision.actorName}`,
+      frameType: "ActorFrame",
+      viewerId: decision.actorId,
+      criticality: "L1",
+      scopeRefs: [
+        `actor:${decision.actorId}`,
+        ...(args.playerLocationId ? [`location:${args.playerLocationId}`] : []),
+        ...(args.playerSceneScopeId ? [`scene:${args.playerSceneScopeId}`] : []),
+      ],
+      run: () => {
+        const clockBefore = readWorldClock(args.campaignId);
+        return retrieveActorKnowledgeForFrame({
+          campaignId: args.campaignId,
+          actorId: decision.actorId,
+          frame: args.sceneFrame,
+          worldVersion: clockBefore.worldVersion,
+          maxFacts: 12,
+        });
+      },
+    })),
+  );
+  const knowledgeByActorId = new Map<string, ActorKnowledgeRetrievalResult>();
+  for (const result of frameRetrievalRun.results) {
+    const actorId = result.viewerId;
+    if (!actorId) {
+      throw new Error(`ActorFrame retrieval did not include a viewer id: ${result.jobId}`);
+    }
+    if (result.status === "failed") {
+      throw new Error(
+        `ActorFrame retrieval failed for ${actorId}: ${result.error}`,
+      );
+    }
+    knowledgeByActorId.set(actorId, result.value);
+  }
+
+  if (frameRetrievalRun.trace.length > 0) {
+    log.event("actor.required-pass.frame-retrieval", {
+      campaignId: args.campaignId,
+      groupCount: frameRetrievalRun.trace.length,
+      jobCount: requiredDecisions.length,
+      serializedFallbackCount: frameRetrievalRun.trace.reduce(
+        (total, group) => total + group.serializedFallbackCount,
+        0,
+      ),
+      groups: frameRetrievalRun.trace.map((group) => ({
+        groupIndex: group.groupIndex,
+        jobCount: group.jobCount,
+        durationMs: group.durationMs,
+        serializedFallbackCount: group.serializedFallbackCount,
+        writeScopes: group.writeScopes,
+      })),
+    });
+  }
 
   const preparedRun = await runParallelSimulationJobs(
-    requiredDecisions.map((decision) => {
-      const process = processes.get(decision.actorId);
-      if (!process) {
-        throw new Error(`Required actor process disappeared before decision: ${decision.actorId}`);
+    requiredDecisionProcesses.map(({ decision, process }) => {
+      const knowledge = knowledgeByActorId.get(decision.actorId);
+      if (!knowledge) {
+        throw new Error(`ActorFrame retrieval missing for ${decision.actorId}.`);
       }
       return {
         id: decision.actorId,
         label: decision.actorName,
         route: decision.route,
         writeScopes: decision.writeScopes,
-        run: () => prepareActorDecision({ args, decision, process }),
+        run: () => prepareActorDecision({ args, decision, process, knowledge }),
       };
     }),
   );
@@ -411,6 +473,7 @@ export async function runRequiredActorDecisionPass(
     schedule,
     decisions,
     actionResults,
+    parallelFrameRetrievalTrace: frameRetrievalRun.trace,
     parallelPrepTrace: preparedRun.trace,
   };
 }

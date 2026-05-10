@@ -178,11 +178,22 @@ export {
   runParallelSimulationJobs,
 } from "./parallel-simulation-runner.js";
 
+export {
+  runFrameRetrievalJobs,
+} from "./frame-retrieval-runner.js";
+
 export type {
   ParallelSimulationJob,
   ParallelSimulationJobResult,
   ParallelSimulationRunResult,
 } from "./parallel-simulation-runner.js";
+
+export type {
+  FrameRetrievalJob,
+  FrameRetrievalJobResult,
+  FrameRetrievalRunResult,
+  FrameRetrievalType,
+} from "./frame-retrieval-runner.js";
 
 export {
   createSimulationProposal,

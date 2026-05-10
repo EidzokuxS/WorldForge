@@ -610,6 +610,20 @@ describe("actor tool execution", () => {
     expect(result.decisions).toHaveLength(1);
     expect(result.actionResults).toHaveLength(1);
     expect(result.actionResults[0]?.result.success).toBe(true);
+    expect(result.parallelFrameRetrievalTrace).toEqual([
+      expect.objectContaining({
+        jobCount: 1,
+        writeScopes: [],
+        serializedFallbackCount: 0,
+      }),
+    ]);
+    expect(result.parallelPrepTrace).toEqual([
+      expect.objectContaining({
+        jobCount: 1,
+        writeScopes: ["npc:npc-key:state", "location:loc-a:presence"],
+        serializedFallbackCount: 0,
+      }),
+    ]);
     const processRow = getDb()
       .select()
       .from(actorProcessStates)

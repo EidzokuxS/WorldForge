@@ -28,6 +28,10 @@ import {
   type ResolveDueSimulationProposalsForScopeResult,
 } from "./simulation-proposal-watchdog.js";
 import { consumeActorWakeSignals } from "./actor-wake-signals.js";
+import {
+  planParallelSimulationGroups,
+  type ParallelSimulationRunTrace,
+} from "./parallel-simulation-runner.js";
 
 export type DueWorldWorkPhase = "pre_scene_frame" | "pre_narrator_packet";
 
@@ -51,6 +55,7 @@ export interface ResolveDueWorldWorkForScopeResult {
   deferred: DeferredActorWork[];
   skipped: ActorScheduleDecision[];
   worldThreads: ResolveDueWorldThreadWorkForScopeResult;
+  proposalPrepTrace: ParallelSimulationRunTrace[];
 }
 
 export interface ResolveDueWorldWorkWithProposalWatchdogResult
@@ -155,6 +160,36 @@ function queueDeferredActorDecision(input: {
   });
 }
 
+function buildDeferredActorProposalPrepTrace(
+  deferred: readonly DeferredActorWork[],
+): ParallelSimulationRunTrace[] {
+  if (deferred.length === 0) {
+    return [];
+  }
+
+  const startedAt = Date.now();
+  const groups = planParallelSimulationGroups(
+    deferred.map((item) => ({
+      id: item.decision.actorId,
+      label: item.decision.actorName,
+      route: item.decision.route,
+      writeScopes: item.decision.writeScopes,
+      run: () => undefined,
+    })),
+  );
+  const endedAt = Date.now();
+
+  return groups.map((group) => ({
+    groupIndex: group.groupIndex,
+    startedAt,
+    endedAt,
+    durationMs: Math.max(0, endedAt - startedAt),
+    jobCount: group.jobs.length,
+    writeScopes: group.writeScopes,
+    serializedFallbackCount: group.jobs.filter((job) => job.serializedAfterJobIds.length > 0).length,
+  }));
+}
+
 export function resolveDueWorldWorkForScope(
   input: ResolveDueWorldWorkForScopeInput,
 ): ResolveDueWorldWorkForScopeResult {
@@ -226,6 +261,7 @@ export function resolveDueWorldWorkForScope(
     deferred,
     skipped,
     worldThreads,
+    proposalPrepTrace: buildDeferredActorProposalPrepTrace(deferred),
   };
 }
 

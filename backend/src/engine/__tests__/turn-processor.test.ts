@@ -459,6 +459,7 @@ function setupMocks(options: {
       deferred: [],
       skipped: [],
     },
+    proposalPrepTrace: [],
   });
   resolveDueWorldThreadWorkForScopeMock.mockReturnValue({
     executed: [],
@@ -469,6 +470,8 @@ function setupMocks(options: {
     actionResults: [],
     schedule: { decisions: [] },
     decisions: [],
+    parallelFrameRetrievalTrace: [],
+    parallelPrepTrace: [],
   });
 
   (advanceCampaignTick as Mock).mockReturnValue(6);
@@ -1450,6 +1453,7 @@ describe("processTurn", () => {
         deferred: [],
         skipped: [],
       },
+      proposalPrepTrace: [],
     });
     resolveDueWorldThreadWorkForScopeMock.mockReturnValue({
       executed: [],
@@ -1460,6 +1464,8 @@ describe("processTurn", () => {
       actionResults: [],
       schedule: { decisions: [] },
       decisions: [],
+      parallelFrameRetrievalTrace: [],
+      parallelPrepTrace: [],
     });
     // Default: no movement detected
     vi.mocked(safeGenerateObject).mockResolvedValue({ object: { isMovement: false, destination: null } } as never);
