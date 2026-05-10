@@ -1,0 +1,360 @@
+{
+  "campaignId": "phase-91-proposal-backlog-route",
+  "worldClock": {
+    "campaignId": "phase-91-proposal-backlog-route",
+    "worldVersion": 4,
+    "worldTimeMinutes": 182,
+    "currentTick": 182,
+    "updatedAt": 1778411149116
+  },
+  "watchdogResult": {
+    "selected": [
+      "526e9482-1df2-4b86-bc5c-d8c6d74e86a4",
+      "ef0033b7-d989-4d11-b3df-07d7b9129f7b"
+    ],
+    "executed": [
+      {
+        "status": "committed",
+        "proposalId": "526e9482-1df2-4b86-bc5c-d8c6d74e86a4",
+        "proposalType": "phase_91_committed_surface",
+        "disposition": "committed",
+        "committedWorldVersion": 4,
+        "toolResults": [
+          {
+            "toolName": "add_chronicle_entry",
+            "result": {
+              "success": true,
+              "result": {
+                "entryId": "45957906-cbce-410c-b0f4-e977abecf53e"
+              },
+              "status": "success",
+              "authority": {
+                "toolResultId": "05a0e095-f78e-431a-9ed2-4fe47028923b",
+                "campaignId": "phase-91-proposal-backlog-route",
+                "sourceEntity": {
+                  "type": "system",
+                  "id": "phase_91_committed_surface"
+                },
+                "baseWorldVersion": 1,
+                "resultWorldVersion": 2,
+                "worldTimeMinutes": 181,
+                "elapsedWorldTimeMinutes": 1,
+                "stateDeltaRefs": [
+                  "45957906-cbce-410c-b0f4-e977abecf53e"
+                ],
+                "eventRefs": [],
+                "witnesses": [],
+                "knowledgeOutputs": [],
+                "visibilityOutputs": [],
+                "resources": []
+              }
+            }
+          }
+        ],
+        "authorityTraceIds": [
+          "05a0e095-f78e-431a-9ed2-4fe47028923b"
+        ],
+        "sourceJobId": "294c8a80-b3c5-4109-8568-747851af818b",
+        "rebasedFromWorldVersion": 0
+      },
+      {
+        "status": "terminal",
+        "proposalId": "ef0033b7-d989-4d11-b3df-07d7b9129f7b",
+        "proposalType": "phase_91_invalid_terminal",
+        "disposition": "rejected_invalid",
+        "reason": "invalid_tool_args:add_tag:Invalid option: expected one of \"player\"|\"npc\"|\"location\"|\"item\"|\"faction\"; Invalid input: expected string, received undefined",
+        "sourceJobId": "87e850f2-752b-4d6e-9d47-732d24a460d7",
+        "rebasedFromWorldVersion": 0
+      }
+    ],
+    "skipped": []
+  },
+  "proposals": [
+    {
+      "id": "526e9482-1df2-4b86-bc5c-d8c6d74e86a4",
+      "proposalType": "phase_91_committed_surface",
+      "status": "committed",
+      "proposalDisposition": "committed",
+      "dispositionReason": "intended_tools_executed",
+      "committedWorldVersion": 4,
+      "lifecycleMetadata": {
+        "preflight": {
+          "baseWorldVersion": 1,
+          "currentWorldVersion": 1,
+          "currentWorldTimeMinutes": 180,
+          "writeScopes": [
+            "world:event",
+            "location:phase-91-market:event"
+          ],
+          "disposition": "ready_to_commit",
+          "reason": "proposal_ready_to_commit"
+        },
+        "intendedTools": [
+          {
+            "name": "add_chronicle_entry",
+            "args": {
+              "text": "A sealed-cart rumor becomes part of the campaign chronicle."
+            }
+          }
+        ],
+        "phase": "watchdog",
+        "surfaceSignal": {
+          "policy": "rumor",
+          "summary": "Couriers trade a source-backed rumor about sealed carts leaving at dawn.",
+          "threadId": "96ba041e-6017-4738-833c-48fb803d25b3",
+          "eventId": "d682d84f-d10a-4b68-a960-fee473c00a2b",
+          "locationEventCreated": true
+        },
+        "toolResults": [
+          {
+            "toolName": "add_chronicle_entry",
+            "success": true,
+            "authority": {
+              "toolResultId": "05a0e095-f78e-431a-9ed2-4fe47028923b",
+              "campaignId": "phase-91-proposal-backlog-route",
+              "sourceEntity": {
+                "type": "system",
+                "id": "phase_91_committed_surface"
+              },
+              "baseWorldVersion": 1,
+              "resultWorldVersion": 2,
+              "worldTimeMinutes": 181,
+              "elapsedWorldTimeMinutes": 1,
+              "stateDeltaRefs": [
+                "45957906-cbce-410c-b0f4-e977abecf53e"
+              ],
+              "eventRefs": [],
+              "witnesses": [],
+              "knowledgeOutputs": [],
+              "visibilityOutputs": [],
+              "resources": []
+            }
+          }
+        ],
+        "rebasedFromWorldVersion": 0
+      }
+    },
+    {
+      "id": "ef0033b7-d989-4d11-b3df-07d7b9129f7b",
+      "proposalType": "phase_91_invalid_terminal",
+      "status": "rejected",
+      "proposalDisposition": "rejected_invalid",
+      "dispositionReason": "invalid_tool_args:add_tag:Invalid option: expected one of \"player\"|\"npc\"|\"location\"|\"item\"|\"faction\"; Invalid input: expected string, received undefined",
+      "committedWorldVersion": null,
+      "lifecycleMetadata": {
+        "preflight": {
+          "baseWorldVersion": 4,
+          "currentWorldVersion": 4,
+          "currentWorldTimeMinutes": 182,
+          "writeScopes": [
+            "world:event",
+            "location:phase-91-market:event"
+          ],
+          "disposition": "ready_to_commit",
+          "reason": "proposal_ready_to_commit"
+        },
+        "intendedTools": [
+          {
+            "name": "add_tag",
+            "args": {
+              "entityName": "Mira"
+            },
+            "reason": "Invalid fixture intentionally omits entityType and tag."
+          }
+        ],
+        "phase": "watchdog"
+      }
+    }
+  ],
+  "jobs": [
+    {
+      "id": "294c8a80-b3c5-4109-8568-747851af818b",
+      "jobType": "phase_91_committed_surface",
+      "status": "completed",
+      "resultWorldVersion": 4,
+      "canceledReason": null
+    },
+    {
+      "id": "87e850f2-752b-4d6e-9d47-732d24a460d7",
+      "jobType": "phase_91_invalid_terminal",
+      "status": "failed",
+      "resultWorldVersion": null,
+      "canceledReason": "invalid_tool_args:add_tag:Invalid option: expected one of \"player\"|\"npc\"|\"location\"|\"item\"|\"faction\"; Invalid input: expected string, received undefined"
+    }
+  ],
+  "counts": {
+    "proposals": 2,
+    "committedProposals": 1,
+    "terminalNonCommitProposals": 1,
+    "authorityTraces": 4,
+    "chronicleRows": 1,
+    "worldThreads": 1,
+    "worldThreadEvents": 1,
+    "locationRecentEvents": 1,
+    "surfaceSignals": 1
+  },
+  "surfaceSignals": [
+    {
+      "id": "d682d84f-d10a-4b68-a960-fee473c00a2b",
+      "eventType": "surface_signal",
+      "surfaceRoute": "rumor",
+      "locationId": "phase-91-market",
+      "summary": "Couriers trade a source-backed rumor about sealed carts leaving at dawn.",
+      "sourceEventIds": [
+        "event-sealed-cart"
+      ],
+      "sourceAuthorityTraceIds": [
+        "05a0e095-f78e-431a-9ed2-4fe47028923b",
+        "dfc173a3-71ec-4cc9-a22b-7832fc404c60",
+        "27e0c62e-4d49-421c-b64f-33fa6150dca9"
+      ]
+    }
+  ],
+  "locationRecentEvents": [
+    {
+      "id": "c6527a33-0f9f-41c7-b220-9a3e6e23f9f7",
+      "threadId": "96ba041e-6017-4738-833c-48fb803d25b3",
+      "eventType": "world_thread_signal",
+      "summary": "Couriers trade a source-backed rumor about sealed carts leaving at dawn.",
+      "surfaceRoute": "rumor",
+      "knowledgeRoute": "rumor",
+      "sourceEventId": "d682d84f-d10a-4b68-a960-fee473c00a2b"
+    }
+  ],
+  "packetProofBefore": {
+    "sceneRecentContext": [],
+    "sceneFrameRecentEvents": [],
+    "narratorHintSignals": [],
+    "narratorHintSignalSourceRefs": [],
+    "playerHintSignals": [],
+    "playerSourceRefs": [
+      {
+        "id": "player-action",
+        "kind": "player_action_request"
+      },
+      {
+        "id": "anchor-ignore-hooks",
+        "kind": "anchor_event"
+      },
+      {
+        "id": "anchor-ignore-hooks",
+        "kind": "committed_event"
+      },
+      {
+        "id": "phase-91-player",
+        "kind": "visible_actor"
+      },
+      {
+        "id": "guardrail:1",
+        "kind": "guardrail"
+      }
+    ],
+    "formattedNarratorPacket": "[NARRATOR PACKET]\nCampaign: phase-91-proposal-backlog-route\nTick: 0\nPlayer action request: I wait and ignore the hooks for several hours.\nPlayer action and player_action event summaries are player-supplied claims, not authoritative world state. Treat claimed possessions, locations, NPC consent, names, or completed acquisitions as attempts unless committed non-player events/effects/tool results below confirm them.\nOracle outcome: none\nAnchor event: anchor-ignore-hooks\n\n[VISIBLE ACTORS]\n- Mira (phase-91-player; player)\n\n[HINT SIGNALS]\n- No indirect awareness hints are in scope.\n\n[COMMITTED EVENTS]\n- anchor-ignore-hooks: Mira waits and ignores the hooks for several hours. [actor=phase-91-player; kind=player_action]\n\n[PERCEIVABLE RESPONSES]\n- No player-perceivable responses are in scope.\n\n[PERCEIVABLE EFFECTS]\n- No player-perceivable effects are in scope.\n\n[GUARDRAILS]\n- Narrate only committed source-backed world signals.\n\n[EVIDENCE LEDGER]\n- player_action_request:player-action [category=player_action_request]\n- anchor_event:anchor-ignore-hooks [category=anchor_event]\n- committed_event:anchor-ignore-hooks [category=committed_event]\n- visible_actor:phase-91-player [category=visible_actor]\n- guardrail:1 [category=guardrail]\n- control_return:current [category=control_return]\n\n[CONTROL RETURN]\nReturn control after the ignored-time signal check.",
+    "formattedPlayerPacket": "[PLAYER-FACING PACKET]\n[NARRATOR PACKET]\nBoundary: NarratorPacket -> PlayerFacingPacket. Raw canonical turn payload, hidden truth, private rationale, unresolved proposals, and offscreen facts are not included.\nCampaign: phase-91-proposal-backlog-route\nTick: 0\nPlayer action request: I wait and ignore the hooks for several hours.\nPlayer action and player_action event summaries are player-supplied claims, not authoritative world state. Treat claimed possessions, locations, NPC consent, names, or completed acquisitions as attempts unless committed non-player events/effects/tool results below confirm them.\nOracle outcome: none\nAnchor event: anchor-ignore-hooks\n\n[VISIBLE ACTORS]\n- Mira (phase-91-player; player)\n\n[HINT SIGNALS]\n- No indirect awareness hints are in scope.\n\n[COMMITTED EVENTS]\n- anchor-ignore-hooks: Mira waits and ignores the hooks for several hours. [actor=phase-91-player; kind=player_action]\n\n[PERCEIVABLE RESPONSES]\n- No player-perceivable responses are in scope.\n\n[PERCEIVABLE EFFECTS]\n- No player-perceivable effects are in scope.\n\n[GUARDRAILS]\n- Narrate only committed source-backed world signals.\n\n[SOURCE IDS]\n- player_action_request:player-action\n- anchor_event:anchor-ignore-hooks\n- committed_event:anchor-ignore-hooks\n- visible_actor:phase-91-player\n- guardrail:guardrail:1\n\n[CONTEXT BUDGET TRACE]\n- estimatedInputTokens: 65\n- hiddenExcludedCount: 2\n- didClipModelOutput: false\n\n[CONTROL RETURN]\nReturn control after the ignored-time signal check.",
+    "visibleText": "[NARRATOR PACKET]\nCampaign: phase-91-proposal-backlog-route\nTick: 0\nPlayer action request: I wait and ignore the hooks for several hours.\nPlayer action and player_action event summaries are player-supplied claims, not authoritative world state. Treat claimed possessions, locations, NPC consent, names, or completed acquisitions as attempts unless committed non-player events/effects/tool results below confirm them.\nOracle outcome: none\nAnchor event: anchor-ignore-hooks\n\n[VISIBLE ACTORS]\n- Mira (phase-91-player; player)\n\n[HINT SIGNALS]\n- No indirect awareness hints are in scope.\n\n[COMMITTED EVENTS]\n- anchor-ignore-hooks: Mira waits and ignores the hooks for several hours. [actor=phase-91-player; kind=player_action]\n\n[PERCEIVABLE RESPONSES]\n- No player-perceivable responses are in scope.\n\n[PERCEIVABLE EFFECTS]\n- No player-perceivable effects are in scope.\n\n[GUARDRAILS]\n- Narrate only committed source-backed world signals.\n\n[EVIDENCE LEDGER]\n- player_action_request:player-action [category=player_action_request]\n- anchor_event:anchor-ignore-hooks [category=anchor_event]\n- committed_event:anchor-ignore-hooks [category=committed_event]\n- visible_actor:phase-91-player [category=visible_actor]\n- guardrail:1 [category=guardrail]\n- control_return:current [category=control_return]\n\n[CONTROL RETURN]\nReturn control after the ignored-time signal check.\n[PLAYER-FACING PACKET]\n[NARRATOR PACKET]\nBoundary: NarratorPacket -> PlayerFacingPacket. Raw canonical turn payload, hidden truth, private rationale, unresolved proposals, and offscreen facts are not included.\nCampaign: phase-91-proposal-backlog-route\nTick: 0\nPlayer action request: I wait and ignore the hooks for several hours.\nPlayer action and player_action event summaries are player-supplied claims, not authoritative world state. Treat claimed possessions, locations, NPC consent, names, or completed acquisitions as attempts unless committed non-player events/effects/tool results below confirm them.\nOracle outcome: none\nAnchor event: anchor-ignore-hooks\n\n[VISIBLE ACTORS]\n- Mira (phase-91-player; player)\n\n[HINT SIGNALS]\n- No indirect awareness hints are in scope.\n\n[COMMITTED EVENTS]\n- anchor-ignore-hooks: Mira waits and ignores the hooks for several hours. [actor=phase-91-player; kind=player_action]\n\n[PERCEIVABLE RESPONSES]\n- No player-perceivable responses are in scope.\n\n[PERCEIVABLE EFFECTS]\n- No player-perceivable effects are in scope.\n\n[GUARDRAILS]\n- Narrate only committed source-backed world signals.\n\n[SOURCE IDS]\n- player_action_request:player-action\n- anchor_event:anchor-ignore-hooks\n- committed_event:anchor-ignore-hooks\n- visible_actor:phase-91-player\n- guardrail:guardrail:1\n\n[CONTEXT BUDGET TRACE]\n- estimatedInputTokens: 65\n- hiddenExcludedCount: 2\n- didClipModelOutput: false\n\n[CONTROL RETURN]\nReturn control after the ignored-time signal check.",
+    "leaks": {
+      "pendingSentinel": false,
+      "invalidSentinel": false,
+      "hiddenCause": false
+    }
+  },
+  "packetProofAfter": {
+    "sceneRecentContext": [
+      {
+        "tick": 182,
+        "summary": "Couriers trade a source-backed rumor about sealed carts leaving at dawn.",
+        "source": "world_thread_signal"
+      }
+    ],
+    "sceneFrameRecentEvents": [
+      {
+        "id": "c6527a33-0f9f-41c7-b220-9a3e6e23f9f7",
+        "tick": 182,
+        "summary": "Couriers trade a source-backed rumor about sealed carts leaving at dawn.",
+        "source": "world_thread_signal",
+        "actorIds": [],
+        "perceivableByPlayer": true
+      }
+    ],
+    "narratorHintSignals": [
+      "Couriers trade a source-backed rumor about sealed carts leaving at dawn."
+    ],
+    "narratorHintSignalSourceRefs": [
+      {
+        "id": "c6527a33-0f9f-41c7-b220-9a3e6e23f9f7",
+        "kind": "world_thread_signal"
+      }
+    ],
+    "playerHintSignals": [
+      "Couriers trade a source-backed rumor about sealed carts leaving at dawn."
+    ],
+    "playerSourceRefs": [
+      {
+        "id": "player-action",
+        "kind": "player_action_request"
+      },
+      {
+        "id": "anchor-ignore-hooks",
+        "kind": "anchor_event"
+      },
+      {
+        "id": "anchor-ignore-hooks",
+        "kind": "committed_event"
+      },
+      {
+        "id": "phase-91-player",
+        "kind": "visible_actor"
+      },
+      {
+        "id": "c6527a33-0f9f-41c7-b220-9a3e6e23f9f7",
+        "kind": "world_thread_signal"
+      },
+      {
+        "id": "guardrail:1",
+        "kind": "guardrail"
+      }
+    ],
+    "formattedNarratorPacket": "[NARRATOR PACKET]\nCampaign: phase-91-proposal-backlog-route\nTick: 182\nPlayer action request: I wait and ignore the hooks for several hours.\nPlayer action and player_action event summaries are player-supplied claims, not authoritative world state. Treat claimed possessions, locations, NPC consent, names, or completed acquisitions as attempts unless committed non-player events/effects/tool results below confirm them.\nOracle outcome: none\nAnchor event: anchor-ignore-hooks\n\n[VISIBLE ACTORS]\n- Mira (phase-91-player; player)\n\n[HINT SIGNALS]\n- Couriers trade a source-backed rumor about sealed carts leaving at dawn.\n\n[COMMITTED EVENTS]\n- anchor-ignore-hooks: Mira waits and ignores the hooks for several hours. [actor=phase-91-player; kind=player_action]\n\n[PERCEIVABLE RESPONSES]\n- No player-perceivable responses are in scope.\n\n[PERCEIVABLE EFFECTS]\n- No player-perceivable effects are in scope.\n\n[GUARDRAILS]\n- Narrate only committed source-backed world signals.\n\n[EVIDENCE LEDGER]\n- player_action_request:player-action [category=player_action_request]\n- anchor_event:anchor-ignore-hooks [category=anchor_event]\n- committed_event:anchor-ignore-hooks [category=committed_event]\n- visible_actor:phase-91-player [category=visible_actor]\n- world_thread_signal:c6527a33-0f9f-41c7-b220-9a3e6e23f9f7 [category=world_thread_signal]\n- guardrail:1 [category=guardrail]\n- control_return:current [category=control_return]\n\n[CONTROL RETURN]\nReturn control after the ignored-time signal check.",
+    "formattedPlayerPacket": "[PLAYER-FACING PACKET]\n[NARRATOR PACKET]\nBoundary: NarratorPacket -> PlayerFacingPacket. Raw canonical turn payload, hidden truth, private rationale, unresolved proposals, and offscreen facts are not included.\nCampaign: phase-91-proposal-backlog-route\nTick: 182\nPlayer action request: I wait and ignore the hooks for several hours.\nPlayer action and player_action event summaries are player-supplied claims, not authoritative world state. Treat claimed possessions, locations, NPC consent, names, or completed acquisitions as attempts unless committed non-player events/effects/tool results below confirm them.\nOracle outcome: none\nAnchor event: anchor-ignore-hooks\n\n[VISIBLE ACTORS]\n- Mira (phase-91-player; player)\n\n[HINT SIGNALS]\n- Couriers trade a source-backed rumor about sealed carts leaving at dawn.\n\n[COMMITTED EVENTS]\n- anchor-ignore-hooks: Mira waits and ignores the hooks for several hours. [actor=phase-91-player; kind=player_action]\n\n[PERCEIVABLE RESPONSES]\n- No player-perceivable responses are in scope.\n\n[PERCEIVABLE EFFECTS]\n- No player-perceivable effects are in scope.\n\n[GUARDRAILS]\n- Narrate only committed source-backed world signals.\n\n[SOURCE IDS]\n- player_action_request:player-action\n- anchor_event:anchor-ignore-hooks\n- committed_event:anchor-ignore-hooks\n- visible_actor:phase-91-player\n- world_thread_signal:c6527a33-0f9f-41c7-b220-9a3e6e23f9f7\n- guardrail:guardrail:1\n\n[CONTEXT BUDGET TRACE]\n- estimatedInputTokens: 83\n- hiddenExcludedCount: 2\n- didClipModelOutput: false\n\n[CONTROL RETURN]\nReturn control after the ignored-time signal check.",
+    "visibleText": "Couriers trade a source-backed rumor about sealed carts leaving at dawn.\nCouriers trade a source-backed rumor about sealed carts leaving at dawn.\nCouriers trade a source-backed rumor about sealed carts leaving at dawn.\nCouriers trade a source-backed rumor about sealed carts leaving at dawn.\n[NARRATOR PACKET]\nCampaign: phase-91-proposal-backlog-route\nTick: 182\nPlayer action request: I wait and ignore the hooks for several hours.\nPlayer action and player_action event summaries are player-supplied claims, not authoritative world state. Treat claimed possessions, locations, NPC consent, names, or completed acquisitions as attempts unless committed non-player events/effects/tool results below confirm them.\nOracle outcome: none\nAnchor event: anchor-ignore-hooks\n\n[VISIBLE ACTORS]\n- Mira (phase-91-player; player)\n\n[HINT SIGNALS]\n- Couriers trade a source-backed rumor about sealed carts leaving at dawn.\n\n[COMMITTED EVENTS]\n- anchor-ignore-hooks: Mira waits and ignores the hooks for several hours. [actor=phase-91-player; kind=player_action]\n\n[PERCEIVABLE RESPONSES]\n- No player-perceivable responses are in scope.\n\n[PERCEIVABLE EFFECTS]\n- No player-perceivable effects are in scope.\n\n[GUARDRAILS]\n- Narrate only committed source-backed world signals.\n\n[EVIDENCE LEDGER]\n- player_action_request:player-action [category=player_action_request]\n- anchor_event:anchor-ignore-hooks [category=anchor_event]\n- committed_event:anchor-ignore-hooks [category=committed_event]\n- visible_actor:phase-91-player [category=visible_actor]\n- world_thread_signal:c6527a33-0f9f-41c7-b220-9a3e6e23f9f7 [category=world_thread_signal]\n- guardrail:1 [category=guardrail]\n- control_return:current [category=control_return]\n\n[CONTROL RETURN]\nReturn control after the ignored-time signal check.\nCouriers trade a source-backed rumor about sealed carts leaving at dawn.\n[PLAYER-FACING PACKET]\n[NARRATOR PACKET]\nBoundary: NarratorPacket -> PlayerFacingPacket. Raw canonical turn payload, hidden truth, private rationale, unresolved proposals, and offscreen facts are not included.\nCampaign: phase-91-proposal-backlog-route\nTick: 182\nPlayer action request: I wait and ignore the hooks for several hours.\nPlayer action and player_action event summaries are player-supplied claims, not authoritative world state. Treat claimed possessions, locations, NPC consent, names, or completed acquisitions as attempts unless committed non-player events/effects/tool results below confirm them.\nOracle outcome: none\nAnchor event: anchor-ignore-hooks\n\n[VISIBLE ACTORS]\n- Mira (phase-91-player; player)\n\n[HINT SIGNALS]\n- Couriers trade a source-backed rumor about sealed carts leaving at dawn.\n\n[COMMITTED EVENTS]\n- anchor-ignore-hooks: Mira waits and ignores the hooks for several hours. [actor=phase-91-player; kind=player_action]\n\n[PERCEIVABLE RESPONSES]\n- No player-perceivable responses are in scope.\n\n[PERCEIVABLE EFFECTS]\n- No player-perceivable effects are in scope.\n\n[GUARDRAILS]\n- Narrate only committed source-backed world signals.\n\n[SOURCE IDS]\n- player_action_request:player-action\n- anchor_event:anchor-ignore-hooks\n- committed_event:anchor-ignore-hooks\n- visible_actor:phase-91-player\n- world_thread_signal:c6527a33-0f9f-41c7-b220-9a3e6e23f9f7\n- guardrail:guardrail:1\n\n[CONTEXT BUDGET TRACE]\n- estimatedInputTokens: 83\n- hiddenExcludedCount: 2\n- didClipModelOutput: false\n\n[CONTROL RETURN]\nReturn control after the ignored-time signal check.",
+    "leaks": {
+      "pendingSentinel": false,
+      "invalidSentinel": false,
+      "hiddenCause": false
+    }
+  },
+  "metrics": {
+    "campaignId": "phase-91-proposal-backlog-route",
+    "sinceWorldTimeMinutes": null,
+    "generatedAt": 1778411149126,
+    "metrics": {
+      "proposal_commit_ratio": 0.5,
+      "proposal_terminal_state_ratio": 1,
+      "surface_signal_coverage": 1,
+      "stale_job_count": 0
+    },
+    "counts": {
+      "totalProposals": 2,
+      "pending": 0,
+      "committed": 1,
+      "rejected": 1,
+      "canceled": 0,
+      "expired": 0,
+      "deferred": 0,
+      "superseded": 0,
+      "needsRebase": 0,
+      "needsActorRetry": 0,
+      "meaningfulCommitted": 1,
+      "discoverableSurface": 1,
+      "explicitNoSurface": 0,
+      "missingSurface": 0,
+      "worldThreadEvents": 1,
+      "locationRecentEvents": 1,
+      "staleJobs": 0
+    },
+    "defects": {
+      "missingSurfaceProposalIds": [],
+      "staleJobIds": []
+    }
+  }
+}
