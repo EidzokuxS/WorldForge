@@ -209,6 +209,7 @@ describe("bridge candidate lookup tools", () => {
 
   it("inspects visible and player-known facts while denying private facts without leaked names", () => {
     const context = createContext();
+    const baseWorldVersion = context.authority?.baseWorldVersion;
 
     const visible = executeBridgeCandidateTool(
       "inspect_known_fact",
@@ -228,6 +229,7 @@ describe("bridge candidate lookup tools", () => {
     expect(hidden.error).toBe("no_player_visible_or_known_fact");
     expect(JSON.stringify(hidden)).not.toContain("Shadow Broker");
     expect(JSON.stringify(hidden)).not.toContain("private vault");
+    expect(context.authority?.baseWorldVersion).toBe(baseWorldVersion);
   });
 
   it("checks only visible legal routes and does not mutate authority state", () => {
@@ -258,5 +260,47 @@ describe("bridge candidate lookup tools", () => {
     expect(denied.success).toBe(false);
     expect(JSON.stringify(denied)).not.toContain("Secret Vault");
     expect(context.authority?.baseWorldVersion).toBe(baseWorldVersion);
+  });
+
+  it("supports the tourist courier route/POI lookup sequence without exact-ID target prompts", () => {
+    const context = createContext();
+
+    const navigation = executeBridgeCandidateTool(
+      "list_navigation_options",
+      { maxResults: 4 },
+      context,
+    );
+    const location = executeBridgeCandidateTool(
+      "find_location_candidates",
+      { query: "logical route East Tea Lane", tags: ["tea"], maxResults: 4 },
+      context,
+    );
+    const poi = executeBridgeCandidateTool(
+      "find_poi_candidates",
+      { query: "чайная лавка", tags: ["tea", "shop"], includePotential: true, maxResults: 4 },
+      context,
+    );
+    const visibleFact = executeBridgeCandidateTool(
+      "inspect_known_fact",
+      { query: "public tea stall", maxResults: 2 },
+      context,
+    );
+    const route = executeBridgeCandidateTool(
+      "check_route",
+      { actorRef: "Player", destinationRef: "East Tea Lane", mode: "walk" },
+      context,
+    );
+
+    expect(navigation.success).toBe(true);
+    expect(location.success).toBe(true);
+    expect(poi.success).toBe(true);
+    expect(visibleFact.success).toBe(true);
+    expect(route.success).toBe(true);
+    expect(JSON.stringify([navigation, location, poi, visibleFact, route])).toContain("East Tea Lane");
+    expect(JSON.stringify(poi)).toContain("Painted Tea Sign");
+    expect(JSON.stringify(visibleFact)).toContain("player_known");
+    expect(JSON.stringify([navigation, location, poi, visibleFact, route])).not.toMatch(
+      /which connected location|exact route id|backend target/i,
+    );
   });
 });

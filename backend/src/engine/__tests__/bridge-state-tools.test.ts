@@ -217,6 +217,65 @@ describe("bridge state tool constraints", () => {
     }
   });
 
+  it("validates the tourist courier movement plus constrained tea-stall creation sequence", () => {
+    const context = createContext();
+
+    const move = prepareMoveActorInput({
+      actorRef: "Iria",
+      destinationRef: "Tea Lane",
+      routeId: "route-tea-lane",
+      evidenceRefs: ["route-tea-lane"],
+      intentSummary: "иду дальше по логичному маршруту и ищу чайную лавку",
+    }, context);
+    const teaStall = prepareCreateMinorPoiInput({
+      areaRef: "current_location",
+      poiType: "tea_stall",
+      name: "Lantern Tea Stall",
+      visibility: "public",
+      persistence: "scene_local",
+      reason: "A public market route supports ordinary tea service.",
+    }, context);
+    const search = buildStartSearchResult({
+      actorRef: "Iria",
+      query: "чайная лавка",
+      scope: "current_location",
+      method: "follow_public_route",
+      intentSummary: "Look for public tea service after taking the route.",
+    }, context);
+    const hiddenTeaVault = prepareCreateMinorPoiInput({
+      areaRef: "current_location",
+      poiType: "tea_stall",
+      name: "Hidden Faction Tea Vault",
+      visibility: "public",
+      persistence: "scene_local",
+      reason: "Create a secret faction headquarters.",
+    }, context);
+
+    expect(move.ok).toBe(true);
+    expect(teaStall.ok).toBe(true);
+    expect(search.ok).toBe(true);
+    expect(hiddenTeaVault.ok).toBe(false);
+    if (move.ok) {
+      expect(move.value.targetLocationName).toBe("loc-tea-lane");
+      expect(move.value.routeEvidenceRefs).toContain("route-tea-lane");
+    }
+    if (teaStall.ok) {
+      expect(teaStall.value).toMatchObject({
+        poiType: "tea_stall",
+        connectedToName: "current_location",
+        visibility: "public",
+      });
+    }
+    if (search.ok) {
+      expect(search.value).toMatchObject({
+        kind: "search_started",
+        found: false,
+        discoveryCreated: false,
+        targetTruth: "unconfirmed",
+      });
+    }
+  });
+
   it("budgets repeated equivalent minor POI and scene extra creation", () => {
     expect(dynamicCreationBudgetKey({
       toolName: "create_minor_poi",
