@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  addLivingWorldProposalMetricsToTrace,
   addTurnLatencyProposalEffects,
   createTurnLatencyTrace,
   finalizeTurnLatencyTrace,
@@ -124,5 +125,46 @@ describe("turn latency trace", () => {
       "serialized_group_budget_exceeded",
       "missing_stage",
     ]);
+  });
+
+  it("merges living-world proposal metrics into proposal effects without changing latency semantics", () => {
+    const trace = createTurnLatencyTrace({
+      turnId: "turn-3",
+      campaignId: "campaign-1",
+      tick: 9,
+      startedAt: 10,
+    });
+
+    addLivingWorldProposalMetricsToTrace(trace, {
+      counts: {
+        totalProposals: 8,
+        pending: 2,
+        committed: 3,
+        rejected: 1,
+        canceled: 0,
+        expired: 1,
+        deferred: 2,
+        superseded: 1,
+        needsRebase: 1,
+        needsActorRetry: 0,
+        meaningfulCommitted: 3,
+        discoverableSurface: 2,
+        explicitNoSurface: 1,
+        missingSurface: 0,
+        worldThreadEvents: 2,
+        locationRecentEvents: 2,
+        staleJobs: 1,
+      },
+    });
+
+    expect(trace.proposalEffects).toMatchObject({
+      queued: 2,
+      committed: 3,
+      rejected: 1,
+      deferred: 2,
+    });
+    expect(trace.totalDurationMs).toBeUndefined();
+    expect(trace.stages).toEqual([]);
+    expect(trace.didClipModelOutput).toBe(false);
   });
 });

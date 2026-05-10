@@ -1,3 +1,5 @@
+import type { LivingWorldProposalMetrics } from "./living-world-metrics.js";
+
 export interface TurnLatencyTraceStage {
   stage: string;
   startedAt: number;
@@ -300,6 +302,18 @@ export function addTurnLatencyProposalEffects(
     cacheHits: trace.proposalEffects.cacheHits + Math.max(0, input.cacheHits ?? 0),
     cacheMisses: trace.proposalEffects.cacheMisses + Math.max(0, input.cacheMisses ?? 0),
   };
+}
+
+export function addLivingWorldProposalMetricsToTrace(
+  trace: TurnLatencyTrace,
+  metrics: Pick<LivingWorldProposalMetrics, "counts">,
+): void {
+  addTurnLatencyProposalEffects(trace, {
+    queued: metrics.counts.pending,
+    committed: metrics.counts.committed,
+    rejected: metrics.counts.rejected,
+    deferred: metrics.counts.deferred,
+  });
 }
 
 export function diagnoseTurnLatencyTrace(
