@@ -946,6 +946,56 @@ describe("GamePage", () => {
     });
   });
 
+  it("maps safe Phase 93 stage ids to progress copy without rendering hidden payload text", async () => {
+    await renderReadyGame();
+    mockedChatAction.mockResolvedValue(createStreamResponse() as never);
+    let releaseTurn: (() => void) | undefined;
+    mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
+      handlers.onSceneSettling?.({
+        stage: "scene-settling",
+        stageId: "resolving-action",
+        phase: "gm-read",
+        hiddenActorName: "Hidden Watcher",
+        proposalId: "proposal-secret",
+      } as never);
+      handlers.onSceneSettling?.({
+        stage: "scene-settling",
+        stageId: "resolving-nearby-reactions",
+        phase: "actor-reactions",
+        privateTerm: "Forest Outpost",
+      } as never);
+      await new Promise<void>((resolve) => {
+        releaseTurn = resolve;
+      });
+      handlers.onFinalizing?.({
+        stage: "rollback_critical",
+        stageId: "advancing-world-time",
+        privateTerm: "Forest Outpost",
+      } as never);
+      handlers.onNarrative("The lock rattles once and holds.");
+      handlers.onDone();
+    });
+
+    fireEvent.change(screen.getByLabelText("Scene action"), {
+      target: { value: "Try the side door" },
+    });
+    fireEvent.click(screen.getByLabelText("Send action"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("narration-dock")).toHaveTextContent("Resolving nearby reactions");
+    });
+    expect(screen.queryByText("resolving-nearby-reactions")).not.toBeInTheDocument();
+    expect(screen.queryByText("Hidden Watcher")).not.toBeInTheDocument();
+    expect(screen.queryByText("proposal-secret")).not.toBeInTheDocument();
+    expect(screen.queryByText("Forest Outpost")).not.toBeInTheDocument();
+
+    releaseTurn?.();
+
+    await waitFor(() => {
+      expect(screen.getByText("The lock rattles once and holds.")).toBeInTheDocument();
+    });
+  });
+
   it("clears stale Oracle mechanics when a direct no-roll turn streams no oracle_result", async () => {
     await renderReadyGame();
     mockedChatAction.mockResolvedValue(createStreamResponse() as never);

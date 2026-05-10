@@ -43,14 +43,15 @@ import {
   parseTurnSSE,
 } from "@/lib/api";
 import type { ChatLookupRequest, LookupKind, LookupResultEvent } from "@/lib/api";
+import type { TurnStageStatus } from "@/lib/api";
 import type { WorldCurrentScene, WorldData } from "@/lib/api-types";
 import { deriveGameMessageKind } from "@/lib/gameplay-text";
 
 type TurnPhase = "idle" | "streaming" | "finalizing";
 type QuickAction = { label: string; action: string };
 type SceneProgress = "opening" | "scene-settling" | null;
-type SceneSettlingStatus = { phase?: string; opening?: boolean };
-type FinalizingTurnStatus = { stage?: string; phase?: string; tick?: number };
+type SceneSettlingStatus = TurnStageStatus;
+type FinalizingTurnStatus = TurnStageStatus;
 type DisplayChatMessage = ChatMessage & { debugReasoning?: string | null };
 
 function StageContextCard({
@@ -1354,7 +1355,25 @@ function getHudStatus(
   return "Ready";
 }
 
+const SAFE_PROGRESS_COPY_BY_STAGE_ID: Record<string, string> = {
+  "resolving-action": "Resolving your action",
+  "checking-immediate-consequences": "Checking immediate consequences",
+  "resolving-nearby-reactions": "Resolving nearby reactions",
+  "advancing-world-time": "Advancing world time",
+  "writing-scene": "Writing the scene",
+  "repairing-narration-grounding": "Repairing narration grounding",
+};
+
+function getSafeStageProgressCopy(status?: TurnStageStatus): string | null {
+  const stageId = status?.stageId;
+  if (!stageId) return null;
+  return SAFE_PROGRESS_COPY_BY_STAGE_ID[stageId] ?? "Preparing scene";
+}
+
 function getSceneProgressCopy(status?: SceneSettlingStatus): string {
+  const stageCopy = getSafeStageProgressCopy(status);
+  if (stageCopy) return stageCopy;
+
   const phase = status?.phase ?? "";
 
   switch (phase) {
@@ -1401,6 +1420,9 @@ function getSceneProgressCopy(status?: SceneSettlingStatus): string {
 }
 
 function getFinalizingProgressCopy(status?: FinalizingTurnStatus): string {
+  const stageCopy = getSafeStageProgressCopy(status);
+  if (stageCopy) return stageCopy;
+
   const phase = status?.phase ?? status?.stage ?? "";
 
   switch (phase) {

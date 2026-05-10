@@ -566,6 +566,54 @@ describe("parseTurnSSE", () => {
     expect(onFinalizing.mock.invocationCallOrder[0]).toBeLessThan(onDone.mock.invocationCallOrder[0]);
   });
 
+  it("normalizes safe stage payloads and drops hidden progress fields", async () => {
+    const onSceneSettling = vi.fn();
+    const onFinalizing = vi.fn();
+
+    await parseTurnSSE(
+      createStream([
+        "event: scene-settling",
+        "data: {\"stage\":\"scene-settling\",\"stageId\":\"resolving-nearby-reactions\",\"phase\":\"actor-reactions\",\"criticality\":\"L1\",\"criticalPath\":true,\"hiddenActorName\":\"Hidden Watcher\",\"proposalId\":\"proposal-secret\"}",
+        "",
+        'event: narrative',
+        'data: {"text":"The gate trembles."}',
+        "",
+        "event: finalizing_turn",
+        "data: {\"stage\":\"rollback_critical\",\"stageId\":\"advancing-world-time\",\"tick\":8,\"privateTerm\":\"Forest Outpost\"}",
+        "",
+        "event: done",
+        "data: {}",
+        "",
+      ].join("\n")),
+      {
+        onSceneSettling,
+        onNarrative: vi.fn(),
+        onOracleResult: vi.fn(),
+        onStateUpdate: vi.fn(),
+        onQuickActions: vi.fn(),
+        onFinalizing,
+        onDone: vi.fn(),
+        onError: vi.fn(),
+      },
+    );
+
+    expect(onSceneSettling).toHaveBeenCalledWith({
+      stage: "scene-settling",
+      stageId: "resolving-nearby-reactions",
+      phase: "actor-reactions",
+      criticality: "L1",
+      criticalPath: true,
+    });
+    expect(onFinalizing).toHaveBeenCalledWith({
+      stage: "rollback_critical",
+      stageId: "advancing-world-time",
+      tick: 8,
+    });
+    expect(JSON.stringify(onSceneSettling.mock.calls[0]?.[0])).not.toContain("Hidden Watcher");
+    expect(JSON.stringify(onSceneSettling.mock.calls[0]?.[0])).not.toContain("proposal-secret");
+    expect(JSON.stringify(onFinalizing.mock.calls[0]?.[0])).not.toContain("Forest Outpost");
+  });
+
   it("ignores finalizing_turn safely when the optional callback is omitted", async () => {
     const onDone = vi.fn();
 

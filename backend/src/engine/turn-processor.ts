@@ -183,6 +183,32 @@ export interface TurnEvent {
   data: unknown;
 }
 
+type TurnProgressEventType = "scene-settling" | "finalizing_turn";
+
+type SafeTurnStageId =
+  | "resolving-action"
+  | "checking-immediate-consequences"
+  | "resolving-nearby-reactions"
+  | "advancing-world-time"
+  | "writing-scene"
+  | "repairing-narration-grounding";
+
+type SafeTurnStageCriticality = "L0" | "L1" | "L2";
+
+interface SafeTurnStagePayload {
+  stage: string;
+  stageId: SafeTurnStageId;
+  phase?: string;
+  tick?: number;
+  opening?: boolean;
+  criticality: SafeTurnStageCriticality;
+  criticalPath: true;
+  executed?: number;
+  deferred?: number;
+  worldThreads?: number;
+  resumed?: boolean;
+}
+
 export interface TurnOptions {
   campaignId: string;
   playerAction: string;
@@ -217,6 +243,107 @@ export interface ResumePendingNarrationOptions {
   embedderResult?: ResolveResult;
   contextWindow?: number;
   onPostTurn?: (summary: TurnSummary) => void | Promise<void>;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readOptionalString(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function readOptionalNumber(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function readOptionalBoolean(record: Record<string, unknown>, key: string): boolean | undefined {
+  const value = record[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function inferSafeTurnStageId(args: {
+  eventType: TurnProgressEventType;
+  stage?: string;
+  phase?: string;
+}): SafeTurnStageId {
+  const marker = `${args.stage ?? ""}:${args.phase ?? ""}`;
+  if (/repair/i.test(marker)) {
+    return "repairing-narration-grounding";
+  }
+  if (/final-narration|opening-final-narration/i.test(marker)) {
+    return "writing-scene";
+  }
+  if (/actor-reactions/i.test(marker)) {
+    return "resolving-nearby-reactions";
+  }
+  if (/offscreen-catch-up|world-time|due-work|local-present-scene|rollback_critical/i.test(marker)) {
+    return "advancing-world-time";
+  }
+  if (/gm-read|oracle|judge-adjudication|judge-scene-plan/i.test(marker)) {
+    return "resolving-action";
+  }
+  if (args.eventType === "finalizing_turn") {
+    return "advancing-world-time";
+  }
+  return "checking-immediate-consequences";
+}
+
+function criticalityForSafeStage(stageId: SafeTurnStageId): SafeTurnStageCriticality {
+  switch (stageId) {
+    case "resolving-action":
+    case "writing-scene":
+    case "repairing-narration-grounding":
+      return "L0";
+    case "resolving-nearby-reactions":
+    case "checking-immediate-consequences":
+      return "L1";
+    case "advancing-world-time":
+      return "L2";
+  }
+}
+
+function buildSafeTurnStagePayload(
+  eventType: TurnProgressEventType,
+  data: unknown,
+): SafeTurnStagePayload {
+  const record = isRecord(data) ? data : {};
+  const stage = readOptionalString(record, "stage") ?? eventType;
+  const phase = readOptionalString(record, "phase");
+  const stageId = inferSafeTurnStageId({ eventType, stage, phase });
+  const payload: SafeTurnStagePayload = {
+    stage,
+    stageId,
+    criticality: criticalityForSafeStage(stageId),
+    criticalPath: true,
+  };
+  const tick = readOptionalNumber(record, "tick");
+  const opening = readOptionalBoolean(record, "opening");
+  const executed = readOptionalNumber(record, "executed");
+  const deferred = readOptionalNumber(record, "deferred");
+  const worldThreads = readOptionalNumber(record, "worldThreads");
+  const resumed = readOptionalBoolean(record, "resumed");
+
+  if (phase) payload.phase = phase;
+  if (tick !== undefined) payload.tick = tick;
+  if (opening !== undefined) payload.opening = opening;
+  if (executed !== undefined) payload.executed = executed;
+  if (deferred !== undefined) payload.deferred = deferred;
+  if (worldThreads !== undefined) payload.worldThreads = worldThreads;
+  if (resumed !== undefined) payload.resumed = resumed;
+  return payload;
+}
+
+export function withSafeTurnProgressPayload(event: TurnEvent): TurnEvent {
+  if (event.type !== "scene-settling" && event.type !== "finalizing_turn") {
+    return event;
+  }
+  return {
+    ...event,
+    data: buildSafeTurnStagePayload(event.type, event.data),
+  };
 }
 
 export interface HiddenTurnSummary {
@@ -2258,12 +2385,13 @@ function appendAssistantNarrationForResume(input: {
 export async function* processTurn(
   options: TurnOptions
 ): AsyncGenerator<TurnEvent> {
-  if (!isScenePlanEnabled()) {
-    yield* processTurnLegacy(options);
-    return;
-  }
+  const events = isScenePlanEnabled()
+    ? processTurnScenePlan(options)
+    : processTurnLegacy(options);
 
-  yield* processTurnScenePlan(options);
+  for await (const event of events) {
+    yield withSafeTurnProgressPayload(event);
+  }
 }
 
 export async function* resumePendingTurnNarration(

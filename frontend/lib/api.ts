@@ -779,29 +779,90 @@ export function suggestSeed(
 
 // ───── Turn SSE Parser ─────
 
+export type TurnProgressStageId =
+  | "resolving-action"
+  | "checking-immediate-consequences"
+  | "resolving-nearby-reactions"
+  | "advancing-world-time"
+  | "writing-scene"
+  | "repairing-narration-grounding";
+
+export interface TurnStageStatus {
+  stage?: string;
+  stageId?: TurnProgressStageId | string;
+  phase?: string;
+  opening?: boolean;
+  tick?: number;
+  criticality?: string;
+  criticalPath?: boolean;
+  executed?: number;
+  deferred?: number;
+  worldThreads?: number;
+  resumed?: boolean;
+}
+
 export interface TurnSSEHandlers {
-  onSceneSettling?: (status: {
-    stage?: string;
-    phase?: string;
-    opening?: boolean;
-  }) => void;
+  onSceneSettling?: (status: TurnStageStatus) => void;
   onLookupResult?: (result: LookupResultEvent) => void;
   onNarrative: (text: string) => void;
   onReasoning?: (payload: { text: string }) => void;
   onOracleResult: (result: { chance: number; roll: number; outcome: string; reasoning: string }) => void;
   onStateUpdate: (update: { tool: string; args: unknown; result: unknown }) => void;
   onQuickActions: (actions: Array<{ label: string; action: string }>) => void;
-  onFinalizing?: (status?: {
-    stage?: string;
-    phase?: string;
-    tick?: number;
-  }) => void;
+  onFinalizing?: (status?: TurnStageStatus) => void;
   onDone: () => void;
   onError: (error: string) => void;
 }
 
 const TURN_STREAM_EMPTY_NARRATION_ERROR = "Turn finished without visible narration. Please retry.";
 const TURN_STREAM_INCOMPLETE_ERROR = "Turn stream ended before completion.";
+
+function readStringField(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function readNumberField(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function readBooleanField(record: Record<string, unknown>, key: string): boolean | undefined {
+  const value = record[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function normalizeTurnStageStatus(value: unknown): TurnStageStatus {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const record = value as Record<string, unknown>;
+  const status: TurnStageStatus = {};
+  const stage = readStringField(record, "stage");
+  const stageId = readStringField(record, "stageId");
+  const phase = readStringField(record, "phase");
+  const criticality = readStringField(record, "criticality");
+  const opening = readBooleanField(record, "opening");
+  const criticalPath = readBooleanField(record, "criticalPath");
+  const tick = readNumberField(record, "tick");
+  const executed = readNumberField(record, "executed");
+  const deferred = readNumberField(record, "deferred");
+  const worldThreads = readNumberField(record, "worldThreads");
+  const resumed = readBooleanField(record, "resumed");
+
+  if (stage) status.stage = stage;
+  if (stageId) status.stageId = stageId;
+  if (phase) status.phase = phase;
+  if (opening !== undefined) status.opening = opening;
+  if (tick !== undefined) status.tick = tick;
+  if (criticality) status.criticality = criticality;
+  if (criticalPath !== undefined) status.criticalPath = criticalPath;
+  if (executed !== undefined) status.executed = executed;
+  if (deferred !== undefined) status.deferred = deferred;
+  if (worldThreads !== undefined) status.worldThreads = worldThreads;
+  if (resumed !== undefined) status.resumed = resumed;
+  return status;
+}
 
 export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: TurnSSEHandlers): Promise<void> {
   const reader = body.getReader();
@@ -825,7 +886,7 @@ export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: T
     try {
       const parsed = JSON.parse(currentData);
       switch (currentEvent) {
-        case "scene-settling": handlers.onSceneSettling?.(parsed); break;
+        case "scene-settling": handlers.onSceneSettling?.(normalizeTurnStageStatus(parsed)); break;
         case "lookup_result":
           hasLookupResult = true;
           handlers.onLookupResult?.(parsed);
@@ -842,7 +903,7 @@ export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: T
         case "quick_actions": handlers.onQuickActions(parsed.actions ?? parsed.result?.actions ?? []); break;
         case "finalizing_turn":
           requiresVisibleNarrative = true;
-          handlers.onFinalizing?.(parsed);
+          handlers.onFinalizing?.(normalizeTurnStageStatus(parsed));
           break;
         case "done":
           hasDoneEvent = true;

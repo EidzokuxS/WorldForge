@@ -97,6 +97,52 @@ describe("Turn observability — single turn seam coverage via REAL chat route",
     }
   });
 
+  it("normalizes progress events to safe stage ids without leaking hidden fields", async () => {
+    const { withSafeTurnProgressPayload } = await import("../turn-processor.js");
+    const normalized = withSafeTurnProgressPayload({
+      type: "scene-settling",
+      data: {
+        stage: "scene-settling",
+        phase: "actor-reactions",
+        tick: 9,
+        hiddenActorName: "Hidden Watcher",
+        proposalId: "proposal-secret",
+        hiddenRationale: "betrayal plan",
+      },
+    });
+
+    expect(normalized).toEqual({
+      type: "scene-settling",
+      data: {
+        stage: "scene-settling",
+        stageId: "resolving-nearby-reactions",
+        phase: "actor-reactions",
+        tick: 9,
+        criticality: "L1",
+        criticalPath: true,
+      },
+    });
+    expect(JSON.stringify(normalized.data)).not.toContain("Hidden Watcher");
+    expect(JSON.stringify(normalized.data)).not.toContain("proposal-secret");
+    expect(JSON.stringify(normalized.data)).not.toContain("betrayal plan");
+
+    const finalizing = withSafeTurnProgressPayload({
+      type: "finalizing_turn",
+      data: {
+        stage: "rollback_critical",
+        privateTerm: "Forest Outpost",
+      },
+    });
+    expect(finalizing.data).toEqual(
+      expect.objectContaining({
+        stageId: "advancing-world-time",
+        criticality: "L2",
+        criticalPath: true,
+      }),
+    );
+    expect(JSON.stringify(finalizing.data)).not.toContain("Forest Outpost");
+  });
+
   it("emits all expected seams with a single turnId after one mocked turn via app.request", async () => {
     const campaignId = "test-obs-campaign";
     seedCampaignWithAllSeams(campaignsRoot, campaignId, { tick: 3 });
