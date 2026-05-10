@@ -168,6 +168,28 @@ export type {
 } from "./frame-budget.js";
 
 export {
+  buildOracleFrame,
+  formatOracleFrameForPrompt,
+} from "./oracle-frame.js";
+
+export type {
+  OracleFrame,
+  OracleFrameSourceRef,
+} from "./oracle-frame.js";
+
+export {
+  ReviewerPacketSourceError,
+  buildReviewerPacket,
+  formatReviewerPacketForPrompt,
+} from "./reviewer-packet.js";
+
+export type {
+  ReviewerPacket,
+  ReviewerPacketEvidence,
+  ReviewerPacketEvidenceInput,
+} from "./reviewer-packet.js";
+
+export {
   createTurnLatencyTrace,
   recordParallelGroup,
   recordSerializedLlmGroup,

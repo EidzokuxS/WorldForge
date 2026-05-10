@@ -12,11 +12,14 @@ import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
 import { safeGenerateObject } from "../ai/generate-object-safe.js";
 import { createLogger, withRole } from "../lib/index.js";
 import type { CombatEnvelope } from "./combat-envelope.js";
+import {
+  buildOracleFrame,
+  formatOracleFrameForPrompt,
+} from "./oracle-frame.js";
 import { buildOraclePromptContract } from "./prompt-contracts.js";
+export { DURABILITY_NO_BYPASS_CLAMP_LINE } from "./oracle-frame.js";
 
 const log = createLogger("oracle");
-export const DURABILITY_NO_BYPASS_CLAMP_LINE =
-  "Clamp: actorBypassesTarget is false and durabilityTierGap >= 2. Unless the action explicitly exploits a listed vulnerability or setup angle, keep direct frontal force at 35% chance or lower.";
 
 // -- Types -------------------------------------------------------------------
 
@@ -109,34 +112,8 @@ Target: []
 Environment: [forest, dry]
 -> { "chance": 12, "reasoning": "Actor has wind magic, not fire magic. No fire-related tags. Novice skill level. Attempting a technique outside their element gives very low odds." }`;
 
-function buildCombatEnvelopeBlock(envelope: CombatEnvelope): string {
-  const lines = [
-    "[Combat Envelope]",
-    `Matchup: ${envelope.matchup}`,
-    `durabilityTierGap: ${envelope.durabilityTierGap}`,
-    `speedTierGap: ${envelope.speedTierGap}`,
-    `intelligenceTierGap: ${envelope.intelligenceTierGap ?? "n/a"}`,
-    `actorBypassesTarget: ${String(envelope.actorBypassesTarget)}`,
-    `targetBypassesActor: ${String(envelope.targetBypassesActor)}`,
-    ...envelope.summaryLines.map((line) => `- ${line}`),
-  ];
-
-  if (!envelope.actorBypassesTarget && envelope.durabilityTierGap >= 2) {
-    lines.push(DURABILITY_NO_BYPASS_CLAMP_LINE);
-  }
-
-  return lines.join("\n");
-}
-
 function buildOraclePrompt(payload: OraclePayload): string {
-  return [
-    `Action: ${payload.intent}${payload.method ? ` via ${payload.method}` : ""}`,
-    `Actor: [${payload.actorTags.join(", ")}]`,
-    `Target: [${payload.targetTags.join(", ")}]`,
-    `Environment: [${payload.environmentTags.join(", ")}]`,
-    `Scene: ${payload.sceneContext}`,
-    ...(payload.combatEnvelope ? [buildCombatEnvelopeBlock(payload.combatEnvelope)] : []),
-  ].join("\n");
+  return formatOracleFrameForPrompt(buildOracleFrame({ payload }));
 }
 
 async function executeOracleCall(
