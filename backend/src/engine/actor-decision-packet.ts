@@ -5,6 +5,10 @@ import {
   type BridgeLookupToolName,
 } from "./bridge-candidate-tools.js";
 import {
+  BRIDGE_STATE_TOOL_NAMES,
+  type BridgeStateToolName,
+} from "./bridge-state-tools.js";
+import {
   runtimeToolInputSchemas,
   type RuntimeToolName,
 } from "./tool-schemas.js";
@@ -16,10 +20,16 @@ const runtimeToolNames = Object.keys(runtimeToolInputSchemas) as [
   RuntimeToolName,
   ...RuntimeToolName[],
 ];
-type ActorDecisionRuntimeToolName = Exclude<RuntimeToolName, BridgeLookupToolName>;
-const bridgeLookupToolNameSet = new Set<string>(BRIDGE_LOOKUP_TOOL_NAMES);
+type ActorDecisionRuntimeToolName = Exclude<
+  RuntimeToolName,
+  BridgeLookupToolName | BridgeStateToolName
+>;
+const actorDecisionExcludedToolNameSet = new Set<string>([
+  ...BRIDGE_LOOKUP_TOOL_NAMES,
+  ...BRIDGE_STATE_TOOL_NAMES,
+]);
 const actorDecisionRuntimeToolNames = runtimeToolNames.filter(
-  (toolName) => !bridgeLookupToolNameSet.has(toolName),
+  (toolName) => !actorDecisionExcludedToolNameSet.has(toolName),
 ) as [ActorDecisionRuntimeToolName, ...ActorDecisionRuntimeToolName[]];
 
 export interface ActorDecisionToolRequest {

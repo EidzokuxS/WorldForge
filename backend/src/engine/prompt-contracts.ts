@@ -40,6 +40,29 @@ const runtimeToolInputShapes = {
     '{ "destinationRef": string, "actorRef"?: string, "mode"?: "walk"|"travel"|"follow_route"|"unknown" }',
     "Observation-only route check over visible legal movement refs; hidden routes deny without names.",
   ],
+  move_actor: [
+    '{ "actorRef"?: string, "destinationRef": string, "routeId"?: string, "mode"?: "walk"|"travel"|"follow_route"|"unknown", "intentSummary"?: string, "evidenceRefs": string[] }',
+    "Move only the current player/subject actor along a legal movement candidate backed by route/check_route evidence.",
+    "Returns destination, path, travel cost, and actor refs; do not narrate completed movement without a successful result.",
+  ],
+  create_minor_poi: [
+    '{ "areaRef"?: string, "poiType": "tea_stall"|"street_vendor"|"shrine_desk"|"notice_board"|"courier_desk", "name"?: string, "description"?: string, "tags"?: string[], "persistence"?: "scene_local"|"ephemeral", "visibility"?: "public"|"visible", "reason": string }',
+    "Create only ordinary local low-impact public POIs in current scope.",
+    "Reject secret, remote, faction, rare, weapon, key, or plot-critical places.",
+  ],
+  create_scene_extra: [
+    '{ "locationRef"?: "current_scene"|"current_location", "role": "service"|"witness"|"crowd"|"support"|"vendor"|"courier"|"clerk"|"porter", "name"?: string, "tags"?: string[], "persistence"?: "temporary", "visibility"?: "visible", "reason": string }',
+    "Create only a temporary visible current-scene/current-location support extra.",
+    "Do not create key, persistent, remote, secret, or plot-critical NPCs.",
+  ],
+  start_search: [
+    '{ "actorRef"?: string, "query": string, "scope"?: "current_scene"|"current_location"|"visible", "method"?: "look"|"ask"|"inspect"|"listen"|"track"|"browse", "intentSummary"?: string }',
+    "Record an active search/intent only; never create a found target, proof, or discovery.",
+  ],
+  record_player_intent: [
+    '{ "actorRef"?: string, "intentType": "seek"|"ask"|"claim"|"avoid"|"follow"|"inspect"|"negotiate"|"travel"|"other", "targetHint"?: string, "stance"?: "intends"|"claims"|"suspects"|"asks"|"refuses"|"offers"|"unknown", "summary"?: string }',
+    "Record player intent, stance, or claim as unconfirmed; do not make hinted target truth.",
+  ],
   add_tag: [
     '{ "entityName": string, "entityType": "player"|"npc"|"location"|"item"|"faction", "tag": string }',
     "Use lowercase, hyphenated tags already justified by the current scene.",
@@ -126,6 +149,16 @@ const runtimeToolExampleInputs = {
   find_poi_candidates: '{ "query": "tea shop", "includePotential": true, "maxResults": 4 }',
   inspect_known_fact: '{ "query": "bridge key", "scope": "known", "maxResults": 2 }',
   check_route: '{ "actorRef": "Player", "destinationRef": "Old Shrine Road", "mode": "walk" }',
+  move_actor:
+    '{ "actorRef": "Player", "destinationRef": "Old Shrine Road", "routeId": "Old Shrine Road", "mode": "walk", "intentSummary": "The player follows the obvious road.", "evidenceRefs": ["Old Shrine Road"] }',
+  create_minor_poi:
+    '{ "areaRef": "current_location", "poiType": "tea_stall", "name": "Lantern Tea Stall", "reason": "The public market supports ordinary tea service." }',
+  create_scene_extra:
+    '{ "locationRef": "current_scene", "role": "courier", "name": "Local Courier", "reason": "The current courier desk needs a temporary clerk to answer routine questions." }',
+  start_search:
+    '{ "actorRef": "Player", "query": "tea stall", "scope": "current_location", "method": "browse", "intentSummary": "The player looks for a place to drink tea." }',
+  record_player_intent:
+    '{ "actorRef": "Player", "intentType": "seek", "targetHint": "tea stall", "stance": "intends", "summary": "The player wants to find tea without knowing an exact shop id." }',
   add_tag: '{ "entityName": "Road Warden", "entityType": "npc", "tag": "alert" }',
   remove_tag:
     '{ "entityName": "Road Warden", "entityType": "npc", "tag": "distracted" }',

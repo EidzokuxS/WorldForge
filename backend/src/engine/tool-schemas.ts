@@ -13,6 +13,10 @@ import {
   executeBridgeCandidateTool,
   type BridgeLookupToolName,
 } from "./bridge-candidate-tools.js";
+import {
+  MINOR_POI_TYPES,
+  SCENE_EXTRA_ROLES,
+} from "./bridge-state-tools.js";
 import { INVENTORY_EQUIP_STATES } from "../inventory/authority.js";
 
 const entityTypeEnum = z.enum(["player", "npc", "location", "item", "faction"]);
@@ -236,6 +240,51 @@ const checkRouteInputSchema = z.object({
   destinationRef: z.string().trim().min(1).max(160),
   mode: z.enum(["walk", "travel", "follow_route", "unknown"]).default("walk"),
 });
+const moveActorInputSchema = z.object({
+  actorRef: z.string().trim().min(1).max(160).optional(),
+  destinationRef: z.string().trim().min(1).max(160),
+  routeId: z.string().trim().min(1).max(180).optional(),
+  mode: z.enum(["walk", "travel", "follow_route", "unknown"]).default("walk"),
+  intentSummary: z.string().trim().min(1).max(300).optional(),
+  evidenceRefs: z
+    .array(z.string().trim().min(1).max(200))
+    .min(1)
+    .max(8)
+    .describe("Refs from legal route/movement lookup or check_route evidence."),
+});
+const createMinorPoiInputSchema = z.object({
+  areaRef: z.string().trim().min(1).max(160).default("current_location"),
+  poiType: z.enum(MINOR_POI_TYPES),
+  name: z.string().trim().min(1).max(120).optional(),
+  description: z.string().trim().min(1).max(400).optional(),
+  tags: z.array(z.string().trim().min(1).max(80)).max(6).default([]),
+  persistence: z.enum(["scene_local", "ephemeral"]).default("scene_local"),
+  visibility: z.enum(["public", "visible"]).default("public"),
+  reason: z.string().trim().min(1).max(360),
+});
+const createSceneExtraInputSchema = z.object({
+  locationRef: z.enum(["current_scene", "current_location"]).default("current_scene"),
+  role: z.enum(SCENE_EXTRA_ROLES),
+  name: z.string().trim().min(1).max(120).optional(),
+  tags: z.array(z.string().trim().min(1).max(80)).max(6).default([]),
+  persistence: z.enum(["temporary"]).default("temporary"),
+  visibility: z.enum(["visible"]).default("visible"),
+  reason: z.string().trim().min(1).max(360),
+});
+const startSearchInputSchema = z.object({
+  actorRef: z.string().trim().min(1).max(160).optional(),
+  query: z.string().trim().min(1).max(220),
+  scope: z.enum(["current_scene", "current_location", "visible"]).default("current_scene"),
+  method: z.enum(["look", "ask", "inspect", "listen", "track", "browse"]).default("look"),
+  intentSummary: z.string().trim().min(1).max(300).optional(),
+});
+const recordPlayerIntentInputSchema = z.object({
+  actorRef: z.string().trim().min(1).max(160).optional(),
+  intentType: z.enum(["seek", "ask", "claim", "avoid", "follow", "inspect", "negotiate", "travel", "other"]),
+  targetHint: z.string().trim().min(1).max(220).optional(),
+  stance: z.enum(["intends", "claims", "suspects", "asks", "refuses", "offers", "unknown"]).default("intends"),
+  summary: z.string().trim().min(1).max(360).optional(),
+});
 
 export const runtimeToolInputSchemas = {
   list_visible_affordances: listVisibleAffordancesInputSchema,
@@ -246,6 +295,11 @@ export const runtimeToolInputSchemas = {
   find_poi_candidates: findPoiCandidatesInputSchema,
   inspect_known_fact: inspectKnownFactInputSchema,
   check_route: checkRouteInputSchema,
+  move_actor: moveActorInputSchema,
+  create_minor_poi: createMinorPoiInputSchema,
+  create_scene_extra: createSceneExtraInputSchema,
+  start_search: startSearchInputSchema,
+  record_player_intent: recordPlayerIntentInputSchema,
   add_tag: addTagInputSchema,
   remove_tag: removeTagInputSchema,
   set_relationship: setRelationshipInputSchema,
@@ -357,6 +411,41 @@ export function createStorytellerTools(
         "Observation-only lookup. Check whether a destination ref is already here or a visible legal movement route; illegal/hidden routes deny without leaks.",
       inputSchema: checkRouteInputSchema,
       execute: (args) => executeBridgeLookupTool("check_route", args),
+    }),
+
+    move_actor: tool({
+      description:
+        "State-bearing bridge. Move only the current player/subject actor along a legal movement candidate backed by route evidence; returns destination, path, travel cost, and actor refs.",
+      inputSchema: moveActorInputSchema,
+      execute: (args) => executeRuntimeTool("move_actor", args),
+    }),
+
+    create_minor_poi: tool({
+      description:
+        "State-bearing bridge. Create only an ordinary local low-impact public POI in current scope: tea stall, street vendor, shrine desk, notice board, or courier desk. Rejects secret, remote, faction, rare, key, or plot-critical places.",
+      inputSchema: createMinorPoiInputSchema,
+      execute: (args) => executeRuntimeTool("create_minor_poi", args),
+    }),
+
+    create_scene_extra: tool({
+      description:
+        "State-bearing bridge. Create only a temporary visible service/witness/crowd/support extra in current_scene/current_location; not a key or persistent NPC.",
+      inputSchema: createSceneExtraInputSchema,
+      execute: (args) => executeRuntimeTool("create_scene_extra", args),
+    }),
+
+    start_search: tool({
+      description:
+        "State-bearing bridge. Record that the current actor starts searching; does not create a found target, proof, or discovery.",
+      inputSchema: startSearchInputSchema,
+      execute: (args) => executeRuntimeTool("start_search", args),
+    }),
+
+    record_player_intent: tool({
+      description:
+        "State-bearing bridge. Record player intent, stance, or claim as unconfirmed; does not make the hinted target true.",
+      inputSchema: recordPlayerIntentInputSchema,
+      execute: (args) => executeRuntimeTool("record_player_intent", args),
     }),
 
     add_tag: tool({

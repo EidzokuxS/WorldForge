@@ -546,6 +546,9 @@ export function runtimeToolCategory(toolName: RuntimeToolName): GmBeatPlanToolCa
     case "inspect_known_fact":
     case "check_route":
       return "lookup";
+    case "start_search":
+    case "record_player_intent":
+      return "memory";
     case "add_chronicle_entry":
     case "log_event":
       return "memory";
@@ -560,10 +563,13 @@ export function runtimeToolCategory(toolName: RuntimeToolName): GmBeatPlanToolCa
     case "spawn_npc":
     case "spawn_item":
     case "reveal_location":
+    case "create_minor_poi":
+    case "create_scene_extra":
       return "world";
     case "request_contested_outcome":
       return "contest";
     case "move_to":
+    case "move_actor":
       return "movement";
     case "transfer_item":
       return "inventory";

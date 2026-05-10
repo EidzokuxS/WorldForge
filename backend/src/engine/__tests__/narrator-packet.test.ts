@@ -406,6 +406,154 @@ describe("narrator packet settlement boundary", () => {
     expect(formatted).not.toMatch(/validated .* consequence settles/i);
   });
 
+  it("summarizes successful bridge state results without turning search or intent into discovered truth", () => {
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    const acceptedActions: CanonicalTurnPacket["actionResults"] = [
+      {
+        order: 0,
+        actionId: successfulActionId,
+        actionRef: "step-move-actor",
+        actorId: playerId,
+        toolName: "move_actor",
+        input: {
+          actorRef: "Iria",
+          destinationRef: "Tea Lane",
+          evidenceRefs: ["route-tea-lane"],
+        },
+        args: {
+          actorRef: "Iria",
+          destinationRef: "Tea Lane",
+          evidenceRefs: ["route-tea-lane"],
+        },
+        result: {
+          success: true,
+          result: {
+            kind: "move_actor",
+            actorRef: "Iria",
+            locationId: "loc-tea-lane",
+            locationName: "Tea Lane",
+            travelCost: 1,
+            path: ["Market District", "Tea Lane"],
+          },
+        },
+      },
+      {
+        order: 1,
+        actionId: secondActionId,
+        actionRef: "step-minor-poi",
+        actorId: visibleNpcId,
+        toolName: "create_minor_poi",
+        input: {
+          poiType: "tea_stall",
+          areaRef: "current_location",
+          reason: "A public market supports ordinary tea service.",
+        },
+        args: {
+          poiType: "tea_stall",
+          areaRef: "current_location",
+          reason: "A public market supports ordinary tea service.",
+        },
+        result: {
+          success: true,
+          result: {
+            kind: "minor_poi",
+            id: "loc-tea-stall",
+            name: "Lantern Tea Stall",
+            connectedTo: "Market District",
+            poiType: "tea_stall",
+          },
+        },
+      },
+      {
+        order: 2,
+        actionId: thirdActionId,
+        actionRef: "step-scene-extra",
+        actorId: visibleNpcId,
+        toolName: "create_scene_extra",
+        input: {
+          role: "courier",
+          reason: "A temporary clerk can answer routine public questions.",
+        },
+        args: {
+          role: "courier",
+          reason: "A temporary clerk can answer routine public questions.",
+        },
+        result: {
+          success: true,
+          result: {
+            kind: "scene_extra",
+            id: "npc-counter-courier",
+            name: "Counter Courier",
+            role: "courier",
+          },
+        },
+      },
+      {
+        order: 3,
+        actionId: fourthActionId,
+        actionRef: "step-search",
+        actorId: playerId,
+        toolName: "start_search",
+        input: { actorRef: "Iria", query: "tea stall" },
+        args: { actorRef: "Iria", query: "tea stall" },
+        result: {
+          success: true,
+          result: {
+            kind: "search_started",
+            actorRef: "Iria",
+            query: "tea stall",
+            found: false,
+            discoveryCreated: false,
+            targetTruth: "unconfirmed",
+          },
+        },
+      },
+      {
+        order: 4,
+        actionId: fifthActionId,
+        actionRef: "step-intent",
+        actorId: playerId,
+        toolName: "record_player_intent",
+        input: { actorRef: "Iria", intentType: "claim", targetHint: "hidden courier route" },
+        args: { actorRef: "Iria", intentType: "claim", targetHint: "hidden courier route" },
+        result: {
+          success: true,
+          result: {
+            kind: "player_intent_recorded",
+            actorRef: "Iria",
+            intentType: "claim",
+            targetHint: "hidden courier route",
+            claimTruth: "unconfirmed",
+            proofCreated: false,
+          },
+        },
+      },
+    ];
+    canonicalTurnPacket.effects = [];
+    canonicalTurnPacket.actionResults = acceptedActions;
+    canonicalTurnPacket.narratorFacts.actionIds = acceptedActions.map((action) => action.actionId);
+    canonicalTurnPacket.narratorFacts.toolResultRefs = acceptedActions.map((action) => ({
+      actionId: action.actionId,
+      toolName: action.toolName,
+    }));
+
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket,
+    });
+    const summaries = packet.perceivableEffects.map((effect) => effect.summary);
+
+    expect(summaries).toEqual([
+      "Iria moves to Tea Lane.",
+      "Lantern Tea Stall becomes reachable from Market District.",
+      "Counter Courier becomes visibly present in the scene.",
+      "Iria starts searching for tea stall; no discovery is confirmed.",
+      "Iria records an unconfirmed intent or claim about hidden courier route.",
+    ]);
+    expect(formatNarratorPacketForPrompt(packet)).not.toContain("found tea stall");
+    expect(formatNarratorPacketForPrompt(packet)).not.toContain("confirmed hidden courier route");
+  });
+
   it("does not convert referenced failed or guarded tool attempts into settled effects", () => {
     const canonicalTurnPacket = createCanonicalTurnPacket();
     canonicalTurnPacket.effects = [

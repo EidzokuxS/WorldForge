@@ -406,14 +406,19 @@ function firstMultiToolStepIndex(steps: unknown[]): number | null {
 const STATE_BEARING_RUNTIME_TOOLS = new Set<RuntimeToolName>([
   "add_chronicle_entry",
   "add_tag",
+  "create_minor_poi",
+  "create_scene_extra",
   "move_to",
+  "move_actor",
   "promote_npc",
+  "record_player_intent",
   "remove_tag",
   "reveal_location",
   "set_condition",
   "set_relationship",
   "spawn_item",
   "spawn_npc",
+  "start_search",
   "transfer_item",
 ]);
 

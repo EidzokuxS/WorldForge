@@ -35,6 +35,23 @@ export function dynamicCreationBudgetKey(
       "temporary",
     ].join("|");
   }
+  if (request.toolName === "create_scene_extra") {
+    const locationRef =
+      normalizeBudgetPart(request.input.locationRef) ||
+      "current_scene";
+    const roleOrName =
+      normalizeBudgetPart(request.input.role) ||
+      normalizeBudgetPart(request.input.name) ||
+      normalizeBudgetPart(request.input.tags) ||
+      "scene-extra";
+    return [
+      request.toolName,
+      locationRef,
+      roleOrName,
+      normalizeBudgetPart(request.input.tags),
+      "temporary",
+    ].join("|");
+  }
   if (request.toolName === "reveal_location") {
     const anchorRef = normalizeBudgetPart(request.input.connectedToName) || "unspecified";
     const sceneKind =
@@ -47,6 +64,21 @@ export function dynamicCreationBudgetKey(
       sceneKind,
       normalizeBudgetPart(request.input.tags),
       "ephemeral",
+    ].join("|");
+  }
+  if (request.toolName === "create_minor_poi") {
+    const anchorRef = normalizeBudgetPart(request.input.areaRef) || "current_location";
+    const poiIdentity =
+      normalizeBudgetPart(request.input.poiType) ||
+      normalizeBudgetPart(request.input.name) ||
+      normalizeBudgetPart(request.input.tags) ||
+      "minor-poi";
+    return [
+      request.toolName,
+      anchorRef,
+      poiIdentity,
+      normalizeBudgetPart(request.input.tags),
+      "low-impact",
     ].join("|");
   }
   if (request.toolName === "spawn_item") {

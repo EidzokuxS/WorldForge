@@ -5,6 +5,7 @@ const CLAIM_ECHO_PATTERN =
 
 const PLAYER_CLAIM_ECHO_TOOLS = new Set<RuntimeToolName>([
   "log_event",
+  "record_player_intent",
   "set_relationship",
 ]);
 

@@ -50,6 +50,14 @@ import {
 } from "./tool-execution-context.js";
 import type { RuntimeToolName } from "./tool-schemas.js";
 import {
+  buildRecordPlayerIntentResult,
+  buildStartSearchResult,
+  prepareCreateMinorPoiInput,
+  prepareCreateSceneExtraInput,
+  prepareMoveActorInput,
+  type BridgeStateValidationIssue,
+} from "./bridge-state-tools.js";
+import {
   WorldVersionConflictError,
   commitAuthorityTrace,
   validateBaseWorldVersion,
@@ -115,6 +123,11 @@ const STATE_BEARING_TOOLS = new Set([
   "request_contested_outcome",
   "set_condition",
   "move_to",
+  "move_actor",
+  "create_minor_poi",
+  "create_scene_extra",
+  "start_search",
+  "record_player_intent",
   "transfer_item",
 ]);
 const SYNC_SQLITE_STATE_BEARING_TOOLS = new Set(
@@ -1433,6 +1446,143 @@ function handleActorMoveTo(
   };
 }
 
+function bridgeValidationFailure(issue: BridgeStateValidationIssue): ToolResult {
+  return {
+    success: false,
+    error: `Bridge state validation failed: ${issue.message}`,
+  };
+}
+
+function handleMoveActor(
+  campaignId: string,
+  args: Record<string, unknown>,
+  tick: number,
+  executionContext?: ToolExecutionContext,
+): ToolResult {
+  const prepared = prepareMoveActorInput(args, executionContext);
+  if (!prepared.ok) return bridgeValidationFailure(prepared.issue);
+
+  const movement = handleMoveTo(
+    campaignId,
+    { targetLocationName: prepared.value.targetLocationName },
+    tick,
+    executionContext,
+  );
+  if (!movement.success) return movement;
+
+  return {
+    ...movement,
+    result: {
+      kind: "move_actor",
+      actorRef: prepared.value.actorRef,
+      actorRefs: prepared.value.actorRefs,
+      destinationRef: prepared.value.destinationRef,
+      routeEvidenceRefs: prepared.value.routeEvidenceRefs,
+      intentSummary: prepared.value.intentSummary,
+      locationId: readStringField(movement.result, "locationId"),
+      locationName: readStringField(movement.result, "locationName"),
+      travelCost: readIntegerField(movement.result, "travelCost"),
+      path: Array.isArray((movement.result as Record<string, unknown> | undefined)?.path)
+        ? (movement.result as { path: unknown[] }).path.filter((entry): entry is string => typeof entry === "string")
+        : [],
+      delegateTool: "move_to",
+    },
+  };
+}
+
+function handleCreateMinorPoi(
+  campaignId: string,
+  args: Record<string, unknown>,
+  tick: number,
+  executionContext?: ToolExecutionContext,
+): ToolResult {
+  const prepared = prepareCreateMinorPoiInput(args, executionContext);
+  if (!prepared.ok) return bridgeValidationFailure(prepared.issue);
+
+  const revealed = handleRevealLocation(
+    campaignId,
+    {
+      name: prepared.value.name,
+      description: prepared.value.description,
+      tags: prepared.value.tags,
+      connectedToName: prepared.value.connectedToName,
+    },
+    tick,
+    executionContext,
+  );
+  if (!revealed.success) return revealed;
+
+  return {
+    ...revealed,
+    result: {
+      ...(revealed.result as Record<string, unknown>),
+      kind: "minor_poi",
+      poiType: prepared.value.poiType,
+      areaRef: prepared.value.areaRef,
+      visibility: prepared.value.visibility,
+      impact: "low",
+      reason: prepared.value.reason,
+      delegateTool: "reveal_location",
+    },
+  };
+}
+
+function handleCreateSceneExtra(
+  campaignId: string,
+  args: Record<string, unknown>,
+  executionContext?: ToolExecutionContext,
+): ToolResult {
+  const prepared = prepareCreateSceneExtraInput(args, executionContext);
+  if (!prepared.ok) return bridgeValidationFailure(prepared.issue);
+
+  const spawned = handleSpawnNpc(
+    campaignId,
+    {
+      name: prepared.value.name,
+      tags: prepared.value.tags,
+      locationRef: prepared.value.locationRef,
+    },
+    executionContext,
+  );
+  if (!spawned.success) return spawned;
+
+  return {
+    ...spawned,
+    result: {
+      ...(spawned.result as Record<string, unknown>),
+      kind: "scene_extra",
+      role: prepared.value.role,
+      temporary: true,
+      reason: prepared.value.reason,
+      delegateTool: "spawn_npc",
+    },
+  };
+}
+
+function handleStartSearch(
+  args: Record<string, unknown>,
+  executionContext?: ToolExecutionContext,
+): ToolResult {
+  const built = buildStartSearchResult(args, executionContext);
+  if (!built.ok) return bridgeValidationFailure(built.issue);
+  return {
+    success: true,
+    result: built.value,
+  };
+}
+
+function handleRecordPlayerIntent(
+  args: Record<string, unknown>,
+  executionContext?: ToolExecutionContext,
+): ToolResult {
+  const built = buildRecordPlayerIntentResult(args, executionContext);
+  if (!built.ok) return bridgeValidationFailure(built.issue);
+  return {
+    success: true,
+    result: built.value,
+  };
+}
+
 function modeBaseAllowance(mode: string): string {
   switch (mode) {
     case "attack":
@@ -1874,6 +2024,47 @@ function stateDeltaRefsForToolResult(input: {
         readStringField(payload, "locationName"),
       ]);
       break;
+    case "move_actor":
+      addStringRefs(refs, [
+        readStringField(payload, "actorRef"),
+        readStringField(payload, "destinationRef"),
+        readStringField(payload, "locationId"),
+        readStringField(payload, "locationName"),
+      ]);
+      break;
+    case "create_minor_poi":
+      addStringRefs(refs, [
+        readStringField(payload, "id"),
+        readStringField(payload, "name"),
+        readStringField(payload, "poiType"),
+        readStringField(payload, "anchorLocationId"),
+        readStringField(payload, "areaRef"),
+      ]);
+      break;
+    case "create_scene_extra":
+      addStringRefs(refs, [
+        readStringField(payload, "id"),
+        readStringField(payload, "name"),
+        readStringField(payload, "role"),
+        readStringField(payload, "locationId"),
+        readStringField(payload, "sceneLocationId"),
+      ]);
+      break;
+    case "start_search":
+      addStringRefs(refs, [
+        readStringField(payload, "searchId"),
+        readStringField(payload, "actorRef"),
+        readStringField(payload, "query"),
+      ]);
+      break;
+    case "record_player_intent":
+      addStringRefs(refs, [
+        readStringField(payload, "intentId"),
+        readStringField(payload, "actorRef"),
+        readStringField(payload, "intentType"),
+        readStringField(payload, "targetHint"),
+      ]);
+      break;
     case "transfer_item":
       addStringRefs(refs, [
         readStringField(payload, "item"),
@@ -1930,6 +2121,16 @@ function runToolHandler(input: {
       return handleSetCondition(input.campaignId, input.args, input.outcomeTier);
     case "move_to":
       return handleMoveTo(input.campaignId, input.args, input.tick, input.executionContext);
+    case "move_actor":
+      return handleMoveActor(input.campaignId, input.args, input.tick, input.executionContext);
+    case "create_minor_poi":
+      return handleCreateMinorPoi(input.campaignId, input.args, input.tick, input.executionContext);
+    case "create_scene_extra":
+      return handleCreateSceneExtra(input.campaignId, input.args, input.executionContext);
+    case "start_search":
+      return handleStartSearch(input.args, input.executionContext);
+    case "record_player_intent":
+      return handleRecordPlayerIntent(input.args, input.executionContext);
     case "transfer_item":
       return handleTransferItem(input.campaignId, input.args);
     default:

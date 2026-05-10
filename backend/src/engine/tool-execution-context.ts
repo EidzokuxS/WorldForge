@@ -7,6 +7,10 @@ import {
   type BridgeKnownFactSnapshot,
   type BridgeLookupSnapshot,
 } from "./bridge-candidate-tools.js";
+import {
+  isBridgeStateToolName,
+  validateBridgeStateToolGrounding,
+} from "./bridge-state-tools.js";
 import { buildModelFacingScenePacket } from "./model-facing-scene.js";
 import { listActorKnowledge } from "./knowledge-model.js";
 import {
@@ -426,6 +430,7 @@ export function applySuccessfulToolObservationToExecutionContext(input: {
       addRefs(input.context.legalMovementRefs, [id, name]);
       break;
     case "move_to":
+    case "move_actor":
       if (!id) return;
       input.context.currentLocationId = id;
       input.context.currentSceneScopeId = id;
@@ -437,7 +442,12 @@ export function applySuccessfulToolObservationToExecutionContext(input: {
       addRefs(input.context.legalMovementRefs, [id, name]);
       break;
     case "spawn_npc":
+    case "create_scene_extra":
       addRefs(input.context.legalActorRefs, [id, name]);
+      break;
+    case "create_minor_poi":
+      addRefs(input.context.legalLocationRefs, [id, name]);
+      addRefs(input.context.legalMovementRefs, [id, name]);
       break;
     case "spawn_item":
       addRefs(input.context.legalItemRefs, [id, name]);
@@ -599,6 +609,20 @@ export function validateToolInputGrounding(input: {
   }
 
   switch (input.toolName) {
+    case "move_actor":
+    case "create_minor_poi":
+    case "create_scene_extra":
+    case "start_search":
+    case "record_player_intent": {
+      if (!isBridgeStateToolName(input.toolName)) return null;
+      const issue = validateBridgeStateToolGrounding({
+        toolName: input.toolName,
+        toolInput,
+        context: input.context,
+        pathPrefix: path,
+      });
+      return issue ? { ...issue } : null;
+    }
     case "log_event":
       return validateLogEventGrounding(toolInput, input.context, path);
     case "spawn_npc":

@@ -189,4 +189,29 @@ describe("PlayerFacingPacket", () => {
       PlayerFacingPacketSafetyError,
     );
   });
+
+  it("allows record_player_intent to echo an unconfirmed player claim without making it truth", () => {
+    const narratorPacket = createNarratorPacket();
+    narratorPacket.playerAction = "I claim Hidden Auditor gave me a courier seal.";
+    narratorPacket.perceivableEffects[0] = {
+      ...narratorPacket.perceivableEffects[0]!,
+      toolName: "record_player_intent",
+      summary: "Mira records an unconfirmed claim about Hidden Auditor.",
+      toolResult: {
+        success: true,
+        result: {
+          kind: "player_intent_recorded",
+          targetHint: "Hidden Auditor",
+          claimTruth: "unconfirmed",
+          proofCreated: false,
+        },
+      },
+    };
+
+    const packet = buildPlayerFacingPacketFromNarratorPacket(narratorPacket);
+    const formatted = formatPlayerFacingPacketForPrompt(packet);
+
+    expect(formatted).toContain("unconfirmed claim about Hidden Auditor");
+    expect(formatted).not.toContain("gave Mira a courier seal");
+  });
 });

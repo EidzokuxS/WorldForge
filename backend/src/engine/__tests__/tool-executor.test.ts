@@ -1755,6 +1755,347 @@ describe("executeToolCall", () => {
     });
   });
 
+  describe("Phase 90 bridge state tools", () => {
+    it("move_actor delegates through legal subject and route evidence and returns actor/destination refs", async () => {
+      const { db, state } = createMutableInventoryDb({
+        players: [{
+          id: "player-1",
+          campaignId: CAMPAIGN_ID,
+          name: "Hero",
+          race: "Human",
+          gender: "",
+          age: "",
+          appearance: "",
+          hp: 5,
+          tags: "[]",
+          equippedItems: "[]",
+          currentLocationId: "loc-1",
+          currentSceneLocationId: null,
+          characterRecord: JSON.stringify({
+            identity: {
+              id: "player-1",
+              campaignId: CAMPAIGN_ID,
+              role: "player",
+              tier: "key",
+              displayName: "Hero",
+              canonicalStatus: "original",
+            },
+            profile: {
+              species: "Human",
+              gender: "",
+              ageText: "",
+              appearance: "",
+              backgroundSummary: "",
+              personaSummary: "",
+            },
+            socialContext: {
+              factionId: null,
+              factionName: null,
+              homeLocationId: null,
+              homeLocationName: null,
+              currentLocationId: "loc-1",
+              currentLocationName: "Town Square",
+              relationshipRefs: [],
+              socialStatus: [],
+              originMode: "resident",
+            },
+            motivations: {
+              shortTermGoals: [],
+              longTermGoals: [],
+              beliefs: [],
+              drives: [],
+              frictions: [],
+            },
+            capabilities: {
+              traits: [],
+              skills: [],
+              flaws: [],
+              specialties: [],
+              wealthTier: null,
+            },
+            state: {
+              hp: 5,
+              conditions: [],
+              statusFlags: [],
+              activityState: "active",
+            },
+            loadout: {
+              inventorySeed: [],
+              equippedItemRefs: [],
+              currencyNotes: "",
+              signatureItems: [],
+            },
+            startConditions: {},
+            provenance: {
+              sourceKind: "generator",
+              importMode: null,
+              templateId: null,
+              archetypePrompt: null,
+              worldgenOrigin: null,
+              legacyTags: [],
+            },
+          }),
+          derivedTags: "[]",
+        }],
+        locations: [
+          {
+            id: "loc-1",
+            campaignId: CAMPAIGN_ID,
+            name: "Town Square",
+            description: "A busy square",
+            tags: "[]",
+            connectedTo: '["loc-2"]',
+          },
+          {
+            id: "loc-2",
+            campaignId: CAMPAIGN_ID,
+            name: "Tea Lane",
+            description: "A narrow lane of stalls",
+            tags: "[]",
+            connectedTo: '["loc-1"]',
+          },
+        ],
+        locationEdges: [
+          {
+            id: "route-tea-lane",
+            campaignId: CAMPAIGN_ID,
+            fromLocationId: "loc-1",
+            toLocationId: "loc-2",
+            travelCost: 1,
+            discovered: true,
+          },
+          {
+            id: "route-town-square",
+            campaignId: CAMPAIGN_ID,
+            fromLocationId: "loc-2",
+            toLocationId: "loc-1",
+            travelCost: 1,
+            discovered: true,
+          },
+        ],
+      });
+      (getDb as Mock).mockReturnValue(db);
+
+      const context = createPlayerTurnContext({
+        subjectActorRefs: new Set(["hero", "player-1"]),
+        legalMovementRefs: new Set(["route-tea-lane", "loc-2", "tea lane"]),
+        bridgeLookup: {
+          current: {
+            campaignId: CAMPAIGN_ID,
+            tick: TICK,
+            playerActorId: "player-1",
+            currentLocationId: "loc-1",
+            currentSceneScopeId: "loc-1",
+            currentLocationName: "Town Square",
+            currentSceneScopeName: "Town Square",
+          },
+          visibleActors: [],
+          awarenessHints: [],
+          legalTargets: [],
+          legalMovement: [{
+            id: "route-tea-lane",
+            locationId: "loc-2",
+            label: "Tea Lane",
+            connected: true,
+            travelCost: 1,
+            path: ["Town Square", "Tea Lane"],
+          }],
+          localRecentEvents: [],
+          playerKnownFacts: [],
+          allowedTools: ["move_actor"],
+        },
+      });
+
+      const result = await executeToolCall(CAMPAIGN_ID, "move_actor", {
+        actorRef: "Hero",
+        destinationRef: "Tea Lane",
+        routeId: "route-tea-lane",
+        evidenceRefs: ["route-tea-lane"],
+      }, TICK, undefined, context);
+
+      expect(result.success).toBe(true);
+      expect(result.result).toMatchObject({
+        kind: "move_actor",
+        actorRef: "Hero",
+        locationId: "loc-2",
+        locationName: "Tea Lane",
+        travelCost: 1,
+        path: ["Town Square", "Tea Lane"],
+      });
+      expect(state.players[0]).toMatchObject({
+        currentLocationId: "loc-2",
+        currentSceneLocationId: "loc-2",
+      });
+    });
+
+    it("move_actor rejects unsupported remote destinations before movement", async () => {
+      const context = createPlayerTurnContext({
+        subjectActorRefs: new Set(["hero", "player-1"]),
+        legalMovementRefs: new Set(["loc-2", "tea lane"]),
+      });
+
+      const result = await executeToolCall(CAMPAIGN_ID, "move_actor", {
+        actorRef: "Hero",
+        destinationRef: "Remote Outpost",
+        evidenceRefs: ["Remote Outpost"],
+      }, TICK, undefined, context);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Tool grounding failed");
+      expect(result.error).toContain("connected movement candidate");
+      expect(getDb).not.toHaveBeenCalled();
+    });
+
+    it("create_minor_poi creates a constrained local low-impact location", async () => {
+      const { db, state } = createMutableInventoryDb({
+        locations: [{
+          id: "loc-market",
+          campaignId: CAMPAIGN_ID,
+          name: "Market District",
+          description: "Public stalls and courier desks",
+          tags: '["market"]',
+          connectedTo: "[]",
+        }],
+      });
+      (getDb as Mock).mockReturnValue(db);
+
+      const result = await executeToolCall(CAMPAIGN_ID, "create_minor_poi", {
+        areaRef: "current_location",
+        poiType: "tea_stall",
+        name: "Lantern Tea Stall",
+        reason: "The public market supports ordinary tea service.",
+      }, TICK, undefined, createPlayerTurnContext({
+        currentLocationId: "loc-market",
+        currentSceneScopeId: "loc-market",
+        currentLocationRefs: new Set(["current_location", "loc-market", "market district"]),
+        currentSceneRefs: new Set(["current_scene", "loc-market", "market district"]),
+        legalLocationRefs: new Set(["current_location", "current_scene", "loc-market", "market district"]),
+      }));
+
+      expect(result.success).toBe(true);
+      expect(result.result).toMatchObject({
+        kind: "minor_poi",
+        name: "Lantern Tea Stall",
+        poiType: "tea_stall",
+        impact: "low",
+        delegateTool: "reveal_location",
+      });
+      expect(state.locations.find((location) => location.name === "Lantern Tea Stall")).toMatchObject({
+        kind: "ephemeral_scene",
+        parentLocationId: "loc-market",
+        anchorLocationId: "loc-market",
+      });
+      expect(state.locationEdges).toHaveLength(2);
+    });
+
+    it("create_minor_poi rejects high-impact or secret places", async () => {
+      const result = await executeToolCall(CAMPAIGN_ID, "create_minor_poi", {
+        areaRef: "current_location",
+        poiType: "tea_stall",
+        name: "Secret Vault",
+        reason: "The player wants a rare plot-critical weapon shop.",
+      }, TICK, undefined, createPlayerTurnContext());
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("rejects high-impact");
+      expect(getDb).not.toHaveBeenCalled();
+    });
+
+    it("create_scene_extra creates only a temporary current-scene support NPC", async () => {
+      const { db, state } = createMutableInventoryDb({
+        locations: [
+          {
+            id: "loc-market",
+            campaignId: CAMPAIGN_ID,
+            name: "Market District",
+            description: "Public stalls",
+            tags: "[]",
+          },
+          {
+            id: "scene-counter",
+            campaignId: CAMPAIGN_ID,
+            name: "Courier Counter",
+            description: "A staffed courier desk",
+            tags: "[]",
+            kind: "ephemeral_scene",
+            parentLocationId: "loc-market",
+          },
+        ],
+      });
+      (getDb as Mock).mockReturnValue(db);
+
+      const result = await executeToolCall(CAMPAIGN_ID, "create_scene_extra", {
+        locationRef: "current_scene",
+        role: "courier",
+        name: "Counter Courier",
+        reason: "A temporary clerk can answer routine public questions.",
+      }, TICK, undefined, createPlayerTurnContext({
+        currentLocationId: "loc-market",
+        currentSceneScopeId: "scene-counter",
+        currentLocationRefs: new Set(["current_location", "loc-market", "market district"]),
+        currentSceneRefs: new Set(["current_scene", "scene-counter", "courier counter"]),
+        legalLocationRefs: new Set([
+          "current_location",
+          "current_scene",
+          "loc-market",
+          "scene-counter",
+          "market district",
+          "courier counter",
+        ]),
+      }));
+
+      expect(result.success).toBe(true);
+      expect(result.result).toMatchObject({
+        kind: "scene_extra",
+        name: "Counter Courier",
+        role: "courier",
+        temporary: true,
+        sceneLocationId: "scene-counter",
+        broadLocationId: "loc-market",
+      });
+      expect(state.npcs[0]).toMatchObject({
+        name: "Counter Courier",
+        tier: "temporary",
+        currentLocationId: "loc-market",
+        currentSceneLocationId: "scene-counter",
+      });
+    });
+
+    it("start_search and record_player_intent do not create target truth or discovery", async () => {
+      const context = createPlayerTurnContext({
+        subjectActorRefs: new Set(["hero", "player-1"]),
+      });
+
+      const search = await executeToolCall(CAMPAIGN_ID, "start_search", {
+        actorRef: "Hero",
+        query: "tea stall",
+        method: "browse",
+      }, TICK, undefined, context);
+      const intent = await executeToolCall(CAMPAIGN_ID, "record_player_intent", {
+        actorRef: "Hero",
+        intentType: "claim",
+        targetHint: "the courier knows a hidden shortcut",
+        stance: "claims",
+      }, TICK, undefined, context);
+
+      expect(search.success).toBe(true);
+      expect(search.result).toMatchObject({
+        kind: "search_started",
+        found: false,
+        discoveryCreated: false,
+        targetTruth: "unconfirmed",
+      });
+      expect(intent.success).toBe(true);
+      expect(intent.result).toMatchObject({
+        kind: "player_intent_recorded",
+        claimTruth: "unconfirmed",
+        proofCreated: false,
+        discoveryCreated: false,
+      });
+      expect(getDb).not.toHaveBeenCalled();
+    });
+  });
+
   describe("spawn_item authoritative defaults", () => {
     it("creates character-owned items with explicit carried, unequipped, non-signature metadata", async () => {
       const { db, state } = createMutableInventoryDb({

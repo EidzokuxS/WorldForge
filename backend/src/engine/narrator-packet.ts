@@ -518,6 +518,55 @@ export function summarizeRuntimeToolResultForNarrator(input: {
         ?? "the destination";
       return `The scene moves to ${targetLocationName}.`;
     }
+    case "move_actor": {
+      const actorRef =
+        acceptedField("actorRef")
+        ?? toolField(toolInput, toolArgs, "actorRef")
+        ?? "The current actor";
+      const targetLocationName =
+        acceptedField("locationName")
+        ?? toolField(toolInput, toolArgs, "destinationRef")
+        ?? "the destination";
+      return `${actorRef} moves to ${targetLocationName}.`;
+    }
+    case "create_minor_poi": {
+      const name = acceptedField("name")
+        ?? toolField(toolInput, toolArgs, "name")
+        ?? "A minor local place";
+      const anchor = acceptedField("connectedTo")
+        ?? toolField(toolInput, toolArgs, "areaRef")
+        ?? "the current area";
+      return `${name} becomes reachable from ${anchor}.`;
+    }
+    case "create_scene_extra": {
+      const name = acceptedField("name")
+        ?? toolField(toolInput, toolArgs, "name")
+        ?? "A temporary local extra";
+      return `${name} becomes visibly present in the scene.`;
+    }
+    case "start_search": {
+      const actorRef =
+        acceptedField("actorRef")
+        ?? toolField(toolInput, toolArgs, "actorRef")
+        ?? "The current actor";
+      const query =
+        acceptedField("query")
+        ?? toolField(toolInput, toolArgs, "query")
+        ?? "the target";
+      return `${actorRef} starts searching for ${query}; no discovery is confirmed.`;
+    }
+    case "record_player_intent": {
+      const actorRef =
+        acceptedField("actorRef")
+        ?? toolField(toolInput, toolArgs, "actorRef")
+        ?? "The player";
+      const targetHint =
+        acceptedField("targetHint")
+        ?? toolField(toolInput, toolArgs, "targetHint")
+        ?? toolField(toolInput, toolArgs, "summary")
+        ?? "the stated intent";
+      return `${actorRef} records an unconfirmed intent or claim about ${targetHint}.`;
+    }
     case "transfer_item": {
       const itemName = toolField(toolInput, toolArgs, "itemName") ?? "An item";
       const targetName = toolField(toolInput, toolArgs, "targetName") ?? "a new holder";
