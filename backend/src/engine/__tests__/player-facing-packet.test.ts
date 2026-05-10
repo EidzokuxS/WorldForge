@@ -311,6 +311,11 @@ describe("PlayerFacingPacket", () => {
     expect(formatted).not.toContain("canonicalTurnPacket");
     expect(packet.audit.canonicalTurnPacketOmitted).toBe(true);
     expect(packet.audit.hiddenExcludedCount).toBeGreaterThanOrEqual(6);
+    expect(packet.audit.redactionAudit.hiddenEventCount).toBe(1);
+    expect(packet.audit.redactionAudit.hiddenResponseCount).toBe(1);
+    expect(packet.audit.redactionAudit.hiddenEffectCount).toBe(1);
+    expect(formatted).toContain("[REDACTION AUDIT]");
+    expect(formatted).toContain("hiddenEventCount: 1");
     expect(packet.contextBudgetTrace.didClipModelOutput).toBe(false);
   });
 
@@ -410,5 +415,32 @@ describe("PlayerFacingPacket", () => {
     expect(formatted).not.toContain("Hidden Tea Broker");
     expect(formatted).not.toContain("Hidden Tea Vault");
     expect(formatted).not.toContain("private vault tea room");
+  });
+
+  it("records source-linked overflow summaries without clipping visible narration output", () => {
+    const narratorPacket = createNarratorPacket();
+    narratorPacket.perceivableResponses = Array.from({ length: 42 }, (_, index) => ({
+      id: `response-visible-${index + 1}`,
+      actorId: visibleNpcId,
+      responseKind: "spoken",
+      eventId: "event-player",
+      summary: `Visible depot response ${index + 1} stays source linked.`,
+      visibleToPlayer: true,
+    }));
+
+    const packet = buildPlayerFacingPacketFromNarratorPacket(narratorPacket);
+    const formatted = formatPlayerFacingPacketForPrompt(packet);
+
+    expect(packet.contextBudgetTrace.summarizedItemCount).toBeGreaterThan(0);
+    expect(packet.contextBudgetTrace.sourceLinkedSummaryCount).toBeGreaterThan(0);
+    expect(packet.contextBudgetTrace.overflowWarnings.map((warning) => warning.code)).toContain(
+      "items_summarized_by_budget",
+    );
+    expect(packet.contextBudgetTrace.didClipModelOutput).toBe(false);
+    expect(formatted).toContain("[SOURCE-LINKED SUMMARIES]");
+    expect(formatted).toContain("additional player-facing packet records summarized for budget");
+    expect(formatted).toContain("didClipModelOutput: false");
+    expect(formatted).not.toContain("truncateToFit");
+    expect(formatted).not.toContain("sanitizeNarrative");
   });
 });

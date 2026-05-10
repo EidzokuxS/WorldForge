@@ -4,6 +4,11 @@ import type { ToolResult } from "./tool-executor.js";
 import { isObservationToolResult } from "./tool-result.js";
 import type { RuntimeToolName } from "./tool-schemas.js";
 import { sourceBoundaryTermIsLeak } from "./source-boundary.js";
+import {
+  buildContextBudgetTrace,
+  type ContextBudgetTrace,
+} from "./context-budget-trace.js";
+import { getFrameBudgetSpec } from "./frame-budget.js";
 
 export type CanonicalTurnPacketEventKind =
   | "player_action"
@@ -123,6 +128,39 @@ export interface NarratorPacketEvidence {
   sourceId?: string;
 }
 
+export type NarratorPacketRedactionReason =
+  | "hidden_event"
+  | "hidden_response"
+  | "failed_effect"
+  | "unreferenced_effect"
+  | "hidden_effect"
+  | "private_actor_name"
+  | "forbidden_fact_marker"
+  | "forbidden_private_term"
+  | "uncommitted_proposal";
+
+export interface NarratorPacketRedactionAudit {
+  hiddenEventCount: number;
+  hiddenResponseCount: number;
+  failedEffectCount: number;
+  unreferencedEffectCount: number;
+  hiddenEffectCount: number;
+  privateActorNameCount: number;
+  forbiddenFactMarkerCount: number;
+  forbiddenPrivateTermCount: number;
+  uncommittedProposalCount: number;
+  retainedSourceRefCount: number;
+  retainedEvidenceCount: number;
+  excludedReasons: Record<NarratorPacketRedactionReason, number>;
+}
+
+export interface NarratorPacketSourceLinkedSummary {
+  id: string;
+  summary: string;
+  sourceIds: string[];
+  summarizedItemCount: number;
+}
+
 export interface NarratorPacket {
   campaignId: string;
   tick: number;
@@ -142,6 +180,9 @@ export interface NarratorPacket {
   forbiddenActorNames: string[];
   forbiddenFactMarkers: string[];
   forbiddenPrivateTerms: string[];
+  redactionAudit?: NarratorPacketRedactionAudit;
+  sourceLinkedSummaries?: NarratorPacketSourceLinkedSummary[];
+  contextBudgetTrace?: ContextBudgetTrace;
   canonicalTurnPacket: CanonicalTurnPacket;
 }
 
@@ -150,6 +191,13 @@ export interface BuildNarratorPacketArgs {
   canonicalTurnPacket: CanonicalTurnPacket;
   forbiddenFactMarkers?: string[];
   forbiddenPrivateTerms?: string[];
+  uncommittedProposalCandidates?: readonly NarratorPacketProposalCandidate[];
+}
+
+export interface NarratorPacketProposalCandidate {
+  id: string;
+  status?: string;
+  hidden?: boolean;
 }
 
 export class NarratorPacketPromptSafetyError extends Error {
@@ -675,6 +723,309 @@ function collectPerceivableEffects(packet: CanonicalTurnPacket): CanonicalTurnPa
   ]);
 }
 
+interface NarratorPromptVisibleItem {
+  id: string;
+  category: string;
+  text: string;
+  sourceId: string;
+}
+
+function collectNarratorPromptVisibleItems(packet: NarratorPacket): NarratorPromptVisibleItem[] {
+  return [
+    {
+      id: "player-action",
+      category: "player_action_request",
+      text: packet.playerAction,
+      sourceId: "player-action",
+    },
+    ...(packet.oracleOutcome
+      ? [{
+          id: "oracle-outcome",
+          category: "oracle_outcome",
+          text: packet.oracleOutcome,
+          sourceId: "oracle-outcome",
+        }]
+      : []),
+    {
+      id: packet.anchorEvent.id,
+      category: "anchor_event",
+      text: packet.anchorEvent.summary,
+      sourceId: packet.anchorEvent.id,
+    },
+    ...packet.perceivableEvents.map((event) => ({
+      id: event.id,
+      category: "committed_event",
+      text: event.summary,
+      sourceId: event.id,
+    })),
+    ...packet.perceivableResponses.map((response) => ({
+      id: response.id,
+      category: "perceivable_response",
+      text: response.summary,
+      sourceId: response.id,
+    })),
+    ...packet.perceivableEffects.map((effect) => ({
+      id: effect.id,
+      category: "perceivable_effect",
+      text: effect.summary,
+      sourceId: effect.id,
+    })),
+    ...packet.visibleActors.map((actor) => ({
+      id: actor.id,
+      category: "visible_actor",
+      text: actor.label,
+      sourceId: actor.id,
+    })),
+    ...packet.hintSignals.map((hint, index) => ({
+      id: packet.hintSignalSourceRefs?.[index]?.id ?? `hint:${index + 1}`,
+      category: packet.hintSignalSourceRefs?.[index]?.kind ?? "hint_signal",
+      text: hint,
+      sourceId: packet.hintSignalSourceRefs?.[index]?.id ?? `hint:${index + 1}`,
+    })),
+    ...packet.guardrails.map((guardrail, index) => ({
+      id: `guardrail:${index + 1}`,
+      category: "guardrail",
+      text: guardrail,
+      sourceId: `guardrail:${index + 1}`,
+    })),
+    {
+      id: "control-return",
+      category: "control_return",
+      text: packet.controlReturnReason,
+      sourceId: "control-return",
+    },
+  ].filter((item) => item.text.trim().length > 0);
+}
+
+function routeCountsFromItems(items: readonly NarratorPromptVisibleItem[]): Record<string, number> {
+  return items.reduce<Record<string, number>>((counts, item) => {
+    counts[item.category] = (counts[item.category] ?? 0) + 1;
+    return counts;
+  }, {});
+}
+
+function countFailedActionResultsWithoutEffect(packet: CanonicalTurnPacket): number {
+  const failedEffectActionIds = new Set(
+    packet.effects
+      .filter((effect) => effect.toolResult?.success === false)
+      .map((effect) => effect.actionId)
+      .filter((id): id is string => Boolean(id)),
+  );
+
+  return packet.actionResults.filter(
+    (result) => !result.result.success && !failedEffectActionIds.has(result.actionId),
+  ).length;
+}
+
+function countUnreferencedSuccessfulActionResults(args: {
+  packet: CanonicalTurnPacket;
+  perceivableEffects: readonly CanonicalTurnPacketEffect[];
+}): number {
+  const referencedActionIds = new Set(args.packet.narratorFacts.actionIds);
+  const referencedToolRefs = new Set(
+    args.packet.narratorFacts.toolResultRefs.map((ref) => `${ref.actionId}:${ref.toolName}`),
+  );
+  const includedGeneratedEffectIds = new Set(
+    args.perceivableEffects
+      .filter((effect) => effect.id.startsWith("action-result:"))
+      .map((effect) => effect.id.replace(/^action-result:/u, "")),
+  );
+
+  return args.packet.actionResults.filter((result) => {
+    if (!result.result.success || isObservationToolResult(result.result)) {
+      return false;
+    }
+    if (includedGeneratedEffectIds.has(result.actionId)) {
+      return false;
+    }
+    return !referencedActionIds.has(result.actionId)
+      && !referencedToolRefs.has(`${result.actionId}:${result.toolName}`);
+  }).length;
+}
+
+function buildRedactionAudit(args: {
+  packet: CanonicalTurnPacket;
+  perceivableEvents: readonly CanonicalTurnPacketEvent[];
+  perceivableResponses: readonly CanonicalTurnPacketResponse[];
+  perceivableEffects: readonly CanonicalTurnPacketEffect[];
+  forbiddenActorNames: readonly string[];
+  forbiddenFactMarkers: readonly string[];
+  forbiddenPrivateTerms: readonly string[];
+  evidenceLedger: readonly NarratorPacketEvidence[];
+  uncommittedProposalCandidates?: readonly NarratorPacketProposalCandidate[];
+}): NarratorPacketRedactionAudit {
+  const visibleEffectIds = new Set(args.perceivableEffects.map((effect) => effect.id));
+  const candidateEvents = uniqueById([args.packet.anchorEvent, ...args.packet.events]);
+  const hiddenEventCount = candidateEvents.filter(
+    (event) => !event.perceivableByPlayer,
+  ).length;
+  const hiddenResponseCount = args.packet.responses.filter(
+    (response) => !response.visibleToPlayer,
+  ).length;
+  const failedEffectCount = args.packet.effects.filter(
+    (effect) => effect.toolResult?.success === false,
+  ).length + countFailedActionResultsWithoutEffect(args.packet);
+  const hiddenEffectCount = args.packet.effects.filter(
+    (effect) => !effect.perceivableByPlayer,
+  ).length;
+  const unreferencedEffectCount = args.packet.effects.filter((effect) => {
+    if (!effect.perceivableByPlayer || effect.toolResult?.success === false) {
+      return false;
+    }
+    return !visibleEffectIds.has(effect.id);
+  }).length + countUnreferencedSuccessfulActionResults({
+    packet: args.packet,
+    perceivableEffects: args.perceivableEffects,
+  });
+  const excludedReasons: Record<NarratorPacketRedactionReason, number> = {
+    hidden_event: hiddenEventCount,
+    hidden_response: hiddenResponseCount,
+    failed_effect: failedEffectCount,
+    unreferenced_effect: unreferencedEffectCount,
+    hidden_effect: hiddenEffectCount,
+    private_actor_name: args.forbiddenActorNames.length,
+    forbidden_fact_marker: args.forbiddenFactMarkers.length,
+    forbidden_private_term: args.forbiddenPrivateTerms.length,
+    uncommitted_proposal: args.uncommittedProposalCandidates?.length ?? 0,
+  };
+
+  return {
+    hiddenEventCount,
+    hiddenResponseCount,
+    failedEffectCount,
+    unreferencedEffectCount,
+    hiddenEffectCount,
+    privateActorNameCount: args.forbiddenActorNames.length,
+    forbiddenFactMarkerCount: args.forbiddenFactMarkers.length,
+    forbiddenPrivateTermCount: args.forbiddenPrivateTerms.length,
+    uncommittedProposalCount: args.uncommittedProposalCandidates?.length ?? 0,
+    retainedSourceRefCount: uniqueStrings(
+      args.evidenceLedger.map((entry) => entry.sourceId ?? null),
+    ).length,
+    retainedEvidenceCount: args.evidenceLedger.length,
+    excludedReasons,
+  };
+}
+
+function redactionAuditHiddenExcludedCount(audit: NarratorPacketRedactionAudit): number {
+  return audit.hiddenEventCount
+    + audit.hiddenResponseCount
+    + audit.failedEffectCount
+    + audit.unreferencedEffectCount
+    + audit.hiddenEffectCount
+    + audit.privateActorNameCount
+    + audit.forbiddenFactMarkerCount
+    + audit.forbiddenPrivateTermCount
+    + audit.uncommittedProposalCount;
+}
+
+export function getNarratorPacketRedactionAudit(
+  packet: NarratorPacket,
+): NarratorPacketRedactionAudit {
+  if (packet.redactionAudit) {
+    return packet.redactionAudit;
+  }
+
+  const audit = buildRedactionAudit({
+    packet: packet.canonicalTurnPacket,
+    perceivableEvents: packet.perceivableEvents,
+    perceivableResponses: packet.perceivableResponses,
+    perceivableEffects: packet.perceivableEffects,
+    forbiddenActorNames: packet.forbiddenActorNames,
+    forbiddenFactMarkers: packet.forbiddenFactMarkers,
+    forbiddenPrivateTerms: packet.forbiddenPrivateTerms,
+    evidenceLedger: packet.evidenceLedger ?? [],
+    uncommittedProposalCandidates: [],
+  });
+  if ((packet.evidenceLedger ?? []).length > 0) {
+    return audit;
+  }
+
+  const visibleItems = collectNarratorPromptVisibleItems(packet);
+  return {
+    ...audit,
+    retainedSourceRefCount: uniqueStrings(visibleItems.map((item) => item.sourceId)).length,
+    retainedEvidenceCount: visibleItems.length,
+  };
+}
+
+function buildNarratorSourceLinkedSummaries(
+  items: readonly NarratorPromptVisibleItem[],
+): NarratorPacketSourceLinkedSummary[] {
+  const budget = getFrameBudgetSpec("NarratorPacket");
+  const overflow = items.slice(budget.maxSelectedItems);
+  if (overflow.length === 0) {
+    return [];
+  }
+
+  const sourceIds = uniqueStrings(overflow.map((item) => item.sourceId));
+  return [{
+    id: `narrator-summary:${sourceIds.slice(0, 4).join(":")}`,
+    summary:
+      `${overflow.length} additional player-visible packet records summarized for budget. `
+      + `Sources: ${sourceIds.slice(0, 8).join(", ")}.`,
+    sourceIds,
+    summarizedItemCount: overflow.length,
+  }];
+}
+
+function buildNarratorContextBudgetTrace(args: {
+  packet: NarratorPacket;
+  visibleItems: readonly NarratorPromptVisibleItem[];
+  redactionAudit: NarratorPacketRedactionAudit;
+  sourceLinkedSummaries: readonly NarratorPacketSourceLinkedSummary[];
+}): ContextBudgetTrace {
+  const budget = getFrameBudgetSpec("NarratorPacket");
+  const overflowCount = Math.max(0, args.visibleItems.length - budget.maxSelectedItems);
+  const sourceBackedCount = uniqueStrings([
+    ...(args.packet.evidenceLedger ?? []).map((entry) => entry.sourceId ?? null),
+    ...args.sourceLinkedSummaries.flatMap((summary) => summary.sourceIds),
+  ]).length;
+
+  return buildContextBudgetTrace({
+    label: "NarratorPacket",
+    frameType: "NarratorPacket",
+    visibleTexts: [
+      ...args.visibleItems.map((item) => item.text),
+      ...args.sourceLinkedSummaries.map((summary) => summary.summary),
+    ],
+    visibleItemCount: args.visibleItems.length + args.sourceLinkedSummaries.length,
+    hiddenExcludedCount: redactionAuditHiddenExcludedCount(args.redactionAudit),
+    candidateItemCount:
+      args.visibleItems.length
+      + redactionAuditHiddenExcludedCount(args.redactionAudit),
+    selectedItemCount: Math.min(args.visibleItems.length, budget.maxSelectedItems),
+    summarizedItemCount: overflowCount,
+    excludedByVisibilityCount:
+      args.redactionAudit.hiddenEventCount
+      + args.redactionAudit.hiddenResponseCount
+      + args.redactionAudit.hiddenEffectCount
+      + args.redactionAudit.privateActorNameCount
+      + args.redactionAudit.forbiddenFactMarkerCount
+      + args.redactionAudit.forbiddenPrivateTermCount
+      + args.redactionAudit.uncommittedProposalCount,
+    excludedByBudgetCount: 0,
+    sourceLinkedSummaryCount: args.sourceLinkedSummaries.length,
+    sectionCounts: {
+      actors: args.packet.visibleActors.length,
+      hints: args.packet.hintSignals.length,
+      events: args.packet.perceivableEvents.length,
+      responses: args.packet.perceivableResponses.length,
+      effects: args.packet.perceivableEffects.length,
+      guardrails: args.packet.guardrails.length,
+      sourceLinkedSummaries: args.sourceLinkedSummaries.length,
+    },
+    sourceCoverage: {
+      sourceBackedCount,
+      routeCounts: routeCountsFromItems(args.visibleItems),
+    },
+    notes: [
+      "NarratorPacket audit counts hidden/private/proposal exclusions without formatting hidden payloads.",
+      "Context pressure is diagnostic only; it must not clip model output.",
+    ],
+  });
+}
+
 export function buildNarratorPacket(args: BuildNarratorPacketArgs): NarratorPacket {
   const visibleActors = collectVisibleActors(args.frame);
   const perceivableEvents = collectPerceivableEvents(args.canonicalTurnPacket);
@@ -682,6 +1033,32 @@ export function buildNarratorPacket(args: BuildNarratorPacketArgs): NarratorPack
   const perceivableEffects = collectPerceivableEffects(args.canonicalTurnPacket);
   const hintSignals = collectHintSignals(args.frame);
   const hintSignalSourceRefs = collectHintSignalSourceRefs(args.frame);
+  const evidenceLedger = collectEvidenceLedger({
+    packet: args.canonicalTurnPacket,
+    visibleActors,
+    perceivableEvents,
+    perceivableResponses,
+    perceivableEffects,
+    hintSignals,
+    hintSignalSourceRefs,
+  });
+  const forbiddenActorNames = collectForbiddenActorNames(args.frame);
+  const forbiddenFactMarkers = collectForbiddenFactMarkers(
+    args.frame,
+    args.forbiddenFactMarkers,
+  );
+  const forbiddenPrivateTerms = uniqueStrings(args.forbiddenPrivateTerms ?? []);
+  const redactionAudit = buildRedactionAudit({
+    packet: args.canonicalTurnPacket,
+    perceivableEvents,
+    perceivableResponses,
+    perceivableEffects,
+    forbiddenActorNames,
+    forbiddenFactMarkers,
+    forbiddenPrivateTerms,
+    evidenceLedger,
+    uncommittedProposalCandidates: args.uncommittedProposalCandidates,
+  });
   const packet: NarratorPacket = {
     campaignId: args.canonicalTurnPacket.campaignId,
     tick: args.canonicalTurnPacket.tick,
@@ -694,26 +1071,25 @@ export function buildNarratorPacket(args: BuildNarratorPacketArgs): NarratorPack
     visibleActors,
     hintSignals,
     hintSignalSourceRefs,
-    evidenceLedger: collectEvidenceLedger({
-      packet: args.canonicalTurnPacket,
-      visibleActors,
-      perceivableEvents,
-      perceivableResponses,
-      perceivableEffects,
-      hintSignals,
-      hintSignalSourceRefs,
-    }),
+    evidenceLedger,
     guardrails: [...args.canonicalTurnPacket.guardrails],
     controlReturnReason: args.canonicalTurnPacket.controlReturnReason,
     allowedVisibleActorNames: visibleActors.map((actor) => actor.label),
-    forbiddenActorNames: collectForbiddenActorNames(args.frame),
-    forbiddenFactMarkers: collectForbiddenFactMarkers(
-      args.frame,
-      args.forbiddenFactMarkers,
-    ),
-    forbiddenPrivateTerms: uniqueStrings(args.forbiddenPrivateTerms ?? []),
+    forbiddenActorNames,
+    forbiddenFactMarkers,
+    forbiddenPrivateTerms,
+    redactionAudit,
     canonicalTurnPacket: args.canonicalTurnPacket,
   };
+  const visibleItems = collectNarratorPromptVisibleItems(packet);
+  const sourceLinkedSummaries = buildNarratorSourceLinkedSummaries(visibleItems);
+  packet.sourceLinkedSummaries = sourceLinkedSummaries;
+  packet.contextBudgetTrace = buildNarratorContextBudgetTrace({
+    packet,
+    visibleItems,
+    redactionAudit,
+    sourceLinkedSummaries,
+  });
 
   return packet;
 }
@@ -763,6 +1139,10 @@ function promptSourceBoundaryText(
     ...packet.guardrails.map((guardrail, index) => ({
       source: `guardrail:${index + 1}`,
       text: guardrail,
+    })),
+    ...(packet.sourceLinkedSummaries ?? []).map((summary) => ({
+      source: `source_linked_summary:${summary.id}`,
+      text: summary.summary,
     })),
     { source: "control_return", text: packet.controlReturnReason },
   ];
@@ -837,8 +1217,51 @@ function formatEvidence(evidence: NarratorPacketEvidence): string {
   return `- ${evidence.id} [category=${evidence.category}]`;
 }
 
+function formatSourceLinkedSummary(summary: NarratorPacketSourceLinkedSummary): string {
+  return `- ${summary.id}: ${summary.summary} [sources=${summary.sourceIds.join(", ")}]`;
+}
+
+function formatRedactionAudit(audit: NarratorPacketRedactionAudit): string[] {
+  return [
+    `- hiddenEventCount: ${audit.hiddenEventCount}`,
+    `- hiddenResponseCount: ${audit.hiddenResponseCount}`,
+    `- failedEffectCount: ${audit.failedEffectCount}`,
+    `- unreferencedEffectCount: ${audit.unreferencedEffectCount}`,
+    `- hiddenEffectCount: ${audit.hiddenEffectCount}`,
+    `- privateActorNameCount: ${audit.privateActorNameCount}`,
+    `- forbiddenFactMarkerCount: ${audit.forbiddenFactMarkerCount}`,
+    `- forbiddenPrivateTermCount: ${audit.forbiddenPrivateTermCount}`,
+    `- uncommittedProposalCount: ${audit.uncommittedProposalCount}`,
+    `- retainedSourceRefCount: ${audit.retainedSourceRefCount}`,
+    `- retainedEvidenceCount: ${audit.retainedEvidenceCount}`,
+  ];
+}
+
+function formatContextBudgetTrace(trace: ContextBudgetTrace | undefined): string[] {
+  if (!trace) {
+    return ["- No context budget trace is available."];
+  }
+
+  return [
+    `- frameType: ${trace.frameType ?? "unknown"}`,
+    `- estimatedInputTokens: ${trace.estimatedInputTokens}`,
+    `- selectedItemCount: ${trace.selectedItemCount}`,
+    `- summarizedItemCount: ${trace.summarizedItemCount}`,
+    `- hiddenExcludedCount: ${trace.hiddenExcludedCount}`,
+    `- sourceLinkedSummaryCount: ${trace.sourceLinkedSummaryCount}`,
+    `- didClipModelOutput: ${trace.didClipModelOutput}`,
+    ...(trace.overflowWarnings.length > 0
+      ? trace.overflowWarnings.map((warning) =>
+          `- overflowWarning: ${warning.code}${warning.count ? ` (${warning.count})` : ""}`,
+        )
+      : ["- overflowWarnings: none"]),
+  ];
+}
+
 export function formatNarratorPacketForPrompt(packet: NarratorPacket): string {
   assertNarratorPacketPromptSafe(packet);
+  const redactionAudit = getNarratorPacketRedactionAudit(packet);
+  const sourceLinkedSummaries = packet.sourceLinkedSummaries ?? [];
 
   return [
     "[NARRATOR PACKET]",
@@ -883,6 +1306,17 @@ export function formatNarratorPacketForPrompt(packet: NarratorPacket): string {
     ...((packet.evidenceLedger ?? []).length > 0
       ? (packet.evidenceLedger ?? []).map(formatEvidence)
       : ["- No packet evidence ids are in scope."]),
+    "",
+    "[SOURCE-LINKED SUMMARIES]",
+    ...(sourceLinkedSummaries.length > 0
+      ? sourceLinkedSummaries.map(formatSourceLinkedSummary)
+      : ["- No source-linked overflow summaries were needed."]),
+    "",
+    "[REDACTION AUDIT]",
+    ...formatRedactionAudit(redactionAudit),
+    "",
+    "[CONTEXT BUDGET TRACE]",
+    ...formatContextBudgetTrace(packet.contextBudgetTrace),
     "",
     "[CONTROL RETURN]",
     packet.controlReturnReason,

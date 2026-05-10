@@ -212,6 +212,66 @@ describe("visible narration output guard", () => {
     );
   });
 
+  it("reports safe redaction audit diagnostics without hidden terms or proposal text", async () => {
+    const packet = createPacket();
+    packet.redactionAudit = {
+      hiddenEventCount: 1,
+      hiddenResponseCount: 1,
+      failedEffectCount: 1,
+      unreferencedEffectCount: 1,
+      hiddenEffectCount: 1,
+      privateActorNameCount: 1,
+      forbiddenFactMarkerCount: 1,
+      forbiddenPrivateTermCount: 1,
+      uncommittedProposalCount: 2,
+      retainedSourceRefCount: 3,
+      retainedEvidenceCount: 3,
+      excludedReasons: {
+        hidden_event: 1,
+        hidden_response: 1,
+        failed_effect: 1,
+        unreferenced_effect: 1,
+        hidden_effect: 1,
+        private_actor_name: 1,
+        forbidden_fact_marker: 1,
+        forbidden_private_term: 1,
+        uncommitted_proposal: 2,
+      },
+    };
+    const attempts: Array<{ attempt: number; guardAddendum: string | null }> = [];
+    const diagnostics: string[] = [];
+    const generateNarration = vi.fn(({ attempt, guardAddendum }) => {
+      attempts.push({ attempt, guardAddendum });
+      return attempt === 1
+        ? JSON.stringify(createGroundedDraft({
+            prose: "The Hidden Archer names the Forest Outpost and proposal-secret-vault.",
+          }))
+        : JSON.stringify(createGroundedDraft());
+    });
+
+    const result = await runVisibleNarrationWithPacketGuard({
+      packet,
+      generateNarration,
+      onUnsafeAttempt: ({ validation }) => {
+        diagnostics.push(JSON.stringify(validation.diagnostics));
+      },
+    });
+
+    expect(result.retried).toBe(true);
+    expect(attempts[1]?.guardAddendum).toContain("Safe redaction audit categories");
+    expect(attempts[1]?.guardAddendum).toContain("forbiddenActorName");
+    expect(attempts[1]?.guardAddendum).toContain("uncommittedProposalCount=2");
+    expect(diagnostics[0]).toContain("\"uncommittedProposalCount\":2");
+    expect(`${attempts[1]?.guardAddendum}\n${diagnostics[0]}`).not.toContain("Hidden Archer");
+    expect(`${attempts[1]?.guardAddendum}\n${diagnostics[0]}`).not.toContain("Forest Outpost");
+    expect(`${attempts[1]?.guardAddendum}\n${diagnostics[0]}`).not.toContain(
+      `hidden-actor:${hiddenNpcId}`,
+    );
+    expect(`${attempts[1]?.guardAddendum}\n${diagnostics[0]}`).not.toContain(
+      "proposal-secret-vault",
+    );
+  });
+
   it("empty Storyteller output retries with playable narration addendum", async () => {
     const packet = createPacket();
     const attempts: Array<{ attempt: number; guardAddendum: string | null }> =

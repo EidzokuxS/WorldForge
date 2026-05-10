@@ -199,6 +199,61 @@ describe("narrator packet settlement boundary", () => {
     expect(formatNarratorPacketForPrompt(packet)).toContain("perceivable_effect:effect-success");
   });
 
+  it("records redaction audit counts without formatting hidden proposal payloads", () => {
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    canonicalTurnPacket.events.push({
+      id: "event-hidden-private",
+      actorId: visibleNpcId,
+      kind: "environment",
+      summary: "HIDDEN EVENT SENTINEL: Hidden Proposal Vault opens.",
+      perceivableByPlayer: false,
+    });
+    canonicalTurnPacket.responses.push({
+      id: "response-hidden-private",
+      actorId: visibleNpcId,
+      responseKind: "system",
+      eventId: "event-hidden-private",
+      summary: "HIDDEN RESPONSE SENTINEL: private proposal answer.",
+      visibleToPlayer: false,
+    });
+    canonicalTurnPacket.effects.push({
+      id: "effect-hidden-private",
+      actorId: visibleNpcId,
+      summary: "HIDDEN EFFECT SENTINEL: the private proposal commits.",
+      perceivableByPlayer: false,
+    });
+
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket,
+      forbiddenPrivateTerms: ["Hidden Proposal Vault", "private proposal answer"],
+      uncommittedProposalCandidates: [
+        { id: "proposal-hidden-vault", status: "pending", hidden: true },
+      ],
+    });
+    const formatted = formatNarratorPacketForPrompt(packet);
+
+    expect(packet.redactionAudit).toMatchObject({
+      hiddenEventCount: 1,
+      hiddenResponseCount: 1,
+      failedEffectCount: 1,
+      unreferencedEffectCount: 1,
+      hiddenEffectCount: 1,
+      forbiddenPrivateTermCount: 2,
+      uncommittedProposalCount: 1,
+    });
+    expect(packet.contextBudgetTrace?.frameType).toBe("NarratorPacket");
+    expect(packet.contextBudgetTrace?.didClipModelOutput).toBe(false);
+    expect(formatted).toContain("[REDACTION AUDIT]");
+    expect(formatted).toContain("uncommittedProposalCount: 1");
+    expect(formatted).not.toContain("HIDDEN EVENT SENTINEL");
+    expect(formatted).not.toContain("HIDDEN RESPONSE SENTINEL");
+    expect(formatted).not.toContain("HIDDEN EFFECT SENTINEL");
+    expect(formatted).not.toContain("proposal-hidden-vault");
+    expect(formatted).not.toContain("Hidden Proposal Vault");
+    expect(formatted).not.toContain("private proposal answer");
+  });
+
   it("keeps private POV terms out of player prompt and model-facing scene packets", () => {
     const frame = createFrame();
     frame.roster.active[1] = {

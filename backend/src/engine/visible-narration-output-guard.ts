@@ -1,4 +1,8 @@
-import type { NarratorPacket } from "./narrator-packet.js";
+import {
+  getNarratorPacketRedactionAudit,
+  type NarratorPacket,
+  type NarratorPacketRedactionAudit,
+} from "./narrator-packet.js";
 import {
   ALLOWED_NARRATION_CLAIM_KINDS,
   validateNarrationDraftGrounding,
@@ -42,11 +46,28 @@ export interface VisibleNarrationPacketWarning {
   term: string;
 }
 
+export interface VisibleNarrationPacketDiagnostics {
+  violationKinds: VisibleNarrationPacketViolationKind[];
+  redactionAudit: Pick<
+    NarratorPacketRedactionAudit,
+    | "hiddenEventCount"
+    | "hiddenResponseCount"
+    | "failedEffectCount"
+    | "unreferencedEffectCount"
+    | "hiddenEffectCount"
+    | "privateActorNameCount"
+    | "forbiddenFactMarkerCount"
+    | "forbiddenPrivateTermCount"
+    | "uncommittedProposalCount"
+  >;
+}
+
 export interface VisibleNarrationPacketValidationResult {
   ok: boolean;
   violations: VisibleNarrationPacketViolation[];
   warnings?: VisibleNarrationPacketWarning[];
   grounding?: GroundingGuardResult;
+  diagnostics?: VisibleNarrationPacketDiagnostics;
 }
 
 export interface VisibleNarrationGeneratorArgs {
@@ -143,6 +164,7 @@ export function validateVisibleNarrationAgainstPacket(args: {
     violations,
     warnings,
     grounding,
+    diagnostics: buildVisibleNarrationDiagnostics(args.packet, violations),
   };
 }
 
@@ -217,7 +239,53 @@ function buildVisibleNarrationRetryAddendum(
     return THIN_VISIBLE_PACKET_RETRY_ADDENDUM;
   }
 
+  if (validation?.diagnostics?.violationKinds.length) {
+    return [
+      GENERIC_VISIBLE_PACKET_RETRY_ADDENDUM,
+      `Safe redaction audit categories: ${validation.diagnostics.violationKinds.join(", ")}.`,
+      formatDiagnosticCountLine(validation.diagnostics.redactionAudit),
+    ].join("\n");
+  }
+
   return GENERIC_VISIBLE_PACKET_RETRY_ADDENDUM;
+}
+
+function buildVisibleNarrationDiagnostics(
+  packet: NarratorPacket,
+  violations: readonly VisibleNarrationPacketViolation[],
+): VisibleNarrationPacketDiagnostics {
+  const audit = getNarratorPacketRedactionAudit(packet);
+  return {
+    violationKinds: [...new Set(violations.map((violation) => violation.kind))],
+    redactionAudit: {
+      hiddenEventCount: audit.hiddenEventCount,
+      hiddenResponseCount: audit.hiddenResponseCount,
+      failedEffectCount: audit.failedEffectCount,
+      unreferencedEffectCount: audit.unreferencedEffectCount,
+      hiddenEffectCount: audit.hiddenEffectCount,
+      privateActorNameCount: audit.privateActorNameCount,
+      forbiddenFactMarkerCount: audit.forbiddenFactMarkerCount,
+      forbiddenPrivateTermCount: audit.forbiddenPrivateTermCount,
+      uncommittedProposalCount: audit.uncommittedProposalCount,
+    },
+  };
+}
+
+function formatDiagnosticCountLine(
+  audit: VisibleNarrationPacketDiagnostics["redactionAudit"],
+): string {
+  return [
+    "Safe redaction audit counts:",
+    `hiddenEventCount=${audit.hiddenEventCount}`,
+    `hiddenResponseCount=${audit.hiddenResponseCount}`,
+    `failedEffectCount=${audit.failedEffectCount}`,
+    `unreferencedEffectCount=${audit.unreferencedEffectCount}`,
+    `hiddenEffectCount=${audit.hiddenEffectCount}`,
+    `privateActorNameCount=${audit.privateActorNameCount}`,
+    `forbiddenFactMarkerCount=${audit.forbiddenFactMarkerCount}`,
+    `forbiddenPrivateTermCount=${audit.forbiddenPrivateTermCount}`,
+    `uncommittedProposalCount=${audit.uncommittedProposalCount}`,
+  ].join(" ");
 }
 
 function shouldRetryThinNarrationPreference(args: {
@@ -375,15 +443,38 @@ function isNarrationDraftRequired(packet: NarratorPacket): boolean {
 function withInvalidNarrationDraftViolation(
   validation: VisibleNarrationPacketValidationResult,
 ): VisibleNarrationPacketValidationResult {
+  const violations = [
+    ...validation.violations,
+    {
+      kind: "invalidNarrationDraft" as const,
+      term: "NarrationDraft JSON",
+    },
+  ];
+
   return {
     ...validation,
     ok: false,
-    violations: [
-      ...validation.violations,
-      {
-        kind: "invalidNarrationDraft",
-        term: "NarrationDraft JSON",
-      },
-    ],
+    violations,
+    diagnostics: {
+      ...(validation.diagnostics ?? buildEmptyVisibleNarrationDiagnostics()),
+      violationKinds: [...new Set(violations.map((violation) => violation.kind))],
+    },
+  };
+}
+
+function buildEmptyVisibleNarrationDiagnostics(): VisibleNarrationPacketDiagnostics {
+  return {
+    violationKinds: [],
+    redactionAudit: {
+      hiddenEventCount: 0,
+      hiddenResponseCount: 0,
+      failedEffectCount: 0,
+      unreferencedEffectCount: 0,
+      hiddenEffectCount: 0,
+      privateActorNameCount: 0,
+      forbiddenFactMarkerCount: 0,
+      forbiddenPrivateTermCount: 0,
+      uncommittedProposalCount: 0,
+    },
   };
 }

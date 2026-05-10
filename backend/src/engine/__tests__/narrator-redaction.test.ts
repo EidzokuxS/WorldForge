@@ -151,6 +151,8 @@ describe("narrator redaction boundary", () => {
 
     expect(result.prompt).toContain("[PLAYER-FACING PACKET]");
     expect(result.prompt).toContain("[CONTEXT BUDGET TRACE]");
+    expect(result.prompt).toContain("[REDACTION AUDIT]");
+    expect(result.prompt).toContain("forbiddenPrivateTermCount: 1");
     expect(result.prompt).toContain("didClipModelOutput: false");
     expect(result.prompt).toContain("Paper clicks once behind the ledger wall.");
     expect(result.prompt).not.toContain("Hidden Auditor");
