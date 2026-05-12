@@ -41,6 +41,7 @@ vi.mock("../manager.js", () => ({
 
 vi.mock("../runtime-state.js", () => ({
   clearCampaignRuntimeState: vi.fn(),
+  hasActiveTurn: vi.fn(() => false),
 }));
 
 vi.mock("../../vectors/episodic-events.js", () => ({
@@ -79,7 +80,7 @@ import { openVectorDb, closeVectorDb } from "../../vectors/connection.js";
 import { runMigrations } from "../../db/migrate.js";
 import { AppError } from "../../lib/index.js";
 import { loadCampaign } from "../manager.js";
-import { clearCampaignRuntimeState } from "../runtime-state.js";
+import { clearCampaignRuntimeState, hasActiveTurn } from "../runtime-state.js";
 import { clearPendingCommittedEvents } from "../../vectors/episodic-events.js";
 import {
   invalidateAuthorityAfterRestore,
@@ -89,6 +90,7 @@ import {
 beforeEach(() => {
   vi.restoreAllMocks();
   mockBackup.mockReset().mockResolvedValue(undefined);
+  vi.mocked(hasActiveTurn).mockReturnValue(false);
 });
 
 describe("createCheckpoint", () => {
@@ -307,6 +309,17 @@ describe("loadCheckpoint", () => {
     await expect(loadCheckpoint("camp-1", "cp-missing")).rejects.toThrow(
       "not found"
     );
+  });
+
+  it("refuses to restore a checkpoint while a turn is active", async () => {
+    vi.mocked(hasActiveTurn).mockReturnValue(true);
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+
+    await expect(loadCheckpoint("camp-1", "cp-1")).rejects.toThrow(
+      "Cannot load a checkpoint while a turn is active.",
+    );
+    expect(clearCampaignRuntimeState).not.toHaveBeenCalled();
+    expect(loadCampaign).not.toHaveBeenCalled();
   });
 
   it("disconnects DB/vectors, copies files back, reconnects", async () => {

@@ -49,6 +49,7 @@ vi.mock("../../lib/index.js", () => ({
 }));
 
 const {
+  getSafeGenerateObjectErrorCode,
   isSafeGenerateObjectError,
   safeGenerateObject,
 } = await import("../generate-object-safe.js");
@@ -275,6 +276,43 @@ describe("safeGenerateObject", () => {
     expect(mockGenerateText.mock.calls[0]?.[0]).not.toHaveProperty("output");
   });
 
+  it("rejects explicit text_fallback mode without calling generateText when text fallback is disabled", async () => {
+    await expect(safeGenerateObject({
+      model: {} as never,
+      schema: z.object({
+        hp: z.number(),
+      }),
+      prompt: "test",
+      mode: "text_fallback",
+      allowTextFallback: false,
+      retries: 1,
+    })).rejects.toSatisfy((error: unknown) =>
+      isSafeGenerateObjectError(error)
+      && error instanceof Error
+      && error.message.includes("text fallback is disabled")
+    );
+
+    expect(mockGenerateText).not.toHaveBeenCalled();
+  });
+
+  it("rejects resolver text_fallback strategy without calling generateText when text fallback is disabled", async () => {
+    await expect(safeGenerateObject({
+      model: {} as never,
+      schema: z.object({
+        hp: z.number(),
+      }),
+      prompt: "test",
+      allowTextFallback: false,
+      retries: 1,
+    })).rejects.toSatisfy((error: unknown) =>
+      isSafeGenerateObjectError(error)
+      && error instanceof Error
+      && error.message.includes("text fallback is disabled")
+    );
+
+    expect(mockGenerateText).not.toHaveBeenCalled();
+  });
+
   it("uses native JSON mode for OpenCode chat-completions models that do not support json_schema", async () => {
     const model = {};
     rememberStructuredOutputModelMetadata(
@@ -312,6 +350,318 @@ describe("safeGenerateObject", () => {
       output: expect.objectContaining({
         kind: "mock-output-json",
       }),
+    }));
+  });
+
+  it("uses native JSON mode for GLM/Z.AI chat-completions models that fail json_schema in live play", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "z-ai",
+        providerName: "GLM",
+        model: "glm-5-turbo",
+        protocol: "openai-compatible",
+        baseUrl: "https://api.z.ai/api/coding/paas/v4",
+        transport: "chat-completions",
+      }),
+    );
+    mockGenerateText.mockResolvedValue({
+      text: "",
+      output: { hp: 5 },
+    });
+
+    const result = await safeGenerateObject({
+      model: model as never,
+      schema: z.object({
+        hp: z.number(),
+      }),
+      prompt: "Return JSON.",
+      retries: 1,
+    });
+
+    expect(result.object).toEqual({ hp: 5 });
+    expect(result.trace.strategy).toBe("native_json");
+    expect(result.trace.primaryStrategy).toBe("native_json");
+    expect(mockOutputJson).toHaveBeenCalledTimes(1);
+    expect(mockOutputObject).not.toHaveBeenCalled();
+  });
+
+  it("can disable text fallback for strict native JSON call sites", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "z-ai",
+        providerName: "GLM",
+        model: "glm-5-turbo",
+        protocol: "openai-compatible",
+        baseUrl: "https://api.z.ai/api/coding/paas/v4",
+        transport: "chat-completions",
+      }),
+    );
+    mockGenerateText.mockRejectedValueOnce(new Error("The operation was aborted due to timeout"));
+
+    await expect(safeGenerateObject({
+      model: model as never,
+      schema: z.object({
+        hp: z.number(),
+      }),
+      prompt: "Return JSON.",
+      mode: "native_json",
+      retries: 1,
+      allowTextFallback: false,
+    })).rejects.toSatisfy((error: unknown) =>
+      isSafeGenerateObjectError(error)
+      && error instanceof Error
+      && error.message.includes("text fallback is disabled")
+    );
+
+    expect(mockGenerateText).toHaveBeenCalledTimes(1);
+    expect(mockOutputJson).toHaveBeenCalledTimes(1);
+    expect(mockLogEvent).toHaveBeenCalledWith("llm.attempt", expect.objectContaining({
+      success: false,
+      strategy: "full_retry",
+      primaryStrategy: "native_json",
+      fallbackStrategy: "text_fallback",
+      error: expect.stringContaining("text fallback is disabled"),
+    }));
+  });
+
+  it("can disable repair for strict native JSON call sites", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "z-ai",
+        providerName: "GLM",
+        model: "glm-5-turbo",
+        protocol: "openai-compatible",
+        baseUrl: "https://api.z.ai/api/coding/paas/v4",
+        transport: "chat-completions",
+      }),
+    );
+    mockGenerateText.mockResolvedValueOnce({
+      text: "",
+      output: { hp: "five" },
+    });
+
+    await expect(safeGenerateObject({
+      model: model as never,
+      schema: z.object({
+        hp: z.number(),
+      }),
+      prompt: "Return JSON.",
+      mode: "native_json",
+      retries: 1,
+      allowTextFallback: false,
+      allowRepair: false,
+    })).rejects.toSatisfy((error: unknown) =>
+      isSafeGenerateObjectError(error)
+      && error instanceof Error
+      && error.message.includes("Zod validation failed")
+    );
+
+    expect(mockGenerateText).toHaveBeenCalledTimes(1);
+    expect(mockOutputJson).toHaveBeenCalledTimes(1);
+    expect(mockLogEvent).toHaveBeenCalledWith("llm.attempt", expect.objectContaining({
+      success: false,
+      strategy: "full_retry",
+      primaryStrategy: "native_json",
+      fallbackStrategy: "text_fallback",
+      error: expect.stringContaining("Zod validation failed"),
+    }));
+  });
+
+  it("does not coerce final narration evidenceRefs strings in strict schema mode", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "z-ai",
+        providerName: "GLM",
+        model: "glm-5-turbo",
+        protocol: "openai-compatible",
+        baseUrl: "https://api.z.ai/api/coding/paas/v4",
+        transport: "chat-completions",
+      }),
+    );
+    mockGenerateText.mockResolvedValueOnce({
+      text: "",
+      output: {
+        version: "grounded-sentence-draft.v2",
+        sentences: [
+          {
+            text: "The clerk lowers his voice.",
+            evidenceRefs: "perceivable_response:one,perceivable_effect:two",
+          },
+        ],
+      },
+    });
+
+    await expect(safeGenerateObject({
+      model: model as never,
+      schema: z.object({
+        version: z.literal("grounded-sentence-draft.v2"),
+        sentences: z.array(z.object({
+          text: z.string(),
+          evidenceRefs: z.array(z.string()).min(1).max(4),
+        }).strict()).min(1).max(5),
+      }).strict(),
+      prompt: "Return final narration JSON.",
+      mode: "native_json",
+      retries: 1,
+      allowTextFallback: false,
+      allowRepair: false,
+      strictSchema: true,
+    })).rejects.toSatisfy((error: unknown) =>
+      isSafeGenerateObjectError(error)
+      && error instanceof Error
+      && error.message.includes("Zod validation failed")
+    );
+  });
+
+  it("does not truncate excess final narration sentences in strict schema mode", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "z-ai",
+        providerName: "GLM",
+        model: "glm-5-turbo",
+        protocol: "openai-compatible",
+        baseUrl: "https://api.z.ai/api/coding/paas/v4",
+        transport: "chat-completions",
+      }),
+    );
+    mockGenerateText.mockResolvedValueOnce({
+      text: "",
+      output: {
+        version: "grounded-sentence-draft.v2",
+        sentences: Array.from({ length: 6 }, (_, index) => ({
+          text: `Visible sentence ${index + 1}.`,
+          evidenceRefs: [`perceivable_effect:${index + 1}`],
+        })),
+      },
+    });
+
+    await expect(safeGenerateObject({
+      model: model as never,
+      schema: z.object({
+        version: z.literal("grounded-sentence-draft.v2"),
+        sentences: z.array(z.object({
+          text: z.string(),
+          evidenceRefs: z.array(z.string()).min(1).max(4),
+        }).strict()).min(1).max(5),
+      }).strict(),
+      prompt: "Return final narration JSON.",
+      mode: "native_json",
+      retries: 1,
+      allowTextFallback: false,
+      allowRepair: false,
+      strictSchema: true,
+    })).rejects.toSatisfy((error: unknown) =>
+      isSafeGenerateObjectError(error)
+      && error instanceof Error
+      && error.message.includes("Zod validation failed")
+    );
+  });
+
+  it("does not wrap bare arrays in strict schema mode", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "z-ai",
+        providerName: "GLM",
+        model: "glm-5-turbo",
+        protocol: "openai-compatible",
+        baseUrl: "https://api.z.ai/api/coding/paas/v4",
+        transport: "chat-completions",
+      }),
+    );
+    mockGenerateText.mockResolvedValueOnce({
+      text: "",
+      output: ["perceivable_effect:one"],
+    });
+
+    await expect(safeGenerateObject({
+      model: model as never,
+      schema: z.object({
+        evidenceRefs: z.array(z.string()).min(1),
+      }).strict(),
+      prompt: "Return final narration JSON.",
+      mode: "native_json",
+      retries: 1,
+      allowTextFallback: false,
+      allowRepair: false,
+      strictSchema: true,
+    })).rejects.toSatisfy((error: unknown) =>
+      isSafeGenerateObjectError(error)
+      && error instanceof Error
+      && error.message.includes("Zod validation failed")
+    );
+  });
+
+  it("preserves native JSON failure diagnostics when AI SDK output is unavailable", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "z-ai",
+        providerName: "GLM",
+        model: "glm-5-turbo",
+        protocol: "openai-compatible",
+        baseUrl: "https://api.z.ai/api/coding/paas/v4",
+        transport: "chat-completions",
+      }),
+    );
+    mockGenerateText.mockResolvedValueOnce({
+      text: "",
+      get output() {
+        throw new Error("No output generated");
+      },
+      usage: {
+        inputTokens: 100,
+        outputTokens: 32,
+        totalTokens: 132,
+        reasoningTokens: 0,
+      },
+      response: {
+        modelId: "glm-5-turbo",
+      },
+      finishReason: "length",
+    });
+
+    await expect(safeGenerateObject({
+      model: model as never,
+      schema: z.object({
+        hp: z.number(),
+      }),
+      prompt: "Return JSON.",
+      mode: "native_json",
+      retries: 1,
+      allowTextFallback: false,
+      allowRepair: false,
+    })).rejects.toSatisfy((error: unknown) =>
+      isSafeGenerateObjectError(error)
+      && error instanceof Error
+      && error.message.includes("No output generated")
+    );
+
+    expect(mockLogEvent).toHaveBeenCalledWith("llm.attempt", expect.objectContaining({
+      success: false,
+      primaryStrategy: "native_json",
+      usage: {
+        inputTokens: 100,
+        outputTokens: 32,
+        totalTokens: 132,
+        reasoningTokens: 0,
+        cachedInputTokens: undefined,
+      },
+      responseModel: "glm-5-turbo",
+      finishReason: "length",
+      error: expect.stringContaining("No output generated"),
     }));
   });
 
@@ -369,6 +719,224 @@ describe("safeGenerateObject", () => {
         toolName: "structured_output",
       },
     }));
+  });
+
+  it("includes exact literal values in tool-mode schema hints", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "openrouter",
+        providerName: "OpenRouter",
+        model: "tool-capable-model",
+        protocol: "openai-compatible",
+        baseUrl: "https://openrouter.ai/api/v1",
+        transport: "chat-completions",
+      }),
+    );
+    const schema = z.object({
+      version: z.literal("grounded-sentence-draft.v2"),
+      sentences: z.array(z.object({
+        text: z.string().describe("One concise player-visible narration sentence."),
+        evidenceRefs: z
+          .array(z.string().describe("Exact packet evidence id."))
+          .describe("One to four exact evidence ids."),
+      })).describe("Hard cap: one to five grounded visible narration sentence objects; never return six or more."),
+    }).strict();
+    mockGenerateText.mockResolvedValue({
+      text: "",
+      finishReason: "tool-calls",
+      toolCalls: [
+        {
+          type: "tool-call",
+          toolName: "structured_output",
+          input: {
+            version: "grounded-sentence-draft.v2",
+            sentences: [
+              {
+                text: "The witness points east.",
+                evidenceRefs: ["perceivable_effect:1"],
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    const result = await safeGenerateObject({
+      model: model as never,
+      schema,
+      prompt: "test",
+      mode: "tool",
+      retries: 1,
+      allowTextFallback: false,
+      allowRepair: false,
+      strictSchema: true,
+    });
+
+    expect(result.object.version).toBe("grounded-sentence-draft.v2");
+    const call = mockGenerateText.mock.calls[0]?.[0] as { system?: string } | undefined;
+    expect(call?.system).toContain('"version": "grounded-sentence-draft.v2"');
+    expect(call?.system).toContain('"text": "string value"');
+    expect(call?.system).toContain('"evidenceRefs": [');
+    expect(call?.system).not.toContain('"sentences": [\n    "Hard cap: one to five grounded visible narration sentence objects; never return six or more."');
+    expect(call?.system).not.toContain('"version": "value"');
+  });
+
+  it("uses AI SDK step tool calls with args for explicit tool mode", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "openrouter",
+        providerName: "OpenRouter",
+        model: "tool-capable-model",
+        protocol: "openai-compatible",
+        baseUrl: "https://openrouter.ai/api/v1",
+        transport: "chat-completions",
+      }),
+    );
+    mockGenerateText.mockResolvedValue({
+      text: "",
+      steps: [
+        {
+          toolCalls: [
+            {
+              type: "tool-call",
+              toolName: "structured_output",
+              args: { hp: 6 },
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = await safeGenerateObject({
+      model: model as never,
+      schema: z.object({
+        hp: z.number(),
+      }),
+      prompt: "test",
+      mode: "tool",
+      retries: 1,
+    });
+
+    expect(result.object).toEqual({ hp: 6 });
+    expect(result.trace.strategy).toBe("tool_mode");
+    expect(mockGenerateText).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses AI SDK step tool calls with arguments for explicit tool mode", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "openrouter",
+        providerName: "OpenRouter",
+        model: "tool-capable-model",
+        protocol: "openai-compatible",
+        baseUrl: "https://openrouter.ai/api/v1",
+        transport: "chat-completions",
+      }),
+    );
+    mockGenerateText.mockResolvedValue({
+      text: "",
+      steps: [
+        {
+          toolCalls: [
+            {
+              type: "tool-call",
+              toolName: "structured_output",
+              arguments: { hp: 7 },
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = await safeGenerateObject({
+      model: model as never,
+      schema: z.object({
+        hp: z.number(),
+      }),
+      prompt: "test",
+      mode: "tool",
+      retries: 1,
+    });
+
+    expect(result.object).toEqual({ hp: 7 });
+    expect(result.trace.strategy).toBe("tool_mode");
+    expect(mockGenerateText).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces a typed missing-tool error when explicit tool mode does not call the structured output tool", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "openrouter",
+        providerName: "OpenRouter",
+        model: "tool-capable-model",
+        protocol: "openai-compatible",
+        baseUrl: "https://openrouter.ai/api/v1",
+        transport: "chat-completions",
+      }),
+    );
+    mockGenerateText.mockResolvedValue({
+      text: "",
+      finishReason: "tool-calls",
+      toolCalls: [],
+    });
+
+    await expect(safeGenerateObject({
+      model: model as never,
+      schema: z.object({ hp: z.number() }),
+      prompt: "test",
+      mode: "tool",
+      retries: 1,
+      allowTextFallback: false,
+    })).rejects.toSatisfy((error: unknown) =>
+      getSafeGenerateObjectErrorCode(error) === "missing_structured_tool_call"
+      && isSafeGenerateObjectError(error)
+    );
+  });
+
+  it("surfaces a typed invalid-tool error when explicit tool mode returns invalid structured output arguments", async () => {
+    const model = {};
+    rememberStructuredOutputModelMetadata(
+      model,
+      buildStructuredOutputModelMetadata({
+        providerId: "openrouter",
+        providerName: "OpenRouter",
+        model: "tool-capable-model",
+        protocol: "openai-compatible",
+        baseUrl: "https://openrouter.ai/api/v1",
+        transport: "chat-completions",
+      }),
+    );
+    mockGenerateText.mockResolvedValue({
+      text: "",
+      finishReason: "tool-calls",
+      toolCalls: [
+        {
+          type: "tool-call",
+          toolName: "structured_output",
+          invalid: true,
+        },
+      ],
+    });
+
+    await expect(safeGenerateObject({
+      model: model as never,
+      schema: z.object({ hp: z.number() }),
+      prompt: "test",
+      mode: "tool",
+      retries: 1,
+      allowTextFallback: false,
+    })).rejects.toSatisfy((error: unknown) =>
+      getSafeGenerateObjectErrorCode(error) === "invalid_structured_tool_call"
+      && isSafeGenerateObjectError(error)
+    );
   });
 
   it("validates native_schema output with Zod before returning and falls back to text JSON on failure", async () => {

@@ -76,8 +76,8 @@ describe("ProvidersTab", () => {
     const settings = createMockSettings();
     render(<ProvidersTab settings={settings} setSettings={vi.fn()} />);
 
-    expect(screen.getByText("OpenAI")).toBeInTheDocument();
-    expect(screen.getByText("My Provider")).toBeInTheDocument();
+    expect(screen.getAllByText("OpenAI").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("My Provider").length).toBeGreaterThan(0);
   });
 
   it("shows Built-in badge for builtin providers", () => {

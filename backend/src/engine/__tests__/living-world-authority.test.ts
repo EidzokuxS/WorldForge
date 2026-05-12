@@ -21,6 +21,7 @@ import {
   queueSimulationJob,
   readWorldClock,
   recordSimulationProposal,
+  syncWorldClockTurnBoundary,
   upsertActorProcessState,
   validateBaseWorldVersion,
 } from "../living-world-authority.js";
@@ -104,6 +105,46 @@ describe("living world authority", () => {
       .all();
     expect(traces).toHaveLength(1);
     expect(traces[0]?.resultWorldVersion).toBe(1);
+  });
+
+  it("syncs the readable world clock to the finalized turn tick and elapsed turn time without mutating world version", () => {
+    ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 0, worldTimeMinutes: 0 });
+
+    const synced = syncWorldClockTurnBoundary({
+      campaignId: CAMPAIGN_ID,
+      currentTick: 55,
+    });
+
+    expect(synced).toMatchObject({
+      campaignId: CAMPAIGN_ID,
+      worldVersion: 0,
+      worldTimeMinutes: 55,
+      currentTick: 55,
+    });
+
+    const rewound = syncWorldClockTurnBoundary({
+      campaignId: CAMPAIGN_ID,
+      currentTick: 12,
+    });
+
+    expect(rewound).toMatchObject({
+      worldVersion: 0,
+      worldTimeMinutes: 55,
+      currentTick: 55,
+    });
+  });
+
+  it("creates a missing world clock at the turn boundary with elapsed turn time", () => {
+    const synced = syncWorldClockTurnBoundary({
+      campaignId: CAMPAIGN_ID,
+      currentTick: 9,
+    });
+
+    expect(synced).toMatchObject({
+      worldVersion: 0,
+      worldTimeMinutes: 9,
+      currentTick: 9,
+    });
   });
 
   it("cancels future jobs/proposals and disables ahead-of-rollback actor process state", () => {

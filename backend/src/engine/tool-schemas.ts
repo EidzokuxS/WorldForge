@@ -21,6 +21,118 @@ import { INVENTORY_EQUIP_STATES } from "../inventory/authority.js";
 
 const entityTypeEnum = z.enum(["player", "npc", "location", "item", "faction"]);
 const eventDurabilityEnum = z.enum(["durable", "scene_local"]);
+const dialogueOutcomeKindEnum = z.enum([
+  "answered",
+  "refused",
+  "silent",
+  "gestured",
+  "warned",
+  "redirected",
+  "unavailable",
+  "no_current_answer",
+]);
+const dialogueTopicKindEnum = z.enum([
+  "social",
+  "procedure",
+  "permission",
+  "proof",
+  "route",
+  "safety",
+  "trade",
+  "status",
+  "other",
+]);
+const dialogueAuthorityKindEnum = z.enum([
+  "role_authority",
+  "public_service",
+  "witness",
+  "hearsay",
+  "not_authorized",
+  "no_visible_authority",
+  "unknown",
+]);
+const dialogueTruthStatusEnum = z.enum([
+  "settled_by_backend",
+  "speaker_asserted",
+  "unconfirmed",
+  "contested",
+  "conflicting",
+]);
+const dialogueFutureUseKindEnum = z.enum([
+  "route_choice",
+  "permission_check",
+  "evidence",
+  "safety",
+  "obligation",
+  "npc_memory",
+  "relationship",
+  "other",
+]);
+const worldFactSourceKindEnum = z.enum([
+  "direct_observation",
+  "public_record",
+  "report_message",
+  "rumor",
+  "claim",
+  "comparison",
+  "memory",
+  "other",
+]);
+const worldFactTruthStatusEnum = z.enum([
+  "observed",
+  "verified",
+  "reported",
+  "rumored",
+  "claimed",
+  "believed",
+  "disputed",
+  "unknown",
+]);
+const worldFactKindEnum = z.enum([
+  "public_record",
+  "procedure",
+  "route_status",
+  "permission_boundary",
+  "warning",
+  "lead",
+  "status",
+  "contradiction",
+  "gap",
+  "other",
+]);
+const worldFactClaimKindEnum = z.enum([
+  "public_record",
+  "requirement",
+  "permission_boundary",
+  "prohibition",
+  "office",
+  "route_status",
+  "warning",
+  "lead",
+  "status",
+  "contradiction",
+  "gap",
+  "other",
+]);
+const dialogueClaimKindEnum = z.enum([
+  "requirement",
+  "permission",
+  "prohibition",
+  "office",
+  "route_status",
+  "warning",
+  "lead",
+  "document_status",
+  "other",
+]);
+const dialogueClaimPolarityEnum = z.enum([
+  "allows",
+  "denies",
+  "requires",
+  "redirects",
+  "unknown",
+  "states",
+]);
 const inventoryEquipStateEnum = z.enum(INVENTORY_EQUIP_STATES);
 const contestedOutcomeModeEnum = z.enum([
   "attack",
@@ -285,6 +397,220 @@ const recordPlayerIntentInputSchema = z.object({
   stance: z.enum(["intends", "claims", "suspects", "asks", "refuses", "offers", "unknown"]).default("intends"),
   summary: z.string().trim().min(1).max(360).optional(),
 });
+const recordDialogueClaimInputSchema = z.object({
+  claimKind: dialogueClaimKindEnum,
+  polarity: dialogueClaimPolarityEnum,
+  subjectRef: z.string().trim().min(1).max(180).optional(),
+  subjectText: z.string().trim().min(1).max(240).optional(),
+  summary: z.string().trim().min(1).max(500),
+});
+const recordWorldFactClaimInputSchema = z.object({
+  claimKind: worldFactClaimKindEnum,
+  polarity: dialogueClaimPolarityEnum,
+  subjectRef: z
+    .string()
+    .trim()
+    .min(1)
+    .max(180)
+    .optional()
+    .describe("Optional exact legal visible/current ref or player-known fact ref only; never use free text like notice board, date gap, route log mismatch, clerk, office, or permit here."),
+  subjectText: z
+    .string()
+    .trim()
+    .min(1)
+    .max(240)
+    .optional()
+    .describe("Free-text subject label for concepts that are not exact legal refs, such as notice board, posted date, route log mismatch, office name, permit, or procedure."),
+  summary: z.string().trim().min(1).max(600),
+});
+const recordWorldFactInputSchema = z.object({
+  sourceKind: worldFactSourceKindEnum.describe("How the player knows this fact: observation, public record, report, rumor, claim, comparison, memory, or other."),
+  truthStatus: worldFactTruthStatusEnum.describe("Structured confidence/status. Use disputed/unknown for gaps or contradictions instead of inventing certainty."),
+  factKind: worldFactKindEnum.describe("The game-useful fact category being recorded."),
+  topicKind: dialogueTopicKindEnum.describe("Broad topic for later retrieval and route choice."),
+  durability: z.literal("durable").describe("World facts are future-usable player knowledge; transient color belongs in observation or scene-local beats."),
+  futureUseKind: dialogueFutureUseKindEnum.describe("How this fact may matter later."),
+  futureRelevance: z
+    .string()
+    .trim()
+    .min(1)
+    .max(700)
+    .describe("One concrete sentence explaining how later play can use this fact."),
+  summary: z
+    .string()
+    .trim()
+    .min(1)
+    .max(900)
+    .describe("Human-readable player-known fact summary. Validators do not parse this for semantics."),
+  claims: z
+    .array(recordWorldFactClaimInputSchema)
+    .min(1)
+    .max(8)
+    .describe("Structured claims carried by this fact. These fields carry semantics; prose does not."),
+  subjectRefs: z
+    .array(z.string().trim().min(1).max(180))
+    .max(8)
+    .default([])
+    .describe("Optional legal visible/current refs or player-known fact refs the fact is about."),
+  sourceRefs: z
+    .array(z.string().trim().min(1).max(180))
+    .min(1)
+    .max(12)
+    .describe("Legal visible/current refs or player-known fact refs that support this fact."),
+}).superRefine((data, ctx) => {
+  if (
+    data.truthStatus === "unknown"
+    && data.factKind !== "gap"
+    && data.factKind !== "contradiction"
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["factKind"],
+      message: "unknown truthStatus must record a gap or contradiction, not a positive fact",
+    });
+  }
+});
+const proceduralDialogueTopicKinds = new Set([
+  "procedure",
+  "permission",
+  "proof",
+  "route",
+  "safety",
+  "status",
+]);
+const proceduralDialogueOutcomeKindsRequiringClaims = new Set([
+  "answered",
+  "warned",
+  "redirected",
+]);
+const recordDialogueOutcomeInputSchema = z.object({
+  speakerRef: z
+    .string()
+    .trim()
+    .min(1)
+    .max(180)
+    .optional()
+    .describe("Exact visible/current actor ref for the NPC/source who answered, refused, warned, gestured, or stayed silent. Do not use a raw role/office label unless it is a legal ref."),
+  addresseeRefs: z
+    .array(z.string().trim().min(1).max(180))
+    .min(1)
+    .max(6)
+    .describe("Visible/current actor refs who receive this dialogue outcome; usually Player plus any present listener."),
+  outcomeKind: dialogueOutcomeKindEnum.describe("Structural outcome. This enum decides what happened; prose does not."),
+  topicKind: dialogueTopicKindEnum.describe("What the exchange is about; use procedure/proof/permission/route/safety/status for reusable game facts."),
+  authorityKind: dialogueAuthorityKindEnum.describe("Whether the speaker/source can be relied on for the topic."),
+  truthStatus: dialogueTruthStatusEnum.describe("Whether the content is backend-settled, speaker-asserted, unconfirmed, contested, or conflicting."),
+  durability: eventDurabilityEnum.describe("durable for future-usable answers/refusals/warnings/redirects; scene_local for immediate color."),
+  futureUseKind: dialogueFutureUseKindEnum
+    .optional()
+    .describe("Required when durable: how this outcome can matter later."),
+  futureRelevance: z
+    .string()
+    .trim()
+    .min(1)
+    .max(600)
+    .optional()
+    .describe("Required when durable: one concrete sentence explaining later use."),
+  requestedRoleText: z
+    .string()
+    .trim()
+    .min(1)
+    .max(240)
+    .optional()
+    .describe("For unavailable/no_current_answer: plain role, office, or authority text the player tried to reach. This is text, not a ref."),
+  quote: z
+    .string()
+    .trim()
+    .min(1)
+    .max(1_000)
+    .optional()
+    .describe("Optional direct speech in any language. Validators do not parse this for semantics."),
+  summary: z
+    .string()
+    .trim()
+    .min(1)
+    .max(700)
+    .describe("Human-readable summary in any language. Validators do not parse this for semantics."),
+  claims: z
+    .array(recordDialogueClaimInputSchema)
+    .max(8)
+    .default([])
+    .describe("Structured claims carried by procedural/reusable dialogue outcomes."),
+  sourceRefs: z
+    .array(z.string().trim().min(1).max(180))
+    .min(1)
+    .max(12)
+    .describe("Exact legal visible/current refs or known fact refs supporting the outcome. For unavailable/no_current_answer, cite Player/current_scene/current_location/visible evidence, not the unavailable role text."),
+}).superRefine((data, ctx) => {
+  if (data.durability === "durable") {
+    if (!data.futureUseKind) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["futureUseKind"],
+        message: "futureUseKind is required when durability is durable",
+      });
+    }
+    if (!data.futureRelevance?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["futureRelevance"],
+        message: "futureRelevance is required when durability is durable",
+      });
+    }
+  }
+
+  if (data.outcomeKind === "unavailable" || data.outcomeKind === "no_current_answer") {
+    if (data.authorityKind !== "no_visible_authority") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["authorityKind"],
+        message: "unavailable/no_current_answer outcomes require authorityKind no_visible_authority",
+      });
+    }
+    if (data.speakerRef?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["speakerRef"],
+        message: "unavailable/no_current_answer outcomes with no_visible_authority must not use a speakerRef",
+      });
+    }
+    if (!data.requestedRoleText?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["requestedRoleText"],
+        message: "requestedRoleText is required for unavailable/no_current_answer outcomes",
+      });
+    }
+  } else {
+    if (data.authorityKind === "no_visible_authority") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["authorityKind"],
+        message: "no_visible_authority is only valid for unavailable/no_current_answer outcomes",
+      });
+    }
+    if (!data.speakerRef?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["speakerRef"],
+        message: "speakerRef is required for visible dialogue outcomes",
+      });
+    }
+  }
+
+  if (
+    data.durability === "durable"
+    && proceduralDialogueTopicKinds.has(data.topicKind)
+    && proceduralDialogueOutcomeKindsRequiringClaims.has(data.outcomeKind)
+    && data.claims.length === 0
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["claims"],
+      message: "durable procedural answered/warned/redirected outcomes require at least one structured claim",
+    });
+  }
+});
 
 export const runtimeToolInputSchemas = {
   list_visible_affordances: listVisibleAffordancesInputSchema,
@@ -300,6 +626,8 @@ export const runtimeToolInputSchemas = {
   create_scene_extra: createSceneExtraInputSchema,
   start_search: startSearchInputSchema,
   record_player_intent: recordPlayerIntentInputSchema,
+  record_dialogue_outcome: recordDialogueOutcomeInputSchema,
+  record_world_fact: recordWorldFactInputSchema,
   add_tag: addTagInputSchema,
   remove_tag: removeTagInputSchema,
   set_relationship: setRelationshipInputSchema,
@@ -446,6 +774,20 @@ export function createStorytellerTools(
         "State-bearing bridge. Record player intent, stance, or claim as unconfirmed; does not make the hinted target true.",
       inputSchema: recordPlayerIntentInputSchema,
       execute: (args) => executeRuntimeTool("record_player_intent", args),
+    }),
+
+    record_dialogue_outcome: tool({
+      description:
+        "State-bearing semantic dialogue outcome. Use for an NPC/source answer, refusal, silence, gesture, warning, redirect, unavailable role, or no-current-answer result. Outcome semantics live in enum fields; quote/summary may be any language and are display/evidence only.",
+      inputSchema: recordDialogueOutcomeInputSchema,
+      execute: (args) => executeRuntimeTool("record_dialogue_outcome", args),
+    }),
+
+    record_world_fact: tool({
+      description:
+        "State-bearing semantic world fact. Use when the player compares, verifies, or records future-usable public/known facts without an NPC dialogue outcome. Semantics live in sourceKind/truthStatus/factKind/topicKind/claims; summary may be any language and is display/evidence only. claims[].subjectRef, subjectRefs, and sourceRefs must be exact legal refs; put ordinary labels like notice board or route-log mismatch in subjectText.",
+      inputSchema: recordWorldFactInputSchema,
+      execute: (args) => executeRuntimeTool("record_world_fact", args),
     }),
 
     add_tag: tool({

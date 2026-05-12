@@ -305,6 +305,8 @@ describe("PlayerFacingPacket", () => {
     expect(formatted).toContain("The depot queue grows restless.");
     expect(formatted).toContain("Paper clicks once behind the ledger wall.");
     expect(formatted).toContain("[CONTEXT BUDGET TRACE]");
+    expect(formatted).not.toContain("tool=log_event");
+    expect(formatted).not.toContain("log_event");
     expect(formatted).not.toContain("Hidden Auditor");
     expect(formatted).not.toContain(`hidden-actor:${hiddenNpcId}`);
     expect(formatted).not.toContain("Forest Outpost");
@@ -319,11 +321,239 @@ describe("PlayerFacingPacket", () => {
     expect(packet.contextBudgetTrace.didClipModelOutput).toBe(false);
   });
 
+  it("can omit diagnostic-only packet sections for compact final narration prompts", () => {
+    const packet = buildPlayerFacingPacketFromNarratorPacket(createNarratorPacket());
+    const formatted = formatPlayerFacingPacketForPrompt(packet, {
+      includeDiagnostics: false,
+      includeTechnicalRefs: false,
+    });
+
+    expect(formatted).toContain("The depot queue grows restless.");
+    expect(formatted).toContain("[CONTROL RETURN]");
+    expect(formatted).toContain("Player attempted:");
+    expect(formatted).not.toContain("Player action request:");
+    expect(formatted).not.toContain("Campaign: campaign-1");
+    expect(formatted).not.toContain("Tick:");
+    expect(formatted).not.toContain("Anchor event:");
+    expect(formatted).not.toContain("actor=");
+    expect(formatted).not.toContain("action=");
+    expect(formatted).not.toContain("kind=");
+    expect(formatted).not.toContain(hiddenNpcId);
+    expect(formatted).not.toContain("[VISIBLE SOURCE IDS -- DIAGNOSTIC, DO NOT USE AS evidenceRefs]");
+    expect(formatted).not.toContain("[SOURCE-LINKED SUMMARIES]");
+    expect(formatted).not.toContain("[REDACTION AUDIT]");
+    expect(formatted).not.toContain("[CONTEXT BUDGET TRACE]");
+  });
+
+  it("formats current inventory status as player-facing source without exposing raw canonical data", () => {
+    const narratorPacket = createNarratorPacket();
+    narratorPacket.currentInventory = [
+      {
+        id: "current-inventory:item-logbook",
+        itemId: "item-logbook",
+        label: "Courier Route Logbook",
+        equipState: "carried",
+        equippedSlot: null,
+        isSignature: false,
+      },
+    ];
+    narratorPacket.evidenceLedger = [
+      ...(narratorPacket.evidenceLedger ?? []),
+      {
+        id: "current_inventory_status:item-logbook",
+        category: "current_inventory_status",
+        summary: "Courier Route Logbook is currently carried by the player.",
+        sourceId: "item-logbook",
+      },
+    ];
+
+    const packet = buildPlayerFacingPacketFromNarratorPacket(narratorPacket);
+    const formatted = formatPlayerFacingPacketForPrompt(packet);
+
+    expect(packet.sourceRefs).toContainEqual({
+      id: "item-logbook",
+      kind: "current_inventory_status",
+    });
+    expect(formatted).toContain("[CURRENT INVENTORY STATUS]");
+    expect(formatted).toContain("Courier Route Logbook is currently carried by the player.");
+    expect(formatted).not.toContain("canonicalTurnPacket");
+  });
+
   it("fails closed if a forbidden private term enters visible packet prose", () => {
     const narratorPacket = createNarratorPacket();
     narratorPacket.perceivableEffects[0] = {
       ...narratorPacket.perceivableEffects[0]!,
       summary: "Forest Outpost becomes visible from the depot window.",
+    };
+
+    expect(() => buildPlayerFacingPacketFromNarratorPacket(narratorPacket)).toThrow(
+      PlayerFacingPacketSafetyError,
+    );
+  });
+
+  it("allows a same-turn visible scene-extra label that also appears in forbidden actor names", () => {
+    const narratorPacket = createNarratorPacket();
+    narratorPacket.playerAction = "I ask the Exchange Validation Clerk to cite the rule.";
+    narratorPacket.forbiddenActorNames = ["Exchange Validation Clerk"];
+    narratorPacket.visibleActors = [
+      ...narratorPacket.visibleActors,
+      { id: "actor-exchange-clerk", label: "Exchange Validation Clerk", type: "npc" },
+    ];
+    narratorPacket.perceivableEffects[0] = {
+      id: "action-result:create-clerk",
+      actorId: playerId,
+      actionId: "create-clerk",
+      toolName: "create_scene_extra",
+      summary: "Exchange Validation Clerk becomes visibly present in the scene.",
+      perceivableByPlayer: true,
+      toolResult: {
+        success: true,
+        result: {
+          id: "actor-exchange-clerk",
+          name: "Exchange Validation Clerk",
+        },
+      },
+    };
+    narratorPacket.canonicalTurnPacket = {
+      ...narratorPacket.canonicalTurnPacket,
+      playerAction: narratorPacket.playerAction,
+      narratorFacts: {
+        ...narratorPacket.canonicalTurnPacket.narratorFacts,
+        actionIds: ["create-clerk"],
+        toolResultRefs: [{ actionId: "create-clerk", toolName: "create_scene_extra" }],
+      },
+      actionResults: [
+        {
+          order: 1,
+          actionId: "create-clerk",
+          actionRef: "tool-call-1",
+          actorId: playerId,
+          toolName: "create_scene_extra",
+          input: { name: "Exchange Validation Clerk" },
+          args: { name: "Exchange Validation Clerk" },
+          result: {
+            success: true,
+            result: {
+              id: "actor-exchange-clerk",
+              name: "Exchange Validation Clerk",
+            },
+          },
+          summary: "Exchange Validation Clerk becomes visibly present in the scene.",
+        },
+      ],
+    };
+
+    const packet = buildPlayerFacingPacketFromNarratorPacket(narratorPacket);
+    const formatted = formatPlayerFacingPacketForPrompt(packet);
+
+    expect(packet.committedVisibleActorCreationLabels).toContain("Exchange Validation Clerk");
+    expect(formatted).toContain("Exchange Validation Clerk becomes visibly present in the scene.");
+  });
+
+  it("rejects same-turn visible scene-extra label substrings", () => {
+    const narratorPacket = createNarratorPacket();
+    narratorPacket.forbiddenActorNames = ["Validation Clerk"];
+    narratorPacket.visibleActors = [
+      ...narratorPacket.visibleActors,
+      { id: "actor-exchange-clerk", label: "Exchange Validation Clerk", type: "npc" },
+    ];
+    narratorPacket.perceivableEffects[0] = {
+      id: "action-result:create-clerk",
+      actorId: playerId,
+      actionId: "create-clerk",
+      toolName: "create_scene_extra",
+      summary: "Exchange Validation Clerk becomes visibly present in the scene.",
+      perceivableByPlayer: true,
+      toolResult: {
+        success: true,
+        result: {
+          id: "actor-exchange-clerk",
+          name: "Exchange Validation Clerk",
+        },
+      },
+    };
+    narratorPacket.canonicalTurnPacket = {
+      ...narratorPacket.canonicalTurnPacket,
+      narratorFacts: {
+        ...narratorPacket.canonicalTurnPacket.narratorFacts,
+        actionIds: ["create-clerk"],
+        toolResultRefs: [{ actionId: "create-clerk", toolName: "create_scene_extra" }],
+      },
+      actionResults: [
+        {
+          order: 1,
+          actionId: "create-clerk",
+          actionRef: "tool-call-1",
+          actorId: playerId,
+          toolName: "create_scene_extra",
+          input: { name: "Exchange Validation Clerk" },
+          args: { name: "Exchange Validation Clerk" },
+          result: {
+            success: true,
+            result: {
+              id: "actor-exchange-clerk",
+              name: "Exchange Validation Clerk",
+            },
+          },
+          summary: "Exchange Validation Clerk becomes visibly present in the scene.",
+        },
+      ],
+    };
+
+    expect(() => buildPlayerFacingPacketFromNarratorPacket(narratorPacket)).toThrow(
+      PlayerFacingPacketSafetyError,
+    );
+  });
+
+  it("rejects forbidden private terms embedded in same-turn visible actor labels", () => {
+    const narratorPacket = createNarratorPacket();
+    narratorPacket.forbiddenActorNames = ["Forest Outpost Clerk"];
+    narratorPacket.forbiddenPrivateTerms = ["Forest Outpost"];
+    narratorPacket.visibleActors = [
+      ...narratorPacket.visibleActors,
+      { id: "actor-forest-clerk", label: "Forest Outpost Clerk", type: "npc" },
+    ];
+    narratorPacket.perceivableEffects[0] = {
+      id: "action-result:create-clerk",
+      actorId: playerId,
+      actionId: "create-clerk",
+      toolName: "create_scene_extra",
+      summary: "Forest Outpost Clerk becomes visibly present in the scene.",
+      perceivableByPlayer: true,
+      toolResult: {
+        success: true,
+        result: {
+          id: "actor-forest-clerk",
+          name: "Forest Outpost Clerk",
+        },
+      },
+    };
+    narratorPacket.canonicalTurnPacket = {
+      ...narratorPacket.canonicalTurnPacket,
+      narratorFacts: {
+        ...narratorPacket.canonicalTurnPacket.narratorFacts,
+        actionIds: ["create-clerk"],
+        toolResultRefs: [{ actionId: "create-clerk", toolName: "create_scene_extra" }],
+      },
+      actionResults: [
+        {
+          order: 1,
+          actionId: "create-clerk",
+          actionRef: "tool-call-1",
+          actorId: playerId,
+          toolName: "create_scene_extra",
+          input: { name: "Forest Outpost Clerk" },
+          args: { name: "Forest Outpost Clerk" },
+          result: {
+            success: true,
+            result: {
+              id: "actor-forest-clerk",
+              name: "Forest Outpost Clerk",
+            },
+          },
+          summary: "Forest Outpost Clerk becomes visibly present in the scene.",
+        },
+      ],
     };
 
     expect(() => buildPlayerFacingPacketFromNarratorPacket(narratorPacket)).toThrow(

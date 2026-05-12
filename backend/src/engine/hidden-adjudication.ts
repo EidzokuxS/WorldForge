@@ -17,6 +17,7 @@ export const adjudicationActionSchema = z.discriminatedUnion("toolName", [
   z.object({ toolName: z.literal("set_relationship"), input: runtimeToolInputSchemas.set_relationship }),
   z.object({ toolName: z.literal("add_chronicle_entry"), input: runtimeToolInputSchemas.add_chronicle_entry }),
   z.object({ toolName: z.literal("log_event"), input: runtimeToolInputSchemas.log_event }),
+  z.object({ toolName: z.literal("record_dialogue_outcome"), input: runtimeToolInputSchemas.record_dialogue_outcome }),
   z.object({ toolName: z.literal("advance_time"), input: runtimeToolInputSchemas.advance_time }),
   z.object({ toolName: z.literal("offer_quick_actions"), input: runtimeToolInputSchemas.offer_quick_actions }),
   z.object({ toolName: z.literal("spawn_npc"), input: runtimeToolInputSchemas.spawn_npc }),

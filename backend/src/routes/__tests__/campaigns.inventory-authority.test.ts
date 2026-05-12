@@ -431,6 +431,109 @@ describe("GET /api/campaigns/:id/world authoritative inventory", () => {
       .toBe("loc-rooftop");
   });
 
+  it("keeps explicitly scoped macro-scene NPCs visible without pulling sibling sublocations", async () => {
+    (getDb as Mock).mockReturnValue(
+      createMockDb({
+        locations: [
+          {
+            id: "loc-macro",
+            campaignId: "abc-123",
+            name: "Brass Citadel",
+            description: "A macro civic district with an active public platform.",
+            kind: "macro",
+            parentLocationId: null,
+            connectedTo: "[]",
+          },
+          {
+            id: "loc-bell-hall",
+            campaignId: "abc-123",
+            name: "Bell Hall",
+            description: "A sibling hall under the same macro.",
+            kind: "persistent_sublocation",
+            parentLocationId: "loc-macro",
+            connectedTo: "[]",
+          },
+        ],
+        players: [
+          {
+            id: "player-1",
+            campaignId: "abc-123",
+            name: "Courier",
+            race: "Human",
+            gender: "",
+            age: "",
+            appearance: "",
+            hp: 5,
+            tags: "[]",
+            equippedItems: "[]",
+            currentLocationId: "loc-macro",
+            currentSceneLocationId: "loc-macro",
+          },
+        ],
+        npcs: [
+          {
+            id: "npc-clerk",
+            campaignId: "abc-123",
+            name: "Wax-Tablet Clerk",
+            persona: "",
+            tags: "[]",
+            tier: "temporary",
+            currentLocationId: "loc-macro",
+            currentSceneLocationId: "loc-macro",
+            goals: "{\"short_term\":[],\"long_term\":[]}",
+            beliefs: "[]",
+          },
+          {
+            id: "npc-bell-hall",
+            campaignId: "abc-123",
+            name: "Bell Hall Arbiter",
+            persona: "",
+            tags: "[]",
+            tier: "key",
+            currentLocationId: "loc-macro",
+            currentSceneLocationId: "loc-bell-hall",
+            goals: "{\"short_term\":[],\"long_term\":[]}",
+            beliefs: "[]",
+          },
+          {
+            id: "npc-legacy",
+            campaignId: "abc-123",
+            name: "Broad Legacy Presence",
+            persona: "",
+            tags: "[]",
+            tier: "key",
+            currentLocationId: "loc-macro",
+            currentSceneLocationId: null,
+            goals: "{\"short_term\":[],\"long_term\":[]}",
+            beliefs: "[]",
+          },
+        ],
+        items: [],
+      }) as unknown as ReturnType<typeof getDb>,
+    );
+
+    const response = await app.request("/api/campaigns/abc-123/world");
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+
+    expect(body.currentScene).toMatchObject({
+      id: "loc-macro",
+      name: "Brass Citadel",
+      broadLocationId: "loc-macro",
+      broadLocationName: "Brass Citadel",
+      sceneNpcIds: ["npc-clerk"],
+      clearNpcIds: ["npc-clerk"],
+      awareness: {
+        byNpcId: {
+          "npc-clerk": "clear",
+        },
+      },
+    });
+    expect(body.currentScene.sceneNpcIds).not.toContain("npc-bell-hall");
+    expect(body.currentScene.sceneNpcIds).not.toContain("npc-legacy");
+  });
+
   it("derives persistent sublocation broad scope so support NPCs placed at parent remain visible", async () => {
     (getDb as Mock).mockReturnValue(
       createMockDb({

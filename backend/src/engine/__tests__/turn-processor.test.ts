@@ -11,6 +11,7 @@ const {
   resolveDueWorldThreadWorkForScopeMock,
   runRequiredActorDecisionPassMock,
   readWorldClockMock,
+  syncWorldClockTurnBoundaryMock,
   assertNoPendingNarrationBeforeNewTurnMock,
   claimTurnSagaWorkerMock,
   createTurnSagaMock,
@@ -26,6 +27,7 @@ const {
   recordNarratorAttemptMock,
   releaseTurnSagaWorkerMock,
   transitionTurnSagaStatusMock,
+  updateNarratorAttemptOutcomeMock,
 } = vi.hoisted(() => ({
   logEventMock: vi.fn(),
   logInfoMock: vi.fn(),
@@ -35,6 +37,7 @@ const {
   resolveDueWorldThreadWorkForScopeMock: vi.fn(),
   runRequiredActorDecisionPassMock: vi.fn(),
   readWorldClockMock: vi.fn(),
+  syncWorldClockTurnBoundaryMock: vi.fn(),
   assertNoPendingNarrationBeforeNewTurnMock: vi.fn(),
   claimTurnSagaWorkerMock: vi.fn(),
   createTurnSagaMock: vi.fn(),
@@ -50,6 +53,7 @@ const {
   recordNarratorAttemptMock: vi.fn(),
   releaseTurnSagaWorkerMock: vi.fn(),
   transitionTurnSagaStatusMock: vi.fn(),
+  updateNarratorAttemptOutcomeMock: vi.fn(),
 }));
 
 vi.mock("../../db/index.js", () => ({
@@ -219,6 +223,7 @@ vi.mock("../actor-tools.js", () => ({
 
 vi.mock("../living-world-authority.js", () => ({
   readWorldClock: readWorldClockMock,
+  syncWorldClockTurnBoundary: syncWorldClockTurnBoundaryMock,
 }));
 
 vi.mock("../turn-saga.js", () => ({
@@ -253,6 +258,7 @@ vi.mock("../turn-saga.js", () => ({
   recordNarratorAttempt: recordNarratorAttemptMock,
   releaseTurnSagaWorker: releaseTurnSagaWorkerMock,
   transitionTurnSagaStatus: transitionTurnSagaStatusMock,
+  updateNarratorAttemptOutcome: updateNarratorAttemptOutcomeMock,
 }));
 
 vi.mock("../scene-plan-validator.js", () => {
@@ -280,9 +286,24 @@ vi.mock("../narrator-packet.js", () => ({
   ),
 }));
 
-vi.mock("../visible-narration-output-guard.js", () => ({
-  runVisibleNarrationWithPacketGuard: vi.fn(),
-}));
+vi.mock("../visible-narration-output-guard.js", () => {
+  class VisibleNarrationPacketGuardError extends Error {
+    constructor(
+      message: string,
+      public readonly violations: Array<{ kind: string; term: string }> = [],
+      public readonly attempts = 1,
+      public readonly validation: unknown = null,
+    ) {
+      super(message);
+      this.name = "VisibleNarrationPacketGuardError";
+    }
+  }
+
+  return {
+    runVisibleNarrationWithPacketGuard: vi.fn(),
+    VisibleNarrationPacketGuardError,
+  };
+});
 
 // Mock the ai module
 vi.mock("ai", () => ({
@@ -291,7 +312,37 @@ vi.mock("ai", () => ({
 }));
 
 vi.mock("../../ai/generate-object-safe.js", () => ({
-  safeGenerateObject: vi.fn().mockResolvedValue({ object: { isMovement: false, destination: null } }),
+  getSafeGenerateObjectErrorCode: vi.fn((error: unknown) =>
+    error && typeof error === "object" && "safeGenerateCode" in error
+      ? (error as { safeGenerateCode?: string }).safeGenerateCode ?? null
+      : null,
+  ),
+  safeGenerateObject: vi.fn(async (opts?: { prompt?: unknown }) => {
+    const prompt = String(opts?.prompt ?? "");
+    if (prompt.includes("Final narration prompt") || prompt.includes("[FINAL NARRATION TASK]")) {
+      return {
+        object: {
+          version: "grounded-sentence-draft.v2",
+          sentences: [
+            {
+              text: "The goblin falls.",
+              evidenceRefs: ["perceivable_effect:effect-goblin-falls"],
+            },
+          ],
+        },
+        trace: {
+          text: "",
+          cleanedText: "",
+          strategy: "native_json",
+          primaryStrategy: "native_json",
+          finishReason: "stop",
+          response: { modelId: "mock-model" },
+        },
+      };
+    }
+
+    return { object: { isMovement: false, destination: null }, trace: {} };
+  }),
 }));
 
 vi.mock("../../ai/provider-registry.js", () => ({
@@ -330,7 +381,12 @@ import { runGmToolLoop } from "../gm-tool-loop.js";
 import { validateScenePlan } from "../scene-plan-validator.js";
 import { executeScenePlan } from "../scene-plan-executor.js";
 import { buildNarratorPacket } from "../narrator-packet.js";
-import { runVisibleNarrationWithPacketGuard } from "../visible-narration-output-guard.js";
+import {
+  runVisibleNarrationWithPacketGuard,
+  VisibleNarrationPacketGuardError,
+  type VisibleNarrationPacketValidationResult,
+} from "../visible-narration-output-guard.js";
+import { DEFAULT_PLAYER_BLOCKING_STAGE_TIMEOUT_MS } from "../runtime-limits.js";
 import { generateText } from "ai";
 import { safeGenerateObject } from "../../ai/generate-object-safe.js";
 import { createModel } from "../../ai/provider-registry.js";
@@ -737,22 +793,134 @@ function createNarratorPacketMock() {
     },
     perceivableEvents: [],
     perceivableResponses: [],
-    perceivableEffects: [],
+    perceivableEffects: [
+      {
+        id: "effect-goblin-falls",
+        actionId: "action-goblin-falls",
+        actorId: "goblin-raider",
+        toolName: "log_event",
+        summary: "The goblin falls.",
+        perceivableByPlayer: true,
+        toolResult: { success: true, result: { eventId: "event-goblin-falls" } },
+      },
+    ],
     visibleActors: [{ id: SCENE_PLAN_PLAYER_ID, label: "Hero", type: "player" }],
     hintSignals: [],
+    evidenceLedger: [
+      {
+        id: "perceivable_effect:effect-goblin-falls",
+        category: "perceivable_effect",
+        summary: "The goblin falls.",
+      },
+      {
+        id: "control_return:scene-complete",
+        category: "control_return",
+        summary: "Scene complete.",
+      },
+    ],
     guardrails: [],
     controlReturnReason: "Scene complete.",
     allowedVisibleActorNames: ["Hero"],
     forbiddenActorNames: ["Hidden Watcher"],
     forbiddenFactMarkers: ["hidden-actor:hidden-watcher"],
+    forbiddenPrivateTerms: [],
     canonicalTurnPacket: {},
   };
+}
+
+function createNarrationDraftForTest(prose: string) {
+  return {
+    prose,
+    claims: [
+      {
+        id: "claim-playable",
+        kind: "playable_beat" as const,
+        summary: "The generated narration returns control on a playable beat.",
+        requiresEvidence: false,
+        evidenceRefs: [],
+      },
+    ],
+    claimSpans: [
+      {
+        id: "span-playable",
+        spanText: prose,
+        claimIds: ["claim-playable"],
+        requiresEvidence: false,
+      },
+    ],
+  };
+}
+
+function createGroundedSentenceDraftForTest(prose: string) {
+  return {
+    version: "grounded-sentence-draft.v2" as const,
+    sentences: [
+      {
+        text: prose,
+        evidenceRefs: ["perceivable_effect:effect-goblin-falls"],
+      },
+    ],
+  };
+}
+
+function acceptedGroundedNarrationResult() {
+  return {
+    ok: true,
+    narrationDraftAccepted: true,
+    narrationContractVersion: "grounded-sentence-draft.v2",
+    structuredTrace: {
+      strategy: "native_json",
+      primaryStrategy: "native_json",
+      fallbackReason: null,
+      repairedFromStrategy: null,
+      repair: null,
+    },
+    attempts: 1,
+    retried: false,
+    guardAddendum: null,
+  };
+}
+
+function normalizeGeneratedNarrationForTest(generated: unknown) {
+  if (generated && typeof generated === "object" && "prose" in generated) {
+    const draft = generated as ReturnType<typeof createNarrationDraftForTest>;
+    return { text: draft.prose, draft };
+  }
+
+  if (typeof generated === "string") {
+    throw new Error(
+      "Turn-processor packet narration tests must return a native NarrationDraft object, not prose text.",
+    );
+  }
+
+  return { text: "", draft: createNarrationDraftForTest("") };
+}
+
+function installSafeGenerateObjectDefaultMock() {
+  vi.mocked(safeGenerateObject).mockImplementation(async (opts?: { prompt?: unknown }) => {
+    const prompt = String(opts?.prompt ?? "");
+    if (prompt.includes("Final narration prompt") || prompt.includes("[FINAL NARRATION TASK]")) {
+      return {
+        object: createGroundedSentenceDraftForTest("The goblin falls."),
+        trace: {
+          text: "",
+          cleanedText: "",
+          strategy: "native_json",
+          primaryStrategy: "native_json",
+          finishReason: "stop",
+          response: { modelId: "mock-model" },
+        },
+      } as never;
+    }
+
+    return { object: { isMovement: false, destination: null }, trace: {} } as never;
+  });
 }
 
 function createGmReadMock(
   overrides: Partial<Record<string, unknown>> = {},
 ): Record<string, unknown> {
-  const read = {
+  const read: Record<string, unknown> = {
     version: "gm-read.v1",
     situationSummary: "The player creates the next local beat.",
     sceneQuestion: "What changes in the immediate scene?",
@@ -770,6 +938,13 @@ function createGmReadMock(
     narrationGuardrails: ["Stay inside the visible scene."],
     ...overrides,
   };
+
+  if (read.path === "tool_plan" && !("runtimeRequirement" in overrides)) {
+    read.runtimeRequirement = {
+      kind: "scene_beat",
+      durability: "durable",
+    };
+  }
 
   return Object.fromEntries(
     Object.entries(read).filter(([, value]) => value !== undefined),
@@ -827,9 +1002,11 @@ function setupScenePlanMocks(options: {
   vi.mocked(executeScenePlan).mockResolvedValue(executedPlan as never);
   vi.mocked(buildNarratorPacket).mockReturnValue(narratorPacket as never);
   vi.mocked(runVisibleNarrationWithPacketGuard).mockImplementation(async (args) => {
-    const text = await args.generateNarration({ attempt: 1, guardAddendum: null });
+    const generated = await args.generateNarration({ attempt: 1, guardAddendum: null });
+    const { text, draft } = normalizeGeneratedNarrationForTest(generated);
     return {
       text,
+      draft,
       attempts: 1,
       retried: false,
       validation: { ok: true, violations: [] },
@@ -1013,6 +1190,10 @@ function setupTurnSagaMocks(overrides: {
     const id = `attempt-${recordNarratorAttemptMock.mock.calls.length + 1}`;
     saga = { ...saga, latestNarratorAttemptId: id };
     return { id, sagaId: saga.id, status: input.status };
+  });
+  updateNarratorAttemptOutcomeMock.mockImplementation((input: { id: string; status: string }) => {
+    saga = { ...saga, latestNarratorAttemptId: input.id };
+    return { id: input.id, sagaId: saga.id, status: input.status };
   });
   markTurnSagaFinalizedMock.mockImplementation(() => {
     saga = { ...saga, status: "finalized" };
@@ -1467,8 +1648,9 @@ describe("processTurn", () => {
       parallelFrameRetrievalTrace: [],
       parallelPrepTrace: [],
     });
-    // Default: no movement detected
-    vi.mocked(safeGenerateObject).mockResolvedValue({ object: { isMovement: false, destination: null } } as never);
+    vi.mocked(safeGenerateObject).mockReset();
+    // Default: no movement detected; final packet narration returns a native JSON draft.
+    installSafeGenerateObjectDefaultMock();
   });
 
   it("yields oracle_result event first", async () => {
@@ -1691,7 +1873,7 @@ describe("processTurn", () => {
     );
   });
 
-  it("uses storyteller model role with reasoning-enabled baseline family for visible narration", async () => {
+  it("uses storyteller model role without explicit reasoning bypass for visible prose narration", async () => {
     setupMocks({
       streamParts: [{ type: "text-delta", text: "A blade cuts the air." }],
     });
@@ -1699,7 +1881,7 @@ describe("processTurn", () => {
     await collectEvents(processTurn(createTestOptions()));
 
     const storytellerCalls = mockedCreateModel.mock.calls.filter(
-      ([, options]) => options?.role === "storyteller" && options?.familyHint === "baseline",
+      ([, options]) => options?.role === "storyteller" && options?.familyHint == null && options?.reasoningMode == null,
     );
 
     expect(storytellerCalls).toHaveLength(1);
@@ -2086,6 +2268,42 @@ describe("processTurn", () => {
         },
       },
     ]);
+  });
+
+  it("retries the final visible storyteller pass after a provider timeout", async () => {
+    setupMocks();
+    (generateText as Mock)
+      .mockRejectedValueOnce(new Error("AI SDK timeout after 60000ms"))
+      .mockResolvedValueOnce({
+        text: "The warden lets the silence stretch, then taps the ledger for an answer.",
+      });
+
+    const events = await collectEvents(processTurn(createTestOptions()));
+
+    expect(generateText).toHaveBeenCalledTimes(2);
+    expect((generateText as Mock).mock.calls[1]?.[0]?.prompt).not.toContain(
+      "[FINAL VISIBLE PASS CORRECTION]",
+    );
+    expect(events.filter((event) => event.type === "narrative")).toEqual([
+      {
+        type: "narrative",
+        data: {
+          text: "The warden lets the silence stretch, then taps the ledger for an answer.",
+        },
+      },
+    ]);
+  });
+
+  it("bounds final visible storyteller calls with a timeout and output cap", async () => {
+    setupMocks();
+
+    await collectEvents(processTurn(createTestOptions({ storytellerMaxTokens: 32_000 })));
+
+    const call = (generateText as Mock).mock.calls[0]?.[0];
+    expect(call).toMatchObject({
+      maxOutputTokens: 4096,
+      timeout: { totalMs: DEFAULT_PLAYER_BLOCKING_STAGE_TIMEOUT_MS },
+    });
   });
 
   it("retries the final visible pass once when the opening lead restarts in a later paragraph", async () => {
@@ -3673,6 +3891,8 @@ describe("processTurn ScenePlan path", () => {
     logInfoMock.mockClear();
     logWarnMock.mockClear();
     logErrorMock.mockClear();
+    vi.mocked(safeGenerateObject).mockReset();
+    installSafeGenerateObjectDefaultMock();
   });
 
   function assistantAppendCallOrder(): number | undefined {
@@ -3686,8 +3906,8 @@ describe("processTurn ScenePlan path", () => {
   }
 
   function successfulNarratorAttemptId(): string {
-    const result = recordNarratorAttemptMock.mock.results.find((entry, index) => {
-      const input = recordNarratorAttemptMock.mock.calls[index]?.[0] as
+    const result = updateNarratorAttemptOutcomeMock.mock.results.find((entry, index) => {
+      const input = updateNarratorAttemptOutcomeMock.mock.calls[index]?.[0] as
         | { status?: string }
         | undefined;
       return input?.status === "succeeded" && entry.type === "return";
@@ -3704,9 +3924,11 @@ describe("processTurn ScenePlan path", () => {
     const milestones: string[] = [];
     vi.mocked(runVisibleNarrationWithPacketGuard).mockImplementationOnce(async (args) => {
       milestones.push("runVisibleNarrationWithPacketGuard before narrative SSE");
-      const text = await args.generateNarration({ attempt: 1, guardAddendum: null });
+      const generated = await args.generateNarration({ attempt: 1, guardAddendum: null });
+      const { text, draft } = normalizeGeneratedNarrationForTest(generated);
       return {
         text,
+        draft,
         attempts: 1,
         retried: false,
         validation: { ok: true, violations: [] },
@@ -3846,12 +4068,13 @@ describe("processTurn ScenePlan path", () => {
     expect(advanceCampaignTick).toHaveBeenCalledWith(CAMPAIGN_ID, 3);
   });
 
-  it("keeps observation-only GM-loop lookups out of settled ScenePlan actions", async () => {
+  it("keeps observation-only GM-loop lookups as packet evidence without emitting state updates", async () => {
     setupMocks();
     setupScenePlanMocks();
     vi.mocked(runGmToolLoop).mockResolvedValueOnce({
       intent: "Look up the public route before deciding whether to mutate.",
       text: "",
+      observationSummary: "list_navigation_options observed candidates Tea Row",
       rawToolCalls: [
         {
           tool: "list_navigation_options",
@@ -3860,7 +4083,65 @@ describe("processTurn ScenePlan path", () => {
             success: true,
             kind: "observation",
             observationOnly: true,
-            result: { candidates: [{ label: "Tea Row" }] },
+            result: {
+              visibleActors: [
+                { label: "Mira" },
+                { label: "Dol the Docksman" },
+                { label: "Gondolier" },
+                { label: "Lead Warden" },
+                { label: "Second Warden" },
+              ],
+              legalTargets: [
+                { label: "Mira" },
+                { label: "Dol the Docksman" },
+                { label: "Gondolier" },
+                { label: "Lead Warden" },
+                { label: "Second Warden" },
+              ],
+              legalMovement: [
+                { label: "Canal Market District" },
+                { label: "Gondola Dispatch Alcove" },
+                { label: "Tea Row" },
+              ],
+              candidates: [{ label: "Tea Row" }],
+              visibleFacts: [
+                {
+                  id: "current-location-description",
+                  summary: "Station CCTV watches the rope barrier beside Tea Row.",
+                },
+              ],
+              categories: {
+                cameras: {
+                  targets: [{ label: "Station CCTV Camera" }],
+                  facts: [],
+                  absence: null,
+                },
+                barriers: {
+                  targets: [],
+                  facts: [
+                    {
+                      id: "current-location-description",
+                      summary: "A rope barrier controls the queue.",
+                    },
+                  ],
+                  absence: null,
+                },
+                personnel: {
+                  actors: [
+                    { label: "Dol the Docksman" },
+                    { label: "Lead Warden" },
+                    { label: "Second Warden" },
+                  ],
+                  facts: [
+                    {
+                      id: "warden-ready",
+                      summary: "The Second Warden is ready to detain anyone who ignores the proof demand.",
+                    },
+                  ],
+                  absence: null,
+                },
+              },
+            },
           },
         },
       ],
@@ -3880,7 +4161,65 @@ describe("processTurn ScenePlan path", () => {
             success: true,
             kind: "observation",
             observationOnly: true,
-            result: { candidates: [{ label: "Tea Row" }] },
+            result: {
+              visibleActors: [
+                { label: "Mira" },
+                { label: "Dol the Docksman" },
+                { label: "Gondolier" },
+                { label: "Lead Warden" },
+                { label: "Second Warden" },
+              ],
+              legalTargets: [
+                { label: "Mira" },
+                { label: "Dol the Docksman" },
+                { label: "Gondolier" },
+                { label: "Lead Warden" },
+                { label: "Second Warden" },
+              ],
+              legalMovement: [
+                { label: "Canal Market District" },
+                { label: "Gondola Dispatch Alcove" },
+                { label: "Tea Row" },
+              ],
+              candidates: [{ label: "Tea Row" }],
+              visibleFacts: [
+                {
+                  id: "current-location-description",
+                  summary: "Station CCTV watches the rope barrier beside Tea Row.",
+                },
+              ],
+              categories: {
+                cameras: {
+                  targets: [{ label: "Station CCTV Camera" }],
+                  facts: [],
+                  absence: null,
+                },
+                barriers: {
+                  targets: [],
+                  facts: [
+                    {
+                      id: "current-location-description",
+                      summary: "A rope barrier controls the queue.",
+                    },
+                  ],
+                  absence: null,
+                },
+                personnel: {
+                  actors: [
+                    { label: "Dol the Docksman" },
+                    { label: "Lead Warden" },
+                    { label: "Second Warden" },
+                  ],
+                  facts: [
+                    {
+                      id: "warden-ready",
+                      summary: "The Second Warden is ready to detain anyone who ignores the proof demand.",
+                    },
+                  ],
+                  absence: null,
+                },
+              },
+            },
           },
         },
       ],
@@ -3889,15 +4228,80 @@ describe("processTurn ScenePlan path", () => {
     const events = await collectEvents(processTurn(createTestOptions()));
     const persistedPacket = persistSettledTurnPacketMock.mock.calls[0]?.[0] as {
       canonicalTurnPacket?: {
-        actionResults?: unknown[];
+        actionResults?: Array<{
+          toolName?: string;
+          result?: { success?: boolean; kind?: string; observationOnly?: boolean };
+        }>;
+        effects?: Array<{
+          toolName?: string;
+          summary?: string;
+          toolResult?: { success?: boolean; kind?: string; observationOnly?: boolean };
+        }>;
+        responses?: Array<{ summary?: string }>;
         narratorFacts?: { actionIds?: string[]; toolResultRefs?: unknown[] };
+        turnResolution?: {
+          kind?: string;
+          resolutionState?: string;
+          combatIntent?: boolean;
+          evidenceIds?: string[];
+          consequenceIds?: string[];
+          explicitNoCombatEvidenceIds?: string[];
+          toolNames?: string[];
+        };
       };
     } | undefined;
 
     expect(events.filter((event) => event.type === "state_update")).toEqual([]);
-    expect(persistedPacket?.canonicalTurnPacket?.actionResults).toEqual([]);
-    expect(persistedPacket?.canonicalTurnPacket?.narratorFacts?.actionIds).toEqual([]);
-    expect(persistedPacket?.canonicalTurnPacket?.narratorFacts?.toolResultRefs).toEqual([]);
+    expect(events.find((event) => event.type === "turn_resolution")?.data).toMatchObject({
+      kind: "status_read",
+      resolutionState: "observation_grounded",
+      combatIntent: false,
+      toolNames: ["list_navigation_options"],
+    });
+    expect(persistedPacket?.canonicalTurnPacket?.actionResults).toHaveLength(1);
+    expect(persistedPacket?.canonicalTurnPacket?.turnResolution).toMatchObject({
+      kind: "status_read",
+      resolutionState: "observation_grounded",
+      combatIntent: false,
+      consequenceIds: [],
+      explicitNoCombatEvidenceIds: expect.arrayContaining([
+        expect.stringMatching(/^action-result:/),
+      ]),
+      toolNames: ["list_navigation_options"],
+    });
+    expect(persistedPacket?.canonicalTurnPacket?.actionResults?.[0]).toMatchObject({
+      toolName: "list_navigation_options",
+      result: {
+        success: true,
+        kind: "observation",
+        observationOnly: true,
+      },
+    });
+    expect(persistedPacket?.canonicalTurnPacket?.effects?.[0]).toMatchObject({
+      toolName: "list_navigation_options",
+      toolResult: {
+        success: true,
+        kind: "observation",
+        observationOnly: true,
+      },
+    });
+    expect(persistedPacket?.canonicalTurnPacket?.effects?.[0]?.summary).toContain(
+      "Station CCTV",
+    );
+    expect(persistedPacket?.canonicalTurnPacket?.effects?.[0]?.summary).toContain(
+      "Lead Warden",
+    );
+    expect(persistedPacket?.canonicalTurnPacket?.effects?.[0]?.summary).toContain(
+      "ready to detain",
+    );
+    expect(persistedPacket?.canonicalTurnPacket?.effects?.[0]?.summary).toContain(
+      "rope barrier",
+    );
+    expect(persistedPacket?.canonicalTurnPacket?.responses?.[0]?.summary).not.toContain(
+      "GM no-mutation direction",
+    );
+    expect(persistedPacket?.canonicalTurnPacket?.narratorFacts?.actionIds).toHaveLength(1);
+    expect(persistedPacket?.canonicalTurnPacket?.narratorFacts?.toolResultRefs).toHaveLength(1);
   });
 
   it("refuses to start a new ScenePlan turn while narration is pending", async () => {
@@ -4014,11 +4418,217 @@ describe("processTurn ScenePlan path", () => {
       sagaId: "saga-1",
       lockToken: "lock-token",
     });
-    expect(recordNarratorAttemptMock).toHaveBeenCalledWith(
+    expect(updateNarratorAttemptOutcomeMock).toHaveBeenCalledWith(
       expect.objectContaining({ status: "succeeded", lockToken: "lock-token" }),
     );
     expect(markTurnSagaFinalizedMock).toHaveBeenCalledWith(
       expect.objectContaining({ lockToken: "lock-token" }),
+    );
+  });
+
+  it("uses closed structured grounded sentence draft generation and emits only compiled prose", async () => {
+    setupMocks();
+    setupScenePlanMocks();
+
+    const events = await collectEvents(processTurn(createTestOptions({ storytellerMaxTokens: 32_000 })));
+    const finalNarrationCall = vi.mocked(safeGenerateObject).mock.calls.find(([call]) =>
+      String((call as { prompt?: unknown } | undefined)?.prompt ?? "").includes("Final narration prompt"),
+    )?.[0] as {
+      model?: unknown;
+      mode?: string;
+      retries?: number;
+      timeout?: unknown;
+      maxOutputTokens?: number;
+    } | undefined;
+
+    const finalNarrationModelCall = mockedCreateModel.mock.calls.find(
+      ([, options]) => options?.role === "storyteller" && options?.reasoningMode === "bypass",
+    );
+    expect(finalNarrationCall).toMatchObject({
+      mode: "native_json",
+      retries: 1,
+      allowTextFallback: false,
+      allowRepair: false,
+      strictSchema: true,
+      timeout: { totalMs: DEFAULT_PLAYER_BLOCKING_STAGE_TIMEOUT_MS },
+      maxOutputTokens: 2048,
+    });
+    expect(finalNarrationModelCall).toBeTruthy();
+    expect(events).toEqual(
+      expect.arrayContaining([
+        { type: "narrative", data: { text: "The goblin falls." } },
+      ]),
+    );
+    expect(appendChatMessages).toHaveBeenCalledWith(CAMPAIGN_ID, [
+      expect.objectContaining({
+        role: "assistant",
+        content: "The goblin falls.",
+      }),
+    ]);
+    expect(JSON.stringify(vi.mocked(appendChatMessages).mock.calls)).not.toContain('"prose"');
+  });
+
+  it("emits a dense closed structured grounded sentence without draft-contract failure", async () => {
+    setupMocks();
+    setupScenePlanMocks();
+    const denseText = [
+      "The scene consequence lands in one continuous visible beat, with the fallen threat no longer driving the exchange,",
+      "the nearby space opening just enough for the player to choose whether to press forward, check the body,",
+      "or turn attention back to whoever else can see the result before the room has time to settle into a safer rhythm.",
+      "Nothing in the line adds a new item, route, promise, injury, or authority; it only renders the existing perceivable effect as a playable moment.",
+    ].join(" ");
+    expect(denseText.length).toBeGreaterThan(360);
+
+    vi.mocked(safeGenerateObject).mockImplementation(async (opts?: { prompt?: unknown }) => {
+      const prompt = String(opts?.prompt ?? "");
+      if (prompt.includes("Final narration prompt") || prompt.includes("[FINAL NARRATION TASK]")) {
+        return {
+          object: {
+            version: "grounded-sentence-draft.v2",
+            sentences: [
+              {
+                text: denseText,
+                evidenceRefs: ["perceivable_effect:effect-goblin-falls"],
+              },
+            ],
+          },
+          trace: {
+            text: "",
+            cleanedText: "",
+            strategy: "native_json",
+            primaryStrategy: "native_json",
+            finishReason: "stop",
+            response: { modelId: "mock-model" },
+          },
+        } as never;
+      }
+
+      return { object: createGmReadMock(), trace: {} } as never;
+    });
+
+    const events = await collectEvents(processTurn(createTestOptions()));
+
+    expect(events).toEqual(
+      expect.arrayContaining([
+        { type: "narrative", data: { text: denseText } },
+      ]),
+    );
+    expect(updateNarratorAttemptOutcomeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "succeeded" }),
+    );
+  });
+
+  it("retries the same closed structured final narration contract after structured output channel misses", async () => {
+    setupMocks();
+    setupScenePlanMocks();
+    let finalNarrationCalls = 0;
+    vi.mocked(safeGenerateObject).mockImplementation(async (opts?: { prompt?: unknown }) => {
+      const prompt = String(opts?.prompt ?? "");
+      if (prompt.includes("Final narration prompt") || prompt.includes("[FINAL NARRATION TASK]")) {
+        finalNarrationCalls += 1;
+        if (finalNarrationCalls < 3) {
+          throw Object.assign(
+            new Error("safeGenerateObject native_json: text fallback is disabled. native_json failed: No output generated"),
+            { safeGenerateCode: "native_output_unavailable" },
+          );
+        }
+        return {
+          object: createGroundedSentenceDraftForTest("The goblin falls after the channel holds."),
+          trace: {
+            text: "",
+            cleanedText: "",
+            strategy: "native_json",
+            primaryStrategy: "native_json",
+            finishReason: "tool-calls",
+            response: { modelId: "mock-model" },
+          },
+        } as never;
+      }
+
+      return { object: { isMovement: false, destination: null }, trace: {} } as never;
+    });
+
+    const events = await collectEvents(processTurn(createTestOptions()));
+
+    expect(finalNarrationCalls).toBe(3);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        { type: "narrative", data: { text: "The goblin falls after the channel holds." } },
+      ]),
+    );
+    expect(String(vi.mocked(safeGenerateObject).mock.calls.at(-1)?.[0]?.prompt)).not.toContain(
+      "[PACKET VISIBILITY RECOVERY]",
+    );
+    expect(updateNarratorAttemptOutcomeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "succeeded" }),
+    );
+    const channelRetryWarnings = logWarnMock.mock.calls.filter(([message]) =>
+      String(message).includes("Visible structured narration channel error; retrying same contract pass"),
+    );
+    expect(channelRetryWarnings).toHaveLength(2);
+  });
+
+  it("fails closed when final grounded sentence draft generation leaves the closed structured strategy", async () => {
+    setupMocks();
+    setupScenePlanMocks();
+    vi.mocked(safeGenerateObject).mockImplementation(async (opts?: { prompt?: unknown }) => {
+      const prompt = String(opts?.prompt ?? "");
+      if (prompt.includes("Final narration prompt")) {
+        return {
+          object: createNarrationDraftForTest("Extracted JSON should not become visible."),
+          trace: {
+            text: "{\"prose\":\"Extracted JSON should not become visible.\"}",
+            cleanedText: "{\"prose\":\"Extracted JSON should not become visible.\"}",
+            strategy: "text_fallback",
+            primaryStrategy: "native_json",
+            fallbackReason: "native_json failed",
+          },
+        } as never;
+      }
+
+      return { object: { isMovement: false, destination: null }, trace: {} } as never;
+    });
+
+    await expect(collectEvents(processTurn(createTestOptions()))).rejects.toThrow(
+      NarrationRepairExhaustedError,
+    );
+
+    expect(runVisibleNarrationWithPacketGuard).toHaveBeenCalledTimes(1);
+    expect(assistantAppendCallOrder()).toBeUndefined();
+    expect(JSON.stringify(vi.mocked(appendChatMessages).mock.calls)).not.toContain(
+      "Extracted JSON should not become visible.",
+    );
+    expect(updateNarratorAttemptOutcomeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "failed" }),
+    );
+  });
+
+  it("does not run packet recovery regeneration after grounded sentence draft transport timeout", async () => {
+    setupMocks();
+    setupScenePlanMocks();
+    vi.mocked(safeGenerateObject).mockImplementation(async (opts?: { prompt?: unknown }) => {
+      const prompt = String(opts?.prompt ?? "");
+      if (prompt.includes("Final narration prompt")) {
+        throw new Error("AI SDK timeout after 60000ms");
+      }
+
+      return { object: { isMovement: false, destination: null }, trace: {} } as never;
+    });
+
+    await expect(collectEvents(processTurn(createTestOptions()))).rejects.toThrow(
+      NarrationRepairExhaustedError,
+    );
+
+    expect(runVisibleNarrationWithPacketGuard).toHaveBeenCalledTimes(1);
+    expect(String(vi.mocked(safeGenerateObject).mock.calls.at(-1)?.[0]?.prompt)).not.toContain(
+      "[PACKET VISIBILITY RECOVERY]",
+    );
+    expect(assistantAppendCallOrder()).toBeUndefined();
+    expect(markTurnSagaFinalizedMock).not.toHaveBeenCalled();
+    expect(updateNarratorAttemptOutcomeMock).toHaveBeenCalledTimes(1);
+    expect(logEventMock).toHaveBeenCalledWith(
+      "visible-narration.packet-guard",
+      expect.objectContaining({ stage: "transport-exhausted" }),
     );
   });
 
@@ -4061,54 +4671,42 @@ describe("processTurn ScenePlan path", () => {
     expect(callOracle).not.toHaveBeenCalled();
     expect(events.some((event) => event.type === "done")).toBe(true);
 
-    if (_path !== "clarification") {
-      const packetArgs = vi.mocked(buildNarratorPacket).mock.calls.at(-1)?.[0] as
-        | { canonicalTurnPacket?: { anchorEvent?: { summary?: string }; responses?: Array<{ summary: string }> } }
-        | undefined;
-      const expectedGuidance =
-        "directResolutionNotes" in pathFields
-          ? pathFields.directResolutionNotes
-          : "continuationGuidance" in pathFields
-            ? pathFields.continuationGuidance
+    const packetArgs = vi.mocked(buildNarratorPacket).mock.calls.at(-1)?.[0] as
+      | { canonicalTurnPacket?: { anchorEvent?: { summary?: string }; responses?: Array<{ summary: string }> } }
+      | undefined;
+    const expectedGuidance =
+      "directResolutionNotes" in pathFields
+        ? pathFields.directResolutionNotes
+        : "continuationGuidance" in pathFields
+          ? pathFields.continuationGuidance
+          : "clarificationPrompt" in pathFields
+            ? pathFields.clarificationPrompt
             : null;
 
-      expect(packetArgs?.canonicalTurnPacket?.anchorEvent?.summary).toContain(
-        "Player action request:",
-      );
-      expect(typeof expectedGuidance).toBe("string");
-      expect(packetArgs?.canonicalTurnPacket?.responses?.[0]?.summary).toContain(
-        expectedGuidance as string,
-      );
-      expect(persistSettledTurnPacketMock).toHaveBeenCalled();
-      expect(runVisibleNarrationWithPacketGuard).toHaveBeenCalled();
-      expect(sagaStatusTransitions()).toEqual([
-        "collecting_context",
-        "pre_turn_catchup",
-        "gm_reading",
-        "oracle_adjudicating",
-        "tool_loop_running",
-        "local_reaction_running",
-        "world_consequence_running",
-        "narrator_rendering",
-      ]);
-    } else {
-      expect(persistSettledTurnPacketMock).not.toHaveBeenCalled();
-      expect(runVisibleNarrationWithPacketGuard).not.toHaveBeenCalled();
-      expect(markTurnSagaFinalizedMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          reason: "Clarification returned without settled narration packet.",
-        }),
-      );
-      expect(sagaStatusTransitions()).toEqual([
-        "collecting_context",
-        "pre_turn_catchup",
-        "gm_reading",
-        "oracle_adjudicating",
-        "tool_loop_running",
-        "local_reaction_running",
-        "world_consequence_running",
-      ]);
-    }
+    expect(packetArgs?.canonicalTurnPacket?.anchorEvent?.summary).toContain(
+      "Player action request:",
+    );
+    expect(typeof expectedGuidance).toBe("string");
+    expect(packetArgs?.canonicalTurnPacket?.responses?.[0]?.summary).toContain(
+      expectedGuidance as string,
+    );
+    expect(persistSettledTurnPacketMock).toHaveBeenCalled();
+    expect(runVisibleNarrationWithPacketGuard).toHaveBeenCalled();
+    expect(markTurnSagaFinalizedMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: "Clarification returned without settled narration packet.",
+      }),
+    );
+    expect(sagaStatusTransitions()).toEqual([
+      "collecting_context",
+      "pre_turn_catchup",
+      "gm_reading",
+      "oracle_adjudicating",
+      "tool_loop_running",
+      "local_reaction_running",
+      "world_consequence_running",
+      "narrator_rendering",
+    ]);
   });
 
   it("throws GM tool-loop failures before final narration, assistant persistence, and done", async () => {
@@ -4125,29 +4723,147 @@ describe("processTurn ScenePlan path", () => {
     expect(assistantAppendCallOrder()).toBeUndefined();
   });
 
-  it("regenerates Storyteller output once more after packet-guard failure before rollback", async () => {
+  it("fails closed after packet-guard failure without recovery regeneration", async () => {
     setupMocks();
     setupScenePlanMocks();
     vi.mocked(runVisibleNarrationWithPacketGuard).mockRejectedValueOnce(
-      new Error("Visible narration violated packet visibility constraints after retry."),
+      new VisibleNarrationPacketGuardError(
+        "Visible narration failed NarrationDraft or packet validation after retry.",
+        [{ kind: "grounding", term: "narration grounding" }],
+        1,
+        {
+          ok: false,
+          violations: [{ kind: "grounding", term: "narration grounding" }],
+        },
+      ),
     );
 
-    const events = await collectEvents(processTurn(createTestOptions()));
+    const events: TurnEvent[] = [];
+    await expect((async () => {
+      for await (const event of processTurn(createTestOptions())) {
+        events.push(event);
+      }
+    })()).rejects.toThrow(NarrationRepairExhaustedError);
 
-    expect(runVisibleNarrationWithPacketGuard).toHaveBeenCalledTimes(2);
-    expect(recordNarratorAttemptMock).toHaveBeenCalledWith(
+    expect(runVisibleNarrationWithPacketGuard).toHaveBeenCalledTimes(1);
+    expect(updateNarratorAttemptOutcomeMock).toHaveBeenCalledWith(
       expect.objectContaining({ status: "failed" }),
     );
-    expect(recordNarratorAttemptMock).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "succeeded" }),
+    expect(updateNarratorAttemptOutcomeMock.mock.calls).not.toEqual(
+      expect.arrayContaining([
+        [expect.objectContaining({ status: "succeeded" })],
+      ]),
     );
-    expect(markTurnSagaFinalizedMock).toHaveBeenCalled();
-    expect(String(vi.mocked(generateText).mock.calls.at(-1)?.[0]?.prompt)).toContain(
+    expect(markTurnSagaFinalizedMock).not.toHaveBeenCalled();
+    expect(JSON.stringify(vi.mocked(safeGenerateObject).mock.calls)).not.toContain(
       "[PACKET VISIBILITY RECOVERY]",
     );
-    expect(assistantAppendCallOrder()).toBeDefined();
-    expect(events.some((event) => event.type === "narrative")).toBe(true);
-    expect(events.some((event) => event.type === "done")).toBe(true);
+    expect(assistantAppendCallOrder()).toBeUndefined();
+    expect(events.some((event) => event.type === "narrative")).toBe(false);
+    expect(events.some((event) => event.type === "done")).toBe(false);
+  });
+
+  it("persists sanitized grounding subtype diagnostics on failed narrator attempts", async () => {
+    setupMocks();
+    setupScenePlanMocks();
+    const validation: VisibleNarrationPacketValidationResult = {
+      ok: false,
+      violations: [{ kind: "grounding", term: "narration grounding" }],
+      grounding: {
+        ok: false,
+        violations: [
+          {
+            kind: "unknown_evidence_ref",
+            claimKind: "future_pressure",
+            evidenceRefs: ["private-Forest-Outpost-ref"],
+            missingEvidenceRefs: ["private-Forest-Outpost-ref"],
+            requiredEvidenceCategories: ["perceivable_response"],
+          },
+        ],
+        warnings: [],
+        coverage: [
+          {
+            spanId: "span-Forest-Outpost-private",
+            claimIds: ["claim-Forest-Outpost-private"],
+            covered: false,
+            requiresEvidence: true,
+          },
+        ],
+        repairAddendum: null,
+      },
+      diagnostics: {
+        violationKinds: ["grounding"],
+        grounding: {
+          violationKinds: ["unknown_evidence_ref"],
+          warningKinds: [],
+          coverage: {
+            total: 1,
+            covered: 0,
+            unsupported: 1,
+            evidenceRequired: 1,
+            missingClaim: 0,
+          },
+        },
+        redactionAudit: {
+          hiddenEventCount: 0,
+          hiddenResponseCount: 0,
+          failedEffectCount: 0,
+          unreferencedEffectCount: 0,
+          hiddenEffectCount: 0,
+          privateActorNameCount: 0,
+          forbiddenFactMarkerCount: 0,
+          forbiddenPrivateTermCount: 1,
+          uncommittedProposalCount: 0,
+        },
+      },
+    };
+    vi.mocked(runVisibleNarrationWithPacketGuard).mockRejectedValueOnce(
+      new VisibleNarrationPacketGuardError(
+        "Visible narration failed NarrationDraft or packet validation after retry.",
+        [{ kind: "grounding", term: "narration grounding" }],
+        1,
+        validation,
+      ),
+    );
+
+    await expect(collectEvents(processTurn(createTestOptions()))).rejects.toThrow(
+      NarrationRepairExhaustedError,
+    );
+
+    const failedCall = updateNarratorAttemptOutcomeMock.mock.calls.find(([input]) =>
+      (input as { status?: string }).status === "failed",
+    )?.[0] as { groundingResult?: unknown } | undefined;
+
+    expect(failedCall?.groundingResult).toMatchObject({
+      ok: false,
+      stage: "packet_guard",
+      recovered: false,
+      attempts: 1,
+      violationKinds: ["grounding"],
+      validationDiagnostics: {
+        groundingViolationKinds: ["unknown_evidence_ref"],
+        groundingViolations: [
+          {
+            kind: "unknown_evidence_ref",
+            claimKind: "future_pressure",
+            evidenceRefCount: 1,
+            missingEvidenceRefCount: 1,
+            requiredEvidenceCategories: ["perceivable_response"],
+          },
+        ],
+        groundingCoverage: {
+          total: 1,
+          covered: 0,
+          unsupported: 1,
+          evidenceRequired: 1,
+          missingClaim: 0,
+        },
+      },
+    });
+    const persistedDiagnostics = JSON.stringify(failedCall?.groundingResult);
+    expect(persistedDiagnostics).not.toContain("Forest Outpost");
+    expect(persistedDiagnostics).not.toContain("span-Forest-Outpost-private");
+    expect(persistedDiagnostics).not.toContain("claim-Forest-Outpost-private");
   });
 
   it("finalizes saga only after assistant append and normal post-narration tail", async () => {
@@ -4250,12 +4966,20 @@ describe("processTurn ScenePlan path", () => {
     expect(markTurnSagaFinalizedMock).not.toHaveBeenCalled();
   });
 
-  it("throws Storyteller output guard failures only after recovery regeneration also fails", async () => {
+  it("throws Storyteller output guard failures without recovery regeneration", async () => {
     setupMocks();
     setupScenePlanMocks();
-    vi.mocked(runVisibleNarrationWithPacketGuard)
-      .mockRejectedValueOnce(new Error("Visible narration violated packet visibility constraints after retry."))
-      .mockRejectedValueOnce(new Error("Visible narration violated packet visibility constraints after recovery."));
+    vi.mocked(runVisibleNarrationWithPacketGuard).mockRejectedValueOnce(
+      new VisibleNarrationPacketGuardError(
+        "Visible narration failed NarrationDraft or packet validation after retry.",
+        [{ kind: "grounding", term: "narration grounding" }],
+        1,
+        {
+          ok: false,
+          violations: [{ kind: "grounding", term: "narration grounding" }],
+        },
+      ),
+    );
 
     const events: TurnEvent[] = [];
     await expect((async () => {
@@ -4266,10 +4990,14 @@ describe("processTurn ScenePlan path", () => {
 
     expect(assistantAppendCallOrder()).toBeUndefined();
     expect(persistSettledTurnPacketMock).toHaveBeenCalled();
-    expect(recordNarratorAttemptMock).toHaveBeenCalledWith(
+    expect(updateNarratorAttemptOutcomeMock).toHaveBeenCalledWith(
       expect.objectContaining({ status: "failed" }),
     );
-    expect(recordNarratorAttemptMock).toHaveBeenCalledTimes(2);
+    expect(runVisibleNarrationWithPacketGuard).toHaveBeenCalledTimes(1);
+    expect(updateNarratorAttemptOutcomeMock).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(vi.mocked(safeGenerateObject).mock.calls)).not.toContain(
+      "[PACKET VISIBILITY RECOVERY]",
+    );
     expect(events.some((event) => event.type === "narrative")).toBe(false);
     expect(events.some((event) => event.type === "done")).toBe(false);
   });
@@ -4314,17 +5042,26 @@ describe("processTurn ScenePlan path", () => {
     setupMocks();
     setupTurnSagaMocks({ status: "world_consequence_running", turnId: "pending-turn" });
     vi.mocked(runVisibleNarrationWithPacketGuard).mockImplementation(async (args) => {
-      const text = await args.generateNarration({ attempt: 1, guardAddendum: null });
+      const generated = await args.generateNarration({ attempt: 1, guardAddendum: null });
+      const { text, draft } = normalizeGeneratedNarrationForTest(generated);
       return {
         text,
+        draft,
         attempts: 1,
         retried: false,
         validation: { ok: true, violations: [] },
         guardAddendum: null,
       };
     });
-    vi.mocked(generateText).mockResolvedValue({
-      text: "The recovered packet narrates cleanly.",
+    vi.mocked(safeGenerateObject).mockResolvedValueOnce({
+      object: createGroundedSentenceDraftForTest("The recovered packet narrates cleanly."),
+      trace: {
+        text: "",
+        cleanedText: "",
+        strategy: "native_json",
+        primaryStrategy: "native_json",
+        finishReason: "stop",
+      },
     } as never);
 
     const events = await collectEvents(
@@ -4342,7 +5079,7 @@ describe("processTurn ScenePlan path", () => {
       "narrator_rendering",
     ]);
     expect(runVisibleNarrationWithPacketGuard).toHaveBeenCalledTimes(1);
-    expect(recordNarratorAttemptMock).toHaveBeenCalledWith(
+    expect(updateNarratorAttemptOutcomeMock).toHaveBeenCalledWith(
       expect.objectContaining({ status: "succeeded", lockToken: "lock-token" }),
     );
     expect(events).toEqual(
@@ -4360,18 +5097,27 @@ describe("processTurn ScenePlan path", () => {
     setupTurnSagaMocks({ status: "resolved_pending_narration", turnId: "pending-turn" });
     const onPostTurn = vi.fn();
     vi.mocked(runVisibleNarrationWithPacketGuard).mockImplementation(async (args) => {
-      const text = await args.generateNarration({ attempt: 1, guardAddendum: null });
+      const generated = await args.generateNarration({ attempt: 1, guardAddendum: null });
+      const { text, draft } = normalizeGeneratedNarrationForTest(generated);
       return {
         text,
+        draft,
         attempts: 1,
         retried: false,
         validation: { ok: true, violations: [] },
         guardAddendum: null,
       };
     });
-    vi.mocked(generateText).mockResolvedValue({
-      text: "The settled scene resolves cleanly.",
-      reasoningText: "Resume reasoning stays private by default.",
+    vi.mocked(safeGenerateObject).mockResolvedValueOnce({
+      object: createGroundedSentenceDraftForTest("The settled scene resolves cleanly."),
+      trace: {
+        text: "",
+        cleanedText: "",
+        reasoningText: "Resume reasoning stays private by default.",
+        strategy: "native_json",
+        primaryStrategy: "native_json",
+        finishReason: "stop",
+      },
     } as never);
 
     const events = await collectEvents(
@@ -4404,7 +5150,7 @@ describe("processTurn ScenePlan path", () => {
       lockToken: "lock-token",
     });
     expect(runVisibleNarrationWithPacketGuard).toHaveBeenCalledTimes(1);
-    expect(recordNarratorAttemptMock).toHaveBeenCalledWith(
+    expect(updateNarratorAttemptOutcomeMock).toHaveBeenCalledWith(
       expect.objectContaining({ status: "succeeded", lockToken: "lock-token" }),
     );
     expect(callOracle).not.toHaveBeenCalled();
@@ -4451,6 +5197,66 @@ describe("processTurn ScenePlan path", () => {
         { type: "done", data: { tick: 6, resumed: true } },
       ]),
     );
+  });
+
+  it("fails closed after a grounded sentence citation contract failure without repair prompts", async () => {
+    setupMocks();
+    setupTurnSagaMocks({ status: "resolved_pending_narration", turnId: "pending-turn" });
+    vi.mocked(runVisibleNarrationWithPacketGuard).mockImplementation(async (args) => {
+      const generated = await args.generateNarration({ attempt: 1, guardAddendum: null });
+      const { text, draft } = normalizeGeneratedNarrationForTest(generated);
+      return {
+        text,
+        draft,
+        attempts: 1,
+        retried: false,
+        validation: { ok: true, violations: [] },
+        guardAddendum: null,
+      };
+    });
+    vi.mocked(safeGenerateObject)
+      .mockResolvedValueOnce({
+        object: {
+          version: "grounded-sentence-draft.v2",
+          sentences: [
+            {
+              text: "The scene is complete.",
+              evidenceRefs: ["control_return:scene-complete"],
+            },
+          ],
+        },
+        trace: {
+          text: "",
+          cleanedText: "",
+          strategy: "native_json",
+          primaryStrategy: "native_json",
+          finishReason: "stop",
+        },
+      } as never);
+
+    await expect(collectEvents(
+      resumePendingTurnNarration({
+        campaignId: CAMPAIGN_ID,
+        turnId: "pending-turn",
+        storytellerProvider: createTestOptions().storytellerProvider,
+        storytellerTemperature: 0.8,
+        storytellerMaxTokens: 2000,
+      }),
+    )).rejects.toThrow(NarrationRepairExhaustedError);
+
+    expect(safeGenerateObject).toHaveBeenCalledTimes(1);
+    for (const [call] of vi.mocked(safeGenerateObject).mock.calls) {
+      expect(call).toMatchObject({
+        allowTextFallback: false,
+        allowRepair: false,
+        strictSchema: true,
+        mode: "native_json",
+      });
+    }
+    expect(String(vi.mocked(safeGenerateObject).mock.calls[0]?.[0]?.prompt ?? "")).not.toContain(
+      "[GROUNDING DRAFT CORRECTION]",
+    );
+    expect(assistantAppendCallOrder()).toBeUndefined();
   });
 
   it("refuses a locked pending narration before calling Storyteller", async () => {
@@ -4513,7 +5319,7 @@ describe("processTurn ScenePlan path", () => {
       turnId: "pending-turn",
       attemptIndex: 2,
       status: "succeeded",
-      groundingResult: { ok: true },
+      groundingResult: acceptedGroundedNarrationResult(),
       finalText: "The already rendered narration lands cleanly.",
       failureReason: null,
       createdAt: 10,
@@ -4561,6 +5367,84 @@ describe("processTurn ScenePlan path", () => {
     );
   });
 
+  it("does not reuse pre-contract successful narrator attempts without draft acceptance marker", async () => {
+    setupMocks();
+    setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
+    findLatestSuccessfulNarratorAttemptMock.mockReturnValue({
+      id: "attempt-old-fallback",
+      campaignId: CAMPAIGN_ID,
+      sagaId: "saga-1",
+      settledTurnPacketId: "packet-1",
+      turnId: "pending-turn",
+      attemptIndex: 2,
+      status: "succeeded",
+      groundingResult: { ok: true },
+      finalText: "The immediate scene settles into a playable next moment.",
+      failureReason: null,
+      createdAt: 10,
+      updatedAt: 10,
+    });
+    vi.mocked(runVisibleNarrationWithPacketGuard).mockImplementation(async (args) => {
+      const generated = await args.generateNarration({ attempt: 1, guardAddendum: null });
+      const { text, draft } = normalizeGeneratedNarrationForTest(generated);
+      return {
+        text,
+        draft,
+        attempts: 1,
+        retried: false,
+        validation: { ok: true, violations: [] },
+        guardAddendum: null,
+      };
+    });
+    vi.mocked(safeGenerateObject).mockResolvedValueOnce({
+      object: createGroundedSentenceDraftForTest("Fresh draft-backed narration replaces the old fallback."),
+      trace: {
+        text: "",
+        cleanedText: "",
+        strategy: "native_json",
+        primaryStrategy: "native_json",
+        finishReason: "stop",
+      },
+    } as never);
+
+    const events = await collectEvents(
+      resumePendingTurnNarration({
+        campaignId: CAMPAIGN_ID,
+        turnId: "pending-turn",
+        storytellerProvider: createTestOptions().storytellerProvider,
+        storytellerTemperature: 0.8,
+        storytellerMaxTokens: 2000,
+      }),
+    );
+
+    expect(runVisibleNarrationWithPacketGuard).toHaveBeenCalledTimes(1);
+    expect(appendChatMessages).toHaveBeenCalledWith(CAMPAIGN_ID, [
+      {
+        role: "assistant",
+        content: "Fresh draft-backed narration replaces the old fallback.",
+        metadata: {
+          resumeNarration: {
+            sagaId: "saga-1",
+            narratorAttemptId: expect.any(String),
+          },
+        },
+      },
+    ]);
+    expect(appendChatMessages).not.toHaveBeenCalledWith(CAMPAIGN_ID, [
+      expect.objectContaining({
+        content: "The immediate scene settles into a playable next moment.",
+      }),
+    ]);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        {
+          type: "narrative",
+          data: { text: "Fresh draft-backed narration replaces the old fallback." },
+        },
+      ]),
+    );
+  });
+
   it("appends current resume narration when older identical assistant text has no resume key", async () => {
     setupMocks();
     setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
@@ -4572,7 +5456,7 @@ describe("processTurn ScenePlan path", () => {
       turnId: "pending-turn",
       attemptIndex: 1,
       status: "succeeded",
-      groundingResult: { ok: true },
+      groundingResult: acceptedGroundedNarrationResult(),
       finalText: "The assistant line is already in chat.",
       failureReason: null,
       createdAt: 10,
@@ -4631,7 +5515,7 @@ describe("processTurn ScenePlan path", () => {
       turnId: "pending-turn",
       attemptIndex: 1,
       status: "succeeded",
-      groundingResult: { ok: true },
+      groundingResult: acceptedGroundedNarrationResult(),
       finalText: "The assistant line is already in chat.",
       failureReason: null,
       createdAt: 10,
@@ -4693,7 +5577,7 @@ describe("processTurn ScenePlan path", () => {
       turnId: "pending-turn",
       attemptIndex: 1,
       status: "succeeded",
-      groundingResult: { ok: true },
+      groundingResult: acceptedGroundedNarrationResult(),
       finalText: "Metadata lands with the stored assistant line.",
       failureReason: null,
       createdAt: 10,
@@ -4745,7 +5629,7 @@ describe("processTurn ScenePlan path", () => {
       turnId: "pending-turn",
       attemptIndex: 1,
       status: "succeeded",
-      groundingResult: { ok: true },
+      groundingResult: acceptedGroundedNarrationResult(),
       finalText: "Tail already ran once.",
       failureReason: null,
       createdAt: 10,
@@ -4790,7 +5674,7 @@ describe("processTurn ScenePlan path", () => {
       turnId: "pending-turn",
       attemptIndex: 1,
       status: "succeeded",
-      groundingResult: { ok: true },
+      groundingResult: acceptedGroundedNarrationResult(),
       finalText: "Tail ran before finalization.",
       failureReason: null,
       createdAt: 10,
@@ -4853,6 +5737,40 @@ describe("processTurn ScenePlan path", () => {
     expect(onPostTurn).toHaveBeenCalled();
   });
 
+  it("advances passive finalization from the world clock when tool commits moved it ahead of campaign tick", async () => {
+    setupMocks();
+    setupScenePlanMocks();
+    vi.mocked(readCampaignConfig).mockReturnValue({ currentTick: 18 } as never);
+    readWorldClockMock.mockReturnValue({
+      campaignId: CAMPAIGN_ID,
+      worldVersion: 7,
+      worldTimeMinutes: 21,
+      currentTick: 21,
+      updatedAt: 0,
+    });
+    vi.mocked(advanceCampaignTick).mockReturnValue(22);
+    const onPostTurn = vi.fn();
+
+    const events = await collectEvents(processTurn(createTestOptions({ onPostTurn })));
+
+    expect(advanceCampaignTick).toHaveBeenCalledWith(CAMPAIGN_ID, 4);
+    expect(incrementTick).not.toHaveBeenCalled();
+    expect(syncWorldClockTurnBoundaryMock).toHaveBeenCalledWith({
+      campaignId: CAMPAIGN_ID,
+      currentTick: 22,
+    });
+    expect(events).toEqual(
+      expect.arrayContaining([
+        { type: "done", data: { tick: 22 } },
+      ]),
+    );
+    expect(onPostTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tick: 22,
+      }),
+    );
+  });
+
   it("isolates the legacy path when SCENE_PLAN_ENABLED=false", async () => {
     process.env.SCENE_PLAN_ENABLED = "false";
     setupMocks();
@@ -4868,10 +5786,29 @@ describe("processTurn ScenePlan path", () => {
     expect(runVisibleNarrationWithPacketGuard).not.toHaveBeenCalled();
     expect(runHiddenAdjudicationPlan).toHaveBeenCalled();
   });
+
+  it("fails closed outside tests when SCENE_PLAN_ENABLED=false would select legacy runtime", async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "development";
+    process.env.SCENE_PLAN_ENABLED = "false";
+    setupMocks();
+    setupScenePlanMocks();
+
+    try {
+      await expect(collectEvents(processTurn(createTestOptions()))).rejects.toThrow(
+        "SCENE_PLAN_ENABLED=false legacy player-turn path is disabled",
+      );
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+    }
+
+    expect(buildSceneFrame).not.toHaveBeenCalled();
+    expect(runHiddenAdjudicationPlan).not.toHaveBeenCalled();
+  });
 });
 
 describe("processOpeningScene", () => {
-  it("uses storyteller model role with reasoning-enabled baseline family for opening narration", async () => {
+  it("uses explicit storyteller reasoning bypass for opening narration", async () => {
     const playerRow = createOpeningPlayerRow();
     (getDb as Mock).mockReturnValue(
       createEntityLookupDb({
@@ -4916,12 +5853,62 @@ describe("processOpeningScene", () => {
 
     expect(mockedCreateModel).toHaveBeenCalledWith(
       expect.objectContaining({ id: "test", name: "Test", model: "test-model" }),
-      { role: "storyteller", familyHint: "baseline" },
+      { role: "storyteller", reasoningMode: "bypass" },
     );
     expect(events).toEqual(
       expect.arrayContaining([{ type: "narrative", data: { text: "Lanternlight spills into the market." } }]),
     );
     expect(events.some((event) => event.type === "reasoning")).toBe(false);
+  });
+
+  it("does not mark opening complete when visible narration is empty", async () => {
+    const playerRow = createOpeningPlayerRow();
+    (getDb as Mock).mockReturnValue(
+      createEntityLookupDb({
+        playerRow,
+        locationRows: [
+          {
+            id: "loc-1",
+            campaignId: CAMPAIGN_ID,
+            name: "Town Square",
+            description: "A welcoming square with low conversation.",
+            tags: '["urban"]',
+            connectedTo: "[]",
+          },
+        ],
+      }),
+    );
+    (readCampaignConfig as Mock).mockReturnValue({ currentTick: 5 });
+    (assembleFinalNarrationPrompt as Mock).mockResolvedValue({
+      system: "Opening visible system",
+      prompt: "Opening visible prompt",
+      assembledBase: { formatted: "Opening prompt", sections: [], totalTokens: 42, budgetUsed: 4 },
+    });
+    (generateText as Mock).mockResolvedValue({
+      text: "   ",
+      reasoningText: undefined,
+    });
+
+    await expect(
+      collectEvents(
+        processOpeningScene({
+          campaignId: CAMPAIGN_ID,
+          storytellerProvider: {
+            id: "test",
+            name: "Test",
+            baseUrl: "http://localhost",
+            apiKey: "key",
+            model: "test-model",
+          },
+          storytellerTemperature: 0.8,
+          storytellerMaxTokens: 1600,
+        }),
+      ),
+    ).rejects.toThrow("Final visible narration was empty");
+
+    expect(appendChatMessages).not.toHaveBeenCalledWith(CAMPAIGN_ID, [
+      { role: "assistant", content: "   " },
+    ]);
   });
 
   it("runs world-brain before opening visible narration and hands it through scene assembly", async () => {

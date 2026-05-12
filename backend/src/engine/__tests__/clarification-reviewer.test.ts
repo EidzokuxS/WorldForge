@@ -244,6 +244,7 @@ describe("clarification reviewer", () => {
       path: "tool_plan",
       turnIntent:
         "Use bridge lookup and state tools to follow the legal route and ground a low-impact tea search or minor tea stall.",
+      runtimeRequirement: { kind: "state_mutation" },
       rationale: "The intent is understandable and low-risk; backend tools must validate movement and POI state.",
       evidenceRefs: ["Player", "Tea Row"],
       narrationGuardrails: ["Do not narrate completed movement or a tea stall before tool results."],

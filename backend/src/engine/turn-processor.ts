@@ -8,7 +8,10 @@
 import { generateText } from "ai";
 import type { ChatMessage } from "@worldforge/shared";
 import { extractReasoningText, normalizeReasoningText } from "../ai/extract-reasoning-text.js";
-import { safeGenerateObject as generateObject } from "../ai/generate-object-safe.js";
+import {
+  getSafeGenerateObjectErrorCode,
+  safeGenerateObject as generateObject,
+} from "../ai/generate-object-safe.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
@@ -106,10 +109,23 @@ import {
   type CanonicalTurnPacketEffect,
   type CanonicalTurnPacketEvent,
   type CanonicalTurnPacketResponse,
+  type CanonicalTurnResolution,
   type NarratorPacket,
 } from "./narrator-packet.js";
-import { runVisibleNarrationWithPacketGuard } from "./visible-narration-output-guard.js";
-import { readWorldClock } from "./living-world-authority.js";
+import {
+  runVisibleNarrationWithPacketGuard,
+  VisibleNarrationPacketGuardError,
+  type VisibleNarrationPacketValidationResult,
+} from "./visible-narration-output-guard.js";
+import {
+  buildGroundedSentenceDraftRepairAddendum,
+  compileGroundedSentenceDraftToNarrationDraft,
+  GROUNDED_SENTENCE_DRAFT_VERSION,
+  groundedSentenceDraftSchema,
+  type NarrationDraft,
+} from "./narration-grounding-guard.js";
+import { readWorldClock, syncWorldClockTurnBoundary } from "./living-world-authority.js";
+import { playerBlockingStageLimit } from "./runtime-limits.js";
 import {
   claimTurnSagaWorker,
   createTurnSaga,
@@ -128,6 +144,7 @@ import {
   recordNarratorAttempt,
   releaseTurnSagaWorker,
   transitionTurnSagaStatus,
+  updateNarratorAttemptOutcome,
   type SettledTurnPacketRecord,
   type TurnSagaRecord,
   type TurnSagaStatus,
@@ -136,25 +153,52 @@ import {
   buildScopedForecastExcerpt,
   loadWorldTrajectoryForecast,
   shouldRefreshWorldTrajectoryForecast,
-  stageWorldTrajectoryForecast,
   writeStagedWorldTrajectoryForecast,
   type ScopedForecastExcerpt,
   type StagedWorldTrajectoryForecast,
 } from "./world-forecast.js";
-import { runWorldForecastBuilder } from "./world-forecast-builder.js";
 import { cleanupTransientSceneObjects } from "./transient-scene-lifecycle.js";
 
 const log = createLogger("turn-processor");
 const VISIBLE_NARRATION_TRANSPORT_RETRY_LIMIT = 2;
+const VISIBLE_NARRATION_OPENING_TRANSPORT_RETRY_LIMIT = 1;
+const VISIBLE_NARRATION_TIMEOUT_MS = playerBlockingStageLimit(
+  "WORLDFORGE_VISIBLE_NARRATION_TIMEOUT_MS",
+);
+const VISIBLE_NARRATION_OPENING_TIMEOUT_MS = playerBlockingStageLimit(
+  "WORLDFORGE_VISIBLE_NARRATION_OPENING_TIMEOUT_MS",
+);
+const VISIBLE_NARRATION_MAX_OUTPUT_TOKENS = 4_096;
+const VISIBLE_NARRATION_OPENING_MAX_OUTPUT_TOKENS = 2_048;
+const VISIBLE_NARRATION_DRAFT_CHANNEL_RETRY_LIMIT = 3;
+const VISIBLE_NARRATION_DRAFT_TIMEOUT_MS = playerBlockingStageLimit(
+  "WORLDFORGE_VISIBLE_NARRATION_DRAFT_TIMEOUT_MS",
+);
+const VISIBLE_NARRATION_DRAFT_MAX_OUTPUT_TOKENS = 2_048;
+const VISIBLE_NARRATION_DRAFT_MODE = "native_json";
+const VISIBLE_NARRATION_DRAFT_CONTRACT_RETRY_LIMIT = 0;
 const PENDING_NARRATION_RESUME_CHECKPOINT_KEY = "pendingNarrationResume";
 const PENDING_NARRATION_WORKER_STALE_AFTER_MS = 5 * 60_000;
 const PENDING_NARRATION_WORKER_HEARTBEAT_MS = 60_000;
-const FINAL_VISIBLE_PACKET_GUARD_RECOVERY_ADDENDUM = [
-  "The previous final visible narration failed packet visibility validation after its internal retries.",
-  "Generate a fresh final narration from the same authoritative player-facing packet.",
-  "Do not preserve wording from the failed draft.",
-  "Omit any identity, fact marker, or private/source-boundary wording that is not explicitly player-visible in the packet.",
-].join("\n");
+const GROUNDED_SENTENCE_DRAFT_CONTRACT_VERSION = GROUNDED_SENTENCE_DRAFT_VERSION;
+
+type VisibleNarrationUsage = Awaited<ReturnType<typeof generateText>>["usage"];
+type VisibleNarrationResponse = Awaited<ReturnType<typeof generateText>>["response"] | {
+  id?: string;
+  modelId?: string;
+  timestamp?: string;
+};
+type VisibleNarrationFinishReason = Awaited<ReturnType<typeof generateText>>["finishReason"] | string;
+interface NarrationDraftStructuredTrace {
+  strategy: unknown;
+  primaryStrategy: unknown;
+  fallbackStrategy: unknown;
+  fallbackReason: unknown;
+  repairedFromStrategy: unknown;
+  repair: unknown;
+  finishReason: unknown;
+  responseModel: string | null;
+}
 
 export class NarrationRepairExhaustedError extends Error {
   constructor(
@@ -177,6 +221,7 @@ export interface TurnEvent {
     | "state_update"
     | "quick_actions"
     | "auto_checkpoint"
+    | "turn_resolution"
     | "finalizing_turn"
     | "done"
     | "error";
@@ -809,7 +854,28 @@ function isVisibleNarrationTransportError(error: unknown): boolean {
       ? error
       : "";
 
-  return /\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|network error|fetch failed|socket hang up|connection (?:closed|terminated|reset|refused)|terminated)\b/i.test(message);
+  return /\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|network error|fetch failed|socket hang up|connection (?:closed|terminated|reset|refused)|terminated|timeout|timed out|abort(?:ed)?|AbortError)\b/i.test(message);
+}
+
+function isVisibleNarrationStructuredChannelError(error: unknown): boolean {
+  const code = getSafeGenerateObjectErrorCode(error);
+  return (
+    code === "missing_structured_tool_call"
+    || code === "invalid_structured_tool_call"
+    || code === "native_output_unavailable"
+    || code === "invalid_json"
+  );
+}
+
+function isVisibleNarrationRetryableChannelError(error: unknown): boolean {
+  return isVisibleNarrationTransportError(error) || isVisibleNarrationStructuredChannelError(error);
+}
+
+function visibleNarrationMaxOutputTokens(
+  requested: number,
+  cap = VISIBLE_NARRATION_MAX_OUTPUT_TOKENS,
+): number {
+  return Math.max(1, Math.min(requested, cap));
 }
 
 async function runVisibleNarrationWithGuard(args: {
@@ -824,9 +890,9 @@ async function runVisibleNarrationWithGuard(args: {
   reasoningText: string | undefined;
   retried: boolean;
   failures: VisibleNarrationFailure[];
-  usage?: Awaited<ReturnType<typeof generateText>>["usage"];
-  response?: Awaited<ReturnType<typeof generateText>>["response"];
-  finishReason?: Awaited<ReturnType<typeof generateText>>["finishReason"];
+  usage?: VisibleNarrationUsage;
+  response?: VisibleNarrationResponse;
+  finishReason?: VisibleNarrationFinishReason;
 }> {
   const {
     label,
@@ -839,25 +905,61 @@ async function runVisibleNarrationWithGuard(args: {
 
   async function runNarrationPass(activeProvider: ProviderConfig, promptText: string) {
     let lastError: unknown;
-    for (let attempt = 1; attempt <= VISIBLE_NARRATION_TRANSPORT_RETRY_LIMIT; attempt += 1) {
+    const transportRetryLimit = label === "opening"
+      ? VISIBLE_NARRATION_OPENING_TRANSPORT_RETRY_LIMIT
+      : VISIBLE_NARRATION_TRANSPORT_RETRY_LIMIT;
+    const timeoutMs = label === "opening"
+      ? VISIBLE_NARRATION_OPENING_TIMEOUT_MS
+      : VISIBLE_NARRATION_TIMEOUT_MS;
+    const outputTokenCap = label === "opening"
+      ? VISIBLE_NARRATION_OPENING_MAX_OUTPUT_TOKENS
+      : VISIBLE_NARRATION_MAX_OUTPUT_TOKENS;
+    for (let attempt = 1; attempt <= transportRetryLimit; attempt += 1) {
+      const startedAt = Date.now();
+      const maxOutputTokens = visibleNarrationMaxOutputTokens(storytellerMaxTokens, outputTokenCap);
+      log.event("storyteller.visible.call.start", {
+        label,
+        attempt,
+        timeoutMs,
+        requestedMaxOutputTokens: storytellerMaxTokens,
+        maxOutputTokens,
+      });
       try {
-        return await generateText({
+        const result = await generateText({
           model: createModel(activeProvider, {
             role: "storyteller",
-            familyHint: "baseline",
+            ...(label === "opening" ? { reasoningMode: "bypass" as const } : {}),
           }),
           system,
           prompt: promptText,
           temperature: storytellerTemperature,
-          maxOutputTokens: storytellerMaxTokens,
+          maxOutputTokens,
+          timeout: { totalMs: timeoutMs },
         });
+        log.event("storyteller.visible.call.end", {
+          label,
+          attempt,
+          success: true,
+          durationMs: Date.now() - startedAt,
+          finishReason: result.finishReason ?? null,
+          responseModel: result.response?.modelId ?? null,
+          outputChars: result.text.length,
+        });
+        return result;
       } catch (error) {
         lastError = error;
-        if (!isVisibleNarrationTransportError(error) || attempt >= VISIBLE_NARRATION_TRANSPORT_RETRY_LIMIT) {
+        log.event("storyteller.visible.call.end", {
+          label,
+          attempt,
+          success: false,
+          durationMs: Date.now() - startedAt,
+          error: errorMessage(error).slice(0, 500),
+        });
+        if (!isVisibleNarrationTransportError(error) || attempt >= transportRetryLimit) {
           throw error;
         }
         log.warn(
-          `Visible narration transport error; retrying storyteller pass ${attempt + 1}/${VISIBLE_NARRATION_TRANSPORT_RETRY_LIMIT}`,
+          `Visible narration transport error; retrying storyteller pass ${attempt + 1}/${transportRetryLimit}`,
           error,
         );
       }
@@ -937,13 +1039,247 @@ async function runVisibleNarrationWithGuard(args: {
   };
 }
 
+async function runVisibleNarrationDraftWithGuard(args: {
+  label: "final";
+  provider: ProviderConfig;
+  narratorPacket: NarratorPacket;
+  system: string;
+  prompt: string;
+  storytellerTemperature: number;
+  storytellerMaxTokens: number;
+}): Promise<{
+  text: string;
+  draft: NarrationDraft;
+  reasoningText: string | undefined;
+  retried: boolean;
+  failures: VisibleNarrationFailure[];
+  usage?: VisibleNarrationUsage;
+  response?: VisibleNarrationResponse;
+  finishReason?: VisibleNarrationFinishReason;
+  structuredTrace: NarrationDraftStructuredTrace;
+}> {
+  const {
+    label,
+    provider,
+    narratorPacket,
+    system,
+    prompt,
+    storytellerTemperature,
+    storytellerMaxTokens,
+  } = args;
+
+  async function runNarrationDraftPass(activeProvider: ProviderConfig, promptText: string) {
+    let lastError: unknown;
+    let contractRepairAddendum: string | null = null;
+    for (
+      let contractAttempt = 1;
+      contractAttempt <= VISIBLE_NARRATION_DRAFT_CONTRACT_RETRY_LIMIT + 1;
+      contractAttempt += 1
+    ) {
+      const activePrompt = contractRepairAddendum
+        ? `${promptText}\n\n[GROUNDING DRAFT CORRECTION]\n${contractRepairAddendum}`
+        : promptText;
+      let shouldRetryContract = false;
+      for (let attempt = 1; attempt <= VISIBLE_NARRATION_DRAFT_CHANNEL_RETRY_LIMIT; attempt += 1) {
+        const startedAt = Date.now();
+        const maxOutputTokens = visibleNarrationMaxOutputTokens(
+          storytellerMaxTokens,
+          VISIBLE_NARRATION_DRAFT_MAX_OUTPUT_TOKENS,
+        );
+        log.event("storyteller.visible.call.start", {
+          label,
+          attempt,
+          contractAttempt,
+          structured: true,
+          mode: VISIBLE_NARRATION_DRAFT_MODE,
+          timeoutMs: VISIBLE_NARRATION_DRAFT_TIMEOUT_MS,
+          requestedMaxOutputTokens: storytellerMaxTokens,
+          maxOutputTokens,
+          contractRepair: contractRepairAddendum !== null,
+        });
+        try {
+          const result = await generateObject({
+            model: createModel(activeProvider, {
+              role: "storyteller",
+              reasoningMode: "bypass",
+            }),
+            schema: groundedSentenceDraftSchema,
+            system,
+            prompt: activePrompt,
+            temperature: storytellerTemperature,
+            maxOutputTokens,
+            timeout: { totalMs: VISIBLE_NARRATION_DRAFT_TIMEOUT_MS },
+            mode: VISIBLE_NARRATION_DRAFT_MODE,
+            retries: 1,
+            allowTextFallback: false,
+            allowRepair: false,
+            strictSchema: true,
+          });
+          assertClosedStructuredNarrationDraftTrace(result.trace);
+          const compiledDraft = compileGroundedSentenceDraftToNarrationDraft({
+            packet: narratorPacket,
+            draft: result.object,
+          });
+          log.event("storyteller.visible.call.end", {
+            label,
+            attempt,
+            contractAttempt,
+            structured: true,
+            success: true,
+            durationMs: Date.now() - startedAt,
+            finishReason: result.trace.finishReason ?? null,
+            responseModel: result.trace.response?.modelId ?? null,
+            strategy: result.trace.strategy ?? null,
+            primaryStrategy: result.trace.primaryStrategy ?? null,
+            fallbackReason: result.trace.fallbackReason ?? null,
+            outputChars: compiledDraft.prose.length,
+            sentenceCount: result.object.sentences.length,
+            contractRepair: contractRepairAddendum !== null,
+          });
+          return { draft: compiledDraft, trace: result.trace };
+        } catch (error) {
+          lastError = error;
+          const message = errorMessage(error);
+          log.event("storyteller.visible.call.end", {
+            label,
+            attempt,
+            contractAttempt,
+            structured: true,
+            success: false,
+            durationMs: Date.now() - startedAt,
+            error: message.slice(0, 500),
+            contractRepair: contractRepairAddendum !== null,
+          });
+          if (
+            isGroundedSentenceDraftContractError(error)
+            && contractAttempt <= VISIBLE_NARRATION_DRAFT_CONTRACT_RETRY_LIMIT
+          ) {
+            contractRepairAddendum = buildGroundedSentenceDraftRepairAddendum({
+              packet: narratorPacket,
+              failureReason: message,
+            });
+            log.event("storyteller.visible.draft-contract-retry", {
+              label,
+              contractAttempt,
+              nextContractAttempt: contractAttempt + 1,
+              reason: message.slice(0, 500),
+            });
+            shouldRetryContract = true;
+            break;
+          }
+          if (
+            !isVisibleNarrationRetryableChannelError(error)
+            || attempt >= VISIBLE_NARRATION_DRAFT_CHANNEL_RETRY_LIMIT
+          ) {
+            throw error;
+          }
+          log.warn(
+            `Visible structured narration channel error; retrying same contract pass ${attempt + 1}/${VISIBLE_NARRATION_DRAFT_CHANNEL_RETRY_LIMIT}`,
+            error,
+          );
+        }
+      }
+      if (shouldRetryContract) {
+        continue;
+      }
+      break;
+    }
+
+    throw lastError;
+  }
+
+  const initialResult = await runNarrationDraftPass(provider, prompt);
+  const initialDraft = initialResult.draft;
+  const initialReasoningText = normalizeReasoningText(initialResult.trace.reasoningText);
+  const initialFailures = detectVisibleNarrationFailures(initialDraft.prose, { system, prompt });
+  if (initialFailures.length === 0) {
+    return {
+      text: initialDraft.prose,
+      draft: initialDraft,
+      reasoningText: initialReasoningText,
+      retried: false,
+      failures: [],
+        usage: initialResult.trace.usage as VisibleNarrationUsage | undefined,
+        response: initialResult.trace.response,
+        finishReason: initialResult.trace.finishReason,
+        structuredTrace: summarizeNarrationDraftStructuredTrace(initialResult.trace),
+      };
+    }
+
+  log.event("visible-narration.prose-filter", {
+    label,
+    status: "failed-closed",
+    failures: initialFailures,
+    finishReason: initialResult.trace.finishReason ?? null,
+    responseModel: initialResult.trace.response?.modelId ?? null,
+  });
+  throw new Error(
+    `Visible structured narration failed visible prose filters: ${initialFailures.join(", ")}`,
+  );
+}
+
+function assertClosedStructuredNarrationDraftTrace(trace: {
+  strategy?: unknown;
+  fallbackReason?: unknown;
+  repairedFromStrategy?: unknown;
+  repair?: unknown;
+}): void {
+  const usedClosedStructuredStrategy =
+    trace.strategy === "native_json" || trace.strategy === "tool_mode";
+
+  if (
+    usedClosedStructuredStrategy
+    && trace.fallbackReason == null
+    && trace.repairedFromStrategy == null
+    && trace.repair == null
+  ) {
+    return;
+  }
+
+  throw new Error(
+    `Final NarrationDraft generation left closed structured output path (strategy=${String(trace.strategy ?? "unknown")}); failing closed.`,
+  );
+}
+
+function isGroundedSentenceDraftContractError(error: unknown): boolean {
+  return /GroundedSentenceDraft/u.test(errorMessage(error));
+}
+
+function summarizeNarrationDraftStructuredTrace(trace: {
+  strategy?: unknown;
+  primaryStrategy?: unknown;
+  fallbackStrategy?: unknown;
+  fallbackReason?: unknown;
+  repairedFromStrategy?: unknown;
+  repair?: unknown;
+  finishReason?: unknown;
+  response?: { modelId?: string };
+}): NarrationDraftStructuredTrace {
+  return {
+    strategy: trace.strategy ?? null,
+    primaryStrategy: trace.primaryStrategy ?? null,
+    fallbackStrategy: trace.fallbackStrategy ?? null,
+    fallbackReason: trace.fallbackReason ?? null,
+    repairedFromStrategy: trace.repairedFromStrategy ?? null,
+    repair: trace.repair ?? null,
+    finishReason: trace.finishReason ?? null,
+    responseModel: trace.response?.modelId ?? null,
+  };
+}
+
 // -- Main processor -----------------------------------------------------------
 
 function isScenePlanEnabled(): boolean {
-  // Temporary Phase 70 rollback flag. SCENE_PLAN_ENABLED defaults true; only
-  // exact string "false" isolates the legacy Phase 69 path. Remove this flag
-  // once focused Phase 70 route/typecheck tests pass, or keep it only with a
-  // dated follow-up naming the failing rollback evidence that blocks removal.
+  // Phase 95: the legacy player-turn path lacks settled packet/structured
+  // narration invariants, so the old rollback flag must fail closed.
+  if (process.env.SCENE_PLAN_ENABLED === "false") {
+    if (process.env.NODE_ENV === "test") {
+      return false;
+    }
+    throw new Error(
+      "SCENE_PLAN_ENABLED=false legacy player-turn path is disabled; scene-plan pipeline is required.",
+    );
+  }
   return !(process.env.SCENE_PLAN_ENABLED === "false");
 }
 
@@ -961,6 +1297,20 @@ function getSceneActorLabel(frame: SceneFrame, actorId: string): string {
     return actor.label;
   }
   return actor.awarenessHint ?? "A nearby presence";
+}
+
+function actorIsClearToPlayer(frame: SceneFrame, actorId: string | null | undefined): boolean {
+  if (!actorId || actorId === frame.playerActorId) {
+    return true;
+  }
+
+  const actor = [
+    ...frame.roster.active,
+    ...frame.roster.support,
+    ...frame.roster.background,
+  ].find((entry) => entry.id === actorId || entry.actorId === actorId);
+
+  return actor?.awareness === "clear";
 }
 
 function sceneResponseToPacketResponse(
@@ -1003,7 +1353,7 @@ function scenePlanActionToPacketEffect(
     actionId: action.actionId,
     actorId: action.actorId,
     toolName: action.toolName,
-    summary: summarizeRuntimeToolResultForNarrator({
+    summary: action.summary?.trim() || summarizeRuntimeToolResultForNarrator({
       toolName: action.toolName,
       actionId: action.actionId,
       toolInput: action.input,
@@ -1015,8 +1365,85 @@ function scenePlanActionToPacketEffect(
   };
 }
 
+function gmReadRuntimeRequirementKind(gmRead: GmRead): string | null {
+  if (gmRead.path !== "tool_plan") return null;
+  const requirement = gmRead.runtimeRequirement;
+  return requirement && requirement.kind !== "none" ? requirement.kind : null;
+}
+
+function canonicalTurnKindForGmRead(args: {
+  gmRead: GmRead;
+  outcomeBounds: ReturnType<typeof buildNarrativeOutcomeBounds> | null;
+}): CanonicalTurnResolution["kind"] {
+  if (args.gmRead.path === "combat_transition" || args.outcomeBounds) return "combat_transition";
+  const requirementKind = gmReadRuntimeRequirementKind(args.gmRead);
+  if (requirementKind === "observation_read") return "status_read";
+  if (requirementKind === "dialogue_outcome") return "dialogue_outcome";
+  if (requirementKind === "world_fact") return "world_fact";
+  if (requirementKind === "scene_beat") return "scene_beat";
+  if (requirementKind === "state_mutation") return "state_mutation";
+  return "direct_noop";
+}
+
+function isCombatAuthorityTool(toolName: string | undefined): boolean {
+  return toolName === "request_contested_outcome" || toolName === "set_condition";
+}
+
+function buildCanonicalTurnResolution(args: {
+  gmRead: GmRead;
+  actionResults: readonly ExecutedScenePlanActionResult[];
+  outcomeBounds: ReturnType<typeof buildNarrativeOutcomeBounds> | null;
+}): CanonicalTurnResolution {
+  const successful = args.actionResults.filter((result) => result.result.success);
+  const observationIds = successful
+    .filter((result) => isObservationToolResult(result.result))
+    .map((result) => `action-result:${result.actionId}`);
+  const mutationIds = successful
+    .filter((result) => !isObservationToolResult(result.result))
+    .map((result) => `action-result:${result.actionId}`);
+  const combatIntent =
+    args.gmRead.path === "combat_transition"
+    || Boolean(args.outcomeBounds)
+    || successful.some((result) => isCombatAuthorityTool(result.toolName));
+  const kind =
+    !combatIntent && observationIds.length > 0 && mutationIds.length === 0
+      ? "status_read"
+      : canonicalTurnKindForGmRead({
+          gmRead: args.gmRead,
+          outcomeBounds: args.outcomeBounds,
+        });
+  const resolutionState: CanonicalTurnResolution["resolutionState"] =
+    combatIntent && mutationIds.length === 0 && observationIds.length > 0
+      ? "explicit_no_combat"
+      : mutationIds.length > 0
+        ? "mutated"
+        : observationIds.length > 0
+          ? "observation_grounded"
+          : "explicit_no_change";
+  const evidenceIds = [
+    ...observationIds,
+    ...mutationIds,
+  ];
+
+  return {
+    kind,
+    resolutionState,
+    combatIntent,
+    evidenceIds,
+    consequenceIds: mutationIds,
+    explicitNoCombatEvidenceIds:
+      !combatIntent && observationIds.length > 0
+        ? observationIds
+        : resolutionState === "explicit_no_combat"
+          ? observationIds
+          : [],
+    toolNames: [...new Set(successful.map((result) => result.toolName))],
+  };
+}
+
 function buildCanonicalTurnPacketFromScenePlan(args: {
   frame: SceneFrame;
+  gmRead: GmRead;
   plan: ScenePlan;
   executedPlan: { actionResults: ExecutedScenePlanActionResult[] };
   actorActionResults?: readonly ExecutedScenePlanActionResult[];
@@ -1028,8 +1455,12 @@ function buildCanonicalTurnPacketFromScenePlan(args: {
     plan: args.plan,
     playerAction: args.frame.playerAction,
   });
+  const actionResults = [
+    ...args.executedPlan.actionResults,
+    ...(args.actorActionResults ?? []),
+  ];
   const primaryResponseSummary =
-    args.plan.plannedActions.length === 0
+    actionResults.length === 0
       ? `GM no-mutation direction: ${boundedPlanText(args.plan.actionInterpretation.intent, 220)}`
       : undefined;
   const responses = [
@@ -1038,30 +1469,46 @@ function buildCanonicalTurnPacketFromScenePlan(args: {
       sceneResponseToPacketResponse(args.frame, response),
     ),
   ];
-  const actionResults = [
-    ...args.executedPlan.actionResults,
-    ...(args.actorActionResults ?? []),
-  ];
+  const narratorVisibleActorActionResults = (args.actorActionResults ?? []).filter((result) =>
+    actorIsClearToPlayer(args.frame, result.actorId),
+  );
+  const packetActionIds = Array.from(new Set([
+    ...args.plan.narratorFacts.actionIds,
+    ...args.executedPlan.actionResults.map((action) => action.actionId),
+    ...narratorVisibleActorActionResults.map((action) => action.actionId),
+  ]));
+  const packetToolResultRefs = Array.from(
+    new Map(
+      [
+        ...args.plan.narratorFacts.toolResultRefs,
+        ...args.executedPlan.actionResults.map((action) => ({
+          actionId: action.actionId,
+          toolName: action.toolName,
+        })),
+        ...narratorVisibleActorActionResults.map((action) => ({
+          actionId: action.actionId,
+          toolName: action.toolName,
+        })),
+      ].map((ref) => [`${ref.actionId}:${ref.toolName}`, ref]),
+    ).values(),
+  );
   const narratorFacts = {
     ...args.plan.narratorFacts,
-    actionIds: [
-      ...args.plan.narratorFacts.actionIds,
-      ...(args.actorActionResults ?? []).map((action) => action.actionId),
-    ],
-    toolResultRefs: [
-      ...args.plan.narratorFacts.toolResultRefs,
-      ...(args.actorActionResults ?? []).map((action) => ({
-        actionId: action.actionId,
-        toolName: action.toolName,
-      })),
-    ],
+    actionIds: packetActionIds,
+    toolResultRefs: packetToolResultRefs,
   };
+  const turnResolution = buildCanonicalTurnResolution({
+    gmRead: args.gmRead,
+    actionResults,
+    outcomeBounds: args.outcomeBounds,
+  });
 
   return {
     campaignId: args.frame.campaignId,
     tick: args.frame.tick,
     playerAction: args.frame.playerAction,
     oracleOutcome: args.oracleResult?.outcome ?? null,
+    turnResolution,
     narratorFacts,
     anchorEvent,
     events: [anchorEvent],
@@ -1181,9 +1628,165 @@ function successfulToolStepResults(
 ): GmToolStepResult[] {
   return stepResults.filter((result) =>
     result.result?.success === true
-    && !isObservationToolResult(result.result)
     && result.toolName !== null
     && result.candidateInput !== null,
+  );
+}
+
+function successfulStateChangingToolStepResults(
+  stepResults: readonly GmToolStepResult[],
+): GmToolStepResult[] {
+  return successfulToolStepResults(stepResults).filter((result) =>
+    result.result && !isObservationToolResult(result.result),
+  );
+}
+
+function isObservationActionResult(
+  actionResult: ExecutedScenePlanActionResult,
+): boolean {
+  return isObservationToolResult(actionResult.result);
+}
+
+function firstObservationLabel(entry: unknown): string | null {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    return null;
+  }
+  const record = entry as Record<string, unknown>;
+  for (const key of ["label", "name", "ref", "id"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
+function observationLabels(value: unknown, limit: number): string[] {
+  if (!Array.isArray(value)) return [];
+  const labels: string[] = [];
+  for (const entry of value) {
+    const label = firstObservationLabel(entry);
+    if (label) labels.push(label);
+    if (labels.length >= limit) break;
+  }
+  return labels;
+}
+
+function observationSummaries(value: unknown, limit: number): string[] {
+  if (!Array.isArray(value)) return [];
+  const summaries: string[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const summary = (entry as Record<string, unknown>).summary;
+    if (typeof summary === "string" && summary.trim()) {
+      summaries.push(summary.trim());
+    }
+    if (summaries.length >= limit) break;
+  }
+  return summaries;
+}
+
+function categoryRecord(value: unknown, key: string): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const entry = (value as Record<string, unknown>)[key];
+  return entry && typeof entry === "object" && !Array.isArray(entry)
+    ? entry as Record<string, unknown>
+    : null;
+}
+
+function pushCategoryObservationPart(
+  parts: string[],
+  label: string,
+  category: Record<string, unknown> | null,
+): void {
+  if (!category) return;
+  const labels = [
+    ...observationLabels(category.targets, 2),
+    ...observationLabels(category.actors, 2),
+  ];
+  const summaries = observationSummaries(category.facts, 2);
+  const absence = typeof category.absence === "string" && category.absence.trim()
+    ? category.absence.trim()
+    : null;
+  const details = [...labels, ...summaries].slice(0, 3);
+  if (details.length > 0) {
+    parts.push(`${label} ${details.join("; ")}`);
+  } else if (absence) {
+    parts.push(`${label} ${absence}`);
+  }
+}
+
+function summarizeObservationPayloadForPacket(
+  toolName: string,
+  payload: unknown,
+): string | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+  const record = payload as Record<string, unknown>;
+  const parts: string[] = [];
+  const visibleActors = observationLabels(record.visibleActors, 3);
+  const legalTargets = observationLabels(record.legalTargets, 3);
+  const legalMovement = observationLabels(record.legalMovement, 3);
+  const candidates = observationLabels(record.candidates, 4);
+  const affordances = observationLabels(record.affordances, 4);
+  const visibleFacts = observationSummaries(record.visibleFacts, 3);
+  const categories = record.categories;
+  pushCategoryObservationPart(parts, "personnel", categoryRecord(categories, "personnel"));
+  pushCategoryObservationPart(parts, "barriers", categoryRecord(categories, "barriers"));
+  pushCategoryObservationPart(parts, "exits/routes", { targets: (categories as Record<string, unknown> | undefined)?.exitsRoutes });
+  pushCategoryObservationPart(parts, "physical options", { targets: (categories as Record<string, unknown> | undefined)?.physicalAffordances });
+  pushCategoryObservationPart(parts, "witnesses", categoryRecord(categories, "witnesses"));
+  pushCategoryObservationPart(parts, "cameras", categoryRecord(categories, "cameras"));
+  if (visibleFacts.length > 0) parts.push(`facts ${visibleFacts.join("; ")}`);
+  if (legalMovement.length > 0) parts.push(`routes ${legalMovement.join(", ")}`);
+  if (affordances.length > 0) parts.push(`scene options ${affordances.join(", ")}`);
+  if (candidates.length > 0) parts.push(`matches ${candidates.join(", ")}`);
+  if (visibleActors.length > 0) parts.push(`actors ${visibleActors.join(", ")}`);
+  if (legalTargets.length > 0) parts.push(`visible options ${legalTargets.join(", ")}`);
+  if (parts.length > 0) {
+    return `${observationToolPublicLabel(toolName)}: ${parts.join("; ")}`;
+  }
+  const count = typeof record.count === "number" ? record.count : null;
+  if (count === null) return null;
+  return count > 0
+    ? `${observationToolPublicLabel(toolName)} confirms ${count} visible option${count === 1 ? "" : "s"}.`
+    : `${observationToolPublicLabel(toolName)} confirms no matching visible option.`;
+}
+
+function observationToolPublicLabel(toolName: string): string {
+  switch (toolName) {
+    case "list_visible_affordances":
+      return "Scene scan";
+    case "list_navigation_options":
+    case "check_route":
+      return "Route check";
+    case "find_location_candidates":
+      return "Location check";
+    case "find_object_candidates":
+      return "Object check";
+    case "find_actor_candidates":
+      return "People check";
+    case "find_poi_candidates":
+      return "Local point check";
+    case "inspect_known_fact":
+      return "Known information check";
+    default:
+      return "Scene observation";
+  }
+}
+
+function summarizeObservationToolStepResult(
+  stepResult: GmToolStepResult,
+  fallbackSummary?: string,
+): string {
+  const toolName = stepResult.toolName ?? "observation_tool";
+  return boundedPlanText(
+    summarizeObservationPayloadForPacket(toolName, stepResult.result?.result)
+      ?? fallbackSummary
+      ?? stepResult.visibleEffect
+      ?? "A player-visible observation is confirmed without changing state.",
+    640,
   );
 }
 
@@ -1232,20 +1835,27 @@ function buildScenePlanFromGmToolLoop(args: {
   frame: SceneFrame;
   gmRead: Extract<GmRead, { path: "tool_plan" | "roll_oracle" | "combat_transition" }>;
   intent: string;
+  observationSummary?: string;
   stepResults: readonly GmToolStepResult[];
 }): ScenePlan {
   const actorId = primarySceneActorId(args.frame);
   const anchorEventId = randomUUID();
   const primaryResponseId = randomUUID();
-  const successfulSteps = successfulToolStepResults(args.stepResults);
+  const successfulSteps = successfulStateChangingToolStepResults(args.stepResults);
   const plannedActions = successfulSteps.map((result) =>
     buildScenePlanActionFromToolStep(result, actorId),
   );
+  const intentWithObservation = args.observationSummary
+    ? boundedPlanText(
+      `${args.intent} Scene observation: ${args.observationSummary}`,
+      420,
+    )
+    : args.intent;
 
   return {
     actionInterpretation: {
       actorId,
-      intent: boundedPlanText(args.intent, 160),
+      intent: boundedPlanText(intentWithObservation, 420),
       method: args.gmRead.path,
       targetIds: [],
     },
@@ -1277,7 +1887,7 @@ function buildScenePlanFromGmToolLoop(args: {
       })),
     },
     hiddenRationale: boundedPlanText(
-      `${args.gmRead.rationale} ${args.intent}`,
+      `${args.gmRead.rationale} ${intentWithObservation}`,
       280,
     ),
   };
@@ -1286,6 +1896,7 @@ function buildScenePlanFromGmToolLoop(args: {
 function buildExecutedScenePlanFromGmToolLoop(args: {
   frame: SceneFrame;
   plan: ScenePlan;
+  observationSummary?: string;
   stepResults: readonly GmToolStepResult[];
 }): ExecutedScenePlan {
   const validatedPlan = {
@@ -1294,17 +1905,25 @@ function buildExecutedScenePlanFromGmToolLoop(args: {
     issues: [],
   };
   const successfulSteps = successfulToolStepResults(args.stepResults);
+  let plannedActionIndex = 0;
   const actionResults = successfulSteps.map((stepResult, order): ExecutedScenePlanActionResult => {
-    const action = args.plan.plannedActions[order]!;
+    const isObservation = stepResult.result ? isObservationToolResult(stepResult.result) : false;
+    const action = isObservation ? null : args.plan.plannedActions[plannedActionIndex++];
+    if (!isObservation && !action) {
+      throw new Error("GM tool loop execution produced more state-changing results than planned actions.");
+    }
     return {
       order,
-      actionId: action.id,
+      actionId: action?.id ?? randomUUID(),
       actionRef: stepResult.stepId,
-      actorId: action.actorId,
-      toolName: action.toolName,
-      input: action.input,
+      actorId: action?.actorId ?? primarySceneActorId(args.frame),
+      toolName: action?.toolName ?? stepResult.toolName!,
+      input: action?.input ?? stepResult.candidateInput!,
       args: stepResult.candidateInput!,
       result: stepResult.result!,
+      summary: isObservation
+        ? summarizeObservationToolStepResult(stepResult, args.observationSummary)
+        : undefined,
     };
   });
   const successfulTravel = successfulSteps.reduce<SuccessfulTravel | null>(
@@ -1315,9 +1934,14 @@ function buildExecutedScenePlanFromGmToolLoop(args: {
     ),
     null,
   );
-  const emittedEvents: ExecutedScenePlan["emittedEvents"] = actionResults.map((actionResult) => {
+  const emittedEvents: ExecutedScenePlan["emittedEvents"] = [];
+  for (const actionResult of actionResults) {
+    if (isObservationActionResult(actionResult)) {
+      continue;
+    }
     if (actionResult.toolName === "offer_quick_actions") {
-      return { type: "quick_actions", data: actionResult.result };
+      emittedEvents.push({ type: "quick_actions", data: actionResult.result });
+      continue;
     }
     if (actionResult.toolName === "move_to" || actionResult.toolName === "move_actor") {
       const moveResult = getSuccessfulMoveToolStepResult({
@@ -1334,7 +1958,7 @@ function buildExecutedScenePlanFromGmToolLoop(args: {
         result: actionResult.result,
       });
       if (moveResult) {
-        return {
+        emittedEvents.push({
           type: "state_update",
           data: {
             type: "location_change",
@@ -1344,11 +1968,12 @@ function buildExecutedScenePlanFromGmToolLoop(args: {
             tickAdvance: moveResult.tickAdvance,
             path: moveResult.path,
           },
-        };
+        });
+        continue;
       }
     }
-    return { type: "state_update", data: actionResult };
-  });
+    emittedEvents.push({ type: "state_update", data: actionResult });
+  }
 
   return {
     plan: validatedPlan,
@@ -1358,13 +1983,15 @@ function buildExecutedScenePlanFromGmToolLoop(args: {
     emittedEvents,
     quickActionsEmitted: actionResults.some((action) => action.toolName === "offer_quick_actions"),
     successfulTravel,
-    canonicalEvents: actionResults.map((actionResult) => ({
-      id: actionResult.actionId,
-      actionId: actionResult.actionId,
-      actorId: actionResult.actorId,
-      toolName: actionResult.toolName,
-      result: actionResult.result.result,
-    })),
+    canonicalEvents: actionResults
+      .filter((actionResult) => !isObservationActionResult(actionResult))
+      .map((actionResult) => ({
+        id: actionResult.actionId,
+        actionId: actionResult.actionId,
+        actorId: actionResult.actorId,
+        toolName: actionResult.toolName,
+        result: actionResult.result.result,
+      })),
   };
 }
 
@@ -1457,36 +2084,6 @@ function pushForecastRef(refs: string[], value?: string | null): void {
   refs.push(trimmed);
 }
 
-function textContainsForbiddenTerm(value: string, forbiddenTerms: readonly string[]): boolean {
-  const normalized = value.toLocaleLowerCase();
-  return forbiddenTerms.some((term) => {
-    const trimmed = term.trim();
-    return trimmed.length > 0 && normalized.includes(trimmed.toLocaleLowerCase());
-  });
-}
-
-function safeClarificationPromptForFrame(
-  prompt: string,
-  frame: SceneFrame,
-  scopedForecastExcerpt: ScopedForecastExcerpt,
-): string {
-  const forbiddenTerms = [
-    ...scopedForecastExcerpt.forbiddenPrivateTerms,
-    ...(frame.perception.forbiddenActorIds ?? []),
-    ...(frame.perception.forbiddenActorLabels ?? []),
-  ];
-
-  if (!textContainsForbiddenTerm(prompt, forbiddenTerms)) {
-    return prompt;
-  }
-
-  log.warn("Clarification prompt contained forbidden scoped term; replacing with generic prompt", {
-    campaignId: frame.campaignId,
-    tick: frame.tick,
-  });
-  return "I need one more concrete detail before I resolve that. What exactly do you try next?";
-}
-
 function buildSceneFrameForecastRefs(frame: SceneFrame): string[] {
   const refs: string[] = [];
 
@@ -1520,24 +2117,20 @@ function buildSceneFrameForecastRefs(frame: SceneFrame): string[] {
 
 async function buildScopedForecastExcerptForFrame(
   frame: SceneFrame,
-  provider: ProviderConfig,
-  maxOutputTokens?: number,
 ): Promise<{
   excerpt: ScopedForecastExcerpt;
   stagedForecast: StagedWorldTrajectoryForecast | null;
+  refreshDue: boolean;
 }> {
   try {
-    let forecast = loadWorldTrajectoryForecast(frame.campaignId);
-    let stagedForecast: StagedWorldTrajectoryForecast | null = null;
-
-    if (shouldRefreshWorldTrajectoryForecast(forecast, frame.tick)) {
-      forecast = await runWorldForecastBuilder({
-        provider,
-        frame,
-        priorForecast: forecast,
-        maxOutputTokens,
+    const forecast = loadWorldTrajectoryForecast(frame.campaignId);
+    const refreshDue = shouldRefreshWorldTrajectoryForecast(forecast, frame.tick);
+    if (refreshDue) {
+      log.event("world-forecast.refresh-deferred", {
+        campaignId: frame.campaignId,
+        tick: frame.tick,
+        hasPriorForecast: forecast !== null,
       });
-      stagedForecast = stageWorldTrajectoryForecast(forecast);
     }
 
     return {
@@ -1545,7 +2138,8 @@ async function buildScopedForecastExcerptForFrame(
         forecast,
         localRefs: buildSceneFrameForecastRefs(frame),
       }),
-      stagedForecast,
+      stagedForecast: null,
+      refreshDue,
     };
   } catch (error) {
     log.warn("Failed to load scoped world forecast; continuing without forecast pressure", {
@@ -1558,6 +2152,7 @@ async function buildScopedForecastExcerptForFrame(
         localRefs: [],
       }),
       stagedForecast: null,
+      refreshDue: false,
     };
   }
 }
@@ -1591,6 +2186,89 @@ function logScenePlanPacket(packet: ReturnType<typeof buildNarratorPacket>, dura
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function diagnosticForbiddenTerms(packet: NarratorPacket): string[] {
+  return uniqueRefs([
+    ...(packet.forbiddenActorNames ?? []),
+    ...(packet.forbiddenFactMarkers ?? []),
+    ...(packet.forbiddenPrivateTerms ?? []),
+  ]);
+}
+
+function redactDiagnosticText(value: string, packet: NarratorPacket): string {
+  let redacted = value.replace(/\s+/gu, " ").trim();
+  for (const term of diagnosticForbiddenTerms(packet)) {
+    redacted = redacted.replace(
+      new RegExp(escapeRegExp(term), "giu"),
+      "[private term omitted]",
+    );
+  }
+  return redacted;
+}
+
+function allowedEvidenceDiagnostics(packet: NarratorPacket) {
+  return (packet.evidenceLedger ?? []).map((entry) => ({
+    id: entry.id,
+    category: entry.category,
+    summary: redactDiagnosticText(entry.summary, packet),
+  }));
+}
+
+function visibleNarrationValidationDiagnostics(args: {
+  validation: VisibleNarrationPacketValidationResult;
+  packet: NarratorPacket;
+}) {
+  const grounding = args.validation.grounding;
+  return {
+    ok: args.validation.ok,
+    violationKinds: args.validation.violations.map((violation) => violation.kind),
+    groundingViolationKinds: grounding?.violations.map((violation) => violation.kind) ?? [],
+    groundingWarnings: grounding?.warnings?.map((warning) => warning.kind) ?? [],
+    groundingViolations: grounding?.violations.map((violation) => ({
+      kind: violation.kind,
+      claimKind: violation.claimKind,
+      evidenceRefCount: violation.evidenceRefs?.length ?? 0,
+      missingEvidenceRefCount: violation.missingEvidenceRefs?.length ?? 0,
+      requiredEvidenceCategories: violation.requiredEvidenceCategories ?? [],
+    })) ?? [],
+    groundingCoverage: args.validation.diagnostics?.grounding?.coverage ?? null,
+    redactionAudit: args.validation.diagnostics?.redactionAudit ?? null,
+    allowedEvidence: allowedEvidenceDiagnostics(args.packet),
+  };
+}
+
+function failedNarratorGroundingResult(args: {
+  error: unknown;
+  recovered: boolean;
+  packet: NarratorPacket;
+}) {
+  const base = {
+    ok: false,
+    stage: "packet_guard",
+    recovered: args.recovered,
+    narrationContractVersion: GROUNDED_SENTENCE_DRAFT_CONTRACT_VERSION,
+  };
+
+  if (!(args.error instanceof VisibleNarrationPacketGuardError)) {
+    return base;
+  }
+
+  return {
+    ...base,
+    attempts: args.error.attempts,
+    violationKinds: args.error.violations.map((violation) => violation.kind),
+    validationDiagnostics: args.error.validation
+      ? visibleNarrationValidationDiagnostics({
+          validation: args.error.validation,
+          packet: args.packet,
+        })
+      : null,
+  };
 }
 
 function uniqueRefs(values: readonly (string | null | undefined)[]): string[] {
@@ -1817,16 +2495,33 @@ function advanceNarrationTick(args: {
   successfulTravel: SuccessfulTravel | null;
   idempotentResume: boolean;
 }): number {
+  const storedTick = readCampaignConfig(args.campaignId).currentTick ?? args.currentTick;
+  const worldClock = readWorldClock(args.campaignId);
+  const baseTick = Math.max(
+    args.currentTick,
+    storedTick,
+    worldClock.currentTick,
+    worldClock.worldTimeMinutes,
+  );
   if (args.idempotentResume) {
-    const storedTick = readCampaignConfig(args.campaignId).currentTick ?? args.currentTick;
     if (storedTick > args.currentTick) {
-      return storedTick;
+      return baseTick;
     }
   }
 
-  return args.successfulTravel && args.successfulTravel.tickAdvance > 0
-    ? advanceCampaignTick(args.campaignId, args.successfulTravel.tickAdvance)
-    : incrementTick(args.campaignId);
+  const tickAdvance = args.successfulTravel && args.successfulTravel.tickAdvance > 0
+    ? args.successfulTravel.tickAdvance
+    : 1;
+  const targetTick = baseTick + tickAdvance;
+  const deltaFromStoredTick = Math.max(0, targetTick - storedTick);
+
+  if (deltaFromStoredTick === 0) {
+    return storedTick;
+  }
+  if (deltaFromStoredTick === 1 && tickAdvance === 1) {
+    return incrementTick(args.campaignId);
+  }
+  return advanceCampaignTick(args.campaignId, deltaFromStoredTick);
 }
 
 function applyPostNarrationStartConditionEffects(args: {
@@ -1907,6 +2602,10 @@ async function* runPostNarrationFinalizationTail(args: {
     currentTick: args.currentTick,
     successfulTravel: args.successfulTravel,
     idempotentResume: args.idempotentResume ?? false,
+  });
+  syncWorldClockTurnBoundary({
+    campaignId: args.campaignId,
+    currentTick: newTick,
   });
 
   heartbeat();
@@ -2017,9 +2716,11 @@ async function renderSettledNarrationWithSaga(args: {
 
   let lastReasoningText: string | undefined;
   let lastVisibleFailures: VisibleNarrationFailure[] = [];
-  let lastVisibleUsage: Awaited<ReturnType<typeof generateText>>["usage"] | undefined;
-  let lastVisibleFinishReason: Awaited<ReturnType<typeof generateText>>["finishReason"] | undefined;
-  let lastVisibleResponse: Awaited<ReturnType<typeof generateText>>["response"] | undefined;
+  let lastVisibleUsage: VisibleNarrationUsage | undefined;
+  let lastVisibleFinishReason: VisibleNarrationFinishReason | undefined;
+  let lastVisibleResponse: VisibleNarrationResponse | undefined;
+  let lastVisibleTextLength: number | undefined;
+  let lastStructuredTrace: NarrationDraftStructuredTrace | null = null;
 
   async function runFinalPacketGuardedNarration(recoveryAddendum: string | null) {
     return runVisibleNarrationWithPacketGuard({
@@ -2037,9 +2738,10 @@ async function renderSettledNarrationWithSaga(args: {
           ? `${finalNarrationPrompt.prompt}\n\n${addenda.join("\n\n")}`
           : finalNarrationPrompt.prompt;
         const result = await withRole("storyteller", () =>
-          runVisibleNarrationWithGuard({
+          runVisibleNarrationDraftWithGuard({
             label: "final",
             provider: args.storytellerProvider,
+            narratorPacket: args.narratorPacket,
             system: finalNarrationPrompt.system,
             prompt: activePrompt,
             storytellerTemperature: args.storytellerTemperature,
@@ -2051,14 +2753,23 @@ async function renderSettledNarrationWithSaga(args: {
         lastVisibleUsage = result.usage;
         lastVisibleFinishReason = result.finishReason;
         lastVisibleResponse = result.response;
-        return result.text;
+        lastVisibleTextLength = result.text.length;
+        lastStructuredTrace = result.structuredTrace;
+        return result.draft;
       },
       onUnsafeAttempt: ({ attempt, validation }) => {
         log.event("visible-narration.packet-guard", {
           stage: recoveryAddendum ? "recovery-unsafe-attempt" : "unsafe-attempt",
           attempt,
           violationCount: validation.violations.length,
-          violationKinds: validation.violations.map((violation) => violation.kind),
+          diagnostics: visibleNarrationValidationDiagnostics({
+            validation,
+            packet: args.narratorPacket,
+          }),
+          finishReason: lastVisibleFinishReason,
+          responseModel: lastVisibleResponse?.modelId,
+          textLength: lastVisibleTextLength,
+          structuredTrace: lastStructuredTrace,
         });
       },
     });
@@ -2068,70 +2779,97 @@ async function renderSettledNarrationWithSaga(args: {
   let recovered = false;
   const narrationStartedAt = Date.now();
   let narrationEndedAt = narrationStartedAt;
+  let activeNarratorAttempt = recordNarratorAttempt({
+    sagaId: saga.id,
+    settledTurnPacketId: args.settledPacket.id,
+    status: "started",
+    groundingResult: {
+      stage: "packet_guard",
+      recovered: false,
+      narrationContractVersion: GROUNDED_SENTENCE_DRAFT_CONTRACT_VERSION,
+      startedAt: narrationStartedAt,
+    },
+    lockToken: args.lockToken,
+  });
   try {
     guardedNarration = await runFinalPacketGuardedNarration(null);
     narrationEndedAt = Date.now();
   } catch (error) {
+    narrationEndedAt = Date.now();
     const failureReason = errorMessage(error);
-    recordNarratorAttempt({
-      sagaId: saga.id,
-      settledTurnPacketId: args.settledPacket.id,
+    const failureGroundingResult = failedNarratorGroundingResult({
+      error,
+      recovered: false,
+      packet: args.narratorPacket,
+    });
+    updateNarratorAttemptOutcome({
+      id: activeNarratorAttempt.id,
       status: "failed",
-      groundingResult: { ok: false, stage: "packet_guard", recovered: false },
+      groundingResult: failureGroundingResult,
       failureReason,
       lockToken: args.lockToken,
     });
-    if (saga.status === "narrator_rendering") {
-      saga = transitionTurnSagaStatus({
-        sagaId: saga.id,
-        toStatus: "narrator_repairing",
-        reason: "First final narration guard call failed; retrying from settled packet.",
-        lockToken: args.lockToken,
-      });
-    }
+    const stage = error instanceof VisibleNarrationPacketGuardError
+      ? "packet-guard-failed"
+      : isVisibleNarrationTransportError(error)
+        ? "transport-exhausted"
+        : isVisibleNarrationStructuredChannelError(error)
+          ? "structured-channel-exhausted"
+        : "draft-contract-failed";
     log.warn(
-      "Final visible narration failed packet guard; regenerating storyteller output from the same packet before aborting turn",
+      "Final visible narration failed; preserving settled packet without recovery regeneration",
       error,
     );
     log.event("visible-narration.packet-guard", {
-      stage: "recovery-regenerate",
+      stage,
       reason: failureReason,
+      diagnostics: failureGroundingResult,
     });
-    recovered = true;
-    const repairStart = Date.now();
-    try {
-      guardedNarration = await runFinalPacketGuardedNarration(
-        FINAL_VISIBLE_PACKET_GUARD_RECOVERY_ADDENDUM,
-      );
-      narrationEndedAt = Date.now();
-      args.recordNarratorRepairStage?.(repairStart, narrationEndedAt, {
-        recovered: true,
-        reason: failureReason,
-      });
-    } catch (recoveryError) {
-      narrationEndedAt = Date.now();
-      recordNarratorAttempt({
-        sagaId: saga.id,
-        settledTurnPacketId: args.settledPacket.id,
-        status: "failed",
-        groundingResult: { ok: false, stage: "packet_guard", recovered: true },
-        failureReason: errorMessage(recoveryError),
-        lockToken: args.lockToken,
-      });
-      throw new NarrationRepairExhaustedError(
-        "Visible narration violated packet visibility constraints after recovery.",
-        recoveryError,
-      );
-    }
+    throw new NarrationRepairExhaustedError(
+      stage === "transport-exhausted"
+        ? "Visible narration transport failed before packet validation; settled packet is pending narration."
+        : stage === "structured-channel-exhausted"
+          ? "Visible narration structured output channel failed before packet validation; settled packet is pending narration."
+        : stage === "packet-guard-failed"
+          ? "Visible narration violated packet visibility or grounding constraints; settled packet is pending narration."
+          : "Visible narration structured contract failed before packet validation; settled packet is pending narration.",
+      error,
+    );
   }
 
   const narrativeText = guardedNarration.text;
-  assertNonEmptyFinalVisibleNarration(narrativeText);
-  const successAttempt = recordNarratorAttempt({
-    sagaId: saga.id,
-    settledTurnPacketId: args.settledPacket.id,
+  try {
+    if (!guardedNarration.draft) {
+      throw new Error("Final narration guard returned success without a NarrationDraft.");
+    }
+    assertNonEmptyFinalVisibleNarration(narrativeText);
+  } catch (error) {
+    updateNarratorAttemptOutcome({
+      id: activeNarratorAttempt.id,
+      status: "failed",
+      groundingResult: failedNarratorGroundingResult({
+        error,
+        recovered,
+        packet: args.narratorPacket,
+      }),
+      failureReason: errorMessage(error),
+      lockToken: args.lockToken,
+    });
+    throw error;
+  }
+  const successAttempt = updateNarratorAttemptOutcome({
+    id: activeNarratorAttempt.id,
     status: "succeeded",
-    groundingResult: guardedNarration.validation,
+    groundingResult: {
+      ...guardedNarration.validation,
+      narrationDraftAccepted: true,
+      narrationContractVersion: GROUNDED_SENTENCE_DRAFT_CONTRACT_VERSION,
+      structuredTrace: lastStructuredTrace,
+      attempts: guardedNarration.attempts,
+      retried: guardedNarration.retried,
+      guardAddendum: guardedNarration.guardAddendum,
+      visibleFailures: lastVisibleFailures,
+    },
     finalText: narrativeText,
     lockToken: args.lockToken,
   });
@@ -2187,6 +2925,23 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
+}
+
+function isNarrationDraftAcceptedAttempt(attempt: {
+  groundingResult: unknown;
+}): boolean {
+  const grounding = asRecord(attempt.groundingResult);
+  const trace = asRecord(grounding?.structuredTrace);
+  const strategy = trace?.strategy;
+  return grounding?.narrationDraftAccepted === true
+    && grounding?.narrationContractVersion === GROUNDED_SENTENCE_DRAFT_CONTRACT_VERSION
+    && grounding?.attempts === 1
+    && grounding?.retried === false
+    && grounding?.guardAddendum == null
+    && (strategy === "native_json" || strategy === "tool_mode")
+    && trace?.fallbackReason == null
+    && trace?.repairedFromStrategy == null
+    && trace?.repair == null;
 }
 
 function getResumeCheckpoint(
@@ -2475,11 +3230,15 @@ export async function* resumePendingTurnNarration(
       },
     };
 
-    const successfulAttempt = findLatestSuccessfulNarratorAttempt({
+    const latestSuccessfulAttempt = findLatestSuccessfulNarratorAttempt({
       sagaId: lockedSaga.id,
       settledTurnPacketId: settledPacket.id,
       campaignId,
     });
+    const successfulAttempt =
+      latestSuccessfulAttempt && isNarrationDraftAcceptedAttempt(latestSuccessfulAttempt)
+        ? latestSuccessfulAttempt
+        : null;
     const narration = successfulAttempt
       ? {
           narrativeText: successfulAttempt.finalText ?? "",
@@ -2536,6 +3295,10 @@ export async function* resumePendingTurnNarration(
       tick = typeof tailCheckpoint.tick === "number"
         ? tailCheckpoint.tick
         : readCampaignConfig(campaignId).currentTick ?? narratorPacket.tick;
+      syncWorldClockTurnBoundary({
+        campaignId,
+        currentTick: tick,
+      });
     } else {
       workerHeartbeat.heartbeat();
       const tailResult = yield* runPostNarrationFinalizationTail({
@@ -2794,19 +3557,16 @@ async function* processTurnScenePlan(
   });
   logScenePlanFrame(sceneFrame, frameEnded - frameStart);
   const forecastStart = Date.now();
-  const forecastResult = await buildScopedForecastExcerptForFrame(
-    sceneFrame,
-    judgeProvider,
-    storytellerMaxTokens,
-  );
+  const forecastResult = await buildScopedForecastExcerptForFrame(sceneFrame);
   const forecastEnded = Date.now();
-  const { excerpt: scopedForecastExcerpt, stagedForecast } = forecastResult;
+  const { excerpt: scopedForecastExcerpt, stagedForecast, refreshDue } = forecastResult;
   recordTurnLatencyStage(latencyTrace, {
     stage: "world_forecast",
     startedAt: forecastStart,
     endedAt: forecastEnded,
     metadata: {
       refreshed: stagedForecast !== null,
+      refreshDue,
       entryCount: scopedForecastExcerpt.entries.length,
     },
   });
@@ -2829,6 +3589,7 @@ async function* processTurnScenePlan(
     forbiddenPrivateTermCount: scopedForecastExcerpt.forbiddenPrivateTerms.length,
     baseTick: scopedForecastExcerpt.baseTick,
     refreshStaged: stagedForecast !== null,
+    refreshDue,
   });
 
   advanceSaga("gm_reading", "Running GM Read.");
@@ -2847,7 +3608,6 @@ async function* processTurnScenePlan(
     frame: sceneFrame,
     scopedForecastExcerpt,
     recentConversation: getChatHistory(campaignId).slice(-8),
-    maxOutputTokens: storytellerMaxTokens,
   });
   const originalGmReadPath = gmRead.path;
   let clarificationReviewMetadata: {
@@ -2872,7 +3632,6 @@ async function* processTurnScenePlan(
       gmRead,
       scopedForecastExcerpt,
       recentConversation: getChatHistory(campaignId).slice(-8),
-      maxOutputTokens: storytellerMaxTokens,
     });
     clarificationReviewMetadata = {
       reviewed: true,
@@ -3151,11 +3910,13 @@ async function* processTurnScenePlan(
       frame: frameWithOracle,
       gmRead,
       intent: gmToolLoop.intent,
+      observationSummary: gmToolLoop.observationSummary,
       stepResults,
     });
     executedPlan = buildExecutedScenePlanFromGmToolLoop({
       frame: frameWithOracle,
       plan: scenePlan,
+      observationSummary: gmToolLoop.observationSummary,
       stepResults,
     });
     log.event("scene.gm-tool-loop.execution", {
@@ -3197,48 +3958,6 @@ async function* processTurnScenePlan(
     yield event;
   }
 
-  if (gmRead.path === "clarification") {
-    advanceSaga("local_reaction_running", "Actor reactions not required for clarification.");
-    advanceSaga(
-      "world_consequence_running",
-      "No accepted world consequence; finalizing clarification without narration.",
-      readWorldClock(campaignId).worldVersion,
-    );
-    const narrativeText = safeClarificationPromptForFrame(
-      gmRead.clarificationPrompt,
-      frameWithOracle,
-      scopedForecastExcerpt,
-    );
-    appendChatMessages(campaignId, [
-      { role: "assistant", content: narrativeText },
-    ]);
-    yield { type: "narrative", data: { text: narrativeText } };
-
-    if (onPostTurn) {
-      yield {
-        type: "finalizing_turn",
-        data: { tick: currentTick, stage: "rollback_critical" },
-      };
-    }
-
-    commitStagedWorldForecast(campaignId, stagedForecast);
-    recordTurnLatencyStage(latencyTrace, {
-      stage: "clarification_response",
-      startedAt: gmReadEnded,
-      metadata: { path: gmRead.path },
-    });
-    finishLatencyTrace([
-      ...baseLatencyStageDefinitions,
-      { stage: "clarification_response", criticality: "L0", blocksPlayerResponse: true, criticalPath: true },
-    ]);
-    markTurnSagaFinalized({
-      sagaId: turnSaga.id,
-      reason: "Clarification returned without settled narration packet.",
-    });
-    yield { type: "done", data: { tick: currentTick } };
-    return;
-  }
-
   advanceSaga("local_reaction_running", "Running local actor reaction pass.");
   yield {
     type: "scene-settling",
@@ -3253,6 +3972,7 @@ async function* processTurnScenePlan(
     tick: currentTick,
     provider: judgeProvider,
     sceneFrame: frameWithOracle,
+    playerAction,
     playerLocationId: frameWithOracle.currentLocationId,
     playerSceneScopeId: frameWithOracle.currentSceneScopeId,
     elapsedWorldTimeMinutes: 1,
@@ -3479,6 +4199,7 @@ async function* processTurnScenePlan(
   const packetStart = Date.now();
   const canonicalTurnPacket = buildCanonicalTurnPacketFromScenePlan({
     frame: narratorFrame,
+    gmRead,
     plan: scenePlan,
     executedPlan,
     actorActionResults,
@@ -3503,6 +4224,7 @@ async function* processTurnScenePlan(
     },
   });
   logScenePlanPacket(narratorPacket, packetEnded - packetStart);
+  log.event("turn.resolution", canonicalTurnPacket.turnResolution);
   hiddenSummary.sceneAssembly = sceneAssembly;
   const liveClaim = claimTurnSagaWorker({
     sagaId: turnSaga.id,
@@ -3540,6 +4262,11 @@ async function* processTurnScenePlan(
     });
     liveSettledPacket = settledPacket;
     turnSaga = getTurnSaga({ sagaId: turnSaga.id }) ?? turnSaga;
+
+    yield {
+      type: "turn_resolution",
+      data: canonicalTurnPacket.turnResolution,
+    };
 
     yield {
       type: "scene-settling",
@@ -4394,6 +5121,7 @@ export async function* processOpeningScene(
   log.info(
     `Opening narration complete: final=${narrativeText.length} chars, retried=${openingNarration.retried}, failures=${openingNarration.failures.join(",") || "none"}`,
   );
+  assertNonEmptyFinalVisibleNarration(narrativeText);
 
   if (narrativeText) {
     appendChatMessages(campaignId, [{ role: "assistant", content: narrativeText }]);

@@ -564,6 +564,54 @@ describe("executeGmToolSteps", () => {
     expect(executeToolCall).not.toHaveBeenCalled();
   });
 
+  it("allows durable NPC procedural rulings when futureRelevance only explains later stakes", async () => {
+    const frame = createFrame({
+      playerAction:
+        "I show only the documents I actually have and ask which one fails their requirement.",
+    });
+    const proceduralRulingStep = logEventStep({
+      candidateToolRequest: {
+        toolName: "log_event",
+        actorRef: "Player",
+        targetRefs: ["Road Warden"],
+        input: {
+          text: "The Road Warden states that the route logbook, rainproof ledger, and sealed lacquer message do not satisfy the transit requirement.",
+          importance: 7,
+          participants: ["Player", "Road Warden"],
+          durability: "durable",
+          futureRelevance:
+            "The ruling tells Mira what she must address to gain passage in a future negotiation or appeal.",
+        },
+      },
+    });
+
+    const results = await executeGmToolSteps({
+      campaignId: frame.campaignId,
+      tick: frame.tick,
+      frame,
+      checklist: checklist([proceduralRulingStep]),
+    });
+
+    expect(results).toEqual([
+      expect.objectContaining({
+        status: "done",
+        toolName: "log_event",
+        validationError: null,
+      }),
+    ]);
+    expect(executeToolCall).toHaveBeenCalledWith(
+      frame.campaignId,
+      "log_event",
+      expect.objectContaining({
+        durability: "durable",
+        futureRelevance: expect.stringContaining("gain passage"),
+      }),
+      frame.tick,
+      undefined,
+      expect.objectContaining({ scope: "player_turn" }),
+    );
+  });
+
   it("allows scene-local log_event records for unsupported access attempts without durable persistence", async () => {
     const frame = createFrame({
       playerAction:

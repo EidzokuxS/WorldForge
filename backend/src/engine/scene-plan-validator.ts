@@ -24,6 +24,10 @@ export type ScenePlanValidationIssueCode =
   | "hidden_actor_ref"
   | "unexposed_item_ref"
   | "unsupported_action_claim"
+  | "invalid_speaker_ref"
+  | "invalid_source_ref"
+  | "invalid_durability"
+  | "missing_structural_claim"
   | "outcome_contradiction"
   | "too_many_primary_scene_changers";
 

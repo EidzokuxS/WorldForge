@@ -3,6 +3,7 @@ import { safeGenerateObject } from "../ai/generate-object-safe.js";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
 import { createLogger, withRole } from "../lib/index.js";
 import { buildWorldBrainPromptContract } from "./prompt-contracts.js";
+import { playerBlockingStageLimit, readRuntimeLimitMs } from "./runtime-limits.js";
 
 const log = createLogger("world-brain");
 
@@ -17,6 +18,17 @@ export const WORLD_BRAIN_MAX_BACKGROUND_ACTORS = 4;
 export const WORLD_BRAIN_MAX_PRESENCE_REASONS = 6;
 export const WORLD_BRAIN_MAX_CAUSAL_BEATS = 6;
 export const WORLD_BRAIN_MAX_GUARDRAILS = 4;
+export const WORLD_BRAIN_TIMEOUT_MS = playerBlockingStageLimit("WORLDFORGE_WORLD_BRAIN_TIMEOUT_MS");
+export const WORLD_BRAIN_REPAIR_TIMEOUT_MS = readRuntimeLimitMs(
+  [
+    "WORLDFORGE_WORLD_BRAIN_REPAIR_TIMEOUT_MS",
+    "WORLDFORGE_WORLD_BRAIN_TIMEOUT_MS",
+    "WORLDFORGE_PLAYER_TURN_LLM_TIMEOUT_MS",
+    "WF_PLAYER_BLOCKING_STAGE_TIMEOUT_MS",
+  ],
+  WORLD_BRAIN_TIMEOUT_MS,
+);
+export const WORLD_BRAIN_MAX_OUTPUT_TOKENS = 900;
 
 const boundedString = (max: number) => z.string().trim().min(1).max(max);
 const looseString = z.string().trim().min(1);
@@ -389,7 +401,7 @@ export async function runWorldBrainSceneDirection(args: {
 }): Promise<WorldBrainSceneDirection> {
   const allowedActorNames = uniqueStrings([args.seed.playerLabel, ...args.seed.clearActorNames]);
   const prompt = buildWorldBrainPrompt(args.seed);
-  const model = createModel(args.provider);
+  const model = createModel(args.provider, { role: "judge", reasoningMode: "bypass" });
 
   const result = await withRole("judge", () =>
     safeGenerateObject({
@@ -398,6 +410,12 @@ export async function runWorldBrainSceneDirection(args: {
       temperature: 0,
       system: WORLD_BRAIN_SYSTEM_PROMPT,
       prompt,
+      maxOutputTokens: WORLD_BRAIN_MAX_OUTPUT_TOKENS,
+      timeout: { totalMs: WORLD_BRAIN_TIMEOUT_MS },
+      mode: "native_json",
+      retries: 1,
+      allowTextFallback: false,
+      allowRepair: false,
     }),
   );
 
@@ -434,7 +452,12 @@ export async function runWorldBrainSceneDirection(args: {
         candidate: normalized,
         issues,
       }),
-      retries: 2,
+      maxOutputTokens: WORLD_BRAIN_MAX_OUTPUT_TOKENS,
+      timeout: { totalMs: WORLD_BRAIN_REPAIR_TIMEOUT_MS },
+      mode: "native_json",
+      retries: 1,
+      allowTextFallback: false,
+      allowRepair: false,
     }),
   );
 

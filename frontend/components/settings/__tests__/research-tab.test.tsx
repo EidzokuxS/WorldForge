@@ -42,7 +42,7 @@ describe("ResearchTab", () => {
     const settings = createMockSettings();
     render(<ResearchTab settings={settings} setSettings={vi.fn()} />);
 
-    expect(screen.getByText("Research Agent")).toBeInTheDocument();
+    expect(screen.getByText("Research")).toBeInTheDocument();
     expect(screen.getByText("Enable research agent")).toBeInTheDocument();
     expect(screen.getAllByText(/world formation/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/character grounding/i).length).toBeGreaterThan(0);
@@ -63,6 +63,6 @@ describe("ResearchTab", () => {
     const settings = createMockSettings();
     render(<ResearchTab settings={settings} setSettings={vi.fn()} />);
 
-    expect(screen.getByText("Search Provider")).toBeInTheDocument();
+    expect(screen.getAllByText("Search Provider").length).toBeGreaterThan(0);
   });
 });

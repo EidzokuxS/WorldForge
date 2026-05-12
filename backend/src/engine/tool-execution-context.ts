@@ -55,7 +55,11 @@ export interface ToolGroundingIssue {
     | "ambiguous_entity_ref"
     | "hidden_actor_ref"
     | "unexposed_item_ref"
-    | "unsupported_action_claim";
+    | "unsupported_action_claim"
+    | "invalid_speaker_ref"
+    | "invalid_source_ref"
+    | "invalid_durability"
+    | "missing_structural_claim";
   path: string;
   message: string;
   toolName?: RuntimeToolName | string;
@@ -73,6 +77,36 @@ function addRefs(target: Set<string>, values: Array<string | null | undefined>) 
   }
 }
 
+function addActorScopedRefs(target: Set<string>, values: Array<string | null | undefined>) {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (!trimmed) continue;
+    addRefs(target, [trimmed, trimmed.startsWith("actor:") ? trimmed : `actor:${trimmed}`]);
+  }
+}
+
+function addLocationScopedRefs(target: Set<string>, values: Array<string | null | undefined>) {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (!trimmed) continue;
+    const unprefixed = trimmed.startsWith("location:")
+      ? trimmed.slice("location:".length)
+      : trimmed;
+    addRefs(target, [unprefixed, `location:${unprefixed}`]);
+  }
+}
+
+function addItemScopedRefs(target: Set<string>, values: Array<string | null | undefined>) {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (!trimmed) continue;
+    const unprefixed = trimmed.startsWith("item:")
+      ? trimmed.slice("item:".length)
+      : trimmed;
+    addRefs(target, [unprefixed, `item:${unprefixed}`]);
+  }
+}
+
 function collectSceneFrameActorRefs(frame: SceneFrame, actorId: string): Set<string> {
   const refs = new Set<string>();
   const actor = [
@@ -81,11 +115,12 @@ function collectSceneFrameActorRefs(frame: SceneFrame, actorId: string): Set<str
   ].find((entry) => entry.id === actorId || entry.actorId === actorId);
 
   if (actor) {
-    addRefs(refs, [actor.id, actor.actorId, actor.label]);
+    addActorScopedRefs(refs, [actor.id, actor.actorId]);
+    addRefs(refs, [actor.label]);
     return refs;
   }
 
-  addRefs(refs, [actorId]);
+  addActorScopedRefs(refs, [actorId]);
   return refs;
 }
 
@@ -220,47 +255,50 @@ export function createPlayerTurnToolExecutionContext(frame: SceneFrame): ToolExe
     ...frame.roster.support.filter((actor) => actor.awareness === "clear"),
   ];
   for (const actor of clearActors) {
-    addRefs(legalActorRefs, [actor.id, actor.actorId, actor.label]);
+    addActorScopedRefs(legalActorRefs, [actor.id, actor.actorId]);
+    addRefs(legalActorRefs, [actor.label]);
     if (actor.id === frame.playerActorId || actor.actorId === frame.playerActorId) {
-      addRefs(subjectActorRefs, [actor.id, actor.actorId, actor.label]);
+      addActorScopedRefs(subjectActorRefs, [actor.id, actor.actorId]);
+      addRefs(subjectActorRefs, [actor.label]);
     }
   }
-  addRefs(subjectActorRefs, [frame.playerActorId]);
+  addActorScopedRefs(subjectActorRefs, [frame.playerActorId]);
 
-  addRefs(currentLocationRefs, [
+  addLocationScopedRefs(currentLocationRefs, [frame.currentLocationId]);
+  addRefs(currentLocationRefs, [frame.currentLocationName, "current_location"]);
+  addLocationScopedRefs(currentSceneRefs, [frame.currentSceneScopeId]);
+  addRefs(currentSceneRefs, [frame.currentSceneScopeName, "current_scene"]);
+  addLocationScopedRefs(legalLocationRefs, [
     frame.currentLocationId,
-    frame.currentLocationName,
-    "current_location",
-  ]);
-  addRefs(currentSceneRefs, [
     frame.currentSceneScopeId,
-    frame.currentSceneScopeName,
-    "current_scene",
   ]);
   addRefs(legalLocationRefs, [
-    frame.currentLocationId,
     frame.currentLocationName,
-    frame.currentSceneScopeId,
     frame.currentSceneScopeName,
     "current_location",
     "current_scene",
   ]);
 
   for (const candidate of frame.movementCandidates.filter((entry) => entry.connected)) {
-    addRefs(legalLocationRefs, [candidate.id, candidate.locationId, candidate.label]);
-    addRefs(legalMovementRefs, [candidate.id, candidate.locationId, candidate.label]);
+    addLocationScopedRefs(legalLocationRefs, [candidate.id, candidate.locationId]);
+    addRefs(legalLocationRefs, [candidate.label]);
+    addLocationScopedRefs(legalMovementRefs, [candidate.id, candidate.locationId]);
+    addRefs(legalMovementRefs, [candidate.label]);
   }
 
   for (const candidate of frame.targetCandidates) {
     switch (candidate.type) {
       case "actor":
-        addRefs(legalActorRefs, [candidate.id, candidate.actorId, candidate.label]);
+        addActorScopedRefs(legalActorRefs, [candidate.id, candidate.actorId]);
+        addRefs(legalActorRefs, [candidate.label]);
         break;
       case "item":
-        addRefs(legalItemRefs, [candidate.id, candidate.itemId, candidate.label]);
+        addItemScopedRefs(legalItemRefs, [candidate.id, candidate.itemId]);
+        addRefs(legalItemRefs, [candidate.label]);
         break;
       case "location":
-        addRefs(legalLocationRefs, [candidate.id, candidate.locationId, candidate.label]);
+        addLocationScopedRefs(legalLocationRefs, [candidate.id, candidate.locationId]);
+        addRefs(legalLocationRefs, [candidate.label]);
         break;
       case "faction":
         addRefs(legalFactionRefs, [candidate.id, candidate.factionId, candidate.label]);
@@ -306,38 +344,35 @@ export function createActorTurnToolExecutionContext(
   const currentSceneRefs = new Set<string>();
   const legalMovementRefs = new Set<string>();
 
-  addRefs(legalActorRefs, [
+  addActorScopedRefs(legalActorRefs, [
     actorFrame.observer.id,
     actorFrame.observer.actorId,
-    actorFrame.observer.label,
   ]);
-  addRefs(subjectActorRefs, [
+  addRefs(legalActorRefs, [actorFrame.observer.label]);
+  addActorScopedRefs(subjectActorRefs, [
     actorFrame.observer.id,
     actorFrame.observer.actorId,
-    actorFrame.observer.label,
   ]);
+  addRefs(subjectActorRefs, [actorFrame.observer.label]);
 
   const clearActors = [
     ...sceneFrame.roster.active,
     ...sceneFrame.roster.support.filter((actor) => actor.awareness === "clear"),
   ];
   for (const actor of clearActors) {
-    addRefs(legalActorRefs, [actor.id, actor.actorId, actor.label]);
+    addActorScopedRefs(legalActorRefs, [actor.id, actor.actorId]);
+    addRefs(legalActorRefs, [actor.label]);
   }
 
-  addRefs(currentLocationRefs, [
+  addLocationScopedRefs(currentLocationRefs, [actorFrame.observer.locationId]);
+  addRefs(currentLocationRefs, [sceneFrame.currentLocationName, "current_location"]);
+  addLocationScopedRefs(currentSceneRefs, [actorFrame.observer.sceneScopeId]);
+  addRefs(currentSceneRefs, [sceneFrame.currentSceneScopeName, "current_scene"]);
+  addLocationScopedRefs(legalLocationRefs, [
     actorFrame.observer.locationId,
-    sceneFrame.currentLocationName,
-    "current_location",
-  ]);
-  addRefs(currentSceneRefs, [
     actorFrame.observer.sceneScopeId,
-    sceneFrame.currentSceneScopeName,
-    "current_scene",
   ]);
   addRefs(legalLocationRefs, [
-    actorFrame.observer.locationId,
-    actorFrame.observer.sceneScopeId,
     sceneFrame.currentLocationName,
     sceneFrame.currentSceneScopeName,
     "current_location",
@@ -345,20 +380,25 @@ export function createActorTurnToolExecutionContext(
   ]);
 
   for (const candidate of sceneFrame.movementCandidates.filter((entry) => entry.connected)) {
-    addRefs(legalLocationRefs, [candidate.id, candidate.locationId, candidate.label]);
-    addRefs(legalMovementRefs, [candidate.id, candidate.locationId, candidate.label]);
+    addLocationScopedRefs(legalLocationRefs, [candidate.id, candidate.locationId]);
+    addRefs(legalLocationRefs, [candidate.label]);
+    addLocationScopedRefs(legalMovementRefs, [candidate.id, candidate.locationId]);
+    addRefs(legalMovementRefs, [candidate.label]);
   }
 
   for (const candidate of sceneFrame.targetCandidates) {
     switch (candidate.type) {
       case "actor":
-        addRefs(legalActorRefs, [candidate.id, candidate.actorId, candidate.label]);
+        addActorScopedRefs(legalActorRefs, [candidate.id, candidate.actorId]);
+        addRefs(legalActorRefs, [candidate.label]);
         break;
       case "item":
-        addRefs(legalItemRefs, [candidate.id, candidate.itemId, candidate.label]);
+        addItemScopedRefs(legalItemRefs, [candidate.id, candidate.itemId]);
+        addRefs(legalItemRefs, [candidate.label]);
         break;
       case "location":
-        addRefs(legalLocationRefs, [candidate.id, candidate.locationId, candidate.label]);
+        addLocationScopedRefs(legalLocationRefs, [candidate.id, candidate.locationId]);
+        addRefs(legalLocationRefs, [candidate.label]);
         break;
       case "faction":
         addRefs(legalFactionRefs, [candidate.id, candidate.factionId, candidate.label]);
@@ -416,6 +456,9 @@ export function applySuccessfulToolObservationToExecutionContext(input: {
   const id = readResultString(payload, "id")
     ?? readResultString(payload, "locationId")
     ?? readResultString(payload, "npcId");
+  const actorId = readResultString(payload, "actorId")
+    ?? readResultString(payload, "npcId")
+    ?? id;
   const name = readResultString(payload, "name")
     ?? readResultString(payload, "locationName");
 
@@ -426,8 +469,10 @@ export function applySuccessfulToolObservationToExecutionContext(input: {
       }
       break;
     case "reveal_location":
-      addRefs(input.context.legalLocationRefs, [id, name]);
-      addRefs(input.context.legalMovementRefs, [id, name]);
+      addLocationScopedRefs(input.context.legalLocationRefs, [id]);
+      addRefs(input.context.legalLocationRefs, [name]);
+      addLocationScopedRefs(input.context.legalMovementRefs, [id]);
+      addRefs(input.context.legalMovementRefs, [name]);
       break;
     case "move_to":
     case "move_actor":
@@ -436,21 +481,29 @@ export function applySuccessfulToolObservationToExecutionContext(input: {
       input.context.currentSceneScopeId = id;
       input.context.currentLocationRefs.clear();
       input.context.currentSceneRefs.clear();
-      addRefs(input.context.currentLocationRefs, ["current_location", id, name]);
-      addRefs(input.context.currentSceneRefs, ["current_scene", id, name]);
-      addRefs(input.context.legalLocationRefs, [id, name]);
-      addRefs(input.context.legalMovementRefs, [id, name]);
+      addLocationScopedRefs(input.context.currentLocationRefs, [id]);
+      addRefs(input.context.currentLocationRefs, ["current_location", name]);
+      addLocationScopedRefs(input.context.currentSceneRefs, [id]);
+      addRefs(input.context.currentSceneRefs, ["current_scene", name]);
+      addLocationScopedRefs(input.context.legalLocationRefs, [id]);
+      addRefs(input.context.legalLocationRefs, [name]);
+      addLocationScopedRefs(input.context.legalMovementRefs, [id]);
+      addRefs(input.context.legalMovementRefs, [name]);
       break;
     case "spawn_npc":
     case "create_scene_extra":
-      addRefs(input.context.legalActorRefs, [id, name]);
+      addActorScopedRefs(input.context.legalActorRefs, [actorId, id]);
+      addRefs(input.context.legalActorRefs, [name]);
       break;
     case "create_minor_poi":
-      addRefs(input.context.legalLocationRefs, [id, name]);
-      addRefs(input.context.legalMovementRefs, [id, name]);
+      addLocationScopedRefs(input.context.legalLocationRefs, [id]);
+      addRefs(input.context.legalLocationRefs, [name]);
+      addLocationScopedRefs(input.context.legalMovementRefs, [id]);
+      addRefs(input.context.legalMovementRefs, [name]);
       break;
     case "spawn_item":
-      addRefs(input.context.legalItemRefs, [id, name]);
+      addItemScopedRefs(input.context.legalItemRefs, [id]);
+      addRefs(input.context.legalItemRefs, [name]);
       break;
   }
 }
@@ -559,15 +612,222 @@ function validateLogEventGrounding(
     return null;
   }
 
-  const textParts = [input.text, input.futureRelevance].filter(
-    (value): value is string => typeof value === "string",
-  );
-  if (textParts.some(textHasUnsupportedActionClaim)) {
+  const eventText = typeof input.text === "string" ? input.text : "";
+  if (textHasUnsupportedActionClaim(eventText)) {
     return scopedIssue(
       "unsupported_action_claim",
       `${pathPrefix}.text`,
       "player-turn durable log_event cannot commit possession, access, item-use, or completed movement claims; use a concrete backend tool result or record the attempted/failed beat as scene_local.",
     );
+  }
+
+  return null;
+}
+
+function knownFactRefs(context: ToolExecutionContext): Set<string> {
+  const refs = new Set<string>();
+  for (const fact of context.bridgeLookup?.playerKnownFacts ?? []) {
+    addRefs(refs, [fact.id, ...fact.sourceRefs]);
+  }
+  return refs;
+}
+
+function dialogueSourceRefs(context: ToolExecutionContext): Set<string> {
+  return mergeSets(
+    context.subjectActorRefs,
+    context.legalActorRefs,
+    context.legalItemRefs,
+    context.legalLocationRefs,
+    context.legalFactionRefs,
+    context.legalMovementRefs,
+    context.currentLocationRefs,
+    context.currentSceneRefs,
+    knownFactRefs(context),
+  );
+}
+
+function worldFactSourceRefs(context: ToolExecutionContext): Set<string> {
+  return dialogueSourceRefs(context);
+}
+
+function validateRefArray(input: {
+  values: unknown;
+  refs: ReadonlySet<string>;
+  path: string;
+  description: string;
+  code: ToolGroundingIssue["code"];
+}): ToolGroundingIssue | null {
+  if (!Array.isArray(input.values)) return null;
+  for (const [index, value] of input.values.entries()) {
+    const issue = requireRef({
+      value,
+      refs: input.refs,
+      path: `${input.path}.${index}`,
+      description: input.description,
+      code: input.code,
+    });
+    if (issue) return issue;
+  }
+  return null;
+}
+
+function validateRecordDialogueOutcomeGrounding(
+  input: Record<string, unknown>,
+  context: ToolExecutionContext,
+  pathPrefix: string,
+): ToolGroundingIssue | null {
+  const outcomeKind = typeof input.outcomeKind === "string" ? input.outcomeKind : "";
+  const topicKind = typeof input.topicKind === "string" ? input.topicKind : "";
+  const durability = typeof input.durability === "string" ? input.durability : "";
+  const authorityKind = typeof input.authorityKind === "string" ? input.authorityKind : "";
+  const speakerOptional = outcomeKind === "unavailable" || outcomeKind === "no_current_answer";
+  const speakerRef = input.speakerRef;
+
+  if (authorityKind === "no_visible_authority") {
+    if (!speakerOptional) {
+      return scopedIssue(
+        "invalid_speaker_ref",
+        `${pathPrefix}.authorityKind`,
+        "record_dialogue_outcome may use no_visible_authority only for unavailable/no_current_answer outcomes.",
+      );
+    }
+    if (typeof speakerRef === "string" && speakerRef.trim()) {
+      return scopedIssue(
+        "invalid_speaker_ref",
+        `${pathPrefix}.speakerRef`,
+        "record_dialogue_outcome unavailable/no_current_answer outcomes with no_visible_authority must not use a speakerRef.",
+      );
+    }
+  }
+
+  if (!speakerOptional && (typeof speakerRef !== "string" || !speakerRef.trim())) {
+    return scopedIssue(
+      "invalid_speaker_ref",
+      `${pathPrefix}.speakerRef`,
+      "record_dialogue_outcome requires speakerRef for visible dialogue outcomes.",
+    );
+  }
+
+  if (!speakerOptional || typeof speakerRef === "string") {
+    const speakerIssue = requireRef({
+      value: speakerRef,
+      refs: context.legalActorRefs,
+      path: `${pathPrefix}.speakerRef`,
+      description: "a clear visible/current actor speaker",
+      code: "invalid_speaker_ref",
+    });
+    if (speakerIssue) return speakerIssue;
+
+    if (typeof speakerRef === "string" && hasRef(context.subjectActorRefs, speakerRef)) {
+      return scopedIssue(
+        "invalid_speaker_ref",
+        `${pathPrefix}.speakerRef`,
+        "record_dialogue_outcome speakerRef must be a non-player visible/current actor for NPC answers, refusals, warnings, gestures, or silence.",
+      );
+    }
+  }
+
+  const addresseeIssue = validateRefArray({
+    values: input.addresseeRefs,
+    refs: context.legalActorRefs,
+    path: `${pathPrefix}.addresseeRefs`,
+    description: "clear visible/current actor addressee refs",
+    code: "hidden_actor_ref",
+  });
+  if (addresseeIssue) return addresseeIssue;
+
+  const sourceIssue = validateRefArray({
+    values: input.sourceRefs,
+    refs: dialogueSourceRefs(context),
+    path: `${pathPrefix}.sourceRefs`,
+    description: "legal visible/current refs, movement refs, or player-known fact refs",
+    code: "invalid_source_ref",
+  });
+  if (sourceIssue) return sourceIssue;
+
+  if (durability === "durable") {
+    if (typeof input.futureUseKind !== "string" || !input.futureUseKind.trim()) {
+      return scopedIssue(
+        "invalid_durability",
+        `${pathPrefix}.futureUseKind`,
+        "durable record_dialogue_outcome requires futureUseKind.",
+      );
+    }
+    if (typeof input.futureRelevance !== "string" || !input.futureRelevance.trim()) {
+      return scopedIssue(
+        "invalid_durability",
+        `${pathPrefix}.futureRelevance`,
+        "durable record_dialogue_outcome requires futureRelevance.",
+      );
+    }
+  }
+
+  const requiresClaim =
+    durability === "durable"
+    && ["procedure", "permission", "proof", "route", "safety", "status"].includes(topicKind)
+    && ["answered", "warned", "redirected"].includes(outcomeKind);
+  if (requiresClaim && (!Array.isArray(input.claims) || input.claims.length === 0)) {
+    return scopedIssue(
+      "missing_structural_claim",
+      `${pathPrefix}.claims`,
+      "durable procedural answered/warned/redirected dialogue outcomes require at least one structured claim.",
+    );
+  }
+
+  if (Array.isArray(input.claims)) {
+    const legalClaimRefs = dialogueSourceRefs(context);
+    for (const [index, claim] of input.claims.entries()) {
+      if (!claim || typeof claim !== "object" || Array.isArray(claim)) continue;
+      const subjectIssue = requireRef({
+        value: (claim as Record<string, unknown>).subjectRef,
+        refs: legalClaimRefs,
+        path: `${pathPrefix}.claims.${index}.subjectRef`,
+        description: "a legal visible/current ref or player-known fact ref",
+        code: "invalid_source_ref",
+      });
+      if (subjectIssue) return subjectIssue;
+    }
+  }
+
+  return null;
+}
+
+function validateRecordWorldFactGrounding(
+  input: Record<string, unknown>,
+  context: ToolExecutionContext,
+  pathPrefix: string,
+): ToolGroundingIssue | null {
+  const sourceRefs = worldFactSourceRefs(context);
+  const sourceIssue = validateRefArray({
+    values: input.sourceRefs,
+    refs: sourceRefs,
+    path: `${pathPrefix}.sourceRefs`,
+    description: "legal visible/current refs, movement refs, or player-known fact refs",
+    code: "invalid_source_ref",
+  });
+  if (sourceIssue) return sourceIssue;
+
+  const subjectIssue = validateRefArray({
+    values: input.subjectRefs,
+    refs: sourceRefs,
+    path: `${pathPrefix}.subjectRefs`,
+    description: "legal visible/current refs, movement refs, or player-known fact refs",
+    code: "invalid_source_ref",
+  });
+  if (subjectIssue) return subjectIssue;
+
+  if (Array.isArray(input.claims)) {
+    for (const [index, claim] of input.claims.entries()) {
+      if (!claim || typeof claim !== "object" || Array.isArray(claim)) continue;
+      const claimSubjectIssue = requireRef({
+        value: (claim as Record<string, unknown>).subjectRef,
+        refs: sourceRefs,
+        path: `${pathPrefix}.claims.${index}.subjectRef`,
+        description: "a legal visible/current ref or player-known fact ref",
+        code: "invalid_source_ref",
+      });
+      if (claimSubjectIssue) return claimSubjectIssue;
+    }
   }
 
   return null;
@@ -625,6 +885,10 @@ export function validateToolInputGrounding(input: {
     }
     case "log_event":
       return validateLogEventGrounding(toolInput, input.context, path);
+    case "record_dialogue_outcome":
+      return validateRecordDialogueOutcomeGrounding(toolInput, input.context, path);
+    case "record_world_fact":
+      return validateRecordWorldFactGrounding(toolInput, input.context, path);
     case "spawn_npc":
       return validateSpawnNpcGrounding(toolInput, input.context, path);
     case "promote_npc":

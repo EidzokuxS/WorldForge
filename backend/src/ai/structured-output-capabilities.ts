@@ -60,6 +60,10 @@ export interface BuildStructuredOutputModelMetadataInput {
 }
 
 const metadataByModel = new WeakMap<object, StructuredOutputModelMetadata>();
+const jsonObjectModeBaseUrlFamilies = new Set([
+  "opencode.ai",
+  "api.z.ai",
+]);
 
 function cleanIdentityPart(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -147,7 +151,7 @@ function prefersJsonObjectMode(metadata: StructuredOutputModelMetadata): boolean
   return (
     metadata.protocol === "openai-compatible" &&
     metadata.transport === "chat-completions" &&
-    metadata.baseUrlFamily === "opencode.ai"
+    jsonObjectModeBaseUrlFamilies.has(metadata.baseUrlFamily)
   );
 }
 

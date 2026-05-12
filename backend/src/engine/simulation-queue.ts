@@ -239,6 +239,7 @@ export function queuePostTurnSimulationProposals(
         tick: input.tick,
         playerLocationId: input.playerLocationId,
         playerSceneScopeId: input.playerSceneScopeId,
+        presentActorReactionRoute: "proposal_after_done",
       }).decisions
     : [];
 
@@ -419,12 +420,17 @@ export function buildDoneBoundaryData(
   campaignId: string,
   data: unknown,
 ): Record<string, unknown> {
-  const base = data && typeof data === "object" && !Array.isArray(data)
+  const base: Record<string, unknown> = data && typeof data === "object" && !Array.isArray(data)
     ? { ...data as Record<string, unknown> }
     : { value: data };
   const clock = readWorldClock(campaignId);
+  const inputTick = base["tick"];
+  const coherentTick = typeof inputTick === "number"
+    ? Math.max(inputTick, clock.currentTick, clock.worldTimeMinutes)
+    : null;
   return {
     ...base,
+    ...(coherentTick === null ? {} : { tick: coherentTick }),
     worldVersion: clock.worldVersion,
     worldTimeMinutes: clock.worldTimeMinutes,
   };

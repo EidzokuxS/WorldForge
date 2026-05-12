@@ -75,6 +75,10 @@ import {
   formatPlayerFacingPacketForPrompt,
 } from "./player-facing-packet.js";
 import { buildContextCompressionPromptContract } from "./prompt-contracts.js";
+import {
+  GROUNDED_SENTENCE_DRAFT_VERSION,
+  isNarrationDraftCitationEvidence,
+} from "./narration-grounding-guard.js";
 
 const log = createLogger("prompt-assembler");
 
@@ -1530,6 +1534,20 @@ function collectNarratorPacketForbiddenTerms(narratorPacket?: NarratorPacket): s
   return terms;
 }
 
+function redactForbiddenTerms(
+  value: string,
+  forbiddenTerms: readonly string[],
+): string {
+  let content = value;
+  for (const term of forbiddenTerms) {
+    content = content.replace(
+      new RegExp(escapeRegExp(term), "gi"),
+      "[private term omitted]",
+    );
+  }
+  return content;
+}
+
 function redactFinalNarrationUncheckedSections(
   sections: Array<{ name: string; content: string; sourceBoundaryChecked: boolean }>,
   narratorPacket?: NarratorPacket,
@@ -1544,13 +1562,7 @@ function redactFinalNarrationUncheckedSections(
       return section;
     }
 
-    let content = section.content;
-    for (const term of forbiddenTerms) {
-      content = content.replace(
-        new RegExp(escapeRegExp(term), "gi"),
-        "[private term omitted]",
-      );
-    }
+    const content = redactForbiddenTerms(section.content, forbiddenTerms);
     return { ...section, content };
   });
 }
@@ -1567,19 +1579,42 @@ function formatSettledPacketEffectsSection(narratorPacket: NarratorPacket): stri
 }
 
 function formatNarrationDraftContract(narratorPacket: NarratorPacket): string {
-  const evidenceLines = (narratorPacket.evidenceLedger ?? []).map(
-    (entry) => `- ${entry.id}`,
-  );
+  const forbiddenTerms = collectNarratorPacketForbiddenTerms(narratorPacket);
+  const evidenceLines = (narratorPacket.evidenceLedger ?? [])
+    .filter((entry) => isNarrationDraftCitationEvidence(entry, narratorPacket))
+    .map(
+      (entry) =>
+        `- ${entry.id} [category=${entry.category}] summary=${redactForbiddenTerms(entry.summary, forbiddenTerms)}`,
+    );
 
   return [
-    "[NARRATION DRAFT CONTRACT]",
-    "Return a single JSON object, not markdown.",
-    "Shape: { \"prose\": string, \"claims\": [{ \"id\": string, \"kind\": \"actor_presence\" | \"object_presence\" | \"location_change\" | \"route_status\" | \"threat_hazard\" | \"future_pressure\" | \"inventory_status_change\" | \"oracle_outcome\" | \"playable_beat\", \"summary\": string, \"requiresEvidence\": boolean, \"evidenceRefs\": string[] }], \"claimSpans\": [{ \"id\": string, \"spanText\": string, \"claimIds\": string[], \"requiresEvidence\": boolean }] }.",
-    "Every concrete world, pressure, route, actor, object, status, oracle, or playable-beat statement in prose must appear as a claimSpan and map to declared claims.",
-    "When a claim requires packet support, set requiresEvidence=true and cite only ids from [PACKET EVIDENCE IDS].",
-    "For atmosphere or connective prose that does not assert a concrete world fact, use requiresEvidence=false on its span.",
+    "[GROUNDED SENTENCE DRAFT CONTRACT]",
+    "Submit exactly one GroundedSentenceDraft structured object through the requested structured-output channel.",
+    "Do not use markdown, comments, explanations, labels, or extra text.",
+    "Use exactly these top-level keys: version, sentences.",
+    `version MUST be "${GROUNDED_SENTENCE_DRAFT_VERSION}".`,
+    "Each sentence object MUST include exactly these keys: text, evidenceRefs.",
+    "Any other sentence key, including kind, id, summary, prose, claims, claimSpans, or requiresEvidence, is invalid.",
+    `Shape: { "version": "${GROUNDED_SENTENCE_DRAFT_VERSION}", "sentences": [{ "text": string, "evidenceRefs": [1 to 4 exact packet evidence ids] }] }.`,
+    "Write between 1 and 5 concise visible prose sentence objects; HARD CAP: sentences.length MUST be <= 5, never 6 or more.",
+    "Prefer short sentence text. If more than five grounded details matter, merge or prioritize them inside five or fewer sentence objects; no sentence text may exceed 900 characters.",
+    "Do not output kind, prose, claims, claimSpans, id, summary, or requiresEvidence; the backend derives internal claim metadata and compiles the rest from sentences[].text and evidenceRefs.",
+    "Every sentence must cite 1-4 exact ids from [PACKET EVIDENCE IDS -- USE ONLY THESE IN evidenceRefs]; HARD CAP: each evidenceRefs array MUST contain <= 4 ids, never 5 or more.",
+    "If one sentence has many supporting packet ids, cite only the strongest 1-4 ids or split/prioritize details while staying within the 1-5 sentence limit.",
+    "Never put diagnostic source ids in evidenceRefs; use only ids listed in [PACKET EVIDENCE IDS -- USE ONLY THESE IN evidenceRefs].",
+    "Do not invent evidenceRefs. A source id is valid only when the same literal id appears below as a packet evidence id.",
+    "The allowed evidenceRefs list intentionally excludes player_action_request, anchor_event, guardrail, control_return, and the anchor player-action committed_event because they are context, not proof of the settled world.",
+    "Do not use player_action_request as the only evidence for success, possession, access, movement, route truth, inventory, NPC consent, object existence, threat, hazard, blocker, or changed world state.",
+    "player_action_request and anchor_event prove what the player attempted or asked; they do not prove the NPC answer, route/access truth, permission, possession, threat, hazard, blocker, or result.",
+    "guardrail and control_return ids are context only; never use them as the sole evidenceRefs for any sentence.",
+    "For any sentence about an NPC answer, proof requirement, permission boundary, access rule, route status, or next actionable option, cite the committed_event, perceivable_effect, perceivable_response, or tool_result id that actually states that fact.",
+    "A sentence about visible danger, pressure, or urgency must cite the concrete packet id that exposes it: committed_event, perceivable_effect, perceivable_response, oracle_outcome, hint_signal, or world_thread_signal.",
+    "When an observation tool makes pressure, risk, route leverage, visible personnel, camera, barrier, witness, or exit information narratable, cite the paired perceivable_effect evidence id for that observation; do not cite only the paired tool_result id.",
+    "If the only relevant packet id is tool_result, either cite its paired perceivable_effect id or phrase the sentence as concrete route/object/status information instead of pressure.",
+    "For current carried/equipped/signature inventory facts, cite current_inventory_status evidence. For acquire/drop/equip/transfer changes, cite the committed event, perceivable effect, or tool result that explicitly states the change.",
+    "For atmosphere or connective prose, cite visible_actor, perceivable_response, perceivable_effect, or a non-anchor committed_event as appropriate; do not cite only control_return, guardrail, anchor_event, or player_action_request.",
     "",
-    "[PACKET EVIDENCE IDS]",
+    "[PACKET EVIDENCE IDS -- USE ONLY THESE IN evidenceRefs]",
     ...(evidenceLines.length > 0 ? evidenceLines : ["- No packet evidence ids are in scope."]),
   ].join("\n");
 }
@@ -1597,7 +1632,8 @@ function buildRpBeatDirective(narratorPacket?: NarratorPacket): string {
     "- Write one playable RPG/VN beat, not a recap, report, or lore dump.",
     "- Start from the player request and show what visibly changes now.",
     "- Let visible NPCs act from motives, pressure, relationships, and limited knowledge.",
-    "- First sentence must add new pressure, a visible reaction, or a fresh authoritative scene fact; do not spend it restating what the player just typed.",
+    "- First sentence must add new pressure, a visible reaction, a fresh authoritative scene fact, or the most important existing visible-state answer to an observe/status-read request; do not spend it restating what the player just typed.",
+    "- For observe, inspect, take-stock, or read-the-room requests, answer the requested visible categories from authoritative packet/current-scene facts; include at least one concrete next lever, risk, route, person, object, or constraint already in scope, or explicitly state that no such sign is visible. Existing visible-state answers do not need to invent new pressure.",
     "- If a present NPC matters to this beat and packet/current-scene facts support it, give one concrete line, gesture, decision, or refusal.",
     "- Use concrete observable details, body language, distinct dialogue, and changed positions before abstract mood.",
     "- Do not open by echoing or paraphrasing the player action.",
@@ -1668,6 +1704,7 @@ export async function assembleFinalNarrationPrompt(options: {
         assertNarratorPacketPromptSafe(options.narratorPacket);
         return formatPlayerFacingPacketForPrompt(
           buildPlayerFacingPacketFromNarratorPacket(options.narratorPacket),
+          { includeDiagnostics: false, includeTechnicalRefs: false },
         );
       })()
     : null;
@@ -1680,10 +1717,11 @@ When the packet has no perceivable effects, answer with immediate visible reacti
 Treat the raw player action as an attempted request, not as proof that the action already succeeded.
 Do not narrate claimed possessions, NPC consent, location access, or item acquisition unless NarratorPacket events/effects/tool results confirm them.
 If a packet effect says a claim may be false or unconfirmed, narrate the visible challenge/refusal without placing the claimed object in the player's hand.
-Return the final narration as the JSON draft object required by [NARRATION DRAFT CONTRACT]; put player-visible prose only in the prose field.
-Do not write tool syntax or backend metadata inside the prose field.
+Return the final narration as the compact structured draft object required by [GROUNDED SENTENCE DRAFT CONTRACT]; put player-visible prose only in sentences[].text.
+Do not write tool syntax or backend metadata inside sentence text.
 Keep the output bounded to what the player can perceive in this scene.
-End on a concrete playable next moment rather than closing the scene with generic reflection.`
+End on a concrete playable next moment rather than closing the scene with generic reflection.
+Return only the structured draft object. No markdown. No prose outside the structured output.`
     : `[FINAL NARRATION TASK]
 Write one final narration pass from the settled opening state, current scene, scene effects, and player-perceivable consequences.
 Do not invent material events outside these authoritative inputs.
@@ -1826,7 +1864,7 @@ End on a concrete playable next moment rather than closing the scene with generi
       sceneMode: storytellerSceneMode,
       includeGlmOverlay: true,
       responseLanguage,
-      outputMode: options.narratorPacket ? "narration-draft-json" : "prose",
+      outputMode: options.narratorPacket ? "grounded-sentence-draft" : "prose",
     }),
   ].filter((section): section is string => Boolean(section)).join("\n");
 

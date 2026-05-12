@@ -55,6 +55,8 @@ function createExecutionContext(): ToolExecutionContext {
         currentSceneScopeId: "scene-market",
         currentLocationName: "Canal Market",
         currentSceneScopeName: "Canal Market Counter",
+        currentLocationDescription: null,
+        currentSceneScopeDescription: null,
       },
       visibleActors: [
         {
@@ -170,5 +172,142 @@ describe("bridge lookup tool schemas", () => {
     });
     expect(result.authority).toBeUndefined();
     expect(isObservationToolResult(result)).toBe(true);
+  });
+});
+
+describe("record_dialogue_outcome schema", () => {
+  it("accepts multilingual direct speech when structural enums and claims carry the semantics", () => {
+    expect(runtimeToolInputSchemas.record_dialogue_outcome.safeParse({
+      speakerRef: "Road Warden",
+      addresseeRefs: ["Player"],
+      outcomeKind: "answered",
+      topicKind: "proof",
+      authorityKind: "role_authority",
+      truthStatus: "speaker_asserted",
+      durability: "durable",
+      futureUseKind: "permission_check",
+      futureRelevance: "The proof requirement controls later lawful passage attempts.",
+      quote: "持参するのは封印確認済みの通行証だ。",
+      summary: "Der Wachposten nennt den erforderlichen Nachweis.",
+      claims: [
+        {
+          claimKind: "requirement",
+          polarity: "requires",
+          subjectText: "seal-verified transit chit",
+          summary: "A seal-verified transit chit is required.",
+        },
+      ],
+      sourceRefs: ["Road Warden", "Player"],
+    }).success).toBe(true);
+  });
+
+  it("rejects durable procedural answers without future use or structured claims", () => {
+    expect(runtimeToolInputSchemas.record_dialogue_outcome.safeParse({
+      speakerRef: "Road Warden",
+      addresseeRefs: ["Player"],
+      outcomeKind: "answered",
+      topicKind: "proof",
+      authorityKind: "role_authority",
+      truthStatus: "speaker_asserted",
+      durability: "durable",
+      futureRelevance: "The proof requirement controls later lawful passage attempts.",
+      summary: "The warden names proof.",
+      sourceRefs: ["Road Warden", "Player"],
+    }).success).toBe(false);
+  });
+
+  it("requires requestedRoleText for unavailable/no-current-answer outcomes", () => {
+    expect(runtimeToolInputSchemas.record_dialogue_outcome.safeParse({
+      addresseeRefs: ["Player"],
+      outcomeKind: "unavailable",
+      topicKind: "safety",
+      authorityKind: "no_visible_authority",
+      truthStatus: "unconfirmed",
+      durability: "durable",
+      futureUseKind: "safety",
+      futureRelevance: "The player must seek a visible safety authority elsewhere.",
+      summary: "No ward engineer is visible here.",
+      sourceRefs: ["Player"],
+    }).success).toBe(false);
+  });
+
+  it("rejects no-visible-authority on visible speaker outcomes", () => {
+    expect(runtimeToolInputSchemas.record_dialogue_outcome.safeParse({
+      speakerRef: "Road Warden",
+      addresseeRefs: ["Player"],
+      outcomeKind: "refused",
+      topicKind: "status",
+      authorityKind: "no_visible_authority",
+      truthStatus: "speaker_asserted",
+      durability: "durable",
+      futureUseKind: "npc_memory",
+      futureRelevance: "The refusal affects later warden interactions.",
+      summary: "The warden refuses to answer.",
+      sourceRefs: ["Road Warden"],
+    }).success).toBe(false);
+
+    expect(runtimeToolInputSchemas.record_dialogue_outcome.safeParse({
+      speakerRef: "Road Warden",
+      addresseeRefs: ["Player"],
+      outcomeKind: "unavailable",
+      topicKind: "status",
+      authorityKind: "no_visible_authority",
+      truthStatus: "unconfirmed",
+      durability: "durable",
+      futureUseKind: "route_choice",
+      futureRelevance: "The player must find the actual office elsewhere.",
+      requestedRoleText: "signal warden office",
+      summary: "No signal warden office is visible here.",
+      sourceRefs: ["Player"],
+    }).success).toBe(false);
+  });
+});
+
+describe("record_world_fact schema", () => {
+  it("accepts structured durable contradictions without parsing summary prose", () => {
+    expect(runtimeToolInputSchemas.record_world_fact.safeParse({
+      sourceKind: "comparison",
+      truthStatus: "disputed",
+      factKind: "contradiction",
+      topicKind: "procedure",
+      durability: "durable",
+      futureUseKind: "route_choice",
+      futureRelevance:
+        "The mismatch should guide which office the player asks before choosing a route.",
+      summary:
+        "The posted date and the route log disagree; treat the gap as unresolved.",
+      claims: [
+        {
+          claimKind: "contradiction",
+          polarity: "unknown",
+          subjectText: "posted date vs route log",
+          summary: "The date mismatch is unresolved.",
+        },
+      ],
+      subjectRefs: ["route log"],
+      sourceRefs: ["Player"],
+    }).success).toBe(true);
+  });
+
+  it("rejects unknown positive facts that should be gaps or contradictions", () => {
+    expect(runtimeToolInputSchemas.record_world_fact.safeParse({
+      sourceKind: "comparison",
+      truthStatus: "unknown",
+      factKind: "route_status",
+      topicKind: "route",
+      durability: "durable",
+      futureUseKind: "route_choice",
+      futureRelevance: "The route status should affect later travel.",
+      summary: "The route may be closed.",
+      claims: [
+        {
+          claimKind: "route_status",
+          polarity: "unknown",
+          subjectText: "north route",
+          summary: "The route status is unknown.",
+        },
+      ],
+      sourceRefs: ["Player"],
+    }).success).toBe(false);
   });
 });

@@ -212,11 +212,223 @@ function createMutableInventoryDb(options?: {
   return { db, state };
 }
 
+function extractSqlStringParams(value: unknown, seen = new Set<object>()): string[] {
+  if (typeof value === "string") return [value];
+  if (!value || typeof value !== "object") return [];
+  if (seen.has(value)) return [];
+  seen.add(value);
+  const chunks = (value as { queryChunks?: unknown[] }).queryChunks;
+  if (!Array.isArray(chunks)) return [];
+  return chunks.flatMap((chunk) => extractSqlStringParams(chunk, seen));
+}
+
+function createStrictResolverDb(options?: {
+  players?: Array<Record<string, unknown>>;
+  npcs?: Array<Record<string, unknown>>;
+  locations?: Array<Record<string, unknown>>;
+  items?: MutableInventoryItem[];
+  factions?: Array<Record<string, unknown>>;
+}) {
+  const state = {
+    players: options?.players ?? [],
+    npcs: options?.npcs ?? [],
+    locations: options?.locations ?? [],
+    items: options?.items ?? [],
+    factions: options?.factions ?? [],
+    relationships: [] as Array<Record<string, unknown>>,
+    insertedItems: [] as MutableInventoryItem[],
+    updateTables: [] as string[],
+  };
+  let lastTableName: string | null = null;
+
+  const getRows = (tableName: string | null): Array<Record<string, unknown>> => {
+    switch (tableName) {
+      case "players":
+        return state.players;
+      case "npcs":
+        return state.npcs;
+      case "locations":
+        return state.locations;
+      case "items":
+        return state.items;
+      case "factions":
+        return state.factions;
+      case "relationships":
+        return state.relationships;
+      default:
+        return [];
+    }
+  };
+
+  const matchesCondition = (row: Record<string, unknown>, condition: unknown): boolean => {
+    const params = extractSqlStringParams(condition).map((entry) => entry.toLowerCase());
+    if (params.length === 0) return true;
+    const campaignId = typeof row.campaignId === "string" ? row.campaignId.toLowerCase() : null;
+    if (campaignId && !params.includes(campaignId)) return false;
+    const id = typeof row.id === "string" ? row.id.toLowerCase() : null;
+    const name = typeof row.name === "string" ? row.name.toLowerCase() : null;
+    const identityParams = params.filter((param) => param !== campaignId);
+    if (identityParams.length === 0) return true;
+    return Boolean((id && identityParams.includes(id)) || (name && identityParams.includes(name)));
+  };
+
+  const db = {
+    select: vi.fn().mockReturnThis(),
+    from: vi.fn().mockImplementation((table: unknown) => {
+      lastTableName = getDrizzleTableName(table);
+      return db;
+    }),
+    where: vi.fn().mockImplementation((condition: unknown) => ({
+      get: vi.fn().mockImplementation(() =>
+        getRows(lastTableName).find((row) => matchesCondition(row, condition))),
+      all: vi.fn().mockImplementation(() =>
+        getRows(lastTableName).filter((row) => matchesCondition(row, condition))),
+    })),
+    update: vi.fn().mockImplementation((table: unknown) => {
+      const tableName = getDrizzleTableName(table);
+      return {
+        set: vi.fn().mockImplementation((values: Record<string, unknown>) => ({
+          where: vi.fn().mockImplementation(() => ({
+            run: vi.fn().mockImplementation(() => {
+              state.updateTables.push(tableName ?? "unknown");
+              const row = getRows(tableName)[0];
+              if (row) Object.assign(row, values);
+            }),
+          })),
+        })),
+      };
+    }),
+    insert: vi.fn().mockImplementation((table: unknown) => {
+      const tableName = getDrizzleTableName(table);
+      return {
+        values: vi.fn().mockImplementation((values: Record<string, unknown>) => ({
+          run: vi.fn().mockImplementation(() => {
+            const destination = getRows(tableName);
+            destination.push({ ...values });
+            if (tableName === "items") {
+              state.insertedItems.push({ ...values } as MutableInventoryItem);
+            }
+          }),
+          onConflictDoUpdate: vi.fn().mockReturnValue({ run: vi.fn() }),
+        })),
+      };
+    }),
+  };
+
+  return { db, state };
+}
+
 // -- Tests --------------------------------------------------------------------
 
 describe("executeToolCall", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  describe("typed entity refs", () => {
+    it("resolves typed refs after grounding instead of failing in executor lookups", async () => {
+      const { db, state } = createStrictResolverDb({
+        players: [{
+          id: "player-1",
+          campaignId: CAMPAIGN_ID,
+          name: "Hero",
+          tags: "[]",
+          hp: 5,
+        }],
+        npcs: [{
+          id: "npc-runner",
+          campaignId: CAMPAIGN_ID,
+          name: "Market Runner",
+          tags: "[]",
+          tier: "temporary",
+        }],
+        locations: [{
+          id: "loc-1",
+          campaignId: CAMPAIGN_ID,
+          name: "Town Square",
+          tags: "[]",
+          kind: "macro",
+          persistence: "persistent",
+        }],
+        items: [{
+          id: "item-1",
+          campaignId: CAMPAIGN_ID,
+          name: "Iron Sword",
+          tags: "[]",
+          ownerId: null,
+          locationId: "loc-1",
+          equipState: "carried",
+          equippedSlot: null,
+          isSignature: false,
+        }],
+      });
+      (getDb as Mock).mockReturnValue(db);
+      const context = createPlayerTurnContext({
+        legalActorRefs: new Set([
+          "actor:player-1",
+          "player-1",
+          "Hero",
+          "actor:npc-runner",
+          "npc-runner",
+          "Market Runner",
+        ]),
+        legalLocationRefs: new Set(["location:loc-1", "loc-1", "Town Square"]),
+        currentLocationRefs: new Set(["current_location", "location:loc-1", "loc-1", "Town Square"]),
+        currentSceneRefs: new Set(["current_scene", "location:loc-1", "loc-1", "Town Square"]),
+        legalItemRefs: new Set(["item:item-1", "item-1", "Iron Sword"]),
+      });
+
+      await expect(executeToolCall(CAMPAIGN_ID, "spawn_item", {
+        name: "Stamped Pass",
+        tags: ["pass"],
+        ownerName: "actor:player-1",
+        ownerType: "character",
+      }, TICK, undefined, context)).resolves.toMatchObject({ success: true });
+
+      await expect(executeToolCall(CAMPAIGN_ID, "spawn_item", {
+        name: "Counter Token",
+        tags: ["token"],
+        ownerName: "location:loc-1",
+        ownerType: "location",
+      }, TICK, undefined, context)).resolves.toMatchObject({ success: true });
+
+      await expect(executeToolCall(CAMPAIGN_ID, "transfer_item", {
+        itemName: "item:item-1",
+        targetName: "actor:player-1",
+        targetType: "character",
+      }, TICK, undefined, context)).resolves.toMatchObject({ success: true });
+
+      await expect(executeToolCall(CAMPAIGN_ID, "transfer_item", {
+        itemName: "item:item-1",
+        targetName: "location:loc-1",
+        targetType: "location",
+      }, TICK, undefined, context)).resolves.toMatchObject({ success: true });
+
+      await expect(executeToolCall(CAMPAIGN_ID, "add_tag", {
+        entityName: "item:item-1",
+        entityType: "item",
+        tag: "marked",
+      }, TICK, undefined, context)).resolves.toMatchObject({ success: true });
+
+      await expect(executeToolCall(CAMPAIGN_ID, "set_relationship", {
+        entityA: "actor:player-1",
+        entityB: "item:item-1",
+        tag: "carries",
+        reason: "The player now relies on the sword.",
+      }, TICK, undefined, context)).resolves.toMatchObject({ success: true });
+
+      await expect(executeToolCall(CAMPAIGN_ID, "promote_npc", {
+        npcRef: "actor:npc-runner",
+        newTier: "persistent",
+        reason: "The runner became a reusable courier contact.",
+      }, TICK, undefined, context)).resolves.toMatchObject({ success: true });
+
+      expect(state.insertedItems.map((item) => item.name)).toEqual(
+        expect.arrayContaining(["Stamped Pass", "Counter Token"]),
+      );
+      expect(state.updateTables).toContain("items");
+      expect(state.updateTables).toContain("npcs");
+    });
   });
 
   // -- add_tag ----------------------------------------------------------------
@@ -1888,6 +2100,8 @@ describe("executeToolCall", () => {
             currentSceneScopeId: "loc-1",
             currentLocationName: "Town Square",
             currentSceneScopeName: "Town Square",
+            currentLocationDescription: null,
+            currentSceneScopeDescription: null,
           },
           visibleActors: [],
           awarenessHints: [],

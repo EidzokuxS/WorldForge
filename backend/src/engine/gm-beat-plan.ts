@@ -548,6 +548,8 @@ export function runtimeToolCategory(toolName: RuntimeToolName): GmBeatPlanToolCa
       return "lookup";
     case "start_search":
     case "record_player_intent":
+    case "record_dialogue_outcome":
+    case "record_world_fact":
       return "memory";
     case "add_chronicle_entry":
     case "log_event":

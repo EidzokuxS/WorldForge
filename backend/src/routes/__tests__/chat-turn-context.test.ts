@@ -37,6 +37,10 @@ vi.mock("../../engine/index.js", () => ({
   simulateOffscreenNpcs: vi.fn(),
   checkAndTriggerReflections: vi.fn(),
   tickFactions: vi.fn(),
+  findPendingNarrationSaga: vi.fn(() => null),
+  resumePendingTurnNarration: vi.fn(),
+  NarrationRepairExhaustedError: class NarrationRepairExhaustedError extends Error {},
+  PendingNarrationError: class PendingNarrationError extends Error {},
   queuePostTurnSimulationProposals: vi.fn((input: { campaignId: string }) => ({
     campaignId: input.campaignId,
     baseWorldVersion: 0,
@@ -163,6 +167,7 @@ vi.mock("../../campaign/runtime-state.js", () => {
       active.delete(id);
     },
     hasActiveTurn: (id: string) => active.has(id),
+    hasAnyActiveTurn: () => active.size > 0,
     setLastTurnSnapshot: (id: string, snap: unknown) => {
       snapshots.set(id, snap);
     },

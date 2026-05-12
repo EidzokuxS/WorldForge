@@ -41,6 +41,8 @@ export interface BridgeLookupSnapshot {
     currentSceneScopeId: string | null;
     currentLocationName: string | null;
     currentSceneScopeName: string | null;
+    currentLocationDescription: string | null;
+    currentSceneScopeDescription: string | null;
   };
   visibleActors: ModelFacingActor[];
   awarenessHints: string[];
@@ -221,6 +223,126 @@ function compactActor(actor: ModelFacingActor, score: number): Record<string, un
   };
 }
 
+function compactFact(fact: BridgeKnownFactSnapshot, score: number): Record<string, unknown> {
+  return {
+    id: fact.id,
+    summary: fact.summary,
+    visibilityRoute: fact.visibilityRoute,
+    confidence: fact.confidence,
+    sourceRefs: fact.sourceRefs,
+    score,
+    observationOnly: true,
+  };
+}
+
+const OBSERVATION_CATEGORY_KEYWORDS = {
+  camera: [
+    "camera",
+    "cctv",
+    "lens",
+    "surveillance",
+    "recorder",
+    "monitor",
+  ],
+  barrier: [
+    "barrier",
+    "barricade",
+    "blockade",
+    "gate",
+    "fence",
+    "wall",
+    "ward",
+    "curtain",
+    "seal",
+    "checkpoint",
+  ],
+  witness: [
+    "witness",
+    "onlooker",
+    "bystander",
+    "civilian",
+    "crowd",
+    "staff",
+    "clerk",
+    "guard",
+    "personnel",
+  ],
+  personnel: [
+    "personnel",
+    "staff",
+    "guard",
+    "officer",
+    "warden",
+    "clerk",
+    "attendant",
+    "crew",
+    "sorcerer",
+    "jujutsu",
+  ],
+} as const;
+
+function partsMatchKeywords(
+  parts: Array<string | null | undefined>,
+  keywords: readonly string[],
+): boolean {
+  const haystack = parts
+    .filter((part): part is string => Boolean(part?.trim()))
+    .join(" ")
+    .toLowerCase();
+  return keywords.some((keyword) => haystack.includes(keyword.toLowerCase()));
+}
+
+function targetMatchesCategory(
+  candidate: SceneFrameTargetCandidate,
+  keywords: readonly string[],
+): boolean {
+  return partsMatchKeywords([
+    candidate.id,
+    candidate.label,
+    candidate.actorId,
+    candidate.itemId,
+    candidate.locationId,
+    candidate.factionId,
+    ...(candidate.tags ?? []),
+  ], keywords);
+}
+
+function actorMatchesCategory(actor: ModelFacingActor, keywords: readonly string[]): boolean {
+  return partsMatchKeywords([
+    actor.id,
+    actor.actorId,
+    actor.label,
+    ...(actor.tags ?? []),
+    actor.summary,
+  ], keywords);
+}
+
+function factMatchesCategory(fact: BridgeKnownFactSnapshot, keywords: readonly string[]): boolean {
+  return partsMatchKeywords([fact.id, fact.summary, ...fact.sourceRefs], keywords);
+}
+
+function categoryFacts(
+  facts: readonly BridgeKnownFactSnapshot[],
+  keywords: readonly string[],
+  maxResults: number,
+): Record<string, unknown>[] {
+  return facts
+    .filter((fact) => factMatchesCategory(fact, keywords))
+    .slice(0, maxResults)
+    .map((fact) => compactFact(fact, 1));
+}
+
+function categoryTargets(
+  targets: readonly SceneFrameTargetCandidate[],
+  keywords: readonly string[],
+  maxResults: number,
+): Record<string, unknown>[] {
+  return targets
+    .filter((target) => targetMatchesCategory(target, keywords))
+    .slice(0, maxResults)
+    .map((target) => compactTarget(target, 1));
+}
+
 function sortCandidates<T extends { score: number; label: string }>(values: T[]): T[] {
   return values.sort((left, right) => {
     if (right.score !== left.score) return right.score - left.score;
@@ -264,6 +386,8 @@ export function buildBridgeLookupSnapshot(
       currentSceneScopeId: args.frame.currentSceneScopeId,
       currentLocationName: args.frame.currentLocationName ?? null,
       currentSceneScopeName: args.frame.currentSceneScopeName ?? null,
+      currentLocationDescription: args.packet.view.localScene.currentLocationDescription ?? null,
+      currentSceneScopeDescription: args.packet.view.localScene.currentSceneScopeDescription ?? null,
     },
     visibleActors: view.visibleActors.map((actor) => ({
       ...actor,
@@ -293,10 +417,38 @@ function getSnapshot(context: ToolExecutionContext): BridgeLookupSnapshot | null
 
 function listVisibleAffordances(
   toolName: BridgeLookupToolName,
+  input: Record<string, unknown>,
   context: ToolExecutionContext,
 ): ToolResult {
   const snapshot = getSnapshot(context);
   if (!snapshot) return denial(toolName, "bridge_lookup_context_unavailable");
+  const maxResults = readMaxResults(input, 8);
+  const visibleFacts = allFacts(snapshot);
+  const connectedRoutes = snapshot.legalMovement.filter((candidate) => candidate.connected);
+  const visiblePersonnel = snapshot.visibleActors.filter(
+    (actor) => (actor.actorId ?? actor.id) !== snapshot.current.playerActorId,
+  );
+  const witnessActors = visiblePersonnel.filter((actor) =>
+    actorMatchesCategory(actor, OBSERVATION_CATEGORY_KEYWORDS.witness)
+  );
+  const personnelActors = visiblePersonnel.filter((actor) =>
+    actorMatchesCategory(actor, OBSERVATION_CATEGORY_KEYWORDS.personnel)
+  );
+  const visiblePhysicalTargets = snapshot.legalTargets.filter((target) => target.type !== "actor");
+  const cameraTargets = categoryTargets(
+    visiblePhysicalTargets,
+    OBSERVATION_CATEGORY_KEYWORDS.camera,
+    maxResults,
+  );
+  const cameraFacts = categoryFacts(visibleFacts, OBSERVATION_CATEGORY_KEYWORDS.camera, maxResults);
+  const barrierTargets = categoryTargets(
+    visiblePhysicalTargets,
+    OBSERVATION_CATEGORY_KEYWORDS.barrier,
+    maxResults,
+  );
+  const barrierFacts = categoryFacts(visibleFacts, OBSERVATION_CATEGORY_KEYWORDS.barrier, maxResults);
+  const witnessFacts = categoryFacts(visibleFacts, OBSERVATION_CATEGORY_KEYWORDS.witness, maxResults);
+  const personnelFacts = categoryFacts(visibleFacts, OBSERVATION_CATEGORY_KEYWORDS.personnel, maxResults);
 
   return observation(toolName, {
     current: snapshot.current,
@@ -309,6 +461,44 @@ function listVisibleAffordances(
       ...snapshot.localRecentEvents.map((event) => event.id),
       ...snapshot.playerKnownFacts.map((fact) => fact.id),
     ],
+    visibleFacts: visibleFacts.slice(0, maxResults).map((fact) => compactFact(fact, 1)),
+    categories: {
+      exitsRoutes: connectedRoutes.slice(0, maxResults).map((candidate) => compactMovement(candidate, 1)),
+      physicalAffordances: visiblePhysicalTargets
+        .slice(0, maxResults)
+        .map((candidate) => compactTarget(candidate, 1)),
+      cameras: {
+        targets: cameraTargets,
+        facts: cameraFacts,
+        absence: cameraTargets.length === 0 && cameraFacts.length === 0
+          ? "No visible camera refs are present in current scene packet or player-visible/player-known facts."
+          : null,
+      },
+      barriers: {
+        targets: barrierTargets,
+        facts: barrierFacts,
+        absence: barrierTargets.length === 0 && barrierFacts.length === 0
+          ? "No visible barrier refs are present in current scene packet or player-visible/player-known facts."
+          : null,
+      },
+      witnesses: {
+        actors: witnessActors.slice(0, maxResults).map((actor) => compactActor(actor, 1)),
+        facts: witnessFacts,
+        absence: witnessActors.length === 0 && witnessFacts.length === 0
+          ? "No clearly identified witness refs are visible in current scene packet or player-visible/player-known facts."
+          : null,
+      },
+      personnel: {
+        actors: (personnelActors.length > 0 ? personnelActors : visiblePersonnel)
+          .slice(0, maxResults)
+          .map((actor) => compactActor(actor, 1)),
+        facts: personnelFacts,
+        absence: visiblePersonnel.length === 0 && personnelFacts.length === 0
+          ? "No non-player personnel actors are clearly visible in current scene packet."
+          : null,
+      },
+      hints: snapshot.awarenessHints.slice(0, maxResults),
+    },
     allowedTools: snapshot.allowedTools,
   });
 }
@@ -481,6 +671,40 @@ function factRefs(fact: BridgeKnownFactSnapshot): string[] {
   return uniqueStrings([fact.id, ...fact.sourceRefs]);
 }
 
+function currentSceneDescriptionFacts(snapshot: BridgeLookupSnapshot): BridgeKnownFactSnapshot[] {
+  const facts: BridgeKnownFactSnapshot[] = [];
+  if (snapshot.current.currentLocationDescription?.trim()) {
+    facts.push({
+      id: `current_location:${snapshot.current.currentLocationId ?? "unknown"}:description`,
+      summary: `${snapshot.current.currentLocationName ?? "Current location"}: ${snapshot.current.currentLocationDescription.trim()}`,
+      visibilityRoute: "player_visible",
+      confidence: 1,
+      sourceRefs: uniqueStrings([
+        snapshot.current.currentLocationId,
+        snapshot.current.currentLocationName,
+        "current_location",
+      ]),
+    });
+  }
+  if (
+    snapshot.current.currentSceneScopeDescription?.trim()
+    && snapshot.current.currentSceneScopeId !== snapshot.current.currentLocationId
+  ) {
+    facts.push({
+      id: `current_scene:${snapshot.current.currentSceneScopeId ?? "unknown"}:description`,
+      summary: `${snapshot.current.currentSceneScopeName ?? "Current scene"}: ${snapshot.current.currentSceneScopeDescription.trim()}`,
+      visibilityRoute: "player_visible",
+      confidence: 1,
+      sourceRefs: uniqueStrings([
+        snapshot.current.currentSceneScopeId,
+        snapshot.current.currentSceneScopeName,
+        "current_scene",
+      ]),
+    });
+  }
+  return facts;
+}
+
 function allFacts(snapshot: BridgeLookupSnapshot): BridgeKnownFactSnapshot[] {
   const visibleEvents: BridgeKnownFactSnapshot[] = snapshot.localRecentEvents.map((event) => ({
     id: event.id,
@@ -489,7 +713,11 @@ function allFacts(snapshot: BridgeLookupSnapshot): BridgeKnownFactSnapshot[] {
     confidence: 0.85,
     sourceRefs: uniqueStrings([event.id, event.source, ...event.actorIds]),
   }));
-  return [...visibleEvents, ...snapshot.playerKnownFacts];
+  return [
+    ...currentSceneDescriptionFacts(snapshot),
+    ...visibleEvents,
+    ...snapshot.playerKnownFacts,
+  ];
 }
 
 function inspectKnownFact(
@@ -606,7 +834,7 @@ export function executeBridgeCandidateTool(
 
   switch (toolName) {
     case "list_visible_affordances":
-      return listVisibleAffordances(toolName, context);
+      return listVisibleAffordances(toolName, rawInput, context);
     case "list_navigation_options":
       return listNavigationOptions(toolName, rawInput, context);
     case "find_location_candidates":

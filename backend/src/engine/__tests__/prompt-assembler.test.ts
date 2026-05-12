@@ -1569,12 +1569,19 @@ describe("assemblePrompt", () => {
     expect(result.prompt).toContain("[RP BEAT DIRECTIVE]");
     expect(result.prompt).toContain("one playable RPG/VN beat");
     expect(result.prompt).toContain("Treat NarratorPacket events, effects, and tool results as the only authority");
+    expect(result.prompt).toContain("For observe, inspect, take-stock, or read-the-room requests");
+    expect(result.prompt).toContain("answer the requested visible categories");
+    expect(result.prompt).toContain("include at least one concrete next lever");
     expect(result.prompt).toContain("keep it unconfirmed");
     expect(result.prompt).toContain("Stop when the scene reaches a live next decision");
     expect(result.prompt).toContain("Use the NarratorPacket as the authoritative committed packet.");
     expect(result.prompt).toMatch(/\[PRESENT ACTORS\]\n- Mira\b/);
     expect(result.prompt).not.toContain("No other present actors are confirmed in the current scene.");
-    expect(result.prompt).toContain("Player action request:");
+    expect(result.prompt).toContain("Player attempted:");
+    expect(result.prompt).not.toContain("Player action request:");
+    expect(result.prompt).not.toContain("actor=");
+    expect(result.prompt).not.toContain("action=");
+    expect(result.prompt).not.toContain("kind=");
     expect(result.prompt).toContain("player-supplied claims, not authoritative world state");
     expect(result.prompt).toContain("Treat the raw player action as an attempted request");
     expect(result.prompt).toContain("Do not narrate claimed possessions");
@@ -1584,13 +1591,87 @@ describe("assemblePrompt", () => {
     expect(result.prompt).toContain("If NarratorPacket has no perceivable effects");
     expect(result.prompt).toContain("keep the beat alive through existing visible actors");
     expect(result.prompt).toContain("End on a concrete playable next moment");
-    expect(result.prompt).toContain("[NARRATION DRAFT CONTRACT]");
-    expect(result.prompt).toContain("[PACKET EVIDENCE IDS]");
+    expect(result.prompt).toContain("[GROUNDED SENTENCE DRAFT CONTRACT]");
+    expect(result.prompt).toContain("[PACKET EVIDENCE IDS -- USE ONLY THESE IN evidenceRefs]");
+    expect(result.prompt).toContain("Submit exactly one GroundedSentenceDraft structured object");
+    expect(result.prompt).toContain("Do not use markdown");
+    expect(result.prompt).toContain("backend metadata inside sentence text");
+    expect(result.prompt).toContain("HARD CAP: sentences.length MUST be <= 5, never 6 or more");
+    expect(result.prompt).toContain("merge or prioritize them inside five or fewer sentence objects");
+    expect(result.prompt).toContain("no sentence text may exceed 900 characters");
+    expect(result.prompt).toContain("Use exactly these top-level keys: version, sentences.");
+    expect(result.prompt).toContain("version MUST be \"grounded-sentence-draft.v2\".");
+    expect(result.prompt).toContain("Any other sentence key, including kind");
+    expect(result.prompt).toContain("\"evidenceRefs\": [1 to 4 exact packet evidence ids]");
+    expect(result.prompt).toContain("Do not output kind, prose, claims, claimSpans");
+    expect(result.prompt).toContain("Every sentence must cite 1-4 exact ids");
+    expect(result.prompt).toContain("HARD CAP: each evidenceRefs array MUST contain <= 4 ids, never 5 or more");
+    expect(result.prompt).toContain("cite only the strongest 1-4 ids");
+    expect(result.prompt).toContain(
+      "The allowed evidenceRefs list intentionally excludes player_action_request, anchor_event, guardrail, control_return, and the anchor player-action committed_event because they are context, not proof of the settled world.",
+    );
+    expect(result.prompt).toContain(
+      "A sentence about visible danger, pressure, or urgency must cite the concrete packet id that exposes it",
+    );
+    expect(result.prompt).toContain(
+      "When an observation tool makes pressure, risk, route leverage, visible personnel, camera, barrier, witness, or exit information narratable, cite the paired perceivable_effect evidence id",
+    );
+    expect(result.prompt).toContain(
+      "If the only relevant packet id is tool_result, either cite its paired perceivable_effect id",
+    );
+    expect(result.prompt).toContain(
+      "player_action_request and anchor_event prove what the player attempted or asked; they do not prove the NPC answer",
+    );
+    expect(result.prompt).toContain(
+      "threat, hazard, blocker",
+    );
+    expect(result.prompt).toContain(
+      "guardrail and control_return ids are context only; never use them as the sole evidenceRefs",
+    );
+    expect(result.prompt).toContain(
+      "For any sentence about an NPC answer, proof requirement, permission boundary, access rule, route status, or next actionable option",
+    );
+    expect(result.prompt).toContain(
+      "For atmosphere or connective prose, cite visible_actor, perceivable_response, perceivable_effect, or a non-anchor committed_event as appropriate; do not cite only control_return, guardrail, anchor_event, or player_action_request.",
+    );
+    expect(result.prompt).not.toContain("[VISIBLE SOURCE IDS -- DIAGNOSTIC, DO NOT USE AS evidenceRefs]");
+    expect(result.prompt).not.toContain("[SOURCE-LINKED SUMMARIES]");
+    expect(result.prompt).not.toContain("[REDACTION AUDIT]");
+    expect(result.prompt).not.toContain("[CONTEXT BUDGET TRACE]");
+    const citationEvidenceCategories = new Set([
+      "oracle_outcome",
+      "committed_event",
+      "perceivable_response",
+      "perceivable_effect",
+      "visible_actor",
+      "current_inventory_status",
+      "hint_signal",
+      "world_thread_signal",
+      "tool_result",
+    ]);
     for (const entry of narratorPacket.evidenceLedger ?? []) {
-      expect(result.prompt).toContain(`- ${entry.id}`);
+      if (
+        citationEvidenceCategories.has(entry.category)
+        && entry.id !== `committed_event:${packetEventId}`
+      ) {
+        expect(result.prompt).toContain(`- ${entry.id} [category=${entry.category}]`);
+      } else {
+        expect(result.prompt).not.toContain(`- ${entry.id} [category=${entry.category}]`);
+      }
     }
-    expect(result.prompt).toContain(`- tool_result:${packetActionId}:log_event`);
-    expect(result.system).toContain("Return exactly one JSON object; the prose field must contain narrative prose only.");
+    expect(result.prompt).not.toContain(
+      "player_action_request:player-action [category=player_action_request]",
+    );
+    expect(result.prompt).toContain(
+      `perceivable_effect:effect-${packetActionId} [category=perceivable_effect]`,
+    );
+    expect(result.prompt).not.toContain(
+      "control_return:current [category=control_return]",
+    );
+    expect(result.prompt).not.toContain("; supports=");
+    expect(result.prompt).toContain("Return only the structured draft object. No markdown. No prose outside the structured output.");
+    expect(result.system).toContain("Return exactly one GroundedSentenceDraft structured object");
+    expect(result.system).toContain("rules below apply inside sentences[].text");
     expect(result.system).not.toContain("Your output must be narrative prose only.");
     expect(result.prompt).toContain("Iria keeps both palms open.");
     expect(result.prompt).toContain("Mira lowers the knife without dropping her guard.");
@@ -1712,6 +1793,48 @@ describe("assemblePrompt", () => {
     expect(result.assembledBase.formatted).not.toContain("Forest Outpost");
     expect(result.assembledBase.sections.find((section) => section.name === "WORLD STATE")).toBeUndefined();
     expect(result.assembledBase.sections.find((section) => section.name === "RECENT CONVERSATION")).toBeUndefined();
+  });
+
+  it("adds exact spanText and packet evidence summary instructions to draft prompts", async () => {
+    const narratorPacket = createNarratorPacket();
+    narratorPacket.forbiddenPrivateTerms = ["Forest Outpost"];
+    narratorPacket.evidenceLedger = [
+      {
+        id: "perceivable_effect:private-summary",
+        category: "perceivable_effect",
+        summary: "Forest Outpost pressure is visible at the counter.",
+        sourceId: "private-summary",
+      },
+      ...(narratorPacket.evidenceLedger ?? []),
+    ];
+
+    const result = await assembleFinalNarrationPrompt({
+      campaignId: "test-campaign-123",
+      contextWindow: 8192,
+      sceneAssembly: createSceneAssembly() as SceneAssembly,
+      narratorPacket,
+    });
+
+    expect(result.prompt).toContain("[GROUNDED SENTENCE DRAFT CONTRACT]");
+    expect(result.prompt).toContain(
+      "Do not output kind, prose, claims, claimSpans",
+    );
+    expect(result.prompt).toContain(
+      "Every sentence must cite 1-4 exact ids",
+    );
+    expect(result.prompt).toContain(
+      "[PACKET EVIDENCE IDS -- USE ONLY THESE IN evidenceRefs]",
+    );
+    expect(result.prompt).toContain(
+      "Never put diagnostic source ids in evidenceRefs; use only ids listed in [PACKET EVIDENCE IDS -- USE ONLY THESE IN evidenceRefs].",
+    );
+    expect(result.prompt).toContain(
+      "perceivable_effect:private-summary [category=perceivable_effect] summary=[private term omitted] pressure is visible at the counter.",
+    );
+    expect(result.prompt).toContain(
+      `perceivable_response:${packetResponseId} [category=perceivable_response] summary=Mira lowers the knife without dropping her guard.`,
+    );
+    expect(result.prompt).not.toContain("Forest Outpost");
   });
 
   it("pins final narration language from the current player action over unrelated recent chat", async () => {
@@ -2278,6 +2401,7 @@ describe("assemblePrompt", () => {
     expect(finalPrompt.prompt).toContain("[SCENE DIRECTION]");
     expect(finalPrompt.prompt).toContain("[NARRATION GUARDRAILS]");
     expect(finalPrompt.prompt).toContain("First sentence must add new pressure");
+    expect(finalPrompt.prompt).toContain("existing visible-state answer to an observe/status-read request");
     expect(finalPrompt.prompt).toContain("one concrete line, gesture, decision, or refusal");
     expect(finalPrompt.prompt).toContain("Nanami measures intent before committing to escalation.");
     expect(finalPrompt.prompt).toContain("Focal actors: Hero, Nanami");

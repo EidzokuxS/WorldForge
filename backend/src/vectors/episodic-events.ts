@@ -32,6 +32,9 @@ export interface PendingCommittedEvent {
 const TABLE_NAME = "episodic_events";
 const pendingCommittedEvents = new Map<string, PendingCommittedEvent[]>();
 
+type VectorDb = ReturnType<typeof getVectorDb>;
+type EpisodicEventsTable = Awaited<ReturnType<VectorDb["openTable"]>>;
+
 function createBaseSchema(): Schema {
   return new Schema([
     new Field("id", new Utf8(), false),
@@ -102,20 +105,58 @@ async function tableHasVectorColumn(table: { schema(): Promise<{ fields: Array<{
   return schema.fields.some((field) => field.name === "vector");
 }
 
+function formatStorageError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function createEpisodicEventsTable(
+  db: VectorDb,
+  vectorDimension?: number,
+): Promise<EpisodicEventsTable> {
+  if (vectorDimension && vectorDimension > 0) {
+    return db.createEmptyTable(TABLE_NAME, createVectorSchema(vectorDimension));
+  }
+  return db.createEmptyTable(TABLE_NAME, createBaseSchema());
+}
+
+async function recreateUnreadableEpisodicEventsTable(
+  db: VectorDb,
+  error: unknown,
+  vectorDimension?: number,
+): Promise<EpisodicEventsTable> {
+  log.warn("Episodic events table was listed but unreadable; recreating storage table.", {
+    table: TABLE_NAME,
+    error: formatStorageError(error),
+  });
+  try {
+    await db.dropTable(TABLE_NAME);
+  } catch (dropError) {
+    log.warn("Dropping unreadable episodic events table failed before recreation.", {
+      table: TABLE_NAME,
+      error: formatStorageError(dropError),
+    });
+  }
+  return createEpisodicEventsTable(db, vectorDimension);
+}
+
 async function ensureEpisodicEventsTable(
   vectorDimension?: number,
-): Promise<Awaited<ReturnType<ReturnType<typeof getVectorDb>["openTable"]>>> {
+): Promise<EpisodicEventsTable> {
   const db = getVectorDb();
   const tableNames = await db.tableNames();
 
   if (!tableNames.includes(TABLE_NAME)) {
-    if (vectorDimension && vectorDimension > 0) {
-      return db.createEmptyTable(TABLE_NAME, createVectorSchema(vectorDimension));
-    }
-    return db.createEmptyTable(TABLE_NAME, createBaseSchema());
+    return createEpisodicEventsTable(db, vectorDimension);
   }
 
-  const table = await db.openTable(TABLE_NAME);
+  let table: EpisodicEventsTable;
+  try {
+    table = await db.openTable(TABLE_NAME);
+    await table.schema();
+  } catch (error) {
+    return recreateUnreadableEpisodicEventsTable(db, error, vectorDimension);
+  }
+
   if (!vectorDimension || vectorDimension <= 0) {
     return table;
   }

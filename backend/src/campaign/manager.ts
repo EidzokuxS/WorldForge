@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { eq } from "drizzle-orm";
-import { closeDb, connectDb } from "../db/index.js";
+import { closeDb, connectDb, getDb } from "../db/index.js";
 import { runMigrations } from "../db/migrate.js";
 import { campaigns } from "../db/schema.js";
 import type {
@@ -21,6 +21,7 @@ import { createLogger } from "../lib/index.js";
 import { ensureCampaignInventoryAuthority } from "../inventory/index.js";
 import type { WorldgenResearchFrame } from "../worldgen/research-frame.js";
 import { parseWorldgenResearchArtifact } from "../worldgen/research-artifact.js";
+import { hasAnyActiveTurn } from "./runtime-state.js";
 
 const log = createLogger("campaign-manager");
 
@@ -180,6 +181,10 @@ export async function createCampaign(
   }
   // Premise is optional when worldbook provides context
 
+  if (hasAnyActiveTurn()) {
+    throw new AppError("Cannot create a campaign while a turn is active.", 409);
+  }
+
   ensureCampaignsDir();
 
   const campaignId = crypto.randomUUID();
@@ -250,6 +255,24 @@ export async function createCampaign(
 export async function loadCampaign(id: string): Promise<CampaignMeta> {
   assertSafeId(id);
   ensureCampaignsDir();
+  const currentActiveCampaign = activeCampaign;
+  const isSameActiveCampaign = currentActiveCampaign?.id === id;
+
+  if (isSameActiveCampaign) {
+    try {
+      getDb();
+      return currentActiveCampaign;
+    } catch {
+      log.warn(
+        `Active campaign ${id} had no open database connection; reconnecting to campaign database.`,
+      );
+    }
+  }
+
+  if (!isSameActiveCampaign && hasAnyActiveTurn()) {
+    throw new AppError("Cannot switch campaigns while a turn is active.", 409);
+  }
+
   activeCampaign = null;
 
   const campaignDir = getCampaignDir(id);
@@ -325,6 +348,10 @@ export async function deleteCampaign(id: string): Promise<void> {
   const campaignDir = getCampaignDir(id);
   if (!fs.existsSync(campaignDir)) {
     throw new AppError("Campaign not found.", 404);
+  }
+
+  if (activeCampaign?.id === id && hasAnyActiveTurn()) {
+    throw new AppError("Cannot delete the active campaign while a turn is active.", 409);
   }
 
   if (activeCampaign?.id === id) {

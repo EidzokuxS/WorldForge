@@ -42,6 +42,7 @@ export interface ScheduleKeyActorProcessesInput {
   elapsedWorldTimeMinutes?: number;
   reportsByActorId?: ReadonlyMap<string, readonly KeyActorInboxItem[]>;
   explicitActorIds?: readonly string[];
+  presentActorReactionRoute?: "required_before_done" | "proposal_after_done";
 }
 
 export interface ScheduleKeyActorProcessesResult {
@@ -81,6 +82,7 @@ export function classifyActorProcess(input: {
   signals: readonly WakeSignal[];
   playerLocationId?: string | null;
   playerSceneScopeId?: string | null;
+  presentActorReactionRoute?: "required_before_done" | "proposal_after_done";
 }): Omit<ActorScheduleDecision, "reservation"> {
   const process = input.process;
   if (process.status === "disabled") {
@@ -100,13 +102,24 @@ export function classifyActorProcess(input: {
     playerLocationId: input.playerLocationId,
     playerSceneScopeId: input.playerSceneScopeId,
   });
-  if (present && input.signals.some((signal) => signal.requiredBeforeDone)) {
-    const route: ActorProcessRoute = "required_before_done";
+  const requiredSignals = input.signals.filter((signal) => signal.requiredBeforeDone);
+  const onlyPresenceRequiresVisibleBoundary =
+    requiredSignals.length > 0
+    && requiredSignals.every((signal) => signal.type === "direct_observation");
+  if (present && requiredSignals.length > 0) {
+    const route: ActorProcessRoute =
+      input.presentActorReactionRoute === "proposal_after_done"
+      && onlyPresenceRequiresVisibleBoundary
+        ? "proposal_after_done"
+        : "required_before_done";
     return {
       actorId: process.actorId,
       actorName: process.actor.name,
       route,
-      reason: "present actor can affect the visible scene",
+      reason:
+        route === "required_before_done"
+          ? "present actor can affect the visible scene"
+          : "present actor reaction deferred after visible status read",
       signals: [...input.signals],
       writeScopes: actorWriteScopes(process, route),
     };
@@ -220,6 +233,7 @@ export function scheduleKeyActorProcessesForTurn(
       signals,
       playerLocationId: input.playerLocationId,
       playerSceneScopeId: input.playerSceneScopeId,
+      presentActorReactionRoute: input.presentActorReactionRoute,
     });
     return decision.route === "sleeping" ? [] : [decision];
   });

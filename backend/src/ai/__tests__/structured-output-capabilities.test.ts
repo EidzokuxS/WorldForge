@@ -171,4 +171,32 @@ describe("structured output capability metadata", () => {
     });
     expect(JSON.stringify(autoDecision)).not.toContain("sk-opencode-secret");
   });
+
+  it("routes GLM/Z.AI chat-completions auto mode to json_object instead of json_schema", () => {
+    const model = createModel({
+      id: "z-ai",
+      name: "GLM",
+      baseUrl: "https://api.z.ai/api/coding/paas/v4",
+      apiKey: "sk-zai-secret",
+      model: "glm-5-turbo",
+      protocol: "openai-compatible",
+    });
+
+    const metadata = getStructuredOutputModelMetadata(model);
+    const autoDecision = resolveStructuredOutputCapability({ metadata });
+    const explicitSchemaDecision = resolveStructuredOutputCapability({
+      metadata,
+      requestedMode: "native_schema",
+    });
+
+    expect(autoDecision).toMatchObject({
+      primaryStrategy: "native_json",
+      actualMode: "native_json",
+    });
+    expect(explicitSchemaDecision).toMatchObject({
+      primaryStrategy: "native_schema",
+      actualMode: "native_schema",
+    });
+    expect(JSON.stringify(autoDecision)).not.toContain("sk-zai-secret");
+  });
 });

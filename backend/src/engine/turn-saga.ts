@@ -258,6 +258,17 @@ export interface RecordNarratorAttemptInput {
   nowMs?: number;
 }
 
+export interface UpdateNarratorAttemptOutcomeInput {
+  id: string;
+  sagaId?: string;
+  status: Extract<NarratorAttemptStatus, "failed" | "succeeded">;
+  groundingResult?: unknown;
+  finalText?: string | null;
+  failureReason?: string | null;
+  lockToken?: string;
+  nowMs?: number;
+}
+
 interface MarkTurnSagaFinalizedFields {
   narratorAttemptId?: string | null;
   reason?: string | null;
@@ -1112,6 +1123,83 @@ export function recordNarratorAttempt(
     .get();
   if (!row) {
     throw new Error(`NarratorAttempt ${id} failed to persist.`);
+  }
+  return toNarratorAttempt(row);
+}
+
+export function updateNarratorAttemptOutcome(
+  input: UpdateNarratorAttemptOutcomeInput,
+): NarratorAttemptRecord {
+  const existing = getDb()
+    .select()
+    .from(narratorAttempts)
+    .where(eq(narratorAttempts.id, input.id))
+    .get();
+  if (!existing) {
+    throw new Error(`NarratorAttempt ${input.id} not found.`);
+  }
+
+  const saga = requireTurnSagaRow({ sagaId: input.sagaId ?? existing.sagaId });
+  assertLockTokenIfProvided(saga, input.lockToken);
+  if (existing.sagaId !== saga.id) {
+    throw new Error(`NarratorAttempt ${input.id} is not attached to saga ${saga.id}.`);
+  }
+  if (existing.status !== "started") {
+    throw new Error(`NarratorAttempt ${input.id} is already ${existing.status}.`);
+  }
+  if (input.status === "succeeded" && !input.finalText?.trim()) {
+    throw new Error("Successful narrator attempt requires finalText.");
+  }
+  if (input.status === "failed" && !input.failureReason?.trim()) {
+    throw new Error("Failed narrator attempt requires failureReason.");
+  }
+
+  const timestamp = now(input.nowMs);
+  getDb().transaction((tx) => {
+    const attemptResult = tx
+      .update(narratorAttempts)
+      .set({
+        status: input.status,
+        groundingResultJson: stringifyJson(input.groundingResult ?? {}, {}),
+        finalText: input.status === "succeeded" ? input.finalText ?? null : null,
+        failureReason: input.status === "failed" ? input.failureReason ?? null : null,
+        updatedAt: timestamp,
+      })
+      .where(and(
+        eq(narratorAttempts.id, input.id),
+        eq(narratorAttempts.status, "started"),
+      ))
+      .run();
+
+    if (attemptResult.changes !== 1) {
+      throw new Error(`NarratorAttempt ${input.id} changed before outcome could be recorded.`);
+    }
+
+    const sagaResult = tx
+      .update(turnSagas)
+      .set({
+        latestNarratorAttemptId: input.id,
+        updatedAt: timestamp,
+      })
+      .where(and(
+        eq(turnSagas.id, saga.id),
+        ...lockTokenPredicate(input.lockToken),
+      ))
+      .run();
+
+    if (sagaResult.changes !== 1) {
+      const latest = requireTurnSagaRow({ sagaId: saga.id });
+      throw new TurnSagaLockConflictError(toTurnSaga(latest));
+    }
+  });
+
+  const row = getDb()
+    .select()
+    .from(narratorAttempts)
+    .where(eq(narratorAttempts.id, input.id))
+    .get();
+  if (!row) {
+    throw new Error(`NarratorAttempt ${input.id} failed to update.`);
   }
   return toNarratorAttempt(row);
 }

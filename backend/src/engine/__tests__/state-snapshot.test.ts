@@ -150,4 +150,33 @@ describe("state snapshot rollback bundle", () => {
       (loadCampaign as Mock).mock.invocationCallOrder[0],
     );
   });
+
+  it("removes stale SQLite sidecars before reopening a restored turn snapshot", async () => {
+    const snapshot = {
+      campaignId: CAMPAIGN_ID,
+      bundleDir: "/campaigns/test-campaign-123/.turn-boundaries/bundle-001",
+      capturedAt: Date.now(),
+    } as Awaited<ReturnType<typeof captureSnapshot>>;
+
+    await restoreSnapshot(CAMPAIGN_ID, snapshot);
+
+    expect(fs.rmSync).toHaveBeenCalledWith(
+      expect.stringContaining(`${CAMPAIGN_ID}\\state.db-wal`),
+      { force: true },
+    );
+    expect(fs.rmSync).toHaveBeenCalledWith(
+      expect.stringContaining(`${CAMPAIGN_ID}\\state.db-shm`),
+      { force: true },
+    );
+    expect(fs.rmSync).toHaveBeenCalledWith(
+      expect.stringContaining(`${CAMPAIGN_ID}\\state.db-journal`),
+      { force: true },
+    );
+    expect((fs.rmSync as Mock).mock.invocationCallOrder[0]).toBeLessThan(
+      (fs.copyFileSync as Mock).mock.invocationCallOrder[0],
+    );
+    expect((fs.rmSync as Mock).mock.invocationCallOrder.at(-1)!).toBeLessThan(
+      (loadCampaign as Mock).mock.invocationCallOrder[0],
+    );
+  });
 });

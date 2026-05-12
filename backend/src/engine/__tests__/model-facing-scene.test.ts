@@ -20,6 +20,12 @@ function createForestOutpostLeakFrame(): SceneFrame {
     playerActorId: playerId,
     currentLocationId: "loc-shibuya-district",
     currentSceneScopeId: "scene-shibuya-cafe",
+    currentLocationName: "Shibuya District",
+    currentSceneScopeName: "Shibuya Cafe",
+    currentLocationDescription:
+      "Shibuya CCTV watches the public counter while a rumor about Forest Outpost stays private.",
+    currentSceneScopeDescription:
+      "The cafe counter has a service curtain and one visible clerk.",
     playerAction: "I ask the cafe clerk for the price.",
     roster: {
       active: [
@@ -126,6 +132,7 @@ describe("model-facing scene packet", () => {
     const promptSurface = JSON.stringify(packet.view);
 
     expect(promptSurface).toContain("Shibuya");
+    expect(promptSurface).toContain("Shibuya CCTV watches the public counter");
     expect(promptSurface).toContain("Cafe Clerk");
     expect(promptSurface).toContain("Someone shifts behind the service curtain.");
     expect(promptSurface).toContain("hiddenActorCount");

@@ -1,18 +1,19 @@
 import {
+  collectCommittedVisibleActorCreationLabels,
   getNarratorPacketRedactionAudit,
   type NarratorPacket,
   type NarratorPacketRedactionAudit,
 } from "./narrator-packet.js";
 import {
-  ALLOWED_NARRATION_CLAIM_KINDS,
+  narrationDraftSchema,
   validateNarrationDraftGrounding,
   type GroundingGuardResult,
-  type NarrationClaim,
-  type NarrationClaimSpan,
+  type GroundingGuardViolationKind,
+  type GroundingGuardWarningKind,
   type NarrationDraft,
 } from "./narration-grounding-guard.js";
 
-export const VISIBLE_NARRATION_PACKET_GUARD_RETRY_LIMIT = 1;
+export const VISIBLE_NARRATION_PACKET_GUARD_RETRY_LIMIT = 0;
 
 const GENERIC_VISIBLE_PACKET_RETRY_ADDENDUM =
   "Revise the final narration to stay within the visible packet. Omit any identity or fact that is not directly visible to the player.";
@@ -24,7 +25,7 @@ const THIN_VISIBLE_PACKET_RETRY_ADDENDUM =
   "Revise the final narration because the previous output was too thin. Write a concrete, player-visible beat from the packet and return control on a playable next moment.";
 
 const INVALID_DRAFT_RETRY_ADDENDUM =
-  "Revise the final narration because the previous output was not a valid NarrationDraft JSON object. Stay within the visible packet. Return exactly one JSON object with prose, claims, and claimSpans; put player-visible narration only in prose.";
+  "Revise the final narration because the previous output was not a valid grounded structured draft. Stay within the visible packet. Return exactly one GroundedSentenceDraft object with version and sentences; put player-visible narration only in sentences[].text. Each sentences[].evidenceRefs array must contain 1-4 ids and never five or more.";
 
 export type VisibleNarrationPacketViolationKind =
   | "forbiddenActorName"
@@ -48,6 +49,17 @@ export interface VisibleNarrationPacketWarning {
 
 export interface VisibleNarrationPacketDiagnostics {
   violationKinds: VisibleNarrationPacketViolationKind[];
+  grounding?: {
+    violationKinds: GroundingGuardViolationKind[];
+    warningKinds: GroundingGuardWarningKind[];
+    coverage: {
+      total: number;
+      covered: number;
+      unsupported: number;
+      evidenceRequired: number;
+      missingClaim: number;
+    };
+  };
   redactionAudit: Pick<
     NarratorPacketRedactionAudit,
     | "hiddenEventCount"
@@ -75,9 +87,11 @@ export interface VisibleNarrationGeneratorArgs {
   guardAddendum: string | null;
 }
 
+export type VisibleNarrationGeneratorOutput = NarrationDraft;
+
 export type VisibleNarrationGenerator = (
   args: VisibleNarrationGeneratorArgs,
-) => Promise<string> | string;
+) => Promise<VisibleNarrationGeneratorOutput> | VisibleNarrationGeneratorOutput;
 
 export interface RunVisibleNarrationWithPacketGuardArgs {
   packet: NarratorPacket;
@@ -90,6 +104,7 @@ export interface RunVisibleNarrationWithPacketGuardArgs {
 
 export interface RunVisibleNarrationWithPacketGuardResult {
   text: string;
+  draft: NarrationDraft;
   attempts: number;
   retried: boolean;
   validation: VisibleNarrationPacketValidationResult;
@@ -101,6 +116,7 @@ export class VisibleNarrationPacketGuardError extends Error {
     message: string,
     public readonly violations: VisibleNarrationPacketViolation[],
     public readonly attempts: number,
+    public readonly validation: VisibleNarrationPacketValidationResult | null = null,
   ) {
     super(message);
     this.name = "VisibleNarrationPacketGuardError";
@@ -126,11 +142,22 @@ export function validateVisibleNarrationAgainstPacket(args: {
     });
   }
 
+  const committedVisibleActorCreationLabels = collectCommittedVisibleActorCreationLabels({
+    packet: args.packet.canonicalTurnPacket,
+    perceivableEffects: args.packet.perceivableEffects,
+  });
+
   collectForbiddenTermViolations({
     text: args.text,
     terms: args.packet.forbiddenActorNames,
     kind: "forbiddenActorName",
     violations,
+    isAllowedTerm: (term) =>
+      outputTextAllowsCommittedVisibleActorCreationLabel({
+        text: args.text,
+        forbiddenTerm: term,
+        committedVisibleActorCreationLabels,
+      }),
   });
   collectForbiddenTermViolations({
     text: args.text,
@@ -164,7 +191,7 @@ export function validateVisibleNarrationAgainstPacket(args: {
     violations,
     warnings,
     grounding,
-    diagnostics: buildVisibleNarrationDiagnostics(args.packet, violations),
+    diagnostics: buildVisibleNarrationDiagnostics(args.packet, violations, grounding),
   };
 }
 
@@ -188,10 +215,9 @@ export async function runVisibleNarrationWithPacketGuard(
       text: candidate.text,
       draft: candidate.draft,
     });
-    const effectiveValidation =
-      isNarrationDraftRequired(args.packet) && !candidate.draft
-        ? withInvalidNarrationDraftViolation(validation)
-        : validation;
+    const effectiveValidation = !candidate.draft
+      ? withInvalidNarrationDraftViolation(validation)
+      : validation;
 
     if (shouldRetryThinNarrationPreference({
       validation: effectiveValidation,
@@ -202,9 +228,10 @@ export async function runVisibleNarrationWithPacketGuard(
       continue;
     }
 
-    if (effectiveValidation.ok) {
+    if (effectiveValidation.ok && candidate.draft) {
       return {
-        text: candidate.text,
+        text: candidate.draft.prose,
+        draft: candidate.draft,
         attempts: attempt,
         retried: attempt > 1,
         validation: effectiveValidation,
@@ -216,17 +243,11 @@ export async function runVisibleNarrationWithPacketGuard(
     args.onUnsafeAttempt?.({ attempt, validation: effectiveValidation });
   }
 
-  const fallback = buildDeterministicPacketNarrationFallback({
-    packet: args.packet,
-    attempts: maxAttempts,
-    lastValidation,
-  });
-  if (fallback) return fallback;
-
   throw new VisibleNarrationPacketGuardError(
-    "Visible narration violated packet visibility constraints after retry.",
+    "Visible narration failed NarrationDraft or packet validation after retry.",
     lastValidation?.violations ?? [],
     maxAttempts,
+    lastValidation,
   );
 }
 
@@ -257,123 +278,15 @@ function buildVisibleNarrationRetryAddendum(
   return GENERIC_VISIBLE_PACKET_RETRY_ADDENDUM;
 }
 
-function buildDeterministicPacketNarrationFallback(args: {
-  packet: NarratorPacket;
-  attempts: number;
-  lastValidation: VisibleNarrationPacketValidationResult | null;
-}): RunVisibleNarrationWithPacketGuardResult | null {
-  if (!isNarrationDraftRequired(args.packet)) return null;
-  if (
-    !args.lastValidation?.violations.some(
-      (violation) => violation.kind === "invalidNarrationDraft",
-    )
-  ) {
-    return null;
-  }
-  if (
-    args.lastValidation.violations.some(
-      (violation) => violation.kind !== "invalidNarrationDraft",
-    )
-  ) {
-    return null;
-  }
-
-  const draft = buildDeterministicNarrationDraft(args.packet);
-  const validation = validateVisibleNarrationAgainstPacket({
-    packet: args.packet,
-    text: draft.prose,
-    draft,
-  });
-  if (!validation.ok) return null;
-
-  return {
-    text: draft.prose,
-    attempts: args.attempts,
-    retried: true,
-    validation,
-    guardAddendum: "deterministic_fallback_from_packet_evidence",
-  };
-}
-
-function buildDeterministicNarrationDraft(packet: NarratorPacket): NarrationDraft {
-  const evidence = (packet.evidenceLedger ?? [])
-    .filter((entry) => isFallbackNarrationEvidenceCategory(entry.category))
-    .map((entry) => ({
-      ...entry,
-      sentence: normalizeFallbackSentence(entry.summary),
-    }))
-    .filter((entry) => entry.sentence.length > 0)
-    .slice(0, 3);
-
-  if (evidence.length === 0) {
-    const prose = "The immediate scene settles into a playable next moment.";
-    return {
-      prose,
-      claims: [{
-        id: "fallback-claim-playable-beat",
-        kind: "playable_beat",
-        summary: "The scene returns control on a playable next moment.",
-        requiresEvidence: false,
-        evidenceRefs: [],
-      }],
-      claimSpans: [{
-        id: "fallback-span-playable-beat",
-        spanText: prose,
-        claimIds: ["fallback-claim-playable-beat"],
-        requiresEvidence: false,
-      }],
-    };
-  }
-
-  const prose = evidence.map((entry) => entry.sentence).join(" ");
-  return {
-    prose,
-    claims: evidence.map((entry, index) => ({
-      id: `fallback-claim-${index + 1}`,
-      kind: fallbackClaimKind(entry.category),
-      summary: entry.summary,
-      requiresEvidence: true,
-      evidenceRefs: [entry.id],
-    })),
-    claimSpans: evidence.map((entry, index) => ({
-      id: `fallback-span-${index + 1}`,
-      spanText: entry.sentence,
-      claimIds: [`fallback-claim-${index + 1}`],
-      requiresEvidence: true,
-    })),
-  };
-}
-
-function isFallbackNarrationEvidenceCategory(category: string): boolean {
-  return category === "perceivable_effect"
-    || category === "perceivable_response"
-    || category === "committed_event"
-    || category === "oracle_outcome"
-    || category === "hint_signal"
-    || category === "world_thread_signal";
-}
-
-function fallbackClaimKind(category: string): NarrationClaim["kind"] {
-  if (category === "oracle_outcome") return "oracle_outcome";
-  if (category === "hint_signal" || category === "world_thread_signal") return "future_pressure";
-  return "playable_beat";
-}
-
-function normalizeFallbackSentence(value: string): string {
-  const compact = value
-    .replace(/\s+/gu, " ")
-    .trim();
-  if (!compact) return "";
-  return /[.!?]$/u.test(compact) ? compact : `${compact}.`;
-}
-
 function buildVisibleNarrationDiagnostics(
   packet: NarratorPacket,
   violations: readonly VisibleNarrationPacketViolation[],
+  grounding?: GroundingGuardResult,
 ): VisibleNarrationPacketDiagnostics {
   const audit = getNarratorPacketRedactionAudit(packet);
   return {
     violationKinds: [...new Set(violations.map((violation) => violation.kind))],
+    grounding: grounding ? summarizeGroundingDiagnostics(grounding) : undefined,
     redactionAudit: {
       hiddenEventCount: audit.hiddenEventCount,
       hiddenResponseCount: audit.hiddenResponseCount,
@@ -384,6 +297,23 @@ function buildVisibleNarrationDiagnostics(
       forbiddenFactMarkerCount: audit.forbiddenFactMarkerCount,
       forbiddenPrivateTermCount: audit.forbiddenPrivateTermCount,
       uncommittedProposalCount: audit.uncommittedProposalCount,
+    },
+  };
+}
+
+function summarizeGroundingDiagnostics(
+  grounding: GroundingGuardResult,
+): NonNullable<VisibleNarrationPacketDiagnostics["grounding"]> {
+  const evidenceRequiredCoverage = grounding.coverage.filter((entry) => entry.requiresEvidence);
+  return {
+    violationKinds: [...new Set(grounding.violations.map((violation) => violation.kind))],
+    warningKinds: [...new Set((grounding.warnings ?? []).map((warning) => warning.kind))],
+    coverage: {
+      total: grounding.coverage.length,
+      covered: grounding.coverage.filter((entry) => entry.covered).length,
+      unsupported: evidenceRequiredCoverage.filter((entry) => !entry.covered).length,
+      evidenceRequired: evidenceRequiredCoverage.length,
+      missingClaim: evidenceRequiredCoverage.filter((entry) => entry.claimIds.length === 0).length,
     },
   };
 }
@@ -427,6 +357,7 @@ function collectForbiddenTermViolations(args: {
   terms: string[];
   kind: VisibleNarrationPacketViolationKind;
   violations: VisibleNarrationPacketViolation[];
+  isAllowedTerm?: (term: string) => boolean;
 }): void {
   for (const term of args.terms) {
     const trimmed = term.trim();
@@ -435,6 +366,9 @@ function collectForbiddenTermViolations(args: {
     }
 
     if (containsForbiddenTerm(args.text, trimmed)) {
+      if (args.isAllowedTerm?.(trimmed)) {
+        continue;
+      }
       args.violations.push({
         kind: args.kind,
         term: trimmed,
@@ -447,114 +381,51 @@ function containsForbiddenTerm(text: string, term: string): boolean {
   return text.toLocaleLowerCase().includes(term.toLocaleLowerCase());
 }
 
+function outputTextAllowsCommittedVisibleActorCreationLabel(args: {
+  text: string;
+  forbiddenTerm: string;
+  committedVisibleActorCreationLabels: readonly string[];
+}): boolean {
+  const normalizedText = normalizeActorLabel(args.text);
+  return args.committedVisibleActorCreationLabels.some((label) => {
+    const normalizedLabel = normalizeActorLabel(label);
+    return forbiddenActorTermMatchesCommittedVisibleActorLabel(
+      args.forbiddenTerm,
+      normalizedLabel,
+    ) && actorLabelContainsWholeTokens(normalizedText, normalizedLabel);
+  });
+}
+
+function forbiddenActorTermMatchesCommittedVisibleActorLabel(
+  forbiddenTerm: string,
+  normalizedCommittedLabel: string,
+): boolean {
+  const normalizedForbiddenTerm = normalizeActorLabel(forbiddenTerm);
+  return Boolean(normalizedForbiddenTerm)
+    && Boolean(normalizedCommittedLabel)
+    && normalizedForbiddenTerm === normalizedCommittedLabel;
+}
+
+function normalizeActorLabel(label: string): string {
+  return label.trim().toLocaleLowerCase().replace(/\s+/gu, " ");
+}
+
+function actorLabelContainsWholeTokens(text: string, label: string): boolean {
+  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  return new RegExp(`(^|\\W)${escapedLabel}(\\W|$)`, "iu").test(text);
+}
+
 function normalizeVisibleNarrationOutput(
-  output: string,
+  output: unknown,
 ): { text: string; draft: NarrationDraft | null } {
-  const draft = parseNarrationDraft(output);
-  return draft
-    ? { text: draft.prose, draft }
-    : { text: output, draft: null };
-}
-
-function parseNarrationDraft(text: string): NarrationDraft | null {
-  const trimmed = text.trim();
-  if (!trimmed.startsWith("{")) {
-    return null;
-  }
-
-  try {
-    return coerceNarrationDraft(JSON.parse(trimmed));
-  } catch {
-    return null;
-  }
-}
-
-function coerceNarrationDraft(value: unknown): NarrationDraft | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  const record = value as Record<string, unknown>;
-  if (typeof record.prose !== "string") {
-    return null;
-  }
-  if (!Array.isArray(record.claims) || !Array.isArray(record.claimSpans)) {
-    return null;
-  }
-
-  const claims = record.claims.map(coerceNarrationClaim);
-  const claimSpans = record.claimSpans.map(coerceNarrationClaimSpan);
-  if (claims.some((claim) => !claim) || claimSpans.some((span) => !span)) {
-    return null;
-  }
-
-  return {
-    prose: record.prose,
-    claims: claims as NarrationClaim[],
-    claimSpans: claimSpans as NarrationClaimSpan[],
-  };
-}
-
-function coerceNarrationClaim(value: unknown): NarrationClaim | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  const record = value as Record<string, unknown>;
-  if (
-    typeof record.id !== "string"
-    || typeof record.kind !== "string"
-    || typeof record.summary !== "string"
-    || typeof record.requiresEvidence !== "boolean"
-    || !Array.isArray(record.evidenceRefs)
-  ) {
-    return null;
-  }
-  if (!record.evidenceRefs.every((ref) => typeof ref === "string")) {
-    return null;
-  }
-  if (!ALLOWED_NARRATION_CLAIM_KINDS.has(record.kind as NarrationClaim["kind"])) {
-    return null;
-  }
-
-  return {
-    id: record.id,
-    kind: record.kind as NarrationClaim["kind"],
-    summary: record.summary,
-    requiresEvidence: record.requiresEvidence,
-    evidenceRefs: record.evidenceRefs,
-  };
-}
-
-function coerceNarrationClaimSpan(value: unknown): NarrationClaimSpan | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  const record = value as Record<string, unknown>;
-  if (
-    typeof record.id !== "string"
-    || typeof record.spanText !== "string"
-    || typeof record.requiresEvidence !== "boolean"
-    || !Array.isArray(record.claimIds)
-  ) {
-    return null;
-  }
-  if (!record.claimIds.every((claimId) => typeof claimId === "string")) {
-    return null;
-  }
-
-  return {
-    id: record.id,
-    spanText: record.spanText,
-    claimIds: record.claimIds,
-    requiresEvidence: record.requiresEvidence,
-  };
+  const parsed = narrationDraftSchema.safeParse(output);
+  return parsed.success
+    ? { text: parsed.data.prose, draft: parsed.data }
+    : { text: "", draft: null };
 }
 
 function countWords(text: string): number {
   return text.split(/\s+/u).filter(Boolean).length;
-}
-
-function isNarrationDraftRequired(packet: NarratorPacket): boolean {
-  return Array.isArray(packet.evidenceLedger);
 }
 
 function withInvalidNarrationDraftViolation(
@@ -564,7 +435,7 @@ function withInvalidNarrationDraftViolation(
     ...validation.violations,
     {
       kind: "invalidNarrationDraft" as const,
-      term: "NarrationDraft JSON",
+      term: "GroundedSentenceDraft",
     },
   ];
 
@@ -582,6 +453,7 @@ function withInvalidNarrationDraftViolation(
 function buildEmptyVisibleNarrationDiagnostics(): VisibleNarrationPacketDiagnostics {
   return {
     violationKinds: [],
+    grounding: undefined,
     redactionAudit: {
       hiddenEventCount: 0,
       hiddenResponseCount: 0,

@@ -16,6 +16,10 @@ function createFrame(): SceneFrame {
     currentSceneScopeId: "scene-market",
     currentLocationName: "Canal Market",
     currentSceneScopeName: "Canal Market Counter",
+    currentLocationDescription:
+      "Public exits run toward the east lane while a station camera watches the counter and a visible barrier rope controls the queue.",
+    currentSceneScopeDescription:
+      "The counter faces a crowd of witnesses and uniformed market personnel.",
     playerAction: "иду дальше по логичному маршруту и ищу чайную лавку",
     roster: {
       active: [
@@ -302,5 +306,102 @@ describe("bridge candidate lookup tools", () => {
     expect(JSON.stringify([navigation, location, poi, visibleFact, route])).not.toMatch(
       /which connected location|exact route id|backend target/i,
     );
+  });
+
+  it("groups visible observation affordances for routes, cameras, barriers, witnesses, and personnel without mutation", () => {
+    const context = createContext();
+    const baseWorldVersion = context.authority?.baseWorldVersion;
+    context.bridgeLookup?.visibleActors.push({
+      id: "npc-jujutsu-window",
+      actorId: "npc-jujutsu-window",
+      type: "npc",
+      label: "Jujutsu Window",
+      awareness: "clear",
+      tags: ["jujutsu", "personnel", "witness"],
+    });
+    context.bridgeLookup?.legalTargets.push({
+      id: "item:station-cctv",
+      type: "item",
+      label: "Station CCTV Camera",
+      itemId: "item-station-cctv",
+      locationId: "loc-market",
+      tags: ["camera", "surveillance"],
+    });
+    context.bridgeLookup?.playerKnownFacts.push({
+      id: "knowledge:fault-line-curtain",
+      summary: "reported: A visible curtain barrier ripples beside the station fault line.",
+      visibilityRoute: "player_known",
+      confidence: 0.8,
+      sourceRefs: ["event-fault-line", "barrier:curtain"],
+    });
+    context.bridgeLookup?.localRecentEvents.push({
+      id: "event-station-clerks",
+      tick: 12,
+      summary: "Two station clerks point toward the exit map near the fault line.",
+      source: "location_recent_event",
+      actorIds: ["npc-jujutsu-window"],
+      perceivableByPlayer: true,
+    });
+
+    const result = executeBridgeCandidateTool(
+      "list_visible_affordances",
+      { scope: "visible", maxResults: 8 },
+      context,
+    );
+    const resultJson = JSON.stringify(result);
+    const payload = result.result as {
+      categories: {
+        exitsRoutes: unknown[];
+        cameras: { targets: unknown[]; facts: unknown[]; absence: string | null };
+        barriers: { targets: unknown[]; facts: unknown[]; absence: string | null };
+        witnesses: { actors: unknown[]; facts: unknown[]; absence: string | null };
+        personnel: { actors: unknown[]; facts: unknown[]; absence: string | null };
+      };
+      visibleFacts: unknown[];
+    };
+
+    expect(result.success).toBe(true);
+    expect(isObservationToolResult(result)).toBe(true);
+    expect(result.authority).toBeUndefined();
+    expect(payload.categories.exitsRoutes).toEqual(
+      expect.arrayContaining([expect.objectContaining({ label: "East Tea Lane" })]),
+    );
+    expect(payload.categories.cameras.targets).toEqual(
+      expect.arrayContaining([expect.objectContaining({ label: "Station CCTV Camera" })]),
+    );
+    expect(payload.categories.cameras.absence).toBeNull();
+    expect(payload.categories.barriers.facts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "knowledge:fault-line-curtain",
+          summary: expect.stringContaining("visible curtain barrier"),
+        }),
+      ]),
+    );
+    expect(payload.categories.cameras.facts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "current_location:loc-market:description",
+          summary: expect.stringContaining("station camera"),
+        }),
+      ]),
+    );
+    expect(payload.categories.witnesses.actors).toEqual(
+      expect.arrayContaining([expect.objectContaining({ label: "Jujutsu Window" })]),
+    );
+    expect(payload.categories.personnel.actors).toEqual(
+      expect.arrayContaining([expect.objectContaining({ label: "Jujutsu Window" })]),
+    );
+    expect(payload.visibleFacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "current_location:loc-market:description" }),
+        expect.objectContaining({ id: "current_scene:scene-market:description" }),
+        expect.objectContaining({ id: "event-station-clerks" }),
+      ]),
+    );
+    expect(resultJson).not.toContain("Vault Keeper");
+    expect(resultJson).not.toContain("Shadow Broker");
+    expect(resultJson).not.toContain("private vault");
+    expect(context.authority?.baseWorldVersion).toBe(baseWorldVersion);
   });
 });

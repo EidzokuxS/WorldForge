@@ -26,6 +26,7 @@ const mockDatabase = {
 vi.mock("../../db/index.js", () => ({
   connectDb: vi.fn(() => mockDatabase),
   closeDb: vi.fn(),
+  getDb: vi.fn(() => mockDatabase),
 }));
 
 vi.mock("../../db/migrate.js", () => ({
@@ -43,6 +44,10 @@ vi.mock("../../vectors/index.js", () => ({
 
 vi.mock("../../inventory/index.js", () => ({
   ensureCampaignInventoryAuthority: vi.fn(),
+}));
+
+vi.mock("../runtime-state.js", () => ({
+  hasAnyActiveTurn: vi.fn(() => false),
 }));
 
 vi.mock("../../worldgen/index.js", () => ({
@@ -88,9 +93,10 @@ import {
   saveWorldgenResearchArtifact,
   loadWorldgenResearchArtifact,
 } from "../manager.js";
-import { closeDb } from "../../db/index.js";
+import { closeDb, connectDb, getDb } from "../../db/index.js";
 import { openVectorDb, closeVectorDb } from "../../vectors/index.js";
 import { AppError } from "../../lib/index.js";
+import { hasAnyActiveTurn } from "../runtime-state.js";
 import { jjkWithNarutoPowerSystemArtifact } from "../../worldgen/__tests__/fixtures/jjk-naruto-artifact.js";
 
 beforeEach(() => {
@@ -103,6 +109,8 @@ beforeEach(() => {
   mockSelectWhere.mockReset().mockReturnValue({ get: mockSelectGet });
   mockSelectFrom.mockReset().mockReturnValue({ where: mockSelectWhere });
   mockSelect.mockReset().mockReturnValue({ from: mockSelectFrom });
+  vi.mocked(getDb).mockReset().mockReturnValue(mockDatabase as any);
+  vi.mocked(hasAnyActiveTurn).mockReset().mockReturnValue(false);
 });
 
 describe("readCampaignConfig", () => {
@@ -421,6 +429,72 @@ describe("loadCampaign", () => {
     expect(result.id).toBe("test-id");
     expect(result.name).toBe("Loaded");
     expect(result.premise).toBe("A story");
+    expect(openVectorDb).toHaveBeenCalledWith("test-id");
+  });
+
+  it("returns the active campaign without reconnecting when the database is still open", async () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "readFileSync").mockReturnValue(
+      JSON.stringify({ name: "Loaded", premise: "A story", createdAt: 2000 })
+    );
+    vi.spyOn(fs, "mkdirSync").mockImplementation(() => "");
+
+    mockSelectGet.mockReturnValue({
+      id: "test-id",
+      name: "Loaded",
+      premise: "A story",
+      createdAt: 2000,
+      updatedAt: 2000,
+    });
+
+    await loadCampaign("test-id");
+    vi.mocked(connectDb).mockClear();
+    vi.mocked(openVectorDb).mockClear();
+
+    const result = await loadCampaign("test-id");
+
+    expect(result.id).toBe("test-id");
+    expect(connectDb).not.toHaveBeenCalled();
+    expect(openVectorDb).not.toHaveBeenCalled();
+  });
+
+  it("blocks switching campaigns while any turn is active", async () => {
+    vi.mocked(hasAnyActiveTurn).mockReturnValue(true);
+
+    await expect(loadCampaign("other-id")).rejects.toThrow(
+      "Cannot switch campaigns while a turn is active.",
+    );
+    expect(connectDb).not.toHaveBeenCalled();
+    expect(openVectorDb).not.toHaveBeenCalled();
+  });
+
+  it("allows the active campaign to reconnect after an internal restore closed the DB", async () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    vi.spyOn(fs, "readFileSync").mockReturnValue(
+      JSON.stringify({ name: "Loaded", premise: "A story", createdAt: 2000 })
+    );
+    vi.spyOn(fs, "mkdirSync").mockImplementation(() => "");
+
+    mockSelectGet.mockReturnValue({
+      id: "test-id",
+      name: "Loaded",
+      premise: "A story",
+      createdAt: 2000,
+      updatedAt: 2000,
+    });
+
+    await loadCampaign("test-id");
+    vi.mocked(connectDb).mockClear();
+    vi.mocked(openVectorDb).mockClear();
+    vi.mocked(getDb).mockImplementation(() => {
+      throw new Error("Database not connected.");
+    });
+    vi.mocked(hasAnyActiveTurn).mockReturnValue(true);
+
+    const result = await loadCampaign("test-id");
+
+    expect(result.id).toBe("test-id");
+    expect(connectDb).toHaveBeenCalled();
     expect(openVectorDb).toHaveBeenCalledWith("test-id");
   });
 });

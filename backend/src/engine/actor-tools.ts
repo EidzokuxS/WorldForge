@@ -91,6 +91,7 @@ export interface RunRequiredActorDecisionPassArgs {
   tick: number;
   provider: ProviderConfig;
   sceneFrame: SceneFrame;
+  playerAction?: string;
   playerLocationId?: string | null;
   playerSceneScopeId?: string | null;
   elapsedWorldTimeMinutes?: number;
@@ -248,6 +249,19 @@ function requiredReservedDecisions(
   );
 }
 
+const BROAD_STATUS_READ_ACTION_PATTERN =
+  /\b(take stock|read the room|look around|look over|scan|survey|observe|watch|inspect|study|listen|assess|describe|identify|note|check|compare|tour)\b/i;
+const DIRECT_INTERACTION_ACTION_PATTERN =
+  /\b(ask|tell|say|reply|answer|question|interrogate|demand|request|order|command|threaten|attack|strike|grab|restrain|follow|chase|show|give|offer|pay|bribe|promise|negotiate|argue|accuse|convince|persuade|deceive|lie|bluff|intimidate)\b/i;
+
+function shouldDeferPresenceOnlyActorReactions(playerAction?: string): boolean {
+  if (!playerAction) {
+    return false;
+  }
+  return BROAD_STATUS_READ_ACTION_PATTERN.test(playerAction)
+    && !DIRECT_INTERACTION_ACTION_PATTERN.test(playerAction);
+}
+
 interface PreparedActorDecision {
   decision: ActorScheduleDecision;
   process: KeyActorProcess;
@@ -302,6 +316,9 @@ export async function runRequiredActorDecisionPass(
     playerLocationId: args.playerLocationId,
     playerSceneScopeId: args.playerSceneScopeId,
     elapsedWorldTimeMinutes: args.elapsedWorldTimeMinutes,
+    presentActorReactionRoute: shouldDeferPresenceOnlyActorReactions(args.playerAction)
+      ? "proposal_after_done"
+      : "required_before_done",
   });
   const processes = new Map(
     listKeyActorProcessesForCampaign({ campaignId: args.campaignId })

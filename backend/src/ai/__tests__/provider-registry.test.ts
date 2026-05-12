@@ -131,10 +131,10 @@ describe("createModel", () => {
 
     createModel(config);
 
-    expect(mockCreateOpenAI).toHaveBeenCalledWith({
+    expect(mockCreateOpenAI).toHaveBeenCalledWith(expect.objectContaining({
       baseURL: "https://api.openai.com/v1",
       apiKey: "sk-test-key",
-    });
+    }));
     expect(mockOpenAIChatFn).toHaveBeenCalledWith("gpt-4o");
   });
 
@@ -149,10 +149,10 @@ describe("createModel", () => {
 
     createModel(config);
 
-    expect(mockCreateOpenAI).toHaveBeenCalledWith({
+    expect(mockCreateOpenAI).toHaveBeenCalledWith(expect.objectContaining({
       baseURL: "https://api.openai.com/v1",
       apiKey: "sk-key",
-    });
+    }));
   });
 
   it('uses "ollama" as fallback apiKey when apiKey is empty', () => {
@@ -166,10 +166,10 @@ describe("createModel", () => {
 
     createModel(config);
 
-    expect(mockCreateOpenAI).toHaveBeenCalledWith({
+    expect(mockCreateOpenAI).toHaveBeenCalledWith(expect.objectContaining({
       baseURL: "http://localhost:11434/v1",
       apiKey: "ollama",
-    });
+    }));
     expect(mockOpenAIChatFn).toHaveBeenCalledWith("llama3");
   });
 
@@ -358,9 +358,15 @@ describe("createModel", () => {
     expect(result.middleware).toHaveLength(2);
   });
 
-  it("keeps storyteller GLM requests off the default reasoning wrapper when explicit", () => {
+  it("injects Z.AI thinking-disabled into chat completion bodies for explicit GLM bypass", async () => {
     const fakeModel = { modelId: "glm-5.1" };
     mockOpenAIChatFn.mockReturnValue(fakeModel);
+    let capturedBody: BodyInit | null | undefined;
+    const downstreamFetch = vi.fn(async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      capturedBody = init?.body;
+      return new Response("{}", { status: 200 });
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(downstreamFetch);
 
     const config: ProviderConfig = {
       id: "glm",
@@ -372,9 +378,87 @@ describe("createModel", () => {
 
     const options: ModelCreationOptions = { role: "storyteller", familyHint: "glm" };
     const result = createModel(config, options);
+    const createOptions = (mockCreateOpenAI.mock.calls.at(-1) as unknown[] | undefined)?.[0] as {
+      fetch?: typeof globalThis.fetch;
+    };
+
+    expect(result).toBe(fakeModel);
+    expect(mockWrapLanguageModel).not.toHaveBeenCalled();
+    expect(createOptions.fetch).toBeTypeOf("function");
+
+    await createOptions.fetch!("https://api.z.ai/api/paas/v4/chat/completions", {
+      method: "POST",
+      body: JSON.stringify({
+        model: "glm-5.1",
+        messages: [{ role: "user", content: "Return JSON." }],
+      }),
+    });
+
+    const sentBody = JSON.parse(String(capturedBody));
+    expect(sentBody.thinking).toEqual({ type: "disabled" });
+    fetchSpy.mockRestore();
+  });
+
+  it("keeps storyteller GLM requests on default reasoning without explicit bypass", () => {
+    const fakeModel = { modelId: "glm-5.1" };
+    mockOpenAIChatFn.mockReturnValue(fakeModel);
+
+    const config: ProviderConfig = {
+      id: "glm",
+      name: "ZAI",
+      baseUrl: "https://api.z.ai/api/paas/v4",
+      apiKey: "key",
+      model: "GLM-5.1",
+    };
+
+    const result = createModel(config, { role: "storyteller" }) as unknown as {
+      baseModel: unknown;
+    };
+
+    expect(mockWrapLanguageModel).toHaveBeenCalledTimes(1);
+    expect(result.baseModel).toBe(fakeModel);
+  });
+
+  it("allows explicit GLM reasoning bypass for latency-sensitive judge calls", () => {
+    const fakeModel = { modelId: "glm-5.1" };
+    mockOpenAIChatFn.mockReturnValue(fakeModel);
+
+    const config: ProviderConfig = {
+      id: "glm",
+      name: "ZAI",
+      baseUrl: "https://api.z.ai/api/paas/v4",
+      apiKey: "key",
+      model: "GLM-5.1",
+    };
+
+    const result = createModel(config, { role: "judge", reasoningMode: "bypass" });
+    const createOptions = (mockCreateOpenAI.mock.calls.at(-1) as unknown[] | undefined)?.[0] as {
+      fetch?: typeof globalThis.fetch;
+    };
 
     expect(mockWrapLanguageModel).not.toHaveBeenCalled();
+    expect(createOptions.fetch).toBeTypeOf("function");
     expect(result).toBe(fakeModel);
+  });
+
+  it("keeps explicit reasoning bypass scoped to GLM-family providers", () => {
+    const fakeModel = { modelId: "gpt-5" };
+    mockOpenAIChatFn.mockReturnValue(fakeModel);
+
+    const config: ProviderConfig = {
+      id: "openai",
+      name: "OpenAI",
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "key",
+      model: "gpt-5",
+    };
+
+    const result = createModel(config, { role: "judge", reasoningMode: "bypass" }) as unknown as {
+      baseModel: unknown;
+    };
+
+    expect(mockWrapLanguageModel).toHaveBeenCalledTimes(1);
+    expect(result.baseModel).toBe(fakeModel);
   });
 
   it("can explicitly request non-glm behavior for storyteller role", () => {

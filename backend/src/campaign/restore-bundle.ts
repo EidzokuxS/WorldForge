@@ -22,6 +22,12 @@ function resolveBundlePaths(bundleDir: string) {
   };
 }
 
+function removeSqliteSidecarFiles(dbPath: string): void {
+  for (const suffix of ["-wal", "-shm", "-journal"]) {
+    fs.rmSync(`${dbPath}${suffix}`, { force: true });
+  }
+}
+
 export async function captureCampaignBundle(
   campaignId: string,
   bundleDir: string,
@@ -70,7 +76,9 @@ export async function restoreCampaignBundle(
   closeDb();
   closeVectorDb();
 
+  removeSqliteSidecarFiles(campaignDbPath);
   fs.copyFileSync(dbPath, campaignDbPath);
+  removeSqliteSidecarFiles(campaignDbPath);
   fs.copyFileSync(configPath, campaignConfigPath);
 
   if (fs.existsSync(chatPath)) {

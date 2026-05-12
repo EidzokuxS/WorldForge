@@ -916,3 +916,17 @@ Plans:
 - [ ] 94-03-PLAN.md - Live route runner and trace assertions.
 - [ ] 94-04-PLAN.md - Fail-closed acceptance report and full matrix gate.
 - [ ] 94-05-PLAN.md - Soft review and final acceptance package.
+
+### Phase 95: Twenty-good-turn multi-scenario gameplay acceptance gate
+
+**Goal:** Turn the current runtime into a game that can actually sustain play: five rotating cloned-campaign scenarios must each produce a continuous 20-turn player route that is readable, interesting, consequence-bearing, and worth continuing. This phase treats gameplay feel as the acceptance target, not trace green-ness. Any blocker found by deep playtests is in scope until the route can continue without player-facing backend fallbacks, parser-like confusion, empty/technical narration, hidden-truth leaks, dead world state, incoherent NPC reactions, stale campaign/server evidence, or harness loopholes that count inert/clarification turns as success.
+**Requirements**: P95-R1, P95-R2, P95-R3, P95-R4, P95-R5, P95-R6, P95-R7, P95-R8
+**Depends on:** Phase 94
+**Plans:** 5 plans
+
+Plans:
+- [ ] 95-01-PLAN.md - No player-facing narration fallback and strict Storyteller draft repair.
+- [ ] 95-02-PLAN.md - Twenty-good-turn rubric, telemetry, and deep playtest harness hardening.
+- [ ] 95-03-PLAN.md - Multi-scenario cloned campaign health gate and baseline selection.
+- [ ] 95-04-PLAN.md - Gameplay blocker burn-down from deep playtest findings.
+- [ ] 95-05-PLAN.md - Final five-scenario 20-turn acceptance package and human playfeel report.

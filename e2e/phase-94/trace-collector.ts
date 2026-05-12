@@ -27,6 +27,16 @@ export interface Phase94DoneBoundary {
   worldTimeMinutes: number | null;
 }
 
+export interface Phase94TurnResolution {
+  kind: string;
+  resolutionState: string;
+  combatIntent: boolean;
+  evidenceIds: string[];
+  consequenceIds: string[];
+  explicitNoCombatEvidenceIds: string[];
+  toolNames: string[];
+}
+
 export interface Phase94CollectedTurn {
   routeId: Phase94RouteId;
   campaignId: string;
@@ -43,6 +53,7 @@ export interface Phase94CollectedTurn {
   screenshotPath: string | null;
   sseEvents: Phase94SseEvent[];
   doneBoundary: Phase94DoneBoundary | null;
+  turnResolution: Phase94TurnResolution | null;
   hardFailures: string[];
 }
 
@@ -191,6 +202,30 @@ function doneBoundaryFromEvents(events: readonly Phase94SseEvent[]): Phase94Done
   };
 }
 
+function stringArrayField(record: Record<string, unknown>, key: string): string[] {
+  const value = record[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+}
+
+function turnResolutionFromEvents(events: readonly Phase94SseEvent[]): Phase94TurnResolution | null {
+  const resolution = [...events].reverse().find((event) => event.eventType === "turn_resolution");
+  if (!resolution || !isRecord(resolution.data)) return null;
+  const kind = asString(resolution.data.kind);
+  const resolutionState = asString(resolution.data.resolutionState);
+  const combatIntent = resolution.data.combatIntent;
+  if (!kind || !resolutionState || typeof combatIntent !== "boolean") return null;
+  return {
+    kind,
+    resolutionState,
+    combatIntent,
+    evidenceIds: stringArrayField(resolution.data, "evidenceIds"),
+    consequenceIds: stringArrayField(resolution.data, "consequenceIds"),
+    explicitNoCombatEvidenceIds: stringArrayField(resolution.data, "explicitNoCombatEvidenceIds"),
+    toolNames: stringArrayField(resolution.data, "toolNames"),
+  };
+}
+
 function readExistingJsonlRows(filePath: string): unknown[] {
   if (!existsSync(filePath)) return [];
   return readFileSync(filePath, "utf-8")
@@ -277,6 +312,7 @@ export function writeCollectedTurn(input: {
     traceArtifactId: input.turn.traceArtifactId,
     screenshotPath: input.turn.screenshotPath,
     doneBoundary: input.turn.doneBoundary,
+    turnResolution: input.turn.turnResolution,
     hardFailures: input.turn.hardFailures,
   });
 
@@ -290,6 +326,7 @@ export function writeCollectedTurn(input: {
     terminalEvent: input.turn.terminalEvent,
     stageEvents: input.turn.sseEvents.filter((event) => event.eventType === "scene-settling" || event.eventType === "finalizing_turn"),
     doneBoundary: input.turn.doneBoundary,
+    turnResolution: input.turn.turnResolution,
     hardFailures: input.turn.hardFailures,
   });
   appendJsonl(join(input.routeRoot, "world-diffs.jsonl"), {
@@ -352,6 +389,7 @@ export function buildCollectedTurn(input: {
   });
   const terminalEvent = terminalEventFromEvents(events);
   const doneBoundary = doneBoundaryFromEvents(events);
+  const turnResolution = turnResolutionFromEvents(events);
   const assistantText = assistantTextFromEvents(events);
   const hardFailures = [
     terminalEvent !== "done" ? "missing-terminal-done-event" : undefined,
@@ -374,6 +412,7 @@ export function buildCollectedTurn(input: {
     screenshotPath: input.screenshotPath,
     sseEvents: events,
     doneBoundary,
+    turnResolution,
     hardFailures,
   };
 }

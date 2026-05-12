@@ -566,6 +566,39 @@ describe("parseTurnSSE", () => {
     expect(onFinalizing.mock.invocationCallOrder[0]).toBeLessThan(onDone.mock.invocationCallOrder[0]);
   });
 
+  it("passes done boundary metadata to completion handlers", async () => {
+    const onDone = vi.fn();
+
+    await parseTurnSSE(
+      createStream([
+        'event: narrative',
+        'data: {"text":"The gate trembles."}',
+        "",
+        "event: finalizing_turn",
+        "data: {\"stage\":\"rollback_critical\"}",
+        "",
+        "event: done",
+        "data: {\"tick\":12,\"worldVersion\":4,\"worldTimeMinutes\":90,\"privateTerm\":\"hidden\"}",
+        "",
+      ].join("\n")),
+      {
+        onNarrative: vi.fn(),
+        onOracleResult: vi.fn(),
+        onStateUpdate: vi.fn(),
+        onQuickActions: vi.fn(),
+        onDone,
+        onError: vi.fn(),
+      },
+    );
+
+    expect(onDone).toHaveBeenCalledWith({
+      tick: 12,
+      worldVersion: 4,
+      worldTimeMinutes: 90,
+    });
+    expect(JSON.stringify(onDone.mock.calls[0]?.[0])).not.toContain("hidden");
+  });
+
   it("normalizes safe stage payloads and drops hidden progress fields", async () => {
     const onSceneSettling = vi.fn();
     const onFinalizing = vi.fn();

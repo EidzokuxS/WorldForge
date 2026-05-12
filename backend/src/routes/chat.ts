@@ -101,8 +101,7 @@ function registerTurnAbortCleanup(args: {
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
-    endTurn(args.campaignId);
-    log.event("turn.abort.cleanup", {
+    log.event("turn.abort.observed", {
       route: args.route,
       campaignId: args.campaignId,
     });
@@ -130,6 +129,7 @@ async function runRollbackCriticalPostTurn(
   campaignId: string,
   judgeProvider: ProviderConfig,
   summary: TurnSummary,
+  route: "/chat/action" | "/chat/retry",
 ): Promise<void> {
   const db = (await import("../db/index.js")).getDb();
   const { players } = await import("../db/schema.js");
@@ -150,7 +150,7 @@ async function runRollbackCriticalPostTurn(
     judgeProvider,
     playerLocationId: player?.currentLocationId,
     playerSceneScopeId: player?.currentSceneLocationId ?? undefined,
-    route: "/chat/action",
+    route,
     idempotencyKey: summary.idempotencyKey,
   });
   const actorSchedules = result.actorSchedules ?? [];
@@ -308,9 +308,10 @@ function buildOnPostTurn(
   settings: Settings,
   campaignId: string,
   judgeProvider: ProviderConfig,
+  route: "/chat/action" | "/chat/retry",
 ): ((summary: TurnSummary) => Promise<void>) | undefined {
   return async (summary: TurnSummary) => {
-    await runRollbackCriticalPostTurn(settings, campaignId, judgeProvider, summary);
+    await runRollbackCriticalPostTurn(settings, campaignId, judgeProvider, summary, route);
     queueAuxiliaryPostTurnWork(settings, campaignId, judgeProvider, summary);
   };
 }
@@ -419,20 +420,34 @@ async function streamPendingTurnNarration(args: {
       onPostTurn: args.onPostTurn,
     });
 
+    let sawTerminalEvent = false;
     for await (const event of generator) {
+      if (event.type === "done" || event.type === "error") {
+        sawTerminalEvent = true;
+      }
       await writeRouteTurnEventSSE(args.campaignId, args.stream, event);
+    }
+    if (!sawTerminalEvent) {
+      await writeTurnEventSSE(args.stream, {
+        type: "error",
+        data: pendingNarrationData(
+          args.saga,
+          "Pending narration resume ended before a terminal event.",
+        ),
+      });
+      return "pending";
     }
     return "resumed";
   } catch (error) {
+    const message = isNarrationLockConflict(error)
+      ? "Pending narration is already being completed by another worker."
+      : getErrorMessage(error, "Pending narration resume failed.");
     if (!isNarrationLockConflict(error)) {
-      throw error;
+      log.error("Pending narration resume failed; preserving settled turn state", error);
     }
     await writeTurnEventSSE(args.stream, {
       type: "error",
-      data: pendingNarrationData(
-        args.saga,
-        "Pending narration is already being completed by another worker.",
-      ),
+      data: pendingNarrationData(args.saga, message),
     });
     return "pending";
   }
@@ -724,7 +739,7 @@ app.post("/action", async (c) => {
                 storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
                 storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
                 embedderResult,
-                onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider),
+                onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider, "/chat/action"),
               });
             } finally {
               endTurn(campaignId);
@@ -813,7 +828,7 @@ app.post("/action", async (c) => {
             storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
             storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
             embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
-            onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider),
+            onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider, "/chat/action"),
           });
 
           for await (const event of turnGenerator) {
@@ -857,7 +872,7 @@ app.post("/action", async (c) => {
               storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
               storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
               embedderResult,
-              onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider),
+              onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider, "/chat/action"),
             });
             if (result === "pending") {
               outcome = "pending";
@@ -883,7 +898,7 @@ app.post("/action", async (c) => {
             storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
             storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
             embedderResult,
-            onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider),
+            onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider, "/chat/action"),
             pendingMessage: getErrorMessage(
               error,
               "Turn resolved but final narration is pending.",
@@ -1092,7 +1107,7 @@ app.post("/retry", async (c) => {
                 storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
                 storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
                 embedderResult,
-                onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider),
+                onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider, "/chat/retry"),
               });
             } finally {
               endTurn(campaignId);
@@ -1165,7 +1180,7 @@ app.post("/retry", async (c) => {
             storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
             storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
             embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
-            onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider),
+            onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider, "/chat/retry"),
           });
 
           for await (const event of turnGenerator) {
@@ -1208,7 +1223,7 @@ app.post("/retry", async (c) => {
               storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
               storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
               embedderResult,
-              onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider),
+              onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider, "/chat/retry"),
             });
             if (result === "pending") {
               outcome = "pending";
@@ -1234,7 +1249,7 @@ app.post("/retry", async (c) => {
             storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
             storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
             embedderResult,
-            onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider),
+            onPostTurn: buildOnPostTurn(settings, campaignId, judgeResult.resolved.provider, "/chat/retry"),
             pendingMessage: getErrorMessage(
               error,
               "Retry resolved but final narration is pending.",

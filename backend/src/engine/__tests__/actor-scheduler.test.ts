@@ -160,6 +160,82 @@ describe("actor scheduler", () => {
     );
   });
 
+  it("can route presence-only actor reactions after done for status-read turns", () => {
+    seedNpc({
+      id: "npc-present",
+      name: "Present Actor",
+      locationId: "loc-main",
+      sceneId: "scene-a",
+    });
+    backfillKeyActorProcessesForCampaign({
+      campaignId: CAMPAIGN_ID,
+      nextWakeDelayMinutes: 30,
+    });
+
+    const schedule = scheduleKeyActorProcessesForTurn({
+      campaignId: CAMPAIGN_ID,
+      tick: 1,
+      playerLocationId: "loc-main",
+      playerSceneScopeId: "scene-a",
+      elapsedWorldTimeMinutes: 1,
+      presentActorReactionRoute: "proposal_after_done",
+    });
+
+    expect(schedule.decisions[0]).toMatchObject({
+      actorId: "npc-present",
+      route: "proposal_after_done",
+      reason: "present actor reaction deferred after visible status read",
+      reservation: {
+        status: "reserved",
+      },
+    });
+    expect(schedule.decisions[0]?.signals.map((signal) => signal.type)).toContain(
+      "direct_observation",
+    );
+  });
+
+  it("keeps urgent present actor inbox signals required before done", () => {
+    seedNpc({
+      id: "npc-present",
+      name: "Present Actor",
+      locationId: "loc-main",
+      sceneId: "scene-a",
+    });
+    backfillKeyActorProcessesForCampaign({
+      campaignId: CAMPAIGN_ID,
+      nextWakeDelayMinutes: 30,
+    });
+
+    const schedule = scheduleKeyActorProcessesForTurn({
+      campaignId: CAMPAIGN_ID,
+      tick: 1,
+      playerLocationId: "loc-main",
+      playerSceneScopeId: "scene-a",
+      elapsedWorldTimeMinutes: 1,
+      reportsByActorId: new Map([
+        ["npc-present", [{
+          id: "urgent-visible-report",
+          route: "direct_observation",
+          summary: "The player directly provokes this actor.",
+          priority: 5,
+        }]],
+      ]),
+      presentActorReactionRoute: "proposal_after_done",
+    });
+
+    expect(schedule.decisions[0]).toMatchObject({
+      actorId: "npc-present",
+      route: "required_before_done",
+      reason: "present actor can affect the visible scene",
+      reservation: {
+        status: "reserved",
+      },
+    });
+    expect(schedule.decisions[0]?.signals.map((signal) => signal.type)).toContain(
+      "inbox",
+    );
+  });
+
   it("wakes distant actors after enough world time elapses", () => {
     seedNpc({
       id: "npc-away",

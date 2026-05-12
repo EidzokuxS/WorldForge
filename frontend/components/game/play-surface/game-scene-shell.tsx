@@ -13,6 +13,13 @@ export interface GameSceneShellProps {
   leftStageSlot?: ReactNode;
   rightStageSlot?: ReactNode;
   className?: string;
+  debugState?: {
+    campaignId: string | null;
+    worldVersion: number | null;
+    currentTick: number | null;
+    worldTimeMinutes: number | null;
+    sceneId: string | null;
+  };
 }
 
 export function GameSceneShell({
@@ -27,11 +34,17 @@ export function GameSceneShell({
   leftStageSlot,
   rightStageSlot,
   className,
+  debugState,
 }: GameSceneShellProps) {
   return (
     <main
       data-testid="game-scene-shell"
       data-shell-region="game-root"
+      data-campaign-id={debugState?.campaignId ?? undefined}
+      data-world-version={debugState?.worldVersion ?? undefined}
+      data-current-tick={debugState?.currentTick ?? undefined}
+      data-world-time-minutes={debugState?.worldTimeMinutes ?? undefined}
+      data-scene-id={debugState?.sceneId ?? undefined}
       className={cn(
         "relative h-dvh min-h-0 overflow-hidden bg-[var(--bg)] text-zinc-100",
         className,

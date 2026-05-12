@@ -381,6 +381,64 @@ describe("ScenePlan execution and narrator packet", () => {
     );
   });
 
+  it("adds authoritative current inventory status evidence without inventing an inventory change", async () => {
+    (executeToolCall as Mock).mockResolvedValue({
+      success: true,
+      result: { eventId: "event-1" },
+    });
+
+    const frame = {
+      ...createFrame(),
+      playerInventory: [
+        {
+          id: "current-inventory:item-satchel",
+          itemId: "item-satchel",
+          label: "Worn Leather Satchel",
+          equipState: "equipped" as const,
+          equippedSlot: "shoulder",
+          isSignature: true,
+        },
+      ],
+    };
+    const plan = createPlan();
+    const validated = expectValidated(validateScenePlan({ frame, plan }));
+    const executed = await executeScenePlan({
+      campaignId: frame.campaignId,
+      tick: frame.tick,
+      validatedPlan: validated,
+    });
+    const packet = buildNarratorPacket({
+      frame,
+      canonicalTurnPacket: createCanonicalTurnPacket(frame, plan, executed),
+    });
+    const prompt = formatNarratorPacketForPrompt(packet);
+
+    expect(packet.currentInventory).toEqual([
+      expect.objectContaining({
+        itemId: "item-satchel",
+        label: "Worn Leather Satchel",
+        equipState: "equipped",
+        isSignature: true,
+      }),
+    ]);
+    expect(packet.evidenceLedger).toContainEqual(
+      expect.objectContaining({
+        id: "current_inventory_status:item-satchel",
+        category: "current_inventory_status",
+        sourceId: "item-satchel",
+      }),
+    );
+    expect(packet.evidenceLedger).not.toContainEqual(
+      expect.objectContaining({
+        id: "tool_result:item-satchel:transfer_item",
+      }),
+    );
+    expect(prompt).toContain("[CURRENT INVENTORY STATUS]");
+    expect(prompt).toContain(
+      "Worn Leather Satchel is currently equipped in shoulder by the player as a signature item.",
+    );
+  });
+
   it("pre-prompt guard rejects backend prose that leaks a hidden actor name or hidden fact marker", async () => {
     (executeToolCall as Mock).mockResolvedValue({
       success: true,

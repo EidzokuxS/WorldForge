@@ -24,10 +24,12 @@ export interface ProviderConfig {
 }
 
 export type ModelRole = "storyteller" | "judge" | "generator" | "embedder";
+export type ModelReasoningMode = "default" | "bypass";
 
 export interface ModelCreationOptions {
   role?: ModelRole;
   familyHint?: "baseline" | "glm";
+  reasoningMode?: ModelReasoningMode;
 }
 
 function normalizeBaseUrl(baseUrl: string): string {
@@ -49,10 +51,19 @@ function isGlmFamilyModel(config: ProviderConfig): boolean {
   return /\bglm\b/.test(haystack);
 }
 
-function shouldBypassReasoningForStoryteller(
+function isZaiApiFamily(config: ProviderConfig): boolean {
+  const haystack = `${config.name} ${config.baseUrl}`.toLowerCase();
+  return /\bzai\b|z\.ai|zhipu/.test(haystack);
+}
+
+function shouldBypassReasoning(
   config: ProviderConfig,
   options?: ModelCreationOptions,
 ): boolean {
+  if (options?.reasoningMode === "bypass") {
+    return isGlmFamilyModel(config);
+  }
+
   if (options?.role !== "storyteller") {
     return false;
   }
@@ -61,11 +72,7 @@ function shouldBypassReasoningForStoryteller(
     return true;
   }
 
-  if (options.familyHint === "baseline") {
-    return false;
-  }
-
-  return isGlmFamilyModel(config);
+  return false;
 }
 
 function reasoningMiddleware(): LanguageModelMiddleware[] {
@@ -88,6 +95,41 @@ function reasoningMiddleware(): LanguageModelMiddleware[] {
       },
     },
   ];
+}
+
+function createZaiThinkingDisabledFetch(
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): typeof globalThis.fetch {
+  return async (input, init) => {
+    const url = typeof input === "string"
+      ? input
+      : input instanceof URL
+        ? input.toString()
+        : typeof (input as { url?: unknown }).url === "string"
+          ? String((input as { url: string }).url)
+          : "";
+
+    if (!url.includes("/chat/completions") || typeof init?.body !== "string") {
+      return fetchImpl(input, init);
+    }
+
+    try {
+      const body = JSON.parse(init.body) as unknown;
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return fetchImpl(input, init);
+      }
+
+      return fetchImpl(input, {
+        ...init,
+        body: JSON.stringify({
+          ...body,
+          thinking: { type: "disabled" },
+        }),
+      });
+    } catch {
+      return fetchImpl(input, init);
+    }
+  };
 }
 
 export function resolveProviderProtocol(config: ProviderConfig): ProviderProtocol {
@@ -142,16 +184,19 @@ export function createModel(
     return model;
   }
 
+  const bypassReasoning = shouldBypassReasoning(config, options);
   const provider = createOpenAI({
     baseURL,
     apiKey: config.apiKey || "ollama",
+    ...(bypassReasoning && isZaiApiFamily(config)
+      ? { fetch: createZaiThinkingDisabledFetch() }
+      : {}),
   });
 
   // Use Chat Completions API (not Responses API) for broad provider compatibility.
   // The Responses API is OpenAI-specific and fails on OpenRouter, Ollama, etc.
   const model = provider.chat(config.model);
   rememberModelMetadata(model, "chat-completions");
-  const bypassReasoning = shouldBypassReasoningForStoryteller(config, options);
 
   if (bypassReasoning) {
     return model;

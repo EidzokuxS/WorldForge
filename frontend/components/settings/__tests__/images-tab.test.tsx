@@ -43,7 +43,7 @@ describe("ImagesTab", () => {
     const settings = createMockSettings();
     render(<ImagesTab settings={settings} setSettings={vi.fn()} />);
 
-    expect(screen.getByText("Image Generation")).toBeInTheDocument();
+    expect(screen.getByText("Images")).toBeInTheDocument();
     expect(screen.getByText("Enable image generation")).toBeInTheDocument();
     expect(screen.getByRole("switch")).toBeInTheDocument();
   });

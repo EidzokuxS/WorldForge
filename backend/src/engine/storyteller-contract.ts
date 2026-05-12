@@ -22,8 +22,11 @@ export const STORYTELLER_WORLD_RULES = [
   "Never contradict established scene facts, inventory truth, or the world premise.",
 ].join(" ");
 
-const STORYTELLER_DRAFT_JSON_WORLD_RULES = [
-  "Return exactly one JSON object; the prose field must contain narrative prose only.",
+const STORYTELLER_GROUNDED_SENTENCE_DRAFT_RULES = [
+  "Return exactly one GroundedSentenceDraft structured object; each sentences[].text field must contain player-visible narrative prose only.",
+  "Return 1-5 sentence objects total; never return 6 or more sentences.",
+  "Each sentences[].evidenceRefs array must contain 1-4 exact packet evidence ids; never return five or more evidenceRefs on one sentence.",
+  "All visible narration, style, RPG beat, and prose technique rules below apply inside sentences[].text; they never replace the structured-output shape.",
   "Do not echo bracketed system sections, metadata, roll numbers, or tool syntax.",
   "Narrate the provided outcome faithfully instead of inventing new mechanics.",
   "Produce exactly one continuous narration pass for the turn. Do not restart the scene or restate the same beat in alternate wording.",
@@ -36,7 +39,7 @@ export const STORYTELLER_RP_PLAY_RULES = [
   "NPCs are autonomous actors, not quest terminals; let them react from motives, pressure, relationships, limits, and incomplete knowledge.",
   "Dialogue should feel spoken: distinct voices, subtext, interruptions, omissions, and short replies before monologues.",
   "Do not open by echoing or paraphrasing the latest player action; continue from it with what visibly changes now.",
-  "The first sentence must add new pressure, a visible reaction, or a fresh scene fact already supported by authoritative inputs; a brief connective phrase is allowed, a recap is not.",
+  "The first sentence must add new pressure, a visible reaction, a fresh scene fact, or the most important existing visible-state answer to an observe/status-read request already supported by authoritative inputs; a brief connective phrase is allowed, a recap is not.",
   "When a present NPC matters to the beat, give at least one concrete line, gesture, decision, or refusal grounded in what they can perceive.",
   "Show concrete observable evidence before abstract mood: posture, distance, objects, expressions, light, sound, movement, or silence.",
   "Do not railroad future choices. End with a live situation, pressure, invitation, question, or fork that returns control to the player.",
@@ -91,7 +94,7 @@ export type { StorytellerPass };
 
 interface BuildStorytellerContractOptions {
   pass?: StorytellerPass;
-  outputMode?: "prose" | "narration-draft-json";
+  outputMode?: "prose" | "narration-draft-json" | "grounded-sentence-draft";
   includeWorldRules?: boolean;
   includeContextRules?: boolean;
   includeToolSupportRules?: boolean;
@@ -129,8 +132,8 @@ export function buildStorytellerContract(
     options.includeGlmOverlay ? presetOverlay : null,
     options.includeWorldRules === false
       ? null
-      : outputMode === "narration-draft-json"
-        ? STORYTELLER_DRAFT_JSON_WORLD_RULES
+      : outputMode === "narration-draft-json" || outputMode === "grounded-sentence-draft"
+        ? STORYTELLER_GROUNDED_SENTENCE_DRAFT_RULES
         : STORYTELLER_WORLD_RULES,
     STORYTELLER_RP_PLAY_RULES,
     pass === "final-visible" ? STORYTELLER_PROSE_TECHNIQUE_RULES : null,

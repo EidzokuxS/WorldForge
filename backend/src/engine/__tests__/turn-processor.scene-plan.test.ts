@@ -198,8 +198,6 @@ describe("turn processor ScenePlan contract", () => {
   it("pins canonical GM tool-loop ordering before final narration", () => {
     expect(SCENE_PLAN_TURN_ORDER).toEqual([
       "buildSceneFrame",
-      "optional runWorldForecastBuilder",
-      "stageWorldTrajectoryForecast",
       "buildScopedForecastExcerpt",
       "runGmRead",
       "optional callOracle",
@@ -211,12 +209,6 @@ describe("turn processor ScenePlan contract", () => {
     ]);
 
     expect(SCENE_PLAN_TURN_ORDER.indexOf("buildSceneFrame")).toBeLessThan(
-      SCENE_PLAN_TURN_ORDER.indexOf("buildScopedForecastExcerpt"),
-    );
-    expect(SCENE_PLAN_TURN_ORDER.indexOf("optional runWorldForecastBuilder")).toBeLessThan(
-      SCENE_PLAN_TURN_ORDER.indexOf("stageWorldTrajectoryForecast"),
-    );
-    expect(SCENE_PLAN_TURN_ORDER.indexOf("stageWorldTrajectoryForecast")).toBeLessThan(
       SCENE_PLAN_TURN_ORDER.indexOf("buildScopedForecastExcerpt"),
     );
     expect(SCENE_PLAN_TURN_ORDER.indexOf("buildScopedForecastExcerpt")).toBeLessThan(
@@ -332,24 +324,18 @@ describe("turn processor ScenePlan contract", () => {
     );
   });
 
-  it("reviews parser-like clarification before visible clarification can be appended", () => {
+  it("reviews parser-like clarification before clarification reaches the normal narrator path", () => {
     const source = extractScenePlanPathSource();
     const gmReadStart = source.indexOf("let gmRead = await runGmRead({");
     const reviewStart = source.indexOf("reviewGmReadClarification", gmReadStart);
     const reviewGuardStart = source.lastIndexOf('if (gmRead.path === "clarification")', reviewStart);
-    const visibleClarificationStart = source.indexOf('if (gmRead.path === "clarification")', reviewStart + 1);
-    const safePromptStart = source.indexOf("safeClarificationPromptForFrame", visibleClarificationStart);
-    const reviewBlock = source.slice(reviewGuardStart, visibleClarificationStart);
+    const targetContextStart = source.indexOf("const targetContext =", reviewStart);
+    const reviewBlock = source.slice(reviewGuardStart, targetContextStart);
 
     expect(gmReadStart, "mutable GM Read assignment exists").toBeGreaterThanOrEqual(0);
     expect(reviewStart, "clarification reviewer call exists").toBeGreaterThan(gmReadStart);
     expect(reviewGuardStart, "review guard exists").toBeGreaterThan(gmReadStart);
-    expect(visibleClarificationStart, "visible clarification branch exists").toBeGreaterThan(
-      reviewStart,
-    );
-    expect(safePromptStart, "safe clarification prompt remains").toBeGreaterThan(
-      visibleClarificationStart,
-    );
+    expect(targetContextStart, "normal path continues after review").toBeGreaterThan(reviewStart);
     expect(reviewBlock).toContain('if (gmRead.path === "clarification")');
     expect(reviewBlock).toContain("clarificationReview.repaired");
     expect(reviewBlock).toContain("gmRead = clarificationReview.gmRead");
@@ -366,13 +352,13 @@ describe("turn processor ScenePlan contract", () => {
     const reassignmentStart = source.indexOf("gmRead = clarificationReview.gmRead", reviewStart);
     const targetContextStart = source.indexOf("const targetContext =", reviewStart);
     const toolLoopStart = source.indexOf("runGmToolLoop", targetContextStart);
-    const visibleClarificationStart = source.indexOf('if (gmRead.path === "clarification")', toolLoopStart);
+    const narratorPacketStart = source.indexOf("buildNarratorPacket", toolLoopStart);
 
     expect(reassignmentStart).toBeGreaterThan(reviewStart);
     expect(targetContextStart).toBeGreaterThan(reviewStart);
     expect(targetContextStart).toBeGreaterThan(reassignmentStart);
     expect(toolLoopStart).toBeGreaterThan(targetContextStart);
-    expect(visibleClarificationStart).toBeGreaterThan(toolLoopStart);
+    expect(narratorPacketStart).toBeGreaterThan(toolLoopStart);
   });
 
   it("records clarification review metrics in GM Read latency metadata without raw hidden terms", () => {
@@ -412,22 +398,15 @@ describe("turn processor ScenePlan contract", () => {
     expect(helper).toContain('candidate.type === "actor" && candidate.awareness !== "clear"');
   });
 
-  it("redacts unsafe clarification prompts before chat append and narrative SSE", () => {
+  it("does not append clarification prompts directly as visible narration", () => {
     const source = extractScenePlanPathSource();
     const executedEventsStart = source.indexOf("for (const event of executedPlan.emittedEvents)");
-    const clarificationStart = source.indexOf(
-      'if (gmRead.path === "clarification")',
-      executedEventsStart,
-    );
-    const clarificationEnd = source.indexOf("const hpDropped", clarificationStart);
-    const clarificationPath = source.slice(clarificationStart, clarificationEnd);
+    const narratorStart = source.indexOf("buildNarratorPacket", executedEventsStart);
+    const preNarratorPath = source.slice(executedEventsStart, narratorStart);
 
-    expect(clarificationPath).toContain("safeClarificationPromptForFrame");
-    expectInOrder(clarificationPath, [
-      "safeClarificationPromptForFrame",
-      "appendChatMessages",
-      "yield { type: \"narrative\"",
-    ]);
+    expect(preNarratorPath).not.toContain("safeClarificationPromptForFrame");
+    expect(preNarratorPath).not.toContain("clarificationPrompt");
+    expect(preNarratorPath).not.toContain('yield { type: "narrative"');
   });
 
   it("rejects wrong-location spawn_npc before ScenePlan execution", () => {

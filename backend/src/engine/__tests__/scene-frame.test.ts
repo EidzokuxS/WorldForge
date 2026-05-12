@@ -354,6 +354,52 @@ describe("SceneFrame builder", () => {
     expect(frame.contextBudgetTrace?.didClipModelOutput).toBe(false);
   });
 
+  it("projects authoritative player inventory rows into the SceneFrame", async () => {
+    (getDb as Mock).mockReturnValue(
+      createMockDb({
+        itemRows: [
+          {
+            id: "item-satchel",
+            campaignId,
+            name: "Worn Leather Satchel",
+            tags: '["pack"]',
+            ownerId: playerId,
+            locationId: null,
+            equipState: "equipped",
+            equippedSlot: "shoulder",
+            isSignature: true,
+          },
+          {
+            id: "item-counter-seal",
+            campaignId,
+            name: "Counter Seal",
+            tags: '["scene-prop"]',
+            ownerId: null,
+            locationId: sceneScopeId,
+            equipState: "carried",
+            equippedSlot: null,
+            isSignature: false,
+          },
+        ],
+      }),
+    );
+
+    const frame = await buildDbBackedFrame();
+
+    expect(frame.playerInventory).toEqual([
+      {
+        id: "current-inventory:item-satchel",
+        itemId: "item-satchel",
+        label: "Worn Leather Satchel",
+        equipState: "equipped",
+        equippedSlot: "shoulder",
+        isSignature: true,
+      },
+    ]);
+    expect(frame.targetCandidates.map((candidate) => candidate.label)).toContain("Counter Seal");
+    expect(frame.contextBudgetTrace?.sourceCoverage.routeCounts.currentInventory).toBeUndefined();
+  });
+
   it("summarizes over-budget recent events with source ids in the SceneFrame trace", async () => {
     const recentEvents = Array.from({ length: SCENE_FRAME_RECENT_EVENT_LIMIT + 3 }, (_, index) => ({
       id: `event-${index}`,

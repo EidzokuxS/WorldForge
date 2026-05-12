@@ -221,7 +221,9 @@ function movementRefs(candidate: {
 }): string[] {
   return uniqueStrings([
     candidate.id,
+    candidate.id.startsWith("location:") ? candidate.id : `location:${candidate.id}`,
     candidate.locationId,
+    `location:${candidate.locationId}`,
     candidate.label,
     ...(candidate.path ?? []),
   ]);

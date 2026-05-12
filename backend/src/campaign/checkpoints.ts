@@ -10,7 +10,7 @@ import {
   captureCampaignBundle,
   restoreCampaignBundle,
 } from "./restore-bundle.js";
-import { clearCampaignRuntimeState } from "./runtime-state.js";
+import { clearCampaignRuntimeState, hasActiveTurn } from "./runtime-state.js";
 import { clearPendingCommittedEvents } from "../vectors/episodic-events.js";
 import {
   invalidateAuthorityAfterRestore,
@@ -107,6 +107,10 @@ export async function loadCheckpoint(
 ): Promise<CheckpointMeta> {
   assertSafeId(campaignId);
   assertSafeId(checkpointId);
+
+  if (hasActiveTurn(campaignId)) {
+    throw new AppError("Cannot load a checkpoint while a turn is active.", 409);
+  }
 
   const checkpointDir = getCheckpointDir(campaignId, checkpointId);
   const metaPath = path.join(checkpointDir, "meta.json");

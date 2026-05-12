@@ -43,7 +43,7 @@ import {
   parseTurnSSE,
 } from "@/lib/api";
 import type { ChatLookupRequest, LookupKind, LookupResultEvent } from "@/lib/api";
-import type { TurnStageStatus } from "@/lib/api";
+import type { TurnDoneBoundary, TurnStageStatus } from "@/lib/api";
 import type { WorldCurrentScene, WorldData } from "@/lib/api-types";
 import { deriveGameMessageKind } from "@/lib/gameplay-text";
 
@@ -350,17 +350,11 @@ export default function GamePage() {
   const messagesRef = useRef<DisplayChatMessage[]>([]);
   const openingRequestCampaignRef = useRef<string | null>(null);
 
-  const refreshWorldData = useCallback(
-    async (campaignId: string) => {
-      try {
-        const data = await getWorldData(campaignId);
-        setWorldData(data);
-      } catch {
-        // Non-critical — keep existing data on refresh failure
-      }
-    },
-    [],
-  );
+  const refreshWorldData = useCallback(async (campaignId: string) => {
+    const data = await getWorldData(campaignId);
+    setWorldData(data);
+    return data;
+  }, []);
 
   const clearQuickActionState = useCallback(() => {
     bufferedQuickActionsRef.current = [];
@@ -407,21 +401,45 @@ export default function GamePage() {
     setQuickActions(bufferedQuickActionsRef.current);
   }, []);
 
+  const assertWorldBoundaryFresh = useCallback((world: WorldData, boundary?: TurnDoneBoundary) => {
+    if (!boundary) return;
+    if (
+      typeof boundary.worldVersion === "number"
+      && world.worldVersion < boundary.worldVersion
+    ) {
+      throw new Error("World state refresh returned a stale world version.");
+    }
+    if (
+      typeof boundary.worldTimeMinutes === "number"
+      && world.worldTimeMinutes < boundary.worldTimeMinutes
+    ) {
+      throw new Error("World state refresh returned a stale world clock.");
+    }
+    if (typeof boundary.tick === "number" && world.currentTick < boundary.tick) {
+      throw new Error("World state refresh returned a stale turn tick.");
+    }
+  }, []);
+
   const finishCompletedTurn = useCallback(
-    (campaignId: string) => {
+    (campaignId: string, boundary?: TurnDoneBoundary) => {
       setSceneProgress("scene-settling");
       setSceneProgressCopy("Syncing world state");
       setTurnPhase("finalizing");
       setHasLiveTurnSnapshot(true);
-      revealBufferedQuickActions();
 
       void (async () => {
-        await refreshWorldData(campaignId);
+        const world = await refreshWorldData(campaignId);
+        assertWorldBoundaryFresh(world, boundary);
+        revealBufferedQuickActions();
         setSceneProgress(null);
         setTurnPhase("idle");
-      })();
+      })().catch((error) => {
+        toast.error("World sync failed", {
+          description: getErrorMessage(error, "The turn completed, but the world view did not refresh."),
+        });
+      });
     },
-    [refreshWorldData, revealBufferedQuickActions],
+    [assertWorldBoundaryFresh, refreshWorldData, revealBufferedQuickActions],
   );
 
   useEffect(() => {
@@ -506,7 +524,7 @@ export default function GamePage() {
           onDone: () => {
             setSceneProgress(null);
             setTurnPhase("idle");
-            void refreshWorldData(campaignId);
+            void refreshWorldData(campaignId).catch(() => {});
           },
           onError: (error) => {
             openingFailed = error;
@@ -884,15 +902,15 @@ export default function GamePage() {
             setTravelFeedback(formatTravelFeedback(locationChange));
           }
           // Refresh world data on any state change (movement, spawn, item transfer, etc.)
-          void refreshWorldData(campaignId);
+          void refreshWorldData(campaignId).catch(() => {});
         },
         onQuickActions: (actions) => {
           bufferQuickActions(actions);
         },
         onFinalizing: applyFinalizingStatus,
-        onDone: () => {
+        onDone: (boundary) => {
           turnCompleted = true;
-          finishCompletedTurn(campaignId);
+          finishCompletedTurn(campaignId, boundary);
         },
         onError: (error) => {
           actionStreamError = error;
@@ -979,16 +997,16 @@ export default function GamePage() {
             setTravelFeedback(formatTravelFeedback(locationChange));
           }
           if (activeCampaign) {
-            void refreshWorldData(activeCampaign.id);
+            void refreshWorldData(activeCampaign.id).catch(() => {});
           }
         },
         onQuickActions: (actions) => {
           bufferQuickActions(actions);
         },
         onFinalizing: applyFinalizingStatus,
-        onDone: () => {
+        onDone: (boundary) => {
           turnCompleted = true;
-          finishCompletedTurn(activeCampaign.id);
+          finishCompletedTurn(activeCampaign.id, boundary);
         },
         onError: (error) => {
           retryStreamError = error;
@@ -1031,7 +1049,7 @@ export default function GamePage() {
       setTravelFeedback(null);
       setHasLiveTurnSnapshot(false);
       if (activeCampaign) {
-        void refreshWorldData(activeCampaign.id);
+        void refreshWorldData(activeCampaign.id).catch(() => {});
       }
       toast.success("Last action undone");
     } catch (error) {
@@ -1206,9 +1224,17 @@ export default function GamePage() {
           <p>{backdropLocationName}</p>
         ) : null}
         {connectedPaths.length > 0 ? (
-          <p className="mt-1 text-zinc-400">
-            {connectedPaths.length} route{connectedPaths.length === 1 ? "" : "s"} nearby
-          </p>
+          <div className="mt-2 space-y-1">
+            <p className="text-zinc-400">
+              {connectedPaths.length} route{connectedPaths.length === 1 ? "" : "s"} nearby
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {connectedPaths.slice(0, 3).map((path) => (
+                <StageChip key={path.id}>{path.name}</StageChip>
+              ))}
+              {connectedPaths.length > 3 ? <StageChip>+{connectedPaths.length - 3}</StageChip> : null}
+            </div>
+          </div>
         ) : null}
       </StageContextCard>
     </div>
@@ -1261,6 +1287,13 @@ export default function GamePage() {
 
   return (
     <GameSceneShell
+      debugState={{
+        campaignId: activeCampaign?.id ?? null,
+        worldVersion: worldData?.worldVersion ?? null,
+        currentTick: worldData?.currentTick ?? null,
+        worldTimeMinutes: worldData?.worldTimeMinutes ?? null,
+        sceneId: currentScene?.id ?? currentLocation?.id ?? null,
+      }}
       backdrop={
         <SceneBackdrop
           sceneName={backdropSceneName}

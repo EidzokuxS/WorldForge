@@ -115,10 +115,14 @@ vi.mock("../../db/index.js", () => ({
 }));
 
 vi.mock("../../engine/index.js", () => ({
+  NarrationRepairExhaustedError: class NarrationRepairExhaustedError extends Error {},
+  PendingNarrationError: class PendingNarrationError extends Error {},
   processTurn: vi.fn(),
   processOpeningScene: vi.fn(),
+  resumePendingTurnNarration: vi.fn(async function* () {}),
   captureSnapshot: vi.fn(),
   restoreSnapshot: vi.fn(),
+  findPendingNarrationSaga: vi.fn(() => null),
   tickPresentNpcs: vi.fn(),
   simulateOffscreenNpcs: vi.fn(),
   checkAndTriggerReflections: vi.fn(),

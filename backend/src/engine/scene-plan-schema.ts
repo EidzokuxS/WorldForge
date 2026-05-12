@@ -18,6 +18,8 @@ const runtimeToolNames = [
   "set_relationship",
   "add_chronicle_entry",
   "log_event",
+  "record_dialogue_outcome",
+  "record_world_fact",
   "advance_time",
   "offer_quick_actions",
   "spawn_npc",
@@ -117,6 +119,22 @@ export const scenePlanActionSchema = z.discriminatedUnion("toolName", [
       actorId: backendIdSchema,
       toolName: z.literal("log_event"),
       input: runtimeToolInputSchemas.log_event,
+    })
+    .strict(),
+  z
+    .object({
+      id: backendIdSchema,
+      actorId: backendIdSchema,
+      toolName: z.literal("record_dialogue_outcome"),
+      input: runtimeToolInputSchemas.record_dialogue_outcome,
+    })
+    .strict(),
+  z
+    .object({
+      id: backendIdSchema,
+      actorId: backendIdSchema,
+      toolName: z.literal("record_world_fact"),
+      input: runtimeToolInputSchemas.record_world_fact,
     })
     .strict(),
   z

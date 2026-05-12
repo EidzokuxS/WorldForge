@@ -21,6 +21,7 @@ const {
   recordNarratorAttemptMock,
   releaseTurnSagaWorkerMock,
   transitionTurnSagaStatusMock,
+  updateNarratorAttemptOutcomeMock,
 } = vi.hoisted(() => ({
   appendChatMessagesMock: vi.fn(),
   advanceCampaignTickMock: vi.fn(),
@@ -42,6 +43,7 @@ const {
   recordNarratorAttemptMock: vi.fn(),
   releaseTurnSagaWorkerMock: vi.fn(),
   transitionTurnSagaStatusMock: vi.fn(),
+  updateNarratorAttemptOutcomeMock: vi.fn(),
 }));
 
 vi.mock("ai", () => ({
@@ -202,9 +204,24 @@ vi.mock("../narrator-packet.js", () => ({
   summarizeRuntimeToolResultForNarrator: vi.fn(() => "A local result settles."),
 }));
 
-vi.mock("../visible-narration-output-guard.js", () => ({
-  runVisibleNarrationWithPacketGuard: runVisibleNarrationWithPacketGuardMock,
-}));
+vi.mock("../visible-narration-output-guard.js", () => {
+  class VisibleNarrationPacketGuardError extends Error {
+    constructor(
+      message: string,
+      public readonly violations: Array<{ kind: string; term: string }> = [],
+      public readonly attempts = 1,
+      public readonly validation: unknown = null,
+    ) {
+      super(message);
+      this.name = "VisibleNarrationPacketGuardError";
+    }
+  }
+
+  return {
+    runVisibleNarrationWithPacketGuard: runVisibleNarrationWithPacketGuardMock,
+    VisibleNarrationPacketGuardError,
+  };
+});
 
 vi.mock("../living-world-authority.js", () => ({
   readWorldClock: vi.fn(() => ({
@@ -214,6 +231,7 @@ vi.mock("../living-world-authority.js", () => ({
     currentTick: 5,
     updatedAt: 0,
   })),
+  syncWorldClockTurnBoundary: vi.fn(),
 }));
 
 vi.mock("../turn-saga.js", () => ({
@@ -246,6 +264,7 @@ vi.mock("../turn-saga.js", () => ({
   recordNarratorAttempt: recordNarratorAttemptMock,
   releaseTurnSagaWorker: releaseTurnSagaWorkerMock,
   transitionTurnSagaStatus: transitionTurnSagaStatusMock,
+  updateNarratorAttemptOutcome: updateNarratorAttemptOutcomeMock,
 }));
 
 vi.mock("../world-forecast.js", () => ({
@@ -514,6 +533,15 @@ beforeEach(() => {
     saga = { ...saga, latestNarratorAttemptId: attempt.id };
     return attempt;
   });
+  updateNarratorAttemptOutcomeMock.mockImplementation((input: { id: string; status: string }) => {
+    const attempt = {
+      id: input.id,
+      sagaId: saga.id,
+      status: input.status,
+    };
+    saga = { ...saga, latestNarratorAttemptId: attempt.id };
+    return attempt;
+  });
   markTurnSagaFinalizedMock.mockImplementation(() => {
     saga = { ...saga, status: "finalized" };
     return saga;
@@ -552,6 +580,7 @@ describe("processTurn empty final narration", () => {
     const onPostTurn = vi.fn();
     runVisibleNarrationWithPacketGuardMock.mockResolvedValue({
       text: "   ",
+      draft: { prose: "   ", claims: [], claimSpans: [] },
       attempts: 2,
       retried: true,
       validation: { ok: true, violations: [] },

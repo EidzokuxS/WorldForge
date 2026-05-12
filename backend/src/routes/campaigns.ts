@@ -102,13 +102,7 @@ function buildWorldCurrentScene(args: {
   const broadLocation = parentBroadLocation ?? storedBroadLocation;
   const broadLocationId = broadLocation?.id ?? player.currentLocationId;
 
-  let presenceSceneScopeId = player.currentSceneLocationId ?? null;
-  if (presenceSceneScopeId && presenceSceneScopeId === player.currentLocationId) {
-    const scopeLocation = args.locations.find((location) => location.id === presenceSceneScopeId);
-    if (scopeLocation?.kind === "macro") {
-      presenceSceneScopeId = null;
-    }
-  }
+  const presenceSceneScopeId = player.currentSceneLocationId ?? null;
 
   const presenceSnapshot = resolveScenePresence({
     playerActorId: player.id,

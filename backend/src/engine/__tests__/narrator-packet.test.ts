@@ -188,7 +188,7 @@ describe("narrator packet settlement boundary", () => {
         `committed_event:${anchorEventId}`,
         `perceivable_response:${responseId}`,
         "perceivable_effect:effect-success",
-        `tool_result:${successfulActionId}:log_event`,
+        `tool_result:${successfulActionId}`,
         `visible_actor:${playerId}`,
         `visible_actor:${visibleNpcId}`,
         "guardrail:1",
@@ -339,6 +339,139 @@ describe("narrator packet settlement boundary", () => {
     expect(serializedModelView).not.toContain("pending proposal payload");
   });
 
+  it("includes hidden-source visible disturbances anonymously when no private term is present", () => {
+    const hiddenActorId = "npc-hidden-scout";
+    const hiddenActionId = "action-hidden-scout-disturbance";
+    const frame = createFrame();
+    frame.roster.background = [
+      {
+        id: hiddenActorId,
+        actorId: hiddenActorId,
+        type: "npc",
+        label: "Roof Scout",
+        locationId,
+        sceneScopeId: locationId,
+        awareness: "none",
+      },
+    ];
+    frame.perception.forbiddenActorIds = [hiddenActorId];
+    frame.perception.forbiddenActorLabels = ["Roof Scout"];
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    canonicalTurnPacket.effects = [
+      {
+        id: "effect-hidden-disturbance",
+        actionId: hiddenActionId,
+        actorId: hiddenActorId,
+        toolName: "log_event",
+        summary: "A loose shutter bangs twice above the alley.",
+        perceivableByPlayer: true,
+        toolResult: { success: true, result: { durability: "scene_local", persisted: false } },
+      },
+    ];
+    canonicalTurnPacket.actionResults = [];
+    canonicalTurnPacket.narratorFacts.actionIds = [hiddenActionId];
+    canonicalTurnPacket.narratorFacts.toolResultRefs = [
+      { actionId: hiddenActionId, toolName: "log_event" },
+    ];
+
+    const packet = buildNarratorPacket({ frame, canonicalTurnPacket });
+    const formatted = formatNarratorPacketForPrompt(packet);
+
+    expect(packet.perceivableEffects.map((effect) => effect.summary)).toContain(
+      "A loose shutter bangs twice above the alley.",
+    );
+    expect(formatted).toContain("A loose shutter bangs twice above the alley.");
+    expect(formatted).not.toContain("Roof Scout");
+    expect(formatted).not.toContain(hiddenActorId);
+    expect(formatted).not.toContain(hiddenActionId);
+  });
+
+  it("redacts hidden actor identity/private terms from visible consequences before formatting", () => {
+    const hiddenActorId = "npc-hidden-gojo";
+    const hiddenActionId = "action-hidden-gojo-reaction";
+    const hiddenText =
+      "Satoru Gojo's Six Eyes catch the Infinity Lattice pulse from across the district.";
+    const frame = createFrame();
+    frame.roster.background = [
+      {
+        id: hiddenActorId,
+        actorId: hiddenActorId,
+        type: "npc",
+        label: "Satoru Gojo",
+        locationId,
+        sceneScopeId: locationId,
+        awareness: "none",
+        summary: hiddenText,
+      },
+    ];
+    frame.perception.forbiddenActorIds = [hiddenActorId];
+    frame.perception.forbiddenActorLabels = ["Satoru Gojo", "Six Eyes"];
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    canonicalTurnPacket.effects = [
+      ...canonicalTurnPacket.effects,
+      {
+        id: "effect-hidden-gojo-reaction",
+        actionId: hiddenActionId,
+        actorId: hiddenActorId,
+        toolName: "log_event",
+        summary: hiddenText,
+        perceivableByPlayer: true,
+        toolResult: { success: true, result: { durability: "scene_local", persisted: false } },
+      },
+    ];
+    canonicalTurnPacket.actionResults = [
+      ...canonicalTurnPacket.actionResults,
+      {
+        order: 1,
+        actionId: hiddenActionId,
+        actionRef: "actor-tool:hidden-gojo:log_event:1",
+        actorId: hiddenActorId,
+        toolName: "log_event",
+        input: { text: hiddenText, importance: 3, participants: ["Satoru Gojo"] },
+        args: { text: hiddenText, importance: 3, participants: ["Satoru Gojo"] },
+        result: { success: true, result: { durability: "scene_local", persisted: false } },
+      },
+    ];
+    canonicalTurnPacket.narratorFacts.actionIds = [
+      ...canonicalTurnPacket.narratorFacts.actionIds,
+      hiddenActionId,
+    ];
+    canonicalTurnPacket.narratorFacts.toolResultRefs = [
+      ...canonicalTurnPacket.narratorFacts.toolResultRefs,
+      { actionId: hiddenActionId, toolName: "log_event" },
+    ];
+
+    const packet = buildNarratorPacket({
+      frame,
+      canonicalTurnPacket,
+      forbiddenPrivateTerms: ["Infinity Lattice"],
+    });
+    const formatted = formatNarratorPacketForPrompt(packet);
+
+    expect(packet.perceivableEffects.length).toBeGreaterThan(0);
+    expect(formatted).toContain("The lock rattles but stays closed.");
+    expect(formatted).not.toContain("Satoru Gojo");
+    expect(formatted).not.toContain("Six Eyes");
+    expect(formatted).not.toContain("Infinity Lattice");
+    expect(formatted).not.toContain(hiddenActorId);
+    expect(formatted).not.toContain(hiddenActionId);
+    expect(() => formatNarratorPacketForPrompt(packet)).not.toThrow();
+  });
+
+  it("still includes visible actor effects without anonymous-source redaction", () => {
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket,
+    });
+    const formatted = formatNarratorPacketForPrompt(packet);
+
+    expect(packet.perceivableEffects.map((effect) => effect.id)).toContain("effect-success");
+    expect(packet.perceivableEffects.map((effect) => effect.actorId)).toContain(visibleNpcId);
+    expect(formatted).toContain("Mira");
+    expect(formatted).toContain("actor=22222222-2222-4222-8222-222222222222");
+  });
+
   it("uses concrete successful log_event text when no explicit effect was authored", () => {
     const canonicalTurnPacket = createCanonicalTurnPacket();
     canonicalTurnPacket.effects = [];
@@ -369,6 +502,80 @@ describe("narrator packet settlement boundary", () => {
       "The Gondolier names the Three-Lantern Marker and says it burns amber.",
     );
     expect(formatted).not.toContain(`Committed log_event result ${successfulActionId}.`);
+  });
+
+  it("surfaces structural dialogue outcome content in narrator evidence", () => {
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    canonicalTurnPacket.effects = [];
+    canonicalTurnPacket.narratorFacts.toolResultRefs = [
+      { actionId: successfulActionId, toolName: "record_dialogue_outcome" },
+    ];
+    canonicalTurnPacket.actionResults[0] = {
+      ...canonicalTurnPacket.actionResults[0]!,
+      toolName: "record_dialogue_outcome",
+      input: {
+        speakerRef: "Concourse Disputes Clerk",
+        addresseeRefs: ["Iria"],
+        outcomeKind: "answered",
+        topicKind: "procedure",
+        authorityKind: "role_authority",
+        truthStatus: "settled_by_backend",
+        durability: "durable",
+        futureUseKind: "route_choice",
+        futureRelevance:
+          "Mismatched prose: the back alley is the official next step.",
+        summary:
+          "Mismatched prose: the courier should ignore the chamber and use a back alley.",
+        claims: [
+          {
+            claimKind: "requirement",
+            polarity: "requires",
+            subjectText: "Seal Verification Chamber",
+            summary:
+              "Mismatched prose: the sealed message should go to a back alley.",
+          },
+        ],
+        sourceRefs: ["Concourse Disputes Clerk", "Iria"],
+      },
+      args: {
+        summary:
+          "Mismatched prose: the courier should ignore the chamber and use a back alley.",
+      },
+      result: {
+        success: true,
+        result: {
+          summary:
+            "Mismatched prose: the courier should ignore the chamber and use a back alley.",
+          claims: [
+            {
+              claimKind: "requirement",
+              polarity: "requires",
+              subjectText: "Seal Verification Chamber",
+              summary:
+                "Mismatched prose: the sealed message should go to a back alley.",
+            },
+          ],
+          futureRelevance:
+            "Mismatched prose: the back alley is the official next step.",
+          durability: "durable",
+          persisted: true,
+        },
+      },
+    };
+
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket,
+    });
+    const formatted = formatNarratorPacketForPrompt(packet);
+
+    expect(packet.perceivableEffects.map((effect) => effect.summary).join("\n")).toContain(
+      "Seal Verification Chamber",
+    );
+    expect(formatted).toContain("Seal Verification Chamber");
+    expect(formatted).not.toContain("back alley");
+    expect(formatted).not.toContain("ignore the chamber");
+    expect(formatted).not.toContain("validated record dialogue outcome consequence settles");
   });
 
   it("uses legacy log_event summary text when no explicit effect was authored", () => {
@@ -545,6 +752,292 @@ describe("narrator packet settlement boundary", () => {
     expect(formatted).not.toContain("npc-generated-placeholder");
     expect(formatted).not.toContain("item-generated-placeholder");
     expect(formatted).not.toMatch(/validated .* consequence settles/i);
+  });
+
+  it("allows exact same-turn visible actor creation labels only at that creation source", () => {
+    const cases: Array<{
+      toolName: "spawn_npc" | "create_scene_extra";
+      label: string;
+      actionRef: string;
+    }> = [
+      {
+        toolName: "spawn_npc",
+        label: "Station Attendant",
+        actionRef: "step-spawn-station-attendant",
+      },
+      {
+        toolName: "create_scene_extra",
+        label: "Platform Sweeper",
+        actionRef: "step-create-platform-sweeper",
+      },
+    ];
+
+    for (const example of cases) {
+      const frame = createFrame();
+      frame.perception.forbiddenActorLabels = [example.label];
+      const canonicalTurnPacket = createCanonicalTurnPacket();
+      canonicalTurnPacket.effects = [];
+      canonicalTurnPacket.actionResults = [
+        {
+          order: 0,
+          actionId: successfulActionId,
+          actionRef: example.actionRef,
+          actorId: visibleNpcId,
+          toolName: example.toolName,
+          input: {
+            name: "generated-placeholder",
+            locationRef: "current_scene",
+          },
+          args: {
+            name: "generated-placeholder",
+            locationRef: "current_scene",
+          },
+          result: {
+            success: true,
+            result: {
+              id: `npc-${example.label.toLowerCase().replace(/\s+/g, "-")}`,
+              name: example.label,
+            },
+          },
+        },
+      ];
+      canonicalTurnPacket.narratorFacts.actionIds = [successfulActionId];
+      canonicalTurnPacket.narratorFacts.toolResultRefs = [{
+        actionId: successfulActionId,
+        toolName: example.toolName,
+      }];
+
+      const packet = buildNarratorPacket({
+        frame,
+        canonicalTurnPacket,
+      });
+
+      expect(packet.perceivableEffects.map((effect) => effect.summary)).toContain(
+        `${example.label} becomes visibly present in the scene.`,
+      );
+      expect(() => formatNarratorPacketForPrompt(packet)).not.toThrow();
+      expect(packet.forbiddenActorNames).toContain(example.label);
+    }
+  });
+
+  it("rejects same-turn visible actor creation label substrings", () => {
+    const frame = createFrame();
+    frame.perception.forbiddenActorLabels = ["Market Ledger Clerk", "Hidden Inspector"];
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    canonicalTurnPacket.effects = [];
+    canonicalTurnPacket.actionResults = [
+      {
+        order: 0,
+        actionId: successfulActionId,
+        actionRef: "step-create-canal-market-ledger-clerk",
+        actorId: visibleNpcId,
+        toolName: "create_scene_extra",
+        input: {
+          name: "Canal Market Ledger Clerk",
+          locationRef: "current_scene",
+        },
+        args: {
+          name: "Canal Market Ledger Clerk",
+          locationRef: "current_scene",
+        },
+        result: {
+          success: true,
+          result: {
+            id: "npc-canal-market-ledger-clerk",
+            name: "Canal Market Ledger Clerk",
+          },
+        },
+      },
+    ];
+    canonicalTurnPacket.narratorFacts.actionIds = [successfulActionId];
+    canonicalTurnPacket.narratorFacts.toolResultRefs = [{
+      actionId: successfulActionId,
+      toolName: "create_scene_extra",
+    }];
+
+    const packet = buildNarratorPacket({
+      frame,
+      canonicalTurnPacket,
+    });
+
+    expect(packet.perceivableEffects.map((effect) => effect.summary)).toContain(
+      "Canal Market Ledger Clerk becomes visibly present in the scene.",
+    );
+    expect(packet.forbiddenActorNames).toContain("Market Ledger Clerk");
+    expect(packet.forbiddenActorNames).toContain("Hidden Inspector");
+    expect(() => formatNarratorPacketForPrompt(packet)).toThrow(/NarratorPacket prompt unsafe/);
+  });
+
+  it("does not allow private terms embedded in same-turn visible actor creation labels", () => {
+    const frame = createFrame();
+    frame.perception.forbiddenActorLabels = ["Forest Outpost Clerk"];
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    canonicalTurnPacket.effects = [];
+    canonicalTurnPacket.actionResults = [
+      {
+        order: 0,
+        actionId: successfulActionId,
+        actionRef: "step-create-forest-outpost-clerk",
+        actorId: visibleNpcId,
+        toolName: "create_scene_extra",
+        input: {
+          name: "Forest Outpost Clerk",
+          locationRef: "current_scene",
+        },
+        args: {
+          name: "Forest Outpost Clerk",
+          locationRef: "current_scene",
+        },
+        result: {
+          success: true,
+          result: {
+            id: "npc-forest-outpost-clerk",
+            name: "Forest Outpost Clerk",
+          },
+        },
+      },
+    ];
+    canonicalTurnPacket.narratorFacts.actionIds = [successfulActionId];
+    canonicalTurnPacket.narratorFacts.toolResultRefs = [{
+      actionId: successfulActionId,
+      toolName: "create_scene_extra",
+    }];
+
+    const packet = buildNarratorPacket({
+      frame,
+      canonicalTurnPacket,
+      forbiddenPrivateTerms: ["Forest Outpost"],
+    });
+
+    expect(packet.perceivableEffects.map((effect) => effect.summary)).toContain(
+      "Forest Outpost Clerk becomes visibly present in the scene.",
+    );
+    expect(packet.forbiddenActorNames).toContain("Forest Outpost Clerk");
+    expect(packet.forbiddenPrivateTerms).toContain("Forest Outpost");
+    expect(() => formatNarratorPacketForPrompt(packet)).toThrow(/NarratorPacket prompt unsafe/);
+  });
+
+  it("does not let a shorter visible actor creation suppress a longer hidden actor label", () => {
+    const frame = createFrame();
+    frame.perception.forbiddenActorLabels = ["Canal Market Ledger Clerk"];
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    canonicalTurnPacket.effects = [];
+    canonicalTurnPacket.actionResults = [
+      {
+        order: 0,
+        actionId: successfulActionId,
+        actionRef: "step-create-market-ledger-clerk",
+        actorId: visibleNpcId,
+        toolName: "create_scene_extra",
+        input: {
+          name: "Market Ledger Clerk",
+          locationRef: "current_scene",
+        },
+        args: {
+          name: "Market Ledger Clerk",
+          locationRef: "current_scene",
+        },
+        result: {
+          success: true,
+          result: {
+            id: "npc-market-ledger-clerk",
+            name: "Market Ledger Clerk",
+          },
+        },
+      },
+      {
+        order: 1,
+        actionId: secondActionId,
+        actionRef: "step-hidden-longer-label-leak",
+        actorId: visibleNpcId,
+        toolName: "log_event",
+        input: {
+          text: "Canal Market Ledger Clerk watches from the offscreen booth.",
+        },
+        args: {
+          text: "Canal Market Ledger Clerk watches from the offscreen booth.",
+        },
+        result: {
+          success: true,
+          result: { eventId: "event-hidden-longer-label-leak" },
+        },
+      },
+    ];
+    canonicalTurnPacket.narratorFacts.actionIds = [successfulActionId, secondActionId];
+    canonicalTurnPacket.narratorFacts.toolResultRefs = [
+      { actionId: successfulActionId, toolName: "create_scene_extra" },
+      { actionId: secondActionId, toolName: "log_event" },
+    ];
+
+    const packet = buildNarratorPacket({
+      frame,
+      canonicalTurnPacket,
+    });
+
+    expect(packet.perceivableEffects.map((effect) => effect.summary)).toContain(
+      "Market Ledger Clerk becomes visibly present in the scene.",
+    );
+    expect(packet.forbiddenActorNames).toContain("Canal Market Ledger Clerk");
+    expect(() => formatNarratorPacketForPrompt(packet)).toThrow(/NarratorPacket prompt unsafe/);
+  });
+
+  it("keeps hidden actor labels forbidden when they are not same-turn visible creations", () => {
+    const frame = createFrame();
+    frame.perception.forbiddenActorLabels = ["Station Attendant", "Back-Room Auditor"];
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    canonicalTurnPacket.effects = [];
+    canonicalTurnPacket.actionResults = [
+      {
+        order: 0,
+        actionId: successfulActionId,
+        actionRef: "step-spawn-station-attendant",
+        actorId: visibleNpcId,
+        toolName: "spawn_npc",
+        input: {
+          name: "generated-placeholder",
+          locationRef: "current_scene",
+        },
+        args: {
+          name: "generated-placeholder",
+          locationRef: "current_scene",
+        },
+        result: {
+          success: true,
+          result: { id: "npc-station-attendant", name: "Station Attendant" },
+        },
+      },
+      {
+        order: 1,
+        actionId: secondActionId,
+        actionRef: "step-hidden-leak",
+        actorId: visibleNpcId,
+        toolName: "log_event",
+        input: {
+          text: "Back-Room Auditor watches from the offscreen booth.",
+        },
+        args: {
+          text: "Back-Room Auditor watches from the offscreen booth.",
+        },
+        result: {
+          success: true,
+          result: { eventId: "event-hidden-leak" },
+        },
+      },
+    ];
+    canonicalTurnPacket.narratorFacts.actionIds = [successfulActionId, secondActionId];
+    canonicalTurnPacket.narratorFacts.toolResultRefs = [
+      { actionId: successfulActionId, toolName: "spawn_npc" },
+      { actionId: secondActionId, toolName: "log_event" },
+    ];
+
+    const packet = buildNarratorPacket({
+      frame,
+      canonicalTurnPacket,
+    });
+
+    expect(packet.forbiddenActorNames).toContain("Station Attendant");
+    expect(packet.forbiddenActorNames).toContain("Back-Room Auditor");
+    expect(() => formatNarratorPacketForPrompt(packet)).toThrow(/NarratorPacket prompt unsafe/);
   });
 
   it("summarizes successful bridge state results without turning search or intent into discovered truth", () => {
@@ -853,5 +1346,30 @@ describe("narrator packet settlement boundary", () => {
       expect(summary).not.toContain(successfulActionId);
       expect(summary).not.toMatch(/^Committed /);
     }
+  });
+
+  it("summarizes observation lookup results without exposing tool names as scene prose", () => {
+    const summary = summarizeRuntimeToolResultForNarrator({
+      toolName: "find_location_candidates",
+      actionId: successfulActionId,
+      toolInput: { query: "original square" },
+      toolArgs: { query: "original square" },
+      toolResult: {
+        success: true,
+        kind: "observation",
+        observationOnly: true,
+        result: {
+          queryMatched: false,
+          candidates: [],
+          count: 0,
+        },
+      },
+    });
+
+    expect(summary).toContain("No matching visible or reachable location is confirmed");
+    expect(summary).not.toContain("find_location_candidates");
+    expect(summary).not.toContain("find location");
+    expect(summary).not.toContain("sweep");
+    expect(summary).not.toMatch(/validated .* consequence/i);
   });
 });

@@ -23,6 +23,7 @@ import { safeGenerateObject } from "../../ai/generate-object-safe.js";
 import { createModel } from "../../ai/provider-registry.js";
 import { withRole } from "../../lib/index.js";
 import {
+  WORLD_BRAIN_TIMEOUT_MS,
   WORLD_BRAIN_MAX_BACKGROUND_ACTORS,
   WORLD_BRAIN_MAX_CAUSAL_BEATS,
   WORLD_BRAIN_MAX_GUARDRAILS,
@@ -374,11 +375,17 @@ describe("world-brain", () => {
     expect(withRole).toHaveBeenCalledWith("judge", expect.any(Function));
     expect(createModel).toHaveBeenCalledWith(
       expect.objectContaining({ id: "judge-provider" }),
+      { role: "judge", reasoningMode: "bypass" },
     );
     expect(safeGenerateObject).toHaveBeenCalledWith(
       expect.objectContaining({
         model: "judge-model",
         prompt: expect.stringContaining("Allowed actor names: Hero, Nanami, Choso"),
+        mode: "native_json",
+        maxOutputTokens: 900,
+        timeout: { totalMs: WORLD_BRAIN_TIMEOUT_MS },
+        allowTextFallback: false,
+        allowRepair: false,
       }),
     );
     expect(result.focalActorNames).toEqual(["Hero"]);

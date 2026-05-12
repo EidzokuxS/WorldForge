@@ -49,6 +49,7 @@ describe("storyteller-contract", () => {
     expect(STORYTELLER_RP_PLAY_RULES).toContain("Player agency is locked");
     expect(STORYTELLER_RP_PLAY_RULES).toContain("NPCs are autonomous");
     expect(STORYTELLER_RP_PLAY_RULES).toContain("The first sentence must add new pressure");
+    expect(STORYTELLER_RP_PLAY_RULES).toContain("existing visible-state answer to an observe/status-read request");
     expect(STORYTELLER_RP_PLAY_RULES).toContain("already supported by authoritative inputs");
     expect(STORYTELLER_RP_PLAY_RULES).toContain("one concrete line, gesture, decision, or refusal");
     expect(STORYTELLER_PROSE_TECHNIQUE_RULES).toContain("plain scene truth first");
@@ -147,14 +148,17 @@ describe("storyteller-contract", () => {
     expect(contract).toContain("plain scene truth first");
   });
 
-  it("uses a non-conflicting final-visible JSON draft output mode", () => {
+  it("uses a non-conflicting final-visible grounded sentence draft output mode", () => {
     const contract = buildStorytellerContract({
       pass: "final-visible",
-      outputMode: "narration-draft-json",
+      outputMode: "grounded-sentence-draft",
     });
 
-    expect(contract).toContain("Return exactly one JSON object");
-    expect(contract).toContain("prose field must contain narrative prose only");
+    expect(contract).toContain("Return exactly one GroundedSentenceDraft structured object");
+    expect(contract).toContain("Return 1-5 sentence objects total; never return 6 or more sentences.");
+    expect(contract).toContain("sentences[].text field must contain player-visible narrative prose only");
+    expect(contract).toContain("sentences[].evidenceRefs array must contain 1-4 exact packet evidence ids");
+    expect(contract).toContain("never return five or more evidenceRefs on one sentence");
     expect(contract).not.toContain("Your output must be narrative prose only.");
     expect(contract).toContain("plain scene truth first");
   });

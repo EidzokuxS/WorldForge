@@ -142,6 +142,10 @@ function createThinGroundedDraft(overrides: Partial<NarrationDraft> = {}): Narra
   };
 }
 
+function invalidGeneratorOutput(value: unknown): NarrationDraft {
+  return value as NarrationDraft;
+}
+
 describe("visible narration output guard", () => {
   it("detects forbidden actor names and forbidden fact markers in buffered narration", () => {
     const packet = createPacket();
@@ -179,37 +183,260 @@ describe("visible narration output guard", () => {
     });
   });
 
-  it("forbidden Storyteller output retries once with generic guard addendum", async () => {
+  it("allows same-turn committed visible actor creation labels in final narration", () => {
+    const packet = createPacket();
+    packet.forbiddenActorNames = ["Exchange Validation Clerk"];
+    packet.visibleActors.push({
+      id: "actor-exchange-clerk",
+      label: "Exchange Validation Clerk",
+      type: "npc",
+    });
+    packet.perceivableEffects = [
+      {
+        id: "action-result:create-clerk",
+        actorId: playerId,
+        actionId: "create-clerk",
+        toolName: "create_scene_extra",
+        summary: "Exchange Validation Clerk becomes visibly present in the scene.",
+        perceivableByPlayer: true,
+        toolResult: {
+          success: true,
+          result: {
+            id: "actor-exchange-clerk",
+            name: "Exchange Validation Clerk",
+          },
+        },
+      },
+    ];
+    packet.canonicalTurnPacket = {
+      ...packet.canonicalTurnPacket,
+      narratorFacts: {
+        ...packet.canonicalTurnPacket.narratorFacts,
+        actionIds: ["create-clerk"],
+        toolResultRefs: [{ actionId: "create-clerk", toolName: "create_scene_extra" }],
+      },
+      actionResults: [
+        {
+          order: 1,
+          actionId: "create-clerk",
+          actionRef: "tool-call-1",
+          actorId: playerId,
+          toolName: "create_scene_extra",
+          input: { name: "Exchange Validation Clerk" },
+          args: { name: "Exchange Validation Clerk" },
+          result: {
+            success: true,
+            result: {
+              id: "actor-exchange-clerk",
+              name: "Exchange Validation Clerk",
+            },
+          },
+          summary: "Exchange Validation Clerk becomes visibly present in the scene.",
+        },
+      ],
+    };
+    const prose = "The Exchange Validation Clerk slides the form back across the counter.";
+    const draft = createGroundedDraft({
+      prose,
+      claims: [{
+        id: "claim-visible-clerk",
+        kind: "playable_beat",
+        summary: "The newly visible clerk returns the form.",
+        requiresEvidence: false,
+        evidenceRefs: [],
+      }],
+      claimSpans: [{
+        id: "span-visible-clerk",
+        spanText: prose,
+        claimIds: ["claim-visible-clerk"],
+        requiresEvidence: false,
+      }],
+    });
+
+    expect(
+      validateVisibleNarrationAgainstPacket({
+        packet,
+        text: prose,
+        draft,
+      }),
+    ).toMatchObject({
+      ok: true,
+      violations: [],
+    });
+
+    packet.forbiddenActorNames.push("Hidden Archer");
+    expect(
+      validateVisibleNarrationAgainstPacket({
+        packet,
+        text: `${prose} The Hidden Archer waits unseen.`,
+      }),
+    ).toMatchObject({
+      ok: false,
+      violations: [{ kind: "forbiddenActorName", term: "Hidden Archer" }],
+    });
+  });
+
+  it("rejects same-turn committed visible actor creation label substrings", () => {
+    const packet = createPacket();
+    packet.forbiddenActorNames = ["Validation Clerk"];
+    packet.visibleActors.push({
+      id: "actor-exchange-clerk",
+      label: "Exchange Validation Clerk",
+      type: "npc",
+    });
+    packet.perceivableEffects = [
+      {
+        id: "action-result:create-clerk",
+        actorId: playerId,
+        actionId: "create-clerk",
+        toolName: "create_scene_extra",
+        summary: "Exchange Validation Clerk becomes visibly present in the scene.",
+        perceivableByPlayer: true,
+        toolResult: {
+          success: true,
+          result: {
+            id: "actor-exchange-clerk",
+            name: "Exchange Validation Clerk",
+          },
+        },
+      },
+    ];
+    packet.canonicalTurnPacket = {
+      ...packet.canonicalTurnPacket,
+      narratorFacts: {
+        ...packet.canonicalTurnPacket.narratorFacts,
+        actionIds: ["create-clerk"],
+        toolResultRefs: [{ actionId: "create-clerk", toolName: "create_scene_extra" }],
+      },
+      actionResults: [
+        {
+          order: 1,
+          actionId: "create-clerk",
+          actionRef: "tool-call-1",
+          actorId: playerId,
+          toolName: "create_scene_extra",
+          input: { name: "Exchange Validation Clerk" },
+          args: { name: "Exchange Validation Clerk" },
+          result: {
+            success: true,
+            result: {
+              id: "actor-exchange-clerk",
+              name: "Exchange Validation Clerk",
+            },
+          },
+          summary: "Exchange Validation Clerk becomes visibly present in the scene.",
+        },
+      ],
+    };
+
+    expect(
+      validateVisibleNarrationAgainstPacket({
+        packet,
+        text: "The Exchange Validation Clerk slides the form back across the counter.",
+      }),
+    ).toMatchObject({
+      ok: false,
+      violations: [{ kind: "forbiddenActorName", term: "Validation Clerk" }],
+    });
+  });
+
+  it("rejects forbidden private terms embedded in same-turn visible actor labels", () => {
+    const packet = createPacket();
+    packet.forbiddenActorNames = ["Forest Outpost Clerk"];
+    packet.forbiddenPrivateTerms = ["Forest Outpost"];
+    packet.visibleActors.push({
+      id: "actor-forest-clerk",
+      label: "Forest Outpost Clerk",
+      type: "npc",
+    });
+    packet.perceivableEffects = [
+      {
+        id: "action-result:create-clerk",
+        actorId: playerId,
+        actionId: "create-clerk",
+        toolName: "create_scene_extra",
+        summary: "Forest Outpost Clerk becomes visibly present in the scene.",
+        perceivableByPlayer: true,
+        toolResult: {
+          success: true,
+          result: {
+            id: "actor-forest-clerk",
+            name: "Forest Outpost Clerk",
+          },
+        },
+      },
+    ];
+    packet.canonicalTurnPacket = {
+      ...packet.canonicalTurnPacket,
+      narratorFacts: {
+        ...packet.canonicalTurnPacket.narratorFacts,
+        actionIds: ["create-clerk"],
+        toolResultRefs: [{ actionId: "create-clerk", toolName: "create_scene_extra" }],
+      },
+      actionResults: [
+        {
+          order: 1,
+          actionId: "create-clerk",
+          actionRef: "tool-call-1",
+          actorId: playerId,
+          toolName: "create_scene_extra",
+          input: { name: "Forest Outpost Clerk" },
+          args: { name: "Forest Outpost Clerk" },
+          result: {
+            success: true,
+            result: {
+              id: "actor-forest-clerk",
+              name: "Forest Outpost Clerk",
+            },
+          },
+          summary: "Forest Outpost Clerk becomes visibly present in the scene.",
+        },
+      ],
+    };
+
+    expect(
+      validateVisibleNarrationAgainstPacket({
+        packet,
+        text: "The Forest Outpost Clerk slides the form back across the counter.",
+      }),
+    ).toMatchObject({
+      ok: false,
+      violations: [{ kind: "forbiddenPrivateTerm", term: "Forest Outpost" }],
+    });
+  });
+
+  it("forbidden Storyteller output fails closed without guard repair", async () => {
     const packet = createPacket();
     const attempts: Array<{ attempt: number; guardAddendum: string | null }> =
       [];
     const generateNarration = vi.fn(({ attempt, guardAddendum }) => {
       attempts.push({ attempt, guardAddendum });
-
-      if (attempt === 1) {
-        return "The Hidden Archer watches from the parapet.";
-      }
-
-      return JSON.stringify(createGroundedDraft());
+      return createGroundedDraft({
+        prose: "The Hidden Archer watches from the parapet.",
+        claimSpans: [
+          {
+            id: "span-hidden-archer",
+            spanText: "The Hidden Archer watches from the parapet.",
+            claimIds: ["claim-bridge-bell"],
+            requiresEvidence: true,
+          },
+        ],
+      });
     });
 
-    const result = await runVisibleNarrationWithPacketGuard({
+    await expect(runVisibleNarrationWithPacketGuard({
       packet,
       generateNarration,
+    })).rejects.toMatchObject({
+      attempts: 1,
+      violations: expect.arrayContaining([
+        expect.objectContaining({ kind: "forbiddenActorName", term: "Hidden Archer" }),
+      ]),
     });
 
-    expect(VISIBLE_NARRATION_PACKET_GUARD_RETRY_LIMIT).toBe(1);
-    expect(generateNarration).toHaveBeenCalledTimes(2);
-    expect(result).toMatchObject({
-      text: "The Gate Captain lowers his voice: the bridge bell will ring soon.",
-      attempts: 2,
-      retried: true,
-    });
-    expect(attempts[1]?.guardAddendum).toContain("visible packet");
-    expect(attempts[1]?.guardAddendum).not.toContain("Hidden Archer");
-    expect(attempts[1]?.guardAddendum).not.toContain(
-      `hidden-actor:${hiddenNpcId}`,
-    );
+    expect(VISIBLE_NARRATION_PACKET_GUARD_RETRY_LIMIT).toBe(0);
+    expect(generateNarration).toHaveBeenCalledTimes(1);
+    expect(attempts).toEqual([{ attempt: 1, guardAddendum: null }]);
   });
 
   it("reports safe redaction audit diagnostics without hidden terms or proposal text", async () => {
@@ -242,71 +469,62 @@ describe("visible narration output guard", () => {
     const diagnostics: string[] = [];
     const generateNarration = vi.fn(({ attempt, guardAddendum }) => {
       attempts.push({ attempt, guardAddendum });
-      return attempt === 1
-        ? JSON.stringify(createGroundedDraft({
-            prose: "The Hidden Archer names the Forest Outpost and proposal-secret-vault.",
-          }))
-        : JSON.stringify(createGroundedDraft());
+      return createGroundedDraft({
+        prose: "The Hidden Archer names the Forest Outpost and proposal-secret-vault.",
+      });
     });
 
-    const result = await runVisibleNarrationWithPacketGuard({
+    await expect(runVisibleNarrationWithPacketGuard({
       packet,
       generateNarration,
       onUnsafeAttempt: ({ validation }) => {
         diagnostics.push(JSON.stringify(validation.diagnostics));
       },
-    });
+    })).rejects.toBeInstanceOf(VisibleNarrationPacketGuardError);
 
-    expect(result.retried).toBe(true);
-    expect(attempts[1]?.guardAddendum).toContain("Safe redaction audit categories");
-    expect(attempts[1]?.guardAddendum).toContain("forbiddenActorName");
-    expect(attempts[1]?.guardAddendum).toContain("uncommittedProposalCount=2");
+    expect(generateNarration).toHaveBeenCalledTimes(1);
+    expect(attempts).toEqual([{ attempt: 1, guardAddendum: null }]);
     expect(diagnostics[0]).toContain("\"uncommittedProposalCount\":2");
-    expect(`${attempts[1]?.guardAddendum}\n${diagnostics[0]}`).not.toContain("Hidden Archer");
-    expect(`${attempts[1]?.guardAddendum}\n${diagnostics[0]}`).not.toContain("Forest Outpost");
-    expect(`${attempts[1]?.guardAddendum}\n${diagnostics[0]}`).not.toContain(
+    expect(diagnostics[0]).not.toContain("Hidden Archer");
+    expect(diagnostics[0]).not.toContain("Forest Outpost");
+    expect(diagnostics[0]).not.toContain(
       `hidden-actor:${hiddenNpcId}`,
     );
-    expect(`${attempts[1]?.guardAddendum}\n${diagnostics[0]}`).not.toContain(
+    expect(diagnostics[0]).not.toContain(
       "proposal-secret-vault",
     );
   });
 
-  it("empty Storyteller output retries with playable narration addendum", async () => {
+  it("empty Storyteller output fails closed without playable narration repair", async () => {
     const packet = createPacket();
     const attempts: Array<{ attempt: number; guardAddendum: string | null }> =
       [];
     const generateNarration = vi.fn(({ attempt, guardAddendum }) => {
       attempts.push({ attempt, guardAddendum });
-
-      if (attempt === 1) {
-        return "   ";
-      }
-
-      return JSON.stringify(createGroundedDraft());
+      return invalidGeneratorOutput("   ");
     });
 
-    const result = await runVisibleNarrationWithPacketGuard({
+    await expect(runVisibleNarrationWithPacketGuard({
       packet,
       generateNarration,
+    })).rejects.toMatchObject({
+      attempts: 1,
+      violations: expect.arrayContaining([
+        expect.objectContaining({ kind: "emptyNarration" }),
+        expect.objectContaining({ kind: "invalidNarrationDraft" }),
+      ]),
     });
 
-    expect(generateNarration).toHaveBeenCalledTimes(2);
-    expect(result).toMatchObject({
-      text: "The Gate Captain lowers his voice: the bridge bell will ring soon.",
-      attempts: 2,
-      retried: true,
-    });
-    expect(attempts[1]?.guardAddendum).toContain("previous output was empty");
-    expect(attempts[1]?.guardAddendum).toContain("playable next moment");
+    expect(generateNarration).toHaveBeenCalledTimes(1);
+    expect(attempts).toEqual([{ attempt: 1, guardAddendum: null }]);
   });
 
-  it("accepts short safe structured narration after one soft retry preference", async () => {
+  it("accepts short safe structured narration without soft retry preference", async () => {
     const packet = createPacket();
     const attempts: Array<{ attempt: number; guardAddendum: string | null }> = [];
     const generateNarration = vi.fn(({ attempt, guardAddendum }) => {
       attempts.push({ attempt, guardAddendum });
-      return JSON.stringify(createThinGroundedDraft());
+      return createThinGroundedDraft();
     });
 
     const result = await runVisibleNarrationWithPacketGuard({
@@ -314,11 +532,11 @@ describe("visible narration output guard", () => {
       generateNarration,
     });
 
-    expect(generateNarration).toHaveBeenCalledTimes(2);
+    expect(generateNarration).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({
       text: "Gate holds.",
-      attempts: 2,
-      retried: true,
+      attempts: 1,
+      retried: false,
       validation: {
         ok: true,
         violations: [],
@@ -330,101 +548,162 @@ describe("visible narration output guard", () => {
       violations: [],
       warnings: [{ kind: "thin_prose" }],
     });
-    expect(attempts[1]?.guardAddendum).toContain("previous output was too thin");
+    expect(attempts).toEqual([{ attempt: 1, guardAddendum: null }]);
   });
 
-  it("returns accepted plain prose exactly without trimming", async () => {
+  it("returns accepted draft prose exactly without trimming", async () => {
     const packet = createPacket();
     packet.evidenceLedger = undefined;
     const output = "\n  The captain waits by the gate.  \n";
 
     const result = await runVisibleNarrationWithPacketGuard({
       packet,
-      generateNarration: vi.fn(() => output),
+      generateNarration: vi.fn(() => ({
+        prose: output,
+        claims: [{
+          id: "claim-playable",
+          kind: "playable_beat",
+          summary: "The scene returns control on a playable next moment.",
+          requiresEvidence: false,
+          evidenceRefs: [],
+        }],
+        claimSpans: [{
+          id: "span-playable",
+          spanText: output,
+          claimIds: ["claim-playable"],
+          requiresEvidence: false,
+        }],
+      } as NarrationDraft)),
     });
 
     expect(result.retried).toBe(false);
     expect(result.text).toBe(output);
   });
 
-  it("runs literal and empty packet checks before structured grounding repair", async () => {
+  it("accepts a native structured NarrationDraft object without prose fallback parsing", async () => {
+    const packet = createPacket();
+    const draft = createGroundedDraft();
+
+    const result = await runVisibleNarrationWithPacketGuard({
+      packet,
+      generateNarration: vi.fn(() => draft),
+    });
+
+    expect(result.retried).toBe(false);
+    expect(result.text).toBe(draft.prose);
+    expect(result.draft).toEqual(draft);
+  });
+
+  it("runs literal and empty packet checks before grounding diagnostics and fails closed", async () => {
     const packet = createPacket();
     const attempts: Array<{ attempt: number; guardAddendum: string | null }> = [];
     const generateNarration = vi.fn(({ attempt, guardAddendum }) => {
       attempts.push({ attempt, guardAddendum });
-
-      if (attempt === 1) {
-        return JSON.stringify(createGroundedDraft({
-          prose: "The Hidden Archer names the Forest Outpost.",
-          claims: [
-            {
-              id: "claim-unsupported",
-              kind: "future_pressure",
-              summary: "Unsupported pressure.",
-              requiresEvidence: true,
-              evidenceRefs: [],
-            },
-          ],
-        }));
-      }
-
-      return JSON.stringify(createGroundedDraft());
+      return createGroundedDraft({
+        prose: "The Hidden Archer names the Forest Outpost.",
+        claims: [
+          {
+            id: "claim-unsupported",
+            kind: "future_pressure",
+            summary: "Unsupported pressure.",
+            requiresEvidence: true,
+            evidenceRefs: [],
+          },
+        ],
+      });
     });
 
-    const result = await runVisibleNarrationWithPacketGuard({
+    await expect(runVisibleNarrationWithPacketGuard({
       packet,
       generateNarration,
+    })).rejects.toMatchObject({
+      attempts: 1,
+      violations: expect.arrayContaining([
+        expect.objectContaining({ kind: "forbiddenActorName" }),
+        expect.objectContaining({ kind: "forbiddenPrivateTerm" }),
+      ]),
     });
 
-    expect(result.text).toBe("The Gate Captain lowers his voice: the bridge bell will ring soon.");
-    expect(attempts[1]?.guardAddendum).toContain("visible packet");
-    expect(attempts[1]?.guardAddendum).not.toContain("claim-unsupported");
-    expect(attempts[1]?.guardAddendum).not.toContain("Hidden Archer");
-    expect(attempts[1]?.guardAddendum).not.toContain("Forest Outpost");
+    expect(generateNarration).toHaveBeenCalledTimes(1);
+    expect(attempts).toEqual([{ attempt: 1, guardAddendum: null }]);
   });
 
-  it("repairs unsupported structured grounding without leaking private terms", async () => {
+  it("rejects r17-style draft metadata instead of locally assigning evidence", async () => {
+    const packet = createPacket();
+    const prose = "The Gate Captain lowers his voice: the bridge bell will ring soon.";
+    const generateNarration = vi
+      .fn()
+      .mockReturnValue(createGroundedDraft({
+        prose,
+        claims: [
+          {
+            id: "claim-bridge-bell",
+            kind: "future_pressure",
+            summary: "The bridge bell creates near-future pressure.",
+            requiresEvidence: true,
+            evidenceRefs: ["unknown-ledger-ref"],
+          },
+        ],
+        claimSpans: [
+          {
+            id: "span-bridge-bell",
+            spanText: "a warning that is not copied from prose",
+            claimIds: ["claim-bridge-bell"],
+            requiresEvidence: true,
+          },
+        ],
+      }));
+
+    await expect(runVisibleNarrationWithPacketGuard({
+      packet,
+      generateNarration,
+    })).rejects.toMatchObject({
+      attempts: 1,
+      violations: expect.arrayContaining([
+        expect.objectContaining({ kind: "grounding" }),
+      ]),
+    });
+
+    expect(generateNarration).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not auto-fill evidence refs for unsupported structured grounding", async () => {
     const packet = createPacket();
     const attempts: Array<{ attempt: number; guardAddendum: string | null }> = [];
     const generateNarration = vi.fn(({ attempt, guardAddendum }) => {
       attempts.push({ attempt, guardAddendum });
-
-      if (attempt === 1) {
-        return JSON.stringify(createGroundedDraft({
-          claims: [
-            {
-              id: "claim-unsupported",
-              kind: "future_pressure",
-              summary: "Unsupported pressure near the gate.",
-              requiresEvidence: true,
-              evidenceRefs: [],
-            },
-          ],
-        }));
-      }
-
-      return JSON.stringify(createGroundedDraft());
+      return createGroundedDraft({
+        claims: [
+          {
+            id: "claim-unsupported",
+            kind: "future_pressure",
+            summary: "Unsupported pressure near the gate.",
+            requiresEvidence: true,
+            evidenceRefs: [],
+          },
+        ],
+      });
     });
 
-    const result = await runVisibleNarrationWithPacketGuard({
+    await expect(runVisibleNarrationWithPacketGuard({
       packet,
       generateNarration,
+    })).rejects.toMatchObject({
+      attempts: 1,
+      violations: expect.arrayContaining([
+        expect.objectContaining({ kind: "grounding" }),
+      ]),
     });
 
-    expect(result.retried).toBe(true);
-    expect(result.text).toBe("The Gate Captain lowers his voice: the bridge bell will ring soon.");
-    expect(attempts[1]?.guardAddendum).toContain("an evidence-required claim lacks evidenceRefs");
-    expect(attempts[1]?.guardAddendum).not.toContain("claim-unsupported");
-    expect(attempts[1]?.guardAddendum).not.toContain("Forest Outpost");
-    expect(attempts[1]?.guardAddendum).not.toContain("Hidden Archer");
-    expect(attempts[1]?.guardAddendum).not.toContain(`hidden-actor:${hiddenNpcId}`);
+    expect(generateNarration).toHaveBeenCalledTimes(1);
+    expect(attempts[0]?.guardAddendum).toBeNull();
   });
 
-  it("repairs unsupported claimSpan coverage omitted from claims", async () => {
+  it("rejects omitted evidence-backed claim metadata after retry instead of synthesizing claims", async () => {
     const packet = createPacket();
     const generateNarration = vi
       .fn()
-      .mockReturnValueOnce(JSON.stringify(createGroundedDraft({
+      .mockReturnValue(createGroundedDraft({
         claims: [],
         claimSpans: [
           {
@@ -434,24 +713,104 @@ describe("visible narration output guard", () => {
             requiresEvidence: true,
           },
         ],
-      })))
-      .mockReturnValueOnce(JSON.stringify(createGroundedDraft()));
+      }));
 
-    const result = await runVisibleNarrationWithPacketGuard({
+    await expect(runVisibleNarrationWithPacketGuard({
       packet,
       generateNarration,
+    })).rejects.toMatchObject({
+      attempts: 1,
+      violations: expect.arrayContaining([
+        expect.objectContaining({ kind: "grounding" }),
+      ]),
     });
 
-    expect(result.retried).toBe(true);
-    expect(result.validation.grounding?.ok).toBe(true);
-    expect(generateNarration).toHaveBeenCalledTimes(2);
+    expect(generateNarration).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports safe grounding subtype diagnostics during direct validation", async () => {
+    const packet = createPacket();
+    const draft = createGroundedDraft({
+      claims: [],
+      claimSpans: [
+        {
+          id: "span-Forest-Outpost-private",
+          spanText: "the bridge bell will ring soon",
+          claimIds: [],
+          requiresEvidence: true,
+        },
+      ],
+    });
+
+    const validation = validateVisibleNarrationAgainstPacket({
+      packet,
+      text: draft.prose,
+      draft,
+    });
+    const diagnostics = JSON.stringify(validation.diagnostics);
+
+    expect(diagnostics).toContain("\"grounding\"");
+    expect(diagnostics).toContain("\"uncovered_claim_span\"");
+    expect(diagnostics).toContain("\"unsupported\":1");
+    expect(diagnostics).not.toContain("Forest Outpost");
+    expect(diagnostics).not.toContain("span-Forest-Outpost-private");
+  });
+
+  it("does not repair forbidden private term leaks even when metadata is repairable", async () => {
+    const packet = createPacket();
+    const leakedDraft = createGroundedDraft({
+      prose: "The Gate Captain names the Forest Outpost while the bridge bell will ring soon.",
+      claims: [
+        {
+          id: "claim-bridge-bell",
+          kind: "future_pressure",
+          summary: "The bridge bell creates near-future pressure.",
+          requiresEvidence: true,
+          evidenceRefs: ["unknown-ledger-ref"],
+        },
+      ],
+      claimSpans: [
+        {
+          id: "span-bridge-bell",
+          spanText: "a warning that is not copied from prose",
+          claimIds: ["claim-bridge-bell"],
+          requiresEvidence: true,
+        },
+      ],
+    });
+    const generateNarration = vi.fn(() => leakedDraft);
+
+    await expect(runVisibleNarrationWithPacketGuard({
+      packet,
+      generateNarration,
+    })).rejects.toMatchObject({
+      attempts: 1,
+      violations: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "forbiddenPrivateTerm",
+          term: "Forest Outpost",
+        }),
+      ]),
+    });
+
+    expect(generateNarration).toHaveBeenCalledTimes(1);
   });
 
   it("second forbidden Storyteller output throws before appendChatMessages", async () => {
     const packet = createPacket();
 
     const appendChatMessages = vi.fn();
-    const generateNarration = vi.fn(() => "The Hidden Archer stays named.");
+    const generateNarration = vi.fn(() => createGroundedDraft({
+      prose: "The Hidden Archer stays named.",
+      claimSpans: [
+        {
+          id: "span-hidden-archer",
+          spanText: "The Hidden Archer stays named.",
+          claimIds: ["claim-bridge-bell"],
+          requiresEvidence: true,
+        },
+      ],
+    }));
 
     let thrown: unknown;
     try {
@@ -465,7 +824,7 @@ describe("visible narration output guard", () => {
 
     expect(thrown).toBeInstanceOf(VisibleNarrationPacketGuardError);
     expect(thrown).toMatchObject({
-      attempts: 2,
+      attempts: 1,
       violations: expect.arrayContaining([
         expect.objectContaining({
           kind: "forbiddenActorName",
@@ -473,113 +832,256 @@ describe("visible narration output guard", () => {
         }),
       ]),
     });
-    expect(generateNarration).toHaveBeenCalledTimes(2);
+    expect(generateNarration).toHaveBeenCalledTimes(1);
     expect(appendChatMessages).not.toHaveBeenCalled();
   });
 
-  it("repairs non-JSON packet narration instead of accepting plain prose", async () => {
+  it("rejects non-JSON packet narration instead of accepting plain prose", async () => {
     const packet = createPacket();
     const attempts: Array<{ attempt: number; guardAddendum: string | null }> = [];
     const generateNarration = vi.fn(({ attempt, guardAddendum }) => {
       attempts.push({ attempt, guardAddendum });
-      return attempt === 1
-        ? "The captain waits, and the wall remains dark."
-        : JSON.stringify(createGroundedDraft());
+      return invalidGeneratorOutput("The captain waits, and the wall remains dark.");
     });
 
-    const result = await runVisibleNarrationWithPacketGuard({
+    await expect(runVisibleNarrationWithPacketGuard({
       packet,
       generateNarration,
+    })).rejects.toMatchObject({
+      attempts: 1,
+      violations: expect.arrayContaining([
+        expect.objectContaining({ kind: "invalidNarrationDraft" }),
+      ]),
     });
 
-    expect(result.retried).toBe(true);
-    expect(result.text).toBe("The Gate Captain lowers his voice: the bridge bell will ring soon.");
-    expect(attempts[1]?.guardAddendum).toContain("valid NarrationDraft JSON object");
-    expect(generateNarration).toHaveBeenCalledTimes(2);
+    expect(attempts).toEqual([{ attempt: 1, guardAddendum: null }]);
+    expect(generateNarration).toHaveBeenCalledTimes(1);
   });
 
-  it("falls back to packet evidence when narration never returns draft JSON", async () => {
+  it("throws immediately when packet narration never returns a grounded structured draft", async () => {
     const packet = createPacket();
-    const generateNarration = vi.fn(() => "The captain waits, and the wall remains dark.");
-
-    const result = await runVisibleNarrationWithPacketGuard({
-      packet,
-      generateNarration,
-    });
-
-    expect(result.text).toBe(
-      "The Gate Captain warns that the bridge bell will ring soon.",
+    const generateNarration = vi.fn(() =>
+      invalidGeneratorOutput("The captain waits, and the wall remains dark."),
     );
-    expect(result.guardAddendum).toBe("deterministic_fallback_from_packet_evidence");
-    expect(result.validation.ok).toBe(true);
-    expect(generateNarration).toHaveBeenCalledTimes(2);
+
+    await expect(runVisibleNarrationWithPacketGuard({
+      packet,
+      generateNarration,
+    })).rejects.toMatchObject({
+      attempts: 1,
+      violations: expect.arrayContaining([
+        expect.objectContaining({ kind: "invalidNarrationDraft" }),
+      ]),
+    });
+
+    expect(generateNarration).toHaveBeenCalledTimes(1);
   });
 
-  it("repairs malformed draft JSON instead of falling back to raw text", async () => {
+  it("does not synthesize fallback prose from packet evidence when drafts are invalid", async () => {
+    const packet = createPacket();
+    packet.evidenceLedger = [
+      {
+        id: "oracle_outcome:oracle-outcome",
+        category: "oracle_outcome",
+        summary: "miss",
+        sourceId: "oracle-outcome",
+      },
+      {
+        id: "perceivable_response:station-attendant",
+        category: "perceivable_response",
+        summary: [
+          "Tiamat response: environment.",
+          "Station Attendant becomes visibly present in the scene.",
+        ].join(" "),
+        sourceId: "station-attendant",
+      },
+      {
+        id: "perceivable_response:no-mutation",
+        category: "perceivable_response",
+        summary: "GM no-mutation direction: The attendant would be confused by cursed-object phrasing.",
+        sourceId: "no-mutation",
+      },
+      {
+        id: "perceivable_effect:internal-intent",
+        category: "perceivable_effect",
+        summary: "e2518725-f973-4b6e-9d57-cf2c91cd2fa4 records an unconfirmed intent or claim about a safe-looking person.",
+        sourceId: "internal-intent",
+      },
+    ];
+    const generateNarration = vi.fn(() =>
+      invalidGeneratorOutput("The captain waits, and the wall remains dark."),
+    );
+
+    await expect(runVisibleNarrationWithPacketGuard({
+      packet,
+      generateNarration,
+    })).rejects.toBeInstanceOf(VisibleNarrationPacketGuardError);
+
+    expect(generateNarration).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects malformed draft JSON instead of falling back to raw text", async () => {
     const packet = createPacket();
     const attempts: Array<{ attempt: number; guardAddendum: string | null }> = [];
     const generateNarration = vi.fn(({ attempt, guardAddendum }) => {
       attempts.push({ attempt, guardAddendum });
-      return attempt === 1
-        ? '{"prose":"The captain waits", "claims": ['
-        : JSON.stringify(createGroundedDraft());
+      return invalidGeneratorOutput('{"prose":"The captain waits", "claims": [');
     });
 
-    const result = await runVisibleNarrationWithPacketGuard({
+    await expect(runVisibleNarrationWithPacketGuard({
       packet,
       generateNarration,
+    })).rejects.toMatchObject({
+      attempts: 1,
+      violations: expect.arrayContaining([
+        expect.objectContaining({ kind: "invalidNarrationDraft" }),
+      ]),
     });
 
-    expect(result.retried).toBe(true);
-    expect(result.text).toBe("The Gate Captain lowers his voice: the bridge bell will ring soon.");
-    expect(attempts[1]?.guardAddendum).toContain("valid NarrationDraft JSON object");
+    expect(attempts).toEqual([{ attempt: 1, guardAddendum: null }]);
   });
 
-  it("preserves legacy plain prose behavior when no evidence ledger contract is present", async () => {
+  it("still requires a grounded structured draft when a packet has no evidenceLedger", async () => {
+    const packet = createPacket();
+    packet.evidenceLedger = undefined;
+
+    await expect(runVisibleNarrationWithPacketGuard({
+      packet,
+      generateNarration: vi.fn(() =>
+        invalidGeneratorOutput("The captain waits, and the wall remains dark."),
+      ),
+    })).rejects.toMatchObject({
+      violations: expect.arrayContaining([
+        expect.objectContaining({ kind: "invalidNarrationDraft" }),
+      ]),
+    });
+  });
+
+  it("accepts a valid no-ledger NarrationDraft with non-evidence playable beat", async () => {
     const packet = createPacket();
     packet.evidenceLedger = undefined;
 
     const result = await runVisibleNarrationWithPacketGuard({
       packet,
-      generateNarration: vi.fn(() => "The captain waits, and the wall remains dark."),
+      generateNarration: vi.fn(() => ({
+        prose: "The gate remains quiet enough for your next move.",
+        claims: [{
+          id: "claim-playable",
+          kind: "playable_beat",
+          summary: "The scene returns control on a playable next moment.",
+          requiresEvidence: false,
+          evidenceRefs: [],
+        }],
+        claimSpans: [{
+          id: "span-playable",
+          spanText: "The gate remains quiet enough for your next move.",
+          claimIds: ["claim-playable"],
+          requiresEvidence: false,
+        }],
+      } as NarrationDraft)),
     });
 
     expect(result.retried).toBe(false);
-    expect(result.text).toBe("The captain waits, and the wall remains dark.");
+    expect(result.text).toBe("The gate remains quiet enough for your next move.");
+    expect(result.draft.prose).toBe(result.text);
   });
 
-  it("rejects malformed draft JSON and unknown claim kinds at runtime", async () => {
+  it("does not invent evidence refs when a packet has no evidenceLedger", async () => {
+    const packet = createPacket();
+    packet.evidenceLedger = undefined;
+    const generateNarration = vi.fn(() => createGroundedDraft({
+      claims: [
+        {
+          id: "claim-bridge-bell",
+          kind: "future_pressure",
+          summary: "The bridge bell creates near-future pressure.",
+          requiresEvidence: true,
+          evidenceRefs: [],
+        },
+      ],
+      claimSpans: [
+        {
+          id: "span-bridge-bell",
+          spanText: "not copied from prose",
+          claimIds: ["claim-bridge-bell"],
+          requiresEvidence: true,
+        },
+      ],
+    }));
+
+    await expect(runVisibleNarrationWithPacketGuard({
+      packet,
+      generateNarration,
+    })).rejects.toMatchObject({
+      violations: expect.arrayContaining([
+        expect.objectContaining({ kind: "grounding" }),
+      ]),
+    });
+
+    expect(generateNarration).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects fenced JSON and arbitrary wrapper text for the strict NarrationDraft contract", async () => {
+    const packet = createPacket();
+    const draft = createGroundedDraft();
+
+    const fenced = [
+      "```json",
+      JSON.stringify(draft),
+      "```",
+    ].join("\n");
+
+    await expect(runVisibleNarrationWithPacketGuard({
+      packet,
+      generateNarration: vi.fn(() => invalidGeneratorOutput(fenced)),
+    })).rejects.toMatchObject({
+      violations: expect.arrayContaining([
+        expect.objectContaining({ kind: "invalidNarrationDraft" }),
+      ]),
+    });
+
+    await expect(runVisibleNarrationWithPacketGuard({
+      packet,
+      generateNarration: vi.fn(() =>
+        invalidGeneratorOutput(`Here is the JSON:\n${JSON.stringify(draft)}`),
+      ),
+    })).rejects.toMatchObject({
+      violations: expect.arrayContaining([
+        expect.objectContaining({ kind: "invalidNarrationDraft" }),
+      ]),
+    });
+  });
+
+  it("rejects native draft objects with unknown claim kinds at runtime", async () => {
     const packet = createPacket();
     const attempts: Array<{ attempt: number; guardAddendum: string | null }> = [];
     const generateNarration = vi.fn(({ attempt, guardAddendum }) => {
       attempts.push({ attempt, guardAddendum });
-
-      if (attempt === 1) {
-        return JSON.stringify({
-          ...createGroundedDraft(),
-          claims: [
-            {
-              id: "claim-bad-kind",
-              kind: "private_lore_dump",
-              summary: "Invalid claim kind.",
-              requiresEvidence: false,
-              evidenceRefs: [],
-            },
-          ],
-        });
-      }
-
-      return JSON.stringify(createGroundedDraft());
+      return invalidGeneratorOutput({
+        ...createGroundedDraft(),
+        claims: [
+          {
+            id: "claim-bad-kind",
+            kind: "private_lore_dump",
+            summary: "Invalid claim kind.",
+            requiresEvidence: false,
+            evidenceRefs: [],
+          },
+        ],
+      });
     });
 
-    const result = await runVisibleNarrationWithPacketGuard({
+    await expect(runVisibleNarrationWithPacketGuard({
       packet,
       generateNarration,
+    })).rejects.toMatchObject({
+      attempts: 1,
+      violations: expect.arrayContaining([
+        expect.objectContaining({ kind: "invalidNarrationDraft" }),
+      ]),
     });
 
-    expect(result.retried).toBe(true);
-    expect(attempts[1]?.guardAddendum).toContain("valid NarrationDraft JSON object");
-    expect(attempts[1]?.guardAddendum).not.toContain("claim-bad-kind");
+    expect(attempts).toEqual([{ attempt: 1, guardAddendum: null }]);
   });
 
   it("keeps final narration non-streaming and buffered so no SSE narrative event can emit before validation", async () => {
@@ -590,7 +1092,7 @@ describe("visible narration output guard", () => {
       packet,
       generateNarration: async () => {
         emittedEvents.push("model-buffer-ready");
-        return JSON.stringify(createGroundedDraft());
+        return createGroundedDraft();
       },
     });
 

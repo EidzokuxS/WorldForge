@@ -116,6 +116,9 @@ export interface GenerationProgress {
 }
 
 export interface WorldData {
+  currentTick: number;
+  worldVersion: number;
+  worldTimeMinutes: number;
   currentScene: WorldCurrentScene | null;
   locations: WorldLocation[];
   npcs: Array<{

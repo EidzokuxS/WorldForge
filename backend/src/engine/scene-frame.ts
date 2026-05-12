@@ -28,6 +28,7 @@ import { runtimeToolInputSchemas, type RuntimeToolName } from "./tool-schemas.js
 export const SCENE_FRAME_RECENT_EVENT_LIMIT = 12;
 export const SCENE_FRAME_TARGET_CANDIDATE_LIMIT = 12;
 export const SCENE_FRAME_MOVEMENT_CANDIDATE_LIMIT = 12;
+export const SCENE_FRAME_PLAYER_INVENTORY_ITEM_LIMIT = 24;
 
 export type SceneActorType = "player" | "npc";
 
@@ -94,6 +95,15 @@ export interface SceneFrameMovementCandidate {
   path?: string[];
 }
 
+export interface SceneFramePlayerInventoryItem {
+  id: string;
+  itemId: string;
+  label: string;
+  equipState: "carried" | "equipped";
+  equippedSlot: string | null;
+  isSignature: boolean;
+}
+
 export interface SceneFrameDeferredHook {
   id: string;
   hookType: "offscreen" | "reflection" | "faction" | "memory" | "custom";
@@ -128,12 +138,15 @@ export interface SceneFrame {
   currentSceneScopeId: string | null;
   currentLocationName?: string | null;
   currentSceneScopeName?: string | null;
+  currentLocationDescription?: string | null;
+  currentSceneScopeDescription?: string | null;
   playerAction: string;
   roster: SceneFrameRoster;
   perception: SceneFramePerception;
   recentEvents: SceneFrameRecentEvent[];
   targetCandidates: SceneFrameTargetCandidate[];
   movementCandidates: SceneFrameMovementCandidate[];
+  playerInventory?: SceneFramePlayerInventoryItem[];
   deferredHooks: SceneFrameDeferredHook[];
   allowedTools: RuntimeToolName[];
   /**
@@ -158,6 +171,8 @@ export interface SceneFrameBuildOptions {
   currentSceneScopeId?: string | null;
   currentLocationName?: string | null;
   currentSceneScopeName?: string | null;
+  currentLocationDescription?: string | null;
+  currentSceneScopeDescription?: string | null;
   playerAction: string;
   intent?: string;
   method?: string;
@@ -168,6 +183,7 @@ export interface SceneFrameBuildOptions {
   recentEvents?: SceneFrameRecentEvent[];
   targetCandidates?: SceneFrameTargetCandidate[];
   movementCandidates?: SceneFrameMovementCandidate[];
+  playerInventory?: SceneFramePlayerInventoryItem[];
   deferredHooks?: SceneFrameDeferredHook[];
   allowedTools?: RuntimeToolName[];
   oracleContext?: SceneFrameOracleContext | null;
@@ -195,6 +211,8 @@ const EXECUTE_TOOL_SUPPORTED_TOOL_NAMES = new Set<RuntimeToolName>([
   "create_scene_extra",
   "start_search",
   "record_player_intent",
+  "record_dialogue_outcome",
+  "record_world_fact",
   "add_tag",
   "remove_tag",
   "set_relationship",
@@ -339,6 +357,14 @@ function cloneMovementCandidates(
   }));
 }
 
+function clonePlayerInventoryItems(
+  items: readonly SceneFramePlayerInventoryItem[],
+): SceneFramePlayerInventoryItem[] {
+  return items.map((item) => ({
+    ...item,
+  }));
+}
+
 function cloneDeferredHooks(hooks: readonly SceneFrameDeferredHook[]): SceneFrameDeferredHook[] {
   return hooks.map((hook) => ({
     ...hook,
@@ -363,12 +389,15 @@ function normalizeFrame(input: {
   currentSceneScopeId: string | null;
   currentLocationName?: string | null;
   currentSceneScopeName?: string | null;
+  currentLocationDescription?: string | null;
+  currentSceneScopeDescription?: string | null;
   playerAction: string;
   roster: SceneFrameRoster;
   perception: SceneFramePerception;
   recentEvents?: SceneFrameRecentEvent[];
   targetCandidates?: SceneFrameTargetCandidate[];
   movementCandidates?: SceneFrameMovementCandidate[];
+  playerInventory?: SceneFramePlayerInventoryItem[];
   deferredHooks?: SceneFrameDeferredHook[];
   allowedTools?: RuntimeToolName[];
   oracleContext?: SceneFrameOracleContext | null;
@@ -387,6 +416,7 @@ function normalizeFrame(input: {
     : rawRecentEvents;
   const targetCandidateInputCount = input.targetCandidates?.length ?? 0;
   const movementCandidateInputCount = input.movementCandidates?.length ?? 0;
+  const playerInventoryInputCount = input.playerInventory?.length ?? 0;
   const targetCandidates = cloneTargetCandidates(input.targetCandidates ?? []).slice(
     0,
     SCENE_FRAME_TARGET_CANDIDATE_LIMIT,
@@ -395,10 +425,15 @@ function normalizeFrame(input: {
     0,
     SCENE_FRAME_MOVEMENT_CANDIDATE_LIMIT,
   );
+  const playerInventory = clonePlayerInventoryItems(input.playerInventory ?? []).slice(
+    0,
+    SCENE_FRAME_PLAYER_INVENTORY_ITEM_LIMIT,
+  );
   const hiddenExcludedCount = input.perception.forbiddenActorIds?.length ?? 0;
   const excludedByBudgetCount =
     Math.max(0, targetCandidateInputCount - targetCandidates.length)
-    + Math.max(0, movementCandidateInputCount - movementCandidates.length);
+    + Math.max(0, movementCandidateInputCount - movementCandidates.length)
+    + Math.max(0, playerInventoryInputCount - playerInventory.length);
   const sourceLinkedSummaryCount = recentEventOverflow.length > 0 ? 1 : 0;
   const frame: SceneFrame = {
     campaignId: input.campaignId,
@@ -408,6 +443,8 @@ function normalizeFrame(input: {
     currentSceneScopeId: input.currentSceneScopeId,
     currentLocationName: input.currentLocationName ?? null,
     currentSceneScopeName: input.currentSceneScopeName ?? null,
+    currentLocationDescription: input.currentLocationDescription ?? null,
+    currentSceneScopeDescription: input.currentSceneScopeDescription ?? null,
     playerAction: input.playerAction,
     roster: {
       active: cloneActors(input.roster.active),
@@ -418,6 +455,7 @@ function normalizeFrame(input: {
     recentEvents,
     targetCandidates,
     movementCandidates,
+    playerInventory,
     deferredHooks: cloneDeferredHooks(input.deferredHooks ?? []),
     allowedTools: buildAllowedTools(input.allowedTools),
     oracle: input.oracle ?? null,
@@ -427,6 +465,8 @@ function normalizeFrame(input: {
       visibleTexts: [
         input.currentLocationName ?? "",
         input.currentSceneScopeName ?? "",
+        input.currentLocationDescription ?? "",
+        input.currentSceneScopeDescription ?? "",
         ...input.roster.active
           .filter((actor) => actor.awareness === "clear")
           .map((actor) => actor.label),
@@ -434,13 +474,15 @@ function normalizeFrame(input: {
         ...recentEvents.map((event) => event.summary),
         ...targetCandidates.map((candidate) => candidate.label),
         ...movementCandidates.map((candidate) => candidate.label),
+        ...playerInventory.map((item) => item.label),
       ],
       visibleItemCount:
         input.roster.active.length
         + input.roster.support.length
         + recentEvents.length
         + targetCandidates.length
-        + movementCandidates.length,
+        + movementCandidates.length
+        + playerInventory.length,
       hiddenExcludedCount,
       candidateItemCount:
         input.roster.active.length
@@ -448,13 +490,15 @@ function normalizeFrame(input: {
         + input.roster.background.length
         + rawRecentEvents.length
         + targetCandidateInputCount
-        + movementCandidateInputCount,
+        + movementCandidateInputCount
+        + playerInventoryInputCount,
       selectedItemCount:
         input.roster.active.length
         + input.roster.support.length
         + recentEvents.length
         + targetCandidates.length
         + movementCandidates.length
+        + playerInventory.length
         - sourceLinkedSummaryCount,
       summarizedItemCount: recentEventOverflow.length,
       excludedByVisibilityCount: hiddenExcludedCount,
@@ -867,6 +911,31 @@ function collectTargetCandidates(input: {
   );
 }
 
+function collectPlayerInventoryItems(input: {
+  itemRows: ItemRow[];
+  playerActorId: string;
+}): SceneFramePlayerInventoryItem[] {
+  return input.itemRows
+    .filter((item) => item.ownerId === input.playerActorId)
+    .map((item): SceneFramePlayerInventoryItem => ({
+      id: `current-inventory:${item.id}`,
+      itemId: item.id,
+      label: item.name,
+      equipState: item.equipState === "equipped" ? "equipped" : "carried",
+      equippedSlot: item.equipState === "equipped" ? item.equippedSlot ?? null : null,
+      isSignature: Boolean(item.isSignature),
+    }))
+    .sort((left, right) => {
+      if (left.equipState !== right.equipState) {
+        return left.equipState === "equipped" ? -1 : 1;
+      }
+      if (left.isSignature !== right.isSignature) {
+        return left.isSignature ? -1 : 1;
+      }
+      return left.label.localeCompare(right.label);
+    });
+}
+
 function mapCandidateTypeToOracleType(
   candidate: SceneFrameTargetCandidate,
 ): SceneFrameOracleContext["targetType"] {
@@ -942,6 +1011,16 @@ function findLocationName(
   return locationRows.find((location) => location.id === locationId)?.name ?? null;
 }
 
+function findLocationDescription(
+  locationRows: LocationRow[],
+  locationId: string | null,
+): string | null {
+  if (!locationId) {
+    return null;
+  }
+  return locationRows.find((location) => location.id === locationId)?.description ?? null;
+}
+
 export async function buildSceneFrame(
   options: SceneFrameBuildOptions,
 ): Promise<SceneFrame> {
@@ -954,12 +1033,15 @@ export async function buildSceneFrame(
       currentSceneScopeId: options.currentSceneScopeId ?? null,
       currentLocationName: options.currentLocationName ?? null,
       currentSceneScopeName: options.currentSceneScopeName ?? null,
+      currentLocationDescription: options.currentLocationDescription ?? null,
+      currentSceneScopeDescription: options.currentSceneScopeDescription ?? null,
       playerAction: options.playerAction,
       roster: options.roster,
       perception: options.perception,
       recentEvents: options.recentEvents,
       targetCandidates: options.targetCandidates,
       movementCandidates: options.movementCandidates,
+      playerInventory: options.playerInventory,
       deferredHooks: options.deferredHooks,
       allowedTools: options.allowedTools,
       oracleContext: options.oracleContext,
@@ -989,6 +1071,8 @@ export async function buildSceneFrame(
   const itemRows = readRowsByCampaign<ItemRow>(options.campaignId, items);
   const currentLocationName = findLocationName(locationRows, currentLocationId);
   const currentSceneScopeName = findLocationName(locationRows, currentSceneScopeId);
+  const currentLocationDescription = findLocationDescription(locationRows, currentLocationId);
+  const currentSceneScopeDescription = findLocationDescription(locationRows, currentSceneScopeId);
   const { roster, perception } = buildRoster({
     player,
     npcRows,
@@ -1009,6 +1093,10 @@ export async function buildSceneFrame(
     currentLocationId,
     currentSceneScopeId,
   });
+  const playerInventory = collectPlayerInventoryItems({
+    itemRows,
+    playerActorId: player.id,
+  });
   const recentEvents = collectRecentEvents({
     campaignId: options.campaignId,
     tick,
@@ -1025,12 +1113,15 @@ export async function buildSceneFrame(
     currentSceneScopeId,
     currentLocationName,
     currentSceneScopeName,
+    currentLocationDescription,
+    currentSceneScopeDescription,
     playerAction: options.playerAction,
     roster,
     perception,
     recentEvents,
     targetCandidates,
     movementCandidates,
+    playerInventory,
     deferredHooks: options.deferredHooks,
     allowedTools: options.allowedTools,
     oracleContext: options.oracleContext,

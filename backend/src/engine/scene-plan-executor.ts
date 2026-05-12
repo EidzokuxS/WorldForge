@@ -3,6 +3,7 @@ import { createLogger } from "../lib/index.js";
 import type { SuccessfulTravelLike } from "./hidden-adjudication.js";
 import type { ScenePlanAction } from "./scene-plan-schema.js";
 import type { ValidatedScenePlan } from "./scene-plan-validator.js";
+import type { BridgeLookupToolName } from "./bridge-candidate-tools.js";
 import {
   applySuccessfulToolObservationToExecutionContext,
   createScenePlanActionToolExecutionContext,
@@ -18,17 +19,18 @@ export interface ExecutedScenePlanActionResult {
   actionId: string;
   actionRef: string;
   actorId: string;
-  toolName: ScenePlanAction["toolName"];
-  input: ScenePlanAction["input"];
+  toolName: ScenePlanAction["toolName"] | BridgeLookupToolName;
+  input: ScenePlanAction["input"] | Record<string, unknown>;
   args: Record<string, unknown>;
   result: ToolResult;
+  summary?: string;
 }
 
 export interface ExecutedScenePlanCanonicalEvent {
   id: string;
   actionId: string;
   actorId: string;
-  toolName: ScenePlanAction["toolName"];
+  toolName: ScenePlanAction["toolName"] | BridgeLookupToolName;
   result: ToolResult["result"];
 }
 

@@ -20,6 +20,10 @@ export function hasActiveTurn(campaignId: string): boolean {
   return campaignsWithActiveTurn.has(campaignId);
 }
 
+export function hasAnyActiveTurn(): boolean {
+  return campaignsWithActiveTurn.size > 0;
+}
+
 export function setLastTurnSnapshot(
   campaignId: string,
   snapshot: TurnSnapshot,

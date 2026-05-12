@@ -262,6 +262,7 @@ export {
   persistSettledTurnPacket,
   recordNarratorAttempt,
   transitionTurnSagaStatus,
+  updateNarratorAttemptOutcome,
   updateTurnSagaStatus,
 } from "./turn-saga.js";
 
@@ -283,6 +284,7 @@ export type {
   TransitionTurnSagaStatusInput,
   TurnSagaRecord,
   TurnSagaStatus,
+  UpdateNarratorAttemptOutcomeInput,
 } from "./turn-saga.js";
 
 export {

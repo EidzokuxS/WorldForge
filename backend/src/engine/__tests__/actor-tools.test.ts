@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PowerStats } from "@worldforge/shared";
 import {
   hydrateStoredNpcRecord,
@@ -639,6 +639,39 @@ describe("actor tool execution", () => {
     expect(state).toMatchObject({
       nextDecisionReason: "player changes the local situation",
       agencyDebt: 0,
+    });
+  });
+
+  it("does not block broad status reads on presence-only actor decisions", async () => {
+    const decideActor = vi.fn(() => {
+      throw new Error("presence-only actor should not run before done");
+    });
+
+    const result = await runRequiredActorDecisionPass({
+      campaignId: CAMPAIGN_ID,
+      tick: 7,
+      provider: {
+        id: "test-provider",
+        name: "Test",
+        baseUrl: "http://localhost:1/v1",
+        apiKey: "test",
+        model: "test-model",
+      },
+      sceneFrame: createSceneFrame(),
+      playerAction: "I identify visible exits, guards, ledgers, and public routes.",
+      playerLocationId: "loc-a",
+      playerSceneScopeId: "loc-a",
+      elapsedWorldTimeMinutes: 1,
+      decideActor,
+    });
+
+    expect(decideActor).not.toHaveBeenCalled();
+    expect(result.decisions).toEqual([]);
+    expect(result.actionResults).toEqual([]);
+    expect(result.schedule.decisions[0]).toMatchObject({
+      actorId: "npc-key",
+      route: "proposal_after_done",
+      reason: "present actor reaction deferred after visible status read",
     });
   });
 });

@@ -24,6 +24,10 @@ export interface ModelFacingSceneView {
     playerActorId: string;
     currentLocationId: string | null;
     currentSceneScopeId: string | null;
+    currentLocationName?: string | null;
+    currentSceneScopeName?: string | null;
+    currentLocationDescription?: string | null;
+    currentSceneScopeDescription?: string | null;
   };
   visibleActors: ModelFacingActor[];
   awarenessHints: string[];
@@ -282,6 +286,14 @@ export function buildModelFacingScenePacket(frame: SceneFrame): ModelFacingScene
       playerActorId: frame.playerActorId,
       currentLocationId: frame.currentLocationId,
       currentSceneScopeId: frame.currentSceneScopeId,
+      currentLocationName: frame.currentLocationName ?? null,
+      currentSceneScopeName: frame.currentSceneScopeName ?? null,
+      currentLocationDescription: frame.currentLocationDescription
+        ? redactModelFacingText(frame.currentLocationDescription, safety)
+        : null,
+      currentSceneScopeDescription: frame.currentSceneScopeDescription
+        ? redactModelFacingText(frame.currentSceneScopeDescription, safety)
+        : null,
     },
     visibleActors: [...frame.roster.active, ...frame.roster.support]
       .filter(actorIsVisible)

@@ -121,6 +121,9 @@ export interface LookupResultEvent {
 // ───── Raw types (internal) ─────
 
 interface RawWorldData {
+  currentTick?: number;
+  worldVersion?: number;
+  worldTimeMinutes?: number;
   currentScene?: unknown;
   locations: Array<{
     id: string;
@@ -473,6 +476,9 @@ function normalizeCharacterResult(
 
 function parseWorldData(raw: RawWorldData): WorldData {
   return {
+    currentTick: typeof raw.currentTick === "number" ? raw.currentTick : 0,
+    worldVersion: typeof raw.worldVersion === "number" ? raw.worldVersion : 0,
+    worldTimeMinutes: typeof raw.worldTimeMinutes === "number" ? raw.worldTimeMinutes : 0,
     currentScene: parseWorldCurrentScene(raw.currentScene),
     locations: raw.locations.map((loc) => {
       const connectedPaths = parseWorldLocationConnectedPaths(loc.connectedPaths);
@@ -810,8 +816,14 @@ export interface TurnSSEHandlers {
   onStateUpdate: (update: { tool: string; args: unknown; result: unknown }) => void;
   onQuickActions: (actions: Array<{ label: string; action: string }>) => void;
   onFinalizing?: (status?: TurnStageStatus) => void;
-  onDone: () => void;
+  onDone: (boundary?: TurnDoneBoundary) => void;
   onError: (error: string) => void;
+}
+
+export interface TurnDoneBoundary {
+  tick?: number;
+  worldVersion?: number;
+  worldTimeMinutes?: number;
 }
 
 const TURN_STREAM_EMPTY_NARRATION_ERROR = "Turn finished without visible narration. Please retry.";
@@ -864,6 +876,23 @@ function normalizeTurnStageStatus(value: unknown): TurnStageStatus {
   return status;
 }
 
+function normalizeTurnDoneBoundary(value: unknown): TurnDoneBoundary | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const boundary: TurnDoneBoundary = {};
+  const tick = readNumberField(record, "tick");
+  const worldVersion = readNumberField(record, "worldVersion");
+  const worldTimeMinutes = readNumberField(record, "worldTimeMinutes");
+
+  if (tick !== undefined) boundary.tick = tick;
+  if (worldVersion !== undefined) boundary.worldVersion = worldVersion;
+  if (worldTimeMinutes !== undefined) boundary.worldTimeMinutes = worldTimeMinutes;
+
+  return Object.keys(boundary).length > 0 ? boundary : undefined;
+}
+
 export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: TurnSSEHandlers): Promise<void> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -912,7 +941,7 @@ export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: T
             handlers.onError(TURN_STREAM_EMPTY_NARRATION_ERROR);
             break;
           }
-          handlers.onDone();
+          handlers.onDone(normalizeTurnDoneBoundary(parsed));
           break;
         case "error":
           hasErrorEvent = true;

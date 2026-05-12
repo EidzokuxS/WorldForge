@@ -32,6 +32,30 @@ const actorDecisionRuntimeToolNames = runtimeToolNames.filter(
   (toolName) => !actorDecisionExcludedToolNameSet.has(toolName),
 ) as [ActorDecisionRuntimeToolName, ...ActorDecisionRuntimeToolName[]];
 
+const actorDecisionToolRequestSchemas = actorDecisionRuntimeToolNames.map((toolName) =>
+  z
+    .object({
+      toolName: z.literal(toolName).describe(`Exact actor tool name: ${toolName}.`),
+      purpose: z
+        .string()
+        .trim()
+        .min(1)
+        .max(300)
+        .describe("Why this actor is requesting this tool now."),
+      input: runtimeToolInputSchemas[toolName].describe(
+        `All ${toolName} runtime arguments must be nested inside this input object. Never put tool args beside input.`,
+      ),
+    })
+    .strict()
+    .describe(
+      `Actor tool request for ${toolName}. Shape must be exactly { toolName, purpose, input }; runtime args belong only inside input.`,
+    ),
+);
+const toolRequestSchema = z.discriminatedUnion(
+  "toolName",
+  actorDecisionToolRequestSchemas as unknown as Parameters<typeof z.discriminatedUnion>[1],
+) as z.ZodType<ActorDecisionToolRequest>;
+
 export interface ActorDecisionToolRequest {
   toolName: ActorDecisionRuntimeToolName;
   purpose: string;
@@ -103,28 +127,6 @@ export class ActorDecisionPacketValidationError extends Error {
   }
 }
 
-const toolRequestSchema = z
-  .object({
-    toolName: z.enum(actorDecisionRuntimeToolNames),
-    purpose: z.string().trim().min(1).max(300),
-    input: z.record(z.string(), z.unknown()).default({}),
-  })
-  .strict()
-  .superRefine((request, ctx) => {
-    const toolSchema = runtimeToolInputSchemas[request.toolName];
-    const parsed = toolSchema.safeParse(request.input);
-    if (parsed.success) {
-      return;
-    }
-    for (const issue of parsed.error.issues) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["input", ...issue.path],
-        message: issue.message,
-      });
-    }
-  });
-
 const planUpdateSchema = z
   .object({
     summary: z.string().trim().min(1).max(400),
@@ -150,7 +152,13 @@ export const actorDecisionPacketSchema = z
       .max(ACTOR_DECISION_MAX_FACTS),
     selectedGoal: z.string().trim().min(1).max(500).nullable().optional(),
     intent: z.string().trim().min(1).max(800),
-    requestedTools: z.array(toolRequestSchema).max(ACTOR_DECISION_MAX_TOOLS).default([]),
+    requestedTools: z
+      .array(toolRequestSchema)
+      .max(ACTOR_DECISION_MAX_TOOLS)
+      .default([])
+      .describe(
+        "Actor tool requests. Each entry must be exactly { toolName, purpose, input }. Never flatten input fields such as text, importance, participants, durability, or futureRelevance onto the request object.",
+      ),
     beliefUpdates: z.array(z.string().trim().min(1).max(400)).max(6).default([]),
     planUpdates: z.array(planUpdateSchema).max(6).default([]),
     nextDecisionTrigger: nextDecisionTriggerSchema.optional(),

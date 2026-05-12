@@ -85,14 +85,29 @@ export interface SafeGenerateResult<T> {
   trace: SafeGenerateTrace;
 }
 
+export type SafeGenerateErrorCode =
+  | "missing_structured_tool_call"
+  | "invalid_structured_tool_call"
+  | "schema_validation_failed"
+  | "text_fallback_disabled"
+  | "native_output_unavailable"
+  | "invalid_json"
+  | "full_retry_exhausted";
+
 class SafeGenerateError extends Error {
   readonly trace?: SafeGenerateTrace;
+  readonly code?: SafeGenerateErrorCode;
 
-  constructor(message: string, trace?: SafeGenerateTrace) {
+  constructor(message: string, trace?: SafeGenerateTrace, code?: SafeGenerateErrorCode) {
     super(message);
     this.name = "SafeGenerateError";
     this.trace = trace;
+    this.code = code;
   }
+}
+
+export function getSafeGenerateObjectErrorCode(error: unknown): SafeGenerateErrorCode | null {
+  return error instanceof SafeGenerateError ? error.code ?? null : null;
 }
 
 export function isSafeGenerateObjectError(error: unknown): boolean {
@@ -253,6 +268,20 @@ function getInnerSchema(def: any): ZodType<any> | undefined {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function getRecordValueSchema(def: any): ZodType<any> | undefined {
   return def?.valueType ?? def?.valueSchema;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getLiteralExampleValue(def: any): { found: boolean; value: unknown } {
+  if (Array.isArray(def?.values) && def.values.length > 0) {
+    return { found: true, value: def.values[0] };
+  }
+  if (def?.values instanceof Set && def.values.size > 0) {
+    return { found: true, value: [...def.values][0] };
+  }
+  if (Object.prototype.hasOwnProperty.call(def ?? {}, "value")) {
+    return { found: true, value: def.value };
+  }
+  return { found: false, value: undefined };
 }
 
 /**
@@ -435,14 +464,14 @@ function generateSchemaExample(schema: ZodType<any>, depth = 0): unknown {
   }
 
   if (schemaType === "ZodArray" || schemaType === "array") {
-    // Preserve array-level description as the example element so the LLM sees field guidance
-    if (desc) {
-      return [desc];
-    }
     // Zod 3: def.type is element schema; Zod 4: def.element is element schema, def.type is "array"
     const elementSchema = def.element ?? (typeof def.type === "object" ? def.type : undefined);
     if (elementSchema) {
       return [generateSchemaExample(elementSchema, depth + 1)];
+    }
+    // Preserve array-level description only when no element schema is available.
+    if (desc) {
+      return [desc];
     }
     return ["..."];
   }
@@ -457,6 +486,11 @@ function generateSchemaExample(schema: ZodType<any>, depth = 0): unknown {
 
   if (schemaType === "ZodBoolean" || schemaType === "boolean") {
     return false;
+  }
+
+  if (schemaType === "ZodLiteral" || schemaType === "literal") {
+    const literal = getLiteralExampleValue(def);
+    return literal.found ? literal.value : desc || "literal value";
   }
 
   if (schemaType === "ZodNullable" || schemaType === "nullable") {
@@ -551,6 +585,12 @@ interface SafeGenerateOpts<T> {
   mode?: StructuredOutputRequestedMode;
   /** Override retry count (default 3). Set to 1 to disable retries. */
   retries?: number;
+  /** Default true. Set false for call sites where text fallback would mask a broken native contract. */
+  allowTextFallback?: boolean;
+  /** Default true. Set false for call sites where repair would mask a broken primary contract. */
+  allowRepair?: boolean;
+  /** Default false. Set true for fail-closed call sites where schema coercion would mask a broken contract. */
+  strictSchema?: boolean;
   [key: string]: unknown;
 }
 
@@ -680,6 +720,10 @@ async function attemptRepair<T>(
   originalTrace: SafeGenerateTrace,
   schemaHint: string,
 ): Promise<SafeGenerateResult<T> | null> {
+  if (opts.allowRepair === false) {
+    return null;
+  }
+
   const repairContext: StrategyContext = {
     metadata: getStructuredOutputModelMetadata(opts.model),
     capability: {
@@ -715,7 +759,7 @@ async function attemptRepair<T>(
     return null;
   }
 
-  parsed = coerceToSchema(parsed, opts.schema);
+  parsed = maybeCoerceToSchema(parsed, opts.schema, opts);
   const repaired = opts.schema.safeParse(parsed);
   if (!repaired.success) {
     log.warn(`safeGenerateObject repair still failed Zod validation: ${formatZodIssues(repaired.error)}`);
@@ -747,6 +791,28 @@ async function attemptRepair<T>(
       },
     },
   };
+}
+
+function textFallbackDisabledError(
+  context: StrategyContext,
+  strategy: StructuredOutputPrimaryStrategy,
+  reason: string,
+  trace?: SafeGenerateTrace,
+  code: SafeGenerateErrorCode = "text_fallback_disabled",
+): SafeGenerateError {
+  return new SafeGenerateError(
+    `safeGenerateObject ${strategy}: text fallback is disabled. ${reason}`,
+    applyStrategyTrace(
+      trace ?? {
+        text: "",
+        cleanedText: "",
+      },
+      context,
+      strategy,
+      reason,
+    ),
+    code,
+  );
 }
 
 function buildBaseCallOpts<T>(opts: SafeGenerateOpts<T>): Record<string, unknown> {
@@ -793,10 +859,15 @@ function parseWithSchema<T>(
   parsed: unknown,
   schema: ZodType<T>,
   trace: SafeGenerateTrace,
+  options: { allowBareArrayWrapping?: boolean } = {},
 ): SafeGenerateResult<T> | null {
   const direct = schema.safeParse(parsed);
   if (direct.success) {
     return { object: direct.data as T, trace };
+  }
+
+  if (options.allowBareArrayWrapping === false) {
+    return null;
   }
 
   if (Array.isArray(parsed)) {
@@ -817,20 +888,88 @@ function parseWithSchema<T>(
   return null;
 }
 
-function extractStructuredOutputToolInput(result: Awaited<ReturnType<typeof generateText>>): unknown {
-  const toolCalls = (result as {
-    toolCalls?: Array<{
-      toolName?: string;
-      input?: unknown;
-      invalid?: boolean;
-    }>;
-  }).toolCalls ?? [];
-  const toolCall = toolCalls.find((call) => (
-    call.toolName === STRUCTURED_OUTPUT_TOOL_NAME &&
-    !call.invalid
-  ));
+function maybeCoerceToSchema<T>(
+  data: unknown,
+  schema: ZodType<T>,
+  opts: Pick<SafeGenerateOpts<T>, "strictSchema">,
+): unknown {
+  return opts.strictSchema === true ? data : coerceToSchema(data, schema);
+}
 
-  return toolCall?.input;
+function parseGeneratedWithSchema<T>(
+  parsed: unknown,
+  opts: Pick<SafeGenerateOpts<T>, "schema" | "strictSchema">,
+  trace: SafeGenerateTrace,
+): SafeGenerateResult<T> | null {
+  return parseWithSchema(parsed, opts.schema, trace, {
+    allowBareArrayWrapping: opts.strictSchema !== true,
+  });
+}
+
+type StructuredOutputToolCallLike = {
+  toolName?: string;
+  input?: unknown;
+  args?: unknown;
+  arguments?: unknown;
+  invalid?: boolean;
+};
+
+function isStructuredOutputToolCall(call: unknown): call is StructuredOutputToolCallLike {
+  return Boolean(
+    call
+    && typeof call === "object"
+    && (call as StructuredOutputToolCallLike).toolName === STRUCTURED_OUTPUT_TOOL_NAME
+    && (call as StructuredOutputToolCallLike).invalid !== true,
+  );
+}
+
+function structuredOutputToolInput(call: StructuredOutputToolCallLike): unknown {
+  if (call.input !== undefined) return call.input;
+  if (call.args !== undefined) return call.args;
+  return call.arguments;
+}
+
+type StructuredOutputToolInputResult =
+  | { kind: "found"; input: unknown }
+  | { kind: "invalid" }
+  | { kind: "missing" };
+
+function collectStructuredOutputToolCalls(
+  result: Awaited<ReturnType<typeof generateText>>,
+): unknown[] {
+  const directToolCalls = (result as { toolCalls?: unknown }).toolCalls;
+  const toolCalls: unknown[] = Array.isArray(directToolCalls) ? [...directToolCalls] : [];
+  const steps = (result as { steps?: unknown }).steps;
+  if (Array.isArray(steps)) {
+    for (const step of steps) {
+      if (!step || typeof step !== "object") continue;
+      const stepToolCalls = (step as { toolCalls?: unknown }).toolCalls;
+      if (Array.isArray(stepToolCalls)) {
+        toolCalls.push(...stepToolCalls);
+      }
+    }
+  }
+  return toolCalls;
+}
+
+function extractStructuredOutputToolInput(
+  result: Awaited<ReturnType<typeof generateText>>,
+): StructuredOutputToolInputResult {
+  const toolCalls = collectStructuredOutputToolCalls(result);
+  const toolCall = toolCalls.find(isStructuredOutputToolCall);
+  if (toolCall) {
+    return { kind: "found", input: structuredOutputToolInput(toolCall) };
+  }
+
+  const invalidToolCall = toolCalls.find((call) =>
+    Boolean(
+      call
+      && typeof call === "object"
+      && (call as StructuredOutputToolCallLike).toolName === STRUCTURED_OUTPUT_TOOL_NAME
+      && (call as StructuredOutputToolCallLike).invalid === true,
+    ),
+  );
+  return invalidToolCall ? { kind: "invalid" } : { kind: "missing" };
 }
 
 /**
@@ -877,12 +1016,13 @@ async function attemptTextFallbackGenerate<T>(
     throw new SafeGenerateError(
       `safeGenerateObject: invalid JSON. Raw: ${result.text.slice(0, 500)}`,
       trace,
+      "invalid_json",
     );
   }
 
-  parsed = coerceToSchema(parsed, schema);
+  parsed = maybeCoerceToSchema(parsed, schema, opts);
 
-  const valid = parseWithSchema(parsed, schema, trace);
+  const valid = parseGeneratedWithSchema(parsed, opts, trace);
   if (valid) return valid;
 
   const direct = schema.safeParse(parsed);
@@ -893,6 +1033,7 @@ async function attemptTextFallbackGenerate<T>(
   throw new SafeGenerateError(
     `safeGenerateObject: Zod validation failed.\nErrors: ${zodErrors}\nRaw (first 500 chars): ${cleaned.slice(0, 500)}`,
     trace,
+    "schema_validation_failed",
   );
 }
 
@@ -917,11 +1058,12 @@ async function attemptNativeStructuredGenerate<T>(
     context,
     "native_schema",
   );
-  const parsed = coerceToSchema(
+  const parsed = maybeCoerceToSchema(
     (result as { output?: unknown }).output,
     opts.schema,
+    opts,
   );
-  const valid = parseWithSchema(parsed, opts.schema, trace);
+  const valid = parseGeneratedWithSchema(parsed, opts, trace);
   if (valid) return valid;
 
   const direct = opts.schema.safeParse(parsed);
@@ -929,6 +1071,7 @@ async function attemptNativeStructuredGenerate<T>(
   throw new SafeGenerateError(
     `safeGenerateObject native structured output: Zod validation failed.\nErrors: ${zodErrors}`,
     trace,
+    "schema_validation_failed",
   );
 }
 
@@ -956,9 +1099,18 @@ async function attemptNativeJsonGenerate<T>(
     context,
     "native_json",
   );
-  const rawOutput = (result as { output?: unknown }).output;
-  const parsed = coerceToSchema(rawOutput, opts.schema);
-  const valid = parseWithSchema(parsed, opts.schema, trace);
+  let rawOutput: unknown;
+  try {
+    rawOutput = (result as { output?: unknown }).output;
+  } catch (err) {
+    throw new SafeGenerateError(
+      `safeGenerateObject native JSON output was unavailable: ${formatNativeFailureReason(err)}`,
+      trace,
+      "native_output_unavailable",
+    );
+  }
+  const parsed = maybeCoerceToSchema(rawOutput, opts.schema, opts);
+  const valid = parseGeneratedWithSchema(parsed, opts, trace);
   if (valid) return valid;
 
   const direct = opts.schema.safeParse(parsed);
@@ -975,6 +1127,7 @@ async function attemptNativeJsonGenerate<T>(
   throw new SafeGenerateError(
     `safeGenerateObject native JSON output: Zod validation failed.\nErrors: ${zodErrors}`,
     trace,
+    "schema_validation_failed",
   );
 }
 
@@ -1014,26 +1167,35 @@ async function attemptToolModeGenerate<T>(
     context,
     "tool_mode",
   );
-  const toolInput = extractStructuredOutputToolInput(result);
-  if (toolInput === undefined) {
+  const toolInputResult = extractStructuredOutputToolInput(result);
+  if (toolInputResult.kind === "missing") {
     throw new SafeGenerateError(
       `safeGenerateObject tool mode: ${STRUCTURED_OUTPUT_TOOL_NAME} tool call was not generated`,
       trace,
+      "missing_structured_tool_call",
+    );
+  }
+  if (toolInputResult.kind === "invalid") {
+    throw new SafeGenerateError(
+      `safeGenerateObject tool mode: ${STRUCTURED_OUTPUT_TOOL_NAME} tool call was generated with invalid arguments`,
+      trace,
+      "invalid_structured_tool_call",
     );
   }
 
-  const parsed = coerceToSchema(toolInput, opts.schema);
-  const valid = parseWithSchema(parsed, opts.schema, trace);
+  const parsed = maybeCoerceToSchema(toolInputResult.input, opts.schema, opts);
+  const valid = parseGeneratedWithSchema(parsed, opts, trace);
   if (valid) return valid;
 
   const direct = opts.schema.safeParse(parsed);
   const zodErrors = direct.success ? "" : formatZodIssues(direct.error);
-  const repaired = await attemptRepair(opts, JSON.stringify(toolInput), zodErrors, trace, schemaHint);
+  const repaired = await attemptRepair(opts, JSON.stringify(toolInputResult.input), zodErrors, trace, schemaHint);
   if (repaired) return repaired;
 
   throw new SafeGenerateError(
     `safeGenerateObject tool mode: Zod validation failed.\nErrors: ${zodErrors}`,
     trace,
+    "schema_validation_failed",
   );
 }
 
@@ -1044,11 +1206,28 @@ async function attemptGenerate<T>(opts: SafeGenerateOpts<T>): Promise<SafeGenera
   const schemaHint = describeZodShape(opts.schema);
   const context = buildStrategyContext(opts);
 
+  if (opts.allowTextFallback === false && context.capability.primaryStrategy === "text_fallback") {
+    throw textFallbackDisabledError(
+      context,
+      "text_fallback",
+      "Primary strategy resolved to text_fallback.",
+    );
+  }
+
   if (context.capability.primaryStrategy === "native_schema") {
     try {
       return await attemptNativeStructuredGenerate(opts, context);
     } catch (err) {
       const fallbackReason = formatNativeFailureReason(err);
+      if (opts.allowTextFallback === false) {
+        throw textFallbackDisabledError(
+          context,
+          "native_schema",
+          fallbackReason,
+          err instanceof SafeGenerateError ? err.trace : undefined,
+          err instanceof SafeGenerateError ? err.code ?? "text_fallback_disabled" : "text_fallback_disabled",
+        );
+      }
       return attemptTextFallbackGenerate(opts, schemaHint, context, fallbackReason);
     }
   }
@@ -1057,11 +1236,21 @@ async function attemptGenerate<T>(opts: SafeGenerateOpts<T>): Promise<SafeGenera
     try {
       return await attemptNativeJsonGenerate(opts, schemaHint, context);
     } catch (err) {
+      const fallbackReason = `native_json failed: ${formatNativeFailureReason(err)}`;
+      if (opts.allowTextFallback === false) {
+        throw textFallbackDisabledError(
+          context,
+          "native_json",
+          fallbackReason,
+          err instanceof SafeGenerateError ? err.trace : undefined,
+          err instanceof SafeGenerateError ? err.code ?? "text_fallback_disabled" : "text_fallback_disabled",
+        );
+      }
       return attemptTextFallbackGenerate(
         opts,
         schemaHint,
         context,
-        `native_json failed: ${formatNativeFailureReason(err)}`,
+        fallbackReason,
       );
     }
   }
@@ -1070,11 +1259,21 @@ async function attemptGenerate<T>(opts: SafeGenerateOpts<T>): Promise<SafeGenera
     try {
       return await attemptToolModeGenerate(opts, schemaHint, context);
     } catch (err) {
+      const fallbackReason = `tool_mode failed: ${formatToolFailureReason(err)}`;
+      if (opts.allowTextFallback === false) {
+        throw textFallbackDisabledError(
+          context,
+          "tool_mode",
+          fallbackReason,
+          err instanceof SafeGenerateError ? err.trace : undefined,
+          err instanceof SafeGenerateError ? err.code ?? "text_fallback_disabled" : "text_fallback_disabled",
+        );
+      }
       return attemptTextFallbackGenerate(
         opts,
         schemaHint,
         context,
-        `tool_mode failed: ${formatToolFailureReason(err)}`,
+        fallbackReason,
       );
     }
   }
@@ -1083,6 +1282,10 @@ async function attemptGenerate<T>(opts: SafeGenerateOpts<T>): Promise<SafeGenera
     context.capability.primaryStrategy === "text_fallback"
       ? undefined
       : `${context.capability.primaryStrategy} is not implemented for safeGenerateObject; using explicit text fallback.`;
+
+  if (opts.allowTextFallback === false) {
+    throw textFallbackDisabledError(context, context.capability.primaryStrategy, fallbackReason ?? "Primary strategy is unavailable.");
+  }
 
   return attemptTextFallbackGenerate(opts, schemaHint, context, fallbackReason);
 }
@@ -1122,6 +1325,7 @@ export async function safeGenerateObject<T>(opts: SafeGenerateOpts<T>): Promise<
         reasoningLen: result.trace.reasoningText?.length ?? 0,
         responseModel: result.trace.response?.modelId ?? null,
         usage: result.trace.usage ?? null,
+        finishReason: result.trace.finishReason ?? null,
         latencyMs: Date.now() - attemptStart,
       });
       return result;
@@ -1144,6 +1348,7 @@ export async function safeGenerateObject<T>(opts: SafeGenerateOpts<T>): Promise<
         reasoningLen: trace?.reasoningText?.length ?? 0,
         responseModel: trace?.response?.modelId ?? null,
         usage: trace?.usage ?? null,
+        finishReason: trace?.finishReason ?? null,
         latencyMs: Date.now() - attemptStart,
       });
       if (attempt < maxAttempts) {
@@ -1163,6 +1368,7 @@ export async function safeGenerateObject<T>(opts: SafeGenerateOpts<T>): Promise<
             strategy: "full_retry",
           }
         : undefined,
+      lastError.code ?? "full_retry_exhausted",
     );
   }
   throw lastError;

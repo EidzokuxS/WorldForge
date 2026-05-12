@@ -146,6 +146,62 @@ describe("ActorDecisionPacket", () => {
     );
   });
 
+  it("rejects flattened runtime tool args instead of interpreting them as input", () => {
+    const validation = validateActorDecisionPacket({
+      frame,
+      packet: {
+        actorId: "npc-key",
+        citedFactIds: ["self:npc-key"],
+        intent: "log an overheard procedural detail",
+        requestedTools: [
+          {
+            toolName: "log_event",
+            purpose: "record a visible witness beat",
+            input: "The witness heard wardens discuss courier delays.",
+            text: "The witness heard wardens discuss courier delays.",
+            importance: 3,
+            participants: ["Watcher"],
+            durability: "scene_local",
+          } as never,
+        ],
+      },
+    });
+
+    expect(validation.ok).toBe(false);
+    expect(validation.issues).toContainEqual(
+      expect.objectContaining({
+        code: "invalid_shape",
+        path: "requestedTools.0.input",
+      }),
+    );
+  });
+
+  it("rejects move_to requests that omit targetLocationName", () => {
+    const validation = validateActorDecisionPacket({
+      frame,
+      packet: {
+        actorId: "npc-key",
+        citedFactIds: ["self:npc-key", "move:loc-b"],
+        intent: "move to the connected station",
+        requestedTools: [
+          {
+            toolName: "move_to",
+            purpose: "Watcher leaves for Station B",
+            input: { destination: "Station B" },
+          },
+        ],
+      },
+    });
+
+    expect(validation.ok).toBe(false);
+    expect(validation.issues).toContainEqual(
+      expect.objectContaining({
+        code: "invalid_shape",
+        path: "requestedTools.0.input.targetLocationName",
+      }),
+    );
+  });
+
   it("requires a concrete no-action reason when no tools are requested", () => {
     const validation = validateActorDecisionPacket({
       frame,

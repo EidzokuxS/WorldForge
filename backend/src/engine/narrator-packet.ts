@@ -1,5 +1,6 @@
 import type { NarrativeOutcomeBounds } from "./combat-envelope.js";
-import type { SceneActor, SceneFrame } from "./scene-frame.js";
+import type { BridgeLookupToolName } from "./bridge-candidate-tools.js";
+import type { SceneActor, SceneFrame, SceneFramePlayerInventoryItem } from "./scene-frame.js";
 import type { ToolResult } from "./tool-executor.js";
 import { isObservationToolResult } from "./tool-result.js";
 import type { RuntimeToolName } from "./tool-schemas.js";
@@ -32,19 +33,47 @@ export interface CanonicalTurnPacketNarratorFacts {
   actionIds: string[];
   toolResultRefs: Array<{
     actionId: string;
-    toolName: RuntimeToolName;
+    toolName: CanonicalTurnPacketToolName;
   }>;
 }
+
+export type CanonicalTurnKind =
+  | "status_read"
+  | "dialogue_outcome"
+  | "world_fact"
+  | "scene_beat"
+  | "state_mutation"
+  | "combat_transition"
+  | "direct_noop";
+
+export type CanonicalTurnResolutionState =
+  | "observation_grounded"
+  | "mutated"
+  | "explicit_no_change"
+  | "explicit_no_combat";
+
+export interface CanonicalTurnResolution {
+  kind: CanonicalTurnKind;
+  resolutionState: CanonicalTurnResolutionState;
+  combatIntent: boolean;
+  evidenceIds: string[];
+  consequenceIds: string[];
+  explicitNoCombatEvidenceIds: string[];
+  toolNames: string[];
+}
+
+export type CanonicalTurnPacketToolName = RuntimeToolName | BridgeLookupToolName;
 
 export interface CanonicalTurnPacketActionResult {
   order: number;
   actionId: string;
   actionRef: string;
   actorId: string;
-  toolName: RuntimeToolName;
+  toolName: CanonicalTurnPacketToolName;
   input: unknown;
   args: unknown;
   result: ToolResult;
+  summary?: string;
 }
 
 export interface CanonicalTurnPacketEvent {
@@ -56,7 +85,7 @@ export interface CanonicalTurnPacketEvent {
   actionId?: string;
   toolResultRef?: {
     actionId: string;
-    toolName: RuntimeToolName;
+    toolName: CanonicalTurnPacketToolName;
   };
 }
 
@@ -74,7 +103,7 @@ export interface CanonicalTurnPacketEffect {
   id: string;
   actionId?: string;
   actorId?: string;
-  toolName?: RuntimeToolName;
+  toolName?: CanonicalTurnPacketToolName;
   summary: string;
   perceivableByPlayer: boolean;
   toolResult?: ToolResult;
@@ -85,6 +114,7 @@ export interface CanonicalTurnPacket {
   tick: number;
   playerAction: string;
   oracleOutcome: string | null;
+  turnResolution?: CanonicalTurnResolution;
   narratorFacts: CanonicalTurnPacketNarratorFacts;
   anchorEvent: CanonicalTurnPacketEvent;
   events: CanonicalTurnPacketEvent[];
@@ -107,6 +137,15 @@ export interface NarratorPacketHintSignalSourceRef {
   kind: "hint_signal" | "world_thread_signal";
 }
 
+export interface NarratorPacketInventoryItem {
+  id: string;
+  itemId: string;
+  label: string;
+  equipState: "carried" | "equipped";
+  equippedSlot: string | null;
+  isSignature: boolean;
+}
+
 export type NarratorPacketEvidenceCategory =
   | "player_action_request"
   | "oracle_outcome"
@@ -115,6 +154,7 @@ export type NarratorPacketEvidenceCategory =
   | "perceivable_response"
   | "perceivable_effect"
   | "visible_actor"
+  | "current_inventory_status"
   | "hint_signal"
   | "world_thread_signal"
   | "guardrail"
@@ -126,6 +166,7 @@ export interface NarratorPacketEvidence {
   category: NarratorPacketEvidenceCategory;
   summary: string;
   sourceId?: string;
+  claimSupport?: string[];
 }
 
 export type NarratorPacketRedactionReason =
@@ -171,6 +212,7 @@ export interface NarratorPacket {
   perceivableResponses: CanonicalTurnPacketResponse[];
   perceivableEffects: CanonicalTurnPacketEffect[];
   visibleActors: NarratorPacketActor[];
+  currentInventory?: NarratorPacketInventoryItem[];
   hintSignals: string[];
   hintSignalSourceRefs?: NarratorPacketHintSignalSourceRef[];
   evidenceLedger?: NarratorPacketEvidence[];
@@ -242,6 +284,19 @@ function collectVisibleActors(frame: SceneFrame): NarratorPacketActor[] {
     }));
 }
 
+function collectCurrentInventory(
+  frame: Pick<SceneFrame, "playerInventory">,
+): NarratorPacketInventoryItem[] {
+  return (frame.playerInventory ?? []).map((item: SceneFramePlayerInventoryItem) => ({
+    id: item.id,
+    itemId: item.itemId,
+    label: item.label,
+    equipState: item.equipState,
+    equippedSlot: item.equippedSlot,
+    isSignature: item.isSignature,
+  }));
+}
+
 function collectHintSignals(frame: SceneFrame): string[] {
   return uniqueStrings([
     ...frame.perception.playerAwarenessHints,
@@ -280,9 +335,18 @@ function evidenceId(category: NarratorPacketEvidenceCategory, id: string): strin
   return `${category}:${id}`;
 }
 
+function formatInventoryStatusSummary(item: NarratorPacketInventoryItem): string {
+  const state = item.equipState === "equipped"
+    ? `currently equipped${item.equippedSlot ? ` in ${item.equippedSlot}` : ""}`
+    : "currently carried";
+  const signature = item.isSignature ? " as a signature item" : "";
+  return `${item.label} is ${state} by the player${signature}.`;
+}
+
 function collectEvidenceLedger(args: {
   packet: CanonicalTurnPacket;
   visibleActors: NarratorPacketActor[];
+  currentInventory: NarratorPacketInventoryItem[];
   perceivableEvents: CanonicalTurnPacketEvent[];
   perceivableResponses: CanonicalTurnPacketResponse[];
   perceivableEffects: CanonicalTurnPacketEffect[];
@@ -337,10 +401,10 @@ function collectEvidenceLedger(args: {
     });
     if (effect.actionId && effect.toolName) {
       add({
-        id: evidenceId("tool_result", `${effect.actionId}:${effect.toolName}`),
+        id: evidenceId("tool_result", effect.actionId),
         category: "tool_result",
-        summary: `${formatToolName(effect.toolName)} result is player-perceivable through effect ${effect.id}.`,
-        sourceId: `${effect.actionId}:${effect.toolName}`,
+        summary: `The accepted action result supports this player-perceivable effect: ${effect.summary}`,
+        sourceId: effect.actionId,
       });
     }
   }
@@ -350,6 +414,14 @@ function collectEvidenceLedger(args: {
       category: "visible_actor",
       summary: actor.label,
       sourceId: actor.id,
+    });
+  }
+  for (const item of args.currentInventory) {
+    add({
+      id: evidenceId("current_inventory_status", item.itemId),
+      category: "current_inventory_status",
+      summary: formatInventoryStatusSummary(item),
+      sourceId: item.itemId,
     });
   }
   for (let index = 0; index < args.hintSignals.length; index += 1) {
@@ -444,6 +516,27 @@ function readRecordStringArray(value: unknown, key: string): string[] {
     : [];
 }
 
+function readRecordNumber(value: unknown, key: string): number | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const field = (value as Record<string, unknown>)[key];
+  return typeof field === "number" && Number.isFinite(field)
+    ? field
+    : null;
+}
+
+function readRecordArray(value: unknown, key: string): Record<string, unknown>[] {
+  if (!value || typeof value !== "object") {
+    return [];
+  }
+  const field = (value as Record<string, unknown>)[key];
+  return Array.isArray(field)
+    ? field.filter((entry): entry is Record<string, unknown> =>
+      Boolean(entry) && typeof entry === "object" && !Array.isArray(entry))
+    : [];
+}
+
 function summarizeFirstListEntry(values: readonly string[], fallback: string): string {
   const first = values[0]?.trim();
   if (!first) return fallback;
@@ -454,12 +547,171 @@ function toolField(input: unknown, args: unknown, key: string): string | null {
   return readRecordString(input, key) ?? readRecordString(args, key);
 }
 
-function formatToolName(toolName: RuntimeToolName): string {
-  return toolName.replace(/_/g, " ");
+function toolStringArray(input: unknown, args: unknown, key: string): string[] {
+  return readRecordStringArray(input, key).length > 0
+    ? readRecordStringArray(input, key)
+    : readRecordStringArray(args, key);
+}
+
+function toolRecordArray(input: unknown, args: unknown, key: string): Record<string, unknown>[] {
+  const inputArray = readRecordArray(input, key);
+  return inputArray.length > 0 ? inputArray : readRecordArray(args, key);
+}
+
+function candidateLabelsFromResult(result: unknown, key: string): string[] {
+  return readRecordArray(result, key)
+    .map((candidate) =>
+      readRecordString(candidate, "label")
+        ?? readRecordString(candidate, "name")
+        ?? readRecordString(candidate, "summary"))
+    .filter((label): label is string => Boolean(label))
+    .slice(0, 3);
+}
+
+function formatLabelList(labels: readonly string[]): string {
+  return labels.join(", ");
+}
+
+function formatStructuralClaim(claim: Record<string, unknown>): string {
+  const claimKind = readRecordString(claim, "claimKind") ?? "claim";
+  const polarity = readRecordString(claim, "polarity") ?? "states";
+  const subject =
+    readRecordString(claim, "subjectRef")
+    ?? readRecordString(claim, "subjectText");
+  return subject
+    ? `${claimKind}/${polarity} subject=${subject}`
+    : `${claimKind}/${polarity}`;
+}
+
+function summarizeDialogueOutcomeStructurally(input: {
+  acceptedResult: unknown;
+  toolInput: unknown;
+  toolArgs: unknown;
+}): string {
+  const { acceptedResult, toolInput, toolArgs } = input;
+  const acceptedField = (key: string): string | null => readRecordString(acceptedResult, key);
+  const field = (key: string): string | null =>
+    acceptedField(key) ?? toolField(toolInput, toolArgs, key);
+  const claims = readRecordArray(acceptedResult, "claims").length > 0
+    ? readRecordArray(acceptedResult, "claims")
+    : toolRecordArray(toolInput, toolArgs, "claims");
+  const addresseeRefs = readRecordStringArray(acceptedResult, "addresseeRefs").length > 0
+    ? readRecordStringArray(acceptedResult, "addresseeRefs")
+    : toolStringArray(toolInput, toolArgs, "addresseeRefs");
+  const sourceRefs = readRecordStringArray(acceptedResult, "sourceRefs").length > 0
+    ? readRecordStringArray(acceptedResult, "sourceRefs")
+    : toolStringArray(toolInput, toolArgs, "sourceRefs");
+  const parts = [
+    `Dialogue outcome: outcome=${field("outcomeKind") ?? "unknown"}`,
+    `topic=${field("topicKind") ?? "unknown"}`,
+    `authority=${field("authorityKind") ?? "unknown"}`,
+    `truth=${field("truthStatus") ?? "unknown"}`,
+    `durability=${field("durability") ?? "unknown"}`,
+    field("speakerRef") ? `speaker=${field("speakerRef")}` : null,
+    addresseeRefs.length > 0 ? `addressees=${formatLabelList(addresseeRefs)}` : null,
+    field("requestedRoleText") ? `requestedRole=${field("requestedRoleText")}` : null,
+    field("futureUseKind") ? `futureUse=${field("futureUseKind")}` : null,
+    sourceRefs.length > 0 ? `sources=${formatLabelList(sourceRefs)}` : null,
+    claims.length > 0 ? `Claims: ${claims.map(formatStructuralClaim).join(" | ")}` : null,
+  ];
+  return parts.filter((part): part is string => Boolean(part)).join("; ");
+}
+
+function summarizeWorldFactStructurally(input: {
+  acceptedResult: unknown;
+  toolInput: unknown;
+  toolArgs: unknown;
+}): string {
+  const { acceptedResult, toolInput, toolArgs } = input;
+  const acceptedField = (key: string): string | null => readRecordString(acceptedResult, key);
+  const field = (key: string): string | null =>
+    acceptedField(key) ?? toolField(toolInput, toolArgs, key);
+  const claims = readRecordArray(acceptedResult, "claims").length > 0
+    ? readRecordArray(acceptedResult, "claims")
+    : toolRecordArray(toolInput, toolArgs, "claims");
+  const subjectRefs = readRecordStringArray(acceptedResult, "subjectRefs").length > 0
+    ? readRecordStringArray(acceptedResult, "subjectRefs")
+    : toolStringArray(toolInput, toolArgs, "subjectRefs");
+  const sourceRefs = readRecordStringArray(acceptedResult, "sourceRefs").length > 0
+    ? readRecordStringArray(acceptedResult, "sourceRefs")
+    : toolStringArray(toolInput, toolArgs, "sourceRefs");
+  const parts = [
+    `World fact: fact=${field("factKind") ?? "unknown"}`,
+    `topic=${field("topicKind") ?? "unknown"}`,
+    `truth=${field("truthStatus") ?? "unknown"}`,
+    `source=${field("sourceKind") ?? "unknown"}`,
+    `durability=${field("durability") ?? "unknown"}`,
+    field("futureUseKind") ? `futureUse=${field("futureUseKind")}` : null,
+    subjectRefs.length > 0 ? `subjects=${formatLabelList(subjectRefs)}` : null,
+    sourceRefs.length > 0 ? `sources=${formatLabelList(sourceRefs)}` : null,
+    claims.length > 0 ? `Claims: ${claims.map(formatStructuralClaim).join(" | ")}` : null,
+  ];
+  return parts.filter((part): part is string => Boolean(part)).join("; ");
+}
+
+function summarizeObservationToolResult(
+  toolName: CanonicalTurnPacketToolName,
+  acceptedResult: unknown,
+): string | null {
+  const labels = candidateLabelsFromResult(acceptedResult, "candidates");
+  const facts = candidateLabelsFromResult(acceptedResult, "facts");
+  const count = readRecordNumber(acceptedResult, "count");
+  const labelsText = formatLabelList(labels);
+  const factsText = formatLabelList(facts);
+
+  switch (toolName) {
+    case "list_visible_affordances":
+      return "The current visible actors, routes, objects, and public scene cues are checked without changing state.";
+    case "list_navigation_options":
+      return labels.length > 0
+        ? `Reachable routes are checked: ${labelsText}.`
+        : "No additional reachable route is confirmed from the current scene.";
+    case "find_location_candidates":
+      return labels.length > 0
+        ? `Matching visible or reachable locations are checked: ${labelsText}.`
+        : "No matching visible or reachable location is confirmed; the current scene remains the grounded vantage point.";
+    case "find_poi_candidates":
+      return labels.length > 0
+        ? `Matching visible points of interest are checked: ${labelsText}.`
+        : "No matching visible point of interest is confirmed in the current scene.";
+    case "find_object_candidates":
+      return labels.length > 0
+        ? `Matching visible objects are checked: ${labelsText}.`
+        : "No matching visible object is confirmed in the current scene.";
+    case "find_actor_candidates":
+      return labels.length > 0
+        ? `Matching visible actors are checked: ${labelsText}.`
+        : "No matching visible actor is confirmed in the current scene.";
+    case "inspect_known_fact":
+      return facts.length > 0
+        ? `Player-visible or player-known facts are checked: ${factsText}.`
+        : "No matching player-visible or player-known fact is confirmed.";
+    case "check_route": {
+      const routeStatus = readRecordString(acceptedResult, "routeStatus");
+      const destination = acceptedResult && typeof acceptedResult === "object"
+        ? readRecordString((acceptedResult as Record<string, unknown>).destination, "label")
+        : null;
+      if (routeStatus === "already_here") {
+        return destination
+          ? `The player is already at ${destination}.`
+          : "The player is already at the checked destination.";
+      }
+      if (routeStatus === "legal") {
+        return destination
+          ? `A visible route to ${destination} is confirmed.`
+          : "A visible route to the checked destination is confirmed.";
+      }
+      return "The requested route is checked against visible current-scene routes.";
+    }
+    default:
+      return count !== null && count === 0
+        ? "No matching player-visible result is confirmed."
+        : null;
+  }
 }
 
 export function summarizeRuntimeToolResultForNarrator(input: {
-  toolName: RuntimeToolName;
+  toolName: CanonicalTurnPacketToolName;
   actionId: string;
   toolInput: unknown;
   toolArgs: unknown;
@@ -470,12 +722,36 @@ export function summarizeRuntimeToolResultForNarrator(input: {
   const acceptedField = (key: string): string | null => readRecordString(acceptedResult, key);
 
   switch (toolName) {
+    case "list_visible_affordances":
+    case "list_navigation_options":
+    case "find_location_candidates":
+    case "find_object_candidates":
+    case "find_actor_candidates":
+    case "find_poi_candidates":
+    case "inspect_known_fact":
+    case "check_route":
+      return summarizeObservationToolResult(toolName, acceptedResult)
+        ?? "A player-visible observation is checked without changing state.";
     case "log_event":
       return clarifyUnconfirmedClaimSummary(
         toolField(toolInput, toolArgs, "text")
           ?? toolField(toolInput, toolArgs, "summary")
           ?? "A future-relevant local event is recorded.",
       );
+    case "record_dialogue_outcome": {
+      return summarizeDialogueOutcomeStructurally({
+        acceptedResult,
+        toolInput,
+        toolArgs,
+      });
+    }
+    case "record_world_fact": {
+      return summarizeWorldFactStructurally({
+        acceptedResult,
+        toolInput,
+        toolArgs,
+      });
+    }
     case "set_relationship": {
       const reason = toolField(toolInput, toolArgs, "reason");
       const entityA = toolField(toolInput, toolArgs, "entityA");
@@ -622,7 +898,7 @@ export function summarizeRuntimeToolResultForNarrator(input: {
       return `${itemName} moves to ${targetName}.`;
     }
     default:
-      return `A validated ${formatToolName(toolName)} consequence settles in the scene.`;
+      return "A player-visible action result is accepted by the game state.";
   }
 }
 
@@ -664,6 +940,73 @@ function buildActionResultEffect(
   };
 }
 
+type ActorCreationToolName = Extract<RuntimeToolName, "spawn_npc" | "create_scene_extra">;
+
+function isActorCreationToolName(
+  toolName: CanonicalTurnPacketToolName | undefined,
+): toolName is ActorCreationToolName {
+  return toolName === "spawn_npc" || toolName === "create_scene_extra";
+}
+
+export function collectCommittedVisibleActorCreationLabels(args: {
+  packet: CanonicalTurnPacket;
+  perceivableEffects: readonly CanonicalTurnPacketEffect[];
+}): string[] {
+  const visibleCreationRefs = new Set(
+    args.perceivableEffects
+      .filter((effect) => isActorCreationToolName(effect.toolName))
+      .flatMap((effect) => [
+        effect.actionId ? `action:${effect.actionId}` : null,
+        effect.actionId && effect.toolName ? `tool:${effect.actionId}:${effect.toolName}` : null,
+      ])
+      .filter((ref): ref is string => Boolean(ref)),
+  );
+  const effectLabels = args.perceivableEffects
+    .filter((effect) => isActorCreationToolName(effect.toolName))
+    .map((effect) =>
+      effect.toolResult?.success === true
+        ? readRecordString(effect.toolResult.result, "name")
+        : null,
+    );
+  const actionResultLabels = args.packet.actionResults
+    .filter((result) =>
+      result.result.success
+      && !isObservationToolResult(result.result)
+      && isActorCreationToolName(result.toolName)
+      && (
+        visibleCreationRefs.has(`action:${result.actionId}`)
+        || visibleCreationRefs.has(`tool:${result.actionId}:${result.toolName}`)
+      ),
+    )
+    .map((result) =>
+      readRecordString(result.result.result, "name")
+        ?? toolField(result.input, result.args, "name"),
+    );
+
+  return uniqueStrings([...effectLabels, ...actionResultLabels]);
+}
+
+function normalizeActorPromptSafetyLabel(label: string): string {
+  return label.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function forbiddenActorNameMatchesCommittedVisibleActorLabel(
+  forbiddenActorName: string,
+  normalizedCommittedLabel: string,
+): boolean {
+  const normalizedForbiddenName = normalizeActorPromptSafetyLabel(forbiddenActorName);
+  return Boolean(normalizedForbiddenName)
+    && Boolean(normalizedCommittedLabel)
+    && normalizedForbiddenName === normalizedCommittedLabel;
+}
+
+function actorPromptSafetyLabelContainsWholeTokens(container: string, contained: string): boolean {
+  return container === contained
+    || container.startsWith(`${contained} `)
+    || container.endsWith(` ${contained}`)
+    || container.includes(` ${contained} `);
+}
+
 function collectPerceivableEvents(packet: CanonicalTurnPacket): CanonicalTurnPacketEvent[] {
   const eventById = new Map(
     uniqueById([packet.anchorEvent, ...packet.events]).map((event) => [event.id, event]),
@@ -689,38 +1032,196 @@ function collectPerceivableResponses(
     );
 }
 
-function collectPerceivableEffects(packet: CanonicalTurnPacket): CanonicalTurnPacketEffect[] {
+function findFrameActor(frame: SceneFrame, actorId: string | null | undefined): SceneActor | null {
+  if (!actorId) {
+    return null;
+  }
+
+  return [
+    ...frame.roster.active,
+    ...frame.roster.support,
+    ...frame.roster.background,
+  ].find((entry) => entry.id === actorId || entry.actorId === actorId) ?? null;
+}
+
+function actorIsPromptVisible(frame: SceneFrame, actorId: string | null | undefined): boolean {
+  if (!actorId || actorId === frame.playerActorId) {
+    return true;
+  }
+
+  const actor = findFrameActor(frame, actorId);
+  return actor?.awareness === "clear";
+}
+
+interface HiddenSourceRedactionTerm {
+  term: string;
+  replacement: string;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function collectHiddenSourceRedactionTerms(args: {
+  frame: SceneFrame;
+  forbiddenActorNames: readonly string[];
+  forbiddenFactMarkers: readonly string[];
+  forbiddenPrivateTerms: readonly string[];
+}): HiddenSourceRedactionTerm[] {
+  const actorIdentityTerms = uniqueStrings([
+    ...args.forbiddenActorNames,
+    ...(args.frame.perception.forbiddenActorIds ?? []),
+    ...collectForbiddenActors(args.frame).flatMap((actor) => [
+      actor.id,
+      actor.actorId,
+      actor.label,
+    ]),
+  ]).map((term) => ({ term, replacement: "someone unseen" }));
+  const privateTerms = uniqueStrings([
+    ...args.forbiddenFactMarkers,
+    ...args.forbiddenPrivateTerms,
+  ]).map((term) => ({ term, replacement: "something private" }));
+
+  return [...actorIdentityTerms, ...privateTerms]
+    .filter((entry) => entry.term.trim().length > 0)
+    .sort((left, right) => right.term.length - left.term.length);
+}
+
+function containsForbiddenPromptTerm(
+  text: string,
+  terms: readonly HiddenSourceRedactionTerm[],
+): boolean {
+  const normalizedText = text.toLowerCase();
+  return terms.some((entry) => normalizedText.includes(entry.term.trim().toLowerCase()));
+}
+
+function redactHiddenSourceSummary(args: {
+  summary: string;
+  terms: readonly HiddenSourceRedactionTerm[];
+}): string | null {
+  let redacted = args.summary.trim();
+  if (!redacted) {
+    return null;
+  }
+
+  for (const entry of args.terms) {
+    const term = entry.term.trim();
+    if (!term) {
+      continue;
+    }
+    redacted = redacted.replace(new RegExp(escapeRegExp(term), "gi"), entry.replacement);
+  }
+
+  redacted = redacted
+    .replace(/\s+/g, " ")
+    .replace(/\bsomeone unseen's something private\b/gi, "an unseen private action")
+    .trim();
+
+  if (!/[A-Za-z0-9]/.test(redacted) || containsForbiddenPromptTerm(redacted, args.terms)) {
+    return null;
+  }
+
+  return redacted;
+}
+
+function anonymizeHiddenSourceEffect(args: {
+  effect: CanonicalTurnPacketEffect;
+  index: number;
+  terms: readonly HiddenSourceRedactionTerm[];
+}): CanonicalTurnPacketEffect | null {
+  const summary = redactHiddenSourceSummary({
+    summary: args.effect.summary,
+    terms: args.terms,
+  });
+  if (!summary) {
+    return null;
+  }
+
+  const anonymousActionId = args.effect.actionId
+    ? `anonymous-action-${args.index}`
+    : undefined;
+
+  return {
+    ...args.effect,
+    id: `anonymous-effect-${args.index}`,
+    actionId: anonymousActionId,
+    actorId: undefined,
+    summary,
+  };
+}
+
+function collectPromptSafeEffect(args: {
+  effect: CanonicalTurnPacketEffect;
+  frame: SceneFrame;
+  hiddenSourceIndex: number;
+  hiddenSourceRedactionTerms: readonly HiddenSourceRedactionTerm[];
+}): CanonicalTurnPacketEffect | null {
+  if (actorIsPromptVisible(args.frame, args.effect.actorId)) {
+    return args.effect;
+  }
+
+  return anonymizeHiddenSourceEffect({
+    effect: args.effect,
+    index: args.hiddenSourceIndex,
+    terms: args.hiddenSourceRedactionTerms,
+  });
+}
+
+function collectPerceivableEffects(
+  packet: CanonicalTurnPacket,
+  frame: SceneFrame,
+  hiddenSourceRedactionTerms: readonly HiddenSourceRedactionTerm[],
+): CanonicalTurnPacketEffect[] {
   const actionIds = new Set(packet.narratorFacts.actionIds);
   const toolResultRefs = new Set(
     packet.narratorFacts.toolResultRefs.map((ref) => `${ref.actionId}:${ref.toolName}`),
   );
-  const generatedEffects = packet.actionResults
-    .filter(
-      (result) =>
-        result.result.success
-        && !isObservationToolResult(result.result)
-        && (
-          actionIds.has(result.actionId)
-          || toolResultRefs.has(`${result.actionId}:${result.toolName}`)
-        ),
+  let hiddenSourceIndex = 0;
+  const nextHiddenSourceIndex = (): number => {
+    hiddenSourceIndex += 1;
+    return hiddenSourceIndex;
+  };
+  const referencedAction = (
+    actionId: string,
+    toolName?: CanonicalTurnPacketToolName,
+  ): boolean =>
+    actionIds.has(actionId)
+    || (toolName ? toolResultRefs.has(`${actionId}:${toolName}`) : false);
+  const explicitEffects = packet.effects
+    .filter((effect) =>
+      effect.perceivableByPlayer
+      && effect.toolResult?.success !== false
+      && (
+        (effect.actionId ? referencedAction(effect.actionId, effect.toolName) : false)
+      ),
     )
-    .map(buildActionResultEffect);
+    .map((effect) =>
+      collectPromptSafeEffect({
+        effect,
+        frame,
+        hiddenSourceIndex: nextHiddenSourceIndex(),
+        hiddenSourceRedactionTerms,
+      }),
+    )
+    .filter((effect): effect is CanonicalTurnPacketEffect => Boolean(effect));
+  const generatedEffects = packet.actionResults
+    .filter((result) =>
+      result.result.success
+      && !isObservationToolResult(result.result)
+      && referencedAction(result.actionId, result.toolName),
+    )
+    .map(buildActionResultEffect)
+    .map((effect) =>
+      collectPromptSafeEffect({
+        effect,
+        frame,
+        hiddenSourceIndex: nextHiddenSourceIndex(),
+        hiddenSourceRedactionTerms,
+      }),
+    )
+    .filter((effect): effect is CanonicalTurnPacketEffect => Boolean(effect));
 
-  return uniqueById([
-    ...packet.effects.filter(
-      (effect) =>
-        effect.perceivableByPlayer
-        && effect.toolResult?.success !== false
-        && !(effect.toolResult && isObservationToolResult(effect.toolResult))
-        && (
-          (effect.actionId ? actionIds.has(effect.actionId) : false)
-          || (effect.actionId && effect.toolName
-            ? toolResultRefs.has(`${effect.actionId}:${effect.toolName}`)
-            : false)
-        ),
-    ),
-    ...generatedEffects,
-  ]);
+  return uniqueById([...explicitEffects, ...generatedEffects]);
 }
 
 interface NarratorPromptVisibleItem {
@@ -775,6 +1276,12 @@ function collectNarratorPromptVisibleItems(packet: NarratorPacket): NarratorProm
       category: "visible_actor",
       text: actor.label,
       sourceId: actor.id,
+    })),
+    ...(packet.currentInventory ?? []).map((item) => ({
+      id: item.itemId,
+      category: "current_inventory_status",
+      text: formatInventoryStatusSummary(item),
+      sourceId: item.itemId,
     })),
     ...packet.hintSignals.map((hint, index) => ({
       id: packet.hintSignalSourceRefs?.[index]?.id ?? `hint:${index + 1}`,
@@ -1008,6 +1515,7 @@ function buildNarratorContextBudgetTrace(args: {
     sourceLinkedSummaryCount: args.sourceLinkedSummaries.length,
     sectionCounts: {
       actors: args.packet.visibleActors.length,
+      currentInventory: (args.packet.currentInventory ?? []).length,
       hints: args.packet.hintSignals.length,
       events: args.packet.perceivableEvents.length,
       responses: args.packet.perceivableResponses.length,
@@ -1028,26 +1536,43 @@ function buildNarratorContextBudgetTrace(args: {
 
 export function buildNarratorPacket(args: BuildNarratorPacketArgs): NarratorPacket {
   const visibleActors = collectVisibleActors(args.frame);
+  const currentInventory = collectCurrentInventory(args.frame);
   const perceivableEvents = collectPerceivableEvents(args.canonicalTurnPacket);
   const perceivableResponses = collectPerceivableResponses(args.canonicalTurnPacket);
-  const perceivableEffects = collectPerceivableEffects(args.canonicalTurnPacket);
+  const rawForbiddenActorNames = collectForbiddenActorNames(args.frame);
+  const forbiddenFactMarkers = collectForbiddenFactMarkers(
+    args.frame,
+    args.forbiddenFactMarkers,
+  );
+  const forbiddenPrivateTerms = uniqueStrings(args.forbiddenPrivateTerms ?? []);
+  const hiddenSourceRedactionTerms = collectHiddenSourceRedactionTerms({
+    frame: args.frame,
+    forbiddenActorNames: rawForbiddenActorNames,
+    forbiddenFactMarkers,
+    forbiddenPrivateTerms,
+  });
+  const perceivableEffects = collectPerceivableEffects(
+    args.canonicalTurnPacket,
+    args.frame,
+    hiddenSourceRedactionTerms,
+  );
   const hintSignals = collectHintSignals(args.frame);
   const hintSignalSourceRefs = collectHintSignalSourceRefs(args.frame);
+  const committedVisibleActorCreationLabels = collectCommittedVisibleActorCreationLabels({
+    packet: args.canonicalTurnPacket,
+    perceivableEffects,
+  });
   const evidenceLedger = collectEvidenceLedger({
     packet: args.canonicalTurnPacket,
     visibleActors,
+    currentInventory,
     perceivableEvents,
     perceivableResponses,
     perceivableEffects,
     hintSignals,
     hintSignalSourceRefs,
   });
-  const forbiddenActorNames = collectForbiddenActorNames(args.frame);
-  const forbiddenFactMarkers = collectForbiddenFactMarkers(
-    args.frame,
-    args.forbiddenFactMarkers,
-  );
-  const forbiddenPrivateTerms = uniqueStrings(args.forbiddenPrivateTerms ?? []);
+  const forbiddenActorNames = [...rawForbiddenActorNames];
   const redactionAudit = buildRedactionAudit({
     packet: args.canonicalTurnPacket,
     perceivableEvents,
@@ -1069,12 +1594,16 @@ export function buildNarratorPacket(args: BuildNarratorPacketArgs): NarratorPack
     perceivableResponses,
     perceivableEffects,
     visibleActors,
+    currentInventory,
     hintSignals,
     hintSignalSourceRefs,
     evidenceLedger,
     guardrails: [...args.canonicalTurnPacket.guardrails],
     controlReturnReason: args.canonicalTurnPacket.controlReturnReason,
-    allowedVisibleActorNames: visibleActors.map((actor) => actor.label),
+    allowedVisibleActorNames: uniqueStrings([
+      ...visibleActors.map((actor) => actor.label),
+      ...committedVisibleActorCreationLabels,
+    ]),
     forbiddenActorNames,
     forbiddenFactMarkers,
     forbiddenPrivateTerms,
@@ -1104,13 +1633,13 @@ function promptSourceBoundaryText(
   source: string;
   text: string;
   playerSourced: boolean;
-  toolName?: RuntimeToolName | null;
+  toolName?: CanonicalTurnPacketToolName | null;
 }> {
   const texts: Array<{
     source: string;
     text: string | null | undefined;
     playerSourced?: boolean;
-    toolName?: RuntimeToolName | null;
+    toolName?: CanonicalTurnPacketToolName | null;
   }> = [
     { source: "oracle_outcome", text: packet.oracleOutcome },
     {
@@ -1132,6 +1661,10 @@ function promptSourceBoundaryText(
       text: effect.summary,
       toolName: effect.toolName,
     })),
+    ...(packet.currentInventory ?? []).map((item) => ({
+      source: `current_inventory_status:${item.itemId}`,
+      text: formatInventoryStatusSummary(item),
+    })),
     ...packet.hintSignals.map((hint, index) => ({
       source: `hint_signal:${index + 1}`,
       text: hint,
@@ -1152,7 +1685,7 @@ function promptSourceBoundaryText(
       source: string;
       text: string;
       playerSourced?: boolean;
-      toolName?: RuntimeToolName | null;
+      toolName?: CanonicalTurnPacketToolName | null;
     } =>
       typeof entry.text === "string" && entry.text.length > 0,
   ).map((entry) => ({
@@ -1164,35 +1697,79 @@ function promptSourceBoundaryText(
 }
 
 export function assertNarratorPacketPromptSafe(packet: NarratorPacket): void {
-  const forbiddenTerms = uniqueStrings([
-    ...packet.forbiddenActorNames,
-    ...packet.forbiddenFactMarkers,
-    ...packet.forbiddenPrivateTerms,
-  ]);
   const promptTexts = promptSourceBoundaryText(packet);
+  const committedVisibleActorCreationLabels = collectCommittedVisibleActorCreationLabels({
+    packet: packet.canonicalTurnPacket,
+    perceivableEffects: packet.perceivableEffects,
+  });
+  const forbiddenTermGroups = [
+    {
+      terms: packet.forbiddenActorNames,
+      allowCommittedActorCreation: true,
+    },
+    {
+      terms: packet.forbiddenFactMarkers,
+      allowCommittedActorCreation: false,
+    },
+    {
+      terms: packet.forbiddenPrivateTerms,
+      allowCommittedActorCreation: false,
+    },
+  ];
 
-  for (const term of forbiddenTerms) {
-    const normalizedTerm = term.trim().toLowerCase();
-    if (!normalizedTerm) {
-      continue;
-    }
-    const leak = promptTexts.find((entry) => {
-      return sourceBoundaryTermIsLeak({
-        source: entry.source,
-        text: entry.text,
-        playerSourced: entry.playerSourced,
-        playerAction: packet.playerAction,
-        normalizedTerm,
-        toolName: entry.toolName,
+  for (const group of forbiddenTermGroups) {
+    for (const term of uniqueStrings(group.terms)) {
+      const normalizedTerm = term.trim().toLowerCase();
+      if (!normalizedTerm) {
+        continue;
+      }
+      const leak = promptTexts.find((entry) => {
+        if (
+          group.allowCommittedActorCreation
+          && sourceBoundaryTermIsAllowedCommittedActorCreation({
+            source: entry.source,
+            text: entry.text,
+            toolName: entry.toolName as RuntimeToolName | null | undefined,
+            forbiddenTerm: term,
+            committedVisibleActorCreationLabels,
+          })
+        ) {
+          return false;
+        }
+        return sourceBoundaryTermIsLeak({
+          source: entry.source,
+          text: entry.text,
+          playerSourced: entry.playerSourced,
+          playerAction: packet.playerAction,
+          normalizedTerm,
+          toolName: entry.toolName as RuntimeToolName | null | undefined,
+        });
       });
-    });
-    if (leak) {
-      throw new NarratorPacketPromptSafetyError(
-        `NarratorPacket prompt unsafe: forbidden packet term would be formatted from ${leak.source}.`,
-        term,
-      );
+      if (leak) {
+        throw new NarratorPacketPromptSafetyError(
+          `NarratorPacket prompt unsafe: forbidden packet term would be formatted from ${leak.source}.`,
+          term,
+        );
+      }
     }
   }
+}
+
+export function sourceBoundaryTermIsAllowedCommittedActorCreation(args: {
+  source: string;
+  text: string;
+  toolName?: RuntimeToolName | null;
+  forbiddenTerm: string;
+  committedVisibleActorCreationLabels: readonly string[];
+}): boolean {
+  if (!args.source.startsWith("perceivable_effect:")) return false;
+  if (!args.toolName || !isActorCreationToolName(args.toolName)) return false;
+  const normalizedText = normalizeActorPromptSafetyLabel(args.text);
+  return args.committedVisibleActorCreationLabels.some((label) => {
+    const normalizedLabel = normalizeActorPromptSafetyLabel(label);
+    return forbiddenActorNameMatchesCommittedVisibleActorLabel(args.forbiddenTerm, normalizedLabel)
+      && actorPromptSafetyLabelContainsWholeTokens(normalizedText, normalizedLabel);
+  });
 }
 
 function formatEvent(event: CanonicalTurnPacketEvent): string {
@@ -1207,7 +1784,6 @@ function formatEffect(effect: CanonicalTurnPacketEffect): string {
   const refs = [
     effect.actionId ? `action=${effect.actionId}` : null,
     effect.actorId ? `actor=${effect.actorId}` : null,
-    effect.toolName ? `tool=${effect.toolName}` : null,
   ].filter((value): value is string => Boolean(value));
 
   return `- ${effect.id}: ${effect.summary}${refs.length > 0 ? ` [${refs.join("; ")}]` : ""}`;
@@ -1276,6 +1852,11 @@ export function formatNarratorPacketForPrompt(packet: NarratorPacket): string {
     ...(packet.visibleActors.length > 0
       ? packet.visibleActors.map((actor) => `- ${actor.label} (${actor.id}; ${actor.type})`)
       : ["- No confirmed visible actors."]),
+    "",
+    "[CURRENT INVENTORY STATUS]",
+    ...((packet.currentInventory ?? []).length > 0
+      ? (packet.currentInventory ?? []).map((item) => `- ${formatInventoryStatusSummary(item)}`)
+      : ["- No carried, equipped, or signature items are currently recorded."]),
     "",
     "[HINT SIGNALS]",
     ...(packet.hintSignals.length > 0

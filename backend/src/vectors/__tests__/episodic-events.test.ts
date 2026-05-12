@@ -43,12 +43,14 @@ function createMockDb({
   vectorRows = [],
   vectorSearchThrows = false,
   schemaFields = ["id", "text", "tick", "location", "participants", "importance", "type"],
+  schemaThrows = false,
 }: {
   hasTable?: boolean;
   queryRows?: Record<string, unknown>[];
   vectorRows?: Record<string, unknown>[];
   vectorSearchThrows?: boolean;
   schemaFields?: string[];
+  schemaThrows?: boolean;
 } = {}) {
   const queryBuilder = {
     where: vi.fn().mockReturnThis(),
@@ -69,9 +71,11 @@ function createMockDb({
     update: vi.fn().mockResolvedValue(undefined),
     query: vi.fn().mockReturnValue(queryBuilder),
     vectorSearch: vi.fn().mockReturnValue(vectorSearchBuilder),
-    schema: vi.fn().mockResolvedValue({
-      fields: schemaFields.map((name) => ({ name })),
-    }),
+    schema: schemaThrows
+      ? vi.fn().mockRejectedValue(new Error("Dataset missing _versions"))
+      : vi.fn().mockResolvedValue({
+          fields: schemaFields.map((name) => ({ name })),
+        }),
   };
 
   const db = {
@@ -218,6 +222,34 @@ describe("episodic-events", () => {
         importance: 4,
         type: "event",
       });
+    });
+
+    it("recreates a listed but unreadable episodic table before storing a committed event", async () => {
+      const { db, table } = createMockDb({ hasTable: true, schemaThrows: true });
+      mockGetVectorDb.mockReturnValue(db);
+
+      await storeEpisodicEvent("campaign-1", {
+        text: "The warden states the current proof requirement.",
+        tick: 55,
+        location: "Lantern-Lit Gondola Pier",
+        participants: ["Lead Warden", "Mira Voss"],
+        importance: 6,
+        type: "dialogue",
+      });
+
+      expect(db.openTable).toHaveBeenCalledWith("episodic_events");
+      expect(db.dropTable).toHaveBeenCalledWith("episodic_events");
+      expect(db.createEmptyTable).toHaveBeenCalledTimes(1);
+      expect(table.add).toHaveBeenCalledWith([
+        expect.objectContaining({
+          text: "The warden states the current proof requirement.",
+          tick: 55,
+          location: "Lantern-Lit Gondola Pier",
+          participants: ["Lead Warden", "Mira Voss"],
+          importance: 6,
+          type: "dialogue",
+        }),
+      ]);
     });
 
     it("queues same-turn pending evidence for committed events without requiring embeddings", async () => {

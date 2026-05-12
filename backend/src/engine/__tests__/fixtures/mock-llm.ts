@@ -529,6 +529,13 @@ export async function applyMocks(): Promise<void> {
         worldTimeMinutes: 0,
       })),
       readWorldClock: vi.fn((campaignId: string) => ({ campaignId, worldVersion: 0, worldTimeMinutes: 0, currentTick: 0, updatedAt: 0 })),
+      syncWorldClockTurnBoundary: vi.fn((input: { campaignId: string; currentTick: number }) => ({
+        campaignId: input.campaignId,
+        worldVersion: 0,
+        worldTimeMinutes: 0,
+        currentTick: input.currentTick,
+        updatedAt: 0,
+      })),
     };
   });
 

@@ -48,6 +48,11 @@ import {
   type SpawnNpcLocationRef,
   type ToolExecutionContext,
 } from "./tool-execution-context.js";
+import {
+  recordActorKnowledge,
+  type ActorKnowledgeRoute,
+  type ActorKnowledgeTruthStatus,
+} from "./knowledge-model.js";
 import type { RuntimeToolName } from "./tool-schemas.js";
 import {
   buildRecordPlayerIntentResult,
@@ -115,6 +120,8 @@ const STATE_BEARING_TOOLS = new Set([
   "set_relationship",
   "add_chronicle_entry",
   "log_event",
+  "record_dialogue_outcome",
+  "record_world_fact",
   "advance_time",
   "spawn_npc",
   "promote_npc",
@@ -131,10 +138,40 @@ const STATE_BEARING_TOOLS = new Set([
   "transfer_item",
 ]);
 const SYNC_SQLITE_STATE_BEARING_TOOLS = new Set(
-  [...STATE_BEARING_TOOLS].filter((toolName) => toolName !== "log_event"),
+  [...STATE_BEARING_TOOLS].filter((toolName) =>
+    toolName !== "log_event" && toolName !== "record_dialogue_outcome"),
 );
 
 // -- Entity resolution --------------------------------------------------------
+
+function typedRefPrefixesForEntityType(entityType: EntityType): string[] {
+  switch (entityType) {
+    case "player":
+      return ["actor:", "player:"];
+    case "npc":
+      return ["actor:", "npc:"];
+    case "location":
+      return ["location:"];
+    case "item":
+      return ["item:"];
+    case "faction":
+      return ["faction:"];
+  }
+}
+
+function refCandidates(value: string, prefixes: readonly string[]): string[] {
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  const lower = trimmed.toLowerCase();
+  const candidates = [trimmed];
+  for (const prefix of prefixes) {
+    if (lower.startsWith(prefix)) {
+      const unprefixed = trimmed.slice(prefix.length).trim();
+      if (unprefixed) candidates.push(unprefixed);
+    }
+  }
+  return [...new Set(candidates)];
+}
 
 function resolveEntity(
   campaignId: string,
@@ -145,11 +182,16 @@ function resolveEntity(
   if (!table) return null;
 
   const db = getDb();
+  const candidates = refCandidates(entityName, typedRefPrefixesForEntityType(entityType));
+  const primaryRef = candidates[0] ?? entityName;
+  const secondaryRef = candidates[1] ?? primaryRef;
+  const normalizedPrimary = primaryRef.trim().toLowerCase();
+  const normalizedSecondary = secondaryRef.trim().toLowerCase();
   const row = db
     .select({ id: table.id, name: table.name, tags: table.tags })
     .from(table)
     .where(
-      sql`${table.campaignId} = ${campaignId} AND LOWER(${table.name}) = LOWER(${entityName})`
+      sql`${table.campaignId} = ${campaignId} AND (${table.id} = ${primaryRef} OR ${table.id} = ${secondaryRef} OR LOWER(${table.name}) = ${normalizedPrimary} OR LOWER(${table.name}) = ${normalizedSecondary})`
     )
     .get();
 
@@ -178,19 +220,21 @@ function normalizeLocationRef(value: string): string {
 }
 
 function resolveToolLocationById(campaignId: string, locationId: string): ToolLocationRow | null {
-  return loadToolLocationRows(campaignId).find((location) => location.id === locationId) ?? null;
+  const candidates = refCandidates(locationId, ["location:"]);
+  return loadToolLocationRows(campaignId).find((location) => candidates.includes(location.id)) ?? null;
 }
 
 function resolveToolLocationByNameOrId(
   campaignId: string,
   locationRef: string,
 ): ToolLocationRow | null {
-  const normalizedRef = normalizeLocationRef(locationRef);
+  const candidates = refCandidates(locationRef, ["location:"]);
+  const normalizedRefs = candidates.map(normalizeLocationRef);
   return (
     loadToolLocationRows(campaignId).find(
       (location) =>
-        location.id === locationRef ||
-        normalizeLocationRef(location.name) === normalizedRef,
+        candidates.includes(location.id) ||
+        normalizedRefs.includes(normalizeLocationRef(location.name)),
     ) ?? null
   );
 }
@@ -243,13 +287,25 @@ function resolveEntityIdByName(
 ): string | null {
   const db = getDb();
   const tables = [players, npcs, locations, factions, items] as const;
+  const candidates = refCandidates(entityName, [
+    "actor:",
+    "player:",
+    "npc:",
+    "location:",
+    "faction:",
+    "item:",
+  ]);
+  const primaryRef = candidates[0] ?? entityName;
+  const secondaryRef = candidates[1] ?? primaryRef;
+  const normalizedPrimary = primaryRef.trim().toLowerCase();
+  const normalizedSecondary = secondaryRef.trim().toLowerCase();
 
   for (const table of tables) {
     const row = db
       .select({ id: table.id })
       .from(table)
       .where(
-        sql`${table.campaignId} = ${campaignId} AND LOWER(${table.name}) = LOWER(${entityName})`
+        sql`${table.campaignId} = ${campaignId} AND (${table.id} = ${primaryRef} OR ${table.id} = ${secondaryRef} OR LOWER(${table.name}) = ${normalizedPrimary} OR LOWER(${table.name}) = ${normalizedSecondary})`
       )
       .get();
 
@@ -396,13 +452,18 @@ function resolveCharacterRecordByName(
   entityType: CharacterEntityType,
 ) {
   const db = getDb();
+  const candidates = refCandidates(entityName, typedRefPrefixesForEntityType(entityType));
+  const primaryRef = candidates[0] ?? entityName;
+  const secondaryRef = candidates[1] ?? primaryRef;
+  const normalizedPrimary = primaryRef.trim().toLowerCase();
+  const normalizedSecondary = secondaryRef.trim().toLowerCase();
 
   if (entityType === "player") {
     const row = db
       .select()
       .from(players)
       .where(
-        sql`${players.campaignId} = ${campaignId} AND LOWER(${players.name}) = LOWER(${entityName})`
+        sql`${players.campaignId} = ${campaignId} AND (${players.id} = ${primaryRef} OR ${players.id} = ${secondaryRef} OR LOWER(${players.name}) = ${normalizedPrimary} OR LOWER(${players.name}) = ${normalizedSecondary})`
       )
       .get();
 
@@ -419,7 +480,7 @@ function resolveCharacterRecordByName(
     .select()
     .from(npcs)
     .where(
-      sql`${npcs.campaignId} = ${campaignId} AND LOWER(${npcs.name}) = LOWER(${entityName})`
+      sql`${npcs.campaignId} = ${campaignId} AND (${npcs.id} = ${primaryRef} OR ${npcs.id} = ${secondaryRef} OR LOWER(${npcs.name}) = ${normalizedPrimary} OR LOWER(${npcs.name}) = ${normalizedSecondary})`
     )
     .get();
 
@@ -459,13 +520,18 @@ function resolveCharacterByName(
   name: string
 ): { id: string; name: string; table: "players" | "npcs"; hp?: number } | null {
   const db = getDb();
+  const candidates = refCandidates(name, ["actor:", "player:", "npc:"]);
+  const primaryRef = candidates[0] ?? name;
+  const secondaryRef = candidates[1] ?? primaryRef;
+  const normalizedPrimary = primaryRef.trim().toLowerCase();
+  const normalizedSecondary = secondaryRef.trim().toLowerCase();
 
   // Search players first
   const player = db
     .select({ id: players.id, name: players.name, hp: players.hp })
     .from(players)
     .where(
-      sql`${players.campaignId} = ${campaignId} AND LOWER(${players.name}) = LOWER(${name})`
+      sql`${players.campaignId} = ${campaignId} AND (${players.id} = ${primaryRef} OR ${players.id} = ${secondaryRef} OR LOWER(${players.name}) = ${normalizedPrimary} OR LOWER(${players.name}) = ${normalizedSecondary})`
     )
     .get();
 
@@ -476,7 +542,7 @@ function resolveCharacterByName(
     .select({ id: npcs.id, name: npcs.name })
     .from(npcs)
     .where(
-      sql`${npcs.campaignId} = ${campaignId} AND LOWER(${npcs.name}) = LOWER(${name})`
+      sql`${npcs.campaignId} = ${campaignId} AND (${npcs.id} = ${primaryRef} OR ${npcs.id} = ${secondaryRef} OR LOWER(${npcs.name}) = ${normalizedPrimary} OR LOWER(${npcs.name}) = ${normalizedSecondary})`
     )
     .get();
 
@@ -489,14 +555,18 @@ function resolveCharacterRecordByRef(
   campaignId: string,
   ref: string,
 ) {
-  const normalizedRef = ref.trim().toLowerCase();
+  const candidates = refCandidates(ref, ["actor:", "player:", "npc:"]);
+  const primaryRef = candidates[0] ?? ref;
+  const secondaryRef = candidates[1] ?? primaryRef;
+  const normalizedPrimary = primaryRef.trim().toLowerCase();
+  const normalizedSecondary = secondaryRef.trim().toLowerCase();
   const db = getDb();
 
   const player = db
     .select()
     .from(players)
     .where(
-      sql`${players.campaignId} = ${campaignId} AND (${players.id} = ${ref} OR LOWER(${players.name}) = ${normalizedRef})`,
+      sql`${players.campaignId} = ${campaignId} AND (${players.id} = ${primaryRef} OR ${players.id} = ${secondaryRef} OR LOWER(${players.name}) = ${normalizedPrimary} OR LOWER(${players.name}) = ${normalizedSecondary})`,
     )
     .get();
 
@@ -513,7 +583,7 @@ function resolveCharacterRecordByRef(
     .select()
     .from(npcs)
     .where(
-      sql`${npcs.campaignId} = ${campaignId} AND (${npcs.id} = ${ref} OR LOWER(${npcs.name}) = ${normalizedRef})`,
+      sql`${npcs.campaignId} = ${campaignId} AND (${npcs.id} = ${primaryRef} OR ${npcs.id} = ${secondaryRef} OR LOWER(${npcs.name}) = ${normalizedPrimary} OR LOWER(${npcs.name}) = ${normalizedSecondary})`,
     )
     .get();
 
@@ -524,6 +594,26 @@ function resolveCharacterRecordByRef(
     type: "npc" as const,
     record: hydrateStoredNpcRecord(npc),
   };
+}
+
+function resolveItemByNameOrRef(
+  campaignId: string,
+  itemRef: string,
+): { id: string; name: string } | null {
+  const candidates = refCandidates(itemRef, ["item:"]);
+  const primaryRef = candidates[0] ?? itemRef;
+  const secondaryRef = candidates[1] ?? primaryRef;
+  const normalizedPrimary = primaryRef.trim().toLowerCase();
+  const normalizedSecondary = secondaryRef.trim().toLowerCase();
+  const db = getDb();
+
+  return db
+    .select({ id: items.id, name: items.name })
+    .from(items)
+    .where(
+      sql`${items.campaignId} = ${campaignId} AND (${items.id} = ${primaryRef} OR ${items.id} = ${secondaryRef} OR LOWER(${items.name}) = ${normalizedPrimary} OR LOWER(${items.name}) = ${normalizedSecondary})`
+    )
+    .get() ?? null;
 }
 
 function normalizeNpcTier(value: unknown): NpcTier | null {
@@ -850,6 +940,350 @@ async function handleLogEvent(
   }
 }
 
+function readToolString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readToolStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    .map((entry) => entry.trim());
+}
+
+function uniqueToolStrings(values: readonly unknown[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(trimmed);
+  }
+  return result;
+}
+
+function canonicalDialogueOutcomeText(args: Record<string, unknown>): string {
+  const speakerRef = readToolString(args.speakerRef);
+  const requestedRoleText = readToolString(args.requestedRoleText);
+  const outcomeKind = readToolString(args.outcomeKind) ?? "unknown";
+  const topicKind = readToolString(args.topicKind) ?? "other";
+  const authorityKind = readToolString(args.authorityKind) ?? "unknown";
+  const truthStatus = readToolString(args.truthStatus) ?? "unconfirmed";
+  const summary = readToolString(args.summary) ?? "Dialogue outcome recorded.";
+  const quote = readToolString(args.quote);
+  const futureUseKind = readToolString(args.futureUseKind);
+  const futureRelevance = readToolString(args.futureRelevance);
+  const claims = Array.isArray(args.claims)
+    ? args.claims
+        .filter((claim): claim is Record<string, unknown> =>
+          Boolean(claim) && typeof claim === "object" && !Array.isArray(claim))
+        .map((claim) => {
+          const claimKind = readToolString(claim.claimKind) ?? "other";
+          const polarity = readToolString(claim.polarity) ?? "states";
+          const claimSummary = readToolString(claim.summary) ?? "";
+          return `${claimKind}/${polarity}: ${claimSummary}`;
+        })
+        .filter(Boolean)
+    : [];
+
+  return [
+    `Dialogue outcome ${outcomeKind} on ${topicKind}.`,
+    speakerRef ? `Speaker: ${speakerRef}.` : null,
+    requestedRoleText ? `Requested role: ${requestedRoleText}.` : null,
+    `Authority: ${authorityKind}; truth: ${truthStatus}.`,
+    `Summary: ${summary}`,
+    quote ? `Quote: ${quote}` : null,
+    claims.length > 0 ? `Claims: ${claims.join(" | ")}` : null,
+    futureUseKind ? `Future use: ${futureUseKind}.` : null,
+    futureRelevance ? `Future relevance: ${futureRelevance}` : null,
+  ].filter((part): part is string => Boolean(part)).join(" ");
+}
+
+async function handleRecordDialogueOutcome(
+  campaignId: string,
+  args: Record<string, unknown>,
+  tick: number,
+): Promise<ToolResult> {
+  const durability = args.durability === "durable" ? "durable" : "scene_local";
+  const text = canonicalDialogueOutcomeText(args);
+  const speakerRef = readToolString(args.speakerRef);
+  const addresseeRefs = readToolStringArray(args.addresseeRefs);
+  const sourceRefs = readToolStringArray(args.sourceRefs);
+  const claims = Array.isArray(args.claims) ? args.claims : [];
+  const participants = uniqueToolStrings([
+    speakerRef,
+    ...addresseeRefs,
+    ...sourceRefs,
+  ]);
+  const baseResult = {
+    text,
+    outcomeKind: readToolString(args.outcomeKind),
+    topicKind: readToolString(args.topicKind),
+    authorityKind: readToolString(args.authorityKind),
+    truthStatus: readToolString(args.truthStatus),
+    speakerRef,
+    addresseeRefs,
+    requestedRoleText: readToolString(args.requestedRoleText),
+    futureUseKind: readToolString(args.futureUseKind),
+    futureRelevance: readToolString(args.futureRelevance),
+    quote: readToolString(args.quote),
+    summary: readToolString(args.summary),
+    claims,
+    sourceRefs,
+    durability,
+  };
+
+  if (durability !== "durable") {
+    return {
+      success: true,
+      result: {
+        ...baseResult,
+        persisted: false,
+      },
+    };
+  }
+
+  const futureRelevance = readToolString(args.futureRelevance);
+  if (!futureRelevance) {
+    return {
+      success: false,
+      error: "futureRelevance is required when record_dialogue_outcome durability is durable",
+    };
+  }
+
+  const db = getDb();
+  const player = db
+    .select({ currentLocationId: players.currentLocationId })
+    .from(players)
+    .where(eq(players.campaignId, campaignId))
+    .get();
+  const playerLocation = player?.currentLocationId
+    ? db
+        .select({ name: locations.name })
+        .from(locations)
+        .where(eq(locations.id, player.currentLocationId))
+        .get()
+    : null;
+
+  try {
+    const eventId = await storeEpisodicEvent(campaignId, {
+      text,
+      tick,
+      location: playerLocation?.name ?? "",
+      participants,
+      importance: 5,
+      type: "event",
+    });
+    await accumulateReflectionBudget(campaignId, participants, 5);
+
+    return {
+      success: true,
+      result: {
+        ...baseResult,
+        eventId,
+        persisted: true,
+      },
+    };
+  } catch (error) {
+    log.warn("Failed to store dialogue outcome event", error);
+    return {
+      success: false,
+      error: `Failed to store dialogue outcome event: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+function mapWorldFactRoute(sourceKind: string | null): ActorKnowledgeRoute {
+  switch (sourceKind) {
+    case "direct_observation":
+      return "direct_observation";
+    case "public_record":
+      return "public_record";
+    case "report_message":
+      return "report_message";
+    case "rumor":
+      return "rumor";
+    case "claim":
+      return "claim";
+    case "memory":
+      return "memory";
+    case "comparison":
+    case "other":
+    default:
+      return "belief";
+  }
+}
+
+function mapWorldFactTruthStatus(truthStatus: string | null): ActorKnowledgeTruthStatus {
+  switch (truthStatus) {
+    case "observed":
+      return "observed";
+    case "verified":
+      return "verified";
+    case "reported":
+      return "reported";
+    case "rumored":
+      return "rumored";
+    case "claimed":
+      return "claimed";
+    case "disputed":
+      return "disputed";
+    case "believed":
+    case "unknown":
+    default:
+      return "believed";
+  }
+}
+
+function worldFactConfidence(truthStatus: string | null): number {
+  switch (truthStatus) {
+    case "verified":
+    case "observed":
+      return 80;
+    case "reported":
+      return 65;
+    case "claimed":
+    case "believed":
+      return 55;
+    case "rumored":
+      return 40;
+    case "disputed":
+    case "unknown":
+      return 35;
+    default:
+      return 50;
+  }
+}
+
+function isLikelyEventSourceRef(ref: string): boolean {
+  return /event|chronicle|tool-result|tool:/i.test(ref);
+}
+
+function canonicalWorldFactText(args: Record<string, unknown>): string {
+  const sourceKind = readToolString(args.sourceKind) ?? "other";
+  const truthStatus = readToolString(args.truthStatus) ?? "believed";
+  const factKind = readToolString(args.factKind) ?? "other";
+  const topicKind = readToolString(args.topicKind) ?? "other";
+  const summary = readToolString(args.summary) ?? "World fact recorded.";
+  const futureUseKind = readToolString(args.futureUseKind);
+  const futureRelevance = readToolString(args.futureRelevance);
+  const subjectRefs = readToolStringArray(args.subjectRefs);
+  const sourceRefs = readToolStringArray(args.sourceRefs);
+  const claims = Array.isArray(args.claims)
+    ? args.claims
+        .filter((claim): claim is Record<string, unknown> =>
+          Boolean(claim) && typeof claim === "object" && !Array.isArray(claim))
+        .map((claim) => {
+          const claimKind = readToolString(claim.claimKind) ?? "other";
+          const polarity = readToolString(claim.polarity) ?? "states";
+          const claimSummary = readToolString(claim.summary) ?? "";
+          return `${claimKind}/${polarity}: ${claimSummary}`;
+        })
+        .filter(Boolean)
+    : [];
+
+  return [
+    `World fact ${factKind} on ${topicKind}.`,
+    `Source: ${sourceKind}; truth: ${truthStatus}.`,
+    subjectRefs.length > 0 ? `Subjects: ${subjectRefs.join(", ")}.` : null,
+    sourceRefs.length > 0 ? `Source refs: ${sourceRefs.join(", ")}.` : null,
+    `Summary: ${summary}`,
+    claims.length > 0 ? `Claims: ${claims.join(" | ")}` : null,
+    futureUseKind ? `Future use: ${futureUseKind}.` : null,
+    futureRelevance ? `Future relevance: ${futureRelevance}` : null,
+  ].filter((part): part is string => Boolean(part)).join(" ");
+}
+
+function handleRecordWorldFact(
+  campaignId: string,
+  args: Record<string, unknown>,
+  executionContext?: ToolExecutionContext,
+): ToolResult {
+  const actorId = executionContext?.subjectActorId;
+  if (!actorId) {
+    return {
+      success: false,
+      error: "record_world_fact requires a subject actor in the execution context",
+    };
+  }
+
+  const futureRelevance = readToolString(args.futureRelevance);
+  if (!futureRelevance) {
+    return {
+      success: false,
+      error: "futureRelevance is required when record_world_fact durability is durable",
+    };
+  }
+
+  const sourceKind = readToolString(args.sourceKind);
+  const truthStatus = readToolString(args.truthStatus);
+  const subjectRefs = readToolStringArray(args.subjectRefs);
+  const sourceRefs = readToolStringArray(args.sourceRefs);
+  const claims = Array.isArray(args.claims) ? args.claims : [];
+  const statement = canonicalWorldFactText(args);
+
+  try {
+    const record = recordActorKnowledge({
+      campaignId,
+      actorId,
+      route: mapWorldFactRoute(sourceKind),
+      truthStatus: mapWorldFactTruthStatus(truthStatus),
+      statement,
+      subjectRefs,
+      sourceKnowledgeIds: sourceRefs
+        .filter((ref) => ref.startsWith("knowledge:"))
+        .map((ref) => ref.slice("knowledge:".length)),
+      sourceEventIds: sourceRefs.filter((ref) =>
+        !ref.startsWith("knowledge:") && isLikelyEventSourceRef(ref)),
+      confidence: worldFactConfidence(truthStatus),
+      reliability: worldFactConfidence(truthStatus),
+      privacy: "private",
+      metadata: {
+        toolName: "record_world_fact",
+        sourceKind,
+        truthStatus,
+        factKind: readToolString(args.factKind),
+        topicKind: readToolString(args.topicKind),
+        futureUseKind: readToolString(args.futureUseKind),
+        futureRelevance,
+        claims,
+        sourceRefs,
+      },
+    });
+
+    return {
+      success: true,
+      result: {
+        knowledgeId: record.id,
+        factRef: `knowledge:${record.id}`,
+        statement: record.statement,
+        sourceKind,
+        truthStatus,
+        factKind: readToolString(args.factKind),
+        topicKind: readToolString(args.topicKind),
+        futureUseKind: readToolString(args.futureUseKind),
+        futureRelevance,
+        summary: readToolString(args.summary),
+        claims,
+        subjectRefs,
+        sourceRefs,
+        durability: "durable",
+        persisted: true,
+      },
+    };
+  } catch (error) {
+    log.warn("Failed to record world fact", error);
+    return {
+      success: false,
+      error: `Failed to record world fact: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
 // -- New tool handlers --------------------------------------------------------
 
 function resolveSpawnNpcLocation(
@@ -984,11 +1418,16 @@ function handlePromoteNpc(
   }
 
   const db = getDb();
+  const npcCandidates = refCandidates(npcRef, ["actor:", "npc:"]);
+  const primaryRef = npcCandidates[0] ?? npcRef;
+  const secondaryRef = npcCandidates[1] ?? primaryRef;
+  const normalizedPrimary = primaryRef.trim().toLowerCase();
+  const normalizedSecondary = secondaryRef.trim().toLowerCase();
   const npc = db
     .select({ id: npcs.id, name: npcs.name, tier: npcs.tier })
     .from(npcs)
     .where(
-      sql`${npcs.campaignId} = ${campaignId} AND (${npcs.id} = ${npcRef} OR LOWER(${npcs.name}) = LOWER(${npcRef}))`
+      sql`${npcs.campaignId} = ${campaignId} AND (${npcs.id} = ${primaryRef} OR ${npcs.id} = ${secondaryRef} OR LOWER(${npcs.name}) = ${normalizedPrimary} OR LOWER(${npcs.name}) = ${normalizedSecondary})`
     )
     .get();
 
@@ -1241,6 +1680,7 @@ function handleMoveTo(
   }
 
   const targetLocationName = args.targetLocationName as string;
+  const targetLocationRef = refCandidates(targetLocationName, ["location:"])[1] ?? targetLocationName;
 
   const db = getDb();
   const player = db
@@ -1254,7 +1694,7 @@ function handleMoveTo(
 
   const locationGraph = loadLocationGraph({ campaignId });
   const destination = resolveLocationTarget({
-    targetName: targetLocationName,
+    targetName: targetLocationRef,
     locations: locationGraph.locations,
     currentTick: tick,
   });
@@ -1342,6 +1782,7 @@ function handleActorMoveTo(
   executionContext: ToolExecutionContext,
 ): ToolResult {
   const targetLocationName = args.targetLocationName as string;
+  const targetLocationRef = refCandidates(targetLocationName, ["location:"])[1] ?? targetLocationName;
   const actorId = executionContext.subjectActorId;
   if (!actorId) {
     return { success: false, error: "Actor turn move_to requires subjectActorId" };
@@ -1371,7 +1812,7 @@ function handleActorMoveTo(
   }
 
   const destination = resolveLocationTarget({
-    targetName: targetLocationName,
+    targetName: targetLocationRef,
     locations: locationGraph.locations,
     currentTick: tick,
   });
@@ -1791,14 +2232,7 @@ function handleTransferItem(
 
   const db = getDb();
 
-  // Resolve item by name
-  const item = db
-    .select({ id: items.id, name: items.name })
-    .from(items)
-    .where(
-      sql`${items.campaignId} = ${campaignId} AND LOWER(${items.name}) = LOWER(${itemName})`
-    )
-    .get();
+  const item = resolveItemByNameOrRef(campaignId, itemName);
 
   if (!item) {
     return { success: false, error: `Item not found: ${itemName}` };
@@ -1933,7 +2367,7 @@ function addStringRefs(target: Set<string>, values: readonly unknown[]): void {
 }
 
 function isSceneLocalLogEvent(toolName: string, result: ToolResult): boolean {
-  return toolName === "log_event"
+  return (toolName === "log_event" || toolName === "record_dialogue_outcome")
     && readStringField(result.result, "durability") === "scene_local";
 }
 
@@ -1971,6 +2405,27 @@ function stateDeltaRefsForToolResult(input: {
     case "log_event":
       addStringRefs(refs, [
         readStringField(payload, "eventId"),
+        readStringField(payload, "durability"),
+      ]);
+      break;
+    case "record_dialogue_outcome":
+      addStringRefs(refs, [
+        readStringField(payload, "eventId"),
+        readStringField(payload, "outcomeKind"),
+        readStringField(payload, "topicKind"),
+        readStringField(payload, "futureUseKind"),
+        readStringField(payload, "speakerRef"),
+        readStringField(payload, "requestedRoleText"),
+        readStringField(payload, "durability"),
+      ]);
+      break;
+    case "record_world_fact":
+      addStringRefs(refs, [
+        readStringField(payload, "knowledgeId"),
+        readStringField(payload, "factRef"),
+        readStringField(payload, "factKind"),
+        readStringField(payload, "topicKind"),
+        readStringField(payload, "futureUseKind"),
         readStringField(payload, "durability"),
       ]);
       break;
@@ -2095,6 +2550,10 @@ function runToolHandler(input: {
       return handleAddChronicleEntry(input.campaignId, input.args, input.tick);
     case "log_event":
       return handleLogEvent(input.campaignId, input.args, input.tick);
+    case "record_dialogue_outcome":
+      return handleRecordDialogueOutcome(input.campaignId, input.args, input.tick);
+    case "record_world_fact":
+      return handleRecordWorldFact(input.campaignId, input.args, input.executionContext);
     case "advance_time":
       return handleAdvanceTime(input.args);
     case "offer_quick_actions":

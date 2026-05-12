@@ -179,9 +179,11 @@ import {
   buildDoneBoundaryData,
   captureSnapshot,
   findPendingNarrationSaga,
+  PendingNarrationError,
   processTurn,
   resumePendingTurnNarration,
   restoreSnapshot,
+  type TurnSagaRecord,
 } from "../../engine/index.js";
 import chatRoutes from "../chat.js";
 
@@ -189,6 +191,34 @@ const app = new Hono();
 app.route("/chat", chatRoutes);
 
 const CAMPAIGN_ID = "phase-89-chat-resilience";
+
+function mockPendingSaga(overrides: Partial<TurnSagaRecord> = {}): TurnSagaRecord {
+  return {
+    id: "saga-pending",
+    campaignId: CAMPAIGN_ID,
+    turnId: "turn-pending",
+    playerId: null,
+    actionId: null,
+    actionText: null,
+    sourceAction: null,
+    status: "resolved_pending_narration",
+    statusReason: null,
+    statusUpdatedAt: 1,
+    activeLockToken: null,
+    activeWorkerId: null,
+    activeStartedAt: null,
+    requiresNarration: true,
+    baseWorldVersion: 0,
+    resultWorldVersion: 1,
+    oracleDecisionId: null,
+    settledTurnPacketId: null,
+    latestNarratorAttemptId: null,
+    provenance: {},
+    createdAt: 1,
+    updatedAt: 1,
+    ...overrides,
+  };
+}
 
 const mockedGetActive = vi.mocked(getActiveCampaign);
 const mockedGetPremise = vi.mocked(getCampaignPremise);
@@ -207,6 +237,20 @@ async function* createTurnStream(events: Array<{ type: string; data: unknown }>)
   for (const event of events) {
     yield event as never;
   }
+}
+
+async function* createThrowingTurnStream(
+  events: Array<{ type: string; data: unknown }>,
+  error: Error,
+) {
+  for (const event of events) {
+    yield event as never;
+  }
+  throw error;
+}
+
+function sseEventNames(body: string): string[] {
+  return Array.from(body.matchAll(/^event: ([^\r\n]+)/gm), (match) => match[1]);
 }
 
 function setupStoryteller() {
@@ -285,11 +329,10 @@ beforeEach(() => {
 
 describe("Phase 89 chat route resilience", () => {
   it("resumes a pending saga without opening a new paid turn and releases the route lock", async () => {
-    const pendingSaga = {
+    const pendingSaga = mockPendingSaga({
       id: "saga-p89-pending",
       turnId: "turn-p89-pending",
-      status: "resolved_pending_narration",
-    };
+    });
     mockedFindPendingNarrationSaga.mockReturnValue(pendingSaga as never);
     mockedResumePendingTurnNarration.mockImplementation(() =>
       createTurnStream([
@@ -320,6 +363,96 @@ describe("Phase 89 chat route resilience", () => {
     );
     expect(mockedProcessTurn).not.toHaveBeenCalled();
     expect(mockedCaptureSnapshot).not.toHaveBeenCalled();
+    expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
+    expect(runtimeActiveTurns.has(CAMPAIGN_ID)).toBe(false);
+  });
+
+  it("surfaces a resumable terminal error when pending narration resume closes without done or error", async () => {
+    const pendingSaga = mockPendingSaga({
+      id: "saga-p95-silent-resume",
+      turnId: "turn-p95-silent-resume",
+    });
+
+    mockedProcessTurn.mockImplementation(() =>
+      (async function* () {
+        yield { type: "scene-settling", data: { phase: "final-narration" } };
+        throw new PendingNarrationError(pendingSaga);
+      })() as never,
+    );
+    mockedResumePendingTurnNarration.mockImplementation(() =>
+      createTurnStream([
+        { type: "scene-settling", data: { phase: "final-narration", resumed: true } },
+      ]) as never,
+    );
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Resolve the turn",
+        intent: "Resolve the turn",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    const eventNames = sseEventNames(body);
+
+    expect(eventNames).toContain("scene-settling");
+    expect(eventNames.at(-1)).toBe("error");
+    expect(body).toContain("\"pendingNarration\":true");
+    expect(body).toContain("\"resumable\":true");
+    expect(body).toContain("turn-p95-silent-resume");
+    expect(eventNames).not.toContain("done");
+    expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
+    expect(runtimeActiveTurns.has(CAMPAIGN_ID)).toBe(false);
+  });
+
+  it("surfaces a resumable terminal error when pending narration resume throws after settled resume", async () => {
+    const pendingSaga = mockPendingSaga({
+      id: "saga-p95-prompt-safety",
+      turnId: "turn-p95-prompt-safety",
+    });
+
+    mockedProcessTurn.mockImplementation(() =>
+      (async function* () {
+        yield { type: "scene-settling", data: { phase: "final-narration" } };
+        throw new PendingNarrationError(pendingSaga);
+      })() as never,
+    );
+    mockedResumePendingTurnNarration.mockImplementation(() =>
+      createThrowingTurnStream(
+        [
+          { type: "scene-settling", data: { phase: "final-narration", resumed: true } },
+        ],
+        new Error("prompt safety failed"),
+      ) as never,
+    );
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Resolve the turn",
+        intent: "Resolve the turn",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    const eventNames = sseEventNames(body);
+
+    expect(eventNames).toContain("scene-settling");
+    expect(eventNames.at(-1)).toBe("error");
+    expect(body).toContain("\"error\":\"prompt safety failed\"");
+    expect(body).toContain("\"pendingNarration\":true");
+    expect(body).toContain("\"resumable\":true");
+    expect(body).toContain("\"turnId\":\"turn-p95-prompt-safety\"");
+    expect(eventNames).not.toContain("done");
     expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
     expect(runtimeActiveTurns.has(CAMPAIGN_ID)).toBe(false);
   });

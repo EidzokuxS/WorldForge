@@ -570,6 +570,9 @@ const fakeCampaign = {
 };
 
 const fakeWorldData = {
+  currentTick: 12,
+  worldVersion: 1,
+  worldTimeMinutes: 12,
   player: {
     id: "player-1",
     name: "Hero",
@@ -743,6 +746,7 @@ describe("GamePage", () => {
 
     expect(screen.getByTestId("stage-left-zone")).toHaveTextContent("Town Square");
     expect(screen.getByTestId("stage-left-zone")).toHaveTextContent("1 route nearby");
+    expect(screen.getByTestId("stage-left-zone")).toHaveTextContent("Dark Forest");
     expect(screen.getByTestId("stage-right-zone")).toHaveTextContent("Presence");
     expect(screen.getByTestId("stage-right-zone")).toHaveTextContent("No one visible");
   });
@@ -1940,6 +1944,36 @@ describe("GamePage", () => {
       expect(screen.getByLabelText("Scene action")).toBeEnabled();
     });
     expect(screen.getByTestId("presence-layer")).toHaveTextContent("Gondolier");
+  });
+
+  it("fails closed when done refresh returns stale world state", async () => {
+    await renderReadyGame();
+    mockedChatAction.mockResolvedValue(createStreamResponse() as never);
+    mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
+      handlers.onNarrative("The registry clerk lowers the stamp.");
+      handlers.onQuickActions([{ label: "Press the clerk", action: "Press the clerk" }]);
+      handlers.onFinalizing?.({ stage: "rollback_critical" });
+      handlers.onDone({ tick: 20, worldVersion: 3, worldTimeMinutes: 20 });
+    });
+    mockedGetWorld.mockResolvedValue({
+      ...fakeWorldData,
+      currentTick: 19,
+      worldVersion: 3,
+      worldTimeMinutes: 20,
+    } as never);
+
+    fireEvent.change(screen.getByLabelText("Scene action"), {
+      target: { value: "Watch the registry clerk" },
+    });
+    fireEvent.click(screen.getByLabelText("Send action"));
+
+    await waitFor(() => {
+      expect(mockedToast.error).toHaveBeenCalledWith("World sync failed", {
+        description: "World state refresh returned a stale turn tick.",
+      });
+    });
+    expect(screen.getByLabelText("Scene action")).toBeDisabled();
+    expect(screen.queryByText("Press the clerk")).not.toBeInTheDocument();
   });
 
   it("reveals quick actions only after authoritative done arrives", async () => {

@@ -41,6 +41,8 @@ function createContext(overrides: Partial<ToolExecutionContext> = {}): ToolExecu
         currentSceneScopeId: "scene-market-counter",
         currentLocationName: "Market District",
         currentSceneScopeName: "Market Counter",
+        currentLocationDescription: null,
+        currentSceneScopeDescription: null,
       },
       visibleActors: [],
       awarenessHints: [],
@@ -113,6 +115,26 @@ describe("bridge state tool constraints", () => {
       expect(accepted.value.targetLocationName).toBe("loc-tea-lane");
       expect(accepted.value.actorRefs).toContain("Iria");
     }
+
+    const acceptedScoped = prepareMoveActorInput({
+      actorRef: "Iria",
+      destinationRef: "location:loc-tea-lane",
+      evidenceRefs: ["location:loc-tea-lane"],
+      intentSummary: "Iria follows the scoped route ref.",
+    }, createContext({
+      legalMovementRefs: new Set([
+        "route-tea-lane",
+        "loc-tea-lane",
+        "location:loc-tea-lane",
+        "tea lane",
+      ]),
+    }));
+    expect(acceptedScoped.ok).toBe(true);
+    if (acceptedScoped.ok) {
+      expect(acceptedScoped.value.targetLocationName).toBe("loc-tea-lane");
+      expect(acceptedScoped.value.routeEvidenceRefs).toContain("location:loc-tea-lane");
+    }
+
     expect(remote.ok).toBe(false);
     expect(wrongActor.ok).toBe(false);
   });

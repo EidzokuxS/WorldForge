@@ -89,6 +89,70 @@ export function readWorldClock(campaignId: string): WorldClockState {
   return ensureWorldClock({ campaignId });
 }
 
+export function syncWorldClockTurnBoundary(input: {
+  campaignId: string;
+  currentTick: number;
+  worldTimeMinutes?: number;
+}): WorldClockState {
+  const db = getDb();
+  const targetTick = Math.max(0, input.currentTick);
+  const requestedWorldTime = input.worldTimeMinutes == null
+    ? targetTick
+    : Math.max(0, input.worldTimeMinutes);
+  const existing = db
+    .select()
+    .from(worldClocks)
+    .where(eq(worldClocks.campaignId, input.campaignId))
+    .get();
+
+  if (!existing) {
+    return ensureWorldClock({
+      campaignId: input.campaignId,
+      currentTick: targetTick,
+      worldTimeMinutes: requestedWorldTime,
+    });
+  }
+
+  const clock = toClockState(existing);
+  const nextWorldTimeMinutes = Math.max(
+    clock.worldTimeMinutes,
+    requestedWorldTime,
+  );
+  if (clock.currentTick >= targetTick && clock.worldTimeMinutes >= nextWorldTimeMinutes) {
+    return clock;
+  }
+
+  const update = db
+    .update(worldClocks)
+    .set({
+      currentTick: Math.max(clock.currentTick, targetTick),
+      worldTimeMinutes: nextWorldTimeMinutes,
+      updatedAt: now(),
+    })
+    .where(
+      and(
+        eq(worldClocks.campaignId, input.campaignId),
+        eq(worldClocks.currentTick, existing.currentTick),
+      ),
+    )
+    .run();
+
+  if (update.changes !== 1) {
+    const latest = readWorldClock(input.campaignId);
+    if (
+      latest.currentTick >= targetTick
+      && latest.worldTimeMinutes >= nextWorldTimeMinutes
+    ) {
+      return latest;
+    }
+    throw new WorldVersionConflictError(
+      `World clock changed while syncing turn boundary for campaign ${input.campaignId}.`,
+    );
+  }
+
+  return readWorldClock(input.campaignId);
+}
+
 export function validateBaseWorldVersion(input: {
   campaignId: string;
   baseWorldVersion: number;

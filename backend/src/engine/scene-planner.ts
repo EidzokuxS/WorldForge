@@ -30,8 +30,6 @@ const log = createLogger("scene-planner");
 
 export const SCENE_PLAN_TURN_ORDER = [
   "buildSceneFrame",
-  "optional runWorldForecastBuilder",
-  "stageWorldTrajectoryForecast",
   "buildScopedForecastExcerpt",
   "runGmRead",
   "optional callOracle",
