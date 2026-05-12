@@ -251,6 +251,7 @@ describe("GM Read contract", () => {
     expect(contract).toContain("nearest notice-board clerk");
     expect(contract).toContain("which posted item/notice/rule/sign applies");
     expect(contract).toContain("which posted item applies");
+    expect(contract).toContain("create/tag item state");
     expect(contract).toContain("Do not choose clarification just because the exact clerk/assistant actor is not already listed");
     expect(contract).toContain("bounded temporary responder or record a grounded unavailable/no-current-answer outcome");
     expect(contract).toContain("next practical move from accumulated evidence or options");
@@ -1388,6 +1389,81 @@ describe("GM Read contract", () => {
     ).rejects.toThrow(/passive-status-read-requires-grounded-consequence-path/);
 
     expect(safeGenerateObject).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects document state transitions on no-mutation paths", () => {
+    const issues = validateGmReadForFrame(
+      gmReadSchema.parse({
+        ...baseRead,
+        path: "direct",
+        sceneQuestion: "Does the clerk issue a docket receipt?",
+        directResolutionNotes:
+          "The clerk issues a docket receipt, stamps the proof reviewed, and attaches a warning rider.",
+        narrationGuardrails: ["Keep the reviewed proof visible for later turns."],
+      }),
+      createFrame(),
+    );
+
+    expect(issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "sceneQuestion",
+          message: expect.stringContaining("document-state-requires-tool-path"),
+        }),
+        expect.objectContaining({
+          path: "directResolutionNotes",
+          message: expect.stringContaining("document-state-requires-tool-path"),
+        }),
+      ]),
+    );
+  });
+
+  it("rejects unsupported player document-state premises before narration treats them as true", () => {
+    const issues = validateGmReadForFrame(
+      gmReadSchema.parse({
+        ...baseRead,
+        path: "direct",
+        directResolutionNotes:
+          "Answer with a local reaction without changing the document.",
+      }),
+      createFrame(),
+      "After the official unsealing, I ask the archive reviewer which docket controls the message.",
+    );
+
+    expect(issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "path",
+          message: expect.stringContaining("document-premise-requires-backed-state"),
+        }),
+      ]),
+    );
+  });
+
+  it("accepts document-state premises when current item tags back them", () => {
+    const issues = validateGmReadForFrame(
+      gmReadSchema.parse({
+        ...baseRead,
+        path: "direct",
+        directResolutionNotes: "The clerk gives one local nod.",
+      }),
+      createFrame({
+        playerInventory: [
+          {
+            id: "current-inventory:item-proof",
+            itemId: "item-proof",
+            label: "Archive Proof Packet",
+            tags: ["document", "officially-unsealed", "reviewed"],
+            equipState: "carried",
+            equippedSlot: null,
+            isSignature: false,
+          },
+        ],
+      }),
+      "After the official unsealing, I nod once to the clerk.",
+    );
+
+    expect(issues).toEqual([]);
   });
 
   it("rejects dispatch-contact permission answers on direct no-mutation paths", async () => {

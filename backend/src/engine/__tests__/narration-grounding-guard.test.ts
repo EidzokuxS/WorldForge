@@ -677,6 +677,7 @@ describe("grounded sentence draft compiler", () => {
         id: "current-inventory:item-satchel",
         itemId: "item-satchel",
         label: "Worn Leather Satchel",
+        tags: ["pack"],
         equipState: "equipped",
         equippedSlot: "shoulder",
         isSignature: true,
@@ -686,7 +687,8 @@ describe("grounded sentence draft compiler", () => {
       {
         id: "current_inventory_status:item-satchel",
         category: "current_inventory_status",
-        summary: "Worn Leather Satchel is currently equipped by the player as a signature item.",
+        summary:
+          "Worn Leather Satchel is currently equipped by the player as a signature item. Item tags/state: pack.",
         sourceId: "item-satchel",
       },
     ];

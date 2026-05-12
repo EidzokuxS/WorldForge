@@ -80,7 +80,7 @@ const runtimeToolInputShapes = {
   ],
   add_tag: [
     '{ "entityName": string, "entityType": "player"|"npc"|"location"|"item"|"faction", "tag": string }',
-    "Use lowercase, hyphenated tags already justified by the current scene.",
+    "Use lowercase, hyphenated tags already justified by the current scene; use item tags for durable document states such as reviewed, officially-unsealed, docketed, stamped, receipt, or warning-rider.",
   ],
   remove_tag: [
     '{ "entityName": string, "entityType": "player"|"npc"|"location"|"item"|"faction", "tag": string }',
@@ -100,7 +100,7 @@ const runtimeToolInputShapes = {
     'Default durability is "scene_local"; scene_local beats are not persisted to episodic memory, location recent events, pending committed facts, or reflection inputs.',
     'Use durability "durable" only for future-relevant facts and include futureRelevance explaining why this should matter later.',
     "Participants must be clear local/current actors from model-facing refs; omit names from participants if they appear only in recent transcript or memory.",
-    "Do not use durable log_event to grant or confirm player possession, access, item-use, or completed movement claims; those require a successful concrete backend tool/state result first.",
+    "Do not use durable log_event to grant or confirm player possession, access, item-use, document state, or completed movement claims; those require a successful concrete backend tool/state result first.",
     "If the player is bluffing, requesting, attempting, being refused, or being merely witnessed, record the beat as scene_local or use a concrete state tool for the NPC/location consequence.",
     "Routine direct beats such as asking a price, paying for coffee, sitting down, greeting, or service flavor should stay scene_local.",
     "Durable examples: promised to return, made an enemy, found a hidden door, changed faction standing.",
@@ -128,7 +128,7 @@ const runtimeToolInputShapes = {
   ],
   spawn_item: [
     '{ "name": string, "tags": string[], "ownerName": string, "ownerType": "character"|"location" }',
-    "Owner must be an explicit character or location.",
+    "Owner must be an explicit character or location. Spawn every future-usable receipt, docket, warning rider, stamp, permit, proof artifact, or document the player may later cite.",
   ],
   reveal_location: [
     '{ "name": string, "description": string, "tags": string[], "connectedToName": string }',
@@ -196,7 +196,7 @@ const runtimeToolExampleInputs = {
   promote_npc:
     '{ "npcRef": "Market Runner", "newTier": "persistent", "reason": "The runner agreed to carry future messages for the player." }',
   spawn_item:
-    '{ "name": "Mud-Spattered Token", "tags": ["clue"], "ownerName": "Town Gate", "ownerType": "location" }',
+    '{ "name": "Review Docket Receipt", "tags": ["document", "receipt", "reviewed"], "ownerName": "Player", "ownerType": "character" }',
   reveal_location:
     '{ "name": "Old Shrine Road", "description": "A narrow path leaving the gate toward the forest shrine.", "tags": ["road"], "connectedToName": "current_location" }',
   request_contested_outcome:
@@ -382,7 +382,7 @@ export function buildGmReadPromptContract(options: {
     "Use tool_plan only when world state must actually change, a fact must matter later, a scene affordance must be established, reusable NPC procedural/logistical information must be recorded, or a support actor/location must exist for the current fiction.",
     "If the player asks a visible authority, guard, clerk, warden, worker, assistant, witness, or service role for proof requirements, permits, permissions, rules, procedure, route status, dispatch rules, what changed, what changed today, which posted item/notice/rule/sign applies to a document or case, or any answer the player can rely on later, choose tool_plan. Do not use direct for reusable procedural answers.",
     "If the player asks whether they may/can send a message, contact a dispatch office, call for permission, keep waiting in place, use a public service, or follow an official communication procedure, choose tool_plan. That is reusable permission/logistical adjudication, even if the player is polite and stationary.",
-    "If the player shows, compares, or asks which actual document, proof, permit, seal, credential, ledger, logbook, pass, or manifest satisfies or fails a stated requirement, choose tool_plan. The answer is reusable procedural adjudication, not a direct postcard.",
+    "If the player shows, compares, or asks which actual document, proof, permit, seal, credential, ledger, logbook, pass, or manifest satisfies or fails a stated requirement, choose tool_plan. The answer is reusable procedural adjudication, not a direct postcard. If the document is issued, reviewed, stamped, docketed, receipted, or officially unsealed, the later tool loop must create/tag item state.",
     "If the player compares, reconciles, audits, summarizes, marks contradictions, or labels uncertainty between prior procedural answers, official claims, warnings, safety rules, route restrictions, inspection results, ledgers, permits, proof requirements, or clerk/worker/authority statements, choose tool_plan. The comparison must be grounded and recorded so future route choices can use it.",
     "If the player asks to decide, choose, or identify the next practical move from accumulated evidence or options, do not choose clarification just to restate durable route/proof/obligation pressure. If evidence is sufficient, choose tool_plan with observation_read or world_fact to ground the available options/likely leads without committing the player's choice; if agency truly requires clarification, ask only a bounded diegetic choice question and keep sceneQuestion/clarificationPrompt free of future-relevant concrete pressure.",
     "Fuzzy bridge policy: bridge understandable low-risk navigation, search, and service-role intent with listed legal candidates; do not clarify solely because wording is not an exact backend string. If candidates are materially similar, choose one; if risk/cost/identity differs, ask a bounded diegetic 2-3 choice question.",

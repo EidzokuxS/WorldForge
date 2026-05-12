@@ -165,7 +165,7 @@ const transferItemInputSchema = z.discriminatedUnion("targetType", [
 const addTagInputSchema = z.object({
   entityName: z.string().describe("Name of the entity to tag"),
   entityType: entityTypeEnum,
-  tag: z.string().describe("The tag to add (lowercase, hyphenated)"),
+  tag: z.string().describe("The tag to add (lowercase, hyphenated); item tags carry durable document states such as reviewed, officially-unsealed, docketed, stamped, receipt, or warning-rider"),
 });
 
 const removeTagInputSchema = z.object({
@@ -274,7 +274,7 @@ const promoteNpcInputSchema = z.object({
 
 const spawnItemInputSchema = z.object({
   name: z.string().describe("Concrete item name; only create tangible future-usable items, not incidental scenery."),
-  tags: z.array(z.string()).describe("Tags describing item function, state, visibility, and story relevance."),
+  tags: z.array(z.string()).describe("Tags describing item function, state, visibility, and story relevance. Include document/receipt/proof plus state tags for future-usable receipts, dockets, stamps, warning riders, permits, and proof artifacts."),
   ownerName: z.string().describe("Visible character or local location ref that the backend can resolve as the authoritative item owner."),
   ownerType: z.enum(["character", "location"]).describe("Whether the owner is a character or location"),
 });
@@ -792,7 +792,7 @@ export function createStorytellerTools(
 
     add_tag: tool({
       description:
-        "Add a tag to an entity (player, NPC, location, item, or faction). Tags represent traits, states, skills, relationships.",
+        "Add a tag to an entity (player, NPC, location, item, or faction). Tags represent traits, states, skills, relationships. For document/proof items, use this for durable states such as reviewed, officially-unsealed, docketed, stamped, receipt, or warning-rider.",
       inputSchema: addTagInputSchema,
       execute: (args) => executeRuntimeTool("add_tag", args),
     }),
@@ -820,7 +820,7 @@ export function createStorytellerTools(
 
     log_event: tool({
       description:
-        "Log a scene beat. Use scene_local for attempted, refused, witnessed, conversational, sensory/non-durable, or bluff beats. Use durable only for future-relevant facts that should matter later; never use durable log_event itself to grant possession, access, item use, route revelation, or completed movement.",
+        "Log a scene beat. Use scene_local for attempted, refused, witnessed, conversational, sensory/non-durable, or bluff beats. Use durable only for future-relevant facts that should matter later; never use durable log_event itself to grant possession, access, item use, document state, route revelation, or completed movement.",
       inputSchema: logEventInputSchema,
       execute: (args) => executeRuntimeTool("log_event", args),
     }),
@@ -858,7 +858,7 @@ export function createStorytellerTools(
 
     spawn_item: tool({
       description:
-        "Spawn a tangible, persistent item that the player or visible actors can later inspect, use, own, carry, transfer, or owe action around. Do not leave future-relevant props or obligations only in assistant prose. Do not create casual props, set dressing, atmospheric details, or generic scenery.",
+        "Spawn a tangible, persistent item that the player or visible actors can later inspect, use, own, carry, transfer, or owe action around. Spawn every future-usable receipt, docket, warning rider, stamp, permit, proof artifact, or document the player may later cite, with document/state tags. Do not leave future-relevant props or obligations only in assistant prose. Do not create casual props, set dressing, atmospheric details, or generic scenery.",
       inputSchema: spawnItemInputSchema,
       execute: (args) => executeRuntimeTool("spawn_item", args),
     }),

@@ -99,6 +99,7 @@ export interface SceneFramePlayerInventoryItem {
   id: string;
   itemId: string;
   label: string;
+  tags: string[];
   equipState: "carried" | "equipped";
   equippedSlot: string | null;
   isSignature: boolean;
@@ -362,6 +363,7 @@ function clonePlayerInventoryItems(
 ): SceneFramePlayerInventoryItem[] {
   return items.map((item) => ({
     ...item,
+    tags: [...item.tags],
   }));
 }
 
@@ -921,6 +923,7 @@ function collectPlayerInventoryItems(input: {
       id: `current-inventory:${item.id}`,
       itemId: item.id,
       label: item.name,
+      tags: parseTags(item.tags),
       equipState: item.equipState === "equipped" ? "equipped" : "carried",
       equippedSlot: item.equipState === "equipped" ? item.equippedSlot ?? null : null,
       isSignature: Boolean(item.isSignature),

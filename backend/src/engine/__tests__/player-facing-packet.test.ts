@@ -352,6 +352,7 @@ describe("PlayerFacingPacket", () => {
         id: "current-inventory:item-logbook",
         itemId: "item-logbook",
         label: "Courier Route Logbook",
+        tags: ["document", "reviewed"],
         equipState: "carried",
         equippedSlot: null,
         isSignature: false,
@@ -362,7 +363,8 @@ describe("PlayerFacingPacket", () => {
       {
         id: "current_inventory_status:item-logbook",
         category: "current_inventory_status",
-        summary: "Courier Route Logbook is currently carried by the player.",
+        summary:
+          "Courier Route Logbook is currently carried by the player. Item tags/state: document, reviewed.",
         sourceId: "item-logbook",
       },
     ];
@@ -375,7 +377,9 @@ describe("PlayerFacingPacket", () => {
       kind: "current_inventory_status",
     });
     expect(formatted).toContain("[CURRENT INVENTORY STATUS]");
-    expect(formatted).toContain("Courier Route Logbook is currently carried by the player.");
+    expect(formatted).toContain(
+      "Courier Route Logbook is currently carried by the player. Item tags/state: document, reviewed.",
+    );
     expect(formatted).not.toContain("canonicalTurnPacket");
   });
 

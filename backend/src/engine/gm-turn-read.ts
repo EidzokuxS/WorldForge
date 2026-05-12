@@ -304,6 +304,8 @@ export type GmReadValidationIssue = {
 const NO_MUTATION_PRESSURE_ISSUE_CODE = "future-relevant-pressure-requires-tool-path";
 const PASSIVE_STATUS_READ_ISSUE_CODE = "passive-status-read-requires-grounded-consequence-path";
 const POSTED_PROOF_REQUIREMENT_ISSUE_CODE = "posted-proof-request-requires-dialogue-outcome";
+const DOCUMENT_STATE_ISSUE_CODE = "document-state-requires-tool-path";
+const DOCUMENT_PREMISE_ISSUE_CODE = "document-premise-requires-backed-state";
 
 function normalizeRef(ref: string): string {
   return ref.trim().toLowerCase();
@@ -454,6 +456,8 @@ export function validateGmReadForFrame(
   }
 
   issues.push(...validateNoMutationFutureRelevantPressure(read));
+  issues.push(...validateNoMutationDocumentState(read));
+  issues.push(...validateDocumentPremiseRequiresBackedState(read, frame, playerAction));
   issues.push(...validatePassiveStatusReadNoMutation(read, frame, playerAction));
   issues.push(...validateRuntimeRequirementPath(read));
   issues.push(...validatePostedProofRuntimeRequirement(read, playerAction));
@@ -497,6 +501,101 @@ function isNoMutationReadPath(
   read: GmRead,
 ): read is Extract<GmRead, { path: "direct" | "continue" | "clarification" }> {
   return read.path === "direct" || read.path === "continue" || read.path === "clarification";
+}
+
+function readNoMutationPathFields(
+  read: GmRead,
+): Array<{ path: string; text: string }> {
+  if (!isNoMutationReadPath(read)) return [];
+  const fields: Array<{ path: string; text: string }> = [
+    { path: "sceneQuestion", text: read.sceneQuestion },
+    ...read.narrationGuardrails.map((text, index) => ({
+      path: `narrationGuardrails.${index}`,
+      text,
+    })),
+  ];
+
+  switch (read.path) {
+    case "direct":
+      fields.push({ path: "directResolutionNotes", text: read.directResolutionNotes });
+      break;
+    case "continue":
+      fields.push({ path: "continuationGuidance", text: read.continuationGuidance });
+      break;
+    case "clarification":
+      fields.push({ path: "clarificationPrompt", text: read.clarificationPrompt });
+      break;
+  }
+
+  return fields;
+}
+
+function hasDocumentStateMutationClaim(text: string): boolean {
+  const normalized = text.trim();
+  if (!normalized) return false;
+  if (/\b(?:do not|don't|without|not)\b.{0,60}\b(?:issue|attach|stamp|validate|review|unseal|docket|file|register|accept|authorize|authorise|clear|mark)\b/i.test(normalized)) {
+    return false;
+  }
+
+  const documentSubject =
+    /\b(?:document|documents|proof|permit|pass|credential|credentials|message|case file|case|docket|receipt|stamp|seal|warning rider|rider|chit|waiver|route log|courier logbook|manifest)\b/i
+      .test(normalized);
+  const documentTransition =
+    /\b(?:issue[sd]?|created?|attached?|stamped?|validated?|reviewed?|unsealed?|opened?|logged?|docketed?|accepted?|authori[sz]ed?|cleared?|marked?|filed?|registered?|signed|endorsed|updated)\b/i
+      .test(normalized);
+  const specificDocumentState =
+    /\b(?:official(?:ly)?[- ]unsealed|review receipt|docket receipt|warning rider|authorization stamp|authorisation stamp|red[- ]ink validation|chain[- ]of[- ]custody)\b/i
+      .test(normalized);
+  return specificDocumentState || (documentSubject && documentTransition);
+}
+
+function validateNoMutationDocumentState(read: GmRead): GmReadValidationIssue[] {
+  return readNoMutationPathFields(read)
+    .filter((field) => hasDocumentStateMutationClaim(field.text))
+    .map((field) => ({
+      path: field.path,
+      message:
+        `${DOCUMENT_STATE_ISSUE_CODE}: document, receipt, docket, stamp, warning-rider, proof, or permit state changes cannot be introduced by direct/continue/clarification prose. Choose tool_plan and use item state tools such as spawn_item, add_tag, remove_tag, or transfer_item so later turns can cite typed inventory state.`,
+    }));
+}
+
+function playerActionAssumesDocumentState(playerAction: string): boolean {
+  return /\b(?:after|once|now that|with|using)\b.{0,100}\b(?:official(?:ly)?[- ]?)?(?:unseal(?:ed|ing)?|reviewed?|stamped?|validated?|authori[sz]ed?|docketed?|filed?|registered?|accepted|receipt|warning rider|rider attached)\b/i
+    .test(playerAction)
+    || /\b(?:official(?:ly)?[- ]?)?(?:unsealed|unsealing|reviewed|stamped|validated|authori[sz]ed|docketed|filed|registered|accepted)\s+(?:document|proof|permit|pass|credential|message|case file|docket|receipt|seal|chit|waiver|manifest)\b/i
+      .test(playerAction);
+}
+
+function tagBacksDocumentState(tag: string): boolean {
+  return /^(?:officially-)?unsealed$/i.test(tag)
+    || /^(?:reviewed|stamped|validated|authori[sz]ed|docketed|filed|registered|accepted|cleared|sealed)$/i.test(tag)
+    || /\breceipt\b/i.test(tag)
+    || /\bwarning-rider\b/i.test(tag)
+    || /\bred-ink-validation\b/i.test(tag);
+}
+
+function frameHasBackedDocumentState(frame: SceneFrame): boolean {
+  const inventoryTags = (frame.playerInventory ?? []).flatMap((item) => item.tags);
+  const visibleItemTags = frame.targetCandidates
+    .filter((candidate) => candidate.type === "item")
+    .flatMap((candidate) => candidate.tags ?? []);
+  return [...inventoryTags, ...visibleItemTags].some(tagBacksDocumentState);
+}
+
+function validateDocumentPremiseRequiresBackedState(
+  read: GmRead,
+  frame: SceneFrame,
+  playerAction?: string,
+): GmReadValidationIssue[] {
+  if (!playerAction || !playerActionAssumesDocumentState(playerAction)) return [];
+  if (frameHasBackedDocumentState(frame)) return [];
+  if (read.path === "tool_plan") return [];
+
+  return [{
+    path: "path",
+    message:
+      `${DOCUMENT_PREMISE_ISSUE_CODE}: the player action assumes a document/proof/receipt/stamp state that is not backed by current item tags. Choose tool_plan to create, tag, verify, reject, or clarify that document state before narration treats it as true.`,
+  }];
 }
 
 function validateRuntimeRequirementPath(read: GmRead): GmReadValidationIssue[] {

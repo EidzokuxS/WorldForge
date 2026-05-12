@@ -135,7 +135,9 @@ function formatInventoryStatus(item: NarratorPacketInventoryItem): string {
     ? `currently equipped${item.equippedSlot ? ` in ${item.equippedSlot}` : ""}`
     : "currently carried";
   const signature = item.isSignature ? " as a signature item" : "";
-  return `${item.label} is ${state} by the player${signature}.`;
+  const tags = uniqueStrings(item.tags);
+  const tagSummary = tags.length > 0 ? ` Item tags/state: ${tags.join(", ")}.` : "";
+  return `${item.label} is ${state} by the player${signature}.${tagSummary}`;
 }
 
 function visibleTexts(packet: PlayerFacingPacket): string[] {

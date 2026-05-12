@@ -391,6 +391,7 @@ describe("SceneFrame builder", () => {
         id: "current-inventory:item-satchel",
         itemId: "item-satchel",
         label: "Worn Leather Satchel",
+        tags: ["pack"],
         equipState: "equipped",
         equippedSlot: "shoulder",
         isSignature: true,

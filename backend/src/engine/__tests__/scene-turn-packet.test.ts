@@ -394,6 +394,7 @@ describe("ScenePlan execution and narrator packet", () => {
           id: "current-inventory:item-satchel",
           itemId: "item-satchel",
           label: "Worn Leather Satchel",
+          tags: ["pack", "route-authorized"],
           equipState: "equipped" as const,
           equippedSlot: "shoulder",
           isSignature: true,
@@ -435,7 +436,7 @@ describe("ScenePlan execution and narrator packet", () => {
     );
     expect(prompt).toContain("[CURRENT INVENTORY STATUS]");
     expect(prompt).toContain(
-      "Worn Leather Satchel is currently equipped in shoulder by the player as a signature item.",
+      "Worn Leather Satchel is currently equipped in shoulder by the player as a signature item. Item tags/state: pack, route-authorized.",
     );
   });
 
