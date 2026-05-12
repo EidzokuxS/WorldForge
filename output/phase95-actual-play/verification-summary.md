@@ -6,7 +6,9 @@
 - World: `Glass Tides of Moth-Court`
 - Player: `Nyx Arlen`
 - Worldgen produced 11 locations, 5 factions, 12 NPCs, 51 lore cards.
-- Actual player run covered opening plus 11 logged turns in `output/phase95-actual-play/transcript.md`.
+- Actual player run now covers opening plus 40 logged turns in `output/phase95-actual-play/transcript.md`.
+- The extended segment is turns 12-40, all completed with `status=done`.
+- The full transcript is not a clean 40/40 run because the original probe still contains the historical turn 4-5 failures that were later fixed. The clean distance claim is the 29-turn continuation segment.
 
 ## Edge Cases Played
 
@@ -18,6 +20,12 @@
 - Tried to misuse `Cheap Legal Stamp`; game noticed wrong stamp and preserved consequence pressure.
 - Explicit route travel to `The Shifting Notice Door`; authoritative location changed and new routes/NPCs appeared.
 - Read dynamic public notice without assuming hidden recipient/contents.
+- Extended run reached `Bridge Ward of Oath-Locks`, `Flooded Stairwell Registry`, `Coral Archive Vaults`, and `Central Shaft Watchpost`.
+- Tried a bad paperwork shortcut with `Cheap Legal Stamp`; the world logged a durable bridge warning and later referenced it.
+- Followed a sealed-proof refusal path into a real dead end, then authorized official archive unsealing and received docket `9-DRIFT-VEY`.
+- Tested unsafe/off-path descent during high tide; the world refused the shortcut and explained the risk.
+- Waited through a tide gate; world time jumped from 138 to 379 minutes and low water made authorization available.
+- Reached the chamber approach, but entry remained blocked by a red-ink validation requirement.
 
 ## Bugs Fixed From Play
 
@@ -36,6 +44,8 @@
 - `npm --prefix frontend run typecheck`: passed.
 - Focused replay after guard fix resumed pending narration successfully and finalized with `done.resumed=true`.
 - Oracle browser review successfully delivered 9 file attachments and saved `output/phase95-actual-play/oracle-review.md`; the reported blocker was fixed before this summary was updated.
+- Oracle extended-distance review delivered 5 file attachments and saved `output/phase95-actual-play/oracle-extended-review.md`; verdict: turns 12-40 are meaningful distance evidence, but robust Phase 95 playability is still blocked by typed document/state gaps.
+- Extended actual-play continuation: turns 12-40 completed live against backend `http://127.0.0.1:3001`, ending at tick 387 / worldVersion 63.
 - GitNexus impact before editing:
   - `restoreCampaignBundle`: LOW.
   - `assertPlayerFacingPacketPromptSafe`: LOW.
@@ -46,3 +56,8 @@
 
 - Scene-extra NPC duplication still occurs in the live run (`Exchange Validation Clerk` appears multiple times after repeated interactions).
 - Stamped exception form is represented in narration, but inventory summary still only shows initial signature items; form/stamp status may need a dedicated inventory/document-state representation.
+- Extended run strengthened this concern: docket receipt `9-DRIFT-VEY`, bridge warning rider, tide-crossing stamp, and authorized review receipt were all carried in narration, but the final inventory still only listed the five initial items.
+- Authorized archive review did not mutate `Anonymous Sealed Proof` into an opened/reviewed document in the inventory summary, even after the story treated it as unsealed and reviewed.
+- Oracle also flagged player-premise smuggling: turn 26 began with "After the official unsealing" before the transcript had visibly or typed-state committed the unsealing transition.
+- Route state lagged behind authorization at Central Shaft Watchpost: after the tide-crossing stamp, the watchpost still did not expose a direct Hearing Chamber route until the player traveled back down into the registry.
+- `Archive Review Clerk` appears twice in visible NPCs after repeated archive interactions; bridge clerk naming also drifted between similar clerk identities.
