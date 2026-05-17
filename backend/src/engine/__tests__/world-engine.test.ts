@@ -128,36 +128,28 @@ describe("createFactionTools", () => {
     expect(actionTool).toHaveProperty("execute");
   });
 
-  it("update_faction_goal tool replaces old goal with new goal", async () => {
-    const faction = createMockFaction();
-    const mockDb = setupMockDb({ factions: [faction] });
-    mockDb.get.mockReturnValue({
-      id: "faction-001",
-      name: "Iron Brotherhood",
-      goals: '["Expand territory to the west","Control trade routes"]',
-    });
-
+  it("update_faction_goal tool returns a proposal without mutating faction rows", async () => {
     const tools = createFactionTools(CAMPAIGN_ID, TICK);
-    // AI SDK v6 tool.execute takes (input, options)
     const result = await tools.update_faction_goal.execute!({
       factionName: "Iron Brotherhood",
       oldGoal: "Expand territory to the west",
       newGoal: "Consolidate western holdings",
     }, {} as never);
 
-    expect(result).toHaveProperty("updated", true);
+    expect(result).toMatchObject({
+      status: "proposal_only",
+      kind: "update_faction_goal",
+      committed: false,
+      campaignId: CAMPAIGN_ID,
+      tick: TICK,
+      factionName: "Iron Brotherhood",
+      oldGoal: "Expand territory to the west",
+      newGoal: "Consolidate western holdings",
+    });
+    expect(getDb).not.toHaveBeenCalled();
   });
 
-  it("declare_world_event with affectedLocations adds chronicle entry and applies event tag to location", async () => {
-    const mockDb = setupMockDb({
-      factions: [],
-      locationByName: {
-        id: "loc-east",
-        name: "Eastmarch",
-        tags: '["frontier"]',
-      },
-    });
-
+  it("declare_world_event with affectedLocations returns a proposal without chronicle or location writes", async () => {
     const tools = createFactionTools(CAMPAIGN_ID, TICK);
     const result = await tools.declare_world_event.execute!({
       event: "Plague sweeps the eastern provinces",
@@ -165,64 +157,53 @@ describe("createFactionTools", () => {
       affectedLocations: ["Eastmarch"],
     }, {} as never);
 
-    expect(result).toHaveProperty("entryId");
-    expect(result).toHaveProperty("locationsAffected", 1);
-    // Should insert chronicle entry
-    expect(mockDb.insert).toHaveBeenCalled();
-    // Should update location tags
-    expect(mockDb.update).toHaveBeenCalled();
+    expect(result).toMatchObject({
+      status: "proposal_only",
+      kind: "declare_world_event",
+      committed: false,
+      campaignId: CAMPAIGN_ID,
+      tick: TICK,
+      event: "Plague sweeps the eastern provinces",
+      eventType: "plague",
+      affectedLocations: ["Eastmarch"],
+      chronicleText: "[WORLD EVENT] Plague sweeps the eastern provinces",
+    });
+    expect(getDb).not.toHaveBeenCalled();
+    expect(recordLocationRecentEventMock).not.toHaveBeenCalled();
   });
 
-  it("declare_world_event with no affectedLocations still creates chronicle entry", async () => {
-    const mockDb = setupMockDb({ factions: [] });
-
+  it("declare_world_event with no affectedLocations keeps the proposal location list empty", async () => {
     const tools = createFactionTools(CAMPAIGN_ID, TICK);
     const result = await tools.declare_world_event.execute!({
       event: "A comet lights up the night sky",
       eventType: "anomaly" as const,
     }, {} as never);
 
-    expect(result).toHaveProperty("entryId");
-    expect(result).toHaveProperty("locationsAffected", 0);
-    // Should insert chronicle entry
-    expect(mockDb.insert).toHaveBeenCalled();
-    // Should NOT update any locations
-    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      status: "proposal_only",
+      kind: "declare_world_event",
+      committed: false,
+      affectedLocations: [],
+      chronicleText: "[WORLD EVENT] A comet lights up the night sky",
+    });
+    expect(getDb).not.toHaveBeenCalled();
   });
 
-  it("declare_world_event chronicle entry has [WORLD EVENT] prefix", async () => {
-    const insertedValues: Record<string, unknown>[] = [];
-    const mockDb = setupMockDb({ factions: [] });
-    mockDb.values.mockImplementation((val: Record<string, unknown>) => {
-      insertedValues.push(val);
-      return mockDb;
-    });
-
+  it("declare_world_event proposal has [WORLD EVENT] chronicle text prefix", async () => {
     const tools = createFactionTools(CAMPAIGN_ID, TICK);
-    await tools.declare_world_event.execute!({
+    const result = await tools.declare_world_event.execute!({
       event: "Earthquake strikes the capital",
       eventType: "disaster" as const,
     }, {} as never);
 
-    expect(insertedValues.length).toBeGreaterThan(0);
-    const chronicleEntry = insertedValues[0]!;
-    expect(chronicleEntry.text).toContain("[WORLD EVENT]");
-    expect(chronicleEntry.text).toContain("Earthquake strikes the capital");
+    expect(result).toMatchObject({
+      chronicleText: "[WORLD EVENT] Earthquake strikes the capital",
+    });
   });
 
-  it("faction_action writes a location recent-event projection when targetLocation is concrete", async () => {
-    const faction = createMockFaction();
-    setupMockDb({
-      factions: [faction],
-      locationByName: {
-        id: "loc-west",
-        name: "Westmarch",
-        tags: '["frontier"]',
-      },
-    });
-
+  it("faction_action returns proposed target and tag changes without location-event projection", async () => {
     const tools = createFactionTools(CAMPAIGN_ID, TICK);
-    await tools.faction_action.execute!(
+    const result = await tools.faction_action.execute!(
       {
         action: "Fortified Westmarch",
         outcome: "Raised new barricades at the western gate",
@@ -232,55 +213,30 @@ describe("createFactionTools", () => {
       {} as never,
     );
 
-    expect(recordLocationRecentEventMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        campaignId: CAMPAIGN_ID,
-        locationRef: "Westmarch",
-        tick: TICK,
-      }),
-    );
-  });
-
-  it("declare_world_event projects recent happenings for each affected location", async () => {
-    setupMockDb({
-      factions: [],
-      locationByName: {
-        id: "loc-east",
-        name: "Eastmarch",
-        tags: '["frontier"]',
-      },
+    expect(result).toMatchObject({
+      status: "proposal_only",
+      kind: "faction_action",
+      committed: false,
+      targetLocation: "Westmarch",
+      tagChanges: [],
     });
-
-    const tools = createFactionTools(CAMPAIGN_ID, TICK);
-    await tools.declare_world_event.execute!(
-      {
-        event: "Plague sweeps the eastern provinces",
-        eventType: "plague" as const,
-        affectedLocations: ["Eastmarch"],
-      },
-      {} as never,
-    );
-
-    expect(recordLocationRecentEventMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        campaignId: CAMPAIGN_ID,
-        locationRef: "Eastmarch",
-        tick: TICK,
-      }),
-    );
+    expect(getDb).not.toHaveBeenCalled();
+    expect(recordLocationRecentEventMock).not.toHaveBeenCalled();
   });
 
-  it("add_chronicle_entry tool inserts chronicle row", async () => {
-    const mockDb = setupMockDb({ factions: [] });
-
+  it("add_chronicle_entry returns a proposal without inserting chronicle rows", async () => {
     const tools = createFactionTools(CAMPAIGN_ID, TICK);
-    // AI SDK v6 tool.execute takes (input, options)
     const result = await tools.add_chronicle_entry.execute!({
       text: "The Iron Brotherhood expanded into Westmarch",
     }, {} as never);
 
-    expect(result).toHaveProperty("entryId");
-    expect(mockDb.insert).toHaveBeenCalled();
+    expect(result).toMatchObject({
+      status: "proposal_only",
+      kind: "add_chronicle_entry",
+      committed: false,
+      text: "The Iron Brotherhood expanded into Westmarch",
+    });
+    expect(getDb).not.toHaveBeenCalled();
   });
 });
 
@@ -355,8 +311,10 @@ describe("tickFactions", () => {
     const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
     expect(systemPrompt).toContain('You are the world simulation engine evaluating faction "Iron Brotherhood".');
     expect(systemPrompt).toContain("Use faction goals, territory, neighbors, assets, and chronicle-backed world state as your canonical macro context.");
-    expect(systemPrompt).toContain("Choose ONE macro-level action for this faction.");
-    expect(systemPrompt).toContain("SPECIFIC, OBSERVABLE change");
+    expect(systemPrompt).toContain("Choose ONE macro-level action proposal for this faction.");
+    expect(systemPrompt).toContain("These tools are proposal-only.");
+    expect(systemPrompt).toContain("Durable world changes must be committed later through the authority pipeline.");
+    expect(systemPrompt).toContain("SPECIFIC, OBSERVABLE intended change");
     expect(systemPrompt).toContain("Recent World Events:");
     expect(systemPrompt).not.toContain("All characters, items, locations, and factions use a tag-based system");
     expect(systemPrompt).not.toContain("Your output must be narrative prose only.");
