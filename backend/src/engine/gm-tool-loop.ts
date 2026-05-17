@@ -63,10 +63,12 @@ import {
   type RuntimeRequirementLike,
 } from "./tool-contracts.js";
 import {
+  attachStructuralStateReceiptsToToolResult,
   appliedStateEffectsFromDialoguePayload,
   DIALOGUE_STRUCTURAL_EFFECT_TOOLS,
   dialogueStateTokenAliases,
   receiptBacksAppliedStateEffect,
+  resolveAppliedStateEffectFromReceipt,
   structuralStateReceiptFromToolCall,
 } from "./dialogue-state-receipt.js";
 import type { GmToolStepResult } from "./gm-tool-step.js";
@@ -735,13 +737,19 @@ function withGmToolLoopMutationBoundary(
           ) {
             boundary.taint(`${toolName} returned a malformed result inside an inner runtime wrapper.`);
           }
+          const resultWithStateReceipts = attachStructuralStateReceiptsToToolResult({
+            toolName,
+            candidateInput: input,
+            result,
+            prefix: `state_receipt_${boundary.trackedStepResults.length + 1}`,
+          });
           boundary.trackToolResult({
             tick,
             toolName,
             candidateInput: input,
-            result,
+            result: resultWithStateReceipts,
           });
-          return result;
+          return resultWithStateReceipts;
         },
       } as StorytellerToolDef;
 
@@ -1271,7 +1279,7 @@ function formatGmToolLoopProfilePrompt(profile: GmToolLoopProfile): string {
       "For reusable procedure questions, no-answer/unavailable-role outcomes are still procedural outcomes. Record them as durable record_dialogue_outcome with futureUseKind and futureRelevance when they constrain the player's next route, office, evidence, safety choice, or later attempt.",
       "Use durable record_dialogue_outcome with futureRelevance for reusable procedural answers, document failures, named offices, citations, permissions, prohibitions, route facts, warnings, or obligations. Do not stop after only advance_time, lookup, record_player_intent, or log_event.",
       "If the NPC/source only says what would work, what they believe, or what rule applies, leave stateEffects empty; that is a communicative answer, not an applied state.",
-      "If the outcome actually applies durable state now because the player earned, bluffed, persuaded, proved, paid, fought, or otherwise made something happen, first make the matching structural state-bearing tool call in its own observed step; then record_dialogue_outcome with stateEffects[{ status:'applied_now', structuralTool, targetRef, stateKey, stateValue }]. targetRef/stateValue must match the tool input/result.",
+      "If the outcome actually applies durable state now because the player earned, bluffed, persuaded, proved, paid, fought, or otherwise made something happen, first make the matching structural state-bearing tool call in its own observed step; then record_dialogue_outcome with stateEffects[{ status:'applied_now', stateReceipt:'state_receipt_...' }], citing the stateReceipt alias from that tool result. Do not hand-copy target/key/value; the backend resolves them from the receipt.",
       "When runtimeRequirement.requiresStructuralEffect is true, do not call record_dialogue_outcome until every needed structural state-bearing tool has already succeeded. Preliminary dialogue records without backed applied_now stateEffects waste the player-blocking loop and will fail validation.",
       "If the attempted structural change is refused, unavailable, redirected, impossible, not currently owed, or otherwise not applied, record that typed non-application as record_dialogue_outcome with outcomeKind refused/unavailable/no_current_answer/redirected/silent and no applied_now stateEffects. Do not invent a structural tool for a change that did not happen.",
       "For payments, deposits, custody transfer, access grants, status marks, relationship shifts, route openings, injuries, and item movement, settle the concrete world change first with add_tag/remove_tag/set_relationship/transfer_item/move_actor/reveal_location/spawn_item/set_condition as appropriate; then record the NPC/source answer once with backed stateEffects.",
@@ -1877,7 +1885,14 @@ function effectHasPriorReceipt(
   stepResults: readonly GmToolStepResult[],
   dialogueStepIndex: number,
   effect: Record<string, unknown>,
+  options: { requireStateReceipt?: boolean } = {},
 ): boolean {
+  if (
+    options.requireStateReceipt === true
+    && !stringField(effect, "stateReceipt")
+  ) {
+    return false;
+  }
   return stepResults
     .slice(0, dialogueStepIndex)
     .some((step) => {
@@ -1949,7 +1964,8 @@ function missingAppliedStateEffectsWithoutPriorReceipts(
           candidateInput: step.candidateInput,
           result: step.result,
         });
-        return Boolean(receipt && receiptBacksAppliedStateEffect(receipt, effect));
+        return Boolean(receipt && stringField(effect, "stateReceipt")
+          && resolveAppliedStateEffectFromReceipt(receipt, effect));
       }));
 }
 
@@ -1962,8 +1978,45 @@ function missingAppliedStateEffectReceiptError(effect: Record<string, unknown>):
     "dialogue_state_effect_missing_prior_receipt",
     "record_dialogue_outcome declared an applied_now stateEffect before the matching structural tool succeeded.",
     `Effect: structuralTool=${structuralTool}; targetRef=${targetRef}; stateKey=${stateKey}; stateValue=${stateValue}.`,
-    "Call the required structural tool first, or record the outcome without this applied_now stateEffect if the state did not change.",
+    "Call the required structural tool first, then cite the stateReceipt alias returned by that tool, or record the outcome without this applied_now stateEffect if the state did not change.",
   ].join(" ");
+}
+
+function resolveAppliedStateEffectFromPriorReceipts(
+  priorStepResults: readonly GmToolStepResult[],
+  effect: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const stateReceipt = stringField(effect, "stateReceipt");
+  if (!stateReceipt) return null;
+  for (const step of priorStepResults) {
+    const receipt = structuralStateReceiptFromToolCall({
+      toolName: step.toolName,
+      candidateInput: step.candidateInput,
+      result: step.result,
+    });
+    if (!receipt) continue;
+    const resolved = resolveAppliedStateEffectFromReceipt(receipt, effect);
+    if (resolved) return resolved;
+  }
+  return null;
+}
+
+function normalizeDialogueOutcomeStateEffectsFromReceipts(
+  input: Record<string, unknown>,
+  priorStepResults: readonly GmToolStepResult[],
+): Record<string, unknown> {
+  if (!Array.isArray(input.stateEffects)) return input;
+  let changed = false;
+  const stateEffects = input.stateEffects.map((effect) => {
+    if (!isRecord(effect) || stringField(effect, "status") !== "applied_now") {
+      return effect;
+    }
+    const resolved = resolveAppliedStateEffectFromPriorReceipts(priorStepResults, effect);
+    if (!resolved) return effect;
+    changed = true;
+    return resolved;
+  });
+  return changed ? { ...input, stateEffects } : input;
 }
 
 function withDialogueStateReceiptHandshake(
@@ -1981,9 +2034,13 @@ function withDialogueStateReceiptHandshake(
     ...dialogueToolDef,
     async execute(input: unknown, ...rest: unknown[]): Promise<ToolResult> {
       const candidateInput = isRecord(input) ? input : {};
+      const normalizedInput = normalizeDialogueOutcomeStateEffectsFromReceipts(
+        candidateInput,
+        priorStepResults(),
+      );
       const missingEffects = missingAppliedStateEffectsWithoutPriorReceipts(
         priorStepResults(),
-        candidateInput,
+        normalizedInput,
       );
       if (missingEffects.length > 0) {
         const error = missingAppliedStateEffectReceiptError(missingEffects[0]);
@@ -2002,7 +2059,7 @@ function withDialogueStateReceiptHandshake(
         };
       }
 
-      const result = await originalExecute(input, ...rest);
+      const result = await originalExecute(normalizedInput, ...rest);
       return isToolResult(result)
         ? result
         : malformedToolResult(

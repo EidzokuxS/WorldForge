@@ -1832,10 +1832,7 @@ describe("runGmToolLoop", () => {
             {
               effectId: "guard-convinced-by-bluff",
               status: "applied_now",
-              structuralTool: "add_tag",
-              targetRef: "Gate Guard",
-              stateKey: "tag",
-              stateValue: "convinced-by-bluff",
+              stateReceipt: "state_receipt_1_1",
               summary: "The guard now has the convinced-by-bluff state.",
             },
           ],
@@ -1857,6 +1854,7 @@ describe("runGmToolLoop", () => {
               {
                 effectId: "guard-convinced-by-bluff",
                 status: "applied_now",
+                stateReceipt: "state_receipt_1_1",
                 structuralTool: "add_tag",
                 targetRef: "Gate Guard",
                 stateKey: "tag",
@@ -3962,10 +3960,7 @@ describe("runGmToolLoop", () => {
                   {
                     effectId: "routing-stamp-on-writ",
                     status: "applied_now",
-                    structuralTool: "add_tag",
-                    targetRef: "item:sealed-writ",
-                    stateKey: "tag",
-                    stateValue: "routing-stamped",
+                    stateReceipt: "state_receipt_1_1",
                     summary: "The sealed writ now has the routing-stamped tag.",
                   },
                 ],
@@ -3991,6 +3986,7 @@ describe("runGmToolLoop", () => {
                     {
                       effectId: "routing-stamp-on-writ",
                       status: "applied_now",
+                      stateReceipt: "state_receipt_1_1",
                       structuralTool: "add_tag",
                       targetRef: "item:sealed-writ",
                       stateKey: "tag",
@@ -4095,6 +4091,7 @@ describe("runGmToolLoop", () => {
                   {
                     effectId: "routing-stamp-on-writ",
                     status: "applied_now",
+                    stateReceipt: "state_receipt_1_1",
                     structuralTool: "add_tag",
                     targetRef: "item:sealed-writ",
                     stateKey: "tag",
@@ -4247,19 +4244,13 @@ describe("runGmToolLoop", () => {
                   {
                     effectId: "docket-proof",
                     status: "applied_now",
-                    structuralTool: "add_tag",
-                    targetRef: "Anonymous sealed proof",
-                    stateKey: "tag",
-                    stateValue: "docketed-pending-tide-lock",
+                    stateReceipt: "state_receipt_1_1",
                     summary: "The proof is docketed and pending authentication.",
                   },
                   {
                     effectId: "transfer-custody",
                     status: "applied_now",
-                    structuralTool: "transfer_item",
-                    targetRef: "Anonymous sealed proof",
-                    stateKey: "custody",
-                    stateValue: "carried",
+                    stateReceipt: "state_receipt_2_7",
                     summary: "The proof is in Corvan Dels' custody.",
                   },
                 ],
@@ -4285,6 +4276,7 @@ describe("runGmToolLoop", () => {
                     {
                       effectId: "docket-proof",
                       status: "applied_now",
+                      stateReceipt: "state_receipt_1_1",
                       structuralTool: "add_tag",
                       targetRef: "Anonymous sealed proof",
                       stateKey: "tag",
@@ -4294,6 +4286,7 @@ describe("runGmToolLoop", () => {
                     {
                       effectId: "transfer-custody",
                       status: "applied_now",
+                      stateReceipt: "state_receipt_2_7",
                       structuralTool: "transfer_item",
                       targetRef: "Anonymous sealed proof",
                       stateKey: "custody",
@@ -4416,19 +4409,13 @@ describe("runGmToolLoop", () => {
                   {
                     effectId: "surety-slip-transfer",
                     status: "applied_now",
-                    structuralTool: "transfer_item",
-                    targetRef: "Three Ration Slips",
-                    stateKey: "possession",
-                    stateValue: "split",
+                    stateReceipt: "state_receipt_1_16",
                     summary: "Two ration slips move to the Bureau clerk.",
                   },
                   {
                     effectId: "surety-slip-target-transfer",
                     status: "applied_now",
-                    structuralTool: "transfer_item",
-                    targetRef: "Two Ration Slips",
-                    stateKey: "possession",
-                    stateValue: "carried by Bureau Window Clerk",
+                    stateReceipt: "state_receipt_1_2",
                     summary: "The transferred two-ration-slip bundle is now held by the Bureau clerk.",
                   },
                 ],
@@ -4454,6 +4441,7 @@ describe("runGmToolLoop", () => {
                     {
                       effectId: "surety-slip-transfer",
                       status: "applied_now",
+                      stateReceipt: "state_receipt_1_16",
                       structuralTool: "transfer_item",
                       targetRef: "Three Ration Slips",
                       stateKey: "possession",
@@ -4463,6 +4451,7 @@ describe("runGmToolLoop", () => {
                     {
                       effectId: "surety-slip-target-transfer",
                       status: "applied_now",
+                      stateReceipt: "state_receipt_1_2",
                       structuralTool: "transfer_item",
                       targetRef: "Two Ration Slips",
                       stateKey: "possession",
@@ -4599,10 +4588,7 @@ describe("runGmToolLoop", () => {
                   {
                     effectId: "receipt-stub-issued",
                     status: "applied_now",
-                    structuralTool: "spawn_item",
-                    targetRef: "Filing Receipt Stub",
-                    stateKey: "possession",
-                    stateValue: "carried by Player",
+                    stateReceipt: "state_receipt_1_7",
                     summary: "The player receives the filing receipt stub.",
                   },
                 ],
@@ -4627,6 +4613,7 @@ describe("runGmToolLoop", () => {
                     {
                       effectId: "receipt-stub-issued",
                       status: "applied_now",
+                      stateReceipt: "state_receipt_1_7",
                       structuralTool: "spawn_item",
                       targetRef: "Filing Receipt Stub",
                       stateKey: "possession",
@@ -4685,6 +4672,7 @@ describe("runGmToolLoop", () => {
       {
         effectId: "registry-token-transfer",
         status: "applied_now",
+        stateReceipt: "state_receipt_1_2",
         structuralTool: "transfer_item",
         targetRef: "Public Debt Token",
         stateKey: "possession",

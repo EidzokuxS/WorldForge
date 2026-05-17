@@ -40,6 +40,14 @@ export interface ToolContractFailure {
   message: string;
 }
 
+export interface ToolResultStateReceipt {
+  stateReceipt: string;
+  tool: string;
+  target: string;
+  key: string;
+  value: string;
+}
+
 export interface ToolResult {
   success: boolean;
   status?: ToolResultStatus;
@@ -50,6 +58,7 @@ export interface ToolResult {
   authority?: ToolResultAuthority;
   contractFailure?: ToolContractFailure;
   modelSafeRefs?: string[];
+  stateReceipts?: ToolResultStateReceipt[];
 }
 
 export type AttachToolResultAuthorityInput = Omit<
@@ -179,6 +188,7 @@ export function toModelVisibleToolResult(result: ToolResult): ToolResult {
     contractFailure,
     result: payload,
     modelSafeRefs,
+    stateReceipts,
     ...visible
   } = result;
   return {
@@ -189,6 +199,7 @@ export function toModelVisibleToolResult(result: ToolResult): ToolResult {
     result: sanitizeModelVisibleToolPayload(payload),
     contractFailure: safeContractFailureForModel(contractFailure),
     modelSafeRefs: safeModelSafeRefs(modelSafeRefs),
+    stateReceipts: sanitizeModelVisibleToolPayload(stateReceipts) as ToolResultStateReceipt[] | undefined,
   };
 }
 

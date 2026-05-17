@@ -1,4 +1,4 @@
-import type { ToolResult } from "./tool-result.js";
+import type { ToolResult, ToolResultStateReceipt } from "./tool-result.js";
 import { isAuthoritativeMutationToolResult } from "./tool-result.js";
 import type { RuntimeToolName } from "./tool-schemas.js";
 import {
@@ -8,6 +8,7 @@ import {
   normalizeDialogueStateReceiptKey,
   type DialogueStructuralEffectToolName,
 } from "./dialogue-state-receipt-contract.js";
+import { isBackendOnlyModelRef } from "./model-facing-ref-safety.js";
 
 export const DIALOGUE_STRUCTURAL_EFFECT_TOOLS = new Set<RuntimeToolName>(
   DIALOGUE_STRUCTURAL_EFFECT_TOOL_NAMES as readonly RuntimeToolName[],
@@ -19,6 +20,16 @@ export type StructuralStateReceipt = {
   stateKeys: Set<string>;
   stateValues: Set<string>;
   claims: StructuralStateReceiptClaim[];
+  relations: StructuralStateReceiptRelation[];
+};
+
+export type StructuralStateReceiptRelation = {
+  stateReceiptRefs: Set<string>;
+  targetRefs: Set<string>;
+  stateKey: string;
+  stateValues: Set<string>;
+  displayTarget: string;
+  displayValue: string;
 };
 
 type StructuralStateReceiptClaim = {
@@ -39,18 +50,62 @@ function normalizeStateToken(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function slugStateToken(value: string): string {
-  return normalizeStateToken(value)
-    .replace(/^[a-z]+:/, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+function isAsciiAlphaNumeric(char: string | undefined): boolean {
+  if (!char) return false;
+  const code = char.charCodeAt(0);
+  return (code >= 48 && code <= 57)
+    || (code >= 65 && code <= 90)
+    || (code >= 97 && code <= 122);
+}
+
+function isAsciiAlpha(char: string | undefined): boolean {
+  if (!char) return false;
+  const code = char.charCodeAt(0);
+  return (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+}
+
+function stripAsciiAlphaPrefix(value: string): string {
+  const separatorIndex = value.indexOf(":");
+  if (separatorIndex <= 0) return value;
+  for (let index = 0; index < separatorIndex; index += 1) {
+    if (!isAsciiAlpha(value[index])) return value;
+  }
+  return value.slice(separatorIndex + 1);
+}
+
+function slugStateToken(
+  value: string,
+  options: { stripPrefix?: boolean } = {},
+): string {
+  const normalizedToken = normalizeStateToken(value);
+  const normalized = options.stripPrefix === false
+    ? normalizedToken
+    : stripAsciiAlphaPrefix(normalizedToken);
+  let slug = "";
+  let pendingDash = false;
+
+  for (const char of normalized) {
+    if (isAsciiAlphaNumeric(char)) {
+      if (pendingDash && slug.length > 0) {
+        slug += "-";
+      }
+      slug += char;
+      pendingDash = false;
+      continue;
+    }
+    if (slug.length > 0) {
+      pendingDash = true;
+    }
+  }
+
+  return slug;
 }
 
 export function dialogueStateTokenAliases(value?: unknown, typeHint?: string | null): string[] {
   if (typeof value !== "string") return [];
   const normalized = normalizeStateToken(value);
   if (!normalized) return [];
-  const withoutPrefix = normalized.replace(/^[a-z]+:/, "");
+  const withoutPrefix = stripAsciiAlphaPrefix(normalized);
   const slug = slugStateToken(normalized);
   const aliases = new Set([normalized, withoutPrefix, slug].filter(Boolean));
   if (typeHint?.trim()) {
@@ -88,11 +143,9 @@ function addReceiptQualifiedValue(values: Set<string>, prefix: string, value?: u
   const normalizedPrefix = normalizeStateToken(prefix);
   const normalizedValue = normalizeStateToken(value);
   if (!normalizedPrefix || !normalizedValue) return;
-  const qualified = `${normalizedPrefix}:${normalizedValue.replace(/^[a-z]+:/, "")}`;
+  const qualified = `${normalizedPrefix}:${stripAsciiAlphaPrefix(normalizedValue)}`;
   values.add(qualified);
-  const slug = qualified
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+  const slug = slugStateToken(qualified, { stripPrefix: false });
   if (slug) values.add(slug);
 }
 
@@ -181,6 +234,108 @@ function appendReceiptClaim(
   });
 }
 
+function chooseModelVisibleToken(values: ReadonlySet<string>): string {
+  const orderedValues = [...values];
+  const safeValues = orderedValues.filter((value) => !isBackendOnlyModelRef(value));
+  return safeValues.find((value) => value.includes(" "))
+    ?? safeValues[0]
+    ?? orderedValues[0]
+    ?? "";
+}
+
+function buildStructuralStateReceiptRelations(
+  receipt: StructuralStateReceipt,
+): StructuralStateReceiptRelation[] {
+  const relations: StructuralStateReceiptRelation[] = [];
+  for (const claim of receipt.claims) {
+    const displayTarget = chooseModelVisibleToken(claim.targetRefs);
+    for (const [stateKey, values] of claim.keyedValues.entries()) {
+      const groupedValues = new Map<string, Set<string>>();
+      for (const value of values) {
+        const groupKey = slugStateToken(value, { stripPrefix: false })
+          || normalizeStateToken(value);
+        let group = groupedValues.get(groupKey);
+        if (!group) {
+          group = new Set();
+          groupedValues.set(groupKey, group);
+        }
+        group.add(value);
+      }
+      for (const group of groupedValues.values()) {
+        relations.push({
+          stateReceiptRefs: new Set(),
+          targetRefs: new Set(claim.targetRefs),
+          stateKey,
+          stateValues: group,
+          displayTarget,
+          displayValue: chooseModelVisibleToken(group),
+        });
+      }
+    }
+  }
+  return relations;
+}
+
+function normalizeStateReceiptRef(value: string): string {
+  return normalizeStateToken(value);
+}
+
+function structuralStateReceiptRows(result: ToolResult | null | undefined): ToolResultStateReceipt[] {
+  return Array.isArray(result?.stateReceipts)
+    ? result.stateReceipts.filter((row): row is ToolResultStateReceipt =>
+        isRecord(row)
+        && typeof row.stateReceipt === "string"
+        && typeof row.target === "string"
+        && typeof row.key === "string"
+        && typeof row.value === "string")
+    : [];
+}
+
+function attachStateReceiptRefsFromRows(
+  receipt: StructuralStateReceipt,
+  rows: readonly ToolResultStateReceipt[],
+): void {
+  for (const row of rows) {
+    const rowRef = normalizeStateReceiptRef(row.stateReceipt);
+    if (!rowRef) continue;
+    const rowKey = normalizeDialogueStateReceiptKey(row.key);
+    const rowTargetAliases = dialogueStateTokenAliases(row.target);
+    const rowValueAliases = dialogueStateTokenAliases(row.value);
+    const relation = receipt.relations.find((candidate) =>
+      candidate.stateKey === rowKey
+      && hasIntersection(candidate.targetRefs, rowTargetAliases)
+      && hasIntersection(candidate.stateValues, rowValueAliases));
+    relation?.stateReceiptRefs.add(rowRef);
+  }
+}
+
+export function modelSafeStateReceiptsFromStructuralReceipt(
+  receipt: StructuralStateReceipt,
+  prefix: string,
+): ToolResultStateReceipt[] {
+  return receipt.relations.map((relation, index) => ({
+    stateReceipt: `${prefix}_${index + 1}`,
+    tool: receipt.toolName,
+    target: relation.displayTarget,
+    key: relation.stateKey,
+    value: relation.displayValue,
+  }));
+}
+
+export function attachStructuralStateReceiptsToToolResult(input: {
+  toolName: RuntimeToolName | string | null | undefined;
+  candidateInput?: unknown;
+  result: ToolResult;
+  prefix: string;
+}): ToolResult {
+  const receipt = structuralStateReceiptFromToolCall(input);
+  if (!receipt || receipt.relations.length === 0) return input.result;
+  const stateReceipts = modelSafeStateReceiptsFromStructuralReceipt(receipt, input.prefix);
+  if (stateReceipts.length === 0) return input.result;
+  input.result.stateReceipts = stateReceipts;
+  return input.result;
+}
+
 export function structuralStateReceiptFromToolCall(input: {
   toolName: RuntimeToolName | string | null | undefined;
   candidateInput?: unknown;
@@ -198,6 +353,7 @@ export function structuralStateReceiptFromToolCall(input: {
     stateKeys: new Set(),
     stateValues: new Set(),
     claims: [],
+    relations: [],
   };
   const entityType = stringField(candidateInput, "entityType");
 
@@ -381,6 +537,8 @@ export function structuralStateReceiptFromToolCall(input: {
       break;
   }
 
+  receipt.relations = buildStructuralStateReceiptRelations(receipt);
+  attachStateReceiptRefsFromRows(receipt, structuralStateReceiptRows(input.result));
   return receipt;
 }
 
@@ -396,17 +554,66 @@ export function receiptBacksAppliedStateEffect(
   receipt: StructuralStateReceipt,
   effect: Record<string, unknown>,
 ): boolean {
+  return resolveAppliedStateEffectFromReceipt(receipt, effect) !== null;
+}
+
+export function resolveAppliedStateEffectFromReceipt(
+  receipt: StructuralStateReceipt,
+  effect: Record<string, unknown>,
+): Record<string, unknown> | null {
   const structuralTool = stringField(effect, "structuralTool");
-  if (!structuralTool || receipt.toolName !== structuralTool) return false;
+  if (structuralTool && receipt.toolName !== structuralTool) return null;
+
+  const stateReceipt = stringField(effect, "stateReceipt");
+  if (stateReceipt) {
+    const normalizedReceipt = normalizeStateReceiptRef(stateReceipt);
+    const relation = receipt.relations.find((candidate) =>
+      candidate.stateReceiptRefs.has(normalizedReceipt));
+    if (!relation) return null;
+
+    const targetRef = stringField(effect, "targetRef");
+    if (
+      targetRef
+      && !hasIntersection(relation.targetRefs, dialogueStateTokenAliases(targetRef))
+    ) {
+      return null;
+    }
+
+    const stateKey = stringField(effect, "stateKey");
+    if (
+      stateKey
+      && relation.stateKey !== normalizeDialogueStateReceiptKey(stateKey)
+    ) {
+      return null;
+    }
+
+    const stateValue = stringField(effect, "stateValue");
+    if (
+      stateValue
+      && !hasIntersection(relation.stateValues, dialogueStateTokenAliases(stateValue))
+    ) {
+      return null;
+    }
+
+    return {
+      ...effect,
+      structuralTool: receipt.toolName,
+      targetRef: targetRef ?? relation.displayTarget,
+      stateKey: stateKey ?? relation.stateKey,
+      stateValue: stateValue ?? relation.displayValue,
+    };
+  }
+
+  if (!structuralTool || receipt.toolName !== structuralTool) return null;
 
   const stateValue = stringField(effect, "stateValue");
   if (!stateValue) {
-    return false;
+    return null;
   }
 
   const targetRef = stringField(effect, "targetRef");
   const stateKey = stringField(effect, "stateKey");
-  if (!targetRef || !stateKey) return false;
+  if (!targetRef || !stateKey) return null;
 
   return receipt.claims.some((claim) => {
     if (!hasIntersection(claim.targetRefs, dialogueStateTokenAliases(targetRef))) {
@@ -417,5 +624,7 @@ export function receiptBacksAppliedStateEffect(
       return false;
     }
     return hasIntersection(values, dialogueStateTokenAliases(stateValue));
-  });
+  })
+    ? effect
+    : null;
 }

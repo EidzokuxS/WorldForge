@@ -112,7 +112,7 @@ export function dialogueStateEffectStateKeyDescription(): string {
       .map((toolName) =>
         `${toolName}=${dialogueStateReceiptKeysForTool(toolName).join("/")}`)
       .join("; "),
-    "For possession/custody, stateValue may be the exact owner/target label or a receipt-derived phrase such as carried by <character> or located at <location>.",
+    "In the GM tool loop, applied_now effects should cite the prior structural tool's stateReceipt alias; target/key/value are resolved by the backend.",
     "Use custody only for transfer_item ownership/custody transfer.",
   ].join(" ");
 }

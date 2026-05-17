@@ -444,16 +444,23 @@ const dialogueStateEffectInputSchema = z.object({
     .max(80)
     .describe("Stable short id for this effect within the dialogue outcome."),
   status: dialogueStateEffectStatusEnum.describe("applied_now means this turn actually changed backend world state; asserted_only/not_applied are communicative only."),
+  stateReceipt: z
+    .string()
+    .trim()
+    .min(1)
+    .max(80)
+    .optional()
+    .describe("For applied_now in the GM tool loop, cite the stateReceipt alias returned by the prior structural tool result, such as state_receipt_1_1. The backend resolves target/key/value from that receipt."),
   structuralTool: structuralDialogueStateToolEnum
     .optional()
-    .describe("Required only for applied_now. Names the successful structural tool that must have run before record_dialogue_outcome."),
+    .describe("Resolved by the backend from stateReceipt for applied_now; legacy/internal callers may provide it to name the successful structural tool."),
   targetRef: z
     .string()
     .trim()
     .min(1)
     .max(180)
     .optional()
-    .describe("Required for applied_now. Use the same exact target/entity ref or label used by the structural tool input/result."),
+    .describe("Resolved by the backend from stateReceipt for applied_now; legacy/internal callers may provide the same exact target/entity ref or label used by the structural tool input/result."),
   stateKey: z
     .string()
     .trim()
@@ -467,7 +474,7 @@ const dialogueStateEffectInputSchema = z.object({
     .min(1)
     .max(180)
     .optional()
-    .describe("State value backed by the structural tool result, such as target/owner label, carried, carried by <character>, located at <location>, revealed, created, or removed:blocked/cleared:blocked for remove_tag."),
+    .describe("Resolved by the backend from stateReceipt for applied_now; legacy/internal callers may provide the state value backed by the structural tool result."),
   summary: z
     .string()
     .trim()
@@ -476,32 +483,33 @@ const dialogueStateEffectInputSchema = z.object({
     .describe("Human-readable description. Validators do not parse this for semantics."),
 }).superRefine((data, ctx) => {
   if (data.status === "applied_now") {
-    if (!data.structuralTool) {
+    const hasStateReceipt = Boolean(data.stateReceipt?.trim());
+    if (!hasStateReceipt && !data.structuralTool) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["structuralTool"],
-        message: "applied_now stateEffects require structuralTool",
+        message: "applied_now stateEffects require stateReceipt or structuralTool",
       });
     }
-    if (!data.targetRef?.trim()) {
+    if (!hasStateReceipt && !data.targetRef?.trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["targetRef"],
-        message: "applied_now stateEffects require targetRef",
+        message: "applied_now stateEffects require stateReceipt or targetRef",
       });
     }
-    if (!data.stateKey?.trim()) {
+    if (!hasStateReceipt && !data.stateKey?.trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["stateKey"],
-        message: "applied_now stateEffects require stateKey",
+        message: "applied_now stateEffects require stateReceipt or stateKey",
       });
     }
-    if (!data.stateValue?.trim()) {
+    if (!hasStateReceipt && !data.stateValue?.trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["stateValue"],
-        message: "applied_now stateEffects require stateValue",
+        message: "applied_now stateEffects require stateReceipt or stateValue",
       });
     }
     if (

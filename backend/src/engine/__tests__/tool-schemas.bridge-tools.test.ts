@@ -396,6 +396,18 @@ describe("record_dialogue_outcome schema", () => {
         {
           effectId: "guard-cleared-by-bluff",
           status: "applied_now",
+          stateReceipt: "state_receipt_1_1",
+          summary: "The backend resolves this applied state from a prior receipt.",
+        },
+      ],
+    }).success).toBe(true);
+
+    expect(runtimeToolInputSchemas.record_dialogue_outcome.safeParse({
+      ...base,
+      stateEffects: [
+        {
+          effectId: "guard-cleared-by-bluff",
+          status: "applied_now",
           structuralTool: "add_tag",
           targetRef: "Gate Guard",
           stateKey: "tag",

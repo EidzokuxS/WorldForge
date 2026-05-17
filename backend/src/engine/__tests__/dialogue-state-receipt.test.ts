@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  attachStructuralStateReceiptsToToolResult,
   receiptBacksAppliedStateEffect,
+  resolveAppliedStateEffectFromReceipt,
   structuralStateReceiptFromToolCall,
 } from "../dialogue-state-receipt.js";
 import {
@@ -84,6 +86,58 @@ describe("dialogue state receipts", () => {
       stateKey: "verification",
       stateValue: "verified-authentic",
     })).toBe(true);
+  });
+
+  it("backs applied_now effects from backend-issued stateReceipt aliases", () => {
+    const toolResult = mutationToolResult({
+      entity: "Anonymous sealed proof",
+      appliedTag: "verified-authentic",
+      tags: ["starting-loadout", "equipped", "verified-authentic"],
+    });
+    attachStructuralStateReceiptsToToolResult({
+      toolName: "add_tag",
+      candidateInput: {
+        entityName: "Anonymous sealed proof",
+        entityType: "item",
+        tag: "verified-authentic",
+      },
+      result: toolResult,
+      prefix: "state_receipt_1",
+    });
+    const receipt = structuralStateReceiptFromToolCall({
+      toolName: "add_tag",
+      candidateInput: {
+        entityName: "Anonymous sealed proof",
+        entityType: "item",
+        tag: "verified-authentic",
+      },
+      result: toolResult,
+    });
+
+    const stateReceipt = toolResult.stateReceipts?.find((row) =>
+      row.key === "tag" && row.value === "verified-authentic")?.stateReceipt;
+    expect(stateReceipt).toBe("state_receipt_1_1");
+    expect(receipt).not.toBeNull();
+    expect(receiptBacksAppliedStateEffect(receipt!, {
+      status: "applied_now",
+      stateReceipt,
+      summary: "The backend resolves target/key/value from this receipt.",
+    })).toBe(true);
+    expect(resolveAppliedStateEffectFromReceipt(receipt!, {
+      status: "applied_now",
+      stateReceipt,
+      summary: "The backend resolves target/key/value from this receipt.",
+    })).toMatchObject({
+      structuralTool: "add_tag",
+      targetRef: "anonymous sealed proof",
+      stateKey: "tag",
+      stateValue: "verified-authentic",
+    });
+    expect(receiptBacksAppliedStateEffect(receipt!, {
+      status: "applied_now",
+      stateReceipt: "state_receipt_9_9",
+      summary: "A forged same-turn receipt must not work.",
+    })).toBe(false);
   });
 
   it("does not let a tag receipt back an unrelated state key", () => {
