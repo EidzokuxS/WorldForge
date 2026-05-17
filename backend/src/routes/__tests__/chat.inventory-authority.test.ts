@@ -1,6 +1,10 @@
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const routeState = vi.hoisted(() => ({
+  chatHistoryByCampaign: new Map<string, Array<{ role: "user" | "assistant"; content: string }>>(),
+}));
+
 vi.mock("../../ai/index.js", () => ({
   callStoryteller: vi.fn(),
   resolveRoleModel: vi.fn(() => ({
@@ -13,7 +17,7 @@ vi.mock("../../ai/index.js", () => ({
 vi.mock("../../campaign/index.js", () => ({
   appendChatMessages: vi.fn(),
   getCampaignPremise: vi.fn(() => "A harsh frontier under failing wardstones."),
-  getChatHistory: vi.fn(() => []),
+  getChatHistory: vi.fn((campaignId: string) => routeState.chatHistoryByCampaign.get(campaignId) ?? []),
   getActiveCampaign: vi.fn(() => null),
   loadCampaign: vi.fn(async (campaignId: string) => ({
     id: campaignId,
@@ -160,6 +164,9 @@ const runtimeSnapshots = new Map<string, unknown>();
 const runtimeSnapshotMetadata = new Map<string, {
   acceptedDurableEventIds: string[];
   producedDurableEventIds: string[];
+  playerAction: string | null;
+  chatHistoryLengthBeforeTurn: number | null;
+  chatHistoryLengthAfterTurn: number | null;
 }>();
 
 vi.mock("../../campaign/runtime-state.js", () => ({
@@ -173,12 +180,18 @@ vi.mock("../../campaign/runtime-state.js", () => ({
     metadata?: {
       acceptedDurableEventIds?: readonly string[];
       producedDurableEventIds?: readonly string[];
+      playerAction?: string | null;
+      chatHistoryLengthBeforeTurn?: number | null;
+      chatHistoryLengthAfterTurn?: number | null;
     },
   ) => {
     runtimeSnapshots.set(campaignId, snapshot);
     runtimeSnapshotMetadata.set(campaignId, {
       acceptedDurableEventIds: [...new Set(metadata?.acceptedDurableEventIds ?? [])],
       producedDurableEventIds: [...new Set(metadata?.producedDurableEventIds ?? [])],
+      playerAction: metadata?.playerAction ?? null,
+      chatHistoryLengthBeforeTurn: metadata?.chatHistoryLengthBeforeTurn ?? null,
+      chatHistoryLengthAfterTurn: metadata?.chatHistoryLengthAfterTurn ?? null,
     });
   }),
   getLastTurnSnapshot: vi.fn((campaignId: string) => runtimeSnapshots.get(campaignId)),
@@ -186,6 +199,9 @@ vi.mock("../../campaign/runtime-state.js", () => ({
     runtimeSnapshotMetadata.get(campaignId) ?? {
       acceptedDurableEventIds: [],
       producedDurableEventIds: [],
+      playerAction: null,
+      chatHistoryLengthBeforeTurn: null,
+      chatHistoryLengthAfterTurn: null,
     }),
   clearLastTurnSnapshot: vi.fn((campaignId: string) => {
     runtimeSnapshots.delete(campaignId);
@@ -219,12 +235,24 @@ beforeEach(() => {
   vi.clearAllMocks();
   runtimeSnapshots.clear();
   runtimeSnapshotMetadata.clear();
+  routeState.chatHistoryByCampaign.clear();
 });
 
 describe("Phase 38 retry/undo reopen seam", () => {
   it("restores the last snapshot before retry replays the turn so bundle reopen cannot skip authority migration", async () => {
     const previousSnapshot = { bundleId: "legacy-turn-boundary" } as const;
     runtimeSnapshots.set("campaign-38", previousSnapshot);
+    routeState.chatHistoryByCampaign.set("campaign-38", [
+      { role: "user", content: "Retry the duel" },
+      { role: "assistant", content: "The duel resolved once." },
+    ]);
+    runtimeSnapshotMetadata.set("campaign-38", {
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+      playerAction: "Retry the duel",
+      chatHistoryLengthBeforeTurn: 0,
+      chatHistoryLengthAfterTurn: 2,
+    });
     mockedRestoreSnapshot.mockResolvedValue(undefined);
     mockedProcessTurn.mockImplementation(() =>
       createTurnStream([{ type: "done", data: { tick: 7 } }]),
@@ -250,6 +278,17 @@ describe("Phase 38 retry/undo reopen seam", () => {
   it("reopens the last snapshot before undo succeeds so retry/undo restore shares the same authority seam", async () => {
     const previousSnapshot = { bundleId: "legacy-turn-boundary" } as const;
     runtimeSnapshots.set("campaign-38", previousSnapshot);
+    routeState.chatHistoryByCampaign.set("campaign-38", [
+      { role: "user", content: "Retry the duel" },
+      { role: "assistant", content: "The duel resolved once." },
+    ]);
+    runtimeSnapshotMetadata.set("campaign-38", {
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+      playerAction: "Retry the duel",
+      chatHistoryLengthBeforeTurn: 0,
+      chatHistoryLengthAfterTurn: 2,
+    });
     mockedRestoreSnapshot.mockResolvedValue(undefined);
 
     const response = await app.request("/chat/undo", {

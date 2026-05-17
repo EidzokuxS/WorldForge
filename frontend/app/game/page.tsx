@@ -33,6 +33,7 @@ import {
   chatHistory,
   chatLookup,
   chatOpening,
+  chatResume,
   chatRetry,
   chatUndo,
   getActiveCampaign,
@@ -332,7 +333,7 @@ function renderInventoryDrawer(
 }
 
 export default function GamePage() {
-  const router = useRouter();
+  const { push: pushRoute, replace: replaceRoute } = useRouter();
   const { settings } = useSettings();
   const [activeCampaign, setActiveCampaign] = useState<CampaignMeta | null>(null);
   const [messages, setMessages] = useState<DisplayChatMessage[]>([]);
@@ -346,9 +347,11 @@ export default function GamePage() {
   const [quickActions, setQuickActions] = useState<QuickAction[]>([]);
   const [worldData, setWorldData] = useState<WorldData | null>(null);
   const [travelFeedback, setTravelFeedback] = useState<string | null>(null);
+  const [pendingResumeCampaignId, setPendingResumeCampaignId] = useState<string | null>(null);
   const bufferedQuickActionsRef = useRef<QuickAction[]>([]);
   const messagesRef = useRef<DisplayChatMessage[]>([]);
   const openingRequestCampaignRef = useRef<string | null>(null);
+  const pendingResumeStartedRef = useRef<string | null>(null);
 
   const refreshWorldData = useCallback(async (campaignId: string) => {
     const data = await getWorldData(campaignId);
@@ -367,10 +370,18 @@ export default function GamePage() {
       const lastIndex = next.length - 1;
       if (lastIndex >= 0 && next[lastIndex].role === "assistant") {
         next[lastIndex] = { ...next[lastIndex], content };
+        messagesRef.current = next;
         return next;
       }
 
-      return [...next, { role: "assistant", content, debugReasoning: null }];
+      const appendedMessage: DisplayChatMessage = {
+        role: "assistant",
+        content,
+        debugReasoning: null,
+      };
+      const appended = [...next, appendedMessage];
+      messagesRef.current = appended;
+      return appended;
     });
   }, []);
 
@@ -457,6 +468,7 @@ export default function GamePage() {
         : [];
       const displayMessages = toDisplayMessages(safeMessages);
 
+      messagesRef.current = displayMessages;
       setMessages(displayMessages);
       setHasLiveTurnSnapshot(history.hasLiveTurnSnapshot);
       setWorldData(world);
@@ -464,6 +476,7 @@ export default function GamePage() {
       return {
         messages: displayMessages,
         hasNarratedAssistantMessage: hasNarratedAssistantMessage(displayMessages),
+        hasPendingNarration: history.pendingNarration?.resumable === true,
       };
     },
     [],
@@ -551,6 +564,109 @@ export default function GamePage() {
     ],
   );
 
+  const requestPendingResume = useCallback(
+    async (campaignId: string) => {
+      setTurnPhase("idle");
+      setSceneProgress("scene-settling");
+      setSceneProgressCopy("Resuming turn");
+      setLastOracleResult(null);
+      setTravelFeedback(null);
+      clearQuickActionState();
+
+      let turnCompleted = false;
+      let resumeStreamError: string | null = null;
+      let narrativeText = "";
+
+      try {
+        const response = await chatResume(campaignId);
+        if (!response.body) {
+          throw new Error("Empty resume response stream.");
+        }
+
+        await parseTurnSSE(response.body, {
+          onSceneSettling: applySceneSettlingStatus,
+          onNarrative: (text) => {
+            narrativeText += text;
+            setSceneProgress(null);
+            setTurnPhase("streaming");
+            upsertAssistantMessage(narrativeText);
+          },
+          onReasoning: attachReasoningToLatestAssistant,
+          onOracleResult: (result) => {
+            setLastOracleResult(result as OracleResultData);
+          },
+          onStateUpdate: (update) => {
+            const locationChange = getLocationChangeUpdate(update);
+            if (locationChange) {
+              setTravelFeedback(formatTravelFeedback(locationChange));
+            }
+            void refreshWorldData(campaignId).catch(() => {});
+          },
+          onQuickActions: (actions) => {
+            bufferQuickActions(actions);
+          },
+          onFinalizing: applyFinalizingStatus,
+          onDone: (boundary) => {
+            turnCompleted = true;
+            finishCompletedTurn(campaignId, boundary);
+          },
+          onError: (error) => {
+            resumeStreamError = error;
+          },
+        });
+
+        if (resumeStreamError) {
+          throw new Error(resumeStreamError);
+        }
+      } catch (error) {
+        clearQuickActionState();
+        setLastOracleResult(null);
+        setTravelFeedback(null);
+        try {
+          await restoreGameplayState(campaignId);
+        } catch {
+          setHasLiveTurnSnapshot(false);
+        }
+        toast.error("Failed to resume pending turn", {
+          description: getErrorMessage(error, "Unknown resume error."),
+        });
+      } finally {
+        if (!turnCompleted) {
+          setSceneProgress(null);
+          setTurnPhase("idle");
+        }
+      }
+    },
+    [
+      applyFinalizingStatus,
+      applySceneSettlingStatus,
+      attachReasoningToLatestAssistant,
+      bufferQuickActions,
+      clearQuickActionState,
+      finishCompletedTurn,
+      refreshWorldData,
+      restoreGameplayState,
+      upsertAssistantMessage,
+    ],
+  );
+
+  useEffect(() => {
+    if (!pendingResumeCampaignId) {
+      return;
+    }
+    if (pendingResumeStartedRef.current === pendingResumeCampaignId) {
+      return;
+    }
+
+    pendingResumeStartedRef.current = pendingResumeCampaignId;
+    void requestPendingResume(pendingResumeCampaignId).finally(() => {
+      pendingResumeStartedRef.current = null;
+      setPendingResumeCampaignId((current) =>
+        current === pendingResumeCampaignId ? null : current,
+      );
+    });
+  }, [pendingResumeCampaignId, requestPendingResume]);
+
   const rollbackRetryBoundary = useCallback(
     async (campaignId: string, fallbackPremise: string, cause: unknown) => {
       const rolledBackMessages = messagesRef.current.slice(
@@ -590,21 +706,23 @@ export default function GamePage() {
 
         if (!campaign) {
           toast.error("No active campaign found. Create or load one first.");
-          router.replace("/");
+          replaceRoute("/");
           return;
         }
 
         if (cancelled) return;
         setActiveCampaign(campaign);
         const restored = await restoreGameplayState(campaign.id);
-        if (!cancelled && !restored.hasNarratedAssistantMessage) {
+        if (!cancelled && restored.hasPendingNarration) {
+          setPendingResumeCampaignId(campaign.id);
+        } else if (!cancelled && !restored.hasNarratedAssistantMessage) {
           void requestOpeningScene(campaign.id);
         }
       } catch (error) {
         toast.error("Failed to load game state", {
           description: getErrorMessage(error, "Unknown initialization error."),
         });
-        router.replace("/");
+        replaceRoute("/");
       } finally {
         if (!cancelled) {
           setIsInitializing(false);
@@ -617,7 +735,7 @@ export default function GamePage() {
     return () => {
       cancelled = true;
     };
-  }, [requestOpeningScene, restoreGameplayState, router]);
+  }, [requestOpeningScene, restoreGameplayState, replaceRoute]);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -1034,12 +1152,11 @@ export default function GamePage() {
     if (isTurnBusy || !activeCampaign) return;
 
     try {
-      await chatUndo(activeCampaign.id);
+      const result = await chatUndo(activeCampaign.id);
       setMessages((current) => {
         const next = [...current];
-        // Remove last 2 messages (user action + assistant response)
-        if (next.length >= 2) {
-          next.pop();
+        const removeCount = Math.max(0, Math.min(next.length, result.messagesRemoved));
+        for (let index = 0; index < removeCount; index += 1) {
           next.pop();
         }
         return next;
@@ -1085,7 +1202,11 @@ export default function GamePage() {
     hasLiveTurnSnapshot &&
     turnPhase === "idle" &&
     messages.length >= 2 &&
-    messages[messages.length - 1]?.role === "assistant";
+    messages[messages.length - 1]?.role === "assistant" &&
+    deriveGameMessageKind(
+      messages[messages.length - 1]!.role,
+      messages[messages.length - 1]!.content,
+    ) === "narration";
 
   const handleContinueAction = () => {
     if (isTurnBusy) return;
@@ -1307,9 +1428,9 @@ export default function GamePage() {
           sceneName={backdropSceneName}
           broadLocationName={backdropLocationName}
           status={hudStatus}
-          onHome={() => router.push("/")}
+          onHome={() => pushRoute("/")}
           onSaves={() => playSurface.openDrawer("saves")}
-          onSettings={() => router.push("/settings")}
+          onSettings={() => pushRoute("/settings")}
         />
       }
       stageOverlay={

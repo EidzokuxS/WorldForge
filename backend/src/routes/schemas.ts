@@ -211,6 +211,10 @@ export const chatRetryBodySchema = z.object({
   campaignId: campaignIdSchema,
 });
 
+export const chatResumeBodySchema = z.object({
+  campaignId: campaignIdSchema,
+});
+
 export const chatUndoBodySchema = z.object({
   campaignId: campaignIdSchema,
 });

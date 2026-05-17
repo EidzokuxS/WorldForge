@@ -6,6 +6,9 @@ const routeState = vi.hoisted(() => {
   const runtimeSnapshotMetadata = new Map<string, {
     acceptedDurableEventIds: string[];
     producedDurableEventIds: string[];
+    playerAction: string | null;
+    chatHistoryLengthBeforeTurn: number | null;
+    chatHistoryLengthAfterTurn: number | null;
   }>();
   const runtimeActiveTurns = new Set<string>();
   const chatHistoryByCampaign = new Map<string, Array<{ role: string; content: string }>>();
@@ -31,12 +34,18 @@ const routeState = vi.hoisted(() => {
       metadata?: {
         acceptedDurableEventIds?: readonly string[];
         producedDurableEventIds?: readonly string[];
+        playerAction?: string | null;
+        chatHistoryLengthBeforeTurn?: number | null;
+        chatHistoryLengthAfterTurn?: number | null;
       },
     ) => {
       runtimeSnapshots.set(campaignId, snapshot);
       runtimeSnapshotMetadata.set(campaignId, {
         acceptedDurableEventIds: [...new Set(metadata?.acceptedDurableEventIds ?? [])],
         producedDurableEventIds: [...new Set(metadata?.producedDurableEventIds ?? [])],
+        playerAction: metadata?.playerAction ?? null,
+        chatHistoryLengthBeforeTurn: metadata?.chatHistoryLengthBeforeTurn ?? null,
+        chatHistoryLengthAfterTurn: metadata?.chatHistoryLengthAfterTurn ?? null,
       });
     }),
     mockGetLastTurnSnapshot: vi.fn((campaignId: string) => runtimeSnapshots.get(campaignId)),
@@ -44,6 +53,9 @@ const routeState = vi.hoisted(() => {
       runtimeSnapshotMetadata.get(campaignId) ?? {
         acceptedDurableEventIds: [],
         producedDurableEventIds: [],
+        playerAction: null,
+        chatHistoryLengthBeforeTurn: null,
+        chatHistoryLengthAfterTurn: null,
       }),
     mockClearLastTurnSnapshot: vi.fn((campaignId: string) => {
       runtimeSnapshots.delete(campaignId);
@@ -481,6 +493,17 @@ describe("ScenePlan chat route cutover", () => {
       bundleDir: "previous-turn-boundary",
       capturedAt: 1,
     });
+    chatHistoryByCampaign.set(CAMPAIGN_ID, [
+      { role: "user", content: "Retry the strike" },
+      { role: "assistant", content: "The previous strike resolved." },
+    ]);
+    runtimeSnapshotMetadata.set(CAMPAIGN_ID, {
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+      playerAction: "Retry the strike",
+      chatHistoryLengthBeforeTurn: 0,
+      chatHistoryLengthAfterTurn: 2,
+    });
     mockedGetLastPlayerAction.mockReturnValue("Retry the strike");
 
     const res = await app.request("/chat/retry", {
@@ -649,9 +672,14 @@ describe("ScenePlan chat route cutover", () => {
 
     expect(body).toContain('"worldVersion":4');
     expect(snapshotWasStoredAtDone).toEqual([true]);
-    expect(mockSetLastTurnSnapshot).toHaveBeenCalledWith(CAMPAIGN_ID, snapshot, {
-      acceptedDurableEventIds: [],
-      producedDurableEventIds: [],
-    });
+    expect(mockSetLastTurnSnapshot).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      snapshot,
+      expect.objectContaining({
+        acceptedDurableEventIds: [],
+        producedDurableEventIds: [],
+        playerAction: "Hold position",
+      }),
+    );
   });
 });

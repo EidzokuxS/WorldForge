@@ -29,6 +29,7 @@ vi.mock("@/lib/api", () => ({
   chatHistory: vi.fn(),
   chatLookup: vi.fn(),
   chatOpening: vi.fn(),
+  chatResume: vi.fn(),
   chatRetry: vi.fn(),
   chatUndo: vi.fn(),
   getActiveCampaign: vi.fn(),
@@ -541,6 +542,7 @@ import {
   chatHistory,
   chatLookup,
   chatOpening,
+  chatResume,
   chatRetry,
   getActiveCampaign,
   getRememberedCampaignId,
@@ -558,6 +560,7 @@ const mockedChatAction = vi.mocked(chatAction);
 const mockedChatHistory = vi.mocked(chatHistory);
 const mockedChatLookup = vi.mocked(chatLookup);
 const mockedChatOpening = vi.mocked(chatOpening);
+const mockedChatResume = vi.mocked(chatResume);
 const mockedChatRetry = vi.mocked(chatRetry);
 const mockedGetRememberedCampaignId = vi.mocked(getRememberedCampaignId);
 const mockedLoadCampaign = vi.mocked(loadCampaign);
@@ -808,6 +811,7 @@ describe("GamePage", () => {
 
   it("routes Send and visible Continue through the existing backend turn path", async () => {
     await renderReadyGame();
+    const initialHistoryCallCount = mockedChatHistory.mock.calls.length;
     mockedChatAction.mockResolvedValue(createStreamResponse() as never);
 
     fireEvent.change(screen.getByLabelText("Scene action"), {
@@ -1196,6 +1200,44 @@ describe("GamePage", () => {
     });
   });
 
+  it("resumes pending narration on load without sending a new player action", async () => {
+    mockedChatResume.mockResolvedValue({ body: {} } as Response as never);
+    mockedParseTurnSSE.mockImplementation(async (_body, handlers) => {
+      handlers.onNarrative("The preserved turn resolves cleanly.");
+      handlers.onDone({ resumed: true });
+    });
+
+    await renderReadyGame({
+      messages: [
+        { role: "user" as const, content: "Open the sealed hatch" },
+      ],
+      premise: "A dark world",
+      hasLiveTurnSnapshot: false,
+      pendingNarration: {
+        pendingNarration: true,
+        resumable: true,
+        status: "resolved_pending_narration",
+      },
+    });
+
+    await waitFor(() => {
+      expect(mockedChatResume).toHaveBeenCalledWith(fakeCampaign.id);
+    });
+    await waitFor(() => {
+      expect(mockedParseTurnSSE).toHaveBeenCalled();
+    });
+    expect(mockedChatAction).not.toHaveBeenCalled();
+    expect(mockedChatOpening).not.toHaveBeenCalled();
+    openDrawer("Log");
+    await waitFor(() => {
+      expect(
+        within(screen.getByTestId("narrative-log")).getByText(
+          "The preserved turn resolves cleanly.",
+        ),
+      ).toBeInTheDocument();
+    });
+  });
+
   it("renders HUD with Home, Settings, and Saves buttons", async () => {
     await renderReadyGame();
 
@@ -1532,6 +1574,13 @@ describe("GamePage", () => {
     mockedChatAction.mockResolvedValue(createStreamResponse() as never);
     mockedChatRetry.mockResolvedValue(createStreamResponse() as never);
 
+    openDrawer("Log");
+    fireEvent.click(screen.getByText("Retry turn"));
+
+    await waitFor(() => {
+      expect(mockedChatRetry).toHaveBeenCalledWith(fakeCampaign.id);
+    });
+
     fireEvent.change(screen.getByLabelText("Scene action"), {
       target: { value: "Scout ahead" },
     });
@@ -1544,13 +1593,6 @@ describe("GamePage", () => {
         "Scout ahead",
         "",
       );
-    });
-
-    openDrawer("Log");
-    fireEvent.click(screen.getByText("Retry turn"));
-
-    await waitFor(() => {
-      expect(mockedChatRetry).toHaveBeenCalledWith(fakeCampaign.id);
     });
   });
 
@@ -1841,6 +1883,22 @@ describe("GamePage", () => {
 
   it("does not expose retry controls for reloaded history without a live snapshot", async () => {
     await renderReadyGame();
+
+    expect(screen.queryByText("Retry turn")).not.toBeInTheDocument();
+  });
+
+  it("does not expose retry controls when a lookup entry is the current tail", async () => {
+    await renderReadyGame({
+      messages: [
+        { role: "user" as const, content: "Signal the harbor bell" },
+        { role: "assistant" as const, content: "The bell answers from the inspection dock." },
+        { role: "user" as const, content: "/lookup character: Harbor Master" },
+        { role: "assistant" as const, content: "[Lookup: character_canon_fact] The harbor master controls inspection access." },
+      ],
+      premise: "A dark world",
+      hasLiveTurnSnapshot: true,
+    });
+    openDrawer("Log");
 
     expect(screen.queryByText("Retry turn")).not.toBeInTheDocument();
   });
@@ -2210,6 +2268,7 @@ describe("GamePage", () => {
     };
 
     await renderReadyGame();
+    const initialHistoryCallCount = mockedChatHistory.mock.calls.length;
     mockedChatAction.mockResolvedValue(createStreamResponse() as never);
     mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
       handlers.onNarrative("The hatch opens onto a back room that should roll back.");
@@ -2225,7 +2284,7 @@ describe("GamePage", () => {
     fireEvent.click(screen.getByLabelText("Send action"));
 
     await waitFor(() => {
-      expect(mockedChatHistory).toHaveBeenCalledTimes(2);
+      expect(mockedChatHistory.mock.calls.length).toBeGreaterThan(initialHistoryCallCount);
     });
 
     expect(screen.getAllByText("You see a bustling town square.").length).toBeGreaterThan(0);
@@ -2239,6 +2298,44 @@ describe("GamePage", () => {
       description: "Rollback-critical post-turn failed",
     });
     expect(screen.getByLabelText("Send action")).toBeDisabled();
+  });
+
+  it("rolls back optimistic action and narration when a stream closes before done", async () => {
+    const restoredBoundaryHistory = {
+      messages: [
+        { role: "user" as const, content: "Look around" },
+        { role: "assistant" as const, content: "You see a bustling town square." },
+      ],
+      premise: "A dark world",
+      hasLiveTurnSnapshot: false,
+    };
+
+    await renderReadyGame();
+    const initialHistoryCallCount = mockedChatHistory.mock.calls.length;
+    mockedChatAction.mockResolvedValue(createStreamResponse() as never);
+    mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
+      handlers.onNarrative("The partial narration should not survive.");
+      handlers.onQuickActions([{ label: "Trust the partial result", action: "Trust it" }]);
+      handlers.onError("Turn stream ended before completion.");
+    });
+    mockedChatHistory.mockResolvedValue(restoredBoundaryHistory as never);
+
+    fireEvent.change(screen.getByLabelText("Scene action"), {
+      target: { value: "Open the records hatch" },
+    });
+    fireEvent.click(screen.getByLabelText("Send action"));
+
+    await waitFor(() => {
+      expect(mockedChatHistory.mock.calls.length).toBeGreaterThan(initialHistoryCallCount);
+    });
+
+    expect(screen.getAllByText("You see a bustling town square.").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Open the records hatch")).not.toBeInTheDocument();
+    expect(screen.queryByText("The partial narration should not survive.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Trust the partial result")).not.toBeInTheDocument();
+    expect(mockedToast.error).toHaveBeenCalledWith("Failed to generate narrative", {
+      description: "Turn stream ended before completion.",
+    });
   });
 
   it("restores the honest pre-turn boundary after a failed retry", async () => {

@@ -365,7 +365,7 @@ beforeEach(() => {
 });
 
 describe("Phase 89 chat route resilience", () => {
-  it("resumes a pending saga without opening a new paid turn and releases the route lock", async () => {
+  it("resumes a pending saga through the explicit resume route without opening a new paid turn", async () => {
     const pendingSaga = mockPendingSaga({
       id: "saga-p89-pending",
       turnId: "turn-p89-pending",
@@ -378,14 +378,11 @@ describe("Phase 89 chat route resilience", () => {
       ]) as never,
     );
 
-    const res = await app.request("/chat/action", {
+    const res = await app.request("/chat/resume", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         campaignId: CAMPAIGN_ID,
-        playerAction: "Try to start new paid work",
-        intent: "Try to start new paid work",
-        method: "",
       }),
     });
 
@@ -404,7 +401,7 @@ describe("Phase 89 chat route resilience", () => {
     expect(runtimeActiveTurns.has(CAMPAIGN_ID)).toBe(false);
   });
 
-  it("keeps a pending narration resume error as pending instead of treating it as resumed", async () => {
+  it("keeps an explicit pending narration resume error as pending instead of treating it as resumed", async () => {
     const pendingSaga = mockPendingSaga({
       id: "saga-p95-terminal-error",
       turnId: "turn-p95-terminal-error",
@@ -424,14 +421,11 @@ describe("Phase 89 chat route resilience", () => {
       ]) as never,
     );
 
-    const res = await app.request("/chat/action", {
+    const res = await app.request("/chat/resume", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         campaignId: CAMPAIGN_ID,
-        playerAction: "Try to start new paid work",
-        intent: "Try to start new paid work",
-        method: "",
       }),
     });
 

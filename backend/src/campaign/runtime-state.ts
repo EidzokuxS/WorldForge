@@ -1,10 +1,23 @@
 import type { TurnSnapshot } from "../engine/state-snapshot.js";
 
 const lastTurnSnapshots = new Map<string, TurnSnapshot>();
-const lastTurnSnapshotMetadata = new Map<string, {
+export interface LastTurnSnapshotMetadata {
   acceptedDurableEventIds: string[];
   producedDurableEventIds: string[];
-}>();
+  playerAction: string | null;
+  chatHistoryLengthBeforeTurn: number | null;
+  chatHistoryLengthAfterTurn: number | null;
+}
+
+const EMPTY_LAST_TURN_SNAPSHOT_METADATA: LastTurnSnapshotMetadata = {
+  acceptedDurableEventIds: [],
+  producedDurableEventIds: [],
+  playerAction: null,
+  chatHistoryLengthBeforeTurn: null,
+  chatHistoryLengthAfterTurn: null,
+};
+
+const lastTurnSnapshotMetadata = new Map<string, LastTurnSnapshotMetadata>();
 const campaignsWithActiveTurn = new Set<string>();
 
 export function tryBeginTurn(campaignId: string): boolean {
@@ -34,12 +47,18 @@ export function setLastTurnSnapshot(
   metadata?: {
     acceptedDurableEventIds?: readonly string[];
     producedDurableEventIds?: readonly string[];
+    playerAction?: string | null;
+    chatHistoryLengthBeforeTurn?: number | null;
+    chatHistoryLengthAfterTurn?: number | null;
   },
 ): void {
   lastTurnSnapshots.set(campaignId, snapshot);
   lastTurnSnapshotMetadata.set(campaignId, {
     acceptedDurableEventIds: [...new Set(metadata?.acceptedDurableEventIds ?? [])],
     producedDurableEventIds: [...new Set(metadata?.producedDurableEventIds ?? [])],
+    playerAction: metadata?.playerAction ?? null,
+    chatHistoryLengthBeforeTurn: metadata?.chatHistoryLengthBeforeTurn ?? null,
+    chatHistoryLengthAfterTurn: metadata?.chatHistoryLengthAfterTurn ?? null,
   });
 }
 
@@ -51,14 +70,8 @@ export function getLastTurnSnapshot(
 
 export function getLastTurnSnapshotMetadata(
   campaignId: string,
-): {
-  acceptedDurableEventIds: string[];
-  producedDurableEventIds: string[];
-} {
-  return lastTurnSnapshotMetadata.get(campaignId) ?? {
-    acceptedDurableEventIds: [],
-    producedDurableEventIds: [],
-  };
+): LastTurnSnapshotMetadata {
+  return lastTurnSnapshotMetadata.get(campaignId) ?? EMPTY_LAST_TURN_SNAPSHOT_METADATA;
 }
 
 export function clearLastTurnSnapshot(campaignId: string): void {

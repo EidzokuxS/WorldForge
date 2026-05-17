@@ -94,6 +94,11 @@ export type ChatHistoryResponse = {
   messages: ChatMessage[];
   premise: string;
   hasLiveTurnSnapshot: boolean;
+  pendingNarration?: {
+    pendingNarration: true;
+    resumable: boolean;
+    status?: string;
+  } | null;
 };
 
 export type LookupKind =
@@ -824,6 +829,7 @@ export interface TurnDoneBoundary {
   tick?: number;
   worldVersion?: number;
   worldTimeMinutes?: number;
+  resumed?: boolean;
 }
 
 const TURN_STREAM_EMPTY_NARRATION_ERROR = "Turn finished without visible narration. Please retry.";
@@ -889,6 +895,8 @@ function normalizeTurnDoneBoundary(value: unknown): TurnDoneBoundary | undefined
   if (tick !== undefined) boundary.tick = tick;
   if (worldVersion !== undefined) boundary.worldVersion = worldVersion;
   if (worldTimeMinutes !== undefined) boundary.worldTimeMinutes = worldTimeMinutes;
+  const resumed = readBooleanField(record, "resumed");
+  if (resumed !== undefined) boundary.resumed = resumed;
 
   return Object.keys(boundary).length > 0 ? boundary : undefined;
 }
@@ -986,7 +994,7 @@ export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: T
 
   dispatchCurrentEvent();
 
-  if (!hasDoneEvent && !hasErrorEvent && !hasVisibleNarrative && !hasLookupResult) {
+  if (!hasDoneEvent && !hasErrorEvent) {
     handlers.onError(TURN_STREAM_INCOMPLETE_ERROR);
   }
 }
@@ -1387,6 +1395,10 @@ export function chatOpening(campaignId: string): Promise<Response> {
 
 export function chatRetry(campaignId: string): Promise<Response> {
   return apiStreamPost("/api/chat/retry", { campaignId });
+}
+
+export function chatResume(campaignId: string): Promise<Response> {
+  return apiStreamPost("/api/chat/resume", { campaignId });
 }
 
 export function chatUndo(campaignId: string): Promise<{ ok: boolean; messagesRemoved: number }> {

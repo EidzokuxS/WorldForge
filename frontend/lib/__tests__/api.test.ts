@@ -4,6 +4,7 @@ import {
   chatEdit,
   chatHistory,
   chatLookup,
+  chatResume,
   chatRetry,
   chatUndo,
   deleteLoreCardById,
@@ -283,6 +284,23 @@ describe("gameplay API helpers", () => {
 
     await expect(chatRetry("campaign-42")).resolves.toBe(response);
     expect(fetchMock).toHaveBeenCalledWith("http://localhost:3001/api/chat/retry", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: "campaign-42" }),
+    });
+  });
+
+  it("chatResume is a streaming helper and sends only the explicit campaignId", async () => {
+    const response = new Response("event: done\ndata: {}\n\n", {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    });
+
+    fetchMock.mockResolvedValue(response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(chatResume("campaign-42")).resolves.toBe(response);
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost:3001/api/chat/resume", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ campaignId: "campaign-42" }),
@@ -765,6 +783,59 @@ describe("parseTurnSSE", () => {
     expect(onError).toHaveBeenCalledWith("Turn stream ended before completion.");
   });
 
+  it("reports visible narrative streams that close before done as incomplete", async () => {
+    const onNarrative = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+
+    await parseTurnSSE(
+      createStream([
+        "event: narrative",
+        'data: {"text":"The gate opens, but the transport dies."}',
+        "",
+      ].join("\n")),
+      {
+        onNarrative,
+        onOracleResult: vi.fn(),
+        onStateUpdate: vi.fn(),
+        onQuickActions: vi.fn(),
+        onDone,
+        onError,
+      },
+    );
+
+    expect(onNarrative).toHaveBeenCalledWith("The gate opens, but the transport dies.");
+    expect(onDone).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith("Turn stream ended before completion.");
+  });
+
+  it("reports lookup streams that close before done as incomplete", async () => {
+    const onLookupResult = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+
+    await parseTurnSSE(
+      createStream([
+        "event: lookup_result",
+        'data: {"lookupKind":"power_profile","subject":"Gojo","answer":"Bounded answer","citations":[],"uncertaintyNotes":[],"sceneImpact":"Lookup only."}',
+        "",
+      ].join("\n")),
+      {
+        onLookupResult,
+        onNarrative: vi.fn(),
+        onOracleResult: vi.fn(),
+        onStateUpdate: vi.fn(),
+        onQuickActions: vi.fn(),
+        onDone,
+        onError,
+      },
+    );
+
+    expect(onLookupResult).toHaveBeenCalledTimes(1);
+    expect(onDone).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith("Turn stream ended before completion.");
+  });
+
   it("keeps lookup-only done streams successful without narrative", async () => {
     const onLookupResult = vi.fn();
     const onDone = vi.fn();
@@ -793,6 +864,31 @@ describe("parseTurnSSE", () => {
     expect(onLookupResult).toHaveBeenCalledTimes(1);
     expect(onDone).toHaveBeenCalledTimes(1);
     expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("preserves resumed completion metadata for pending narration recovery", async () => {
+    const onDone = vi.fn();
+
+    await parseTurnSSE(
+      createStream([
+        'event: narrative',
+        'data: {"text":"The prior turn finally resolves."}',
+        "",
+        "event: done",
+        "data: {\"tick\":9,\"resumed\":true}",
+        "",
+      ].join("\n")),
+      {
+        onNarrative: vi.fn(),
+        onOracleResult: vi.fn(),
+        onStateUpdate: vi.fn(),
+        onQuickActions: vi.fn(),
+        onDone,
+        onError: vi.fn(),
+      },
+    );
+
+    expect(onDone).toHaveBeenCalledWith({ tick: 9, resumed: true });
   });
 
   it("dispatches reasoning on its own event lane without regressing lookup_result, narrative, or done", async () => {
