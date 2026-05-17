@@ -5,22 +5,40 @@ import {
 } from "../ai/generate-object-safe.js";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
 import { executeToolCall, type ToolResult } from "./tool-executor.js";
+import {
+  applySuccessfulToolObservationToExecutionContext,
+  type ToolExecutionContext,
+} from "./tool-execution-context.js";
 import { runtimeToolInputSchemas, type RuntimeToolName } from "./tool-schemas.js";
 import { buildHiddenAdjudicationPromptContract } from "./prompt-contracts.js";
+import {
+  toPlayerFacingQuickActions,
+  type PlayerFacingQuickActionsEvent,
+} from "./player-facing-events.js";
 
 export const ADJUDICATION_PLAN_ACTION_LIMIT = 8;
 export const ADJUDICATION_PLAN_RATIONALE_MAX = 280;
+const ADJUDICATION_STATE_MUTATION_TOOLS = new Set<RuntimeToolName>([
+  "add_tag",
+  "remove_tag",
+  "set_relationship",
+  "log_event",
+  "advance_time",
+  "promote_npc",
+  "spawn_item",
+  "reveal_location",
+  "set_condition",
+  "move_to",
+  "transfer_item",
+]);
 
 export const adjudicationActionSchema = z.discriminatedUnion("toolName", [
   z.object({ toolName: z.literal("add_tag"), input: runtimeToolInputSchemas.add_tag }),
   z.object({ toolName: z.literal("remove_tag"), input: runtimeToolInputSchemas.remove_tag }),
   z.object({ toolName: z.literal("set_relationship"), input: runtimeToolInputSchemas.set_relationship }),
-  z.object({ toolName: z.literal("add_chronicle_entry"), input: runtimeToolInputSchemas.add_chronicle_entry }),
   z.object({ toolName: z.literal("log_event"), input: runtimeToolInputSchemas.log_event }),
-  z.object({ toolName: z.literal("record_dialogue_outcome"), input: runtimeToolInputSchemas.record_dialogue_outcome }),
   z.object({ toolName: z.literal("advance_time"), input: runtimeToolInputSchemas.advance_time }),
   z.object({ toolName: z.literal("offer_quick_actions"), input: runtimeToolInputSchemas.offer_quick_actions }),
-  z.object({ toolName: z.literal("spawn_npc"), input: runtimeToolInputSchemas.spawn_npc }),
   z.object({ toolName: z.literal("promote_npc"), input: runtimeToolInputSchemas.promote_npc }),
   z.object({ toolName: z.literal("spawn_item"), input: runtimeToolInputSchemas.spawn_item }),
   z.object({ toolName: z.literal("reveal_location"), input: runtimeToolInputSchemas.reveal_location }),
@@ -62,7 +80,7 @@ export interface ExecutedAdjudication {
     result: ToolResult;
   }>;
   emittedEvents: Array<
-    | { type: "quick_actions"; data: ToolResult }
+    | { type: "quick_actions"; data: PlayerFacingQuickActionsEvent }
     | { type: "state_update"; data: unknown }
   >;
   quickActionsEmitted: boolean;
@@ -134,24 +152,36 @@ export async function executeAdjudicationPlan(args: {
   tick: number;
   outcomeTier?: string;
   plan: AdjudicationPlan;
+  executionContext: ToolExecutionContext;
 }): Promise<ExecutedAdjudication> {
   const toolCallResults: ExecutedAdjudication["toolCallResults"] = [];
   const emittedEvents: ExecutedAdjudication["emittedEvents"] = [];
   let quickActionsEmitted = false;
   let successfulTravel: SuccessfulTravelLike | null = null;
+  const stateMutationActions = args.plan.actions.filter((action) =>
+    ADJUDICATION_STATE_MUTATION_TOOLS.has(action.toolName),
+  );
+
+  if (stateMutationActions.length > 1) {
+    throw new Error(
+      "Adjudication plan rejected before execution: legacy hidden adjudication may execute at most one state-bearing action. Use the GM tool loop/scene-plan pipeline for multi-step mutations.",
+    );
+  }
 
   for (const action of args.plan.actions) {
+    const toolInput = action.input as Record<string, unknown>;
     const toolResult = await executeToolCall(
       args.campaignId,
       action.toolName,
-      action.input as Record<string, unknown>,
+      toolInput,
       args.tick,
       args.outcomeTier,
+      args.executionContext,
     );
 
     const toolCall = {
       tool: action.toolName,
-      args: action.input as Record<string, unknown>,
+      args: toolInput,
       result: toolResult,
     } satisfies ExecutedAdjudication["toolCallResults"][number];
 
@@ -162,10 +192,18 @@ export async function executeAdjudicationPlan(args: {
         `Adjudication action failed: ${action.toolName}${toolResult.error ? ` — ${toolResult.error}` : ""}`,
       );
     }
+    applySuccessfulToolObservationToExecutionContext({
+      toolName: action.toolName,
+      context: args.executionContext,
+      result: toolResult,
+    });
 
     if (action.toolName === "offer_quick_actions") {
-      quickActionsEmitted = true;
-      emittedEvents.push({ type: "quick_actions", data: toolResult });
+      const quickActions = toPlayerFacingQuickActions(toolResult);
+      if (quickActions) {
+        quickActionsEmitted = true;
+        emittedEvents.push({ type: "quick_actions", data: quickActions });
+      }
       continue;
     }
 
@@ -188,7 +226,6 @@ export async function executeAdjudicationPlan(args: {
       }
     }
 
-    emittedEvents.push({ type: "state_update", data: toolCall });
   }
 
   return {

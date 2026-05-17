@@ -117,6 +117,7 @@ function createFrame(overrides: Partial<SceneFrame> = {}): SceneFrame {
     combatEnvelope: null,
     oracle: null,
     ...overrides,
+    worldVersion: overrides.worldVersion ?? 0,
   };
 }
 
@@ -129,6 +130,12 @@ const baseClarification: Extract<GmRead, { path: "clarification" }> = {
   actionInterpretation: {
     intent: "follow a logical route and find a tea stall",
     targetRefs: [],
+  },
+  turnGrounding: {
+    intentKind: "clarification_needed",
+    requiresGrounding: false,
+    groundingKind: "none",
+    reason: "The parser could not bind the intended route.",
   },
   path: "clarification",
   clarificationPrompt: "Which connected location should I use for that route?",
@@ -244,7 +251,13 @@ describe("clarification reviewer", () => {
       path: "tool_plan",
       turnIntent:
         "Use bridge lookup and state tools to follow the legal route and ground a low-impact tea search or minor tea stall.",
-      runtimeRequirement: { kind: "state_mutation" },
+      runtimeRequirement: { kind: "state_mutation", effectKind: "movement" },
+      turnGrounding: {
+        intentKind: "concrete_state_change",
+        requiresGrounding: true,
+        groundingKind: "state_mutation",
+        reason: "The repaired route/search turn needs backend-validated movement or POI state.",
+      },
       rationale: "The intent is understandable and low-risk; backend tools must validate movement and POI state.",
       evidenceRefs: ["Player", "Tea Row"],
       narrationGuardrails: ["Do not narrate completed movement or a tea stall before tool results."],
@@ -276,6 +289,7 @@ describe("clarification reviewer", () => {
     expect(repairCall?.prompt).toContain("create_minor_poi");
     expect(repairCall?.prompt).toContain("Do not ask for exact ids");
     expect(repairCall?.prompt).toContain("All state changes must still go through later bridge tools");
+    expect(repairCall?.prompt).toContain("update turnGrounding in the same JSON object");
   });
 
   it("allows repair into bounded grounded diegetic choices", async () => {

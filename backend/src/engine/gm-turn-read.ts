@@ -6,10 +6,18 @@ import { createLogger, withRole } from "../lib/index.js";
 import {
   buildModelFacingSceneDiagnostics,
   buildModelFacingScenePacket,
-  shouldDropModelFacingText,
+  buildModelFacingScenePromptView,
+  collectModelFacingScenePromptRefs,
+  isUnsafeModelFacingRef,
+  oracleContextForModelPrompt,
   type ModelFacingPromptSafety,
   type ModelFacingSceneView,
 } from "./model-facing-scene.js";
+import {
+  formatModelFacingPlayerActionText,
+  formatModelFacingRecentConversation,
+  sanitizeModelFacingJson,
+} from "./model-facing-conversation.js";
 import {
   buildPlayerActionEpistemicNotes,
   isClaimedProofOracleExistenceQuestion,
@@ -17,8 +25,10 @@ import {
 } from "./player-action-epistemics.js";
 import { buildGmReadPromptContract } from "./prompt-contracts.js";
 import type { SceneFrame } from "./scene-frame.js";
-import type { ScopedForecastExcerpt } from "./world-forecast.js";
-import { hasFutureRelevantConcretePressure } from "./future-relevant-pressure.js";
+import {
+  scopedForecastForModelPrompt,
+  type ScopedForecastExcerpt,
+} from "./world-forecast.js";
 import { isCombatPressureAction } from "./combat-envelope.js";
 import {
   formatSessionLanguageContract,
@@ -26,6 +36,10 @@ import {
   type SessionResponseLanguage,
 } from "./session-language.js";
 import { playerBlockingStageLimit, readRuntimeLimitMs } from "./runtime-limits.js";
+import {
+  RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS,
+  canRuntimeToolSatisfyRequirement,
+} from "./tool-contracts.js";
 
 const log = createLogger("gm-turn-read");
 
@@ -53,6 +67,7 @@ export const GM_READ_STRUCTURED_OUTPUT_RETRIES = readRuntimeLimitMs(
 const GM_READ_RECENT_CONVERSATION_LIMIT = 4;
 const GM_READ_RECENT_CONVERSATION_MAX_CHARS = 500;
 const GM_READ_PROMPT_TEXT_MAX_CHARS = 320;
+const GM_READ_NO_MUTATION_ADMISSIBILITY_MAX_OUTPUT_TOKENS = 500;
 
 const gmReadText = (max = GM_READ_TEXT_MAX) => z.string().trim().min(1).max(max);
 const gmReadRef = z.string().trim().min(1).max(GM_READ_REF_MAX);
@@ -172,6 +187,102 @@ const runtimeRequirementTopicSchema = z.enum([
 ]);
 
 const runtimeRequirementDurabilitySchema = z.enum(["scene_local", "durable"]);
+export const GM_READ_RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS = [
+  ...RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS,
+] as const;
+const runtimeRequirementStateEffectKindSchema = z.enum(GM_READ_RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS);
+const runtimeRequirementSceneBeatKindSchema = z.enum([
+  "event_log",
+  "time_passage",
+]);
+
+const turnGroundingIntentKindSchema = z.enum([
+  "ordinary_local_response",
+  "passive_status_read",
+  "procedural_information",
+  "posted_proof_applicability",
+  "document_state_assumption",
+  "concrete_state_change",
+  "combat_pressure",
+  "clarification_needed",
+  "other",
+]);
+
+const turnGroundingKindSchema = z.enum([
+  "none",
+  "observation_read",
+  "dialogue_outcome",
+  "world_fact",
+  "scene_beat",
+  "state_mutation",
+  "roll_oracle",
+  "combat_transition",
+]);
+
+const noMutationSafeKinds = [
+  "local_greeting",
+  "sensory_color",
+  "bounded_clarification",
+  "pure_ooc_system",
+  "no_state_claim",
+] as const;
+const noMutationBlockedClaimKinds = [
+  "procedure",
+  "permission_access",
+  "proof_document",
+  "route",
+  "status_read_change",
+  "actor_creation",
+  "movement",
+  "possession_inventory",
+  "durable_social_fact",
+  "world_fact",
+  "combat_threat",
+] as const;
+const noMutationRequiredGroundingKinds = [
+  "observation_read",
+  "dialogue_outcome",
+  "world_fact",
+  "scene_beat",
+  "state_mutation",
+  "roll_oracle",
+  "combat_transition",
+] as const;
+const noMutationAdmissibilitySchema = z.object({
+  decision: z.enum(["admissible", "runtime_required"]),
+  safeKind: z.enum(noMutationSafeKinds).optional(),
+  blockedClaimKinds: z.array(z.enum(noMutationBlockedClaimKinds)).default([]),
+  requiredGroundingKind: z.enum(noMutationRequiredGroundingKinds).optional(),
+  topicKind: runtimeRequirementTopicSchema.optional(),
+  durability: runtimeRequirementDurabilitySchema.optional(),
+  reason: gmReadText(240),
+}).strict();
+type NoMutationAdmissibility = z.infer<typeof noMutationAdmissibilitySchema>;
+
+const turnGroundingSchema = z.object({
+  intentKind: turnGroundingIntentKindSchema,
+  requiresGrounding: z.boolean(),
+  groundingKind: turnGroundingKindSchema,
+  topicKind: runtimeRequirementTopicSchema.optional(),
+  durability: runtimeRequirementDurabilitySchema.optional(),
+  reason: gmReadText(240),
+}).strict();
+
+const dialogueSpeakerBindingSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("visible_actor"),
+    speakerRef: gmReadRef,
+  }).strict(),
+  z.object({
+    kind: z.literal("prose_role"),
+    requestedRoleText: gmReadText(160),
+    allowCreateSceneExtra: z.boolean().default(true),
+  }).strict(),
+  z.object({
+    kind: z.literal("no_visible_authority"),
+    requestedRoleText: gmReadText(160),
+  }).strict(),
+]);
 
 const runtimeRequirementSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("none") }).strict(),
@@ -196,7 +307,37 @@ const runtimeRequirementSchema = z.discriminatedUnion("kind", [
     kind: z.literal("dialogue_outcome"),
     durability: runtimeRequirementDurabilitySchema,
     topicKind: runtimeRequirementTopicSchema.optional(),
-  }).strict(),
+    speakerBinding: dialogueSpeakerBindingSchema.optional(),
+    requiresStructuralEffect: z
+      .boolean()
+      .optional()
+      .describe("True only when this turn should actually apply durable world/entity state now, not merely discuss a rule, requirement, warning, or hypothetical permission."),
+    effectKind: runtimeRequirementStateEffectKindSchema
+      .optional()
+      .describe("Single structural state owner. Use effectKinds instead when the dialogue outcome needs multiple structural owner classes."),
+    effectKinds: z
+      .array(runtimeRequirementStateEffectKindSchema)
+      .min(1)
+      .max(4)
+      .optional()
+      .describe("Required when requiresStructuralEffect=true if multiple structural owner classes are needed before record_dialogue_outcome."),
+  }).strict().superRefine((value, ctx) => {
+    const hasEffectKinds = Boolean(value.effectKind || value.effectKinds?.length);
+    if (value.requiresStructuralEffect === true && !hasEffectKinds) {
+      ctx.addIssue({
+        code: "custom",
+        message: "dialogue_outcome with requiresStructuralEffect=true requires effectKind/effectKinds so the runtime exposes exactly the needed structural owner classes.",
+        path: ["effectKind"],
+      });
+    }
+    if (hasEffectKinds && value.requiresStructuralEffect !== true) {
+      ctx.addIssue({
+        code: "custom",
+        message: "dialogue_outcome effectKind/effectKinds are only valid when requiresStructuralEffect=true.",
+        path: ["effectKind"],
+      });
+    }
+  }),
   z.object({
     kind: z.literal("world_fact"),
     durability: z.literal("durable"),
@@ -205,9 +346,27 @@ const runtimeRequirementSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("scene_beat"),
     durability: runtimeRequirementDurabilitySchema,
-  }).strict(),
+    effectKind: runtimeRequirementStateEffectKindSchema.optional(),
+    beatKind: runtimeRequirementSceneBeatKindSchema.optional(),
+  }).strict().superRefine((value, ctx) => {
+    if (!value.effectKind && !value.beatKind) {
+      ctx.addIssue({
+        code: "custom",
+        message: "scene_beat requires either effectKind for state-backed beats or beatKind for event/time beats.",
+        path: ["effectKind"],
+      });
+    }
+    if (value.effectKind && value.beatKind) {
+      ctx.addIssue({
+        code: "custom",
+        message: "scene_beat must use effectKind or beatKind, not both.",
+        path: ["beatKind"],
+      });
+    }
+  }),
   z.object({
     kind: z.literal("state_mutation"),
+    effectKind: runtimeRequirementStateEffectKindSchema,
   }).strict(),
 ]);
 
@@ -221,6 +380,7 @@ const gmReadBaseSchema = z
     actionInterpretation: actionInterpretationSchema,
     rationale: gmReadText(),
     evidenceRefs: evidenceRefsSchema,
+    turnGrounding: turnGroundingSchema,
     narrationGuardrails: z
       .array(gmReadText(GM_READ_GUARDRAIL_TEXT_MAX))
       .max(GM_READ_GUARDRAIL_MAX)
@@ -273,9 +433,30 @@ const gmReadUnionSchema = z.discriminatedUnion("path", [
 
 function normalizeGmReadInput(value: unknown): unknown {
   if (!isRecord(value)) return value;
+  const runtimeRequirement = isRecord(value.runtimeRequirement)
+    ? normalizeRuntimeRequirementInput(value.runtimeRequirement)
+    : value.runtimeRequirement;
   return {
     version: value.version ?? GM_READ_VERSION,
     ...value,
+    runtimeRequirement,
+  };
+}
+
+function normalizeRuntimeRequirementInput(value: Record<string, unknown>): Record<string, unknown> {
+  if (!isRecord(value.speakerBinding)) return value;
+  return {
+    ...value,
+    speakerBinding: normalizeDialogueSpeakerBindingInput(value.speakerBinding),
+  };
+}
+
+function normalizeDialogueSpeakerBindingInput(value: Record<string, unknown>): Record<string, unknown> {
+  if (value.requestedRoleText !== undefined || value.proseRole === undefined) return value;
+  const { proseRole, ...rest } = value;
+  return {
+    ...rest,
+    requestedRoleText: proseRole,
   };
 }
 
@@ -301,11 +482,33 @@ export type GmReadValidationIssue = {
   message: string;
 };
 
-const NO_MUTATION_PRESSURE_ISSUE_CODE = "future-relevant-pressure-requires-tool-path";
+const TURN_GROUNDING_CONSISTENCY_ISSUE_CODE = "turn-grounding-runtime-contract-mismatch";
 const PASSIVE_STATUS_READ_ISSUE_CODE = "passive-status-read-requires-grounded-consequence-path";
 const POSTED_PROOF_REQUIREMENT_ISSUE_CODE = "posted-proof-request-requires-dialogue-outcome";
 const DOCUMENT_STATE_ISSUE_CODE = "document-state-requires-tool-path";
 const DOCUMENT_PREMISE_ISSUE_CODE = "document-premise-requires-backed-state";
+const REUSABLE_DIALOGUE_DURABILITY_ISSUE_CODE = "reusable-dialogue-requires-durable-requirement";
+const NO_MUTATION_ADMISSIBILITY_ISSUE_CODE = "no-mutation-admissibility-requires-runtime";
+const DOCUMENT_STATE_TAG_KEYS = new Set([
+  "officially-unsealed",
+  "unsealed",
+  "reviewed",
+  "stamped",
+  "validated",
+  "authorized",
+  "authorised",
+  "docketed",
+  "filed",
+  "registered",
+  "accepted",
+  "cleared",
+  "sealed",
+  "receipt",
+  "review-receipt",
+  "docket-receipt",
+  "warning-rider",
+  "red-ink-validation",
+]);
 
 function normalizeRef(ref: string): string {
   return ref.trim().toLowerCase();
@@ -321,44 +524,9 @@ function addTypedRef(refs: Set<string>, type: string, value?: string | null): vo
 }
 
 function buildAllowedRefSet(frame: SceneFrame): Set<string> {
-  const refs = new Set<string>();
-
-  addRef(refs, "Player");
-  addTypedRef(refs, "actor", "Player");
-  addRef(refs, frame.playerActorId);
-  addTypedRef(refs, "actor", frame.playerActorId);
-  addRef(refs, frame.currentLocationId);
-  addTypedRef(refs, "location", frame.currentLocationId);
-  addRef(refs, frame.currentSceneScopeId);
-  addTypedRef(refs, "location", frame.currentSceneScopeId);
-  for (const actor of [...frame.roster.active, ...frame.roster.support]) {
-    addRef(refs, actor.id);
-    addTypedRef(refs, "actor", actor.id);
-    addRef(refs, actor.actorId);
-    addTypedRef(refs, "actor", actor.actorId);
-    addRef(refs, actor.label);
-  }
-  for (const candidate of frame.targetCandidates) {
-    addRef(refs, candidate.id);
-    addRef(refs, candidate.actorId);
-    addTypedRef(refs, "actor", candidate.actorId);
-    addRef(refs, candidate.itemId);
-    addTypedRef(refs, "item", candidate.itemId);
-    addRef(refs, candidate.locationId);
-    addTypedRef(refs, "location", candidate.locationId);
-    addRef(refs, candidate.factionId);
-    addTypedRef(refs, "faction", candidate.factionId);
-    addRef(refs, candidate.label);
-  }
-  for (const candidate of frame.movementCandidates) {
-    addRef(refs, candidate.id);
-    addTypedRef(refs, "location", candidate.id);
-    addRef(refs, candidate.locationId);
-    addTypedRef(refs, "location", candidate.locationId);
-    addRef(refs, candidate.label);
-  }
-
-  return refs;
+  const packet = buildModelFacingScenePacket(frame);
+  const promptView = buildModelFacingScenePromptView(packet.view);
+  return new Set(collectModelFacingScenePromptRefs(promptView).map(normalizeRef));
 }
 
 function buildForbiddenRefSet(frame: SceneFrame): Set<string> {
@@ -396,6 +564,13 @@ function validateRefs(
 
   refs.forEach((ref, index) => {
     const normalized = normalizeRef(ref);
+    if (isUnsafeModelFacingRef(ref)) {
+      issues.push({
+        path: `${path}.${index}`,
+        message: `${path}.${index} uses a backend-only ref "${ref}". Use a visible label, Player, current_scene/current_location, or a short prompt alias.`,
+      });
+      return;
+    }
     if (forbiddenRefs.has(normalized)) {
       issues.push({
         path: `${path}.${index}`,
@@ -455,46 +630,62 @@ export function validateGmReadForFrame(
     issues.push(...validateRefs([read.targetRef], frame, "targetRef"));
   }
 
-  issues.push(...validateNoMutationFutureRelevantPressure(read));
+  issues.push(...validateTurnGroundingConsistency(read));
   issues.push(...validateNoMutationDocumentState(read));
-  issues.push(...validateDocumentPremiseRequiresBackedState(read, frame, playerAction));
-  issues.push(...validatePassiveStatusReadNoMutation(read, frame, playerAction));
+  issues.push(...validateDocumentPremiseRequiresBackedState(read, frame));
+  issues.push(...validatePassiveStatusReadNoMutation(read, frame));
   issues.push(...validateRuntimeRequirementPath(read));
-  issues.push(...validatePostedProofRuntimeRequirement(read, playerAction));
+  issues.push(...validateRuntimeRequirementSatisfiable(read, frame));
+  issues.push(...validateDialogueRuntimeRequirementSpeakerBinding(read, frame));
+  issues.push(...validatePostedProofRuntimeRequirement(read));
+  issues.push(...validateReusableDialogueDurability(read));
 
   return issues;
 }
 
-function validateNoMutationFutureRelevantPressure(read: GmRead): GmReadValidationIssue[] {
-  const fields: Array<{ path: string; text: string }> = [
-    { path: "sceneQuestion", text: read.sceneQuestion },
-    ...read.narrationGuardrails.map((text, index) => ({
-      path: `narrationGuardrails.${index}`,
-      text,
-    })),
-  ];
-
-  switch (read.path) {
-    case "direct":
-      fields.push({ path: "directResolutionNotes", text: read.directResolutionNotes });
-      break;
-    case "continue":
-      fields.push({ path: "continuationGuidance", text: read.continuationGuidance });
-      break;
-    case "clarification":
-      fields.push({ path: "clarificationPrompt", text: read.clarificationPrompt });
-      break;
-    default:
-      return [];
-  }
-
-  return fields
-    .filter((field) => hasFutureRelevantConcretePressure(field.text))
-    .map((field) => ({
-      path: field.path,
+function validateDialogueRuntimeRequirementSpeakerBinding(
+  read: GmRead,
+  frame: SceneFrame,
+): GmReadValidationIssue[] {
+  const requirement = read.runtimeRequirement;
+  if (requirement?.kind !== "dialogue_outcome") return [];
+  const binding = requirement.speakerBinding;
+  if (!binding) {
+    return [{
+      path: "runtimeRequirement.speakerBinding",
       message:
-        `${NO_MUTATION_PRESSURE_ISSUE_CODE}: direct/continue/clarification cannot introduce future-relevant concrete pressure. Choose tool_plan, roll_oracle, or combat_transition if the pressure should matter later; otherwise keep this field sensory, local, and non-durable.`,
-    }));
+        "GM Read dialogue_outcome requires speakerBinding: visible_actor for an existing visible speaker, prose_role for a role/office described only in player prose, or no_visible_authority when no current speaker exists.",
+    }];
+  }
+  if (binding.kind === "visible_actor") {
+    return validateRefs([binding.speakerRef], frame, "runtimeRequirement.speakerBinding.speakerRef");
+  }
+  return [];
+}
+
+function validateRuntimeRequirementSatisfiable(
+  read: GmRead,
+  frame: SceneFrame,
+): GmReadValidationIssue[] {
+  const requirement = read.runtimeRequirement;
+  if (!requirement || requirement.kind === "none" || requirement.kind === "observation_read") {
+    return [];
+  }
+  if (
+    read.path !== "tool_plan"
+    && read.path !== "roll_oracle"
+    && read.path !== "combat_transition"
+  ) {
+    return [];
+  }
+  if (frame.allowedTools.some((toolName) => canRuntimeToolSatisfyRequirement(toolName, requirement))) {
+    return [];
+  }
+  return [{
+    path: "runtimeRequirement",
+    message:
+      `GM Read runtimeRequirement.kind=${requirement.kind} cannot be satisfied by the current model-facing tool surface. Choose the nearest available runtimeRequirement supported by allowed tools, or use observation_read/direct prose when no state receipt is needed.`,
+  }];
 }
 
 function isNoMutationReadPath(
@@ -503,75 +694,209 @@ function isNoMutationReadPath(
   return read.path === "direct" || read.path === "continue" || read.path === "clarification";
 }
 
-function readNoMutationPathFields(
-  read: GmRead,
-): Array<{ path: string; text: string }> {
-  if (!isNoMutationReadPath(read)) return [];
-  const fields: Array<{ path: string; text: string }> = [
-    { path: "sceneQuestion", text: read.sceneQuestion },
-    ...read.narrationGuardrails.map((text, index) => ({
-      path: `narrationGuardrails.${index}`,
-      text,
-    })),
-  ];
+type RuntimeRequirementKind = NonNullable<GmRead["runtimeRequirement"]>["kind"];
 
-  switch (read.path) {
-    case "direct":
-      fields.push({ path: "directResolutionNotes", text: read.directResolutionNotes });
-      break;
-    case "continue":
-      fields.push({ path: "continuationGuidance", text: read.continuationGuidance });
-      break;
-    case "clarification":
-      fields.push({ path: "clarificationPrompt", text: read.clarificationPrompt });
-      break;
+function expectedRuntimeRequirementKindForGrounding(
+  groundingKind: GmRead["turnGrounding"]["groundingKind"],
+): RuntimeRequirementKind | null {
+  switch (groundingKind) {
+    case "observation_read":
+      return "observation_read";
+    case "dialogue_outcome":
+      return "dialogue_outcome";
+    case "world_fact":
+      return "world_fact";
+    case "scene_beat":
+      return "scene_beat";
+    case "state_mutation":
+      return "state_mutation";
+    case "none":
+    case "roll_oracle":
+    case "combat_transition":
+      return null;
   }
-
-  return fields;
 }
 
-function hasDocumentStateMutationClaim(text: string): boolean {
-  const normalized = text.trim();
-  if (!normalized) return false;
-  if (/\b(?:do not|don't|without|not)\b.{0,60}\b(?:issue|attach|stamp|validate|review|unseal|docket|file|register|accept|authorize|authorise|clear|mark)\b/i.test(normalized)) {
-    return false;
+function runtimeRequirementTopicKind(
+  requirement: NonNullable<GmRead["runtimeRequirement"]>,
+): string | null {
+  return "topicKind" in requirement ? requirement.topicKind ?? null : null;
+}
+
+function runtimeRequirementDurability(
+  requirement: NonNullable<GmRead["runtimeRequirement"]>,
+): string | null {
+  return "durability" in requirement ? requirement.durability ?? null : null;
+}
+
+function validateTurnGroundingConsistency(read: GmRead): GmReadValidationIssue[] {
+  const issues: GmReadValidationIssue[] = [];
+  const grounding = getTurnGrounding(read);
+  if (!grounding) {
+    return [{
+      path: "turnGrounding",
+      message:
+        `${TURN_GROUNDING_CONSISTENCY_ISSUE_CODE}: turnGrounding is required for every GM Read object.`,
+    }];
+  }
+  const requirement = read.runtimeRequirement;
+  const requirementKind = requirement?.kind ?? "none";
+
+  if (grounding.groundingKind === "none") {
+    if (grounding.requiresGrounding) {
+      issues.push({
+        path: "turnGrounding.requiresGrounding",
+        message:
+          `${TURN_GROUNDING_CONSISTENCY_ISSUE_CODE}: requiresGrounding=true must name a non-none groundingKind.`,
+      });
+    }
+    if (requirementKind !== "none") {
+      issues.push({
+        path: "turnGrounding.groundingKind",
+        message:
+          `${TURN_GROUNDING_CONSISTENCY_ISSUE_CODE}: non-none runtimeRequirement requires a matching non-none turnGrounding.groundingKind.`,
+      });
+    }
+    if (read.path === "roll_oracle" || read.path === "combat_transition") {
+      issues.push({
+        path: "turnGrounding.groundingKind",
+        message:
+          `${TURN_GROUNDING_CONSISTENCY_ISSUE_CODE}: ${read.path} requires a matching non-none turnGrounding.groundingKind.`,
+      });
+    }
+    return issues;
   }
 
-  const documentSubject =
-    /\b(?:document|documents|proof|permit|pass|credential|credentials|message|case file|case|docket|receipt|stamp|seal|warning rider|rider|chit|waiver|route log|courier logbook|manifest)\b/i
-      .test(normalized);
-  const documentTransition =
-    /\b(?:issue[sd]?|created?|attached?|stamped?|validated?|reviewed?|unsealed?|opened?|logged?|docketed?|accepted?|authori[sz]ed?|cleared?|marked?|filed?|registered?|signed|endorsed|updated)\b/i
-      .test(normalized);
-  const specificDocumentState =
-    /\b(?:official(?:ly)?[- ]unsealed|review receipt|docket receipt|warning rider|authorization stamp|authorisation stamp|red[- ]ink validation|chain[- ]of[- ]custody)\b/i
-      .test(normalized);
-  return specificDocumentState || (documentSubject && documentTransition);
+  if (!grounding.requiresGrounding) {
+    issues.push({
+      path: "turnGrounding.requiresGrounding",
+      message:
+        `${TURN_GROUNDING_CONSISTENCY_ISSUE_CODE}: non-none groundingKind requires requiresGrounding=true.`,
+    });
+  }
+
+  if (grounding.groundingKind === "roll_oracle") {
+    if (read.path !== "roll_oracle") {
+      issues.push({
+        path: "path",
+        message:
+          `${TURN_GROUNDING_CONSISTENCY_ISSUE_CODE}: groundingKind=roll_oracle requires path=roll_oracle.`,
+      });
+    }
+    return issues;
+  }
+
+  if (grounding.groundingKind === "combat_transition") {
+    if (read.path !== "combat_transition") {
+      issues.push({
+        path: "path",
+        message:
+          `${TURN_GROUNDING_CONSISTENCY_ISSUE_CODE}: groundingKind=combat_transition requires path=combat_transition.`,
+      });
+    }
+    return issues;
+  }
+
+  if (isNoMutationReadPath(read)) {
+    issues.push({
+      path: "path",
+      message:
+        `${TURN_GROUNDING_CONSISTENCY_ISSUE_CODE}: turnGrounding requires backend grounding, so path must be tool_plan, roll_oracle, or combat_transition.`,
+    });
+    return issues;
+  }
+
+  const expectedRequirementKind = expectedRuntimeRequirementKindForGrounding(grounding.groundingKind);
+  if (expectedRequirementKind && requirementKind !== expectedRequirementKind) {
+    issues.push({
+      path: "runtimeRequirement",
+      message:
+        `${TURN_GROUNDING_CONSISTENCY_ISSUE_CODE}: groundingKind=${grounding.groundingKind} requires runtimeRequirement.kind=${expectedRequirementKind}.`,
+    });
+    return issues;
+  }
+
+  if (!requirement || requirement.kind === "none") {
+    issues.push({
+      path: "runtimeRequirement",
+      message:
+        `${TURN_GROUNDING_CONSISTENCY_ISSUE_CODE}: non-none turnGrounding requires a non-none runtimeRequirement on grounded paths.`,
+    });
+    return issues;
+  }
+
+  const requirementTopic = runtimeRequirementTopicKind(requirement);
+  if (grounding.topicKind && requirementTopic && grounding.topicKind !== requirementTopic) {
+    issues.push({
+      path: "runtimeRequirement.topicKind",
+      message:
+        `${TURN_GROUNDING_CONSISTENCY_ISSUE_CODE}: runtimeRequirement.topicKind must match turnGrounding.topicKind when both are present.`,
+    });
+  }
+
+  const requirementDurability = runtimeRequirementDurability(requirement);
+  if (
+    grounding.durability === "durable"
+    && requirementDurability
+    && requirementDurability !== "durable"
+  ) {
+    issues.push({
+      path: "runtimeRequirement.durability",
+      message:
+        `${TURN_GROUNDING_CONSISTENCY_ISSUE_CODE}: durable turnGrounding requires a durable runtimeRequirement.`,
+    });
+  }
+
+  if (
+    grounding.intentKind === "concrete_state_change"
+    && requirement.kind === "dialogue_outcome"
+    && requirement.requiresStructuralEffect !== true
+  ) {
+    issues.push({
+      path: "runtimeRequirement.requiresStructuralEffect",
+      message:
+        `${TURN_GROUNDING_CONSISTENCY_ISSUE_CODE}: concrete_state_change via dialogue_outcome must set requiresStructuralEffect=true.`,
+    });
+  }
+
+  return issues;
 }
 
 function validateNoMutationDocumentState(read: GmRead): GmReadValidationIssue[] {
-  return readNoMutationPathFields(read)
-    .filter((field) => hasDocumentStateMutationClaim(field.text))
-    .map((field) => ({
-      path: field.path,
-      message:
-        `${DOCUMENT_STATE_ISSUE_CODE}: document, receipt, docket, stamp, warning-rider, proof, or permit state changes cannot be introduced by direct/continue/clarification prose. Choose tool_plan and use item state tools such as spawn_item, add_tag, remove_tag, or transfer_item so later turns can cite typed inventory state.`,
-    }));
+  if (!isNoMutationReadPath(read)) return [];
+  const grounding = getTurnGrounding(read);
+  if (!grounding) return [];
+  if (!turnGroundingClaimsDocumentStateChange(grounding)) return [];
+
+  return [{
+    path: "turnGrounding",
+    message:
+      `${DOCUMENT_STATE_ISSUE_CODE}: document, receipt, docket, stamp, warning-rider, proof, or permit state changes cannot be introduced by direct/continue/clarification. Choose tool_plan and use item state tools such as spawn_item, add_tag, remove_tag, or transfer_item so later turns can cite typed inventory state.`,
+  }];
 }
 
-function playerActionAssumesDocumentState(playerAction: string): boolean {
-  return /\b(?:after|once|now that|with|using)\b.{0,100}\b(?:official(?:ly)?[- ]?)?(?:unseal(?:ed|ing)?|reviewed?|stamped?|validated?|authori[sz]ed?|docketed?|filed?|registered?|accepted|receipt|warning rider|rider attached)\b/i
-    .test(playerAction)
-    || /\b(?:official(?:ly)?[- ]?)?(?:unsealed|unsealing|reviewed|stamped|validated|authori[sz]ed|docketed|filed|registered|accepted)\s+(?:document|proof|permit|pass|credential|message|case file|docket|receipt|seal|chit|waiver|manifest)\b/i
-      .test(playerAction);
+function turnGroundingClaimsDocumentStateChange(
+  grounding: GmRead["turnGrounding"],
+): boolean {
+  return grounding.intentKind === "concrete_state_change"
+    && (
+      grounding.groundingKind === "state_mutation"
+      || grounding.groundingKind === "scene_beat"
+    )
+    && (
+      grounding.topicKind === "proof"
+      || grounding.topicKind === "permission"
+      || grounding.topicKind === "procedure"
+      || grounding.topicKind === "route"
+    );
+}
+
+function normalizeDocumentStateTag(tag: string): string {
+  return tag.trim().toLowerCase().replaceAll("_", "-").replaceAll(" ", "-");
 }
 
 function tagBacksDocumentState(tag: string): boolean {
-  return /^(?:officially-)?unsealed$/i.test(tag)
-    || /^(?:reviewed|stamped|validated|authori[sz]ed|docketed|filed|registered|accepted|cleared|sealed)$/i.test(tag)
-    || /\breceipt\b/i.test(tag)
-    || /\bwarning-rider\b/i.test(tag)
-    || /\bred-ink-validation\b/i.test(tag);
+  return DOCUMENT_STATE_TAG_KEYS.has(normalizeDocumentStateTag(tag));
 }
 
 function frameHasBackedDocumentState(frame: SceneFrame): boolean {
@@ -585,9 +910,9 @@ function frameHasBackedDocumentState(frame: SceneFrame): boolean {
 function validateDocumentPremiseRequiresBackedState(
   read: GmRead,
   frame: SceneFrame,
-  playerAction?: string,
 ): GmReadValidationIssue[] {
-  if (!playerAction || !playerActionAssumesDocumentState(playerAction)) return [];
+  const grounding = getTurnGrounding(read);
+  if (!grounding || grounding.intentKind !== "document_state_assumption") return [];
   if (frameHasBackedDocumentState(frame)) return [];
   if (read.path === "tool_plan") return [];
 
@@ -610,22 +935,39 @@ function validateRuntimeRequirementPath(read: GmRead): GmReadValidationIssue[] {
     ];
   }
   if (!requirement || requirement.kind === "none") return [];
-  if (read.path === "tool_plan") return [];
+  if (
+    read.path === "tool_plan"
+    || read.path === "roll_oracle"
+    || read.path === "combat_transition"
+  ) {
+    return [];
+  }
 
   return [
     {
       path: "runtimeRequirement",
       message:
-        "GM Read runtimeRequirement can be non-none only for tool_plan paths. Use runtimeRequirement { kind: \"none\" } or omit it for direct, continue, clarification, roll_oracle, and combat_transition.",
+        "GM Read runtimeRequirement can be non-none only for tool_plan, roll_oracle, or combat_transition paths. Use runtimeRequirement { kind: \"none\" } or omit it for direct, continue, and clarification.",
     },
   ];
 }
 
+function getTurnGrounding(read: GmRead): GmRead["turnGrounding"] | null {
+  return (read as Partial<GmRead>).turnGrounding ?? null;
+}
+
+function turnGroundingRequiresRuntime(read: GmRead): boolean {
+  const grounding = getTurnGrounding(read);
+  if (!grounding) return false;
+  return grounding.requiresGrounding
+    && grounding.groundingKind !== "none";
+}
+
 function validatePostedProofRuntimeRequirement(
   read: GmRead,
-  playerAction?: string,
 ): GmReadValidationIssue[] {
-  if (!playerAction || !isPostedApplicableProofRequest(playerAction)) return [];
+  const grounding = getTurnGrounding(read);
+  if (!grounding || grounding.intentKind !== "posted_proof_applicability") return [];
   if (read.path !== "tool_plan") {
     return [{
       path: "path",
@@ -648,47 +990,52 @@ function validatePostedProofRuntimeRequirement(
   }];
 }
 
-function isPassiveStatusReadAction(playerAction: string): boolean {
-  return /\b(take stock|read the room|look around|look over|scan|survey|observe|watch|inspect|study|listen|assess|describe|identify|note|check|compare|reconcile|audit|summari[sz]e|contradict(?:ion|ions)?|uncertain(?:ty)?|wait|linger|tour)\b/i.test(playerAction);
+function validateReusableDialogueDurability(
+  read: GmRead,
+): GmReadValidationIssue[] {
+  const grounding = getTurnGrounding(read);
+  if (!grounding) return [];
+  if (
+    grounding.intentKind !== "procedural_information"
+    && grounding.intentKind !== "posted_proof_applicability"
+  ) {
+    return [];
+  }
+  if (read.path !== "tool_plan") return [];
+  const requirement = read.runtimeRequirement;
+  if (requirement?.kind !== "dialogue_outcome") return [];
+  if (requirement.durability !== "scene_local") return [];
+
+  return [{
+    path: "runtimeRequirement.durability",
+    message:
+      `${REUSABLE_DIALOGUE_DURABILITY_ISSUE_CODE}: reusable procedural, proof, permission, route, safety, status, or public-service dialogue answers must use runtimeRequirement { kind: "dialogue_outcome", durability: "durable" }. Use scene_local only for non-reusable immediate color.`,
+  }];
 }
 
-function isProceduralInformationRequest(playerAction: string): boolean {
-  const conversational = /\b(ask|question|inquire|request|tell me|what|which|where|who|how|whether)\b/i
-    .test(playerAction);
-  if (!conversational) return false;
-  if (isPostedApplicableProofRequest(playerAction)) return true;
-  return /\b(proof|credential|credentials|permit|pass|permission|authori[sz]ation|waiver|chit|stamp(?:ed)?|seal[- ]?verified|require(?:ment|ments|s|d)?|need(?:ed)?|document|documents|valid|invalid|sufficient|fail|fails|failed|rule|law|procedure|protocol|jurisdiction|route|lead|witness|dispatch|office|contact|send|public service|communication|stay(?:ing)? in place|wait(?:ing)? in place|report|unsafe|danger|risk|restricted|forbidden|allowed|access|entry|classify|classification|changed today|notice[- ]?board|public postings?|postings?|posted\s+(?:item|notice|rule|entry|sign)|amend(?:ed|ment|ments)?)\b/i
-    .test(playerAction);
-}
+function hardenReusableDialogueRuntimeRequirement(
+  read: GmRead,
+): GmRead {
+  const grounding = getTurnGrounding(read);
+  if (!grounding) return read;
+  if (
+    grounding.intentKind !== "procedural_information"
+    && grounding.intentKind !== "posted_proof_applicability"
+  ) {
+    return read;
+  }
+  if (read.path !== "tool_plan") return read;
+  const requirement = read.runtimeRequirement;
+  if (requirement?.kind !== "dialogue_outcome") return read;
+  if (requirement.durability !== "scene_local") return read;
 
-function isPostedApplicableProofRequest(playerAction: string): boolean {
-  const conversational = /\b(ask|question|inquire|request|tell me|what|which|whether|identify)\b/i
-    .test(playerAction);
-  if (!conversational) return false;
-  const hasPostedSignal =
-    /\b(posted\s+(?:item|notice|rule|entry|sign)|notice[- ]?board|public postings?|postings?)\b/i
-      .test(playerAction);
-  const asksApplicability = /\b(appl(?:y|ies|ied|icable)|identify|which)\b/i.test(playerAction);
-  const hasProofSubject =
-    /\b(document|documents|message|case|proof|permit|pass|seal(?:ed)?|credential|credentials|authority|requirement|requirements|chit|waiver)\b/i
-      .test(playerAction);
-  return hasPostedSignal && asksApplicability && hasProofSubject;
-}
-
-function requestsBroadStatusRead(playerAction: string): boolean {
-  const normalized = playerAction.toLowerCase();
-  const categorySignals = [
-    /\bvisible\b/,
-    /\bofficials?\b|\bguards?\b|\bclerks?\b|\bwitness(?:es)?\b|\bcrowd\b/,
-    /\broutes?\b|\bexits?\b|\bpaths?\b|\bdoors?\b|\bwhere\b/,
-    /\brisks?\b|\bthreats?\b|\bchallengers?\b|\bpressure\b|\bdanger\b/,
-    /\bpublic\b|\blegal\b|\brules?\b|\bprocedure\b|\bauthorit(?:y|ies)\b/,
-    /\bobjects?\b|\bitems?\b|\bevidence\b|\bsigns?\b|\btraces?\b|\bresidue\b/,
-    /\bmovement\b|\breaction\b|\bbehavior\b|\balarm\b|\bbells?\b|\bfog\b|\bengines?\b/,
-  ];
-  const matchedCategories = categorySignals.filter((pattern) => pattern.test(normalized)).length;
-  const listLike = (playerAction.match(/[,;:]/g)?.length ?? 0) >= 2;
-  return matchedCategories >= 2 || listLike;
+  return {
+    ...read,
+    runtimeRequirement: {
+      ...requirement,
+      durability: "durable",
+    },
+  };
 }
 
 function sceneHasPlayableStatusReadContext(frame: SceneFrame): boolean {
@@ -706,14 +1053,10 @@ function sceneHasPlayableStatusReadContext(frame: SceneFrame): boolean {
 function validatePassiveStatusReadNoMutation(
   read: GmRead,
   frame: SceneFrame,
-  playerAction?: string,
 ): GmReadValidationIssue[] {
-  if (!playerAction || !isNoMutationReadPath(read)) return [];
-  const statusReadLike =
-    isPassiveStatusReadAction(playerAction)
-    || isProceduralInformationRequest(playerAction);
-  if (!statusReadLike) return [];
-  if (!requestsBroadStatusRead(playerAction) && !sceneHasPlayableStatusReadContext(frame)) return [];
+  if (!isNoMutationReadPath(read)) return [];
+  if (!turnGroundingRequiresRuntime(read)) return [];
+  if (!sceneHasPlayableStatusReadContext(frame)) return [];
 
   return [
     {
@@ -729,25 +1072,12 @@ function formatRecentConversation(
   safety?: ModelFacingPromptSafety,
   extraForbiddenTerms: readonly string[] = [],
 ): string {
-  if (!recentConversation || recentConversation.length === 0) {
-    return "- none";
-  }
-
-  const forbiddenTerms = extraForbiddenTerms
-    .map((term) => term.trim().toLowerCase())
-    .filter((term) => term.length > 0);
-  const lines = recentConversation
-    .slice(-8)
-    .filter((entry) => {
-      if (safety && shouldDropModelFacingText(entry.content, safety)) return false;
-      const content = entry.content.toLowerCase();
-      return !forbiddenTerms.some((term) => content.includes(term));
-    })
-    .slice(-GM_READ_RECENT_CONVERSATION_LIMIT)
-    .map((entry) => `- ${entry.role}: ${compactPromptText(entry.content, GM_READ_RECENT_CONVERSATION_MAX_CHARS)}`)
-    .join("\n");
-
-  return lines || "- none";
+  return formatModelFacingRecentConversation(recentConversation, {
+    safety,
+    extraForbiddenTerms,
+    maxEntries: GM_READ_RECENT_CONVERSATION_LIMIT,
+    maxChars: GM_READ_RECENT_CONVERSATION_MAX_CHARS,
+  });
 }
 
 function compactPromptText(value: string | null | undefined, maxChars = GM_READ_PROMPT_TEXT_MAX_CHARS): string | undefined {
@@ -773,22 +1103,47 @@ function uniqueRefs(values: Array<string | null | undefined>): string[] {
 function actorPreferredRef(
   view: ModelFacingSceneView,
   actor: ModelFacingSceneView["visibleActors"][number],
+  index = 0,
 ): string {
   if (actor.id === view.localScene.playerActorId || actor.actorId === view.localScene.playerActorId) {
     return "Player";
   }
-  return actor.label || actor.actorId || actor.id;
+  return actor.label || `person_${index + 1}`;
+}
+
+function buildActorPromptRefLookup(view: ModelFacingSceneView): Map<string, string> {
+  const refs = new Map<string, string>();
+  view.visibleActors.forEach((actor, index) => {
+    const promptRef = actorPreferredRef(view, actor, index);
+    for (const rawRef of [actor.id, actor.actorId, actor.label, promptRef]) {
+      const normalized = rawRef ? normalizeRef(rawRef) : "";
+      if (normalized) refs.set(normalized, promptRef);
+    }
+  });
+  return refs;
+}
+
+function eventActorRefsForPrompt(
+  event: ModelFacingSceneView["localRecentEvents"][number],
+  actorRefLookup: ReadonlyMap<string, string>,
+): string[] {
+  return uniqueRefs(
+    event.actorIds.map((actorId) => actorRefLookup.get(normalizeRef(actorId)) ?? null),
+  ).slice(0, 4);
 }
 
 function buildGmReadSceneViewForPrompt(view: ModelFacingSceneView): unknown {
+  const actorRefLookup = buildActorPromptRefLookup(view);
   return {
     localScene: {
       tick: view.localScene.tick,
-      currentLocationId: view.localScene.currentLocationId,
-      currentSceneScopeId: view.localScene.currentSceneScopeId,
+      currentLocationRef: "current_location",
+      currentSceneRef: "current_scene",
+      currentLocationName: view.localScene.currentLocationName ?? null,
+      currentSceneScopeName: view.localScene.currentSceneScopeName ?? null,
     },
-    visibleActors: view.visibleActors.map((actor) => ({
-      ref: actorPreferredRef(view, actor),
+    visibleActors: view.visibleActors.map((actor, index) => ({
+      ref: actorPreferredRef(view, actor, index),
       type: actor.type,
       tags: actor.tags?.slice(0, 6),
       summary: compactPromptText(actor.summary),
@@ -799,57 +1154,40 @@ function buildGmReadSceneViewForPrompt(view: ModelFacingSceneView): unknown {
       tick: event.tick,
       source: event.source,
       summary: compactPromptText(event.summary),
-      actorRefs: event.actorIds.slice(0, 4),
+      actorRefs: eventActorRefsForPrompt(event, actorRefLookup),
     })),
     legalTargetCount: view.legalTargets.length,
     legalMovementCount: view.legalMovement.length,
     oracle: view.oracle,
-    oracleContext: view.oracleContext,
+    oracleContext: oracleContextForModelPrompt(view.oracleContext),
     combatEnvelope: view.combatEnvelope ? { present: true } : undefined,
   };
 }
 
 function buildCandidateRefsForPrompt(view: ModelFacingSceneView): unknown {
   return {
-    actors: view.visibleActors.map((actor) => ({
-      preferredRef: actorPreferredRef(view, actor),
-      usableRefs: uniqueRefs([
-        actorPreferredRef(view, actor),
-        actor.label,
-        actor.actorId,
-        actor.actorId ? `actor:${actor.actorId}` : null,
-        actor.id,
-        `actor:${actor.id}`,
-      ]),
+    current: {
+      currentLocation: {
+        ref: "current_location",
+        label: view.localScene.currentLocationName ?? null,
+      },
+      currentScene: {
+        ref: "current_scene",
+        label: view.localScene.currentSceneScopeName ?? null,
+      },
+    },
+    actors: view.visibleActors.map((actor, index) => ({
+      preferredRef: actorPreferredRef(view, actor, index),
       type: actor.type,
       awareness: actor.awareness,
     })),
-    targets: view.legalTargets.map((candidate) => ({
-      preferredRef: candidate.label || candidate.id,
-      usableRefs: uniqueRefs([
-        candidate.label,
-        candidate.id,
-        candidate.actorId,
-        candidate.actorId ? `actor:${candidate.actorId}` : null,
-        candidate.itemId,
-        candidate.itemId ? `item:${candidate.itemId}` : null,
-        candidate.locationId,
-        candidate.locationId ? `location:${candidate.locationId}` : null,
-        candidate.factionId,
-        candidate.factionId ? `faction:${candidate.factionId}` : null,
-      ]),
+    targets: view.legalTargets.map((candidate, index) => ({
+      preferredRef: candidate.label || `target_${index + 1}`,
       type: candidate.type,
       tags: candidate.tags?.slice(0, 6),
     })),
-    movements: view.legalMovement.map((candidate) => ({
-      preferredRef: candidate.label || candidate.locationId || candidate.id,
-      usableRefs: uniqueRefs([
-        candidate.label,
-        candidate.locationId,
-        candidate.locationId ? `location:${candidate.locationId}` : null,
-        candidate.id,
-        `location:${candidate.id}`,
-      ]),
+    movements: view.legalMovement.map((candidate, index) => ({
+      preferredRef: candidate.label || `move_${index + 1}`,
       connected: candidate.connected,
       travelCost: candidate.travelCost,
     })),
@@ -859,14 +1197,14 @@ function buildCandidateRefsForPrompt(view: ModelFacingSceneView): unknown {
 function buildCitableRefBudgetForPrompt(view: ModelFacingSceneView): string[] {
   const playerRefs = ["Player"];
   const visibleActorRefs = view.visibleActors
-    .map((actor) => actorPreferredRef(view, actor))
+    .map((actor, index) => actorPreferredRef(view, actor, index))
     .filter((ref) => ref !== "Player")
     .slice(0, 3);
   const targetRefs = view.legalTargets
-    .map((candidate) => candidate.label || candidate.id)
+    .map((candidate, index) => candidate.label || `target_${index + 1}`)
     .slice(0, 3);
   const movementRefs = view.legalMovement
-    .map((candidate) => candidate.label || candidate.locationId || candidate.id)
+    .map((candidate, index) => candidate.label || `move_${index + 1}`)
     .slice(0, 2);
 
   return uniqueRefs([
@@ -875,18 +1213,6 @@ function buildCitableRefBudgetForPrompt(view: ModelFacingSceneView): string[] {
     ...targetRefs,
     ...movementRefs,
   ]).slice(0, GM_READ_EVIDENCE_MAX);
-}
-
-function scopedForecastForPrompt(
-  scopedForecastExcerpt?: ScopedForecastExcerpt | null,
-): Pick<ScopedForecastExcerpt, "version" | "baseTick" | "promptReady" | "entries"> | null {
-  if (!scopedForecastExcerpt) return null;
-  return {
-    version: scopedForecastExcerpt.version,
-    baseTick: scopedForecastExcerpt.baseTick,
-    promptReady: scopedForecastExcerpt.promptReady,
-    entries: scopedForecastExcerpt.entries,
-  };
 }
 
 function buildCombatPressureNotes(playerAction: string): string {
@@ -902,8 +1228,192 @@ function buildCombatPressureNotes(playerAction: string): string {
   ].join("\n");
 }
 
+function buildNoMutationAdmissibilityPrompt(input: {
+  playerAction: string;
+  read: GmRead;
+  sceneView: ModelFacingSceneView;
+  safety: ModelFacingPromptSafety;
+  extraForbiddenTerms: readonly string[];
+}): string {
+  return [
+    "NO-MUTATION ADMISSIBILITY CHECK",
+    "Classify whether the proposed GM Read no-mutation path can be answered without any runtime receipt.",
+    "Return one JSON object only.",
+    "",
+    "Decision rule:",
+    "- admissible only for local greetings, pure sensory color, bounded clarification, pure out-of-character/system housekeeping, or text that makes no reusable state claim.",
+    "- runtime_required for any route, proof, document, permission, access, procedure, public-service answer, status read/change, movement, actor creation, possession/inventory, world fact, combat/threat, or durable social fact the player may rely on later.",
+    "- Do not trust the previous turnGrounding label; judge the player request, scene context, and proposed no-mutation output together.",
+    "- Do not propose tool payloads. Only classify the required grounding kind.",
+    "",
+    `Allowed safeKind values: ${noMutationSafeKinds.join(", ")}.`,
+    `Blocked claim kinds: ${noMutationBlockedClaimKinds.join(", ")}.`,
+    `requiredGroundingKind values when runtime_required: ${noMutationRequiredGroundingKinds.join(", ")}.`,
+    "",
+    "PLAYER ACTION RAW TEXT (SANITIZED PLAYER-AUTHORED PROSE; NOT LEGAL REFS)",
+    formatModelFacingPlayerActionText(input.playerAction, {
+      safety: input.safety,
+      extraForbiddenTerms: input.extraForbiddenTerms,
+    }),
+    "",
+    "MODEL-FACING SCENE SUMMARY",
+    JSON.stringify(buildGmReadSceneViewForPrompt(input.sceneView), null, 2),
+    "",
+    "PROPOSED GM READ JSON",
+    JSON.stringify(
+      sanitizeModelFacingJson(input.read, {
+        safety: input.safety,
+        extraForbiddenTerms: input.extraForbiddenTerms,
+      }),
+      null,
+      2,
+    ),
+  ].join("\n");
+}
+
+function noMutationAdmissibilityIssue(
+  admissibility: NoMutationAdmissibility | null,
+): GmReadValidationIssue | null {
+  if (!admissibility) {
+    return {
+      path: "path",
+      message:
+        `${NO_MUTATION_ADMISSIBILITY_ISSUE_CODE}: no-mutation admissibility classifier did not return a valid result, so direct/continue/clarification fails closed into a grounded path.`,
+    };
+  }
+
+  if (
+    admissibility.decision === "admissible"
+    && admissibility.safeKind
+    && admissibility.blockedClaimKinds.length === 0
+    && !admissibility.requiredGroundingKind
+  ) {
+    return null;
+  }
+
+  const blockedClaimKinds = admissibility.blockedClaimKinds.length > 0
+    ? admissibility.blockedClaimKinds.join(", ")
+    : "none";
+  const requiredGroundingKind = admissibility.requiredGroundingKind ?? "unspecified";
+  return {
+    path: "path",
+    message:
+      `${NO_MUTATION_ADMISSIBILITY_ISSUE_CODE}: proposed no-mutation response is not admissible without a runtime receipt. decision=${admissibility.decision}; safeKind=${admissibility.safeKind ?? "none"}; blockedClaimKinds=${blockedClaimKinds}; requiredGroundingKind=${requiredGroundingKind}; topicKind=${admissibility.topicKind ?? "none"}; durability=${admissibility.durability ?? "none"}.`,
+  };
+}
+
+async function validateNoMutationAdmissibility(input: {
+  model: ReturnType<typeof createModel>;
+  provider: ProviderConfig;
+  playerAction: string;
+  read: GmRead;
+  sceneView: ModelFacingSceneView;
+  safety: ModelFacingPromptSafety;
+  extraForbiddenTerms: readonly string[];
+}): Promise<GmReadValidationIssue[]> {
+  if (!isNoMutationReadPath(input.read)) return [];
+
+  try {
+    const result = await withRole("judge", () =>
+      safeGenerateObject({
+        model: input.model,
+        schema: noMutationAdmissibilitySchema,
+        system:
+          "You are a strict no-mutation admissibility classifier for one GM Read. Return one JSON object only.",
+        prompt: buildNoMutationAdmissibilityPrompt(input),
+        temperature: 0,
+        maxOutputTokens: GM_READ_NO_MUTATION_ADMISSIBILITY_MAX_OUTPUT_TOKENS,
+        timeout: { totalMs: GM_READ_TIMEOUT_MS },
+        retries: GM_READ_STRUCTURED_OUTPUT_RETRIES,
+        mode: readGmReadStructuredOutputMode(input.provider),
+        allowTextFallback: false,
+        allowRepair: false,
+      }),
+    );
+    const issue = noMutationAdmissibilityIssue(result.object);
+    log.event("judge.gm-read.no-mutation-admissibility", {
+      path: input.read.path,
+      decision: result.object?.decision ?? null,
+      safeKind: result.object?.safeKind ?? null,
+      blockedClaimKinds: result.object?.blockedClaimKinds ?? [],
+      requiredGroundingKind: result.object?.requiredGroundingKind ?? null,
+      success: issue === null,
+    });
+    return issue ? [issue] : [];
+  } catch (error) {
+    log.warn("GM Read no-mutation admissibility classifier failed; failing closed.", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [noMutationAdmissibilityIssue(null)!];
+  }
+}
+
+async function validateGeneratedGmRead(input: {
+  model: ReturnType<typeof createModel>;
+  provider: ProviderConfig;
+  read: GmRead;
+  frame: SceneFrame;
+  playerAction: string;
+  sceneView: ModelFacingSceneView;
+  safety: ModelFacingPromptSafety;
+  extraForbiddenTerms: readonly string[];
+}): Promise<GmReadValidationIssue[]> {
+  const issues = validateGmReadForFrame(input.read, input.frame, input.playerAction);
+  if (issues.length > 0) return issues;
+  return validateNoMutationAdmissibility(input);
+}
+
 function formatGmReadValidationIssues(issues: readonly GmReadValidationIssue[]): string {
   return issues.map((issue) => `- ${issue.path}: ${issue.message}`).join("\n");
+}
+
+function isRepairableGmReadValidationIssue(issue: GmReadValidationIssue): boolean {
+  return (
+    issue.message.includes(TURN_GROUNDING_CONSISTENCY_ISSUE_CODE)
+    || issue.message.includes(PASSIVE_STATUS_READ_ISSUE_CODE)
+    || issue.message.includes(POSTED_PROOF_REQUIREMENT_ISSUE_CODE)
+    || issue.message.includes(DOCUMENT_STATE_ISSUE_CODE)
+    || issue.message.includes(REUSABLE_DIALOGUE_DURABILITY_ISSUE_CODE)
+    || issue.message.includes(NO_MUTATION_ADMISSIBILITY_ISSUE_CODE)
+  );
+}
+
+function shouldAttemptGmReadValidationRepair(
+  issues: readonly GmReadValidationIssue[],
+): boolean {
+  return issues.length > 0 && issues.every(isRepairableGmReadValidationIssue);
+}
+
+function buildGmReadValidationRepairPrompt(input: {
+  originalPrompt: string;
+  previousRead: GmRead;
+  issues: readonly GmReadValidationIssue[];
+  safety: ModelFacingPromptSafety;
+  extraForbiddenTerms?: readonly string[];
+}): string {
+  return [
+    input.originalPrompt,
+    "",
+    "VALIDATION REPAIR REQUIRED",
+    "The previous GM Read JSON passed schema validation but failed backend semantic validation.",
+    "Return one corrected GM Read JSON object only.",
+    "Do not add new refs, hidden actors, player inventory, completed movement, or concrete tool payloads.",
+    "Prefer the lightest valid path. If the issue says a reusable answer or pressure must be grounded, use tool_plan with the narrowest runtimeRequirement.",
+    "If the previous direct/continue/clarification text made pressure sound durable but the turn should stay local, you may instead keep the same no-mutation path and remove future-relevant pressure.",
+    "",
+    "BACKEND VALIDATION ISSUES",
+    formatGmReadValidationIssues(input.issues),
+    "",
+    "PREVIOUS GM READ JSON",
+    JSON.stringify(
+      sanitizeModelFacingJson(input.previousRead, {
+        safety: input.safety,
+        extraForbiddenTerms: input.extraForbiddenTerms,
+      }),
+      null,
+      2,
+    ),
+  ].join("\n");
 }
 
 export function buildGmReadPrompt(args: RunGmReadArgs): string {
@@ -920,8 +1430,11 @@ export function buildGmReadPrompt(args: RunGmReadArgs): string {
     "",
     formatSessionLanguageContract(responseLanguage),
     "",
-    "PLAYER ACTION RAW TEXT",
-    args.playerAction,
+    "PLAYER ACTION RAW TEXT (SANITIZED PLAYER-AUTHORED PROSE; NOT LEGAL REFS)",
+    formatModelFacingPlayerActionText(args.playerAction, {
+      safety: scenePacket.safety,
+      extraForbiddenTerms: args.scopedForecastExcerpt?.forbiddenPrivateTerms ?? [],
+    }),
     "",
     "PLAYER ACTION EPISTEMIC NOTES",
     buildPlayerActionEpistemicNotes(args.playerAction),
@@ -949,11 +1462,23 @@ export function buildGmReadPrompt(args: RunGmReadArgs): string {
     "CANDIDATE REFS FROM MODEL-FACING VIEW ONLY",
     JSON.stringify(buildCandidateRefsForPrompt(scenePacket.view), null, 2),
     "",
+    "PLAYFEEL AND STATE GROUNDING",
+    "Before choosing path, fill turnGrounding from your semantic read of the player request and current SceneFrame. This replaces backend keyword routing: the harness validates consistency between turnGrounding, path, and runtimeRequirement.",
+    'turnGrounding intentKind values: ordinary_local_response, passive_status_read, procedural_information, posted_proof_applicability, document_state_assumption, concrete_state_change, combat_pressure, clarification_needed, other.',
+    'turnGrounding groundingKind values: none, observation_read, dialogue_outcome, world_fact, scene_beat, state_mutation, roll_oracle, combat_transition. If requiresGrounding=true, direct/continue/clarification are invalid.',
+    "This is a game: reward clever, tone-appropriate player plans when the scene supports a check, bluff, social read, power move, or risky trick.",
+    "Do not turn every access/proof/permission beat into paperwork. Use bureaucracy only when it is actually interesting for this world's tone.",
+    "If the turn only asks what would be sufficient, what a source believes, or what rule applies, use dialogue_outcome with requiresStructuralEffect=false.",
+    "If the turn should actually apply durable state now (access granted, guard convinced, suspicion attached, stamp/mark added, relationship changed, possession transferred, route opened, wound/condition set), use tool_plan and set runtimeRequirement.requiresStructuralEffect=true plus runtimeRequirement.effectKind or effectKinds so runtime exposes exactly the matching structural owner classes before record_dialogue_outcome.",
+    "For every dialogue_outcome runtimeRequirement, set speakerBinding. Use visible_actor only when the player addressed an existing visible actor ref. Use prose_role when the player addressed a role/office/source in prose, even if some other visible NPC is present. Use no_visible_authority only when the scene has no current speaker who can answer.",
+    "Exact speakerBinding keys: visible_actor uses speakerRef; prose_role and no_visible_authority use requestedRoleText. Do not write proseRole or roleText in GM Read speakerBinding.",
+    "speakerBinding is a binding contract for runtime, not narration. A prose_role target may be answered only by a same-turn created matching support actor or by unavailable/no_current_answer; it must not be silently rebound to a different visible NPC.",
+    "",
     "REFERENCE SELECTION RULES",
     "Use preferredRef values exactly whenever present.",
-    "For the player, use Player. Do not copy raw UUID-like backend actor IDs for the player.",
+    "For the player, use Player. For the current place, use current_scene/current_location.",
     "For visible NPCs, locations, items, and factions, prefer human-readable labels from preferredRef.",
-    "Only use a backendId or typed backend ref when no preferredRef can identify the listed candidate.",
+    "Do not copy backend IDs, typed backend refs, or UUID-like strings into GM Read refs. If no preferredRef identifies a candidate, omit that candidate from the ref field and describe the concept in prose.",
     "",
     "ALLOWED TOOLS FROM frame.allowedTools",
     args.frame.allowedTools.length > 0
@@ -961,7 +1486,7 @@ export function buildGmReadPrompt(args: RunGmReadArgs): string {
       : "- none",
     "",
     "SCOPED FORECAST EXCERPT ONLY",
-    JSON.stringify(scopedForecastForPrompt(args.scopedForecastExcerpt), null, 2),
+    JSON.stringify(scopedForecastForModelPrompt(args.scopedForecastExcerpt), null, 2),
     "",
     "RECENT CONVERSATION",
     formatRecentConversation(
@@ -978,7 +1503,7 @@ export async function runGmRead(args: RunGmReadArgs): Promise<GmRead> {
     "You are the GM/Judge for one player turn.",
     "Return one GM Read JSON object only. Do not write prose, dialogue, markdown, or runtime tool calls.",
     "Interpret the raw playerAction against the model-facing scene view, candidate refs, allowed tools, and scoped forecast excerpt.",
-    "For refs, use candidate preferredRef values exactly whenever present. Use Player for the player instead of raw UUID-like backend IDs.",
+    "For refs, use candidate preferredRef values, Player, current_scene, or current_location exactly. Do not output raw backend IDs or typed backend refs.",
     "For evidenceRefs, use only the GM READ CITABLE REF BUDGET and keep the array at or below its max. Select top refs; do not enumerate every visible candidate.",
     "Write every GM Read free-text field in the session response language.",
     "Choose the next path and explain why, but do not create concrete tool payloads or mutate world state.",
@@ -993,12 +1518,12 @@ export async function runGmRead(args: RunGmReadArgs): Promise<GmRead> {
     ...buildModelFacingSceneDiagnostics(scenePacket),
   });
 
-  const result = await withRole("judge", () =>
+  const generateRead = (promptText: string) =>
     safeGenerateObject({
       model,
       schema: gmReadSchema,
       system,
-      prompt,
+      prompt: promptText,
       temperature: 0,
       maxOutputTokens: args.maxOutputTokens ?? GM_READ_DEFAULT_MAX_OUTPUT_TOKENS,
       timeout: { totalMs: GM_READ_TIMEOUT_MS },
@@ -1006,11 +1531,29 @@ export async function runGmRead(args: RunGmReadArgs): Promise<GmRead> {
       mode: readGmReadStructuredOutputMode(args.provider),
       allowTextFallback: false,
       allowRepair: false,
-    }),
-  );
-  const read = result.object;
-  const issues = validateGmReadForFrame(read, args.frame, args.playerAction);
-  const trace = result.trace;
+    });
+
+  let result = await withRole("judge", () => generateRead(prompt));
+  let read = hardenReusableDialogueRuntimeRequirement(result.object);
+  if (read !== result.object) {
+    log.event("judge.gm-read.runtime-requirement-hardened", {
+      reason: REUSABLE_DIALOGUE_DURABILITY_ISSUE_CODE,
+      path: read.path,
+    });
+  }
+  const extraForbiddenTerms = args.scopedForecastExcerpt?.forbiddenPrivateTerms ?? [];
+  let issues = await validateGeneratedGmRead({
+    model,
+    provider: args.provider,
+    read,
+    frame: args.frame,
+    playerAction: args.playerAction,
+    sceneView: scenePacket.view,
+    safety: scenePacket.safety,
+    extraForbiddenTerms,
+  });
+  let trace = result.trace;
+  let validationRepairAttempted = false;
 
   log.event("judge.gm-read", {
     path: read.path,
@@ -1026,10 +1569,76 @@ export async function runGmRead(args: RunGmReadArgs): Promise<GmRead> {
     latencyMs: Date.now() - startMs,
   });
 
+  if (shouldAttemptGmReadValidationRepair(issues)) {
+    validationRepairAttempted = true;
+    log.event("judge.gm-read.rejected", {
+      reason: "validation_failed",
+      repairAttempted: true,
+      issueCount: issues.length,
+      issues: formatGmReadValidationIssues(issues),
+    });
+
+    const repairPrompt = buildGmReadValidationRepairPrompt({
+      originalPrompt: prompt,
+      previousRead: read,
+      issues,
+      safety: scenePacket.safety,
+      extraForbiddenTerms,
+    });
+    let repairResult: typeof result | undefined;
+    try {
+      repairResult = await withRole("judge", () => generateRead(repairPrompt));
+    } catch (error) {
+      log.warn("GM Read validation repair generation failed; preserving original validation failure.", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    if (repairResult?.object) {
+      result = repairResult;
+      read = hardenReusableDialogueRuntimeRequirement(result.object);
+      if (read !== result.object) {
+        log.event("judge.gm-read.runtime-requirement-hardened", {
+          reason: REUSABLE_DIALOGUE_DURABILITY_ISSUE_CODE,
+          path: read.path,
+          validationRepair: true,
+        });
+      }
+      issues = await validateGeneratedGmRead({
+        model,
+        provider: args.provider,
+        read,
+        frame: args.frame,
+        playerAction: args.playerAction,
+        sceneView: scenePacket.view,
+        safety: scenePacket.safety,
+        extraForbiddenTerms,
+      });
+      trace = result.trace;
+
+      log.event("judge.gm-read", {
+        path: read.path,
+        success: issues.length === 0,
+        issueCount: issues.length,
+        validationRepair: true,
+        strategy: trace?.strategy ?? null,
+        primaryStrategy: trace?.primaryStrategy ?? null,
+        fallbackStrategy: trace?.fallbackStrategy ?? null,
+        fallbackReason: trace?.fallbackReason ?? null,
+        capability: trace?.capability ?? null,
+        usage: trace?.usage ?? null,
+        responseModel: trace?.response?.modelId ?? null,
+        latencyMs: Date.now() - startMs,
+      });
+    } else {
+      log.warn("GM Read validation repair returned no object; preserving original validation failure.");
+    }
+  }
+
   if (issues.length > 0) {
     log.event("judge.gm-read.rejected", {
       reason: "validation_failed",
-      repairAttempted: false,
+      repairAttempted: validationRepairAttempted,
       issueCount: issues.length,
       issues: formatGmReadValidationIssues(issues),
     });

@@ -1,8 +1,17 @@
-import { buildObservationToolResult, type ToolResult } from "./tool-result.js";
+import {
+  buildObservationToolResult,
+  type ToolResult,
+} from "./tool-result.js";
+import { runtimeToolInputSchemas } from "./runtime-tool-input-schemas.js";
+import {
+  canonicalEventRef,
+  uniqueModelRefs,
+} from "./ref-provenance.js";
 import type {
   ModelFacingActor,
   ModelFacingScenePacket,
 } from "./model-facing-scene.js";
+import { isBackendOnlyModelRef } from "./model-facing-ref-safety.js";
 import type {
   SceneFrame,
   SceneFrameMovementCandidate,
@@ -143,6 +152,84 @@ function actorRefs(actor: ModelFacingActor): string[] {
   return uniqueStrings([actor.id, actor.actorId, actor.label]);
 }
 
+interface BridgeDisplayAliases {
+  targetRefs: Map<SceneFrameTargetCandidate, string>;
+  movementRefs: Map<SceneFrameMovementCandidate, string>;
+  actorRefs: Map<ModelFacingActor, string>;
+  factRefs: Map<BridgeKnownFactSnapshot, string>;
+  refAliases: Map<string, string>;
+}
+
+function addAlias(aliases: Map<string, string>, rawRef: string | null | undefined, alias: string): void {
+  const trimmed = rawRef?.trim();
+  if (!trimmed) return;
+  aliases.set(normalize(trimmed), alias);
+}
+
+function buildDisplayAliases(
+  snapshot: BridgeLookupSnapshot,
+  facts: readonly BridgeKnownFactSnapshot[],
+): BridgeDisplayAliases {
+  const aliases: BridgeDisplayAliases = {
+    targetRefs: new Map(),
+    movementRefs: new Map(),
+    actorRefs: new Map(),
+    factRefs: new Map(),
+    refAliases: new Map(),
+  };
+
+  snapshot.visibleActors.forEach((actor, index) => {
+    const alias = `actor${index + 1}`;
+    aliases.actorRefs.set(actor, alias);
+    actorRefs(actor).forEach((ref) => addAlias(aliases.refAliases, ref, alias));
+  });
+
+  snapshot.legalTargets.forEach((target, index) => {
+    const actorAlias = target.actorId
+      ? aliases.refAliases.get(normalize(target.actorId))
+      : undefined;
+    const alias = target.type === "actor" && actorAlias
+      ? actorAlias
+      : `target${index + 1}`;
+    aliases.targetRefs.set(target, alias);
+    candidateRefs(target).forEach((ref) => addAlias(aliases.refAliases, ref, alias));
+  });
+
+  snapshot.legalMovement.forEach((movement, index) => {
+    const alias = `route${index + 1}`;
+    aliases.movementRefs.set(movement, alias);
+    movementRefs(movement).forEach((ref) => addAlias(aliases.refAliases, ref, alias));
+  });
+
+  facts.forEach((fact, index) => {
+    const alias = `fact${index + 1}`;
+    aliases.factRefs.set(fact, alias);
+    factRefs(fact).forEach((ref) => addAlias(aliases.refAliases, ref, alias));
+  });
+
+  addAlias(aliases.refAliases, snapshot.current.currentLocationId, "current_location");
+  addAlias(aliases.refAliases, snapshot.current.currentSceneScopeId, "current_scene");
+  addAlias(aliases.refAliases, snapshot.current.currentLocationName, "current_location");
+  addAlias(aliases.refAliases, snapshot.current.currentSceneScopeName, "current_scene");
+
+  return aliases;
+}
+
+function compactCurrent(snapshot: BridgeLookupSnapshot): Record<string, unknown> {
+  return {
+    actor: "Player",
+    locationRef: "current_location",
+    sceneRef: "current_scene",
+    locationName: snapshot.current.currentLocationName,
+    sceneName: snapshot.current.currentSceneScopeName,
+    tick: snapshot.current.tick,
+  };
+}
+
+function safeUsableAs(...values: Array<string | null | undefined>): string[] {
+  return uniqueStrings(values).filter(isConsumableObservationRef);
+}
+
 function scoreText(input: {
   query: string | null;
   tags: readonly string[];
@@ -174,65 +261,112 @@ function scoreText(input: {
 function compactTarget(
   candidate: SceneFrameTargetCandidate,
   score: number,
+  aliases: BridgeDisplayAliases,
 ): Record<string, unknown> {
+  const ref = aliases.targetRefs.get(candidate) ?? candidate.label;
   return {
-    ref: candidate.id,
+    ref,
     type: candidate.type,
     label: candidate.label,
     score,
-    ids: uniqueStrings([
-      candidate.actorId,
-      candidate.itemId,
-      candidate.locationId,
-      candidate.factionId,
-    ]),
-    tags: candidate.tags ?? [],
-    sourceRefs: candidateRefs(candidate),
     observationOnly: true,
+    usableAs: safeUsableAs(ref, candidate.label),
   };
 }
 
 function compactMovement(
   candidate: SceneFrameMovementCandidate,
   score: number,
+  aliases: BridgeDisplayAliases,
 ): Record<string, unknown> {
+  const ref = aliases.movementRefs.get(candidate) ?? candidate.label;
   return {
-    ref: candidate.id,
+    ref,
     type: "location",
     label: candidate.label,
     score,
-    locationId: candidate.locationId,
     connected: candidate.connected,
     travelCost: candidate.travelCost ?? null,
-    path: candidate.path ?? [],
-    sourceRefs: movementRefs(candidate),
     observationOnly: true,
+    usableAs: safeUsableAs(ref, candidate.label),
   };
 }
 
-function compactActor(actor: ModelFacingActor, score: number): Record<string, unknown> {
+function compactActor(
+  actor: ModelFacingActor,
+  score: number,
+  aliases: BridgeDisplayAliases,
+): Record<string, unknown> {
+  const ref = aliases.actorRefs.get(actor) ?? actor.label;
   return {
-    ref: actor.actorId ?? actor.id,
+    ref,
     type: "actor",
     label: actor.label,
     score,
-    ids: actorRefs(actor),
-    tags: actor.tags ?? [],
-    sourceRefs: actorRefs(actor),
     observationOnly: true,
+    usableAs: safeUsableAs(ref, actor.label),
   };
 }
 
-function compactFact(fact: BridgeKnownFactSnapshot, score: number): Record<string, unknown> {
+function compactFact(
+  fact: BridgeKnownFactSnapshot,
+  score: number,
+  aliases: BridgeDisplayAliases,
+): Record<string, unknown> {
+  const ref = aliases.factRefs.get(fact) ?? "fact";
   return {
-    id: fact.id,
+    ref,
+    kind: "fact",
     summary: fact.summary,
     visibilityRoute: fact.visibilityRoute,
     confidence: fact.confidence,
-    sourceRefs: fact.sourceRefs,
     score,
     observationOnly: true,
+    usableAs: safeUsableAs(ref),
   };
+}
+
+function isConsumableObservationRef(value: string): boolean {
+  const ref = value.trim();
+  const normalized = normalize(ref);
+  if (!ref || isBackendOnlyModelRef(ref)) return false;
+  if (/^potential(?:_|:|$)/iu.test(normalized)) return false;
+  if (/^current_(?:location|scene):.+:description$/iu.test(ref)) return false;
+  return true;
+}
+
+function addConsumableObservationRefs(value: unknown, refs: string[]): void {
+  if (typeof value === "string") {
+    if (isConsumableObservationRef(value)) refs.push(value.trim());
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry) => addConsumableObservationRefs(entry, refs));
+    return;
+  }
+}
+
+function collectBridgeModelSafeRefs(payload: unknown): string[] {
+  const refs: string[] = [];
+  const visit = (value: unknown): void => {
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      if (key === "ref" || key === "locationRef" || key === "sceneRef" || key === "visibleFactRefs" || key === "usableAs") {
+        addConsumableObservationRefs(entry, refs);
+        continue;
+      }
+      if (Array.isArray(entry) || (entry && typeof entry === "object")) {
+        visit(entry);
+      }
+    }
+  };
+
+  visit(payload);
+  return uniqueModelRefs(refs);
 }
 
 const OBSERVATION_CATEGORY_KEYWORDS = {
@@ -325,22 +459,24 @@ function categoryFacts(
   facts: readonly BridgeKnownFactSnapshot[],
   keywords: readonly string[],
   maxResults: number,
+  aliases: BridgeDisplayAliases,
 ): Record<string, unknown>[] {
   return facts
     .filter((fact) => factMatchesCategory(fact, keywords))
     .slice(0, maxResults)
-    .map((fact) => compactFact(fact, 1));
+    .map((fact) => compactFact(fact, 1, aliases));
 }
 
 function categoryTargets(
   targets: readonly SceneFrameTargetCandidate[],
   keywords: readonly string[],
   maxResults: number,
+  aliases: BridgeDisplayAliases,
 ): Record<string, unknown>[] {
   return targets
     .filter((target) => targetMatchesCategory(target, keywords))
     .slice(0, maxResults)
-    .map((target) => compactTarget(target, 1));
+    .map((target) => compactTarget(target, 1, aliases));
 }
 
 function sortCandidates<T extends { score: number; label: string }>(values: T[]): T[] {
@@ -351,12 +487,14 @@ function sortCandidates<T extends { score: number; label: string }>(values: T[])
 }
 
 function observation(toolName: BridgeLookupToolName, result: Record<string, unknown>): ToolResult {
+  const payload = {
+    toolName,
+    observationOnly: true,
+    ...result,
+  };
   return buildObservationToolResult({
-    result: {
-      toolName,
-      observationOnly: true,
-      ...result,
-    },
+    result: payload,
+    modelSafeRefs: collectBridgeModelSafeRefs(payload),
   });
 }
 
@@ -424,6 +562,7 @@ function listVisibleAffordances(
   if (!snapshot) return denial(toolName, "bridge_lookup_context_unavailable");
   const maxResults = readMaxResults(input, 8);
   const visibleFacts = allFacts(snapshot);
+  const aliases = buildDisplayAliases(snapshot, visibleFacts);
   const connectedRoutes = snapshot.legalMovement.filter((candidate) => candidate.connected);
   const visiblePersonnel = snapshot.visibleActors.filter(
     (actor) => (actor.actorId ?? actor.id) !== snapshot.current.playerActorId,
@@ -439,34 +578,35 @@ function listVisibleAffordances(
     visiblePhysicalTargets,
     OBSERVATION_CATEGORY_KEYWORDS.camera,
     maxResults,
+    aliases,
   );
-  const cameraFacts = categoryFacts(visibleFacts, OBSERVATION_CATEGORY_KEYWORDS.camera, maxResults);
+  const cameraFacts = categoryFacts(visibleFacts, OBSERVATION_CATEGORY_KEYWORDS.camera, maxResults, aliases);
   const barrierTargets = categoryTargets(
     visiblePhysicalTargets,
     OBSERVATION_CATEGORY_KEYWORDS.barrier,
     maxResults,
+    aliases,
   );
-  const barrierFacts = categoryFacts(visibleFacts, OBSERVATION_CATEGORY_KEYWORDS.barrier, maxResults);
-  const witnessFacts = categoryFacts(visibleFacts, OBSERVATION_CATEGORY_KEYWORDS.witness, maxResults);
-  const personnelFacts = categoryFacts(visibleFacts, OBSERVATION_CATEGORY_KEYWORDS.personnel, maxResults);
+  const barrierFacts = categoryFacts(visibleFacts, OBSERVATION_CATEGORY_KEYWORDS.barrier, maxResults, aliases);
+  const witnessFacts = categoryFacts(visibleFacts, OBSERVATION_CATEGORY_KEYWORDS.witness, maxResults, aliases);
+  const personnelFacts = categoryFacts(visibleFacts, OBSERVATION_CATEGORY_KEYWORDS.personnel, maxResults, aliases);
 
   return observation(toolName, {
-    current: snapshot.current,
-    visibleActors: snapshot.visibleActors.map((actor) => compactActor(actor, 1)),
-    legalTargets: snapshot.legalTargets.map((candidate) => compactTarget(candidate, 1)),
+    current: compactCurrent(snapshot),
+    visibleActors: snapshot.visibleActors.map((actor) => compactActor(actor, 1, aliases)),
+    legalTargets: snapshot.legalTargets.map((candidate) => compactTarget(candidate, 1, aliases)),
     legalMovement: snapshot.legalMovement
       .filter((candidate) => candidate.connected)
-      .map((candidate) => compactMovement(candidate, 1)),
+      .map((candidate) => compactMovement(candidate, 1, aliases)),
     visibleFactRefs: [
-      ...snapshot.localRecentEvents.map((event) => event.id),
-      ...snapshot.playerKnownFacts.map((fact) => fact.id),
-    ],
-    visibleFacts: visibleFacts.slice(0, maxResults).map((fact) => compactFact(fact, 1)),
+      ...visibleFacts.map((fact) => aliases.factRefs.get(fact)),
+    ].filter((ref): ref is string => Boolean(ref)),
+    visibleFacts: visibleFacts.slice(0, maxResults).map((fact) => compactFact(fact, 1, aliases)),
     categories: {
-      exitsRoutes: connectedRoutes.slice(0, maxResults).map((candidate) => compactMovement(candidate, 1)),
+      exitsRoutes: connectedRoutes.slice(0, maxResults).map((candidate) => compactMovement(candidate, 1, aliases)),
       physicalAffordances: visiblePhysicalTargets
         .slice(0, maxResults)
-        .map((candidate) => compactTarget(candidate, 1)),
+        .map((candidate) => compactTarget(candidate, 1, aliases)),
       cameras: {
         targets: cameraTargets,
         facts: cameraFacts,
@@ -482,7 +622,7 @@ function listVisibleAffordances(
           : null,
       },
       witnesses: {
-        actors: witnessActors.slice(0, maxResults).map((actor) => compactActor(actor, 1)),
+        actors: witnessActors.slice(0, maxResults).map((actor) => compactActor(actor, 1, aliases)),
         facts: witnessFacts,
         absence: witnessActors.length === 0 && witnessFacts.length === 0
           ? "No clearly identified witness refs are visible in current scene packet or player-visible/player-known facts."
@@ -491,7 +631,7 @@ function listVisibleAffordances(
       personnel: {
         actors: (personnelActors.length > 0 ? personnelActors : visiblePersonnel)
           .slice(0, maxResults)
-          .map((actor) => compactActor(actor, 1)),
+          .map((actor) => compactActor(actor, 1, aliases)),
         facts: personnelFacts,
         absence: visiblePersonnel.length === 0 && personnelFacts.length === 0
           ? "No non-player personnel actors are clearly visible in current scene packet."
@@ -511,13 +651,15 @@ function listNavigationOptions(
   const snapshot = getSnapshot(context);
   if (!snapshot) return denial(toolName, "bridge_lookup_context_unavailable");
   const maxResults = readMaxResults(input, 8);
+  const facts = allFacts(snapshot);
+  const aliases = buildDisplayAliases(snapshot, facts);
   const candidates = snapshot.legalMovement
     .filter((candidate) => candidate.connected)
     .slice(0, maxResults)
-    .map((candidate) => compactMovement(candidate, 1));
+    .map((candidate) => compactMovement(candidate, 1, aliases));
 
   return observation(toolName, {
-    current: snapshot.current,
+    current: compactCurrent(snapshot),
     candidates,
     count: candidates.length,
   });
@@ -535,6 +677,7 @@ function findTargets(input: {
   const query = readString(input.rawInput, "query");
   const tags = readStringArray(input.rawInput, "tags");
   const maxResults = readMaxResults(input.rawInput);
+  const aliases = buildDisplayAliases(snapshot, allFacts(snapshot));
   const candidates: Array<Record<string, unknown> & { score: number; label: string }> = [];
 
   for (const candidate of snapshot.legalTargets.filter((entry) => input.types.includes(entry.type))) {
@@ -546,7 +689,7 @@ function findTargets(input: {
       candidateTags: candidate.tags,
     });
     if (score > 0) {
-      candidates.push(compactTarget(candidate, score) as Record<string, unknown> & { score: number; label: string });
+      candidates.push(compactTarget(candidate, score, aliases) as Record<string, unknown> & { score: number; label: string });
     }
   }
 
@@ -559,7 +702,7 @@ function findTargets(input: {
         refs: movementRefs(candidate),
       });
       if (score > 0) {
-        candidates.push(compactMovement(candidate, score) as Record<string, unknown> & { score: number; label: string });
+        candidates.push(compactMovement(candidate, score, aliases) as Record<string, unknown> & { score: number; label: string });
       }
     }
   }
@@ -581,6 +724,7 @@ function findActors(
   const query = readString(input, "query") ?? readString(input, "relationHint");
   const tags = readStringArray(input, "tags");
   const maxResults = readMaxResults(input);
+  const aliases = buildDisplayAliases(snapshot, allFacts(snapshot));
   const byRef = new Map<string, Record<string, unknown> & { score: number; label: string }>();
 
   for (const actor of snapshot.visibleActors) {
@@ -592,7 +736,7 @@ function findActors(
       candidateTags: actor.tags,
     });
     if (score > 0) {
-      byRef.set(actor.actorId ?? actor.id, compactActor(actor, score) as Record<string, unknown> & { score: number; label: string });
+      byRef.set(actor.actorId ?? actor.id, compactActor(actor, score, aliases) as Record<string, unknown> & { score: number; label: string });
     }
   }
 
@@ -608,7 +752,7 @@ function findActors(
     const ref = candidate.actorId ?? candidate.id;
     const existing = byRef.get(ref);
     if (!existing || score > existing.score) {
-      byRef.set(ref, compactTarget(candidate, score) as Record<string, unknown> & { score: number; label: string });
+      byRef.set(ref, compactTarget(candidate, score, aliases) as Record<string, unknown> & { score: number; label: string });
     }
   }
 
@@ -645,18 +789,14 @@ function findPoiCandidates(
 
   if (includePotential && query && candidates.length === 0 && snapshot.current.currentLocationId) {
     candidates.push({
-      ref: `potential:${snapshot.current.currentLocationId}:${words(query).join("-").slice(0, 48) || "poi"}`,
+      ref: "potential_poi_1",
       type: "potential_poi",
       label: query,
       score: 1,
       legal: false,
       requires: "future create_minor_poi authority",
-      sourceRefs: uniqueStrings([
-        snapshot.current.currentLocationId,
-        snapshot.current.currentLocationName,
-        "current_location",
-      ]),
       observationOnly: true,
+      usableAs: [],
     });
   }
 
@@ -675,12 +815,11 @@ function currentSceneDescriptionFacts(snapshot: BridgeLookupSnapshot): BridgeKno
   const facts: BridgeKnownFactSnapshot[] = [];
   if (snapshot.current.currentLocationDescription?.trim()) {
     facts.push({
-      id: `current_location:${snapshot.current.currentLocationId ?? "unknown"}:description`,
+      id: "visible_fact:current_location_description",
       summary: `${snapshot.current.currentLocationName ?? "Current location"}: ${snapshot.current.currentLocationDescription.trim()}`,
       visibilityRoute: "player_visible",
       confidence: 1,
       sourceRefs: uniqueStrings([
-        snapshot.current.currentLocationId,
         snapshot.current.currentLocationName,
         "current_location",
       ]),
@@ -691,12 +830,11 @@ function currentSceneDescriptionFacts(snapshot: BridgeLookupSnapshot): BridgeKno
     && snapshot.current.currentSceneScopeId !== snapshot.current.currentLocationId
   ) {
     facts.push({
-      id: `current_scene:${snapshot.current.currentSceneScopeId ?? "unknown"}:description`,
+      id: "visible_fact:current_scene_description",
       summary: `${snapshot.current.currentSceneScopeName ?? "Current scene"}: ${snapshot.current.currentSceneScopeDescription.trim()}`,
       visibilityRoute: "player_visible",
       confidence: 1,
       sourceRefs: uniqueStrings([
-        snapshot.current.currentSceneScopeId,
         snapshot.current.currentSceneScopeName,
         "current_scene",
       ]),
@@ -707,11 +845,11 @@ function currentSceneDescriptionFacts(snapshot: BridgeLookupSnapshot): BridgeKno
 
 function allFacts(snapshot: BridgeLookupSnapshot): BridgeKnownFactSnapshot[] {
   const visibleEvents: BridgeKnownFactSnapshot[] = snapshot.localRecentEvents.map((event) => ({
-    id: event.id,
+    id: canonicalEventRef(event.id),
     summary: event.summary,
     visibilityRoute: "player_visible",
     confidence: 0.85,
-    sourceRefs: uniqueStrings([event.id, event.source, ...event.actorIds]),
+    sourceRefs: uniqueStrings([canonicalEventRef(event.id)]),
   }));
   return [
     ...currentSceneDescriptionFacts(snapshot),
@@ -730,7 +868,9 @@ function inspectKnownFact(
   const query = readString(input, "query");
   const ref = readString(input, "ref");
   const maxResults = readMaxResults(input, 3);
-  const candidates = allFacts(snapshot)
+  const facts = allFacts(snapshot);
+  const aliases = buildDisplayAliases(snapshot, facts);
+  const candidates = facts
     .map((fact) => ({
       fact,
       score:
@@ -745,15 +885,7 @@ function inspectKnownFact(
     .filter(({ score }) => score > 0 || (!query && !ref))
     .sort((left, right) => right.score - left.score || left.fact.id.localeCompare(right.fact.id))
     .slice(0, maxResults)
-    .map(({ fact, score }) => ({
-      id: fact.id,
-      summary: fact.summary,
-      visibilityRoute: fact.visibilityRoute,
-      confidence: fact.confidence,
-      sourceRefs: fact.sourceRefs,
-      score,
-      observationOnly: true,
-    }));
+    .map(({ fact, score }) => compactFact(fact, score, aliases));
 
   if (candidates.length === 0) {
     return denial(toolName, "no_player_visible_or_known_fact");
@@ -771,6 +903,29 @@ function refMatches(ref: string, refs: readonly string[]): boolean {
   return refs.some((candidateRef) => normalize(candidateRef) === normalized);
 }
 
+function displayRefMatches(ref: string, refs: readonly string[], aliases: BridgeDisplayAliases): boolean {
+  if (refMatches(ref, refs)) return true;
+  const normalized = normalize(ref);
+  return refs.some((candidateRef) => {
+    const alias = aliases.refAliases.get(normalize(candidateRef));
+    return Boolean(alias && normalize(alias) === normalized);
+  });
+}
+
+function movementDisplayRefs(
+  movement: SceneFrameMovementCandidate,
+  snapshot: BridgeLookupSnapshot,
+  aliases: BridgeDisplayAliases,
+): string[] {
+  return safeUsableAs(
+    aliases.movementRefs.get(movement),
+    movement.label,
+    ...snapshot.legalTargets
+      .filter((target) => target.type === "location" && target.locationId === movement.locationId)
+      .map((target) => aliases.targetRefs.get(target)),
+  );
+}
+
 function checkRoute(
   toolName: BridgeLookupToolName,
   input: Record<string, unknown>,
@@ -778,49 +933,63 @@ function checkRoute(
 ): ToolResult {
   const snapshot = getSnapshot(context);
   if (!snapshot) return denial(toolName, "bridge_lookup_context_unavailable");
+  const aliases = buildDisplayAliases(snapshot, allFacts(snapshot));
   const destinationRef = readString(input, "destinationRef");
   if (!destinationRef) return denial(toolName, "missing_destination_ref");
   const actorRef = readString(input, "actorRef");
-  if (actorRef && !context.subjectActorRefs.has(normalize(actorRef)) && !context.legalActorRefs.has(normalize(actorRef))) {
+  const actorRefAllowed = !actorRef
+    || context.subjectActorRefs.has(normalize(actorRef))
+    || context.legalActorRefs.has(normalize(actorRef))
+    || snapshot.visibleActors.some((actor) =>
+      refMatches(actorRef, safeUsableAs(aliases.actorRefs.get(actor), actor.label))
+    );
+  if (!actorRefAllowed) {
     return denial(toolName, "actor_ref_not_visible_or_allowed");
   }
 
   if (
-    refMatches(destinationRef, uniqueStrings([
+    displayRefMatches(destinationRef, uniqueStrings([
       snapshot.current.currentLocationId,
       snapshot.current.currentLocationName,
       snapshot.current.currentSceneScopeId,
       snapshot.current.currentSceneScopeName,
       "current_location",
       "current_scene",
-    ]))
+    ]), aliases)
   ) {
     return observation(toolName, {
       routeStatus: "already_here",
       destination: {
-        locationId: snapshot.current.currentLocationId,
+        ref: "current_location",
+        type: "location",
         label: snapshot.current.currentLocationName ?? snapshot.current.currentSceneScopeName ?? "current location",
       },
       cost: 0,
-      path: uniqueStrings([snapshot.current.currentLocationId]),
+      path: ["current_location"],
+      usableAs: safeUsableAs("current_location", snapshot.current.currentLocationName),
     });
   }
 
   const route = snapshot.legalMovement.find((candidate) =>
-    candidate.connected && refMatches(destinationRef, movementRefs(candidate))
+    candidate.connected
+    && (
+      displayRefMatches(destinationRef, movementRefs(candidate), aliases)
+      || refMatches(destinationRef, movementDisplayRefs(candidate, snapshot, aliases))
+    )
   );
   if (!route) return denial(toolName, "route_not_visible_or_legal");
+  const routeRef = aliases.movementRefs.get(route) ?? route.label;
 
   return observation(toolName, {
     routeStatus: "legal",
     destination: {
-      ref: route.id,
-      locationId: route.locationId,
+      ref: routeRef,
+      type: "location",
       label: route.label,
     },
     cost: route.travelCost ?? null,
-    path: route.path ?? [],
-    sourceRefs: movementRefs(route),
+    path: safeUsableAs("current_location", routeRef, route.label),
+    usableAs: safeUsableAs(routeRef, route.label),
   });
 }
 
@@ -830,7 +999,9 @@ export function executeBridgeCandidateTool(
   context: ToolExecutionContext | undefined,
 ): ToolResult {
   if (!context) return denial(toolName, "bridge_lookup_context_unavailable");
-  const rawInput = asInput(input);
+  const parsedInput = runtimeToolInputSchemas[toolName].safeParse(input);
+  if (!parsedInput.success) return denial(toolName, "invalid_tool_input");
+  const rawInput = parsedInput.data as Record<string, unknown>;
 
   switch (toolName) {
     case "list_visible_affordances":

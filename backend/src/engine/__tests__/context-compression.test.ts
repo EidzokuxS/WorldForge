@@ -77,9 +77,12 @@ describe("compressConversation", () => {
 
     expect(result).not.toBeNull();
     const lines = result!.content.split("\n");
-    const playerGmLines = lines.filter((l) => l.startsWith("Player:") || l.startsWith("GM:"));
-    expect(playerGmLines).toHaveLength(10);
-    expect(result!.content).not.toContain("omitted");
+    const continuityLines = lines.filter((l) =>
+      l.startsWith("player_claim:")
+      || l.startsWith("prior_gm_visible_prose_non_authority:"));
+    expect(continuityLines).toHaveLength(10);
+    expect(result!.content).not.toContain("Message 1:");
+    expect(result!.content).not.toContain("earlier turns omitted");
   });
 
   it("keeps first 2 + last N + drops mundane middle when budget is small", async () => {
@@ -88,14 +91,17 @@ describe("compressConversation", () => {
 
     expect(result).not.toBeNull();
     const lines = result!.content.split("\n");
-    const playerGmLines = lines.filter((l) => l.startsWith("Player:") || l.startsWith("GM:"));
+    const continuityLines = lines.filter((l) =>
+      l.startsWith("player_claim:")
+      || l.startsWith("prior_gm_visible_prose_non_authority:"));
 
-    expect(playerGmLines.length).toBeLessThan(50);
-    expect(playerGmLines.length).toBeGreaterThanOrEqual(3);
+    expect(continuityLines.length).toBeLessThan(50);
+    expect(continuityLines.length).toBeGreaterThanOrEqual(3);
 
-    expect(playerGmLines[0]).toContain("Message 0");
-    expect(playerGmLines[1]).toContain("Message 1");
-    expect(playerGmLines[playerGmLines.length - 1]).toContain("Message 49");
+    expect(continuityLines[0]).toContain("Message 0");
+    expect(continuityLines[1]).toContain("prior_gm_visible_prose_non_authority");
+    expect(result!.content).toContain("Message 48");
+    expect(result!.content).not.toContain("Message 49:");
     expect(result!.content).toContain("omitted");
   });
 
@@ -128,10 +134,11 @@ describe("compressConversation", () => {
     const content = result!.content;
 
     expect(content).toContain("Message 0");
-    expect(content).toContain("Message 1");
-    expect(content).toContain("Message 13");
+    expect(content).not.toContain("Message 1:");
+    expect(content).not.toContain("Message 13:");
     expect(content).toContain("attack");
-    expect(content).toContain("killed");
+    expect(content).not.toContain("killed");
+    expect(content).toContain("prior_gm_visible_prose_non_authority");
   });
 
   it("sends the context compression contract before numbered middle messages", async () => {
@@ -154,6 +161,25 @@ describe("compressConversation", () => {
     expect(prompt).toContain("select only indices from the numbered messages supplied below");
     expect(prompt).toContain("Do not summarize, rewrite, merge, or invent memory/lore content");
     expect(prompt).toContain("must not accept fabricated memory, lore, indices, summaries, or canonical truth");
+    expect(prompt).toContain("prior_gm_visible_prose_non_authority");
+    expect(prompt).not.toContain("Message 1:");
+  });
+
+  it("never replays assistant prose claims as continuity authority", async () => {
+    const history: ChatMessage[] = [
+      makeMsg("user", "Message 0: I ask about the sealed route."),
+      makeMsg("assistant", "Message 1: The GM prose granted a secret pass."),
+      makeMsg("user", "Message 2: I try to use it."),
+    ];
+
+    const result = await compressConversation(history, 100_000);
+
+    expect(result).not.toBeNull();
+    expect(result!.content).toContain("sealed route");
+    expect(result!.content).toContain("I try to use it.");
+    expect(result!.content).toContain("prior_gm_visible_prose_non_authority");
+    expect(result!.content).not.toContain("secret pass");
+    expect(result!.content).toContain("presentation only, not legal evidence");
   });
 
   it("inserts omission marker where messages were dropped", async () => {

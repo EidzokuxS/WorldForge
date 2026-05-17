@@ -111,10 +111,10 @@ function createSemanticPlan(overrides: Record<string, unknown> = {}) {
       targetRefs: ["Road Warden"],
     },
     primaryResponse: {
-      actorRef: npcId,
+      actorRef: "Road Warden",
       responseKind: "spoken",
       visibleToPlayer: true,
-      targetRefs: [playerId],
+      targetRefs: ["Player"],
     },
     supportResponses: [
       {
@@ -214,6 +214,7 @@ function createFrame(overrides: Partial<SceneFrame> = {}): SceneFrame {
     combatEnvelope: null,
     oracle: { outcome: "weak_hit" },
     ...overrides,
+    worldVersion: overrides.worldVersion ?? 0,
   };
 }
 
@@ -964,6 +965,8 @@ describe("runScenePlanner", () => {
     const firstCall = vi.mocked(safeGenerateObject).mock.calls[0]?.[0];
     expect(firstCall?.prompt).toContain('"path": "roll_oracle"');
     expect(firstCall?.prompt).toContain('"roll": 43');
+    expect(firstCall?.prompt).not.toContain("The evidence creates mixed odds.");
+    expect(firstCall?.prompt).not.toContain('"reasoning"');
     expect(firstCall?.prompt).toContain("Oracle outcome is present only when a GM roll_oracle decision requested backend randomness");
     expect(firstCall?.system).toContain("Do not choose or request a new Oracle outcome tier");
   });
@@ -1025,7 +1028,8 @@ describe("runScenePlanner", () => {
     expect(firstCall?.prompt).toContain("payload instead of input");
     expect(firstCall?.prompt).toContain("model-generated backend IDs");
     expect(firstCall?.prompt).toContain("semanticScenePlanSchema");
-    expect(firstCall?.prompt).toContain(playerId);
+    expect(firstCall?.prompt).toContain("person_road_warden");
+    expect(firstCall?.prompt).not.toContain(playerId);
     expect(firstCall?.prompt).toContain("Road Warden");
   });
 
@@ -1142,11 +1146,15 @@ describe("runScenePlanner", () => {
     const prompt = vi.mocked(safeGenerateObject).mock.calls[0]?.[0].prompt ?? "";
     expect(prompt).toContain("Shibuya");
     expect(prompt).toContain("Cafe Clerk");
-    expect(prompt).toContain("hiddenActorCount");
+    expect(prompt).toContain("person_cafe_clerk");
+    expect(prompt).toContain("Player");
     expect(prompt).not.toContain("Forest Outpost");
     expect(prompt).not.toContain("Okutama Safe Zone");
     expect(prompt).not.toContain("Outpost Cook");
+    expect(prompt).not.toContain(playerId);
+    expect(prompt).not.toContain(npcId);
     expect(prompt).not.toContain(hiddenNpcId);
+    expect(prompt).not.toContain("hiddenActorCount");
     expect(prompt).not.toContain("forbiddenActorLabels");
     expect(prompt).not.toContain("roster.background");
   });
@@ -1230,7 +1238,9 @@ describe("runScenePlanner", () => {
     });
 
     const prompt = vi.mocked(safeGenerateObject).mock.calls[0]?.[0].prompt ?? "";
-    expect(prompt).toContain("The Cafe Clerk puts a ceramic cup on the counter.");
+    expect(prompt).toContain("prior_gm_visible_prose_non_authority");
+    expect(prompt).toContain("presentation only, not legal evidence");
+    expect(prompt).not.toContain("ceramic cup");
     expect(prompt).not.toContain("Postal Cache");
   });
 
@@ -1411,8 +1421,13 @@ describe("runScenePlanner", () => {
     expect(result.narratorFacts.anchorEventId).toBe(result.anchorEvent.id);
 
     expect(safeGenerateObject).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(safeGenerateObject).mock.calls[1]?.[0].prompt).toContain(
-      "semantic object",
-    );
+    const repairPrompt = vi.mocked(safeGenerateObject).mock.calls[1]?.[0].prompt ?? "";
+    expect(repairPrompt).toContain("semantic object");
+    expect(repairPrompt).not.toContain(playerId);
+    expect(repairPrompt).not.toContain(npcId);
+    expect(repairPrompt).not.toContain(eventId);
+    expect(repairPrompt).not.toContain(responseId);
+    expect(repairPrompt).not.toContain(actionId);
+    expect(repairPrompt).toContain("[backend ref hidden]");
   });
 });

@@ -41,14 +41,25 @@ function setupMockDb(entity: Record<string, unknown> | null = createMockEntity()
     select: vi.fn().mockReturnThis(),
     from: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
+    insert: vi.fn().mockReturnThis(),
+    values: vi.fn().mockReturnThis(),
     update: vi.fn().mockReturnThis(),
     set: vi.fn().mockReturnThis(),
-    run: vi.fn(),
+    run: vi.fn().mockReturnValue({ changes: 1 }),
     get: vi.fn().mockReturnValue(entity),
+    transaction: vi.fn((callback: () => unknown) => callback()),
   };
 
   (getDb as ReturnType<typeof vi.fn>).mockReturnValue(db);
   return db;
+}
+
+function latestEntitySetCall(mockDb: ReturnType<typeof setupMockDb>): Record<string, unknown> {
+  const call = mockDb.set.mock.calls
+    .map(([payload]) => payload as Record<string, unknown>)
+    .find((payload) => typeof payload.tags === "string" || typeof payload.characterRecord === "string");
+  expect(call).toBeDefined();
+  return call!;
 }
 
 const execCtx = {
@@ -103,7 +114,7 @@ describe("upgrade_wealth", () => {
     );
 
     expect(result).toHaveProperty("updated", true);
-    const setCall = mockDb.set.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+    const setCall = latestEntitySetCall(mockDb);
     const tagsStr = setCall?.tags as string;
     const tags = JSON.parse(tagsStr) as string[];
     expect(tags).toContain("Comfortable");
@@ -147,7 +158,7 @@ describe("upgrade_wealth", () => {
     );
 
     expect(result).toHaveProperty("updated", true);
-    const setCall = mockDb.set.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+    const setCall = latestEntitySetCall(mockDb);
     const tagsStr = setCall?.tags as string;
     const tags = JSON.parse(tagsStr) as string[];
     expect(tags).toContain("Poor");
@@ -178,7 +189,7 @@ describe("upgrade_skill", () => {
     );
 
     expect(result).toHaveProperty("updated", true);
-    const setCall = mockDb.set.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+    const setCall = latestEntitySetCall(mockDb);
     const tagsStr = setCall?.tags as string;
     const tags = JSON.parse(tagsStr) as string[];
     expect(tags).toContain("Skilled Swordsman");
@@ -218,7 +229,7 @@ describe("upgrade_skill", () => {
     );
 
     expect(result).toHaveProperty("updated", true);
-    const setCall = mockDb.set.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+    const setCall = latestEntitySetCall(mockDb);
     const tagsStr = setCall?.tags as string;
     const tags = JSON.parse(tagsStr) as string[];
     expect(tags).toContain("Novice Alchemy");

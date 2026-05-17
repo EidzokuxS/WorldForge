@@ -18,16 +18,22 @@ const {
   getSettledTurnPacketMock,
   getTurnSagaMock,
   findLatestSuccessfulNarratorAttemptMock,
+  hasPreparedSettledTurnPacketRecoveryMock,
   heartbeatTurnSagaWorkerMock,
   markTurnSagaFinalizedMock,
   markTurnSagaFinalizedIfNeededMock,
   mergeTurnSagaProvenanceMock,
   persistOracleDecisionMock,
   persistSettledTurnPacketMock,
+  recordPreparedSettledTurnPacketMock,
+  retractActorKnowledgeRecordMock,
   recordNarratorAttemptMock,
   releaseTurnSagaWorkerMock,
+  retractReflectionBudgetMock,
+  retractStoredEpisodicEventMock,
   transitionTurnSagaStatusMock,
   updateNarratorAttemptOutcomeMock,
+  recoverSettledTurnPacketFromPreparedEventMock,
 } = vi.hoisted(() => ({
   logEventMock: vi.fn(),
   logInfoMock: vi.fn(),
@@ -44,16 +50,22 @@ const {
   getSettledTurnPacketMock: vi.fn(),
   getTurnSagaMock: vi.fn(),
   findLatestSuccessfulNarratorAttemptMock: vi.fn(),
+  hasPreparedSettledTurnPacketRecoveryMock: vi.fn(),
   heartbeatTurnSagaWorkerMock: vi.fn(),
   markTurnSagaFinalizedMock: vi.fn(),
   markTurnSagaFinalizedIfNeededMock: vi.fn(),
   mergeTurnSagaProvenanceMock: vi.fn(),
   persistOracleDecisionMock: vi.fn(),
   persistSettledTurnPacketMock: vi.fn(),
+  recordPreparedSettledTurnPacketMock: vi.fn(),
+  retractActorKnowledgeRecordMock: vi.fn(),
   recordNarratorAttemptMock: vi.fn(),
   releaseTurnSagaWorkerMock: vi.fn(),
+  retractReflectionBudgetMock: vi.fn(),
+  retractStoredEpisodicEventMock: vi.fn(),
   transitionTurnSagaStatusMock: vi.fn(),
   updateNarratorAttemptOutcomeMock: vi.fn(),
+  recoverSettledTurnPacketFromPreparedEventMock: vi.fn(),
 }));
 
 vi.mock("../../db/index.js", () => ({
@@ -202,7 +214,7 @@ vi.mock("../world-thread-runner.js", () => ({
 }));
 
 vi.mock("../due-world-work.js", () => ({
-  resolveDueWorldWorkForScope: resolveDueWorldWorkForScopeMock,
+  resolveDueWorldWorkForScopeWithProposalWatchdog: resolveDueWorldWorkForScopeMock,
 }));
 
 vi.mock("../scene-frame.js", () => ({
@@ -249,14 +261,17 @@ vi.mock("../turn-saga.js", () => ({
   findLatestSuccessfulNarratorAttempt: findLatestSuccessfulNarratorAttemptMock,
   getSettledTurnPacket: getSettledTurnPacketMock,
   getTurnSaga: getTurnSagaMock,
+  hasPreparedSettledTurnPacketRecovery: hasPreparedSettledTurnPacketRecoveryMock,
   markTurnSagaFinalized: markTurnSagaFinalizedMock,
   heartbeatTurnSagaWorker: heartbeatTurnSagaWorkerMock,
   markTurnSagaFinalizedIfNeeded: markTurnSagaFinalizedIfNeededMock,
   mergeTurnSagaProvenance: mergeTurnSagaProvenanceMock,
   persistOracleDecision: persistOracleDecisionMock,
   persistSettledTurnPacket: persistSettledTurnPacketMock,
+  recordPreparedSettledTurnPacket: recordPreparedSettledTurnPacketMock,
   recordNarratorAttempt: recordNarratorAttemptMock,
   releaseTurnSagaWorker: releaseTurnSagaWorkerMock,
+  recoverSettledTurnPacketFromPreparedEvent: recoverSettledTurnPacketFromPreparedEventMock,
   transitionTurnSagaStatus: transitionTurnSagaStatusMock,
   updateNarratorAttemptOutcome: updateNarratorAttemptOutcomeMock,
 }));
@@ -281,6 +296,8 @@ vi.mock("../scene-plan-executor.js", () => ({
 
 vi.mock("../narrator-packet.js", () => ({
   buildNarratorPacket: vi.fn(),
+  repairModelGuidancePerceivableResponses: vi.fn((packet: unknown) => packet),
+  repairPromptUnsafePerceivableEffects: vi.fn((packet: unknown) => packet),
   summarizeRuntimeToolResultForNarrator: vi.fn((input: { toolInput?: Record<string, unknown> }) =>
     String(input.toolInput?.text ?? input.toolInput?.summary ?? "Scene consequence settles."),
   ),
@@ -304,6 +321,18 @@ vi.mock("../visible-narration-output-guard.js", () => {
     VisibleNarrationPacketGuardError,
   };
 });
+vi.mock("../../vectors/episodic-events.js", () => ({
+  retractStoredEpisodicEvent: retractStoredEpisodicEventMock,
+}));
+
+vi.mock("../reflection-budget.js", () => ({
+  retractReflectionBudget: retractReflectionBudgetMock,
+}));
+
+vi.mock("../knowledge-model.js", () => ({
+  listActorKnowledge: vi.fn(() => []),
+  retractActorKnowledgeRecord: retractActorKnowledgeRecordMock,
+}));
 
 // Mock the ai module
 vi.mock("ai", () => ({
@@ -326,7 +355,7 @@ vi.mock("../../ai/generate-object-safe.js", () => ({
           sentences: [
             {
               text: "The goblin falls.",
-              evidenceRefs: ["perceivable_effect:effect-goblin-falls"],
+              evidenceRefs: ["e1"],
             },
           ],
         },
@@ -380,7 +409,13 @@ import { runScenePlanner } from "../scene-planner.js";
 import { runGmToolLoop } from "../gm-tool-loop.js";
 import { validateScenePlan } from "../scene-plan-validator.js";
 import { executeScenePlan } from "../scene-plan-executor.js";
-import { buildNarratorPacket } from "../narrator-packet.js";
+import { assembleAuthoritativeScene } from "../scene-assembly.js";
+import {
+  buildNarratorPacket,
+  repairModelGuidancePerceivableResponses,
+  type CanonicalTurnPacketResponse,
+  type NarratorPacket,
+} from "../narrator-packet.js";
 import {
   runVisibleNarrationWithPacketGuard,
   VisibleNarrationPacketGuardError,
@@ -442,7 +477,6 @@ describe("movement prompt contract helper", () => {
     expect(prompt).toContain("must not invent movement intent or destination");
   });
 });
-
 // -- Helpers ------------------------------------------------------------------
 
 const CAMPAIGN_ID = "test-campaign-123";
@@ -516,6 +550,12 @@ function setupMocks(options: {
       skipped: [],
     },
     proposalPrepTrace: [],
+    proposals: {
+      selected: [],
+      executed: [],
+      skipped: [],
+      blockedWriteScopes: [],
+    },
   });
   resolveDueWorldThreadWorkForScopeMock.mockReturnValue({
     executed: [],
@@ -564,6 +604,7 @@ function setupMocks(options: {
   // Mock readCampaignConfig
   (readCampaignConfig as Mock).mockReturnValue({ currentTick: 5 });
   (getChatHistory as Mock).mockReturnValue([]);
+  vi.mocked(buildSceneFrame).mockResolvedValue(createScenePlanFrameMock() as never);
 
   // Mock incrementTick
   (incrementTick as Mock).mockReturnValue(6);
@@ -611,14 +652,7 @@ function setupMocks(options: {
       }
     }
 
-    return [{
-      type: "state_update",
-      data: {
-        tool: String(part.toolName ?? ""),
-        args: part.input,
-        result: part.output,
-      },
-    }];
+    return [];
   });
 
   (runHiddenAdjudicationPlan as Mock).mockResolvedValue({
@@ -648,11 +682,38 @@ const SCENE_PLAN_EVENT_ID = "10000000-0000-4000-8000-000000000001";
 const SCENE_PLAN_RESPONSE_ID = "10000000-0000-4000-8000-000000000002";
 const SCENE_PLAN_ACTION_ID = "10000000-0000-4000-8000-000000000003";
 const SCENE_PLAN_PLAYER_ID = "10000000-0000-4000-8000-000000000010";
+const PLAYER_TURN_ALLOWED_TOOLS_FOR_TEST = [
+  "list_visible_affordances",
+  "list_navigation_options",
+  "find_location_candidates",
+  "find_object_candidates",
+  "find_actor_candidates",
+  "find_poi_candidates",
+  "inspect_known_fact",
+  "check_route",
+  "move_actor",
+  "create_minor_poi",
+  "create_scene_extra",
+  "advance_time",
+  "record_dialogue_outcome",
+  "record_world_fact",
+  "add_tag",
+  "remove_tag",
+  "set_relationship",
+  "log_event",
+  "offer_quick_actions",
+  "promote_npc",
+  "spawn_item",
+  "reveal_location",
+  "set_condition",
+  "transfer_item",
+] as const;
 
 function createScenePlanFrameMock() {
   return {
     campaignId: CAMPAIGN_ID,
     tick: 5,
+    worldVersion: 7,
     playerActorId: SCENE_PLAN_PLAYER_ID,
     currentLocationId: "loc-1",
     currentSceneScopeId: "loc-1",
@@ -682,7 +743,7 @@ function createScenePlanFrameMock() {
     targetCandidates: [],
     movementCandidates: [],
     deferredHooks: [],
-    allowedTools: ["log_event"],
+    allowedTools: [...PLAYER_TURN_ALLOWED_TOOLS_FOR_TEST],
     oracleContext: {
       targetLabel: null,
       targetType: "none",
@@ -782,6 +843,7 @@ function createNarratorPacketMock() {
   return {
     campaignId: CAMPAIGN_ID,
     tick: 5,
+    postNarrationTargetTick: 6,
     playerAction: "I attack the goblin",
     oracleOutcome: "strong_hit",
     anchorEvent: {
@@ -828,6 +890,17 @@ function createNarratorPacketMock() {
   };
 }
 
+function setPrimaryNarratorFactText(
+  narratorPacket: {
+    evidenceLedger: Array<{ summary: string }>;
+    perceivableEffects: Array<{ summary: string }>;
+  },
+  text: string,
+) {
+  narratorPacket.evidenceLedger[0]!.summary = text;
+  narratorPacket.perceivableEffects[0]!.summary = text;
+}
+
 function createNarrationDraftForTest(prose: string) {
   return {
     prose,
@@ -851,13 +924,13 @@ function createNarrationDraftForTest(prose: string) {
   };
 }
 
-function createGroundedSentenceDraftForTest(prose: string) {
+function createGroundedSentenceDraftForTest(_prose: string) {
   return {
     version: "grounded-sentence-draft.v2" as const,
     sentences: [
       {
-        text: prose,
-        evidenceRefs: ["perceivable_effect:effect-goblin-falls"],
+        factRefs: ["e1.s1"],
+        evidenceRefs: ["e1"],
       },
     ],
   };
@@ -868,6 +941,7 @@ function acceptedGroundedNarrationResult() {
     ok: true,
     narrationDraftAccepted: true,
     narrationContractVersion: "grounded-sentence-draft.v2",
+    groundedSentenceDraft: createGroundedSentenceDraftForTest(""),
     structuredTrace: {
       strategy: "native_json",
       primaryStrategy: "native_json",
@@ -912,6 +986,20 @@ function installSafeGenerateObjectDefaultMock() {
         },
       } as never;
     }
+    if (prompt.includes("NO-MUTATION ADMISSIBILITY CHECK")) {
+      return {
+        object: {
+          decision: "admissible",
+          safeKind: "no_state_claim",
+          blockedClaimKinds: [],
+          reason: "The mocked no-mutation response makes no reusable state claim.",
+        },
+        trace: {},
+      } as never;
+    }
+    if (prompt.includes("MODEL-FACING GM READ CONTRACT")) {
+      return { object: createGmReadMock(), trace: {} } as never;
+    }
 
     return { object: { isMovement: false, destination: null }, trace: {} } as never;
   });
@@ -924,7 +1012,7 @@ function createGmReadMock(
     version: "gm-read.v1",
     situationSummary: "The player creates the next local beat.",
     sceneQuestion: "What changes in the immediate scene?",
-    focalActorRefs: [SCENE_PLAN_PLAYER_ID],
+    focalActorRefs: ["Player"],
     backgroundActorRefs: [],
     actionInterpretation: {
       intent: "Attack the goblin",
@@ -934,8 +1022,7 @@ function createGmReadMock(
     path: "tool_plan",
     turnIntent: "Plan a concrete local scene mutation.",
     rationale: "The GM selected a concrete tool-backed scene mutation.",
-    evidenceRefs: [SCENE_PLAN_PLAYER_ID],
-    narrationGuardrails: ["Stay inside the visible scene."],
+    evidenceRefs: ["Player"],
     ...overrides,
   };
 
@@ -943,7 +1030,57 @@ function createGmReadMock(
     read.runtimeRequirement = {
       kind: "scene_beat",
       durability: "durable",
+      beatKind: "event_log",
     };
+  }
+  const runtimeRequirement = read.runtimeRequirement as Record<string, unknown> | undefined;
+  if (
+    runtimeRequirement?.kind === "dialogue_outcome"
+    && !("speakerBinding" in runtimeRequirement)
+  ) {
+    runtimeRequirement.speakerBinding = {
+      kind: "prose_role",
+      requestedRoleText: "local speaker",
+      allowCreateSceneExtra: true,
+    };
+  }
+  if (!("turnGrounding" in overrides)) {
+    if (read.path === "tool_plan") {
+      const requirement = read.runtimeRequirement as { kind?: string; topicKind?: string; durability?: string } | undefined;
+      const requirementKind = requirement?.kind ?? "scene_beat";
+      read.turnGrounding = {
+        intentKind: requirementKind === "state_mutation" ? "concrete_state_change" : "ordinary_local_response",
+        requiresGrounding: true,
+        groundingKind: requirementKind,
+        topicKind: requirement?.topicKind,
+        durability: requirement?.durability,
+        reason: "The test GM Read uses a backend-grounded tool path.",
+      };
+    } else if (read.path === "roll_oracle") {
+      read.turnGrounding = {
+        intentKind: "combat_pressure",
+        requiresGrounding: true,
+        groundingKind: "roll_oracle",
+        reason: "The test GM Read uses an Oracle roll.",
+      };
+    } else if (read.path === "combat_transition") {
+      read.turnGrounding = {
+        intentKind: "combat_pressure",
+        requiresGrounding: true,
+        groundingKind: "combat_transition",
+        reason: "The test GM Read enters combat.",
+      };
+    } else {
+      read.turnGrounding = {
+        intentKind: "ordinary_local_response",
+        requiresGrounding: false,
+        groundingKind: "none",
+        reason: "The test GM Read uses a no-mutation path.",
+      };
+    }
+  }
+  if (!("narrationGuardrails" in overrides)) {
+    read.narrationGuardrails = ["Stay inside the visible scene."];
   }
 
   return Object.fromEntries(
@@ -993,6 +1130,8 @@ function setupScenePlanMocks(options: {
         },
       },
     ],
+    acceptedStepIds: ["tool-call-1"],
+    acceptedToolResultIds: [],
   } as never);
   vi.mocked(runScenePlanner).mockResolvedValue(scenePlan as never);
   vi.mocked(validateScenePlan).mockReturnValue({
@@ -1085,6 +1224,8 @@ function setupTurnSagaMocks(overrides: {
     acceptedToolResultRefs: [],
     acceptedActorResultRefs: [],
     dueWorldRefs: [],
+    acceptedDurableEventIds: [],
+    producedDurableEventIds: [],
     requiresNarration: true,
     baseWorldVersion: 7,
     resultWorldVersion: 8,
@@ -1106,6 +1247,9 @@ function setupTurnSagaMocks(overrides: {
       turnId: input.turnId ?? saga.turnId,
       baseWorldVersion: input.baseWorldVersion ?? saga.baseWorldVersion,
       status: "created",
+      activeLockToken: (input as { activeLockToken?: string | null }).activeLockToken ?? null,
+      activeWorkerId: (input as { activeWorkerId?: string | null }).activeWorkerId ?? null,
+      activeStartedAt: (input as { activeWorkerId?: string | null }).activeWorkerId ? 1 : null,
     };
     return saga;
   });
@@ -1133,6 +1277,22 @@ function setupTurnSagaMocks(overrides: {
   });
   getTurnSagaMock.mockImplementation(() => saga);
   getSettledTurnPacketMock.mockImplementation(() => settledPacket);
+  hasPreparedSettledTurnPacketRecoveryMock.mockReturnValue(false);
+  recordPreparedSettledTurnPacketMock.mockImplementation(() => ({
+    id: "prepared-event-1",
+    sagaId: saga.id,
+    eventType: "settled_packet_prepared",
+  }));
+  recoverSettledTurnPacketFromPreparedEventMock.mockImplementation(() => {
+    saga = {
+      ...saga,
+      status: "resolved_pending_narration",
+      requiresNarration: true,
+      settledTurnPacketId: "packet-1",
+      resultWorldVersion: 8,
+    };
+    return settledPacket;
+  });
   claimTurnSagaWorkerMock.mockImplementation((input: { workerId: string; lockToken?: string }) => {
     const lockToken = input.lockToken ?? "lock-token";
     saga = {
@@ -1186,8 +1346,10 @@ function setupTurnSagaMocks(overrides: {
     saga = { ...saga, provenance: merge(saga.provenance, input.patch) };
     return saga;
   });
+  let narratorAttemptSequence = 0;
   recordNarratorAttemptMock.mockImplementation((input: { status: string }) => {
-    const id = `attempt-${recordNarratorAttemptMock.mock.calls.length + 1}`;
+    narratorAttemptSequence += 1;
+    const id = `attempt-${narratorAttemptSequence}`;
     saga = { ...saga, latestNarratorAttemptId: id };
     return { id, sagaId: saga.id, status: input.status };
   });
@@ -1635,6 +1797,12 @@ describe("processTurn", () => {
         skipped: [],
       },
       proposalPrepTrace: [],
+      proposals: {
+        selected: [],
+        executed: [],
+        skipped: [],
+        blockedWriteScopes: [],
+      },
     });
     resolveDueWorldThreadWorkForScopeMock.mockReturnValue({
       executed: [],
@@ -1661,8 +1829,13 @@ describe("processTurn", () => {
 
     expect(events[0]).toEqual({
       type: "oracle_result",
-      data: oracleResult,
+      data: {
+        chance: oracleResult.chance,
+        roll: oracleResult.roll,
+        outcome: oracleResult.outcome,
+      },
     });
+    expect(JSON.stringify(events[0])).not.toContain(oracleResult.reasoning);
   });
 
   it("yields one final visible narration event after the hidden pass completes", async () => {
@@ -1705,7 +1878,7 @@ describe("processTurn", () => {
     expect(events.some((event) => event.type === "reasoning")).toBe(false);
   });
 
-  it("emits reasoning SSE only when explicit non-production exposure is enabled", async () => {
+  it("keeps reasoning off player SSE even when debug exposure env is set", async () => {
     process.env.EXPOSE_LLM_REASONING = "true";
     setupMocks({
       streamParts: [{ type: "text-delta", text: "The goblin falls." }],
@@ -1720,22 +1893,9 @@ describe("processTurn", () => {
     expect(events).toEqual(
       expect.arrayContaining([
         { type: "narrative", data: { text: "The goblin falls." } },
-        {
-          type: "reasoning",
-          data: {
-            text: "Debug-only reasoning stays on the private diagnostic lane.",
-          },
-        },
       ]),
     );
-
-    const narrativeIndex = events.findIndex((event) => event.type === "narrative");
-    const reasoningIndex = events.findIndex((event) => event.type === "reasoning");
-    const doneIndex = events.findIndex((event) => event.type === "done");
-
-    expect(narrativeIndex).toBeGreaterThan(-1);
-    expect(reasoningIndex).toBeGreaterThan(narrativeIndex);
-    expect(doneIndex).toBeGreaterThan(reasoningIndex);
+    expect(events.some((event) => event.type === "reasoning")).toBe(false);
   });
 
   it("does not emit a reasoning event when generateText returns no separate reasoningText", async () => {
@@ -1752,7 +1912,7 @@ describe("processTurn", () => {
     expect(events.some((event) => event.type === "reasoning")).toBe(false);
   });
 
-  it("emits reasoning when Z.AI chat body carries reasoning_content even if reasoningText is empty", async () => {
+  it("keeps Z.AI reasoning_content off player SSE even when debug exposure env is set", async () => {
     process.env.EXPOSE_LLM_REASONING = "true";
     setupMocks({
       streamParts: [{ type: "text-delta", text: "The goblin falls." }],
@@ -1781,14 +1941,9 @@ describe("processTurn", () => {
     expect(events).toEqual(
       expect.arrayContaining([
         { type: "narrative", data: { text: "The goblin falls." } },
-        {
-          type: "reasoning",
-          data: {
-            text: "Narrate only the committed consequence and do not invent extra beats.",
-          },
-        },
       ]),
     );
+    expect(events.some((event) => event.type === "reasoning")).toBe(false);
   });
 
   it("logs judge and storyteller reasoning metadata when those traces are available", async () => {
@@ -2041,7 +2196,7 @@ describe("processTurn", () => {
     });
   });
 
-  it("yields state_update events for tool results", async () => {
+  it("does not yield raw generic state_update events for non-location tool results", async () => {
     setupMocks({
       streamParts: [
         { type: "text-delta", text: "The goblin is wounded." },
@@ -2058,12 +2213,7 @@ describe("processTurn", () => {
     const events = await collectEvents(processTurn(options));
 
     const stateUpdates = events.filter((e) => e.type === "state_update");
-    expect(stateUpdates).toHaveLength(1);
-    expect(stateUpdates[0]!.data).toEqual({
-      tool: "add_tag",
-      args: { entityName: "Goblin", entityType: "npc", tag: "wounded" },
-      result: { success: true, result: { entity: "Goblin", tags: ["wounded"] } },
-    });
+    expect(stateUpdates).toEqual([]);
   });
 
   it("yields quick_actions event when offer_quick_actions tool is called", async () => {
@@ -2090,8 +2240,7 @@ describe("processTurn", () => {
     const quickActions = events.filter((e) => e.type === "quick_actions");
     expect(quickActions).toHaveLength(1);
     expect(quickActions[0]!.data).toEqual({
-      success: true,
-      result: { actions },
+      actions,
     });
   });
 
@@ -2209,6 +2358,12 @@ describe("processTurn", () => {
           role: "assistant",
           content:
             "The market square falls silent.\n\nThe market square falls silent.\n\nA bell tolls somewhere beyond the smoke.",
+          metadata: {
+            presentation: {
+              authority: "visible_prose_non_authority",
+              source: "legacy_final_narration",
+            },
+          },
         },
       ],
     );
@@ -2353,6 +2508,12 @@ describe("processTurn", () => {
       {
         role: "assistant",
         content: "Force would only wake the nest. Patience kept the passage quiet.",
+        metadata: {
+          presentation: {
+            authority: "visible_prose_non_authority",
+            source: "legacy_final_narration",
+          },
+        },
       },
     ]);
   });
@@ -2381,6 +2542,12 @@ describe("processTurn", () => {
       {
         role: "assistant",
         content: "A cart wheel creaks once. The crowd parts around the spilled apples.",
+        metadata: {
+          presentation: {
+            authority: "visible_prose_non_authority",
+            source: "legacy_final_narration",
+          },
+        },
       },
     ]);
     expect(appendChatMessages).not.toHaveBeenCalledWith(CAMPAIGN_ID, [
@@ -2417,7 +2584,16 @@ describe("processTurn", () => {
       },
     ]);
     expect(appendChatMessages).toHaveBeenLastCalledWith(CAMPAIGN_ID, [
-      { role: "assistant", content: retryText },
+      {
+        role: "assistant",
+        content: retryText,
+        metadata: {
+          presentation: {
+            authority: "visible_prose_non_authority",
+            source: "legacy_final_narration",
+          },
+        },
+      },
     ]);
   });
 
@@ -2509,7 +2685,7 @@ describe("processTurn", () => {
     expect(doneStep.done).toBe(false);
     expect(doneStep.value).toEqual({
       type: "done",
-      data: { tick: 6 },
+      data: expect.objectContaining({ tick: 6 }),
     });
   });
 
@@ -2575,7 +2751,7 @@ describe("processTurn", () => {
       expect(doneStep.done).toBe(false);
       expect(doneStep.value).toEqual({
         type: "done",
-        data: { tick: 6 },
+        data: expect.objectContaining({ tick: 6 }),
       });
     } finally {
       vi.useRealTimers();
@@ -2850,7 +3026,16 @@ describe("processTurn", () => {
         { role: "user", content: "go to Town Square" },
       ]);
       expect(appendChatMessages).toHaveBeenNthCalledWith(2, CAMPAIGN_ID, [
-        { role: "assistant", content: "You remain at Town Square." },
+        {
+          role: "assistant",
+          content: "You remain at Town Square.",
+          metadata: {
+            presentation: {
+              authority: "visible_prose_non_authority",
+              source: "deterministic_noop",
+            },
+          },
+        },
       ]);
       expect(callOracle).not.toHaveBeenCalled();
       expect(runHiddenAdjudicationPlan).not.toHaveBeenCalled();
@@ -2971,8 +3156,13 @@ describe("processTurn", () => {
 
     expect(events[0]).toEqual({
       type: "oracle_result",
-      data: oracleResult,
+      data: {
+        chance: oracleResult.chance,
+        roll: oracleResult.roll,
+        outcome: oracleResult.outcome,
+      },
     });
+    expect(JSON.stringify(events[0])).not.toContain(oracleResult.reasoning);
   });
 
   it("derives Oracle actor tags from canonical player records instead of raw stored tags", async () => {
@@ -3991,6 +4181,422 @@ describe("processTurn ScenePlan path", () => {
     ]);
   });
 
+  it("runs due simulation proposals through the live turn watchdog and refreshes narrator frame after committed proposal effects", async () => {
+    setupMocks();
+    setupScenePlanMocks();
+
+    resolveDueWorldWorkForScopeMock.mockImplementation((input: { phase: string }) => ({
+      phase: input.phase,
+      executed: [],
+      deferred: [],
+      skipped: [],
+      worldThreads: {
+        executed: [],
+        deferred: [],
+        skipped: [],
+      },
+      proposalPrepTrace: [],
+      proposals: input.phase === "pre_narrator_packet"
+        ? {
+            selected: ["proposal-due-1"],
+            executed: [{
+              status: "committed",
+              proposalId: "proposal-due-1",
+              proposalType: "key_actor_due_decision",
+              disposition: "committed",
+              committedWorldVersion: 9,
+              toolResults: [{
+                toolName: "add_chronicle_entry",
+                result: {
+                  success: true,
+                  authority: {
+                    toolResultId: "proposal-tool-result-1",
+                    resultWorldVersion: 9,
+                  },
+                },
+              }],
+              authorityTraceIds: ["proposal-trace-1"],
+              sourceJobId: null,
+            }],
+            skipped: [],
+            blockedWriteScopes: [],
+          }
+        : {
+            selected: [],
+            executed: [],
+            skipped: [],
+            blockedWriteScopes: [],
+          },
+    }));
+
+    await collectEvents(processTurn(createTestOptions()));
+
+    expect(resolveDueWorldWorkForScopeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ phase: "pre_scene_frame" }),
+    );
+    expect(resolveDueWorldWorkForScopeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ phase: "pre_narrator_packet" }),
+    );
+    expect(buildSceneFrame).toHaveBeenCalledTimes(3);
+
+    const persistedPacket = persistSettledTurnPacketMock.mock.calls[0]?.[0] as {
+      dueWorldRefs?: string[];
+    };
+    expect(persistedPacket.dueWorldRefs).toEqual(
+      expect.arrayContaining([
+        "proposal-due-1",
+        "proposal-due-1:committed",
+        "proposal-trace-1",
+        "proposal-tool-result-1",
+      ]),
+    );
+  });
+
+  it("uses pre-frame due time authority before building GM Read and tool-loop frames", async () => {
+    setupMocks();
+    setupScenePlanMocks();
+    const baseClock = {
+      campaignId: CAMPAIGN_ID,
+      worldVersion: 7,
+      worldTimeMinutes: 5,
+      currentTick: 5,
+      updatedAt: 0,
+    };
+    const postDueClock = {
+      campaignId: CAMPAIGN_ID,
+      worldVersion: 8,
+      worldTimeMinutes: 125,
+      currentTick: 125,
+      updatedAt: 0,
+    };
+    let currentClock = baseClock;
+    readWorldClockMock.mockImplementation(() => currentClock);
+    const advancedFrame = {
+      ...createScenePlanFrameMock(),
+      tick: 125,
+      worldVersion: 8,
+    };
+    vi.mocked(buildSceneFrame).mockReset();
+    vi.mocked(buildSceneFrame).mockResolvedValue(advancedFrame as never);
+    resolveDueWorldWorkForScopeMock.mockImplementation((input: { phase: string }) => {
+      if (input.phase === "pre_scene_frame") {
+        currentClock = postDueClock;
+        return {
+          phase: input.phase,
+          executed: [],
+          deferred: [],
+          skipped: [],
+          worldThreads: { executed: [], deferred: [], skipped: [] },
+          proposalPrepTrace: [],
+          proposals: {
+            selected: ["proposal-pre-frame-time"],
+            executed: [{
+              status: "committed",
+              proposalId: "proposal-pre-frame-time",
+              proposalType: "key_actor_due_decision",
+              disposition: "committed",
+              committedWorldVersion: 8,
+              toolResults: [{
+                toolName: "advance_time",
+                result: {
+                  success: true,
+                  status: "success",
+                  result: { minutes: 120, clockAdvanced: true },
+                  authority: {
+                    toolResultId: "proposal-tool-result-pre-frame-time",
+                    resultWorldVersion: 8,
+                    worldTimeMinutes: 125,
+                    elapsedWorldTimeMinutes: 120,
+                  },
+                },
+              }],
+              authorityTraceIds: ["proposal-trace-pre-frame-time"],
+              sourceJobId: null,
+            }],
+            skipped: [],
+            blockedWriteScopes: [],
+          },
+        };
+      }
+      return {
+        phase: input.phase,
+        executed: [],
+        deferred: [],
+        skipped: [],
+        worldThreads: { executed: [], deferred: [], skipped: [] },
+        proposalPrepTrace: [],
+        proposals: { selected: [], executed: [], skipped: [], blockedWriteScopes: [] },
+      };
+    });
+
+    await collectEvents(processTurn(createTestOptions()));
+
+    expect(buildSceneFrame).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        tick: 125,
+        elapsedWorldTimeMinutes: 120,
+      }),
+    );
+    expect(runGmToolLoop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tick: 125,
+        frame: expect.objectContaining({ tick: 125 }),
+      }),
+    );
+  });
+
+  it("uses SceneFrame post-catchup tick for GM tool-loop execution", async () => {
+    setupMocks();
+    setupScenePlanMocks();
+    const baseClock = {
+      campaignId: CAMPAIGN_ID,
+      worldVersion: 7,
+      worldTimeMinutes: 5,
+      currentTick: 5,
+      updatedAt: 0,
+    };
+    const postCatchupClock = {
+      campaignId: CAMPAIGN_ID,
+      worldVersion: 8,
+      worldTimeMinutes: 40,
+      currentTick: 40,
+      updatedAt: 0,
+    };
+    let currentClock = baseClock;
+    readWorldClockMock.mockImplementation(() => currentClock);
+    const catchupFrame = {
+      ...createScenePlanFrameMock(),
+      tick: 40,
+      worldVersion: 8,
+    };
+    vi.mocked(buildSceneFrame).mockReset();
+    vi.mocked(buildSceneFrame).mockImplementation(async () => {
+      currentClock = postCatchupClock;
+      return catchupFrame as never;
+    });
+
+    await collectEvents(processTurn(createTestOptions()));
+
+    expect(runGmToolLoop).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tick: 40,
+        frame: expect.objectContaining({
+          tick: 40,
+          worldVersion: 8,
+        }),
+      }),
+    );
+  });
+
+  it("uses pre-narrator due time authority and narrator-frame catchup for packet and scene assembly ticks", async () => {
+    setupMocks();
+    setupScenePlanMocks();
+    const baseClock = {
+      campaignId: CAMPAIGN_ID,
+      worldVersion: 7,
+      worldTimeMinutes: 5,
+      currentTick: 5,
+      updatedAt: 0,
+    };
+    const postDueClock = {
+      campaignId: CAMPAIGN_ID,
+      worldVersion: 9,
+      worldTimeMinutes: 205,
+      currentTick: 205,
+      updatedAt: 0,
+    };
+    const postNarratorFrameCatchupClock = {
+      campaignId: CAMPAIGN_ID,
+      worldVersion: 10,
+      worldTimeMinutes: 240,
+      currentTick: 240,
+      updatedAt: 0,
+    };
+    let currentClock = baseClock;
+    readWorldClockMock.mockImplementation(() => currentClock);
+    const baseFrame = createScenePlanFrameMock();
+    const settledFrame = {
+      ...baseFrame,
+      tick: 6,
+      worldVersion: 8,
+    };
+    const narratorFrame = {
+      ...baseFrame,
+      tick: 240,
+      worldVersion: 10,
+    };
+    vi.mocked(buildSceneFrame).mockReset();
+    vi.mocked(buildSceneFrame)
+      .mockResolvedValueOnce(baseFrame as never)
+      .mockResolvedValueOnce(settledFrame as never)
+      .mockImplementationOnce(async () => {
+        currentClock = postNarratorFrameCatchupClock;
+        return narratorFrame as never;
+      });
+    resolveDueWorldWorkForScopeMock.mockImplementation((input: { phase: string }) => {
+      if (input.phase === "pre_narrator_packet") {
+        currentClock = postDueClock;
+        return {
+          phase: input.phase,
+          executed: [],
+          deferred: [],
+          skipped: [],
+          worldThreads: { executed: [], deferred: [], skipped: [] },
+          proposalPrepTrace: [],
+          proposals: {
+            selected: ["proposal-pre-narrator-time"],
+            executed: [{
+              status: "committed",
+              proposalId: "proposal-pre-narrator-time",
+              proposalType: "key_actor_due_decision",
+              disposition: "committed",
+              committedWorldVersion: 9,
+              toolResults: [{
+                toolName: "advance_time",
+                result: {
+                  success: true,
+                  status: "success",
+                  result: { minutes: 200, clockAdvanced: true },
+                  authority: {
+                    toolResultId: "proposal-tool-result-pre-narrator-time",
+                    resultWorldVersion: 9,
+                    worldTimeMinutes: 205,
+                    elapsedWorldTimeMinutes: 200,
+                  },
+                },
+              }],
+              authorityTraceIds: ["proposal-trace-pre-narrator-time"],
+              sourceJobId: null,
+            }],
+            skipped: [],
+            blockedWriteScopes: [],
+          },
+        };
+      }
+      return {
+        phase: input.phase,
+        executed: [],
+        deferred: [],
+        skipped: [],
+        worldThreads: { executed: [], deferred: [], skipped: [] },
+        proposalPrepTrace: [],
+        proposals: { selected: [], executed: [], skipped: [], blockedWriteScopes: [] },
+      };
+    });
+
+    await collectEvents(processTurn(createTestOptions()));
+
+    expect(buildSceneFrame).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        tick: 205,
+        elapsedWorldTimeMinutes: 200,
+      }),
+    );
+    expect(buildNarratorPacket).toHaveBeenCalledWith(
+      expect.objectContaining({
+        frame: expect.objectContaining({ tick: 240 }),
+        canonicalTurnPacket: expect.objectContaining({ tick: 240 }),
+      }),
+    );
+    expect(assembleAuthoritativeScene).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pendingEventTicks: [5, 6, 205, 240],
+      }),
+    );
+    const persistedPacket = persistSettledTurnPacketMock.mock.calls[0]?.[0] as {
+      canonicalTurnPacket?: { tick?: number };
+      resultWorldVersion?: number;
+    };
+    expect(persistedPacket.canonicalTurnPacket?.tick).toBe(240);
+    expect(persistedPacket.resultWorldVersion).toBe(10);
+  });
+
+  it("refreshes the actor-reaction frame after GM authority writes before required actor decisions", async () => {
+    setupMocks();
+    const { frame, scenePlan } = setupScenePlanMocks();
+    const actorReactionFrame = {
+      ...frame,
+      worldVersion: 8,
+      currentLocationId: "loc-after-gm",
+      currentSceneScopeId: "loc-after-gm",
+    };
+    const preNarratorFrame = {
+      ...frame,
+      worldVersion: 8,
+      currentLocationId: "loc-after-gm",
+      currentSceneScopeId: "loc-after-gm",
+    };
+    const gmAuthorityResult = {
+      success: true,
+      result: {
+        committed: true,
+        eventId: "event-gm-authority",
+        durability: "durable",
+        persisted: true,
+      },
+      authority: {
+        toolResultId: "gm-tool-result-1",
+        resultWorldVersion: 8,
+        stateDeltaRefs: ["world:event"],
+        eventRefs: ["event-gm-authority"],
+      },
+    } as {
+      success: true;
+      result: { committed: boolean; eventId: string; durability: string; persisted: boolean };
+      authority: { toolResultId: string; resultWorldVersion: number; stateDeltaRefs: string[]; eventRefs: string[] };
+    };
+    const action = scenePlan.plannedActions[0]!;
+    vi.mocked(runGmToolLoop).mockResolvedValueOnce({
+      intent: "Plan a concrete local scene mutation.",
+      text: "",
+      rawToolCalls: [{
+        tool: action.toolName,
+        args: action.input,
+        result: gmAuthorityResult,
+      }],
+      stepResults: [{
+        stepId: "tool-call-1",
+        attempt: 1,
+        status: "done",
+        toolName: action.toolName,
+        candidateInput: action.input,
+        validationError: null,
+        visibleEffect: "The scene records the local consequence.",
+        privateGuardTerms: [],
+        mutationRefs: ["gm-tool-result-1"],
+        settledAtTick: frame.tick,
+          result: gmAuthorityResult,
+        }],
+      acceptedStepIds: ["tool-call-1"],
+      acceptedToolResultIds: ["gm-tool-result-1"],
+    } as never);
+    vi.mocked(buildSceneFrame).mockReset();
+    vi.mocked(buildSceneFrame)
+      .mockResolvedValueOnce(frame as never)
+      .mockResolvedValueOnce(actorReactionFrame as never)
+      .mockResolvedValueOnce(preNarratorFrame as never);
+
+    await collectEvents(processTurn(createTestOptions()));
+
+    expect(buildSceneFrame).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(buildSceneFrame).mock.invocationCallOrder[1]).toBeLessThan(
+      runRequiredActorDecisionPassMock.mock.invocationCallOrder[0]!,
+    );
+    expect(runRequiredActorDecisionPassMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sceneFrame: expect.objectContaining({
+          worldVersion: 8,
+          currentLocationId: "loc-after-gm",
+          currentSceneScopeId: "loc-after-gm",
+        }),
+        playerLocationId: "loc-after-gm",
+        playerSceneScopeId: "loc-after-gm",
+      }),
+    );
+  });
+
   it("projects move_actor GM-loop movement as legacy location_change state", async () => {
     setupMocks();
     setupScenePlanMocks();
@@ -4045,6 +4651,8 @@ describe("processTurn ScenePlan path", () => {
           },
         },
       ],
+      acceptedStepIds: ["move-actor-step"],
+      acceptedToolResultIds: [],
     } as never);
 
     const events = await collectEvents(processTurn(createTestOptions()));
@@ -4066,6 +4674,269 @@ describe("processTurn ScenePlan path", () => {
       },
     });
     expect(advanceCampaignTick).toHaveBeenCalledWith(CAMPAIGN_ID, 3);
+  });
+
+  it("accepts advance_time as contextual setup before a later GM-loop state mutation", async () => {
+    setupMocks();
+    setupScenePlanMocks({
+      gmRead: createGmReadMock({
+        sceneQuestion: "Does waiting create enough cover to move into the back room?",
+        turnIntent: "Wait briefly, then apply the concrete location change.",
+        runtimeRequirement: { kind: "state_mutation", effectKind: "movement" },
+      }),
+    });
+    const advanceInput = {
+      minutes: 5,
+      reason: "Hero waits for the queue to shift.",
+    };
+    const moveInput = {
+      actorRef: "Hero",
+      destinationRef: "Back Room",
+      evidenceRefs: ["waited-for-cover"],
+    };
+    const advanceResult = {
+      success: true,
+      status: "success",
+      result: {
+        minutes: 5,
+        reason: "Hero waits for the queue to shift.",
+        clockAdvanced: true,
+      },
+      authority: {
+        toolResultId: "tool-result-advance-time",
+        campaignId: CAMPAIGN_ID,
+        sourceEntity: { type: "player", id: SCENE_PLAN_PLAYER_ID },
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        elapsedWorldTimeMinutes: 5,
+        stateDeltaRefs: ["world_time", "elapsed:5"],
+        eventRefs: [],
+        witnesses: [],
+        knowledgeOutputs: [],
+        visibilityOutputs: [],
+        resources: [],
+      },
+    };
+    const moveResult = {
+      success: true,
+      status: "success",
+      result: {
+        kind: "move_actor",
+        actorRef: "Hero",
+        destinationRef: "Back Room",
+        locationId: "loc-back-room",
+        locationName: "Back Room",
+      },
+      authority: {
+        toolResultId: "tool-result-move-actor",
+        campaignId: CAMPAIGN_ID,
+        sourceEntity: { type: "player", id: SCENE_PLAN_PLAYER_ID },
+        baseWorldVersion: 8,
+        resultWorldVersion: 9,
+        elapsedWorldTimeMinutes: 0,
+        stateDeltaRefs: ["actor:hero", "location:loc-back-room"],
+        eventRefs: [],
+        witnesses: [],
+        knowledgeOutputs: [],
+        visibilityOutputs: [],
+        resources: [],
+      },
+    };
+    vi.mocked(runGmToolLoop).mockResolvedValueOnce({
+      intent: "Wait for cover, then move into the back room.",
+      text: "",
+      rawToolCalls: [
+        { tool: "advance_time", args: advanceInput, result: advanceResult },
+        { tool: "move_actor", args: moveInput, result: moveResult },
+      ],
+      stepResults: [
+        {
+          stepId: "advance-time-step",
+          attempt: 1,
+          status: "done",
+          toolName: "advance_time",
+          candidateInput: advanceInput,
+          validationError: null,
+          visibleEffect: "Hero waits for five minutes.",
+          privateGuardTerms: [],
+          mutationRefs: ["world_time", "elapsed:5"],
+          settledAtTick: 5,
+          result: advanceResult,
+        },
+        {
+          stepId: "move-actor-step",
+          attempt: 1,
+          status: "done",
+          toolName: "move_actor",
+          candidateInput: moveInput,
+          validationError: null,
+          visibleEffect: "Hero moves to the back room.",
+          privateGuardTerms: [],
+          mutationRefs: ["actor:hero", "location:loc-back-room"],
+          settledAtTick: 5,
+          result: moveResult,
+        },
+      ],
+      acceptedStepIds: ["advance-time-step", "move-actor-step"],
+      acceptedToolResultIds: ["tool-result-advance-time", "tool-result-move-actor"],
+    } as never);
+
+    await collectEvents(processTurn(createTestOptions()));
+
+    const persistedPacket = persistSettledTurnPacketMock.mock.calls[0]?.[0] as {
+      canonicalTurnPacket?: {
+        effects?: Array<{ toolName?: string }>;
+        turnResolution?: {
+          kind?: string;
+          consequenceIds?: string[];
+          toolNames?: string[];
+        };
+      };
+    } | undefined;
+    expect(persistSettledTurnPacketMock).toHaveBeenCalled();
+    expect(persistedPacket?.canonicalTurnPacket?.effects?.map((effect) => effect.toolName)).toEqual(
+      expect.arrayContaining(["advance_time", "move_actor"]),
+    );
+    expect(persistedPacket?.canonicalTurnPacket?.turnResolution).toMatchObject({
+      kind: "state_mutation",
+      toolNames: expect.arrayContaining(["advance_time", "move_actor"]),
+    });
+    expect(persistedPacket?.canonicalTurnPacket?.turnResolution?.consequenceIds).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^action-result:/),
+      ]),
+    );
+  });
+
+  it("uses accepted advance_time authority as the settled clock before actor and narrator frames", async () => {
+    setupMocks();
+    const { frame } = setupScenePlanMocks({
+      gmRead: createGmReadMock({
+        sceneQuestion: "What changes after the player waits for the full tide cycle?",
+        turnIntent: "Advance the lawful wait until the tide cycle is reached.",
+        runtimeRequirement: {
+          kind: "scene_beat",
+          durability: "scene_local",
+          beatKind: "time_passage",
+        },
+      }),
+    });
+    const baseClock = {
+      campaignId: CAMPAIGN_ID,
+      worldVersion: 7,
+      worldTimeMinutes: 5,
+      currentTick: 5,
+      updatedAt: 0,
+    };
+    const postAdvanceClock = {
+      campaignId: CAMPAIGN_ID,
+      worldVersion: 8,
+      worldTimeMinutes: 4325,
+      currentTick: 4325,
+      updatedAt: 0,
+    };
+    let currentClock = baseClock;
+    readWorldClockMock.mockImplementation(() => currentClock);
+    const advanceInput = {
+      minutes: 4320,
+      reason: "Hero waits until the full moon tide cycle begins.",
+    };
+    const advanceResult = {
+      success: true,
+      status: "success",
+      result: {
+        minutes: 4320,
+        reason: "Hero waits until the full moon tide cycle begins.",
+        clockAdvanced: true,
+      },
+      authority: {
+        toolResultId: "tool-result-advance-time",
+        campaignId: CAMPAIGN_ID,
+        sourceEntity: { type: "player", id: SCENE_PLAN_PLAYER_ID },
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        worldTimeMinutes: 4325,
+        elapsedWorldTimeMinutes: 4320,
+        stateDeltaRefs: ["world_time", "elapsed:4320"],
+        eventRefs: [],
+        witnesses: [],
+        knowledgeOutputs: [],
+        visibilityOutputs: [],
+        resources: [],
+      },
+    };
+    vi.mocked(runGmToolLoop).mockImplementationOnce(async () => {
+      currentClock = postAdvanceClock;
+      return {
+        intent: "The full waiting interval elapses.",
+        text: "",
+        rawToolCalls: [
+          { tool: "advance_time", args: advanceInput, result: advanceResult },
+        ],
+        stepResults: [
+          {
+            stepId: "advance-time-step",
+            attempt: 1,
+            status: "done",
+            toolName: "advance_time",
+            candidateInput: advanceInput,
+            validationError: null,
+            visibleEffect: "Hero waits until the tide cycle begins.",
+            privateGuardTerms: [],
+            mutationRefs: ["world_time", "elapsed:4320"],
+            settledAtTick: frame.tick,
+            result: advanceResult,
+          },
+        ],
+        acceptedStepIds: ["advance-time-step"],
+        acceptedToolResultIds: ["tool-result-advance-time"],
+      } as never;
+    });
+    const settledFrame = {
+      ...frame,
+      tick: 4325,
+      worldVersion: 8,
+    };
+    vi.mocked(buildSceneFrame).mockReset();
+    vi.mocked(buildSceneFrame)
+      .mockResolvedValueOnce(frame as never)
+      .mockResolvedValue(settledFrame as never);
+
+    await collectEvents(processTurn(createTestOptions()));
+
+    expect(runRequiredActorDecisionPassMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tick: 4325,
+        elapsedWorldTimeMinutes: 4320,
+        sceneFrame: expect.objectContaining({ tick: 4325 }),
+      }),
+    );
+    expect(resolveDueWorldWorkForScopeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phase: "pre_narrator_packet",
+        tick: 4325,
+        elapsedWorldTimeMinutes: 4320,
+      }),
+    );
+    expect(buildNarratorPacket).toHaveBeenCalledWith(
+      expect.objectContaining({
+        frame: expect.objectContaining({ tick: 4325 }),
+        canonicalTurnPacket: expect.objectContaining({
+          tick: 4325,
+          effects: expect.arrayContaining([
+            expect.objectContaining({ toolName: "advance_time" }),
+          ]),
+          turnResolution: expect.objectContaining({
+            kind: "scene_beat",
+            toolNames: expect.arrayContaining(["advance_time"]),
+          }),
+        }),
+      }),
+    );
+    const settledPacketInput = persistSettledTurnPacketMock.mock.calls[0]?.[0] as {
+      canonicalTurnPacket?: { tick?: number };
+    } | undefined;
+    expect(settledPacketInput?.canonicalTurnPacket?.tick).toBe(4325);
   });
 
   it("keeps observation-only GM-loop lookups as packet evidence without emitting state updates", async () => {
@@ -4223,6 +5094,8 @@ describe("processTurn ScenePlan path", () => {
           },
         },
       ],
+      acceptedStepIds: [],
+      acceptedToolResultIds: [],
     } as never);
 
     const events = await collectEvents(processTurn(createTestOptions()));
@@ -4277,31 +5150,1758 @@ describe("processTurn ScenePlan path", () => {
         observationOnly: true,
       },
     });
-    expect(persistedPacket?.canonicalTurnPacket?.effects?.[0]).toMatchObject({
-      toolName: "list_navigation_options",
-      toolResult: {
-        success: true,
-        kind: "observation",
-        observationOnly: true,
-      },
-    });
-    expect(persistedPacket?.canonicalTurnPacket?.effects?.[0]?.summary).toContain(
-      "Station CCTV",
-    );
-    expect(persistedPacket?.canonicalTurnPacket?.effects?.[0]?.summary).toContain(
-      "Lead Warden",
-    );
-    expect(persistedPacket?.canonicalTurnPacket?.effects?.[0]?.summary).toContain(
-      "ready to detain",
-    );
-    expect(persistedPacket?.canonicalTurnPacket?.effects?.[0]?.summary).toContain(
-      "rope barrier",
-    );
+    expect(persistedPacket?.canonicalTurnPacket?.effects).toEqual([]);
     expect(persistedPacket?.canonicalTurnPacket?.responses?.[0]?.summary).not.toContain(
       "GM no-mutation direction",
     );
-    expect(persistedPacket?.canonicalTurnPacket?.narratorFacts?.actionIds).toHaveLength(1);
-    expect(persistedPacket?.canonicalTurnPacket?.narratorFacts?.toolResultRefs).toHaveLength(1);
+    expect(persistedPacket?.canonicalTurnPacket?.narratorFacts?.actionIds).toHaveLength(0);
+    expect(persistedPacket?.canonicalTurnPacket?.narratorFacts?.toolResultRefs).toHaveLength(0);
+  });
+
+  it("rejects successful intent-marker GM-loop tools as side-effect boundaries, not receipts", async () => {
+    setupMocks();
+    setupScenePlanMocks();
+    vi.mocked(runGmToolLoop).mockResolvedValueOnce({
+      intent: "Record the player's unverified claim without applying state.",
+      text: "",
+      rawToolCalls: [
+        {
+          tool: "record_player_intent",
+          args: {
+            actorRef: "Hero",
+            intentType: "claim",
+            targetHint: "I already paid the toll",
+          },
+          result: {
+            success: true,
+            status: "success",
+            result: {
+              kind: "player_intent_recorded",
+              actorRef: "Hero",
+              intentType: "claim",
+              targetHint: "I already paid the toll",
+              claimTruth: "unconfirmed",
+              proofCreated: false,
+            },
+          },
+        },
+      ],
+      stepResults: [
+        {
+          stepId: "intent-marker-step",
+          attempt: 1,
+          status: "done",
+          toolName: "record_player_intent",
+          candidateInput: {
+            actorRef: "Hero",
+            intentType: "claim",
+            targetHint: "I already paid the toll",
+          },
+          validationError: null,
+          visibleEffect: "The claim is noted as unverified.",
+          privateGuardTerms: [],
+          mutationRefs: [],
+          settledAtTick: 5,
+          result: {
+            success: true,
+            status: "success",
+            result: {
+              kind: "player_intent_recorded",
+              actorRef: "Hero",
+              intentType: "claim",
+              targetHint: "I already paid the toll",
+              claimTruth: "unconfirmed",
+              proofCreated: false,
+            },
+          },
+        },
+      ],
+      acceptedStepIds: [],
+      acceptedToolResultIds: [],
+    } as never);
+
+    await expect(collectEvents(processTurn(createTestOptions()))).rejects.toThrow(
+      "GM tool loop produced successful side-effecting result(s) that do not satisfy the accepted turn receipt",
+    );
+    expect(persistSettledTurnPacketMock).not.toHaveBeenCalled();
+    expect(runRequiredActorDecisionPassMock).not.toHaveBeenCalled();
+    expect(buildNarratorPacket).not.toHaveBeenCalled();
+  });
+
+  it("does not accept a mismatched terminal receipt through the generic fallback", async () => {
+    setupMocks();
+    setupScenePlanMocks({
+      gmRead: createGmReadMock({
+        turnIntent: "Record the durable procedure answer.",
+        runtimeRequirement: {
+          kind: "world_fact",
+          topicKind: "procedure",
+          durability: "durable",
+        },
+      }),
+    });
+    vi.mocked(runGmToolLoop).mockResolvedValueOnce({
+      intent: "Accidentally record a route fact instead of the required procedure fact.",
+      text: "",
+      rawToolCalls: [
+        {
+          tool: "record_world_fact",
+          args: {
+            factKind: "rule",
+            topicKind: "route",
+            summary: "The ferry route closes after dusk.",
+            truthStatus: "established",
+            durability: "durable",
+          },
+          result: {
+            success: true,
+            status: "success",
+            result: {
+              factKind: "rule",
+              topicKind: "route",
+              summary: "The ferry route closes after dusk.",
+              truthStatus: "established",
+              durability: "durable",
+              persisted: true,
+            },
+          },
+        },
+      ],
+      stepResults: [
+        {
+          stepId: "wrong-topic-world-fact-step",
+          attempt: 1,
+          status: "done",
+          toolName: "record_world_fact",
+          candidateInput: {
+            factKind: "rule",
+            topicKind: "route",
+            summary: "The ferry route closes after dusk.",
+            truthStatus: "established",
+            durability: "durable",
+          },
+          validationError: null,
+          visibleEffect: "A route fact is recorded.",
+          privateGuardTerms: [],
+          mutationRefs: [],
+          settledAtTick: 5,
+          result: {
+            success: true,
+            status: "success",
+            result: {
+              factKind: "rule",
+              topicKind: "route",
+              summary: "The ferry route closes after dusk.",
+              truthStatus: "established",
+              durability: "durable",
+              persisted: true,
+            },
+          },
+        },
+      ],
+      acceptedStepIds: [],
+      acceptedToolResultIds: [],
+    } as never);
+
+    await expect(collectEvents(processTurn(createTestOptions()))).rejects.toThrow(
+      "GM tool loop produced successful side-effecting result(s) that do not satisfy the accepted turn receipt",
+    );
+
+    expect(persistSettledTurnPacketMock).not.toHaveBeenCalled();
+    expect(runRequiredActorDecisionPassMock).not.toHaveBeenCalled();
+    expect(appendChatMessages).toHaveBeenCalledTimes(1);
+    expect(appendChatMessages).toHaveBeenCalledWith(CAMPAIGN_ID, [
+      { role: "user", content: "I attack the goblin" },
+    ]);
+  });
+
+  it("trusts GM-loop acceptedStepIds over a broad turn-processor receipt match", async () => {
+    setupMocks();
+    setupScenePlanMocks({
+      gmRead: createGmReadMock({
+        turnIntent: "Record the durable procedure fact.",
+        runtimeRequirement: {
+          kind: "world_fact",
+          topicKind: "procedure",
+          durability: "durable",
+        },
+      }),
+    });
+    const worldFactInput = {
+      sourceKind: "public_record",
+      truthStatus: "verified",
+      factKind: "procedure",
+      topicKind: "procedure",
+      summary: "The permit office requires a stamped copy.",
+      durability: "durable",
+      futureUseKind: "permission_check",
+      futureRelevance: "The stamped-copy rule gates later permit attempts.",
+      claims: [{
+        claimKind: "requirement",
+        polarity: "requires",
+        subjectText: "Permit office stamped-copy rule",
+        summary: "The permit office requires a stamped copy.",
+      }],
+      subjectRefs: ["permit-office"],
+      sourceRefs: ["clerk"],
+    };
+    const worldFactResult = {
+      success: true,
+      status: "success",
+      result: {
+        ...worldFactInput,
+        factRef: "Knowledge:world-fact-unaccepted",
+        persisted: true,
+      },
+      authority: {
+        toolResultId: "tool-result-world-fact-unaccepted",
+        campaignId: CAMPAIGN_ID,
+        sourceEntity: { type: "player", id: SCENE_PLAN_PLAYER_ID },
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        elapsedWorldTimeMinutes: 0,
+        stateDeltaRefs: ["knowledge:world-fact-unaccepted"],
+        eventRefs: [],
+        witnesses: [],
+        knowledgeOutputs: ["Knowledge:world-fact-unaccepted"],
+        visibilityOutputs: [],
+        resources: [],
+      },
+    };
+
+    vi.mocked(runGmToolLoop).mockResolvedValueOnce({
+      intent: "Record the procedure fact.",
+      text: "",
+      rawToolCalls: [{ tool: "record_world_fact", args: worldFactInput, result: worldFactResult }],
+      stepResults: [
+        {
+          stepId: "unaccepted-world-fact-step",
+          attempt: 1,
+          status: "done",
+          toolName: "record_world_fact",
+          candidateInput: worldFactInput,
+          validationError: null,
+          visibleEffect: "The procedure fact is recorded.",
+          privateGuardTerms: [],
+          mutationRefs: ["Knowledge:world-fact-unaccepted"],
+          settledAtTick: 5,
+          result: worldFactResult,
+        },
+      ],
+      acceptedStepIds: [],
+      acceptedToolResultIds: [],
+    } as never);
+
+    await expect(collectEvents(processTurn(createTestOptions()))).rejects.toThrow(
+      "GM tool loop produced successful side-effecting result(s) that do not satisfy the accepted turn receipt",
+    );
+    expect(retractActorKnowledgeRecordMock).toHaveBeenCalledWith({
+      campaignId: CAMPAIGN_ID,
+      factRef: "Knowledge:world-fact-unaccepted",
+      reason: "unaccepted_turn_durable_memory",
+    });
+    expect(retractStoredEpisodicEventMock).not.toHaveBeenCalledWith({
+      campaignId: CAMPAIGN_ID,
+      eventId: "event-world-fact-unaccepted",
+    });
+    expect(persistSettledTurnPacketMock).not.toHaveBeenCalled();
+  });
+
+  it("persists GM-loop acceptedStepIds and acceptedToolResultIds as accepted receipt refs", async () => {
+    setupMocks();
+    setupScenePlanMocks({
+      gmRead: createGmReadMock({
+        turnIntent: "Record the durable procedure fact.",
+        runtimeRequirement: {
+          kind: "world_fact",
+          topicKind: "procedure",
+          durability: "durable",
+        },
+      }),
+    });
+    const worldFactInput = {
+      sourceKind: "public_record",
+      truthStatus: "verified",
+      factKind: "procedure",
+      topicKind: "procedure",
+      summary: "The permit office requires a stamped copy.",
+      durability: "durable",
+      futureUseKind: "permission_check",
+      futureRelevance: "The stamped-copy rule gates later permit attempts.",
+      claims: [{
+        claimKind: "requirement",
+        polarity: "requires",
+        subjectText: "Permit office stamped-copy rule",
+        summary: "The permit office requires a stamped copy.",
+      }],
+      subjectRefs: ["permit-office"],
+      sourceRefs: ["clerk"],
+    };
+    const worldFactResult = {
+      success: true,
+      status: "success",
+      result: {
+        ...worldFactInput,
+        eventId: "event-world-fact-accepted",
+        persisted: true,
+      },
+      authority: {
+        toolResultId: "tool-result-world-fact-accepted",
+        campaignId: CAMPAIGN_ID,
+        sourceEntity: { type: "player", id: SCENE_PLAN_PLAYER_ID },
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        elapsedWorldTimeMinutes: 0,
+        stateDeltaRefs: ["event-world-fact-accepted"],
+        eventRefs: ["event-world-fact-accepted"],
+        witnesses: [],
+        knowledgeOutputs: [],
+        visibilityOutputs: [],
+        resources: [],
+      },
+    };
+
+    vi.mocked(runGmToolLoop).mockResolvedValueOnce({
+      intent: "Record the procedure fact.",
+      text: "",
+      rawToolCalls: [{ tool: "record_world_fact", args: worldFactInput, result: worldFactResult }],
+      stepResults: [
+        {
+          stepId: "accepted-world-fact-step",
+          attempt: 1,
+          status: "done",
+          toolName: "record_world_fact",
+          candidateInput: worldFactInput,
+          validationError: null,
+          visibleEffect: "The procedure fact is recorded.",
+          privateGuardTerms: [],
+          mutationRefs: ["event-world-fact-accepted"],
+          settledAtTick: 5,
+          result: worldFactResult,
+        },
+      ],
+      acceptedStepIds: ["accepted-world-fact-step"],
+      acceptedToolResultIds: ["tool-result-world-fact-accepted"],
+    } as never);
+
+    await collectEvents(processTurn(createTestOptions()));
+
+    const persistedPacket = persistSettledTurnPacketMock.mock.calls[0]?.[0] as {
+      acceptedToolResultRefs?: string[];
+      acceptedDurableEventIds?: string[];
+      canonicalTurnPacket?: { effects?: Array<{ toolName?: string }> };
+    };
+    expect(persistedPacket.acceptedToolResultRefs).toEqual(
+      expect.arrayContaining([
+        "accepted-world-fact-step",
+        "tool-result-world-fact-accepted",
+      ]),
+    );
+    expect(persistedPacket.acceptedDurableEventIds).toEqual(["event-world-fact-accepted"]);
+    expect(persistedPacket.canonicalTurnPacket?.effects).toEqual(
+      expect.arrayContaining([expect.objectContaining({ toolName: "record_world_fact" })]),
+    );
+  });
+
+  it("rejects applied_now dialogue stateEffects without prior structural action under any runtime requirement", async () => {
+    setupMocks();
+    setupScenePlanMocks({
+      gmRead: createGmReadMock({
+        turnIntent: "Record the current scene beat.",
+        runtimeRequirement: {
+          kind: "scene_beat",
+          durability: "durable",
+          beatKind: "event_log",
+        },
+      }),
+    });
+    const dialogueInput = {
+      speakerRef: "Clerk",
+      addresseeRefs: ["Hero"],
+      outcomeKind: "answered",
+      topicKind: "procedure",
+      authorityKind: "role_authority",
+      truthStatus: "settled_by_backend",
+      durability: "durable",
+      summary: "The clerk says Hero is now cleared.",
+      quote: "Hero is now cleared for this route.",
+      sourceRefs: ["Clerk"],
+      futureUseKind: "permission_check",
+      futureRelevance: "The claimed clearance would control later route checks.",
+      claims: [{
+        claimKind: "permission",
+        polarity: "allows",
+        subjectText: "Hero's route clearance",
+        summary: "The clerk says Hero is cleared for the route.",
+      }],
+      stateEffects: [{
+        effectId: "effect-cleared-by-clerk",
+        status: "applied_now",
+        structuralTool: "add_tag",
+        targetRef: "Hero",
+        stateKey: "tag",
+        stateValue: "cleared-by-clerk",
+        summary: "Hero is marked as cleared by the clerk.",
+      }],
+    };
+    const dialogueResult = {
+      success: true,
+      status: "success",
+      result: {
+        ...dialogueInput,
+        eventId: "event-dialogue-unbacked-applied-now",
+        persisted: true,
+      },
+      authority: {
+        toolResultId: "tool-result-dialogue-unbacked-applied-now",
+        campaignId: CAMPAIGN_ID,
+        sourceEntity: { type: "player", id: SCENE_PLAN_PLAYER_ID },
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        elapsedWorldTimeMinutes: 0,
+        stateDeltaRefs: ["event-dialogue-unbacked-applied-now"],
+        eventRefs: ["event-dialogue-unbacked-applied-now"],
+        witnesses: [],
+        knowledgeOutputs: [],
+        visibilityOutputs: [],
+        resources: [],
+      },
+    };
+
+    vi.mocked(runGmToolLoop).mockResolvedValueOnce({
+      intent: "Record an unbacked applied dialogue effect.",
+      text: "",
+      rawToolCalls: [{ tool: "record_dialogue_outcome", args: dialogueInput, result: dialogueResult }],
+      stepResults: [
+        {
+          stepId: "dialogue-unbacked-applied-now-step",
+          attempt: 1,
+          status: "done",
+          toolName: "record_dialogue_outcome",
+          candidateInput: dialogueInput,
+          validationError: null,
+          visibleEffect: "The clerk's answer is recorded.",
+          privateGuardTerms: [],
+          mutationRefs: ["event-dialogue-unbacked-applied-now"],
+          settledAtTick: 5,
+          result: dialogueResult,
+        },
+      ],
+      acceptedStepIds: ["dialogue-unbacked-applied-now-step"],
+      acceptedToolResultIds: ["tool-result-dialogue-unbacked-applied-now"],
+    } as never);
+
+    await expect(collectEvents(processTurn(createTestOptions()))).rejects.toThrow(
+      "record_dialogue_outcome declared applied_now stateEffect without a prior matching structural state tool result",
+    );
+    expect(persistSettledTurnPacketMock).not.toHaveBeenCalled();
+  });
+
+  it("retracts produced durable memory when the result is evidence-only for the required receipt", async () => {
+    setupMocks();
+    setupScenePlanMocks({
+      gmRead: createGmReadMock({
+        turnIntent: "Record the durable procedure answer.",
+        runtimeRequirement: {
+          kind: "world_fact",
+          topicKind: "procedure",
+          durability: "durable",
+        },
+      }),
+    });
+    vi.mocked(runGmToolLoop).mockResolvedValueOnce({
+      intent: "The tool loop logged supporting evidence but did not create the required world fact.",
+      observationSummary: "A witness says the stamp might matter later.",
+      text: "",
+      rawToolCalls: [
+        {
+          tool: "log_event",
+          args: {
+            text: "A witness mentions the stamp.",
+            importance: 6,
+            participants: ["Hero", "Witness"],
+            durability: "durable",
+            futureRelevance: "The witness statement may matter later.",
+          },
+          result: {
+            success: true,
+            status: "success",
+            result: {
+              eventId: "event-evidence-only",
+              durability: "durable",
+              persisted: true,
+            },
+          },
+        },
+      ],
+      stepResults: [
+        {
+          stepId: "evidence-only-log-event-step",
+          attempt: 1,
+          status: "done",
+          toolName: "log_event",
+          candidateInput: {
+            text: "A witness mentions the stamp.",
+            importance: 6,
+            participants: ["Hero", "Witness"],
+            durability: "durable",
+            futureRelevance: "The witness statement may matter later.",
+          },
+          validationError: null,
+          visibleEffect: "The witness statement is heard.",
+          privateGuardTerms: [],
+          mutationRefs: ["event-evidence-only"],
+          settledAtTick: 5,
+          result: {
+            success: true,
+            status: "success",
+            result: {
+              eventId: "event-evidence-only",
+              durability: "durable",
+              persisted: true,
+            },
+          },
+        },
+      ],
+      acceptedStepIds: [],
+      acceptedToolResultIds: [],
+    } as never);
+
+    await expect(collectEvents(processTurn(createTestOptions()))).rejects.toThrow(
+      "GM tool loop produced successful side-effecting result(s) that do not satisfy the accepted turn receipt",
+    );
+
+    expect(retractStoredEpisodicEventMock).toHaveBeenCalledWith({
+      campaignId: CAMPAIGN_ID,
+      eventId: "event-evidence-only",
+    });
+    expect(retractReflectionBudgetMock).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      ["Hero", "Witness"],
+      6,
+    );
+    expect(retractStoredEpisodicEventMock.mock.invocationCallOrder[0]).toBeLessThan(
+      retractReflectionBudgetMock.mock.invocationCallOrder[0]!,
+    );
+    expect(persistSettledTurnPacketMock).not.toHaveBeenCalled();
+    expect(runRequiredActorDecisionPassMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      toolName: "log_event",
+      args: {
+        text: "A witness mentions the stamp.",
+        importance: 6,
+        participants: ["Hero", "Witness"],
+        durability: "durable",
+        futureRelevance: "The witness statement may matter later.",
+      },
+      payload: {
+        eventId: "event-wrong-log-receipt",
+        durability: "durable",
+        persisted: true,
+      },
+    },
+    {
+      toolName: "record_dialogue_outcome",
+      args: {
+        speakerRef: "Witness",
+        addresseeRefs: ["Hero"],
+        outcomeKind: "answered",
+        topicKind: "procedure",
+        authorityKind: "witness_claim",
+        truthStatus: "speaker_asserted",
+        durability: "durable",
+        futureUseKind: "lead",
+        futureRelevance: "The witness answer may matter later.",
+      },
+      payload: {
+        eventId: "event-wrong-dialogue-receipt",
+        topicKind: "procedure",
+        outcomeKind: "answered",
+        durability: "durable",
+        persisted: true,
+      },
+    },
+  ])("fails closed when committed durable $toolName is not the required receipt", async ({ toolName, args, payload }) => {
+    setupMocks();
+    setupScenePlanMocks({
+      gmRead: createGmReadMock({
+        turnIntent: "Record the durable procedure fact.",
+        runtimeRequirement: {
+          kind: "world_fact",
+          topicKind: "procedure",
+          durability: "durable",
+        },
+      }),
+    });
+
+    const result = {
+      success: true,
+      status: "success",
+      result: payload,
+      authority: {
+        toolResultId: `tool-result-${toolName}`,
+        campaignId: CAMPAIGN_ID,
+        sourceEntity: { type: "player", id: SCENE_PLAN_PLAYER_ID },
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        elapsedWorldTimeMinutes: 0,
+        stateDeltaRefs: [`tool:${toolName}:wrong-receipt`],
+        eventRefs: [payload.eventId],
+        witnesses: [],
+        knowledgeOutputs: [],
+        visibilityOutputs: [],
+        resources: [],
+      },
+    };
+    vi.mocked(runGmToolLoop).mockResolvedValueOnce({
+      intent: `Wrongly used ${toolName} instead of record_world_fact.`,
+      observationSummary: "The wrong durable receipt committed authority.",
+      text: "",
+      rawToolCalls: [{ tool: toolName, args, result }],
+      stepResults: [
+        {
+          stepId: `wrong-${toolName}-step`,
+          attempt: 1,
+          status: "done",
+          toolName,
+          candidateInput: args,
+          validationError: null,
+          visibleEffect: "The wrong durable record is visible.",
+          privateGuardTerms: [],
+          mutationRefs: [`tool:${toolName}:wrong-receipt`],
+          settledAtTick: 5,
+          result,
+        },
+      ],
+    } as never);
+
+    await expect(collectEvents(processTurn(createTestOptions()))).rejects.toThrow(
+      "GM tool loop produced successful side-effecting result(s) that do not satisfy the accepted turn receipt",
+    );
+
+    expect(persistSettledTurnPacketMock).not.toHaveBeenCalled();
+    expect(runRequiredActorDecisionPassMock).not.toHaveBeenCalled();
+    expect(buildNarratorPacket).not.toHaveBeenCalled();
+  });
+
+  it("accepts a structural-effect dialogue refusal when no state was applied", async () => {
+    setupMocks();
+    setupScenePlanMocks({
+      gmRead: createGmReadMock({
+        turnIntent: "Record that the clerk refused the requested route permission.",
+        runtimeRequirement: {
+          kind: "dialogue_outcome",
+          topicKind: "permission",
+          durability: "durable",
+          requiresStructuralEffect: true,
+          effectKind: "entity_tag",
+        },
+      }),
+    });
+    const dialogueInput = {
+      speakerRef: "Clerk",
+      addresseeRefs: ["Hero"],
+      outcomeKind: "refused",
+      topicKind: "permission",
+      authorityKind: "role_authority",
+      truthStatus: "settled_by_backend",
+      durability: "durable",
+      futureUseKind: "permission_check",
+      futureRelevance: "The clerk's refusal controls later route attempts until the player brings proof.",
+      summary: "The clerk refuses to mark Hero as cleared without the missing seal.",
+      sourceRefs: ["Clerk"],
+      claims: [
+        {
+          claimKind: "permission",
+          polarity: "denies",
+          subjectText: "Hero's route trust status",
+          summary: "Hero is not cleared for this route without the missing seal.",
+        },
+      ],
+      stateEffects: [],
+    };
+    const dialogueResult = {
+      success: true,
+      status: "success",
+      result: {
+        eventId: "event-dialogue-refusal",
+        ...dialogueInput,
+        persisted: true,
+      },
+      authority: {
+        toolResultId: "tool-result-dialogue-refusal",
+        campaignId: CAMPAIGN_ID,
+        sourceEntity: { type: "player", id: SCENE_PLAN_PLAYER_ID },
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        elapsedWorldTimeMinutes: 0,
+        stateDeltaRefs: ["event-dialogue-refusal"],
+        eventRefs: ["event-dialogue-refusal"],
+        witnesses: [],
+        knowledgeOutputs: [],
+        visibilityOutputs: [],
+        resources: [],
+      },
+    };
+
+    vi.mocked(runGmToolLoop).mockResolvedValueOnce({
+      intent: "Record the clerk's refusal.",
+      text: "",
+      rawToolCalls: [
+        { tool: "record_dialogue_outcome", args: dialogueInput, result: dialogueResult },
+      ],
+      stepResults: [
+        {
+          stepId: "accepted-dialogue-refusal-step",
+          attempt: 1,
+          status: "done",
+          toolName: "record_dialogue_outcome",
+          candidateInput: dialogueInput,
+          validationError: null,
+          visibleEffect: "The clerk's refusal is recorded.",
+          privateGuardTerms: [],
+          mutationRefs: ["event-dialogue-refusal"],
+          settledAtTick: 5,
+          result: dialogueResult,
+        },
+      ],
+      acceptedStepIds: ["accepted-dialogue-refusal-step"],
+      acceptedToolResultIds: ["tool-result-dialogue-refusal"],
+    } as never);
+
+    await collectEvents(processTurn(createTestOptions()));
+
+    const persistedPacket = persistSettledTurnPacketMock.mock.calls[0]?.[0] as {
+      acceptedToolResultRefs?: string[];
+      acceptedDurableEventIds?: string[];
+      canonicalTurnPacket?: { effects?: Array<{ toolName?: string }> };
+    };
+    expect(persistedPacket.acceptedToolResultRefs).toEqual(
+      expect.arrayContaining(["accepted-dialogue-refusal-step"]),
+    );
+    expect(persistedPacket.acceptedDurableEventIds).toEqual(["event-dialogue-refusal"]);
+    expect(persistedPacket.canonicalTurnPacket?.effects).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ toolName: "record_dialogue_outcome" }),
+      ]),
+    );
+    expect(buildNarratorPacket).toHaveBeenCalled();
+  });
+
+  it("accepts create_scene_extra only when dialogue cites the returned actor identity", async () => {
+    setupMocks();
+    setupScenePlanMocks({
+      gmRead: createGmReadMock({
+        turnIntent: "Create a current-scene clerk and record the clerk's answer.",
+        runtimeRequirement: {
+          kind: "dialogue_outcome",
+          topicKind: "procedure",
+          durability: "durable",
+        },
+      }),
+    });
+    const sceneExtraResult = {
+      success: true,
+      status: "success",
+      result: {
+        id: "npc-disputes-clerk",
+        name: "Concourse Disputes Clerk",
+        kind: "scene_extra",
+        role: "clerk",
+        temporary: true,
+      },
+      authority: {
+        toolResultId: "tool-result-scene-extra",
+        campaignId: CAMPAIGN_ID,
+        sourceEntity: { type: "player", id: SCENE_PLAN_PLAYER_ID },
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        elapsedWorldTimeMinutes: 0,
+        stateDeltaRefs: ["npc:npc-disputes-clerk", "Concourse Disputes Clerk"],
+        eventRefs: [],
+        witnesses: [],
+        knowledgeOutputs: [],
+        visibilityOutputs: [],
+        resources: [],
+      },
+    };
+    const dialogueInput = {
+      speakerRef: "npc-disputes-clerk",
+      addresseeRefs: ["Hero"],
+      outcomeKind: "answered",
+      topicKind: "procedure",
+      authorityKind: "role_authority",
+      truthStatus: "settled_by_backend",
+      durability: "durable",
+      futureUseKind: "route_choice",
+      futureRelevance: "The clerk's answer tells Hero which queue to use later.",
+      summary: "The disputes clerk points Hero to the stamped-copy queue.",
+      quote: "Stamped-copy disputes go through the north queue.",
+      sourceRefs: ["npc-disputes-clerk"],
+      claims: [
+        {
+          claimKind: "requirement",
+          polarity: "states",
+          subjectText: "Stamped-copy queue",
+          summary: "Stamped-copy disputes go through the north queue.",
+        },
+      ],
+      stateEffects: [],
+    };
+    const dialogueResult = {
+      success: true,
+      status: "success",
+      result: {
+        eventId: "event-clerk-answer",
+        ...dialogueInput,
+        persisted: true,
+      },
+      authority: {
+        toolResultId: "tool-result-clerk-answer",
+        campaignId: CAMPAIGN_ID,
+        sourceEntity: { type: "player", id: SCENE_PLAN_PLAYER_ID },
+        baseWorldVersion: 8,
+        resultWorldVersion: 9,
+        elapsedWorldTimeMinutes: 0,
+        stateDeltaRefs: ["event-clerk-answer"],
+        eventRefs: ["event-clerk-answer"],
+        witnesses: [],
+        knowledgeOutputs: [],
+        visibilityOutputs: [],
+        resources: [],
+      },
+    };
+
+    vi.mocked(runGmToolLoop).mockResolvedValueOnce({
+      intent: "Create the clerk and record their answer.",
+      text: "",
+      rawToolCalls: [],
+      stepResults: [
+        {
+          stepId: "scene-extra-step",
+          attempt: 1,
+          status: "done",
+          toolName: "create_scene_extra",
+          candidateInput: {
+            locationRef: "current_scene",
+            role: "clerk",
+            name: "Concourse Disputes Clerk",
+            reason: "A local support responder is needed.",
+          },
+          validationError: null,
+          visibleEffect: "A disputes clerk is available.",
+          privateGuardTerms: [],
+          mutationRefs: ["npc-disputes-clerk"],
+          settledAtTick: 5,
+          result: sceneExtraResult,
+        },
+        {
+          stepId: "dialogue-uses-scene-extra-step",
+          attempt: 1,
+          status: "done",
+          toolName: "record_dialogue_outcome",
+          candidateInput: dialogueInput,
+          validationError: null,
+          visibleEffect: "The clerk's answer is recorded.",
+          privateGuardTerms: [],
+          mutationRefs: ["event-clerk-answer"],
+          settledAtTick: 5,
+          result: dialogueResult,
+        },
+      ],
+      acceptedStepIds: ["scene-extra-step", "dialogue-uses-scene-extra-step"],
+      acceptedToolResultIds: ["tool-result-scene-extra", "tool-result-clerk-answer"],
+    } as never);
+
+    await collectEvents(processTurn(createTestOptions()));
+
+    const persistedPacket = persistSettledTurnPacketMock.mock.calls[0]?.[0] as {
+      acceptedToolResultRefs?: string[];
+    };
+    expect(persistedPacket.acceptedToolResultRefs).toEqual(
+      expect.arrayContaining([
+        "scene-extra-step",
+        "dialogue-uses-scene-extra-step",
+      ]),
+    );
+  });
+
+  it("keeps observation-only scene-extra reuse evidence-only before an accepted dialogue outcome", async () => {
+    setupMocks();
+    setupScenePlanMocks({
+      gmRead: createGmReadMock({
+        turnIntent: "Use the local clerk already in scene and record the clerk's answer.",
+        runtimeRequirement: {
+          kind: "dialogue_outcome",
+          topicKind: "procedure",
+          durability: "durable",
+        },
+      }),
+    });
+    const sceneExtraInput = {
+      locationRef: "current_scene",
+      role: "clerk",
+      name: "Concourse Disputes Clerk",
+      reason: "Reuse the visible local clerk for the answer.",
+    };
+    const sceneExtraReuseResult = {
+      success: true,
+      kind: "observation",
+      observationOnly: true,
+      result: {
+        id: "npc-existing-local-clerk",
+        name: "Concourse Disputes Clerk",
+        locationId: "loc-concourse",
+        locationName: "Concourse",
+        tier: "temporary",
+        temporary: true,
+        reusedExisting: true,
+        delegateTool: "existing_npc",
+      },
+    };
+    const dialogueInput = {
+      speakerRef: "npc-existing-local-clerk",
+      addresseeRefs: ["Hero"],
+      outcomeKind: "answered",
+      topicKind: "procedure",
+      authorityKind: "role_authority",
+      truthStatus: "settled_by_backend",
+      durability: "durable",
+      futureUseKind: "route_choice",
+      futureRelevance: "The clerk's answer tells Hero which queue to use later.",
+      summary: "The existing disputes clerk points Hero to the stamped-copy queue.",
+      quote: "Stamped-copy disputes go through the north queue.",
+      sourceRefs: ["npc-existing-local-clerk"],
+      claims: [
+        {
+          claimKind: "requirement",
+          polarity: "states",
+          subjectText: "Stamped-copy queue",
+          summary: "Stamped-copy disputes go through the north queue.",
+        },
+      ],
+      stateEffects: [],
+    };
+    const dialogueResult = {
+      success: true,
+      status: "success",
+      result: {
+        eventId: "event-existing-clerk-answer",
+        ...dialogueInput,
+        persisted: true,
+      },
+      authority: {
+        toolResultId: "tool-result-existing-clerk-answer",
+        campaignId: CAMPAIGN_ID,
+        sourceEntity: { type: "player", id: SCENE_PLAN_PLAYER_ID },
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        elapsedWorldTimeMinutes: 0,
+        stateDeltaRefs: ["event-existing-clerk-answer"],
+        eventRefs: ["event-existing-clerk-answer"],
+        witnesses: [],
+        knowledgeOutputs: [],
+        visibilityOutputs: [],
+        resources: [],
+      },
+    };
+
+    vi.mocked(runGmToolLoop).mockResolvedValueOnce({
+      intent: "Reuse the local clerk and record their answer.",
+      text: "",
+      rawToolCalls: [],
+      stepResults: [
+        {
+          stepId: "scene-extra-reuse-step",
+          attempt: 1,
+          status: "done",
+          toolName: "create_scene_extra",
+          candidateInput: sceneExtraInput,
+          validationError: null,
+          visibleEffect: "An existing disputes clerk is already available.",
+          privateGuardTerms: [],
+          mutationRefs: [],
+          settledAtTick: 5,
+          result: sceneExtraReuseResult,
+        },
+        {
+          stepId: "dialogue-existing-clerk-step",
+          attempt: 1,
+          status: "done",
+          toolName: "record_dialogue_outcome",
+          candidateInput: dialogueInput,
+          validationError: null,
+          visibleEffect: "The clerk's answer is recorded.",
+          privateGuardTerms: [],
+          mutationRefs: ["event-existing-clerk-answer"],
+          settledAtTick: 5,
+          result: dialogueResult,
+        },
+      ],
+      acceptedStepIds: ["scene-extra-reuse-step", "dialogue-existing-clerk-step"],
+      acceptedToolResultIds: [
+        "tool-result-scene-extra-reuse",
+        "tool-result-existing-clerk-answer",
+      ],
+    } as never);
+
+    const events = await collectEvents(processTurn(createTestOptions()));
+
+    const persistedPacket = persistSettledTurnPacketMock.mock.calls[0]?.[0] as {
+      acceptedToolResultRefs?: string[];
+      acceptedDurableEventIds?: string[];
+      canonicalTurnPacket?: {
+        actionResults?: Array<{
+          actionRef?: string;
+          acceptedReceipt?: boolean;
+          toolName?: string;
+          input?: unknown;
+          args?: unknown;
+        }>;
+        effects?: Array<{ toolName?: string }>;
+        narratorFacts?: { toolResultRefs?: Array<{ toolName?: string }> };
+      };
+    };
+    const stateUpdates = events.filter((event) => event.type === "state_update");
+    expect(stateUpdates).toEqual([]);
+    expect(persistedPacket.acceptedToolResultRefs).toContain("dialogue-existing-clerk-step");
+    expect(persistedPacket.acceptedToolResultRefs).not.toContain("scene-extra-reuse-step");
+    expect(persistedPacket.acceptedDurableEventIds).toEqual(["event-existing-clerk-answer"]);
+    expect(persistedPacket.canonicalTurnPacket?.effects).toEqual([
+      expect.objectContaining({ toolName: "record_dialogue_outcome" }),
+    ]);
+    expect(persistedPacket.canonicalTurnPacket?.narratorFacts?.toolResultRefs).toEqual([
+      expect.objectContaining({ toolName: "record_dialogue_outcome" }),
+    ]);
+    expect(persistedPacket.canonicalTurnPacket?.actionResults).toEqual([
+      expect.objectContaining({
+        actionRef: "dialogue-existing-clerk-step",
+        acceptedReceipt: true,
+        toolName: "record_dialogue_outcome",
+        input: dialogueInput,
+        args: dialogueInput,
+      }),
+    ]);
+  });
+
+  it("rejects create_scene_extra acceptance through role-only dialogue refs", async () => {
+    setupMocks();
+    setupScenePlanMocks({
+      gmRead: createGmReadMock({
+        turnIntent: "Create a current-scene clerk and record the clerk's answer.",
+        runtimeRequirement: {
+          kind: "dialogue_outcome",
+          topicKind: "procedure",
+          durability: "durable",
+        },
+      }),
+    });
+    const sceneExtraResult = {
+      success: true,
+      status: "success",
+      result: {
+        id: "npc-disputes-clerk",
+        name: "Concourse Disputes Clerk",
+        kind: "scene_extra",
+        role: "clerk",
+        temporary: true,
+      },
+      authority: {
+        toolResultId: "tool-result-scene-extra",
+        campaignId: CAMPAIGN_ID,
+        sourceEntity: { type: "player", id: SCENE_PLAN_PLAYER_ID },
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        elapsedWorldTimeMinutes: 0,
+        stateDeltaRefs: ["npc:npc-disputes-clerk", "Concourse Disputes Clerk"],
+        eventRefs: [],
+        witnesses: [],
+        knowledgeOutputs: [],
+        visibilityOutputs: [],
+        resources: [],
+      },
+    };
+    const dialogueInput = {
+      speakerRef: "clerk",
+      addresseeRefs: ["Hero"],
+      outcomeKind: "answered",
+      topicKind: "procedure",
+      authorityKind: "role_authority",
+      truthStatus: "settled_by_backend",
+      durability: "durable",
+      futureUseKind: "route_choice",
+      futureRelevance: "The clerk's answer tells Hero which queue to use later.",
+      summary: "A clerk points Hero to the stamped-copy queue.",
+      quote: "Stamped-copy disputes go through the north queue.",
+      sourceRefs: ["clerk"],
+      claims: [
+        {
+          claimKind: "requirement",
+          polarity: "states",
+          subjectText: "Stamped-copy queue",
+          summary: "Stamped-copy disputes go through the north queue.",
+        },
+      ],
+      stateEffects: [],
+    };
+    const dialogueResult = {
+      success: true,
+      status: "success",
+      result: {
+        eventId: "event-clerk-answer",
+        ...dialogueInput,
+        persisted: true,
+      },
+    };
+
+    vi.mocked(runGmToolLoop).mockResolvedValueOnce({
+      intent: "Create the clerk and record their answer with a role label.",
+      text: "",
+      rawToolCalls: [],
+      stepResults: [
+        {
+          stepId: "scene-extra-role-only-step",
+          attempt: 1,
+          status: "done",
+          toolName: "create_scene_extra",
+          candidateInput: {
+            locationRef: "current_scene",
+            role: "clerk",
+            name: "Concourse Disputes Clerk",
+            reason: "A local support responder is needed.",
+          },
+          validationError: null,
+          visibleEffect: "A disputes clerk is available.",
+          privateGuardTerms: [],
+          mutationRefs: ["npc-disputes-clerk"],
+          settledAtTick: 5,
+          result: sceneExtraResult,
+        },
+        {
+          stepId: "dialogue-role-only-step",
+          attempt: 1,
+          status: "done",
+          toolName: "record_dialogue_outcome",
+          candidateInput: dialogueInput,
+          validationError: null,
+          visibleEffect: "The clerk's answer is recorded.",
+          privateGuardTerms: [],
+          mutationRefs: ["event-clerk-answer"],
+          settledAtTick: 5,
+          result: dialogueResult,
+        },
+      ],
+      acceptedStepIds: ["dialogue-role-only-step"],
+      acceptedToolResultIds: [],
+    } as never);
+
+    await expect(collectEvents(processTurn(createTestOptions()))).rejects.toThrow(
+      "GM tool loop produced successful side-effecting result(s) that do not satisfy the accepted turn receipt",
+    );
+    expect(persistSettledTurnPacketMock).not.toHaveBeenCalled();
+    expect(buildNarratorPacket).not.toHaveBeenCalled();
+  });
+
+  it("accepts a dialogue structural pre-tool when the accepted dialogue receipt backs it", async () => {
+    setupMocks();
+    setupScenePlanMocks({
+      gmRead: createGmReadMock({
+        turnIntent: "Apply the clerk's permission mark and record the answer.",
+        runtimeRequirement: {
+          kind: "dialogue_outcome",
+          topicKind: "permission",
+          durability: "durable",
+          requiresStructuralEffect: true,
+          effectKind: "entity_tag",
+        },
+      }),
+    });
+    const stateEffect = {
+      effectId: "effect-trusted-by-clerk",
+      status: "applied_now",
+      structuralTool: "add_tag",
+      targetRef: "Hero",
+      stateKey: "tag",
+      stateValue: "trusted-by-clerk",
+      summary: "Hero is marked as trusted by the clerk.",
+    };
+    const addTagResult = {
+      success: true,
+      status: "success",
+      result: {
+        entity: "Hero",
+        appliedTag: "trusted-by-clerk",
+        tags: ["trusted-by-clerk"],
+      },
+      authority: {
+        toolResultId: "tool-result-add-tag",
+        campaignId: CAMPAIGN_ID,
+        sourceEntity: { type: "player", id: SCENE_PLAN_PLAYER_ID },
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        elapsedWorldTimeMinutes: 0,
+        stateDeltaRefs: ["actor:hero", "trusted-by-clerk"],
+        eventRefs: [],
+        witnesses: [],
+        knowledgeOutputs: [],
+        visibilityOutputs: [],
+        resources: [],
+      },
+    };
+    const dialogueResult = {
+      success: true,
+      status: "success",
+      result: {
+        eventId: "event-dialogue-structural",
+        topicKind: "permission",
+        outcomeKind: "answered",
+        authorityKind: "role_authority",
+        truthStatus: "settled_by_backend",
+        durability: "durable",
+        persisted: true,
+        futureUseKind: "permission_check",
+        futureRelevance: "The clerk's trust mark can affect later route checks.",
+        summary: "The clerk accepts Hero as trusted for this route.",
+        claims: [
+          {
+            claimKind: "permission",
+            polarity: "allows",
+            subjectText: "Hero's route trust status",
+            summary: "Hero is trusted by the clerk for this route.",
+          },
+        ],
+        stateEffects: [stateEffect],
+      },
+      authority: {
+        toolResultId: "tool-result-dialogue",
+        campaignId: CAMPAIGN_ID,
+        sourceEntity: { type: "player", id: SCENE_PLAN_PLAYER_ID },
+        baseWorldVersion: 8,
+        resultWorldVersion: 9,
+        elapsedWorldTimeMinutes: 0,
+        stateDeltaRefs: ["event-dialogue-structural"],
+        eventRefs: ["event-dialogue-structural"],
+        witnesses: [],
+        knowledgeOutputs: [],
+        visibilityOutputs: [],
+        resources: [],
+      },
+    };
+
+    vi.mocked(runGmToolLoop).mockResolvedValueOnce({
+      intent: "Apply the permission mark and record the clerk's answer.",
+      text: "",
+      rawToolCalls: [
+        {
+          tool: "add_tag",
+          args: { entityName: "Hero", entityType: "player", tag: "trusted-by-clerk" },
+          result: addTagResult,
+        },
+        {
+          tool: "record_dialogue_outcome",
+          args: {
+            speakerRef: "Clerk",
+            addresseeRefs: ["Hero"],
+            outcomeKind: "answered",
+            topicKind: "permission",
+            authorityKind: "role_authority",
+            truthStatus: "settled_by_backend",
+            durability: "durable",
+            futureUseKind: "permission_check",
+            futureRelevance: "The clerk's trust mark can affect later route checks.",
+            summary: "The clerk accepts Hero as trusted for this route.",
+            quote: "I accept Hero as trusted for this route.",
+            sourceRefs: ["Clerk"],
+            claims: [
+              {
+                claimKind: "permission",
+                polarity: "allows",
+                subjectText: "Hero's route trust status",
+                summary: "Hero is trusted by the clerk for this route.",
+              },
+            ],
+            stateEffects: [stateEffect],
+          },
+          result: dialogueResult,
+        },
+      ],
+      stepResults: [
+        {
+          stepId: "backing-add-tag-step",
+          attempt: 1,
+          status: "done",
+          toolName: "add_tag",
+          candidateInput: { entityName: "Hero", entityType: "player", tag: "trusted-by-clerk" },
+          validationError: null,
+          visibleEffect: "Hero is marked as trusted by the clerk.",
+          privateGuardTerms: [],
+          mutationRefs: ["actor:hero", "trusted-by-clerk"],
+          settledAtTick: 5,
+          result: addTagResult,
+        },
+        {
+          stepId: "accepted-dialogue-step",
+          attempt: 1,
+          status: "done",
+          toolName: "record_dialogue_outcome",
+          candidateInput: {
+            speakerRef: "Clerk",
+            addresseeRefs: ["Hero"],
+            outcomeKind: "answered",
+            topicKind: "permission",
+            authorityKind: "role_authority",
+            truthStatus: "settled_by_backend",
+            durability: "durable",
+            futureUseKind: "permission_check",
+            futureRelevance: "The clerk's trust mark can affect later route checks.",
+            summary: "The clerk accepts Hero as trusted for this route.",
+            quote: "I accept Hero as trusted for this route.",
+            sourceRefs: ["Clerk"],
+            claims: [
+              {
+                claimKind: "permission",
+                polarity: "allows",
+                subjectText: "Hero's route trust status",
+                summary: "Hero is trusted by the clerk for this route.",
+              },
+            ],
+            stateEffects: [stateEffect],
+          },
+          validationError: null,
+          visibleEffect: "The clerk's permission is recorded.",
+          privateGuardTerms: [],
+          mutationRefs: ["event-dialogue-structural"],
+          settledAtTick: 5,
+          result: dialogueResult,
+        },
+      ],
+      acceptedStepIds: ["backing-add-tag-step", "accepted-dialogue-step"],
+      acceptedToolResultIds: ["tool-result-add-tag", "tool-result-dialogue"],
+    } as never);
+
+    await collectEvents(processTurn(createTestOptions()));
+
+    const persistedPacket = persistSettledTurnPacketMock.mock.calls[0]?.[0] as {
+      canonicalTurnPacket?: { effects?: Array<{ toolName?: string }> };
+      acceptedToolResultRefs?: string[];
+      acceptedDurableEventIds?: string[];
+    };
+    expect(persistedPacket.canonicalTurnPacket?.effects).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ toolName: "add_tag" }),
+        expect.objectContaining({ toolName: "record_dialogue_outcome" }),
+      ]),
+    );
+    expect(persistedPacket.acceptedToolResultRefs).toEqual(
+      expect.arrayContaining(["backing-add-tag-step", "accepted-dialogue-step"]),
+    );
+    expect(persistedPacket.acceptedDurableEventIds).toEqual(["event-dialogue-structural"]);
+    expect(buildNarratorPacket).toHaveBeenCalled();
+  });
+
+  it("accepts spawned carried receipt stateEffects after GM tool loop action conversion", async () => {
+    setupMocks();
+    setupScenePlanMocks({
+      gmRead: createGmReadMock({
+        turnIntent: "Issue a delay-report receipt and record its dialogue answer.",
+        runtimeRequirement: {
+          kind: "dialogue_outcome",
+          topicKind: "proof",
+          durability: "durable",
+          requiresStructuralEffect: true,
+          effectKind: "item_created",
+        },
+      }),
+    });
+    const stateEffect = {
+      effectId: "receipt-issued",
+      status: "applied_now",
+      structuralTool: "spawn_item",
+      targetRef: "Stamped Delay-Report Receipt",
+      stateKey: "possession",
+      stateValue: "carried",
+      summary: "Mira receives the stamped delay-report receipt.",
+    };
+    const spawnItemResult = {
+      success: true,
+      status: "success",
+      result: {
+        id: "item-stamped-delay-report-receipt",
+        name: "Stamped Delay-Report Receipt",
+        owner: "Mira Voss",
+        ownerType: "character",
+      },
+      authority: {
+        toolResultId: "tool-result-spawn-receipt",
+        campaignId: CAMPAIGN_ID,
+        sourceEntity: { type: "player", id: SCENE_PLAN_PLAYER_ID },
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        elapsedWorldTimeMinutes: 0,
+        stateDeltaRefs: ["item:stamped-delay-report-receipt", "actor:mira-voss"],
+        eventRefs: [],
+        witnesses: [],
+        knowledgeOutputs: [],
+        visibilityOutputs: [],
+        resources: [],
+      },
+    };
+    const dialogueResult = {
+      success: true,
+      status: "success",
+      result: {
+        eventId: "event-delay-report-receipt-issued",
+        topicKind: "proof",
+        outcomeKind: "answered",
+        authorityKind: "role_authority",
+        truthStatus: "settled_by_backend",
+        durability: "durable",
+        persisted: true,
+        futureUseKind: "evidence",
+        futureRelevance: "The stamped receipt proves Mira reported the delay.",
+        summary: "Courier-Marshal Ten issues Mira a stamped delay-report receipt.",
+        claims: [
+          {
+            claimKind: "document_status",
+            polarity: "states",
+            subjectRef: "Stamped Delay-Report Receipt",
+            summary: "The receipt documents the reported delay.",
+          },
+        ],
+        stateEffects: [stateEffect],
+      },
+      authority: {
+        toolResultId: "tool-result-dialogue-receipt",
+        campaignId: CAMPAIGN_ID,
+        sourceEntity: { type: "player", id: SCENE_PLAN_PLAYER_ID },
+        baseWorldVersion: 8,
+        resultWorldVersion: 9,
+        elapsedWorldTimeMinutes: 0,
+        stateDeltaRefs: ["event-delay-report-receipt-issued"],
+        eventRefs: ["event-delay-report-receipt-issued"],
+        witnesses: [],
+        knowledgeOutputs: [],
+        visibilityOutputs: [],
+        resources: [],
+      },
+    };
+
+    vi.mocked(runGmToolLoop).mockResolvedValueOnce({
+      intent: "Issue the receipt and record the answer.",
+      text: "",
+      rawToolCalls: [
+        {
+          tool: "spawn_item",
+          args: {
+            name: "Stamped Delay-Report Receipt",
+            tags: ["document", "receipt", "proof"],
+            ownerName: "Mira Voss",
+            ownerType: "character",
+          },
+          result: spawnItemResult,
+        },
+        {
+          tool: "record_dialogue_outcome",
+          args: {
+            speakerRef: "Courier-Marshal Ten",
+            addresseeRefs: ["Mira Voss"],
+            outcomeKind: "answered",
+            topicKind: "proof",
+            authorityKind: "role_authority",
+            truthStatus: "settled_by_backend",
+            durability: "durable",
+            futureUseKind: "evidence",
+            futureRelevance: "The stamped receipt proves Mira reported the delay.",
+            summary: "Courier-Marshal Ten issues Mira a stamped delay-report receipt.",
+            quote: "This stamped receipt records your delay report.",
+            sourceRefs: ["Courier-Marshal Ten", "Mira Voss"],
+            claims: [
+              {
+                claimKind: "document_status",
+                polarity: "states",
+                subjectRef: "Stamped Delay-Report Receipt",
+                summary: "The receipt documents the reported delay.",
+              },
+            ],
+            stateEffects: [stateEffect],
+          },
+          result: dialogueResult,
+        },
+      ],
+      stepResults: [
+        {
+          stepId: "spawn-receipt-step",
+          attempt: 1,
+          status: "done",
+          toolName: "spawn_item",
+          candidateInput: {
+            name: "Stamped Delay-Report Receipt",
+            tags: ["document", "receipt", "proof"],
+            ownerName: "Mira Voss",
+            ownerType: "character",
+          },
+          validationError: null,
+          visibleEffect: "Mira receives the stamped delay-report receipt.",
+          privateGuardTerms: [],
+          mutationRefs: ["item:stamped-delay-report-receipt"],
+          settledAtTick: 5,
+          result: spawnItemResult,
+        },
+        {
+          stepId: "dialogue-receipt-step",
+          attempt: 1,
+          status: "done",
+          toolName: "record_dialogue_outcome",
+          candidateInput: {
+            speakerRef: "Courier-Marshal Ten",
+            addresseeRefs: ["Mira Voss"],
+            outcomeKind: "answered",
+            topicKind: "proof",
+            authorityKind: "role_authority",
+            truthStatus: "settled_by_backend",
+            durability: "durable",
+            futureUseKind: "evidence",
+            futureRelevance: "The stamped receipt proves Mira reported the delay.",
+            summary: "Courier-Marshal Ten issues Mira a stamped delay-report receipt.",
+            quote: "This stamped receipt records your delay report.",
+            sourceRefs: ["Courier-Marshal Ten", "Mira Voss"],
+            claims: [
+              {
+                claimKind: "document_status",
+                polarity: "states",
+                subjectRef: "Stamped Delay-Report Receipt",
+                summary: "The receipt documents the reported delay.",
+              },
+            ],
+            stateEffects: [stateEffect],
+          },
+          validationError: null,
+          visibleEffect: "The receipt issuance is recorded.",
+          privateGuardTerms: [],
+          mutationRefs: ["event-delay-report-receipt-issued"],
+          settledAtTick: 5,
+          result: dialogueResult,
+        },
+      ],
+      acceptedStepIds: ["spawn-receipt-step", "dialogue-receipt-step"],
+      acceptedToolResultIds: ["tool-result-spawn-receipt", "tool-result-dialogue-receipt"],
+    } as never);
+
+    await collectEvents(processTurn(createTestOptions()));
+
+    const persistedPacket = persistSettledTurnPacketMock.mock.calls[0]?.[0] as {
+      canonicalTurnPacket?: { effects?: Array<{ toolName?: string }> };
+      acceptedToolResultRefs?: string[];
+      acceptedDurableEventIds?: string[];
+    };
+    expect(persistedPacket.canonicalTurnPacket?.effects).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ toolName: "spawn_item" }),
+        expect.objectContaining({ toolName: "record_dialogue_outcome" }),
+      ]),
+    );
+    expect(persistedPacket.acceptedToolResultRefs).toEqual(
+      expect.arrayContaining(["spawn-receipt-step", "dialogue-receipt-step"]),
+    );
+    expect(persistedPacket.acceptedDurableEventIds).toEqual(["event-delay-report-receipt-issued"]);
+    expect(buildNarratorPacket).toHaveBeenCalled();
+  });
+
+  it("fails closed when a dialogue receipt does not actually back its prior structural mutation", async () => {
+    setupMocks();
+    setupScenePlanMocks({
+      gmRead: createGmReadMock({
+        turnIntent: "Apply the clerk's permission mark and record the answer.",
+        runtimeRequirement: {
+          kind: "dialogue_outcome",
+          topicKind: "permission",
+          durability: "durable",
+          requiresStructuralEffect: true,
+          effectKind: "entity_tag",
+        },
+      }),
+    });
+    const wrongStateEffect = {
+      effectId: "effect-wrong-tag",
+      status: "applied_now",
+      structuralTool: "add_tag",
+      targetRef: "Hero",
+      stateKey: "tag",
+      stateValue: "wrong-tag",
+      summary: "Hero is marked with the wrong tag.",
+    };
+    const addTagResult = {
+      success: true,
+      status: "success",
+      result: {
+        entity: "Hero",
+        appliedTag: "trusted-by-clerk",
+        tags: ["trusted-by-clerk"],
+      },
+      authority: {
+        toolResultId: "tool-result-add-tag",
+        campaignId: CAMPAIGN_ID,
+        sourceEntity: { type: "player", id: SCENE_PLAN_PLAYER_ID },
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        elapsedWorldTimeMinutes: 0,
+        stateDeltaRefs: ["actor:hero", "trusted-by-clerk"],
+        eventRefs: [],
+        witnesses: [],
+        knowledgeOutputs: [],
+        visibilityOutputs: [],
+        resources: [],
+      },
+    };
+    const dialogueResult = {
+      success: true,
+      status: "success",
+      result: {
+        eventId: "event-dialogue-unbacked",
+        topicKind: "permission",
+        outcomeKind: "answered",
+        authorityKind: "role_authority",
+        truthStatus: "settled_by_backend",
+        durability: "durable",
+        persisted: true,
+        futureUseKind: "permission_check",
+        futureRelevance: "The clerk's trust mark can affect later route checks.",
+        summary: "The clerk accepts Hero as trusted for this route.",
+        claims: [
+          {
+            claimKind: "permission",
+            polarity: "allows",
+            subjectText: "Hero's route trust status",
+            summary: "Hero is trusted by the clerk for this route.",
+          },
+        ],
+        stateEffects: [wrongStateEffect],
+      },
+    };
+
+    vi.mocked(runGmToolLoop).mockResolvedValueOnce({
+      intent: "Record a mismatched dialogue state effect.",
+      text: "",
+      rawToolCalls: [],
+      stepResults: [
+        {
+          stepId: "unbacked-add-tag-step",
+          attempt: 1,
+          status: "done",
+          toolName: "add_tag",
+          candidateInput: { entityName: "Hero", entityType: "player", tag: "trusted-by-clerk" },
+          validationError: null,
+          visibleEffect: "Hero is marked as trusted by the clerk.",
+          privateGuardTerms: [],
+          mutationRefs: ["actor:hero", "trusted-by-clerk"],
+          settledAtTick: 5,
+          result: addTagResult,
+        },
+        {
+          stepId: "unbacked-dialogue-step",
+          attempt: 1,
+          status: "done",
+          toolName: "record_dialogue_outcome",
+          candidateInput: {
+            speakerRef: "Clerk",
+            addresseeRefs: ["Hero"],
+            outcomeKind: "answered",
+            topicKind: "permission",
+            authorityKind: "role_authority",
+            truthStatus: "settled_by_backend",
+            durability: "durable",
+            futureUseKind: "permission_check",
+            futureRelevance: "The clerk's trust mark can affect later route checks.",
+            summary: "The clerk accepts Hero as trusted for this route.",
+            sourceRefs: ["Clerk"],
+            claims: [
+              {
+                claimKind: "permission",
+                polarity: "allows",
+                subjectText: "Hero's route trust status",
+                summary: "Hero is trusted by the clerk for this route.",
+              },
+            ],
+            stateEffects: [wrongStateEffect],
+          },
+          validationError: null,
+          visibleEffect: "The clerk's permission is recorded.",
+          privateGuardTerms: [],
+          mutationRefs: ["event-dialogue-unbacked"],
+          settledAtTick: 5,
+          result: dialogueResult,
+        },
+      ],
+    } as never);
+
+    await expect(collectEvents(processTurn(createTestOptions()))).rejects.toThrow(
+      "record_dialogue_outcome declared applied_now stateEffect without a prior matching structural state tool result",
+    );
+    expect(persistSettledTurnPacketMock).not.toHaveBeenCalled();
+    expect(buildNarratorPacket).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before actor reactions when a successful state mutation is not the accepted receipt", async () => {
+    setupMocks();
+    setupScenePlanMocks({
+      gmRead: createGmReadMock({
+        turnIntent: "Record the durable procedure answer.",
+        runtimeRequirement: {
+          kind: "world_fact",
+          topicKind: "procedure",
+          durability: "durable",
+        },
+      }),
+    });
+    vi.mocked(runGmToolLoop).mockResolvedValueOnce({
+      intent: "Accidentally tag the wrong actor instead of recording the required fact.",
+      text: "",
+      rawToolCalls: [
+        {
+          tool: "add_tag",
+          args: { entityName: "Witness", entityType: "npc", tag: "stamp-rumor-source" },
+          result: {
+            success: true,
+            status: "success",
+            result: { entity: "Witness", tags: ["stamp-rumor-source"] },
+          },
+        },
+      ],
+      stepResults: [
+        {
+          stepId: "unaccepted-add-tag-step",
+          attempt: 1,
+          status: "done",
+          toolName: "add_tag",
+          candidateInput: {
+            entityName: "Witness",
+            entityType: "npc",
+            tag: "stamp-rumor-source",
+          },
+          validationError: null,
+          visibleEffect: "Witness is tagged as a rumor source.",
+          privateGuardTerms: [],
+          mutationRefs: ["npc:witness:tag:stamp-rumor-source"],
+          settledAtTick: 5,
+          result: {
+            success: true,
+            status: "success",
+            result: { entity: "Witness", tags: ["stamp-rumor-source"] },
+          },
+        },
+      ],
+    } as never);
+
+    await expect(collectEvents(processTurn(createTestOptions()))).rejects.toThrow(
+      "GM tool loop produced successful side-effecting result(s) that do not satisfy the accepted turn receipt",
+    );
+
+    expect(persistSettledTurnPacketMock).not.toHaveBeenCalled();
+    expect(runRequiredActorDecisionPassMock).not.toHaveBeenCalled();
+    expect(buildNarratorPacket).not.toHaveBeenCalled();
   });
 
   it("refuses to start a new ScenePlan turn while narration is pending", async () => {
@@ -4327,10 +6927,10 @@ describe("processTurn ScenePlan path", () => {
       gmRead: createGmReadMock({
         path: "roll_oracle",
         rollRequest: {
-          actorRef: SCENE_PLAN_PLAYER_ID,
+          actorRef: "Player",
           question: "Can the hero force the gate?",
           stakes: "Noise may draw attention.",
-          evidenceRefs: [SCENE_PLAN_PLAYER_ID],
+          evidenceRefs: ["Player"],
         },
       }),
     });
@@ -4470,7 +7070,7 @@ describe("processTurn ScenePlan path", () => {
 
   it("emits a dense closed structured grounded sentence without draft-contract failure", async () => {
     setupMocks();
-    setupScenePlanMocks();
+    const { narratorPacket } = setupScenePlanMocks();
     const denseText = [
       "The scene consequence lands in one continuous visible beat, with the fallen threat no longer driving the exchange,",
       "the nearby space opening just enough for the player to choose whether to press forward, check the body,",
@@ -4478,17 +7078,22 @@ describe("processTurn ScenePlan path", () => {
       "Nothing in the line adds a new item, route, promise, injury, or authority; it only renders the existing perceivable effect as a playable moment.",
     ].join(" ");
     expect(denseText.length).toBeGreaterThan(360);
+    setPrimaryNarratorFactText(narratorPacket, denseText);
 
     vi.mocked(safeGenerateObject).mockImplementation(async (opts?: { prompt?: unknown }) => {
       const prompt = String(opts?.prompt ?? "");
-      if (prompt.includes("Final narration prompt") || prompt.includes("[FINAL NARRATION TASK]")) {
+      if (
+        prompt.includes("Final narration prompt")
+        || prompt.includes("[FINAL NARRATION TASK]")
+        || prompt.includes("Opening visible prompt")
+      ) {
         return {
           object: {
             version: "grounded-sentence-draft.v2",
             sentences: [
               {
-                text: denseText,
-                evidenceRefs: ["perceivable_effect:effect-goblin-falls"],
+                text: "[[fact:e1.s1]]",
+                evidenceRefs: ["e1"],
               },
             ],
           },
@@ -4518,13 +7123,80 @@ describe("processTurn ScenePlan path", () => {
     );
   });
 
+  it("retries and emits final narration when the grounded sentence draft over-cites valid refs", async () => {
+    setupMocks();
+    const { narratorPacket } = setupScenePlanMocks();
+    narratorPacket.evidenceLedger = Array.from({ length: 6 }, (_, index) => ({
+      id: `perceivable_effect:effect-${index + 1}`,
+      category: "perceivable_effect" as const,
+      summary: `Visible settled effect ${index + 1}.`,
+      sourceId: `effect-${index + 1}`,
+      claimSupport: ["playable_beat"],
+    }));
+    const visibleText = "The visible effects stack into one playable beat.";
+    narratorPacket.evidenceLedger[0]!.summary = visibleText;
+    let finalNarrationCalls = 0;
+
+    vi.mocked(safeGenerateObject).mockImplementation(async (opts?: { prompt?: unknown }) => {
+      const prompt = String(opts?.prompt ?? "");
+      if (
+        prompt.includes("Final narration prompt")
+        || prompt.includes("[FINAL NARRATION TASK]")
+        || prompt.includes("Opening visible prompt")
+      ) {
+        finalNarrationCalls += 1;
+        return {
+          object: {
+            version: "grounded-sentence-draft.v2",
+            sentences: [
+              {
+                text: "[[fact:e1.s1]]",
+                evidenceRefs: finalNarrationCalls === 1
+                  ? ["e1", "e2", "e2", "e3", "e4", "e5", "e6"]
+                  : ["e1", "e2", "e3", "e4"],
+              },
+            ],
+          },
+          trace: {
+            text: "",
+            cleanedText: "",
+            strategy: "native_json",
+            primaryStrategy: "native_json",
+            finishReason: "stop",
+            response: { modelId: "mock-model" },
+          },
+        } as never;
+      }
+
+      return { object: createGmReadMock(), trace: {} } as never;
+    });
+
+    const events = await collectEvents(processTurn(createTestOptions()));
+
+    expect(events).toEqual(
+      expect.arrayContaining([
+        { type: "narrative", data: { text: visibleText } },
+      ]),
+    );
+    expect(finalNarrationCalls).toBe(2);
+    expect(updateNarratorAttemptOutcomeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "succeeded" }),
+    );
+    expect(markTurnSagaFinalizedMock).toHaveBeenCalled();
+  });
+
   it("retries the same closed structured final narration contract after structured output channel misses", async () => {
     setupMocks();
-    setupScenePlanMocks();
+    const { narratorPacket } = setupScenePlanMocks();
+    setPrimaryNarratorFactText(narratorPacket, "The goblin falls after the channel holds.");
     let finalNarrationCalls = 0;
     vi.mocked(safeGenerateObject).mockImplementation(async (opts?: { prompt?: unknown }) => {
       const prompt = String(opts?.prompt ?? "");
-      if (prompt.includes("Final narration prompt") || prompt.includes("[FINAL NARRATION TASK]")) {
+      if (
+        prompt.includes("Final narration prompt")
+        || prompt.includes("[FINAL NARRATION TASK]")
+        || prompt.includes("Opening visible prompt")
+      ) {
         finalNarrationCalls += 1;
         if (finalNarrationCalls < 3) {
           throw Object.assign(
@@ -4672,7 +7344,12 @@ describe("processTurn ScenePlan path", () => {
     expect(events.some((event) => event.type === "done")).toBe(true);
 
     const packetArgs = vi.mocked(buildNarratorPacket).mock.calls.at(-1)?.[0] as
-      | { canonicalTurnPacket?: { anchorEvent?: { summary?: string }; responses?: Array<{ summary: string }> } }
+      | {
+        canonicalTurnPacket?: {
+          anchorEvent?: { summary?: string };
+          responses?: Array<{ summary: string; evidenceAuthority?: string }>;
+        };
+      }
       | undefined;
     const expectedGuidance =
       "directResolutionNotes" in pathFields
@@ -4689,6 +7366,9 @@ describe("processTurn ScenePlan path", () => {
     expect(typeof expectedGuidance).toBe("string");
     expect(packetArgs?.canonicalTurnPacket?.responses?.[0]?.summary).toContain(
       expectedGuidance as string,
+    );
+    expect(packetArgs?.canonicalTurnPacket?.responses?.[0]?.evidenceAuthority).toBe(
+      "model_guidance",
     );
     expect(persistSettledTurnPacketMock).toHaveBeenCalled();
     expect(runVisibleNarrationWithPacketGuard).toHaveBeenCalled();
@@ -4721,6 +7401,198 @@ describe("processTurn ScenePlan path", () => {
     expect(assembleFinalNarrationPrompt).not.toHaveBeenCalled();
     expect(runVisibleNarrationWithPacketGuard).not.toHaveBeenCalled();
     expect(assistantAppendCallOrder()).toBeUndefined();
+  });
+
+  it("excludes hidden actor-turn log_event memory from the canonical narrator packet", async () => {
+    setupMocks();
+    const { frame } = setupScenePlanMocks();
+    frame.roster.active.push({
+      id: "npc-renn",
+      actorId: "npc-renn",
+      type: "npc",
+      label: "Renn",
+      locationId: "loc-1",
+      sceneScopeId: "loc-1",
+      awareness: "clear",
+    });
+    runRequiredActorDecisionPassMock.mockReturnValue({
+      actionResults: [
+        {
+          order: 1,
+          actionId: "actor-hidden-memory-action",
+          actionRef: "actor-tool:npc-renn:log_event:1",
+          actorId: "npc-renn",
+          toolName: "log_event",
+          input: {
+            text: "Renn privately recognizes the sealed proof pattern.",
+            importance: 6,
+            participants: ["Renn"],
+            durability: "durable",
+            futureRelevance: "Renn can use this private recognition later.",
+          },
+          args: {
+            text: "Renn privately recognizes the sealed proof pattern.",
+            importance: 6,
+            participants: ["Renn"],
+            durability: "durable",
+            futureRelevance: "Renn can use this private recognition later.",
+          },
+          result: {
+            success: true,
+            result: {
+              eventId: "event-private-memory",
+              durability: "durable",
+              persisted: true,
+              visibility: "hidden",
+              surfaceRoute: "actor_private_log_event",
+            },
+            authority: {
+              toolResultId: "tool-result-private-memory",
+              resultWorldVersion: 8,
+              eventRefs: ["event-private-memory"],
+              stateDeltaRefs: [],
+              witnesses: [],
+              knowledgeOutputs: [],
+              visibilityOutputs: [],
+              resources: [],
+            },
+          },
+        },
+      ],
+      schedule: { decisions: [] },
+      decisions: [],
+      parallelFrameRetrievalTrace: [],
+      parallelPrepTrace: [],
+    });
+
+    await collectEvents(processTurn(createTestOptions()));
+
+    const packetArgs = vi.mocked(buildNarratorPacket).mock.calls.at(-1)?.[0] as
+      | {
+          canonicalTurnPacket?: {
+            narratorFacts?: {
+              actionIds?: string[];
+              toolResultRefs?: Array<{ actionId: string; toolName: string }>;
+            };
+            effects?: Array<{ actionId?: string; summary?: string }>;
+            actionResults?: Array<{ actionId?: string }>;
+          };
+        }
+      | undefined;
+    const canonicalTurnPacket = packetArgs?.canonicalTurnPacket;
+
+    expect(canonicalTurnPacket?.narratorFacts?.actionIds).not.toContain(
+      "actor-hidden-memory-action",
+    );
+    expect(canonicalTurnPacket?.narratorFacts?.toolResultRefs).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ actionId: "actor-hidden-memory-action" }),
+      ]),
+    );
+    expect(canonicalTurnPacket?.effects).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ actionId: "actor-hidden-memory-action" }),
+      ]),
+    );
+    expect(JSON.stringify(canonicalTurnPacket)).not.toContain("sealed proof pattern");
+  });
+
+  it("keeps explicitly player-perceivable actor-turn log_event results narratable", async () => {
+    setupMocks();
+    const { frame } = setupScenePlanMocks();
+    frame.roster.active.push({
+      id: "npc-renn",
+      actorId: "npc-renn",
+      type: "npc",
+      label: "Renn",
+      locationId: "loc-1",
+      sceneScopeId: "loc-1",
+      awareness: "clear",
+    });
+    runRequiredActorDecisionPassMock.mockReturnValue({
+      actionResults: [
+        {
+          order: 1,
+          actionId: "actor-visible-log-action",
+          actionRef: "actor-tool:npc-renn:log_event:1",
+          actorId: "npc-renn",
+          toolName: "log_event",
+          input: {
+            text: "Renn visibly stamps the proof as accepted.",
+            importance: 6,
+            participants: ["Renn"],
+            durability: "durable",
+            futureRelevance: "The visible stamp can be cited later.",
+          },
+          args: {
+            text: "Renn visibly stamps the proof as accepted.",
+            importance: 6,
+            participants: ["Renn"],
+            durability: "durable",
+            futureRelevance: "The visible stamp can be cited later.",
+          },
+          result: {
+            success: true,
+            result: {
+              eventId: "event-visible-log",
+              durability: "durable",
+              persisted: true,
+              visibility: "player_perceivable",
+              surfaceRoute: "public_actor_log_event",
+            },
+            authority: {
+              toolResultId: "tool-result-visible-log",
+              resultWorldVersion: 8,
+              eventRefs: ["event-visible-log"],
+              stateDeltaRefs: [],
+              witnesses: [],
+              knowledgeOutputs: [],
+              visibilityOutputs: [],
+              resources: [],
+            },
+          },
+        },
+      ],
+      schedule: { decisions: [] },
+      decisions: [],
+      parallelFrameRetrievalTrace: [],
+      parallelPrepTrace: [],
+    });
+
+    await collectEvents(processTurn(createTestOptions()));
+
+    const packetArgs = vi.mocked(buildNarratorPacket).mock.calls.at(-1)?.[0] as
+      | {
+          canonicalTurnPacket?: {
+            narratorFacts?: {
+              actionIds?: string[];
+              toolResultRefs?: Array<{ actionId: string; toolName: string }>;
+            };
+            effects?: Array<{ actionId?: string; summary?: string }>;
+          };
+        }
+      | undefined;
+    const canonicalTurnPacket = packetArgs?.canonicalTurnPacket;
+
+    expect(canonicalTurnPacket?.narratorFacts?.actionIds).toContain(
+      "actor-visible-log-action",
+    );
+    expect(canonicalTurnPacket?.narratorFacts?.toolResultRefs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionId: "actor-visible-log-action",
+          toolName: "log_event",
+        }),
+      ]),
+    );
+    expect(canonicalTurnPacket?.effects).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionId: "actor-visible-log-action",
+          summary: "Renn visibly stamps the proof as accepted.",
+        }),
+      ]),
+    );
   });
 
   it("fails closed after packet-guard failure without recovery regeneration", async () => {
@@ -5038,9 +7910,81 @@ describe("processTurn ScenePlan path", () => {
     expect(runGmToolLoop).not.toHaveBeenCalled();
   });
 
+  it("recovers a prepared settled packet before pending narration resume", async () => {
+    setupMocks();
+    const { settledPacket } = setupTurnSagaMocks({ status: "world_consequence_running", turnId: "pending-turn" });
+    setPrimaryNarratorFactText(
+      settledPacket.narratorPacket as ReturnType<typeof createNarratorPacketMock>,
+      "The recovered prepared packet narrates cleanly.",
+    );
+    getSettledTurnPacketMock.mockReturnValue(null);
+    hasPreparedSettledTurnPacketRecoveryMock.mockReturnValue(true);
+    recoverSettledTurnPacketFromPreparedEventMock.mockReturnValue(settledPacket);
+    vi.mocked(runVisibleNarrationWithPacketGuard).mockImplementation(async (args) => {
+      const generated = await args.generateNarration({ attempt: 1, guardAddendum: null });
+      const { text, draft } = normalizeGeneratedNarrationForTest(generated);
+      return {
+        text,
+        draft,
+        attempts: 1,
+        retried: false,
+        validation: { ok: true, violations: [] },
+        guardAddendum: null,
+      };
+    });
+    vi.mocked(safeGenerateObject).mockResolvedValueOnce({
+      object: createGroundedSentenceDraftForTest("The recovered prepared packet narrates cleanly."),
+      trace: {
+        text: "",
+        cleanedText: "",
+        strategy: "native_json",
+        primaryStrategy: "native_json",
+        finishReason: "stop",
+      },
+    } as never);
+
+    const events = await collectEvents(
+      resumePendingTurnNarration({
+        campaignId: CAMPAIGN_ID,
+        turnId: "pending-turn",
+        storytellerProvider: createTestOptions().storytellerProvider,
+        storytellerTemperature: 0.8,
+        storytellerMaxTokens: 2000,
+      }),
+    );
+
+    expect(claimTurnSagaWorkerMock).toHaveBeenCalled();
+    expect(recoverSettledTurnPacketFromPreparedEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        campaignId: CAMPAIGN_ID,
+        turnId: "pending-turn",
+        lockToken: "lock-token",
+      }),
+    );
+    expect(sagaStatusTransitions()).toEqual([
+      "resolved_pending_narration",
+      "narrator_rendering",
+    ]);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        { type: "narrative", data: { text: "The recovered prepared packet narrates cleanly." } },
+        {
+          type: "done",
+          data: expect.objectContaining({ tick: 6, resumed: true }),
+        },
+      ]),
+    );
+    expect(callOracle).not.toHaveBeenCalled();
+    expect(runGmToolLoop).not.toHaveBeenCalled();
+  });
+
   it("repairs a world consequence saga that already has a settled packet before narration", async () => {
     setupMocks();
-    setupTurnSagaMocks({ status: "world_consequence_running", turnId: "pending-turn" });
+    const { settledPacket } = setupTurnSagaMocks({ status: "world_consequence_running", turnId: "pending-turn" });
+    setPrimaryNarratorFactText(
+      settledPacket.narratorPacket as ReturnType<typeof createNarratorPacketMock>,
+      "The recovered packet narrates cleanly.",
+    );
     vi.mocked(runVisibleNarrationWithPacketGuard).mockImplementation(async (args) => {
       const generated = await args.generateNarration({ attempt: 1, guardAddendum: null });
       const { text, draft } = normalizeGeneratedNarrationForTest(generated);
@@ -5085,7 +8029,10 @@ describe("processTurn ScenePlan path", () => {
     expect(events).toEqual(
       expect.arrayContaining([
         { type: "narrative", data: { text: "The recovered packet narrates cleanly." } },
-        { type: "done", data: { tick: 6, resumed: true } },
+        {
+          type: "done",
+          data: expect.objectContaining({ tick: 6, resumed: true }),
+        },
       ]),
     );
     expect(callOracle).not.toHaveBeenCalled();
@@ -5094,7 +8041,11 @@ describe("processTurn ScenePlan path", () => {
 
   it("resumes pending narration from settled artifacts without paid resolution work", async () => {
     setupMocks();
-    setupTurnSagaMocks({ status: "resolved_pending_narration", turnId: "pending-turn" });
+    const { settledPacket } = setupTurnSagaMocks({ status: "resolved_pending_narration", turnId: "pending-turn" });
+    setPrimaryNarratorFactText(
+      settledPacket.narratorPacket as ReturnType<typeof createNarratorPacketMock>,
+      "The settled scene resolves cleanly.",
+    );
     const onPostTurn = vi.fn();
     vi.mocked(runVisibleNarrationWithPacketGuard).mockImplementation(async (args) => {
       const generated = await args.generateNarration({ attempt: 1, guardAddendum: null });
@@ -5194,12 +8145,115 @@ describe("processTurn ScenePlan path", () => {
           type: "scene-settling",
           data: { stage: "scene-settling", phase: "cleaning-transient-scene", tick: 6 },
         },
-        { type: "done", data: { tick: 6, resumed: true } },
+        {
+          type: "done",
+          data: expect.objectContaining({ tick: 6, resumed: true }),
+        },
       ]),
     );
   });
 
-  it("fails closed after a grounded sentence citation contract failure without repair prompts", async () => {
+  it("repairs stale model-guidance response evidence before resumed narration", async () => {
+    setupMocks();
+    const { settledPacket } = setupTurnSagaMocks({ status: "resolved_pending_narration", turnId: "pending-turn" });
+    const narratorPacket = settledPacket.narratorPacket as unknown as NarratorPacket;
+    const staleResponse: CanonicalTurnPacketResponse = {
+      id: "response-legacy-guidance",
+      actorId: "guide-clerk",
+      responseKind: "gesture",
+      eventId: "player-action",
+      summary: "Legacy GM no-mutation direction: the clerk accepts the seal.",
+      visibleToPlayer: true,
+    };
+    const staleEvidenceId = `perceivable_response:${staleResponse.id}`;
+    setPrimaryNarratorFactText(
+      narratorPacket as unknown as ReturnType<typeof createNarratorPacketMock>,
+      "The settled scene resolves cleanly.",
+    );
+    narratorPacket.perceivableResponses = [staleResponse];
+    narratorPacket.evidenceLedger = [
+      ...(narratorPacket.evidenceLedger ?? []),
+      {
+        id: staleEvidenceId,
+        category: "perceivable_response",
+        summary: staleResponse.summary,
+        sourceId: staleResponse.id,
+      },
+    ];
+    narratorPacket.sourceLinkedSummaries = [{
+      id: "source-linked-legacy-guidance",
+      summary: staleResponse.summary,
+      sourceIds: [staleResponse.id],
+      summarizedItemCount: 1,
+    }];
+    narratorPacket.canonicalTurnPacket = {
+      actionResults: [],
+      effects: [],
+      narratorFacts: {
+        actionIds: [],
+        toolResultRefs: [],
+      },
+    } as unknown as NarratorPacket["canonicalTurnPacket"];
+    vi.mocked(repairModelGuidancePerceivableResponses).mockImplementationOnce((packet) => {
+      const input = packet as NarratorPacket;
+      return {
+        ...input,
+        perceivableResponses: [],
+        evidenceLedger: (input.evidenceLedger ?? []).filter((entry) => entry.id !== staleEvidenceId),
+        sourceLinkedSummaries: [],
+        contextBudgetTrace: undefined,
+      };
+    });
+    vi.mocked(runVisibleNarrationWithPacketGuard).mockImplementation(async (args) => {
+      const generated = await args.generateNarration({ attempt: 1, guardAddendum: null });
+      const { text, draft } = normalizeGeneratedNarrationForTest(generated);
+      return {
+        text,
+        draft,
+        attempts: 1,
+        retried: false,
+        validation: { ok: true, violations: [] },
+        guardAddendum: null,
+      };
+    });
+    vi.mocked(safeGenerateObject).mockResolvedValueOnce({
+      object: createGroundedSentenceDraftForTest("The settled scene resolves cleanly."),
+      trace: {
+        text: "",
+        cleanedText: "",
+        strategy: "native_json",
+        primaryStrategy: "native_json",
+        finishReason: "stop",
+      },
+    } as never);
+
+    await collectEvents(
+      resumePendingTurnNarration({
+        campaignId: CAMPAIGN_ID,
+        turnId: "pending-turn",
+        storytellerProvider: createTestOptions().storytellerProvider,
+        storytellerTemperature: 0.8,
+        storytellerMaxTokens: 2000,
+      }),
+    );
+
+    expect(repairModelGuidancePerceivableResponses).toHaveBeenCalledWith(
+      expect.objectContaining({
+        perceivableResponses: [staleResponse],
+      }),
+    );
+    const packetArg = vi.mocked(runVisibleNarrationWithPacketGuard).mock.calls[0]?.[0]?.packet as NarratorPacket;
+    expect(packetArg.perceivableResponses).toEqual([]);
+    expect(packetArg.evidenceLedger?.map((entry) => entry.id)).not.toContain(staleEvidenceId);
+    expect(packetArg.sourceLinkedSummaries).toEqual([]);
+    expect(assembleFinalNarrationPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ narratorPacket: packetArg }),
+    );
+    expect(callOracle).not.toHaveBeenCalled();
+    expect(runGmToolLoop).not.toHaveBeenCalled();
+  });
+
+  it("fails closed after a grounded sentence citation contract failure after bounded same-contract retry", async () => {
     setupMocks();
     setupTurnSagaMocks({ status: "resolved_pending_narration", turnId: "pending-turn" });
     vi.mocked(runVisibleNarrationWithPacketGuard).mockImplementation(async (args) => {
@@ -5215,7 +8269,7 @@ describe("processTurn ScenePlan path", () => {
       };
     });
     vi.mocked(safeGenerateObject)
-      .mockResolvedValueOnce({
+      .mockImplementation(async () => ({
         object: {
           version: "grounded-sentence-draft.v2",
           sentences: [
@@ -5232,7 +8286,7 @@ describe("processTurn ScenePlan path", () => {
           primaryStrategy: "native_json",
           finishReason: "stop",
         },
-      } as never);
+      } as never));
 
     await expect(collectEvents(
       resumePendingTurnNarration({
@@ -5244,7 +8298,7 @@ describe("processTurn ScenePlan path", () => {
       }),
     )).rejects.toThrow(NarrationRepairExhaustedError);
 
-    expect(safeGenerateObject).toHaveBeenCalledTimes(1);
+    expect(safeGenerateObject).toHaveBeenCalledTimes(2);
     for (const [call] of vi.mocked(safeGenerateObject).mock.calls) {
       expect(call).toMatchObject({
         allowTextFallback: false,
@@ -5310,7 +8364,11 @@ describe("processTurn ScenePlan path", () => {
 
   it("reuses an existing successful narrator attempt on resume without calling Storyteller", async () => {
     setupMocks();
-    setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
+    const { settledPacket } = setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
+    setPrimaryNarratorFactText(
+      settledPacket.narratorPacket as ReturnType<typeof createNarratorPacketMock>,
+      "The already rendered narration lands cleanly.",
+    );
     findLatestSuccessfulNarratorAttemptMock.mockReturnValue({
       id: "attempt-existing",
       campaignId: CAMPAIGN_ID,
@@ -5345,6 +8403,12 @@ describe("processTurn ScenePlan path", () => {
         role: "assistant",
         content: "The already rendered narration lands cleanly.",
         metadata: {
+          presentation: {
+            authority: "settled_packet_presentation",
+            source: "settled_turn_packet",
+            sagaId: "saga-1",
+            narratorAttemptId: "attempt-existing",
+          },
           resumeNarration: {
             sagaId: "saga-1",
             narratorAttemptId: "attempt-existing",
@@ -5362,14 +8426,21 @@ describe("processTurn ScenePlan path", () => {
     expect(events).toEqual(
       expect.arrayContaining([
         { type: "narrative", data: { text: "The already rendered narration lands cleanly." } },
-        { type: "done", data: { tick: 6, resumed: true } },
+        {
+          type: "done",
+          data: expect.objectContaining({ tick: 6, resumed: true }),
+        },
       ]),
     );
   });
 
   it("does not reuse pre-contract successful narrator attempts without draft acceptance marker", async () => {
     setupMocks();
-    setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
+    const { settledPacket } = setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
+    setPrimaryNarratorFactText(
+      settledPacket.narratorPacket as ReturnType<typeof createNarratorPacketMock>,
+      "Fresh draft-backed narration replaces the old fallback.",
+    );
     findLatestSuccessfulNarratorAttemptMock.mockReturnValue({
       id: "attempt-old-fallback",
       campaignId: CAMPAIGN_ID,
@@ -5423,6 +8494,12 @@ describe("processTurn ScenePlan path", () => {
         role: "assistant",
         content: "Fresh draft-backed narration replaces the old fallback.",
         metadata: {
+          presentation: {
+            authority: "settled_packet_presentation",
+            source: "settled_turn_packet",
+            sagaId: "saga-1",
+            narratorAttemptId: expect.any(String),
+          },
           resumeNarration: {
             sagaId: "saga-1",
             narratorAttemptId: expect.any(String),
@@ -5445,9 +8522,86 @@ describe("processTurn ScenePlan path", () => {
     );
   });
 
+  it("does not reuse accepted narrator attempts whose final text diverges from the backend-owned draft", async () => {
+    setupMocks();
+    const { settledPacket } = setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
+    setPrimaryNarratorFactText(
+      settledPacket.narratorPacket as ReturnType<typeof createNarratorPacketMock>,
+      "The sealed lantern flares once.",
+    );
+    findLatestSuccessfulNarratorAttemptMock.mockReturnValue({
+      id: "attempt-diverged",
+      campaignId: CAMPAIGN_ID,
+      sagaId: "saga-1",
+      settledTurnPacketId: "packet-1",
+      turnId: "pending-turn",
+      attemptIndex: 2,
+      status: "succeeded",
+      groundingResult: acceptedGroundedNarrationResult(),
+      finalText: "The sealed lantern breaks instead.",
+      failureReason: null,
+      createdAt: 10,
+      updatedAt: 10,
+    });
+    vi.mocked(runVisibleNarrationWithPacketGuard).mockImplementation(async (args) => {
+      const generated = await args.generateNarration({ attempt: 1, guardAddendum: null });
+      const { text, draft } = normalizeGeneratedNarrationForTest(generated);
+      return {
+        text,
+        draft,
+        attempts: 1,
+        retried: false,
+        validation: { ok: true, violations: [] },
+        guardAddendum: null,
+      };
+    });
+    vi.mocked(safeGenerateObject).mockResolvedValueOnce({
+      object: createGroundedSentenceDraftForTest("The sealed lantern flares once."),
+      trace: {
+        text: "",
+        cleanedText: "",
+        strategy: "native_json",
+        primaryStrategy: "native_json",
+        finishReason: "stop",
+      },
+    } as never);
+
+    const events = await collectEvents(
+      resumePendingTurnNarration({
+        campaignId: CAMPAIGN_ID,
+        turnId: "pending-turn",
+        storytellerProvider: createTestOptions().storytellerProvider,
+        storytellerTemperature: 0.8,
+        storytellerMaxTokens: 2000,
+      }),
+    );
+
+    expect(runVisibleNarrationWithPacketGuard).toHaveBeenCalledTimes(1);
+    expect(appendChatMessages).toHaveBeenCalledWith(CAMPAIGN_ID, [
+      expect.objectContaining({
+        role: "assistant",
+        content: "The sealed lantern flares once.",
+      }),
+    ]);
+    expect(appendChatMessages).not.toHaveBeenCalledWith(CAMPAIGN_ID, [
+      expect.objectContaining({
+        content: "The sealed lantern breaks instead.",
+      }),
+    ]);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        { type: "narrative", data: { text: "The sealed lantern flares once." } },
+      ]),
+    );
+  });
+
   it("appends current resume narration when older identical assistant text has no resume key", async () => {
     setupMocks();
-    setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
+    const { settledPacket } = setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
+    setPrimaryNarratorFactText(
+      settledPacket.narratorPacket as ReturnType<typeof createNarratorPacketMock>,
+      "The assistant line is already in chat.",
+    );
     findLatestSuccessfulNarratorAttemptMock.mockReturnValue({
       id: "attempt-existing",
       campaignId: CAMPAIGN_ID,
@@ -5482,6 +8636,12 @@ describe("processTurn ScenePlan path", () => {
         role: "assistant",
         content: "The assistant line is already in chat.",
         metadata: {
+          presentation: {
+            authority: "settled_packet_presentation",
+            source: "settled_turn_packet",
+            sagaId: "saga-1",
+            narratorAttemptId: "attempt-existing",
+          },
           resumeNarration: {
             sagaId: "saga-1",
             narratorAttemptId: "attempt-existing",
@@ -5506,7 +8666,11 @@ describe("processTurn ScenePlan path", () => {
 
   it("suppresses duplicate resume narration when same saga and narrator attempt key exists", async () => {
     setupMocks();
-    setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
+    const { settledPacket } = setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
+    setPrimaryNarratorFactText(
+      settledPacket.narratorPacket as ReturnType<typeof createNarratorPacketMock>,
+      "The assistant line is already in chat.",
+    );
     findLatestSuccessfulNarratorAttemptMock.mockReturnValue({
       id: "attempt-existing",
       campaignId: CAMPAIGN_ID,
@@ -5568,7 +8732,11 @@ describe("processTurn ScenePlan path", () => {
 
   it("writes saga and narrator attempt metadata on successful resume append", async () => {
     setupMocks();
-    setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
+    const { settledPacket } = setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
+    setPrimaryNarratorFactText(
+      settledPacket.narratorPacket as ReturnType<typeof createNarratorPacketMock>,
+      "Metadata lands with the stored assistant line.",
+    );
     findLatestSuccessfulNarratorAttemptMock.mockReturnValue({
       id: "attempt-existing",
       campaignId: CAMPAIGN_ID,
@@ -5599,6 +8767,12 @@ describe("processTurn ScenePlan path", () => {
         role: "assistant",
         content: "Metadata lands with the stored assistant line.",
         metadata: {
+          presentation: {
+            authority: "settled_packet_presentation",
+            source: "settled_turn_packet",
+            sagaId: "saga-1",
+            narratorAttemptId: "attempt-existing",
+          },
           resumeNarration: {
             sagaId: "saga-1",
             narratorAttemptId: "attempt-existing",
@@ -5610,7 +8784,8 @@ describe("processTurn ScenePlan path", () => {
 
   it("skips post-narration tail when resume checkpoint already completed it", async () => {
     setupMocks();
-    setupTurnSagaMocks({
+    const onPostTurn = vi.fn();
+    const { settledPacket } = setupTurnSagaMocks({
       status: "narrator_rendering",
       turnId: "pending-turn",
       provenance: {
@@ -5620,7 +8795,10 @@ describe("processTurn ScenePlan path", () => {
         },
       },
     });
-    const onPostTurn = vi.fn();
+    setPrimaryNarratorFactText(
+      settledPacket.narratorPacket as ReturnType<typeof createNarratorPacketMock>,
+      "Tail already ran once.",
+    );
     findLatestSuccessfulNarratorAttemptMock.mockReturnValue({
       id: "attempt-existing",
       campaignId: CAMPAIGN_ID,
@@ -5652,7 +8830,10 @@ describe("processTurn ScenePlan path", () => {
     expect(events.some((event) => event.type === "finalizing_turn")).toBe(false);
     expect(events).toEqual(
       expect.arrayContaining([
-        { type: "done", data: { tick: 9, resumed: true } },
+        {
+          type: "done",
+          data: expect.objectContaining({ tick: 9, resumed: true }),
+        },
       ]),
     );
     expect(markTurnSagaFinalizedIfNeededMock).toHaveBeenCalledWith(
@@ -5665,7 +8846,11 @@ describe("processTurn ScenePlan path", () => {
 
   it("resumes after normal tail crash without advancing tick again and keeps post-turn idempotency key", async () => {
     setupMocks();
-    setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
+    const { settledPacket } = setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
+    setPrimaryNarratorFactText(
+      settledPacket.narratorPacket as ReturnType<typeof createNarratorPacketMock>,
+      "Tail ran before finalization.",
+    );
     findLatestSuccessfulNarratorAttemptMock.mockReturnValue({
       id: "attempt-existing",
       campaignId: CAMPAIGN_ID,
@@ -5713,7 +8898,224 @@ describe("processTurn ScenePlan path", () => {
     expect(events).toEqual(
       expect.arrayContaining([
         { type: "finalizing_turn", data: { tick: 6, stage: "rollback_critical" } },
-        { type: "done", data: { tick: 6, resumed: true } },
+        {
+          type: "done",
+          data: expect.objectContaining({ tick: 6, resumed: true }),
+        },
+      ]),
+    );
+  });
+
+  it("does not advance a resumed settled packet whose stored target tick already landed", async () => {
+    setupMocks();
+    const onPostTurn = vi.fn();
+    const { settledPacket } = setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
+    const narratorPacket = settledPacket.narratorPacket as Omit<
+      ReturnType<typeof createNarratorPacketMock>,
+      "postNarrationTargetTick"
+    > & {
+      postNarrationTargetTick?: number;
+    };
+    narratorPacket.tick = 6;
+    narratorPacket.postNarrationTargetTick = 6;
+    setPrimaryNarratorFactText(narratorPacket, "The lantern remains settled.");
+    findLatestSuccessfulNarratorAttemptMock.mockReturnValue({
+      id: "attempt-existing",
+      campaignId: CAMPAIGN_ID,
+      sagaId: "saga-1",
+      settledTurnPacketId: "packet-1",
+      turnId: "pending-turn",
+      attemptIndex: 1,
+      status: "succeeded",
+      groundingResult: acceptedGroundedNarrationResult(),
+      finalText: "The lantern remains settled.",
+      failureReason: null,
+      createdAt: 10,
+      updatedAt: 10,
+    });
+    vi.mocked(readCampaignConfig).mockReturnValue({ currentTick: 6 } as never);
+    readWorldClockMock.mockReturnValue({
+      campaignId: CAMPAIGN_ID,
+      worldVersion: 7,
+      worldTimeMinutes: 6,
+      currentTick: 6,
+      updatedAt: 0,
+    });
+
+    const events = await collectEvents(
+      resumePendingTurnNarration({
+        campaignId: CAMPAIGN_ID,
+        turnId: "pending-turn",
+        storytellerProvider: createTestOptions().storytellerProvider,
+        storytellerTemperature: 0.8,
+        storytellerMaxTokens: 2000,
+        onPostTurn,
+      }),
+    );
+
+    expect(incrementTick).not.toHaveBeenCalled();
+    expect(advanceCampaignTick).not.toHaveBeenCalled();
+    expect(onPostTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tick: 6,
+        idempotencyKey: "post-turn:test-campaign-123:pending-turn:saga-1:attempt-existing:6",
+      }),
+    );
+    expect(events).toEqual(
+      expect.arrayContaining([
+        { type: "done", data: expect.objectContaining({ tick: 6, resumed: true }) },
+      ]),
+    );
+  });
+
+  it("uses move_actor travel from an older settled packet when no target tick was persisted", async () => {
+    setupMocks();
+    const onPostTurn = vi.fn();
+    const { settledPacket } = setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
+    const narratorPacket = settledPacket.narratorPacket as Omit<
+      ReturnType<typeof createNarratorPacketMock>,
+      "postNarrationTargetTick"
+    > & {
+      postNarrationTargetTick?: number;
+    };
+    delete narratorPacket.postNarrationTargetTick;
+    narratorPacket.canonicalTurnPacket = {
+      actionResults: [{
+        actionId: "move-action-1",
+        toolName: "move_actor",
+        args: { actorRef: "Hero", destinationRef: "Inspection Dock" },
+        result: {
+          success: true,
+          result: {
+            locationId: "loc-dock",
+            locationName: "Inspection Dock",
+            travelCost: 3,
+            tickAdvance: 3,
+            path: ["Hall", "Inspection Dock"],
+          },
+        },
+      }],
+    };
+    setPrimaryNarratorFactText(narratorPacket, "The hero reaches the inspection dock.");
+    findLatestSuccessfulNarratorAttemptMock.mockReturnValue({
+      id: "attempt-existing",
+      campaignId: CAMPAIGN_ID,
+      sagaId: "saga-1",
+      settledTurnPacketId: "packet-1",
+      turnId: "pending-turn",
+      attemptIndex: 1,
+      status: "succeeded",
+      groundingResult: acceptedGroundedNarrationResult(),
+      finalText: "The hero reaches the inspection dock.",
+      failureReason: null,
+      createdAt: 10,
+      updatedAt: 10,
+    });
+    vi.mocked(advanceCampaignTick).mockReturnValue(8);
+
+    const events = await collectEvents(
+      resumePendingTurnNarration({
+        campaignId: CAMPAIGN_ID,
+        turnId: "pending-turn",
+        storytellerProvider: createTestOptions().storytellerProvider,
+        storytellerTemperature: 0.8,
+        storytellerMaxTokens: 2000,
+        onPostTurn,
+      }),
+    );
+
+    expect(incrementTick).not.toHaveBeenCalled();
+    expect(advanceCampaignTick).toHaveBeenCalledWith(CAMPAIGN_ID, 3);
+    expect(onPostTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tick: 8,
+        toolCalls: [
+          expect.objectContaining({ tool: "move_actor" }),
+        ],
+      }),
+    );
+    expect(events).toEqual(
+      expect.arrayContaining([
+        { type: "done", data: expect.objectContaining({ tick: 8, resumed: true }) },
+      ]),
+    );
+  });
+
+  it("does not double-advance an older settled packet after the fallback target already landed", async () => {
+    setupMocks();
+    const onPostTurn = vi.fn();
+    const { settledPacket } = setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
+    const narratorPacket = settledPacket.narratorPacket as Omit<
+      ReturnType<typeof createNarratorPacketMock>,
+      "postNarrationTargetTick"
+    > & {
+      postNarrationTargetTick?: number;
+    };
+    delete narratorPacket.postNarrationTargetTick;
+    narratorPacket.tick = 5;
+    narratorPacket.canonicalTurnPacket = {
+      actionResults: [{
+        actionId: "move-action-1",
+        toolName: "move_actor",
+        args: { actorRef: "Hero", destinationRef: "Inspection Dock" },
+        result: {
+          success: true,
+          result: {
+            locationId: "loc-dock",
+            locationName: "Inspection Dock",
+            travelCost: 3,
+            tickAdvance: 3,
+            path: ["Hall", "Inspection Dock"],
+          },
+        },
+      }],
+    };
+    setPrimaryNarratorFactText(narratorPacket, "The hero reaches the inspection dock.");
+    findLatestSuccessfulNarratorAttemptMock.mockReturnValue({
+      id: "attempt-existing",
+      campaignId: CAMPAIGN_ID,
+      sagaId: "saga-1",
+      settledTurnPacketId: "packet-1",
+      turnId: "pending-turn",
+      attemptIndex: 1,
+      status: "succeeded",
+      groundingResult: acceptedGroundedNarrationResult(),
+      finalText: "The hero reaches the inspection dock.",
+      failureReason: null,
+      createdAt: 10,
+      updatedAt: 10,
+    });
+    vi.mocked(readCampaignConfig).mockReturnValue({ currentTick: 8 } as never);
+    readWorldClockMock.mockReturnValue({
+      campaignId: CAMPAIGN_ID,
+      worldVersion: 9,
+      worldTimeMinutes: 8,
+      currentTick: 8,
+      updatedAt: 0,
+    });
+
+    const events = await collectEvents(
+      resumePendingTurnNarration({
+        campaignId: CAMPAIGN_ID,
+        turnId: "pending-turn",
+        storytellerProvider: createTestOptions().storytellerProvider,
+        storytellerTemperature: 0.8,
+        storytellerMaxTokens: 2000,
+        onPostTurn,
+      }),
+    );
+
+    expect(incrementTick).not.toHaveBeenCalled();
+    expect(advanceCampaignTick).not.toHaveBeenCalled();
+    expect(onPostTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tick: 8,
+        idempotencyKey: "post-turn:test-campaign-123:pending-turn:saga-1:attempt-existing:8",
+      }),
+    );
+    expect(events).toEqual(
+      expect.arrayContaining([
+        { type: "done", data: expect.objectContaining({ tick: 8, resumed: true }) },
       ]),
     );
   });
@@ -5761,7 +9163,7 @@ describe("processTurn ScenePlan path", () => {
     });
     expect(events).toEqual(
       expect.arrayContaining([
-        { type: "done", data: { tick: 22 } },
+        { type: "done", data: expect.objectContaining({ tick: 22 }) },
       ]),
     );
     expect(onPostTurn).toHaveBeenCalledWith(
@@ -5778,7 +9180,7 @@ describe("processTurn ScenePlan path", () => {
 
     await collectEvents(processTurn(createTestOptions()));
 
-    expect(buildSceneFrame).not.toHaveBeenCalled();
+    expect(buildSceneFrame).toHaveBeenCalledTimes(1);
     expect(runScenePlanner).not.toHaveBeenCalled();
     expect(validateScenePlan).not.toHaveBeenCalled();
     expect(executeScenePlan).not.toHaveBeenCalled();
@@ -5808,6 +9210,56 @@ describe("processTurn ScenePlan path", () => {
 });
 
 describe("processOpeningScene", () => {
+  beforeEach(() => {
+    delete process.env.EXPOSE_LLM_REASONING;
+    vi.clearAllMocks();
+    logEventMock.mockClear();
+    logInfoMock.mockClear();
+    logWarnMock.mockClear();
+    logErrorMock.mockClear();
+    setupTurnSagaMocks();
+    vi.mocked(safeGenerateObject).mockReset();
+    vi.mocked(safeGenerateObject).mockImplementation(async (opts?: { prompt?: unknown }) => {
+      const prompt = String(opts?.prompt ?? "");
+      if (
+        prompt.includes("Final narration prompt")
+        || prompt.includes("[FINAL NARRATION TASK]")
+        || prompt.includes("Opening visible prompt")
+      ) {
+        return {
+          object: {
+            version: "grounded-sentence-draft.v2",
+            sentences: [{
+              factRefs: ["e1.s1"],
+              evidenceRefs: ["e1"],
+            }],
+          },
+          trace: {
+            text: "",
+            cleanedText: "",
+            strategy: "native_json",
+            primaryStrategy: "native_json",
+            finishReason: "stop",
+            response: { modelId: "mock-model" },
+          },
+        } as never;
+      }
+      return { object: { isMovement: false, destination: null }, trace: {} } as never;
+    });
+    vi.mocked(runVisibleNarrationWithPacketGuard).mockImplementation(async (args) => {
+      const generated = await args.generateNarration({ attempt: 1, guardAddendum: null });
+      const { text, draft } = normalizeGeneratedNarrationForTest(generated);
+      return {
+        text,
+        draft,
+        attempts: 1,
+        retried: false,
+        validation: { ok: true, violations: [] },
+        guardAddendum: null,
+      };
+    });
+  });
+
   it("uses explicit storyteller reasoning bypass for opening narration", async () => {
     const playerRow = createOpeningPlayerRow();
     (getDb as Mock).mockReturnValue(
@@ -5835,6 +9287,17 @@ describe("processOpeningScene", () => {
       text: "Lanternlight spills into the market.",
       reasoningText: "Opening-scene hidden reasoning stays private by default.",
     });
+    vi.mocked(runVisibleNarrationWithPacketGuard).mockImplementationOnce(async (args) => {
+      await args.generateNarration({ attempt: 1, guardAddendum: null });
+      return {
+        text: "Lanternlight spills into the market.",
+        draft: createNarrationDraftForTest("Lanternlight spills into the market."),
+        attempts: 1,
+        retried: false,
+        validation: { ok: true, violations: [] },
+        guardAddendum: null,
+      };
+    });
 
     const events = await collectEvents(
       processOpeningScene({
@@ -5857,6 +9320,45 @@ describe("processOpeningScene", () => {
     );
     expect(events).toEqual(
       expect.arrayContaining([{ type: "narrative", data: { text: "Lanternlight spills into the market." } }]),
+    );
+    expect(appendChatMessages).toHaveBeenCalledWith(CAMPAIGN_ID, [
+      {
+        role: "assistant",
+        content: "Lanternlight spills into the market.",
+        metadata: {
+          presentation: {
+            authority: "settled_packet_presentation",
+            source: "opening_scene",
+            sagaId: "saga-1",
+            narratorAttemptId: "attempt-1",
+          },
+          resumeNarration: {
+            sagaId: "saga-1",
+            narratorAttemptId: "attempt-1",
+          },
+        },
+      },
+    ]);
+    expect(persistSettledTurnPacketMock).toHaveBeenCalled();
+    expect(recordNarratorAttemptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sagaId: "saga-1",
+        settledTurnPacketId: "packet-1",
+        status: "started",
+      }),
+    );
+    expect(updateNarratorAttemptOutcomeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "attempt-1",
+        status: "succeeded",
+        finalText: "Lanternlight spills into the market.",
+      }),
+    );
+    expect(markTurnSagaFinalizedMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sagaId: "saga-1",
+        narratorAttemptId: "attempt-1",
+      }),
     );
     expect(events.some((event) => event.type === "reasoning")).toBe(false);
   });
@@ -5884,9 +9386,16 @@ describe("processOpeningScene", () => {
       prompt: "Opening visible prompt",
       assembledBase: { formatted: "Opening prompt", sections: [], totalTokens: 42, budgetUsed: 4 },
     });
-    (generateText as Mock).mockResolvedValue({
-      text: "   ",
-      reasoningText: undefined,
+    vi.mocked(runVisibleNarrationWithPacketGuard).mockImplementationOnce(async (args) => {
+      await args.generateNarration({ attempt: 1, guardAddendum: null });
+      return {
+        text: "   ",
+        draft: createNarrationDraftForTest("   "),
+        attempts: 1,
+        retried: false,
+        validation: { ok: true, violations: [] },
+        guardAddendum: null,
+      };
     });
 
     await expect(
@@ -5904,11 +9413,18 @@ describe("processOpeningScene", () => {
           storytellerMaxTokens: 1600,
         }),
       ),
-    ).rejects.toThrow("Final visible narration was empty");
+    ).rejects.toThrow("Pending settled turn narration");
 
     expect(appendChatMessages).not.toHaveBeenCalledWith(CAMPAIGN_ID, [
       { role: "assistant", content: "   " },
     ]);
+    expect(updateNarratorAttemptOutcomeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "attempt-1",
+        status: "failed",
+      }),
+    );
+    expect(markTurnSagaFinalizedMock).not.toHaveBeenCalled();
   });
 
   it("runs world-brain before opening visible narration and hands it through scene assembly", async () => {

@@ -3,12 +3,17 @@ import { Hono } from "hono";
 
 const routeState = vi.hoisted(() => {
   const runtimeSnapshots = new Map<string, unknown>();
+  const runtimeSnapshotMetadata = new Map<string, {
+    acceptedDurableEventIds: string[];
+    producedDurableEventIds: string[];
+  }>();
   const runtimeActiveTurns = new Set<string>();
   const chatHistoryByCampaign = new Map<string, Array<{ role: string; content: string }>>();
   const partialMutations: string[] = [];
 
   return {
     runtimeSnapshots,
+    runtimeSnapshotMetadata,
     runtimeActiveTurns,
     chatHistoryByCampaign,
     partialMutations,
@@ -20,18 +25,42 @@ const routeState = vi.hoisted(() => {
     mockEndTurn: vi.fn((campaignId: string) => {
       runtimeActiveTurns.delete(campaignId);
     }),
-    mockSetLastTurnSnapshot: vi.fn((campaignId: string, snapshot: unknown) => {
+    mockSetLastTurnSnapshot: vi.fn((
+      campaignId: string,
+      snapshot: unknown,
+      metadata?: {
+        acceptedDurableEventIds?: readonly string[];
+        producedDurableEventIds?: readonly string[];
+      },
+    ) => {
       runtimeSnapshots.set(campaignId, snapshot);
+      runtimeSnapshotMetadata.set(campaignId, {
+        acceptedDurableEventIds: [...new Set(metadata?.acceptedDurableEventIds ?? [])],
+        producedDurableEventIds: [...new Set(metadata?.producedDurableEventIds ?? [])],
+      });
     }),
     mockGetLastTurnSnapshot: vi.fn((campaignId: string) => runtimeSnapshots.get(campaignId)),
+    mockGetLastTurnSnapshotMetadata: vi.fn((campaignId: string) =>
+      runtimeSnapshotMetadata.get(campaignId) ?? {
+        acceptedDurableEventIds: [],
+        producedDurableEventIds: [],
+      }),
     mockClearLastTurnSnapshot: vi.fn((campaignId: string) => {
       runtimeSnapshots.delete(campaignId);
+      runtimeSnapshotMetadata.delete(campaignId);
     }),
+    mockGetSettledTurnPacket: vi.fn((_input?: unknown) => null),
+    mockDrainPendingCommittedEventsByIds: vi.fn((_campaignId?: unknown, _eventIds?: unknown) => []),
+    mockRetractStoredEpisodicEvent: vi.fn((_input?: unknown) => undefined),
+    mockRetractPendingCommittedEventsForTick: vi.fn(
+      async (_campaignId?: unknown, _tick?: unknown): Promise<Array<{ id: string; text: string }>> => [],
+    ),
     mockLogError: vi.fn(),
   };
 });
 const {
   runtimeSnapshots,
+  runtimeSnapshotMetadata,
   runtimeActiveTurns,
   chatHistoryByCampaign,
   partialMutations,
@@ -39,7 +68,12 @@ const {
   mockEndTurn,
   mockSetLastTurnSnapshot,
   mockGetLastTurnSnapshot,
+  mockGetLastTurnSnapshotMetadata,
   mockClearLastTurnSnapshot,
+  mockGetSettledTurnPacket,
+  mockDrainPendingCommittedEventsByIds,
+  mockRetractStoredEpisodicEvent,
+  mockRetractPendingCommittedEventsForTick,
   mockLogError,
 } = routeState;
 
@@ -74,6 +108,7 @@ vi.mock("../../lib/index.js", () => ({
     Math.min(Math.max(val, min), max),
   ),
   getErrorMessage: vi.fn((_err: unknown, fallback: string) => fallback),
+  getPlayerSafeErrorMessage: vi.fn((_err: unknown, fallback: string) => fallback),
   getErrorStatus: vi.fn(() => 500),
   createLogger: vi.fn(() => ({
     info: vi.fn(),
@@ -123,6 +158,7 @@ vi.mock("../../engine/index.js", () => ({
   captureSnapshot: vi.fn(),
   restoreSnapshot: vi.fn(),
   findPendingNarrationSaga: vi.fn(() => null),
+  getSettledTurnPacket: (input: unknown) => mockGetSettledTurnPacket(input),
   tickPresentNpcs: vi.fn(),
   simulateOffscreenNpcs: vi.fn(),
   checkAndTriggerReflections: vi.fn(),
@@ -148,6 +184,11 @@ vi.mock("../../engine/grounded-lookup.js", () => ({
 vi.mock("../../vectors/episodic-events.js", () => ({
   embedAndUpdateEvent: vi.fn(),
   drainPendingCommittedEvents: vi.fn(() => []),
+  drainPendingCommittedEventsByIds: (campaignId: unknown, eventIds: unknown) =>
+    mockDrainPendingCommittedEventsByIds(campaignId, eventIds),
+  retractStoredEpisodicEvent: (input: unknown) => mockRetractStoredEpisodicEvent(input),
+  retractPendingCommittedEventsForTick: (campaignId: unknown, tick: unknown) =>
+    mockRetractPendingCommittedEventsForTick(campaignId, tick),
 }));
 
 vi.mock("../../campaign/runtime-state.js", () => ({
@@ -156,8 +197,14 @@ vi.mock("../../campaign/runtime-state.js", () => ({
   hasActiveTurn: (campaignId: string) => routeState.runtimeActiveTurns.has(campaignId),
   setLastTurnSnapshot: routeState.mockSetLastTurnSnapshot,
   getLastTurnSnapshot: routeState.mockGetLastTurnSnapshot,
+  getLastTurnSnapshotMetadata: routeState.mockGetLastTurnSnapshotMetadata,
   clearLastTurnSnapshot: routeState.mockClearLastTurnSnapshot,
   hasLiveTurnSnapshot: (campaignId: string) => routeState.runtimeSnapshots.has(campaignId),
+  clearCampaignRuntimeState: (campaignId: string) => {
+    routeState.runtimeActiveTurns.delete(campaignId);
+    routeState.runtimeSnapshots.delete(campaignId);
+    routeState.runtimeSnapshotMetadata.delete(campaignId);
+  },
 }));
 
 import { resolveRoleModel } from "../../ai/index.js";
@@ -170,7 +217,7 @@ import {
   tickPresentNpcs,
   buildDoneBoundaryData,
 } from "../../engine/index.js";
-import { drainPendingCommittedEvents } from "../../vectors/episodic-events.js";
+import { retractPendingCommittedEventsForTick } from "../../vectors/episodic-events.js";
 import { loadSettings } from "../../settings/index.js";
 import chatRoutes from "../chat.js";
 
@@ -186,7 +233,7 @@ const mockedCaptureSnapshot = vi.mocked(captureSnapshot);
 const mockedRestoreSnapshot = vi.mocked(restoreSnapshot);
 const mockedTickPresentNpcs = vi.mocked(tickPresentNpcs);
 const mockedBuildDoneBoundaryData = vi.mocked(buildDoneBoundaryData);
-const mockedDrainPendingCommittedEvents = vi.mocked(drainPendingCommittedEvents);
+void retractPendingCommittedEventsForTick;
 const mockedGetLastPlayerAction = vi.mocked(getLastPlayerAction);
 const mockedAppendChatMessages = vi.mocked(appendChatMessages);
 
@@ -243,6 +290,7 @@ function turnStream(events: Array<{ type: string; data: unknown }>) {
 beforeEach(() => {
   vi.clearAllMocks();
   runtimeSnapshots.clear();
+  runtimeSnapshotMetadata.clear();
   runtimeActiveTurns.clear();
   chatHistoryByCampaign.clear();
   partialMutations.length = 0;
@@ -256,7 +304,9 @@ beforeEach(() => {
   mockedProcessTurn.mockImplementation(() =>
     turnStream([{ type: "done", data: { tick: 1 } }]),
   );
-  mockedDrainPendingCommittedEvents.mockReturnValue([]);
+  mockRetractPendingCommittedEventsForTick.mockResolvedValue([]);
+  mockDrainPendingCommittedEventsByIds.mockReturnValue([]);
+  mockGetSettledTurnPacket.mockReturnValue(null);
   mockedAppendChatMessages.mockImplementation((campaignId, messages) => {
     const existing = chatHistoryByCampaign.get(campaignId) ?? [];
     existing.push(...messages);
@@ -521,11 +571,11 @@ describe("ScenePlan chat route cutover", () => {
     mockedRestoreSnapshot.mockImplementation(async () => {
       partialMutations.length = 0;
     });
-    mockedDrainPendingCommittedEvents.mockReturnValueOnce([
+    mockRetractPendingCommittedEventsForTick.mockResolvedValueOnce([
       {
         id: "queued-before-abort",
         text: "durable event queued before abort",
-      } as any,
+      },
     ]);
     mockedProcessTurn.mockImplementation(() =>
       (async function* () {
@@ -553,7 +603,7 @@ describe("ScenePlan chat route cutover", () => {
     expect(body).not.toContain("event: done");
     expect(body).not.toContain("Forest Outpost");
     expect(mockedRestoreSnapshot).toHaveBeenCalledWith(CAMPAIGN_ID, snapshot);
-    expect(mockedDrainPendingCommittedEvents).toHaveBeenCalledWith(CAMPAIGN_ID, 0);
+    expect(mockRetractPendingCommittedEventsForTick).toHaveBeenCalledWith(CAMPAIGN_ID, 0);
     expect(partialMutations).toEqual([]);
     expect(mockedAppendChatMessages).not.toHaveBeenCalledWith(
       CAMPAIGN_ID,
@@ -599,6 +649,9 @@ describe("ScenePlan chat route cutover", () => {
 
     expect(body).toContain('"worldVersion":4');
     expect(snapshotWasStoredAtDone).toEqual([true]);
-    expect(mockSetLastTurnSnapshot).toHaveBeenCalledWith(CAMPAIGN_ID, snapshot);
+    expect(mockSetLastTurnSnapshot).toHaveBeenCalledWith(CAMPAIGN_ID, snapshot, {
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+    });
   });
 });

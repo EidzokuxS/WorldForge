@@ -1,11 +1,11 @@
 import {
-  generateText,
   NoObjectGeneratedError,
   Output,
   tool as defineTool,
   type LanguageModel,
 } from "ai";
 import type { ZodType } from "zod";
+import { generateText } from "./raindrop-workshop.js";
 import { createLogger } from "../lib/index.js";
 import { extractReasoningText } from "./extract-reasoning-text.js";
 import {
@@ -688,7 +688,17 @@ function formatZodIssues(error: { issues: Array<{ path: PropertyKey[]; message: 
   ).join("; ");
 }
 
+const REPAIR_UUID_PATTERN = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/giu;
+const REPAIR_TYPED_BACKEND_REF_PATTERN = /\b(?:actor|campaign|candidate|edge|effect|event|fact|faction|item|knowledge|loc|location|movement|npc|player|route|scene|source|tool|authority|world|forecast|tool-result)[-:][a-z0-9][a-z0-9._:-]*\b/giu;
+
+function redactBackendRefsForRepair(text: string): string {
+  return text
+    .replace(REPAIR_UUID_PATTERN, "[backend ref hidden]")
+    .replace(REPAIR_TYPED_BACKEND_REF_PATTERN, "[backend ref hidden]");
+}
+
 function buildRepairPrompt(invalidJson: string, issues: string, schemaHint: string): string {
+  const redactedInvalidJson = redactBackendRefsForRepair(invalidJson).slice(0, 24000);
   return `Repair this model JSON output so it satisfies the expected schema.
 
 ${STRUCTURED_OUTPUT_REPAIR_POLICY}
@@ -710,7 +720,7 @@ Expected schema:
 ${schemaHint || "(schema example unavailable)"}
 
 Invalid output:
-${invalidJson.slice(0, 24000)}`;
+${redactedInvalidJson}`;
 }
 
 async function attemptRepair<T>(

@@ -206,4 +206,57 @@ describe("collectToolCalls", () => {
       { success: false, error: "tool_failed" },
     ]);
   });
+
+  it("matches tool results emitted in a later tool-result-only step by id", () => {
+    const calls = collectToolCalls([
+      {
+        toolCalls: [
+          { toolName: "find_object_candidates", toolCallId: "call-1", input: { query: "ledger" } },
+          { toolName: "inspect_known_fact", toolCallId: "call-2", input: { query: "bond wording" } },
+        ],
+      },
+      {
+        toolResults: [
+          {
+            toolCallId: "call-1",
+            output: { success: true, kind: "observation", result: { candidates: [] } },
+          },
+          {
+            toolCallId: "call-2",
+            output: { success: true, kind: "observation", result: { facts: [] } },
+          },
+        ],
+      },
+    ]);
+
+    expect(calls.map((call) => call.result)).toEqual([
+      { success: true, kind: "observation", result: { candidates: [] } },
+      { success: true, kind: "observation", result: { facts: [] } },
+    ]);
+  });
+
+  it("unwraps AI SDK json output wrappers before returning tool results", () => {
+    const calls = collectToolCalls([
+      {
+        toolCalls: [
+          { toolName: "find_object_candidates", toolCallId: "call-1", input: { query: "ledger" } },
+        ],
+        toolResults: [
+          {
+            toolCallId: "call-1",
+            output: {
+              type: "json",
+              value: { success: true, kind: "observation", result: { candidates: [] } },
+            },
+          },
+        ],
+      },
+    ]);
+
+    expect(calls[0]?.result).toEqual({
+      success: true,
+      kind: "observation",
+      result: { candidates: [] },
+    });
+  });
 });

@@ -10,12 +10,12 @@ function normalizeParticipantName(name: string): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
-export async function accumulateReflectionBudget(
+async function adjustReflectionBudget(
   campaignId: string,
   participants: string[],
-  importance: number,
+  delta: number,
 ): Promise<void> {
-  if (!Number.isFinite(importance) || importance <= 0 || participants.length === 0) {
+  if (!Number.isFinite(delta) || delta === 0 || participants.length === 0) {
     return;
   }
 
@@ -48,7 +48,7 @@ export async function accumulateReflectionBudget(
     }
 
     db.update(npcs)
-      .set({ unprocessedImportance: npc.unprocessedImportance + importance })
+      .set({ unprocessedImportance: Math.max(0, npc.unprocessedImportance + delta) })
       .where(eq(npcs.id, npc.id))
       .run();
     log.event("db.write", {
@@ -58,4 +58,26 @@ export async function accumulateReflectionBudget(
       rowName: npc.name,
     });
   }
+}
+
+export async function accumulateReflectionBudget(
+  campaignId: string,
+  participants: string[],
+  importance: number,
+): Promise<void> {
+  if (!Number.isFinite(importance) || importance <= 0) {
+    return;
+  }
+  await adjustReflectionBudget(campaignId, participants, importance);
+}
+
+export async function retractReflectionBudget(
+  campaignId: string,
+  participants: string[],
+  importance: number,
+): Promise<void> {
+  if (!Number.isFinite(importance) || importance <= 0) {
+    return;
+  }
+  await adjustReflectionBudget(campaignId, participants, -importance);
 }

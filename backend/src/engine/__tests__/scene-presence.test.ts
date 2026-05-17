@@ -70,6 +70,49 @@ describe("resolveScenePresence", () => {
     expect(snapshot.knowledgeBasisByObserver.player_1?.kafka).toBe("none");
   });
 
+  it("treats explicit macro scene scope as immediate scope without broad fallback", async () => {
+    const {
+      resolveImmediateScenePresenceScopeId,
+      resolveScenePresence,
+    } = await import("../scene-presence.js");
+
+    expect(resolveImmediateScenePresenceScopeId("shibuya-ward")).toBe("shibuya-ward");
+    expect(resolveImmediateScenePresenceScopeId(null)).toBeNull();
+
+    const snapshot = resolveScenePresence({
+      playerActorId: "player-1",
+      broadLocationId: "shibuya-ward",
+      sceneScopeId: resolveImmediateScenePresenceScopeId("shibuya-ward"),
+      actors: [
+        {
+          actorId: "player-1",
+          actorType: "player",
+          broadLocationId: "shibuya-ward",
+          sceneScopeId: "shibuya-ward",
+          visibility: "clear",
+        },
+        {
+          actorId: "clerk",
+          actorType: "npc",
+          broadLocationId: "shibuya-ward",
+          sceneScopeId: "shibuya-ward",
+          visibility: "clear",
+        },
+        {
+          actorId: "legacy-broad-row",
+          actorType: "npc",
+          broadLocationId: "shibuya-ward",
+          sceneScopeId: null,
+          visibility: "clear",
+        },
+      ],
+    });
+
+    expect(snapshot.presentActorIds).toEqual(["player-1", "clerk"]);
+    expect(snapshot.awarenessByObserver.player_1?.clerk).toBe("clear");
+    expect(snapshot.awarenessByObserver.player_1?.legacy_broad_row).toBe("none");
+  });
+
   it("keeps hidden but present actors inside presence while only surfacing awareness hints", async () => {
     const { resolveScenePresence } = await import("../scene-presence.js");
 

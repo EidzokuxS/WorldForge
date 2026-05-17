@@ -310,4 +310,52 @@ describe("actor plan executor", () => {
     expect(getDb().select().from(locationRecentEvents).all()).toEqual([]);
     expect(getDb().select().from(authorityTraces).all()).toHaveLength(1);
   });
+
+  it("rolls back deterministic travel when actor process commit races stale", () => {
+    setActivePlan({
+      id: "plan-racy-travel",
+      summary: "Courier goes to the depot.",
+      deterministic: true,
+      action: {
+        kind: "travel",
+        destinationLocationName: "Depot",
+        summary: "Courier reaches the depot offscreen.",
+      },
+    });
+    const process = loadProcess();
+    getDb()
+      .update(actorProcessStates)
+      .set({ lastWorldVersion: process.lastWorldVersion + 5 })
+      .where(eq(actorProcessStates.actorId, "npc-key"))
+      .run();
+
+    const result = executeActorPlanStep({
+      campaignId: CAMPAIGN_ID,
+      tick: 10,
+      process,
+      baseWorldVersion: 0,
+    });
+
+    expect(result).toMatchObject({
+      status: "stale_rejected",
+      processUpdateStatus: "stale_rejected",
+      failureReason: "actor_process_update_stale_rejected",
+      eventIds: [],
+      stateDeltaRefs: [],
+    });
+    expect(
+      getDb()
+        .select({ currentLocationId: npcs.currentLocationId })
+        .from(npcs)
+        .where(eq(npcs.id, "npc-key"))
+        .get(),
+    ).toMatchObject({ currentLocationId: "loc-a" });
+    expect(getDb().select().from(locationRecentEvents).all()).toEqual([]);
+    expect(getDb().select().from(authorityTraces).all()).toEqual([]);
+    expect(readWorldClock(CAMPAIGN_ID)).toMatchObject({
+      worldVersion: 0,
+      worldTimeMinutes: 10,
+    });
+    expect(loadProcess().state.activePlan).toMatchObject({ id: "plan-racy-travel" });
+  });
 });

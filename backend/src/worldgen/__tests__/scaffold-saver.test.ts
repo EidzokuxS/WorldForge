@@ -27,7 +27,7 @@ vi.mock("../../db/schema.js", () => ({
     _name: "location_recent_events",
     campaignId: "location_recent_events.campaignId",
   },
-  items: { _name: "items", campaignId: "items.campaignId" },
+  items: { _name: "items", campaignId: "items.campaignId", ownerId: "items.ownerId" },
   factions: { _name: "factions" },
   npcs: { _name: "npcs" },
   players: { _name: "players", campaignId: "players.campaignId" },
@@ -36,7 +36,9 @@ vi.mock("../../db/schema.js", () => ({
 
 // ---- Mock drizzle-orm eq ----
 vi.mock("drizzle-orm", () => ({
+  and: (...conditions: unknown[]) => ({ _and: conditions }),
   eq: (col: unknown, val: unknown) => ({ _eq: { col, val } }),
+  isNull: (col: unknown) => ({ _isNull: col }),
 }));
 
 // ---- Build chainable mock DB ----
@@ -202,7 +204,7 @@ function buildScaffold(): WorldScaffold {
         persona: "A mysterious traveler with no allegiance.",
         tags: ["mysterious", "traveler"],
         goals: { shortTerm: ["Find shelter"], longTerm: ["Discover the truth"] },
-        locationName: "Unknown Village",
+        locationName: "Dark Forest",
         factionName: null,
         tier: "supporting" as const,
       },
@@ -294,6 +296,28 @@ describe("saveScaffoldToDb", () => {
     expect(deletes[5]!.table).toBe("locations");
   });
 
+  it("reanchors existing players and ownerless items to the new starting scene after scaffold rewrite", () => {
+    saveScaffoldToDb("campaign-1", buildScaffold());
+    const playerUpdates = dbCalls.filter(
+      (c) => c.op === "update" && c.table === "players",
+    );
+    const itemUpdates = dbCalls.filter(
+      (c) => c.op === "update" && c.table === "items",
+    );
+
+    expect(playerUpdates.at(-1)?.data).toEqual({
+      currentLocationId: "uuid-1",
+      currentSceneLocationId: "uuid-1",
+    });
+    expect(itemUpdates.at(-1)?.data).toEqual({ locationId: "uuid-1" });
+    expect(itemUpdates.at(-1)?.where).toEqual({
+      _and: [
+        { _eq: { col: "items.campaignId", val: "campaign-1" } },
+        { _isNull: "items.ownerId" },
+      ],
+    });
+  });
+
   it("insertLocations creates one row per location with Phase 43 default fields", () => {
     saveScaffoldToDb("campaign-1", buildScaffold());
     const locationInserts = dbCalls.filter(
@@ -336,7 +360,7 @@ describe("saveScaffoldToDb", () => {
     const scaffold = makeDenseLocationScaffold();
     scaffold.locations = scaffold.locations.map((location) => ({
       ...location,
-      connectedTo: [],
+      connectedTo: location.kind === "persistent_sublocation" ? [] : location.connectedTo,
     }));
 
     saveScaffoldToDb("campaign-1", scaffold);
@@ -376,7 +400,7 @@ describe("saveScaffoldToDb", () => {
 
     expect(() =>
       saveScaffoldToDb("campaign-1", scaffold as DenseLocationWorldScaffold),
-    ).toThrow(/duplicate scaffold location name/i);
+    ).toThrow(/location_name_duplicate|duplicate location name/i);
     expect(dbCalls.some((c) => c.op === "insert" && c.table === "locations")).toBe(
       false,
     );
@@ -401,7 +425,7 @@ describe("saveScaffoldToDb", () => {
 
     expect(() =>
       saveScaffoldToDb("campaign-1", scaffold as DenseLocationWorldScaffold),
-    ).toThrow(/parentLocationName/i);
+    ).toThrow(/sublocation_parent_invalid|parent/i);
   });
 
   it("updateAdjacency creates bidirectional compatibility projection", () => {
@@ -788,14 +812,17 @@ describe("saveScaffoldToDb", () => {
     expect(mira.grounding).toBeUndefined();
   });
 
-  it("NPC with unknown locationName gets null currentLocationId", () => {
-    saveScaffoldToDb("campaign-1", buildScaffold());
-    const npcInserts = dbCalls.filter(
-      (c) => c.op === "insert" && c.table === "npcs",
+  it("rejects NPCs with unknown locationName before persistence", () => {
+    const scaffold = buildScaffold();
+    scaffold.npcs[1] = {
+      ...scaffold.npcs[1]!,
+      locationName: "Unknown Village",
+    };
+
+    expect(() => saveScaffoldToDb("campaign-1", scaffold)).toThrow(
+      /npc_location_missing|unknown location/i,
     );
-    const mira = npcInserts[1]!.data as Record<string, unknown>;
-    expect(mira.name).toBe("Mira the Wanderer");
-    expect(mira.currentLocationId).toBeNull();
+    expect(getNpcInserts()).toHaveLength(0);
   });
 
   it("maps scaffold tier 'supporting' to DB tier 'persistent'", () => {
@@ -835,23 +862,17 @@ describe("saveScaffoldToDb", () => {
     expect(rel.reason).toContain("Iron Guard");
   });
 
-  it("deduplicates membership relationships when duplicate scaffold NPC names resolve to the same entity", () => {
+  it("rejects duplicate scaffold NPC names before membership persistence", () => {
     const scaffold = buildScaffold();
     scaffold.npcs.push({
       ...scaffold.npcs[0]!,
       persona: "Duplicate source row for the same generated character.",
     });
 
-    saveScaffoldToDb("campaign-1", scaffold);
-    const relInserts = dbCalls.filter(
-      (c) => c.op === "insert" && c.table === "relationships",
+    expect(() => saveScaffoldToDb("campaign-1", scaffold)).toThrow(
+      /npc_name_duplicate|duplicate npc name/i,
     );
-    const memberRels = relInserts.filter((c) => {
-      const data = c.data as Record<string, unknown>;
-      return (data.tags as string).includes("Member");
-    });
-
-    expect(memberRels.length).toBe(1);
+    expect(getNpcInserts()).toHaveLength(0);
   });
 
   it("NPC with no factionName skips membership relationship", () => {
@@ -889,23 +910,19 @@ describe("saveScaffoldToDb", () => {
     expect(rel.reason).toContain("Castle Keep");
   });
 
-  it("deduplicates territory relationships when duplicate scaffold factions resolve to the same entity", () => {
+  it("rejects duplicate scaffold faction names before territory persistence", () => {
     const scaffold = buildScaffold();
     scaffold.factions.push({
       ...scaffold.factions[0]!,
       goals: ["Duplicate source row for the same faction."],
     });
 
-    saveScaffoldToDb("campaign-1", scaffold);
-    const relInserts = dbCalls.filter(
-      (c) => c.op === "insert" && c.table === "relationships",
+    expect(() => saveScaffoldToDb("campaign-1", scaffold)).toThrow(
+      /faction_name_duplicate|duplicate faction name/i,
     );
-    const territoryRels = relInserts.filter((c) => {
-      const data = c.data as Record<string, unknown>;
-      return (data.tags as string).includes("Controls");
-    });
-
-    expect(territoryRels.length).toBe(1);
+    expect(dbCalls.some((c) => c.op === "insert" && c.table === "factions")).toBe(
+      false,
+    );
   });
 
   it("updates campaign premise via tx.update(campaigns).set({premise, updatedAt})", () => {

@@ -126,6 +126,7 @@ vi.mock("../../engine/index.js", () => ({
   captureSnapshot: vi.fn(),
   restoreSnapshot: vi.fn(),
   findPendingNarrationSaga: vi.fn(() => null),
+  getSettledTurnPacket: vi.fn(() => null),
   NarrationRepairExhaustedError: class NarrationRepairExhaustedError extends Error {},
   PendingNarrationError: class PendingNarrationError extends Error {},
   tickPresentNpcs: vi.fn(async () => []),
@@ -149,22 +150,50 @@ vi.mock("../../engine/index.js", () => ({
 
 vi.mock("../../vectors/episodic-events.js", () => ({
   drainPendingCommittedEvents: vi.fn(() => []),
+  drainPendingCommittedEventsByIds: vi.fn(() => []),
   embedAndUpdateEvent: vi.fn(),
+  retractStoredEpisodicEvent: vi.fn(),
+  retractPendingCommittedEventsForTick: vi.fn(async () => []),
 }));
 
 const runtimeSnapshots = new Map<string, unknown>();
+const runtimeSnapshotMetadata = new Map<string, {
+  acceptedDurableEventIds: string[];
+  producedDurableEventIds: string[];
+}>();
 
 vi.mock("../../campaign/runtime-state.js", () => ({
   tryBeginTurn: vi.fn(() => true),
   endTurn: vi.fn(),
   hasActiveTurn: vi.fn(() => false),
   hasLiveTurnSnapshot: vi.fn((campaignId: string) => runtimeSnapshots.has(campaignId)),
-  setLastTurnSnapshot: vi.fn((campaignId: string, snapshot: unknown) => {
+  setLastTurnSnapshot: vi.fn((
+    campaignId: string,
+    snapshot: unknown,
+    metadata?: {
+      acceptedDurableEventIds?: readonly string[];
+      producedDurableEventIds?: readonly string[];
+    },
+  ) => {
     runtimeSnapshots.set(campaignId, snapshot);
+    runtimeSnapshotMetadata.set(campaignId, {
+      acceptedDurableEventIds: [...new Set(metadata?.acceptedDurableEventIds ?? [])],
+      producedDurableEventIds: [...new Set(metadata?.producedDurableEventIds ?? [])],
+    });
   }),
   getLastTurnSnapshot: vi.fn((campaignId: string) => runtimeSnapshots.get(campaignId)),
+  getLastTurnSnapshotMetadata: vi.fn((campaignId: string) =>
+    runtimeSnapshotMetadata.get(campaignId) ?? {
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+    }),
   clearLastTurnSnapshot: vi.fn((campaignId: string) => {
     runtimeSnapshots.delete(campaignId);
+    runtimeSnapshotMetadata.delete(campaignId);
+  }),
+  clearCampaignRuntimeState: vi.fn((campaignId: string) => {
+    runtimeSnapshots.delete(campaignId);
+    runtimeSnapshotMetadata.delete(campaignId);
   }),
 }));
 
@@ -189,6 +218,7 @@ function createTurnStream(events: Array<{ type: string; data: unknown }>) {
 beforeEach(() => {
   vi.clearAllMocks();
   runtimeSnapshots.clear();
+  runtimeSnapshotMetadata.clear();
 });
 
 describe("Phase 38 retry/undo reopen seam", () => {

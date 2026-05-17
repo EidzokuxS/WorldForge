@@ -3,6 +3,11 @@ import { z } from "zod";
 
 import type { SceneFrame, SceneActor } from "./scene-frame.js";
 import {
+  buildModelFacingScenePacket,
+  buildModelFacingScenePromptView,
+  isUnsafeModelFacingRef,
+} from "./model-facing-scene.js";
+import {
   SCENE_PLAN_ACTION_LIMIT,
   SCENE_PLAN_DEFERRED_HOOK_LIMIT,
   SCENE_PLAN_HIDDEN_RATIONALE_MAX,
@@ -95,6 +100,7 @@ export type SemanticScenePlan = z.infer<typeof semanticScenePlanSchema>;
 
 export type SemanticScenePlanMappingIssueCode =
   | "invalid_semantic_scene_plan"
+  | "unsafe_actor_ref"
   | "unknown_actor_ref"
   | "forbidden_actor_ref"
   | "missing_toolName"
@@ -146,13 +152,24 @@ function buildActorResolver(frame: SceneFrame): {
         .flatMap(actorRefs),
     ].map(normalizeRef),
   );
+  const packet = buildModelFacingScenePacket(frame);
+  const promptView = buildModelFacingScenePromptView(packet.view);
+  const byAllowedLabel = new Map<string, string>();
   const byRef = new Map<string, string>();
 
   for (const actor of allowed) {
-    for (const ref of actorRefs(actor)) {
+    const normalizedLabel = normalizeRef(actor.label);
+    if (!forbiddenRefs.has(normalizedLabel) && !byAllowedLabel.has(normalizedLabel)) {
+      byAllowedLabel.set(normalizedLabel, actor.id);
+    }
+  }
+  for (const actor of promptView.visibleActors) {
+    const actorId = byAllowedLabel.get(normalizeRef(actor.label));
+    if (!actorId) continue;
+    for (const ref of [actor.ref, actor.label]) {
       const normalized = normalizeRef(ref);
       if (!forbiddenRefs.has(normalized) && !byRef.has(normalized)) {
-        byRef.set(normalized, actor.id);
+        byRef.set(normalized, actorId);
       }
     }
   }
@@ -160,6 +177,15 @@ function buildActorResolver(frame: SceneFrame): {
   return {
     resolve(ref, path) {
       const normalized = normalizeRef(ref);
+      if (isUnsafeModelFacingRef(ref)) {
+        throw new SemanticScenePlanMappingError([
+          {
+            code: "unsafe_actor_ref",
+            path,
+            message: `${path} uses backend-only actor ref "${ref}". Use an allowed actor alias or visible label.`,
+          },
+        ]);
+      }
       if (forbiddenRefs.has(normalized)) {
         throw new SemanticScenePlanMappingError([
           {

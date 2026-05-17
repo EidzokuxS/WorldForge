@@ -91,7 +91,9 @@ function buildSourceLinkedKnowledgeSummary(
   return {
     id: `knowledge-summary:${sourceKnowledgeIds.slice(0, 4).join(":")}`,
     route: "memory",
-    text: `source-linked summary: ${records.length} eligible actor knowledge records were summarized for frame budget. Sources: ${sourceKnowledgeIds.slice(0, 8).join(", ")}.`,
+    text:
+      `source-linked summary: ${records.length} eligible actor knowledge records `
+      + "were summarized for frame budget. Source links are preserved internally.",
     subjectRefs: uniqueStrings(records.flatMap((record) => record.subjectRefs)),
     confidence: Math.min(...records.map((record) => record.confidence)) / 100,
     reliability: Math.min(...records.map((record) => record.reliability)) / 100,

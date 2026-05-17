@@ -1307,6 +1307,39 @@ describe("safeGenerateObject", () => {
     expect(repairPrompt).toContain("fail closed");
   });
 
+  it("redacts backend refs from generic repair prompts before replaying invalid output", async () => {
+    mockGenerateText
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          facts:
+            "actor:actor-player reached location:loc-secret via route-secret-1 and 11111111-1111-4111-8111-111111111111",
+        }),
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          facts: [{ note: "The visible route changed." }],
+        }),
+      });
+
+    await safeGenerateObject({
+      model: {} as never,
+      schema: z.object({
+        facts: z.array(z.object({
+          note: z.string(),
+        })),
+      }),
+      prompt: "test repair redaction",
+      retries: 1,
+    });
+
+    const repairPrompt = String(mockGenerateText.mock.calls[1]?.[0]?.prompt ?? "");
+    expect(repairPrompt).toContain("[backend ref hidden]");
+    expect(repairPrompt).not.toContain("actor:actor-player");
+    expect(repairPrompt).not.toContain("location:loc-secret");
+    expect(repairPrompt).not.toContain("route-secret-1");
+    expect(repairPrompt).not.toContain("11111111-1111-4111-8111-111111111111");
+  });
+
   it("extracts the first parseable balanced JSON payload after malformed prose braces", async () => {
     mockGenerateText.mockResolvedValue({
       text: "metadata: {not valid json}\nActual payload:\n{\"hp\":5}",

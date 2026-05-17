@@ -127,6 +127,7 @@ function createBridgeFrame(): SceneFrame {
   return {
     campaignId: "campaign-90-04",
     tick: 90,
+    worldVersion: 0,
     playerActorId: playerId,
     currentLocationId: "loc-canal-market",
     currentSceneScopeId: "scene-courier-counter",
@@ -298,7 +299,10 @@ function createBridgeCanonicalTurnPacket(): CanonicalTurnPacket {
 describe("PlayerFacingPacket", () => {
   it("formats only committed player-visible truth and omits raw canonical packet data", () => {
     const packet = buildPlayerFacingPacketFromNarratorPacket(createNarratorPacket());
-    const formatted = formatPlayerFacingPacketForPrompt(packet);
+    const formatted = formatPlayerFacingPacketForPrompt(packet, {
+      includeDiagnostics: true,
+      includeTechnicalRefs: true,
+    });
 
     expect(formatted).toContain("[PLAYER-FACING PACKET]");
     expect(formatted).toContain("[NARRATOR PACKET]");
@@ -323,6 +327,8 @@ describe("PlayerFacingPacket", () => {
 
   it("can omit diagnostic-only packet sections for compact final narration prompts", () => {
     const packet = buildPlayerFacingPacketFromNarratorPacket(createNarratorPacket());
+    packet.playerActionRequest =
+      "I cite actor:actor-player, route-secret-1, tool-result-9, and Hidden Auditor.";
     const formatted = formatPlayerFacingPacketForPrompt(packet, {
       includeDiagnostics: false,
       includeTechnicalRefs: false,
@@ -331,6 +337,10 @@ describe("PlayerFacingPacket", () => {
     expect(formatted).toContain("The depot queue grows restless.");
     expect(formatted).toContain("[CONTROL RETURN]");
     expect(formatted).toContain("Player attempted:");
+    expect(formatted).not.toContain("actor:actor-player");
+    expect(formatted).not.toContain("route-secret-1");
+    expect(formatted).not.toContain("tool-result-9");
+    expect(formatted).not.toContain("Hidden Auditor");
     expect(formatted).not.toContain("Player action request:");
     expect(formatted).not.toContain("Campaign: campaign-1");
     expect(formatted).not.toContain("Tick:");
@@ -343,6 +353,37 @@ describe("PlayerFacingPacket", () => {
     expect(formatted).not.toContain("[SOURCE-LINKED SUMMARIES]");
     expect(formatted).not.toContain("[REDACTION AUDIT]");
     expect(formatted).not.toContain("[CONTEXT BUDGET TRACE]");
+  });
+
+  it("formats lookup-grounded observations as player-visible packet sources", () => {
+    const narratorPacket = createNarratorPacket();
+    narratorPacket.perceivableObservations = [
+      {
+        id: "observation-result:scan-1",
+        actionId: "scan-1",
+        toolName: "list_visible_affordances",
+        summary:
+          "Scene scan: personnel Depot Clerk; routes Tide-Guild Receiving Office; barriers No visible barrier refs are present.",
+        atoms: [
+          {
+            id: "a1",
+            actionId: "scan-1",
+            toolName: "list_visible_affordances",
+            kind: "actor",
+            summary: "Scene scan: personnel Depot Clerk",
+            claimSupport: ["actor_presence"],
+            sourcePath: "visibleActors.0",
+          },
+        ],
+      },
+    ];
+
+    const packet = buildPlayerFacingPacketFromNarratorPacket(narratorPacket);
+    const formatted = formatPlayerFacingPacketForPrompt(packet);
+
+    expect(packet.perceivableObservations).toHaveLength(1);
+    expect(formatted).toContain("[PLAYER-VISIBLE OBSERVATIONS]");
+    expect(formatted).toContain("Scene scan: personnel Depot Clerk");
   });
 
   it("formats current inventory status as player-facing source without exposing raw canonical data", () => {
@@ -364,13 +405,16 @@ describe("PlayerFacingPacket", () => {
         id: "current_inventory_status:item-logbook",
         category: "current_inventory_status",
         summary:
-          "Courier Route Logbook is currently carried by the player. Item tags/state: document, reviewed.",
+          "Courier Route Logbook is carried by the player. Visible marks/status: document, reviewed.",
         sourceId: "item-logbook",
       },
     ];
 
     const packet = buildPlayerFacingPacketFromNarratorPacket(narratorPacket);
-    const formatted = formatPlayerFacingPacketForPrompt(packet);
+    const formatted = formatPlayerFacingPacketForPrompt(packet, {
+      includeDiagnostics: true,
+      includeTechnicalRefs: true,
+    });
 
     expect(packet.sourceRefs).toContainEqual({
       id: "item-logbook",
@@ -378,9 +422,31 @@ describe("PlayerFacingPacket", () => {
     });
     expect(formatted).toContain("[CURRENT INVENTORY STATUS]");
     expect(formatted).toContain(
-      "Courier Route Logbook is currently carried by the player. Item tags/state: document, reviewed.",
+      "Courier Route Logbook is carried by the player. Visible marks/status: document, reviewed.",
     );
     expect(formatted).not.toContain("canonicalTurnPacket");
+  });
+
+  it("does not duplicate a generic equipped slot into inventory prose", () => {
+    const narratorPacket = createNarratorPacket();
+    narratorPacket.currentInventory = [
+      {
+        id: "current-inventory:item-fork",
+        itemId: "item-fork",
+        label: "Pocket Tuning Fork",
+        tags: ["starting-loadout", "equipped"],
+        equipState: "equipped",
+        equippedSlot: "equipped",
+        isSignature: false,
+      },
+    ];
+
+    const packet = buildPlayerFacingPacketFromNarratorPacket(narratorPacket);
+    const formatted = formatPlayerFacingPacketForPrompt(packet);
+
+    expect(formatted).toContain("Pocket Tuning Fork is ready to hand.");
+    expect(formatted).not.toContain("equipped in equipped");
+    expect(formatted).not.toContain("currently equipped");
   });
 
   it("fails closed if a forbidden private term enters visible packet prose", () => {
@@ -403,28 +469,48 @@ describe("PlayerFacingPacket", () => {
       ...narratorPacket.visibleActors,
       { id: "actor-exchange-clerk", label: "Exchange Validation Clerk", type: "npc" },
     ];
-    narratorPacket.perceivableEffects[0] = {
-      id: "action-result:create-clerk",
-      actorId: playerId,
-      actionId: "create-clerk",
-      toolName: "create_scene_extra",
-      summary: "Exchange Validation Clerk becomes visibly present in the scene.",
-      perceivableByPlayer: true,
-      toolResult: {
-        success: true,
-        result: {
-          id: "actor-exchange-clerk",
-          name: "Exchange Validation Clerk",
+    narratorPacket.perceivableEffects = [
+      {
+        id: "action-result:create-clerk",
+        actorId: playerId,
+        actionId: "create-clerk",
+        toolName: "create_scene_extra",
+        summary: "Exchange Validation Clerk becomes visibly present in the scene.",
+        perceivableByPlayer: true,
+        toolResult: {
+          success: true,
+          result: {
+            id: "actor-exchange-clerk",
+            name: "Exchange Validation Clerk",
+          },
         },
       },
-    };
+      {
+        id: "action-result:log-clerk",
+        actorId: playerId,
+        actionId: "log-clerk",
+        toolName: "log_event",
+        summary: "Exchange Validation Clerk corrects the player's procedural phrase without raising alarm.",
+        perceivableByPlayer: true,
+        toolResult: {
+          success: true,
+          result: {
+            durability: "scene_local",
+            persisted: false,
+          },
+        },
+      },
+    ];
     narratorPacket.canonicalTurnPacket = {
       ...narratorPacket.canonicalTurnPacket,
       playerAction: narratorPacket.playerAction,
       narratorFacts: {
         ...narratorPacket.canonicalTurnPacket.narratorFacts,
-        actionIds: ["create-clerk"],
-        toolResultRefs: [{ actionId: "create-clerk", toolName: "create_scene_extra" }],
+        actionIds: ["create-clerk", "log-clerk"],
+        toolResultRefs: [
+          { actionId: "create-clerk", toolName: "create_scene_extra" },
+          { actionId: "log-clerk", toolName: "log_event" },
+        ],
       },
       actionResults: [
         {
@@ -444,6 +530,28 @@ describe("PlayerFacingPacket", () => {
           },
           summary: "Exchange Validation Clerk becomes visibly present in the scene.",
         },
+        {
+          order: 2,
+          actionId: "log-clerk",
+          actionRef: "tool-call-2",
+          actorId: playerId,
+          toolName: "log_event",
+          input: {
+            text: "Exchange Validation Clerk corrects the player's procedural phrase without raising alarm.",
+          },
+          args: {
+            text: "Exchange Validation Clerk corrects the player's procedural phrase without raising alarm.",
+          },
+          result: {
+            success: true,
+            result: {
+              durability: "scene_local",
+              persisted: false,
+            },
+          },
+          summary:
+            "Exchange Validation Clerk corrects the player's procedural phrase without raising alarm.",
+        },
       ],
     };
 
@@ -452,6 +560,9 @@ describe("PlayerFacingPacket", () => {
 
     expect(packet.committedVisibleActorCreationLabels).toContain("Exchange Validation Clerk");
     expect(formatted).toContain("Exchange Validation Clerk becomes visibly present in the scene.");
+    expect(formatted).toContain(
+      "Exchange Validation Clerk corrects the player's procedural phrase without raising alarm.",
+    );
   });
 
   it("rejects same-turn visible scene-extra label substrings", () => {
@@ -631,6 +742,77 @@ describe("PlayerFacingPacket", () => {
     expect(formatted).not.toContain("gave Mira a courier seal");
   });
 
+  it("redacts backend refs from committed player-facing prompt summaries", () => {
+    const narratorPacket = createNarratorPacket();
+    narratorPacket.oracleOutcome = "weak_hit with route-tea-lane";
+    narratorPacket.anchorEvent = {
+      ...narratorPacket.anchorEvent,
+      summary: "Mira waits near actor:hidden-watcher.",
+    };
+    narratorPacket.perceivableEvents[0] = {
+      ...narratorPacket.perceivableEvents[0]!,
+      summary: "Mira cites route_hidden_path.",
+    };
+    narratorPacket.perceivableResponses[0] = {
+      ...narratorPacket.perceivableResponses[0]!,
+      summary: "The clerk mentions tool_result_8 and location:loc-secret.",
+    };
+    narratorPacket.perceivableEffects[0] = {
+      ...narratorPacket.perceivableEffects[0]!,
+      summary: "The queue records authority:gm-loop and source:event-1.",
+    };
+    narratorPacket.visibleActors = [
+      ...narratorPacket.visibleActors,
+      { id: "visible-extra", label: "Courier actor_hidden", type: "npc" },
+    ];
+    narratorPacket.currentInventory = [{
+      id: "inventory-secret",
+      itemId: "item-secret",
+      label: "Satchel campaign-main",
+      equipState: "carried",
+      equippedSlot: null,
+      isSignature: false,
+      tags: ["tool-result-7"],
+    }];
+    narratorPacket.hintSignals = ["A hint mentions candidate_secret."];
+    narratorPacket.guardrails = ["Never expose 550e8400-e29b-41d4-a716-446655440000."];
+    narratorPacket.sourceLinkedSummaries = [{
+      id: "summary-raw-refs",
+      summary: "Overflow mentions effect_hidden and campaign-main.",
+      sourceIds: ["event-1"],
+      summarizedItemCount: 1,
+    }];
+
+    const packet = buildPlayerFacingPacketFromNarratorPacket(narratorPacket);
+    const formatted = formatPlayerFacingPacketForPrompt(packet, {
+      includeDiagnostics: true,
+      includeTechnicalRefs: true,
+    });
+
+    expect(formatted).toContain("[backend ref hidden]");
+    for (const leaked of [
+      "route-tea-lane",
+      "actor:hidden-watcher",
+      "route_hidden_path",
+      "tool_result_8",
+      "location:loc-secret",
+      "authority:gm-loop",
+      "source:event-1",
+      "actor_hidden",
+      "campaign-main",
+      "tool-result-7",
+      "candidate_secret",
+      "effect_hidden",
+      "event-player",
+      "response-visible",
+      "effect-visible",
+      "action-visible",
+      "550e8400",
+    ]) {
+      expect(formatted).not.toContain(leaked);
+    }
+  });
+
   it("surfaces tourist route bridge facts only from successful tool results", () => {
     const narratorPacket = buildNarratorPacket({
       frame: createBridgeFrame(),
@@ -638,14 +820,19 @@ describe("PlayerFacingPacket", () => {
       forbiddenPrivateTerms: ["Hidden Tea Vault", "private vault tea room"],
     });
     const packet = buildPlayerFacingPacketFromNarratorPacket(narratorPacket);
-    const formatted = formatPlayerFacingPacketForPrompt(packet);
+    const formatted = formatPlayerFacingPacketForPrompt(packet, {
+      includeDiagnostics: true,
+      includeTechnicalRefs: true,
+    });
 
     expect(formatted).toContain("Tourist Courier moves to Tea Row");
     expect(formatted).toContain("Lantern Tea Stall becomes reachable from Canal Market");
-    expect(formatted).toContain("starts searching for чайная лавка; no discovery is confirmed");
-    expect(formatted).toContain("perceivable_effect:action-result:action-move");
-    expect(formatted).toContain("perceivable_effect:action-result:action-poi");
-    expect(formatted).toContain("perceivable_effect:action-result:action-search");
+    expect(formatted).toContain("perceivable_effect:[backend ref hidden]");
+    expect(formatted).not.toContain("perceivable_effect:action-result:action-move");
+    expect(formatted).not.toContain("perceivable_effect:action-result:action-poi");
+    expect(formatted).toContain("ищу чайную лавку");
+    expect(formatted).not.toContain("starts searching for чайная лавка; no discovery is confirmed");
+    expect(formatted).not.toContain("perceivable_effect:action-result:action-search");
     expect(formatted).not.toContain("Hidden Tea Broker");
     expect(formatted).not.toContain("Hidden Tea Vault");
     expect(formatted).not.toContain("private vault tea room");
@@ -663,7 +850,10 @@ describe("PlayerFacingPacket", () => {
     }));
 
     const packet = buildPlayerFacingPacketFromNarratorPacket(narratorPacket);
-    const formatted = formatPlayerFacingPacketForPrompt(packet);
+    const formatted = formatPlayerFacingPacketForPrompt(packet, {
+      includeDiagnostics: true,
+      includeTechnicalRefs: true,
+    });
 
     expect(packet.contextBudgetTrace.summarizedItemCount).toBeGreaterThan(0);
     expect(packet.contextBudgetTrace.sourceLinkedSummaryCount).toBeGreaterThan(0);

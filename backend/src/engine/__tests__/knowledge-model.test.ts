@@ -9,6 +9,7 @@ import { actorKnowledgeRecords, campaigns } from "../../db/schema.js";
 import {
   listActorKnowledge,
   recordActorKnowledge,
+  retractActorKnowledgeRecord,
   toActorFrameExternalFact,
 } from "../knowledge-model.js";
 import {
@@ -141,5 +142,28 @@ describe("knowledge model", () => {
       actorId: "npc-scout",
       worldVersion: 0,
     })).toEqual([]);
+  });
+
+  it("retracts actor knowledge by factRef for rejected durable facts", () => {
+    const record = recordActorKnowledge({
+      campaignId: CAMPAIGN_ID,
+      actorId: "npc-scout",
+      route: "claim",
+      statement: "The office route contradicts the public notice.",
+      subjectRefs: ["office-route"],
+    });
+
+    expect(retractActorKnowledgeRecord({
+      campaignId: CAMPAIGN_ID,
+      factRef: `knowledge:${record.id}`,
+      reason: "rejected durable record_world_fact",
+    })).toBe(true);
+    expect(
+      getDb()
+        .select()
+        .from(actorKnowledgeRecords)
+        .where(eq(actorKnowledgeRecords.id, record.id))
+        .get(),
+    ).toBeUndefined();
   });
 });

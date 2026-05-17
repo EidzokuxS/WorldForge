@@ -102,6 +102,7 @@ function createFrame(overrides: Partial<SceneFrame> = {}): SceneFrame {
       outcome: "weak_hit",
     },
     ...overrides,
+    worldVersion: overrides.worldVersion ?? 0,
   };
 }
 
@@ -444,26 +445,40 @@ describe("ScenePlan validator", () => {
     expectIssue(result, "hidden_actor_ref");
   });
 
-  it("returns remote_location_ref when spawn_npc uses a remote legacy locationName", () => {
+  it("returns invalid_tool_input when spawn_npc uses legacy locationName instead of locationRef", () => {
+    const validPlan = createPlan({
+      plannedActions: [
+        {
+          id: actionId,
+          actorId: activeNpcId,
+          toolName: "spawn_npc",
+          input: {
+            name: "Outpost Cook",
+            tags: ["service-staff"],
+            locationRef: "current_scene",
+          },
+        },
+      ],
+    });
+    const legacyLocationNamePlan = {
+      ...validPlan,
+      plannedActions: [
+        {
+          ...validPlan.plannedActions[0]!,
+          input: {
+            name: "Outpost Cook",
+            tags: ["service-staff"],
+            locationName: "Okutama Safe Zone - Forest Outpost",
+          },
+        },
+      ],
+    } as unknown as ScenePlan;
     const result = validateScenePlan({
       frame: createFrame({ allowedTools: ["log_event", "spawn_npc"] }),
-      plan: createPlan({
-        plannedActions: [
-          {
-            id: actionId,
-            actorId: activeNpcId,
-            toolName: "spawn_npc",
-            input: {
-              name: "Outpost Cook",
-              tags: ["service-staff"],
-              locationName: "Okutama Safe Zone - Forest Outpost",
-            },
-          },
-        ],
-      }),
+      plan: legacyLocationNamePlan,
     });
 
-    expectIssue(result, "remote_location_ref");
+    expectIssue(result, "invalid_tool_input");
   });
 
   it("returns hidden_actor_visible_fact when narratorFacts reference hidden actor identity", () => {
@@ -664,7 +679,7 @@ describe("ScenePlan executor", () => {
     });
   });
 
-  it("projects quick action emitted events and full ToolResult metadata", async () => {
+  it("projects quick action emitted events as player-facing actions", async () => {
     const quickAction = {
       id: quickActionId,
       actorId: activeNpcId,
@@ -684,7 +699,10 @@ describe("ScenePlan executor", () => {
     const executed = await executeScenePlan({ campaignId: "campaign-1", tick: 12, plan: validated });
 
     expect(executed.quickActionsEmitted).toBe(true);
-    expect(executed.emittedEvents).toEqual([{ type: "quick_actions", data: toolResult }]);
+    expect(executed.emittedEvents).toEqual([{
+      type: "quick_actions",
+      data: { actions: quickAction.input.actions },
+    }]);
     expect(executed.toolCallResults).toEqual([
       expect.objectContaining({
         order: 0,

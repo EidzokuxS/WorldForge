@@ -86,7 +86,7 @@ vi.mock("../oracle.js", () => ({
 }));
 
 vi.mock("../due-world-work.js", () => ({
-  resolveDueWorldWorkForScope: resolveDueWorldWorkForScopeMock,
+  resolveDueWorldWorkForScopeWithProposalWatchdog: resolveDueWorldWorkForScopeMock,
 }));
 
 vi.mock("../prompt-assembler.js", () => ({
@@ -190,9 +190,22 @@ vi.mock("../narrator-packet.js", () => ({
     anchorEvent: null,
     perceivableEvents: [],
     perceivableResponses: [],
-    perceivableEffects: [],
+    perceivableEffects: [{
+      id: "effect-empty-1",
+      actionId: "action-empty-1",
+      actorId: "player-1",
+      toolName: "log_event",
+      summary: "A local result settles.",
+      perceivableByPlayer: true,
+      toolResult: { success: true, result: { eventId: "event-empty-1" } },
+    }],
     visibleActors: [{ id: "player-1", label: "Hero", type: "player" }],
     hintSignals: [],
+    evidenceLedger: [{
+      id: "perceivable_effect:effect-empty-1",
+      category: "perceivable_effect",
+      summary: "A local result settles.",
+    }],
     guardrails: [],
     controlReturnReason: "Return control.",
     allowedVisibleActorNames: ["Hero"],
@@ -242,6 +255,7 @@ vi.mock("../turn-saga.js", () => ({
   getSettledTurnPacket: vi.fn(),
   getTurnSaga: getTurnSagaMock,
   heartbeatTurnSagaWorker: vi.fn(),
+  hasPreparedSettledTurnPacketRecovery: vi.fn(() => false),
   markTurnSagaFinalized: markTurnSagaFinalizedMock,
   markTurnSagaFinalizedIfNeeded: vi.fn(),
   mergeTurnSagaProvenance: vi.fn(),
@@ -261,8 +275,10 @@ vi.mock("../turn-saga.js", () => ({
   ],
   persistOracleDecision: vi.fn(() => ({ id: "oracle-empty-narration" })),
   persistSettledTurnPacket: persistSettledTurnPacketMock,
+  recordPreparedSettledTurnPacket: vi.fn(),
   recordNarratorAttempt: recordNarratorAttemptMock,
   releaseTurnSagaWorker: releaseTurnSagaWorkerMock,
+  recoverSettledTurnPacketFromPreparedEvent: vi.fn(() => null),
   transitionTurnSagaStatus: transitionTurnSagaStatusMock,
   updateNarratorAttemptOutcome: updateNarratorAttemptOutcomeMock,
 }));
@@ -444,6 +460,12 @@ beforeEach(() => {
       skipped: [],
     },
     proposalPrepTrace: [],
+    proposals: {
+      selected: [],
+      executed: [],
+      skipped: [],
+    },
+    blockedWriteScopes: [],
   });
   incrementTickMock.mockReturnValue(6);
   advanceCampaignTickMock.mockReturnValue(6);
@@ -578,14 +600,28 @@ beforeEach(() => {
 describe("processTurn empty final narration", () => {
   it("does not finalize the scene-plan path when packet-guarded narration is blank", async () => {
     const onPostTurn = vi.fn();
-    runVisibleNarrationWithPacketGuardMock.mockResolvedValue({
+    safeGenerateObjectMock.mockResolvedValueOnce({
+      object: {
+        version: "grounded-sentence-draft.v2",
+        sentences: [{
+          text: "[[fact:e1.s1]]",
+          evidenceRefs: ["e1"],
+        }],
+      },
+      trace: {
+        strategy: "native_json",
+        primaryStrategy: "native_json",
+        finishReason: "stop",
+      },
+    });
+    runVisibleNarrationWithPacketGuardMock.mockImplementation(async (args) => ({
       text: "   ",
-      draft: { prose: "   ", claims: [], claimSpans: [] },
+      draft: await args.generateNarration({ attempt: 1, guardAddendum: null }),
       attempts: 2,
       retried: true,
       validation: { ok: true, violations: [] },
       guardAddendum: null,
-    });
+    }));
 
     const { events, thrown } = await collectEventsUntilError(
       processTurn(createOptions({ onPostTurn })),

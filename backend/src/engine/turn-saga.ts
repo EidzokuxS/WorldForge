@@ -5,6 +5,8 @@ import {
   narratorAttempts,
   oracleDecisions,
   settledTurnPackets,
+  turnSagaEvents,
+  turnSagaEventTypeValues,
   turnSagaStatusValues,
   turnSagas,
   type narratorAttemptStatusValues,
@@ -12,6 +14,7 @@ import {
 
 export type TurnSagaStatus = (typeof turnSagaStatusValues)[number];
 export type NarratorAttemptStatus = (typeof narratorAttemptStatusValues)[number];
+export type TurnSagaEventType = (typeof turnSagaEventTypeValues)[number];
 
 export const TURN_SAGA_STATUSES = turnSagaStatusValues;
 export const PENDING_NARRATION_STATUSES = [
@@ -66,6 +69,7 @@ export class TurnSagaLockConflictError extends Error {
 }
 
 type TurnSagaRow = typeof turnSagas.$inferSelect;
+type TurnSagaEventRow = typeof turnSagaEvents.$inferSelect;
 type OracleDecisionRow = typeof oracleDecisions.$inferSelect;
 type SettledTurnPacketRow = typeof settledTurnPackets.$inferSelect;
 type NarratorAttemptRow = typeof narratorAttempts.$inferSelect;
@@ -93,6 +97,20 @@ export interface TurnSagaRecord {
   provenance: Record<string, unknown>;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface TurnSagaEventRecord {
+  id: string;
+  campaignId: string;
+  sagaId: string;
+  turnId: string;
+  eventType: TurnSagaEventType;
+  idempotencyKey: string;
+  baseWorldVersion: number | null;
+  resultWorldVersion: number | null;
+  settledTurnPacketId: string | null;
+  payload: unknown;
+  createdAt: number;
 }
 
 export interface OracleDecisionRecord {
@@ -128,6 +146,8 @@ export interface SettledTurnPacketRecord {
   sourceRefs: string[];
   acceptedToolResultRefs: string[];
   acceptedActorResultRefs: string[];
+  acceptedDurableEventIds: string[];
+  producedDurableEventIds: string[];
   dueWorldRefs: string[];
   requiresNarration: boolean;
   baseWorldVersion: number;
@@ -238,12 +258,19 @@ export interface PersistSettledTurnPacketInput {
   sourceRefs?: readonly string[];
   acceptedToolResultRefs?: readonly string[];
   acceptedActorResultRefs?: readonly string[];
+  acceptedDurableEventIds?: readonly string[];
+  producedDurableEventIds?: readonly string[];
   dueWorldRefs?: readonly string[];
   requiresNarration?: boolean;
   baseWorldVersion: number;
   resultWorldVersion: number;
   nowMs?: number;
 }
+
+export type PreparedSettledTurnPacketInput = Omit<
+  PersistSettledTurnPacketInput,
+  "lockToken"
+>;
 
 export interface RecordNarratorAttemptInput {
   id?: string;
@@ -283,6 +310,16 @@ export type MergeTurnSagaProvenanceInput =
   GetTurnSagaInput & {
     patch: Record<string, unknown>;
     lockToken?: string;
+    nowMs?: number;
+  };
+
+export type GetPreparedSettledTurnPacketEventInput = GetTurnSagaInput;
+
+export type RecordPreparedSettledTurnPacketInput = PersistSettledTurnPacketInput;
+
+export type RecoverSettledTurnPacketFromPreparedEventInput =
+  GetTurnSagaInput & {
+    lockToken: string;
     nowMs?: number;
   };
 
@@ -420,6 +457,22 @@ function toTurnSaga(row: TurnSagaRow): TurnSagaRecord {
   };
 }
 
+function toTurnSagaEvent(row: TurnSagaEventRow): TurnSagaEventRecord {
+  return {
+    id: row.id,
+    campaignId: row.campaignId,
+    sagaId: row.sagaId,
+    turnId: row.turnId,
+    eventType: row.eventType,
+    idempotencyKey: row.idempotencyKey,
+    baseWorldVersion: row.baseWorldVersion ?? null,
+    resultWorldVersion: row.resultWorldVersion ?? null,
+    settledTurnPacketId: row.settledTurnPacketId ?? null,
+    payload: parseJson(row.payloadJson),
+    createdAt: row.createdAt,
+  };
+}
+
 function toOracleDecision(row: OracleDecisionRow): OracleDecisionRecord {
   return {
     id: row.id,
@@ -456,6 +509,8 @@ function toSettledTurnPacket(row: SettledTurnPacketRow): SettledTurnPacketRecord
     sourceRefs: parseStringArray(row.sourceRefs),
     acceptedToolResultRefs: parseStringArray(row.acceptedToolResultRefs),
     acceptedActorResultRefs: parseStringArray(row.acceptedActorResultRefs),
+    acceptedDurableEventIds: parseStringArray(row.acceptedDurableEventIds),
+    producedDurableEventIds: parseStringArray(row.producedDurableEventIds),
     dueWorldRefs: parseStringArray(row.dueWorldRefs),
     requiresNarration: row.requiresNarration,
     baseWorldVersion: row.baseWorldVersion,
@@ -866,6 +921,173 @@ export function mergeTurnSagaProvenance(
   return toTurnSaga(requireTurnSagaRow({ sagaId: saga.id }));
 }
 
+function preparedSettledTurnPacketInput(
+  input: PersistSettledTurnPacketInput,
+): PreparedSettledTurnPacketInput {
+  const { lockToken: _lockToken, ...prepared } = input;
+  return prepared;
+}
+
+function latestTurnSagaEventRow(input: {
+  saga: TurnSagaRow;
+  eventType: TurnSagaEventType;
+}): TurnSagaEventRow | null {
+  return getDb()
+    .select()
+    .from(turnSagaEvents)
+    .where(and(
+      eq(turnSagaEvents.sagaId, input.saga.id),
+      eq(turnSagaEvents.eventType, input.eventType),
+    ))
+    .orderBy(desc(turnSagaEvents.createdAt))
+    .get() ?? null;
+}
+
+export function getPreparedSettledTurnPacketEvent(
+  input: GetPreparedSettledTurnPacketEventInput,
+): TurnSagaEventRecord | null {
+  const saga = requireTurnSagaRow(input);
+  const row = latestTurnSagaEventRow({
+    saga,
+    eventType: "settled_packet_prepared",
+  });
+  return row ? toTurnSagaEvent(row) : null;
+}
+
+export function hasPreparedSettledTurnPacketRecovery(
+  input: GetPreparedSettledTurnPacketEventInput,
+): boolean {
+  return getPreparedSettledTurnPacketEvent(input) !== null;
+}
+
+export function recordPreparedSettledTurnPacket(
+  input: RecordPreparedSettledTurnPacketInput,
+): TurnSagaEventRecord {
+  const saga = requireTurnSagaRow({ sagaId: input.sagaId });
+  assertLockTokenIfProvided(saga, input.lockToken);
+  const timestamp = now(input.nowMs);
+  const idempotencyKey = input.id ?? `settled-packet:${saga.id}`;
+  const eventId = randomUUID();
+  const preparedInput = preparedSettledTurnPacketInput(input);
+  const insert = getDb()
+    .insert(turnSagaEvents)
+    .values({
+      id: eventId,
+      campaignId: saga.campaignId,
+      sagaId: saga.id,
+      turnId: saga.turnId,
+      eventType: "settled_packet_prepared",
+      idempotencyKey,
+      baseWorldVersion: input.baseWorldVersion,
+      resultWorldVersion: input.resultWorldVersion,
+      settledTurnPacketId: input.id ?? null,
+      payloadJson: stringifyJson({
+        persistSettledTurnPacketInput: preparedInput,
+      }, {}),
+      createdAt: timestamp,
+    });
+  const result = insert
+    .onConflictDoNothing({
+      target: [
+        turnSagaEvents.sagaId,
+        turnSagaEvents.eventType,
+        turnSagaEvents.idempotencyKey,
+      ],
+    })
+    .run();
+  const row = getDb()
+    .select()
+    .from(turnSagaEvents)
+    .where(and(
+      eq(turnSagaEvents.sagaId, saga.id),
+      eq(turnSagaEvents.eventType, "settled_packet_prepared"),
+      eq(turnSagaEvents.idempotencyKey, idempotencyKey),
+    ))
+    .get();
+  if (!row) {
+    throw new Error(
+      `Settled packet preparation event ${eventId} failed to persist for saga ${saga.id}.`,
+    );
+  }
+  if (result.changes === 0 && row.settledTurnPacketId !== (input.id ?? null)) {
+    throw new Error(`Settled packet preparation idempotency collision for saga ${saga.id}.`);
+  }
+  return toTurnSagaEvent(row);
+}
+
+function readPreparedStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function preparedSettledTurnPacketInputFromEvent(
+  event: TurnSagaEventRecord,
+): PreparedSettledTurnPacketInput | null {
+  const payload = isPlainRecord(event.payload) ? event.payload : {};
+  const rawInput = payload.persistSettledTurnPacketInput;
+  if (!isPlainRecord(rawInput)) {
+    return null;
+  }
+  const sagaId = rawInput.sagaId;
+  const baseWorldVersion = rawInput.baseWorldVersion;
+  const resultWorldVersion = rawInput.resultWorldVersion;
+  if (
+    typeof sagaId !== "string"
+    || typeof baseWorldVersion !== "number"
+    || typeof resultWorldVersion !== "number"
+  ) {
+    return null;
+  }
+  const id = typeof rawInput.id === "string" ? rawInput.id : undefined;
+  const oracleDecisionId =
+    typeof rawInput.oracleDecisionId === "string" ? rawInput.oracleDecisionId : null;
+  const requiresNarration =
+    typeof rawInput.requiresNarration === "boolean" ? rawInput.requiresNarration : undefined;
+  const nowMs = typeof rawInput.nowMs === "number" ? rawInput.nowMs : undefined;
+  return {
+    ...(id ? { id } : {}),
+    sagaId,
+    ...(oracleDecisionId ? { oracleDecisionId } : {}),
+    canonicalTurnPacket: rawInput.canonicalTurnPacket ?? {},
+    narratorPacket: rawInput.narratorPacket ?? {},
+    sourceRefs: readPreparedStringArray(rawInput.sourceRefs),
+    acceptedToolResultRefs: readPreparedStringArray(rawInput.acceptedToolResultRefs),
+    acceptedActorResultRefs: readPreparedStringArray(rawInput.acceptedActorResultRefs),
+    acceptedDurableEventIds: readPreparedStringArray(rawInput.acceptedDurableEventIds),
+    producedDurableEventIds: readPreparedStringArray(rawInput.producedDurableEventIds),
+    dueWorldRefs: readPreparedStringArray(rawInput.dueWorldRefs),
+    ...(requiresNarration === undefined ? {} : { requiresNarration }),
+    baseWorldVersion,
+    resultWorldVersion,
+    ...(nowMs === undefined ? {} : { nowMs }),
+  };
+}
+
+export function recoverSettledTurnPacketFromPreparedEvent(
+  input: RecoverSettledTurnPacketFromPreparedEventInput,
+): SettledTurnPacketRecord | null {
+  const saga = requireTurnSagaRow(input);
+  assertLockTokenIfProvided(saga, input.lockToken);
+  const existing = getSettledTurnPacket({ sagaId: saga.id, campaignId: saga.campaignId });
+  if (existing) {
+    return existing;
+  }
+  const event = getPreparedSettledTurnPacketEvent({ sagaId: saga.id });
+  if (!event) {
+    return null;
+  }
+  const preparedInput = preparedSettledTurnPacketInputFromEvent(event);
+  if (!preparedInput || preparedInput.sagaId !== saga.id) {
+    throw new Error(`Prepared settled packet event ${event.id} is not recoverable.`);
+  }
+  return persistSettledTurnPacket({
+    ...preparedInput,
+    lockToken: input.lockToken,
+    nowMs: input.nowMs ?? preparedInput.nowMs,
+  });
+}
+
 export function persistOracleDecision(
   input: PersistOracleDecisionInput,
 ): OracleDecisionRecord {
@@ -975,12 +1197,42 @@ export function persistSettledTurnPacket(
         sourceRefs: stringifyStringArray(input.sourceRefs),
         acceptedToolResultRefs: stringifyStringArray(input.acceptedToolResultRefs),
         acceptedActorResultRefs: stringifyStringArray(input.acceptedActorResultRefs),
+        acceptedDurableEventIds: stringifyStringArray(input.acceptedDurableEventIds),
+        producedDurableEventIds: stringifyStringArray(input.producedDurableEventIds),
         dueWorldRefs: stringifyStringArray(input.dueWorldRefs),
         requiresNarration,
         baseWorldVersion: input.baseWorldVersion,
         resultWorldVersion: input.resultWorldVersion,
         createdAt: timestamp,
         updatedAt: timestamp,
+      })
+      .run();
+
+    tx
+      .insert(turnSagaEvents)
+      .values({
+        id: randomUUID(),
+        campaignId: saga.campaignId,
+        sagaId: saga.id,
+        turnId: saga.turnId,
+        eventType: "settled_packet_persisted",
+        idempotencyKey: id,
+        baseWorldVersion: input.baseWorldVersion,
+        resultWorldVersion: input.resultWorldVersion,
+        settledTurnPacketId: id,
+        payloadJson: stringifyJson({
+          settledTurnPacketId: id,
+          oracleDecisionId: input.oracleDecisionId ?? null,
+          requiresNarration,
+        }, {}),
+        createdAt: timestamp,
+      })
+      .onConflictDoNothing({
+        target: [
+          turnSagaEvents.sagaId,
+          turnSagaEvents.eventType,
+          turnSagaEvents.idempotencyKey,
+        ],
       })
       .run();
 

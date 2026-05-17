@@ -1,10 +1,16 @@
 import crypto from "node:crypto";
+import { and, eq } from "drizzle-orm";
 import { Field, FixedSizeList, Float32, Int32, List, Schema, Utf8 } from "apache-arrow";
+import { getDb } from "../db/index.js";
+import { locationRecentEvents } from "../db/schema.js";
 import { getVectorDb } from "./connection.js";
 import { embedTexts } from "./embeddings.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import { createLogger } from "../lib/index.js";
-import { recordLocationRecentEvent } from "../engine/location-events.js";
+import {
+  recordLocationRecentEvent,
+  type LocationRecentEventSummary,
+} from "../engine/location-events.js";
 
 const log = createLogger("episodic-events");
 
@@ -16,6 +22,10 @@ export interface EpisodicEvent {
   participants: string[];
   importance: number;
   type: string;
+  visibility?: LocationRecentEventSummary["visibility"];
+  surfaceRoute?: string | null;
+  knowledgeRoute?: string | null;
+  hiddenCauseTerms?: string[];
   vector: number[];
 }
 
@@ -27,6 +37,10 @@ export interface PendingCommittedEvent {
   participants: string[];
   importance: number;
   type: string;
+  visibility?: LocationRecentEventSummary["visibility"];
+  surfaceRoute?: string | null;
+  knowledgeRoute?: string | null;
+  hiddenCauseTerms?: string[];
 }
 
 const TABLE_NAME = "episodic_events";
@@ -184,6 +198,7 @@ function clonePendingCommittedEvent(event: PendingCommittedEvent): PendingCommit
   return {
     ...event,
     participants: [...event.participants],
+    hiddenCauseTerms: [...(event.hiddenCauseTerms ?? [])],
   };
 }
 
@@ -191,6 +206,29 @@ function queuePendingCommittedEvent(campaignId: string, event: PendingCommittedE
   const queue = pendingCommittedEvents.get(campaignId) ?? [];
   queue.push(event);
   pendingCommittedEvents.set(campaignId, queue);
+}
+
+function removePendingCommittedEvent(
+  campaignId: string,
+  eventId: string,
+): PendingCommittedEvent | null {
+  const queue = pendingCommittedEvents.get(campaignId) ?? [];
+  let removed: PendingCommittedEvent | null = null;
+  const remaining = queue.filter((event) => {
+    if (event.id === eventId && !removed) {
+      removed = event;
+      return false;
+    }
+    return true;
+  });
+
+  if (remaining.length > 0) {
+    pendingCommittedEvents.set(campaignId, remaining);
+  } else {
+    pendingCommittedEvents.delete(campaignId);
+  }
+
+  return removed ? clonePendingCommittedEvent(removed) : null;
 }
 
 export function readPendingCommittedEvents(
@@ -227,8 +265,118 @@ export function drainPendingCommittedEvents(
   return drained.map(clonePendingCommittedEvent);
 }
 
+export function drainPendingCommittedEventsByIds(
+  campaignId: string,
+  eventIds: readonly string[],
+): PendingCommittedEvent[] {
+  const idSet = new Set(
+    eventIds
+      .map((id) => id.trim())
+      .filter(Boolean),
+  );
+  if (idSet.size === 0) {
+    return [];
+  }
+
+  const queue = pendingCommittedEvents.get(campaignId) ?? [];
+  const drained: PendingCommittedEvent[] = [];
+  const remaining: PendingCommittedEvent[] = [];
+
+  for (const event of queue) {
+    if (idSet.has(event.id)) {
+      drained.push(event);
+    } else {
+      remaining.push(event);
+    }
+  }
+
+  if (remaining.length > 0) {
+    pendingCommittedEvents.set(campaignId, remaining);
+  } else {
+    pendingCommittedEvents.delete(campaignId);
+  }
+
+  return drained.map(clonePendingCommittedEvent);
+}
+
 export function clearPendingCommittedEvents(campaignId: string): void {
   pendingCommittedEvents.delete(campaignId);
+}
+
+function escapeTableString(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+export async function retractStoredEpisodicEvent(input: {
+  campaignId: string;
+  eventId: string;
+}): Promise<{
+  vectorDeleted: boolean;
+  pendingEvent: PendingCommittedEvent | null;
+}> {
+  const pendingEvent = removePendingCommittedEvent(input.campaignId, input.eventId);
+  let vectorDeleted = false;
+
+  const vectorDb = getVectorDb();
+  const tableNames = await vectorDb.tableNames();
+  if (tableNames.includes(TABLE_NAME)) {
+    const table = await vectorDb.openTable(TABLE_NAME);
+    const escapedEventId = escapeTableString(input.eventId);
+    const existingRows = await table
+      .query()
+      .where(`id = '${escapedEventId}'`)
+      .toArray();
+    if (existingRows.length > 0) {
+      await table.delete(`id = '${escapedEventId}'`);
+      vectorDeleted = true;
+      log.event("vector.write", {
+        store: "episodic_events",
+        op: "delete",
+        count: 1,
+        rowId: input.eventId,
+      });
+    }
+  }
+
+  getDb()
+    .delete(locationRecentEvents)
+    .where(and(
+      eq(locationRecentEvents.campaignId, input.campaignId),
+      eq(locationRecentEvents.sourceEventId, input.eventId),
+    ))
+    .run();
+
+  return { vectorDeleted, pendingEvent };
+}
+
+export async function retractPendingCommittedEventsForTick(
+  campaignId: string,
+  tick: number,
+): Promise<Array<{
+  eventId: string;
+  vectorDeleted: boolean;
+  pendingEvent: PendingCommittedEvent | null;
+}>> {
+  const pendingEvents = readPendingCommittedEvents(campaignId, tick);
+  const results: Array<{
+    eventId: string;
+    vectorDeleted: boolean;
+    pendingEvent: PendingCommittedEvent | null;
+  }> = [];
+
+  for (const event of pendingEvents) {
+    const result = await retractStoredEpisodicEvent({
+      campaignId,
+      eventId: event.id,
+    });
+    results.push({
+      eventId: event.id,
+      vectorDeleted: result.vectorDeleted,
+      pendingEvent: result.pendingEvent,
+    });
+  }
+
+  return results;
 }
 
 /**
@@ -270,6 +418,10 @@ export async function storeEpisodicEvent(
     summary: event.text,
     importance: event.importance,
     sourceEventId: id,
+    visibility: event.visibility,
+    surfaceRoute: event.surfaceRoute,
+    knowledgeRoute: event.knowledgeRoute,
+    hiddenCauseTerms: event.hiddenCauseTerms,
   });
 
   queuePendingCommittedEvent(campaignId, {
@@ -280,6 +432,10 @@ export async function storeEpisodicEvent(
     participants: [...event.participants],
     importance: event.importance,
     type: event.type || "event",
+    visibility: event.visibility ?? "player_perceivable",
+    surfaceRoute: event.surfaceRoute ?? null,
+    knowledgeRoute: event.knowledgeRoute ?? null,
+    hiddenCauseTerms: [...(event.hiddenCauseTerms ?? [])],
   });
   log.info(`Stored episodic event ${id} (tick=${event.tick}, importance=${event.importance})`);
   return id;

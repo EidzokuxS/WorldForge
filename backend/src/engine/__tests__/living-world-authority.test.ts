@@ -267,4 +267,75 @@ describe("living world authority", () => {
     expect(clocks).toHaveLength(1);
     expect(clocks[0]?.worldVersion).toBe(1);
   });
+
+  it("returns the existing authority trace when a tool result id is retried", () => {
+    ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 0 });
+
+    const first = commitAuthorityTrace({
+      campaignId: CAMPAIGN_ID,
+      operation: "tool:record_world_fact",
+      baseWorldVersion: 0,
+      sourceEntity: { type: "system", id: "gm-tool-loop" },
+      elapsedWorldTimeMinutes: 0,
+      toolResultId: "tool-result-idempotent",
+      eventIds: ["event-1"],
+      stateDeltaRefs: ["knowledge:fact-1"],
+      witnesses: ["Player"],
+    });
+    const second = commitAuthorityTrace({
+      campaignId: CAMPAIGN_ID,
+      operation: "tool:record_world_fact",
+      baseWorldVersion: 0,
+      sourceEntity: { type: "system", id: "gm-tool-loop" },
+      elapsedWorldTimeMinutes: 0,
+      toolResultId: "tool-result-idempotent",
+      eventIds: ["event-1"],
+      stateDeltaRefs: ["knowledge:fact-1"],
+      witnesses: ["Player"],
+    });
+
+    expect(second).toMatchObject(first);
+    expect(getDb().select().from(authorityTraces).all()).toHaveLength(1);
+    expect(readWorldClock(CAMPAIGN_ID)).toMatchObject({
+      worldVersion: 1,
+      worldTimeMinutes: 0,
+    });
+  });
+
+  it("rolls back the world clock when authority trace insertion fails", () => {
+    ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 0 });
+    getDb().insert(authorityTraces).values({
+      id: "manual-conflicting-trace",
+      campaignId: CAMPAIGN_ID,
+      operation: "manual-conflict",
+      sourceEntityType: "test",
+      sourceEntityId: null,
+      baseWorldVersion: 0,
+      resultWorldVersion: 1,
+      worldTimeMinutes: 1,
+      elapsedWorldTimeMinutes: 1,
+      toolResultId: "manual-conflict",
+      eventIds: "[]",
+      stateDeltaRefs: "[]",
+      witnesses: "[]",
+      metadata: "{}",
+      createdAt: Date.now(),
+    }).run();
+
+    expect(() =>
+      commitAuthorityTrace({
+        campaignId: CAMPAIGN_ID,
+        operation: "tool:add_tag",
+        baseWorldVersion: 0,
+        sourceEntity: { type: "player", id: "player-1" },
+        toolResultId: "tool-result-after-conflict",
+        stateDeltaRefs: ["actor:player-1:tagged"],
+      }),
+    ).toThrow();
+
+    expect(readWorldClock(CAMPAIGN_ID)).toMatchObject({
+      worldVersion: 0,
+      worldTimeMinutes: 0,
+    });
+  });
 });

@@ -32,6 +32,7 @@ vi.mock("../../lib/index.js", () => ({
   getErrorMessage: vi.fn((error: unknown, fallback: string) =>
     error instanceof Error && error.message ? error.message : fallback,
   ),
+  getPlayerSafeErrorMessage: vi.fn((_error: unknown, fallback: string) => fallback),
   getErrorStatus: vi.fn(() => 500),
   createLogger: vi.fn(() => ({
     info: vi.fn(),
@@ -88,6 +89,8 @@ vi.mock("../../db/index.js", () => ({
   getDb: vi.fn(),
 }));
 
+const mockGetSettledTurnPacket = vi.fn((_input?: unknown) => null);
+
 vi.mock("../../engine/index.js", () => ({
   processTurn: vi.fn(),
   resumePendingTurnNarration: vi.fn(),
@@ -95,6 +98,7 @@ vi.mock("../../engine/index.js", () => ({
   captureSnapshot: vi.fn(),
   restoreSnapshot: vi.fn(),
   findPendingNarrationSaga: vi.fn(() => null),
+  getSettledTurnPacket: (input: unknown) => mockGetSettledTurnPacket(input),
   PendingNarrationError: class PendingNarrationError extends Error {
     constructor(public readonly pendingSaga: unknown) {
       super("Pending narration.");
@@ -123,12 +127,24 @@ vi.mock("../../engine/grounded-lookup.js", () => ({
 
 const mockEmbedAndUpdateEvent = vi.fn();
 const mockDrainPendingCommittedEvents = vi.fn((..._args: unknown[]) => []);
+const mockDrainPendingCommittedEventsByIds = vi.fn((..._args: unknown[]) => []);
+const mockRetractStoredEpisodicEvent = vi.fn();
+const mockRetractPendingCommittedEventsForTick = vi.fn();
 vi.mock("../../vectors/episodic-events.js", () => ({
   embedAndUpdateEvent: (...args: unknown[]) => mockEmbedAndUpdateEvent(...args),
   drainPendingCommittedEvents: (...args: unknown[]) => mockDrainPendingCommittedEvents(...args),
+  drainPendingCommittedEventsByIds: (...args: unknown[]) =>
+    mockDrainPendingCommittedEventsByIds(...args),
+  retractStoredEpisodicEvent: (...args: unknown[]) => mockRetractStoredEpisodicEvent(...args),
+  retractPendingCommittedEventsForTick: (...args: unknown[]) =>
+    mockRetractPendingCommittedEventsForTick(...args),
 }));
 
 const runtimeSnapshots = new Map<string, unknown>();
+const runtimeSnapshotMetadata = new Map<string, {
+  acceptedDurableEventIds: string[];
+  producedDurableEventIds: string[];
+}>();
 const runtimeActiveTurns = new Set<string>();
 
 vi.mock("../../campaign/runtime-state.js", () => ({
@@ -143,17 +159,35 @@ vi.mock("../../campaign/runtime-state.js", () => ({
     runtimeActiveTurns.delete(campaignId);
   },
   hasActiveTurn: (campaignId: string) => runtimeActiveTurns.has(campaignId),
-  setLastTurnSnapshot: (campaignId: string, snapshot: unknown) => {
+  setLastTurnSnapshot: (
+    campaignId: string,
+    snapshot: unknown,
+    metadata?: {
+      acceptedDurableEventIds?: readonly string[];
+      producedDurableEventIds?: readonly string[];
+    },
+  ) => {
     runtimeSnapshots.set(campaignId, snapshot);
+    runtimeSnapshotMetadata.set(campaignId, {
+      acceptedDurableEventIds: [...new Set(metadata?.acceptedDurableEventIds ?? [])],
+      producedDurableEventIds: [...new Set(metadata?.producedDurableEventIds ?? [])],
+    });
   },
   getLastTurnSnapshot: (campaignId: string) => runtimeSnapshots.get(campaignId),
+  getLastTurnSnapshotMetadata: (campaignId: string) =>
+    runtimeSnapshotMetadata.get(campaignId) ?? {
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+    },
   clearLastTurnSnapshot: (campaignId: string) => {
     runtimeSnapshots.delete(campaignId);
+    runtimeSnapshotMetadata.delete(campaignId);
   },
   hasLiveTurnSnapshot: (campaignId: string) => runtimeSnapshots.has(campaignId),
   clearCampaignRuntimeState: (campaignId: string) => {
     runtimeActiveTurns.delete(campaignId);
     runtimeSnapshots.delete(campaignId);
+    runtimeSnapshotMetadata.delete(campaignId);
   },
 }));
 
@@ -308,8 +342,11 @@ function setupLoadedCampaign() {
 beforeEach(() => {
   vi.clearAllMocks();
   runtimeSnapshots.clear();
+  runtimeSnapshotMetadata.clear();
   runtimeActiveTurns.clear();
   mockDrainPendingCommittedEvents.mockReturnValue([]);
+  mockDrainPendingCommittedEventsByIds.mockReturnValue([]);
+  mockGetSettledTurnPacket.mockReturnValue(null);
   mockedFindPendingNarrationSaga.mockReturnValue(null);
   mockedCaptureSnapshot.mockReturnValue({
     campaignId: CAMPAIGN_ID,
@@ -367,6 +404,50 @@ describe("Phase 89 chat route resilience", () => {
     expect(runtimeActiveTurns.has(CAMPAIGN_ID)).toBe(false);
   });
 
+  it("keeps a pending narration resume error as pending instead of treating it as resumed", async () => {
+    const pendingSaga = mockPendingSaga({
+      id: "saga-p95-terminal-error",
+      turnId: "turn-p95-terminal-error",
+    });
+    mockedFindPendingNarrationSaga.mockReturnValue(pendingSaga as never);
+    mockedResumePendingTurnNarration.mockImplementation(() =>
+      createTurnStream([
+        {
+          type: "error",
+          data: {
+            error: "Narration guard still needs repair.",
+            pendingNarration: true,
+            resumable: true,
+            turnId: "turn-p95-terminal-error",
+          },
+        },
+      ]) as never,
+    );
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Try to start new paid work",
+        intent: "Try to start new paid work",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    const eventNames = sseEventNames(body);
+
+    expect(eventNames.at(-1)).toBe("error");
+    expect(body).toContain("Narration guard still needs repair.");
+    expect(body).toContain("\"pendingNarration\":true");
+    expect(mockedProcessTurn).not.toHaveBeenCalled();
+    expect(mockedCaptureSnapshot).not.toHaveBeenCalled();
+    expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
+    expect(runtimeActiveTurns.has(CAMPAIGN_ID)).toBe(false);
+  });
+
   it("surfaces a resumable terminal error when pending narration resume closes without done or error", async () => {
     const pendingSaga = mockPendingSaga({
       id: "saga-p95-silent-resume",
@@ -404,7 +485,8 @@ describe("Phase 89 chat route resilience", () => {
     expect(eventNames.at(-1)).toBe("error");
     expect(body).toContain("\"pendingNarration\":true");
     expect(body).toContain("\"resumable\":true");
-    expect(body).toContain("turn-p95-silent-resume");
+    expect(body).not.toContain("turn-p95-silent-resume");
+    expect(body).not.toContain("saga-p95-silent-resume");
     expect(eventNames).not.toContain("done");
     expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
     expect(runtimeActiveTurns.has(CAMPAIGN_ID)).toBe(false);
@@ -448,10 +530,13 @@ describe("Phase 89 chat route resilience", () => {
 
     expect(eventNames).toContain("scene-settling");
     expect(eventNames.at(-1)).toBe("error");
-    expect(body).toContain("\"error\":\"prompt safety failed\"");
+    expect(body).toContain(
+      "\"error\":\"Pending narration could not be completed yet. The settled turn state was preserved.\"",
+    );
     expect(body).toContain("\"pendingNarration\":true");
     expect(body).toContain("\"resumable\":true");
-    expect(body).toContain("\"turnId\":\"turn-p95-prompt-safety\"");
+    expect(body).not.toContain("\"turnId\":\"turn-p95-prompt-safety\"");
+    expect(body).not.toContain("\"sagaId\":\"saga-p95-prompt-safety\"");
     expect(eventNames).not.toContain("done");
     expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
     expect(runtimeActiveTurns.has(CAMPAIGN_ID)).toBe(false);

@@ -64,6 +64,28 @@ export function findConflictingWriteScope(input: {
   return null;
 }
 
+export function findUncoveredWriteRef(input: {
+  stateDeltaRefs: readonly SimulationActorWriteScope[];
+  allowedWriteScopes: readonly SimulationActorWriteScope[];
+}): { stateDeltaRef: SimulationActorWriteScope } | null {
+  for (const stateDeltaRef of input.stateDeltaRefs) {
+    const normalized = normalizeWriteScope(stateDeltaRef);
+    if (!normalized) continue;
+    const aliases = [normalized];
+    const parts = splitScope(normalized);
+    if ((parts[0] === "npc" || parts[0] === "actor") && parts[1] && parts[2] === "process") {
+      aliases.push(`npc:${parts[1]}:state`);
+    }
+    const covered = input.allowedWriteScopes.some((allowedWriteScope) =>
+      aliases.some((alias) => writeScopesConflict(allowedWriteScope, alias)),
+    );
+    if (!covered) {
+      return { stateDeltaRef };
+    }
+  }
+  return null;
+}
+
 export function reserveActorWriteScopes(
   jobs: readonly ActorWriteScopeJob[],
 ): ActorWriteScopeReservation[] {

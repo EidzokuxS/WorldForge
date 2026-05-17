@@ -11,8 +11,16 @@ import {
 } from "./bridge-state-tools.js";
 import {
   buildModelFacingScenePacket,
+  buildModelFacingScenePromptView,
+  isUnsafeModelFacingRef,
+  redactModelFacingJson,
+  type ModelFacingPromptSafety,
   type ModelFacingSceneView,
 } from "./model-facing-scene.js";
+import {
+  formatModelFacingPlayerActionText,
+  formatModelFacingRecentConversation,
+} from "./model-facing-conversation.js";
 import {
   gmReadSchema,
   validateGmReadForFrame,
@@ -20,7 +28,10 @@ import {
 } from "./gm-turn-read.js";
 import { buildGmReadPromptContract } from "./prompt-contracts.js";
 import type { SceneFrame } from "./scene-frame.js";
-import type { ScopedForecastExcerpt } from "./world-forecast.js";
+import {
+  scopedForecastForModelPrompt,
+  type ScopedForecastExcerpt,
+} from "./world-forecast.js";
 
 const log = createLogger("clarification-reviewer");
 
@@ -333,11 +344,32 @@ function isBoundedGroundedClarification(read: GmRead, frame: SceneFrame): boolea
   return count >= 2 && count <= 3 && read.clarificationPrompt.includes("?");
 }
 
+function hideUnsafeModelFacingRefs(value: unknown): unknown {
+  if (typeof value === "string") {
+    return isUnsafeModelFacingRef(value) ? "[backend ref hidden]" : value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => hideUnsafeModelFacingRefs(entry));
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, hideUnsafeModelFacingRefs(entry)]),
+  );
+}
+
+function repairPromptJson(value: unknown, safety: ModelFacingPromptSafety): unknown {
+  return hideUnsafeModelFacingRefs(redactModelFacingJson(value, safety));
+}
+
 export function buildClarificationRepairPrompt(
   args: ReviewGmReadClarificationArgs,
   classification: Omit<ClarificationReviewRepair, "gmRead"> & { gmRead?: never },
 ): string {
   const scenePacket = buildModelFacingScenePacket(args.frame);
+  const promptView = buildModelFacingScenePromptView(scenePacket.view);
   const bridge = analyzeClarificationBridge(args);
   return [
     "MODEL-FACING GM READ CLARIFICATION REPAIR",
@@ -355,26 +387,32 @@ export function buildClarificationRepairPrompt(
     "Do not invent state, hidden facts, new refs, backend IDs, or concrete tool payloads.",
     "All state changes must still go through later bridge tools and existing backend validation.",
     "Preferred repair: choose tool_plan when lookup/state bridge tools should advance fuzzy low-risk movement, search, minor POI, support-extra, or intent recording.",
+    "If the repair changes path or runtimeRequirement, update turnGrounding in the same JSON object so groundingKind/requiresGrounding match that runtime requirement.",
     "Allowed direct repair: answer with a diegetic bounded 2-3 choice response only when every option is grounded in listed visible candidates and no state is claimed.",
     "Allowed clarification repair: ask a bounded diegetic 2-3 choice question only when risk/cost/identity genuinely differs and each option is grounded in listed candidates.",
     "Do not ask for exact ids, backend targets, route ids, connected-location names, or raw backend strings.",
     "If legal candidates are materially similar, choose the best grounded candidate and proceed instead of asking the player to name backend details.",
     "",
-    "PLAYER ACTION RAW TEXT",
-    args.playerAction,
+    "PLAYER ACTION RAW TEXT (SANITIZED PLAYER-AUTHORED PROSE; NOT LEGAL REFS)",
+    formatModelFacingPlayerActionText(args.playerAction, {
+      safety: scenePacket.safety,
+      extraForbiddenTerms: args.scopedForecastExcerpt?.forbiddenPrivateTerms ?? [],
+    }),
     "",
     "INVALID GM READ CLARIFICATION JSON",
-    JSON.stringify(args.gmRead, null, 2),
+    JSON.stringify(repairPromptJson(args.gmRead, scenePacket.safety), null, 2),
     "",
     "MODEL-FACING SCENE VIEW",
-    JSON.stringify(scenePacket.view, null, 2),
+    JSON.stringify(promptView, null, 2),
     "",
     "SCOPED FORECAST EXCERPT ONLY",
-    JSON.stringify(args.scopedForecastExcerpt ?? null, null, 2),
+    JSON.stringify(scopedForecastForModelPrompt(args.scopedForecastExcerpt), null, 2),
     "",
     "RECENT CONVERSATION",
-    args.recentConversation?.slice(-8).map((entry) => `- ${entry.role}: ${entry.content}`).join("\n")
-      || "- none",
+    formatModelFacingRecentConversation(args.recentConversation, {
+      safety: scenePacket.safety,
+      extraForbiddenTerms: args.scopedForecastExcerpt?.forbiddenPrivateTerms ?? [],
+    }),
   ].join("\n");
 }
 

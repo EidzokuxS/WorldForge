@@ -66,10 +66,7 @@ import {
   resolveStoredSceneScopeId,
   type PresenceSnapshot,
 } from "./scene-presence.js";
-import {
-  assertNarratorPacketPromptSafe,
-  type NarratorPacket,
-} from "./narrator-packet.js";
+import type { NarratorPacket } from "./narrator-packet.js";
 import {
   buildPlayerFacingPacketFromNarratorPacket,
   formatPlayerFacingPacketForPrompt,
@@ -77,10 +74,23 @@ import {
 import { buildContextCompressionPromptContract } from "./prompt-contracts.js";
 import {
   GROUNDED_SENTENCE_DRAFT_VERSION,
-  isNarrationDraftCitationEvidence,
+  formatAllowedCitationEvidenceRef,
+  getAllowedNarrationCitationEvidenceRefs,
 } from "./narration-grounding-guard.js";
+import {
+  formatModelFacingConversationEntry,
+  sanitizeModelFacingConversationText,
+} from "./model-facing-conversation.js";
+import { sanitizeModelFacingText } from "./model-facing-ref-safety.js";
 
 const log = createLogger("prompt-assembler");
+
+function sanitizeStoredPromptText(
+  text: string,
+  maxChars = 1000,
+): string {
+  return sanitizeModelFacingConversationText(text, { maxChars });
+}
 
 export interface AssembledPrompt {
   sections: PromptSection[];
@@ -202,13 +212,20 @@ const importantIndicesSchema = z.object({
 async function detectImportantMessages(
   messages: ReadonlyArray<{ role: string; content: string }>,
   judgeRole: ResolvedRole,
+  options: { extraForbiddenTerms?: readonly string[] } = {},
 ): Promise<Set<number>> {
   if (messages.length === 0) return new Set();
 
   try {
-    const numbered = messages.map(
-      (m, i) => `[${i}] ${m.role === "user" ? "Player" : "GM"}: ${m.content}`,
-    );
+    const numbered = messages.flatMap((message, index) => {
+      const line = formatModelFacingConversationEntry(message, {
+        extraForbiddenTerms: options.extraForbiddenTerms,
+        maxChars: 1200,
+      });
+      return line ? [`[${index}] ${line}`] : [];
+    });
+
+    if (numbered.length === 0) return new Set();
 
     const { object } = await generateObject({
       model: createModel(judgeRole.provider),
@@ -315,6 +332,31 @@ function hasAnyTokenMatch(texts: string[], tokens: string[]): boolean {
   });
 }
 
+function uniqueNonEmptyStrings(values: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(trimmed);
+  }
+  return result;
+}
+
+function sceneConversationForbiddenTerms(
+  sceneAssembly?: SceneAssembly,
+): string[] {
+  if (!sceneAssembly) return [];
+  return uniqueNonEmptyStrings(
+    Object.entries(sceneAssembly.awareness.byNpcName)
+      .filter(([, awareness]) => awareness !== "clear")
+      .map(([name]) => name),
+  );
+}
+
 function classifyStorytellerSceneMode(opts: {
   sceneAssembly?: SceneAssembly;
   actionResult?: AssembleOptions["actionResult"];
@@ -410,18 +452,24 @@ export async function compressConversation(
   history: ChatMessage[],
   budgetTokens: number,
   judgeRole?: ResolvedRole,
+  options: { extraForbiddenTerms?: readonly string[] } = {},
 ): Promise<PromptSection | null> {
   if (history.length === 0) return null;
 
   const FIRST_KEEP = 2; // Always keep first 2 messages (world setup / character intro)
   const RECENT_RATIO = 0.6; // 60% of budget for recent messages
 
-  // Format a single message
   const format = (msg: ChatMessage) =>
-    `${msg.role === "user" ? "Player" : "GM"}: ${msg.content}`;
+    formatModelFacingConversationEntry(msg, {
+      extraForbiddenTerms: options.extraForbiddenTerms,
+      maxChars: 1200,
+    });
 
   // If everything fits, return all
-  const allFormatted = history.map(format);
+  const allFormatted = history
+    .map(format)
+    .filter((line): line is string => Boolean(line));
+  if (allFormatted.length === 0) return null;
   const allTokens = allFormatted.reduce(
     (sum, line) => sum + estimateTokens(line),
     0,
@@ -443,7 +491,9 @@ export async function compressConversation(
   // 1. Always keep first N messages
   const firstCount = Math.min(FIRST_KEEP, history.length);
   const firstMessages = history.slice(0, firstCount);
-  const firstFormatted = firstMessages.map(format);
+  const firstFormatted = firstMessages
+    .map(format)
+    .filter((line): line is string => Boolean(line));
   let usedTokens = firstFormatted.reduce(
     (sum, line) => sum + estimateTokens(line),
     0,
@@ -456,6 +506,7 @@ export async function compressConversation(
 
   for (let i = history.length - 1; i >= firstCount; i--) {
     const line = format(history[i]!);
+    if (!line) continue;
     const lineTokens = estimateTokens(line);
     if (usedTokens + lineTokens > budgetTokens) break;
 
@@ -473,13 +524,14 @@ export async function compressConversation(
   // 3. From middle (firstCount .. recentStartIdx), keep important messages
   const middleMessages = history.slice(firstCount, recentStartIdx);
   const importantSet = judgeRole
-    ? await detectImportantMessages(middleMessages, judgeRole)
+    ? await detectImportantMessages(middleMessages, judgeRole, options)
     : new Set<number>();
 
   const importantMiddle: Array<{ idx: number; line: string }> = [];
   for (let i = 0; i < middleMessages.length; i++) {
     if (importantSet.has(i)) {
       const line = format(middleMessages[i]!);
+      if (!line) continue;
       const lineTokens = estimateTokens(line);
       if (usedTokens + lineTokens <= budgetTokens) {
         importantMiddle.push({ idx: firstCount + i, line });
@@ -586,7 +638,7 @@ function buildPlayerStateSection(
     },
   };
   const authoritativeInventory = loadAuthoritativeInventoryView(campaignId, player.id);
-  const tags = deriveRuntimeCharacterTags(effectivePlayerRecord);
+  const tags = sanitizeStoredPromptList(deriveRuntimeCharacterTags(effectivePlayerRecord), 120);
   const carriedItems = authoritativeInventory.carried.map((item) => item.name);
   const equipped = authoritativeInventory.compatibility.equippedItemRefs;
   const signatureItems = authoritativeInventory.compatibility.signatureItems;
@@ -599,10 +651,10 @@ function buildPlayerStateSection(
 
   const lines = [
     `Name: ${playerRecord.identity.displayName}`,
-    playerRecord.profile.species ? `Race: ${playerRecord.profile.species}` : null,
-    playerRecord.profile.gender ? `Gender: ${playerRecord.profile.gender}` : null,
-    playerRecord.profile.ageText ? `Age: ${playerRecord.profile.ageText}` : null,
-    playerRecord.profile.appearance ? `Appearance: ${playerRecord.profile.appearance}` : null,
+    playerRecord.profile.species ? `Race: ${sanitizeStoredPromptText(playerRecord.profile.species, 160)}` : null,
+    playerRecord.profile.gender ? `Gender: ${sanitizeStoredPromptText(playerRecord.profile.gender, 160)}` : null,
+    playerRecord.profile.ageText ? `Age: ${sanitizeStoredPromptText(playerRecord.profile.ageText, 160)}` : null,
+    playerRecord.profile.appearance ? `Appearance: ${sanitizeStoredPromptText(playerRecord.profile.appearance, 300)}` : null,
     `HP: ${playerRecord.state.hp}/5`,
     wealthTag ? `Wealth: ${wealthTag}` : null,
     tags.length > 0 ? `Tags: ${tags.join(", ")}` : null,
@@ -740,6 +792,7 @@ function buildSceneSection(
 
 interface EncounterPromptContext {
   broadLocationId: string | null;
+  broadLocationName: string | null;
   sceneId: string | null;
   sceneName: string | null;
   playerId: string | null;
@@ -816,6 +869,23 @@ function buildEncounterPromptContext(
     sceneRow?.parentLocationId
     ?? storedLocationRow?.parentLocationId
     ?? storedLocationId;
+  const broadLocationRow = broadLocationId
+    ? (
+        broadLocationId === storedLocationId
+          ? storedLocationRow
+          : broadLocationId === sceneId
+            ? sceneRow
+            : db
+                .select({
+                  name: locations.name,
+                  kind: locations.kind,
+                  parentLocationId: locations.parentLocationId,
+                })
+                .from(locations)
+                .where(eq(locations.id, broadLocationId))
+                .get() as EncounterLocationRow | undefined
+      )
+    : null;
   let presenceSceneId = player?.currentSceneLocationId ?? sceneId ?? null;
   if (presenceSceneId && presenceSceneId === broadLocationId) {
     const presenceSceneRow =
@@ -873,6 +943,7 @@ function buildEncounterPromptContext(
 
   return {
     broadLocationId,
+    broadLocationName: broadLocationRow?.name ?? null,
     sceneId,
     sceneName: sceneAssembly?.currentScene?.name ?? sceneRow?.name ?? null,
     playerId: player?.id ?? null,
@@ -903,7 +974,7 @@ function buildEncounterScopeSection(
       ? `Immediate encounter: ${encounter.sceneName}`
       : "Immediate encounter: unresolved",
     encounter.broadLocationId && encounter.sceneId && encounter.broadLocationId !== encounter.sceneId
-      ? `Broad location anchor: ${encounter.broadLocationId}`
+      ? `Broad location anchor: ${encounter.broadLocationName ?? "current_location"}`
       : null,
     `Awareness contract: clear=${AWARENESS_BAND_CONTRACT.clear}`,
     `Awareness contract: hint=${AWARENESS_BAND_CONTRACT.hint}`,
@@ -959,12 +1030,12 @@ function buildNpcStatesSection(
   const npcBlocks = npcRows.map((npc) => {
     const npcRecord = hydrateStoredNpcRecord(npc);
     const authoritativeInventory = loadAuthoritativeInventoryView(campaignId, npc.id);
-    const tags = deriveRuntimeCharacterTags(npcRecord);
+    const tags = sanitizeStoredPromptList(deriveRuntimeCharacterTags(npcRecord), 120);
     const goals = [
       ...npcRecord.motivations.shortTermGoals,
       ...npcRecord.motivations.longTermGoals,
-    ];
-    const beliefs = npcRecord.motivations.beliefs;
+    ].map((goal) => sanitizeStoredPromptText(goal, 240));
+    const beliefs = sanitizeStoredPromptList(npcRecord.motivations.beliefs, 240);
     const npcWealthTag = npcRecord.capabilities.wealthTier;
     const awareness =
       encounter.snapshot && encounter.playerId
@@ -976,7 +1047,7 @@ function buildNpcStatesSection(
       `- ${npcRecord.identity.displayName} (${npcRecord.identity.tier})`,
       `  Encounter awareness: ${awareness}`,
       `  Awareness meaning: ${AWARENESS_BAND_CONTRACT[awareness]}`,
-      `  Persona: ${npcRecord.profile.personaSummary}`,
+      `  Persona: ${sanitizeStoredPromptText(npcRecord.profile.personaSummary, 700)}`,
       npcWealthTag ? `  Wealth: ${npcWealthTag}` : null,
       ...identityLines,
       tags.length > 0 ? `  Tags: ${tags.join(", ")}` : null,
@@ -1042,10 +1113,66 @@ function buildRelationshipsSection(
 
   if (relevant.length === 0) return null;
 
-  const lines = relevant.map((r) => {
-    const tags = safeParseTags(r.tags);
-    return `- ${r.entityA} <-> ${r.entityB}: ${tags.join(", ")}${r.reason ? ` (${r.reason})` : ""}`;
+  const entityLabels = new Map<string, string>();
+  const addEntityLabels = (
+    rows: Array<{ id: string; name: string }>,
+    type: "player" | "npc" | "location" | "item" | "faction",
+  ) => {
+    for (const row of rows) {
+      entityLabels.set(row.id, row.name);
+      entityLabels.set(`${type}:${row.id}`, row.name);
+    }
+  };
+
+  addEntityLabels(
+    db.select({ id: players.id, name: players.name })
+      .from(players)
+      .where(eq(players.campaignId, campaignId))
+      .all(),
+    "player",
+  );
+  addEntityLabels(
+    db.select({ id: npcs.id, name: npcs.name })
+      .from(npcs)
+      .where(eq(npcs.campaignId, campaignId))
+      .all(),
+    "npc",
+  );
+  addEntityLabels(
+    db.select({ id: locations.id, name: locations.name })
+      .from(locations)
+      .where(eq(locations.campaignId, campaignId))
+      .all(),
+    "location",
+  );
+  addEntityLabels(
+    db.select({ id: items.id, name: items.name })
+      .from(items)
+      .where(eq(items.campaignId, campaignId))
+      .all(),
+    "item",
+  );
+  addEntityLabels(
+    db.select({ id: factions.id, name: factions.name })
+      .from(factions)
+      .where(eq(factions.campaignId, campaignId))
+      .all(),
+    "faction",
+  );
+
+  const lines = relevant.flatMap((r) => {
+    const left = entityLabels.get(r.entityA);
+    const right = entityLabels.get(r.entityB);
+    if (!left || !right) return [];
+    const tags = safeParseTags(r.tags).map((tag) => sanitizeStoredPromptText(tag, 120));
+    const tagStr = tags.length > 0 ? tags.join(", ") : "related";
+    const reason = r.reason ? ` (${sanitizeStoredPromptText(r.reason, 500)})` : "";
+    return [
+      `- ${sanitizeStoredPromptText(left, 160)} <-> ${sanitizeStoredPromptText(right, 160)}: ${tagStr}${reason}`,
+    ];
   });
+
+  if (lines.length === 0) return null;
 
   const content = lines.join("\n");
 
@@ -1077,7 +1204,8 @@ async function buildLoreContextSection(
     if (loreCards.length === 0) return null;
 
     const lines = loreCards.map(
-      (card) => `${card.term}: ${card.definition}`,
+      (card) =>
+        `${sanitizeStoredPromptText(card.term, 160)}: ${sanitizeStoredPromptText(card.definition, 700)}`,
     );
     const content = lines.join("\n");
 
@@ -1118,7 +1246,7 @@ async function buildEpisodicMemorySection(
     if (events.length === 0) return null;
 
     const lines = events.map(
-      (e) => `[Tick ${e.tick}] ${e.text} (importance: ${e.importance})`,
+      (e) => `[Tick ${e.tick}] ${sanitizeStoredPromptText(e.text, 900)} (importance: ${e.importance})`,
     );
     const content = lines.join("\n");
 
@@ -1172,7 +1300,7 @@ function buildWorldStateSection(
     lines.push("Recent World Events:");
     const chronological = [...recentChronicle].reverse();
     for (const entry of chronological) {
-      lines.push(`[Tick ${entry.tick}] ${entry.text}`);
+      lines.push(`[Tick ${entry.tick}] ${sanitizeStoredPromptText(entry.text, 900)}`);
     }
   }
 
@@ -1182,9 +1310,12 @@ function buildWorldStateSection(
     for (const faction of allFactions) {
       const tags = safeParseTags(faction.tags);
       const goals = safeParseGoals(faction.goals);
-      const tagStr = tags.length > 0 ? `[${tags.join(", ")}]` : "";
-      const goalStr = goals.length > 0 ? `Goals: [${goals.join(", ")}]` : "";
-      lines.push(`- ${faction.name}: ${tagStr}${tagStr && goalStr ? ", " : ""}${goalStr}`);
+      const safeName = sanitizeStoredPromptText(faction.name, 160);
+      const safeTags = tags.map((tag) => sanitizeStoredPromptText(tag, 120));
+      const safeGoals = goals.map((goal) => sanitizeStoredPromptText(goal, 180));
+      const tagStr = safeTags.length > 0 ? `[${safeTags.join(", ")}]` : "";
+      const goalStr = safeGoals.length > 0 ? `Goals: [${safeGoals.join(", ")}]` : "";
+      lines.push(`- ${safeName}: ${tagStr}${tagStr && goalStr ? ", " : ""}${goalStr}`);
     }
   }
 
@@ -1308,7 +1439,6 @@ export async function assemblePrompt(
       `Chance: ${actionResult.chance}%`,
       `Roll: ${actionResult.roll}`,
       `Outcome: ${actionResult.outcome}`,
-      `Reasoning: ${actionResult.reasoning}`,
     ].join("\n");
 
     actionSection = {
@@ -1330,8 +1460,11 @@ export async function assemblePrompt(
 
   const conversationBudget = budgets.recentConversation ?? Math.floor(contextWindow * 0.20);
   const history = getChatHistory(campaignId);
+  const conversationForbiddenTerms = sceneConversationForbiddenTerms(sceneAssembly);
   const conversationSection = includeRecentConversation
-    ? await compressConversation(history, conversationBudget, judgeRole)
+    ? await compressConversation(history, conversationBudget, judgeRole, {
+      extraForbiddenTerms: conversationForbiddenTerms,
+    })
     : null;
 
   const allSections: PromptSection[] = [
@@ -1411,17 +1544,23 @@ function buildRecentVisibleTranscriptSection(
   const lines = getChatHistory(campaignId)
     .slice(-8)
     .flatMap((message) => {
+      if (message.role !== "user") {
+        return [];
+      }
       const content = message.content.trim();
       if (!content) {
         return [];
       }
-      if (message.role !== "user" && includesAnyTerm(content, forbiddenTerms)) {
+      if (includesAnyTerm(content, forbiddenTerms)) {
         return [];
       }
 
-      const speaker = message.role === "user" ? "Player (player-supplied claim)" : "GM";
-      const clipped = content.length > 900 ? `${content.slice(0, 900).trim()}...` : content;
-      return [`${speaker}: ${clipped}`];
+      return [
+        `Player (player-supplied continuity claim; not proof): ${sanitizeModelFacingConversationText(content, {
+          extraForbiddenTerms: forbiddenTerms,
+          maxChars: 900,
+        })}`,
+      ];
     });
 
   if (lines.length === 0) {
@@ -1430,7 +1569,7 @@ function buildRecentVisibleTranscriptSection(
 
   return [
     "[RECENT VISIBLE TRANSCRIPT]",
-    "Use only as continuity for the current player-visible scene. NarratorPacket facts remain authoritative.",
+    "This section intentionally replays only player-authored visible chat for continuity. Prior GM prose is omitted here because NarratorPacket evidence is the sole authority for people, routes, objects, documents, permissions, threats, and world facts.",
     ...lines.map((line) => `- ${line}`),
   ].join("\n");
 }
@@ -1443,15 +1582,15 @@ function formatOpeningState(sceneAssembly: SceneAssembly): string {
 
   const lines = [
     openingState.active ? "Structured opening state is active." : "Structured opening state has expired.",
-    openingState.locationName ? `Opening location: ${openingState.locationName}` : null,
-    openingState.arrivalMode ? `Arrival mode: ${openingState.arrivalMode}` : null,
-    openingState.startingVisibility ? `Visibility: ${openingState.startingVisibility}` : null,
-    openingState.immediateSituation ? `Immediate situation: ${openingState.immediateSituation}` : null,
+    openingState.locationName ? `Opening location: ${sanitizeModelFacingText(openingState.locationName)}` : null,
+    openingState.arrivalMode ? `Arrival mode: ${sanitizeModelFacingText(openingState.arrivalMode)}` : null,
+    openingState.startingVisibility ? `Visibility: ${sanitizeModelFacingText(openingState.startingVisibility)}` : null,
+    openingState.immediateSituation ? `Immediate situation: ${sanitizeModelFacingText(openingState.immediateSituation)}` : null,
     openingState.entryPressure.length > 0
-      ? `Entry pressure: ${openingState.entryPressure.join(", ")}`
+      ? `Entry pressure: ${sanitizeModelFacingText(openingState.entryPressure.join(", "))}`
       : null,
-    ...openingState.promptLines,
-    ...openingState.sceneContextLines,
+    ...openingState.promptLines.map((line) => sanitizeModelFacingText(line)),
+    ...openingState.sceneContextLines.map((line) => sanitizeModelFacingText(line)),
   ].filter((line): line is string => Boolean(line));
 
   return `[OPENING STATE]\n${lines.map((line) => `- ${line}`).join("\n")}`;
@@ -1464,10 +1603,10 @@ function formatCurrentScene(sceneAssembly: SceneAssembly): string {
   }
 
   const lines = [
-    `Name: ${currentScene.name}`,
-    `Id: ${currentScene.id}`,
-    currentScene.description ? `Description: ${currentScene.description}` : null,
-    currentScene.tags.length > 0 ? `Tags: ${currentScene.tags.join(", ")}` : null,
+    `Name: ${sanitizeModelFacingText(currentScene.name)}`,
+    "Ref: current_scene",
+    currentScene.description ? `Description: ${sanitizeModelFacingText(currentScene.description)}` : null,
+    currentScene.tags.length > 0 ? `Tags: ${sanitizeModelFacingText(currentScene.tags.join(", "))}` : null,
   ].filter((line): line is string => Boolean(line));
 
   return `[CURRENT LOCAL SCENE]\n${lines.map((line) => `- ${line}`).join("\n")}`;
@@ -1567,25 +1706,10 @@ function redactFinalNarrationUncheckedSections(
   });
 }
 
-function formatSettledPacketEffectsSection(narratorPacket: NarratorPacket): string {
-  return formatListSection(
-    "SETTLED PACKET EFFECTS",
-    narratorPacket.perceivableEffects.map(
-      (effect) =>
-        `${effect.summary} [source=narrator-packet; player-perceivable=yes]`,
-    ),
-    "No settled player-perceivable effects are in scope.",
-  );
-}
-
 function formatNarrationDraftContract(narratorPacket: NarratorPacket): string {
   const forbiddenTerms = collectNarratorPacketForbiddenTerms(narratorPacket);
-  const evidenceLines = (narratorPacket.evidenceLedger ?? [])
-    .filter((entry) => isNarrationDraftCitationEvidence(entry, narratorPacket))
-    .map(
-      (entry) =>
-        `- ${entry.id} [category=${entry.category}] summary=${redactForbiddenTerms(entry.summary, forbiddenTerms)}`,
-    );
+  const evidenceLines = getAllowedNarrationCitationEvidenceRefs(narratorPacket)
+    .map((entry) => formatAllowedCitationEvidenceRef(entry, forbiddenTerms));
 
   return [
     "[GROUNDED SENTENCE DRAFT CONTRACT]",
@@ -1593,29 +1717,38 @@ function formatNarrationDraftContract(narratorPacket: NarratorPacket): string {
     "Do not use markdown, comments, explanations, labels, or extra text.",
     "Use exactly these top-level keys: version, sentences.",
     `version MUST be "${GROUNDED_SENTENCE_DRAFT_VERSION}".`,
-    "Each sentence object MUST include exactly these keys: text, evidenceRefs.",
-    "Any other sentence key, including kind, id, summary, prose, claims, claimSpans, or requiresEvidence, is invalid.",
-    `Shape: { "version": "${GROUNDED_SENTENCE_DRAFT_VERSION}", "sentences": [{ "text": string, "evidenceRefs": [1 to 4 exact packet evidence ids] }] }.`,
+    "Each sentence object MUST include exactly these keys: factRefs, evidenceRefs.",
+    "Any other sentence key, including text, kind, id, summary, prose, claims, claimSpans, or requiresEvidence, is invalid.",
+    `Shape: { "version": "${GROUNDED_SENTENCE_DRAFT_VERSION}", "sentences": [{ "factRefs": [exactly 1 backendFacts ref such as "e1.p1"], "evidenceRefs": [1 to 4 short packet evidence refs such as "e1"] }] }.`,
     "Write between 1 and 5 concise visible prose sentence objects; HARD CAP: sentences.length MUST be <= 5, never 6 or more.",
-    "Prefer short sentence text. If more than five grounded details matter, merge or prioritize them inside five or fewer sentence objects; no sentence text may exceed 900 characters.",
-    "Do not output kind, prose, claims, claimSpans, id, summary, or requiresEvidence; the backend derives internal claim metadata and compiles the rest from sentences[].text and evidenceRefs.",
-    "Every sentence must cite 1-4 exact ids from [PACKET EVIDENCE IDS -- USE ONLY THESE IN evidenceRefs]; HARD CAP: each evidenceRefs array MUST contain <= 4 ids, never 5 or more.",
-    "If one sentence has many supporting packet ids, cite only the strongest 1-4 ids or split/prioritize details while staying within the 1-5 sentence limit.",
-    "Never put diagnostic source ids in evidenceRefs; use only ids listed in [PACKET EVIDENCE IDS -- USE ONLY THESE IN evidenceRefs].",
-    "Do not invent evidenceRefs. A source id is valid only when the same literal id appears below as a packet evidence id.",
-    "The allowed evidenceRefs list intentionally excludes player_action_request, anchor_event, guardrail, control_return, and the anchor player-action committed_event because they are context, not proof of the settled world.",
+    "If more than five grounded details matter, merge or prioritize them inside five or fewer sentence objects.",
+    "Do not output text, kind, prose, claims, claimSpans, id, summary, or requiresEvidence; the backend derives internal claim metadata and compiles player-visible prose from factRefs and evidenceRefs.",
+    "Every sentence must cite 1-4 short refs from [NARRATABLE PACKET EVIDENCE REFS -- USE ONLY THESE IN evidenceRefs]; HARD CAP: each evidenceRefs array MUST contain <= 4 refs, never 5 or more.",
+    "If one sentence has many supporting packet facts, cite only the strongest 1-4 short refs or split/prioritize details while staying within the 1-5 sentence limit.",
+    "Never put diagnostic source ids, UUIDs, tool result ids, actor ids, or item ids in evidenceRefs; use only short refs listed in [NARRATABLE PACKET EVIDENCE REFS -- USE ONLY THESE IN evidenceRefs].",
+    "Do not invent evidenceRefs. A ref is valid only when the same literal short ref appears below as a narratable packet evidence ref.",
+    "Runtime fact ownership is strict: factRefs selects backend-owned facts; the model does not author factual prose.",
+    "Every sentence object MUST include exactly one listed backendFacts ref in factRefs, such as e1.s1 or e1.p1; never repeat the same factRef in another sentence.",
+    "Use evidenceRefs for support. Do not repeat a quote factRef just to support later claim facts.",
+    "Use e1.s1 for the backend-owned evidence summary and e1.p1 for listed precision facts. The backend expands the selected factRef into player-visible text.",
+    "Rows or details without a backendFacts= field are support context only and are not legal evidenceRefs or factRefs.",
+    "Never write NPC answers, route/access status, pressure, visible changes, formal wording, bell timing, seal types, docket rules, route labels, or document wording yourself; select the matching backendFacts refs.",
+    "Never introduce a new formal phrase, bell time, seal type, docket rule, route label, document wording, NPC answer, or route/access status outside backend-owned factRefs.",
+    "The narratable evidenceRefs list intentionally excludes player_action_request, anchor_event, guardrail, control_return, raw tool_result support rows, support-only visible actors, and the anchor player-action committed_event because they are context, not proof of the settled world.",
     "Do not use player_action_request as the only evidence for success, possession, access, movement, route truth, inventory, NPC consent, object existence, threat, hazard, blocker, or changed world state.",
     "player_action_request and anchor_event prove what the player attempted or asked; they do not prove the NPC answer, route/access truth, permission, possession, threat, hazard, blocker, or result.",
-    "guardrail and control_return ids are context only; never use them as the sole evidenceRefs for any sentence.",
-    "For any sentence about an NPC answer, proof requirement, permission boundary, access rule, route status, or next actionable option, cite the committed_event, perceivable_effect, perceivable_response, or tool_result id that actually states that fact.",
-    "A sentence about visible danger, pressure, or urgency must cite the concrete packet id that exposes it: committed_event, perceivable_effect, perceivable_response, oracle_outcome, hint_signal, or world_thread_signal.",
-    "When an observation tool makes pressure, risk, route leverage, visible personnel, camera, barrier, witness, or exit information narratable, cite the paired perceivable_effect evidence id for that observation; do not cite only the paired tool_result id.",
-    "If the only relevant packet id is tool_result, either cite its paired perceivable_effect id or phrase the sentence as concrete route/object/status information instead of pressure.",
-    "For current carried/equipped/signature inventory facts, cite current_inventory_status evidence. For acquire/drop/equip/transfer changes, cite the committed event, perceivable effect, or tool result that explicitly states the change.",
-    "For atmosphere or connective prose, cite visible_actor, perceivable_response, perceivable_effect, or a non-anchor committed_event as appropriate; do not cite only control_return, guardrail, anchor_event, or player_action_request.",
+    "guardrail, control_return, and support-only context are not addressable refs; never use them as evidenceRefs for any sentence.",
+    "For any sentence about an NPC answer, proof requirement, permission boundary, access rule, route status, or next actionable option, cite the short ref for a committed_event, perceivable_effect, or perceivable_response entry that actually states that fact.",
+    "For observation-grounded status/read-the-room turns, cite the observation_result short ref for every sentence about visible people, routes, objects, barriers, risks, absences, or next playable levers; do not replace a missing observation with invented scene color.",
+    "A sentence about visible danger, pressure, or urgency must cite the short ref for the concrete packet evidence that exposes it: committed_event, perceivable_effect, perceivable_response, oracle_outcome, hint_signal, or world_thread_signal.",
+    "When an observation tool makes pressure, risk, route leverage, visible personnel, camera, barrier, witness, or exit information narratable, cite the short ref for the observation_result evidence for that observation.",
+    "If the only relevant packet evidence seems to be a raw tool_result support row, cite its paired perceivable_effect short ref instead.",
+    "Current carried/equipped/signature inventory rows are support context unless explicitly exposed with backendFacts. For acquire/drop/equip/transfer changes, cite the committed event or perceivable effect that explicitly states the change.",
+    "For movement, route reveal, location creation, or time-passage rows, the row summary may be a support-only state receipt; use only the listed backendFacts precision refs for player-visible prose.",
+    "For atmosphere or connective prose, use present actors from the player-facing packet as context, but cite perceivable_response, perceivable_effect, hint_signal, world_thread_signal, or a non-anchor committed_event as the narratable evidence.",
     "",
-    "[PACKET EVIDENCE IDS -- USE ONLY THESE IN evidenceRefs]",
-    ...(evidenceLines.length > 0 ? evidenceLines : ["- No packet evidence ids are in scope."]),
+    "[NARRATABLE PACKET EVIDENCE REFS -- USE ONLY THESE IN evidenceRefs]",
+    ...(evidenceLines.length > 0 ? evidenceLines : ["- No packet evidence refs are in scope."]),
   ].join("\n");
 }
 
@@ -1700,13 +1833,10 @@ export async function assembleFinalNarrationPrompt(options: {
     recentConversation,
   });
   const formattedNarratorPacket = options.narratorPacket
-    ? (() => {
-        assertNarratorPacketPromptSafe(options.narratorPacket);
-        return formatPlayerFacingPacketForPrompt(
-          buildPlayerFacingPacketFromNarratorPacket(options.narratorPacket),
-          { includeDiagnostics: false, includeTechnicalRefs: false },
-        );
-      })()
+    ? formatPlayerFacingPacketForPrompt(
+        buildPlayerFacingPacketFromNarratorPacket(options.narratorPacket),
+        { includeDiagnostics: false, includeTechnicalRefs: false },
+      )
     : null;
   const finalNarrationTask = options.narratorPacket
     ? `[FINAL NARRATION TASK]
@@ -1714,11 +1844,12 @@ Use the NarratorPacket as the authoritative committed packet.
 Write one final narration pass from the settled opening state, current scene, and NarratorPacket facts.
 Do not invent material events outside these authoritative inputs.
 When the packet has no perceivable effects, answer with immediate visible reaction, dialogue, refusal, or local sensory color grounded in the current scene; do not introduce any reusable prop, route, hazard, document, authority, promise, injury, movement, changed position, or new named fact.
+For observation-grounded turns, use [PLAYER-VISIBLE OBSERVATIONS] and observation_result evidence as the source of visible status. Observation results may confirm existing refs and absences; they do not authorize new addressable actors, desks, gates, documents, routes, or social authorities.
 Treat the raw player action as an attempted request, not as proof that the action already succeeded.
 Do not narrate claimed possessions, NPC consent, location access, or item acquisition unless NarratorPacket events/effects/tool results confirm them.
 If a packet effect says a claim may be false or unconfirmed, narrate the visible challenge/refusal without placing the claimed object in the player's hand.
-Return the final narration as the compact structured draft object required by [GROUNDED SENTENCE DRAFT CONTRACT]; put player-visible prose only in sentences[].text.
-Do not write tool syntax or backend metadata inside sentence text.
+Return the final narration as the compact structured draft object required by [GROUNDED SENTENCE DRAFT CONTRACT]; select backend-owned factRefs instead of writing player-visible fact prose yourself.
+Do not output sentences[].text, tool syntax, or backend metadata.
 Keep the output bounded to what the player can perceive in this scene.
 End on a concrete playable next moment rather than closing the scene with generic reflection.
 Return only the structured draft object. No markdown. No prose outside the structured output.`
@@ -1775,11 +1906,7 @@ End on a concrete playable next moment rather than closing the scene with generi
       sourceBoundaryChecked: false,
     },
     options.narratorPacket
-      ? {
-          name: "settled-packet-effects",
-          content: formatSettledPacketEffectsSection(options.narratorPacket),
-          sourceBoundaryChecked: true,
-        }
+      ? null
       : {
           name: "scene-effects",
           content: formatListSection(
@@ -1939,8 +2066,23 @@ If no state mutation is justified, return an empty actions list.`,
         ): message is { role: "user" | "assistant"; content: string } =>
           (message.role === "user" || message.role === "assistant") &&
           typeof message.content === "string",
-      ),
-    { role: "user" as const, content: options.playerAction },
+      )
+      .flatMap((message) => {
+        const line = formatModelFacingConversationEntry(message, { maxChars: 1200 });
+        return line
+          ? [{
+              role: "user" as const,
+              content: `Prior visible continuity entry (not legal evidence or world authority): ${line}`,
+            }]
+          : [];
+      }),
+    {
+      role: "user" as const,
+      content: `Current player request (player claim, not proof): ${
+        formatModelFacingConversationEntry({ role: "user", content: options.playerAction }, { maxChars: 1200 })
+        ?? "player_claim: [empty player action]"
+      }`,
+    },
   ];
 
   return {
@@ -1979,29 +2121,39 @@ function safeParseGoals(raw: string): string[] {
   }
 }
 
+function sanitizeStoredPromptList(values: readonly string[], maxChars = 240): string[] {
+  return values.map((value) => sanitizeStoredPromptText(value, maxChars));
+}
+
 function formatIdentityField(label: string, values: string[]): string | null {
   if (values.length === 0) return null;
-  return `${label}: ${values.join("; ")}`;
+  return `${label}: ${sanitizeStoredPromptList(values).join("; ")}`;
 }
 
 function buildPersonalityLines(
   personality?: CharacterRecord["identity"]["personality"],
 ): string {
   const parts = [
-    personality?.summary ? `summary=${JSON.stringify(personality.summary)}` : null,
-    personality?.voice ? `voice=${JSON.stringify(personality.voice)}` : null,
-    personality?.decisionStyle
-      ? `decision-style=${JSON.stringify(personality.decisionStyle)}`
+    personality?.summary
+      ? `summary=${JSON.stringify(sanitizeStoredPromptText(personality.summary, 500))}`
       : null,
-    personality?.worldview ? `worldview=${JSON.stringify(personality.worldview)}` : null,
+    personality?.voice
+      ? `voice=${JSON.stringify(sanitizeStoredPromptText(personality.voice, 500))}`
+      : null,
+    personality?.decisionStyle
+      ? `decision-style=${JSON.stringify(sanitizeStoredPromptText(personality.decisionStyle, 500))}`
+      : null,
+    personality?.worldview
+      ? `worldview=${JSON.stringify(sanitizeStoredPromptText(personality.worldview, 500))}`
+      : null,
     personality?.internalContradictions?.length
-      ? `internal-contradictions=${JSON.stringify(personality.internalContradictions)}`
+      ? `internal-contradictions=${JSON.stringify(sanitizeStoredPromptList(personality.internalContradictions, 240))}`
       : null,
     personality?.personalMythology
-      ? `personal-mythology=${JSON.stringify(personality.personalMythology)}`
+      ? `personal-mythology=${JSON.stringify(sanitizeStoredPromptText(personality.personalMythology, 500))}`
       : null,
     personality?.sampleLines?.length
-      ? `sample-lines=${JSON.stringify(personality.sampleLines)}`
+      ? `sample-lines=${JSON.stringify(sanitizeStoredPromptList(personality.sampleLines, 240))}`
       : null,
   ].filter((value): value is string => Boolean(value));
 
@@ -2022,7 +2174,9 @@ export function buildRuntimeIdentityLines(
 
   const lines = [
     [
-      baseFacts?.biography ? `biography=${baseFacts.biography}` : null,
+      baseFacts?.biography
+        ? `biography=${sanitizeStoredPromptText(baseFacts.biography, 700)}`
+        : null,
       formatIdentityField("roles", baseFacts?.socialRole ?? []),
     ]
       .filter((value): value is string => Boolean(value))
@@ -2041,13 +2195,13 @@ export function buildRuntimeIdentityLines(
     lines[0] ? `${indent}Base Facts: ${lines[0]}` : null,
     personalityLine ? `${indent}Personality: ${personalityLine}` : null,
     behavioralCore?.selfImage
-      ? `${indent}self-image=${JSON.stringify(behavioralCore.selfImage)}`
+      ? `${indent}self-image=${JSON.stringify(sanitizeStoredPromptText(behavioralCore.selfImage, 500))}`
       : null,
     liveDynamics?.attachments?.length
-      ? `${indent}attachments=${JSON.stringify(liveDynamics.attachments)}`
+      ? `${indent}attachments=${JSON.stringify(sanitizeStoredPromptList(liveDynamics.attachments, 240))}`
       : null,
     baseFacts?.hardConstraints?.length
-      ? `${indent}hard-constraints=${JSON.stringify(baseFacts.hardConstraints)}`
+      ? `${indent}hard-constraints=${JSON.stringify(sanitizeStoredPromptList(baseFacts.hardConstraints, 240))}`
       : null,
     lines[1] ? `${indent}Live Dynamics: ${lines[1]}` : null,
   ].filter((value): value is string => Boolean(value));

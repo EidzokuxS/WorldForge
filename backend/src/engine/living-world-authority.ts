@@ -46,6 +46,61 @@ function stringifyArray(value: readonly string[] | undefined): string {
   return JSON.stringify([...(value ?? [])]);
 }
 
+function parseStringArray(value: string | null | undefined): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((entry): entry is string => typeof entry === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function toolResultAuthorityFromTrace(
+  trace: typeof authorityTraces.$inferSelect,
+): ToolResultAuthority {
+  return {
+    toolResultId: trace.toolResultId ?? "",
+    campaignId: trace.campaignId,
+    sourceEntity: {
+      type: trace.sourceEntityType,
+      id: trace.sourceEntityId,
+    },
+    baseWorldVersion: trace.baseWorldVersion,
+    resultWorldVersion: trace.resultWorldVersion,
+    worldTimeMinutes: trace.worldTimeMinutes,
+    elapsedWorldTimeMinutes: trace.elapsedWorldTimeMinutes,
+    stateDeltaRefs: parseStringArray(trace.stateDeltaRefs),
+    eventRefs: parseStringArray(trace.eventIds),
+    witnesses: parseStringArray(trace.witnesses),
+    knowledgeOutputs: [],
+    visibilityOutputs: [],
+    resources: [],
+  };
+}
+
+function existingAuthorityTraceByToolResultId(input: {
+  campaignId: string;
+  toolResultId: string | null | undefined;
+}): typeof authorityTraces.$inferSelect | null {
+  if (!input.toolResultId) return null;
+  const row = getDb()
+    .select()
+    .from(authorityTraces)
+    .where(and(
+      eq(authorityTraces.campaignId, input.campaignId),
+      eq(authorityTraces.toolResultId, input.toolResultId),
+    ))
+    .get();
+  if (!row) return null;
+  if (row.campaignId !== input.campaignId || row.toolResultId !== input.toolResultId) {
+    return null;
+  }
+  return row;
+}
+
 function toClockState(row: typeof worldClocks.$inferSelect): WorldClockState {
   return {
     campaignId: row.campaignId,
@@ -184,77 +239,92 @@ export function commitAuthorityTrace(input: {
   metadata?: unknown;
 }): ToolResultAuthority {
   const db = getDb();
-  const clock = validateBaseWorldVersion({
-    campaignId: input.campaignId,
-    baseWorldVersion: input.baseWorldVersion,
-    currentTick: input.currentTick,
-  });
-  const elapsedWorldTimeMinutes = Math.max(0, input.elapsedWorldTimeMinutes ?? 1);
-  const resultWorldVersion = clock.worldVersion + 1;
-  const resultWorldTimeMinutes = clock.worldTimeMinutes + elapsedWorldTimeMinutes;
-  const resultTick = Math.max(
-    clock.currentTick,
-    input.currentTick ?? clock.currentTick,
-    resultWorldTimeMinutes,
-  );
   const toolResultId = input.toolResultId ?? crypto.randomUUID();
-  const timestamp = now();
-
-  const clockUpdate = db.update(worldClocks)
-    .set({
-      worldVersion: resultWorldVersion,
-      worldTimeMinutes: resultWorldTimeMinutes,
-      currentTick: resultTick,
-      updatedAt: timestamp,
-    })
-    .where(
-      and(
-        eq(worldClocks.campaignId, input.campaignId),
-        eq(worldClocks.worldVersion, clock.worldVersion),
-      ),
-    )
-    .run();
-  if (clockUpdate.changes !== 1) {
-    throw new WorldVersionConflictError(
-      `World version changed while committing ${input.operation} for campaign ${input.campaignId}.`,
-    );
+  const existingTrace = existingAuthorityTraceByToolResultId({
+    campaignId: input.campaignId,
+    toolResultId,
+  });
+  if (existingTrace) {
+    if (existingTrace.operation !== input.operation) {
+      throw new WorldVersionConflictError(
+        `Tool result id ${toolResultId} for campaign ${input.campaignId} already belongs to ${existingTrace.operation}, not ${input.operation}.`,
+      );
+    }
+    return toolResultAuthorityFromTrace(existingTrace);
   }
 
-  db.insert(authorityTraces)
-    .values({
-      id: crypto.randomUUID(),
+  return db.transaction(() => {
+    const clock = validateBaseWorldVersion({
       campaignId: input.campaignId,
-      operation: input.operation,
-      sourceEntityType: input.sourceEntity.type,
-      sourceEntityId: input.sourceEntity.id ?? null,
+      baseWorldVersion: input.baseWorldVersion,
+      currentTick: input.currentTick,
+    });
+    const elapsedWorldTimeMinutes = Math.max(0, input.elapsedWorldTimeMinutes ?? 1);
+    const resultWorldVersion = clock.worldVersion + 1;
+    const resultWorldTimeMinutes = clock.worldTimeMinutes + elapsedWorldTimeMinutes;
+    const resultTick = Math.max(
+      clock.currentTick,
+      input.currentTick ?? clock.currentTick,
+      resultWorldTimeMinutes,
+    );
+    const timestamp = now();
+
+    const clockUpdate = db.update(worldClocks)
+      .set({
+        worldVersion: resultWorldVersion,
+        worldTimeMinutes: resultWorldTimeMinutes,
+        currentTick: resultTick,
+        updatedAt: timestamp,
+      })
+      .where(
+        and(
+          eq(worldClocks.campaignId, input.campaignId),
+          eq(worldClocks.worldVersion, clock.worldVersion),
+        ),
+      )
+      .run();
+    if (clockUpdate.changes !== 1) {
+      throw new WorldVersionConflictError(
+        `World version changed while committing ${input.operation} for campaign ${input.campaignId}.`,
+      );
+    }
+
+    db.insert(authorityTraces)
+      .values({
+        id: crypto.randomUUID(),
+        campaignId: input.campaignId,
+        operation: input.operation,
+        sourceEntityType: input.sourceEntity.type,
+        sourceEntityId: input.sourceEntity.id ?? null,
+        baseWorldVersion: clock.worldVersion,
+        resultWorldVersion,
+        worldTimeMinutes: resultWorldTimeMinutes,
+        elapsedWorldTimeMinutes,
+        toolResultId,
+        eventIds: stringifyArray(input.eventIds),
+        stateDeltaRefs: stringifyArray(input.stateDeltaRefs),
+        witnesses: stringifyArray(input.witnesses),
+        metadata: stringifyJson(input.metadata),
+        createdAt: timestamp,
+      })
+      .run();
+
+    return {
+      toolResultId,
+      campaignId: input.campaignId,
+      sourceEntity: input.sourceEntity,
       baseWorldVersion: clock.worldVersion,
       resultWorldVersion,
       worldTimeMinutes: resultWorldTimeMinutes,
       elapsedWorldTimeMinutes,
-      toolResultId,
-      eventIds: stringifyArray(input.eventIds),
-      stateDeltaRefs: stringifyArray(input.stateDeltaRefs),
-      witnesses: stringifyArray(input.witnesses),
-      metadata: stringifyJson(input.metadata),
-      createdAt: timestamp,
-    })
-    .run();
-
-  return {
-    toolResultId,
-    campaignId: input.campaignId,
-    sourceEntity: input.sourceEntity,
-    baseWorldVersion: clock.worldVersion,
-    resultWorldVersion,
-    worldTimeMinutes: resultWorldTimeMinutes,
-    elapsedWorldTimeMinutes,
-    stateDeltaRefs: input.stateDeltaRefs ?? [],
-    eventRefs: input.eventIds ?? [],
-    witnesses: input.witnesses ?? [],
-    knowledgeOutputs: [],
-    visibilityOutputs: [],
-    resources: [],
-  };
+      stateDeltaRefs: input.stateDeltaRefs ?? [],
+      eventRefs: input.eventIds ?? [],
+      witnesses: input.witnesses ?? [],
+      knowledgeOutputs: [],
+      visibilityOutputs: [],
+      resources: [],
+    };
+  });
 }
 
 export function queueSimulationJob(input: {

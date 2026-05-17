@@ -78,6 +78,8 @@ describe("bridge state tool constraints", () => {
     }).success).toBe(true);
     expect(runtimeToolInputSchemas.create_scene_extra.safeParse({
       role: "courier",
+      roleText: "Public Courier",
+      locationRef: "current_scene",
       reason: "A courier desk needs a temporary clerk.",
     }).success).toBe(true);
     expect(runtimeToolInputSchemas.start_search.safeParse({
@@ -95,8 +97,7 @@ describe("bridge state tool constraints", () => {
     const accepted = prepareMoveActorInput({
       actorRef: "Iria",
       destinationRef: "Tea Lane",
-      routeId: "route-tea-lane",
-      evidenceRefs: ["route-tea-lane"],
+      evidenceRefs: ["Tea Lane"],
       intentSummary: "Iria follows the obvious route.",
     }, context);
     const remote = prepareMoveActorInput({
@@ -116,7 +117,7 @@ describe("bridge state tool constraints", () => {
       expect(accepted.value.actorRefs).toContain("Iria");
     }
 
-    const acceptedScoped = prepareMoveActorInput({
+    const rejectedScoped = prepareMoveActorInput({
       actorRef: "Iria",
       destinationRef: "location:loc-tea-lane",
       evidenceRefs: ["location:loc-tea-lane"],
@@ -129,11 +130,7 @@ describe("bridge state tool constraints", () => {
         "tea lane",
       ]),
     }));
-    expect(acceptedScoped.ok).toBe(true);
-    if (acceptedScoped.ok) {
-      expect(acceptedScoped.value.targetLocationName).toBe("loc-tea-lane");
-      expect(acceptedScoped.value.routeEvidenceRefs).toContain("location:loc-tea-lane");
-    }
+    expect(rejectedScoped.ok).toBe(false);
 
     expect(remote.ok).toBe(false);
     expect(wrongActor.ok).toBe(false);
@@ -155,6 +152,14 @@ describe("bridge state tool constraints", () => {
         poiType,
         reason: "The public local area supports a mundane service.",
       }, context).ok).toBe(true);
+    }
+
+    for (const areaRef of ["loc-market", "scene-market-counter", "location:loc-market"]) {
+      expect(prepareCreateMinorPoiInput({
+        areaRef,
+        poiType: "tea_stall",
+        reason: "The public local area supports a mundane service.",
+      }, context).ok).toBe(false);
     }
 
     for (const name of [
@@ -206,14 +211,43 @@ describe("bridge state tool constraints", () => {
       name: "лидер фракции",
       reason: "Нужен ключевой персонаж фракции.",
     }, context);
+    const sameTurnLocation = prepareCreateSceneExtraInput({
+      locationId: "loc-fresh-room",
+      role: "service",
+      roleText: "Seal Counter Worker",
+      reason: "A newly revealed local room needs an ordinary service responder.",
+    }, createContext({
+      sameTurnResultRefs: new Set(["loc-fresh-room", "seal counter"]),
+    }));
+    const internalSameTurnLocation = prepareCreateSceneExtraInput({
+      locationId: "loc-fresh-room",
+      role: "service",
+      roleText: "Seal Counter Worker",
+      reason: "An internal actor/system flow can resolve raw same-turn state refs.",
+    }, createContext({
+      scope: "actor_turn",
+      sameTurnResultRefs: new Set(["loc-fresh-room", "seal counter"]),
+    }));
+    const remoteLocation = prepareCreateSceneExtraInput({
+      locationId: "loc-remote",
+      role: "service",
+      reason: "A remote office should not get a player-turn extra.",
+    }, context);
 
     expect(accepted.ok).toBe(true);
     if (accepted.ok) {
       expect(accepted.value.tags).toEqual(expect.arrayContaining(["temporary", "scene-extra"]));
     }
+    expect(sameTurnLocation.ok).toBe(false);
+    expect(internalSameTurnLocation.ok).toBe(true);
+    if (internalSameTurnLocation.ok) {
+      expect(internalSameTurnLocation.value.locationId).toBe("loc-fresh-room");
+      expect(internalSameTurnLocation.value.name).toBe("Seal Counter Worker");
+    }
     expect(persistent.ok).toBe(false);
     expect(keyNpc.ok).toBe(false);
     expect(russianFactionLeader.ok).toBe(false);
+    expect(remoteLocation.ok).toBe(false);
   });
 
   it("records search and player intent without inventing discovery or truth", () => {
@@ -255,8 +289,7 @@ describe("bridge state tool constraints", () => {
     const move = prepareMoveActorInput({
       actorRef: "Iria",
       destinationRef: "Tea Lane",
-      routeId: "route-tea-lane",
-      evidenceRefs: ["route-tea-lane"],
+      evidenceRefs: ["Tea Lane"],
       intentSummary: "иду дальше по логичному маршруту и ищу чайную лавку",
     }, context);
     const teaStall = prepareCreateMinorPoiInput({
@@ -290,7 +323,7 @@ describe("bridge state tool constraints", () => {
     expect(hiddenTeaVault.ok).toBe(false);
     if (move.ok) {
       expect(move.value.targetLocationName).toBe("loc-tea-lane");
-      expect(move.value.routeEvidenceRefs).toContain("route-tea-lane");
+      expect(move.value.routeEvidenceRefs).toContain("Tea Lane");
     }
     if (teaStall.ok) {
       expect(teaStall.value).toMatchObject({

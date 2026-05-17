@@ -1,4 +1,5 @@
-import { and, eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { simulationProposals } from "../db/schema.js";
 import {
@@ -7,6 +8,7 @@ import {
   readWorldClock,
   type AuthoritySourceEntity,
 } from "./living-world-authority.js";
+import { simulationProposalAuthorityTraceToolResultId } from "./simulation-proposal-execution.js";
 import { findConflictingWriteScope, writeScopesConflict } from "./simulation-write-scope.js";
 
 export type SimulationProposalWriteScope =
@@ -20,6 +22,7 @@ export type SimulationProposalWriteScope =
 
 export type SimulationProposalStatus =
   | "pending"
+  | "executing"
   | "committed"
   | "rejected"
   | "canceled"
@@ -33,7 +36,8 @@ export type SimulationProposalDisposition =
   | "deferred_not_due"
   | "superseded_by_new_event"
   | "needs_rebase"
-  | "needs_actor_retry";
+  | "needs_actor_retry"
+  | "execution_abandoned";
 
 export type SimulationProposalPreflightDisposition =
   | "ready_to_commit"
@@ -47,6 +51,8 @@ export type SimulationProposalPreflightDisposition =
 export type SimulationProposalExpiryPolicy =
   | "reject_when_expired"
   | "ignore_expiry";
+
+type ProposalRow = typeof simulationProposals.$inferSelect;
 
 export interface SimulationProposalIntendedTool {
   name: string;
@@ -138,6 +144,9 @@ export type CommitSimulationProposalResult =
         | "deferred_not_due"
         | "superseded_by_new_event"
         | "needs_actor_retry"
+        | "execution_abandoned"
+        | "proposal_commit_requires_executor_for_intended_tools"
+        | "proposal_commit_requires_executor_receipt"
         | "rejected_invalid";
       baseWorldVersion?: number;
       currentWorldVersion?: number;
@@ -295,6 +304,7 @@ function dispositionFromLegacyRow(input: {
     case "canceled":
       return "rejected_invalid";
     case "pending":
+    case "executing":
       return "pending";
   }
 }
@@ -407,6 +417,39 @@ export function createSimulationProposal(
         dueAtWorldTimeMinutes: storedPayload.dueAtWorldTimeMinutes,
         priority: storedPayload.priority,
       };
+}
+
+export function findActiveActorDecisionProposal(input: {
+  campaignId: string;
+  actorId: string;
+  phase: string;
+  proposalTypes?: readonly string[];
+}): CreatedSimulationProposal | null {
+  const proposalTypes = input.proposalTypes ?? [
+    "key_actor_due_decision",
+    "key_actor_exposure_decision",
+  ];
+  const existing = getDb()
+    .select()
+    .from(simulationProposals)
+    .where(and(
+      eq(simulationProposals.campaignId, input.campaignId),
+      inArray(simulationProposals.proposalType, [...proposalTypes]),
+      inArray(simulationProposals.status, ["pending", "executing"]),
+      eq(simulationProposals.sourceEntityId, input.actorId),
+    ))
+    .all()
+    .find((proposal) => {
+      const payload = parseSimulationProposalPayload(proposal.payload);
+      const data = payload.data && typeof payload.data === "object" && !Array.isArray(payload.data)
+        ? payload.data as Record<string, unknown>
+        : {};
+      return data.phase === input.phase;
+    });
+
+  return existing
+    ? createdProposalFromRow(existing, parseSimulationProposalPayload(existing.payload))
+    : null;
 }
 
 function invalidPreconditionReason(preconditions: readonly string[]): string | null {
@@ -575,15 +618,72 @@ function statusForRejectedPreflight(
   return "rejected";
 }
 
+function parseLifecycleMetadata(row: ProposalRow): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(row.lifecycleMetadata) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function executionTokenFromRow(row: ProposalRow): string | null {
+  const execution = parseLifecycleMetadata(row).execution;
+  if (!execution || typeof execution !== "object" || Array.isArray(execution)) {
+    return null;
+  }
+  const token = (execution as Record<string, unknown>).token;
+  return typeof token === "string" && token.trim() ? token.trim() : null;
+}
+
+function claimAuthorityTraceOnlyCommit(row: ProposalRow): ProposalRow | null {
+  const timestamp = now();
+  const lifecycleMetadata = JSON.stringify({
+    ...parseLifecycleMetadata(row),
+    execution: {
+      token: randomUUID(),
+      kind: "authority_trace_only",
+      claimedAt: timestamp,
+      previousStatus: row.status,
+      previousDisposition: row.proposalDisposition,
+    },
+  });
+  const update = getDb()
+    .update(simulationProposals)
+    .set({
+      status: "executing",
+      proposalDisposition: "pending",
+      dispositionReason: "authority_trace_only_execution_claimed",
+      rejectionReason: null,
+      lifecycleMetadata,
+      updatedAt: timestamp,
+    })
+    .where(and(
+      eq(simulationProposals.id, row.id),
+      eq(simulationProposals.status, "pending"),
+    ))
+    .run();
+  if (update.changes !== 1) {
+    return null;
+  }
+  return getDb()
+    .select()
+    .from(simulationProposals)
+    .where(eq(simulationProposals.id, row.id))
+    .get() ?? null;
+}
+
 function applyPreflightDisposition(input: {
   proposalId: string;
   preflight: SimulationProposalPreflightResult;
   rejectionReason: SimulationProposalRejectionReason;
-}): void {
+}): boolean {
   const disposition = input.preflight.disposition === "ready_to_commit"
     ? "pending"
     : input.preflight.disposition;
-  getDb()
+  const update = getDb()
     .update(simulationProposals)
     .set({
       status: statusForRejectedPreflight(disposition),
@@ -596,8 +696,12 @@ function applyPreflightDisposition(input: {
       }),
       updatedAt: now(),
     })
-    .where(eq(simulationProposals.id, input.proposalId))
+    .where(and(
+      eq(simulationProposals.id, input.proposalId),
+      eq(simulationProposals.status, "pending"),
+    ))
     .run();
+  return update.changes === 1;
 }
 
 export function commitSimulationProposal(
@@ -634,6 +738,46 @@ export function commitSimulationProposal(
       }),
     };
   }
+  if (payload.intendedTools.length > 0) {
+    const clock = readWorldClock(input.campaignId);
+    const preflight: SimulationProposalPreflightResult = {
+      disposition: "rejected_invalid",
+      reason: "proposal_commit_requires_executor_for_intended_tools",
+      baseWorldVersion: proposal.baseWorldVersion,
+      currentWorldVersion: clock.worldVersion,
+      currentWorldTimeMinutes: clock.worldTimeMinutes,
+      writeScopes: payload.writeScopes,
+    };
+    const transitioned = applyPreflightDisposition({
+      proposalId: input.proposalId,
+      preflight,
+      rejectionReason: "rejected_invalid",
+    });
+    if (!transitioned) {
+      return {
+        status: "rejected",
+        proposalId: input.proposalId,
+        reason: "not_pending",
+        baseWorldVersion: proposal.baseWorldVersion,
+        currentWorldVersion: clock.worldVersion,
+        writeScopes: payload.writeScopes,
+        disposition: dispositionFromLegacyRow({
+          status: proposal.status,
+          proposalDisposition: proposal.proposalDisposition,
+          rejectionReason: proposal.rejectionReason,
+        }),
+      };
+    }
+    return {
+      status: "rejected",
+      proposalId: input.proposalId,
+      reason: "proposal_commit_requires_executor_for_intended_tools",
+      baseWorldVersion: proposal.baseWorldVersion,
+      currentWorldVersion: clock.worldVersion,
+      writeScopes: payload.writeScopes,
+      disposition: "rejected_invalid",
+    };
+  }
 
   const clock = readWorldClock(input.campaignId);
   const preflight = classifySimulationProposalPreflight({
@@ -649,11 +793,26 @@ export function commitSimulationProposal(
 
   if (preflight.disposition !== "ready_to_commit") {
     const rejectionReason = legacyReasonFromPreflight(preflight);
-    applyPreflightDisposition({
+    const transitioned = applyPreflightDisposition({
       proposalId: input.proposalId,
       preflight,
       rejectionReason,
     });
+    if (!transitioned) {
+      return {
+        status: "rejected",
+        proposalId: input.proposalId,
+        reason: "not_pending",
+        baseWorldVersion: proposal.baseWorldVersion,
+        currentWorldVersion: clock.worldVersion,
+        writeScopes: payload.writeScopes,
+        disposition: dispositionFromLegacyRow({
+          status: proposal.status,
+          proposalDisposition: proposal.proposalDisposition,
+          rejectionReason: proposal.rejectionReason,
+        }),
+      };
+    }
     return {
       status: "rejected",
       proposalId: input.proposalId,
@@ -664,50 +823,141 @@ export function commitSimulationProposal(
       disposition: preflight.disposition,
     };
   }
-
-  const authority = commitAuthorityTrace({
-    campaignId: input.campaignId,
-    operation: `proposal:${proposal.proposalType}`,
-    baseWorldVersion: proposal.baseWorldVersion,
-    sourceEntity: {
-      type: proposal.sourceEntityType,
-      id: proposal.sourceEntityId,
-    },
-    elapsedWorldTimeMinutes: input.elapsedWorldTimeMinutes ?? 0,
-    stateDeltaRefs: payload.writeScopes,
-    metadata: {
+  if (payload.intendedTools.length === 0) {
+    const rejectionPreflight: SimulationProposalPreflightResult = {
+      ...preflight,
+      disposition: "rejected_invalid",
+      reason: "proposal_commit_requires_executor_receipt",
+    };
+    const transitioned = applyPreflightDisposition({
       proposalId: input.proposalId,
-      proposalType: proposal.proposalType,
-      summary: payload.summary,
-      readSet: payload.readSet,
-      preconditions: payload.preconditions,
-      intendedTools: payload.intendedTools,
-      proposalPreflight: preflight,
-      provenance: payload.provenance,
-    },
-  });
+      preflight: rejectionPreflight,
+      rejectionReason: "rejected_invalid",
+    });
+    if (!transitioned) {
+      return {
+        status: "rejected",
+        proposalId: input.proposalId,
+        reason: "not_pending",
+        baseWorldVersion: proposal.baseWorldVersion,
+        currentWorldVersion: clock.worldVersion,
+        writeScopes: payload.writeScopes,
+        disposition: dispositionFromLegacyRow({
+          status: proposal.status,
+          proposalDisposition: proposal.proposalDisposition,
+          rejectionReason: proposal.rejectionReason,
+        }),
+      };
+    }
+    return {
+      status: "rejected",
+      proposalId: input.proposalId,
+      reason: "proposal_commit_requires_executor_receipt",
+      baseWorldVersion: proposal.baseWorldVersion,
+      currentWorldVersion: clock.worldVersion,
+      writeScopes: payload.writeScopes,
+      disposition: "rejected_invalid",
+    };
+  }
 
-  const committedWorldVersion = authority.resultWorldVersion ?? proposal.baseWorldVersion + 1;
-
-  db.update(simulationProposals)
-    .set({
-      status: "committed",
-      proposalDisposition: "committed",
-      dispositionReason: preflight.reason,
-      committedWorldVersion,
-      lifecycleMetadata: JSON.stringify({
-        preflight,
-        authorityToolResultId: authority.toolResultId,
+  const claimed = claimAuthorityTraceOnlyCommit(proposal);
+  if (!claimed || claimed.status !== "executing") {
+    return {
+      status: "rejected",
+      proposalId: input.proposalId,
+      reason: "not_pending",
+      baseWorldVersion: proposal.baseWorldVersion,
+      currentWorldVersion: clock.worldVersion,
+      writeScopes: payload.writeScopes,
+      disposition: dispositionFromLegacyRow({
+        status: proposal.status,
+        proposalDisposition: proposal.proposalDisposition,
+        rejectionReason: proposal.rejectionReason,
       }),
-      updatedAt: now(),
-    })
-    .where(eq(simulationProposals.id, input.proposalId))
-    .run();
+    };
+  }
+  const executionToken = executionTokenFromRow(claimed);
+  if (!executionToken) {
+    return {
+      status: "rejected",
+      proposalId: input.proposalId,
+      reason: "execution_abandoned",
+      baseWorldVersion: proposal.baseWorldVersion,
+      currentWorldVersion: clock.worldVersion,
+      writeScopes: payload.writeScopes,
+      disposition: "execution_abandoned",
+    };
+  }
+
+  let committedWorldVersion: number;
+  try {
+    committedWorldVersion = db.transaction(() => {
+      const authority = commitAuthorityTrace({
+        campaignId: input.campaignId,
+        operation: `proposal:${claimed.proposalType}`,
+        baseWorldVersion: claimed.baseWorldVersion,
+        sourceEntity: {
+          type: claimed.sourceEntityType,
+          id: claimed.sourceEntityId,
+        },
+        elapsedWorldTimeMinutes: input.elapsedWorldTimeMinutes ?? 0,
+        toolResultId: simulationProposalAuthorityTraceToolResultId({
+          proposalId: input.proposalId,
+          executionToken,
+        }),
+        stateDeltaRefs: payload.writeScopes,
+        metadata: {
+          proposalId: input.proposalId,
+          proposalType: claimed.proposalType,
+          executionToken,
+          summary: payload.summary,
+          readSet: payload.readSet,
+          preconditions: payload.preconditions,
+          intendedTools: payload.intendedTools,
+          proposalPreflight: preflight,
+          provenance: payload.provenance,
+        },
+      });
+      const resultWorldVersion = authority.resultWorldVersion ?? claimed.baseWorldVersion + 1;
+      const commitUpdate = db.update(simulationProposals)
+        .set({
+          status: "committed",
+          proposalDisposition: "committed",
+          dispositionReason: preflight.reason,
+          committedWorldVersion: resultWorldVersion,
+          lifecycleMetadata: JSON.stringify({
+            preflight,
+            authorityToolResultId: authority.toolResultId,
+          }),
+          updatedAt: now(),
+        })
+        .where(and(
+          eq(simulationProposals.id, input.proposalId),
+          eq(simulationProposals.status, "executing"),
+          eq(simulationProposals.lifecycleMetadata, claimed.lifecycleMetadata),
+        ))
+        .run();
+      if (commitUpdate.changes !== 1) {
+        throw new Error("proposal_authority_trace_commit_claim_lost");
+      }
+      return resultWorldVersion;
+    });
+  } catch {
+    return {
+      status: "rejected",
+      proposalId: input.proposalId,
+      reason: "not_pending",
+      baseWorldVersion: proposal.baseWorldVersion,
+      currentWorldVersion: readWorldClock(input.campaignId).worldVersion,
+      writeScopes: payload.writeScopes,
+      disposition: "pending",
+    };
+  }
 
   return {
     status: "committed",
     proposalId: input.proposalId,
-    baseWorldVersion: proposal.baseWorldVersion,
+    baseWorldVersion: claimed.baseWorldVersion,
     committedWorldVersion,
     writeScopes: payload.writeScopes,
   };

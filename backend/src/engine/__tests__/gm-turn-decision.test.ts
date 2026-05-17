@@ -112,6 +112,7 @@ function createFrame(overrides: Partial<SceneFrame> = {}): SceneFrame {
     combatEnvelope: null,
     oracle: null,
     ...overrides,
+    worldVersion: overrides.worldVersion ?? 0,
   };
 }
 
@@ -360,6 +361,165 @@ describe("GM turn decision contract", () => {
     ).toThrow();
   });
 
+  it("rejects backend-only refs in every model-authored evidence ref field", () => {
+    const frame = createFrame();
+
+    const cases: Array<{ decision: GmTurnDecision; path: string }> = [
+      {
+        decision: {
+          path: "direct",
+          directResolutionNotes: "Answer from visible context.",
+          evidenceRefs: ["actor:11111111-1111-4111-8111-111111111111"],
+        },
+        path: "evidenceRefs.0",
+      },
+      {
+        decision: {
+          path: "roll_oracle",
+          rollRequest: {
+            actorRef: "Player",
+            question: "Does the warden believe the bluff?",
+            stakes: "Trust shifts.",
+            evidenceRefs: ["knowledge:public-notice"],
+          },
+          evidenceRefs: ["Player"],
+        },
+        path: "rollRequest.evidenceRefs.0",
+      },
+      {
+        decision: {
+          path: "tool_plan",
+          plannedTools: [
+            {
+              toolName: "log_event",
+              actorRef: "Player",
+              targetRefs: ["Road Warden"],
+              input: { text: "The warden answers.", durability: "scene_local" },
+              evidenceRefs: ["tool-result-123"],
+            },
+          ],
+          evidenceRefs: ["Player"],
+        },
+        path: "plannedTools.0.evidenceRefs.0",
+      },
+      {
+        decision: {
+          path: "combat_transition",
+          actorRef: "Player",
+          targetRef: "Road Warden",
+          combatFraming: "The confrontation becomes physical.",
+          stakes: "Immediate danger.",
+          evidenceRefs: ["location:99999999-9999-4999-8999-999999999999"],
+        },
+        path: "evidenceRefs.0",
+      },
+    ];
+
+    for (const entry of cases) {
+      expect(validateGmTurnDecisionForFrame(entry.decision, frame)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ path: entry.path }),
+        ]),
+      );
+    }
+  });
+
+  it("rejects backend-only and forbidden refs inside planned tool input payloads", () => {
+    const frame = createFrame();
+
+    expect(validateGmTurnDecisionForFrame(
+      {
+        path: "tool_plan",
+        plannedTools: [
+          {
+            toolName: "log_event",
+            actorRef: "Player",
+            targetRefs: ["Road Warden"],
+            input: {
+              text: "The warden answers.",
+              sourceRefs: ["tool-result-secret-1"],
+              nested: { witness: "Hidden Watcher" },
+              "actor:11111111-1111-4111-8111-111111111111": true,
+            },
+            evidenceRefs: ["Player"],
+          },
+        ],
+        evidenceRefs: ["Player"],
+      },
+      frame,
+    )).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: "plannedTools.0.input.sourceRefs.0" }),
+      expect.objectContaining({ path: "plannedTools.0.input.nested.witness" }),
+      expect.objectContaining({
+        path: "plannedTools.0.input.actor:11111111-1111-4111-8111-111111111111",
+      }),
+    ]));
+
+    const frameWithFriendlyLabel = createFrame({
+      roster: {
+        ...frame.roster,
+        active: [
+          ...frame.roster.active,
+          {
+            id: "miraInternal42",
+            actorId: "miraInternal42",
+            type: "npc",
+            label: "Mira Voss",
+            locationId: frame.currentLocationId,
+            sceneScopeId: frame.currentSceneScopeId,
+            awareness: "clear",
+          },
+        ],
+      },
+      targetCandidates: [
+        ...frame.targetCandidates,
+        {
+          id: "miraInternal42",
+          actorId: "miraInternal42",
+          type: "actor",
+          label: "Mira Voss",
+          awareness: "clear",
+        },
+      ],
+    });
+
+    expect(validateGmTurnDecisionForFrame(
+      {
+        path: "tool_plan",
+        plannedTools: [
+          {
+            toolName: "set_condition",
+            actorRef: "Player",
+            targetRefs: ["Mira Voss"],
+            input: { targetName: "miraInternal42", condition: "winded", value: 1 },
+            evidenceRefs: ["Player", "Mira Voss"],
+          },
+        ],
+        evidenceRefs: ["Player", "Mira Voss"],
+      },
+      frameWithFriendlyLabel,
+    )).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: "plannedTools.0.input.targetName" }),
+    ]));
+
+    expect(validateGmTurnDecisionForFrame(
+      {
+        path: "tool_plan",
+        plannedTools: [
+          {
+            toolName: "set_condition",
+            actorRef: "Player",
+            targetRefs: ["Mira Voss"],
+            input: { targetName: "Mira Voss", condition: "winded", value: 1 },
+            evidenceRefs: ["Player", "Mira Voss"],
+          },
+        ],
+        evidenceRefs: ["Player", "Mira Voss"],
+      },
+      frameWithFriendlyLabel,
+    ).map((issue) => issue.path)).not.toContain("plannedTools.0.input.targetName");
+  });
+
   it("runs with judge role, temperature zero, one retry, raw player text, neutral SceneFrame, candidates, and allowed tools", async () => {
     vi.mocked(safeGenerateObject).mockResolvedValueOnce(safeResult(validDecisions[0]));
 
@@ -481,11 +641,15 @@ describe("GM turn decision contract", () => {
     const prompt = vi.mocked(safeGenerateObject).mock.calls[0]?.[0].prompt ?? "";
     expect(prompt).toContain("Shibuya");
     expect(prompt).toContain("Cafe Clerk");
-    expect(prompt).toContain("hiddenActorCount");
+    expect(prompt).toContain("person_cafe_clerk");
+    expect(prompt).toContain("Player");
     expect(prompt).not.toContain("Forest Outpost");
     expect(prompt).not.toContain("Okutama Safe Zone");
     expect(prompt).not.toContain("Outpost Cook");
+    expect(prompt).not.toContain(playerId);
+    expect(prompt).not.toContain(npcId);
     expect(prompt).not.toContain(hiddenNpcId);
+    expect(prompt).not.toContain("hiddenActorCount");
     expect(prompt).not.toContain("forbiddenActorLabels");
     expect(prompt).not.toContain("roster.background");
   });
@@ -559,8 +723,92 @@ describe("GM turn decision contract", () => {
     });
 
     const prompt = vi.mocked(safeGenerateObject).mock.calls[0]?.[0].prompt ?? "";
-    expect(prompt).toContain("The Cafe Clerk puts a ceramic cup on the counter.");
+    expect(prompt).toContain("prior_gm_visible_prose_non_authority");
+    expect(prompt).toContain("presentation only, not legal evidence");
+    expect(prompt).not.toContain("ceramic cup");
     expect(prompt).not.toContain("Postal Cache");
+  });
+
+  it("redacts exact non-pattern frame ids from player action and recent conversation", async () => {
+    vi.mocked(safeGenerateObject).mockResolvedValueOnce(safeResult(validDecisions[0]));
+
+    await runGmTurnDecision({
+      provider,
+      playerAction:
+        "I paste miraInternal42 near pierInternal77 and ask about backRoomInternal99.",
+      frame: createFrame({
+        playerActorId: "miraInternal42",
+        currentLocationId: "pierInternal77",
+        currentSceneScopeId: "counterInternal88",
+        roster: {
+          active: [
+            {
+              id: "miraInternal42",
+              actorId: "miraInternal42",
+              type: "player",
+              label: "Player",
+              locationId: "pierInternal77",
+              sceneScopeId: "counterInternal88",
+              awareness: "clear",
+            },
+            {
+              id: "wardenInternal13",
+              actorId: "wardenInternal13",
+              type: "npc",
+              label: "Road Warden",
+              locationId: "pierInternal77",
+              sceneScopeId: "counterInternal88",
+              awareness: "clear",
+            },
+          ],
+          support: [],
+          background: [],
+        },
+        perception: {
+          playerAwarenessHints: [],
+          actorAwareness: {},
+          forbiddenActorIds: [],
+          forbiddenActorLabels: [],
+        },
+        targetCandidates: [
+          {
+            id: "wardenInternal13",
+            actorId: "wardenInternal13",
+            type: "actor",
+            label: "Road Warden",
+            awareness: "clear",
+          },
+        ],
+        movementCandidates: [
+          {
+            id: "backRoomInternal99",
+            locationId: "backRoomInternal99",
+            label: "Back Room",
+            connected: true,
+          },
+        ],
+      }),
+      recentConversation: [
+        {
+          role: "assistant",
+          content: "Debug replay mentioned wardenInternal13 and counterInternal88.",
+        },
+      ],
+    });
+
+    const prompt = vi.mocked(safeGenerateObject).mock.calls[0]?.[0].prompt ?? "";
+    expect(prompt).toContain("Road Warden");
+    expect(prompt).toContain("Back Room");
+    for (const leaked of [
+      "miraInternal42",
+      "pierInternal77",
+      "counterInternal88",
+      "wardenInternal13",
+      "backRoomInternal99",
+    ]) {
+      expect(prompt).not.toContain(leaked);
+    }
+    expect(prompt).toContain("[backend ref hidden]");
   });
 
   it("rejects model output that references hidden/background refs or tools outside frame.allowedTools", async () => {

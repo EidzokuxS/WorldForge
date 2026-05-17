@@ -12,6 +12,7 @@ vi.mock("../../campaign/index.js", () => ({
 
 vi.mock("../../lib/index.js", () => ({
   getErrorMessage: vi.fn((_err: unknown, fallback: string) => fallback),
+  getPlayerSafeErrorMessage: vi.fn((_err: unknown, fallback: string) => fallback),
   getErrorStatus: vi.fn(() => 500),
   createLogger: vi.fn(() => ({
     info: vi.fn(),

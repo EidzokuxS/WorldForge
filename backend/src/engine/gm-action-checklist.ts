@@ -7,10 +7,18 @@ import type { OracleResult } from "./oracle.js";
 import {
   buildModelFacingSceneDiagnostics,
   buildModelFacingScenePacket,
-  shouldDropModelFacingText,
+  buildModelFacingScenePromptView,
+  collectModelFacingScenePromptRefs,
+  isUnsafeModelFacingRef,
+  oracleResultForModelPrompt,
+  redactModelFacingJson,
   type ModelFacingPromptSafety,
-  type ModelFacingSceneView,
+  type ModelFacingScenePromptView,
 } from "./model-facing-scene.js";
+import {
+  formatModelFacingPlayerActionText,
+  formatModelFacingRecentConversation,
+} from "./model-facing-conversation.js";
 import { buildGmActionChecklistPromptContract } from "./prompt-contracts.js";
 import type { GmRead } from "./gm-turn-read.js";
 import {
@@ -21,7 +29,10 @@ import {
 } from "./player-action-epistemics.js";
 import type { SceneFrame } from "./scene-frame.js";
 import { runtimeToolInputSchemas, type RuntimeToolName } from "./tool-schemas.js";
-import type { ScopedForecastExcerpt } from "./world-forecast.js";
+import {
+  scopedForecastForModelPrompt,
+  type ScopedForecastExcerpt,
+} from "./world-forecast.js";
 
 const log = createLogger("gm-action-checklist");
 
@@ -261,29 +272,9 @@ function addRef(refs: Set<string>, value?: string | null): void {
 }
 
 function buildAllowedRefSet(frame: SceneFrame): Set<string> {
-  const refs = new Set<string>();
-  addRef(refs, "Player");
-  addRef(refs, `actor:Player`);
-  addRef(refs, frame.playerActorId);
-  for (const actor of [...frame.roster.active, ...frame.roster.support]) {
-    addRef(refs, actor.id);
-    addRef(refs, actor.actorId);
-    addRef(refs, actor.label);
-  }
-  for (const candidate of frame.targetCandidates) {
-    addRef(refs, candidate.id);
-    addRef(refs, candidate.actorId);
-    addRef(refs, candidate.itemId);
-    addRef(refs, candidate.locationId);
-    addRef(refs, candidate.factionId);
-    addRef(refs, candidate.label);
-  }
-  for (const candidate of frame.movementCandidates) {
-    addRef(refs, candidate.id);
-    addRef(refs, candidate.locationId);
-    addRef(refs, candidate.label);
-  }
-  return refs;
+  const packet = buildModelFacingScenePacket(frame);
+  const promptView = buildModelFacingScenePromptView(packet.view);
+  return new Set(collectModelFacingScenePromptRefs(promptView).map(normalizeRef));
 }
 
 function buildForbiddenRefSet(frame: SceneFrame): Set<string> {
@@ -314,6 +305,13 @@ function validateRefs(
 
   refs.forEach((ref, index) => {
     const normalized = normalizeRef(ref);
+    if (isUnsafeModelFacingRef(ref)) {
+      issues.push({
+        path: `${path}.${index}`,
+        message: `${path}.${index} uses a backend-only ref "${ref}". Use a visible label, Player, current_scene/current_location, or a short prompt alias.`,
+      });
+      return;
+    }
     if (forbiddenRefs.has(normalized)) {
       issues.push({
         path: `${path}.${index}`,
@@ -330,6 +328,32 @@ function validateRefs(
   });
 
   return issues;
+}
+
+function validateNoUnsafeInputRefs(
+  value: unknown,
+  path: string,
+): GmActionChecklistValidationIssue[] {
+  if (typeof value === "string") {
+    return isUnsafeModelFacingRef(value)
+      ? [{
+          path,
+          message: `${path} uses a backend-only ref "${value}". Use a visible label, current_scene/current_location, or a short prompt alias.`,
+        }]
+      : [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((entry, index) =>
+      validateNoUnsafeInputRefs(entry, `${path}.${index}`));
+  }
+
+  if (!isRecord(value)) {
+    return [];
+  }
+
+  return Object.entries(value).flatMap(([key, entry]) =>
+    validateNoUnsafeInputRefs(entry, `${path}.${key}`));
 }
 
 export function validateGmActionChecklistForFrame(
@@ -368,6 +392,12 @@ export function validateGmActionChecklistForFrame(
           message: "candidateToolRequest.toolName must be one of frame.allowedTools.",
         });
       }
+      issues.push(
+        ...validateNoUnsafeInputRefs(
+          step.candidateToolRequest.input,
+          `steps.${index}.candidateToolRequest.input`,
+        ),
+      );
       if (unconfirmedAccessClaim) {
         if (
           grantsClaimedAccessFromUnconfirmedProof(
@@ -404,78 +434,55 @@ function formatRecentConversation(
   safety?: ModelFacingPromptSafety,
   extraForbiddenTerms: readonly string[] = [],
 ): string {
-  if (!recentConversation || recentConversation.length === 0) {
-    return "- none";
-  }
-
-  const forbiddenTerms = extraForbiddenTerms
-    .map((term) => term.trim().toLowerCase())
-    .filter((term) => term.length > 0);
-  const lines = recentConversation
-    .slice(-8)
-    .filter((entry) => {
-      if (safety && shouldDropModelFacingText(entry.content, safety)) return false;
-      const content = entry.content.toLowerCase();
-      return !forbiddenTerms.some((term) => content.includes(term));
-    })
-    .map((entry) => `- ${entry.role}: ${entry.content}`)
-    .join("\n");
-
-  return lines || "- none";
+  return formatModelFacingRecentConversation(recentConversation, {
+    safety,
+    extraForbiddenTerms,
+  });
 }
 
-function buildCandidateRefsForPrompt(view: ModelFacingSceneView): unknown {
+function buildCandidateRefsForPrompt(view: ModelFacingScenePromptView): unknown {
   return {
     actors: view.visibleActors.map((actor) => ({
-      id: actor.id,
-      actorId: actor.actorId,
+      ref: actor.ref,
       label: actor.label,
       awareness: actor.awareness,
     })),
     targets: view.legalTargets.map((candidate) => ({
-      id: candidate.id,
+      ref: candidate.ref,
       label: candidate.label,
       type: candidate.type,
     })),
     movements: view.legalMovement.map((candidate) => ({
-      id: candidate.id,
+      ref: candidate.ref,
       label: candidate.label,
     })),
-  };
-}
-
-function scopedForecastForPrompt(
-  scopedForecastExcerpt?: ScopedForecastExcerpt | null,
-): Pick<ScopedForecastExcerpt, "version" | "baseTick" | "promptReady" | "entries"> | null {
-  if (!scopedForecastExcerpt) return null;
-  return {
-    version: scopedForecastExcerpt.version,
-    baseTick: scopedForecastExcerpt.baseTick,
-    promptReady: scopedForecastExcerpt.promptReady,
-    entries: scopedForecastExcerpt.entries,
   };
 }
 
 export function buildGmActionChecklistPrompt(args: RunGmActionChecklistArgs): string {
   const scenePacket = buildModelFacingScenePacket(args.frame);
+  const promptView = buildModelFacingScenePromptView(scenePacket.view);
   return [
     "MODEL-FACING GM ACTION CHECKLIST CONTRACT",
     buildGmActionChecklistPromptContract({ allowedTools: args.frame.allowedTools }),
     "",
-    "PLAYER ACTION RAW TEXT",
-    args.playerAction,
+    "PLAYER ACTION RAW TEXT (SANITIZED PLAYER-AUTHORED PROSE; NOT LEGAL REFS)",
+    formatModelFacingPlayerActionText(args.playerAction, {
+      safety: scenePacket.safety,
+      extraForbiddenTerms: args.scopedForecastExcerpt?.forbiddenPrivateTerms ?? [],
+    }),
     "",
     "PLAYER ACTION EPISTEMIC NOTES",
     buildPlayerActionEpistemicNotes(args.playerAction),
     "",
     "GM READ",
-    JSON.stringify(args.gmRead, null, 2),
+    JSON.stringify(redactModelFacingJson(args.gmRead, scenePacket.safety), null, 2),
     "",
     "MODEL-FACING SCENE VIEW",
-    JSON.stringify(scenePacket.view, null, 2),
+    JSON.stringify(promptView, null, 2),
     "",
     "CANDIDATE REFS FROM MODEL-FACING VIEW ONLY",
-    JSON.stringify(buildCandidateRefsForPrompt(scenePacket.view), null, 2),
+    JSON.stringify(buildCandidateRefsForPrompt(promptView), null, 2),
     "",
     "ALLOWED TOOLS FROM frame.allowedTools",
     args.frame.allowedTools.length > 0
@@ -483,10 +490,12 @@ export function buildGmActionChecklistPrompt(args: RunGmActionChecklistArgs): st
       : "- none",
     "",
     "ORACLE RESULT",
-    args.oracleResult ? JSON.stringify(args.oracleResult, null, 2) : "- none",
+    args.oracleResult
+      ? JSON.stringify(redactModelFacingJson(oracleResultForModelPrompt(args.oracleResult), scenePacket.safety), null, 2)
+      : "- none",
     "",
     "SCOPED FORECAST EXCERPT ONLY",
-    JSON.stringify(scopedForecastForPrompt(args.scopedForecastExcerpt), null, 2),
+    JSON.stringify(scopedForecastForModelPrompt(args.scopedForecastExcerpt), null, 2),
     "",
     "RECENT CONVERSATION",
     formatRecentConversation(

@@ -6,9 +6,11 @@ import { createLogger, withRole } from "../lib/index.js";
 import {
   buildModelFacingSceneDiagnostics,
   buildModelFacingScenePacket,
-  redactModelFacingJson,
+  buildModelFacingScenePromptView,
+  isUnsafeModelFacingRef,
   type ModelFacingScenePacket,
 } from "./model-facing-scene.js";
+import { sanitizeModelFacingJson } from "./model-facing-conversation.js";
 import type { SceneFrame } from "./scene-frame.js";
 import {
   WORLD_FORECAST_VERSION,
@@ -135,6 +137,14 @@ function forecastSubjectLabel(
   return "label" in subject ? subject.label : undefined;
 }
 
+function safeForecastSubjectLabel(
+  subject: { label?: string; id: string },
+): string | undefined {
+  const label = forecastSubjectLabel(subject)?.trim();
+  if (!label || isUnsafeModelFacingRef(label)) return undefined;
+  return label;
+}
+
 const forecastBuilderSubjectRefSchema = z.union([
   forecastBuilderRefSchema.transform((value) => {
     const parsed = parseTypedRef(value);
@@ -235,15 +245,36 @@ export const forecastBuilderOutputSchema = z
 
 type ForecastBuilderEntryCandidate = z.infer<typeof forecastBuilderEntryCandidateSchema>;
 
-function normalizeForecastRef(value: string): string {
+type ForecastPromptRefResolver = ReadonlyMap<string, string>;
+
+function normalizeForecastRef(
+  value: string,
+  frame?: SceneFrame,
+  promptRefResolver?: ForecastPromptRefResolver,
+): string {
   const parsed = parseTypedRef(value);
-  return parsed.id;
+  const id = parsed.id.trim();
+  const normalized = id.toLowerCase();
+  const mapped = promptRefResolver?.get(normalized)
+    ?? promptRefResolver?.get(value.trim().toLowerCase());
+  if (mapped) return mapped;
+  if (frame) {
+    if (normalized === "current_location" && frame.currentLocationId) return frame.currentLocationId;
+    if (normalized === "current_scene" && frame.currentSceneScopeId) return frame.currentSceneScopeId;
+    if (normalized === "player" && frame.playerActorId) return frame.playerActorId;
+  }
+  return id;
 }
 
-function pushUniqueRef(target: string[], value: string | null | undefined): void {
+function pushUniqueRef(
+  target: string[],
+  value: string | null | undefined,
+  frame?: SceneFrame,
+  promptRefResolver?: ForecastPromptRefResolver,
+): void {
   const trimmed = value?.trim();
   if (!trimmed) return;
-  const normalized = normalizeForecastRef(trimmed);
+  const normalized = normalizeForecastRef(trimmed, frame, promptRefResolver);
   const key = normalized.toLowerCase();
   if (target.some((entry) => entry.toLowerCase() === key)) return;
   target.push(normalized);
@@ -252,22 +283,25 @@ function pushUniqueRef(target: string[], value: string | null | undefined): void
 function pushTypedLocalityRef(
   locality: { locationRefs: string[]; sceneRefs: string[]; actorRefs: string[] },
   value: string,
+  frame: SceneFrame,
+  promptRefResolver?: ForecastPromptRefResolver,
 ): void {
   const parsed = parseTypedRef(value);
   if (parsed.type === "scene") {
-    pushUniqueRef(locality.sceneRefs, parsed.id);
+    pushUniqueRef(locality.sceneRefs, parsed.id, frame, promptRefResolver);
     return;
   }
   if (parsed.type === "actor") {
-    pushUniqueRef(locality.actorRefs, parsed.id);
+    pushUniqueRef(locality.actorRefs, parsed.id, frame, promptRefResolver);
     return;
   }
-  pushUniqueRef(locality.locationRefs, parsed.id);
+  pushUniqueRef(locality.locationRefs, parsed.id, frame, promptRefResolver);
 }
 
 function normalizeForecastLocality(
   entry: ForecastBuilderEntryCandidate,
   frame: SceneFrame,
+  promptRefResolver?: ForecastPromptRefResolver,
 ): ForecastEntry["locality"] {
   const locality = {
     locationRefs: [] as string[],
@@ -276,30 +310,40 @@ function normalizeForecastLocality(
   };
 
   for (const ref of entry.localityRefs ?? []) {
-    pushTypedLocalityRef(locality, ref);
+    pushTypedLocalityRef(locality, ref, frame, promptRefResolver);
   }
 
   const rawLocality = entry.locality;
   if (rawLocality && "locationRefs" in rawLocality) {
-    rawLocality.locationRefs.forEach((ref) => pushUniqueRef(locality.locationRefs, ref));
-    rawLocality.sceneRefs.forEach((ref) => pushUniqueRef(locality.sceneRefs, ref));
-    rawLocality.actorRefs.forEach((ref) => pushUniqueRef(locality.actorRefs, ref));
+    rawLocality.locationRefs.forEach((ref) =>
+      pushUniqueRef(locality.locationRefs, ref, frame, promptRefResolver));
+    rawLocality.sceneRefs.forEach((ref) =>
+      pushUniqueRef(locality.sceneRefs, ref, frame, promptRefResolver));
+    rawLocality.actorRefs.forEach((ref) =>
+      pushUniqueRef(locality.actorRefs, ref, frame, promptRefResolver));
   } else if (rawLocality && "refs" in rawLocality) {
-    rawLocality.refs.forEach((ref) => pushTypedLocalityRef(locality, ref));
+    rawLocality.refs.forEach((ref) =>
+      pushTypedLocalityRef(locality, ref, frame, promptRefResolver));
   } else if (rawLocality && "id" in rawLocality) {
     if (rawLocality.type === "scene") {
-      pushUniqueRef(locality.sceneRefs, rawLocality.id);
+      pushUniqueRef(locality.sceneRefs, rawLocality.id, frame, promptRefResolver);
     } else if (rawLocality.type === "actor") {
-      pushUniqueRef(locality.actorRefs, rawLocality.id);
+      pushUniqueRef(locality.actorRefs, rawLocality.id, frame, promptRefResolver);
     } else {
-      pushUniqueRef(locality.locationRefs, rawLocality.id);
+      pushUniqueRef(locality.locationRefs, rawLocality.id, frame, promptRefResolver);
     }
   }
 
   for (const subject of entry.subjectRefs) {
-    if (subject.type === "location") pushUniqueRef(locality.locationRefs, subject.id);
-    if (subject.type === "scene") pushUniqueRef(locality.sceneRefs, subject.id);
-    if (subject.type === "actor") pushUniqueRef(locality.actorRefs, subject.id);
+    if (subject.type === "location") {
+      pushUniqueRef(locality.locationRefs, subject.id, frame, promptRefResolver);
+    }
+    if (subject.type === "scene") {
+      pushUniqueRef(locality.sceneRefs, subject.id, frame, promptRefResolver);
+    }
+    if (subject.type === "actor") {
+      pushUniqueRef(locality.actorRefs, subject.id, frame, promptRefResolver);
+    }
   }
 
   if (
@@ -307,9 +351,9 @@ function normalizeForecastLocality(
     && locality.sceneRefs.length === 0
     && locality.actorRefs.length === 0
   ) {
-    pushUniqueRef(locality.locationRefs, frame.currentLocationId);
-    pushUniqueRef(locality.sceneRefs, frame.currentSceneScopeId);
-    pushUniqueRef(locality.actorRefs, frame.playerActorId);
+    pushUniqueRef(locality.locationRefs, frame.currentLocationId, frame, promptRefResolver);
+    pushUniqueRef(locality.sceneRefs, frame.currentSceneScopeId, frame, promptRefResolver);
+    pushUniqueRef(locality.actorRefs, frame.playerActorId, frame, promptRefResolver);
   }
 
   return locality;
@@ -325,7 +369,10 @@ function normalizePrivateTerms(
 
   if (entry.privacy !== "public") {
     for (const subject of entry.subjectRefs) {
-      pushUniqueRef(terms, forecastSubjectLabel(subject) ?? subject.id);
+      pushUniqueRef(
+        terms,
+        safeForecastSubjectLabel(subject) ?? `${subject.type} forecast subject`,
+      );
     }
   }
 
@@ -341,15 +388,125 @@ export interface RunWorldForecastBuilderArgs {
 }
 
 function localDurableFactsForPrompt(packet: ModelFacingScenePacket): unknown {
-  return {
-    localScene: packet.view.localScene,
-    visibleActors: packet.view.visibleActors,
-    awarenessHints: packet.view.awarenessHints,
-    localRecentEvents: packet.view.localRecentEvents,
-    legalTargets: packet.view.legalTargets,
-    legalMovement: packet.view.legalMovement,
-    privateContext: packet.view.privateContext,
-  };
+  return buildModelFacingScenePromptView(packet.view);
+}
+
+function addPromptRefMapping(
+  refs: Map<string, string>,
+  rawRef: string | null | undefined,
+  promptRef: string | null | undefined,
+): void {
+  const raw = rawRef?.trim();
+  const prompt = promptRef?.trim();
+  if (!raw || !prompt) return;
+  refs.set(raw.toLowerCase(), prompt);
+}
+
+function buildForecastPromptRefMap(packet: ModelFacingScenePacket): Map<string, string> {
+  const refs = new Map<string, string>();
+  const promptView = buildModelFacingScenePromptView(packet.view);
+  addPromptRefMapping(refs, packet.view.localScene.playerActorId, "Player");
+  addPromptRefMapping(refs, packet.view.localScene.currentLocationId, "current_location");
+  addPromptRefMapping(refs, packet.view.localScene.currentLocationName, "current_location");
+  addPromptRefMapping(refs, packet.view.localScene.currentSceneScopeId, "current_scene");
+  addPromptRefMapping(refs, packet.view.localScene.currentSceneScopeName, "current_scene");
+
+  packet.view.visibleActors.forEach((actor, index) => {
+    const promptActor = promptView.visibleActors[index];
+    addPromptRefMapping(refs, actor.id, promptActor?.ref);
+    addPromptRefMapping(refs, actor.actorId, promptActor?.ref);
+    addPromptRefMapping(refs, actor.label, promptActor?.ref);
+  });
+
+  packet.view.legalTargets.forEach((target, index) => {
+    const promptTarget = promptView.legalTargets[index];
+    addPromptRefMapping(refs, target.id, promptTarget?.ref);
+    addPromptRefMapping(refs, target.actorId, promptTarget?.ref);
+    addPromptRefMapping(refs, target.itemId, promptTarget?.ref);
+    addPromptRefMapping(refs, target.locationId, promptTarget?.ref);
+    addPromptRefMapping(refs, target.factionId, promptTarget?.ref);
+    addPromptRefMapping(refs, target.label, promptTarget?.ref);
+  });
+
+  packet.view.legalMovement.forEach((movement, index) => {
+    const promptMovement = promptView.legalMovement[index];
+    addPromptRefMapping(refs, movement.id, promptMovement?.ref);
+    addPromptRefMapping(refs, movement.locationId, promptMovement?.ref);
+    addPromptRefMapping(refs, movement.label, promptMovement?.ref);
+  });
+
+  return refs;
+}
+
+function addPromptAliasResolution(
+  refs: Map<string, string>,
+  promptRef: string | null | undefined,
+  rawRef: string | null | undefined,
+): void {
+  const prompt = promptRef?.trim();
+  const raw = rawRef?.trim();
+  if (!prompt || !raw) return;
+  refs.set(prompt.toLowerCase(), raw);
+}
+
+function targetRawRef(target: ModelFacingScenePacket["view"]["legalTargets"][number]): string {
+  switch (target.type) {
+    case "actor":
+      return target.actorId ?? target.id;
+    case "item":
+      return target.itemId ?? target.id;
+    case "location":
+      return target.locationId ?? target.id;
+    case "faction":
+      return target.factionId ?? target.id;
+  }
+}
+
+function buildForecastPromptRefResolver(packet: ModelFacingScenePacket): Map<string, string> {
+  const refs = new Map<string, string>();
+  const promptView = buildModelFacingScenePromptView(packet.view);
+  addPromptAliasResolution(refs, "Player", packet.view.localScene.playerActorId);
+  addPromptAliasResolution(refs, "current_location", packet.view.localScene.currentLocationId);
+  addPromptAliasResolution(refs, packet.view.localScene.currentLocationName, packet.view.localScene.currentLocationId);
+  addPromptAliasResolution(refs, "current_scene", packet.view.localScene.currentSceneScopeId);
+  addPromptAliasResolution(refs, packet.view.localScene.currentSceneScopeName, packet.view.localScene.currentSceneScopeId);
+
+  packet.view.visibleActors.forEach((actor, index) => {
+    const promptActor = promptView.visibleActors[index];
+    const rawRef = actor.actorId ?? actor.id;
+    addPromptAliasResolution(refs, promptActor?.ref, rawRef);
+    addPromptAliasResolution(refs, `actor_${index + 1}`, rawRef);
+    addPromptAliasResolution(refs, actor.label, rawRef);
+  });
+
+  packet.view.legalTargets.forEach((target, index) => {
+    const promptTarget = promptView.legalTargets[index];
+    const rawRef = targetRawRef(target);
+    addPromptAliasResolution(refs, promptTarget?.ref, rawRef);
+    addPromptAliasResolution(refs, `${target.type}_${index + 1}`, rawRef);
+    addPromptAliasResolution(refs, target.label, rawRef);
+  });
+
+  packet.view.legalMovement.forEach((movement, index) => {
+    const promptMovement = promptView.legalMovement[index];
+    addPromptAliasResolution(refs, promptMovement?.ref, movement.locationId ?? movement.id);
+    addPromptAliasResolution(refs, `movement_${index + 1}`, movement.locationId ?? movement.id);
+    addPromptAliasResolution(refs, `location_${index + 1}`, movement.locationId ?? movement.id);
+    addPromptAliasResolution(refs, movement.label, movement.locationId ?? movement.id);
+  });
+
+  return refs;
+}
+
+function promptSafeForecastRef(
+  ref: string,
+  promptRefs: ReadonlyMap<string, string>,
+  fallback: string,
+): string {
+  const trimmed = ref.trim();
+  const mapped = promptRefs.get(trimmed.toLowerCase());
+  if (mapped) return mapped;
+  return isUnsafeModelFacingRef(trimmed) ? fallback : trimmed;
 }
 
 function priorForecastForPrompt(
@@ -357,25 +514,41 @@ function priorForecastForPrompt(
   packet: ModelFacingScenePacket,
 ): unknown {
   if (!forecast) return null;
-  return redactModelFacingJson(
+  const promptRefs = buildForecastPromptRefMap(packet);
+  return sanitizeModelFacingJson(
     {
       baseTick: forecast.baseTick,
       generatedAtTick: forecast.generatedAtTick,
       expiresAtTick: forecast.expiresAtTick,
-      entries: forecast.entries.map((entry) => ({
-        id: entry.id,
+      entries: forecast.entries.map((entry, entryIndex) => ({
+        entryId: `forecast_${entryIndex + 1}`,
         horizonTicks: entry.horizonTicks,
-        subjectRefs: entry.subjectRefs,
+        subjectRefs: entry.subjectRefs.map((subject, subjectIndex) => ({
+          type: subject.type,
+          ref: promptSafeForecastRef(
+            subject.id,
+            promptRefs,
+            `subject_${subjectIndex + 1}`,
+          ),
+          label: subject.label ?? null,
+        })),
         confidence: entry.confidence,
         privacy: entry.privacy,
         playerFacingEligibility: entry.playerFacingEligibility,
-        locality: entry.locality,
+        locality: {
+          locationRefs: entry.locality.locationRefs.map((ref, index) =>
+            promptSafeForecastRef(ref, promptRefs, `place_${index + 1}`)),
+          sceneRefs: entry.locality.sceneRefs.map((ref, index) =>
+            promptSafeForecastRef(ref, promptRefs, `scope_${index + 1}`)),
+          actorRefs: entry.locality.actorRefs.map((ref, index) =>
+            promptSafeForecastRef(ref, promptRefs, `person_${index + 1}`)),
+        },
         advisoryText: entry.advisoryText,
         preconditions: entry.preconditions,
         advisorySignals: entry.advisorySignals,
       })),
     },
-    packet.safety,
+    { safety: packet.safety },
   );
 }
 
@@ -392,7 +565,8 @@ function buildWorldForecastBuilderPrompt(args: RunWorldForecastBuilderArgs): str
     "Return model-owned forecast meaning only. Backend fills entry id, entry baseTick, root campaignId, generatedAtTick, expiresAtTick, and promptReady.",
     "Every forecast entry should be bounded pressure: subjectRefs, locality, privacy, playerFacingEligibility, advisoryText, preconditions, advisorySignals, privateTerms.",
     "advisorySignals should be perceptual hooks the GM can surface later (sound, movement, crowd behavior, clock pressure, light, posture), never hidden truth leaking into narration.",
-    "Prefer this entry shape: {\"horizonTicks\":3,\"subjectRefs\":[{\"type\":\"location\",\"id\":\"current-location-id\",\"label\":\"Current place\"}],\"confidence\":0.5,\"privacy\":\"public\",\"playerFacingEligibility\":\"local_public\",\"locality\":{\"locationRefs\":[\"current-location-id\"],\"sceneRefs\":[],\"actorRefs\":[]},\"advisoryText\":\"One compact pressure likely to matter if nobody intervenes.\",\"preconditions\":[],\"advisorySignals\":[{\"label\":\"visible pressure\"}],\"privateTerms\":[]}.",
+    "Use human-readable labels, current_scene/current_location, Player, or short prompt aliases. Never copy UUID-like backend ids, typed backend refs, actor ids, location ids, route ids, or tool result ids.",
+    "Prefer this entry shape: {\"horizonTicks\":3,\"subjectRefs\":[{\"type\":\"location\",\"id\":\"current_location\",\"label\":\"Current place\"}],\"confidence\":0.5,\"privacy\":\"public\",\"playerFacingEligibility\":\"local_public\",\"locality\":{\"locationRefs\":[\"current_location\"],\"sceneRefs\":[\"current_scene\"],\"actorRefs\":[]},\"advisoryText\":\"One compact pressure likely to matter if nobody intervenes.\",\"preconditions\":[],\"advisorySignals\":[{\"label\":\"visible pressure\"}],\"privateTerms\":[]}.",
     "Only mark playerFacingEligibility=local_public when the pressure can be safely used in the current local scene without omniscience.",
     "Private/offscreen pressure is allowed, but it must be privacy=private, playerFacingEligibility=never, and include privateTerms for prompt/output guards.",
     "Do not include entry campaignId, toolName, input, plannedTools, action payloads, or state deltas.",
@@ -408,6 +582,7 @@ function buildWorldForecastBuilderPrompt(args: RunWorldForecastBuilderArgs): str
 function normalizeForecastEntries(
   entries: readonly ForecastBuilderEntryCandidate[],
   frame: SceneFrame,
+  promptRefResolver?: ForecastPromptRefResolver,
   expiresInTicks = WORLD_FORECAST_DEFAULT_HORIZON_TICKS,
 ): ForecastEntry[] {
   return entries.map((entry, index) => {
@@ -417,19 +592,19 @@ function normalizeForecastEntries(
       ?? (privacy === "public" ? "local_public" : "never");
 
     return forecastEntrySchema.parse({
-      id: entry.id ?? `forecast-${frame.tick}-${index + 1}`,
+      id: `forecast-${frame.tick}-${index + 1}`,
       baseTick: frame.tick,
       horizonTicks: entry.horizonTicks
         ?? Math.min(Math.max(expiresInTicks, 1), 10_000),
       subjectRefs: entry.subjectRefs.map((subject) => ({
         type: subject.type,
-        id: normalizeForecastRef(subject.id),
-        ...(forecastSubjectLabel(subject) ? { label: forecastSubjectLabel(subject) } : {}),
+        id: normalizeForecastRef(subject.id, frame, promptRefResolver),
+        ...(safeForecastSubjectLabel(subject) ? { label: safeForecastSubjectLabel(subject) } : {}),
       })),
       confidence: entry.confidence ?? WORLD_FORECAST_DEFAULT_CONFIDENCE,
       privacy,
       playerFacingEligibility,
-      locality: normalizeForecastLocality(entry, frame),
+      locality: normalizeForecastLocality(entry, frame, promptRefResolver),
       advisoryText: entry.advisoryText,
       preconditions: entry.preconditions,
       advisorySignals: entry.advisorySignals,
@@ -478,7 +653,12 @@ export async function runWorldForecastBuilder(
     generatedAtTick: args.frame.tick,
     expiresAtTick,
     promptReady: false,
-    entries: normalizeForecastEntries(result.object.entries, args.frame, result.object.expiresInTicks),
+    entries: normalizeForecastEntries(
+      result.object.entries,
+      args.frame,
+      buildForecastPromptRefResolver(packet),
+      result.object.expiresInTicks,
+    ),
     diagnostics: {
       source: "gm_forecast_builder",
       notes: result.object.diagnostics.notes,

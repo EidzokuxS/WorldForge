@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { safeGenerateObject } from "../../ai/generate-object-safe.js";
 import { createModel, type ProviderConfig } from "../../ai/provider-registry.js";
 import {
+  buildGmActionChecklistPrompt,
   gmActionChecklistSchema,
   runGmActionChecklist,
   validateGmActionChecklistForFrame,
@@ -107,6 +108,7 @@ function createFrame(overrides: Partial<SceneFrame> = {}): SceneFrame {
     combatEnvelope: null,
     oracle: null,
     ...overrides,
+    worldVersion: overrides.worldVersion ?? 0,
   };
 }
 
@@ -119,6 +121,14 @@ const gmRead: Extract<GmRead, { path: "tool_plan" }> = {
   actionInterpretation: {
     intent: "promise to return before dusk",
     targetRefs: ["Road Warden"],
+  },
+  turnGrounding: {
+    intentKind: "concrete_state_change",
+    requiresGrounding: true,
+    groundingKind: "scene_beat",
+    topicKind: "social",
+    durability: "durable",
+    reason: "The promise should be recorded for later trust.",
   },
   path: "tool_plan",
   turnIntent: "Record the promise as a future-relevant local commitment.",
@@ -162,6 +172,26 @@ beforeEach(() => {
 });
 
 describe("GM Action Checklist contract", () => {
+  it("keeps Oracle reasoning out of model-facing checklist prompts", () => {
+    const prompt = buildGmActionChecklistPrompt({
+      provider,
+      frame: createFrame(),
+      playerAction: "Bluff the road warden.",
+      gmRead,
+      oracleResult: {
+        outcome: "weak_hit",
+        chance: 55,
+        roll: 43,
+        reasoning: "Secret oracle chain-of-thought.",
+      },
+    });
+
+    expect(prompt).toContain('"outcome": "weak_hit"');
+    expect(prompt).toContain('"roll": 43');
+    expect(prompt).not.toContain("Secret oracle chain-of-thought.");
+    expect(prompt).not.toContain('"reasoning"');
+  });
+
   it("keeps the checklist as an explicit compact consequence plan, not a second GM", () => {
     const contract = buildGmActionChecklistPromptContract({
       allowedTools: ["log_event", "spawn_npc"],
@@ -176,6 +206,8 @@ describe("GM Action Checklist contract", () => {
     expect(contract).toContain("use lookup observation tools before state-bearing bridge tools");
     expect(contract).toContain("Prefer legal low-risk advancement over parser-like questions");
     expect(contract).toContain("list/find/check lookup steps before move_actor");
+    expect(contract).toContain("when allowed tools include create_minor_poi or create_scene_extra");
+    expect(contract).not.toContain("when allowed tools include reveal_location or spawn_npc");
     expect(contract).toContain("not say an exact backend string");
     expect(contract).toContain("materially different risk/cost");
     expect(contract).toContain("no fair playable bridge");
@@ -336,6 +368,30 @@ describe("GM Action Checklist contract", () => {
     ).toEqual([
       expect.objectContaining({ path: "steps.0.candidateToolRequest.toolName" }),
     ]);
+
+    expect(
+      validateGmActionChecklistForFrame(
+        gmActionChecklistSchema.parse({
+          ...validChecklist,
+          steps: [
+            {
+              ...validChecklist.steps[0],
+              candidateToolRequest: {
+                ...validChecklist.steps[0].candidateToolRequest!,
+                input: {
+                  text: "The backend handle leaked into a nested candidate.",
+                  importance: 3,
+                  participants: ["actor:11111111-1111-4111-8111-111111111111"],
+                },
+              },
+            },
+          ],
+        }),
+        createFrame(),
+      ),
+    ).toEqual([
+      expect.objectContaining({ path: "steps.0.candidateToolRequest.input.participants.0" }),
+    ]);
   });
 
   it("accepts Player as a stable checklist ref even when the live actor label is a character name", () => {
@@ -470,7 +526,9 @@ describe("GM Action Checklist contract", () => {
     expect(prompt).toContain("support NPC");
     expect(prompt).toContain("promote_npc");
     expect(prompt).toContain("temporary props/items are out of scope");
-    expect(prompt).toContain("The Road Warden narrows his eyes.");
+    expect(prompt).toContain("prior_gm_visible_prose_non_authority");
+    expect(prompt).toContain("presentation only, not legal evidence");
+    expect(prompt).not.toContain("The Road Warden narrows his eyes.");
     expect(prompt).not.toContain("Forest Outpost");
     expect(prompt).not.toContain("Postal Cache");
     expect(prompt).not.toContain("Hidden Watcher");

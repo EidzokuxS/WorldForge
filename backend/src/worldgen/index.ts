@@ -14,6 +14,10 @@ export type {
   WorldScaffold,
 } from "./types.js";
 export { saveScaffoldToDb } from "./scaffold-saver.js";
+export {
+  assertScaffoldPlayable,
+  validateScaffoldForPlayableWorld,
+} from "./scaffold-preflight.js";
 export { extractLoreCards } from "./lore-extractor.js";
 export type { ExtractedLoreCard } from "./types.js";
 export { researchKnownIP } from "./ip-researcher.js";

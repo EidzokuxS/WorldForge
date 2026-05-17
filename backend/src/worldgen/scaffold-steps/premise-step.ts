@@ -3,7 +3,7 @@ import {
   safeGenerateObject as generateObject,
 } from "../../ai/generate-object-safe.js";
 import { z } from "zod";
-import { generateText } from "ai";
+import { generateText } from "../../ai/raindrop-workshop.js";
 import { createModel } from "../../ai/index.js";
 import {
   buildKnownIpGenerationContract,

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { z } from "zod";
+import { sanitizeModelFacingConversationText } from "./model-facing-conversation.js";
 
 import { getCampaignConfigPath } from "../campaign/paths.js";
 import { AppError } from "../lib/index.js";
@@ -222,6 +223,26 @@ export type WorldTrajectoryForecast = z.infer<typeof worldTrajectoryForecastSche
 export type ScopedForecastExcerpt = z.infer<typeof scopedForecastExcerptSchema>;
 export type StagedWorldTrajectoryForecast = z.infer<typeof stagedWorldTrajectoryForecastSchema>;
 
+export interface ScopedForecastPromptEntry {
+  entryId: string;
+  horizonTicks: number;
+  subjectRefs: Array<{
+    type: ForecastEntry["subjectRefs"][number]["type"];
+    ref: string;
+    label: string | null;
+  }>;
+  confidence: number;
+  pressure: string;
+  preconditions: string[];
+}
+
+export interface ScopedForecastPromptExcerpt {
+  version: ScopedForecastExcerpt["version"];
+  baseTick: number;
+  promptReady: true;
+  entries: ScopedForecastPromptEntry[];
+}
+
 export interface BuildScopedForecastExcerptArgs {
   forecast: WorldTrajectoryForecast | null | undefined;
   localRefs: readonly string[];
@@ -373,6 +394,84 @@ function collectForbiddenTerms(
   }
 
   return terms.slice(0, WORLD_FORECAST_MAX_PRIVATE_TERMS);
+}
+
+export function scopedForecastPromptEntryId(index: number): string {
+  return `forecast_${index + 1}`;
+}
+
+function forecastSubjectPromptRef(
+  subject: ForecastEntry["subjectRefs"][number],
+  index: number,
+  forbiddenPrivateTerms: readonly string[] = [],
+): string {
+  const label = subject.label?.trim();
+  if (!label) return `${subject.type}_${index + 1}`;
+  const sanitized = sanitizeModelFacingConversationText(label, {
+    extraForbiddenTerms: forbiddenPrivateTerms,
+    maxChars: WORLD_FORECAST_MAX_SHORT_TEXT,
+  });
+  return sanitized && sanitized !== "[backend ref hidden]" ? sanitized : `${subject.type}_${index + 1}`;
+}
+
+function sanitizeForecastPromptText(
+  text: string,
+  maxChars = WORLD_FORECAST_MAX_TEXT,
+  forbiddenPrivateTerms: readonly string[] = [],
+): string {
+  return sanitizeModelFacingConversationText(text, {
+    extraForbiddenTerms: forbiddenPrivateTerms,
+    maxChars,
+  });
+}
+
+export function scopedForecastForModelPrompt(
+  scopedForecastExcerpt?: ScopedForecastExcerpt | null,
+): ScopedForecastPromptExcerpt | null {
+  if (!scopedForecastExcerpt) return null;
+  const forbiddenPrivateTerms = scopedForecastExcerpt.forbiddenPrivateTerms;
+  return {
+    version: scopedForecastExcerpt.version,
+    baseTick: scopedForecastExcerpt.baseTick,
+    promptReady: scopedForecastExcerpt.promptReady,
+    entries: scopedForecastExcerpt.entries.map((entry, entryIndex) => ({
+      entryId: scopedForecastPromptEntryId(entryIndex),
+      horizonTicks: entry.horizonTicks,
+      subjectRefs: entry.subjectRefs.map((subject, subjectIndex) => ({
+        type: subject.type,
+        ref: forecastSubjectPromptRef(subject, subjectIndex, forbiddenPrivateTerms),
+        label: subject.label
+          ? sanitizeForecastPromptText(
+              subject.label,
+              WORLD_FORECAST_MAX_SHORT_TEXT,
+              forbiddenPrivateTerms,
+            )
+          : null,
+      })),
+      confidence: entry.confidence,
+      pressure: sanitizeForecastPromptText(entry.pressure, WORLD_FORECAST_MAX_TEXT, forbiddenPrivateTerms),
+      preconditions: entry.preconditions.map((precondition) =>
+        sanitizeForecastPromptText(
+          precondition,
+          WORLD_FORECAST_MAX_SHORT_TEXT,
+          forbiddenPrivateTerms,
+        )),
+    })),
+  };
+}
+
+export function resolveScopedForecastPromptEntryId(
+  scopedForecastExcerpt: ScopedForecastExcerpt | null | undefined,
+  promptEntryId: string,
+): string | null {
+  const normalized = promptEntryId.trim().toLowerCase();
+  const entries = scopedForecastExcerpt?.entries ?? [];
+  const aliasMatch = /^forecast_(\d+)$/u.exec(normalized);
+  if (aliasMatch) {
+    const index = Number(aliasMatch[1]) - 1;
+    return entries[index]?.entryId ?? null;
+  }
+  return null;
 }
 
 export function buildScopedForecastExcerpt({

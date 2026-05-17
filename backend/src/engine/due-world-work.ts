@@ -2,9 +2,6 @@ import {
   scheduleKeyActorProcessesForTurn,
   type ActorScheduleDecision,
 } from "./actor-scheduler.js";
-import { and, eq } from "drizzle-orm";
-import { getDb } from "../db/index.js";
-import { simulationProposals } from "../db/schema.js";
 import {
   listKeyActorProcessesByActorIds,
   type KeyActorProcess,
@@ -15,8 +12,9 @@ import {
 } from "./actor-plan-executor.js";
 import {
   createSimulationProposal,
-  parseSimulationProposalPayload,
+  findActiveActorDecisionProposal,
   type CreatedSimulationProposal,
+  type SimulationProposalWriteScope,
 } from "./simulation-proposal.js";
 import { readWorldClock } from "./living-world-authority.js";
 import {
@@ -27,11 +25,15 @@ import {
   resolveDueSimulationProposalsForScope,
   type ResolveDueSimulationProposalsForScopeResult,
 } from "./simulation-proposal-watchdog.js";
+import { findConflictingWriteScope } from "./simulation-write-scope.js";
 import { consumeActorWakeSignals } from "./actor-wake-signals.js";
 import {
   planParallelSimulationGroups,
   type ParallelSimulationRunTrace,
 } from "./parallel-simulation-runner.js";
+import type { ProviderConfig } from "../ai/provider-registry.js";
+import type { SceneFrame } from "./scene-frame.js";
+import type { RunScheduledActorDecisionArgs } from "./actor-tools.js";
 
 export type DueWorldWorkPhase = "pre_scene_frame" | "pre_narrator_packet";
 
@@ -42,6 +44,13 @@ export interface ResolveDueWorldWorkForScopeInput {
   playerSceneScopeId?: string | null;
   elapsedWorldTimeMinutes?: number;
   phase: DueWorldWorkPhase;
+  blockedWriteScopes?: readonly SimulationProposalWriteScope[];
+  actorDecisionContext?: {
+    provider: ProviderConfig;
+    sceneFrame: SceneFrame;
+    maxOutputTokens?: number;
+    decideActor?: RunScheduledActorDecisionArgs["decideActor"];
+  };
 }
 
 export interface DeferredActorWork {
@@ -61,6 +70,43 @@ export interface ResolveDueWorldWorkForScopeResult {
 export interface ResolveDueWorldWorkWithProposalWatchdogResult
   extends ResolveDueWorldWorkForScopeResult {
   proposals: ResolveDueSimulationProposalsForScopeResult;
+}
+
+function mergeProposalResults(
+  first: ResolveDueSimulationProposalsForScopeResult,
+  second: ResolveDueSimulationProposalsForScopeResult,
+): ResolveDueSimulationProposalsForScopeResult {
+  const selected = [...new Set([...first.selected, ...second.selected])];
+  const executedByProposalId = new Map(
+    first.executed.map((entry) => [entry.proposalId, entry]),
+  );
+  for (const entry of second.executed) {
+    executedByProposalId.set(entry.proposalId, entry);
+  }
+  const skippedByKey = new Map(
+    first.skipped.map((entry) => [`${entry.proposalId}:${entry.reason}`, entry]),
+  );
+  for (const entry of second.skipped) {
+    skippedByKey.set(`${entry.proposalId}:${entry.reason}`, entry);
+  }
+  return {
+    selected,
+    executed: [...executedByProposalId.values()],
+    skipped: [...skippedByKey.values()],
+    blockedWriteScopes: [...new Set([
+      ...first.blockedWriteScopes,
+      ...second.blockedWriteScopes,
+    ])],
+  };
+}
+
+function dueWorkBlockedWriteScopes(
+  result: ResolveDueWorldWorkForScopeResult,
+): SimulationProposalWriteScope[] {
+  return [...new Set([
+    ...result.executed.flatMap((entry) => entry.stateDeltaRefs),
+    ...result.worldThreads.executed.flatMap((entry) => entry.authority.stateDeltaRefs),
+  ])] as SimulationProposalWriteScope[];
 }
 
 function processByActorId(processes: readonly KeyActorProcess[]): Map<string, KeyActorProcess> {
@@ -93,38 +139,13 @@ function queueDeferredActorDecision(input: {
   decision: ActorScheduleDecision;
 }): CreatedSimulationProposal {
   const clock = readWorldClock(input.campaignId);
-  const existing = getDb()
-    .select()
-    .from(simulationProposals)
-    .where(
-      and(
-        eq(simulationProposals.campaignId, input.campaignId),
-        eq(simulationProposals.proposalType, "key_actor_due_decision"),
-        eq(simulationProposals.status, "pending"),
-        eq(simulationProposals.sourceEntityId, input.decision.actorId),
-      ),
-    )
-    .all()
-    .find((proposal) => {
-      const payload = parseSimulationProposalPayload(proposal.payload);
-      const data = payload.data && typeof payload.data === "object" && !Array.isArray(payload.data)
-        ? payload.data as Record<string, unknown>
-        : {};
-      return data.phase === input.phase;
-    });
+  const existing = findActiveActorDecisionProposal({
+    campaignId: input.campaignId,
+    actorId: input.decision.actorId,
+    phase: input.phase,
+  });
   if (existing) {
-    const payload = parseSimulationProposalPayload(existing.payload);
-    return {
-      proposalId: existing.id,
-      campaignId: existing.campaignId,
-      proposalType: existing.proposalType,
-      baseWorldVersion: existing.baseWorldVersion,
-      writeScopes: payload.writeScopes,
-      status: "pending",
-      disposition: existing.proposalDisposition,
-      dueAtWorldTimeMinutes: existing.dueAtWorldTimeMinutes ?? payload.dueAtWorldTimeMinutes,
-      priority: existing.priority ?? payload.priority,
-    };
+    return existing;
   }
 
   return createSimulationProposal({
@@ -137,6 +158,7 @@ function queueDeferredActorDecision(input: {
       `world_version:${clock.worldVersion}`,
       `world_time:${clock.worldTimeMinutes}`,
       `npc:${input.decision.actorId}:process`,
+      ...input.decision.writeScopes,
     ],
     writeScopes: input.decision.writeScopes,
     preconditions: [
@@ -193,11 +215,20 @@ function buildDeferredActorProposalPrepTrace(
 export function resolveDueWorldWorkForScope(
   input: ResolveDueWorldWorkForScopeInput,
 ): ResolveDueWorldWorkForScopeResult {
+  const blockedWriteScopes: SimulationProposalWriteScope[] = [
+    ...(input.blockedWriteScopes ?? []),
+  ];
   const worldThreads = resolveDueWorldThreadWorkForScope({
     campaignId: input.campaignId,
     playerLocationId: input.playerLocationId,
     playerSceneScopeId: input.playerSceneScopeId,
+    blockedWriteScopes,
   });
+  blockedWriteScopes.push(
+    ...(worldThreads.executed.flatMap((entry) =>
+      entry.authority.stateDeltaRefs,
+    ) as SimulationProposalWriteScope[]),
+  );
   const schedule = scheduleKeyActorProcessesForTurn({
     campaignId: input.campaignId,
     tick: input.tick,
@@ -216,6 +247,15 @@ export function resolveDueWorldWorkForScope(
   const skipped: ActorScheduleDecision[] = [];
 
   for (const decision of schedule.decisions) {
+    const conflict = findConflictingWriteScope({
+      writeScopes: decision.writeScopes,
+      blockedWriteScopes,
+    });
+    if (conflict) {
+      skipped.push(decision);
+      continue;
+    }
+
     if (shouldExecuteDeterministic(decision)) {
       const process = processes.get(decision.actorId);
       if (!process) {
@@ -230,6 +270,7 @@ export function resolveDueWorldWorkForScope(
       });
       executed.push(result);
       if (result.status === "completed") {
+        blockedWriteScopes.push(...(result.stateDeltaRefs as SimulationProposalWriteScope[]));
         consumeActorWakeSignals({
           campaignId: input.campaignId,
           actorIds: [decision.actorId],
@@ -268,15 +309,32 @@ export function resolveDueWorldWorkForScope(
 export async function resolveDueWorldWorkForScopeWithProposalWatchdog(
   input: ResolveDueWorldWorkForScopeInput,
 ): Promise<ResolveDueWorldWorkWithProposalWatchdogResult> {
-  const proposals = await resolveDueSimulationProposalsForScope({
+  const beforeProposals = await resolveDueSimulationProposalsForScope({
     campaignId: input.campaignId,
     tick: input.tick,
     phase: input.phase,
     playerLocationId: input.playerLocationId,
     playerSceneScopeId: input.playerSceneScopeId,
+    actorDecisionContext: input.actorDecisionContext,
+  });
+  const dueWork = resolveDueWorldWorkForScope({
+    ...input,
+    blockedWriteScopes: beforeProposals.blockedWriteScopes,
+  });
+  const afterProposals = await resolveDueSimulationProposalsForScope({
+    campaignId: input.campaignId,
+    tick: input.tick,
+    phase: input.phase,
+    playerLocationId: input.playerLocationId,
+    playerSceneScopeId: input.playerSceneScopeId,
+    blockedWriteScopes: [
+      ...beforeProposals.blockedWriteScopes,
+      ...dueWorkBlockedWriteScopes(dueWork),
+    ],
+    actorDecisionContext: input.actorDecisionContext,
   });
   return {
-    ...resolveDueWorldWorkForScope(input),
-    proposals,
+    ...dueWork,
+    proposals: mergeProposalResults(beforeProposals, afterProposals),
   };
 }

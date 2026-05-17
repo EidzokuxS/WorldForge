@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Hono } from "hono";
+import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 type TempCampaignContext = {
@@ -447,6 +448,114 @@ describe("loadCampaign legacy migration", () => {
         .sort();
 
       expect(secondPassNames).toEqual(["Bedroll", "Family Compass", "Iron Sword"]);
+    } finally {
+      closeDb();
+      fs.rmSync(context.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not resurrect legacy loadout names after authoritative inventory mutates", async () => {
+    const context = makeTempCampaignContext("wf-phase38-mutated-");
+    let closeDb = () => {};
+
+    try {
+      const {
+        connectDb,
+        closeDb: closeDbConnection,
+        campaigns,
+        getDb,
+        items,
+        locations,
+        players,
+        runMigrations,
+        loadCampaign,
+      } = await importManagerHarness(context);
+      closeDb = closeDbConnection;
+
+      connectDb(context.dbPath);
+      runMigrations();
+
+      getDb()
+        .insert(campaigns)
+        .values({
+          id: context.campaignId,
+          name: "Legacy Campaign",
+          premise: "A legacy save that predates Phase 38.",
+          createdAt: 1,
+          updatedAt: 1,
+        })
+        .run();
+
+      getDb()
+        .insert(locations)
+        .values({
+          id: "loc-1",
+          campaignId: context.campaignId,
+          name: "Wayfarer Gate",
+          description: "A drafty stone gate above the marsh road.",
+        })
+        .run();
+
+      getDb()
+        .insert(players)
+        .values({
+          id: "player-1",
+          campaignId: context.campaignId,
+          name: "Avery Vale",
+          race: "Human",
+          gender: "Nonbinary",
+          age: "29",
+          appearance: "Travel-stained coat and a careful gaze.",
+          hp: 5,
+          tags: "[]",
+          equippedItems: JSON.stringify(["Iron Sword"]),
+          currentLocationId: "loc-1",
+          characterRecord: JSON.stringify(
+            makeLegacyPlayerRecord({
+              inventorySeed: ["Bedroll", "Family Compass"],
+              equippedItemRefs: ["Iron Sword"],
+              signatureItems: ["Family Compass"],
+            }),
+          ),
+          derivedTags: "[]",
+        })
+        .run();
+
+      closeDb();
+      await loadCampaign(context.campaignId);
+
+      getDb()
+        .update(items)
+        .set({ name: "Broken Iron Sword" })
+        .where(eq(items.name, "Iron Sword"))
+        .run();
+
+      closeDb();
+      await loadCampaign(context.campaignId);
+
+      const reopenedNames = getDb()
+        .select({ name: items.name })
+        .from(items)
+        .all()
+        .map((row) => row.name)
+        .sort();
+
+      expect(reopenedNames).toEqual(["Bedroll", "Broken Iron Sword", "Family Compass"]);
+
+      const playerRow = getDb()
+        .select({
+          equippedItems: players.equippedItems,
+          characterRecord: players.characterRecord,
+        })
+        .from(players)
+        .get();
+      const record = JSON.parse(playerRow?.characterRecord ?? "{}") as {
+        loadout?: { equippedItemRefs?: string[] };
+      };
+
+      expect(JSON.parse(playerRow?.equippedItems ?? "[]")).toContain("Broken Iron Sword");
+      expect(record.loadout?.equippedItemRefs).toContain("Broken Iron Sword");
+      expect(record.loadout?.equippedItemRefs).not.toContain("Iron Sword");
     } finally {
       closeDb();
       fs.rmSync(context.rootDir, { recursive: true, force: true });

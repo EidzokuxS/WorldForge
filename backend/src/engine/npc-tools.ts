@@ -7,7 +7,7 @@
 
 import { z } from "zod";
 import { tool } from "ai";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { npcs, locations } from "../db/schema.js";
 import { callOracle, type OraclePayload } from "./oracle.js";
@@ -16,11 +16,13 @@ import {
   isHostileCombatAction,
 } from "./combat-envelope.js";
 import { executeToolCall } from "./tool-executor.js";
-import { storeEpisodicEvent } from "../vectors/episodic-events.js";
+import {
+  createBackgroundToolExecutionContext,
+  type ToolExecutionContext,
+} from "./tool-execution-context.js";
 import type { ProviderConfig } from "../ai/provider-registry.js";
 import { createLogger } from "../lib/index.js";
 import { parseTags } from "./parse-helpers.js";
-import { accumulateReflectionBudget } from "./reflection-budget.js";
 import {
   hydrateStoredNpcRecord,
   projectNpcRecord,
@@ -29,12 +31,66 @@ import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
 import {
   listConnectedPaths,
   loadLocationGraph,
+  type ResolvedTravelPath,
   resolveLocationTarget,
   resolveTravelPath,
 } from "./location-graph.js";
 import { resolveActionTargetContext } from "./target-context.js";
+import {
+  commitAuthorityTrace,
+  validateBaseWorldVersion,
+} from "./living-world-authority.js";
 
 const log = createLogger("npc-tools");
+
+function createNpcAuthorityContext(input: {
+  campaignId: string;
+  npcId: string;
+  elapsedWorldTimeMinutes?: number;
+  allowedWriteScopes?: readonly string[];
+}): ToolExecutionContext {
+  return createBackgroundToolExecutionContext({
+    campaignId: input.campaignId,
+    sourceEntity: { type: "npc", id: input.npcId },
+    elapsedWorldTimeMinutes: input.elapsedWorldTimeMinutes ?? 0,
+    allowedWriteScopes: input.allowedWriteScopes,
+  });
+}
+
+function createNpcMoveAuthorityContext(input: {
+  campaignId: string;
+  npcId: string;
+  targetLocationId: string;
+  targetLocationName: string;
+  travelPath: ResolvedTravelPath;
+}): ToolExecutionContext {
+  const context = createNpcAuthorityContext({
+    campaignId: input.campaignId,
+    npcId: input.npcId,
+    elapsedWorldTimeMinutes: input.travelPath.totalTravelCost,
+    allowedWriteScopes: [
+      `npc:${input.npcId}`,
+      `location:${input.targetLocationId}`,
+    ],
+  });
+
+  return {
+    ...context,
+    scope: "actor_turn",
+    subjectActorId: input.npcId,
+    legalMovementRefs: new Set([
+      input.targetLocationId,
+      `location:${input.targetLocationId}`,
+      input.targetLocationName,
+      ...input.travelPath.locationIds,
+      ...input.travelPath.locationIds.map((locationId) => `location:${locationId}`),
+    ]),
+  };
+}
+
+function authorityError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 // -- Tool factory -------------------------------------------------------------
 
@@ -155,7 +211,12 @@ export function createNpcAgentTools(
           text: eventText,
           importance: oracleResult.outcome === "strong_hit" ? 5 : oracleResult.outcome === "weak_hit" ? 3 : 2,
           participants: [npc.name],
-        }, tick);
+        }, tick, undefined, createBackgroundToolExecutionContext({
+          campaignId,
+          sourceEntity: { type: "npc", id: npcId },
+          elapsedWorldTimeMinutes: 0,
+          allowedWriteScopes: ["world:event"],
+        }));
 
         return { oracleResult, outcome: oracleResult.outcome };
       },
@@ -184,21 +245,27 @@ export function createNpcAgentTools(
               .where(eq(locations.id, npc.currentLocationId))
               .get()
           : null;
-        const participants = [npcName];
-        if (target) participants.push(target);
+        const result = await executeToolCall(campaignId, "record_dialogue_outcome", {
+          speakerRef: npcName,
+          addresseeRefs: target ? [target] : [],
+          outcomeKind: "answered",
+          topicKind: "social",
+          authorityKind: "witness",
+          truthStatus: "speaker_asserted",
+          quote: dialogue,
+          summary: `${npcName} said to ${target ?? "everyone"}: "${dialogue}"`,
+          sourceRefs: [npcName, currentLocation?.name].filter((value): value is string => Boolean(value)),
+          durability: "durable",
+          futureUseKind: "npc_memory",
+          futureRelevance: "NPC-authored dialogue may inform future NPC memory and player-facing recall.",
+        }, tick, undefined, createNpcAuthorityContext({
+          campaignId,
+          npcId,
+          allowedWriteScopes: ["world:dialogue"],
+        }));
 
-        try {
-          await storeEpisodicEvent(campaignId, {
-            text: `${npcName} said to ${target ?? "everyone"}: "${dialogue}"`,
-            tick,
-            location: currentLocation?.name ?? "",
-            participants,
-            importance: 3,
-            type: "dialogue",
-          });
-          await accumulateReflectionBudget(campaignId, participants, 3);
-        } catch (err) {
-          log.warn("Failed to store NPC dialogue event", err);
+        if (!result.success) {
+          return { error: result.error ?? "NPC dialogue was rejected by authority" };
         }
 
         return { spoke: true, dialogue };
@@ -268,36 +335,26 @@ export function createNpcAgentTools(
           };
         }
 
-        const npcRecord = hydrateStoredNpcRecord(npc, {
-          currentLocationName: targetLoc.locationName,
-        });
-        db.update(npcs)
-          .set({
-            ...projectNpcRecord({
-              ...npcRecord,
-              socialContext: {
-                ...npcRecord.socialContext,
-                currentLocationId: targetLoc.locationId,
-                currentLocationName: targetLoc.locationName,
-              },
-            }),
-            currentSceneLocationId: targetLoc.locationId,
-          })
-          .where(eq(npcs.id, npcId))
-          .run();
-        log.event("db.write", {
-          table: "npcs",
-          op: "update",
-          rowId: npcId,
-          rowName: npc.name,
-        });
-
         const locationNameById = new Map(
           locationGraph.locations.map((location) => [location.id, location.name]),
         );
         const path = travelPath.locationIds
           .map((locationId) => locationNameById.get(locationId))
           .filter((locationName): locationName is string => Boolean(locationName));
+
+        const moveResult = await executeToolCall(campaignId, "move_to", {
+          targetLocationName: targetLoc.locationName,
+        }, tick, undefined, createNpcMoveAuthorityContext({
+          campaignId,
+          npcId,
+          targetLocationId: targetLoc.locationId,
+          targetLocationName: targetLoc.locationName,
+          travelPath,
+        }));
+
+        if (!moveResult.success) {
+          return { error: moveResult.error ?? "NPC movement was rejected by authority" };
+        }
 
         log.info(`${npc.name} moved from ${currentLoc.name} to ${targetLoc.locationName}`);
 
@@ -344,23 +401,62 @@ export function createNpcAgentTools(
           goalList.push(newGoal);
         }
 
-        db.update(npcs)
-          .set(projectNpcRecord({
-            ...npcRecord,
-            motivations: {
-              ...npcRecord.motivations,
-              shortTermGoals: goals.short_term,
-              longTermGoals: goals.long_term,
-            },
-          }))
-          .where(eq(npcs.id, npcId))
-          .run();
-        log.event("db.write", {
-          table: "npcs",
-          op: "update",
-          rowId: npcId,
-          rowName: npc.name,
+        const authorityContext = createNpcAuthorityContext({
+          campaignId,
+          npcId,
+          allowedWriteScopes: [`npc:${npcId}`],
         });
+        const authority = authorityContext.authority;
+        if (!authority) {
+          return { error: "NPC goal update requires execution authority" };
+        }
+
+        try {
+          db.transaction(() => {
+            validateBaseWorldVersion({
+              campaignId,
+              baseWorldVersion: authority.baseWorldVersion,
+              currentTick: tick,
+            });
+
+            db.update(npcs)
+              .set(projectNpcRecord({
+                ...npcRecord,
+                motivations: {
+                  ...npcRecord.motivations,
+                  shortTermGoals: goals.short_term,
+                  longTermGoals: goals.long_term,
+                },
+              }))
+              .where(eq(npcs.id, npcId))
+              .run();
+            log.event("db.write", {
+              table: "npcs",
+              op: "update",
+              rowId: npcId,
+              rowName: npc.name,
+            });
+
+            commitAuthorityTrace({
+              campaignId,
+              operation: "npc:update_own_goal",
+              baseWorldVersion: authority.baseWorldVersion,
+              sourceEntity: authority.sourceEntity,
+              elapsedWorldTimeMinutes: authority.elapsedWorldTimeMinutes,
+              currentTick: tick,
+              toolResultId: authority.toolResultId,
+              stateDeltaRefs: [`npc:${npcId}`, `npc_goal:${type}`],
+              metadata: {
+                toolName: "update_own_goal",
+                oldGoal,
+                newGoal,
+                type,
+              },
+            });
+          });
+        } catch (error) {
+          return { error: `NPC goal update rejected by authority: ${authorityError(error)}` };
+        }
 
         return { updated: true, goals };
       },

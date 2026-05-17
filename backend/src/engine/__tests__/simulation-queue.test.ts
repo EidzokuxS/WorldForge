@@ -24,6 +24,7 @@ import {
   createSimulationProposal,
   parseSimulationProposalPayload,
 } from "../simulation-proposal.js";
+import { executeDueSimulationProposal } from "../simulation-proposal-executor.js";
 import {
   queuePostTurnSimulationProposals,
 } from "../simulation-queue.js";
@@ -94,6 +95,24 @@ function seedFactionCommandNetwork() {
   return node;
 }
 
+function seedPlayerLocation() {
+  getDb().insert(locations).values({
+    id: "loc-player",
+    campaignId: CAMPAIGN_ID,
+    name: "Player Hall",
+    description: "The player-facing scene anchor.",
+    kind: "macro",
+    parentLocationId: null,
+    anchorLocationId: null,
+    persistence: "persistent",
+    expiresAtTick: null,
+    archivedAtTick: null,
+    tags: "[]",
+    isStarting: true,
+    connectedTo: "[]",
+  }).run();
+}
+
 function provider() {
   return {
     id: "judge",
@@ -136,39 +155,98 @@ describe("simulation queue and proposal lifecycle", () => {
       baseWorldVersion: 0,
       queued: [
         expect.objectContaining({ proposalType: "npc_offscreen_updates" }),
-        expect.objectContaining({ proposalType: "npc_reflection_updates" }),
-        expect.objectContaining({ proposalType: "faction_command_updates" }),
       ],
     });
-    expect(getDb().select().from(simulationJobs).all()).toHaveLength(3);
+    expect(getDb().select().from(simulationJobs).all()).toHaveLength(1);
     const proposals = getDb().select().from(simulationProposals).all();
-    expect(proposals).toHaveLength(3);
+    expect(proposals).toHaveLength(1);
     expect(proposals.map((proposal) => proposal.status)).toEqual([
-      "pending",
-      "pending",
       "pending",
     ]);
     expect(proposals.map((proposal) => proposal.proposalDisposition)).toEqual([
       "pending",
-      "pending",
-      "pending",
     ]);
     expect(proposals.map((proposal) => proposal.dueAtWorldTimeMinutes)).toEqual([
       result.worldTimeMinutes,
-      result.worldTimeMinutes,
-      result.worldTimeMinutes,
     ]);
-    expect(proposals.map((proposal) => proposal.priority)).toEqual([10, 5, 1]);
+    expect(proposals.map((proposal) => proposal.priority)).toEqual([10]);
     const payloads = proposals.map((proposal) =>
       parseSimulationProposalPayload(proposal.payload),
     );
     expect(payloads.every((payload) => payload.schemaVersion === 2)).toBe(true);
     expect(payloads.every((payload) => payload.intendedTools.length > 0)).toBe(true);
+    const offscreenPayload = proposals
+      .map((proposal) => ({
+        proposal,
+        payload: parseSimulationProposalPayload(proposal.payload),
+      }))
+      .find((entry) => entry.proposal.proposalType === "npc_offscreen_updates")?.payload;
+    expect(offscreenPayload?.intendedTools).toEqual([
+      expect.objectContaining({
+        name: "record_location_event",
+        args: expect.objectContaining({
+          locationRef: "loc-player",
+          eventType: "npc_offscreen_interval_due",
+        }),
+      }),
+    ]);
+    const toolNames = payloads.flatMap((payload) => payload.intendedTools.map((tool) => tool.name));
+    expect(toolNames).not.toContain("npc_offscreen_update");
+    expect(toolNames).not.toContain("npc_reflection_update");
+    expect(toolNames).not.toContain("faction_command_operation");
+    expect(toolNames).not.toContain("record_world_event");
     expect(proposals.map((proposal) => proposal.payload).join("\n")).not.toContain("secret-key");
-    expect(proposals.map((proposal) => proposal.payload).join("\n")).toContain("factionRouting");
+    expect(proposals.map((proposal) => proposal.payload).join("\n")).not.toContain("factionRouting");
   });
 
-  it("keeps interval-bound workers out of non-interval turns while preserving reflection scan proposals", () => {
+  it("queues executable offscreen interval proposals instead of unsupported multi-tool work", async () => {
+    ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 5 });
+    seedPlayerLocation();
+
+    const result = queuePostTurnSimulationProposals({
+      campaignId: CAMPAIGN_ID,
+      tick: 5,
+      judgeProvider: provider(),
+      playerLocationId: "loc-player",
+      playerSceneScopeId: "scene-player",
+      route: "/chat/action",
+      idempotencyKey: "post-turn:offscreen-executable:5",
+    });
+    const offscreen = result.queued.find((proposal) =>
+      proposal.proposalType === "npc_offscreen_updates");
+    if (!offscreen) {
+      throw new Error("expected npc_offscreen_updates proposal");
+    }
+
+    const row = getDb()
+      .select()
+      .from(simulationProposals)
+      .where(eq(simulationProposals.id, offscreen.proposalId))
+      .get();
+    const payload = parseSimulationProposalPayload(row?.payload ?? "{}");
+    expect(payload.intendedTools).toEqual([
+      expect.objectContaining({
+        name: "record_location_event",
+        args: expect.objectContaining({ locationRef: "loc-player" }),
+      }),
+    ]);
+
+    const execution = await executeDueSimulationProposal({
+      campaignId: CAMPAIGN_ID,
+      proposalId: offscreen.proposalId,
+      tick: 5,
+      phase: "watchdog",
+    });
+
+    expect(execution).toMatchObject({
+      status: "committed",
+      disposition: "committed",
+      proposalId: offscreen.proposalId,
+    });
+    expect(readWorldClock(CAMPAIGN_ID).worldVersion).toBe(1);
+  });
+
+  it("keeps all interval-bound post-turn proposals out of non-interval turns", () => {
     ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 2 });
 
     const result = queuePostTurnSimulationProposals({
@@ -178,14 +256,12 @@ describe("simulation queue and proposal lifecycle", () => {
       playerLocationId: "loc-player",
     });
 
-    expect(result.queued.map((proposal) => proposal.proposalType)).toEqual([
-      "npc_reflection_updates",
-    ]);
+    expect(result.queued.map((proposal) => proposal.proposalType)).toEqual([]);
   });
 
-  it("routes scheduled faction work to command-node candidates instead of abstract faction mutation", () => {
+  it("does not queue unsupported faction command proposals until an executable proposal tool exists", () => {
     ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 5 });
-    const node = seedFactionCommandNetwork();
+    seedFactionCommandNetwork();
 
     const result = queuePostTurnSimulationProposals({
       campaignId: CAMPAIGN_ID,
@@ -194,33 +270,18 @@ describe("simulation queue and proposal lifecycle", () => {
       playerLocationId: "loc-player",
       route: "/chat/action",
     });
-    const factionProposal = result.queued.find(
-      (proposal) => proposal.proposalType === "faction_command_updates",
-    );
-    if (!factionProposal) {
-      throw new Error("expected faction command proposal");
-    }
-    const row = getDb()
+    const payloads = getDb()
       .select()
       .from(simulationProposals)
-      .where(eq(simulationProposals.id, factionProposal.proposalId))
-      .get();
-    const payload = parseSimulationProposalPayload(row?.payload ?? "{}");
-    const data = payload.data as Record<string, unknown>;
-    const factionRouting = data.factionRouting as Record<string, unknown>;
+      .all()
+      .map((row) => parseSimulationProposalPayload(row.payload));
 
-    expect(factionRouting.commandNodeCandidateIds).toEqual([node.id]);
-    expect(factionRouting.candidates).toEqual([
-      expect.objectContaining({
-        commandNodeId: node.id,
-        factionId: "faction-wardens",
-        reason: "available_report",
-        reportIds: expect.any(Array),
-        resourceKeys: ["patrols"],
-      }),
+    expect(result.queued.map((proposal) => proposal.proposalType)).toEqual([
+      "npc_offscreen_updates",
     ]);
-    expect(payload.preconditions.join("\n")).toContain("command node");
-    expect(payload.writeScopes).toContain("faction:command_network");
+    const toolNames = payloads.flatMap((payload) => payload.intendedTools.map((tool) => tool.name));
+    expect(toolNames).not.toContain("faction_command_operation");
+    expect(toolNames).not.toContain("record_world_event");
   });
 
   it("dedupes rollback-critical post-turn proposals by idempotency key", () => {
@@ -248,44 +309,40 @@ describe("simulation queue and proposal lifecycle", () => {
     expect(second.queued.map((proposal) => proposal.proposalId)).toEqual(
       first.queued.map((proposal) => proposal.proposalId),
     );
-    expect(getDb().select().from(simulationJobs).all()).toHaveLength(3);
+    expect(getDb().select().from(simulationJobs).all()).toHaveLength(1);
     expect(getDb().select().from(simulationJobs).all().map((job) => job.idempotencyKey).sort()).toEqual([
-      "post-turn:campaign:turn:saga:attempt:5:faction_command_updates:system:faction-command-network",
       "post-turn:campaign:turn:saga:attempt:5:npc_offscreen_updates:system:npc-offscreen",
-      "post-turn:campaign:turn:saga:attempt:5:npc_reflection_updates:system:npc-reflection",
     ]);
-    expect(getDb().select().from(simulationProposals).all()).toHaveLength(3);
+    expect(getDb().select().from(simulationProposals).all()).toHaveLength(1);
     expect(getDb().select().from(simulationProposals).all().map((proposal) => proposal.idempotencyKey).sort()).toEqual([
-      "post-turn:campaign:turn:saga:attempt:5:faction_command_updates:system:faction-command-network",
       "post-turn:campaign:turn:saga:attempt:5:npc_offscreen_updates:system:npc-offscreen",
-      "post-turn:campaign:turn:saga:attempt:5:npc_reflection_updates:system:npc-reflection",
     ]);
   });
 
-  it("heals a crash gap when an idempotent job exists before its proposal", () => {
-    ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 2 });
+  it("heals a supported crash gap when an idempotent job exists before its proposal", () => {
+    ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 5 });
     const jobId = queueSimulationJob({
       campaignId: CAMPAIGN_ID,
-      jobType: "npc_reflection_scan",
+      jobType: "npc_offscreen_tick",
       baseWorldVersion: 0,
-      sourceEntity: { type: "system", id: "npc-reflection" },
-      idempotencyKey: "post-turn:gap:2:npc_reflection_updates:system:npc-reflection",
-      priority: 5,
+      sourceEntity: { type: "system", id: "npc-offscreen" },
+      idempotencyKey: "post-turn:gap:5:npc_offscreen_updates:system:npc-offscreen",
+      priority: 10,
       payload: { crashedAfterJobInsert: true },
     });
 
     const result = queuePostTurnSimulationProposals({
       campaignId: CAMPAIGN_ID,
-      tick: 2,
+      tick: 5,
       judgeProvider: provider(),
       playerLocationId: "loc-player",
       route: "/chat/action",
-      idempotencyKey: "post-turn:gap:2",
+      idempotencyKey: "post-turn:gap:5",
     });
 
     expect(result.queued).toHaveLength(1);
     expect(result.queued[0]).toMatchObject({
-      proposalType: "npc_reflection_updates",
+      proposalType: "npc_offscreen_updates",
       status: "pending",
     });
     const jobs = getDb().select().from(simulationJobs).all();
@@ -295,16 +352,16 @@ describe("simulation queue and proposal lifecycle", () => {
     expect(proposals).toHaveLength(1);
     expect(proposals[0]).toMatchObject({
       jobId,
-      idempotencyKey: "post-turn:gap:2:npc_reflection_updates:system:npc-reflection",
+      idempotencyKey: "post-turn:gap:5:npc_offscreen_updates:system:npc-offscreen",
     });
 
     const second = queuePostTurnSimulationProposals({
       campaignId: CAMPAIGN_ID,
-      tick: 2,
+      tick: 5,
       judgeProvider: provider(),
       playerLocationId: "loc-player",
       route: "/chat/action",
-      idempotencyKey: "post-turn:gap:2",
+      idempotencyKey: "post-turn:gap:5",
     });
     expect(second.queued.map((proposal) => proposal.proposalId)).toEqual(
       result.queued.map((proposal) => proposal.proposalId),
@@ -342,7 +399,7 @@ describe("simulation queue and proposal lifecycle", () => {
     expect(getDb().select().from(simulationProposals).all()).toHaveLength(1);
   });
 
-  it("commits valid proposals and rejects stale, conflicting, and expired proposals without hidden writes", () => {
+  it("rejects direct metadata-only commits and still rejects stale, conflicting, and expired proposals", () => {
     ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 0 });
     const valid = createSimulationProposal({
       campaignId: CAMPAIGN_ID,
@@ -359,16 +416,16 @@ describe("simulation queue and proposal lifecycle", () => {
       campaignId: CAMPAIGN_ID,
       proposalId: valid.proposalId,
     })).toMatchObject({
-      status: "committed",
+      status: "rejected",
+      reason: "proposal_commit_requires_executor_receipt",
       baseWorldVersion: 0,
-      committedWorldVersion: 1,
     });
-    expect(readWorldClock(CAMPAIGN_ID)).toMatchObject({ worldVersion: 1 });
+    expect(readWorldClock(CAMPAIGN_ID)).toMatchObject({ worldVersion: 0 });
 
     const stale = createSimulationProposal({
       campaignId: CAMPAIGN_ID,
       proposalType: "faction_command_updates",
-      baseWorldVersion: 1,
+      baseWorldVersion: 0,
       sourceEntity: { type: "system", id: "test" },
       summary: "Faction update.",
       writeScopes: ["faction:state"],
@@ -377,7 +434,7 @@ describe("simulation queue and proposal lifecycle", () => {
     commitAuthorityTrace({
       campaignId: CAMPAIGN_ID,
       operation: "tool:log_event",
-      baseWorldVersion: 1,
+      baseWorldVersion: 0,
       sourceEntity: { type: "player", id: "player-1" },
     });
     expect(commitSimulationProposal({
@@ -386,14 +443,14 @@ describe("simulation queue and proposal lifecycle", () => {
     })).toMatchObject({
       status: "rejected",
       reason: "stale_base_world_version",
-      baseWorldVersion: 1,
-      currentWorldVersion: 2,
+      baseWorldVersion: 0,
+      currentWorldVersion: 1,
     });
 
     const conflicting = createSimulationProposal({
       campaignId: CAMPAIGN_ID,
       proposalType: "npc_offscreen_updates",
-      baseWorldVersion: 2,
+      baseWorldVersion: 1,
       sourceEntity: { type: "system", id: "test" },
       summary: "NPC move.",
       writeScopes: ["npc:state"],
@@ -406,7 +463,7 @@ describe("simulation queue and proposal lifecycle", () => {
     })).toMatchObject({
       status: "rejected",
       reason: "conflicting_write_scope",
-      currentWorldVersion: 2,
+      currentWorldVersion: 1,
     });
 
     getDb().update(worldClocks)
@@ -416,7 +473,7 @@ describe("simulation queue and proposal lifecycle", () => {
     const expired = createSimulationProposal({
       campaignId: CAMPAIGN_ID,
       proposalType: "world_event",
-      baseWorldVersion: 2,
+      baseWorldVersion: 1,
       sourceEntity: { type: "system", id: "test" },
       summary: "Expired pressure.",
       writeScopes: ["world:event"],
@@ -429,8 +486,8 @@ describe("simulation queue and proposal lifecycle", () => {
     })).toMatchObject({
       status: "rejected",
       reason: "expired",
-      currentWorldVersion: 2,
+      currentWorldVersion: 1,
     });
-    expect(readWorldClock(CAMPAIGN_ID)).toMatchObject({ worldVersion: 2 });
+    expect(readWorldClock(CAMPAIGN_ID)).toMatchObject({ worldVersion: 1 });
   });
 });

@@ -672,7 +672,7 @@ export function buildScenePlanContract(): string {
     `supportResponses max ${SCENE_PLAN_SUPPORT_RESPONSE_LIMIT}.`,
     `deferredHooks max ${SCENE_PLAN_DEFERRED_HOOK_LIMIT}.`,
     `hiddenRationale max ${SCENE_PLAN_HIDDEN_RATIONALE_MAX} characters.`,
-    "Use actor IDs from SceneFrame roster fields, never display names.",
+    "Use visible actor labels or local aliases from the prompt; never copy backend actor IDs.",
     `Allowed tools: ${runtimeToolNames.join(", ")}.`,
     "narratorFacts must contain reference IDs only: anchorEventId, eventIds, responseIds, actionIds, toolResultRefs.",
     `Do not include narratorFacts prose fields: ${narratorFactProseKeys.join(", ")}.`,

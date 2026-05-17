@@ -22,8 +22,7 @@ describe("ActorDecisionPacket", () => {
     const packet = assertActorDecisionPacket({
       frame,
       packet: {
-        actorId: "npc-key",
-        citedFactIds: ["self:npc-key", "actor:player-1"],
+        citedFactIds: ["f1", "f2"],
         selectedGoal: "keep watch",
         intent: "warn the player without taking over the turn",
         requestedTools: [
@@ -48,6 +47,8 @@ describe("ActorDecisionPacket", () => {
       },
     });
 
+    expect(packet.actorId).toBe("npc-key");
+    expect(packet.citedFactIds).toEqual(["self:npc-key", "actor:player-1"]);
     expect(packet.requestedTools[0]?.toolName).toBe("log_event");
   });
 
@@ -58,8 +59,7 @@ describe("ActorDecisionPacket", () => {
         legalTools: ["request_contested_outcome"] satisfies RuntimeToolName[],
       },
       packet: {
-        actorId: "npc-key",
-        citedFactIds: ["self:npc-key", "actor:player-1"],
+        citedFactIds: ["f1", "f2"],
         intent: "stop the player without deciding the combat result in prose",
         requestedTools: [
           {
@@ -71,7 +71,7 @@ describe("ActorDecisionPacket", () => {
               mode: "restrain",
               intent: "Pin the player before they force the door.",
               stakes: "Whether the player can keep moving.",
-              evidenceRefs: ["self:npc-key", "actor:player-1"],
+              evidenceRefs: ["f1", "f2"],
             },
           },
         ],
@@ -79,6 +79,50 @@ describe("ActorDecisionPacket", () => {
     });
 
     expect(packet.requestedTools[0]?.toolName).toBe("request_contested_outcome");
+    expect(packet.requestedTools[0]?.input).toMatchObject({
+      evidenceRefs: ["self:npc-key", "actor:player-1"],
+    });
+  });
+
+  it("normalizes natural typed belief and plan updates into the actor process contract", () => {
+    const packet = assertActorDecisionPacket({
+      frame,
+      packet: {
+        citedFactIds: ["f1"],
+        intent: "watch the player and keep the current plan alive",
+        requestedTools: [],
+        beliefUpdates: [
+          {
+            category: "suspicion",
+            update: "The player may be testing the posted boundary.",
+          },
+        ],
+        planUpdates: [
+          {
+            category: "blocked",
+            update: "Hold the checkpoint posture until the player presents a valid seal.",
+            writeScopes: ["npc:other:state"],
+          },
+          {
+            update: "Keep the witness line stable for the next exchange.",
+          },
+        ],
+        noActionReason: "The watcher has no grounded world-facing move yet.",
+      },
+    });
+
+    expect(packet.beliefUpdates).toEqual([
+      "suspicion: The player may be testing the posted boundary.",
+    ]);
+    expect(packet.planUpdates[0]).toMatchObject({
+      summary: "Hold the checkpoint posture until the player presents a valid seal.",
+      status: "blocked",
+    });
+    expect(packet.planUpdates[0]?.writeScopes).toBeUndefined();
+    expect(packet.planUpdates[1]).toMatchObject({
+      summary: "Keep the witness line stable for the next exchange.",
+      status: "continued",
+    });
   });
 
   it("rejects claims cited outside the ActorFrame", () => {
@@ -86,7 +130,6 @@ describe("ActorDecisionPacket", () => {
       assertActorDecisionPacket({
         frame,
         packet: {
-          actorId: "npc-key",
           citedFactIds: ["hidden:offscreen-secret"],
           intent: "react to a secret not in frame",
           requestedTools: [],
@@ -96,11 +139,73 @@ describe("ActorDecisionPacket", () => {
     ).toThrow(ActorDecisionPacketValidationError);
   });
 
+  it("rejects backend fact ids even when the fact is present in the ActorFrame", () => {
+    const validation = validateActorDecisionPacket({
+      frame,
+      packet: {
+        citedFactIds: ["self:npc-key"],
+        intent: "try to cite a backend fact id directly",
+        requestedTools: [],
+        beliefUpdates: [{
+          category: "suspicion",
+          update: "The watcher privately notes the player's posture.",
+        }],
+        planUpdates: [{
+          category: "continued",
+          update: "Keep the station watch stable.",
+        }],
+        noActionReason: "no grounded move",
+      },
+    });
+
+    expect(validation.ok).toBe(false);
+    expect(validation.issues).toContainEqual(
+      expect.objectContaining({
+        code: "invalid_fact_ref",
+        path: "citedFactIds.0",
+      }),
+    );
+  });
+
+  it("rejects raw contested-outcome evidence refs before normalizing tool input", () => {
+    const validation = validateActorDecisionPacket({
+      frame: {
+        ...frame,
+        legalTools: ["request_contested_outcome"] satisfies RuntimeToolName[],
+      },
+      packet: {
+        citedFactIds: ["f1"],
+        intent: "try to send raw evidence to the contest request",
+        requestedTools: [
+          {
+            toolName: "request_contested_outcome",
+            purpose: "ask backend rules for contest bounds",
+            input: {
+              actorName: "Watcher",
+              targetName: "Player",
+              mode: "restrain",
+              intent: "Pin the player before they force the door.",
+              stakes: "Whether the player can keep moving.",
+              evidenceRefs: ["self:npc-key"],
+            },
+          },
+        ],
+      },
+    });
+
+    expect(validation.ok).toBe(false);
+    expect(validation.issues).toContainEqual(
+      expect.objectContaining({
+        code: "invalid_fact_ref",
+        path: "requestedTools.0.input.evidenceRefs.0",
+      }),
+    );
+  });
+
   it("rejects tools not exposed by the actor frame", () => {
     const validation = validateActorDecisionPacket({
       frame,
       packet: {
-        actorId: "npc-key",
         citedFactIds: ["self:npc-key"],
         intent: "create an unsupported extra NPC",
         requestedTools: [
@@ -127,7 +232,6 @@ describe("ActorDecisionPacket", () => {
     const validation = validateActorDecisionPacket({
       frame,
       packet: {
-        actorId: "npc-key",
         citedFactIds: ["self:npc-key"],
         intent: "log an event with missing fields",
         requestedTools: [
@@ -150,9 +254,16 @@ describe("ActorDecisionPacket", () => {
     const validation = validateActorDecisionPacket({
       frame,
       packet: {
-        actorId: "npc-key",
         citedFactIds: ["self:npc-key"],
         intent: "log an overheard procedural detail",
+        beliefUpdates: [{
+          category: "suspicion",
+          update: "The watcher privately marks the player's timing.",
+        }],
+        planUpdates: [{
+          category: "continued",
+          update: "Hold the current watch posture.",
+        }],
         requestedTools: [
           {
             toolName: "log_event",
@@ -180,7 +291,6 @@ describe("ActorDecisionPacket", () => {
     const validation = validateActorDecisionPacket({
       frame,
       packet: {
-        actorId: "npc-key",
         citedFactIds: ["self:npc-key", "move:loc-b"],
         intent: "move to the connected station",
         requestedTools: [
@@ -206,7 +316,6 @@ describe("ActorDecisionPacket", () => {
     const validation = validateActorDecisionPacket({
       frame,
       packet: {
-        actorId: "npc-key",
         citedFactIds: ["self:npc-key"],
         intent: "do nothing",
         requestedTools: [],
@@ -216,6 +325,27 @@ describe("ActorDecisionPacket", () => {
     expect(validation.ok).toBe(false);
     expect(validation.issues).toContainEqual(
       expect.objectContaining({ code: "invalid_shape", path: "noActionReason" }),
+    );
+  });
+
+  it("rejects model-supplied actorId because the backend binds the observer", () => {
+    const validation = validateActorDecisionPacket({
+      frame,
+      packet: {
+        actorId: "npc-key",
+        citedFactIds: ["f1"],
+        intent: "try to bind the actor manually",
+        requestedTools: [],
+        noActionReason: "no grounded move",
+      },
+    });
+
+    expect(validation.ok).toBe(false);
+    expect(validation.issues).toContainEqual(
+      expect.objectContaining({
+        code: "invalid_shape",
+        path: "(root)",
+      }),
     );
   });
 });

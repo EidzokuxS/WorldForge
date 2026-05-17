@@ -5,8 +5,8 @@
  * (route handler) to stream events to the client as they happen.
  */
 
-import { generateText } from "ai";
 import type { ChatMessage } from "@worldforge/shared";
+import { generateText } from "../ai/raindrop-workshop.js";
 import { extractReasoningText, normalizeReasoningText } from "../ai/extract-reasoning-text.js";
 import {
   getSafeGenerateObjectErrorCode,
@@ -76,10 +76,11 @@ import {
 import { runGmRead, type GmRead } from "./gm-turn-read.js";
 import { reviewGmReadClarification } from "./clarification-reviewer.js";
 import { runGmToolLoop } from "./gm-tool-loop.js";
+import { createPlayerTurnToolExecutionContext } from "./tool-execution-context.js";
 import { runRequiredActorDecisionPass } from "./actor-tools.js";
 import {
-  resolveDueWorldWorkForScope,
-  type ResolveDueWorldWorkForScopeResult,
+  resolveDueWorldWorkForScopeWithProposalWatchdog,
+  type ResolveDueWorldWorkWithProposalWatchdogResult,
 } from "./due-world-work.js";
 import {
   addTurnLatencyProposalEffects,
@@ -92,6 +93,19 @@ import {
 } from "./turn-latency-trace.js";
 import type { GmToolStepResult } from "./gm-tool-step.js";
 import { isObservationToolResult } from "./tool-result.js";
+import {
+  isAcceptedRuntimeReceiptForTurn,
+  isRuntimeToolName,
+  runtimeToolHasRole,
+  runtimeToolIsSideEffecting,
+  type RuntimeRequirementLike,
+} from "./tool-contracts.js";
+import {
+  appliedStateEffectsFromDialoguePayload,
+  dialogueStateTokenAliases,
+  receiptBacksAppliedStateEffect,
+  structuralStateReceiptFromToolCall,
+} from "./dialogue-state-receipt.js";
 import type {
   ExecutedScenePlan,
   ExecutedScenePlanActionResult,
@@ -104,6 +118,8 @@ import {
 } from "./scene-plan-schema.js";
 import {
   buildNarratorPacket,
+  repairModelGuidancePerceivableResponses,
+  repairPromptUnsafePerceivableEffects,
   summarizeRuntimeToolResultForNarrator,
   type CanonicalTurnPacket,
   type CanonicalTurnPacketEffect,
@@ -122,6 +138,7 @@ import {
   compileGroundedSentenceDraftToNarrationDraft,
   GROUNDED_SENTENCE_DRAFT_VERSION,
   groundedSentenceDraftSchema,
+  type GroundedSentenceDraft,
   type NarrationDraft,
 } from "./narration-grounding-guard.js";
 import { readWorldClock, syncWorldClockTurnBoundary } from "./living-world-authority.js";
@@ -133,6 +150,7 @@ import {
   findLatestSuccessfulNarratorAttempt,
   getSettledTurnPacket,
   getTurnSaga,
+  hasPreparedSettledTurnPacketRecovery,
   heartbeatTurnSagaWorker,
   markTurnSagaFinalized,
   markTurnSagaFinalizedIfNeeded,
@@ -141,8 +159,10 @@ import {
   persistSettledTurnPacket,
   PendingSettledTurnNarrationError,
   PENDING_NARRATION_STATUSES,
+  recordPreparedSettledTurnPacket,
   recordNarratorAttempt,
   releaseTurnSagaWorker,
+  recoverSettledTurnPacketFromPreparedEvent,
   transitionTurnSagaStatus,
   updateNarratorAttemptOutcome,
   type SettledTurnPacketRecord,
@@ -158,10 +178,23 @@ import {
   type StagedWorldTrajectoryForecast,
 } from "./world-forecast.js";
 import { cleanupTransientSceneObjects } from "./transient-scene-lifecycle.js";
+import { retractStoredEpisodicEvent } from "../vectors/episodic-events.js";
+import { retractReflectionBudget } from "./reflection-budget.js";
+import { retractActorKnowledgeRecord } from "./knowledge-model.js";
+import { toPlayerFacingQuickActions } from "./player-facing-events.js";
 
 const log = createLogger("turn-processor");
 const VISIBLE_NARRATION_TRANSPORT_RETRY_LIMIT = 2;
 const VISIBLE_NARRATION_OPENING_TRANSPORT_RETRY_LIMIT = 1;
+const OPENING_SAGA_TO_WORLD_CONSEQUENCE_STATUSES: TurnSagaStatus[] = [
+  "collecting_context",
+  "pre_turn_catchup",
+  "gm_reading",
+  "oracle_adjudicating",
+  "tool_loop_running",
+  "local_reaction_running",
+  "world_consequence_running",
+];
 const VISIBLE_NARRATION_TIMEOUT_MS = playerBlockingStageLimit(
   "WORLDFORGE_VISIBLE_NARRATION_TIMEOUT_MS",
 );
@@ -176,11 +209,21 @@ const VISIBLE_NARRATION_DRAFT_TIMEOUT_MS = playerBlockingStageLimit(
 );
 const VISIBLE_NARRATION_DRAFT_MAX_OUTPUT_TOKENS = 2_048;
 const VISIBLE_NARRATION_DRAFT_MODE = "native_json";
-const VISIBLE_NARRATION_DRAFT_CONTRACT_RETRY_LIMIT = 0;
+const VISIBLE_NARRATION_DRAFT_CONTRACT_RETRY_LIMIT = 1;
 const PENDING_NARRATION_RESUME_CHECKPOINT_KEY = "pendingNarrationResume";
 const PENDING_NARRATION_WORKER_STALE_AFTER_MS = 5 * 60_000;
 const PENDING_NARRATION_WORKER_HEARTBEAT_MS = 60_000;
 const GROUNDED_SENTENCE_DRAFT_CONTRACT_VERSION = GROUNDED_SENTENCE_DRAFT_VERSION;
+
+function normalizePlayerFacingEmittedEvent(
+  event: TurnEvent,
+): TurnEvent | null {
+  if (event.type === "quick_actions") {
+    const quickActions = toPlayerFacingQuickActions(event.data);
+    return quickActions ? { type: "quick_actions", data: quickActions } : null;
+  }
+  return event;
+}
 
 type VisibleNarrationUsage = Awaited<ReturnType<typeof generateText>>["usage"];
 type VisibleNarrationResponse = Awaited<ReturnType<typeof generateText>>["response"] | {
@@ -411,12 +454,14 @@ export interface TurnSummary {
   tick: number;
   oracleResult: OracleResult | null;
   toolCalls: Array<{ tool: string; args: unknown; result: unknown }>;
+  acceptedDurableEventIds: string[];
+  producedDurableEventIds: string[];
   narrativeText: string;
   sceneDirection?: WorldBrainSceneDirection;
   sceneAssembly?: SceneAssembly;
 }
 
-type TurnToolCallResult = TurnSummary["toolCalls"][number];
+type TurnToolCallResult = TurnSummary["toolCalls"][number] & { acceptedReceipt?: boolean };
 
 function persistPlayerRuntimeRecord(
   db: ReturnType<typeof getDb>,
@@ -540,6 +585,77 @@ function predictNextTick(
   return successfulTravel && successfulTravel.tickAdvance > 0
     ? currentTick + successfulTravel.tickAdvance
     : currentTick + 1;
+}
+
+function readPositiveIntegerField(payload: unknown, key: string): number | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+  const value = (payload as Record<string, unknown>)[key];
+  return typeof value === "number" && Number.isInteger(value) && value > 0
+    ? value
+    : null;
+}
+
+function acceptedAdvanceTimeMinutes(
+  actionResults: readonly ExecutedScenePlanActionResult[],
+  gmRead?: GmRead | null,
+): number {
+  return acceptedActionResultsWithContext(actionResults, gmRead)
+    .filter((action) => action.toolName === "advance_time" && action.result.success)
+    .reduce((total, action) => {
+      const resultMinutes = readPositiveIntegerField(action.result.result, "minutes");
+      const authorityMinutes = typeof action.result.authority?.elapsedWorldTimeMinutes === "number"
+        && action.result.authority.elapsedWorldTimeMinutes > 0
+        ? action.result.authority.elapsedWorldTimeMinutes
+        : null;
+      return total + (resultMinutes ?? authorityMinutes ?? 0);
+    }, 0);
+}
+
+function buildSettledTurnClockContext(args: {
+  campaignId: string;
+  currentTick: number;
+  baseWorldClock: ReturnType<typeof readWorldClock>;
+  successfulTravel: SuccessfulTravel | null;
+  gmActionResults: readonly ExecutedScenePlanActionResult[];
+  gmRead?: GmRead | null;
+  actorActionResults?: readonly ExecutedScenePlanActionResult[];
+  minimumTick?: number;
+}): {
+  tick: number;
+  elapsedWorldTimeMinutes: number;
+  acceptedAdvanceTimeMinutes: number;
+  worldTimeMinutes: number;
+  worldVersion: number;
+} {
+  const clock = readWorldClock(args.campaignId);
+  const acceptedTimeMinutes = acceptedAdvanceTimeMinutes(args.gmActionResults, args.gmRead)
+    + acceptedAdvanceTimeMinutes(args.actorActionResults ?? [], null);
+  const authorityElapsed = Math.max(
+    0,
+    clock.worldTimeMinutes - args.baseWorldClock.worldTimeMinutes,
+  );
+  const travelElapsed = args.successfulTravel?.travelCost ?? 0;
+  const elapsedWorldTimeMinutes = Math.max(
+    1,
+    acceptedTimeMinutes,
+    authorityElapsed,
+    travelElapsed,
+  );
+  const tick = Math.max(
+    args.minimumTick ?? predictNextTick(args.currentTick, args.successfulTravel),
+    clock.currentTick,
+    clock.worldTimeMinutes,
+  );
+
+  return {
+    tick,
+    elapsedWorldTimeMinutes,
+    acceptedAdvanceTimeMinutes: acceptedTimeMinutes,
+    worldTimeMinutes: clock.worldTimeMinutes,
+    worldVersion: clock.worldVersion,
+  };
 }
 
 function logWorldBrainSceneDirection(
@@ -834,7 +950,12 @@ function scoreVisibleNarrationCandidate(
 }
 
 function shouldExposeReasoningSse(): boolean {
-  return process.env.NODE_ENV !== "production" && process.env.EXPOSE_LLM_REASONING === "true";
+  return false;
+}
+
+function toPlayerSafeOracleResult(result: OracleResult): Omit<OracleResult, "reasoning"> {
+  const { reasoning: _reasoning, ...safeResult } = result;
+  return safeResult;
 }
 
 function assertNonEmptyFinalVisibleNarration(text: string): void {
@@ -1040,7 +1161,7 @@ async function runVisibleNarrationWithGuard(args: {
 }
 
 async function runVisibleNarrationDraftWithGuard(args: {
-  label: "final";
+  label: "final" | "opening";
   provider: ProviderConfig;
   narratorPacket: NarratorPacket;
   system: string;
@@ -1050,6 +1171,7 @@ async function runVisibleNarrationDraftWithGuard(args: {
 }): Promise<{
   text: string;
   draft: NarrationDraft;
+  groundedSentenceDraft: GroundedSentenceDraft;
   reasoningText: string | undefined;
   retried: boolean;
   failures: VisibleNarrationFailure[];
@@ -1119,6 +1241,7 @@ async function runVisibleNarrationDraftWithGuard(args: {
           const compiledDraft = compileGroundedSentenceDraftToNarrationDraft({
             packet: narratorPacket,
             draft: result.object,
+            requireBackendOwnedFactText: true,
           });
           log.event("storyteller.visible.call.end", {
             label,
@@ -1136,7 +1259,11 @@ async function runVisibleNarrationDraftWithGuard(args: {
             sentenceCount: result.object.sentences.length,
             contractRepair: contractRepairAddendum !== null,
           });
-          return { draft: compiledDraft, trace: result.trace };
+          return {
+            draft: compiledDraft,
+            groundedSentenceDraft: result.object,
+            trace: result.trace,
+          };
         } catch (error) {
           lastError = error;
           const message = errorMessage(error);
@@ -1196,6 +1323,7 @@ async function runVisibleNarrationDraftWithGuard(args: {
     return {
       text: initialDraft.prose,
       draft: initialDraft,
+      groundedSentenceDraft: initialResult.groundedSentenceDraft,
       reasoningText: initialReasoningText,
       retried: false,
       failures: [],
@@ -1242,7 +1370,13 @@ function assertClosedStructuredNarrationDraftTrace(trace: {
 }
 
 function isGroundedSentenceDraftContractError(error: unknown): boolean {
-  return /GroundedSentenceDraft/u.test(errorMessage(error));
+  if (getSafeGenerateObjectErrorCode(error) === "schema_validation_failed") {
+    return true;
+  }
+  if (error instanceof z.ZodError) {
+    return true;
+  }
+  return errorMessage(error).includes("GroundedSentenceDraft");
 }
 
 function summarizeNarrationDraftStructuredTrace(trace: {
@@ -1313,10 +1447,19 @@ function actorIsClearToPlayer(frame: SceneFrame, actorId: string | null | undefi
   return actor?.awareness === "clear";
 }
 
+function actionResultIsPlayerPerceivable(action: ExecutedScenePlanActionResult): boolean {
+  if (!action.result.success || !isRecord(action.result.result)) {
+    return true;
+  }
+  const visibility = action.result.result.visibility;
+  return typeof visibility !== "string" || visibility === "player_perceivable";
+}
+
 function sceneResponseToPacketResponse(
   frame: SceneFrame,
   response: SceneResponse,
   summaryOverride?: string,
+  options: { evidenceAuthority?: CanonicalTurnPacketResponse["evidenceAuthority"] } = {},
 ): CanonicalTurnPacketResponse {
   return {
     id: response.id,
@@ -1328,6 +1471,7 @@ function sceneResponseToPacketResponse(
       : `${getSceneActorLabel(frame, response.actorId)} response: ${response.responseKind}.`,
     visibleToPlayer: response.visibleToPlayer,
     targetIds: response.targetIds,
+    evidenceAuthority: options.evidenceAuthority,
   };
 }
 
@@ -1371,6 +1515,229 @@ function gmReadRuntimeRequirementKind(gmRead: GmRead): string | null {
   return requirement && requirement.kind !== "none" ? requirement.kind : null;
 }
 
+function gmReadRuntimeRequirementForReceipt(gmRead: GmRead): RuntimeRequirementLike | null {
+  if (gmRead.path !== "tool_plan") return null;
+  const requirement = gmRead.runtimeRequirement;
+  return requirement && requirement.kind !== "none" ? requirement : null;
+}
+
+function isAcceptedTurnReceipt(input: {
+  toolName: string | null | undefined;
+  result: ExecutedScenePlanActionResult["result"] | GmToolStepResult["result"];
+  gmRead?: GmRead | null;
+}): boolean {
+  if (!input.result || !isRuntimeToolName(input.toolName)) return false;
+  const gmRequirement = input.gmRead ? gmReadRuntimeRequirementForReceipt(input.gmRead) : null;
+  return isAcceptedRuntimeReceiptForTurn({
+    toolName: input.toolName,
+    result: input.result,
+    requirement: gmRequirement,
+  });
+}
+
+function isAcceptedActionReceipt(
+  actionResult: ExecutedScenePlanActionResult,
+  gmRead?: GmRead | null,
+): boolean {
+  if (actionResult.receiptAuthority === "gm_tool_loop") {
+    return actionResult.acceptedReceipt === true;
+  }
+  return isAcceptedTurnReceipt({
+    toolName: actionResult.toolName,
+    result: actionResult.result,
+    gmRead,
+  });
+}
+
+function hasReceiptAlias(aliases: ReadonlySet<string>, value: unknown): boolean {
+  return dialogueStateTokenAliases(value).some((alias) => aliases.has(alias));
+}
+
+function addReceiptAliases(
+  aliases: Set<string>,
+  value: unknown,
+  typeHint?: string | null,
+): void {
+  dialogueStateTokenAliases(value, typeHint).forEach((alias) => aliases.add(alias));
+}
+
+function dialoguePayloadFromActionResult(
+  action: ExecutedScenePlanActionResult,
+): Record<string, unknown> | null {
+  if (action.toolName !== "record_dialogue_outcome" || !action.result.success) {
+    return null;
+  }
+  const resultPayload: Record<string, unknown> | null = isRecord(action.result.result)
+    ? action.result.result as Record<string, unknown>
+    : null;
+  return resultPayload;
+}
+
+function appliedDialogueStateEffects(action: ExecutedScenePlanActionResult): Record<string, unknown>[] {
+  const payload = dialoguePayloadFromActionResult(action);
+  return appliedStateEffectsFromDialoguePayload(payload);
+}
+
+function actionResultBacksDialogueStateEffect(
+  action: ExecutedScenePlanActionResult,
+  effect: Record<string, unknown>,
+): boolean {
+  const receipt = structuralStateReceiptFromToolCall({
+    toolName: action.toolName,
+    candidateInput: action.input,
+    result: action.result,
+  });
+  return Boolean(receipt && receiptBacksAppliedStateEffect(receipt, effect));
+}
+
+function assertAppliedDialogueEffectsBackedByPriorActionResults(
+  actionResults: readonly ExecutedScenePlanActionResult[],
+): void {
+  for (const dialogueAction of actionResults) {
+    if (dialogueAction.toolName !== "record_dialogue_outcome" || !dialogueAction.result.success) {
+      continue;
+    }
+    for (const effect of appliedDialogueStateEffects(dialogueAction)) {
+      const backed = actionResults.some((action) =>
+        action.order < dialogueAction.order
+        && action.result.success
+        && (
+          action.receiptAuthority !== "gm_tool_loop"
+          || action.acceptedReceipt === true
+        )
+        && actionResultBacksDialogueStateEffect(action, effect));
+      if (backed) continue;
+      throw new Error(
+        "record_dialogue_outcome declared applied_now stateEffect without a prior matching structural state tool result.",
+      );
+    }
+  }
+}
+
+function dialoguePayloadUsesCreatedSceneExtra(
+  action: ExecutedScenePlanActionResult,
+  dialoguePayload: Record<string, unknown> | null,
+): boolean {
+  if (action.toolName !== "create_scene_extra" || !dialoguePayload) return false;
+  const aliases = createdSceneExtraIdentityAliases(action);
+  return [
+    dialoguePayload.speakerRef,
+    dialoguePayload.addresseeRefs,
+    dialoguePayload.sourceRefs,
+  ].some((value) => {
+    if (Array.isArray(value)) {
+      return value.some((entry) => hasReceiptAlias(aliases, entry));
+    }
+    return hasReceiptAlias(aliases, value);
+  });
+}
+
+function createdSceneExtraIdentityAliases(
+  action: ExecutedScenePlanActionResult,
+): Set<string> {
+  const aliases = new Set<string>();
+  const payload = isRecord(action.result.result)
+    ? action.result.result as Record<string, unknown>
+    : {};
+
+  addReceiptAliases(aliases, payload.id, "npc");
+  addReceiptAliases(aliases, payload.id, "actor");
+  addReceiptAliases(aliases, payload.npcId, "npc");
+  addReceiptAliases(aliases, payload.npcId, "actor");
+  addReceiptAliases(aliases, payload.actorId, "npc");
+  addReceiptAliases(aliases, payload.actorId, "actor");
+  addReceiptAliases(aliases, payload.name, "npc");
+  addReceiptAliases(aliases, payload.name, "actor");
+
+  if (Array.isArray(payload.modelSafeRefs)) {
+    payload.modelSafeRefs.forEach((ref) => addReceiptAliases(aliases, ref));
+  }
+
+  const authorityRefs = [
+    ...(action.result.authority?.stateDeltaRefs ?? []),
+    ...(action.result.authority?.eventRefs ?? []),
+  ];
+  authorityRefs
+    .filter((ref) => {
+      const lowerRef = ref.toLowerCase();
+      return lowerRef.startsWith("actor:") || lowerRef.startsWith("npc:");
+    })
+    .forEach((ref) => addReceiptAliases(aliases, ref));
+
+  return aliases;
+}
+
+function contextualAcceptedActionRefSet(
+  actionResults: readonly ExecutedScenePlanActionResult[],
+  gmRead?: GmRead | null,
+): Set<string> {
+  const acceptedRefs = new Set<string>();
+  actionResults.forEach((action) => {
+    if (action.receiptAuthority === "gm_tool_loop") {
+      if (action.acceptedReceipt === true) {
+        acceptedRefs.add(action.actionRef);
+      }
+      return;
+    }
+    if (isAcceptedActionReceipt(action, gmRead)) {
+      acceptedRefs.add(action.actionRef);
+    }
+  });
+
+  const requirementKind = gmRead ? gmReadRuntimeRequirementKind(gmRead) : null;
+
+  if (requirementKind === "state_mutation") {
+    for (const action of actionResults) {
+      if (acceptedRefs.has(action.actionRef) || action.toolName !== "advance_time") continue;
+      if (action.receiptAuthority === "gm_tool_loop") continue;
+      const hasLaterAcceptedStateMutation = actionResults.some((laterAction) =>
+        laterAction.order > action.order
+        && acceptedRefs.has(laterAction.actionRef)
+        && isRuntimeToolName(laterAction.toolName)
+        && runtimeToolHasRole(laterAction.toolName, "state_mutation"));
+      if (hasLaterAcceptedStateMutation) {
+        acceptedRefs.add(action.actionRef);
+      }
+    }
+  }
+
+  if (requirementKind !== "dialogue_outcome") {
+    return acceptedRefs;
+  }
+
+  const acceptedDialogueActions = actionResults.filter((action) =>
+    acceptedRefs.has(action.actionRef) && action.toolName === "record_dialogue_outcome");
+  for (const dialogueAction of acceptedDialogueActions) {
+    const dialoguePayload = dialoguePayloadFromActionResult(dialogueAction);
+    const appliedEffects = appliedDialogueStateEffects(dialogueAction);
+    for (const action of actionResults) {
+      if (action.order >= dialogueAction.order || acceptedRefs.has(action.actionRef)) {
+        continue;
+      }
+      if (action.receiptAuthority === "gm_tool_loop") {
+        continue;
+      }
+      if (dialoguePayloadUsesCreatedSceneExtra(action, dialoguePayload)) {
+        acceptedRefs.add(action.actionRef);
+        continue;
+      }
+      if (appliedEffects.some((effect) => actionResultBacksDialogueStateEffect(action, effect))) {
+        acceptedRefs.add(action.actionRef);
+      }
+    }
+  }
+
+  return acceptedRefs;
+}
+
+function acceptedActionResultsWithContext(
+  actionResults: readonly ExecutedScenePlanActionResult[],
+  gmRead?: GmRead | null,
+): ExecutedScenePlanActionResult[] {
+  const acceptedRefs = contextualAcceptedActionRefSet(actionResults, gmRead);
+  return actionResults.filter((action) => acceptedRefs.has(action.actionRef));
+}
+
 function canonicalTurnKindForGmRead(args: {
   gmRead: GmRead;
   outcomeBounds: ReturnType<typeof buildNarrativeOutcomeBounds> | null;
@@ -1393,13 +1760,17 @@ function buildCanonicalTurnResolution(args: {
   gmRead: GmRead;
   actionResults: readonly ExecutedScenePlanActionResult[];
   outcomeBounds: ReturnType<typeof buildNarrativeOutcomeBounds> | null;
+  acceptedActionRefs?: ReadonlySet<string>;
 }): CanonicalTurnResolution {
   const successful = args.actionResults.filter((result) => result.result.success);
   const observationIds = successful
     .filter((result) => isObservationToolResult(result.result))
     .map((result) => `action-result:${result.actionId}`);
   const mutationIds = successful
-    .filter((result) => !isObservationToolResult(result.result))
+    .filter((result) =>
+      args.acceptedActionRefs
+        ? args.acceptedActionRefs.has(result.actionRef)
+        : isAcceptedActionReceipt(result, args.gmRead))
     .map((result) => `action-result:${result.actionId}`);
   const combatIntent =
     args.gmRead.path === "combat_transition"
@@ -1441,6 +1812,33 @@ function buildCanonicalTurnResolution(args: {
   };
 }
 
+function isCanonicalPacketEvidenceActionResult(
+  actionResult: ExecutedScenePlanActionResult,
+  input: {
+    acceptedActionRefs: ReadonlySet<string>;
+    explicitNarratorActionIds: ReadonlySet<string>;
+    explicitNarratorToolResultRefs: ReadonlySet<string>;
+    includeUnacceptedObservations: boolean;
+  },
+): boolean {
+  if (input.acceptedActionRefs.has(actionResult.actionRef)) {
+    return true;
+  }
+  if (isObservationActionResult(actionResult)) {
+    if (input.includeUnacceptedObservations) {
+      return true;
+    }
+    return input.explicitNarratorActionIds.has(actionResult.actionId)
+      || input.explicitNarratorToolResultRefs.has(`${actionResult.actionId}:${actionResult.toolName}`);
+  }
+  if (!isRuntimeToolName(actionResult.toolName)) {
+    return false;
+  }
+  return runtimeToolHasRole(actionResult.toolName, "intent_marker")
+    || runtimeToolHasRole(actionResult.toolName, "ui_suggestion")
+    || runtimeToolHasRole(actionResult.toolName, "authority_bounds");
+}
+
 function buildCanonicalTurnPacketFromScenePlan(args: {
   frame: SceneFrame;
   gmRead: GmRead;
@@ -1464,28 +1862,59 @@ function buildCanonicalTurnPacketFromScenePlan(args: {
       ? `GM no-mutation direction: ${boundedPlanText(args.plan.actionInterpretation.intent, 220)}`
       : undefined;
   const responses = [
-    sceneResponseToPacketResponse(args.frame, args.plan.primaryResponse, primaryResponseSummary),
+    sceneResponseToPacketResponse(args.frame, args.plan.primaryResponse, primaryResponseSummary, {
+      evidenceAuthority: actionResults.length === 0 ? "model_guidance" : undefined,
+    }),
     ...args.plan.supportResponses.map((response) =>
       sceneResponseToPacketResponse(args.frame, response),
     ),
   ];
   const narratorVisibleActorActionResults = (args.actorActionResults ?? []).filter((result) =>
-    actorIsClearToPlayer(args.frame, result.actorId),
+    actorIsClearToPlayer(args.frame, result.actorId)
+    && actionResultIsPlayerPerceivable(result),
+  );
+  const acceptedExecutedActionResults = acceptedActionResultsWithContext(
+    args.executedPlan.actionResults,
+    args.gmRead,
+  );
+  const acceptedVisibleActorActionResults = acceptedActionResultsWithContext(
+    narratorVisibleActorActionResults,
+    null,
+  );
+  const acceptedResolutionActionRefs = new Set(
+    [
+      ...acceptedExecutedActionResults,
+      ...acceptedVisibleActorActionResults,
+    ].map((action) => action.actionRef),
+  );
+  const explicitNarratorActionIds = new Set(args.plan.narratorFacts.actionIds);
+  const explicitNarratorToolResultRefs = new Set(
+    args.plan.narratorFacts.toolResultRefs.map((ref) => `${ref.actionId}:${ref.toolName}`),
+  );
+  const includeUnacceptedObservations = acceptedResolutionActionRefs.size === 0
+    && actionResults.some((actionResult) => isObservationActionResult(actionResult));
+  const packetActionResults = actionResults.filter((actionResult) =>
+    isCanonicalPacketEvidenceActionResult(actionResult, {
+      acceptedActionRefs: acceptedResolutionActionRefs,
+      explicitNarratorActionIds,
+      explicitNarratorToolResultRefs,
+      includeUnacceptedObservations,
+    }),
   );
   const packetActionIds = Array.from(new Set([
     ...args.plan.narratorFacts.actionIds,
-    ...args.executedPlan.actionResults.map((action) => action.actionId),
-    ...narratorVisibleActorActionResults.map((action) => action.actionId),
+    ...acceptedExecutedActionResults.map((action) => action.actionId),
+    ...acceptedVisibleActorActionResults.map((action) => action.actionId),
   ]));
   const packetToolResultRefs = Array.from(
     new Map(
       [
         ...args.plan.narratorFacts.toolResultRefs,
-        ...args.executedPlan.actionResults.map((action) => ({
+        ...acceptedExecutedActionResults.map((action) => ({
           actionId: action.actionId,
           toolName: action.toolName,
         })),
-        ...narratorVisibleActorActionResults.map((action) => ({
+        ...acceptedVisibleActorActionResults.map((action) => ({
           actionId: action.actionId,
           toolName: action.toolName,
         })),
@@ -1497,11 +1926,21 @@ function buildCanonicalTurnPacketFromScenePlan(args: {
     actionIds: packetActionIds,
     toolResultRefs: packetToolResultRefs,
   };
+  const acceptedEffectActionResults = [
+    ...acceptedExecutedActionResults,
+    ...acceptedVisibleActorActionResults,
+  ];
   const turnResolution = buildCanonicalTurnResolution({
     gmRead: args.gmRead,
-    actionResults,
+    actionResults: packetActionResults,
     outcomeBounds: args.outcomeBounds,
+    acceptedActionRefs: acceptedResolutionActionRefs,
   });
+  const observationOnlyGuardrails = turnResolution.resolutionState === "observation_grounded"
+    ? [
+        "Observation-only packet: final narration may describe only existing visible actors, routes, objects, barriers, risks, and absences from lookup-grounded observation results/current scene; do not add new addressable people, desks, gates, documents, routes, authorities, movement, or reusable facts.",
+      ]
+    : [];
 
   return {
     campaignId: args.frame.campaignId,
@@ -1513,10 +1952,11 @@ function buildCanonicalTurnPacketFromScenePlan(args: {
     anchorEvent,
     events: [anchorEvent],
     responses,
-    effects: actionResults.map(scenePlanActionToPacketEffect),
-    actionResults,
+    effects: acceptedEffectActionResults.map(scenePlanActionToPacketEffect),
+    actionResults: packetActionResults,
     guardrails: [
       "Narrate only committed player-perceivable packet facts.",
+      ...observationOnlyGuardrails,
       ...(args.outcomeBounds?.prohibitions ?? []),
       ...(args.outcomeBounds?.ceilings ?? []),
     ],
@@ -1635,9 +2075,13 @@ function successfulToolStepResults(
 
 function successfulStateChangingToolStepResults(
   stepResults: readonly GmToolStepResult[],
+  acceptedStepIds: readonly string[],
 ): GmToolStepResult[] {
+  const accepted = new Set(acceptedStepIds);
   return successfulToolStepResults(stepResults).filter((result) =>
-    result.result && !isObservationToolResult(result.result),
+    accepted.has(result.stepId)
+    && result.result
+    && !isObservationToolResult(result.result),
   );
 }
 
@@ -1645,6 +2089,48 @@ function isObservationActionResult(
   actionResult: ExecutedScenePlanActionResult,
 ): boolean {
   return isObservationToolResult(actionResult.result);
+}
+
+function shouldDeferPresentActorReactionsAfterSettledOutcome(
+  actionResults: readonly ExecutedScenePlanActionResult[],
+  gmRead: GmRead,
+): boolean {
+  const acceptedRefs = contextualAcceptedActionRefSet(actionResults, gmRead);
+  return actionResults.some((actionResult) =>
+    actionResult.result.success && acceptedRefs.has(actionResult.actionRef),
+  );
+}
+
+function hasCommittedAuthorityTrace(
+  actionResults: readonly ExecutedScenePlanActionResult[],
+): boolean {
+  return actionResults.some((actionResult) =>
+    actionResult.result.success
+    && typeof actionResult.result.authority?.resultWorldVersion === "number",
+  );
+}
+
+function readPlayerScenePosition(input: {
+  campaignId: string;
+  fallbackLocationId: string | null;
+  fallbackSceneScopeId: string | null;
+}): { currentLocationId: string | null; currentSceneScopeId: string | null } {
+  const row = getDb()
+    .select({
+      currentLocationId: players.currentLocationId,
+      currentSceneLocationId: players.currentSceneLocationId,
+    })
+    .from(players)
+    .where(eq(players.campaignId, input.campaignId))
+    .get();
+  const currentLocationId = row?.currentLocationId ?? input.fallbackLocationId;
+  return {
+    currentLocationId,
+    currentSceneScopeId:
+      row?.currentSceneLocationId
+      ?? currentLocationId
+      ?? input.fallbackSceneScopeId,
+  };
 }
 
 function firstObservationLabel(entry: unknown): string | null {
@@ -1837,11 +2323,15 @@ function buildScenePlanFromGmToolLoop(args: {
   intent: string;
   observationSummary?: string;
   stepResults: readonly GmToolStepResult[];
+  acceptedStepIds: readonly string[];
 }): ScenePlan {
   const actorId = primarySceneActorId(args.frame);
   const anchorEventId = randomUUID();
   const primaryResponseId = randomUUID();
-  const successfulSteps = successfulStateChangingToolStepResults(args.stepResults);
+  const successfulSteps = successfulStateChangingToolStepResults(
+    args.stepResults,
+    args.acceptedStepIds,
+  );
   const plannedActions = successfulSteps.map((result) =>
     buildScenePlanActionFromToolStep(result, actorId),
   );
@@ -1895,9 +2385,11 @@ function buildScenePlanFromGmToolLoop(args: {
 
 function buildExecutedScenePlanFromGmToolLoop(args: {
   frame: SceneFrame;
+  gmRead: GmRead;
   plan: ScenePlan;
   observationSummary?: string;
   stepResults: readonly GmToolStepResult[];
+  acceptedStepIds: readonly string[];
 }): ExecutedScenePlan {
   const validatedPlan = {
     frame: args.frame,
@@ -1905,12 +2397,25 @@ function buildExecutedScenePlanFromGmToolLoop(args: {
     issues: [],
   };
   const successfulSteps = successfulToolStepResults(args.stepResults);
-  let plannedActionIndex = 0;
+  const acceptedStateChangingSteps = successfulStateChangingToolStepResults(
+    args.stepResults,
+    args.acceptedStepIds,
+  );
+  const plannedActionsByStepId = new Map<string, ScenePlanAction>();
+  acceptedStateChangingSteps.forEach((stepResult, index) => {
+    const action = args.plan.plannedActions[index];
+    if (!action) {
+      throw new Error("GM tool loop execution produced more state-changing results than planned actions.");
+    }
+    plannedActionsByStepId.set(stepResult.stepId, action);
+  });
   const actionResults = successfulSteps.map((stepResult, order): ExecutedScenePlanActionResult => {
     const isObservation = stepResult.result ? isObservationToolResult(stepResult.result) : false;
-    const action = isObservation ? null : args.plan.plannedActions[plannedActionIndex++];
-    if (!isObservation && !action) {
-      throw new Error("GM tool loop execution produced more state-changing results than planned actions.");
+    const action = isObservation ? null : plannedActionsByStepId.get(stepResult.stepId) ?? null;
+    const acceptedReceipt = action !== null;
+    const evidenceOnly = isObservation || !acceptedReceipt;
+    if (action && action.toolName !== stepResult.toolName) {
+      throw new Error("GM tool loop execution produced a planned action that does not match its source step.");
     }
     return {
       order,
@@ -1921,15 +2426,32 @@ function buildExecutedScenePlanFromGmToolLoop(args: {
       input: action?.input ?? stepResult.candidateInput!,
       args: stepResult.candidateInput!,
       result: stepResult.result!,
-      summary: isObservation
+      acceptedReceipt,
+      receiptAuthority: "gm_tool_loop",
+      summary: evidenceOnly
         ? summarizeObservationToolStepResult(stepResult, args.observationSummary)
         : undefined,
     };
   });
-  const successfulTravel = successfulSteps.reduce<SuccessfulTravel | null>(
-    (travel, result) => travel ?? (
-      result.toolName === "move_to" || result.toolName === "move_actor"
-        ? getSuccessfulMoveToolStepResult(result)
+  assertAppliedDialogueEffectsBackedByPriorActionResults(actionResults);
+  const acceptedActionRefSet = contextualAcceptedActionRefSet(actionResults, args.gmRead);
+  const successfulTravel = actionResults.reduce<SuccessfulTravel | null>(
+    (travel, actionResult) => travel ?? (
+      acceptedActionRefSet.has(actionResult.actionRef)
+      && (actionResult.toolName === "move_to" || actionResult.toolName === "move_actor")
+        ? getSuccessfulMoveToolStepResult({
+            stepId: actionResult.actionRef,
+            attempt: 1,
+            status: "done",
+            toolName: actionResult.toolName,
+            candidateInput: actionResult.args,
+            validationError: null,
+            visibleEffect: "",
+            privateGuardTerms: [],
+            mutationRefs: [],
+            settledAtTick: args.frame.tick,
+            result: actionResult.result,
+          })
         : null
     ),
     null,
@@ -1940,7 +2462,13 @@ function buildExecutedScenePlanFromGmToolLoop(args: {
       continue;
     }
     if (actionResult.toolName === "offer_quick_actions") {
-      emittedEvents.push({ type: "quick_actions", data: actionResult.result });
+      const quickActions = toPlayerFacingQuickActions(actionResult.result);
+      if (quickActions) {
+        emittedEvents.push({ type: "quick_actions", data: quickActions });
+      }
+      continue;
+    }
+    if (!acceptedActionRefSet.has(actionResult.actionRef)) {
       continue;
     }
     if (actionResult.toolName === "move_to" || actionResult.toolName === "move_actor") {
@@ -1972,7 +2500,6 @@ function buildExecutedScenePlanFromGmToolLoop(args: {
         continue;
       }
     }
-    emittedEvents.push({ type: "state_update", data: actionResult });
   }
 
   return {
@@ -1984,7 +2511,7 @@ function buildExecutedScenePlanFromGmToolLoop(args: {
     quickActionsEmitted: actionResults.some((action) => action.toolName === "offer_quick_actions"),
     successfulTravel,
     canonicalEvents: actionResults
-      .filter((actionResult) => !isObservationActionResult(actionResult))
+      .filter((actionResult) => acceptedActionRefSet.has(actionResult.actionRef))
       .map((actionResult) => ({
         id: actionResult.actionId,
         actionId: actionResult.actionId,
@@ -2047,12 +2574,21 @@ function buildOracleContextFromCombatTransition(
 
 function toTurnToolCallResults(
   actionResults: readonly ExecutedScenePlanActionResult[],
+  gmRead?: GmRead | null,
 ): TurnToolCallResult[] {
-  return actionResults.map((action) => ({
-    tool: action.toolName,
-    args: action.input,
-    result: action.result,
-  }));
+  const acceptedRefs = contextualAcceptedActionRefSet(actionResults, gmRead);
+  return actionResults.flatMap((action) => {
+    const acceptedReceipt = acceptedRefs.has(action.actionRef);
+    if (!acceptedReceipt && !isObservationActionResult(action)) {
+      return [];
+    }
+    return [{
+      tool: action.toolName,
+      args: action.input,
+      result: action.result,
+      acceptedReceipt,
+    }];
+  });
 }
 
 function logScenePlanFrame(frame: SceneFrame, durationMs: number): void {
@@ -2283,6 +2819,19 @@ function uniqueRefs(values: readonly (string | null | undefined)[]): string[] {
   return refs;
 }
 
+function uniqueTicks(values: readonly (number | null | undefined)[]): number[] {
+  const seen = new Set<number>();
+  const ticks: number[] = [];
+  for (const value of values) {
+    if (typeof value !== "number" || !Number.isFinite(value)) continue;
+    const tick = Math.trunc(value);
+    if (seen.has(tick)) continue;
+    seen.add(tick);
+    ticks.push(tick);
+  }
+  return ticks;
+}
+
 function executedActionRefs(
   actionResults: readonly ExecutedScenePlanActionResult[],
 ): string[] {
@@ -2290,12 +2839,280 @@ function executedActionRefs(
     actionResults.flatMap((result) => [
       result.actionRef,
       result.actionId,
+      result.result.authority?.toolResultId,
       `${result.toolName}:${result.actionId}`,
     ]),
   );
 }
 
-function dueWorldRefs(result: ResolveDueWorldWorkForScopeResult): string[] {
+function acceptedActionRefs(
+  actionResults: readonly ExecutedScenePlanActionResult[],
+  gmRead?: GmRead | null,
+): string[] {
+  return executedActionRefs(acceptedActionResultsWithContext(actionResults, gmRead));
+}
+
+function eventIdsFromToolResult(result: unknown): string[] {
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return [];
+  }
+  const record = result as Record<string, unknown>;
+  const inner = record.result && typeof record.result === "object" && !Array.isArray(record.result)
+    ? record.result as Record<string, unknown>
+    : null;
+  const authority = record.authority && typeof record.authority === "object" && !Array.isArray(record.authority)
+    ? record.authority as Record<string, unknown>
+    : null;
+  return uniqueRefs([
+    typeof inner?.eventId === "string" ? inner.eventId : null,
+    ...(Array.isArray(authority?.eventRefs)
+      ? authority.eventRefs.filter((id): id is string => typeof id === "string")
+      : []),
+  ]);
+}
+
+function durableEventIdsFromActionResults(
+  actionResults: readonly ExecutedScenePlanActionResult[],
+): string[] {
+  return uniqueRefs(actionResults.flatMap((result) => eventIdsFromToolResult(result.result)));
+}
+
+function acceptedDurableEventIdsFromActionResults(
+  actionResults: readonly ExecutedScenePlanActionResult[],
+  gmRead?: GmRead | null,
+): string[] {
+  return durableEventIdsFromActionResults(
+    acceptedActionResultsWithContext(actionResults, gmRead),
+  );
+}
+
+function stringArrayField(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    : [];
+}
+
+function durableMemoryRollbackDetails(
+  actionResult: ExecutedScenePlanActionResult,
+): {
+  eventId?: string;
+  knowledgeId?: string;
+  factRef?: string;
+  participants: string[];
+  importance: number;
+} | null {
+  if (
+    actionResult.toolName !== "log_event"
+    && actionResult.toolName !== "record_dialogue_outcome"
+    && actionResult.toolName !== "record_world_fact"
+  ) {
+    return null;
+  }
+  if (!actionResult.result.success || actionResult.result.status === "failure") {
+    return null;
+  }
+  const resultPayload = actionResult.result.result;
+  if (!resultPayload || typeof resultPayload !== "object" || Array.isArray(resultPayload)) {
+    return null;
+  }
+  const payload = resultPayload as Record<string, unknown>;
+  if (payload.durability !== "durable" || payload.persisted !== true) {
+    return null;
+  }
+  const eventId = typeof payload.eventId === "string" ? payload.eventId : "";
+  const knowledgeId = typeof payload.knowledgeId === "string" && payload.knowledgeId.trim()
+    ? payload.knowledgeId.trim()
+    : "";
+  const factRef = typeof payload.factRef === "string" && payload.factRef.trim()
+    ? payload.factRef.trim()
+    : "";
+  if (!eventId && !knowledgeId && !factRef) {
+    return null;
+  }
+  const args = actionResult.args && typeof actionResult.args === "object" && !Array.isArray(actionResult.args)
+    ? actionResult.args as Record<string, unknown>
+    : {};
+  if (actionResult.toolName === "record_dialogue_outcome") {
+    if (!eventId) return null;
+    return {
+      eventId,
+      participants: uniqueRefs([
+        typeof args.speakerRef === "string" ? args.speakerRef : undefined,
+        typeof payload.speakerRef === "string" ? payload.speakerRef : undefined,
+        ...stringArrayField(args.addresseeRefs),
+        ...stringArrayField(payload.addresseeRefs),
+        ...stringArrayField(args.sourceRefs),
+        ...stringArrayField(payload.sourceRefs),
+      ]),
+      importance: 5,
+    };
+  }
+  if (actionResult.toolName === "record_world_fact") {
+    return {
+      eventId: eventId || undefined,
+      knowledgeId: knowledgeId || undefined,
+      factRef: factRef || undefined,
+      participants: uniqueRefs([
+        ...stringArrayField(args.subjectRefs),
+        ...stringArrayField(payload.subjectRefs),
+        ...stringArrayField(args.sourceRefs),
+        ...stringArrayField(payload.sourceRefs),
+      ]),
+      importance: 5,
+    };
+  }
+  if (!eventId) return null;
+  return {
+    eventId,
+    participants: uniqueRefs([
+      ...stringArrayField(args.participants),
+      ...stringArrayField(payload.participants),
+    ]),
+    importance: typeof args.importance === "number"
+      ? args.importance
+      : typeof payload.importance === "number" ? payload.importance : 0,
+  };
+}
+
+function stripKnowledgePrefix(value: string): string {
+  const prefix = "knowledge:";
+  return value.toLowerCase().startsWith(prefix)
+    ? value.slice(prefix.length)
+    : value;
+}
+
+async function retractUnacceptedDurableMemories(input: {
+  campaignId: string;
+  actionResults: readonly ExecutedScenePlanActionResult[];
+  acceptedEventIds: readonly string[];
+  acceptedActionRefs?: readonly string[];
+}): Promise<void> {
+  const accepted = new Set(input.acceptedEventIds);
+  const acceptedActionRefs = new Set(input.acceptedActionRefs ?? []);
+  for (const actionResult of input.actionResults) {
+    if (acceptedActionRefs.has(actionResult.actionRef)) {
+      continue;
+    }
+    const details = durableMemoryRollbackDetails(actionResult);
+    const knowledgeDedupId = details?.knowledgeId
+      ?? (details?.factRef ? stripKnowledgePrefix(details.factRef) : undefined);
+    const acceptedDurableId =
+      (details?.eventId && accepted.has(details.eventId))
+      || (knowledgeDedupId && accepted.has(knowledgeDedupId));
+    if (!details || acceptedDurableId) {
+      continue;
+    }
+    if (details.eventId) {
+      await retractStoredEpisodicEvent({
+        campaignId: input.campaignId,
+        eventId: details.eventId,
+      });
+      await retractReflectionBudget(
+        input.campaignId,
+        details.participants,
+        details.importance,
+      );
+    }
+    if (details.knowledgeId) {
+      retractActorKnowledgeRecord({
+        campaignId: input.campaignId,
+        knowledgeId: details.knowledgeId,
+        factRef: details.factRef,
+        reason: "unaccepted_turn_durable_memory",
+      });
+    } else if (details.factRef) {
+      retractActorKnowledgeRecord({
+        campaignId: input.campaignId,
+        factRef: details.factRef,
+        reason: "unaccepted_turn_durable_memory",
+      });
+    }
+  }
+}
+
+function isUnacceptedSideEffectingResult(
+  actionResult: ExecutedScenePlanActionResult,
+  gmRead?: GmRead | null,
+  acceptedActionRefs?: ReadonlySet<string>,
+): boolean {
+  if (!actionResult.result.success || actionResult.result.status === "failure") {
+    return false;
+  }
+  if (isObservationActionResult(actionResult)) {
+    return false;
+  }
+  if (actionResult.receiptAuthority === "gm_tool_loop") {
+    if (actionResult.acceptedReceipt === true || acceptedActionRefs?.has(actionResult.actionRef)) {
+      return false;
+    }
+  } else {
+    if (isAcceptedActionReceipt(actionResult, gmRead)) {
+      return false;
+    }
+    if (acceptedActionRefs?.has(actionResult.actionRef)) {
+      return false;
+    }
+  }
+  if (!isRuntimeToolName(actionResult.toolName)) {
+    return false;
+  }
+  if (typeof actionResult.result.authority?.resultWorldVersion === "number") {
+    return true;
+  }
+  return runtimeToolIsSideEffecting(actionResult.toolName);
+}
+
+function assertNoUnacceptedSideEffectingResults(input: {
+  phase: string;
+  actionResults: readonly ExecutedScenePlanActionResult[];
+  gmRead?: GmRead | null;
+}): void {
+  assertAppliedDialogueEffectsBackedByPriorActionResults(input.actionResults);
+  const acceptedActionRefs = contextualAcceptedActionRefSet(input.actionResults, input.gmRead);
+  const offenders = input.actionResults.filter((actionResult) =>
+    isUnacceptedSideEffectingResult(actionResult, input.gmRead, acceptedActionRefs),
+  );
+  if (offenders.length === 0) {
+    return;
+  }
+  throw new Error(
+    [
+      `GM tool loop produced successful side-effecting result(s) that do not satisfy the accepted turn receipt during ${input.phase}.`,
+      offenders.map((result) => `${result.toolName}:${result.actionRef}`).join(", "),
+    ].join(" "),
+  );
+}
+
+function dueProposalRefs(result: ResolveDueWorldWorkWithProposalWatchdogResult): string[] {
+  return uniqueRefs([
+    ...result.proposals.selected,
+    ...result.proposals.executed.flatMap((entry) => [
+      entry.proposalId,
+      entry.status === "committed" ? `${entry.proposalId}:committed` : null,
+      entry.status === "committed" ? entry.authorityTraceIds : [],
+      entry.status === "committed"
+        ? entry.toolResults.map((toolResult) => toolResult.result.authority?.toolResultId)
+        : [],
+    ]).flat(),
+  ].filter((ref): ref is string => typeof ref === "string" && ref.trim().length > 0));
+}
+
+function dueProposalCommitCount(result: ResolveDueWorldWorkWithProposalWatchdogResult): number {
+  return result.proposals.executed.filter((entry) => entry.status === "committed").length;
+}
+
+function dueProposalRejectedCount(result: ResolveDueWorldWorkWithProposalWatchdogResult): number {
+  return result.proposals.executed.filter((entry) =>
+    entry.status === "terminal" && entry.disposition !== "deferred_not_due",
+  ).length;
+}
+
+function dueProposalDeferredCount(result: ResolveDueWorldWorkWithProposalWatchdogResult): number {
+  return result.proposals.executed.filter((entry) => entry.status === "deferred").length
+    + result.proposals.skipped.length;
+}
+
+function dueWorldRefs(result: ResolveDueWorldWorkWithProposalWatchdogResult): string[] {
   return uniqueRefs([
     ...result.executed.flatMap((entry) => [
       ...entry.eventIds,
@@ -2309,6 +3126,7 @@ function dueWorldRefs(result: ResolveDueWorldWorkForScopeResult): string[] {
       entry.authority.toolResultId,
     ]),
     ...result.worldThreads.deferred.map((entry) => entry.thread.id),
+    ...dueProposalRefs(result),
   ]);
 }
 
@@ -2458,7 +3276,10 @@ function getSuccessfulTravelFromCanonicalPacket(packet: unknown): SuccessfulTrav
   }
 
   for (const actionResult of packet.actionResults) {
-    if (!isObjectRecord(actionResult) || actionResult.toolName !== "move_to") {
+    if (
+      !isObjectRecord(actionResult)
+      || (actionResult.toolName !== "move_to" && actionResult.toolName !== "move_actor")
+    ) {
       continue;
     }
 
@@ -2489,11 +3310,10 @@ function getToolCallResultsFromCanonicalPacket(packet: unknown): TurnToolCallRes
   });
 }
 
-function advanceNarrationTick(args: {
+function predictNarrationTargetTick(args: {
   campaignId: string;
   currentTick: number;
   successfulTravel: SuccessfulTravel | null;
-  idempotentResume: boolean;
 }): number {
   const storedTick = readCampaignConfig(args.campaignId).currentTick ?? args.currentTick;
   const worldClock = readWorldClock(args.campaignId);
@@ -2503,25 +3323,72 @@ function advanceNarrationTick(args: {
     worldClock.currentTick,
     worldClock.worldTimeMinutes,
   );
-  if (args.idempotentResume) {
-    if (storedTick > args.currentTick) {
-      return baseTick;
-    }
-  }
+  return baseTick + narrationTickAdvance(args.successfulTravel);
+}
 
-  const tickAdvance = args.successfulTravel && args.successfulTravel.tickAdvance > 0
-    ? args.successfulTravel.tickAdvance
+function predictIdempotentResumeTargetTickFromPacket(args: {
+  packetTick: number;
+  successfulTravel: SuccessfulTravel | null;
+}): number {
+  return args.packetTick + narrationTickAdvance(args.successfulTravel);
+}
+
+function narrationTickAdvance(successfulTravel: SuccessfulTravel | null): number {
+  return successfulTravel && successfulTravel.tickAdvance > 0
+    ? successfulTravel.tickAdvance
     : 1;
-  const targetTick = baseTick + tickAdvance;
+}
+
+function advanceCampaignTickToTarget(campaignId: string, storedTick: number, targetTick: number): number {
   const deltaFromStoredTick = Math.max(0, targetTick - storedTick);
 
   if (deltaFromStoredTick === 0) {
     return storedTick;
   }
-  if (deltaFromStoredTick === 1 && tickAdvance === 1) {
-    return incrementTick(args.campaignId);
+  if (deltaFromStoredTick === 1) {
+    return incrementTick(campaignId);
   }
-  return advanceCampaignTick(args.campaignId, deltaFromStoredTick);
+  return advanceCampaignTick(campaignId, deltaFromStoredTick);
+}
+
+function advanceNarrationTick(args: {
+  campaignId: string;
+  currentTick: number;
+  successfulTravel: SuccessfulTravel | null;
+  idempotentResume: boolean;
+  idempotentTargetTick?: number;
+}): number {
+  const storedTick = readCampaignConfig(args.campaignId).currentTick ?? args.currentTick;
+  if (args.idempotentResume && typeof args.idempotentTargetTick === "number") {
+    const worldClock = readWorldClock(args.campaignId);
+    const targetTick = Math.max(
+      args.idempotentTargetTick,
+      storedTick,
+      worldClock.currentTick,
+      worldClock.worldTimeMinutes,
+    );
+    return advanceCampaignTickToTarget(args.campaignId, storedTick, targetTick);
+  }
+  if (args.idempotentResume) {
+    return advanceCampaignTickToTarget(
+      args.campaignId,
+      storedTick,
+      predictIdempotentResumeTargetTickFromPacket({
+        packetTick: args.currentTick,
+        successfulTravel: args.successfulTravel,
+      }),
+    );
+  }
+
+  return advanceCampaignTickToTarget(
+    args.campaignId,
+    storedTick,
+    predictNarrationTargetTick({
+      campaignId: args.campaignId,
+      currentTick: args.currentTick,
+      successfulTravel: args.successfulTravel,
+    }),
+  );
 }
 
 function applyPostNarrationStartConditionEffects(args: {
@@ -2582,11 +3449,14 @@ async function* runPostNarrationFinalizationTail(args: {
   successfulTravel: SuccessfulTravel | null;
   oracleResult: OracleResult | null;
   toolCallResults: TurnToolCallResult[];
+  acceptedDurableEventIds?: readonly string[];
+  producedDurableEventIds?: readonly string[];
   narrativeText: string;
   sceneAssembly?: SceneAssembly;
   onPostTurn?: (summary: TurnSummary) => void | Promise<void>;
   stagedForecast?: StagedWorldTrajectoryForecast | null;
   idempotentResume?: boolean;
+  idempotentTargetTick?: number;
   recordTransientCleanupStage?: (startedAt: number, tick: number) => void;
   finishLatencyTrace?: () => void;
 }): AsyncGenerator<TurnEvent, { tick: number; summary: TurnSummary }, void> {
@@ -2602,6 +3472,7 @@ async function* runPostNarrationFinalizationTail(args: {
     currentTick: args.currentTick,
     successfulTravel: args.successfulTravel,
     idempotentResume: args.idempotentResume ?? false,
+    idempotentTargetTick: args.idempotentTargetTick,
   });
   syncWorldClockTurnBoundary({
     campaignId: args.campaignId,
@@ -2632,6 +3503,8 @@ async function* runPostNarrationFinalizationTail(args: {
     tick: newTick,
     oracleResult: args.oracleResult,
     toolCalls: args.toolCallResults,
+    acceptedDurableEventIds: uniqueRefs(args.acceptedDurableEventIds ?? []),
+    producedDurableEventIds: uniqueRefs(args.producedDurableEventIds ?? []),
     narrativeText: args.narrativeText,
     sceneAssembly: args.sceneAssembly,
   };
@@ -2679,6 +3552,7 @@ async function renderSettledNarrationWithSaga(args: {
   storytellerTemperature: number;
   storytellerMaxTokens: number;
   judgeProvider?: ProviderConfig;
+  narrationLabel?: "final" | "opening";
   lockToken?: string;
   recordPromptAssemblyStage?: (startedAt: number, endedAt: number) => void;
   recordNarratorRepairStage?: (
@@ -2687,6 +3561,7 @@ async function renderSettledNarrationWithSaga(args: {
     metadata: Record<string, unknown>,
   ) => void;
 }) {
+  const narrationLabel = args.narrationLabel ?? "final";
   let saga = args.saga;
   if (saga.status === "resolved_pending_narration") {
     saga = transitionTurnSagaStatus({
@@ -2721,6 +3596,7 @@ async function renderSettledNarrationWithSaga(args: {
   let lastVisibleResponse: VisibleNarrationResponse | undefined;
   let lastVisibleTextLength: number | undefined;
   let lastStructuredTrace: NarrationDraftStructuredTrace | null = null;
+  let lastGroundedSentenceDraft: GroundedSentenceDraft | null = null;
 
   async function runFinalPacketGuardedNarration(recoveryAddendum: string | null) {
     return runVisibleNarrationWithPacketGuard({
@@ -2739,7 +3615,7 @@ async function renderSettledNarrationWithSaga(args: {
           : finalNarrationPrompt.prompt;
         const result = await withRole("storyteller", () =>
           runVisibleNarrationDraftWithGuard({
-            label: "final",
+            label: narrationLabel,
             provider: args.storytellerProvider,
             narratorPacket: args.narratorPacket,
             system: finalNarrationPrompt.system,
@@ -2755,6 +3631,7 @@ async function renderSettledNarrationWithSaga(args: {
         lastVisibleResponse = result.response;
         lastVisibleTextLength = result.text.length;
         lastStructuredTrace = result.structuredTrace;
+        lastGroundedSentenceDraft = result.groundedSentenceDraft;
         return result.draft;
       },
       onUnsafeAttempt: ({ attempt, validation }) => {
@@ -2842,6 +3719,9 @@ async function renderSettledNarrationWithSaga(args: {
     if (!guardedNarration.draft) {
       throw new Error("Final narration guard returned success without a NarrationDraft.");
     }
+    if (!lastGroundedSentenceDraft) {
+      throw new Error("Final narration guard returned success without the source GroundedSentenceDraft.");
+    }
     assertNonEmptyFinalVisibleNarration(narrativeText);
   } catch (error) {
     updateNarratorAttemptOutcome({
@@ -2855,7 +3735,7 @@ async function renderSettledNarrationWithSaga(args: {
       failureReason: errorMessage(error),
       lockToken: args.lockToken,
     });
-    throw error;
+    throw new PendingSettledTurnNarrationError(args.saga, error);
   }
   const successAttempt = updateNarratorAttemptOutcome({
     id: activeNarratorAttempt.id,
@@ -2864,6 +3744,7 @@ async function renderSettledNarrationWithSaga(args: {
       ...guardedNarration.validation,
       narrationDraftAccepted: true,
       narrationContractVersion: GROUNDED_SENTENCE_DRAFT_CONTRACT_VERSION,
+      groundedSentenceDraft: lastGroundedSentenceDraft,
       structuredTrace: lastStructuredTrace,
       attempts: guardedNarration.attempts,
       retried: guardedNarration.retried,
@@ -2893,7 +3774,7 @@ async function renderSettledNarrationWithSaga(args: {
 }
 
 function logDueWorldWork(
-  result: ResolveDueWorldWorkForScopeResult,
+  result: ResolveDueWorldWorkWithProposalWatchdogResult,
   durationMs: number,
 ): void {
   log.event("living-world.due-work", {
@@ -2910,15 +3791,23 @@ function logDueWorldWork(
     proposalPrepGroupCount: result.proposalPrepTrace.length,
     proposalPrepSerializedFallbackCount: result.proposalPrepTrace
       .reduce((total, group) => total + group.serializedFallbackCount, 0),
+    proposalSelectedCount: result.proposals.selected.length,
+    proposalExecutedCount: result.proposals.executed.length,
+    proposalCommittedCount: dueProposalCommitCount(result),
+    proposalRejectedCount: dueProposalRejectedCount(result),
+    proposalDeferredCount: dueProposalDeferredCount(result),
+    proposalSkippedCount: result.proposals.skipped.length,
     durationMs,
   });
 }
 
-function hasVisibleDueWorldWork(result: ResolveDueWorldWorkForScopeResult): boolean {
+function hasVisibleDueWorldWork(result: ResolveDueWorldWorkWithProposalWatchdogResult): boolean {
   return result.executed.some((item) => item.status !== "waiting")
     || result.deferred.length > 0
     || result.worldThreads.executed.length > 0
-    || result.worldThreads.deferred.length > 0;
+    || result.worldThreads.deferred.length > 0
+    || result.proposals.selected.length > 0
+    || result.proposals.executed.length > 0;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -2942,6 +3831,49 @@ function isNarrationDraftAcceptedAttempt(attempt: {
     && trace?.fallbackReason == null
     && trace?.repairedFromStrategy == null
     && trace?.repair == null;
+}
+
+function reusableNarrationFromAcceptedAttempt(
+  attempt: {
+    id: string;
+    groundingResult: unknown;
+    finalText: string | null;
+  },
+  packet: NarratorPacket,
+): { narratorAttemptId: string; narrativeText: string } | null {
+  if (!isNarrationDraftAcceptedAttempt(attempt)) {
+    return null;
+  }
+
+  const grounding = asRecord(attempt.groundingResult);
+  const sourceDraft = grounding?.groundedSentenceDraft;
+  if (!sourceDraft) {
+    return null;
+  }
+
+  try {
+    const compiledDraft = compileGroundedSentenceDraftToNarrationDraft({
+      packet,
+      draft: sourceDraft,
+      requireBackendOwnedFactText: true,
+    });
+    if (compiledDraft.prose !== attempt.finalText) {
+      log.warn("Ignoring reusable narrator attempt whose stored text no longer matches its backend-owned draft", {
+        narratorAttemptId: attempt.id,
+      });
+      return null;
+    }
+    return {
+      narratorAttemptId: attempt.id,
+      narrativeText: compiledDraft.prose,
+    };
+  } catch (error) {
+    log.warn("Ignoring reusable narrator attempt whose source draft no longer compiles against the settled packet", {
+      narratorAttemptId: attempt.id,
+      error: errorMessage(error),
+    });
+    return null;
+  }
 }
 
 function getResumeCheckpoint(
@@ -3095,6 +4027,7 @@ function appendAssistantNarrationForResume(input: {
   saga: TurnSagaRecord;
   narratorAttemptId: string;
   narrativeText: string;
+  presentationSource?: "settled_turn_packet" | "opening_scene";
   lockToken?: string;
 }): TurnSagaRecord {
   if (getResumeCheckpoint(input.saga, "assistantAppend", input.narratorAttemptId)) {
@@ -3116,6 +4049,12 @@ function appendAssistantNarrationForResume(input: {
         role: "assistant",
         content: input.narrativeText,
         metadata: {
+          presentation: {
+            authority: "settled_packet_presentation",
+            source: input.presentationSource ?? "settled_turn_packet",
+            sagaId: input.saga.id,
+            narratorAttemptId: input.narratorAttemptId,
+          },
           resumeNarration: {
             sagaId: input.saga.id,
             narratorAttemptId: input.narratorAttemptId,
@@ -3178,7 +4117,14 @@ export async function* resumePendingTurnNarration(
   const settledPacketBeforeClaim = saga.status === "world_consequence_running"
     ? getSettledTurnPacket({ campaignId, turnId })
     : null;
-  if (saga.status === "world_consequence_running" && !settledPacketBeforeClaim) {
+  const hasPreparedSettledPacketRecovery = saga.status === "world_consequence_running"
+    ? hasPreparedSettledTurnPacketRecovery({ campaignId, turnId })
+    : false;
+  if (
+    saga.status === "world_consequence_running"
+    && !settledPacketBeforeClaim
+    && !hasPreparedSettledPacketRecovery
+  ) {
     yield buildPendingSettledTurnEvent(saga);
     return;
   }
@@ -3206,11 +4152,38 @@ export async function* resumePendingTurnNarration(
         `Turn ${turnId} is not pending narration; current status is ${lockedSaga.status}.`,
       );
     }
-    const settledPacket = settledPacketBeforeClaim ?? getSettledTurnPacket({ campaignId, turnId });
+    const settledPacket = settledPacketBeforeClaim
+      ?? getSettledTurnPacket({ campaignId, turnId })
+      ?? (lockedSaga.status === "world_consequence_running"
+        ? recoverSettledTurnPacketFromPreparedEvent({
+            campaignId,
+            turnId,
+            lockToken: claim.lockToken,
+          })
+        : null);
     if (!settledPacket) {
       throw new Error(`SettledTurnPacket not found for pending turn ${turnId}.`);
     }
-    const narratorPacket = requireNarratorPacket(settledPacket.narratorPacket);
+    const storedNarratorPacket = requireNarratorPacket(settledPacket.narratorPacket);
+    const narratorPacket = repairModelGuidancePerceivableResponses(
+      repairPromptUnsafePerceivableEffects(storedNarratorPacket),
+    );
+    if (narratorPacket.perceivableEffects.length !== storedNarratorPacket.perceivableEffects.length) {
+      log.warn("Pending narration resume repaired unsafe stale perceivable effects", {
+        sagaId: lockedSaga.id,
+        settledTurnPacketId: settledPacket.id,
+        removedEffectCount:
+          storedNarratorPacket.perceivableEffects.length - narratorPacket.perceivableEffects.length,
+      });
+    }
+    if (narratorPacket.perceivableResponses.length !== storedNarratorPacket.perceivableResponses.length) {
+      log.warn("Pending narration resume repaired stale model-guidance perceivable responses", {
+        sagaId: lockedSaga.id,
+        settledTurnPacketId: settledPacket.id,
+        removedResponseCount:
+          storedNarratorPacket.perceivableResponses.length - narratorPacket.perceivableResponses.length,
+      });
+    }
     const sceneAssembly = minimalSceneAssemblyFromNarratorPacket(narratorPacket);
     let resumeSaga = lockedSaga.status === "world_consequence_running"
       ? transitionTurnSagaStatus({
@@ -3235,15 +4208,14 @@ export async function* resumePendingTurnNarration(
       settledTurnPacketId: settledPacket.id,
       campaignId,
     });
-    const successfulAttempt =
-      latestSuccessfulAttempt && isNarrationDraftAcceptedAttempt(latestSuccessfulAttempt)
-        ? latestSuccessfulAttempt
-        : null;
-    const narration = successfulAttempt
+    const reusableAttempt = latestSuccessfulAttempt
+      ? reusableNarrationFromAcceptedAttempt(latestSuccessfulAttempt, narratorPacket)
+      : null;
+    const narration = reusableAttempt
       ? {
-          narrativeText: successfulAttempt.finalText ?? "",
+          narrativeText: reusableAttempt.narrativeText,
           reasoningText: undefined,
-          narratorAttemptId: successfulAttempt.id,
+          narratorAttemptId: reusableAttempt.narratorAttemptId,
           finalizationReason: "Final narration resumed from successful narrator attempt.",
         }
       : await renderSettledNarrationWithSaga({
@@ -3261,7 +4233,7 @@ export async function* resumePendingTurnNarration(
           lockToken: claim.lockToken,
         });
 
-    if (successfulAttempt && resumeSaga.status === "resolved_pending_narration") {
+    if (reusableAttempt && resumeSaga.status === "resolved_pending_narration") {
       resumeSaga = transitionTurnSagaStatus({
         sagaId: resumeSaga.id,
         toStatus: "narrator_rendering",
@@ -3313,10 +4285,13 @@ export async function* resumePendingTurnNarration(
         successfulTravel: getSuccessfulTravelFromCanonicalPacket(narratorPacket.canonicalTurnPacket),
         oracleResult: null,
         toolCallResults: getToolCallResultsFromCanonicalPacket(narratorPacket.canonicalTurnPacket),
+        acceptedDurableEventIds: settledPacket.acceptedDurableEventIds,
+        producedDurableEventIds: settledPacket.producedDurableEventIds,
         narrativeText: narration.narrativeText,
         sceneAssembly,
         onPostTurn,
         idempotentResume: true,
+        idempotentTargetTick: narratorPacket.postNarrationTargetTick,
       });
       tick = tailResult.tick;
       resumeSaga = mergeResumeCheckpoint({
@@ -3335,7 +4310,15 @@ export async function* resumePendingTurnNarration(
       reason: narration.finalizationReason,
       lockToken: claim.lockToken,
     });
-    yield { type: "done", data: { tick, resumed: true } };
+    yield {
+      type: "done",
+      data: {
+        tick,
+        resumed: true,
+        acceptedDurableEventIds: settledPacket.acceptedDurableEventIds,
+        producedDurableEventIds: settledPacket.producedDurableEventIds,
+      },
+    };
   } finally {
     workerHeartbeat?.stop();
     try {
@@ -3490,7 +4473,7 @@ async function* processTurnScenePlan(
 
   advanceSaga("pre_turn_catchup", "Resolving pre-turn catch-up work.");
   const preFrameDueWorkStart = Date.now();
-  const preFrameDueWork = resolveDueWorldWorkForScope({
+  const preFrameDueWork = await resolveDueWorldWorkForScopeWithProposalWatchdog({
     campaignId,
     tick: currentTick,
     playerLocationId: oracleLocationId,
@@ -3514,6 +4497,9 @@ async function* processTurnScenePlan(
   });
   addTurnLatencyProposalEffects(latencyTrace, {
     deferred: preFrameDueWork.deferred.length + preFrameDueWork.worldThreads.deferred.length,
+    committed: dueProposalCommitCount(preFrameDueWork),
+    rejected: dueProposalRejectedCount(preFrameDueWork),
+    cacheMisses: preFrameDueWork.proposals.selected.length,
   });
   logDueWorldWork(preFrameDueWork, preFrameDueWorkEnded - preFrameDueWorkStart);
   if (hasVisibleDueWorldWork(preFrameDueWork)) {
@@ -3528,18 +4514,26 @@ async function* processTurnScenePlan(
       },
     };
   }
+  const preFrameClockContext = buildSettledTurnClockContext({
+    campaignId,
+    currentTick,
+    baseWorldClock,
+    successfulTravel: null,
+    gmActionResults: [],
+    minimumTick: currentTick,
+  });
 
   const frameStart = Date.now();
   const sceneFrame = await buildSceneFrame({
     campaignId,
-    tick: currentTick,
+    tick: preFrameClockContext.tick,
     playerActorId: player?.id,
     currentLocationId: oracleLocationId,
     currentSceneScopeId,
     playerAction,
     intent,
     method,
-    elapsedWorldTimeMinutes: 1,
+    elapsedWorldTimeMinutes: preFrameClockContext.elapsedWorldTimeMinutes,
   });
   const frameEnded = Date.now();
   recordTurnLatencyStage(latencyTrace, {
@@ -3780,7 +4774,7 @@ async function* processTurnScenePlan(
   }
 
   if (oracleResult) {
-    yield { type: "oracle_result", data: oracleResult };
+    yield { type: "oracle_result", data: toPlayerSafeOracleResult(oracleResult) };
   }
 
   const frameWithOracle: SceneFrame = oracleResult || combatEnvelope
@@ -3791,7 +4785,7 @@ async function* processTurnScenePlan(
         oracle: {
           outcome: oracleResult?.outcome ?? "combat_transition",
           confidence: oracleResult?.chance,
-          rationale: oracleResult?.reasoning ?? gmRead.rationale,
+          rationale: gmRead.rationale,
         },
       }
     : sceneFrame;
@@ -3854,7 +4848,7 @@ async function* processTurnScenePlan(
     const gmToolLoop = await runGmToolLoop({
       campaignId,
       provider: judgeProvider,
-      tick: currentTick,
+      tick: frameWithOracle.tick,
       playerAction,
       frame: frameWithOracle,
       gmRead,
@@ -3864,6 +4858,8 @@ async function* processTurnScenePlan(
       maxOutputTokens: storytellerMaxTokens,
     });
     const stepResults = gmToolLoop.stepResults;
+    const gmToolLoopAcceptedStepIds = gmToolLoop.acceptedStepIds ?? [];
+    const gmToolLoopAcceptedToolResultIds = gmToolLoop.acceptedToolResultIds ?? [];
     if (
       stepResults.some(
         (result) =>
@@ -3912,12 +4908,15 @@ async function* processTurnScenePlan(
       intent: gmToolLoop.intent,
       observationSummary: gmToolLoop.observationSummary,
       stepResults,
+      acceptedStepIds: gmToolLoopAcceptedStepIds,
     });
     executedPlan = buildExecutedScenePlanFromGmToolLoop({
       frame: frameWithOracle,
+      gmRead,
       plan: scenePlan,
       observationSummary: gmToolLoop.observationSummary,
       stepResults,
+      acceptedStepIds: gmToolLoopAcceptedStepIds,
     });
     log.event("scene.gm-tool-loop.execution", {
       stepCount: stepResults.length,
@@ -3925,6 +4924,8 @@ async function* processTurnScenePlan(
       revisedCount: stepResults.filter((result) => result.status === "revised").length,
       skippedCount: stepResults.filter((result) => result.status === "skipped").length,
       executedActionCount: executedPlan.toolCallResults.length,
+      acceptedStepCount: gmToolLoopAcceptedStepIds.length,
+      acceptedToolResultCount: gmToolLoopAcceptedToolResultIds.length,
       canonicalEventCount: executedPlan.canonicalEvents.length,
       durationMs: Date.now() - executionStart,
     });
@@ -3951,11 +4952,75 @@ async function* processTurnScenePlan(
   }
 
   successfulTravel = executedPlan.successfulTravel ?? successfulTravel;
-  let toolCallResults = toTurnToolCallResults(executedPlan.toolCallResults);
+  const postGmClockContext = buildSettledTurnClockContext({
+    campaignId,
+    currentTick,
+    baseWorldClock,
+    successfulTravel,
+    gmActionResults: executedPlan.actionResults,
+    gmRead,
+    minimumTick: Math.max(preFrameClockContext.tick, predictNextTick(currentTick, successfulTravel)),
+  });
+  const gmAcceptedDurableEventIds = acceptedDurableEventIdsFromActionResults(
+    executedPlan.actionResults,
+    gmRead,
+  );
+  const gmProducedDurableEventIds = durableEventIdsFromActionResults(executedPlan.actionResults);
+  await retractUnacceptedDurableMemories({
+    campaignId,
+    actionResults: executedPlan.actionResults,
+    acceptedEventIds: gmAcceptedDurableEventIds,
+    acceptedActionRefs: acceptedActionRefs(executedPlan.actionResults, gmRead),
+  });
+  assertNoUnacceptedSideEffectingResults({
+    phase: "gm_tool_loop",
+    actionResults: executedPlan.actionResults,
+    gmRead,
+  });
+  let toolCallResults = toTurnToolCallResults(executedPlan.toolCallResults, gmRead);
   let actorActionResults: ExecutedScenePlanActionResult[] = [];
 
   for (const event of executedPlan.emittedEvents) {
-    yield event;
+    const normalizedEvent = normalizePlayerFacingEmittedEvent(event);
+    if (normalizedEvent) yield normalizedEvent;
+  }
+
+  let actorReactionFrame: SceneFrame = frameWithOracle;
+  if (hasCommittedAuthorityTrace(executedPlan.toolCallResults)) {
+    const actorFramePosition = readPlayerScenePosition({
+      campaignId,
+      fallbackLocationId: frameWithOracle.currentLocationId,
+      fallbackSceneScopeId: frameWithOracle.currentSceneScopeId,
+    });
+    const actorReactionFrameStart = Date.now();
+    const refreshedActorReactionFrame = await buildSceneFrame({
+      campaignId,
+      tick: postGmClockContext.tick,
+      playerActorId: player?.id,
+      currentLocationId: actorFramePosition.currentLocationId,
+      currentSceneScopeId: actorFramePosition.currentSceneScopeId,
+      playerAction,
+      intent,
+      method,
+      elapsedWorldTimeMinutes: postGmClockContext.elapsedWorldTimeMinutes,
+    });
+    actorReactionFrame = {
+      ...refreshedActorReactionFrame,
+      oracleContext: frameWithOracle.oracleContext,
+      combatEnvelope: frameWithOracle.combatEnvelope,
+      oracle: frameWithOracle.oracle,
+    };
+    recordTurnLatencyStage(latencyTrace, {
+      stage: "actor_reaction_frame_refresh",
+      startedAt: actorReactionFrameStart,
+      endedAt: Date.now(),
+      metadata: {
+        worldVersion: actorReactionFrame.worldVersion,
+        visibleActorCount:
+          actorReactionFrame.roster.active.length
+          + actorReactionFrame.roster.support.length,
+      },
+    });
   }
 
   advanceSaga("local_reaction_running", "Running local actor reaction pass.");
@@ -3969,14 +5034,20 @@ async function* processTurnScenePlan(
   const actorPassStart = Date.now();
   const actorPass = await runRequiredActorDecisionPass({
     campaignId,
-    tick: currentTick,
+    tick: postGmClockContext.tick,
     provider: judgeProvider,
-    sceneFrame: frameWithOracle,
+    sceneFrame: actorReactionFrame,
     playerAction,
-    playerLocationId: frameWithOracle.currentLocationId,
-    playerSceneScopeId: frameWithOracle.currentSceneScopeId,
-    elapsedWorldTimeMinutes: 1,
+    playerLocationId: actorReactionFrame.currentLocationId,
+    playerSceneScopeId: actorReactionFrame.currentSceneScopeId,
+    elapsedWorldTimeMinutes: postGmClockContext.elapsedWorldTimeMinutes,
     maxOutputTokens: storytellerMaxTokens,
+    presentActorReactionRoute: shouldDeferPresentActorReactionsAfterSettledOutcome(
+      executedPlan.toolCallResults,
+      gmRead,
+    )
+      ? "proposal_after_done"
+      : undefined,
   });
   const actorPassEnded = Date.now();
   const actorFrameRetrievalTrace = actorPass.parallelFrameRetrievalTrace ?? [];
@@ -4040,10 +5111,44 @@ async function* processTurnScenePlan(
       ...toTurnToolCallResults(actorActionResults),
     ];
   }
+  const actorAcceptedDurableEventIds = acceptedDurableEventIdsFromActionResults(
+    actorActionResults,
+    null,
+  );
+  const actorProducedDurableEventIds = durableEventIdsFromActionResults(actorActionResults);
+  await retractUnacceptedDurableMemories({
+    campaignId,
+    actionResults: actorActionResults,
+    acceptedEventIds: actorAcceptedDurableEventIds,
+    acceptedActionRefs: acceptedActionRefs(actorActionResults, null),
+  });
+  assertNoUnacceptedSideEffectingResults({
+    phase: "actor_reactions",
+    actionResults: actorActionResults,
+    gmRead: null,
+  });
+  const acceptedDurableEventIds = uniqueRefs([
+    ...gmAcceptedDurableEventIds,
+    ...actorAcceptedDurableEventIds,
+  ]);
+  const producedDurableEventIds = uniqueRefs([
+    ...gmProducedDurableEventIds,
+    ...actorProducedDurableEventIds,
+  ]);
   log.event("scene.actor-required-pass", {
     scheduledCount: actorPass.schedule.decisions.length,
     decisionCount: actorPass.decisions.length,
     actionResultCount: actorActionResults.length,
+  });
+  const settledClockContext = buildSettledTurnClockContext({
+    campaignId,
+    currentTick,
+    baseWorldClock,
+    successfulTravel,
+    gmActionResults: executedPlan.actionResults,
+    gmRead,
+    actorActionResults,
+    minimumTick: Math.max(preFrameClockContext.tick, predictNextTick(currentTick, successfulTravel)),
   });
 
   const hpDropped = toolCallResults.some((tc) => {
@@ -4058,7 +5163,6 @@ async function* processTurnScenePlan(
     yield { type: "auto_checkpoint", data: { reason: "HP dropped to danger zone" } };
   }
 
-  const predictedTick = predictNextTick(currentTick, successfulTravel);
   const currentLocationId =
     successfulTravel?.locationId
     ?? db
@@ -4076,15 +5180,51 @@ async function* processTurnScenePlan(
       .get()?.currentSceneLocationId
     ?? null;
 
+  const preNarratorFrameStart = Date.now();
+  const refreshedPreNarratorFrame = await buildSceneFrame({
+    campaignId,
+    tick: settledClockContext.tick,
+    playerActorId: player?.id,
+    currentLocationId,
+    currentSceneScopeId,
+    playerAction,
+    intent,
+    method,
+    elapsedWorldTimeMinutes: settledClockContext.elapsedWorldTimeMinutes,
+  });
+  const preNarratorActorDecisionFrame: SceneFrame = {
+    ...refreshedPreNarratorFrame,
+    oracleContext: frameWithOracle.oracleContext,
+    combatEnvelope: frameWithOracle.combatEnvelope,
+    oracle: frameWithOracle.oracle,
+  };
+  const preNarratorFrameEnded = Date.now();
+  recordTurnLatencyStage(latencyTrace, {
+    stage: "pre_narrator_actor_frame_refresh",
+    startedAt: preNarratorFrameStart,
+    endedAt: preNarratorFrameEnded,
+    metadata: {
+      visibleActorCount:
+        refreshedPreNarratorFrame.roster.active.length
+        + refreshedPreNarratorFrame.roster.support.length,
+      eventCount: refreshedPreNarratorFrame.recentEvents.length,
+    },
+  });
+
   advanceSaga("world_consequence_running", "Resolving world consequences before narrator packet.");
   const preNarratorDueWorkStart = Date.now();
-  const preNarratorDueWork = resolveDueWorldWorkForScope({
+  const preNarratorDueWork = await resolveDueWorldWorkForScopeWithProposalWatchdog({
     campaignId,
-    tick: currentTick,
+    tick: settledClockContext.tick,
     playerLocationId: currentLocationId,
     playerSceneScopeId: currentSceneScopeId,
-    elapsedWorldTimeMinutes: successfulTravel?.travelCost ?? 1,
+    elapsedWorldTimeMinutes: settledClockContext.elapsedWorldTimeMinutes,
     phase: "pre_narrator_packet",
+    actorDecisionContext: {
+      provider: judgeProvider,
+      sceneFrame: preNarratorActorDecisionFrame,
+      maxOutputTokens: storytellerMaxTokens,
+    },
   });
   const preNarratorDueWorkEnded = Date.now();
   recordTurnLatencyStage(latencyTrace, {
@@ -4102,6 +5242,9 @@ async function* processTurnScenePlan(
   });
   addTurnLatencyProposalEffects(latencyTrace, {
     deferred: preNarratorDueWork.deferred.length + preNarratorDueWork.worldThreads.deferred.length,
+    committed: dueProposalCommitCount(preNarratorDueWork),
+    rejected: dueProposalRejectedCount(preNarratorDueWork),
+    cacheMisses: preNarratorDueWork.proposals.selected.length,
   });
   logDueWorldWork(preNarratorDueWork, preNarratorDueWorkEnded - preNarratorDueWorkStart);
   if (hasVisibleDueWorldWork(preNarratorDueWork)) {
@@ -4116,23 +5259,39 @@ async function* processTurnScenePlan(
       },
     };
   }
+  const finalClockContext = buildSettledTurnClockContext({
+    campaignId,
+    currentTick,
+    baseWorldClock,
+    successfulTravel,
+    gmActionResults: executedPlan.actionResults,
+    gmRead,
+    actorActionResults,
+    minimumTick: settledClockContext.tick,
+  });
+  const acceptedCommittedEventIds = uniqueRefs([
+    ...acceptedDurableEventIds,
+    ...dueWorldRefs(preFrameDueWork),
+    ...dueWorldRefs(preNarratorDueWork),
+  ]);
 
-  let narratorFrame: SceneFrame = frameWithOracle;
+  let narratorFrame: SceneFrame = preNarratorActorDecisionFrame;
   if (
     preNarratorDueWork.executed.some((result) => result.status === "completed")
+    || dueProposalCommitCount(preNarratorDueWork) > 0
     || preNarratorDueWork.worldThreads.executed.length > 0
   ) {
     const narratorFrameStart = Date.now();
     const refreshedNarratorFrame = await buildSceneFrame({
       campaignId,
-      tick: currentTick,
+      tick: finalClockContext.tick,
       playerActorId: player?.id,
       currentLocationId,
       currentSceneScopeId,
       playerAction,
       intent,
       method,
-      elapsedWorldTimeMinutes: successfulTravel?.travelCost ?? 1,
+      elapsedWorldTimeMinutes: finalClockContext.elapsedWorldTimeMinutes,
     });
     narratorFrame = {
       ...refreshedNarratorFrame,
@@ -4161,6 +5320,7 @@ async function* processTurnScenePlan(
       eventCount: refreshedNarratorFrame.recentEvents.length,
     });
   }
+  const predictedTick = Math.max(finalClockContext.tick, narratorFrame.tick);
 
   yield {
     type: "scene-settling",
@@ -4179,8 +5339,16 @@ async function* processTurnScenePlan(
     campaignId,
     currentLocationId,
     currentSceneScopeId,
-    pendingEventTicks: [currentTick, predictedTick],
+    pendingEventTicks: uniqueTicks([
+      currentTick,
+      preFrameClockContext.tick,
+      postGmClockContext.tick,
+      settledClockContext.tick,
+      finalClockContext.tick,
+      narratorFrame.tick,
+    ]),
     toolCalls: toolCallResults,
+    acceptedDurableEventIds: acceptedCommittedEventIds,
     openingScene: options.openingScene ?? false,
     playerLabel,
   });
@@ -4211,6 +5379,11 @@ async function* processTurnScenePlan(
     canonicalTurnPacket,
     forbiddenPrivateTerms: scopedForecastExcerpt.forbiddenPrivateTerms,
   });
+  narratorPacket.postNarrationTargetTick = predictNarrationTargetTick({
+    campaignId,
+    currentTick,
+    successfulTravel,
+  });
   const packetEnded = Date.now();
   recordTurnLatencyStage(latencyTrace, {
     stage: "narrator_packet",
@@ -4221,6 +5394,7 @@ async function* processTurnScenePlan(
       eventCount: narratorPacket.perceivableEvents.length,
       responseCount: narratorPacket.perceivableResponses.length,
       effectCount: narratorPacket.perceivableEffects.length,
+      observationCount: narratorPacket.perceivableObservations?.length ?? 0,
     },
   });
   logScenePlanPacket(narratorPacket, packetEnded - packetStart);
@@ -4238,7 +5412,8 @@ async function* processTurnScenePlan(
   let liveSettledPacket: SettledTurnPacketRecord | null = null;
   try {
     turnSaga = liveClaim.saga;
-    const settledPacket = persistSettledTurnPacket({
+    const settledTurnPacketInput = {
+      id: randomUUID(),
       sagaId: turnSaga.id,
       lockToken: liveClaim.lockToken,
       oracleDecisionId,
@@ -4250,8 +5425,10 @@ async function* processTurnScenePlan(
         ...canonicalTurnPacket.narratorFacts.responseIds,
         ...canonicalTurnPacket.narratorFacts.actionIds,
       ]),
-      acceptedToolResultRefs: executedActionRefs(executedPlan.actionResults),
-      acceptedActorResultRefs: executedActionRefs(actorActionResults),
+      acceptedToolResultRefs: acceptedActionRefs(executedPlan.actionResults, gmRead),
+      acceptedActorResultRefs: acceptedActionRefs(actorActionResults, null),
+      acceptedDurableEventIds,
+      producedDurableEventIds,
       dueWorldRefs: uniqueRefs([
         ...dueWorldRefs(preFrameDueWork),
         ...dueWorldRefs(preNarratorDueWork),
@@ -4259,7 +5436,9 @@ async function* processTurnScenePlan(
       requiresNarration: true,
       baseWorldVersion: baseWorldClock.worldVersion,
       resultWorldVersion: readWorldClock(campaignId).worldVersion,
-    });
+    };
+    recordPreparedSettledTurnPacket(settledTurnPacketInput);
+    const settledPacket = persistSettledTurnPacket(settledTurnPacketInput);
     liveSettledPacket = settledPacket;
     turnSaga = getTurnSaga({ sagaId: turnSaga.id }) ?? turnSaga;
 
@@ -4387,7 +5566,7 @@ async function* processTurnScenePlan(
       yield { type: "reasoning", data: { text: reasoningText } };
     }
 
-    const { tick: newTick } = yield* runPostNarrationFinalizationTail({
+    const { tick: newTick, summary } = yield* runPostNarrationFinalizationTail({
       campaignId,
       turnId: turnSaga.turnId,
       sagaId: turnSaga.id,
@@ -4399,6 +5578,8 @@ async function* processTurnScenePlan(
       successfulTravel,
       oracleResult,
       toolCallResults,
+      acceptedDurableEventIds,
+      producedDurableEventIds,
       narrativeText,
       sceneAssembly,
       onPostTurn,
@@ -4419,7 +5600,14 @@ async function* processTurnScenePlan(
       reason: narration.finalizationReason,
       lockToken: liveClaim.lockToken,
     });
-    yield { type: "done", data: { tick: newTick } };
+    yield {
+      type: "done",
+      data: {
+        tick: newTick,
+        acceptedDurableEventIds: summary.acceptedDurableEventIds,
+        producedDurableEventIds: summary.producedDurableEventIds,
+      },
+    };
   } catch (error) {
     const latestSaga = getTurnSaga({ sagaId: liveClaim.saga.id }) ?? turnSaga;
     if (
@@ -4544,7 +5732,16 @@ async function* processTurnLegacy(
       if (destination.locationId === player.currentLocationId) {
         const noOpNarrative = `You remain at ${destination.locationName}.`;
         appendChatMessages(campaignId, [{ role: "user", content: playerAction }]);
-        appendChatMessages(campaignId, [{ role: "assistant", content: noOpNarrative }]);
+        appendChatMessages(campaignId, [{
+          role: "assistant",
+          content: noOpNarrative,
+          metadata: {
+            presentation: {
+              authority: "visible_prose_non_authority",
+              source: "deterministic_noop",
+            },
+          },
+        }]);
         yield { type: "narrative", data: { text: noOpNarrative } };
         yield { type: "done", data: { tick: currentTick } };
         return;
@@ -4693,7 +5890,7 @@ async function* processTurnLegacy(
     judgeProvider
   );
 
-  yield { type: "oracle_result", data: oracleResult };
+  yield { type: "oracle_result", data: toPlayerSafeOracleResult(oracleResult) };
 
   const playerLabel =
     runtimePlayerRecord?.identity?.displayName
@@ -4796,12 +5993,24 @@ async function* processTurnLegacy(
       });
     }
 
+    const hiddenAdjudicationFrame = await buildSceneFrame({
+      campaignId,
+      tick: currentTick,
+      playerActorId: player?.id,
+      currentLocationId: oracleLocationId,
+      currentSceneScopeId,
+      playerAction,
+      intent,
+      method,
+      elapsedWorldTimeMinutes: 1,
+    });
     const executionStart = Date.now();
     const executedPlan = await executeAdjudicationPlan({
       campaignId,
       tick: currentTick,
       outcomeTier: oracleResult.outcome,
       plan: adjudicationPlan,
+      executionContext: createPlayerTurnToolExecutionContext(hiddenAdjudicationFrame),
     });
     log.event("judge.hidden.execution", {
       plannedActionCount: adjudicationPlan.actions.length,
@@ -4813,10 +6022,20 @@ async function* processTurnLegacy(
     toolCallResults.push(...executedPlan.toolCallResults);
 
     for (const event of executedPlan.emittedEvents) {
-      yield event;
+      const normalizedEvent = normalizePlayerFacingEmittedEvent(event);
+      if (normalizedEvent) yield normalizedEvent;
     }
   } catch (hiddenPassError) {
-    throw new Error("Judge hidden adjudication failed before visible narration could be generated.");
+    const causeMessage = hiddenPassError instanceof Error
+      ? hiddenPassError.message
+      : String(hiddenPassError);
+    log.event("judge.hidden.failed", {
+      message: causeMessage,
+    });
+    throw new Error(
+      `Judge hidden adjudication failed before visible narration could be generated: ${causeMessage}`,
+      { cause: hiddenPassError },
+    );
   }
 
   // 10c. Reactive auto-checkpoint if HP dropped to danger zone (2 or below) during turn
@@ -4943,7 +6162,16 @@ async function* processTurnLegacy(
   if (narrativeText) {
     yield { type: "narrative", data: { text: narrativeText } };
     appendChatMessages(campaignId, [
-      { role: "assistant", content: narrativeText },
+      {
+        role: "assistant",
+        content: narrativeText,
+        metadata: {
+          presentation: {
+            authority: "visible_prose_non_authority",
+            source: "legacy_final_narration",
+          },
+        },
+      },
     ]);
   }
 
@@ -4993,10 +6221,15 @@ async function* processTurnLegacy(
     }
   }
 
+  const legacyDurableEventIds = uniqueRefs(
+    toolCallResults.flatMap((toolCall) => eventIdsFromToolResult(toolCall.result)),
+  );
   const summary: TurnSummary = {
     tick: newTick,
     oracleResult,
     toolCalls: toolCallResults,
+    acceptedDurableEventIds: legacyDurableEventIds,
+    producedDurableEventIds: legacyDurableEventIds,
     narrativeText,
     sceneDirection: sceneAssembly.sceneDirection ?? undefined,
     sceneAssembly,
@@ -5011,7 +6244,210 @@ async function* processTurnLegacy(
     await Promise.resolve(onPostTurn(summary));
   }
 
-  yield { type: "done", data: { tick: newTick } };
+  yield {
+    type: "done",
+    data: {
+      tick: newTick,
+      acceptedDurableEventIds: summary.acceptedDurableEventIds,
+      producedDurableEventIds: summary.producedDurableEventIds,
+    },
+  };
+}
+
+function openingNarrationPackets(input: {
+  campaignId: string;
+  currentTick: number;
+  playerId: string | null;
+  playerLabel: string;
+  sceneAssembly: SceneAssembly;
+  sceneDirection: WorldBrainSceneDirection;
+}): { canonicalTurnPacket: CanonicalTurnPacket; narratorPacket: NarratorPacket } {
+  const anchorEventId = `opening:${input.currentTick}:scene`;
+  const playerActorId = input.playerId ?? "player";
+  const anchorEvent: CanonicalTurnPacketEvent = {
+    id: anchorEventId,
+    actorId: playerActorId,
+    kind: "environment",
+    summary: input.sceneDirection.situationSummary,
+    perceivableByPlayer: true,
+  };
+  const openingEffect: CanonicalTurnPacketEffect = {
+    id: `opening:${input.currentTick}:visible-scene`,
+    actorId: playerActorId,
+    summary: input.sceneDirection.situationSummary,
+    perceivableByPlayer: true,
+  };
+  const openingTurnResolution: CanonicalTurnResolution = {
+    kind: "status_read",
+    resolutionState: "observation_grounded",
+    combatIntent: false,
+    evidenceIds: [openingEffect.id],
+    consequenceIds: [],
+    explicitNoCombatEvidenceIds: [],
+    toolNames: [],
+  };
+  const canonicalTurnPacket: CanonicalTurnPacket = {
+    campaignId: input.campaignId,
+    tick: input.currentTick,
+    playerAction: "[opening scene]",
+    oracleOutcome: null,
+    turnResolution: openingTurnResolution,
+    narratorFacts: {
+      anchorEventId,
+      eventIds: [anchorEventId],
+      responseIds: [],
+      actionIds: [],
+      toolResultRefs: [],
+    },
+    anchorEvent,
+    events: [anchorEvent],
+    responses: [],
+    effects: [openingEffect],
+    actionResults: [],
+    guardrails: input.sceneDirection.narrationGuardrails,
+    controlReturnReason: "opening_scene_settled_packet",
+  };
+  const visibleActors = [
+    {
+      id: playerActorId,
+      label: input.playerLabel,
+      type: "player" as const,
+    },
+    ...input.sceneDirection.focalActorNames
+      .filter((name) => name.trim() && name.trim() !== input.playerLabel)
+      .map((name) => ({
+        id: `opening-actor:${name.trim()}`,
+        label: name.trim(),
+        type: "npc" as const,
+      })),
+  ];
+  const narratorPacket: NarratorPacket = {
+    campaignId: input.campaignId,
+    tick: input.currentTick,
+    playerAction: "[opening scene]",
+    oracleOutcome: null,
+    anchorEvent,
+    perceivableEvents: [anchorEvent],
+    perceivableResponses: [],
+    perceivableEffects: [openingEffect],
+    visibleActors,
+    hintSignals: input.sceneDirection.presenceReasons.map((reason) =>
+      reason.reason.trim()
+        ? `${reason.actorName}: ${reason.reason}`
+        : reason.actorName),
+    evidenceLedger: [{
+      id: openingEffect.id,
+      category: "perceivable_effect",
+      summary: input.sceneDirection.situationSummary,
+      sourceId: openingEffect.id,
+      summaryBackendFact: true,
+      claimSupport: ["playable_beat"],
+      precisionFacts: [{
+        kind: "summary",
+        value: input.sceneDirection.situationSummary,
+        sourcePath: "opening.sceneDirection.situationSummary",
+      }],
+    }],
+    guardrails: input.sceneDirection.narrationGuardrails,
+    controlReturnReason: "opening_scene_settled_packet",
+    allowedVisibleActorNames: visibleActors.map((actor) => actor.label),
+    forbiddenActorNames: [],
+    forbiddenFactMarkers: [],
+    forbiddenPrivateTerms: [],
+    canonicalTurnPacket,
+    sourceLinkedSummaries: [{
+      id: anchorEventId,
+      summary: input.sceneDirection.situationSummary,
+      sourceIds: [anchorEventId],
+      summarizedItemCount: 1,
+    }],
+  };
+  return { canonicalTurnPacket, narratorPacket };
+}
+
+function createOpeningNarrationLedger(input: {
+  campaignId: string;
+  currentTick: number;
+  playerId: string | null;
+  playerLabel: string;
+  sceneAssembly: SceneAssembly;
+  sceneDirection: WorldBrainSceneDirection;
+}): {
+  saga: TurnSagaRecord;
+  lockToken: string;
+  settledPacket: SettledTurnPacketRecord;
+  narratorPacket: NarratorPacket;
+} {
+  const baseClock = readWorldClock(input.campaignId);
+  const turnId = `opening:${input.currentTick}:${randomUUID()}`;
+  const lockToken = randomUUID();
+  let saga = createTurnSaga({
+    campaignId: input.campaignId,
+    turnId,
+    playerId: input.playerId,
+    actionText: "[opening scene]",
+    sourceAction: {
+      kind: "opening_scene",
+      currentTick: input.currentTick,
+    },
+    baseWorldVersion: baseClock.worldVersion,
+    requiresNarration: true,
+    activeLockToken: lockToken,
+    activeWorkerId: `opening-scene:${randomUUID()}`,
+    provenance: {
+      source: "opening_scene",
+      authority: "settled_packet",
+    },
+  });
+
+  for (const toStatus of OPENING_SAGA_TO_WORLD_CONSEQUENCE_STATUSES) {
+    saga = transitionTurnSagaStatus({
+      sagaId: saga.id,
+      toStatus,
+      reason: "Opening scene setup has no player-turn mutation phase; advancing to settled packet.",
+      lockToken,
+    });
+  }
+
+  const { canonicalTurnPacket, narratorPacket } = openingNarrationPackets(input);
+  const resultWorldVersion = readWorldClock(input.campaignId).worldVersion;
+  const settledTurnPacketInput = {
+    id: randomUUID(),
+    sagaId: saga.id,
+    lockToken,
+    oracleDecisionId: null,
+    canonicalTurnPacket,
+    narratorPacket,
+    sourceRefs: uniqueRefs([
+      ...canonicalTurnPacket.narratorFacts.eventIds,
+      ...(canonicalTurnPacket.turnResolution?.evidenceIds ?? []),
+    ]),
+    acceptedToolResultRefs: [],
+    acceptedActorResultRefs: [],
+    acceptedDurableEventIds: [],
+    producedDurableEventIds: [],
+    dueWorldRefs: [],
+    requiresNarration: true,
+    baseWorldVersion: baseClock.worldVersion,
+    resultWorldVersion,
+  };
+  recordPreparedSettledTurnPacket(settledTurnPacketInput);
+  const settledPacket = persistSettledTurnPacket(settledTurnPacketInput);
+  saga = getTurnSaga({ sagaId: saga.id }) ?? saga;
+  if (saga.status === "resolved_pending_narration") {
+    saga = transitionTurnSagaStatus({
+      sagaId: saga.id,
+      toStatus: "narrator_rendering",
+      reason: "Rendering opening narration from settled packet.",
+      lockToken,
+    });
+  }
+  return {
+    saga,
+    lockToken,
+    settledPacket,
+    narratorPacket,
+  };
 }
 
 export async function* processOpeningScene(
@@ -5076,12 +6512,13 @@ export async function* processOpeningScene(
   if (sceneAssembly.sceneDirection) {
     logWorldBrainSceneDirection("opening-scene", sceneAssembly.sceneDirection);
   }
-
-  const finalNarrationPrompt = await assembleFinalNarrationPrompt({
+  const openingLedger = createOpeningNarrationLedger({
     campaignId,
-    contextWindow,
+    currentTick,
+    playerId: player?.id ?? null,
+    playerLabel,
     sceneAssembly,
-    embedderResult,
+    sceneDirection,
   });
 
   yield {
@@ -5093,53 +6530,64 @@ export async function* processOpeningScene(
     },
   };
 
-  const openingCallStart = Date.now();
-  const openingNarration = await withRole("storyteller", () =>
-    runVisibleNarrationWithGuard({
-      label: "opening",
-      provider: storytellerProvider,
-      system: finalNarrationPrompt.system,
-      prompt: finalNarrationPrompt.prompt,
+  try {
+    const narration = await renderSettledNarrationWithSaga({
+      saga: openingLedger.saga,
+      settledPacket: openingLedger.settledPacket,
+      campaignId,
+      contextWindow,
+      sceneAssembly,
+      narratorPacket: openingLedger.narratorPacket,
+      embedderResult,
+      playerAction: "[opening scene]",
+      storytellerProvider,
       storytellerTemperature,
       storytellerMaxTokens,
-    }),
-  );
-  const narrativeText = openingNarration.text;
-  const reasoningText = openingNarration.reasoningText;
-  log.event("storyteller.visible.call", {
-    label: "opening",
-    initialLen: narrativeText.length,
-    retried: openingNarration.retried,
-    failures: openingNarration.failures,
-    reasoningLen: reasoningText?.length ?? 0,
-    finishReason: openingNarration.finishReason ?? null,
-    responseModel: openingNarration.response?.modelId ?? null,
-    usage: openingNarration.usage ?? null,
-    durationMs: Date.now() - openingCallStart,
-  });
-
-  log.info(
-    `Opening narration complete: final=${narrativeText.length} chars, retried=${openingNarration.retried}, failures=${openingNarration.failures.join(",") || "none"}`,
-  );
-  assertNonEmptyFinalVisibleNarration(narrativeText);
-
-  if (narrativeText) {
-    appendChatMessages(campaignId, [{ role: "assistant", content: narrativeText }]);
-    yield { type: "narrative", data: { text: narrativeText } };
-  }
-
-  if (reasoningText) {
-    log.event("storyteller.reasoning", {
-      label: "opening",
-      reasoningText,
-      responseModel: openingNarration.response?.modelId ?? null,
-      usage: openingNarration.usage ?? null,
+      narrationLabel: "opening",
     });
-  }
+    const narrativeText = narration.narrativeText;
+    const reasoningText = narration.reasoningText;
+    appendAssistantNarrationForResume({
+      campaignId,
+      saga: openingLedger.saga,
+      narratorAttemptId: narration.narratorAttemptId,
+      narrativeText,
+      presentationSource: "opening_scene",
+      lockToken: openingLedger.lockToken,
+    });
+    yield { type: "narrative", data: { text: narrativeText } };
 
-  if (shouldExposeReasoningSse() && reasoningText) {
-    yield { type: "reasoning", data: { text: reasoningText } };
-  }
+    if (reasoningText) {
+      log.event("storyteller.reasoning", {
+        label: "opening",
+        reasoningText,
+        responseModel: narration.lastVisibleResponse?.modelId ?? null,
+        usage: narration.lastVisibleUsage ?? null,
+      });
+    }
 
-  yield { type: "done", data: { tick: currentTick, opening: true } };
+    if (shouldExposeReasoningSse() && reasoningText) {
+      yield { type: "reasoning", data: { text: reasoningText } };
+    }
+
+    markTurnSagaFinalized({
+      sagaId: openingLedger.saga.id,
+      narratorAttemptId: narration.narratorAttemptId,
+      reason: narration.finalizationReason,
+      lockToken: openingLedger.lockToken,
+    });
+    log.info(
+      `Opening narration complete: final=${narrativeText.length} chars, retried=${narration.guardedNarration.retried}, failures=${narration.lastVisibleFailures.join(",") || "none"}`,
+    );
+    yield { type: "done", data: { tick: currentTick, opening: true } };
+  } finally {
+    try {
+      releaseTurnSagaWorker({
+        sagaId: openingLedger.saga.id,
+        lockToken: openingLedger.lockToken,
+      });
+    } catch (releaseError) {
+      log.warn("Opening narration worker could not release saga lock", releaseError);
+    }
+  }
 }

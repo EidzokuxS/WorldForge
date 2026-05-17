@@ -197,6 +197,7 @@ function upsertDesiredItemsForOwner(
   ownerId: string,
   existingRows: AuthoritativeItemRow[],
   desiredItems: DesiredAuthoritativeItem[],
+  options: { insertMissing: boolean },
 ): void {
   const db = getDb();
   const consumedRowIds = new Set<string>();
@@ -217,6 +218,10 @@ function upsertDesiredItemsForOwner(
           .where(eq(items.id, matchingRow.id))
           .run();
       }
+      continue;
+    }
+
+    if (!options.insertMissing) {
       continue;
     }
 
@@ -299,7 +304,9 @@ export function ensureCampaignInventoryAuthority(campaignId: string): void {
       buildPlayerLegacyLoadout(campaignId, row),
     );
 
-    upsertDesiredItemsForOwner(campaignId, row.id, existingRows, desiredItems);
+    upsertDesiredItemsForOwner(campaignId, row.id, existingRows, desiredItems, {
+      insertMissing: existingRows.length === 0,
+    });
     rewritePlayerCompatibilityProjection(campaignId, row);
   }
 
@@ -321,7 +328,9 @@ export function ensureCampaignInventoryAuthority(campaignId: string): void {
       .all();
     const desiredItems = buildDesiredAuthoritativeItems(buildNpcLegacyLoadout(row));
 
-    upsertDesiredItemsForOwner(campaignId, row.id, existingRows, desiredItems);
+    upsertDesiredItemsForOwner(campaignId, row.id, existingRows, desiredItems, {
+      insertMissing: existingRows.length === 0,
+    });
     rewriteNpcCompatibilityProjection(campaignId, row);
   }
 }

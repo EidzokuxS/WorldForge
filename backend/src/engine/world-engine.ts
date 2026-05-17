@@ -7,10 +7,11 @@
  * and create world-level narrative events.
  */
 
-import { generateText, stepCountIs } from "ai";
+import { stepCountIs } from "ai";
 import { eq, sql, desc } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { factions, locations, chronicle } from "../db/schema.js";
+import { generateText } from "../ai/raindrop-workshop.js";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
 import { createFactionTools } from "./faction-tools.js";
 import { createLogger } from "../lib/index.js";

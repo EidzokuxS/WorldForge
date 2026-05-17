@@ -333,7 +333,7 @@ describe("proposal truth boundary", () => {
       expect.objectContaining({ id: "proposal-committed-surface" }),
     );
     expect(playerPacket.sourceRefs.some((source) => source.id.startsWith("proposal-"))).toBe(false);
-    expect(formattedPlayerPacket).toContain("world_thread_signal");
+    expect(formattedPlayerPacket).not.toContain("world_thread_signal");
     expect(formattedPlayerPacket).toContain(committedSurfaceSignal);
     expect(visibleSurfaceText).not.toContain("secret patron");
   });

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
 import type { ToolExecutionContext } from "./tool-execution-context.js";
+import { isUnsafeModelFacingRef } from "./model-facing-scene.js";
 
 export const BRIDGE_STATE_TOOL_NAMES = [
   "move_actor",
@@ -49,7 +50,9 @@ export interface PreparedSceneExtraInput {
   name: string;
   tags: string[];
   locationRef: "current_scene" | "current_location";
+  locationId?: string;
   role: SceneExtraRole;
+  roleText?: string;
   reason: string;
 }
 
@@ -236,6 +239,12 @@ function findMovementCandidate(
   const snapshot = context.bridgeLookup;
   if (!snapshot) return null;
   const normalizedRef = normalize(ref);
+  const routeAlias = /^route(\d+)$/iu.exec(normalizedRef);
+  if (routeAlias) {
+    const routeIndex = Number(routeAlias[1]) - 1;
+    const candidate = snapshot.legalMovement[routeIndex];
+    return candidate?.connected ? candidate : null;
+  }
   return snapshot.legalMovement.find(
     (candidate) =>
       candidate.connected
@@ -243,8 +252,32 @@ function findMovementCandidate(
   ) ?? null;
 }
 
+function sameTurnRefConsumableByMoveActor(
+  context: ToolExecutionContext,
+  ref: string | null,
+): boolean {
+  if (!ref) return false;
+  const normalized = normalize(ref);
+  return (context.sameTurnModelSafeRefs ?? []).some((entry) => {
+    if (entry.consumableBy && !entry.consumableBy.includes("move_actor")) return false;
+    return [entry.token, ...entry.aliases].some((candidate) => normalize(candidate) === normalized);
+  });
+}
+
+function isUnsafePlayerTurnRef(context: ToolExecutionContext, ref: string | null): boolean {
+  return context.scope === "player_turn" && ref !== null && isUnsafeModelFacingRef(ref);
+}
+
 function legalMovementRef(context: ToolExecutionContext, ref: string | null): boolean {
-  return Boolean(ref && hasRef(context.legalMovementRefs, ref));
+  if (isUnsafePlayerTurnRef(context, ref)) return false;
+  return Boolean(
+    ref
+      && (
+        hasRef(context.legalMovementRefs, ref)
+        || Boolean(findMovementCandidate(context, ref))
+        || sameTurnRefConsumableByMoveActor(context, ref)
+      ),
+  );
 }
 
 export function prepareMoveActorInput(
@@ -263,7 +296,18 @@ export function prepareMoveActorInput(
     };
   }
 
-  const actorRef = readString(input, "actorRef") ?? context.subjectActorId ?? null;
+  const suppliedActorRef = readString(input, "actorRef");
+  const actorRef = suppliedActorRef ?? context.subjectActorId ?? null;
+  if (suppliedActorRef && isUnsafePlayerTurnRef(context, suppliedActorRef)) {
+    return {
+      ok: false,
+      issue: issue(
+        "hidden_actor_ref",
+        `${pathPrefix}.actorRef`,
+        "move_actor actorRef uses a backend-only ref. Use Player or omit actorRef for the current player.",
+      ),
+    };
+  }
   if (!actorRef || !hasRef(context.subjectActorRefs, actorRef)) {
     return {
       ok: false,
@@ -286,6 +330,19 @@ export function prepareMoveActorInput(
   const routeId = readString(input, "routeId");
   const evidenceRefs = readStringArray(input, "evidenceRefs");
   const routeEvidenceRefs = uniqueStrings([routeId, ...evidenceRefs]);
+  const unsafeRouteEvidence = [destinationRef, ...routeEvidenceRefs].find((ref) =>
+    isUnsafePlayerTurnRef(context, ref),
+  );
+  if (unsafeRouteEvidence) {
+    return {
+      ok: false,
+      issue: issue(
+        "remote_location_ref",
+        `${pathPrefix}.destinationRef`,
+        "move_actor route refs use a backend-only ref. Use a visible route label or a short check_route alias.",
+      ),
+    };
+  }
   if (routeEvidenceRefs.length === 0) {
     return {
       ok: false,
@@ -356,6 +413,16 @@ export function prepareCreateMinorPoiInput(
   }
 
   const areaRef = readString(input, "areaRef") ?? "current_location";
+  if (isUnsafePlayerTurnRef(context, areaRef)) {
+    return {
+      ok: false,
+      issue: issue(
+        "remote_location_ref",
+        `${pathPrefix}.areaRef`,
+        "create_minor_poi areaRef uses a backend-only ref. Use current_location/current_scene.",
+      ),
+    };
+  }
   if (!hasCurrentScopeRef(context, areaRef)) {
     return {
       ok: false,
@@ -469,28 +536,57 @@ export function prepareCreateSceneExtraInput(
     };
   }
 
-  const locationRef = readString(input, "locationRef") ?? "current_scene";
-  if (locationRef !== "current_scene" && locationRef !== "current_location") {
-    return {
-      ok: false,
-      issue: issue(
-        "remote_location_ref",
-        `${pathPrefix}.locationRef`,
-        "create_scene_extra locationRef must be current_scene or current_location.",
-      ),
-    };
-  }
-  if (locationRef === "current_scene" && !context.currentSceneScopeId) {
-    return {
-      ok: false,
-      issue: issue("remote_location_ref", `${pathPrefix}.locationRef`, "current_scene is unavailable."),
-    };
-  }
-  if (locationRef === "current_location" && !context.currentLocationId) {
-    return {
-      ok: false,
-      issue: issue("remote_location_ref", `${pathPrefix}.locationRef`, "current_location is unavailable."),
-    };
+  const locationId = readString(input, "locationId");
+  const rawLocationRef = readString(input, "locationRef") ?? "current_scene";
+  const locationRef: "current_scene" | "current_location" =
+    rawLocationRef === "current_location" ? "current_location" : "current_scene";
+  if (locationId) {
+    if (isUnsafePlayerTurnRef(context, locationId)) {
+      return {
+        ok: false,
+        issue: issue(
+          "remote_location_ref",
+          `${pathPrefix}.locationId`,
+          "create_scene_extra locationId uses a backend-only ref. Use current_scene/current_location or a short helper alias.",
+        ),
+      };
+    }
+    const sameTurnRefs = context.scope === "player_turn"
+      ? new Set<string>()
+      : context.sameTurnResultRefs ?? new Set<string>();
+    if (!hasCurrentScopeRef(context, locationId) && !hasRef(sameTurnRefs, locationId)) {
+      return {
+        ok: false,
+        issue: issue(
+          "remote_location_ref",
+          `${pathPrefix}.locationId`,
+          "create_scene_extra locationId must be current-scope or returned by a successful same-turn tool result.",
+        ),
+      };
+    }
+  } else {
+    if (rawLocationRef !== "current_scene" && rawLocationRef !== "current_location") {
+      return {
+        ok: false,
+        issue: issue(
+          "remote_location_ref",
+          `${pathPrefix}.locationRef`,
+          "create_scene_extra locationRef must be current_scene or current_location.",
+        ),
+      };
+    }
+    if (locationRef === "current_scene" && !context.currentSceneScopeId) {
+      return {
+        ok: false,
+        issue: issue("remote_location_ref", `${pathPrefix}.locationRef`, "current_scene is unavailable."),
+      };
+    }
+    if (locationRef === "current_location" && !context.currentLocationId) {
+      return {
+        ok: false,
+        issue: issue("remote_location_ref", `${pathPrefix}.locationRef`, "current_location is unavailable."),
+      };
+    }
   }
 
   const persistence = readString(input, "persistence") ?? "temporary";
@@ -505,7 +601,8 @@ export function prepareCreateSceneExtraInput(
     };
   }
 
-  const safetyText = combinedText(input, ["role", "name", "reason", "tags"]);
+  const roleText = readString(input, "roleText");
+  const safetyText = combinedText(input, ["role", "roleText", "name", "reason", "tags"]);
   if (textMatchesAnyPattern(safetyText, DISALLOWED_EXTRA_PATTERNS)) {
     return {
       ok: false,
@@ -528,7 +625,7 @@ export function prepareCreateSceneExtraInput(
   return {
     ok: true,
     value: {
-      name: readString(input, "name") ?? SCENE_EXTRA_LABELS[role],
+      name: readString(input, "name") ?? roleText ?? SCENE_EXTRA_LABELS[role],
       tags: uniqueStrings([
         ...readStringArray(input, "tags"),
         "temporary",
@@ -538,7 +635,9 @@ export function prepareCreateSceneExtraInput(
         `role:${role}`,
       ]),
       locationRef,
+      locationId: locationId ?? undefined,
       role,
+      roleText: roleText ?? undefined,
       reason,
     },
   };
@@ -560,7 +659,18 @@ function requireSubjectActor(
       ),
     };
   }
-  const actorRef = readString(input, "actorRef") ?? context.subjectActorId ?? null;
+  const suppliedActorRef = readString(input, "actorRef");
+  const actorRef = suppliedActorRef ?? context.subjectActorId ?? null;
+  if (suppliedActorRef && isUnsafePlayerTurnRef(context, suppliedActorRef)) {
+    return {
+      ok: false,
+      issue: issue(
+        "hidden_actor_ref",
+        `${pathPrefix}.actorRef`,
+        `${toolName} actorRef uses a backend-only ref. Use Player or omit actorRef for the current player.`,
+      ),
+    };
+  }
   if (!actorRef || !hasRef(context.subjectActorRefs, actorRef)) {
     return {
       ok: false,

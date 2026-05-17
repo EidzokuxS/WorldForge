@@ -183,6 +183,75 @@ describe("visible narration output guard", () => {
     });
   });
 
+  it("fails packet validation when grounded draft drifts from cited precision facts", () => {
+    const packet = createPacket();
+    packet.evidenceLedger = [
+      {
+        id: "perceivable_effect:route-answer",
+        category: "perceivable_effect",
+        summary: "Brasswick gives route timing and tribunal approach guidance.",
+        sourceId: "route-answer",
+        claimSupport: ["route_status", "playable_beat"],
+        precisionFacts: [
+          {
+            kind: "claim",
+            value:
+              "Second bell has not yet passed; it is still early-to-mid afternoon.",
+            sourcePath: "claims.0.summary",
+            claimKind: "route_status",
+            polarity: "states",
+            exhaustive: true,
+          },
+          {
+            kind: "claim",
+            value:
+              "The safest route is the east aqueduct maintenance catwalk south along the channel, then the stone causeway approach.",
+            sourcePath: "claims.1.summary",
+            claimKind: "route_status",
+            polarity: "allows",
+            exhaustive: true,
+          },
+        ],
+      },
+    ];
+    const text =
+      "Brasswick says second bell passed an hour ago, and the aqueduct service walk under the southern arch past the cistern grates stays clear.";
+    const draft = createGroundedDraft({
+      prose: text,
+      claims: [
+        {
+          id: "claim-route",
+          kind: "route_status",
+          summary: "Brasswick gives route timing and tribunal approach guidance.",
+          requiresEvidence: true,
+          evidenceRefs: ["perceivable_effect:route-answer"],
+        },
+      ],
+      claimSpans: [
+        {
+          id: "span-route",
+          spanText: text,
+          claimIds: ["claim-route"],
+          requiresEvidence: true,
+        },
+      ],
+    });
+
+    const validation = validateVisibleNarrationAgainstPacket({
+      packet,
+      text,
+      draft,
+    });
+
+    expect(validation.ok).toBe(false);
+    expect(validation.violations).toContainEqual(
+      expect.objectContaining({ kind: "grounding" }),
+    );
+    expect(validation.grounding?.violations).toContainEqual(
+      expect.objectContaining({ kind: "precision_fact_drift" }),
+    );
+  });
+
   it("allows same-turn committed visible actor creation labels in final narration", () => {
     const packet = createPacket();
     packet.forbiddenActorNames = ["Exchange Validation Clerk"];

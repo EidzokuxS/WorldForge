@@ -9,6 +9,7 @@ import crypto from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { CHARACTER_SKILL_TIERS, CHARACTER_WEALTH_TIERS, type CharacterRecord } from "@worldforge/shared";
 import { getDb } from "../db/index.js";
+import { withSqliteWriteLock } from "../db/sqlite-write-lock.js";
 import {
   players,
   npcs,
@@ -19,10 +20,16 @@ import {
   relationships,
   chronicle,
 } from "../db/schema.js";
-import { storeEpisodicEvent } from "../vectors/episodic-events.js";
+import {
+  retractStoredEpisodicEvent,
+  storeEpisodicEvent,
+} from "../vectors/episodic-events.js";
 import { createLogger } from "../lib/index.js";
 import { parseTags } from "./parse-helpers.js";
-import { accumulateReflectionBudget } from "./reflection-budget.js";
+import {
+  accumulateReflectionBudget,
+  retractReflectionBudget,
+} from "./reflection-budget.js";
 import {
   createCharacterRecordFromDraft,
   fromLegacyScaffoldNpc,
@@ -47,13 +54,16 @@ import {
   validateToolInputGrounding,
   type SpawnNpcLocationRef,
   type ToolExecutionContext,
+  type ToolGroundingIssue,
 } from "./tool-execution-context.js";
 import {
   recordActorKnowledge,
+  retractActorKnowledgeRecord,
   type ActorKnowledgeRoute,
   type ActorKnowledgeTruthStatus,
 } from "./knowledge-model.js";
 import type { RuntimeToolName } from "./tool-schemas.js";
+import { runtimeToolInputSchemas } from "./runtime-tool-input-schemas.js";
 import {
   buildRecordPlayerIntentResult,
   buildStartSearchResult,
@@ -61,23 +71,33 @@ import {
   prepareCreateSceneExtraInput,
   prepareMoveActorInput,
   type BridgeStateValidationIssue,
+  type PreparedSceneExtraInput,
 } from "./bridge-state-tools.js";
 import {
   WorldVersionConflictError,
   commitAuthorityTrace,
+  readWorldClock,
   validateBaseWorldVersion,
 } from "./living-world-authority.js";
 import {
+  attachModelVisibleToolResultJson,
   attachToolResultAuthority,
   buildValidationFailureToolResult,
   inferRefsFromToolResultPayload,
+  isObservationToolResult,
+  type ToolContractFailure,
   type ToolResult,
 } from "./tool-result.js";
+import { assertSimulationProposalExecutionStillClaimed } from "./simulation-proposal-execution.js";
 import {
   buildCombatEnvelope,
   buildNarrativeOutcomeBounds,
   deriveCombatPosture,
 } from "./combat-envelope.js";
+import { findUncoveredWriteRef } from "./simulation-write-scope.js";
+import {
+  RUNTIME_STATE_BEARING_TOOL_NAMES,
+} from "./tool-contracts.js";
 
 export type { ToolResult } from "./tool-result.js";
 
@@ -101,6 +121,16 @@ type ResolvedSpawnNpcLocation = {
   scene: ToolLocationRow;
   broad: ToolLocationRow;
 };
+type ToolNpcRow = {
+  id: string;
+  name: string;
+  tier: string;
+  currentLocationId: string | null;
+  currentSceneLocationId: string | null;
+  tags?: string | null;
+  persona?: string | null;
+};
+type DurableLogEventVisibility = "player_perceivable" | "local_signal" | "report_only" | "hidden";
 
 const ENTITY_TYPE_TABLE_MAP = {
   player: players,
@@ -114,33 +144,19 @@ const NPC_TIER_ORDER: Record<NpcTier, number> = {
   persistent: 1,
   key: 2,
 };
-const STATE_BEARING_TOOLS = new Set([
-  "add_tag",
-  "remove_tag",
-  "set_relationship",
-  "add_chronicle_entry",
-  "log_event",
-  "record_dialogue_outcome",
-  "record_world_fact",
-  "advance_time",
-  "spawn_npc",
-  "promote_npc",
-  "spawn_item",
-  "reveal_location",
-  "request_contested_outcome",
-  "set_condition",
-  "move_to",
-  "move_actor",
-  "create_minor_poi",
-  "create_scene_extra",
-  "start_search",
-  "record_player_intent",
-  "transfer_item",
-]);
+const STATE_BEARING_TOOLS = new Set<string>(RUNTIME_STATE_BEARING_TOOL_NAMES);
 const SYNC_SQLITE_STATE_BEARING_TOOLS = new Set(
   [...STATE_BEARING_TOOLS].filter((toolName) =>
     toolName !== "log_event" && toolName !== "record_dialogue_outcome"),
 );
+
+export function toolRequiresExecutionAuthority(toolName: string): boolean {
+  return STATE_BEARING_TOOLS.has(toolName);
+}
+
+export interface ExecuteToolCallOptions {
+  authorityMode?: "strict_authority" | "legacy_unscoped";
+}
 
 // -- Entity resolution --------------------------------------------------------
 
@@ -217,6 +233,52 @@ function loadToolLocationRows(campaignId: string): ToolLocationRow[] {
 
 function normalizeLocationRef(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function normalizeEntityName(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+const SCENE_EXTRA_REUSE_STOP_WORDS = new Set([
+  "current",
+  "local",
+  "nearby",
+  "night",
+  "plaza",
+  "public",
+  "scene",
+  "extra",
+  "temporary",
+  "support",
+  "role",
+  "salt",
+  "stained",
+  "grey",
+  "gray",
+  "sash",
+  "with",
+]);
+
+function sceneExtraReuseTerms(values: Array<string | null | undefined>): Set<string> {
+  const terms = new Set<string>();
+  for (const value of values) {
+    const normalized = normalizeEntityName(value ?? "");
+    if (!normalized) continue;
+    for (const token of normalized.split(/[^a-z0-9]+/)) {
+      if (token.length < 4) continue;
+      if (SCENE_EXTRA_REUSE_STOP_WORDS.has(token)) continue;
+      terms.add(token);
+    }
+  }
+  return terms;
+}
+
+function termsOverlap(left: ReadonlySet<string>, right: ReadonlySet<string>): number {
+  let count = 0;
+  for (const term of left) {
+    if (right.has(term)) count += 1;
+  }
+  return count;
 }
 
 function resolveToolLocationById(campaignId: string, locationId: string): ToolLocationRow | null {
@@ -599,7 +661,17 @@ function resolveCharacterRecordByRef(
 function resolveItemByNameOrRef(
   campaignId: string,
   itemRef: string,
-): { id: string; name: string } | null {
+): {
+  id: string;
+  campaignId: string;
+  name: string;
+  tags: string;
+  ownerId: string | null;
+  locationId: string | null;
+  equipState: InventoryEquipState;
+  equippedSlot: string | null;
+  isSignature: boolean;
+} | null {
   const candidates = refCandidates(itemRef, ["item:"]);
   const primaryRef = candidates[0] ?? itemRef;
   const secondaryRef = candidates[1] ?? primaryRef;
@@ -608,7 +680,17 @@ function resolveItemByNameOrRef(
   const db = getDb();
 
   return db
-    .select({ id: items.id, name: items.name })
+    .select({
+      id: items.id,
+      campaignId: items.campaignId,
+      name: items.name,
+      tags: items.tags,
+      ownerId: items.ownerId,
+      locationId: items.locationId,
+      equipState: items.equipState,
+      equippedSlot: items.equippedSlot,
+      isSignature: items.isSignature,
+    })
     .from(items)
     .where(
       sql`${items.campaignId} = ${campaignId} AND (${items.id} = ${primaryRef} OR ${items.id} = ${secondaryRef} OR LOWER(${items.name}) = ${normalizedPrimary} OR LOWER(${items.name}) = ${normalizedSecondary})`
@@ -662,7 +744,7 @@ function handleAddTag(
 
     return {
       success: true,
-      result: { entity: character.name, tags },
+      result: { entity: character.name, appliedTag: tag, tags },
     };
   }
 
@@ -694,7 +776,7 @@ function handleAddTag(
 
   return {
     success: true,
-    result: { entity: entity.name, tags: currentTags },
+    result: { entity: entity.name, appliedTag: tag, tags: currentTags },
   };
 }
 
@@ -742,7 +824,7 @@ function handleRemoveTag(
 
     return {
       success: true,
-      result: { entity: character.name, tags },
+      result: { entity: character.name, removedTag: tag, tags },
     };
   }
 
@@ -776,7 +858,7 @@ function handleRemoveTag(
 
   return {
     success: true,
-    result: { entity: entity.name, tags: currentTags },
+    result: { entity: entity.name, removedTag: tag, tags: currentTags },
   };
 }
 
@@ -872,7 +954,8 @@ function handleAddChronicleEntry(
 async function handleLogEvent(
   campaignId: string,
   args: Record<string, unknown>,
-  tick: number
+  tick: number,
+  executionContext?: ToolExecutionContext,
 ): Promise<ToolResult> {
   const text = args.text as string;
   const importance = args.importance as number;
@@ -880,6 +963,18 @@ async function handleLogEvent(
   const durability = args.durability === "durable" ? "durable" : "scene_local";
   const futureRelevance =
     typeof args.futureRelevance === "string" ? args.futureRelevance.trim() : "";
+  const visibility: DurableLogEventVisibility =
+    executionContext?.scope === "actor_turn" ? "hidden" : "player_perceivable";
+  const surfaceRoute =
+    executionContext?.scope === "actor_turn" ? "actor_private_log_event" : "log_event";
+  const knowledgeRoute =
+    executionContext?.scope === "actor_turn" && executionContext.subjectActorId
+      ? `actor:${executionContext.subjectActorId}`
+      : null;
+  const hiddenCauseTerms =
+    executionContext?.scope === "actor_turn" && executionContext.subjectActorId
+      ? [executionContext.subjectActorId]
+      : [];
 
   if (durability !== "durable") {
     return {
@@ -912,14 +1007,19 @@ async function handleLogEvent(
         .get()
     : null;
 
+  let eventId: string | null = null;
   try {
-    const eventId = await storeEpisodicEvent(campaignId, {
+    eventId = await storeEpisodicEvent(campaignId, {
       text,
       tick,
       location: playerLocation?.name ?? "",
       participants,
       importance,
       type: "event",
+      visibility,
+      surfaceRoute,
+      knowledgeRoute,
+      hiddenCauseTerms,
     });
     await accumulateReflectionBudget(campaignId, participants, importance);
 
@@ -929,9 +1029,23 @@ async function handleLogEvent(
         eventId,
         durability: "durable",
         persisted: true,
+        visibility,
+        surfaceRoute,
+        knowledgeRoute,
       },
     };
   } catch (error) {
+    if (eventId) {
+      await retractDurableMemoryAfterRejectedAuthority({
+        campaignId,
+        toolName: "log_event",
+        args,
+        result: {
+          success: true,
+          result: { eventId },
+        },
+      });
+    }
     log.warn("Failed to store episodic event", error);
     return {
       success: false,
@@ -989,6 +1103,26 @@ function canonicalDialogueOutcomeText(args: Record<string, unknown>): string {
         })
         .filter(Boolean)
     : [];
+  const stateEffects = Array.isArray(args.stateEffects)
+    ? args.stateEffects
+        .filter((effect): effect is Record<string, unknown> =>
+          Boolean(effect) && typeof effect === "object" && !Array.isArray(effect))
+        .map((effect) => {
+          const status = readToolString(effect.status) ?? "unknown";
+          const structuralTool = readToolString(effect.structuralTool);
+          const targetRef = readToolString(effect.targetRef);
+          const stateKey = readToolString(effect.stateKey);
+          const stateValue = readToolString(effect.stateValue);
+          return [
+            status,
+            structuralTool ? `tool=${structuralTool}` : null,
+            targetRef ? `target=${targetRef}` : null,
+            stateKey ? `key=${stateKey}` : null,
+            stateValue ? `value=${stateValue}` : null,
+          ].filter((part): part is string => Boolean(part)).join("/");
+        })
+        .filter(Boolean)
+    : [];
 
   return [
     `Dialogue outcome ${outcomeKind} on ${topicKind}.`,
@@ -998,6 +1132,7 @@ function canonicalDialogueOutcomeText(args: Record<string, unknown>): string {
     `Summary: ${summary}`,
     quote ? `Quote: ${quote}` : null,
     claims.length > 0 ? `Claims: ${claims.join(" | ")}` : null,
+    stateEffects.length > 0 ? `State effects: ${stateEffects.join(" | ")}` : null,
     futureUseKind ? `Future use: ${futureUseKind}.` : null,
     futureRelevance ? `Future relevance: ${futureRelevance}` : null,
   ].filter((part): part is string => Boolean(part)).join(" ");
@@ -1007,6 +1142,7 @@ async function handleRecordDialogueOutcome(
   campaignId: string,
   args: Record<string, unknown>,
   tick: number,
+  executionContext?: ToolExecutionContext,
 ): Promise<ToolResult> {
   const durability = args.durability === "durable" ? "durable" : "scene_local";
   const text = canonicalDialogueOutcomeText(args);
@@ -1014,6 +1150,7 @@ async function handleRecordDialogueOutcome(
   const addresseeRefs = readToolStringArray(args.addresseeRefs);
   const sourceRefs = readToolStringArray(args.sourceRefs);
   const claims = Array.isArray(args.claims) ? args.claims : [];
+  const stateEffects = Array.isArray(args.stateEffects) ? args.stateEffects : [];
   const participants = uniqueToolStrings([
     speakerRef,
     ...addresseeRefs,
@@ -1033,6 +1170,7 @@ async function handleRecordDialogueOutcome(
     quote: readToolString(args.quote),
     summary: readToolString(args.summary),
     claims,
+    stateEffects,
     sourceRefs,
     durability,
   };
@@ -1069,8 +1207,10 @@ async function handleRecordDialogueOutcome(
         .get()
     : null;
 
+  let eventId: string | null = null;
+  let knowledgeId: string | null = null;
   try {
-    const eventId = await storeEpisodicEvent(campaignId, {
+    eventId = await storeEpisodicEvent(campaignId, {
       text,
       tick,
       location: playerLocation?.name ?? "",
@@ -1078,6 +1218,14 @@ async function handleRecordDialogueOutcome(
       importance: 5,
       type: "event",
     });
+    const knowledgeRecord = recordDialogueOutcomeKnowledge({
+      campaignId,
+      actorId: executionContext?.subjectActorId,
+      args,
+      eventId,
+      statement: text,
+    });
+    knowledgeId = knowledgeRecord?.id ?? null;
     await accumulateReflectionBudget(campaignId, participants, 5);
 
     return {
@@ -1085,16 +1233,179 @@ async function handleRecordDialogueOutcome(
       result: {
         ...baseResult,
         eventId,
+        knowledgeId: knowledgeId ?? undefined,
+        factRef: knowledgeId ? `knowledge:${knowledgeId}` : undefined,
         persisted: true,
       },
     };
   } catch (error) {
+    if (knowledgeId) {
+      retractActorKnowledgeRecord({
+        campaignId,
+        knowledgeId,
+        reason: "failed_dialogue_outcome_commit",
+      });
+    }
+    if (eventId) {
+      await retractDurableMemoryAfterRejectedAuthority({
+        campaignId,
+        toolName: "record_dialogue_outcome",
+        args,
+        result: {
+          success: true,
+          result: { eventId },
+        },
+      });
+    }
     log.warn("Failed to store dialogue outcome event", error);
     return {
       success: false,
       error: `Failed to store dialogue outcome event: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
+}
+
+function mapDialogueKnowledgeRoute(
+  authorityKind: string | null,
+  outcomeKind: string | null,
+): ActorKnowledgeRoute {
+  switch (outcomeKind) {
+    case "silent":
+    case "gestured":
+    case "no_current_answer":
+      return "memory";
+    default:
+      break;
+  }
+
+  switch (authorityKind) {
+    case "role_authority":
+    case "public_service":
+      return "report_message";
+    case "hearsay":
+      return "rumor";
+    case "no_visible_authority":
+      return "memory";
+    case "witness":
+    case "not_authorized":
+    case "unknown":
+    default:
+      return "claim";
+  }
+}
+
+function mapDialogueKnowledgeTruthStatus(
+  truthStatus: string | null,
+): ActorKnowledgeTruthStatus {
+  switch (truthStatus) {
+    case "settled_by_backend":
+      return "verified";
+    case "speaker_asserted":
+      return "claimed";
+    case "contested":
+    case "conflicting":
+      return "disputed";
+    case "unconfirmed":
+    default:
+      return "reported";
+  }
+}
+
+function dialogueKnowledgeConfidence(
+  truthStatus: string | null,
+  authorityKind: string | null,
+): number {
+  switch (truthStatus) {
+    case "settled_by_backend":
+      return 85;
+    case "speaker_asserted":
+      return authorityKind === "role_authority" || authorityKind === "public_service" ? 70 : 55;
+    case "unconfirmed":
+      return 45;
+    case "contested":
+    case "conflicting":
+      return 35;
+    default:
+      return 50;
+  }
+}
+
+function sourceKnowledgeIdsFromRefs(sourceRefs: readonly string[]): string[] {
+  return sourceRefs.flatMap((ref) => {
+    const trimmed = ref.trim();
+    const prefix = "knowledge:";
+    if (!trimmed.toLowerCase().startsWith(prefix)) return [];
+    const id = trimmed.slice(prefix.length).trim();
+    return id ? [id] : [];
+  });
+}
+
+function dialogueKnowledgeSubjectRefs(args: Record<string, unknown>): string[] {
+  const claims = Array.isArray(args.claims) ? args.claims : [];
+  const values: string[] = uniqueToolStrings([
+    readToolString(args.speakerRef),
+    readToolString(args.requestedRoleText),
+    readToolString(args.topicKind),
+    readToolString(args.futureUseKind),
+    ...readToolStringArray(args.sourceRefs),
+  ]);
+
+  for (const claim of claims) {
+    if (!claim || typeof claim !== "object" || Array.isArray(claim)) continue;
+    values.push(...uniqueToolStrings([
+      readToolString((claim as Record<string, unknown>).claimKind),
+      readToolString((claim as Record<string, unknown>).subjectRef),
+      readToolString((claim as Record<string, unknown>).subjectText),
+    ]));
+  }
+
+  return uniqueToolStrings(values);
+}
+
+function recordDialogueOutcomeKnowledge(input: {
+  campaignId: string;
+  actorId?: string | null;
+  args: Record<string, unknown>;
+  eventId: string;
+  statement: string;
+}) {
+  if (!input.actorId) return null;
+
+  const authorityKind = readToolString(input.args.authorityKind);
+  const truthStatus = readToolString(input.args.truthStatus);
+  const sourceRefs = readToolStringArray(input.args.sourceRefs);
+  const confidence = dialogueKnowledgeConfidence(truthStatus, authorityKind);
+  return recordActorKnowledge({
+    campaignId: input.campaignId,
+    actorId: input.actorId,
+    route: mapDialogueKnowledgeRoute(
+      authorityKind,
+      readToolString(input.args.outcomeKind),
+    ),
+    truthStatus: mapDialogueKnowledgeTruthStatus(truthStatus),
+    statement: input.statement,
+    subjectRefs: dialogueKnowledgeSubjectRefs(input.args),
+    sourceEventIds: [input.eventId],
+    sourceKnowledgeIds: sourceKnowledgeIdsFromRefs(sourceRefs),
+    confidence,
+    reliability: confidence,
+    privacy: "private",
+    metadata: {
+      toolName: "record_dialogue_outcome",
+      eventId: input.eventId,
+      outcomeKind: readToolString(input.args.outcomeKind),
+      topicKind: readToolString(input.args.topicKind),
+      authorityKind,
+      truthStatus,
+      futureUseKind: readToolString(input.args.futureUseKind),
+      futureRelevance: readToolString(input.args.futureRelevance),
+      quote: readToolString(input.args.quote),
+      summary: readToolString(input.args.summary),
+      claims: Array.isArray(input.args.claims) ? input.args.claims : [],
+      stateEffects: Array.isArray(input.args.stateEffects) ? input.args.stateEffects : [],
+      sourceRefs,
+    },
+  });
 }
 
 function mapWorldFactRoute(sourceKind: string | null): ActorKnowledgeRoute {
@@ -1190,7 +1501,7 @@ function canonicalWorldFactText(args: Record<string, unknown>): string {
     `World fact ${factKind} on ${topicKind}.`,
     `Source: ${sourceKind}; truth: ${truthStatus}.`,
     subjectRefs.length > 0 ? `Subjects: ${subjectRefs.join(", ")}.` : null,
-    sourceRefs.length > 0 ? `Source refs: ${sourceRefs.join(", ")}.` : null,
+    sourceRefs.length > 0 ? "Source refs are preserved internally." : null,
     `Summary: ${summary}`,
     claims.length > 0 ? `Claims: ${claims.join(" | ")}` : null,
     futureUseKind ? `Future use: ${futureUseKind}.` : null,
@@ -1315,10 +1626,141 @@ function resolveSpawnNpcLocation(
   };
 }
 
+function isNpcInResolvedLocalScope(
+  npc: Pick<ToolNpcRow, "currentLocationId" | "currentSceneLocationId">,
+  resolvedLocation: ResolvedSpawnNpcLocation,
+): boolean {
+  return npc.currentSceneLocationId === resolvedLocation.scene.id
+    || npc.currentLocationId === resolvedLocation.scene.id
+    || npc.currentLocationId === resolvedLocation.broad.id;
+}
+
+function isNpcInResolvedImmediateSceneScope(
+  npc: Pick<ToolNpcRow, "currentLocationId" | "currentSceneLocationId">,
+  resolvedLocation: ResolvedSpawnNpcLocation,
+): boolean {
+  return npc.currentSceneLocationId === resolvedLocation.scene.id
+    || npc.currentLocationId === resolvedLocation.scene.id;
+}
+
+function loadLocalNpcRows(
+  campaignId: string,
+  resolvedLocation: ResolvedSpawnNpcLocation,
+): ToolNpcRow[] {
+  return getDb()
+    .select({
+      id: npcs.id,
+      name: npcs.name,
+      tier: npcs.tier,
+      currentLocationId: npcs.currentLocationId,
+      currentSceneLocationId: npcs.currentSceneLocationId,
+      tags: npcs.tags,
+      persona: npcs.persona,
+    })
+    .from(npcs)
+    .where(eq(npcs.campaignId, campaignId))
+    .all()
+    .filter((npc: ToolNpcRow) => isNpcInResolvedLocalScope(npc, resolvedLocation));
+}
+
+function findExistingLocalNpcByName(
+  campaignId: string,
+  name: string,
+  resolvedLocation: ResolvedSpawnNpcLocation,
+): ToolNpcRow | null {
+  const normalizedName = normalizeEntityName(name);
+  return loadLocalNpcRows(campaignId, resolvedLocation)
+    .find((npc) => normalizeEntityName(npc.name) === normalizedName) ?? null;
+}
+
+function findExistingImmediateSceneNpcByName(
+  campaignId: string,
+  name: string,
+  resolvedLocation: ResolvedSpawnNpcLocation,
+  executionContext?: ToolExecutionContext,
+): ToolNpcRow | null {
+  const normalizedName = normalizeEntityName(name);
+  return loadLocalNpcRows(campaignId, resolvedLocation)
+    .filter((npc) => isNpcInResolvedImmediateSceneScope(npc, resolvedLocation))
+    .filter((npc) => isNpcVisibleForSceneExtraReuse(npc, executionContext))
+    .find((npc) => normalizeEntityName(npc.name) === normalizedName) ?? null;
+}
+
+function findExistingImmediateSceneNpcBySceneExtraIntent(
+  campaignId: string,
+  input: PreparedSceneExtraInput,
+  resolvedLocation: ResolvedSpawnNpcLocation,
+  executionContext?: ToolExecutionContext,
+): ToolNpcRow | null {
+  const requestedTerms = sceneExtraReuseTerms([
+    input.name,
+    input.roleText,
+    input.role,
+    ...input.tags,
+  ]);
+  if (requestedTerms.size === 0) return null;
+
+  let best: { npc: ToolNpcRow; score: number } | null = null;
+  for (const npc of loadLocalNpcRows(campaignId, resolvedLocation)) {
+    if (!isNpcInResolvedImmediateSceneScope(npc, resolvedLocation)) continue;
+    if (!isNpcVisibleForSceneExtraReuse(npc, executionContext)) continue;
+    if (npc.tier !== "temporary") continue;
+    const existingTerms = sceneExtraReuseTerms([
+      npc.name,
+      npc.tags,
+      npc.persona,
+    ]);
+    const score = termsOverlap(requestedTerms, existingTerms);
+    if (score === 0) continue;
+    if (!best || score > best.score) {
+      best = { npc, score };
+    }
+  }
+  return best?.npc ?? null;
+}
+
+function modelRefSetContainsVisibleLabel(refs: ReadonlySet<string> | undefined, value: string): boolean {
+  if (!refs) return false;
+  const normalized = normalizeEntityName(value);
+  return [...refs].some((ref) => normalizeEntityName(ref) === normalized);
+}
+
+function isNpcVisibleForSceneExtraReuse(
+  npc: ToolNpcRow,
+  executionContext?: ToolExecutionContext,
+): boolean {
+  if (executionContext?.scope !== "player_turn") return true;
+  return modelRefSetContainsVisibleLabel(executionContext.legalActorRefs, npc.name);
+}
+
+function buildExistingLocalNpcObservation(
+  existing: ToolNpcRow,
+  resolvedLocation: ResolvedSpawnNpcLocation,
+  extras: Record<string, unknown> = {},
+): ToolResult {
+  return {
+    success: true,
+    kind: "observation",
+    observationOnly: true,
+    result: {
+      name: existing.name,
+      locationName: resolvedLocation.scene.name,
+      broadLocationName: resolvedLocation.broad.name,
+      sceneLocationName: resolvedLocation.scene.name,
+      tier: existing.tier,
+      temporary: existing.tier === "temporary",
+      reusedExisting: true,
+      delegateTool: "existing_npc",
+      ...extras,
+    },
+  };
+}
+
 function handleSpawnNpc(
   campaignId: string,
   args: Record<string, unknown>,
   executionContext?: ToolExecutionContext,
+  options: { reuseExisting?: "local" | "immediate_scene" | "none" } = {},
 ): ToolResult {
   const name = args.name as string;
   const tags = args.tags as string[];
@@ -1339,6 +1781,17 @@ function handleSpawnNpc(
       success: false,
       error: "spawn_npc locationName must resolve to the current scene/current location in player turns",
     };
+  }
+
+  if (executionContext?.scope === "player_turn" && options.reuseExisting !== "none") {
+    const existing = options.reuseExisting === "immediate_scene"
+      ? findExistingImmediateSceneNpcByName(campaignId, name, resolvedLocation, executionContext)
+      : findExistingLocalNpcByName(campaignId, name, resolvedLocation);
+    if (existing) {
+      return buildExistingLocalNpcObservation(existing, resolvedLocation, {
+        reason: "An exact-name local NPC already exists in the current scene; reused instead of spawning a duplicate.",
+      });
+    }
   }
 
   const id = crypto.randomUUID();
@@ -1568,7 +2021,9 @@ function handleRevealLocation(
 
   const id = crypto.randomUUID();
   const db = getDb();
-  const expiresAtTick = tick + 3;
+  const clock = readWorldClock(campaignId);
+  const effectiveTick = Math.max(tick, clock.currentTick);
+  const expiresAtTick = effectiveTick + 3;
 
   // Insert new location connected to existing one
   db.insert(locations)
@@ -1894,6 +2349,21 @@ function bridgeValidationFailure(issue: BridgeStateValidationIssue): ToolResult 
   };
 }
 
+function contractFailureFromGroundingIssue(input: {
+  toolName: string;
+  issue: ToolGroundingIssue;
+}): ToolContractFailure {
+  return {
+    code: input.issue.code,
+    path: input.issue.path,
+    toolName: input.issue.toolName?.toString() ?? input.toolName,
+    retryable: true,
+    invalidRef: input.issue.invalidRef,
+    refHints: input.issue.refHints,
+    message: input.issue.message,
+  };
+}
+
 function handleMoveActor(
   campaignId: string,
   args: Record<string, unknown>,
@@ -1976,14 +2446,56 @@ function handleCreateSceneExtra(
   const prepared = prepareCreateSceneExtraInput(args, executionContext);
   if (!prepared.ok) return bridgeValidationFailure(prepared.issue);
 
+  const resolvedLocation = resolveSpawnNpcLocation(
+    campaignId,
+    {
+      locationRef: prepared.value.locationId ? undefined : prepared.value.locationRef,
+      locationId: prepared.value.locationId,
+    },
+    executionContext,
+  );
+  if (!resolvedLocation) {
+    return { success: false, error: "Location not found for grounded local scene-extra ref" };
+  }
+  const existing = findExistingImmediateSceneNpcByName(
+    campaignId,
+    prepared.value.name,
+    resolvedLocation,
+    executionContext,
+  );
+  if (existing) {
+    return buildExistingLocalNpcObservation(existing, resolvedLocation, {
+      kind: "scene_extra",
+      role: prepared.value.role,
+      roleText: prepared.value.roleText,
+      reason: prepared.value.reason,
+    });
+  }
+  const existingByIntent = findExistingImmediateSceneNpcBySceneExtraIntent(
+    campaignId,
+    prepared.value,
+    resolvedLocation,
+    executionContext,
+  );
+  if (existingByIntent) {
+    return buildExistingLocalNpcObservation(existingByIntent, resolvedLocation, {
+      kind: "scene_extra",
+      role: prepared.value.role,
+      roleText: prepared.value.roleText,
+      reason: "A same-scene temporary scene extra already matches this requested role or office; reused instead of creating another responder.",
+    });
+  }
+
   const spawned = handleSpawnNpc(
     campaignId,
     {
       name: prepared.value.name,
       tags: prepared.value.tags,
-      locationRef: prepared.value.locationRef,
+      locationRef: prepared.value.locationId ? undefined : prepared.value.locationRef,
+      locationId: prepared.value.locationId,
     },
     executionContext,
+    { reuseExisting: "none" },
   );
   if (!spawned.success) return spawned;
 
@@ -1993,6 +2505,7 @@ function handleCreateSceneExtra(
       ...(spawned.result as Record<string, unknown>),
       kind: "scene_extra",
       role: prepared.value.role,
+      roleText: prepared.value.roleText,
       temporary: true,
       reason: prepared.value.reason,
       delegateTool: "spawn_npc",
@@ -2108,6 +2621,9 @@ function handleRequestContestedOutcome(
 
   return {
     success: true,
+    status: "success",
+    kind: "observation",
+    observationOnly: true,
     result: {
       kind: "contested_outcome_bounds",
       actorId: actor.id,
@@ -2229,6 +2745,10 @@ function handleTransferItem(
   const targetType = args.targetType as string;
   const equipState = args.equipState as InventoryEquipState | undefined;
   const equippedSlot = args.equippedSlot as string | undefined;
+  const transferredItemName =
+    typeof args.transferredItemName === "string" ? args.transferredItemName.trim() : "";
+  const remainingItemName =
+    typeof args.remainingItemName === "string" ? args.remainingItemName.trim() : "";
 
   const db = getDb();
 
@@ -2237,8 +2757,17 @@ function handleTransferItem(
   if (!item) {
     return { success: false, error: `Item not found: ${itemName}` };
   }
+  const originalItemName = item.name;
 
-  if (targetType === "character") {
+  const isPartialTransfer = Boolean(transferredItemName || remainingItemName);
+  if (isPartialTransfer && (!transferredItemName || !remainingItemName)) {
+    return {
+      success: false,
+      error: "Partial transfer requires both transferredItemName and remainingItemName",
+    };
+  }
+
+  if (targetType === "character" || targetType === "npc" || targetType === "player" || targetType === "actor") {
     const character = resolveCharacterByName(campaignId, targetName);
     if (!character) {
       return { success: false, error: `Character not found: ${targetName}` };
@@ -2248,6 +2777,56 @@ function handleTransferItem(
       equipState,
       equippedSlot,
     });
+
+    if (isPartialTransfer) {
+      const transferredId = crypto.randomUUID();
+      db.update(items)
+        .set({
+          name: remainingItemName,
+        })
+        .where(eq(items.id, item.id))
+        .run();
+      log.event("db.write", {
+        table: "items",
+        op: "update",
+        rowId: item.id,
+        rowName: originalItemName,
+      });
+
+      db.insert(items)
+        .values({
+          id: transferredId,
+          campaignId,
+          name: transferredItemName,
+          tags: item.tags,
+          ownerId: character.id,
+          locationId: null,
+          equipState: nextState.equipState,
+          equippedSlot: nextState.equippedSlot,
+          isSignature: false,
+        })
+        .run();
+      log.event("db.write", {
+        table: "items",
+        op: "insert",
+        rowId: transferredId,
+        rowName: transferredItemName,
+      });
+
+      return {
+        success: true,
+        result: {
+          item: transferredItemName,
+          splitFrom: originalItemName,
+          remainingItem: remainingItemName,
+          target: character.name,
+          action: nextState.equipState === "equipped" ? "equipped" : "carried",
+          equipState: nextState.equipState,
+          equippedSlot: nextState.equippedSlot,
+          partialTransfer: true,
+        },
+      };
+    }
 
     db.update(items)
       .set({
@@ -2284,6 +2863,56 @@ function handleTransferItem(
     }
 
     const nextState = resolveLocationTransferState();
+
+    if (isPartialTransfer) {
+      const transferredId = crypto.randomUUID();
+      db.update(items)
+        .set({
+          name: remainingItemName,
+        })
+        .where(eq(items.id, item.id))
+        .run();
+      log.event("db.write", {
+        table: "items",
+        op: "update",
+        rowId: item.id,
+        rowName: originalItemName,
+      });
+
+      db.insert(items)
+        .values({
+          id: transferredId,
+          campaignId,
+          name: transferredItemName,
+          tags: item.tags,
+          ownerId: null,
+          locationId: location.id,
+          equipState: nextState.equipState,
+          equippedSlot: nextState.equippedSlot,
+          isSignature: false,
+        })
+        .run();
+      log.event("db.write", {
+        table: "items",
+        op: "insert",
+        rowId: transferredId,
+        rowName: transferredItemName,
+      });
+
+      return {
+        success: true,
+        result: {
+          item: transferredItemName,
+          splitFrom: originalItemName,
+          remainingItem: remainingItemName,
+          target: location.name,
+          action: "dropped",
+          equipState: nextState.equipState,
+          equippedSlot: nextState.equippedSlot,
+          partialTransfer: true,
+        },
+      };
+    }
 
     db.update(items)
       .set({
@@ -2366,6 +2995,96 @@ function addStringRefs(target: Set<string>, values: readonly unknown[]): void {
   }
 }
 
+function scopedRef(prefix: string, value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const trimmed = value.trim();
+  const withoutPrefix = trimmed.includes(":")
+    ? trimmed.split(":").slice(1).join(":")
+    : trimmed;
+  return withoutPrefix ? `${prefix}:${withoutPrefix}` : null;
+}
+
+function addScopedWriteRefsForToolResult(
+  refs: Set<string>,
+  input: {
+    toolName: string;
+    args: Record<string, unknown>;
+    result: ToolResult;
+  },
+): void {
+  const payload = input.result.result;
+  switch (input.toolName) {
+    case "add_chronicle_entry":
+    case "log_event":
+      refs.add("world:event");
+      break;
+    case "record_dialogue_outcome":
+      refs.add("world:dialogue");
+      break;
+    case "record_world_fact":
+      refs.add("world:fact");
+      break;
+    case "advance_time":
+      refs.add("world:time");
+      break;
+    case "add_tag":
+    case "remove_tag": {
+      const entityType = typeof input.args.entityType === "string"
+        ? input.args.entityType.trim().toLowerCase()
+        : "";
+      const entityName = input.args.entityName;
+      if (entityType === "npc") addStringRefs(refs, [scopedRef("npc", entityName)]);
+      if (entityType === "faction") addStringRefs(refs, [scopedRef("faction", entityName)]);
+      if (entityType === "location") addStringRefs(refs, [scopedRef("location", entityName)]);
+      if (entityType === "item") addStringRefs(refs, [scopedRef("item", entityName)]);
+      break;
+    }
+    case "set_relationship":
+      refs.add("world:relationship");
+      break;
+    case "spawn_npc":
+    case "promote_npc":
+    case "create_scene_extra":
+      addStringRefs(refs, [
+        scopedRef("npc", readStringField(payload, "id")),
+        scopedRef("npc", readStringField(payload, "npcId")),
+        scopedRef("location", readStringField(payload, "locationId")),
+        scopedRef("location", readStringField(payload, "broadLocationId")),
+        scopedRef("location", readStringField(payload, "sceneLocationId")),
+      ]);
+      break;
+    case "spawn_item":
+      addStringRefs(refs, [scopedRef("item", readStringField(payload, "id"))]);
+      break;
+    case "reveal_location":
+    case "create_minor_poi":
+      addStringRefs(refs, [
+        scopedRef("location", readStringField(payload, "id")),
+        scopedRef("location", readStringField(payload, "parentLocationId")),
+        scopedRef("location", readStringField(payload, "anchorLocationId")),
+      ]);
+      break;
+    case "move_to":
+    case "move_actor":
+      addStringRefs(refs, [
+        scopedRef("npc", readStringField(payload, "actorId")),
+        scopedRef("npc", readStringField(payload, "actorRef")),
+        scopedRef("location", readStringField(payload, "locationId")),
+      ]);
+      break;
+    case "set_condition":
+      addStringRefs(refs, [scopedRef("npc", readStringField(payload, "entity"))]);
+      break;
+    case "start_search":
+    case "record_player_intent":
+      refs.add("world:intent");
+      break;
+    case "transfer_item":
+      refs.add("world:inventory");
+      break;
+  }
+}
+
 function isSceneLocalLogEvent(toolName: string, result: ToolResult): boolean {
   return (toolName === "log_event" || toolName === "record_dialogue_outcome")
     && readStringField(result.result, "durability") === "scene_local";
@@ -2376,11 +3095,7 @@ function stateDeltaRefsForToolResult(input: {
   args: Record<string, unknown>;
   result: ToolResult;
 }): string[] {
-  const refs = new Set(
-    input.toolName === "request_contested_outcome"
-      ? []
-      : inferRefsFromToolResultPayload(input.result.result),
-  );
+  const refs = new Set(inferRefsFromToolResultPayload(input.result.result));
   const payload = input.result.result;
   switch (input.toolName) {
     case "add_tag":
@@ -2468,8 +3183,6 @@ function stateDeltaRefsForToolResult(input: {
         readStringField(payload, "anchorLocationId"),
       ]);
       break;
-    case "request_contested_outcome":
-      break;
     case "set_condition":
       addStringRefs(refs, [readStringField(payload, "entity")]);
       break;
@@ -2522,13 +3235,163 @@ function stateDeltaRefsForToolResult(input: {
       break;
     case "transfer_item":
       addStringRefs(refs, [
+        input.args.itemName,
+        input.args.targetName,
+        input.args.transferredItemName,
+        input.args.remainingItemName,
         readStringField(payload, "item"),
+        readStringField(payload, "splitFrom"),
+        readStringField(payload, "remainingItem"),
         readStringField(payload, "target"),
         readStringField(payload, "equipState"),
       ]);
       break;
   }
+  addScopedWriteRefsForToolResult(refs, input);
   return [...refs].slice(0, 32);
+}
+
+function eventIdsForAuthorityTrace(input: {
+  toolName: string;
+  inferredRefs: readonly string[];
+  result: ToolResult;
+}): string[] {
+  const eventIds = new Set(
+    input.inferredRefs.filter((ref) => /^(?:event|chronicle):/i.test(ref)),
+  );
+  const payload = input.result.result;
+  switch (input.toolName) {
+    case "log_event":
+    case "record_dialogue_outcome":
+      addStringRefs(eventIds, [readStringField(payload, "eventId")]);
+      break;
+    case "add_chronicle_entry":
+      addStringRefs(eventIds, [readStringField(payload, "entryId")]);
+      break;
+  }
+  return [...eventIds];
+}
+
+function assertAuthorityWriteScopesCovered(input: {
+  stateDeltaRefs: readonly string[];
+  allowedWriteScopes?: readonly string[];
+}): void {
+  if (!input.allowedWriteScopes) return;
+  const scopeRefs = input.stateDeltaRefs.filter((ref) => /^[a-z-]+:[^:]+/i.test(ref));
+  const uncovered = findUncoveredWriteRef({
+    stateDeltaRefs: scopeRefs,
+    allowedWriteScopes: input.allowedWriteScopes,
+  });
+  if (uncovered) {
+    throw new Error(`authority_write_scope_mismatch:${uncovered.stateDeltaRef}`);
+  }
+}
+
+function durableMemoryRollbackDetails(input: {
+  toolName: string;
+  args: Record<string, unknown>;
+  result: ToolResult;
+}): { eventId: string; participants: string[]; importance: number } | null {
+  if (input.toolName !== "log_event" && input.toolName !== "record_dialogue_outcome") {
+    return null;
+  }
+  if (!input.result.success) return null;
+  const eventId = readStringField(input.result.result, "eventId");
+  if (!eventId) return null;
+
+  if (input.toolName === "log_event") {
+    const participants = readToolStringArray(input.args.participants);
+    const importance = typeof input.args.importance === "number" ? input.args.importance : 0;
+    return { eventId, participants, importance };
+  }
+
+  const speakerRef = readToolString(input.args.speakerRef);
+  const participants = uniqueToolStrings([
+    speakerRef,
+    ...readToolStringArray(input.args.addresseeRefs),
+    ...readToolStringArray(input.args.sourceRefs),
+  ]);
+  return { eventId, participants, importance: 5 };
+}
+
+function durableKnowledgeRollbackDetails(input: {
+  toolName: string;
+  result: ToolResult;
+}): { knowledgeId: string | null; factRef: string | null } | null {
+  if (
+    input.toolName !== "record_world_fact"
+    && input.toolName !== "record_dialogue_outcome"
+  ) {
+    return null;
+  }
+  if (!input.result.success) return null;
+  const payload = input.result.result;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  if (
+    readStringField(payload, "durability") !== "durable"
+    || (payload as Record<string, unknown>).persisted !== true
+  ) {
+    return null;
+  }
+  const knowledgeId = readStringField(payload, "knowledgeId");
+  const factRef = readStringField(payload, "factRef");
+  return knowledgeId || factRef ? { knowledgeId, factRef } : null;
+}
+
+function knowledgeOutputsForToolResult(input: {
+  toolName: string;
+  result: ToolResult;
+}): string[] {
+  const details = durableKnowledgeRollbackDetails(input);
+  if (!details) return [];
+  return uniqueToolStrings([details.knowledgeId, details.factRef]);
+}
+
+async function retractDurableMemoryAfterRejectedAuthority(input: {
+  campaignId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  result: ToolResult;
+}): Promise<void> {
+  const details = durableMemoryRollbackDetails(input);
+  if (details) {
+    try {
+      await retractStoredEpisodicEvent({
+        campaignId: input.campaignId,
+        eventId: details.eventId,
+      });
+      await retractReflectionBudget(
+        input.campaignId,
+        details.participants,
+        details.importance,
+      );
+    } catch (retractError) {
+      log.warn("Failed to retract durable memory after rejected authority commit", {
+        toolName: input.toolName,
+        eventId: details.eventId,
+        error: retractError instanceof Error ? retractError.message : String(retractError),
+      });
+    }
+  }
+
+  const knowledgeDetails = durableKnowledgeRollbackDetails(input);
+  if (knowledgeDetails) {
+    try {
+      retractActorKnowledgeRecord({
+        campaignId: input.campaignId,
+        knowledgeId: knowledgeDetails.knowledgeId,
+        factRef: knowledgeDetails.factRef,
+        reason: "rejected_authority_commit",
+      });
+    } catch (retractError) {
+      log.warn("Failed to retract durable knowledge after rejected authority commit", {
+        toolName: input.toolName,
+        knowledgeId: knowledgeDetails.knowledgeId,
+        factRef: knowledgeDetails.factRef,
+        error: retractError instanceof Error ? retractError.message : String(retractError),
+      });
+    }
+  }
 }
 
 function runToolHandler(input: {
@@ -2549,9 +3412,14 @@ function runToolHandler(input: {
     case "add_chronicle_entry":
       return handleAddChronicleEntry(input.campaignId, input.args, input.tick);
     case "log_event":
-      return handleLogEvent(input.campaignId, input.args, input.tick);
+      return handleLogEvent(input.campaignId, input.args, input.tick, input.executionContext);
     case "record_dialogue_outcome":
-      return handleRecordDialogueOutcome(input.campaignId, input.args, input.tick);
+      return handleRecordDialogueOutcome(
+        input.campaignId,
+        input.args,
+        input.tick,
+        input.executionContext,
+      );
     case "record_world_fact":
       return handleRecordWorldFact(input.campaignId, input.args, input.executionContext);
     case "advance_time":
@@ -2607,7 +3475,13 @@ function finalizeAuthorityResult(input: {
 }): ToolResult {
   const authority = input.executionContext?.authority;
   if (!authority || !STATE_BEARING_TOOLS.has(input.toolName)) {
-    return input.result;
+    return attachModelVisibleToolResultJson(input.result);
+  }
+  if (
+    input.result.success
+    && isObservationToolResult(input.result)
+  ) {
+    return attachModelVisibleToolResultJson(input.result);
   }
 
   if (!input.result.success) {
@@ -2646,6 +3520,14 @@ function finalizeAuthorityResult(input: {
     input.toolName === "advance_time"
       ? readIntegerField(input.result.result, "minutes") ?? 0
       : input.executionContext?.authority?.elapsedWorldTimeMinutes ?? 1;
+  assertAuthorityWriteScopesCovered({
+    stateDeltaRefs: inferredRefs,
+    allowedWriteScopes: authority.allowedWriteScopes,
+  });
+  assertSimulationProposalExecutionStillClaimed({
+    campaignId: input.campaignId,
+    metadata: authority.metadata,
+  });
   const trace = commitAuthorityTrace({
     campaignId: input.campaignId,
     operation: `tool:${input.toolName}`,
@@ -2653,19 +3535,93 @@ function finalizeAuthorityResult(input: {
     sourceEntity: authority.sourceEntity,
     elapsedWorldTimeMinutes,
     currentTick: input.tick,
-    eventIds: inferredRefs.filter((ref) => /event|chronicle/i.test(ref)),
+    toolResultId: authority.toolResultId,
+    eventIds: eventIdsForAuthorityTrace({
+      toolName: input.toolName,
+      inferredRefs,
+      result: input.result,
+    }),
     stateDeltaRefs: inferredRefs,
     metadata: {
       toolName: input.toolName,
       args: input.args,
+      ...(authority.metadata ? { proposalExecution: authority.metadata } : {}),
     },
   });
 
   return attachToolResultAuthority(input.result, {
     ...trace,
     eventRefs: trace.eventRefs,
-    requireStateDelta: input.toolName !== "request_contested_outcome",
+    knowledgeOutputs: knowledgeOutputsForToolResult(input),
+    requireStateDelta: true,
   });
+}
+
+function missingStateBearingAuthorityIssue(input: {
+  toolName: string;
+  executionContext?: ToolExecutionContext;
+  options?: ExecuteToolCallOptions;
+}): ToolResult | null {
+  if (!STATE_BEARING_TOOLS.has(input.toolName)) return null;
+  if (!input.executionContext) {
+    if (input.options?.authorityMode === "legacy_unscoped") return null;
+    return buildValidationFailureToolResult(
+      `${input.toolName} is state-bearing and requires execution authority. Pass a ToolExecutionContext with authority, or explicitly mark a legacy_unscoped caller.`,
+    );
+  }
+  if (input.executionContext.authority) return null;
+  return buildValidationFailureToolResult(
+    `${input.toolName} is state-bearing and requires execution authority for ${input.executionContext.scope}.`,
+  );
+}
+
+function runtimeToolSchemaFor(toolName: string) {
+  if (!Object.hasOwn(runtimeToolInputSchemas, toolName)) return null;
+  return runtimeToolInputSchemas[toolName as RuntimeToolName];
+}
+
+function describeSchemaIssues(
+  issues: readonly { path: PropertyKey[]; message: string }[],
+): string {
+  return issues
+    .slice(0, 5)
+    .map((issue) => {
+      const path = issue.path.length > 0
+        ? issue.path.map((part) => String(part)).join(".")
+        : "input";
+      return `${path}: ${issue.message}`;
+    })
+    .join("; ");
+}
+
+function validateRuntimeToolArgs(input: {
+  toolName: string;
+  args: Record<string, unknown>;
+}): { args: Record<string, unknown>; failure: ToolResult | null } {
+  const schema = runtimeToolSchemaFor(input.toolName);
+  if (!schema) return { args: input.args, failure: null };
+  const parsed = schema.safeParse(input.args);
+  if (!parsed.success) {
+    return {
+      args: input.args,
+      failure: buildValidationFailureToolResult(
+        `Tool schema validation failed for ${input.toolName}: ${describeSchemaIssues(parsed.error.issues)}`,
+      ),
+    };
+  }
+  const parsedData = parsed.data;
+  if (typeof parsedData !== "object" || parsedData === null || Array.isArray(parsedData)) {
+    return {
+      args: input.args,
+      failure: buildValidationFailureToolResult(
+        `Tool schema validation failed for ${input.toolName}: parsed input was not an object.`,
+      ),
+    };
+  }
+  return {
+    args: parsedData as Record<string, unknown>,
+    failure: null,
+  };
 }
 
 // -- Main executor ------------------------------------------------------------
@@ -2677,104 +3633,153 @@ export async function executeToolCall(
   tick: number,
   outcomeTier?: string,
   executionContext?: ToolExecutionContext,
+  options: ExecuteToolCallOptions = {},
 ): Promise<ToolResult> {
   const toolCallStart = Date.now();
   let resultForLog: ToolResult = { success: false, error: "Tool execution did not complete" };
+  let argsForExecution = args;
   try {
+    const schemaValidation = validateRuntimeToolArgs({ toolName, args });
+    argsForExecution = schemaValidation.args;
+    if (schemaValidation.failure) {
+      resultForLog = schemaValidation.failure;
+      return resultForLog;
+    }
+
+    const missingAuthority = missingStateBearingAuthorityIssue({
+      toolName,
+      executionContext,
+      options,
+    });
+    if (missingAuthority) {
+      resultForLog = missingAuthority;
+      return resultForLog;
+    }
+
+    if (executionContext?.scope === "player_turn" && toolName === "spawn_npc") {
+      resultForLog = {
+        success: false,
+        error: "spawn_npc is not a player-turn model-facing tool. Use create_scene_extra for temporary local NPCs.",
+      };
+      return resultForLog;
+    }
+
     if (executionContext) {
       const groundingIssue = validateToolInputGrounding({
         toolName: toolName as RuntimeToolName,
-        toolInput: args,
+        toolInput: argsForExecution,
         context: executionContext,
       });
       if (groundingIssue) {
-        resultForLog = {
-          success: false,
-          error: `Tool grounding failed: ${groundingIssue.message}`,
-        };
+        resultForLog = buildValidationFailureToolResult(
+          `Tool grounding failed: ${groundingIssue.message}`,
+          contractFailureFromGroundingIssue({ toolName, issue: groundingIssue }),
+        );
         return resultForLog;
       }
     }
 
-    const hasAuthority = Boolean(
-      executionContext?.authority && STATE_BEARING_TOOLS.has(toolName),
-    );
-    if (hasAuthority && SYNC_SQLITE_STATE_BEARING_TOOLS.has(toolName)) {
-      resultForLog = getDb().transaction(() => {
-        validateBaseWorldVersion({
-          campaignId,
-          baseWorldVersion: executionContext!.authority!.baseWorldVersion,
-          currentTick: tick,
+    const executeValidatedTool = async (): Promise<ToolResult> => {
+      const hasAuthority = Boolean(
+        executionContext?.authority && STATE_BEARING_TOOLS.has(toolName),
+      );
+      if (hasAuthority && SYNC_SQLITE_STATE_BEARING_TOOLS.has(toolName)) {
+        return getDb().transaction(() => {
+          validateBaseWorldVersion({
+            campaignId,
+            baseWorldVersion: executionContext!.authority!.baseWorldVersion,
+            currentTick: tick,
+          });
+          const handlerResult = runToolHandler({
+            campaignId,
+            toolName,
+            args: argsForExecution,
+            tick,
+            outcomeTier,
+            executionContext,
+          }) as ToolResult;
+          resultForLog = handlerResult;
+          return finalizeAuthorityResult({
+            campaignId,
+            toolName,
+            args: argsForExecution,
+            tick,
+            result: handlerResult,
+            executionContext,
+          });
         });
-        const handlerResult = runToolHandler({
-          campaignId,
-          toolName,
-          args,
-          tick,
-          outcomeTier,
-          executionContext,
-        }) as ToolResult;
-        return finalizeAuthorityResult({
-          campaignId,
-          toolName,
-          args,
-          tick,
-          result: handlerResult,
-          executionContext,
-        });
-      });
-      return resultForLog;
-    }
-
-    if (hasAuthority) {
-      try {
-        validateBaseWorldVersion({
-          campaignId,
-          baseWorldVersion: executionContext!.authority!.baseWorldVersion,
-          currentTick: tick,
-        });
-      } catch (error) {
-        if (isWorldVersionConflict(error)) {
-          resultForLog = attachToolResultAuthority(
-            buildValidationFailureToolResult(error.message),
-            {
-              campaignId,
-              sourceEntity: executionContext!.authority!.sourceEntity,
-              baseWorldVersion: executionContext!.authority!.baseWorldVersion,
-              elapsedWorldTimeMinutes: 0,
-              stateDeltaRefs: [],
-              eventRefs: [],
-              witnesses: [],
-              knowledgeOutputs: [],
-              visibilityOutputs: [],
-              resources: [],
-              failureReason: error.message,
-            },
-          );
-          return resultForLog;
-        }
-        throw error;
       }
-    }
 
-    resultForLog = await runToolHandler({
-      campaignId,
-      toolName,
-      args,
-      tick,
-      executionContext,
-      outcomeTier,
-    });
-    resultForLog = finalizeAuthorityResult({
-      campaignId,
-      toolName,
-      args,
-      tick,
-      result: resultForLog,
-      executionContext,
-    });
+      if (hasAuthority) {
+        try {
+          validateBaseWorldVersion({
+            campaignId,
+            baseWorldVersion: executionContext!.authority!.baseWorldVersion,
+            currentTick: tick,
+          });
+        } catch (error) {
+          if (isWorldVersionConflict(error)) {
+            return attachToolResultAuthority(
+              buildValidationFailureToolResult(error.message),
+              {
+                campaignId,
+                sourceEntity: executionContext!.authority!.sourceEntity,
+                baseWorldVersion: executionContext!.authority!.baseWorldVersion,
+                elapsedWorldTimeMinutes: 0,
+                stateDeltaRefs: [],
+                eventRefs: [],
+                witnesses: [],
+                knowledgeOutputs: [],
+                visibilityOutputs: [],
+                resources: [],
+                failureReason: error.message,
+              },
+            );
+          }
+          throw error;
+        }
+      }
+
+      const handlerResult = await runToolHandler({
+        campaignId,
+        toolName,
+        args: argsForExecution,
+        tick,
+        executionContext,
+        outcomeTier,
+      });
+      resultForLog = handlerResult;
+      return finalizeAuthorityResult({
+        campaignId,
+        toolName,
+        args: argsForExecution,
+        tick,
+        result: handlerResult,
+        executionContext,
+      });
+    };
+
+    resultForLog = STATE_BEARING_TOOLS.has(toolName)
+      ? await withSqliteWriteLock(`tool:${campaignId}:${toolName}`, executeValidatedTool)
+      : await executeValidatedTool();
+    if (
+      executionContext?.authority
+      && resultForLog.success
+      && typeof resultForLog.authority?.resultWorldVersion === "number"
+    ) {
+      executionContext.authority.baseWorldVersion = resultForLog.authority.resultWorldVersion;
+      executionContext.authority.elapsedWorldTimeMinutes = 0;
+    }
     return resultForLog;
   } catch (error) {
+    if (executionContext?.authority) {
+      await retractDurableMemoryAfterRejectedAuthority({
+        campaignId,
+        toolName,
+        args: argsForExecution,
+        result: resultForLog,
+      });
+    }
     if (executionContext?.authority && isWorldVersionConflict(error)) {
       resultForLog = attachToolResultAuthority(
         buildValidationFailureToolResult(error.message),
@@ -2803,7 +3808,7 @@ export async function executeToolCall(
   } finally {
     log.event("tool.call", {
       toolName,
-      args,
+      args: argsForExecution,
       result: resultForLog,
       latencyMs: Date.now() - toolCallStart,
     });

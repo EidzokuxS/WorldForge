@@ -1,6 +1,3 @@
-import { and, eq } from "drizzle-orm";
-import { getDb } from "../db/index.js";
-import { simulationProposals } from "../db/schema.js";
 import {
   actorWakeSignalToWakeSignal,
   type ActorWakeSignalRecord,
@@ -19,7 +16,7 @@ import { executeActorPlanStep, type ExecuteActorPlanStepResult } from "./actor-p
 import { readWorldClock } from "./living-world-authority.js";
 import {
   createSimulationProposal,
-  parseSimulationProposalPayload,
+  findActiveActorDecisionProposal,
   type CreatedSimulationProposal,
 } from "./simulation-proposal.js";
 import { collectWakeSignals, type WakeSignal } from "./wake-signals.js";
@@ -89,38 +86,13 @@ function queueDeferredExposureDecision(input: {
   decision: ActorScheduleDecision;
 }): CreatedSimulationProposal {
   const clock = readWorldClock(input.campaignId);
-  const existing = getDb()
-    .select()
-    .from(simulationProposals)
-    .where(
-      and(
-        eq(simulationProposals.campaignId, input.campaignId),
-        eq(simulationProposals.proposalType, "key_actor_exposure_decision"),
-        eq(simulationProposals.status, "pending"),
-        eq(simulationProposals.sourceEntityId, input.decision.actorId),
-      ),
-    )
-    .all()
-    .find((proposal) => {
-      const payload = parseSimulationProposalPayload(proposal.payload);
-      const data = payload.data && typeof payload.data === "object" && !Array.isArray(payload.data)
-        ? payload.data as Record<string, unknown>
-        : {};
-      return data.phase === input.phase;
-    });
+  const existing = findActiveActorDecisionProposal({
+    campaignId: input.campaignId,
+    actorId: input.decision.actorId,
+    phase: input.phase,
+  });
   if (existing) {
-    const payload = parseSimulationProposalPayload(existing.payload);
-    return {
-      proposalId: existing.id,
-      campaignId: existing.campaignId,
-      proposalType: existing.proposalType,
-      baseWorldVersion: existing.baseWorldVersion,
-      writeScopes: payload.writeScopes,
-      status: "pending",
-      disposition: existing.proposalDisposition,
-      dueAtWorldTimeMinutes: existing.dueAtWorldTimeMinutes ?? payload.dueAtWorldTimeMinutes,
-      priority: existing.priority ?? payload.priority,
-    };
+    return existing;
   }
 
   return createSimulationProposal({

@@ -33,6 +33,7 @@ import { loadAuthoritativeInventoryView } from "../inventory/authority.js";
 import {
   getObserverAwareness,
   inferPresenceVisibility,
+  resolveImmediateScenePresenceScopeId,
   resolveScenePresence,
 } from "../engine/scene-presence.js";
 
@@ -102,7 +103,9 @@ function buildWorldCurrentScene(args: {
   const broadLocation = parentBroadLocation ?? storedBroadLocation;
   const broadLocationId = broadLocation?.id ?? player.currentLocationId;
 
-  const presenceSceneScopeId = player.currentSceneLocationId ?? null;
+  const presenceSceneScopeId = resolveImmediateScenePresenceScopeId(
+    player.currentSceneLocationId,
+  );
 
   const presenceSnapshot = resolveScenePresence({
     playerActorId: player.id,

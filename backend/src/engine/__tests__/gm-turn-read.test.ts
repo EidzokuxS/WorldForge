@@ -9,8 +9,10 @@ import {
   GM_READ_GUARDRAIL_TEXT_MAX,
   GM_READ_STRUCTURED_OUTPUT_RETRIES,
   GM_READ_TIMEOUT_MS,
+  GM_READ_RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS,
   GM_READ_SCENE_QUESTION_MAX,
   GM_READ_SITUATION_SUMMARY_MAX,
+  buildGmReadPrompt,
   gmReadSchema,
   readGmReadStructuredOutputMode,
   runGmRead,
@@ -18,6 +20,10 @@ import {
   type GmRead,
 } from "../gm-turn-read.js";
 import type { SceneFrame } from "../scene-frame.js";
+import {
+  RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS,
+  runtimeRequirementStateMutationTools,
+} from "../tool-contracts.js";
 
 vi.mock("../../ai/generate-object-safe.js", () => ({
   safeGenerateObject: vi.fn(),
@@ -47,6 +53,18 @@ function safeResult<T>(object: T) {
       cleanedText: JSON.stringify(object),
     },
   };
+}
+
+function safeNoMutationAdmissibilityResult(
+  overrides: Record<string, unknown> = {},
+) {
+  return safeResult({
+    decision: "admissible",
+    safeKind: "no_state_claim",
+    blockedClaimKinds: [],
+    reason: "The proposed no-mutation response makes no reusable state claim.",
+    ...overrides,
+  });
 }
 
 function createFrame(overrides: Partial<SceneFrame> = {}): SceneFrame {
@@ -116,11 +134,26 @@ function createFrame(overrides: Partial<SceneFrame> = {}): SceneFrame {
       },
     ],
     deferredHooks: [],
-    allowedTools: ["log_event", "move_to", "set_condition"],
+    allowedTools: [
+      "log_event",
+      "advance_time",
+      "move_actor",
+      "create_minor_poi",
+      "create_scene_extra",
+      "record_dialogue_outcome",
+      "record_world_fact",
+      "add_tag",
+      "remove_tag",
+      "set_relationship",
+      "spawn_item",
+      "set_condition",
+      "transfer_item",
+    ],
     oracleContext: null,
     combatEnvelope: null,
     oracle: null,
     ...overrides,
+    worldVersion: overrides.worldVersion ?? 0,
   };
 }
 
@@ -136,8 +169,26 @@ const baseRead = {
   },
   rationale: "The action is local and can be answered from visible scene facts.",
   evidenceRefs: ["Player", "Road Warden"],
+  turnGrounding: {
+    intentKind: "ordinary_local_response",
+    requiresGrounding: false,
+    groundingKind: "none",
+    reason: "A local response can be rendered from current visible facts.",
+  },
   narrationGuardrails: ["Keep the answer local to the gate."],
 } satisfies Omit<GmRead, "path">;
+
+function testTurnGrounding(
+  overrides: Partial<GmRead["turnGrounding"]>,
+): GmRead["turnGrounding"] {
+  return {
+    intentKind: "ordinary_local_response",
+    requiresGrounding: false,
+    groundingKind: "none",
+    reason: "Test turn grounding.",
+    ...overrides,
+  };
+}
 
 const validReads: GmRead[] = [
   {
@@ -148,6 +199,13 @@ const validReads: GmRead[] = [
   {
     ...baseRead,
     path: "roll_oracle",
+    turnGrounding: testTurnGrounding({
+      intentKind: "combat_pressure",
+      requiresGrounding: true,
+      groundingKind: "roll_oracle",
+      topicKind: "social",
+      durability: "scene_local",
+    }),
     rollRequest: {
       actorRef: "Player",
       targetRef: "Road Warden",
@@ -159,15 +217,30 @@ const validReads: GmRead[] = [
   {
     ...baseRead,
     path: "tool_plan",
+    turnGrounding: testTurnGrounding({
+      intentKind: "concrete_state_change",
+      requiresGrounding: true,
+      groundingKind: "scene_beat",
+      topicKind: "social",
+      durability: "durable",
+    }),
     turnIntent: "Record a durable promise if the warden agrees.",
     runtimeRequirement: {
       kind: "scene_beat",
       durability: "durable",
+      beatKind: "event_log",
     },
   },
   {
     ...baseRead,
     path: "combat_transition",
+    turnGrounding: testTurnGrounding({
+      intentKind: "combat_pressure",
+      requiresGrounding: true,
+      groundingKind: "combat_transition",
+      topicKind: "safety",
+      durability: "scene_local",
+    }),
     actorRef: "Player",
     targetRef: "Road Warden",
     combatFraming: "The player commits to an attack.",
@@ -190,6 +263,12 @@ beforeEach(() => {
   vi.stubEnv("WORLDFORGE_GM_READ_STRUCTURED_OUTPUT_MODE", "");
   vi.stubEnv("WF_GM_READ_STRUCTURED_OUTPUT_MODE", "");
   vi.clearAllMocks();
+  vi.mocked(safeGenerateObject).mockImplementation(async (options) => {
+    const prompt = typeof options.prompt === "string" ? options.prompt : "";
+    return prompt.includes("NO-MUTATION ADMISSIBILITY CHECK")
+      ? safeNoMutationAdmissibilityResult() as never
+      : undefined as never;
+  });
 });
 
 describe("GM Read contract", () => {
@@ -263,8 +342,11 @@ describe("GM Read contract", () => {
     expect(contract).toContain("defensive posture");
     expect(contract).toContain("power-gap questions");
     expect(contract).toContain("Do not include concrete tool payloads");
-    expect(contract).toContain("runtimeRequirement is the typed runtime obligation for tool_plan");
+    expect(contract).toContain("runtimeRequirement is the typed runtime obligation for tool_plan, roll_oracle, and combat_transition");
     expect(contract).toContain('"kind": "dialogue_outcome"');
+    expect(contract).toContain('"kind": "prose_role"');
+    expect(contract).toContain('"requestedRoleText": "nearest engineer"');
+    expect(contract).toContain("Never write proseRole or roleText in GM Read speakerBinding");
     expect(contract).toContain('"kind": "world_fact"');
     expect(contract).toContain('"kind": "observation_read"');
     expect(contract).toContain("Use observation_read for broad observation/status scans");
@@ -296,7 +378,7 @@ describe("GM Read contract", () => {
     ).toThrow();
   });
 
-  it("accepts typed runtimeRequirement for tool_plan and rejects it on no-runtime paths", () => {
+  it("accepts typed runtimeRequirement for mutating runtime paths and rejects it on no-runtime paths", () => {
     expect(
       gmReadSchema.parse({
         ...baseRead,
@@ -306,6 +388,7 @@ describe("GM Read contract", () => {
           kind: "dialogue_outcome",
           durability: "durable",
           topicKind: "proof",
+          speakerBinding: { kind: "visible_actor", speakerRef: "Road Warden" },
         },
       }),
     ).toMatchObject({
@@ -314,8 +397,61 @@ describe("GM Read contract", () => {
         kind: "dialogue_outcome",
         durability: "durable",
         topicKind: "proof",
+        speakerBinding: { kind: "visible_actor", speakerRef: "Road Warden" },
       },
     });
+
+    expect(
+      validateGmReadForFrame(
+        gmReadSchema.parse({
+          ...baseRead,
+          path: "roll_oracle",
+          turnGrounding: testTurnGrounding({
+            intentKind: "concrete_state_change",
+            requiresGrounding: true,
+            groundingKind: "roll_oracle",
+            topicKind: "status",
+            durability: "scene_local",
+          }),
+          rollRequest: {
+            actorRef: "Player",
+            question: "Does the guard yield?",
+            stakes: "Whether the gate state changes.",
+            evidenceRefs: ["Player"],
+          },
+          runtimeRequirement: {
+            kind: "state_mutation",
+            effectKind: "entity_tag",
+          },
+        }),
+        createFrame({ allowedTools: ["log_event", "move_to", "set_condition", "add_tag"] }),
+      ),
+    ).toEqual([]);
+
+    expect(
+      validateGmReadForFrame(
+        gmReadSchema.parse({
+          ...baseRead,
+          path: "combat_transition",
+          turnGrounding: testTurnGrounding({
+            intentKind: "combat_pressure",
+            requiresGrounding: true,
+            groundingKind: "combat_transition",
+            topicKind: "safety",
+            durability: "scene_local",
+          }),
+          actorRef: "Player",
+          targetRef: "Road Warden",
+          combatFraming: "The shove becomes a fight.",
+          stakes: "Whether the opening exchange leaves a condition.",
+          runtimeRequirement: {
+            kind: "state_mutation",
+            effectKind: "actor_condition",
+          },
+        }),
+        createFrame(),
+      ),
+    ).toEqual([]);
 
     expect(
       validateGmReadForFrame(
@@ -327,16 +463,107 @@ describe("GM Read contract", () => {
             kind: "dialogue_outcome",
             durability: "durable",
             topicKind: "proof",
+            speakerBinding: { kind: "visible_actor", speakerRef: "Road Warden" },
           },
         }),
         createFrame(),
       ),
-    ).toEqual([
+    ).toEqual(expect.arrayContaining([
       expect.objectContaining({
         path: "runtimeRequirement",
-        message: expect.stringContaining("non-none only for tool_plan"),
+        message: expect.stringContaining("non-none only for tool_plan, roll_oracle, or combat_transition"),
       }),
-    ]);
+    ]));
+  });
+
+  it("canonicalizes observed proseRole speakerBinding alias at the GM Read boundary", () => {
+    const parsed = gmReadSchema.parse({
+      ...baseRead,
+      path: "tool_plan",
+      turnGrounding: testTurnGrounding({
+        intentKind: "procedural_information",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "procedure",
+        durability: "durable",
+      }),
+      turnIntent: "Resolve the nearest engineer's procedural answer.",
+      runtimeRequirement: {
+        kind: "dialogue_outcome",
+        durability: "durable",
+        topicKind: "procedure",
+        speakerBinding: {
+          kind: "prose_role",
+          proseRole: "nearest engineer",
+        },
+      },
+    });
+
+    expect(parsed.runtimeRequirement).toMatchObject({
+      kind: "dialogue_outcome",
+      speakerBinding: {
+        kind: "prose_role",
+        requestedRoleText: "nearest engineer",
+      },
+    });
+    expect(JSON.stringify(parsed)).not.toContain("proseRole");
+  });
+
+  it("requires dialogue_outcome speakerBinding before the tool loop can bind a speaker", () => {
+    expect(
+      validateGmReadForFrame(
+        gmReadSchema.parse({
+          ...baseRead,
+          path: "tool_plan",
+          turnGrounding: testTurnGrounding({
+            intentKind: "procedural_information",
+            requiresGrounding: true,
+            groundingKind: "dialogue_outcome",
+            topicKind: "proof",
+            durability: "durable",
+          }),
+          turnIntent: "Record the warden answer as reusable procedure.",
+          runtimeRequirement: {
+            kind: "dialogue_outcome",
+            durability: "durable",
+            topicKind: "proof",
+          },
+        }),
+        createFrame(),
+      ),
+    ).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: "runtimeRequirement.speakerBinding",
+        message: expect.stringContaining("requires speakerBinding"),
+      }),
+    ]));
+
+    expect(
+      validateGmReadForFrame(
+        gmReadSchema.parse({
+          ...baseRead,
+          path: "tool_plan",
+          turnGrounding: testTurnGrounding({
+            intentKind: "ordinary_local_response",
+            requiresGrounding: true,
+            groundingKind: "dialogue_outcome",
+            topicKind: "other",
+            durability: "scene_local",
+          }),
+          turnIntent: "Resolve the clerk role if the scene can support one.",
+          runtimeRequirement: {
+            kind: "dialogue_outcome",
+            durability: "scene_local",
+            topicKind: "other",
+            speakerBinding: {
+              kind: "prose_role",
+              requestedRoleText: "bored clerk",
+            },
+          },
+        }),
+        createFrame(),
+      ),
+    ).toEqual([]);
   });
 
   it("keeps runtimeRequirement topicKind aligned with runtime tool schemas", () => {
@@ -371,6 +598,88 @@ describe("GM Read contract", () => {
         categories: ["public_records", "local_status"],
       },
     }).success).toBe(true);
+
+    expect([...GM_READ_RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS]).toEqual(
+      [...RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS],
+    );
+
+    for (const effectKind of RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS) {
+      expect(gmReadSchema.safeParse({
+        ...baseRead,
+        path: "tool_plan",
+        turnIntent: "Use a runtime-owned state effect kind.",
+        turnGrounding: testTurnGrounding({
+          intentKind: "concrete_state_change",
+          requiresGrounding: true,
+          groundingKind: "state_mutation",
+        }),
+        runtimeRequirement: {
+          kind: "state_mutation",
+          effectKind,
+        },
+      }).success).toBe(true);
+
+      expect(gmReadSchema.safeParse({
+        ...baseRead,
+        path: "tool_plan",
+        turnIntent: "Use a runtime-owned scene beat state effect kind.",
+        turnGrounding: testTurnGrounding({
+          intentKind: "concrete_state_change",
+          requiresGrounding: true,
+          groundingKind: "scene_beat",
+        }),
+        runtimeRequirement: {
+          kind: "scene_beat",
+          durability: "scene_local",
+          effectKind,
+        },
+      }).success).toBe(true);
+    }
+  });
+
+  it("keeps GM Read StateEffectKind prompt text in parity with runtime owners", () => {
+    const contract = buildGmReadPromptContract({
+      allowedTools: ["log_event", "set_condition"],
+    });
+
+    for (const effectKind of RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS) {
+      expect(contract).toContain(`"${effectKind}"`);
+      for (const ownerTool of runtimeRequirementStateMutationTools({
+        kind: "state_mutation",
+        effectKind,
+      })) {
+        expect(contract).toContain(ownerTool);
+      }
+    }
+  });
+
+  it("rejects runtime requirements that the current model-facing tool surface cannot satisfy", () => {
+    const read = gmReadSchema.parse({
+      ...baseRead,
+      path: "tool_plan",
+      turnGrounding: testTurnGrounding({
+        intentKind: "concrete_state_change",
+        requiresGrounding: true,
+        groundingKind: "state_mutation",
+        topicKind: "route",
+        durability: "durable",
+      }),
+      turnIntent: "Create a local public point of interest if the scene supports it.",
+      runtimeRequirement: {
+        kind: "state_mutation",
+        effectKind: "minor_poi_created",
+      },
+    });
+
+    expect(validateGmReadForFrame(
+      read,
+      createFrame({ allowedTools: ["log_event", "set_condition"] }),
+    )).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: "runtimeRequirement",
+        message: expect.stringContaining("cannot be satisfied by the current model-facing tool surface"),
+      }),
+    ]));
   });
 
   it("tells GM Read to route prior procedural fact comparisons through tool_plan", () => {
@@ -419,7 +728,7 @@ describe("GM Read contract", () => {
     expect(parsed.directResolutionNotes).toBe("Answer from visible facts without changing state.");
   });
 
-  it("accepts typed aliases for known current location and actor refs", () => {
+  it("rejects typed backend refs even when they point at known current actors and locations", () => {
     const frame = createFrame();
     expect(
       validateGmReadForFrame(
@@ -436,7 +745,13 @@ describe("GM Read contract", () => {
         }),
         frame,
       ),
-    ).toEqual([]);
+    ).toEqual([
+      expect.objectContaining({ path: "focalActorRefs.0", message: expect.stringContaining("backend-only ref") }),
+      expect.objectContaining({ path: "focalActorRefs.1", message: expect.stringContaining("backend-only ref") }),
+      expect.objectContaining({ path: "actionInterpretation.targetRefs.0", message: expect.stringContaining("backend-only ref") }),
+      expect.objectContaining({ path: "evidenceRefs.0", message: expect.stringContaining("backend-only ref") }),
+      expect.objectContaining({ path: "evidenceRefs.1", message: expect.stringContaining("backend-only ref") }),
+    ]);
   });
 
   it("accepts Player as a stable alias even when the live actor label is a character name", () => {
@@ -491,45 +806,55 @@ describe("GM Read contract", () => {
     ).toEqual([]);
   });
 
-  it("rejects no-mutation GM Read paths that introduce future-relevant concrete pressure", () => {
+  it("rejects no-mutation GM Read paths when structured turnGrounding requires backend grounding", () => {
     expect(
       validateGmReadForFrame(
         gmReadSchema.parse({
           ...baseRead,
           path: "direct",
+          turnGrounding: testTurnGrounding({
+            intentKind: "concrete_state_change",
+            requiresGrounding: true,
+            groundingKind: "scene_beat",
+            topicKind: "status",
+            durability: "durable",
+          }),
           sceneQuestion: "Do the raised voices become an inspection dispute?",
           directResolutionNotes:
             "Raised voices become an inspection dispute as a dockworker with a clipboard changes the crate count.",
         }),
         createFrame(),
       ),
-    ).toEqual([
+    ).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        path: "sceneQuestion",
-        message: expect.stringContaining("future-relevant-pressure-requires-tool-path"),
+        path: "path",
+        message: expect.stringContaining("turn-grounding-runtime-contract-mismatch"),
       }),
-      expect.objectContaining({
-        path: "directResolutionNotes",
-        message: expect.stringContaining("future-relevant-pressure-requires-tool-path"),
-      }),
-    ]);
+    ]));
 
     expect(
       validateGmReadForFrame(
         gmReadSchema.parse({
           ...baseRead,
           path: "continue",
+          turnGrounding: testTurnGrounding({
+            intentKind: "concrete_state_change",
+            requiresGrounding: true,
+            groundingKind: "scene_beat",
+            topicKind: "route",
+            durability: "durable",
+          }),
           continuationGuidance:
             "A recessed maintenance-like door opens onto a narrow stair that should guide the next route.",
         }),
         createFrame(),
       ),
-    ).toEqual([
+    ).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        path: "continuationGuidance",
-        message: expect.stringContaining("future-relevant-pressure-requires-tool-path"),
+        path: "path",
+        message: expect.stringContaining("turn-grounding-runtime-contract-mismatch"),
       }),
-    ]);
+    ]));
   });
 
   it("allows no-mutation GM Read paths for local sensory color without durable pressure", () => {
@@ -607,6 +932,13 @@ describe("GM Read contract", () => {
         gmReadSchema.parse({
           ...baseRead,
           path: "combat_transition",
+          turnGrounding: testTurnGrounding({
+            intentKind: "combat_pressure",
+            requiresGrounding: true,
+            groundingKind: "combat_transition",
+            topicKind: "safety",
+            durability: "scene_local",
+          }),
           actorRef: "Player",
           targetRef: "Invented Bandit",
           combatFraming: "The player attacks.",
@@ -619,11 +951,12 @@ describe("GM Read contract", () => {
 
   it("runs with judge role, temperature zero, one retry, raw player text, neutral scene, candidates, forecast, and allowed tools", async () => {
     vi.mocked(safeGenerateObject).mockResolvedValueOnce(safeResult(validReads[0]));
+    const frame = createFrame();
 
     const result = await runGmRead({
       provider,
       playerAction: "I just say hello.",
-      frame: createFrame(),
+      frame,
       scopedForecastExcerpt: {
         version: "scoped-forecast-excerpt.v1",
         baseTick: 4,
@@ -644,7 +977,7 @@ describe("GM Read contract", () => {
 
     expect(result).toMatchObject({ path: "direct" });
     expect(createModel).toHaveBeenCalledWith(provider, { role: "judge", reasoningMode: "bypass" });
-    expect(safeGenerateObject).toHaveBeenCalledTimes(1);
+    expect(safeGenerateObject).toHaveBeenCalledTimes(2);
     expect(safeGenerateObject).toHaveBeenCalledWith(
       expect.objectContaining({
         schema: gmReadSchema,
@@ -671,7 +1004,10 @@ describe("GM Read contract", () => {
     expect(firstCall?.prompt).toContain("CANDIDATE REFS FROM MODEL-FACING VIEW ONLY");
     expect(firstCall?.prompt).toContain('"preferredRef": "Player"');
     expect(firstCall?.prompt).toContain('"preferredRef": "Road Warden"');
-    expect(firstCall?.prompt).toContain('"usableRefs"');
+    expect(firstCall?.prompt).toContain('"ref": "current_scene"');
+    expect(firstCall?.prompt).not.toContain('"usableRefs"');
+    expect(firstCall?.prompt).not.toContain(`actor:${playerId}`);
+    expect(firstCall?.prompt).not.toContain(`location:${frame.currentLocationId}`);
     expect(firstCall?.prompt).toContain("REFERENCE SELECTION RULES");
     expect(firstCall?.prompt).toContain("For the player, use Player");
     expect(firstCall?.prompt).toContain("ALLOWED TOOLS FROM frame.allowedTools");
@@ -682,10 +1018,11 @@ describe("GM Read contract", () => {
     expect(firstCall?.prompt).toContain("Use direct for normal conversation");
     expect(firstCall?.prompt).toContain("Use tool_plan only when world state must actually change");
     expect(firstCall?.prompt).toContain("Do not use direct for reusable procedural answers");
-    expect(firstCall?.prompt).toContain("which actual document");
-    expect(firstCall?.prompt).toContain("contact a dispatch office");
+    expect(firstCall?.prompt).toContain("turnGrounding");
+    expect(firstCall?.prompt).toContain('"speakerBinding"');
+    expect(firstCall?.prompt).toContain("The player asks a visible warden what proof is required");
     expect(firstCall?.prompt).toContain("Resolve and record the authority response");
-    expect(firstCall?.prompt).toContain("Permission to contact an office");
+    expect(firstCall?.prompt).toContain("Proof requirements are reusable procedural information");
     expect(firstCall?.prompt).toContain("proofs, permits, waivers, authorisations");
     expect(firstCall?.prompt).toContain("reusable NPC procedural/logistical information");
     expect(firstCall?.prompt).toContain("Before choosing direct for a passive/tourist action");
@@ -693,7 +1030,7 @@ describe("GM Read contract", () => {
     expect(firstCall?.prompt).toContain("worker, assistant");
     expect(firstCall?.prompt).toContain("low-ranking staff");
     expect(firstCall?.prompt).toContain("what changed today");
-    expect(firstCall?.prompt).toContain("Resolve a plausible current-scene clerk or record no-current-answer");
+    expect(firstCall?.prompt).toContain("groundingKind");
     expect(firstCall?.prompt).toContain("Player agency is locked");
     expect(firstCall?.prompt).toContain("Treat claimed possessions, authority, access");
     expect(firstCall?.prompt).toContain("do not ask Oracle whether the proof exists");
@@ -703,6 +1040,226 @@ describe("GM Read contract", () => {
     expect(firstCall?.prompt).toContain("Path choice is the GM's job");
     expect(firstCall?.prompt).not.toContain('"plannedTools":');
     expect(firstCall?.prompt).not.toContain('"input":');
+    const secondCall = vi.mocked(safeGenerateObject).mock.calls[1]?.[0];
+    expect(secondCall?.prompt).toContain("NO-MUTATION ADMISSIBILITY CHECK");
+    expect(secondCall?.prompt).toContain("Do not trust the previous turnGrounding label");
+  });
+
+  it.each([
+    {
+      playerAction: "Which permit lets me pass through the posted gate?",
+      blockedClaimKind: "permission_access",
+      requiredGroundingKind: "dialogue_outcome",
+      topicKind: "permission",
+      repairedTurnGrounding: testTurnGrounding({
+        intentKind: "procedural_information",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "permission",
+        durability: "durable",
+      }),
+      repairedRuntimeRequirement: {
+        kind: "dialogue_outcome",
+        durability: "durable",
+        topicKind: "permission",
+        speakerBinding: { kind: "visible_actor", speakerRef: "Road Warden" },
+      },
+    },
+    {
+      playerAction: "Does this stamped receipt satisfy the posting?",
+      blockedClaimKind: "proof_document",
+      requiredGroundingKind: "dialogue_outcome",
+      topicKind: "proof",
+      repairedTurnGrounding: testTurnGrounding({
+        intentKind: "posted_proof_applicability",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "proof",
+        durability: "durable",
+      }),
+      repairedRuntimeRequirement: {
+        kind: "dialogue_outcome",
+        durability: "durable",
+        topicKind: "proof",
+        speakerBinding: { kind: "visible_actor", speakerRef: "Road Warden" },
+      },
+    },
+    {
+      playerAction: "Which route is now safest?",
+      blockedClaimKind: "route",
+      requiredGroundingKind: "observation_read",
+      topicKind: "route",
+      repairedTurnGrounding: testTurnGrounding({
+        intentKind: "passive_status_read",
+        requiresGrounding: true,
+        groundingKind: "observation_read",
+        topicKind: "route",
+        durability: "scene_local",
+      }),
+      repairedRuntimeRequirement: {
+        kind: "observation_read",
+        categories: ["routes", "hazards", "local_status"],
+      },
+    },
+    {
+      playerAction: "Has the clerk accepted the waiver?",
+      blockedClaimKind: "status_read_change",
+      requiredGroundingKind: "dialogue_outcome",
+      topicKind: "status",
+      repairedTurnGrounding: testTurnGrounding({
+        intentKind: "procedural_information",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "status",
+        durability: "durable",
+      }),
+      repairedRuntimeRequirement: {
+        kind: "dialogue_outcome",
+        durability: "durable",
+        topicKind: "status",
+        speakerBinding: { kind: "visible_actor", speakerRef: "Road Warden" },
+      },
+    },
+    {
+      playerAction: "What changed in the queue?",
+      blockedClaimKind: "procedure",
+      requiredGroundingKind: "observation_read",
+      topicKind: "procedure",
+      repairedTurnGrounding: testTurnGrounding({
+        intentKind: "passive_status_read",
+        requiresGrounding: true,
+        groundingKind: "observation_read",
+        topicKind: "procedure",
+        durability: "scene_local",
+      }),
+      repairedRuntimeRequirement: {
+        kind: "observation_read",
+        categories: ["crowd", "procedure", "local_status"],
+      },
+    },
+  ])(
+    "repairs misclassified direct no-mutation claims into grounded paths: $playerAction",
+    async ({
+      playerAction,
+      blockedClaimKind,
+      requiredGroundingKind,
+      topicKind,
+      repairedTurnGrounding,
+      repairedRuntimeRequirement,
+    }) => {
+      const misclassifiedRead = gmReadSchema.parse({
+        ...baseRead,
+        path: "direct",
+        situationSummary: "The player asks for a reusable answer, but the read mislabeled it local.",
+        sceneQuestion: "Which reusable answer applies now?",
+        actionInterpretation: {
+          intent: playerAction,
+          targetRefs: ["Road Warden"],
+        },
+        directResolutionNotes: "Answer directly without tools.",
+      });
+      const repairedRead = gmReadSchema.parse({
+        ...baseRead,
+        path: "tool_plan",
+        situationSummary: "The player asks for a reusable answer that needs grounding.",
+        sceneQuestion: "Which grounded answer applies now?",
+        actionInterpretation: {
+          intent: playerAction,
+          targetRefs: ["Road Warden"],
+        },
+        turnGrounding: repairedTurnGrounding,
+        runtimeRequirement: repairedRuntimeRequirement,
+        turnIntent: "Ground and record the reusable answer before narration uses it.",
+      });
+
+      vi.mocked(safeGenerateObject)
+        .mockResolvedValueOnce(safeResult(misclassifiedRead))
+        .mockResolvedValueOnce(safeResult({
+          decision: "runtime_required",
+          blockedClaimKinds: [blockedClaimKind],
+          requiredGroundingKind,
+          topicKind,
+          durability: topicKind === "route" || topicKind === "procedure" ? "scene_local" : "durable",
+          reason: "The proposed direct answer would create a reusable gameplay claim.",
+        }))
+        .mockResolvedValueOnce(safeResult(repairedRead));
+
+      await expect(runGmRead({
+        provider,
+        playerAction,
+        frame: createFrame(),
+      })).resolves.toMatchObject({
+        path: "tool_plan",
+        runtimeRequirement: repairedRuntimeRequirement,
+      });
+
+      expect(safeGenerateObject).toHaveBeenCalledTimes(3);
+      expect(vi.mocked(safeGenerateObject).mock.calls[1]?.[0]?.prompt).toContain(
+        "NO-MUTATION ADMISSIBILITY CHECK",
+      );
+      expect(vi.mocked(safeGenerateObject).mock.calls[2]?.[0]?.prompt).toContain(
+        "no-mutation-admissibility-requires-runtime",
+      );
+    },
+  );
+
+  it("uses local aliases instead of raw ids when prompt candidates lack labels", () => {
+    const frame = createFrame({
+      roster: {
+        active: [
+          {
+            id: playerId,
+            actorId: playerId,
+            type: "player",
+            label: "Player",
+            locationId: "99999999-9999-4999-8999-999999999999",
+            sceneScopeId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            awareness: "clear",
+          },
+          {
+            id: npcId,
+            actorId: npcId,
+            type: "npc",
+            label: "",
+            locationId: "99999999-9999-4999-8999-999999999999",
+            sceneScopeId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            awareness: "clear",
+          },
+        ],
+        support: [],
+        background: [],
+      },
+      targetCandidates: [
+        {
+          id: npcId,
+          actorId: npcId,
+          type: "actor",
+          label: "",
+          awareness: "clear",
+        },
+      ],
+      movementCandidates: [
+        {
+          id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          locationId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          label: "",
+          connected: true,
+        },
+      ],
+    });
+
+    const prompt = buildGmReadPrompt({
+      provider,
+      playerAction: "I check who is nearby.",
+      frame,
+    });
+
+    expect(prompt).toContain('"ref": "person_2"');
+    expect(prompt).toContain('"preferredRef": "target_1"');
+    expect(prompt).toContain('"preferredRef": "move_1"');
+    expect(prompt).not.toContain(npcId);
+    expect(prompt).not.toContain("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+    expect(prompt).not.toContain("cccccccc-cccc-4ccc-8ccc-cccccccccccc");
   });
 
   it("keeps OpenCode/Mimo GM Read on closed native JSON by default with same-mode retries", async () => {
@@ -1030,11 +1587,92 @@ describe("GM Read contract", () => {
     });
 
     const prompt = vi.mocked(safeGenerateObject).mock.calls[0]?.[0].prompt ?? "";
-    expect(prompt).toContain("The Cafe Clerk puts a ceramic cup on the counter.");
+    expect(prompt).toContain("prior_gm_visible_prose_non_authority");
+    expect(prompt).toContain("presentation only, not legal evidence");
+    expect(prompt).not.toContain("ceramic cup");
     expect(prompt).not.toContain("Postal Cache");
   });
 
-  it("carries recent social and route referents into GM Read before clarification", async () => {
+  it("redacts exact non-pattern frame ids from player action and recent conversation", () => {
+    const prompt = buildGmReadPrompt({
+      provider,
+      playerAction:
+        "I paste miraInternal42 near pierInternal77 and ask about backRoomInternal99.",
+      frame: createFrame({
+        playerActorId: "miraInternal42",
+        currentLocationId: "pierInternal77",
+        currentSceneScopeId: "counterInternal88",
+        roster: {
+          active: [
+            {
+              id: "miraInternal42",
+              actorId: "miraInternal42",
+              type: "player",
+              label: "Player",
+              locationId: "pierInternal77",
+              sceneScopeId: "counterInternal88",
+              awareness: "clear",
+            },
+            {
+              id: "wardenInternal13",
+              actorId: "wardenInternal13",
+              type: "npc",
+              label: "Road Warden",
+              locationId: "pierInternal77",
+              sceneScopeId: "counterInternal88",
+              awareness: "clear",
+            },
+          ],
+          support: [],
+          background: [],
+        },
+        perception: {
+          playerAwarenessHints: [],
+          actorAwareness: {},
+          forbiddenActorIds: [],
+          forbiddenActorLabels: [],
+        },
+        targetCandidates: [
+          {
+            id: "wardenInternal13",
+            actorId: "wardenInternal13",
+            type: "actor",
+            label: "Road Warden",
+            awareness: "clear",
+          },
+        ],
+        movementCandidates: [
+          {
+            id: "backRoomInternal99",
+            locationId: "backRoomInternal99",
+            label: "Back Room",
+            connected: true,
+          },
+        ],
+      }),
+      recentConversation: [
+        {
+          role: "assistant",
+          content: "Debug replay mentioned wardenInternal13 and counterInternal88.",
+        },
+      ],
+    });
+
+    expect(prompt).toContain("Road Warden");
+    expect(prompt).toContain("Back Room");
+    for (const leaked of [
+      "miraInternal42",
+      "pierInternal77",
+      "counterInternal88",
+      "wardenInternal13",
+      "backRoomInternal99",
+    ]) {
+      expect(prompt).not.toContain(leaked);
+    }
+    expect(prompt).toContain("[backend ref hidden]");
+  });
+
+  it("does not carry assistant-authored route/social facts into GM Read as evidence", async () => {
     vi.mocked(safeGenerateObject).mockResolvedValueOnce(
       safeResult({
         ...validReads[0],
@@ -1070,9 +1708,10 @@ describe("GM Read contract", () => {
 
     const prompt = vi.mocked(safeGenerateObject).mock.calls[0]?.[0].prompt ?? "";
     expect(prompt).toContain("RECENT CONVERSATION");
-    expect(prompt).toContain("slower route along Old Shrine Road");
-    expect(prompt).toContain("nearby vendor offers a quiet deal");
+    expect(prompt).not.toContain("slower route along Old Shrine Road");
+    expect(prompt).not.toContain("nearby vendor offers a quiet deal");
     expect(prompt).toContain("Old Shrine Road");
+    expect(prompt).toContain("presentation only, not legal evidence");
     expect(prompt).toContain("Resolve obvious recent-context references");
     expect(prompt).toContain("SESSION RESPONSE LANGUAGE");
     expect(prompt).toContain("Output language: English.");
@@ -1248,10 +1887,161 @@ describe("GM Read contract", () => {
     expect(safeGenerateObject).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects no-mutation future pressure instead of repairing into a tool path", async () => {
+  it("repairs recoverable GM Read path validation failures with a second semantic pass", async () => {
     const invalidRead = {
       ...baseRead,
       path: "direct",
+      turnGrounding: testTurnGrounding({
+        intentKind: "concrete_state_change",
+        requiresGrounding: true,
+        groundingKind: "scene_beat",
+        topicKind: "status",
+        durability: "scene_local",
+      }),
+      sceneQuestion: "Do the raised voices become an inspection dispute?",
+      directResolutionNotes:
+        "Raised voices become an inspection dispute as actor:private-handler with loc-secret-vault changes the crate count after tool-result-abc.",
+      rationale: "The pressure can be answered in prose.",
+      narrationGuardrails: ["Keep the inspection dispute visible."],
+    } satisfies GmRead;
+    const repairedRead = {
+      ...baseRead,
+      path: "tool_plan",
+      turnGrounding: testTurnGrounding({
+        intentKind: "concrete_state_change",
+        requiresGrounding: true,
+        groundingKind: "scene_beat",
+        topicKind: "status",
+        durability: "scene_local",
+      }),
+      sceneQuestion: "What grounded local pressure can be recorded before narration?",
+      actionInterpretation: {
+        intent: "notice raised voices and local inspection pressure",
+        targetRefs: ["Road Warden"],
+      },
+      turnIntent:
+        "Ground the local inspection pressure before narration uses it as a playable update.",
+      runtimeRequirement: {
+        kind: "scene_beat",
+        durability: "scene_local",
+        beatKind: "event_log",
+      },
+      rationale: "The pressure should be grounded before narration treats it as a continuing beat.",
+      evidenceRefs: ["Player", "Road Warden"],
+      narrationGuardrails: ["Keep the pressure modest and local."],
+    } satisfies GmRead;
+
+    vi.mocked(safeGenerateObject)
+      .mockResolvedValueOnce(safeResult(invalidRead))
+      .mockResolvedValueOnce(safeResult(repairedRead));
+
+    await expect(
+      runGmRead({
+        provider,
+        playerAction: "I take a detour when I hear raised voices.",
+        frame: createFrame(),
+      }),
+    ).resolves.toMatchObject({
+      path: "tool_plan",
+      turnIntent: expect.stringContaining("inspection pressure"),
+    });
+
+    expect(safeGenerateObject).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(safeGenerateObject).mock.calls[1]?.[0]?.prompt).toContain(
+      "VALIDATION REPAIR REQUIRED",
+    );
+    expect(vi.mocked(safeGenerateObject).mock.calls[1]?.[0]?.prompt).not.toContain(
+      "actor:private-handler",
+    );
+    expect(vi.mocked(safeGenerateObject).mock.calls[1]?.[0]?.prompt).not.toContain(
+      "loc-secret-vault",
+    );
+    expect(vi.mocked(safeGenerateObject).mock.calls[1]?.[0]?.prompt).not.toContain(
+      "tool-result-abc",
+    );
+  });
+
+  it("hardens repaired reusable dialogue requirements to durable before final validation", async () => {
+    const invalidRead = {
+      ...baseRead,
+      path: "direct",
+      sceneQuestion: "Where does the factor say the conveyance-warrant office is?",
+      turnGrounding: testTurnGrounding({
+        intentKind: "procedural_information",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "procedure",
+        durability: "durable",
+      }),
+      directResolutionNotes:
+        "The factor says the harbormaster signs conveyance warrants past the lock gates.",
+      rationale: "The answer is routine local conversation.",
+      narrationGuardrails: ["Keep the direction actionable."],
+    } satisfies GmRead;
+    const repairedRead = {
+      ...baseRead,
+      path: "tool_plan",
+      sceneQuestion: "Which official direction does the factor give?",
+      turnGrounding: testTurnGrounding({
+        intentKind: "procedural_information",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "procedure",
+        durability: "durable",
+      }),
+      actionInterpretation: {
+        intent: "ask where the harbormaster or conveyance-warrant office is",
+        targetRefs: ["Road Warden"],
+      },
+      turnIntent:
+        "Record the factor's public-service direction so the player can rely on the office route later.",
+      runtimeRequirement: {
+        kind: "dialogue_outcome",
+        durability: "scene_local",
+        topicKind: "procedure",
+        speakerBinding: { kind: "visible_actor", speakerRef: "Road Warden" },
+        requiresStructuralEffect: false,
+      },
+      rationale: "The factor's direction is reusable but does not grant access by itself.",
+      evidenceRefs: ["Player", "Road Warden"],
+      narrationGuardrails: ["Do not invent that the warrant was issued."],
+    } satisfies GmRead;
+
+    vi.mocked(safeGenerateObject)
+      .mockResolvedValueOnce(safeResult(invalidRead))
+      .mockResolvedValueOnce(safeResult(repairedRead));
+
+    await expect(
+      runGmRead({
+        provider,
+        playerAction:
+          "I ask the factor where the harbormaster or conveyance-warrant office is, and which public route I should take.",
+        frame: createFrame(),
+      }),
+    ).resolves.toMatchObject({
+      path: "tool_plan",
+      runtimeRequirement: {
+        kind: "dialogue_outcome",
+        durability: "durable",
+        topicKind: "procedure",
+        requiresStructuralEffect: false,
+      },
+    });
+
+    expect(safeGenerateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects no-mutation structured grounding instead of silently promoting into a tool path", async () => {
+    const invalidRead = {
+      ...baseRead,
+      path: "direct",
+      turnGrounding: testTurnGrounding({
+        intentKind: "concrete_state_change",
+        requiresGrounding: true,
+        groundingKind: "scene_beat",
+        topicKind: "status",
+        durability: "scene_local",
+      }),
       sceneQuestion: "Do the raised voices become an inspection dispute?",
       directResolutionNotes:
         "Raised voices become an inspection dispute as a dockworker with a clipboard changes the crate count.",
@@ -1269,7 +2059,7 @@ describe("GM Read contract", () => {
       }),
     ).rejects.toThrow(/GM Read validation failed/);
 
-    expect(safeGenerateObject).toHaveBeenCalledTimes(1);
+    expect(safeGenerateObject).toHaveBeenCalledTimes(2);
   });
 
   it("rejects broad status-read no-mutation turns instead of repairing the path", async () => {
@@ -1277,6 +2067,12 @@ describe("GM Read contract", () => {
       ...baseRead,
       path: "direct",
       sceneQuestion: "What can the player assess from visible officials, bells, fog, and challengers?",
+      turnGrounding: testTurnGrounding({
+        intentKind: "passive_status_read",
+        requiresGrounding: true,
+        groundingKind: "observation_read",
+        topicKind: "status",
+      }),
       actionInterpretation: {
         intent:
           "take stock of visible officials, public bells, ward engines, fog level, and possible challengers",
@@ -1311,13 +2107,20 @@ describe("GM Read contract", () => {
       }),
     ).rejects.toThrow(/GM Read validation failed/);
 
-    expect(safeGenerateObject).toHaveBeenCalledTimes(1);
+    expect(safeGenerateObject).toHaveBeenCalledTimes(2);
   });
 
   it("rejects actionable NPC handoff answers instead of repairing into a tool path", async () => {
     const invalidRead = {
       ...baseRead,
       path: "direct",
+      turnGrounding: testTurnGrounding({
+        intentKind: "procedural_information",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "procedure",
+        durability: "durable",
+      }),
       sceneQuestion: "Where does the visible attendant say the anomaly report should go?",
       directResolutionNotes:
         "The Road Warden says station security could take a report and points the player toward lost and found or police.",
@@ -1336,13 +2139,20 @@ describe("GM Read contract", () => {
       }),
     ).rejects.toThrow(/GM Read validation failed/);
 
-    expect(safeGenerateObject).toHaveBeenCalledTimes(1);
+    expect(safeGenerateObject).toHaveBeenCalledTimes(2);
   });
 
   it("rejects reusable procedural proof answers on direct no-mutation paths", async () => {
     const invalidRead = {
       ...baseRead,
       path: "direct",
+      turnGrounding: testTurnGrounding({
+        intentKind: "procedural_information",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "proof",
+        durability: "durable",
+      }),
       sceneQuestion: "What proof does the visible authority require?",
       directResolutionNotes:
         "The Lead Warden says Mira needs a seal-verified transit chit, guild waiver, or signal-house dispatch authorisation stamped within twelve hours.",
@@ -1362,13 +2172,20 @@ describe("GM Read contract", () => {
       }),
     ).rejects.toThrow(/GM Read validation failed/);
 
-    expect(safeGenerateObject).toHaveBeenCalledTimes(1);
+    expect(safeGenerateObject).toHaveBeenCalledTimes(2);
   });
 
   it("rejects document requirement adjudication on direct no-mutation paths", async () => {
     const invalidRead = {
       ...baseRead,
       path: "direct",
+      turnGrounding: testTurnGrounding({
+        intentKind: "procedural_information",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "proof",
+        durability: "durable",
+      }),
       sceneQuestion: "Which document fails the stated requirement?",
       directResolutionNotes:
         "The Lead Warden says the courier logbook fails the permit requirement and the sealed lacquer message is not sufficient.",
@@ -1388,7 +2205,7 @@ describe("GM Read contract", () => {
       }),
     ).rejects.toThrow(/passive-status-read-requires-grounded-consequence-path/);
 
-    expect(safeGenerateObject).toHaveBeenCalledTimes(1);
+    expect(safeGenerateObject).toHaveBeenCalledTimes(2);
   });
 
   it("rejects document state transitions on no-mutation paths", () => {
@@ -1396,6 +2213,13 @@ describe("GM Read contract", () => {
       gmReadSchema.parse({
         ...baseRead,
         path: "direct",
+        turnGrounding: testTurnGrounding({
+          intentKind: "concrete_state_change",
+          requiresGrounding: true,
+          groundingKind: "state_mutation",
+          topicKind: "proof",
+          durability: "durable",
+        }),
         sceneQuestion: "Does the clerk issue a docket receipt?",
         directResolutionNotes:
           "The clerk issues a docket receipt, stamps the proof reviewed, and attaches a warning rider.",
@@ -1407,11 +2231,7 @@ describe("GM Read contract", () => {
     expect(issues).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          path: "sceneQuestion",
-          message: expect.stringContaining("document-state-requires-tool-path"),
-        }),
-        expect.objectContaining({
-          path: "directResolutionNotes",
+          path: "turnGrounding",
           message: expect.stringContaining("document-state-requires-tool-path"),
         }),
       ]),
@@ -1423,6 +2243,13 @@ describe("GM Read contract", () => {
       gmReadSchema.parse({
         ...baseRead,
         path: "direct",
+        turnGrounding: testTurnGrounding({
+          intentKind: "document_state_assumption",
+          requiresGrounding: false,
+          groundingKind: "none",
+          topicKind: "proof",
+          durability: "durable",
+        }),
         directResolutionNotes:
           "Answer with a local reaction without changing the document.",
       }),
@@ -1445,6 +2272,13 @@ describe("GM Read contract", () => {
       gmReadSchema.parse({
         ...baseRead,
         path: "direct",
+        turnGrounding: testTurnGrounding({
+          intentKind: "document_state_assumption",
+          requiresGrounding: false,
+          groundingKind: "none",
+          topicKind: "proof",
+          durability: "durable",
+        }),
         directResolutionNotes: "The clerk gives one local nod.",
       }),
       createFrame({
@@ -1476,6 +2310,13 @@ describe("GM Read contract", () => {
         intent: "ask permission to send a dispatch message while staying in place",
         targetRefs: ["Road Warden"],
       },
+      turnGrounding: testTurnGrounding({
+        intentKind: "procedural_information",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "permission",
+        durability: "durable",
+      }),
       path: "direct",
       directResolutionNotes:
         "The Road Warden says the courier may send one short message to dispatch if they stay beside the desk.",
@@ -1495,7 +2336,7 @@ describe("GM Read contract", () => {
       }),
     ).rejects.toThrow(/passive-status-read-requires-grounded-consequence-path/);
 
-    expect(safeGenerateObject).toHaveBeenCalledTimes(1);
+    expect(safeGenerateObject).toHaveBeenCalledTimes(2);
   });
 
   it("rejects watch-for-public-procedure-change answers on direct no-mutation paths", async () => {
@@ -1509,6 +2350,12 @@ describe("GM Read contract", () => {
         intent: "watch for crowd pressure, procedure change, or public announcement",
         targetRefs: ["Road Warden"],
       },
+      turnGrounding: testTurnGrounding({
+        intentKind: "passive_status_read",
+        requiresGrounding: true,
+        groundingKind: "observation_read",
+        topicKind: "status",
+      }),
       path: "direct",
       directResolutionNotes:
         "The crowd pressure is making the wardens adjust procedure and a public announcement may follow.",
@@ -1528,7 +2375,7 @@ describe("GM Read contract", () => {
       }),
     ).rejects.toThrow(/passive-status-read-requires-grounded-consequence-path/);
 
-    expect(safeGenerateObject).toHaveBeenCalledTimes(1);
+    expect(safeGenerateObject).toHaveBeenCalledTimes(2);
   });
 
   it("accepts watch-for-public-procedure-change turns when GM Read chooses a grounded tool plan", async () => {
@@ -1541,6 +2388,12 @@ describe("GM Read contract", () => {
         intent: "watch for crowd pressure, procedure change, or public announcement",
         targetRefs: ["Road Warden"],
       },
+      turnGrounding: testTurnGrounding({
+        intentKind: "passive_status_read",
+        requiresGrounding: true,
+        groundingKind: "observation_read",
+        topicKind: "status",
+      }),
       path: "tool_plan",
       turnIntent:
         "Ground the visible unchanged state, change, announcement, or lack of public shift before narration uses it as a playable update.",
@@ -1583,6 +2436,13 @@ describe("GM Read contract", () => {
         intent: "ask permission to send a dispatch message while remaining in place",
         targetRefs: ["Road Warden"],
       },
+      turnGrounding: testTurnGrounding({
+        intentKind: "procedural_information",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "permission",
+        durability: "durable",
+      }),
       path: "tool_plan",
       turnIntent:
         "Resolve and record the authority response about dispatch contact and whether staying in place is permitted.",
@@ -1590,6 +2450,7 @@ describe("GM Read contract", () => {
         kind: "dialogue_outcome",
         durability: "durable",
         topicKind: "permission",
+        speakerBinding: { kind: "visible_actor", speakerRef: "Road Warden" },
       },
       rationale:
         "Permission to contact an office or use a public procedure is reusable logistical adjudication.",
@@ -1628,6 +2489,13 @@ describe("GM Read contract", () => {
           intent: "compare prior procedural warnings and mark contradictions as uncertainty",
           targetRefs: [],
         },
+        turnGrounding: testTurnGrounding({
+          intentKind: "procedural_information",
+          requiresGrounding: true,
+          groundingKind: "world_fact",
+          topicKind: "procedure",
+          durability: "durable",
+        }),
         rationale: "The player is only comparing prior statements.",
         evidenceRefs: ["Player", "Road Warden"],
         narrationGuardrails: ["Preserve uncertainty without inventing a conspiracy."],
@@ -1686,7 +2554,7 @@ describe("GM Read contract", () => {
         }),
       ).rejects.toThrow(/passive-status-read-requires-grounded-consequence-path/);
 
-      expect(safeGenerateObject).toHaveBeenCalledTimes(1);
+      expect(safeGenerateObject).toHaveBeenCalledTimes(2);
     },
   );
 
@@ -1700,6 +2568,13 @@ describe("GM Read contract", () => {
         intent: "compare prior procedural warnings and mark contradictions as uncertainty",
         targetRefs: [],
       },
+      turnGrounding: testTurnGrounding({
+        intentKind: "procedural_information",
+        requiresGrounding: true,
+        groundingKind: "world_fact",
+        topicKind: "procedure",
+        durability: "durable",
+      }),
       path: "tool_plan",
       turnIntent:
         "Ground and record the comparison between the engineer warning and debt clerk claim so future route choices can use the uncertainty.",
@@ -1762,6 +2637,13 @@ describe("GM Read contract", () => {
         intent: "ask the nearest low-ranking worker or assistant what changed today",
         targetRefs: [],
       },
+      turnGrounding: testTurnGrounding({
+        intentKind: "procedural_information",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "status",
+        durability: "durable",
+      }),
       path: "clarification",
       clarificationPrompt: "Which worker or assistant do you mean?",
       rationale: "The exact service worker is not named.",
@@ -1780,7 +2662,7 @@ describe("GM Read contract", () => {
       }),
     ).rejects.toThrow(/passive-status-read-requires-grounded-consequence-path/);
 
-    expect(safeGenerateObject).toHaveBeenCalledTimes(1);
+    expect(safeGenerateObject).toHaveBeenCalledTimes(2);
   });
 
   it("accepts generic worker status reads when GM Read chooses a grounded tool plan", async () => {
@@ -1793,6 +2675,13 @@ describe("GM Read contract", () => {
         intent: "ask the nearest low-ranking worker or assistant what changed today",
         targetRefs: [],
       },
+      turnGrounding: testTurnGrounding({
+        intentKind: "procedural_information",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "status",
+        durability: "durable",
+      }),
       path: "tool_plan",
       turnIntent:
         "Resolve a plausible current-scene worker or assistant and record their observable answer, refusal, silence, or warning.",
@@ -1800,6 +2689,11 @@ describe("GM Read contract", () => {
         kind: "dialogue_outcome",
         durability: "durable",
         topicKind: "status",
+        speakerBinding: {
+          kind: "prose_role",
+          requestedRoleText: "nearest low-ranking worker or assistant",
+          allowCreateSceneExtra: true,
+        },
       },
       rationale:
         "The service-role question should produce a grounded public update rather than a backend target clarification.",
@@ -1834,6 +2728,13 @@ describe("GM Read contract", () => {
         intent: "ask the nearest notice-board clerk whether any public posting changed today",
         targetRefs: [],
       },
+      turnGrounding: testTurnGrounding({
+        intentKind: "procedural_information",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "status",
+        durability: "durable",
+      }),
       path: "clarification",
       clarificationPrompt: "Which exact notice-board clerk should answer whether any posting changed today?",
       rationale: "The exact clerk actor is not already listed.",
@@ -1850,9 +2751,9 @@ describe("GM Read contract", () => {
           "I ask the nearest notice-board clerk whether any public posting was added, removed, or amended today.",
         frame: createFrame(),
       }),
-    ).rejects.toThrow(/future-relevant-pressure-requires-tool-path|passive-status-read-requires-grounded-consequence-path/);
+    ).rejects.toThrow(/turn-grounding-runtime-contract-mismatch|passive-status-read-requires-grounded-consequence-path/);
 
-    expect(safeGenerateObject).toHaveBeenCalledTimes(1);
+    expect(safeGenerateObject).toHaveBeenCalledTimes(2);
   });
 
   it("accepts public notice-board clerk status requests as grounded tool plans", async () => {
@@ -1865,6 +2766,13 @@ describe("GM Read contract", () => {
         intent: "ask the nearest notice-board clerk whether any public posting changed today",
         targetRefs: [],
       },
+      turnGrounding: testTurnGrounding({
+        intentKind: "procedural_information",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "status",
+        durability: "durable",
+      }),
       path: "tool_plan",
       turnIntent:
         "Resolve a bounded public service responder or record no-current-answer, then ground the posting status for future route choices.",
@@ -1872,6 +2780,11 @@ describe("GM Read contract", () => {
         kind: "dialogue_outcome",
         durability: "durable",
         topicKind: "status",
+        speakerBinding: {
+          kind: "prose_role",
+          requestedRoleText: "nearest notice-board clerk",
+          allowCreateSceneExtra: true,
+        },
       },
       rationale:
         "A notice-board clerk question in a public scene is reusable procedural/status information, not a backend identity clarification.",
@@ -1896,6 +2809,47 @@ describe("GM Read contract", () => {
     expect(safeGenerateObject).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects reusable procedural dialogue tool plans with scene-local durability", () => {
+    const invalidRead = {
+      ...baseRead,
+      situationSummary: "The player asks a road warden which public office can give a real route answer.",
+      sceneQuestion: "Which office or route answer can the warden ground for later choices?",
+      focalActorRefs: ["Player", "Road Warden"],
+      actionInterpretation: {
+        intent: "ask which office can provide the real route answer",
+        targetRefs: ["Road Warden"],
+      },
+      turnGrounding: testTurnGrounding({
+        intentKind: "procedural_information",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "procedure",
+        durability: "durable",
+      }),
+      path: "tool_plan",
+      turnIntent: "Record the warden answer so the player can choose a lawful office route.",
+      runtimeRequirement: {
+        kind: "dialogue_outcome",
+        durability: "scene_local",
+        topicKind: "procedure",
+      },
+      rationale: "The answer is only for the immediate exchange.",
+      evidenceRefs: ["Player", "Road Warden"],
+      narrationGuardrails: ["Do not invent a completed route."],
+    } satisfies GmRead;
+
+    const issues = validateGmReadForFrame(
+      invalidRead,
+      createFrame(),
+      "I ask the road warden which public office can give me the real route answer.",
+    );
+
+    expect(issues).toContainEqual(expect.objectContaining({
+      path: "runtimeRequirement.durability",
+      message: expect.stringContaining("reusable-dialogue-requires-durable-requirement"),
+    }));
+  });
+
   it("rejects applicable posted-item questions on direct no-mutation paths", async () => {
     const invalidRead = {
       ...baseRead,
@@ -1906,6 +2860,13 @@ describe("GM Read contract", () => {
         intent: "ask a clerk to identify which posted item applies to the sealed message",
         targetRefs: [],
       },
+      turnGrounding: testTurnGrounding({
+        intentKind: "posted_proof_applicability",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "proof",
+        durability: "durable",
+      }),
       path: "direct",
       directResolutionNotes: "The clerk answers from ambient current facts without a tool path.",
       rationale: "The answer is local.",
@@ -1924,7 +2885,7 @@ describe("GM Read contract", () => {
       }),
     ).rejects.toThrow(/passive-status-read-requires-grounded-consequence-path/);
 
-    expect(safeGenerateObject).toHaveBeenCalledTimes(1);
+    expect(safeGenerateObject).toHaveBeenCalledTimes(2);
   });
 
   it("accepts applicable posted-item questions as grounded tool plans", async () => {
@@ -1937,6 +2898,13 @@ describe("GM Read contract", () => {
         intent: "ask a clerk to identify which posted item applies to the sealed message",
         targetRefs: [],
       },
+      turnGrounding: testTurnGrounding({
+        intentKind: "posted_proof_applicability",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "proof",
+        durability: "durable",
+      }),
       path: "tool_plan",
       turnIntent:
         "Resolve a plausible current-scene clerk or record no-current-answer, then record the posted-item/proof answer for future route choices.",
@@ -1944,6 +2912,11 @@ describe("GM Read contract", () => {
         kind: "dialogue_outcome",
         durability: "durable",
         topicKind: "proof",
+        speakerBinding: {
+          kind: "prose_role",
+          requestedRoleText: "clerk",
+          allowCreateSceneExtra: true,
+        },
       },
       rationale:
         "Which posted item applies to a carried document is reusable proof/procedure adjudication, not direct prose.",
@@ -1981,6 +2954,13 @@ describe("GM Read contract", () => {
         intent: "ask a clerk to identify which posted item applies to the sealed message",
         targetRefs: [],
       },
+      turnGrounding: testTurnGrounding({
+        intentKind: "posted_proof_applicability",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "proof",
+        durability: "durable",
+      }),
       path: "tool_plan",
       turnIntent:
         "Look up posted signs and summarize the applicable record without recording a clerk outcome.",
@@ -2004,7 +2984,7 @@ describe("GM Read contract", () => {
       }),
     ).rejects.toThrow(/posted-proof-request-requires-dialogue-outcome/);
 
-    expect(safeGenerateObject).toHaveBeenCalledTimes(1);
+    expect(safeGenerateObject).toHaveBeenCalledTimes(2);
   });
 
   it.each([
@@ -2037,7 +3017,10 @@ describe("GM Read contract", () => {
       }),
     ).resolves.toMatchObject({ path: "direct" });
 
-    expect(safeGenerateObject).toHaveBeenCalledTimes(1);
+    expect(safeGenerateObject).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(safeGenerateObject).mock.calls[1]?.[0]?.prompt).toContain(
+      "NO-MUTATION ADMISSIBILITY CHECK",
+    );
   });
 
   it("rejects public indicated route clarification that tries to carry future pressure", async () => {
@@ -2050,6 +3033,13 @@ describe("GM Read contract", () => {
         intent: "follow a public indicated route toward the safest named office or holding point",
         targetRefs: [],
       },
+      turnGrounding: testTurnGrounding({
+        intentKind: "concrete_state_change",
+        requiresGrounding: true,
+        groundingKind: "state_mutation",
+        topicKind: "route",
+        durability: "scene_local",
+      }),
       path: "clarification",
       clarificationPrompt: "Which safest holding point should the public route commit you toward?",
       rationale: "The safest office wording is not an exact backend route id.",
@@ -2065,9 +3055,9 @@ describe("GM Read contract", () => {
         playerAction: "I follow only a public, indicated route toward the safest named office or holding point.",
         frame: createFrame(),
       }),
-    ).rejects.toThrow(/future-relevant-pressure-requires-tool-path/);
+    ).rejects.toThrow(/turn-grounding-runtime-contract-mismatch/);
 
-    expect(safeGenerateObject).toHaveBeenCalledTimes(1);
+    expect(safeGenerateObject).toHaveBeenCalledTimes(2);
   });
 
   it("accepts public indicated route movement as a grounded tool plan", async () => {
@@ -2080,11 +3070,19 @@ describe("GM Read contract", () => {
         intent: "follow a public indicated route toward the safest named office or holding point",
         targetRefs: [],
       },
+      turnGrounding: testTurnGrounding({
+        intentKind: "concrete_state_change",
+        requiresGrounding: true,
+        groundingKind: "state_mutation",
+        topicKind: "route",
+        durability: "scene_local",
+      }),
       path: "tool_plan",
       turnIntent:
         "Resolve legal route options, move along a confirmed public route, or record a grounded blocked/no-current-route outcome.",
       runtimeRequirement: {
         kind: "state_mutation",
+        effectKind: "movement",
       },
       rationale: "Low-risk public navigation should bridge through route tools instead of asking for backend route ids.",
       evidenceRefs: ["Player"],
@@ -2102,7 +3100,7 @@ describe("GM Read contract", () => {
     ).resolves.toMatchObject({
       path: "tool_plan",
       turnIntent: expect.stringContaining("blocked/no-current-route"),
-      runtimeRequirement: { kind: "state_mutation" },
+      runtimeRequirement: { kind: "state_mutation", effectKind: "movement" },
     });
 
     expect(safeGenerateObject).toHaveBeenCalledTimes(1);
@@ -2112,6 +3110,13 @@ describe("GM Read contract", () => {
     const invalidRead = {
       ...baseRead,
       path: "direct",
+      turnGrounding: testTurnGrounding({
+        intentKind: "concrete_state_change",
+        requiresGrounding: true,
+        groundingKind: "scene_beat",
+        topicKind: "status",
+        durability: "scene_local",
+      }),
       sceneQuestion: "Do the raised voices become an inspection dispute?",
       directResolutionNotes:
         "Raised voices become an inspection dispute as a dockworker with a clipboard changes the crate count.",
@@ -2127,7 +3132,7 @@ describe("GM Read contract", () => {
         frame: createFrame(),
       }),
     ).rejects.toThrow(/GM Read validation failed/);
-    expect(safeGenerateObject).toHaveBeenCalledTimes(1);
+    expect(safeGenerateObject).toHaveBeenCalledTimes(2);
   });
 
   it("rejects invented evidence-only refs instead of sanitizing them", async () => {
@@ -2153,7 +3158,7 @@ describe("GM Read contract", () => {
         playerAction: "I offer one registry chit for quiet lawful guidance.",
         frame: createFrame(),
       }),
-    ).rejects.toThrow(/evidenceRefs\.1 references a ref outside SceneFrame candidates/);
+    ).rejects.toThrow(/evidenceRefs\.1 uses a backend-only ref/);
 
     expect(safeGenerateObject).toHaveBeenCalledTimes(1);
   });

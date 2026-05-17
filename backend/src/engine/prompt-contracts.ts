@@ -1,11 +1,26 @@
+import {
+  RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS,
+  runtimeRequirementStateMutationTools,
+} from "./tool-contracts.js";
 import { runtimeToolInputSchemas, type RuntimeToolName } from "./tool-schemas.js";
 
 export const ENGINE_CONTRACT_MARKER_PREFIX = "STRUCTURED_OUTPUT_CONTRACT:";
 
 const runtimeToolNames = Object.keys(runtimeToolInputSchemas) as RuntimeToolName[];
-const hiddenAdjudicationToolNames = runtimeToolNames.filter(
-  (toolName) => toolName !== "request_contested_outcome",
-);
+const hiddenAdjudicationToolNames: RuntimeToolName[] = [
+  "add_tag",
+  "remove_tag",
+  "set_relationship",
+  "log_event",
+  "advance_time",
+  "offer_quick_actions",
+  "promote_npc",
+  "spawn_item",
+  "reveal_location",
+  "set_condition",
+  "move_to",
+  "transfer_item",
+];
 
 const runtimeToolInputShapes = {
   list_visible_affordances: [
@@ -41,8 +56,8 @@ const runtimeToolInputShapes = {
     "Observation-only route check over visible legal movement refs; hidden routes deny without names.",
   ],
   move_actor: [
-    '{ "actorRef"?: string, "destinationRef": string, "routeId"?: string, "mode"?: "walk"|"travel"|"follow_route"|"unknown", "intentSummary"?: string, "evidenceRefs": string[] }',
-    "Move only the current player/subject actor along a legal movement candidate backed by route/check_route evidence.",
+    '{ "actorRef"?: string, "destinationRef": string, "mode"?: "walk"|"travel"|"follow_route"|"unknown", "intentSummary"?: string, "evidenceRefs": string[] }',
+    "Move only the current player/subject actor along a legal movement candidate backed by destination labels/current aliases or route/check_route helper aliases.",
     "Returns destination, path, travel cost, and actor refs; do not narrate completed movement without a successful result.",
   ],
   create_minor_poi: [
@@ -117,18 +132,18 @@ const runtimeToolInputShapes = {
     "Provide 3-5 actions. label max 80 chars; action max 220 chars and must be the full text if selected.",
   ],
   spawn_npc: [
-    '{ "name": string, "tags": string[], "locationRef"?: "current_scene"|"current_location", "locationId"?: string, "locationName"?: string }',
-    "Prefer locationRef=current_scene/current_location. locationId is allowed only when exposed in legal refs; locationName is legacy only.",
+    '{ "name": string, "tags": string[], "locationRef": "current_scene"|"current_location" }',
+    "Use locationRef=current_scene/current_location. Do not copy backend location IDs or invent remote spawn targets.",
     "Spawn only if the current local facts justify a new temporary NPC.",
   ],
   promote_npc: [
     '{ "npcRef": string, "newTier": "persistent"|"key", "reason": string }',
-    "npcRef must be a visible current-scene NPC id or name.",
+    "npcRef must be a visible current-scene NPC name/ref from model-facing refs, not a backend id.",
     "Promote only upward when the NPC became future-relevant; do not promote routine one-scene support actors.",
   ],
   spawn_item: [
     '{ "name": string, "tags": string[], "ownerName": string, "ownerType": "character"|"location" }',
-    "Owner must be an explicit character or location. Spawn every future-usable receipt, docket, warning rider, stamp, permit, proof artifact, or document the player may later cite.",
+    "Owner must be an explicit character or location. Spawn only a tangible, ownable, transferable, losable artifact that should exist in inventory or location state; record spoken requirements, warnings, permissions, debts, or procedural facts with dialogue/world-fact tools instead.",
   ],
   reveal_location: [
     '{ "name": string, "description": string, "tags": string[], "connectedToName": string }',
@@ -138,6 +153,7 @@ const runtimeToolInputShapes = {
   request_contested_outcome: [
     '{ "actorName": string, "targetName": string, "mode": "attack"|"restrain"|"escape"|"pursue"|"defend"|"contest", "intent": string, "stakes": string, "evidenceRefs": string[] }',
     "Use before committing combat or active opposition outcomes such as hits, captures, escapes, restraints, or defenses.",
+    "Use visible actor labels/refs and short evidence refs; do not copy backend actor IDs.",
     "The result supplies backend bounds only; apply HP, movement, inventory, tags, or relationships with separate successful tools.",
   ],
   set_condition: [
@@ -165,7 +181,7 @@ const runtimeToolExampleInputs = {
   inspect_known_fact: '{ "query": "bridge key", "scope": "known", "maxResults": 2 }',
   check_route: '{ "actorRef": "Player", "destinationRef": "Old Shrine Road", "mode": "walk" }',
   move_actor:
-    '{ "actorRef": "Player", "destinationRef": "Old Shrine Road", "routeId": "Old Shrine Road", "mode": "walk", "intentSummary": "The player follows the obvious road.", "evidenceRefs": ["Old Shrine Road"] }',
+    '{ "actorRef": "Player", "destinationRef": "Old Shrine Road", "mode": "walk", "intentSummary": "The player follows the obvious road.", "evidenceRefs": ["Old Shrine Road"] }',
   create_minor_poi:
     '{ "areaRef": "current_location", "poiType": "tea_stall", "name": "Lantern Tea Stall", "reason": "The public market supports ordinary tea service." }',
   create_scene_extra:
@@ -265,6 +281,18 @@ function buildRuntimeToolInvalidExampleLines(
   return ["Invalid examples:", ...invalidExamples];
 }
 
+function formatRuntimeRequirementStateEffectKindValues(): string {
+  return RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS
+    .map((effectKind) => {
+      const ownerTools = runtimeRequirementStateMutationTools({
+        kind: "state_mutation",
+        effectKind,
+      }).join("/");
+      return `"${effectKind}" (${ownerTools})`;
+    })
+    .join(", ");
+}
+
 export function buildRuntimeToolInputContract(options: {
   toolNames?: readonly RuntimeToolName[];
 } = {}): string {
@@ -313,7 +341,7 @@ export function buildScenePlannerPromptContract(options: {
     "Tool and combat plans must use concrete refs/tools from candidates and ALLOWED TOOLS. Tool/combat paths may consume an existing Oracle result, but must not trigger Oracle directly.",
     "Top-level fields: actionInterpretation, primaryResponse, supportResponses, plannedActions, deferredHooks, hiddenRationale.",
     'plannedActions shape: { "plannedActions": [{ "toolName": RuntimeToolName, "input": object }] } with optional actorRef.',
-    "Use actorRef values from allowed actor ids or labels only. Backend maps refs and validates with semanticScenePlanSchema.",
+    "Use actorRef values from visible labels or local aliases only. Backend maps refs and validates with semanticScenePlanSchema.",
     "backend will generate event/action/response/narrator IDs; backend generates event/action/response/narrator IDs deterministically. Do not output id, eventId, actionId, responseId, narratorFacts, actionIds, responseIds, or toolResultRefs.",
     buildRuntimeToolInputContract({ toolNames: options.allowedTools }),
     "ScenePlanner minimal valid output:",
@@ -373,13 +401,19 @@ export function buildGmReadPromptContract(options: {
     'Allowed path values exactly: "direct", "roll_oracle", "tool_plan", "combat_transition", "clarification", "continue".',
     "GM Read owns scene interpretation and path choice, not backend execution. RP turn job: read playerAction as a live request, identify the next playable beat, and choose the lightest path that makes the scene respond.",
     "One beat anchor: sceneQuestion is the immediate playable pressure for this turn; later tool execution and final narration must stay on it.",
-    "runtimeRequirement is the typed runtime obligation for tool_plan. It tells the later tool loop what kind of outcome must be fulfilled; it is not a tool call and contains no payload.",
-    'runtimeRequirement kinds: { "kind": "none" }, { "kind": "observation_read", "categories": ["visible_actors"|"visible_objects"|"routes"|"hazards"|"crowd"|"public_records"|"procedure"|"local_status"|"other"] }, { "kind": "dialogue_outcome", "durability": "scene_local"|"durable", "topicKind"?: "social"|"procedure"|"permission"|"proof"|"route"|"safety"|"trade"|"status"|"other" }, { "kind": "world_fact", "durability": "durable", "topicKind"?: same dialogue/world-fact topicKind }, { "kind": "scene_beat", "durability": "scene_local"|"durable" }, { "kind": "state_mutation" }.',
+    "turnGrounding is the structured semantic routing read for the current player request. Fill it before path choice; the backend validates consistency between turnGrounding, path, and runtimeRequirement instead of keyword-routing the player prose.",
+    'turnGrounding: { "intentKind": "ordinary_local_response"|"passive_status_read"|"procedural_information"|"posted_proof_applicability"|"document_state_assumption"|"concrete_state_change"|"combat_pressure"|"clarification_needed"|"other", "requiresGrounding": boolean, "groundingKind": "none"|"observation_read"|"dialogue_outcome"|"world_fact"|"scene_beat"|"state_mutation"|"roll_oracle"|"combat_transition", "topicKind"?: "social"|"procedure"|"permission"|"proof"|"route"|"safety"|"trade"|"status"|"other", "durability"?: "scene_local"|"durable", "reason": string }.',
+    "runtimeRequirement is the typed runtime obligation for tool_plan, roll_oracle, and combat_transition when later runtime tools may mutate state. It tells the later tool loop what kind of outcome must be fulfilled; it is not a tool call and contains no payload.",
+    'runtimeRequirement kinds: { "kind": "none" }, { "kind": "observation_read", "categories": ["visible_actors"|"visible_objects"|"routes"|"hazards"|"crowd"|"public_records"|"procedure"|"local_status"|"other"] }, { "kind": "dialogue_outcome", "durability": "scene_local"|"durable", "topicKind"?: "social"|"procedure"|"permission"|"proof"|"route"|"safety"|"trade"|"status"|"other", "requiresStructuralEffect"?: boolean }, { "kind": "world_fact", "durability": "durable", "topicKind"?: same dialogue/world-fact topicKind }, { "kind": "scene_beat", "durability": "scene_local"|"durable", "effectKind": StateEffectKind } OR { "kind": "scene_beat", "durability": "scene_local"|"durable", "beatKind": "event_log"|"time_passage" }, { "kind": "state_mutation", "effectKind": StateEffectKind }.',
+    `StateEffectKind values: ${formatRuntimeRequirementStateEffectKindValues()}. BeatKind values: "event_log" for log_event, "time_passage" for advance_time. Do not use generic state_mutation or scene_beat without a narrow kind.`,
     'Use observation_read for broad observation/status scans. Do not put "observation" or "public_record" in dialogue_outcome/world_fact.topicKind; public records belong in observation_read.categories or record_world_fact.sourceKind/factKind.',
-    'For direct, continue, clarification, roll_oracle, and combat_transition, omit runtimeRequirement or set { "kind": "none" }. For every tool_plan, include the narrowest non-none runtimeRequirement.',
+    "For dialogue_outcome, set requiresStructuralEffect=true only when this turn should actually apply durable world/entity state now: access granted, guard convinced, suspicion attached/removed, mark/tag added, relationship changed, possession transferred, route opened, wound/condition set. Leave it false/omitted for rules, hypotheticals, warnings, or claims about what would be sufficient.",
+    'For direct, continue, and clarification, omit runtimeRequirement or set { "kind": "none" }. For every tool_plan, include the narrowest non-none runtimeRequirement. For roll_oracle or combat_transition, use { "kind": "none" } only when the later loop should run observation-only tools; include a narrow non-none runtimeRequirement before any side-effecting state, scene-beat, or terminal receipt tool can run.',
     "Use direct for normal conversation, local description, ambient reaction, or a non-mutating NPC response from current visible facts only. Do not use direct, continue, or clarification for future-relevant concrete pressure such as named/role actors who keep acting, props, obligations, routes/doors/stairs, proofs, permits, waivers, authorisations, dispatch rules, permission boundaries, defensive posture, danger changes, or violence aftermath.",
     "Before returning direct, continue, or clarification, scan sceneQuestion, the path field, and narrationGuardrails. If any line would still matter after narration, switch path or remove that pressure. Path choice is the GM's job; Backend validates and may reject illegal no-mutation pressure.",
+    "Direct, continue, and clarification are checked by a separate no-mutation admissibility gate. Do not label route, proof, document, permission, procedure, public-service status, movement, possession, actor creation, combat/threat, or durable world/social claims as ordinary local response; the harness will repair them into grounded paths.",
     "Use tool_plan only when world state must actually change, a fact must matter later, a scene affordance must be established, reusable NPC procedural/logistical information must be recorded, or a support actor/location must exist for the current fiction.",
+    'For reusable procedural/logistical NPC answers, use runtimeRequirement { "kind": "dialogue_outcome", "durability": "durable" }. Do not ask the tool loop to persist durable memory from a scene_local requirement.',
     "If the player asks a visible authority, guard, clerk, warden, worker, assistant, witness, or service role for proof requirements, permits, permissions, rules, procedure, route status, dispatch rules, what changed, what changed today, which posted item/notice/rule/sign applies to a document or case, or any answer the player can rely on later, choose tool_plan. Do not use direct for reusable procedural answers.",
     "If the player asks whether they may/can send a message, contact a dispatch office, call for permission, keep waiting in place, use a public service, or follow an official communication procedure, choose tool_plan. That is reusable permission/logistical adjudication, even if the player is polite and stationary.",
     "If the player shows, compares, or asks which actual document, proof, permit, seal, credential, ledger, logbook, pass, or manifest satisfies or fails a stated requirement, choose tool_plan. The answer is reusable procedural adjudication, not a direct postcard. If the document is issued, reviewed, stamped, docketed, receipted, or officially unsealed, the later tool loop must create/tag item state.",
@@ -399,6 +433,7 @@ export function buildGmReadPromptContract(options: {
     "Keep passive-pressure modest and world-agnostic: delays, routine NPC movement, overheard signals, witness attention, public obstruction, or local consequences are enough.",
     "Use roll_oracle for uncertain visible reactions or resistance when no new durable fact is needed yet: belief, witness notice, alarm, or visible physical traction.",
     "Player agency is locked: never decide the player's deliberate words, feelings, consent, inventory claims, completed movement, or success in GM Read.",
+    "Playfeel matters: reward clever, tone-appropriate bluffs, social reads, risky tricks, and character power when the scene supports them. Do not turn every permission/proof beat into paperwork; if a creative success should matter later, request structural recording of the consequence instead.",
     "Treat claimed possessions, authority, access, or prior accomplishments as claims until state confirms them. For claimed keys/permits/passes/credentials/authority, do not ask Oracle whether the proof exists, is owned, fits, or works; only judge visible belief, witness reaction, alarm, or physical resistance.",
     "Unlisted claimed objects, doors, offices, routes, rooms, credentials, keys, or locks are not refs. Do not put them in actionInterpretation.targetRefs, rollRequest.targetRef, combat targetRef, focalActorRefs, backgroundActorRefs, or evidenceRefs; omit rollRequest.targetRef unless it is an exact listed candidate.",
     "Do not rescue a false or unconfirmed access claim by inventing an alternate key, lockpick, hidden tool, special technique, credential, or background skill.",
@@ -412,29 +447,25 @@ export function buildGmReadPromptContract(options: {
     "Use only refs supplied in CANDIDATE REFS FROM MODEL-FACING VIEW.",
     "Selection caps are hard: focalActorRefs 1-3, backgroundActorRefs 0-4, actionInterpretation.targetRefs 0-4, evidenceRefs 1-8, narrationGuardrails 0-4. Select the most decision-relevant refs; never enumerate every visible actor, event, item, or route.",
     "For broad take-stock/status-read actions, use Player plus the top 1-2 blockers, authorities, or affordances as focalActorRefs. Put less important visible context in situationSummary/rationale without adding refs.",
-    "Top-level fields shared by every path: version, situationSummary, sceneQuestion, focalActorRefs, backgroundActorRefs, actionInterpretation, path, rationale, evidenceRefs, narrationGuardrails, optional runtimeRequirement.",
+    "Top-level fields shared by every path: version, situationSummary, sceneQuestion, focalActorRefs, backgroundActorRefs, actionInterpretation, turnGrounding, path, rationale, evidenceRefs, narrationGuardrails, optional runtimeRequirement.",
     'actionInterpretation shape: { "intent": string, "method"?: string, "targetRefs": string[] }.',
     "Write compact fields. situationSummary should be 1-2 short sentences; sceneQuestion one direct question; rationale 1-2 sentences; narrationGuardrails 0-4 short bullets. Do not write essays in schema fields.",
     "Hard budgets to aim for: situationSummary under 240 chars, sceneQuestion under 140 chars, each narrationGuardrail under 140 chars. Backend accepts a little extra to avoid losing a valid turn, but concise output is the contract.",
+    'speakerBinding exact shapes: { "kind": "visible_actor", "speakerRef": "Road Warden" }, { "kind": "prose_role", "requestedRoleText": "nearest engineer", "allowCreateSceneExtra": true }, or { "kind": "no_visible_authority", "requestedRoleText": "permit office" }. Never write proseRole or roleText in GM Read speakerBinding.',
     "Per-path required fields:",
     '- direct: { "path": "direct", "directResolutionNotes": string }.',
     '- continue: { "path": "continue", "continuationGuidance": string }.',
     '- clarification: { "path": "clarification", "clarificationPrompt": string }.',
-    '- roll_oracle: { "path": "roll_oracle", "rollRequest": { "actorRef": string, "targetRef"?: string, "question": string, "stakes": string, "evidenceRefs": string[] } }.',
+    '- roll_oracle: { "path": "roll_oracle", "rollRequest": { "actorRef": string, "targetRef"?: string, "question": string, "stakes": string, "evidenceRefs": string[] }, "runtimeRequirement"?: RuntimeRequirement }. Use non-none runtimeRequirement when the post-roll tool loop must mutate state.',
     '- tool_plan: { "path": "tool_plan", "turnIntent": string, "runtimeRequirement": non-none RuntimeRequirement }. No tool inputs here.',
-    '- combat_transition: { "path": "combat_transition", "actorRef": string, "targetRef": string, "combatFraming": string, "stakes": string }.',
+    '- combat_transition: { "path": "combat_transition", "actorRef": string, "targetRef": string, "combatFraming": string, "stakes": string, "runtimeRequirement"?: RuntimeRequirement }. Use non-none runtimeRequirement when combat setup must apply state before narration.',
     "Compact valid examples:",
-    '{ "version": "gm-read.v1", "situationSummary": "The player greets a visible clerk.", "sceneQuestion": "How does the clerk answer the greeting?", "focalActorRefs": ["Player", "Cafe Clerk"], "backgroundActorRefs": [], "actionInterpretation": { "intent": "greet the clerk", "targetRefs": ["Cafe Clerk"] }, "path": "direct", "directResolutionNotes": "Answer with one local greeting from current visible facts only.", "rationale": "No reusable fact, route, proof, permission, or later obligation is introduced.", "evidenceRefs": ["Player", "Cafe Clerk"], "narrationGuardrails": ["Keep the answer local and non-durable."] }',
-    '{ "version": "gm-read.v1", "situationSummary": "The player tries to force the gate under pressure.", "sceneQuestion": "Does the gate challenge become uncertain?", "focalActorRefs": ["Player", "Gate Guard"], "backgroundActorRefs": [], "actionInterpretation": { "intent": "force passage", "targetRefs": ["Gate Guard"] }, "path": "roll_oracle", "rollRequest": { "actorRef": "Player", "targetRef": "Gate Guard", "question": "Does the guard yield?", "stakes": "The player passes or the gate locks down.", "evidenceRefs": ["Player", "Gate Guard"] }, "rationale": "The outcome is uncertain and consequential.", "evidenceRefs": ["Player", "Gate Guard"], "narrationGuardrails": ["Do not decide the outcome before Oracle."] }',
-    '{ "version": "gm-read.v1", "situationSummary": "The player claims a master key for an unlisted office door.", "sceneQuestion": "How does the visible guard challenge the claim?", "focalActorRefs": ["Player", "Road Warden"], "backgroundActorRefs": [], "actionInterpretation": { "intent": "claim authority and test access", "targetRefs": ["Road Warden"] }, "path": "roll_oracle", "rollRequest": { "actorRef": "Player", "targetRef": "Road Warden", "question": "Does the warden hesitate or call out the bluff?", "stakes": "The public reaction changes pressure, but the unlisted key/office is not confirmed.", "evidenceRefs": ["Player", "Road Warden"] }, "rationale": "Only the visible reaction is uncertain; the claimed proof is unconfirmed.", "evidenceRefs": ["Player", "Road Warden"], "narrationGuardrails": ["Do not put the claimed key in the player hand."] }',
-    '{ "version": "gm-read.v1", "situationSummary": "The player spends an hour as a tourist while the district is already under pressure.", "sceneQuestion": "What local pressure advances while the player lingers?", "focalActorRefs": ["Player"], "backgroundActorRefs": [], "actionInterpretation": { "intent": "linger and observe", "targetRefs": [] }, "path": "tool_plan", "turnIntent": "Ground a modest local pressure or support presence before narration uses it.", "runtimeRequirement": { "kind": "scene_beat", "durability": "durable" }, "rationale": "Elapsed time plus active pressure should leave a small remembered consequence.", "evidenceRefs": ["Player"], "narrationGuardrails": ["Do not make the player central by default."] }',
-    '{ "version": "gm-read.v1", "situationSummary": "The player watches whether public pressure changes checkpoint procedure.", "sceneQuestion": "What grounded crowd or authority signal is visible now?", "focalActorRefs": ["Player", "Road Warden"], "backgroundActorRefs": [], "actionInterpretation": { "intent": "watch for crowd pressure, procedure change, or public announcement", "targetRefs": ["Road Warden"] }, "path": "tool_plan", "turnIntent": "Ground the visible unchanged state, change, announcement, or lack of public shift before narration uses it as a playable update.", "runtimeRequirement": { "kind": "observation_read", "categories": ["crowd", "procedure", "local_status"] }, "rationale": "A yes/no change in public procedure is a future-relevant situational read, not ambient direct prose.", "evidenceRefs": ["Player", "Road Warden"], "narrationGuardrails": ["It is valid for nothing to change, but the lack of change must be grounded as the current playable read."] }',
-    '{ "version": "gm-read.v1", "situationSummary": "The player asks a visible warden what proof is required.", "sceneQuestion": "What procedural requirement does the warden state?", "focalActorRefs": ["Player", "Road Warden"], "backgroundActorRefs": [], "actionInterpretation": { "intent": "ask for proof requirements", "targetRefs": ["Road Warden"] }, "path": "tool_plan", "turnIntent": "Resolve and record the authority response so the requirement can matter on later turns.", "runtimeRequirement": { "kind": "dialogue_outcome", "durability": "durable", "topicKind": "proof" }, "rationale": "Proof requirements, permits, and permission boundaries are reusable procedural information.", "evidenceRefs": ["Player", "Road Warden"], "narrationGuardrails": ["The warden may answer, refuse, or demand another proof, but do not invent player credentials."] }',
-    '{ "version": "gm-read.v1", "situationSummary": "The player asks if they may contact dispatch while staying put.", "sceneQuestion": "What permission or public communication procedure applies here?", "focalActorRefs": ["Player", "Road Warden"], "backgroundActorRefs": [], "actionInterpretation": { "intent": "ask permission to send a dispatch message while remaining in place", "targetRefs": ["Road Warden"] }, "path": "tool_plan", "turnIntent": "Resolve and record the authority response about dispatch contact and whether staying in place is permitted.", "runtimeRequirement": { "kind": "dialogue_outcome", "durability": "durable", "topicKind": "permission" }, "rationale": "Permission to contact an office or use a public procedure is reusable logistical adjudication.", "evidenceRefs": ["Player", "Road Warden"], "narrationGuardrails": ["The authority may allow, refuse, redirect, or require a specific office; do not complete the message without a tool result."] }',
-    '{ "version": "gm-read.v1", "situationSummary": "The player shows actual courier documents to a visible warden.", "sceneQuestion": "Which document fails the stated requirement?", "focalActorRefs": ["Player", "Road Warden"], "backgroundActorRefs": [], "actionInterpretation": { "intent": "compare actual documents against a permit requirement", "targetRefs": ["Road Warden"] }, "path": "tool_plan", "turnIntent": "Record the warden adjudicating which actual document fails the requirement so the rejection can matter later.", "runtimeRequirement": { "kind": "dialogue_outcome", "durability": "durable", "topicKind": "proof" }, "rationale": "A document failure is reusable procedural information and should not be only direct prose.", "evidenceRefs": ["Player", "Road Warden"], "narrationGuardrails": ["Do not invent new credentials, substitute documents, or passage."] }',
-    '{ "version": "gm-read.v1", "situationSummary": "The player compares an engineer warning with a debt clerk claim.", "sceneQuestion": "What grounded contradiction or uncertainty should future route choices remember?", "focalActorRefs": ["Player"], "backgroundActorRefs": [], "actionInterpretation": { "intent": "compare prior procedural warnings and clerk statements", "targetRefs": [] }, "path": "tool_plan", "turnIntent": "Ground and record the comparison or uncertainty between prior official warnings so future route choices can use it.", "runtimeRequirement": { "kind": "world_fact", "durability": "durable", "topicKind": "procedure" }, "rationale": "Reconciling reusable procedural facts is itself future-relevant game state, not a direct aside.", "evidenceRefs": ["Player"], "narrationGuardrails": ["Do not invent a conspiracy; record uncertainty only where the grounded facts conflict."] }',
-    '{ "version": "gm-read.v1", "situationSummary": "The player asks a public clerk which posted item applies to a sealed message.", "sceneQuestion": "What clerk answer, refusal, redirect, or no-current-answer can be grounded here?", "focalActorRefs": ["Player"], "backgroundActorRefs": [], "actionInterpretation": { "intent": "ask a clerk to identify which posted item applies to the sealed message", "targetRefs": [] }, "path": "tool_plan", "turnIntent": "Resolve a plausible current-scene clerk or record no-current-answer, then record the posted-item/proof answer for future route choices.", "runtimeRequirement": { "kind": "dialogue_outcome", "durability": "durable", "topicKind": "proof" }, "rationale": "Which posted item applies to a carried document is reusable proof/procedure adjudication, not direct prose.", "evidenceRefs": ["Player"], "narrationGuardrails": ["The clerk may answer, refuse, redirect to the registry, or say no posted item applies here."] }',
-    '{ "version": "gm-read.v1", "situationSummary": "The player follows a public indicated route toward the safest lawful office.", "sceneQuestion": "Which legal movement or blocked-route outcome can be grounded now?", "focalActorRefs": ["Player"], "backgroundActorRefs": [], "actionInterpretation": { "intent": "follow a public indicated route toward the safest named office or holding point", "targetRefs": [] }, "path": "tool_plan", "turnIntent": "Resolve legal route options, move along a confirmed public route, or record a grounded blocked/no-current-route outcome.", "runtimeRequirement": { "kind": "state_mutation" }, "rationale": "Low-risk public navigation should bridge through route tools instead of asking for backend route ids.", "evidenceRefs": ["Player"], "narrationGuardrails": ["Do not complete movement without a valid route or blocked-route tool result."] }',
+    '{ "version": "gm-read.v1", "situationSummary": "The player greets a visible clerk.", "sceneQuestion": "How does the clerk answer the greeting?", "focalActorRefs": ["Player", "Cafe Clerk"], "backgroundActorRefs": [], "actionInterpretation": { "intent": "greet the clerk", "targetRefs": ["Cafe Clerk"] }, "turnGrounding": { "intentKind": "ordinary_local_response", "requiresGrounding": false, "groundingKind": "none", "reason": "A local greeting can be answered from visible facts without durable state." }, "path": "direct", "directResolutionNotes": "Answer with one local greeting from current visible facts only.", "rationale": "No reusable fact, route, proof, permission, or later obligation is introduced.", "evidenceRefs": ["Player", "Cafe Clerk"], "narrationGuardrails": ["Keep the answer local and non-durable."] }',
+    '{ "version": "gm-read.v1", "situationSummary": "The player tries to force the gate under pressure.", "sceneQuestion": "Does the gate challenge become uncertain?", "focalActorRefs": ["Player", "Gate Guard"], "backgroundActorRefs": [], "actionInterpretation": { "intent": "force passage", "targetRefs": ["Gate Guard"] }, "turnGrounding": { "intentKind": "combat_pressure", "requiresGrounding": true, "groundingKind": "roll_oracle", "topicKind": "safety", "durability": "scene_local", "reason": "The visible reaction is uncertain and needs Oracle before narration." }, "path": "roll_oracle", "rollRequest": { "actorRef": "Player", "targetRef": "Gate Guard", "question": "Does the guard yield?", "stakes": "The player passes or the gate locks down.", "evidenceRefs": ["Player", "Gate Guard"] }, "rationale": "The outcome is uncertain and consequential.", "evidenceRefs": ["Player", "Gate Guard"], "narrationGuardrails": ["Do not decide the outcome before Oracle."] }',
+    '{ "version": "gm-read.v1", "situationSummary": "The player watches whether public pressure changes checkpoint procedure.", "sceneQuestion": "What grounded crowd or authority signal is visible now?", "focalActorRefs": ["Player", "Road Warden"], "backgroundActorRefs": [], "actionInterpretation": { "intent": "watch for crowd pressure, procedure change, or public announcement", "targetRefs": ["Road Warden"] }, "turnGrounding": { "intentKind": "passive_status_read", "requiresGrounding": true, "groundingKind": "observation_read", "topicKind": "procedure", "durability": "scene_local", "reason": "The player asks for a playable current-state read, not ambient color." }, "path": "tool_plan", "turnIntent": "Ground the visible unchanged state, change, announcement, or lack of public shift before narration uses it as a playable update.", "runtimeRequirement": { "kind": "observation_read", "categories": ["crowd", "procedure", "local_status"] }, "rationale": "A yes/no change in public procedure is a situational read, not ambient direct prose.", "evidenceRefs": ["Player", "Road Warden"], "narrationGuardrails": ["It is valid for nothing to change, but the lack of change must be grounded as the current playable read."] }',
+    '{ "version": "gm-read.v1", "situationSummary": "The player asks a visible warden what proof is required.", "sceneQuestion": "What procedural requirement does the warden state?", "focalActorRefs": ["Player", "Road Warden"], "backgroundActorRefs": [], "actionInterpretation": { "intent": "ask for proof requirements", "targetRefs": ["Road Warden"] }, "turnGrounding": { "intentKind": "procedural_information", "requiresGrounding": true, "groundingKind": "dialogue_outcome", "topicKind": "proof", "durability": "durable", "reason": "Proof requirements are reusable procedural information." }, "path": "tool_plan", "turnIntent": "Resolve and record the authority response so the requirement can matter on later turns.", "runtimeRequirement": { "kind": "dialogue_outcome", "durability": "durable", "topicKind": "proof", "speakerBinding": { "kind": "visible_actor", "speakerRef": "Road Warden" } }, "rationale": "Proof requirements, permits, and permission boundaries are reusable procedural information.", "evidenceRefs": ["Player", "Road Warden"], "narrationGuardrails": ["The warden may answer, refuse, or demand another proof, but do not invent player credentials."] }',
+    '{ "version": "gm-read.v1", "situationSummary": "The player compares an engineer warning with a debt clerk claim.", "sceneQuestion": "What grounded contradiction or uncertainty should future route choices remember?", "focalActorRefs": ["Player"], "backgroundActorRefs": [], "actionInterpretation": { "intent": "compare prior procedural warnings and clerk statements", "targetRefs": [] }, "turnGrounding": { "intentKind": "procedural_information", "requiresGrounding": true, "groundingKind": "world_fact", "topicKind": "procedure", "durability": "durable", "reason": "The comparison should become a reusable known fact or uncertainty." }, "path": "tool_plan", "turnIntent": "Ground and record the comparison or uncertainty between prior official warnings so future route choices can use it.", "runtimeRequirement": { "kind": "world_fact", "durability": "durable", "topicKind": "procedure" }, "rationale": "Reconciling reusable procedural facts is itself future-relevant game state, not a direct aside.", "evidenceRefs": ["Player"], "narrationGuardrails": ["Do not invent a conspiracy; record uncertainty only where the grounded facts conflict."] }',
+    '{ "version": "gm-read.v1", "situationSummary": "The player follows a public indicated route toward the safest lawful office.", "sceneQuestion": "Which legal movement or blocked-route outcome can be grounded now?", "focalActorRefs": ["Player"], "backgroundActorRefs": [], "actionInterpretation": { "intent": "follow a public indicated route toward the safest named office or holding point", "targetRefs": [] }, "turnGrounding": { "intentKind": "concrete_state_change", "requiresGrounding": true, "groundingKind": "state_mutation", "topicKind": "route", "durability": "scene_local", "reason": "Completed movement or a blocked route must be resolved by backend tools." }, "path": "tool_plan", "turnIntent": "Resolve legal route options, move along a confirmed public route, or record a grounded blocked/no-current-route outcome.", "runtimeRequirement": { "kind": "state_mutation", "effectKind": "movement" }, "rationale": "Low-risk public navigation should bridge through route tools instead of asking for backend route ids.", "evidenceRefs": ["Player"], "narrationGuardrails": ["Do not complete movement without a valid route or blocked-route tool result."] }',
     "Invalid examples: plannedTools, plannedActions, tool input payloads, hpDelta, stateDelta, inventoryAdd, narrator prose, invented actor refs, private/offscreen refs.",
   ].join("\n");
 }
@@ -460,7 +491,7 @@ export function buildGmActionChecklistPromptContract(options: {
     "Each runtime_tool step should map to one backend action. Do not combine unrelated changes into one step and do not split one fact into filler steps.",
     "expectedVisibleEffect must be concrete and player-perceivable if the step succeeds; it is not permission to narrate skipped or failed work.",
     "Bridgeable tool_plan policy: use lookup observation tools before state-bearing bridge tools when candidate support is needed, then let backend validation execute only the legal state tool.",
-    "Prefer legal low-risk advancement over parser-like questions. For fuzzy route, POI, object, actor, or service-role intent, propose list/find/check lookup steps before move_actor, create_minor_poi, create_scene_extra, start_search, or record_player_intent when needed.",
+    "Prefer legal low-risk advancement over parser-like questions. For fuzzy route, POI, object, actor, or service-role intent, propose list/find/check lookup steps before move_actor, create_minor_poi, create_scene_extra, or another listed state-bearing tool when needed.",
     "Do not skip or stall merely because the player did not say an exact backend string. Reserve clarification-like deferral for materially different risk/cost, irreversible high-impact actions, contradictory intent, mechanically important target identity, or no fair playable bridge.",
     "Prefer reuse over creation. Create dynamic locations or support NPCs only when the current action needs them to keep the fiction playable.",
     "Player agency remains locked: do not record claimed possessions, access, consent, or completed movement unless the step can be proven by current state or a valid tool result.",
@@ -476,7 +507,7 @@ export function buildGmActionChecklistPromptContract(options: {
     `Allowed RuntimeToolName values for candidateToolRequest: ${allowedToolList}.`,
     "candidateToolRequest is an untrusted suggestion for the later backend tool-step validator. Backend may accept, revise, skip, or reject it.",
     "Use candidateToolRequest only when requiredAction is runtime_tool. Omit it for combat_transition, oracle, narration_constraint, and skip.",
-    "Dynamic local staging kit: when allowed tools include reveal_location or spawn_npc, you may propose anchored ephemeral sublocations and support NPCs only when current fiction needs a local affordance or scene actor.",
+    "Dynamic local staging kit: when allowed tools include create_minor_poi or create_scene_extra, you may propose anchored ephemeral sublocations and support NPCs only when current fiction needs a local affordance or scene actor.",
     "Reuse an existing suitable local scene affordance before creating another; do not create a room/NPC just because a tool exists.",
     "Support NPCs are temporary local actors. Use promote_npc only when one becomes future-relevant; otherwise let cleanup retire incidental cast.",
     "temporary props/items are out of scope for dynamic staging in this checklist; do not use spawn_item as a substitute for local scene dressing.",

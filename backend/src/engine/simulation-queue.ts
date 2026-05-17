@@ -2,10 +2,6 @@ import type { ProviderConfig } from "../ai/provider-registry.js";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import {
-  factionCommandNodes,
-  factionReports,
-  factionResources,
-  factions,
   simulationProposals,
 } from "../db/schema.js";
 import {
@@ -17,7 +13,6 @@ import {
   scheduleKeyActorProcessesForTurn,
   type ActorScheduleDecision,
 } from "./actor-scheduler.js";
-import { scheduleFactionCommandNodes } from "./faction-command-scheduler.js";
 import {
   createSimulationProposal,
   parseSimulationProposalPayload,
@@ -57,65 +52,6 @@ function providerDescriptor(provider: ProviderConfig): Record<string, string | u
 
 function dueOnInterval(tick: number, interval: number): boolean {
   return tick > 0 && tick % interval === 0;
-}
-
-function buildFactionCommandRoutingSnapshot(campaignId: string): {
-  factionCount: number;
-  commandNodeCount: number;
-  availableReportCount: number;
-  resourceRouteCount: number;
-  commandNodeCandidateIds: string[];
-  candidates: Array<{
-    commandNodeId: string;
-    factionId: string;
-    reason: string;
-    reportIds: string[];
-    standingOrderCount: number;
-    resourceKeys: string[];
-  }>;
-  routingWarnings: string[];
-} {
-  const db = getDb();
-  const factionCount = db
-    .select()
-    .from(factions)
-    .where(eq(factions.campaignId, campaignId))
-    .all().length;
-  const commandNodeCount = db
-    .select()
-    .from(factionCommandNodes)
-    .where(eq(factionCommandNodes.campaignId, campaignId))
-    .all().length;
-  const availableReportCount = db
-    .select()
-    .from(factionReports)
-    .where(eq(factionReports.campaignId, campaignId))
-    .all()
-    .filter((row) => row.status === "available").length;
-  const resourceRouteCount = db
-    .select()
-    .from(factionResources)
-    .where(eq(factionResources.campaignId, campaignId))
-    .all().length;
-  const schedule = scheduleFactionCommandNodes({ campaignId });
-  return {
-    factionCount,
-    commandNodeCount,
-    availableReportCount,
-    resourceRouteCount,
-    commandNodeCandidateIds: schedule.candidates.map((candidate) => candidate.commandNodeId),
-    candidates: schedule.candidates.map((candidate) => ({
-      commandNodeId: candidate.commandNodeId,
-      factionId: candidate.factionId,
-      reason: candidate.reason,
-      reportIds: candidate.reports.map((report) => report.id),
-      standingOrderCount: candidate.standingOrders.length,
-      resourceKeys: candidate.resources.map((resource) => resource.resourceKey),
-    })),
-    routingWarnings: commandNodeCount === 0 && factionCount > 0
-      ? ["No faction command nodes exist yet; command-node proposals must seed routing before committing faction action."]
-      : [],
-  };
 }
 
 function enqueueProposal(input: {
@@ -318,90 +254,24 @@ export function queuePostTurnSimulationProposals(
           `player_location:${input.playerLocationId}`,
           `player_scene:${input.playerSceneScopeId ?? input.playerLocationId}`,
         ],
-        writeScopes: ["npc:state", "event:npc_offscreen", "memory:reflection_budget"],
-        preconditions: ["Do not apply NPC moves, goals, events, or reflection budget until proposal commit validates base world version."],
-        intendedTools: [
-          { name: "npc_offscreen_update", reason: "interval_due" },
-          { name: "record_location_event", reason: "surface_offscreen_change" },
-        ],
+        writeScopes: [`location:${input.playerLocationId}:recent_event`],
+        preconditions: ["Do not apply NPC moves, goals, events, or reflection budget until a supported proposal executor tool validates base world version and write scope."],
+        intendedTools: [{
+          name: "record_location_event",
+          reason: "surface_offscreen_interval_due",
+          args: {
+            locationRef: input.playerLocationId,
+            eventType: "npc_offscreen_interval_due",
+            summary: "Offscreen NPC simulation interval became due outside the player-visible scene.",
+            importance: 2,
+          },
+        }],
         payload: {
           tick: input.tick,
           provider,
           playerLocationId: input.playerLocationId,
           playerSceneScopeId: input.playerSceneScopeId ?? null,
           interval,
-        },
-      }),
-    );
-  }
-
-  queued.push(
-    enqueueProposal({
-      campaignId: input.campaignId,
-      baseWorldVersion: clock.worldVersion,
-      jobType: "npc_reflection_scan",
-      proposalType: "npc_reflection_updates",
-      sourceEntity: { type: "system", id: "npc-reflection" },
-      idempotencyKey: proposalIdempotencyKey({
-        rootKey: input.idempotencyKey,
-        proposalType: "npc_reflection_updates",
-        sourceEntity: { type: "system", id: "npc-reflection" },
-      }),
-      priority: 5,
-      tick: input.tick,
-      worldTimeMinutes: clock.worldTimeMinutes,
-      route: input.route,
-      summary: "Scan reflection-eligible NPCs and propose memory/belief/goal updates only.",
-      readSet: [`tick:${input.tick}`, "npc:unprocessed_importance"],
-      writeScopes: ["npc:memory", "npc:belief", "npc:goal", "npc:identity"],
-      preconditions: ["Reflection tools cannot directly mutate NPC records from detached post-turn work."],
-      intendedTools: [{ name: "npc_reflection_update", reason: "post_turn_reflection_scan" }],
-      payload: {
-        tick: input.tick,
-        provider,
-      },
-    }),
-  );
-
-  if (dueOnInterval(input.tick, interval)) {
-    const factionRouting = buildFactionCommandRoutingSnapshot(input.campaignId);
-    queued.push(
-      enqueueProposal({
-        campaignId: input.campaignId,
-        baseWorldVersion: clock.worldVersion,
-        jobType: "faction_command_tick",
-        proposalType: "faction_command_updates",
-        sourceEntity: { type: "system", id: "faction-command-network" },
-        idempotencyKey: proposalIdempotencyKey({
-          rootKey: input.idempotencyKey,
-          proposalType: "faction_command_updates",
-          sourceEntity: { type: "system", id: "faction-command-network" },
-        }),
-        priority: 1,
-        tick: input.tick,
-        worldTimeMinutes: clock.worldTimeMinutes,
-        route: input.route,
-        summary: "Evaluate faction command nodes through reports, standing orders, and resource ledgers before proposing any faction/world change.",
-        readSet: [
-          `tick:${input.tick}`,
-          "faction:command_nodes",
-          "faction:reports",
-          "faction:resources",
-        ],
-        writeScopes: ["faction:command_network", "world:event", "location:event"],
-        preconditions: [
-          "Faction work cannot directly mutate state from detached post-turn work.",
-          "A committed faction operation must cite a command node plus available report or standing order and validated resources.",
-        ],
-        intendedTools: [
-          { name: "faction_command_operation", reason: "interval_due" },
-          { name: "record_world_event", reason: "surface_faction_consequence" },
-        ],
-        payload: {
-          tick: input.tick,
-          provider,
-          interval,
-          factionRouting,
         },
       }),
     );

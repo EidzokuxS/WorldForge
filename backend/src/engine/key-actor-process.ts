@@ -29,6 +29,12 @@ export interface KeyActorPlanStep {
   writeScopes?: string[];
   deadlineWorldTimeMinutes?: number | null;
   action?: KeyActorDeterministicPlanAction | null;
+  provenance?: KeyActorPlanProvenance | null;
+}
+
+export interface KeyActorPlanProvenance {
+  source: string;
+  authoritativeForPlayer: boolean;
 }
 
 export type KeyActorSurfaceVisibility =
@@ -231,6 +237,22 @@ function normalizePlanStep(value: unknown): KeyActorPlanStep | null {
         ? Math.max(0, record.deadlineWorldTimeMinutes)
         : null,
     action: normalizeDeterministicPlanAction(record.action),
+    provenance: normalizePlanProvenance(record.provenance),
+  };
+}
+
+function normalizePlanProvenance(value: unknown): KeyActorPlanProvenance | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const source = typeof record.source === "string" ? record.source.trim() : "";
+  if (!source) {
+    return null;
+  }
+  return {
+    source,
+    authoritativeForPlayer: record.authoritativeForPlayer === true,
   };
 }
 

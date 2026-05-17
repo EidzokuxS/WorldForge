@@ -134,6 +134,15 @@ export function resolveStoredSceneScopeId(
   return currentSceneLocationId ?? broadLocationId ?? null;
 }
 
+export function resolveImmediateScenePresenceScopeId(
+  currentSceneLocationId: string | null | undefined,
+): string | null {
+  // Immediate actor presence is keyed only by an explicit scene scope.
+  // A macro id is valid when runtime state stores it there; absent scene scope
+  // must not fall back to broad-location co-presence.
+  return currentSceneLocationId ?? null;
+}
+
 function resolvePresenceSceneScopeId(input: {
   broadLocationId: string | null | undefined;
   sceneScopeId: string | null | undefined;

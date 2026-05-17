@@ -21,6 +21,7 @@ function createFrame(): SceneFrame {
   return {
     campaignId: "campaign-78-05",
     tick: 3,
+    worldVersion: 0,
     playerActorId: playerId,
     currentLocationId: "loc-bridge",
     currentSceneScopeId: "loc-bridge",
@@ -158,10 +159,10 @@ describe("executeScenePlan rollback boundary evidence", () => {
       input: {
         name: "Outpost Cook",
         tags: ["service-staff"],
-        locationName: "Okutama Safe Zone - Forest Outpost",
+        locationRef: "current_scene",
       },
     };
-    const plan = scenePlanSchema.parse({
+    const validPlan = scenePlanSchema.parse({
       ...createPlan(),
       plannedActions: [firstAction, remoteSpawnAction],
       narratorFacts: {
@@ -173,6 +174,20 @@ describe("executeScenePlan rollback boundary evidence", () => {
         ],
       },
     });
+    const plan = {
+      ...validPlan,
+      plannedActions: [
+        validPlan.plannedActions[0]!,
+        {
+          ...validPlan.plannedActions[1]!,
+          input: {
+            name: "Outpost Cook",
+            tags: ["service-staff"],
+            locationName: "Okutama Safe Zone - Forest Outpost",
+          },
+        },
+      ],
+    } as typeof validPlan;
 
     const promise = executeScenePlan({
       campaignId: "campaign-78-05",

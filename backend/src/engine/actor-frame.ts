@@ -407,15 +407,6 @@ function routeCountsForFacts(facts: readonly ActorFrameFact[]): Record<string, n
   return counts;
 }
 
-function sourceRefsForFact(fact: ActorFrameFact): string[] {
-  return uniqueStrings([
-    fact.id,
-    ...(fact.sourceEventIds ?? []),
-    ...(fact.sourceKnowledgeIds ?? []),
-    ...(fact.authorityTraceIds ?? []),
-  ]);
-}
-
 function buildSourceLinkedSummaryFact(input: {
   id: string;
   textPrefix: string;
@@ -425,11 +416,10 @@ function buildSourceLinkedSummaryFact(input: {
   if (input.facts.length === 0) {
     return null;
   }
-  const sourceRefs = uniqueStrings(input.facts.flatMap(sourceRefsForFact));
   return {
     id: input.id,
     route: "source_linked_summary",
-    text: `${input.textPrefix} ${input.facts.length} records summarized for frame budget. Sources: ${sourceRefs.slice(0, 8).join(", ")}.`,
+    text: `${input.textPrefix} ${input.facts.length} records summarized for frame budget. Source links are preserved internally.`,
     subjectRefs: uniqueStrings(input.facts.flatMap((fact) => fact.subjectRefs)),
     confidence: Math.min(...input.facts.map((fact) => fact.confidence)),
     reliability: Math.min(...input.facts.map((fact) => fact.reliability ?? fact.confidence)),

@@ -5,6 +5,7 @@ import type {
   NarratorPacket,
   NarratorPacketActor,
   NarratorPacketInventoryItem,
+  NarratorPacketObservation,
   NarratorPacketRedactionAudit,
   NarratorPacketSourceLinkedSummary,
 } from "./narrator-packet.js";
@@ -20,6 +21,8 @@ import {
   type ContextBudgetTrace,
 } from "./context-budget-trace.js";
 import { getFrameBudgetSpec } from "./frame-budget.js";
+import { sanitizeModelFacingConversationText } from "./model-facing-conversation.js";
+import { sanitizeModelFacingText } from "./model-facing-ref-safety.js";
 
 export type PlayerFacingPacketSourceKind =
   | "player_action_request"
@@ -28,6 +31,7 @@ export type PlayerFacingPacketSourceKind =
   | "committed_event"
   | "perceivable_response"
   | "perceivable_effect"
+  | "observation_result"
   | "visible_actor"
   | "current_inventory_status"
   | "hint_signal"
@@ -57,6 +61,7 @@ export interface PlayerFacingPacket {
   committedEvents: CanonicalTurnPacketEvent[];
   perceivableResponses: CanonicalTurnPacketResponse[];
   perceivableEffects: CanonicalTurnPacketEffect[];
+  perceivableObservations: NarratorPacketObservation[];
   visibleActors: NarratorPacketActor[];
   currentInventory: NarratorPacketInventoryItem[];
   hintSignals: string[];
@@ -83,7 +88,7 @@ export class PlayerFacingPacketSafetyError extends Error {
   }
 }
 
-function uniqueStrings(values: Array<string | null | undefined>): string[] {
+function uniqueStrings(values: readonly (string | null | undefined)[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
 
@@ -104,55 +109,108 @@ function uniqueStrings(values: Array<string | null | undefined>): string[] {
 }
 
 function formatEvent(event: CanonicalTurnPacketEvent, includeTechnicalRefs: boolean): string {
+  const summary = sanitizeModelFacingText(event.summary);
   return includeTechnicalRefs
-    ? `- ${event.id}: ${event.summary} [actor=${event.actorId}; kind=${event.kind}]`
-    : `- ${event.summary}`;
+    ? `- ${formatDiagnosticRef(event.id)}: ${summary} [actor=${formatDiagnosticRef(event.actorId)}; kind=${event.kind}]`
+    : `- ${summary}`;
 }
 
 function formatResponse(response: CanonicalTurnPacketResponse, includeTechnicalRefs: boolean): string {
+  const summary = sanitizeModelFacingText(response.summary);
   return includeTechnicalRefs
-    ? `- ${response.id}: ${response.summary} [actor=${response.actorId}; event=${response.eventId}; kind=${response.responseKind}]`
-    : `- ${response.summary}`;
+    ? `- ${formatDiagnosticRef(response.id)}: ${summary} [actor=${formatDiagnosticRef(response.actorId)}; event=${formatDiagnosticRef(response.eventId)}; kind=${response.responseKind}]`
+    : `- ${summary}`;
 }
 
 function formatEffect(
   effect: CanonicalTurnPacketEffect,
   includeTechnicalRefs: boolean,
 ): string {
+  const summary = sanitizeModelFacingText(effect.summary);
   if (!includeTechnicalRefs) {
-    return `- ${effect.summary}`;
+    return `- ${summary}`;
   }
   const refs = [
-    effect.actionId ? `action=${effect.actionId}` : null,
-    effect.actorId ? `actor=${effect.actorId}` : null,
+    effect.actionId ? `action=${formatDiagnosticRef(effect.actionId)}` : null,
+    effect.actorId ? `actor=${formatDiagnosticRef(effect.actorId)}` : null,
   ].filter((value): value is string => Boolean(value));
 
-  return `- ${effect.id}: ${effect.summary}${refs.length > 0 ? ` [${refs.join("; ")}]` : ""}`;
+  return `- ${formatDiagnosticRef(effect.id)}: ${summary}${refs.length > 0 ? ` [${refs.join("; ")}]` : ""}`;
+}
+
+function formatObservation(
+  observation: NarratorPacketObservation,
+  includeTechnicalRefs: boolean,
+): string {
+  const summary = sanitizeModelFacingText(observation.summary);
+  return includeTechnicalRefs
+    ? `- ${formatDiagnosticRef(observation.id)}: ${summary} [tool=${sanitizeModelFacingText(observation.toolName)}]`
+    : `- ${summary}`;
+}
+
+const NON_NARRATIVE_INVENTORY_TAGS = new Set(["starting-loadout", "equipped", "carried"]);
+
+function formatInventoryTagForPrompt(tag: string): string {
+  let formatted = "";
+  let pendingSpace = false;
+
+  for (const char of tag) {
+    if (char === "_" || char === "-") {
+      pendingSpace = formatted.length > 0;
+      continue;
+    }
+    if (pendingSpace) {
+      formatted += " ";
+      pendingSpace = false;
+    }
+    formatted += char;
+  }
+
+  return formatted.trim();
+}
+
+function playerVisibleInventoryStates(tags: readonly string[]): string[] {
+  return uniqueStrings(tags)
+    .filter((tag) => !NON_NARRATIVE_INVENTORY_TAGS.has(tag.toLowerCase()))
+    .map((tag) => formatInventoryTagForPrompt(tag));
+}
+
+function formatEquippedSlotForPrompt(slot: string | null): string | null {
+  const formatted = slot ? formatInventoryTagForPrompt(slot) : "";
+  if (!formatted || formatted.toLowerCase() === "equipped") {
+    return null;
+  }
+  return formatted;
 }
 
 function formatInventoryStatus(item: NarratorPacketInventoryItem): string {
+  const equippedSlot = formatEquippedSlotForPrompt(item.equippedSlot);
   const state = item.equipState === "equipped"
-    ? `currently equipped${item.equippedSlot ? ` in ${item.equippedSlot}` : ""}`
-    : "currently carried";
-  const signature = item.isSignature ? " as a signature item" : "";
-  const tags = uniqueStrings(item.tags);
-  const tagSummary = tags.length > 0 ? ` Item tags/state: ${tags.join(", ")}.` : "";
-  return `${item.label} is ${state} by the player${signature}.${tagSummary}`;
+    ? equippedSlot
+      ? `ready at the player's ${equippedSlot}`
+      : "ready to hand"
+    : "carried by the player";
+  const tags = playerVisibleInventoryStates(item.tags);
+  const tagSummary = tags.length > 0 ? ` Visible marks/status: ${tags.join(", ")}.` : "";
+  return sanitizeModelFacingText(`${item.label} is ${state}.${tagSummary}`);
 }
 
 function visibleTexts(packet: PlayerFacingPacket): string[] {
   return [
-    packet.playerActionRequest,
-    packet.oracleOutcome,
-    packet.anchorEvent.summary,
-    ...packet.committedEvents.map((event) => event.summary),
-    ...packet.perceivableResponses.map((response) => response.summary),
-    ...packet.perceivableEffects.map((effect) => effect.summary),
-    ...packet.visibleActors.map((actor) => actor.label),
+    sanitizeModelFacingText(packet.playerActionRequest),
+    packet.oracleOutcome ? sanitizeModelFacingText(packet.oracleOutcome) : packet.oracleOutcome,
+    sanitizeModelFacingText(packet.anchorEvent.summary),
+    ...packet.committedEvents.map((event) => sanitizeModelFacingText(event.summary)),
+    ...packet.perceivableResponses.map((response) => sanitizeModelFacingText(response.summary)),
+    ...packet.perceivableEffects.map((effect) => sanitizeModelFacingText(effect.summary)),
+    ...(packet.perceivableObservations ?? []).map((observation) =>
+      sanitizeModelFacingText(observation.summary)
+    ),
+    ...packet.visibleActors.map((actor) => sanitizeModelFacingText(actor.label)),
     ...packet.currentInventory.map(formatInventoryStatus),
-    ...packet.hintSignals,
-    ...packet.guardrails,
-    packet.controlReturnReason,
+    ...packet.hintSignals.map((hint) => sanitizeModelFacingText(hint)),
+    ...packet.guardrails.map((guardrail) => sanitizeModelFacingText(guardrail)),
+    sanitizeModelFacingText(packet.controlReturnReason),
   ].filter((text): text is string => typeof text === "string" && text.length > 0);
 }
 
@@ -170,43 +228,51 @@ function sourceBoundaryCheckedTexts(
     playerSourced?: boolean;
     toolName?: RuntimeToolName | null;
   }> = [
-    { source: "oracle_outcome", text: packet.oracleOutcome },
     {
-      source: `anchor_event:${packet.anchorEvent.id}`,
-      text: packet.anchorEvent.summary,
+      source: "oracle_outcome",
+      text: packet.oracleOutcome ? sanitizeModelFacingText(packet.oracleOutcome) : packet.oracleOutcome,
+    },
+    {
+      source: "anchor_event:e0",
+      text: sanitizeModelFacingText(packet.anchorEvent.summary),
       playerSourced: isPlayerActionEvent(packet.anchorEvent),
     },
-    ...packet.committedEvents.map((event) => ({
-      source: `committed_event:${event.id}`,
-      text: event.summary,
+    ...packet.committedEvents.map((event, index) => ({
+      source: `committed_event:e${index + 1}`,
+      text: sanitizeModelFacingText(event.summary),
       playerSourced: isPlayerActionEvent(event),
     })),
-    ...packet.perceivableResponses.map((response) => ({
-      source: `perceivable_response:${response.id}`,
-      text: response.summary,
+    ...packet.perceivableResponses.map((response, index) => ({
+      source: `perceivable_response:r${index + 1}`,
+      text: sanitizeModelFacingText(response.summary),
     })),
-    ...packet.perceivableEffects.map((effect) => ({
-      source: `perceivable_effect:${effect.id}`,
-      text: effect.summary,
+    ...packet.perceivableEffects.map((effect, index) => ({
+      source: `perceivable_effect:f${index + 1}`,
+      text: sanitizeModelFacingText(effect.summary),
       toolName: effect.toolName,
     })),
-    ...packet.visibleActors.map((actor) => ({
-      source: `visible_actor:${actor.id}`,
-      text: actor.label,
+    ...packet.perceivableObservations.map((observation, index) => ({
+      source: `observation_result:o${index + 1}`,
+      text: sanitizeModelFacingText(observation.summary),
+      toolName: observation.toolName,
     })),
-    ...packet.currentInventory.map((item) => ({
-      source: `current_inventory_status:${item.itemId}`,
+    ...packet.visibleActors.map((actor, index) => ({
+      source: `visible_actor:v${index + 1}`,
+      text: sanitizeModelFacingText(actor.label),
+    })),
+    ...packet.currentInventory.map((item, index) => ({
+      source: `current_inventory_status:i${index + 1}`,
       text: formatInventoryStatus(item),
     })),
     ...packet.hintSignals.map((hint, index) => ({
       source: `hint_signal:${index + 1}`,
-      text: hint,
+      text: sanitizeModelFacingText(hint),
     })),
     ...packet.guardrails.map((guardrail, index) => ({
       source: `guardrail:${index + 1}`,
-      text: guardrail,
+      text: sanitizeModelFacingText(guardrail),
     })),
-    { source: "control_return", text: packet.controlReturnReason },
+    { source: "control_return", text: sanitizeModelFacingText(packet.controlReturnReason) },
   ];
 
   return texts.filter(
@@ -245,6 +311,10 @@ function sourceRefsFromNarratorPacket(packet: NarratorPacket): PlayerFacingPacke
     ...packet.perceivableEffects.map((effect) => ({
       id: effect.id,
       kind: "perceivable_effect" as const,
+    })),
+    ...(packet.perceivableObservations ?? []).map((observation) => ({
+      id: observation.id,
+      kind: "observation_result" as const,
     })),
     ...packet.visibleActors.map((actor) => ({
       id: actor.id,
@@ -306,7 +376,7 @@ function buildFallbackSourceLinkedSummaries(args: {
     id: `player-facing-summary:${sourceIds.slice(0, 4).join(":")}`,
     summary:
       `${overflow.length} additional player-facing packet records summarized for budget. `
-      + `Sources: ${sourceIds.slice(0, 8).join(", ")}.`,
+      + "Source links are preserved internally.",
     sourceIds,
     summarizedItemCount: overflow.length,
   }];
@@ -352,6 +422,7 @@ export function buildPlayerFacingPacketFromNarratorPacket(
     committedEvents: [...packet.perceivableEvents],
     perceivableResponses: [...packet.perceivableResponses],
     perceivableEffects: [...packet.perceivableEffects],
+    perceivableObservations: [...(packet.perceivableObservations ?? [])],
     visibleActors: [...packet.visibleActors],
     currentInventory: [...(packet.currentInventory ?? [])],
     hintSignals: [...packet.hintSignals],
@@ -405,7 +476,7 @@ export function buildPlayerFacingPacketFromNarratorPacket(
     frameType: "NarratorPacket",
     visibleTexts: [
       ...texts,
-      ...sourceLinkedSummaries.map((summary) => summary.summary),
+      ...sourceLinkedSummaries.map((summary) => sanitizeModelFacingText(summary.summary)),
     ],
     visibleItemCount: texts.length + sourceLinkedSummaries.length,
     hiddenExcludedCount,
@@ -431,6 +502,7 @@ export function buildPlayerFacingPacketFromNarratorPacket(
       events: packet.perceivableEvents.length,
       responses: packet.perceivableResponses.length,
       effects: packet.perceivableEffects.length,
+      observations: (packet.perceivableObservations ?? []).length,
       guardrails: packet.guardrails.length,
       sourceLinkedSummaries: sourceLinkedSummaries.length,
     },
@@ -526,17 +598,41 @@ function sourceBoundaryTermIsAllowedVisibleActorLabel(args: {
   forbiddenTerm: string;
   committedVisibleActorCreationLabels: readonly string[];
 }): boolean {
-  if (!args.source.startsWith("visible_actor:")) return false;
   const normalizedText = normalizeActorLabel(args.text);
   const normalizedTerm = normalizeActorLabel(args.forbiddenTerm);
   return args.committedVisibleActorCreationLabels.some((label) => {
     const normalizedLabel = normalizeActorLabel(label);
-    return normalizedTerm === normalizedLabel && normalizedText === normalizedLabel;
+    return normalizedTerm === normalizedLabel && actorLabelTextContainsWholeTokens(
+      normalizedText,
+      normalizedLabel,
+    );
   });
 }
 
 function normalizeActorLabel(label: string): string {
-  return label.trim().toLowerCase().replace(/\s+/g, " ");
+  let normalized = "";
+  let pendingSpace = false;
+
+  for (const char of label.trim().toLowerCase()) {
+    if (char.trim() === "") {
+      pendingSpace = normalized.length > 0;
+      continue;
+    }
+    if (pendingSpace) {
+      normalized += " ";
+      pendingSpace = false;
+    }
+    normalized += char;
+  }
+
+  return normalized;
+}
+
+function actorLabelTextContainsWholeTokens(container: string, contained: string): boolean {
+  return container === contained
+    || container.startsWith(`${contained} `)
+    || container.endsWith(` ${contained}`)
+    || container.includes(` ${contained} `);
 }
 
 function formatListSection(
@@ -555,32 +651,38 @@ export interface FormatPlayerFacingPacketForPromptOptions {
   includeTechnicalRefs?: boolean;
 }
 
+function formatDiagnosticRef(value: string): string {
+  return sanitizeModelFacingText(value);
+}
+
 export function formatPlayerFacingPacketForPrompt(
   packet: PlayerFacingPacket,
   options: FormatPlayerFacingPacketForPromptOptions = {},
 ): string {
   assertPlayerFacingPacketPromptSafe(packet);
-  const includeDiagnostics = options.includeDiagnostics ?? true;
-  const includeTechnicalRefs = options.includeTechnicalRefs ?? true;
+  const includeDiagnostics = options.includeDiagnostics ?? false;
+  const includeTechnicalRefs = options.includeTechnicalRefs ?? false;
 
   return [
     "[PLAYER-FACING PACKET]",
     "[NARRATOR PACKET]",
     "Boundary: NarratorPacket -> PlayerFacingPacket. Raw canonical turn payload, hidden truth, private rationale, unresolved proposals, and offscreen facts are not included.",
     ...(includeTechnicalRefs
-      ? [`Campaign: ${packet.campaignId}`, `Tick: ${packet.tick}`]
+      ? [`Campaign: ${formatDiagnosticRef(packet.campaignId)}`, `Tick: ${packet.tick}`]
       : ["Packet scope: current settled turn."]),
-    `${includeTechnicalRefs ? "Player action request" : "Player attempted"}: ${packet.playerActionRequest}`,
+    `${includeTechnicalRefs ? "Player action request" : "Player attempted"}: ${sanitizeModelFacingConversationText(packet.playerActionRequest, {
+      extraForbiddenTerms: packet.forbiddenTerms,
+    })}`,
     "Player action and player_action event summaries are player-supplied claims, not authoritative world state. Treat claimed possessions, locations, NPC consent, names, or completed acquisitions as attempts unless committed non-player events/effects/tool results below confirm them.",
-    `Oracle outcome: ${packet.oracleOutcome ?? "none"}`,
-    ...(includeTechnicalRefs ? [`Anchor event: ${packet.anchorEvent.id}`] : []),
+    `Oracle outcome: ${packet.oracleOutcome ? sanitizeModelFacingText(packet.oracleOutcome) : "none"}`,
+    ...(includeTechnicalRefs ? [`Anchor event: ${formatDiagnosticRef(packet.anchorEvent.id)}`] : []),
     "",
     formatListSection(
       "VISIBLE ACTORS",
       packet.visibleActors.map((actor) =>
         includeTechnicalRefs
-          ? `- ${actor.label} (${actor.id}; ${actor.type})`
-          : `- ${actor.label}`),
+          ? `- ${sanitizeModelFacingText(actor.label)} (${formatDiagnosticRef(actor.id)}; ${actor.type})`
+          : `- ${sanitizeModelFacingText(actor.label)}`),
       "No confirmed visible actors.",
     ),
     "",
@@ -592,7 +694,7 @@ export function formatPlayerFacingPacketForPrompt(
     "",
     formatListSection(
       "HINT SIGNALS",
-      packet.hintSignals.map((hint) => `- ${hint}`),
+      packet.hintSignals.map((hint) => `- ${sanitizeModelFacingText(hint)}`),
       "No indirect awareness hints are in scope.",
     ),
     "",
@@ -615,8 +717,16 @@ export function formatPlayerFacingPacketForPrompt(
     ),
     "",
     formatListSection(
+      "PLAYER-VISIBLE OBSERVATIONS",
+      packet.perceivableObservations.map((observation) =>
+        formatObservation(observation, includeTechnicalRefs)
+      ),
+      "No lookup-grounded observations are in scope.",
+    ),
+    "",
+    formatListSection(
       "GUARDRAILS",
-      packet.guardrails.map((guardrail) => `- ${guardrail}`),
+      packet.guardrails.map((guardrail) => `- ${sanitizeModelFacingText(guardrail)}`),
       "Stay within the committed packet.",
     ),
     "",
@@ -624,14 +734,16 @@ export function formatPlayerFacingPacketForPrompt(
       ? [
           "[VISIBLE SOURCE IDS -- DIAGNOSTIC, DO NOT USE AS evidenceRefs]",
           ...(packet.sourceRefs.length > 0
-            ? packet.sourceRefs.map((source) => `- ${source.kind}:${source.id}`)
+            ? packet.sourceRefs.map((source) => `- ${source.kind}:${formatDiagnosticRef(source.id)}`)
             : ["- No source ids are in scope."]),
           "",
           "[SOURCE-LINKED SUMMARIES]",
           ...(packet.sourceLinkedSummaries.length > 0
             ? packet.sourceLinkedSummaries.map(
                 (summary) =>
-                  `- ${summary.id}: ${summary.summary} [sources=${summary.sourceIds.join(", ")}]`,
+                  includeTechnicalRefs
+                    ? `- ${formatDiagnosticRef(summary.id)}: ${sanitizeModelFacingText(summary.summary)} [sources=${summary.sourceIds.map(formatDiagnosticRef).join(", ")}]`
+                    : `- ${sanitizeModelFacingText(summary.summary)}`,
               )
             : ["- No source-linked overflow summaries were needed."]),
           "",
@@ -655,6 +767,6 @@ export function formatPlayerFacingPacketForPrompt(
         ]
       : []),
     "[CONTROL RETURN]",
-    packet.controlReturnReason,
+    sanitizeModelFacingText(packet.controlReturnReason),
   ].join("\n");
 }

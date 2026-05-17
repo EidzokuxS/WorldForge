@@ -30,6 +30,49 @@ import {
   ENGINE_CONTRACT_MARKER_PREFIX,
 } from "../prompt-contracts.js";
 import { runtimeToolInputSchemas } from "../tool-schemas.js";
+import type { ToolExecutionContext } from "../tool-execution-context.js";
+
+function createExecutionContext(): ToolExecutionContext {
+  return {
+    scope: "player_turn",
+    subjectActorId: "actor-player",
+    subjectActorRefs: new Set(["Player"]),
+    authority: {
+      baseWorldVersion: 0,
+      sourceEntity: { type: "player", id: "actor-player" },
+    },
+    legalActorRefs: new Set(["Player"]),
+    legalLocationRefs: new Set(["Gate", "Shrine"]),
+    legalMovementRefs: new Set(["Gate", "Shrine"]),
+    legalItemRefs: new Set<string>(),
+    legalFactionRefs: new Set<string>(),
+    currentLocationId: "loc-gate",
+    currentSceneScopeId: "scene-gate",
+    currentLocationRefs: new Set(["current_location", "Gate"]),
+    currentSceneRefs: new Set(["current_scene", "Gate"]),
+    sameTurnModelSafeRefs: [],
+    bridgeLookup: {
+      current: {
+        campaignId: "campaign-hidden-adjudication",
+        tick: 0,
+        playerActorId: "actor-player",
+        currentLocationId: "loc-gate",
+        currentSceneScopeId: "scene-gate",
+        currentLocationName: "Gate",
+        currentSceneScopeName: "Gate",
+        currentLocationDescription: null,
+        currentSceneScopeDescription: null,
+      },
+      visibleActors: [],
+      awarenessHints: [],
+      legalTargets: [],
+      legalMovement: [],
+      localRecentEvents: [],
+      playerKnownFacts: [],
+      allowedTools: [],
+    },
+  };
+}
 
 describe("hidden adjudication", () => {
   beforeEach(() => {
@@ -67,6 +110,27 @@ describe("hidden adjudication", () => {
               intent: "Decide a contest from hidden adjudication.",
               stakes: "Illegal hidden authority.",
               evidenceRefs: [],
+            },
+          },
+        ],
+      }),
+    ).toThrow();
+
+    expect(() =>
+      adjudicationPlanSchema.parse({
+        rationale: "Semantic receipts belong to the GM tool loop, not hidden adjudication.",
+        actions: [
+          {
+            toolName: "record_dialogue_outcome",
+            input: {
+              speakerRef: "Road Warden",
+              addresseeRefs: ["Player"],
+              outcomeKind: "answered",
+              topicKind: "procedure",
+              authorityKind: "role_authority",
+              truthStatus: "speaker_asserted",
+              durability: "scene_local",
+              summary: "The warden answers.",
             },
           },
         ],
@@ -117,6 +181,7 @@ describe("hidden adjudication", () => {
   });
 
   it("executes ordered plan actions deterministically and preserves quick_actions/state_update mapping", async () => {
+    const executionContext = createExecutionContext();
     (executeToolCall as Mock)
       .mockResolvedValueOnce({
         success: true,
@@ -139,6 +204,7 @@ describe("hidden adjudication", () => {
       campaignId: "campaign-1",
       tick: 7,
       outcomeTier: "strong_hit",
+      executionContext,
       plan: {
         rationale: "Move first, then present concrete follow-ups.",
         actions: [
@@ -158,6 +224,7 @@ describe("hidden adjudication", () => {
       { targetLocationName: "Shrine" },
       7,
       "strong_hit",
+      executionContext,
     );
     expect(executeToolCall).toHaveBeenNthCalledWith(
       2,
@@ -166,6 +233,7 @@ describe("hidden adjudication", () => {
       { actions: [{ label: "Look around", action: "I scan the shrine courtyard." }] },
       7,
       "strong_hit",
+      executionContext,
     );
     expect(executed.successfulTravel).toEqual({
       locationId: "loc-2",
@@ -189,16 +257,57 @@ describe("hidden adjudication", () => {
       {
         type: "quick_actions",
         data: {
-          success: true,
-          result: {
-            actions: [{ label: "Look around", action: "I scan the shrine courtyard." }],
-          },
+          actions: [{ label: "Look around", action: "I scan the shrine courtyard." }],
         },
       },
     ]);
   });
 
+  it("passes player-turn execution context through hidden adjudication tool execution", async () => {
+    const executionContext = createExecutionContext();
+    (executeToolCall as Mock).mockResolvedValueOnce({
+      success: true,
+      result: { durability: "scene_local", persisted: false },
+    });
+
+    await executeAdjudicationPlan({
+      campaignId: "campaign-1",
+      tick: 7,
+      outcomeTier: "weak_hit",
+      executionContext,
+      plan: {
+        rationale: "Record a local beat.",
+        actions: [
+          {
+            toolName: "log_event",
+            input: {
+              text: "The gate pressure changes.",
+              importance: 3,
+              participants: ["Player"],
+              durability: "scene_local",
+            },
+          },
+        ],
+      },
+    });
+
+    expect(executeToolCall).toHaveBeenCalledWith(
+      "campaign-1",
+      "log_event",
+      {
+        text: "The gate pressure changes.",
+        importance: 3,
+        participants: ["Player"],
+        durability: "scene_local",
+      },
+      7,
+      "weak_hit",
+      executionContext,
+    );
+  });
+
   it("fails loud on the first unsuccessful executed action", async () => {
+    const executionContext = createExecutionContext();
     (executeToolCall as Mock).mockResolvedValue({
       success: false,
       error: "Unknown character",
@@ -208,6 +317,7 @@ describe("hidden adjudication", () => {
       executeAdjudicationPlan({
         campaignId: "campaign-1",
         tick: 4,
+        executionContext,
         plan: {
           rationale: "Bad plan should abort immediately.",
           actions: [
@@ -219,6 +329,31 @@ describe("hidden adjudication", () => {
         },
       }),
     ).rejects.toThrow("Adjudication action failed: add_tag");
+  });
+
+  it("rejects multi-mutation hidden plans before executing any action", async () => {
+    await expect(
+      executeAdjudicationPlan({
+        campaignId: "campaign-1",
+        tick: 4,
+        executionContext: createExecutionContext(),
+        plan: {
+          rationale: "Legacy hidden adjudication must not partially commit multi-step state.",
+          actions: [
+            {
+              toolName: "add_tag",
+              input: { entityName: "Gate", entityType: "location", tag: "watched" },
+            },
+            {
+              toolName: "log_event",
+              input: { text: "A second mutation should not run.", importance: 1, participants: [] },
+            },
+          ],
+        },
+      }),
+    ).rejects.toThrow("may execute at most one state-bearing action");
+
+    expect(executeToolCall).not.toHaveBeenCalled();
   });
 
   it("builds a judge-only contract with no prose requirement", () => {
@@ -236,9 +371,27 @@ describe("hidden adjudication", () => {
     expect(contract).toContain("unsupported toolName");
     expect(contract).toContain("payload instead of input");
     expect(contract).toContain("invented source truth");
+    const allowedHiddenToolNames = [
+      "add_tag",
+      "remove_tag",
+      "set_relationship",
+      "log_event",
+      "advance_time",
+      "offer_quick_actions",
+      "promote_npc",
+      "spawn_item",
+      "reveal_location",
+      "set_condition",
+      "move_to",
+      "transfer_item",
+    ];
+    for (const toolName of allowedHiddenToolNames) {
+      expect(contract).toContain(`"${toolName}"`);
+    }
     for (const toolName of Object.keys(runtimeToolInputSchemas)) {
       if (toolName === "request_contested_outcome") continue;
-      expect(contract).toContain(`"${toolName}"`);
+      if (allowedHiddenToolNames.includes(toolName)) continue;
+      expect(contract).not.toContain(`"${toolName}" input`);
     }
     expect(contract).not.toContain('"request_contested_outcome" input');
     expect(contract).not.toContain("narrative prose only");

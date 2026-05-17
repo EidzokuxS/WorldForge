@@ -7,13 +7,46 @@ import type { SceneFrame } from "../scene-frame.js";
 import { createPlayerTurnToolExecutionContext } from "../tool-execution-context.js";
 import { isObservationToolResult } from "../tool-result.js";
 
+const RAW_REFS = {
+  campaign: "campaign:550e8400-e29b-41d4-a716-446655440000",
+  player: "actor:550e8400-e29b-41d4-a716-446655440001",
+  warden: "actor:550e8400-e29b-41d4-a716-446655440002",
+  hidden: "actor:550e8400-e29b-41d4-a716-446655440003",
+  offscreen: "actor:550e8400-e29b-41d4-a716-446655440004",
+  market: "location:550e8400-e29b-41d4-a716-446655440005",
+  scene: "scene:550e8400-e29b-41d4-a716-446655440006",
+  teaLane: "location:550e8400-e29b-41d4-a716-446655440007",
+  privateVault: "location:550e8400-e29b-41d4-a716-446655440008",
+  teaSign: "item:550e8400-e29b-41d4-a716-446655440009",
+  routeTeaLane: "route:550e8400-e29b-41d4-a716-446655440010",
+  routePrivateVault: "route:550e8400-e29b-41d4-a716-446655440011",
+  eventTea: "event:550e8400-e29b-41d4-a716-446655440012",
+  eventHidden: "event:550e8400-e29b-41d4-a716-446655440013",
+  knowledgeTea: "knowledge:550e8400-e29b-41d4-a716-446655440014",
+  knowledgeTeaSource: "knowledge:550e8400-e29b-41d4-a716-446655440015",
+};
+
+const RAW_REF_VALUES = [
+  ...Object.values(RAW_REFS),
+  "candidate:550e8400-e29b-41d4-a716-446655440016",
+  "candidate:550e8400-e29b-41d4-a716-446655440017",
+  "candidate:550e8400-e29b-41d4-a716-446655440018",
+  "candidate:550e8400-e29b-41d4-a716-446655440019",
+  "actor:550e8400-e29b-41d4-a716-446655440020",
+  "candidate:550e8400-e29b-41d4-a716-446655440021",
+  "item:550e8400-e29b-41d4-a716-446655440022",
+  "knowledge:550e8400-e29b-41d4-a716-446655440023",
+  "event:550e8400-e29b-41d4-a716-446655440024",
+];
+
 function createFrame(): SceneFrame {
   return {
-    campaignId: "campaign-bridge",
+    campaignId: RAW_REFS.campaign,
     tick: 12,
-    playerActorId: "actor-player",
-    currentLocationId: "loc-market",
-    currentSceneScopeId: "scene-market",
+    worldVersion: 0,
+    playerActorId: RAW_REFS.player,
+    currentLocationId: RAW_REFS.market,
+    currentSceneScopeId: RAW_REFS.scene,
     currentLocationName: "Canal Market",
     currentSceneScopeName: "Canal Market Counter",
     currentLocationDescription:
@@ -24,33 +57,33 @@ function createFrame(): SceneFrame {
     roster: {
       active: [
         {
-          id: "actor-player",
-          actorId: "actor-player",
+          id: RAW_REFS.player,
+          actorId: RAW_REFS.player,
           type: "player",
           label: "Player",
-          locationId: "loc-market",
-          sceneScopeId: "scene-market",
+          locationId: RAW_REFS.market,
+          sceneScopeId: RAW_REFS.scene,
           awareness: "clear",
         },
         {
-          id: "npc-warden",
-          actorId: "npc-warden",
+          id: RAW_REFS.warden,
+          actorId: RAW_REFS.warden,
           type: "npc",
           label: "Road Warden",
-          locationId: "loc-market",
-          sceneScopeId: "scene-market",
+          locationId: RAW_REFS.market,
+          sceneScopeId: RAW_REFS.scene,
           awareness: "clear",
           tags: ["guide", "route"],
         },
       ],
       support: [
         {
-          id: "npc-hidden",
-          actorId: "npc-hidden",
+          id: RAW_REFS.hidden,
+          actorId: RAW_REFS.hidden,
           type: "npc",
           label: "Shadow Broker",
-          locationId: "loc-market",
-          sceneScopeId: "scene-market",
+          locationId: RAW_REFS.market,
+          sceneScopeId: RAW_REFS.scene,
           awareness: "hint",
           awarenessHint: "someone watches from the crowd",
           tags: ["private"],
@@ -58,12 +91,12 @@ function createFrame(): SceneFrame {
       ],
       background: [
         {
-          id: "npc-offscreen",
-          actorId: "npc-offscreen",
+          id: RAW_REFS.offscreen,
+          actorId: RAW_REFS.offscreen,
           type: "npc",
           label: "Vault Keeper",
-          locationId: "loc-vault",
-          sceneScopeId: "loc-vault",
+          locationId: RAW_REFS.privateVault,
+          sceneScopeId: RAW_REFS.privateVault,
           awareness: "none",
         },
       ],
@@ -75,7 +108,7 @@ function createFrame(): SceneFrame {
     },
     recentEvents: [
       {
-        id: "event-tea-visible",
+        id: RAW_REFS.eventTea,
         tick: 11,
         summary: "A tea seller was heard calling from the east lane.",
         source: "location_recent_event",
@@ -83,63 +116,63 @@ function createFrame(): SceneFrame {
         perceivableByPlayer: true,
       },
       {
-        id: "event-shadow-hidden",
+        id: RAW_REFS.eventHidden,
         tick: 11,
         summary: "Shadow Broker reserved the private vault route.",
         source: "location_recent_event",
-        actorIds: ["npc-hidden"],
+        actorIds: [RAW_REFS.hidden],
         perceivableByPlayer: false,
       },
     ],
     targetCandidates: [
       {
-        id: "actor:npc-warden",
+        id: "candidate:550e8400-e29b-41d4-a716-446655440016",
         type: "actor",
         label: "Road Warden",
-        actorId: "npc-warden",
+        actorId: RAW_REFS.warden,
         awareness: "clear",
         tags: ["guide", "route"],
       },
       {
-        id: "actor:npc-hidden",
+        id: "candidate:550e8400-e29b-41d4-a716-446655440017",
         type: "actor",
         label: "Shadow Broker",
-        actorId: "npc-hidden",
+        actorId: RAW_REFS.hidden,
         awareness: "hint",
         tags: ["private"],
       },
       {
-        id: "item:tea-sign",
+        id: "candidate:550e8400-e29b-41d4-a716-446655440018",
         type: "item",
         label: "Painted Tea Sign",
-        itemId: "item-tea-sign",
-        locationId: "loc-market",
+        itemId: RAW_REFS.teaSign,
+        locationId: RAW_REFS.market,
         tags: ["tea", "shop", "sign"],
       },
       {
-        id: "location:loc-tea-lane",
+        id: "candidate:550e8400-e29b-41d4-a716-446655440019",
         type: "location",
         label: "East Tea Lane",
-        locationId: "loc-tea-lane",
+        locationId: RAW_REFS.teaLane,
         tags: ["tea", "shop"],
       },
     ],
     movementCandidates: [
       {
-        id: "edge-tea-lane",
-        locationId: "loc-tea-lane",
+        id: RAW_REFS.routeTeaLane,
+        locationId: RAW_REFS.teaLane,
         label: "East Tea Lane",
         connected: true,
         travelCost: 4,
-        path: ["loc-market", "loc-tea-lane"],
+        path: [RAW_REFS.market, RAW_REFS.teaLane],
       },
       {
-        id: "edge-private-vault",
-        locationId: "loc-private-vault",
+        id: RAW_REFS.routePrivateVault,
+        locationId: RAW_REFS.privateVault,
         label: "Shadow Broker Vault",
         connected: true,
         travelCost: 1,
-        path: ["loc-market", "loc-private-vault"],
+        path: [RAW_REFS.market, RAW_REFS.privateVault],
       },
     ],
     deferredHooks: [],
@@ -158,21 +191,94 @@ function createContext() {
   const context = createPlayerTurnToolExecutionContext(createFrame());
   context.authority = {
     baseWorldVersion: 5,
-    sourceEntity: { type: "player", id: "actor-player" },
+    sourceEntity: { type: "player", id: RAW_REFS.player },
     elapsedWorldTimeMinutes: 1,
   };
   const knownFact: BridgeKnownFactSnapshot = {
-    id: "knowledge:tea-route",
+    id: RAW_REFS.knowledgeTea,
     summary: "reported: The east lane usually has a public tea stall.",
     visibilityRoute: "player_known",
     confidence: 0.7,
-    sourceRefs: ["knowledge-tea", "event-tea-visible"],
+    sourceRefs: [RAW_REFS.knowledgeTeaSource, RAW_REFS.eventTea],
   };
   context.bridgeLookup?.playerKnownFacts.push(knownFact);
   return context;
 }
 
+function expectNoRawObservationRefs(result: unknown) {
+  const json = JSON.stringify(result);
+  for (const rawRef of RAW_REF_VALUES) {
+    expect(json).not.toContain(rawRef);
+  }
+  expect(json).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/iu);
+  expect(json).not.toMatch(/\b(?:actor|campaign|candidate|event|item|knowledge|location|route|scene):/iu);
+  expect(json).not.toMatch(/"(?:actorId|campaignId|currentLocationId|currentSceneScopeId|id|ids|locationId|playerActorId|sourceRefs|terminalSourceRefs)"\s*:/u);
+}
+
 describe("bridge candidate lookup tools", () => {
+  it("fails closed for invalid direct executor input instead of coercing manually", () => {
+    const context = createContext();
+
+    const result = executeBridgeCandidateTool(
+      "find_location_candidates",
+      { query: "East Tea Lane", maxResults: "4" },
+      context,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("invalid_tool_input");
+    expect(result.result).toMatchObject({
+      denied: true,
+      reason: "invalid_tool_input",
+      toolName: "find_location_candidates",
+    });
+    expect(JSON.stringify(result)).not.toContain("East Tea Lane");
+  });
+
+  it("sanitizes model-visible bridge lookup observations to aliases and labels", () => {
+    const context = createContext();
+    const locationLookup = executeBridgeCandidateTool(
+      "find_location_candidates",
+      { query: "East Tea Lane", maxResults: 4 },
+      context,
+    );
+    const locationCandidateRef = (
+      (locationLookup.result as { candidates?: Array<{ ref?: string }> }).candidates?.[0]?.ref
+    ) ?? "East Tea Lane";
+    const results = [
+      executeBridgeCandidateTool("list_visible_affordances", { maxResults: 8 }, context),
+      executeBridgeCandidateTool("list_navigation_options", { maxResults: 4 }, context),
+      locationLookup,
+      executeBridgeCandidateTool("find_object_candidates", { query: "Painted Tea Sign", maxResults: 4 }, context),
+      executeBridgeCandidateTool("find_actor_candidates", { query: "Road Warden", maxResults: 4 }, context),
+      executeBridgeCandidateTool(
+        "find_poi_candidates",
+        { query: "sealed noodle stall", includePotential: true, maxResults: 4 },
+        context,
+      ),
+      executeBridgeCandidateTool("inspect_known_fact", { query: "public tea stall", maxResults: 2 }, context),
+      executeBridgeCandidateTool(
+        "check_route",
+        { actorRef: "Player", destinationRef: locationCandidateRef, mode: "walk" },
+        context,
+      ),
+    ];
+
+    for (const result of results) {
+      expect(result.success).toBe(true);
+      expect(isObservationToolResult(result)).toBe(true);
+      expectNoRawObservationRefs(result);
+    }
+
+    expect(JSON.stringify(results)).toContain("current_location");
+    expect(JSON.stringify(results)).toContain("current_scene");
+    expect(JSON.stringify(results)).toContain("actor2");
+    expect(JSON.stringify(results)).toContain("route1");
+    expect(JSON.stringify(results)).toContain("fact");
+    expect(JSON.stringify(results)).toContain("potential_poi_1");
+    expect(JSON.stringify(results)).toContain("East Tea Lane");
+  });
+
   it("returns observation-only fuzzy POI and location candidates from visible/legal refs", () => {
     const context = createContext();
 
@@ -189,6 +295,74 @@ describe("bridge candidate lookup tools", () => {
     expect(JSON.stringify(result)).toContain("Painted Tea Sign");
     expect(JSON.stringify(result)).not.toContain("Shadow Broker");
     expect(JSON.stringify(result)).not.toContain("Vault Keeper");
+    expect(result.modelSafeRefs).toEqual(
+      expect.arrayContaining(["East Tea Lane", "Painted Tea Sign"]),
+    );
+    expect(result.modelSafeRefs ?? []).not.toEqual(
+      expect.arrayContaining([RAW_REFS.market, RAW_REFS.teaLane, RAW_REFS.teaSign]),
+    );
+  });
+
+  it("does not whitelist potential POI refs or raw route path ids for terminal tools", () => {
+    const context = createContext();
+
+    const potentialPoi = executeBridgeCandidateTool(
+      "find_poi_candidates",
+      { query: "sealed noodle stall", includePotential: true, maxResults: 4 },
+      context,
+    );
+    const route = executeBridgeCandidateTool(
+      "check_route",
+      { actorRef: "Player", destinationRef: "East Tea Lane", mode: "walk" },
+      context,
+    );
+
+    expect(JSON.stringify(potentialPoi)).toContain("potential_poi_1");
+    expect(JSON.stringify(potentialPoi)).not.toContain("potential:");
+    expect(potentialPoi.modelSafeRefs ?? []).not.toEqual(
+      expect.arrayContaining([RAW_REFS.market, RAW_REFS.teaLane, "sealed noodle stall"]),
+    );
+    expect(route).toMatchObject({
+      success: true,
+      result: expect.objectContaining({
+        path: expect.arrayContaining(["current_location", "East Tea Lane"]),
+      }),
+    });
+    expect(route.modelSafeRefs ?? []).toEqual(
+      expect.arrayContaining(["route1", "East Tea Lane"]),
+    );
+    expect(route.modelSafeRefs ?? []).not.toEqual(
+      expect.arrayContaining([RAW_REFS.market, RAW_REFS.teaLane, RAW_REFS.routeTeaLane]),
+    );
+  });
+
+  it("does not treat backend-looking query echoes as consumable observation refs", () => {
+    const context = createContext();
+
+    const result = executeBridgeCandidateTool(
+      "find_poi_candidates",
+      {
+        query:
+          "actor:hidden-watcher actor_hidden route_hidden_path tool-result-7 " +
+          "source:event-1 550e8400-e29b-41d4-a716-446655440000",
+        includePotential: true,
+        maxResults: 4,
+      },
+      context,
+    );
+
+    expect(result.success).toBe(true);
+    expect(JSON.stringify(result)).toContain("potential_poi_1");
+    const refs = result.modelSafeRefs ?? [];
+    expect(refs).not.toEqual(expect.arrayContaining([
+      "potential_poi_1",
+      "actor:hidden-watcher",
+      "actor_hidden",
+      "route_hidden_path",
+      "tool-result-7",
+      "source:event-1",
+      "550e8400-e29b-41d4-a716-446655440000",
+    ]));
   });
 
   it("matches only clear visible actors and omits hidden/offscreen actor names", () => {
@@ -258,7 +432,7 @@ describe("bridge candidate lookup tools", () => {
       result: expect.objectContaining({
         routeStatus: "legal",
         cost: 4,
-        path: ["loc-market", "loc-tea-lane"],
+        path: expect.arrayContaining(["current_location", "East Tea Lane"]),
       }),
     });
     expect(denied.success).toBe(false);
@@ -312,34 +486,34 @@ describe("bridge candidate lookup tools", () => {
     const context = createContext();
     const baseWorldVersion = context.authority?.baseWorldVersion;
     context.bridgeLookup?.visibleActors.push({
-      id: "npc-jujutsu-window",
-      actorId: "npc-jujutsu-window",
+      id: "actor:550e8400-e29b-41d4-a716-446655440020",
+      actorId: "actor:550e8400-e29b-41d4-a716-446655440020",
       type: "npc",
       label: "Jujutsu Window",
       awareness: "clear",
       tags: ["jujutsu", "personnel", "witness"],
     });
     context.bridgeLookup?.legalTargets.push({
-      id: "item:station-cctv",
+      id: "candidate:550e8400-e29b-41d4-a716-446655440021",
       type: "item",
       label: "Station CCTV Camera",
-      itemId: "item-station-cctv",
-      locationId: "loc-market",
+      itemId: "item:550e8400-e29b-41d4-a716-446655440022",
+      locationId: RAW_REFS.market,
       tags: ["camera", "surveillance"],
     });
     context.bridgeLookup?.playerKnownFacts.push({
-      id: "knowledge:fault-line-curtain",
+      id: "knowledge:550e8400-e29b-41d4-a716-446655440023",
       summary: "reported: A visible curtain barrier ripples beside the station fault line.",
       visibilityRoute: "player_known",
       confidence: 0.8,
-      sourceRefs: ["event-fault-line", "barrier:curtain"],
+      sourceRefs: ["event:550e8400-e29b-41d4-a716-446655440024", "barrier:550e8400-e29b-41d4-a716-446655440025"],
     });
     context.bridgeLookup?.localRecentEvents.push({
-      id: "event-station-clerks",
+      id: "event:550e8400-e29b-41d4-a716-446655440024",
       tick: 12,
       summary: "Two station clerks point toward the exit map near the fault line.",
       source: "location_recent_event",
-      actorIds: ["npc-jujutsu-window"],
+      actorIds: ["actor:550e8400-e29b-41d4-a716-446655440020"],
       perceivableByPlayer: true,
     });
 
@@ -373,15 +547,15 @@ describe("bridge candidate lookup tools", () => {
     expect(payload.categories.barriers.facts).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          id: "knowledge:fault-line-curtain",
+          ref: expect.stringMatching(/^fact\d+$/u),
           summary: expect.stringContaining("visible curtain barrier"),
         }),
       ]),
     );
     expect(payload.categories.cameras.facts).toEqual(
-      expect.arrayContaining([
+        expect.arrayContaining([
         expect.objectContaining({
-          id: "current_location:loc-market:description",
+          ref: "fact1",
           summary: expect.stringContaining("station camera"),
         }),
       ]),
@@ -393,10 +567,28 @@ describe("bridge candidate lookup tools", () => {
       expect.arrayContaining([expect.objectContaining({ label: "Jujutsu Window" })]),
     );
     expect(payload.visibleFacts).toEqual(
+        expect.arrayContaining([
+        expect.objectContaining({ ref: "fact1" }),
+        expect.objectContaining({ ref: "fact2" }),
+        expect.objectContaining({
+          ref: expect.stringMatching(/^fact\d+$/u),
+          summary: expect.stringContaining("station clerks"),
+        }),
+      ]),
+    );
+    expect(result.modelSafeRefs ?? []).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: "current_location:loc-market:description" }),
-        expect.objectContaining({ id: "current_scene:scene-market:description" }),
-        expect.objectContaining({ id: "event-station-clerks" }),
+        "current_location",
+        "current_scene",
+        "fact1",
+        "fact2",
+      ]),
+    );
+    expect(result.modelSafeRefs ?? []).not.toEqual(
+      expect.arrayContaining([
+        RAW_REFS.market,
+        RAW_REFS.scene,
+        "actor:550e8400-e29b-41d4-a716-446655440020",
       ]),
     );
     expect(resultJson).not.toContain("Vault Keeper");

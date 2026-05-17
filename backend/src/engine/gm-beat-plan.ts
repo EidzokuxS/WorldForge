@@ -7,13 +7,24 @@ import type { GmTurnDecision } from "./gm-turn-decision.js";
 import {
   buildModelFacingSceneDiagnostics,
   buildModelFacingScenePacket,
+  buildModelFacingScenePromptView,
+  collectModelFacingScenePromptRefs,
+  isUnsafeModelFacingRef,
   redactModelFacingJson,
-  shouldDropModelFacingText,
+  redactModelFacingText,
   type ModelFacingScenePacket,
 } from "./model-facing-scene.js";
+import {
+  formatModelFacingPlayerActionText,
+  formatModelFacingRecentConversation,
+} from "./model-facing-conversation.js";
 import type { SceneFrame } from "./scene-frame.js";
 import { runtimeToolInputSchemas, type RuntimeToolName } from "./tool-schemas.js";
-import type { ScopedForecastExcerpt } from "./world-forecast.js";
+import {
+  resolveScopedForecastPromptEntryId,
+  scopedForecastForModelPrompt,
+  type ScopedForecastExcerpt,
+} from "./world-forecast.js";
 
 const log = createLogger("gm-beat-plan");
 
@@ -475,6 +486,7 @@ export interface BeatPlanValidationIssue {
     | "tool_posture_mismatch"
     | "tool_category_mismatch"
     | "tool_not_allowed"
+    | "local_focus_ref_invalid"
     | "forecast_ref_out_of_scope"
     | "private_forecast_term";
   path: string;
@@ -672,6 +684,41 @@ function redactPrivateForecastTerms(value: string, forbiddenTerms: readonly stri
   return redacted;
 }
 
+function buildBeatPlanAllowedRefSet(frame: SceneFrame): Set<string> {
+  const packet = buildModelFacingScenePacket(frame);
+  const promptView = buildModelFacingScenePromptView(packet.view);
+  return new Set([
+    ...collectModelFacingScenePromptRefs(promptView),
+    "player_action",
+    "oracle_result",
+  ].map((ref) => ref.trim().toLowerCase()));
+}
+
+function validateLocalFocusRefs(
+  refs: readonly string[],
+  allowedRefs: ReadonlySet<string>,
+  path: string,
+): BeatPlanValidationIssue[] {
+  return refs.flatMap((ref, index): BeatPlanValidationIssue[] => {
+    const refPath = `${path}.${index}`;
+    if (isUnsafeModelFacingRef(ref)) {
+      return [{
+        code: "local_focus_ref_invalid",
+        path: refPath,
+        message: `${refPath} uses a backend-only ref "${ref}". Use a visible label, Player, current_scene/current_location, or a prompt alias.`,
+      }];
+    }
+    if (!allowedRefs.has(ref.trim().toLowerCase())) {
+      return [{
+        code: "local_focus_ref_invalid",
+        path: refPath,
+        message: `${refPath} references a ref outside the model-facing SceneFrame: "${ref}".`,
+      }];
+    }
+    return [];
+  });
+}
+
 export function validateBeatPlanForFrame({
   beatPlan,
   frame,
@@ -681,6 +728,7 @@ export function validateBeatPlanForFrame({
   const issues: BeatPlanValidationIssue[] = [];
   const expectedPosture = deriveBeatPlanToolPosture(gmDecision);
   const allowedTools = new Set(frame.allowedTools);
+  const allowedRefs = buildBeatPlanAllowedRefSet(frame);
 
   if (beatPlan.toolPosture.execution !== expectedPosture.execution) {
     issues.push({
@@ -716,11 +764,8 @@ export function validateBeatPlanForFrame({
     }
   });
 
-  const scopedForecastIds = new Set(
-    scopedForecastExcerpt?.entries.map((entry) => entry.entryId) ?? [],
-  );
   beatPlan.forecastInfluenceRefs.forEach((ref, index) => {
-    if (!scopedForecastIds.has(ref.entryId)) {
+    if (!resolveScopedForecastPromptEntryId(scopedForecastExcerpt, ref.entryId)) {
       issues.push({
         code: "forecast_ref_out_of_scope",
         path: `forecastInfluenceRefs.${index}.entryId`,
@@ -728,6 +773,13 @@ export function validateBeatPlanForFrame({
       });
     }
   });
+
+  issues.push(
+    ...validateLocalFocusRefs(beatPlan.localFocus.actorRefs, allowedRefs, "localFocus.actorRefs"),
+    ...validateLocalFocusRefs(beatPlan.localFocus.locationRefs, allowedRefs, "localFocus.locationRefs"),
+    ...validateLocalFocusRefs(beatPlan.localFocus.sceneRefs, allowedRefs, "localFocus.sceneRefs"),
+    ...validateLocalFocusRefs(beatPlan.localFocus.evidenceRefs, allowedRefs, "localFocus.evidenceRefs"),
+  );
 
   const forbiddenTerms = scopedForecastExcerpt?.forbiddenPrivateTerms ?? [];
   if (forbiddenTerms.length > 0) {
@@ -758,23 +810,20 @@ export function formatBeatPlanForScenePlanner(
   beatPlan: GmBeatPlan,
   forbiddenPrivateTerms: readonly string[] = [],
 ): ScenePlannerBeatPlanProjection {
+  const redactRef = (ref: string) =>
+    redactPrivateForecastTerms(
+      redactModelFacingText(ref, { forbiddenTerms: [ref].filter(isUnsafeModelFacingRef) }),
+      forbiddenPrivateTerms,
+    );
   return {
     version: beatPlan.version,
     beatIntent: redactPrivateForecastTerms(beatPlan.beatIntent, forbiddenPrivateTerms),
     whyNow: redactPrivateForecastTerms(beatPlan.whyNow, forbiddenPrivateTerms),
     localFocus: {
-      actorRefs: beatPlan.localFocus.actorRefs.map((ref) =>
-        redactPrivateForecastTerms(ref, forbiddenPrivateTerms),
-      ),
-      locationRefs: beatPlan.localFocus.locationRefs.map((ref) =>
-        redactPrivateForecastTerms(ref, forbiddenPrivateTerms),
-      ),
-      sceneRefs: beatPlan.localFocus.sceneRefs.map((ref) =>
-        redactPrivateForecastTerms(ref, forbiddenPrivateTerms),
-      ),
-      evidenceRefs: beatPlan.localFocus.evidenceRefs.map((ref) =>
-        redactPrivateForecastTerms(ref, forbiddenPrivateTerms),
-      ),
+      actorRefs: beatPlan.localFocus.actorRefs.map(redactRef),
+      locationRefs: beatPlan.localFocus.locationRefs.map(redactRef),
+      sceneRefs: beatPlan.localFocus.sceneRefs.map(redactRef),
+      evidenceRefs: beatPlan.localFocus.evidenceRefs.map(redactRef),
     },
     pacing: beatPlan.pacing,
     tensionPosture: beatPlan.tensionPosture,
@@ -821,41 +870,15 @@ export function formatBeatPlanForNarrator(
 
 export const projectBeatPlanForNarrator = formatBeatPlanForNarrator;
 
-function scopedForecastForPrompt(
-  scopedForecastExcerpt?: ScopedForecastExcerpt | null,
-): Pick<ScopedForecastExcerpt, "version" | "baseTick" | "promptReady" | "entries"> | null {
-  if (!scopedForecastExcerpt) return null;
-  return {
-    version: scopedForecastExcerpt.version,
-    baseTick: scopedForecastExcerpt.baseTick,
-    promptReady: scopedForecastExcerpt.promptReady,
-    entries: scopedForecastExcerpt.entries,
-  };
-}
-
 function formatRecentConversation(
   recentConversation?: readonly { role: string; content: string }[],
   scenePacket?: ModelFacingScenePacket,
   extraForbiddenTerms: readonly string[] = [],
 ): string {
-  if (!recentConversation || recentConversation.length === 0) {
-    return "- none";
-  }
-
-  const forbiddenTerms = extraForbiddenTerms
-    .map((term) => term.trim().toLowerCase())
-    .filter((term) => term.length > 0);
-  const lines = recentConversation
-    .slice(-8)
-    .filter((entry) => {
-      if (scenePacket && shouldDropModelFacingText(entry.content, scenePacket.safety)) return false;
-      const content = entry.content.toLowerCase();
-      return !forbiddenTerms.some((term) => content.includes(term));
-    })
-    .map((entry) => `- ${entry.role}: ${entry.content}`)
-    .join("\n");
-
-  return lines || "- none";
+  return formatModelFacingRecentConversation(recentConversation, {
+    safety: scenePacket?.safety,
+    extraForbiddenTerms,
+  });
 }
 
 function buildAllowedToolSummary(frame: SceneFrame, gmDecision: GmTurnDecision): unknown {
@@ -887,21 +910,25 @@ function buildBeatPlanContract(): string {
 
 function buildGmBeatPlanPrompt(args: RunGmBeatPlanArgs): string {
   const scenePacket = args.modelFacingScenePacket ?? buildModelFacingScenePacket(args.frame);
+  const promptView = buildModelFacingScenePromptView(scenePacket.view);
   return [
     "MODEL-FACING GM BEATPLAN CONTRACT",
     buildBeatPlanContract(),
     "",
-    "PLAYER ACTION RAW TEXT",
-    args.playerAction,
+    "PLAYER ACTION RAW TEXT (SANITIZED PLAYER-AUTHORED PROSE; NOT LEGAL REFS)",
+    formatModelFacingPlayerActionText(args.playerAction, {
+      safety: scenePacket.safety,
+      extraForbiddenTerms: args.scopedForecastExcerpt?.forbiddenPrivateTerms ?? [],
+    }),
     "",
     "GM TURN DECISION",
     JSON.stringify(redactModelFacingJson(args.gmDecision, scenePacket.safety), null, 2),
     "",
     "MODEL-FACING LOCAL SCENE PACKET",
-    JSON.stringify(scenePacket.view, null, 2),
+    JSON.stringify(promptView, null, 2),
     "",
     "SCOPED FORECAST EXCERPT ONLY",
-    JSON.stringify(scopedForecastForPrompt(args.scopedForecastExcerpt), null, 2),
+    JSON.stringify(scopedForecastForModelPrompt(args.scopedForecastExcerpt), null, 2),
     "",
     "EXPECTED TOOL POSTURE AND CANDIDATES",
     JSON.stringify(buildAllowedToolSummary(args.frame, args.gmDecision), null, 2),

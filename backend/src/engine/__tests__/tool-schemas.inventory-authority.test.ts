@@ -13,6 +13,29 @@ vi.mock("../tool-executor.js", () => ({
 
 import { createStorytellerTools } from "../tool-schemas.js";
 import { executeToolCall } from "../tool-executor.js";
+import type { ToolExecutionContext } from "../tool-execution-context.js";
+
+function createExecutionContext(): ToolExecutionContext {
+  return {
+    scope: "player_turn",
+    subjectActorId: "player-1",
+    subjectActorRefs: new Set(["player-1", "Hero"]),
+    authority: {
+      baseWorldVersion: 0,
+      sourceEntity: { type: "player", id: "player-1" },
+      elapsedWorldTimeMinutes: 1,
+    },
+    currentLocationId: "loc-square",
+    currentSceneScopeId: "loc-square",
+    legalLocationRefs: new Set(["loc-square", "Town Square", "current_location", "current_scene"]),
+    legalActorRefs: new Set(["player-1", "Hero"]),
+    legalItemRefs: new Set(["Iron Sword"]),
+    legalFactionRefs: new Set(),
+    currentLocationRefs: new Set(["loc-square", "Town Square", "current_location"]),
+    currentSceneRefs: new Set(["loc-square", "Town Square", "current_scene"]),
+    legalMovementRefs: new Set(),
+  };
+}
 
 describe("createStorytellerTools inventory authority", () => {
   beforeEach(() => {
@@ -21,7 +44,8 @@ describe("createStorytellerTools inventory authority", () => {
   });
 
   it("keeps transfer_item as the only item-state mutation tool and accepts structured equip semantics", async () => {
-    const tools = createStorytellerTools("campaign-1", 5);
+    const executionContext = createExecutionContext();
+    const tools = createStorytellerTools("campaign-1", 5, undefined, executionContext);
 
     expect(Object.keys(tools)).toContain("transfer_item");
     expect(Object.keys(tools)).not.toContain("equip_item");
@@ -75,7 +99,7 @@ describe("createStorytellerTools inventory authority", () => {
       }),
       5,
       undefined,
-      undefined,
+      executionContext,
     );
   });
 });

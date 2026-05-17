@@ -75,8 +75,7 @@ describe("runActorDecisionBrain", () => {
     vi.clearAllMocks();
     safeGenerateObjectMock.mockResolvedValue({
       object: {
-        actorId: "npc-1",
-        citedFactIds: ["self:npc-1"],
+        citedFactIds: ["f1"],
         intent: "Keep watching without changing the scene.",
         requestedTools: [],
         noActionReason: "The clerk has no useful immediate move.",
@@ -136,6 +135,18 @@ describe("runActorDecisionBrain", () => {
     expect(prompt).toContain('"importance": 3');
   });
 
+  it("describes natural private and plan update shapes separately from tool inputs", () => {
+    const prompt = buildActorDecisionPrompt(frame);
+
+    expect(prompt).toContain("beliefUpdates are transient private packet notes only");
+    expect(prompt).toContain("use an array of compact strings");
+    expect(prompt).toContain(
+      'planUpdates entries must be { "summary": "how the actor plan changes", "status": "planned|continued|completed|blocked" }',
+    );
+    expect(prompt).toContain("Do not include writeScopes; backend scheduling owns write scopes");
+    expect(prompt).toContain("do not put private cognition in log_event text");
+  });
+
   it("shows exact actor tool input contracts for movement instead of a generic input object", () => {
     const prompt = buildActorDecisionPrompt({
       ...frame,
@@ -154,16 +165,31 @@ describe("runActorDecisionBrain", () => {
 
     expect(prompt).toContain("LEGAL TOOL INPUT CONTRACTS");
     expect(prompt).toContain('"targetLocationName"');
-    expect(prompt).toContain("Copy the exact destination from a cited reachable move:* fact");
+    expect(prompt).toContain("Use the exact destination label from a cited reachable movement fact text");
     expect(prompt).toContain("Do not use destination, destinationRef, target, locationName, or an empty input object");
+    expect(prompt).toContain('"ref": "f1"');
+    expect(prompt).not.toContain('"actorId": "npc-1"');
+    expect(prompt).not.toContain('"campaignId"');
+  });
+
+  it("suppresses runtime tool examples when no tools are legal", () => {
+    const prompt = buildActorDecisionPrompt({
+      ...frame,
+      legalTools: [],
+    });
+
+    expect(prompt).toContain("No tools are legal in this actor pass. Return requestedTools: [] only.");
+    expect(prompt).toContain('"requestedTools": []');
+    expect(prompt).toContain("No world-facing tool is legal for this process update.");
+    expect(prompt).not.toContain("DURABLE LOG_EVENT EXAMPLE");
+    expect(prompt).not.toContain('"toolName": "log_event"');
   });
 
   it("accepts durable actor log events only when the model supplies futureRelevance", async () => {
     safeGenerateObjectMock.mockResolvedValue({
       object: {
-        actorId: "npc-1",
         decisionSummary: "The clerk states the permit requirement.",
-        citedFactIds: ["self:npc-1"],
+        citedFactIds: ["f1"],
         selectedGoal: null,
         intent: "State the boundary that blocks passage.",
         requestedTools: [
@@ -192,6 +218,8 @@ describe("runActorDecisionBrain", () => {
 
     const packet = await runActorDecisionBrain({ provider, frame });
 
+    expect(packet.actorId).toBe("npc-1");
+    expect(packet.citedFactIds).toEqual(["self:npc-1"]);
     expect(packet.requestedTools?.[0]?.input).toMatchObject({
       durability: "durable",
       futureRelevance:
@@ -199,12 +227,51 @@ describe("runActorDecisionBrain", () => {
     });
   });
 
+  it("accepts natural typed private updates without relaxing tool request shape", async () => {
+    safeGenerateObjectMock.mockResolvedValue({
+      object: {
+        decisionSummary: "The clerk keeps the boundary in mind.",
+        citedFactIds: ["f1"],
+        selectedGoal: null,
+        intent: "Watch the player without making a public move.",
+        requestedTools: [],
+        beliefUpdates: [
+          {
+            category: "recognition",
+            update: "The player is trying to preserve leverage without striking the fork.",
+          },
+        ],
+        planUpdates: [
+          {
+            category: "continued",
+            update: "Maintain the threshold posture and wait for the player's next proof.",
+          },
+        ],
+        noActionReason: "The clerk has no grounded public action before the player acts again.",
+      },
+      trace: {
+        usage: null,
+        reasoningText: "",
+      },
+    });
+
+    const packet = await runActorDecisionBrain({ provider, frame });
+
+    expect(packet.beliefUpdates).toEqual([
+      "recognition: The player is trying to preserve leverage without striking the fork.",
+    ]);
+    expect(packet.planUpdates?.[0]).toMatchObject({
+      summary: "Maintain the threshold posture and wait for the player's next proof.",
+      status: "continued",
+    });
+    expect(packet.requestedTools).toEqual([]);
+  });
+
   it("fails closed when a durable actor log event omits futureRelevance", async () => {
     safeGenerateObjectMock.mockResolvedValue({
       object: {
-        actorId: "npc-1",
         decisionSummary: "The clerk states the permit requirement.",
-        citedFactIds: ["self:npc-1"],
+        citedFactIds: ["f1"],
         selectedGoal: null,
         intent: "State the boundary that blocks passage.",
         requestedTools: [

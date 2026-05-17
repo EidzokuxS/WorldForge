@@ -79,6 +79,7 @@ export function grantsClaimedAccessFromUnconfirmedProof(
   switch (toolName) {
     case "reveal_location":
     case "move_to":
+    case "move_actor":
       return restrictedAccessTextPattern.test(text);
     case "spawn_item":
     case "transfer_item":

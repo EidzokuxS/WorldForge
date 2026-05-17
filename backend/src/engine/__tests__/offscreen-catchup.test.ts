@@ -256,6 +256,19 @@ describe("offscreen catch-up", () => {
       }),
     ]);
     expect(getDb().select().from(simulationProposals).all()).toHaveLength(1);
+
+    const exposureResult = resolveActorExposureCatchup({
+      campaignId: CAMPAIGN_ID,
+      tick: 20,
+      playerLocationId: "loc-main",
+      playerSceneScopeId: "scene-a",
+      elapsedWorldTimeMinutes: 15,
+      phase: "pre_scene_frame",
+    });
+
+    expect(exposureResult.deferred).toHaveLength(1);
+    expect(exposureResult.deferred[0]?.proposal.proposalType).toBe("key_actor_due_decision");
+    expect(getDb().select().from(simulationProposals).all()).toHaveLength(1);
   });
 
   it("catches up visible deterministic actor plans before stale frame exposure", () => {

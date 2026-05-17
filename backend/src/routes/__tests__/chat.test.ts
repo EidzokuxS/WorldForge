@@ -34,6 +34,7 @@ vi.mock("../../lib/index.js", () => ({
     Math.min(Math.max(val, min), max)
   ),
   getErrorMessage: vi.fn((_err: unknown, fallback: string) => fallback),
+  getPlayerSafeErrorMessage: vi.fn((_err: unknown, fallback: string) => fallback),
   getErrorStatus: vi.fn(() => 500),
   createLogger: vi.fn(() => ({
     info: vi.fn(),
@@ -93,6 +94,8 @@ vi.mock("../../db/index.js", () => ({
   getDb: vi.fn(),
 }));
 
+const mockGetSettledTurnPacket = vi.fn((_input?: unknown) => null);
+
 vi.mock("../../engine/index.js", () => ({
   processTurn: vi.fn(),
   resumePendingTurnNarration: vi.fn(),
@@ -100,6 +103,7 @@ vi.mock("../../engine/index.js", () => ({
   captureSnapshot: vi.fn(),
   restoreSnapshot: vi.fn(),
   findPendingNarrationSaga: vi.fn(() => null),
+  getSettledTurnPacket: (input: unknown) => mockGetSettledTurnPacket(input),
   PendingNarrationError: class PendingNarrationError extends Error {
     constructor(public readonly pendingSaga: unknown) {
       super("Pending narration.");
@@ -132,12 +136,36 @@ vi.mock("../../engine/grounded-lookup.js", () => ({
 
 const mockEmbedAndUpdateEvent = vi.fn();
 const mockDrainPendingCommittedEvents = vi.fn();
+const mockDrainPendingCommittedEventsByIds = vi.fn(
+  (_campaignId?: unknown, _eventIds?: unknown): Array<{
+    id: string;
+    text: string;
+    tick?: number;
+    location?: string;
+    participants?: string[];
+    importance?: number;
+    type?: string;
+  }> => [],
+);
+const mockRetractStoredEpisodicEvent = vi.fn((_input?: unknown) => undefined);
+const mockRetractPendingCommittedEventsForTick = vi.fn(
+  async (_campaignId?: unknown, _tick?: unknown): Promise<Array<{ id: string; text: string }>> => [],
+);
 const runtimeSnapshots = new Map<string, unknown>();
+const runtimeSnapshotMetadata = new Map<string, {
+  acceptedDurableEventIds: string[];
+  producedDurableEventIds: string[];
+}>();
 const runtimeActiveTurns = new Set<string>();
 
 vi.mock("../../vectors/episodic-events.js", () => ({
   embedAndUpdateEvent: (...args: unknown[]) => mockEmbedAndUpdateEvent(...args),
   drainPendingCommittedEvents: (...args: unknown[]) => mockDrainPendingCommittedEvents(...args),
+  drainPendingCommittedEventsByIds: (campaignId: unknown, eventIds: unknown) =>
+    mockDrainPendingCommittedEventsByIds(campaignId, eventIds),
+  retractStoredEpisodicEvent: (input: unknown) => mockRetractStoredEpisodicEvent(input),
+  retractPendingCommittedEventsForTick: (campaignId: unknown, tick: unknown) =>
+    mockRetractPendingCommittedEventsForTick(campaignId, tick),
 }));
 
 vi.mock("../../campaign/runtime-state.js", () => ({
@@ -152,17 +180,35 @@ vi.mock("../../campaign/runtime-state.js", () => ({
     runtimeActiveTurns.delete(campaignId);
   },
   hasActiveTurn: (campaignId: string) => runtimeActiveTurns.has(campaignId),
-  setLastTurnSnapshot: (campaignId: string, snapshot: unknown) => {
+  setLastTurnSnapshot: (
+    campaignId: string,
+    snapshot: unknown,
+    metadata?: {
+      acceptedDurableEventIds?: readonly string[];
+      producedDurableEventIds?: readonly string[];
+    },
+  ) => {
     runtimeSnapshots.set(campaignId, snapshot);
+    runtimeSnapshotMetadata.set(campaignId, {
+      acceptedDurableEventIds: [...new Set(metadata?.acceptedDurableEventIds ?? [])],
+      producedDurableEventIds: [...new Set(metadata?.producedDurableEventIds ?? [])],
+    });
   },
   getLastTurnSnapshot: (campaignId: string) => runtimeSnapshots.get(campaignId),
+  getLastTurnSnapshotMetadata: (campaignId: string) =>
+    runtimeSnapshotMetadata.get(campaignId) ?? {
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+    },
   clearLastTurnSnapshot: (campaignId: string) => {
     runtimeSnapshots.delete(campaignId);
+    runtimeSnapshotMetadata.delete(campaignId);
   },
   hasLiveTurnSnapshot: (campaignId: string) => runtimeSnapshots.has(campaignId),
   clearCampaignRuntimeState: (campaignId: string) => {
     runtimeActiveTurns.delete(campaignId);
     runtimeSnapshots.delete(campaignId);
+    runtimeSnapshotMetadata.delete(campaignId);
   },
 }));
 
@@ -180,6 +226,7 @@ import {
 import { loadSettings } from "../../settings/index.js";
 import { resolveRoleModel } from "../../ai/index.js";
 import { getDb } from "../../db/index.js";
+import { getErrorMessage, getPlayerSafeErrorMessage } from "../../lib/index.js";
 import {
   processOpeningScene,
   processTurn,
@@ -211,6 +258,8 @@ const mockedCallStoryteller = vi.mocked(callStoryteller);
 const mockedLoadSettings = vi.mocked(loadSettings);
 const mockedResolveRole = vi.mocked(resolveRoleModel);
 const mockedGetDb = vi.mocked(getDb);
+const mockedGetErrorMessage = vi.mocked(getErrorMessage);
+const mockedGetPlayerSafeErrorMessage = vi.mocked(getPlayerSafeErrorMessage);
 const mockedProcessTurn = vi.mocked(processTurn);
 const mockedResumePendingTurnNarration = vi.mocked(resumePendingTurnNarration);
 const mockedProcessOpeningScene = vi.mocked(processOpeningScene);
@@ -289,7 +338,11 @@ function createTurnStream(events: Array<{ type: string; data: unknown }>) {
 beforeEach(() => {
   vi.clearAllMocks();
   mockDrainPendingCommittedEvents.mockReturnValue([]);
+  mockDrainPendingCommittedEventsByIds.mockReturnValue([]);
+  mockRetractPendingCommittedEventsForTick.mockResolvedValue([]);
+  mockGetSettledTurnPacket.mockReturnValue(null);
   runtimeSnapshots.clear();
+  runtimeSnapshotMetadata.clear();
   runtimeActiveTurns.clear();
   chatHistoryByCampaign.clear();
   mockedGetPremise.mockReturnValue("A dark fantasy world.");
@@ -903,7 +956,7 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(body).toContain("Nanami let the warning land before he moved.");
   });
 
-  it("streams a separate reasoning SSE event without merging it into narrative", async () => {
+  it("strips private ids and reasoning from player SSE events", async () => {
     setupStoryteller();
     setupDbMock();
 
@@ -923,9 +976,37 @@ describe("Campaign-loaded gameplay transport", () => {
     }) as any);
     mockedProcessTurn.mockImplementation(() =>
       createTurnStream([
+        { type: "oracle_result", data: { outcome: "weak_hit", reasoning: "Secret oracle reasoning." } },
+        {
+          type: "turn_resolution",
+          data: {
+            kind: "status_read",
+            resolutionState: "observation_grounded",
+            evidenceIds: ["action-result:read-1"],
+            consequenceIds: ["action-result:mutate-1"],
+          },
+        },
+        { type: "state_update", data: { type: "raw_tool_result", id: "action-result:raw-1" } },
+        {
+          type: "state_update",
+          data: {
+            type: "location_change",
+            locationId: "location:raw-secret-market",
+            locationName: "route-confirmation desk",
+            path: ["location:raw-origin", "route-confirmation landing", "Canal Market"],
+            travelCost: 2,
+          },
+        },
         { type: "narrative", data: { text: "Nanami let the warning land before he moved." } },
         { type: "reasoning", data: { text: "Reasoning stays on a debug lane." } },
-        { type: "done", data: { tick: 2 } },
+        {
+          type: "done",
+          data: {
+            tick: 2,
+            acceptedDurableEventIds: ["evt-speak"],
+            producedDurableEventIds: ["evt-speak"],
+          },
+        },
       ]),
     );
 
@@ -943,9 +1024,214 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain("event: narrative");
-    expect(body).toContain("event: reasoning");
-    expect(body).toContain("Reasoning stays on a debug lane.");
+    expect(body).toContain("event: oracle_result");
+    expect(body).toContain("event: turn_resolution");
+    expect(body).toContain("event: state_update");
+    expect(body).toContain("status_read");
+    expect(body).toContain("route-confirmation desk");
+    expect(body).toContain("route-confirmation landing");
+    expect(body).toContain("Canal Market");
+    expect(body).toContain("\"travelCost\":2");
+    expect(body).not.toContain("event: reasoning");
+    expect(body).not.toContain("Reasoning stays on a debug lane.");
+    expect(body).not.toContain("Secret oracle reasoning.");
+    expect(body).not.toContain("raw_tool_result");
+    expect(body).not.toContain("location:raw-secret-market");
+    expect(body).not.toContain("location:raw-origin");
+    expect(body).not.toContain("action-result:");
+    expect(body).not.toContain("evt-speak");
     expect(body).not.toContain("Nanami let the warning land before he moved.Reasoning stays on a debug lane.");
+  });
+
+  it("projects quick actions through a player-facing SSE allow-list", async () => {
+    setupStoryteller();
+    setupDbMock();
+
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
+      id: campaignId,
+      name: `Campaign ${campaignId}`,
+      createdAt: "2026-01-01",
+    }) as any);
+    mockedCaptureSnapshot.mockImplementation((campaignId) => ({
+      campaignId,
+      spawnedNpcIds: [],
+      spawnedItemIds: [],
+      revealedLocationIds: [],
+      createdRelationshipIds: [],
+      createdChronicleIds: [],
+    }) as any);
+    mockedProcessTurn.mockImplementation(() =>
+      createTurnStream([
+        {
+          type: "quick_actions",
+          data: {
+            success: true,
+            result: {
+              actions: [
+                {
+                  label: "Ask actor_hidden",
+                  action: "Ask actor_hidden about route_hidden_path via tool_result_8 and spawn_npc.",
+                },
+                { label: "Ask", action: "Ask the clerk about the sealed queue." },
+                { label: "Watch", action: "Watch the counter for a change in posture." },
+                { label: "Move", action: "Step toward the open registry desk." },
+              ],
+            },
+            authority: { toolResultId: "tool-result-secret" },
+            toolResultId: "tool-result-secret",
+            debug: "raw debug data",
+          },
+        },
+        { type: "internal_debug", data: { id: "tool-result-unknown", debug: "hidden" } },
+        { type: "done", data: { tick: 2 } },
+      ]),
+    );
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Ask for options",
+        intent: "Ask for options",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("event: quick_actions");
+    expect(body).toContain("Ask [hidden] about [hidden] via [hidden] and [hidden].");
+    expect(body).toContain("Ask the clerk about the sealed queue.");
+    expect(body).not.toContain("\"success\"");
+    expect(body).not.toContain("\"result\"");
+    expect(body).not.toContain("authority");
+    expect(body).not.toContain("toolResultId");
+    expect(body).not.toContain("tool-result-secret");
+    expect(body).not.toContain("actor_hidden");
+    expect(body).not.toContain("route_hidden_path");
+    expect(body).not.toContain("tool_result_8");
+    expect(body).not.toContain("spawn_npc");
+    expect(body).not.toContain("raw debug data");
+    expect(body).not.toContain("event: internal_debug");
+    expect(body).not.toContain("tool-result-unknown");
+  });
+
+  it("projects progress events through the player-facing SSE allow-list", async () => {
+    setupStoryteller();
+    setupDbMock();
+
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
+      id: campaignId,
+      name: `Campaign ${campaignId}`,
+      createdAt: "2026-01-01",
+    }) as any);
+    mockedCaptureSnapshot.mockImplementation((campaignId) => ({
+      campaignId,
+      spawnedNpcIds: [],
+      spawnedItemIds: [],
+      revealedLocationIds: [],
+      createdRelationshipIds: [],
+      createdChronicleIds: [],
+    }) as any);
+    mockedProcessTurn.mockImplementation(() =>
+      createTurnStream([
+        {
+          type: "scene-settling",
+          data: {
+            stage: "scene-settling",
+            phase: "actor-reactions",
+            hiddenActorName: "Hidden Watcher",
+            proposalId: "proposal-secret",
+          },
+        },
+        {
+          type: "finalizing_turn",
+          data: {
+            stage: "rollback_critical",
+            privateTerm: "Forest Outpost",
+          },
+        },
+        {
+          type: "auto_checkpoint",
+          data: { reason: "actor:secret-watcher" },
+        },
+        { type: "done", data: { tick: 2 } },
+      ]),
+    );
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Wait and watch",
+        intent: "Wait and watch",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("event: scene-settling");
+    expect(body).toContain("\"stageId\":\"resolving-nearby-reactions\"");
+    expect(body).toContain("event: finalizing_turn");
+    expect(body).toContain("\"stageId\":\"advancing-world-time\"");
+    expect(body).toContain("event: auto_checkpoint");
+    expect(body).toContain("Checkpoint available");
+    expect(body).not.toContain("Hidden Watcher");
+    expect(body).not.toContain("proposal-secret");
+    expect(body).not.toContain("Forest Outpost");
+    expect(body).not.toContain("actor:secret-watcher");
+  });
+
+  it.each([
+    {
+      path: "/chat/opening",
+      fallback: "Opening request failed.",
+      body: { campaignId: CAMPAIGN_ID },
+    },
+    {
+      path: "/chat/action",
+      fallback: "Action request failed.",
+      body: {
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Wait",
+        intent: "Wait",
+        method: "",
+      },
+    },
+    {
+      path: "/chat/retry",
+      fallback: "Retry request failed.",
+      body: { campaignId: CAMPAIGN_ID },
+    },
+  ])("uses player-safe JSON errors for outer $path failures", async ({ path, fallback, body }) => {
+    mockedGetErrorMessage.mockImplementationOnce((error: unknown, fallbackMessage?: string) =>
+      error instanceof Error ? error.message : fallbackMessage ?? "fallback",
+    );
+    mockedGetPlayerSafeErrorMessage.mockImplementationOnce((_error: unknown, fallbackMessage?: string) =>
+      fallbackMessage ?? "fallback",
+    );
+    mockedLoadSettings.mockImplementationOnce(() => {
+      throw new Error("outer failure actor_hidden tool_result_8");
+    });
+
+    const res = await app.request(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    expect(res.status).toBe(500);
+    const text = await res.text();
+    expect(text).toContain(fallback);
+    expect(text).not.toContain("actor_hidden");
+    expect(text).not.toContain("tool_result_8");
+    expect(text).not.toContain("outer failure");
+    expect(mockedGetPlayerSafeErrorMessage).toHaveBeenCalledWith(expect.any(Error), fallback);
   });
 
   it("loads history by explicit campaignId when no campaign is active", async () => {
@@ -968,6 +1254,87 @@ describe("Campaign-loaded gameplay transport", () => {
     const body = await res.json();
     expect(body.hasLiveTurnSnapshot).toBe(false);
     expect(body.messages).toHaveLength(2);
+  });
+
+  it("uses player-safe errors when explicit campaign loading fails", async () => {
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockRejectedValueOnce(new Error("missing actor_hidden tool_result_8"));
+    mockedGetErrorMessage.mockImplementationOnce((error: unknown, fallback?: string) =>
+      error instanceof Error ? error.message : fallback ?? "fallback",
+    );
+    mockedGetPlayerSafeErrorMessage.mockImplementationOnce((_error: unknown, fallback?: string) =>
+      fallback ?? "fallback",
+    );
+
+    const res = await app.request(`/chat/history?campaignId=${CAMPAIGN_ID}`);
+
+    expect(res.status).toBe(404);
+    const bodyText = await res.text();
+    expect(bodyText).toContain("Campaign not active or not found.");
+    expect(bodyText).not.toContain("actor_hidden");
+    expect(bodyText).not.toContain("tool_result_8");
+    expect(mockedGetPlayerSafeErrorMessage).toHaveBeenCalledWith(
+      expect.any(Error),
+      "Campaign not active or not found.",
+    );
+  });
+
+  it("projects history messages without backend resume metadata", async () => {
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockResolvedValue({
+      id: CAMPAIGN_ID,
+      name: "Loaded Campaign",
+      createdAt: "2026-01-01",
+    } as any);
+    mockedGetPremise.mockReturnValue("A dark fantasy world.");
+    mockedGetHistory.mockReturnValue([
+      { role: "user", content: "I wait by the counter." },
+      {
+        role: "assistant",
+        content:
+          "The clerk returns with actor_hidden, tool_result_8, source:event-1, response-visible-1, effect_hidden, and 01890f9a-20f3-7cc2-9b7c-1a2b3c4d5e6f in a stale transcript.",
+        metadata: {
+          resumeNarration: {
+            sagaId: "saga-secret-1",
+            narratorAttemptId: "narrator-attempt-secret-1",
+            turnId: "turn-secret-1",
+            toolResultId: "tool-result-secret-1",
+          },
+          authority: {
+            toolResultId: "tool-result-secret-2",
+          },
+        },
+      },
+    ] as any);
+
+    const res = await app.request(`/chat/history?campaignId=${CAMPAIGN_ID}`);
+
+    expect(res.status).toBe(200);
+    const bodyText = await res.text();
+    const body = JSON.parse(bodyText);
+    expect(body.messages).toEqual([
+      { role: "user", content: "I wait by the counter." },
+      {
+        role: "assistant",
+        content:
+          "The clerk returns with [hidden], [hidden], [hidden], [hidden], [hidden], and [hidden] in a stale transcript.",
+      },
+    ]);
+    expect(bodyText).toContain("[hidden]");
+    expect(bodyText).not.toContain("metadata");
+    expect(bodyText).not.toContain("resumeNarration");
+    expect(bodyText).not.toContain("saga-secret-1");
+    expect(bodyText).not.toContain("narratorAttemptId");
+    expect(bodyText).not.toContain("narrator-attempt-secret-1");
+    expect(bodyText).not.toContain("turn-secret-1");
+    expect(bodyText).not.toContain("tool-result-secret");
+    expect(bodyText).not.toContain("authority");
+    expect(bodyText).not.toContain("actor_hidden");
+    expect(bodyText).not.toContain("tool_result_8");
+    expect(bodyText).not.toContain("source:event-1");
+    expect(bodyText).not.toContain("response-visible-1");
+    expect(bodyText).not.toContain("effect_hidden");
+    expect(bodyText).not.toContain("01890f9a");
   });
 
   it("reports live turn snapshot availability in history after a successful action", async () => {
@@ -1199,7 +1566,7 @@ describe("Campaign-loaded gameplay transport", () => {
         queued: [],
       } as any;
     });
-    mockDrainPendingCommittedEvents.mockReturnValue([
+    mockDrainPendingCommittedEventsByIds.mockReturnValue([
       {
         id: "evt-speak",
         text: 'Greta the Merchant said to player: "Keep your voice down."',
@@ -1226,8 +1593,17 @@ describe("Campaign-loaded gameplay transport", () => {
         await onPostTurn?.({
           tick: 2,
           toolCalls: [],
+          acceptedDurableEventIds: ["evt-speak", "evt-offscreen"],
+          producedDurableEventIds: ["evt-speak", "evt-offscreen"],
         } as any);
-        yield { type: "done", data: { tick: 2 } } as any;
+        yield {
+          type: "done",
+          data: {
+            tick: 2,
+            acceptedDurableEventIds: ["evt-speak", "evt-offscreen"],
+            producedDurableEventIds: ["evt-speak", "evt-offscreen"],
+          },
+        } as any;
       })(),
     );
 
@@ -1251,7 +1627,10 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(mockedCheckAndTriggerReflections).not.toHaveBeenCalled();
     expect(mockedTickFactions).not.toHaveBeenCalled();
     expect(mockedTickPresentNpcs).not.toHaveBeenCalled();
-    expect(mockDrainPendingCommittedEvents).toHaveBeenCalledWith(CAMPAIGN_ID, 2);
+    expect(mockDrainPendingCommittedEventsByIds).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      ["evt-speak", "evt-offscreen"],
+    );
     expect(mockEmbedAndUpdateEvent).toHaveBeenCalledTimes(2);
     expect(mockEmbedAndUpdateEvent).toHaveBeenNthCalledWith(
       1,
@@ -1394,7 +1773,10 @@ describe("Campaign-loaded gameplay transport", () => {
     mockedFindPendingNarrationSaga.mockReturnValue(pendingSaga);
     mockedResumePendingTurnNarration.mockImplementation(() =>
       createTurnStream([
-        { type: "narrative", data: { text: "The pending narration resumes." } },
+        {
+          type: "narrative",
+          data: { text: "The pending narration resumes with actor_hidden and tool_result_8." },
+        },
         { type: "done", data: { tick: 3, resumed: true } },
       ]) as any,
     );
@@ -1412,7 +1794,9 @@ describe("Campaign-loaded gameplay transport", () => {
 
     expect(res.status).toBe(200);
     const body = await res.text();
-    expect(body).toContain("The pending narration resumes.");
+    expect(body).toContain("The pending narration resumes with [hidden] and [hidden].");
+    expect(body).not.toContain("actor_hidden");
+    expect(body).not.toContain("tool_result_8");
     expect(mockedResumePendingTurnNarration).toHaveBeenCalledWith(
       expect.objectContaining({
         campaignId: CAMPAIGN_ID,
@@ -1464,10 +1848,13 @@ describe("Campaign-loaded gameplay transport", () => {
 
     expect(res.status).toBe(200);
     const body = await res.text();
-    expect(body).toContain("event: error");
-    expect(body).toContain("\"pendingNarration\":true");
-    expect(body).toContain("\"resumable\":true");
-    expect(body).not.toContain("event: done");
+    expect(body).toContain("event: scene-settling");
+    expect(body).toContain("event: narrative");
+    expect(body).toContain("The pending narration resumes");
+    expect(body).not.toContain("actor_hidden");
+    expect(body).not.toContain("tool_result_8");
+    expect(body).toContain("event: done");
+    expect(body).toContain("\"resumed\":true");
     expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
   });
 
@@ -1519,7 +1906,8 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(body).toContain("event: error");
     expect(body).toContain("\"pendingNarration\":true");
     expect(body).toContain("\"resumable\":true");
-    expect(body).toContain("turn-generic-pending");
+    expect(body).not.toContain("turn-generic-pending");
+    expect(body).not.toContain("saga-generic-pending");
     expect(mockedResumePendingTurnNarration).toHaveBeenCalledWith(
       expect.objectContaining({
         campaignId: CAMPAIGN_ID,
@@ -1707,7 +2095,10 @@ describe("Campaign-loaded gameplay transport", () => {
     mockedFindPendingNarrationSaga.mockReturnValue(pendingSaga);
     mockedResumePendingTurnNarration.mockImplementation(() =>
       createTurnStream([
-        { type: "narrative", data: { text: "Retry waits for pending narration." } },
+        {
+          type: "narrative",
+          data: { text: "Retry waits for pending narration from route_hidden_path." },
+        },
         { type: "done", data: { tick: 4, resumed: true } },
       ]) as any,
     );
@@ -1720,7 +2111,8 @@ describe("Campaign-loaded gameplay transport", () => {
 
     expect(res.status).toBe(200);
     const body = await res.text();
-    expect(body).toContain("Retry waits for pending narration.");
+    expect(body).toContain("Retry waits for pending narration from [hidden].");
+    expect(body).not.toContain("route_hidden_path");
     expect(mockedResumePendingTurnNarration).toHaveBeenCalledWith(
       expect.objectContaining({
         campaignId: CAMPAIGN_ID,

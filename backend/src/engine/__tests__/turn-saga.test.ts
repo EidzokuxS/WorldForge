@@ -10,6 +10,7 @@ import {
   narratorAttempts,
   oracleDecisions,
   settledTurnPackets,
+  turnSagaEvents,
   turnSagas,
 } from "../../db/schema.js";
 import {
@@ -30,8 +31,10 @@ import {
   mergeTurnSagaProvenance,
   persistOracleDecision,
   persistSettledTurnPacket,
+  recordPreparedSettledTurnPacket,
   recordNarratorAttempt,
   releaseTurnSagaWorker,
+  recoverSettledTurnPacketFromPreparedEvent,
   transitionTurnSagaStatus,
   type TurnSagaStatus,
 } from "../turn-saga.js";
@@ -449,6 +452,76 @@ describe("turn saga persistence", () => {
       settledTurnPacketId: "saga-packet-fence-packet",
       activeLockToken: "live-lock",
     });
+  });
+
+  it("recovers a prepared settled packet after a crash before packet persistence", () => {
+    createSaga("saga-prepared-recovery", "turn-prepared-recovery");
+    advanceToWorldConsequence("saga-prepared-recovery");
+    persistDecision("saga-prepared-recovery");
+    claimTurnSagaWorker({
+      sagaId: "saga-prepared-recovery",
+      workerId: "live-turn-narration:crashed-worker",
+      lockToken: "crashed-lock",
+      allowStaleReclaim: false,
+      nowMs: 4_000,
+    });
+
+    const prepared = recordPreparedSettledTurnPacket({
+      id: "saga-prepared-recovery-packet",
+      sagaId: "saga-prepared-recovery",
+      lockToken: "crashed-lock",
+      oracleDecisionId: "saga-prepared-recovery-oracle",
+      canonicalTurnPacket: { turnId: "turn-prepared-recovery", resolution: "door opens" },
+      narratorPacket: { visibleEvents: ["The door opens."] },
+      sourceRefs: ["gm-read-1", "tool-loop-1"],
+      acceptedToolResultRefs: ["tool-result-1"],
+      acceptedActorResultRefs: ["actor-result-1"],
+      acceptedDurableEventIds: ["event-accepted"],
+      producedDurableEventIds: ["event-produced"],
+      dueWorldRefs: ["thread-1"],
+      baseWorldVersion: 10,
+      resultWorldVersion: 11,
+      requiresNarration: true,
+      nowMs: 4_100,
+    });
+
+    expect(prepared).toMatchObject({
+      eventType: "settled_packet_prepared",
+      settledTurnPacketId: "saga-prepared-recovery-packet",
+      baseWorldVersion: 10,
+      resultWorldVersion: 11,
+    });
+    expect(getDb().select().from(settledTurnPackets).all()).toHaveLength(0);
+
+    const recovery = claimTurnSagaWorker({
+      sagaId: "saga-prepared-recovery",
+      workerId: "resume-pending-narration:recovery",
+      lockToken: "recovery-lock",
+      staleAfterMs: 300_000,
+      nowMs: 304_001,
+    });
+    const packet = recoverSettledTurnPacketFromPreparedEvent({
+      sagaId: "saga-prepared-recovery",
+      lockToken: recovery.lockToken,
+      nowMs: 304_002,
+    });
+
+    expect(packet).toMatchObject({
+      id: "saga-prepared-recovery-packet",
+      sagaId: "saga-prepared-recovery",
+      acceptedDurableEventIds: ["event-accepted"],
+      producedDurableEventIds: ["event-produced"],
+      resultWorldVersion: 11,
+    });
+    expect(getTurnSaga({ sagaId: "saga-prepared-recovery" })).toMatchObject({
+      status: "resolved_pending_narration",
+      settledTurnPacketId: "saga-prepared-recovery-packet",
+      activeLockToken: "recovery-lock",
+    });
+    expect(getDb().select().from(turnSagaEvents).all()).toEqual([
+      expect.objectContaining({ eventType: "settled_packet_prepared" }),
+      expect.objectContaining({ eventType: "settled_packet_persisted" }),
+    ]);
   });
 
   it("finds pending narration immediately after packet persistence by campaign", () => {

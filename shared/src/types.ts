@@ -231,8 +231,24 @@ export interface ChatMessageResumeNarrationMetadata {
   narratorAttemptId: string;
 }
 
+export type ChatMessagePresentationAuthority =
+  | "settled_packet_presentation"
+  | "visible_prose_non_authority";
+
+export interface ChatMessagePresentationMetadata {
+  authority: ChatMessagePresentationAuthority;
+  source:
+    | "settled_turn_packet"
+    | "opening_scene"
+    | "legacy_final_narration"
+    | "deterministic_noop";
+  sagaId?: string;
+  narratorAttemptId?: string;
+}
+
 export interface ChatMessageMetadata {
   resumeNarration?: ChatMessageResumeNarrationMetadata;
+  presentation?: ChatMessagePresentationMetadata;
 }
 
 export interface ChatMessage {

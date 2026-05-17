@@ -307,6 +307,35 @@ describe("assembleAuthoritativeScene world-brain handoff", () => {
     expect(scene.playerPerceivableConsequences.join("\n")).not.toContain("paid for coffee");
   });
 
+  it("does not turn explicitly unaccepted durable log_event receipts into player-facing scene effects", () => {
+    const scene = assembleAuthoritativeScene({
+      campaignId: CAMPAIGN_ID,
+      currentLocationId: "loc-1",
+      currentSceneScopeId: "scene-1",
+      pendingEventTicks: [5],
+      toolCalls: [
+        {
+          tool: "log_event",
+          args: {
+            text: "Hero files the disputed stamp claim.",
+            importance: 6,
+            participants: ["Hero"],
+            durability: "durable",
+            futureRelevance: "The filing could matter later.",
+          },
+          result: { success: true, result: { eventId: "event-unaccepted", durability: "durable", persisted: true } },
+          acceptedReceipt: false,
+        },
+      ],
+      playerLabel: "Hero",
+    });
+
+    expect(scene.sceneEffects.map((effect) => effect.summary)).not.toContain(
+      "Hero files the disputed stamp claim.",
+    );
+    expect(scene.playerPerceivableConsequences.join("\n")).not.toContain("disputed stamp claim");
+  });
+
   it("summarizes spawn_npc only when the authoritative result location matches the current scene", () => {
     const scene = assembleAuthoritativeScene({
       campaignId: CAMPAIGN_ID,
@@ -350,6 +379,91 @@ describe("assembleAuthoritativeScene world-brain handoff", () => {
     expect(scene.playerPerceivableConsequences.join("\n")).not.toContain("Forest Outpost");
   });
 
+  it("keeps explicit macro scene scope visible without broad-only actor leakage", () => {
+    vi.mocked(getDb).mockReturnValue(
+      createMockDb({
+        playerRow: {
+          id: "player-1",
+          campaignId: CAMPAIGN_ID,
+          name: "Hero",
+          hp: 5,
+          tags: "[]",
+          equippedItems: "[]",
+          race: "Human",
+          gender: "",
+          age: "",
+          appearance: "",
+          currentLocationId: "loc-macro",
+          currentSceneLocationId: "loc-macro",
+          characterRecord: "{}",
+        },
+        locationRows: [
+          {
+            id: "loc-macro",
+            campaignId: CAMPAIGN_ID,
+            name: "Brass Citadel",
+            description: "A macro civic district with an active public platform.",
+            tags: "[]",
+            kind: "macro",
+            parentLocationId: null,
+            connectedTo: "[]",
+          },
+          {
+            id: "loc-bell-hall",
+            campaignId: CAMPAIGN_ID,
+            name: "Bell Hall",
+            description: "A sibling hall under the same macro.",
+            tags: "[]",
+            kind: "persistent_sublocation",
+            parentLocationId: "loc-macro",
+            connectedTo: "[]",
+          },
+        ],
+        npcRows: [
+          {
+            id: "npc-clerk",
+            campaignId: CAMPAIGN_ID,
+            name: "Wax-Tablet Clerk",
+            tags: "[]",
+            currentLocationId: "loc-macro",
+            currentSceneLocationId: "loc-macro",
+          },
+          {
+            id: "npc-bell-hall",
+            campaignId: CAMPAIGN_ID,
+            name: "Bell Hall Arbiter",
+            tags: "[]",
+            currentLocationId: "loc-macro",
+            currentSceneLocationId: "loc-bell-hall",
+          },
+          {
+            id: "npc-legacy",
+            campaignId: CAMPAIGN_ID,
+            name: "Broad Legacy Presence",
+            tags: "[]",
+            currentLocationId: "loc-macro",
+            currentSceneLocationId: null,
+          },
+        ],
+      }) as unknown as ReturnType<typeof getDb>,
+    );
+
+    const scene = assembleAuthoritativeScene({
+      campaignId: CAMPAIGN_ID,
+      currentLocationId: "loc-macro",
+      currentSceneScopeId: "loc-macro",
+      pendingEventTicks: [5],
+      toolCalls: [],
+      playerLabel: "Hero",
+    });
+
+    expect(scene.presentNpcNames).toEqual(["Wax-Tablet Clerk"]);
+    expect(scene.awareness.clearNpcNames).toEqual(["Wax-Tablet Clerk"]);
+    expect(scene.awareness.byNpcName).toEqual({
+      "Wax-Tablet Clerk": "clear",
+    });
+  });
+
   it("filters pending committed events before both scene effects and recent context", () => {
     vi.mocked(readPendingCommittedEvents).mockReturnValue([
       {
@@ -369,6 +483,17 @@ describe("assembleAuthoritativeScene world-brain handoff", () => {
         participants: ["Outpost Cook"],
         importance: 2,
         type: "event",
+      },
+      {
+        id: "event-hidden-memory",
+        text: "Jiraiya privately recognizes the sealed proof pattern.",
+        tick: 5,
+        location: "Town Square",
+        participants: ["Jiraiya"],
+        importance: 6,
+        type: "event",
+        visibility: "hidden",
+        surfaceRoute: "actor_private_log_event",
       },
     ]);
 
@@ -390,8 +515,63 @@ describe("assembleAuthoritativeScene world-brain handoff", () => {
     expect(scene.sceneEffects.map((effect) => effect.summary)).not.toContain(
       "A cook at Forest Outpost served dinner.",
     );
+    expect(scene.sceneEffects.map((effect) => effect.summary)).not.toContain(
+      "Jiraiya privately recognizes the sealed proof pattern.",
+    );
     expect(scene.recentContext.map((entry) => entry.summary)).not.toContain(
       "A cook at Forest Outpost served dinner.",
+    );
+    expect(scene.recentContext.map((entry) => entry.summary)).not.toContain(
+      "Jiraiya privately recognizes the sealed proof pattern.",
+    );
+    expect(scene.playerPerceivableConsequences.join("\n")).not.toContain(
+      "sealed proof pattern",
+    );
+  });
+
+  it("only summarizes pending committed events that are in the accepted durable allow-list", () => {
+    vi.mocked(readPendingCommittedEvents).mockReturnValue([
+      {
+        id: "event-accepted",
+        text: "Hero files the accepted route claim.",
+        tick: 5,
+        location: "Town Square",
+        participants: ["Hero"],
+        importance: 7,
+        type: "event",
+      },
+      {
+        id: "event-unaccepted",
+        text: "Hero files an unaccepted stamp claim.",
+        tick: 5,
+        location: "Town Square",
+        participants: ["Hero"],
+        importance: 7,
+        type: "event",
+      },
+    ]);
+
+    const scene = assembleAuthoritativeScene({
+      campaignId: CAMPAIGN_ID,
+      currentLocationId: "loc-1",
+      currentSceneScopeId: "scene-1",
+      pendingEventTicks: [5],
+      toolCalls: [],
+      acceptedDurableEventIds: ["event-accepted"],
+      playerLabel: "Hero",
+    });
+
+    expect(scene.sceneEffects.map((effect) => effect.summary)).toContain(
+      "Hero files the accepted route claim.",
+    );
+    expect(scene.recentContext.map((entry) => entry.summary)).toContain(
+      "Hero files the accepted route claim.",
+    );
+    expect(scene.sceneEffects.map((effect) => effect.summary)).not.toContain(
+      "Hero files an unaccepted stamp claim.",
+    );
+    expect(scene.recentContext.map((entry) => entry.summary)).not.toContain(
+      "Hero files an unaccepted stamp claim.",
     );
   });
 });

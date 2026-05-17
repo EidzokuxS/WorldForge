@@ -31,6 +31,11 @@ export const narratorAttemptStatusValues = [
   "succeeded",
 ] as const;
 
+export const turnSagaEventTypeValues = [
+  "settled_packet_prepared",
+  "settled_packet_persisted",
+] as const;
+
 export const simulationProposalDispositionValues = [
   "pending",
   "committed",
@@ -40,6 +45,7 @@ export const simulationProposalDispositionValues = [
   "superseded_by_new_event",
   "needs_rebase",
   "needs_actor_retry",
+  "execution_abandoned",
 ] as const;
 
 export const simulationProposalExpiryPolicyValues = [
@@ -645,7 +651,7 @@ export const simulationProposals = sqliteTable(
     proposalType: text("proposal_type").notNull(),
     idempotencyKey: text("idempotency_key"),
     status: text("status", {
-      enum: ["pending", "committed", "rejected", "canceled", "superseded"],
+      enum: ["pending", "executing", "committed", "rejected", "canceled", "superseded"],
     }).notNull().default("pending"),
     proposalDisposition: text("proposal_disposition", {
       enum: simulationProposalDispositionValues,
@@ -866,6 +872,10 @@ export const authorityTraces = sqliteTable(
       table.campaignId,
       table.resultWorldVersion,
     ),
+    uniqueIndex("authority_traces_campaign_tool_result_unique").on(
+      table.campaignId,
+      table.toolResultId,
+    ),
     index("idx_authority_traces_campaign_version").on(
       table.campaignId,
       table.resultWorldVersion,
@@ -915,6 +925,40 @@ export const turnSagas = sqliteTable(
       table.status,
     ),
     index("idx_turn_sagas_base_version").on(table.campaignId, table.baseWorldVersion),
+  ]
+);
+
+export const turnSagaEvents = sqliteTable(
+  "turn_saga_events",
+  {
+    id: text("id").primaryKey(),
+    campaignId: text("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    sagaId: text("saga_id")
+      .notNull()
+      .references(() => turnSagas.id, { onDelete: "cascade" }),
+    turnId: text("turn_id").notNull(),
+    eventType: text("event_type", { enum: turnSagaEventTypeValues }).notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    baseWorldVersion: integer("base_world_version"),
+    resultWorldVersion: integer("result_world_version"),
+    settledTurnPacketId: text("settled_turn_packet_id"),
+    payloadJson: text("payload_json").notNull().default("{}"),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("turn_saga_events_saga_type_key_unique").on(
+      table.sagaId,
+      table.eventType,
+      table.idempotencyKey,
+    ),
+    index("idx_turn_saga_events_campaign_turn_type").on(
+      table.campaignId,
+      table.turnId,
+      table.eventType,
+    ),
+    index("idx_turn_saga_events_packet").on(table.settledTurnPacketId),
   ]
 );
 
@@ -985,6 +1029,12 @@ export const settledTurnPackets = sqliteTable(
       .notNull()
       .default("[]"),
     acceptedActorResultRefs: text("accepted_actor_result_refs")
+      .notNull()
+      .default("[]"),
+    acceptedDurableEventIds: text("accepted_durable_event_ids")
+      .notNull()
+      .default("[]"),
+    producedDurableEventIds: text("produced_durable_event_ids")
       .notNull()
       .default("[]"),
     dueWorldRefs: text("due_world_refs").notNull().default("[]"),

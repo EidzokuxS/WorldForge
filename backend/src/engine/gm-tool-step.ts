@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import { safeGenerateObject } from "../ai/generate-object-safe.js";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
+import { getSqliteConnection } from "../db/index.js";
+import { withSqliteWriteLock } from "../db/sqlite-write-lock.js";
 import { createLogger, getErrorMessage, withRole } from "../lib/index.js";
 import { executeToolCall, type ToolResult } from "./tool-executor.js";
 import {
@@ -23,9 +25,29 @@ import type { GmActionChecklist } from "./gm-action-checklist.js";
 import {
   buildModelFacingSceneDiagnostics,
   buildModelFacingScenePacket,
+  buildModelFacingScenePromptView,
 } from "./model-facing-scene.js";
+import {
+  sanitizeModelFacingConversationText,
+  sanitizeModelFacingJson,
+} from "./model-facing-conversation.js";
 import type { SceneFrame } from "./scene-frame.js";
+import {
+  canRuntimeToolSatisfyRequirement,
+  isAcceptedRuntimeReceipt,
+  runtimeRequirementPreparatoryTools,
+  type RuntimeRequirementLike,
+  runtimeToolHasRole,
+  runtimeToolIsSideEffecting,
+} from "./tool-contracts.js";
 import { runtimeToolInputSchemas, type RuntimeToolName } from "./tool-schemas.js";
+import {
+  appliedStateEffectsFromDialoguePayload,
+  DIALOGUE_STRUCTURAL_EFFECT_TOOLS,
+  receiptBacksAppliedStateEffect,
+  structuralStateReceiptFromToolCall,
+} from "./dialogue-state-receipt.js";
+import { retractDurableMemoryForRejectedSteps } from "./durable-side-effect-retraction.js";
 
 const log = createLogger("gm-tool-step");
 const GM_TOOL_STEP_MAX_CANDIDATE_REQUESTS = 8;
@@ -99,6 +121,7 @@ export interface ExecuteGmToolStepsArgs {
   checklist: GmActionChecklist;
   forbiddenPrivateTerms?: readonly string[];
   executionContext?: ToolExecutionContext;
+  runtimeRequirement?: RuntimeRequirementLike | null;
   maxCandidateRequests?: number;
   reviseStep?: (input: {
     step: GmActionChecklist["steps"][number];
@@ -106,6 +129,15 @@ export interface ExecuteGmToolStepsArgs {
     validationError: GmToolStepValidationError;
   }) => Promise<GmToolStepCandidateRequest | null> | GmToolStepCandidateRequest | null;
 }
+
+type GmToolStepMutationBoundary = {
+  readonly active: boolean;
+  beginForTool(toolName: RuntimeToolName): void;
+  commit(): void;
+  rollback(): void;
+};
+
+let gmToolStepBoundaryCounter = 0;
 
 function normalizePrivateTerm(value: string): string {
   return value.trim().toLowerCase();
@@ -251,6 +283,252 @@ function mutationRefsFromToolResult(result: ToolResult): string[] {
   return [...refs].slice(0, 12);
 }
 
+function createGmToolStepMutationBoundary(campaignId: string): GmToolStepMutationBoundary {
+  gmToolStepBoundaryCounter += 1;
+  const savepointName = `gm_tool_step_${gmToolStepBoundaryCounter}`;
+  let active = false;
+  let closed = false;
+
+  const ensureActive = (): void => {
+    if (closed || active) return;
+    getSqliteConnection().exec(`SAVEPOINT ${savepointName}`);
+    active = true;
+    log.event("gm-tool-step.mutation-boundary.start", {
+      campaignId,
+      savepointName,
+    });
+  };
+
+  const close = (mode: "commit" | "rollback"): void => {
+    if (closed || !active) {
+      closed = true;
+      return;
+    }
+    const sqlite = getSqliteConnection();
+    if (mode === "rollback") {
+      sqlite.exec(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+    }
+    sqlite.exec(`RELEASE SAVEPOINT ${savepointName}`);
+    closed = true;
+    active = false;
+    log.event("gm-tool-step.mutation-boundary.close", {
+      campaignId,
+      savepointName,
+      mode,
+    });
+  };
+
+  return {
+    get active() {
+      return active;
+    },
+    beginForTool(toolName) {
+      if (runtimeToolIsSideEffecting(toolName)) {
+        ensureActive();
+      }
+    },
+    commit() {
+      close("commit");
+    },
+    rollback() {
+      close("rollback");
+    },
+  };
+}
+
+function checklistMayExecuteSideEffects(checklist: GmActionChecklist): boolean {
+  return checklist.steps.some((step) => {
+    const candidate = toCandidateRequest(step.candidateToolRequest);
+    return candidate ? runtimeToolIsSideEffecting(candidate.toolName) : false;
+  });
+}
+
+function checklistMayProduceSideEffects(input: {
+  checklist: GmActionChecklist;
+  reviseStep: ExecuteGmToolStepsArgs["reviseStep"] | undefined;
+}): boolean {
+  return checklistMayExecuteSideEffects(input.checklist) || Boolean(input.reviseStep);
+}
+
+function checklistPlansTerminalReceipt(checklist: GmActionChecklist): boolean {
+  return checklist.steps.some((step) => {
+    const candidate = toCandidateRequest(step.candidateToolRequest);
+    return candidate ? runtimeToolHasRole(candidate.toolName, "terminal_receipt") : false;
+  });
+}
+
+function structuralEffectsBackedByPriorStepReceipts(
+  results: readonly GmToolStepResult[],
+  dialogueResult: GmToolStepResult,
+): boolean {
+  const dialogueIndex = results.indexOf(dialogueResult);
+  if (dialogueIndex < 0 || dialogueResult.toolName !== "record_dialogue_outcome") {
+    return false;
+  }
+  const payload = dialogueResult.result?.result
+    && typeof dialogueResult.result.result === "object"
+    && !Array.isArray(dialogueResult.result.result)
+    ? dialogueResult.result.result as Record<string, unknown>
+    : null;
+  const effects = appliedStateEffectsFromDialoguePayload(payload);
+  return effects.length > 0
+    && effects.every((effect) =>
+      results.slice(0, dialogueIndex).some((priorResult) => {
+        const receipt = structuralStateReceiptFromToolCall({
+          toolName: priorResult.toolName,
+          candidateInput: priorResult.candidateInput,
+          result: priorResult.result,
+        });
+        return Boolean(receipt && receiptBacksAppliedStateEffect(receipt, effect));
+      }));
+}
+
+function acceptedRuntimeReceiptResult(
+  results: readonly GmToolStepResult[],
+  result: GmToolStepResult,
+  requirement: RuntimeRequirementLike | null | undefined,
+): boolean {
+  return isAcceptedRuntimeReceipt({
+    toolName: result.toolName,
+    result: result.result,
+    requirement,
+    appliedStructuralEffectsBacked: structuralEffectsBackedByPriorStepReceipts(results, result),
+  });
+}
+
+function acceptedTerminalReceiptResult(
+  results: readonly GmToolStepResult[],
+  result: GmToolStepResult,
+  requirement: RuntimeRequirementLike | null | undefined,
+): boolean {
+  return result.toolName !== null
+    && runtimeToolHasRole(result.toolName, "terminal_receipt")
+    && acceptedRuntimeReceiptResult(results, result, requirement);
+}
+
+function missingPlannedTerminalReceipt(
+  checklist: GmActionChecklist,
+  results: readonly GmToolStepResult[],
+  requirement: RuntimeRequirementLike | null | undefined,
+): RuntimeToolName | null {
+  for (const step of checklist.steps) {
+    const candidate = toCandidateRequest(step.candidateToolRequest);
+    if (!candidate || !runtimeToolHasRole(candidate.toolName, "terminal_receipt")) continue;
+    const result = results.find((entry) => entry.stepId === step.stepId);
+    if (!result || !acceptedTerminalReceiptResult(results, result, requirement)) {
+      return candidate.toolName;
+    }
+  }
+  return null;
+}
+
+function resultHasSuccessfulSideEffect(result: GmToolStepResult): boolean {
+  return Boolean(
+    result.toolName
+      && runtimeToolIsSideEffecting(result.toolName)
+      && result.result?.success === true
+      && result.result.status !== "failure"
+      && !result.result.contractFailure
+      && !isObservationToolResult(result.result),
+  );
+}
+
+function missingRuntimeReceiptBoundary(
+  results: readonly GmToolStepResult[],
+  requirement: RuntimeRequirementLike | null | undefined,
+): string | null {
+  const successfulSideEffects = results.filter(resultHasSuccessfulSideEffect);
+  if (successfulSideEffects.length === 0) return null;
+  if (!requirement) {
+    return "typed runtimeRequirement was not provided; rolled back legacy checklist side effects.";
+  }
+  const offender = successfulSideEffects.find((result) =>
+    !sideEffectHasAcceptedReceiptBoundary(results, result, requirement));
+  return offender
+    ? `${offender.toolName ?? "side-effecting tool"} did not satisfy or feed an accepted runtime receipt for runtimeRequirement.kind=${requirement.kind}; rolled back legacy checklist side effects.`
+    : null;
+}
+
+function sideEffectHasAcceptedReceiptBoundary(
+  results: readonly GmToolStepResult[],
+  result: GmToolStepResult,
+  requirement: RuntimeRequirementLike,
+): boolean {
+  if (acceptedRuntimeReceiptResult(results, result, requirement)) {
+    return true;
+  }
+
+  if (!result.toolName) return false;
+  const resultIndex = results.indexOf(result);
+  const laterResults = resultIndex >= 0 ? results.slice(resultIndex + 1) : [];
+
+  if (
+    requirement.kind === "dialogue_outcome"
+    && DIALOGUE_STRUCTURAL_EFFECT_TOOLS.has(result.toolName)
+  ) {
+    return laterResults.some((laterResult) =>
+      acceptedTerminalReceiptResult(results, laterResult, requirement));
+  }
+
+  if (
+    result.toolName === "advance_time"
+    && (requirement.kind === "state_mutation" || requirement.kind === "scene_beat")
+  ) {
+    return laterResults.some((laterResult) =>
+      laterResult.toolName
+      && canRuntimeToolSatisfyRequirement(laterResult.toolName, requirement)
+      && acceptedRuntimeReceiptResult(results, laterResult, requirement));
+  }
+
+  const preparatoryTools = runtimeRequirementPreparatoryTools(requirement);
+  if (preparatoryTools.includes(result.toolName)) {
+    return laterResults.some((laterResult) =>
+      laterResult.toolName
+      && canRuntimeToolSatisfyRequirement(laterResult.toolName, requirement)
+      && acceptedRuntimeReceiptResult(results, laterResult, requirement));
+  }
+
+  return false;
+}
+
+function failedSideEffectingToolResult(
+  results: readonly GmToolStepResult[],
+): GmToolStepResult | null {
+  return results.find((result) =>
+    result.toolName
+      && runtimeToolIsSideEffecting(result.toolName)
+      && result.status === "skipped"
+      && result.validationError?.code === "tool_failed") ?? null;
+}
+
+function rollbackSideEffectResults(input: {
+  results: readonly GmToolStepResult[];
+  reason: string;
+}): GmToolStepResult[] {
+  return input.results.map((result) => {
+    if (
+      result.toolName
+      && runtimeToolIsSideEffecting(result.toolName)
+      && result.result?.success === true
+      && result.status !== "skipped"
+    ) {
+      return {
+        ...result,
+        status: "skipped",
+        validationError: {
+          code: "tool_failed",
+          message: input.reason,
+          toolName: result.toolName,
+        },
+        visibleEffect: "",
+        mutationRefs: [],
+        result: null,
+      };
+    }
+    return result;
+  });
+}
+
 function buildSkippedResult(input: {
   step: GmActionChecklist["steps"][number];
   attempt: number;
@@ -281,6 +559,7 @@ async function executeSingleStep(input: {
   allowedTools: ReadonlySet<RuntimeToolName>;
   forbiddenPrivateTerms: readonly string[];
   remainingCandidateRequests: number;
+  mutationBoundary?: GmToolStepMutationBoundary;
   reviseStep?: ExecuteGmToolStepsArgs["reviseStep"];
 }): Promise<{ result: GmToolStepResult; candidateRequestCount: number }> {
   if (input.step.requiredAction !== "runtime_tool") {
@@ -365,6 +644,7 @@ async function executeSingleStep(input: {
     };
   }
 
+  input.mutationBoundary?.beginForTool(candidate.toolName);
   const result = isBridgeLookupToolName(candidate.toolName)
     ? executeBridgeCandidateTool(candidate.toolName, candidate.input, input.context)
     : await executeToolCall(
@@ -407,6 +687,7 @@ async function executeSingleStep(input: {
           input.forbiddenPrivateTerms,
         );
         if (!revisedValidationError) {
+          input.mutationBoundary?.beginForTool(revised.toolName);
           const revisedResult = isBridgeLookupToolName(revised.toolName)
             ? executeBridgeCandidateTool(revised.toolName, revised.input, input.context)
             : await executeToolCall(
@@ -478,116 +759,177 @@ async function executeSingleStep(input: {
 export async function executeGmToolSteps(
   args: ExecuteGmToolStepsArgs,
 ): Promise<GmToolStepResult[]> {
-  const context = args.executionContext ?? createPlayerTurnToolExecutionContext(args.frame);
-  const allowedTools = new Set(args.frame.allowedTools);
-  const forbiddenPrivateTerms = args.forbiddenPrivateTerms ?? [];
-  const maxCandidateRequests = args.maxCandidateRequests ?? GM_TOOL_STEP_MAX_CANDIDATE_REQUESTS;
-  let candidateRequestCount = 0;
-  const results: GmToolStepResult[] = [];
-  const skippedStepIds = new Set<string>();
-  const dynamicCreationKeys = new Set<string>();
+  const runSteps = async (
+    mutationBoundary?: GmToolStepMutationBoundary,
+  ): Promise<GmToolStepResult[]> => {
+    const context = args.executionContext ?? createPlayerTurnToolExecutionContext(args.frame);
+    const allowedTools = new Set(args.frame.allowedTools);
+    const forbiddenPrivateTerms = args.forbiddenPrivateTerms ?? [];
+    const maxCandidateRequests = args.maxCandidateRequests ?? GM_TOOL_STEP_MAX_CANDIDATE_REQUESTS;
+    let candidateRequestCount = 0;
+    const results: GmToolStepResult[] = [];
+    const skippedStepIds = new Set<string>();
+    const dynamicCreationKeys = new Set<string>();
 
-  for (const step of args.checklist.steps) {
-    if (candidateRequestCount >= maxCandidateRequests) {
-      const result = buildSkippedResult({
-        step,
-        attempt: 1,
-        candidate: toCandidateRequest(step.candidateToolRequest),
-        validationError: {
-          code: "missing_candidate",
-          message: `Candidate request limit ${maxCandidateRequests} reached.`,
-        },
+    for (const step of args.checklist.steps) {
+      if (candidateRequestCount >= maxCandidateRequests) {
+        const result = buildSkippedResult({
+          step,
+          attempt: 1,
+          candidate: toCandidateRequest(step.candidateToolRequest),
+          validationError: {
+            code: "missing_candidate",
+            message: `Candidate request limit ${maxCandidateRequests} reached.`,
+          },
+          tick: args.tick,
+        });
+        results.push(result);
+        skippedStepIds.add(step.stepId);
+        continue;
+      }
+
+      const blockedDependency = step.dependsOnStepIds.find((stepId) => skippedStepIds.has(stepId));
+      if (blockedDependency) {
+        const result = buildSkippedResult({
+          step,
+          attempt: 1,
+          candidate: toCandidateRequest(step.candidateToolRequest),
+          validationError: {
+            code: "missing_candidate",
+            message: `Dependency ${blockedDependency} was skipped.`,
+          },
+          tick: args.tick,
+        });
+        results.push(result);
+        skippedStepIds.add(step.stepId);
+        continue;
+      }
+
+      const candidate = toCandidateRequest(step.candidateToolRequest);
+      const dynamicKey = dynamicCreationBudgetKey(candidate);
+      if (dynamicKey && dynamicCreationKeys.has(dynamicKey)) {
+        const result = buildSkippedResult({
+          step,
+          attempt: 1,
+          candidate,
+          validationError: {
+            code: "semantic_budget_exceeded",
+            message: dynamicCreationBudgetExceededError(),
+            path: "candidateToolRequest.input",
+            toolName: candidate?.toolName,
+          },
+          tick: args.tick,
+        });
+        results.push(result);
+        skippedStepIds.add(step.stepId);
+        continue;
+      }
+
+      const executed = await executeSingleStep({
+        campaignId: args.campaignId,
         tick: args.tick,
-      });
-      results.push(result);
-      skippedStepIds.add(step.stepId);
-      continue;
-    }
-
-    const blockedDependency = step.dependsOnStepIds.find((stepId) => skippedStepIds.has(stepId));
-    if (blockedDependency) {
-      const result = buildSkippedResult({
         step,
-        attempt: 1,
-        candidate: toCandidateRequest(step.candidateToolRequest),
-        validationError: {
-          code: "missing_candidate",
-          message: `Dependency ${blockedDependency} was skipped.`,
-        },
-        tick: args.tick,
+        context,
+        allowedTools,
+        forbiddenPrivateTerms,
+        remainingCandidateRequests: Math.max(0, maxCandidateRequests - candidateRequestCount),
+        mutationBoundary,
+        reviseStep: args.reviseStep,
       });
+      candidateRequestCount += executed.candidateRequestCount;
+      const result = executed.result;
       results.push(result);
-      skippedStepIds.add(step.stepId);
-      continue;
+      const executedKey = dynamicCreationBudgetKey(
+        result.toolName && result.candidateInput
+          ? {
+              toolName: result.toolName,
+              input: result.candidateInput,
+            }
+          : null,
+      );
+      if (executedKey && (result.status === "done" || result.status === "revised")) {
+        dynamicCreationKeys.add(executedKey);
+      }
+      if (result.status === "skipped") {
+        skippedStepIds.add(step.stepId);
+      }
+      log.event("gm-tool-step.result", {
+        checklistVersion: args.checklist.version,
+        stepId: result.stepId,
+        attempt: result.attempt,
+        status: result.status,
+        toolName: result.toolName,
+        validationErrorCode: result.validationError?.code ?? null,
+        mutationRefCount: result.mutationRefs.length,
+        settledAtTick: result.settledAtTick,
+        candidateRequestCount,
+      });
     }
 
-    const candidate = toCandidateRequest(step.candidateToolRequest);
-    const dynamicKey = dynamicCreationBudgetKey(candidate);
-    if (dynamicKey && dynamicCreationKeys.has(dynamicKey)) {
-      const result = buildSkippedResult({
-        step,
-        attempt: 1,
-        candidate,
-        validationError: {
-          code: "semantic_budget_exceeded",
-          message: dynamicCreationBudgetExceededError(),
-          path: "candidateToolRequest.input",
-          toolName: candidate?.toolName,
-        },
-        tick: args.tick,
-      });
-      results.push(result);
-      skippedStepIds.add(step.stepId);
-      continue;
-    }
+    return results;
+  };
 
-    const executed = await executeSingleStep({
-      campaignId: args.campaignId,
-      tick: args.tick,
-      step,
-      context,
-      allowedTools,
-      forbiddenPrivateTerms,
-      remainingCandidateRequests: Math.max(0, maxCandidateRequests - candidateRequestCount),
-      reviseStep: args.reviseStep,
-    });
-    candidateRequestCount += executed.candidateRequestCount;
-    const result = executed.result;
-    results.push(result);
-    const executedKey = dynamicCreationBudgetKey(
-      result.toolName && result.candidateInput
-        ? {
-            toolName: result.toolName,
-            input: result.candidateInput,
-          }
-        : null,
-    );
-    if (executedKey && (result.status === "done" || result.status === "revised")) {
-      dynamicCreationKeys.add(executedKey);
-    }
-    if (result.status === "skipped") {
-      skippedStepIds.add(step.stepId);
-    }
-    log.event("gm-tool-step.result", {
-      checklistVersion: args.checklist.version,
-      stepId: result.stepId,
-      attempt: result.attempt,
-      status: result.status,
-      toolName: result.toolName,
-      validationErrorCode: result.validationError?.code ?? null,
-      mutationRefCount: result.mutationRefs.length,
-      settledAtTick: result.settledAtTick,
-      candidateRequestCount,
-    });
+  if (!checklistMayProduceSideEffects({
+    checklist: args.checklist,
+    reviseStep: args.reviseStep,
+  })) {
+    return await runSteps();
   }
 
-  return results;
+  const mutationBoundary = createGmToolStepMutationBoundary(args.campaignId);
+  return await withSqliteWriteLock(`gm-tool-step:${args.campaignId}`, async () => {
+    try {
+      const results = await runSteps(mutationBoundary);
+      const missingTerminalReceipt = checklistPlansTerminalReceipt(args.checklist)
+        ? missingPlannedTerminalReceipt(args.checklist, results, args.runtimeRequirement)
+        : null;
+      const missingRuntimeReceipt = missingRuntimeReceiptBoundary(results, args.runtimeRequirement);
+      const failedSideEffect = failedSideEffectingToolResult(results);
+      if ((missingTerminalReceipt || missingRuntimeReceipt || failedSideEffect) && mutationBoundary.active) {
+        const reason = missingTerminalReceipt
+          ? `${missingTerminalReceipt} terminal receipt was not accepted; rolled back legacy checklist side effects.`
+          : missingRuntimeReceipt
+            ? missingRuntimeReceipt
+          : `${failedSideEffect?.toolName ?? "side-effecting tool"} failed; rolled back legacy checklist side effects.`;
+        mutationBoundary.rollback();
+        await retractDurableMemoryForRejectedSteps({
+          campaignId: args.campaignId,
+          stepResults: results,
+          reason,
+          source: "rejected_gm_tool_step",
+        });
+        return rollbackSideEffectResults({ results, reason });
+      }
+      mutationBoundary.commit();
+      return results;
+    } catch (error) {
+      try {
+        mutationBoundary.rollback();
+      } catch (rollbackError) {
+        log.warn("Failed to rollback GM tool-step mutation boundary", {
+          campaignId: args.campaignId,
+          error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+        });
+      }
+      throw error;
+    }
+  });
 }
 
 export async function runGmToolStepRevision(
   args: RunGmToolStepRevisionArgs,
 ): Promise<GmToolStepCandidateRequest | null> {
   const scenePacket = buildModelFacingScenePacket(args.frame);
+  const promptView = buildModelFacingScenePromptView(scenePacket.view);
+  const sanitizeForRepair = (value: unknown) =>
+    JSON.stringify(
+      sanitizeModelFacingJson(value, {
+        safety: scenePacket.safety,
+        maxChars: 500,
+      }),
+      null,
+      2,
+    );
   log.event("model-facing.scene-packet", {
     source: "gm-tool-step-revision",
     ...buildModelFacingSceneDiagnostics(scenePacket),
@@ -608,16 +950,19 @@ export async function runGmToolStepRevision(
       ].join(" "),
       prompt: [
         "REJECTED CHECKLIST STEP",
-        JSON.stringify(args.step, null, 2),
+        sanitizeForRepair(args.step),
         "",
         "BACKEND VALIDATION ERROR",
-        JSON.stringify(args.validationError, null, 2),
+        sanitizeForRepair(args.validationError),
         "",
         "CHECKLIST TURN INTENT",
-        args.checklist.turnIntent,
+        sanitizeModelFacingConversationText(args.checklist.turnIntent, {
+          safety: scenePacket.safety,
+          maxChars: 1000,
+        }),
         "",
         "MODEL-FACING SCENE VIEW",
-        JSON.stringify(scenePacket.view, null, 2),
+        JSON.stringify(promptView, null, 2),
         "",
         "ALLOWED TOOLS FROM frame.allowedTools",
         args.frame.allowedTools.length > 0

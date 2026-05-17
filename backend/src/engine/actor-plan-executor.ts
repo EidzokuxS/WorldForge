@@ -25,6 +25,20 @@ import {
 import { recordLocationRecentEvent } from "./location-events.js";
 import { createSimulationProposal } from "./simulation-proposal.js";
 
+type ActorProcessUpdateStatus = ReturnType<typeof updateActorProcessAfterDecision>["status"];
+
+class ActorPlanProcessUpdateError extends Error {
+  readonly actorId: string;
+  readonly status: ActorProcessUpdateStatus;
+
+  constructor(input: { actorId: string; status: ActorProcessUpdateStatus }) {
+    super(`Actor plan process update failed for ${input.actorId}: ${input.status}`);
+    this.name = "ActorPlanProcessUpdateError";
+    this.actorId = input.actorId;
+    this.status = input.status;
+  }
+}
+
 export type ActorPlanExecutionStatus =
   | "completed"
   | "waiting"
@@ -113,6 +127,15 @@ function updateProcess(input: {
       failed: input.failed,
     }),
   });
+}
+
+function assertActorPlanProcessUpdated(input: {
+  actorId: string;
+  status: ActorProcessUpdateStatus;
+}): asserts input is { actorId: string; status: "updated" } {
+  if (input.status !== "updated") {
+    throw new ActorPlanProcessUpdateError(input);
+  }
 }
 
 function findLocationName(locationId: string | null): string | null {
@@ -251,6 +274,10 @@ function recordFailure(input: {
     activePlan: input.process.state.activePlan,
     reason: input.reason,
     failed: true,
+  });
+  assertActorPlanProcessUpdated({
+    actorId: input.process.actorId,
+    status: processUpdate.status,
   });
   const replan = createSimulationProposal({
     campaignId: input.campaignId,
@@ -430,6 +457,10 @@ function executeTravel(input: ExecuteActorPlanStepInput): ExecuteActorPlanStepRe
     activePlan: null,
     reason: "deterministic_travel_completed",
   });
+  assertActorPlanProcessUpdated({
+    actorId: input.process.actorId,
+    status: processUpdate.status,
+  });
 
   return {
     status: "completed",
@@ -503,6 +534,10 @@ function executeRecordEvent(input: ExecuteActorPlanStepInput): ExecuteActorPlanS
     activePlan: null,
     reason: "deterministic_event_recorded",
   });
+  assertActorPlanProcessUpdated({
+    actorId: input.process.actorId,
+    status: processUpdate.status,
+  });
 
   return {
     status: "completed",
@@ -552,6 +587,10 @@ function executeWait(input: ExecuteActorPlanStepInput): ExecuteActorPlanStepResu
     activePlan: null,
     reason: "deterministic_wait_completed",
   });
+  assertActorPlanProcessUpdated({
+    actorId: input.process.actorId,
+    status: processUpdate.status,
+  });
 
   return {
     status: "completed",
@@ -562,6 +601,22 @@ function executeWait(input: ExecuteActorPlanStepInput): ExecuteActorPlanStepResu
     eventIds: [],
     stateDeltaRefs,
     processUpdateStatus: processUpdate.status,
+  };
+}
+
+function actorPlanProcessUpdateFailureResult(input: {
+  process: KeyActorProcess;
+  error: ActorPlanProcessUpdateError;
+}): ExecuteActorPlanStepResult {
+  return {
+    status: input.error.status === "stale_rejected" ? "stale_rejected" : "failed",
+    actorId: input.process.actorId,
+    actorName: input.process.actor.name,
+    summary: `Skipped deterministic plan for ${input.process.actor.name}: actor process update failed with ${input.error.status}.`,
+    eventIds: [],
+    stateDeltaRefs: [],
+    failureReason: `actor_process_update_${input.error.status}`,
+    processUpdateStatus: input.error.status,
   };
 }
 
@@ -615,20 +670,44 @@ export function executeActorPlanStep(
   }
 
   if (!plan.action) {
-    return recordFailure({
-      campaignId: input.campaignId,
-      tick: input.tick,
-      process: input.process,
-      reason: "deterministic plan has no executable action payload",
-    });
+    try {
+      return getDb().transaction(() => recordFailure({
+        campaignId: input.campaignId,
+        tick: input.tick,
+        process: input.process,
+        reason: "deterministic plan has no executable action payload",
+      }));
+    } catch (error) {
+      if (error instanceof ActorPlanProcessUpdateError) {
+        return actorPlanProcessUpdateFailureResult({
+          process: input.process,
+          error,
+        });
+      }
+      throw error;
+    }
   }
 
-  switch (plan.action.kind) {
-    case "travel":
-      return executeTravel(input);
-    case "record_event":
-      return executeRecordEvent(input);
-    case "wait":
-      return executeWait(input);
+  try {
+    return getDb().transaction(() => {
+      switch (plan.action?.kind) {
+        case "travel":
+          return executeTravel(input);
+        case "record_event":
+          return executeRecordEvent(input);
+        case "wait":
+          return executeWait(input);
+        default:
+          throw new Error("deterministic_actor_plan_action_disappeared");
+      }
+    });
+  } catch (error) {
+    if (error instanceof ActorPlanProcessUpdateError) {
+      return actorPlanProcessUpdateFailureResult({
+        process: input.process,
+        error,
+      });
+    }
+    throw error;
   }
 }

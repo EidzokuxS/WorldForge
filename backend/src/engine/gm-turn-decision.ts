@@ -6,14 +6,23 @@ import { createLogger, withRole } from "../lib/index.js";
 import {
   buildModelFacingSceneDiagnostics,
   buildModelFacingScenePacket,
-  shouldDropModelFacingText,
+  buildModelFacingScenePromptView,
+  collectModelFacingScenePromptRefs,
+  isUnsafeModelFacingRef,
   type ModelFacingPromptSafety,
-  type ModelFacingSceneView,
+  type ModelFacingScenePromptView,
 } from "./model-facing-scene.js";
+import {
+  formatModelFacingPlayerActionText,
+  formatModelFacingRecentConversation,
+} from "./model-facing-conversation.js";
 import { buildGmTurnDecisionPromptContract } from "./prompt-contracts.js";
 import type { SceneFrame } from "./scene-frame.js";
 import { runtimeToolInputSchemas, type RuntimeToolName } from "./tool-schemas.js";
-import type { ScopedForecastExcerpt } from "./world-forecast.js";
+import {
+  scopedForecastForModelPrompt,
+  type ScopedForecastExcerpt,
+} from "./world-forecast.js";
 
 const log = createLogger("gm-turn-decision");
 
@@ -307,27 +316,9 @@ function normalizeRef(ref: string): string {
 }
 
 function buildAllowedRefSet(frame: SceneFrame): Set<string> {
-  const refs = new Set<string>();
-  const add = (value?: string | null) => {
-    if (value?.trim()) refs.add(normalizeRef(value));
-  };
-
-  add(frame.playerActorId);
-  for (const actor of [...frame.roster.active, ...frame.roster.support]) {
-    add(actor.id);
-    add(actor.actorId);
-    add(actor.label);
-  }
-  for (const candidate of frame.targetCandidates) {
-    add(candidate.id);
-    add(candidate.label);
-  }
-  for (const candidate of frame.movementCandidates) {
-    add(candidate.id);
-    add(candidate.label);
-  }
-
-  return refs;
+  const packet = buildModelFacingScenePacket(frame);
+  const promptView = buildModelFacingScenePromptView(packet.view);
+  return new Set(collectModelFacingScenePromptRefs(promptView).map(normalizeRef));
 }
 
 function buildForbiddenRefSet(frame: SceneFrame): Set<string> {
@@ -352,6 +343,64 @@ function buildForbiddenRefSet(frame: SceneFrame): Set<string> {
   return refs;
 }
 
+function buildBackendOnlyFrameRefSet(frame: SceneFrame): Set<string> {
+  const refs = new Set<string>();
+  const add = (value?: string | null) => {
+    if (value?.trim()) refs.add(normalizeRef(value));
+  };
+  const addMany = (values?: readonly (string | null | undefined)[]) => {
+    values?.forEach(add);
+  };
+
+  add(frame.campaignId);
+  add(frame.playerActorId);
+  add(frame.currentLocationId);
+  add(frame.currentSceneScopeId);
+  for (const actor of [
+    ...frame.roster.active,
+    ...frame.roster.support,
+    ...frame.roster.background,
+  ]) {
+    add(actor.id);
+    add(actor.actorId);
+    add(actor.locationId);
+    add(actor.sceneScopeId);
+  }
+  for (const event of frame.recentEvents) {
+    add(event.id);
+    addMany(event.actorIds);
+  }
+  for (const candidate of frame.targetCandidates) {
+    add(candidate.id);
+    add(candidate.actorId);
+    add(candidate.itemId);
+    add(candidate.locationId);
+    add(candidate.factionId);
+  }
+  for (const movement of frame.movementCandidates) {
+    add(movement.id);
+    add(movement.locationId);
+    addMany(movement.path);
+  }
+  for (const item of frame.playerInventory ?? []) {
+    add(item.id);
+    add(item.itemId);
+  }
+  for (const hook of frame.deferredHooks) {
+    add(hook.id);
+    addMany(hook.subjectIds);
+  }
+  const oracleContext = frame.oracleContext;
+  if (oracleContext) {
+    add(oracleContext.candidateId);
+    add(oracleContext.actorId);
+    add(oracleContext.itemId);
+    add(oracleContext.locationId);
+    add(oracleContext.factionId);
+  }
+  return refs;
+}
+
 function validateRefs(
   refs: readonly string[],
   frame: SceneFrame,
@@ -363,6 +412,13 @@ function validateRefs(
 
   refs.forEach((ref, index) => {
     const normalized = normalizeRef(ref);
+    if (isUnsafeModelFacingRef(ref)) {
+      issues.push({
+        path: `${path}.${index}`,
+        message: `${path}.${index} uses a backend-only ref "${ref}". Use a visible label, Player, current_scene/current_location, or a short prompt alias.`,
+      });
+      return;
+    }
     if (forbiddenRefs.has(normalized)) {
       issues.push({
         path: `${path}.${index}`,
@@ -381,11 +437,61 @@ function validateRefs(
   return issues;
 }
 
+function validateModelAuthoredInputValue(
+  value: unknown,
+  frame: SceneFrame,
+  path: string,
+): DecisionValidationIssue[] {
+  const forbiddenRefs = buildForbiddenRefSet(frame);
+  const backendOnlyRefs = buildBackendOnlyFrameRefSet(frame);
+  const issues: DecisionValidationIssue[] = [];
+  const visit = (entry: unknown, entryPath: string): void => {
+    if (typeof entry === "string") {
+      const text = entry.trim();
+      if (!text) return;
+      if (isUnsafeModelFacingRef(text)) {
+        issues.push({
+          path: entryPath,
+          message: `${entryPath} uses a backend-only ref "${text}". Use a visible label, Player, current_scene/current_location, or a short prompt alias.`,
+        });
+        return;
+      }
+      if (backendOnlyRefs.has(normalizeRef(text))) {
+        issues.push({
+          path: entryPath,
+          message: `${entryPath} references raw SceneFrame/backend ref "${text}". Use a visible label, Player, current_scene/current_location, or a short prompt alias.`,
+        });
+        return;
+      }
+      if (forbiddenRefs.has(normalizeRef(text))) {
+        issues.push({
+          path: entryPath,
+          message: `${entryPath} references forbidden SceneFrame ref "${text}".`,
+        });
+      }
+      return;
+    }
+    if (Array.isArray(entry)) {
+      entry.forEach((item, index) => visit(item, `${entryPath}.${index}`));
+      return;
+    }
+    if (!isRecord(entry)) return;
+    for (const [key, child] of Object.entries(entry)) {
+      visit(key, `${entryPath}.${key}`);
+      visit(child, `${entryPath}.${key}`);
+    }
+  };
+
+  visit(value, path);
+  return issues;
+}
+
 export function validateGmTurnDecisionForFrame(
   decision: GmTurnDecision,
   frame: SceneFrame,
 ): DecisionValidationIssue[] {
   const issues: DecisionValidationIssue[] = [];
+  issues.push(...validateRefs(decision.evidenceRefs, frame, "evidenceRefs"));
 
   if (decision.path !== "roll_oracle" && "rollRequest" in decision) {
     issues.push({
@@ -397,6 +503,9 @@ export function validateGmTurnDecisionForFrame(
   if (decision.path === "roll_oracle") {
     issues.push(
       ...validateRefs([decision.rollRequest.actorRef], frame, "rollRequest.actorRef"),
+    );
+    issues.push(
+      ...validateRefs(decision.rollRequest.evidenceRefs, frame, "rollRequest.evidenceRefs"),
     );
     if (decision.rollRequest.targetRef) {
       issues.push(
@@ -421,6 +530,12 @@ export function validateGmTurnDecisionForFrame(
       }
       issues.push(...validateRefs([tool.actorRef], frame, `plannedTools.${index}.actorRef`));
       issues.push(...validateRefs(tool.targetRefs, frame, `plannedTools.${index}.targetRefs`));
+      issues.push(...validateRefs(tool.evidenceRefs, frame, `plannedTools.${index}.evidenceRefs`));
+      issues.push(...validateModelAuthoredInputValue(
+        tool.input,
+        frame,
+        `plannedTools.${index}.input`,
+      ));
     });
   }
 
@@ -437,72 +552,49 @@ function formatRecentConversation(
   safety?: ModelFacingPromptSafety,
   extraForbiddenTerms: readonly string[] = [],
 ): string {
-  if (!recentConversation || recentConversation.length === 0) {
-    return "- none";
-  }
-
-  const forbiddenTerms = extraForbiddenTerms
-    .map((term) => term.trim().toLowerCase())
-    .filter((term) => term.length > 0);
-  const lines = recentConversation
-    .slice(-8)
-    .filter((entry) => {
-      if (safety && shouldDropModelFacingText(entry.content, safety)) return false;
-      const content = entry.content.toLowerCase();
-      return !forbiddenTerms.some((term) => content.includes(term));
-    })
-    .map((entry) => `- ${entry.role}: ${entry.content}`)
-    .join("\n");
-
-  return lines || "- none";
+  return formatModelFacingRecentConversation(recentConversation, {
+    safety,
+    extraForbiddenTerms,
+  });
 }
 
-function buildCandidateRefsForPrompt(view: ModelFacingSceneView): unknown {
+function buildCandidateRefsForPrompt(view: ModelFacingScenePromptView): unknown {
   return {
     actors: view.visibleActors.map((actor) => ({
-      id: actor.id,
-      actorId: actor.actorId,
+      ref: actor.ref,
       label: actor.label,
       awareness: actor.awareness,
     })),
     targets: view.legalTargets.map((candidate) => ({
-      id: candidate.id,
+      ref: candidate.ref,
       label: candidate.label,
       type: candidate.type,
     })),
     movements: view.legalMovement.map((candidate) => ({
-      id: candidate.id,
+      ref: candidate.ref,
       label: candidate.label,
     })),
-  };
-}
-
-function scopedForecastForPrompt(
-  scopedForecastExcerpt?: ScopedForecastExcerpt | null,
-): Pick<ScopedForecastExcerpt, "version" | "baseTick" | "promptReady" | "entries"> | null {
-  if (!scopedForecastExcerpt) return null;
-  return {
-    version: scopedForecastExcerpt.version,
-    baseTick: scopedForecastExcerpt.baseTick,
-    promptReady: scopedForecastExcerpt.promptReady,
-    entries: scopedForecastExcerpt.entries,
   };
 }
 
 function buildGmTurnDecisionPrompt(args: RunGmTurnDecisionArgs): string {
   const scenePacket = buildModelFacingScenePacket(args.frame);
+  const promptView = buildModelFacingScenePromptView(scenePacket.view);
   return [
     "MODEL-FACING GM TURN DECISION CONTRACT",
     buildGmTurnDecisionPromptContract({ allowedTools: args.frame.allowedTools }),
     "",
-    "PLAYER ACTION RAW TEXT",
-    args.playerAction,
+    "PLAYER ACTION RAW TEXT (SANITIZED PLAYER-AUTHORED PROSE; NOT LEGAL REFS)",
+    formatModelFacingPlayerActionText(args.playerAction, {
+      safety: scenePacket.safety,
+      extraForbiddenTerms: args.scopedForecastExcerpt?.forbiddenPrivateTerms ?? [],
+    }),
     "",
     "MODEL-FACING SCENE VIEW",
-    JSON.stringify(scenePacket.view, null, 2),
+    JSON.stringify(promptView, null, 2),
     "",
     "CANDIDATE REFS FROM MODEL-FACING VIEW ONLY",
-    JSON.stringify(buildCandidateRefsForPrompt(scenePacket.view), null, 2),
+    JSON.stringify(buildCandidateRefsForPrompt(promptView), null, 2),
     "",
     "ALLOWED TOOLS FROM frame.allowedTools",
     args.frame.allowedTools.length > 0
@@ -510,7 +602,7 @@ function buildGmTurnDecisionPrompt(args: RunGmTurnDecisionArgs): string {
       : "- none",
     "",
     "SCOPED FORECAST EXCERPT ONLY",
-    JSON.stringify(scopedForecastForPrompt(args.scopedForecastExcerpt), null, 2),
+    JSON.stringify(scopedForecastForModelPrompt(args.scopedForecastExcerpt), null, 2),
     "",
     "RECENT CONVERSATION",
     formatRecentConversation(

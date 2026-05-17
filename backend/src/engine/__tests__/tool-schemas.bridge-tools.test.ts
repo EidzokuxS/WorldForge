@@ -6,6 +6,8 @@ const { executeToolCallMock } = vi.hoisted(() => ({
 
 vi.mock("../tool-executor.js", () => ({
   executeToolCall: executeToolCallMock,
+  toolRequiresExecutionAuthority: (toolName: string) =>
+    toolName !== "request_contested_outcome" && toolName !== "offer_quick_actions",
 }));
 
 import { buildRuntimeToolInputContract } from "../prompt-contracts.js";
@@ -126,6 +128,33 @@ describe("bridge lookup tool schemas", () => {
     expect(runtimeToolInputSchemas.check_route.safeParse({ mode: "walk" }).success).toBe(false);
   });
 
+  it("does not expose legacy raw id fields in model-facing movement/spawn schemas", () => {
+    expect(runtimeToolInputSchemas.move_actor.safeParse({
+      actorRef: "Player",
+      destinationRef: "East Tea Lane",
+      routeId: "edge-tea-lane",
+      evidenceRefs: ["East Tea Lane"],
+    }).data).not.toHaveProperty("routeId");
+
+    expect(runtimeToolInputSchemas.create_scene_extra.safeParse({
+      locationId: "loc-tea-lane",
+      role: "courier",
+      reason: "The public desk needs an ordinary courier.",
+    }).success).toBe(true);
+    expect(runtimeToolInputSchemas.create_scene_extra.safeParse({
+      locationId: "loc-tea-lane",
+      role: "courier",
+      reason: "The public desk needs an ordinary courier.",
+    }).data).not.toHaveProperty("locationId");
+
+    expect(runtimeToolInputSchemas.spawn_npc.safeParse({
+      name: "Market Runner",
+      tags: ["messenger"],
+      locationRef: "current_scene",
+      locationId: "loc-tea-lane",
+    }).data).not.toHaveProperty("locationId");
+  });
+
   it("returns observation-only results from lookup tools without entering executeToolCall", async () => {
     const tools = createStorytellerTools("campaign-1", 3, undefined, createExecutionContext());
     const executeFindObjectCandidates = tools.find_object_candidates.execute as (
@@ -144,6 +173,27 @@ describe("bridge lookup tool schemas", () => {
     });
     expect(isObservationToolResult(result)).toBe(true);
     expect(JSON.stringify(result)).toContain("Painted Tea Sign");
+    expect(executeToolCallMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for model-facing state-bearing tools without an execution context", async () => {
+    const tools = createStorytellerTools("campaign-1", 3);
+    const executeTransferItem = tools.transfer_item.execute as (
+      input: { itemName: string; targetName: string; targetType: "character" },
+      options?: unknown,
+    ) => Promise<ToolResult>;
+
+    const result = await executeTransferItem({
+      itemName: "Iron Sword",
+      targetName: "Hero",
+      targetType: "character",
+    }, undefined);
+
+    expect(result).toMatchObject({
+      success: false,
+      status: "failure",
+      error: expect.stringContaining("requires an execution context"),
+    });
     expect(executeToolCallMock).not.toHaveBeenCalled();
   });
 
@@ -172,6 +222,34 @@ describe("bridge lookup tool schemas", () => {
     });
     expect(result.authority).toBeUndefined();
     expect(isObservationToolResult(result)).toBe(true);
+  });
+});
+
+describe("transfer_item schema", () => {
+  it("accepts optional partial-transfer split names only as a pair", () => {
+    expect(runtimeToolInputSchemas.transfer_item.safeParse({
+      itemName: "Three Ration Slips",
+      targetName: "Bureau Window",
+      targetType: "location",
+      transferredItemName: "Two Ration Slips",
+      remainingItemName: "One Ration Slip",
+    }).success).toBe(true);
+
+    expect(runtimeToolInputSchemas.transfer_item.safeParse({
+      itemName: "Three Ration Slips",
+      targetName: "Bureau Window",
+      targetType: "location",
+      transferredItemName: "Two Ration Slips",
+    }).success).toBe(false);
+
+    expect(runtimeToolInputSchemas.transfer_item.safeParse({
+      itemName: "Three Ration Slips",
+      targetName: "Hero",
+      targetType: "npc",
+      transferredItemName: "Two Ration Slips",
+      remainingItemName: "One Ration Slip",
+      equipState: "carried",
+    }).success).toBe(true);
   });
 });
 
@@ -216,6 +294,35 @@ describe("record_dialogue_outcome schema", () => {
     }).success).toBe(false);
   });
 
+  it("rejects durable procedural answers without a concrete quote surface", () => {
+    const result = runtimeToolInputSchemas.record_dialogue_outcome.safeParse({
+      speakerRef: "Lead Warden",
+      addresseeRefs: ["Player"],
+      outcomeKind: "answered",
+      topicKind: "procedure",
+      authorityKind: "role_authority",
+      truthStatus: "speaker_asserted",
+      durability: "durable",
+      futureUseKind: "route_choice",
+      futureRelevance: "The answer decides where the player must go next.",
+      summary: "The Lead Warden tells Mira where to obtain the manifest.",
+      claims: [
+        {
+          claimKind: "route_status",
+          polarity: "states",
+          subjectText: "green-lantern manifest office",
+          summary: "The Lead Warden states where the manifest must be obtained.",
+        },
+      ],
+      sourceRefs: ["Lead Warden", "Player"],
+    });
+
+    if (result.success) {
+      throw new Error("Expected missing quote to fail.");
+    }
+    expect(result.error.issues.some((issue) => issue.path.join(".") === "quote")).toBe(true);
+  });
+
   it("requires requestedRoleText for unavailable/no-current-answer outcomes", () => {
     expect(runtimeToolInputSchemas.record_dialogue_outcome.safeParse({
       addresseeRefs: ["Player"],
@@ -228,6 +335,116 @@ describe("record_dialogue_outcome schema", () => {
       futureRelevance: "The player must seek a visible safety authority elsewhere.",
       summary: "No ward engineer is visible here.",
       sourceRefs: ["Player"],
+    }).success).toBe(false);
+  });
+
+  it("keeps communicative claims separate from applied state effects", () => {
+    expect(runtimeToolInputSchemas.record_dialogue_outcome.safeParse({
+      speakerRef: "Gate Guard",
+      addresseeRefs: ["Player"],
+      outcomeKind: "answered",
+      topicKind: "permission",
+      authorityKind: "role_authority",
+      truthStatus: "speaker_asserted",
+      durability: "durable",
+      futureUseKind: "permission_check",
+      futureRelevance:
+        "The guard's stated condition can guide the player's next entry attempt.",
+      quote: "\"A convincing registry phrase would be enough.\"",
+      summary: "The guard says a convincing registry phrase would be enough.",
+      claims: [
+        {
+          claimKind: "permission",
+          polarity: "allows",
+          subjectText: "convincing registry phrase",
+          summary: "A convincing registry phrase would satisfy this guard.",
+        },
+      ],
+      stateEffects: [],
+      sourceRefs: ["Gate Guard", "Player"],
+    }).success).toBe(true);
+  });
+
+  it("validates applied_now state effects as typed mutation receipts, not prose", () => {
+    const base = {
+      speakerRef: "Gate Guard",
+      addresseeRefs: ["Player"],
+      outcomeKind: "answered",
+      topicKind: "permission",
+      authorityKind: "role_authority",
+      truthStatus: "settled_by_backend",
+      durability: "durable",
+      futureUseKind: "permission_check",
+      futureRelevance:
+        "The guard now treats the player as cleared by the bluff.",
+      quote: "\"That will do. You may pass.\"",
+      summary: "Готово.",
+      claims: [
+        {
+          claimKind: "permission",
+          polarity: "allows",
+          subjectRef: "Gate Guard",
+          summary: "The guard currently allows this attempt.",
+        },
+      ],
+      sourceRefs: ["Gate Guard", "Player"],
+    };
+
+    expect(runtimeToolInputSchemas.record_dialogue_outcome.safeParse({
+      ...base,
+      stateEffects: [
+        {
+          effectId: "guard-cleared-by-bluff",
+          status: "applied_now",
+          structuralTool: "add_tag",
+          targetRef: "Gate Guard",
+          stateKey: "tag",
+          stateValue: "cleared-by-bluff",
+          summary: "The guard now has the cleared-by-bluff tag.",
+        },
+      ],
+    }).success).toBe(true);
+
+    expect(runtimeToolInputSchemas.record_dialogue_outcome.safeParse({
+      ...base,
+      stateEffects: [
+        {
+          effectId: "guard-cleared-by-bluff",
+          status: "applied_now",
+          targetRef: "Gate Guard",
+          stateKey: "tag",
+          stateValue: "cleared-by-bluff",
+          summary: "The guard now has the cleared-by-bluff tag.",
+        },
+      ],
+    }).success).toBe(false);
+
+    expect(runtimeToolInputSchemas.record_dialogue_outcome.safeParse({
+      ...base,
+      stateEffects: [
+        {
+          effectId: "guard-cleared-by-bluff",
+          status: "asserted_only",
+          structuralTool: "add_tag",
+          summary: "The guard says a tag would work.",
+        },
+      ],
+    }).success).toBe(false);
+
+    expect(runtimeToolInputSchemas.record_dialogue_outcome.safeParse({
+      ...base,
+      durability: "scene_local",
+      stateEffects: [
+        {
+          effectId: "guard-cleared-by-bluff",
+          status: "applied_now",
+          structuralTool: "add_tag",
+          targetRef: "Gate Guard",
+          stateKey: "tag",
+          stateValue: "cleared-by-bluff",
+          summary: "The guard now has the cleared-by-bluff tag.",
+        },
+      ],
     }).success).toBe(false);
   });
 

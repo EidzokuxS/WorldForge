@@ -200,6 +200,15 @@ function createMutableInventoryDb() {
         isSignature: false,
       },
     ] satisfies MutableInventoryItem[],
+    worldClocks: [
+      {
+        campaignId: CAMPAIGN_ID,
+        worldVersion: 0,
+        worldTimeMinutes: 5,
+        currentTick: 5,
+        updatedAt: 0,
+      },
+    ],
   };
 
   let lastTableName: string | null = null;
@@ -212,6 +221,8 @@ function createMutableInventoryDb() {
         return state.locations;
       case "items":
         return state.items;
+      case "world_clocks":
+        return state.worldClocks;
       default:
         return [];
     }
@@ -243,6 +254,7 @@ function createMutableInventoryDb() {
               if (row) {
                 Object.assign(row, values);
               }
+              return { changes: row ? 1 : 0 };
             }),
           })),
         })),
@@ -250,10 +262,11 @@ function createMutableInventoryDb() {
     }),
     insert: vi.fn().mockImplementation(() => ({
       values: vi.fn().mockReturnValue({
-        run: vi.fn(),
-        onConflictDoUpdate: vi.fn().mockReturnValue({ run: vi.fn() }),
+        run: vi.fn().mockReturnValue({ changes: 1 }),
+        onConflictDoUpdate: vi.fn().mockReturnValue({ run: vi.fn().mockReturnValue({ changes: 1 }) }),
       }),
     })),
+    transaction: vi.fn().mockImplementation((callback: () => unknown) => callback()),
   };
 
   return { db, state };
@@ -344,14 +357,7 @@ describe("processTurn inventory authority", () => {
       }
     }
 
-    expect(events).toContainEqual({
-      type: "state_update",
-      data: {
-        tool: "transfer_item",
-        args: transferArgs,
-        result: expect.objectContaining({ success: true }),
-      },
-    });
+    expect(events.filter((event) => event.type === "state_update")).toEqual([]);
 
     const authoritativeView = buildAuthoritativeInventoryView(
       state.items.filter((item) => item.ownerId === "player-1"),

@@ -7,10 +7,11 @@
  * Failures are logged but never block gameplay.
  */
 
-import { generateText, stepCountIs } from "ai";
+import { stepCountIs } from "ai";
 import { eq, and } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { npcs, locations, players } from "../db/schema.js";
+import { generateText } from "../ai/raindrop-workshop.js";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
 import { extractReasoningText } from "../ai/extract-reasoning-text.js";
 import { createNpcAgentTools } from "./npc-tools.js";

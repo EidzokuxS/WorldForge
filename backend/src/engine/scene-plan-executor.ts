@@ -11,6 +11,10 @@ import {
   validateToolPlanGrounding,
   type ToolExecutionContext,
 } from "./tool-execution-context.js";
+import {
+  toPlayerFacingQuickActions,
+  type PlayerFacingQuickActionsEvent,
+} from "./player-facing-events.js";
 
 const log = createLogger("scene-plan-executor");
 
@@ -23,6 +27,8 @@ export interface ExecutedScenePlanActionResult {
   input: ScenePlanAction["input"] | Record<string, unknown>;
   args: Record<string, unknown>;
   result: ToolResult;
+  acceptedReceipt?: boolean;
+  receiptAuthority?: "gm_tool_loop";
   summary?: string;
 }
 
@@ -40,7 +46,7 @@ export interface ExecutedScenePlan {
   toolCallResults: ExecutedScenePlanActionResult[];
   actionResults: ExecutedScenePlanActionResult[];
   emittedEvents: Array<
-    | { type: "quick_actions"; data: ToolResult }
+    | { type: "quick_actions"; data: PlayerFacingQuickActionsEvent }
     | { type: "state_update"; data: unknown }
   >;
   quickActionsEmitted: boolean;
@@ -226,8 +232,11 @@ export async function executeScenePlan(
     });
 
     if (action.toolName === "offer_quick_actions") {
-      quickActionsEmitted = true;
-      emittedEvents.push({ type: "quick_actions", data: result });
+      const quickActions = toPlayerFacingQuickActions(result);
+      if (quickActions) {
+        quickActionsEmitted = true;
+        emittedEvents.push({ type: "quick_actions", data: quickActions });
+      }
       continue;
     }
 
@@ -250,7 +259,6 @@ export async function executeScenePlan(
       }
     }
 
-    emittedEvents.push({ type: "state_update", data: actionResult });
   }
 
   return buildExecutedScenePlanSnapshot({

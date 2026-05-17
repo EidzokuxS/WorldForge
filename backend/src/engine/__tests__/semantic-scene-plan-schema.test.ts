@@ -15,6 +15,7 @@ function createNeutralFrame(): SceneFrame {
   return {
     campaignId: "campaign-78-02",
     tick: 7,
+    worldVersion: 0,
     playerActorId: playerId,
     currentLocationId: "loc-market",
     currentSceneScopeId: "scene-bridge",
@@ -135,8 +136,13 @@ describe("semanticScenePlanToStrictPlan with neutral SceneFrame", () => {
     ).toThrow(SemanticScenePlanMappingError);
   });
 
-  it("rejects invented actor labels and ids instead of selecting from raw text", () => {
-    for (const targetRef of ["Iru's hidden twin", "99999999-9999-4999-8999-999999999999"]) {
+  it("rejects invented actor labels, UUIDs, and raw backend actor ids instead of selecting from raw text", () => {
+    for (const targetRef of [
+      "Iru's hidden twin",
+      "99999999-9999-4999-8999-999999999999",
+      clearNpcId,
+      `actor:${clearNpcId}`,
+    ]) {
       expect(() =>
         semanticScenePlanToStrictPlan(
           createSemanticPlan({

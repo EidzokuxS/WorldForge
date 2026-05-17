@@ -31,6 +31,7 @@ function createSceneFrame(): SceneFrame {
   return {
     campaignId: CAMPAIGN_ID,
     tick: 4,
+    worldVersion: 0,
     playerActorId: "player-1",
     currentLocationId: "loc-depot",
     currentSceneScopeId: "loc-depot",
@@ -104,7 +105,6 @@ describe("actor knowledge retrieval", () => {
     const frame = buildActorFrame({
       frame: createSceneFrame(),
       actorId: "npc-key",
-      worldVersion: 0,
       reports: retrieval.reports,
       memories: retrieval.memories,
       beliefs: retrieval.beliefs,

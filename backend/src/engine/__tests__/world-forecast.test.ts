@@ -8,6 +8,7 @@ import {
   WORLD_FORECAST_MAX_ENTRIES,
   buildScopedForecastExcerpt,
   loadWorldTrajectoryForecast,
+  scopedForecastForModelPrompt,
   scopedForecastExcerptSchema,
   stageWorldTrajectoryForecast,
   worldTrajectoryForecastSchema,
@@ -323,5 +324,50 @@ describe("scoped forecast excerpt", () => {
 
     expect(excerpt.forbiddenPrivateTerms).not.toContain("Shibuya Kissaten");
     expect(excerpt.forbiddenPrivateTerms).toContain("Hidden Watcher");
+  });
+
+  it("redacts forbidden private terms from scoped prompt pressure and labels", () => {
+    const forecast = createForecast({
+      entries: [
+        {
+          ...createForecast().entries[0],
+          subjectRefs: [
+            { type: "location", id: "loc-shibuya", label: "Hidden Watcher counter" },
+          ],
+          advisoryText: "Hidden Watcher pressure rises near actor:secret-handler.",
+          preconditions: ["The player stays near Hidden Watcher."],
+        },
+        {
+          id: "forecast-private",
+          baseTick: 10,
+          horizonTicks: 4,
+          subjectRefs: [{ type: "actor", id: "actor-hidden", label: "Hidden Watcher" }],
+          confidence: 0.5,
+          privacy: "private",
+          playerFacingEligibility: "never",
+          locality: {
+            locationRefs: ["loc-shibuya"],
+            sceneRefs: ["scene-kissaten"],
+            actorRefs: ["actor-hidden"],
+          },
+          advisoryText: "Private pressure.",
+          preconditions: [],
+          advisorySignals: [],
+          privateTerms: ["Hidden Watcher"],
+        },
+      ],
+    });
+
+    const excerpt = buildScopedForecastExcerpt({
+      forecast,
+      localRefs: ["loc-shibuya", "scene-kissaten", "actor-player"],
+    });
+    const prompt = scopedForecastForModelPrompt(excerpt);
+    const serialized = JSON.stringify(prompt);
+
+    expect(serialized).not.toContain("Hidden Watcher");
+    expect(serialized).not.toContain("actor:secret-handler");
+    expect(serialized).toContain("[private term hidden]");
+    expect(serialized).toContain("[backend ref hidden]");
   });
 });

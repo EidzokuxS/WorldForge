@@ -20,6 +20,7 @@ function createFrame(): SceneFrame {
   return {
     campaignId: "campaign-1",
     tick: 7,
+    worldVersion: 0,
     playerActorId: playerId,
     currentLocationId: locationId,
     currentSceneScopeId: locationId,

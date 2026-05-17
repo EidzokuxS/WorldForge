@@ -167,11 +167,14 @@ function setupMockDb() {
     select: vi.fn().mockReturnThis(),
     from: vi.fn().mockReturnThis(),
     where: vi.fn().mockReturnThis(),
+    insert: vi.fn().mockReturnThis(),
+    values: vi.fn().mockReturnThis(),
     update: vi.fn().mockReturnThis(),
     set: vi.fn().mockReturnThis(),
-    run: vi.fn(),
+    run: vi.fn().mockReturnValue({ changes: 1 }),
     get: vi.fn().mockReturnValue(npc),
     all: vi.fn().mockReturnValue([]),
+    transaction: vi.fn((callback: () => unknown) => callback()),
   };
 
   vi.mocked(getDb).mockReturnValue(db as never);
@@ -246,7 +249,11 @@ describe("reflection personality contract", () => {
       { toolCallId: "tc1", messages: [], abortSignal: undefined as unknown as AbortSignal },
     );
 
-    const payload = db.set.mock.calls[0]?.[0] as Record<string, string>;
+    const payload = db.set.mock.calls
+      .map(([entry]) => entry as Record<string, string>)
+      .find((entry) => typeof entry.characterRecord === "string");
+    expect(payload).toBeDefined();
+    if (!payload) throw new Error("Expected NPC record update payload");
     const updatedRecord = JSON.parse(payload.characterRecord);
     expect(updatedRecord.identity.personality.summary).toBe(
       "Now trusts Elara with the ledger keys.",

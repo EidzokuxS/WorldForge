@@ -226,6 +226,30 @@ export function recordActorKnowledge(input: RecordActorKnowledgeInput): ActorKno
   return hydrate(row as typeof actorKnowledgeRecords.$inferSelect);
 }
 
+export function retractActorKnowledgeRecord(input: {
+  campaignId: string;
+  knowledgeId?: string | null;
+  factRef?: string | null;
+  reason: string;
+}): boolean {
+  const knowledgeId =
+    input.knowledgeId?.trim()
+    || input.factRef?.trim().replace(/^knowledge:/i, "")
+    || "";
+  if (!knowledgeId) return false;
+
+  const result = getDb()
+    .delete(actorKnowledgeRecords)
+    .where(
+      and(
+        eq(actorKnowledgeRecords.campaignId, input.campaignId),
+        eq(actorKnowledgeRecords.id, knowledgeId),
+      ),
+    )
+    .run();
+  return result.changes > 0;
+}
+
 function queryTokens(query: string | undefined): string[] {
   if (!query) return [];
   return query

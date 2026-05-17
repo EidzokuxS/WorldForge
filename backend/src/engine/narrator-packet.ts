@@ -1,9 +1,13 @@
 import type { NarrativeOutcomeBounds } from "./combat-envelope.js";
 import type { BridgeLookupToolName } from "./bridge-candidate-tools.js";
+import type { NarrationClaimKind } from "./narration-grounding-guard.js";
 import type { SceneActor, SceneFrame, SceneFramePlayerInventoryItem } from "./scene-frame.js";
 import type { ToolResult } from "./tool-executor.js";
 import { isObservationToolResult } from "./tool-result.js";
 import type { RuntimeToolName } from "./tool-schemas.js";
+import { isRuntimeToolName, runtimeToolHasRole } from "./tool-contracts.js";
+import { sanitizeModelFacingConversationText } from "./model-facing-conversation.js";
+import { sanitizeModelFacingText } from "./model-facing-ref-safety.js";
 import { sourceBoundaryTermIsLeak } from "./source-boundary.js";
 import {
   buildContextBudgetTrace,
@@ -25,6 +29,10 @@ export type CanonicalTurnPacketResponseKind =
   | "environment"
   | "silence"
   | "system";
+
+export type CanonicalTurnPacketResponseEvidenceAuthority =
+  | "backend_fact"
+  | "model_guidance";
 
 export interface CanonicalTurnPacketNarratorFacts {
   anchorEventId: string;
@@ -97,6 +105,7 @@ export interface CanonicalTurnPacketResponse {
   summary: string;
   visibleToPlayer: boolean;
   targetIds?: string[];
+  evidenceAuthority?: CanonicalTurnPacketResponseEvidenceAuthority;
 }
 
 export interface CanonicalTurnPacketEffect {
@@ -107,6 +116,32 @@ export interface CanonicalTurnPacketEffect {
   summary: string;
   perceivableByPlayer: boolean;
   toolResult?: ToolResult;
+}
+
+export type NarratorPacketObservationAtomKind =
+  | "actor"
+  | "route"
+  | "object"
+  | "barrier"
+  | "fact"
+  | "absence";
+
+export interface NarratorPacketObservationAtom {
+  id: string;
+  actionId: string;
+  toolName: CanonicalTurnPacketToolName;
+  kind: NarratorPacketObservationAtomKind;
+  summary: string;
+  claimSupport: NarrationClaimKind[];
+  sourcePath: string;
+}
+
+export interface NarratorPacketObservation {
+  id: string;
+  actionId: string;
+  toolName: CanonicalTurnPacketToolName;
+  summary: string;
+  atoms: NarratorPacketObservationAtom[];
 }
 
 export interface CanonicalTurnPacket {
@@ -154,6 +189,7 @@ export type NarratorPacketEvidenceCategory =
   | "committed_event"
   | "perceivable_response"
   | "perceivable_effect"
+  | "observation_result"
   | "visible_actor"
   | "current_inventory_status"
   | "hint_signal"
@@ -162,12 +198,30 @@ export type NarratorPacketEvidenceCategory =
   | "control_return"
   | "tool_result";
 
+export type NarratorPacketPrecisionFactKind =
+  | "claim"
+  | "quote"
+  | "summary"
+  | "state_effect"
+  | "subject";
+
+export interface NarratorPacketPrecisionFact {
+  kind: NarratorPacketPrecisionFactKind;
+  value: string;
+  sourcePath: string;
+  claimKind?: string;
+  polarity?: string;
+  exhaustive?: boolean;
+}
+
 export interface NarratorPacketEvidence {
   id: string;
   category: NarratorPacketEvidenceCategory;
   summary: string;
   sourceId?: string;
+  summaryBackendFact?: boolean;
   claimSupport?: string[];
+  precisionFacts?: NarratorPacketPrecisionFact[];
 }
 
 export type NarratorPacketRedactionReason =
@@ -206,12 +260,14 @@ export interface NarratorPacketSourceLinkedSummary {
 export interface NarratorPacket {
   campaignId: string;
   tick: number;
+  postNarrationTargetTick?: number;
   playerAction: string;
   oracleOutcome: string | null;
   anchorEvent: CanonicalTurnPacketEvent;
   perceivableEvents: CanonicalTurnPacketEvent[];
   perceivableResponses: CanonicalTurnPacketResponse[];
   perceivableEffects: CanonicalTurnPacketEffect[];
+  perceivableObservations?: NarratorPacketObservation[];
   visibleActors: NarratorPacketActor[];
   currentInventory?: NarratorPacketInventoryItem[];
   hintSignals: string[];
@@ -253,7 +309,7 @@ export class NarratorPacketPromptSafetyError extends Error {
   }
 }
 
-function uniqueStrings(values: Array<string | null | undefined>): string[] {
+function uniqueStrings(values: readonly (string | null | undefined)[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
 
@@ -273,6 +329,12 @@ function uniqueStrings(values: Array<string | null | undefined>): string[] {
   }
 
   return result;
+}
+
+function boundedSummary(value: string, maxChars: number): string {
+  const text = value.trim();
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, Math.max(0, maxChars - 1)).trimEnd()}...`;
 }
 
 function collectVisibleActors(frame: SceneFrame): NarratorPacketActor[] {
@@ -337,14 +399,262 @@ function evidenceId(category: NarratorPacketEvidenceCategory, id: string): strin
   return `${category}:${id}`;
 }
 
+const NON_NARRATIVE_INVENTORY_TAGS = new Set(["starting-loadout", "equipped", "carried"]);
+
+function formatInventoryTagForPrompt(tag: string): string {
+  let formatted = "";
+  let pendingSpace = false;
+
+  for (const char of tag) {
+    if (char === "_" || char === "-") {
+      pendingSpace = formatted.length > 0;
+      continue;
+    }
+    if (pendingSpace) {
+      formatted += " ";
+      pendingSpace = false;
+    }
+    formatted += char;
+  }
+
+  return formatted.trim();
+}
+
+function playerVisibleInventoryStates(tags: readonly string[]): string[] {
+  return uniqueStrings(tags)
+    .filter((tag) => !NON_NARRATIVE_INVENTORY_TAGS.has(tag.toLowerCase()))
+    .map((tag) => formatInventoryTagForPrompt(tag));
+}
+
+function formatEquippedSlotForPrompt(slot: string | null): string | null {
+  const formatted = slot ? formatInventoryTagForPrompt(slot) : "";
+  if (!formatted || formatted.toLowerCase() === "equipped") {
+    return null;
+  }
+  return formatted;
+}
+
 function formatInventoryStatusSummary(item: NarratorPacketInventoryItem): string {
+  const equippedSlot = formatEquippedSlotForPrompt(item.equippedSlot);
   const state = item.equipState === "equipped"
-    ? `currently equipped${item.equippedSlot ? ` in ${item.equippedSlot}` : ""}`
-    : "currently carried";
-  const signature = item.isSignature ? " as a signature item" : "";
-  const tags = uniqueStrings(item.tags);
-  const tagSummary = tags.length > 0 ? ` Item tags/state: ${tags.join(", ")}.` : "";
-  return `${item.label} is ${state} by the player${signature}.${tagSummary}`;
+    ? equippedSlot
+      ? `ready at the player's ${equippedSlot}`
+      : "ready to hand"
+    : "carried by the player";
+  const tags = playerVisibleInventoryStates(item.tags);
+  const tagSummary = tags.length > 0 ? ` Visible marks/status: ${tags.join(", ")}.` : "";
+  return `${item.label} is ${state}.${tagSummary}`;
+}
+
+function addPrecisionFact(
+  facts: NarratorPacketPrecisionFact[],
+  fact: NarratorPacketPrecisionFact,
+): void {
+  const value = safePrecisionFactText(fact.value);
+  if (!value) return;
+  if (facts.some((existing) =>
+    existing.kind === fact.kind
+    && existing.value === value
+    && existing.sourcePath === fact.sourcePath
+  )) {
+    return;
+  }
+  facts.push({ ...fact, value });
+}
+
+function collectClaimPrecisionFacts(
+  claims: readonly unknown[],
+): NarratorPacketPrecisionFact[] {
+  const facts: NarratorPacketPrecisionFact[] = [];
+  claims.forEach((claim, index) => {
+    if (!claim || typeof claim !== "object" || Array.isArray(claim)) return;
+    const record = claim as Record<string, unknown>;
+    const claimKind = readRecordString(record, "claimKind") ?? "other";
+    const polarity = readRecordString(record, "polarity") ?? "states";
+    const subjectText = readRecordString(record, "subjectText");
+    const summary = readRecordString(record, "summary");
+  if (subjectText) {
+    addPrecisionFact(facts, {
+      kind: "subject",
+      value: subjectText,
+      sourcePath: `claims.${index}.subjectText`,
+        claimKind,
+        polarity,
+      exhaustive: false,
+    });
+  }
+  if (summary) {
+    addPrecisionFact(facts, {
+      kind: "claim",
+      value: summary,
+      sourcePath: `claims.${index}.summary`,
+      claimKind,
+        polarity,
+        exhaustive: true,
+      });
+    }
+  });
+  return facts;
+}
+
+function collectToolResultPrecisionFacts(
+  result: unknown,
+  toolName?: CanonicalTurnPacketToolName,
+): NarratorPacketPrecisionFact[] {
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return [];
+  }
+  const record = result as Record<string, unknown>;
+  const facts: NarratorPacketPrecisionFact[] = [];
+  const summary = readRecordString(record, "summary");
+  const quote = readRecordString(record, "quote");
+  const speaker = readRecordString(record, "speakerRef");
+  const summaryIsNarrativeSurface =
+    toolName !== "record_dialogue_outcome"
+    && toolName !== "record_world_fact";
+  if (summary && summaryIsNarrativeSurface) {
+    addPrecisionFact(facts, {
+      kind: "summary",
+      value: summary,
+      sourcePath: "summary",
+      exhaustive: false,
+    });
+  }
+  if (quote) {
+    const quoteText = toolName === "record_dialogue_outcome" && speaker
+      ? `${speaker} says, ${quote}`
+      : quote;
+    addPrecisionFact(facts, {
+      kind: "quote",
+      value: quoteText,
+      sourcePath: "quote",
+      exhaustive: true,
+    });
+  }
+  for (const fact of collectClaimPrecisionFacts(readRecordArray(record, "claims"))) {
+    addPrecisionFact(facts, fact);
+  }
+  return facts;
+}
+
+function collectEffectPrecisionFacts(
+  effect: CanonicalTurnPacketEffect,
+): NarratorPacketPrecisionFact[] {
+  const result = effect.toolResult?.success === true ? effect.toolResult.result : null;
+  return [
+    ...collectToolResultPrecisionFacts(result, effect.toolName),
+    ...collectStructuralEffectNarratableFacts(effect, result),
+  ];
+}
+
+function withPrecisionFacts(
+  entry: NarratorPacketEvidence,
+  precisionFacts: readonly NarratorPacketPrecisionFact[],
+): NarratorPacketEvidence {
+  return precisionFacts.length > 0
+    ? { ...entry, precisionFacts: [...precisionFacts] }
+    : entry;
+}
+
+const SUPPORT_ONLY_STRUCTURAL_EFFECT_SUMMARY_TOOLS = new Set<CanonicalTurnPacketToolName>([
+  "advance_time",
+  "move_to",
+  "move_actor",
+  "reveal_location",
+  "create_minor_poi",
+]);
+
+function isPlayerMoveActorRef(value: string | null, result: unknown): boolean {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  if (normalized === "player" || normalized === "current_player") {
+    return true;
+  }
+  return readRecordStringArray(result, "actorRefs")
+    .map((ref) => ref.trim().toLowerCase())
+    .includes("current_player");
+}
+
+function collectStructuralEffectNarratableFacts(
+  effect: CanonicalTurnPacketEffect,
+  result: unknown,
+): NarratorPacketPrecisionFact[] {
+  const facts: NarratorPacketPrecisionFact[] = [];
+  const addSummaryFact = (value: string | null, sourcePath: string, claimKind?: NarrationClaimKind) => {
+    if (!value) return;
+    addPrecisionFact(facts, {
+      kind: "summary",
+      value,
+      sourcePath,
+      claimKind,
+      exhaustive: true,
+    });
+  };
+
+  switch (effect.toolName) {
+    case "advance_time": {
+      const minutes = readRecordNumber(result, "minutes");
+      const reason = trimTrailingSentencePunctuation(readRecordString(result, "reason") ?? "");
+      if (minutes !== null && reason) {
+        addSummaryFact(formatAdvanceTimeReason(reason, minutes), "toolResult.result.reason", "playable_beat");
+      } else if (minutes !== null) {
+        addSummaryFact(`${formatElapsedWorldMinutes(minutes)}.`, "toolResult.result.minutes", "playable_beat");
+      } else {
+        addSummaryFact("In-world time passes.", "toolResult.result", "playable_beat");
+      }
+      break;
+    }
+    case "move_to": {
+      const locationName = readRecordString(result, "locationName");
+      addSummaryFact(
+        locationName ? `You arrive at ${locationName}.` : null,
+        "toolResult.result.locationName",
+        "location_change",
+      );
+      break;
+    }
+    case "move_actor": {
+      const locationName = readRecordString(result, "locationName");
+      if (!locationName) break;
+      const actorRef = readRecordString(result, "actorRef");
+      const actorText = actorRef && !isPlayerMoveActorRef(actorRef, result)
+        ? `${actorRef} arrives`
+        : "You arrive";
+      addSummaryFact(`${actorText} at ${locationName}.`, "toolResult.result.locationName", "location_change");
+      break;
+    }
+    case "reveal_location": {
+      const name = readRecordString(result, "name");
+      const connectedTo = readRecordString(result, "connectedTo");
+      if (name && connectedTo) {
+        addSummaryFact(`${name} is reachable from ${connectedTo}.`, "toolResult.result.name", "route_status");
+      } else if (name) {
+        addSummaryFact(`${name} is reachable.`, "toolResult.result.name", "route_status");
+      }
+      break;
+    }
+    case "create_minor_poi": {
+      const name = readRecordString(result, "name");
+      const connectedTo = readRecordString(result, "connectedTo");
+      if (name && connectedTo) {
+        addSummaryFact(`${name} is available near ${connectedTo}.`, "toolResult.result.name", "route_status");
+      } else if (name) {
+        addSummaryFact(`${name} is available nearby.`, "toolResult.result.name", "route_status");
+      }
+      break;
+    }
+    default:
+      break;
+  }
+
+  return facts;
+}
+
+function effectSummaryContributesBackendFact(effect: CanonicalTurnPacketEffect): boolean {
+  if (effect.toolName && SUPPORT_ONLY_STRUCTURAL_EFFECT_SUMMARY_TOOLS.has(effect.toolName)) {
+    return false;
+  }
+  return effect.toolName !== "record_dialogue_outcome"
+    && effect.toolName !== "record_world_fact";
 }
 
 function collectEvidenceLedger(args: {
@@ -354,6 +664,7 @@ function collectEvidenceLedger(args: {
   perceivableEvents: CanonicalTurnPacketEvent[];
   perceivableResponses: CanonicalTurnPacketResponse[];
   perceivableEffects: CanonicalTurnPacketEffect[];
+  perceivableObservations: NarratorPacketObservation[];
   hintSignals: string[];
   hintSignalSourceRefs: NarratorPacketHintSignalSourceRef[];
 }): NarratorPacketEvidence[] {
@@ -397,27 +708,43 @@ function collectEvidenceLedger(args: {
     });
   }
   for (const effect of args.perceivableEffects) {
-    add({
+    const precisionFacts = collectEffectPrecisionFacts(effect);
+    add(withPrecisionFacts({
       id: evidenceId("perceivable_effect", effect.id),
       category: "perceivable_effect",
       summary: effect.summary,
       sourceId: effect.id,
-    });
+      summaryBackendFact: effectSummaryContributesBackendFact(effect),
+    }, precisionFacts));
     if (effect.actionId && effect.toolName) {
-      add({
+      add(withPrecisionFacts({
         id: evidenceId("tool_result", effect.actionId),
         category: "tool_result",
         summary: `The accepted action result supports this player-perceivable effect: ${effect.summary}`,
         sourceId: effect.actionId,
+        summaryBackendFact: false,
+      }, precisionFacts));
+    }
+  }
+  for (const observation of args.perceivableObservations) {
+    for (const atom of observation.atoms) {
+      add({
+        id: evidenceId("observation_result", `${observation.actionId}:${atom.id}`),
+        category: "observation_result",
+        summary: atom.summary,
+        sourceId: observation.actionId,
+        claimSupport: atom.claimSupport,
       });
     }
   }
   for (const actor of args.visibleActors) {
+    const isPlayer = actor.type === "player";
     add({
       id: evidenceId("visible_actor", actor.id),
       category: "visible_actor",
-      summary: actor.label,
+      summary: isPlayer ? actor.label : `${actor.label} is present in the scene.`,
       sourceId: actor.id,
+      summaryBackendFact: false,
     });
   }
   for (const item of args.currentInventory) {
@@ -426,6 +753,7 @@ function collectEvidenceLedger(args: {
       category: "current_inventory_status",
       summary: formatInventoryStatusSummary(item),
       sourceId: item.itemId,
+      summaryBackendFact: false,
     });
   }
   for (let index = 0; index < args.hintSignals.length; index += 1) {
@@ -551,10 +879,88 @@ function toolField(input: unknown, args: unknown, key: string): string | null {
   return readRecordString(input, key) ?? readRecordString(args, key);
 }
 
+function toolNumber(input: unknown, args: unknown, key: string): number | null {
+  return readRecordNumber(input, key) ?? readRecordNumber(args, key);
+}
+
 function toolStringArray(input: unknown, args: unknown, key: string): string[] {
   return readRecordStringArray(input, key).length > 0
     ? readRecordStringArray(input, key)
     : readRecordStringArray(args, key);
+}
+
+function formatElapsedWorldMinutes(minutes: number): string {
+  if (!Number.isFinite(minutes) || minutes < 1) {
+    return "time passes";
+  }
+  if (minutes % 1440 === 0) {
+    const days = minutes / 1440;
+    return days === 1 ? "1 day passes" : `${days} days pass`;
+  }
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return hours === 1 ? "1 hour passes" : `${hours} hours pass`;
+  }
+  return minutes === 1 ? "1 minute passes" : `${minutes} minutes pass`;
+}
+
+function formatWorldDuration(minutes: number): string {
+  if (!Number.isFinite(minutes) || minutes < 1) {
+    return "some time";
+  }
+  if (minutes % 1440 === 0) {
+    const days = minutes / 1440;
+    return days === 1 ? "1 day" : `${days} days`;
+  }
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return hours === 1 ? "1 hour" : `${hours} hours`;
+  }
+  return minutes === 1 ? "1 minute" : `${minutes} minutes`;
+}
+
+function normalizeDurationComparisonText(value: string): string {
+  let normalized = "";
+  let pendingSpace = false;
+  for (const char of value.trim().toLowerCase()) {
+    if (char.trim() === "") {
+      pendingSpace = normalized.length > 0;
+      continue;
+    }
+    if (pendingSpace) {
+      normalized += " ";
+      pendingSpace = false;
+    }
+    normalized += char;
+  }
+  return normalized;
+}
+
+function reasonAlreadyNamesDuration(reason: string, minutes: number): boolean {
+  const normalizedReason = normalizeDurationComparisonText(reason);
+  return normalizedReason.includes(normalizeDurationComparisonText(formatWorldDuration(minutes)))
+    || normalizedReason.includes(normalizeDurationComparisonText(formatElapsedWorldMinutes(minutes)));
+}
+
+function formatAdvanceTimeReason(reason: string, minutes: number): string {
+  if (reasonAlreadyNamesDuration(reason, minutes)) {
+    return `${reason}.`;
+  }
+  return `${reason} takes ${formatWorldDuration(minutes)}.`;
+}
+
+function trimTrailingSentencePunctuation(value: string): string {
+  let result = value.trim();
+  while (
+    result.endsWith(".")
+    || result.endsWith("!")
+    || result.endsWith("?")
+    || result.endsWith(";")
+    || result.endsWith(":")
+  ) {
+    result = result.slice(0, -1).trimEnd();
+  }
+  return result;
 }
 
 function toolRecordArray(input: unknown, args: unknown, key: string): Record<string, unknown>[] {
@@ -576,12 +982,71 @@ function formatLabelList(labels: readonly string[]): string {
   return labels.join(", ");
 }
 
+const MODEL_ONLY_ALIAS_PREFIXES = new Set([
+  "actor",
+  "npc",
+  "player",
+  "loc",
+  "location",
+  "scene",
+  "route",
+  "movement",
+  "item",
+  "faction",
+  "event",
+  "knowledge",
+  "tool",
+  "source",
+  "candidate",
+  "support",
+]);
+
+function isPositiveIntegerText(value: string): boolean {
+  return value.length > 0
+    && [...value].every((char) => char >= "0" && char <= "9")
+    && Number.parseInt(value, 10) > 0;
+}
+
+function isModelOnlyAlias(value: string): boolean {
+  const trimmed = value.trim().toLowerCase();
+  const separatorIndex = trimmed.indexOf("_");
+  if (separatorIndex <= 0) return false;
+  const prefix = trimmed.slice(0, separatorIndex);
+  const numericTail = trimmed.slice(separatorIndex + 1);
+  return MODEL_ONLY_ALIAS_PREFIXES.has(prefix)
+    && isPositiveIntegerText(numericTail)
+    && !numericTail.includes("_");
+}
+
+function safeStructuralSummaryText(value: string | null | undefined, fallback: string): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  if (isModelOnlyAlias(trimmed)) return fallback;
+  const sanitized = sanitizeModelFacingConversationText(trimmed, { maxChars: 140 });
+  if (!sanitized || sanitized === "[backend ref hidden]") return fallback;
+  return sanitized;
+}
+
+function safePrecisionFactText(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed || isModelOnlyAlias(trimmed)) return null;
+  const sanitized = sanitizeModelFacingConversationText(trimmed, { maxChars: 2000 });
+  if (!sanitized || sanitized === "[backend ref hidden]") return null;
+  return sanitized.length <= 640 ? sanitized : null;
+}
+
+function safeStructuralSummaryList(values: readonly string[], fallback: string): string[] {
+  return values
+    .map((value) => safeStructuralSummaryText(value, fallback))
+    .filter((value): value is string => Boolean(value));
+}
+
 function formatStructuralClaim(claim: Record<string, unknown>): string {
   const claimKind = readRecordString(claim, "claimKind") ?? "claim";
   const polarity = readRecordString(claim, "polarity") ?? "states";
   const subject =
-    readRecordString(claim, "subjectRef")
-    ?? readRecordString(claim, "subjectText");
+    safeStructuralSummaryText(readRecordString(claim, "subjectText"), "described subject")
+    ?? (readRecordString(claim, "subjectRef") ? "referenced subject" : null);
   return subject
     ? `${claimKind}/${polarity} subject=${subject}`
     : `${claimKind}/${polarity}`;
@@ -611,11 +1076,19 @@ function summarizeDialogueOutcomeStructurally(input: {
     `authority=${field("authorityKind") ?? "unknown"}`,
     `truth=${field("truthStatus") ?? "unknown"}`,
     `durability=${field("durability") ?? "unknown"}`,
-    field("speakerRef") ? `speaker=${field("speakerRef")}` : null,
-    addresseeRefs.length > 0 ? `addressees=${formatLabelList(addresseeRefs)}` : null,
-    field("requestedRoleText") ? `requestedRole=${field("requestedRoleText")}` : null,
+    field("speakerRef")
+      ? `speaker=${safeStructuralSummaryText(field("speakerRef"), "referenced speaker")}`
+      : null,
+    addresseeRefs.length > 0
+      ? `addressees=${formatLabelList(safeStructuralSummaryList(addresseeRefs, "referenced addressee"))}`
+      : null,
+    field("requestedRoleText")
+      ? `requestedRole=${safeStructuralSummaryText(field("requestedRoleText"), "requested role")}`
+      : null,
     field("futureUseKind") ? `futureUse=${field("futureUseKind")}` : null,
-    sourceRefs.length > 0 ? `sources=${formatLabelList(sourceRefs)}` : null,
+    sourceRefs.length > 0
+      ? `sources=${formatLabelList(safeStructuralSummaryList(sourceRefs, "referenced source"))}`
+      : null,
     claims.length > 0 ? `Claims: ${claims.map(formatStructuralClaim).join(" | ")}` : null,
   ];
   return parts.filter((part): part is string => Boolean(part)).join("; ");
@@ -646,8 +1119,12 @@ function summarizeWorldFactStructurally(input: {
     `source=${field("sourceKind") ?? "unknown"}`,
     `durability=${field("durability") ?? "unknown"}`,
     field("futureUseKind") ? `futureUse=${field("futureUseKind")}` : null,
-    subjectRefs.length > 0 ? `subjects=${formatLabelList(subjectRefs)}` : null,
-    sourceRefs.length > 0 ? `sources=${formatLabelList(sourceRefs)}` : null,
+    subjectRefs.length > 0
+      ? `subjects=${formatLabelList(safeStructuralSummaryList(subjectRefs, "referenced subject"))}`
+      : null,
+    sourceRefs.length > 0
+      ? `sources=${formatLabelList(safeStructuralSummaryList(sourceRefs, "referenced source"))}`
+      : null,
     claims.length > 0 ? `Claims: ${claims.map(formatStructuralClaim).join(" | ")}` : null,
   ];
   return parts.filter((part): part is string => Boolean(part)).join("; ");
@@ -756,6 +1233,17 @@ export function summarizeRuntimeToolResultForNarrator(input: {
         toolArgs,
       });
     }
+    case "advance_time": {
+      const minutes =
+        readRecordNumber(acceptedResult, "minutes")
+        ?? toolNumber(toolInput, toolArgs, "minutes")
+        ?? toolResult?.authority?.elapsedWorldTimeMinutes
+        ?? null;
+      const elapsedText = minutes === null
+        ? "In-world time passes"
+        : formatElapsedWorldMinutes(minutes);
+      return `${elapsedText}.`;
+    }
     case "set_relationship": {
       const reason = toolField(toolInput, toolArgs, "reason");
       const entityA = toolField(toolInput, toolArgs, "entityA");
@@ -772,13 +1260,11 @@ export function summarizeRuntimeToolResultForNarrator(input: {
         ?? "A campaign chronicle beat is recorded.";
     case "add_tag": {
       const entityName = toolField(toolInput, toolArgs, "entityName") ?? "An entity";
-      const tag = toolField(toolInput, toolArgs, "tag") ?? "a new state";
-      return `${entityName} gains ${tag}.`;
+      return `${entityName}'s recorded status changes.`;
     }
     case "remove_tag": {
       const entityName = toolField(toolInput, toolArgs, "entityName") ?? "An entity";
-      const tag = toolField(toolInput, toolArgs, "tag") ?? "a prior state";
-      return `${entityName} is no longer marked by ${tag}.`;
+      return `${entityName}'s recorded status changes.`;
     }
     case "offer_quick_actions":
       return "Follow-up player options become available.";
@@ -845,7 +1331,7 @@ export function summarizeRuntimeToolResultForNarrator(input: {
         ?? toolField(toolInput, toolArgs, "locationName")
         ?? toolField(toolInput, toolArgs, "targetLocationName")
         ?? "the destination";
-      return `The scene moves to ${targetLocationName}.`;
+      return `You arrive at ${targetLocationName}.`;
     }
     case "move_actor": {
       const actorRef =
@@ -897,8 +1383,19 @@ export function summarizeRuntimeToolResultForNarrator(input: {
       return `${actorRef} records an unconfirmed intent or claim about ${targetHint}.`;
     }
     case "transfer_item": {
-      const itemName = toolField(toolInput, toolArgs, "itemName") ?? "An item";
-      const targetName = toolField(toolInput, toolArgs, "targetName") ?? "a new holder";
+      const itemName =
+        acceptedField("item")
+        ?? toolField(toolInput, toolArgs, "transferredItemName")
+        ?? toolField(toolInput, toolArgs, "itemName")
+        ?? "An item";
+      const sourceItem = acceptedField("splitFrom") ?? toolField(toolInput, toolArgs, "itemName");
+      const remainingItem =
+        acceptedField("remainingItem") ?? toolField(toolInput, toolArgs, "remainingItemName");
+      const targetName =
+        acceptedField("target") ?? toolField(toolInput, toolArgs, "targetName") ?? "a new holder";
+      if (sourceItem && remainingItem && itemName !== sourceItem) {
+        return `${sourceItem} is split: ${itemName} moves to ${targetName}, leaving ${remainingItem}.`;
+      }
       return `${itemName} moves to ${targetName}.`;
     }
     default:
@@ -907,17 +1404,53 @@ export function summarizeRuntimeToolResultForNarrator(input: {
 }
 
 function clarifyUnconfirmedClaimSummary(summary: string): string {
-  if (
-    /\bclaim(?:ed|s)?\s+to\s+(?:possess|have|hold|own)\b/i.test(summary) &&
-    /\beither\b[^.]{0,160}\bdoesn'?t\s+exist\b/i.test(summary)
-  ) {
-    return summary.replace(
-      /\bThe\s+[^.]{1,120}?\s+did\s+not\s+work\s+[-—]\s+either\s+[^.]+?\./i,
-      "No confirmed possession or access is established; the claim is visibly challenged.",
+  const normalized = summary.toLowerCase();
+  const possessionClaim =
+    normalized.includes("claim to possess")
+    || normalized.includes("claims to possess")
+    || normalized.includes("claimed to possess")
+    || normalized.includes("claim to have")
+    || normalized.includes("claims to have")
+    || normalized.includes("claimed to have")
+    || normalized.includes("claim to hold")
+    || normalized.includes("claims to hold")
+    || normalized.includes("claimed to hold")
+    || normalized.includes("claim to own")
+    || normalized.includes("claims to own")
+    || normalized.includes("claimed to own");
+  const challengedExistence =
+    normalized.includes("either")
+    && (
+      normalized.includes("doesn't exist")
+      || normalized.includes("doesnt exist")
+      || normalized.includes("does not exist")
     );
+  if (possessionClaim && challengedExistence) {
+    return "No confirmed possession or access is established; the claim is visibly challenged.";
   }
 
   return summary;
+}
+
+function isNarratableSettledActionResult(result: CanonicalTurnPacketActionResult): boolean {
+  if (!result.result.success || isObservationToolResult(result.result)) return false;
+  if (!isRuntimeToolName(result.toolName)) return false;
+  if (!runtimeToolHasGeneratedNarrativeSurface(result.toolName)) return false;
+  return runtimeToolHasRole(result.toolName, "state_mutation")
+    || runtimeToolHasRole(result.toolName, "terminal_receipt")
+    || runtimeToolHasRole(result.toolName, "legacy_scene_beat");
+}
+
+function runtimeToolHasGeneratedNarrativeSurface(toolName: RuntimeToolName): boolean {
+  switch (toolName) {
+    case "add_tag":
+    case "remove_tag":
+    case "record_player_intent":
+    case "start_search":
+      return false;
+    default:
+      return true;
+  }
 }
 
 function summarizeActionResult(result: CanonicalTurnPacketActionResult): string {
@@ -991,7 +1524,22 @@ export function collectCommittedVisibleActorCreationLabels(args: {
 }
 
 function normalizeActorPromptSafetyLabel(label: string): string {
-  return label.trim().toLowerCase().replace(/\s+/g, " ");
+  let normalized = "";
+  let pendingSpace = false;
+
+  for (const char of label.trim().toLowerCase()) {
+    if (char.trim() === "") {
+      pendingSpace = normalized.length > 0;
+      continue;
+    }
+    if (pendingSpace) {
+      normalized += " ";
+      pendingSpace = false;
+    }
+    normalized += char;
+  }
+
+  return normalized;
 }
 
 function forbiddenActorNameMatchesCommittedVisibleActorLabel(
@@ -1009,6 +1557,17 @@ function actorPromptSafetyLabelContainsWholeTokens(container: string, contained:
     || container.startsWith(`${contained} `)
     || container.endsWith(` ${contained}`)
     || container.includes(` ${contained} `);
+}
+
+function forbiddenActorNameIsAllowedVisibleLabel(
+  forbiddenActorName: string,
+  allowedVisibleActorNames: readonly string[],
+): boolean {
+  const normalizedForbiddenName = normalizeActorPromptSafetyLabel(forbiddenActorName);
+  return Boolean(normalizedForbiddenName)
+    && allowedVisibleActorNames.some((label) =>
+      normalizeActorPromptSafetyLabel(label) === normalizedForbiddenName,
+    );
 }
 
 function collectPerceivableEvents(packet: CanonicalTurnPacket): CanonicalTurnPacketEvent[] {
@@ -1031,9 +1590,24 @@ function collectPerceivableResponses(
   const responseById = new Map(packet.responses.map((response) => [response.id, response]));
   return uniqueStrings(packet.narratorFacts.responseIds)
     .map((id) => responseById.get(id))
-    .filter((response): response is CanonicalTurnPacketResponse =>
-      Boolean(response?.visibleToPlayer),
-    );
+    .filter((response): response is CanonicalTurnPacketResponse => {
+      if (!response?.visibleToPlayer) {
+        return false;
+      }
+      return responseContributesBackendFacts(response);
+    });
+}
+
+function responseContributesBackendFacts(
+  response: CanonicalTurnPacketResponse,
+): boolean {
+  if (response.evidenceAuthority === "model_guidance") {
+    return false;
+  }
+  if (response.evidenceAuthority === "backend_fact") {
+    return true;
+  }
+  return false;
 }
 
 function findFrameActor(frame: SceneFrame, actorId: string | null | undefined): SceneActor | null {
@@ -1060,10 +1634,6 @@ function actorIsPromptVisible(frame: SceneFrame, actorId: string | null | undefi
 interface HiddenSourceRedactionTerm {
   term: string;
   replacement: string;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function collectHiddenSourceRedactionTerms(args: {
@@ -1099,6 +1669,59 @@ function containsForbiddenPromptTerm(
   return terms.some((entry) => normalizedText.includes(entry.term.trim().toLowerCase()));
 }
 
+function replaceLiteralCaseInsensitive(
+  value: string,
+  search: string,
+  replacement: string,
+): string {
+  const normalizedValue = value.toLocaleLowerCase();
+  const normalizedSearch = search.toLocaleLowerCase();
+  let cursor = 0;
+  let result = "";
+
+  while (cursor < value.length) {
+    const matchIndex = normalizedValue.indexOf(normalizedSearch, cursor);
+    if (matchIndex < 0) {
+      result += value.slice(cursor);
+      break;
+    }
+    result += value.slice(cursor, matchIndex);
+    result += replacement;
+    cursor = matchIndex + search.length;
+  }
+
+  return result;
+}
+
+function collapseWhitespace(value: string): string {
+  let compacted = "";
+  let pendingSpace = false;
+
+  for (const char of value.trim()) {
+    if (char.trim() === "") {
+      pendingSpace = compacted.length > 0;
+      continue;
+    }
+    if (pendingSpace) {
+      compacted += " ";
+      pendingSpace = false;
+    }
+    compacted += char;
+  }
+
+  return compacted;
+}
+
+function hasPlayerVisibleCharacter(value: string): boolean {
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    if ((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function redactHiddenSourceSummary(args: {
   summary: string;
   terms: readonly HiddenSourceRedactionTerm[];
@@ -1113,15 +1736,17 @@ function redactHiddenSourceSummary(args: {
     if (!term) {
       continue;
     }
-    redacted = redacted.replace(new RegExp(escapeRegExp(term), "gi"), entry.replacement);
+    redacted = replaceLiteralCaseInsensitive(redacted, term, entry.replacement);
   }
 
-  redacted = redacted
-    .replace(/\s+/g, " ")
-    .replace(/\bsomeone unseen's something private\b/gi, "an unseen private action")
-    .trim();
+  redacted = collapseWhitespace(redacted);
+  redacted = replaceLiteralCaseInsensitive(
+    redacted,
+    "someone unseen's something private",
+    "an unseen private action",
+  );
 
-  if (!/[A-Za-z0-9]/.test(redacted) || containsForbiddenPromptTerm(redacted, args.terms)) {
+  if (!hasPlayerVisibleCharacter(redacted) || containsForbiddenPromptTerm(redacted, args.terms)) {
     return null;
   }
 
@@ -1154,13 +1779,112 @@ function anonymizeHiddenSourceEffect(args: {
   };
 }
 
+function effectRuntimeToolName(
+  effect: CanonicalTurnPacketEffect,
+): RuntimeToolName | null {
+  return effect.toolName && isRuntimeToolName(effect.toolName) ? effect.toolName : null;
+}
+
+function actorCreationLabelsFromEffect(effect: CanonicalTurnPacketEffect): string[] {
+  if (!isActorCreationToolName(effect.toolName) || effect.toolResult?.success !== true) {
+    return [];
+  }
+
+  return uniqueStrings([readRecordString(effect.toolResult.result, "name")]);
+}
+
+function visibleEffectWouldLeakForbiddenTerm(args: {
+  effect: CanonicalTurnPacketEffect;
+  playerAction: string;
+  forbiddenActorNames: readonly string[];
+  forbiddenFactMarkers: readonly string[];
+  forbiddenPrivateTerms: readonly string[];
+}): boolean {
+  if (isActorCreationToolName(args.effect.toolName)) {
+    return false;
+  }
+
+  const text = sanitizeModelFacingText(args.effect.summary);
+  const toolName = effectRuntimeToolName(args.effect);
+  const committedVisibleActorCreationLabels = actorCreationLabelsFromEffect(args.effect);
+
+  for (const term of uniqueStrings(args.forbiddenActorNames)) {
+    const normalizedTerm = term.trim().toLowerCase();
+    if (!normalizedTerm) {
+      continue;
+    }
+    if (
+      sourceBoundaryTermIsAllowedCommittedActorCreation({
+        source: "perceivable_effect:candidate",
+        text,
+        toolName,
+        forbiddenTerm: term,
+        committedVisibleActorCreationLabels,
+      })
+    ) {
+      continue;
+    }
+    if (
+      sourceBoundaryTermIsLeak({
+        source: "perceivable_effect:candidate",
+        text,
+        playerSourced: false,
+        playerAction: args.playerAction,
+        normalizedTerm,
+        toolName,
+      })
+    ) {
+      return true;
+    }
+  }
+
+  for (const term of uniqueStrings([
+    ...args.forbiddenFactMarkers,
+    ...args.forbiddenPrivateTerms,
+  ])) {
+    const normalizedTerm = term.trim().toLowerCase();
+    if (!normalizedTerm) {
+      continue;
+    }
+    if (
+      sourceBoundaryTermIsLeak({
+        source: "perceivable_effect:candidate",
+        text,
+        playerSourced: false,
+        playerAction: args.playerAction,
+        normalizedTerm,
+        toolName,
+      })
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function collectPromptSafeEffect(args: {
   effect: CanonicalTurnPacketEffect;
   frame: SceneFrame;
   hiddenSourceIndex: number;
   hiddenSourceRedactionTerms: readonly HiddenSourceRedactionTerm[];
+  playerAction: string;
+  forbiddenActorNames: readonly string[];
+  forbiddenFactMarkers: readonly string[];
+  forbiddenPrivateTerms: readonly string[];
 }): CanonicalTurnPacketEffect | null {
   if (actorIsPromptVisible(args.frame, args.effect.actorId)) {
+    if (
+      visibleEffectWouldLeakForbiddenTerm({
+        effect: args.effect,
+        playerAction: args.playerAction,
+        forbiddenActorNames: args.forbiddenActorNames,
+        forbiddenFactMarkers: args.forbiddenFactMarkers,
+        forbiddenPrivateTerms: args.forbiddenPrivateTerms,
+      })
+    ) {
+      return null;
+    }
     return args.effect;
   }
 
@@ -1175,6 +1899,9 @@ function collectPerceivableEffects(
   packet: CanonicalTurnPacket,
   frame: SceneFrame,
   hiddenSourceRedactionTerms: readonly HiddenSourceRedactionTerm[],
+  forbiddenActorNames: readonly string[],
+  forbiddenFactMarkers: readonly string[],
+  forbiddenPrivateTerms: readonly string[],
 ): CanonicalTurnPacketEffect[] {
   const actionIds = new Set(packet.narratorFacts.actionIds);
   const toolResultRefs = new Set(
@@ -1195,6 +1922,7 @@ function collectPerceivableEffects(
     .filter((effect) =>
       effect.perceivableByPlayer
       && effect.toolResult?.success !== false
+      && (effect.toolResult ? !isObservationToolResult(effect.toolResult) : true)
       && (
         (effect.actionId ? referencedAction(effect.actionId, effect.toolName) : false)
       ),
@@ -1205,13 +1933,16 @@ function collectPerceivableEffects(
         frame,
         hiddenSourceIndex: nextHiddenSourceIndex(),
         hiddenSourceRedactionTerms,
+        playerAction: packet.playerAction,
+        forbiddenActorNames,
+        forbiddenFactMarkers,
+        forbiddenPrivateTerms,
       }),
     )
     .filter((effect): effect is CanonicalTurnPacketEffect => Boolean(effect));
   const generatedEffects = packet.actionResults
     .filter((result) =>
-      result.result.success
-      && !isObservationToolResult(result.result)
+      isNarratableSettledActionResult(result)
       && referencedAction(result.actionId, result.toolName),
     )
     .map(buildActionResultEffect)
@@ -1221,11 +1952,466 @@ function collectPerceivableEffects(
         frame,
         hiddenSourceIndex: nextHiddenSourceIndex(),
         hiddenSourceRedactionTerms,
+        playerAction: packet.playerAction,
+        forbiddenActorNames,
+        forbiddenFactMarkers,
+        forbiddenPrivateTerms,
       }),
     )
     .filter((effect): effect is CanonicalTurnPacketEffect => Boolean(effect));
 
   return uniqueById([...explicitEffects, ...generatedEffects]);
+}
+
+const OBSERVATION_ATOM_MAX = 12;
+const OBSERVATION_ATOM_SUMMARY_MAX = 220;
+const OBSERVATION_ATOM_DEPTH_MAX = 4;
+
+interface NarratorPacketObservationAtomDraft {
+  kind: NarratorPacketObservationAtomKind;
+  summary: string;
+  claimSupport: NarrationClaimKind[];
+  sourcePath: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value)
+    && typeof value === "object"
+    && !Array.isArray(value);
+}
+
+function normalizeObservationKey(key: string): string {
+  let normalized = "";
+  for (const char of key.toLocaleLowerCase()) {
+    const code = char.charCodeAt(0);
+    const isNumber = code >= 48 && code <= 57;
+    const isLetter = code >= 97 && code <= 122;
+    if (isNumber || isLetter) {
+      normalized += char;
+    }
+  }
+  return normalized;
+}
+
+function readObservationString(
+  record: Record<string, unknown>,
+  keys: readonly string[],
+): string | null {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed) return trimmed;
+  }
+  return null;
+}
+
+function readNestedObservationLabel(
+  record: Record<string, unknown>,
+  key: string,
+): string | null {
+  const value = record[key];
+  if (!isRecord(value)) return null;
+  return readObservationString(value, ["label", "name", "title", "summary"]);
+}
+
+function observationAtomKindForToolName(
+  toolName: CanonicalTurnPacketToolName,
+): NarratorPacketObservationAtomKind | null {
+  switch (toolName) {
+    case "find_actor_candidates":
+      return "actor";
+    case "find_object_candidates":
+      return "object";
+    case "find_location_candidates":
+    case "list_navigation_options":
+    case "check_route":
+      return "route";
+    case "inspect_known_fact":
+      return "fact";
+    case "find_poi_candidates":
+      return "object";
+    default:
+      return null;
+  }
+}
+
+function observationAtomKindForRecord(
+  record: Record<string, unknown>,
+): NarratorPacketObservationAtomKind | null {
+  const kind = readObservationString(record, ["kind"])?.toLocaleLowerCase();
+  if (kind === "fact") return "fact";
+
+  const type = readObservationString(record, ["type"])?.toLocaleLowerCase();
+  switch (type) {
+    case "actor":
+      return "actor";
+    case "item":
+    case "object":
+      return "object";
+    case "location":
+    case "route":
+      return "route";
+    default:
+      return null;
+  }
+}
+
+function observationAtomKindForKey(input: {
+  key: string;
+  toolName: CanonicalTurnPacketToolName;
+  inheritedKind: NarratorPacketObservationAtomKind | null;
+}): NarratorPacketObservationAtomKind | null {
+  const normalized = normalizeObservationKey(input.key);
+  if (
+    input.inheritedKind
+    && [
+      "actors",
+      "facts",
+      "items",
+      "targets",
+      "candidates",
+      "destination",
+      "path",
+    ].includes(normalized)
+  ) {
+    return input.inheritedKind;
+  }
+
+  switch (normalized) {
+    case "visibleactors":
+    case "actors":
+    case "personnel":
+    case "witnesses":
+      return "actor";
+    case "legaltargets":
+    case "physicalaffordances":
+    case "objects":
+    case "items":
+    case "targets":
+    case "cameras":
+      return "object";
+    case "legalmovement":
+    case "movement":
+    case "routes":
+    case "exitsroutes":
+    case "navigation":
+    case "destination":
+    case "path":
+      return "route";
+    case "barriers":
+    case "hazards":
+    case "risks":
+      return "barrier";
+    case "visiblefacts":
+    case "facts":
+    case "knownfacts":
+    case "publicfacts":
+    case "hints":
+      return "fact";
+    case "candidates":
+      return observationAtomKindForToolName(input.toolName);
+    default:
+      return null;
+  }
+}
+
+function observationAtomClaimSupport(
+  kind: NarratorPacketObservationAtomKind,
+  absenceOf: NarratorPacketObservationAtomKind | null = null,
+): NarrationClaimKind[] {
+  const effectiveKind = kind === "absence" && absenceOf ? absenceOf : kind;
+  switch (effectiveKind) {
+    case "actor":
+      return ["actor_presence", "playable_beat"];
+    case "object":
+      return ["object_presence", "playable_beat"];
+    case "route":
+      return ["route_status", "playable_beat"];
+    case "barrier":
+      return ["route_status", "threat_hazard", "playable_beat"];
+    case "fact":
+    case "absence":
+      return ["playable_beat"];
+  }
+}
+
+function observationAtomSummaryFromRecord(
+  record: Record<string, unknown>,
+  kind: NarratorPacketObservationAtomKind,
+): string | null {
+  if (kind === "route") {
+    const routeStatus = readObservationString(record, ["routeStatus", "status"]);
+    if (routeStatus) {
+      const destinationLabel = readNestedObservationLabel(record, "destination")
+        ?? readObservationString(record, ["label", "name", "title"]);
+      const status = formatInventoryTagForPrompt(routeStatus);
+      return destinationLabel
+        ? `Route to ${destinationLabel} is ${status}.`
+        : `Route status is ${status}.`;
+    }
+  }
+
+  return readObservationString(record, [
+    "summary",
+    "label",
+    "name",
+    "title",
+    "description",
+    "text",
+    "reason",
+  ]);
+}
+
+function pushObservationAtomDraft(input: {
+  drafts: NarratorPacketObservationAtomDraft[];
+  seen: Set<string>;
+  kind: NarratorPacketObservationAtomKind;
+  rawSummary: string | null;
+  sourcePath: string;
+  absenceOf?: NarratorPacketObservationAtomKind | null;
+}): void {
+  if (input.drafts.length >= OBSERVATION_ATOM_MAX) return;
+  const summary = sanitizeModelFacingText(
+    boundedSummary(input.rawSummary ?? "", OBSERVATION_ATOM_SUMMARY_MAX),
+  );
+  if (!summary) return;
+
+  const key = `${input.kind}:${summary.toLocaleLowerCase()}`;
+  if (input.seen.has(key)) return;
+  input.seen.add(key);
+  input.drafts.push({
+    kind: input.kind,
+    summary,
+    claimSupport: observationAtomClaimSupport(input.kind, input.absenceOf ?? null),
+    sourcePath: input.sourcePath,
+  });
+}
+
+function collectObservationAtomDraftsFromValue(input: {
+  value: unknown;
+  toolName: CanonicalTurnPacketToolName;
+  inheritedKind: NarratorPacketObservationAtomKind | null;
+  path: string;
+  depth: number;
+  drafts: NarratorPacketObservationAtomDraft[];
+  seen: Set<string>;
+}): void {
+  if (
+    input.depth > OBSERVATION_ATOM_DEPTH_MAX
+    || input.drafts.length >= OBSERVATION_ATOM_MAX
+  ) {
+    return;
+  }
+
+  if (typeof input.value === "string") {
+    if (!input.inheritedKind) return;
+    pushObservationAtomDraft({
+      drafts: input.drafts,
+      seen: input.seen,
+      kind: input.inheritedKind,
+      rawSummary: input.value,
+      sourcePath: input.path,
+    });
+    return;
+  }
+
+  if (Array.isArray(input.value)) {
+    input.value.forEach((entry, index) => {
+      collectObservationAtomDraftsFromValue({
+        ...input,
+        value: entry,
+        path: `${input.path}.${index + 1}`,
+        depth: input.depth + 1,
+      });
+    });
+    return;
+  }
+
+  if (!isRecord(input.value)) return;
+
+  const recordKind = observationAtomKindForRecord(input.value)
+    ?? input.inheritedKind
+    ?? observationAtomKindForToolName(input.toolName);
+  if (recordKind) {
+    pushObservationAtomDraft({
+      drafts: input.drafts,
+      seen: input.seen,
+      kind: recordKind,
+      rawSummary: observationAtomSummaryFromRecord(input.value, recordKind),
+      sourcePath: input.path,
+    });
+  }
+
+  for (const [key, value] of Object.entries(input.value)) {
+    const normalizedKey = normalizeObservationKey(key);
+    if (normalizedKey === "absence") {
+      if (typeof value === "string" && value.trim()) {
+        pushObservationAtomDraft({
+          drafts: input.drafts,
+          seen: input.seen,
+          kind: "absence",
+          rawSummary: value,
+          sourcePath: `${input.path}.${key}`,
+          absenceOf: recordKind,
+        });
+      }
+      continue;
+    }
+
+    const childKind = observationAtomKindForKey({
+      key,
+      toolName: input.toolName,
+      inheritedKind: recordKind,
+    });
+    collectObservationAtomDraftsFromValue({
+      value,
+      toolName: input.toolName,
+      inheritedKind: childKind,
+      path: `${input.path}.${key}`,
+      depth: input.depth + 1,
+      drafts: input.drafts,
+      seen: input.seen,
+    });
+  }
+}
+
+function collectObservationAtoms(args: {
+  actionId: string;
+  toolName: CanonicalTurnPacketToolName;
+  toolResult: ToolResult;
+  fallbackSummary: string;
+}): NarratorPacketObservationAtom[] {
+  const drafts: NarratorPacketObservationAtomDraft[] = [];
+  const seen = new Set<string>();
+  collectObservationAtomDraftsFromValue({
+    value: args.toolResult.result,
+    toolName: args.toolName,
+    inheritedKind: null,
+    path: "result",
+    depth: 0,
+    drafts,
+    seen,
+  });
+
+  if (drafts.length === 0) {
+    pushObservationAtomDraft({
+      drafts,
+      seen,
+      kind: "fact",
+      rawSummary: args.fallbackSummary,
+      sourcePath: "summary",
+    });
+  }
+
+  return drafts.map((draft, index) => ({
+    id: `a${index + 1}`,
+    actionId: args.actionId,
+    toolName: args.toolName,
+    kind: draft.kind,
+    summary: draft.summary,
+    claimSupport: draft.claimSupport,
+    sourcePath: draft.sourcePath,
+  }));
+}
+
+function observationWouldLeakForbiddenTerm(args: {
+  observation: NarratorPacketObservation;
+  playerAction: string;
+  forbiddenActorNames: readonly string[];
+  forbiddenFactMarkers: readonly string[];
+  forbiddenPrivateTerms: readonly string[];
+}): boolean {
+  const texts = [
+    sanitizeModelFacingText(args.observation.summary),
+    ...args.observation.atoms.map((atom) => sanitizeModelFacingText(atom.summary)),
+  ];
+  for (const term of uniqueStrings([
+    ...args.forbiddenActorNames,
+    ...args.forbiddenFactMarkers,
+    ...args.forbiddenPrivateTerms,
+  ])) {
+    const normalizedTerm = term.trim().toLowerCase();
+    if (!normalizedTerm) continue;
+    for (const text of texts) {
+      if (
+        sourceBoundaryTermIsLeak({
+          source: "observation_result:candidate",
+          text,
+          playerSourced: false,
+          playerAction: args.playerAction,
+          normalizedTerm,
+          toolName: args.observation.toolName,
+        })
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function isPacketObservationEvidenceRef(packet: CanonicalTurnPacket, actionId: string): boolean {
+  const observationEvidenceRef = `action-result:${actionId}`;
+  if (packet.turnResolution?.evidenceIds.includes(observationEvidenceRef)) {
+    return true;
+  }
+  if (packet.turnResolution?.explicitNoCombatEvidenceIds.includes(observationEvidenceRef)) {
+    return true;
+  }
+  if (packet.narratorFacts.actionIds.includes(actionId)) {
+    return true;
+  }
+  return packet.narratorFacts.toolResultRefs.some((ref) => ref.actionId === actionId);
+}
+
+function collectPerceivableObservations(input: {
+  packet: CanonicalTurnPacket;
+  forbiddenActorNames: readonly string[];
+  forbiddenFactMarkers: readonly string[];
+  forbiddenPrivateTerms: readonly string[];
+}): NarratorPacketObservation[] {
+  const packet = input.packet;
+  return packet.actionResults
+    .filter((result) =>
+      result.result.success === true
+      && isObservationToolResult(result.result)
+      && isPacketObservationEvidenceRef(packet, result.actionId))
+    .map((result) => {
+      const summary = boundedSummary(
+        result.summary
+          ?? summarizeRuntimeToolResultForNarrator({
+            toolName: result.toolName,
+            actionId: result.actionId,
+            toolInput: result.input,
+            toolArgs: result.args,
+            toolResult: result.result,
+          }),
+        640,
+      );
+      return {
+        id: `observation-result:${result.actionId}`,
+        actionId: result.actionId,
+        toolName: result.toolName,
+        summary,
+        atoms: collectObservationAtoms({
+          actionId: result.actionId,
+          toolName: result.toolName,
+          toolResult: result.result,
+          fallbackSummary: summary,
+        }),
+      };
+    })
+    .filter((observation) =>
+      observation.summary.trim().length > 0
+      && !observationWouldLeakForbiddenTerm({
+        observation,
+        playerAction: packet.playerAction,
+        forbiddenActorNames: input.forbiddenActorNames,
+        forbiddenFactMarkers: input.forbiddenFactMarkers,
+        forbiddenPrivateTerms: input.forbiddenPrivateTerms,
+      })
+    );
 }
 
 interface NarratorPromptVisibleItem {
@@ -1275,6 +2461,14 @@ function collectNarratorPromptVisibleItems(packet: NarratorPacket): NarratorProm
       text: effect.summary,
       sourceId: effect.id,
     })),
+    ...(packet.perceivableObservations ?? []).flatMap((observation) =>
+      observation.atoms.map((atom) => ({
+        id: `${observation.id}:${atom.id}`,
+        category: "observation_result",
+        text: atom.summary,
+        sourceId: observation.actionId,
+      }))
+    ),
     ...packet.visibleActors.map((actor) => ({
       id: actor.id,
       category: "visible_actor",
@@ -1339,7 +2533,7 @@ function countUnreferencedSuccessfulActionResults(args: {
   const includedGeneratedEffectIds = new Set(
     args.perceivableEffects
       .filter((effect) => effect.id.startsWith("action-result:"))
-      .map((effect) => effect.id.replace(/^action-result:/u, "")),
+      .map((effect) => effect.id.slice("action-result:".length)),
   );
 
   return args.packet.actionResults.filter((result) => {
@@ -1474,7 +2668,7 @@ function buildNarratorSourceLinkedSummaries(
     id: `narrator-summary:${sourceIds.slice(0, 4).join(":")}`,
     summary:
       `${overflow.length} additional player-visible packet records summarized for budget. `
-      + `Sources: ${sourceIds.slice(0, 8).join(", ")}.`,
+      + "Source links are preserved internally.",
     sourceIds,
     summarizedItemCount: overflow.length,
   }];
@@ -1524,6 +2718,7 @@ function buildNarratorContextBudgetTrace(args: {
       events: args.packet.perceivableEvents.length,
       responses: args.packet.perceivableResponses.length,
       effects: args.packet.perceivableEffects.length,
+      observations: (args.packet.perceivableObservations ?? []).length,
       guardrails: args.packet.guardrails.length,
       sourceLinkedSummaries: args.sourceLinkedSummaries.length,
     },
@@ -1559,7 +2754,16 @@ export function buildNarratorPacket(args: BuildNarratorPacketArgs): NarratorPack
     args.canonicalTurnPacket,
     args.frame,
     hiddenSourceRedactionTerms,
+    rawForbiddenActorNames,
+    forbiddenFactMarkers,
+    forbiddenPrivateTerms,
   );
+  const perceivableObservations = collectPerceivableObservations({
+    packet: args.canonicalTurnPacket,
+    forbiddenActorNames: rawForbiddenActorNames,
+    forbiddenFactMarkers,
+    forbiddenPrivateTerms,
+  });
   const hintSignals = collectHintSignals(args.frame);
   const hintSignalSourceRefs = collectHintSignalSourceRefs(args.frame);
   const committedVisibleActorCreationLabels = collectCommittedVisibleActorCreationLabels({
@@ -1573,6 +2777,7 @@ export function buildNarratorPacket(args: BuildNarratorPacketArgs): NarratorPack
     perceivableEvents,
     perceivableResponses,
     perceivableEffects,
+    perceivableObservations,
     hintSignals,
     hintSignalSourceRefs,
   });
@@ -1597,6 +2802,7 @@ export function buildNarratorPacket(args: BuildNarratorPacketArgs): NarratorPack
     perceivableEvents,
     perceivableResponses,
     perceivableEffects,
+    perceivableObservations,
     visibleActors,
     currentInventory,
     hintSignals,
@@ -1627,6 +2833,163 @@ export function buildNarratorPacket(args: BuildNarratorPacketArgs): NarratorPack
   return packet;
 }
 
+export function repairPromptUnsafePerceivableEffects(packet: NarratorPacket): NarratorPacket {
+  const unsafeEffects = packet.perceivableEffects.filter((effect) =>
+    visibleEffectWouldLeakForbiddenTerm({
+      effect,
+      playerAction: packet.playerAction,
+      forbiddenActorNames: packet.forbiddenActorNames,
+      forbiddenFactMarkers: packet.forbiddenFactMarkers,
+      forbiddenPrivateTerms: packet.forbiddenPrivateTerms,
+    }),
+  );
+  if (unsafeEffects.length === 0) {
+    return packet;
+  }
+
+  const unsafeEffectIds = new Set(unsafeEffects.map((effect) => effect.id));
+  const unsafeActionIds = new Set(
+    unsafeEffects
+      .map((effect) => effect.actionId)
+      .filter((value): value is string => Boolean(value)),
+  );
+  const safeEffects = packet.perceivableEffects.filter((effect) => !unsafeEffectIds.has(effect.id));
+  const summaryLeaks = (source: string, text: string): boolean => {
+    for (const term of uniqueStrings([
+      ...packet.forbiddenActorNames,
+      ...packet.forbiddenFactMarkers,
+      ...packet.forbiddenPrivateTerms,
+    ])) {
+      const normalizedTerm = term.trim().toLowerCase();
+      if (
+        normalizedTerm
+        && sourceBoundaryTermIsLeak({
+          source,
+          text,
+          playerSourced: false,
+          playerAction: packet.playerAction,
+          normalizedTerm,
+          toolName: null,
+        })
+      ) {
+        return true;
+      }
+    }
+    return false;
+  };
+  const evidenceLedger = (packet.evidenceLedger ?? []).filter((entry) => {
+    if (entry.sourceId && (unsafeEffectIds.has(entry.sourceId) || unsafeActionIds.has(entry.sourceId))) {
+      return false;
+    }
+    if (entry.category === "perceivable_effect" || entry.category === "tool_result") {
+      const separatorIndex = entry.id.indexOf(":");
+      const rawId = separatorIndex >= 0 ? entry.id.slice(separatorIndex + 1) : "";
+      if (rawId && (unsafeEffectIds.has(rawId) || unsafeActionIds.has(rawId))) {
+        return false;
+      }
+    }
+    return !summaryLeaks(`evidence:${entry.category}`, entry.summary);
+  });
+  const sourceLinkedSummaries = (packet.sourceLinkedSummaries ?? []).filter((summary) =>
+    !summary.sourceIds.some((sourceId) => unsafeEffectIds.has(sourceId) || unsafeActionIds.has(sourceId))
+    && !summaryLeaks("source_linked_summary", summary.summary)
+  );
+  const redactionAudit = packet.redactionAudit
+    ? {
+        ...packet.redactionAudit,
+        forbiddenPrivateTermCount:
+          packet.redactionAudit.forbiddenPrivateTermCount + unsafeEffects.length,
+        retainedEvidenceCount: evidenceLedger.length,
+        excludedReasons: {
+          ...packet.redactionAudit.excludedReasons,
+          forbidden_private_term:
+            packet.redactionAudit.excludedReasons.forbidden_private_term + unsafeEffects.length,
+        },
+      }
+    : undefined;
+
+  return {
+    ...packet,
+    perceivableEffects: safeEffects,
+    evidenceLedger,
+    sourceLinkedSummaries,
+    redactionAudit,
+    contextBudgetTrace: undefined,
+  };
+}
+
+export function repairModelGuidancePerceivableResponses(packet: NarratorPacket): NarratorPacket {
+  const retainedBackendResponseIds = new Set(
+    packet.perceivableResponses
+      .filter(responseContributesBackendFacts)
+      .map((response) => response.id),
+  );
+
+  const perceivableResponses = packet.perceivableResponses.filter(
+    (response) => retainedBackendResponseIds.has(response.id),
+  );
+  const originalEvidenceLedger = packet.evidenceLedger ?? [];
+  const evidenceLedger = originalEvidenceLedger.filter(
+    (entry) => {
+      if (entry.category !== "perceivable_response") {
+        return true;
+      }
+      return Boolean(entry.sourceId && retainedBackendResponseIds.has(entry.sourceId));
+    },
+  );
+  const originalSourceLinkedSummaries = packet.sourceLinkedSummaries ?? [];
+  const sourceLinkedSummaries = buildNarratorSourceLinkedSummaries(
+    collectNarratorPromptVisibleItems({
+      ...packet,
+      perceivableResponses,
+      evidenceLedger,
+      sourceLinkedSummaries: [],
+      contextBudgetTrace: undefined,
+    }),
+  );
+  if (
+    perceivableResponses.length === packet.perceivableResponses.length
+    && evidenceLedger.length === originalEvidenceLedger.length
+    && sourceLinkedSummariesEqual(sourceLinkedSummaries, originalSourceLinkedSummaries)
+  ) {
+    return packet;
+  }
+
+  const redactionAudit = packet.redactionAudit
+    ? {
+        ...packet.redactionAudit,
+        retainedEvidenceCount: evidenceLedger.length,
+      }
+    : undefined;
+
+  return {
+    ...packet,
+    perceivableResponses,
+    evidenceLedger,
+    sourceLinkedSummaries,
+    redactionAudit,
+    contextBudgetTrace: undefined,
+  };
+}
+
+function sourceLinkedSummariesEqual(
+  left: readonly NarratorPacketSourceLinkedSummary[],
+  right: readonly NarratorPacketSourceLinkedSummary[],
+): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+  return left.every((summary, index) => {
+    const other = right[index];
+    return Boolean(other)
+      && summary.id === other.id
+      && summary.summary === other.summary
+      && summary.summarizedItemCount === other.summarizedItemCount
+      && summary.sourceIds.length === other.sourceIds.length
+      && summary.sourceIds.every((sourceId, sourceIndex) => sourceId === other.sourceIds[sourceIndex]);
+  });
+}
+
 function isPlayerActionEvent(event: CanonicalTurnPacketEvent): boolean {
   return event.kind === "player_action";
 }
@@ -1647,26 +3010,33 @@ function promptSourceBoundaryText(
   }> = [
     { source: "oracle_outcome", text: packet.oracleOutcome },
     {
-      source: `anchor_event:${packet.anchorEvent.id}`,
+      source: "anchor_event:e0",
       text: packet.anchorEvent.summary,
       playerSourced: isPlayerActionEvent(packet.anchorEvent),
     },
-    ...packet.perceivableEvents.map((event) => ({
-      source: `perceivable_event:${event.id}`,
+    ...packet.perceivableEvents.map((event, index) => ({
+      source: `committed_event:e${index + 1}`,
       text: event.summary,
       playerSourced: isPlayerActionEvent(event),
     })),
-    ...packet.perceivableResponses.map((response) => ({
-      source: `perceivable_response:${response.id}`,
+    ...packet.perceivableResponses.map((response, index) => ({
+      source: `perceivable_response:r${index + 1}`,
       text: response.summary,
     })),
-    ...packet.perceivableEffects.map((effect) => ({
-      source: `perceivable_effect:${effect.id}`,
+    ...packet.perceivableEffects.map((effect, index) => ({
+      source: `perceivable_effect:f${index + 1}`,
       text: effect.summary,
       toolName: effect.toolName,
     })),
-    ...(packet.currentInventory ?? []).map((item) => ({
-      source: `current_inventory_status:${item.itemId}`,
+    ...(packet.perceivableObservations ?? []).flatMap((observation, observationIndex) =>
+      observation.atoms.map((atom, atomIndex) => ({
+        source: `observation_result:o${observationIndex + 1}.a${atomIndex + 1}`,
+        text: atom.summary,
+        toolName: observation.toolName,
+      }))
+    ),
+    ...(packet.currentInventory ?? []).map((item, index) => ({
+      source: `current_inventory_status:i${index + 1}`,
       text: formatInventoryStatusSummary(item),
     })),
     ...packet.hintSignals.map((hint, index) => ({
@@ -1677,8 +3047,8 @@ function promptSourceBoundaryText(
       source: `guardrail:${index + 1}`,
       text: guardrail,
     })),
-    ...(packet.sourceLinkedSummaries ?? []).map((summary) => ({
-      source: `source_linked_summary:${summary.id}`,
+    ...(packet.sourceLinkedSummaries ?? []).map((summary, index) => ({
+      source: `source_linked_summary:s${index + 1}`,
       text: summary.summary,
     })),
     { source: "control_return", text: packet.controlReturnReason },
@@ -1694,7 +3064,7 @@ function promptSourceBoundaryText(
       typeof entry.text === "string" && entry.text.length > 0,
   ).map((entry) => ({
     source: entry.source,
-    text: entry.text,
+    text: sanitizeModelFacingText(entry.text),
     playerSourced: Boolean(entry.playerSourced),
     toolName: entry.toolName,
   }));
@@ -1728,6 +3098,12 @@ export function assertNarratorPacketPromptSafe(packet: NarratorPacket): void {
         continue;
       }
       const leak = promptTexts.find((entry) => {
+        if (
+          group.allowCommittedActorCreation
+          && forbiddenActorNameIsAllowedVisibleLabel(term, packet.allowedVisibleActorNames)
+        ) {
+          return false;
+        }
         if (
           group.allowCommittedActorCreation
           && sourceBoundaryTermIsAllowedCommittedActorCreation({
@@ -1776,29 +3152,35 @@ export function sourceBoundaryTermIsAllowedCommittedActorCreation(args: {
   });
 }
 
-function formatEvent(event: CanonicalTurnPacketEvent): string {
-  return `- ${event.id}: ${event.summary} [actor=${event.actorId}; kind=${event.kind}]`;
+function formatEvent(event: CanonicalTurnPacketEvent, index: number): string {
+  return `- e${index + 1}: ${sanitizeModelFacingText(event.summary)} [kind=${event.kind}]`;
 }
 
-function formatResponse(response: CanonicalTurnPacketResponse): string {
-  return `- ${response.id}: ${response.summary} [actor=${response.actorId}; event=${response.eventId}; kind=${response.responseKind}]`;
+function formatResponse(response: CanonicalTurnPacketResponse, index: number): string {
+  return `- r${index + 1}: ${sanitizeModelFacingText(response.summary)} [kind=${response.responseKind}]`;
 }
 
-function formatEffect(effect: CanonicalTurnPacketEffect): string {
-  const refs = [
-    effect.actionId ? `action=${effect.actionId}` : null,
-    effect.actorId ? `actor=${effect.actorId}` : null,
-  ].filter((value): value is string => Boolean(value));
-
-  return `- ${effect.id}: ${effect.summary}${refs.length > 0 ? ` [${refs.join("; ")}]` : ""}`;
+function formatEffect(effect: CanonicalTurnPacketEffect, index: number): string {
+  return `- f${index + 1}: ${sanitizeModelFacingText(effect.summary)}`;
 }
 
-function formatEvidence(evidence: NarratorPacketEvidence): string {
-  return `- ${evidence.id} [category=${evidence.category}]`;
+function formatObservation(observation: NarratorPacketObservation, index: number): string {
+  const lines = [`- o${index + 1}: ${sanitizeModelFacingText(observation.toolName)}`];
+  for (let atomIndex = 0; atomIndex < observation.atoms.length; atomIndex += 1) {
+    const atom = observation.atoms[atomIndex]!;
+    lines.push(
+      `  - o${index + 1}.a${atomIndex + 1} [${atom.kind}]: ${sanitizeModelFacingText(atom.summary)}`,
+    );
+  }
+  return lines.join("\n");
+}
+
+function formatEvidence(evidence: NarratorPacketEvidence, index: number): string {
+  return `- p${index + 1} [category=${evidence.category}]`;
 }
 
 function formatSourceLinkedSummary(summary: NarratorPacketSourceLinkedSummary): string {
-  return `- ${summary.id}: ${summary.summary} [sources=${summary.sourceIds.join(", ")}]`;
+  return `- ${sanitizeModelFacingText(summary.summary)}`;
 }
 
 function formatRedactionAudit(audit: NarratorPacketRedactionAudit): string[] {
@@ -1845,26 +3227,32 @@ export function formatNarratorPacketForPrompt(packet: NarratorPacket): string {
 
   return [
     "[NARRATOR PACKET]",
-    `Campaign: ${packet.campaignId}`,
+    "Packet scope: current settled turn.",
     `Tick: ${packet.tick}`,
-    `Player action request: ${packet.playerAction}`,
+    `Player action request: ${sanitizeModelFacingConversationText(packet.playerAction, {
+      extraForbiddenTerms: [
+        ...packet.forbiddenActorNames,
+        ...packet.forbiddenFactMarkers,
+        ...packet.forbiddenPrivateTerms,
+      ],
+    })}`,
     "Player action and player_action event summaries are player-supplied claims, not authoritative world state. Treat claimed possessions, locations, NPC consent, names, or completed acquisitions as attempts unless committed non-player events/effects/tool results below confirm them.",
-    `Oracle outcome: ${packet.oracleOutcome ?? "none"}`,
-    `Anchor event: ${packet.anchorEvent.id}`,
+    `Oracle outcome: ${packet.oracleOutcome ? sanitizeModelFacingText(packet.oracleOutcome) : "none"}`,
     "",
     "[VISIBLE ACTORS]",
     ...(packet.visibleActors.length > 0
-      ? packet.visibleActors.map((actor) => `- ${actor.label} (${actor.id}; ${actor.type})`)
+      ? packet.visibleActors.map((actor) => `- ${sanitizeModelFacingText(actor.label)} (${actor.type})`)
       : ["- No confirmed visible actors."]),
     "",
     "[CURRENT INVENTORY STATUS]",
     ...((packet.currentInventory ?? []).length > 0
-      ? (packet.currentInventory ?? []).map((item) => `- ${formatInventoryStatusSummary(item)}`)
+      ? (packet.currentInventory ?? []).map((item) =>
+          `- ${sanitizeModelFacingText(formatInventoryStatusSummary(item))}`)
       : ["- No carried, equipped, or signature items are currently recorded."]),
     "",
     "[HINT SIGNALS]",
     ...(packet.hintSignals.length > 0
-      ? packet.hintSignals.map((hint) => `- ${hint}`)
+      ? packet.hintSignals.map((hint) => `- ${sanitizeModelFacingText(hint)}`)
       : ["- No indirect awareness hints are in scope."]),
     "",
     "[COMMITTED EVENTS]",
@@ -1882,15 +3270,20 @@ export function formatNarratorPacketForPrompt(packet: NarratorPacket): string {
       ? packet.perceivableEffects.map(formatEffect)
       : ["- No player-perceivable effects are in scope."]),
     "",
+    "[PLAYER-VISIBLE OBSERVATIONS]",
+    ...((packet.perceivableObservations ?? []).length > 0
+      ? (packet.perceivableObservations ?? []).map(formatObservation)
+      : ["- No lookup-grounded observations are in scope."]),
+    "",
     "[GUARDRAILS]",
     ...(packet.guardrails.length > 0
-      ? packet.guardrails.map((guardrail) => `- ${guardrail}`)
+      ? packet.guardrails.map((guardrail) => `- ${sanitizeModelFacingText(guardrail)}`)
       : ["- Stay within the committed packet."]),
     "",
     "[EVIDENCE LEDGER]",
     ...((packet.evidenceLedger ?? []).length > 0
       ? (packet.evidenceLedger ?? []).map(formatEvidence)
-      : ["- No packet evidence ids are in scope."]),
+      : ["- No packet evidence refs are in scope."]),
     "",
     "[SOURCE-LINKED SUMMARIES]",
     ...(sourceLinkedSummaries.length > 0
@@ -1904,6 +3297,6 @@ export function formatNarratorPacketForPrompt(packet: NarratorPacket): string {
     ...formatContextBudgetTrace(packet.contextBudgetTrace),
     "",
     "[CONTROL RETURN]",
-    packet.controlReturnReason,
+    sanitizeModelFacingText(packet.controlReturnReason),
   ].join("\n");
 }

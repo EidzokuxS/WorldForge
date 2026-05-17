@@ -511,6 +511,7 @@ export async function applyMocks(): Promise<void> {
       captureSnapshot: vi.fn(async () => ({ snapshot: "mock" })),
       restoreSnapshot: vi.fn(async () => undefined),
       findPendingNarrationSaga: vi.fn(() => null),
+      getSettledTurnPacket: vi.fn(() => null),
       NarrationRepairExhaustedError: class NarrationRepairExhaustedError extends Error {},
       PendingNarrationError: class PendingNarrationError extends Error {},
       tickPresentNpcs: vi.fn(async () => undefined),
@@ -545,7 +546,10 @@ export async function applyMocks(): Promise<void> {
 
   vi.doMock(mod("vectors/episodic-events.js"), () => ({
     drainPendingCommittedEvents: vi.fn(() => []),
+    drainPendingCommittedEventsByIds: vi.fn(() => []),
     embedAndUpdateEvent: vi.fn(async () => undefined),
+    retractStoredEpisodicEvent: vi.fn(async () => undefined),
+    retractPendingCommittedEventsForTick: vi.fn(async () => []),
   }));
 
   vi.doMock(mod("images/index.js"), () => ({
@@ -662,6 +666,10 @@ export async function applyMocks(): Promise<void> {
   vi.doMock(mod("campaign/runtime-state.js"), () => {
     const active = new Set<string>();
     const snapshots = new Map<string, unknown>();
+    const metadataByCampaign = new Map<string, {
+      acceptedDurableEventIds: string[];
+      producedDurableEventIds: string[];
+    }>();
     return {
       tryBeginTurn: (id: string) => {
         if (active.has(id)) return false;
@@ -672,14 +680,36 @@ export async function applyMocks(): Promise<void> {
         active.delete(id);
       },
       hasActiveTurn: (id: string) => active.has(id),
-      setLastTurnSnapshot: (id: string, snap: unknown) => {
+      setLastTurnSnapshot: (
+        id: string,
+        snap: unknown,
+        metadata?: {
+          acceptedDurableEventIds?: readonly string[];
+          producedDurableEventIds?: readonly string[];
+        },
+      ) => {
         snapshots.set(id, snap);
+        metadataByCampaign.set(id, {
+          acceptedDurableEventIds: [...new Set(metadata?.acceptedDurableEventIds ?? [])],
+          producedDurableEventIds: [...new Set(metadata?.producedDurableEventIds ?? [])],
+        });
       },
       getLastTurnSnapshot: (id: string) => snapshots.get(id),
+      getLastTurnSnapshotMetadata: (id: string) =>
+        metadataByCampaign.get(id) ?? {
+          acceptedDurableEventIds: [],
+          producedDurableEventIds: [],
+        },
       clearLastTurnSnapshot: (id: string) => {
         snapshots.delete(id);
+        metadataByCampaign.delete(id);
       },
       hasLiveTurnSnapshot: (id: string) => snapshots.has(id),
+      clearCampaignRuntimeState: (id: string) => {
+        active.delete(id);
+        snapshots.delete(id);
+        metadataByCampaign.delete(id);
+      },
     };
   });
 

@@ -1,7 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { executeBridgeCandidateToolMock } = vi.hoisted(() => ({
+const {
+  executeBridgeCandidateToolMock,
+  sqliteExecMock,
+  retractStoredEpisodicEventMock,
+  retractReflectionBudgetMock,
+  retractActorKnowledgeRecordMock,
+} = vi.hoisted(() => ({
   executeBridgeCandidateToolMock: vi.fn(),
+  sqliteExecMock: vi.fn(),
+  retractStoredEpisodicEventMock: vi.fn(),
+  retractReflectionBudgetMock: vi.fn(),
+  retractActorKnowledgeRecordMock: vi.fn(),
 }));
 
 vi.mock("../tool-executor.js", () => ({
@@ -28,15 +38,89 @@ vi.mock("../bridge-candidate-tools.js", async (importOriginal) => {
   };
 });
 
+vi.mock("../../ai/generate-object-safe.js", () => ({
+  safeGenerateObject: vi.fn(),
+}));
+
+vi.mock("../../ai/provider-registry.js", () => ({
+  createModel: vi.fn(() => ({ modelId: "judge-test-model" })),
+}));
+
+vi.mock("../../db/index.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../db/index.js")>();
+  return {
+    ...actual,
+    getSqliteConnection: vi.fn(() => ({
+      exec: sqliteExecMock,
+    })),
+  };
+});
+
+vi.mock("../../vectors/episodic-events.js", () => ({
+  retractStoredEpisodicEvent: retractStoredEpisodicEventMock,
+}));
+
+vi.mock("../reflection-budget.js", () => ({
+  retractReflectionBudget: retractReflectionBudgetMock,
+}));
+
+vi.mock("../knowledge-model.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../knowledge-model.js")>();
+  return {
+    ...actual,
+    retractActorKnowledgeRecord: retractActorKnowledgeRecordMock,
+  };
+});
+
+import { safeGenerateObject } from "../../ai/generate-object-safe.js";
+import type { ProviderConfig } from "../../ai/provider-registry.js";
 import type { GmActionChecklist } from "../gm-action-checklist.js";
-import { executeGmToolSteps } from "../gm-tool-step.js";
+import { executeGmToolSteps, runGmToolStepRevision } from "../gm-tool-step.js";
 import type { SceneFrame } from "../scene-frame.js";
 import { executeToolCall } from "../tool-executor.js";
+import type { ToolResultAuthority } from "../tool-result.js";
 
 const playerId = "11111111-1111-4111-8111-111111111111";
 const npcId = "22222222-2222-4222-8222-222222222222";
 const sceneId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const locationId = "99999999-9999-4999-8999-999999999999";
+const provider: ProviderConfig = {
+  id: "test-provider",
+  name: "Test Provider",
+  baseUrl: "http://localhost:11434/v1",
+  apiKey: "test-key",
+  model: "judge-model",
+};
+const sceneBeatRuntimeRequirement = {
+  kind: "scene_beat",
+  durability: "durable",
+  beatKind: "event_log",
+} as const;
+const supportActorRuntimeRequirement = {
+  kind: "state_mutation",
+  effectKind: "support_actor_created",
+} as const;
+
+function toolAuthority(
+  stateDeltaRefs: string[],
+  toolResultId = "tool-result-test",
+  eventRefs: string[] = [],
+): ToolResultAuthority {
+  return {
+    toolResultId,
+    campaignId: "campaign-1",
+    sourceEntity: { type: "system", id: "gm-tool-step-test" },
+    baseWorldVersion: 4,
+    resultWorldVersion: 5,
+    elapsedWorldTimeMinutes: 0,
+    stateDeltaRefs,
+    eventRefs,
+    witnesses: [],
+    knowledgeOutputs: [],
+    visibilityOutputs: [],
+    resources: [],
+  };
+}
 
 function createFrame(overrides: Partial<SceneFrame> = {}): SceneFrame {
   return {
@@ -91,6 +175,7 @@ function createFrame(overrides: Partial<SceneFrame> = {}): SceneFrame {
     combatEnvelope: null,
     oracle: null,
     ...overrides,
+    worldVersion: overrides.worldVersion ?? 0,
   };
 }
 
@@ -138,7 +223,10 @@ beforeEach(() => {
     result: {
       eventId: "event-1",
       actorName: "Road Warden",
+      durability: "durable",
+      persisted: true,
     },
+    authority: toolAuthority([], "tool-result-event-1", ["event-1"]),
   });
   executeBridgeCandidateToolMock.mockReturnValue({
     success: true,
@@ -160,6 +248,7 @@ describe("executeGmToolSteps", () => {
       tick: frame.tick,
       frame,
       checklist: checklist(),
+      runtimeRequirement: sceneBeatRuntimeRequirement,
     });
 
     expect(results).toEqual([
@@ -186,6 +275,35 @@ describe("executeGmToolSteps", () => {
         subjectActorId: playerId,
       }),
     );
+  });
+
+  it("rolls back a standalone log_event when no typed scene beat receipt boundary is provided", async () => {
+    const frame = createFrame();
+    const results = await executeGmToolSteps({
+      campaignId: frame.campaignId,
+      tick: frame.tick,
+      frame,
+      checklist: checklist(),
+    });
+
+    expect(results).toEqual([
+      expect.objectContaining({
+        stepId: "step-1",
+        status: "skipped",
+        toolName: "log_event",
+        result: null,
+        mutationRefs: [],
+        validationError: expect.objectContaining({
+          code: "tool_failed",
+          message: expect.stringContaining("typed runtimeRequirement was not provided"),
+        }),
+      }),
+    ]);
+    expect(sqliteExecMock.mock.calls.map(([statement]) => statement)).toEqual([
+      expect.stringMatching(/^SAVEPOINT gm_tool_step_/),
+      expect.stringMatching(/^ROLLBACK TO SAVEPOINT gm_tool_step_/),
+      expect.stringMatching(/^RELEASE SAVEPOINT gm_tool_step_/),
+    ]);
   });
 
   it("executes lookup candidates through observation dispatch instead of executeToolCall", async () => {
@@ -250,6 +368,11 @@ describe("executeGmToolSteps", () => {
   });
 
   it("allows one revised candidate after schema or grounding rejection", async () => {
+    vi.mocked(executeToolCall).mockResolvedValueOnce({
+      success: true,
+      result: { npcId: "npc-gate-witness" },
+      authority: toolAuthority(["actor:npc-gate-witness"]),
+    });
     const frame = createFrame();
     const spawnStep: GmActionChecklist["steps"][number] = {
       ...logEventStep({ stepId: "step-1" }),
@@ -272,8 +395,9 @@ describe("executeGmToolSteps", () => {
       tick: frame.tick,
       frame,
       checklist: checklist([spawnStep]),
+      runtimeRequirement: supportActorRuntimeRequirement,
       reviseStep: ({ validationError }) => {
-        expect(validationError.code).toBe("grounding_invalid");
+        expect(validationError.code).toBe("schema_invalid");
         return {
           toolName: "spawn_npc",
           targetRefs: [],
@@ -303,6 +427,187 @@ describe("executeGmToolSteps", () => {
       undefined,
       expect.any(Object),
     );
+  });
+
+  it("rolls back a side-effecting revision when the original checklist looked observation-only", async () => {
+    vi.mocked(executeToolCall).mockResolvedValueOnce({
+      success: true,
+      status: "success",
+      result: { entity: "Road Warden", tags: ["trusting-player"] },
+      authority: toolAuthority(["npc:road-warden:tag"]),
+    });
+    const frame = createFrame({
+      allowedTools: ["find_actor_candidates", "add_tag"],
+    });
+    const lookupStep = logEventStep({
+      stepId: "step-1",
+      candidateToolRequest: {
+        toolName: "find_actor_candidates",
+        actorRef: "Player",
+        targetRefs: [],
+        input: {
+          query: "",
+          maxResults: 4,
+        },
+      },
+    });
+
+    const results = await executeGmToolSteps({
+      campaignId: frame.campaignId,
+      tick: frame.tick,
+      frame,
+      checklist: checklist([lookupStep]),
+      reviseStep: ({ validationError }) => {
+        expect(validationError.code).toBe("schema_invalid");
+        return {
+          toolName: "add_tag",
+          targetRefs: ["Road Warden"],
+          input: {
+            entityName: "Road Warden",
+            entityType: "npc",
+            tag: "trusting-player",
+          },
+        };
+      },
+    });
+
+    expect(results).toEqual([
+      expect.objectContaining({
+        stepId: "step-1",
+        attempt: 2,
+        status: "skipped",
+        toolName: "add_tag",
+        result: null,
+        mutationRefs: [],
+        validationError: expect.objectContaining({
+          code: "tool_failed",
+          message: expect.stringContaining("typed runtimeRequirement was not provided"),
+        }),
+      }),
+    ]);
+    expect(executeToolCall).toHaveBeenCalledTimes(1);
+    expect(sqliteExecMock.mock.calls.map(([statement]) => statement)).toEqual([
+      expect.stringMatching(/^SAVEPOINT gm_tool_step_/),
+      expect.stringMatching(/^ROLLBACK TO SAVEPOINT gm_tool_step_/),
+      expect.stringMatching(/^RELEASE SAVEPOINT gm_tool_step_/),
+    ]);
+  });
+
+  it("commits a side-effecting revision from an observation-only draft when it satisfies a typed requirement", async () => {
+    vi.mocked(executeToolCall).mockResolvedValueOnce({
+      success: true,
+      status: "success",
+      result: { entity: "Road Warden", tags: ["trusting-player"] },
+      authority: toolAuthority(["npc:road-warden:tag"]),
+    });
+    const frame = createFrame({
+      allowedTools: ["find_actor_candidates", "add_tag"],
+    });
+    const lookupStep = logEventStep({
+      stepId: "step-1",
+      candidateToolRequest: {
+        toolName: "find_actor_candidates",
+        actorRef: "Player",
+        targetRefs: [],
+        input: {
+          query: "",
+          maxResults: 4,
+        },
+      },
+    });
+
+    const results = await executeGmToolSteps({
+      campaignId: frame.campaignId,
+      tick: frame.tick,
+      frame,
+      checklist: checklist([lookupStep]),
+      runtimeRequirement: { kind: "state_mutation", effectKind: "entity_tag" },
+      reviseStep: () => ({
+        toolName: "add_tag",
+        targetRefs: ["Road Warden"],
+        input: {
+          entityName: "Road Warden",
+          entityType: "npc",
+          tag: "trusting-player",
+        },
+      }),
+    });
+
+    expect(results).toEqual([
+      expect.objectContaining({
+        stepId: "step-1",
+        attempt: 2,
+        status: "revised",
+        toolName: "add_tag",
+        validationError: null,
+      }),
+    ]);
+    expect(sqliteExecMock.mock.calls.map(([statement]) => statement)).toEqual([
+      expect.stringMatching(/^SAVEPOINT gm_tool_step_/),
+      expect.stringMatching(/^RELEASE SAVEPOINT gm_tool_step_/),
+    ]);
+  });
+
+  it("rolls back a side-effecting revision when its typed receipt lacks authority", async () => {
+    vi.mocked(executeToolCall).mockResolvedValueOnce({
+      success: true,
+      status: "success",
+      result: { entity: "Road Warden", tags: ["trusting-player"] },
+    });
+    const frame = createFrame({
+      allowedTools: ["find_actor_candidates", "add_tag"],
+    });
+    const lookupStep = logEventStep({
+      stepId: "step-1",
+      candidateToolRequest: {
+        toolName: "find_actor_candidates",
+        actorRef: "Player",
+        targetRefs: [],
+        input: {
+          query: "",
+          maxResults: 4,
+        },
+      },
+    });
+
+    const results = await executeGmToolSteps({
+      campaignId: frame.campaignId,
+      tick: frame.tick,
+      frame,
+      checklist: checklist([lookupStep]),
+      runtimeRequirement: { kind: "state_mutation", effectKind: "entity_tag" },
+      reviseStep: () => ({
+        toolName: "add_tag",
+        targetRefs: ["Road Warden"],
+        input: {
+          entityName: "Road Warden",
+          entityType: "npc",
+          tag: "trusting-player",
+        },
+      }),
+    });
+
+    expect(results).toEqual([
+      expect.objectContaining({
+        stepId: "step-1",
+        attempt: 2,
+        status: "skipped",
+        toolName: "add_tag",
+        result: null,
+        mutationRefs: [],
+        validationError: expect.objectContaining({
+          code: "tool_failed",
+          message: expect.stringContaining(
+            "add_tag did not satisfy or feed an accepted runtime receipt",
+          ),
+        }),
+      }),
+    ]);
+    expect(sqliteExecMock.mock.calls.map(([statement]) => statement)).toEqual([
+      expect.stringMatching(/^SAVEPOINT gm_tool_step_/),
+      expect.stringMatching(/^ROLLBACK TO SAVEPOINT gm_tool_step_/),
+      expect.stringMatching(/^RELEASE SAVEPOINT gm_tool_step_/),
+    ]);
   });
 
   it("skips the step when revision generation fails after validation rejection", async () => {
@@ -336,7 +641,7 @@ describe("executeGmToolSteps", () => {
         attempt: 1,
         status: "skipped",
         validationError: expect.objectContaining({
-          code: "grounding_invalid",
+          code: "schema_invalid",
           message: expect.stringContaining("Revision failed: revision model malformed output"),
         }),
       }),
@@ -375,7 +680,7 @@ describe("executeGmToolSteps", () => {
       expect.objectContaining({
         stepId: "step-1",
         status: "skipped",
-        validationError: expect.objectContaining({ code: "grounding_invalid" }),
+        validationError: expect.objectContaining({ code: "schema_invalid" }),
       }),
       expect.objectContaining({
         stepId: "step-2",
@@ -422,7 +727,8 @@ describe("executeGmToolSteps", () => {
       })
       .mockResolvedValueOnce({
         success: true,
-        result: { eventId: "event-2" },
+        result: { eventId: "event-2", durability: "durable", persisted: true },
+        authority: toolAuthority([], "tool-result-event-2", ["event-2"]),
       });
 
     const frame = createFrame();
@@ -431,6 +737,7 @@ describe("executeGmToolSteps", () => {
       tick: frame.tick,
       frame,
       checklist: checklist(),
+      runtimeRequirement: sceneBeatRuntimeRequirement,
       reviseStep: ({ validationError }) => {
         expect(validationError.code).toBe("tool_failed");
         return {
@@ -590,6 +897,7 @@ describe("executeGmToolSteps", () => {
       tick: frame.tick,
       frame,
       checklist: checklist([proceduralRulingStep]),
+      runtimeRequirement: sceneBeatRuntimeRequirement,
     });
 
     expect(results).toEqual([
@@ -636,6 +944,7 @@ describe("executeGmToolSteps", () => {
       tick: frame.tick,
       frame,
       checklist: checklist([sceneLocalAttemptStep]),
+      runtimeRequirement: sceneBeatRuntimeRequirement,
     });
 
     expect(results).toEqual([
@@ -653,6 +962,268 @@ describe("executeGmToolSteps", () => {
       undefined,
       expect.objectContaining({ scope: "player_turn" }),
     );
+  });
+
+  it("rolls back side effects when a planned terminal receipt is skipped", async () => {
+    const frame = createFrame({
+      allowedTools: ["add_tag", "record_dialogue_outcome"],
+    });
+    const addTagStep = logEventStep({
+      stepId: "step-1",
+      expectedVisibleEffect: "The warden is marked as trusting the player.",
+      candidateToolRequest: {
+        toolName: "add_tag",
+        actorRef: "Player",
+        targetRefs: ["Road Warden"],
+        input: {
+          entityName: "Road Warden",
+          entityType: "npc",
+          tag: "trusting-player",
+        },
+      },
+    });
+    const invalidTerminalReceiptStep = logEventStep({
+      stepId: "step-2",
+      dependsOnStepIds: ["step-1"],
+      expectedVisibleEffect: "The warden's answer is recorded as a typed receipt.",
+      candidateToolRequest: {
+        toolName: "record_dialogue_outcome",
+        actorRef: "Player",
+        targetRefs: ["Road Warden"],
+        input: {
+          addresseeRefs: ["Player"],
+          outcomeKind: "answered",
+          topicKind: "permission",
+          authorityKind: "role_authority",
+          truthStatus: "settled_by_backend",
+          durability: "durable",
+          futureUseKind: "permission_check",
+          futureRelevance: "The answer controls a later permission check.",
+          summary: "The warden trusts the player enough to permit passage.",
+          sourceRefs: ["Road Warden"],
+        },
+      },
+    });
+
+    const results = await executeGmToolSteps({
+      campaignId: frame.campaignId,
+      tick: frame.tick,
+      frame,
+      checklist: checklist([addTagStep, invalidTerminalReceiptStep]),
+    });
+
+    expect(results).toEqual([
+      expect.objectContaining({
+        stepId: "step-1",
+        status: "skipped",
+        toolName: "add_tag",
+        result: null,
+        mutationRefs: [],
+        validationError: expect.objectContaining({
+          code: "tool_failed",
+          message: expect.stringContaining("record_dialogue_outcome terminal receipt was not accepted"),
+        }),
+      }),
+      expect.objectContaining({
+        stepId: "step-2",
+        status: "skipped",
+        toolName: "record_dialogue_outcome",
+        result: null,
+        validationError: expect.objectContaining({
+          code: "schema_invalid",
+        }),
+      }),
+    ]);
+    expect(executeToolCall).toHaveBeenCalledTimes(1);
+    expect(sqliteExecMock.mock.calls.map(([statement]) => statement)).toEqual([
+      expect.stringMatching(/^SAVEPOINT gm_tool_step_/),
+      expect.stringMatching(/^ROLLBACK TO SAVEPOINT gm_tool_step_/),
+      expect.stringMatching(/^RELEASE SAVEPOINT gm_tool_step_/),
+    ]);
+  });
+
+  it("rolls back a standalone add_tag when no typed state mutation receipt boundary is provided", async () => {
+    const frame = createFrame({
+      allowedTools: ["add_tag"],
+    });
+    const addTagStep = logEventStep({
+      expectedVisibleEffect: "The warden is marked as trusting the player.",
+      candidateToolRequest: {
+        toolName: "add_tag",
+        actorRef: "Player",
+        targetRefs: ["Road Warden"],
+        input: {
+          entityName: "Road Warden",
+          entityType: "npc",
+          tag: "trusting-player",
+        },
+      },
+    });
+
+    const results = await executeGmToolSteps({
+      campaignId: frame.campaignId,
+      tick: frame.tick,
+      frame,
+      checklist: checklist([addTagStep]),
+    });
+
+    expect(results).toEqual([
+      expect.objectContaining({
+        status: "skipped",
+        toolName: "add_tag",
+        result: null,
+        mutationRefs: [],
+        validationError: expect.objectContaining({
+          code: "tool_failed",
+          message: expect.stringContaining("typed runtimeRequirement was not provided"),
+        }),
+      }),
+    ]);
+    expect(sqliteExecMock.mock.calls.map(([statement]) => statement)).toEqual([
+      expect.stringMatching(/^SAVEPOINT gm_tool_step_/),
+      expect.stringMatching(/^ROLLBACK TO SAVEPOINT gm_tool_step_/),
+      expect.stringMatching(/^RELEASE SAVEPOINT gm_tool_step_/),
+    ]);
+  });
+
+  it("rolls back an unrelated side effect even when another checklist step satisfies the runtime receipt", async () => {
+    vi.mocked(executeToolCall)
+      .mockResolvedValueOnce({
+        success: true,
+        result: {
+          eventId: "event-1",
+          actorName: "Road Warden",
+          durability: "durable",
+          persisted: true,
+        },
+        authority: toolAuthority([], "tool-result-event-1", ["event-1"]),
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        result: { tags: ["trusting-player"] },
+        authority: toolAuthority(["actor:road-warden:tag"]),
+      });
+    const frame = createFrame({
+      allowedTools: ["log_event", "add_tag"],
+    });
+    const addTagStep = logEventStep({
+      stepId: "step-2",
+      expectedVisibleEffect: "The warden is marked as trusting the player.",
+      candidateToolRequest: {
+        toolName: "add_tag",
+        actorRef: "Player",
+        targetRefs: ["Road Warden"],
+        input: {
+          entityName: "Road Warden",
+          entityType: "npc",
+          tag: "trusting-player",
+        },
+      },
+    });
+
+    const results = await executeGmToolSteps({
+      campaignId: frame.campaignId,
+      tick: frame.tick,
+      frame,
+      checklist: checklist([logEventStep(), addTagStep]),
+      runtimeRequirement: sceneBeatRuntimeRequirement,
+    });
+
+    expect(results).toEqual([
+      expect.objectContaining({
+        stepId: "step-1",
+        status: "skipped",
+        result: null,
+        validationError: expect.objectContaining({
+          code: "tool_failed",
+          message: expect.stringContaining("add_tag did not satisfy or feed an accepted runtime receipt"),
+        }),
+      }),
+      expect.objectContaining({
+        stepId: "step-2",
+        status: "skipped",
+        result: null,
+        validationError: expect.objectContaining({
+          code: "tool_failed",
+          message: expect.stringContaining("add_tag did not satisfy or feed an accepted runtime receipt"),
+        }),
+      }),
+    ]);
+    expect(sqliteExecMock.mock.calls.map(([statement]) => statement)).toEqual([
+      expect.stringMatching(/^SAVEPOINT gm_tool_step_/),
+      expect.stringMatching(/^ROLLBACK TO SAVEPOINT gm_tool_step_/),
+      expect.stringMatching(/^RELEASE SAVEPOINT gm_tool_step_/),
+    ]);
+  });
+
+  it("retracts durable legacy memory when a later unrelated side effect rejects the checklist batch", async () => {
+    vi.mocked(executeToolCall)
+      .mockResolvedValueOnce({
+        success: true,
+        result: {
+          eventId: "event-durable-1",
+          actorName: "Road Warden",
+          durability: "durable",
+          persisted: true,
+        },
+        authority: toolAuthority([], "tool-result-event-durable-1", ["event-durable-1"]),
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        result: { tags: ["trusting-player"] },
+        authority: toolAuthority(["actor:road-warden:tag"]),
+      });
+    const frame = createFrame({
+      allowedTools: ["log_event", "add_tag"],
+    });
+    const durableLogStep = logEventStep({
+      stepId: "step-1",
+      candidateToolRequest: {
+        toolName: "log_event",
+        actorRef: "Player",
+        targetRefs: ["Road Warden"],
+        input: {
+          text: "The road warden records a future-relevant promise.",
+          importance: 4,
+          participants: ["Player", "Road Warden"],
+          durability: "durable",
+          futureRelevance: "This promise may affect later trust checks.",
+        },
+      },
+    });
+    const addTagStep = logEventStep({
+      stepId: "step-2",
+      expectedVisibleEffect: "The warden is marked as trusting the player.",
+      candidateToolRequest: {
+        toolName: "add_tag",
+        actorRef: "Player",
+        targetRefs: ["Road Warden"],
+        input: {
+          entityName: "Road Warden",
+          entityType: "npc",
+          tag: "trusting-player",
+        },
+      },
+    });
+
+    await executeGmToolSteps({
+      campaignId: frame.campaignId,
+      tick: frame.tick,
+      frame,
+      checklist: checklist([durableLogStep, addTagStep]),
+      runtimeRequirement: sceneBeatRuntimeRequirement,
+    });
+
+    expect(retractStoredEpisodicEventMock).toHaveBeenCalledWith({
+      campaignId: frame.campaignId,
+      eventId: "event-durable-1",
+    });
+    expect(retractReflectionBudgetMock).toHaveBeenCalledWith(
+      frame.campaignId,
+      ["Player", "Road Warden"],
+      4,
+    );
+    expect(retractActorKnowledgeRecordMock).not.toHaveBeenCalled();
   });
 
   it("skips player-turn tags that would persist unsupported access as world state", async () => {
@@ -697,6 +1268,11 @@ describe("executeGmToolSteps", () => {
   });
 
   it("blocks repeated equivalent dynamic creation in one turn so existing affordances are reused", async () => {
+    vi.mocked(executeToolCall).mockResolvedValueOnce({
+      success: true,
+      result: { npcId: "npc-counter-clerk" },
+      authority: toolAuthority(["actor:npc-counter-clerk"]),
+    });
     const frame = createFrame({ allowedTools: ["spawn_npc"] });
     const firstSpawn = logEventStep({
       stepId: "step-1",
@@ -730,6 +1306,7 @@ describe("executeGmToolSteps", () => {
       tick: frame.tick,
       frame,
       checklist: checklist([firstSpawn, duplicateSpawn]),
+      runtimeRequirement: supportActorRuntimeRequirement,
     });
 
     expect(results).toEqual([
@@ -788,10 +1365,55 @@ describe("executeGmToolSteps", () => {
       expect.objectContaining({
         attempt: 1,
         status: "skipped",
-        validationError: expect.objectContaining({ code: "grounding_invalid" }),
+        validationError: expect.objectContaining({ code: "schema_invalid" }),
       }),
     ]);
     expect(reviseStep).not.toHaveBeenCalled();
     expect(executeToolCall).not.toHaveBeenCalled();
+  });
+
+  it("sanitizes rejected tool candidates and validation errors before repair prompting", async () => {
+    vi.mocked(safeGenerateObject).mockResolvedValueOnce({
+      object: {
+        toolName: "log_event",
+        targetRefs: ["Road Warden"],
+        input: {
+          text: "The road warden acknowledges a corrected visible beat.",
+          importance: 3,
+          participants: ["Player", "Road Warden"],
+        },
+      },
+    } as never);
+    const step = logEventStep({
+      candidateToolRequest: {
+        toolName: "log_event",
+        actorRef: "Player",
+        targetRefs: ["Road Warden"],
+        input: {
+          text: `Rejected candidate mentioned actor:${npcId} at location:${locationId}.`,
+          importance: 3,
+          participants: [`actor:${npcId}`],
+        },
+      },
+    });
+
+    await runGmToolStepRevision({
+      provider,
+      frame: createFrame(),
+      checklist: checklist([step]),
+      step,
+      validationError: {
+        code: "grounding_invalid",
+        message: `candidateToolRequest.input.participants.0 rejected actor:${npcId}`,
+        path: "candidateToolRequest.input.participants.0",
+        toolName: "log_event",
+      },
+    });
+
+    const prompt = vi.mocked(safeGenerateObject).mock.calls[0]?.[0].prompt ?? "";
+    expect(prompt).toContain("BACKEND VALIDATION ERROR");
+    expect(prompt).not.toContain(`actor:${npcId}`);
+    expect(prompt).not.toContain(`location:${locationId}`);
+    expect(prompt).toContain("[backend ref hidden]");
   });
 });

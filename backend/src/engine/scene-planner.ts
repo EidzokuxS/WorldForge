@@ -11,12 +11,18 @@ import type { SceneFrame } from "./scene-frame.js";
 import {
   buildModelFacingSceneDiagnostics,
   buildModelFacingScenePacket,
+  buildModelFacingScenePromptView,
+  oracleResultForModelPrompt,
   redactModelFacingJson,
-  redactModelFacingText,
-  shouldDropModelFacingText,
   type ModelFacingPromptSafety,
-  type ModelFacingSceneView,
+  type ModelFacingScenePromptView,
 } from "./model-facing-scene.js";
+import {
+  formatModelFacingPlayerActionText,
+  formatModelFacingRecentConversation,
+  sanitizeModelFacingConversationText,
+  sanitizeModelFacingJson,
+} from "./model-facing-conversation.js";
 import {
   type ScenePlan,
 } from "./scene-plan-schema.js";
@@ -69,14 +75,14 @@ function buildDefaultScenePlannerSystem(): string {
     "Return one semantic ScenePlan JSON object only. Do not write prose, dialogue, or markdown.",
     "GM decision path is binding for this turn. Oracle result is present only when requested and is binding. Do not choose or request a new Oracle outcome tier.",
     "GM decision rationale is advisory for current-beat intent; executable changes must still use concrete refs and allowed backend tools.",
-    "Return actorRef values from allowed actor ids or labels; return toolName from ALLOWED TOOLS; backend will generate event/action/response/narrator IDs; do not output id/eventId/actionId/responseId/narratorFacts reference arrays.",
+    "Return actorRef values from allowed actor refs or labels; return toolName from ALLOWED TOOLS; backend will generate event/action/response/narrator IDs; do not output id/eventId/actionId/responseId/narratorFacts reference arrays.",
     "Return semantic local intent only: actionInterpretation actorRef/intent/method/targetRefs, responses actorRef/responseKind/visibleToPlayer/targetRefs, plannedActions actorRef/toolName/input, deferredHooks hookType/subjectRefs/reason, and hiddenRationale.",
   ].join(" ");
 }
 
-function formatActors(view: ModelFacingSceneView): string {
+function formatActors(view: ModelFacingScenePromptView): string {
   const lines = view.visibleActors.map(
-    (actor) => `- visible actorId=${actor.id} label=${actor.label} awareness=${actor.awareness}`,
+    (actor) => `- visible actorRef=${actor.ref} label=${actor.label} awareness=${actor.awareness}`,
   );
 
   return lines.length > 0 ? lines.join("\n") : "- none";
@@ -87,41 +93,23 @@ function formatRecentConversation(
   safety?: ModelFacingPromptSafety,
   extraForbiddenTerms: readonly string[] = [],
 ): string {
-  if (!recentConversation || recentConversation.length === 0) {
-    return "- none";
-  }
-
-  const forbiddenTerms = extraForbiddenTerms
-    .map((term) => term.trim().toLowerCase())
-    .filter((term) => term.length > 0);
-  const lines = recentConversation
-    .slice(-8)
-    .filter((entry) => {
-      if (safety && shouldDropModelFacingText(entry.content, safety)) return false;
-      const content = entry.content.toLowerCase();
-      return !forbiddenTerms.some((term) => content.includes(term));
-    })
-    .map((entry) => `- ${entry.role}: ${entry.content}`)
-    .join("\n");
-
-  return lines || "- none";
+  return formatModelFacingRecentConversation(recentConversation, {
+    safety,
+    extraForbiddenTerms,
+  });
 }
 
 function buildDefaultScenePlannerPrompt(args: RunScenePlannerArgs): string {
   const scenePacket = buildModelFacingScenePacket(args.frame);
-  const oracleResult = args.oracleResult
-    ? {
-        ...args.oracleResult,
-        outcome: args.oracleResult.outcome,
-      }
-    : null;
+  const promptView = buildModelFacingScenePromptView(scenePacket.view);
+  const oracleResult = oracleResultForModelPrompt(args.oracleResult);
 
   return [
     "MODEL-FACING SCENEPLAN CONTRACT",
     buildScenePlannerPromptContract({ allowedTools: args.frame.allowedTools }),
     "",
     "MODEL-FACING SCENE VIEW",
-    JSON.stringify(scenePacket.view, null, 2),
+    JSON.stringify(promptView, null, 2),
     "",
     "GM READ",
     args.gmDecision
@@ -139,7 +127,7 @@ function buildDefaultScenePlannerPrompt(args: RunScenePlannerArgs): string {
       : "- none requested for this decision path",
     "",
     "ALLOWED ACTORS",
-    formatActors(scenePacket.view),
+    formatActors(promptView),
     "",
     "ALLOWED TOOLS",
     args.frame.allowedTools.length > 0
@@ -159,7 +147,10 @@ function buildDefaultScenePlannerPrompt(args: RunScenePlannerArgs): string {
     ),
     "",
     "SCENE PLAN TASK",
-    `Player action: ${args.playerAction}`,
+    `Player action: ${formatModelFacingPlayerActionText(args.playerAction, {
+      safety: scenePacket.safety,
+      extraForbiddenTerms: args.forbiddenPrivateTerms ?? [],
+    })}`,
     "Honor the GM decision path. Direct, continue, and clarification may use plannedActions [] and no mutation. Tool/combat paths must use concrete refs/tools from candidates and ALLOWED TOOLS. Backend will map this to a strict ScenePlan before validation and execution.",
   ].join("\n");
 }
@@ -209,12 +200,22 @@ function buildScenePlannerRepairPrompt(args: {
     "SEMANTIC SCENE PLAN REPAIR",
     "Reason: semantic-mapping-failed",
     "Validation issues:",
-    redactModelFacingText(args.issues, args.safety),
+    sanitizeModelFacingConversationText(args.issues, {
+      safety: args.safety,
+      maxChars: 2000,
+    }),
     "",
     "Candidate to repair:",
-    JSON.stringify(redactModelFacingJson(args.candidate, args.safety), null, 2),
+    JSON.stringify(
+      sanitizeModelFacingJson(redactModelFacingJson(args.candidate, args.safety), {
+        safety: args.safety,
+        maxChars: 500,
+      }),
+      null,
+      2,
+    ),
     "",
-    "Repair the semantic object shape once. Keep GM decision path and Oracle result binding. Return actorRef values from allowed actor ids or labels; return toolName from ALLOWED TOOLS; backend will generate event/action/response/narrator IDs.",
+    "Repair the semantic object shape once. Keep GM decision path and Oracle result binding. Return actorRef values from allowed actor refs or labels; return toolName from ALLOWED TOOLS; backend will generate event/action/response/narrator IDs.",
     "Do not add a roll request. ScenePlanner cannot trigger Oracle directly.",
   ].join("\n");
 }

@@ -1,5 +1,6 @@
-import { generateText, stepCountIs, type ToolSet } from "ai";
+import { stepCountIs, type ToolSet } from "ai";
 import { createModel } from "../ai/index.js";
+import { generateText } from "../ai/raindrop-workshop.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
 import type { ResearchConfig } from "@worldforge/shared";
 import { createLogger, withSearchMcp } from "../lib/index.js";

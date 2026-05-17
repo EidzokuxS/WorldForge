@@ -30,6 +30,7 @@ function createFrame(): SceneFrame {
   return {
     campaignId: "campaign-1",
     tick: 21,
+    worldVersion: 0,
     playerActorId: playerId,
     currentLocationId: locationId,
     currentSceneScopeId: locationId,
@@ -189,6 +190,7 @@ function createCanonicalTurnPacket(
         eventId: plan.primaryResponse.eventId,
         summary: "The gate captain answers with a contained gesture.",
         visibleToPlayer: true,
+        evidenceAuthority: "backend_fact",
       },
     ],
     effects: [
@@ -436,7 +438,7 @@ describe("ScenePlan execution and narrator packet", () => {
     );
     expect(prompt).toContain("[CURRENT INVENTORY STATUS]");
     expect(prompt).toContain(
-      "Worn Leather Satchel is currently equipped in shoulder by the player as a signature item. Item tags/state: pack, route-authorized.",
+      "Worn Leather Satchel is ready at the player's shoulder. Visible marks/status: pack, route authorized.",
     );
   });
 

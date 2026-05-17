@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import { executeBridgeCandidateTool } from "../bridge-candidate-tools.js";
 import {
-  buildStartSearchResult,
   prepareCreateMinorPoiInput,
   prepareMoveActorInput,
 } from "../bridge-state-tools.js";
@@ -16,7 +15,6 @@ import {
 import type { SceneFrame } from "../scene-frame.js";
 import { scenePlanSchema } from "../scene-plan-schema.js";
 import { createPlayerTurnToolExecutionContext } from "../tool-execution-context.js";
-import { runtimeToolInputSchemas } from "../tool-schemas.js";
 
 const exactInput = "иду дальше по логичному маршруту и ищу чайную лавку";
 const playerId = "11111111-1111-4111-8111-111111111111";
@@ -35,6 +33,7 @@ function createTouristCourierFrame(): SceneFrame {
   return {
     campaignId: "campaign-90-04",
     tick: 90,
+    worldVersion: 0,
     playerActorId: playerId,
     currentLocationId: "loc-canal-market",
     currentSceneScopeId: "scene-courier-counter",
@@ -137,8 +136,6 @@ function createTouristCourierFrame(): SceneFrame {
       "check_route",
       "move_actor",
       "create_minor_poi",
-      "start_search",
-      "record_player_intent",
     ],
     oracle: null,
   };
@@ -171,6 +168,12 @@ const parserLikeClarification: Extract<GmRead, { path: "clarification" }> = {
     intent: "follow a logical route and look for a tea stall",
     targetRefs: [],
   },
+  turnGrounding: {
+    intentKind: "clarification_needed",
+    requiresGrounding: false,
+    groundingKind: "none",
+    reason: "The parser could not bind the intended bridge route.",
+  },
   path: "clarification",
   clarificationPrompt: "Which connected location should I use for that route?",
   rationale: "The player did not provide an exact route id.",
@@ -188,13 +191,21 @@ const repairedToolPlan: GmRead = {
     intent: "follow the obvious public market route and look for tea",
     targetRefs: ["Tea Row", "knowledge:public-tea-route"],
   },
+  turnGrounding: {
+    intentKind: "concrete_state_change",
+    requiresGrounding: true,
+    groundingKind: "state_mutation",
+    topicKind: "route",
+    durability: "scene_local",
+    reason: "Bridge tools can ground movement and local tea search affordances.",
+  },
   path: "tool_plan",
   turnIntent:
     "Use lookup tools to ground the public route and tea-service affordance, then use state tools for movement, search, or a constrained minor POI.",
   rationale: "The intent is understandable, local, public, low-risk, and supported by bridge candidates.",
   evidenceRefs: ["Tourist Courier", "Tea Row", "knowledge:public-tea-route"],
   narrationGuardrails: [
-    "Narrate only successful move_actor, create_minor_poi, start_search results, or visible public facts.",
+    "Narrate only successful move_actor, create_minor_poi results, or visible public facts.",
   ],
 };
 
@@ -254,12 +265,11 @@ function runDeterministicBridgeLedger(): ToolLedgerStep[] {
   const move = prepareMoveActorInput({
     actorRef: "Tourist Courier",
     destinationRef: "Tea Row",
-    routeId: "route-market-tea-row",
-    evidenceRefs: ["route-market-tea-row"],
+    evidenceRefs: ["Tea Row"],
     intentSummary: exactInput,
   }, context);
   expect(move.ok).toBe(true);
-  push("move_actor", move.ok, "validated", ["route-market-tea-row"]);
+  push("move_actor", move.ok, "validated", ["Tea Row"]);
 
   const minorPoi = prepareCreateMinorPoiInput({
     areaRef: "current_location",
@@ -271,17 +281,6 @@ function runDeterministicBridgeLedger(): ToolLedgerStep[] {
   }, context);
   expect(minorPoi.ok).toBe(true);
   push("create_minor_poi", minorPoi.ok, "validated", ["knowledge:public-tea-route"]);
-
-  const searchInput = runtimeToolInputSchemas.start_search.parse({
-    actorRef: "Tourist Courier",
-    query: "чайная лавка",
-    scope: "current_location",
-    method: "browse",
-    intentSummary: exactInput,
-  });
-  const search = buildStartSearchResult(searchInput, context);
-  expect(search.ok).toBe(true);
-  push("start_search", search.ok, "validated", ["create_minor_poi:Lantern Tea Stall"]);
 
   return ledger;
 }
@@ -468,11 +467,10 @@ describe("Phase 90 tourist/courier bridge acceptance", () => {
       "check_route",
       "move_actor",
       "create_minor_poi",
-      "start_search",
     ]);
     expect(ledger.every((step) => step.success)).toBe(true);
     expect(ledger.filter((step) => step.mutation === "validated").map((step) => step.toolName))
-      .toEqual(["move_actor", "create_minor_poi", "start_search"]);
+      .toEqual(["move_actor", "create_minor_poi"]);
   });
 
   it("keeps player-facing route narration backed by successful tool results and visible facts", () => {
@@ -482,13 +480,17 @@ describe("Phase 90 tourist/courier bridge acceptance", () => {
       forbiddenPrivateTerms: ["Hidden Tea Vault", "private vault tea room"],
     });
     const playerPacket = buildPlayerFacingPacketFromNarratorPacket(packet);
-    const formatted = formatPlayerFacingPacketForPrompt(playerPacket);
+    const formatted = formatPlayerFacingPacketForPrompt(playerPacket, {
+      includeDiagnostics: true,
+      includeTechnicalRefs: true,
+    });
 
     expect(formatted).toContain("Tourist Courier moves to Tea Row");
     expect(formatted).toContain("Lantern Tea Stall becomes reachable from Canal Market");
-    expect(formatted).toContain("starts searching for чайная лавка; no discovery is confirmed");
-    expect(formatted).toContain("perceivable_effect:action-result:action-move");
-    expect(formatted).toContain("perceivable_effect:action-result:action-poi");
+    expect(formatted).not.toContain("starts searching for чайная лавка");
+    expect(formatted).toContain("perceivable_effect:[backend ref hidden]");
+    expect(formatted).not.toContain("perceivable_effect:action-result:action-move");
+    expect(formatted).not.toContain("perceivable_effect:action-result:action-poi");
     expect(formatted).not.toContain("Hidden Tea Broker");
     expect(formatted).not.toContain("Hidden Tea Vault");
     expect(formatted).not.toContain("private vault tea room");
@@ -547,8 +549,15 @@ describe("Phase 90 tourist/courier bridge acceptance", () => {
     );
 
     expect(packet.perceivableEffects).toEqual([]);
+    expect(packet.perceivableObservations).toEqual([
+      expect.objectContaining({
+        summary: "Reachable routes are checked: Tea Row.",
+        toolName: "list_navigation_options",
+      }),
+    ]);
     expect(formatted).not.toContain("validated list navigation options consequence settles");
-    expect(formatted).not.toContain("Tea Row");
+    expect(formatted).toContain("[PLAYER-VISIBLE OBSERVATIONS]");
+    expect(formatted).toContain("Reachable routes are checked: Tea Row.");
   });
 
   it("round-trips state-bearing bridge actions through the strict ScenePlan schema", () => {

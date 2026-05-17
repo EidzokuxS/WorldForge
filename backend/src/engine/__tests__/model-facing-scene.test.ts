@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildModelFacingScenePacket,
+  buildModelFacingScenePromptView,
   redactModelFacingJson,
   redactModelFacingText,
 } from "../model-facing-scene.js";
@@ -17,6 +18,7 @@ function createForestOutpostLeakFrame(): SceneFrame {
   return {
     campaignId: "campaign-phase-79",
     tick: 79,
+    worldVersion: 0,
     playerActorId: playerId,
     currentLocationId: "loc-shibuya-district",
     currentSceneScopeId: "scene-shibuya-cafe",
@@ -219,5 +221,93 @@ describe("model-facing scene packet", () => {
     expect(json).not.toContain("Outpost Cook");
     expect(json).not.toContain("Forest Outpost");
     expect(json).not.toContain("Okutama Safe Zone");
+  });
+
+  it("projects prompt scene view without backend ids or dangerous id keys", () => {
+    const frame = createForestOutpostLeakFrame();
+    frame.campaignId = "UGLY-CAMPAIGN-ID-95";
+    frame.playerActorId = "UGLY-PLAYER-ACTOR-ID-95";
+    frame.currentLocationId = "UGLY-CURRENT-LOCATION-ID-95";
+    frame.currentSceneScopeId = "UGLY-CURRENT-SCENE-SCOPE-ID-95";
+    frame.roster.active[0].id = "UGLY-PLAYER-ID-95";
+    frame.roster.active[0].actorId = "UGLY-PLAYER-ACTOR-ID-95";
+    frame.roster.active[1].id = "UGLY-CLERK-ID-95";
+    frame.roster.active[1].actorId = "UGLY-CLERK-ACTOR-ID-95";
+    frame.recentEvents[0].id = "UGLY-EVENT-ID-95";
+    frame.recentEvents[0].actorIds = ["UGLY-PLAYER-ID-95", "UGLY-CLERK-ACTOR-ID-95"];
+    frame.targetCandidates[0].id = "UGLY-TARGET-ID-95";
+    frame.targetCandidates[0].actorId = "UGLY-CLERK-ACTOR-ID-95";
+    frame.movementCandidates[0].id = "UGLY-MOVEMENT-ID-95";
+    frame.movementCandidates[0].locationId = "UGLY-MOVEMENT-LOCATION-ID-95";
+
+    const packet = buildModelFacingScenePacket(frame);
+    const promptView = buildModelFacingScenePromptView(packet.view);
+    const promptSurface = JSON.stringify(promptView);
+
+    expect(promptSurface).toContain("current_location");
+    expect(promptSurface).toContain("current_scene");
+    expect(promptSurface).toContain("Shibuya District");
+    expect(promptSurface).toContain("Shibuya Cafe");
+    expect(promptSurface).toContain("Cafe Clerk");
+    expect(promptSurface).toContain("Shibuya Station Exit");
+    expect(promptSurface).not.toContain("UGLY-");
+    expect(promptSurface).not.toContain("actor:");
+    expect(promptSurface).not.toContain("location:");
+    expect(promptSurface).not.toContain("movement:");
+    expect(promptSurface).not.toMatch(
+      /"(?:id|actorId|locationId|campaignId|playerActorId|currentLocationId|currentSceneScopeId)"\s*:/,
+    );
+  });
+
+  it("sanitizes backend refs embedded in persistent prompt strings", () => {
+    const frame = createForestOutpostLeakFrame();
+    frame.currentLocationDescription =
+      "Public counter near loc-secret-vault and route_hidden_path.";
+    frame.currentSceneScopeDescription =
+      "Scene scope says source:event-1 should stay backend-only.";
+    frame.roster.active[1].summary =
+      "Cafe Clerk remembers actor_hidden and tool_result_8.";
+    frame.perception.playerAwarenessHints = [
+      "A player-facing source-linked hint mentions route-tea-lane.",
+    ];
+    frame.recentEvents[0]!.summary =
+      "The clerk points at location:loc-pier after tool-result-7.";
+    frame.targetCandidates[0]!.label = "Cafe Clerk actor_hidden";
+    frame.movementCandidates[0]!.label = "Shibuya route_hidden_path";
+
+    const packet = buildModelFacingScenePacket(frame);
+    const promptView = buildModelFacingScenePromptView(packet.view);
+    const promptSurface = JSON.stringify(promptView);
+
+    expect(promptSurface).toContain("player-facing");
+    expect(promptSurface).toContain("source-linked");
+    for (const leaked of [
+      "loc-secret-vault",
+      "route_hidden_path",
+      "source:event-1",
+      "actor_hidden",
+      "tool_result_8",
+      "location:loc-pier",
+      "tool-result-7",
+      "route-tea-lane",
+    ]) {
+      expect(promptSurface).not.toContain(leaked);
+    }
+    expect(promptSurface).toContain("[backend ref hidden]");
+  });
+
+  it("does not surface unknown non-pattern backend ids from recent event actor refs", () => {
+    const frame = createForestOutpostLeakFrame();
+    frame.roster.active[1].id = "clerkInternal44";
+    frame.roster.active[1].actorId = "clerkInternal44";
+    frame.recentEvents[0]!.actorIds = ["clerkInternal44", "orphanInternal55"];
+
+    const packet = buildModelFacingScenePacket(frame);
+    const promptView = buildModelFacingScenePromptView(packet.view);
+    const promptSurface = JSON.stringify(promptView.localRecentEvents);
+
+    expect(promptSurface).toContain("Cafe Clerk");
+    expect(promptSurface).not.toContain("clerkInternal44");
+    expect(promptSurface).not.toContain("orphanInternal55");
   });
 });

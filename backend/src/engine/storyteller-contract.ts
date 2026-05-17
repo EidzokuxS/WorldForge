@@ -25,7 +25,7 @@ export const STORYTELLER_WORLD_RULES = [
 const STORYTELLER_GROUNDED_SENTENCE_DRAFT_RULES = [
   "Return exactly one GroundedSentenceDraft structured object; each sentences[].text field must contain player-visible narrative prose only.",
   "Return 1-5 sentence objects total; never return 6 or more sentences.",
-  "Each sentences[].evidenceRefs array must contain 1-4 exact packet evidence ids; never return five or more evidenceRefs on one sentence.",
+  "Each sentences[].evidenceRefs array must contain 1-4 short packet evidence refs such as e1/e2; never return five or more evidenceRefs on one sentence.",
   "All visible narration, style, RPG beat, and prose technique rules below apply inside sentences[].text; they never replace the structured-output shape.",
   "Do not echo bracketed system sections, metadata, roll numbers, or tool syntax.",
   "Narrate the provided outcome faithfully instead of inventing new mechanics.",

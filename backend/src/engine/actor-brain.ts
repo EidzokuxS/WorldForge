@@ -27,7 +27,7 @@ export function buildActorDecisionSystem(): string {
     "You are the decision brain for exactly one NPC actor in a living RPG world.",
     "You are not the narrator, not the backend, and not the player's GM.",
     "Choose this actor's immediate intent from the ActorFrame only.",
-    "Cite fact ids for every meaningful claim. Do not use hidden, absent, or imagined facts.",
+    "Cite short ActorFrame fact refs for every meaningful claim. Do not use hidden, absent, or imagined facts.",
     "Return one JSON ActorDecisionPacket only.",
     "The backend validates every requested tool; failed tools do not mutate world state.",
   ].join(" ");
@@ -36,11 +36,21 @@ export function buildActorDecisionSystem(): string {
 function formatActorFrame(frame: ActorFrame): string {
   return JSON.stringify(
     {
-      campaignId: frame.campaignId,
       worldVersion: frame.worldVersion,
-      observer: frame.observer,
+      observer: {
+        label: frame.observer.label,
+        type: frame.observer.type,
+      },
       playerActionRequest: frame.playerActionRequest,
-      facts: frame.facts,
+      facts: frame.facts.map((fact, index) => ({
+        ref: `f${index + 1}`,
+        route: fact.route,
+        text: fact.text,
+        confidence: fact.confidence,
+        reliability: fact.reliability,
+        deliveredAtWorldTimeMinutes: fact.deliveredAtWorldTimeMinutes,
+        observedAtWorldVersion: fact.observedAtWorldVersion,
+      })),
       legalTools: frame.legalTools,
       constraints: frame.constraints,
       hiddenExcludedCount: frame.hiddenExcludedCount,
@@ -59,7 +69,7 @@ function actorToolInputContracts(frame: ActorFrame): string {
   }
   if (frame.legalTools.includes("move_to")) {
     contracts.push(
-      'move_to input: { "targetLocationName": string }. Copy the exact destination from a cited reachable move:* fact. Do not use destination, destinationRef, target, locationName, or an empty input object.',
+      'move_to input: { "targetLocationName": string }. Use the exact destination label from a cited reachable movement fact text. Do not use destination, destinationRef, target, locationName, or an empty input object.',
     );
   }
   if (frame.legalTools.includes("set_relationship")) {
@@ -79,7 +89,7 @@ function actorToolInputContracts(frame: ActorFrame): string {
   }
   if (frame.legalTools.includes("request_contested_outcome")) {
     contracts.push(
-      'request_contested_outcome input: { "actorName": string, "targetName": string, "mode": "attack"|"restrain"|"escape"|"pursue"|"defend"|"interfere"|"other", "intent": string, "stakes": string, "evidenceRefs": [fact ids] }.',
+      'request_contested_outcome input: { "actorName": string, "targetName": string, "mode": "attack"|"restrain"|"escape"|"pursue"|"defend"|"contest", "intent": string, "stakes": string, "evidenceRefs": [short fact refs such as f1/f2] }.',
     );
   }
   if (frame.legalTools.includes("set_condition")) {
@@ -104,22 +114,86 @@ function actorToolInputContracts(frame: ActorFrame): string {
 }
 
 export function buildActorDecisionPrompt(frame: ActorFrame): string {
+  const hasLegalTools = frame.legalTools.length > 0;
+  const returnShape = hasLegalTools
+    ? {
+      decisionSummary: "one sentence decision",
+      citedFactIds: ["f1"],
+      selectedGoal: "goal or null",
+      intent: "what the actor is trying to do now",
+      requestedTools: [
+        {
+          toolName: "log_event",
+          purpose: "why this tool is needed",
+          input: {
+            text: "grounded event text",
+            importance: 3,
+            participants: [frame.observer.label],
+            durability: "scene_local",
+          },
+        },
+      ],
+      beliefUpdates: [],
+      planUpdates: [],
+      nextDecisionTrigger: {
+        reason: "when this actor should reconsider",
+        delayWorldTimeMinutes: 15,
+      },
+      noActionReason: null,
+    }
+    : {
+      decisionSummary: "one sentence process update",
+      citedFactIds: ["f1"],
+      selectedGoal: "goal or null",
+      intent: "what the actor is trying to decide or maintain now",
+      requestedTools: [],
+      beliefUpdates: [],
+      planUpdates: [{
+        summary: "how the actor's plan continues, changes, blocks, or completes",
+        status: "continued",
+      }],
+      nextDecisionTrigger: {
+        reason: "when this actor should reconsider",
+        delayWorldTimeMinutes: 15,
+      },
+      noActionReason: "No world-facing tool is legal for this process update.",
+    };
   return [
     "ACTOR DECISION CONTRACT",
-    "- Decide only for observer.actorId.",
-    "- Use requestedTools only when this actor genuinely attempts something now.",
-    '- Every requestedTools entry must be exactly { "toolName": string, "purpose": string, "input": object }.',
-    "- Never put tool arguments beside input. For log_event, text, importance, participants, durability, and futureRelevance must be inside input.",
-    '- INVALID requestedTools entry: { "toolName": "log_event", "purpose": "...", "input": "text", "text": "...", "importance": 3, "participants": [], "durability": "scene_local" }.',
+    "- Decide only for the observer shown in ACTOR FRAME.",
+    "- Do not output actorId; the backend binds this packet to the ActorFrame observer.",
+    "- Cite facts with short refs from ACTOR FRAME facts, such as f1/f2. Do not copy backend fact ids, actor ids, source ids, or UUID-like strings.",
+    hasLegalTools
+      ? "- Use requestedTools only when this actor genuinely attempts something now."
+      : "- No tools are legal in this actor pass. Return requestedTools: [] only.",
+    hasLegalTools
+      ? '- Every requestedTools entry must be exactly { "toolName": string, "purpose": string, "input": object }.'
+      : "- Use noActionReason, planUpdates, beliefUpdates, and nextDecisionTrigger to update the actor process without world-facing side effects.",
+    hasLegalTools
+      ? "- Never put tool arguments beside input. For log_event, text, importance, participants, durability, and futureRelevance must be inside input."
+      : "- Do not request log_event, move_to, request_contested_outcome, or any other tool when legalTools is empty.",
+    hasLegalTools
+      ? '- INVALID requestedTools entry: { "toolName": "log_event", "purpose": "...", "input": "text", "text": "...", "importance": 3, "participants": [], "durability": "scene_local" }.'
+      : "- If the actor only watches, hesitates, waits, or maintains a plan, explain that in noActionReason.",
     "- If the actor only watches, hesitates, or has no useful move, return requestedTools: [] and a concrete noActionReason.",
-    "- Use log_event durability durable, with futureRelevance, when the actor gives the player a future-usable procedure, constraint, route, name, lead, warning, promise, obligation, or permission boundary.",
-    '- HARD VALIDATION RULE: every requested log_event with input.durability === "durable" must include non-empty input.futureRelevance. If you cannot state why it should matter later in one sentence, use scene_local or omit the tool.',
-    "- Use log_event durability scene_local only for transient speech, posture, hesitation, sensory color, or witnessed beats that should not matter after this turn.",
-    "- Use move_to only for the actor's own movement to a connected movement candidate.",
-    "- For attack, restraint, escape, pursuit, defense, or other active opposition, request request_contested_outcome before any tool claim that would treat the result as settled.",
-    "- Treat request_contested_outcome as bounds, not victory: HP, movement, inventory, tags, relationships, and durable memory still require separate successful backend tools.",
+    "- beliefUpdates are transient private packet notes only: use an array of compact strings. They do not create world facts, player-facing memory, or durable process authority.",
+    '- planUpdates entries must be { "summary": "how the actor plan changes", "status": "planned|continued|completed|blocked" }. Do not include writeScopes; backend scheduling owns write scopes.',
+    ...(hasLegalTools
+      ? [
+        "- Use beliefUpdates/planUpdates for private recognition, suspicion, intent, or internal process notes; do not put private cognition in log_event text.",
+        "- Use log_event only for externally observable speech, posture, movement, or public-facing procedure beats. Actor log_event is process memory; it is not a narration shortcut.",
+        "- Use log_event durability durable, with futureRelevance, only when the actor's externally observable action gives the player a future-usable procedure, constraint, route, name, lead, warning, promise, obligation, or permission boundary.",
+        '- HARD VALIDATION RULE: every requested log_event with input.durability === "durable" must include non-empty input.futureRelevance. If you cannot state why it should matter later in one sentence, use scene_local or omit the tool.',
+        "- Use log_event durability scene_local only for transient speech, posture, hesitation, sensory color, or witnessed beats that should not matter after this turn.",
+        "- Use move_to only for the actor's own movement to a connected movement candidate.",
+        "- For attack, restraint, escape, pursuit, defense, or other active opposition, request request_contested_outcome before any tool claim that would treat the result as settled.",
+        "- Treat request_contested_outcome as bounds, not victory: HP, movement, inventory, tags, relationships, and durable memory still require separate successful backend tools.",
+      ]
+      : []),
     "- Do not create locations, spawn NPCs, or award items unless the tool is explicitly legal and grounded.",
-    "- Before returning JSON, check every requested tool against legalTools and the durable/futureRelevance rule.",
+    hasLegalTools
+      ? "- Before returning JSON, check every requested tool against legalTools and the durable/futureRelevance rule."
+      : "- Before returning JSON, verify requestedTools is exactly an empty array.",
     "- Keep the packet compact. No prose narration.",
     "",
     "ACTOR FRAME",
@@ -130,53 +204,32 @@ export function buildActorDecisionPrompt(frame: ActorFrame): string {
     "",
     "RETURN SHAPE",
     JSON.stringify(
-      {
-        actorId: frame.observer.actorId,
-        decisionSummary: "one sentence decision",
-        citedFactIds: ["fact:id"],
-        selectedGoal: "goal or null",
-        intent: "what the actor is trying to do now",
-        requestedTools: [
+      returnShape,
+      null,
+      2,
+    ),
+    ...(hasLegalTools
+      ? [
+        "",
+        "DURABLE LOG_EVENT EXAMPLE",
+        JSON.stringify(
           {
             toolName: "log_event",
-            purpose: "why this tool is needed",
+            purpose: "Record a procedure or boundary that can affect later play.",
             input: {
-              text: "grounded event text",
-              importance: 3,
+              text: "Gate Clerk says the player needs a stamped Council seal before the ward gate will open.",
+              importance: 4,
               participants: [frame.observer.label],
-              durability: "scene_local",
+              durability: "durable",
+              futureRelevance:
+                "The stamped Council seal requirement should constrain later attempts to enter this ward.",
             },
           },
-        ],
-        beliefUpdates: [],
-        planUpdates: [],
-        nextDecisionTrigger: {
-          reason: "when this actor should reconsider",
-          delayWorldTimeMinutes: 15,
-        },
-        noActionReason: null,
-      },
-      null,
-      2,
-    ),
-    "",
-    "DURABLE LOG_EVENT EXAMPLE",
-    JSON.stringify(
-      {
-        toolName: "log_event",
-        purpose: "Record a procedure or boundary that can affect later play.",
-        input: {
-          text: "Gate Clerk says the player needs a stamped Council seal before the ward gate will open.",
-          importance: 4,
-          participants: [frame.observer.label],
-          durability: "durable",
-          futureRelevance:
-            "The stamped Council seal requirement should constrain later attempts to enter this ward.",
-        },
-      },
-      null,
-      2,
-    ),
+          null,
+          2,
+        ),
+      ]
+      : []),
   ].join("\n");
 }
 

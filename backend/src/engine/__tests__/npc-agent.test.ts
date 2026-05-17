@@ -7,6 +7,9 @@ const {
   logInfoMock,
   logWarnMock,
   logErrorMock,
+  readWorldClockMock,
+  validateBaseWorldVersionMock,
+  commitAuthorityTraceMock,
 } = vi.hoisted(() => ({
   accumulateReflectionBudgetMock: vi.fn(),
   getRelationshipGraphMock: vi.fn(),
@@ -14,6 +17,35 @@ const {
   logInfoMock: vi.fn(),
   logWarnMock: vi.fn(),
   logErrorMock: vi.fn(),
+  readWorldClockMock: vi.fn(() => ({
+    campaignId: "test-campaign-123",
+    worldVersion: 0,
+    worldTimeMinutes: 5,
+    currentTick: 5,
+    updatedAt: 123,
+  })),
+  validateBaseWorldVersionMock: vi.fn(() => ({
+    campaignId: "test-campaign-123",
+    worldVersion: 0,
+    worldTimeMinutes: 5,
+    currentTick: 5,
+    updatedAt: 123,
+  })),
+  commitAuthorityTraceMock: vi.fn(() => ({
+    toolResultId: "authority-trace-1",
+    campaignId: "test-campaign-123",
+    sourceEntity: { type: "npc", id: "npc-001" },
+    baseWorldVersion: 0,
+    resultWorldVersion: 1,
+    worldTimeMinutes: 5,
+    elapsedWorldTimeMinutes: 0,
+    stateDeltaRefs: [],
+    eventRefs: [],
+    witnesses: [],
+    knowledgeOutputs: [],
+    visibilityOutputs: [],
+    resources: [],
+  })),
 }));
 
 // Mock all external dependencies before imports
@@ -42,6 +74,16 @@ vi.mock("../oracle.js", () => ({
 vi.mock("../tool-executor.js", () => ({
   executeToolCall: vi.fn().mockResolvedValue({ success: true, result: {} }),
 }));
+
+vi.mock("../living-world-authority.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../living-world-authority.js")>();
+  return {
+    ...actual,
+    readWorldClock: readWorldClockMock,
+    validateBaseWorldVersion: validateBaseWorldVersionMock,
+    commitAuthorityTrace: commitAuthorityTraceMock,
+  };
+});
 
 vi.mock("../target-context.js", () => ({
   resolveActionTargetContext: vi.fn().mockResolvedValue({
@@ -94,7 +136,7 @@ import { resolveActionTargetContext } from "../target-context.js";
 import { executeToolCall } from "../tool-executor.js";
 import { storeEpisodicEvent } from "../../vectors/episodic-events.js";
 import { generateText } from "ai";
-import { npcs, locations, locationEdges, players, items } from "../../db/schema.js";
+import { npcs, locations, locationEdges, players, items, worldClocks } from "../../db/schema.js";
 
 const CAMPAIGN_ID = "test-campaign-123";
 const NPC_ID = "npc-001";
@@ -270,6 +312,7 @@ function setupMockDb(options: {
     update: vi.fn().mockReturnThis(),
     set: vi.fn().mockReturnThis(),
     run: vi.fn(),
+    transaction: vi.fn((fn: () => unknown) => fn()),
     get: vi.fn().mockImplementation(() => {
       // Return based on call order context
       return mockNpc;
@@ -290,6 +333,15 @@ function setupMockDb(options: {
       if (getCallCount === 1) return mockLocation;
       if (getCallCount === 2) return adjacentLoc;
       return mockLocation;
+    }
+    if (lastFromTable === (worldClocks as unknown)) {
+      return {
+        campaignId: CAMPAIGN_ID,
+        worldVersion: 0,
+        worldTimeMinutes: TICK,
+        currentTick: TICK,
+        updatedAt: 123,
+      };
     }
     return null;
   });
@@ -430,7 +482,7 @@ describe("createNpcAgentTools", () => {
     expect((result as { error: string }).error).toMatch(/not found|not adjacent/i);
   });
 
-  it("move_to updates NPC currentLocationId on success", async () => {
+  it("move_to delegates NPC movement through authority-backed tool execution", async () => {
     const adjLocation = {
       id: "loc-002",
       name: "Harbor",
@@ -449,7 +501,24 @@ describe("createNpcAgentTools", () => {
     );
 
     expect(result).toHaveProperty("moved", true);
-    expect(mockDb.run).toHaveBeenCalled();
+    expect(mockDb.run).not.toHaveBeenCalled();
+    expect(executeToolCall).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      "move_to",
+      { targetLocationName: "Harbor" },
+      TICK,
+      undefined,
+      expect.objectContaining({
+        scope: "actor_turn",
+        subjectActorId: NPC_ID,
+        authority: expect.objectContaining({
+          baseWorldVersion: 0,
+          sourceEntity: { type: "npc", id: NPC_ID },
+          allowedWriteScopes: ["npc:npc-001", "location:loc-002"],
+        }),
+        legalMovementRefs: expect.any(Set),
+      }),
+    );
   });
 
   it("move_to shares the travel cost contract with player movement for multi-edge destinations", async () => {
@@ -497,7 +566,20 @@ describe("createNpcAgentTools", () => {
       travelCost: 2,
       path: ["Shibuya Crossing", "Hidden Station Platform", "Tokyo Jujutsu High"],
     });
-    expect(mockDb.run).toHaveBeenCalled();
+    expect(mockDb.run).not.toHaveBeenCalled();
+    expect(executeToolCall).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      "move_to",
+      { targetLocationName: "Tokyo Jujutsu High" },
+      TICK,
+      undefined,
+      expect.objectContaining({
+        scope: "actor_turn",
+        authority: expect.objectContaining({
+          allowedWriteScopes: ["npc:npc-001", "location:loc-003"],
+        }),
+      }),
+    );
   });
 
   it("update_own_goal replaces old goal with new goal", async () => {
@@ -512,6 +594,39 @@ describe("createNpcAgentTools", () => {
 
     expect(result).toHaveProperty("updated", true);
     expect(mockDb.run).toHaveBeenCalled();
+    expect(validateBaseWorldVersionMock).toHaveBeenCalledWith({
+      campaignId: CAMPAIGN_ID,
+      baseWorldVersion: 0,
+      currentTick: TICK,
+    });
+    expect(commitAuthorityTraceMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        campaignId: CAMPAIGN_ID,
+        operation: "npc:update_own_goal",
+        baseWorldVersion: 0,
+        sourceEntity: { type: "npc", id: NPC_ID },
+        stateDeltaRefs: ["npc:npc-001", "npc_goal:short_term"],
+      }),
+    );
+  });
+
+  it("update_own_goal refuses stale authority before writing", async () => {
+    const mockDb = setupMockDb({});
+    validateBaseWorldVersionMock.mockImplementationOnce(() => {
+      throw new Error("stale world version");
+    });
+
+    const tools = createNpcAgentTools(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
+
+    const result = await tools.update_own_goal.execute!(
+      { oldGoal: "sell rare goods", newGoal: "find rare artifacts", type: "short_term" as const },
+      { toolCallId: "tc-stale", messages: [], abortSignal: undefined as unknown as AbortSignal },
+    );
+
+    expect(result).toHaveProperty("error");
+    expect((result as { error: string }).error).toContain("stale world version");
+    expect(mockDb.run).not.toHaveBeenCalled();
+    expect(commitAuthorityTraceMock).not.toHaveBeenCalled();
   });
 
   it("speak returns dialogue text as result without Oracle", async () => {
@@ -527,15 +642,30 @@ describe("createNpcAgentTools", () => {
     expect(result).toHaveProperty("spoke", true);
     expect(result).toHaveProperty("dialogue", "Welcome to my shop!");
     expect(callOracle).not.toHaveBeenCalled();
-    expect(storeEpisodicEvent).toHaveBeenCalledWith(
+    expect(storeEpisodicEvent).not.toHaveBeenCalled();
+    expect(executeToolCall).toHaveBeenCalledWith(
       CAMPAIGN_ID,
+      "record_dialogue_outcome",
       expect.objectContaining({
-        location: "Market Square",
+        speakerRef: "Greta the Merchant",
+        addresseeRefs: ["player"],
+        quote: "Welcome to my shop!",
+        durability: "durable",
+        futureUseKind: "npc_memory",
+      }),
+      TICK,
+      undefined,
+      expect.objectContaining({
+        scope: "background",
+        authority: expect.objectContaining({
+          sourceEntity: { type: "npc", id: NPC_ID },
+          allowedWriteScopes: ["world:dialogue"],
+        }),
       }),
     );
   });
 
-  it("increments reflection budget when present-NPC dialogue commits an episodic event", async () => {
+  it("does not write NPC dialogue memory directly outside authority execution", async () => {
     setupMockDb({});
 
     const tools = createNpcAgentTools(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
@@ -545,11 +675,22 @@ describe("createNpcAgentTools", () => {
       { toolCallId: "tc2", messages: [], abortSignal: undefined as unknown as AbortSignal }
     );
 
-    expect(storeEpisodicEvent).toHaveBeenCalled();
-    expect(accumulateReflectionBudgetMock).toHaveBeenCalledWith(
+    expect(storeEpisodicEvent).not.toHaveBeenCalled();
+    expect(accumulateReflectionBudgetMock).not.toHaveBeenCalled();
+    expect(executeToolCall).toHaveBeenCalledWith(
       CAMPAIGN_ID,
-      ["Greta the Merchant", "Hero"],
-      3,
+      "record_dialogue_outcome",
+      expect.objectContaining({
+        quote: "We need allies before dawn.",
+        addresseeRefs: ["Hero"],
+      }),
+      TICK,
+      undefined,
+      expect.objectContaining({
+        authority: expect.objectContaining({
+          allowedWriteScopes: ["world:dialogue"],
+        }),
+      }),
     );
   });
 
@@ -569,6 +710,13 @@ describe("createNpcAgentTools", () => {
         participants: ["Greta the Merchant"],
       }),
       TICK,
+      undefined,
+      expect.objectContaining({
+        scope: "background",
+        authority: expect.objectContaining({
+          sourceEntity: { type: "npc", id: NPC_ID },
+        }),
+      }),
     );
     expect(accumulateReflectionBudgetMock).not.toHaveBeenCalled();
   });

@@ -43,7 +43,11 @@ import {
   type SceneFrame,
   type SceneFrameBuildOptions,
 } from "../scene-frame.js";
-import { runtimeToolInputSchemas } from "../tool-schemas.js";
+import { GM_READ_RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS } from "../gm-turn-read.js";
+import {
+  canRuntimeToolSatisfyRequirement,
+  type RuntimeRequirementLike,
+} from "../tool-contracts.js";
 
 const campaignId = "campaign-70-02";
 const playerId = "11111111-1111-4111-8111-111111111111";
@@ -85,6 +89,7 @@ function createMockDb(options: {
   locationRows?: Array<Record<string, unknown>>;
   edgeRows?: Array<Record<string, unknown>>;
   itemRows?: Array<Record<string, unknown>>;
+  worldClockRows?: Array<Record<string, unknown>>;
 } = {}) {
   const state = {
     players: options.playerRows ?? [createPlayerRow()],
@@ -211,6 +216,13 @@ function createMockDb(options: {
         isSignature: false,
       },
     ],
+    worldClocks: options.worldClockRows ?? [{
+      campaignId,
+      worldVersion: 7,
+      worldTimeMinutes: 12,
+      currentTick: 12,
+      updatedAt: 1,
+    }],
   };
 
   let lastTableName: string | null = null;
@@ -226,6 +238,8 @@ function createMockDb(options: {
         return state.locationEdges;
       case "items":
         return state.items;
+      case "world_clocks":
+        return state.worldClocks;
       default:
         return [];
     }
@@ -312,6 +326,39 @@ describe("SceneFrame builder", () => {
     expect(frame.roster.active.map((actor) => actor.actorId)).toContain(clearNpcId);
   });
 
+  it("uses the post-catchup world clock for the returned frame and pending-event scan", async () => {
+    const worldClockRows = [{
+      campaignId,
+      worldVersion: 7,
+      worldTimeMinutes: 12,
+      currentTick: 12,
+      updatedAt: 1,
+    }];
+    (getDb as Mock).mockReturnValue(createMockDb({ worldClockRows }));
+    (resolveActorExposureCatchup as Mock).mockImplementationOnce(() => {
+      worldClockRows[0] = {
+        campaignId,
+        worldVersion: 8,
+        worldTimeMinutes: 40,
+        currentTick: 40,
+        updatedAt: 2,
+      };
+      return {
+        executed: [{ status: "completed" }],
+        deferred: [],
+        skippedActorIds: [],
+        inspectedActorIds: [clearNpcId],
+        requiresFrameRefresh: true,
+      };
+    });
+
+    const frame = await buildDbBackedFrame({ elapsedWorldTimeMinutes: 28 });
+
+    expect(frame.tick).toBe(40);
+    expect(frame.worldVersion).toBe(8);
+    expect(readPendingCommittedEvents).toHaveBeenCalledWith(campaignId, 40);
+  });
+
   it("respects callers that already performed actor exposure catchup", async () => {
     await buildDbBackedFrame({ runActorExposureCatchup: false });
 
@@ -321,6 +368,7 @@ describe("SceneFrame builder", () => {
   it("projects roster buckets from resolveScenePresence with stable actor IDs", async () => {
     const frame: SceneFrame = await buildDbBackedFrame();
 
+    expect(frame.worldVersion).toBe(7);
     expect(frame.roster.active.map((actor) => actor.actorId)).toEqual([
       playerId,
       clearNpcId,
@@ -443,7 +491,8 @@ describe("SceneFrame builder", () => {
 
     expect(frame.recentEvents).toHaveLength(SCENE_FRAME_RECENT_EVENT_LIMIT);
     expect(frame.recentEvents.at(-1)?.summary).toContain("source-linked local events");
-    expect(frame.recentEvents.at(-1)?.summary).toContain("event-11");
+    expect(frame.recentEvents.at(-1)?.summary).toContain("Source links are preserved internally");
+    expect(frame.recentEvents.at(-1)?.summary).not.toContain("event-11");
     expect(frame.contextBudgetTrace?.summarizedItemCount).toBe(4);
     expect(frame.contextBudgetTrace?.sourceLinkedSummaryCount).toBe(1);
     expect(frame.contextBudgetTrace?.overflowWarnings).toContainEqual(
@@ -584,6 +633,131 @@ describe("SceneFrame builder", () => {
     );
   });
 
+  it("keeps explicit macro scene scope aligned with currentScene visibility", async () => {
+    (getDb as Mock).mockReturnValue(
+      createMockDb({
+        playerRows: [
+          createPlayerRow({
+            currentLocationId: broadLocationId,
+            currentSceneLocationId: broadLocationId,
+          }),
+        ],
+        locationRows: [
+          {
+            id: broadLocationId,
+            campaignId,
+            name: "Brass Citadel",
+            description: "A macro civic district with an active public platform.",
+            kind: "macro",
+            parentLocationId: null,
+            anchorLocationId: null,
+            persistence: "persistent",
+            expiresAtTick: null,
+            archivedAtTick: null,
+            tags: '["civic"]',
+            isStarting: false,
+            connectedTo: "[]",
+          },
+          {
+            id: "loc-bell-hall",
+            campaignId,
+            name: "Bell Hall",
+            description: "A sibling hall under the same macro.",
+            kind: "persistent_sublocation",
+            parentLocationId: broadLocationId,
+            anchorLocationId: null,
+            persistence: "persistent",
+            expiresAtTick: null,
+            archivedAtTick: null,
+            tags: "[]",
+            isStarting: false,
+            connectedTo: "[]",
+          },
+        ],
+        npcRows: [
+          {
+            id: clearNpcId,
+            campaignId,
+            name: "Wax-Tablet Clerk",
+            persona: "A temporary clerk on the public platform.",
+            characterRecord: "{}",
+            derivedTags: "[]",
+            tags: "[]",
+            tier: "temporary",
+            currentLocationId: broadLocationId,
+            currentSceneLocationId: broadLocationId,
+            goals: '{"short_term":[],"long_term":[]}',
+            beliefs: "[]",
+            unprocessedImportance: 0,
+            inactiveTicks: 0,
+            createdAt: 1,
+          },
+          {
+            id: backgroundNpcId,
+            campaignId,
+            name: "Bell Hall Arbiter",
+            persona: "Working in a sibling hall.",
+            characterRecord: "{}",
+            derivedTags: "[]",
+            tags: "[]",
+            tier: "key",
+            currentLocationId: broadLocationId,
+            currentSceneLocationId: "loc-bell-hall",
+            goals: '{"short_term":[],"long_term":[]}',
+            beliefs: "[]",
+            unprocessedImportance: 0,
+            inactiveTicks: 0,
+            createdAt: 1,
+          },
+          {
+            id: hintNpcId,
+            campaignId,
+            name: "Broad Legacy Presence",
+            persona: "A broad-only legacy row.",
+            characterRecord: "{}",
+            derivedTags: "[]",
+            tags: "[]",
+            tier: "persistent",
+            currentLocationId: broadLocationId,
+            currentSceneLocationId: null,
+            goals: '{"short_term":[],"long_term":[]}',
+            beliefs: "[]",
+            unprocessedImportance: 0,
+            inactiveTicks: 0,
+            createdAt: 1,
+          },
+        ],
+      }),
+    );
+
+    const frame = await buildDbBackedFrame();
+
+    expect(frame.currentLocationId).toBe(broadLocationId);
+    expect(frame.currentSceneScopeId).toBe(broadLocationId);
+    expect(getSceneFrameVisibleActorNames(frame)).toContain("Wax-Tablet Clerk");
+    expect(frame.targetCandidates.map((candidate) => candidate.label)).toContain(
+      "Wax-Tablet Clerk",
+    );
+    expect(frame.roster.active.map((actor) => actor.label)).not.toContain("Bell Hall Arbiter");
+    expect(frame.roster.active.map((actor) => actor.label)).not.toContain(
+      "Broad Legacy Presence",
+    );
+    expect(frame.roster.background).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actorId: backgroundNpcId,
+          label: "Bell Hall Arbiter",
+          awareness: "none",
+        }),
+        expect.objectContaining({
+          actorId: hintNpcId,
+          label: "Broad Legacy Presence",
+          awareness: "none",
+        }),
+      ]),
+    );
+  });
+
   it("keeps broad-only legacy rows out of immediate presence while preserving them as background", async () => {
     (getDb as Mock).mockReturnValue(
       createMockDb({
@@ -694,6 +868,64 @@ describe("SceneFrame builder", () => {
     expect(JSON.stringify(frame)).not.toContain("combatEnvelope");
   });
 
+  it("filters hidden pending committed actor memory out of SceneFrame recent events", async () => {
+    (readPendingCommittedEvents as Mock).mockReturnValue([
+      {
+        id: "pending-visible",
+        text: "Bridge Captain visibly stamps the docket.",
+        tick: 12,
+        location: sceneScopeId,
+        participants: [clearNpcId],
+        importance: 4,
+        type: "event",
+        visibility: "player_perceivable",
+      },
+      {
+        id: "pending-local-signal",
+        text: "A muffled signal clicks behind the docket wall.",
+        tick: 12,
+        location: sceneScopeId,
+        participants: [],
+        importance: 3,
+        type: "event",
+        visibility: "local_signal",
+      },
+      {
+        id: "pending-hidden-memory",
+        text: "Bridge Captain privately recognizes the sealed proof pattern.",
+        tick: 12,
+        location: sceneScopeId,
+        participants: [clearNpcId],
+        importance: 6,
+        type: "event",
+        visibility: "hidden",
+      },
+      {
+        id: "pending-report-only",
+        text: "A private report records a sealed route.",
+        tick: 12,
+        location: sceneScopeId,
+        participants: [clearNpcId],
+        importance: 6,
+        type: "event",
+        visibility: "report_only",
+      },
+    ]);
+
+    const frame = await buildDbBackedFrame();
+    const summaries = frame.recentEvents.map((event) => event.summary);
+
+    expect(summaries).toContain("Bridge Captain visibly stamps the docket.");
+    expect(summaries).toContain("A muffled signal clicks behind the docket wall.");
+    expect(summaries).not.toContain(
+      "Bridge Captain privately recognizes the sealed proof pattern.",
+    );
+    expect(summaries).not.toContain("A private report records a sealed route.");
+    expect(frame.recentEvents.find((event) => event.id === "pending-local-signal")).toMatchObject({
+      perceivableByPlayer: true,
+    });
+  });
+
   it("preserves explicit post-GM oracle context and deferred hook context without inventing memory hints", async () => {
     const neutralFrame = await buildDbBackedFrame({
       deferredHooks: [
@@ -785,7 +1017,7 @@ describe("SceneFrame builder", () => {
     expect(JSON.stringify(frame)).not.toContain("combatEnvelope");
   });
 
-  it("derives player-turn allowedTools without disabling item spawning", async () => {
+  it("derives curated player-turn allowedTools without exposing overlapping raw tools", async () => {
     (readPendingCommittedEvents as Mock).mockReturnValue(
       Array.from({ length: SCENE_FRAME_RECENT_EVENT_LIMIT + 2 }, (_, index) => ({
         id: `pending-${index}`,
@@ -841,19 +1073,65 @@ describe("SceneFrame builder", () => {
 
     const frame = await buildDbBackedFrame();
 
-    expect(frame.allowedTools).toEqual(Object.keys(runtimeToolInputSchemas));
+    expect(frame.allowedTools).toContain("create_scene_extra");
+    expect(frame.allowedTools).toContain("move_actor");
     expect(frame.allowedTools).toContain("spawn_item");
+    expect(frame.allowedTools).toContain("create_minor_poi");
+    expect(frame.allowedTools).toContain("reveal_location");
+    expect(frame.allowedTools).toContain("add_chronicle_entry");
+    expect(frame.allowedTools).not.toContain("start_search");
+    expect(frame.allowedTools).not.toContain("record_player_intent");
+    expect(frame.allowedTools).toContain("advance_time");
+    expect(frame.allowedTools).not.toContain("spawn_npc");
+    expect(frame.allowedTools).not.toContain("move_to");
     expect(frame.recentEvents).toHaveLength(SCENE_FRAME_RECENT_EVENT_LIMIT);
     expect(frame.targetCandidates).toHaveLength(SCENE_FRAME_TARGET_CANDIDATE_LIMIT);
     expect(frame.movementCandidates).toHaveLength(SCENE_FRAME_MOVEMENT_CANDIDATE_LIMIT);
   });
 
-  it("keeps explicit caller-supplied allowedTools unchanged", async () => {
+  it("normalizes explicit player-turn allowedTools so overlapping raw tools stay hidden", async () => {
     const frame = await buildDbBackedFrame({
-      allowedTools: ["log_event", "spawn_item"],
+      allowedTools: ["log_event", "add_chronicle_entry", "spawn_npc", "move_to", "spawn_item"],
     });
 
-    expect(frame.allowedTools).toEqual(["log_event", "spawn_item"]);
+    expect(frame.allowedTools).toEqual(["log_event", "add_chronicle_entry", "spawn_item"]);
+  });
+
+  it("normalizes explicit player-turn allowedTools so one owner handles local place and intent effects", async () => {
+    const frame = await buildDbBackedFrame({
+      allowedTools: ["create_minor_poi", "reveal_location", "start_search", "record_player_intent"],
+    });
+
+    expect(frame.allowedTools).toEqual(["create_minor_poi", "reveal_location", "start_search"]);
+  });
+
+  it("keeps every GM Read player-turn runtime requirement satisfiable by default normalized tools", async () => {
+    const frame = await buildDbBackedFrame();
+    const requirements: RuntimeRequirementLike[] = [
+      { kind: "dialogue_outcome", durability: "durable" },
+      { kind: "world_fact", durability: "durable" },
+      { kind: "scene_beat", durability: "scene_local", beatKind: "event_log" },
+      { kind: "scene_beat", durability: "scene_local", beatKind: "time_passage" },
+      ...GM_READ_RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS.flatMap((effectKind) => [
+        { kind: "state_mutation", effectKind },
+        { kind: "scene_beat", durability: "scene_local", effectKind },
+      ]),
+    ];
+
+    const unsatisfied = requirements.filter((requirement) =>
+      !frame.allowedTools.some((toolName) => canRuntimeToolSatisfyRequirement(toolName, requirement)),
+    );
+
+    expect(unsatisfied).toEqual([]);
+  });
+
+  it("keeps explicit caller-supplied allowedTools available for system flows", async () => {
+    const frame = await buildDbBackedFrame({
+      allowedTools: ["log_event", "spawn_npc", "move_to", "spawn_item"],
+      toolExposureMode: "system_flow",
+    });
+
+    expect(frame.allowedTools).toEqual(["log_event", "spawn_npc", "move_to", "spawn_item"]);
   });
 
   it("keeps hidden names out of visibleActorNames while exposing playerHints for hint-band actors", async () => {

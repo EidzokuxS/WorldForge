@@ -6,11 +6,13 @@ import {
   type WorldThreadSurfaceRoute,
 } from "./world-thread.js";
 import { readWorldClock } from "./living-world-authority.js";
+import { findConflictingWriteScope } from "./simulation-write-scope.js";
 
 export interface ResolveDueWorldThreadWorkForScopeInput {
   campaignId: string;
   playerLocationId?: string | null;
   playerSceneScopeId?: string | null;
+  blockedWriteScopes?: readonly string[];
 }
 
 export interface SkippedWorldThreadWork {
@@ -94,6 +96,15 @@ export function resolveDueWorldThreadWorkForScope(
     }
     if (!hasRouteSource(route, thread)) {
       deferred.push({ thread, reason: "surface_route_missing_source" });
+      continue;
+    }
+    const writeScopes = [`world-thread:${thread.id}`];
+    const conflict = findConflictingWriteScope({
+      writeScopes,
+      blockedWriteScopes: input.blockedWriteScopes ?? [],
+    });
+    if (conflict) {
+      skipped.push({ thread, reason: "conflicting_write_scope" });
       continue;
     }
 

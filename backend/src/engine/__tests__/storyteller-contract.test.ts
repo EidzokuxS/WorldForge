@@ -157,7 +157,7 @@ describe("storyteller-contract", () => {
     expect(contract).toContain("Return exactly one GroundedSentenceDraft structured object");
     expect(contract).toContain("Return 1-5 sentence objects total; never return 6 or more sentences.");
     expect(contract).toContain("sentences[].text field must contain player-visible narrative prose only");
-    expect(contract).toContain("sentences[].evidenceRefs array must contain 1-4 exact packet evidence ids");
+    expect(contract).toContain("sentences[].evidenceRefs array must contain 1-4 short packet evidence refs");
     expect(contract).toContain("never return five or more evidenceRefs on one sentence");
     expect(contract).not.toContain("Your output must be narrative prose only.");
     expect(contract).toContain("plain scene truth first");

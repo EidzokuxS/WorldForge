@@ -81,6 +81,8 @@ function createFrame(overrides: Partial<SceneFrame> = {}): SceneFrame {
     playerActorId: playerId,
     currentLocationId: "99999999-9999-4999-8999-999999999999",
     currentSceneScopeId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    currentLocationName: "Town Gate",
+    currentSceneScopeName: "Gate Approach",
     playerAction: "Ask the road warden what happened.",
     roster: {
       active: [
@@ -139,6 +141,7 @@ function createFrame(overrides: Partial<SceneFrame> = {}): SceneFrame {
     combatEnvelope: null,
     oracle: null,
     ...overrides,
+    worldVersion: overrides.worldVersion ?? 0,
   };
 }
 
@@ -175,7 +178,7 @@ function createBeatPlan(overrides: Partial<GmBeatPlan> = {}): GmBeatPlan {
     localFocus: {
       actorRefs: ["Player", "Road Warden"],
       locationRefs: ["Town Gate"],
-      sceneRefs: ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
+      sceneRefs: ["current_scene"],
       evidenceRefs: ["Player", "Road Warden"],
     },
     pacing: "breathe",
@@ -187,7 +190,7 @@ function createBeatPlan(overrides: Partial<GmBeatPlan> = {}): GmBeatPlan {
     },
     forecastInfluenceRefs: [
       {
-        entryId: "forecast-local-rain",
+        entryId: "forecast_1",
         influence: "Add gentle time pressure around the road.",
         force: "pressure_only",
       },
@@ -226,7 +229,7 @@ describe("GM BeatPlan contract", () => {
     expect(parsed.pacing).toBe("breathe");
     expect(parsed.tensionPosture).toBe("low");
     expect(parsed.revealBudget.mode).toBe("hint");
-    expect(parsed.forecastInfluenceRefs[0]?.entryId).toBe("forecast-local-rain");
+    expect(parsed.forecastInfluenceRefs[0]?.entryId).toBe("forecast_1");
     expect(parsed.toolPosture.execution).toBe("forbid_tools");
 
     expect(() =>
@@ -425,8 +428,8 @@ describe("GM BeatPlan contract", () => {
     const outOfScope = createBeatPlan({
       forecastInfluenceRefs: [
         {
-          entryId: "forecast-private-outpost",
-          influence: "Leak a private forecast.",
+          entryId: "forecast-local-rain",
+          influence: "Try to address a stored backend forecast id directly.",
           force: "pressure_only",
         },
       ],
@@ -463,7 +466,7 @@ describe("GM BeatPlan contract", () => {
       whyNow: "The Forest Outpost forecast should steer this scene.",
       forecastInfluenceRefs: [
         {
-          entryId: "forecast-local-rain",
+          entryId: "forecast_1",
           influence: "Let the Okutama Safe Zone pressure shape the gate.",
           force: "pressure_only",
         },
@@ -484,6 +487,28 @@ describe("GM BeatPlan contract", () => {
         code: "private_forecast_term",
         path: expect.stringContaining("scenePlannerProjection"),
       }),
+    ]);
+
+    const rawLocalFocus = createBeatPlan({
+      localFocus: {
+        actorRefs: [`actor:${npcId}`],
+        locationRefs: ["location:99999999-9999-4999-8999-999999999999"],
+        sceneRefs: ["scene-forest-outpost"],
+        evidenceRefs: ["tool-result-123"],
+      },
+      forecastInfluenceRefs: [],
+    });
+
+    expect(validateBeatPlanForFrame({
+      beatPlan: rawLocalFocus,
+      frame: createFrame(),
+      gmDecision: directDecision,
+      scopedForecastExcerpt: createScopedForecast(),
+    })).toEqual([
+      expect.objectContaining({ code: "local_focus_ref_invalid", path: "localFocus.actorRefs.0" }),
+      expect.objectContaining({ code: "local_focus_ref_invalid", path: "localFocus.locationRefs.0" }),
+      expect.objectContaining({ code: "local_focus_ref_invalid", path: "localFocus.sceneRefs.0" }),
+      expect.objectContaining({ code: "local_focus_ref_invalid", path: "localFocus.evidenceRefs.0" }),
     ]);
   });
 
@@ -511,7 +536,7 @@ describe("GM BeatPlan contract", () => {
         whyNow: "The Forest Outpost pressure is offscreen.",
         forecastInfluenceRefs: [
           {
-            entryId: "forecast-local-rain",
+            entryId: "forecast_1",
             influence: "Use the Okutama Safe Zone thread as pressure only.",
             force: "pressure_only",
           },
@@ -559,7 +584,8 @@ describe("GM BeatPlan contract", () => {
     expect(call?.prompt).toContain("GM TURN DECISION");
     expect(call?.prompt).toContain("MODEL-FACING LOCAL SCENE PACKET");
     expect(call?.prompt).toContain("SCOPED FORECAST EXCERPT ONLY");
-    expect(call?.prompt).toContain("forecast-local-rain");
+    expect(call?.prompt).toContain("forecast_1");
+    expect(call?.prompt).not.toContain("forecast-local-rain");
     expect(call?.prompt).toContain("EXPECTED TOOL POSTURE AND CANDIDATES");
     expect(call?.prompt).not.toContain("forbiddenPrivateTerms");
     expect(call?.prompt).not.toContain("Forest Outpost");

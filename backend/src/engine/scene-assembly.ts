@@ -9,6 +9,7 @@ import {
   AWARENESS_BAND_CONTRACT,
   getObserverAwareness,
   inferPresenceVisibility,
+  resolveImmediateScenePresenceScopeId,
   resolveScenePresence,
   resolveStoredSceneScopeId,
   type PresenceSnapshot,
@@ -89,7 +90,8 @@ export interface AssembleSceneOptions {
   currentLocationId?: string | null;
   currentSceneScopeId?: string | null;
   pendingEventTicks: number[];
-  toolCalls: Array<{ tool: string; args: unknown; result: unknown }>;
+  toolCalls: Array<{ tool: string; args: unknown; result: unknown; acceptedReceipt?: boolean }>;
+  acceptedDurableEventIds?: readonly string[];
   openingScene?: boolean;
   playerLabel?: string | null;
   sceneDirection?: WorldBrainSceneDirection | null;
@@ -332,13 +334,16 @@ function buildCurrentScene(
 
 function summarizeToolCall(
   index: number,
-  toolCall: { tool: string; args: unknown; result: unknown },
+  toolCall: { tool: string; args: unknown; result: unknown; acceptedReceipt?: boolean },
   currentScene: AuthoritativeSceneContext | null,
 ): SceneEffect | null {
   const args = (toolCall.args ?? {}) as Record<string, unknown>;
   const result = (toolCall.result ?? {}) as Record<string, unknown>;
   const inner = (result.result ?? {}) as Record<string, unknown>;
 
+  if (toolCall.acceptedReceipt === false) {
+    return null;
+  }
   if (result.success !== true) {
     return null;
   }
@@ -348,6 +353,7 @@ function summarizeToolCall(
       if (
         inner.persisted === true
         && inner.durability === "durable"
+        && (inner.visibility ?? "player_perceivable") === "player_perceivable"
         && typeof args.text === "string"
         && args.text.trim().length > 0
       ) {
@@ -501,6 +507,9 @@ function summarizeCommittedEvent(
   event: PendingCommittedEvent,
   currentScene: AuthoritativeSceneContext | null,
 ): SceneEffect | null {
+  if ((event.visibility ?? "player_perceivable") !== "player_perceivable") {
+    return null;
+  }
   if (
     currentScene
     && event.location
@@ -560,17 +569,9 @@ function buildScenePresence(
   }
 
   const broadLocationId = currentLocationId ?? player.currentLocationId ?? null;
-  let playerSceneScopeId = player.currentSceneLocationId ?? null;
-  if (playerSceneScopeId && playerSceneScopeId === broadLocationId) {
-    const scopeLocation = db
-      .select({ kind: locations.kind })
-      .from(locations)
-      .where(eq(locations.id, playerSceneScopeId))
-      .get();
-    if (scopeLocation?.kind === "macro") {
-      playerSceneScopeId = null;
-    }
-  }
+  const playerSceneScopeId = resolveImmediateScenePresenceScopeId(
+    player.currentSceneLocationId,
+  );
 
   if (!broadLocationId || !playerSceneScopeId) {
     return {
@@ -661,8 +662,12 @@ export function assembleAuthoritativeScene(
   );
   const presentNpcNames = scenePresence.presentNpcNames;
 
+  const acceptedDurableEventIds = options.acceptedDurableEventIds
+    ? new Set(options.acceptedDurableEventIds.map((id) => id.trim()).filter(Boolean))
+    : null;
   const pendingEvents = [...new Set(options.pendingEventTicks)]
-    .flatMap((tick) => readPendingCommittedEvents(options.campaignId, tick));
+    .flatMap((tick) => readPendingCommittedEvents(options.campaignId, tick))
+    .filter((event) => !acceptedDurableEventIds || acceptedDurableEventIds.has(event.id));
   const committedEventPairs = pendingEvents
     .map((event) => ({
       event,

@@ -19,11 +19,14 @@ import {
   getObserverAwareness,
   getObserverKnowledgeBasis,
   inferPresenceVisibility,
+  resolveImmediateScenePresenceScopeId,
   resolveScenePresence,
   type AwarenessBand,
   type KnowledgeBasis,
 } from "./scene-presence.js";
 import { runtimeToolInputSchemas, type RuntimeToolName } from "./tool-schemas.js";
+import { readWorldClock } from "./living-world-authority.js";
+import { RUNTIME_TOOL_DESCRIPTORS } from "./runtime-tool-descriptors.js";
 
 export const SCENE_FRAME_RECENT_EVENT_LIMIT = 12;
 export const SCENE_FRAME_TARGET_CANDIDATE_LIMIT = 12;
@@ -134,6 +137,7 @@ export interface SceneFrameOracleContext {
 export interface SceneFrame {
   campaignId: string;
   tick: number;
+  worldVersion: number;
   playerActorId: string;
   currentLocationId: string | null;
   currentSceneScopeId: string | null;
@@ -187,10 +191,17 @@ export interface SceneFrameBuildOptions {
   playerInventory?: SceneFramePlayerInventoryItem[];
   deferredHooks?: SceneFrameDeferredHook[];
   allowedTools?: RuntimeToolName[];
+  toolExposureMode?: ModelFacingToolExposureMode;
   oracleContext?: SceneFrameOracleContext | null;
   combatEnvelope?: CombatEnvelope | null;
   oracle?: SceneFrameOracleInput | null;
 }
+
+export type ModelFacingToolExposureMode =
+  | "player_turn"
+  | "actor_turn"
+  | "system_flow"
+  | "internal";
 
 type PlayerRow = typeof players.$inferSelect;
 type NpcRow = typeof npcs.$inferSelect;
@@ -231,9 +242,33 @@ const EXECUTE_TOOL_SUPPORTED_TOOL_NAMES = new Set<RuntimeToolName>([
   "transfer_item",
 ]);
 
-const DEFAULT_PLAYER_TURN_ALLOWED_TOOLS: RuntimeToolName[] = (
-  Object.keys(runtimeToolInputSchemas) as RuntimeToolName[]
-);
+const DEFAULT_PLAYER_TURN_ALLOWED_TOOLS: RuntimeToolName[] = [
+  "list_visible_affordances",
+  "list_navigation_options",
+  "find_location_candidates",
+  "find_object_candidates",
+  "find_actor_candidates",
+  "find_poi_candidates",
+  "inspect_known_fact",
+  "check_route",
+  "move_actor",
+  "create_minor_poi",
+  "create_scene_extra",
+  "advance_time",
+  "record_dialogue_outcome",
+  "record_world_fact",
+  "add_tag",
+  "remove_tag",
+  "set_relationship",
+  "add_chronicle_entry",
+  "log_event",
+  "offer_quick_actions",
+  "promote_npc",
+  "spawn_item",
+  "reveal_location",
+  "set_condition",
+  "transfer_item",
+];
 
 function uniqueStrings(values: Array<string | null | undefined>): string[] {
   const seen = new Set<string>();
@@ -332,7 +367,9 @@ function summarizeRecentEventOverflow(
   const summary: SceneFrameRecentEvent = {
     id: `summary:scene-frame-recent-events:${sourceIds.slice(0, 4).join(":")}`,
     tick: Math.max(...overflow.map((event) => event.tick)),
-    summary: `${overflow.length} source-linked local events are summarized for frame budget. Sources: ${sourceIds.slice(0, 8).join(", ")}.`,
+    summary:
+      `${overflow.length} source-linked local events are summarized for frame budget. `
+      + "Source links are preserved internally.",
     source: "committed_event",
     actorIds: uniqueStrings(overflow.flatMap((event) => event.actorIds)),
     perceivableByPlayer: overflow.some((event) => event.perceivableByPlayer),
@@ -374,18 +411,48 @@ function cloneDeferredHooks(hooks: readonly SceneFrameDeferredHook[]): SceneFram
   }));
 }
 
-function buildAllowedTools(explicitTools?: readonly RuntimeToolName[]): RuntimeToolName[] {
+export function normalizeModelFacingAllowedTools(input: {
+  tools: readonly RuntimeToolName[];
+  mode?: ModelFacingToolExposureMode;
+}): RuntimeToolName[] {
+  const mode = input.mode ?? "player_turn";
+  const hasSearchOwner = input.tools.includes("start_search");
+  const inputToolSet = new Set(input.tools);
+  const seen = new Set<RuntimeToolName>();
+  const result: RuntimeToolName[] = [];
+
+  for (const toolName of input.tools) {
+    if (seen.has(toolName)) continue;
+    seen.add(toolName);
+    if (!(toolName in runtimeToolInputSchemas)) continue;
+    if (!EXECUTE_TOOL_SUPPORTED_TOOL_NAMES.has(toolName)) continue;
+    const descriptor = RUNTIME_TOOL_DESCRIPTORS[toolName];
+    if (mode === "player_turn" && descriptor.hiddenInPlayerTurn === true) continue;
+    if (
+      mode === "player_turn"
+      && descriptor.suppressInPlayerTurnWhenPresent?.some((owner) => inputToolSet.has(owner))
+    ) {
+      continue;
+    }
+    if (mode === "player_turn" && hasSearchOwner && toolName === "record_player_intent") continue;
+    result.push(toolName);
+  }
+
+  return result;
+}
+
+function buildAllowedTools(
+  explicitTools?: readonly RuntimeToolName[],
+  toolExposureMode: ModelFacingToolExposureMode = "player_turn",
+): RuntimeToolName[] {
   const allowedTools = explicitTools ?? DEFAULT_PLAYER_TURN_ALLOWED_TOOLS;
-  return allowedTools.filter(
-    (toolName) =>
-      toolName in runtimeToolInputSchemas
-      && EXECUTE_TOOL_SUPPORTED_TOOL_NAMES.has(toolName),
-  );
+  return normalizeModelFacingAllowedTools({ tools: allowedTools, mode: toolExposureMode });
 }
 
 function normalizeFrame(input: {
   campaignId: string;
   tick: number;
+  worldVersion: number;
   playerActorId: string;
   currentLocationId: string | null;
   currentSceneScopeId: string | null;
@@ -402,6 +469,7 @@ function normalizeFrame(input: {
   playerInventory?: SceneFramePlayerInventoryItem[];
   deferredHooks?: SceneFrameDeferredHook[];
   allowedTools?: RuntimeToolName[];
+  toolExposureMode?: ModelFacingToolExposureMode;
   oracleContext?: SceneFrameOracleContext | null;
   combatEnvelope?: CombatEnvelope | null;
   oracle?: SceneFrameOracleInput | null;
@@ -440,6 +508,7 @@ function normalizeFrame(input: {
   const frame: SceneFrame = {
     campaignId: input.campaignId,
     tick: input.tick,
+    worldVersion: input.worldVersion,
     playerActorId: input.playerActorId,
     currentLocationId: input.currentLocationId,
     currentSceneScopeId: input.currentSceneScopeId,
@@ -459,7 +528,7 @@ function normalizeFrame(input: {
     movementCandidates,
     playerInventory,
     deferredHooks: cloneDeferredHooks(input.deferredHooks ?? []),
-    allowedTools: buildAllowedTools(input.allowedTools),
+    allowedTools: buildAllowedTools(input.allowedTools, input.toolExposureMode),
     oracle: input.oracle ?? null,
     contextBudgetTrace: buildContextBudgetTrace({
       label: "SceneFrame",
@@ -597,29 +666,6 @@ function locationIsVisibleNow(location: LocationRow, currentTick: number): boole
   return true;
 }
 
-function resolveImmediatePresenceSceneScopeId(input: {
-  currentLocationId: string | null;
-  currentSceneScopeId: string | null;
-  locationRows: LocationRow[];
-}): string | null {
-  if (!input.currentSceneScopeId) {
-    return null;
-  }
-
-  if (input.currentSceneScopeId !== input.currentLocationId) {
-    return input.currentSceneScopeId;
-  }
-
-  const sceneLocation = input.locationRows.find(
-    (location) => location.id === input.currentSceneScopeId,
-  );
-  if (sceneLocation?.kind === "macro") {
-    return null;
-  }
-
-  return input.currentSceneScopeId;
-}
-
 function resolvePresenceBroadLocationId(input: {
   currentLocationId: string | null;
   currentSceneScopeId: string | null;
@@ -649,11 +695,9 @@ function buildRoster(input: {
   currentSceneScopeId: string | null;
 }): { roster: SceneFrameRoster; perception: SceneFramePerception } {
   const playerTags = parseTags(input.player.tags);
-  const presenceSceneScopeId = resolveImmediatePresenceSceneScopeId({
-    currentLocationId: input.currentLocationId,
-    currentSceneScopeId: input.currentSceneScopeId,
-    locationRows: input.locationRows,
-  });
+  const presenceSceneScopeId = resolveImmediateScenePresenceScopeId(
+    input.currentSceneScopeId,
+  );
   const presenceBroadLocationId = resolvePresenceBroadLocationId({
     currentLocationId: input.currentLocationId,
     currentSceneScopeId: input.currentSceneScopeId,
@@ -798,6 +842,10 @@ function collectRecentEvents(input: {
     : [];
   const pendingEvents = readPendingCommittedEvents(input.campaignId, input.tick)
     .filter((event) => {
+      const visibility = event.visibility ?? "player_perceivable";
+      if (visibility !== "player_perceivable" && visibility !== "local_signal") {
+        return false;
+      }
       const location = event.location.trim();
       return (
         location.length === 0
@@ -811,7 +859,9 @@ function collectRecentEvents(input: {
       summary: event.text,
       source: "committed_event",
       actorIds: [...event.participants],
-      perceivableByPlayer: true,
+      perceivableByPlayer:
+        (event.visibility ?? "player_perceivable") === "player_perceivable"
+        || event.visibility === "local_signal",
     }));
 
   return [...locationEvents, ...pendingEvents].slice(0, SCENE_FRAME_RECENT_EVENT_LIMIT);
@@ -1028,9 +1078,11 @@ export async function buildSceneFrame(
   options: SceneFrameBuildOptions,
 ): Promise<SceneFrame> {
   if (options.roster && options.perception && options.playerActorId) {
+    const clock = readWorldClock(options.campaignId);
     return normalizeFrame({
       campaignId: options.campaignId,
       tick: options.tick ?? readCampaignConfig(options.campaignId).currentTick ?? 0,
+      worldVersion: clock.worldVersion,
       playerActorId: options.playerActorId,
       currentLocationId: options.currentLocationId ?? null,
       currentSceneScopeId: options.currentSceneScopeId ?? null,
@@ -1047,6 +1099,7 @@ export async function buildSceneFrame(
       playerInventory: options.playerInventory,
       deferredHooks: options.deferredHooks,
       allowedTools: options.allowedTools,
+      toolExposureMode: options.toolExposureMode,
       oracleContext: options.oracleContext,
       combatEnvelope: options.combatEnvelope,
       oracle: options.oracle,
@@ -1068,6 +1121,8 @@ export async function buildSceneFrame(
       phase: "pre_scene_frame",
     });
   }
+  const frameClock = readWorldClock(options.campaignId);
+  const frameTick = Math.max(tick, frameClock.currentTick, frameClock.worldTimeMinutes);
   const npcRows = readRowsByCampaign<NpcRow>(options.campaignId, npcs);
   const locationRows = readRowsByCampaign<LocationRow>(options.campaignId, locations);
   const edgeRows = readRowsByCampaign<LocationEdgeRow>(options.campaignId, locationEdges);
@@ -1085,7 +1140,7 @@ export async function buildSceneFrame(
   });
   const movementCandidates = collectMovementCandidates({
     currentLocationId,
-    currentTick: tick,
+    currentTick: frameTick,
     locationRows,
     edgeRows,
   });
@@ -1102,7 +1157,7 @@ export async function buildSceneFrame(
   });
   const recentEvents = collectRecentEvents({
     campaignId: options.campaignId,
-    tick,
+    tick: frameTick,
     currentLocationId,
     currentSceneScopeId,
     currentSceneName: currentSceneScopeName,
@@ -1110,7 +1165,8 @@ export async function buildSceneFrame(
 
   return normalizeFrame({
     campaignId: options.campaignId,
-    tick,
+    tick: frameTick,
+    worldVersion: frameClock.worldVersion,
     playerActorId: player.id,
     currentLocationId,
     currentSceneScopeId,
@@ -1127,6 +1183,7 @@ export async function buildSceneFrame(
     playerInventory,
     deferredHooks: options.deferredHooks,
     allowedTools: options.allowedTools,
+    toolExposureMode: options.toolExposureMode,
     oracleContext: options.oracleContext,
     combatEnvelope: options.combatEnvelope,
     oracle: options.oracle,

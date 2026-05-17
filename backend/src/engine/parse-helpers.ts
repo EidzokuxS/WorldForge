@@ -81,20 +81,44 @@ function stringField(record: Record<string, unknown>, field: string): string | n
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
-function resultPayload(value: unknown): unknown {
+function looksLikeToolResult(value: Record<string, unknown>): boolean {
+  return typeof value.success === "boolean"
+    || typeof value.status === "string"
+    || typeof value.kind === "string"
+    || typeof value.observationOnly === "boolean"
+    || typeof value.error === "string";
+}
+
+function unwrapAiSdkToolOutput(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+  const type = stringField(value, "type");
+  if (type === "json" || type === "error-json" || type === "text" || type === "error-text") {
+    return "value" in value ? value.value : null;
+  }
+  if (type === "execution-denied") {
+    return {
+      success: false,
+      error: stringField(value, "reason") ?? "tool_execution_denied",
+    };
+  }
+  return value;
+}
+
+export function extractToolResultPayload(value: unknown): unknown {
   if (!isRecord(value)) return null;
-  return value.output ?? value.result ?? null;
+  if (looksLikeToolResult(value)) return value;
+  if ("output" in value) return unwrapAiSdkToolOutput(value.output);
+  if ("result" in value) return unwrapAiSdkToolOutput(value.result);
+  return unwrapAiSdkToolOutput(value);
 }
 
 export function collectToolCalls(steps: StepLike[]): CollectedToolCall[] {
   const collected: CollectedToolCall[] = [];
   const seenToolCallIds = new Set<string>();
+  const resultsById = new Map<string, unknown>();
 
   for (const step of steps) {
-    const calls = step.toolCalls ?? [];
     const results = step.toolResults ?? [];
-    const resultsById = new Map<string, unknown>();
-
     for (const result of results) {
       if (!isRecord(result)) continue;
       const resultId = stringField(result, "toolCallId");
@@ -102,6 +126,11 @@ export function collectToolCalls(steps: StepLike[]): CollectedToolCall[] {
         resultsById.set(resultId, result);
       }
     }
+  }
+
+  for (const step of steps) {
+    const calls = step.toolCalls ?? [];
+    const results = step.toolResults ?? [];
 
     for (let i = 0; i < calls.length; i++) {
       const tc = calls[i]!;
@@ -119,7 +148,7 @@ export function collectToolCalls(steps: StepLike[]): CollectedToolCall[] {
       collected.push({
         tool: tc.toolName,
         args: raw.input ?? raw.args ?? {},
-        result: resultPayload(rawResult),
+        result: extractToolResultPayload(rawResult),
         ...(toolCallId ? { toolCallId } : {}),
       });
     }

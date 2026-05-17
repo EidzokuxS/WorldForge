@@ -1,6 +1,10 @@
 import type { TurnSnapshot } from "../engine/state-snapshot.js";
 
 const lastTurnSnapshots = new Map<string, TurnSnapshot>();
+const lastTurnSnapshotMetadata = new Map<string, {
+  acceptedDurableEventIds: string[];
+  producedDurableEventIds: string[];
+}>();
 const campaignsWithActiveTurn = new Set<string>();
 
 export function tryBeginTurn(campaignId: string): boolean {
@@ -27,8 +31,16 @@ export function hasAnyActiveTurn(): boolean {
 export function setLastTurnSnapshot(
   campaignId: string,
   snapshot: TurnSnapshot,
+  metadata?: {
+    acceptedDurableEventIds?: readonly string[];
+    producedDurableEventIds?: readonly string[];
+  },
 ): void {
   lastTurnSnapshots.set(campaignId, snapshot);
+  lastTurnSnapshotMetadata.set(campaignId, {
+    acceptedDurableEventIds: [...new Set(metadata?.acceptedDurableEventIds ?? [])],
+    producedDurableEventIds: [...new Set(metadata?.producedDurableEventIds ?? [])],
+  });
 }
 
 export function getLastTurnSnapshot(
@@ -37,8 +49,21 @@ export function getLastTurnSnapshot(
   return lastTurnSnapshots.get(campaignId);
 }
 
+export function getLastTurnSnapshotMetadata(
+  campaignId: string,
+): {
+  acceptedDurableEventIds: string[];
+  producedDurableEventIds: string[];
+} {
+  return lastTurnSnapshotMetadata.get(campaignId) ?? {
+    acceptedDurableEventIds: [],
+    producedDurableEventIds: [],
+  };
+}
+
 export function clearLastTurnSnapshot(campaignId: string): void {
   lastTurnSnapshots.delete(campaignId);
+  lastTurnSnapshotMetadata.delete(campaignId);
 }
 
 export function hasLiveTurnSnapshot(campaignId: string): boolean {
@@ -48,4 +73,5 @@ export function hasLiveTurnSnapshot(campaignId: string): boolean {
 export function clearCampaignRuntimeState(campaignId: string): void {
   campaignsWithActiveTurn.delete(campaignId);
   lastTurnSnapshots.delete(campaignId);
+  lastTurnSnapshotMetadata.delete(campaignId);
 }

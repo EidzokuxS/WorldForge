@@ -357,4 +357,36 @@ describe("simulation proposal lifecycle preflight", () => {
         supersededByProposalId: "proposal-newer",
       });
   });
+
+  it("rejects direct proposal commits that still require intended tool execution", () => {
+    ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 0, worldTimeMinutes: 10 });
+    const proposal = createSimulationProposal({
+      campaignId: CAMPAIGN_ID,
+      proposalType: "tool_backed_commit",
+      baseWorldVersion: 0,
+      sourceEntity: { type: "npc", id: "npc-tool" },
+      summary: "A tool-backed proposal must use the executor.",
+      writeScopes: ["world:event"],
+      intendedTools: [{
+        name: "add_chronicle_entry",
+        args: { text: "This should not be committed by the legacy API." },
+      }],
+      provenance: { source: "test" },
+    });
+
+    expect(commitSimulationProposal({
+      campaignId: CAMPAIGN_ID,
+      proposalId: proposal.proposalId,
+    })).toMatchObject({
+      status: "rejected",
+      reason: "proposal_commit_requires_executor_for_intended_tools",
+      disposition: "rejected_invalid",
+    });
+    expect(getDb().select().from(simulationProposals).where(eq(simulationProposals.id, proposal.proposalId)).get())
+      .toMatchObject({
+        status: "rejected",
+        proposalDisposition: "rejected_invalid",
+        dispositionReason: "proposal_commit_requires_executor_for_intended_tools",
+      });
+  });
 });

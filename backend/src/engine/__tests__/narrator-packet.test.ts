@@ -3,10 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   buildNarratorPacket,
   formatNarratorPacketForPrompt,
+  repairModelGuidancePerceivableResponses,
+  repairPromptUnsafePerceivableEffects,
   summarizeRuntimeToolResultForNarrator,
   type CanonicalTurnPacket,
 } from "../narrator-packet.js";
 import { buildModelFacingScenePacket } from "../model-facing-scene.js";
+import { buildPlayerFacingPacketFromNarratorPacket } from "../player-facing-packet.js";
 import type { SceneFrame } from "../scene-frame.js";
 
 const playerId = "11111111-1111-4111-8111-111111111111";
@@ -26,6 +29,7 @@ function createFrame(): SceneFrame {
   return {
     campaignId: "campaign-1",
     tick: 12,
+    worldVersion: 0,
     playerActorId: playerId,
     currentLocationId: locationId,
     currentSceneScopeId: locationId,
@@ -104,6 +108,7 @@ function createCanonicalTurnPacket(): CanonicalTurnPacket {
         eventId: anchorEventId,
         summary: "Mira watches the lock without stepping closer.",
         visibleToPlayer: true,
+        evidenceAuthority: "backend_fact",
       },
     ],
     effects: [
@@ -160,6 +165,47 @@ function createCanonicalTurnPacket(): CanonicalTurnPacket {
 }
 
 describe("narrator packet settlement boundary", () => {
+  it("summarizes accepted time passage as completed elapsed time", () => {
+    const summary = summarizeRuntimeToolResultForNarrator({
+      toolName: "advance_time",
+      actionId: "action-time",
+      toolInput: {
+        minutes: 4320,
+        reason: "The player waits until the full moon tide begins.",
+      },
+      toolArgs: {
+        minutes: 4320,
+        reason: "The player waits until the full moon tide begins.",
+      },
+      toolResult: {
+        success: true,
+        result: {
+          minutes: 4320,
+          reason: "The player waits until the full moon tide begins.",
+          clockAdvanced: true,
+        },
+        authority: {
+          toolResultId: "tool-result-time",
+          campaignId: "campaign-1",
+          sourceEntity: { type: "player", id: playerId },
+          baseWorldVersion: 1,
+          resultWorldVersion: 2,
+          worldTimeMinutes: 4332,
+          elapsedWorldTimeMinutes: 4320,
+          stateDeltaRefs: ["world_time", "elapsed:4320"],
+          eventRefs: [],
+          witnesses: [],
+          knowledgeOutputs: [],
+          visibilityOutputs: [],
+          resources: [],
+        },
+      },
+    });
+
+    expect(summary).toBe("3 days pass.");
+    expect(summary).not.toMatch(/\bstretch ahead\b/i);
+  });
+
   it("formats only narratorFacts-referenced successful effects and omits failed or skipped sentinels", () => {
     const packet = buildNarratorPacket({
       frame: createFrame(),
@@ -196,7 +242,341 @@ describe("narrator packet settlement boundary", () => {
       ]),
     );
     expect(formatNarratorPacketForPrompt(packet)).toContain("[EVIDENCE LEDGER]");
-    expect(formatNarratorPacketForPrompt(packet)).toContain("perceivable_effect:effect-success");
+    expect(formatNarratorPacketForPrompt(packet)).toContain("p5 [category=perceivable_effect]");
+    expect(formatNarratorPacketForPrompt(packet)).not.toContain(
+      "perceivable_effect:effect-success",
+    );
+  });
+
+  it("does not promote no-mutation model guidance responses into narrator facts", () => {
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    canonicalTurnPacket.responses[0] = {
+      ...canonicalTurnPacket.responses[0]!,
+      summary: "GM no-mutation direction: the clerk accepts the seal and opens the route.",
+      evidenceAuthority: "model_guidance",
+    };
+
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket,
+    });
+    const formatted = formatNarratorPacketForPrompt(packet);
+
+    expect(packet.perceivableResponses).toEqual([]);
+    expect(packet.evidenceLedger?.map((entry) => entry.id)).not.toContain(
+      `perceivable_response:${responseId}`,
+    );
+    expect(formatted).not.toContain("the clerk accepts the seal");
+  });
+
+  it("does not promote legacy no-mutation responses without backend-owned action anchors", () => {
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    canonicalTurnPacket.actionResults = [];
+    canonicalTurnPacket.effects = [];
+    canonicalTurnPacket.narratorFacts.actionIds = [];
+    canonicalTurnPacket.narratorFacts.toolResultRefs = [];
+    const { evidenceAuthority: _evidenceAuthority, ...legacyResponse } =
+      canonicalTurnPacket.responses[0]!;
+    canonicalTurnPacket.responses[0] = {
+      ...legacyResponse,
+      summary: "Legacy GM no-mutation direction: the clerk accepts the seal.",
+    };
+
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket,
+    });
+    const formatted = formatNarratorPacketForPrompt(packet);
+
+    expect(packet.perceivableResponses).toEqual([]);
+    expect(packet.evidenceLedger?.map((entry) => entry.id)).not.toContain(
+      `perceivable_response:${responseId}`,
+    );
+    expect(formatted).not.toContain("the clerk accepts the seal");
+  });
+
+  it("repairs stale persisted no-mutation responses before they can be cited", () => {
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    canonicalTurnPacket.actionResults = [];
+    canonicalTurnPacket.effects = [];
+    canonicalTurnPacket.narratorFacts.actionIds = [];
+    canonicalTurnPacket.narratorFacts.toolResultRefs = [];
+    const { evidenceAuthority: _evidenceAuthority, ...legacyResponse } =
+      canonicalTurnPacket.responses[0]!;
+    canonicalTurnPacket.responses[0] = {
+      ...legacyResponse,
+      summary: "Legacy GM no-mutation direction: the clerk accepts the seal.",
+    };
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket,
+    });
+    const stalePacket = {
+      ...packet,
+      perceivableResponses: [canonicalTurnPacket.responses[0]!],
+      evidenceLedger: [
+        ...(packet.evidenceLedger ?? []),
+        {
+          id: `perceivable_response:${responseId}`,
+          category: "perceivable_response" as const,
+          summary: canonicalTurnPacket.responses[0]!.summary,
+          sourceId: responseId,
+        },
+      ],
+      sourceLinkedSummaries: [
+        ...(packet.sourceLinkedSummaries ?? []),
+        {
+          id: "source-linked-response",
+          summary: canonicalTurnPacket.responses[0]!.summary,
+          sourceIds: [responseId],
+          summarizedItemCount: 1,
+        },
+      ],
+      redactionAudit: packet.redactionAudit
+        ? {
+            ...packet.redactionAudit,
+            retainedEvidenceCount: (packet.evidenceLedger ?? []).length + 1,
+          }
+        : undefined,
+    };
+
+    const repaired = repairModelGuidancePerceivableResponses(stalePacket);
+    const formatted = formatNarratorPacketForPrompt(repaired);
+
+    expect(repaired.perceivableResponses).toEqual([]);
+    expect(repaired.evidenceLedger?.map((entry) => entry.id)).not.toContain(
+      `perceivable_response:${responseId}`,
+    );
+    expect(repaired.sourceLinkedSummaries?.map((summary) => summary.id)).not.toContain(
+      "source-linked-response",
+    );
+    expect(repaired.redactionAudit?.retainedEvidenceCount).toBe(repaired.evidenceLedger?.length);
+    expect(formatted).not.toContain("the clerk accepts the seal");
+  });
+
+  it("does not promote mixed-packet legacy responses without response-owned authority", () => {
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    const { evidenceAuthority: _evidenceAuthority, ...legacyResponse } =
+      canonicalTurnPacket.responses[0]!;
+    canonicalTurnPacket.responses[0] = {
+      ...legacyResponse,
+      summary: "Legacy GM guidance in a mixed packet: the clerk accepts the seal.",
+    };
+
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket,
+    });
+    const formatted = formatNarratorPacketForPrompt(packet);
+
+    expect(canonicalTurnPacket.actionResults.length).toBeGreaterThan(0);
+    expect(canonicalTurnPacket.effects.length).toBeGreaterThan(0);
+    expect(packet.perceivableEffects.map((effect) => effect.id)).toContain("effect-success");
+    expect(packet.perceivableResponses).toEqual([]);
+    expect(packet.evidenceLedger?.map((entry) => entry.id)).not.toContain(
+      `perceivable_response:${responseId}`,
+    );
+    expect(formatted).not.toContain("the clerk accepts the seal");
+  });
+
+  it("repairs mixed stale responses and untrusted source-less response evidence", () => {
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    const { evidenceAuthority: _evidenceAuthority, ...legacyResponse } =
+      canonicalTurnPacket.responses[0]!;
+    canonicalTurnPacket.responses[0] = {
+      ...legacyResponse,
+      summary: "Legacy GM guidance in a mixed packet: the clerk accepts the seal.",
+    };
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket,
+    });
+    const stalePacket = {
+      ...packet,
+      perceivableResponses: [canonicalTurnPacket.responses[0]!],
+      evidenceLedger: [
+        ...(packet.evidenceLedger ?? []),
+        {
+          id: `perceivable_response:${responseId}`,
+          category: "perceivable_response" as const,
+          summary: canonicalTurnPacket.responses[0]!.summary,
+          sourceId: responseId,
+        },
+        {
+          id: "perceivable_response:legacy-source-missing",
+          category: "perceivable_response" as const,
+          summary: "Legacy response evidence without source id.",
+        },
+      ],
+    };
+
+    const repaired = repairModelGuidancePerceivableResponses(stalePacket);
+    const formatted = formatNarratorPacketForPrompt(repaired);
+
+    expect(repaired.perceivableEffects.map((effect) => effect.id)).toContain("effect-success");
+    expect(repaired.perceivableResponses).toEqual([]);
+    expect(repaired.evidenceLedger?.map((entry) => entry.id)).not.toContain(
+      `perceivable_response:${responseId}`,
+    );
+    expect(repaired.evidenceLedger?.map((entry) => entry.id)).not.toContain(
+      "perceivable_response:legacy-source-missing",
+    );
+    expect(formatted).not.toContain("the clerk accepts the seal");
+  });
+
+  it("repairs ledger-only stale response evidence even without response array entries", () => {
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket: createCanonicalTurnPacket(),
+    });
+    const stalePacket = {
+      ...packet,
+      perceivableResponses: [],
+      evidenceLedger: [
+        ...(packet.evidenceLedger ?? []).filter((entry) => entry.category !== "perceivable_response"),
+        {
+          id: "perceivable_response:ghost-response",
+          category: "perceivable_response" as const,
+          summary: "Ledger-only legacy GM guidance: the clerk accepts the seal.",
+          sourceId: "ghost-response",
+        },
+        {
+          id: "perceivable_response:legacy-source-missing",
+          category: "perceivable_response" as const,
+          summary: "Source-less legacy GM guidance: the clerk accepts the seal.",
+        },
+      ],
+      sourceLinkedSummaries: [
+        ...(packet.sourceLinkedSummaries ?? []),
+        {
+          id: "source-linked-ghost-response",
+          summary: "Ledger-only legacy GM guidance: the clerk accepts the seal.",
+          sourceIds: ["ghost-response"],
+          summarizedItemCount: 1,
+        },
+        {
+          id: "source-linked-source-less-response",
+          summary: "Source-less legacy GM guidance: the clerk accepts the seal.",
+          sourceIds: [],
+          summarizedItemCount: 1,
+        },
+      ],
+    };
+
+    const repaired = repairModelGuidancePerceivableResponses(stalePacket);
+    const formatted = formatNarratorPacketForPrompt(repaired);
+
+    expect(repaired.perceivableResponses).toEqual([]);
+    expect(repaired.perceivableEffects.map((effect) => effect.id)).toContain("effect-success");
+    expect(repaired.evidenceLedger?.map((entry) => entry.id)).not.toContain(
+      "perceivable_response:ghost-response",
+    );
+    expect(repaired.evidenceLedger?.map((entry) => entry.id)).not.toContain(
+      "perceivable_response:legacy-source-missing",
+    );
+    expect(repaired.sourceLinkedSummaries?.map((summary) => summary.id)).not.toContain(
+      "source-linked-ghost-response",
+    );
+    expect(repaired.sourceLinkedSummaries?.map((summary) => summary.id)).not.toContain(
+      "source-linked-source-less-response",
+    );
+    expect(formatted).not.toContain("the clerk accepts the seal");
+  });
+
+  it("drops summary-only orphan response text without response or ledger entries", () => {
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket: createCanonicalTurnPacket(),
+    });
+    const stalePacket = {
+      ...packet,
+      perceivableResponses: [],
+      evidenceLedger: [],
+      sourceLinkedSummaries: [{
+        id: "summary-only-ghost-response",
+        summary: "Legacy GM guidance: the clerk accepts the seal.",
+        sourceIds: ["ghost-response"],
+        summarizedItemCount: 1,
+      }],
+    };
+
+    const repaired = repairModelGuidancePerceivableResponses(stalePacket);
+    const formatted = formatNarratorPacketForPrompt(repaired);
+
+    expect(repaired.sourceLinkedSummaries?.map((summary) => summary.id)).not.toContain(
+      "summary-only-ghost-response",
+    );
+    expect(formatted).not.toContain("the clerk accepts the seal");
+  });
+
+  it("drops mixed source-linked summaries instead of preserving blended stale prose", () => {
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket: createCanonicalTurnPacket(),
+    });
+    const stalePacket = {
+      ...packet,
+      sourceLinkedSummaries: [{
+        id: "mixed-trusted-and-ghost",
+        summary: "Trusted lock observation plus legacy GM guidance: the clerk accepts the seal.",
+        sourceIds: [responseId, "ghost-response"],
+        summarizedItemCount: 2,
+      }],
+    };
+
+    const repaired = repairModelGuidancePerceivableResponses(stalePacket);
+    const formatted = formatNarratorPacketForPrompt(repaired);
+
+    expect(repaired.perceivableResponses.map((response) => response.id)).toEqual([responseId]);
+    expect(repaired.sourceLinkedSummaries?.map((summary) => summary.id)).not.toContain(
+      "mixed-trusted-and-ghost",
+    );
+    expect(formatted).toContain("Mira watches the lock without stepping closer.");
+    expect(formatted).not.toContain("the clerk accepts the seal");
+  });
+
+  it("keeps backend-owned response evidence while dropping orphan response evidence", () => {
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket: createCanonicalTurnPacket(),
+    });
+    const stalePacket = {
+      ...packet,
+      evidenceLedger: [
+        ...(packet.evidenceLedger ?? []),
+        {
+          id: "perceivable_response:ghost-response",
+          category: "perceivable_response" as const,
+          summary: "Orphan legacy GM guidance: the clerk accepts the seal.",
+          sourceId: "ghost-response",
+        },
+      ],
+      sourceLinkedSummaries: [
+        ...(packet.sourceLinkedSummaries ?? []),
+        {
+          id: "source-linked-ghost-response",
+          summary: "Orphan legacy GM guidance: the clerk accepts the seal.",
+          sourceIds: ["ghost-response"],
+          summarizedItemCount: 1,
+        },
+      ],
+    };
+
+    const repaired = repairModelGuidancePerceivableResponses(stalePacket);
+    const formatted = formatNarratorPacketForPrompt(repaired);
+
+    expect(repaired.perceivableResponses.map((response) => response.id)).toEqual([responseId]);
+    expect(repaired.evidenceLedger?.map((entry) => entry.id)).toContain(
+      `perceivable_response:${responseId}`,
+    );
+    expect(repaired.evidenceLedger?.map((entry) => entry.id)).not.toContain(
+      "perceivable_response:ghost-response",
+    );
+    expect(repaired.sourceLinkedSummaries?.map((summary) => summary.id)).not.toContain(
+      "source-linked-ghost-response",
+    );
+    expect(formatted).toContain("Mira watches the lock without stepping closer.");
+    expect(formatted).not.toContain("the clerk accepts the seal");
   });
 
   it("records redaction audit counts without formatting hidden proposal payloads", () => {
@@ -339,6 +719,65 @@ describe("narrator packet settlement boundary", () => {
     expect(serializedModelView).not.toContain("pending proposal payload");
   });
 
+  it("repairs stale persisted narrator packets by dropping unsafe non-creation effects", () => {
+    const narratorPacket = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket: createCanonicalTurnPacket(),
+      forbiddenPrivateTerms: ["Black Ledger"],
+    });
+    narratorPacket.perceivableEffects = [
+      ...narratorPacket.perceivableEffects,
+      {
+        id: "effect-stale-private",
+        actionId: secondActionId,
+        actorId: visibleNpcId,
+        toolName: "log_event",
+        summary: "Mira internally recognizes the Black Ledger pattern but betrays nothing.",
+        perceivableByPlayer: true,
+        toolResult: { success: true, result: { durability: "durable", persisted: true } },
+      },
+    ];
+    narratorPacket.evidenceLedger = [
+      ...(narratorPacket.evidenceLedger ?? []),
+      {
+        id: "perceivable_effect:effect-stale-private",
+        category: "perceivable_effect",
+        summary: "Mira internally recognizes the Black Ledger pattern but betrays nothing.",
+        sourceId: "effect-stale-private",
+      },
+      {
+        id: `tool_result:${secondActionId}`,
+        category: "tool_result",
+        summary:
+          "The accepted action result supports this player-perceivable effect: Mira internally recognizes the Black Ledger pattern.",
+        sourceId: secondActionId,
+      },
+    ];
+    narratorPacket.sourceLinkedSummaries = [{
+      id: "source-linked-stale-private",
+      summary: "Overflow summary mentions the Black Ledger.",
+      sourceIds: ["effect-stale-private"],
+      summarizedItemCount: 1,
+    }];
+
+    expect(() => buildPlayerFacingPacketFromNarratorPacket(narratorPacket)).toThrow(
+      /forbidden packet term/i,
+    );
+
+    const repaired = repairPromptUnsafePerceivableEffects(narratorPacket);
+    const playerFacingPacket = buildPlayerFacingPacketFromNarratorPacket(repaired);
+    const formatted = formatNarratorPacketForPrompt(repaired);
+
+    expect(repaired.perceivableEffects.map((effect) => effect.id)).not.toContain("effect-stale-private");
+    expect(repaired.evidenceLedger?.map((entry) => entry.id)).not.toContain(
+      "perceivable_effect:effect-stale-private",
+    );
+    expect(playerFacingPacket.perceivableEffects.map((effect) => effect.id)).not.toContain(
+      "effect-stale-private",
+    );
+    expect(formatted).not.toContain("Black Ledger");
+  });
+
   it("includes hidden-source visible disturbances anonymously when no private term is present", () => {
     const hiddenActorId = "npc-hidden-scout";
     const hiddenActionId = "action-hidden-scout-disturbance";
@@ -458,6 +897,62 @@ describe("narrator packet settlement boundary", () => {
     expect(() => formatNarratorPacketForPrompt(packet)).not.toThrow();
   });
 
+  it("drops visible-actor private cognition before it becomes a player-facing effect", () => {
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    canonicalTurnPacket.effects = [
+      ...canonicalTurnPacket.effects,
+      {
+        id: "effect-private-cognition",
+        actionId: secondActionId,
+        actorId: visibleNpcId,
+        toolName: "log_event",
+        summary:
+          "Mira privately recognizes Nyx Corallus in the sealed proof pattern and recalls the seven receipts.",
+        perceivableByPlayer: true,
+        toolResult: { success: true, result: { durability: "durable", persisted: true } },
+      },
+    ];
+    canonicalTurnPacket.actionResults = [
+      ...canonicalTurnPacket.actionResults,
+      {
+        order: 1,
+        actionId: secondActionId,
+        actionRef: "actor-tool:mira:private-cognition",
+        actorId: visibleNpcId,
+        toolName: "log_event",
+        input: {
+          text:
+            "Mira privately recognizes Nyx Corallus in the sealed proof pattern and recalls the seven receipts.",
+        },
+        args: {
+          text:
+            "Mira privately recognizes Nyx Corallus in the sealed proof pattern and recalls the seven receipts.",
+        },
+        result: { success: true, result: { durability: "durable", persisted: true } },
+      },
+    ];
+    canonicalTurnPacket.narratorFacts.actionIds = [successfulActionId, secondActionId];
+    canonicalTurnPacket.narratorFacts.toolResultRefs = [
+      { actionId: successfulActionId, toolName: "log_event" },
+      { actionId: secondActionId, toolName: "log_event" },
+    ];
+
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket,
+      forbiddenPrivateTerms: ["Nyx Corallus", "seven receipts"],
+    });
+    const formatted = formatNarratorPacketForPrompt(packet);
+
+    expect(packet.perceivableEffects.map((effect) => effect.id)).toContain("effect-success");
+    expect(packet.perceivableEffects.map((effect) => effect.id)).not.toContain(
+      "effect-private-cognition",
+    );
+    expect(formatted).toContain("The lock rattles but stays closed.");
+    expect(formatted).not.toContain("Nyx Corallus");
+    expect(formatted).not.toContain("seven receipts");
+  });
+
   it("still includes visible actor effects without anonymous-source redaction", () => {
     const canonicalTurnPacket = createCanonicalTurnPacket();
     const packet = buildNarratorPacket({
@@ -469,7 +964,7 @@ describe("narrator packet settlement boundary", () => {
     expect(packet.perceivableEffects.map((effect) => effect.id)).toContain("effect-success");
     expect(packet.perceivableEffects.map((effect) => effect.actorId)).toContain(visibleNpcId);
     expect(formatted).toContain("Mira");
-    expect(formatted).toContain("actor=22222222-2222-4222-8222-222222222222");
+    expect(formatted).not.toContain("actor=22222222-2222-4222-8222-222222222222");
   });
 
   it("uses concrete successful log_event text when no explicit effect was authored", () => {
@@ -578,6 +1073,84 @@ describe("narrator packet settlement boundary", () => {
     expect(formatted).not.toContain("validated record dialogue outcome consequence settles");
   });
 
+  it("attaches dialogue outcome precision facts to perceivable effect and tool result evidence", () => {
+    const dialogueResult = {
+      summary:
+        "Brasswick confirms second bell has not yet passed and names the east aqueduct maintenance catwalk.",
+      quote:
+        "Second bell hasn't rung yet. Take the east maintenance catwalk south, then the stone causeway.",
+      claims: [
+        {
+          claimKind: "route_status",
+          polarity: "states",
+          summary:
+            "Second bell has not yet passed; it is still early-to-mid afternoon.",
+        },
+        {
+          claimKind: "route_status",
+          polarity: "allows",
+          summary:
+            "The safest route is the east aqueduct maintenance catwalk south along the channel, then the stone causeway approach.",
+        },
+      ],
+      stateEffects: [
+        {
+          status: "applied_now",
+          targetRef: "Refused Petition: Roster Inquiry",
+          stateKey: "possession",
+          stateValue: "internal-custody-debug-token",
+          summary: "The refused petition remains carried by Iri Vale.",
+        },
+      ],
+      persisted: true,
+    };
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    canonicalTurnPacket.narratorFacts.toolResultRefs = [
+      { actionId: successfulActionId, toolName: "record_dialogue_outcome" },
+    ];
+    canonicalTurnPacket.effects = [
+      {
+        id: "effect-dialogue-route",
+        actionId: successfulActionId,
+        actorId: visibleNpcId,
+        toolName: "record_dialogue_outcome",
+        summary: "Brasswick gives route timing and tribunal approach guidance.",
+        perceivableByPlayer: true,
+        toolResult: { success: true, result: dialogueResult },
+      },
+    ];
+    canonicalTurnPacket.actionResults[0] = {
+      ...canonicalTurnPacket.actionResults[0]!,
+      toolName: "record_dialogue_outcome",
+      result: { success: true, result: dialogueResult },
+    };
+
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket,
+    });
+    const effectEvidence = packet.evidenceLedger?.find((entry) =>
+      entry.id === "perceivable_effect:effect-dialogue-route");
+    const toolEvidence = packet.evidenceLedger?.find((entry) =>
+      entry.id === `tool_result:${successfulActionId}`);
+
+    expect(effectEvidence?.precisionFacts?.map((fact) => fact.value)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("Second bell has not yet passed"),
+        expect.stringContaining("east maintenance catwalk south"),
+      ]),
+    );
+    expect(effectEvidence?.precisionFacts?.map((fact) => fact.value).join("\n")).not.toContain(
+      "The refused petition remains carried by Iri Vale",
+    );
+    expect(effectEvidence?.precisionFacts?.map((fact) => fact.value)).not.toContain(
+      "internal-custody-debug-token",
+    );
+    expect(toolEvidence?.precisionFacts?.map((fact) => fact.value)).toEqual(
+      effectEvidence?.precisionFacts?.map((fact) => fact.value),
+    );
+  });
+
   it("uses legacy log_event summary text when no explicit effect was authored", () => {
     const canonicalTurnPacket = createCanonicalTurnPacket();
     canonicalTurnPacket.effects = [];
@@ -599,6 +1172,56 @@ describe("narrator packet settlement boundary", () => {
     expect(packet.perceivableEffects.map((effect) => effect.summary)).toContain(
       "The bridge patrol lowers one spear but keeps the line tight.",
     );
+  });
+
+  it("does not auto-promote structural tag mutations into perceivable narration effects", () => {
+    const rawTag = "cressen-permitted-harmonic-intervention";
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    canonicalTurnPacket.effects = [];
+    canonicalTurnPacket.actionResults = [
+      {
+        order: 0,
+        actionId: successfulActionId,
+        actionRef: "step-add-permission-tag",
+        actorId: visibleNpcId,
+        toolName: "add_tag",
+        input: {
+          entityName: "Iria",
+          entityType: "player",
+          tag: rawTag,
+        },
+        args: {
+          entityName: "Iria",
+          entityType: "player",
+          tag: rawTag,
+        },
+        result: {
+          success: true,
+          result: {
+            entity: "Iria",
+            appliedTag: rawTag,
+            tags: ["repair-singer", rawTag],
+          },
+        },
+      },
+    ];
+    canonicalTurnPacket.narratorFacts.actionIds = [successfulActionId];
+    canonicalTurnPacket.narratorFacts.toolResultRefs = [
+      { actionId: successfulActionId, toolName: "add_tag" },
+    ];
+
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket,
+    });
+    const formatted = formatNarratorPacketForPrompt(packet);
+
+    expect(packet.perceivableEffects).toEqual([]);
+    expect(packet.evidenceLedger?.map((entry) => entry.id)).not.toContain(
+      `tool_result:${successfulActionId}`,
+    );
+    expect(formatted).not.toContain(rawTag);
+    expect(formatted).not.toContain("gains");
   });
 
   it("materializes concrete successful runtime observations as settled narrator effects", () => {
@@ -741,10 +1364,34 @@ describe("narrator packet settlement boundary", () => {
     expect(packet.perceivableEffects.map((effect) => effect.summary)).toEqual([
       "The dock clerk records the waxed-cloth manifest dispute as unresolved.",
       "Recessed Counting Stair becomes reachable from Pier Records Counter.",
-      "The scene moves to Recessed Counting Stair.",
+      "You arrive at Recessed Counting Stair.",
       "Ledger Porter becomes visibly present in the scene.",
       "Waxed-Cloth Manifest becomes available to Pier Records Counter.",
     ]);
+    const revealEvidence = packet.evidenceLedger?.find((entry) =>
+      entry.id === `perceivable_effect:action-result:${secondActionId}`);
+    const moveEvidence = packet.evidenceLedger?.find((entry) =>
+      entry.id === `perceivable_effect:action-result:${thirdActionId}`);
+    expect(revealEvidence).toEqual(expect.objectContaining({
+      summaryBackendFact: false,
+      precisionFacts: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "summary",
+          value: "Recessed Counting Stair is reachable from Pier Records Counter.",
+          claimKind: "route_status",
+        }),
+      ]),
+    }));
+    expect(moveEvidence).toEqual(expect.objectContaining({
+      summaryBackendFact: false,
+      precisionFacts: expect.arrayContaining([
+        expect.objectContaining({
+          kind: "summary",
+          value: "You arrive at Recessed Counting Stair.",
+          claimKind: "location_change",
+        }),
+      ]),
+    }));
     expect(formatted).toContain("Waxed-Cloth Manifest");
     expect(formatted).toContain("Ledger Porter");
     expect(formatted).toContain("Recessed Counting Stair");
@@ -754,7 +1401,7 @@ describe("narrator packet settlement boundary", () => {
     expect(formatted).not.toMatch(/validated .* consequence settles/i);
   });
 
-  it("allows exact same-turn visible actor creation labels only at that creation source", () => {
+  it("allows exact same-turn visible actor creation labels in the narrator packet", () => {
     const cases: Array<{
       toolName: "spawn_npc" | "create_scene_extra";
       label: string;
@@ -818,6 +1465,226 @@ describe("narrator packet settlement boundary", () => {
       expect(() => formatNarratorPacketForPrompt(packet)).not.toThrow();
       expect(packet.forbiddenActorNames).toContain(example.label);
     }
+  });
+
+  it("keeps movement receipt summaries support-only while exposing narratable movement facts", () => {
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    const advanceActionId = "action-advance-gondola";
+    const moveActionId = "action-move-gondola";
+    canonicalTurnPacket.effects = [
+      {
+        id: "effect-advance-gondola",
+        actionId: advanceActionId,
+        actorId: playerId,
+        toolName: "advance_time",
+        summary: "12 minutes pass.",
+        perceivableByPlayer: true,
+        toolResult: {
+          success: true,
+          result: {
+            minutes: 12,
+            reason: "Gondola transit from Lantern-Lit Gondola Pier to Tower Bridge east gallery",
+            clockAdvanced: true,
+          },
+        },
+      },
+      {
+        id: "effect-move-gondola",
+        actionId: moveActionId,
+        actorId: playerId,
+        toolName: "move_actor",
+        summary: "Player moves to Tower Bridge Concourse - East Gallery Landing.",
+        perceivableByPlayer: true,
+        toolResult: {
+          success: true,
+          result: {
+            kind: "move_actor",
+            actorRef: "Player",
+            actorRefs: ["Player", "current_player", playerId],
+            locationName: "Tower Bridge Concourse - East Gallery Landing",
+            travelCost: 1,
+            path: ["Lantern-Lit Gondola Pier", "Tower Bridge Concourse - East Gallery Landing"],
+          },
+        },
+      },
+    ];
+    canonicalTurnPacket.actionResults = [];
+    canonicalTurnPacket.narratorFacts.actionIds = [advanceActionId, moveActionId];
+    canonicalTurnPacket.narratorFacts.toolResultRefs = [
+      { actionId: advanceActionId, toolName: "advance_time" },
+      { actionId: moveActionId, toolName: "move_actor" },
+    ];
+
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket,
+    });
+    const advanceEvidence = packet.evidenceLedger?.find((entry) =>
+      entry.id === "perceivable_effect:effect-advance-gondola");
+    const moveEvidence = packet.evidenceLedger?.find((entry) =>
+      entry.id === "perceivable_effect:effect-move-gondola");
+
+    expect(advanceEvidence).toEqual(expect.objectContaining({
+      summary: "12 minutes pass.",
+      summaryBackendFact: false,
+      precisionFacts: expect.arrayContaining([
+        expect.objectContaining({
+          value: "Gondola transit from Lantern-Lit Gondola Pier to Tower Bridge east gallery takes 12 minutes.",
+          claimKind: "playable_beat",
+        }),
+      ]),
+    }));
+    expect(moveEvidence).toEqual(expect.objectContaining({
+      summary: "Player moves to Tower Bridge Concourse - East Gallery Landing.",
+      summaryBackendFact: false,
+      precisionFacts: expect.arrayContaining([
+        expect.objectContaining({
+          value: "You arrive at Tower Bridge Concourse - East Gallery Landing.",
+          claimKind: "location_change",
+        }),
+      ]),
+    }));
+  });
+
+  it("does not duplicate duration when advance_time reason already names it", () => {
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    const advanceActionId = "action-advance-walk";
+    canonicalTurnPacket.effects = [
+      {
+        id: "effect-advance-walk",
+        actionId: advanceActionId,
+        actorId: playerId,
+        toolName: "advance_time",
+        summary: "15 minutes pass.",
+        perceivableByPlayer: true,
+        toolResult: {
+          success: true,
+          result: {
+            minutes: 15,
+            reason: "Walking the public marked way from Canal Market District to Tower Bridge Concourse takes approximately 15 minutes.",
+            clockAdvanced: true,
+          },
+        },
+      },
+    ];
+    canonicalTurnPacket.actionResults = [];
+    canonicalTurnPacket.narratorFacts.actionIds = [advanceActionId];
+    canonicalTurnPacket.narratorFacts.toolResultRefs = [
+      { actionId: advanceActionId, toolName: "advance_time" },
+    ];
+
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket,
+    });
+    const advanceEvidence = packet.evidenceLedger?.find((entry) =>
+      entry.id === "perceivable_effect:effect-advance-walk");
+
+    expect(advanceEvidence?.precisionFacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        value: "Walking the public marked way from Canal Market District to Tower Bridge Concourse takes approximately 15 minutes.",
+        claimKind: "playable_beat",
+      }),
+    ]));
+    expect(formatNarratorPacketForPrompt(packet)).not.toContain("15 minutes takes 15 minutes");
+  });
+
+  it("does not let observation-only scene-extra reuse authorize hidden labels in later effects", () => {
+    const frame = createFrame();
+    frame.roster.active = frame.roster.active.filter((actor) => actor.id === playerId);
+    frame.perception.forbiddenActorLabels = ["Advocate Pelorren"];
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    canonicalTurnPacket.playerAction =
+      "I try a playful low-risk bluff with an invented civic phrase.";
+    canonicalTurnPacket.effects = [
+      {
+        id: `action-result:${successfulActionId}`,
+        actionId: successfulActionId,
+        actorId: playerId,
+        toolName: "create_scene_extra",
+        summary: "create_scene_extra settled through backend observation.",
+        perceivableByPlayer: true,
+        toolResult: {
+          success: true,
+          kind: "observation",
+          observationOnly: true,
+          result: {
+            id: "npc-advocate-pelorren",
+            name: "Advocate Pelorren",
+            reusedExisting: true,
+          },
+        },
+      },
+      {
+        id: `action-result:${secondActionId}`,
+        actionId: secondActionId,
+        actorId: playerId,
+        toolName: "log_event",
+        summary:
+          "Sera Venn bluffed Advocate Pelorren with the invented phrase; Pelorren treated it as harmless confusion.",
+        perceivableByPlayer: true,
+        toolResult: {
+          success: true,
+          result: {
+            durability: "scene_local",
+            persisted: false,
+          },
+        },
+      },
+    ];
+    canonicalTurnPacket.actionResults = [
+      {
+        order: 0,
+        actionId: successfulActionId,
+        actionRef: "step-reuse-advocate",
+        actorId: playerId,
+        toolName: "create_scene_extra",
+        input: {
+          role: "witness",
+          roleText: "Public advocate",
+          locationRef: "current_scene",
+        },
+        args: {
+          role: "witness",
+          roleText: "Public advocate",
+          locationRef: "current_scene",
+        },
+        result: canonicalTurnPacket.effects[0]!.toolResult!,
+      },
+      {
+        order: 1,
+        actionId: secondActionId,
+        actionRef: "step-log-bluff",
+        actorId: playerId,
+        toolName: "log_event",
+        input: {
+          text: "Sera Venn bluffed Advocate Pelorren with the invented phrase; Pelorren treated it as harmless confusion.",
+          durability: "scene_local",
+        },
+        args: {
+          text: "Sera Venn bluffed Advocate Pelorren with the invented phrase; Pelorren treated it as harmless confusion.",
+          durability: "scene_local",
+        },
+        result: canonicalTurnPacket.effects[1]!.toolResult!,
+      },
+    ];
+    canonicalTurnPacket.narratorFacts.actionIds = [successfulActionId, secondActionId];
+    canonicalTurnPacket.narratorFacts.toolResultRefs = [
+      { actionId: successfulActionId, toolName: "create_scene_extra" },
+      { actionId: secondActionId, toolName: "log_event" },
+    ];
+
+    const packet = buildNarratorPacket({
+      frame,
+      canonicalTurnPacket,
+    });
+
+    expect(packet.allowedVisibleActorNames).not.toContain("Advocate Pelorren");
+    expect(packet.forbiddenActorNames).toContain("Advocate Pelorren");
+    expect(packet.perceivableEffects.map((effect) => effect.summary).join("\n")).not.toContain(
+      "Advocate Pelorren",
+    );
+    expect(formatNarratorPacketForPrompt(packet)).not.toContain("Advocate Pelorren");
   });
 
   it("rejects same-turn visible actor creation label substrings", () => {
@@ -978,7 +1845,10 @@ describe("narrator packet settlement boundary", () => {
       "Market Ledger Clerk becomes visibly present in the scene.",
     );
     expect(packet.forbiddenActorNames).toContain("Canal Market Ledger Clerk");
-    expect(() => formatNarratorPacketForPrompt(packet)).toThrow(/NarratorPacket prompt unsafe/);
+    expect(packet.perceivableEffects.map((effect) => effect.summary).join("\n")).not.toContain(
+      "Canal Market Ledger Clerk watches",
+    );
+    expect(formatNarratorPacketForPrompt(packet)).not.toContain("Canal Market Ledger Clerk watches");
   });
 
   it("keeps hidden actor labels forbidden when they are not same-turn visible creations", () => {
@@ -1037,10 +1907,16 @@ describe("narrator packet settlement boundary", () => {
 
     expect(packet.forbiddenActorNames).toContain("Station Attendant");
     expect(packet.forbiddenActorNames).toContain("Back-Room Auditor");
-    expect(() => formatNarratorPacketForPrompt(packet)).toThrow(/NarratorPacket prompt unsafe/);
+    expect(packet.perceivableEffects.map((effect) => effect.summary)).toContain(
+      "Station Attendant becomes visibly present in the scene.",
+    );
+    expect(packet.perceivableEffects.map((effect) => effect.summary).join("\n")).not.toContain(
+      "Back-Room Auditor",
+    );
+    expect(formatNarratorPacketForPrompt(packet)).not.toContain("Back-Room Auditor");
   });
 
-  it("summarizes successful bridge state results without turning search or intent into discovered truth", () => {
+  it("does not infer intent-marker perceivable effects directly from referenced action results", () => {
     const canonicalTurnPacket = createCanonicalTurnPacket();
     const acceptedActions: CanonicalTurnPacket["actionResults"] = [
       {
@@ -1181,9 +2057,9 @@ describe("narrator packet settlement boundary", () => {
       "Iria moves to Tea Lane.",
       "Lantern Tea Stall becomes reachable from Market District.",
       "Counter Courier becomes visibly present in the scene.",
-      "Iria starts searching for tea stall; no discovery is confirmed.",
-      "Iria records an unconfirmed intent or claim about hidden courier route.",
     ]);
+    expect(formatNarratorPacketForPrompt(packet)).not.toContain("starts searching for tea stall");
+    expect(formatNarratorPacketForPrompt(packet)).not.toContain("records an unconfirmed intent");
     expect(formatNarratorPacketForPrompt(packet)).not.toContain("found tea stall");
     expect(formatNarratorPacketForPrompt(packet)).not.toContain("confirmed hidden courier route");
   });
@@ -1300,7 +2176,7 @@ describe("narrator packet settlement boundary", () => {
       {
         toolName: "move_to" as const,
         toolInput: { targetLocationName: "Lantern Pier" },
-        expected: "The scene moves to Lantern Pier.",
+        expected: "You arrive at Lantern Pier.",
       },
       {
         toolName: "set_condition" as const,
@@ -1371,5 +2247,302 @@ describe("narrator packet settlement boundary", () => {
     expect(summary).not.toContain("find location");
     expect(summary).not.toContain("sweep");
     expect(summary).not.toMatch(/validated .* consequence/i);
+  });
+
+  it("keeps lookup-grounded observations as packet evidence instead of asking final prose to invent status", () => {
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    canonicalTurnPacket.turnResolution = {
+      kind: "status_read",
+      resolutionState: "observation_grounded",
+      combatIntent: false,
+      evidenceIds: [`action-result:${successfulActionId}`],
+      consequenceIds: [],
+      explicitNoCombatEvidenceIds: [`action-result:${successfulActionId}`],
+      toolNames: ["list_visible_affordances"],
+    };
+    canonicalTurnPacket.effects = [];
+    canonicalTurnPacket.narratorFacts.actionIds = [];
+    canonicalTurnPacket.narratorFacts.toolResultRefs = [];
+    canonicalTurnPacket.actionResults = [
+      {
+        order: 0,
+        actionId: successfulActionId,
+        actionRef: "step-observe",
+        actorId: playerId,
+        toolName: "list_visible_affordances",
+        input: { focus: "personnel routes public desk" },
+        args: { focus: "personnel routes public desk" },
+        result: {
+          success: true,
+          kind: "observation",
+          observationOnly: true,
+          result: {
+            visibleActors: [{ label: "Mira", type: "npc" }],
+            categories: {
+              personnel: {
+                actors: [{ label: "Mira", type: "npc" }],
+                absence: null,
+              },
+              barriers: {
+                absence: "No visible barrier refs are present.",
+              },
+            },
+          },
+        },
+        summary:
+          "Scene scan: personnel Mira; barriers No visible barrier refs are present.",
+      },
+    ];
+
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket,
+    });
+    const formatted = formatNarratorPacketForPrompt(packet);
+
+    expect(packet.perceivableEffects).toEqual([]);
+    expect(packet.perceivableObservations?.map((observation) => observation.summary)).toEqual([
+      "Scene scan: personnel Mira; barriers No visible barrier refs are present.",
+    ]);
+    expect(packet.perceivableObservations?.[0]?.atoms).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "actor",
+          summary: "Mira",
+          claimSupport: expect.arrayContaining(["actor_presence"]),
+        }),
+        expect.objectContaining({
+          kind: "absence",
+          summary: "No visible barrier refs are present.",
+          claimSupport: expect.arrayContaining(["route_status"]),
+        }),
+      ]),
+    );
+    expect(packet.evidenceLedger).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: `observation_result:${successfulActionId}:a1`,
+          category: "observation_result",
+          summary: "Mira",
+          claimSupport: expect.arrayContaining(["actor_presence"]),
+        }),
+        expect.objectContaining({
+          category: "observation_result",
+          summary: "No visible barrier refs are present.",
+          claimSupport: expect.arrayContaining(["route_status"]),
+        }),
+      ]),
+    );
+    expect(formatted).toContain("[PLAYER-VISIBLE OBSERVATIONS]");
+    expect(formatted).toContain("o1.a1 [actor]: Mira");
+  });
+
+  it("omits observation results that are neither turn-resolution evidence nor narratorFacts", () => {
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    canonicalTurnPacket.turnResolution = {
+      kind: "state_mutation",
+      resolutionState: "mutated",
+      combatIntent: false,
+      evidenceIds: [`action-result:${successfulActionId}`],
+      consequenceIds: [`action-result:${successfulActionId}`],
+      explicitNoCombatEvidenceIds: [],
+      toolNames: ["log_event", "list_visible_affordances"],
+    };
+    canonicalTurnPacket.effects = [];
+    canonicalTurnPacket.narratorFacts.actionIds = [];
+    canonicalTurnPacket.narratorFacts.toolResultRefs = [];
+    canonicalTurnPacket.actionResults = [
+      {
+        order: 1,
+        actionId: "observation-not-accepted",
+        actionRef: "step-observe-extra",
+        actorId: playerId,
+        toolName: "list_visible_affordances",
+        input: { focus: "remote route rumor" },
+        args: { focus: "remote route rumor" },
+        result: {
+          success: true,
+          kind: "observation",
+          observationOnly: true,
+          result: {
+            categories: {
+              routes: {
+                facts: [{
+                  id: "remote-route-rumor",
+                  summary: "A remote service stair might exist beyond the scene.",
+                }],
+                absence: null,
+              },
+            },
+          },
+        },
+        summary: "Scene scan: routes A remote service stair might exist beyond the scene.",
+      },
+    ];
+
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket,
+    });
+
+    expect(packet.perceivableObservations).toEqual([]);
+    expect(packet.evidenceLedger).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "observation_result",
+        }),
+      ]),
+    );
+  });
+
+  it("redacts backend refs from committed prompt summaries", () => {
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket: createCanonicalTurnPacket(),
+    });
+    packet.perceivableEvents[0] = {
+      ...packet.perceivableEvents[0]!,
+      summary: "Iria cites actor:hidden-watcher and route_hidden_path.",
+    };
+    packet.perceivableResponses[0] = {
+      ...packet.perceivableResponses[0]!,
+      summary: "Mira mentions tool_result_8 and location:loc-secret.",
+    };
+    packet.perceivableEffects[0] = {
+      ...packet.perceivableEffects[0]!,
+      summary: "The lock logs authority:gm-loop and source:event-1.",
+    };
+    packet.currentInventory = [
+      {
+        id: "inventory-secret",
+        itemId: "item-secret",
+        label: "Satchel actor_hidden",
+        equipState: "carried",
+        equippedSlot: null,
+        isSignature: false,
+        tags: ["route-tea-lane"],
+      },
+    ];
+    packet.hintSignals = ["A hint mentions campaign-main."];
+    packet.guardrails = ["Never expose tool-result-7."];
+    packet.sourceLinkedSummaries = [{
+      id: "summary-raw-refs",
+      summary: "Overflow mentions candidate_secret and 550e8400-e29b-41d4-a716-446655440000.",
+      sourceIds: ["event-1"],
+      summarizedItemCount: 1,
+    }];
+
+    const formatted = formatNarratorPacketForPrompt(packet);
+
+    expect(formatted).toContain("[backend ref hidden]");
+    for (const leaked of [
+      "actor:hidden-watcher",
+      "route_hidden_path",
+      "tool_result_8",
+      "location:loc-secret",
+      "authority:gm-loop",
+      "source:event-1",
+      "actor_hidden",
+      "route-tea-lane",
+      "campaign-main",
+      "tool-result-7",
+      "candidate_secret",
+      "550e8400",
+    ]) {
+      expect(formatted).not.toContain(leaked);
+    }
+  });
+
+  it("redacts backend refs from oracle outcomes while preserving safe prose markers", () => {
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    canonicalTurnPacket.oracleOutcome =
+      "weak_hit with actor:hidden-watcher, route_hidden_path, tool-result-7, " +
+      "source:event-1, effect_hidden, response-visible-1, " +
+      "550e8400-e29b-41d4-a716-446655440000, source-linked, player-facing, " +
+      "player_known, and player_visible.";
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket,
+    });
+
+    const formatted = formatNarratorPacketForPrompt(packet);
+
+    expect(formatted).toContain("[backend ref hidden]");
+    for (const leaked of [
+      "actor:hidden-watcher",
+      "route_hidden_path",
+      "tool-result-7",
+      "source:event-1",
+      "effect_hidden",
+      "response-visible-1",
+      "550e8400",
+    ]) {
+      expect(formatted).not.toContain(leaked);
+    }
+    for (const safeMarker of [
+      "source-linked",
+      "player-facing",
+      "player_known",
+      "player_visible",
+    ]) {
+      expect(formatted).toContain(safeMarker);
+    }
+  });
+
+  it("does not expose structural refs in dialogue/world-fact narrator summaries", () => {
+    const dialogueSummary = summarizeRuntimeToolResultForNarrator({
+      toolName: "record_dialogue_outcome",
+      actionId: successfulActionId,
+      toolInput: {
+        outcomeKind: "answer",
+        topicKind: "proof",
+        authorityKind: "explicit_source",
+        truthStatus: "reported",
+        durability: "scene_local",
+        speakerRef: "actor_2",
+        addresseeRefs: ["Player", "actor:private-handler"],
+        sourceRefs: ["event:secret-route"],
+        claims: [
+          {
+            claimKind: "procedure",
+            polarity: "affirmed",
+            subjectRef: "route_1",
+          },
+        ],
+      },
+      toolArgs: {},
+    });
+    const factSummary = summarizeRuntimeToolResultForNarrator({
+      toolName: "record_world_fact",
+      actionId: successfulActionId,
+      toolInput: {
+        factKind: "procedure",
+        topicKind: "proof",
+        truthStatus: "reported",
+        sourceKind: "observed",
+        durability: "persistent",
+        subjectRefs: ["loc-secret-vault", "movement_1"],
+        sourceRefs: ["tool-result-abc"],
+        claims: [
+          {
+            claimKind: "procedure",
+            polarity: "affirmed",
+            subjectText: "posted item applies",
+          },
+        ],
+      },
+      toolArgs: {},
+    });
+
+    expect(dialogueSummary).not.toContain("actor_2");
+    expect(dialogueSummary).not.toContain("actor:private-handler");
+    expect(dialogueSummary).not.toContain("event:secret-route");
+    expect(dialogueSummary).not.toContain("route_1");
+    expect(dialogueSummary).toContain("referenced speaker");
+    expect(dialogueSummary).toContain("referenced subject");
+    expect(factSummary).not.toContain("loc-secret-vault");
+    expect(factSummary).not.toContain("movement_1");
+    expect(factSummary).not.toContain("tool-result-abc");
+    expect(factSummary).toContain("posted item applies");
   });
 });

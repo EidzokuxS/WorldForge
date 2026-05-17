@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockSearchEpisodicEvents = vi.fn();
 const mockReadPendingCommittedEvents = vi.fn();
+const mockCommitAuthorityTrace = vi.fn();
+const mockReadWorldClock = vi.fn();
+const mockValidateBaseWorldVersion = vi.fn();
 
 // Mock all external dependencies before imports
 vi.mock("../../db/index.js", () => ({
@@ -19,6 +22,12 @@ vi.mock("../../vectors/embeddings.js", () => ({
 
 vi.mock("../tool-executor.js", () => ({
   executeToolCall: vi.fn().mockResolvedValue({ success: true, result: {} }),
+}));
+
+vi.mock("../living-world-authority.js", () => ({
+  commitAuthorityTrace: (...args: unknown[]) => mockCommitAuthorityTrace(...args),
+  readWorldClock: (...args: unknown[]) => mockReadWorldClock(...args),
+  validateBaseWorldVersion: (...args: unknown[]) => mockValidateBaseWorldVersion(...args),
 }));
 
 vi.mock("ai", () => ({
@@ -149,24 +158,49 @@ function createMockNpc(overrides: Record<string, unknown> = {}) {
 function setupMockDb(options: {
   npc?: Record<string, unknown> | null;
   npcsAboveThreshold?: Record<string, unknown>[];
+  authorityTraceId?: string;
 }) {
   const mockNpc = options.npc !== undefined ? options.npc : createMockNpc();
   const npcsAboveThreshold = options.npcsAboveThreshold ?? [];
+  const authorityTraceId = options.authorityTraceId ?? "authority-trace-1";
   const run = vi.fn();
   const values = vi.fn().mockReturnValue({ run });
+  let selectAuthorityTraceId = false;
 
-  const db = {
-    select: vi.fn().mockReturnThis(),
-    from: vi.fn().mockReturnThis(),
-    where: vi.fn().mockReturnThis(),
-    insert: vi.fn().mockReturnValue({ values }),
-    update: vi.fn().mockReturnThis(),
-    set: vi.fn().mockReturnThis(),
-    values,
-    run,
-    get: vi.fn().mockReturnValue(mockNpc),
-    all: vi.fn().mockReturnValue(npcsAboveThreshold),
+  const db = {} as {
+    select: ReturnType<typeof vi.fn>;
+    from: ReturnType<typeof vi.fn>;
+    where: ReturnType<typeof vi.fn>;
+    insert: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+    set: ReturnType<typeof vi.fn>;
+    values: ReturnType<typeof vi.fn>;
+    run: ReturnType<typeof vi.fn>;
+    get: ReturnType<typeof vi.fn>;
+    all: ReturnType<typeof vi.fn>;
+    transaction: ReturnType<typeof vi.fn>;
   };
+
+  db.select = vi.fn((fields?: Record<string, unknown>) => {
+    selectAuthorityTraceId = Boolean(fields && Object.keys(fields).length === 1 && "id" in fields);
+    return db;
+  });
+  db.from = vi.fn().mockReturnValue(db);
+  db.where = vi.fn().mockReturnValue(db);
+  db.insert = vi.fn().mockReturnValue({ values });
+  db.update = vi.fn().mockReturnValue(db);
+  db.set = vi.fn().mockReturnValue(db);
+  db.values = values;
+  db.run = run;
+  db.get = vi.fn(() => {
+    if (selectAuthorityTraceId) {
+      selectAuthorityTraceId = false;
+      return { id: authorityTraceId };
+    }
+    return mockNpc;
+  });
+  db.all = vi.fn().mockReturnValue(npcsAboveThreshold);
+  db.transaction = vi.fn((callback: () => unknown) => callback());
 
   (getDb as ReturnType<typeof vi.fn>).mockReturnValue(db);
   return db;
@@ -177,6 +211,28 @@ function setupMockDb(options: {
 describe("createReflectionTools", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockReadWorldClock.mockReturnValue({
+      campaignId: CAMPAIGN_ID,
+      worldVersion: 7,
+      worldTimeMinutes: 70,
+      currentTick: 70,
+      updatedAt: 0,
+    });
+    mockCommitAuthorityTrace.mockReturnValue({
+      toolResultId: "tool-result-reflection-1",
+      campaignId: CAMPAIGN_ID,
+      sourceEntity: { type: "npc", id: NPC_ID },
+      baseWorldVersion: 7,
+      resultWorldVersion: 8,
+      worldTimeMinutes: 70,
+      elapsedWorldTimeMinutes: 0,
+      stateDeltaRefs: [],
+      eventRefs: [],
+      witnesses: [],
+      knowledgeOutputs: [],
+      visibilityOutputs: [],
+      resources: [],
+    });
   });
 
   it("returns 7 tools including explicit deeper-identity promotion", () => {
@@ -201,6 +257,22 @@ describe("createReflectionTools", () => {
     );
 
     expect(result).toHaveProperty("updated", true);
+    expect(mockDb.transaction).toHaveBeenCalled();
+    expect(mockValidateBaseWorldVersion).toHaveBeenCalledWith({
+      campaignId: CAMPAIGN_ID,
+      baseWorldVersion: 7,
+      currentTick: 70,
+    });
+    expect(mockCommitAuthorityTrace).toHaveBeenCalledWith(expect.objectContaining({
+      campaignId: CAMPAIGN_ID,
+      operation: "reflection:set_belief",
+      baseWorldVersion: 7,
+      sourceEntity: { type: "npc", id: NPC_ID },
+      elapsedWorldTimeMinutes: 0,
+      currentTick: 70,
+      eventIds: ["bandit attack"],
+      stateDeltaRefs: [`npc:${NPC_ID}:beliefs`, `npc:${NPC_ID}:knowledge`],
+    }));
     expect(mockDb.run).toHaveBeenCalled();
     // Check the set() call contains the updated beliefs
     const setCall = mockDb.set.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
@@ -210,6 +282,8 @@ describe("createReflectionTools", () => {
     const beliefs = JSON.parse(beliefsStr) as string[];
     expect(beliefs).toContain("Every debt can be collected");
     expect(beliefs).toContain("The market is dangerous");
+    const knowledgeRow = mockDb.values.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+    expect(JSON.parse(String(knowledgeRow?.authorityTraceIds))).toEqual(["authority-trace-1"]);
   });
 
   it("set_goal adds a goal to the appropriate priority array", async () => {
@@ -222,6 +296,10 @@ describe("createReflectionTools", () => {
     );
 
     expect(result).toHaveProperty("updated", true);
+    expect(mockCommitAuthorityTrace).toHaveBeenCalledWith(expect.objectContaining({
+      operation: "reflection:set_goal",
+      stateDeltaRefs: [`npc:${NPC_ID}:goals`],
+    }));
     const setCall = mockDb.set.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
     const goalsStr = setCall?.goals as string;
     const goals = JSON.parse(goalsStr) as { short_term: string[]; long_term: string[] };
@@ -239,6 +317,10 @@ describe("createReflectionTools", () => {
     );
 
     expect(result).toHaveProperty("updated", true);
+    expect(mockCommitAuthorityTrace).toHaveBeenCalledWith(expect.objectContaining({
+      operation: "reflection:drop_goal",
+      stateDeltaRefs: [`npc:${NPC_ID}:goals`],
+    }));
     const setCall = mockDb.set.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
     const goalsStr = setCall?.goals as string;
     const goals = JSON.parse(goalsStr) as { short_term: string[]; long_term: string[] };
@@ -264,7 +346,58 @@ describe("createReflectionTools", () => {
         reason: "Threatened my livelihood",
       }),
       0,
+      undefined,
+      expect.objectContaining({
+        scope: "background",
+        authority: expect.objectContaining({
+          sourceEntity: { type: "npc", id: NPC_ID },
+        }),
+      }),
     );
+  });
+
+  it("promote_identity_change persists only behind reflection authority", async () => {
+    setupMockDb({});
+
+    const tools = createReflectionTools(CAMPAIGN_ID, NPC_ID);
+    const result = await tools.promote_identity_change.execute!(
+      {
+        selfImage: "A merchant who now sees threat before profit.",
+        evidence: ["evt-strong-1"],
+        whyNow: "The repeated direct threats forced a durable self-image change.",
+      },
+      { toolCallId: "tc1", messages: [], abortSignal: undefined as unknown as AbortSignal },
+    );
+
+    expect(result).toHaveProperty("updated", true);
+    expect(mockCommitAuthorityTrace).toHaveBeenCalledWith(expect.objectContaining({
+      operation: "reflection:promote_identity_change",
+      eventIds: ["evt-strong-1"],
+      stateDeltaRefs: [`npc:${NPC_ID}:identity`],
+    }));
+  });
+
+  it("upgrade_wealth and upgrade_skill persist through reflection authority", async () => {
+    setupMockDb({});
+
+    const tools = createReflectionTools(CAMPAIGN_ID, NPC_ID);
+    await tools.upgrade_wealth.execute!(
+      { entityName: "Greta the Merchant", entityType: "npc", newTier: "Obscenely Rich" },
+      { toolCallId: "tc1", messages: [], abortSignal: undefined as unknown as AbortSignal },
+    );
+    await tools.upgrade_skill.execute!(
+      { entityName: "Greta the Merchant", entityType: "npc", skillName: "Alchemy", newTier: "Novice" },
+      { toolCallId: "tc2", messages: [], abortSignal: undefined as unknown as AbortSignal },
+    );
+
+    expect(mockCommitAuthorityTrace).toHaveBeenCalledWith(expect.objectContaining({
+      operation: "reflection:upgrade_wealth",
+      stateDeltaRefs: [`npc:${NPC_ID}:capabilities`],
+    }));
+    expect(mockCommitAuthorityTrace).toHaveBeenCalledWith(expect.objectContaining({
+      operation: "reflection:upgrade_skill",
+      stateDeltaRefs: [`npc:${NPC_ID}:capabilities`],
+    }));
   });
 });
 
@@ -353,6 +486,148 @@ describe("runReflection", () => {
     expect(systemPrompt).not.toContain("legacy belief");
     expect(systemPrompt).not.toContain("Use the legacy persona/goals/beliefs blobs as the main worldview");
     expect(systemPrompt).not.toContain("Use tag-only worldview updates");
+  });
+
+  it("does not fall back to raw currentLocationId in reflection prompts", async () => {
+    const npc = createMockNpc();
+    const record = JSON.parse(String(npc.characterRecord)) as Record<string, unknown>;
+    const socialContext = record.socialContext as Record<string, unknown>;
+    socialContext.currentLocationName = null;
+    setupMockDb({
+      npc: {
+        ...npc,
+        currentLocationId: "loc-private-ledger-room",
+        characterRecord: JSON.stringify(record),
+      },
+    });
+
+    const { generateText } = await import("ai");
+
+    await runReflection(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER, {
+      ...JUDGE_PROVIDER,
+      id: "embedder-provider",
+    });
+
+    const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
+    expect(systemPrompt).toContain("Current social context: location=unknown");
+    expect(systemPrompt).not.toContain("loc-private-ledger-room");
+  });
+
+  it("redacts backend refs from reflection evidence and stored NPC prompt fields", async () => {
+    const npc = createMockNpc();
+    const record = JSON.parse(String(npc.characterRecord)) as Record<string, unknown>;
+    const identity = record.identity as Record<string, unknown>;
+    identity.baseFacts = {
+      biography: "Ledger witness for actor:actor-private and 55555555-5555-4555-8555-555555555555.",
+      socialRole: ["keeper of location:loc-ledger"],
+      hardConstraints: ["Never reveal tool-result-hard-stop"],
+    };
+    identity.behavioralCore = {
+      attachments: [],
+      selfImage: "Witness tied to loc-self-ref",
+    };
+    identity.liveDynamics = {
+      attachments: ["owes actor:actor-contact"],
+      activeGoals: ["secure route-private-9"],
+      beliefDrift: ["trusts knowledge:fact-private"],
+      currentStrains: ["watched by source:private"],
+      earnedChanges: ["survived tool-result-earned"],
+    };
+    identity.personality = {
+      summary: "Careful around actor:actor-handler.",
+      voice: "Warns about location:loc-voice.",
+      decisionStyle: "Avoids route-private-2.",
+      worldview: "Debts bind faction:hidden-ledger.",
+      internalContradictions: ["wants item:sealed-token"],
+      personalMythology: "Marked by event:hidden-bell.",
+      sampleLines: ["I remember tool-result-sample."],
+    };
+    record.profile = {
+      ...(record.profile as Record<string, unknown>),
+      personaSummary: "Files claims under tool-result-profile.",
+    };
+    record.socialContext = {
+      ...(record.socialContext as Record<string, unknown>),
+      currentLocationName: "location:loc-reflection",
+      socialStatus: ["linked to actor:actor-status"],
+    };
+    record.motivations = {
+      ...(record.motivations as Record<string, unknown>),
+      shortTermGoals: ["follow route-short-1"],
+      longTermGoals: ["protect knowledge:fact-long"],
+      beliefs: ["player carries item:sealed-message"],
+    };
+
+    setupMockDb({
+      npc: {
+        ...npc,
+        characterRecord: JSON.stringify(record),
+      },
+    });
+    mockReadPendingCommittedEvents.mockReturnValue([
+      {
+        id: "evt-pending",
+        text: "Greta saw actor:actor-private near loc-pending and tool-result-pending.",
+        tick: TICK,
+        location: "Market Square",
+        participants: ["Greta the Merchant", "player"],
+        importance: 8,
+        type: "dialogue",
+      },
+    ]);
+    mockSearchEpisodicEvents.mockResolvedValue([
+      {
+        id: "evt-semantic",
+        text: "Greta stored location:loc-semantic under source:semantic-private.",
+        tick: TICK - 1,
+        location: "Market Square",
+        participants: ["Greta the Merchant"],
+        importance: 7,
+        type: "event",
+        vector: [0.1, 0.2],
+      },
+    ]);
+
+    const { generateText } = await import("ai");
+
+    await runReflection(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER, {
+      ...JUDGE_PROVIDER,
+      id: "embedder-provider",
+    });
+
+    const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
+    expect(systemPrompt).toContain("[backend ref hidden]");
+    for (const raw of [
+      "actor:actor-private",
+      "55555555-5555-4555-8555-555555555555",
+      "location:loc-ledger",
+      "tool-result-hard-stop",
+      "loc-self-ref",
+      "actor:actor-contact",
+      "route-private-9",
+      "knowledge:fact-private",
+      "source:private",
+      "tool-result-earned",
+      "actor:actor-handler",
+      "location:loc-voice",
+      "route-private-2",
+      "faction:hidden-ledger",
+      "item:sealed-token",
+      "event:hidden-bell",
+      "tool-result-sample",
+      "tool-result-profile",
+      "location:loc-reflection",
+      "actor:actor-status",
+      "route-short-1",
+      "knowledge:fact-long",
+      "item:sealed-message",
+      "loc-pending",
+      "tool-result-pending",
+      "location:loc-semantic",
+      "source:semantic-private",
+    ]) {
+      expect(systemPrompt).not.toContain(raw);
+    }
   });
 
   it("beliefs, goals, and relationships first when reflection decides what to change", async () => {

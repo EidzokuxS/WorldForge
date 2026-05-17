@@ -8,11 +8,18 @@
 
 import { z } from "zod";
 import { tool } from "ai";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "../db/index.js";
-import { npcs, players } from "../db/schema.js";
+import { authorityTraces, npcs, players } from "../db/schema.js";
 import { executeToolCall } from "./tool-executor.js";
+import { createBackgroundToolExecutionContext } from "./tool-execution-context.js";
 import { recordActorKnowledge } from "./knowledge-model.js";
+import {
+  commitAuthorityTrace,
+  readWorldClock,
+  validateBaseWorldVersion,
+} from "./living-world-authority.js";
+import type { ToolResultAuthority } from "./tool-result.js";
 import { createLogger } from "../lib/index.js";
 import {
   blankPersonality,
@@ -36,6 +43,65 @@ export const SKILL_TIERS = ["Novice", "Skilled", "Master"] as const;
 export const RELATIONSHIP_TAGS = ["Trusted Ally", "Friendly", "Neutral", "Suspicious", "Hostile", "Sworn Enemy"] as const;
 
 type EntityType = "player" | "npc";
+
+type ReflectionAuthorityContext = {
+  authority: ToolResultAuthority;
+  authorityTraceId: string;
+};
+
+function readAuthorityTraceId(campaignId: string, toolResultId: string): string | null {
+  const row = getDb()
+    .select({ id: authorityTraces.id })
+    .from(authorityTraces)
+    .where(and(
+      eq(authorityTraces.campaignId, campaignId),
+      eq(authorityTraces.toolResultId, toolResultId),
+    ))
+    .get();
+  return row?.id ?? null;
+}
+
+function withReflectionMutationAuthority<T>(
+  input: {
+    campaignId: string;
+    npcId: string;
+    operation: string;
+    stateDeltaRefs: string[];
+    eventIds?: string[];
+    metadata?: Record<string, unknown>;
+  },
+  mutate: (context: ReflectionAuthorityContext) => T,
+): T {
+  const db = getDb();
+
+  return db.transaction(() => {
+    const clock = readWorldClock(input.campaignId);
+    validateBaseWorldVersion({
+      campaignId: input.campaignId,
+      baseWorldVersion: clock.worldVersion,
+      currentTick: clock.currentTick,
+    });
+    const authority = commitAuthorityTrace({
+      campaignId: input.campaignId,
+      operation: `reflection:${input.operation}`,
+      baseWorldVersion: clock.worldVersion,
+      sourceEntity: { type: "npc", id: input.npcId },
+      elapsedWorldTimeMinutes: 0,
+      currentTick: clock.currentTick,
+      eventIds: input.eventIds,
+      stateDeltaRefs: input.stateDeltaRefs,
+      metadata: {
+        source: "reflection-agent",
+        ...input.metadata,
+      },
+    });
+    const authorityTraceId =
+      readAuthorityTraceId(input.campaignId, authority.toolResultId)
+      ?? authority.toolResultId;
+
+    return mutate({ authority, authorityTraceId });
+  });
+}
 
 function resolveEntityForUpgrade(
   campaignId: string,
@@ -407,24 +473,41 @@ export function createReflectionTools(campaignId: string, npcId: string) {
 
         const npcRecord = hydrateStoredNpcRecord(npc);
         const updatedRecord = updateLiveDynamicsBeliefs(npcRecord, belief);
-        persistNpcReflectionRecord(npcId, updatedRecord);
-        const knowledge = recordActorKnowledge({
-          campaignId,
-          actorId: npcId,
-          route: "belief",
-          truthStatus: "believed",
-          statement: belief,
-          subjectRefs: [npcId],
-          sourceEventIds: evidence,
-          confidence: 70,
-          reliability: 65,
-          metadata: { source: "reflection:set_belief" },
-        });
+        const trimmedEvidence = evidence.map((entry) => entry.trim()).filter(Boolean);
+        const result = withReflectionMutationAuthority(
+          {
+            campaignId,
+            npcId,
+            operation: "set_belief",
+            stateDeltaRefs: [`npc:${npcId}:beliefs`, `npc:${npcId}:knowledge`],
+            eventIds: trimmedEvidence,
+            metadata: { belief },
+          },
+          ({ authorityTraceId }) => {
+            persistNpcReflectionRecord(npcId, updatedRecord);
+            const knowledge = recordActorKnowledge({
+              campaignId,
+              actorId: npcId,
+              route: "belief",
+              truthStatus: "believed",
+              statement: belief,
+              subjectRefs: [npcId],
+              sourceEventIds: trimmedEvidence,
+              authorityTraceIds: [authorityTraceId],
+              confidence: 70,
+              reliability: 65,
+              metadata: { source: "reflection:set_belief" },
+            });
+            return {
+              knowledgeId: knowledge.id,
+            };
+          },
+        );
 
         log.info(`NPC ${npcId}: set belief "${belief}"`);
         return {
           updated: true,
-          knowledgeId: knowledge.id,
+          knowledgeId: result.knowledgeId,
           beliefs: updatedRecord.motivations.beliefs,
         };
       },
@@ -450,7 +533,16 @@ export function createReflectionTools(campaignId: string, npcId: string) {
 
         const npcRecord = hydrateStoredNpcRecord(npc);
         const updatedRecord = updateLiveDynamicsGoals(npcRecord, goal, priority);
-        persistNpcReflectionRecord(npcId, updatedRecord);
+        withReflectionMutationAuthority(
+          {
+            campaignId,
+            npcId,
+            operation: "set_goal",
+            stateDeltaRefs: [`npc:${npcId}:goals`],
+            metadata: { goal, priority },
+          },
+          () => persistNpcReflectionRecord(npcId, updatedRecord),
+        );
 
         log.info(`NPC ${npcId}: set ${priority} goal "${goal}"`);
         return {
@@ -482,7 +574,16 @@ export function createReflectionTools(campaignId: string, npcId: string) {
 
         const npcRecord = hydrateStoredNpcRecord(npc);
         const updatedRecord = dropLiveDynamicsGoal(npcRecord, goal);
-        persistNpcReflectionRecord(npcId, updatedRecord);
+        withReflectionMutationAuthority(
+          {
+            campaignId,
+            npcId,
+            operation: "drop_goal",
+            stateDeltaRefs: [`npc:${npcId}:goals`],
+            metadata: { goal },
+          },
+          () => persistNpcReflectionRecord(npcId, updatedRecord),
+        );
 
         log.info(`NPC ${npcId}: dropped goal "${goal}"`);
         return {
@@ -526,6 +627,13 @@ export function createReflectionTools(campaignId: string, npcId: string) {
             reason,
           },
           0,
+          undefined,
+          createBackgroundToolExecutionContext({
+            campaignId,
+            sourceEntity: { type: "npc", id: npcId },
+            elapsedWorldTimeMinutes: 0,
+            allowedWriteScopes: ["world:relationship"],
+          }),
         );
 
         log.info(`NPC ${npcId}: set relationship with "${target}" -> [${tag}]`);
@@ -579,7 +687,25 @@ export function createReflectionTools(campaignId: string, npcId: string) {
             whyNow: whyNow.trim(),
           },
         );
-        persistNpcReflectionRecord(npcId, updatedRecord);
+        withReflectionMutationAuthority(
+          {
+            campaignId,
+            npcId,
+            operation: "promote_identity_change",
+            stateDeltaRefs: [`npc:${npcId}:identity`],
+            eventIds: strongEvidence,
+            metadata: {
+              whyNow: whyNow.trim(),
+              changedFields: {
+                personality: Boolean(personality),
+                liveDynamicsAttachments: Boolean(liveDynamicsAttachments),
+                selfImage: Boolean(selfImage?.trim()),
+                hardConstraints: Boolean(hardConstraints),
+              },
+            },
+          },
+          () => persistNpcReflectionRecord(npcId, updatedRecord),
+        );
 
         log.info(`NPC ${npcId}: promoted personality/baseFacts change`);
         return {
@@ -619,7 +745,16 @@ export function createReflectionTools(campaignId: string, npcId: string) {
               wealthTier: newTier,
             },
           };
-          persistResolvedEntity(entity);
+          withReflectionMutationAuthority(
+            {
+              campaignId,
+              npcId,
+              operation: "upgrade_wealth",
+              stateDeltaRefs: [`${entity.type}:${entity.id}:capabilities`],
+              metadata: { entityName, entityType, newTier },
+            },
+            () => persistResolvedEntity(entity),
+          );
           log.info(`${entityName}: set initial wealth tier "${newTier}"`);
           return { updated: true, tags: entity.record.capabilities.wealthTier ? [entity.record.capabilities.wealthTier] : [] };
         }
@@ -642,7 +777,16 @@ export function createReflectionTools(campaignId: string, npcId: string) {
             wealthTier: newTier,
           },
         };
-        persistResolvedEntity(entity);
+        withReflectionMutationAuthority(
+          {
+            campaignId,
+            npcId,
+            operation: "upgrade_wealth",
+            stateDeltaRefs: [`${entity.type}:${entity.id}:capabilities`],
+            metadata: { entityName, entityType, currentWealthTag, newTier },
+          },
+          () => persistResolvedEntity(entity),
+        );
         log.info(`${entityName}: wealth ${currentWealthTag} -> ${newTier}`);
         return { updated: true, tags: [newTier] };
       },
@@ -682,7 +826,16 @@ export function createReflectionTools(campaignId: string, npcId: string) {
               ],
             },
           };
-          persistResolvedEntity(entity);
+          withReflectionMutationAuthority(
+            {
+              campaignId,
+              npcId,
+              operation: "upgrade_skill",
+              stateDeltaRefs: [`${entity.type}:${entity.id}:capabilities`],
+              metadata: { entityName, entityType, skillName, newTier },
+            },
+            () => persistResolvedEntity(entity),
+          );
           log.info(`${entityName}: set initial skill "${newTier} ${skillName}"`);
           return { updated: true, tags: [`${newTier} ${skillName}`] };
         }
@@ -714,7 +867,16 @@ export function createReflectionTools(campaignId: string, npcId: string) {
             ),
           },
         };
-        persistResolvedEntity(entity);
+        withReflectionMutationAuthority(
+          {
+            campaignId,
+            npcId,
+            operation: "upgrade_skill",
+            stateDeltaRefs: [`${entity.type}:${entity.id}:capabilities`],
+            metadata: { entityName, entityType, skillName, currentTier, newTier },
+          },
+          () => persistResolvedEntity(entity),
+        );
         log.info(`${entityName}: skill ${currentTier} ${skillName} -> ${newTier} ${skillName}`);
         return { updated: true, tags: [`${newTier} ${skillName}`] };
       },

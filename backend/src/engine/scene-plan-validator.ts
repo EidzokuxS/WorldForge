@@ -27,7 +27,10 @@ export type ScenePlanValidationIssueCode =
   | "invalid_speaker_ref"
   | "invalid_source_ref"
   | "invalid_durability"
+  | "addressed_target_mismatch"
   | "missing_structural_claim"
+  | "missing_background_authority"
+  | "missing_background_write_scope"
   | "outcome_contradiction"
   | "too_many_primary_scene_changers";
 

@@ -1,4 +1,4 @@
-import { generateText } from "ai";
+import { generateText } from "./raindrop-workshop.js";
 import { createModel } from "./provider-registry.js";
 import type { ProviderConfig } from "./provider-registry.js";
 

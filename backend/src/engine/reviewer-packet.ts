@@ -75,7 +75,9 @@ function buildSourceLinkedSummary(
   return {
     id: `reviewer-summary:${sourceRefs.slice(0, 4).join(":")}`,
     kind: "source_linked_summary",
-    text: `${overflow.length} reviewer records summarized for budget. Sources: ${sourceRefs.slice(0, 8).join(", ")}.`,
+    text:
+      `${overflow.length} reviewer records summarized for budget. `
+      + "Source links are preserved internally.",
     sourceRefs,
   };
 }
@@ -142,10 +144,8 @@ export function buildReviewerPacket(input: {
 export function formatReviewerPacketForPrompt(packet: ReviewerPacket): string {
   return [
     "[REVIEWER PACKET]",
-    `Packet: ${packet.id}`,
-    ...packet.evidence.map((entry) =>
-      `- ${entry.kind}:${entry.id}: ${entry.text} [sources=${entry.sourceRefs.join(", ")}]`,
-    ),
+    "Packet scope: current review evidence.",
+    ...packet.evidence.map((entry, index) => `- e${index + 1} [${entry.kind}]: ${entry.text}`),
     "[CONTEXT BUDGET TRACE]",
     `- frameType: ${packet.contextBudgetTrace.frameType}`,
     `- selectedItemCount: ${packet.contextBudgetTrace.selectedItemCount}`,

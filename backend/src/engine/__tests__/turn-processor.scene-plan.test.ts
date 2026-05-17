@@ -45,6 +45,7 @@ function createShibuyaFrame(): SceneFrame {
   return {
     campaignId: "campaign-phase-79-04",
     tick: 79,
+    worldVersion: 0,
     playerActorId: playerId,
     currentLocationId: "loc-shibuya-district",
     currentSceneScopeId: "scene-shibuya-cafe",
@@ -95,7 +96,7 @@ function createShibuyaFrame(): SceneFrame {
 }
 
 function createMixedLocalAndRemotePlan(): ScenePlan {
-  return scenePlanSchema.parse({
+  const validPlan = scenePlanSchema.parse({
     actionInterpretation: {
       actorId: playerId,
       intent: "ask cafe price",
@@ -135,7 +136,7 @@ function createMixedLocalAndRemotePlan(): ScenePlan {
         input: {
           name: "Outpost Cook",
           tags: ["service-staff"],
-          locationName: "Okutama Safe Zone - Forest Outpost",
+          locationRef: "current_scene",
         },
       },
     ],
@@ -152,6 +153,20 @@ function createMixedLocalAndRemotePlan(): ScenePlan {
     },
     hiddenRationale: "A remote spawn in a local Shibuya turn must fail atomically.",
   });
+  return {
+    ...validPlan,
+    plannedActions: [
+      validPlan.plannedActions[0]!,
+      {
+        ...validPlan.plannedActions[1]!,
+        input: {
+          name: "Outpost Cook",
+          tags: ["service-staff"],
+          locationName: "Okutama Safe Zone - Forest Outpost",
+        },
+      },
+    ],
+  } as ScenePlan;
 }
 
 function readTurnProcessorSource(): string {
@@ -409,7 +424,7 @@ describe("turn processor ScenePlan contract", () => {
     expect(preNarratorPath).not.toContain('yield { type: "narrative"');
   });
 
-  it("rejects wrong-location spawn_npc before ScenePlan execution", () => {
+  it("rejects legacy-location spawn_npc before ScenePlan execution", () => {
     const validation = validateScenePlan({
       frame: createShibuyaFrame(),
       plan: createMixedLocalAndRemotePlan(),
@@ -420,8 +435,8 @@ describe("turn processor ScenePlan contract", () => {
       expect(validation.issues).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            code: "remote_location_ref",
-            path: expect.stringContaining("locationName"),
+            code: "invalid_tool_input",
+            path: expect.stringContaining("input"),
             message: expect.not.stringContaining("Forest Outpost"),
           }),
         ]),
@@ -482,7 +497,7 @@ describe("turn processor ScenePlan contract", () => {
       "finalText: narrativeText",
     ]);
     const finalNarrationStart = source.indexOf("const narration = await renderSettledNarrationWithSaga");
-    const finalNarrationEnd = source.indexOf("const { tick: newTick }", finalNarrationStart);
+    const finalNarrationEnd = source.indexOf("const { tick: newTick", finalNarrationStart);
     const finalNarrationPath = source.slice(finalNarrationStart, finalNarrationEnd);
 
     expect(finalNarrationStart, "final narration render call exists").toBeGreaterThanOrEqual(0);

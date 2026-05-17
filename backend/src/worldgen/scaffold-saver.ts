@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import {
   createCharacterRecordFromDraft,
@@ -20,6 +20,7 @@ import {
   relationships,
 } from "../db/schema.js";
 import type { WorldScaffold } from "./types.js";
+import { assertScaffoldPlayable } from "./scaffold-preflight.js";
 
 type DbInstance = ReturnType<typeof getDb>;
 type Tx = Parameters<Parameters<DbInstance["transaction"]>[0]>[0];
@@ -456,6 +457,51 @@ function insertMembershipRelationships(
   }
 }
 
+function resolveStartingPlacement(
+  locationPlan: LocationPersistencePlan,
+): { broadLocationId: string; sceneLocationId: string } {
+  const startingEntry =
+    locationPlan.entries.find((entry) => entry.location.isStarting)
+    ?? locationPlan.entries[0];
+  if (!startingEntry) {
+    throw new Error("Cannot reanchor world entities without a starting location.");
+  }
+  if (startingEntry.kind === "persistent_sublocation") {
+    const broadLocationId = startingEntry.parentLocationId;
+    if (!broadLocationId) {
+      throw new Error(
+        `Starting sublocation "${startingEntry.location.name}" has no parent location.`,
+      );
+    }
+    return {
+      broadLocationId,
+      sceneLocationId: startingEntry.id,
+    };
+  }
+  return {
+    broadLocationId: startingEntry.id,
+    sceneLocationId: startingEntry.id,
+  };
+}
+
+function reanchorExistingRuntimeEntities(
+  { tx, campaignId }: BaseContext,
+  locationPlan: LocationPersistencePlan,
+): void {
+  const starting = resolveStartingPlacement(locationPlan);
+  tx.update(players)
+    .set({
+      currentLocationId: starting.broadLocationId,
+      currentSceneLocationId: starting.sceneLocationId,
+    })
+    .where(eq(players.campaignId, campaignId))
+    .run();
+  tx.update(items)
+    .set({ locationId: starting.sceneLocationId })
+    .where(and(eq(items.campaignId, campaignId), isNull(items.ownerId)))
+    .run();
+}
+
 function insertTerritoryRelationships(
   ctx: InsertContext,
   scaffoldFactions: WorldScaffold["factions"]
@@ -483,6 +529,7 @@ export function saveScaffoldToDb(
   scaffold: WorldScaffold
 ): void {
   const db = getDb();
+  assertScaffoldPlayable(scaffold);
   const locationPlan = buildLocationPersistencePlan(scaffold.locations);
 
   db.transaction((tx) => {
@@ -491,6 +538,7 @@ export function saveScaffoldToDb(
 
     const locationIds = insertLocations(base, locationPlan);
     updateAdjacency(tx, campaignId, locationPlan);
+    reanchorExistingRuntimeEntities(base, locationPlan);
 
     const factionIds = insertFactions(base, scaffold.factions);
     const npcIds = insertNpcs(base, scaffold.npcs, locationPlan);

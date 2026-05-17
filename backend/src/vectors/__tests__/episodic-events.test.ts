@@ -31,8 +31,10 @@ import {
   clearPendingCommittedEvents,
   computeCompositeScore,
   drainPendingCommittedEvents,
+  drainPendingCommittedEventsByIds,
   embedAndUpdateEvent,
   readPendingCommittedEvents,
+  retractPendingCommittedEventsForTick,
   searchEpisodicEvents,
   storeEpisodicEvent,
 } from "../episodic-events.js";
@@ -96,6 +98,9 @@ function createMockCampaignDb({
   const insertRun = vi.fn();
   const insertValues = vi.fn().mockReturnValue({ run: insertRun });
   const insert = vi.fn().mockReturnValue({ values: insertValues });
+  const deleteRun = vi.fn();
+  const deleteWhere = vi.fn().mockReturnValue({ run: deleteRun });
+  const deleteFn = vi.fn().mockReturnValue({ where: deleteWhere });
 
   const selectGet = vi.fn().mockReturnValue(location);
   const where = vi.fn().mockReturnValue({ get: selectGet });
@@ -106,9 +111,11 @@ function createMockCampaignDb({
     db: {
       select,
       insert,
+      delete: deleteFn,
     },
     insertValues,
     insertRun,
+    deleteRun,
     selectGet,
   };
 }
@@ -318,6 +325,54 @@ describe("episodic-events", () => {
       );
     });
 
+    it("propagates explicit visibility routes to location projections and pending same-turn evidence", async () => {
+      const { db: vectorDb } = createMockDb();
+      const { db: campaignDb, insertValues } = createMockCampaignDb({
+        location: {
+          id: "scene-actor-memory",
+          campaignId: "campaign-1",
+          name: "Moth Court",
+          kind: "macro",
+          persistence: "persistent",
+          anchorLocationId: null,
+          archivedAtTick: null,
+        },
+      });
+      mockGetVectorDb.mockReturnValue(vectorDb);
+      mockGetDb.mockReturnValue(campaignDb);
+
+      await storeEpisodicEvent("campaign-1", {
+        text: "Renn privately recognizes the sealed proof pattern.",
+        tick: 14,
+        location: "Moth Court",
+        participants: ["Renn"],
+        importance: 6,
+        type: "event",
+        visibility: "hidden",
+        surfaceRoute: "actor_private_memory",
+        knowledgeRoute: "memory",
+        hiddenCauseTerms: ["sealed proof pattern"],
+      });
+
+      expect(insertValues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          visibility: "hidden",
+          surfaceRoute: "actor_private_memory",
+          knowledgeRoute: "memory",
+          hiddenCauseTerms: JSON.stringify(["sealed proof pattern"]),
+        }),
+      );
+      expect(readPendingCommittedEvents("campaign-1", 14)).toEqual([
+        expect.objectContaining({
+          text: "Renn privately recognizes the sealed proof pattern.",
+          visibility: "hidden",
+          surfaceRoute: "actor_private_memory",
+          knowledgeRoute: "memory",
+          hiddenCauseTerms: ["sealed proof pattern"],
+        }),
+      ]);
+    });
+
     it("keeps pending evidence campaign-scoped and tick-scoped, and drain clears queued committed events", async () => {
       const { db } = createMockDb();
       mockGetVectorDb.mockReturnValue(db);
@@ -367,6 +422,65 @@ describe("episodic-events", () => {
       expect(readPendingCommittedEvents("campaign-other", 20)).toEqual([
         expect.objectContaining({ text: "Wrong campaign evidence." }),
       ]);
+    });
+
+    it("promotes accepted durable memory by event id instead of post-turn tick", async () => {
+      const { db } = createMockDb();
+      mockGetVectorDb.mockReturnValue(db);
+
+      const acceptedId = await storeEpisodicEvent("campaign-live", {
+        text: "Accepted event from the old tick.",
+        tick: 20,
+        location: "Bazaar",
+        participants: ["Greta the Merchant"],
+        importance: 4,
+        type: "event",
+      });
+      await storeEpisodicEvent("campaign-live", {
+        text: "Unaccepted event from the same tick.",
+        tick: 20,
+        location: "Bazaar",
+        participants: ["Greta the Merchant"],
+        importance: 4,
+        type: "event",
+      });
+
+      expect(drainPendingCommittedEventsByIds("campaign-live", [acceptedId])).toEqual([
+        expect.objectContaining({ id: acceptedId, text: "Accepted event from the old tick." }),
+      ]);
+      expect(readPendingCommittedEvents("campaign-live", 20)).toEqual([
+        expect.objectContaining({ text: "Unaccepted event from the same tick." }),
+      ]);
+    });
+
+    it("retracts pending/vector/location projections for a rolled-back turn tick", async () => {
+      const { db, table } = createMockDb({
+        hasTable: true,
+        queryRows: [{ id: "event-present" }],
+      });
+      const { db: campaignDb, deleteRun } = createMockCampaignDb();
+      mockGetVectorDb.mockReturnValue(db);
+      mockGetDb.mockReturnValue(campaignDb);
+
+      const eventId = await storeEpisodicEvent("campaign-live", {
+        text: "This rejected turn should not remain in memory.",
+        tick: 20,
+        location: "Bazaar",
+        participants: ["Greta the Merchant"],
+        importance: 7,
+        type: "event",
+      });
+
+      await expect(retractPendingCommittedEventsForTick("campaign-live", 20)).resolves.toEqual([
+        expect.objectContaining({
+          eventId,
+          vectorDeleted: true,
+          pendingEvent: expect.objectContaining({ id: eventId }),
+        }),
+      ]);
+      expect(table.delete).toHaveBeenCalledWith(`id = '${eventId}'`);
+      expect(deleteRun).toHaveBeenCalledTimes(1);
+      expect(readPendingCommittedEvents("campaign-live", 20)).toEqual([]);
     });
 
     it("clears all queued committed events for one campaign regardless of tick", async () => {

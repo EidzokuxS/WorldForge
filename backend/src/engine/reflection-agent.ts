@@ -7,10 +7,11 @@
  * Failures are logged but never block gameplay.
  */
 
-import { generateText, stepCountIs } from "ai";
+import { stepCountIs } from "ai";
 import { eq, and, sql } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { npcs } from "../db/schema.js";
+import { generateText } from "../ai/raindrop-workshop.js";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
 import { createReflectionTools } from "./reflection-tools.js";
 import {
@@ -23,11 +24,29 @@ import { hydrateStoredNpcRecord } from "../character/record-adapters.js";
 import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
 import { DERIVED_RUNTIME_TAGS_RULE } from "../character/prompt-contract.js";
 import { collectToolCalls } from "./parse-helpers.js";
+import { sanitizeModelFacingConversationText } from "./model-facing-conversation.js";
 
 const log = createLogger("reflection-agent");
 
 /** NPCs must accumulate this much importance before reflection triggers. */
 export const REFLECTION_THRESHOLD = 10;
+
+function sanitizeStoredPromptText(text: string, maxChars = 1000): string {
+  return sanitizeModelFacingConversationText(text, { maxChars });
+}
+
+function sanitizeStoredPromptList(values: readonly string[], maxChars = 240): string[] {
+  return values.map((value) => sanitizeStoredPromptText(value, maxChars));
+}
+
+function formatStoredPromptList(values: readonly string[], fallback = "none"): string {
+  const sanitized = sanitizeStoredPromptList(values);
+  return sanitized.length > 0 ? sanitized.join(", ") : fallback;
+}
+
+function formatStoredGoals(values: readonly string[], label: "short" | "long"): string[] {
+  return sanitizeStoredPromptList(values).map((goal) => `  - [${label}] ${goal}`);
+}
 
 // -- Types --------------------------------------------------------------------
 
@@ -91,7 +110,7 @@ async function runReflectionInternal(
       return;
     }
     recentEventKeys.add(key);
-    recentEvents.push(`[Tick ${event.tick}] ${event.text}`);
+    recentEvents.push(`[Tick ${event.tick}] ${sanitizeStoredPromptText(event.text, 900)}`);
   };
 
   for (const event of readPendingCommittedEvents(campaignId, tick)) {
@@ -116,12 +135,18 @@ async function runReflectionInternal(
 
   // 3. Build system prompt
   const goalsText = [
-    ...npcRecord.motivations.shortTermGoals.map((g) => `  - [short] ${g}`),
-    ...npcRecord.motivations.longTermGoals.map((g) => `  - [long] ${g}`),
+    ...formatStoredGoals(npcRecord.motivations.shortTermGoals, "short"),
+    ...formatStoredGoals(npcRecord.motivations.longTermGoals, "long"),
   ].join("\n") || "  (none)";
+  const safeDisplayName = sanitizeStoredPromptText(npcRecord.identity.displayName, 160);
+  const safeRuntimeTags = sanitizeStoredPromptList(runtimeTags, 120);
+  const baseFacts = npcRecord.identity.baseFacts;
+  const personality = npcRecord.identity.personality;
+  const behavioralCore = npcRecord.identity.behavioralCore;
+  const liveDynamics = npcRecord.identity.liveDynamics;
 
   const systemPrompt = [
-    `You are reflecting on recent experiences as ${npcRecord.identity.displayName}.`,
+    `You are reflecting on recent experiences as ${safeDisplayName}.`,
     `Canonical NPC record authority: profile, socialContext, motivations, capabilities, and state define the current baseline before any compatibility aliases.`,
     `Derived runtime tags are compact compatibility evidence, not the source-of-truth worldview.`,
     DERIVED_RUNTIME_TAGS_RULE,
@@ -133,13 +158,13 @@ async function runReflectionInternal(
     `Update active goals, belief drift, current strains, and relationships before considering deeper identity edits.`,
     `Deeper identity changes require explicit promotion with multiple strong evidence points.`,
     ``,
-    `Current profile: ${npcRecord.profile.personaSummary}`,
-    `Current base facts: biography=${npcRecord.identity.baseFacts?.biography ?? "none"}; roles=[${npcRecord.identity.baseFacts?.socialRole.join(", ") || "none"}]; constraints=[${npcRecord.identity.baseFacts?.hardConstraints.join(", ") || "none"}]`,
-    `Current personality: summary=${npcRecord.identity.personality?.summary || "none"}; voice=${npcRecord.identity.personality?.voice || "none"}; contradictions=[${npcRecord.identity.personality?.internalContradictions?.join(", ") || "none"}]; self-image=${npcRecord.identity.behavioralCore?.selfImage || "none"}`,
-    `Current live dynamics: goals=[${npcRecord.identity.liveDynamics?.activeGoals.join(", ") || "none"}]; belief drift=[${npcRecord.identity.liveDynamics?.beliefDrift.join(", ") || "none"}]; strains=[${npcRecord.identity.liveDynamics?.currentStrains.join(", ") || "none"}]; earned changes=[${npcRecord.identity.liveDynamics?.earnedChanges.join(", ") || "none"}]`,
-    `Current social context: location=${npcRecord.socialContext.currentLocationName ?? npc.currentLocationId ?? "unknown"}; status=[${npcRecord.socialContext.socialStatus.join(", ") || "none"}]`,
-    `Current capabilities/state shorthand: tags=[${runtimeTags.join(", ")}]`,
-    `Current beliefs: [${npcRecord.motivations.beliefs.join(", ")}]`,
+    `Current profile: ${sanitizeStoredPromptText(npcRecord.profile.personaSummary, 700)}`,
+    `Current base facts: biography=${baseFacts?.biography ? sanitizeStoredPromptText(baseFacts.biography, 700) : "none"}; roles=[${formatStoredPromptList(baseFacts?.socialRole ?? [])}]; constraints=[${formatStoredPromptList(baseFacts?.hardConstraints ?? [])}]`,
+    `Current personality: summary=${personality?.summary ? sanitizeStoredPromptText(personality.summary, 500) : "none"}; voice=${personality?.voice ? sanitizeStoredPromptText(personality.voice, 500) : "none"}; contradictions=[${formatStoredPromptList(personality?.internalContradictions ?? [])}]; self-image=${behavioralCore?.selfImage ? sanitizeStoredPromptText(behavioralCore.selfImage, 500) : "none"}`,
+    `Current live dynamics: goals=[${formatStoredPromptList(liveDynamics?.activeGoals ?? [])}]; belief drift=[${formatStoredPromptList(liveDynamics?.beliefDrift ?? [])}]; strains=[${formatStoredPromptList(liveDynamics?.currentStrains ?? [])}]; earned changes=[${formatStoredPromptList(liveDynamics?.earnedChanges ?? [])}]`,
+    `Current social context: location=${npcRecord.socialContext.currentLocationName ? sanitizeStoredPromptText(npcRecord.socialContext.currentLocationName, 160) : "unknown"}; status=[${formatStoredPromptList(npcRecord.socialContext.socialStatus)}]`,
+    `Current capabilities/state shorthand: tags=[${safeRuntimeTags.join(", ") || "none"}]`,
+    `Current beliefs: [${formatStoredPromptList(npcRecord.motivations.beliefs)}]`,
     `Current goals:\n${goalsText}`,
     recentEvents.length > 0
       ? `\nRecent evidence:\n${recentEvents.join("\n")}`
