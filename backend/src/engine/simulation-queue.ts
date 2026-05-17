@@ -264,6 +264,9 @@ export function queuePostTurnSimulationProposals(
             eventType: "npc_offscreen_interval_due",
             summary: "Offscreen NPC simulation interval became due outside the player-visible scene.",
             importance: 2,
+            visibility: "report_only",
+            surfaceRoute: "offscreen_scheduler_diagnostic",
+            knowledgeRoute: "system:npc-offscreen",
           },
         }],
         payload: {

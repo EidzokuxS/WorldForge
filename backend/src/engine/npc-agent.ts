@@ -373,7 +373,12 @@ async function tickNpcAgentInternal(
     try {
       const queryVector = await embedTexts([npcRecord.identity.displayName], embedderProvider);
       if (queryVector[0] && queryVector[0].length > 0) {
-        const events = await searchEpisodicEvents(queryVector[0], tick, 3);
+        const events = await searchEpisodicEvents(queryVector[0], tick, 3, {
+          kind: "actor",
+          campaignId,
+          actorId: npcId,
+          includePlayerPerceivable: true,
+        });
         recentMemories = events.map((e) => `[Tick ${e.tick}] ${e.text}`);
       }
     } catch (err) {

@@ -1026,6 +1026,8 @@ describe("simulation proposal executor", () => {
           locationRef: "loc-a",
           eventType: "ambient",
           summary: "This event must roll back when final disposition ownership is lost.",
+          visibility: "player_perceivable",
+          surfaceRoute: "test_visible_proposal_event",
         },
       }],
       data: {
@@ -1865,6 +1867,8 @@ describe("simulation proposal executor", () => {
           locationRef: "loc-a",
           eventType: "ambient",
           summary: "This location event is outside the proposal write scope.",
+          visibility: "player_perceivable",
+          surfaceRoute: "test_visible_proposal_event",
         },
       }],
     });
@@ -1899,6 +1903,8 @@ describe("simulation proposal executor", () => {
           locationRef: "loc-a",
           eventType: "ambient",
           summary: "A location update claims the same visible scope before actor work.",
+          visibility: "player_perceivable",
+          surfaceRoute: "test_visible_proposal_event",
         },
       }],
     });

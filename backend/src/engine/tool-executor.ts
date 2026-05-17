@@ -1206,6 +1206,20 @@ async function handleRecordDialogueOutcome(
         .where(eq(locations.id, player.currentLocationId))
         .get()
     : null;
+  const visibility: DurableLogEventVisibility =
+    executionContext?.scope === "actor_turn" ? "hidden" : "player_perceivable";
+  const surfaceRoute =
+    executionContext?.scope === "actor_turn"
+      ? "actor_private_dialogue_outcome"
+      : "dialogue_outcome";
+  const knowledgeRoute =
+    executionContext?.scope === "actor_turn" && executionContext.subjectActorId
+      ? `actor:${executionContext.subjectActorId}`
+      : null;
+  const hiddenCauseTerms =
+    executionContext?.scope === "actor_turn" && executionContext.subjectActorId
+      ? [executionContext.subjectActorId]
+      : [];
 
   let eventId: string | null = null;
   let knowledgeId: string | null = null;
@@ -1216,7 +1230,11 @@ async function handleRecordDialogueOutcome(
       location: playerLocation?.name ?? "",
       participants,
       importance: 5,
-      type: "event",
+      type: "dialogue",
+      visibility,
+      surfaceRoute,
+      knowledgeRoute,
+      hiddenCauseTerms,
     });
     const knowledgeRecord = recordDialogueOutcomeKnowledge({
       campaignId,
@@ -1236,6 +1254,9 @@ async function handleRecordDialogueOutcome(
         knowledgeId: knowledgeId ?? undefined,
         factRef: knowledgeId ? `knowledge:${knowledgeId}` : undefined,
         persisted: true,
+        visibility,
+        surfaceRoute,
+        knowledgeRoute,
       },
     };
   } catch (error) {

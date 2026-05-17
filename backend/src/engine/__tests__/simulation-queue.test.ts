@@ -8,6 +8,7 @@ import { runMigrations } from "../../db/migrate.js";
 import {
   campaigns,
   factions,
+  locationRecentEvents,
   locations,
   simulationJobs,
   simulationProposals,
@@ -187,6 +188,9 @@ describe("simulation queue and proposal lifecycle", () => {
         args: expect.objectContaining({
           locationRef: "loc-player",
           eventType: "npc_offscreen_interval_due",
+          visibility: "report_only",
+          surfaceRoute: "offscreen_scheduler_diagnostic",
+          knowledgeRoute: "system:npc-offscreen",
         }),
       }),
     ]);
@@ -227,7 +231,12 @@ describe("simulation queue and proposal lifecycle", () => {
     expect(payload.intendedTools).toEqual([
       expect.objectContaining({
         name: "record_location_event",
-        args: expect.objectContaining({ locationRef: "loc-player" }),
+        args: expect.objectContaining({
+          locationRef: "loc-player",
+          visibility: "report_only",
+          surfaceRoute: "offscreen_scheduler_diagnostic",
+          knowledgeRoute: "system:npc-offscreen",
+        }),
       }),
     ]);
 
@@ -244,6 +253,13 @@ describe("simulation queue and proposal lifecycle", () => {
       proposalId: offscreen.proposalId,
     });
     expect(readWorldClock(CAMPAIGN_ID).worldVersion).toBe(1);
+    expect(getDb().select().from(locationRecentEvents).all()).toEqual([
+      expect.objectContaining({
+        visibility: "report_only",
+        surfaceRoute: "offscreen_scheduler_diagnostic",
+        knowledgeRoute: "system:npc-offscreen",
+      }),
+    ]);
   });
 
   it("keeps all interval-bound post-turn proposals out of non-interval turns", () => {

@@ -16,6 +16,7 @@ const log = createLogger("episodic-events");
 
 export interface EpisodicEvent {
   id: string;
+  campaignId: string;
   text: string;
   tick: number;
   location: string;
@@ -28,6 +29,26 @@ export interface EpisodicEvent {
   hiddenCauseTerms?: string[];
   vector: number[];
 }
+
+export type EpisodicEventVisibility = NonNullable<LocationRecentEventSummary["visibility"]>;
+
+export type EpisodicEventSearchAudience =
+  | {
+      kind: "player";
+      campaignId: string;
+      includeLocalSignals?: boolean;
+    }
+  | {
+      kind: "actor";
+      campaignId: string;
+      actorId: string;
+      includePlayerPerceivable?: boolean;
+      includeLocalSignals?: boolean;
+    }
+  | {
+      kind: "system";
+      campaignId?: string;
+    };
 
 export interface PendingCommittedEvent {
   id: string;
@@ -49,8 +70,24 @@ const pendingCommittedEvents = new Map<string, PendingCommittedEvent[]>();
 type VectorDb = ReturnType<typeof getVectorDb>;
 type EpisodicEventsTable = Awaited<ReturnType<VectorDb["openTable"]>>;
 
+const BASE_SCHEMA_FIELD_NAMES = [
+  "campaignId",
+  "id",
+  "text",
+  "tick",
+  "location",
+  "participants",
+  "importance",
+  "type",
+  "visibility",
+  "surfaceRoute",
+  "knowledgeRoute",
+  "hiddenCauseTerms",
+] as const;
+
 function createBaseSchema(): Schema {
   return new Schema([
+    new Field("campaignId", new Utf8(), false),
     new Field("id", new Utf8(), false),
     new Field("text", new Utf8(), false),
     new Field("tick", new Int32(), false),
@@ -58,6 +95,10 @@ function createBaseSchema(): Schema {
     new Field("participants", new List(new Field("item", new Utf8(), true)), false),
     new Field("importance", new Int32(), false),
     new Field("type", new Utf8(), false),
+    new Field("visibility", new Utf8(), false),
+    new Field("surfaceRoute", new Utf8(), false),
+    new Field("knowledgeRoute", new Utf8(), false),
+    new Field("hiddenCauseTerms", new List(new Field("item", new Utf8(), true)), false),
   ]);
 }
 
@@ -72,10 +113,12 @@ function createVectorSchema(vectorDimension: number): Schema {
   ]);
 }
 
-function normalizeStoredEventRowWithoutVector(
+function normalizeStoredEventRow(
   row: Record<string, unknown>,
+  options: { preserveVector?: boolean } = {},
 ): Record<string, unknown> {
-  return {
+  const normalized: Record<string, unknown> = {
+    campaignId: String(row.campaignId ?? ""),
     id: String(row.id),
     text: String(row.text),
     tick: Number(row.tick ?? 0),
@@ -83,7 +126,17 @@ function normalizeStoredEventRowWithoutVector(
     participants: normalizeStringArray(row.participants),
     importance: Number(row.importance ?? 0),
     type: String(row.type ?? "event"),
+    visibility: String(row.visibility ?? "player_perceivable"),
+    surfaceRoute: String(row.surfaceRoute ?? ""),
+    knowledgeRoute: String(row.knowledgeRoute ?? ""),
+    hiddenCauseTerms: normalizeStringArray(row.hiddenCauseTerms),
   };
+
+  if (options.preserveVector && Array.isArray(row.vector)) {
+    normalized.vector = row.vector;
+  }
+
+  return normalized;
 }
 
 function normalizeStringArray(value: unknown): string[] {
@@ -117,6 +170,22 @@ function normalizeStringArray(value: unknown): string[] {
 async function tableHasVectorColumn(table: { schema(): Promise<{ fields: Array<{ name: string }> }> }): Promise<boolean> {
   const schema = await table.schema();
   return schema.fields.some((field) => field.name === "vector");
+}
+
+async function tableColumnNames(
+  table: { schema(): Promise<{ fields: Array<{ name: string }> }> },
+): Promise<Set<string>> {
+  const schema = await table.schema();
+  return new Set(schema.fields.map((field) => field.name));
+}
+
+function inferVectorDimension(rows: readonly Record<string, unknown>[]): number | undefined {
+  for (const row of rows) {
+    if (Array.isArray(row.vector) && row.vector.length > 0) {
+      return row.vector.length;
+    }
+  }
+  return undefined;
 }
 
 function formatStorageError(error: unknown): string {
@@ -171,22 +240,29 @@ async function ensureEpisodicEventsTable(
     return recreateUnreadableEpisodicEventsTable(db, error, vectorDimension);
   }
 
-  if (!vectorDimension || vectorDimension <= 0) {
+  const columnNames = await tableColumnNames(table);
+  const hasRequiredBaseColumns = BASE_SCHEMA_FIELD_NAMES.every((fieldName) =>
+    columnNames.has(fieldName)
+  );
+  const hasVectorColumn = columnNames.has("vector");
+  const requiresVectorColumn = Boolean(vectorDimension && vectorDimension > 0);
+
+  if (hasRequiredBaseColumns && (!requiresVectorColumn || hasVectorColumn)) {
     return table;
   }
 
-  if (await tableHasVectorColumn(table)) {
-    return table;
-  }
-
-  const existingRows = await table.query().toArray();
+  const existingRows = (await table.query().toArray()) as Record<string, unknown>[];
   await db.dropTable(TABLE_NAME);
 
-  const migratedTable = await db.createEmptyTable(TABLE_NAME, createVectorSchema(vectorDimension));
+  const targetVectorDimension =
+    requiresVectorColumn ? vectorDimension : inferVectorDimension(existingRows);
+  const migratedTable = targetVectorDimension && targetVectorDimension > 0
+    ? await db.createEmptyTable(TABLE_NAME, createVectorSchema(targetVectorDimension))
+    : await db.createEmptyTable(TABLE_NAME, createBaseSchema());
   if (existingRows.length > 0) {
     await migratedTable.add(
       existingRows.map((row) =>
-        normalizeStoredEventRowWithoutVector(row as Record<string, unknown>),
+        normalizeStoredEventRow(row, { preserveVector: Boolean(targetVectorDimension) }),
       ),
     );
   }
@@ -386,12 +462,17 @@ export async function retractPendingCommittedEventsForTick(
  */
 export async function storeEpisodicEvent(
   campaignId: string,
-  event: Omit<EpisodicEvent, "id" | "vector">
+  event: Omit<EpisodicEvent, "id" | "campaignId" | "vector">
 ): Promise<string> {
   const id = crypto.randomUUID();
+  const visibility = event.visibility ?? "player_perceivable";
+  const surfaceRoute = event.surfaceRoute ?? null;
+  const knowledgeRoute = event.knowledgeRoute ?? null;
+  const hiddenCauseTerms = [...(event.hiddenCauseTerms ?? [])];
 
   // Store WITHOUT vector column — embedding is deferred to post-turn async.
   const row = {
+    campaignId,
     id,
     text: event.text,
     tick: event.tick,
@@ -399,6 +480,10 @@ export async function storeEpisodicEvent(
     participants: event.participants,
     importance: event.importance,
     type: event.type || "event",
+    visibility,
+    surfaceRoute: surfaceRoute ?? "",
+    knowledgeRoute: knowledgeRoute ?? "",
+    hiddenCauseTerms,
   };
 
   const table = await ensureEpisodicEventsTable();
@@ -418,10 +503,10 @@ export async function storeEpisodicEvent(
     summary: event.text,
     importance: event.importance,
     sourceEventId: id,
-    visibility: event.visibility,
-    surfaceRoute: event.surfaceRoute,
-    knowledgeRoute: event.knowledgeRoute,
-    hiddenCauseTerms: event.hiddenCauseTerms,
+    visibility,
+    surfaceRoute,
+    knowledgeRoute,
+    hiddenCauseTerms,
   });
 
   queuePendingCommittedEvent(campaignId, {
@@ -432,10 +517,10 @@ export async function storeEpisodicEvent(
     participants: [...event.participants],
     importance: event.importance,
     type: event.type || "event",
-    visibility: event.visibility ?? "player_perceivable",
-    surfaceRoute: event.surfaceRoute ?? null,
-    knowledgeRoute: event.knowledgeRoute ?? null,
-    hiddenCauseTerms: [...(event.hiddenCauseTerms ?? [])],
+    visibility,
+    surfaceRoute,
+    knowledgeRoute,
+    hiddenCauseTerms,
   });
   log.info(`Stored episodic event ${id} (tick=${event.tick}, importance=${event.importance})`);
   return id;
@@ -511,6 +596,7 @@ export async function searchEpisodicEvents(
   queryVector: number[],
   currentTick: number,
   limit = 5,
+  audience?: EpisodicEventSearchAudience,
 ): Promise<EpisodicEvent[]> {
   const db = getVectorDb();
 
@@ -527,7 +613,7 @@ export async function searchEpisodicEvents(
   // Over-fetch for composite re-ranking.
   // vectorSearch will fail if no rows have a vector column yet (all embeddings deferred).
   // Gracefully return empty in that case.
-  const fetchLimit = limit * 3;
+  const fetchLimit = Math.max(limit * 6, 30);
   let results: Record<string, unknown>[];
   try {
     results = await table
@@ -551,19 +637,68 @@ export async function searchEpisodicEvents(
 
     const event: EpisodicEvent = {
       id: String(row.id),
+      campaignId: String(row.campaignId ?? ""),
       text: String(row.text),
       tick,
       location: String(row.location ?? ""),
-      participants: (row.participants as string[]) ?? [],
+      participants: normalizeStringArray(row.participants),
       importance,
       type: String(row.type ?? "event"),
+      visibility: normalizeEpisodicVisibility(row.visibility),
+      surfaceRoute: normalizeNullableText(row.surfaceRoute),
+      knowledgeRoute: normalizeNullableText(row.knowledgeRoute),
+      hiddenCauseTerms: normalizeStringArray(row.hiddenCauseTerms),
       vector: row.vector as number[],
     };
 
     return { event, composite };
-  });
+  }).filter(({ event }) => episodicEventVisibleToAudience(event, audience));
 
   // Sort by composite descending, take top N
   scored.sort((a, b) => b.composite - a.composite);
   return scored.slice(0, limit).map((s) => s.event);
+}
+
+function normalizeNullableText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeEpisodicVisibility(value: unknown): EpisodicEventVisibility {
+  return value === "hidden"
+    || value === "local_signal"
+    || value === "report_only"
+    || value === "player_perceivable"
+    ? value
+    : "player_perceivable";
+}
+
+function episodicEventVisibleToAudience(
+  event: EpisodicEvent,
+  audience: EpisodicEventSearchAudience | undefined,
+): boolean {
+  if (!audience) return true;
+  if (event.campaignId !== audience.campaignId) {
+    return false;
+  }
+
+  if (audience.kind === "system") {
+    return true;
+  }
+
+  if (audience.kind === "player") {
+    return event.visibility === "player_perceivable"
+      || (audience.includeLocalSignals === true && event.visibility === "local_signal");
+  }
+
+  if (event.visibility === "hidden") {
+    return event.knowledgeRoute === `actor:${audience.actorId}`;
+  }
+
+  if (event.visibility === "player_perceivable") {
+    return audience.includePlayerPerceivable !== false;
+  }
+
+  return audience.includeLocalSignals === true && event.visibility === "local_signal";
 }

@@ -123,7 +123,12 @@ async function runReflectionInternal(
     try {
       const queryVector = await embedTexts([npcRecord.identity.displayName], embedderProvider);
       if (queryVector[0] && queryVector[0].length > 0) {
-        const events = await searchEpisodicEvents(queryVector[0], tick, 10);
+        const events = await searchEpisodicEvents(queryVector[0], tick, 10, {
+          kind: "actor",
+          campaignId,
+          actorId: npcId,
+          includePlayerPerceivable: true,
+        });
         for (const event of events) {
           pushRecentEvidence(event);
         }

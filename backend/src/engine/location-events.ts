@@ -36,6 +36,21 @@ export type RecordLocationRecentEventInput = {
 
 export type LocationRecentEventSummary = typeof locationRecentEvents.$inferSelect;
 
+export type LocationRecentEventAudience =
+  | {
+      kind: "player";
+      includeLocalSignals?: boolean;
+    }
+  | {
+      kind: "actor";
+      actorId: string;
+      includePlayerPerceivable?: boolean;
+      includeLocalSignals?: boolean;
+    }
+  | {
+      kind: "system";
+    };
+
 function toLocationProjection(location: LocationProjectionRow): ResolvedLocationProjection {
   const shouldAnchorProjection =
     location.kind === "ephemeral_scene" && Boolean(location.anchorLocationId);
@@ -96,6 +111,46 @@ function stringifyStringArray(values: readonly string[] | undefined): string {
   return JSON.stringify(normalized);
 }
 
+function eventVisibleToAudience(
+  event: LocationRecentEventSummary,
+  audience: LocationRecentEventAudience | undefined,
+): boolean {
+  if (!audience || audience.kind === "system") {
+    return true;
+  }
+
+  const visibility = event.visibility ?? "player_perceivable";
+  if (audience.kind === "player") {
+    return visibility === "player_perceivable"
+      || (audience.includeLocalSignals === true && visibility === "local_signal");
+  }
+
+  if (visibility === "hidden") {
+    return event.knowledgeRoute === `actor:${audience.actorId}`;
+  }
+  if (visibility === "player_perceivable") {
+    return audience.includePlayerPerceivable !== false;
+  }
+  return audience.includeLocalSignals === true && visibility === "local_signal";
+}
+
+function sanitizeEventForAudience(
+  event: LocationRecentEventSummary,
+  audience: LocationRecentEventAudience | undefined,
+): LocationRecentEventSummary {
+  if (!audience || audience.kind === "system") {
+    return event;
+  }
+  if (audience.kind === "actor" && event.visibility === "hidden") {
+    return event;
+  }
+  return {
+    ...event,
+    knowledgeRoute: null,
+    hiddenCauseTerms: "[]",
+  };
+}
+
 export function recordLocationRecentEvent(
   input: RecordLocationRecentEventInput,
 ): LocationRecentEventSummary | null {
@@ -132,13 +187,15 @@ export function listRecentLocationEvents(input: {
   campaignId: string;
   locationRef: string;
   limit?: number;
+  audience?: LocationRecentEventAudience;
 }): LocationRecentEventSummary[] {
   const projection = resolveLocationProjection(input.campaignId, input.locationRef);
   if (!projection) {
     return [];
   }
 
-  return getDb()
+  const fetchLimit = input.audience ? Math.max((input.limit ?? 5) * 4, 20) : (input.limit ?? 5);
+  const rows = getDb()
     .select()
     .from(locationRecentEvents)
     .where(
@@ -148,14 +205,19 @@ export function listRecentLocationEvents(input: {
       ),
     )
     .orderBy(desc(locationRecentEvents.tick), desc(locationRecentEvents.createdAt))
-    .limit(input.limit ?? 5)
+    .limit(fetchLimit)
     .all();
+  return rows
+    .filter((event) => eventVisibleToAudience(event, input.audience))
+    .slice(0, input.limit ?? 5)
+    .map((event) => sanitizeEventForAudience(event, input.audience));
 }
 
 export function listRecentLocationEventsForLocations(input: {
   campaignId: string;
   locationIds: string[];
   limitPerLocation?: number;
+  audience?: LocationRecentEventAudience;
 }): Record<string, LocationRecentEventSummary[]> {
   const normalizedLocationIds = [...new Set(
     input.locationIds.map((locationId) => locationId.trim()).filter(Boolean),
@@ -208,11 +270,14 @@ export function listRecentLocationEventsForLocations(input: {
       .all();
 
     for (const recentEvent of recentEvents) {
+      if (!eventVisibleToAudience(recentEvent, input.audience)) {
+        continue;
+      }
       const bucket = groupedByProjectedLocationId.get(recentEvent.locationId) ?? [];
       if (bucket.length >= limitPerLocation) {
         continue;
       }
-      bucket.push(recentEvent);
+      bucket.push(sanitizeEventForAudience(recentEvent, input.audience));
       groupedByProjectedLocationId.set(recentEvent.locationId, bucket);
     }
   }

@@ -678,11 +678,12 @@ export function assembleAuthoritativeScene(
     );
   const committedEventEffects = committedEventPairs.map((entry) => entry.effect);
   const recentLocationEvents = currentScene
-    ? listRecentLocationEvents({
-        campaignId: options.campaignId,
-        locationRef: currentScene.id,
-        limit: 5,
-      }).filter((event) =>
+      ? listRecentLocationEvents({
+          campaignId: options.campaignId,
+          locationRef: currentScene.id,
+          limit: 5,
+          audience: { kind: "player", includeLocalSignals: true },
+        }).filter((event) =>
         event.visibility === "player_perceivable"
         || event.visibility === "local_signal",
       )

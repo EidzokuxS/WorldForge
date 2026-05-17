@@ -341,6 +341,10 @@ export async function applyOffscreenUpdate(
       participants: [npcCtx.npcName],
       importance: 3,
       type: "npc_offscreen",
+      visibility: "hidden",
+      surfaceRoute: "legacy_npc_offscreen_memory",
+      knowledgeRoute: `actor:${npcCtx.npcId}`,
+      hiddenCauseTerms: [npcCtx.npcId],
     });
     await accumulateReflectionBudget(campaignId, [npcCtx.npcName], 3);
   } catch (err) {

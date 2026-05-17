@@ -301,6 +301,7 @@ app.get("/:id/world", async (c) => {
       campaignId: id,
       locationIds: worldLocations.map((location) => location.id),
       limitPerLocation: 5,
+      audience: { kind: "player", includeLocalSignals: true },
     });
     const normalizedWorldLocations = worldLocations.map((location) => {
       const { connectedTo: _connectedTo, ...worldLocation } = location;

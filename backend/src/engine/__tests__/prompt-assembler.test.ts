@@ -475,6 +475,10 @@ describe("assemblePrompt", () => {
         role: "user",
         content: "I present it to Road Warden.",
       },
+      {
+        role: "user",
+        content: "I accuse Shadow Auditor of steering the checkpoint.",
+      },
     ]);
 
     const result = await assembleJudgeAdjudicationPrompt({
@@ -487,6 +491,26 @@ describe("assemblePrompt", () => {
         reasoning: "Hidden judge math.",
       },
       playerAction: "I try to pass the checkpoint.",
+      worldBrainDirection: {
+        situationSummary: "A checkpoint challenge is underway.",
+        sceneQuestion: "Does the claim hold?",
+        focalActorNames: ["Player", "Road Warden"],
+        backgroundActorNames: ["Shadow Auditor"],
+        presenceReasons: [
+          {
+            actorName: "Shadow Auditor",
+            reason: "Shadow Auditor is privately evaluating the checkpoint.",
+            perceivable: false,
+          },
+        ],
+        causalBeats: [
+          {
+            summary: "A hidden audit route is active behind the checkpoint.",
+            perceivable: false,
+          },
+        ],
+        narrationGuardrails: ["Do not reveal private audit actors by name."],
+      },
     });
 
     const joined = result.messages.map((message) => `${message.role}: ${message.content}`).join("\n");
@@ -496,6 +520,8 @@ describe("assemblePrompt", () => {
     expect(joined).toContain("presentation only, not legal evidence");
     expect(joined).toContain("player_claim");
     expect(joined).toContain("Road Warden");
+    expect(joined).not.toContain("Shadow Auditor");
+    expect(joined).not.toContain("hidden audit route");
     expect(joined).not.toContain("secret pass");
     expect(joined).not.toContain("actor:raw-hidden-id");
   });
@@ -594,6 +620,7 @@ describe("assemblePrompt", () => {
     ]);
     vi.mocked(searchEpisodicEvents).mockResolvedValue([
       {
+        campaignId: "campaign-1",
         id: "evt-1",
         text: "The route-secret-1 marker leaked near knowledge:fact-1.",
         tick: 12,
@@ -749,6 +776,7 @@ describe("assemblePrompt", () => {
       campaignId: "test-campaign-123",
       locationRef: "loc-1",
       limit: 5,
+      audience: { kind: "player", includeLocalSignals: true },
     });
   });
 

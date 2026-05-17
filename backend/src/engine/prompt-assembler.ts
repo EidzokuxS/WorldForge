@@ -754,6 +754,7 @@ function buildSceneSection(
     campaignId,
     locationRef: locationId,
     limit: 5,
+    audience: { kind: "player", includeLocalSignals: true },
   }).filter((event) => event.tick >= currentTick - 50);
   const recentHappeningsLines =
     recentHappenings.length > 0
@@ -1227,6 +1228,7 @@ async function buildLoreContextSection(
  * Retrieves top 5 episodic events semantically related to the current action.
  */
 async function buildEpisodicMemorySection(
+  campaignId: string,
   embedderResult: ResolveResult | undefined,
   playerAction: string | undefined,
   currentTick: number,
@@ -1242,7 +1244,10 @@ async function buildEpisodicMemorySection(
     const queryVector = embeddings[0];
     if (!queryVector || queryVector.length === 0) return null;
 
-    const events = await searchEpisodicEvents(queryVector, currentTick, 5);
+    const events = await searchEpisodicEvents(queryVector, currentTick, 5, {
+      kind: "player",
+      campaignId,
+    });
     if (events.length === 0) return null;
 
     const lines = events.map(
@@ -1453,6 +1458,7 @@ export async function assemblePrompt(
   const loreSection = await buildLoreContextSection(embedderResult, playerAction);
 
   const episodicSection = await buildEpisodicMemorySection(
+    campaignId,
     embedderResult,
     playerAction,
     currentTick,
@@ -1530,6 +1536,36 @@ function includesAnyTerm(text: string, terms: readonly string[]): boolean {
     const normalizedTerm = term.trim().toLowerCase();
     return normalizedTerm.length > 0 && normalizedText.includes(normalizedTerm);
   });
+}
+
+function pushUniqueTerm(output: string[], seen: Set<string>, value: string | null | undefined): void {
+  const trimmed = value?.trim();
+  if (!trimmed) return;
+  const key = trimmed.toLowerCase();
+  if (seen.has(key)) return;
+  seen.add(key);
+  output.push(trimmed);
+}
+
+function collectWorldBrainPrivateTerms(direction?: WorldBrainSceneDirection): string[] {
+  if (!direction) return [];
+  const seen = new Set<string>();
+  const terms: string[] = [];
+  for (const actorName of direction.backgroundActorNames) {
+    pushUniqueTerm(terms, seen, actorName);
+  }
+  for (const reason of direction.presenceReasons) {
+    if (!reason.perceivable) {
+      pushUniqueTerm(terms, seen, reason.actorName);
+      pushUniqueTerm(terms, seen, reason.reason);
+    }
+  }
+  for (const beat of direction.causalBeats) {
+    if (!beat.perceivable) {
+      pushUniqueTerm(terms, seen, beat.summary);
+    }
+  }
+  return terms;
 }
 
 function buildRecentVisibleTranscriptSection(
@@ -2023,6 +2059,7 @@ export async function assembleJudgeAdjudicationPrompt(options: {
   worldBrainDirection?: WorldBrainSceneDirection;
   outcomeBounds?: NarrativeOutcomeBounds;
 }): Promise<JudgeAdjudicationPrompt> {
+  const privateContinuityTerms = collectWorldBrainPrivateTerms(options.worldBrainDirection);
   const assembledBase = await assemblePrompt({
     campaignId: options.campaignId,
     contextWindow: options.contextWindow,
@@ -2068,7 +2105,10 @@ If no state mutation is justified, return an empty actions list.`,
           typeof message.content === "string",
       )
       .flatMap((message) => {
-        const line = formatModelFacingConversationEntry(message, { maxChars: 1200 });
+        const line = formatModelFacingConversationEntry(message, {
+          extraForbiddenTerms: privateContinuityTerms,
+          maxChars: 1200,
+        });
         return line
           ? [{
               role: "user" as const,
@@ -2078,9 +2118,11 @@ If no state mutation is justified, return an empty actions list.`,
       }),
     {
       role: "user" as const,
-      content: `Current player request (player claim, not proof): ${
-        formatModelFacingConversationEntry({ role: "user", content: options.playerAction }, { maxChars: 1200 })
-        ?? "player_claim: [empty player action]"
+      content: `Current player request (player claim, not proof): player_claim: ${
+        sanitizeModelFacingConversationText(options.playerAction, {
+          extraForbiddenTerms: privateContinuityTerms,
+          maxChars: 1200,
+        }) || "[empty player action]"
       }`,
     },
   ];

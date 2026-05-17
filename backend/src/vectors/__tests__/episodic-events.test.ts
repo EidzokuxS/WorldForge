@@ -44,7 +44,20 @@ function createMockDb({
   queryRows = [],
   vectorRows = [],
   vectorSearchThrows = false,
-  schemaFields = ["id", "text", "tick", "location", "participants", "importance", "type"],
+  schemaFields = [
+    "campaignId",
+    "id",
+    "text",
+    "tick",
+    "location",
+    "participants",
+    "importance",
+    "type",
+    "visibility",
+    "surfaceRoute",
+    "knowledgeRoute",
+    "hiddenCauseTerms",
+  ],
   schemaThrows = false,
 }: {
   hasTable?: boolean;
@@ -196,12 +209,17 @@ describe("episodic-events", () => {
       expect(rows).toHaveLength(1);
       expect(rows[0]).not.toHaveProperty("vector");
       expect(rows[0]).toMatchObject({
+        campaignId: "campaign-1",
         text: "The duel ended in a draw.",
         tick: 12,
         location: "Arena",
         participants: ["Hero", "Rival"],
         importance: 7,
         type: "combat",
+        visibility: "player_perceivable",
+        surfaceRoute: "",
+        knowledgeRoute: "",
+        hiddenCauseTerms: [],
       });
     });
 
@@ -222,12 +240,14 @@ describe("episodic-events", () => {
       expect(rows).toHaveLength(1);
       expect(rows[0]).not.toHaveProperty("vector");
       expect(rows[0]).toMatchObject({
+        campaignId: "campaign-1",
         text: "A bell rang in the tower.",
         tick: 13,
         location: "Tower",
         participants: ["Hero"],
         importance: 4,
         type: "event",
+        visibility: "player_perceivable",
       });
     });
 
@@ -285,7 +305,7 @@ describe("episodic-events", () => {
     });
 
     it("writes a SQLite-backed location projection row with source traceability and anchored archived-scene spillover", async () => {
-      const { db: vectorDb } = createMockDb();
+      const { db: vectorDb, table: vectorTable } = createMockDb();
       const { db: campaignDb, insertValues } = createMockCampaignDb({
         location: {
           id: "scene-1",
@@ -326,7 +346,7 @@ describe("episodic-events", () => {
     });
 
     it("propagates explicit visibility routes to location projections and pending same-turn evidence", async () => {
-      const { db: vectorDb } = createMockDb();
+      const { db: vectorDb, table: vectorTable } = createMockDb();
       const { db: campaignDb, insertValues } = createMockCampaignDb({
         location: {
           id: "scene-actor-memory",
@@ -362,6 +382,14 @@ describe("episodic-events", () => {
           hiddenCauseTerms: JSON.stringify(["sealed proof pattern"]),
         }),
       );
+      const rows = vectorTable.add.mock.calls[0]?.[0] as Array<Record<string, unknown>>;
+      expect(rows[0]).toMatchObject({
+        campaignId: "campaign-1",
+        visibility: "hidden",
+        surfaceRoute: "actor_private_memory",
+        knowledgeRoute: "memory",
+        hiddenCauseTerms: ["sealed proof pattern"],
+      });
       expect(readPendingCommittedEvents("campaign-1", 14)).toEqual([
         expect.objectContaining({
           text: "Renn privately recognizes the sealed proof pattern.",
@@ -577,7 +605,8 @@ describe("episodic-events", () => {
       expect(db.dropTable).toHaveBeenCalledWith("episodic_events");
       const migratedTable = await db.createEmptyTable.mock.results[0]?.value;
       expect(migratedTable.add).toHaveBeenCalledWith([
-        {
+        expect.objectContaining({
+          campaignId: "",
           id: "evt-2",
           text: "The signal cut out again.",
           tick: 7,
@@ -585,7 +614,11 @@ describe("episodic-events", () => {
           participants: ["Aria", "Greta"],
           importance: 9,
           type: "event",
-        },
+          visibility: "player_perceivable",
+          surfaceRoute: "",
+          knowledgeRoute: "",
+          hiddenCauseTerms: [],
+        }),
       ]);
       expect(migratedTable.update).toHaveBeenCalledWith({
         where: "id = 'evt-2'",
@@ -620,6 +653,165 @@ describe("episodic-events", () => {
 
       expect(table.vectorSearch).toHaveBeenCalledWith([0.1, 0.2]);
       expect(results).toEqual([]);
+    });
+
+    it("filters player memory retrieval by campaign and player-visible audience", async () => {
+      const { db } = createMockDb({
+        hasTable: true,
+        schemaFields: [
+          "campaignId",
+          "id",
+          "text",
+          "tick",
+          "location",
+          "participants",
+          "importance",
+          "type",
+          "visibility",
+          "surfaceRoute",
+          "knowledgeRoute",
+          "hiddenCauseTerms",
+          "vector",
+        ],
+        vectorRows: [
+          {
+            campaignId: "campaign-live",
+            id: "hidden-owning-actor-only",
+            text: "Hidden actor memory should not enter player prompt.",
+            tick: 21,
+            location: "Bazaar",
+            participants: ["Renn"],
+            importance: 10,
+            type: "event",
+            visibility: "hidden",
+            surfaceRoute: "actor_private_log_event",
+            knowledgeRoute: "actor:npc-renn",
+            hiddenCauseTerms: ["sealed proof"],
+            vector: [0.1, 0.2],
+            _distance: 0.01,
+          },
+          {
+            campaignId: "",
+            id: "legacy-blank-campaign",
+            text: "Legacy blank-campaign memory must not enter scoped prompts.",
+            tick: 21,
+            location: "Bazaar",
+            participants: ["Greta"],
+            importance: 10,
+            type: "event",
+            visibility: "player_perceivable",
+            surfaceRoute: "log_event",
+            knowledgeRoute: "",
+            hiddenCauseTerms: [],
+            vector: [0.1, 0.2],
+            _distance: 0.015,
+          },
+          {
+            campaignId: "campaign-other",
+            id: "other-campaign-public",
+            text: "Other campaign event should not enter this prompt.",
+            tick: 21,
+            location: "Elsewhere",
+            participants: ["Greta"],
+            importance: 9,
+            type: "event",
+            visibility: "player_perceivable",
+            surfaceRoute: "log_event",
+            knowledgeRoute: "",
+            hiddenCauseTerms: [],
+            vector: [0.1, 0.2],
+            _distance: 0.02,
+          },
+          {
+            campaignId: "campaign-live",
+            id: "public-live",
+            text: "Public live event belongs in player memory.",
+            tick: 20,
+            location: "Bazaar",
+            participants: ["Greta"],
+            importance: 4,
+            type: "event",
+            visibility: "player_perceivable",
+            surfaceRoute: "log_event",
+            knowledgeRoute: "",
+            hiddenCauseTerms: [],
+            vector: [0.1, 0.2],
+            _distance: 0.2,
+          },
+        ],
+      });
+      mockGetVectorDb.mockReturnValue(db);
+
+      const results = await searchEpisodicEvents([0.1, 0.2], 21, 5, {
+        kind: "player",
+        campaignId: "campaign-live",
+      });
+
+      expect(results.map((event) => event.id)).toEqual(["public-live"]);
+    });
+
+    it("allows actor memory retrieval to see its own hidden events but not another actor's hidden events", async () => {
+      const { db } = createMockDb({
+        hasTable: true,
+        schemaFields: [
+          "campaignId",
+          "id",
+          "text",
+          "tick",
+          "location",
+          "participants",
+          "importance",
+          "type",
+          "visibility",
+          "surfaceRoute",
+          "knowledgeRoute",
+          "hiddenCauseTerms",
+          "vector",
+        ],
+        vectorRows: [
+          {
+            campaignId: "campaign-live",
+            id: "own-hidden",
+            text: "Renn remembers the private seal.",
+            tick: 22,
+            location: "Bazaar",
+            participants: ["Renn"],
+            importance: 10,
+            type: "event",
+            visibility: "hidden",
+            surfaceRoute: "actor_private_log_event",
+            knowledgeRoute: "actor:npc-renn",
+            hiddenCauseTerms: ["private seal"],
+            vector: [0.1, 0.2],
+            _distance: 0.01,
+          },
+          {
+            campaignId: "campaign-live",
+            id: "other-hidden",
+            text: "Mira's hidden memory must stay private.",
+            tick: 22,
+            location: "Bazaar",
+            participants: ["Mira"],
+            importance: 10,
+            type: "event",
+            visibility: "hidden",
+            surfaceRoute: "actor_private_log_event",
+            knowledgeRoute: "actor:npc-mira",
+            hiddenCauseTerms: ["private seal"],
+            vector: [0.1, 0.2],
+            _distance: 0.02,
+          },
+        ],
+      });
+      mockGetVectorDb.mockReturnValue(db);
+
+      const results = await searchEpisodicEvents([0.1, 0.2], 22, 5, {
+        kind: "actor",
+        campaignId: "campaign-live",
+        actorId: "npc-renn",
+      });
+
+      expect(results.map((event) => event.id)).toEqual(["own-hidden"]);
     });
   });
 });

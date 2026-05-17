@@ -159,6 +159,41 @@ const EXECUTABLE_RUNTIME_TOOL_NAMES = new Set<RuntimeToolName>([
   "transfer_item",
 ]);
 
+type ProposalLocationEventVisibility =
+  NonNullable<Parameters<typeof recordLocationRecentEvent>[0]["visibility"]>;
+
+function normalizeProposalLocationEventVisibility(
+  value: unknown,
+): ProposalLocationEventVisibility | null {
+  return value === "player_perceivable"
+    || value === "local_signal"
+    || value === "hidden"
+    || value === "report_only"
+    ? value
+    : null;
+}
+
+function normalizeOptionalToolText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeToolStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string") continue;
+    const trimmed = entry.trim();
+    const key = trimmed.toLowerCase();
+    if (!trimmed || seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(trimmed);
+  }
+  return normalized;
+}
+
 function now(): number {
   return Date.now();
 }
@@ -313,17 +348,27 @@ function prepareRuntimeTool(tool: SimulationProposalIntendedTool): PreparedTool 
     };
   }
   if (tool.name === "record_location_event") {
+    const visibility = normalizeProposalLocationEventVisibility(args.visibility);
+    const surfaceRoute = normalizeOptionalToolText(args.surfaceRoute);
     if (
       typeof args.locationRef !== "string"
       || typeof args.eventType !== "string"
       || typeof args.summary !== "string"
+      || visibility === null
+      || surfaceRoute === null
     ) {
       return "invalid_tool_args:record_location_event";
     }
     return {
       kind: "typed",
       toolName: "record_location_event",
-      args,
+      args: {
+        ...args,
+        visibility,
+        surfaceRoute,
+        knowledgeRoute: normalizeOptionalToolText(args.knowledgeRoute),
+        hiddenCauseTerms: normalizeToolStringArray(args.hiddenCauseTerms),
+      },
     };
   }
   return `unsupported_intended_tool:${tool.name}`;
@@ -1121,6 +1166,10 @@ function executeTypedTool(input: {
           typeof input.tool.args.importance === "number"
             ? input.tool.args.importance
             : 3,
+        visibility: input.tool.args.visibility as ProposalLocationEventVisibility,
+        surfaceRoute: input.tool.args.surfaceRoute as string,
+        knowledgeRoute: input.tool.args.knowledgeRoute as string | null,
+        hiddenCauseTerms: input.tool.args.hiddenCauseTerms as string[],
       });
       if (!event) {
         return { success: false, error: "location_event_target_not_found" };

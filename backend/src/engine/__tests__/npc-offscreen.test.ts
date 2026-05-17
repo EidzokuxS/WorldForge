@@ -621,7 +621,14 @@ describe("applyOffscreenUpdate", () => {
       }),
     );
     // Should store episodic event
-    expect(storeEpisodicEvent).toHaveBeenCalled();
+    expect(storeEpisodicEvent).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      expect.objectContaining({
+        visibility: "hidden",
+        surfaceRoute: "legacy_npc_offscreen_memory",
+        knowledgeRoute: "actor:npc-001",
+      }),
+    );
   });
 
   it("increments reflection budget after committed off-screen event writes", async () => {
@@ -710,6 +717,9 @@ describe("applyOffscreenUpdate", () => {
       CAMPAIGN_ID,
       expect.objectContaining({
         location: "Council Hall",
+        visibility: "hidden",
+        surfaceRoute: "legacy_npc_offscreen_memory",
+        knowledgeRoute: "actor:npc-001",
       }),
     );
   });

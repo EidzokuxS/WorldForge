@@ -823,11 +823,12 @@ function collectRecentEvents(input: {
   );
   const localLocationRef = input.currentSceneScopeId ?? input.currentLocationId;
   const locationEvents = localLocationRef
-    ? listRecentLocationEvents({
-        campaignId: input.campaignId,
-        locationRef: localLocationRef,
-        limit: SCENE_FRAME_RECENT_EVENT_LIMIT,
-      }).map((event): SceneFrameRecentEvent => {
+      ? listRecentLocationEvents({
+          campaignId: input.campaignId,
+          locationRef: localLocationRef,
+          limit: SCENE_FRAME_RECENT_EVENT_LIMIT,
+          audience: { kind: "player", includeLocalSignals: true },
+        }).map((event): SceneFrameRecentEvent => {
         const visibility = event.visibility ?? "player_perceivable";
         return {
           id: event.id,

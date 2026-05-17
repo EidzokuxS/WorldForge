@@ -1074,6 +1074,7 @@ describe("GET /:id/world", () => {
       campaignId: CAMPAIGN_ID,
       locationIds: ["loc-1"],
       limitPerLocation: 5,
+      audience: { kind: "player", includeLocalSignals: true },
     });
     expect(mockedListConnectedPaths).toHaveBeenCalledWith({
       campaignId: CAMPAIGN_ID,
