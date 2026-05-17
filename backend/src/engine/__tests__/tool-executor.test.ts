@@ -606,8 +606,10 @@ describe("executeToolCall", () => {
       }, TICK);
 
       expect(result.success).toBe(true);
-      expect(result.result).toEqual({
+      expect(result.result).toMatchObject({
         entity: "Gandalf",
+        entityId: "ent-1",
+        entityType: "npc",
         appliedTag: "wise",
         tags: ["wizard", "wise"],
       });
@@ -641,8 +643,10 @@ describe("executeToolCall", () => {
       }, TICK);
 
       expect(result.success).toBe(true);
-      expect(result.result).toEqual({
+      expect(result.result).toMatchObject({
         entity: "Gandalf",
+        entityId: "ent-1",
+        entityType: "npc",
         appliedTag: "wizard",
         tags: ["wizard"],
       });
@@ -666,8 +670,10 @@ describe("executeToolCall", () => {
       }, TICK);
 
       expect(result.success).toBe(true);
-      expect(result.result).toEqual({
+      expect(result.result).toMatchObject({
         entity: "Gandalf",
+        entityId: "ent-1",
+        entityType: "npc",
         removedTag: "wise",
         tags: ["wizard"],
       });

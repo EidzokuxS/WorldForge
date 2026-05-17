@@ -744,7 +744,13 @@ function handleAddTag(
 
     return {
       success: true,
-      result: { entity: character.name, appliedTag: tag, tags },
+      result: {
+        entity: character.name,
+        entityId: character.id,
+        entityType: character.type,
+        appliedTag: tag,
+        tags,
+      },
     };
   }
 
@@ -776,7 +782,13 @@ function handleAddTag(
 
   return {
     success: true,
-    result: { entity: entity.name, appliedTag: tag, tags: currentTags },
+    result: {
+      entity: entity.name,
+      entityId: entity.id,
+      entityType,
+      appliedTag: tag,
+      tags: currentTags,
+    },
   };
 }
 
@@ -824,7 +836,13 @@ function handleRemoveTag(
 
     return {
       success: true,
-      result: { entity: character.name, removedTag: tag, tags },
+      result: {
+        entity: character.name,
+        entityId: character.id,
+        entityType: character.type,
+        removedTag: tag,
+        tags,
+      },
     };
   }
 
@@ -858,7 +876,13 @@ function handleRemoveTag(
 
   return {
     success: true,
-    result: { entity: entity.name, removedTag: tag, tags: currentTags },
+    result: {
+      entity: entity.name,
+      entityId: entity.id,
+      entityType,
+      removedTag: tag,
+      tags: currentTags,
+    },
   };
 }
 
@@ -2243,6 +2267,7 @@ function handleMoveTo(
   return {
     success: true,
     result: {
+      playerId: player.id,
       locationId: destination.locationId,
       locationName: destinationName,
       travelCost: travelPath.totalTravelCost,
@@ -2750,6 +2775,8 @@ function handleSetCondition(
     success: true,
     result: {
       entity: character.name,
+      entityId: character.id,
+      entityType: "player",
       oldHp,
       newHp,
       isDowned: newHp === 0,
@@ -3025,6 +3052,11 @@ function scopedRef(prefix: string, value: unknown): string | null {
   return withoutPrefix ? `${prefix}:${withoutPrefix}` : null;
 }
 
+function scopedWriteRef(prefix: string, value: unknown, suffix: string): string | null {
+  const ref = scopedRef(prefix, value);
+  return ref ? `${ref}:${suffix}` : null;
+}
+
 function addScopedWriteRefsForToolResult(
   refs: Set<string>,
   input: {
@@ -3058,6 +3090,13 @@ function addScopedWriteRefsForToolResult(
       if (entityType === "faction") addStringRefs(refs, [scopedRef("faction", entityName)]);
       if (entityType === "location") addStringRefs(refs, [scopedRef("location", entityName)]);
       if (entityType === "item") addStringRefs(refs, [scopedRef("item", entityName)]);
+      if (entityType === "player") {
+        const playerRef = readStringField(payload, "entityId")
+          ?? (typeof entityName === "string" ? entityName : null);
+        addStringRefs(refs, [
+          scopedWriteRef("player", playerRef, "tags"),
+        ]);
+      }
       break;
     }
     case "set_relationship":
@@ -3086,15 +3125,24 @@ function addScopedWriteRefsForToolResult(
       ]);
       break;
     case "move_to":
+      addStringRefs(refs, [
+        scopedWriteRef("player", readStringField(payload, "playerId"), "location"),
+        scopedRef("location", readStringField(payload, "locationId")),
+      ]);
+      break;
     case "move_actor":
       addStringRefs(refs, [
-        scopedRef("npc", readStringField(payload, "actorId")),
+        scopedWriteRef("npc", readStringField(payload, "actorId"), "location"),
         scopedRef("npc", readStringField(payload, "actorRef")),
         scopedRef("location", readStringField(payload, "locationId")),
       ]);
       break;
     case "set_condition":
-      addStringRefs(refs, [scopedRef("npc", readStringField(payload, "entity"))]);
+      const playerRef = readStringField(payload, "entityId")
+        ?? readStringField(payload, "entity");
+      addStringRefs(refs, [
+        scopedWriteRef("player", playerRef, "state"),
+      ]);
       break;
     case "start_search":
     case "record_player_intent":

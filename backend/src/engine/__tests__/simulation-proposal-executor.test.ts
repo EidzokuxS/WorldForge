@@ -1815,6 +1815,39 @@ describe("simulation proposal executor", () => {
       });
   });
 
+  it("rejects player tag proposals that only declare a generic world write scope", async () => {
+    seedActorDecisionWorld();
+    const { proposal } = createExecutableProposal({
+      proposalType: "runtime_player_scope_mismatch",
+      writeScopes: ["world:event"],
+      intendedTools: [{
+        name: "add_tag",
+        args: {
+          entityName: "Player",
+          entityType: "player",
+          tag: "exhausted",
+        },
+      }],
+    });
+
+    const result = await executeDueSimulationProposal({
+      campaignId: CAMPAIGN_ID,
+      proposalId: proposal.proposalId,
+      tick: 10,
+      phase: "pre_scene_frame",
+    });
+
+    expect(result).toMatchObject({
+      status: "terminal",
+      disposition: "rejected_invalid",
+      reason: expect.stringContaining("authority_write_scope_mismatch:player:player-1:tags"),
+    });
+    expect(getDb().select().from(authorityTraces).all()).toEqual([]);
+    expect(readWorldClock(CAMPAIGN_ID).worldVersion).toBe(0);
+    expect(getDb().select().from(players).where(eq(players.id, "player-1")).get())
+      .toMatchObject({ tags: "[]" });
+  });
+
   it("commits runtime proposal authority when state delta refs are covered by write scopes", async () => {
     const { proposal } = createExecutableProposal({
       proposalType: "runtime_scope_covered",

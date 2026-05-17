@@ -320,6 +320,70 @@ describe("executeToolCall authority bridge", () => {
     });
   });
 
+  it("records player HP mutations under player state scope, not npc scope", async () => {
+    getDb().insert(players).values({
+      id: "player-1",
+      campaignId: CAMPAIGN_ID,
+      name: "Iria",
+      hp: 5,
+      tags: "[]",
+    }).run();
+    const context = createAuthorityContext(0);
+    context.authority = {
+      ...context.authority!,
+      allowedWriteScopes: ["player:player-1:state"],
+    };
+    context.legalActorRefs = new Set(["iria", "player-1", "player"]);
+    context.subjectActorRefs = new Set(["iria", "player-1", "player"]);
+
+    const result = await executeToolCall(
+      CAMPAIGN_ID,
+      "set_condition",
+      { targetName: "Iria", delta: -2 },
+      3,
+      undefined,
+      context,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.authority?.stateDeltaRefs).toEqual(
+      expect.arrayContaining(["player:player-1:state"]),
+    );
+    expect(result.authority?.stateDeltaRefs).not.toContain("npc:Iria");
+  });
+
+  it("rejects player HP mutations declared under npc write scope", async () => {
+    getDb().insert(players).values({
+      id: "player-1",
+      campaignId: CAMPAIGN_ID,
+      name: "Iria",
+      hp: 5,
+      tags: "[]",
+    }).run();
+    const context = createAuthorityContext(0);
+    context.authority = {
+      ...context.authority!,
+      allowedWriteScopes: ["npc:player-1:state"],
+    };
+    context.legalActorRefs = new Set(["iria", "player-1", "player"]);
+    context.subjectActorRefs = new Set(["iria", "player-1", "player"]);
+
+    const result = await executeToolCall(
+      CAMPAIGN_ID,
+      "set_condition",
+      { targetName: "Iria", delta: -2 },
+      3,
+      undefined,
+      context,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("authority_write_scope_mismatch:player:player-1:state");
+    expect(getDb().select().from(players).where(eq(players.id, "player-1")).get())
+      .toMatchObject({ hp: 5 });
+    expect(getDb().select().from(authorityTraces).all()).toEqual([]);
+  });
+
   it("attaches durable log_event event ids to authority event refs", async () => {
     const context = createAuthorityContext(0);
     context.legalActorRefs = new Set(["player"]);
