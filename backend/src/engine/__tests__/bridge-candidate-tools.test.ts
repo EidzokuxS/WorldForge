@@ -365,6 +365,63 @@ describe("bridge candidate lookup tools", () => {
     ]));
   });
 
+  it("does not use raw backend refs as lookup selectors or replay them from player-known facts", () => {
+    const context = createContext();
+    context.bridgeLookup?.playerKnownFacts.push({
+      id: "knowledge:shadow-broker",
+      summary:
+        `reported: Shadow Broker ties ${RAW_REFS.hidden} to ${RAW_REFS.privateVault}.`,
+      visibilityRoute: "player_known",
+      confidence: 0.6,
+      sourceRefs: [RAW_REFS.eventHidden, RAW_REFS.knowledgeTeaSource],
+    });
+
+    const affordances = executeBridgeCandidateTool(
+      "list_visible_affordances",
+      { maxResults: 8 },
+      context,
+    );
+    const rawLocationSearch = executeBridgeCandidateTool(
+      "find_location_candidates",
+      { query: RAW_REFS.teaLane, maxResults: 4 },
+      context,
+    );
+    const rawFactInspect = executeBridgeCandidateTool(
+      "inspect_known_fact",
+      { ref: RAW_REFS.knowledgeTea, maxResults: 2 },
+      context,
+    );
+    const rawRouteCheck = executeBridgeCandidateTool(
+      "check_route",
+      { actorRef: "Player", destinationRef: RAW_REFS.routeTeaLane, mode: "walk" },
+      context,
+    );
+
+    const affordancesJson = JSON.stringify(affordances);
+    expect(affordancesJson).not.toContain("Shadow Broker");
+    expect(affordancesJson).not.toContain(RAW_REFS.hidden);
+    expect(affordancesJson).not.toContain(RAW_REFS.privateVault);
+    expect(affordancesJson).toContain("[redacted]");
+    expect(affordancesJson).toContain("[backend ref hidden]");
+
+    expect(rawLocationSearch).toMatchObject({
+      success: true,
+      result: expect.objectContaining({
+        queryMatched: false,
+        count: 0,
+      }),
+    });
+    expect(JSON.stringify(rawLocationSearch)).not.toContain("East Tea Lane");
+    expect(rawFactInspect).toMatchObject({
+      success: false,
+      error: "backend_ref_not_model_facing",
+    });
+    expect(rawRouteCheck).toMatchObject({
+      success: false,
+      error: "backend_ref_not_model_facing",
+    });
+  });
+
   it("matches only clear visible actors and omits hidden/offscreen actor names", () => {
     const context = createContext();
 

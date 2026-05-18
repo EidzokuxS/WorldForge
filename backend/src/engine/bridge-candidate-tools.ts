@@ -9,9 +9,13 @@ import {
 } from "./ref-provenance.js";
 import type {
   ModelFacingActor,
+  ModelFacingPromptSafety,
   ModelFacingScenePacket,
 } from "./model-facing-scene.js";
-import { isBackendOnlyModelRef } from "./model-facing-ref-safety.js";
+import {
+  isBackendOnlyModelRef,
+  sanitizeModelFacingText,
+} from "./model-facing-ref-safety.js";
 import type {
   SceneFrame,
   SceneFrameMovementCandidate,
@@ -42,6 +46,7 @@ export interface BridgeKnownFactSnapshot {
 }
 
 export interface BridgeLookupSnapshot {
+  modelFacingSafety?: ModelFacingPromptSafety;
   current: {
     campaignId: string;
     tick: number;
@@ -230,6 +235,21 @@ function safeUsableAs(...values: Array<string | null | undefined>): string[] {
   return uniqueStrings(values).filter(isConsumableObservationRef);
 }
 
+function safeLookupText(
+  value: string,
+  safety?: ModelFacingPromptSafety,
+): string {
+  return sanitizeModelFacingText(value, { safety });
+}
+
+function isUnsafeBridgeInputRef(
+  context: ToolExecutionContext,
+  value: string | null,
+): boolean {
+  if (!value) return false;
+  return isBackendOnlyModelRef(value) || Boolean(context.backendOnlyRefs?.has(normalize(value)));
+}
+
 function scoreText(input: {
   query: string | null;
   tags: readonly string[];
@@ -312,12 +332,13 @@ function compactFact(
   fact: BridgeKnownFactSnapshot,
   score: number,
   aliases: BridgeDisplayAliases,
+  safety?: ModelFacingPromptSafety,
 ): Record<string, unknown> {
   const ref = aliases.factRefs.get(fact) ?? "fact";
   return {
     ref,
     kind: "fact",
-    summary: fact.summary,
+    summary: safeLookupText(fact.summary, safety),
     visibilityRoute: fact.visibilityRoute,
     confidence: fact.confidence,
     score,
@@ -431,20 +452,13 @@ function targetMatchesCategory(
   keywords: readonly string[],
 ): boolean {
   return partsMatchKeywords([
-    candidate.id,
     candidate.label,
-    candidate.actorId,
-    candidate.itemId,
-    candidate.locationId,
-    candidate.factionId,
     ...(candidate.tags ?? []),
   ], keywords);
 }
 
 function actorMatchesCategory(actor: ModelFacingActor, keywords: readonly string[]): boolean {
   return partsMatchKeywords([
-    actor.id,
-    actor.actorId,
     actor.label,
     ...(actor.tags ?? []),
     actor.summary,
@@ -452,7 +466,7 @@ function actorMatchesCategory(actor: ModelFacingActor, keywords: readonly string
 }
 
 function factMatchesCategory(fact: BridgeKnownFactSnapshot, keywords: readonly string[]): boolean {
-  return partsMatchKeywords([fact.id, fact.summary, ...fact.sourceRefs], keywords);
+  return partsMatchKeywords([fact.summary], keywords);
 }
 
 function categoryFacts(
@@ -460,11 +474,12 @@ function categoryFacts(
   keywords: readonly string[],
   maxResults: number,
   aliases: BridgeDisplayAliases,
+  safety?: ModelFacingPromptSafety,
 ): Record<string, unknown>[] {
   return facts
     .filter((fact) => factMatchesCategory(fact, keywords))
     .slice(0, maxResults)
-    .map((fact) => compactFact(fact, 1, aliases));
+    .map((fact) => compactFact(fact, 1, aliases, safety));
 }
 
 function categoryTargets(
@@ -511,19 +526,31 @@ function denial(toolName: BridgeLookupToolName, reason: string): ToolResult {
   });
 }
 
+function cloneKnownFactForLookup(
+  fact: BridgeKnownFactSnapshot,
+  safety: ModelFacingPromptSafety,
+): BridgeKnownFactSnapshot {
+  return {
+    ...fact,
+    summary: safeLookupText(fact.summary, safety),
+    sourceRefs: [...fact.sourceRefs],
+  };
+}
+
 export function buildBridgeLookupSnapshot(
   args: BuildBridgeLookupSnapshotArgs,
 ): BridgeLookupSnapshot {
   const view = args.packet.view;
   return {
+    modelFacingSafety: args.packet.safety,
     current: {
       campaignId: args.frame.campaignId,
       tick: args.frame.tick,
       playerActorId: args.frame.playerActorId,
       currentLocationId: args.frame.currentLocationId,
       currentSceneScopeId: args.frame.currentSceneScopeId,
-      currentLocationName: args.frame.currentLocationName ?? null,
-      currentSceneScopeName: args.frame.currentSceneScopeName ?? null,
+      currentLocationName: view.localScene.currentLocationName ?? null,
+      currentSceneScopeName: view.localScene.currentSceneScopeName ?? null,
       currentLocationDescription: args.packet.view.localScene.currentLocationDescription ?? null,
       currentSceneScopeDescription: args.packet.view.localScene.currentSceneScopeDescription ?? null,
     },
@@ -544,7 +571,8 @@ export function buildBridgeLookupSnapshot(
       ...event,
       actorIds: [...event.actorIds],
     })),
-    playerKnownFacts: [...(args.playerKnownFacts ?? [])],
+    playerKnownFacts: (args.playerKnownFacts ?? []).map((fact) =>
+      cloneKnownFactForLookup(fact, args.packet.safety)),
     allowedTools: [...view.allowedTools],
   };
 }
@@ -580,16 +608,40 @@ function listVisibleAffordances(
     maxResults,
     aliases,
   );
-  const cameraFacts = categoryFacts(visibleFacts, OBSERVATION_CATEGORY_KEYWORDS.camera, maxResults, aliases);
+  const cameraFacts = categoryFacts(
+    visibleFacts,
+    OBSERVATION_CATEGORY_KEYWORDS.camera,
+    maxResults,
+    aliases,
+    snapshot.modelFacingSafety,
+  );
   const barrierTargets = categoryTargets(
     visiblePhysicalTargets,
     OBSERVATION_CATEGORY_KEYWORDS.barrier,
     maxResults,
     aliases,
   );
-  const barrierFacts = categoryFacts(visibleFacts, OBSERVATION_CATEGORY_KEYWORDS.barrier, maxResults, aliases);
-  const witnessFacts = categoryFacts(visibleFacts, OBSERVATION_CATEGORY_KEYWORDS.witness, maxResults, aliases);
-  const personnelFacts = categoryFacts(visibleFacts, OBSERVATION_CATEGORY_KEYWORDS.personnel, maxResults, aliases);
+  const barrierFacts = categoryFacts(
+    visibleFacts,
+    OBSERVATION_CATEGORY_KEYWORDS.barrier,
+    maxResults,
+    aliases,
+    snapshot.modelFacingSafety,
+  );
+  const witnessFacts = categoryFacts(
+    visibleFacts,
+    OBSERVATION_CATEGORY_KEYWORDS.witness,
+    maxResults,
+    aliases,
+    snapshot.modelFacingSafety,
+  );
+  const personnelFacts = categoryFacts(
+    visibleFacts,
+    OBSERVATION_CATEGORY_KEYWORDS.personnel,
+    maxResults,
+    aliases,
+    snapshot.modelFacingSafety,
+  );
 
   return observation(toolName, {
     current: compactCurrent(snapshot),
@@ -601,7 +653,9 @@ function listVisibleAffordances(
     visibleFactRefs: [
       ...visibleFacts.map((fact) => aliases.factRefs.get(fact)),
     ].filter((ref): ref is string => Boolean(ref)),
-    visibleFacts: visibleFacts.slice(0, maxResults).map((fact) => compactFact(fact, 1, aliases)),
+    visibleFacts: visibleFacts
+      .slice(0, maxResults)
+      .map((fact) => compactFact(fact, 1, aliases, snapshot.modelFacingSafety)),
     categories: {
       exitsRoutes: connectedRoutes.slice(0, maxResults).map((candidate) => compactMovement(candidate, 1, aliases)),
       physicalAffordances: visiblePhysicalTargets
@@ -685,7 +739,7 @@ function findTargets(input: {
       query,
       tags,
       label: candidate.label,
-      refs: candidateRefs(candidate),
+      refs: safeUsableAs(aliases.targetRefs.get(candidate), candidate.label),
       candidateTags: candidate.tags,
     });
     if (score > 0) {
@@ -699,7 +753,7 @@ function findTargets(input: {
         query,
         tags,
         label: candidate.label,
-        refs: movementRefs(candidate),
+        refs: movementDisplayRefs(candidate, snapshot, aliases),
       });
       if (score > 0) {
         candidates.push(compactMovement(candidate, score, aliases) as Record<string, unknown> & { score: number; label: string });
@@ -732,7 +786,7 @@ function findActors(
       query,
       tags,
       label: actor.label,
-      refs: actorRefs(actor),
+      refs: safeUsableAs(aliases.actorRefs.get(actor), actor.label),
       candidateTags: actor.tags,
     });
     if (score > 0) {
@@ -745,7 +799,7 @@ function findActors(
       query,
       tags,
       label: candidate.label,
-      refs: candidateRefs(candidate),
+      refs: safeUsableAs(aliases.targetRefs.get(candidate), candidate.label),
       candidateTags: candidate.tags,
     });
     if (score <= 0) continue;
@@ -867,6 +921,9 @@ function inspectKnownFact(
   if (!snapshot) return denial(toolName, "bridge_lookup_context_unavailable");
   const query = readString(input, "query");
   const ref = readString(input, "ref");
+  if (isUnsafeBridgeInputRef(context, ref)) {
+    return denial(toolName, "backend_ref_not_model_facing");
+  }
   const maxResults = readMaxResults(input, 3);
   const facts = allFacts(snapshot);
   const aliases = buildDisplayAliases(snapshot, facts);
@@ -874,18 +931,18 @@ function inspectKnownFact(
     .map((fact) => ({
       fact,
       score:
-        (ref && factRefs(fact).some((candidateRef) => normalize(candidateRef) === normalize(ref)) ? 100 : 0)
+        (ref && refMatches(ref, safeUsableAs(aliases.factRefs.get(fact))) ? 100 : 0)
         + scoreText({
           query,
           tags: [],
           label: fact.summary,
-          refs: factRefs(fact),
+          refs: safeUsableAs(aliases.factRefs.get(fact)),
         }),
     }))
     .filter(({ score }) => score > 0 || (!query && !ref))
     .sort((left, right) => right.score - left.score || left.fact.id.localeCompare(right.fact.id))
     .slice(0, maxResults)
-    .map(({ fact, score }) => compactFact(fact, score, aliases));
+    .map(({ fact, score }) => compactFact(fact, score, aliases, snapshot.modelFacingSafety));
 
   if (candidates.length === 0) {
     return denial(toolName, "no_player_visible_or_known_fact");
@@ -937,6 +994,9 @@ function checkRoute(
   const destinationRef = readString(input, "destinationRef");
   if (!destinationRef) return denial(toolName, "missing_destination_ref");
   const actorRef = readString(input, "actorRef");
+  if (isUnsafeBridgeInputRef(context, actorRef) || isUnsafeBridgeInputRef(context, destinationRef)) {
+    return denial(toolName, "backend_ref_not_model_facing");
+  }
   const actorRefAllowed = !actorRef
     || context.subjectActorRefs.has(normalize(actorRef))
     || context.legalActorRefs.has(normalize(actorRef))
