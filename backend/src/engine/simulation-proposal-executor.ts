@@ -3,6 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { getDb, getSqliteConnection } from "../db/index.js";
 import {
   authorityTraces,
+  chronicle,
   locations,
   simulationJobs,
   simulationProposals,
@@ -23,22 +24,12 @@ import {
   type SimulationProposalStatus,
   type SimulationProposalWriteScope,
 } from "./simulation-proposal.js";
-import { executeToolCall } from "./tool-executor.js";
-import {
-  applySuccessfulToolObservationToExecutionContext,
-  type ToolExecutionContext,
-} from "./tool-execution-context.js";
+import { type ToolExecutionContext } from "./tool-execution-context.js";
 import { attachToolResultAuthority, type ToolResult } from "./tool-result.js";
 import {
-  isRuntimeToolName,
   isModelToolName,
   modelToolIsSideEffecting,
-  runtimeToolHasRole,
 } from "./tool-contracts.js";
-import {
-  runtimeToolInputSchemas,
-  type RuntimeToolName,
-} from "./tool-schemas.js";
 import {
   assertSimulationProposalExecutionStillClaimed,
   type SimulationProposalExecutionMetadata,
@@ -115,8 +106,8 @@ type ClaimedProposalRow = ProposalRow & { status: "executing" };
 const EXECUTING_PROPOSAL_STALE_AFTER_MS = 10 * 60_000;
 type PreparedTool =
   | {
-      kind: "runtime";
-      toolName: RuntimeToolName;
+      kind: "typed";
+      toolName: "add_chronicle_entry";
       args: Record<string, unknown>;
     }
   | {
@@ -140,24 +131,6 @@ type PreparedToolExecutionOutcome =
       results: ExecutedProposalToolResult[];
       sideEffectCommitted: boolean;
     };
-
-const EXECUTABLE_RUNTIME_TOOL_NAMES = new Set<RuntimeToolName>([
-  "add_tag",
-  "remove_tag",
-  "set_relationship",
-  "add_chronicle_entry",
-  "advance_time",
-  "spawn_npc",
-  "promote_npc",
-  "spawn_item",
-  "reveal_location",
-  "set_condition",
-  "move_to",
-  "move_actor",
-  "create_minor_poi",
-  "create_scene_extra",
-  "transfer_item",
-]);
 
 type ProposalLocationEventVisibility =
   NonNullable<Parameters<typeof recordLocationRecentEvent>[0]["visibility"]>;
@@ -322,10 +295,6 @@ function createBackgroundExecutionContext(input: {
   };
 }
 
-function isExecutableRuntimeToolName(name: string): name is RuntimeToolName {
-  return EXECUTABLE_RUNTIME_TOOL_NAMES.has(name as RuntimeToolName);
-}
-
 function prepareRuntimeTool(tool: SimulationProposalIntendedTool): PreparedTool | string {
   const args = readObject(tool.args) ?? {};
   if (tool.name === "actor_decision") {
@@ -335,16 +304,16 @@ function prepareRuntimeTool(tool: SimulationProposalIntendedTool): PreparedTool 
       args,
     };
   }
-  if (isExecutableRuntimeToolName(tool.name)) {
-    const schema = runtimeToolInputSchemas[tool.name];
-    const parsed = schema.safeParse(args);
-    if (!parsed.success) {
-      return `invalid_tool_args:${tool.name}:${parsed.error.issues.map((issue) => issue.message).join("; ")}`;
+  if (tool.name === "add_chronicle_entry") {
+    if (typeof args.text !== "string" || !args.text.trim()) {
+      return "invalid_tool_args:add_chronicle_entry";
     }
     return {
-      kind: "runtime",
-      toolName: tool.name,
-      args: parsed.data as Record<string, unknown>,
+      kind: "typed",
+      toolName: "add_chronicle_entry",
+      args: {
+        text: args.text.trim(),
+      },
     };
   }
   if (tool.name === "record_location_event") {
@@ -1009,50 +978,25 @@ function recoverCommittedProposalFromAuthorityTrace(input: {
   };
 }
 
-function isAcceptedProposalRuntimeResult(input: {
-  toolName: RuntimeToolName;
-  result: ToolResult;
-}): boolean {
-  if (!input.result.success || input.result.status === "failure") return false;
-  if (input.result.contractFailure) return false;
-  if (input.result.observationOnly === true || input.result.kind === "observation") {
-    return false;
-  }
-  if (typeof input.result.authority?.resultWorldVersion !== "number") {
-    return false;
-  }
-  if (runtimeToolHasRole(input.toolName, "legacy_scene_beat")) {
-    const payload = readObject(input.result.result);
-    return payload?.durability === "durable" && payload.persisted === true;
-  }
-  return runtimeToolHasRole(input.toolName, "state_mutation")
-    || runtimeToolHasRole(input.toolName, "time_effect");
+function isAcceptedProposalTypedMutationResult(result: ToolResult): boolean {
+  return result.success
+    && result.status !== "failure"
+    && result.contractFailure == null
+    && result.kind !== "observation"
+    && result.observationOnly !== true
+    && typeof result.authority?.resultWorldVersion === "number"
+    && (result.authority?.stateDeltaRefs.length ?? 0) > 0;
 }
 
 function isAcceptedProposalToolResult(entry: ExecutedProposalToolResult): boolean {
-  if (entry.toolName === "actor_decision") {
-    return entry.result.success
-      && entry.result.status !== "failure"
-      && entry.result.contractFailure == null
-      && entry.result.kind !== "observation"
-      && entry.result.observationOnly !== true
-      && typeof entry.result.authority?.resultWorldVersion === "number"
-      && (entry.result.authority?.stateDeltaRefs.length ?? 0) > 0;
+  switch (entry.toolName) {
+    case "actor_decision":
+    case "record_location_event":
+    case "add_chronicle_entry":
+      return isAcceptedProposalTypedMutationResult(entry.result);
+    default:
+      return false;
   }
-  if (entry.toolName === "record_location_event") {
-    return entry.result.success
-      && entry.result.status !== "failure"
-      && entry.result.contractFailure == null
-      && entry.result.kind !== "observation"
-      && entry.result.observationOnly !== true
-      && typeof entry.result.authority?.resultWorldVersion === "number"
-      && (entry.result.authority?.stateDeltaRefs.length ?? 0) > 0;
-  }
-  if (!isRuntimeToolName(entry.toolName)) return false;
-  return isAcceptedProposalRuntimeResult({
-    toolName: entry.toolName,
-    result: entry.result,
-  });
 }
 
 function assertProposalWriteScopesCover(input: {
@@ -1138,6 +1082,64 @@ function executeTypedTool(input: {
   const authority = input.context.authority;
   if (!authority) {
     return { success: false, error: "missing_authority_context" };
+  }
+  if (input.tool.toolName === "add_chronicle_entry") {
+    try {
+      const plannedWriteRef = "world:event" as SimulationProposalWriteScope;
+      assertProposalWriteScopesCover({
+        stateDeltaRefs: [plannedWriteRef],
+        writeScopes: input.payload.writeScopes,
+      });
+      return getDb().transaction(() => {
+        assertSimulationProposalExecutionStillClaimed({
+          campaignId: input.campaignId,
+          metadata: authority.metadata,
+        });
+        const entryId = randomUUID();
+        getDb().insert(chronicle).values({
+          id: entryId,
+          campaignId: input.campaignId,
+          tick: input.tick,
+          text: input.tool.args.text as string,
+          createdAt: now(),
+        }).run();
+        const stateDeltaRefs = [plannedWriteRef];
+        const trace = commitAuthorityTrace({
+          campaignId: input.campaignId,
+          operation: "tool:add_chronicle_entry",
+          baseWorldVersion: authority.baseWorldVersion,
+          sourceEntity: authority.sourceEntity,
+          elapsedWorldTimeMinutes: authority.elapsedWorldTimeMinutes ?? 1,
+          currentTick: input.tick,
+          toolResultId: authority.toolResultId,
+          eventIds: [entryId],
+          stateDeltaRefs,
+          metadata: {
+            entryId,
+            source: "simulation_proposal_executor",
+            ...(authority.metadata ? { proposalExecution: authority.metadata } : {}),
+          },
+        });
+        return attachToolResultAuthority(
+          {
+            success: true,
+            status: "success",
+            kind: "mutation",
+            result: { entryId },
+          },
+          {
+            ...trace,
+            eventRefs: [entryId],
+            requireStateDelta: true,
+          },
+        );
+      });
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
   try {
     const plannedWriteRef = resolveLocationEventWriteRef({
@@ -1408,17 +1410,8 @@ async function executePreparedTools(input: {
         claimLifecycleMetadata: input.claimLifecycleMetadata,
       },
     });
-    const result = tool.kind === "runtime"
-      ? await executeToolCall(
-          input.campaignId,
-          tool.toolName,
-          tool.args,
-          input.tick,
-          undefined,
-          context,
-        )
-      : tool.kind === "typed"
-        ? executeTypedTool({
+    const result = tool.kind === "typed"
+      ? executeTypedTool({
           campaignId: input.campaignId,
           tool,
           payload: input.payload,
@@ -1459,13 +1452,6 @@ async function executePreparedTools(input: {
         sideEffectCommitted: results.some((entry) => hasCommittedAuthority(entry.result)),
       };
     }
-    if (isRuntimeToolName(tool.toolName)) {
-      applySuccessfulToolObservationToExecutionContext({
-        toolName: tool.toolName,
-        result,
-        context,
-      });
-    }
   }
   return { status: "accepted", results };
 }
@@ -1478,7 +1464,7 @@ export function hasExecutableIntendedTools(input: {
   const payload = input.payload ?? parseSimulationProposalPayload(input.row.payload);
   const tools = intendedToolsFromRow(input.row, payload);
   return tools.some((tool) =>
-    isExecutableRuntimeToolName(tool.name)
+    tool.name === "add_chronicle_entry"
     || tool.name === "record_location_event"
     || (tool.name === "actor_decision" && input.actorDecisionAvailable === true),
   );

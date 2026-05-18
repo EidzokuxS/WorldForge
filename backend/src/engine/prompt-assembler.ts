@@ -81,7 +81,10 @@ import {
   formatModelFacingConversationEntry,
   sanitizeModelFacingConversationText,
 } from "./model-facing-conversation.js";
-import { sanitizeModelFacingText } from "./model-facing-ref-safety.js";
+import {
+  redactModelFacingForbiddenTerms,
+  sanitizeModelFacingText,
+} from "./model-facing-ref-safety.js";
 import type { ModelFacingPromptSafety } from "./model-facing-scene.js";
 
 const log = createLogger("prompt-assembler");
@@ -213,13 +216,17 @@ const importantIndicesSchema = z.object({
 async function detectImportantMessages(
   messages: ReadonlyArray<{ role: string; content: string }>,
   judgeRole: ResolvedRole,
-  options: { extraForbiddenTerms?: readonly string[] } = {},
+  options: {
+    safety?: ModelFacingPromptSafety;
+    extraForbiddenTerms?: readonly string[];
+  } = {},
 ): Promise<Set<number>> {
   if (messages.length === 0) return new Set();
 
   try {
     const numbered = messages.flatMap((message, index) => {
       const line = formatModelFacingConversationEntry(message, {
+        safety: options.safety,
         extraForbiddenTerms: options.extraForbiddenTerms,
         maxChars: 1200,
       });
@@ -453,7 +460,10 @@ export async function compressConversation(
   history: ChatMessage[],
   budgetTokens: number,
   judgeRole?: ResolvedRole,
-  options: { extraForbiddenTerms?: readonly string[] } = {},
+  options: {
+    safety?: ModelFacingPromptSafety;
+    extraForbiddenTerms?: readonly string[];
+  } = {},
 ): Promise<PromptSection | null> {
   if (history.length === 0) return null;
 
@@ -462,6 +472,7 @@ export async function compressConversation(
 
   const format = (msg: ChatMessage) =>
     formatModelFacingConversationEntry(msg, {
+      safety: options.safety,
       extraForbiddenTerms: options.extraForbiddenTerms,
       maxChars: 1200,
     });
@@ -1392,6 +1403,7 @@ export async function assemblePrompt(
 
   const db = getDb();
   const encounter = buildEncounterPromptContext(campaignId, sceneAssembly);
+  const encounterSafety = buildEncounterPromptSafety(encounter);
   const player = db
     .select()
     .from(players)
@@ -1467,9 +1479,17 @@ export async function assemblePrompt(
 
   const conversationBudget = budgets.recentConversation ?? Math.floor(contextWindow * 0.20);
   const history = getChatHistory(campaignId);
-  const conversationForbiddenTerms = sceneConversationForbiddenTerms(sceneAssembly);
+  const conversationForbiddenTerms = uniqueNonEmptyStrings([
+    ...sceneConversationForbiddenTerms(sceneAssembly),
+    ...encounterSafety.forbiddenTerms,
+  ]);
+  const conversationSafety: ModelFacingPromptSafety = {
+    forbiddenTerms: conversationForbiddenTerms,
+    backendOnlyTerms: encounterSafety.backendOnlyTerms,
+  };
   const conversationSection = includeRecentConversation
     ? await compressConversation(history, conversationBudget, judgeRole, {
+      safety: conversationSafety,
       extraForbiddenTerms: conversationForbiddenTerms,
     })
     : null;
@@ -1605,6 +1625,7 @@ function buildEncounterPromptSafety(
 function buildRecentVisibleTranscriptSection(
   campaignId: string,
   narratorPacket: NarratorPacket,
+  safety?: ModelFacingPromptSafety,
 ): string | null {
   const forbiddenTerms = [
     ...narratorPacket.forbiddenActorNames,
@@ -1627,6 +1648,7 @@ function buildRecentVisibleTranscriptSection(
 
       return [
         `Player (player-supplied continuity claim; not proof): ${sanitizeModelFacingConversationText(content, {
+          safety,
           extraForbiddenTerms: forbiddenTerms,
           maxChars: 900,
         })}`,
@@ -1644,39 +1666,54 @@ function buildRecentVisibleTranscriptSection(
   ].join("\n");
 }
 
-function formatOpeningState(sceneAssembly: SceneAssembly): string {
+function sanitizeFinalSupportText(
+  value: string,
+  safety?: ModelFacingPromptSafety,
+): string {
+  return sanitizeModelFacingText(value, { safety });
+}
+
+function formatOpeningState(
+  sceneAssembly: SceneAssembly,
+  safety?: ModelFacingPromptSafety,
+): string {
   const openingState = sceneAssembly.openingState;
   if (!openingState) {
     return "[OPENING STATE]\n- No structured opening state is active.";
   }
 
   const lines = [
+    "Support-only context for atmosphere and continuity; not legal factRefs or proof of new world state.",
     openingState.active ? "Structured opening state is active." : "Structured opening state has expired.",
-    openingState.locationName ? `Opening location: ${sanitizeModelFacingText(openingState.locationName)}` : null,
-    openingState.arrivalMode ? `Arrival mode: ${sanitizeModelFacingText(openingState.arrivalMode)}` : null,
-    openingState.startingVisibility ? `Visibility: ${sanitizeModelFacingText(openingState.startingVisibility)}` : null,
-    openingState.immediateSituation ? `Immediate situation: ${sanitizeModelFacingText(openingState.immediateSituation)}` : null,
+    openingState.locationName ? `Opening location: ${sanitizeFinalSupportText(openingState.locationName, safety)}` : null,
+    openingState.arrivalMode ? `Arrival mode: ${sanitizeFinalSupportText(openingState.arrivalMode, safety)}` : null,
+    openingState.startingVisibility ? `Visibility: ${sanitizeFinalSupportText(openingState.startingVisibility, safety)}` : null,
+    openingState.immediateSituation ? `Immediate situation: ${sanitizeFinalSupportText(openingState.immediateSituation, safety)}` : null,
     openingState.entryPressure.length > 0
-      ? `Entry pressure: ${sanitizeModelFacingText(openingState.entryPressure.join(", "))}`
+      ? `Entry pressure: ${sanitizeFinalSupportText(openingState.entryPressure.join(", "), safety)}`
       : null,
-    ...openingState.promptLines.map((line) => sanitizeModelFacingText(line)),
-    ...openingState.sceneContextLines.map((line) => sanitizeModelFacingText(line)),
+    ...openingState.promptLines.map((line) => sanitizeFinalSupportText(line, safety)),
+    ...openingState.sceneContextLines.map((line) => sanitizeFinalSupportText(line, safety)),
   ].filter((line): line is string => Boolean(line));
 
   return `[OPENING STATE]\n${lines.map((line) => `- ${line}`).join("\n")}`;
 }
 
-function formatCurrentScene(sceneAssembly: SceneAssembly): string {
+function formatCurrentScene(
+  sceneAssembly: SceneAssembly,
+  safety?: ModelFacingPromptSafety,
+): string {
   const currentScene = sceneAssembly.currentScene;
   if (!currentScene) {
     return "[CURRENT LOCAL SCENE]\n- No current local scene is available.";
   }
 
   const lines = [
-    `Name: ${sanitizeModelFacingText(currentScene.name)}`,
+    "Support-only context for atmosphere and continuity; not legal factRefs or proof of new world state.",
+    `Name: ${sanitizeFinalSupportText(currentScene.name, safety)}`,
     "Ref: current_scene",
-    currentScene.description ? `Description: ${sanitizeModelFacingText(currentScene.description)}` : null,
-    currentScene.tags.length > 0 ? `Tags: ${sanitizeModelFacingText(currentScene.tags.join(", "))}` : null,
+    currentScene.description ? `Description: ${sanitizeFinalSupportText(currentScene.description, safety)}` : null,
+    currentScene.tags.length > 0 ? `Tags: ${sanitizeFinalSupportText(currentScene.tags.join(", "), safety)}` : null,
   ].filter((line): line is string => Boolean(line));
 
   return `[CURRENT LOCAL SCENE]\n${lines.map((line) => `- ${line}`).join("\n")}`;
@@ -1717,10 +1754,6 @@ function assertFinalNarrationPromptSafe(
   }
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function collectNarratorPacketForbiddenTerms(narratorPacket?: NarratorPacket): string[] {
   if (!narratorPacket) {
     return [];
@@ -1747,14 +1780,11 @@ function redactForbiddenTerms(
   value: string,
   forbiddenTerms: readonly string[],
 ): string {
-  let content = value;
-  for (const term of forbiddenTerms) {
-    content = content.replace(
-      new RegExp(escapeRegExp(term), "gi"),
-      "[private term omitted]",
-    );
-  }
-  return content;
+  return redactModelFacingForbiddenTerms(
+    value,
+    forbiddenTerms,
+    "[private term omitted]",
+  );
 }
 
 function redactFinalNarrationUncheckedSections(
@@ -1908,6 +1938,17 @@ export async function assembleFinalNarrationPrompt(options: {
         { includeDiagnostics: false, includeTechnicalRefs: false },
       )
     : null;
+  const finalEncounterSafety = buildEncounterPromptSafety(
+    buildEncounterPromptContext(options.campaignId, options.sceneAssembly),
+  );
+  const finalForbiddenTerms = uniqueNonEmptyStrings([
+    ...collectNarratorPacketForbiddenTerms(options.narratorPacket),
+    ...finalEncounterSafety.forbiddenTerms,
+  ]);
+  const finalSupportSafety: ModelFacingPromptSafety = {
+    forbiddenTerms: finalForbiddenTerms,
+    backendOnlyTerms: finalEncounterSafety.backendOnlyTerms,
+  };
   const finalNarrationTask = options.narratorPacket
     ? `[FINAL NARRATION TASK]
 Use the NarratorPacket as the authoritative committed packet.
@@ -1959,6 +2000,7 @@ End on a concrete playable next moment rather than closing the scene with generi
           const content = buildRecentVisibleTranscriptSection(
             options.campaignId,
             options.narratorPacket,
+            finalSupportSafety,
           );
           return content
             ? { name: "recent-visible-transcript", content, sourceBoundaryChecked: true }
@@ -1967,12 +2009,12 @@ End on a concrete playable next moment rather than closing the scene with generi
       : null,
     {
       name: "current-local-scene",
-      content: formatCurrentScene(options.sceneAssembly),
+      content: formatCurrentScene(options.sceneAssembly, finalSupportSafety),
       sourceBoundaryChecked: false,
     },
     {
       name: "opening-state",
-      content: formatOpeningState(options.sceneAssembly),
+      content: formatOpeningState(options.sceneAssembly, finalSupportSafety),
       sourceBoundaryChecked: false,
     },
     options.narratorPacket

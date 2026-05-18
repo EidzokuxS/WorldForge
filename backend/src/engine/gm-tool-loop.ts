@@ -31,6 +31,7 @@ import {
   formatModelFacingPlayerActionText,
   formatModelFacingRecentConversation,
   sanitizeModelFacingConversationText,
+  sanitizeModelFacingJson,
 } from "./model-facing-conversation.js";
 import {
   normalizeModelFacingAllowedTools,
@@ -1571,18 +1572,24 @@ function modelFacingPriorToolSteps(
   safety: ModelFacingPromptSafety,
   extraForbiddenTerms: readonly string[] = [],
 ): unknown[] {
-  return stepResults.map((step) => ({
-    stepId: step.stepId,
-    toolName: step.toolName,
-    status: step.status,
-    input: redactModelFacingJson(step.candidateInput ?? {}, safety),
-    result: step.result
-      ? toModelVisibleToolResult(step.result, { safety, extraForbiddenTerms })
-      : null,
-    validationError: step.validationError
-      ? redactModelFacingJson(step.validationError, safety)
-      : null,
-  }));
+  return stepResults.map((step) => {
+    const acceptedInput = step.result?.success === true && step.result.status !== "failure"
+      ? step.candidateInput ?? {}
+      : null;
+    return {
+      toolName: step.toolName,
+      status: step.status,
+      input: acceptedInput
+        ? sanitizeModelFacingJson(acceptedInput, { safety, extraForbiddenTerms })
+        : null,
+      result: step.result
+        ? toModelVisibleToolResult(step.result, { safety, extraForbiddenTerms })
+        : null,
+      validationError: step.validationError
+        ? sanitizeModelFacingJson(step.validationError, { safety, extraForbiddenTerms })
+        : null,
+    };
+  });
 }
 
 function privateToolObservationTerms(frame: SceneFrame): string[] {
@@ -2121,25 +2128,12 @@ function createdSceneExtraIdentityAliasesFromStep(step: GmToolStepResult): Set<s
   if (step.toolName !== "create_scene_extra") return aliases;
   const payload = isRecord(step.result?.result) ? step.result.result : {};
 
-  addIdentityAliases(aliases, payload.id, "npc");
-  addIdentityAliases(aliases, payload.id, "actor");
-  addIdentityAliases(aliases, payload.npcId, "npc");
-  addIdentityAliases(aliases, payload.npcId, "actor");
-  addIdentityAliases(aliases, payload.actorId, "npc");
-  addIdentityAliases(aliases, payload.actorId, "actor");
   addIdentityAliases(aliases, payload.name, "npc");
   addIdentityAliases(aliases, payload.name, "actor");
 
   if (Array.isArray(payload.modelSafeRefs)) {
     payload.modelSafeRefs.forEach((ref) => addIdentityAliases(aliases, ref));
   }
-
-  [
-    ...(step.result?.authority?.stateDeltaRefs ?? []),
-    ...(step.result?.authority?.eventRefs ?? []),
-  ]
-    .filter((ref) => /^actor:|^npc:/i.test(ref))
-    .forEach((ref) => addIdentityAliases(aliases, ref));
 
   return aliases;
 }

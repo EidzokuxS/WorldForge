@@ -5892,7 +5892,7 @@ describe("processTurn ScenePlan path", () => {
     expect(buildNarratorPacket).toHaveBeenCalled();
   });
 
-  it("accepts create_scene_extra only when dialogue cites the returned actor identity", async () => {
+  it("accepts create_scene_extra only when dialogue cites the returned model-safe actor identity", async () => {
     setupMocks();
     setupScenePlanMocks({
       gmRead: createGmReadMock({
@@ -5913,6 +5913,7 @@ describe("processTurn ScenePlan path", () => {
         kind: "scene_extra",
         role: "clerk",
         temporary: true,
+        modelSafeRefs: ["Concourse Disputes Clerk"],
       },
       authority: {
         toolResultId: "tool-result-scene-extra",
@@ -5930,7 +5931,7 @@ describe("processTurn ScenePlan path", () => {
       },
     };
     const dialogueInput = {
-      speakerRef: "npc-disputes-clerk",
+      speakerRef: "Concourse Disputes Clerk",
       addresseeRefs: ["Hero"],
       outcomeKind: "answered",
       topicKind: "procedure",
@@ -5941,7 +5942,7 @@ describe("processTurn ScenePlan path", () => {
       futureRelevance: "The clerk's answer tells Hero which queue to use later.",
       summary: "The disputes clerk points Hero to the stamped-copy queue.",
       quote: "Stamped-copy disputes go through the north queue.",
-      sourceRefs: ["npc-disputes-clerk"],
+      sourceRefs: ["Concourse Disputes Clerk"],
       claims: [
         {
           claimKind: "requirement",
@@ -6296,6 +6297,124 @@ describe("processTurn ScenePlan path", () => {
         },
       ],
       acceptedStepIds: ["dialogue-role-only-step"],
+      acceptedToolResultIds: [],
+    } as never);
+
+    await expect(collectEvents(processTurn(createTestOptions()))).rejects.toThrow(
+      "GM tool loop produced successful side-effecting result(s) that do not satisfy the accepted turn receipt",
+    );
+    expect(persistSettledTurnPacketMock).not.toHaveBeenCalled();
+    expect(buildNarratorPacket).not.toHaveBeenCalled();
+  });
+
+  it("rejects create_scene_extra acceptance through raw backend dialogue refs", async () => {
+    setupMocks();
+    setupScenePlanMocks({
+      gmRead: createGmReadMock({
+        turnIntent: "Create a current-scene clerk and record the clerk's answer.",
+        runtimeRequirement: {
+          kind: "dialogue_outcome",
+          topicKind: "procedure",
+          durability: "durable",
+        },
+      }),
+    });
+    const sceneExtraResult = {
+      success: true,
+      status: "success",
+      result: {
+        id: "npc-disputes-clerk",
+        name: "Concourse Disputes Clerk",
+        kind: "scene_extra",
+        role: "clerk",
+        temporary: true,
+        modelSafeRefs: ["Concourse Disputes Clerk"],
+      },
+      authority: {
+        toolResultId: "tool-result-scene-extra",
+        campaignId: CAMPAIGN_ID,
+        sourceEntity: { type: "player", id: SCENE_PLAN_PLAYER_ID },
+        baseWorldVersion: 7,
+        resultWorldVersion: 8,
+        elapsedWorldTimeMinutes: 0,
+        stateDeltaRefs: ["npc:npc-disputes-clerk", "Concourse Disputes Clerk"],
+        eventRefs: [],
+        witnesses: [],
+        knowledgeOutputs: [],
+        visibilityOutputs: [],
+        resources: [],
+      },
+    };
+    const dialogueInput = {
+      speakerRef: "npc-disputes-clerk",
+      addresseeRefs: ["Hero"],
+      outcomeKind: "answered",
+      topicKind: "procedure",
+      authorityKind: "role_authority",
+      truthStatus: "settled_by_backend",
+      durability: "durable",
+      futureUseKind: "route_choice",
+      futureRelevance: "The clerk's answer tells Hero which queue to use later.",
+      summary: "The disputes clerk points Hero to the stamped-copy queue.",
+      quote: "Stamped-copy disputes go through the north queue.",
+      sourceRefs: ["npc:npc-disputes-clerk"],
+      claims: [
+        {
+          claimKind: "requirement",
+          polarity: "states",
+          subjectText: "Stamped-copy queue",
+          summary: "Stamped-copy disputes go through the north queue.",
+        },
+      ],
+      stateEffects: [],
+    };
+
+    vi.mocked(runGmToolLoop).mockResolvedValueOnce({
+      intent: "Create the clerk and record their answer with a raw backend ref.",
+      text: "",
+      rawToolCalls: [],
+      stepResults: [
+        {
+          stepId: "scene-extra-raw-ref-step",
+          attempt: 1,
+          status: "done",
+          toolName: "create_scene_extra",
+          candidateInput: {
+            locationRef: "current_scene",
+            role: "clerk",
+            name: "Concourse Disputes Clerk",
+            reason: "A local support responder is needed.",
+          },
+          validationError: null,
+          visibleEffect: "A disputes clerk is available.",
+          privateGuardTerms: [],
+          mutationRefs: ["npc-disputes-clerk"],
+          settledAtTick: 5,
+          result: sceneExtraResult,
+        },
+        {
+          stepId: "dialogue-raw-ref-step",
+          attempt: 1,
+          status: "done",
+          toolName: "record_dialogue_outcome",
+          candidateInput: dialogueInput,
+          validationError: null,
+          visibleEffect: "The clerk's answer is recorded.",
+          privateGuardTerms: [],
+          mutationRefs: ["event-clerk-answer"],
+          settledAtTick: 5,
+          result: {
+            success: true,
+            status: "success",
+            result: {
+              eventId: "event-clerk-answer",
+              ...dialogueInput,
+              persisted: true,
+            },
+          },
+        },
+      ],
+      acceptedStepIds: ["dialogue-raw-ref-step"],
       acceptedToolResultIds: [],
     } as never);
 

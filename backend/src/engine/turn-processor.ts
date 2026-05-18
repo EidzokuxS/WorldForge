@@ -5912,6 +5912,8 @@ async function* processTurnLegacy(
     method,
     judgeProvider,
     movementDestination,
+    candidateScope: "current_location",
+    currentLocationId: currentSceneScopeId ?? oracleLocationId ?? player?.currentLocationId ?? null,
   });
 
   log.event("target.context", {

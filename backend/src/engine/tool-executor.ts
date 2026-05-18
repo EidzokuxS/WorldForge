@@ -3128,10 +3128,17 @@ function addScopedWriteRefsForToolResult(
       ]);
       break;
     case "move_to":
-      addStringRefs(refs, [
-        scopedWriteRef("player", readStringField(payload, "playerId"), "location"),
-        scopedRef("location", readStringField(payload, "locationId")),
-      ]);
+      if (readStringField(payload, "actorId")) {
+        addStringRefs(refs, [
+          scopedWriteRef("npc", readStringField(payload, "actorId"), "location"),
+          scopedRef("location", readStringField(payload, "locationId")),
+        ]);
+      } else {
+        addStringRefs(refs, [
+          scopedWriteRef("player", readStringField(payload, "playerId"), "location"),
+          scopedRef("location", readStringField(payload, "locationId")),
+        ]);
+      }
       break;
     case "move_actor":
       if (readStringField(payload, "playerId")) {
@@ -3267,6 +3274,9 @@ function stateDeltaRefsForToolResult(input: {
       break;
     case "move_to":
       addStringRefs(refs, [
+        readStringField(payload, "playerId"),
+        readStringField(payload, "actorId"),
+        readStringField(payload, "actorName"),
         readStringField(payload, "locationId"),
         readStringField(payload, "locationName"),
       ]);
@@ -3676,6 +3686,36 @@ function describeSchemaIssues(
     .join("; ");
 }
 
+function findSchemaDroppedInputKeys(
+  raw: unknown,
+  parsed: unknown,
+  path: string[] = [],
+): string[] {
+  if (Array.isArray(raw)) {
+    if (!Array.isArray(parsed)) return [];
+    return raw.flatMap((entry, index) =>
+      findSchemaDroppedInputKeys(entry, parsed[index], [...path, String(index)]));
+  }
+  if (
+    !raw
+    || typeof raw !== "object"
+    || Array.isArray(parsed)
+    || !parsed
+    || typeof parsed !== "object"
+  ) {
+    return [];
+  }
+
+  const parsedRecord = parsed as Record<string, unknown>;
+  return Object.entries(raw as Record<string, unknown>).flatMap(([key, value]) => {
+    const nextPath = [...path, key];
+    if (!Object.hasOwn(parsedRecord, key)) {
+      return [nextPath.join(".")];
+    }
+    return findSchemaDroppedInputKeys(value, parsedRecord[key], nextPath);
+  });
+}
+
 function validateRuntimeToolArgs(input: {
   toolName: string;
   args: Record<string, unknown>;
@@ -3697,6 +3737,15 @@ function validateRuntimeToolArgs(input: {
       args: input.args,
       failure: buildValidationFailureToolResult(
         `Tool schema validation failed for ${input.toolName}: parsed input was not an object.`,
+      ),
+    };
+  }
+  const droppedKeys = findSchemaDroppedInputKeys(input.args, parsedData);
+  if (droppedKeys.length > 0) {
+    return {
+      args: input.args,
+      failure: buildValidationFailureToolResult(
+        `Tool schema validation failed for ${input.toolName}: unsupported input field(s): ${droppedKeys.slice(0, 5).join(", ")}`,
       ),
     };
   }

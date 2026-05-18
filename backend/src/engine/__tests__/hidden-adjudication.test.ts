@@ -99,6 +99,18 @@ describe("hidden adjudication", () => {
 
     expect(() =>
       adjudicationPlanSchema.parse({
+        rationale: "Movement belongs to GM tool loop canonical movement ownership.",
+        actions: [
+          {
+            toolName: "move_to",
+            input: { targetLocationName: "Shrine" },
+          },
+        ],
+      }),
+    ).toThrow();
+
+    expect(() =>
+      adjudicationPlanSchema.parse({
         rationale: "hidden judge cannot request contested bounds without execution context.",
         actions: [
           {
@@ -180,17 +192,15 @@ describe("hidden adjudication", () => {
     );
   });
 
-  it("executes ordered plan actions deterministically and preserves quick_actions/state_update mapping", async () => {
+  it("executes ordered non-movement plan actions deterministically and preserves quick_actions mapping", async () => {
     const executionContext = createExecutionContext();
     (executeToolCall as Mock)
       .mockResolvedValueOnce({
         success: true,
         result: {
-          locationId: "loc-2",
-          locationName: "Shrine",
-          travelCost: 1,
-          tickAdvance: 1,
-          path: ["Gate", "Shrine"],
+          eventId: "event-pressure",
+          durability: "scene_local",
+          persisted: false,
         },
       })
       .mockResolvedValueOnce({
@@ -206,9 +216,17 @@ describe("hidden adjudication", () => {
       outcomeTier: "strong_hit",
       executionContext,
       plan: {
-        rationale: "Move first, then present concrete follow-ups.",
+        rationale: "Record the pressure, then present concrete follow-ups.",
         actions: [
-          { toolName: "move_to", input: { targetLocationName: "Shrine" } },
+          {
+            toolName: "log_event",
+            input: {
+              text: "The shrine pressure sharpens.",
+              importance: 3,
+              participants: ["Player"],
+              durability: "scene_local",
+            },
+          },
           {
             toolName: "offer_quick_actions",
             input: { actions: [{ label: "Look around", action: "I scan the shrine courtyard." }] },
@@ -220,8 +238,13 @@ describe("hidden adjudication", () => {
     expect(executeToolCall).toHaveBeenNthCalledWith(
       1,
       "campaign-1",
-      "move_to",
-      { targetLocationName: "Shrine" },
+      "log_event",
+      {
+        text: "The shrine pressure sharpens.",
+        importance: 3,
+        participants: ["Player"],
+        durability: "scene_local",
+      },
       7,
       "strong_hit",
       executionContext,
@@ -235,25 +258,8 @@ describe("hidden adjudication", () => {
       "strong_hit",
       executionContext,
     );
-    expect(executed.successfulTravel).toEqual({
-      locationId: "loc-2",
-      locationName: "Shrine",
-      travelCost: 1,
-      tickAdvance: 1,
-      path: ["Gate", "Shrine"],
-    });
+    expect(executed.successfulTravel).toBeNull();
     expect(executed.emittedEvents).toEqual([
-      {
-        type: "state_update",
-        data: {
-          type: "location_change",
-          locationId: "loc-2",
-          locationName: "Shrine",
-          travelCost: 1,
-          tickAdvance: 1,
-          path: ["Gate", "Shrine"],
-        },
-      },
       {
         type: "quick_actions",
         data: {
@@ -382,7 +388,6 @@ describe("hidden adjudication", () => {
       "spawn_item",
       "reveal_location",
       "set_condition",
-      "move_to",
       "transfer_item",
     ];
     for (const toolName of allowedHiddenToolNames) {
@@ -399,8 +404,23 @@ describe("hidden adjudication", () => {
 });
 
 describe("engine prompt contracts", () => {
-  it("renders every runtime tool input contract from the schema registry", () => {
+  it("fails closed when no runtime tool input contract scope is supplied", () => {
     const contract = buildRuntimeToolInputContract();
+
+    for (const toolName of Object.keys(runtimeToolInputSchemas)) {
+      expect(contract).not.toContain(`"${toolName}" input`);
+    }
+
+    expect(contract).toContain("Allowed RuntimeToolName values from runtimeToolInputSchemas: (none).");
+    expect(contract).toContain("no runtime tools are allowed");
+    expect(contract).toContain("Runtime tool input shapes:\n- none");
+    expect(contract).not.toContain('"toolName": "');
+  });
+
+  it("renders every runtime tool input contract from the schema registry when explicitly scoped", () => {
+    const contract = buildRuntimeToolInputContract({
+      toolNames: Object.keys(runtimeToolInputSchemas) as Array<keyof typeof runtimeToolInputSchemas>,
+    });
 
     for (const toolName of Object.keys(runtimeToolInputSchemas)) {
       expect(contract).toContain(`"${toolName}"`);
@@ -429,6 +449,8 @@ describe("engine prompt contracts", () => {
     expect(sceneContract).toContain("STRUCTURED_OUTPUT_CONTRACT: scene-planner.v1");
     expect(sceneContract).toContain('"plannedActions": [{ "toolName": RuntimeToolName, "input": object }]');
     expect(sceneContract).toContain("backend generates event/action/response/narrator IDs");
+    expect(sceneContract).toContain("Allowed RuntimeToolName values from runtimeToolInputSchemas: (none).");
+    expect(sceneContract).not.toContain('"log_event" input');
 
     const hiddenContract = buildHiddenAdjudicationPromptContract();
     expect(hiddenContract).toContain("STRUCTURED_OUTPUT_CONTRACT: hidden-adjudication.v1");

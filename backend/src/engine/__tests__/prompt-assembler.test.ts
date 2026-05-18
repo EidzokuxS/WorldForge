@@ -2297,11 +2297,9 @@ describe("assemblePrompt", () => {
       "Never put diagnostic source ids, UUIDs, tool result ids, actor ids, or item ids in evidenceRefs; use only short refs listed in [NARRATABLE PACKET EVIDENCE REFS -- USE ONLY THESE IN evidenceRefs].",
     );
     expect(result.prompt).toContain(
-      "- e1 [category=perceivable_effect] summary=[private term omitted] pressure is visible at the counter.",
-    );
-    expect(result.prompt).toContain(
       "[category=perceivable_response] summary=Mira lowers the knife without dropping her guard.",
     );
+    expect(result.prompt).not.toContain("[private term omitted] pressure is visible at the counter.");
     expect(result.prompt).not.toContain("Forest Outpost");
   });
 

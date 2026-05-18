@@ -150,6 +150,9 @@ export function createNpcAgentTools(
               intent: action,
               method: "",
               judgeProvider,
+              candidateScope: "current_location",
+              currentLocationId: npc.currentSceneLocationId ?? npc.currentLocationId,
+              allowClassifier: false,
             })
           : null;
 

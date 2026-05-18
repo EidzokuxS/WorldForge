@@ -13,7 +13,7 @@ describe("player-facing event projection", () => {
           {
             label: "Ask actor_hidden",
             action:
-              "Ask actor_hidden about route_hidden_path via tool_result_8, 01890f9a-20f3-7cc2-9b7c-1a2b3c4d5e6f, and spawn_npc.",
+              "Ask actor_hidden about route_hidden_path via tool_result_8, 01890f9a-20f3-7cc2-9b7c-1a2b3c4d5e6f, spawn_npc, record_world_fact, transfer_item, and add_tag.",
           },
         ],
       },
@@ -23,7 +23,7 @@ describe("player-facing event projection", () => {
       actions: [
         {
           label: "Ask [hidden]",
-          action: "Ask [hidden] about [hidden] via [hidden], [hidden], and [hidden].",
+          action: "Ask [hidden] about [hidden] via [hidden], [hidden], [hidden], [hidden], [hidden], and [hidden].",
         },
       ],
     });
@@ -32,6 +32,9 @@ describe("player-facing event projection", () => {
     expect(JSON.stringify(projected)).not.toContain("tool_result_8");
     expect(JSON.stringify(projected)).not.toContain("01890f9a");
     expect(JSON.stringify(projected)).not.toContain("spawn_npc");
+    expect(JSON.stringify(projected)).not.toContain("record_world_fact");
+    expect(JSON.stringify(projected)).not.toContain("transfer_item");
+    expect(JSON.stringify(projected)).not.toContain("add_tag");
   });
 
   it("can preserve player-visible narrative whitespace while redacting handles", () => {

@@ -18,7 +18,6 @@ const hiddenAdjudicationToolNames: RuntimeToolName[] = [
   "spawn_item",
   "reveal_location",
   "set_condition",
-  "move_to",
   "transfer_item",
 ];
 
@@ -224,7 +223,7 @@ const runtimeToolExampleInputs = {
 } satisfies Record<RuntimeToolName, string>;
 
 function selectRuntimeToolNames(toolNames?: readonly RuntimeToolName[]): RuntimeToolName[] {
-  if (!toolNames) return runtimeToolNames;
+  if (!toolNames) return [];
   const allowed = new Set(toolNames);
   return runtimeToolNames.filter((toolName) => allowed.has(toolName));
 }

@@ -4,6 +4,7 @@ import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
 import { createLogger, withRole } from "../lib/index.js";
 import { buildWorldBrainPromptContract } from "./prompt-contracts.js";
 import { playerBlockingStageLimit, readRuntimeLimitMs } from "./runtime-limits.js";
+import { sanitizeModelFacingJsonValue } from "./model-facing-ref-safety.js";
 
 const log = createLogger("world-brain");
 
@@ -256,6 +257,9 @@ function buildWorldBrainRepairPrompt(args: {
   candidate: WorldBrainSceneDirectionCandidate;
   issues: readonly string[];
 }): string {
+  const candidate = sanitizeModelFacingJsonValue(args.candidate, {
+    extraForbiddenTerms: args.allowedActorNames,
+  });
   return [
     `Allowed actor names: ${uniqueStrings(args.allowedActorNames).join(", ") || "(player only)"}`,
     "The previous world-brain object failed validation.",
@@ -264,7 +268,7 @@ function buildWorldBrainRepairPrompt(args: {
     ...args.issues.map((issue) => `- ${issue}`),
     "Candidate JSON:",
     "```json",
-    JSON.stringify(args.candidate, null, 2),
+    JSON.stringify(candidate, null, 2),
     "```",
     "Return only the repaired structured scene-direction object.",
   ].join("\n");

@@ -462,6 +462,20 @@ async function simulateOffscreenNpcsInternal(
   log.info(
     `Simulating ${offscreenKeyNpcs.length} off-screen Key NPC(s) outside scene scope ${resolvedPlayerSceneScopeId ?? playerLocationId} at tick ${tick}`,
   );
+  const playerBroadLocationName = playerLocationId
+    ? db
+      .select({ name: locations.name })
+      .from(locations)
+      .where(eq(locations.id, playerLocationId))
+      .get()?.name ?? "Unknown"
+    : "Unknown";
+  const playerSceneScopeName = resolvedPlayerSceneScopeId
+    ? db
+      .select({ name: locations.name })
+      .from(locations)
+      .where(eq(locations.id, resolvedPlayerSceneScopeId))
+      .get()?.name ?? playerBroadLocationName
+    : playerBroadLocationName;
 
   // -- Build NPC summaries for batch prompt --
   const npcSummaries = offscreenKeyNpcs.map((npc) => {
@@ -501,8 +515,8 @@ async function simulateOffscreenNpcsInternal(
     "",
     buildNpcOffscreenPromptContract(),
     "",
-    `Player broad location: ${playerLocationId}`,
-    `Player scene scope: ${resolvedPlayerSceneScopeId ?? playerLocationId}`,
+    `Player broad location: ${playerBroadLocationName}`,
+    `Player scene scope: ${playerSceneScopeName}`,
     "Same broad-location actors outside the player's immediate scene still count as off-screen here.",
     "NPCs:",
     ...npcSummaries,

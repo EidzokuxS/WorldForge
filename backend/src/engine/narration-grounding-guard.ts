@@ -209,9 +209,10 @@ export function isNarrationDraftCitationEvidence(
 export function getAllowedNarrationCitationEvidence(
   packet: NarratorPacket,
 ): NarratorPacketEvidence[] {
+  const forbiddenTerms = collectNarratorPacketForbiddenTerms(packet);
   return (packet.evidenceLedger ?? []).filter((entry) =>
     isNarrationDraftCitationEvidence(entry, packet)
-      && evidenceHasBackendFacts(entry),
+      && evidenceHasBackendFacts(entry, forbiddenTerms),
   );
 }
 
@@ -615,7 +616,7 @@ export function buildNarrationGroundingRepairAddendum(
     ? getAllowedNarrationCitationEvidenceRefs(options.packet)
     : (options.evidenceLedger ?? [])
         .filter((entry) => isNarrationDraftCitationEvidence(entry, options.packet)
-          && evidenceHasBackendFacts(entry))
+          && evidenceHasBackendFacts(entry, forbiddenTerms))
         .map((evidence, index) => ({ refId: `e${index + 1}`, evidence }));
   const evidenceLines = citationRefs.map((entry) =>
     formatAllowedEvidenceForRepair(entry, forbiddenTerms),
@@ -699,7 +700,9 @@ export function formatAllowedCitationEvidenceRef(
   forbiddenTerms: readonly string[],
 ): string {
   const summary = sanitizeRepairText(ref.evidence.summary, forbiddenTerms);
-  const summaryBackendFact = evidenceSummaryContributesBackendFact(ref.evidence) ? summary : "";
+  const summaryBackendFact = evidenceSummaryContributesBackendFact(ref.evidence)
+    ? safeBackendFactText(ref.evidence.summary, forbiddenTerms)
+    : null;
   const backendFacts = summaryBackendFact
     ? [`${ref.refId}.s1 summary: ${summaryBackendFact}`]
     : [];
@@ -711,7 +714,10 @@ export function formatAllowedCitationEvidenceRef(
       if (!precisionFactContributesBackendFact(fact)) {
         return `supportOnly ${fact.kind}${polarity}: ${value}`;
       }
-      return `${ref.refId}.p${index + 1} ${fact.kind}${polarity}: ${value}`;
+      const backendValue = safeBackendFactText(fact.value, forbiddenTerms);
+      return backendValue
+        ? `${ref.refId}.p${index + 1} ${fact.kind}${polarity}: ${backendValue}`
+        : null;
     })
     .filter((fact): fact is string => Boolean(fact));
   backendFacts.push(...precisionFacts.filter((fact) => fact.startsWith(`${ref.refId}.p`)));
@@ -920,6 +926,16 @@ function sanitizeRepairText(
   return sanitized;
 }
 
+function safeBackendFactText(
+  value: string,
+  forbiddenTerms: readonly string[],
+): string | null {
+  const raw = collapseWhitespace(value);
+  if (!raw) return null;
+  const sanitized = sanitizeRepairText(raw, forbiddenTerms);
+  return sanitized === raw ? sanitized : null;
+}
+
 function replaceLiteralCaseInsensitive(
   value: string,
   search: string,
@@ -970,13 +986,19 @@ function evidenceSummaryContributesBackendFact(evidence: NarratorPacketEvidence)
   return evidence.category !== "tool_result";
 }
 
-function evidenceHasBackendFacts(evidence: NarratorPacketEvidence): boolean {
-  if (collapseWhitespace(evidence.summary) && evidenceSummaryContributesBackendFact(evidence)) {
+function evidenceHasBackendFacts(
+  evidence: NarratorPacketEvidence,
+  forbiddenTerms: readonly string[],
+): boolean {
+  if (
+    evidenceSummaryContributesBackendFact(evidence)
+    && safeBackendFactText(evidence.summary, forbiddenTerms)
+  ) {
     return true;
   }
   return (evidence.precisionFacts ?? []).some((fact) =>
     precisionFactContributesBackendFact(fact)
-      && Boolean(collapseWhitespace(fact.value)),
+      && Boolean(safeBackendFactText(fact.value, forbiddenTerms)),
   );
 }
 
@@ -984,8 +1006,9 @@ function buildAllowedBackendFactsByRef(
   packet: NarratorPacket,
 ): ReadonlyMap<string, AllowedBackendFactRef> {
   const refs = new Map<string, AllowedBackendFactRef>();
+  const forbiddenTerms = collectNarratorPacketForbiddenTerms(packet);
   for (const { refId, evidence } of getAllowedNarrationCitationEvidenceRefs(packet)) {
-    const summary = collapseWhitespace(evidence.summary);
+    const summary = safeBackendFactText(evidence.summary, forbiddenTerms);
     if (summary && evidenceSummaryContributesBackendFact(evidence)) {
       refs.set(`${refId}.s1`, {
         evidenceId: evidence.id,
@@ -994,7 +1017,7 @@ function buildAllowedBackendFactsByRef(
     }
     (evidence.precisionFacts ?? []).forEach((fact, index) => {
       if (!precisionFactContributesBackendFact(fact)) return;
-      const value = collapseWhitespace(fact.value);
+      const value = safeBackendFactText(fact.value, forbiddenTerms);
       if (!value) return;
       refs.set(`${refId}.p${index + 1}`, {
         evidenceId: evidence.id,

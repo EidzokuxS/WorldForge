@@ -483,6 +483,47 @@ describe("executeToolCall", () => {
     expect(getDb).not.toHaveBeenCalled();
   });
 
+  it("rejects unknown top-level tool input fields instead of silently stripping backend ids", async () => {
+    const result = await executeToolCall(CAMPAIGN_ID, "log_event", {
+      text: "The player waits at the gate.",
+      importance: 2,
+      participants: ["player"],
+      durability: "scene_local",
+      actorId: "11111111-1111-4112-8111-111111111111",
+    }, TICK, undefined, createPlayerTurnContext());
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("unsupported input field(s): actorId");
+    expect(getDb).not.toHaveBeenCalled();
+  });
+
+  it("rejects unknown nested tool input fields before they can hide inside structured claims", async () => {
+    const result = await executeToolCall(CAMPAIGN_ID, "record_world_fact", {
+      sourceKind: "comparison",
+      truthStatus: "disputed",
+      factKind: "contradiction",
+      topicKind: "procedure",
+      durability: "durable",
+      futureUseKind: "route_choice",
+      futureRelevance: "The mismatch controls the next route choice.",
+      summary: "A posted record and route log disagree.",
+      claims: [
+        {
+          claimKind: "contradiction",
+          polarity: "unknown",
+          subjectText: "posted record vs route log",
+          subjectId: "11111111-1111-4112-8111-111111111111",
+          summary: "The mismatch is unresolved.",
+        },
+      ],
+      sourceRefs: ["player"],
+    }, TICK, undefined, createPlayerTurnContext());
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("unsupported input field(s): claims.0.subjectId");
+    expect(getDb).not.toHaveBeenCalled();
+  });
+
   describe("typed entity refs", () => {
     it("resolves typed refs after grounding instead of failing in executor lookups", async () => {
       const { db, state } = createStrictResolverDb({
@@ -2591,6 +2632,162 @@ describe("executeToolCall", () => {
 
       expect(result.success).toBe(true);
       expect(state.players[0]).toMatchObject({
+        currentLocationId: "loc-2",
+        currentSceneLocationId: "loc-2",
+      });
+    });
+
+    it("records NPC write authority when actor_turn move_to moves an NPC", async () => {
+      const { db, state } = createMutableInventoryDb({
+        npcs: [{
+          id: "npc-runner",
+          campaignId: CAMPAIGN_ID,
+          name: "Market Runner",
+          persona: "Courier",
+          tags: "[]",
+          tier: "supporting",
+          currentLocationId: "loc-1",
+          currentSceneLocationId: "loc-1",
+          goals: '{"short_term":[],"long_term":[]}',
+          beliefs: "[]",
+          createdAt: 0,
+          unprocessedImportance: 0,
+          inactiveTicks: 0,
+          derivedTags: "[]",
+          characterRecord: JSON.stringify({
+            identity: {
+              id: "npc-runner",
+              campaignId: CAMPAIGN_ID,
+              role: "npc",
+              tier: "supporting",
+              displayName: "Market Runner",
+              canonicalStatus: "original",
+            },
+            profile: {
+              species: "",
+              gender: "",
+              ageText: "",
+              appearance: "",
+              backgroundSummary: "",
+              personaSummary: "Courier",
+            },
+            socialContext: {
+              factionId: null,
+              factionName: null,
+              homeLocationId: null,
+              homeLocationName: null,
+              currentLocationId: "loc-1",
+              currentLocationName: "Town Square",
+              relationshipRefs: [],
+              socialStatus: [],
+              originMode: "resident",
+            },
+            motivations: {
+              shortTermGoals: [],
+              longTermGoals: [],
+              beliefs: [],
+              drives: [],
+              frictions: [],
+            },
+            capabilities: {
+              traits: [],
+              skills: [],
+              flaws: [],
+              specialties: [],
+              wealthTier: null,
+            },
+            state: {
+              hp: 5,
+              conditions: [],
+              statusFlags: [],
+              activityState: "active",
+            },
+            loadout: {
+              inventorySeed: [],
+              equippedItemRefs: [],
+              currencyNotes: "",
+              signatureItems: [],
+            },
+            startConditions: {},
+            provenance: {
+              sourceKind: "generator",
+              importMode: null,
+              templateId: null,
+              archetypePrompt: null,
+              worldgenOrigin: null,
+              legacyTags: [],
+            },
+          }),
+        }],
+        locations: [
+          {
+            id: "loc-1",
+            campaignId: CAMPAIGN_ID,
+            name: "Town Square",
+            description: "A busy square",
+            tags: "[]",
+            connectedTo: '["loc-2"]',
+          },
+          {
+            id: "loc-2",
+            campaignId: CAMPAIGN_ID,
+            name: "Signal Tower",
+            description: "An old relay station",
+            tags: "[]",
+            connectedTo: '["loc-1"]',
+          },
+        ],
+        locationEdges: [
+          {
+            id: "edge-1",
+            campaignId: CAMPAIGN_ID,
+            fromLocationId: "loc-1",
+            toLocationId: "loc-2",
+            travelCost: 1,
+            discovered: true,
+          },
+          {
+            id: "edge-2",
+            campaignId: CAMPAIGN_ID,
+            fromLocationId: "loc-2",
+            toLocationId: "loc-1",
+            travelCost: 1,
+            discovered: true,
+          },
+        ],
+      });
+      (getDb as Mock).mockReturnValue(db);
+
+      const result = await executeToolCall(CAMPAIGN_ID, "move_to", {
+        targetLocationName: "Signal Tower",
+      }, TICK, undefined, createPlayerTurnContext({
+        scope: "actor_turn",
+        subjectActorId: "npc-runner",
+        subjectActorRefs: new Set(["Market Runner", "npc-runner"]),
+        authority: {
+          baseWorldVersion: 0,
+          sourceEntity: { type: "npc", id: "npc-runner" },
+          allowedWriteScopes: ["*"],
+        },
+        currentLocationId: "loc-1",
+        currentSceneScopeId: "loc-1",
+        legalMovementRefs: new Set(["signal tower", "loc-2"]),
+      }));
+
+      expect(result.success).toBe(true);
+      expect(result.result).toMatchObject({
+        actorId: "npc-runner",
+        actorName: "Market Runner",
+        locationId: "loc-2",
+        locationName: "Signal Tower",
+      });
+      expect(result.authority?.stateDeltaRefs).toEqual(
+        expect.arrayContaining(["npc:npc-runner:location", "location:loc-2"]),
+      );
+      expect(result.authority?.stateDeltaRefs ?? []).not.toEqual(
+        expect.arrayContaining(["player:npc-runner:location"]),
+      );
+      expect(state.npcs[0]).toMatchObject({
         currentLocationId: "loc-2",
         currentSceneLocationId: "loc-2",
       });

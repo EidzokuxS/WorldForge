@@ -58,7 +58,6 @@ import { resolveDueSimulationProposalsForScope } from "../simulation-proposal-wa
 import { resolveDueWorldWorkForScopeWithProposalWatchdog } from "../due-world-work.js";
 import { executeToolCall } from "../tool-executor.js";
 import type { ToolExecutionContext } from "../tool-execution-context.js";
-import { attachToolResultAuthority, type ToolResult } from "../tool-result.js";
 import { backfillKeyActorProcessesForCampaign } from "../key-actor-process.js";
 import type { ActorScheduleDecision } from "../actor-scheduler.js";
 import type { SceneFrame } from "../scene-frame.js";
@@ -304,52 +303,6 @@ const testProvider = {
   apiKey: "test",
   model: "test-model",
 };
-
-function mockNextRuntimeAuthorityResult(stateDeltaRefs: string[]) {
-  vi.mocked(executeToolCall).mockImplementationOnce(async (
-    campaignId: string,
-    toolName: string,
-    args: Record<string, unknown>,
-    tick: number,
-    _outcomeTier?: string,
-    context?: ToolExecutionContext,
-  ): Promise<ToolResult> => {
-    const authority = context?.authority;
-    if (!authority) {
-      return { success: false, error: "missing_authority_context" };
-    }
-    const trace = commitAuthorityTrace({
-      campaignId,
-      operation: `tool:${toolName}`,
-      baseWorldVersion: authority.baseWorldVersion,
-      sourceEntity: authority.sourceEntity,
-      elapsedWorldTimeMinutes: authority.elapsedWorldTimeMinutes ?? 1,
-      currentTick: tick,
-      toolResultId: authority.toolResultId,
-      stateDeltaRefs,
-      metadata: {
-        source: "test_runtime_authority",
-        toolName,
-        args,
-      },
-    });
-    return attachToolResultAuthority(
-      {
-        success: true,
-        status: "success",
-        kind: "mutation",
-        result: {
-          entity: args.entityName,
-          tags: [args.tag],
-        },
-      },
-      {
-        ...trace,
-        requireStateDelta: true,
-      },
-    );
-  });
-}
 
 function createJob(jobType: string, baseWorldVersion = readWorldClock(CAMPAIGN_ID).worldVersion) {
   return queueSimulationJob({
@@ -1776,7 +1729,7 @@ describe("simulation proposal executor", () => {
     ]);
   });
 
-  it("rejects runtime proposal authority whose state delta refs exceed declared write scopes", async () => {
+  it("rejects generic runtime mutation proposals before authority execution", async () => {
     seedActorDecisionWorld();
     const { proposal } = createExecutableProposal({
       proposalType: "runtime_scope_mismatch",
@@ -1801,7 +1754,7 @@ describe("simulation proposal executor", () => {
     expect(result).toMatchObject({
       status: "terminal",
       disposition: "rejected_invalid",
-      reason: expect.stringContaining("authority_write_scope_mismatch:npc:Watcher"),
+      reason: "unsupported_intended_tool:add_tag",
     });
     expect(getDb().select().from(authorityTraces).all()).toEqual([]);
     expect(readWorldClock(CAMPAIGN_ID).worldVersion).toBe(0);
@@ -1815,7 +1768,7 @@ describe("simulation proposal executor", () => {
       });
   });
 
-  it("rejects player tag proposals that only declare a generic world write scope", async () => {
+  it("rejects generic player tag proposals before authority execution", async () => {
     seedActorDecisionWorld();
     const { proposal } = createExecutableProposal({
       proposalType: "runtime_player_scope_mismatch",
@@ -1840,7 +1793,7 @@ describe("simulation proposal executor", () => {
     expect(result).toMatchObject({
       status: "terminal",
       disposition: "rejected_invalid",
-      reason: expect.stringContaining("authority_write_scope_mismatch:player:player-1:tags"),
+      reason: "unsupported_intended_tool:add_tag",
     });
     expect(getDb().select().from(authorityTraces).all()).toEqual([]);
     expect(readWorldClock(CAMPAIGN_ID).worldVersion).toBe(0);
@@ -1848,7 +1801,7 @@ describe("simulation proposal executor", () => {
       .toMatchObject({ tags: "[]" });
   });
 
-  it("commits runtime proposal authority when state delta refs are covered by write scopes", async () => {
+  it("rejects generic runtime proposals even when declared write scopes would cover them", async () => {
     const { proposal } = createExecutableProposal({
       proposalType: "runtime_scope_covered",
       writeScopes: ["npc:npc-a:tags"],
@@ -1861,8 +1814,6 @@ describe("simulation proposal executor", () => {
         },
       }],
     });
-    mockNextRuntimeAuthorityResult(["npc:npc-a:tags"]);
-
     const result = await executeDueSimulationProposal({
       campaignId: CAMPAIGN_ID,
       proposalId: proposal.proposalId,
@@ -1871,21 +1822,16 @@ describe("simulation proposal executor", () => {
     });
 
     expect(result).toMatchObject({
-      status: "committed",
-      disposition: "committed",
-      committedWorldVersion: 1,
+      status: "terminal",
+      disposition: "rejected_invalid",
+      reason: "unsupported_intended_tool:add_tag",
     });
-    expect(getDb().select().from(authorityTraces).all()).toEqual([
-      expect.objectContaining({
-        operation: "tool:add_tag",
-        stateDeltaRefs: JSON.stringify(["npc:npc-a:tags"]),
-      }),
-    ]);
+    expect(getDb().select().from(authorityTraces).all()).toEqual([]);
     expect(getDb().select().from(simulationProposals).where(eq(simulationProposals.id, proposal.proposalId)).get())
       .toMatchObject({
-        status: "committed",
-        proposalDisposition: "committed",
-        committedWorldVersion: 1,
+        status: "rejected",
+        proposalDisposition: "rejected_invalid",
+        committedWorldVersion: null,
       });
   });
 

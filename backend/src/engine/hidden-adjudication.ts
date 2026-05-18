@@ -28,7 +28,6 @@ const ADJUDICATION_STATE_MUTATION_TOOLS = new Set<RuntimeToolName>([
   "spawn_item",
   "reveal_location",
   "set_condition",
-  "move_to",
   "transfer_item",
 ]);
 
@@ -43,7 +42,6 @@ export const adjudicationActionSchema = z.discriminatedUnion("toolName", [
   z.object({ toolName: z.literal("spawn_item"), input: runtimeToolInputSchemas.spawn_item }),
   z.object({ toolName: z.literal("reveal_location"), input: runtimeToolInputSchemas.reveal_location }),
   z.object({ toolName: z.literal("set_condition"), input: runtimeToolInputSchemas.set_condition }),
-  z.object({ toolName: z.literal("move_to"), input: runtimeToolInputSchemas.move_to }),
   z.object({ toolName: z.literal("transfer_item"), input: runtimeToolInputSchemas.transfer_item }),
 ]);
 
@@ -205,25 +203,6 @@ export async function executeAdjudicationPlan(args: {
         emittedEvents.push({ type: "quick_actions", data: quickActions });
       }
       continue;
-    }
-
-    if (action.toolName === "move_to") {
-      const moveResult = getSuccessfulMoveToolResult(toolResult);
-      successfulTravel = moveResult ?? successfulTravel;
-      if (moveResult) {
-        emittedEvents.push({
-          type: "state_update",
-          data: {
-            type: "location_change",
-            locationId: moveResult.locationId,
-            locationName: moveResult.locationName,
-            travelCost: moveResult.travelCost,
-            tickAdvance: moveResult.tickAdvance,
-            path: moveResult.path,
-          },
-        });
-        continue;
-      }
     }
 
   }

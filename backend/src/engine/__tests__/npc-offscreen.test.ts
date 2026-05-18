@@ -287,6 +287,8 @@ describe("simulateOffscreenNpcs", () => {
     expect(systemPrompt).toContain("Persona: A calculating noble who hides panic behind manners.");
     expect(systemPrompt).toContain("  Traits: [Strategic, Master Intrigue, Cruel, Wealthy, Hidden, noble, Ambition, Paranoid]");
     expect(systemPrompt).toContain("Goals: short=[Secure the council vote], long=[Take the throne]");
+    expect(systemPrompt).toContain("Player broad location: Unknown");
+    expect(systemPrompt).not.toContain(`Player broad location: ${PLAYER_LOCATION_ID}`);
     expect(systemPrompt).not.toContain("A cunning noble lord");
     expect(results).toHaveLength(1);
     expect(results[0]!.npcName).toBe("Lord Blackwood");
@@ -325,7 +327,8 @@ describe("simulateOffscreenNpcs", () => {
 
     expect(generateText).toHaveBeenCalledOnce();
     const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
-    expect(systemPrompt).toContain("Player scene scope: platform-7");
+    expect(systemPrompt).toContain("Player scene scope: Unknown");
+    expect(systemPrompt).not.toContain("Player scene scope: platform-7");
     expect(systemPrompt).toContain("Same broad-location actors outside the player's immediate scene still count as off-screen here.");
     expect(results).toHaveLength(1);
   });

@@ -30,8 +30,38 @@ const PLAYER_FACING_SAFE_HYPHEN_TOKENS = new Set([
   "route-hazard",
   "route-hazards",
 ]);
-const PLAYER_FACING_TOOL_NAME_PATTERN =
-  /\b(?:create_minor_poi|create_scene_extra|move_actor|move_to|record_player_intent|reveal_location|spawn_npc|start_search)\b/giu;
+const PLAYER_FACING_TOOL_NAMES = [
+  "add_chronicle_entry",
+  "add_tag",
+  "advance_time",
+  "check_route",
+  "create_minor_poi",
+  "create_scene_extra",
+  "find_actor_candidates",
+  "find_location_candidates",
+  "find_object_candidates",
+  "find_poi_candidates",
+  "inspect_known_fact",
+  "list_navigation_options",
+  "list_visible_affordances",
+  "log_event",
+  "move_actor",
+  "move_to",
+  "offer_quick_actions",
+  "promote_npc",
+  "record_dialogue_outcome",
+  "record_player_intent",
+  "record_world_fact",
+  "remove_tag",
+  "request_contested_outcome",
+  "reveal_location",
+  "set_condition",
+  "set_relationship",
+  "spawn_item",
+  "spawn_npc",
+  "start_search",
+  "transfer_item",
+].sort((left, right) => right.length - left.length);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -70,12 +100,41 @@ function sanitizePlayerFacingBackendRefs(text: string): string {
     );
 }
 
+function isToolTokenChar(value: string | undefined): boolean {
+  if (!value) return false;
+  return (value >= "a" && value <= "z")
+    || (value >= "A" && value <= "Z")
+    || (value >= "0" && value <= "9")
+    || value === "_";
+}
+
+function redactPlayerFacingToolNames(text: string): string {
+  const lower = text.toLowerCase();
+  let output = "";
+  let cursor = 0;
+
+  while (cursor < text.length) {
+    const match = PLAYER_FACING_TOOL_NAMES.find((toolName) =>
+      lower.startsWith(toolName, cursor)
+      && !isToolTokenChar(text[cursor - 1])
+      && !isToolTokenChar(text[cursor + toolName.length]));
+    if (match) {
+      output += PLAYER_REF_REPLACEMENT;
+      cursor += match.length;
+      continue;
+    }
+    output += text[cursor];
+    cursor += 1;
+  }
+
+  return output;
+}
+
 export function sanitizePlayerFacingText(
   value: string,
   options: { maxChars?: number; preserveWhitespace?: boolean } = {},
 ): string {
-  const redacted = sanitizePlayerFacingBackendRefs(value)
-    .replace(PLAYER_FACING_TOOL_NAME_PATTERN, PLAYER_REF_REPLACEMENT);
+  const redacted = redactPlayerFacingToolNames(sanitizePlayerFacingBackendRefs(value));
   const normalized = options.preserveWhitespace
     ? redacted
     : redacted.replace(/\s+/g, " ").trim();

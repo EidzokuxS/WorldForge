@@ -1309,6 +1309,56 @@ describe("grounded sentence draft compiler", () => {
     expect(draft.prose).toBe("You arrive at Night Courier Depot.");
   });
 
+  it("does not expose unsafe backend refs as backend-owned fact expansions", () => {
+    const packet = createPacket();
+    packet.forbiddenPrivateTerms = ["Hidden Tea Broker"];
+    packet.evidenceLedger = [
+      {
+        id: "perceivable_effect:unsafe-fact",
+        category: "perceivable_effect",
+        summary: "The route answer names actor:npc-hidden-tea-broker as the contact.",
+        sourceId: "unsafe-fact",
+        summaryBackendFact: true,
+        precisionFacts: [
+          {
+            kind: "claim",
+            value: "Hidden Tea Broker opens the gate for knowledge:secret-ledger.",
+            sourcePath: "claims.0.summary",
+            claimKind: "route_status",
+            polarity: "states",
+            exhaustive: true,
+          },
+        ],
+      },
+    ];
+
+    expect(getAllowedNarrationCitationEvidenceRefs(packet)).toEqual([]);
+
+    const formatted = formatAllowedCitationEvidenceRef({
+      refId: "e1",
+      evidence: packet.evidenceLedger[0]!,
+    }, packet.forbiddenPrivateTerms);
+    expect(formatted).not.toContain("backendFacts=");
+    expect(formatted).not.toContain("actor:npc-hidden-tea-broker");
+    expect(formatted).not.toContain("Hidden Tea Broker");
+
+    expect(() =>
+      compileGroundedSentenceDraftToNarrationDraft({
+        packet,
+        requireBackendOwnedFactText: true,
+        draft: {
+          version: "grounded-sentence-draft.v2",
+          sentences: [
+            {
+              factRefs: ["e1.s1"],
+              evidenceRefs: ["e1"],
+            },
+          ],
+        },
+      }),
+    ).toThrow("unknown or disallowed evidence ref");
+  });
+
   it("rejects backend fact placeholders that are unknown or not backed by cited evidence", () => {
     const packet = createPacket();
     packet.evidenceLedger = [
@@ -1894,9 +1944,9 @@ describe("narration grounding guard", () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.repairAddendum).toContain("- e1 [category=perceivable_effect]");
+    expect(result.repairAddendum).toContain("No narratable packet evidence refs are in scope");
     expect(result.repairAddendum).not.toContain("perceivable_effect:private-summary");
-    expect(result.repairAddendum).toContain("[private term omitted] pressure is visible");
+    expect(result.repairAddendum).not.toContain("[private term omitted] pressure is visible");
     expect(result.repairAddendum).not.toContain("Forest Outpost");
     expect(result.repairAddendum).not.toContain("claim-inspector-pressure");
   });

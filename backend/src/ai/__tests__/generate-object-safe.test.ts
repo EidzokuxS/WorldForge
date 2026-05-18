@@ -1312,7 +1312,7 @@ describe("safeGenerateObject", () => {
       .mockResolvedValueOnce({
         text: JSON.stringify({
           facts:
-            "actor:actor-player reached location:loc-secret via route-secret-1 and 11111111-1111-4111-8111-111111111111",
+            "actor:actor-player reached location:loc-secret via route-secret-1, tool_result_8, action-result-1, response-visible-1, and 11111111-1111-4111-8111-111111111111",
         }),
       })
       .mockResolvedValueOnce({
@@ -1337,7 +1337,42 @@ describe("safeGenerateObject", () => {
     expect(repairPrompt).not.toContain("actor:actor-player");
     expect(repairPrompt).not.toContain("location:loc-secret");
     expect(repairPrompt).not.toContain("route-secret-1");
+    expect(repairPrompt).not.toContain("tool_result_8");
+    expect(repairPrompt).not.toContain("action-result-1");
+    expect(repairPrompt).not.toContain("response-visible-1");
     expect(repairPrompt).not.toContain("11111111-1111-4111-8111-111111111111");
+  });
+
+  it("applies caller repair redaction to validation issues and invalid output", async () => {
+    mockGenerateText
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          facts: "The Hidden Tea Broker opens actor:secret-contact.",
+        }),
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          facts: [{ note: "Hidden Tea Broker" }],
+        }),
+      });
+
+    await safeGenerateObject({
+      model: {} as never,
+      schema: z.object({
+        facts: z.array(z.object({
+          note: z.literal("Hidden Tea Broker"),
+        })),
+      }),
+      prompt: "test repair caller redaction",
+      retries: 1,
+      repairRedactor: (text) => text.split("Hidden Tea Broker").join("[private term hidden]"),
+    });
+
+    const repairPrompt = String(mockGenerateText.mock.calls[1]?.[0]?.prompt ?? "");
+    expect(repairPrompt).toContain("[private term hidden]");
+    expect(repairPrompt).toContain("[backend ref hidden]");
+    expect(repairPrompt).not.toContain("Hidden Tea Broker");
+    expect(repairPrompt).not.toContain("actor:secret-contact");
   });
 
   it("extracts the first parseable balanced JSON payload after malformed prose braces", async () => {

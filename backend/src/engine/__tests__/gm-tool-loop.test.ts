@@ -1934,7 +1934,7 @@ describe("runGmToolLoop", () => {
       reason: "The public holding point plausibly has a clerk who can answer the next-step procedure.",
     };
     const dialogueInput = {
-      speakerRef: "actor-concourse-disputes-clerk",
+      speakerRef: "support_responder_1",
       addresseeRefs: ["Player"],
       outcomeKind: "redirected",
       topicKind: "procedure",
@@ -1953,7 +1953,7 @@ describe("runGmToolLoop", () => {
           summary: "The registry intake desk is the official next step for the sealed message.",
         },
       ],
-      sourceRefs: ["actor-concourse-disputes-clerk"],
+      sourceRefs: ["support_responder_1"],
     };
     createSceneExtraExecuteMock.mockResolvedValueOnce({
       success: true,
@@ -1961,6 +1961,7 @@ describe("runGmToolLoop", () => {
         id: "actor-concourse-disputes-clerk",
         name: "Concourse Disputes Clerk",
         role: "clerk",
+        modelSafeRefs: ["support_responder_1"],
       },
       authority: toolAuthority(["actor:actor-concourse-disputes-clerk:presence"]),
     });
@@ -1968,9 +1969,9 @@ describe("runGmToolLoop", () => {
       "record_dialogue_outcome",
       {
       success: true,
-      result: {
-        eventId: "event-support-responder-dialogue",
-        speakerRef: "actor-concourse-disputes-clerk",
+        result: {
+          eventId: "event-support-responder-dialogue",
+        speakerRef: "support_responder_1",
         outcomeKind: "redirected",
         topicKind: "procedure",
         authorityKind: "role_authority",
@@ -5765,6 +5766,8 @@ describe("runGmToolLoop", () => {
     const closurePrompt = (generateTextMock().mock.calls[1]?.[0] as { prompt?: string } | undefined)?.prompt ?? "";
     expect(closurePrompt).not.toContain("Hidden Tea Broker");
     expect(closurePrompt).not.toContain("actor:hidden-broker");
+    expect(closurePrompt).not.toContain("tool-call-1");
+    expect(closurePrompt).not.toContain("tool-call-2");
     expect(closurePrompt).toContain("[backend ref hidden]");
     expect(generateText).toHaveBeenLastCalledWith(expect.objectContaining({
       activeTools: ["record_dialogue_outcome"],

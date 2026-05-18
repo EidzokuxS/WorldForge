@@ -297,6 +297,52 @@ describe("world-brain", () => {
     );
   });
 
+  it("redacts allowed actor private terms from world-brain repair candidate replay", async () => {
+    const oversizedRepairCandidate =
+      `Nanami watches actor:hidden-contact while Choso waits above the platform. ${"repair-only pressure ".repeat(16)}`;
+    vi.mocked(safeGenerateObject)
+      .mockResolvedValueOnce({
+        object: createDirection({
+          situationSummary: oversizedRepairCandidate,
+        }),
+      } as Awaited<ReturnType<typeof safeGenerateObject>>)
+      .mockResolvedValueOnce({
+        object: createDirection({
+          situationSummary: "Hero and Nanami hold the visible platform tension.",
+          backgroundActorNames: [],
+          presenceReasons: [
+            {
+              actorName: "Hero",
+              reason: "The player remains the local pivot.",
+              perceivable: true,
+            },
+            {
+              actorName: "Nanami",
+              reason: "Nanami measures the player's intent.",
+              perceivable: true,
+            },
+          ],
+        }),
+      } as Awaited<ReturnType<typeof safeGenerateObject>>);
+
+    await runWorldBrainSceneDirection({
+      provider: {
+        id: "judge-provider",
+        name: "Judge",
+        model: "judge-model",
+        apiKey: "test",
+        baseUrl: "http://localhost",
+      },
+      seed: createSeed(),
+    });
+
+    const repairPrompt = String(vi.mocked(safeGenerateObject).mock.calls[1]?.[0]?.prompt ?? "");
+    expect(repairPrompt).toContain("[backend ref hidden]");
+    expect(repairPrompt).toContain("[private term hidden]");
+    expect(repairPrompt).not.toContain("actor:hidden-contact");
+    expect(repairPrompt).not.toContain("Choso waits");
+  });
+
   it("filters hidden presence reasons and causal beats for player-perceivable direction", () => {
     const visible = toPlayerPerceivableWorldBrainDirection(createDirection({
       situationSummary: "A hidden observer is deciding whether to surface.",

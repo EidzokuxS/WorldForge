@@ -322,6 +322,95 @@ describe("resolveActionTargetContext", () => {
     expect(prompt).toContain("must not invent a missing target");
   });
 
+  it("scopes classifier candidates to the current location when requested", async () => {
+    (getDb as Mock).mockReturnValue(
+      createDb({
+        npcRows: [
+          createNpcRow({ name: "Gate Guard", currentLocationId: "loc-1" }),
+          createNpcRow({ id: "npc-hidden", name: "Hidden Tea Broker", currentLocationId: "loc-secret" }),
+        ],
+        locationRows: [
+          { id: "loc-1", campaignId: CAMPAIGN_ID, name: "Gate" },
+          { id: "loc-secret", campaignId: CAMPAIGN_ID, name: "Secret Annex" },
+        ],
+      }),
+    );
+
+    await resolveActionTargetContext({
+      campaignId: CAMPAIGN_ID,
+      playerAction: "Strike the nearest suspicious figure",
+      intent: "Strike the nearest suspicious figure",
+      method: "Draw steel",
+      judgeProvider: PROVIDER,
+      candidateScope: "current_location",
+      currentLocationId: "loc-1",
+    });
+
+    const prompt = String(vi.mocked(safeGenerateObject).mock.calls[0]?.[0]?.prompt ?? "");
+    expect(prompt).toContain("Gate Guard");
+    expect(prompt).toContain("Gate");
+    expect(prompt).not.toContain("Hidden Tea Broker");
+    expect(prompt).not.toContain("Secret Annex");
+  });
+
+  it("allows explicit known location targets without widening scoped classifier candidates", async () => {
+    (getDb as Mock).mockReturnValue(
+      createDb({
+        locationRows: [
+          { id: "loc-1", campaignId: CAMPAIGN_ID, name: "Gate", tags: '["nearby"]' },
+          { id: "loc-signal", campaignId: CAMPAIGN_ID, name: "Signal Tower", tags: '["elevated","exposed"]' },
+        ],
+      }),
+    );
+
+    const result = await resolveActionTargetContext({
+      campaignId: CAMPAIGN_ID,
+      playerAction: "Inspect the Signal Tower for weak points",
+      intent: "Inspect the Signal Tower",
+      method: "Careful survey of Signal Tower",
+      judgeProvider: PROVIDER,
+      candidateScope: "current_location",
+      currentLocationId: "loc-1",
+    });
+
+    expect(safeGenerateObject).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      targetLabel: "Signal Tower",
+      targetType: "location/object",
+      targetTags: ["elevated", "exposed"],
+      source: "parsed",
+    });
+  });
+
+  it("can disable the classifier so scoped NPC action targeting stays deterministic", async () => {
+    (getDb as Mock).mockReturnValue(
+      createDb({
+        npcRows: [
+          createNpcRow({ name: "Gate Guard", currentLocationId: "loc-1" }),
+          createNpcRow({ id: "npc-hidden", name: "Hidden Tea Broker", currentLocationId: "loc-secret" }),
+        ],
+      }),
+    );
+
+    const result = await resolveActionTargetContext({
+      campaignId: CAMPAIGN_ID,
+      playerAction: "Strike the Hidden Tea Broker",
+      intent: "Strike the Hidden Tea Broker",
+      method: "",
+      judgeProvider: PROVIDER,
+      candidateScope: "current_location",
+      currentLocationId: "loc-1",
+      allowClassifier: false,
+    });
+
+    expect(safeGenerateObject).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      targetLabel: null,
+      targetType: "none",
+      source: "fallback",
+    });
+  });
+
   it("includes a combat snapshot for resolved character targets with powerStats", async () => {
     (getDb as Mock).mockReturnValue(
       createDb({

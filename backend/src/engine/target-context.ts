@@ -10,6 +10,7 @@ import { factions, items, locations, npcs, players } from "../db/schema.js";
 import { createLogger } from "../lib/index.js";
 import { parseTags } from "./parse-helpers.js";
 import { buildTargetContextPromptContract } from "./prompt-contracts.js";
+import { sanitizeModelFacingConversationText } from "./model-facing-conversation.js";
 
 const log = createLogger("target-context");
 
@@ -46,11 +47,17 @@ interface ResolveActionTargetContextOptions {
   method: string;
   judgeProvider: ProviderConfig;
   movementDestination?: string | null;
+  candidateScope?: "campaign" | "current_location";
+  currentLocationId?: string | null;
+  allowClassifier?: boolean;
 }
 
 interface EntityNameCandidate {
   name: string;
   type: SupportedActionTargetType;
+  id?: string | null;
+  locationId?: string | null;
+  sceneLocationId?: string | null;
 }
 
 const targetCandidateSchema = z.object({
@@ -75,44 +82,79 @@ function readRows<T>(query: { all?: () => T[]; get?: () => T | null | undefined 
   return [];
 }
 
-function collectEntityNameCandidates(campaignId: string): EntityNameCandidate[] {
+function collectEntityNameCandidates(
+  campaignId: string,
+  options: Pick<ResolveActionTargetContextOptions, "candidateScope" | "currentLocationId"> = {},
+): EntityNameCandidate[] {
   const db = getDb();
   const rows: EntityNameCandidate[] = [];
+  const scopeLocationId = options.candidateScope === "current_location"
+    ? options.currentLocationId?.trim() || null
+    : null;
 
   const playerRows = readRows(
     db
-    .select({ name: players.name })
+    .select({
+      id: players.id,
+      name: players.name,
+      currentLocationId: players.currentLocationId,
+      currentSceneLocationId: players.currentSceneLocationId,
+    })
     .from(players)
     .where(eq(players.campaignId, campaignId)),
   );
-  rows.push(...playerRows.map((row) => ({ name: row.name, type: "character" as const })));
+  rows.push(...playerRows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    type: "character" as const,
+    locationId: row.currentLocationId,
+    sceneLocationId: row.currentSceneLocationId,
+  })));
 
   const npcRows = readRows(
     db
-    .select({ name: npcs.name })
+    .select({
+      id: npcs.id,
+      name: npcs.name,
+      currentLocationId: npcs.currentLocationId,
+      currentSceneLocationId: npcs.currentSceneLocationId,
+    })
     .from(npcs)
     .where(eq(npcs.campaignId, campaignId)),
   );
-  rows.push(...npcRows.map((row) => ({ name: row.name, type: "character" as const })));
+  rows.push(...npcRows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    type: "character" as const,
+    locationId: row.currentLocationId,
+    sceneLocationId: row.currentSceneLocationId,
+  })));
 
   const itemRows = readRows(
     db
-    .select({ name: items.name })
+    .select({ id: items.id, name: items.name, locationId: items.locationId })
     .from(items)
     .where(eq(items.campaignId, campaignId)),
   );
-  rows.push(...itemRows.map((row) => ({ name: row.name, type: "item" as const })));
+  rows.push(...itemRows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    type: "item" as const,
+    locationId: row.locationId,
+  })));
 
   const locationRows = readRows(
     db
-    .select({ name: locations.name })
+    .select({ id: locations.id, name: locations.name })
     .from(locations)
     .where(eq(locations.campaignId, campaignId)),
   );
   rows.push(
     ...locationRows.map((row) => ({
+      id: row.id,
       name: row.name,
       type: "location/object" as const,
+      locationId: row.id,
     })),
   );
 
@@ -124,7 +166,13 @@ function collectEntityNameCandidates(campaignId: string): EntityNameCandidate[] 
   );
   rows.push(...factionRows.map((row) => ({ name: row.name, type: "faction" as const })));
 
-  return rows;
+  if (!scopeLocationId) return rows;
+
+  return rows.filter((row) => {
+    if (row.type === "faction") return false;
+    return row.locationId === scopeLocationId
+      || row.sceneLocationId === scopeLocationId;
+  });
 }
 
 function detectCandidateFromParsedTexts(
@@ -184,9 +232,9 @@ async function detectCandidateByClassifier(
         "",
         "Choose the single concrete target this action is directed at, if any.",
         "Only choose one of the listed names. If no supported concrete target is present, return nulls.",
-        `Player action: ${options.playerAction}`,
-        `Intent: ${options.intent}`,
-        `Method: ${options.method}`,
+        `Player action: ${sanitizeModelFacingConversationText(options.playerAction, { maxChars: 700 })}`,
+        `Intent: ${sanitizeModelFacingConversationText(options.intent, { maxChars: 400 })}`,
+        `Method: ${sanitizeModelFacingConversationText(options.method, { maxChars: 400 })}`,
         "Available character targets:",
         grouped.character.join(", ") || "(none)",
         "Available item targets:",
@@ -196,6 +244,7 @@ async function detectCandidateByClassifier(
         "Available faction targets:",
         grouped.faction.join(", ") || "(none)",
       ].join("\n"),
+      allowRepair: false,
     });
 
     const { targetName, targetType } = object;
@@ -227,14 +276,30 @@ async function detectCandidateByClassifier(
 export async function detectActionTargetCandidate(
   options: ResolveActionTargetContextOptions,
 ): Promise<ActionTargetCandidate | null> {
-  const candidates = collectEntityNameCandidates(options.campaignId);
+  const candidates = collectEntityNameCandidates(options.campaignId, options);
   const parsedMatch = detectCandidateFromParsedTexts(candidates, options.intent, options.method);
   if (parsedMatch) {
     return parsedMatch;
   }
 
+  if (options.candidateScope === "current_location") {
+    const knownLocationMatch = detectCandidateFromParsedTexts(
+      collectEntityNameCandidates(options.campaignId)
+        .filter((candidate) => candidate.type === "location/object"),
+      options.intent,
+      options.method,
+    );
+    if (knownLocationMatch) {
+      return knownLocationMatch;
+    }
+  }
+
   if (options.movementDestination) {
-    const movementMatch = candidates.find(
+    const movementCandidates = options.candidateScope === "current_location"
+      ? collectEntityNameCandidates(options.campaignId)
+        .filter((candidate) => candidate.type === "location/object")
+      : candidates;
+    const movementMatch = movementCandidates.find(
       (candidate) =>
         candidate.type === "location/object" &&
         normalizeText(candidate.name) === normalizeText(options.movementDestination ?? ""),
@@ -246,6 +311,10 @@ export async function detectActionTargetCandidate(
         source: "movement",
       };
     }
+  }
+
+  if (options.allowClassifier === false) {
+    return null;
   }
 
   return detectCandidateByClassifier(candidates, options);

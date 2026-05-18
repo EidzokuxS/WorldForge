@@ -589,6 +589,8 @@ interface SafeGenerateOpts<T> {
   allowTextFallback?: boolean;
   /** Default true. Set false for call sites where repair would mask a broken primary contract. */
   allowRepair?: boolean;
+  /** Optional model-facing repair redactor for caller-private names or refs in invalid output/issues. */
+  repairRedactor?: (text: string) => string;
   /** Default false. Set true for fail-closed call sites where schema coercion would mask a broken contract. */
   strictSchema?: boolean;
   [key: string]: unknown;
@@ -688,17 +690,131 @@ function formatZodIssues(error: { issues: Array<{ path: PropertyKey[]; message: 
   ).join("; ");
 }
 
-const REPAIR_UUID_PATTERN = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/giu;
-const REPAIR_TYPED_BACKEND_REF_PATTERN = /\b(?:actor|campaign|candidate|edge|effect|event|fact|faction|item|knowledge|loc|location|movement|npc|player|route|scene|source|tool|authority|world|forecast|tool-result)[-:][a-z0-9][a-z0-9._:-]*\b/giu;
+const REPAIR_BACKEND_REF_PREFIXES = [
+  "tool-result",
+  "tool_result",
+  "action",
+  "actor",
+  "campaign",
+  "candidate",
+  "edge",
+  "effect",
+  "event",
+  "fact",
+  "faction",
+  "item",
+  "knowledge",
+  "loc",
+  "location",
+  "movement",
+  "npc",
+  "player",
+  "response",
+  "route",
+  "scene",
+  "source",
+  "tool",
+  "authority",
+  "world",
+  "forecast",
+] as const;
 
-function redactBackendRefsForRepair(text: string): string {
-  return text
-    .replace(REPAIR_UUID_PATTERN, "[backend ref hidden]")
-    .replace(REPAIR_TYPED_BACKEND_REF_PATTERN, "[backend ref hidden]");
+function isRepairAlphaNumeric(char: string | undefined): boolean {
+  if (!char) return false;
+  const code = char.charCodeAt(0);
+  return (code >= 48 && code <= 57)
+    || (code >= 65 && code <= 90)
+    || (code >= 97 && code <= 122);
 }
 
-function buildRepairPrompt(invalidJson: string, issues: string, schemaHint: string): string {
-  const redactedInvalidJson = redactBackendRefsForRepair(invalidJson).slice(0, 24000);
+function isRepairHex(char: string | undefined): boolean {
+  if (!char) return false;
+  const code = char.charCodeAt(0);
+  return (code >= 48 && code <= 57)
+    || (code >= 65 && code <= 70)
+    || (code >= 97 && code <= 102);
+}
+
+function isRepairUuidBoundary(char: string | undefined): boolean {
+  return !char || (!isRepairHex(char) && char !== "-");
+}
+
+function isRepairUuidAt(value: string, index: number): boolean {
+  if (index < 0 || index + 36 > value.length) return false;
+  if (!isRepairUuidBoundary(value[index - 1])) return false;
+  if (!isRepairUuidBoundary(value[index + 36])) return false;
+  for (let offset = 0; offset < 36; offset += 1) {
+    const char = value[index + offset];
+    if (offset === 8 || offset === 13 || offset === 18 || offset === 23) {
+      if (char !== "-") return false;
+      continue;
+    }
+    if (!isRepairHex(char)) return false;
+  }
+  return true;
+}
+
+function isRepairTokenBoundary(char: string | undefined): boolean {
+  return !char || (!isRepairAlphaNumeric(char) && char !== "_");
+}
+
+function isRepairRefTailChar(char: string | undefined): boolean {
+  return isRepairAlphaNumeric(char)
+    || char === "."
+    || char === "_"
+    || char === ":"
+    || char === "-";
+}
+
+function repairBackendRefEnd(value: string, index: number): number | null {
+  if (!isRepairTokenBoundary(value[index - 1])) return null;
+  const lower = value.toLowerCase();
+  const prefix = REPAIR_BACKEND_REF_PREFIXES
+    .filter((candidate) => lower.startsWith(candidate, index))
+    .sort((left, right) => right.length - left.length)[0];
+  if (!prefix) return null;
+  const separatorIndex = index + prefix.length;
+  const separator = value[separatorIndex];
+  if (separator !== ":" && separator !== "-" && separator !== "_") return null;
+  const tailStart = separatorIndex + 1;
+  if (!isRepairAlphaNumeric(value[tailStart])) return null;
+  let end = tailStart + 1;
+  while (end < value.length && isRepairRefTailChar(value[end])) {
+    end += 1;
+  }
+  return end;
+}
+
+function redactBackendRefsForRepair(text: string): string {
+  let redacted = "";
+  let index = 0;
+  while (index < text.length) {
+    if (isRepairUuidAt(text, index)) {
+      redacted += "[backend ref hidden]";
+      index += 36;
+      continue;
+    }
+    const refEnd = repairBackendRefEnd(text, index);
+    if (refEnd !== null) {
+      redacted += "[backend ref hidden]";
+      index = refEnd;
+      continue;
+    }
+    redacted += text[index];
+    index += 1;
+  }
+  return redacted;
+}
+
+function buildRepairPrompt(
+  invalidJson: string,
+  issues: string,
+  schemaHint: string,
+  repairRedactor: (text: string) => string = redactBackendRefsForRepair,
+): string {
+  const redactedInvalidJson = repairRedactor(redactBackendRefsForRepair(invalidJson)).slice(0, 24000);
+  const redactedIssues = repairRedactor(redactBackendRefsForRepair(issues));
+  const redactedSchemaHint = repairRedactor(redactBackendRefsForRepair(schemaHint));
   return `Repair this model JSON output so it satisfies the expected schema.
 
 ${STRUCTURED_OUTPUT_REPAIR_POLICY}
@@ -714,10 +830,10 @@ Rules:
 - Output valid JSON only. No markdown. No explanation.
 
 Validation errors:
-${issues}
+${redactedIssues}
 
 Expected schema:
-${schemaHint || "(schema example unavailable)"}
+${redactedSchemaHint || "(schema example unavailable)"}
 
 Invalid output:
 ${redactedInvalidJson}`;
@@ -751,7 +867,7 @@ async function attemptRepair<T>(
     maxOutputTokens: opts.maxOutputTokens ?? opts.maxTokens,
     timeout: opts.timeout,
     system: "You repair invalid JSON into schema-valid JSON. Return JSON only.",
-    prompt: buildRepairPrompt(invalidJson, issues, schemaHint),
+    prompt: buildRepairPrompt(invalidJson, issues, schemaHint, opts.repairRedactor),
   });
 
   const cleaned = extractJson(result.text);
