@@ -90,6 +90,7 @@ vi.mock("../../db/index.js", () => ({
 }));
 
 const mockGetSettledTurnPacket = vi.fn((_input?: unknown) => null);
+const mockGetTurnSaga = vi.fn((_input?: unknown) => null);
 
 vi.mock("../../engine/index.js", () => ({
   processTurn: vi.fn(),
@@ -99,6 +100,7 @@ vi.mock("../../engine/index.js", () => ({
   restoreSnapshot: vi.fn(),
   findPendingNarrationSaga: vi.fn(() => null),
   getSettledTurnPacket: (input: unknown) => mockGetSettledTurnPacket(input),
+  getTurnSaga: (input: unknown) => mockGetTurnSaga(input),
   PendingNarrationError: class PendingNarrationError extends Error {
     constructor(public readonly pendingSaga: unknown) {
       super("Pending narration.");
@@ -214,10 +216,10 @@ import {
   captureSnapshot,
   findPendingNarrationSaga,
   PendingNarrationError,
-  processTurn,
-  resumePendingTurnNarration,
-  restoreSnapshot,
-  type TurnSagaRecord,
+    processTurn,
+    resumePendingTurnNarration,
+    restoreSnapshot,
+    type TurnSagaRecord,
 } from "../../engine/index.js";
 import chatRoutes from "../chat.js";
 
@@ -348,6 +350,7 @@ beforeEach(() => {
   mockDrainPendingCommittedEventsByIds.mockReturnValue([]);
   mockGetSettledTurnPacket.mockReturnValue(null);
   mockedFindPendingNarrationSaga.mockReturnValue(null);
+  mockGetTurnSaga.mockReturnValue(null);
   mockedCaptureSnapshot.mockReturnValue({
     campaignId: CAMPAIGN_ID,
     bundleDir: "phase-89-snapshot",
@@ -371,6 +374,7 @@ describe("Phase 89 chat route resilience", () => {
       turnId: "turn-p89-pending",
     });
     mockedFindPendingNarrationSaga.mockReturnValue(pendingSaga as never);
+    mockGetTurnSaga.mockReturnValue(pendingSaga as never);
     mockedResumePendingTurnNarration.mockImplementation(() =>
       createTurnStream([
         { type: "narrative", data: { text: "Pending narration resumes cleanly." } },
@@ -383,6 +387,7 @@ describe("Phase 89 chat route resilience", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         campaignId: CAMPAIGN_ID,
+        resumeToken: "resume_phase89deadbeef",
       }),
     });
 
@@ -407,6 +412,7 @@ describe("Phase 89 chat route resilience", () => {
       turnId: "turn-p95-terminal-error",
     });
     mockedFindPendingNarrationSaga.mockReturnValue(pendingSaga as never);
+    mockGetTurnSaga.mockReturnValue(pendingSaga as never);
     mockedResumePendingTurnNarration.mockImplementation(() =>
       createTurnStream([
         {
@@ -426,6 +432,7 @@ describe("Phase 89 chat route resilience", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         campaignId: CAMPAIGN_ID,
+        resumeToken: "resume_phase89deadbeef",
       }),
     });
 

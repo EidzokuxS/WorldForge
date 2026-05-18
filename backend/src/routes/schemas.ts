@@ -213,6 +213,7 @@ export const chatRetryBodySchema = z.object({
 
 export const chatResumeBodySchema = z.object({
   campaignId: campaignIdSchema,
+  resumeToken: z.string().trim().min(1).optional(),
 });
 
 export const chatUndoBodySchema = z.object({

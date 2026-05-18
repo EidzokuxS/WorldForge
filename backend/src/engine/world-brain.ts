@@ -278,17 +278,30 @@ export function toPlayerPerceivableWorldBrainDirection(
       .filter((reason) => reason.perceivable)
       .map((reason) => reason.actorName.trim().toLowerCase()),
   );
+  const presenceReasons = direction.presenceReasons.filter((reason) => reason.perceivable);
+  const causalBeats = direction.causalBeats.filter((beat) => beat.perceivable);
+  const firstCausalBeat = causalBeats.find((beat) => beat.summary.trim().length > 0)?.summary.trim();
+  const firstPresenceReason = presenceReasons.find((reason) => reason.reason.trim().length > 0);
+  const derivedSituationSummary =
+    firstCausalBeat
+    ?? (firstPresenceReason
+      ? `${firstPresenceReason.actorName}: ${firstPresenceReason.reason}`
+      : "Visible scene information is limited to the player's immediate perception.");
 
   return {
-    ...direction,
+    situationSummary: derivedSituationSummary,
+    sceneQuestion: firstCausalBeat
+      ? "What does the visible pressure invite next?"
+      : "What can the player perceive or do from here?",
     focalActorNames: direction.focalActorNames.filter((name) =>
       perceivableActorNames.has(name.trim().toLowerCase()),
     ),
     backgroundActorNames: direction.backgroundActorNames.filter((name) =>
       perceivableActorNames.has(name.trim().toLowerCase()),
     ),
-    presenceReasons: direction.presenceReasons.filter((reason) => reason.perceivable),
-    causalBeats: direction.causalBeats.filter((beat) => beat.perceivable),
+    presenceReasons,
+    causalBeats,
+    narrationGuardrails: [],
   };
 }
 

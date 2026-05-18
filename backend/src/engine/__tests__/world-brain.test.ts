@@ -298,8 +298,16 @@ describe("world-brain", () => {
   });
 
   it("filters hidden presence reasons and causal beats for player-perceivable direction", () => {
-    const visible = toPlayerPerceivableWorldBrainDirection(createDirection());
+    const visible = toPlayerPerceivableWorldBrainDirection(createDirection({
+      situationSummary: "A hidden observer is deciding whether to surface.",
+      sceneQuestion: "Will Choso reveal the ambush?",
+      narrationGuardrails: ["Do not reveal hidden actors by name."],
+    }));
 
+    expect(visible.situationSummary).toBe("Nanami measures intent before escalating.");
+    expect(visible.situationSummary).not.toContain("hidden observer");
+    expect(visible.sceneQuestion).not.toContain("Choso");
+    expect(visible.narrationGuardrails).toEqual([]);
     expect(visible.presenceReasons).toEqual([
       {
         actorName: "Hero",

@@ -290,7 +290,7 @@ describe("gameplay API helpers", () => {
     });
   });
 
-  it("chatResume is a streaming helper and sends only the explicit campaignId", async () => {
+  it("chatResume is a streaming helper and sends the explicit resume token", async () => {
     const response = new Response("event: done\ndata: {}\n\n", {
       status: 200,
       headers: { "Content-Type": "text/event-stream" },
@@ -299,11 +299,11 @@ describe("gameplay API helpers", () => {
     fetchMock.mockResolvedValue(response);
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(chatResume("campaign-42")).resolves.toBe(response);
+    await expect(chatResume("campaign-42", "saga-token-1")).resolves.toBe(response);
     expect(fetchMock).toHaveBeenCalledWith("http://localhost:3001/api/chat/resume", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ campaignId: "campaign-42" }),
+      body: JSON.stringify({ campaignId: "campaign-42", resumeToken: "saga-token-1" }),
     });
   });
 
@@ -564,7 +564,7 @@ describe("parseTurnSSE", () => {
         "data: {\"stage\":\"rollback_critical\",\"tick\":7}",
         "",
         "event: done",
-        "data: {}",
+        "data: {\"tick\":7,\"worldVersion\":2,\"worldTimeMinutes\":45}",
         "",
       ].join("\n")),
       {
@@ -633,7 +633,7 @@ describe("parseTurnSSE", () => {
         "data: {\"stage\":\"rollback_critical\",\"stageId\":\"advancing-world-time\",\"tick\":8,\"privateTerm\":\"Forest Outpost\"}",
         "",
         "event: done",
-        "data: {}",
+        "data: {\"tick\":7,\"worldVersion\":2,\"worldTimeMinutes\":45}",
         "",
       ].join("\n")),
       {
@@ -675,10 +675,10 @@ describe("parseTurnSSE", () => {
           'data: {"text":"The gate trembles."}',
           "",
           "event: finalizing_turn",
-          "data: {}",
+          "data: {\"tick\":8,\"worldVersion\":3,\"worldTimeMinutes\":50}",
           "",
           "event: done",
-          "data: {}",
+          "data: {\"tick\":8,\"worldVersion\":3,\"worldTimeMinutes\":50}",
           "",
         ].join("\n")),
         {
@@ -706,7 +706,7 @@ describe("parseTurnSSE", () => {
         "data: {\"stage\":\"commit\",\"tick\":8}",
         "",
         "event: done",
-        "data: {}",
+        "data: {\"tick\":8,\"worldVersion\":3,\"worldTimeMinutes\":50}",
         "",
       ].join("\n")),
       {
@@ -739,7 +739,7 @@ describe("parseTurnSSE", () => {
         "data: {\"stage\":\"commit\",\"tick\":8}",
         "",
         "event: done",
-        "data: {}",
+        "data: {\"tick\":8,\"worldVersion\":3,\"worldTimeMinutes\":50}",
         "",
       ].join("\n")),
       {
@@ -847,7 +847,7 @@ describe("parseTurnSSE", () => {
         'data: {"lookupKind":"power_profile","subject":"Gojo","answer":"Bounded answer","citations":[],"uncertaintyNotes":[],"sceneImpact":"Lookup only."}',
         "",
         "event: done",
-        "data: {}",
+        "data: {\"tick\":7,\"worldVersion\":2,\"worldTimeMinutes\":45}",
         "",
       ].join("\n")),
       {
@@ -875,7 +875,7 @@ describe("parseTurnSSE", () => {
         'data: {"text":"The prior turn finally resolves."}',
         "",
         "event: done",
-        "data: {\"tick\":9,\"resumed\":true}",
+        "data: {\"tick\":9,\"worldVersion\":5,\"worldTimeMinutes\":75,\"resumed\":true}",
         "",
       ].join("\n")),
       {
@@ -888,7 +888,41 @@ describe("parseTurnSSE", () => {
       },
     );
 
-    expect(onDone).toHaveBeenCalledWith({ tick: 9, resumed: true });
+    expect(onDone).toHaveBeenCalledWith({
+      tick: 9,
+      worldVersion: 5,
+      worldTimeMinutes: 75,
+      resumed: true,
+    });
+  });
+
+  it("reports visible turn streams that finish without durable boundary metadata", async () => {
+    const onDone = vi.fn();
+    const onError = vi.fn();
+
+    await parseTurnSSE(
+      createStream([
+        'event: narrative',
+        'data: {"text":"The gate trembles."}',
+        "",
+        "event: done",
+        "data: {\"tick\":9}",
+        "",
+      ].join("\n")),
+      {
+        onNarrative: vi.fn(),
+        onOracleResult: vi.fn(),
+        onStateUpdate: vi.fn(),
+        onQuickActions: vi.fn(),
+        onDone,
+        onError,
+      },
+    );
+
+    expect(onDone).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith(
+      "Turn finished without durable boundary metadata. Please refresh before continuing.",
+    );
   });
 
   it("dispatches reasoning on its own event lane without regressing lookup_result, narrative, or done", async () => {
@@ -909,7 +943,7 @@ describe("parseTurnSSE", () => {
         'data: {"text":"Provider reasoning stays outside canonical narration."}',
         "",
         "event: done",
-        "data: {}",
+          "data: {\"tick\":8,\"worldVersion\":3,\"worldTimeMinutes\":50}",
         "",
       ].join("\n")),
       {

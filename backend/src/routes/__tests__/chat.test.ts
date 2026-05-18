@@ -95,6 +95,7 @@ vi.mock("../../db/index.js", () => ({
 }));
 
 const mockGetSettledTurnPacket = vi.fn((_input?: unknown) => null);
+const mockGetTurnSaga = vi.fn((_input?: unknown) => null);
 
 vi.mock("../../engine/index.js", () => ({
   processTurn: vi.fn(),
@@ -104,6 +105,7 @@ vi.mock("../../engine/index.js", () => ({
   restoreSnapshot: vi.fn(),
   findPendingNarrationSaga: vi.fn(() => null),
   getSettledTurnPacket: (input: unknown) => mockGetSettledTurnPacket(input),
+  getTurnSaga: (input: unknown) => mockGetTurnSaga(input),
   PendingNarrationError: class PendingNarrationError extends Error {
     constructor(public readonly pendingSaga: unknown) {
       super("Pending narration.");
@@ -384,6 +386,7 @@ beforeEach(() => {
     worldTimeMinutes: 0,
   }));
   mockedFindPendingNarrationSaga.mockReturnValue(null);
+  mockGetTurnSaga.mockReturnValue(null);
 });
 
 // ---------------------------------------------------------------------------
@@ -1058,6 +1061,7 @@ describe("Campaign-loaded gameplay transport", () => {
         body: JSON.stringify(payload),
       });
       expect(res.status).toBe(200);
+      await res.text();
     }
   });
 
@@ -2289,8 +2293,10 @@ describe("Campaign-loaded gameplay transport", () => {
     setupDbMock();
     const pendingSaga = {
       id: "saga-pending-resume",
+      campaignId: CAMPAIGN_ID,
       turnId: "turn-pending-resume",
       status: "resolved_pending_narration",
+      settledTurnPacketId: null,
     } as any;
 
     mockedGetActive.mockReturnValue(null as any);
@@ -2300,6 +2306,7 @@ describe("Campaign-loaded gameplay transport", () => {
       createdAt: "2026-01-01",
     }) as any);
     mockedFindPendingNarrationSaga.mockReturnValue(pendingSaga);
+    mockGetTurnSaga.mockReturnValue(pendingSaga);
     mockedResumePendingTurnNarration.mockImplementation(() =>
       createTurnStream([
         {
@@ -2313,7 +2320,7 @@ describe("Campaign-loaded gameplay transport", () => {
     const res = await app.request("/chat/resume", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID, resumeToken: "resume_deadbeefcafef00d" }),
     });
 
     expect(res.status).toBe(200);

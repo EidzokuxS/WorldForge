@@ -1217,11 +1217,12 @@ describe("GamePage", () => {
         pendingNarration: true,
         resumable: true,
         status: "resolved_pending_narration",
+        resumeToken: "resume-safe-token",
       },
     });
 
     await waitFor(() => {
-      expect(mockedChatResume).toHaveBeenCalledWith(fakeCampaign.id);
+      expect(mockedChatResume).toHaveBeenCalledWith(fakeCampaign.id, "resume-safe-token");
     });
     await waitFor(() => {
       expect(mockedParseTurnSSE).toHaveBeenCalled();

@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import { randomUUID } from "node:crypto";
 import { parseLookupLogEntry, type ChatMessage } from "@worldforge/shared";
@@ -74,7 +74,6 @@ import {
   endTurn,
   getLastTurnSnapshot,
   getLastTurnSnapshotMetadata,
-  hasActiveTurn,
   hasLiveTurnSnapshot,
   setLastTurnSnapshot,
   tryBeginTurn,
@@ -103,6 +102,7 @@ const log = createLogger("chat");
 
 const app = new Hono();
 type PostTurnRoute = "/chat/action" | "/chat/retry" | "/chat/resume";
+type TerminalTurnEventType = "done" | "error";
 
 function registerTurnAbortCleanup(args: {
   signal: AbortSignal;
@@ -362,6 +362,60 @@ function durableEventMetadataFromSettledSaga(
         producedDurableEventIds: packet.producedDurableEventIds,
       }
     : { acceptedDurableEventIds: [], producedDurableEventIds: [] };
+}
+
+function sagaCanResumeNarration(
+  saga: Pick<TurnSagaRecord, "campaignId" | "turnId" | "status" | "settledTurnPacketId"> | null | undefined,
+): boolean {
+  if (!saga) {
+    return false;
+  }
+  if (saga.status !== "world_consequence_running") {
+    return true;
+  }
+  return Boolean(
+    saga.settledTurnPacketId
+      || getSettledTurnPacket({ campaignId: saga.campaignId, turnId: saga.turnId }),
+  );
+}
+
+function resumeTokenForSaga(
+  saga: Pick<TurnSagaRecord, "id" | "campaignId" | "turnId">,
+): string {
+  return `resume_${sha256Prefix(`${saga.campaignId}:${saga.id}:${saga.turnId}`)}`;
+}
+
+function pendingNarrationBlockResponse(
+  c: Context,
+  campaignId: string,
+  message: string,
+): Response | null {
+  const pendingSaga = findPendingNarrationSaga({ campaignId });
+  return pendingSaga
+    ? c.json(pendingNarrationData(pendingSaga, message), 409)
+    : null;
+}
+
+function noteTerminalTurnEvent(
+  event: TurnEvent,
+  current: TerminalTurnEventType | null,
+): TerminalTurnEventType | null {
+  return event.type === "done" || event.type === "error"
+    ? event.type
+    : current;
+}
+
+async function writeMissingTerminalTurnError(
+  stream: { writeSSE: (event: { event: string; data: string }) => Promise<void> },
+  message: string,
+): Promise<void> {
+  await stream.writeSSE({
+    event: "error",
+    data: JSON.stringify({
+      error: message,
+      incompleteTurnStream: true,
+    }),
+  });
 }
 
 function turnSummaryFromDoneEvent(event: TurnEvent): TurnSummary | null {
@@ -746,33 +800,38 @@ function isPendingNarrationError(error: unknown): error is PendingNarrationError
 }
 
 function pendingNarrationData(
-  saga: Pick<TurnSagaRecord, "id" | "turnId" | "status"> | null,
+  saga: Pick<TurnSagaRecord, "id" | "campaignId" | "turnId" | "status" | "settledTurnPacketId"> | null,
   message: string,
 ) {
+  const resumable = sagaCanResumeNarration(saga);
   return {
     error: message,
     pendingNarration: true,
-    resumable: Boolean(saga),
+    resumable,
+    status: saga?.status,
+    resumeToken: resumable && saga ? resumeTokenForSaga(saga) : undefined,
   };
 }
 
 function pendingNarrationStatus(
-  saga: Pick<TurnSagaRecord, "status"> | null,
-): { pendingNarration: true; resumable: boolean; status?: string } | null {
+  saga: Pick<TurnSagaRecord, "id" | "campaignId" | "turnId" | "status" | "settledTurnPacketId"> | null,
+): { pendingNarration: true; resumable: boolean; status?: string; resumeToken?: string } | null {
   if (!saga) {
     return null;
   }
+  const resumable = sagaCanResumeNarration(saga);
 
   return {
     pendingNarration: true,
-    resumable: true,
+    resumable,
     status: saga.status,
+    resumeToken: resumable ? resumeTokenForSaga(saga) : undefined,
   };
 }
 
 async function streamPendingTurnNarration(args: {
   campaignId: string;
-  saga: Pick<TurnSagaRecord, "id" | "turnId" | "status">;
+  saga: Pick<TurnSagaRecord, "id" | "campaignId" | "turnId" | "status" | "settledTurnPacketId">;
   stream: { writeSSE: (event: { event: string; data: string }) => Promise<void> };
   storytellerProvider: ProviderConfig;
   storytellerTemperature: number;
@@ -876,7 +935,7 @@ async function streamPendingNarrationBeforeRollback(args: {
 
 async function streamNarrationRepairExhausted(args: {
   campaignId: string;
-  pendingSaga?: Pick<TurnSagaRecord, "id" | "turnId" | "status"> | null;
+  pendingSaga?: Pick<TurnSagaRecord, "id" | "campaignId" | "turnId" | "status" | "settledTurnPacketId"> | null;
   stream: { writeSSE: (event: { event: string; data: string }) => Promise<void> };
   storytellerProvider: ProviderConfig;
   storytellerTemperature: number;
@@ -1041,8 +1100,19 @@ app.post("/opening", async (c) => {
             embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
           });
 
+          let terminalEventType: TerminalTurnEventType | null = null;
           for await (const event of openingGenerator) {
+            terminalEventType = noteTerminalTurnEvent(event, terminalEventType);
             await writeRouteTurnEventSSE(campaignId, stream, event);
+          }
+          if (terminalEventType !== "done") {
+            outcome = "error";
+            if (!terminalEventType) {
+              await writeMissingTerminalTurnError(
+                stream,
+                "Opening scene stream ended before a terminal event.",
+              );
+            }
           }
         } catch (error) {
           outcome = "error";
@@ -1141,17 +1211,15 @@ app.post("/action", async (c) => {
     // Resolve Embedder (optional -- used for lore search)
     const embedderResult = resolveEmbedder(settings);
 
-    const pendingSaga = findPendingNarrationSaga({ campaignId });
-    if (pendingSaga) {
+    const pendingBlock = pendingNarrationBlockResponse(
+      c,
+      campaignId,
+      "A previous turn is still waiting for final narration. Resume it before sending a new action.",
+    );
+    if (pendingBlock) {
       endTurn(campaignId);
       turnStartedForCampaign = null;
-      return c.json(
-        pendingNarrationData(
-          pendingSaga,
-          "A previous turn is still waiting for final narration. Resume it before sending a new action.",
-        ),
-        409,
-      );
+      return pendingBlock;
     }
 
     // Auto-checkpoint before dangerous turns (HP <= 2)
@@ -1242,6 +1310,7 @@ app.post("/action", async (c) => {
             onPostTurn: postTurnHooks.onPostTurn,
           });
 
+          let terminalEventType: TerminalTurnEventType | null = null;
           for await (const event of turnGenerator) {
             // Reactive auto-checkpoint when HP drops to danger zone during turn
             if (event.type === "auto_checkpoint") {
@@ -1269,8 +1338,18 @@ app.post("/action", async (c) => {
               settledTurnRollbackShield = true;
               postTurnHooks.onDone(event, snapshot);
             }
+            terminalEventType = noteTerminalTurnEvent(event, terminalEventType);
 
             await writeRouteTurnEventSSE(campaignId, stream, event);
+          }
+          if (terminalEventType !== "done") {
+            outcome = "error";
+            if (!terminalEventType) {
+              await writeMissingTerminalTurnError(
+                stream,
+                "Turn stream ended before a terminal event.",
+              );
+            }
           }
         } catch (error) {
           if (isPendingNarrationError(error)) {
@@ -1459,7 +1538,7 @@ app.post("/resume", async (c) => {
     const result = await parseBody(c, chatResumeBodySchema);
     if ("response" in result) return result.response;
 
-    const { campaignId } = result.data;
+    const { campaignId, resumeToken } = result.data;
     const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
     if (!tryBeginTurn(campaignId)) {
@@ -1472,6 +1551,39 @@ app.post("/resume", async (c) => {
       endTurn(campaignId);
       turnStartedForCampaign = null;
       return c.json({ error: "No pending narration to resume." }, 400);
+    }
+    if (!resumeToken) {
+      endTurn(campaignId);
+      turnStartedForCampaign = null;
+      return c.json(
+        pendingNarrationData(
+          pendingSaga,
+          "Resume token is required for pending narration recovery.",
+        ),
+        400,
+      );
+    }
+    if (resumeToken !== resumeTokenForSaga(pendingSaga)) {
+      endTurn(campaignId);
+      turnStartedForCampaign = null;
+      return c.json(
+        pendingNarrationData(
+          pendingSaga,
+          "Resume token no longer matches the pending narration turn.",
+        ),
+        409,
+      );
+    }
+    if (!sagaCanResumeNarration(pendingSaga)) {
+      endTurn(campaignId);
+      turnStartedForCampaign = null;
+      return c.json(
+        pendingNarrationData(
+          pendingSaga,
+          "Pending turn has not reached a resumable narration boundary yet.",
+        ),
+        409,
+      );
     }
 
     const settings = loadSettings();
@@ -1541,6 +1653,7 @@ app.post("/resume", async (c) => {
 // -- POST /lookup — Explicit grounded lookup via dedicated SSE -----------------
 
 app.post("/lookup", async (c) => {
+  let turnStartedForCampaign: string | null = null;
   try {
     const result = await parseBody(c, chatLookupBodySchema);
     if ("response" in result) return result.response;
@@ -1548,6 +1661,20 @@ app.post("/lookup", async (c) => {
     const { campaignId, lookupKind, subject, compareAgainst, question } = result.data;
     const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
+    if (!tryBeginTurn(campaignId)) {
+      return c.json({ error: "The world is still settling. Wait for the turn to finish." }, 409);
+    }
+    turnStartedForCampaign = campaignId;
+    const pendingBlock = pendingNarrationBlockResponse(
+      c,
+      campaignId,
+      "A previous turn is still waiting for final narration. Resume it before running lookups.",
+    );
+    if (pendingBlock) {
+      endTurn(campaignId);
+      turnStartedForCampaign = null;
+      return pendingBlock;
+    }
 
     c.header("Cache-Control", "no-cache, no-transform");
 
@@ -1588,9 +1715,15 @@ app.post("/lookup", async (c) => {
             error: getPlayerSafeErrorMessage(error, "Lookup failed."),
           }),
         });
+      } finally {
+        endTurn(campaignId);
+        turnStartedForCampaign = null;
       }
     });
   } catch (error) {
+    if (turnStartedForCampaign) {
+      endTurn(turnStartedForCampaign);
+    }
     return c.json(
       { error: getPlayerSafeErrorMessage(error, "Lookup request failed.") },
       getErrorStatus(error),
@@ -1635,17 +1768,15 @@ app.post("/retry", async (c) => {
     // Resolve Embedder (optional)
     const embedderResult = resolveEmbedder(settings);
 
-    const pendingSaga = findPendingNarrationSaga({ campaignId });
-    if (pendingSaga) {
+    const pendingBlock = pendingNarrationBlockResponse(
+      c,
+      campaignId,
+      "A previous turn is still waiting for final narration. Resume it before retrying.",
+    );
+    if (pendingBlock) {
       endTurn(campaignId);
       turnStartedForCampaign = null;
-      return c.json(
-        pendingNarrationData(
-          pendingSaga,
-          "A previous turn is still waiting for final narration. Resume it before retrying.",
-        ),
-        409,
-      );
+      return pendingBlock;
     }
 
     const previousSnapshot = getLastTurnSnapshot(campaignId);
@@ -1731,6 +1862,7 @@ app.post("/retry", async (c) => {
             onPostTurn: postTurnHooks.onPostTurn,
           });
 
+          let terminalEventType: TerminalTurnEventType | null = null;
           for await (const event of turnGenerator) {
             if (event.type === "auto_checkpoint") {
               const detachedCtx = getTurnContext();
@@ -1757,8 +1889,18 @@ app.post("/retry", async (c) => {
               settledTurnRollbackShield = true;
               postTurnHooks.onDone(event, previousSnapshot);
             }
+            terminalEventType = noteTerminalTurnEvent(event, terminalEventType);
 
             await writeRouteTurnEventSSE(campaignId, stream, event);
+          }
+          if (terminalEventType !== "done") {
+            outcome = "error";
+            if (!terminalEventType) {
+              await writeMissingTerminalTurnError(
+                stream,
+                "Retry stream ended before a terminal event.",
+              );
+            }
           }
         } catch (error) {
           if (isPendingNarrationError(error)) {
@@ -1938,6 +2080,7 @@ app.post("/retry", async (c) => {
 // -- POST /undo — Revert last action+response pair ----------------------------
 
 app.post("/undo", async (c) => {
+  let turnStartedForCampaign: string | null = null;
   try {
     const result = await parseBody(c, chatUndoBodySchema);
     if ("response" in result) return result.response;
@@ -1945,17 +2088,32 @@ app.post("/undo", async (c) => {
     const { campaignId } = result.data;
     const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
-    if (hasActiveTurn(campaignId)) {
+    if (!tryBeginTurn(campaignId)) {
       return c.json({ error: "The world is still settling. Wait for the turn to finish." }, 409);
+    }
+    turnStartedForCampaign = campaignId;
+    const pendingBlock = pendingNarrationBlockResponse(
+      c,
+      campaignId,
+      "A previous turn is still waiting for final narration. Resume it before undoing.",
+    );
+    if (pendingBlock) {
+      endTurn(campaignId);
+      turnStartedForCampaign = null;
+      return pendingBlock;
     }
 
     const previousSnapshot = getLastTurnSnapshot(campaignId);
     if (!previousSnapshot) {
+      endTurn(campaignId);
+      turnStartedForCampaign = null;
       return c.json({ error: "Nothing to undo." }, 400);
     }
     const previousBoundary = getLiveGameplayBoundaryAtTail(campaignId);
     if (!previousBoundary) {
       clearLastTurnSnapshot(campaignId);
+      endTurn(campaignId);
+      turnStartedForCampaign = null;
       return c.json({ error: "Nothing to undo." }, 400);
     }
 
@@ -1976,8 +2134,13 @@ app.post("/undo", async (c) => {
         - (previousBoundary.chatHistoryLengthBeforeTurn ?? 0),
     );
 
+    endTurn(campaignId);
+    turnStartedForCampaign = null;
     return c.json({ ok: true, messagesRemoved });
   } catch (error) {
+    if (turnStartedForCampaign) {
+      endTurn(turnStartedForCampaign);
+    }
     return c.json(
       { error: getPlayerSafeErrorMessage(error, "Undo request failed.") },
       getErrorStatus(error)
@@ -1988,6 +2151,7 @@ app.post("/undo", async (c) => {
 // -- POST /edit — Edit an assistant message content ---------------------------
 
 app.post("/edit", async (c) => {
+  let turnStartedForCampaign: string | null = null;
   try {
     const result = await parseBody(c, chatEditBodySchema);
     if ("response" in result) return result.response;
@@ -1995,6 +2159,20 @@ app.post("/edit", async (c) => {
     const { campaignId, messageIndex, newContent } = result.data;
     const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
+    if (!tryBeginTurn(campaignId)) {
+      return c.json({ error: "The world is still settling. Wait for the turn to finish." }, 409);
+    }
+    turnStartedForCampaign = campaignId;
+    const pendingBlock = pendingNarrationBlockResponse(
+      c,
+      campaignId,
+      "A previous turn is still waiting for final narration. Resume it before editing chat history.",
+    );
+    if (pendingBlock) {
+      endTurn(campaignId);
+      turnStartedForCampaign = null;
+      return pendingBlock;
+    }
 
     const success = replaceChatMessage(
       campaignId,
@@ -2003,14 +2181,21 @@ app.post("/edit", async (c) => {
     );
 
     if (!success) {
+      endTurn(campaignId);
+      turnStartedForCampaign = null;
       return c.json(
         { error: "Invalid message index or not an assistant message." },
         400
       );
     }
 
+    endTurn(campaignId);
+    turnStartedForCampaign = null;
     return c.json({ ok: true });
   } catch (error) {
+    if (turnStartedForCampaign) {
+      endTurn(turnStartedForCampaign);
+    }
     return c.json(
       { error: getPlayerSafeErrorMessage(error, "Edit request failed.") },
       getErrorStatus(error)

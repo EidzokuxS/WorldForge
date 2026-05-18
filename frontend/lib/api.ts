@@ -98,6 +98,7 @@ export type ChatHistoryResponse = {
     pendingNarration: true;
     resumable: boolean;
     status?: string;
+    resumeToken?: string;
   } | null;
 };
 
@@ -901,6 +902,12 @@ function normalizeTurnDoneBoundary(value: unknown): TurnDoneBoundary | undefined
   return Object.keys(boundary).length > 0 ? boundary : undefined;
 }
 
+function hasDurableTurnDoneBoundary(boundary: TurnDoneBoundary | undefined): boolean {
+  return boundary?.tick !== undefined
+    && boundary.worldVersion !== undefined
+    && boundary.worldTimeMinutes !== undefined;
+}
+
 export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: TurnSSEHandlers): Promise<void> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -949,7 +956,15 @@ export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: T
             handlers.onError(TURN_STREAM_EMPTY_NARRATION_ERROR);
             break;
           }
-          handlers.onDone(normalizeTurnDoneBoundary(parsed));
+          {
+            const boundary = normalizeTurnDoneBoundary(parsed);
+            if (!hasLookupResult && hasVisibleNarrative && !hasDurableTurnDoneBoundary(boundary)) {
+              hasErrorEvent = true;
+              handlers.onError("Turn finished without durable boundary metadata. Please refresh before continuing.");
+              break;
+            }
+            handlers.onDone(boundary);
+          }
           break;
         case "error":
           hasErrorEvent = true;
@@ -1397,8 +1412,8 @@ export function chatRetry(campaignId: string): Promise<Response> {
   return apiStreamPost("/api/chat/retry", { campaignId });
 }
 
-export function chatResume(campaignId: string): Promise<Response> {
-  return apiStreamPost("/api/chat/resume", { campaignId });
+export function chatResume(campaignId: string, resumeToken: string): Promise<Response> {
+  return apiStreamPost("/api/chat/resume", { campaignId, resumeToken });
 }
 
 export function chatUndo(campaignId: string): Promise<{ ok: boolean; messagesRemoved: number }> {

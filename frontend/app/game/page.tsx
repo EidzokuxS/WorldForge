@@ -347,7 +347,10 @@ export default function GamePage() {
   const [quickActions, setQuickActions] = useState<QuickAction[]>([]);
   const [worldData, setWorldData] = useState<WorldData | null>(null);
   const [travelFeedback, setTravelFeedback] = useState<string | null>(null);
-  const [pendingResumeCampaignId, setPendingResumeCampaignId] = useState<string | null>(null);
+  const [pendingResumeRequest, setPendingResumeRequest] = useState<{
+    campaignId: string;
+    resumeToken: string;
+  } | null>(null);
   const bufferedQuickActionsRef = useRef<QuickAction[]>([]);
   const messagesRef = useRef<DisplayChatMessage[]>([]);
   const openingRequestCampaignRef = useRef<string | null>(null);
@@ -476,7 +479,10 @@ export default function GamePage() {
       return {
         messages: displayMessages,
         hasNarratedAssistantMessage: hasNarratedAssistantMessage(displayMessages),
-        hasPendingNarration: history.pendingNarration?.resumable === true,
+        pendingResumeToken:
+          history.pendingNarration?.resumable === true
+            ? history.pendingNarration.resumeToken ?? null
+            : null,
       };
     },
     [],
@@ -565,7 +571,7 @@ export default function GamePage() {
   );
 
   const requestPendingResume = useCallback(
-    async (campaignId: string) => {
+    async (campaignId: string, resumeToken: string) => {
       setTurnPhase("idle");
       setSceneProgress("scene-settling");
       setSceneProgressCopy("Resuming turn");
@@ -578,7 +584,7 @@ export default function GamePage() {
       let narrativeText = "";
 
       try {
-        const response = await chatResume(campaignId);
+        const response = await chatResume(campaignId, resumeToken);
         if (!response.body) {
           throw new Error("Empty resume response stream.");
         }
@@ -651,21 +657,27 @@ export default function GamePage() {
   );
 
   useEffect(() => {
-    if (!pendingResumeCampaignId) {
+    if (!pendingResumeRequest) {
       return;
     }
-    if (pendingResumeStartedRef.current === pendingResumeCampaignId) {
+    if (pendingResumeStartedRef.current === pendingResumeRequest.campaignId) {
       return;
     }
 
-    pendingResumeStartedRef.current = pendingResumeCampaignId;
-    void requestPendingResume(pendingResumeCampaignId).finally(() => {
+    pendingResumeStartedRef.current = pendingResumeRequest.campaignId;
+    void requestPendingResume(
+      pendingResumeRequest.campaignId,
+      pendingResumeRequest.resumeToken,
+    ).finally(() => {
       pendingResumeStartedRef.current = null;
-      setPendingResumeCampaignId((current) =>
-        current === pendingResumeCampaignId ? null : current,
+      setPendingResumeRequest((current) =>
+        current?.campaignId === pendingResumeRequest.campaignId
+          && current.resumeToken === pendingResumeRequest.resumeToken
+          ? null
+          : current,
       );
     });
-  }, [pendingResumeCampaignId, requestPendingResume]);
+  }, [pendingResumeRequest, requestPendingResume]);
 
   const rollbackRetryBoundary = useCallback(
     async (campaignId: string, fallbackPremise: string, cause: unknown) => {
@@ -713,8 +725,11 @@ export default function GamePage() {
         if (cancelled) return;
         setActiveCampaign(campaign);
         const restored = await restoreGameplayState(campaign.id);
-        if (!cancelled && restored.hasPendingNarration) {
-          setPendingResumeCampaignId(campaign.id);
+        if (!cancelled && restored.pendingResumeToken) {
+          setPendingResumeRequest({
+            campaignId: campaign.id,
+            resumeToken: restored.pendingResumeToken,
+          });
         } else if (!cancelled && !restored.hasNarratedAssistantMessage) {
           void requestOpeningScene(campaign.id);
         }
