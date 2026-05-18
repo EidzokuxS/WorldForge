@@ -1155,6 +1155,118 @@ describe("createPlayerTurnToolExecutionContext", () => {
     });
   });
 
+  it("rejects backend refs embedded in player-turn model-authored text fields", () => {
+    const context = createPlayerTurnToolExecutionContext(createFrame());
+
+    expect(validateToolInputGrounding({
+      toolName: "record_world_fact",
+      toolInput: {
+        sourceKind: "comparison",
+        truthStatus: "disputed",
+        factKind: "contradiction",
+        topicKind: "procedure",
+        durability: "durable",
+        futureUseKind: "route_choice",
+        futureRelevance:
+          "The contradiction controls which office Mira asks before choosing a route.",
+        summary:
+          "The hidden actor:secret-witness record contradicts the public route log.",
+        claims: [
+          {
+            claimKind: "contradiction",
+            polarity: "unknown",
+            subjectText: "route log mismatch",
+            summary: "The mismatch is unresolved.",
+          },
+        ],
+        sourceRefs: ["Mira Voss"],
+      },
+      context,
+    })).toMatchObject({
+      code: "invalid_source_ref",
+      path: "input.summary",
+    });
+
+    expect(validateToolInputGrounding({
+      toolName: "log_event",
+      toolInput: {
+        text: "The player remembers tool-result-7 as proof.",
+        importance: 5,
+        participants: ["Mira Voss"],
+        durability: "durable",
+        futureRelevance: "The proof claim should matter later.",
+      },
+      context,
+    })).toMatchObject({
+      code: "invalid_source_ref",
+      path: "input.text",
+    });
+  });
+
+  it("does not promote weak player-known facts into observed or verified world facts", () => {
+    const context = createPlayerTurnToolExecutionContext(createFrame());
+    context.bridgeLookup?.playerKnownFacts.push({
+      id: "fact1",
+      summary: "claimed: The ledger is already sealed.",
+      visibilityRoute: "player_known",
+      truthStatus: "claimed",
+      confidence: 0.55,
+      sourceRefs: [],
+    });
+
+    expect(validateToolInputGrounding({
+      toolName: "record_world_fact",
+      toolInput: {
+        sourceKind: "claim",
+        truthStatus: "verified",
+        factKind: "public_record",
+        topicKind: "procedure",
+        durability: "durable",
+        futureUseKind: "evidence",
+        futureRelevance: "The ledger status would govern later proof checks.",
+        summary: "The ledger is sealed.",
+        claims: [
+          {
+            claimKind: "public_record",
+            polarity: "states",
+            subjectText: "ledger",
+            summary: "The ledger is sealed.",
+          },
+        ],
+        sourceRefs: ["fact1"],
+      },
+      context,
+    })).toMatchObject({
+      code: "invalid_source_ref",
+      path: "input.sourceRefs",
+      invalidRef: "fact1",
+    });
+
+    expect(validateToolInputGrounding({
+      toolName: "record_world_fact",
+      toolInput: {
+        sourceKind: "claim",
+        truthStatus: "claimed",
+        factKind: "public_record",
+        topicKind: "procedure",
+        durability: "durable",
+        futureUseKind: "evidence",
+        futureRelevance: "The ledger status claim can be questioned later.",
+        summary: "Someone claims the ledger is sealed.",
+        claims: [
+          {
+            claimKind: "public_record",
+            polarity: "states",
+            subjectText: "ledger claim",
+            summary: "The ledger is only claimed to be sealed.",
+          },
+        ],
+        sourceRefs: ["fact1"],
+      },
+      context,
+    })).toBeNull();
+  });
+
   it("keeps validation ref hints model-facing instead of leaking opaque refs", () => {
     const context = createPlayerTurnToolExecutionContext(createFrame());
     for (const safeAlias of ["fact1", "route1", "actor1", "person_guard"]) {

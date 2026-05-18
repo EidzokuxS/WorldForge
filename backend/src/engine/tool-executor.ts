@@ -2433,6 +2433,9 @@ function handleMoveActor(
       kind: "move_actor",
       actorRef: prepared.value.actorRef,
       actorRefs: prepared.value.actorRefs,
+      playerId: readStringField(movement.result, "playerId"),
+      actorId: readStringField(movement.result, "actorId"),
+      actorName: readStringField(movement.result, "actorName"),
       destinationRef: prepared.value.destinationRef,
       routeEvidenceRefs: prepared.value.routeEvidenceRefs,
       intentSummary: prepared.value.intentSummary,
@@ -3131,11 +3134,18 @@ function addScopedWriteRefsForToolResult(
       ]);
       break;
     case "move_actor":
-      addStringRefs(refs, [
-        scopedWriteRef("npc", readStringField(payload, "actorId"), "location"),
-        scopedRef("npc", readStringField(payload, "actorRef")),
-        scopedRef("location", readStringField(payload, "locationId")),
-      ]);
+      if (readStringField(payload, "playerId")) {
+        addStringRefs(refs, [
+          scopedWriteRef("player", readStringField(payload, "playerId"), "location"),
+          scopedRef("location", readStringField(payload, "locationId")),
+        ]);
+      } else {
+        addStringRefs(refs, [
+          scopedWriteRef("npc", readStringField(payload, "actorId"), "location"),
+          scopedRef("npc", readStringField(payload, "actorRef")),
+          scopedRef("location", readStringField(payload, "locationId")),
+        ]);
+      }
       break;
     case "set_condition":
       const playerRef = readStringField(payload, "entityId")
@@ -3263,6 +3273,9 @@ function stateDeltaRefsForToolResult(input: {
       break;
     case "move_actor":
       addStringRefs(refs, [
+        readStringField(payload, "playerId"),
+        readStringField(payload, "actorId"),
+        readStringField(payload, "actorName"),
         readStringField(payload, "actorRef"),
         readStringField(payload, "destinationRef"),
         readStringField(payload, "locationId"),

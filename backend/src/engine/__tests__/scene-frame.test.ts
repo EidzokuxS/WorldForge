@@ -1078,7 +1078,7 @@ describe("SceneFrame builder", () => {
     expect(frame.allowedTools).toContain("spawn_item");
     expect(frame.allowedTools).toContain("create_minor_poi");
     expect(frame.allowedTools).toContain("reveal_location");
-    expect(frame.allowedTools).toContain("add_chronicle_entry");
+    expect(frame.allowedTools).not.toContain("add_chronicle_entry");
     expect(frame.allowedTools).not.toContain("start_search");
     expect(frame.allowedTools).not.toContain("record_player_intent");
     expect(frame.allowedTools).toContain("advance_time");
@@ -1094,7 +1094,7 @@ describe("SceneFrame builder", () => {
       allowedTools: ["log_event", "add_chronicle_entry", "spawn_npc", "move_to", "spawn_item"],
     });
 
-    expect(frame.allowedTools).toEqual(["log_event", "add_chronicle_entry", "spawn_item"]);
+    expect(frame.allowedTools).toEqual(["log_event", "spawn_item"]);
   });
 
   it("normalizes explicit player-turn allowedTools so one owner handles local place and intent effects", async () => {

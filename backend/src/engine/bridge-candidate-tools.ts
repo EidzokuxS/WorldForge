@@ -41,6 +41,7 @@ export interface BridgeKnownFactSnapshot {
   id: string;
   summary: string;
   visibilityRoute: "player_visible" | "player_known";
+  truthStatus?: "observed" | "verified" | "reported" | "rumored" | "claimed" | "believed" | "disputed";
   confidence: number;
   sourceRefs: string[];
 }
@@ -872,6 +873,7 @@ function currentSceneDescriptionFacts(snapshot: BridgeLookupSnapshot): BridgeKno
       id: "visible_fact:current_location_description",
       summary: `${snapshot.current.currentLocationName ?? "Current location"}: ${snapshot.current.currentLocationDescription.trim()}`,
       visibilityRoute: "player_visible",
+      truthStatus: "observed",
       confidence: 1,
       sourceRefs: uniqueStrings([
         snapshot.current.currentLocationName,
@@ -887,6 +889,7 @@ function currentSceneDescriptionFacts(snapshot: BridgeLookupSnapshot): BridgeKno
       id: "visible_fact:current_scene_description",
       summary: `${snapshot.current.currentSceneScopeName ?? "Current scene"}: ${snapshot.current.currentSceneScopeDescription.trim()}`,
       visibilityRoute: "player_visible",
+      truthStatus: "observed",
       confidence: 1,
       sourceRefs: uniqueStrings([
         snapshot.current.currentSceneScopeName,
@@ -902,6 +905,7 @@ function allFacts(snapshot: BridgeLookupSnapshot): BridgeKnownFactSnapshot[] {
     id: canonicalEventRef(event.id),
     summary: event.summary,
     visibilityRoute: "player_visible",
+    truthStatus: "observed",
     confidence: 0.85,
     sourceRefs: uniqueStrings([canonicalEventRef(event.id)]),
   }));
@@ -910,6 +914,26 @@ function allFacts(snapshot: BridgeLookupSnapshot): BridgeKnownFactSnapshot[] {
     ...visibleEvents,
     ...snapshot.playerKnownFacts,
   ];
+}
+
+function visibleFacts(snapshot: BridgeLookupSnapshot): BridgeKnownFactSnapshot[] {
+  return allFacts(snapshot).filter((fact) => fact.visibilityRoute === "player_visible");
+}
+
+function factsForInspectScope(
+  snapshot: BridgeLookupSnapshot,
+  scope: string | null,
+): BridgeKnownFactSnapshot[] {
+  switch (scope) {
+    case "known":
+      return snapshot.playerKnownFacts;
+    case "visible":
+    case "current_scene":
+    case "current_location":
+      return visibleFacts(snapshot);
+    default:
+      return allFacts(snapshot);
+  }
 }
 
 function inspectKnownFact(
@@ -925,7 +949,7 @@ function inspectKnownFact(
     return denial(toolName, "backend_ref_not_model_facing");
   }
   const maxResults = readMaxResults(input, 3);
-  const facts = allFacts(snapshot);
+  const facts = factsForInspectScope(snapshot, readString(input, "scope"));
   const aliases = buildDisplayAliases(snapshot, facts);
   const candidates = facts
     .map((fact) => ({

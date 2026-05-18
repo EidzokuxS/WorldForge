@@ -188,7 +188,8 @@ const runtimeRequirementTopicSchema = z.enum([
 
 const runtimeRequirementDurabilitySchema = z.enum(["scene_local", "durable"]);
 export const GM_READ_RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS = [
-  ...RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS,
+  ...RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS.filter((effectKind) =>
+    effectKind !== "chronicle_entry"),
 ] as const;
 const runtimeRequirementStateEffectKindSchema = z.enum(GM_READ_RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS);
 const runtimeRequirementSceneBeatKindSchema = z.enum([

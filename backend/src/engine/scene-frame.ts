@@ -260,7 +260,6 @@ const DEFAULT_PLAYER_TURN_ALLOWED_TOOLS: RuntimeToolName[] = [
   "add_tag",
   "remove_tag",
   "set_relationship",
-  "add_chronicle_entry",
   "log_event",
   "offer_quick_actions",
   "promote_npc",

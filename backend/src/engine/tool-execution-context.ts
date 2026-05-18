@@ -27,6 +27,7 @@ import {
   buildModelFacingScenePacket,
   isUnsafeModelFacingRef,
 } from "./model-facing-scene.js";
+import { isBackendOnlyModelRef } from "./model-facing-ref-safety.js";
 import { listActorKnowledge } from "./knowledge-model.js";
 import {
   readWorldClock,
@@ -140,7 +141,8 @@ export interface ToolGroundingIssue {
     | "addressed_target_mismatch"
     | "missing_structural_claim"
     | "missing_background_authority"
-    | "missing_background_write_scope";
+    | "missing_background_write_scope"
+    | "unsupported_tool_owner";
   path: string;
   message: string;
   toolName?: RuntimeToolName | string;
@@ -638,6 +640,7 @@ function readPlayerKnownFacts(
         id: knowledgeRef,
         summary: `${record.truthStatus}: ${record.statement}`,
         visibilityRoute: "player_known",
+        truthStatus: record.truthStatus,
         confidence: Math.max(0, Math.min(1, record.confidence / 100)),
         sourceRefs: uniqueModelRefs([
           knowledgeRef,
@@ -1131,6 +1134,14 @@ function validateLogEventGrounding(
   }
 
   const eventText = typeof input.text === "string" ? input.text : "";
+  const textIssue = validatePlayerTurnModelTextFields({
+    toolInput: input,
+    context,
+    pathPrefix,
+    fields: ["text", "futureRelevance"],
+  });
+  if (textIssue) return textIssue;
+
   if (textHasUnsupportedActionClaim(eventText)) {
     return scopedIssue(
       "unsupported_action_claim",
@@ -1202,6 +1213,79 @@ function validateRefArray(input: {
       backendOnlyRefs: input.context.backendOnlyRefs,
     });
     if (issue) return issue;
+  }
+  return null;
+}
+
+function generalModelFacingRefs(context: ToolExecutionContext): Set<string> {
+  return mergeSets(
+    context.subjectActorRefs,
+    context.legalActorRefs,
+    context.legalItemRefs,
+    context.legalLocationRefs,
+    context.legalFactionRefs,
+    context.legalMovementRefs,
+    context.currentLocationRefs,
+    context.currentSceneRefs,
+    context.sameTurnResultRefs ?? new Set(),
+  );
+}
+
+function validatePlayerTurnModelText(input: {
+  value: unknown;
+  context: ToolExecutionContext;
+  path: string;
+}): ToolGroundingIssue | null {
+  if (!strictModelFacingRefs(input.context)) return null;
+  if (typeof input.value !== "string" || !input.value.trim()) return null;
+  if (!isBackendOnlyModelRef(input.value)) return null;
+  const refHints = modelFacingRefHints(
+    generalModelFacingRefs(input.context),
+    input.context.backendOnlyRefs,
+  );
+  return scopedIssue(
+    "invalid_source_ref",
+    input.path,
+    `${input.path} contains a backend-only ref in model-authored text. Use visible labels, helper aliases, or structured ref fields instead.`,
+    input.value,
+    refHints,
+  );
+}
+
+function validatePlayerTurnModelTextFields(input: {
+  toolInput: Record<string, unknown>;
+  context: ToolExecutionContext;
+  pathPrefix: string;
+  fields: readonly string[];
+}): ToolGroundingIssue | null {
+  for (const field of input.fields) {
+    const issue = validatePlayerTurnModelText({
+      value: input.toolInput[field],
+      context: input.context,
+      path: `${input.pathPrefix}.${field}`,
+    });
+    if (issue) return issue;
+  }
+  return null;
+}
+
+function validateClaimModelTextFields(input: {
+  claims: unknown;
+  context: ToolExecutionContext;
+  pathPrefix: string;
+}): ToolGroundingIssue | null {
+  if (!Array.isArray(input.claims)) return null;
+  for (const [index, claim] of input.claims.entries()) {
+    if (!claim || typeof claim !== "object" || Array.isArray(claim)) continue;
+    const record = claim as Record<string, unknown>;
+    for (const field of ["subjectText", "summary"] as const) {
+      const issue = validatePlayerTurnModelText({
+        value: record[field],
+        context: input.context,
+        path: `${input.pathPrefix}.${index}.${field}`,
+      });
+      if (issue) return issue;
+    }
   }
   return null;
 }
@@ -1418,6 +1502,18 @@ function validateRecordDialogueOutcomeGrounding(
   });
   if (sourceIssue) return sourceIssue;
 
+  const textIssue = validatePlayerTurnModelTextFields({
+    toolInput: input,
+    context,
+    pathPrefix,
+    fields: ["futureRelevance", "requestedRoleText", "quote", "summary"],
+  }) ?? validateClaimModelTextFields({
+    claims: input.claims,
+    context,
+    pathPrefix: `${pathPrefix}.claims`,
+  });
+  if (textIssue) return textIssue;
+
   if (durability === "durable") {
     if (typeof input.futureUseKind !== "string" || !input.futureUseKind.trim()) {
       return scopedIssue(
@@ -1519,6 +1615,101 @@ function validateRecordWorldFactGrounding(
     }
   }
 
+  const weakEvidenceIssue = validateWorldFactKnownEvidenceStrength(input, context, pathPrefix);
+  if (weakEvidenceIssue) return weakEvidenceIssue;
+
+  const textIssue = validatePlayerTurnModelTextFields({
+    toolInput: input,
+    context,
+    pathPrefix,
+    fields: ["futureRelevance", "summary"],
+  }) ?? validateClaimModelTextFields({
+    claims: input.claims,
+    context,
+    pathPrefix: `${pathPrefix}.claims`,
+  });
+  if (textIssue) return textIssue;
+
+  return null;
+}
+
+function isStrongWorldFactTruthStatus(value: unknown): boolean {
+  return value === "observed" || value === "verified";
+}
+
+function isWeakKnownFact(fact: BridgeKnownFactSnapshot): boolean {
+  return fact.truthStatus !== "observed" && fact.truthStatus !== "verified";
+}
+
+function weakKnownFactRefs(context: ToolExecutionContext): Set<string> {
+  const refs = new Set<string>();
+  for (const fact of context.bridgeLookup?.playerKnownFacts ?? []) {
+    if (!isWeakKnownFact(fact)) continue;
+    addRefs(refs, [fact.id, ...fact.sourceRefs]);
+  }
+  return refs;
+}
+
+function firstWeakKnownFactRef(input: {
+  values: unknown;
+  refs: ReadonlySet<string>;
+}): string | null {
+  if (!Array.isArray(input.values)) return null;
+  for (const value of input.values) {
+    if (typeof value === "string" && hasRef(input.refs, value)) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function validateWorldFactKnownEvidenceStrength(
+  input: Record<string, unknown>,
+  context: ToolExecutionContext,
+  pathPrefix: string,
+): ToolGroundingIssue | null {
+  if (!isStrongWorldFactTruthStatus(input.truthStatus)) return null;
+  const weakRefs = weakKnownFactRefs(context);
+  if (weakRefs.size === 0) return null;
+
+  const sourceRef = firstWeakKnownFactRef({ values: input.sourceRefs, refs: weakRefs });
+  if (sourceRef) {
+    return scopedIssue(
+      "invalid_source_ref",
+      `${pathPrefix}.sourceRefs`,
+      "reported, rumored, claimed, believed, or disputed player-known facts cannot be promoted to observed/verified world facts without direct visible or backend authority evidence.",
+      sourceRef,
+      modelFacingRefHints(worldFactSourceRefs(context), context.backendOnlyRefs),
+    );
+  }
+
+  const subjectRef = firstWeakKnownFactRef({ values: input.subjectRefs, refs: weakRefs });
+  if (subjectRef) {
+    return scopedIssue(
+      "invalid_source_ref",
+      `${pathPrefix}.subjectRefs`,
+      "reported, rumored, claimed, believed, or disputed player-known facts cannot be promoted to observed/verified world facts without direct visible or backend authority evidence.",
+      subjectRef,
+      modelFacingRefHints(worldFactSourceRefs(context), context.backendOnlyRefs),
+    );
+  }
+
+  if (Array.isArray(input.claims)) {
+    for (const [index, claim] of input.claims.entries()) {
+      if (!claim || typeof claim !== "object" || Array.isArray(claim)) continue;
+      const subject = (claim as Record<string, unknown>).subjectRef;
+      if (typeof subject === "string" && hasRef(weakRefs, subject)) {
+        return scopedIssue(
+          "invalid_source_ref",
+          `${pathPrefix}.claims.${index}.subjectRef`,
+          "reported, rumored, claimed, believed, or disputed player-known facts cannot be promoted to observed/verified world facts without direct visible or backend authority evidence.",
+          subject,
+          modelFacingRefHints(worldFactSourceRefs(context), context.backendOnlyRefs),
+        );
+      }
+    }
+  }
+
   return null;
 }
 
@@ -1606,6 +1797,20 @@ export function validateToolInputGrounding(input: {
     }
     case "log_event":
       return validateLogEventGrounding(toolInput, input.context, path);
+    case "add_chronicle_entry":
+      if (input.context.scope === "player_turn") {
+        return scopedIssue(
+          "unsupported_tool_owner",
+          path,
+          "player_turn cannot author chronicle entries directly; record the concrete event/fact/dialogue receipt and let chronicle projection summarize accepted authoritative state.",
+        );
+      }
+      return validatePlayerTurnModelTextFields({
+        toolInput,
+        context: input.context,
+        pathPrefix: path,
+        fields: ["text"],
+      });
     case "record_dialogue_outcome":
       return validateRecordDialogueOutcomeGrounding(toolInput, input.context, path);
     case "record_world_fact":

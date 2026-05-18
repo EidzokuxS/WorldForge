@@ -58,6 +58,18 @@ function createAuthorityContext(baseWorldVersion: number): ToolExecutionContext 
   };
 }
 
+function createBackgroundChronicleContext(baseWorldVersion: number): ToolExecutionContext {
+  const context = createAuthorityContext(baseWorldVersion);
+  context.scope = "background";
+  context.authority = {
+    baseWorldVersion,
+    sourceEntity: { type: "system", id: "chronicle-projection" },
+    elapsedWorldTimeMinutes: 1,
+    allowedWriteScopes: ["*"],
+  };
+  return context;
+}
+
 describe("executeToolCall authority bridge", () => {
   beforeEach(async () => {
     previousCampaignsRoot = process.env.GSD_CAMPAIGNS_ROOT;
@@ -82,7 +94,7 @@ describe("executeToolCall authority bridge", () => {
   });
 
   it("commits a state-bearing tool result with authority metadata and advances context base", async () => {
-    const context = createAuthorityContext(0);
+    const context = createBackgroundChronicleContext(0);
 
     const result = await executeToolCall(
       CAMPAIGN_ID,
@@ -122,6 +134,32 @@ describe("executeToolCall authority bridge", () => {
       context,
     });
     expect(context.authority?.baseWorldVersion).toBe(1);
+  });
+
+  it("rejects player-turn chronicle entries before inserting rows", async () => {
+    const context = createAuthorityContext(0);
+
+    const result = await executeToolCall(
+      CAMPAIGN_ID,
+      "add_chronicle_entry",
+      { text: "The player model tries to author the chronicle." },
+      3,
+      undefined,
+      context,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.contractFailure).toMatchObject({
+      code: "unsupported_tool_owner",
+      toolName: "add_chronicle_entry",
+    });
+    expect(
+      getDb()
+        .select()
+        .from(chronicle)
+        .where(eq(chronicle.campaignId, CAMPAIGN_ID))
+        .all(),
+    ).toHaveLength(0);
   });
 
   it("rejects state-bearing tools when a runtime context has no authority", async () => {
@@ -225,7 +263,7 @@ describe("executeToolCall authority bridge", () => {
       { text: "The first entry." },
       3,
       undefined,
-      createAuthorityContext(0),
+      createBackgroundChronicleContext(0),
     );
 
     const staleResult = await executeToolCall(
@@ -234,7 +272,7 @@ describe("executeToolCall authority bridge", () => {
       { text: "This must not be inserted." },
       4,
       undefined,
-      createAuthorityContext(0),
+      createBackgroundChronicleContext(0),
     );
 
     expect(staleResult.success).toBe(false);
@@ -302,11 +340,18 @@ describe("executeToolCall authority bridge", () => {
     });
     expect(context.authority?.baseWorldVersion).toBe(1);
     expect(context.authority?.elapsedWorldTimeMinutes).toBe(0);
+    context.legalActorRefs.add("player");
 
     const followupResult = await executeToolCall(
       CAMPAIGN_ID,
-      "add_chronicle_entry",
-      { text: "The hour matters later." },
+      "log_event",
+      {
+        text: "The hour matters later.",
+        importance: 5,
+        participants: ["player"],
+        durability: "durable",
+        futureRelevance: "The elapsed hour should affect later trust checks.",
+      },
       0,
       undefined,
       context,

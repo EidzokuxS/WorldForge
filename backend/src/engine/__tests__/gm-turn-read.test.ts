@@ -600,10 +600,11 @@ describe("GM Read contract", () => {
     }).success).toBe(true);
 
     expect([...GM_READ_RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS]).toEqual(
-      [...RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS],
+      RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS.filter((effectKind) =>
+        effectKind !== "chronicle_entry"),
     );
 
-    for (const effectKind of RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS) {
+    for (const effectKind of GM_READ_RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS) {
       expect(gmReadSchema.safeParse({
         ...baseRead,
         path: "tool_plan",
@@ -641,16 +642,22 @@ describe("GM Read contract", () => {
     const contract = buildGmReadPromptContract({
       allowedTools: ["log_event", "set_condition"],
     });
+    const exposedTools = new Set(["log_event", "set_condition"]);
 
-    for (const effectKind of RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS) {
-      expect(contract).toContain(`"${effectKind}"`);
-      for (const ownerTool of runtimeRequirementStateMutationTools({
+    for (const effectKind of GM_READ_RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS) {
+      const ownerTools = runtimeRequirementStateMutationTools({
         kind: "state_mutation",
         effectKind,
-      })) {
-        expect(contract).toContain(ownerTool);
+      }).filter((ownerTool) => exposedTools.has(ownerTool));
+      if (ownerTools.length > 0) {
+        expect(contract).toContain(`"${effectKind}"`);
+        for (const ownerTool of ownerTools) {
+          expect(contract).toContain(ownerTool);
+        }
       }
     }
+    expect(contract).not.toContain('"chronicle_entry"');
+    expect(contract).not.toContain("add_chronicle_entry");
   });
 
   it("rejects runtime requirements that the current model-facing tool surface cannot satisfy", () => {

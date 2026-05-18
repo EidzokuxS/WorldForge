@@ -2760,11 +2760,18 @@ describe("executeToolCall", () => {
       expect(result.result).toMatchObject({
         kind: "move_actor",
         actorRef: "Hero",
+        playerId: "player-1",
         locationId: "loc-2",
         locationName: "Tea Lane",
         travelCost: 1,
         path: ["Town Square", "Tea Lane"],
       });
+      expect(result.authority?.stateDeltaRefs).toEqual(
+        expect.arrayContaining(["player:player-1:location", "location:loc-2"]),
+      );
+      expect(result.authority?.stateDeltaRefs ?? []).not.toEqual(
+        expect.arrayContaining(["npc:player-1:location"]),
+      );
       expect(state.players[0]).toMatchObject({
         currentLocationId: "loc-2",
         currentSceneLocationId: "loc-2",

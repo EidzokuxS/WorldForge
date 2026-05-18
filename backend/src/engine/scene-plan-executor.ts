@@ -240,7 +240,7 @@ export async function executeScenePlan(
       continue;
     }
 
-    if (action.toolName === "move_to") {
+    if (action.toolName === "move_to" || action.toolName === "move_actor") {
       const moveResult = getSuccessfulMoveToolResult(result);
       successfulTravel = moveResult ?? successfulTravel;
       if (moveResult) {

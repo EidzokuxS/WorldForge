@@ -110,6 +110,7 @@ export const RUNTIME_TOOL_DESCRIPTORS: Record<RuntimeToolName, RuntimeToolDescri
     toolName: "add_chronicle_entry",
     roles: ["state_mutation"],
     stateEffects: [{ effectKind: "chronicle_entry", ownerKind: "canonical" }],
+    hiddenInPlayerTurn: true,
   },
   log_event: {
     toolName: "log_event",

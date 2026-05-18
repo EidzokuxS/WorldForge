@@ -281,14 +281,19 @@ function buildRuntimeToolInvalidExampleLines(
   return ["Invalid examples:", ...invalidExamples];
 }
 
-function formatRuntimeRequirementStateEffectKindValues(): string {
+function formatRuntimeRequirementStateEffectKindValues(
+  selectedToolNames: readonly RuntimeToolName[],
+): string {
+  const selected = new Set(selectedToolNames);
   return RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS
-    .map((effectKind) => {
+    .flatMap((effectKind) => {
       const ownerTools = runtimeRequirementStateMutationTools({
         kind: "state_mutation",
         effectKind,
-      }).join("/");
-      return `"${effectKind}" (${ownerTools})`;
+      }).filter((toolName) => selected.has(toolName));
+      return ownerTools.length > 0
+        ? [`"${effectKind}" (${ownerTools.join("/")})`]
+        : [];
     })
     .join(", ");
 }
@@ -405,7 +410,7 @@ export function buildGmReadPromptContract(options: {
     'turnGrounding: { "intentKind": "ordinary_local_response"|"passive_status_read"|"procedural_information"|"posted_proof_applicability"|"document_state_assumption"|"concrete_state_change"|"combat_pressure"|"clarification_needed"|"other", "requiresGrounding": boolean, "groundingKind": "none"|"observation_read"|"dialogue_outcome"|"world_fact"|"scene_beat"|"state_mutation"|"roll_oracle"|"combat_transition", "topicKind"?: "social"|"procedure"|"permission"|"proof"|"route"|"safety"|"trade"|"status"|"other", "durability"?: "scene_local"|"durable", "reason": string }.',
     "runtimeRequirement is the typed runtime obligation for tool_plan, roll_oracle, and combat_transition when later runtime tools may mutate state. It tells the later tool loop what kind of outcome must be fulfilled; it is not a tool call and contains no payload.",
     'runtimeRequirement kinds: { "kind": "none" }, { "kind": "observation_read", "categories": ["visible_actors"|"visible_objects"|"routes"|"hazards"|"crowd"|"public_records"|"procedure"|"local_status"|"other"] }, { "kind": "dialogue_outcome", "durability": "scene_local"|"durable", "topicKind"?: "social"|"procedure"|"permission"|"proof"|"route"|"safety"|"trade"|"status"|"other", "requiresStructuralEffect"?: boolean }, { "kind": "world_fact", "durability": "durable", "topicKind"?: same dialogue/world-fact topicKind }, { "kind": "scene_beat", "durability": "scene_local"|"durable", "effectKind": StateEffectKind } OR { "kind": "scene_beat", "durability": "scene_local"|"durable", "beatKind": "event_log"|"time_passage" }, { "kind": "state_mutation", "effectKind": StateEffectKind }.',
-    `StateEffectKind values: ${formatRuntimeRequirementStateEffectKindValues()}. BeatKind values: "event_log" for log_event, "time_passage" for advance_time. Do not use generic state_mutation or scene_beat without a narrow kind.`,
+    `StateEffectKind values: ${formatRuntimeRequirementStateEffectKindValues(selectedToolNames)}. BeatKind values: "event_log" for log_event, "time_passage" for advance_time. Do not use generic state_mutation or scene_beat without a narrow kind.`,
     'Use observation_read for broad observation/status scans. Do not put "observation" or "public_record" in dialogue_outcome/world_fact.topicKind; public records belong in observation_read.categories or record_world_fact.sourceKind/factKind.',
     "For dialogue_outcome, set requiresStructuralEffect=true only when this turn should actually apply durable world/entity state now: access granted, guard convinced, suspicion attached/removed, mark/tag added, relationship changed, possession transferred, route opened, wound/condition set. Leave it false/omitted for rules, hypotheticals, warnings, or claims about what would be sufficient.",
     'For direct, continue, and clarification, omit runtimeRequirement or set { "kind": "none" }. For every tool_plan, include the narrowest non-none runtimeRequirement. For roll_oracle or combat_transition, use { "kind": "none" } only when the later loop should run observation-only tools; include a narrow non-none runtimeRequirement before any side-effecting state, scene-beat, or terminal receipt tool can run.',

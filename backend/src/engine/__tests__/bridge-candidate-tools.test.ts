@@ -279,6 +279,34 @@ describe("bridge candidate lookup tools", () => {
     expect(JSON.stringify(results)).toContain("East Tea Lane");
   });
 
+  it("keeps inspect_known_fact visible and known scopes separate", () => {
+    const context = createContext();
+
+    const visibleResult = executeBridgeCandidateTool(
+      "inspect_known_fact",
+      { query: "usually stall", scope: "visible", maxResults: 4 },
+      context,
+    );
+    expect(visibleResult.success).toBe(false);
+    expect(visibleResult.error).toBe("no_player_visible_or_known_fact");
+
+    const knownResult = executeBridgeCandidateTool(
+      "inspect_known_fact",
+      { query: "usually stall", scope: "known", maxResults: 4 },
+      context,
+    );
+    expect(knownResult.success).toBe(true);
+    expect(JSON.stringify(knownResult)).toContain("public tea stall");
+
+    const knownCurrentSceneResult = executeBridgeCandidateTool(
+      "inspect_known_fact",
+      { query: "counter faces a crowd", scope: "known", maxResults: 4 },
+      context,
+    );
+    expect(knownCurrentSceneResult.success).toBe(false);
+    expect(knownCurrentSceneResult.error).toBe("no_player_visible_or_known_fact");
+  });
+
   it("returns observation-only fuzzy POI and location candidates from visible/legal refs", () => {
     const context = createContext();
 
