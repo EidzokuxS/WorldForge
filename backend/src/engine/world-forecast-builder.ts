@@ -515,12 +515,14 @@ function priorForecastForPrompt(
 ): unknown {
   if (!forecast) return null;
   const promptRefs = buildForecastPromptRefMap(packet);
+  const promptVisibleEntries = forecast.entries.filter((entry) => entry.privacy === "public");
   return sanitizeModelFacingJson(
     {
       baseTick: forecast.baseTick,
       generatedAtTick: forecast.generatedAtTick,
       expiresAtTick: forecast.expiresAtTick,
-      entries: forecast.entries.map((entry, entryIndex) => ({
+      omittedNonPublicEntryCount: forecast.entries.length - promptVisibleEntries.length,
+      entries: promptVisibleEntries.map((entry, entryIndex) => ({
         entryId: `forecast_${entryIndex + 1}`,
         horizonTicks: entry.horizonTicks,
         subjectRefs: entry.subjectRefs.map((subject, subjectIndex) => ({

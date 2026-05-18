@@ -321,6 +321,79 @@ describe("world forecast builder", () => {
     expect(prompt).toContain("[backend ref hidden]");
   });
 
+  it("omits non-public prior forecast entries from refresh prompts", async () => {
+    vi.mocked(safeGenerateObject).mockResolvedValueOnce({
+      object: forecastBuilderOutputSchema.parse({
+        expiresInTicks: 3,
+        entries: [],
+        diagnostics: { notes: [] },
+      }),
+      trace: {
+        text: "{}",
+        cleanedText: "{}",
+      },
+    } as Awaited<ReturnType<typeof safeGenerateObject>>);
+
+    await runWorldForecastBuilder({
+      provider,
+      frame: createFrame(),
+      priorForecast: worldTrajectoryForecastSchema.parse({
+        version: "world-trajectory-forecast.v1",
+        campaignId: "campaign-forecast",
+        baseTick: 20,
+        generatedAtTick: 20,
+        expiresAtTick: 25,
+        entries: [
+          {
+            id: "forecast-public",
+            baseTick: 20,
+            horizonTicks: 3,
+            subjectRefs: [{ type: "location", id: "loc-pier", label: "Lantern-Lit Gondola Pier" }],
+            confidence: 0.5,
+            privacy: "public",
+            playerFacingEligibility: "local_public",
+            locality: {
+              locationRefs: ["loc-pier"],
+              sceneRefs: ["scene-counter"],
+              actorRefs: ["actor-player"],
+            },
+            advisoryText: "Public pier pressure remains active.",
+            preconditions: [],
+            advisorySignals: [{ label: "visible queue pressure" }],
+            privateTerms: [],
+          },
+          {
+            id: "forecast-private",
+            baseTick: 20,
+            horizonTicks: 3,
+            subjectRefs: [{ type: "actor", id: "actor-hidden", label: "Hidden Warden" }],
+            confidence: 0.7,
+            privacy: "private",
+            playerFacingEligibility: "never",
+            locality: {
+              locationRefs: ["loc-pier"],
+              sceneRefs: ["scene-counter"],
+              actorRefs: ["actor-hidden"],
+            },
+            advisoryText: "Hidden Warden prepares a private warrant.",
+            preconditions: ["private warrant is unsigned"],
+            advisorySignals: [{ label: "sealed warrant" }],
+            privateTerms: ["Hidden Warden", "private warrant"],
+          },
+        ],
+        diagnostics: { source: "manual", notes: [] },
+      }),
+    });
+
+    const prompt = String(vi.mocked(safeGenerateObject).mock.calls[0]?.[0]?.prompt ?? "");
+    expect(prompt).toContain("Public pier pressure remains active.");
+    expect(prompt).toContain("\"omittedNonPublicEntryCount\": 1");
+    expect(prompt).not.toContain("Hidden Warden");
+    expect(prompt).not.toContain("private warrant");
+    expect(prompt).not.toContain("sealed warrant");
+    expect(prompt).not.toContain("actor-hidden");
+  });
+
   it("keeps executable payloads out of the draft schema before final forecast validation", () => {
     expect(forecastBuilderOutputSchema.safeParse({
       expiresInTicks: 3,
