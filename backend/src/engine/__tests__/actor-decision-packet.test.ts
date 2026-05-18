@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ActorDecisionPacketValidationError,
   assertActorDecisionPacket,
+  buildActorDecisionPacketSchema,
   validateActorDecisionPacket,
   type ActorDecisionPacketFrameLike,
 } from "../actor-decision-packet.js";
@@ -18,6 +19,52 @@ const frame: ActorDecisionPacketFrameLike = {
 };
 
 describe("ActorDecisionPacket", () => {
+  it("builds a model schema from only frame-legal actor tools", () => {
+    const schema = buildActorDecisionPacketSchema({
+      legalTools: ["log_event"],
+      allowProposedToolNames: false,
+    });
+
+    expect(schema.safeParse({
+      citedFactIds: ["f1"],
+      intent: "Record the visible warning.",
+      requestedTools: [
+        {
+          toolName: "log_event",
+          purpose: "record the visible warning beat",
+          input: {
+            text: "The watcher warns the player.",
+            importance: 3,
+            participants: ["Watcher"],
+            durability: "scene_local",
+          },
+        },
+      ],
+    }).success).toBe(true);
+    expect(schema.safeParse({
+      citedFactIds: ["f1"],
+      intent: "Try to spawn a non-legal actor.",
+      requestedTools: [
+        {
+          toolName: "spawn_npc",
+          purpose: "not legal in this ActorFrame",
+          input: {
+            name: "Extra",
+            tags: ["support"],
+            locationRef: "current_scene",
+          },
+        },
+      ],
+    }).success).toBe(false);
+    expect(schema.safeParse({
+      citedFactIds: ["f1"],
+      intent: "Use a legacy field.",
+      requestedTools: [],
+      proposedToolNames: ["log_event"],
+      noActionReason: "No grounded action.",
+    }).success).toBe(false);
+  });
+
   it("accepts a cited, legal actor tool request", () => {
     const packet = assertActorDecisionPacket({
       frame,

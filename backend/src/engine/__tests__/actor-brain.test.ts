@@ -154,6 +154,31 @@ describe("runActorDecisionBrain", () => {
     expect(prompt).toContain("[backend ref hidden]");
   });
 
+  it("omits backend control metadata from ActorFrame prompts", () => {
+    const prompt = buildActorDecisionPrompt({
+      ...frame,
+      hiddenExcludedCount: 7,
+      facts: [
+        {
+          id: "self:npc-1",
+          route: "self_state",
+          text: "Gate Clerk is present.",
+          subjectRefs: ["npc-1"],
+          confidence: 1,
+          deliveredAtWorldTimeMinutes: 123,
+          observedAtWorldVersion: 456,
+        },
+      ],
+    });
+
+    expect(prompt).not.toContain('"worldVersion"');
+    expect(prompt).not.toContain('"hiddenExcludedCount"');
+    expect(prompt).not.toContain('"deliveredAtWorldTimeMinutes"');
+    expect(prompt).not.toContain('"observedAtWorldVersion"');
+    expect(prompt).not.toContain("123");
+    expect(prompt).not.toContain("456");
+  });
+
   it("warns actors not to flatten runtime tool args beside input", () => {
     const prompt = buildActorDecisionPrompt(frame);
 
@@ -256,6 +281,53 @@ describe("runActorDecisionBrain", () => {
       futureRelevance:
         "The stamped Council seal should constrain later attempts to enter through this gate.",
     });
+  });
+
+  it("sends a schema that exposes only frame-legal actor tools", async () => {
+    safeGenerateObjectMock.mockResolvedValue({
+      object: {
+        citedFactIds: ["f1"],
+        intent: "The clerk waits without a grounded action.",
+        requestedTools: [],
+        noActionReason: "No legal world-facing tool is available.",
+      },
+      trace: { usage: null, reasoningText: "" },
+    });
+
+    await runActorDecisionBrain({
+      provider,
+      frame: {
+        ...frame,
+        legalTools: [],
+      },
+    });
+
+    const schema = safeGenerateObjectMock.mock.calls[0]?.[0]?.schema as {
+      safeParse?: (value: unknown) => { success: boolean };
+    };
+    expect(schema.safeParse?.({
+      citedFactIds: ["f1"],
+      intent: "Try a non-legal tool.",
+      requestedTools: [
+        {
+          toolName: "log_event",
+          purpose: "not legal here",
+          input: {
+            text: "The clerk speaks.",
+            importance: 2,
+            participants: ["Gate Clerk"],
+            durability: "scene_local",
+          },
+        },
+      ],
+    }).success).toBe(false);
+    expect(schema.safeParse?.({
+      citedFactIds: ["f1"],
+      intent: "Try legacy proposed tool names.",
+      requestedTools: [],
+      proposedToolNames: ["log_event"],
+      noActionReason: "No legal tool is available.",
+    }).success).toBe(false);
   });
 
   it("accepts natural typed private updates without relaxing tool request shape", async () => {

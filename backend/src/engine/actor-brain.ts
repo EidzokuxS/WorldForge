@@ -2,8 +2,8 @@ import { safeGenerateObject } from "../ai/generate-object-safe.js";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
 import { createLogger, withRole } from "../lib/index.js";
 import {
-  actorDecisionPacketSchema,
   assertActorDecisionPacket,
+  buildActorDecisionPacketSchema,
   type ActorDecisionPacket,
 } from "./actor-decision-packet.js";
 import type { ActorFrame } from "./actor-frame.js";
@@ -58,7 +58,6 @@ function actorPromptStrings(
 function formatActorFrame(frame: ActorFrame): string {
   return JSON.stringify(
     {
-      worldVersion: frame.worldVersion,
       observer: {
         label: actorPromptText(frame, frame.observer.label, 120),
         type: frame.observer.type,
@@ -70,12 +69,9 @@ function formatActorFrame(frame: ActorFrame): string {
         text: actorPromptText(frame, fact.text, 900),
         confidence: fact.confidence,
         reliability: fact.reliability,
-        deliveredAtWorldTimeMinutes: fact.deliveredAtWorldTimeMinutes,
-        observedAtWorldVersion: fact.observedAtWorldVersion,
       })),
       legalTools: frame.legalTools,
       constraints: actorPromptStrings(frame, frame.constraints, 500),
-      hiddenExcludedCount: frame.hiddenExcludedCount,
     },
     null,
     2,
@@ -263,7 +259,10 @@ export async function runActorDecisionBrain(
   const result = await withRole("judge", () =>
     safeGenerateObject({
       model: createModel(args.provider, { role: "judge", reasoningMode: "bypass" }),
-      schema: actorDecisionPacketSchema,
+      schema: buildActorDecisionPacketSchema({
+        legalTools: args.frame.legalTools,
+        allowProposedToolNames: false,
+      }),
       system: buildActorDecisionSystem(),
       prompt,
       temperature: 0.2,

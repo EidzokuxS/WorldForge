@@ -31,6 +31,7 @@ const actorDecisionExcludedToolNameSet = new Set<string>([
 const actorDecisionRuntimeToolNames = runtimeToolNames.filter(
   (toolName) => !actorDecisionExcludedToolNameSet.has(toolName),
 ) as [ActorDecisionRuntimeToolName, ...ActorDecisionRuntimeToolName[]];
+const actorDecisionRuntimeToolNameSet = new Set<string>(actorDecisionRuntimeToolNames);
 
 const actorDecisionToolRequestSchemas = actorDecisionRuntimeToolNames.map((toolName) =>
   z
@@ -51,10 +52,12 @@ const actorDecisionToolRequestSchemas = actorDecisionRuntimeToolNames.map((toolN
       `Actor tool request for ${toolName}. Shape must be exactly { toolName, purpose, input }; runtime args belong only inside input.`,
     ),
 );
-const toolRequestSchema = z.discriminatedUnion(
-  "toolName",
-  actorDecisionToolRequestSchemas as unknown as Parameters<typeof z.discriminatedUnion>[1],
-) as z.ZodType<ActorDecisionToolRequest>;
+const actorDecisionToolRequestSchemaByName = new Map(
+  actorDecisionRuntimeToolNames.map((toolName, index) => [
+    toolName,
+    actorDecisionToolRequestSchemas[index] as z.ZodType<ActorDecisionToolRequest>,
+  ]),
+);
 
 export interface ActorDecisionToolRequest {
   toolName: ActorDecisionRuntimeToolName;
@@ -96,6 +99,21 @@ export interface ActorDecisionPacket {
    */
   proposedToolNames?: ActorDecisionRuntimeToolName[];
 }
+
+export interface ActorDecisionPacketDraft {
+  decisionSummary?: string;
+  citedFactIds: string[];
+  selectedGoal?: string | null;
+  intent: string;
+  requestedTools: ActorDecisionToolRequest[];
+  beliefUpdates: string[];
+  planUpdates: ActorDecisionPlanUpdate[];
+  nextDecisionTrigger?: ActorDecisionTrigger;
+  noActionReason?: string | null;
+  proposedToolNames?: ActorDecisionRuntimeToolName[];
+}
+
+export type ParsedActorDecisionPacket = ActorDecisionPacketDraft & { actorId: string };
 
 export interface ActorDecisionPacketFrameLike {
   observer?: {
@@ -231,8 +249,47 @@ const nextDecisionTriggerSchema = z
   })
   .strict();
 
-export const actorDecisionPacketSchema = z
-  .object({
+function legalActorDecisionToolNames(
+  legalTools?: readonly RuntimeToolName[],
+): ActorDecisionRuntimeToolName[] {
+  const source = legalTools ?? actorDecisionRuntimeToolNames;
+  return source.filter((toolName): toolName is ActorDecisionRuntimeToolName =>
+    actorDecisionRuntimeToolNameSet.has(toolName));
+}
+
+function buildRequestedToolsSchema(
+  legalTools?: readonly RuntimeToolName[],
+): z.ZodType<ActorDecisionToolRequest[]> {
+  const schemas = legalActorDecisionToolNames(legalTools)
+    .map((toolName) => actorDecisionToolRequestSchemaByName.get(toolName))
+    .filter((schema): schema is z.ZodType<ActorDecisionToolRequest> => Boolean(schema));
+  if (schemas.length === 0) {
+    return z
+      .array(z.object({}).strict() as unknown as z.ZodType<ActorDecisionToolRequest>)
+      .max(0)
+      .default([])
+      .describe("No actor tools are legal for this ActorFrame. Return requestedTools: [] only.");
+  }
+  const requestSchema = schemas.length === 1
+    ? schemas[0]
+    : z.discriminatedUnion(
+        "toolName",
+        schemas as unknown as Parameters<typeof z.discriminatedUnion>[1],
+      ) as z.ZodType<ActorDecisionToolRequest>;
+  return z
+    .array(requestSchema)
+    .max(ACTOR_DECISION_MAX_TOOLS)
+    .default([])
+    .describe(
+      "Actor tool requests. Each entry must be exactly { toolName, purpose, input }. Never flatten input fields such as text, importance, participants, durability, or futureRelevance onto the request object.",
+    );
+}
+
+export function buildActorDecisionPacketSchema(args: {
+  legalTools?: readonly RuntimeToolName[];
+  allowProposedToolNames?: boolean;
+} = {}): z.ZodType<ActorDecisionPacketDraft> {
+  const shape = {
     decisionSummary: z.string().trim().min(1).max(800).optional(),
     citedFactIds: z
       .array(z.string().trim().min(1).max(200))
@@ -241,13 +298,7 @@ export const actorDecisionPacketSchema = z
       .describe("Short fact refs such as f1/f2 from the ActorFrame prompt. Do not copy backend fact ids."),
     selectedGoal: z.string().trim().min(1).max(500).nullable().optional(),
     intent: z.string().trim().min(1).max(800),
-    requestedTools: z
-      .array(toolRequestSchema)
-      .max(ACTOR_DECISION_MAX_TOOLS)
-      .default([])
-      .describe(
-        "Actor tool requests. Each entry must be exactly { toolName, purpose, input }. Never flatten input fields such as text, importance, participants, durability, or futureRelevance onto the request object.",
-      ),
+    requestedTools: buildRequestedToolsSchema(args.legalTools),
     beliefUpdates: z
       .array(beliefUpdateSchema)
       .max(6)
@@ -264,21 +315,30 @@ export const actorDecisionPacketSchema = z
       ),
     nextDecisionTrigger: nextDecisionTriggerSchema.optional(),
     noActionReason: z.string().trim().min(1).max(500).nullable().optional(),
-    proposedToolNames: z.array(z.enum(actorDecisionRuntimeToolNames)).max(ACTOR_DECISION_MAX_TOOLS).optional(),
-  })
-  .strict()
-  .superRefine((packet, ctx) => {
-    if ((packet.requestedTools?.length ?? 0) === 0 && !packet.noActionReason?.trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["noActionReason"],
-        message: "noActionReason is required when the actor requests no tools",
-      });
-    }
-  });
+    ...((args.allowProposedToolNames ?? true)
+      ? {
+          proposedToolNames: z.array(z.enum(actorDecisionRuntimeToolNames))
+            .max(ACTOR_DECISION_MAX_TOOLS)
+            .optional(),
+        }
+      : {}),
+  };
+  return z
+    .object(shape)
+    .strict()
+    .superRefine((packet, ctx) => {
+      const draft = packet as ActorDecisionPacketDraft;
+      if (draft.requestedTools.length === 0 && !draft.noActionReason?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["noActionReason"],
+          message: "noActionReason is required when the actor requests no tools",
+        });
+      }
+    }) as z.ZodType<ActorDecisionPacketDraft>;
+}
 
-export type ActorDecisionPacketDraft = z.infer<typeof actorDecisionPacketSchema>;
-export type ParsedActorDecisionPacket = Omit<ActorDecisionPacketDraft, "actorId"> & { actorId: string };
+export const actorDecisionPacketSchema = buildActorDecisionPacketSchema();
 
 export function parseActorDecisionPacket(input: unknown): ActorDecisionPacketDraft {
   return actorDecisionPacketSchema.parse(input);

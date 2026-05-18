@@ -125,12 +125,6 @@ export interface RunRequiredActorDecisionPassResult {
   parallelPrepTrace: ParallelSimulationRunTrace[];
 }
 
-function compactSignalReason(decision: ActorScheduleDecision): string[] {
-  return decision.signals
-    .slice(0, 6)
-    .map((signal) => `${signal.type}: ${signal.reason}`);
-}
-
 function newestPlanUpdate(
   packet: ParsedActorDecisionPacket,
 ): ParsedActorDecisionPacket["planUpdates"][number] | null {
@@ -567,10 +561,7 @@ async function prepareActorDecision(input: {
     publicRecords: input.knowledge.publicRecords,
     legalTools: input.args.legalTools ?? ACTOR_TURN_LEGAL_TOOLS,
     constraints: [
-      `scheduler route: ${input.decision.route}`,
-      `scheduler reason: ${input.decision.reason}`,
       "Act only as this NPC within the visible turn boundary. Do not decide for the player, the GM, or backend systems.",
-      ...compactSignalReason(input.decision),
     ],
   });
   const packet = input.args.decideActor
