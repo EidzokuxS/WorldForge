@@ -415,7 +415,7 @@ describe("record_dialogue_outcome schema", () => {
           summary: "The guard now has the cleared-by-bluff tag.",
         },
       ],
-    }).success).toBe(true);
+    }).success).toBe(false);
 
     expect(runtimeToolInputSchemas.record_dialogue_outcome.safeParse({
       ...base,

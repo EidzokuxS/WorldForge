@@ -2,18 +2,21 @@ import { describe, expect, it } from "vitest";
 
 import {
   attachStructuralStateReceiptsToToolResult,
+  dialogueStateTokenAliases,
   receiptBacksAppliedStateEffect,
   resolveAppliedStateEffectFromReceipt,
+  type StructuralStateReceipt,
   structuralStateReceiptFromToolCall,
 } from "../dialogue-state-receipt.js";
 import {
   DIALOGUE_STRUCTURAL_EFFECT_TOOL_NAMES,
   dialogueStateReceiptKeysForTool,
   dialogueStateEffectStateKeyDescription,
+  normalizeDialogueStateReceiptKey,
   type DialogueStructuralEffectToolName,
 } from "../dialogue-state-receipt-contract.js";
 import { runtimeToolInputSchemas } from "../tool-schemas.js";
-import type { ToolResult } from "../tool-result.js";
+import { toModelVisibleToolResult, type ToolResult } from "../tool-result.js";
 
 function mutationToolResult(result: unknown): ToolResult {
   return {
@@ -62,6 +65,23 @@ function dialogueOutcomeInput(stateEffect: Record<string, unknown>) {
   };
 }
 
+function receiptHasAppliedStateRelation(
+  receipt: StructuralStateReceipt,
+  effect: Record<string, unknown>,
+): boolean {
+  const targetRef = typeof effect.targetRef === "string" ? effect.targetRef : null;
+  const stateKey = typeof effect.stateKey === "string" ? effect.stateKey : null;
+  const stateValue = typeof effect.stateValue === "string" ? effect.stateValue : null;
+  if (!targetRef || !stateKey || !stateValue) return false;
+  const targetAliases = dialogueStateTokenAliases(targetRef);
+  const stateValueAliases = dialogueStateTokenAliases(stateValue);
+  const normalizedStateKey = normalizeDialogueStateReceiptKey(stateKey);
+  return receipt.relations.some((relation) =>
+    relation.stateKey === normalizedStateKey
+    && targetAliases.some((alias) => relation.targetRefs.has(alias))
+    && stateValueAliases.some((alias) => relation.stateValues.has(alias)));
+}
+
 describe("dialogue state receipts", () => {
   it("backs document verification stateEffects with prior tag receipts", () => {
     const receipt = structuralStateReceiptFromToolCall({
@@ -79,7 +99,7 @@ describe("dialogue state receipts", () => {
     });
 
     expect(receipt).not.toBeNull();
-    expect(receiptBacksAppliedStateEffect(receipt!, {
+    expect(receiptHasAppliedStateRelation(receipt!, {
       status: "applied_now",
       structuralTool: "add_tag",
       targetRef: "Anonymous sealed proof",
@@ -140,6 +160,37 @@ describe("dialogue state receipts", () => {
     })).toBe(false);
   });
 
+  it("exposes only opaque stateReceipt aliases to the model", () => {
+    const toolResult = mutationToolResult({
+      entity: "actor:backend-guard-id",
+      appliedTag: "cleared-by-bluff",
+      tags: ["cleared-by-bluff"],
+    });
+    attachStructuralStateReceiptsToToolResult({
+      toolName: "add_tag",
+      candidateInput: {
+        entityName: "actor:backend-guard-id",
+        entityType: "npc",
+        tag: "cleared-by-bluff",
+      },
+      result: toolResult,
+      prefix: "state_receipt_1",
+    });
+
+    expect(toolResult.stateReceipts?.[0]).toMatchObject({
+      stateReceipt: "state_receipt_1_1",
+      tool: "add_tag",
+      key: "tag",
+      value: "cleared-by-bluff",
+    });
+    const modelVisibleReceipts = toModelVisibleToolResult(toolResult).stateReceipts;
+    expect(modelVisibleReceipts?.length).toBe(toolResult.stateReceipts?.length);
+    expect(modelVisibleReceipts?.[0]).toEqual({ stateReceipt: "state_receipt_1_1" });
+    expect(modelVisibleReceipts?.every((receipt) =>
+      Object.keys(receipt).length === 1
+      && typeof receipt.stateReceipt === "string")).toBe(true);
+  });
+
   it("does not let a tag receipt back an unrelated state key", () => {
     const receipt = structuralStateReceiptFromToolCall({
       toolName: "add_tag",
@@ -155,7 +206,7 @@ describe("dialogue state receipts", () => {
     });
 
     expect(receipt).not.toBeNull();
-    expect(receiptBacksAppliedStateEffect(receipt!, {
+    expect(receiptHasAppliedStateRelation(receipt!, {
       status: "applied_now",
       structuralTool: "add_tag",
       targetRef: "Anonymous sealed proof",
@@ -179,7 +230,7 @@ describe("dialogue state receipts", () => {
     });
 
     expect(receipt).not.toBeNull();
-    expect(receiptBacksAppliedStateEffect(receipt!, {
+    expect(receiptHasAppliedStateRelation(receipt!, {
       status: "applied_now",
       structuralTool: "add_tag",
       targetRef: "Anonymous sealed proof",
@@ -203,14 +254,14 @@ describe("dialogue state receipts", () => {
     });
 
     expect(receipt).not.toBeNull();
-    expect(receiptBacksAppliedStateEffect(receipt!, {
+    expect(receiptHasAppliedStateRelation(receipt!, {
       status: "applied_now",
       structuralTool: "add_tag",
       targetRef: "Anonymous sealed proof",
       stateKey: "verification",
       stateValue: "starting-loadout",
     })).toBe(false);
-    expect(receiptBacksAppliedStateEffect(receipt!, {
+    expect(receiptHasAppliedStateRelation(receipt!, {
       status: "applied_now",
       structuralTool: "add_tag",
       targetRef: "Anonymous sealed proof",
@@ -235,28 +286,28 @@ describe("dialogue state receipts", () => {
     });
 
     expect(receipt).not.toBeNull();
-    expect(receiptBacksAppliedStateEffect(receipt!, {
+    expect(receiptHasAppliedStateRelation(receipt!, {
       status: "applied_now",
       structuralTool: "remove_tag",
       targetRef: "Gate Writ",
       stateKey: "status",
       stateValue: "blocked",
     })).toBe(false);
-    expect(receiptBacksAppliedStateEffect(receipt!, {
+    expect(receiptHasAppliedStateRelation(receipt!, {
       status: "applied_now",
       structuralTool: "remove_tag",
       targetRef: "Gate Writ",
       stateKey: "status",
       stateValue: "removed",
     })).toBe(false);
-    expect(receiptBacksAppliedStateEffect(receipt!, {
+    expect(receiptHasAppliedStateRelation(receipt!, {
       status: "applied_now",
       structuralTool: "remove_tag",
       targetRef: "Gate Writ",
       stateKey: "access",
       stateValue: "cleared",
     })).toBe(false);
-    expect(receiptBacksAppliedStateEffect(receipt!, {
+    expect(receiptHasAppliedStateRelation(receipt!, {
       status: "applied_now",
       structuralTool: "remove_tag",
       targetRef: "Gate Writ",
@@ -283,7 +334,7 @@ describe("dialogue state receipts", () => {
     });
 
     expect(receipt).not.toBeNull();
-    expect(receiptBacksAppliedStateEffect(receipt!, {
+    expect(receiptHasAppliedStateRelation(receipt!, {
       status: "applied_now",
       structuralTool: "transfer_item",
       targetRef: "Anonymous sealed proof",
@@ -314,35 +365,35 @@ describe("dialogue state receipts", () => {
     });
 
     expect(receipt).not.toBeNull();
-    expect(receiptBacksAppliedStateEffect(receipt!, {
+    expect(receiptHasAppliedStateRelation(receipt!, {
       status: "applied_now",
       structuralTool: "transfer_item",
       targetRef: "One Ration Slip",
       stateKey: "possession",
       stateValue: "Bureau Window Clerk",
     })).toBe(false);
-    expect(receiptBacksAppliedStateEffect(receipt!, {
+    expect(receiptHasAppliedStateRelation(receipt!, {
       status: "applied_now",
       structuralTool: "transfer_item",
       targetRef: "Two Ration Slips",
       stateKey: "possession",
       stateValue: "Bureau Window Clerk",
     })).toBe(true);
-    expect(receiptBacksAppliedStateEffect(receipt!, {
+    expect(receiptHasAppliedStateRelation(receipt!, {
       status: "applied_now",
       structuralTool: "transfer_item",
       targetRef: "Three Ration Slips",
       stateKey: "possession",
       stateValue: "split",
     })).toBe(true);
-    expect(receiptBacksAppliedStateEffect(receipt!, {
+    expect(receiptHasAppliedStateRelation(receipt!, {
       status: "applied_now",
       structuralTool: "transfer_item",
       targetRef: "Three Ration Slips",
       stateKey: "owner",
       stateValue: "split",
     })).toBe(false);
-    expect(receiptBacksAppliedStateEffect(receipt!, {
+    expect(receiptHasAppliedStateRelation(receipt!, {
       status: "applied_now",
       structuralTool: "transfer_item",
       targetRef: "Three Ration Slips",
@@ -410,91 +461,91 @@ describe("dialogue state receipts", () => {
     expect(revealReceipt).not.toBeNull();
     expect(poiReceipt).not.toBeNull();
 
-    expect(receiptBacksAppliedStateEffect(transferReceipt!, {
+    expect(receiptHasAppliedStateRelation(transferReceipt!, {
       status: "applied_now",
       structuralTool: "transfer_item",
       targetRef: "Two Ration Slips",
       stateKey: "equipState",
       stateValue: "Bureau Window Clerk",
     })).toBe(false);
-    expect(receiptBacksAppliedStateEffect(transferReceipt!, {
+    expect(receiptHasAppliedStateRelation(transferReceipt!, {
       status: "applied_now",
       structuralTool: "transfer_item",
       targetRef: "Two Ration Slips",
       stateKey: "owner",
       stateValue: "equipped",
     })).toBe(false);
-    expect(receiptBacksAppliedStateEffect(transferReceipt!, {
+    expect(receiptHasAppliedStateRelation(transferReceipt!, {
       status: "applied_now",
       structuralTool: "transfer_item",
       targetRef: "Two Ration Slips",
       stateKey: "owner",
       stateValue: "carried",
     })).toBe(false);
-    expect(receiptBacksAppliedStateEffect(transferReceipt!, {
+    expect(receiptHasAppliedStateRelation(transferReceipt!, {
       status: "applied_now",
       structuralTool: "transfer_item",
       targetRef: "Two Ration Slips",
       stateKey: "owner",
       stateValue: "Bureau Window Clerk",
     })).toBe(true);
-    expect(receiptBacksAppliedStateEffect(transferReceipt!, {
+    expect(receiptHasAppliedStateRelation(transferReceipt!, {
       status: "applied_now",
       structuralTool: "transfer_item",
       targetRef: "Two Ration Slips",
       stateKey: "equipState",
       stateValue: "equipped",
     })).toBe(true);
-    expect(receiptBacksAppliedStateEffect(transferReceipt!, {
+    expect(receiptHasAppliedStateRelation(transferReceipt!, {
       status: "applied_now",
       structuralTool: "transfer_item",
       targetRef: "Two Ration Slips",
       stateKey: "possession",
       stateValue: "equipped by Bureau Window Clerk",
     })).toBe(true);
-    expect(receiptBacksAppliedStateEffect(spawnReceipt!, {
+    expect(receiptHasAppliedStateRelation(spawnReceipt!, {
       status: "applied_now",
       structuralTool: "spawn_item",
       targetRef: "Stamped Delay Report",
       stateKey: "owner",
       stateValue: "created",
     })).toBe(false);
-    expect(receiptBacksAppliedStateEffect(spawnReceipt!, {
+    expect(receiptHasAppliedStateRelation(spawnReceipt!, {
       status: "applied_now",
       structuralTool: "spawn_item",
       targetRef: "Stamped Delay Report",
       stateKey: "item",
       stateValue: "Mira Voss",
     })).toBe(false);
-    expect(receiptBacksAppliedStateEffect(spawnReceipt!, {
+    expect(receiptHasAppliedStateRelation(spawnReceipt!, {
       status: "applied_now",
       structuralTool: "spawn_item",
       targetRef: "Stamped Delay Report",
       stateKey: "item",
       stateValue: "character",
     })).toBe(false);
-    expect(receiptBacksAppliedStateEffect(revealReceipt!, {
+    expect(receiptHasAppliedStateRelation(revealReceipt!, {
       status: "applied_now",
       structuralTool: "reveal_location",
       targetRef: "Old Archive Stair",
       stateKey: "route",
       stateValue: "revealed",
     })).toBe(false);
-    expect(receiptBacksAppliedStateEffect(revealReceipt!, {
+    expect(receiptHasAppliedStateRelation(revealReceipt!, {
       status: "applied_now",
       structuralTool: "reveal_location",
       targetRef: "Old Archive Stair",
       stateKey: "route",
       stateValue: "visible",
     })).toBe(false);
-    expect(receiptBacksAppliedStateEffect(poiReceipt!, {
+    expect(receiptHasAppliedStateRelation(poiReceipt!, {
       status: "applied_now",
       structuralTool: "create_minor_poi",
       targetRef: "location-court-annex",
       stateKey: "access",
       stateValue: "visible",
     })).toBe(false);
-    expect(receiptBacksAppliedStateEffect(poiReceipt!, {
+    expect(receiptHasAppliedStateRelation(poiReceipt!, {
       status: "applied_now",
       structuralTool: "create_minor_poi",
       targetRef: "Hidden Ledger Niche",
@@ -510,6 +561,7 @@ describe("dialogue state receipts", () => {
           dialogueOutcomeInput({
             effectId: `${structuralTool}-${stateKey}-effect`,
             status: "applied_now",
+            stateReceipt: "state_receipt_1_1",
             structuralTool,
             targetRef: "Anonymous sealed proof",
             stateKey,
@@ -557,14 +609,14 @@ describe("dialogue state receipts", () => {
 
     expect(tagReceipt).not.toBeNull();
     expect(transferReceipt).not.toBeNull();
-    expect(receiptBacksAppliedStateEffect(tagReceipt!, {
+    expect(receiptHasAppliedStateRelation(tagReceipt!, {
       status: "applied_now",
       structuralTool: "add_tag",
       targetRef: "Anonymous sealed proof",
       stateKey: "verification",
       summary: "Missing stateValue must not be enough.",
     })).toBe(false);
-    expect(receiptBacksAppliedStateEffect(transferReceipt!, {
+    expect(receiptHasAppliedStateRelation(transferReceipt!, {
       status: "applied_now",
       structuralTool: "transfer_item",
       targetRef: "Anonymous sealed proof",
@@ -582,6 +634,7 @@ describe("dialogue state receipts", () => {
         dialogueOutcomeInput({
           effectId: `${structuralTool}-${stateKey}`,
           status: "applied_now",
+          stateReceipt: "state_receipt_1_1",
           structuralTool,
           targetRef: "Anonymous sealed proof",
           stateKey,
@@ -725,35 +778,35 @@ describe("dialogue state receipts", () => {
       "old-archive-stair",
       "revealed",
     ]));
-    expect(receiptBacksAppliedStateEffect(spawnReceipt!, {
+    expect(receiptHasAppliedStateRelation(spawnReceipt!, {
       status: "applied_now",
       structuralTool: "spawn_item",
       targetRef: "Mira Voss",
       stateKey: "possession",
       stateValue: "created",
     })).toBe(false);
-    expect(receiptBacksAppliedStateEffect(spawnReceipt!, {
+    expect(receiptHasAppliedStateRelation(spawnReceipt!, {
       status: "applied_now",
       structuralTool: "spawn_item",
       targetRef: "Mira Voss",
       stateKey: "possession",
       stateValue: "Stamped Delay Report",
     })).toBe(true);
-    expect(receiptBacksAppliedStateEffect(spawnReceipt!, {
+    expect(receiptHasAppliedStateRelation(spawnReceipt!, {
       status: "applied_now",
       structuralTool: "spawn_item",
       targetRef: "Stamped Delay Report",
       stateKey: "possession",
       stateValue: "carried by Mira Voss",
     })).toBe(true);
-    expect(receiptBacksAppliedStateEffect(poiReceipt!, {
+    expect(receiptHasAppliedStateRelation(poiReceipt!, {
       status: "applied_now",
       structuralTool: "create_minor_poi",
       targetRef: "location-court-annex",
       stateKey: "visibility",
       stateValue: "visible",
     })).toBe(false);
-    expect(receiptBacksAppliedStateEffect(revealReceipt!, {
+    expect(receiptHasAppliedStateRelation(revealReceipt!, {
       status: "applied_now",
       structuralTool: "reveal_location",
       targetRef: "location-court-annex",

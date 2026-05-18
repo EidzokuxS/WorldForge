@@ -1885,12 +1885,8 @@ function effectHasPriorReceipt(
   stepResults: readonly GmToolStepResult[],
   dialogueStepIndex: number,
   effect: Record<string, unknown>,
-  options: { requireStateReceipt?: boolean } = {},
 ): boolean {
-  if (
-    options.requireStateReceipt === true
-    && !stringField(effect, "stateReceipt")
-  ) {
+  if (!stringField(effect, "stateReceipt")) {
     return false;
   }
   return stepResults

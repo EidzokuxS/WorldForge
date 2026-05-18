@@ -42,10 +42,11 @@ export interface ToolContractFailure {
 
 export interface ToolResultStateReceipt {
   stateReceipt: string;
-  tool: string;
-  target: string;
-  key: string;
-  value: string;
+  tool?: string;
+  target?: string;
+  key?: string;
+  value?: string;
+  relationIndex?: number;
 }
 
 export interface ToolResult {
@@ -182,6 +183,19 @@ function safeContractFailureForModel(
   };
 }
 
+function safeStateReceiptsForModel(
+  receipts: readonly ToolResultStateReceipt[] | undefined,
+): ToolResultStateReceipt[] | undefined {
+  const safeReceipts = receipts
+    ?.flatMap((receipt) => {
+      if (typeof receipt.stateReceipt !== "string") return [];
+      const stateReceipt = sanitizeModelFacingText(receipt.stateReceipt);
+      if (!stateReceipt || stateReceipt !== receipt.stateReceipt) return [];
+      return [{ stateReceipt }];
+    });
+  return safeReceipts && safeReceipts.length > 0 ? safeReceipts : undefined;
+}
+
 export function toModelVisibleToolResult(result: ToolResult): ToolResult {
   const {
     authority: _authority,
@@ -199,7 +213,7 @@ export function toModelVisibleToolResult(result: ToolResult): ToolResult {
     result: sanitizeModelVisibleToolPayload(payload),
     contractFailure: safeContractFailureForModel(contractFailure),
     modelSafeRefs: safeModelSafeRefs(modelSafeRefs),
-    stateReceipts: sanitizeModelVisibleToolPayload(stateReceipts) as ToolResultStateReceipt[] | undefined,
+    stateReceipts: safeStateReceiptsForModel(stateReceipts),
   };
 }
 

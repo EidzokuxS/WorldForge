@@ -2280,11 +2280,17 @@ function buildScenePlanActionFromToolStep(
   result: GmToolStepResult,
   actorId: string,
 ): ScenePlanAction {
+  const resultPayload = isRecord(result.result?.result) ? result.result.result : null;
+  const input = result.toolName === "record_dialogue_outcome"
+    && isRecord(result.candidateInput)
+    && Array.isArray(resultPayload?.stateEffects)
+    ? { ...result.candidateInput, stateEffects: resultPayload.stateEffects }
+    : result.candidateInput;
   return scenePlanActionSchema.parse({
     id: randomUUID(),
     actorId,
     toolName: result.toolName,
-    input: result.candidateInput,
+    input,
   });
 }
 

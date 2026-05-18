@@ -484,32 +484,11 @@ const dialogueStateEffectInputSchema = z.object({
 }).superRefine((data, ctx) => {
   if (data.status === "applied_now") {
     const hasStateReceipt = Boolean(data.stateReceipt?.trim());
-    if (!hasStateReceipt && !data.structuralTool) {
+    if (!hasStateReceipt) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["structuralTool"],
-        message: "applied_now stateEffects require stateReceipt or structuralTool",
-      });
-    }
-    if (!hasStateReceipt && !data.targetRef?.trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["targetRef"],
-        message: "applied_now stateEffects require stateReceipt or targetRef",
-      });
-    }
-    if (!hasStateReceipt && !data.stateKey?.trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["stateKey"],
-        message: "applied_now stateEffects require stateReceipt or stateKey",
-      });
-    }
-    if (!hasStateReceipt && !data.stateValue?.trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["stateValue"],
-        message: "applied_now stateEffects require stateReceipt or stateValue",
+        path: ["stateReceipt"],
+        message: "applied_now stateEffects require a backend-issued stateReceipt",
       });
     }
     if (

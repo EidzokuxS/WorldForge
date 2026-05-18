@@ -5537,6 +5537,7 @@ describe("processTurn ScenePlan path", () => {
       stateEffects: [{
         effectId: "effect-cleared-by-clerk",
         status: "applied_now",
+        stateReceipt: "state_receipt_1_1",
         structuralTool: "add_tag",
         targetRef: "Hero",
         stateKey: "tag",
@@ -6322,6 +6323,7 @@ describe("processTurn ScenePlan path", () => {
     const stateEffect = {
       effectId: "effect-trusted-by-clerk",
       status: "applied_now",
+      stateReceipt: "state_receipt_1_1",
       structuralTool: "add_tag",
       targetRef: "Hero",
       stateKey: "tag",
@@ -6350,6 +6352,13 @@ describe("processTurn ScenePlan path", () => {
         visibilityOutputs: [],
         resources: [],
       },
+      stateReceipts: [{
+        stateReceipt: "state_receipt_1_1",
+        tool: "add_tag",
+        target: "Hero",
+        key: "tag",
+        value: "trusted-by-clerk",
+      }],
     };
     const dialogueResult = {
       success: true,
@@ -6519,6 +6528,7 @@ describe("processTurn ScenePlan path", () => {
     const stateEffect = {
       effectId: "receipt-issued",
       status: "applied_now",
+      stateReceipt: "state_receipt_1_1",
       structuralTool: "spawn_item",
       targetRef: "Stamped Delay-Report Receipt",
       stateKey: "possession",
@@ -6548,6 +6558,13 @@ describe("processTurn ScenePlan path", () => {
         visibilityOutputs: [],
         resources: [],
       },
+      stateReceipts: [{
+        stateReceipt: "state_receipt_1_1",
+        tool: "spawn_item",
+        target: "Stamped Delay-Report Receipt",
+        key: "possession",
+        value: "carried",
+      }],
     };
     const dialogueResult = {
       success: true,

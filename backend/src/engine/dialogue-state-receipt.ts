@@ -284,10 +284,7 @@ function structuralStateReceiptRows(result: ToolResult | null | undefined): Tool
   return Array.isArray(result?.stateReceipts)
     ? result.stateReceipts.filter((row): row is ToolResultStateReceipt =>
         isRecord(row)
-        && typeof row.stateReceipt === "string"
-        && typeof row.target === "string"
-        && typeof row.key === "string"
-        && typeof row.value === "string")
+        && typeof row.stateReceipt === "string")
     : [];
 }
 
@@ -298,6 +295,22 @@ function attachStateReceiptRefsFromRows(
   for (const row of rows) {
     const rowRef = normalizeStateReceiptRef(row.stateReceipt);
     if (!rowRef) continue;
+    if (
+      typeof row.relationIndex === "number"
+      && Number.isInteger(row.relationIndex)
+      && row.relationIndex >= 0
+      && row.relationIndex < receipt.relations.length
+    ) {
+      receipt.relations[row.relationIndex]?.stateReceiptRefs.add(rowRef);
+      continue;
+    }
+    if (
+      typeof row.target !== "string"
+      || typeof row.key !== "string"
+      || typeof row.value !== "string"
+    ) {
+      continue;
+    }
     const rowKey = normalizeDialogueStateReceiptKey(row.key);
     const rowTargetAliases = dialogueStateTokenAliases(row.target);
     const rowValueAliases = dialogueStateTokenAliases(row.value);
@@ -315,6 +328,7 @@ export function modelSafeStateReceiptsFromStructuralReceipt(
 ): ToolResultStateReceipt[] {
   return receipt.relations.map((relation, index) => ({
     stateReceipt: `${prefix}_${index + 1}`,
+    relationIndex: index,
     tool: receipt.toolName,
     target: relation.displayTarget,
     key: relation.stateKey,
@@ -561,70 +575,19 @@ export function resolveAppliedStateEffectFromReceipt(
   receipt: StructuralStateReceipt,
   effect: Record<string, unknown>,
 ): Record<string, unknown> | null {
-  const structuralTool = stringField(effect, "structuralTool");
-  if (structuralTool && receipt.toolName !== structuralTool) return null;
-
   const stateReceipt = stringField(effect, "stateReceipt");
-  if (stateReceipt) {
-    const normalizedReceipt = normalizeStateReceiptRef(stateReceipt);
-    const relation = receipt.relations.find((candidate) =>
-      candidate.stateReceiptRefs.has(normalizedReceipt));
-    if (!relation) return null;
+  if (!stateReceipt) return null;
 
-    const targetRef = stringField(effect, "targetRef");
-    if (
-      targetRef
-      && !hasIntersection(relation.targetRefs, dialogueStateTokenAliases(targetRef))
-    ) {
-      return null;
-    }
+  const normalizedReceipt = normalizeStateReceiptRef(stateReceipt);
+  const relation = receipt.relations.find((candidate) =>
+    candidate.stateReceiptRefs.has(normalizedReceipt));
+  if (!relation) return null;
 
-    const stateKey = stringField(effect, "stateKey");
-    if (
-      stateKey
-      && relation.stateKey !== normalizeDialogueStateReceiptKey(stateKey)
-    ) {
-      return null;
-    }
-
-    const stateValue = stringField(effect, "stateValue");
-    if (
-      stateValue
-      && !hasIntersection(relation.stateValues, dialogueStateTokenAliases(stateValue))
-    ) {
-      return null;
-    }
-
-    return {
-      ...effect,
-      structuralTool: receipt.toolName,
-      targetRef: targetRef ?? relation.displayTarget,
-      stateKey: stateKey ?? relation.stateKey,
-      stateValue: stateValue ?? relation.displayValue,
-    };
-  }
-
-  if (!structuralTool || receipt.toolName !== structuralTool) return null;
-
-  const stateValue = stringField(effect, "stateValue");
-  if (!stateValue) {
-    return null;
-  }
-
-  const targetRef = stringField(effect, "targetRef");
-  const stateKey = stringField(effect, "stateKey");
-  if (!targetRef || !stateKey) return null;
-
-  return receipt.claims.some((claim) => {
-    if (!hasIntersection(claim.targetRefs, dialogueStateTokenAliases(targetRef))) {
-      return false;
-    }
-    const values = claim.keyedValues.get(normalizeDialogueStateReceiptKey(stateKey));
-    if (!values || values.size === 0) {
-      return false;
-    }
-    return hasIntersection(values, dialogueStateTokenAliases(stateValue));
-  })
-    ? effect
-    : null;
+  return {
+    ...effect,
+    structuralTool: receipt.toolName,
+    targetRef: relation.displayTarget,
+    stateKey: relation.stateKey,
+    stateValue: relation.displayValue,
+  };
 }

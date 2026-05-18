@@ -42,9 +42,11 @@ import {
 } from "./tool-contracts.js";
 import { runtimeToolInputSchemas, type RuntimeToolName } from "./tool-schemas.js";
 import {
+  attachStructuralStateReceiptsToToolResult,
   appliedStateEffectsFromDialoguePayload,
   DIALOGUE_STRUCTURAL_EFFECT_TOOLS,
   receiptBacksAppliedStateEffect,
+  resolveAppliedStateEffectFromReceipt,
   structuralStateReceiptFromToolCall,
 } from "./dialogue-state-receipt.js";
 import { retractDurableMemoryForRejectedSteps } from "./durable-side-effect-retraction.js";
@@ -383,6 +385,66 @@ function structuralEffectsBackedByPriorStepReceipts(
       }));
 }
 
+function resolveStateEffectFromPriorStepReceipts(
+  results: readonly GmToolStepResult[],
+  effect: Record<string, unknown>,
+): Record<string, unknown> | null {
+  for (const priorResult of results) {
+    const receipt = structuralStateReceiptFromToolCall({
+      toolName: priorResult.toolName,
+      candidateInput: priorResult.candidateInput,
+      result: priorResult.result,
+    });
+    if (!receipt) continue;
+    const resolved = resolveAppliedStateEffectFromReceipt(receipt, effect);
+    if (resolved) return resolved;
+  }
+  return null;
+}
+
+function resolveDialogueOutcomeInputFromPriorStepReceipts(
+  candidate: GmToolStepCandidateRequest,
+  priorResults: readonly GmToolStepResult[],
+): GmToolStepCandidateRequest {
+  if (candidate.toolName !== "record_dialogue_outcome") return candidate;
+  if (!Array.isArray(candidate.input.stateEffects)) return candidate;
+  let changed = false;
+  const stateEffects = candidate.input.stateEffects.map((effect) => {
+    if (
+      !effect
+      || typeof effect !== "object"
+      || Array.isArray(effect)
+      || (effect as Record<string, unknown>).status !== "applied_now"
+    ) {
+      return effect;
+    }
+    const resolved = resolveStateEffectFromPriorStepReceipts(
+      priorResults,
+      effect as Record<string, unknown>,
+    );
+    if (!resolved) return effect;
+    changed = true;
+    return resolved;
+  });
+  return changed
+    ? { ...candidate, input: { ...candidate.input, stateEffects } }
+    : candidate;
+}
+
+function attachStateReceiptsToGmToolStepResult(input: {
+  candidate: GmToolStepCandidateRequest;
+  result: ToolResult;
+  stepIndex: number;
+}): ToolResult {
+  if (!input.result.success) return input.result;
+  return attachStructuralStateReceiptsToToolResult({
+    toolName: input.candidate.toolName,
+    candidateInput: input.candidate.input,
+    result: input.result,
+    prefix: `state_receipt_${input.stepIndex + 1}`,
+  });
+}
+
 function acceptedRuntimeReceiptResult(
   results: readonly GmToolStepResult[],
   result: GmToolStepResult,
@@ -559,6 +621,7 @@ async function executeSingleStep(input: {
   allowedTools: ReadonlySet<RuntimeToolName>;
   forbiddenPrivateTerms: readonly string[];
   remainingCandidateRequests: number;
+  priorResults: readonly GmToolStepResult[];
   mutationBoundary?: GmToolStepMutationBoundary;
   reviseStep?: ExecuteGmToolStepsArgs["reviseStep"];
 }): Promise<{ result: GmToolStepResult; candidateRequestCount: number }> {
@@ -616,7 +679,7 @@ async function executeSingleStep(input: {
       };
     }
     if (revised) {
-      candidate = revised;
+      candidate = resolveDialogueOutcomeInputFromPriorStepReceipts(revised, input.priorResults);
       attempt = 2;
       candidateRequestCount += 1;
       validationError = validateCandidateRequest(
@@ -644,8 +707,9 @@ async function executeSingleStep(input: {
     };
   }
 
+  candidate = resolveDialogueOutcomeInputFromPriorStepReceipts(candidate, input.priorResults);
   input.mutationBoundary?.beginForTool(candidate.toolName);
-  const result = isBridgeLookupToolName(candidate.toolName)
+  const rawResult = isBridgeLookupToolName(candidate.toolName)
     ? executeBridgeCandidateTool(candidate.toolName, candidate.input, input.context)
     : await executeToolCall(
         input.campaignId,
@@ -655,6 +719,11 @@ async function executeSingleStep(input: {
         undefined,
         input.context,
       );
+  const result = attachStateReceiptsToGmToolStepResult({
+    candidate,
+    result: rawResult,
+    stepIndex: input.priorResults.length,
+  });
 
   if (!result.success) {
     let toolRevisionError: string | null = null;
@@ -680,24 +749,33 @@ async function executeSingleStep(input: {
       }
       if (revised) {
         candidateRequestCount += 1;
-        const revisedValidationError = validateCandidateRequest(
+        const resolvedRevised = resolveDialogueOutcomeInputFromPriorStepReceipts(
           revised,
+          input.priorResults,
+        );
+        const revisedValidationError = validateCandidateRequest(
+          resolvedRevised,
           input.context,
           input.allowedTools,
           input.forbiddenPrivateTerms,
         );
         if (!revisedValidationError) {
-          input.mutationBoundary?.beginForTool(revised.toolName);
-          const revisedResult = isBridgeLookupToolName(revised.toolName)
-            ? executeBridgeCandidateTool(revised.toolName, revised.input, input.context)
+          input.mutationBoundary?.beginForTool(resolvedRevised.toolName);
+          const rawRevisedResult = isBridgeLookupToolName(resolvedRevised.toolName)
+            ? executeBridgeCandidateTool(resolvedRevised.toolName, resolvedRevised.input, input.context)
             : await executeToolCall(
                 input.campaignId,
-                revised.toolName,
-                revised.input,
+                resolvedRevised.toolName,
+                resolvedRevised.input,
                 input.tick,
                 undefined,
                 input.context,
               );
+          const revisedResult = attachStateReceiptsToGmToolStepResult({
+            candidate: resolvedRevised,
+            result: rawRevisedResult,
+            stepIndex: input.priorResults.length,
+          });
           if (revisedResult.success) {
             return {
               candidateRequestCount,
@@ -705,8 +783,8 @@ async function executeSingleStep(input: {
                 stepId: input.step.stepId,
                 attempt: 2,
                 status: "revised",
-                toolName: revised.toolName,
-                candidateInput: revised.input,
+                toolName: resolvedRevised.toolName,
+                candidateInput: resolvedRevised.input,
                 validationError: null,
                 visibleEffect: input.step.expectedVisibleEffect,
                 privateGuardTerms: [...input.forbiddenPrivateTerms],
@@ -833,6 +911,7 @@ export async function executeGmToolSteps(
         allowedTools,
         forbiddenPrivateTerms,
         remainingCandidateRequests: Math.max(0, maxCandidateRequests - candidateRequestCount),
+        priorResults: results,
         mutationBoundary,
         reviseStep: args.reviseStep,
       });
