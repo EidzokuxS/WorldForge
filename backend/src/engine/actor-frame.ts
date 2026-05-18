@@ -12,6 +12,10 @@ import {
   type ContextBudgetTrace,
 } from "./context-budget-trace.js";
 import { getFrameBudgetSpec, type ContextFrameType } from "./frame-budget.js";
+import {
+  buildModelFacingScenePacket,
+  type ModelFacingPromptSafety,
+} from "./model-facing-scene.js";
 
 export type ActorFactSourceRoute =
   | "self_state"
@@ -80,6 +84,7 @@ export interface ActorFrame {
   facts: ActorFrameFact[];
   legalTools: RuntimeToolName[];
   constraints: string[];
+  modelFacingSafety?: ModelFacingPromptSafety;
   contextBudgetTrace: ContextBudgetTrace;
   hiddenExcludedCount: number;
 }
@@ -532,6 +537,7 @@ export function buildActorFrame(args: BuildActorFrameArgs): ActorFrame {
     summaryPrefix: "ActorFrame overflow:",
     worldVersion,
   });
+  const modelFacingSafety = buildModelFacingScenePacket(args.frame).safety;
 
   return {
     campaignId: args.frame.campaignId,
@@ -541,6 +547,7 @@ export function buildActorFrame(args: BuildActorFrameArgs): ActorFrame {
     facts: budgeted.facts,
     legalTools: [...(args.legalTools ?? args.frame.allowedTools)],
     constraints: [...(args.constraints ?? [])],
+    modelFacingSafety,
     hiddenExcludedCount,
     contextBudgetTrace: buildContextBudgetTrace({
       label: "ActorFrame",

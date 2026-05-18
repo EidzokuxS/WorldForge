@@ -7,6 +7,7 @@ import {
   type ActorDecisionPacket,
 } from "./actor-decision-packet.js";
 import type { ActorFrame } from "./actor-frame.js";
+import { sanitizeModelFacingText } from "./model-facing-ref-safety.js";
 import { playerBlockingStageLimit } from "./runtime-limits.js";
 
 const log = createLogger("actor-brain");
@@ -33,26 +34,47 @@ export function buildActorDecisionSystem(): string {
   ].join(" ");
 }
 
+function actorPromptText(
+  frame: ActorFrame,
+  value: string,
+  maxChars?: number,
+): string {
+  return sanitizeModelFacingText(value, {
+    safety: frame.modelFacingSafety,
+    maxChars,
+  });
+}
+
+function actorPromptStrings(
+  frame: ActorFrame,
+  values: readonly string[],
+  maxChars?: number,
+): string[] {
+  return values
+    .map((value) => actorPromptText(frame, value, maxChars))
+    .filter((value) => value.length > 0);
+}
+
 function formatActorFrame(frame: ActorFrame): string {
   return JSON.stringify(
     {
       worldVersion: frame.worldVersion,
       observer: {
-        label: frame.observer.label,
+        label: actorPromptText(frame, frame.observer.label, 120),
         type: frame.observer.type,
       },
-      playerActionRequest: frame.playerActionRequest,
+      playerActionRequest: actorPromptText(frame, frame.playerActionRequest, 1_000),
       facts: frame.facts.map((fact, index) => ({
         ref: `f${index + 1}`,
         route: fact.route,
-        text: fact.text,
+        text: actorPromptText(frame, fact.text, 900),
         confidence: fact.confidence,
         reliability: fact.reliability,
         deliveredAtWorldTimeMinutes: fact.deliveredAtWorldTimeMinutes,
         observedAtWorldVersion: fact.observedAtWorldVersion,
       })),
       legalTools: frame.legalTools,
-      constraints: frame.constraints,
+      constraints: actorPromptStrings(frame, frame.constraints, 500),
       hiddenExcludedCount: frame.hiddenExcludedCount,
     },
     null,
@@ -115,6 +137,7 @@ function actorToolInputContracts(frame: ActorFrame): string {
 
 export function buildActorDecisionPrompt(frame: ActorFrame): string {
   const hasLegalTools = frame.legalTools.length > 0;
+  const observerLabel = actorPromptText(frame, frame.observer.label, 120);
   const returnShape = hasLegalTools
     ? {
       decisionSummary: "one sentence decision",
@@ -128,7 +151,7 @@ export function buildActorDecisionPrompt(frame: ActorFrame): string {
           input: {
             text: "grounded event text",
             importance: 3,
-            participants: [frame.observer.label],
+            participants: [observerLabel],
             durability: "scene_local",
           },
         },
@@ -217,9 +240,9 @@ export function buildActorDecisionPrompt(frame: ActorFrame): string {
             toolName: "log_event",
             purpose: "Record a procedure or boundary that can affect later play.",
             input: {
-              text: "Gate Clerk says the player needs a stamped Council seal before the ward gate will open.",
+              text: `${observerLabel} says the player needs a stamped Council seal before the ward gate will open.`,
               importance: 4,
-              participants: [frame.observer.label],
+              participants: [observerLabel],
               durability: "durable",
               futureRelevance:
                 "The stamped Council seal requirement should constrain later attempts to enter this ward.",

@@ -123,6 +123,37 @@ describe("runActorDecisionBrain", () => {
     expect(prompt).toContain("Use log_event durability scene_local only for transient speech");
   });
 
+  it("formats ActorFrame prompts through the model-facing safety adapter", () => {
+    const prompt = buildActorDecisionPrompt({
+      ...frame,
+      modelFacingSafety: {
+        forbiddenTerms: ["Hidden Tea Broker"],
+        backendOnlyTerms: ["loc-private-vault", "npc-1"],
+      },
+      playerActionRequest: "The player asks whether actor:hidden-broker came from loc-private-vault.",
+      constraints: [
+        "Do not reveal Hidden Tea Broker or loc-private-vault.",
+      ],
+      facts: [
+        {
+          id: "event:private-entry",
+          route: "direct_observation",
+          text: "Hidden Tea Broker crossed actor:hidden-broker through loc-private-vault.",
+          subjectRefs: ["actor:hidden-broker", "loc-private-vault"],
+          confidence: 0.9,
+        },
+      ],
+    });
+
+    expect(prompt).toContain('"ref": "f1"');
+    expect(prompt).not.toContain("Hidden Tea Broker");
+    expect(prompt).not.toContain("actor:hidden-broker");
+    expect(prompt).not.toContain("loc-private-vault");
+    expect(prompt).not.toContain("event:private-entry");
+    expect(prompt).toContain("[redacted]");
+    expect(prompt).toContain("[backend ref hidden]");
+  });
+
   it("warns actors not to flatten runtime tool args beside input", () => {
     const prompt = buildActorDecisionPrompt(frame);
 
