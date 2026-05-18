@@ -5587,6 +5587,18 @@ describe("runGmToolLoop", () => {
   });
 
   it("runs a terminal closure pass when helper calls prepare a conversation but do not record the outcome", async () => {
+    const frame = createFrame();
+    frame.roster.support = [
+      {
+        id: "actor-hidden-tea-broker",
+        actorId: "npc-hidden-tea-broker",
+        type: "npc",
+        label: "Hidden Tea Broker",
+        locationId: "loc-private-vault",
+        sceneScopeId: "loc-private-vault",
+        awareness: "none",
+      },
+    ];
     mockGenerateTextExecutingParsedSteps({
       text: "",
       finishReason: "tool-calls",
@@ -5615,6 +5627,8 @@ describe("runGmToolLoop", () => {
                   name: "Stamp Deputy Corrin",
                   role: "clerk",
                   modelSafeRefs: ["Stamp Deputy Corrin"],
+                  note:
+                    "Hidden Tea Broker should not replay through prior tool observations after actor:hidden-broker.",
                 },
               },
             },
@@ -5737,7 +5751,7 @@ describe("runGmToolLoop", () => {
       tick: 7,
       playerAction: "I ask the commissioned stamp deputy to begin the stamp review.",
       frame: {
-        ...createFrame(),
+        ...frame,
         allowedTools: [
           "create_scene_extra",
           "inspect_known_fact",
@@ -5748,6 +5762,10 @@ describe("runGmToolLoop", () => {
     });
 
     expect(generateText).toHaveBeenCalledTimes(2);
+    const closurePrompt = (generateTextMock().mock.calls[1]?.[0] as { prompt?: string } | undefined)?.prompt ?? "";
+    expect(closurePrompt).not.toContain("Hidden Tea Broker");
+    expect(closurePrompt).not.toContain("actor:hidden-broker");
+    expect(closurePrompt).toContain("[backend ref hidden]");
     expect(generateText).toHaveBeenLastCalledWith(expect.objectContaining({
       activeTools: ["record_dialogue_outcome"],
       tools: {

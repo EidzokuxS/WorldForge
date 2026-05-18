@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import {
   isBackendOnlyModelRef,
   sanitizeModelFacingText,
+  type SanitizeModelFacingTextOptions,
 } from "./model-facing-ref-safety.js";
 
 export type ToolResultStatus = "success" | "partial" | "failure";
@@ -136,13 +137,16 @@ function isBackendIdentifierKey(key: string): boolean {
     || BACKEND_HANDLE_KEY_RE.test(normalized);
 }
 
-function sanitizeModelVisibleToolPayload(payload: unknown): unknown {
+function sanitizeModelVisibleToolPayload(
+  payload: unknown,
+  options: SanitizeModelFacingTextOptions = {},
+): unknown {
   if (typeof payload === "string") {
-    return sanitizeModelFacingText(payload);
+    return sanitizeModelFacingText(payload, options);
   }
   if (Array.isArray(payload)) {
     return payload
-      .map((entry) => sanitizeModelVisibleToolPayload(entry))
+      .map((entry) => sanitizeModelVisibleToolPayload(entry, options))
       .filter((entry) => entry !== undefined);
   }
   if (!payload || typeof payload !== "object") {
@@ -152,19 +156,24 @@ function sanitizeModelVisibleToolPayload(payload: unknown): unknown {
   const visible: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(payload)) {
     if (isBackendIdentifierKey(key)) continue;
-    const sanitized = sanitizeModelVisibleToolPayload(value);
+    const safeKey = sanitizeModelFacingText(key, options);
+    if (!safeKey) continue;
+    const sanitized = sanitizeModelVisibleToolPayload(value, options);
     if (sanitized !== undefined) {
-      visible[key] = sanitized;
+      visible[safeKey] = sanitized;
     }
   }
   return visible;
 }
 
-function safeModelSafeRefs(refs: readonly string[] | undefined): string[] | undefined {
+function safeModelSafeRefs(
+  refs: readonly string[] | undefined,
+  options: SanitizeModelFacingTextOptions = {},
+): string[] | undefined {
   const safeRefs = refs
     ?.flatMap((ref) => {
       if (isBackendOnlyModelRef(ref)) return [];
-      const sanitized = sanitizeModelFacingText(ref);
+      const sanitized = sanitizeModelFacingText(ref, options);
       return sanitized === ref ? [sanitized] : [];
     });
   return safeRefs && safeRefs.length > 0 ? safeRefs : undefined;
@@ -172,14 +181,15 @@ function safeModelSafeRefs(refs: readonly string[] | undefined): string[] | unde
 
 function safeContractFailureForModel(
   failure: ToolContractFailure | undefined,
+  options: SanitizeModelFacingTextOptions = {},
 ): ToolContractFailure | undefined {
   if (!failure) return undefined;
-  const safeHints = safeModelSafeRefs(failure.refHints);
+  const safeHints = safeModelSafeRefs(failure.refHints, options);
   return {
     ...failure,
     invalidRef: undefined,
     refHints: safeHints && safeHints.length > 0 ? safeHints : undefined,
-    message: sanitizeModelFacingText(failure.message),
+    message: sanitizeModelFacingText(failure.message, options),
   };
 }
 
@@ -196,7 +206,10 @@ function safeStateReceiptsForModel(
   return safeReceipts && safeReceipts.length > 0 ? safeReceipts : undefined;
 }
 
-export function toModelVisibleToolResult(result: ToolResult): ToolResult {
+export function toModelVisibleToolResult(
+  result: ToolResult,
+  options: SanitizeModelFacingTextOptions = {},
+): ToolResult {
   const {
     authority: _authority,
     contractFailure,
@@ -208,11 +221,11 @@ export function toModelVisibleToolResult(result: ToolResult): ToolResult {
   return {
     ...visible,
     error: typeof visible.error === "string"
-      ? sanitizeModelFacingText(visible.error)
+      ? sanitizeModelFacingText(visible.error, options)
       : visible.error,
-    result: sanitizeModelVisibleToolPayload(payload),
-    contractFailure: safeContractFailureForModel(contractFailure),
-    modelSafeRefs: safeModelSafeRefs(modelSafeRefs),
+    result: sanitizeModelVisibleToolPayload(payload, options),
+    contractFailure: safeContractFailureForModel(contractFailure, options),
+    modelSafeRefs: safeModelSafeRefs(modelSafeRefs, options),
     stateReceipts: safeStateReceiptsForModel(stateReceipts),
   };
 }

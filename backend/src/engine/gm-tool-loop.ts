@@ -1569,17 +1569,37 @@ function hasRequiredTerminalToolCallInStepResults(
 function modelFacingPriorToolSteps(
   stepResults: readonly GmToolStepResult[],
   safety: ModelFacingPromptSafety,
+  extraForbiddenTerms: readonly string[] = [],
 ): unknown[] {
   return stepResults.map((step) => ({
     stepId: step.stepId,
     toolName: step.toolName,
     status: step.status,
     input: redactModelFacingJson(step.candidateInput ?? {}, safety),
-    result: step.result ? toModelVisibleToolResult(step.result) : null,
+    result: step.result
+      ? toModelVisibleToolResult(step.result, { safety, extraForbiddenTerms })
+      : null,
     validationError: step.validationError
       ? redactModelFacingJson(step.validationError, safety)
       : null,
   }));
+}
+
+function privateToolObservationTerms(frame: SceneFrame): string[] {
+  const terms = new Set<string>();
+  const add = (value?: string | null): void => {
+    const trimmed = value?.trim();
+    if (trimmed) terms.add(trimmed);
+  };
+  for (const ref of frame.perception.forbiddenActorIds ?? []) add(ref);
+  for (const ref of frame.perception.forbiddenActorLabels ?? []) add(ref);
+  for (const actor of [...frame.roster.support, ...frame.roster.background]) {
+    if (actor.awareness === "clear") continue;
+    add(actor.id);
+    add(actor.actorId);
+    add(actor.label);
+  }
+  return [...terms];
 }
 
 function buildTerminalClosurePrompt(input: {
@@ -1589,6 +1609,7 @@ function buildTerminalClosurePrompt(input: {
   priorStepResults: readonly GmToolStepResult[];
 }): string {
   const scenePacket = buildModelFacingScenePacket(input.args.frame);
+  const extraForbiddenTerms = privateToolObservationTerms(input.args.frame);
   const requirement = gmReadRuntimeRequirement(input.args);
   const terminalInstruction = input.requiredTool === "record_dialogue_outcome"
     ? [
@@ -1640,7 +1661,11 @@ function buildTerminalClosurePrompt(input: {
     JSON.stringify(buildCandidateRefsForPrompt(scenePacket.view), null, 2),
     "",
     "PRIOR TOOL RESULTS FROM THIS SAME TURN",
-    JSON.stringify(modelFacingPriorToolSteps(input.priorStepResults, scenePacket.safety), null, 2),
+    JSON.stringify(
+      modelFacingPriorToolSteps(input.priorStepResults, scenePacket.safety, extraForbiddenTerms),
+      null,
+      2,
+    ),
     "",
     "ALLOWED TOOL",
     `- ${input.requiredTool}`,
