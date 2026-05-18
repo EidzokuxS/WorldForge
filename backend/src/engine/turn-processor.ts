@@ -2825,6 +2825,91 @@ function uniqueRefs(values: readonly (string | null | undefined)[]): string[] {
   return refs;
 }
 
+function textContainsOpeningForbiddenTerm(
+  value: string,
+  forbiddenTerms: readonly string[],
+): boolean {
+  const normalizedValue = value.toLocaleLowerCase();
+  return forbiddenTerms.some((term) => {
+    const normalizedTerm = term.trim().toLocaleLowerCase();
+    return Boolean(normalizedTerm) && normalizedValue.includes(normalizedTerm);
+  });
+}
+
+function openingSafeText(
+  value: string | null | undefined,
+  forbiddenTerms: readonly string[],
+): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return textContainsOpeningForbiddenTerm(trimmed, forbiddenTerms) ? null : trimmed;
+}
+
+function openingSafeTexts(
+  values: readonly (string | null | undefined)[],
+  forbiddenTerms: readonly string[],
+): string[] {
+  return uniqueRefs(values.flatMap((value) => {
+    const safe = openingSafeText(value, forbiddenTerms);
+    return safe ? [safe] : [];
+  }));
+}
+
+function collectOpeningForbiddenActorNames(sceneAssembly: SceneAssembly): string[] {
+  return uniqueRefs(
+    Object.entries(sceneAssembly.awareness.byNpcName)
+      .filter(([, awareness]) => awareness !== "clear")
+      .map(([name]) => name),
+  );
+}
+
+function collectOpeningPrivateTerms(input: {
+  sceneDirection: WorldBrainSceneDirection;
+  forbiddenActorNames: readonly string[];
+}): string[] {
+  const privatePresenceTerms = input.sceneDirection.presenceReasons.flatMap((reason) =>
+    reason.perceivable ? [] : [reason.actorName, reason.reason],
+  );
+  const privateBeatTerms = input.sceneDirection.causalBeats.flatMap((beat) =>
+    beat.perceivable ? [] : [beat.summary],
+  );
+
+  return uniqueRefs([
+    ...input.forbiddenActorNames,
+    ...privatePresenceTerms,
+    ...privateBeatTerms,
+  ]);
+}
+
+function openingFallbackSummary(sceneAssembly: SceneAssembly): string {
+  const currentSceneName = sceneAssembly.currentScene?.name.trim();
+  if (currentSceneName) {
+    return `The opening scene settles into a visible moment at ${currentSceneName}.`;
+  }
+  return "The opening scene settles into a visible, playable moment.";
+}
+
+function selectOpeningVisibleSummary(input: {
+  sceneAssembly: SceneAssembly;
+  visibleDirection: WorldBrainSceneDirection;
+  forbiddenTerms: readonly string[];
+}): string {
+  for (const candidate of [
+    input.visibleDirection.situationSummary,
+    ...input.sceneAssembly.playerPerceivableConsequences,
+    openingFallbackSummary(input.sceneAssembly),
+  ]) {
+    const safe = openingSafeText(candidate, input.forbiddenTerms);
+    if (safe) {
+      return safe;
+    }
+  }
+
+  return "The opening scene settles into a visible, playable moment.";
+}
+
 function uniqueTicks(values: readonly (number | null | undefined)[]): number[] {
   const seen = new Set<number>();
   const ticks: number[] = [];
@@ -6268,19 +6353,39 @@ function openingNarrationPackets(input: {
   sceneAssembly: SceneAssembly;
   sceneDirection: WorldBrainSceneDirection;
 }): { canonicalTurnPacket: CanonicalTurnPacket; narratorPacket: NarratorPacket } {
+  const visibleDirection =
+    input.sceneAssembly.playerPerceivableSceneDirection ?? input.sceneDirection;
+  const forbiddenActorNames = collectOpeningForbiddenActorNames(input.sceneAssembly);
+  const forbiddenPrivateTerms = collectOpeningPrivateTerms({
+    sceneDirection: input.sceneDirection,
+    forbiddenActorNames,
+  });
+  const forbiddenTerms = uniqueRefs([
+    ...forbiddenActorNames,
+    ...forbiddenPrivateTerms,
+  ]);
+  const visibleSummary = selectOpeningVisibleSummary({
+    sceneAssembly: input.sceneAssembly,
+    visibleDirection,
+    forbiddenTerms,
+  });
+  const visibleGuardrails = openingSafeTexts(
+    visibleDirection.narrationGuardrails,
+    forbiddenTerms,
+  );
   const anchorEventId = `opening:${input.currentTick}:scene`;
   const playerActorId = input.playerId ?? "player";
   const anchorEvent: CanonicalTurnPacketEvent = {
     id: anchorEventId,
     actorId: playerActorId,
     kind: "environment",
-    summary: input.sceneDirection.situationSummary,
+    summary: visibleSummary,
     perceivableByPlayer: true,
   };
   const openingEffect: CanonicalTurnPacketEffect = {
     id: `opening:${input.currentTick}:visible-scene`,
     actorId: playerActorId,
-    summary: input.sceneDirection.situationSummary,
+    summary: visibleSummary,
     perceivableByPlayer: true,
   };
   const openingTurnResolution: CanonicalTurnResolution = {
@@ -6310,7 +6415,7 @@ function openingNarrationPackets(input: {
     responses: [],
     effects: [openingEffect],
     actionResults: [],
-    guardrails: input.sceneDirection.narrationGuardrails,
+    guardrails: visibleGuardrails,
     controlReturnReason: "opening_scene_settled_packet",
   };
   const visibleActors = [
@@ -6319,7 +6424,7 @@ function openingNarrationPackets(input: {
       label: input.playerLabel,
       type: "player" as const,
     },
-    ...input.sceneDirection.focalActorNames
+    ...openingSafeTexts(visibleDirection.focalActorNames, forbiddenTerms)
       .filter((name) => name.trim() && name.trim() !== input.playerLabel)
       .map((name) => ({
         id: `opening-actor:${name.trim()}`,
@@ -6337,33 +6442,36 @@ function openingNarrationPackets(input: {
     perceivableResponses: [],
     perceivableEffects: [openingEffect],
     visibleActors,
-    hintSignals: input.sceneDirection.presenceReasons.map((reason) =>
-      reason.reason.trim()
-        ? `${reason.actorName}: ${reason.reason}`
-        : reason.actorName),
+    hintSignals: openingSafeTexts([
+      ...visibleDirection.presenceReasons.map((reason) =>
+        reason.reason.trim()
+          ? `${reason.actorName}: ${reason.reason}`
+          : reason.actorName),
+      ...input.sceneAssembly.awareness.hintSignals,
+    ], forbiddenTerms),
     evidenceLedger: [{
       id: openingEffect.id,
       category: "perceivable_effect",
-      summary: input.sceneDirection.situationSummary,
+      summary: visibleSummary,
       sourceId: openingEffect.id,
       summaryBackendFact: true,
       claimSupport: ["playable_beat"],
       precisionFacts: [{
         kind: "summary",
-        value: input.sceneDirection.situationSummary,
-        sourcePath: "opening.sceneDirection.situationSummary",
+        value: visibleSummary,
+        sourcePath: "opening.playerPerceivableSceneDirection.situationSummary",
       }],
     }],
-    guardrails: input.sceneDirection.narrationGuardrails,
+    guardrails: visibleGuardrails,
     controlReturnReason: "opening_scene_settled_packet",
     allowedVisibleActorNames: visibleActors.map((actor) => actor.label),
-    forbiddenActorNames: [],
+    forbiddenActorNames,
     forbiddenFactMarkers: [],
-    forbiddenPrivateTerms: [],
+    forbiddenPrivateTerms,
     canonicalTurnPacket,
     sourceLinkedSummaries: [{
       id: anchorEventId,
-      summary: input.sceneDirection.situationSummary,
+      summary: visibleSummary,
       sourceIds: [anchorEventId],
       summarizedItemCount: 1,
     }],

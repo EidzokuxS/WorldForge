@@ -9499,6 +9499,131 @@ describe("processOpeningScene", () => {
     expect(finalArgs?.sceneAssembly?.playerPerceivableSceneDirection).toEqual(expect.any(Object));
   });
 
+  it("builds opening narrator packets from player-visible world-brain direction", async () => {
+    const playerRow = createOpeningPlayerRow();
+    const rawOpeningDirection = {
+      situationSummary: "Hidden Watcher privately frames the opening ambush.",
+      sceneQuestion: "Does the public pressure reveal the private ambush?",
+      focalActorNames: ["Hero", "Goblin Raider", "Hidden Watcher"],
+      backgroundActorNames: [],
+      presenceReasons: [
+        { actorName: "Hero", reason: "The player is the public pivot.", perceivable: true },
+        { actorName: "Goblin Raider", reason: "The raider is visible in the crowd.", perceivable: true },
+        {
+          actorName: "Hidden Watcher",
+          reason: "private ambush signal waits overhead",
+          perceivable: false,
+        },
+      ],
+      causalBeats: [
+        { summary: "private ambush signal waits overhead", perceivable: false },
+        { summary: "Boots scrape close enough to hear.", perceivable: true },
+      ],
+      narrationGuardrails: ["Do not reveal Hidden Watcher", "Keep boots audible."],
+    };
+    const visibleOpeningDirection = {
+      ...rawOpeningDirection,
+      situationSummary: "Hero faces a visible raider while something concealed presses nearby.",
+      sceneQuestion: "Does Hero answer the visible challenge?",
+      focalActorNames: ["Hero", "Goblin Raider"],
+      presenceReasons: rawOpeningDirection.presenceReasons.filter((reason) => reason.perceivable),
+      causalBeats: rawOpeningDirection.causalBeats.filter((beat) => beat.perceivable),
+      narrationGuardrails: ["Keep boots audible."],
+    };
+    vi.mocked(runWorldBrainSceneDirection).mockResolvedValueOnce(rawOpeningDirection);
+    vi.mocked(assembleAuthoritativeScene).mockImplementation((args?: { sceneDirection?: unknown }) => ({
+      openingScene: true,
+      openingState: null,
+      currentScene: {
+        id: "loc-1",
+        name: "Town Square",
+        description: "A crowded square with one clear confrontation.",
+        tags: ["urban"],
+      },
+      presentNpcNames: ["Goblin Raider"],
+      sceneDirection: args?.sceneDirection ? rawOpeningDirection : null,
+      playerPerceivableSceneDirection: args?.sceneDirection ? visibleOpeningDirection : null,
+      awareness: {
+        contract: {
+          clear: "Full present-scene actor context. Identity and direct interaction are justified.",
+          hint: "Bounded indirect presence signal only. No identity leakage in player-facing surfaces.",
+          none: "Outside encounter scope for this consumer. Omit from player-facing prompt surfaces.",
+        },
+        byNpcName: {
+          "Goblin Raider": "clear",
+          "Hidden Watcher": "hint",
+        },
+        clearNpcNames: ["Goblin Raider"],
+        hintSignals: ["Something concealed is nearby."],
+      },
+      recentContext: [],
+      sceneEffects: [],
+      playerPerceivableConsequences: [
+        "Hero can hear boots scraping nearby.",
+        "Something concealed is nearby.",
+      ],
+    }));
+    (getDb as Mock).mockReturnValue(
+      createEntityLookupDb({
+        playerRow,
+        locationRows: [
+          {
+            id: "loc-1",
+            campaignId: CAMPAIGN_ID,
+            name: "Town Square",
+            description: "A crowded square with one clear confrontation.",
+            tags: '["urban"]',
+            connectedTo: "[]",
+          },
+        ],
+      }),
+    );
+    (readCampaignConfig as Mock).mockReturnValue({ currentTick: 5 });
+    (assembleFinalNarrationPrompt as Mock).mockResolvedValue({
+      system: "Opening visible system",
+      prompt: "Opening visible prompt",
+      assembledBase: { formatted: "Opening prompt", sections: [], totalTokens: 42, budgetUsed: 4 },
+    });
+    (generateText as Mock).mockResolvedValue({ text: "Boots scrape near the square." });
+
+    await collectEvents(
+      processOpeningScene({
+        campaignId: CAMPAIGN_ID,
+        storytellerProvider: {
+          id: "test",
+          name: "Test",
+          baseUrl: "http://localhost",
+          apiKey: "key",
+          model: "test-model",
+        },
+        storytellerTemperature: 0.8,
+        storytellerMaxTokens: 1600,
+      }),
+    );
+
+    const finalArgs = (assembleFinalNarrationPrompt as Mock).mock.calls.at(-1)?.[0] as
+      | { narratorPacket?: NarratorPacket }
+      | undefined;
+    const packet = finalArgs?.narratorPacket;
+    expect(packet?.forbiddenActorNames).toContain("Hidden Watcher");
+    expect(packet?.forbiddenPrivateTerms).toEqual(
+      expect.arrayContaining(["Hidden Watcher", "private ambush signal waits overhead"]),
+    );
+    const visibleOpeningPayload = JSON.stringify({
+      anchor: packet?.anchorEvent.summary,
+      effects: packet?.perceivableEffects.map((effect) => effect.summary),
+      hints: packet?.hintSignals,
+      guardrails: packet?.guardrails,
+      evidence: packet?.evidenceLedger?.map((entry) => entry.summary),
+      visibleActors: packet?.visibleActors.map((actor) => actor.label),
+      sourceSummaries: packet?.sourceLinkedSummaries?.map((entry) => entry.summary),
+    });
+    expect(visibleOpeningPayload).toContain("Hero faces a visible raider");
+    expect(visibleOpeningPayload).toContain("Something concealed is nearby.");
+    expect(visibleOpeningPayload).not.toContain("Hidden Watcher");
+    expect(visibleOpeningPayload).not.toContain("private ambush signal");
+  });
+
   it("fails explicitly when opening world-brain returns no focal actors", async () => {
     const playerRow = createOpeningPlayerRow();
     (getDb as Mock).mockReturnValue(
