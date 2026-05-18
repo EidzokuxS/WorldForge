@@ -82,6 +82,7 @@ import {
   sanitizeModelFacingConversationText,
 } from "./model-facing-conversation.js";
 import { sanitizeModelFacingText } from "./model-facing-ref-safety.js";
+import type { ModelFacingPromptSafety } from "./model-facing-scene.js";
 
 const log = createLogger("prompt-assembler");
 
@@ -1568,6 +1569,39 @@ function collectWorldBrainPrivateTerms(direction?: WorldBrainSceneDirection): st
   return terms;
 }
 
+function buildEncounterPromptSafety(
+  encounter: EncounterPromptContext,
+): ModelFacingPromptSafety {
+  const forbiddenSeen = new Set<string>();
+  const backendSeen = new Set<string>();
+  const forbiddenTerms: string[] = [];
+  const backendOnlyTerms: string[] = [];
+
+  pushUniqueTerm(backendOnlyTerms, backendSeen, encounter.broadLocationId);
+  pushUniqueTerm(backendOnlyTerms, backendSeen, encounter.sceneId);
+  pushUniqueTerm(backendOnlyTerms, backendSeen, encounter.playerId);
+
+  const presentActorIds = new Set(encounter.snapshot?.presentActorIds ?? []);
+  for (const npc of encounter.npcRows) {
+    pushUniqueTerm(backendOnlyTerms, backendSeen, npc.id);
+    pushUniqueTerm(backendOnlyTerms, backendSeen, npc.currentLocationId);
+    pushUniqueTerm(backendOnlyTerms, backendSeen, npc.currentSceneLocationId);
+
+    if (!encounter.snapshot || !encounter.playerId || !presentActorIds.has(npc.id)) {
+      continue;
+    }
+
+    const awareness = getObserverAwareness(encounter.snapshot, encounter.playerId, npc.id);
+    if (awareness === "clear") {
+      continue;
+    }
+
+    pushUniqueTerm(forbiddenTerms, forbiddenSeen, npc.name);
+  }
+
+  return { forbiddenTerms, backendOnlyTerms };
+}
+
 function buildRecentVisibleTranscriptSection(
   campaignId: string,
   narratorPacket: NarratorPacket,
@@ -2059,7 +2093,17 @@ export async function assembleJudgeAdjudicationPrompt(options: {
   worldBrainDirection?: WorldBrainSceneDirection;
   outcomeBounds?: NarrativeOutcomeBounds;
 }): Promise<JudgeAdjudicationPrompt> {
-  const privateContinuityTerms = collectWorldBrainPrivateTerms(options.worldBrainDirection);
+  const encounterSafety = buildEncounterPromptSafety(
+    buildEncounterPromptContext(options.campaignId),
+  );
+  const privateContinuityTerms = [
+    ...collectWorldBrainPrivateTerms(options.worldBrainDirection),
+    ...encounterSafety.forbiddenTerms,
+  ];
+  const replaySafety: ModelFacingPromptSafety = {
+    forbiddenTerms: privateContinuityTerms,
+    backendOnlyTerms: encounterSafety.backendOnlyTerms,
+  };
   const assembledBase = await assemblePrompt({
     campaignId: options.campaignId,
     contextWindow: options.contextWindow,
@@ -2106,6 +2150,7 @@ If no state mutation is justified, return an empty actions list.`,
       )
       .flatMap((message) => {
         const line = formatModelFacingConversationEntry(message, {
+          safety: replaySafety,
           extraForbiddenTerms: privateContinuityTerms,
           maxChars: 1200,
         });
@@ -2120,6 +2165,7 @@ If no state mutation is justified, return an empty actions list.`,
       role: "user" as const,
       content: `Current player request (player claim, not proof): player_claim: ${
         sanitizeModelFacingConversationText(options.playerAction, {
+          safety: replaySafety,
           extraForbiddenTerms: privateContinuityTerms,
           maxChars: 1200,
         }) || "[empty player action]"

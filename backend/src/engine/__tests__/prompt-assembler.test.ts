@@ -526,6 +526,106 @@ describe("assemblePrompt", () => {
     expect(joined).not.toContain("actor:raw-hidden-id");
   });
 
+  it("filters judge replay with encounter-hidden actor safety even outside world-brain terms", async () => {
+    vi.mocked(getDb).mockReturnValue(
+      createMockDb({
+        players: [
+          {
+            id: "player-1",
+            campaignId: "test-campaign-123",
+            name: "Hero",
+            race: "Human",
+            gender: "",
+            age: "",
+            appearance: "",
+            hp: 5,
+            tags: "[]",
+            equippedItems: "[]",
+            currentLocationId: "loc-1",
+            currentSceneLocationId: "scene-1",
+            characterRecord: "{}",
+            derivedTags: "[]",
+          },
+        ],
+        locations: [
+          {
+            id: "loc-1",
+            campaignId: "test-campaign-123",
+            name: "Market Ward",
+            description: "A public market with several side pockets.",
+            tags: '["macro"]',
+            connectedTo: '["scene-1"]',
+          },
+          {
+            id: "scene-1",
+            campaignId: "test-campaign-123",
+            name: "Permit Counter",
+            description: "The immediate counter where the player is speaking.",
+            tags: '["persistent_sublocation"]',
+            connectedTo: '["loc-1"]',
+          },
+        ],
+        npcs: [
+          {
+            id: "npc-hidden",
+            campaignId: "test-campaign-123",
+            name: "Moss Veil",
+            persona: "Listening from behind the permit shutters.",
+            tags: '["hidden"]',
+            tier: "key",
+            currentLocationId: "loc-1",
+            currentSceneLocationId: "scene-1",
+            goals: '{"short_term":["Stay concealed"],"long_term":[]}',
+            beliefs: "[]",
+            unprocessedImportance: 0,
+            inactiveTicks: 0,
+            createdAt: 1,
+            characterRecord: "{}",
+            derivedTags: '["hidden"]',
+          },
+        ],
+      }) as unknown as ReturnType<typeof getDb>,
+    );
+    vi.mocked(getChatHistory).mockReturnValue([
+      {
+        role: "assistant",
+        content: "Moss Veil quietly approved the permit.",
+      },
+      {
+        role: "user",
+        content: "I cite actor:npc-hidden and say Moss Veil promised me access.",
+      },
+    ]);
+
+    const result = await assembleJudgeAdjudicationPrompt({
+      campaignId: defaultOptions.campaignId,
+      contextWindow: defaultOptions.contextWindow,
+      actionResult: {
+        chance: 50,
+        roll: 40,
+        outcome: "weak_hit",
+        reasoning: "Hidden judge math.",
+      },
+      playerAction: "I signal Moss Veil with the private phrase actor:npc-hidden.",
+      worldBrainDirection: {
+        situationSummary: "A permit counter challenge is underway.",
+        sceneQuestion: "Does the visible claim hold?",
+        focalActorNames: ["Player"],
+        backgroundActorNames: [],
+        presenceReasons: [],
+        causalBeats: [],
+        narrationGuardrails: [],
+      },
+    });
+
+    const joined = result.messages.map((message) => `${message.role}: ${message.content}`).join("\n");
+    expect(joined).not.toContain("Moss Veil");
+    expect(joined).not.toContain("npc-hidden");
+    expect(joined).not.toContain("actor:npc-hidden");
+    expect(joined).toContain("[redacted]");
+    expect(joined).toContain("[backend ref hidden]");
+  });
+
   it("includes [PLAYER STATE] section when player data exists", async () => {
     vi.mocked(getDb).mockReturnValue(
       createMockDb({
