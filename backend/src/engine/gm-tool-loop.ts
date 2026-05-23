@@ -12,7 +12,10 @@ import {
   extractToolResultPayload,
   type CollectedToolCall,
 } from "./parse-helpers.js";
-import type { GmRead } from "./gm-turn-read.js";
+import {
+  readHasLegalMovementBindingForFrame,
+  type GmRead,
+} from "./gm-turn-read.js";
 import {
   grantsClaimedAccessFromUnconfirmedProof,
   isUnconfirmedAccessProofClaim,
@@ -21,8 +24,8 @@ import {
 import {
   buildModelFacingSceneDiagnostics,
   buildModelFacingScenePacket,
-  oracleContextForModelPrompt,
   oracleResultForModelPrompt,
+  type ModelFacingScenePacket,
   type ModelFacingSceneView,
   redactModelFacingJson,
   type ModelFacingPromptSafety,
@@ -40,19 +43,25 @@ import {
 import {
   applySuccessfulToolObservationToExecutionContext,
   createPlayerTurnToolExecutionContext,
+  writeScopesForRuntimeToolNames,
   type DialogueAddressedTargetInput,
   type ToolExecutionContext,
 } from "./tool-execution-context.js";
 import { createStorytellerTools, type RuntimeToolName } from "./tool-schemas.js";
 import type { ToolResult } from "./tool-executor.js";
-import { isObservationToolResult, toModelVisibleToolResult } from "./tool-result.js";
+import {
+  isObservationToolResult,
+  normalizeToolResultStatus,
+  toModelVisibleToolResult,
+} from "./tool-result.js";
 import {
   buildRuntimeReceiptPlan,
   canRuntimeToolSatisfyRequirement,
   canRuntimeToolSatisfyReceiptPlan,
   dialogueOutcomeSatisfiesStructuralRequirement,
+  evaluateRuntimeReceiptPlanStatus,
+  getRuntimeRequirementStructuralRoutingStatus,
   isAcceptedRuntimeReceipt,
-  isAcceptedRuntimeReceiptForPlan,
   isAcceptedTerminalToolResult,
   isRuntimeToolName,
   requiredTerminalToolForRuntimeRequirement,
@@ -60,7 +69,8 @@ import {
   runtimeRequirementStateEffectKinds,
   runtimeRequirementStateMutationTools,
   runtimeToolHasRole,
-  runtimeToolIsSideEffecting,
+  runtimeToolRequiresExecutionAuthority,
+  type AppliedStructuralEffectProof,
   type RuntimeRequirementLike,
 } from "./tool-contracts.js";
 import {
@@ -536,6 +546,17 @@ function runtimeRequirementToolMismatchError(input: {
   ].join(": ");
 }
 
+function runtimeRequirementAlreadySatisfiedError(input: {
+  toolName: RuntimeToolName;
+  requirement: NonNullable<GmRead["runtimeRequirement"]>;
+}): string {
+  return [
+    "runtime_requirement_already_satisfied",
+    `${input.toolName} would write another primary/preparatory receipt after GM Read runtimeRequirement.kind=${input.requirement.kind} is already satisfied.`,
+    "Stop tool execution or use observation-only helpers/offer_quick_actions if final narration needs visible options.",
+  ].join(": ");
+}
+
 function canRunBeforeRequiredReceipt(
   toolName: RuntimeToolName,
   requirement: NonNullable<GmRead["runtimeRequirement"]>,
@@ -554,9 +575,42 @@ function canRunBeforeRequiredReceipt(
   return false;
 }
 
+function runtimeRequirementPrimarySatisfiedByPriorSteps(
+  args: RunGmToolLoopArgs,
+  priorStepResults: readonly GmToolStepResult[],
+): boolean {
+  const requirement = gmReadRuntimeRequirement(args);
+  if (!requirement) return false;
+  const plan = buildRuntimeReceiptPlan(requirement);
+  if (!plan.primary) return false;
+  const status = evaluateRuntimeReceiptPlanStatus({
+    plan,
+    receipts: priorStepResults.map((step, index) => ({
+      toolName: step.toolName,
+      result: step.result,
+      appliedStructuralEffectProofs: appliedStructuralEffectProofsByPriorReceipts(
+        priorStepResults,
+        index,
+      ),
+    })),
+  });
+  return status.primarySatisfied;
+}
+
+function toolWouldDuplicateSatisfiedPrimaryReceipt(
+  toolName: RuntimeToolName,
+  requirement: NonNullable<GmRead["runtimeRequirement"]>,
+): boolean {
+  return canRuntimeToolSatisfyRequirement(toolName, requirement)
+    || runtimeRequirementPreparatoryTools(requirement).includes(toolName);
+}
+
 function withRuntimeRequirementReceiptGuard(
   tools: Partial<StorytellerToolSet>,
   args: RunGmToolLoopArgs,
+  options: {
+    priorStepResults?: () => readonly GmToolStepResult[];
+  } = {},
 ): Partial<StorytellerToolSet> {
   const requirement = gmReadRuntimeRequirement(args);
   if (!requirement || requirement.kind === "observation_read") return tools;
@@ -566,17 +620,46 @@ function withRuntimeRequirementReceiptGuard(
       if (!toolDef || typeof toolDef.execute !== "function" || !isRuntimeToolName(toolName)) {
         return [toolName, toolDef];
       }
-      if (canRunBeforeRequiredReceipt(toolName, requirement)) {
-        return [toolName, toolDef];
-      }
 
       const error = runtimeRequirementToolMismatchError({
         toolName,
         requirement,
       });
+      const originalExecute = toolDef.execute.bind(toolDef) as (...args: unknown[]) => unknown;
       const guardedTool = {
         ...toolDef,
-        async execute(): Promise<ToolResult> {
+        async execute(input: unknown, ...rest: unknown[]): Promise<ToolResult> {
+          if (
+            options.priorStepResults
+            && toolWouldDuplicateSatisfiedPrimaryReceipt(toolName, requirement)
+            && runtimeRequirementPrimarySatisfiedByPriorSteps(args, options.priorStepResults())
+          ) {
+            const alreadySatisfiedError = runtimeRequirementAlreadySatisfiedError({
+              toolName,
+              requirement,
+            });
+            return {
+              success: false,
+              status: "failure",
+              error: alreadySatisfiedError,
+              contractFailure: {
+                code: "runtime_requirement_already_satisfied",
+                toolName,
+                terminalKind: requirement.kind,
+                retryable: true,
+                message: alreadySatisfiedError,
+              },
+            };
+          }
+          if (canRunBeforeRequiredReceipt(toolName, requirement)) {
+            const result = await originalExecute(input, ...rest);
+            return isToolResult(result)
+              ? result
+              : malformedToolResult(
+                  "Tool result was not returned by the runtime requirement receipt guard.",
+                  toolName,
+                );
+          }
           return {
             success: false,
             status: "failure",
@@ -616,7 +699,7 @@ type GmToolLoopMutationBoundary = {
 let gmToolLoopBoundaryCounter = 0;
 
 function shouldUseGmToolLoopMutationBoundary(toolName: RuntimeToolName): boolean {
-  return runtimeToolIsSideEffecting(toolName);
+  return runtimeToolRequiresExecutionAuthority(toolName);
 }
 
 function createGmToolLoopMutationBoundary(campaignId: string): GmToolLoopMutationBoundary {
@@ -742,7 +825,7 @@ function withGmToolLoopMutationBoundary(
             toolName,
             candidateInput: input,
             result,
-            prefix: `state_receipt_${boundary.trackedStepResults.length + 1}`,
+            prefix: `state_change_${boundary.trackedStepResults.length + 1}`,
           });
           boundary.trackToolResult({
             tick,
@@ -750,7 +833,7 @@ function withGmToolLoopMutationBoundary(
             candidateInput: input,
             result: resultWithStateReceipts,
           });
-          return resultWithStateReceipts;
+          return toModelVisibleToolResult(resultWithStateReceipts);
         },
       } as StorytellerToolDef;
 
@@ -869,13 +952,8 @@ function actorPromptRef(
   view: ModelFacingSceneView,
   actor: ModelFacingSceneView["visibleActors"][number],
 ): string | null {
-  if (
-    actor.id === view.localScene.playerActorId
-    || actor.actorId === view.localScene.playerActorId
-  ) {
-    return "Player";
-  }
-  return actor.label || null;
+  void view;
+  return actor.ref || null;
 }
 
 function addRefReplacement(
@@ -900,42 +978,17 @@ function addTypedRefReplacement(
   addRefReplacement(replacements, `${type}:${raw}`, promptRef);
 }
 
-function buildPromptRefReplacementMap(view: ModelFacingSceneView): Map<string, string> {
+function buildPromptRefReplacementMap(packet: ModelFacingScenePacket): Map<string, string> {
   const replacements = new Map<string, string>();
-  addRefReplacement(replacements, view.localScene.playerActorId, "Player");
-  addTypedRefReplacement(replacements, "actor", view.localScene.playerActorId, "Player");
-  addRefReplacement(replacements, view.localScene.currentLocationId, "current_location");
-  addTypedRefReplacement(replacements, "location", view.localScene.currentLocationId, "current_location");
-  addRefReplacement(replacements, view.localScene.currentSceneScopeId, "current_scene");
-  addTypedRefReplacement(replacements, "location", view.localScene.currentSceneScopeId, "current_scene");
-
-  for (const actor of view.visibleActors ?? []) {
-    const promptRef = actorPromptRef(view, actor);
-    addRefReplacement(replacements, actor.id, promptRef);
-    addTypedRefReplacement(replacements, "actor", actor.id, promptRef);
-    addRefReplacement(replacements, actor.actorId, promptRef);
-    addTypedRefReplacement(replacements, "actor", actor.actorId, promptRef);
-  }
-
-  for (const candidate of view.legalTargets ?? []) {
-    const promptRef = candidate.label || null;
-    addRefReplacement(replacements, candidate.id, promptRef);
-    addRefReplacement(replacements, candidate.actorId, promptRef);
-    addTypedRefReplacement(replacements, "actor", candidate.actorId, promptRef);
-    addRefReplacement(replacements, candidate.itemId, promptRef);
-    addTypedRefReplacement(replacements, "item", candidate.itemId, promptRef);
-    addRefReplacement(replacements, candidate.locationId, promptRef);
-    addTypedRefReplacement(replacements, "location", candidate.locationId, promptRef);
-    addRefReplacement(replacements, candidate.factionId, promptRef);
-    addTypedRefReplacement(replacements, "faction", candidate.factionId, promptRef);
-  }
-
-  for (const candidate of view.legalMovement ?? []) {
-    const promptRef = candidate.label || null;
-    addRefReplacement(replacements, candidate.id, promptRef);
-    addTypedRefReplacement(replacements, "location", candidate.id, promptRef);
-    addRefReplacement(replacements, candidate.locationId, promptRef);
-    addTypedRefReplacement(replacements, "location", candidate.locationId, promptRef);
+  for (const entry of packet.acceptedRefs) {
+    addRefReplacement(replacements, entry.backendRef, entry.ref);
+    addRefReplacement(replacements, entry.candidateId, entry.ref);
+    if (entry.kind === "player" || entry.kind === "actor") {
+      addTypedRefReplacement(replacements, "actor", entry.backendRef, entry.ref);
+    }
+    if (entry.kind === "location" || entry.kind === "scene" || entry.kind === "movement") {
+      addTypedRefReplacement(replacements, "location", entry.backendRef, entry.ref);
+    }
   }
 
   return replacements;
@@ -960,14 +1013,13 @@ function replaceModelFacingRefs(value: unknown, replacements: ReadonlyMap<string
 }
 
 function buildGmToolLoopSceneViewForPrompt(view: ModelFacingSceneView): unknown {
-  const replacements = buildPromptRefReplacementMap(view);
   return {
     localScene: {
       tick: view.localScene.tick,
-      currentLocationRef: "current_location",
-      currentSceneRef: "current_scene",
-      currentLocationName: view.localScene.currentLocationName ?? null,
-      currentSceneScopeName: view.localScene.currentSceneScopeName ?? null,
+      currentLocationRef: view.localScene.currentLocation?.ref ?? null,
+      currentSceneRef: view.localScene.currentScene?.ref ?? null,
+      currentLocationName: view.localScene.currentLocation?.label ?? null,
+      currentSceneScopeName: view.localScene.currentScene?.label ?? null,
     },
     visibleActors: (view.visibleActors ?? []).map((actor) => ({
       ref: actorPromptRef(view, actor),
@@ -978,29 +1030,22 @@ function buildGmToolLoopSceneViewForPrompt(view: ModelFacingSceneView): unknown 
       summary: actor.summary ?? null,
     })),
     awarenessHints: view.awarenessHints ?? [],
-    privateContext: view.privateContext ?? {
-      hiddenActorCount: 0,
-      opaquePresenceCategories: [],
-    },
     localRecentEvents: (view.localRecentEvents ?? []).map((event) => ({
       tick: event.tick,
       source: event.source,
       summary: event.summary,
-      actorRefs: uniqueNonEmptyStrings(
-        event.actorIds.map((actorId) =>
-          replacements.get(actorId.trim().toLowerCase()) ?? null),
-      ).slice(0, 4),
+      actorRefs: uniqueNonEmptyStrings(event.actors ?? []).slice(0, 4),
     })),
     legalTargetCount: (view.legalTargets ?? []).length,
     legalMovementCount: (view.legalMovement ?? []).length,
-    oracle: oracleResultForModelPrompt(view.oracle),
-    oracleContext: oracleContextForModelPrompt(view.oracleContext),
+    oracle: view.oracle ?? null,
+    oracleContext: view.oracleContext ?? null,
     combatEnvelope: view.combatEnvelope ? { present: true } : undefined,
   };
 }
 
-function buildGmReadForToolLoopPrompt(gmRead: GmRead, view: ModelFacingSceneView): unknown {
-  return replaceModelFacingRefs(gmRead, buildPromptRefReplacementMap(view));
+function buildGmReadForToolLoopPrompt(gmRead: GmRead, packet: ModelFacingScenePacket): unknown {
+  return replaceModelFacingRefs(gmRead, buildPromptRefReplacementMap(packet));
 }
 
 function buildCandidateRefsForPrompt(view: ModelFacingSceneView): unknown {
@@ -1008,12 +1053,12 @@ function buildCandidateRefsForPrompt(view: ModelFacingSceneView): unknown {
   return {
     current: {
       currentLocation: {
-        ref: "current_location",
-        label: view.localScene.currentLocationName ?? null,
+        ref: view.localScene.currentLocation?.ref ?? null,
+        label: view.localScene.currentLocation?.label ?? null,
       },
       currentScene: {
-        ref: "current_scene",
-        label: view.localScene.currentSceneScopeName ?? null,
+        ref: view.localScene.currentScene?.ref ?? null,
+        label: view.localScene.currentScene?.label ?? null,
       },
     },
     actors: view.visibleActors.map((actor) => ({
@@ -1022,12 +1067,12 @@ function buildCandidateRefsForPrompt(view: ModelFacingSceneView): unknown {
       awareness: actor.awareness,
     })),
     targets: view.legalTargets.map((candidate) => ({
-      ref: candidate.label || null,
+      ref: candidate.ref || null,
       label: candidate.label,
       type: candidate.type,
     })),
     movements: view.legalMovement.map((candidate) => ({
-      ref: candidate.label || null,
+      ref: candidate.ref || null,
       label: candidate.label,
     })),
   };
@@ -1083,23 +1128,17 @@ function assertRuntimeRequirementCanBeSatisfied(
 ): void {
   if (!requirement) return;
   if (requirement.kind === "observation_read") return;
-  if (
-    requirement.kind === "dialogue_outcome"
-    && requirement.requiresStructuralEffect === true
-    && runtimeRequirementStateEffectKinds(requirement).length === 0
-  ) {
+
+  const structuralRouting = getRuntimeRequirementStructuralRoutingStatus(requirement);
+  if (structuralRouting.status === "missing_structural_owner_kind") {
     throw new Error(
       "GM tool loop cannot run: dialogue_outcome requiresStructuralEffect=true must include runtimeRequirement.effectKind/effectKinds.",
     );
   }
-  if (
-    requirement.kind === "dialogue_outcome"
-    && requirement.requiresStructuralEffect === true
-  ) {
-    const structuralOwners = runtimeRequirementStateMutationTools(requirement);
-    if (!profile.activeTools.some((toolName) => structuralOwners.includes(toolName))) {
+  if (structuralRouting.status === "has_structural_owner") {
+    if (!profile.activeTools.some((toolName) => structuralRouting.ownerTools.includes(toolName))) {
       throw new Error(
-        `GM tool loop cannot run: dialogue_outcome structural effects ${runtimeRequirementStateEffectKinds(requirement).join(",")} have no active structural owner in profile ${profile.name}.`,
+        `GM tool loop cannot run: dialogue_outcome structural effects ${structuralRouting.effectKinds.join(",")} have no active structural owner in profile ${profile.name}.`,
       );
     }
   }
@@ -1137,6 +1176,18 @@ function dialogueOutcomeRequiresNoVisibleAuthority(args: RunGmToolLoopArgs): boo
     && requirement.speakerBinding?.kind === "no_visible_authority";
 }
 
+function dialogueOutcomeAllowsSceneExtra(args: RunGmToolLoopArgs): boolean {
+  const requirement = gmReadRuntimeRequirement(args);
+  if (requirement?.kind !== "dialogue_outcome") return false;
+  if (
+    requirement.speakerBinding?.kind === "prose_role"
+    && requirement.speakerBinding.allowCreateSceneExtra !== false
+  ) {
+    return true;
+  }
+  return runtimeRequirementStateEffectKinds(requirement).includes("support_actor_created");
+}
+
 function playerTurnActiveTools(tools: readonly RuntimeToolName[]): RuntimeToolName[] {
   return normalizeModelFacingAllowedTools({ tools, mode: "player_turn" });
 }
@@ -1147,17 +1198,27 @@ function activeToolsForRuntimeRequirement(
 ): RuntimeToolName[] {
   if (!requirement) {
     return tools.filter((toolName) =>
-      !runtimeToolIsSideEffecting(toolName)
+      !runtimeToolRequiresExecutionAuthority(toolName)
       && !TERMINAL_SEMANTIC_RECEIPT_TOOLS.has(toolName));
   }
 
   const receiptOwners = new Set(runtimeRequirementStateMutationTools(requirement));
-  const preparatoryOwners = new Set(runtimeRequirementPreparatoryTools(requirement));
+  const preparatoryTools = runtimeRequirementPreparatoryTools(requirement);
+  const requirementEffects = new Set(runtimeRequirementStateEffectKinds(requirement));
+  const movementPreparatoryTools = new Set<RuntimeToolName>(preparatoryTools);
+  if (
+    requirementEffects.has("movement")
+    && movementPreparatoryTools.has("create_minor_poi")
+    && movementPreparatoryTools.has("reveal_location")
+  ) {
+    movementPreparatoryTools.delete("create_minor_poi");
+  }
+  const preparatoryOwners = new Set(movementPreparatoryTools);
   const requiredTerminalTool = requiredTerminalToolForRuntimeRequirement(requirement);
   const receiptPlan = buildRuntimeReceiptPlan(requirement);
 
   return tools.filter((toolName) => {
-    if (!runtimeToolIsSideEffecting(toolName)) return true;
+    if (!runtimeToolRequiresExecutionAuthority(toolName)) return true;
     if (requiredTerminalTool && toolName === requiredTerminalTool) return true;
     if (receiptOwners.has(toolName) || preparatoryOwners.has(toolName)) return true;
     if (canRuntimeToolSatisfyReceiptPlan(toolName, receiptPlan)) return true;
@@ -1171,10 +1232,47 @@ function activeToolsForRuntimeRequirement(
   });
 }
 
+function runtimeRequirementAllowsAdvanceTime(
+  requirement: RuntimeRequirementLike | null | undefined,
+): boolean {
+  return canRuntimeToolSatisfyReceiptPlan(
+    "advance_time",
+    buildRuntimeReceiptPlan(requirement),
+  );
+}
+
+function filterAdvanceTimeByRuntimeRequirement(
+  tools: readonly RuntimeToolName[],
+  requirement: RuntimeRequirementLike | null | undefined,
+): RuntimeToolName[] {
+  if (runtimeRequirementAllowsAdvanceTime(requirement)) {
+    return [...tools];
+  }
+  return tools.filter((toolName) => toolName !== "advance_time");
+}
+
+function filterMovementPreparatoryToolsForLegalBinding(
+  tools: readonly RuntimeToolName[],
+  args: RunGmToolLoopArgs,
+  requirement: RuntimeRequirementLike | null | undefined,
+): RuntimeToolName[] {
+  if (!requirement || !runtimeRequirementStateEffectKinds(requirement).includes("movement")) {
+    return [...tools];
+  }
+  if (!readHasLegalMovementBindingForFrame(args.gmRead, args.frame)) {
+    return [...tools];
+  }
+  return tools.filter((toolName) =>
+    toolName !== "reveal_location" && toolName !== "create_minor_poi"
+  );
+}
+
 function defaultRuntimeExecutionTools(args: RunGmToolLoopArgs): RuntimeToolName[] {
   const requirement = gmReadRuntimeRequirement(args);
   const tools = activeToolsForRuntimeRequirement(args.frame.allowedTools, requirement);
-  return playerTurnActiveTools(tools);
+  return playerTurnActiveTools(
+    filterMovementPreparatoryToolsForLegalBinding(tools, args, requirement),
+  );
 }
 
 function selectGmToolLoopProfile(args: RunGmToolLoopArgs): GmToolLoopProfile {
@@ -1183,7 +1281,7 @@ function selectGmToolLoopProfile(args: RunGmToolLoopArgs): GmToolLoopProfile {
     const requestedProceduralMaxOutputTokens =
       args.maxOutputTokens ?? GM_TOOL_LOOP_PROCEDURAL_CONVERSATION_MAX_OUTPUT_TOKENS;
     const requiresStructuralEffect = dialogueOutcomeRequiresStructuralEffect(args);
-    const noVisibleAuthority = dialogueOutcomeRequiresNoVisibleAuthority(args);
+    const allowSceneExtra = dialogueOutcomeAllowsSceneExtra(args);
     const requirement = gmReadRuntimeRequirement(args);
     const structuralEffectTools = requiresStructuralEffect
       ? new Set([
@@ -1194,12 +1292,16 @@ function selectGmToolLoopProfile(args: RunGmToolLoopArgs): GmToolLoopProfile {
     return {
       name: "procedural_conversation_outcome",
       activeTools: playerTurnActiveTools(
-        args.frame.allowedTools.filter((toolName) =>
-          (PROCEDURAL_CONVERSATION_TOOLS.has(toolName)
-            && !(noVisibleAuthority && toolName === "create_scene_extra"))
-          || (requiresStructuralEffect
-            && DIALOGUE_STRUCTURAL_EFFECT_TOOLS.has(toolName)
-            && structuralEffectTools.has(toolName)),
+        filterMovementPreparatoryToolsForLegalBinding(
+          filterAdvanceTimeByRuntimeRequirement(args.frame.allowedTools.filter((toolName) =>
+            (PROCEDURAL_CONVERSATION_TOOLS.has(toolName)
+              && (toolName !== "create_scene_extra" || allowSceneExtra))
+            || (requiresStructuralEffect
+              && DIALOGUE_STRUCTURAL_EFFECT_TOOLS.has(toolName)
+              && structuralEffectTools.has(toolName)),
+          ), requirement),
+          args,
+          requirement,
         ),
       ),
       maxSteps: GM_TOOL_LOOP_PROCEDURAL_CONVERSATION_MAX_STEPS,
@@ -1230,9 +1332,9 @@ function selectGmToolLoopProfile(args: RunGmToolLoopArgs): GmToolLoopProfile {
     return {
       name: "world_fact_recording",
       activeTools: playerTurnActiveTools(
-        args.frame.allowedTools.filter((toolName) =>
+        filterAdvanceTimeByRuntimeRequirement(args.frame.allowedTools.filter((toolName) =>
           WORLD_FACT_RECORDING_TOOLS.has(toolName),
-        ),
+        ), args.gmRead.runtimeRequirement),
       ),
       maxSteps: GM_TOOL_LOOP_PROCEDURAL_CONVERSATION_MAX_STEPS,
       timeoutMs: GM_TOOL_LOOP_PROCEDURAL_CONVERSATION_TIMEOUT_MS,
@@ -1253,6 +1355,12 @@ function selectGmToolLoopProfile(args: RunGmToolLoopArgs): GmToolLoopProfile {
   };
 }
 
+const DOCUMENT_PROOF_CARRIER_RULES = [
+  "Document/proof carrier rule: if a separate future-usable chit/card/receipt/permit/report is issued, create or transfer that item first and cite its stateChangeRef.",
+  "If the effect is only a mark/stamp/status on an existing carried document, use that existing document as claims[].subjectRef.",
+  "Any applied_now document_status claim must use claims[].subjectRef for its document/item carrier; subjectText is only for non-applied procedural descriptions.",
+] as const;
+
 function formatGmToolLoopProfilePrompt(profile: GmToolLoopProfile): string {
   if (profile.name === "default_runtime_execution") {
     return [
@@ -1268,20 +1376,21 @@ function formatGmToolLoopProfilePrompt(profile: GmToolLoopProfile): string {
       "Use only the listed conversation/procedure tools. Do not create locations, items, movement, access, possession, combat, relationships, or persistent/key actors unless GM Read sets runtimeRequirement.requiresStructuralEffect=true and the listed structural tool is the direct consequence of this playable beat.",
       "Use a lookup only when needed to verify visible people, carried/visible documents, or current/known facts before recording the dialogue outcome.",
       "If GM Read speakerBinding.kind is no_visible_authority, do not create a temporary responder and do not bind another speaker; record unavailable/no_current_answer with authorityKind no_visible_authority, requestedRoleText, and no speakerRef.",
-      "If no legal non-player speakerRef is visible but GM Read speakerBinding.kind is prose_role and the current scene plausibly contains an ordinary responder, create one temporary current-scene responder first with create_scene_extra using role clerk/service/support/witness/vendor/courier/porter. Set create_scene_extra.roleText to the exact GM Read speakerBinding.requestedRoleText when possible, or echo that text in reason. Then use the returned name as speakerRef in record_dialogue_outcome; do not copy backend IDs from tool diagnostics.",
+      "If no legal non-player speakerRef is visible but GM Read speakerBinding.kind is prose_role and the current scene plausibly contains an ordinary responder, create one temporary current scene responder first with create_scene_extra using role clerk/service/support/witness/vendor/courier/porter. Set create_scene_extra.roleText to the exact GM Read speakerBinding.requestedRoleText when possible, or echo that text in reason. Then use the returned name as speakerRef in record_dialogue_outcome; do not copy backend IDs from tool diagnostics.",
       "If the player addressed a role or ordinary person from recent visible prose that is not in CANDIDATE REFS, do not substitute another visible NPC just because that NPC is legal. Create the addressed responder with create_scene_extra, or record unavailable/no_current_answer with requestedRoleText.",
       "Create at most one temporary responder in this profile, and only when that responder is needed to answer, refuse, redirect, witness, or make the current public/service scene playable.",
       "If the player states a question, reports a block, or shows documents, do not spend a step recording the player's intent here. The player action is already the intent; call record_dialogue_outcome for the NPC/source answer, refusal, silence, gesture, warning, redirect, unavailable role, or no-current-answer result.",
       "For record_dialogue_outcome, semantics live in outcomeKind/topicKind/authorityKind/truthStatus/futureUseKind, claims, and stateEffects. quote is the concrete player-visible answer surface; durable answered procedure/permission/proof/route/safety/status outcomes require quote. If no concrete answer can be spoken, use refused/unavailable/no_current_answer/redirected instead of answered.",
-      "Legal refs for speakerRef, addresseeRefs, and sourceRefs must be copied exactly from CANDIDATE REFS as Player/current_scene/current_location/human-readable labels, or from a successful tool result name in this loop.",
+      "Legal refs for speakerRef, addresseeRefs, and sourceRefs must be copied exactly from CANDIDATE REFS as Player/current_scene/current_location/prompt aliases, or from a successful tool result name in this loop. Labels are display-only unless they are also the listed ref.",
       "Role or office words from the player action are not refs. Put them in requestedRoleText; never use a role label like dispatcher/clerk/office/warden as speakerRef or sourceRefs unless it appears as a legal ref or was returned by create_scene_extra.",
       "If the requested role or authority is not currently visible and the scene does not plausibly support a temporary responder, use record_dialogue_outcome with outcomeKind unavailable or no_current_answer, authorityKind no_visible_authority, requestedRoleText, and no speakerRef.",
       "For unavailable/no_current_answer, sourceRefs should cite an existing legal ref such as Player, current_scene, current_location, the visible place/object/document the player used, or a player-known fact. Do not cite the unavailable role as a source ref.",
       "For reusable procedure questions, no-answer/unavailable-role outcomes are still procedural outcomes. Record them as durable record_dialogue_outcome with futureUseKind and futureRelevance when they constrain the player's next route, office, evidence, safety choice, or later attempt.",
       "Use durable record_dialogue_outcome with futureRelevance for reusable procedural answers, document failures, named offices, citations, permissions, prohibitions, route facts, warnings, or obligations. Do not stop after only advance_time, lookup, record_player_intent, or log_event.",
       "If the NPC/source only says what would work, what they believe, or what rule applies, leave stateEffects empty; that is a communicative answer, not an applied state.",
-      "If the outcome actually applies durable state now because the player earned, bluffed, persuaded, proved, paid, fought, or otherwise made something happen, first make the matching structural state-bearing tool call in its own observed step; then record_dialogue_outcome with stateEffects[{ status:'applied_now', stateReceipt:'state_receipt_...' }], citing the stateReceipt alias from that tool result. Do not hand-copy target/key/value; the backend resolves them from the receipt.",
+      "If the outcome actually applies durable state now because the player earned, bluffed, persuaded, proved, paid, fought, or otherwise made something happen, first make the matching structural state-bearing tool call in its own observed step; then record_dialogue_outcome with stateEffects[{ status:'applied_now', stateChangeRef:'state_change_...' }], citing the stateChangeRef alias from that tool result. Do not hand-copy target/key/value; the backend resolves target/key/value from that reference.",
       "When runtimeRequirement.requiresStructuralEffect is true, do not call record_dialogue_outcome until every needed structural state-bearing tool has already succeeded. Preliminary dialogue records without backed applied_now stateEffects waste the player-blocking loop and will fail validation.",
+      ...DOCUMENT_PROOF_CARRIER_RULES,
       "If the attempted structural change is refused, unavailable, redirected, impossible, not currently owed, or otherwise not applied, record that typed non-application as record_dialogue_outcome with outcomeKind refused/unavailable/no_current_answer/redirected/silent and no applied_now stateEffects. Do not invent a structural tool for a change that did not happen.",
       "For payments, deposits, custody transfer, access grants, status marks, relationship shifts, route openings, injuries, and item movement, settle the concrete world change first with add_tag/remove_tag/set_relationship/transfer_item/move_actor/reveal_location/spawn_item/set_condition as appropriate; then record the NPC/source answer once with backed stateEffects.",
       "For partial payments, deposits, or giving part of a bundled item, use transfer_item with transferredItemName and remainingItemName so the paid portion and the player's remainder are both concrete state.",
@@ -1346,7 +1455,7 @@ function formatLocalityAndCreationOrder(profile: GmToolLoopProfile): string {
     ...placeOwnerLines,
     "- Support NPCs are allowed when the scene needs someone concrete to answer, oppose, guide, trade, witness, or make the place playable. They should be spawned into the current scene/current location or a just-revealed observed location, not a guessed remote place.",
     "- Items are allowed when a tangible thing becomes persistent, transferable, inspectable, usable, owned, or likely to matter later. Do not spawn incidental set dressing, implied props, or generic scenery; describe those later in narration instead.",
-    "- Use durable log_event only for a new future-relevant fact that is not a possession/access/item-use/movement claim. Successful spawn_item and transfer_item results already carry those concrete facts; successful move_actor carries movement facts.",
+    "- Player-turn log_event is scene_local only. Future-usable player-known facts must use record_world_fact, record_dialogue_outcome, or the concrete state tool that owns the change.",
     "- Use scene_local log_event for attempted, refused, witnessed, conversational, or bluff beats; if an NPC's suspicion should persist, prefer a concrete NPC/location consequence tool when one is justified by legal refs.",
     "- Future-relevant pressure checklist: raised voices tied to an inspection dispute, named/role actors who continue acting, waxed cloth or manifests that create an obligation, recessed doors/stairs/routes, defensive posture, danger changes, or aftermath after violence require state-bearing tool observations. Do not leave them only in text.",
     "- Low-stakes sensory color is allowed for final narration later when it creates no durable actor, prop, route, obligation, combat state, danger change, or aftermath.",
@@ -1371,7 +1480,7 @@ export function buildGmToolLoopPrompt(
     "Stop once the needed backend observations are enough for the final narrator. Do not keep probing tools to improve prose.",
     "A required runtime contract is satisfied only by a tool result with success:true, status not failure, and the required terminal tool for GM Read runtimeRequirement. A failed terminal attempt is not a receipt; read contractFailure/refHints and retry with legal refs.",
     "Do not write final player-facing narration here. The visible narrator runs after backend observations settle.",
-    "Use observation-only lookup tools for fuzzy low-risk intent before choosing a state tool. Read their observations, then choose visible labels/current aliases/helper aliases or stop only if observation is enough.",
+    "Use observation-only lookup tools for fuzzy low-risk intent before choosing a state tool. Read their observations, then choose prompt aliases/current aliases/helper aliases or stop only if observation is enough.",
     "Lookup observations never mutate world state and never reveal hidden/private/offscreen names; do not treat lookup candidates as completed movement or created facts.",
     "Do not satisfy future-relevant concrete pressure in assistant prose. If this pass introduces actors, props, obligations, routes, combat posture, danger changes, or aftermath that should matter later, it must be represented by successful existing runtime tools.",
     "If a tool returns success:false, do not restate the same invalid call. Correct it only if the model-facing scene refs make a legal correction obvious.",
@@ -1387,7 +1496,7 @@ export function buildGmToolLoopPrompt(
     formatLocalityAndCreationOrder(profile),
     "",
     "CONVERSATION COMPLETION",
-    "- If the player asks, speaks to, negotiates with, or questions a visible/current-scene NPC or a support NPC you create, do not stop after only create_scene_extra, record_player_intent, advance_time, or a log_event that only repeats the player's request.",
+    "- If the player asks, speaks to, negotiates with, or questions a visible/current scene NPC or a support NPC you create, do not stop after only create_scene_extra, record_player_intent, advance_time, or a log_event that only repeats the player's request.",
     "- Before stopping a conversational turn, create at least one successful record_dialogue_outcome that structurally records the NPC/source answer, refusal, warning, silence, gesture, redirect, unavailable role, or no-current-answer result.",
     "- Use scene_local record_dialogue_outcome for an immediate non-durable exchange; use durable record_dialogue_outcome with futureUseKind/futureRelevance for reusable leads, names, procedures, warnings, permissions, obligations, route facts, or promises.",
     "- Do not use log_event text to satisfy an NPC answer/refusal/silence/warning. log_event is legacy memory/fact logging, not a dialogue outcome contract.",
@@ -1401,7 +1510,7 @@ export function buildGmToolLoopPrompt(
     "GM READ",
     JSON.stringify(
       redactModelFacingJson(
-        buildGmReadForToolLoopPrompt(args.gmRead, scenePacket.view),
+        buildGmReadForToolLoopPrompt(args.gmRead, scenePacket),
         scenePacket.safety,
       ),
       null,
@@ -1529,7 +1638,7 @@ function hasAcceptedRuntimeTerminalReceipt(
           toolName,
           result: payload,
           requirement,
-          appliedStructuralEffectsBacked: appliedStructuralEffectsBackedForToolResult(
+          appliedStructuralEffectProofs: appliedStructuralEffectProofsForToolResult(
             trackedStepResults?.() ?? [],
             toolName,
             payload,
@@ -1551,20 +1660,46 @@ function hasAcceptedTerminalReceiptInStepResults(
       toolName: step.toolName,
       result: step.result,
       requirement,
-      appliedStructuralEffectsBacked: appliedStructuralEffectsBackedByPriorReceipts(
+      appliedStructuralEffectProofs: appliedStructuralEffectProofsByPriorReceipts(
         stepResults,
         index,
       ),
     }));
 }
 
-function hasRequiredTerminalToolCallInStepResults(
+function hasTerminalToolAttemptInStepResults(
   requirement: NonNullable<GmRead["runtimeRequirement"]> | null,
   stepResults: readonly GmToolStepResult[],
 ): boolean {
   const requiredTool = requiredTerminalToolForRuntimeRequirement(requirement);
   if (!requiredTool) return false;
   return stepResults.some((step) => step.toolName === requiredTool);
+}
+
+function modelFacingUsableRefsForStepResult(
+  result: ToolResult | null | undefined,
+  safety: ModelFacingPromptSafety,
+  extraForbiddenTerms: readonly string[],
+): string[] {
+  const visible = result ? toModelVisibleToolResult(result, { safety, extraForbiddenTerms }) : null;
+  return Array.isArray(visible?.modelSafeRefs)
+    ? visible.modelSafeRefs.filter((ref): ref is string => typeof ref === "string" && ref.trim().length > 0)
+    : [];
+}
+
+function modelFacingUsableStateChangeRefsForStepResult(
+  result: ToolResult | null | undefined,
+  safety: ModelFacingPromptSafety,
+  extraForbiddenTerms: readonly string[],
+): string[] {
+  const visible = result ? toModelVisibleToolResult(result, { safety, extraForbiddenTerms }) : null;
+  return Array.isArray(visible?.stateChangeRefs)
+    ? visible.stateChangeRefs.flatMap((entry) => {
+      if (!isRecord(entry)) return [];
+      const ref = stringField(entry, "stateChangeRef");
+      return ref ? [ref] : [];
+    })
+    : [];
 }
 
 function modelFacingPriorToolSteps(
@@ -1576,6 +1711,15 @@ function modelFacingPriorToolSteps(
     const acceptedInput = step.result?.success === true && step.result.status !== "failure"
       ? step.candidateInput ?? {}
       : null;
+    const usableRefs = step.result?.success === true && step.result.status !== "failure"
+      ? modelFacingUsableRefsForStepResult(step.result, safety, extraForbiddenTerms)
+      : [];
+    const usableStateChangeRefs = step.result?.success === true && step.result.status !== "failure"
+      ? modelFacingUsableStateChangeRefsForStepResult(step.result, safety, extraForbiddenTerms)
+      : [];
+    const rejectedInput = step.result?.success === false || step.result?.status === "failure"
+      ? step.candidateInput ?? {}
+      : null;
     return {
       toolName: step.toolName,
       status: step.status,
@@ -1585,6 +1729,14 @@ function modelFacingPriorToolSteps(
       result: step.result
         ? toModelVisibleToolResult(step.result, { safety, extraForbiddenTerms })
         : null,
+      usableRefs,
+      usableStateChangeRefs,
+      notAReceipt: step.result?.success === false || step.result?.status === "failure"
+        ? true
+        : undefined,
+      rejectedInput: rejectedInput
+        ? sanitizeModelFacingJson(rejectedInput, { safety, extraForbiddenTerms })
+        : undefined,
       validationError: step.validationError
         ? sanitizeModelFacingJson(step.validationError, { safety, extraForbiddenTerms })
         : null,
@@ -1619,12 +1771,16 @@ function buildTerminalClosurePrompt(input: {
   const extraForbiddenTerms = privateToolObservationTerms(input.args.frame);
   const requirement = gmReadRuntimeRequirement(input.args);
   const terminalInstruction = input.requiredTool === "record_dialogue_outcome"
-    ? [
-        "Close the conversational runtime contract now.",
-        "Call record_dialogue_outcome exactly for the NPC/source answer, refusal, warning, silence, redirect, unavailable role, or no-current-answer result.",
-        "If a previous create_scene_extra produced the responder, use that visible name/model-safe result as speakerRef.",
-        "If the already-observed facts do not support a concrete answer or applied state, record a typed non-application outcome such as refused, redirected, unavailable, or no_current_answer; do not invent a structural success.",
-      ]
+      ? [
+          "Close the conversational runtime contract now.",
+          "Call record_dialogue_outcome exactly for the NPC/source answer, refusal, warning, silence, redirect, unavailable role, or no-current-answer result.",
+          "If a previous create_scene_extra produced the responder, use that visible name/model-safe result as speakerRef.",
+          ...DOCUMENT_PROOF_CARRIER_RULES,
+          "For a spawned document/report from a prior successful spawn_item step, use that step's usableRefs[0] as claims[].subjectRef and that step's usableStateChangeRefs[0] as the applied_now stateEffects[].stateChangeRef.",
+          "For an existing carried document mark, use the existing target alias from CANDIDATE REFS as claims[].subjectRef only after a prior successful add_tag/remove_tag step exposes a usableStateChangeRef.",
+          "For applied_now stateEffects, cite only stateChangeRef aliases from successful prior tool results. A failed prior tool is not a receipt and must not be described as applied.",
+          "If the already-observed facts do not support a concrete answer or applied state, record a typed non-application outcome such as refused, redirected, unavailable, or no_current_answer; do not invent a structural success.",
+        ]
     : [
         "Close the world_fact runtime contract now.",
         "Call record_world_fact exactly for the future-usable player-known fact, gap, contradiction, warning, route, office, procedure, or status fact.",
@@ -1651,7 +1807,7 @@ function buildTerminalClosurePrompt(input: {
     "GM READ",
     JSON.stringify(
       redactModelFacingJson(
-        buildGmReadForToolLoopPrompt(input.args.gmRead, scenePacket.view),
+        buildGmReadForToolLoopPrompt(input.args.gmRead, scenePacket),
         scenePacket.safety,
       ),
       null,
@@ -1673,6 +1829,7 @@ function buildTerminalClosurePrompt(input: {
       null,
       2,
     ),
+    "For successful prior steps, prefer the flat usableRefs and usableStateChangeRefs fields; do not mine hidden/raw result payloads for IDs. Failed steps marked notAReceipt are evidence of rejection only.",
     "",
     "ALLOWED TOOL",
     `- ${input.requiredTool}`,
@@ -1874,10 +2031,10 @@ function isDialogueOutcomeStep(
     toolName: step.toolName,
     result: step.result,
     requirement: { kind: "dialogue_outcome" },
-    appliedStructuralEffectsBacked:
+    appliedStructuralEffectProofs:
       typeof stepIndex === "number" && stepResults
-        ? appliedStructuralEffectsBackedByPriorReceipts(stepResults, stepIndex)
-        : false,
+        ? appliedStructuralEffectProofsByPriorReceipts(stepResults, stepIndex)
+        : [],
   })) {
     return false;
   }
@@ -1906,11 +2063,14 @@ function isDurableDialogueOutcomeStep(
 
 function dialogueOutcomeSettlesStructuralRequirementWithoutMutation(
   step: GmToolStepResult,
+  requirement: RuntimeRequirementLike | null | undefined,
 ): boolean {
   const payload = dialogueOutcomePayload(step);
   if (!payload) return false;
   if (appliedStateEffectsFromDialoguePayload(payload).length > 0) return false;
-  return dialogueOutcomeSatisfiesStructuralRequirement(payload);
+  return dialogueOutcomeSatisfiesStructuralRequirement(payload, {
+    requirement,
+  });
 }
 
 function effectHasPriorReceipt(
@@ -1918,19 +2078,9 @@ function effectHasPriorReceipt(
   dialogueStepIndex: number,
   effect: Record<string, unknown>,
 ): boolean {
-  if (!stringField(effect, "stateReceipt")) {
-    return false;
-  }
   return stepResults
     .slice(0, dialogueStepIndex)
-    .some((step) => {
-      const receipt = structuralStateReceiptFromToolCall({
-        toolName: step.toolName,
-        candidateInput: step.candidateInput,
-        result: step.result,
-      });
-      return Boolean(receipt && receiptBacksAppliedStateEffect(receipt, effect));
-    });
+    .some((step) => structuralEffectProofFromPriorReceipt(step, effect) !== null);
 }
 
 function toolResultAuthorityId(result: ToolResult | null | undefined): string | null {
@@ -1950,26 +2100,65 @@ function stepMatchesToolResult(
   return Boolean(leftAuthorityId && rightAuthorityId && leftAuthorityId === rightAuthorityId);
 }
 
-function appliedStructuralEffectsBackedByPriorReceipts(
+function structuralEffectProofFromPriorReceipt(
+  step: GmToolStepResult,
+  effect: Record<string, unknown>,
+): AppliedStructuralEffectProof | null {
+  const receipt = structuralStateReceiptFromToolCall({
+    toolName: step.toolName,
+    candidateInput: step.candidateInput,
+    result: step.result,
+  });
+  if (!receipt) return null;
+  const resolved = resolveAppliedStateEffectFromReceipt(receipt, effect);
+  if (!resolved) return null;
+
+  const structuralTool = stringField(resolved, "structuralTool");
+  const targetRef = stringField(resolved, "targetRef");
+  const stateKey = stringField(resolved, "stateKey");
+  const stateValue = stringField(resolved, "stateValue");
+  if (!structuralTool || !targetRef || !stateKey || !stateValue) return null;
+
+  const stateChangeRef = stringField(effect, "stateChangeRef") ?? stringField(effect, "stateReceipt");
+  const toolResultId = toolResultAuthorityId(step.result);
+  const resultWorldVersion = step.result?.authority?.resultWorldVersion;
+  return {
+    structuralTool,
+    targetRef,
+    stateKey,
+    stateValue,
+    ...(stateChangeRef ? { stateChangeRef } : {}),
+    ...(toolResultId ? { toolResultId } : {}),
+    ...(typeof resultWorldVersion === "number" ? { resultWorldVersion } : {}),
+  };
+}
+
+function appliedStructuralEffectProofsByPriorReceipts(
   stepResults: readonly GmToolStepResult[],
   dialogueStepIndex: number,
-): boolean {
+): AppliedStructuralEffectProof[] {
   const step = stepResults[dialogueStepIndex];
   if (!step || step.toolName !== "record_dialogue_outcome" || step.result?.success !== true) {
-    return false;
+    return [];
   }
   const payload = isRecord(step.result.result) ? step.result.result : null;
   const appliedEffects = appliedStateEffectsFromDialoguePayload(payload);
-  return appliedEffects.length > 0
-    && appliedEffects.every((effect) =>
-      effectHasPriorReceipt(stepResults, dialogueStepIndex, effect));
+  const proofs: AppliedStructuralEffectProof[] = [];
+  for (const effect of appliedEffects) {
+    const proof = stepResults
+      .slice(0, dialogueStepIndex)
+      .map((priorStep) => structuralEffectProofFromPriorReceipt(priorStep, effect))
+      .find((entry): entry is AppliedStructuralEffectProof => entry !== null);
+    if (proof) proofs.push(proof);
+  }
+  return proofs;
 }
 
-function appliedStructuralEffectsBackedForToolResult(
+function appliedStructuralEffectProofsForToolResult(
   stepResults: readonly GmToolStepResult[],
   toolName: RuntimeToolName,
   result: ToolResult,
-): boolean {
+): AppliedStructuralEffectProof[] {
   let dialogueStepIndex = -1;
   for (let index = stepResults.length - 1; index >= 0; index -= 1) {
     if (!stepMatchesToolResult(stepResults[index]!, toolName, result)) continue;
@@ -1977,7 +2166,8 @@ function appliedStructuralEffectsBackedForToolResult(
     break;
   }
   return dialogueStepIndex >= 0
-    && appliedStructuralEffectsBackedByPriorReceipts(stepResults, dialogueStepIndex);
+    ? appliedStructuralEffectProofsByPriorReceipts(stepResults, dialogueStepIndex)
+    : [];
 }
 
 function missingAppliedStateEffectsWithoutPriorReceipts(
@@ -1992,7 +2182,7 @@ function missingAppliedStateEffectsWithoutPriorReceipts(
           candidateInput: step.candidateInput,
           result: step.result,
         });
-        return Boolean(receipt && stringField(effect, "stateReceipt")
+        return Boolean(receipt && (stringField(effect, "stateChangeRef") ?? stringField(effect, "stateReceipt"))
           && resolveAppliedStateEffectFromReceipt(receipt, effect));
       }));
 }
@@ -2006,45 +2196,56 @@ function missingAppliedStateEffectReceiptError(effect: Record<string, unknown>):
     "dialogue_state_effect_missing_prior_receipt",
     "record_dialogue_outcome declared an applied_now stateEffect before the matching structural tool succeeded.",
     `Effect: structuralTool=${structuralTool}; targetRef=${targetRef}; stateKey=${stateKey}; stateValue=${stateValue}.`,
-    "Call the required structural tool first, then cite the stateReceipt alias returned by that tool, or record the outcome without this applied_now stateEffect if the state did not change.",
+    "Call the required structural tool first, then cite the stateChangeRef alias returned by that tool, or record the outcome without this applied_now stateEffect if the state did not change.",
   ].join(" ");
 }
 
-function resolveAppliedStateEffectFromPriorReceipts(
+function appliedStructuralEffectProofsFromPriorReceipts(
   priorStepResults: readonly GmToolStepResult[],
-  effect: Record<string, unknown>,
-): Record<string, unknown> | null {
-  const stateReceipt = stringField(effect, "stateReceipt");
-  if (!stateReceipt) return null;
-  for (const step of priorStepResults) {
-    const receipt = structuralStateReceiptFromToolCall({
-      toolName: step.toolName,
-      candidateInput: step.candidateInput,
-      result: step.result,
-    });
-    if (!receipt) continue;
-    const resolved = resolveAppliedStateEffectFromReceipt(receipt, effect);
-    if (resolved) return resolved;
+  dialoguePayload: Record<string, unknown> | null,
+): AppliedStructuralEffectProof[] {
+  const proofs: AppliedStructuralEffectProof[] = [];
+  for (const effect of appliedStateEffectsFromDialoguePayload(dialoguePayload)) {
+    for (const step of priorStepResults) {
+      const proof = structuralEffectProofFromPriorReceipt(step, effect);
+      if (proof) {
+        proofs.push(proof);
+        break;
+      }
+    }
+  }
+  return proofs;
+}
+
+function appliedDocumentStatusClaimMissingSubjectRef(input: {
+  priorStepResults: readonly GmToolStepResult[];
+  dialoguePayload: Record<string, unknown> | null;
+}): Record<string, unknown> | null {
+  const payload = input.dialoguePayload;
+  if (!payload) return null;
+  const appliedProofs = appliedStructuralEffectProofsFromPriorReceipts(
+    input.priorStepResults,
+    payload,
+  );
+  if (appliedProofs.length === 0) return null;
+  const claims = Array.isArray(payload.claims) ? payload.claims : [];
+  for (const claim of claims) {
+    if (!isRecord(claim)) continue;
+    if (stringField(claim, "claimKind") !== "document_status") continue;
+    if (stringField(claim, "subjectRef")) continue;
+    return claim;
   }
   return null;
 }
 
-function normalizeDialogueOutcomeStateEffectsFromReceipts(
-  input: Record<string, unknown>,
-  priorStepResults: readonly GmToolStepResult[],
-): Record<string, unknown> {
-  if (!Array.isArray(input.stateEffects)) return input;
-  let changed = false;
-  const stateEffects = input.stateEffects.map((effect) => {
-    if (!isRecord(effect) || stringField(effect, "status") !== "applied_now") {
-      return effect;
-    }
-    const resolved = resolveAppliedStateEffectFromPriorReceipts(priorStepResults, effect);
-    if (!resolved) return effect;
-    changed = true;
-    return resolved;
-  });
-  return changed ? { ...input, stateEffects } : input;
+function missingAppliedDocumentStatusSubjectRefError(claim: Record<string, unknown>): string {
+  const subjectText = stringField(claim, "subjectText") ?? "missing";
+  return [
+    "dialogue_document_status_subject_ref_required",
+    "record_dialogue_outcome claimed an applied document_status without claims[].subjectRef for the document/item carrier.",
+    `Subject: ${subjectText}.`,
+    "Use subjectRef for the existing document/item that received the state, or create/transfer the new document with spawn_item/transfer_item and cite that carrier as subjectRef.",
+  ].join(" ");
 }
 
 function withDialogueStateReceiptHandshake(
@@ -2062,13 +2263,9 @@ function withDialogueStateReceiptHandshake(
     ...dialogueToolDef,
     async execute(input: unknown, ...rest: unknown[]): Promise<ToolResult> {
       const candidateInput = isRecord(input) ? input : {};
-      const normalizedInput = normalizeDialogueOutcomeStateEffectsFromReceipts(
-        candidateInput,
-        priorStepResults(),
-      );
       const missingEffects = missingAppliedStateEffectsWithoutPriorReceipts(
         priorStepResults(),
-        normalizedInput,
+        candidateInput,
       );
       if (missingEffects.length > 0) {
         const error = missingAppliedStateEffectReceiptError(missingEffects[0]);
@@ -2087,7 +2284,28 @@ function withDialogueStateReceiptHandshake(
         };
       }
 
-      const result = await originalExecute(normalizedInput, ...rest);
+      const documentStatusMissingSubjectRef = appliedDocumentStatusClaimMissingSubjectRef({
+        priorStepResults: priorStepResults(),
+        dialoguePayload: candidateInput,
+      });
+      if (documentStatusMissingSubjectRef) {
+        const error = missingAppliedDocumentStatusSubjectRefError(documentStatusMissingSubjectRef);
+        return {
+          success: false,
+          status: "failure",
+          error,
+          contractFailure: {
+            code: "dialogue_document_status_subject_ref_required",
+            path: "input.claims",
+            toolName: "record_dialogue_outcome",
+            terminalKind: "dialogue_outcome",
+            retryable: true,
+            message: error,
+          },
+        };
+      }
+
+      const result = await originalExecute(candidateInput, ...rest);
       return isToolResult(result)
         ? result
         : malformedToolResult(
@@ -2112,6 +2330,13 @@ function assertAppliedNowDialogueEffectsBackedByPriorStructuralReceipts(
         "record_dialogue_outcome declared applied_now stateEffect without a prior matching structural state tool result.",
       );
     }
+    const documentStatusMissingSubjectRef = appliedDocumentStatusClaimMissingSubjectRef({
+      priorStepResults: stepResults.slice(0, dialogueIndex),
+      dialoguePayload: dialogueOutcomePayload(step),
+    });
+    if (documentStatusMissingSubjectRef) {
+      throw new Error(missingAppliedDocumentStatusSubjectRefError(documentStatusMissingSubjectRef));
+    }
   }
 }
 
@@ -2126,11 +2351,21 @@ function addIdentityAliases(
 function createdSceneExtraIdentityAliasesFromStep(step: GmToolStepResult): Set<string> {
   const aliases = new Set<string>();
   if (step.toolName !== "create_scene_extra") return aliases;
+  if (step.result?.success !== true || step.result.status === "failure") return aliases;
+  if (typeof step.result.authority?.resultWorldVersion !== "number") return aliases;
   const payload = isRecord(step.result?.result) ? step.result.result : {};
 
   addIdentityAliases(aliases, payload.name, "npc");
   addIdentityAliases(aliases, payload.name, "actor");
 
+  const candidateInput = isRecord(step.candidateInput) ? step.candidateInput : {};
+  addIdentityAliases(aliases, candidateInput.name, "npc");
+  addIdentityAliases(aliases, candidateInput.name, "actor");
+  addIdentityAliases(aliases, candidateInput.roleText);
+
+  if (Array.isArray(step.result.modelSafeRefs)) {
+    step.result.modelSafeRefs.forEach((ref) => addIdentityAliases(aliases, ref));
+  }
   if (Array.isArray(payload.modelSafeRefs)) {
     payload.modelSafeRefs.forEach((ref) => addIdentityAliases(aliases, ref));
   }
@@ -2157,62 +2392,24 @@ function dialoguePayloadUsesCreatedSceneExtraStep(
   });
 }
 
-function hasIdentityAliasIntersection(
-  left: ReadonlySet<string>,
-  right: ReadonlySet<string>,
+function createdSceneExtraSatisfiesDialogueSpeakerBinding(
+  step: GmToolStepResult,
+  dialoguePayload: Record<string, unknown> | null,
+  requirement: NonNullable<GmRead["runtimeRequirement"]> | null | undefined,
 ): boolean {
-  for (const alias of left) {
-    if (right.has(alias)) return true;
-  }
-  return false;
-}
+  if (dialoguePayloadUsesCreatedSceneExtraStep(step, dialoguePayload)) return true;
+  if (step.toolName !== "create_scene_extra" || !dialoguePayload) return false;
+  if (step.result?.success !== true || step.result.status === "failure") return false;
+  if (typeof step.result.authority?.resultWorldVersion !== "number") return false;
+  if (requirement?.kind !== "dialogue_outcome") return false;
+  const binding = requirement.speakerBinding;
+  if (binding?.kind !== "prose_role" || binding.allowCreateSceneExtra !== true) return false;
+  if (!stringField(dialoguePayload, "speakerRef")) return false;
 
-function createdItemIdentityAliasesFromStep(step: GmToolStepResult): Set<string> {
-  const aliases = new Set<string>();
-  if (step.toolName !== "spawn_item" || step.result?.success !== true) return aliases;
-  const payload = isRecord(step.result?.result) ? step.result.result : {};
-
-  addIdentityAliases(aliases, payload.id, "item");
-  addIdentityAliases(aliases, payload.name, "item");
-
-  if (Array.isArray(payload.modelSafeRefs)) {
-    payload.modelSafeRefs.forEach((ref) => addIdentityAliases(aliases, ref));
-  }
-
-  return aliases;
-}
-
-function addTagTargetIdentityAliasesFromStep(step: GmToolStepResult): Set<string> {
-  const aliases = new Set<string>();
-  if (step.toolName !== "add_tag" || step.result?.success !== true) return aliases;
-  const payload = isRecord(step.result?.result) ? step.result.result : {};
-  const input = isRecord(step.candidateInput) ? step.candidateInput : {};
-  const entityType = stringField(input, "entityType");
-
-  addIdentityAliases(aliases, payload.entity, entityType);
-  addIdentityAliases(aliases, input.entityName, entityType);
-  addIdentityAliases(aliases, input.entityRef, entityType);
-
-  return aliases;
-}
-
-function metadataStepTargetsAcceptedSameTurnCreatedItem(input: {
-  step: GmToolStepResult;
-  stepIndex: number;
-  stepResults: readonly GmToolStepResult[];
-  accepted: ReadonlySet<number>;
-}): boolean {
-  const targetAliases = addTagTargetIdentityAliasesFromStep(input.step);
-  if (targetAliases.size === 0) return false;
-
-  return input.stepResults
-    .slice(0, input.stepIndex)
-    .some((candidate, index) =>
-      input.accepted.has(index)
-      && hasIdentityAliasIntersection(
-        targetAliases,
-        createdItemIdentityAliasesFromStep(candidate),
-      ));
+  const requestedAliases = dialogueStateTokenAliases(binding.requestedRoleText);
+  const candidateInput = isRecord(step.candidateInput) ? step.candidateInput : {};
+  const createdRoleAliases = dialogueStateTokenAliases(candidateInput.roleText);
+  return requestedAliases.some((alias) => createdRoleAliases.includes(alias));
 }
 
 function acceptedGmToolStepIndexesBeforeCommit(
@@ -2223,32 +2420,37 @@ function acceptedGmToolStepIndexesBeforeCommit(
   const receiptPlan = buildRuntimeReceiptPlan(requirement);
   const accepted = new Set<number>();
 
-  stepResults.forEach((step, index) => {
-    if (!requirement) return;
-    if (isAcceptedRuntimeReceiptForPlan({
-      toolName: step.toolName,
-      result: step.result,
+  if (requirement) {
+    const planStatus = evaluateRuntimeReceiptPlanStatus({
       plan: receiptPlan,
-      appliedStructuralEffectsBacked: appliedStructuralEffectsBackedByPriorReceipts(
-        stepResults,
-        index,
-      ),
-    })) {
+      receipts: stepResults.map((step, index) => ({
+        toolName: step.toolName,
+        result: step.result,
+        appliedStructuralEffectProofs: appliedStructuralEffectProofsByPriorReceipts(
+          stepResults,
+          index,
+        ),
+      })),
+    });
+    for (const index of planStatus.acceptedReceiptIndexes) {
       accepted.add(index);
     }
-  });
+  }
 
   if (requirement?.kind === "dialogue_outcome") {
     stepResults.forEach((dialogueStep, dialogueIndex) => {
       if (!accepted.has(dialogueIndex) || dialogueStep.toolName !== "record_dialogue_outcome") {
         return;
       }
-      const dialoguePayload = dialogueOutcomePayload(dialogueStep);
+      const resultPayload = dialogueOutcomePayload(dialogueStep);
+      const dialoguePayload = resultPayload && isRecord(dialogueStep.candidateInput)
+        ? { ...dialogueStep.candidateInput, ...resultPayload }
+        : resultPayload;
       const appliedEffects = appliedStateEffectsFromDialoguePayload(dialoguePayload);
       stepResults.slice(0, dialogueIndex).forEach((step, offset) => {
         const stepIndex = offset;
         if (accepted.has(stepIndex)) return;
-        if (dialoguePayloadUsesCreatedSceneExtraStep(step, dialoguePayload)) {
+        if (createdSceneExtraSatisfiesDialogueSpeakerBinding(step, dialoguePayload, requirement)) {
           accepted.add(stepIndex);
           return;
         }
@@ -2262,15 +2464,6 @@ function acceptedGmToolStepIndexesBeforeCommit(
           && appliedEffects.some((effect) => receiptBacksAppliedStateEffect(receipt, effect))
         ) {
           accepted.add(stepIndex);
-          return;
-        }
-        if (metadataStepTargetsAcceptedSameTurnCreatedItem({
-          step,
-          stepIndex,
-          stepResults,
-          accepted,
-        })) {
-          accepted.add(stepIndex);
         }
       });
     });
@@ -2278,6 +2471,7 @@ function acceptedGmToolStepIndexesBeforeCommit(
 
   const preparatoryTools = new Set(runtimeRequirementPreparatoryTools(requirement));
   stepResults.forEach((step, index) => {
+    if (requirement?.kind === "dialogue_outcome") return;
     if (accepted.has(index) || !isRuntimeToolName(step.toolName)) return;
     if (!preparatoryTools.has(step.toolName)) return;
     const hasLaterAcceptedReceipt = stepResults
@@ -2309,7 +2503,7 @@ function isSuccessfulSideEffectingStep(step: GmToolStepResult): boolean {
   if (isObservationToolResult(step.result)) {
     return false;
   }
-  return runtimeToolIsSideEffecting(step.toolName);
+  return runtimeToolRequiresExecutionAuthority(step.toolName);
 }
 
 function stableStepComparisonValue(value: unknown): string {
@@ -2318,6 +2512,10 @@ function stableStepComparisonValue(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function stableModelVisibleToolResultComparisonValue(value: ToolResult | null | undefined): string {
+  return stableStepComparisonValue(value ? toModelVisibleToolResult(value) : value);
 }
 
 function authorityToolResultId(step: GmToolStepResult): string | null {
@@ -2338,8 +2536,22 @@ function stepResultsRepresentSameExecution(
     return true;
   }
 
-  return stableStepComparisonValue(left.candidateInput) === stableStepComparisonValue(right.candidateInput)
-    && stableStepComparisonValue(left.result) === stableStepComparisonValue(right.result);
+  const sameInput = stableStepComparisonValue(left.candidateInput)
+    === stableStepComparisonValue(right.candidateInput);
+  if (!sameInput) return false;
+
+  const leftStatus = left.result ? normalizeToolResultStatus(left.result) : null;
+  const rightStatus = right.result ? normalizeToolResultStatus(right.result) : null;
+  if (
+    left.result?.success === right.result?.success
+    && leftStatus === rightStatus
+    && Boolean(leftAuthorityId) !== Boolean(rightAuthorityId)
+  ) {
+    return true;
+  }
+
+  return stableModelVisibleToolResultComparisonValue(left.result)
+      === stableModelVisibleToolResultComparisonValue(right.result);
 }
 
 function missingRepresentedExecutions(input: {
@@ -2391,14 +2603,44 @@ function assertTrackedSideEffectsRepresentedBeforeCommit(
   }
 }
 
+function backfillTrustedRuntimeAuthorityStepResults(
+  parsedStepResults: readonly GmToolStepResult[],
+  trackedStepResults: readonly GmToolStepResult[],
+): GmToolStepResult[] {
+  if (trackedStepResults.length === 0) return [...parsedStepResults];
+  const usedTrackedIndexes = new Set<number>();
+  return parsedStepResults.map((parsedStep) => {
+    if (!isRuntimeToolName(parsedStep.toolName) || parsedStep.result?.success !== true) {
+      return parsedStep;
+    }
+    const trackedIndex = trackedStepResults.findIndex((trackedStep, index) =>
+      !usedTrackedIndexes.has(index) && stepResultsRepresentSameExecution(parsedStep, trackedStep));
+    if (trackedIndex === -1) return parsedStep;
+    usedTrackedIndexes.add(trackedIndex);
+    const trackedStep = trackedStepResults[trackedIndex]!;
+    if (!trackedStep.result) return parsedStep;
+    return {
+      ...parsedStep,
+      mutationRefs: trackedStep.mutationRefs.length > 0
+        ? trackedStep.mutationRefs
+        : parsedStep.mutationRefs,
+      result: trackedStep.result,
+    };
+  });
+}
+
 function assertNoUnacceptedSideEffectingStepsBeforeCommit(
   args: RunGmToolLoopArgs,
   stepResults: readonly GmToolStepResult[],
   trackedStepResults: readonly GmToolStepResult[] = [],
 ): Set<number> {
   assertTrackedSideEffectsRepresentedBeforeCommit(stepResults, trackedStepResults);
-  const accepted = acceptedGmToolStepIndexesBeforeCommit(args, stepResults);
-  const offenders = stepResults.filter((step, index) =>
+  const trustedStepResults = backfillTrustedRuntimeAuthorityStepResults(
+    stepResults,
+    trackedStepResults,
+  );
+  const accepted = acceptedGmToolStepIndexesBeforeCommit(args, trustedStepResults);
+  const offenders = trustedStepResults.filter((step, index) =>
     isSuccessfulSideEffectingStep(step) && !accepted.has(index));
   if (offenders.length === 0) return accepted;
   throw new Error(
@@ -2456,6 +2698,23 @@ function isReusableProceduralInformationTurn(args: RunGmToolLoopArgs): boolean {
     return true;
   }
   return false;
+}
+
+function latestTerminalContractFailureMessage(
+  stepResults: readonly GmToolStepResult[],
+  toolName: RuntimeToolName,
+): string | null {
+  for (let index = stepResults.length - 1; index >= 0; index -= 1) {
+    const step = stepResults[index]!;
+    if (step.toolName !== toolName) continue;
+    const failure = step.result?.contractFailure;
+    if (!failure) continue;
+    const message = typeof failure.message === "string" && failure.message.trim()
+      ? failure.message.trim()
+      : step.result?.error;
+    return typeof message === "string" && message.trim() ? message.trim() : null;
+  }
+  return null;
 }
 
 function assertConversationalToolLoopResolved(
@@ -2532,6 +2791,13 @@ function assertConversationalToolLoopResolved(
     isDialogueOutcomeStep(step, stepResults, index));
   const hasDialogueOutcome = dialogueOutcomeSteps.length > 0;
   if (!hasDialogueOutcome) {
+    const contractFailureMessage = latestTerminalContractFailureMessage(
+      stepResults,
+      "record_dialogue_outcome",
+    );
+    if (contractFailureMessage) {
+      throw new Error(contractFailureMessage);
+    }
     throw new Error(
       "GM tool loop ended a conversational turn without a structural record_dialogue_outcome for the NPC answer, refusal, silence, gesture, warning, redirect, or unavailable-role result.",
     );
@@ -2582,7 +2848,7 @@ function assertConversationalToolLoopResolved(
     ) {
       return false;
     }
-    return dialogueOutcomeSettlesStructuralRequirementWithoutMutation(step);
+    return dialogueOutcomeSettlesStructuralRequirementWithoutMutation(step, requirement);
   });
   if (!hasBackedAppliedEffect && !hasTypedNonApplicationOutcome) {
     throw new Error(
@@ -2662,9 +2928,15 @@ function toToolStepResult(
   forbiddenPrivateTerms: readonly string[],
   indexOffset = 0,
 ): GmToolStepResult {
+  const missingRuntimePayload = call.result === null || call.result === undefined;
   const toolResult = isToolResult(call.result)
     ? call.result
-    : malformedToolResult("Tool result was not returned by the runtime tool loop.", call.tool);
+    : malformedToolResult(
+        missingRuntimePayload
+          ? `Tool call ${call.tool} completed without a runtime result payload.`
+          : "Tool result was not returned by the runtime tool loop.",
+        call.tool,
+      );
   const input = (
     call.args && typeof call.args === "object" && !Array.isArray(call.args)
       ? call.args
@@ -2723,9 +2995,21 @@ export async function runGmToolLoop(
 
   const model = createModel(args.provider, { role: "judge", reasoningMode: "bypass" });
   const addressedTarget = dialogueAddressedTargetFromGmRead(args);
+  const allowedWriteScopes = writeScopesForRuntimeToolNames(profile.activeTools);
+  const timePassageAllowed = profile.activeTools.includes("advance_time")
+    && runtimeRequirementAllowsAdvanceTime(runtimeRequirement);
   const executionContext = addressedTarget
-    ? createPlayerTurnToolExecutionContext({ frame: args.frame, addressedTarget })
-    : createPlayerTurnToolExecutionContext(args.frame);
+    ? createPlayerTurnToolExecutionContext({
+        frame: args.frame,
+        addressedTarget,
+        allowedWriteScopes,
+        timePassageAllowed,
+      })
+    : createPlayerTurnToolExecutionContext({
+        frame: args.frame,
+        allowedWriteScopes,
+        timePassageAllowed,
+      });
   const allTools = createStorytellerTools(
     args.campaignId,
     args.tick,
@@ -2746,11 +3030,12 @@ export async function runGmToolLoop(
   const requirementGuardedTools = profile.name === "world_fact_recording"
     ? withWorldFactRequirementGuard(proceduralOutcomeGuardedTools, args)
     : proceduralOutcomeGuardedTools;
+  const mutationBoundary = createGmToolLoopMutationBoundary(args.campaignId);
   const receiptGuardedTools = withRuntimeRequirementReceiptGuard(
     requirementGuardedTools,
     args,
+    { priorStepResults: () => mutationBoundary.trackedStepResults },
   );
-  const mutationBoundary = createGmToolLoopMutationBoundary(args.campaignId);
   const boundaryTools = withGmToolLoopMutationBoundary(
     withDynamicCreationBudget(
     receiptGuardedTools,
@@ -2911,13 +3196,23 @@ export async function runGmToolLoop(
     if (rawToolCalls.length === 0) {
       throw new Error("GM tool loop produced no runtime tool calls for a tool-backed GM path.");
     }
-    if (successCount === 0) {
+    stepResults = backfillTrustedRuntimeAuthorityStepResults(
+      stepResults,
+      mutationBoundary.trackedStepResults,
+    );
+    if (successCount === 0 && !requiredTerminalTool) {
+      throw new Error("GM tool loop produced no successful backend observations.");
+    }
+    const hasTerminalToolAttempt = requiredTerminalTool
+      ? hasTerminalToolAttemptInStepResults(runtimeRequirement, stepResults)
+      : false;
+    if (successCount === 0 && !hasTerminalToolAttempt) {
       throw new Error("GM tool loop produced no successful backend observations.");
     }
     if (
       requiredTerminalTool
       && !hasAcceptedTerminalReceiptInStepResults(runtimeRequirement, stepResults)
-      && !hasRequiredTerminalToolCallInStepResults(runtimeRequirement, stepResults)
+      && (successCount > 0 || hasTerminalToolAttempt)
     ) {
       const closurePrompt = buildTerminalClosurePrompt({
         args,
@@ -2935,6 +3230,7 @@ export async function runGmToolLoop(
           model,
           tools: closureTools,
           activeTools: [requiredTerminalTool],
+          toolChoice: { type: "tool", toolName: requiredTerminalTool },
           temperature: 0,
           maxOutputTokens: profile.maxOutputTokens,
           timeout: { totalMs: profile.timeoutMs },
@@ -3024,6 +3320,10 @@ export async function runGmToolLoop(
         durationMs: Date.now() - closureStartMs,
       });
     }
+    stepResults = backfillTrustedRuntimeAuthorityStepResults(
+      stepResults,
+      mutationBoundary.trackedStepResults,
+    );
     assertAppliedNowDialogueEffectsBackedByPriorStructuralReceipts(stepResults);
     assertConversationalToolLoopResolved(args, stepResults);
     const acceptedStepIndexes = assertNoUnacceptedSideEffectingStepsBeforeCommit(

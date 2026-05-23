@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { executeToolCallMock } = vi.hoisted(() => ({
   executeToolCallMock: vi.fn(),
@@ -7,10 +7,11 @@ const { executeToolCallMock } = vi.hoisted(() => ({
 vi.mock("../tool-executor.js", () => ({
   executeToolCall: executeToolCallMock,
   toolRequiresExecutionAuthority: (toolName: string) =>
-    toolName !== "request_contested_outcome" && toolName !== "offer_quick_actions",
+    toolName !== "request_contested_outcome",
 }));
 
 import { buildRuntimeToolInputContract } from "../prompt-contracts.js";
+import { runtimeToolExecutionInputSchemas } from "../runtime-tool-input-schemas.js";
 import {
   createStorytellerTools,
   runtimeToolInputSchemas,
@@ -39,6 +40,12 @@ function createExecutionContext(): ToolExecutionContext {
     scope: "player_turn",
     subjectActorId: "actor-player",
     subjectActorRefs: new Set(["actor-player", "player"]),
+    authority: {
+      baseWorldVersion: 0,
+      sourceEntity: { type: "player", id: "actor-player" },
+      elapsedWorldTimeMinutes: 0,
+      allowedWriteScopes: ["world:quick_action"],
+    },
     currentLocationId: "loc-market",
     currentSceneScopeId: "scene-market",
     legalLocationRefs: new Set(["loc-market", "scene-market", "current_location", "current_scene"]),
@@ -97,6 +104,10 @@ function createExecutionContext(): ToolExecutionContext {
 }
 
 describe("bridge lookup tool schemas", () => {
+  beforeEach(() => {
+    executeToolCallMock.mockReset();
+  });
+
   it("registers all bridge lookup tools in runtime schemas and Storyteller tools", () => {
     const tools = createStorytellerTools("campaign-1", 3, undefined, createExecutionContext());
 
@@ -128,36 +139,31 @@ describe("bridge lookup tool schemas", () => {
     expect(runtimeToolInputSchemas.check_route.safeParse({ mode: "walk" }).success).toBe(false);
   });
 
-  it("does not expose legacy raw id fields in model-facing movement/spawn schemas", () => {
+  it("rejects legacy raw id fields in model-facing movement/spawn schemas", () => {
     expect(runtimeToolInputSchemas.move_actor.safeParse({
       actorRef: "Player",
       destinationRef: "East Tea Lane",
       routeId: "edge-tea-lane",
       evidenceRefs: ["East Tea Lane"],
-    }).data).not.toHaveProperty("routeId");
+    }).success).toBe(false);
 
     expect(runtimeToolInputSchemas.create_scene_extra.safeParse({
       locationId: "loc-tea-lane",
       role: "courier",
       reason: "The public desk needs an ordinary courier.",
-    }).success).toBe(true);
-    expect(runtimeToolInputSchemas.create_scene_extra.safeParse({
-      locationId: "loc-tea-lane",
-      role: "courier",
-      reason: "The public desk needs an ordinary courier.",
-    }).data).not.toHaveProperty("locationId");
+    }).success).toBe(false);
 
     expect(runtimeToolInputSchemas.spawn_npc.safeParse({
       name: "Market Runner",
       tags: ["messenger"],
       locationRef: "current_scene",
       locationId: "loc-tea-lane",
-    }).data).not.toHaveProperty("locationId");
+    }).success).toBe(false);
   });
 
   it("returns observation-only results from lookup tools without entering executeToolCall", async () => {
     const tools = createStorytellerTools("campaign-1", 3, undefined, createExecutionContext());
-    const executeFindObjectCandidates = tools.find_object_candidates.execute as (
+    const executeFindObjectCandidates = tools.find_object_candidates.execute as unknown as (
       input: { query: string; maxResults: number },
       options?: unknown,
     ) => Promise<ToolResult>;
@@ -178,7 +184,7 @@ describe("bridge lookup tool schemas", () => {
 
   it("fails closed for model-facing state-bearing tools without an execution context", async () => {
     const tools = createStorytellerTools("campaign-1", 3);
-    const executeTransferItem = tools.transfer_item.execute as (
+    const executeTransferItem = tools.transfer_item.execute as unknown as (
       input: { itemName: string; targetName: string; targetType: "character" },
       options?: unknown,
     ) => Promise<ToolResult>;
@@ -195,6 +201,124 @@ describe("bridge lookup tool schemas", () => {
       error: expect.stringContaining("requires an execution context"),
     });
     expect(executeToolCallMock).not.toHaveBeenCalled();
+  });
+
+  it("treats quick actions as authority-bound handles, not inline UI echoes", async () => {
+    const actionOffer = {
+      actions: [
+        { label: "Ask", action: "Ask the road warden what changed.", sourceRefs: ["Player"] },
+        { label: "Look", action: "Look over the current scene.", sourceRefs: ["current_scene"] },
+        { label: "Wait", action: "Wait beside the counter.", sourceRefs: ["current_location"] },
+      ],
+    };
+    const context = createExecutionContext();
+    const toolsWithoutAuthority = createStorytellerTools("campaign-1", 3);
+    const executeWithoutAuthority = toolsWithoutAuthority.offer_quick_actions.execute as unknown as (
+      input: typeof actionOffer,
+      options?: unknown,
+    ) => Promise<ToolResult>;
+
+    const denied = await executeWithoutAuthority(actionOffer, undefined);
+
+    expect(denied).toMatchObject({
+      success: false,
+      status: "failure",
+      error: expect.stringContaining("requires an execution context"),
+    });
+    expect(executeToolCallMock).not.toHaveBeenCalled();
+
+    executeToolCallMock.mockResolvedValueOnce({
+      success: true,
+      result: {
+        offerId: "qa_test",
+        persisted: true,
+        actions: [
+          { actionId: "qa_test_1", label: "Ask", action: "Ask the road warden what changed." },
+        ],
+      },
+    });
+    const toolsWithAuthority = createStorytellerTools("campaign-1", 3, undefined, context);
+    const executeWithAuthority = toolsWithAuthority.offer_quick_actions.execute as unknown as (
+      input: typeof actionOffer,
+      options?: unknown,
+    ) => Promise<ToolResult>;
+
+    const accepted = await executeWithAuthority(actionOffer, undefined);
+
+    expect(accepted).toMatchObject({
+      success: true,
+      result: expect.objectContaining({ offerId: "qa_test", persisted: true }),
+    });
+    expect(executeToolCallMock).toHaveBeenCalledWith(
+      "campaign-1",
+      "offer_quick_actions",
+      actionOffer,
+      3,
+      undefined,
+      context,
+    );
+  });
+
+  it("uses explicit sanitized model output for tool results", async () => {
+    const tools = createStorytellerTools("campaign-1", 3, undefined, createExecutionContext());
+    const toModelOutput = (tools.move_actor as unknown as {
+      toModelOutput: (args: {
+        toolCallId: string;
+        input: unknown;
+        output: ToolResult;
+      }) => unknown;
+    }).toModelOutput;
+    const output = await toModelOutput({
+      toolCallId: "tool-call-1",
+      input: {},
+      output: {
+        success: true,
+        result: {
+          id: "raw-backend-id",
+          toolResultId: "tool-result-1",
+          stateDeltaRefs: ["player:actor-player:location"],
+          eventRefs: ["event-1"],
+          visible: "ok",
+        },
+        authority: {
+          toolResultId: "tool-result-1",
+          campaignId: "campaign-1",
+          sourceEntity: { type: "player", id: "actor-player" },
+          baseWorldVersion: 1,
+          resultWorldVersion: 2,
+          worldTimeMinutes: 10,
+          elapsedWorldTimeMinutes: 0,
+          stateDeltaRefs: ["player:actor-player:location"],
+          eventRefs: ["event-1"],
+          witnesses: [],
+          knowledgeOutputs: ["knowledge-1"],
+          visibilityOutputs: [],
+          resources: [],
+        },
+        stateReceipts: [{
+          stateReceipt: "state_change_1_1",
+          tool: "move_actor",
+        }],
+      },
+    });
+
+    expect(output).toMatchObject({
+      type: "json",
+      value: expect.objectContaining({
+        success: true,
+        stateChangeRefs: [{ stateChangeRef: "state_change_1_1" }],
+      }),
+    });
+    const serialized = JSON.stringify(output);
+    expect(serialized).toContain("visible");
+    expect(serialized).toContain("stateChangeRefs");
+    expect(serialized).not.toContain("authority");
+    expect(serialized).not.toContain("toolResultId");
+    expect(serialized).not.toContain("stateDeltaRefs");
+    expect(serialized).not.toContain("eventRefs");
+    expect(serialized).not.toContain("knowledgeOutputs");
+    expect(serialized).not.toContain("stateReceipts");
+    expect(serialized).not.toContain("raw-backend-id");
   });
 
   it("documents lookup tools compactly and marks fact/route lookup as observation-only", () => {
@@ -396,11 +520,27 @@ describe("record_dialogue_outcome schema", () => {
         {
           effectId: "guard-cleared-by-bluff",
           status: "applied_now",
-          stateReceipt: "state_receipt_1_1",
+          stateChangeRef: "state_change_1_1",
           summary: "The backend resolves this applied state from a prior receipt.",
         },
       ],
     }).success).toBe(true);
+
+    expect(runtimeToolInputSchemas.record_dialogue_outcome.safeParse({
+      ...base,
+      stateEffects: [
+        {
+          effectId: "guard-cleared-by-bluff",
+          status: "applied_now",
+          stateChangeRef: "state_change_1_1",
+          structuralTool: "add_tag",
+          targetRef: "Gate Guard",
+          stateKey: "tag",
+          stateValue: "cleared-by-bluff",
+          summary: "The guard now has the cleared-by-bluff tag.",
+        },
+      ],
+    }).success).toBe(false);
 
     expect(runtimeToolInputSchemas.record_dialogue_outcome.safeParse({
       ...base,
@@ -443,6 +583,25 @@ describe("record_dialogue_outcome schema", () => {
       ],
     }).success).toBe(false);
 
+    for (const structuralField of [
+      { stateChangeRef: "state_change_1_1" },
+      { targetRef: "Gate Guard" },
+      { stateKey: "tag" },
+      { stateValue: "cleared-by-bluff" },
+    ]) {
+      expect(runtimeToolInputSchemas.record_dialogue_outcome.safeParse({
+        ...base,
+        stateEffects: [
+          {
+            effectId: "guard-cleared-by-bluff",
+            status: "asserted_only",
+            ...structuralField,
+            summary: "The guard says a tag would work.",
+          },
+        ],
+      }).success).toBe(false);
+    }
+
     expect(runtimeToolInputSchemas.record_dialogue_outcome.safeParse({
       ...base,
       durability: "scene_local",
@@ -450,6 +609,22 @@ describe("record_dialogue_outcome schema", () => {
         {
           effectId: "guard-cleared-by-bluff",
           status: "applied_now",
+          structuralTool: "add_tag",
+          targetRef: "Gate Guard",
+          stateKey: "tag",
+          stateValue: "cleared-by-bluff",
+          summary: "The guard now has the cleared-by-bluff tag.",
+        },
+      ],
+    }).success).toBe(false);
+
+    expect(runtimeToolExecutionInputSchemas.record_dialogue_outcome.safeParse({
+      ...base,
+      stateEffects: [
+        {
+          effectId: "guard-cleared-by-bluff",
+          status: "applied_now",
+          stateChangeRef: "state_change_1_1",
           structuralTool: "add_tag",
           targetRef: "Gate Guard",
           stateKey: "tag",

@@ -51,10 +51,14 @@ import {
   resolveLocationTransferState,
 } from "../inventory/authority.js";
 import {
+  normalizeToolInputForGrounding,
+  normalizeToolRef,
+  resolveToolExecutionRef,
   validateToolInputGrounding,
   type SpawnNpcLocationRef,
   type ToolExecutionContext,
   type ToolGroundingIssue,
+  type ToolExecutionRefKind,
 } from "./tool-execution-context.js";
 import {
   recordActorKnowledge,
@@ -63,7 +67,7 @@ import {
   type ActorKnowledgeTruthStatus,
 } from "./knowledge-model.js";
 import type { RuntimeToolName } from "./tool-schemas.js";
-import { runtimeToolInputSchemas } from "./runtime-tool-input-schemas.js";
+import { runtimeToolExecutionInputSchemas } from "./runtime-tool-input-schemas.js";
 import {
   buildRecordPlayerIntentResult,
   buildStartSearchResult,
@@ -83,7 +87,6 @@ import {
   attachModelVisibleToolResultJson,
   attachToolResultAuthority,
   buildValidationFailureToolResult,
-  inferRefsFromToolResultPayload,
   isObservationToolResult,
   type ToolContractFailure,
   type ToolResult,
@@ -94,10 +97,16 @@ import {
   buildNarrativeOutcomeBounds,
   deriveCombatPosture,
 } from "./combat-envelope.js";
-import { findUncoveredWriteRef } from "./simulation-write-scope.js";
 import {
+  findUncoveredWriteRef,
+  normalizeWriteScope,
+} from "./simulation-write-scope.js";
+import {
+  isRuntimeToolName,
   RUNTIME_STATE_BEARING_TOOL_NAMES,
+  runtimeToolRequiresExecutionAuthority,
 } from "./tool-contracts.js";
+import { persistQuickActionOffer } from "./quick-action-offers.js";
 
 export type { ToolResult } from "./tool-result.js";
 
@@ -149,14 +158,29 @@ const SYNC_SQLITE_STATE_BEARING_TOOLS = new Set(
   [...STATE_BEARING_TOOLS].filter((toolName) =>
     toolName !== "log_event" && toolName !== "record_dialogue_outcome"),
 );
+const SAME_TURN_MODEL_ALIAS_KINDS = new Set(["actor", "item", "location"]);
 
 export function toolRequiresExecutionAuthority(toolName: string): boolean {
-  return STATE_BEARING_TOOLS.has(toolName);
+  return isRuntimeToolName(toolName)
+    ? runtimeToolRequiresExecutionAuthority(toolName)
+    : STATE_BEARING_TOOLS.has(toolName);
 }
 
-export interface ExecuteToolCallOptions {
-  authorityMode?: "strict_authority" | "legacy_unscoped";
+function isPositiveIntegerText(value: string): boolean {
+  return value.length > 0
+    && [...value].every((char) => char >= "0" && char <= "9")
+    && Number.parseInt(value, 10) > 0;
 }
+
+function isUnresolvedSameTurnModelAlias(value: string): boolean {
+  const parts = value.trim().toLowerCase().split("_");
+  return parts.length === 3
+    && parts[0] === "new"
+    && SAME_TURN_MODEL_ALIAS_KINDS.has(parts[1])
+    && isPositiveIntegerText(parts[2]);
+}
+
+export interface ExecuteToolCallOptions {}
 
 // -- Entity resolution --------------------------------------------------------
 
@@ -289,8 +313,14 @@ function resolveToolLocationById(campaignId: string, locationId: string): ToolLo
 function resolveToolLocationByNameOrId(
   campaignId: string,
   locationRef: string,
+  executionContext?: ToolExecutionContext,
 ): ToolLocationRow | null {
-  const candidates = refCandidates(locationRef, ["location:"]);
+  const resolvedLocationRef = resolveExecutionRef(
+    executionContext,
+    locationRef,
+    LOCATION_EXECUTION_REF_KINDS,
+  );
+  const candidates = refCandidates(resolvedLocationRef, ["location:"]);
   const normalizedRefs = candidates.map(normalizeLocationRef);
   return (
     loadToolLocationRows(campaignId).find(
@@ -345,11 +375,17 @@ function resolveBroadLocationForScene(
  */
 function resolveEntityIdByName(
   campaignId: string,
-  entityName: string
+  entityName: string,
+  executionContext?: ToolExecutionContext,
 ): string | null {
   const db = getDb();
+  const resolvedEntityName = resolveExecutionRef(
+    executionContext,
+    entityName,
+    ENTITY_EXECUTION_REF_KINDS,
+  );
   const tables = [players, npcs, locations, factions, items] as const;
-  const candidates = refCandidates(entityName, [
+  const candidates = refCandidates(resolvedEntityName, [
     "actor:",
     "player:",
     "npc:",
@@ -512,9 +548,15 @@ function resolveCharacterRecordByName(
   campaignId: string,
   entityName: string,
   entityType: CharacterEntityType,
+  executionContext?: ToolExecutionContext,
 ) {
   const db = getDb();
-  const candidates = refCandidates(entityName, typedRefPrefixesForEntityType(entityType));
+  const resolvedEntityName = resolveExecutionRef(
+    executionContext,
+    entityName,
+    ACTOR_EXECUTION_REF_KINDS,
+  );
+  const candidates = refCandidates(resolvedEntityName, typedRefPrefixesForEntityType(entityType));
   const primaryRef = candidates[0] ?? entityName;
   const secondaryRef = candidates[1] ?? primaryRef;
   const normalizedPrimary = primaryRef.trim().toLowerCase();
@@ -579,10 +621,16 @@ function persistCharacterRecord(
 
 function resolveCharacterByName(
   campaignId: string,
-  name: string
+  name: string,
+  executionContext?: ToolExecutionContext,
 ): { id: string; name: string; table: "players" | "npcs"; hp?: number } | null {
   const db = getDb();
-  const candidates = refCandidates(name, ["actor:", "player:", "npc:"]);
+  const resolvedName = resolveExecutionRef(
+    executionContext,
+    name,
+    ACTOR_EXECUTION_REF_KINDS,
+  );
+  const candidates = refCandidates(resolvedName, ["actor:", "player:", "npc:"]);
   const primaryRef = candidates[0] ?? name;
   const secondaryRef = candidates[1] ?? primaryRef;
   const normalizedPrimary = primaryRef.trim().toLowerCase();
@@ -616,8 +664,14 @@ function resolveCharacterByName(
 function resolveCharacterRecordByRef(
   campaignId: string,
   ref: string,
+  executionContext?: ToolExecutionContext,
 ) {
-  const candidates = refCandidates(ref, ["actor:", "player:", "npc:"]);
+  const resolvedRef = resolveExecutionRef(
+    executionContext,
+    ref,
+    ACTOR_EXECUTION_REF_KINDS,
+  );
+  const candidates = refCandidates(resolvedRef, ["actor:", "player:", "npc:"]);
   const primaryRef = candidates[0] ?? ref;
   const secondaryRef = candidates[1] ?? primaryRef;
   const normalizedPrimary = primaryRef.trim().toLowerCase();
@@ -661,6 +715,7 @@ function resolveCharacterRecordByRef(
 function resolveItemByNameOrRef(
   campaignId: string,
   itemRef: string,
+  executionContext?: ToolExecutionContext,
 ): {
   id: string;
   campaignId: string;
@@ -672,7 +727,12 @@ function resolveItemByNameOrRef(
   equippedSlot: string | null;
   isSignature: boolean;
 } | null {
-  const candidates = refCandidates(itemRef, ["item:"]);
+  const resolvedItemRef = resolveExecutionRef(
+    executionContext,
+    itemRef,
+    ITEM_EXECUTION_REF_KINDS,
+  );
+  const candidates = refCandidates(resolvedItemRef, ["item:"]);
   const primaryRef = candidates[0] ?? itemRef;
   const secondaryRef = candidates[1] ?? primaryRef;
   const normalizedPrimary = primaryRef.trim().toLowerCase();
@@ -708,7 +768,8 @@ function normalizeNpcTier(value: unknown): NpcTier | null {
 
 function handleAddTag(
   campaignId: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  executionContext?: ToolExecutionContext,
 ): ToolResult {
   const entityName = args.entityName as string;
   const entityType = args.entityType as string;
@@ -723,6 +784,7 @@ function handleAddTag(
       campaignId,
       entityName,
       entityType,
+      executionContext,
     );
     if (!character) {
       return { success: false, error: `Entity not found: ${entityName} (${entityType})` };
@@ -754,7 +816,11 @@ function handleAddTag(
     };
   }
 
-  const entity = resolveEntity(campaignId, entityName, entityType as EntityType);
+  const entity = resolveEntity(
+    campaignId,
+    resolveExecutionRef(executionContext, entityName, ENTITY_EXECUTION_REF_KINDS),
+    entityType as EntityType,
+  );
   if (!entity) {
     return { success: false, error: `Entity not found: ${entityName} (${entityType})` };
   }
@@ -794,7 +860,8 @@ function handleAddTag(
 
 function handleRemoveTag(
   campaignId: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  executionContext?: ToolExecutionContext,
 ): ToolResult {
   const entityName = args.entityName as string;
   const entityType = args.entityType as string;
@@ -809,6 +876,7 @@ function handleRemoveTag(
       campaignId,
       entityName,
       entityType,
+      executionContext,
     );
     if (!character) {
       return { success: false, error: `Entity not found: ${entityName} (${entityType})` };
@@ -846,7 +914,11 @@ function handleRemoveTag(
     };
   }
 
-  const entity = resolveEntity(campaignId, entityName, entityType as EntityType);
+  const entity = resolveEntity(
+    campaignId,
+    resolveExecutionRef(executionContext, entityName, ENTITY_EXECUTION_REF_KINDS),
+    entityType as EntityType,
+  );
   if (!entity) {
     return { success: false, error: `Entity not found: ${entityName} (${entityType})` };
   }
@@ -888,7 +960,8 @@ function handleRemoveTag(
 
 function handleSetRelationship(
   campaignId: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  executionContext?: ToolExecutionContext,
 ): ToolResult {
   const entityAName = args.entityA as string;
   const entityBName = args.entityB as string;
@@ -896,8 +969,8 @@ function handleSetRelationship(
   const reason = args.reason as string;
 
   // Resolve entity IDs by searching all entity tables
-  const entityAId = resolveEntityIdByName(campaignId, entityAName);
-  const entityBId = resolveEntityIdByName(campaignId, entityBName);
+  const entityAId = resolveEntityIdByName(campaignId, entityAName, executionContext);
+  const entityBId = resolveEntityIdByName(campaignId, entityBName, executionContext);
 
   if (!entityAId) {
     return { success: false, error: `Entity not found: ${entityAName}` };
@@ -1104,8 +1177,57 @@ function uniqueToolStrings(values: readonly unknown[]): string[] {
   return result;
 }
 
-function canonicalDialogueOutcomeText(args: Record<string, unknown>): string {
+const ACTOR_EXECUTION_REF_KINDS = new Set<ToolExecutionRefKind>(["actor", "player", "target"]);
+const LOCATION_EXECUTION_REF_KINDS = new Set<ToolExecutionRefKind>(["location", "scene", "movement", "target"]);
+const ITEM_EXECUTION_REF_KINDS = new Set<ToolExecutionRefKind>(["item", "target"]);
+const ENTITY_EXECUTION_REF_KINDS = new Set<ToolExecutionRefKind>([
+  "actor",
+  "player",
+  "location",
+  "scene",
+  "movement",
+  "item",
+  "faction",
+  "target",
+]);
+
+function resolveExecutionRef(
+  executionContext: ToolExecutionContext | undefined,
+  value: string,
+  allowedKinds: ReadonlySet<ToolExecutionRefKind>,
+): string {
+  return resolveToolExecutionRef(executionContext, value, allowedKinds);
+}
+
+function resolveExecutionDisplayRef(
+  executionContext: ToolExecutionContext | undefined,
+  value: string | null | undefined,
+): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  const label = executionContext?.modelRefResolutions
+    ?.get(normalizeToolRef(trimmed))
+    ?.label
+    ?.trim();
+  if (label) return label;
+  return isUnresolvedSameTurnModelAlias(trimmed) ? null : trimmed;
+}
+
+function resolveExecutionDisplayRefs(
+  executionContext: ToolExecutionContext | undefined,
+  values: readonly string[],
+): string[] {
+  return values
+    .map((value) => resolveExecutionDisplayRef(executionContext, value))
+    .filter((value): value is string => Boolean(value));
+}
+
+function canonicalDialogueOutcomeText(
+  args: Record<string, unknown>,
+  executionContext?: ToolExecutionContext,
+): string {
   const speakerRef = readToolString(args.speakerRef);
+  const speakerLabel = resolveExecutionDisplayRef(executionContext, speakerRef);
   const requestedRoleText = readToolString(args.requestedRoleText);
   const outcomeKind = readToolString(args.outcomeKind) ?? "unknown";
   const topicKind = readToolString(args.topicKind) ?? "other";
@@ -1140,7 +1262,7 @@ function canonicalDialogueOutcomeText(args: Record<string, unknown>): string {
           return [
             status,
             structuralTool ? `tool=${structuralTool}` : null,
-            targetRef ? `target=${targetRef}` : null,
+            targetRef ? `target=${resolveExecutionDisplayRef(executionContext, targetRef) ?? targetRef}` : null,
             stateKey ? `key=${stateKey}` : null,
             stateValue ? `value=${stateValue}` : null,
           ].filter((part): part is string => Boolean(part)).join("/");
@@ -1150,7 +1272,7 @@ function canonicalDialogueOutcomeText(args: Record<string, unknown>): string {
 
   return [
     `Dialogue outcome ${outcomeKind} on ${topicKind}.`,
-    speakerRef ? `Speaker: ${speakerRef}.` : null,
+    speakerLabel ? `Speaker: ${speakerLabel}.` : null,
     requestedRoleText ? `Requested role: ${requestedRoleText}.` : null,
     `Authority: ${authorityKind}; truth: ${truthStatus}.`,
     `Summary: ${summary}`,
@@ -1162,6 +1284,72 @@ function canonicalDialogueOutcomeText(args: Record<string, unknown>): string {
   ].filter((part): part is string => Boolean(part)).join(" ");
 }
 
+function quickActionDigest(value: unknown, length = 12): string {
+  return crypto.createHash("sha256")
+    .update(JSON.stringify(value))
+    .digest("hex")
+    .slice(0, length);
+}
+
+function handleOfferQuickActions(
+  campaignId: string,
+  args: Record<string, unknown>,
+  tick: number,
+  executionContext?: ToolExecutionContext,
+): ToolResult {
+  const rawActions = Array.isArray(args.actions) ? args.actions : [];
+  const actions = rawActions
+    .filter((action): action is Record<string, unknown> =>
+      Boolean(action) && typeof action === "object" && !Array.isArray(action))
+    .map((action) => ({
+      label: readToolString(action.label) ?? "",
+      action: readToolString(action.action) ?? "",
+      sourceRefs: readToolStringArray(action.sourceRefs),
+    }))
+    .filter((action) =>
+      action.label.length > 0
+      && action.action.length > 0
+      && action.sourceRefs.length > 0);
+
+  const offerSeed = {
+    campaignId,
+    tick,
+    baseWorldVersion: executionContext?.authority?.baseWorldVersion ?? null,
+    sourceEntity: executionContext?.authority?.sourceEntity ?? null,
+    actions,
+  };
+  const offerId = `qa_${quickActionDigest(offerSeed, 16)}`;
+  const offeredActions = actions.map((action, index) => ({
+    actionId: `${offerId}_${index + 1}`,
+    label: action.label,
+    action: action.action,
+    sourceRefs: action.sourceRefs,
+    sourceEvidenceDigest: `src_${quickActionDigest(action.sourceRefs, 10)}`,
+  }));
+  const baseWorldVersion = executionContext?.authority?.baseWorldVersion;
+  const persisted = typeof baseWorldVersion === "number" && Number.isSafeInteger(baseWorldVersion)
+    ? persistQuickActionOffer({
+        campaignId,
+        offerId,
+        tick,
+        baseWorldVersion,
+        actions: offeredActions,
+      })
+    : false;
+  const visibleActions = persisted ? offeredActions : [];
+
+  return {
+    success: true,
+    result: {
+      offerId,
+      source: "backend_quick_action_offer",
+      expiresAfterTurn: true,
+      persisted,
+      actions: visibleActions,
+    },
+  };
+}
+
 async function handleRecordDialogueOutcome(
   campaignId: string,
   args: Record<string, unknown>,
@@ -1169,16 +1357,19 @@ async function handleRecordDialogueOutcome(
   executionContext?: ToolExecutionContext,
 ): Promise<ToolResult> {
   const durability = args.durability === "durable" ? "durable" : "scene_local";
-  const text = canonicalDialogueOutcomeText(args);
+  const text = canonicalDialogueOutcomeText(args, executionContext);
   const speakerRef = readToolString(args.speakerRef);
   const addresseeRefs = readToolStringArray(args.addresseeRefs);
   const sourceRefs = readToolStringArray(args.sourceRefs);
+  const speakerLabel = resolveExecutionDisplayRef(executionContext, speakerRef);
+  const addresseeLabels = resolveExecutionDisplayRefs(executionContext, addresseeRefs);
+  const sourceLabels = resolveExecutionDisplayRefs(executionContext, sourceRefs);
   const claims = Array.isArray(args.claims) ? args.claims : [];
   const stateEffects = Array.isArray(args.stateEffects) ? args.stateEffects : [];
   const participants = uniqueToolStrings([
-    speakerRef,
-    ...addresseeRefs,
-    ...sourceRefs,
+    speakerLabel ?? speakerRef,
+    ...(addresseeLabels.length > 0 ? addresseeLabels : addresseeRefs),
+    ...(sourceLabels.length > 0 ? sourceLabels : sourceRefs),
   ]);
   const baseResult = {
     text,
@@ -1187,7 +1378,9 @@ async function handleRecordDialogueOutcome(
     authorityKind: readToolString(args.authorityKind),
     truthStatus: readToolString(args.truthStatus),
     speakerRef,
+    speakerLabel,
     addresseeRefs,
+    addresseeLabels,
     requestedRoleText: readToolString(args.requestedRoleText),
     futureUseKind: readToolString(args.futureUseKind),
     futureRelevance: readToolString(args.futureRelevance),
@@ -1196,6 +1389,7 @@ async function handleRecordDialogueOutcome(
     claims,
     stateEffects,
     sourceRefs,
+    sourceLabels,
     durability,
   };
 
@@ -1658,9 +1852,12 @@ function resolveSpawnNpcLocation(
       : executionContext?.currentLocationId;
     scene = refLocationId ? resolveToolLocationById(campaignId, refLocationId) : null;
   } else if (locationId) {
-    scene = resolveToolLocationById(campaignId, locationId);
+    scene = resolveToolLocationById(
+      campaignId,
+      resolveExecutionRef(executionContext, locationId, LOCATION_EXECUTION_REF_KINDS),
+    );
   } else if (locationName) {
-    scene = resolveToolLocationByNameOrId(campaignId, locationName);
+    scene = resolveToolLocationByNameOrId(campaignId, locationName, executionContext);
   }
 
   if (!scene) return null;
@@ -1906,8 +2103,13 @@ function handleSpawnNpc(
 function handlePromoteNpc(
   campaignId: string,
   args: Record<string, unknown>,
+  executionContext?: ToolExecutionContext,
 ): ToolResult {
-  const npcRef = args.npcRef as string;
+  const npcRef = resolveExecutionRef(
+    executionContext,
+    args.npcRef as string,
+    ACTOR_EXECUTION_REF_KINDS,
+  );
   const newTier = normalizeNpcTier(args.newTier);
   const reason = args.reason as string;
 
@@ -1970,7 +2172,8 @@ function handlePromoteNpc(
 
 function handleSpawnItem(
   campaignId: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  executionContext?: ToolExecutionContext,
 ): ToolResult {
   const name = args.name as string;
   const tags = args.tags as string[];
@@ -1981,7 +2184,7 @@ function handleSpawnItem(
   const db = getDb();
 
   if (ownerType === "character") {
-    const character = resolveCharacterByName(campaignId, ownerName);
+    const character = resolveCharacterByName(campaignId, ownerName, executionContext);
     if (!character) {
       return { success: false, error: `Character not found: ${ownerName}` };
     }
@@ -2012,7 +2215,7 @@ function handleSpawnItem(
   }
 
   if (ownerType === "location") {
-    const location = resolveToolLocationByNameOrId(campaignId, ownerName);
+    const location = resolveToolLocationByNameOrId(campaignId, ownerName, executionContext);
     if (!location) {
       return { success: false, error: `Location not found: ${ownerName}` };
     }
@@ -2045,21 +2248,67 @@ function handleSpawnItem(
   return { success: false, error: `Invalid ownerType: ${ownerType}` };
 }
 
+function revealLocationLooksLikeMinorPoi(args: Record<string, unknown>): boolean {
+  const values: string[] = [];
+  for (const key of ["name", "description", "connectedToName"] as const) {
+    const value = args[key];
+    if (typeof value === "string") values.push(value);
+  }
+  const tags = args.tags;
+  if (Array.isArray(tags)) {
+    values.push(...tags.filter((entry): entry is string => typeof entry === "string"));
+  }
+
+  const text = values.join(" ").toLowerCase();
+  const poiTerms = [
+    "minor-poi",
+    "notice_board",
+    "notice board",
+    "courier_desk",
+    "courier desk",
+    "shrine_desk",
+    "shrine desk",
+    "tea_stall",
+    "tea stall",
+    "street_vendor",
+    "street vendor",
+    "service desk",
+    "service counter",
+    "counter clerk",
+    "vendor stall",
+    "shop",
+    "stall",
+  ];
+  return poiTerms.some((term) => text.includes(term));
+}
+
 function handleRevealLocation(
   campaignId: string,
   args: Record<string, unknown>,
   tick: number,
   executionContext?: ToolExecutionContext,
+  options: { allowMinorPoiShape?: boolean } = {},
 ): ToolResult {
   const name = args.name as string;
   const description = args.description as string;
   const tags = args.tags as string[];
   const connectedToName = args.connectedToName as string;
+  if (
+    executionContext?.scope === "player_turn"
+    && !options.allowMinorPoiShape
+    && revealLocationLooksLikeMinorPoi(args)
+  ) {
+    return {
+      success: false,
+      error:
+        "reveal_location cannot create ordinary local POIs/service desks in player turns. Use create_minor_poi for low-impact local places.",
+    };
+  }
 
   const contextLocationId = resolveContextLocationRef(connectedToName, executionContext);
   const existingLocation = contextLocationId
     ? resolveToolLocationById(campaignId, contextLocationId)
-    : resolveToolLocationByNameOrId(campaignId, connectedToName);
+    : resolveToolLocationByNameOrId(campaignId, connectedToName, executionContext);
   if (!existingLocation) {
     return { success: false, error: `Connected location not found: ${connectedToName}` };
   }
@@ -2180,7 +2429,11 @@ function handleMoveTo(
   }
 
   const targetLocationName = args.targetLocationName as string;
-  const targetLocationRef = refCandidates(targetLocationName, ["location:"])[1] ?? targetLocationName;
+  const targetLocationRef = resolveExecutionRef(
+    executionContext,
+    refCandidates(targetLocationName, ["location:"])[1] ?? targetLocationName,
+    LOCATION_EXECUTION_REF_KINDS,
+  );
 
   const db = getDb();
   const player = db
@@ -2283,7 +2536,11 @@ function handleActorMoveTo(
   executionContext: ToolExecutionContext,
 ): ToolResult {
   const targetLocationName = args.targetLocationName as string;
-  const targetLocationRef = refCandidates(targetLocationName, ["location:"])[1] ?? targetLocationName;
+  const targetLocationRef = resolveExecutionRef(
+    executionContext,
+    refCandidates(targetLocationName, ["location:"])[1] ?? targetLocationName,
+    LOCATION_EXECUTION_REF_KINDS,
+  );
   const actorId = executionContext.subjectActorId;
   if (!actorId) {
     return { success: false, error: "Actor turn move_to requires subjectActorId" };
@@ -2469,6 +2726,7 @@ function handleCreateMinorPoi(
     },
     tick,
     executionContext,
+    { allowMinorPoiShape: true },
   );
   if (!revealed.success) return revealed;
 
@@ -2606,9 +2864,18 @@ function modeBaseAllowance(mode: string): string {
 function handleRequestContestedOutcome(
   campaignId: string,
   args: Record<string, unknown>,
+  executionContext?: ToolExecutionContext,
 ): ToolResult {
-  const actorName = String(args.actorName ?? "").trim();
-  const targetName = String(args.targetName ?? "").trim();
+  const actorName = resolveExecutionRef(
+    executionContext,
+    String(args.actorName ?? "").trim(),
+    ACTOR_EXECUTION_REF_KINDS,
+  );
+  const targetName = resolveExecutionRef(
+    executionContext,
+    String(args.targetName ?? "").trim(),
+    ACTOR_EXECUTION_REF_KINDS,
+  );
   const mode = String(args.mode ?? "contest").trim();
   const intent = String(args.intent ?? "").trim();
   const stakes = String(args.stakes ?? "").trim();
@@ -2619,12 +2886,12 @@ function handleRequestContestedOutcome(
       .slice(0, 8)
     : [];
 
-  const actor = resolveCharacterRecordByRef(campaignId, actorName);
+  const actor = resolveCharacterRecordByRef(campaignId, actorName, executionContext);
   if (!actor) {
     return { success: false, error: `Actor not found for contested outcome: ${actorName}` };
   }
 
-  const target = resolveCharacterRecordByRef(campaignId, targetName);
+  const target = resolveCharacterRecordByRef(campaignId, targetName, executionContext);
   if (!target) {
     return { success: false, error: `Target not found for contested outcome: ${targetName}` };
   }
@@ -2706,9 +2973,14 @@ function handleRequestContestedOutcome(
 function handleSetCondition(
   campaignId: string,
   args: Record<string, unknown>,
+  executionContext?: ToolExecutionContext,
   outcomeTier?: string
 ): ToolResult {
-  const targetName = args.targetName as string;
+  const targetName = resolveExecutionRef(
+    executionContext,
+    args.targetName as string,
+    ACTOR_EXECUTION_REF_KINDS,
+  );
   const delta = args.delta as number | undefined;
   const value = args.value as number | undefined;
 
@@ -2716,7 +2988,7 @@ function handleSetCondition(
     return { success: false, error: "Either delta or value must be provided" };
   }
 
-  const character = resolveCharacterByName(campaignId, targetName);
+  const character = resolveCharacterByName(campaignId, targetName, executionContext);
   if (!character) {
     return { success: false, error: `Character not found: ${targetName}` };
   }
@@ -2789,10 +3061,19 @@ function handleSetCondition(
 
 function handleTransferItem(
   campaignId: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  executionContext?: ToolExecutionContext,
 ): ToolResult {
-  const itemName = args.itemName as string;
-  const targetName = args.targetName as string;
+  const itemName = resolveExecutionRef(
+    executionContext,
+    args.itemName as string,
+    ITEM_EXECUTION_REF_KINDS,
+  );
+  const targetName = resolveExecutionRef(
+    executionContext,
+    args.targetName as string,
+    ENTITY_EXECUTION_REF_KINDS,
+  );
   const targetType = args.targetType as string;
   const equipState = args.equipState as InventoryEquipState | undefined;
   const equippedSlot = args.equippedSlot as string | undefined;
@@ -2803,7 +3084,7 @@ function handleTransferItem(
 
   const db = getDb();
 
-  const item = resolveItemByNameOrRef(campaignId, itemName);
+  const item = resolveItemByNameOrRef(campaignId, itemName, executionContext);
 
   if (!item) {
     return { success: false, error: `Item not found: ${itemName}` };
@@ -2819,7 +3100,7 @@ function handleTransferItem(
   }
 
   if (targetType === "character" || targetType === "npc" || targetType === "player" || targetType === "actor") {
-    const character = resolveCharacterByName(campaignId, targetName);
+    const character = resolveCharacterByName(campaignId, targetName, executionContext);
     if (!character) {
       return { success: false, error: `Character not found: ${targetName}` };
     }
@@ -2867,8 +3148,10 @@ function handleTransferItem(
       return {
         success: true,
         result: {
+          id: transferredId,
           item: transferredItemName,
           splitFrom: originalItemName,
+          remainingItemId: item.id,
           remainingItem: remainingItemName,
           target: character.name,
           action: nextState.equipState === "equipped" ? "equipped" : "carried",
@@ -2898,6 +3181,7 @@ function handleTransferItem(
     return {
       success: true,
       result: {
+        id: item.id,
         item: item.name,
         target: character.name,
         action: nextState.equipState === "equipped" ? "equipped" : "carried",
@@ -2953,8 +3237,10 @@ function handleTransferItem(
       return {
         success: true,
         result: {
+          id: transferredId,
           item: transferredItemName,
           splitFrom: originalItemName,
+          remainingItemId: item.id,
           remainingItem: remainingItemName,
           target: location.name,
           action: "dropped",
@@ -2984,6 +3270,7 @@ function handleTransferItem(
     return {
       success: true,
       result: {
+        id: item.id,
         item: item.name,
         target: location.name,
         action: "dropped",
@@ -3076,6 +3363,12 @@ function addScopedWriteRefsForToolResult(
       break;
     case "record_dialogue_outcome":
       refs.add("world:dialogue");
+      if (readStringField(payload, "eventId")) {
+        refs.add("world:event");
+      }
+      if (readStringField(payload, "knowledgeId") || readStringField(payload, "factRef")) {
+        refs.add("world:fact");
+      }
       break;
     case "record_world_fact":
       refs.add("world:fact");
@@ -3085,21 +3378,24 @@ function addScopedWriteRefsForToolResult(
       break;
     case "add_tag":
     case "remove_tag": {
-      const entityType = typeof input.args.entityType === "string"
-        ? input.args.entityType.trim().toLowerCase()
-        : "";
-      const entityName = input.args.entityName;
-      if (entityType === "npc") addStringRefs(refs, [scopedRef("npc", entityName)]);
-      if (entityType === "faction") addStringRefs(refs, [scopedRef("faction", entityName)]);
-      if (entityType === "location") addStringRefs(refs, [scopedRef("location", entityName)]);
-      if (entityType === "item") addStringRefs(refs, [scopedRef("item", entityName)]);
-      if (entityType === "player") {
-        const playerRef = readStringField(payload, "entityId")
-          ?? (typeof entityName === "string" ? entityName : null);
-        addStringRefs(refs, [
-          scopedWriteRef("player", playerRef, "tags"),
-        ]);
-      }
+      const entityType = (readStringField(payload, "entityType")
+        ?? (typeof input.args.entityType === "string" ? input.args.entityType : ""))
+        .trim()
+        .toLowerCase();
+      const entityRef = readStringField(payload, "entityId");
+      if (!entityRef) break;
+      if (entityType === "npc") addStringRefs(refs, [scopedWriteRef("npc", entityRef, "state")]);
+      if (entityType === "faction") addStringRefs(refs, [scopedWriteRef("faction", entityRef, "state")]);
+      if (entityType === "location") addStringRefs(refs, [scopedWriteRef("location", entityRef, "state")]);
+      if (entityType === "item") addStringRefs(refs, [scopedWriteRef("item", entityRef, "state")]);
+      if (entityType === "player") addStringRefs(refs, [scopedWriteRef("player", entityRef, "tags")]);
+      break;
+    }
+    case "set_condition": {
+      const entityType = (readStringField(payload, "entityType") ?? "").trim().toLowerCase();
+      const entityRef = readStringField(payload, "entityId");
+      if (entityType === "player") addStringRefs(refs, [scopedWriteRef("player", entityRef, "state")]);
+      if (entityType === "npc") addStringRefs(refs, [scopedWriteRef("npc", entityRef, "state")]);
       break;
     }
     case "set_relationship":
@@ -3154,13 +3450,6 @@ function addScopedWriteRefsForToolResult(
         ]);
       }
       break;
-    case "set_condition":
-      const playerRef = readStringField(payload, "entityId")
-        ?? readStringField(payload, "entity");
-      addStringRefs(refs, [
-        scopedWriteRef("player", playerRef, "state"),
-      ]);
-      break;
     case "start_search":
     case "record_player_intent":
       refs.add("world:intent");
@@ -3181,166 +3470,13 @@ function stateDeltaRefsForToolResult(input: {
   args: Record<string, unknown>;
   result: ToolResult;
 }): string[] {
-  const refs = new Set(inferRefsFromToolResultPayload(input.result.result));
-  const payload = input.result.result;
-  switch (input.toolName) {
-    case "add_tag":
-    case "remove_tag":
-      addStringRefs(refs, [
-        input.args.entityName,
-        input.args.entityType,
-        readStringField(payload, "entity"),
-      ]);
-      break;
-    case "set_relationship":
-      addStringRefs(refs, [
-        input.args.entityA,
-        input.args.entityB,
-        readStringField(payload, "entityA"),
-        readStringField(payload, "entityB"),
-      ]);
-      break;
-    case "add_chronicle_entry":
-      addStringRefs(refs, [readStringField(payload, "entryId")]);
-      break;
-    case "log_event":
-      addStringRefs(refs, [
-        readStringField(payload, "eventId"),
-        readStringField(payload, "durability"),
-      ]);
-      break;
-    case "record_dialogue_outcome":
-      addStringRefs(refs, [
-        readStringField(payload, "eventId"),
-        readStringField(payload, "outcomeKind"),
-        readStringField(payload, "topicKind"),
-        readStringField(payload, "futureUseKind"),
-        readStringField(payload, "speakerRef"),
-        readStringField(payload, "requestedRoleText"),
-        readStringField(payload, "durability"),
-      ]);
-      break;
-    case "record_world_fact":
-      addStringRefs(refs, [
-        readStringField(payload, "knowledgeId"),
-        readStringField(payload, "factRef"),
-        readStringField(payload, "factKind"),
-        readStringField(payload, "topicKind"),
-        readStringField(payload, "futureUseKind"),
-        readStringField(payload, "durability"),
-      ]);
-      break;
-    case "advance_time": {
-      const minutes = readIntegerField(payload, "minutes");
-      addStringRefs(refs, [
-        "world_time",
-        minutes !== null ? `elapsed:${minutes}` : null,
-        readStringField(payload, "reason"),
-      ]);
-      break;
-    }
-    case "spawn_npc":
-      addStringRefs(refs, [
-        readStringField(payload, "id"),
-        readStringField(payload, "name"),
-        readStringField(payload, "locationId"),
-        readStringField(payload, "broadLocationId"),
-      ]);
-      break;
-    case "promote_npc":
-      addStringRefs(refs, [
-        readStringField(payload, "npcId"),
-        readStringField(payload, "name"),
-        readStringField(payload, "newTier"),
-      ]);
-      break;
-    case "spawn_item":
-      addStringRefs(refs, [
-        readStringField(payload, "id"),
-        readStringField(payload, "name"),
-        readStringField(payload, "owner"),
-      ]);
-      break;
-    case "reveal_location":
-      addStringRefs(refs, [
-        readStringField(payload, "id"),
-        readStringField(payload, "name"),
-        readStringField(payload, "parentLocationId"),
-        readStringField(payload, "anchorLocationId"),
-      ]);
-      break;
-    case "set_condition":
-      addStringRefs(refs, [readStringField(payload, "entity")]);
-      break;
-    case "move_to":
-      addStringRefs(refs, [
-        readStringField(payload, "playerId"),
-        readStringField(payload, "actorId"),
-        readStringField(payload, "actorName"),
-        readStringField(payload, "locationId"),
-        readStringField(payload, "locationName"),
-      ]);
-      break;
-    case "move_actor":
-      addStringRefs(refs, [
-        readStringField(payload, "playerId"),
-        readStringField(payload, "actorId"),
-        readStringField(payload, "actorName"),
-        readStringField(payload, "actorRef"),
-        readStringField(payload, "destinationRef"),
-        readStringField(payload, "locationId"),
-        readStringField(payload, "locationName"),
-      ]);
-      break;
-    case "create_minor_poi":
-      addStringRefs(refs, [
-        readStringField(payload, "id"),
-        readStringField(payload, "name"),
-        readStringField(payload, "poiType"),
-        readStringField(payload, "anchorLocationId"),
-        readStringField(payload, "areaRef"),
-      ]);
-      break;
-    case "create_scene_extra":
-      addStringRefs(refs, [
-        readStringField(payload, "id"),
-        readStringField(payload, "name"),
-        readStringField(payload, "role"),
-        readStringField(payload, "locationId"),
-        readStringField(payload, "sceneLocationId"),
-      ]);
-      break;
-    case "start_search":
-      addStringRefs(refs, [
-        readStringField(payload, "searchId"),
-        readStringField(payload, "actorRef"),
-        readStringField(payload, "query"),
-      ]);
-      break;
-    case "record_player_intent":
-      addStringRefs(refs, [
-        readStringField(payload, "intentId"),
-        readStringField(payload, "actorRef"),
-        readStringField(payload, "intentType"),
-        readStringField(payload, "targetHint"),
-      ]);
-      break;
-    case "transfer_item":
-      addStringRefs(refs, [
-        input.args.itemName,
-        input.args.targetName,
-        input.args.transferredItemName,
-        input.args.remainingItemName,
-        readStringField(payload, "item"),
-        readStringField(payload, "splitFrom"),
-        readStringField(payload, "remainingItem"),
-        readStringField(payload, "target"),
-        readStringField(payload, "equipState"),
-      ]);
-      break;
-  }
+  const refs = new Set<string>();
   addScopedWriteRefsForToolResult(refs, input);
   return [...refs].slice(0, 32);
+}
+
+function sceneLocalAuthorityStateDeltaRefs(toolName: string): string[] {
+  return toolName === "record_dialogue_outcome" ? ["world:dialogue"] : ["world:event"];
 }
 
 function eventIdsForAuthorityTrace(input: {
@@ -3349,7 +3485,10 @@ function eventIdsForAuthorityTrace(input: {
   result: ToolResult;
 }): string[] {
   const eventIds = new Set(
-    input.inferredRefs.filter((ref) => /^(?:event|chronicle):/i.test(ref)),
+    input.inferredRefs.filter((ref) => {
+      const normalized = ref.toLowerCase();
+      return normalized.startsWith("event:") || normalized.startsWith("chronicle:");
+    }),
   );
   const payload = input.result.result;
   switch (input.toolName) {
@@ -3368,8 +3507,11 @@ function assertAuthorityWriteScopesCovered(input: {
   stateDeltaRefs: readonly string[];
   allowedWriteScopes?: readonly string[];
 }): void {
-  if (!input.allowedWriteScopes) return;
-  const scopeRefs = input.stateDeltaRefs.filter((ref) => /^[a-z-]+:[^:]+/i.test(ref));
+  const scopeRefs = input.stateDeltaRefs.filter(isAuthorityWriteScopeRef);
+  if (scopeRefs.length === 0) return;
+  if (!input.allowedWriteScopes || input.allowedWriteScopes.length === 0) {
+    throw new Error(`authority_write_scope_missing:${scopeRefs[0]}`);
+  }
   const uncovered = findUncoveredWriteRef({
     stateDeltaRefs: scopeRefs,
     allowedWriteScopes: input.allowedWriteScopes,
@@ -3377,6 +3519,23 @@ function assertAuthorityWriteScopesCovered(input: {
   if (uncovered) {
     throw new Error(`authority_write_scope_mismatch:${uncovered.stateDeltaRef}`);
   }
+}
+
+const AUTHORITY_WRITE_SCOPE_ROOTS = new Set([
+  "world",
+  "player",
+  "npc",
+  "actor",
+  "location",
+  "item",
+  "faction",
+]);
+
+function isAuthorityWriteScopeRef(ref: string): boolean {
+  const normalized = normalizeWriteScope(ref);
+  if (!normalized.includes(":")) return false;
+  const [root] = normalized.split(":");
+  return AUTHORITY_WRITE_SCOPE_ROOTS.has(root);
 }
 
 function durableMemoryRollbackDetails(input: {
@@ -3439,6 +3598,18 @@ function knowledgeOutputsForToolResult(input: {
   return uniqueToolStrings([details.knowledgeId, details.factRef]);
 }
 
+function authorityWriteScopeRefsForToolResult(input: {
+  stateDeltaRefs: readonly string[];
+  eventIds: readonly string[];
+  knowledgeOutputs: readonly string[];
+}): string[] {
+  return uniqueToolStrings([
+    ...input.stateDeltaRefs,
+    ...(input.eventIds.length > 0 ? ["world:event"] : []),
+    ...(input.knowledgeOutputs.length > 0 ? ["world:fact"] : []),
+  ]);
+}
+
 async function retractDurableMemoryAfterRejectedAuthority(input: {
   campaignId: string;
   toolName: string;
@@ -3496,11 +3667,11 @@ function runToolHandler(input: {
 }): ToolResult | Promise<ToolResult> {
   switch (input.toolName) {
     case "add_tag":
-      return handleAddTag(input.campaignId, input.args);
+      return handleAddTag(input.campaignId, input.args, input.executionContext);
     case "remove_tag":
-      return handleRemoveTag(input.campaignId, input.args);
+      return handleRemoveTag(input.campaignId, input.args, input.executionContext);
     case "set_relationship":
-      return handleSetRelationship(input.campaignId, input.args);
+      return handleSetRelationship(input.campaignId, input.args, input.executionContext);
     case "add_chronicle_entry":
       return handleAddChronicleEntry(input.campaignId, input.args, input.tick);
     case "log_event":
@@ -3517,16 +3688,18 @@ function runToolHandler(input: {
     case "advance_time":
       return handleAdvanceTime(input.args);
     case "offer_quick_actions":
-      return {
-        success: true,
-        result: { actions: input.args.actions },
-      };
+      return handleOfferQuickActions(
+        input.campaignId,
+        input.args,
+        input.tick,
+        input.executionContext,
+      );
     case "spawn_npc":
       return handleSpawnNpc(input.campaignId, input.args, input.executionContext);
     case "promote_npc":
-      return handlePromoteNpc(input.campaignId, input.args);
+      return handlePromoteNpc(input.campaignId, input.args, input.executionContext);
     case "spawn_item":
-      return handleSpawnItem(input.campaignId, input.args);
+      return handleSpawnItem(input.campaignId, input.args, input.executionContext);
     case "reveal_location":
       return handleRevealLocation(
         input.campaignId,
@@ -3535,9 +3708,14 @@ function runToolHandler(input: {
         input.executionContext,
       );
     case "request_contested_outcome":
-      return handleRequestContestedOutcome(input.campaignId, input.args);
+      return handleRequestContestedOutcome(input.campaignId, input.args, input.executionContext);
     case "set_condition":
-      return handleSetCondition(input.campaignId, input.args, input.outcomeTier);
+      return handleSetCondition(
+        input.campaignId,
+        input.args,
+        input.executionContext,
+        input.outcomeTier,
+      );
     case "move_to":
       return handleMoveTo(input.campaignId, input.args, input.tick, input.executionContext);
     case "move_actor":
@@ -3551,7 +3729,7 @@ function runToolHandler(input: {
     case "record_player_intent":
       return handleRecordPlayerIntent(input.args, input.executionContext);
     case "transfer_item":
-      return handleTransferItem(input.campaignId, input.args);
+      return handleTransferItem(input.campaignId, input.args, input.executionContext);
     default:
       return { success: false, error: `Unknown tool: ${input.toolName}` };
   }
@@ -3593,27 +3771,60 @@ function finalizeAuthorityResult(input: {
   }
 
   if (isSceneLocalLogEvent(input.toolName, input.result)) {
-    return attachToolResultAuthority(input.result, {
+    const stateDeltaRefs = sceneLocalAuthorityStateDeltaRefs(input.toolName);
+    assertAuthorityWriteScopesCovered({
+      stateDeltaRefs,
+      allowedWriteScopes: authority.allowedWriteScopes,
+    });
+    assertSimulationProposalExecutionStillClaimed({
       campaignId: input.campaignId,
-      sourceEntity: authority.sourceEntity,
+      metadata: authority.metadata,
+    });
+    const trace = commitAuthorityTrace({
+      campaignId: input.campaignId,
+      operation: `tool:${input.toolName}`,
       baseWorldVersion: authority.baseWorldVersion,
+      sourceEntity: authority.sourceEntity,
       elapsedWorldTimeMinutes: 0,
-      stateDeltaRefs: ["scene_local_observation"],
-      eventRefs: [],
+      currentTick: input.tick,
+      toolResultId: authority.toolResultId,
+      eventIds: [],
+      stateDeltaRefs,
+      metadata: {
+        toolName: input.toolName,
+        args: input.args,
+        sceneLocal: true,
+        ...(authority.metadata ? { proposalExecution: authority.metadata } : {}),
+      },
+    });
+    return attachToolResultAuthority(input.result, {
+      ...trace,
+      eventRefs: trace.eventRefs,
       witnesses: [],
       knowledgeOutputs: [],
       visibilityOutputs: [],
       resources: [],
+      requireStateDelta: true,
     });
   }
 
   const inferredRefs = stateDeltaRefsForToolResult(input);
+  const eventIds = eventIdsForAuthorityTrace({
+    toolName: input.toolName,
+    inferredRefs,
+    result: input.result,
+  });
+  const knowledgeOutputs = knowledgeOutputsForToolResult(input);
   const elapsedWorldTimeMinutes =
     input.toolName === "advance_time"
       ? readIntegerField(input.result.result, "minutes") ?? 0
-      : input.executionContext?.authority?.elapsedWorldTimeMinutes ?? 1;
+      : input.executionContext?.authority?.elapsedWorldTimeMinutes ?? 0;
   assertAuthorityWriteScopesCovered({
-    stateDeltaRefs: inferredRefs,
+    stateDeltaRefs: authorityWriteScopeRefsForToolResult({
+      stateDeltaRefs: inferredRefs,
+      eventIds,
+      knowledgeOutputs,
+    }),
     allowedWriteScopes: authority.allowedWriteScopes,
   });
   assertSimulationProposalExecutionStillClaimed({
@@ -3625,16 +3836,12 @@ function finalizeAuthorityResult(input: {
     operation: `tool:${input.toolName}`,
     baseWorldVersion: authority.baseWorldVersion,
     sourceEntity: authority.sourceEntity,
-    elapsedWorldTimeMinutes,
-    currentTick: input.tick,
-    toolResultId: authority.toolResultId,
-    eventIds: eventIdsForAuthorityTrace({
-      toolName: input.toolName,
-      inferredRefs,
-      result: input.result,
-    }),
-    stateDeltaRefs: inferredRefs,
-    metadata: {
+      elapsedWorldTimeMinutes,
+      currentTick: input.tick,
+      toolResultId: authority.toolResultId,
+      eventIds,
+      stateDeltaRefs: inferredRefs,
+      metadata: {
       toolName: input.toolName,
       args: input.args,
       ...(authority.metadata ? { proposalExecution: authority.metadata } : {}),
@@ -3644,7 +3851,7 @@ function finalizeAuthorityResult(input: {
   return attachToolResultAuthority(input.result, {
     ...trace,
     eventRefs: trace.eventRefs,
-    knowledgeOutputs: knowledgeOutputsForToolResult(input),
+    knowledgeOutputs,
     requireStateDelta: true,
   });
 }
@@ -3652,28 +3859,26 @@ function finalizeAuthorityResult(input: {
 function missingStateBearingAuthorityIssue(input: {
   toolName: string;
   executionContext?: ToolExecutionContext;
-  options?: ExecuteToolCallOptions;
 }): ToolResult | null {
-  if (!STATE_BEARING_TOOLS.has(input.toolName)) return null;
+  if (!toolRequiresExecutionAuthority(input.toolName)) return null;
   if (!input.executionContext) {
-    if (input.options?.authorityMode === "legacy_unscoped") return null;
     return buildValidationFailureToolResult(
-      `${input.toolName} is state-bearing and requires execution authority. Pass a ToolExecutionContext with authority, or explicitly mark a legacy_unscoped caller.`,
+      `${input.toolName} requires execution authority. Pass a ToolExecutionContext with authority.`,
     );
   }
   if (input.executionContext.authority) return null;
   return buildValidationFailureToolResult(
-    `${input.toolName} is state-bearing and requires execution authority for ${input.executionContext.scope}.`,
+    `${input.toolName} requires execution authority for ${input.executionContext.scope}.`,
   );
 }
 
 function runtimeToolSchemaFor(toolName: string) {
-  if (!Object.hasOwn(runtimeToolInputSchemas, toolName)) return null;
-  return runtimeToolInputSchemas[toolName as RuntimeToolName];
+  if (!Object.hasOwn(runtimeToolExecutionInputSchemas, toolName)) return null;
+  return runtimeToolExecutionInputSchemas[toolName as RuntimeToolName];
 }
 
 function describeSchemaIssues(
-  issues: readonly { path: PropertyKey[]; message: string }[],
+  issues: readonly { path: PropertyKey[]; message: string; code?: string; keys?: string[] }[],
 ): string {
   return issues
     .slice(0, 5)
@@ -3681,6 +3886,12 @@ function describeSchemaIssues(
       const path = issue.path.length > 0
         ? issue.path.map((part) => String(part)).join(".")
         : "input";
+      if (issue.code === "unrecognized_keys" && Array.isArray(issue.keys) && issue.keys.length > 0) {
+        const unsupported = issue.keys
+          .map((key) => (path === "input" ? key : `${path}.${key}`))
+          .join(", ");
+        return `unsupported input field(s): ${unsupported}`;
+      }
       return `${path}: ${issue.message}`;
     })
     .join("; ");
@@ -3780,7 +3991,6 @@ export async function executeToolCall(
     const missingAuthority = missingStateBearingAuthorityIssue({
       toolName,
       executionContext,
-      options,
     });
     if (missingAuthority) {
       resultForLog = missingAuthority;
@@ -3793,6 +4003,22 @@ export async function executeToolCall(
         error: "spawn_npc is not a player-turn model-facing tool. Use create_scene_extra for temporary local NPCs.",
       };
       return resultForLog;
+    }
+
+    if (executionContext?.scope === "player_turn" && toolName === "move_to") {
+      resultForLog = {
+        success: false,
+        error: "move_to is not a player-turn model-facing tool. Use move_actor with route evidence.",
+      };
+      return resultForLog;
+    }
+
+    if (executionContext && isRuntimeToolName(toolName)) {
+      argsForExecution = normalizeToolInputForGrounding({
+        toolName,
+        toolInput: argsForExecution,
+        context: executionContext,
+      });
     }
 
     if (executionContext) {
@@ -3811,16 +4037,52 @@ export async function executeToolCall(
     }
 
     const executeValidatedTool = async (): Promise<ToolResult> => {
-      const hasAuthority = Boolean(
+      const requiresExecutionAuthority = toolRequiresExecutionAuthority(toolName);
+      const hasExecutionAuthority = Boolean(
+        executionContext?.authority && requiresExecutionAuthority,
+      );
+      const hasStateAuthority = Boolean(
         executionContext?.authority && STATE_BEARING_TOOLS.has(toolName),
       );
-      if (hasAuthority && SYNC_SQLITE_STATE_BEARING_TOOLS.has(toolName)) {
-        return getDb().transaction(() => {
+      const authorityConflictFailure = (): ToolResult | null => {
+        if (!hasExecutionAuthority) return null;
+        try {
           validateBaseWorldVersion({
             campaignId,
             baseWorldVersion: executionContext!.authority!.baseWorldVersion,
             currentTick: tick,
           });
+          return null;
+        } catch (error) {
+          if (!isWorldVersionConflict(error)) {
+            throw error;
+          }
+          return attachToolResultAuthority(
+            buildValidationFailureToolResult(error.message),
+            {
+              campaignId,
+              sourceEntity: executionContext!.authority!.sourceEntity,
+              baseWorldVersion: executionContext!.authority!.baseWorldVersion,
+              elapsedWorldTimeMinutes: 0,
+              stateDeltaRefs: [],
+              eventRefs: [],
+              witnesses: [],
+              knowledgeOutputs: [],
+              visibilityOutputs: [],
+              resources: [],
+              failureReason: error.message,
+            },
+          );
+        }
+      };
+
+      if (hasStateAuthority && SYNC_SQLITE_STATE_BEARING_TOOLS.has(toolName)) {
+        return getDb().transaction(() => {
+          const conflictFailure = authorityConflictFailure();
+          if (conflictFailure) {
+            resultForLog = conflictFailure;
+            return conflictFailure;
+          }
           const handlerResult = runToolHandler({
             campaignId,
             toolName,
@@ -3841,34 +4103,10 @@ export async function executeToolCall(
         });
       }
 
-      if (hasAuthority) {
-        try {
-          validateBaseWorldVersion({
-            campaignId,
-            baseWorldVersion: executionContext!.authority!.baseWorldVersion,
-            currentTick: tick,
-          });
-        } catch (error) {
-          if (isWorldVersionConflict(error)) {
-            return attachToolResultAuthority(
-              buildValidationFailureToolResult(error.message),
-              {
-                campaignId,
-                sourceEntity: executionContext!.authority!.sourceEntity,
-                baseWorldVersion: executionContext!.authority!.baseWorldVersion,
-                elapsedWorldTimeMinutes: 0,
-                stateDeltaRefs: [],
-                eventRefs: [],
-                witnesses: [],
-                knowledgeOutputs: [],
-                visibilityOutputs: [],
-                resources: [],
-                failureReason: error.message,
-              },
-            );
-          }
-          throw error;
-        }
+      const conflictFailure = authorityConflictFailure();
+      if (conflictFailure) {
+        resultForLog = conflictFailure;
+        return conflictFailure;
       }
 
       const handlerResult = await runToolHandler({
@@ -3880,17 +4118,19 @@ export async function executeToolCall(
         outcomeTier,
       });
       resultForLog = handlerResult;
-      return finalizeAuthorityResult({
-        campaignId,
-        toolName,
-        args: argsForExecution,
-        tick,
-        result: handlerResult,
-        executionContext,
-      });
+      return hasStateAuthority
+        ? finalizeAuthorityResult({
+            campaignId,
+            toolName,
+            args: argsForExecution,
+            tick,
+            result: handlerResult,
+            executionContext,
+          })
+        : handlerResult;
     };
 
-    resultForLog = STATE_BEARING_TOOLS.has(toolName)
+    resultForLog = toolRequiresExecutionAuthority(toolName)
       ? await withSqliteWriteLock(`tool:${campaignId}:${toolName}`, executeValidatedTool)
       : await executeValidatedTool();
     if (

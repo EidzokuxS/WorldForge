@@ -9,7 +9,6 @@ import {
   type ModelSafeRef,
 } from "./ref-provenance.js";
 import {
-  inferRefsFromToolResultPayload,
   isObservationToolResult,
   type ToolResult,
 } from "./tool-result.js";
@@ -26,17 +25,23 @@ import {
 import {
   buildModelFacingScenePacket,
   isUnsafeModelFacingRef,
+  type ModelFacingAcceptedRefKind,
 } from "./model-facing-scene.js";
-import { isBackendOnlyModelRef } from "./model-facing-ref-safety.js";
+import {
+  findUnsafeBackendRefTokenInText,
+  isNaturalModelFacingProseHyphenToken,
+} from "./model-facing-ref-safety.js";
 import { listActorKnowledge } from "./knowledge-model.js";
 import {
   readWorldClock,
   type AuthoritySourceEntity,
 } from "./living-world-authority.js";
+import { writeScopesConflict } from "./simulation-write-scope.js";
 import {
   isRuntimeToolName,
   runtimeToolRequiresExecutionAuthority,
 } from "./tool-contracts.js";
+import { runtimeToolWriteScopes } from "./runtime-tool-descriptors.js";
 
 export type ToolExecutionScope = "player_turn" | "actor_turn" | "background";
 export type SpawnNpcLocationRef = "current_scene" | "current_location";
@@ -49,7 +54,8 @@ export interface ToolExecutionContext {
   authority?: {
     baseWorldVersion: number;
     sourceEntity: AuthoritySourceEntity;
-    elapsedWorldTimeMinutes?: number;
+    elapsedWorldTimeMinutes: number;
+    timePassageAllowed?: boolean;
     toolResultId?: string;
     allowedWriteScopes?: readonly string[];
     metadata?: Record<string, unknown>;
@@ -66,8 +72,25 @@ export interface ToolExecutionContext {
   sameTurnResultRefs?: Set<string>;
   sameTurnModelSafeRefs?: ModelSafeRef[];
   backendOnlyRefs?: Set<string>;
+  modelRefResolutions?: Map<string, ToolExecutionRefResolution>;
+  sameTurnAliasCounters?: Partial<Record<SameTurnAliasKind, number>>;
   bridgeLookup?: BridgeLookupSnapshot;
 }
+
+export type ToolExecutionRefKind =
+  | ModelFacingAcceptedRefKind
+  | "item"
+  | "faction";
+
+export interface ToolExecutionRefResolution {
+  ref: string;
+  kind: ToolExecutionRefKind;
+  backendRef: string;
+  candidateId?: string;
+  label?: string | null;
+}
+
+type SameTurnAliasKind = "actor" | "item" | "location";
 
 export type DialogueAddressedTarget =
   | {
@@ -94,6 +117,7 @@ export interface CreateActorTurnToolExecutionContextArgs {
   actorFrame: ActorFrame;
   baseWorldVersion: number;
   elapsedWorldTimeMinutes?: number;
+  allowedWriteScopes?: readonly string[];
 }
 
 export interface CreateBackgroundToolExecutionContextArgs {
@@ -109,6 +133,8 @@ export interface CreateBackgroundToolExecutionContextArgs {
 export interface CreatePlayerTurnToolExecutionContextArgs {
   frame: SceneFrame;
   addressedTarget?: DialogueAddressedTargetInput | null;
+  allowedWriteScopes?: readonly string[];
+  timePassageAllowed?: boolean;
 }
 
 export type DialogueAddressedTargetInput =
@@ -138,8 +164,10 @@ export interface ToolGroundingIssue {
     | "invalid_speaker_ref"
     | "invalid_source_ref"
     | "invalid_durability"
+    | "missing_time_semantics"
     | "addressed_target_mismatch"
     | "missing_structural_claim"
+    | "missing_write_scope"
     | "missing_background_authority"
     | "missing_background_write_scope"
     | "unsupported_tool_owner";
@@ -202,12 +230,202 @@ function addItemScopedRefs(target: Set<string>, values: Array<string | null | un
   }
 }
 
-function collectSceneFrameActorRefs(frame: SceneFrame, actorId: string): Set<string> {
+function addActorScopedBackendOnlyRefs(target: Set<string>, values: Array<string | null | undefined>) {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (!trimmed) continue;
+    addBackendOnlyRefs(target, [trimmed, trimmed.startsWith("actor:") ? trimmed : `actor:${trimmed}`]);
+  }
+}
+
+function addLocationScopedBackendOnlyRefs(target: Set<string>, values: Array<string | null | undefined>) {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (!trimmed) continue;
+    const unprefixed = trimmed.startsWith("location:")
+      ? trimmed.slice("location:".length)
+      : trimmed;
+    addBackendOnlyRefs(target, [unprefixed, `location:${unprefixed}`]);
+  }
+}
+
+function addItemScopedBackendOnlyRefs(target: Set<string>, values: Array<string | null | undefined>) {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (!trimmed) continue;
+    const unprefixed = trimmed.startsWith("item:")
+      ? trimmed.slice("item:".length)
+      : trimmed;
+    addBackendOnlyRefs(target, [unprefixed, `item:${unprefixed}`]);
+  }
+}
+
+function addModelRefResolution(
+  target: Map<string, ToolExecutionRefResolution>,
+  input: ToolExecutionRefResolution,
+): void {
+  const ref = input.ref.trim();
+  const backendRef = input.backendRef.trim();
+  if (!ref || !backendRef) return;
+  target.set(normalizeToolRef(ref), {
+    ...input,
+    ref,
+    backendRef,
+  });
+}
+
+function addResolvedRefToSet(input: {
+  refs: Set<string>;
+  resolutions: Map<string, ToolExecutionRefResolution>;
+  ref: string | null | undefined;
+  kind: ToolExecutionRefKind;
+  backendRef: string | null | undefined;
+  candidateId?: string | null;
+  label?: string | null;
+}): void {
+  const ref = input.ref?.trim();
+  const backendRef = input.backendRef?.trim();
+  if (!ref || !backendRef) return;
+  addRefs(input.refs, [ref]);
+  addModelRefResolution(input.resolutions, {
+    ref,
+    kind: input.kind,
+    backendRef,
+    candidateId: input.candidateId ?? undefined,
+    label: input.label,
+  });
+}
+
+function addSubjectResolvedRef(input: {
+  subjectRefs: Set<string>;
+  legalActorRefs: Set<string>;
+  resolutions: Map<string, ToolExecutionRefResolution>;
+  ref: string | null | undefined;
+  backendRef: string | null | undefined;
+  label?: string | null;
+}): void {
+  addResolvedRefToSet({
+    refs: input.subjectRefs,
+    resolutions: input.resolutions,
+    ref: input.ref,
+    kind: "player",
+    backendRef: input.backendRef,
+    label: input.label,
+  });
+  addResolvedRefToSet({
+    refs: input.legalActorRefs,
+    resolutions: input.resolutions,
+    ref: input.ref,
+    kind: "player",
+    backendRef: input.backendRef,
+    label: input.label,
+  });
+}
+
+function refResolutionFor(
+  context: ToolExecutionContext | undefined,
+  value: unknown,
+): ToolExecutionRefResolution | null {
+  if (!context || typeof value !== "string") return null;
+  return context.modelRefResolutions?.get(normalizeToolRef(value)) ?? null;
+}
+
+export function resolveToolExecutionRef(
+  context: ToolExecutionContext | undefined,
+  value: string,
+  allowedKinds?: ReadonlySet<ToolExecutionRefKind>,
+): string {
+  const resolution = refResolutionFor(context, value);
+  if (!resolution) return value;
+  if (allowedKinds && !allowedKinds.has(resolution.kind)) return value;
+  return resolution.backendRef;
+}
+
+function nextSameTurnAlias(
+  context: ToolExecutionContext,
+  kind: SameTurnAliasKind,
+): string {
+  context.sameTurnAliasCounters ??= {};
+  const next = (context.sameTurnAliasCounters[kind] ?? 0) + 1;
+  context.sameTurnAliasCounters[kind] = next;
+  return `new_${kind}_${next}`;
+}
+
+function addModelSafeRefToResult(result: ToolResult, ref: string): void {
+  result.modelSafeRefs = uniqueModelRefs([...(result.modelSafeRefs ?? []), ref]);
+}
+
+function addSameTurnResolvedRef(input: {
+  context: ToolExecutionContext;
+  result: ToolResult;
+  refs: Set<string>;
+  aliasKind: SameTurnAliasKind;
+  refKind: ToolExecutionRefKind;
+  backendRef: string | null | undefined;
+  label?: string | null;
+  candidateId?: string | null;
+}): string | null {
+  const backendRef = input.backendRef?.trim();
+  if (!backendRef) return null;
+  const alias = nextSameTurnAlias(input.context, input.aliasKind);
+  input.context.modelRefResolutions ??= new Map<string, ToolExecutionRefResolution>();
+  addResolvedRefToSet({
+    refs: input.refs,
+    resolutions: input.context.modelRefResolutions,
+    ref: alias,
+    kind: input.refKind,
+    backendRef,
+    candidateId: input.candidateId,
+    label: input.label,
+  });
+  addModelSafeRefToResult(input.result, alias);
+  return alias;
+}
+
+function addResolvedRefsForBackendRef(input: {
+  context: ToolExecutionContext;
+  refs: Set<string>;
+  backendRef: string | null | undefined;
+  kinds: ReadonlySet<ToolExecutionRefKind>;
+}): void {
+  const backendRef = input.backendRef?.trim();
+  if (!backendRef) return;
+  for (const resolution of input.context.modelRefResolutions?.values() ?? []) {
+    if (resolution.backendRef === backendRef && input.kinds.has(resolution.kind)) {
+      addRefs(input.refs, [resolution.ref]);
+    }
+  }
+}
+
+function collectSceneFrameActorRefs(
+  frame: SceneFrame,
+  actorId: string,
+  context?: ToolExecutionContext,
+): Set<string> {
   const refs = new Set<string>();
   const actor = [
     ...frame.roster.active,
     ...frame.roster.support.filter((entry) => entry.awareness === "clear"),
   ].find((entry) => entry.id === actorId || entry.actorId === actorId);
+
+  const actorBackendRefs = actor
+    ? [actor.id, actor.actorId].filter((value): value is string => Boolean(value))
+    : [actorId];
+  for (const [alias, resolution] of context?.modelRefResolutions ?? []) {
+    if (
+      (resolution.kind === "actor" || resolution.kind === "player")
+      && actorBackendRefs.includes(resolution.backendRef)
+    ) {
+      addRefs(refs, [alias]);
+    }
+  }
+
+  if (context?.scope === "player_turn") {
+    if (context.subjectActorId && actorBackendRefs.includes(context.subjectActorId)) {
+      addRefs(refs, [...context.subjectActorRefs]);
+    }
+    return refs;
+  }
 
   if (actor) {
     addActorScopedRefs(refs, [actor.id, actor.actorId]);
@@ -223,11 +441,23 @@ export function createScenePlanActionToolExecutionContext(input: {
   context: ToolExecutionContext;
   frame: SceneFrame;
   actorId: string;
+  toolName?: RuntimeToolName | string;
 }): ToolExecutionContext {
+  if (
+    input.context.scope === "player_turn"
+    && (
+      input.toolName === "move_actor"
+      || input.toolName === "record_player_intent"
+      || input.toolName === "start_search"
+    )
+  ) {
+    return input.context;
+  }
+
   return {
     ...input.context,
     subjectActorId: input.actorId,
-    subjectActorRefs: collectSceneFrameActorRefs(input.frame, input.actorId),
+    subjectActorRefs: collectSceneFrameActorRefs(input.frame, input.actorId, input.context),
   };
 }
 
@@ -302,6 +532,7 @@ function buildDialogueAddressedTarget(
   input: DialogueAddressedTargetInput | null | undefined,
   frame: SceneFrame,
   legalActorRefs: ReadonlySet<string>,
+  modelRefResolutions?: ReadonlyMap<string, ToolExecutionRefResolution>,
 ): DialogueAddressedTarget {
   if (!input || input.kind === "none") {
     return { kind: "none" };
@@ -327,12 +558,19 @@ function buildDialogueAddressedTarget(
   ];
   for (const actor of clearActors) {
     if (!addressedRoleMatchesExistingActorLabel(input.roleText, actor.label)) continue;
-    for (const ref of [actor.id, actor.actorId, actor.label].filter((candidateRef): candidateRef is string =>
-      typeof candidateRef === "string" && candidateRef.trim().length > 0)) {
-      const normalized = normalizeToolRef(ref);
-      if (legalActorRefs.has(normalized)) matchedActorRefs.add(normalized);
-      const actorScoped = `actor:${normalized}`;
-      if (legalActorRefs.has(actorScoped)) matchedActorRefs.add(actorScoped);
+    const backendRefs = new Set(
+      [actor.id, actor.actorId].filter((candidateRef): candidateRef is string =>
+        typeof candidateRef === "string" && candidateRef.trim().length > 0)
+        .map((candidateRef) => normalizeToolRef(candidateRef)),
+    );
+    for (const [alias, resolution] of modelRefResolutions ?? []) {
+      if (
+        (resolution.kind === "actor" || resolution.kind === "player" || resolution.kind === "target")
+        && backendRefs.has(normalizeToolRef(resolution.backendRef))
+        && legalActorRefs.has(alias)
+      ) {
+        matchedActorRefs.add(alias);
+      }
     }
   }
 
@@ -375,7 +613,7 @@ function modelFacingRefHints(
 }
 
 function strictModelFacingRefs(context: ToolExecutionContext): boolean {
-  return context.scope === "player_turn";
+  return context.scope === "player_turn" || context.scope === "actor_turn";
 }
 
 function readResultString(value: unknown, key: string): string | null {
@@ -441,6 +679,7 @@ function addCreatedActorRefsForAddressedTarget(input: {
   toolName: RuntimeToolName;
   toolInput?: Record<string, unknown>;
   payload: unknown;
+  modelSafeRefs?: readonly string[];
   id: string | null;
   actorId: string | null;
   name: string | null;
@@ -461,6 +700,7 @@ function addCreatedActorRefsForAddressedTarget(input: {
     input.id,
     input.actorId,
     input.name,
+    ...(input.modelSafeRefs ?? []),
     input.id ? `actor:${input.id}` : null,
     input.actorId ? `actor:${input.actorId}` : null,
   ]) {
@@ -501,16 +741,9 @@ function addSameTurnToolResultRefs(
     return;
   }
 
-  const authority = result.authority;
   addRefs(sameTurnResultRefs(context), [
-    authority?.toolResultId,
-    ...(authority?.stateDeltaRefs ?? []),
-    ...(authority?.eventRefs ?? []),
-    ...(authority?.witnesses ?? []),
-    ...(authority?.knowledgeOutputs ?? []),
-    ...(authority?.visibilityOutputs ?? []),
-    ...(authority?.resources ?? []),
-    ...inferRefsFromToolResultPayload(result.result),
+    ...(result.modelSafeRefs ?? []),
+    ...(result.stateReceipts ?? []).map((receipt) => receipt.stateReceipt),
   ]);
 }
 
@@ -524,6 +757,14 @@ function sameTurnRefsConsumableBy(
     addRefs(refs, [ref.token, ...ref.aliases]);
   }
   return refs;
+}
+
+function legacySameTurnResultRefs(
+  context: ToolExecutionContext,
+): Set<string> {
+  return context.scope === "player_turn"
+    ? new Set<string>()
+    : context.sameTurnResultRefs ?? new Set<string>();
 }
 
 function scopedIssue(
@@ -556,7 +797,7 @@ function requireRef(input: {
     return scopedIssue(
       input.code,
       input.path,
-      `${input.path} uses a backend-only ref. Use a visible label, current_scene/current_location, or a short helper alias. Examples: ${refHints.join(", ") || "none"}.`,
+      `${input.path} uses a backend-only ref. Use current_scene/current_location or a short helper alias. Examples: ${refHints.join(", ") || "none"}.`,
       input.value,
       refHints,
     );
@@ -567,7 +808,7 @@ function requireRef(input: {
   return scopedIssue(
     input.code,
     input.path,
-    `${input.path} must reference ${input.description}; got an out-of-scope ref. Use a visible label, current_scene/current_location, or a short helper alias. Examples: ${refHints.join(", ") || "none"}.`,
+    `${input.path} must reference ${input.description}; got an out-of-scope ref. Use current_scene/current_location or a short helper alias. Examples: ${refHints.join(", ") || "none"}.`,
     input.value,
     refHints,
   );
@@ -602,7 +843,116 @@ function mergeSets(...sets: ReadonlySet<string>[]): Set<string> {
   return merged;
 }
 
-function buildPlayerTurnAuthority(frame: SceneFrame): ToolExecutionContext["authority"] {
+export function writeScopesForRuntimeToolNames(
+  toolNames: readonly (RuntimeToolName | string)[],
+): string[] {
+  const scopes = new Set<string>();
+  for (const toolName of toolNames) {
+    for (const scope of runtimeToolWriteScopes(toolName)) {
+      scopes.add(scope);
+    }
+  }
+  return [...scopes];
+}
+
+function runtimeToolWriteScopesForInput(
+  toolName: RuntimeToolName | string,
+  input: Record<string, unknown>,
+): readonly string[] {
+  const inputString = (key: string): string | null => {
+    const value = input[key];
+    return typeof value === "string" && value.trim().length > 0
+      ? value.trim().toLowerCase()
+      : null;
+  };
+
+  if (toolName === "log_event" && input.durability !== "durable") {
+    return [];
+  }
+
+  if (toolName === "add_tag" || toolName === "remove_tag") {
+    switch (inputString("entityType")) {
+      case "player":
+        return ["player:*:tags"];
+      case "npc":
+        return ["npc:*:state"];
+      case "location":
+        return ["location:*:state"];
+      case "item":
+        return ["item:*:state"];
+      case "faction":
+        return ["faction:*:state"];
+      default:
+        return runtimeToolWriteScopes(toolName);
+    }
+  }
+
+  if (toolName === "set_condition") {
+    return ["player:*:state"];
+  }
+
+  if (toolName === "move_actor") {
+    return inputString("actorRef")
+      ? ["npc:*:location", "npc:*", "location:*"]
+      : ["player:*:location", "location:*"];
+  }
+
+  if (toolName === "move_to") {
+    return ["player:*:location", "location:*"];
+  }
+
+  if (
+    toolName === "spawn_npc"
+    || toolName === "promote_npc"
+    || toolName === "create_scene_extra"
+  ) {
+    return ["npc:*", "location:*"];
+  }
+
+  if (toolName === "spawn_item") {
+    return ["item:*"];
+  }
+
+  if (toolName === "reveal_location" || toolName === "create_minor_poi") {
+    return ["location:*"];
+  }
+
+  return runtimeToolWriteScopes(toolName);
+}
+
+function writeScopeCovered(input: {
+  allowedWriteScopes?: readonly string[];
+  descriptorScope: string;
+}): boolean {
+  return input.allowedWriteScopes?.some((allowedScope) =>
+    writeScopesConflict(allowedScope, input.descriptorScope)) ?? false;
+}
+
+function writeScopesCoveredForToolInput(input: {
+  toolName: RuntimeToolName;
+  toolInput: Record<string, unknown>;
+  allowedWriteScopes?: readonly string[];
+  context?: ToolExecutionContext;
+}): boolean {
+  const descriptorScopes =
+    input.toolName === "move_to" && input.context?.scope === "actor_turn"
+      ? ["npc:*:location", "location:*"]
+      : runtimeToolWriteScopesForInput(input.toolName, input.toolInput);
+  if (descriptorScopes.length === 0) return true;
+  return descriptorScopes.every((descriptorScope) =>
+    writeScopeCovered({
+      allowedWriteScopes: input.allowedWriteScopes,
+      descriptorScope,
+    }));
+}
+
+function buildPlayerTurnAuthority(
+  frame: SceneFrame,
+  args: {
+    allowedWriteScopes?: readonly string[];
+    timePassageAllowed?: boolean;
+  },
+): ToolExecutionContext["authority"] {
   try {
     const clock = readWorldClock(frame.campaignId);
     return {
@@ -611,14 +961,25 @@ function buildPlayerTurnAuthority(frame: SceneFrame): ToolExecutionContext["auth
         type: "player",
         id: frame.playerActorId,
       },
-      elapsedWorldTimeMinutes: 1,
+      elapsedWorldTimeMinutes: 0,
+      timePassageAllowed: args.timePassageAllowed === true,
+      allowedWriteScopes: args.allowedWriteScopes ?? [],
     };
   } catch (error) {
     if (
       error instanceof Error
       && error.message.includes("Database not connected")
     ) {
-      return undefined;
+      return {
+        baseWorldVersion: frame.worldVersion,
+        sourceEntity: {
+          type: "player",
+          id: frame.playerActorId,
+        },
+        elapsedWorldTimeMinutes: 0,
+        timePassageAllowed: args.timePassageAllowed === true,
+        allowedWriteScopes: args.allowedWriteScopes ?? [],
+      };
     }
     throw error;
   }
@@ -666,6 +1027,12 @@ export function createPlayerTurnToolExecutionContext(
 ): ToolExecutionContext {
   const frame = "frame" in input ? input.frame : input;
   const addressedTargetInput = "frame" in input ? input.addressedTarget : null;
+  const allowedWriteScopes = "frame" in input
+    ? input.allowedWriteScopes
+    : writeScopesForRuntimeToolNames(frame.allowedTools);
+  const timePassageAllowed = "frame" in input
+    ? input.timePassageAllowed
+    : false;
   const packet = buildModelFacingScenePacket(frame);
   const subjectActorRefs = new Set<string>();
   const legalActorRefs = new Set<string>();
@@ -676,6 +1043,7 @@ export function createPlayerTurnToolExecutionContext(
   const currentSceneRefs = new Set<string>();
   const legalMovementRefs = new Set<string>();
   const backendOnlyRefs = new Set<string>();
+  const modelRefResolutions = new Map<string, ToolExecutionRefResolution>();
   addBackendOnlyRefs(backendOnlyRefs, [
     frame.campaignId,
     frame.playerActorId,
@@ -694,57 +1062,158 @@ export function createPlayerTurnToolExecutionContext(
       actor.locationId,
       actor.sceneScopeId,
     ]);
-    addActorScopedRefs(legalActorRefs, [actor.id, actor.actorId]);
-    addRefs(legalActorRefs, [actor.label]);
+  }
+
+  addSubjectResolvedRef({
+    subjectRefs: subjectActorRefs,
+    legalActorRefs,
+    resolutions: modelRefResolutions,
+    ref: packet.view.localScene.player.ref,
+    backendRef: frame.playerActorId,
+    label: packet.view.localScene.player.label,
+  });
+  addSubjectResolvedRef({
+    subjectRefs: subjectActorRefs,
+    legalActorRefs,
+    resolutions: modelRefResolutions,
+    ref: "current_player",
+    backendRef: frame.playerActorId,
+    label: "Player",
+  });
+
+  packet.internalView.visibleActors.forEach((actor, index) => {
+    const promptActor = packet.view.visibleActors[index];
+    if (!promptActor) return;
+    const backendRef = actor.actorId ?? actor.id;
+    addResolvedRefToSet({
+      refs: legalActorRefs,
+      resolutions: modelRefResolutions,
+      ref: promptActor.ref,
+      kind: actor.type === "player" ? "player" : "actor",
+      backendRef,
+      label: promptActor.label,
+    });
     if (actor.id === frame.playerActorId || actor.actorId === frame.playerActorId) {
-      addActorScopedRefs(subjectActorRefs, [actor.id, actor.actorId]);
-      addRefs(subjectActorRefs, [actor.label, ...PLAYER_MODEL_SAFE_REFS]);
-      addRefs(legalActorRefs, PLAYER_MODEL_SAFE_REFS);
+      addResolvedRefToSet({
+        refs: subjectActorRefs,
+        resolutions: modelRefResolutions,
+        ref: promptActor.ref,
+        kind: "player",
+        backendRef,
+        label: promptActor.label,
+      });
     }
+  });
+
+  if (frame.currentLocationId) {
+    addResolvedRefToSet({
+      refs: currentLocationRefs,
+      resolutions: modelRefResolutions,
+      ref: "current_location",
+      kind: "location",
+      backendRef: frame.currentLocationId,
+      label: frame.currentLocationName,
+    });
+    addResolvedRefToSet({
+      refs: legalLocationRefs,
+      resolutions: modelRefResolutions,
+      ref: "current_location",
+      kind: "location",
+      backendRef: frame.currentLocationId,
+      label: frame.currentLocationName,
+    });
   }
-  addActorScopedRefs(subjectActorRefs, [frame.playerActorId]);
-  addRefs(subjectActorRefs, PLAYER_MODEL_SAFE_REFS);
-  addRefs(legalActorRefs, PLAYER_MODEL_SAFE_REFS);
+  if (frame.currentSceneScopeId) {
+    addResolvedRefToSet({
+      refs: currentSceneRefs,
+      resolutions: modelRefResolutions,
+      ref: "current_scene",
+      kind: "scene",
+      backendRef: frame.currentSceneScopeId,
+      label: frame.currentSceneScopeName,
+    });
+    addResolvedRefToSet({
+      refs: legalLocationRefs,
+      resolutions: modelRefResolutions,
+      ref: "current_scene",
+      kind: "scene",
+      backendRef: frame.currentSceneScopeId,
+      label: frame.currentSceneScopeName,
+    });
+  }
 
-  addLocationScopedRefs(currentLocationRefs, [frame.currentLocationId]);
-  addRefs(currentLocationRefs, [frame.currentLocationName, "current_location"]);
-  addLocationScopedRefs(currentSceneRefs, [frame.currentSceneScopeId]);
-  addRefs(currentSceneRefs, [frame.currentSceneScopeName, "current_scene"]);
-  addLocationScopedRefs(legalLocationRefs, [
-    frame.currentLocationId,
-    frame.currentSceneScopeId,
-  ]);
-  addRefs(legalLocationRefs, [
-    frame.currentLocationName,
-    frame.currentSceneScopeName,
-    "current_location",
-    "current_scene",
-  ]);
-
-  for (const candidate of frame.movementCandidates.filter((entry) => entry.connected)) {
+  for (const [index, candidate] of packet.internalView.legalMovement.entries()) {
+    if (!candidate.connected) continue;
+    const promptMovement = packet.view.legalMovement[index];
     addBackendOnlyRefs(backendOnlyRefs, [candidate.id, candidate.locationId]);
-    addLocationScopedRefs(legalLocationRefs, [candidate.id, candidate.locationId]);
-    addRefs(legalLocationRefs, [candidate.label]);
-    addLocationScopedRefs(legalMovementRefs, [candidate.id, candidate.locationId]);
-    addRefs(legalMovementRefs, [candidate.label]);
+    if (!promptMovement) continue;
+    addResolvedRefToSet({
+      refs: legalLocationRefs,
+      resolutions: modelRefResolutions,
+      ref: promptMovement.ref,
+      kind: "movement",
+      backendRef: candidate.locationId ?? candidate.id,
+      candidateId: candidate.id,
+      label: promptMovement.label,
+    });
+    addResolvedRefToSet({
+      refs: legalMovementRefs,
+      resolutions: modelRefResolutions,
+      ref: promptMovement.ref,
+      kind: "movement",
+      backendRef: candidate.locationId ?? candidate.id,
+      candidateId: candidate.id,
+      label: promptMovement.label,
+    });
   }
 
-  for (const candidate of packet.view.legalTargets) {
+  for (const [index, candidate] of packet.internalView.legalTargets.entries()) {
+    const promptTarget = packet.view.legalTargets[index];
+    const ref = promptTarget?.ref;
     switch (candidate.type) {
       case "actor":
-        addActorScopedRefs(legalActorRefs, [candidate.id, candidate.actorId]);
-        addRefs(legalActorRefs, [candidate.label]);
+        addResolvedRefToSet({
+          refs: legalActorRefs,
+          resolutions: modelRefResolutions,
+          ref,
+          kind: "actor",
+          backendRef: candidate.actorId ?? candidate.id,
+          candidateId: candidate.id,
+          label: promptTarget?.label ?? candidate.label,
+        });
         break;
       case "item":
-        addItemScopedRefs(legalItemRefs, [candidate.id, candidate.itemId]);
-        addRefs(legalItemRefs, [candidate.label]);
+        addResolvedRefToSet({
+          refs: legalItemRefs,
+          resolutions: modelRefResolutions,
+          ref,
+          kind: "item",
+          backendRef: candidate.itemId ?? candidate.id,
+          candidateId: candidate.id,
+          label: promptTarget?.label ?? candidate.label,
+        });
         break;
       case "location":
-        addLocationScopedRefs(legalLocationRefs, [candidate.id, candidate.locationId]);
-        addRefs(legalLocationRefs, [candidate.label]);
+        addResolvedRefToSet({
+          refs: legalLocationRefs,
+          resolutions: modelRefResolutions,
+          ref,
+          kind: "location",
+          backendRef: candidate.locationId ?? candidate.id,
+          candidateId: candidate.id,
+          label: promptTarget?.label ?? candidate.label,
+        });
         break;
       case "faction":
-        addRefs(legalFactionRefs, [candidate.id, candidate.factionId, candidate.label]);
+        addResolvedRefToSet({
+          refs: legalFactionRefs,
+          resolutions: modelRefResolutions,
+          ref,
+          kind: "faction",
+          backendRef: candidate.factionId ?? candidate.id,
+          candidateId: candidate.id,
+          label: promptTarget?.label ?? candidate.label,
+        });
         break;
     }
   }
@@ -758,7 +1227,10 @@ export function createPlayerTurnToolExecutionContext(
     ]);
   }
 
-  const authority = buildPlayerTurnAuthority(frame);
+  const authority = buildPlayerTurnAuthority(frame, {
+    allowedWriteScopes,
+    timePassageAllowed,
+  });
   const bridgeLookup = buildBridgeLookupSnapshot({
     frame,
     packet,
@@ -768,6 +1240,7 @@ export function createPlayerTurnToolExecutionContext(
     addressedTargetInput,
     frame,
     legalActorRefs,
+    modelRefResolutions,
   );
 
   return {
@@ -787,6 +1260,7 @@ export function createPlayerTurnToolExecutionContext(
     legalMovementRefs,
     sameTurnResultRefs: new Set(),
     backendOnlyRefs,
+    modelRefResolutions,
     bridgeLookup,
   };
 }
@@ -805,7 +1279,7 @@ export function createBackgroundToolExecutionContext(
     authority: {
       baseWorldVersion,
       sourceEntity: args.sourceEntity,
-      elapsedWorldTimeMinutes: args.elapsedWorldTimeMinutes ?? 1,
+      elapsedWorldTimeMinutes: args.elapsedWorldTimeMinutes ?? 0,
       toolResultId: args.toolResultId,
       allowedWriteScopes: args.allowedWriteScopes,
       metadata: args.metadata,
@@ -834,68 +1308,183 @@ export function createActorTurnToolExecutionContext(
   const currentLocationRefs = new Set<string>();
   const currentSceneRefs = new Set<string>();
   const legalMovementRefs = new Set<string>();
-
-  addActorScopedRefs(legalActorRefs, [
+  const backendOnlyRefs = new Set<string>();
+  const modelRefResolutions = new Map<string, ToolExecutionRefResolution>();
+  const targetByFactId = new Map(sceneFrame.targetCandidates.map((candidate) => [
+    `target:${candidate.id}`,
+    candidate,
+  ]));
+  addBackendOnlyRefs(backendOnlyRefs, [
+    sceneFrame.campaignId,
+    sceneFrame.playerActorId,
+    sceneFrame.currentLocationId,
+    sceneFrame.currentSceneScopeId,
     actorFrame.observer.id,
     actorFrame.observer.actorId,
-  ]);
-  addRefs(legalActorRefs, [actorFrame.observer.label]);
-  addActorScopedRefs(subjectActorRefs, [
-    actorFrame.observer.id,
-    actorFrame.observer.actorId,
-  ]);
-  addRefs(subjectActorRefs, [actorFrame.observer.label]);
-
-  const clearActors = [
-    ...sceneFrame.roster.active,
-    ...sceneFrame.roster.support.filter((actor) => actor.awareness === "clear"),
-  ];
-  for (const actor of clearActors) {
-    addActorScopedRefs(legalActorRefs, [actor.id, actor.actorId]);
-    addRefs(legalActorRefs, [actor.label]);
-  }
-
-  addLocationScopedRefs(currentLocationRefs, [actorFrame.observer.locationId]);
-  addRefs(currentLocationRefs, [sceneFrame.currentLocationName, "current_location"]);
-  addLocationScopedRefs(currentSceneRefs, [actorFrame.observer.sceneScopeId]);
-  addRefs(currentSceneRefs, [sceneFrame.currentSceneScopeName, "current_scene"]);
-  addLocationScopedRefs(legalLocationRefs, [
     actorFrame.observer.locationId,
     actorFrame.observer.sceneScopeId,
   ]);
-  addRefs(legalLocationRefs, [
-    sceneFrame.currentLocationName,
-    sceneFrame.currentSceneScopeName,
-    "current_location",
-    "current_scene",
-  ]);
 
-  for (const candidate of sceneFrame.movementCandidates.filter((entry) => entry.connected)) {
-    addLocationScopedRefs(legalLocationRefs, [candidate.id, candidate.locationId]);
-    addRefs(legalLocationRefs, [candidate.label]);
-    addLocationScopedRefs(legalMovementRefs, [candidate.id, candidate.locationId]);
-    addRefs(legalMovementRefs, [candidate.label]);
+  for (const ref of ["self", "current_actor"]) {
+    addResolvedRefToSet({
+      refs: subjectActorRefs,
+      resolutions: modelRefResolutions,
+      ref,
+      kind: "actor",
+      backendRef: actorFrame.observer.actorId ?? actorFrame.observer.id,
+      label: actorFrame.observer.label,
+    });
+    addResolvedRefToSet({
+      refs: legalActorRefs,
+      resolutions: modelRefResolutions,
+      ref,
+      kind: "actor",
+      backendRef: actorFrame.observer.actorId ?? actorFrame.observer.id,
+      label: actorFrame.observer.label,
+    });
   }
+
+  addResolvedRefToSet({
+    refs: currentLocationRefs,
+    resolutions: modelRefResolutions,
+    ref: "current_location",
+    kind: "location",
+    backendRef: actorFrame.observer.locationId,
+  });
+  addResolvedRefToSet({
+    refs: legalLocationRefs,
+    resolutions: modelRefResolutions,
+    ref: "current_location",
+    kind: "location",
+    backendRef: actorFrame.observer.locationId,
+  });
+  addResolvedRefToSet({
+    refs: currentSceneRefs,
+    resolutions: modelRefResolutions,
+    ref: "current_scene",
+    kind: "scene",
+    backendRef: actorFrame.observer.sceneScopeId ?? actorFrame.observer.locationId,
+  });
+  addResolvedRefToSet({
+    refs: legalLocationRefs,
+    resolutions: modelRefResolutions,
+    ref: "current_scene",
+    kind: "scene",
+    backendRef: actorFrame.observer.sceneScopeId ?? actorFrame.observer.locationId,
+  });
 
   for (const candidate of sceneFrame.targetCandidates) {
+    addBackendOnlyRefs(backendOnlyRefs, [
+      candidate.id,
+      "actorId" in candidate ? candidate.actorId : undefined,
+      "itemId" in candidate ? candidate.itemId : undefined,
+      "locationId" in candidate ? candidate.locationId : undefined,
+      "factionId" in candidate ? candidate.factionId : undefined,
+    ]);
+  }
+
+  for (const candidate of sceneFrame.movementCandidates) {
+    addBackendOnlyRefs(backendOnlyRefs, [
+      candidate.id,
+      candidate.locationId,
+    ]);
+  }
+
+  actorFrame.facts.forEach((fact, index) => {
+    const ref = `f${index + 1}`;
+    if (fact.route === "self_state" || fact.id.startsWith("self:")) {
+      for (const refs of [subjectActorRefs, legalActorRefs]) {
+        addResolvedRefToSet({
+          refs,
+          resolutions: modelRefResolutions,
+          ref,
+          kind: "actor",
+          backendRef: actorFrame.observer.actorId ?? actorFrame.observer.id,
+          label: actorFrame.observer.label,
+        });
+      }
+      return;
+    }
+    if (fact.id.startsWith("actor:")) {
+      addResolvedRefToSet({
+        refs: legalActorRefs,
+        resolutions: modelRefResolutions,
+        ref,
+        kind: "actor",
+        backendRef: fact.subjectRefs[0],
+      });
+      return;
+    }
+    if (fact.id.startsWith("move:")) {
+      const routeId = fact.id.slice("move:".length);
+      const locationId = fact.subjectRefs[0];
+      addResolvedRefToSet({
+        refs: legalLocationRefs,
+        resolutions: modelRefResolutions,
+        ref,
+        kind: "movement",
+        backendRef: locationId,
+        candidateId: routeId,
+      });
+      addResolvedRefToSet({
+        refs: legalMovementRefs,
+        resolutions: modelRefResolutions,
+        ref,
+        kind: "movement",
+        backendRef: locationId,
+        candidateId: routeId,
+      });
+      return;
+    }
+    const candidate = targetByFactId.get(fact.id);
+    if (!candidate) return;
     switch (candidate.type) {
       case "actor":
-        addActorScopedRefs(legalActorRefs, [candidate.id, candidate.actorId]);
-        addRefs(legalActorRefs, [candidate.label]);
+        addResolvedRefToSet({
+          refs: legalActorRefs,
+          resolutions: modelRefResolutions,
+          ref,
+          kind: "actor",
+          backendRef: candidate.actorId ?? candidate.id,
+          candidateId: candidate.id,
+          label: candidate.label,
+        });
         break;
       case "item":
-        addItemScopedRefs(legalItemRefs, [candidate.id, candidate.itemId]);
-        addRefs(legalItemRefs, [candidate.label]);
+        addResolvedRefToSet({
+          refs: legalItemRefs,
+          resolutions: modelRefResolutions,
+          ref,
+          kind: "item",
+          backendRef: candidate.itemId ?? candidate.id,
+          candidateId: candidate.id,
+          label: candidate.label,
+        });
         break;
       case "location":
-        addLocationScopedRefs(legalLocationRefs, [candidate.id, candidate.locationId]);
-        addRefs(legalLocationRefs, [candidate.label]);
+        addResolvedRefToSet({
+          refs: legalLocationRefs,
+          resolutions: modelRefResolutions,
+          ref,
+          kind: "location",
+          backendRef: candidate.locationId ?? candidate.id,
+          candidateId: candidate.id,
+          label: candidate.label,
+        });
         break;
       case "faction":
-        addRefs(legalFactionRefs, [candidate.id, candidate.factionId, candidate.label]);
+        addResolvedRefToSet({
+          refs: legalFactionRefs,
+          resolutions: modelRefResolutions,
+          ref,
+          kind: "faction",
+          backendRef: candidate.factionId ?? candidate.id,
+          candidateId: candidate.id,
+          label: candidate.label,
+        });
         break;
     }
-  }
+  });
 
   const bridgeLookup = buildBridgeLookupSnapshot({
     frame: sceneFrame,
@@ -912,7 +1501,8 @@ export function createActorTurnToolExecutionContext(
         type: "npc",
         id: actorFrame.observer.actorId,
       },
-      elapsedWorldTimeMinutes: args.elapsedWorldTimeMinutes ?? 1,
+      elapsedWorldTimeMinutes: args.elapsedWorldTimeMinutes ?? 0,
+      allowedWriteScopes: args.allowedWriteScopes ?? [],
     },
     currentLocationId: actorFrame.observer.locationId,
     currentSceneScopeId: actorFrame.observer.sceneScopeId,
@@ -924,6 +1514,8 @@ export function createActorTurnToolExecutionContext(
     currentSceneRefs,
     legalMovementRefs,
     sameTurnResultRefs: new Set(),
+    backendOnlyRefs,
+    modelRefResolutions,
     bridgeLookup,
   };
 }
@@ -959,6 +1551,11 @@ export function applySuccessfulToolObservationToExecutionContext(input: {
     ?? id;
   const name = readResultString(payload, "name")
     ?? readResultString(payload, "locationName");
+  const backendOnlyRefs = input.context.backendOnlyRefs ??= new Set<string>();
+  addBackendOnlyRefs(
+    backendOnlyRefs,
+    (input.result.stateReceipts ?? []).map((receipt) => receipt.stateReceipt),
+  );
 
   switch (input.toolName) {
     case "advance_time":
@@ -967,10 +1564,19 @@ export function applySuccessfulToolObservationToExecutionContext(input: {
       }
       break;
     case "reveal_location":
-      addLocationScopedRefs(input.context.legalLocationRefs, [id]);
-      addRefs(input.context.legalLocationRefs, [name]);
-      addLocationScopedRefs(input.context.legalMovementRefs, [id]);
-      addRefs(input.context.legalMovementRefs, [name]);
+      addLocationScopedBackendOnlyRefs(backendOnlyRefs, [id]);
+      {
+        const alias = addSameTurnResolvedRef({
+        context: input.context,
+        result: input.result,
+        refs: input.context.legalLocationRefs,
+        aliasKind: "location",
+        refKind: "movement",
+        backendRef: id,
+        label: name,
+      });
+        addRefs(input.context.legalMovementRefs, [alias]);
+      }
       break;
     case "move_to":
     case "move_actor":
@@ -979,46 +1585,108 @@ export function applySuccessfulToolObservationToExecutionContext(input: {
       input.context.currentSceneScopeId = id;
       input.context.currentLocationRefs.clear();
       input.context.currentSceneRefs.clear();
-      addLocationScopedRefs(input.context.currentLocationRefs, [id]);
-      addRefs(input.context.currentLocationRefs, ["current_location", name]);
-      addLocationScopedRefs(input.context.currentSceneRefs, [id]);
-      addRefs(input.context.currentSceneRefs, ["current_scene", name]);
-      addLocationScopedRefs(input.context.legalLocationRefs, [id]);
-      addRefs(input.context.legalLocationRefs, [name]);
-      addLocationScopedRefs(input.context.legalMovementRefs, [id]);
-      addRefs(input.context.legalMovementRefs, [name]);
+      addLocationScopedBackendOnlyRefs(backendOnlyRefs, [id]);
+      input.context.modelRefResolutions ??= new Map<string, ToolExecutionRefResolution>();
+      addResolvedRefToSet({
+        refs: input.context.currentLocationRefs,
+        resolutions: input.context.modelRefResolutions,
+        ref: "current_location",
+        kind: "location",
+        backendRef: id,
+        label: name,
+      });
+      addResolvedRefToSet({
+        refs: input.context.currentSceneRefs,
+        resolutions: input.context.modelRefResolutions,
+        ref: "current_scene",
+        kind: "scene",
+        backendRef: id,
+        label: name,
+      });
+      addResolvedRefsForBackendRef({
+        context: input.context,
+        refs: input.context.currentLocationRefs,
+        backendRef: id,
+        kinds: new Set<ToolExecutionRefKind>(["location", "movement", "scene"]),
+      });
+      addResolvedRefsForBackendRef({
+        context: input.context,
+        refs: input.context.currentSceneRefs,
+        backendRef: id,
+        kinds: new Set<ToolExecutionRefKind>(["location", "movement", "scene"]),
+      });
+      addRefs(input.context.legalLocationRefs, ["current_location", "current_scene"]);
       break;
     case "spawn_npc":
     case "create_scene_extra":
-      addActorScopedRefs(input.context.legalActorRefs, [actorId, id]);
-      addRefs(input.context.legalActorRefs, [name]);
+      addActorScopedBackendOnlyRefs(backendOnlyRefs, [actorId, id]);
+      addSameTurnResolvedRef({
+        context: input.context,
+        result: input.result,
+        refs: input.context.legalActorRefs,
+        aliasKind: "actor",
+        refKind: "actor",
+        backendRef: actorId ?? id,
+        label: name,
+      });
       addCreatedActorRefsForAddressedTarget({
         context: input.context,
         toolName: input.toolName,
         toolInput: input.toolInput,
         payload,
+        modelSafeRefs: input.result.modelSafeRefs,
         id,
         actorId,
         name,
       });
       break;
     case "create_minor_poi":
-      addLocationScopedRefs(input.context.legalLocationRefs, [id]);
-      addRefs(input.context.legalLocationRefs, [name]);
-      addLocationScopedRefs(input.context.legalMovementRefs, [id]);
-      addRefs(input.context.legalMovementRefs, [name]);
+      addLocationScopedBackendOnlyRefs(backendOnlyRefs, [id]);
+      {
+        const alias = addSameTurnResolvedRef({
+        context: input.context,
+        result: input.result,
+        refs: input.context.legalLocationRefs,
+        aliasKind: "location",
+        refKind: "movement",
+        backendRef: id,
+        label: name,
+      });
+        addRefs(input.context.legalMovementRefs, [alias]);
+      }
       break;
     case "spawn_item":
-      addItemScopedRefs(input.context.legalItemRefs, [id]);
-      addRefs(input.context.legalItemRefs, [name]);
+      addItemScopedBackendOnlyRefs(backendOnlyRefs, [id]);
+      addSameTurnResolvedRef({
+        context: input.context,
+        result: input.result,
+        refs: input.context.legalItemRefs,
+        aliasKind: "item",
+        refKind: "item",
+        backendRef: id,
+        label: name,
+      });
       break;
     case "transfer_item":
-      addItemScopedRefs(input.context.legalItemRefs, [readResultString(payload, "id")]);
-      addRefs(input.context.legalItemRefs, [
-        readResultString(payload, "item"),
-        readResultString(payload, "splitFrom"),
-        readResultString(payload, "remainingItem"),
-      ]);
+      addItemScopedBackendOnlyRefs(backendOnlyRefs, [readResultString(payload, "id")]);
+      addSameTurnResolvedRef({
+        context: input.context,
+        result: input.result,
+        refs: input.context.legalItemRefs,
+        aliasKind: "item",
+        refKind: "item",
+        backendRef: readResultString(payload, "id"),
+        label: readResultString(payload, "item"),
+      });
+      addSameTurnResolvedRef({
+        context: input.context,
+        result: input.result,
+        refs: input.context.legalItemRefs,
+        aliasKind: "item",
+        refKind: "item",
+        backendRef: readResultString(payload, "remainingItemId"),
+        label: readResultString(payload, "remainingItem"),
+      });
       break;
   }
 }
@@ -1129,10 +1797,6 @@ function validateLogEventGrounding(
     if (participantIssue) return participantIssue;
   }
 
-  if (input.durability !== "durable") {
-    return null;
-  }
-
   const eventText = typeof input.text === "string" ? input.text : "";
   const textIssue = validatePlayerTurnModelTextFields({
     toolInput: input,
@@ -1142,6 +1806,18 @@ function validateLogEventGrounding(
   });
   if (textIssue) return textIssue;
 
+  if (input.durability !== "durable") {
+    return null;
+  }
+
+  if (context.scope === "player_turn") {
+    return scopedIssue(
+      "invalid_durability",
+      `${pathPrefix}.durability`,
+      "player-turn log_event is scene-local only. Use record_dialogue_outcome or record_world_fact for durable player-known facts, or a concrete state tool for state changes.",
+    );
+  }
+
   if (textHasUnsupportedActionClaim(eventText)) {
     return scopedIssue(
       "unsupported_action_claim",
@@ -1150,6 +1826,83 @@ function validateLogEventGrounding(
     );
   }
 
+  return null;
+}
+
+function validateAdvanceTimeGrounding(
+  input: Record<string, unknown>,
+  context: ToolExecutionContext,
+  pathPrefix: string,
+): ToolGroundingIssue | null {
+  const textIssue = validatePlayerTurnModelTextFields({
+    toolInput: input,
+    context,
+    pathPrefix,
+    fields: ["reason"],
+  });
+  if (textIssue) return textIssue;
+
+  if (context.scope !== "player_turn") return null;
+  if (context.authority?.timePassageAllowed === true) return null;
+
+  return scopedIssue(
+    "missing_time_semantics",
+    pathPrefix,
+    "player-turn advance_time requires a typed time_passage or contextual time runtime requirement from GM Read.",
+  );
+}
+
+function quickActionSourceRefs(context: ToolExecutionContext): Set<string> {
+  return mergeSets(
+    context.subjectActorRefs,
+    context.legalActorRefs,
+    context.legalItemRefs,
+    context.legalLocationRefs,
+    context.legalFactionRefs,
+    context.legalMovementRefs,
+    context.currentLocationRefs,
+    context.currentSceneRefs,
+    legacySameTurnResultRefs(context),
+    knownFactRefs(context),
+  );
+}
+
+function validateQuickActionsGrounding(
+  input: Record<string, unknown>,
+  context: ToolExecutionContext,
+  pathPrefix: string,
+): ToolGroundingIssue | null {
+  if (!Array.isArray(input.actions)) return null;
+  const refs = quickActionSourceRefs(context);
+  for (const [index, action] of input.actions.entries()) {
+    if (!action || typeof action !== "object" || Array.isArray(action)) continue;
+    const actionRecord = action as Record<string, unknown>;
+    const textIssue = validatePlayerTurnModelTextFields({
+      toolInput: actionRecord,
+      context,
+      pathPrefix: `${pathPrefix}.actions.${index}`,
+      fields: ["label", "action"],
+    });
+    if (textIssue) return textIssue;
+
+    if (!Array.isArray(actionRecord.sourceRefs) || actionRecord.sourceRefs.length === 0) {
+      return scopedIssue(
+        "invalid_source_ref",
+        `${pathPrefix}.actions.${index}.sourceRefs`,
+        "quick actions require at least one visible/current sourceRef or player-known fact ref.",
+      );
+    }
+
+    const sourceIssue = validateRefArray({
+      values: actionRecord.sourceRefs,
+      refs,
+      path: `${pathPrefix}.actions.${index}.sourceRefs`,
+      description: "legal visible/current refs or player-known fact refs that justify the quick action",
+      code: "invalid_source_ref",
+      context,
+    });
+    if (sourceIssue) return sourceIssue;
+  }
   return null;
 }
 
@@ -1171,7 +1924,7 @@ function dialogueSourceRefs(context: ToolExecutionContext): Set<string> {
     context.legalMovementRefs,
     context.currentLocationRefs,
     context.currentSceneRefs,
-    context.sameTurnResultRefs ?? new Set(),
+    legacySameTurnResultRefs(context),
     sameTurnRefsConsumableBy(context, "record_dialogue_outcome"),
     knownFactRefs(context),
   );
@@ -1187,10 +1940,120 @@ function worldFactSourceRefs(context: ToolExecutionContext): Set<string> {
     context.legalMovementRefs,
     context.currentLocationRefs,
     context.currentSceneRefs,
-    context.sameTurnResultRefs ?? new Set(),
+    legacySameTurnResultRefs(context),
     sameTurnRefsConsumableBy(context, "record_world_fact"),
     knownFactRefs(context),
   );
+}
+
+function canUseClaimSubjectTextFallback(input: {
+  claim: Record<string, unknown>;
+  refs: ReadonlySet<string>;
+  context: ToolExecutionContext;
+}): boolean {
+  const subjectRef = input.claim.subjectRef;
+  if (typeof subjectRef !== "string" || !subjectRef.trim()) return false;
+  if (hasRef(input.refs, subjectRef)) return false;
+  if (typeof input.claim.subjectText !== "string" || !input.claim.subjectText.trim()) {
+    return false;
+  }
+  if (!strictModelFacingRefs(input.context)) return false;
+  return !isUnsafeModelFacingRef(subjectRef)
+    && !input.context.backendOnlyRefs?.has(normalizeToolRef(subjectRef));
+}
+
+function normalizeClaimsForTextSubjectFallback(input: {
+  claims: unknown;
+  refs: ReadonlySet<string>;
+  context: ToolExecutionContext;
+}): { claims: unknown; changed: boolean } {
+  if (!Array.isArray(input.claims)) {
+    return { claims: input.claims, changed: false };
+  }
+
+  let changed = false;
+  const claims = input.claims.map((claim) => {
+    if (!claim || typeof claim !== "object" || Array.isArray(claim)) return claim;
+    const record = claim as Record<string, unknown>;
+    if (!canUseClaimSubjectTextFallback({ claim: record, refs: input.refs, context: input.context })) {
+      return claim;
+    }
+    const { subjectRef: _subjectRef, ...rest } = record;
+    changed = true;
+    return rest;
+  });
+
+  return { claims, changed };
+}
+
+function recordHasAppliedNowStateEffect(input: Record<string, unknown>): boolean {
+  const stateEffects = input.stateEffects;
+  return Array.isArray(stateEffects)
+    && stateEffects.some((effect) =>
+      typeof effect === "object"
+      && effect !== null
+      && !Array.isArray(effect)
+      && (effect as Record<string, unknown>).status === "applied_now");
+}
+
+function documentStatusClaimTargetsItem(
+  claim: Record<string, unknown>,
+  context: ToolExecutionContext,
+): boolean {
+  if (claim.claimKind !== "document_status") return false;
+  const subjectRef = claim.subjectRef;
+  return typeof subjectRef === "string" && hasRef(context.legalItemRefs, subjectRef);
+}
+
+function validateBackendSettledDocumentClaimsHaveStateReceipt(input: {
+  toolInput: Record<string, unknown>;
+  context: ToolExecutionContext;
+  pathPrefix: string;
+}): ToolGroundingIssue | null {
+  if (input.context.scope !== "player_turn") return null;
+  if (input.toolInput.truthStatus !== "settled_by_backend") return null;
+  if (recordHasAppliedNowStateEffect(input.toolInput)) return null;
+  const claims = input.toolInput.claims;
+  if (!Array.isArray(claims)) return null;
+
+  for (const [index, claim] of claims.entries()) {
+    if (!claim || typeof claim !== "object" || Array.isArray(claim)) continue;
+    if (!documentStatusClaimTargetsItem(claim as Record<string, unknown>, input.context)) {
+      continue;
+    }
+    return scopedIssue(
+      "missing_structural_claim",
+      `${input.pathPrefix}.claims.${index}`,
+      "backend-settled document_status for an item requires a prior item-state mutation receipt and record_dialogue_outcome.stateEffects applied_now; use speaker_asserted/unconfirmed for communication-only document observations.",
+    );
+  }
+
+  return null;
+}
+
+export function normalizeToolInputForGrounding(input: {
+  toolName: RuntimeToolName;
+  toolInput: Record<string, unknown>;
+  context: ToolExecutionContext;
+}): Record<string, unknown> {
+  if (input.toolName !== "record_dialogue_outcome" && input.toolName !== "record_world_fact") {
+    return input.toolInput;
+  }
+
+  const refs = input.toolName === "record_dialogue_outcome"
+    ? dialogueSourceRefs(input.context)
+    : worldFactSourceRefs(input.context);
+  const normalized = normalizeClaimsForTextSubjectFallback({
+    claims: input.toolInput.claims,
+    refs,
+    context: input.context,
+  });
+  if (!normalized.changed) return input.toolInput;
+
+  return {
+    ...input.toolInput,
+    claims: normalized.claims,
+  };
 }
 
 function validateRefArray(input: {
@@ -1227,7 +2090,7 @@ function generalModelFacingRefs(context: ToolExecutionContext): Set<string> {
     context.legalMovementRefs,
     context.currentLocationRefs,
     context.currentSceneRefs,
-    context.sameTurnResultRefs ?? new Set(),
+    legacySameTurnResultRefs(context),
   );
 }
 
@@ -1238,7 +2101,11 @@ function validatePlayerTurnModelText(input: {
 }): ToolGroundingIssue | null {
   if (!strictModelFacingRefs(input.context)) return null;
   if (typeof input.value !== "string" || !input.value.trim()) return null;
-  if (!isBackendOnlyModelRef(input.value)) return null;
+  const backendOnlyRef = findBackendOnlyRefInModelText(input.value, input.context.backendOnlyRefs);
+  const unsafePatternRef = findUnsafeBackendRefTokenInText(input.value, {
+    isSafeHyphenToken: isNaturalModelFacingProseHyphenToken,
+  });
+  if (!unsafePatternRef && !backendOnlyRef) return null;
   const refHints = modelFacingRefHints(
     generalModelFacingRefs(input.context),
     input.context.backendOnlyRefs,
@@ -1246,10 +2113,47 @@ function validatePlayerTurnModelText(input: {
   return scopedIssue(
     "invalid_source_ref",
     input.path,
-    `${input.path} contains a backend-only ref in model-authored text. Use visible labels, helper aliases, or structured ref fields instead.`,
-    input.value,
+    `${input.path} contains a backend-only ref in model-authored text. Use display names only in prose, helper aliases for refs, or structured ref fields instead.`,
+    backendOnlyRef ?? unsafePatternRef ?? input.value,
     refHints,
   );
+}
+
+function isModelTextRefChar(char: string | undefined): boolean {
+  if (!char) return false;
+  const code = char.charCodeAt(0);
+  return (code >= 48 && code <= 57)
+    || (code >= 65 && code <= 90)
+    || (code >= 97 && code <= 122)
+    || char === "_"
+    || char === "-"
+    || char === ":";
+}
+
+function findBackendOnlyRefInModelText(
+  value: string,
+  backendOnlyRefs?: ReadonlySet<string>,
+): string | null {
+  if (!backendOnlyRefs?.size) return null;
+  let token = "";
+
+  const checkToken = () => {
+    if (!token) return null;
+    const normalized = normalizeToolRef(token);
+    token = "";
+    return backendOnlyRefs.has(normalized) ? normalized : null;
+  };
+
+  for (const char of value) {
+    if (isModelTextRefChar(char)) {
+      token += char;
+      continue;
+    }
+    const matched = checkToken();
+    if (matched) return matched;
+  }
+
+  return checkToken();
 }
 
 function validatePlayerTurnModelTextFields(input: {
@@ -1559,6 +2463,13 @@ function validateRecordDialogueOutcomeGrounding(
     const legalClaimRefs = dialogueSourceRefs(context);
     for (const [index, claim] of input.claims.entries()) {
       if (!claim || typeof claim !== "object" || Array.isArray(claim)) continue;
+      if (canUseClaimSubjectTextFallback({
+        claim: claim as Record<string, unknown>,
+        refs: legalClaimRefs,
+        context,
+      })) {
+        continue;
+      }
       const subjectIssue = requireContextRef({
         value: (claim as Record<string, unknown>).subjectRef,
         refs: legalClaimRefs,
@@ -1570,6 +2481,13 @@ function validateRecordDialogueOutcomeGrounding(
       if (subjectIssue) return subjectIssue;
     }
   }
+
+  const documentStateIssue = validateBackendSettledDocumentClaimsHaveStateReceipt({
+    toolInput: input,
+    context,
+    pathPrefix,
+  });
+  if (documentStateIssue) return documentStateIssue;
 
   return null;
 }
@@ -1603,6 +2521,13 @@ function validateRecordWorldFactGrounding(
   if (Array.isArray(input.claims)) {
     for (const [index, claim] of input.claims.entries()) {
       if (!claim || typeof claim !== "object" || Array.isArray(claim)) continue;
+      if (canUseClaimSubjectTextFallback({
+        claim: claim as Record<string, unknown>,
+        refs: sourceRefs,
+        context,
+      })) {
+        continue;
+      }
       const claimSubjectIssue = requireContextRef({
         value: (claim as Record<string, unknown>).subjectRef,
         refs: sourceRefs,
@@ -1736,6 +2661,7 @@ function validateTagGrounding(
 
 function validateBackgroundGrounding(input: {
   toolName: RuntimeToolName | string;
+  toolInput: Record<string, unknown>;
   context: ToolExecutionContext;
   pathPrefix: string;
 }): ToolGroundingIssue | null {
@@ -1747,7 +2673,7 @@ function validateBackgroundGrounding(input: {
     return scopedIssue(
       "missing_background_authority",
       input.pathPrefix,
-      `background state-bearing tool ${input.toolName} requires an authority source entity.`,
+      `background tool ${input.toolName} requires an authority source entity.`,
     );
   }
 
@@ -1755,10 +2681,60 @@ function validateBackgroundGrounding(input: {
     return scopedIssue(
       "missing_background_write_scope",
       input.pathPrefix,
-      `background state-bearing tool ${input.toolName} requires non-empty allowedWriteScopes.`,
+      `background tool ${input.toolName} requires non-empty allowedWriteScopes.`,
+    );
+  }
+  if (!writeScopesCoveredForToolInput({
+    toolName: input.toolName,
+    toolInput: input.toolInput,
+    allowedWriteScopes: authority.allowedWriteScopes,
+    context: input.context,
+  })) {
+    return scopedIssue(
+      "missing_background_write_scope",
+      input.pathPrefix,
+      `background tool ${input.toolName} is outside the execution context write scopes.`,
     );
   }
 
+  return null;
+}
+
+function validateStateBearingWriteScopeGrounding(input: {
+  toolName: RuntimeToolName | string;
+  toolInput: Record<string, unknown>;
+  context: ToolExecutionContext;
+  pathPrefix: string;
+}): ToolGroundingIssue | null {
+  if (!isRuntimeToolName(input.toolName)) return null;
+  if (!runtimeToolRequiresExecutionAuthority(input.toolName)) return null;
+  const authority = input.context.authority;
+  if (!authority?.sourceEntity?.type) {
+    return scopedIssue(
+      input.context.scope === "background" ? "missing_background_authority" : "missing_write_scope",
+      input.pathPrefix,
+      `${input.context.scope} tool ${input.toolName} requires execution authority.`,
+    );
+  }
+  if (!authority.allowedWriteScopes || authority.allowedWriteScopes.length === 0) {
+    return scopedIssue(
+      input.context.scope === "background" ? "missing_background_write_scope" : "missing_write_scope",
+      input.pathPrefix,
+      `${input.context.scope} tool ${input.toolName} requires non-empty allowedWriteScopes.`,
+    );
+  }
+  if (!writeScopesCoveredForToolInput({
+    toolName: input.toolName,
+    toolInput: input.toolInput,
+    allowedWriteScopes: authority.allowedWriteScopes,
+    context: input.context,
+  })) {
+    return scopedIssue(
+      input.context.scope === "background" ? "missing_background_write_scope" : "missing_write_scope",
+      input.pathPrefix,
+      `${input.context.scope} tool ${input.toolName} is outside the execution context write scopes.`,
+    );
+  }
   return null;
 }
 
@@ -1772,15 +2748,8 @@ export function validateToolInputGrounding(input: {
   const path = input.pathPrefix ?? "input";
   const toolInput = input.toolInput;
 
-  if (input.context.scope === "background") {
-    return validateBackgroundGrounding({
-      toolName: input.toolName,
-      context: input.context,
-      pathPrefix: path,
-    });
-  }
-
-  switch (input.toolName) {
+  const toolSpecificIssue = (() => {
+    switch (input.toolName) {
     case "move_actor":
     case "create_minor_poi":
     case "create_scene_extra":
@@ -1797,6 +2766,10 @@ export function validateToolInputGrounding(input: {
     }
     case "log_event":
       return validateLogEventGrounding(toolInput, input.context, path);
+    case "advance_time":
+      return validateAdvanceTimeGrounding(toolInput, input.context, path);
+    case "offer_quick_actions":
+      return validateQuickActionsGrounding(toolInput, input.context, path);
     case "add_chronicle_entry":
       if (input.context.scope === "player_turn") {
         return scopedIssue(
@@ -1871,7 +2844,7 @@ export function validateToolInputGrounding(input: {
             input.context.legalMovementRefs,
             input.context.currentLocationRefs,
             input.context.currentSceneRefs,
-            input.context.sameTurnResultRefs ?? new Set(),
+            legacySameTurnResultRefs(input.context),
             sameTurnRefsConsumableBy(input.context, "request_contested_outcome"),
             knownFactRefs(input.context),
           ),
@@ -2021,7 +2994,23 @@ export function validateToolInputGrounding(input: {
       });
     default:
       return null;
-  }
+    }
+  })();
+  if (toolSpecificIssue) return toolSpecificIssue;
+
+  return input.context.scope === "background"
+    ? validateBackgroundGrounding({
+      toolName: input.toolName,
+      toolInput,
+      context: input.context,
+      pathPrefix: path,
+    })
+    : validateStateBearingWriteScopeGrounding({
+      toolName: input.toolName,
+      toolInput,
+      context: input.context,
+      pathPrefix: path,
+    });
 }
 
 export function validateToolPlanGrounding(input: {

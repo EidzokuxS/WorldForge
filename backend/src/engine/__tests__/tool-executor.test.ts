@@ -54,40 +54,99 @@ async function executeToolCall(
   executionContext?: ToolExecutionContext,
   options: ExecuteToolCallOptions = {},
 ): Promise<ToolResult> {
-  const authorityOptions = executionContext === undefined
-    && options.authorityMode === undefined
-    && toolRequiresExecutionAuthority(toolName)
-    ? { ...options, authorityMode: "legacy_unscoped" as const }
-    : options;
+  const contextForExecution = executionContext
+    ?? (toolRequiresExecutionAuthority(toolName)
+      ? createBackgroundTestExecutionContext(args)
+      : undefined);
   const result = await executeToolCallRaw(
     campaignId,
     toolName,
     args,
     tick,
     outcomeTier,
-    executionContext,
-    authorityOptions,
+    contextForExecution,
+    options,
   );
-  if (executionContext && result.success && isRuntimeToolName(toolName)) {
+  if (contextForExecution && result.success && isRuntimeToolName(toolName)) {
     applySuccessfulToolObservationToExecutionContext({
       toolName,
       toolInput: args,
       result,
-      context: executionContext,
+      context: contextForExecution,
     });
   }
   return result;
 }
 
-function createPlayerTurnContext(overrides: Partial<ToolExecutionContext> = {}): ToolExecutionContext {
+function collectStringRefs(value: unknown, refs: Set<string>): void {
+  if (typeof value === "string" && value.trim()) {
+    refs.add(value.trim());
+    refs.add(value.trim().toLowerCase());
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) collectStringRefs(entry, refs);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  for (const entry of Object.values(value)) {
+    collectStringRefs(entry, refs);
+  }
+}
+
+function createBackgroundTestExecutionContext(args: Record<string, unknown>): ToolExecutionContext {
+  const sceneRefs = new Set([
+    "player",
+    "player-1",
+    "current_location",
+    "current_scene",
+    "loc-current",
+    "scene-current",
+    "shibuya district",
+    "kissaten alcove",
+  ]);
+  const refs = new Set(sceneRefs);
+  collectStringRefs(args, refs);
+  return {
+    scope: "background",
+    subjectActorId: "player-1",
+    subjectActorRefs: new Set(refs),
+    authority: {
+      baseWorldVersion: 0,
+      sourceEntity: { type: "system", id: "test-tool-executor" },
+      allowedWriteScopes: ["*"],
+      elapsedWorldTimeMinutes: 1,
+    },
+    currentLocationId: "loc-current",
+    currentSceneScopeId: "scene-current",
+    legalLocationRefs: new Set(refs),
+    legalActorRefs: new Set(refs),
+    legalItemRefs: new Set(refs),
+    legalFactionRefs: new Set(refs),
+    currentLocationRefs: new Set(["current_location", "loc-current", "shibuya district"]),
+    currentSceneRefs: new Set(["current_scene", "scene-current", "kissaten alcove"]),
+    legalMovementRefs: new Set(refs),
+  };
+}
+
+function createPlayerTurnContext(
+  overrides: Omit<Partial<ToolExecutionContext>, "authority"> & {
+    authority?: Partial<NonNullable<ToolExecutionContext["authority"]>>;
+  } = {},
+): ToolExecutionContext {
+  const baseAuthority: NonNullable<ToolExecutionContext["authority"]> = {
+    baseWorldVersion: 0,
+    sourceEntity: { type: "player", id: "player-1" },
+    elapsedWorldTimeMinutes: 0,
+    allowedWriteScopes: ["*"],
+  };
   return {
     scope: "player_turn",
     subjectActorId: "player-1",
     subjectActorRefs: new Set(["player-1", "player"]),
     authority: {
-      baseWorldVersion: 0,
-      sourceEntity: { type: "player", id: "player-1" },
-      allowedWriteScopes: ["*"],
+      ...baseAuthority,
+      ...overrides.authority,
     },
     currentLocationId: "loc-current",
     currentSceneScopeId: "scene-current",
@@ -98,7 +157,9 @@ function createPlayerTurnContext(overrides: Partial<ToolExecutionContext> = {}):
     currentLocationRefs: new Set(["current_location", "loc-current", "shibuya district"]),
     currentSceneRefs: new Set(["current_scene", "scene-current", "kissaten alcove"]),
     legalMovementRefs: new Set(),
-    ...overrides,
+    ...Object.fromEntries(
+      Object.entries(overrides).filter(([key]) => key !== "authority"),
+    ),
   };
 }
 
@@ -169,6 +230,15 @@ function createMockDb(options: {
   return { db, updateRun, insertRun, upsertRun };
 }
 
+function withTransaction<T extends Record<string, unknown>>(db: T): T & { transaction: Mock } {
+  if (typeof db.transaction === "function") {
+    return db as T & { transaction: Mock };
+  }
+  return Object.assign(db, {
+    transaction: vi.fn((operation: (tx?: unknown) => unknown) => operation(db)),
+  });
+}
+
 type MutableInventoryItem = {
   id: string;
   campaignId: string;
@@ -185,6 +255,19 @@ function getDrizzleTableName(table: unknown): string | null {
   return (table as Record<PropertyKey, unknown>)?.[Symbol.for("drizzle:Name")] as string | null;
 }
 
+function sqlConditionUsesColumn(value: unknown, columnName: string, seen = new Set<object>()): boolean {
+  if (!value || typeof value !== "object") return false;
+  if (seen.has(value)) return false;
+  seen.add(value);
+
+  const record = value as { columnType?: unknown; name?: unknown; queryChunks?: unknown[] };
+  if (typeof record.columnType === "string" && record.name === columnName) {
+    return true;
+  }
+  if (!Array.isArray(record.queryChunks)) return false;
+  return record.queryChunks.some((chunk) => sqlConditionUsesColumn(chunk, columnName, seen));
+}
+
 function createMutableInventoryDb(options?: {
   players?: Array<Record<string, unknown>>;
   npcs?: Array<Record<string, unknown>>;
@@ -192,12 +275,18 @@ function createMutableInventoryDb(options?: {
   locationEdges?: Array<Record<string, unknown>>;
   items?: MutableInventoryItem[];
 }) {
+  const campaignScopedRows = <T extends Record<string, unknown>>(rows: T[] = []): T[] =>
+    rows.map((row) => ({
+      campaignId: CAMPAIGN_ID,
+      ...row,
+    }));
+
   const state = {
-    players: options?.players ?? [],
-    npcs: options?.npcs ?? [],
-    locations: options?.locations ?? [],
-    locationEdges: options?.locationEdges ?? [],
-    items: options?.items ?? [],
+    players: campaignScopedRows(options?.players),
+    npcs: campaignScopedRows(options?.npcs),
+    locations: campaignScopedRows(options?.locations),
+    locationEdges: campaignScopedRows(options?.locationEdges),
+    items: campaignScopedRows(options?.items),
     worldClocks: [] as Array<Record<string, unknown>>,
     authorityTraces: [] as Array<Record<string, unknown>>,
     updateTables: [] as string[],
@@ -235,7 +324,9 @@ function createMutableInventoryDb(options?: {
     const params = extractSqlStringParams(condition).map((entry) => entry.toLowerCase());
     if (params.length === 0) return true;
     const campaignId = typeof row.campaignId === "string" ? row.campaignId.toLowerCase() : null;
-    if (campaignId && !params.includes(campaignId)) return false;
+    if (sqlConditionUsesColumn(condition, "campaign_id") && campaignId && !params.includes(campaignId)) {
+      return false;
+    }
     const candidateValues = [
       row.id,
       row.name,
@@ -287,6 +378,21 @@ function createMutableInventoryDb(options?: {
         })),
       };
     }),
+    delete: vi.fn().mockImplementation((table: unknown) => {
+      const tableName = getDrizzleTableName(table);
+      return {
+        where: vi.fn().mockImplementation((condition: unknown) => ({
+          run: vi.fn().mockImplementation(() => {
+            const rows = getRows(tableName);
+            const before = rows.length;
+            const kept = rows.filter((row) => !matchesCondition(row, condition));
+            rows.length = 0;
+            rows.push(...kept);
+            return { changes: before - rows.length };
+          }),
+        })),
+      };
+    }),
     insert: vi.fn().mockImplementation((table: unknown) => {
       const tableName = getDrizzleTableName(table);
       return {
@@ -316,6 +422,8 @@ function extractSqlStringParams(value: unknown, seen = new Set<object>()): strin
   if (!value || typeof value !== "object") return [];
   if (seen.has(value)) return [];
   seen.add(value);
+  const paramValue = (value as { value?: unknown }).value;
+  if (typeof paramValue === "string") return [paramValue];
   const chunks = (value as { queryChunks?: unknown[] }).queryChunks;
   if (!Array.isArray(chunks)) return [];
   return chunks.flatMap((chunk) => extractSqlStringParams(chunk, seen));
@@ -372,7 +480,9 @@ function createStrictResolverDb(options?: {
     const params = extractSqlStringParams(condition).map((entry) => entry.toLowerCase());
     if (params.length === 0) return true;
     const campaignId = typeof row.campaignId === "string" ? row.campaignId.toLowerCase() : null;
-    if (campaignId && !params.includes(campaignId)) return false;
+    if (sqlConditionUsesColumn(condition, "campaign_id") && campaignId && !params.includes(campaignId)) {
+      return false;
+    }
     const id = typeof row.id === "string" ? row.id.toLowerCase() : null;
     const name = typeof row.name === "string" ? row.name.toLowerCase() : null;
     const toolResultId = typeof row.toolResultId === "string" ? row.toolResultId.toLowerCase() : null;
@@ -422,6 +532,21 @@ function createStrictResolverDb(options?: {
         })),
       };
     }),
+    delete: vi.fn().mockImplementation((table: unknown) => {
+      const tableName = getDrizzleTableName(table);
+      return {
+        where: vi.fn().mockImplementation((condition: unknown) => ({
+          run: vi.fn().mockImplementation(() => {
+            const rows = getRows(tableName);
+            const before = rows.length;
+            const kept = rows.filter((row) => !matchesCondition(row, condition));
+            rows.length = 0;
+            rows.push(...kept);
+            return { changes: before - rows.length };
+          }),
+        })),
+      };
+    }),
     insert: vi.fn().mockImplementation((table: unknown) => {
       const tableName = getDrizzleTableName(table);
       return {
@@ -447,6 +572,7 @@ function createStrictResolverDb(options?: {
 describe("executeToolCall", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    (getDb as Mock).mockReset();
   });
 
   it("returns typed contract failure details for invalid terminal refs", async () => {
@@ -525,7 +651,7 @@ describe("executeToolCall", () => {
   });
 
   describe("typed entity refs", () => {
-    it("resolves typed refs after grounding instead of failing in executor lookups", async () => {
+    it("resolves internal typed refs after grounding instead of failing in executor lookups", async () => {
       const { db, state } = createStrictResolverDb({
         players: [{
           id: "player-1",
@@ -561,9 +687,9 @@ describe("executeToolCall", () => {
           isSignature: false,
         }],
       });
-      (getDb as Mock).mockReturnValue(db);
+      (getDb as Mock).mockReturnValue(withTransaction(db));
       const context = createPlayerTurnContext({
-        scope: "actor_turn",
+        scope: "background",
         legalActorRefs: new Set([
           "actor:player-1",
           "player-1",
@@ -638,7 +764,7 @@ describe("executeToolCall", () => {
       const { db, updateRun } = createMockDb({
         entity: { id: "ent-1", name: "Gandalf", tags: '["wizard"]' },
       });
-      (getDb as Mock).mockReturnValue(db);
+      (getDb as Mock).mockReturnValue(withTransaction(db));
 
       const result = await executeToolCall(CAMPAIGN_ID, "add_tag", {
         entityName: "Gandalf",
@@ -659,7 +785,7 @@ describe("executeToolCall", () => {
 
     it("returns error for non-existent entity", async () => {
       const { db } = createMockDb({ entity: null });
-      (getDb as Mock).mockReturnValue(db);
+      (getDb as Mock).mockReturnValue(withTransaction(db));
 
       const result = await executeToolCall(CAMPAIGN_ID, "add_tag", {
         entityName: "Nobody",
@@ -675,7 +801,7 @@ describe("executeToolCall", () => {
       const { db, updateRun } = createMockDb({
         entity: { id: "ent-1", name: "Gandalf", tags: '["wizard"]' },
       });
-      (getDb as Mock).mockReturnValue(db);
+      (getDb as Mock).mockReturnValue(withTransaction(db));
 
       const result = await executeToolCall(CAMPAIGN_ID, "add_tag", {
         entityName: "Gandalf",
@@ -702,7 +828,7 @@ describe("executeToolCall", () => {
       const { db, updateRun } = createMockDb({
         entity: { id: "ent-1", name: "Gandalf", tags: '["wizard", "wise"]' },
       });
-      (getDb as Mock).mockReturnValue(db);
+      (getDb as Mock).mockReturnValue(withTransaction(db));
 
       const result = await executeToolCall(CAMPAIGN_ID, "remove_tag", {
         entityName: "Gandalf",
@@ -725,7 +851,7 @@ describe("executeToolCall", () => {
       const { db } = createMockDb({
         entity: { id: "ent-1", name: "Gandalf", tags: '["wizard"]' },
       });
-      (getDb as Mock).mockReturnValue(db);
+      (getDb as Mock).mockReturnValue(withTransaction(db));
 
       const result = await executeToolCall(CAMPAIGN_ID, "remove_tag", {
         entityName: "Gandalf",
@@ -739,7 +865,7 @@ describe("executeToolCall", () => {
 
     it("returns error for non-existent entity", async () => {
       const { db } = createMockDb({ entity: null });
-      (getDb as Mock).mockReturnValue(db);
+      (getDb as Mock).mockReturnValue(withTransaction(db));
 
       const result = await executeToolCall(CAMPAIGN_ID, "remove_tag", {
         entityName: "Nobody",
@@ -759,7 +885,7 @@ describe("executeToolCall", () => {
       const { db, upsertRun } = createMockDb({
         entity: { id: "ent-1", name: "Gandalf", tags: "[]" },
       });
-      (getDb as Mock).mockReturnValue(db);
+      (getDb as Mock).mockReturnValue(withTransaction(db));
 
       const result = await executeToolCall(CAMPAIGN_ID, "set_relationship", {
         entityA: "Gandalf",
@@ -777,7 +903,7 @@ describe("executeToolCall", () => {
   describe("add_chronicle_entry", () => {
     it("inserts chronicle entry with tick and returns success with entry ID", async () => {
       const { db, insertRun } = createMockDb({ entity: null });
-      (getDb as Mock).mockReturnValue(db);
+      (getDb as Mock).mockReturnValue(withTransaction(db));
 
       const result = await executeToolCall(CAMPAIGN_ID, "add_chronicle_entry", {
         text: "The fellowship was formed",
@@ -793,11 +919,53 @@ describe("executeToolCall", () => {
   // -- log_event --------------------------------------------------------------
 
   describe("log_event", () => {
+    function createPlayerLogEventFrame(): SceneFrame {
+      return {
+        campaignId: CAMPAIGN_ID,
+        tick: TICK,
+        worldVersion: 0,
+        playerActorId: "player-1",
+        currentLocationId: "loc-market",
+        currentSceneScopeId: "loc-market",
+        currentLocationName: "Market District",
+        currentSceneScopeName: "Market District",
+        playerAction: "Note the moment.",
+        roster: {
+          active: [
+            {
+              id: "player-1",
+              actorId: "player-1",
+              type: "player",
+              label: "Hero",
+              locationId: "loc-market",
+              sceneScopeId: "loc-market",
+              awareness: "clear",
+            },
+          ],
+          support: [],
+          background: [],
+        },
+        perception: {
+          playerAwarenessHints: [],
+          actorAwareness: {},
+        },
+        recentEvents: [],
+        targetCandidates: [],
+        movementCandidates: [],
+        deferredHooks: [],
+        allowedTools: ["log_event"],
+        oracle: null,
+      };
+    }
+
     it("defaults to scene_local and does not persist transient direct beats", async () => {
+      const { db } = createMockDb({ entity: null });
+      (getDb as Mock).mockReturnValue(withTransaction(db));
+
       const result = await executeToolCall(CAMPAIGN_ID, "log_event", {
         text: "Hero paid for coffee.",
         importance: 2,
-        participants: ["Hero"],
+        participants: ["Player"],
       }, TICK);
 
       expect(result.success).toBe(true);
@@ -807,12 +975,63 @@ describe("executeToolCall", () => {
       });
       expect(storeEpisodicEvent).not.toHaveBeenCalled();
       expect(accumulateReflectionBudgetMock).not.toHaveBeenCalled();
-      expect(getDb).not.toHaveBeenCalled();
+      expect(getDb).toHaveBeenCalled();
+    });
+
+    it("accepts scene_local player-turn log_event without durable storage", async () => {
+      const { db, state } = createMutableInventoryDb({
+        players: [{ id: "player-1", name: "Hero", currentLocationId: "loc-market" }],
+        locations: [{ id: "loc-market", name: "Market District" }],
+      });
+      (getDb as Mock).mockReturnValue(db);
+      const context = createPlayerTurnToolExecutionContext(createPlayerLogEventFrame());
+
+      const result = await executeToolCall(CAMPAIGN_ID, "log_event", {
+        text: "Hero marks the lantern signal without making it future truth.",
+        importance: 2,
+        participants: ["Player"],
+        durability: "scene_local",
+      }, TICK, undefined, context);
+
+      expect(result.success).toBe(true);
+      expect(result.result).toMatchObject({
+        durability: "scene_local",
+        persisted: false,
+      });
+      expect(result.authority?.stateDeltaRefs).toEqual(["world:event"]);
+      expect(result.authority?.resultWorldVersion).toBe(1);
+      expect(state.authorityTraces).toHaveLength(1);
+      expect(storeEpisodicEvent).not.toHaveBeenCalled();
+    });
+
+    it("rejects durable player-turn log_event before durable storage", async () => {
+      const { db, state } = createMutableInventoryDb({
+        players: [{ id: "player-1", name: "Hero", currentLocationId: "loc-market" }],
+        locations: [{ id: "loc-market", name: "Market District" }],
+      });
+      (getDb as Mock).mockReturnValue(db);
+      const context = createPlayerTurnToolExecutionContext(createPlayerLogEventFrame());
+
+      const result = await executeToolCall(CAMPAIGN_ID, "log_event", {
+        text: "Hero declares a durable permit exists after glancing at the counter.",
+        importance: 8,
+        participants: ["Player"],
+        durability: "durable",
+        futureRelevance: "The claimed permit would matter later.",
+      }, TICK, undefined, context);
+
+      expect(result.success).toBe(false);
+      expect(result.contractFailure).toMatchObject({
+        code: "invalid_durability",
+        path: "input.durability",
+      });
+      expect(state.authorityTraces).toEqual([]);
+      expect(storeEpisodicEvent).not.toHaveBeenCalled();
     });
 
     it("stores event metadata via storeEpisodicEvent and returns success", async () => {
       const { db } = createMockDb({ entity: null });
-      (getDb as Mock).mockReturnValue(db);
+      (getDb as Mock).mockReturnValue(withTransaction(db));
       (storeEpisodicEvent as Mock).mockResolvedValue("event-123");
 
       const result = await executeToolCall(CAMPAIGN_ID, "log_event", {
@@ -842,7 +1061,7 @@ describe("executeToolCall", () => {
 
     it("accumulates reflection budget after committed log_event writes", async () => {
       const { db } = createMockDb({ entity: null });
-      (getDb as Mock).mockReturnValue(db);
+      (getDb as Mock).mockReturnValue(withTransaction(db));
       (storeEpisodicEvent as Mock).mockResolvedValue("event-234");
 
       const result = await executeToolCall(CAMPAIGN_ID, "log_event", {
@@ -906,7 +1125,7 @@ describe("executeToolCall", () => {
         transaction: vi.fn((operation: () => unknown) => operation()),
         select: vi.fn().mockReturnValue({ from: selectFrom }),
       };
-      (getDb as Mock).mockReturnValue(db);
+      (getDb as Mock).mockReturnValue(withTransaction(db));
       (storeEpisodicEvent as Mock).mockResolvedValue("event-rollback");
 
       const result = await executeToolCall(
@@ -934,7 +1153,7 @@ describe("executeToolCall", () => {
           currentLocationId: null,
           currentSceneScopeId: null,
           legalLocationRefs: new Set(),
-          legalActorRefs: new Set(),
+          legalActorRefs: new Set(["greta"]),
           legalItemRefs: new Set(),
           legalFactionRefs: new Set(),
           currentLocationRefs: new Set(),
@@ -964,12 +1183,16 @@ describe("executeToolCall", () => {
     it("retracts durable record_world_fact knowledge if final authority commit rejects the receipt", async () => {
       const insertRun = vi.fn();
       const deleteRun = vi.fn().mockReturnValue({ changes: 1 });
-      const getWorldClock = vi.fn().mockReturnValue({
-        campaignId: CAMPAIGN_ID,
-        worldVersion: 0,
-        worldTimeMinutes: 0,
-        currentTick: TICK,
-        updatedAt: 0,
+      let worldClockReads = 0;
+      const getWorldClock = vi.fn().mockImplementation(() => {
+        worldClockReads += 1;
+        return {
+          campaignId: CAMPAIGN_ID,
+          worldVersion: worldClockReads === 1 ? 0 : 1,
+          worldTimeMinutes: 0,
+          currentTick: TICK,
+          updatedAt: 0,
+        };
       });
       const db = {
         transaction: vi.fn((operation: () => unknown) => operation()),
@@ -985,7 +1208,7 @@ describe("executeToolCall", () => {
           where: vi.fn().mockReturnValue({ run: deleteRun }),
         }),
       };
-      (getDb as Mock).mockReturnValue(db);
+      (getDb as Mock).mockReturnValue(withTransaction(db));
 
       const result = await executeToolCall(
         CAMPAIGN_ID,
@@ -1015,13 +1238,13 @@ describe("executeToolCall", () => {
             baseWorldVersion: 0,
             sourceEntity: { type: "player", id: "player-1" },
             elapsedWorldTimeMinutes: 1,
-            allowedWriteScopes: ["event:unrelated"],
+            allowedWriteScopes: ["world:fact"],
           },
         }),
       );
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain("authority_write_scope_mismatch");
+      expect(result.authority?.failureReason).toContain("Stale world version");
       expect(insertRun).toHaveBeenCalled();
       expect(deleteRun).toHaveBeenCalled();
       expect(retractStoredEpisodicEventMock).not.toHaveBeenCalled();
@@ -1029,38 +1252,28 @@ describe("executeToolCall", () => {
     });
 
     it("attaches the player's concrete current location when runtime state knows it", async () => {
-      const selectCallCount = { n: 0 };
-      const db = {
-        select: vi.fn().mockReturnThis(),
-        from: vi.fn().mockImplementation(() => {
-          selectCallCount.n += 1;
-
-          if (selectCallCount.n === 1) {
-            return {
-              where: vi.fn().mockReturnValue({
-                get: vi.fn().mockReturnValue({
-                  id: "player-1",
-                  campaignId: CAMPAIGN_ID,
-                  name: "Hero",
-                  currentLocationId: "loc-1",
-                }),
-              }),
-            };
-          }
-
-          return {
-            where: vi.fn().mockReturnValue({
-              get: vi.fn().mockReturnValue({
-                id: "loc-1",
-                campaignId: CAMPAIGN_ID,
-                name: "Town Square",
-              }),
-            }),
-          };
-        }),
-        update: vi.fn(),
-        insert: vi.fn(),
-      };
+      const { db, state } = createStrictResolverDb({
+        players: [{
+          id: "player-1",
+          campaignId: CAMPAIGN_ID,
+          name: "Hero",
+          currentLocationId: "loc-1",
+          tags: "[]",
+        }],
+        locations: [{
+          id: "loc-1",
+          campaignId: CAMPAIGN_ID,
+          name: "Town Square",
+          tags: "[]",
+        }],
+      });
+      state.worldClocks.push({
+        campaignId: CAMPAIGN_ID,
+        worldVersion: 0,
+        worldTimeMinutes: TICK,
+        currentTick: TICK,
+        updatedAt: 0,
+      });
       (getDb as Mock).mockReturnValue(db);
       (storeEpisodicEvent as Mock).mockResolvedValue("event-345");
 
@@ -1102,6 +1315,202 @@ describe("executeToolCall", () => {
   // -- offer_quick_actions ----------------------------------------------------
 
   describe("record_dialogue_outcome", () => {
+    it("requires durable dialogue authority to cover event and fact writes", async () => {
+      const { db, state } = createStrictResolverDb({
+        players: [{
+          id: "player-1",
+          campaignId: CAMPAIGN_ID,
+          name: "Player",
+          currentLocationId: "loc-depot",
+          tags: "[]",
+        }],
+        locations: [{
+          id: "loc-depot",
+          campaignId: CAMPAIGN_ID,
+          name: "Night Courier Depot",
+          tags: "[]",
+        }],
+      });
+      state.worldClocks.push({
+        campaignId: CAMPAIGN_ID,
+        worldVersion: 0,
+        worldTimeMinutes: 80,
+        currentTick: TICK,
+        updatedAt: 0,
+      });
+      (getDb as Mock).mockReturnValue(db);
+      (storeEpisodicEvent as Mock).mockResolvedValue("event-dialogue-scope");
+
+      const dialogueInput = {
+        speakerRef: "Lead Warden",
+        addresseeRefs: ["Player"],
+        outcomeKind: "answered",
+        topicKind: "procedure",
+        authorityKind: "role_authority",
+        truthStatus: "speaker_asserted",
+        durability: "durable",
+        futureUseKind: "permission_check",
+        futureRelevance: "The permit office locations control the player's later checkpoint route.",
+        quote: "Permits are issued at Night Courier Depot.",
+        summary: "The warden says permits are issued at Night Courier Depot.",
+        claims: [{
+          claimKind: "office",
+          polarity: "states",
+          subjectText: "Guild licensing office",
+          summary: "Transit permits are issued at Night Courier Depot.",
+        }],
+        sourceRefs: ["Lead Warden", "Player"],
+      };
+
+      const missingEventScope = await executeToolCall(
+        CAMPAIGN_ID,
+        "record_dialogue_outcome",
+        dialogueInput,
+        TICK,
+        undefined,
+        createPlayerTurnContext({
+          legalActorRefs: new Set(["player-1", "player", "lead warden"]),
+          authority: {
+            baseWorldVersion: 0,
+            sourceEntity: { type: "player", id: "player-1" },
+            allowedWriteScopes: ["world:dialogue"],
+            elapsedWorldTimeMinutes: 1,
+          },
+        }),
+      );
+
+      expect(missingEventScope.success).toBe(false);
+      expect(missingEventScope.contractFailure).toMatchObject({
+        code: "missing_write_scope",
+        toolName: "record_dialogue_outcome",
+      });
+      expect(state.authorityTraces).toHaveLength(0);
+
+      state.actorKnowledgeRecords.length = 0;
+      state.worldClocks[0].worldVersion = 0;
+      (storeEpisodicEvent as Mock).mockResolvedValue("event-dialogue-scope-2");
+
+      const missingFactScope = await executeToolCall(
+        CAMPAIGN_ID,
+        "record_dialogue_outcome",
+        dialogueInput,
+        TICK,
+        undefined,
+        createPlayerTurnContext({
+          legalActorRefs: new Set(["player-1", "player", "lead warden"]),
+          authority: {
+            baseWorldVersion: 0,
+            sourceEntity: { type: "player", id: "player-1" },
+            allowedWriteScopes: ["world:dialogue", "world:event"],
+            elapsedWorldTimeMinutes: 1,
+          },
+        }),
+      );
+
+      expect(missingFactScope.success).toBe(false);
+      expect(missingFactScope.contractFailure).toMatchObject({
+        code: "missing_write_scope",
+        toolName: "record_dialogue_outcome",
+      });
+      expect(state.authorityTraces).toHaveLength(0);
+    });
+
+    it("stores display labels instead of same-turn aliases in durable dialogue text", async () => {
+      const { db, state } = createStrictResolverDb({
+        players: [{
+          id: "player-1",
+          campaignId: CAMPAIGN_ID,
+          name: "Player",
+          currentLocationId: "loc-depot",
+          tags: "[]",
+        }],
+        locations: [{
+          id: "loc-depot",
+          campaignId: CAMPAIGN_ID,
+          name: "Night Courier Depot",
+          tags: "[]",
+        }],
+      });
+      state.worldClocks.push({
+        campaignId: CAMPAIGN_ID,
+        worldVersion: 0,
+        worldTimeMinutes: 80,
+        currentTick: TICK,
+        updatedAt: 0,
+      });
+      (getDb as Mock).mockReturnValue(db);
+      (storeEpisodicEvent as Mock).mockResolvedValue("event-dialogue-alias");
+
+      const context = createPlayerTurnContext({
+        legalActorRefs: new Set(["player-1", "player", "new_actor_1"]),
+        currentSceneRefs: new Set(["current_scene", "loc-depot"]),
+        legalLocationRefs: new Set(["current_scene", "current_location", "loc-depot"]),
+        modelRefResolutions: new Map([
+          ["new_actor_1", {
+            ref: "new_actor_1",
+            kind: "actor",
+            backendRef: "npc-junior-notary-vess",
+            label: "Junior Notary Vess",
+          }],
+          ["current_scene", {
+            ref: "current_scene",
+            kind: "scene",
+            backendRef: "loc-depot",
+            label: "Night Courier Depot",
+          }],
+        ]),
+        authority: {
+          baseWorldVersion: 0,
+          sourceEntity: { type: "player", id: "player-1" },
+          allowedWriteScopes: ["world:dialogue", "world:event", "world:fact"],
+          elapsedWorldTimeMinutes: 1,
+        },
+      });
+
+      const result = await executeToolCall(
+        CAMPAIGN_ID,
+        "record_dialogue_outcome",
+        {
+          speakerRef: "new_actor_1",
+          addresseeRefs: ["Player"],
+          outcomeKind: "answered",
+          topicKind: "procedure",
+          authorityKind: "role_authority",
+          truthStatus: "speaker_asserted",
+          durability: "durable",
+          futureUseKind: "evidence",
+          futureRelevance: "The neutral custody mark procedure can be reused later.",
+          quote: "Use the neutral custody mark.",
+          summary: "The junior notary explains the neutral custody mark procedure.",
+          claims: [{
+            claimKind: "requirement",
+            polarity: "allows",
+            subjectText: "neutral custody mark",
+            summary: "A neutral custody mark can be registered without declaring faction allegiance.",
+          }],
+          sourceRefs: ["new_actor_1", "current_scene"],
+        },
+        TICK,
+        undefined,
+        context,
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.result).toMatchObject({
+        text: expect.stringContaining("Speaker: Junior Notary Vess."),
+        speakerRef: "new_actor_1",
+        speakerLabel: "Junior Notary Vess",
+      });
+      expect(JSON.stringify(result.result)).not.toContain("Speaker: new_actor_1");
+      expect(storeEpisodicEvent).toHaveBeenCalledWith(
+        CAMPAIGN_ID,
+        expect.objectContaining({
+          text: expect.stringContaining("Speaker: Junior Notary Vess."),
+          participants: expect.arrayContaining(["Junior Notary Vess", "Night Courier Depot"]),
+        }),
+      );
+    });
+
     it("projects durable dialogue outcomes into player-known actor knowledge", async () => {
       const { db, state } = createStrictResolverDb({
         players: [{
@@ -1181,6 +1590,18 @@ describe("executeToolCall", () => {
         factRef: `knowledge:${knowledge.id}`,
         persisted: true,
       });
+      expect(result.authority?.stateDeltaRefs).toEqual(expect.arrayContaining([
+        "world:dialogue",
+        "world:event",
+        "world:fact",
+      ]));
+      expect(result.authority?.stateDeltaRefs).not.toEqual(expect.arrayContaining([
+        "Lead Warden",
+        "Player",
+        "procedure",
+        "permission_check",
+        "speaker_asserted",
+      ]));
       expect(result.authority?.knowledgeOutputs).toEqual(expect.arrayContaining([
         knowledge.id,
         `knowledge:${knowledge.id}`,
@@ -1189,20 +1610,22 @@ describe("executeToolCall", () => {
   });
 
   describe("offer_quick_actions", () => {
-    it("returns actions passthrough with no DB interaction", async () => {
+    it("rejects action offers without execution authority", async () => {
       const actions = [
-        { label: "Attack", action: "Attack the goblin" },
-        { label: "Flee", action: "Run away" },
-        { label: "Talk", action: "Try to negotiate" },
+        { label: "Attack", action: "Attack the opponent", sourceRefs: ["current_scene"] },
+        { label: "Flee", action: "Run away", sourceRefs: ["current_scene"] },
+        { label: "Talk", action: "Try to negotiate", sourceRefs: ["current_scene"] },
       ];
 
-      const result = await executeToolCall(CAMPAIGN_ID, "offer_quick_actions", {
+      const result = await executeToolCallRaw(CAMPAIGN_ID, "offer_quick_actions", {
         actions,
       }, TICK);
 
-      expect(result.success).toBe(true);
-      expect(result.result).toEqual({ actions });
-      // getDb should NOT have been called
+      expect(result).toMatchObject({
+        success: false,
+        status: "failure",
+        error: expect.stringContaining("requires execution authority"),
+      });
       expect(getDb).not.toHaveBeenCalled();
     });
   });
@@ -1762,45 +2185,24 @@ describe("executeToolCall", () => {
 
   describe("reveal_location", () => {
     it("inserts new location connected bidirectionally to existing one", async () => {
-      const existingLocation = { id: "loc-1", name: "Town Square", tags: "[]" };
-      const updateRun = vi.fn();
-      const insertRun = vi.fn();
-
-      // Need special mock: first select finds existing location, then select reads connectedTo
-      const selectCallCount = { n: 0 };
-      const db = {
-        select: vi.fn().mockReturnThis(),
-        from: vi.fn().mockImplementation(() => {
-          selectCallCount.n++;
-          if (selectCallCount.n <= 2) {
-            // First calls: resolveEntity for the connected location
-            return {
-              where: vi.fn().mockReturnValue({
-                get: vi.fn().mockReturnValue(existingLocation),
-                all: vi.fn().mockReturnValue([existingLocation]),
-              }),
-            };
-          }
-          // Later call: reading existing location's full row for connectedTo update
-          return {
-            where: vi.fn().mockReturnValue({
-              get: vi.fn().mockReturnValue({ ...existingLocation, connectedTo: "[]" }),
-              all: vi.fn().mockReturnValue([{ ...existingLocation, connectedTo: "[]" }]),
-            }),
-          };
-        }),
-        insert: vi.fn().mockReturnValue({
-          values: vi.fn().mockReturnValue({
-            run: insertRun,
-            onConflictDoUpdate: vi.fn().mockReturnValue({ run: vi.fn() }),
-          }),
-        }),
-        update: vi.fn().mockReturnValue({
-          set: vi.fn().mockReturnValue({
-            where: vi.fn().mockReturnValue({ run: updateRun }),
-          }),
-        }),
-      };
+      const { db, state } = createMutableInventoryDb({
+        locations: [{
+          id: "loc-1",
+          campaignId: CAMPAIGN_ID,
+          name: "Town Square",
+          tags: "[]",
+          kind: "macro",
+          persistence: "persistent",
+          connectedTo: "[]",
+        }],
+      });
+      state.worldClocks.push({
+        campaignId: CAMPAIGN_ID,
+        worldVersion: 0,
+        worldTimeMinutes: TICK,
+        currentTick: TICK,
+        updatedAt: 0,
+      });
       (getDb as Mock).mockReturnValue(db);
 
       const result = await executeToolCall(CAMPAIGN_ID, "reveal_location", {
@@ -1815,9 +2217,8 @@ describe("executeToolCall", () => {
         name: "Dark Alley",
         connectedTo: "Town Square",
       });
-      expect(insertRun).toHaveBeenCalled();
-      expect(updateRun).toHaveBeenCalled();
-      expect(db.insert).toHaveBeenCalledTimes(2);
+      expect(state.locations.some((location) => location.name === "Dark Alley")).toBe(true);
+      expect(state.updateTables).toContain("locations");
     });
 
     it("creates a locally anchored ephemeral scene with lifetime metadata and authoritative refs", async () => {
@@ -1838,9 +2239,9 @@ describe("executeToolCall", () => {
       (getDb as Mock).mockReturnValue(db);
 
       const result = await executeToolCall(CAMPAIGN_ID, "reveal_location", {
-        name: "Kissaten Service Counter",
-        description: "A narrow counter under the district cafe where orders and rumors trade hands.",
-        tags: ["service", "local-stage"],
+        name: "Canal Causeway",
+        description: "A rain-slick route below the district cafe where footsteps echo over the water.",
+        tags: ["route", "local-stage"],
         connectedToName: "current_location",
       }, TICK, undefined, createPlayerTurnContext({
         currentSceneScopeId: null,
@@ -1849,7 +2250,7 @@ describe("executeToolCall", () => {
       }));
 
       expect(result.success).toBe(true);
-      const created = state.locations.find((location) => location.name === "Kissaten Service Counter");
+      const created = state.locations.find((location) => location.name === "Canal Causeway");
       expect(created).toMatchObject({
         kind: "ephemeral_scene",
         parentLocationId: "loc-current",
@@ -1860,7 +2261,7 @@ describe("executeToolCall", () => {
       expect(created?.expiresAtTick).toBeGreaterThan(TICK);
       expect(result.result).toMatchObject({
         id: created?.id,
-        name: "Kissaten Service Counter",
+        name: "Canal Causeway",
         kind: "ephemeral_scene",
         parentLocationId: "loc-current",
         anchorLocationId: "loc-current",
@@ -1868,6 +2269,39 @@ describe("executeToolCall", () => {
         expiresAtTick: created?.expiresAtTick,
         connectedTo: "Shibuya District",
       });
+    });
+
+    it("rejects player-turn reveal_location for ordinary minor POIs owned by create_minor_poi", async () => {
+      const { db, state } = createMutableInventoryDb({
+        locations: [
+          {
+            id: "loc-current",
+            name: "Shibuya District",
+            kind: "macro",
+            parentLocationId: null,
+            anchorLocationId: null,
+            persistence: "persistent",
+            tags: "[]",
+            connectedTo: "[]",
+          },
+        ],
+      });
+      (getDb as Mock).mockReturnValue(db);
+
+      const result = await executeToolCall(CAMPAIGN_ID, "reveal_location", {
+        name: "Courier Desk",
+        description: "A small local service counter where courier slips are sorted.",
+        tags: ["courier_desk", "minor-poi", "local"],
+        connectedToName: "current_location",
+      }, TICK, undefined, createPlayerTurnContext({
+        currentSceneScopeId: null,
+        legalLocationRefs: new Set(["current_location", "loc-current"]),
+        currentSceneRefs: new Set(),
+      }));
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Use create_minor_poi");
+      expect(state.locations.map((location) => location.name)).not.toContain("Courier Desk");
     });
 
     it("uses the settled world clock for reveal_location expiry after same-turn time advances", async () => {
@@ -2012,7 +2446,7 @@ describe("executeToolCall", () => {
 
   describe("set_condition", () => {
     it("applies delta to player HP and clamps to 0-5", async () => {
-      const updateRun = vi.fn();
+      const updateRun = vi.fn().mockReturnValue({ changes: 1 });
       const db = {
         select: vi.fn().mockReturnThis(),
         from: vi.fn().mockImplementation(() => ({
@@ -2034,7 +2468,7 @@ describe("executeToolCall", () => {
           values: vi.fn().mockReturnValue({ run: vi.fn() }),
         }),
       };
-      (getDb as Mock).mockReturnValue(db);
+      (getDb as Mock).mockReturnValue(withTransaction(db));
 
       const result = await executeToolCall(CAMPAIGN_ID, "set_condition", {
         targetName: "Hero",
@@ -2052,7 +2486,7 @@ describe("executeToolCall", () => {
     });
 
     it("sets absolute HP value and returns isDowned when HP=0", async () => {
-      const updateRun = vi.fn();
+      const updateRun = vi.fn().mockReturnValue({ changes: 1 });
       const db = {
         select: vi.fn().mockReturnThis(),
         from: vi.fn().mockImplementation(() => ({
@@ -2074,7 +2508,7 @@ describe("executeToolCall", () => {
           values: vi.fn().mockReturnValue({ run: vi.fn() }),
         }),
       };
-      (getDb as Mock).mockReturnValue(db);
+      (getDb as Mock).mockReturnValue(withTransaction(db));
 
       const result = await executeToolCall(CAMPAIGN_ID, "set_condition", {
         targetName: "Hero",
@@ -2105,14 +2539,14 @@ describe("executeToolCall", () => {
         })),
         update: vi.fn().mockReturnValue({
           set: vi.fn().mockReturnValue({
-            where: vi.fn().mockReturnValue({ run: vi.fn() }),
+            where: vi.fn().mockReturnValue({ run: vi.fn().mockReturnValue({ changes: 1 }) }),
           }),
         }),
         insert: vi.fn().mockReturnValue({
           values: vi.fn().mockReturnValue({ run: vi.fn() }),
         }),
       };
-      (getDb as Mock).mockReturnValue(db);
+      (getDb as Mock).mockReturnValue(withTransaction(db));
 
       const result = await executeToolCall(CAMPAIGN_ID, "set_condition", {
         targetName: "Hero",
@@ -2133,40 +2567,21 @@ describe("executeToolCall", () => {
     });
 
     it("returns error when targeting NPC (NPCs have no HP)", async () => {
-      // Mock: players search returns null, npcs search returns the NPC
-      const callCount = { n: 0 };
-      const db = {
-        select: vi.fn().mockReturnThis(),
-        from: vi.fn().mockImplementation(() => {
-          callCount.n++;
-          if (callCount.n === 1) {
-            // players table: not found
-            return {
-              where: vi.fn().mockReturnValue({
-                get: vi.fn().mockReturnValue(undefined),
-              }),
-            };
-          }
-          // npcs table: found
-          return {
-            where: vi.fn().mockReturnValue({
-              get: vi.fn().mockReturnValue({
-                id: "npc-1",
-                name: "Guard",
-                tags: "[]",
-              }),
-            }),
-          };
-        }),
-        update: vi.fn().mockReturnValue({
-          set: vi.fn().mockReturnValue({
-            where: vi.fn().mockReturnValue({ run: vi.fn() }),
-          }),
-        }),
-        insert: vi.fn().mockReturnValue({
-          values: vi.fn().mockReturnValue({ run: vi.fn() }),
-        }),
-      };
+      const { db, state } = createStrictResolverDb({
+        npcs: [{
+          id: "npc-1",
+          campaignId: CAMPAIGN_ID,
+          name: "Guard",
+          tags: "[]",
+        }],
+      });
+      state.worldClocks.push({
+        campaignId: CAMPAIGN_ID,
+        worldVersion: 0,
+        worldTimeMinutes: TICK,
+        currentTick: TICK,
+        updatedAt: 0,
+      });
       (getDb as Mock).mockReturnValue(db);
 
       const result = await executeToolCall(CAMPAIGN_ID, "set_condition", {
@@ -2183,44 +2598,27 @@ describe("executeToolCall", () => {
 
   describe("transfer_item", () => {
     it("transfers item to a character", async () => {
-      const updateRun = vi.fn();
-      const callCount = { n: 0 };
-      const db = {
-        select: vi.fn().mockReturnThis(),
-        from: vi.fn().mockImplementation(() => {
-          callCount.n++;
-          if (callCount.n === 1) {
-            // items table: find the item
-            return {
-              where: vi.fn().mockReturnValue({
-                get: vi.fn().mockReturnValue({
-                  id: "item-1",
-                  name: "Iron Sword",
-                  tags: "[]",
-                }),
-              }),
-            };
-          }
-          // players/npcs table: find the target character
-          return {
-            where: vi.fn().mockReturnValue({
-              get: vi.fn().mockReturnValue({
-                id: "player-1",
-                name: "Hero",
-                tags: "[]",
-              }),
-            }),
-          };
-        }),
-        update: vi.fn().mockReturnValue({
-          set: vi.fn().mockReturnValue({
-            where: vi.fn().mockReturnValue({ run: updateRun }),
-          }),
-        }),
-        insert: vi.fn().mockReturnValue({
-          values: vi.fn().mockReturnValue({ run: vi.fn() }),
-        }),
-      };
+      const { db, state } = createMutableInventoryDb({
+        players: [{ id: "player-1", campaignId: CAMPAIGN_ID, name: "Hero", tags: "[]", hp: 5 }],
+        items: [{
+          id: "item-1",
+          campaignId: CAMPAIGN_ID,
+          name: "Iron Sword",
+          tags: "[]",
+          ownerId: null,
+          locationId: "loc-1",
+          equipState: "carried",
+          equippedSlot: null,
+          isSignature: false,
+        }],
+      });
+      state.worldClocks.push({
+        campaignId: CAMPAIGN_ID,
+        worldVersion: 0,
+        worldTimeMinutes: TICK,
+        currentTick: TICK,
+        updatedAt: 0,
+      });
       (getDb as Mock).mockReturnValue(db);
 
       const result = await executeToolCall(CAMPAIGN_ID, "transfer_item", {
@@ -2234,7 +2632,10 @@ describe("executeToolCall", () => {
         item: "Iron Sword",
         target: "Hero",
       });
-      expect(updateRun).toHaveBeenCalled();
+      expect(state.items[0]).toMatchObject({
+        ownerId: "player-1",
+        locationId: null,
+      });
     });
 
     it("returns error if item not found", async () => {
@@ -2286,7 +2687,7 @@ describe("executeToolCall", () => {
           state.items.filter((item) => item.ownerId === "player-1"),
         ).carried.map((item) => item.name),
       ).toEqual(["Iron Sword"]);
-      expect(state.updateTables).toEqual(["items"]);
+      expect(state.updateTables).toContain("items");
     });
 
     it("treats npc/player/actor targetType aliases as character transfers", async () => {
@@ -2362,7 +2763,7 @@ describe("executeToolCall", () => {
           state.items.filter((item) => item.ownerId === "player-1"),
         ).equipped.map((item) => item.name),
       ).toEqual(["Iron Sword"]);
-      expect(state.updateTables).toEqual(["items"]);
+      expect(state.updateTables).toContain("items");
     });
 
     it("drops an item to a location and clears equipped metadata on the authoritative row", async () => {
@@ -2401,7 +2802,7 @@ describe("executeToolCall", () => {
           state.items.filter((item) => item.ownerId === "player-1"),
         ).items,
       ).toHaveLength(0);
-      expect(state.updateTables).toEqual(["items"]);
+      expect(state.updateTables).toContain("items");
     });
 
     it("splits a bundled item for partial transfer while preserving the holder's remainder", async () => {
@@ -2463,7 +2864,7 @@ describe("executeToolCall", () => {
           state.items.filter((item) => item.ownerId === "player-1"),
         ).carried.map((item) => item.name),
       ).toEqual(["One Ration Slip"]);
-      expect(state.updateTables).toEqual(["items"]);
+      expect(state.updateTables).toContain("items");
     });
 
     it("unequips a same-owner item back to carried state when equip intent is omitted", async () => {
@@ -2501,11 +2902,56 @@ describe("executeToolCall", () => {
           state.items.filter((item) => item.ownerId === "player-1"),
         ).carried.map((item) => item.name),
       ).toEqual(["Iron Sword"]);
-      expect(state.updateTables).toEqual(["items"]);
+      expect(state.updateTables).toContain("items");
     });
   });
 
   describe("move_to", () => {
+    it("rejects player-turn move_to so movement stays owned by move_actor", async () => {
+      const { db } = createMutableInventoryDb({
+        players: [{
+          id: "player-1",
+          campaignId: CAMPAIGN_ID,
+          name: "Hero",
+          race: "Human",
+          gender: "",
+          age: "",
+          appearance: "",
+          hp: 5,
+          tags: "[]",
+          equippedItems: "[]",
+          currentLocationId: "loc-1",
+          currentSceneLocationId: null,
+        }],
+        locations: [
+          {
+            id: "loc-1",
+            campaignId: CAMPAIGN_ID,
+            name: "Town Square",
+            description: "A busy square",
+            tags: "[]",
+            connectedTo: '["loc-2"]',
+          },
+          {
+            id: "loc-2",
+            campaignId: CAMPAIGN_ID,
+            name: "Signal Tower",
+            description: "An old relay station",
+            tags: "[]",
+            connectedTo: '["loc-1"]',
+          },
+        ],
+      });
+      (getDb as Mock).mockReturnValue(db);
+
+      const result = await executeToolCall(CAMPAIGN_ID, "move_to", {
+        targetLocationName: "Signal Tower",
+      }, TICK, undefined, createPlayerTurnContext());
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Use move_actor");
+    });
+
     it("realigns player scene scope to the destination on authoritative movement", async () => {
       const { db, state } = createMutableInventoryDb({
         players: [{

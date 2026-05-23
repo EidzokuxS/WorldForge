@@ -11,6 +11,7 @@ export const RUNTIME_TOOL_STATE_EFFECT_KINDS = [
   "location_revealed",
   "minor_poi_created",
   "chronicle_entry",
+  "actor_lifecycle",
 ] as const;
 
 export type RuntimeToolStateEffectKind =
@@ -25,6 +26,7 @@ export type RuntimeToolRole =
   | "time_effect"
   | "authority_bounds"
   | "legacy_scene_beat"
+  | "authority_handle"
   | "ui_suggestion";
 
 export type RuntimeToolEffectOwnerKind =
@@ -44,8 +46,18 @@ export interface RuntimeToolDescriptor {
   roles: readonly RuntimeToolRole[];
   terminalKind?: "dialogue_outcome" | "world_fact";
   stateEffects?: readonly RuntimeToolEffectDescriptor[];
+  writeScopes?: readonly string[];
   hiddenInPlayerTurn?: boolean;
   suppressInPlayerTurnWhenPresent?: readonly RuntimeToolName[];
+}
+
+export function runtimeToolWriteScopes(
+  toolName: RuntimeToolName | string | null | undefined,
+): readonly string[] {
+  return typeof toolName === "string"
+    && Object.hasOwn(RUNTIME_TOOL_DESCRIPTORS, toolName)
+    ? RUNTIME_TOOL_DESCRIPTORS[toolName as RuntimeToolName].writeScopes ?? []
+    : [];
 }
 
 export const RUNTIME_TOOL_DESCRIPTORS: Record<RuntimeToolName, RuntimeToolDescriptor> = {
@@ -85,57 +97,67 @@ export const RUNTIME_TOOL_DESCRIPTORS: Record<RuntimeToolName, RuntimeToolDescri
     toolName: "record_dialogue_outcome",
     roles: ["terminal_receipt", "state_mutation"],
     terminalKind: "dialogue_outcome",
+    writeScopes: ["world:dialogue", "world:event", "world:fact"],
   },
   record_world_fact: {
     toolName: "record_world_fact",
     roles: ["terminal_receipt", "state_mutation"],
     terminalKind: "world_fact",
+    writeScopes: ["world:fact"],
   },
   add_tag: {
     toolName: "add_tag",
     roles: ["state_mutation"],
     stateEffects: [{ effectKind: "entity_tag", ownerKind: "canonical" }],
+    writeScopes: ["player:*:state", "player:*:tags", "npc:*:state", "location:*:state", "item:*:state", "faction:*:state"],
   },
   remove_tag: {
     toolName: "remove_tag",
     roles: ["state_mutation"],
     stateEffects: [{ effectKind: "entity_tag", ownerKind: "canonical" }],
+    writeScopes: ["player:*:state", "player:*:tags", "npc:*:state", "location:*:state", "item:*:state", "faction:*:state"],
   },
   set_relationship: {
     toolName: "set_relationship",
     roles: ["state_mutation"],
     stateEffects: [{ effectKind: "relationship_change", ownerKind: "canonical" }],
+    writeScopes: ["world:relationship"],
   },
   add_chronicle_entry: {
     toolName: "add_chronicle_entry",
     roles: ["state_mutation"],
     stateEffects: [{ effectKind: "chronicle_entry", ownerKind: "canonical" }],
+    writeScopes: ["world:event"],
     hiddenInPlayerTurn: true,
   },
   log_event: {
     toolName: "log_event",
     roles: ["legacy_scene_beat"],
+    writeScopes: ["world:event"],
   },
   advance_time: {
     toolName: "advance_time",
     roles: ["time_effect"],
+    writeScopes: ["world:time"],
   },
   spawn_npc: {
     toolName: "spawn_npc",
     roles: ["state_mutation"],
     stateEffects: [{ effectKind: "support_actor_created", ownerKind: "legacy" }],
+    writeScopes: ["npc:*", "location:*"],
     hiddenInPlayerTurn: true,
   },
   promote_npc: {
     toolName: "promote_npc",
     roles: ["state_mutation"],
-    stateEffects: [{ effectKind: "support_actor_created", ownerKind: "delegate" }],
-    suppressInPlayerTurnWhenPresent: ["create_scene_extra"],
+    stateEffects: [{ effectKind: "actor_lifecycle", ownerKind: "canonical" }],
+    writeScopes: ["npc:*", "location:*"],
   },
   spawn_item: {
     toolName: "spawn_item",
     roles: ["state_mutation"],
     stateEffects: [{ effectKind: "item_created", ownerKind: "canonical" }],
+    writeScopes: ["item:*"],
   },
   reveal_location: {
     toolName: "reveal_location",
@@ -144,6 +166,7 @@ export const RUNTIME_TOOL_DESCRIPTORS: Record<RuntimeToolName, RuntimeToolDescri
       { effectKind: "location_revealed", ownerKind: "canonical" },
       { effectKind: "movement", ownerKind: "preparatory", preparatoryFor: "movement" },
     ],
+    writeScopes: ["location:*"],
   },
   request_contested_outcome: {
     toolName: "request_contested_outcome",
@@ -153,17 +176,20 @@ export const RUNTIME_TOOL_DESCRIPTORS: Record<RuntimeToolName, RuntimeToolDescri
     toolName: "set_condition",
     roles: ["state_mutation"],
     stateEffects: [{ effectKind: "actor_condition", ownerKind: "canonical" }],
+    writeScopes: ["player:*:state", "player:*:tags", "npc:*:state", "location:*:state", "item:*:state", "faction:*:state"],
   },
   move_to: {
     toolName: "move_to",
     roles: ["state_mutation"],
     stateEffects: [{ effectKind: "movement", ownerKind: "legacy" }],
+    writeScopes: ["player:*:location", "npc:*:location", "npc:*", "location:*"],
     hiddenInPlayerTurn: true,
   },
   move_actor: {
     toolName: "move_actor",
     roles: ["state_mutation"],
     stateEffects: [{ effectKind: "movement", ownerKind: "canonical" }],
+    writeScopes: ["player:*:location", "npc:*:location", "npc:*", "location:*"],
   },
   create_minor_poi: {
     toolName: "create_minor_poi",
@@ -172,27 +198,33 @@ export const RUNTIME_TOOL_DESCRIPTORS: Record<RuntimeToolName, RuntimeToolDescri
       { effectKind: "minor_poi_created", ownerKind: "canonical" },
       { effectKind: "movement", ownerKind: "preparatory", preparatoryFor: "movement" },
     ],
+    writeScopes: ["location:*"],
   },
   create_scene_extra: {
     toolName: "create_scene_extra",
     roles: ["state_mutation"],
     stateEffects: [{ effectKind: "support_actor_created", ownerKind: "canonical" }],
+    writeScopes: ["npc:*", "location:*"],
   },
   start_search: {
     toolName: "start_search",
     roles: ["intent_marker", "side_effect"],
+    writeScopes: ["world:intent"],
   },
   record_player_intent: {
     toolName: "record_player_intent",
     roles: ["intent_marker", "side_effect"],
+    writeScopes: ["world:intent"],
   },
   transfer_item: {
     toolName: "transfer_item",
     roles: ["state_mutation"],
     stateEffects: [{ effectKind: "item_transfer", ownerKind: "canonical" }],
+    writeScopes: ["world:inventory"],
   },
   offer_quick_actions: {
     toolName: "offer_quick_actions",
-    roles: ["ui_suggestion"],
+    roles: ["ui_suggestion", "authority_handle"],
+    writeScopes: ["world:quick_action"],
   },
 };
