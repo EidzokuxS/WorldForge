@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mockGetVectorDb = vi.fn();
 const mockEmbedTexts = vi.fn();
 const mockGetDb = vi.fn();
+const mockGetTurnContext = vi.fn();
 
 vi.mock("../connection.js", () => ({
   getVectorDb: () => mockGetVectorDb(),
@@ -24,6 +25,7 @@ vi.mock("../../lib/index.js", () => ({
     debug: vi.fn(),
     event: vi.fn(),
   }),
+  getTurnContext: () => mockGetTurnContext(),
   withRole: <T,>(_role: string, fn: () => T) => fn(),
 }));
 
@@ -33,7 +35,11 @@ import {
   drainPendingCommittedEvents,
   drainPendingCommittedEventsByIds,
   embedAndUpdateEvent,
+  isDurableEventProjectionAllowed,
   readPendingCommittedEvents,
+  readTurnDurableEventIds,
+  acceptDurableEventsByIds,
+  retractStoredEpisodicEvent,
   retractPendingCommittedEventsForTick,
   searchEpisodicEvents,
   storeEpisodicEvent,
@@ -44,6 +50,8 @@ function createMockDb({
   queryRows = [],
   vectorRows = [],
   vectorSearchThrows = false,
+  tableNamesThrows = false,
+  deleteThrows = false,
   schemaFields = [
     "campaignId",
     "id",
@@ -64,6 +72,8 @@ function createMockDb({
   queryRows?: Record<string, unknown>[];
   vectorRows?: Record<string, unknown>[];
   vectorSearchThrows?: boolean;
+  tableNamesThrows?: boolean;
+  deleteThrows?: boolean;
   schemaFields?: string[];
   schemaThrows?: boolean;
 } = {}) {
@@ -82,7 +92,9 @@ function createMockDb({
 
   const table = {
     add: vi.fn().mockResolvedValue(undefined),
-    delete: vi.fn().mockResolvedValue(undefined),
+    delete: deleteThrows
+      ? vi.fn().mockRejectedValue(new Error("vector delete failed"))
+      : vi.fn().mockResolvedValue(undefined),
     update: vi.fn().mockResolvedValue(undefined),
     query: vi.fn().mockReturnValue(queryBuilder),
     vectorSearch: vi.fn().mockReturnValue(vectorSearchBuilder),
@@ -94,7 +106,9 @@ function createMockDb({
   };
 
   const db = {
-    tableNames: vi.fn().mockResolvedValue(hasTable ? ["episodic_events"] : []),
+    tableNames: tableNamesThrows
+      ? vi.fn().mockRejectedValue(new Error("vector table list failed"))
+      : vi.fn().mockResolvedValue(hasTable ? ["episodic_events"] : []),
     openTable: vi.fn().mockResolvedValue(table),
     createEmptyTable: vi.fn().mockResolvedValue(table),
     dropTable: vi.fn().mockResolvedValue(undefined),
@@ -105,18 +119,52 @@ function createMockDb({
 
 function createMockCampaignDb({
   location,
+  ledgerStatus,
+  selectResults,
+  selectAllRows,
+  selectAllThrows = false,
 }: {
   location?: Record<string, unknown> | null;
+  ledgerStatus?: string | null;
+  selectResults?: Array<Record<string, unknown> | null | undefined>;
+  selectAllRows?: Array<Record<string, unknown>>;
+  selectAllThrows?: boolean;
 } = {}) {
   const insertRun = vi.fn();
-  const insertValues = vi.fn().mockReturnValue({ run: insertRun });
+  const insertOnConflictDoNothing = vi.fn().mockReturnValue({ run: insertRun });
+  const insertOnConflictDoUpdate = vi.fn().mockReturnValue({ run: insertRun });
+  const insertValues = vi.fn().mockReturnValue({
+    run: insertRun,
+    onConflictDoNothing: insertOnConflictDoNothing,
+    onConflictDoUpdate: insertOnConflictDoUpdate,
+  });
   const insert = vi.fn().mockReturnValue({ values: insertValues });
+  const updateRun = vi.fn();
+  const updateWhere = vi.fn().mockReturnValue({ run: updateRun });
+  const updateSet = vi.fn().mockReturnValue({ where: updateWhere });
+  const update = vi.fn().mockReturnValue({ set: updateSet });
   const deleteRun = vi.fn();
   const deleteWhere = vi.fn().mockReturnValue({ run: deleteRun });
   const deleteFn = vi.fn().mockReturnValue({ where: deleteWhere });
 
-  const selectGet = vi.fn().mockReturnValue(location);
-  const where = vi.fn().mockReturnValue({ get: selectGet });
+  const defaultSelectResults = ledgerStatus === undefined
+    ? [location]
+    : [{ status: ledgerStatus }];
+  const queuedSelectResults = selectResults ?? defaultSelectResults;
+  let selectResultIndex = 0;
+  const selectGet = vi.fn().mockImplementation(() => {
+    const result = queuedSelectResults[
+      Math.min(selectResultIndex, Math.max(queuedSelectResults.length - 1, 0))
+    ];
+    selectResultIndex += 1;
+    return result;
+  });
+  const selectAll = selectAllThrows
+    ? vi.fn().mockImplementation(() => {
+        throw new Error("durable event ledger unavailable");
+      })
+    : vi.fn().mockReturnValue(selectAllRows ?? []);
+  const where = vi.fn().mockReturnValue({ get: selectGet, all: selectAll });
   const from = vi.fn().mockReturnValue({ where });
   const select = vi.fn().mockReturnValue({ from });
 
@@ -124,12 +172,18 @@ function createMockCampaignDb({
     db: {
       select,
       insert,
+      update,
       delete: deleteFn,
     },
     insertValues,
+    insertOnConflictDoNothing,
+    insertOnConflictDoUpdate,
     insertRun,
+    updateSet,
+    updateRun,
     deleteRun,
     selectGet,
+    selectAll,
   };
 }
 
@@ -138,6 +192,8 @@ describe("episodic-events", () => {
     mockGetVectorDb.mockReset();
     mockEmbedTexts.mockReset();
     mockGetDb.mockReset();
+    mockGetTurnContext.mockReset();
+    mockGetTurnContext.mockReturnValue(undefined);
     mockGetDb.mockReturnValue(createMockCampaignDb({ location: null }).db);
     clearPendingCommittedEvents("campaign-1");
     clearPendingCommittedEvents("campaign-live");
@@ -216,11 +272,128 @@ describe("episodic-events", () => {
         participants: ["Hero", "Rival"],
         importance: 7,
         type: "combat",
-        visibility: "player_perceivable",
+        visibility: "report_only",
         surfaceRoute: "",
         knowledgeRoute: "",
         hiddenCauseTerms: [],
       });
+    });
+
+    it("records a produced durable-event ledger row inside the owning turn context", async () => {
+      const { db } = createMockDb();
+      const campaignDb = createMockCampaignDb({ location: null });
+      mockGetVectorDb.mockReturnValue(db);
+      mockGetDb.mockReturnValue(campaignDb.db);
+      mockGetTurnContext.mockReturnValue({
+        campaignId: "campaign-1",
+        turnId: "turn-abc",
+        tick: 14,
+        role: "gm",
+      });
+
+      const eventId = await storeEpisodicEvent("campaign-1", {
+        text: "The charter is accepted as binding.",
+        tick: 14,
+        location: "Guildhall",
+        participants: ["Hero", "Clerk"],
+        importance: 8,
+        type: "dialogue",
+      });
+
+      expect(campaignDb.insertValues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventId,
+          campaignId: "campaign-1",
+          turnId: "turn-abc",
+          status: "produced",
+          tick: 14,
+          acceptedAt: null,
+          projectedAt: null,
+          retractedAt: null,
+        }),
+      );
+      expect(campaignDb.insertOnConflictDoNothing).toHaveBeenCalledTimes(1);
+      expect(campaignDb.insertRun).toHaveBeenCalled();
+    });
+
+    it("records detached durable writes as accepted system events instead of leaving them ledgerless", async () => {
+      const { db } = createMockDb();
+      const campaignDb = createMockCampaignDb({ location: null });
+      mockGetVectorDb.mockReturnValue(db);
+      mockGetDb.mockReturnValue(campaignDb.db);
+      mockGetTurnContext.mockReturnValue(undefined);
+
+      const eventId = await storeEpisodicEvent("campaign-1", {
+        text: "The offscreen courier reached the rain gate.",
+        tick: 18,
+        location: "Rain Gate",
+        participants: ["Courier"],
+        importance: 6,
+        type: "event",
+      });
+
+      expect(campaignDb.insertValues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventId,
+          campaignId: "campaign-1",
+          turnId: "system:18",
+          status: "accepted",
+          tick: 18,
+          acceptedAt: expect.any(Number),
+          projectedAt: null,
+          retractedAt: null,
+        }),
+      );
+      expect(campaignDb.insertOnConflictDoNothing).toHaveBeenCalledTimes(1);
+    });
+
+    it("marks accepted durable events by id before async projection", () => {
+      const campaignDb = createMockCampaignDb();
+      mockGetDb.mockReturnValue(campaignDb.db);
+
+      acceptDurableEventsByIds("campaign-1", [
+        "evt-accepted",
+        "evt-accepted",
+        " ",
+      ]);
+
+      expect(campaignDb.updateSet).toHaveBeenCalledTimes(1);
+      expect(campaignDb.updateSet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "accepted",
+          acceptedAt: expect.any(Number),
+          updatedAt: expect.any(Number),
+        }),
+      );
+      expect(campaignDb.updateRun).toHaveBeenCalledTimes(1);
+    });
+
+    it("reads non-retracted durable event ids by turn for rollback cleanup", () => {
+      const campaignDb = createMockCampaignDb({
+        selectAllRows: [
+          { eventId: "evt-produced", status: "produced" },
+          { eventId: "evt-accepted", status: "accepted" },
+          { eventId: "evt-projected", status: "projected" },
+          { eventId: "evt-retracted", status: "retracted" },
+        ],
+      });
+      mockGetDb.mockReturnValue(campaignDb.db);
+
+      expect(readTurnDurableEventIds("campaign-1", "turn-abc")).toEqual([
+        "evt-produced",
+        "evt-accepted",
+        "evt-projected",
+      ]);
+      expect(campaignDb.selectAll).toHaveBeenCalledTimes(1);
+    });
+
+    it("fails closed when rollback cannot read durable event ids", () => {
+      const campaignDb = createMockCampaignDb({ selectAllThrows: true });
+      mockGetDb.mockReturnValue(campaignDb.db);
+
+      expect(() => readTurnDurableEventIds("campaign-1", "turn-abc")).toThrow(
+        "durable event ledger unavailable",
+      );
     });
 
     it("adds later episodic rows without vector when the table already exists", async () => {
@@ -247,7 +420,7 @@ describe("episodic-events", () => {
         participants: ["Hero"],
         importance: 4,
         type: "event",
-        visibility: "player_perceivable",
+        visibility: "report_only",
       });
     });
 
@@ -339,10 +512,50 @@ describe("episodic-events", () => {
           summary: "The tunnel collapse left cursed residue in the crossing.",
           tick: 14,
           importance: 6,
+          visibility: "report_only",
+          surfaceRoute: null,
           archivedAtTick: 15,
           sourceEventId: expect.any(String),
         }),
       );
+    });
+
+    it("keeps explicit player-visible episodic projections when a surface route is present", async () => {
+      const { db: vectorDb, table: vectorTable } = createMockDb();
+      const { db: campaignDb, insertValues } = createMockCampaignDb({
+        location: {
+          id: "public-square",
+          campaignId: "campaign-1",
+          name: "Public Square",
+          kind: "macro",
+          persistence: "persistent",
+          anchorLocationId: null,
+          archivedAtTick: null,
+        },
+      });
+      mockGetVectorDb.mockReturnValue(vectorDb);
+      mockGetDb.mockReturnValue(campaignDb);
+
+      await storeEpisodicEvent("campaign-1", {
+        text: "A public bell announces the gate schedule.",
+        tick: 15,
+        location: "Public Square",
+        participants: ["Bell Keeper"],
+        importance: 5,
+        type: "event",
+        visibility: "player_perceivable",
+        surfaceRoute: "public_notice",
+      });
+
+      expect(insertValues).toHaveBeenCalledWith(expect.objectContaining({
+        visibility: "player_perceivable",
+        surfaceRoute: "public_notice",
+      }));
+      const rows = vectorTable.add.mock.calls[0]?.[0] as Array<Record<string, unknown>>;
+      expect(rows[0]).toMatchObject({
+        visibility: "player_perceivable",
+        surfaceRoute: "public_notice",
+      });
     });
 
     it("propagates explicit visibility routes to location projections and pending same-turn evidence", async () => {
@@ -562,7 +775,17 @@ describe("episodic-events", () => {
         type: "event",
       };
       const { db, table } = createMockDb({ hasTable: true, queryRows: [existing] });
+      const campaignDb = createMockCampaignDb({
+        selectResults: [
+          { status: "accepted" },
+          { status: "accepted" },
+          { status: "accepted" },
+          { status: "accepted" },
+          { campaignId: "campaign-1" },
+        ],
+      });
       mockGetVectorDb.mockReturnValue(db);
+      mockGetDb.mockReturnValue(campaignDb.db);
       mockEmbedTexts.mockResolvedValue([[0.25, 0.75]]);
 
       await embedAndUpdateEvent("evt-1", existing.text, {
@@ -574,6 +797,203 @@ describe("episodic-events", () => {
         where: "id = 'evt-1'",
         values: { vector: [0.25, 0.75] },
       });
+    });
+
+    it("projects only accepted durable events and records the projected ledger status", async () => {
+      const existing = {
+        id: "evt-ledger-accepted",
+        text: "The signed writ becomes part of public memory.",
+        tick: 8,
+        location: "Guildhall",
+        participants: ["Hero", "Archivist"],
+        importance: 8,
+        type: "event",
+      };
+      const { db, table } = createMockDb({ hasTable: true, queryRows: [existing] });
+      const campaignDb = createMockCampaignDb({
+        selectResults: [
+          { status: "accepted" },
+          { status: "accepted" },
+          { status: "accepted" },
+          { status: "accepted" },
+          { campaignId: "campaign-1" },
+        ],
+      });
+      mockGetVectorDb.mockReturnValue(db);
+      mockGetDb.mockReturnValue(campaignDb.db);
+      mockEmbedTexts.mockResolvedValue([[0.4, 0.6]]);
+
+      await embedAndUpdateEvent("evt-ledger-accepted", existing.text, {
+        id: "embedder",
+        model: "test-model",
+      } as never);
+
+      expect(table.update).toHaveBeenCalledWith({
+        where: "id = 'evt-ledger-accepted'",
+        values: { vector: [0.4, 0.6] },
+      });
+      expect(campaignDb.updateSet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "projected",
+          projectedAt: expect.any(Number),
+          updatedAt: expect.any(Number),
+        }),
+      );
+    });
+
+    it("does not update an accepted event if it is retracted while embedding is in flight", async () => {
+      const existing = {
+        id: "evt-retracted-after-embed",
+        text: "The signed writ was rolled back before projection.",
+        tick: 9,
+        location: "Guildhall",
+        participants: ["Hero", "Archivist"],
+        importance: 8,
+        type: "event",
+      };
+      const { db, table } = createMockDb({ hasTable: true, queryRows: [existing] });
+      const campaignDb = createMockCampaignDb({
+        selectResults: [
+          { status: "accepted" },
+          { status: "retracted" },
+        ],
+      });
+      mockGetVectorDb.mockReturnValue(db);
+      mockGetDb.mockReturnValue(campaignDb.db);
+      mockEmbedTexts.mockResolvedValue([[0.4, 0.6]]);
+
+      await embedAndUpdateEvent("evt-retracted-after-embed", existing.text, {
+        id: "embedder",
+        model: "test-model",
+      } as never);
+
+      expect(mockEmbedTexts).toHaveBeenCalledWith([existing.text], {
+        id: "embedder",
+        model: "test-model",
+      });
+      expect(table.update).not.toHaveBeenCalled();
+      expect(campaignDb.updateSet).not.toHaveBeenCalledWith(
+        expect.objectContaining({ status: "projected" }),
+      );
+    });
+
+    it("does not embed an event after retry or undo retracted it", async () => {
+      const existing = {
+        id: "evt-retracted",
+        text: "The old turn was reverted.",
+        tick: 9,
+        location: "Listening Post",
+        participants: ["Aria"],
+        importance: 8,
+        type: "event",
+      };
+      const { db, table } = createMockDb({ hasTable: true, queryRows: [existing] });
+      const campaignDb = createMockCampaignDb();
+      mockGetVectorDb.mockReturnValue(db);
+      mockGetDb.mockReturnValue(campaignDb.db);
+
+      await retractStoredEpisodicEvent({
+        campaignId: "campaign-retracted",
+        eventId: "evt-retracted",
+      });
+      await embedAndUpdateEvent("evt-retracted", existing.text, {
+        id: "embedder",
+        model: "test-model",
+      } as never);
+
+      expect(mockEmbedTexts).not.toHaveBeenCalled();
+      expect(table.update).not.toHaveBeenCalled();
+      expect(campaignDb.insertValues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventId: "evt-retracted",
+          campaignId: "campaign-retracted",
+          status: "retracted",
+          retractedAt: expect.any(Number),
+        }),
+      );
+      expect(campaignDb.insertOnConflictDoUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          set: expect.objectContaining({
+            status: "retracted",
+            retractedAt: expect.any(Number),
+          }),
+        }),
+      );
+    });
+
+    it("exposes a shared projection gate for detached non-vector projections", () => {
+      const campaignDb = createMockCampaignDb({
+        selectResults: [
+          { status: "produced" },
+          { status: "retracted" },
+          { status: "accepted" },
+          { status: "projected" },
+          null,
+        ],
+      });
+      mockGetDb.mockReturnValue(campaignDb.db);
+
+      expect(isDurableEventProjectionAllowed("evt-produced")).toBe(false);
+      expect(isDurableEventProjectionAllowed("evt-db-retracted")).toBe(false);
+      expect(isDurableEventProjectionAllowed("evt-accepted")).toBe(true);
+      expect(isDurableEventProjectionAllowed("evt-projected")).toBe(true);
+      expect(isDurableEventProjectionAllowed("evt-legacy-without-ledger-row")).toBe(false);
+    });
+
+    it("writes a durable retraction tombstone so restored snapshots cannot erase rollback knowledge", async () => {
+      const { db, insertValues, insertOnConflictDoUpdate } = createMockCampaignDb();
+      mockGetDb.mockReturnValue(db);
+      const { db: vectorDb } = createMockDb({ hasTable: false });
+      mockGetVectorDb.mockReturnValue(vectorDb);
+
+      await retractStoredEpisodicEvent({
+        campaignId: "campaign-restored",
+        eventId: "evt-restored-after-snapshot",
+      });
+
+      expect(insertValues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventId: "evt-restored-after-snapshot",
+          campaignId: "campaign-restored",
+          turnId: "rollback:tombstone",
+          status: "retracted",
+          retractedAt: expect.any(Number),
+        }),
+      );
+      expect(insertOnConflictDoUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          target: expect.anything(),
+          set: expect.objectContaining({
+            status: "retracted",
+            retractedAt: expect.any(Number),
+          }),
+        }),
+      );
+    });
+
+    it("still deletes location projections when vector deletion fails", async () => {
+      const campaignDb = createMockCampaignDb();
+      mockGetDb.mockReturnValue(campaignDb.db);
+      const { db, table } = createMockDb({
+        hasTable: true,
+        queryRows: [{ id: "evt-vector-fails" }],
+        deleteThrows: true,
+      });
+      mockGetVectorDb.mockReturnValue(db);
+
+      await expect(retractStoredEpisodicEvent({
+        campaignId: "campaign-restored",
+        eventId: "evt-vector-fails",
+      })).rejects.toThrow("Failed to retract all projections");
+
+      expect(table.delete).toHaveBeenCalledWith("id = 'evt-vector-fails'");
+      expect(campaignDb.deleteRun).toHaveBeenCalledTimes(1);
+      expect(campaignDb.insertValues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventId: "evt-vector-fails",
+          status: "retracted",
+        }),
+      );
     });
 
     it("migrates legacy tables without a vector column before updating embeddings", async () => {
@@ -595,6 +1015,15 @@ describe("episodic-events", () => {
         schemaFields: ["id", "text", "tick", "location", "participants", "importance", "type"],
       });
       mockGetVectorDb.mockReturnValue(db);
+      mockGetDb.mockReturnValue(createMockCampaignDb({
+        selectResults: [
+          { status: "accepted" },
+          { status: "accepted" },
+          { status: "accepted" },
+          { status: "accepted" },
+          { campaignId: "campaign-1" },
+        ],
+      }).db);
       mockEmbedTexts.mockResolvedValue([[0.5, 0.5]]);
 
       await embedAndUpdateEvent("evt-2", "The signal cut out again.", {
@@ -614,7 +1043,7 @@ describe("episodic-events", () => {
           participants: ["Aria", "Greta"],
           importance: 9,
           type: "event",
-          visibility: "player_perceivable",
+          visibility: "report_only",
           surfaceRoute: "",
           knowledgeRoute: "",
           hiddenCauseTerms: [],

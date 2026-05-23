@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
-import Database from "better-sqlite3";
 
 import type { Phase94RouteId } from "../../backend/src/engine/phase-94-trace-assertions.js";
+import { applyCleanStartClonePolicy } from "./clone-policy.js";
 import {
   assertPhase94BaselinePoolValid,
   writeJsonFile,
@@ -72,44 +72,6 @@ function campaignDir(root: string, campaignId: string): string {
   return dir;
 }
 
-function quoteSqlIdentifier(value: string): string {
-  return `"${value.replace(/"/g, '""')}"`;
-}
-
-function rewriteCampaignIdInDatabase(stateDbPath: string, sourceCampaignId: string, targetCampaignId: string): string[] {
-  const db = new Database(stateDbPath);
-  const updatedTables: string[] = [];
-  try {
-    db.pragma("foreign_keys = OFF");
-    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all() as Array<{ name: string }>;
-    const rewrite = db.transaction(() => {
-      if (tables.some((table) => table.name === "campaigns")) {
-        const result = db.prepare("UPDATE campaigns SET id = ?, updated_at = ? WHERE id = ?")
-          .run(targetCampaignId, Date.now(), sourceCampaignId);
-        if (result.changes > 0) updatedTables.push("campaigns");
-      }
-      for (const table of tables) {
-        const tableName = quoteSqlIdentifier(table.name);
-        const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
-        if (!columns.some((column) => column.name === "campaign_id")) continue;
-        const result = db.prepare(`UPDATE ${tableName} SET campaign_id = ? WHERE campaign_id = ?`)
-          .run(targetCampaignId, sourceCampaignId);
-        if (result.changes > 0) updatedTables.push(table.name);
-      }
-    });
-    rewrite();
-    const violations = db.pragma("foreign_key_check") as unknown[];
-    if (violations.length > 0) {
-      throw new Error(`Campaign clone created ${violations.length} foreign-key violation(s).`);
-    }
-    db.pragma("wal_checkpoint(TRUNCATE)");
-    return updatedTables;
-  } finally {
-    db.pragma("foreign_keys = ON");
-    db.close();
-  }
-}
-
 function rewriteCloneFiles(input: {
   targetDir: string;
   sourceCampaignId: string;
@@ -119,15 +81,16 @@ function rewriteCloneFiles(input: {
   const configPath = join(input.targetDir, "config.json");
   if (existsSync(configPath)) {
     const config = JSON.parse(readFileSync(configPath, "utf-8")) as Record<string, unknown>;
-    if (config.id === input.sourceCampaignId) config.id = input.targetCampaignId;
     config.name = `${String(config.name ?? "Phase 94 baseline")} [P94 ${input.routeId}]`;
     config.updatedAt = Date.now();
     writeJsonFile(configPath, config);
   }
-  writeJsonFile(join(input.targetDir, "chat_history.json"), []);
-  rmSync(join(input.targetDir, "checkpoints"), { recursive: true, force: true });
-  rmSync(join(input.targetDir, ".turn-boundaries"), { recursive: true, force: true });
-  rewriteCampaignIdInDatabase(join(input.targetDir, "state.db"), input.sourceCampaignId, input.targetCampaignId);
+  applyCleanStartClonePolicy({
+    targetDir: input.targetDir,
+    sourceCampaignId: input.sourceCampaignId,
+    targetCampaignId: input.targetCampaignId,
+    routeId: input.routeId,
+  });
 }
 
 function baselineForRoute(route: Phase94RouteManifestEntry): BaselineSource {

@@ -11,6 +11,7 @@ const routeState = vi.hoisted(() => {
     chatHistoryLengthAfterTurn: number | null;
   }>();
   const runtimeActiveTurns = new Set<string>();
+  const runtimePendingRollbackIntents = new Map<string, unknown>();
   const chatHistoryByCampaign = new Map<string, Array<{ role: string; content: string }>>();
   const partialMutations: string[] = [];
 
@@ -18,6 +19,7 @@ const routeState = vi.hoisted(() => {
     runtimeSnapshots,
     runtimeSnapshotMetadata,
     runtimeActiveTurns,
+    runtimePendingRollbackIntents,
     chatHistoryByCampaign,
     partialMutations,
     mockTryBeginTurn: vi.fn((campaignId: string) => {
@@ -56,13 +58,28 @@ const routeState = vi.hoisted(() => {
         playerAction: null,
         chatHistoryLengthBeforeTurn: null,
         chatHistoryLengthAfterTurn: null,
-      }),
+    }),
     mockClearLastTurnSnapshot: vi.fn((campaignId: string) => {
       runtimeSnapshots.delete(campaignId);
       runtimeSnapshotMetadata.delete(campaignId);
     }),
+    mockSetPendingRollbackIntent: vi.fn((input: { campaignId: string }) => {
+      runtimePendingRollbackIntents.set(input.campaignId, input);
+    }),
+    mockGetPendingRollbackIntent: vi.fn((campaignId: string) =>
+      runtimePendingRollbackIntents.get(campaignId) ?? null,
+    ),
+    mockClearPendingRollbackIntent: vi.fn((campaignId: string) => {
+      runtimePendingRollbackIntents.delete(campaignId);
+    }),
     mockGetSettledTurnPacket: vi.fn((_input?: unknown) => null),
+    mockHasPreparedSettledTurnPacketRecovery: vi.fn((_input?: unknown) => false),
+    mockFindAbandonedPreSettledTurnSaga: vi.fn((_input?: unknown) => null),
+    mockRecordAbandonedTurnRollback: vi.fn((_input?: unknown) => undefined),
     mockDrainPendingCommittedEventsByIds: vi.fn((_campaignId?: unknown, _eventIds?: unknown) => []),
+    mockReadTurnDurableEventIds: vi.fn(
+      (_campaignId?: unknown, _turnId?: unknown): string[] => [],
+    ),
     mockRetractStoredEpisodicEvent: vi.fn((_input?: unknown) => undefined),
     mockRetractPendingCommittedEventsForTick: vi.fn(
       async (_campaignId?: unknown, _tick?: unknown): Promise<Array<{ id: string; text: string }>> => [],
@@ -74,6 +91,7 @@ const {
   runtimeSnapshots,
   runtimeSnapshotMetadata,
   runtimeActiveTurns,
+  runtimePendingRollbackIntents,
   chatHistoryByCampaign,
   partialMutations,
   mockTryBeginTurn,
@@ -83,7 +101,11 @@ const {
   mockGetLastTurnSnapshotMetadata,
   mockClearLastTurnSnapshot,
   mockGetSettledTurnPacket,
+  mockHasPreparedSettledTurnPacketRecovery,
+  mockFindAbandonedPreSettledTurnSaga,
+  mockRecordAbandonedTurnRollback,
   mockDrainPendingCommittedEventsByIds,
+  mockReadTurnDurableEventIds,
   mockRetractStoredEpisodicEvent,
   mockRetractPendingCommittedEventsForTick,
   mockLogError,
@@ -170,7 +192,13 @@ vi.mock("../../engine/index.js", () => ({
   captureSnapshot: vi.fn(),
   restoreSnapshot: vi.fn(),
   findPendingNarrationSaga: vi.fn(() => null),
+  findAbandonedPreSettledTurnSaga: (input: unknown) =>
+    mockFindAbandonedPreSettledTurnSaga(input),
   getSettledTurnPacket: (input: unknown) => mockGetSettledTurnPacket(input),
+  hasPreparedSettledTurnPacketRecovery: (input: unknown) =>
+    mockHasPreparedSettledTurnPacketRecovery(input),
+  recordAbandonedTurnRollback: (input: unknown) =>
+    mockRecordAbandonedTurnRollback(input),
   tickPresentNpcs: vi.fn(),
   simulateOffscreenNpcs: vi.fn(),
   checkAndTriggerReflections: vi.fn(),
@@ -196,6 +224,9 @@ vi.mock("../../engine/grounded-lookup.js", () => ({
 vi.mock("../../vectors/episodic-events.js", () => ({
   embedAndUpdateEvent: vi.fn(),
   drainPendingCommittedEvents: vi.fn(() => []),
+  isDurableEventProjectionAllowed: vi.fn(() => true),
+  readTurnDurableEventIds: (campaignId: unknown, turnId: unknown) =>
+    mockReadTurnDurableEventIds(campaignId, turnId),
   drainPendingCommittedEventsByIds: (campaignId: unknown, eventIds: unknown) =>
     mockDrainPendingCommittedEventsByIds(campaignId, eventIds),
   retractStoredEpisodicEvent: (input: unknown) => mockRetractStoredEpisodicEvent(input),
@@ -204,6 +235,7 @@ vi.mock("../../vectors/episodic-events.js", () => ({
 }));
 
 vi.mock("../../campaign/runtime-state.js", () => ({
+  assertActiveTurnLease: vi.fn(),
   tryBeginTurn: routeState.mockTryBeginTurn,
   endTurn: routeState.mockEndTurn,
   hasActiveTurn: (campaignId: string) => routeState.runtimeActiveTurns.has(campaignId),
@@ -212,10 +244,14 @@ vi.mock("../../campaign/runtime-state.js", () => ({
   getLastTurnSnapshotMetadata: routeState.mockGetLastTurnSnapshotMetadata,
   clearLastTurnSnapshot: routeState.mockClearLastTurnSnapshot,
   hasLiveTurnSnapshot: (campaignId: string) => routeState.runtimeSnapshots.has(campaignId),
+  setPendingRollbackIntent: routeState.mockSetPendingRollbackIntent,
+  getPendingRollbackIntent: routeState.mockGetPendingRollbackIntent,
+  clearPendingRollbackIntent: routeState.mockClearPendingRollbackIntent,
   clearCampaignRuntimeState: (campaignId: string) => {
     routeState.runtimeActiveTurns.delete(campaignId);
     routeState.runtimeSnapshots.delete(campaignId);
     routeState.runtimeSnapshotMetadata.delete(campaignId);
+    routeState.runtimePendingRollbackIntents.delete(campaignId);
   },
 }));
 
@@ -226,7 +262,6 @@ import {
   processTurn,
   captureSnapshot,
   restoreSnapshot,
-  tickPresentNpcs,
   buildDoneBoundaryData,
 } from "../../engine/index.js";
 import { retractPendingCommittedEventsForTick } from "../../vectors/episodic-events.js";
@@ -243,7 +278,6 @@ const mockedGetDb = vi.mocked(getDb);
 const mockedProcessTurn = vi.mocked(processTurn);
 const mockedCaptureSnapshot = vi.mocked(captureSnapshot);
 const mockedRestoreSnapshot = vi.mocked(restoreSnapshot);
-const mockedTickPresentNpcs = vi.mocked(tickPresentNpcs);
 const mockedBuildDoneBoundaryData = vi.mocked(buildDoneBoundaryData);
 void retractPendingCommittedEventsForTick;
 const mockedGetLastPlayerAction = vi.mocked(getLastPlayerAction);
@@ -304,21 +338,30 @@ beforeEach(() => {
   runtimeSnapshots.clear();
   runtimeSnapshotMetadata.clear();
   runtimeActiveTurns.clear();
+  runtimePendingRollbackIntents.clear();
   chatHistoryByCampaign.clear();
   partialMutations.length = 0;
   setupSettings();
   setupDbMock();
   mockedCaptureSnapshot.mockImplementation(async (campaignId) => ({
     campaignId,
+    snapshotId: `snapshot-${campaignId}`,
     bundleDir: `bundle-${campaignId}`,
     capturedAt: 1,
+    capturedWorldVersion: 0,
+    capturedWorldTimeMinutes: 0,
+    fileHashes: null,
   }));
   mockedProcessTurn.mockImplementation(() =>
     turnStream([{ type: "done", data: { tick: 1 } }]),
   );
   mockRetractPendingCommittedEventsForTick.mockResolvedValue([]);
+  mockReadTurnDurableEventIds.mockReturnValue([]);
   mockDrainPendingCommittedEventsByIds.mockReturnValue([]);
   mockGetSettledTurnPacket.mockReturnValue(null);
+  mockHasPreparedSettledTurnPacketRecovery.mockReturnValue(false);
+  mockFindAbandonedPreSettledTurnSaga.mockReturnValue(null);
+  mockRecordAbandonedTurnRollback.mockReturnValue(undefined);
   mockedAppendChatMessages.mockImplementation((campaignId, messages) => {
     const existing = chatHistoryByCampaign.get(campaignId) ?? [];
     existing.push(...messages);
@@ -350,7 +393,6 @@ describe("ScenePlan chat route cutover", () => {
       }),
     );
     expect(actionOptions).not.toHaveProperty("onBeforeVisibleNarration");
-    expect(mockedTickPresentNpcs).not.toHaveBeenCalled();
   });
 
   it("treats intent and method as compatibility fields instead of product semantics", async () => {
@@ -371,6 +413,11 @@ describe("ScenePlan chat route cutover", () => {
     const actionOptions = mockedProcessTurn.mock.calls[0]?.[0] as any;
     expect(actionOptions).toEqual(
       expect.objectContaining({
+        turnId: expect.any(String),
+        preTurnSnapshot: expect.objectContaining({
+          campaignId: CAMPAIGN_ID,
+          snapshotId: `snapshot-${CAMPAIGN_ID}`,
+        }),
         playerAction: "I ask Iru if she is safe.",
         intent: "I ask Iru if she is safe.",
         method: "",
@@ -528,7 +575,6 @@ describe("ScenePlan chat route cutover", () => {
       }),
     );
     expect(retryOptions).not.toHaveProperty("onBeforeVisibleNarration");
-    expect(mockedTickPresentNpcs).not.toHaveBeenCalled();
   });
 
   it("execution failure after action N restores snapshot, removes partial mutations, and persists no unsafe assistant message", async () => {
@@ -584,7 +630,7 @@ describe("ScenePlan chat route cutover", () => {
     );
   });
 
-  it("drains pending committed events after wrong-location ScenePlan rollback without narrating remote spawn", async () => {
+  it("retracts turn-ledger durable events after wrong-location ScenePlan rollback without narrating remote spawn", async () => {
     const snapshot = {
       campaignId: CAMPAIGN_ID,
       bundleDir: "pre-remote-spawn-boundary",
@@ -594,12 +640,7 @@ describe("ScenePlan chat route cutover", () => {
     mockedRestoreSnapshot.mockImplementation(async () => {
       partialMutations.length = 0;
     });
-    mockRetractPendingCommittedEventsForTick.mockResolvedValueOnce([
-      {
-        id: "queued-before-abort",
-        text: "durable event queued before abort",
-      },
-    ]);
+    mockReadTurnDurableEventIds.mockReturnValueOnce(["queued-before-abort"]);
     mockedProcessTurn.mockImplementation(() =>
       (async function* () {
         partialMutations.push("attempted Outpost Cook spawn at Forest Outpost");
@@ -626,12 +667,117 @@ describe("ScenePlan chat route cutover", () => {
     expect(body).not.toContain("event: done");
     expect(body).not.toContain("Forest Outpost");
     expect(mockedRestoreSnapshot).toHaveBeenCalledWith(CAMPAIGN_ID, snapshot);
-    expect(mockRetractPendingCommittedEventsForTick).toHaveBeenCalledWith(CAMPAIGN_ID, 0);
+    expect(mockReadTurnDurableEventIds).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      expect.any(String),
+    );
+    expect(mockRetractStoredEpisodicEvent).toHaveBeenCalledWith({
+      campaignId: CAMPAIGN_ID,
+      eventId: "queued-before-abort",
+    });
+    expect(mockRetractPendingCommittedEventsForTick).not.toHaveBeenCalled();
     expect(partialMutations).toEqual([]);
     expect(mockedAppendChatMessages).not.toHaveBeenCalledWith(
       CAMPAIGN_ID,
       expect.arrayContaining([expect.objectContaining({ role: "assistant" })]),
     );
+  });
+
+  it("does not restore the snapshot when rollback cannot read the durable-event ledger", async () => {
+    const snapshot = {
+      campaignId: CAMPAIGN_ID,
+      bundleDir: "pre-ledger-failure-boundary",
+      capturedAt: 1,
+    };
+    mockedCaptureSnapshot.mockResolvedValue(snapshot as any);
+    mockReadTurnDurableEventIds.mockImplementationOnce(() => {
+      throw new Error("durable event ledger unavailable");
+    });
+    mockedProcessTurn.mockImplementation(() =>
+      (async function* () {
+        throw new Error("ScenePlan failed before rollback ledger read");
+      })(),
+    );
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Trigger a failed turn.",
+        intent: "Trigger a failed turn.",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+
+    expect(body).toContain("event: error");
+    expect(body).toContain("Rollback recovery is still pending");
+    expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
+    expect(runtimePendingRollbackIntents.get(CAMPAIGN_ID)).toEqual(
+      expect.objectContaining({
+        campaignId: CAMPAIGN_ID,
+        route: "/action",
+        turnId: expect.any(String),
+        eventIds: [],
+        snapshot,
+      }),
+    );
+  });
+
+  it("attempts every durable-event retraction before reporting rollback failure", async () => {
+    const snapshot = {
+      campaignId: CAMPAIGN_ID,
+      bundleDir: "pre-multi-retraction-boundary",
+      capturedAt: 1,
+    };
+    const retractedEventIds: string[] = [];
+    mockedCaptureSnapshot.mockResolvedValue(snapshot as any);
+    mockedRestoreSnapshot.mockImplementation(async () => {
+      partialMutations.length = 0;
+    });
+    mockReadTurnDurableEventIds.mockReturnValueOnce(["evt-a", "evt-b"]);
+    mockRetractStoredEpisodicEvent.mockImplementation((input: unknown) => {
+      const eventId = (input as { eventId: string }).eventId;
+      retractedEventIds.push(eventId);
+      if (eventId === "evt-a") {
+        throw new Error("vector delete failed");
+      }
+      return undefined;
+    });
+    mockedProcessTurn.mockImplementation(() =>
+      (async function* () {
+        partialMutations.push("partial state before rollback");
+        throw new Error("ScenePlan failed after partial mutation");
+      })(),
+    );
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Trigger partial rollback.",
+        intent: "Trigger partial rollback.",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+
+    expect(body).toContain("event: error");
+    expect(mockedRestoreSnapshot).toHaveBeenCalledWith(CAMPAIGN_ID, snapshot);
+    expect(retractedEventIds).toEqual(["evt-a", "evt-b"]);
+    expect(runtimePendingRollbackIntents.get(CAMPAIGN_ID)).toEqual(
+      expect.objectContaining({
+        eventIds: ["evt-a", "evt-b"],
+        turnId: expect.any(String),
+      }),
+    );
+    expect(partialMutations).toEqual([]);
   });
 
   it("stores the undo snapshot before emitting done boundary metadata", async () => {

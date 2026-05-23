@@ -90,7 +90,14 @@ vi.mock("../../db/index.js", () => ({
 }));
 
 const mockGetSettledTurnPacket = vi.fn((_input?: unknown) => null);
+const mockHasPreparedSettledTurnPacketRecovery = vi.fn((_input?: unknown) => false);
 const mockGetTurnSaga = vi.fn((_input?: unknown) => null);
+const mockFindAbandonedPreSettledTurnSaga = vi.fn(
+  (_input?: unknown): TurnSagaRecord | null => null,
+);
+const mockRecordAbandonedTurnRollback = vi.fn(
+  (_input?: unknown): unknown => undefined,
+);
 
 vi.mock("../../engine/index.js", () => ({
   processTurn: vi.fn(),
@@ -99,8 +106,14 @@ vi.mock("../../engine/index.js", () => ({
   captureSnapshot: vi.fn(),
   restoreSnapshot: vi.fn(),
   findPendingNarrationSaga: vi.fn(() => null),
+  findAbandonedPreSettledTurnSaga: (input: unknown) =>
+    mockFindAbandonedPreSettledTurnSaga(input),
   getSettledTurnPacket: (input: unknown) => mockGetSettledTurnPacket(input),
+  hasPreparedSettledTurnPacketRecovery: (input: unknown) =>
+    mockHasPreparedSettledTurnPacketRecovery(input),
   getTurnSaga: (input: unknown) => mockGetTurnSaga(input),
+  recordAbandonedTurnRollback: (input: unknown) =>
+    mockRecordAbandonedTurnRollback(input),
   PendingNarrationError: class PendingNarrationError extends Error {
     constructor(public readonly pendingSaga: unknown) {
       super("Pending narration.");
@@ -130,6 +143,9 @@ vi.mock("../../engine/grounded-lookup.js", () => ({
 const mockEmbedAndUpdateEvent = vi.fn();
 const mockDrainPendingCommittedEvents = vi.fn((..._args: unknown[]) => []);
 const mockDrainPendingCommittedEventsByIds = vi.fn((..._args: unknown[]) => []);
+const mockReadTurnDurableEventIds = vi.fn(
+  (..._args: unknown[]): string[] => [],
+);
 const mockRetractStoredEpisodicEvent = vi.fn();
 const mockRetractPendingCommittedEventsForTick = vi.fn();
 vi.mock("../../vectors/episodic-events.js", () => ({
@@ -137,6 +153,8 @@ vi.mock("../../vectors/episodic-events.js", () => ({
   drainPendingCommittedEvents: (...args: unknown[]) => mockDrainPendingCommittedEvents(...args),
   drainPendingCommittedEventsByIds: (...args: unknown[]) =>
     mockDrainPendingCommittedEventsByIds(...args),
+  isDurableEventProjectionAllowed: vi.fn(() => true),
+  readTurnDurableEventIds: (...args: unknown[]) => mockReadTurnDurableEventIds(...args),
   retractStoredEpisodicEvent: (...args: unknown[]) => mockRetractStoredEpisodicEvent(...args),
   retractPendingCommittedEventsForTick: (...args: unknown[]) =>
     mockRetractPendingCommittedEventsForTick(...args),
@@ -146,10 +164,15 @@ const runtimeSnapshots = new Map<string, unknown>();
 const runtimeSnapshotMetadata = new Map<string, {
   acceptedDurableEventIds: string[];
   producedDurableEventIds: string[];
+  playerAction: string | null;
+  chatHistoryLengthBeforeTurn: number | null;
+  chatHistoryLengthAfterTurn: number | null;
 }>();
 const runtimeActiveTurns = new Set<string>();
+const runtimePendingRollbackIntents = new Map<string, unknown>();
 
 vi.mock("../../campaign/runtime-state.js", () => ({
+  assertActiveTurnLease: vi.fn(),
   tryBeginTurn: (campaignId: string) => {
     if (runtimeActiveTurns.has(campaignId)) {
       return false;
@@ -167,12 +190,18 @@ vi.mock("../../campaign/runtime-state.js", () => ({
     metadata?: {
       acceptedDurableEventIds?: readonly string[];
       producedDurableEventIds?: readonly string[];
+      playerAction?: string | null;
+      chatHistoryLengthBeforeTurn?: number | null;
+      chatHistoryLengthAfterTurn?: number | null;
     },
   ) => {
     runtimeSnapshots.set(campaignId, snapshot);
     runtimeSnapshotMetadata.set(campaignId, {
       acceptedDurableEventIds: [...new Set(metadata?.acceptedDurableEventIds ?? [])],
       producedDurableEventIds: [...new Set(metadata?.producedDurableEventIds ?? [])],
+      playerAction: metadata?.playerAction ?? null,
+      chatHistoryLengthBeforeTurn: metadata?.chatHistoryLengthBeforeTurn ?? null,
+      chatHistoryLengthAfterTurn: metadata?.chatHistoryLengthAfterTurn ?? null,
     });
   },
   getLastTurnSnapshot: (campaignId: string) => runtimeSnapshots.get(campaignId),
@@ -180,16 +209,31 @@ vi.mock("../../campaign/runtime-state.js", () => ({
     runtimeSnapshotMetadata.get(campaignId) ?? {
       acceptedDurableEventIds: [],
       producedDurableEventIds: [],
+      playerAction: null,
+      chatHistoryLengthBeforeTurn: null,
+      chatHistoryLengthAfterTurn: null,
     },
   clearLastTurnSnapshot: (campaignId: string) => {
     runtimeSnapshots.delete(campaignId);
     runtimeSnapshotMetadata.delete(campaignId);
   },
   hasLiveTurnSnapshot: (campaignId: string) => runtimeSnapshots.has(campaignId),
+  setPendingRollbackIntent: (input: { campaignId: string }) => {
+    runtimePendingRollbackIntents.set(input.campaignId, input);
+  },
+  getPendingRollbackIntent: (campaignId: string) => {
+    const pending = runtimePendingRollbackIntents.get(campaignId);
+    if (pending instanceof Error) throw pending;
+    return pending ?? null;
+  },
+  clearPendingRollbackIntent: (campaignId: string) => {
+    runtimePendingRollbackIntents.delete(campaignId);
+  },
   clearCampaignRuntimeState: (campaignId: string) => {
     runtimeActiveTurns.delete(campaignId);
     runtimeSnapshots.delete(campaignId);
     runtimeSnapshotMetadata.delete(campaignId);
+    runtimePendingRollbackIntents.delete(campaignId);
   },
 }));
 
@@ -217,6 +261,7 @@ import {
   findPendingNarrationSaga,
   PendingNarrationError,
     processTurn,
+    processOpeningScene,
     resumePendingTurnNarration,
     restoreSnapshot,
     type TurnSagaRecord,
@@ -263,6 +308,7 @@ const mockedLoadCampaign = vi.mocked(loadCampaign);
 const mockedLoadSettings = vi.mocked(loadSettings);
 const mockedResolveRole = vi.mocked(resolveRoleModel);
 const mockedProcessTurn = vi.mocked(processTurn);
+const mockedProcessOpeningScene = vi.mocked(processOpeningScene);
 const mockedResumePendingTurnNarration = vi.mocked(resumePendingTurnNarration);
 const mockedCaptureSnapshot = vi.mocked(captureSnapshot);
 const mockedRestoreSnapshot = vi.mocked(restoreSnapshot);
@@ -346,9 +392,14 @@ beforeEach(() => {
   runtimeSnapshots.clear();
   runtimeSnapshotMetadata.clear();
   runtimeActiveTurns.clear();
+  runtimePendingRollbackIntents.clear();
   mockDrainPendingCommittedEvents.mockReturnValue([]);
   mockDrainPendingCommittedEventsByIds.mockReturnValue([]);
+  mockReadTurnDurableEventIds.mockReturnValue([]);
   mockGetSettledTurnPacket.mockReturnValue(null);
+  mockHasPreparedSettledTurnPacketRecovery.mockReturnValue(false);
+  mockFindAbandonedPreSettledTurnSaga.mockReturnValue(null);
+  mockRecordAbandonedTurnRollback.mockReturnValue(undefined);
   mockedFindPendingNarrationSaga.mockReturnValue(null);
   mockGetTurnSaga.mockReturnValue(null);
   mockedCaptureSnapshot.mockReturnValue({
@@ -368,17 +419,597 @@ beforeEach(() => {
 });
 
 describe("Phase 89 chat route resilience", () => {
+  it("recovers a persisted pending rollback intent before starting new work", async () => {
+    const snapshot = {
+      campaignId: CAMPAIGN_ID,
+      snapshotId: "snapshot-pending-rollback",
+      bundleDir: "snapshots/snapshot-pending-rollback",
+      capturedAt: 77,
+      capturedWorldVersion: 12,
+      capturedWorldTimeMinutes: 240,
+    };
+    const orderedCalls: string[] = [];
+    runtimePendingRollbackIntents.set(CAMPAIGN_ID, {
+      version: 1,
+      campaignId: CAMPAIGN_ID,
+      route: "/action",
+      snapshot,
+      turnId: "turn-pending-rollback",
+      eventIds: [],
+      createdAt: 1,
+    });
+    mockReadTurnDurableEventIds.mockImplementation(() => {
+      orderedCalls.push("readTurnDurableEventIds");
+      return ["evt-pending-rollback"];
+    });
+    mockedRestoreSnapshot.mockImplementation(() => {
+      orderedCalls.push("restoreSnapshot");
+      return undefined as never;
+    });
+    mockRetractStoredEpisodicEvent.mockImplementation(() => {
+      orderedCalls.push("retractStoredEpisodicEvent");
+      return undefined;
+    });
+    mockedProcessTurn.mockImplementation(() => {
+      orderedCalls.push("processTurn");
+      return createTurnStream([{ type: "done", data: { tick: 9 } }]) as never;
+    });
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Continue after rollback crash",
+        intent: "Continue after rollback crash",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(mockReadTurnDurableEventIds).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      "turn-pending-rollback",
+    );
+    expect(mockedRestoreSnapshot).toHaveBeenCalledWith(CAMPAIGN_ID, snapshot);
+    expect(mockRetractStoredEpisodicEvent).toHaveBeenCalledWith({
+      campaignId: CAMPAIGN_ID,
+      eventId: "evt-pending-rollback",
+    });
+    expect(runtimePendingRollbackIntents.has(CAMPAIGN_ID)).toBe(false);
+    expect(orderedCalls).toEqual([
+      "readTurnDurableEventIds",
+      "restoreSnapshot",
+      "retractStoredEpisodicEvent",
+      "processTurn",
+    ]);
+    expect(runtimeActiveTurns.has(CAMPAIGN_ID)).toBe(false);
+  });
+
+  it("blocks route work when persisted rollback intent is malformed", async () => {
+    runtimePendingRollbackIntents.set(
+      CAMPAIGN_ID,
+      new Error("Pending rollback intent for campaign phase-89-chat-resilience is malformed."),
+    );
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Try to continue through malformed rollback.",
+        intent: "Try to continue through malformed rollback.",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe("Action request failed.");
+    expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
+    expect(mockRetractStoredEpisodicEvent).not.toHaveBeenCalled();
+    expect(mockedProcessTurn).not.toHaveBeenCalled();
+    expect(runtimePendingRollbackIntents.has(CAMPAIGN_ID)).toBe(true);
+    expect(runtimeActiveTurns.has(CAMPAIGN_ID)).toBe(false);
+  });
+
+  it("recovers a persisted pending rollback intent before explicit resume work", async () => {
+    const snapshot = {
+      campaignId: CAMPAIGN_ID,
+      snapshotId: "snapshot-before-resume-rollback",
+      bundleDir: "snapshots/snapshot-before-resume-rollback",
+      capturedAt: 88,
+      capturedWorldVersion: 14,
+      capturedWorldTimeMinutes: 260,
+    };
+    const pendingSaga = mockPendingSaga({
+      id: "saga-resume-after-rollback",
+      turnId: "turn-resume-after-rollback",
+      actionText: "Finish the recovered narration.",
+    });
+    const orderedCalls: string[] = [];
+    runtimePendingRollbackIntents.set(CAMPAIGN_ID, {
+      version: 1,
+      campaignId: CAMPAIGN_ID,
+      route: "/action",
+      snapshot,
+      turnId: "turn-crashed-before-retraction",
+      eventIds: [],
+      createdAt: 1,
+    });
+    mockReadTurnDurableEventIds.mockImplementation(() => {
+      orderedCalls.push("readTurnDurableEventIds");
+      return ["evt-resume-rollback"];
+    });
+    mockedRestoreSnapshot.mockImplementation(() => {
+      orderedCalls.push("restoreSnapshot");
+      return undefined as never;
+    });
+    mockRetractStoredEpisodicEvent.mockImplementation(() => {
+      orderedCalls.push("retractStoredEpisodicEvent");
+      return undefined;
+    });
+    mockedFindPendingNarrationSaga.mockReturnValue(pendingSaga as never);
+    mockGetTurnSaga.mockReturnValue(pendingSaga as never);
+    mockedResumePendingTurnNarration.mockImplementation(() => {
+      orderedCalls.push("resumePendingTurnNarration");
+      return createTurnStream([
+        { type: "narrative", data: { text: "Recovered narration resumes." } },
+        { type: "done", data: { tick: 9, resumed: true } },
+      ]) as never;
+    });
+
+    const res = await app.request("/chat/resume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        resumeToken: "resume_phase89deadbeef",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("Recovered narration resumes.");
+    expect(mockReadTurnDurableEventIds).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      "turn-crashed-before-retraction",
+    );
+    expect(mockedRestoreSnapshot).toHaveBeenCalledWith(CAMPAIGN_ID, snapshot);
+    expect(mockRetractStoredEpisodicEvent).toHaveBeenCalledWith({
+      campaignId: CAMPAIGN_ID,
+      eventId: "evt-resume-rollback",
+    });
+    expect(runtimePendingRollbackIntents.has(CAMPAIGN_ID)).toBe(false);
+    expect(orderedCalls).toEqual([
+      "readTurnDurableEventIds",
+      "restoreSnapshot",
+      "retractStoredEpisodicEvent",
+      "resumePendingTurnNarration",
+    ]);
+    expect(runtimeActiveTurns.has(CAMPAIGN_ID)).toBe(false);
+  });
+
+  it("blocks explicit resume work when persisted rollback intent is malformed", async () => {
+    runtimePendingRollbackIntents.set(
+      CAMPAIGN_ID,
+      new Error("Pending rollback intent for campaign phase-89-chat-resilience is malformed."),
+    );
+
+    const res = await app.request("/chat/resume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        resumeToken: "resume_phase89deadbeef",
+      }),
+    });
+
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe("Resume request failed.");
+    expect(mockedFindPendingNarrationSaga).not.toHaveBeenCalled();
+    expect(mockedResumePendingTurnNarration).not.toHaveBeenCalled();
+    expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
+    expect(mockRetractStoredEpisodicEvent).not.toHaveBeenCalled();
+    expect(runtimePendingRollbackIntents.has(CAMPAIGN_ID)).toBe(true);
+    expect(runtimeActiveTurns.has(CAMPAIGN_ID)).toBe(false);
+  });
+
+  it("rolls back an abandoned pre-settled turn before starting a new action", async () => {
+    const preTurnSnapshot = {
+      snapshotId: "snapshot-before-abandoned",
+      bundleDir: "snapshots/snapshot-before-abandoned",
+      capturedAt: 321,
+      capturedWorldVersion: 11,
+      capturedWorldTimeMinutes: 120,
+      fileHashes: {
+        stateDb: "state-hash",
+        config: "config-hash",
+        chatHistory: "chat-hash",
+        vectors: "vector-hash",
+      },
+    };
+    const abandonedSaga = mockPendingSaga({
+      id: "saga-abandoned-tool-loop",
+      turnId: "turn-abandoned-tool-loop",
+      status: "tool_loop_running",
+      actionText: "Open the sealed docket.",
+      provenance: { preTurnSnapshot },
+    });
+    const orderedCalls: string[] = [];
+    mockFindAbandonedPreSettledTurnSaga.mockReturnValue(abandonedSaga);
+    mockReadTurnDurableEventIds.mockReturnValue(["evt-abandoned"]);
+    mockedRestoreSnapshot.mockImplementation(() => {
+      orderedCalls.push("restoreSnapshot");
+      return undefined as never;
+    });
+    mockRetractStoredEpisodicEvent.mockImplementation(() => {
+      orderedCalls.push("retractStoredEpisodicEvent");
+      return undefined;
+    });
+    mockRecordAbandonedTurnRollback.mockImplementation(() => {
+      orderedCalls.push("recordAbandonedTurnRollback");
+      return undefined;
+    });
+    mockedProcessTurn.mockImplementation(() => {
+      orderedCalls.push("processTurn");
+      return createTurnStream([{ type: "done", data: { tick: 9 } }]) as never;
+    });
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Continue after restart",
+        intent: "Continue after restart",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(mockReadTurnDurableEventIds).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      "turn-abandoned-tool-loop",
+    );
+    expect(mockedRestoreSnapshot).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      expect.objectContaining({
+        campaignId: CAMPAIGN_ID,
+        snapshotId: "snapshot-before-abandoned",
+        fileHashes: expect.objectContaining({ vectors: "vector-hash" }),
+      }),
+    );
+    expect(mockRetractStoredEpisodicEvent).toHaveBeenCalledWith({
+      campaignId: CAMPAIGN_ID,
+      eventId: "evt-abandoned",
+    });
+    expect(mockRecordAbandonedTurnRollback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        saga: abandonedSaga,
+        reason: expect.stringContaining("rolled back"),
+      }),
+    );
+    expect(orderedCalls).toEqual([
+      "restoreSnapshot",
+      "retractStoredEpisodicEvent",
+      "recordAbandonedTurnRollback",
+      "processTurn",
+    ]);
+    expect(runtimeActiveTurns.has(CAMPAIGN_ID)).toBe(false);
+  });
+
+  it("blocks a prepared world consequence saga for resume instead of rolling it back", async () => {
+    const pendingSaga = mockPendingSaga({
+      id: "saga-prepared-world-consequence",
+      turnId: "turn-prepared-world-consequence",
+      status: "world_consequence_running",
+      settledTurnPacketId: null,
+    });
+    mockFindAbandonedPreSettledTurnSaga.mockReturnValue(pendingSaga);
+    mockedFindPendingNarrationSaga.mockReturnValue(pendingSaga as never);
+    mockGetSettledTurnPacket.mockReturnValue(null);
+    mockHasPreparedSettledTurnPacketRecovery.mockReturnValue(true);
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Start another turn",
+        intent: "Start another turn",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body).toEqual(
+      expect.objectContaining({
+        pendingNarration: true,
+        resumable: true,
+        status: "world_consequence_running",
+      }),
+    );
+    expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
+    expect(mockRetractStoredEpisodicEvent).not.toHaveBeenCalled();
+    expect(mockedProcessTurn).not.toHaveBeenCalled();
+    expect(runtimeActiveTurns.has(CAMPAIGN_ID)).toBe(false);
+  });
+
+  it("tombstones an abandoned opening saga without requiring a pre-turn snapshot", async () => {
+    const openingSaga = mockPendingSaga({
+      id: "saga-opening-before-packet",
+      turnId: "opening:0:before-packet",
+      status: "world_consequence_running",
+      actionText: "[opening scene]",
+      sourceAction: { kind: "opening_scene", currentTick: 0 },
+      provenance: {
+        source: "opening_scene",
+        authority: "settled_packet",
+        recoveryAuthority: "no_mutation_before_settled_packet",
+      },
+    });
+    const orderedCalls: string[] = [];
+    mockFindAbandonedPreSettledTurnSaga.mockReturnValue(openingSaga);
+    mockReadTurnDurableEventIds.mockReturnValue(["evt-opening-stale"]);
+    mockRetractStoredEpisodicEvent.mockImplementation(() => {
+      orderedCalls.push("retractStoredEpisodicEvent");
+      return undefined;
+    });
+    mockRecordAbandonedTurnRollback.mockImplementation(() => {
+      orderedCalls.push("recordAbandonedTurnRollback");
+      return undefined;
+    });
+    mockedProcessTurn.mockImplementation(() => {
+      orderedCalls.push("processTurn");
+      return createTurnStream([{ type: "done", data: { tick: 1 } }]) as never;
+    });
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Begin after opening restart",
+        intent: "Begin after opening restart",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
+    expect(mockRetractStoredEpisodicEvent).toHaveBeenCalledWith({
+      campaignId: CAMPAIGN_ID,
+      eventId: "evt-opening-stale",
+    });
+    expect(mockRecordAbandonedTurnRollback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        saga: openingSaga,
+        reason: expect.stringContaining("opening scene"),
+      }),
+    );
+    expect(orderedCalls).toEqual([
+      "retractStoredEpisodicEvent",
+      "recordAbandonedTurnRollback",
+      "processTurn",
+    ]);
+    expect(runtimeActiveTurns.has(CAMPAIGN_ID)).toBe(false);
+  });
+
+  it("blocks /opening on a resumable prepared opening saga instead of creating another opening", async () => {
+    const openingSaga = mockPendingSaga({
+      id: "saga-opening-prepared",
+      turnId: "opening:0:prepared",
+      status: "world_consequence_running",
+      actionText: "[opening scene]",
+      settledTurnPacketId: null,
+      sourceAction: { kind: "opening_scene", currentTick: 0 },
+      provenance: {
+        source: "opening_scene",
+        authority: "settled_packet",
+        recoveryAuthority: "no_mutation_before_settled_packet",
+      },
+    });
+    mockFindAbandonedPreSettledTurnSaga.mockReturnValue(openingSaga);
+    mockedFindPendingNarrationSaga.mockReturnValue(openingSaga as never);
+    mockGetSettledTurnPacket.mockReturnValue(null);
+    mockHasPreparedSettledTurnPacketRecovery.mockReturnValue(true);
+    mockedGetHistory.mockReturnValue([]);
+    mockedProcessOpeningScene.mockImplementation(() =>
+      createTurnStream([
+        { type: "narrative", data: { text: "A second opening should not run." } },
+        { type: "done", data: { tick: 0, opening: true } },
+      ]) as never,
+    );
+
+    const res = await app.request("/chat/opening", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID }),
+    });
+
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body).toEqual(
+      expect.objectContaining({
+        pendingNarration: true,
+        resumable: true,
+        status: "world_consequence_running",
+      }),
+    );
+    expect(mockedProcessOpeningScene).not.toHaveBeenCalled();
+    expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
+    expect(mockRecordAbandonedTurnRollback).not.toHaveBeenCalled();
+    expect(runtimeActiveTurns.has(CAMPAIGN_ID)).toBe(false);
+  });
+
+  it("rolls back a non-resumable world consequence saga before new work", async () => {
+    const preTurnSnapshot = {
+      snapshotId: "snapshot-before-world-consequence",
+      bundleDir: "snapshots/snapshot-before-world-consequence",
+      capturedAt: 456,
+      capturedWorldVersion: 12,
+      capturedWorldTimeMinutes: 130,
+      fileHashes: {
+        stateDb: "state-hash",
+        config: "config-hash",
+        chatHistory: "chat-hash",
+      },
+    };
+    const pendingSaga = mockPendingSaga({
+      id: "saga-world-consequence-no-packet",
+      turnId: "turn-world-consequence-no-packet",
+      status: "world_consequence_running",
+      settledTurnPacketId: null,
+      provenance: { preTurnSnapshot },
+    });
+    mockedFindPendingNarrationSaga
+      .mockReturnValueOnce(pendingSaga as never)
+      .mockReturnValue(null as never);
+    mockGetSettledTurnPacket.mockReturnValue(null);
+    mockHasPreparedSettledTurnPacketRecovery.mockReturnValue(false);
+    mockedProcessTurn.mockImplementation(() =>
+      createTurnStream([{ type: "done", data: { tick: 10 } }]) as never,
+    );
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Continue after failed consequence",
+        intent: "Continue after failed consequence",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(mockedRestoreSnapshot).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      expect.objectContaining({ snapshotId: "snapshot-before-world-consequence" }),
+    );
+    expect(mockRecordAbandonedTurnRollback).toHaveBeenCalledWith(
+      expect.objectContaining({ saga: pendingSaga }),
+    );
+    expect(mockedProcessTurn).toHaveBeenCalled();
+  });
+
+  it("fails closed and releases the route lease when abandoned turn recovery lacks a snapshot", async () => {
+    const abandonedSaga = mockPendingSaga({
+      id: "saga-no-snapshot",
+      turnId: "turn-no-snapshot",
+      status: "tool_loop_running",
+      provenance: {},
+    });
+    mockFindAbandonedPreSettledTurnSaga.mockReturnValue(abandonedSaga);
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Continue anyway",
+        intent: "Continue anyway",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toBe("Action request failed.");
+    expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
+    expect(mockedProcessTurn).not.toHaveBeenCalled();
+    expect(runtimeActiveTurns.has(CAMPAIGN_ID)).toBe(false);
+  });
+
+  it.each([
+    {
+      route: "/chat/opening",
+      body: { campaignId: CAMPAIGN_ID },
+    },
+    {
+      route: "/chat/lookup",
+      body: {
+        campaignId: CAMPAIGN_ID,
+        lookupKind: "character_canon_fact",
+        subject: "Greta",
+      },
+    },
+    {
+      route: "/chat/retry",
+      body: { campaignId: CAMPAIGN_ID },
+    },
+    {
+      route: "/chat/undo",
+      body: { campaignId: CAMPAIGN_ID },
+    },
+    {
+      route: "/chat/edit",
+      body: { campaignId: CAMPAIGN_ID, messageIndex: 0, newContent: "Edited." },
+    },
+  ])("runs abandoned-turn recovery gate before $route route work", async ({ route, body }) => {
+    mockFindAbandonedPreSettledTurnSaga.mockReturnValue(mockPendingSaga({
+      id: `saga-${route}`,
+      turnId: `turn-${route}`,
+      status: "tool_loop_running",
+      provenance: {},
+    }));
+
+    const res = await app.request(route, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    expect(res.status).toBe(500);
+    expect(mockedCaptureSnapshot).not.toHaveBeenCalled();
+    expect(mockedProcessTurn).not.toHaveBeenCalled();
+    expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
+    expect(runtimeActiveTurns.has(CAMPAIGN_ID)).toBe(false);
+  });
+
   it("resumes a pending saga through the explicit resume route without opening a new paid turn", async () => {
+    const sagaSnapshot = {
+      snapshotId: "snapshot-before-pending",
+      bundleDir: "snapshots/snapshot-before-pending",
+      capturedAt: 123,
+      capturedWorldVersion: 7,
+      capturedWorldTimeMinutes: 90,
+      fileHashes: {
+        stateDb: "state-hash",
+        config: "config-hash",
+        chatHistory: "chat-hash",
+      },
+    };
     const pendingSaga = mockPendingSaga({
       id: "saga-p89-pending",
       turnId: "turn-p89-pending",
+      actionText: "Ask the witness to finish the story.",
+      provenance: {
+        preTurnSnapshot: sagaSnapshot,
+        chatHistoryLengthBeforeTurn: 4,
+      },
     });
     mockedFindPendingNarrationSaga.mockReturnValue(pendingSaga as never);
     mockGetTurnSaga.mockReturnValue(pendingSaga as never);
     mockedResumePendingTurnNarration.mockImplementation(() =>
       createTurnStream([
         { type: "narrative", data: { text: "Pending narration resumes cleanly." } },
-        { type: "done", data: { tick: 7, resumed: true } },
+        {
+          type: "done",
+          data: {
+            tick: 7,
+            resumed: true,
+            acceptedDurableEventIds: ["evt-resumed"],
+            producedDurableEventIds: ["evt-resumed", "evt-hidden-rejected"],
+          },
+        },
       ]) as never,
     );
 
@@ -403,7 +1034,101 @@ describe("Phase 89 chat route resilience", () => {
     expect(mockedProcessTurn).not.toHaveBeenCalled();
     expect(mockedCaptureSnapshot).not.toHaveBeenCalled();
     expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
+    expect(runtimeSnapshots.get(CAMPAIGN_ID)).toEqual({
+      campaignId: CAMPAIGN_ID,
+      ...sagaSnapshot,
+    });
+    expect(runtimeSnapshotMetadata.get(CAMPAIGN_ID)).toMatchObject({
+      acceptedDurableEventIds: ["evt-resumed"],
+      producedDurableEventIds: ["evt-resumed", "evt-hidden-rejected"],
+      playerAction: "Ask the witness to finish the story.",
+      chatHistoryLengthBeforeTurn: 4,
+      chatHistoryLengthAfterTurn: 0,
+    });
     expect(runtimeActiveTurns.has(CAMPAIGN_ID)).toBe(false);
+  });
+
+  it("treats a prepared settled packet recovery event as a resumable route boundary", async () => {
+    const pendingSaga = mockPendingSaga({
+      id: "saga-prepared-only",
+      turnId: "turn-prepared-only",
+      status: "world_consequence_running",
+      settledTurnPacketId: null,
+      actionText: "Wait for the final account.",
+    });
+    mockedFindPendingNarrationSaga.mockReturnValue(pendingSaga as never);
+    mockGetTurnSaga.mockReturnValue(pendingSaga as never);
+    mockGetSettledTurnPacket.mockReturnValue(null);
+    mockHasPreparedSettledTurnPacketRecovery.mockReturnValue(true);
+    mockedResumePendingTurnNarration.mockImplementation(() =>
+      createTurnStream([
+        { type: "scene-settling", data: { phase: "final-narration", resumed: true } },
+        { type: "done", data: { tick: 8, resumed: true } },
+      ]) as never,
+    );
+
+    const historyRes = await app.request(`/chat/history?campaignId=${CAMPAIGN_ID}`);
+    expect(historyRes.status).toBe(200);
+    const historyBody = await historyRes.json();
+    expect(historyBody.pendingNarration).toEqual(
+      expect.objectContaining({
+        pendingNarration: true,
+        resumable: true,
+        status: "world_consequence_running",
+      }),
+    );
+
+    const resumeRes = await app.request("/chat/resume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        resumeToken: "resume_phase89deadbeef",
+      }),
+    });
+
+    expect(resumeRes.status).toBe(200);
+    const resumeBody = await resumeRes.text();
+    expect(resumeBody).toContain("event: done");
+    expect(mockedResumePendingTurnNarration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        campaignId: CAMPAIGN_ID,
+        turnId: "turn-prepared-only",
+      }),
+    );
+    expect(mockedProcessTurn).not.toHaveBeenCalled();
+  });
+
+  it("keeps a world consequence saga non-resumable when no packet or prepared recovery exists", async () => {
+    const pendingSaga = mockPendingSaga({
+      id: "saga-not-ready",
+      turnId: "turn-not-ready",
+      status: "world_consequence_running",
+      settledTurnPacketId: null,
+    });
+    mockedFindPendingNarrationSaga.mockReturnValue(pendingSaga as never);
+    mockGetSettledTurnPacket.mockReturnValue(null);
+    mockHasPreparedSettledTurnPacketRecovery.mockReturnValue(false);
+
+    const res = await app.request("/chat/resume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        resumeToken: "resume_phase89deadbeef",
+      }),
+    });
+
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body).toEqual(
+      expect.objectContaining({
+        pendingNarration: true,
+        resumable: false,
+        status: "world_consequence_running",
+      }),
+    );
+    expect(mockedResumePendingTurnNarration).not.toHaveBeenCalled();
   });
 
   it("keeps an explicit pending narration resume error as pending instead of treating it as resumed", async () => {

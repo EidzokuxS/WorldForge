@@ -6,13 +6,13 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
-  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { chromium, type Browser, type Page } from "playwright";
+import { applyCleanStartClonePolicy } from "./phase-94/clone-policy.js";
 
 const FRONTEND_URL = process.env.FRONTEND_URL ?? "http://localhost:3000";
 const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:3001";
@@ -414,63 +414,11 @@ function writeJson(filePath: string, value: unknown): void {
   writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
 }
 
-function quoteSqlIdentifier(value: string): string {
-  return `"${value.replace(/"/g, '""')}"`;
-}
-
 function campaignDir(campaignId: string): string {
   if (!/^[0-9a-f-]{36}$/i.test(campaignId)) {
     throw new Error(`Unsafe campaign id for filesystem operation: ${campaignId}`);
   }
   return resolve(CAMPAIGNS_ROOT, campaignId);
-}
-
-function assertInside(parentDir: string, childPath: string): void {
-  const parent = resolve(parentDir);
-  const child = resolve(childPath);
-  if (child !== parent && !child.startsWith(`${parent}${sep}`)) {
-    throw new Error(`Refusing filesystem operation outside ${parent}: ${child}`);
-  }
-}
-
-function removeCampaignTransientDir(targetDir: string, childName: string): void {
-  const childPath = resolve(targetDir, childName);
-  assertInside(targetDir, childPath);
-  rmSync(childPath, { recursive: true, force: true });
-}
-
-function rewriteCampaignIdInDatabase(stateDbPath: string, sourceCampaignId: string, targetCampaignId: string): string[] {
-  const db = new Database(stateDbPath);
-  const updatedTables: string[] = [];
-  try {
-    db.pragma("foreign_keys = OFF");
-    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all() as Array<{ name: string }>;
-    const rewrite = db.transaction(() => {
-      if (tables.some((table) => table.name === "campaigns")) {
-        const result = db.prepare("UPDATE campaigns SET id = ?, updated_at = ? WHERE id = ?")
-          .run(targetCampaignId, Date.now(), sourceCampaignId);
-        if (result.changes > 0) updatedTables.push("campaigns");
-      }
-      for (const table of tables) {
-        const tableName = quoteSqlIdentifier(table.name);
-        const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
-        if (!columns.some((column) => column.name === "campaign_id")) continue;
-        const result = db.prepare(`UPDATE ${tableName} SET campaign_id = ? WHERE campaign_id = ?`)
-          .run(targetCampaignId, sourceCampaignId);
-        if (result.changes > 0) updatedTables.push(table.name);
-      }
-    });
-    rewrite();
-    const violations = db.pragma("foreign_key_check") as unknown[];
-    if (violations.length > 0) {
-      throw new Error(`Campaign clone created ${violations.length} foreign-key violation(s).`);
-    }
-    db.pragma("wal_checkpoint(TRUNCATE)");
-    return updatedTables;
-  } finally {
-    db.pragma("foreign_keys = ON");
-    db.close();
-  }
 }
 
 function cloneCampaignDirectory(
@@ -501,12 +449,12 @@ function cloneCampaignDirectory(
     writeJson(configPath, config);
   }
 
-  removeCampaignTransientDir(targetDir, "checkpoints");
-  removeCampaignTransientDir(targetDir, ".turn-boundaries");
-  writeJson(join(targetDir, "chat_history.json"), []);
-
-  const stateDbPath = join(targetDir, "state.db");
-  const updatedTables = rewriteCampaignIdInDatabase(stateDbPath, sourceCampaignId, targetCampaignId);
+  const clonePolicy = applyCleanStartClonePolicy({
+    targetDir,
+    sourceCampaignId,
+    targetCampaignId,
+    routeId,
+  });
   const record: ProvisionedCampaign = {
     key: template.key,
     label: template.label,
@@ -525,7 +473,10 @@ function cloneCampaignDirectory(
     cloneIndex,
     sourceCampaignId,
     targetCampaignId,
-    updatedTables,
+    updatedTables: clonePolicy.updatedTables,
+    clearedRuntimeTables: clonePolicy.clearedRuntimeTables,
+    scrubbedTextColumns: clonePolicy.scrubbedTextColumns,
+    droppedDirs: clonePolicy.droppedDirs,
   });
   return record;
 }
