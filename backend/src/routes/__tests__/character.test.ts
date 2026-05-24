@@ -76,6 +76,7 @@ vi.mock("../../lib/index.js", () => ({
 
 import { getActiveCampaign, loadCampaign, readCampaignConfig } from "../../campaign/index.js";
 import { getDb } from "../../db/index.js";
+import { cacheImage, generateImage, resolveImageProvider } from "../../images/index.js";
 import { resolveStartingLocation } from "../../worldgen/index.js";
 import { IngestionPipelineError } from "../../character/ingestion/errors.js";
 import characterRoutes from "../character.js";
@@ -84,6 +85,9 @@ const mockedGetActive = vi.mocked(getActiveCampaign);
 const mockedLoadCampaign = vi.mocked(loadCampaign);
 const mockedReadCampaignConfig = vi.mocked(readCampaignConfig);
 const mockedGetDb = vi.mocked(getDb);
+const mockedCacheImage = vi.mocked(cacheImage);
+const mockedGenerateImage = vi.mocked(generateImage);
+const mockedResolveImageProvider = vi.mocked(resolveImageProvider);
 const mockedResolveStart = vi.mocked(resolveStartingLocation);
 
 // ---------------------------------------------------------------------------
@@ -165,6 +169,7 @@ beforeEach(() => {
   ingestMock.mockReset();
   mockedLoadCampaign.mockRejectedValue(new Error("not found"));
   mockedReadCampaignConfig.mockReturnValue({ currentTick: 0 } as any);
+  mockedResolveImageProvider.mockReturnValue(null as any);
 });
 
 /** Full CharacterDraft fixture used for save-character and pipeline mocks. */
@@ -565,6 +570,38 @@ describe("POST /api/worldgen/save-character", () => {
     expect(insertPayload).toBeDefined();
     expect(insertPayload?.characterRecord).toBeDefined();
     expect(insertPayload?.derivedTags).toBeDefined();
+  });
+
+  it("caches generated player portraits under the public singleton filename", async () => {
+    setActiveCampaign();
+    createMockDb({
+      locations: [{ id: "loc-1", name: "Tavern" }],
+    });
+    const imageData = Buffer.from("portrait");
+    mockedResolveImageProvider.mockReturnValue({
+      provider: { baseUrl: "http://img", apiKey: "k" },
+      model: "portrait-model",
+    } as any);
+    mockedGenerateImage.mockResolvedValue(imageData);
+
+    const res = await app.request("/api/worldgen/save-character", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        draft: makePlayerDraft(),
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockedCacheImage).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      "portraits",
+      "player.png",
+      imageData,
+    );
   });
 
   it("materializes bounded opening-state status flags when saving structured start conditions", async () => {

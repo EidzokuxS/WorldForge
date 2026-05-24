@@ -242,10 +242,17 @@ remain required before calling the gameplay loop mature.
 ## Current P2 Queue
 
 - Frontend stale/debug reasoning lane should be developer-mode only or ignored.
-- Public DTO player portrait handle may no longer match backend image filename
-  lookup. Needs asset URL contract test.
 - Phase 88 harness text still says clone copies campaign DBs although the code
   now uses `cloneCampaignCleanStart`.
+
+Recently closed P2:
+
+- Player portrait asset projection no longer derives image filenames from public
+  actor handles. The player portrait filename is the stable public singleton
+  asset `player.png`; new portrait generation writes that asset, the image route can serve legacy
+  raw-id portrait files only behind the API boundary, frontend tests assert
+  `player.png`, and Browser evidence showed the Character drawer requesting
+  `/portraits/player.png` with no `pdto_actor_*.png` request.
 
 ## Cluster Status, References, Assumptions, Options
 

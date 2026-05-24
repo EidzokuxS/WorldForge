@@ -209,7 +209,7 @@ architecture boundaries by accident.
 | Final narration attempt | narrator attempts plus compiled text | narration guard/turn processor | selected refs/style/order | selected ref existence, private term scan, grounding | assistant SSE/chat line | live/resume no-legacy-text regressions |
 | Chat history/pending resume | chat history JSON plus saga state | chat route/resume owner | internal metadata | public history DTO, resume token | public history and recovery state | route tests reject saga id/status leaks |
 | SSE/API projection | DTO factories and route projectors | route/projector modules | none | public schemas, event allowlists, backend-ref guard | public events/JSON | raw legacy id rejection tests |
-| Frontend render state | parsed public DTOs/local UI state | frontend API parser/components | draft/debug local state | public handle parser, malformed payload errors; lookup support filtered from scene beat | rendered labels/actions only | API/checkpoint/display-beat tests; Browser Saves/freeform smoke |
+| Frontend render state | parsed public DTOs/local UI state | frontend API parser/components | draft/debug local state | public handle parser, malformed payload errors; lookup support filtered from scene beat; player portrait asset filename is backend-owned | rendered labels/actions/assets only | API/checkpoint/display-beat tests; player portrait URL contract; Browser Saves/freeform/portrait smoke |
 | Checkpoints/artifacts | checkpoint dirs/manifests | checkpoint service | UI labels | path safety, restorable manifest, handle resolver | `pdto_checkpoint_*` | create/list/load/delete tests; Browser delete smoke |
 | Store manifest/bundles | `store-manifest.json`, captured stores | bundle/restore services | evidence hashes/reports | coverage, policies, hashes, row counts | checkpoint/turn snapshot manifests | tampered SQLite/vector evidence tests |
 | Vectors | LanceDB episodic/lore tables | vector services plus rollback policy | retrieval support | campaign/audience filters, row counts, hashes | semantic retrieval only | restore verification and rollback reconcile tests |
@@ -267,8 +267,6 @@ These items are intentionally not buried under "green tests":
 - P2: observability retention/redaction policy should be made explicit before
   remote/long-running trace publication.
 - P2: frontend debug reasoning lane should be developer-mode only or ignored.
-- P2: player portrait handle and backend image filename lookup need an asset
-  URL contract test.
 - P2: Phase 88 harness prose still says clone copies DBs even though code now
   calls the clean-start clone service.
 - Evidence gate: bundled Oracle GO on current HEAD.

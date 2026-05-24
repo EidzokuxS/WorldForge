@@ -545,6 +545,7 @@ import {
   chatResume,
   chatRetry,
   getActiveCampaign,
+  getImageUrl,
   getRememberedCampaignId,
   getWorldData,
   loadCampaign,
@@ -554,6 +555,7 @@ import GamePage from "../page";
 
 const mockedToast = vi.mocked(toast);
 const mockedGetActive = vi.mocked(getActiveCampaign);
+const mockedGetImageUrl = vi.mocked(getImageUrl);
 const mockedGetWorld = vi.mocked(getWorldData);
 const mockedApiGet = vi.mocked(apiGet);
 const mockedChatAction = vi.mocked(chatAction);
@@ -688,6 +690,7 @@ function getLatestNarrativeLogProps() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockedGetImageUrl.mockReset();
   window.localStorage.clear();
   narrativeLogMessageSnapshots.length = 0;
   mockedGetRememberedCampaignId.mockReturnValue(null);
@@ -1392,6 +1395,33 @@ describe("GamePage", () => {
           name: "Hero",
         }),
       }),
+    );
+  });
+
+  it("uses the backend-owned player portrait filename instead of deriving an asset from the actor handle", async () => {
+    mockedGetImageUrl.mockReturnValue("portrait-url");
+    const worldData = {
+      ...fakeWorldData,
+      player: {
+        ...fakeWorldData.player,
+        id: "pdto_actor_44444444444444444444444444444444",
+      },
+    };
+
+    await renderReadyGameWithWorld(worldData);
+
+    openDrawer("Character");
+
+    expect(mockedGetImageUrl).toHaveBeenCalledWith("test-campaign", "portraits", "player.png");
+    expect(mockedGetImageUrl).not.toHaveBeenCalledWith(
+      "test-campaign",
+      "portraits",
+      "pdto_actor_44444444444444444444444444444444.png",
+    );
+    const lastCall = mockCharacterPanel.mock.calls.at(-1)?.[0];
+    expect(lastCall).toEqual(expect.objectContaining({ portraitUrl: "portrait-url" }));
+    expect(JSON.stringify(lastCall)).not.toContain(
+      "pdto_actor_44444444444444444444444444444444.png",
     );
   });
 

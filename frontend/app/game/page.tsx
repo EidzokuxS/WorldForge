@@ -822,7 +822,7 @@ export default function GamePage() {
 
   const portraitUrl = useMemo(() => {
     if (!activeCampaign || !player) return undefined;
-    return getImageUrl(activeCampaign.id, "portraits", `${player.id}.png`);
+    return getImageUrl(activeCampaign.id, "portraits", "player.png");
   }, [activeCampaign, player]);
 
   const canInteract = Boolean(activeCampaign) && !isInitializing;

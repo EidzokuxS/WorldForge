@@ -450,7 +450,7 @@ app.post("/save-character", async (c) => {
           });
           ensureImageDir(campaignId, "portraits");
           const imageData = await generateImage({ prompt, provider: imgProvider.provider, model: imgProvider.model });
-          cacheImage(campaignId, "portraits", `${playerId}.png`, imageData);
+          cacheImage(campaignId, "portraits", "player.png", imageData);
         } catch (err) {
           log.warn("Portrait generation failed (non-blocking)", err);
         }
