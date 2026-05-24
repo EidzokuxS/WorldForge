@@ -63,6 +63,31 @@ Clone/replay/rollback/vector R2 bundle review on 2026-05-24:
   scalar-only in the current clone helpers, and multi-store clone/restore lacks
   a fail-closed crash-convergence lifecycle.
 
+Current full architecture review attempt on 2026-05-24:
+
+- Current reviewed HEAD after the completeness/reference slices:
+  `006421983a794b358cf830f891a149568f8527c3`.
+- Browser/Oracle output recheck rule: a tiny saved `transcript.md` answer is
+  `NEEDS_RECHECK`, not proof that the model answered with one token. Recheck
+  through `scripts/oracle-recheck-output.mjs`, which reopens the saved
+  ChatGPT conversation URL, tries backend conversation JSON, then falls back to
+  DOM extraction without submitting a new prompt.
+- Rechecked sessions:
+  - `phase95-full-architectu-current-go`: saved answer was `I`; DOM recheck
+    recovered a full NO-GO answer for full gameplay-cycle acceptance.
+  - `phase95-full-architectu-current-go-2`: saved answer was `The`; backend
+    and DOM were inaccessible on recheck, so this is `UNVERIFIED_OUTPUT`.
+  - `phase95-full-architectu-current-go-3`: saved transcript was missing after
+    Chrome disconnect; DOM recheck recovered a full **CONDITIONAL ARCHITECTURE
+    GO / ACCEPTANCE NO-GO** answer.
+- Evidence handling: use the verified DOM/user-visible review content and the
+  recheck artifacts, not the one-token saved transcripts. Do not rerun
+  GPT-5.5 Pro for this gate without an explicit fresh request.
+- Meaning: the current control-plane map is coherent enough to proceed to the
+  next evidence gates, but it is not Phase 95 gameplay acceptance. Browser
+  workability, human-style fresh/cloned play, longer soak/replay, and the named
+  P2 hardening items remain required before calling the loop mature.
+
 Implemented hardening slices after the reset:
 
 - Durable quick-action capabilities: quick-action labels/prose remain

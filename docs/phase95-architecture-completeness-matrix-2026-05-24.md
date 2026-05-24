@@ -282,7 +282,20 @@ No known P0/P1 implementation blocker remains listed by this local audit after
 the public projection, pending recovery, quick-action receipt, due-world scope,
 restore/vector, and clone/replay slices.
 
-That is not acceptance. It means the architecture has a complete local map and
-can now be judged as a whole by Oracle and then by Browser/human-style/soak
-evidence. If Oracle finds a missing layer or invariant, this document becomes
-the correction board rather than a defense of the current design.
+That is not acceptance. The current external review label is **CONDITIONAL
+ARCHITECTURE GO / ACCEPTANCE NO-GO**: the map is coherent enough to proceed to
+Browser/play evidence, but not enough to call Phase 95 mature. If later Browser,
+human-style play, soak/replay, or targeted P2 hardening finds a missing layer or
+invariant, this document becomes the correction board rather than a defense of
+the current design.
+
+Output recheck note: broad Browser/Oracle attachment runs produced tiny or
+missing saved transcripts, but that is an extraction/persistence signal, not
+proof of a one-token model answer. `scripts/oracle-recheck-output.mjs` now
+reopens the saved conversation URL, checks backend conversation JSON, and then
+falls back to DOM extraction without submitting a new prompt. Recheck recovered
+full DOM answers for `phase95-full-architectu-current-go` and
+`phase95-full-architectu-current-go-3`; `phase95-full-architectu-current-go-2`
+remains `UNVERIFIED_OUTPUT` because backend/DOM access returned
+`conversation_inaccessible`. Do not repeat GPT-5.5 Pro runs for this gate unless
+explicitly requested.

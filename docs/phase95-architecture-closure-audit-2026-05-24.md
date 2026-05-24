@@ -46,6 +46,19 @@ typechecks. The branch remains NO-GO for long-play acceptance until the full
 architecture completeness matrix, GitNexus, Oracle bundled review, Browser
 evidence, and human-style play/soak evidence pass.
 
+External/current review status after HEAD
+`006421983a794b358cf830f891a149568f8527c3`: **CONDITIONAL ARCHITECTURE GO /
+ACCEPTANCE NO-GO**. The full-cycle control-plane map is coherent enough to
+move to Browser/play evidence gates, but Phase 95 gameplay acceptance remains
+blocked until those gates pass. Browser/Oracle saved transcripts for the broad
+bundle sessions were tiny or missing, but those are now treated as
+`NEEDS_RECHECK` rather than proof of one-token model output. Recheck through
+`scripts/oracle-recheck-output.mjs` recovered full DOM answers for
+`phase95-full-architectu-current-go` and `phase95-full-architectu-current-go-3`;
+`phase95-full-architectu-current-go-2` remains `UNVERIFIED_OUTPUT` because the
+conversation is inaccessible through backend JSON and DOM. Do not repeat
+GPT-5.5 Pro runs for this gate unless explicitly requested.
+
 No long human-style 60-turn, cloned-world, or 600-turn soak acceptance should
 resume until the full local closure matrix is bundled, Oracle-reviewed on a
 frozen current tree, and Browser workability is rechecked.
