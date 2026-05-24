@@ -131,6 +131,7 @@ export async function loadCheckpoint(
     campaignId,
     restoredWorldVersion: restoredClock.worldVersion,
     restoredWorldTimeMinutes: restoredClock.worldTimeMinutes,
+    restoredCurrentTick: restoredClock.currentTick,
     reason: "checkpoint restored",
   });
 

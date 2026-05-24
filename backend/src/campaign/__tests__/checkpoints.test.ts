@@ -70,6 +70,7 @@ vi.mock("../../engine/living-world-authority.js", () => ({
   readWorldClock: vi.fn(() => ({
     worldVersion: 7,
     worldTimeMinutes: 420,
+    currentTick: 33,
   })),
   invalidateAuthorityAfterRestore: vi.fn(),
 }));
@@ -387,6 +388,7 @@ describe("loadCheckpoint", () => {
       campaignId: "camp-1",
       restoredWorldVersion: 7,
       restoredWorldTimeMinutes: 420,
+      restoredCurrentTick: 33,
       reason: "checkpoint restored",
     });
     expect(

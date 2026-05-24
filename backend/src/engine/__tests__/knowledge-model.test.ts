@@ -127,6 +127,7 @@ describe("knowledge model", () => {
       campaignId: CAMPAIGN_ID,
       restoredWorldVersion: 0,
       restoredWorldTimeMinutes: 10,
+      restoredCurrentTick: 10,
       reason: "test rollback",
     });
 

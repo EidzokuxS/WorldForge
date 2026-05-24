@@ -3,7 +3,8 @@
 Date: 2026-05-24
 Branch: `develop`
 Reviewed current local architecture state through:
-`732c9aeb0c36e345abb33d6ddfb7992cd5737adf`
+`10f031ec17725298156b43185ed22b721a0fff39` plus the current
+GM Read/restore/verifier working slice
 Status: **NO-GO for long-play acceptance**
 
 This audit exists to keep the Phase 95 reset/rebuild honest. The product goal is
@@ -31,6 +32,11 @@ The current branch has important hardening slices landed and verified:
 - restore-side manifest evidence verification before copy;
 - staged, idempotent restore lifecycle;
 - vector-policy turn rollback with episodic pre-turn vector retention/rebuild.
+- GM Read semantic repair for structural dialogue requirements that omit
+  explicit owner effect kinds;
+- restore-side `currentTick` recovery that is independent of
+  `worldTimeMinutes`;
+- short cloned-campaign adaptive pilot evidence after the GM Read/restore fix.
 
 It is **not** Phase 95 closure. Independent current-HEAD audits found blockers
 in actor/tool ownership, restore integrity/crash convergence, vector rollback
@@ -74,6 +80,20 @@ projection/playfeel bug where persisted lookup/support answers could replace
 the current scene beat; the scene dock now selects the latest true narration
 while the Narrative Log remains the lookup surface.
 
+Post-GM-Read-fix Browser evidence also loads `/game` to `Ready` with the action
+dock available on the cloned-world smoke path. Evidence is recorded in
+`phase95-browser-smoke-after-gmread-fix-20260524.md`,
+`phase95-browser-smoke-depth6-after-gmread-fix-20260524.md`, and
+`phase95-browser-smoke-after-gmread-fix-20260524.png`. Console evidence shows
+zero errors and the same two Radix Dialog description warnings as P2
+UX/accessibility debt.
+
+The short cloned-world pilot after this fix completed `3/3` adaptive turns in
+`output/phase95-clone-pilot-human-20260524-1800` and passed the adaptive-run
+verifier with zero hard failures and zero warnings. This is recovery smoke
+evidence only; it is not a substitute for fresh/cloned 60-turn human-style
+campaigns or longer soak/replay coverage.
+
 No long human-style 60-turn, cloned-world, or 600-turn soak acceptance should
 resume until the full local closure matrix is bundled, Oracle-reviewed on a
 frozen current tree, and Browser workability is expanded beyond this smoke.
@@ -84,14 +104,14 @@ frozen current tree, and Browser workability is expanded beyond this smoke.
 | --- | --- | --- | --- | --- | --- | --- |
 | UI action intake | Frontend action form plus backend request body | `/chat/action` route canonicalizer | Button labels, quick-action prose, local draft text | Freeform player prose only | request schema, campaign active check, quick-action handle resolution | route tests for freeform/handle/stale/forged; public error DTOs |
 | Turn boundary | turn saga, active lease, pre-turn snapshot | chat route plus turn saga service | progress SSE | none | active turn lock, abandoned saga recovery, snapshot manifest presence | rollback snapshot before mutation; pending recovery tests |
-| GM Read | typed GM Read result | `runGmRead` and validator | prompt context, support forecasts | interpretation, path, runtime requirement, target/action refs by alias | schema, alias resolution, movement binding, speaker binding, durability checks | diagnostic-only receipt; no mutation; route/runtime requirement fixtures |
+| GM Read | typed GM Read result | `runGmRead` and validator | prompt context, support forecasts | interpretation, path, runtime requirement, target/action refs by alias | schema, alias resolution, movement binding, speaker binding, durability checks, semantic repair for structural dialogue without explicit effect kind | diagnostic-only receipt; no mutation; route/runtime requirement fixtures |
 | GM Tool Loop | descriptor-derived active tool set and accepted tool results | `runGmToolLoop` | observations, helper results, repair prompts | tool name and args as proposals | active tool allowlist, runtime requirement, ref/capability resolution, write-scope guard | accepted terminal receipts close requirement; rejected/helper results remain support-only |
 | Executor | SQLite authoritative tables and authority traces | runtime tool executor per state lane | same-turn observations | validated tool args only | input schemas, base world version, fences, allowed/blocked write scopes, transactions/savepoints | authority trace, state delta refs, durable event ids, rollback/no-unaccepted-side-effect tests |
 | Quick-action production | `quick_action_offers` table | quick-action offer service | label/action prose | label/prose suggestions only | source digest, world version, expiry, consumed marker, campaign/player binding, accepted-receipt boundary | `qac_*` handles; stale/forged/replayed tests; GM-loop rollback tests; SSE rollback test |
 | Receipts | authority traces, accepted result refs, settled packet inputs | executor and turn processor | tool observations | none after acceptance | receipt role classification, state-owner matrix, write-scope ledger | replay/rollback fact source; receipt mismatch tests |
 | Actor runtime | key actor process state, actor frame, actor schedule decision | actor scheduler and actor tool execution | actor knowledge retrieval, private memory | actor decision packet requested tools | actor frame binding, base world version, positive allowed scopes, blocked scopes | actor action results and authority traces; positive scope fence tests |
 | Due-world runtime | actor processes, world threads, proposal queue | due-world resolver/proposal executor | forecast/world-brain/guardrails | proposals, deterministic plan payloads | due time, scope conflicts, proposal lifecycle, support-only filtering, deterministic emitted-ref coverage | deferred proposal rows, skipped/executed traces; active-plan scope mismatch tests |
-| Time | `world_clocks`, turn clock ledger | living-world authority clock commit service | UI turn ordinal, narration tick | proposed `advance_time` args | non-negative deltas, no turn-boundary time advance, accepted receipt source | clock ledger rows, public world time, no-op/wait/travel/resume tests |
+| Time | `world_clocks`, turn clock ledger | living-world authority clock commit service | UI turn ordinal, narration tick | proposed `advance_time` args | non-negative deltas, no turn-boundary time advance, accepted receipt source, restore keeps `currentTick` distinct from `worldTimeMinutes` | clock ledger rows, public world time, no-op/wait/travel/resume tests |
 | Narrator packet | settled canonical turn packet plus citable fact list | narrator packet builder | recent transcript, opening scene, guardrails, diagnostics | none | redaction audit, support-only classification, packet budget trace | settled packet persisted before final narration; resume from packet |
 | Final narration | backend-issued fact refs and narrator attempt | narration guard/turn processor | style instruction, support context | selected fact refs/evidence refs/order/style | fact-ref required, private/backend term scan, grounding compile, repair/fail-closed | assistant SSE/chat line; live and resume regressions reject legacy text/private prose |
 | SSE/API projection | player-facing DTO factories | projection modules and route projectors | internal saga/tool/state objects | none | public DTO schemas, backend-ref guard, explicit event allowlists, legacy raw-id rejection | `turn_resolution`, lookup, world, inventory, history, checkpoint, NPC promote tests; raw legacy id guard targeted test green; Browser caught and fixed draft `startLocationId` projection |
@@ -110,11 +130,11 @@ frozen current tree, and Browser workability is expanded beyond this smoke.
 | Quick-action offer | `quick_action_offers` table | quick-action service | UI chips and labels | label/action prose | offer id/action id, source digest, expiry, consumed, base world version, accepted receipt adjacency | `qac_*` handles | stale/consumed/expired tests; non-receipted GM-loop rollback and route SSE rollback tests |
 | Public DTO handles | projector output and resolver | public DTO handle module | UI labels | none | deterministic handle issuer, resolver, public guard | `pdto_*` handles | route tests; P1 raw legacy shape rejection needed |
 | Scene frame aliases | `SceneFrame`, alias map, backend-only ref set | scene frame builder/alias issuer | visible labels and summaries | none | reserved namespaces, backend ref safety, hidden/private term scan | model-facing prompt packet | label collision/raw id tests |
-| GM Read result | accepted typed decision | GM Read validator | repair diagnostics | path/runtime requirement/action interpretation | Zod schema, semantic validators, alias-only refs | diagnostic receipt only | unsupported/composite/ref tests |
+| GM Read result | accepted typed decision | GM Read validator | repair diagnostics | path/runtime requirement/action interpretation | Zod schema, semantic validators, alias-only refs, repairable structural-dialogue effect-kind ambiguity | diagnostic receipt only | unsupported/composite/ref tests; schema-to-semantic repair regression |
 | Runtime tool descriptors | descriptor registry and owner registry | descriptor contract module | tool descriptions | tool calls choose visible tool names | active allowlist, state lane ownership, effect kind parity | descriptor snapshots | runtime effect/state-owner parity tests cover `chronicle_entry` and `entity_tag` service ownership |
 | Tool mutation state | SQLite gameplay tables plus traces | tool executor per lane | helper observations | typed tool args | schemas, grounding, authority, write scopes, savepoints | accepted receipt/state delta refs | no-unaccepted-side-effect, rollback, idempotency tests |
 | Same-turn write scopes | in-memory turn ledger plus accepted refs | turn processor | diagnostic blocked scope lists | none | conflict detection, prefix scope matching | blocks actor/due work later in turn | actor positive allowed-scope test now covers player-owned mutation rejection |
-| World clock | `world_clocks`, `turn_clock_ledger` | living-world authority | UI turn/narration tick | proposed time deltas | accepted clock receipt, non-negative, no boundary time advance | public world time | no-op/wait/travel/restore tests |
+| World clock | `world_clocks`, `turn_clock_ledger` | living-world authority | UI turn/narration tick | proposed time deltas | accepted clock receipt, non-negative, no boundary time advance, restore current tick from snapshot/checkpoint clock | public world time | no-op/wait/travel/restore tests |
 | Actor process | `actor_process_states`, wake signals, actor frame | actor scheduler/actor tools | actor knowledge/private memory | actor decision packet | actor frame binding, route, positive allowed scopes, blocked scopes | actor authority traces and visible consequences | out-of-scope actor mutation rejection test |
 | Due-world proposal/plan | proposals/jobs/world threads/active plans | proposal executor/due-world resolver | forecast/world-brain | proposal payloads and plan actions | lifecycle, due time, scope conflicts, base version, active-plan emitted refs | proposal commit receipts, deferred work | deterministic travel/record-event scope mismatch tests; hidden-leak tests remain watch coverage |
 | Inventory/items/documents | items tables/tags/holder state | inventory authority/tool executor | dialogue claims | item/tool args | item existence, holder refs, tag/state descriptors | item public handles/facts | transfer/spawn/document state tests |

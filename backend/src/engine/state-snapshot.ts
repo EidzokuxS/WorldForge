@@ -52,6 +52,7 @@ export async function restoreSnapshot(
     campaignId,
     restoredWorldVersion: restoredClock.worldVersion,
     restoredWorldTimeMinutes: restoredClock.worldTimeMinutes,
+    restoredCurrentTick: restoredClock.currentTick,
     reason: "turn snapshot restored",
   });
   log.info(

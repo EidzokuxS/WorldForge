@@ -237,6 +237,7 @@ describe("living world authority", () => {
       campaignId: CAMPAIGN_ID,
       restoredWorldVersion: 0,
       restoredWorldTimeMinutes: 5,
+      restoredCurrentTick: 16,
       reason: "test rollback",
     });
 
@@ -272,10 +273,11 @@ describe("living world authority", () => {
     expect(readWorldClock(CAMPAIGN_ID)).toMatchObject({
       worldVersion: 0,
       worldTimeMinutes: 5,
-      currentTick: 5,
+      currentTick: 16,
     });
     expect(readTurnClockLedger(CAMPAIGN_ID).at(-1)).toMatchObject({
       reasonKind: "replay_restore",
+      uiTurnOrdinal: 16,
       resultWorldVersion: 0,
       resultWorldTimeMinutes: 5,
     });

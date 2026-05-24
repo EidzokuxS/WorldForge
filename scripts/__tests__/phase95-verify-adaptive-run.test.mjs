@@ -196,6 +196,38 @@ describe("phase95 adaptive run verifier", () => {
     );
   });
 
+  it("allows hyphenated in-world role prose while still rejecting machine-shaped refs", () => {
+    const root = makeRoot();
+    const turns = [
+      turn(1, {
+        visibleText:
+          "Route-Scout Fen Dorrow works with Route-finders near a Faction-Neutral Front, giving enough public detail for the scene without exposing internal ids.",
+      }),
+    ];
+    writeCloneRun(root, turns, {
+      campaign: { id: "clone-campaign" },
+      locations: [
+        {
+          description:
+            "Route-finders use route-glyphs at the gate, but this unsafe projection also exposes route-a1.",
+        },
+      ],
+    });
+
+    const result = validateAdaptiveRun({ root, targetTurns: 1 });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "visible-internal-leak" }),
+    ]));
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "clone-world-public-projection-leak",
+        message: expect.stringContaining("route-id"),
+      }),
+    ]));
+  });
+
   it("requires mode diversity for 60-turn acceptance evidence", () => {
     const root = makeRoot();
     const turns = Array.from({ length: 60 }, (_, index) => turn(index + 1, { mode: "repeat-mode" }));

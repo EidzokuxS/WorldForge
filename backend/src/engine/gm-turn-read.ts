@@ -324,13 +324,6 @@ const runtimeRequirementSchema = z.discriminatedUnion("kind", [
       .describe("Required when requiresStructuralEffect=true if multiple structural owner classes are needed before record_dialogue_outcome."),
   }).strict().superRefine((value, ctx) => {
     const hasEffectKinds = Boolean(value.effectKind || value.effectKinds?.length);
-    if (value.requiresStructuralEffect === true && !hasEffectKinds) {
-      ctx.addIssue({
-        code: "custom",
-        message: "dialogue_outcome with requiresStructuralEffect=true requires effectKind/effectKinds so the runtime exposes exactly the needed structural owner classes.",
-        path: ["effectKind"],
-      });
-    }
     if (hasEffectKinds && value.requiresStructuralEffect !== true) {
       ctx.addIssue({
         code: "custom",
@@ -489,6 +482,8 @@ const POSTED_PROOF_REQUIREMENT_ISSUE_CODE = "posted-proof-request-requires-dialo
 const DOCUMENT_STATE_ISSUE_CODE = "document-state-requires-tool-path";
 const DOCUMENT_PREMISE_ISSUE_CODE = "document-premise-requires-backed-state";
 const REUSABLE_DIALOGUE_DURABILITY_ISSUE_CODE = "reusable-dialogue-requires-durable-requirement";
+const STRUCTURAL_DIALOGUE_EFFECT_KIND_ISSUE_CODE =
+  "structural-dialogue-requires-explicit-effect-kind";
 const NO_MUTATION_ADMISSIBILITY_ISSUE_CODE = "no-mutation-admissibility-requires-runtime";
 const DOCUMENT_STATE_TAG_KEYS = new Set([
   "officially-unsealed",
@@ -636,6 +631,7 @@ export function validateGmReadForFrame(
   issues.push(...validateDocumentPremiseRequiresBackedState(read, frame));
   issues.push(...validatePassiveStatusReadNoMutation(read, frame));
   issues.push(...validateRuntimeRequirementPath(read));
+  issues.push(...validateDialogueStructuralEffectKinds(read));
   issues.push(...validateRuntimeRequirementSatisfiable(read, frame));
   issues.push(...validateDialogueRuntimeRequirementSpeakerBinding(read, frame));
   issues.push(...validatePostedProofRuntimeRequirement(read));
@@ -662,6 +658,24 @@ function validateDialogueRuntimeRequirementSpeakerBinding(
     return validateRefs([binding.speakerRef], frame, "runtimeRequirement.speakerBinding.speakerRef");
   }
   return [];
+}
+
+function validateDialogueStructuralEffectKinds(read: GmRead): GmReadValidationIssue[] {
+  const requirement = read.runtimeRequirement;
+  if (
+    requirement?.kind !== "dialogue_outcome"
+    || requirement.requiresStructuralEffect !== true
+    || requirement.effectKind
+    || requirement.effectKinds?.length
+  ) {
+    return [];
+  }
+
+  return [{
+    path: "runtimeRequirement.effectKind",
+    message:
+      `${STRUCTURAL_DIALOGUE_EFFECT_KIND_ISSUE_CODE}: dialogue_outcome with requiresStructuralEffect=true must include runtimeRequirement.effectKind/effectKinds so the runtime exposes exactly the needed structural owner classes. If this is only an answer, refusal, warning, route hint, or procedure explanation, set requiresStructuralEffect=false instead.`,
+  }];
 }
 
 function validateRuntimeRequirementSatisfiable(
@@ -1375,6 +1389,7 @@ function isRepairableGmReadValidationIssue(issue: GmReadValidationIssue): boolea
     || issue.message.includes(POSTED_PROOF_REQUIREMENT_ISSUE_CODE)
     || issue.message.includes(DOCUMENT_STATE_ISSUE_CODE)
     || issue.message.includes(REUSABLE_DIALOGUE_DURABILITY_ISSUE_CODE)
+    || issue.message.includes(STRUCTURAL_DIALOGUE_EFFECT_KIND_ISSUE_CODE)
     || issue.message.includes(NO_MUTATION_ADMISSIBILITY_ISSUE_CODE)
   );
 }

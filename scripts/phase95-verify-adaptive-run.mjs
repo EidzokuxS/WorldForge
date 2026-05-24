@@ -5,10 +5,10 @@ import { fileURLToPath } from "node:url";
 const RAW_REF_PATTERNS = [
   { code: "uuid", pattern: /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i },
   { code: "location-id", pattern: /\bloc-[a-z0-9][a-z0-9_-]*\b/i },
-  { code: "npc-id", pattern: /\bnpc-[a-z0-9][a-z0-9_-]*\b/i },
+  { code: "npc-id", pattern: /\bnpc-(?=[a-z0-9_-]*\d)[a-z0-9][a-z0-9_-]*\b/i },
   { code: "item-id", pattern: /\bitem-[a-z0-9][a-z0-9_-]*\b/i },
-  { code: "route-id", pattern: /\b(?:route|edge)-[a-z0-9][a-z0-9_-]*\b/i },
-  { code: "faction-id", pattern: /\bfaction-[a-z0-9][a-z0-9_-]*\b/i },
+  { code: "route-id", pattern: /\b(?:route|edge)-(?=[a-z0-9_-]*\d)[a-z0-9][a-z0-9_-]*\b/i },
+  { code: "faction-id", pattern: /\bfaction-(?=[a-z0-9_-]*\d)[a-z0-9][a-z0-9_-]*\b/i },
   { code: "command-node-id", pattern: /\b(?:cmd|command-node)-[a-z0-9][a-z0-9_-]*\b/i },
   { code: "public-handle", pattern: /\b(?:pdto|qac)_[a-z0-9_:-]+\b/i },
 ];

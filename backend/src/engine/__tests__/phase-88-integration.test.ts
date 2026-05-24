@@ -298,6 +298,7 @@ describe("phase 88 integration gate", () => {
       campaignId: CAMPAIGN_ID,
       restoredWorldVersion: 1,
       restoredWorldTimeMinutes: 20,
+      restoredCurrentTick: 20,
       reason: "phase 88 restore",
     });
 

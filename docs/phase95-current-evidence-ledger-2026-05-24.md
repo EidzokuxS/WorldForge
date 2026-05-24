@@ -3,7 +3,7 @@
 Date: 2026-05-24
 Branch: `develop`
 Current pushed HEAD before this verifier slice:
-`8fbc52c9866a58daba0984d74e167dd8101a62e8`
+`10f031ec17725298156b43185ed22b721a0fff39`
 
 ## Product Gate
 
@@ -21,6 +21,13 @@ fresh/cloned 60-turn human-style campaigns or 600+ soak/replay behavior.
   `output/phase95-browser-smoke-20260524-1705.md` records `/game` load, Saves
   drawer, one freeform action, return to `Ready`, cleared draft, updated scene
   beat, and zero console errors.
+- Post-GM-Read-fix in-app Browser smoke:
+  `phase95-browser-smoke-after-gmread-fix-20260524.md`,
+  `phase95-browser-smoke-depth6-after-gmread-fix-20260524.md`, and
+  `phase95-browser-smoke-after-gmread-fix-20260524.png` record `/game` loaded
+  and ready after the clone pilot fix, with player Mara Venn at the Disaster
+  Route Gatehouse, a usable action dock, zero console errors, and two known
+  Radix Dialog description warnings.
 - Source-scope backend architecture pack:
   `15` files, `404` tests passed for gameplay control-plane contracts, tool
   contracts, GM Read, GM Tool Loop, actor plan execution, living-world
@@ -33,6 +40,21 @@ fresh/cloned 60-turn human-style campaigns or 600+ soak/replay behavior.
 - Frontend projection/play-surface pack:
   `3` files, `26` tests passed for quick actions, narrative log, and narration
   dock; frontend typecheck passed.
+- GM Read structural dialogue repair:
+  live clone turn evidence found that a model could mark
+  `dialogue_outcome.requiresStructuralEffect=true` without naming an
+  `effectKind`. That case now reaches semantic GM Read validation as a
+  repairable issue instead of failing native schema generation before repair.
+  The repair prompt requires either explicit structural owner classes or
+  `requiresStructuralEffect=false` for answer/refusal/warning/route-hint style
+  dialogue. Focused GM Read tests pass `72/72`.
+- Restore clock recovery:
+  rollback/restore invalidation now restores `world_clocks.currentTick` from
+  the snapshot/checkpoint clock, not from `worldTimeMinutes`. Clock ledger
+  restore entries use the restored current tick as `uiTurnOrdinal` while
+  preserving zero elapsed minutes. Focused restore/clock tests pass `33/33`,
+  adjacent knowledge/integration tests pass `6/6`, and backend typecheck
+  passes.
 - Adaptive-run verifier:
   `scripts/phase95-verify-adaptive-run.mjs` now validates adaptive evidence
   roots for clone lineage, required artifacts, turn/done boundaries, raw-ref
@@ -40,7 +62,15 @@ fresh/cloned 60-turn human-style campaigns or 600+ soak/replay behavior.
   stops, repeated action/narration loops, and action-mode diversity. Its
   regression suite covers fresh and clone roots, clone-manifest/source-id
   residue, public world/history projection leaks, quick-action authority, and
-  60-turn mode diversity; current run passed `6/6`.
+  60-turn mode diversity. The latest verifier boundary also allows normal
+  hyphenated in-world prose such as `Route-Scout` while still rejecting
+  machine-shaped ids such as `route-a1`; current run passed `7/7`.
+- Clone pilot after the GM Read/restore fixes:
+  `output/phase95-clone-pilot-human-20260524-1800` cloned source campaign
+  `b876b838-0e49-44a4-9693-8cf23a2ba4a4` into
+  `51064126-fdd6-465f-9d4f-f9ed7c39b599`, completed `3/3` adaptive turns, and
+  passed `scripts/phase95-verify-adaptive-run.mjs` with
+  `PHASE95_TARGET_TURNS=3`, `hardFailureCount=0`, and `warningCount=0`.
 - Issued-ref owner matrix:
   `backend/src/engine/gameplay-control-plane-contract.ts` now records issuer
   owner, resolver owner, validators, receipts, projections, recovery modes, and
@@ -62,11 +92,10 @@ acceptance.
 
 ## Next Evidence Sequence
 
-1. Run the adaptive verifier against a short fresh pilot root and a short clone
-   pilot root before any 60-turn claim. Use
-   `scripts/phase95-clone-adaptive-setup.ts` for clone setup so the baseline
-   pool promise is awaited and clone provenance artifacts are written before
-   verification.
+1. Run a short fresh pilot root through the adaptive verifier before any
+   60-turn claim. The latest short clone pilot is clean, but the fresh pilot
+   setup still needs a successful generated-world root after the earlier
+   worldgen timeout.
 2. Run one bounded cloned-campaign rollback/replay pilot: create clean clone,
    run several real turns, force or exercise rollback-critical recovery, verify
    DB/chat/history/public projection/vector evidence before and after retry.

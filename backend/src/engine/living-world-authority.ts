@@ -649,6 +649,7 @@ export function invalidateAuthorityAfterRestore(input: {
   campaignId: string;
   restoredWorldVersion: number;
   restoredWorldTimeMinutes: number;
+  restoredCurrentTick: number;
   reason: string;
 }): void {
   const timestamp = now();
@@ -796,13 +797,14 @@ export function invalidateAuthorityAfterRestore(input: {
     .set({
       worldVersion: input.restoredWorldVersion,
       worldTimeMinutes: input.restoredWorldTimeMinutes,
-      currentTick: input.restoredWorldTimeMinutes,
+      currentTick: input.restoredCurrentTick,
       updatedAt: timestamp,
     })
     .where(eq(worldClocks.campaignId, input.campaignId))
     .run();
 
-  const sourceReceiptRef = `restore:${input.restoredWorldVersion}:${input.restoredWorldTimeMinutes}`;
+  const sourceReceiptRef =
+    `restore:${input.restoredWorldVersion}:${input.restoredWorldTimeMinutes}:${input.restoredCurrentTick}`;
   const ledgerEntry = TURN_CLOCK_LEDGER_ENTRY_SCHEMA.parse({
     clockReceiptId: clockReceiptId({
       campaignId: input.campaignId,
@@ -814,7 +816,7 @@ export function invalidateAuthorityAfterRestore(input: {
     }),
     campaignId: input.campaignId,
     turnId: sourceReceiptRef,
-    uiTurnOrdinal: input.restoredWorldTimeMinutes,
+    uiTurnOrdinal: input.restoredCurrentTick,
     baseWorldVersion: priorClock.worldVersion,
     deltaMinutes: 0,
     reasonKind: "replay_restore",

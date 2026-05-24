@@ -566,6 +566,90 @@ describe("GM Read contract", () => {
     ).toEqual([]);
   });
 
+  it("accepts incomplete structural dialogue proposals into semantic repair instead of schema-failing the turn", () => {
+    const read = gmReadSchema.parse({
+      ...baseRead,
+      path: "tool_plan",
+      turnGrounding: testTurnGrounding({
+        intentKind: "procedural_information",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "route",
+        durability: "durable",
+      }),
+      turnIntent: "Ask the route-scout for the first route marker wording.",
+      runtimeRequirement: {
+        kind: "dialogue_outcome",
+        durability: "durable",
+        topicKind: "route",
+        speakerBinding: { kind: "visible_actor", speakerRef: "Road Warden" },
+        requiresStructuralEffect: true,
+      },
+    });
+
+    expect(validateGmReadForFrame(read, createFrame())).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: "runtimeRequirement.effectKind",
+        message: expect.stringContaining("structural-dialogue-requires-explicit-effect-kind"),
+      }),
+    ]));
+  });
+
+  it("repairs missing structural dialogue effectKind by choosing an explicit non-structural dialogue outcome", async () => {
+    const invalidRead = gmReadSchema.parse({
+      ...baseRead,
+      path: "tool_plan",
+      turnGrounding: testTurnGrounding({
+        intentKind: "procedural_information",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "route",
+        durability: "durable",
+      }),
+      turnIntent: "Ask the route-scout for the first route marker wording.",
+      runtimeRequirement: {
+        kind: "dialogue_outcome",
+        durability: "durable",
+        topicKind: "route",
+        speakerBinding: { kind: "visible_actor", speakerRef: "Road Warden" },
+        requiresStructuralEffect: true,
+      },
+    });
+    const repairedRead = gmReadSchema.parse({
+      ...invalidRead,
+      runtimeRequirement: {
+        kind: "dialogue_outcome",
+        durability: "durable",
+        topicKind: "route",
+        speakerBinding: { kind: "visible_actor", speakerRef: "Road Warden" },
+        requiresStructuralEffect: false,
+      },
+    });
+
+    vi.mocked(safeGenerateObject)
+      .mockResolvedValueOnce(safeResult(invalidRead))
+      .mockResolvedValueOnce(safeResult(repairedRead));
+
+    await expect(runGmRead({
+      provider,
+      playerAction:
+        "I ask Route-Scout Fen Dorrow to point out the first physical marker on the Ventwatch Ridge route.",
+      frame: createFrame(),
+    })).resolves.toMatchObject({
+      path: "tool_plan",
+      runtimeRequirement: {
+        kind: "dialogue_outcome",
+        topicKind: "route",
+        requiresStructuralEffect: false,
+      },
+    });
+
+    expect(safeGenerateObject).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(safeGenerateObject).mock.calls[1]?.[0]?.prompt).toContain(
+      "structural-dialogue-requires-explicit-effect-kind",
+    );
+  });
+
   it("keeps runtimeRequirement topicKind aligned with runtime tool schemas", () => {
     expect(gmReadSchema.safeParse({
       ...baseRead,
