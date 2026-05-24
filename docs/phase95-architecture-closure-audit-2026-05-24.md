@@ -241,10 +241,23 @@ remain required before calling the gameplay loop mature.
 
 ## Current P2 Queue
 
-- Phase 88 harness text still says clone copies campaign DBs although the code
-  now uses `cloneCampaignCleanStart`.
+No local P2 implementation/documentation blockers are listed after the
+observability evidence policy and stale harness-prose closure. This is still
+**not** Phase 95 acceptance: Oracle bundled GO, Browser UI evidence,
+human-style play, and longer soak/replay remain required.
 
 Recently closed P2:
+
+- Stale Phase 88 harness prose is reconciled. Current architecture docs now
+  mark the raw-copy clone statement as historical pre-fix Oracle evidence, and
+  the live Phase 88/94 harness clone paths call `cloneCampaignCleanStart`
+  instead of defining DB-copy clone semantics themselves.
+
+- Observability retention/redaction policy is now explicit and executable.
+  The policy names artifact classes, retention windows, raw-local-only
+  evidence, remote review/publication gates, and the acceptance-report summary
+  surface. Raw SSE, full-turn artifacts, turn logs, prompt dumps, and Workshop
+  trace payloads fail closed for remote publication.
 
 - World-brain/forecast/guardrail hidden-leak coverage is locally hardened for
   current known support lanes. Final-visible prompt assembly now reprojects

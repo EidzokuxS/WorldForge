@@ -7,6 +7,10 @@ import {
   type Phase94HardInvariantId,
   type Phase94RouteId,
 } from "../../backend/src/engine/phase-94-trace-assertions.js";
+import type {
+  ObservabilityArtifactKind,
+  ObservabilityPolicySummary,
+} from "../../backend/src/lib/observability-evidence-policy.js";
 
 export type Phase94ArtifactKind =
   | "manifest"
@@ -173,6 +177,12 @@ export interface Phase94LivingWorldAssertionsArtifact {
   diagnostics: Phase94ReportDiagnostic[];
 }
 
+export interface Phase94ObservabilityEvidencePolicy extends ObservabilityPolicySummary {
+  rawLocalOnlyKinds: ObservabilityArtifactKind[];
+  remoteReviewKinds: ObservabilityArtifactKind[];
+  remotePublicKinds: ObservabilityArtifactKind[];
+}
+
 export interface Phase94AcceptanceReport {
   phase: 94;
   runId: string;
@@ -187,6 +197,7 @@ export interface Phase94AcceptanceReport {
   softNotes: Phase94SoftNote[];
   diagnostics: Phase94ReportDiagnostic[];
   metrics: Phase94LivingWorldMetrics;
+  observabilityEvidencePolicy: Phase94ObservabilityEvidencePolicy;
 }
 
 export const PHASE94_REQUIRED_ARTIFACTS: readonly Phase94ArtifactKind[] = [

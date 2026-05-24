@@ -217,7 +217,7 @@ architecture boundaries by accident.
 | Store manifest/bundles | `store-manifest.json`, captured stores | bundle/restore services | evidence hashes/reports | coverage, policies, hashes, row counts | checkpoint/turn snapshot manifests | tampered SQLite/vector evidence tests |
 | Vectors | LanceDB episodic/lore tables | vector services plus rollback policy | retrieval support | campaign/audience filters, row counts, hashes | semantic retrieval only | restore verification and rollback reconcile tests |
 | Clone/rollback/replay | clone manifest, turn snapshots, restore bundles | clone/rollback/restore service | playtest logs | operation mode, path safety, rewrite/purge/rebuild/reject | clone manifest, restore evidence | clean-start clone, fail-closed replay, staged restore |
-| Observability/evals | logs, traces, reports | observability/playtest harness | human/Codex moves | redaction and evidence rubric | verdict reports, trace ids | GitNexus/tests done; initial Browser drawer/freeform-turn smoke done; Oracle/play pending |
+| Observability/evals | logs, traces, reports | observability/playtest harness | human/Codex moves | typed retention/redaction policy, publication target validator, evidence rubric | verdict reports, trace ids, policy summary | GitNexus/tests done; initial Browser drawer/freeform-turn smoke done; Oracle/play pending |
 
 ## Recovery Matrix
 
@@ -268,10 +268,14 @@ These items are intentionally not buried under "green tests":
   not wake a command node or enter its frame, and a stale proposal cannot
   double-spend a consumed report, drain a resource twice, or create a second
   authority trace.
-- P2: observability retention/redaction policy should be made explicit before
-  remote/long-running trace publication.
-- P2: Phase 88 harness prose still says clone copies DBs even though code now
-  calls the clean-start clone service.
+- Closed P2: observability retention/redaction policy is now explicit and
+  executable. `observability-evidence-policy` defines typed artifact classes,
+  retention windows, raw-local-only boundaries, remote-publication validation,
+  and acceptance-report policy summaries.
+- Closed P2: stale Phase 88 harness prose has been reconciled. Current docs
+  distinguish historical pre-fix Oracle evidence from current architecture,
+  and the live Phase 88/94 harness clone paths call `cloneCampaignCleanStart`
+  rather than defining DB-copy clone semantics.
 - Closed P2: world-brain/forecast/guardrail hidden-leak coverage is hardened
   for current known support lanes. Final-visible prompt assembly reprojects
   world-brain direction before formatting visible sections, and grounded

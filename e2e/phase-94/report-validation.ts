@@ -16,6 +16,9 @@ import {
   type Phase94RouteId,
 } from "../../backend/src/engine/phase-94-trace-assertions.js";
 import {
+  buildObservabilityEvidencePolicySummary,
+} from "../../backend/src/lib/observability-evidence-policy.js";
+import {
   assertPhase94BaselinePoolValid,
   assertPhase94ManifestValid,
   type Phase94AcceptanceReport,
@@ -690,6 +693,7 @@ export function validatePhase94ReportArtifacts(options: Phase94ReportValidationO
     softNotes,
     diagnostics,
     metrics,
+    observabilityEvidencePolicy: buildObservabilityEvidencePolicySummary(),
   };
   const livingWorldAssertions: Phase94LivingWorldAssertionsArtifact = {
     phase: 94,

@@ -54,10 +54,13 @@ Clone/replay/rollback/vector R2 bundle review on 2026-05-24:
 - Required next slice: tighten manifest policy declarations first, then add a
   manifest-owned executor covering clean-start clone plus vector-safe
   rollback/restore. Do not ship a vector-only patch as the acceptance boundary.
-- P0s verified: Phase 95 clone setup still uses Phase 94 raw-copy behavior;
-  turn rollback leaves live vectors untouched when snapshots exclude vectors;
-  manifest rows are evidence, not execution rules; vector cleanup can depend
-  on non-durable pending in-memory state.
+- P0s verified at that reviewed HEAD: Phase 95 clone setup still used Phase
+  94 raw-copy behavior; turn rollback left live vectors untouched when
+  snapshots excluded vectors; manifest rows were evidence, not execution
+  rules; vector cleanup could depend on non-durable pending in-memory state.
+  This is historical Oracle evidence for the pre-fix tree, not current clone
+  architecture authority. Current HEAD uses manifest-owned clean-start clone
+  through `cloneCampaignCleanStart` for the Phase 88 and Phase 94 harnesses.
 - P1s verified: rollback policy vocabulary is ambiguous before execution,
   vector row-count/hash evidence is incomplete, source campaign id scrub is
   scalar-only in the current clone helpers, and multi-store clone/restore lacks
