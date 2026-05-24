@@ -2,7 +2,7 @@
 
 Date: 2026-05-24
 Branch: `develop`
-Reviewed base before this slice: `e83e4c5578c2663de0c8c54a37d1efa128342326`
+Reviewed base before this slice: `aa6a7fb582c2203be2813565c48f90af79dc77dc`
 Status: **NO-GO for long-play acceptance**
 
 This audit exists to keep the Phase 95 reset/rebuild honest. The product goal is
@@ -36,9 +36,10 @@ semantics, public projection guard strength, frontend raw-id fallback, and
 pending narration recovery projection. The actor/tool ownership P0 has since
 been implemented locally. The restore/vector/recovery P0 queue has also now
 been implemented locally with targeted contract tests. The public projection
-guard and frontend raw-id fallback P1s have also been implemented locally with
-targeted backend/frontend tests and frontend/backend typechecks, but the branch
-remains NO-GO for long-play acceptance until the remaining P1 queue closes, full verification, GitNexus,
+guard, frontend raw-id fallback, and pending-narration public recovery DTO P1s
+have also been implemented locally with targeted backend/frontend tests and
+frontend/backend typechecks, but the branch remains NO-GO for long-play
+acceptance until the remaining P1 queue closes, full verification, GitNexus,
 Oracle bundled review, Browser evidence, and human-style play/soak evidence.
 
 No long human-style 60-turn, cloned-world, or 600-turn soak acceptance should
@@ -88,7 +89,7 @@ reviewed on a frozen current tree.
 | Knowledge/events | authority traces, events, knowledge rows | tool/proposal owner that accepted the event | recent transcript, observations | summaries as receipt payload only | citable/public/private surface policy | event refs, packet facts | rollback/vector rebuild tests |
 | Narrator packet | settled packet and fact list | narrator packet builder | support context, diagnostics | none | selectable/support/private classification | fact refs/evidence refs | resume packet tests |
 | Final narration attempt | narrator attempt record and compiled text | narration guard | style and support prompts | selected fact refs and style/order | selected ref existence, citable kind, private-term guard | public assistant message | no text fallback/unsupported term tests; full E2E gap remains |
-| Chat history/pending resume | chat history file plus saga state | chat route/resume owner | internal metadata | none | history projection, resume token check | public history DTO | P1 saga status must become coarse public recovery state |
+| Chat history/pending resume | chat history file plus saga state | chat route/resume owner | internal metadata | none | history projection, resume token check | public history DTO | coarse public recovery state plus opaque resume token; route tests reject saga status/id leakage |
 | Checkpoints/artifacts | checkpoint directories and manifest | checkpoint service | checkpoint UI labels | none | manifest restorable checks, path safety | checkpoint handles/metadata | P1 raw checkpoint ids need system-only or handle contract |
 | Vectors | LanceDB episodic/lore tables | vector services plus rollback policy | vector evidence stats | none | campaign/audience filters, row counts, hashes | semantic retrieval only | restore verifies evidence; turn rollback preserves matching pre-turn vectors and rebuilds missing rows from `location_recent_events` |
 | Observability | logs, trace spans, eval artifacts | observability/test harness | local-only full payloads | human/Codex moves | no private leakage to public/remote, evidence rubric | trace ids, verdict reports | Browser/UI, GitNexus, Oracle, human-style playtest evidence |
@@ -132,41 +133,42 @@ and human-style long-play evidence remain required.
      `campaign-main`, and matching object keys.
    - Targeted backend tests cover public handles passing while raw shapes fail.
 
+3. Pending narration public recovery DTO is fenced.
+   - Public `/chat/history` and pending-narration conflict/error responses no
+     longer expose `TurnSagaRecord.status`.
+   - Route tests cover coarse `recoveryState`, opaque `resumeToken`, and
+     absence of saga status, saga id, and turn id in public JSON/SSE.
+
 ## Current P1 Queue
 
-1. Pending narration must expose public recovery state, not saga internals.
-   - `pendingNarrationData` returns saga `status`.
-   - Required tests: `/history`, blocked action responses, and `/resume`
-     failures expose only coarse public state plus opaque `resumeToken`.
-
-2. Adjacent public campaign APIs must be classified or wrapped.
+1. Adjacent public campaign APIs must be classified or wrapped.
    - NPC promote and checkpoint APIs still trade raw ids.
    - Required closure: mark them explicit admin/system-only surfaces or wrap
      them in public `npcHandle`/`checkpointHandle` contracts.
 
-3. Deterministic due-world actor plans need emitted-ref coverage.
+2. Deterministic due-world actor plans need emitted-ref coverage.
    - Schedules reserve predicted scopes, but `executeActorPlanStep` does not
      validate actual emitted `stateDeltaRefs` against those scopes.
    - Required tests: travel/record-event active plans missing destination,
      event, or location scopes fail before DB updates.
 
-4. `offer_quick_actions` needs accepted-receipt boundary proof.
+3. `offer_quick_actions` needs accepted-receipt boundary proof.
    - It is durable public-handle authority, but not treated like a mutation in
      all GM loop boundary checks.
    - Required tests: if the turn does not reach accepted receipt closure, no
      quick-action offer row or SSE/projection survives.
 
-5. Clean-start clone must become fully manifest-owned.
+4. Clean-start clone must become fully manifest-owned.
    - SQLite uses the manifest plan; non-SQL policies are still partly
      hard-coded and no durable clone manifest is written to the target.
    - Required tests: non-SQL manifest policy mutation fails closed or is
      executed by the plan; target contains clone manifest artifact.
 
-6. Replay-preserving clone/replay must be executable rejection.
+5. Replay-preserving clone/replay must be executable rejection.
    - Manifest has replay policy, but there is no mode that fails closed when a
      caller asks for replay-preserving clone semantics.
 
-7. Clone test coverage must use a representative migrated source fixture.
+6. Clone test coverage must use a representative migrated source fixture.
    - Existing tests prove narrow happy paths. Need source-id residue across all
      rewrite/purge tables and nested JSON/text payloads.
 
@@ -186,7 +188,7 @@ and human-style long-play evidence remain required.
 
 ### A. Intake, Public Projection, Frontend
 
-Status: **P1 partly closed; adjacent/recovery public surfaces still open**
+Status: **P1 partly closed; adjacent public surfaces still open**
 
 Decision in force: durable quick-action handles and backend-issued public DTO
 handles are the player-facing authority boundary.
@@ -203,6 +205,7 @@ Options compared:
 References Used:
 
 - `backend/src/routes/chat.ts`
+- `backend/src/routes/__tests__/chat.test.ts`
 - `backend/src/routes/campaigns.ts`
 - `backend/src/engine/player-facing-events.ts`
 - `backend/src/engine/public-dto-handles.ts`
@@ -422,7 +425,8 @@ This list is the closure guard before any future "architecture GO" claim:
 - [x] Public guard rejects legacy raw id shapes. Targeted backend tests green.
 - [x] Frontend rejects raw id fallback as public handles. Targeted frontend
   tests and frontend typecheck green.
-- [ ] Pending narration exposes only public recovery state. P1.
+- [x] Pending narration exposes only public recovery state. Targeted route
+  tests green.
 - [ ] Checkpoint/NPC adjacent APIs are system-only or handle-wrapped. P1.
 - [x] Store manifest covers current stores.
 - [x] Restore verifies manifest evidence before copy.
@@ -436,9 +440,9 @@ This list is the closure guard before any future "architecture GO" claim:
 
 ## Next Implementation Order
 
-1. Pending narration public recovery DTO.
-2. Quick-action offer accepted-receipt cleanup.
-3. Due-world deterministic emitted-ref coverage.
+1. Quick-action offer accepted-receipt cleanup.
+2. Due-world deterministic emitted-ref coverage.
+3. Adjacent public campaign API classification/handle wrapping.
 4. Fully manifest-owned clean-start clone artifact and replay rejection.
 5. Oracle bundled full architecture GO, then Browser gameplay workability,
     fresh/cloned human-style 60-turn campaigns, and longer soak/replay.

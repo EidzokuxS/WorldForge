@@ -94,6 +94,10 @@ Implemented hardening slices after the reset:
 - Public DTO projection handles: `/world`, `/inventory`, and location entity
   surfaces now expose backend-owned public handles/aliases instead of raw
   authority ids.
+- Pending narration public recovery DTO: `/chat/history` and
+  pending-narration conflict/error responses now expose only coarse
+  `recoveryState`, `resumable`, and opaque `resumeToken`; internal saga status,
+  saga ids, and turn ids remain backend-only.
 - Lookup public projection boundary: `/chat/lookup` now treats grounded lookup
   output as a support/read-only result, projects it through a typed
   player-facing DTO, and persists only the projected answer into chat history.
@@ -134,7 +138,9 @@ Current post-slice status on `develop`:
   execution are implemented locally with targeted backend tests and backend
   typecheck green. Public projection guard coverage and frontend raw-id
   rejection are also implemented locally with targeted backend/frontend tests
-  and typechecks green. The architecture-closure audit is now recorded in
+  and typechecks green. Pending narration public recovery projection is
+  implemented locally with route tests and backend/frontend typechecks green.
+  The architecture-closure audit is now recorded in
   `docs/phase95-architecture-closure-audit-2026-05-24.md`; it is a NO-GO for
   long-play acceptance until the remaining P1 queue is closed and Oracle/
   Browser/play evidence passes.
@@ -148,11 +154,10 @@ Architecture closure audit on 2026-05-24:
 - P0s from that audit are now locally implemented: actor positive write scopes,
   restore-side hash/row evidence verification, episodic vector rollback
   retention/rebuild, and staged rerun-convergent restore.
-- P1s still open: pending narration public recovery DTO, adjacent public
-  campaign API handle/system classification, deterministic due-world emitted
-  ref coverage, quick-action accepted-receipt cleanup, fully manifest-owned
-  non-SQL clone policy, executable replay rejection, and broader clone residue
-  fixture coverage.
+- P1s still open: adjacent public campaign API handle/system classification,
+  deterministic due-world emitted ref coverage, quick-action accepted-receipt
+  cleanup, fully manifest-owned non-SQL clone policy, executable replay
+  rejection, and broader clone residue fixture coverage.
 
 ## End State
 
@@ -600,9 +605,11 @@ Unverified Assumptions:
    - Durable quick-action handles are implemented.
    - Public world/inventory/location DTOs and frontend world parsing now reject
      legacy raw id authority and keep `pdto_*`/`qac_*` as the public boundary.
-   - Next: finish the remaining public recovery/admin surfaces so they do not
-     expose raw backend ids, authority refs, saga/tool internals, or
-     support-only private terms.
+   - Pending narration recovery now exposes coarse state plus an opaque resume
+     token instead of saga internals.
+   - Next: finish the remaining adjacent public/admin surfaces so they do not
+     expose raw backend ids, authority refs, tool internals, or support-only
+     private terms.
    - Verify with targeted backend/frontend tests plus in-app Browser evidence
      when UI behavior changes.
    - Run GitNexus impact before symbol edits and detect_changes before commit.

@@ -390,6 +390,38 @@ function resumeTokenForSaga(
   return `resume_${sha256Prefix(`${saga.campaignId}:${saga.id}:${saga.turnId}`)}`;
 }
 
+const pendingNarrationRecoveryStates = [
+  "resume_ready",
+  "finalizing_turn",
+  "recovering",
+] as const;
+
+type PendingNarrationRecoveryState = (typeof pendingNarrationRecoveryStates)[number];
+
+type PendingNarrationPublicStatus = {
+  pendingNarration: true;
+  resumable: boolean;
+  recoveryState: PendingNarrationRecoveryState;
+  resumeToken?: string;
+};
+
+type PendingNarrationPublicData = PendingNarrationPublicStatus & {
+  error: string;
+};
+
+function pendingNarrationRecoveryState(
+  saga: Pick<TurnSagaRecord, "status"> | null,
+  resumable: boolean,
+): PendingNarrationRecoveryState {
+  if (resumable) {
+    return "resume_ready";
+  }
+  if (saga) {
+    return "finalizing_turn";
+  }
+  return "recovering";
+}
+
 function pendingNarrationBlockResponse(
   c: Context,
   campaignId: string,
@@ -807,20 +839,20 @@ function isPendingNarrationError(error: unknown): error is PendingNarrationError
 function pendingNarrationData(
   saga: Pick<TurnSagaRecord, "id" | "campaignId" | "turnId" | "status" | "settledTurnPacketId"> | null,
   message: string,
-) {
+): PendingNarrationPublicData {
   const resumable = sagaCanResumeNarration(saga);
   return {
     error: message,
     pendingNarration: true,
     resumable,
-    status: saga?.status,
+    recoveryState: pendingNarrationRecoveryState(saga, resumable),
     resumeToken: resumable && saga ? resumeTokenForSaga(saga) : undefined,
   };
 }
 
 function pendingNarrationStatus(
   saga: Pick<TurnSagaRecord, "id" | "campaignId" | "turnId" | "status" | "settledTurnPacketId"> | null,
-): { pendingNarration: true; resumable: boolean; status?: string; resumeToken?: string } | null {
+): PendingNarrationPublicStatus | null {
   if (!saga) {
     return null;
   }
@@ -829,7 +861,7 @@ function pendingNarrationStatus(
   return {
     pendingNarration: true,
     resumable,
-    status: saga.status,
+    recoveryState: pendingNarrationRecoveryState(saga, resumable),
     resumeToken: resumable ? resumeTokenForSaga(saga) : undefined,
   };
 }

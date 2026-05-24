@@ -97,7 +97,7 @@ export type ChatHistoryResponse = {
   pendingNarration?: {
     pendingNarration: true;
     resumable: boolean;
-    status?: string;
+    recoveryState: "resume_ready" | "finalizing_turn" | "recovering";
     resumeToken?: string;
   } | null;
 };

@@ -432,6 +432,31 @@ describe("GET /chat/history", () => {
     expect(body.messages[0].role).toBe("user");
   });
 
+  it("projects pending narration recovery without leaking saga status", async () => {
+    activateCampaign();
+    mockedFindPendingNarrationSaga.mockReturnValue({
+      id: "saga-hidden-history",
+      campaignId: CAMPAIGN_ID,
+      turnId: "turn-hidden-history",
+      status: "world_consequence_running",
+      settledTurnPacketId: null,
+    } as any);
+
+    const res = await app.request(`/chat/history?campaignId=${CAMPAIGN_ID}`);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.pendingNarration).toMatchObject({
+      pendingNarration: true,
+      resumable: false,
+      recoveryState: "finalizing_turn",
+    });
+    expect(body.pendingNarration).not.toHaveProperty("status");
+    expect(JSON.stringify(body)).not.toContain("world_consequence_running");
+    expect(JSON.stringify(body)).not.toContain("saga-hidden-history");
+    expect(JSON.stringify(body)).not.toContain("turn-hidden-history");
+  });
+
   it("returns 404 when the requested campaign cannot be loaded", async () => {
     mockedGetActive.mockReturnValue(null as any);
     mockedLoadCampaign.mockRejectedValue(new Error("missing campaign"));
@@ -2112,7 +2137,9 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(body).toMatchObject({
       pendingNarration: true,
       resumable: true,
+      recoveryState: "resume_ready",
     });
+    expect(body).not.toHaveProperty("status");
     expect(body.error).toContain("Resume it before sending a new action");
     expect(mockedResumePendingTurnNarration).not.toHaveBeenCalled();
     expect(mockedProcessTurn).not.toHaveBeenCalled();
@@ -2228,6 +2255,8 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(body).toContain("event: error");
     expect(body).toContain("\"pendingNarration\":true");
     expect(body).toContain("\"resumable\":true");
+    expect(body).toContain("\"recoveryState\":\"resume_ready\"");
+    expect(body).not.toContain("resolved_pending_narration");
     expect(body).not.toContain("turn-generic-pending");
     expect(body).not.toContain("saga-generic-pending");
     expect(mockedResumePendingTurnNarration).toHaveBeenCalledWith(
@@ -2442,7 +2471,9 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(body).toMatchObject({
       pendingNarration: true,
       resumable: true,
+      recoveryState: "resume_ready",
     });
+    expect(body).not.toHaveProperty("status");
     expect(body.error).toContain("Resume it before retrying");
     expect(mockedResumePendingTurnNarration).not.toHaveBeenCalled();
     expect(mockedProcessTurn).not.toHaveBeenCalled();
