@@ -28,10 +28,15 @@ vi.mock("../../campaign/store-manifest.js", () => ({
   })),
   writeCampaignStoreBundleManifest: vi.fn(),
   assertCampaignStoreBundleRestorable: vi.fn(),
+  assertCampaignStoreBundleRestorableWithEvidence: vi.fn(async () => ({
+    schemaVersion: 1,
+    stores: [],
+  })),
 }));
 
 vi.mock("../../vectors/episodic-events.js", () => ({
   clearPendingCommittedEvents: vi.fn(),
+  rebuildEpisodicEventsFromLocationRecentEvents: vi.fn(async () => ({ rebuiltCount: 0 })),
 }));
 
 vi.mock("node:fs", () => ({
@@ -50,7 +55,10 @@ import { captureSnapshot, restoreSnapshot } from "../state-snapshot.js";
 import { getDb, getSqliteConnection, closeDb } from "../../db/index.js";
 import { loadCampaign, readCampaignConfig } from "../../campaign/manager.js";
 import { getCampaignDir } from "../../campaign/paths.js";
-import { clearPendingCommittedEvents } from "../../vectors/episodic-events.js";
+import {
+  clearPendingCommittedEvents,
+  rebuildEpisodicEventsFromLocationRecentEvents,
+} from "../../vectors/episodic-events.js";
 import fs from "node:fs";
 
 const CAMPAIGN_ID = "test-campaign-123";
@@ -141,14 +149,26 @@ describe("state snapshot rollback bundle", () => {
 
     expect(fs.copyFileSync).toHaveBeenCalledWith(
       expect.stringContaining("bundle-001\\state.db"),
+      expect.stringContaining(".restore-staging\\current\\state.db"),
+    );
+    expect(fs.copyFileSync).toHaveBeenCalledWith(
+      expect.stringContaining(".restore-staging\\current\\state.db"),
       expect.stringContaining(`${CAMPAIGN_ID}\\state.db`),
     );
     expect(fs.copyFileSync).toHaveBeenCalledWith(
       expect.stringContaining("bundle-001\\config.json"),
+      expect.stringContaining(".restore-staging\\current\\config.json"),
+    );
+    expect(fs.copyFileSync).toHaveBeenCalledWith(
+      expect.stringContaining(".restore-staging\\current\\config.json"),
       expect.stringContaining(`${CAMPAIGN_ID}/config.json`),
     );
     expect(fs.copyFileSync).toHaveBeenCalledWith(
       expect.stringContaining("bundle-001\\chat_history.json"),
+      expect.stringContaining(".restore-staging\\current\\chat_history.json"),
+    );
+    expect(fs.copyFileSync).toHaveBeenCalledWith(
+      expect.stringContaining(".restore-staging\\current\\chat_history.json"),
       expect.stringContaining(`${CAMPAIGN_ID}/chat_history.json`),
     );
     expect(fs.cpSync).not.toHaveBeenCalledWith(
@@ -156,14 +176,15 @@ describe("state snapshot rollback bundle", () => {
       expect.any(String),
       expect.anything(),
     );
-    expect(fs.rmSync).toHaveBeenCalledWith(
+    expect(fs.rmSync).not.toHaveBeenCalledWith(
       expect.stringContaining("vectors\\episodic_events.lance"),
-      { recursive: true, force: true },
+      expect.anything(),
     );
     expect(fs.rmSync).not.toHaveBeenCalledWith(
       expect.stringContaining("vectors\\lore_cards.lance"),
       expect.anything(),
     );
+    expect(rebuildEpisodicEventsFromLocationRecentEvents).toHaveBeenCalledWith(CAMPAIGN_ID);
     expect(clearPendingCommittedEvents).toHaveBeenCalledWith(CAMPAIGN_ID);
   });
 

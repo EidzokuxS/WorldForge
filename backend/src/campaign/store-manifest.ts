@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import Database from "better-sqlite3";
 import * as lancedb from "@lancedb/lancedb";
 import { getSqliteConnection } from "../db/index.js";
 import {
@@ -92,17 +93,21 @@ function quoteSqlIdentifier(value: string): string {
   return `"${value.replace(/"/gu, '""')}"`;
 }
 
-function readSqliteRowCount(tableName: string): number {
+function readSqliteRowCountFromConnection(db: Database.Database, tableName: string): number {
   if (!SQLITE_TABLES.has(tableName)) {
     throw new Error(`Store manifest does not recognize sqlite table: ${tableName}`);
   }
-  const row = getSqliteConnection()
+  const row = db
     .prepare(`SELECT COUNT(*) AS count FROM ${quoteSqlIdentifier(tableName)}`)
     .get() as { count?: number } | undefined;
   if (!row || typeof row.count !== "number" || !Number.isFinite(row.count)) {
     throw new Error(`Could not read sqlite row count for store manifest table: ${tableName}`);
   }
   return row.count;
+}
+
+function readSqliteRowCount(tableName: string): number {
+  return readSqliteRowCountFromConnection(getSqliteConnection(), tableName);
 }
 
 function readJsonArrayCount(filePath: string): number {
@@ -342,6 +347,95 @@ function assertCapturedFile(input: {
   }
 }
 
+function entryWithoutEvidenceHash(
+  entry: CampaignStoreBundleEntry,
+): Omit<CampaignStoreBundleEntry, "evidenceHash"> {
+  const { evidenceHash: _evidenceHash, ...withoutEvidenceHash } = entry;
+  return withoutEvidenceHash;
+}
+
+function assertEntryEvidenceHash(entry: CampaignStoreBundleEntry, actualHash: string): void {
+  if (!entry.requiresHash) return;
+  if (entry.evidenceHash !== actualHash) {
+    throw new Error(`Campaign store bundle evidence hash mismatch for ${entry.store}.`);
+  }
+}
+
+function assertCapturedRowCount(entry: CampaignStoreBundleEntry, actualRowCount: number): void {
+  if (!entry.requiresRowCount || entry.captureStatus !== "captured") return;
+  if (entry.rowCount !== actualRowCount) {
+    throw new Error(
+      `Campaign store bundle row count mismatch for ${entry.store}: expected ${entry.rowCount}, got ${actualRowCount}.`,
+    );
+  }
+}
+
+function assertMetadataEvidenceHash(entry: CampaignStoreBundleEntry): void {
+  assertEntryEvidenceHash(entry, evidenceHashFor(entryWithoutEvidenceHash(entry)));
+}
+
+function verifySqliteBundleEvidence(manifest: CampaignStoreBundleManifest, bundleDir: string): void {
+  const dbPath = path.join(bundleDir, "state.db");
+  const stateDbHash = fileDigest(dbPath);
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  try {
+    for (const entry of manifest.stores.filter((candidate) => candidate.store.startsWith("sqlite:"))) {
+      if (entry.captureStatus !== "captured" || entry.bundlePath !== "state.db") {
+        continue;
+      }
+      const tableName = entry.store.slice("sqlite:".length);
+      assertEntryEvidenceHash(entry, stateDbHash);
+      assertCapturedRowCount(entry, readSqliteRowCountFromConnection(db, tableName));
+    }
+  } finally {
+    db.close();
+  }
+}
+
+function verifyJsonBundleEvidence(manifest: CampaignStoreBundleManifest, bundleDir: string): void {
+  const configEntry = findStore(manifest, "json:config");
+  if (configEntry.captureStatus === "captured") {
+    assertEntryEvidenceHash(configEntry, fileDigest(path.join(bundleDir, "config.json")));
+  }
+
+  const chatEntry = findStore(manifest, "json:chat_history");
+  const chatPath = path.join(bundleDir, "chat_history.json");
+  if (chatEntry.captureStatus === "captured") {
+    assertEntryEvidenceHash(chatEntry, fileDigest(chatPath));
+    assertCapturedRowCount(chatEntry, readJsonArrayCount(chatPath));
+  }
+}
+
+async function verifyVectorBundleEvidence(input: {
+  manifest: CampaignStoreBundleManifest;
+  bundleDir: string;
+  includeVectors: boolean;
+}): Promise<void> {
+  const vectorsDir = path.join(input.bundleDir, "vectors");
+  for (const store of ["vectors:episodic_events", "vectors:lore_cards"]) {
+    const entry = findStore(input.manifest, store);
+    if (entry.captureStatus !== "captured") {
+      assertMetadataEvidenceHash(entry);
+      continue;
+    }
+    if (!input.includeVectors) {
+      throw new Error(`Campaign store bundle unexpectedly captured vectors for ${store}.`);
+    }
+    const tableName = vectorTableNameForStore(store);
+    const tablePath = path.join(vectorsDir, `${tableName}.lance`);
+    assertEntryEvidenceHash(entry, directoryDigest(tablePath));
+    assertCapturedRowCount(entry, await readVectorRowCount({ vectorsDir, tableName }));
+  }
+}
+
+function verifyMetadataOnlyEvidence(manifest: CampaignStoreBundleManifest): void {
+  for (const entry of manifest.stores) {
+    if (entry.captureStatus === "captured") continue;
+    if (entry.store.startsWith("vectors:")) continue;
+    assertMetadataEvidenceHash(entry);
+  }
+}
+
 export function assertCampaignStoreBundleRestorable(input: {
   bundleDir: string;
   includeVectors: boolean;
@@ -387,5 +481,21 @@ export function assertCampaignStoreBundleRestorable(input: {
     }
   }
 
+  return manifest;
+}
+
+export async function assertCampaignStoreBundleRestorableWithEvidence(input: {
+  bundleDir: string;
+  includeVectors: boolean;
+}): Promise<CampaignStoreBundleManifest> {
+  const manifest = assertCampaignStoreBundleRestorable(input);
+  verifySqliteBundleEvidence(manifest, input.bundleDir);
+  verifyJsonBundleEvidence(manifest, input.bundleDir);
+  await verifyVectorBundleEvidence({
+    manifest,
+    bundleDir: input.bundleDir,
+    includeVectors: input.includeVectors,
+  });
+  verifyMetadataOnlyEvidence(manifest);
   return manifest;
 }

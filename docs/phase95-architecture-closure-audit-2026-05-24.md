@@ -2,7 +2,7 @@
 
 Date: 2026-05-24
 Branch: `develop`
-Reviewed HEAD: `b8ebd809340d3897be5623f028c7a8227c5d27f5`
+Reviewed base before this slice: `e83e4c5578c2663de0c8c54a37d1efa128342326`
 Status: **NO-GO for long-play acceptance**
 
 This audit exists to keep the Phase 95 reset/rebuild honest. The product goal is
@@ -26,16 +26,21 @@ The current branch has important hardening slices landed and verified:
 - store manifest coverage;
 - vector row-count/hash evidence for checkpoint bundles;
 - manifest-owned clean-start clone service;
-- vector-policy turn rollback skeleton.
+- restore-side manifest evidence verification before copy;
+- staged, idempotent restore lifecycle;
+- vector-policy turn rollback with episodic pre-turn vector retention/rebuild.
 
 It is **not** Phase 95 closure. Independent current-HEAD audits found blockers
 in actor/tool ownership, restore integrity/crash convergence, vector rollback
 semantics, public projection guard strength, frontend raw-id fallback, and
 pending narration recovery projection. The actor/tool ownership P0 has since
-been implemented locally; the remaining P0 queue is restore/vector/recovery.
+been implemented locally. The restore/vector/recovery P0 queue has also now
+been implemented locally with targeted contract tests, but the branch remains
+NO-GO for long-play acceptance until P1 closure, full verification, GitNexus,
+Oracle bundled review, Browser evidence, and human-style play/soak evidence.
 
 No long human-style 60-turn, cloned-world, or 600-turn soak acceptance should
-resume until the P0 queue below is executable, tested, bundled, and Oracle
+resume until the P1 queue below is executable, tested, bundled, and Oracle
 reviewed on a frozen current tree.
 
 ## Full Stage Coverage
@@ -56,9 +61,9 @@ reviewed on a frozen current tree.
 | Final narration | backend-issued fact refs and narrator attempt | narration guard/turn processor | style instruction, support context | selected fact refs/evidence refs/order/style | fact-ref required, private/backend term scan, grounding compile, repair/fail-closed | assistant SSE/chat line; no live text fallback; **P2: full turn/resume regression still needed** |
 | SSE/API projection | player-facing DTO factories | projection modules and route projectors | internal saga/tool/state objects | none | public DTO schemas, backend-ref guard, explicit event allowlists | `turn_resolution`, lookup, world, inventory, history tests; **P1: guard misses raw legacy id shapes** |
 | Frontend projection | `frontend/lib/api.ts` parsed DTOs | frontend API parser | debug state, local render state | none | public handle parser, SSE parser, malformed payload errors | UI render tests and Browser evidence; **P1: raw-id fallback still accepted** |
-| Persistence bundles | `store-manifest.json` plus campaign stores | manifest/bundle capture and restore services | evidence hashes, playtest reports | none | manifest coverage, policy schemas, path safety | checkpoint/turn snapshot tests; **P0: restore does not verify recorded hash/row count before copy** |
+| Persistence bundles | `store-manifest.json` plus campaign stores | manifest/bundle capture and restore services | evidence hashes, playtest reports | none | manifest coverage, policy schemas, path safety, hash/row-count recomputation | checkpoint/turn snapshot tests; corrupted SQLite/vector evidence fails before live copy |
 | Clone | source campaign stores plus manifest plan | clean-start clone service | old source artifacts as forensic context only | none | active-turn rejection, id rewrite/purge/rebuild plan, path safety | clean clone manifest and clone tests; **P1: non-SQL policies partly hard-coded, no durable clone artifact** |
-| Rollback/replay/vector | turn snapshots, checkpoints, vector stores, event ledgers | rollback/restore service | vector evidence, playtest harness logs | none | restore policy executor, vector include/exclude policy, recovery mode gate | rollback snapshot restore; **P0: episodic vector `purge_rebuild` is purge-only and restore is not crash-convergent** |
+| Rollback/replay/vector | turn snapshots, checkpoints, vector stores, event ledgers | rollback/restore service | vector evidence, playtest harness logs | none | restore policy executor, vector include/exclude policy, recovery mode gate | rollback snapshot restore; episodic vectors reconcile to restored receipts while preserving matching pre-turn vectors |
 | Observability/evals | bounded traces, test artifacts, reports | observability module and playtest harness | local Workshop payloads, redacted remote traces | human/Codex playtest actions | event schemas, redaction policy, evidence completeness rubric | contract tests, GitNexus, Oracle bundles, Browser evidence, human-style playtest reports |
 
 ## State-Class Ownership Matrix
@@ -83,7 +88,7 @@ reviewed on a frozen current tree.
 | Final narration attempt | narrator attempt record and compiled text | narration guard | style and support prompts | selected fact refs and style/order | selected ref existence, citable kind, private-term guard | public assistant message | no text fallback/unsupported term tests; full E2E gap remains |
 | Chat history/pending resume | chat history file plus saga state | chat route/resume owner | internal metadata | none | history projection, resume token check | public history DTO | P1 saga status must become coarse public recovery state |
 | Checkpoints/artifacts | checkpoint directories and manifest | checkpoint service | checkpoint UI labels | none | manifest restorable checks, path safety | checkpoint handles/metadata | P1 raw checkpoint ids need system-only or handle contract |
-| Vectors | LanceDB episodic/lore tables | vector services plus rollback policy | vector evidence stats | none | campaign/audience filters, row counts, hashes | semantic retrieval only | P0 restore hash/row-count verification and pre-turn retention needed |
+| Vectors | LanceDB episodic/lore tables | vector services plus rollback policy | vector evidence stats | none | campaign/audience filters, row counts, hashes | semantic retrieval only | restore verifies evidence; turn rollback preserves matching pre-turn vectors and rebuilds missing rows from `location_recent_events` |
 | Observability | logs, trace spans, eval artifacts | observability/test harness | local-only full payloads | human/Codex moves | no private leakage to public/remote, evidence rubric | trace ids, verdict reports | Browser/UI, GitNexus, Oracle, human-style playtest evidence |
 
 ## Current P0 Queue
@@ -95,26 +100,20 @@ Closed locally after this audit:
   writes when no allowed scopes are supplied, actor-private durable memory is
   scoped to the actor rather than broad `world:event`, and a regression proves
   a scheduled `npc:npc-key:state` actor cannot tag the player.
+- Restore integrity now verifies recorded physical hashes and row counts
+  before any live campaign copy. Corrupted SQLite evidence and tampered vector
+  row-count evidence fail closed.
+- Restore now stages bundle files under campaign-local `.restore-staging`
+  before closing live runtime handles, clears stale staging on rerun, applies
+  one staged bundle into the live campaign, and removes staging before reload.
+- Turn rollback now reconciles `vectors:episodic_events` after restore from
+  authoritative `location_recent_events`: matching pre-turn vector rows are
+  preserved, failed-turn vector rows are purged, and missing accepted receipt
+  rows are rebuilt without inventing new authority.
 
-1. Restore integrity must verify evidence before restore.
-   - Current risk: `assertCampaignStoreBundleRestorable` checks existence, not
-     recorded `evidenceHash` or vector `rowCount` recomputation.
-   - Required closure: corrupted `state.db`, config/chat files, and LanceDB
-     tables fail before any copy into the live campaign.
-
-2. Episodic vector rollback must converge to pre-turn state.
-   - Current risk: `purge_rebuild` is currently purge-only for episodic
-     vectors, so rollback can erase valid pre-turn semantic memory.
-   - Required closure: seed pre-turn episodic vectors, add failed-turn vectors,
-     rollback, then prove old rows are queryable and failed-turn rows are gone.
-
-3. Restore must be crash-convergent.
-   - Current risk: restore copies DB, JSON, chat, and vectors sequentially
-     without a restore-intent marker, temp target, atomic rename, or recovery
-     for a mixed partial restore.
-   - Required closure: failure injection after DB copy, config copy, chat copy,
-     and vector copy must converge after restart/load to old state or fully
-     restored state, never a mixed campaign.
+No P0 blockers are currently listed after this local slice. That is not an
+acceptance claim: the P1 queue, Oracle full architecture GO, Browser evidence,
+and human-style long-play evidence remain required.
 
 ## Current P1 Queue
 
@@ -327,7 +326,7 @@ Unverified Assumptions:
 
 ### F. Persistence, Clone, Replay, Rollback, Vector
 
-Status: **P0 open**
+Status: **P1 open after restore/vector P0 closure**
 
 Decision in force: clone/rollback/replay/vector is a manifest-owned store
 lifecycle problem. Clean-start clone is Phase 95 mode; replay-preserving clone
@@ -357,14 +356,16 @@ References Used:
 
 Unverified Assumptions:
 
-- Episodic vector pre-turn retention can be rebuilt or preserved without
-  making rollback snapshots too large for routine player turns.
-- Atomic restore can be implemented with temp dirs/files and recovery markers
-  inside each campaign directory without cross-platform filesystem surprises.
+- The staged restore lifecycle is sufficient for local crash convergence when
+  rerunning the same restore after interruption; deeper startup-time recovery
+  markers can remain P1/P2 unless Browser/soak evidence proves a gap.
+- Rebuilt accepted episodic rows without vectors are acceptable as a
+  short-lived degradation until normal embedding paths refresh them; preserved
+  pre-turn rows keep their existing vectors.
 
 ### G. Observability, Oracle, Browser, Acceptance
 
-Status: **NO-GO until P0/P1 queues close**
+Status: **NO-GO until P1 queues close and Oracle/Browser/play evidence passes**
 
 Decision in force: 60-turn runs are smoke evidence, not the goal. Acceptance
 requires contract tests, GitNexus impact/detect changes, Oracle GO on bundled
@@ -417,9 +418,10 @@ This list is the closure guard before any future "architecture GO" claim:
 - [ ] Pending narration exposes only public recovery state. P1.
 - [ ] Checkpoint/NPC adjacent APIs are system-only or handle-wrapped. P1.
 - [x] Store manifest covers current stores.
-- [ ] Restore verifies manifest evidence before copy. P0.
-- [ ] Restore is crash-convergent. P0.
-- [ ] Episodic vector rollback preserves/rebuilds pre-turn memory. P0.
+- [x] Restore verifies manifest evidence before copy.
+- [x] Restore uses a staged idempotent lifecycle for rerun convergence.
+- [x] Episodic vector rollback preserves/rebuilds pre-turn memory from
+  authoritative receipts.
 - [ ] Clean-start clone is fully manifest-owned and writes clone evidence. P1.
 - [ ] Replay-preserving clone/replay is executable fail-closed. P1.
 - [ ] Observability evidence includes Browser UI, GitNexus, Oracle bundle, and
@@ -427,13 +429,10 @@ This list is the closure guard before any future "architecture GO" claim:
 
 ## Next Implementation Order
 
-1. Restore evidence verification and fail-before-copy tests.
-2. Crash-convergent restore intent/temp/atomic lifecycle.
-3. Episodic vector rollback retention/rebuild semantics.
-4. Public projection guard and frontend raw-id rejection.
-5. Pending narration public recovery DTO.
-6. Quick-action offer accepted-receipt cleanup.
-7. Due-world deterministic emitted-ref coverage.
-8. Fully manifest-owned clean-start clone artifact and replay rejection.
-9. Oracle bundled full architecture GO, then Browser gameplay workability,
+1. Public projection guard and frontend raw-id rejection.
+2. Pending narration public recovery DTO.
+3. Quick-action offer accepted-receipt cleanup.
+4. Due-world deterministic emitted-ref coverage.
+5. Fully manifest-owned clean-start clone artifact and replay rejection.
+6. Oracle bundled full architecture GO, then Browser gameplay workability,
     fresh/cloned human-style 60-turn campaigns, and longer soak/replay.

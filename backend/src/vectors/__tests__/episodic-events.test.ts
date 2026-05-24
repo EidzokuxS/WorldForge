@@ -34,6 +34,7 @@ import {
   drainPendingCommittedEventsByIds,
   embedAndUpdateEvent,
   readPendingCommittedEvents,
+  rebuildEpisodicEventsFromLocationRecentEvents,
   retractPendingCommittedEventsForTick,
   searchEpisodicEvents,
   storeEpisodicEvent,
@@ -624,6 +625,131 @@ describe("episodic-events", () => {
         where: "id = 'evt-2'",
         values: { vector: [0.5, 0.5] },
       });
+    });
+  });
+
+  describe("rebuildEpisodicEventsFromLocationRecentEvents", () => {
+    it("rebuilds the derived episodic table from authoritative location_recent_events after rollback purge", async () => {
+      const { db, table } = createMockDb({
+        queryRows: [
+          {
+            campaignId: "campaign-live",
+            id: "event-accepted-1",
+            text: "Mira confirms the sealed proof is valid.",
+            tick: 12,
+            location: "loc-a",
+            participants: [],
+            importance: 6,
+            type: "dialogue",
+            visibility: "player_perceivable",
+            surfaceRoute: "player_visible",
+            knowledgeRoute: "",
+            hiddenCauseTerms: [],
+            vector: [0.1, 0.2],
+          },
+          {
+            campaignId: "campaign-live",
+            id: "failed-turn-event",
+            text: "This failed-turn event must be purged.",
+            tick: 14,
+            location: "loc-a",
+            participants: [],
+            importance: 9,
+            type: "event",
+            visibility: "player_perceivable",
+            surfaceRoute: "player_visible",
+            knowledgeRoute: "",
+            hiddenCauseTerms: [],
+            vector: [0.9, 0.9],
+          },
+        ],
+      });
+      db.tableNames
+        .mockResolvedValueOnce(["episodic_events"])
+        .mockResolvedValueOnce([]);
+      mockGetVectorDb.mockReturnValue(db);
+      const recentEvents = [
+        {
+          id: "recent-row-1",
+          campaignId: "campaign-live",
+          locationId: "loc-a",
+          sourceEventId: "event-accepted-1",
+          eventType: "dialogue",
+          summary: "Mira confirms the sealed proof is valid.",
+          surfaceRoute: "player_visible",
+          visibility: "player_perceivable",
+          knowledgeRoute: null,
+          hiddenCauseTerms: "[]",
+          tick: 12,
+          importance: 6,
+          createdAt: 100,
+        },
+        {
+          id: "recent-row-2",
+          campaignId: "campaign-live",
+          locationId: "loc-a",
+          sourceEventId: null,
+          eventType: "event",
+          summary: "Renn privately notices the forged counterseal.",
+          surfaceRoute: "actor_private_log_event",
+          visibility: "hidden",
+          knowledgeRoute: "actor:npc-renn",
+          hiddenCauseTerms: JSON.stringify(["forged counterseal"]),
+          tick: 13,
+          importance: 8,
+          createdAt: 101,
+        },
+      ];
+      const all = vi.fn().mockReturnValue(recentEvents);
+      const orderBy = vi.fn().mockReturnValue({ all });
+      const where = vi.fn().mockReturnValue({ orderBy });
+      const from = vi.fn().mockReturnValue({ where });
+      const select = vi.fn().mockReturnValue({ from });
+      mockGetDb.mockReturnValue({ select });
+
+      await expect(rebuildEpisodicEventsFromLocationRecentEvents("campaign-live"))
+        .resolves.toEqual({
+          rebuiltCount: 2,
+          preservedVectorCount: 1,
+          purgedVectorCount: 1,
+        });
+
+      expect(db.dropTable).toHaveBeenCalledWith("episodic_events");
+      expect(db.createEmptyTable).toHaveBeenCalledWith(
+        "episodic_events",
+        expect.anything(),
+      );
+      expect(table.add).toHaveBeenCalledWith([
+        expect.objectContaining({
+          campaignId: "campaign-live",
+          id: "event-accepted-1",
+          text: "Mira confirms the sealed proof is valid.",
+          tick: 12,
+          location: "loc-a",
+          participants: [],
+          importance: 6,
+          type: "dialogue",
+          visibility: "player_perceivable",
+          surfaceRoute: "player_visible",
+          knowledgeRoute: "",
+          hiddenCauseTerms: [],
+          vector: [0.1, 0.2],
+        }),
+        expect.objectContaining({
+          campaignId: "campaign-live",
+          id: "recent-row-2",
+          text: "Renn privately notices the forged counterseal.",
+          tick: 13,
+          location: "loc-a",
+          participants: [],
+          importance: 8,
+          type: "event",
+          visibility: "hidden",
+          surfaceRoute: "actor_private_log_event",
+          knowledgeRoute: "actor:npc-renn",
+          hiddenCauseTerms: ["forged counterseal"],
+        }),
+      ]);
     });
   });
 

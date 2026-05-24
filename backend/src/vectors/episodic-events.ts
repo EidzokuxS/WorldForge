@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { Field, FixedSizeList, Float32, Int32, List, Schema, Utf8 } from "apache-arrow";
 import { getDb } from "../db/index.js";
 import { locationRecentEvents } from "../db/schema.js";
@@ -165,6 +165,20 @@ function normalizeStringArray(value: unknown): string[] {
   }
 
   return [];
+}
+
+function parseStoredStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return normalizeStringArray(value);
+  }
+  if (typeof value !== "string" || !value.trim()) {
+    return [];
+  }
+  try {
+    return normalizeStringArray(JSON.parse(value) as unknown);
+  } catch {
+    return [];
+  }
 }
 
 async function tableHasVectorColumn(table: { schema(): Promise<{ fields: Array<{ name: string }> }> }): Promise<boolean> {
@@ -377,6 +391,95 @@ export function drainPendingCommittedEventsByIds(
 
 export function clearPendingCommittedEvents(campaignId: string): void {
   pendingCommittedEvents.delete(campaignId);
+}
+
+function episodicRowFromRecentEvent(
+  event: typeof locationRecentEvents.$inferSelect,
+): Record<string, unknown> {
+  return {
+    campaignId: event.campaignId,
+    id: event.sourceEventId ?? event.id,
+    text: event.summary,
+    tick: event.tick,
+    location: event.locationId,
+    participants: [],
+    importance: event.importance,
+    type: event.eventType,
+    visibility: event.visibility,
+    surfaceRoute: event.surfaceRoute ?? "",
+    knowledgeRoute: event.knowledgeRoute ?? "",
+    hiddenCauseTerms: parseStoredStringArray(event.hiddenCauseTerms),
+  };
+}
+
+function rowsById(rows: readonly Record<string, unknown>[]): Map<string, Record<string, unknown>> {
+  const result = new Map<string, Record<string, unknown>>();
+  for (const row of rows) {
+    const id = String(row.id ?? "").trim();
+    if (!id || result.has(id)) continue;
+    result.set(id, row);
+  }
+  return result;
+}
+
+export async function rebuildEpisodicEventsFromLocationRecentEvents(
+  campaignId: string,
+): Promise<{ rebuiltCount: number; preservedVectorCount: number; purgedVectorCount: number }> {
+  const restoredEvents = getDb()
+    .select()
+    .from(locationRecentEvents)
+    .where(eq(locationRecentEvents.campaignId, campaignId))
+    .orderBy(asc(locationRecentEvents.tick), asc(locationRecentEvents.createdAt))
+    .all();
+  const authoritativeRows = [...rowsById(restoredEvents.map(episodicRowFromRecentEvent)).values()];
+  const authoritativeIds = new Set(authoritativeRows.map((row) => String(row.id)));
+
+  const vectorDb = getVectorDb();
+  const tableNames = await vectorDb.tableNames();
+  let preservedRows: Record<string, unknown>[] = [];
+  let purgedVectorCount = 0;
+
+  if (tableNames.includes(TABLE_NAME)) {
+    try {
+      const existingTable = await vectorDb.openTable(TABLE_NAME);
+      const existingRows = (await existingTable.query().toArray()) as Record<string, unknown>[];
+      preservedRows = existingRows.filter((row) => authoritativeIds.has(String(row.id)));
+      purgedVectorCount = Math.max(0, existingRows.length - preservedRows.length);
+    } catch (error) {
+      log.warn("Could not read existing episodic table during rollback rebuild; rebuilding from receipts.", {
+        table: TABLE_NAME,
+        error: formatStorageError(error),
+      });
+    }
+    await vectorDb.dropTable(TABLE_NAME);
+  }
+
+  if (authoritativeRows.length === 0) {
+    return { rebuiltCount: 0, preservedVectorCount: 0, purgedVectorCount };
+  }
+
+  const vectorDimension = inferVectorDimension(preservedRows);
+  const table = await createEpisodicEventsTable(vectorDb, vectorDimension);
+  const preservedById = rowsById(preservedRows);
+  const rowsToAdd = [
+    ...[...preservedById.values()].map((row) =>
+      normalizeStoredEventRow(row, { preserveVector: Boolean(vectorDimension) })
+    ),
+    ...authoritativeRows.filter((row) => !preservedById.has(String(row.id))),
+  ];
+  await table.add(rowsToAdd);
+  log.event("vector.write", {
+    store: "episodic_events",
+    op: "rebuild_from_location_recent_events",
+    count: rowsToAdd.length,
+    preservedVectorCount: preservedById.size,
+    purgedVectorCount,
+  });
+  return {
+    rebuiltCount: authoritativeRows.length,
+    preservedVectorCount: preservedById.size,
+    purgedVectorCount,
+  };
 }
 
 function escapeTableString(value: string): string {

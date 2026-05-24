@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import Database from "better-sqlite3";
 import * as lancedb from "@lancedb/lancedb";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, connectDb, getDb, getSqliteConnection } from "../../db/index.js";
@@ -13,6 +14,7 @@ import {
 import { captureCampaignBundle } from "../restore-bundle.js";
 import {
   assertCampaignStoreBundleRestorable,
+  assertCampaignStoreBundleRestorableWithEvidence,
   readCampaignStoreBundleManifest,
 } from "../store-manifest.js";
 
@@ -208,6 +210,57 @@ describe("campaign store bundle manifest", () => {
       bundleDir,
       includeVectors: true,
     })).not.toThrow();
+    await expect(assertCampaignStoreBundleRestorableWithEvidence({
+      bundleDir,
+      includeVectors: true,
+    })).resolves.toMatchObject({ campaignId: CAMPAIGN_ID });
+  });
+
+  it("refuses to restore a bundle when captured SQLite evidence no longer matches the manifest", async () => {
+    const bundleDir = path.join(campaignDir(), ".turn-boundaries", "last-turn-boundary");
+
+    await captureCampaignBundle(CAMPAIGN_ID, bundleDir, {
+      includeVectors: false,
+      purpose: "turn_snapshot",
+    });
+
+    const bundleDb = new Database(path.join(bundleDir, "state.db"));
+    try {
+      bundleDb
+        .prepare("INSERT INTO campaigns (id, name, premise, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+        .run("tampered-campaign", "Tampered", "Not in manifest evidence.", Date.now(), Date.now());
+    } finally {
+      bundleDb.close();
+    }
+
+    await expect(assertCampaignStoreBundleRestorableWithEvidence({
+      bundleDir,
+      includeVectors: false,
+    })).rejects.toThrow(/evidence hash mismatch/i);
+  });
+
+  it("refuses to restore a checkpoint when vector row-count evidence is tampered", async () => {
+    await seedVectorTables();
+    const bundleDir = path.join(campaignDir(), "checkpoints", "checkpoint-1");
+
+    await captureCampaignBundle(CAMPAIGN_ID, bundleDir, {
+      includeVectors: true,
+      purpose: "checkpoint",
+    });
+
+    const manifestPath = path.join(bundleDir, "store-manifest.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as {
+      stores: Array<{ store: string; rowCount: number | null }>;
+    };
+    const loreEntry = manifest.stores.find((entry) => entry.store === "vectors:lore_cards");
+    if (!loreEntry) throw new Error("Missing lore_cards manifest entry");
+    loreEntry.rowCount = 99;
+    fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf-8");
+
+    await expect(assertCampaignStoreBundleRestorableWithEvidence({
+      bundleDir,
+      includeVectors: true,
+    })).rejects.toThrow(/row count mismatch.*vectors:lore_cards/i);
   });
 
   it("refuses to restore a bundle without a manifest", () => {

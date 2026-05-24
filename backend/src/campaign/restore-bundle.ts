@@ -8,10 +8,11 @@ import {
 } from "./paths.js";
 import { closeDb, getSqliteConnection } from "../db/index.js";
 import { closeVectorDb } from "../vectors/connection.js";
+import { rebuildEpisodicEventsFromLocationRecentEvents } from "../vectors/episodic-events.js";
 import {
   createCampaignStoreBundleManifest,
   writeCampaignStoreBundleManifest,
-  assertCampaignStoreBundleRestorable,
+  assertCampaignStoreBundleRestorableWithEvidence,
   type CampaignStoreBundlePurpose,
 } from "./store-manifest.js";
 import { planCampaignStoreManifestOperation } from "./store-manifest-executor.js";
@@ -20,6 +21,9 @@ type BundleOptions = {
   includeVectors: boolean;
   purpose?: CampaignStoreBundlePurpose;
 };
+
+const RESTORE_STAGING_DIRNAME = ".restore-staging";
+const RESTORE_STAGING_CURRENT_DIRNAME = "current";
 
 function resolveBundlePaths(bundleDir: string) {
   return {
@@ -34,6 +38,38 @@ function removeSqliteSidecarFiles(dbPath: string): void {
   for (const suffix of ["-wal", "-shm", "-journal"]) {
     fs.rmSync(`${dbPath}${suffix}`, { force: true });
   }
+}
+
+function restoreStagingRoot(campaignDir: string): string {
+  return path.join(campaignDir, RESTORE_STAGING_DIRNAME);
+}
+
+function clearRestoreStaging(campaignDir: string): void {
+  fs.rmSync(restoreStagingRoot(campaignDir), { recursive: true, force: true });
+}
+
+function prepareRestoreStaging(input: {
+  campaignDir: string;
+  bundlePaths: ReturnType<typeof resolveBundlePaths>;
+  includeVectors: boolean;
+}): ReturnType<typeof resolveBundlePaths> {
+  const stagingRoot = restoreStagingRoot(input.campaignDir);
+  const stagingDir = path.join(stagingRoot, RESTORE_STAGING_CURRENT_DIRNAME);
+  clearRestoreStaging(input.campaignDir);
+  fs.mkdirSync(stagingDir, { recursive: true });
+
+  const stagedPaths = resolveBundlePaths(stagingDir);
+  fs.copyFileSync(input.bundlePaths.dbPath, stagedPaths.dbPath);
+  fs.copyFileSync(input.bundlePaths.configPath, stagedPaths.configPath);
+  if (fs.existsSync(input.bundlePaths.chatPath)) {
+    fs.copyFileSync(input.bundlePaths.chatPath, stagedPaths.chatPath);
+  } else {
+    fs.writeFileSync(stagedPaths.chatPath, "[]", "utf-8");
+  }
+  if (input.includeVectors && fs.existsSync(input.bundlePaths.vectorsPath)) {
+    fs.cpSync(input.bundlePaths.vectorsPath, stagedPaths.vectorsPath, { recursive: true });
+  }
+  return stagedPaths;
 }
 
 function vectorTableDirForStore(campaignVectorsPath: string, store: string): string {
@@ -51,7 +87,10 @@ function applyTurnRollbackVectorPolicies(campaignVectorsPath: string): void {
   fs.mkdirSync(campaignVectorsPath, { recursive: true });
 
   for (const step of plan.steps.filter((candidate) => candidate.store.startsWith("vectors:"))) {
-    if (step.action === "purge_rebuild" || step.action === "purge") {
+    if (step.action === "purge_rebuild") {
+      continue;
+    }
+    if (step.action === "purge") {
       fs.rmSync(vectorTableDirForStore(campaignVectorsPath, step.store), {
         recursive: true,
         force: true,
@@ -116,37 +155,51 @@ export async function restoreCampaignBundle(
   options: BundleOptions,
 ): Promise<void> {
   const campaignDir = getCampaignDir(campaignId);
-  const { dbPath, configPath, chatPath, vectorsPath } = resolveBundlePaths(bundleDir);
+  const bundlePaths = resolveBundlePaths(bundleDir);
   const campaignDbPath = path.join(campaignDir, "state.db");
   const campaignConfigPath = getCampaignConfigPath(campaignId);
   const campaignChatPath = getChatHistoryPath(campaignId);
   const campaignVectorsPath = path.join(campaignDir, "vectors");
 
-  assertCampaignStoreBundleRestorable({
+  await assertCampaignStoreBundleRestorableWithEvidence({
     bundleDir,
     includeVectors: options.includeVectors,
   });
+  const stagedPaths = prepareRestoreStaging({
+    campaignDir,
+    bundlePaths,
+    includeVectors: options.includeVectors,
+  });
 
-  closeDb();
-  closeVectorDb();
+  try {
+    closeDb();
+    closeVectorDb();
 
-  removeSqliteSidecarFiles(campaignDbPath);
-  fs.copyFileSync(dbPath, campaignDbPath);
-  removeSqliteSidecarFiles(campaignDbPath);
-  fs.copyFileSync(configPath, campaignConfigPath);
+    removeSqliteSidecarFiles(campaignDbPath);
+    fs.copyFileSync(stagedPaths.dbPath, campaignDbPath);
+    removeSqliteSidecarFiles(campaignDbPath);
+    fs.copyFileSync(stagedPaths.configPath, campaignConfigPath);
 
-  if (fs.existsSync(chatPath)) {
-    fs.copyFileSync(chatPath, campaignChatPath);
-  } else {
-    fs.writeFileSync(campaignChatPath, "[]", "utf-8");
+    if (fs.existsSync(stagedPaths.chatPath)) {
+      fs.copyFileSync(stagedPaths.chatPath, campaignChatPath);
+    } else {
+      fs.writeFileSync(campaignChatPath, "[]", "utf-8");
+    }
+
+    if (options.includeVectors && fs.existsSync(stagedPaths.vectorsPath)) {
+      fs.rmSync(campaignVectorsPath, { recursive: true, force: true });
+      fs.cpSync(stagedPaths.vectorsPath, campaignVectorsPath, { recursive: true });
+    } else if (!options.includeVectors) {
+      applyTurnRollbackVectorPolicies(campaignVectorsPath);
+    }
+
+    clearRestoreStaging(campaignDir);
+    await loadCampaign(campaignId);
+    if (!options.includeVectors) {
+      await rebuildEpisodicEventsFromLocationRecentEvents(campaignId);
+    }
+  } catch (error) {
+    clearRestoreStaging(campaignDir);
+    throw error;
   }
-
-  if (options.includeVectors && fs.existsSync(vectorsPath)) {
-    fs.rmSync(campaignVectorsPath, { recursive: true, force: true });
-    fs.cpSync(vectorsPath, campaignVectorsPath, { recursive: true });
-  } else if (!options.includeVectors) {
-    applyTurnRollbackVectorPolicies(campaignVectorsPath);
-  }
-
-  await loadCampaign(campaignId);
 }

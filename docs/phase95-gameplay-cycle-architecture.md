@@ -69,10 +69,11 @@ Implemented hardening slices after the reset:
   presentation, while backend-owned offer rows and opaque capabilities carry
   selection authority.
 - Runtime store bundle manifest: checkpoint and turn-rollback bundles now write
-  and verify a manifest before restore. The manifest covers every current
-  SQLite gameplay table plus JSON, vector, projection, artifact, and evidence
-  stores, so missing store policy blocks restore evidence instead of silently
-  trusting helper-copy behavior.
+  and verify a manifest before restore. Restore also recomputes captured
+  SQLite/JSON/vector hashes and row counts before any live copy. The manifest
+  covers every current SQLite gameplay table plus JSON, vector, projection,
+  artifact, and evidence stores, so missing or tampered store evidence blocks
+  restore instead of silently trusting helper-copy behavior.
 - Turn clock ledger and authority stages: gameplay world time is now recorded
   as ledgered accepted authority, while turn-stage evidence is recorded through
   saga events. UI turn ordering remains separate from world minutes.
@@ -101,13 +102,13 @@ Implemented hardening slices after the reset:
   policy. Unknown stores fail closed, and the planning executor derives one
   manifest-owned action per store before later clone/restore execution work is
   wired in.
-- Vector-policy turn rollback skeleton: restoring a turn snapshot now applies
-  the manifest rollback vector policy instead of leaving all live vector state
-  in place. Episodic event vectors are currently purged for a future lazy
-  rebuild path, lore-card vectors are preserved as verified non-turn state, and
-  pending in-memory committed event queues are cleared after snapshot restore.
-  This is not yet vector rollback closure because pre-turn episodic retention
-  or rebuild is still a P0 gap.
+- Vector-policy turn rollback: restoring a turn snapshot now applies the
+  manifest rollback vector policy instead of leaving all live vector state in
+  place. Episodic event vectors are reconciled after restore from authoritative
+  `location_recent_events`: matching pre-turn vector rows are preserved,
+  failed-turn rows are purged, and missing accepted rows are rebuilt. Lore-card
+  vectors are preserved as verified non-turn state, and pending in-memory
+  committed event queues are cleared after snapshot restore.
 - Manifest-owned clean-start clone: campaign clone creation now runs through a
   backend clone service that consumes the manifest operation plan. SQLite rows
   are rewritten or purged by store policy, config IDs are recursively
@@ -120,16 +121,21 @@ Implemented hardening slices after the reset:
   `episodic_events` and `lore_cards`. Turn rollback bundles continue to mark
   vectors as `excluded_by_policy` and cannot masquerade as vector restore
   evidence.
+- Staged restore lifecycle: restore copies a verified bundle into
+  campaign-local `.restore-staging` before closing live runtime handles, clears
+  stale staging on rerun, applies staged DB/config/chat/vector state, and
+  removes staging before campaign reload.
 
 Current post-slice status on `develop`:
 
-- Current slice status: manifest restore-policy declarations, the
-  planning-only executor skeleton, vector-policy turn rollback execution, and
-  manifest-owned clean-start clone execution are implemented locally. Vector
-  row-count/hash evidence is also implemented locally with targeted backend
-  tests and backend typecheck green. The architecture-closure audit is now
-  recorded in `docs/phase95-architecture-closure-audit-2026-05-24.md`; it is a
-  NO-GO for long-play acceptance until the current P0/P1 queues are closed.
+- Current slice status: manifest restore-policy declarations, vector-policy
+  turn rollback execution, restore-side evidence verification, staged restore,
+  episodic vector retention/rebuild, and manifest-owned clean-start clone
+  execution are implemented locally with targeted backend tests and backend
+  typecheck green. The architecture-closure audit is now recorded in
+  `docs/phase95-architecture-closure-audit-2026-05-24.md`; it is a NO-GO for
+  long-play acceptance until the current P1 queue is closed and Oracle/Browser/
+  play evidence passes.
 - Long-play status: still NO-GO. These slices close important control-plane
   blockers, but they are not full Phase 95 acceptance evidence.
 
@@ -137,9 +143,9 @@ Architecture closure audit on 2026-05-24:
 
 - Reviewed current `develop` HEAD `b8ebd809340d3897be5623f028c7a8227c5d27f5`
   with three independent read-only agents plus local code/doc inspection.
-- P0s still open: restore-side hash/row evidence verification, episodic vector
-  rollback retention/rebuild, and crash-convergent restore. The actor positive
-  write-scope P0 from the closure audit is now implemented locally.
+- P0s from that audit are now locally implemented: actor positive write scopes,
+  restore-side hash/row evidence verification, episodic vector rollback
+  retention/rebuild, and staged rerun-convergent restore.
 - P1s still open: frontend raw-id fallback, public projection guard coverage
   for legacy id shapes, pending narration public recovery DTO, adjacent public
   campaign API handle/system classification, deterministic due-world emitted

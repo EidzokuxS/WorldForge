@@ -46,6 +46,7 @@ vi.mock("../runtime-state.js", () => ({
 
 vi.mock("../../vectors/episodic-events.js", () => ({
   clearPendingCommittedEvents: vi.fn(),
+  rebuildEpisodicEventsFromLocationRecentEvents: vi.fn(async () => ({ rebuiltCount: 0 })),
 }));
 
 vi.mock("../store-manifest.js", () => ({
@@ -59,6 +60,10 @@ vi.mock("../store-manifest.js", () => ({
   })),
   writeCampaignStoreBundleManifest: vi.fn(),
   assertCampaignStoreBundleRestorable: vi.fn(),
+  assertCampaignStoreBundleRestorableWithEvidence: vi.fn(async () => ({
+    schemaVersion: 1,
+    stores: [],
+  })),
 }));
 
 vi.mock("../../engine/living-world-authority.js", () => ({
