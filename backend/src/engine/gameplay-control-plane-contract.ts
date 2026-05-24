@@ -139,12 +139,37 @@ export const STORE_POLICY_VALUES = [
   "reject",
 ] as const;
 
+export type StorePolicy = (typeof STORE_POLICY_VALUES)[number];
+
+export const STORE_TURN_ROLLBACK_POLICY_VALUES = [
+  "snapshot_restore",
+  "purge_rebuild",
+  "preserve_verified",
+  "purge",
+  "reject",
+] as const;
+
+export type StoreTurnRollbackPolicy = (typeof STORE_TURN_ROLLBACK_POLICY_VALUES)[number];
+
+export const STORE_CHECKPOINT_RESTORE_POLICY_VALUES = [
+  "snapshot_restore",
+  "exact_restore",
+  "purge_rebuild",
+  "preserve_verified",
+  "purge",
+  "reject",
+] as const;
+
+export type StoreCheckpointRestorePolicy = (typeof STORE_CHECKPOINT_RESTORE_POLICY_VALUES)[number];
+
 export const STORE_REPLAY_POLICY_VALUES = [
   "deterministic",
   "recorded_reuse",
   "regenerate",
   "reject",
 ] as const;
+
+export type StoreReplayPolicy = (typeof STORE_REPLAY_POLICY_VALUES)[number];
 
 export const SOURCE_CAMPAIGN_ID_POLICY_VALUES = [
   "not_applicable",
@@ -153,7 +178,16 @@ export const SOURCE_CAMPAIGN_ID_POLICY_VALUES = [
   "reject_if_present",
 ] as const;
 
-export const STORE_MANIFEST_ENTRY_SCHEMA = z.object({
+export type SourceCampaignIdPolicy = (typeof SOURCE_CAMPAIGN_ID_POLICY_VALUES)[number];
+
+export const STORE_RESTORE_POLICIES_SCHEMA = z.object({
+  turnRollback: z.enum(STORE_TURN_ROLLBACK_POLICY_VALUES),
+  checkpointRestore: z.enum(STORE_CHECKPOINT_RESTORE_POLICY_VALUES),
+});
+
+export type StoreRestorePolicies = z.infer<typeof STORE_RESTORE_POLICIES_SCHEMA>;
+
+export const STORE_MANIFEST_ENTRY_BASE_SCHEMA = z.object({
   store: z.string().min(1),
   authorityLevel: z.enum(STORE_AUTHORITY_LEVEL_VALUES),
   clonePolicy: z.enum(STORE_POLICY_VALUES),
@@ -164,7 +198,80 @@ export const STORE_MANIFEST_ENTRY_SCHEMA = z.object({
   requiresRowCount: z.boolean(),
 });
 
+export type StoreManifestEntryBase = z.infer<typeof STORE_MANIFEST_ENTRY_BASE_SCHEMA>;
+
+export const STORE_MANIFEST_ENTRY_SCHEMA = STORE_MANIFEST_ENTRY_BASE_SCHEMA.extend({
+  restorePolicies: STORE_RESTORE_POLICIES_SCHEMA,
+});
+
 export type StoreManifestEntry = z.infer<typeof STORE_MANIFEST_ENTRY_SCHEMA>;
+
+const SNAPSHOT_RESTORE_POLICIES: StoreRestorePolicies = {
+  turnRollback: "snapshot_restore",
+  checkpointRestore: "snapshot_restore",
+};
+
+const EPISODIC_VECTOR_RESTORE_POLICIES: StoreRestorePolicies = {
+  turnRollback: "purge_rebuild",
+  checkpointRestore: "exact_restore",
+};
+
+const LORE_VECTOR_RESTORE_POLICIES: StoreRestorePolicies = {
+  turnRollback: "preserve_verified",
+  checkpointRestore: "exact_restore",
+};
+
+const PURGE_REBUILD_RESTORE_POLICIES: StoreRestorePolicies = {
+  turnRollback: "purge_rebuild",
+  checkpointRestore: "purge_rebuild",
+};
+
+const PRESERVE_VERIFIED_RESTORE_POLICIES: StoreRestorePolicies = {
+  turnRollback: "preserve_verified",
+  checkpointRestore: "preserve_verified",
+};
+
+const PURGE_RESTORE_POLICIES: StoreRestorePolicies = {
+  turnRollback: "purge",
+  checkpointRestore: "purge",
+};
+
+const REJECT_RESTORE_POLICIES: StoreRestorePolicies = {
+  turnRollback: "reject",
+  checkpointRestore: "reject",
+};
+
+export function restorePoliciesForStore(store: string): StoreRestorePolicies {
+  if (store.startsWith("sqlite:") || store === "json:config" || store === "json:chat_history") {
+    return SNAPSHOT_RESTORE_POLICIES;
+  }
+  if (store === "vectors:episodic_events") {
+    return EPISODIC_VECTOR_RESTORE_POLICIES;
+  }
+  if (store === "vectors:lore_cards") {
+    return LORE_VECTOR_RESTORE_POLICIES;
+  }
+  if (store === "projection:public_dtos") {
+    return PURGE_REBUILD_RESTORE_POLICIES;
+  }
+  if (store === "artifact:checkpoints" || store === "artifact:images") {
+    return PRESERVE_VERIFIED_RESTORE_POLICIES;
+  }
+  if (store === "artifact:turn_boundaries") {
+    return PURGE_RESTORE_POLICIES;
+  }
+  if (store === "evidence:playtest_reports") {
+    return REJECT_RESTORE_POLICIES;
+  }
+  throw new Error(`No restore policy declared for store: ${store}.`);
+}
+
+function defineStoreManifestEntry(entry: StoreManifestEntryBase): StoreManifestEntry {
+  return STORE_MANIFEST_ENTRY_SCHEMA.parse({
+    ...entry,
+    restorePolicies: restorePoliciesForStore(entry.store),
+  });
+}
 
 export const PHASE95_SQLITE_STORE_TABLES = [
   "campaigns",
@@ -213,12 +320,12 @@ export const PHASE95_REQUIRED_STORE_KEYS = [
   "evidence:playtest_reports",
 ] as const;
 
-export const PHASE95_STORE_MANIFEST: readonly StoreManifestEntry[] = [
+const PHASE95_STORE_MANIFEST_BASE = [
   {
     store: "sqlite:campaigns",
     authorityLevel: "authoritative",
     clonePolicy: "rewrite",
-    rollbackPolicy: "preserve",
+    rollbackPolicy: "rewrite",
     replayPolicy: "deterministic",
     sourceCampaignIdPolicy: "rewrite",
     requiresHash: true,
@@ -528,7 +635,7 @@ export const PHASE95_STORE_MANIFEST: readonly StoreManifestEntry[] = [
     store: "json:config",
     authorityLevel: "authoritative",
     clonePolicy: "rewrite",
-    rollbackPolicy: "preserve",
+    rollbackPolicy: "rewrite",
     replayPolicy: "deterministic",
     sourceCampaignIdPolicy: "rewrite",
     requiresHash: true,
@@ -614,16 +721,23 @@ export const PHASE95_STORE_MANIFEST: readonly StoreManifestEntry[] = [
     requiresHash: true,
     requiresRowCount: false,
   },
-] as const;
+] as const satisfies readonly StoreManifestEntryBase[];
+
+export const PHASE95_STORE_MANIFEST: readonly StoreManifestEntry[] =
+  PHASE95_STORE_MANIFEST_BASE.map((entry) => defineStoreManifestEntry(entry));
 
 export function assertStoreManifestCoverage(
   manifest: readonly StoreManifestEntry[] = PHASE95_STORE_MANIFEST,
 ): StoreManifestEntry[] {
   const parsed = z.array(STORE_MANIFEST_ENTRY_SCHEMA).parse(manifest);
   const stores = new Set<string>();
+  const requiredStores = new Set<string>(PHASE95_REQUIRED_STORE_KEYS);
   for (const entry of parsed) {
     if (stores.has(entry.store)) {
       throw new Error(`Duplicate store manifest entry: ${entry.store}.`);
+    }
+    if (!requiredStores.has(entry.store)) {
+      throw new Error(`Unexpected store manifest entry: ${entry.store}.`);
     }
     stores.add(entry.store);
   }

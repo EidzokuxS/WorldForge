@@ -92,19 +92,19 @@ Implemented hardening slices after the reset:
 - Lookup public projection boundary: `/chat/lookup` now treats grounded lookup
   output as a support/read-only result, projects it through a typed
   player-facing DTO, and persists only the projected answer into chat history.
+- Manifest restore-policy executor skeleton: the store manifest now separates
+  clean-start clone policy from physical turn-rollback and checkpoint-restore
+  policy. Unknown stores fail closed, and the planning executor derives one
+  manifest-owned action per store before later clone/restore execution work is
+  wired in.
 
 Current post-slice status on `develop`:
 
-- Last pushed hardening commit: `48c7678f Project lookup results at public
-  boundary`.
-- Current slice status: lookup public projection is implemented, committed,
-  pushed to `origin/develop`, and the GitNexus index was refreshed. Focused
-  backend/frontend lookup parser tests, backend/frontend typechecks, full
-  backend suite (`219` passed, `1` skipped, `2943` tests, `30` todo), and full
-  frontend suite (`64` files, `522` tests) passed. GitNexus staged
-  `detect_changes` reported HIGH because the defensive frontend normalizer
-  touches shared `parseTurnSSE` flows (`submitAction`, `handleRetry`,
-  `submitLookup`), which is the expected blast radius.
+- Current slice status: manifest restore-policy declarations and the
+  planning-only executor skeleton are implemented locally with targeted
+  backend tests and backend typecheck green. Actual manifest-owned
+  clean-start clone execution, vector-safe turn rollback execution, and vector
+  row-count/hash evidence remain the next blocker cluster.
 - Long-play status: still NO-GO. These slices close important control-plane
   blockers, but they are not full Phase 95 acceptance evidence.
 

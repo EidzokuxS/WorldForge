@@ -119,6 +119,7 @@ function evidenceHashFor(input: Omit<CampaignStoreBundleEntry, "evidenceHash">):
     authorityLevel: input.authorityLevel,
     clonePolicy: input.clonePolicy,
     rollbackPolicy: input.rollbackPolicy,
+    restorePolicies: input.restorePolicies,
     replayPolicy: input.replayPolicy,
     sourceCampaignIdPolicy: input.sourceCampaignIdPolicy,
     requiresHash: input.requiresHash,

@@ -50,12 +50,31 @@ describe("Phase 95 gameplay control-plane contracts", () => {
         authorityLevel: "derived",
         clonePolicy: "rebuild",
         rollbackPolicy: "rebuild",
+        restorePolicies: {
+          turnRollback: "purge_rebuild",
+          checkpointRestore: "exact_restore",
+        },
         sourceCampaignIdPolicy: "reject_if_present",
+      });
+    expect(PHASE95_STORE_MANIFEST.find((entry) => entry.store === "sqlite:campaigns"))
+      .toMatchObject({
+        rollbackPolicy: "rewrite",
+        restorePolicies: {
+          turnRollback: "snapshot_restore",
+          checkpointRestore: "snapshot_restore",
+        },
       });
 
     expect(() => assertStoreManifestCoverage(
       PHASE95_STORE_MANIFEST.filter((entry) => entry.store !== "sqlite:quick_action_offers"),
     )).toThrow(/sqlite:quick_action_offers/i);
+    expect(() => assertStoreManifestCoverage([
+      ...PHASE95_STORE_MANIFEST,
+      {
+        ...PHASE95_STORE_MANIFEST[0]!,
+        store: "json:unexpected",
+      },
+    ])).toThrow(/unexpected/i);
   });
 
   it("keeps one registry entry per gameplay state lane", () => {
