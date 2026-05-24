@@ -20,12 +20,14 @@ const {
   findLatestSuccessfulNarratorAttemptMock,
   hasPreparedSettledTurnPacketRecoveryMock,
   heartbeatTurnSagaWorkerMock,
+  assertTurnAuthorityStagesCompleteMock,
   markTurnSagaFinalizedMock,
   markTurnSagaFinalizedIfNeededMock,
   mergeTurnSagaProvenanceMock,
   persistOracleDecisionMock,
   persistSettledTurnPacketMock,
   recordPreparedSettledTurnPacketMock,
+  recordTurnAuthorityStageMock,
   retractActorKnowledgeRecordMock,
   recordNarratorAttemptMock,
   releaseTurnSagaWorkerMock,
@@ -52,12 +54,14 @@ const {
   findLatestSuccessfulNarratorAttemptMock: vi.fn(),
   hasPreparedSettledTurnPacketRecoveryMock: vi.fn(),
   heartbeatTurnSagaWorkerMock: vi.fn(),
+  assertTurnAuthorityStagesCompleteMock: vi.fn(),
   markTurnSagaFinalizedMock: vi.fn(),
   markTurnSagaFinalizedIfNeededMock: vi.fn(),
   mergeTurnSagaProvenanceMock: vi.fn(),
   persistOracleDecisionMock: vi.fn(),
   persistSettledTurnPacketMock: vi.fn(),
   recordPreparedSettledTurnPacketMock: vi.fn(),
+  recordTurnAuthorityStageMock: vi.fn(),
   retractActorKnowledgeRecordMock: vi.fn(),
   recordNarratorAttemptMock: vi.fn(),
   releaseTurnSagaWorkerMock: vi.fn(),
@@ -262,6 +266,7 @@ vi.mock("../turn-saga.js", () => ({
     }
   },
   assertNoPendingNarrationBeforeNewTurn: assertNoPendingNarrationBeforeNewTurnMock,
+  assertTurnAuthorityStagesComplete: assertTurnAuthorityStagesCompleteMock,
   claimTurnSagaWorker: claimTurnSagaWorkerMock,
   createTurnSaga: createTurnSagaMock,
   findLatestSuccessfulNarratorAttempt: findLatestSuccessfulNarratorAttemptMock,
@@ -275,6 +280,7 @@ vi.mock("../turn-saga.js", () => ({
   persistOracleDecision: persistOracleDecisionMock,
   persistSettledTurnPacket: persistSettledTurnPacketMock,
   recordPreparedSettledTurnPacket: recordPreparedSettledTurnPacketMock,
+  recordTurnAuthorityStage: recordTurnAuthorityStageMock,
   recordNarratorAttempt: recordNarratorAttemptMock,
   releaseTurnSagaWorker: releaseTurnSagaWorkerMock,
   recoverSettledTurnPacketFromPreparedEvent: recoverSettledTurnPacketFromPreparedEventMock,
@@ -1289,6 +1295,30 @@ function setupTurnSagaMocks(overrides: {
     sagaId: saga.id,
     eventType: "settled_packet_prepared",
   }));
+  recordTurnAuthorityStageMock.mockImplementation((input: {
+    sagaId: string;
+    stage: string;
+    baseWorldVersion?: number | null;
+    resultWorldVersion?: number | null;
+    settledTurnPacketId?: string | null;
+    payload?: Record<string, unknown>;
+  }) => ({
+    id: `authority-stage-${input.stage}`,
+    campaignId: CAMPAIGN_ID,
+    sagaId: input.sagaId,
+    turnId: saga.turnId,
+    eventType: "authority_stage_committed",
+    idempotencyKey: `authority-stage:${input.stage}`,
+    baseWorldVersion: input.baseWorldVersion ?? saga.baseWorldVersion,
+    resultWorldVersion: input.resultWorldVersion ?? saga.resultWorldVersion,
+    settledTurnPacketId: input.settledTurnPacketId ?? saga.settledTurnPacketId,
+    payload: {
+      stage: input.stage,
+      ...(input.payload ?? {}),
+    },
+    createdAt: 0,
+  }));
+  assertTurnAuthorityStagesCompleteMock.mockReturnValue([]);
   recoverSettledTurnPacketFromPreparedEventMock.mockImplementation(() => {
     saga = {
       ...saga,
@@ -7207,6 +7237,32 @@ describe("processTurn ScenePlan path", () => {
     });
     expect(updateNarratorAttemptOutcomeMock).toHaveBeenCalledWith(
       expect.objectContaining({ status: "succeeded", lockToken: "lock-token" }),
+    );
+    expect(recordTurnAuthorityStageMock.mock.calls.map(([input]) =>
+      (input as { stage: string }).stage,
+    )).toEqual([
+      "intent_created",
+      "lease_acquired",
+      "snapshot_taken",
+      "effects_staged",
+      "receipts_accepted",
+      "canonical_state_committed",
+      "settled_packet_persisted",
+      "narration_accepted",
+      "public_projection_committed",
+      "turn_finalized",
+    ]);
+    expect(recordTurnAuthorityStageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: "snapshot_taken",
+        payload: expect.objectContaining({
+          provided: false,
+        }),
+      }),
+    );
+    expect(assertTurnAuthorityStagesCompleteMock).toHaveBeenCalledWith({ sagaId: "saga-1" });
+    expect(assertTurnAuthorityStagesCompleteMock.mock.invocationCallOrder[0]).toBeLessThan(
+      markTurnSagaFinalizedMock.mock.invocationCallOrder[0]!,
     );
     expect(markTurnSagaFinalizedMock).toHaveBeenCalledWith(
       expect.objectContaining({ lockToken: "lock-token" }),

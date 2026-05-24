@@ -141,6 +141,7 @@ import {
   type GroundedSentenceDraft,
   type NarrationDraft,
 } from "./narration-grounding-guard.js";
+import type { TurnAuthorityStage } from "./gameplay-control-plane-contract.js";
 import { readWorldClock, syncWorldClockTurnBoundary } from "./living-world-authority.js";
 import { playerBlockingStageLimit } from "./runtime-limits.js";
 import {
@@ -159,7 +160,9 @@ import {
   persistSettledTurnPacket,
   PendingSettledTurnNarrationError,
   PENDING_NARRATION_STATUSES,
+  assertTurnAuthorityStagesComplete,
   recordPreparedSettledTurnPacket,
+  recordTurnAuthorityStage,
   recordNarratorAttempt,
   releaseTurnSagaWorker,
   recoverSettledTurnPacketFromPreparedEvent,
@@ -309,6 +312,10 @@ export interface TurnOptions {
   embedderResult?: ResolveResult;
   contextWindow?: number;
   openingScene?: boolean;
+  preTurnSnapshot?: {
+    bundleDir: string;
+    capturedAt: number;
+  };
   onBeforeVisibleNarration?: (summary: HiddenTurnSummary) => void | Promise<void>;
   onPostTurn?: (summary: TurnSummary) => void | Promise<void>;
 }
@@ -4166,6 +4173,29 @@ function appendAssistantNarrationForResume(input: {
   });
 }
 
+function recordLiveTurnAuthorityStage(input: {
+  saga: TurnSagaRecord;
+  stage: TurnAuthorityStage;
+  baseWorldVersion?: number | null;
+  resultWorldVersion?: number | null;
+  settledTurnPacketId?: string | null;
+  lockToken?: string;
+  payload?: Record<string, unknown>;
+}): void {
+  recordTurnAuthorityStage({
+    sagaId: input.saga.id,
+    stage: input.stage,
+    baseWorldVersion: input.baseWorldVersion ?? input.saga.baseWorldVersion,
+    resultWorldVersion: input.resultWorldVersion ?? input.saga.resultWorldVersion,
+    settledTurnPacketId: input.settledTurnPacketId ?? input.saga.settledTurnPacketId,
+    lockToken: input.lockToken,
+    payload: {
+      source: "live_player_turn",
+      ...input.payload,
+    },
+  });
+}
+
 export async function* processTurn(
   options: TurnOptions
 ): AsyncGenerator<TurnEvent> {
@@ -4436,6 +4466,7 @@ async function* processTurnScenePlan(
     storytellerMaxTokens,
     embedderResult,
     contextWindow = 8192,
+    preTurnSnapshot,
     onPostTurn,
   } = options;
 
@@ -4465,6 +4496,30 @@ async function* processTurnScenePlan(
     baseWorldVersion: baseWorldClock.worldVersion,
     requiresNarration: false,
     provenance: { processor: "scene-plan", phase: "89-03" },
+  });
+  recordLiveTurnAuthorityStage({
+    saga: turnSaga,
+    stage: "intent_created",
+    payload: {
+      actionTextLength: playerAction.length,
+      processor: "scene-plan",
+    },
+  });
+  recordLiveTurnAuthorityStage({
+    saga: turnSaga,
+    stage: "lease_acquired",
+    payload: {
+      leaseOwner: "chat_route_turn_lock",
+    },
+  });
+  recordLiveTurnAuthorityStage({
+    saga: turnSaga,
+    stage: "snapshot_taken",
+    payload: {
+      provided: Boolean(preTurnSnapshot),
+      bundleDir: preTurnSnapshot?.bundleDir ?? null,
+      capturedAt: preTurnSnapshot?.capturedAt ?? null,
+    },
   });
   const advanceSaga = (
     toStatus: TurnSagaStatus,
@@ -5364,6 +5419,36 @@ async function* processTurnScenePlan(
     ...dueWorldRefs(preFrameDueWork),
     ...dueWorldRefs(preNarratorDueWork),
   ]);
+  const committedWorldVersion = readWorldClock(campaignId).worldVersion;
+  recordLiveTurnAuthorityStage({
+    saga: turnSaga,
+    stage: "effects_staged",
+    resultWorldVersion: committedWorldVersion,
+    payload: {
+      gmActionResultCount: executedPlan.actionResults.length,
+      actorActionResultCount: actorActionResults.length,
+      dueWorldRefCount: acceptedCommittedEventIds.length - acceptedDurableEventIds.length,
+    },
+  });
+  recordLiveTurnAuthorityStage({
+    saga: turnSaga,
+    stage: "receipts_accepted",
+    resultWorldVersion: committedWorldVersion,
+    payload: {
+      acceptedToolResultRefs: acceptedActionRefs(executedPlan.actionResults, gmRead),
+      acceptedActorResultRefs: acceptedActionRefs(actorActionResults, null),
+      acceptedDurableEventIds,
+      acceptedCommittedEventIds,
+    },
+  });
+  recordLiveTurnAuthorityStage({
+    saga: turnSaga,
+    stage: "canonical_state_committed",
+    resultWorldVersion: committedWorldVersion,
+    payload: {
+      worldVersion: committedWorldVersion,
+    },
+  });
 
   let narratorFrame: SceneFrame = preNarratorActorDecisionFrame;
   if (
@@ -5531,6 +5616,16 @@ async function* processTurnScenePlan(
     const settledPacket = persistSettledTurnPacket(settledTurnPacketInput);
     liveSettledPacket = settledPacket;
     turnSaga = getTurnSaga({ sagaId: turnSaga.id }) ?? turnSaga;
+    recordLiveTurnAuthorityStage({
+      saga: turnSaga,
+      stage: "settled_packet_persisted",
+      resultWorldVersion: settledPacket.resultWorldVersion,
+      settledTurnPacketId: settledPacket.id,
+      lockToken: liveClaim.lockToken,
+      payload: {
+        settledTurnPacketId: settledPacket.id,
+      },
+    });
 
     yield {
       type: "turn_resolution",
@@ -5591,6 +5686,18 @@ async function* processTurnScenePlan(
       lastVisibleFinishReason,
       lastVisibleResponse,
     } = narration;
+    recordLiveTurnAuthorityStage({
+      saga: turnSaga,
+      stage: "narration_accepted",
+      resultWorldVersion: settledPacket.resultWorldVersion,
+      settledTurnPacketId: settledPacket.id,
+      lockToken: liveClaim.lockToken,
+      payload: {
+        narratorAttemptId: narration.narratorAttemptId,
+        attempts: guardedNarration.attempts,
+        retried: guardedNarration.retried,
+      },
+    });
     recordTurnLatencyStage(latencyTrace, {
       stage: "final_narration",
       startedAt: narration.narrationStartedAt,
@@ -5649,6 +5756,17 @@ async function* processTurnScenePlan(
         narrativeText,
         lockToken: liveClaim.lockToken,
       });
+      recordLiveTurnAuthorityStage({
+        saga: turnSaga,
+        stage: "public_projection_committed",
+        resultWorldVersion: settledPacket.resultWorldVersion,
+        settledTurnPacketId: settledPacket.id,
+        lockToken: liveClaim.lockToken,
+        payload: {
+          narratorAttemptId: narration.narratorAttemptId,
+          assistantMessageChars: narrativeText.length,
+        },
+      });
       yield { type: "narrative", data: { text: narrativeText } };
     }
 
@@ -5684,6 +5802,18 @@ async function* processTurnScenePlan(
       finishLatencyTrace,
     });
     liveHeartbeat.heartbeat();
+    recordLiveTurnAuthorityStage({
+      saga: turnSaga,
+      stage: "turn_finalized",
+      resultWorldVersion: readWorldClock(campaignId).worldVersion,
+      settledTurnPacketId: settledPacket.id,
+      lockToken: liveClaim.lockToken,
+      payload: {
+        narratorAttemptId: narration.narratorAttemptId,
+        tick: newTick,
+      },
+    });
+    assertTurnAuthorityStagesComplete({ sagaId: turnSaga.id });
     markTurnSagaFinalized({
       sagaId: turnSaga.id,
       narratorAttemptId: narration.narratorAttemptId,

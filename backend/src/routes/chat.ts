@@ -1344,6 +1344,7 @@ app.post("/action", async (c) => {
             storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
             storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
             embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
+            preTurnSnapshot: snapshot,
             onPostTurn: postTurnHooks.onPostTurn,
           });
 
@@ -1896,6 +1897,7 @@ app.post("/retry", async (c) => {
             storytellerTemperature: clamp(stResult.resolved.temperature, 0, 2),
             storytellerMaxTokens: clamp(stResult.resolved.maxTokens, 1, 32000),
             embedderResult: embedderResult && !("error" in embedderResult) ? embedderResult : undefined,
+            preTurnSnapshot: previousSnapshot,
             onPostTurn: postTurnHooks.onPostTurn,
           });
 
