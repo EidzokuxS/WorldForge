@@ -4,9 +4,8 @@ Date: 2026-05-24
 Branch: `develop`
 Reviewed implementation HEAD before this documentation slice:
 `732c9aeb0c36e345abb33d6ddfb7992cd5737adf`
-Status: **current-head Oracle bundle returned ARCHITECTURE NO-GO on vector
-evidence coverage; focused Oracle vector recheck returned VECTOR P1 CLOSED;
-gameplay acceptance still NO-GO**
+Status: **focused Oracle vector recheck returned VECTOR P1 CLOSED; current
+in-app Browser smoke passed; gameplay acceptance still NO-GO**
 
 This document is the local "did we forget a layer?" pass for Oracle and
 Browser/play evidence. It does not declare Phase 95 done. It tracks the
@@ -40,6 +39,10 @@ play remains free without making gameplay truth unstable.
 - Ran focused Oracle recheck
   `phase95-vector-rollback-focused-recheck` with the vector/restore files; it
   returned `VECTOR P1 CLOSED` and the saved transcript matches the CLI answer.
+- Ran in-app Browser smoke on `31b025b`: `/game` loaded, Saves opened, one
+  freeform action completed back to `Ready`, the draft cleared, the scene beat
+  updated, and console errors stayed at zero. Evidence is recorded in
+  `output/phase95-browser-smoke-20260524-1705.md`.
 - Kept old Oracle/agent answers as risk inventory only.
 - Used one compact document plus referenced source files instead of many inline
   browser attachments.
@@ -96,11 +99,10 @@ References Used:
 
 Unverified Assumptions:
 
-- Prior same-day in-app Browser smoke confirms `/game` loaded on the restarted
-  dev stack, Saves opened, checkpoint deletion used public handles, and one
-  freeform player action completed through the action dock with zero console
-  errors or warnings. Treat this as historical workability evidence for the
-  slice, not as current acceptance evidence.
+- In-app Browser smoke confirms `/game` loaded on the current dev stack, Saves
+  opened, and one freeform player action completed through the action dock with
+  zero console errors. Treat this as workability evidence, not long-play
+  acceptance.
 - Focused Oracle/vector recheck judged the vector P1 closed. This is not a
   broad architecture GO and not gameplay acceptance.
 - Existing dirty `.planning` evidence files are outside this architecture
@@ -114,7 +116,7 @@ means local contract/source evidence, not Browser or long-play acceptance.
 
 | Layer | Owner | Authority rule | Recovery rule | Current status |
 | --- | --- | --- | --- | --- |
-| UI action intake | frontend parser plus `/chat/action` route | freeform text or backend-issued handle only; labels/prose are display | malformed/stale handles reject before turn mutation | local contract evidence; prior Browser smoke only |
+| UI action intake | frontend parser plus `/chat/action` route | freeform text or backend-issued handle only; labels/prose are display | malformed/stale handles reject before turn mutation | local contract evidence; current Browser freeform smoke passed |
 | Turn boundary | chat route plus turn saga | one lease, one pre-turn snapshot, one authority state machine | retry before lease; resume/rollback after lease/snapshot | local contract evidence |
 | GM Read | `runGmRead` validator | read/classification only; no mutation | repair/retry before executor | local contract evidence |
 | GM Tool Loop | descriptor-derived active tool loop | model proposes tool calls; executor owns authority | savepoint rollback for unaccepted mutation | local contract evidence |
@@ -125,10 +127,10 @@ means local contract/source evidence, not Browser or long-play acceptance.
 | Narrator packet | packet builder | selectable facts are backend-visible accepted facts | resume from settled packet | local contract evidence; live/resume full-path evidence still gateable |
 | Final narration | narration guard/turn processor | model can style/order only selected fact/evidence refs | repair/fail closed before public prose leaks | targeted legacy-text regressions covered; Browser/soak pending |
 | SSE/API projection | DTO factories and route projectors | public handles and allowlists only | rebuild projection from authority | local evidence for known gameplay surfaces; source-scope bundle still needed |
-| Frontend projection | `frontend/lib/api.ts` parser | public handles carry authority; local render is not truth | reject/drop raw legacy authority | targeted tests green; prior Browser smoke passed; lookup support cannot replace scene beat |
+| Frontend projection | `frontend/lib/api.ts` parser | public handles carry authority; local render is not truth | reject/drop raw legacy authority | targeted tests green; current Browser smoke passed; lookup support cannot replace scene beat |
 | Persistence bundles | store manifest and bundle services | every store has policy/evidence | verify before copy; staged restore | local contract evidence |
 | Clone/replay/rollback/vector | manifest executor, clone/restore services | clean-start clone is explicit; replay-preserving fails closed | clone manifest, restore staging, vector reconcile | focused Oracle vector P1 CLOSED; long-play/replay evidence pending |
-| Observability/evals | traces, reports, test harness | evidence describes outcomes, never creates gameplay truth | rerun/compare using committed snapshots | contract tests/GitNexus done; Oracle/Browser/play pending |
+| Observability/evals | traces, reports, test harness | evidence describes outcomes, never creates gameplay truth | rerun/compare using committed snapshots | contract tests/GitNexus done; current Browser smoke recorded; long-play pending |
 
 ## Agent Roles And Tool Calling
 
@@ -294,7 +296,8 @@ These items are intentionally not buried under "green tests":
 - Evidence gate: current-head Oracle bundle returned NO-GO on vector rollback
   evidence coverage; focused Oracle recheck
   `phase95-vector-rollback-focused-recheck` closed that vector P1.
-- Evidence gate: in-app Browser UI workability.
+- Evidence gate: in-app Browser UI workability smoke passed on `31b025b`; this
+  is not human-style long-play acceptance.
 - Evidence gate: human-style fresh and cloned campaigns plus longer
   soak/replay. Sixty turns are smoke evidence, not the end state.
 
@@ -310,11 +313,11 @@ accepted rows, rebuilds missing accepted rows from `location_recent_events`, and
 fails closed without writing rebuilt rows if the stale vector table cannot be
 purged. Focused Oracle session `phase95-vector-rollback-focused-recheck`
 reviewed the attached vector/restore files and returned `VECTOR P1 CLOSED`.
-This closes that named P1 evidence gap only; it does not turn Phase 95 into
-acceptance or replace Browser, human-style play, soak/replay, and any remaining
-source-scope architecture review. If later evidence finds a missing layer or
-invariant, this document becomes the correction board rather than a defense of
-the current design.
+This closes that named P1 evidence gap only. Current in-app Browser smoke also
+passes, but neither result turns Phase 95 into acceptance or replaces
+human-style play, soak/replay, and any remaining source-scope architecture
+review. If later evidence finds a missing layer or invariant, this document
+becomes the correction board rather than a defense of the current design.
 
 Output recheck note: broad Browser/Oracle attachment runs produced tiny or
 missing saved transcripts, but that is an extraction/persistence signal, not

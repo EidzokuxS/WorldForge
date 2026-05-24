@@ -57,23 +57,22 @@ then focused Oracle session `phase95-vector-rollback-focused-recheck` reviewed
 the vector/restore files and returned `VECTOR P1 CLOSED`. Browser, human-style
 play, soak/replay, and acceptance gates remain blocked.
 
-Prior same-day in-app Browser workability on the restarted dev stack loaded
-`/game`, opened Saves, deleted an existing checkpoint through a
-`pdto_checkpoint_*` handle, and left the checkpoint list empty with zero
-console errors. That smoke also caught and closed a live `/world` public
-projection gap: `CharacterDraft.startConditions.startLocationId` and draft
-social location/faction refs are projected as public handles, while the public
-boundary explicitly allows the typed `player-input` enum without allowing raw
-`player-*` ids. Radix Dialog aria-description warnings remain P2 UX debt.
-Expanded Browser workability then sent a freeform player action through the
-real action dock. The turn completed successfully, returned to Ready, cleared
-the submitted draft, emitted no console errors or warnings, and produced
-playable dialogue grounded in backend-visible proof requirements. Treat this as
-historical workability evidence for the slice, not as current acceptance
-evidence. That pass also closed a frontend projection/playfeel bug where
-persisted lookup/support answers could replace the current scene beat; the
-scene dock now selects the latest true narration while the Narrative Log remains
-the lookup surface.
+In-app Browser workability on `31b025b` loaded `/game`, opened Saves, sent one
+freeform player action through the real action dock, returned to Ready, cleared
+the submitted draft, emitted zero console errors, and updated the scene beat
+from the backend response. Evidence is recorded in
+`output/phase95-browser-smoke-20260524-1705.md`. The primary Browser
+`node_repl` bridge failed to initialize before the smoke, so the run used the
+available in-app Browser Playwright page controls; that is a Browser tooling
+note, not a gameplay failure. Radix Dialog aria-description warnings remain P2
+UX/accessibility debt. Earlier same-day Browser work also caught and closed a
+live `/world` public projection gap: `CharacterDraft.startConditions.startLocationId`
+and draft social location/faction refs are projected as public handles, while
+the public boundary explicitly allows the typed `player-input` enum without
+allowing raw `player-*` ids. Another prior pass closed a frontend
+projection/playfeel bug where persisted lookup/support answers could replace
+the current scene beat; the scene dock now selects the latest true narration
+while the Narrative Log remains the lookup surface.
 
 No long human-style 60-turn, cloned-world, or 600-turn soak acceptance should
 resume until the full local closure matrix is bundled, Oracle-reviewed on a
@@ -512,14 +511,15 @@ References Used:
 - `output/phase95-handoff-contract.md`
 - `output/phase95-gameplay-cycle-contract-inventory.md`
 - `docs/phase95-architecture-completeness-matrix-2026-05-24.md`
+- `output/phase95-browser-smoke-20260524-1705.md`
 - `C:\Users\robra\.codex\skills\oracle\SKILL.md`
 - `C:\Users\robra\.agents\skills\agents-best-practices\SKILL.md`
 - Browser plugin requirement from user, 2026-05-24
 
 Unverified Assumptions:
 
-- The local in-app Browser path can be revalidated after backend/frontend
-  servers are restarted; prior smoke is not acceptance evidence.
+- Current in-app Browser smoke is workability evidence only; it does not
+  replace long-play acceptance campaigns.
 
 ## "Nothing Forgotten" Checklist
 
@@ -557,8 +557,8 @@ This list is the closure guard before any future "architecture GO" claim:
   Targeted clone tests green.
 - [x] Replay-preserving clone/replay is executable fail-closed. Targeted
   manifest/clone tests green.
-- [ ] Observability evidence includes Browser UI, GitNexus, Oracle bundle, and
-  human-style play after blockers close.
+- [ ] Observability evidence includes current Browser UI smoke, GitNexus,
+  Oracle bundle, and human-style play after blockers close.
 
 ## Next Implementation Order
 
