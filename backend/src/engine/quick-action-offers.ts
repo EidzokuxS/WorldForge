@@ -3,7 +3,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { quickActionOffers } from "../db/schema.js";
 import { withSqliteWriteLock } from "../db/sqlite-write-lock.js";
-import { AppError } from "../lib/index.js";
+import { AppError } from "../lib/errors.js";
 import { readWorldClock } from "./living-world-authority.js";
 import { sanitizePlayerFacingText } from "./player-facing-events.js";
 

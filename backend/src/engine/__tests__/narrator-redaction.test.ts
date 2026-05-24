@@ -10,6 +10,7 @@ vi.mock("../../db/index.js", () => ({
 }));
 
 import { readCampaignConfig, getChatHistory } from "../../campaign/index.js";
+import { getDb } from "../../db/index.js";
 import { assembleFinalNarrationPrompt } from "../prompt-assembler.js";
 import type { NarratorPacket } from "../narrator-packet.js";
 import type { SceneAssembly } from "../scene-assembly.js";
@@ -138,6 +139,15 @@ describe("narrator redaction boundary", () => {
       generationComplete: true,
     });
     vi.mocked(getChatHistory).mockReturnValue([]);
+    const query = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      get: vi.fn().mockReturnValue(undefined),
+      all: vi.fn().mockReturnValue([]),
+    };
+    vi.mocked(getDb).mockReturnValue({
+      select: vi.fn().mockReturnValue(query),
+    } as never);
   });
 
   it("assembles final narration through PlayerFacingPacket trace without hidden private surfaces", async () => {
@@ -175,7 +185,7 @@ describe("narrator redaction boundary", () => {
     });
 
     expect(result.prompt).toContain("[CURRENT LOCAL SCENE]");
-    expect(result.prompt).toContain("[private term omitted] is secretly visible");
+    expect(result.prompt).toContain("[redacted] is secretly visible");
     expect(result.prompt).not.toContain("Forest Outpost");
   });
 
@@ -260,7 +270,7 @@ describe("narrator redaction boundary", () => {
     expect(result.prompt).toContain("I loudly claim that Satoru Gojo");
     expect(result.prompt).toContain("Mira claimed Satoru Gojo authorized");
     expect(result.prompt).not.toContain("trap prepared for Satoru Gojo");
-    expect(result.prompt).toContain("trap prepared for [private term omitted]");
+    expect(result.prompt).toContain("trap prepared for [redacted]");
   });
 
   it("still rejects a player-named private actor when an effect asserts the name as fact", async () => {

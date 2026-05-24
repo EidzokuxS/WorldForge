@@ -82,7 +82,7 @@ describe("key actor process state", () => {
     connectDb(path.join(tempDir, "state.db"));
     runMigrations();
     seedCampaign();
-    ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 10 });
+    ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 10, worldTimeMinutes: 10 });
   });
 
   afterEach(() => {

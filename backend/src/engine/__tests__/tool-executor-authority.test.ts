@@ -11,6 +11,8 @@ import {
   chronicle,
   npcs,
   players,
+  quickActionOffers,
+  turnClockLedger,
   worldClocks,
 } from "../../db/schema.js";
 import type { ToolExecutionContext } from "../tool-execution-context.js";
@@ -110,7 +112,7 @@ describe("executeToolCall authority bridge", () => {
       campaignId: CAMPAIGN_ID,
       baseWorldVersion: 0,
       resultWorldVersion: 1,
-      worldTimeMinutes: 4,
+      worldTimeMinutes: 1,
       stateDeltaRefs: expect.arrayContaining([expect.any(String), "world:event"]),
     });
     expect(
@@ -127,6 +129,17 @@ describe("executeToolCall authority bridge", () => {
         .where(eq(authorityTraces.campaignId, CAMPAIGN_ID))
         .all(),
     ).toHaveLength(1);
+    expect(
+      getDb()
+        .select()
+        .from(turnClockLedger)
+        .where(eq(turnClockLedger.campaignId, CAMPAIGN_ID))
+        .get(),
+    ).toMatchObject({
+      deltaMinutes: 1,
+      resultWorldVersion: 1,
+      resultWorldTimeMinutes: 1,
+    });
 
     applySuccessfulToolObservationToExecutionContext({
       toolName: "add_chronicle_entry",
@@ -204,6 +217,73 @@ describe("executeToolCall authority bridge", () => {
         .where(eq(chronicle.campaignId, CAMPAIGN_ID))
         .all(),
     ).toHaveLength(0);
+  });
+
+  it("requires authority for quick-action offers without committing canonical world state", async () => {
+    const actions = [
+      { label: "Ask", action: "Ask the clerk about the stamped writ." },
+      { label: "Watch", action: "Watch the counter for a reaction." },
+      { label: "Move", action: "Step back into the queue." },
+    ];
+
+    const directResult = await executeToolCall(
+      CAMPAIGN_ID,
+      "offer_quick_actions",
+      { actions },
+      3,
+    );
+
+    expect(directResult.success).toBe(false);
+    expect(directResult.error).toContain("requires execution authority");
+
+    const context = createAuthorityContext(0);
+    context.authority!.elapsedWorldTimeMinutes = 0;
+    const authorizedResult = await executeToolCall(
+      CAMPAIGN_ID,
+      "offer_quick_actions",
+      { actions },
+      3,
+      undefined,
+      context,
+    );
+
+    expect(authorizedResult.success).toBe(true);
+    expect(authorizedResult.authority).toBeUndefined();
+    expect(authorizedResult.result).toMatchObject({
+      actions: [
+        { label: "Ask", action: "Ask the clerk about the stamped writ.", handle: expect.stringMatching(/^qac_[a-f0-9]{32}$/u) },
+        { label: "Watch", action: "Watch the counter for a reaction.", handle: expect.stringMatching(/^qac_[a-f0-9]{32}$/u) },
+        { label: "Move", action: "Step back into the queue.", handle: expect.stringMatching(/^qac_[a-f0-9]{32}$/u) },
+      ],
+    });
+    expect(
+      getDb()
+        .select()
+        .from(quickActionOffers)
+        .where(eq(quickActionOffers.campaignId, CAMPAIGN_ID))
+        .all(),
+    ).toHaveLength(3);
+    expect(
+      getDb()
+        .select()
+        .from(authorityTraces)
+        .where(eq(authorityTraces.campaignId, CAMPAIGN_ID))
+        .all(),
+    ).toHaveLength(0);
+    expect(
+      getDb()
+        .select()
+        .from(turnClockLedger)
+        .where(eq(turnClockLedger.campaignId, CAMPAIGN_ID))
+        .all(),
+    ).toHaveLength(0);
+    expect(
+      getDb()
+        .select()
+        .from(worldClocks)
+        .where(eq(worldClocks.campaignId, CAMPAIGN_ID))
+        .get(),
+    ).toMatchObject({ worldVersion: 0, worldTimeMinutes: 0 });
   });
 
   it("validates runtime tool schemas for direct executor calls before mutation", async () => {

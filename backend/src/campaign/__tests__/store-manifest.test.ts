@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { closeDb, connectDb, getDb } from "../../db/index.js";
+import { closeDb, connectDb, getDb, getSqliteConnection } from "../../db/index.js";
 import { runMigrations } from "../../db/migrate.js";
 import { campaigns } from "../../db/schema.js";
 import {
@@ -127,6 +127,26 @@ describe("campaign store bundle manifest", () => {
       bundleDir,
       includeVectors: true,
     })).toThrow(/vectors/i);
+  });
+
+  it("covers every migrated gameplay SQLite table in the Phase 95 store manifest", () => {
+    const migratedTables = (
+      getSqliteConnection()
+        .prepare(`
+          SELECT name
+          FROM sqlite_master
+          WHERE type = 'table'
+            AND name NOT LIKE 'sqlite_%'
+            AND name != '__drizzle_migrations'
+          ORDER BY name
+        `)
+        .all() as Array<{ name: string }>
+    ).map((row) => row.name);
+
+    expect([...PHASE95_SQLITE_STORE_TABLES].sort()).toEqual(migratedTables);
+    for (const table of migratedTables) {
+      expect(PHASE95_REQUIRED_STORE_KEYS).toContain(`sqlite:${table}`);
+    }
   });
 
   it("records vector capture when checkpoint bundles include vectors", async () => {

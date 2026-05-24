@@ -65,8 +65,14 @@ describe("Phase 95 gameplay control-plane contracts", () => {
     expect(GAMEPLAY_STATE_OWNER_REGISTRY.find((entry) => entry.lane === "clock_delta"))
       .toMatchObject({
         owner: "turn_clock_ledger",
-        status: "contract_only",
+        status: "live",
         receiptKind: "clock_receipt",
+      });
+    expect(GAMEPLAY_STATE_OWNER_REGISTRY.find((entry) => entry.lane === "quick_action_offer"))
+      .toMatchObject({
+        owner: "quick_action_offer_service",
+        status: "live",
+        receiptKind: "quick_action_offer",
       });
 
     expect(() => assertStateOwnerRegistry([
@@ -80,6 +86,7 @@ describe("Phase 95 gameplay control-plane contracts", () => {
     expect(owners.movement).toEqual(["move_actor"]);
     expect(owners.location_revealed).toEqual(["reveal_location"]);
     expect(owners.minor_poi_created).toEqual(["create_minor_poi"]);
+    expect(owners.quick_action_offer).toEqual(["offer_quick_actions"]);
 
     // Entity tags still have multiple tool verbs. The Phase 95 contract keeps
     // the write owner as an explicit service until runtime routing is unified.

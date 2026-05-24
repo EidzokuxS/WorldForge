@@ -11,6 +11,7 @@ export const RUNTIME_TOOL_STATE_EFFECT_KINDS = [
   "location_revealed",
   "minor_poi_created",
   "chronicle_entry",
+  "quick_action_offer",
 ] as const;
 
 export type RuntimeToolStateEffectKind =
@@ -25,7 +26,8 @@ export type RuntimeToolRole =
   | "time_effect"
   | "authority_bounds"
   | "legacy_scene_beat"
-  | "ui_suggestion";
+  | "ui_suggestion"
+  | "public_handle_authority";
 
 export type RuntimeToolEffectOwnerKind =
   | "canonical"
@@ -193,6 +195,7 @@ export const RUNTIME_TOOL_DESCRIPTORS: Record<RuntimeToolName, RuntimeToolDescri
   },
   offer_quick_actions: {
     toolName: "offer_quick_actions",
-    roles: ["ui_suggestion"],
+    roles: ["ui_suggestion", "public_handle_authority"],
+    stateEffects: [{ effectKind: "quick_action_offer", ownerKind: "canonical" }],
   },
 };

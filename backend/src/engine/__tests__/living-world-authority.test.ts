@@ -20,6 +20,7 @@ import {
   invalidateAuthorityAfterRestore,
   queueSimulationJob,
   readWorldClock,
+  readTurnClockLedger,
   recordSimulationProposal,
   syncWorldClockTurnBoundary,
   upsertActorProcessState,
@@ -63,7 +64,7 @@ describe("living world authority", () => {
     expect(clock).toMatchObject({
       campaignId: CAMPAIGN_ID,
       worldVersion: 0,
-      worldTimeMinutes: 7,
+      worldTimeMinutes: 0,
       currentTick: 7,
     });
 
@@ -82,15 +83,23 @@ describe("living world authority", () => {
       campaignId: CAMPAIGN_ID,
       baseWorldVersion: 0,
       resultWorldVersion: 1,
-      worldTimeMinutes: 10,
+      worldTimeMinutes: 3,
       elapsedWorldTimeMinutes: 3,
     });
 
     expect(readWorldClock(CAMPAIGN_ID)).toMatchObject({
       worldVersion: 1,
-      worldTimeMinutes: 10,
-      currentTick: 10,
+      worldTimeMinutes: 3,
+      currentTick: 7,
     });
+    expect(readTurnClockLedger(CAMPAIGN_ID)).toMatchObject([{
+      campaignId: CAMPAIGN_ID,
+      baseWorldVersion: 0,
+      resultWorldVersion: 1,
+      deltaMinutes: 3,
+      reasonKind: "tool_time_effect",
+      resultWorldTimeMinutes: 3,
+    }]);
     expect(() =>
       validateBaseWorldVersion({
         campaignId: CAMPAIGN_ID,
@@ -107,7 +116,7 @@ describe("living world authority", () => {
     expect(traces[0]?.resultWorldVersion).toBe(1);
   });
 
-  it("syncs the readable world clock to the finalized turn tick and elapsed turn time without mutating world version", () => {
+  it("syncs the readable UI turn ordinal without mutating world time or world version", () => {
     ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 0, worldTimeMinutes: 0 });
 
     const synced = syncWorldClockTurnBoundary({
@@ -118,7 +127,7 @@ describe("living world authority", () => {
     expect(synced).toMatchObject({
       campaignId: CAMPAIGN_ID,
       worldVersion: 0,
-      worldTimeMinutes: 55,
+      worldTimeMinutes: 0,
       currentTick: 55,
     });
 
@@ -129,12 +138,50 @@ describe("living world authority", () => {
 
     expect(rewound).toMatchObject({
       worldVersion: 0,
-      worldTimeMinutes: 55,
+      worldTimeMinutes: 0,
       currentTick: 55,
+    });
+    expect(() =>
+      syncWorldClockTurnBoundary({
+        campaignId: CAMPAIGN_ID,
+        currentTick: 56,
+        worldTimeMinutes: 56,
+      }),
+    ).toThrow(WorldVersionConflictError);
+  });
+
+  it("records an explicit zero-time receipt when authority omits elapsed world time", () => {
+    ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 0 });
+
+    const authority = commitAuthorityTrace({
+      campaignId: CAMPAIGN_ID,
+      operation: "tool:record_world_fact",
+      baseWorldVersion: 0,
+      sourceEntity: { type: "system", id: "gm-tool-loop" },
+      toolResultId: "zero-time-fact",
+      eventIds: ["event-1"],
+      stateDeltaRefs: ["knowledge:fact-1"],
+    });
+
+    expect(authority).toMatchObject({
+      resultWorldVersion: 1,
+      worldTimeMinutes: 0,
+      elapsedWorldTimeMinutes: 0,
+    });
+    expect(readTurnClockLedger(CAMPAIGN_ID)).toMatchObject([{
+      deltaMinutes: 0,
+      reasonKind: "zero_time_status",
+      resultWorldTimeMinutes: 0,
+      resultWorldVersion: 1,
+      sourceReceiptRef: "authority:zero-time-fact",
+    }]);
+    expect(readWorldClock(CAMPAIGN_ID)).toMatchObject({
+      worldVersion: 1,
+      worldTimeMinutes: 0,
     });
   });
 
-  it("creates a missing world clock at the turn boundary with elapsed turn time", () => {
+  it("creates a missing world clock at the turn boundary without elapsed world time", () => {
     const synced = syncWorldClockTurnBoundary({
       campaignId: CAMPAIGN_ID,
       currentTick: 9,
@@ -142,7 +189,7 @@ describe("living world authority", () => {
 
     expect(synced).toMatchObject({
       worldVersion: 0,
-      worldTimeMinutes: 9,
+      worldTimeMinutes: 0,
       currentTick: 9,
     });
   });
@@ -227,6 +274,11 @@ describe("living world authority", () => {
       worldTimeMinutes: 5,
       currentTick: 5,
     });
+    expect(readTurnClockLedger(CAMPAIGN_ID).at(-1)).toMatchObject({
+      reasonKind: "replay_restore",
+      resultWorldVersion: 0,
+      resultWorldTimeMinutes: 5,
+    });
   });
 
   it("keeps world-version linearity at the database level", () => {
@@ -296,6 +348,7 @@ describe("living world authority", () => {
 
     expect(second).toMatchObject(first);
     expect(getDb().select().from(authorityTraces).all()).toHaveLength(1);
+    expect(readTurnClockLedger(CAMPAIGN_ID)).toHaveLength(1);
     expect(readWorldClock(CAMPAIGN_ID)).toMatchObject({
       worldVersion: 1,
       worldTimeMinutes: 0,

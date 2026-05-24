@@ -10,10 +10,12 @@ import {
   isAcceptedTerminalToolResult,
   MODEL_TOOL_CONTRACTS,
   modelToolIsSideEffecting,
+  RUNTIME_AUTHORITY_REQUIRED_TOOL_NAMES,
+  RUNTIME_CANONICAL_WORLD_MUTATION_TOOL_NAMES,
   RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS,
-  RUNTIME_STATE_BEARING_TOOL_NAMES,
   RUNTIME_TOOL_CONTRACTS,
   runtimeRequirementStateMutationTools,
+  runtimeToolCommitsCanonicalWorldVersion,
   runtimeToolRequiresExecutionAuthority,
   runtimeToolIsSideEffecting,
 } from "../tool-contracts.js";
@@ -110,14 +112,14 @@ describe("tool contracts", () => {
     }
   });
 
-  it("derives runtime execution authority from tool contract roles", () => {
-    const derivedStateBearingTools = [...RUNTIME_STATE_BEARING_TOOL_NAMES].sort();
-    const expectedStateBearingTools = (Object.keys(RUNTIME_TOOL_CONTRACTS) as RuntimeToolName[])
+  it("splits execution authority from canonical world-version mutation", () => {
+    const canonicalWorldMutationTools = [...RUNTIME_CANONICAL_WORLD_MUTATION_TOOL_NAMES].sort();
+    const expectedCanonicalWorldMutationTools = (Object.keys(RUNTIME_TOOL_CONTRACTS) as RuntimeToolName[])
       .filter((toolName) => runtimeToolIsSideEffecting(toolName))
       .sort();
 
-    expect(derivedStateBearingTools).toEqual(expectedStateBearingTools);
-    expect(derivedStateBearingTools).toEqual(
+    expect(canonicalWorldMutationTools).toEqual(expectedCanonicalWorldMutationTools);
+    expect(canonicalWorldMutationTools).toEqual(
       expect.arrayContaining([
         "record_dialogue_outcome",
         "record_world_fact",
@@ -129,7 +131,7 @@ describe("tool contracts", () => {
         "transfer_item",
       ]),
     );
-    expect(derivedStateBearingTools).not.toEqual(
+    expect(canonicalWorldMutationTools).not.toEqual(
       expect.arrayContaining([
         "inspect_known_fact",
         "check_route",
@@ -138,9 +140,22 @@ describe("tool contracts", () => {
       ]),
     );
 
+    const authorityRequiredTools = [...RUNTIME_AUTHORITY_REQUIRED_TOOL_NAMES].sort();
+    expect(authorityRequiredTools).toEqual(
+      expect.arrayContaining([
+        ...canonicalWorldMutationTools,
+        "offer_quick_actions",
+      ]),
+    );
+    expect(runtimeToolRequiresExecutionAuthority("offer_quick_actions")).toBe(true);
+    expect(runtimeToolCommitsCanonicalWorldVersion("offer_quick_actions")).toBe(false);
+    expect(runtimeToolIsSideEffecting("offer_quick_actions")).toBe(false);
+
     for (const toolName of Object.keys(runtimeToolInputSchemas) as RuntimeToolName[]) {
+      const requiresAuthority = runtimeToolIsSideEffecting(toolName)
+        || RUNTIME_TOOL_CONTRACTS[toolName].roles.includes("public_handle_authority");
       expect(runtimeToolRequiresExecutionAuthority(toolName)).toBe(
-        runtimeToolIsSideEffecting(toolName),
+        requiresAuthority,
       );
     }
   });

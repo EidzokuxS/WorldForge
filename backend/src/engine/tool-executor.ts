@@ -96,7 +96,8 @@ import {
 } from "./combat-envelope.js";
 import { findUncoveredWriteRef } from "./simulation-write-scope.js";
 import {
-  RUNTIME_STATE_BEARING_TOOL_NAMES,
+  RUNTIME_AUTHORITY_REQUIRED_TOOL_NAMES,
+  RUNTIME_CANONICAL_WORLD_MUTATION_TOOL_NAMES,
 } from "./tool-contracts.js";
 import { persistQuickActionOffer } from "./quick-action-offers.js";
 
@@ -145,14 +146,15 @@ const NPC_TIER_ORDER: Record<NpcTier, number> = {
   persistent: 1,
   key: 2,
 };
-const STATE_BEARING_TOOLS = new Set<string>(RUNTIME_STATE_BEARING_TOOL_NAMES);
+const AUTHORITY_REQUIRED_TOOLS = new Set<string>(RUNTIME_AUTHORITY_REQUIRED_TOOL_NAMES);
+const CANONICAL_WORLD_MUTATION_TOOLS = new Set<string>(RUNTIME_CANONICAL_WORLD_MUTATION_TOOL_NAMES);
 const SYNC_SQLITE_STATE_BEARING_TOOLS = new Set(
-  [...STATE_BEARING_TOOLS].filter((toolName) =>
+  [...CANONICAL_WORLD_MUTATION_TOOLS].filter((toolName) =>
     toolName !== "log_event" && toolName !== "record_dialogue_outcome"),
 );
 
 export function toolRequiresExecutionAuthority(toolName: string): boolean {
-  return STATE_BEARING_TOOLS.has(toolName);
+  return AUTHORITY_REQUIRED_TOOLS.has(toolName);
 }
 
 export interface ExecuteToolCallOptions {
@@ -3576,7 +3578,7 @@ function finalizeAuthorityResult(input: {
   executionContext?: ToolExecutionContext;
 }): ToolResult {
   const authority = input.executionContext?.authority;
-  if (!authority || !STATE_BEARING_TOOLS.has(input.toolName)) {
+  if (!authority || !CANONICAL_WORLD_MUTATION_TOOLS.has(input.toolName)) {
     return attachModelVisibleToolResultJson(input.result);
   }
   if (
@@ -3621,7 +3623,7 @@ function finalizeAuthorityResult(input: {
   const elapsedWorldTimeMinutes =
     input.toolName === "advance_time"
       ? readIntegerField(input.result.result, "minutes") ?? 0
-      : input.executionContext?.authority?.elapsedWorldTimeMinutes ?? 1;
+      : input.executionContext?.authority?.elapsedWorldTimeMinutes ?? 0;
   assertAuthorityWriteScopesCovered({
     stateDeltaRefs: inferredRefs,
     allowedWriteScopes: authority.allowedWriteScopes,
@@ -3636,7 +3638,12 @@ function finalizeAuthorityResult(input: {
     baseWorldVersion: authority.baseWorldVersion,
     sourceEntity: authority.sourceEntity,
     elapsedWorldTimeMinutes,
+    clockReasonKind: input.toolName === "advance_time" ? "tool_time_effect" : undefined,
     currentTick: input.tick,
+    turnId: typeof authority.metadata?.turnId === "string"
+      ? authority.metadata.turnId
+      : `turn:${input.tick}`,
+    uiTurnOrdinal: input.tick,
     toolResultId: authority.toolResultId,
     eventIds: eventIdsForAuthorityTrace({
       toolName: input.toolName,
@@ -3664,7 +3671,7 @@ function missingStateBearingAuthorityIssue(input: {
   executionContext?: ToolExecutionContext;
   options?: ExecuteToolCallOptions;
 }): ToolResult | null {
-  if (!STATE_BEARING_TOOLS.has(input.toolName)) return null;
+  if (!AUTHORITY_REQUIRED_TOOLS.has(input.toolName)) return null;
   if (!input.executionContext) {
     if (input.options?.authorityMode === "legacy_unscoped") return null;
     return buildValidationFailureToolResult(
@@ -3822,7 +3829,7 @@ export async function executeToolCall(
 
     const executeValidatedTool = async (): Promise<ToolResult> => {
       const hasAuthority = Boolean(
-        executionContext?.authority && STATE_BEARING_TOOLS.has(toolName),
+        executionContext?.authority && AUTHORITY_REQUIRED_TOOLS.has(toolName),
       );
       if (hasAuthority && SYNC_SQLITE_STATE_BEARING_TOOLS.has(toolName)) {
         return getDb().transaction(() => {
@@ -3900,7 +3907,7 @@ export async function executeToolCall(
       });
     };
 
-    resultForLog = STATE_BEARING_TOOLS.has(toolName)
+    resultForLog = AUTHORITY_REQUIRED_TOOLS.has(toolName)
       ? await withSqliteWriteLock(`tool:${campaignId}:${toolName}`, executeValidatedTool)
       : await executeValidatedTool();
     if (

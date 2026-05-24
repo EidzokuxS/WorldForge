@@ -1,11 +1,20 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { closeDb, connectDb, getDb } from "../../db/index.js";
+import { runMigrations } from "../../db/migrate.js";
+import { campaigns } from "../../db/schema.js";
 import {
   applySuccessfulToolObservationToExecutionContext,
+  createActorTurnToolExecutionContext,
+  createBackgroundToolExecutionContext,
   createPlayerTurnToolExecutionContext,
   validateToolInputGrounding,
 } from "../tool-execution-context.js";
 import { buildObservationToolResult } from "../tool-result.js";
+import type { ActorFrame } from "../actor-frame.js";
 import type { SceneFrame } from "../scene-frame.js";
 
 function createFrame(): SceneFrame {
@@ -57,6 +66,69 @@ function createFrame(): SceneFrame {
 }
 
 describe("createPlayerTurnToolExecutionContext", () => {
+  it("defaults player, background, and actor authority elapsed time to zero", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-tool-context-"));
+    try {
+      connectDb(path.join(tempDir, "state.db"));
+      runMigrations();
+      getDb().insert(campaigns).values({
+        id: "campaign-1",
+        name: "Tool Context",
+        premise: "A deterministic context test campaign.",
+        createdAt: 100,
+        updatedAt: 100,
+      }).run();
+
+      const frame = createFrame();
+      const playerContext = createPlayerTurnToolExecutionContext(frame);
+      expect(playerContext.authority).toMatchObject({
+        baseWorldVersion: 0,
+        elapsedWorldTimeMinutes: 0,
+      });
+
+      const backgroundContext = createBackgroundToolExecutionContext({
+        campaignId: "campaign-1",
+        sourceEntity: { type: "system", id: "test-background" },
+        baseWorldVersion: 2,
+      });
+      expect(backgroundContext.authority).toMatchObject({
+        baseWorldVersion: 2,
+        elapsedWorldTimeMinutes: 0,
+      });
+
+      const actorFrame: ActorFrame = {
+        campaignId: "campaign-1",
+        worldVersion: 2,
+        observer: {
+          id: "actor-road-warden",
+          actorId: "npc-road-warden",
+          label: "Road Warden",
+          type: "npc",
+          locationId: "loc-pier",
+          sceneScopeId: "scene-counter",
+        },
+        playerActionRequest: "I open the records hatch beside the counter.",
+        facts: [],
+        legalTools: ["log_event"],
+        constraints: [],
+        contextBudgetTrace: {} as never,
+        hiddenExcludedCount: 0,
+      };
+      const actorContext = createActorTurnToolExecutionContext({
+        sceneFrame: frame,
+        actorFrame,
+        baseWorldVersion: 2,
+      });
+      expect(actorContext.authority).toMatchObject({
+        baseWorldVersion: 2,
+        elapsedWorldTimeMinutes: 0,
+      });
+    } finally {
+      closeDb();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects backend-only actor refs for player-turn bridge tools", () => {
     const context = createPlayerTurnToolExecutionContext(createFrame());
 

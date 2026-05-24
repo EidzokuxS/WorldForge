@@ -299,7 +299,7 @@ export function buildDoneBoundaryData(
   const clock = readWorldClock(campaignId);
   const inputTick = base["tick"];
   const coherentTick = typeof inputTick === "number"
-    ? Math.max(inputTick, clock.currentTick, clock.worldTimeMinutes)
+    ? Math.max(inputTick, clock.currentTick)
     : null;
   return {
     ...base,

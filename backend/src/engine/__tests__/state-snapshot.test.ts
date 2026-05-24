@@ -72,6 +72,11 @@ describe("state snapshot rollback bundle", () => {
           where: vi.fn().mockReturnValue({ run: vi.fn() }),
         }),
       }),
+      insert: vi.fn().mockReturnValue({
+        values: vi.fn().mockReturnValue({
+          onConflictDoNothing: vi.fn().mockReturnValue({ run: vi.fn() }),
+        }),
+      }),
       delete: vi.fn().mockReturnValue({
         where: vi.fn().mockReturnValue({ run: vi.fn() }),
       }),

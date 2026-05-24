@@ -157,7 +157,7 @@ function seedWorld() {
   seedEdge("loc-b", "loc-a");
   seedPlayer();
   seedNpc();
-  ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 7 });
+  ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 7, worldTimeMinutes: 7 });
 }
 
 function setNpcPowerStats(npcId: string, powerStats: PowerStats) {

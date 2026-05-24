@@ -101,7 +101,7 @@ function seedWorld() {
   seedEdge("loc-a", "loc-b", 7);
   seedEdge("loc-b", "loc-a", 7);
   seedNpc();
-  ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 10 });
+  ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 10, worldTimeMinutes: 10 });
   backfillKeyActorProcessesForCampaign({
     campaignId: CAMPAIGN_ID,
     nextWakeDelayMinutes: 0,

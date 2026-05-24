@@ -638,7 +638,7 @@ function buildSettledTurnClockContext(args: {
   );
   const travelElapsed = args.successfulTravel?.travelCost ?? 0;
   const elapsedWorldTimeMinutes = Math.max(
-    1,
+    0,
     acceptedTimeMinutes,
     authorityElapsed,
     travelElapsed,
@@ -646,7 +646,6 @@ function buildSettledTurnClockContext(args: {
   const tick = Math.max(
     args.minimumTick ?? predictNextTick(args.currentTick, args.successfulTravel),
     clock.currentTick,
-    clock.worldTimeMinutes,
   );
 
   return {
@@ -3412,7 +3411,6 @@ function predictNarrationTargetTick(args: {
     args.currentTick,
     storedTick,
     worldClock.currentTick,
-    worldClock.worldTimeMinutes,
   );
   return baseTick + narrationTickAdvance(args.successfulTravel);
 }
@@ -3456,7 +3454,6 @@ function advanceNarrationTick(args: {
       args.idempotentTargetTick,
       storedTick,
       worldClock.currentTick,
-      worldClock.worldTimeMinutes,
     );
     return advanceCampaignTickToTarget(args.campaignId, storedTick, targetTick);
   }
@@ -4569,7 +4566,7 @@ async function* processTurnScenePlan(
     tick: currentTick,
     playerLocationId: oracleLocationId,
     playerSceneScopeId: currentSceneScopeId,
-    elapsedWorldTimeMinutes: 1,
+    elapsedWorldTimeMinutes: 0,
     phase: "pre_scene_frame",
   });
   const preFrameDueWorkEnded = Date.now();
@@ -6095,7 +6092,7 @@ async function* processTurnLegacy(
       playerAction,
       intent,
       method,
-      elapsedWorldTimeMinutes: 1,
+      elapsedWorldTimeMinutes: 0,
     });
     const executionStart = Date.now();
     const executedPlan = await executeAdjudicationPlan({

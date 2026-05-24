@@ -11,6 +11,11 @@ import {
   turnSagas,
   type narratorAttemptStatusValues,
 } from "../db/schema.js";
+import {
+  TURN_AUTHORITY_STAGE_SCHEMA,
+  TURN_AUTHORITY_STAGE_VALUES,
+  type TurnAuthorityStage,
+} from "./gameplay-control-plane-contract.js";
 
 export type TurnSagaStatus = (typeof turnSagaStatusValues)[number];
 export type NarratorAttemptStatus = (typeof narratorAttemptStatusValues)[number];
@@ -320,6 +325,18 @@ export type RecordPreparedSettledTurnPacketInput = PersistSettledTurnPacketInput
 export type RecoverSettledTurnPacketFromPreparedEventInput =
   GetTurnSagaInput & {
     lockToken: string;
+    nowMs?: number;
+  };
+
+export type RecordTurnAuthorityStageInput =
+  GetTurnSagaInput & {
+    stage: TurnAuthorityStage | string;
+    baseWorldVersion?: number | null;
+    resultWorldVersion?: number | null;
+    settledTurnPacketId?: string | null;
+    payload?: Record<string, unknown>;
+    idempotencyKey?: string;
+    lockToken?: string;
     nowMs?: number;
   };
 
@@ -958,6 +975,91 @@ export function hasPreparedSettledTurnPacketRecovery(
   input: GetPreparedSettledTurnPacketEventInput,
 ): boolean {
   return getPreparedSettledTurnPacketEvent(input) !== null;
+}
+
+export function listTurnAuthorityStageEvents(
+  input: GetTurnSagaInput,
+): TurnSagaEventRecord[] {
+  const saga = requireTurnSagaRow(input);
+  return getDb()
+    .select()
+    .from(turnSagaEvents)
+    .where(and(
+      eq(turnSagaEvents.sagaId, saga.id),
+      eq(turnSagaEvents.eventType, "authority_stage_committed"),
+    ))
+    .orderBy(asc(turnSagaEvents.createdAt))
+    .all()
+    .map(toTurnSagaEvent);
+}
+
+export function recordTurnAuthorityStage(
+  input: RecordTurnAuthorityStageInput,
+): TurnSagaEventRecord {
+  const saga = requireTurnSagaRow(input);
+  assertLockTokenIfProvided(saga, input.lockToken);
+  const stage = TURN_AUTHORITY_STAGE_SCHEMA.parse(input.stage);
+  const stageOrdinal = TURN_AUTHORITY_STAGE_VALUES.indexOf(stage);
+  const timestamp = now(input.nowMs);
+  const idempotencyKey = input.idempotencyKey ?? `authority-stage:${stage}`;
+  const insert = getDb()
+    .insert(turnSagaEvents)
+    .values({
+      id: randomUUID(),
+      campaignId: saga.campaignId,
+      sagaId: saga.id,
+      turnId: saga.turnId,
+      eventType: "authority_stage_committed",
+      idempotencyKey,
+      baseWorldVersion: input.baseWorldVersion ?? saga.baseWorldVersion,
+      resultWorldVersion: input.resultWorldVersion ?? saga.resultWorldVersion,
+      settledTurnPacketId: input.settledTurnPacketId ?? saga.settledTurnPacketId,
+      payloadJson: stringifyJson({
+        stage,
+        stageOrdinal,
+        ...(input.payload ?? {}),
+      }, {}),
+      createdAt: timestamp,
+    });
+  insert
+    .onConflictDoNothing({
+      target: [
+        turnSagaEvents.sagaId,
+        turnSagaEvents.eventType,
+        turnSagaEvents.idempotencyKey,
+      ],
+    })
+    .run();
+
+  const row = getDb()
+    .select()
+    .from(turnSagaEvents)
+    .where(and(
+      eq(turnSagaEvents.sagaId, saga.id),
+      eq(turnSagaEvents.eventType, "authority_stage_committed"),
+      eq(turnSagaEvents.idempotencyKey, idempotencyKey),
+    ))
+    .get();
+  if (!row) {
+    throw new Error(`Turn authority stage ${stage} failed to persist for saga ${saga.id}.`);
+  }
+  return toTurnSagaEvent(row);
+}
+
+export function assertTurnAuthorityStagesComplete(
+  input: GetTurnSagaInput,
+): TurnSagaEventRecord[] {
+  const events = listTurnAuthorityStageEvents(input);
+  const stages = events.map((event) => {
+    const payload = isPlainRecord(event.payload) ? event.payload : {};
+    return typeof payload.stage === "string" ? payload.stage : "";
+  });
+  for (const expectedStage of TURN_AUTHORITY_STAGE_VALUES) {
+    if (!stages.includes(expectedStage)) {
+      throw new Error(`Missing turn authority stage: ${expectedStage}`);
+    }
+  }
+  return events;
 }
 
 export function recordPreparedSettledTurnPacket(

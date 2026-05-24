@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { and, eq, gt, inArray, or } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, or } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import {
   actorKnowledgeRecords,
@@ -10,9 +10,15 @@ import {
   worldThreads,
   simulationJobs,
   simulationProposals,
+  turnClockLedger,
   worldClocks,
 } from "../db/schema.js";
 import type { ToolResultAuthority } from "./tool-result.js";
+import {
+  TURN_CLOCK_LEDGER_ENTRY_SCHEMA,
+  type ClockLedgerReasonKind,
+  type TurnClockLedgerEntry,
+} from "./gameplay-control-plane-contract.js";
 
 export type AuthoritySourceEntity = {
   type: string;
@@ -25,6 +31,10 @@ export type WorldClockState = {
   worldTimeMinutes: number;
   currentTick: number;
   updatedAt: number;
+};
+
+export type PersistedTurnClockLedgerEntry = TurnClockLedgerEntry & {
+  createdAt: number;
 };
 
 export class WorldVersionConflictError extends Error {
@@ -42,6 +52,20 @@ function stringifyJson(value: unknown): string {
   return JSON.stringify(value ?? {});
 }
 
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableJson).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right));
+    return `{${entries
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
 function stringifyArray(value: readonly string[] | undefined): string {
   return JSON.stringify([...(value ?? [])]);
 }
@@ -56,6 +80,39 @@ function parseStringArray(value: string | null | undefined): string[] {
   } catch {
     return [];
   }
+}
+
+function clockReceiptId(input: {
+  campaignId: string;
+  sourceReceiptRef: string | null;
+  turnId: string;
+  resultWorldVersion: number;
+  deltaMinutes: number;
+  reasonKind: ClockLedgerReasonKind;
+}): string {
+  const digest = crypto
+    .createHash("sha256")
+    .update(stableJson(input))
+    .digest("hex")
+    .slice(0, 32);
+  return `clock_${digest}`;
+}
+
+function authoritySourceReceiptRef(toolResultId: string): string {
+  return `authority:${toolResultId}`;
+}
+
+function clockReasonKindForAuthority(input: {
+  operation: string;
+  elapsedWorldTimeMinutes: number;
+  explicitReason?: ClockLedgerReasonKind;
+}): ClockLedgerReasonKind {
+  if (input.explicitReason) return input.explicitReason;
+  if (input.elapsedWorldTimeMinutes === 0) return "zero_time_status";
+  if (input.operation.includes("advance_time")) return "tool_time_effect";
+  if (input.operation.includes("travel") || input.operation.includes("move")) return "travel";
+  if (input.operation.includes("wait")) return "wait";
+  return "tool_time_effect";
 }
 
 function toolResultAuthorityFromTrace(
@@ -127,7 +184,7 @@ export function ensureWorldClock(input: {
   }
 
   const tick = Math.max(0, input.currentTick ?? 0);
-  const worldTimeMinutes = Math.max(0, input.worldTimeMinutes ?? tick);
+  const worldTimeMinutes = Math.max(0, input.worldTimeMinutes ?? 0);
   const row = {
     campaignId: input.campaignId,
     worldVersion: 0,
@@ -144,6 +201,28 @@ export function readWorldClock(campaignId: string): WorldClockState {
   return ensureWorldClock({ campaignId });
 }
 
+export function readTurnClockLedger(campaignId: string): PersistedTurnClockLedgerEntry[] {
+  return getDb()
+    .select()
+    .from(turnClockLedger)
+    .where(eq(turnClockLedger.campaignId, campaignId))
+    .orderBy(asc(turnClockLedger.createdAt), asc(turnClockLedger.clockReceiptId))
+    .all()
+    .map((row) => ({
+      clockReceiptId: row.clockReceiptId,
+      campaignId: row.campaignId,
+      turnId: row.turnId,
+      uiTurnOrdinal: row.uiTurnOrdinal,
+      baseWorldVersion: row.baseWorldVersion,
+      deltaMinutes: row.deltaMinutes,
+      reasonKind: row.reasonKind,
+      sourceReceiptRef: row.sourceReceiptRef,
+      resultWorldTimeMinutes: row.resultWorldTimeMinutes,
+      resultWorldVersion: row.resultWorldVersion,
+      createdAt: row.createdAt,
+    }));
+}
+
 export function syncWorldClockTurnBoundary(input: {
   campaignId: string;
   currentTick: number;
@@ -152,7 +231,7 @@ export function syncWorldClockTurnBoundary(input: {
   const db = getDb();
   const targetTick = Math.max(0, input.currentTick);
   const requestedWorldTime = input.worldTimeMinutes == null
-    ? targetTick
+    ? null
     : Math.max(0, input.worldTimeMinutes);
   const existing = db
     .select()
@@ -164,16 +243,17 @@ export function syncWorldClockTurnBoundary(input: {
     return ensureWorldClock({
       campaignId: input.campaignId,
       currentTick: targetTick,
-      worldTimeMinutes: requestedWorldTime,
+      worldTimeMinutes: requestedWorldTime ?? 0,
     });
   }
 
   const clock = toClockState(existing);
-  const nextWorldTimeMinutes = Math.max(
-    clock.worldTimeMinutes,
-    requestedWorldTime,
-  );
-  if (clock.currentTick >= targetTick && clock.worldTimeMinutes >= nextWorldTimeMinutes) {
+  if (requestedWorldTime !== null && requestedWorldTime > clock.worldTimeMinutes) {
+    throw new WorldVersionConflictError(
+      `World time cannot be advanced by turn-boundary sync for campaign ${input.campaignId}; commit a clock ledger receipt instead.`,
+    );
+  }
+  if (clock.currentTick >= targetTick) {
     return clock;
   }
 
@@ -181,7 +261,6 @@ export function syncWorldClockTurnBoundary(input: {
     .update(worldClocks)
     .set({
       currentTick: Math.max(clock.currentTick, targetTick),
-      worldTimeMinutes: nextWorldTimeMinutes,
       updatedAt: now(),
     })
     .where(
@@ -194,10 +273,7 @@ export function syncWorldClockTurnBoundary(input: {
 
   if (update.changes !== 1) {
     const latest = readWorldClock(input.campaignId);
-    if (
-      latest.currentTick >= targetTick
-      && latest.worldTimeMinutes >= nextWorldTimeMinutes
-    ) {
+    if (latest.currentTick >= targetTick) {
       return latest;
     }
     throw new WorldVersionConflictError(
@@ -231,6 +307,9 @@ export function commitAuthorityTrace(input: {
   baseWorldVersion: number;
   sourceEntity: AuthoritySourceEntity;
   elapsedWorldTimeMinutes?: number;
+  clockReasonKind?: ClockLedgerReasonKind;
+  turnId?: string;
+  uiTurnOrdinal?: number;
   currentTick?: number;
   toolResultId?: string;
   eventIds?: string[];
@@ -259,7 +338,7 @@ export function commitAuthorityTrace(input: {
       baseWorldVersion: input.baseWorldVersion,
       currentTick: input.currentTick,
     });
-    const elapsedWorldTimeMinutes = Math.max(0, input.elapsedWorldTimeMinutes ?? 1);
+    const elapsedWorldTimeMinutes = Math.max(0, input.elapsedWorldTimeMinutes ?? 0);
     const resultWorldVersion = clock.worldVersion + 1;
     const resultWorldTimeMinutes = clock.worldTimeMinutes + elapsedWorldTimeMinutes;
     const resultTick = Math.max(
@@ -307,6 +386,39 @@ export function commitAuthorityTrace(input: {
         metadata: stringifyJson(input.metadata),
         createdAt: timestamp,
       })
+      .run();
+
+    const sourceReceiptRef = authoritySourceReceiptRef(toolResultId);
+    const reasonKind = clockReasonKindForAuthority({
+      operation: input.operation,
+      elapsedWorldTimeMinutes,
+      explicitReason: input.clockReasonKind,
+    });
+    const ledgerEntry = TURN_CLOCK_LEDGER_ENTRY_SCHEMA.parse({
+      clockReceiptId: clockReceiptId({
+        campaignId: input.campaignId,
+        sourceReceiptRef,
+        turnId: input.turnId ?? sourceReceiptRef,
+        resultWorldVersion,
+        deltaMinutes: elapsedWorldTimeMinutes,
+        reasonKind,
+      }),
+      campaignId: input.campaignId,
+      turnId: input.turnId ?? sourceReceiptRef,
+      uiTurnOrdinal: Math.max(0, input.uiTurnOrdinal ?? input.currentTick ?? clock.currentTick),
+      baseWorldVersion: clock.worldVersion,
+      deltaMinutes: elapsedWorldTimeMinutes,
+      reasonKind,
+      sourceReceiptRef,
+      resultWorldTimeMinutes,
+      resultWorldVersion,
+    });
+
+    db.insert(turnClockLedger)
+      .values({
+        ...ledgerEntry,
+        createdAt: timestamp,
+      } satisfies typeof turnClockLedger.$inferInsert)
       .run();
 
     return {
@@ -540,6 +652,7 @@ export function invalidateAuthorityAfterRestore(input: {
   reason: string;
 }): void {
   const timestamp = now();
+  const priorClock = readWorldClock(input.campaignId);
   const futureJobFilter = and(
     eq(simulationJobs.campaignId, input.campaignId),
     inArray(simulationJobs.status, ["queued", "running", "completed", "failed"]),
@@ -687,5 +800,34 @@ export function invalidateAuthorityAfterRestore(input: {
       updatedAt: timestamp,
     })
     .where(eq(worldClocks.campaignId, input.campaignId))
+    .run();
+
+  const sourceReceiptRef = `restore:${input.restoredWorldVersion}:${input.restoredWorldTimeMinutes}`;
+  const ledgerEntry = TURN_CLOCK_LEDGER_ENTRY_SCHEMA.parse({
+    clockReceiptId: clockReceiptId({
+      campaignId: input.campaignId,
+      sourceReceiptRef,
+      turnId: sourceReceiptRef,
+      resultWorldVersion: input.restoredWorldVersion,
+      deltaMinutes: 0,
+      reasonKind: "replay_restore",
+    }),
+    campaignId: input.campaignId,
+    turnId: sourceReceiptRef,
+    uiTurnOrdinal: input.restoredWorldTimeMinutes,
+    baseWorldVersion: priorClock.worldVersion,
+    deltaMinutes: 0,
+    reasonKind: "replay_restore",
+    sourceReceiptRef,
+    resultWorldTimeMinutes: input.restoredWorldTimeMinutes,
+    resultWorldVersion: input.restoredWorldVersion,
+  });
+  getDb()
+    .insert(turnClockLedger)
+    .values({
+      ...ledgerEntry,
+      createdAt: timestamp,
+    } satisfies typeof turnClockLedger.$inferInsert)
+    .onConflictDoNothing({ target: turnClockLedger.clockReceiptId })
     .run();
 }

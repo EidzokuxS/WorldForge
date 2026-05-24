@@ -13,10 +13,12 @@ import {
   turnSagaEvents,
   turnSagas,
 } from "../../db/schema.js";
+import { TURN_AUTHORITY_STAGE_VALUES } from "../gameplay-control-plane-contract.js";
 import {
   PendingNarrationError,
   TurnSagaLockConflictError,
   TurnSagaTransitionError,
+  assertTurnAuthorityStagesComplete,
   assertNoPendingNarrationBeforeNewTurn,
   claimTurnSagaWorker,
   createTurnSaga,
@@ -31,7 +33,9 @@ import {
   mergeTurnSagaProvenance,
   persistOracleDecision,
   persistSettledTurnPacket,
+  listTurnAuthorityStageEvents,
   recordPreparedSettledTurnPacket,
+  recordTurnAuthorityStage,
   recordNarratorAttempt,
   releaseTurnSagaWorker,
   recoverSettledTurnPacketFromPreparedEvent,
@@ -217,6 +221,62 @@ describe("turn saga persistence", () => {
     expect(finalized.status).toBe("finalized");
     expect(finalized.settledTurnPacketId).toBe("saga-legal-packet");
     expect(finalized.latestNarratorAttemptId).toBe("saga-legal-attempt-2");
+  });
+
+  it("records turn authority stage receipts idempotently and asserts complete coverage", () => {
+    createSaga("saga-authority-stages", "turn-authority-stages");
+
+    const first = recordTurnAuthorityStage({
+      sagaId: "saga-authority-stages",
+      stage: "intent_created",
+      payload: { receipt: "player-action-1" },
+      nowMs: 2_000,
+    });
+    const duplicate = recordTurnAuthorityStage({
+      sagaId: "saga-authority-stages",
+      stage: "intent_created",
+      payload: { receipt: "different-payload-is-ignored" },
+      nowMs: 2_001,
+    });
+
+    expect(duplicate.id).toBe(first.id);
+    expect(listTurnAuthorityStageEvents({ sagaId: "saga-authority-stages" }))
+      .toHaveLength(1);
+
+    TURN_AUTHORITY_STAGE_VALUES.slice(1).forEach((stage, index) => {
+      recordTurnAuthorityStage({
+        sagaId: "saga-authority-stages",
+        stage,
+        baseWorldVersion: 10,
+        resultWorldVersion: stage === "intent_created" ? null : 11,
+        payload: { receipt: `receipt-${stage}` },
+        nowMs: 2_100 + index,
+      });
+    });
+
+    const events = assertTurnAuthorityStagesComplete({
+      sagaId: "saga-authority-stages",
+    });
+    expect(events.map((event) => (event.payload as { stage: string }).stage))
+      .toEqual([...TURN_AUTHORITY_STAGE_VALUES]);
+  });
+
+  it("fails authority stage recovery when stages are invalid or missing", () => {
+    createSaga("saga-missing-authority-stage", "turn-missing-authority-stage");
+
+    expect(() =>
+      assertTurnAuthorityStagesComplete({
+        sagaId: "saga-missing-authority-stage",
+      }),
+    ).toThrow(/Missing turn authority stage: intent_created/);
+
+    expect(() =>
+      recordTurnAuthorityStage({
+        sagaId: "saga-missing-authority-stage",
+        stage: "not_a_real_stage" as never,
+        nowMs: 2_000,
+      }),
+    ).toThrow();
   });
 
   it("finalizes first-pass narrator success directly from narrator_rendering", () => {

@@ -186,6 +186,7 @@ export const PHASE95_SQLITE_STORE_TABLES = [
   "chronicle",
   "quick_action_offers",
   "world_clocks",
+  "turn_clock_ledger",
   "simulation_jobs",
   "simulation_proposals",
   "actor_process_states",
@@ -425,6 +426,16 @@ export const PHASE95_STORE_MANIFEST: readonly StoreManifestEntry[] = [
   },
   {
     store: "sqlite:world_clocks",
+    authorityLevel: "authoritative",
+    clonePolicy: "rewrite",
+    rollbackPolicy: "rewrite",
+    replayPolicy: "deterministic",
+    sourceCampaignIdPolicy: "rewrite",
+    requiresHash: true,
+    requiresRowCount: true,
+  },
+  {
+    store: "sqlite:turn_clock_ledger",
     authorityLevel: "authoritative",
     clonePolicy: "rewrite",
     rollbackPolicy: "rewrite",
@@ -715,6 +726,8 @@ export const CLOCK_LEDGER_REASON_VALUES = [
   "replay_restore",
 ] as const;
 
+export type ClockLedgerReasonKind = (typeof CLOCK_LEDGER_REASON_VALUES)[number];
+
 export const TURN_CLOCK_LEDGER_ENTRY_SCHEMA = z.object({
   clockReceiptId: z.string().min(1),
   campaignId: z.string().min(1),
@@ -905,7 +918,7 @@ export const GAMEPLAY_STATE_OWNER_REGISTRY: readonly GameplayStateOwnerEntry[] =
   {
     lane: "clock_delta",
     owner: "turn_clock_ledger",
-    status: "contract_only",
+    status: "live",
     receiptKind: "clock_receipt",
     rollbackPolicy: "receipt_replay",
     projectionPolicy: "public_fact",
@@ -913,7 +926,7 @@ export const GAMEPLAY_STATE_OWNER_REGISTRY: readonly GameplayStateOwnerEntry[] =
   {
     lane: "quick_action_offer",
     owner: "quick_action_offer_service",
-    status: "contract_only",
+    status: "live",
     receiptKind: "quick_action_offer",
     rollbackPolicy: "purge",
     projectionPolicy: "public_handle",

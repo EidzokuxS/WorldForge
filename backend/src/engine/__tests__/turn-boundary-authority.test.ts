@@ -50,7 +50,7 @@ describe("turn boundary authority metadata", () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("adds current world version to done payloads and keeps tick coherent with the world clock", () => {
+  it("adds current world version to done payloads without deriving UI tick from world time", () => {
     ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 4 });
     commitAuthorityTrace({
       campaignId: CAMPAIGN_ID,
@@ -62,9 +62,9 @@ describe("turn boundary authority metadata", () => {
     });
 
     expect(buildDoneBoundaryData(CAMPAIGN_ID, { tick: 5 })).toMatchObject({
-      tick: 6,
+      tick: 5,
       worldVersion: 1,
-      worldTimeMinutes: 6,
+      worldTimeMinutes: 2,
     });
   });
 

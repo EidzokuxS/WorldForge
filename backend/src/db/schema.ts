@@ -32,8 +32,18 @@ export const narratorAttemptStatusValues = [
 ] as const;
 
 export const turnSagaEventTypeValues = [
+  "authority_stage_committed",
   "settled_packet_prepared",
   "settled_packet_persisted",
+] as const;
+
+export const turnClockLedgerReasonValues = [
+  "zero_time_status",
+  "wait",
+  "travel",
+  "tool_time_effect",
+  "due_world_elapsed",
+  "replay_restore",
 ] as const;
 
 export const simulationProposalDispositionValues = [
@@ -644,6 +654,45 @@ export const worldClocks = sqliteTable(
     check("world_clocks_version_non_negative", sql`${table.worldVersion} >= 0`),
     check("world_clocks_time_non_negative", sql`${table.worldTimeMinutes} >= 0`),
   ]
+);
+
+export const turnClockLedger = sqliteTable(
+  "turn_clock_ledger",
+  {
+    clockReceiptId: text("clock_receipt_id").primaryKey(),
+    campaignId: text("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    turnId: text("turn_id").notNull(),
+    uiTurnOrdinal: integer("ui_turn_ordinal").notNull(),
+    baseWorldVersion: integer("base_world_version").notNull(),
+    resultWorldVersion: integer("result_world_version").notNull(),
+    deltaMinutes: integer("delta_minutes").notNull().default(0),
+    reasonKind: text("reason_kind", { enum: turnClockLedgerReasonValues }).notNull(),
+    sourceReceiptRef: text("source_receipt_ref"),
+    resultWorldTimeMinutes: integer("result_world_time_minutes").notNull(),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("turn_clock_ledger_campaign_source_unique").on(
+      table.campaignId,
+      table.sourceReceiptRef,
+    ),
+    index("idx_turn_clock_ledger_campaign_turn").on(
+      table.campaignId,
+      table.turnId,
+      table.uiTurnOrdinal,
+    ),
+    index("idx_turn_clock_ledger_campaign_version").on(
+      table.campaignId,
+      table.resultWorldVersion,
+    ),
+    check("turn_clock_ledger_ui_turn_non_negative", sql`${table.uiTurnOrdinal} >= 0`),
+    check("turn_clock_ledger_base_version_non_negative", sql`${table.baseWorldVersion} >= 0`),
+    check("turn_clock_ledger_result_version_non_negative", sql`${table.resultWorldVersion} >= 0`),
+    check("turn_clock_ledger_delta_non_negative", sql`${table.deltaMinutes} >= 0`),
+    check("turn_clock_ledger_time_non_negative", sql`${table.resultWorldTimeMinutes} >= 0`),
+  ],
 );
 
 export const simulationJobs = sqliteTable(

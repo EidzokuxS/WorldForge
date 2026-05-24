@@ -611,7 +611,7 @@ function buildPlayerTurnAuthority(frame: SceneFrame): ToolExecutionContext["auth
         type: "player",
         id: frame.playerActorId,
       },
-      elapsedWorldTimeMinutes: 1,
+      elapsedWorldTimeMinutes: 0,
     };
   } catch (error) {
     if (
@@ -805,7 +805,7 @@ export function createBackgroundToolExecutionContext(
     authority: {
       baseWorldVersion,
       sourceEntity: args.sourceEntity,
-      elapsedWorldTimeMinutes: args.elapsedWorldTimeMinutes ?? 1,
+      elapsedWorldTimeMinutes: args.elapsedWorldTimeMinutes ?? 0,
       toolResultId: args.toolResultId,
       allowedWriteScopes: args.allowedWriteScopes,
       metadata: args.metadata,
@@ -912,7 +912,7 @@ export function createActorTurnToolExecutionContext(
         type: "npc",
         id: actorFrame.observer.actorId,
       },
-      elapsedWorldTimeMinutes: args.elapsedWorldTimeMinutes ?? 1,
+      elapsedWorldTimeMinutes: args.elapsedWorldTimeMinutes ?? 0,
     },
     currentLocationId: actorFrame.observer.locationId,
     currentSceneScopeId: actorFrame.observer.sceneScopeId,

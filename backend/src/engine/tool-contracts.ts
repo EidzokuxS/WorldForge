@@ -115,13 +115,22 @@ export function runtimeToolIsSideEffecting(toolName: RuntimeToolName): boolean {
   return modelToolIsSideEffecting(toolName);
 }
 
-export function runtimeToolRequiresExecutionAuthority(toolName: RuntimeToolName): boolean {
+export function runtimeToolCommitsCanonicalWorldVersion(toolName: RuntimeToolName): boolean {
   return runtimeToolIsSideEffecting(toolName);
 }
 
-export const RUNTIME_STATE_BEARING_TOOL_NAMES: readonly RuntimeToolName[] =
+export function runtimeToolRequiresExecutionAuthority(toolName: RuntimeToolName): boolean {
+  return runtimeToolCommitsCanonicalWorldVersion(toolName)
+    || runtimeToolHasRole(toolName, "public_handle_authority");
+}
+
+export const RUNTIME_AUTHORITY_REQUIRED_TOOL_NAMES: readonly RuntimeToolName[] =
   (Object.keys(RUNTIME_TOOL_CONTRACTS) as RuntimeToolName[])
     .filter(runtimeToolRequiresExecutionAuthority);
+
+export const RUNTIME_CANONICAL_WORLD_MUTATION_TOOL_NAMES: readonly RuntimeToolName[] =
+  (Object.keys(RUNTIME_TOOL_CONTRACTS) as RuntimeToolName[])
+    .filter(runtimeToolCommitsCanonicalWorldVersion);
 
 const STATE_MUTATION_RECEIPT_OWNER_KINDS = new Set([
   "canonical",
