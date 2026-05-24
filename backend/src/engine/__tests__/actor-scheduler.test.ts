@@ -380,6 +380,37 @@ describe("actor scheduler", () => {
     });
   });
 
+  it("serializes present actors that touch a blocked same-turn write scope", () => {
+    seedNpc({
+      id: "npc-present",
+      name: "Present Actor",
+      locationId: "loc-main",
+      sceneId: "scene-a",
+    });
+    backfillKeyActorProcessesForCampaign({
+      campaignId: CAMPAIGN_ID,
+      nextWakeDelayMinutes: 30,
+    });
+
+    const schedule = scheduleKeyActorProcessesForTurn({
+      campaignId: CAMPAIGN_ID,
+      tick: 1,
+      playerLocationId: "loc-main",
+      playerSceneScopeId: "scene-a",
+      elapsedWorldTimeMinutes: 1,
+      blockedWriteScopes: ["npc:npc-present"],
+    });
+
+    expect(schedule.decisions[0]).toMatchObject({
+      actorId: "npc-present",
+      route: "required_before_done",
+      reservation: {
+        status: "conflict_serialized",
+        conflictsWithActorIds: ["external:npc:npc-present"],
+      },
+    });
+  });
+
   it("selects only critical-path due and present actors among many sleepers", () => {
     for (let index = 0; index < 40; index += 1) {
       seedNpc({

@@ -13,12 +13,14 @@ const {
   runVisibleNarrationWithPacketGuardMock,
   safeGenerateObjectMock,
   assertNoPendingNarrationBeforeNewTurnMock,
+  assertTurnAuthorityStagesCompleteMock,
   claimTurnSagaWorkerMock,
   createTurnSagaMock,
   getTurnSagaMock,
   markTurnSagaFinalizedMock,
   persistSettledTurnPacketMock,
   recordNarratorAttemptMock,
+  recordTurnAuthorityStageMock,
   releaseTurnSagaWorkerMock,
   transitionTurnSagaStatusMock,
   updateNarratorAttemptOutcomeMock,
@@ -35,12 +37,14 @@ const {
   runVisibleNarrationWithPacketGuardMock: vi.fn(),
   safeGenerateObjectMock: vi.fn(),
   assertNoPendingNarrationBeforeNewTurnMock: vi.fn(),
+  assertTurnAuthorityStagesCompleteMock: vi.fn(),
   claimTurnSagaWorkerMock: vi.fn(),
   createTurnSagaMock: vi.fn(),
   getTurnSagaMock: vi.fn(),
   markTurnSagaFinalizedMock: vi.fn(),
   persistSettledTurnPacketMock: vi.fn(),
   recordNarratorAttemptMock: vi.fn(),
+  recordTurnAuthorityStageMock: vi.fn(),
   releaseTurnSagaWorkerMock: vi.fn(),
   transitionTurnSagaStatusMock: vi.fn(),
   updateNarratorAttemptOutcomeMock: vi.fn(),
@@ -249,6 +253,7 @@ vi.mock("../living-world-authority.js", () => ({
 
 vi.mock("../turn-saga.js", () => ({
   assertNoPendingNarrationBeforeNewTurn: assertNoPendingNarrationBeforeNewTurnMock,
+  assertTurnAuthorityStagesComplete: assertTurnAuthorityStagesCompleteMock,
   claimTurnSagaWorker: claimTurnSagaWorkerMock,
   createTurnSaga: createTurnSagaMock,
   findLatestSuccessfulNarratorAttempt: vi.fn(() => null),
@@ -277,6 +282,7 @@ vi.mock("../turn-saga.js", () => ({
   persistSettledTurnPacket: persistSettledTurnPacketMock,
   recordPreparedSettledTurnPacket: vi.fn(),
   recordNarratorAttempt: recordNarratorAttemptMock,
+  recordTurnAuthorityStage: recordTurnAuthorityStageMock,
   releaseTurnSagaWorker: releaseTurnSagaWorkerMock,
   recoverSettledTurnPacketFromPreparedEvent: vi.fn(() => null),
   transitionTurnSagaStatus: transitionTurnSagaStatusMock,
@@ -545,6 +551,20 @@ beforeEach(() => {
       updatedAt: 0,
     };
   });
+  recordTurnAuthorityStageMock.mockImplementation((input: { stage: string }) => ({
+    id: `authority-stage-${input.stage}`,
+    campaignId: saga.campaignId,
+    sagaId: saga.id,
+    turnId: saga.turnId,
+    eventType: "authority_stage_committed",
+    idempotencyKey: `authority-stage:${input.stage}`,
+    baseWorldVersion: saga.baseWorldVersion,
+    resultWorldVersion: saga.resultWorldVersion,
+    settledTurnPacketId: saga.settledTurnPacketId,
+    payload: { stage: input.stage },
+    createdAt: 0,
+  }));
+  assertTurnAuthorityStagesCompleteMock.mockReturnValue([]);
   getTurnSagaMock.mockImplementation(() => saga);
   recordNarratorAttemptMock.mockImplementation((input: { status: string }) => {
     const attempt = {
@@ -604,7 +624,7 @@ describe("processTurn empty final narration", () => {
       object: {
         version: "grounded-sentence-draft.v2",
         sentences: [{
-          text: "[[fact:e1.s1]]",
+          factRefs: ["e1.s1"],
           evidenceRefs: ["e1"],
         }],
       },

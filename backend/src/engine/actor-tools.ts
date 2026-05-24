@@ -53,6 +53,7 @@ import {
 } from "./parallel-simulation-runner.js";
 import { runFrameRetrievalJobs } from "./frame-retrieval-runner.js";
 import { isAcceptedRuntimeReceiptForTurn } from "./tool-contracts.js";
+import type { SimulationProposalWriteScope } from "./simulation-proposal.js";
 
 const log = createLogger("actor-tools");
 
@@ -108,6 +109,7 @@ export interface RunRequiredActorDecisionPassArgs {
   playerSceneScopeId?: string | null;
   elapsedWorldTimeMinutes?: number;
   maxOutputTokens?: number;
+  blockedWriteScopes?: readonly SimulationProposalWriteScope[];
   presentActorReactionRoute?: "required_before_done" | "proposal_after_done";
   legalTools?: readonly RuntimeToolName[];
   scheduleActorProcesses?: typeof scheduleKeyActorProcessesForTurn;
@@ -593,6 +595,7 @@ export async function runRequiredActorDecisionPass(
     playerLocationId: args.playerLocationId,
     playerSceneScopeId: args.playerSceneScopeId,
     elapsedWorldTimeMinutes: args.elapsedWorldTimeMinutes,
+    blockedWriteScopes: args.blockedWriteScopes,
     presentActorReactionRoute,
   });
   const processes = new Map(

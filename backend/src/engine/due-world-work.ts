@@ -235,6 +235,7 @@ export function resolveDueWorldWorkForScope(
     playerLocationId: input.playerLocationId,
     playerSceneScopeId: input.playerSceneScopeId,
     elapsedWorldTimeMinutes: input.elapsedWorldTimeMinutes,
+    blockedWriteScopes,
   });
   const processes = processByActorId(
     listKeyActorProcessesByActorIds({
@@ -315,6 +316,7 @@ export async function resolveDueWorldWorkForScopeWithProposalWatchdog(
     phase: input.phase,
     playerLocationId: input.playerLocationId,
     playerSceneScopeId: input.playerSceneScopeId,
+    blockedWriteScopes: input.blockedWriteScopes,
     actorDecisionContext: input.actorDecisionContext,
   });
   const dueWork = resolveDueWorldWorkForScope({

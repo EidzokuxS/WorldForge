@@ -14,6 +14,33 @@ export interface ActorWriteScopeReservation {
   conflictsWithActorIds: string[];
 }
 
+export type TurnWriteScopeOwner =
+  | "pre_frame_due_world"
+  | "gm_tool_loop"
+  | "actor_reaction"
+  | "pre_narrator_due_world";
+
+export interface TurnWriteScopeClaimInput {
+  owner: TurnWriteScopeOwner;
+  ownerId: string;
+  phase: string;
+  writeScopes: readonly SimulationActorWriteScope[];
+}
+
+export interface TurnWriteScopeClaim {
+  owner: TurnWriteScopeOwner;
+  ownerId: string;
+  phase: string;
+  writeScopes: SimulationActorWriteScope[];
+}
+
+export interface TurnWriteScopeConflict {
+  incoming: TurnWriteScopeClaim;
+  existing: TurnWriteScopeClaim;
+  writeScope: SimulationActorWriteScope;
+  blockedWriteScope: SimulationActorWriteScope;
+}
+
 function splitScope(scope: string): string[] {
   return scope
     .trim()
@@ -115,4 +142,55 @@ export function reserveActorWriteScopes(
   }
 
   return reservations;
+}
+
+export class TurnWriteScopeLedger {
+  private readonly entries: TurnWriteScopeClaim[] = [];
+
+  claims(): TurnWriteScopeClaim[] {
+    return this.entries.map((entry) => ({
+      ...entry,
+      writeScopes: [...entry.writeScopes],
+    }));
+  }
+
+  blockedWriteScopes(): SimulationActorWriteScope[] {
+    return [...new Set(this.entries.flatMap((entry) => entry.writeScopes))];
+  }
+
+  claim(input: TurnWriteScopeClaimInput): TurnWriteScopeConflict | null {
+    const incoming: TurnWriteScopeClaim = {
+      owner: input.owner,
+      ownerId: input.ownerId,
+      phase: input.phase,
+      writeScopes: input.writeScopes
+        .map(normalizeWriteScope)
+        .filter(Boolean),
+    };
+    if (incoming.writeScopes.length === 0) {
+      return null;
+    }
+
+    for (const existing of this.entries) {
+      const conflict = findConflictingWriteScope({
+        writeScopes: incoming.writeScopes,
+        blockedWriteScopes: existing.writeScopes,
+      });
+      if (conflict) {
+        return {
+          incoming,
+          existing,
+          writeScope: conflict.writeScope,
+          blockedWriteScope: conflict.blockedWriteScope,
+        };
+      }
+    }
+
+    this.entries.push(incoming);
+    return null;
+  }
+}
+
+export function createTurnWriteScopeLedger(): TurnWriteScopeLedger {
+  return new TurnWriteScopeLedger();
 }

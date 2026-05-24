@@ -19,6 +19,7 @@ import {
   listPendingWakeSignalsForActors,
 } from "./actor-wake-signals.js";
 import {
+  findConflictingWriteScope,
   reserveActorWriteScopes,
   type ActorWriteScopeReservation,
 } from "./simulation-write-scope.js";
@@ -40,6 +41,7 @@ export interface ScheduleKeyActorProcessesInput {
   playerLocationId?: string | null;
   playerSceneScopeId?: string | null;
   elapsedWorldTimeMinutes?: number;
+  blockedWriteScopes?: readonly SimulationProposalWriteScope[];
   reportsByActorId?: ReadonlyMap<string, readonly KeyActorInboxItem[]>;
   explicitActorIds?: readonly string[];
   presentActorReactionRoute?: "required_before_done" | "proposal_after_done";
@@ -253,9 +255,33 @@ export function scheduleKeyActorProcessesForTurn(
     baseWorldVersion: clock.worldVersion,
     worldTimeMinutes: clock.worldTimeMinutes,
     candidateActorIds: candidateIds,
-    decisions: decisions.map((decision) => ({
-      ...decision,
-      reservation: reservationByActor.get(decision.actorId),
-    })),
+    decisions: decisions.map((decision) => {
+      const reservation = reservationByActor.get(decision.actorId);
+      const externalConflict = decision.writeScopes.length > 0
+        ? findConflictingWriteScope({
+            writeScopes: decision.writeScopes,
+            blockedWriteScopes: input.blockedWriteScopes ?? [],
+          })
+        : null;
+      if (!externalConflict) {
+        return {
+          ...decision,
+          reservation,
+        };
+      }
+      return {
+        ...decision,
+        reservation: {
+          actorId: decision.actorId,
+          route: decision.route,
+          writeScopes: decision.writeScopes,
+          status: "conflict_serialized",
+          conflictsWithActorIds: [
+            ...(reservation?.conflictsWithActorIds ?? []),
+            `external:${externalConflict.blockedWriteScope}`,
+          ],
+        },
+      };
+    }),
   };
 }

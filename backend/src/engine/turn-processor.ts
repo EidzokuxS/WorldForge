@@ -83,6 +83,11 @@ import {
   type ResolveDueWorldWorkWithProposalWatchdogResult,
 } from "./due-world-work.js";
 import {
+  createTurnWriteScopeLedger,
+  type TurnWriteScopeClaimInput,
+  type TurnWriteScopeLedger,
+} from "./simulation-write-scope.js";
+import {
   addTurnLatencyProposalEffects,
   createTurnLatencyTrace,
   finalizeTurnLatencyTrace,
@@ -180,6 +185,7 @@ import {
   type ScopedForecastExcerpt,
   type StagedWorldTrajectoryForecast,
 } from "./world-forecast.js";
+import type { SimulationProposalWriteScope } from "./simulation-proposal.js";
 import { cleanupTransientSceneObjects } from "./transient-scene-lifecycle.js";
 import { retractStoredEpisodicEvent } from "../vectors/episodic-events.js";
 import { retractReflectionBudget } from "./reflection-budget.js";
@@ -3228,6 +3234,62 @@ function dueWorldRefs(result: ResolveDueWorldWorkWithProposalWatchdogResult): st
   ]);
 }
 
+function dueProposalWriteScopes(result: ResolveDueWorldWorkWithProposalWatchdogResult): string[] {
+  return uniqueRefs(
+    result.proposals.executed.flatMap((entry) =>
+      entry.status === "committed"
+        ? entry.toolResults.flatMap((toolResult) =>
+            toolResult.result.authority?.stateDeltaRefs ?? [])
+        : []),
+  );
+}
+
+function dueWorldWriteScopes(result: ResolveDueWorldWorkWithProposalWatchdogResult): string[] {
+  return uniqueRefs([
+    ...result.executed.flatMap((entry) => entry.stateDeltaRefs),
+    ...result.worldThreads.executed.flatMap((entry) => entry.authority.stateDeltaRefs),
+    ...dueProposalWriteScopes(result),
+  ]);
+}
+
+function acceptedActionWriteScopes(
+  actionResults: readonly ExecutedScenePlanActionResult[],
+  gmRead?: GmRead | null,
+): string[] {
+  return uniqueRefs(
+    acceptedActionResultsWithContext(actionResults, gmRead)
+      .flatMap((action) => action.result.authority?.stateDeltaRefs ?? []),
+  );
+}
+
+function assertTurnWriteScopeClaim(
+  ledger: TurnWriteScopeLedger,
+  input: TurnWriteScopeClaimInput,
+): void {
+  const conflict = ledger.claim(input);
+  if (!conflict) return;
+  throw new Error(
+    [
+      "same_turn_write_scope_conflict",
+      `${conflict.incoming.owner}:${conflict.incoming.ownerId}`,
+      `${conflict.writeScope}`,
+      "blocked_by",
+      `${conflict.existing.owner}:${conflict.existing.ownerId}`,
+      `${conflict.blockedWriteScope}`,
+    ].join(":"),
+  );
+}
+
+function isSimulationProposalWriteScope(scope: string): scope is SimulationProposalWriteScope {
+  return /^(npc|faction|location|world|memory|event|asset):.+/.test(scope);
+}
+
+function blockedSimulationWriteScopes(
+  ledger: TurnWriteScopeLedger,
+): SimulationProposalWriteScope[] {
+  return ledger.blockedWriteScopes().filter(isSimulationProposalWriteScope);
+}
+
 function oracleDecisionInputFromGmRead(args: {
   sagaId: string;
   gmRead: GmRead;
@@ -4488,6 +4550,7 @@ async function* processTurnScenePlan(
     tick: currentTick,
     turnClass: "normal",
   });
+  const turnWriteScopeLedger = createTurnWriteScopeLedger();
   let turnSaga = createTurnSaga({
     campaignId,
     turnId,
@@ -4645,6 +4708,12 @@ async function* processTurnScenePlan(
     committed: dueProposalCommitCount(preFrameDueWork),
     rejected: dueProposalRejectedCount(preFrameDueWork),
     cacheMisses: preFrameDueWork.proposals.selected.length,
+  });
+  assertTurnWriteScopeClaim(turnWriteScopeLedger, {
+    owner: "pre_frame_due_world",
+    ownerId: "pre_frame_due_world",
+    phase: "pre_scene_frame",
+    writeScopes: dueWorldWriteScopes(preFrameDueWork),
   });
   logDueWorldWork(preFrameDueWork, preFrameDueWorkEnded - preFrameDueWorkStart);
   if (hasVisibleDueWorldWork(preFrameDueWork)) {
@@ -5122,6 +5191,13 @@ async function* processTurnScenePlan(
     actionResults: executedPlan.actionResults,
     gmRead,
   });
+  const gmAcceptedWriteScopes = acceptedActionWriteScopes(executedPlan.actionResults, gmRead);
+  assertTurnWriteScopeClaim(turnWriteScopeLedger, {
+    owner: "gm_tool_loop",
+    ownerId: "gm_tool_loop",
+    phase: "gm_tool_loop",
+    writeScopes: gmAcceptedWriteScopes,
+  });
   let toolCallResults = toTurnToolCallResults(executedPlan.toolCallResults, gmRead);
   let actorActionResults: ExecutedScenePlanActionResult[] = [];
 
@@ -5187,6 +5263,7 @@ async function* processTurnScenePlan(
     playerSceneScopeId: actorReactionFrame.currentSceneScopeId,
     elapsedWorldTimeMinutes: postGmClockContext.elapsedWorldTimeMinutes,
     maxOutputTokens: storytellerMaxTokens,
+    blockedWriteScopes: blockedSimulationWriteScopes(turnWriteScopeLedger),
     presentActorReactionRoute: shouldDeferPresentActorReactionsAfterSettledOutcome(
       executedPlan.toolCallResults,
       gmRead,
@@ -5271,6 +5348,13 @@ async function* processTurnScenePlan(
     phase: "actor_reactions",
     actionResults: actorActionResults,
     gmRead: null,
+  });
+  const actorAcceptedWriteScopes = acceptedActionWriteScopes(actorActionResults, null);
+  assertTurnWriteScopeClaim(turnWriteScopeLedger, {
+    owner: "actor_reaction",
+    ownerId: "actor_reaction",
+    phase: "actor_reactions",
+    writeScopes: actorAcceptedWriteScopes,
   });
   const acceptedDurableEventIds = uniqueRefs([
     ...gmAcceptedDurableEventIds,
@@ -5365,6 +5449,7 @@ async function* processTurnScenePlan(
     playerSceneScopeId: currentSceneScopeId,
     elapsedWorldTimeMinutes: settledClockContext.elapsedWorldTimeMinutes,
     phase: "pre_narrator_packet",
+    blockedWriteScopes: blockedSimulationWriteScopes(turnWriteScopeLedger),
     actorDecisionContext: {
       provider: judgeProvider,
       sceneFrame: preNarratorActorDecisionFrame,
@@ -5390,6 +5475,12 @@ async function* processTurnScenePlan(
     committed: dueProposalCommitCount(preNarratorDueWork),
     rejected: dueProposalRejectedCount(preNarratorDueWork),
     cacheMisses: preNarratorDueWork.proposals.selected.length,
+  });
+  assertTurnWriteScopeClaim(turnWriteScopeLedger, {
+    owner: "pre_narrator_due_world",
+    ownerId: "pre_narrator_due_world",
+    phase: "pre_narrator_packet",
+    writeScopes: dueWorldWriteScopes(preNarratorDueWork),
   });
   logDueWorldWork(preNarratorDueWork, preNarratorDueWorkEnded - preNarratorDueWorkStart);
   if (hasVisibleDueWorldWork(preNarratorDueWork)) {
