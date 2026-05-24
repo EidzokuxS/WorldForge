@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   GAMEPLAY_STATE_LANE_VALUES,
   GAMEPLAY_STATE_OWNER_REGISTRY,
+  ISSUED_REF_NAMESPACE_VALUES,
+  ISSUED_REF_OWNER_MATRIX,
   ISSUED_REF_SCHEMA,
   PHASE95_REQUIRED_STORE_KEYS,
   PHASE95_STORE_MANIFEST,
@@ -9,6 +11,7 @@ import {
   TURN_AUTHORITY_STAGE_CONTRACTS,
   TURN_AUTHORITY_STAGE_VALUES,
   TURN_CLOCK_LEDGER_ENTRY_SCHEMA,
+  assertIssuedRefOwnerMatrix,
   assertPublicProjectionPayload,
   assertRuntimeEffectStateOwnerParity,
   assertSelectableNarrationRefs,
@@ -221,6 +224,35 @@ describe("Phase 95 gameplay control-plane contracts", () => {
       surface: "frontend_state",
       payload: { handle: "tool-result:raw" },
     })).toThrow(/backend ref/i);
+  });
+
+  it("requires every issued-ref namespace to name issuer, resolver, validators, projections, recovery, and tests", () => {
+    expect(assertIssuedRefOwnerMatrix().map((entry) => entry.namespace))
+      .toEqual([...ISSUED_REF_NAMESPACE_VALUES]);
+
+    for (const entry of ISSUED_REF_OWNER_MATRIX) {
+      expect(entry.authorityBoundary).toMatch(/\S/);
+      expect(entry.runtimeValidators.length).toBeGreaterThan(0);
+      expect(entry.projections.length).toBeGreaterThan(0);
+      expect(entry.recoveryModes.length).toBeGreaterThan(0);
+      expect(entry.tests.length).toBeGreaterThan(0);
+    }
+
+    expect(
+      ISSUED_REF_OWNER_MATRIX.find((entry) => entry.namespace === "quick_action_capability"),
+    ).toMatchObject({
+      sourceOfTruth: expect.stringContaining("quick_action_offers"),
+      issuerOwner: "quick_action_offer_service",
+      resolverOwner: "quick_action_consumption_service",
+    });
+
+    expect(
+      ISSUED_REF_OWNER_MATRIX.find((entry) => entry.namespace === "public_dto_handle"),
+    ).toMatchObject({
+      issuerOwner: "public_dto_handle_projector",
+      resolverOwner: "public_dto_handle_resolver",
+      modelAuthoredFields: [],
+    });
   });
 
   it("keeps zero-time status turns explicit in the clock ledger contract", () => {

@@ -538,8 +538,13 @@ This list is the closure guard before any future "architecture GO" claim:
 - [x] Time has a ledger and no silent turn-boundary minutes.
 - [x] Narrator packet separates citable facts from support context.
 - [x] Final narration is fact-ref based on live path.
-- [ ] Final narration full turn/resume fail-closed regression exists. P2.
+- [x] Final narration full turn/resume fail-closed regression exists. Live and
+  resume coverage reject legacy `sentences[].text`/private prose before public
+  assistant text is committed.
 - [x] Main backend public projection uses DTO handles.
+- [x] Issued-ref namespaces have an executable owner/resolver matrix covering
+  scene aliases, tool-result aliases, quick-action capabilities, narration
+  facts, and public DTO handles.
 - [x] Public guard rejects legacy raw id shapes. Targeted backend tests green.
 - [x] Frontend rejects raw id fallback as public handles. Targeted frontend
   tests and frontend typecheck green.

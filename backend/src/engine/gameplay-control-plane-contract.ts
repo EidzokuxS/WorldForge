@@ -788,6 +788,147 @@ export const ISSUED_REF_SCHEMA = z.object({
 
 export type IssuedRef = z.infer<typeof ISSUED_REF_SCHEMA>;
 
+export interface IssuedRefOwnerMatrixEntry {
+  namespace: (typeof ISSUED_REF_NAMESPACE_VALUES)[number];
+  sourceOfTruth: string;
+  issuerOwner: string;
+  resolverOwner: string;
+  authorityBoundary: string;
+  supportOnlySurfaces: readonly string[];
+  modelAuthoredFields: readonly string[];
+  runtimeValidators: readonly string[];
+  receipts: readonly string[];
+  projections: readonly string[];
+  recoveryModes: readonly string[];
+  tests: readonly string[];
+}
+
+export const ISSUED_REF_OWNER_MATRIX_ENTRY_SCHEMA = z.object({
+  namespace: z.enum(ISSUED_REF_NAMESPACE_VALUES),
+  sourceOfTruth: z.string().min(1),
+  issuerOwner: z.string().min(1),
+  resolverOwner: z.string().min(1),
+  authorityBoundary: z.string().min(1),
+  supportOnlySurfaces: z.array(z.string().min(1)),
+  modelAuthoredFields: z.array(z.string().min(1)),
+  runtimeValidators: z.array(z.string().min(1)).min(1),
+  receipts: z.array(z.string().min(1)),
+  projections: z.array(z.string().min(1)).min(1),
+  recoveryModes: z.array(z.string().min(1)).min(1),
+  tests: z.array(z.string().min(1)).min(1),
+});
+
+export const ISSUED_REF_OWNER_MATRIX: readonly IssuedRefOwnerMatrixEntry[] = [
+  {
+    namespace: "scene_alias",
+    sourceOfTruth: "Current model-facing SceneFrame alias map.",
+    issuerOwner: "scene_frame_builder",
+    resolverOwner: "model_facing_alias_resolver",
+    authorityBoundary:
+      "Packet-local aliases identify current candidates only; executor resolves them to canonical backend ids before mutation.",
+    supportOnlySurfaces: ["visible labels", "scene summaries", "candidate prose"],
+    modelAuthoredFields: ["tool candidate aliases"],
+    runtimeValidators: ["reserved backend-ref guard", "candidate alias resolver", "tool input schemas"],
+    receipts: [],
+    projections: ["model-facing scene packet"],
+    recoveryModes: ["rebuild scene packet from canonical world snapshot"],
+    tests: ["gm-turn-read.test.ts", "tool-contracts.test.ts", "gameplay-control-plane-contract.test.ts"],
+  },
+  {
+    namespace: "tool_result_alias",
+    sourceOfTruth: "Accepted same-turn tool result and state receipt ledger.",
+    issuerOwner: "gm_tool_loop_result_projector",
+    resolverOwner: "same_turn_receipt_resolver",
+    authorityBoundary:
+      "Same-turn aliases are evidence selectors, not durable storage ids; later tools must resolve against accepted receipts.",
+    supportOnlySurfaces: ["tool result summaries", "repair diagnostics"],
+    modelAuthoredFields: ["state receipt refs selected by later tool calls"],
+    runtimeValidators: ["state receipt matcher", "same-turn write-scope ledger", "tool result schema"],
+    receipts: ["accepted tool result receipt", "authority trace"],
+    projections: ["GM tool loop follow-up packet", "narrator packet citable evidence"],
+    recoveryModes: ["rollback unaccepted effects", "resume from accepted receipt batch"],
+    tests: ["gm-tool-loop.test.ts", "dialogue-state-receipt.test.ts", "tool-contracts.test.ts"],
+  },
+  {
+    namespace: "quick_action_capability",
+    sourceOfTruth: "quick_action_offers rows plus accepted source receipt digest.",
+    issuerOwner: "quick_action_offer_service",
+    resolverOwner: "quick_action_consumption_service",
+    authorityBoundary:
+      "Player-visible label/action prose is presentation; offerId/actionId authority is backend-owned and consumable.",
+    supportOnlySurfaces: ["quick action labels", "quick action prose"],
+    modelAuthoredFields: ["label", "action prose"],
+    runtimeValidators: ["offer id/action id schema", "expiry validator", "consumed/base-world-version/source-digest validator"],
+    receipts: ["accepted turn receipt adjacent to offer creation", "quick action consumption trace"],
+    projections: ["SSE quick actions", "frontend quick action chips", "chat route quick actions"],
+    recoveryModes: ["rollback non-receipted offers", "expire stale offers", "idempotently reject consumed offers"],
+    tests: ["quick-action-offers.test.ts", "chat.test.ts", "quick-actions.test.tsx"],
+  },
+  {
+    namespace: "narration_fact",
+    sourceOfTruth: "Settled narrator packet fact list and narrator attempt record.",
+    issuerOwner: "narrator_packet_builder",
+    resolverOwner: "narration_grounding_guard",
+    authorityBoundary:
+      "The model selects issued fact/evidence refs for prose; backend compiles only citable accepted facts into public narration.",
+    supportOnlySurfaces: ["style instructions", "support context", "diagnostic context"],
+    modelAuthoredFields: ["selected fact refs", "selected evidence refs", "style/order"],
+    runtimeValidators: ["assertSelectableNarrationRefs", "grounding compiler", "private/backend term guard"],
+    receipts: ["settled packet", "narrator attempt"],
+    projections: ["assistant SSE text", "chat history assistant message", "narrative log"],
+    recoveryModes: ["resume from settled packet", "fail closed on unsupported/private prose", "retry structured narration"],
+    tests: ["narrator-packet.test.ts", "narration-grounding-guard.test.ts", "visible-narration-output-guard.test.ts"],
+  },
+  {
+    namespace: "public_dto_handle",
+    sourceOfTruth: "Public DTO projector output and resolver map over canonical stores.",
+    issuerOwner: "public_dto_handle_projector",
+    resolverOwner: "public_dto_handle_resolver",
+    authorityBoundary:
+      "Public handles are opaque projection capabilities; raw storage ids stay backend-only and are never UI authority.",
+    supportOnlySurfaces: ["UI labels", "frontend render state"],
+    modelAuthoredFields: [],
+    runtimeValidators: ["public DTO handle parser", "assertPublicProjectionPayload", "frontend API parser"],
+    receipts: ["projection digest"],
+    projections: ["world", "inventory", "history", "checkpoints", "location entities", "npc promote"],
+    recoveryModes: ["rebuild projection from canonical stores", "reject malformed public handles"],
+    tests: ["campaigns.test.ts", "campaigns.inventory-authority.test.ts", "api.test.ts"],
+  },
+] as const;
+
+export function assertIssuedRefOwnerMatrix(
+  matrix: readonly IssuedRefOwnerMatrixEntry[] = ISSUED_REF_OWNER_MATRIX,
+): IssuedRefOwnerMatrixEntry[] {
+  const parsed = z.array(ISSUED_REF_OWNER_MATRIX_ENTRY_SCHEMA).parse(matrix) as IssuedRefOwnerMatrixEntry[];
+  const seen = new Set<string>();
+  const required = new Set<string>(ISSUED_REF_NAMESPACE_VALUES);
+  for (const entry of parsed) {
+    if (seen.has(entry.namespace)) {
+      throw new Error(`Duplicate issued-ref owner entry: ${entry.namespace}.`);
+    }
+    if (!required.has(entry.namespace)) {
+      throw new Error(`Unexpected issued-ref namespace owner entry: ${entry.namespace}.`);
+    }
+    seen.add(entry.namespace);
+    for (const field of [
+      ["runtimeValidators", entry.runtimeValidators],
+      ["projections", entry.projections],
+      ["recoveryModes", entry.recoveryModes],
+      ["tests", entry.tests],
+    ] as const) {
+      if (field[1].length === 0) {
+        throw new Error(`Issued-ref namespace ${entry.namespace} has no ${field[0]}.`);
+      }
+    }
+  }
+  for (const namespace of ISSUED_REF_NAMESPACE_VALUES) {
+    if (!seen.has(namespace)) {
+      throw new Error(`Missing issued-ref owner entry: ${namespace}.`);
+    }
+  }
+  return parsed;
+}
+
 const BACKEND_REF_BOUNDARY_PATTERN =
   /\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?:actor|location|route|item|tool-result|action-result|authority|saga|turn-saga|settled-packet):[A-Za-z0-9_.:-]+|(?:tool_result|action_result|turn_saga|settled_packet)_[A-Za-z0-9_.:-]+)\b/i;
 
