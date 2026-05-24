@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import * as lancedb from "@lancedb/lancedb";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, connectDb, getDb, getSqliteConnection } from "../../db/index.js";
 import { runMigrations } from "../../db/migrate.js";
@@ -52,6 +53,35 @@ function seedCampaign(): void {
     createdAt: now,
     updatedAt: now,
   }).run();
+}
+
+async function seedVectorTables(): Promise<void> {
+  const db = await lancedb.connect(path.join(campaignDir(), "vectors"));
+  await db.createTable("episodic_events", [
+    {
+      id: "event-1",
+      campaignId: CAMPAIGN_ID,
+      text: "First memory.",
+      tick: 1,
+      vector: [0.1, 0.2, 0.3],
+    },
+    {
+      id: "event-2",
+      campaignId: CAMPAIGN_ID,
+      text: "Second memory.",
+      tick: 2,
+      vector: [0.2, 0.3, 0.4],
+    },
+  ]);
+  await db.createTable("lore_cards", [
+    {
+      id: "lore-1",
+      term: "Lantern Law",
+      definition: "A compact rule of the road.",
+      category: "concept",
+      vector: [0.4, 0.5, 0.6],
+    },
+  ]);
 }
 
 describe("campaign store bundle manifest", () => {
@@ -150,6 +180,7 @@ describe("campaign store bundle manifest", () => {
   });
 
   it("records vector capture when checkpoint bundles include vectors", async () => {
+    await seedVectorTables();
     const bundleDir = path.join(campaignDir(), "checkpoints", "checkpoint-1");
 
     await captureCampaignBundle(CAMPAIGN_ID, bundleDir, {
@@ -162,13 +193,15 @@ describe("campaign store bundle manifest", () => {
     expect(manifest.stores.find((entry) => entry.store === "vectors:episodic_events"))
       .toMatchObject({
         captureStatus: "captured",
-        bundlePath: "vectors",
+        bundlePath: "vectors/episodic_events.lance",
+        rowCount: 2,
         evidenceHash: expect.any(String),
       });
     expect(manifest.stores.find((entry) => entry.store === "vectors:lore_cards"))
       .toMatchObject({
         captureStatus: "captured",
-        bundlePath: "vectors",
+        bundlePath: "vectors/lore_cards.lance",
+        rowCount: 1,
         evidenceHash: expect.any(String),
       });
     expect(() => assertCampaignStoreBundleRestorable({

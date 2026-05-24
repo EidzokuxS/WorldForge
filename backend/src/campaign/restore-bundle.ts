@@ -96,7 +96,7 @@ export async function captureCampaignBundle(
     }
 
     writeCampaignStoreBundleManifest(
-      createCampaignStoreBundleManifest({
+      await createCampaignStoreBundleManifest({
         campaignId,
         bundleDir,
         includeVectors: options.includeVectors,

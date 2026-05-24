@@ -109,15 +109,20 @@ Implemented hardening slices after the reset:
   checkpoint/turn-boundary/image artifacts are rejected instead of copied.
   Phase 88 and Phase 94 e2e clone helpers call this service rather than
   defining clone semantics themselves.
+- Vector evidence hardening: checkpoint manifests now record per-table vector
+  bundle paths, LanceDB row counts, and per-table `.lance` directory hashes for
+  `episodic_events` and `lore_cards`. Turn rollback bundles continue to mark
+  vectors as `excluded_by_policy` and cannot masquerade as vector restore
+  evidence.
 
 Current post-slice status on `develop`:
 
 - Current slice status: manifest restore-policy declarations, the
   planning-only executor skeleton, vector-safe turn rollback execution, and
-  manifest-owned clean-start clone execution are implemented locally with
-  targeted backend tests and backend typecheck green. Vector row-count/hash
-  evidence and the final architecture-closure audit remain open before
-  long-play acceptance can resume.
+  manifest-owned clean-start clone execution are implemented locally. Vector
+  row-count/hash evidence is also implemented locally with targeted backend
+  tests and backend typecheck green. The final architecture-closure audit
+  remains open before long-play acceptance can resume.
 - Long-play status: still NO-GO. These slices close important control-plane
   blockers, but they are not full Phase 95 acceptance evidence.
 
@@ -357,10 +362,12 @@ Current implementation status:
   turn snapshot bundle.
 - `restoreCampaignBundle` refuses to restore a bundle without a manifest and
   refuses vector restore when the bundle did not capture vectors.
-- Remaining work: make clean-start clone consume the same manifest instead of
-  using the legacy Phase 94 helper-copy/rewrite path, and add stronger content
-  hashes for logical vector rows once the clone/replay store rewrite service
-  lands.
+- `vectors:episodic_events` and `vectors:lore_cards` entries now record
+  per-table LanceDB row counts and per-table `.lance` directory hashes when
+  vectors are included in checkpoint bundles.
+- Remaining work: run the final architecture-closure audit and fresh Oracle
+  architecture GO on a frozen current bundle before broad long-play acceptance
+  resumes.
 
 Clean-start clone is the Phase 95 mode. Replay-preserving clone stays rejected
 until it has explicit id rewrite and saga/vector/packet replay semantics.

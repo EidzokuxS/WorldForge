@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import * as lancedb from "@lancedb/lancedb";
 import { getSqliteConnection } from "../db/index.js";
 import {
   PHASE95_SQLITE_STORE_TABLES,
@@ -113,6 +114,28 @@ function readJsonArrayCount(filePath: string): number {
   }
 }
 
+function vectorTableNameForStore(store: string): string {
+  if (store === "vectors:episodic_events") return "episodic_events";
+  if (store === "vectors:lore_cards") return "lore_cards";
+  throw new Error(`Store manifest does not recognize vector store: ${store}`);
+}
+
+async function readVectorRowCount(input: {
+  vectorsDir: string;
+  tableName: string;
+}): Promise<number> {
+  if (!fs.existsSync(input.vectorsDir)) {
+    return 0;
+  }
+  const db = await lancedb.connect(input.vectorsDir);
+  const tableNames = await db.tableNames();
+  if (!tableNames.includes(input.tableName)) {
+    return 0;
+  }
+  const table = await db.openTable(input.tableName);
+  return table.countRows();
+}
+
 function evidenceHashFor(input: Omit<CampaignStoreBundleEntry, "evidenceHash">): string {
   return digest({
     store: input.store,
@@ -141,11 +164,11 @@ function withEvidenceHash(
   };
 }
 
-function bundleEntryForStore(input: {
+async function bundleEntryForStore(input: {
   entry: StoreManifestEntry;
   bundleDir: string;
   includeVectors: boolean;
-}): CampaignStoreBundleEntry {
+}): Promise<CampaignStoreBundleEntry> {
   const { entry, bundleDir, includeVectors } = input;
   if (entry.store.startsWith("sqlite:")) {
     const tableName = entry.store.slice("sqlite:".length);
@@ -179,14 +202,23 @@ function bundleEntryForStore(input: {
   }
 
   if (entry.store === "vectors:episodic_events" || entry.store === "vectors:lore_cards") {
-    const physicalHash = includeVectors ? directoryDigest(path.join(bundleDir, "vectors")) : undefined;
+    const tableName = vectorTableNameForStore(entry.store);
+    const relativeTablePath = `vectors/${tableName}.lance`;
+    const tablePath = path.join(bundleDir, relativeTablePath);
+    const rowCount = includeVectors
+      ? await readVectorRowCount({
+        vectorsDir: path.join(bundleDir, "vectors"),
+        tableName,
+      })
+      : null;
+    const physicalHash = includeVectors ? directoryDigest(tablePath) : undefined;
     return withEvidenceHash({
       ...entry,
       captureStatus: includeVectors ? "captured" : "excluded_by_policy",
-      bundlePath: includeVectors ? "vectors" : null,
-      rowCount: null,
+      bundlePath: includeVectors && fs.existsSync(tablePath) ? relativeTablePath : null,
+      rowCount,
       note: includeVectors
-        ? "Captured as vector directory for checkpoint restore."
+        ? "Captured as vector table evidence for checkpoint restore."
         : "Excluded from turn rollback bundles; vectors are rebuilt or purged by policy.",
     }, physicalHash);
   }
@@ -220,13 +252,13 @@ function bundleEntryForStore(input: {
   });
 }
 
-export function createCampaignStoreBundleManifest(input: {
+export async function createCampaignStoreBundleManifest(input: {
   campaignId: string;
   bundleDir: string;
   includeVectors: boolean;
   purpose: CampaignStoreBundlePurpose;
   capturedAt?: number;
-}): CampaignStoreBundleManifest {
+}): Promise<CampaignStoreBundleManifest> {
   const contractEntries = assertStoreManifestCoverage(PHASE95_STORE_MANIFEST);
   const manifest: CampaignStoreBundleManifest = {
     schemaVersion: STORE_BUNDLE_MANIFEST_SCHEMA_VERSION,
@@ -234,11 +266,13 @@ export function createCampaignStoreBundleManifest(input: {
     purpose: input.purpose,
     includeVectors: input.includeVectors,
     capturedAt: input.capturedAt ?? Date.now(),
-    stores: contractEntries.map((entry) => bundleEntryForStore({
-      entry,
-      bundleDir: input.bundleDir,
-      includeVectors: input.includeVectors,
-    })),
+    stores: await Promise.all(contractEntries.map((entry) =>
+      bundleEntryForStore({
+        entry,
+        bundleDir: input.bundleDir,
+        includeVectors: input.includeVectors,
+      })
+    )),
   };
   assertCampaignStoreBundleManifest(manifest);
   return manifest;
@@ -255,7 +289,7 @@ export function assertCampaignStoreBundleManifest(
     if (entry.requiresHash && !entry.evidenceHash) {
       throw new Error(`Store manifest entry is missing evidence hash: ${entry.store}`);
     }
-    if (entry.requiresRowCount && entry.captureStatus === "captured" && entry.store.startsWith("sqlite:")) {
+    if (entry.requiresRowCount && entry.captureStatus === "captured") {
       if (typeof entry.rowCount !== "number" || entry.rowCount < 0) {
         throw new Error(`Store manifest entry is missing row count: ${entry.store}`);
       }
@@ -332,13 +366,24 @@ export function assertCampaignStoreBundleRestorable(input: {
     relativePath: "chat_history.json",
   });
 
-  const vectorEntry = findStore(manifest, "vectors:episodic_events");
+  const vectorEntries = [
+    findStore(manifest, "vectors:episodic_events"),
+    findStore(manifest, "vectors:lore_cards"),
+  ];
   if (input.includeVectors) {
-    if (vectorEntry.captureStatus !== "captured" || vectorEntry.bundlePath !== "vectors") {
-      throw new Error("Campaign store bundle cannot restore vectors because they were not captured.");
-    }
     if (!fs.existsSync(path.join(input.bundleDir, "vectors"))) {
-      throw new Error("Campaign store bundle vector directory is missing.");
+      throw new Error("Campaign store bundle vectors directory is missing.");
+    }
+    for (const vectorEntry of vectorEntries) {
+      if (vectorEntry.captureStatus !== "captured") {
+        throw new Error("Campaign store bundle cannot restore vectors because they were not captured.");
+      }
+      if (typeof vectorEntry.rowCount !== "number" || vectorEntry.rowCount < 0) {
+        throw new Error(`Campaign store bundle vector row count is missing for ${vectorEntry.store}.`);
+      }
+      if (vectorEntry.bundlePath !== null && !fs.existsSync(path.join(input.bundleDir, vectorEntry.bundlePath))) {
+        throw new Error(`Campaign store bundle vector table directory is missing for ${vectorEntry.store}.`);
+      }
     }
   }
 
