@@ -11,23 +11,41 @@ import {
   type CampaignStoreManifestOperationStep,
 } from "./store-manifest-executor.js";
 
+export const CAMPAIGN_CLONE_MANIFEST_FILENAME = "clone-manifest.json";
+
 export interface CleanStartCampaignCloneOptions {
   sourceCampaignId: string;
   targetCampaignId?: string;
   name?: string;
   nameSuffix?: string;
   now?: number;
+  mode?: "clean_start" | "replay_preserving";
 }
 
 export interface CleanStartCampaignCloneResult {
+  mode: "clean_start";
   sourceCampaignId: string;
   targetCampaignId: string;
   sourceDir: string;
   targetDir: string;
+  cloneManifestPath: string;
   plan: CampaignStoreManifestOperationPlan;
   rewrittenTables: string[];
   purgedTables: string[];
   scrubbedTextColumns: string[];
+  filesystemActions: CampaignFilesystemCloneAction[];
+}
+
+export interface CampaignFilesystemCloneAction {
+  store: string;
+  action: string;
+  targetPath: string | null;
+  note: string;
+}
+
+export interface CleanStartCampaignCloneManifest extends CleanStartCampaignCloneResult {
+  schemaVersion: 1;
+  clonedAt: number;
 }
 
 interface TableColumn {
@@ -86,7 +104,7 @@ function rewriteCampaignIdInValue(value: unknown, sourceCampaignId: string, targ
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value).map(([key, entry]) => [
-        key,
+        key.includes(sourceCampaignId) ? key.replaceAll(sourceCampaignId, targetCampaignId) : key,
         rewriteCampaignIdInValue(entry, sourceCampaignId, targetCampaignId),
       ]),
     );
@@ -232,12 +250,139 @@ function findSourceCampaignIdResidue(
   return null;
 }
 
-function applyFilesystemClonePlan(targetDir: string): void {
-  fs.writeFileSync(path.join(targetDir, "chat_history.json"), "[]\n", "utf-8");
-  fs.mkdirSync(path.join(targetDir, "vectors"), { recursive: true });
-  for (const rejectedPath of ["checkpoints", ".turn-boundaries", "images"]) {
-    fs.rmSync(path.join(targetDir, rejectedPath), { recursive: true, force: true });
+function requireCloneStepAction(
+  step: CampaignStoreManifestOperationStep,
+  expectedAction: string,
+): void {
+  if (step.action !== expectedAction) {
+    throw new Error(
+      `Unsupported clean-start clone action ${step.action} for ${step.store}; expected ${expectedAction}.`,
+    );
   }
+}
+
+function targetPathForArtifactStore(targetDir: string, store: string): string | null {
+  switch (store) {
+    case "artifact:checkpoints":
+      return path.join(targetDir, "checkpoints");
+    case "artifact:images":
+      return path.join(targetDir, "images");
+    case "artifact:turn_boundaries":
+      return path.join(targetDir, ".turn-boundaries");
+    default:
+      return null;
+  }
+}
+
+export function executeCampaignFilesystemClonePlan(input: {
+  targetDir: string;
+  plan: CampaignStoreManifestOperationPlan;
+  configAlreadyRewritten: boolean;
+}): CampaignFilesystemCloneAction[] {
+  if (input.plan.mode !== "clean_start_clone") {
+    throw new Error(`Filesystem clone execution only supports clean_start_clone, got ${input.plan.mode}.`);
+  }
+
+  const actions: CampaignFilesystemCloneAction[] = [];
+  const nonSqlSteps = input.plan.steps.filter((step) => !step.store.startsWith("sqlite:"));
+  for (const step of nonSqlSteps) {
+    if (step.store === "json:config") {
+      requireCloneStepAction(step, "rewrite");
+      if (!input.configAlreadyRewritten) {
+        throw new Error("Clean-start clone config step was not executed before filesystem plan.");
+      }
+      actions.push({
+        store: step.store,
+        action: step.action,
+        targetPath: path.join(input.targetDir, "config.json"),
+        note: "Config JSON was recursively rewritten before filesystem plan execution.",
+      });
+      continue;
+    }
+
+    if (step.store === "json:chat_history") {
+      requireCloneStepAction(step, "purge");
+      const chatPath = path.join(input.targetDir, "chat_history.json");
+      fs.writeFileSync(chatPath, "[]\n", "utf-8");
+      actions.push({
+        store: step.store,
+        action: step.action,
+        targetPath: chatPath,
+        note: "Chat history is reset for clean-start clone.",
+      });
+      continue;
+    }
+
+    if (step.store === "vectors:episodic_events" || step.store === "vectors:lore_cards") {
+      requireCloneStepAction(step, "rebuild");
+      const vectorsDir = path.join(input.targetDir, "vectors");
+      const tableName = step.store === "vectors:episodic_events" ? "episodic_events" : "lore_cards";
+      fs.mkdirSync(vectorsDir, { recursive: true });
+      fs.rmSync(path.join(vectorsDir, `${tableName}.lance`), { recursive: true, force: true });
+      actions.push({
+        store: step.store,
+        action: step.action,
+        targetPath: path.join(vectorsDir, `${tableName}.lance`),
+        note: "Vector table is rebuilt from an empty clean-start clone state.",
+      });
+      continue;
+    }
+
+    if (step.store === "artifact:checkpoints"
+      || step.store === "artifact:images"
+      || step.store === "artifact:turn_boundaries") {
+      requireCloneStepAction(step, "reject");
+      const targetPath = targetPathForArtifactStore(input.targetDir, step.store);
+      if (!targetPath) {
+        throw new Error(`No target path mapped for clone artifact store ${step.store}.`);
+      }
+      fs.rmSync(targetPath, { recursive: true, force: true });
+      actions.push({
+        store: step.store,
+        action: step.action,
+        targetPath,
+        note: "Source artifact store is rejected for clean-start clone.",
+      });
+      continue;
+    }
+
+    if (step.store === "projection:public_dtos") {
+      requireCloneStepAction(step, "rebuild");
+      actions.push({
+        store: step.store,
+        action: step.action,
+        targetPath: null,
+        note: "Public DTO projection is derived and rebuilt on demand.",
+      });
+      continue;
+    }
+
+    if (step.store === "evidence:playtest_reports") {
+      requireCloneStepAction(step, "reject");
+      actions.push({
+        store: step.store,
+        action: step.action,
+        targetPath: null,
+        note: "Playtest evidence is not copied into gameplay clone state.",
+      });
+      continue;
+    }
+
+    throw new Error(`Unsupported non-SQL clean-start clone store: ${step.store}.`);
+  }
+
+  return actions;
+}
+
+function writeCleanStartCloneManifest(
+  targetDir: string,
+  manifest: CleanStartCampaignCloneManifest,
+): void {
+  fs.writeFileSync(
+    path.join(targetDir, CAMPAIGN_CLONE_MANIFEST_FILENAME),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    "utf-8",
+  );
 }
 
 export async function cloneCampaignCleanStart(
@@ -246,6 +391,12 @@ export async function cloneCampaignCleanStart(
   assertSafeId(options.sourceCampaignId);
   const targetCampaignId = options.targetCampaignId ?? randomUUID();
   assertSafeId(targetCampaignId);
+  const mode = options.mode ?? "clean_start";
+
+  if (mode === "replay_preserving") {
+    planCampaignStoreManifestOperation({ mode: "replay_preserving_clone" });
+    throw new Error("Replay-preserving clone is not implemented for Phase 95 clean-start clone.");
+  }
 
   if (hasAnyActiveTurn()) {
     throw new AppError("Cannot clone a campaign while a turn is active.", 409);
@@ -285,7 +436,11 @@ export async function cloneCampaignCleanStart(
       nameSuffix: options.nameSuffix,
       now,
     });
-    applyFilesystemClonePlan(targetDir);
+    const filesystemActions = executeCampaignFilesystemClonePlan({
+      targetDir,
+      plan,
+      configAlreadyRewritten: true,
+    });
     const sqliteResult = applySqliteClonePlan({
       dbPath: targetDbPath,
       plan,
@@ -295,14 +450,23 @@ export async function cloneCampaignCleanStart(
       now,
     });
 
-    return {
+    const result: CleanStartCampaignCloneResult = {
+      mode: "clean_start",
       sourceCampaignId: options.sourceCampaignId,
       targetCampaignId,
       sourceDir,
       targetDir,
+      cloneManifestPath: path.join(targetDir, CAMPAIGN_CLONE_MANIFEST_FILENAME),
       plan,
       ...sqliteResult,
+      filesystemActions,
     };
+    writeCleanStartCloneManifest(targetDir, {
+      schemaVersion: 1,
+      clonedAt: now,
+      ...result,
+    });
+    return result;
   } catch (error) {
     fs.rmSync(targetDir, { recursive: true, force: true });
     throw error;

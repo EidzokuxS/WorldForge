@@ -69,7 +69,7 @@ reviewed on a frozen current tree.
 | SSE/API projection | player-facing DTO factories | projection modules and route projectors | internal saga/tool/state objects | none | public DTO schemas, backend-ref guard, explicit event allowlists, legacy raw-id rejection | `turn_resolution`, lookup, world, inventory, history, checkpoint, NPC promote tests; raw legacy id guard targeted test green |
 | Frontend projection | `frontend/lib/api.ts` parsed DTOs | frontend API parser | debug state, local render state | none | public handle parser, SSE parser, malformed payload errors, no raw fallback authority | API parser rejects/drops raw `loc-*`/`npc-*`/`item-*` fallbacks; Browser evidence still required |
 | Persistence bundles | `store-manifest.json` plus campaign stores | manifest/bundle capture and restore services | evidence hashes, playtest reports | none | manifest coverage, policy schemas, path safety, hash/row-count recomputation | checkpoint/turn snapshot tests; corrupted SQLite/vector evidence fails before live copy |
-| Clone | source campaign stores plus manifest plan | clean-start clone service | old source artifacts as forensic context only | none | active-turn rejection, id rewrite/purge/rebuild plan, path safety | clean clone manifest and clone tests; **P1: non-SQL policies partly hard-coded, no durable clone artifact** |
+| Clone | source campaign stores plus manifest plan | clean-start clone service | old source artifacts as forensic context only | none | active-turn rejection, manifest-dispatched id rewrite/purge/rebuild/reject plan, path safety | durable clone manifest, filesystem action evidence, broad residue tests |
 | Rollback/replay/vector | turn snapshots, checkpoints, vector stores, event ledgers | rollback/restore service | vector evidence, playtest harness logs | none | restore policy executor, vector include/exclude policy, recovery mode gate | rollback snapshot restore; episodic vectors reconcile to restored receipts while preserving matching pre-turn vectors |
 | Observability/evals | bounded traces, test artifacts, reports | observability module and playtest harness | local Workshop payloads, redacted remote traces | human/Codex playtest actions | event schemas, redaction policy, evidence completeness rubric | contract tests, GitNexus, Oracle bundles, Browser evidence, human-style playtest reports |
 
@@ -175,21 +175,24 @@ and human-style long-play evidence remain required.
    - Frontend checkpoint API/panel actions use `checkpointHandle` for load and
      delete.
 
+7. Clone/replay P1 queue is executable.
+   - Non-SQL clean-start clone stores are dispatched through manifest steps:
+     config rewrite, chat purge, vector rebuild, artifact rejection,
+     projection rebuild, and evidence rejection.
+   - Target clones write durable `clone-manifest.json` with source/target ids,
+     plan, rewritten/purged/scrubbed tables, and filesystem actions.
+   - Replay-preserving clone is an explicit operation mode that fails closed
+     when current store replay policies require `reject` or `regenerate`.
+   - Clone residue tests seed representative rows across rewrite and purge
+     manifest tables, nested JSON/text payloads, config map keys, and verify no
+     source campaign id remains in target SQLite gameplay stores.
+
 ## Current P1 Queue
 
-1. Clean-start clone must become fully manifest-owned.
-   - SQLite uses the manifest plan; non-SQL policies are still partly
-     hard-coded and no durable clone manifest is written to the target.
-   - Required tests: non-SQL manifest policy mutation fails closed or is
-     executed by the plan; target contains clone manifest artifact.
-
-2. Replay-preserving clone/replay must be executable rejection.
-   - Manifest has replay policy, but there is no mode that fails closed when a
-     caller asks for replay-preserving clone semantics.
-
-3. Clone test coverage must use a representative migrated source fixture.
-   - Existing tests prove narrow happy paths. Need source-id residue across all
-     rewrite/purge tables and nested JSON/text payloads.
+No current P1 blockers are listed after the local public-API and clone/replay
+closure slices. This is still **not** Phase 95 acceptance: Oracle bundled GO,
+Browser UI evidence, human-style play, longer soak/replay, and P2 hardening
+remain required before calling the gameplay loop mature.
 
 ## Current P2 Queue
 
@@ -270,7 +273,7 @@ Unverified Assumptions:
 
 ### C. GM Read, Tool Loop, Executor, Receipts
 
-Status: **P1 open**
+Status: **Quick-action receipt P1 closed locally; P2 owner-parity items remain**
 
 Decision in force: model proposes; executor validates, mutates, and records
 accepted receipts. Quick-action production is authority-bearing even though it
@@ -365,7 +368,7 @@ Unverified Assumptions:
 
 ### F. Persistence, Clone, Replay, Rollback, Vector
 
-Status: **P1 open after restore/vector P0 closure**
+Status: **P1 closed locally after restore/vector and clone/replay closure**
 
 Decision in force: clone/rollback/replay/vector is a manifest-owned store
 lifecycle problem. Clean-start clone is Phase 95 mode; replay-preserving clone
@@ -401,6 +404,9 @@ Unverified Assumptions:
 - Rebuilt accepted episodic rows without vectors are acceptable as a
   short-lived degradation until normal embedding paths refresh them; preserved
   pre-turn rows keep their existing vectors.
+- Durable clone manifests intentionally retain source campaign ids as lineage
+  evidence; runtime SQLite/config/chat/vector/artifact stores must not retain
+  source-owned gameplay state.
 
 ### G. Observability, Oracle, Browser, Acceptance
 
@@ -465,14 +471,15 @@ This list is the closure guard before any future "architecture GO" claim:
 - [x] Restore uses a staged idempotent lifecycle for rerun convergence.
 - [x] Episodic vector rollback preserves/rebuilds pre-turn memory from
   authoritative receipts.
-- [ ] Clean-start clone is fully manifest-owned and writes clone evidence. P1.
-- [ ] Replay-preserving clone/replay is executable fail-closed. P1.
+- [x] Clean-start clone is fully manifest-owned and writes clone evidence.
+  Targeted clone tests green.
+- [x] Replay-preserving clone/replay is executable fail-closed. Targeted
+  manifest/clone tests green.
 - [ ] Observability evidence includes Browser UI, GitNexus, Oracle bundle, and
   human-style play after blockers close.
 
 ## Next Implementation Order
 
-1. Fully manifest-owned clean-start clone artifact and replay rejection.
-2. Broader clone residue fixture coverage.
-3. Oracle bundled full architecture GO, then Browser gameplay workability,
+1. Full architecture/recovery-matrix completeness audit bundle.
+2. Oracle bundled full architecture GO, then Browser gameplay workability,
     fresh/cloned human-style 60-turn campaigns, and longer soak/replay.

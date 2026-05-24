@@ -54,6 +54,20 @@ describe("campaign store manifest executor", () => {
     });
   });
 
+  it("rejects replay-preserving clone while stores require regenerate or reject replay policy", () => {
+    let message = "";
+    try {
+      planCampaignStoreManifestOperation({ mode: "replay_preserving_clone" });
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+
+    expect(message).toContain("Replay-preserving clone is not supported");
+    expect(message).toContain("sqlite:quick_action_offers:reject");
+    expect(message).toContain("vectors:episodic_events:regenerate");
+    expect(message).toContain("artifact:turn_boundaries:reject");
+  });
+
   it("uses physical snapshot restore for bundled authoritative state instead of legacy coarse rollback labels", () => {
     const steps = stepsByStore("turn_rollback_restore");
 

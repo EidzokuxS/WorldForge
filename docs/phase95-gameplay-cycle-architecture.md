@@ -133,6 +133,11 @@ Implemented hardening slices after the reset:
   checkpoint/turn-boundary/image artifacts are rejected instead of copied.
   Phase 88 and Phase 94 e2e clone helpers call this service rather than
   defining clone semantics themselves.
+- Manifest-owned clone evidence: clean-start clone now dispatches non-SQL
+  stores through manifest steps as well as SQLite stores, writes a durable
+  `clone-manifest.json` into the target campaign, and has an executable
+  replay-preserving clone mode that fails closed against the current manifest
+  because some stores require `reject` or `regenerate` replay policy.
 - Vector evidence hardening: checkpoint manifests now record per-table vector
   bundle paths, LanceDB row counts, and per-table `.lance` directory hashes for
   `episodic_events` and `lore_cards`. Turn rollback bundles continue to mark
@@ -156,7 +161,10 @@ Current post-slice status on `develop`:
   emitted-ref coverage are implemented locally with route/GM-loop/actor-plan
   tests and backend/frontend typechecks green. Adjacent checkpoint/NPC public
   API handle wrapping is implemented locally with route/API/UI tests and
-  backend/frontend typechecks green.
+  backend/frontend typechecks green. Clone/replay P1 closure is implemented
+  locally with manifest-dispatched filesystem clone actions, durable clone
+  manifest evidence, executable replay-preserving rejection, and broad
+  source-id residue fixture coverage.
   The architecture-closure audit is now recorded in
   `docs/phase95-architecture-closure-audit-2026-05-24.md`; it is a NO-GO for
   long-play acceptance until the remaining P1 queue is closed and Oracle/
@@ -171,8 +179,9 @@ Architecture closure audit on 2026-05-24:
 - P0s from that audit are now locally implemented: actor positive write scopes,
   restore-side hash/row evidence verification, episodic vector rollback
   retention/rebuild, and staged rerun-convergent restore.
-- P1s still open: fully manifest-owned non-SQL clone policy, executable replay
-  rejection, and broader clone residue fixture coverage.
+- P1s from that audit are now locally implemented. Remaining work is not a P1
+  blocker list but final architecture bundle review, Browser UI evidence, and
+  long-play/soak acceptance evidence.
 
 ## End State
 
@@ -229,11 +238,11 @@ P0 blockers before broad implementation:
   entities, quick actions, action/retry/resume/opening SSE, history read,
   `/chat/lookup`, checkpoint APIs, and NPC promote; it still needs a fresh
   bundled Oracle review before it can be treated as an acceptance gate closure.
-- Clone/replay/rollback/vector lifecycle is only partially contract-closed.
-  Oracle R2 confirms the next implementation must make manifest policy
-  declarations executable and route both clean-start clone and turn rollback
-  through one manifest-owned executor; vector restore/rebuild must be proven
-  crash-safe.
+- Clone/replay/rollback/vector lifecycle is locally contract-closed for the
+  known P0/P1 queue: clean-start clone and turn rollback execute manifest
+  policy, restore verifies evidence, vectors reconcile after rollback, and
+  replay-preserving clone fails closed. This still needs a fresh bundled Oracle
+  review before acceptance.
 - Clock authority has an executable ledger and no-silent-minute tests, but the
   next review must confirm that all actor/due-world wakeups, resume, clone, and
   projection consumers now read the ledgered authority meaning.
@@ -421,8 +430,9 @@ Current implementation status:
   architecture GO on a frozen current bundle before broad long-play acceptance
   resumes.
 
-Clean-start clone is the Phase 95 mode. Replay-preserving clone stays rejected
-until it has explicit id rewrite and saga/vector/packet replay semantics.
+Clean-start clone is the Phase 95 mode. Replay-preserving clone is executable
+fail-closed until it has explicit id rewrite and saga/vector/packet replay
+semantics.
 
 Post-write-scope bundle focus:
 

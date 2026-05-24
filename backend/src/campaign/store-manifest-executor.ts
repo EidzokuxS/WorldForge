@@ -10,6 +10,7 @@ import {
 
 export const STORE_MANIFEST_OPERATION_MODE_VALUES = [
   "clean_start_clone",
+  "replay_preserving_clone",
   "turn_rollback_restore",
   "checkpoint_restore",
 ] as const;
@@ -18,6 +19,7 @@ export type StoreManifestOperationMode = (typeof STORE_MANIFEST_OPERATION_MODE_V
 
 export type StoreManifestOperationAction =
   | StorePolicy
+  | StoreManifestEntry["replayPolicy"]
   | StoreTurnRollbackPolicy
   | StoreCheckpointRestorePolicy;
 
@@ -44,6 +46,8 @@ function actionForMode(
   switch (mode) {
     case "clean_start_clone":
       return entry.clonePolicy;
+    case "replay_preserving_clone":
+      return entry.replayPolicy;
     case "turn_rollback_restore":
       return entry.restorePolicies.turnRollback;
     case "checkpoint_restore":
@@ -65,6 +69,7 @@ export function assertCampaignStoreManifestOperationPlanClosed(
   const manifestEntries = assertStoreManifestCoverage(manifest);
   const manifestStores = new Set(manifestEntries.map((entry) => entry.store));
   const plannedStores = new Set<string>();
+  const replayUnsupportedStores: string[] = [];
 
   for (const step of plan.steps) {
     if (step.mode !== plan.mode) {
@@ -83,6 +88,10 @@ export function assertCampaignStoreManifestOperationPlanClosed(
     if (plan.mode === "clean_start_clone" && step.action === "preserve") {
       throw new Error(`Clean-start clone cannot preserve source-owned store: ${step.store}.`);
     }
+    if (plan.mode === "replay_preserving_clone"
+      && (step.action === "reject" || step.action === "regenerate")) {
+      replayUnsupportedStores.push(`${step.store}:${step.action}`);
+    }
     if (step.action === "exact_restore" && !step.requiresHash) {
       throw new Error(`Exact restore requires hash evidence for store: ${step.store}.`);
     }
@@ -92,6 +101,12 @@ export function assertCampaignStoreManifestOperationPlanClosed(
     if (!plannedStores.has(entry.store)) {
       throw new Error(`Store manifest operation is missing store: ${entry.store}.`);
     }
+  }
+
+  if (replayUnsupportedStores.length > 0) {
+    throw new Error(
+      `Replay-preserving clone is not supported by the current store manifest: ${replayUnsupportedStores.join(", ")}.`,
+    );
   }
 
   return plan;
