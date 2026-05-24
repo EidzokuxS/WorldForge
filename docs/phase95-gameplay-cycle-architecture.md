@@ -42,6 +42,27 @@ Post-write-scope wide bundle review on 2026-05-24:
   factories and frontend public handles, then implement manifest-driven
   clean-start clone and vector-safe restore.
 
+Clone/replay/rollback/vector R2 bundle review on 2026-05-24:
+
+- Oracle session: `phase95-clone-manifest-r2-full`.
+- Delivery: one generated full-context bundle file uploaded as a single
+  attachment; dry-run reported roughly `94k` tokens and one `389.7 KB`
+  attachment. A prior `10k` snippet review is preliminary only and is not an
+  architecture gate.
+- Verdict: NO-GO for long-play or cloned-world acceptance; CONDITIONAL-GO only
+  for one narrow implementation slice.
+- Required next slice: tighten manifest policy declarations first, then add a
+  manifest-owned executor covering clean-start clone plus vector-safe
+  rollback/restore. Do not ship a vector-only patch as the acceptance boundary.
+- P0s verified: Phase 95 clone setup still uses Phase 94 raw-copy behavior;
+  turn rollback leaves live vectors untouched when snapshots exclude vectors;
+  manifest rows are evidence, not execution rules; vector cleanup can depend
+  on non-durable pending in-memory state.
+- P1s verified: rollback policy vocabulary is ambiguous before execution,
+  vector row-count/hash evidence is incomplete, source campaign id scrub is
+  scalar-only in the current clone helpers, and multi-store clone/restore lacks
+  a fail-closed crash-convergence lifecycle.
+
 Implemented hardening slices after the reset:
 
 - Durable quick-action capabilities: quick-action labels/prose remain
@@ -143,9 +164,10 @@ P0 blockers before broad implementation:
   `/chat/lookup`; it still needs a fresh bundled Oracle review before it can
   be treated as an acceptance gate closure.
 - Clone/replay/rollback/vector lifecycle is only partially contract-closed.
-  Store-manifest rollback bundles exist, but clean-start clone must consume the
-  manifest rather than legacy helper-copy semantics, and vector restore/rebuild
-  policy still needs current cluster GO.
+  Oracle R2 confirms the next implementation must make manifest policy
+  declarations executable and route both clean-start clone and turn rollback
+  through one manifest-owned executor; vector restore/rebuild must be proven
+  crash-safe.
 - Clock authority has an executable ledger and no-silent-minute tests, but the
   next review must confirm that all actor/due-world wakeups, resume, clone, and
   projection consumers now read the ledgered authority meaning.
