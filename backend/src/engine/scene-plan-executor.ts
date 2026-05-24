@@ -1,7 +1,5 @@
 import { executeToolCall, type ToolResult } from "./tool-executor.js";
 import { createLogger } from "../lib/index.js";
-import { getSqliteConnection } from "../db/index.js";
-import { withSqliteWriteLock } from "../db/sqlite-write-lock.js";
 import type { SuccessfulTravelLike } from "./hidden-adjudication.js";
 import type { ScenePlanAction } from "./scene-plan-schema.js";
 import type { ValidatedScenePlan } from "./scene-plan-validator.js";
@@ -11,17 +9,14 @@ import {
   createScenePlanActionToolExecutionContext,
   createPlayerTurnToolExecutionContext,
   validateToolPlanGrounding,
-  writeScopesForRuntimeToolNames,
   type ToolExecutionContext,
 } from "./tool-execution-context.js";
 import {
   toPlayerFacingQuickActions,
   type PlayerFacingQuickActionsEvent,
 } from "./player-facing-events.js";
-import { runtimeToolRequiresExecutionAuthority } from "./tool-contracts.js";
 
 const log = createLogger("scene-plan-executor");
-let scenePlanBoundaryCounter = 0;
 
 export interface ExecutedScenePlanActionResult {
   order: number;
@@ -130,20 +125,6 @@ function buildExecutedScenePlanSnapshot(input: {
   };
 }
 
-function buildRolledBackScenePlanSnapshot(input: {
-  validatedPlan: ValidatedScenePlan;
-  toolCallResults: ExecutedScenePlanActionResult[];
-}): ExecutedScenePlan {
-  return buildExecutedScenePlanSnapshot({
-    validatedPlan: input.validatedPlan,
-    toolCallResults: input.toolCallResults,
-    emittedEvents: [],
-    quickActionsEmitted: false,
-    successfulTravel: null,
-    canonicalEvents: [],
-  });
-}
-
 export async function executeScenePlan(
   args: ExecuteScenePlanArgs,
 ): Promise<ExecutedScenePlan> {
@@ -154,18 +135,12 @@ export async function executeScenePlan(
   let successfulTravel: SuccessfulTravelLike | null = null;
   const canonicalEvents: ExecutedScenePlanCanonicalEvent[] = [];
   const executionContext =
-    args.executionContext ?? createPlayerTurnToolExecutionContext({
-      frame: validatedPlan.frame,
-      allowedWriteScopes: writeScopesForRuntimeToolNames(
-        validatedPlan.plan.plannedActions.map((action) => action.toolName),
-      ),
-    });
-  const contextForAction = (action: { actorId?: string; toolName?: string }) =>
+    args.executionContext ?? createPlayerTurnToolExecutionContext(validatedPlan.frame);
+  const contextForAction = (action: { actorId?: string }) =>
     createScenePlanActionToolExecutionContext({
       context: executionContext,
       frame: validatedPlan.frame,
       actorId: action.actorId ?? executionContext.subjectActorId ?? validatedPlan.frame.playerActorId,
-      toolName: action.toolName,
     });
   const groundingIssues = validateToolPlanGrounding({
     actions: validatedPlan.plan.plannedActions,
@@ -204,161 +179,94 @@ export async function executeScenePlan(
     );
   }
 
-  const hasAuthorityBoundAction = validatedPlan.plan.plannedActions.some((action) =>
-    runtimeToolRequiresExecutionAuthority(action.toolName));
+  for (const [order, action] of validatedPlan.plan.plannedActions.entries()) {
+    const toolArgs = action.input as Record<string, unknown>;
+    const actionExecutionContext = contextForAction(action);
+    const result = await executeToolCall(
+      args.campaignId,
+      action.toolName,
+      toolArgs,
+      args.tick,
+      args.outcomeTier,
+      actionExecutionContext,
+    );
+    const actionResult: ExecutedScenePlanActionResult = {
+      order,
+      actionId: action.id,
+      actionRef: action.id,
+      actorId: action.actorId,
+      toolName: action.toolName,
+      input: action.input,
+      args: toolArgs,
+      result,
+    };
 
-  const executeActions = async (): Promise<ExecutedScenePlan> => {
-    const boundary = createScenePlanMutationBoundary(args.campaignId);
-    try {
-      for (const [order, action] of validatedPlan.plan.plannedActions.entries()) {
-        if (runtimeToolRequiresExecutionAuthority(action.toolName)) {
-          boundary.begin();
-        }
-        const toolArgs = action.input as Record<string, unknown>;
-        const actionExecutionContext = contextForAction(action);
-        const result = await executeToolCall(
-          args.campaignId,
-          action.toolName,
-          toolArgs,
-          args.tick,
-          args.outcomeTier,
-          actionExecutionContext,
-        );
-        const actionResult: ExecutedScenePlanActionResult = {
-          order,
-          actionId: action.id,
-          actionRef: action.id,
-          actorId: action.actorId,
-          toolName: action.toolName,
-          input: action.input,
-          args: toolArgs,
-          result,
-        };
+    toolCallResults.push(actionResult);
 
-        toolCallResults.push(actionResult);
+    if (!result.success) {
+      throw new ScenePlanExecutionError(
+        `ScenePlan action failed: ${action.toolName}${result.error ? ` - ${result.error}` : ""}`,
+        buildExecutedScenePlanSnapshot({
+          validatedPlan,
+          toolCallResults,
+          emittedEvents,
+          quickActionsEmitted,
+          successfulTravel,
+          canonicalEvents,
+        }),
+      );
+    }
 
-        if (!result.success) {
-          throw new ScenePlanExecutionError(
-            `ScenePlan action failed: ${action.toolName}${result.error ? ` - ${result.error}` : ""}`,
-            buildExecutedScenePlanSnapshot({
-              validatedPlan,
-              toolCallResults,
-              emittedEvents,
-              quickActionsEmitted,
-              successfulTravel,
-              canonicalEvents,
-            }),
-          );
-        }
+    applySuccessfulToolObservationToExecutionContext({
+      toolName: action.toolName,
+      result,
+      context: executionContext,
+    });
 
-        applySuccessfulToolObservationToExecutionContext({
-          toolName: action.toolName,
-          result,
-          context: executionContext,
-        });
+    canonicalEvents.push({
+      id: action.id,
+      actionId: action.id,
+      actorId: action.actorId,
+      toolName: action.toolName,
+      result: result.result,
+    });
 
-        canonicalEvents.push({
-          id: action.id,
-          actionId: action.id,
-          actorId: action.actorId,
-          toolName: action.toolName,
-          result: result.result,
-        });
-
-        if (action.toolName === "offer_quick_actions") {
-          const quickActions = toPlayerFacingQuickActions(result);
-          if (quickActions) {
-            quickActionsEmitted = true;
-            emittedEvents.push({ type: "quick_actions", data: quickActions });
-          }
-          continue;
-        }
-
-        if (action.toolName === "move_to" || action.toolName === "move_actor") {
-          const moveResult = getSuccessfulMoveToolResult(result);
-          successfulTravel = moveResult ?? successfulTravel;
-          if (moveResult) {
-            emittedEvents.push({
-              type: "state_update",
-              data: {
-                type: "location_change",
-                locationId: moveResult.locationId,
-                locationName: moveResult.locationName,
-                travelCost: moveResult.travelCost,
-                tickAdvance: moveResult.tickAdvance,
-                path: moveResult.path,
-              },
-            });
-            continue;
-          }
-        }
-
+    if (action.toolName === "offer_quick_actions") {
+      const quickActions = toPlayerFacingQuickActions(result);
+      if (quickActions) {
+        quickActionsEmitted = true;
+        emittedEvents.push({ type: "quick_actions", data: quickActions });
       }
+      continue;
+    }
 
-      boundary.commit();
-      return buildExecutedScenePlanSnapshot({
-        validatedPlan,
-        toolCallResults,
-        emittedEvents,
-        quickActionsEmitted,
-        successfulTravel,
-        canonicalEvents,
-      });
-    } catch (error) {
-      boundary.rollback();
-      if (error instanceof ScenePlanExecutionError) {
-        throw new ScenePlanExecutionError(
-          error.message,
-          buildRolledBackScenePlanSnapshot({
-            validatedPlan,
-            toolCallResults,
-          }),
-        );
+    if (action.toolName === "move_to" || action.toolName === "move_actor") {
+      const moveResult = getSuccessfulMoveToolResult(result);
+      successfulTravel = moveResult ?? successfulTravel;
+      if (moveResult) {
+        emittedEvents.push({
+          type: "state_update",
+          data: {
+            type: "location_change",
+            locationId: moveResult.locationId,
+            locationName: moveResult.locationName,
+            travelCost: moveResult.travelCost,
+            tickAdvance: moveResult.tickAdvance,
+            path: moveResult.path,
+          },
+        });
+        continue;
       }
-      throw error;
     }
-  };
 
-  return hasAuthorityBoundAction
-    ? await withSqliteWriteLock(`scene-plan:${args.campaignId}`, executeActions)
-    : await executeActions();
-}
+  }
 
-function createScenePlanMutationBoundary(campaignId: string): {
-  begin: () => void;
-  commit: () => void;
-  rollback: () => void;
-} {
-  scenePlanBoundaryCounter += 1;
-  const savepointName = `scene_plan_${scenePlanBoundaryCounter}`;
-  let active = false;
-  let closed = false;
-
-  const close = (mode: "commit" | "rollback"): void => {
-    if (closed || !active) {
-      closed = true;
-      return;
-    }
-    const sqlite = getSqliteConnection();
-    if (mode === "rollback") {
-      sqlite.exec(`ROLLBACK TO SAVEPOINT ${savepointName}`);
-    }
-    sqlite.exec(`RELEASE SAVEPOINT ${savepointName}`);
-    active = false;
-    closed = true;
-  };
-
-  return {
-    begin() {
-      if (active || closed) return;
-      getSqliteConnection().exec(`SAVEPOINT ${savepointName}`);
-      active = true;
-    },
-    commit() {
-      close("commit");
-    },
-    rollback() {
-      close("rollback");
-    },
-  };
+  return buildExecutedScenePlanSnapshot({
+    validatedPlan,
+    toolCallResults,
+    emittedEvents,
+    quickActionsEmitted,
+    successfulTravel,
+    canonicalEvents,
+  });
 }

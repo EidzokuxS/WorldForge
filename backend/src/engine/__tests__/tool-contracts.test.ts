@@ -4,19 +4,13 @@ import {
   buildRuntimeReceiptPlan,
   canRuntimeToolSatisfyRequirement,
   canRuntimeToolSatisfyReceiptPlan,
-  evaluateRuntimeReceiptPlanStatus,
-  getRuntimeRequirementStructuralRoutingStatus,
   isAcceptedRuntimeReceipt,
-  isAcceptedRuntimeReceiptForActorProcess,
   isAcceptedRuntimeReceiptForPlan,
-  isRuntimeReceiptAllowedByPlan,
   isAcceptedRuntimeReceiptForTurn,
   isAcceptedTerminalToolResult,
   MODEL_TOOL_CONTRACTS,
-  modelToolHasRole,
   modelToolIsSideEffecting,
   RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS,
-  RUNTIME_EXECUTION_AUTHORITY_TOOL_NAMES,
   RUNTIME_STATE_BEARING_TOOL_NAMES,
   RUNTIME_TOOL_CONTRACTS,
   runtimeRequirementStateMutationTools,
@@ -31,7 +25,6 @@ function withAuthority(
   result: ToolResult,
   stateDeltaRefs: string[] = ["state:delta"],
   eventRefs: string[] = [],
-  knowledgeOutputs: string[] = [],
 ): ToolResult {
   return {
     ...result,
@@ -45,51 +38,11 @@ function withAuthority(
       stateDeltaRefs,
       eventRefs,
       witnesses: [],
-      knowledgeOutputs,
+      knowledgeOutputs: [],
       visibilityOutputs: [],
       resources: [],
     },
   };
-}
-
-function withWorldFactAuthority(result: ToolResult): ToolResult {
-  const payload = result.result && typeof result.result === "object" && !Array.isArray(result.result)
-    ? result.result as Record<string, unknown>
-    : {};
-  const knowledgeId = typeof payload.knowledgeId === "string" ? payload.knowledgeId : "knowledge-1";
-  const factRef = typeof payload.factRef === "string" ? payload.factRef : `knowledge:${knowledgeId}`;
-  return withAuthority({
-    ...result,
-    result: {
-      ...payload,
-      knowledgeId,
-      factRef,
-      durability: "durable",
-      persisted: true,
-    },
-  }, ["world:fact"], [], [knowledgeId, factRef]);
-}
-
-function withDialogueAuthority(result: ToolResult): ToolResult {
-  const payload = result.result && typeof result.result === "object" && !Array.isArray(result.result)
-    ? result.result as Record<string, unknown>
-    : {};
-  const eventId = typeof payload.eventId === "string" ? payload.eventId : "event-dialogue-1";
-  const knowledgeId = typeof payload.knowledgeId === "string" ? payload.knowledgeId : null;
-  const factRef = typeof payload.factRef === "string" ? payload.factRef : null;
-  const knowledgeRefs = [knowledgeId, factRef].filter((ref): ref is string => Boolean(ref));
-  const stateDeltaRefs = [
-    "world:dialogue",
-    "world:event",
-    ...(knowledgeRefs.length > 0 ? ["world:fact"] : []),
-  ];
-  return withAuthority({
-    ...result,
-    result: {
-      ...payload,
-      eventId,
-    },
-  }, stateDeltaRefs, [eventId], knowledgeRefs);
 }
 
 function withoutResultWorldVersion(result: ToolResult): ToolResult {
@@ -103,17 +56,13 @@ function withoutResultWorldVersion(result: ToolResult): ToolResult {
 }
 
 describe("tool contracts", () => {
-  const acceptedWorldFact: ToolResult = withWorldFactAuthority({
+  const acceptedWorldFact: ToolResult = withAuthority({
     success: true,
     status: "success",
     result: {
       factKind: "contradiction",
       topicKind: "procedure",
       truthStatus: "disputed",
-      knowledgeId: "knowledge-procedure-1",
-      factRef: "knowledge:knowledge-procedure-1",
-      durability: "durable",
-      persisted: true,
     },
   });
 
@@ -163,16 +112,11 @@ describe("tool contracts", () => {
 
   it("derives runtime execution authority from tool contract roles", () => {
     const derivedStateBearingTools = [...RUNTIME_STATE_BEARING_TOOL_NAMES].sort();
-    const derivedAuthorityTools = [...RUNTIME_EXECUTION_AUTHORITY_TOOL_NAMES].sort();
     const expectedStateBearingTools = (Object.keys(RUNTIME_TOOL_CONTRACTS) as RuntimeToolName[])
       .filter((toolName) => runtimeToolIsSideEffecting(toolName))
       .sort();
-    const expectedAuthorityTools = (Object.keys(RUNTIME_TOOL_CONTRACTS) as RuntimeToolName[])
-      .filter((toolName) => runtimeToolRequiresExecutionAuthority(toolName))
-      .sort();
 
     expect(derivedStateBearingTools).toEqual(expectedStateBearingTools);
-    expect(derivedAuthorityTools).toEqual(expectedAuthorityTools);
     expect(derivedStateBearingTools).toEqual(
       expect.arrayContaining([
         "record_dialogue_outcome",
@@ -193,12 +137,10 @@ describe("tool contracts", () => {
         "offer_quick_actions",
       ]),
     );
-    expect(derivedAuthorityTools).toEqual(expect.arrayContaining(["offer_quick_actions"]));
-    expect(runtimeToolIsSideEffecting("offer_quick_actions")).toBe(false);
 
     for (const toolName of Object.keys(runtimeToolInputSchemas) as RuntimeToolName[]) {
       expect(runtimeToolRequiresExecutionAuthority(toolName)).toBe(
-        runtimeToolIsSideEffecting(toolName) || modelToolHasRole(toolName, "authority_handle"),
+        runtimeToolIsSideEffecting(toolName),
       );
     }
   });
@@ -262,115 +204,6 @@ describe("tool contracts", () => {
     })).toBe(false);
   });
 
-  it("requires terminal authority to match concrete tool-specific refs", () => {
-    expect(isAcceptedTerminalToolResult({
-      toolName: "record_world_fact",
-      result: withAuthority({
-        success: true,
-        status: "success",
-        result: {
-          factKind: "rule",
-          topicKind: "procedure",
-          truthStatus: "established",
-          durability: "durable",
-          persisted: true,
-        },
-      }),
-      requirement: { kind: "world_fact", topicKind: "procedure", durability: "durable" },
-    })).toBe(false);
-
-    expect(isAcceptedTerminalToolResult({
-      toolName: "record_world_fact",
-      result: withAuthority({
-        success: true,
-        status: "success",
-        result: {
-          knowledgeId: "knowledge-1",
-          factRef: "knowledge:knowledge-1",
-          factKind: "rule",
-          topicKind: "procedure",
-          truthStatus: "established",
-          durability: "durable",
-          persisted: true,
-        },
-      }),
-      requirement: { kind: "world_fact", topicKind: "procedure", durability: "durable" },
-    })).toBe(false);
-
-    expect(isAcceptedTerminalToolResult({
-      toolName: "record_world_fact",
-      result: withAuthority({
-        success: true,
-        status: "success",
-        result: {
-          knowledgeId: "knowledge-1",
-          factRef: "knowledge:knowledge-1",
-          factKind: "rule",
-          topicKind: "procedure",
-          truthStatus: "established",
-          durability: "durable",
-          persisted: true,
-        },
-      }, [], [], ["knowledge-1", "knowledge:knowledge-1"]),
-      requirement: { kind: "world_fact", topicKind: "procedure", durability: "durable" },
-    })).toBe(false);
-
-    expect(isAcceptedTerminalToolResult({
-      toolName: "record_dialogue_outcome",
-      result: withAuthority({
-        success: true,
-        status: "success",
-        result: {
-          eventId: "event-dialogue-1",
-          outcomeKind: "answered",
-          topicKind: "procedure",
-          truthStatus: "speaker_asserted",
-          durability: "durable",
-          persisted: true,
-        },
-      }),
-      requirement: { kind: "dialogue_outcome", topicKind: "procedure", durability: "durable" },
-    })).toBe(false);
-
-    expect(isAcceptedTerminalToolResult({
-      toolName: "record_dialogue_outcome",
-      result: withAuthority({
-        success: true,
-        status: "success",
-        result: {
-          eventId: "event-dialogue-1",
-          knowledgeId: "knowledge-dialogue-1",
-          factRef: "knowledge:knowledge-dialogue-1",
-          outcomeKind: "answered",
-          topicKind: "procedure",
-          truthStatus: "speaker_asserted",
-          durability: "durable",
-          persisted: true,
-        },
-      }, [], ["event-dialogue-1"]),
-      requirement: { kind: "dialogue_outcome", topicKind: "procedure", durability: "durable" },
-    })).toBe(false);
-
-    expect(isAcceptedTerminalToolResult({
-      toolName: "record_dialogue_outcome",
-      result: withAuthority({
-        success: true,
-        status: "success",
-        result: {
-          eventId: "event-dialogue-1",
-          knowledgeId: "knowledge-dialogue-1",
-          factRef: "knowledge:knowledge-dialogue-1",
-          outcomeKind: "answered",
-          topicKind: "procedure",
-          truthStatus: "speaker_asserted",
-          durability: "durable",
-          persisted: true,
-        },
-      }, ["world:dialogue", "world:event", "world:fact"], ["event-dialogue-1"], ["knowledge-dialogue-1", "knowledge:knowledge-dialogue-1"]),
-      requirement: { kind: "dialogue_outcome", topicKind: "procedure", durability: "durable" },
-    })).toBe(true);
-  });
-
   it("requires compatible terminal payload fields for typed GM requirements", () => {
     expect(isAcceptedTerminalToolResult({
       toolName: "record_world_fact",
@@ -406,7 +239,7 @@ describe("tool contracts", () => {
 
     expect(isAcceptedTerminalToolResult({
       toolName: "record_world_fact",
-      result: withWorldFactAuthority({
+      result: withAuthority({
         success: true,
         status: "success",
         result: {
@@ -458,7 +291,7 @@ describe("tool contracts", () => {
   });
 
   it("requires world-version authority for payload-durable terminal receipts even when requirement omits durability", () => {
-    const durableWorldFact = withWorldFactAuthority({
+    const durableWorldFact = withAuthority({
       success: true,
       status: "success",
       result: {
@@ -482,7 +315,7 @@ describe("tool contracts", () => {
       requirement: { kind: "world_fact", topicKind: "procedure" },
     })).toBe(true);
 
-    const durableDialogueOutcome = withDialogueAuthority({
+    const durableDialogueOutcome = withAuthority({
       success: true,
       status: "success",
       result: {
@@ -509,10 +342,10 @@ describe("tool contracts", () => {
     })).toBe(true);
   });
 
-  it("requires backed applied_now effects or an explicit non-application outcome kind when dialogue must settle structural state", () => {
+  it("requires applied_now or typed non-application stateEffects when dialogue must settle structural state", () => {
     expect(isAcceptedTerminalToolResult({
       toolName: "record_dialogue_outcome",
-      result: withDialogueAuthority({
+      result: withAuthority({
         success: true,
         status: "success",
         result: {
@@ -534,7 +367,7 @@ describe("tool contracts", () => {
 
     expect(isAcceptedTerminalToolResult({
       toolName: "record_dialogue_outcome",
-      result: withDialogueAuthority({
+      result: withAuthority({
         success: true,
         status: "success",
         result: {
@@ -561,7 +394,7 @@ describe("tool contracts", () => {
 
     expect(isAcceptedTerminalToolResult({
       toolName: "record_dialogue_outcome",
-      result: withDialogueAuthority({
+      result: withAuthority({
         success: true,
         status: "success",
         result: {
@@ -589,7 +422,7 @@ describe("tool contracts", () => {
 
     expect(isAcceptedTerminalToolResult({
       toolName: "record_dialogue_outcome",
-      result: withDialogueAuthority({
+      result: withAuthority({
         success: true,
         status: "success",
         result: {
@@ -613,86 +446,12 @@ describe("tool contracts", () => {
         requiresStructuralEffect: true,
         effectKind: "entity_tag",
       },
-      appliedStructuralEffectProofs: [{
-        structuralTool: "add_tag",
-        targetRef: "npc:warden",
-        stateKey: "access",
-        stateValue: "granted",
-      }],
-    })).toBe(false);
-
-    expect(isAcceptedTerminalToolResult({
-      toolName: "record_dialogue_outcome",
-      result: withDialogueAuthority({
-        success: true,
-        status: "success",
-        result: {
-          outcomeKind: "accepted",
-          topicKind: "permission",
-          durability: "durable",
-          persisted: true,
-          stateEffects: [{
-            effectId: "effect-1",
-            status: "applied_now",
-            stateChangeRef: "state_change_1_1",
-            summary: "The backend resolves the concrete state from the prior receipt.",
-          }],
-        },
-      }),
-      requirement: {
-        kind: "dialogue_outcome",
-        topicKind: "permission",
-        durability: "durable",
-        requiresStructuralEffect: true,
-        effectKind: "entity_tag",
-      },
-      appliedStructuralEffectProofs: [{
-        structuralTool: "add_tag",
-        targetRef: "npc:warden",
-        stateKey: "access",
-        stateValue: "granted",
-        stateChangeRef: "state_change_1_1",
-        toolResultId: "tool-result-add-tag-1",
-      }],
+      appliedStructuralEffectsBacked: true,
     })).toBe(true);
 
     expect(isAcceptedTerminalToolResult({
       toolName: "record_dialogue_outcome",
-      result: withDialogueAuthority({
-        success: true,
-        status: "success",
-        result: {
-          outcomeKind: "accepted",
-          topicKind: "permission",
-          durability: "durable",
-          persisted: true,
-          stateEffects: [{
-            status: "applied_now",
-            structuralTool: "transfer_item",
-            targetRef: "item:permit",
-            stateKey: "possession",
-            stateValue: "carried by Player",
-          }],
-        },
-      }),
-      requirement: {
-        kind: "dialogue_outcome",
-        topicKind: "permission",
-        durability: "durable",
-        requiresStructuralEffect: true,
-        effectKind: "entity_tag",
-      },
-      appliedStructuralEffectProofs: [{
-        structuralTool: "transfer_item",
-        targetRef: "item:permit",
-        stateKey: "possession",
-        stateValue: "carried by Player",
-      }],
-    })).toBe(false);
-
-    expect(isAcceptedTerminalToolResult({
-      toolName: "record_dialogue_outcome",
-      result: withDialogueAuthority({
+      result: withAuthority({
         success: true,
         status: "success",
         result: {
@@ -720,7 +479,7 @@ describe("tool contracts", () => {
 
     expect(isAcceptedTerminalToolResult({
       toolName: "record_dialogue_outcome",
-      result: withDialogueAuthority({
+      result: withAuthority({
         success: true,
         status: "success",
         result: {
@@ -738,65 +497,11 @@ describe("tool contracts", () => {
         requiresStructuralEffect: true,
         effectKind: "entity_tag",
       },
-    })).toBe(false);
-
-    expect(isAcceptedTerminalToolResult({
-      toolName: "record_dialogue_outcome",
-      result: withDialogueAuthority({
-        success: true,
-        status: "success",
-        result: {
-          outcomeKind: "refused",
-          topicKind: "permission",
-          durability: "durable",
-          persisted: true,
-          stateEffects: [{
-            effectId: "effect-not-applied",
-            status: "not_applied",
-            effectKind: "entity_tag",
-            summary: "The clerk refused to apply the access tag.",
-          }],
-        },
-      }),
-      requirement: {
-        kind: "dialogue_outcome",
-        topicKind: "permission",
-        durability: "durable",
-        requiresStructuralEffect: true,
-        effectKind: "entity_tag",
-      },
     })).toBe(true);
 
     expect(isAcceptedTerminalToolResult({
       toolName: "record_dialogue_outcome",
-      result: withDialogueAuthority({
-        success: true,
-        status: "success",
-        result: {
-          outcomeKind: "no_current_answer",
-          topicKind: "procedure",
-          durability: "durable",
-          persisted: true,
-          stateEffects: [{
-            effectId: "movement-not-applied",
-            status: "not_applied",
-            effectKind: "movement",
-            summary: "No one currently confirms the route after arrival.",
-          }],
-        },
-      }),
-      requirement: {
-        kind: "dialogue_outcome",
-        topicKind: "procedure",
-        durability: "durable",
-        requiresStructuralEffect: true,
-        effectKinds: ["movement"],
-      },
-    })).toBe(false);
-
-    expect(isAcceptedTerminalToolResult({
-      toolName: "record_dialogue_outcome",
-      result: withDialogueAuthority({
+      result: withAuthority({
         success: true,
         status: "success",
         result: {
@@ -814,7 +519,7 @@ describe("tool contracts", () => {
         requiresStructuralEffect: true,
         effectKind: "entity_tag",
       },
-    })).toBe(false);
+    })).toBe(true);
   });
 
   it("does not credit time or intent markers as state mutation receipts", () => {
@@ -969,14 +674,6 @@ describe("tool contracts", () => {
       { kind: "world_fact", durability: "durable" },
     )).toBe(false);
     expect(canRuntimeToolSatisfyRequirement(
-      "inspect_known_fact",
-      { kind: "observation_read" },
-    )).toBe(true);
-    expect(canRuntimeToolSatisfyRequirement(
-      "log_event",
-      { kind: "observation_read" },
-    )).toBe(false);
-    expect(canRuntimeToolSatisfyRequirement(
       "advance_time",
       { kind: "state_mutation" },
     )).toBe(false);
@@ -1007,10 +704,6 @@ describe("tool contracts", () => {
     expect(canRuntimeToolSatisfyRequirement(
       "log_event",
       { kind: "scene_beat", durability: "durable", beatKind: "event_log" },
-    )).toBe(false);
-    expect(canRuntimeToolSatisfyRequirement(
-      "log_event",
-      { kind: "scene_beat", durability: "scene_local", beatKind: "event_log" },
     )).toBe(true);
     expect(canRuntimeToolSatisfyRequirement(
       "log_event",
@@ -1040,59 +733,6 @@ describe("tool contracts", () => {
     }
   });
 
-  it("keeps player-turn state effect ownership canonical and exclusive", () => {
-    expect(runtimeRequirementStateMutationTools({
-      kind: "state_mutation",
-      effectKind: "movement",
-    })).toEqual(["move_actor"]);
-    expect(runtimeRequirementStateMutationTools({
-      kind: "state_mutation",
-      effectKind: "support_actor_created",
-    })).toEqual(["create_scene_extra"]);
-    expect(runtimeRequirementStateMutationTools({
-      kind: "state_mutation",
-      effectKind: "minor_poi_created",
-    })).toEqual(["create_minor_poi"]);
-
-    expect(canRuntimeToolSatisfyRequirement("move_to", {
-      kind: "state_mutation",
-      effectKind: "movement",
-    })).toBe(false);
-    expect(canRuntimeToolSatisfyRequirement("spawn_npc", {
-      kind: "state_mutation",
-      effectKind: "support_actor_created",
-    })).toBe(false);
-  });
-
-  it("reports structural dialogue routing separately from terminal dialogue receipts", () => {
-    expect(getRuntimeRequirementStructuralRoutingStatus({
-      kind: "dialogue_outcome",
-      durability: "durable",
-      topicKind: "route",
-      requiresStructuralEffect: false,
-    })).toEqual({ status: "none" });
-
-    expect(getRuntimeRequirementStructuralRoutingStatus({
-      kind: "dialogue_outcome",
-      durability: "durable",
-      topicKind: "permission",
-      requiresStructuralEffect: true,
-    })).toEqual({ status: "missing_structural_owner_kind" });
-
-    expect(getRuntimeRequirementStructuralRoutingStatus({
-      kind: "dialogue_outcome",
-      durability: "durable",
-      topicKind: "permission",
-      requiresStructuralEffect: true,
-      effectKind: "entity_tag",
-    })).toEqual({
-      status: "has_structural_owner",
-      effectKinds: ["entity_tag"],
-      ownerTools: ["add_tag", "remove_tag"],
-      preparatoryTools: [],
-    });
-  });
-
   it("derives an explicit receipt plan for primary mutations plus contextual time", () => {
     const plan = buildRuntimeReceiptPlan({ kind: "state_mutation", effectKind: "movement" });
 
@@ -1109,177 +749,33 @@ describe("tool contracts", () => {
       { kind: "state_mutation", effectKind: "movement" },
     )).toBe(false);
 
-    const moveReceipt = withAuthority({
-      success: true,
-      status: "success",
-      result: { locationId: "loc-overlook" },
-    }, ["actor:player:location"]);
-    const timeReceipt = withAuthority({
-      success: true,
-      status: "success",
-      result: { minutes: 10, clockAdvanced: true },
-    }, ["world:time"]);
-
     expect(isAcceptedRuntimeReceiptForPlan({
       toolName: "move_actor",
-      result: moveReceipt,
-      plan,
-    })).toBe(true);
-    expect(isRuntimeReceiptAllowedByPlan({
-      toolName: "advance_time",
-      result: timeReceipt,
+      result: withAuthority({
+        success: true,
+        status: "success",
+        result: { locationId: "loc-overlook" },
+      }, ["actor:player:location"]),
       plan,
     })).toBe(true);
     expect(isAcceptedRuntimeReceiptForPlan({
       toolName: "advance_time",
-      result: timeReceipt,
+      result: withAuthority({
+        success: true,
+        status: "success",
+        result: { minutes: 10, clockAdvanced: true },
+      }, ["world:time"]),
       plan,
-    })).toBe(false);
+    })).toBe(true);
     expect(isAcceptedRuntimeReceiptForPlan({
       toolName: "log_event",
       result: withAuthority({
         success: true,
         status: "success",
         result: { eventId: "event-1", durability: "scene_local", persisted: false },
-      }, ["world:event"]),
+      }, ["scene_local_observation"]),
       plan,
     })).toBe(false);
-
-    expect(evaluateRuntimeReceiptPlanStatus({
-      plan,
-      receipts: [{ toolName: "advance_time", result: timeReceipt }],
-    })).toMatchObject({
-      primarySatisfied: false,
-      contextualAccepted: false,
-      acceptedReceiptIndexes: [],
-      complete: false,
-    });
-    expect(evaluateRuntimeReceiptPlanStatus({
-      plan,
-      receipts: [{ toolName: "move_actor", result: moveReceipt }],
-    })).toMatchObject({
-      primarySatisfied: true,
-      contextualAccepted: false,
-      acceptedReceiptIndexes: [0],
-      complete: true,
-    });
-    expect(evaluateRuntimeReceiptPlanStatus({
-      plan,
-      receipts: [
-        { toolName: "move_actor", result: moveReceipt },
-        { toolName: "advance_time", result: timeReceipt },
-      ],
-    })).toMatchObject({
-      primarySatisfied: true,
-      contextualAccepted: true,
-      acceptedReceiptIndexes: [0, 1],
-      complete: true,
-    });
-  });
-
-  it("accepts only one primary receipt per runtime plan", () => {
-    const plan = buildRuntimeReceiptPlan({
-      kind: "dialogue_outcome",
-      durability: "durable",
-      topicKind: "proof",
-    });
-    const firstDialogueReceipt = withDialogueAuthority({
-      success: true,
-      status: "success",
-      result: {
-        eventId: "event-first-proof",
-        durability: "durable",
-        topicKind: "proof",
-        futureUseKind: "permission_check",
-        futureRelevance: "The first answer is the authoritative turn closure.",
-        persisted: true,
-      },
-    });
-    const duplicateDialogueReceipt = withDialogueAuthority({
-      success: true,
-      status: "success",
-      result: {
-        eventId: "event-second-proof",
-        durability: "durable",
-        topicKind: "proof",
-        futureUseKind: "permission_check",
-        futureRelevance: "The duplicate answer must not also close the same turn.",
-        persisted: true,
-      },
-    });
-
-    expect(evaluateRuntimeReceiptPlanStatus({
-      plan,
-      receipts: [
-        { toolName: "record_dialogue_outcome", result: firstDialogueReceipt },
-        { toolName: "record_dialogue_outcome", result: duplicateDialogueReceipt },
-      ],
-    })).toMatchObject({
-      primarySatisfied: true,
-      secondarySatisfied: true,
-      acceptedReceiptIndexes: [0],
-      complete: true,
-    });
-  });
-
-  it("accepts dialogue-time context only after the dialogue terminal receipt is satisfied", () => {
-    const plan = buildRuntimeReceiptPlan({
-      kind: "dialogue_outcome",
-      durability: "durable",
-      topicKind: "proof",
-    });
-
-    expect(plan.primary).toEqual({
-      kind: "dialogue_outcome",
-      durability: "durable",
-      topicKind: "proof",
-    });
-    expect(plan.secondary).toEqual([]);
-    expect(plan.optionalContextual).toEqual([
-      { kind: "scene_beat", durability: "scene_local", beatKind: "time_passage" },
-    ]);
-    expect(canRuntimeToolSatisfyReceiptPlan("record_dialogue_outcome", plan)).toBe(true);
-    expect(canRuntimeToolSatisfyReceiptPlan("advance_time", plan)).toBe(true);
-
-    const dialogueReceipt = withDialogueAuthority({
-      success: true,
-      status: "success",
-      result: {
-        eventId: "event-proof-answer",
-        durability: "durable",
-        topicKind: "proof",
-        futureUseKind: "permission_check",
-        futureRelevance: "The answer constrains later permit checks.",
-        persisted: true,
-      },
-    });
-    const timeReceipt = withAuthority({
-      success: true,
-      status: "success",
-      result: { minutes: 6, clockAdvanced: true },
-    }, ["world:time"]);
-
-    expect(evaluateRuntimeReceiptPlanStatus({
-      plan,
-      receipts: [{ toolName: "advance_time", result: timeReceipt }],
-    })).toMatchObject({
-      primarySatisfied: false,
-      contextualAccepted: false,
-      acceptedReceiptIndexes: [],
-      complete: false,
-    });
-    expect(evaluateRuntimeReceiptPlanStatus({
-      plan,
-      receipts: [
-        { toolName: "advance_time", result: timeReceipt },
-        { toolName: "record_dialogue_outcome", result: dialogueReceipt },
-      ],
-    })).toMatchObject({
-      primarySatisfied: true,
-      contextualAccepted: true,
-      acceptedReceiptIndexes: [0, 1],
-      complete: true,
-    });
   });
 
   it("requires durable scene-beat receipts to be durably persisted", () => {
@@ -1354,7 +850,7 @@ describe("tool contracts", () => {
         result: { eventId: "event-1", durability: "durable", persisted: true },
       }, [], ["event-1"]),
       requirement: { kind: "scene_beat", durability: "durable", beatKind: "event_log" },
-    })).toBe(false);
+    })).toBe(true);
 
     expect(isAcceptedRuntimeReceipt({
       toolName: "log_event",
@@ -1362,7 +858,7 @@ describe("tool contracts", () => {
         success: true,
         status: "success",
         result: { eventId: "event-2", durability: "scene_local", persisted: false },
-      }, ["world:event"]),
+      }, ["scene_local_observation"]),
       requirement: { kind: "scene_beat", durability: "scene_local", beatKind: "event_log" },
     })).toBe(true);
 
@@ -1417,81 +913,6 @@ describe("tool contracts", () => {
       }, ["world_time", "elapsed:10"]),
       requirement: null,
     })).toBe(true);
-
-    expect(isAcceptedRuntimeReceiptForTurn({
-      toolName: "log_event",
-      result: withAuthority({
-        success: true,
-        status: "success",
-        result: { eventId: "event-local", durability: "scene_local", persisted: false },
-      }, ["world:event"]),
-      requirement: null,
-    })).toBe(true);
-
-    expect(isAcceptedRuntimeReceiptForTurn({
-      toolName: "log_event",
-      result: withAuthority({
-        success: true,
-        status: "success",
-        result: { eventId: "event-durable", durability: "durable", persisted: true },
-      }, ["event-durable"], ["event-durable"]),
-      requirement: null,
-    })).toBe(false);
-
-    expect(isAcceptedRuntimeReceiptForActorProcess({
-      toolName: "log_event",
-      result: withAuthority({
-        success: true,
-        status: "success",
-        result: { eventId: "event-actor-memory", durability: "durable", persisted: true },
-      }, [], ["event-actor-memory"]),
-      requirement: null,
-    })).toBe(true);
-
-    const actorMoveToBase = withAuthority({
-      success: true,
-      status: "success",
-      result: {
-        actorId: "npc-key",
-        actorName: "Watcher",
-        locationId: "loc-b",
-        locationName: "Station B",
-      },
-    }, ["npc:npc-key:location", "location:loc-b"]);
-    const actorMoveToReceipt: ToolResult = {
-      ...actorMoveToBase,
-      authority: {
-        ...actorMoveToBase.authority!,
-        sourceEntity: { type: "npc", id: "npc-key" },
-      },
-    };
-    expect(isAcceptedRuntimeReceiptForActorProcess({
-      toolName: "move_to",
-      result: actorMoveToReceipt,
-      requirement: null,
-    })).toBe(true);
-
-    const playerMoveToReceipt: ToolResult = {
-      ...withAuthority({
-        success: true,
-        status: "success",
-        result: {
-          playerId: "player-1",
-          locationId: "loc-b",
-          locationName: "Station B",
-        },
-      }, ["player:player-1:location", "location:loc-b"]),
-      authority: {
-        ...actorMoveToBase.authority!,
-        sourceEntity: { type: "player", id: "player-1" },
-        stateDeltaRefs: ["player:player-1:location", "location:loc-b"],
-      },
-    };
-    expect(isAcceptedRuntimeReceiptForActorProcess({
-      toolName: "move_to",
-      result: playerMoveToReceipt,
-      requirement: null,
-    })).toBe(false);
 
     expect(isAcceptedRuntimeReceiptForTurn({
       toolName: "find_actor_candidates",

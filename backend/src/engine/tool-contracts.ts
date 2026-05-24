@@ -9,7 +9,6 @@ import {
 import {
   isDialogueStateReceiptKeyForTool,
   isDialogueStructuralEffectToolName,
-  normalizeDialogueStateReceiptKey,
 } from "./dialogue-state-receipt-contract.js";
 
 export type RuntimeToolContractRole = RuntimeToolRole;
@@ -28,30 +27,6 @@ export interface RuntimeReceiptPlan {
   primary: RuntimeRequirementLike | null;
   secondary: readonly RuntimeRequirementLike[];
   optionalContextual: readonly RuntimeRequirementLike[];
-}
-
-export interface RuntimeReceiptPlanReceipt {
-  toolName: RuntimeToolName | null | undefined;
-  result: ToolResult | null | undefined;
-  appliedStructuralEffectProofs?: readonly AppliedStructuralEffectProof[];
-}
-
-export interface RuntimeReceiptPlanStatus {
-  primarySatisfied: boolean;
-  secondarySatisfied: boolean;
-  contextualAccepted: boolean;
-  acceptedReceiptIndexes: readonly number[];
-  complete: boolean;
-}
-
-export interface AppliedStructuralEffectProof {
-  structuralTool: string;
-  targetRef: string;
-  stateKey: string;
-  stateValue: string;
-  stateChangeRef?: string;
-  toolResultId?: string;
-  resultWorldVersion?: number;
 }
 
 export interface RuntimeToolContract {
@@ -141,21 +116,17 @@ export function runtimeToolIsSideEffecting(toolName: RuntimeToolName): boolean {
 }
 
 export function runtimeToolRequiresExecutionAuthority(toolName: RuntimeToolName): boolean {
-  return runtimeToolIsSideEffecting(toolName)
-    || runtimeToolHasRole(toolName, "authority_handle");
+  return runtimeToolIsSideEffecting(toolName);
 }
 
 export const RUNTIME_STATE_BEARING_TOOL_NAMES: readonly RuntimeToolName[] =
-  (Object.keys(RUNTIME_TOOL_CONTRACTS) as RuntimeToolName[])
-    .filter(runtimeToolIsSideEffecting);
-
-export const RUNTIME_EXECUTION_AUTHORITY_TOOL_NAMES: readonly RuntimeToolName[] =
   (Object.keys(RUNTIME_TOOL_CONTRACTS) as RuntimeToolName[])
     .filter(runtimeToolRequiresExecutionAuthority);
 
 const STATE_MUTATION_RECEIPT_OWNER_KINDS = new Set([
   "canonical",
   "delegate",
+  "legacy",
 ]);
 
 function runtimeToolsForStateEffectKind(input: {
@@ -242,7 +213,7 @@ export function buildRuntimeReceiptPlan(
   return {
     primary,
     secondary: [],
-    optionalContextual: primary?.kind === "state_mutation" || primary?.kind === "dialogue_outcome"
+    optionalContextual: primary?.kind === "state_mutation"
       ? [{ ...CONTEXTUAL_TIME_PASSAGE_RECEIPT }]
       : [],
   };
@@ -281,8 +252,6 @@ export function canRuntimeToolSatisfyRequirement(
   if (requiredTerminalTool) return toolName === requiredTerminalTool;
 
   switch (requirement?.kind) {
-    case "observation_read":
-      return runtimeToolHasRole(toolName, "helper_observation");
     case "state_mutation":
       return stateMutationToolMatchesEffectKind(toolName, requirement);
     case "scene_beat":
@@ -347,39 +316,6 @@ export function runtimeRequirementStateEffectKinds(
   return [...new Set(kinds)];
 }
 
-export type RuntimeRequirementStructuralRoutingStatus =
-  | { status: "none" }
-  | { status: "missing_structural_owner_kind" }
-  | {
-      status: "has_structural_owner";
-      effectKinds: readonly RuntimeRequirementStateEffectKind[];
-      ownerTools: readonly RuntimeToolName[];
-      preparatoryTools: readonly RuntimeToolName[];
-    };
-
-export function getRuntimeRequirementStructuralRoutingStatus(
-  requirement: RuntimeRequirementLike | null | undefined,
-): RuntimeRequirementStructuralRoutingStatus {
-  if (
-    requirement?.kind !== "dialogue_outcome"
-    || requirement.requiresStructuralEffect !== true
-  ) {
-    return { status: "none" };
-  }
-
-  const effectKinds = runtimeRequirementStateEffectKinds(requirement);
-  if (effectKinds.length === 0) {
-    return { status: "missing_structural_owner_kind" };
-  }
-
-  return {
-    status: "has_structural_owner",
-    effectKinds,
-    ownerTools: runtimeRequirementStateMutationTools(requirement),
-    preparatoryTools: runtimeRequirementPreparatoryTools(requirement),
-  };
-}
-
 function uniqueRuntimeToolNames(toolNames: readonly RuntimeToolName[]): RuntimeToolName[] {
   return [...new Set(toolNames)];
 }
@@ -397,7 +333,6 @@ function legacySceneBeatToolMatchesBeatKind(
 ): boolean {
   return requirement.kind === "scene_beat"
     && requirement.beatKind === "event_log"
-    && requirement.durability === "scene_local"
     && runtimeToolHasRole(toolName, "legacy_scene_beat");
 }
 
@@ -448,57 +383,6 @@ function hasAppliedStructuralEffectDeclaration(payload: Record<string, unknown>)
       isRecord(effect) && stringField(effect, "status") === "applied_now");
 }
 
-function normalizeProofToken(value: string | null): string {
-  return (value ?? "").trim().toLowerCase();
-}
-
-function structuralEffectProofBacksEffect(
-  proof: AppliedStructuralEffectProof,
-  effect: Record<string, unknown>,
-): boolean {
-  const stateChangeRef = stringField(effect, "stateChangeRef") ?? stringField(effect, "stateReceipt");
-  if (stateChangeRef) {
-    return normalizeProofToken(proof.stateChangeRef ?? "") === normalizeProofToken(stateChangeRef);
-  }
-
-  const toolResultId = stringField(effect, "toolResultId");
-  if (toolResultId) {
-    return normalizeProofToken(proof.toolResultId ?? "") === normalizeProofToken(toolResultId);
-  }
-
-  return false;
-}
-
-function structuralEffectProofSatisfiesRequirementOwner(
-  proof: AppliedStructuralEffectProof,
-  requirement: RuntimeRequirementLike | null | undefined,
-): boolean {
-  if (
-    requirement?.kind !== "dialogue_outcome"
-    || requirement.requiresStructuralEffect !== true
-  ) {
-    return true;
-  }
-  if (!isRuntimeToolName(proof.structuralTool)) return false;
-  return runtimeRequirementStateMutationTools(requirement).includes(proof.structuralTool);
-}
-
-function appliedStructuralEffectsBackedByProofs(
-  payload: Record<string, unknown>,
-  proofs: readonly AppliedStructuralEffectProof[] | undefined,
-  requirement?: RuntimeRequirementLike | null,
-): boolean {
-  const stateEffects = payload.stateEffects;
-  if (!Array.isArray(stateEffects) || !proofs || proofs.length === 0) return false;
-  const appliedEffects = stateEffects.filter((effect): effect is Record<string, unknown> =>
-    isRecord(effect) && stringField(effect, "status") === "applied_now");
-  return appliedEffects.length > 0
-    && appliedEffects.every((effect) =>
-      proofs.some((proof) =>
-        structuralEffectProofBacksEffect(proof, effect)
-        && structuralEffectProofSatisfiesRequirementOwner(proof, requirement)));
-}
-
 const NON_APPLIED_DIALOGUE_OUTCOME_KINDS = new Set([
   "refused",
   "silent",
@@ -508,61 +392,23 @@ const NON_APPLIED_DIALOGUE_OUTCOME_KINDS = new Set([
 ]);
 
 function hasTypedNonApplicationOutcome(payload: Record<string, unknown>): boolean {
-  return NON_APPLIED_DIALOGUE_OUTCOME_KINDS.has(stringField(payload, "outcomeKind") ?? "");
-}
-
-function isRuntimeRequirementStateEffectKind(
-  value: string | null,
-): value is RuntimeRequirementStateEffectKind {
-  return value !== null
-    && RUNTIME_REQUIREMENT_STATE_EFFECT_KINDS.includes(
-      value as RuntimeRequirementStateEffectKind,
-    );
-}
-
-function nonAppliedStateEffectKinds(
-  payload: Record<string, unknown>,
-): Set<RuntimeRequirementStateEffectKind> {
   const stateEffects = payload.stateEffects;
-  const kinds = new Set<RuntimeRequirementStateEffectKind>();
-  if (!Array.isArray(stateEffects)) return kinds;
-  for (const effect of stateEffects) {
-    if (!isRecord(effect) || stringField(effect, "status") !== "not_applied") continue;
-    const effectKind = stringField(effect, "effectKind");
-    if (isRuntimeRequirementStateEffectKind(effectKind)) {
-      kinds.add(effectKind);
-    }
-  }
-  return kinds;
-}
-
-function nonApplicationOutcomeSatisfiesStructuralRequirement(
-  payload: Record<string, unknown>,
-  requirement: RuntimeRequirementLike | null | undefined,
-): boolean {
-  if (!hasTypedNonApplicationOutcome(payload)) return false;
-  if (requirement?.requiresStructuralEffect !== true) return true;
-  const requiredEffectKinds = runtimeRequirementStateEffectKinds(requirement);
-  if (requiredEffectKinds.length === 0 || requiredEffectKinds.includes("movement")) {
-    return false;
-  }
-  const nonAppliedKinds = nonAppliedStateEffectKinds(payload);
-  return requiredEffectKinds.every((effectKind) => nonAppliedKinds.has(effectKind));
+  const hasTypedNonApplicationEffect = Array.isArray(stateEffects)
+    && stateEffects.some((effect) =>
+      isRecord(effect) && stringField(effect, "status") === "not_applied");
+  return hasTypedNonApplicationEffect
+    || NON_APPLIED_DIALOGUE_OUTCOME_KINDS.has(stringField(payload, "outcomeKind") ?? "");
 }
 
 export function dialogueOutcomeSatisfiesStructuralRequirement(
   payload: Record<string, unknown> | null,
-  options: {
-    appliedStructuralEffectProofs?: readonly AppliedStructuralEffectProof[];
-    requirement?: RuntimeRequirementLike | null;
-  } = {},
+  options: { appliedStructuralEffectsBacked?: boolean } = {},
 ): boolean {
   if (!payload) return false;
-  return nonApplicationOutcomeSatisfiesStructuralRequirement(payload, options.requirement)
-    || appliedStructuralEffectsBackedByProofs(
-      payload,
-      options.appliedStructuralEffectProofs,
-      options.requirement,
+  return hasTypedNonApplicationOutcome(payload)
+    || (
+      options.appliedStructuralEffectsBacked === true
+      && hasAppliedStructuralEffect(payload)
     );
 }
 
@@ -603,90 +449,33 @@ function hasLegacySceneBeatAuthorityReceipt(
       && authority.eventRefs.length > 0;
   }
 
-  return typeof authority.resultWorldVersion === "number"
-    && authority.stateDeltaRefs.includes("world:event");
-}
-
-function hasActorMoveToAuthorityReceipt(result: ToolResult): boolean {
-  const authority = result.authority;
-  if (!authority?.toolResultId || typeof authority.resultWorldVersion !== "number") {
-    return false;
-  }
-  const payload = isRecord(result.result) ? result.result : null;
-  const actorId = stringField(payload ?? {}, "actorId");
-  const playerId = stringField(payload ?? {}, "playerId");
-  const locationId = stringField(payload ?? {}, "locationId");
-  if (!actorId || playerId || !locationId) {
-    return false;
-  }
-  if (authority.sourceEntity?.type !== "npc" || authority.sourceEntity.id !== actorId) {
-    return false;
-  }
-  return authority.stateDeltaRefs.includes(`npc:${actorId}:location`)
-    && authority.stateDeltaRefs.includes(`location:${locationId}`)
-    && !authority.stateDeltaRefs.some((ref) => ref.startsWith("player:"));
+  return (Array.isArray(authority.eventRefs) && authority.eventRefs.length > 0)
+    || (Array.isArray(authority.stateDeltaRefs) && authority.stateDeltaRefs.length > 0)
+    || (Array.isArray(authority.knowledgeOutputs) && authority.knowledgeOutputs.length > 0);
 }
 
 function hasTerminalAuthorityReceipt(
-  toolName: RuntimeToolName,
   result: ToolResult,
   requirement: RuntimeRequirementLike | null | undefined,
 ): boolean {
   const authority = result.authority;
   if (!authority?.toolResultId) return false;
+  const hasRefs = authority.stateDeltaRefs.length > 0
+    || authority.eventRefs.length > 0
+    || authority.knowledgeOutputs.length > 0;
+  if (!hasRefs) return false;
   const payload = isRecord(result.result) ? result.result : null;
-  if (!payload) return false;
   const durableReceipt = requirement?.durability === "durable"
     || stringField(payload ?? {}, "durability") === "durable";
-  if (durableReceipt && typeof authority.resultWorldVersion !== "number") {
-    return false;
-  }
-
-  if (toolName === "record_world_fact") {
-    const knowledgeRefs = [
-      stringField(payload, "knowledgeId"),
-      stringField(payload, "factRef"),
-    ].filter((ref): ref is string => Boolean(ref));
-    return stringField(payload, "durability") === "durable"
-      && booleanField(payload, "persisted") === true
-      && typeof authority.resultWorldVersion === "number"
-      && authority.stateDeltaRefs.includes("world:fact")
-      && knowledgeRefs.length > 0
-      && knowledgeRefs.some((ref) => authority.knowledgeOutputs.includes(ref));
-  }
-
-  if (toolName === "record_dialogue_outcome") {
-    if (!durableReceipt) {
-      return typeof authority.resultWorldVersion === "number"
-        && authority.stateDeltaRefs.includes("world:dialogue");
-    }
-    const eventId = stringField(payload, "eventId");
-    if (!eventId || !authority.eventRefs.includes(eventId)) return false;
-    if (
-      !authority.stateDeltaRefs.includes("world:dialogue")
-      || !authority.stateDeltaRefs.includes("world:event")
-    ) {
-      return false;
-    }
-    const knowledgeRefs = [
-      stringField(payload, "knowledgeId"),
-      stringField(payload, "factRef"),
-    ].filter((ref): ref is string => Boolean(ref));
-    if (knowledgeRefs.length > 0 && !authority.stateDeltaRefs.includes("world:fact")) {
-      return false;
-    }
-    return knowledgeRefs.length === 0
-      || knowledgeRefs.some((ref) => authority.knowledgeOutputs.includes(ref));
-  }
-
-  return false;
+  if (!durableReceipt) return true;
+  return typeof authority.resultWorldVersion === "number";
 }
 
 export function isAcceptedTerminalToolResult(input: {
   toolName: RuntimeToolName | null | undefined;
   result: ToolResult | null | undefined;
   requirement: RuntimeRequirementLike | null | undefined;
-  appliedStructuralEffectProofs?: readonly AppliedStructuralEffectProof[];
+  appliedStructuralEffectsBacked?: boolean;
 }): boolean {
   if (!input.toolName || !input.result?.success || input.result.status === "failure") {
     return false;
@@ -697,7 +486,7 @@ export function isAcceptedTerminalToolResult(input: {
   if (!runtimeToolHasRole(input.toolName, "terminal_receipt")) return false;
   if (input.result.contractFailure) return false;
   if (isObservationOnlyToolResult(input.result)) return false;
-  if (!hasTerminalAuthorityReceipt(input.toolName, input.result, input.requirement)) return false;
+  if (!hasTerminalAuthorityReceipt(input.result, input.requirement)) return false;
 
   const payload = isRecord(input.result.result) ? input.result.result : null;
   if (
@@ -705,11 +494,10 @@ export function isAcceptedTerminalToolResult(input: {
     && payload
     && hasAppliedStructuralEffectDeclaration(payload)
   ) {
-    if (!appliedStructuralEffectsBackedByProofs(
-      payload,
-      input.appliedStructuralEffectProofs,
-      input.requirement,
-    )) {
+    if (
+      input.appliedStructuralEffectsBacked !== true
+      || !hasAppliedStructuralEffect(payload)
+    ) {
       return false;
     }
   }
@@ -727,8 +515,7 @@ export function isAcceptedTerminalToolResult(input: {
   }
   if (input.requirement?.requiresStructuralEffect === true) {
     if (!dialogueOutcomeSatisfiesStructuralRequirement(payload, {
-      appliedStructuralEffectProofs: input.appliedStructuralEffectProofs,
-      requirement: input.requirement,
+      appliedStructuralEffectsBacked: input.appliedStructuralEffectsBacked === true,
     })) {
       return false;
     }
@@ -741,7 +528,7 @@ export function isAcceptedRuntimeReceipt(input: {
   toolName: RuntimeToolName | null | undefined;
   result: ToolResult | null | undefined;
   requirement: RuntimeRequirementLike | null | undefined;
-  appliedStructuralEffectProofs?: readonly AppliedStructuralEffectProof[];
+  appliedStructuralEffectsBacked?: boolean;
 }): boolean {
   if (!input.toolName || !input.result?.success || input.result.status === "failure") {
     return false;
@@ -778,7 +565,7 @@ export function isAcceptedRuntimeReceiptForTurn(input: {
   toolName: RuntimeToolName | null | undefined;
   result: ToolResult | null | undefined;
   requirement: RuntimeRequirementLike | null | undefined;
-  appliedStructuralEffectProofs?: readonly AppliedStructuralEffectProof[];
+  appliedStructuralEffectsBacked?: boolean;
 }): boolean {
   if (input.requirement) {
     return isAcceptedRuntimeReceipt(input);
@@ -800,8 +587,8 @@ export function isAcceptedRuntimeReceiptForTurn(input: {
       ? isAcceptedRuntimeReceipt({
         toolName: input.toolName,
         result: input.result,
-        requirement: { kind: "scene_beat", durability: "scene_local", beatKind: "event_log" },
-        appliedStructuralEffectProofs: input.appliedStructuralEffectProofs,
+        requirement: { kind: "scene_beat", beatKind: "event_log" },
+        appliedStructuralEffectsBacked: input.appliedStructuralEffectsBacked,
       })
       : false)
     || (input.toolName && runtimeToolHasRole(input.toolName, "time_effect")
@@ -809,86 +596,29 @@ export function isAcceptedRuntimeReceiptForTurn(input: {
         toolName: input.toolName,
         result: input.result,
         requirement: { kind: "scene_beat", beatKind: "time_passage" },
-        appliedStructuralEffectProofs: input.appliedStructuralEffectProofs,
+        appliedStructuralEffectsBacked: input.appliedStructuralEffectsBacked,
       })
       : false)
     || isAcceptedTerminalToolResult({
       toolName: input.toolName,
       result: input.result,
       requirement: { kind: "dialogue_outcome" },
-      appliedStructuralEffectProofs: input.appliedStructuralEffectProofs,
+      appliedStructuralEffectsBacked: input.appliedStructuralEffectsBacked,
     })
     || isAcceptedTerminalToolResult({
       toolName: input.toolName,
       result: input.result,
       requirement: { kind: "world_fact" },
-      appliedStructuralEffectProofs: input.appliedStructuralEffectProofs,
+      appliedStructuralEffectsBacked: input.appliedStructuralEffectsBacked,
     })
   );
-}
-
-export function isAcceptedRuntimeReceiptForActorProcess(input: {
-  toolName: RuntimeToolName | null | undefined;
-  result: ToolResult | null | undefined;
-  requirement?: RuntimeRequirementLike | null | undefined;
-  appliedStructuralEffectProofs?: readonly AppliedStructuralEffectProof[];
-}): boolean {
-  if (
-    input.toolName === "move_to"
-    && input.result?.success === true
-    && input.result.status !== "failure"
-    && !input.result.contractFailure
-    && !isObservationOnlyToolResult(input.result)
-  ) {
-    return hasActorMoveToAuthorityReceipt(input.result);
-  }
-  if (
-    input.toolName === "log_event"
-    && input.result?.success === true
-    && input.result.status !== "failure"
-    && !input.result.contractFailure
-    && !isObservationOnlyToolResult(input.result)
-  ) {
-    const payload = isRecord(input.result.result) ? input.result.result : null;
-    if (stringField(payload ?? {}, "durability") === "durable") {
-      return payloadSatisfiesDurability(payload, "durable")
-        && hasLegacySceneBeatAuthorityReceipt(input.result, {
-          kind: "scene_beat",
-          durability: "durable",
-          beatKind: "event_log",
-        });
-    }
-  }
-  return isAcceptedRuntimeReceiptForTurn({
-    toolName: input.toolName,
-    result: input.result,
-    requirement: input.requirement ?? null,
-    appliedStructuralEffectProofs: input.appliedStructuralEffectProofs,
-  });
 }
 
 export function isAcceptedRuntimeReceiptForPlan(input: {
   toolName: RuntimeToolName | null | undefined;
   result: ToolResult | null | undefined;
   plan: RuntimeReceiptPlan;
-  appliedStructuralEffectProofs?: readonly AppliedStructuralEffectProof[];
-}): boolean {
-  return Boolean(
-    input.plan.primary
-    && isAcceptedRuntimeReceipt({
-      toolName: input.toolName,
-      result: input.result,
-      requirement: input.plan.primary,
-      appliedStructuralEffectProofs: input.appliedStructuralEffectProofs,
-    }),
-  );
-}
-
-export function isRuntimeReceiptAllowedByPlan(input: {
-  toolName: RuntimeToolName | null | undefined;
-  result: ToolResult | null | undefined;
-  plan: RuntimeReceiptPlan;
-  appliedStructuralEffectProofs?: readonly AppliedStructuralEffectProof[];
+  appliedStructuralEffectsBacked?: boolean;
 }): boolean {
   return runtimeReceiptPlanRequirements(input.plan)
     .some((requirement) =>
@@ -896,73 +626,6 @@ export function isRuntimeReceiptAllowedByPlan(input: {
         toolName: input.toolName,
         result: input.result,
         requirement,
-        appliedStructuralEffectProofs: input.appliedStructuralEffectProofs,
+        appliedStructuralEffectsBacked: input.appliedStructuralEffectsBacked,
       }));
-}
-
-export function evaluateRuntimeReceiptPlanStatus(input: {
-  plan: RuntimeReceiptPlan;
-  receipts: readonly RuntimeReceiptPlanReceipt[];
-}): RuntimeReceiptPlanStatus {
-  const acceptedReceiptIndexes = new Set<number>();
-  let primarySatisfied = input.plan.primary === null;
-  let primaryAcceptedIndex: number | null = null;
-  let contextualAccepted = false;
-  const secondarySatisfiedIndexes = new Set<number>();
-
-  input.receipts.forEach((receipt, index) => {
-    if (
-      input.plan.primary
-      && isAcceptedRuntimeReceipt({
-        toolName: receipt.toolName,
-        result: receipt.result,
-        requirement: input.plan.primary,
-        appliedStructuralEffectProofs: receipt.appliedStructuralEffectProofs,
-      })
-    ) {
-      primarySatisfied = true;
-      if (primaryAcceptedIndex === null) {
-        primaryAcceptedIndex = index;
-        acceptedReceiptIndexes.add(index);
-      }
-    }
-
-    input.plan.secondary.forEach((requirement, requirementIndex) => {
-      if (isAcceptedRuntimeReceipt({
-        toolName: receipt.toolName,
-        result: receipt.result,
-        requirement,
-        appliedStructuralEffectProofs: receipt.appliedStructuralEffectProofs,
-      })) {
-        secondarySatisfiedIndexes.add(requirementIndex);
-        acceptedReceiptIndexes.add(index);
-      }
-    });
-  });
-
-  if (primarySatisfied) {
-    input.receipts.forEach((receipt, index) => {
-      if (acceptedReceiptIndexes.has(index)) return;
-      const acceptedContextual = input.plan.optionalContextual.some((requirement) =>
-        isAcceptedRuntimeReceipt({
-          toolName: receipt.toolName,
-          result: receipt.result,
-          requirement,
-          appliedStructuralEffectProofs: receipt.appliedStructuralEffectProofs,
-        }));
-      if (acceptedContextual) {
-        contextualAccepted = true;
-        acceptedReceiptIndexes.add(index);
-      }
-    });
-  }
-
-  const secondarySatisfied = secondarySatisfiedIndexes.size === input.plan.secondary.length;
-  return {
-    primarySatisfied,
-    secondarySatisfied,
-    contextualAccepted,
-    acceptedReceiptIndexes: [...acceptedReceiptIndexes].sort((a, b) => a - b),
-    complete: primarySatisfied && secondarySatisfied,
-  };
 }

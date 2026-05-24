@@ -1,17 +1,7 @@
 import { describe, expect, it, vi, beforeEach, type Mock } from "vitest";
 
-const { sqliteExecMock } = vi.hoisted(() => ({
-  sqliteExecMock: vi.fn(),
-}));
-
 vi.mock("../tool-executor.js", () => ({
   executeToolCall: vi.fn(),
-}));
-
-vi.mock("../../db/index.js", () => ({
-  getSqliteConnection: vi.fn(() => ({
-    exec: sqliteExecMock,
-  })),
 }));
 
 vi.mock("../../ai/generate-object-safe.js", () => ({
@@ -29,7 +19,6 @@ import {
   runHiddenAdjudicationPlan,
   ADJUDICATION_PLAN_ACTION_LIMIT,
   ADJUDICATION_PLAN_RATIONALE_MAX,
-  type AdjudicationPlan,
 } from "../hidden-adjudication.js";
 import { executeToolCall } from "../tool-executor.js";
 import { safeGenerateObject } from "../../ai/generate-object-safe.js";
@@ -47,28 +36,12 @@ function createExecutionContext(): ToolExecutionContext {
   return {
     scope: "player_turn",
     subjectActorId: "actor-player",
-    subjectActorRefs: new Set(["Player", "player"]),
+    subjectActorRefs: new Set(["Player"]),
     authority: {
       baseWorldVersion: 0,
       sourceEntity: { type: "player", id: "actor-player" },
-      elapsedWorldTimeMinutes: 0,
-      allowedWriteScopes: [
-        "world:event",
-        "world:intent",
-        "world:time",
-        "world:relationship",
-        "player:*:state",
-        "player:*:tags",
-        "npc:*:state",
-        "location:*:state",
-        "item:*:state",
-        "location:*",
-        "item:*",
-        "world:inventory",
-        "world:quick_action",
-      ],
     },
-    legalActorRefs: new Set(["Player", "player"]),
+    legalActorRefs: new Set(["Player"]),
     legalLocationRefs: new Set(["Gate", "Shrine"]),
     legalMovementRefs: new Set(["Gate", "Shrine"]),
     legalItemRefs: new Set<string>(),
@@ -104,7 +77,6 @@ function createExecutionContext(): ToolExecutionContext {
 describe("hidden adjudication", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    sqliteExecMock.mockReset();
   });
 
   it("bounds rationale length and ordered action count in the adjudication plan schema", () => {
@@ -119,14 +91,8 @@ describe("hidden adjudication", () => {
       adjudicationPlanSchema.parse({
         rationale: "bounded",
         actions: Array.from({ length: ADJUDICATION_PLAN_ACTION_LIMIT + 1 }, () => ({
-          toolName: "offer_quick_actions",
-          input: {
-            actions: [{
-              label: "Wait",
-              action: "I wait and watch.",
-              sourceRefs: ["Player"],
-            }],
-          },
+          toolName: "log_event",
+          input: { text: "event", importance: 1, participants: [] },
         })),
       }),
     ).toThrow();
@@ -226,20 +192,23 @@ describe("hidden adjudication", () => {
     );
   });
 
-  it("executes hidden quick action projection without world mutation tools", async () => {
+  it("executes ordered non-movement plan actions deterministically and preserves quick_actions mapping", async () => {
     const executionContext = createExecutionContext();
-    (executeToolCall as Mock).mockResolvedValueOnce({
-      success: true,
-      result: {
-        offerId: "hidden_offer",
-        persisted: true,
-        actions: [{
-          label: "Look around",
-          action: "I scan the shrine courtyard.",
-          sourceRefs: ["Player"],
-        }],
-      },
-    });
+    (executeToolCall as Mock)
+      .mockResolvedValueOnce({
+        success: true,
+        result: {
+          eventId: "event-pressure",
+          durability: "scene_local",
+          persisted: false,
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        result: {
+          actions: [{ label: "Look around", action: "I scan the shrine courtyard." }],
+        },
+      });
 
     const executed = await executeAdjudicationPlan({
       campaignId: "campaign-1",
@@ -247,17 +216,20 @@ describe("hidden adjudication", () => {
       outcomeTier: "strong_hit",
       executionContext,
       plan: {
-        rationale: "Offer concrete follow-ups without writing world state.",
+        rationale: "Record the pressure, then present concrete follow-ups.",
         actions: [
           {
-            toolName: "offer_quick_actions",
+            toolName: "log_event",
             input: {
-              actions: [{
-                label: "Look around",
-                action: "I scan the shrine courtyard.",
-                sourceRefs: ["Player"],
-              }],
+              text: "The shrine pressure sharpens.",
+              importance: 3,
+              participants: ["Player"],
+              durability: "scene_local",
             },
+          },
+          {
+            toolName: "offer_quick_actions",
+            input: { actions: [{ label: "Look around", action: "I scan the shrine courtyard." }] },
           },
         ],
       },
@@ -266,49 +238,42 @@ describe("hidden adjudication", () => {
     expect(executeToolCall).toHaveBeenNthCalledWith(
       1,
       "campaign-1",
-      "offer_quick_actions",
+      "log_event",
       {
-        actions: [{
-          label: "Look around",
-          action: "I scan the shrine courtyard.",
-          sourceRefs: ["Player"],
-        }],
+        text: "The shrine pressure sharpens.",
+        importance: 3,
+        participants: ["Player"],
+        durability: "scene_local",
       },
       7,
       "strong_hit",
       executionContext,
     );
-    expect(executeToolCall).toHaveBeenCalledTimes(1);
+    expect(executeToolCall).toHaveBeenNthCalledWith(
+      2,
+      "campaign-1",
+      "offer_quick_actions",
+      { actions: [{ label: "Look around", action: "I scan the shrine courtyard." }] },
+      7,
+      "strong_hit",
+      executionContext,
+    );
     expect(executed.successfulTravel).toBeNull();
     expect(executed.emittedEvents).toEqual([
       {
         type: "quick_actions",
         data: {
-          offerId: "hidden_offer",
-          actions: [{
-            actionId: "hidden_offer_1",
-            label: "Look around",
-            action: "I scan the shrine courtyard.",
-          }],
+          actions: [{ label: "Look around", action: "I scan the shrine courtyard." }],
         },
       },
     ]);
-    expect(sqliteExecMock).not.toHaveBeenCalled();
   });
 
-  it("passes player-turn execution context through hidden quick-action execution", async () => {
+  it("passes player-turn execution context through hidden adjudication tool execution", async () => {
     const executionContext = createExecutionContext();
     (executeToolCall as Mock).mockResolvedValueOnce({
       success: true,
-      result: {
-        offerId: "hidden_offer",
-        persisted: true,
-        actions: [{
-          label: "Wait",
-          action: "I wait and study the gate.",
-          sourceRefs: ["Player"],
-        }],
-      },
+      result: { durability: "scene_local", persisted: false },
     });
 
     await executeAdjudicationPlan({
@@ -317,16 +282,15 @@ describe("hidden adjudication", () => {
       outcomeTier: "weak_hit",
       executionContext,
       plan: {
-        rationale: "Offer a bounded next step.",
+        rationale: "Record a local beat.",
         actions: [
           {
-            toolName: "offer_quick_actions",
+            toolName: "log_event",
             input: {
-              actions: [{
-                label: "Wait",
-                action: "I wait and study the gate.",
-                sourceRefs: ["Player"],
-              }],
+              text: "The gate pressure changes.",
+              importance: 3,
+              participants: ["Player"],
+              durability: "scene_local",
             },
           },
         ],
@@ -335,44 +299,17 @@ describe("hidden adjudication", () => {
 
     expect(executeToolCall).toHaveBeenCalledWith(
       "campaign-1",
-      "offer_quick_actions",
+      "log_event",
       {
-        actions: [{
-          label: "Wait",
-          action: "I wait and study the gate.",
-          sourceRefs: ["Player"],
-        }],
+        text: "The gate pressure changes.",
+        importance: 3,
+        participants: ["Player"],
+        durability: "scene_local",
       },
       7,
       "weak_hit",
       executionContext,
     );
-  });
-
-  it("rejects hidden state-bearing actions before execution", async () => {
-    const executionContext = createExecutionContext();
-
-    await expect(executeAdjudicationPlan({
-      campaignId: "campaign-1",
-      tick: 7,
-      executionContext,
-      plan: {
-        rationale: "Missing authority scopes must fail before hidden writes.",
-        actions: [
-          {
-            toolName: "log_event",
-            input: {
-              text: "This local beat must not be written.",
-              importance: 3,
-              participants: ["Player"],
-              durability: "scene_local",
-            },
-          },
-        ],
-      } as unknown as AdjudicationPlan,
-    })).rejects.toThrow("hidden adjudication cannot execute log_event");
-    expect(executeToolCall).not.toHaveBeenCalled();
-    expect(sqliteExecMock).not.toHaveBeenCalled();
   });
 
   it("fails loud on the first unsuccessful executed action", async () => {
@@ -391,22 +328,16 @@ describe("hidden adjudication", () => {
           rationale: "Bad plan should abort immediately.",
           actions: [
             {
-              toolName: "offer_quick_actions",
-              input: {
-                actions: [{
-                  label: "Look",
-                  action: "I look around.",
-                  sourceRefs: ["Player"],
-                }],
-              },
+              toolName: "add_tag",
+              input: { entityName: "Ghost", entityType: "npc", tag: "observed" },
             },
           ],
         },
       }),
-    ).rejects.toThrow("Adjudication action failed: offer_quick_actions");
+    ).rejects.toThrow("Adjudication action failed: add_tag");
   });
 
-  it("rejects legacy hidden mutation batches before executing any action", async () => {
+  it("rejects multi-mutation hidden plans before executing any action", async () => {
     await expect(
       executeAdjudicationPlan({
         campaignId: "campaign-1",
@@ -424,9 +355,9 @@ describe("hidden adjudication", () => {
               input: { text: "A second mutation should not run.", importance: 1, participants: [] },
             },
           ],
-        } as unknown as AdjudicationPlan,
+        },
       }),
-    ).rejects.toThrow("hidden adjudication cannot execute add_tag");
+    ).rejects.toThrow("may execute at most one state-bearing action");
 
     expect(executeToolCall).not.toHaveBeenCalled();
   });
@@ -438,7 +369,7 @@ describe("hidden adjudication", () => {
     expect(contract).toContain("STRUCTURED_OUTPUT_CONTRACT: hidden-adjudication.v1");
     expect(contract).toContain('"actions": [{ "toolName": RuntimeToolName, "input": object }]');
     expect(contract).toContain('"offer_quick_actions" input');
-    expect(contract).toContain('"actions": [{ "label": string, "action": string, "sourceRefs": string[] }]');
+    expect(contract).toContain('"actions": [{ "label": string, "action": string }]');
     expect(contract).toContain("3-5 actions");
     expect(contract).toContain("Hidden adjudication minimal valid output");
     expect(contract).toContain("missing input");
@@ -446,16 +377,28 @@ describe("hidden adjudication", () => {
     expect(contract).toContain("unsupported toolName");
     expect(contract).toContain("payload instead of input");
     expect(contract).toContain("invented source truth");
-    const allowedHiddenToolNames = ["offer_quick_actions"];
-    expect(contract).toContain('"offer_quick_actions"');
+    const allowedHiddenToolNames = [
+      "add_tag",
+      "remove_tag",
+      "set_relationship",
+      "log_event",
+      "advance_time",
+      "offer_quick_actions",
+      "promote_npc",
+      "spawn_item",
+      "reveal_location",
+      "set_condition",
+      "transfer_item",
+    ];
+    for (const toolName of allowedHiddenToolNames) {
+      expect(contract).toContain(`"${toolName}"`);
+    }
     for (const toolName of Object.keys(runtimeToolInputSchemas)) {
       if (toolName === "request_contested_outcome") continue;
       if (allowedHiddenToolNames.includes(toolName)) continue;
       expect(contract).not.toContain(`"${toolName}" input`);
     }
     expect(contract).not.toContain('"request_contested_outcome" input');
-    expect(contract).not.toContain('"log_event" input');
-    expect(contract).not.toContain('"transfer_item" input');
     expect(contract).not.toContain("narrative prose only");
   });
 });
@@ -484,7 +427,7 @@ describe("engine prompt contracts", () => {
     }
 
     expect(contract).toContain('"offer_quick_actions"');
-    expect(contract).toContain('"actions": [{ "label": string, "action": string, "sourceRefs": string[] }]');
+    expect(contract).toContain('"actions": [{ "label": string, "action": string }]');
     expect(contract).toContain("3-5 actions");
     expect(contract).toContain("Compact valid example");
     expect(contract).toContain("nested runtime tool calls only");

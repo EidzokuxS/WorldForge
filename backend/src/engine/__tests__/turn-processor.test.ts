@@ -351,7 +351,7 @@ vi.mock("../../ai/generate-object-safe.js", () => ({
     if (prompt.includes("Final narration prompt") || prompt.includes("[FINAL NARRATION TASK]")) {
       return {
         object: {
-          version: "grounded-sentence-draft.v3",
+          version: "grounded-sentence-draft.v2",
           sentences: [
             {
               text: "The goblin falls.",
@@ -620,10 +620,7 @@ function setupMocks(options: {
     if (part.type !== "tool-result") return [];
 
     if (part.toolName === "offer_quick_actions") {
-      const output = part.output && typeof part.output === "object" && !Array.isArray(part.output)
-        ? part.output as Record<string, unknown>
-        : {};
-      return [{ type: "quick_actions", data: output.result ?? part.output }];
+      return [{ type: "quick_actions", data: part.output }];
     }
 
     if (
@@ -893,17 +890,6 @@ function createNarratorPacketMock() {
   };
 }
 
-function createOpeningNarratorPacketMock() {
-  const packet = createNarratorPacketMock();
-  delete (packet as { postNarrationTargetTick?: number }).postNarrationTargetTick;
-  packet.playerAction = "[opening scene]";
-  packet.controlReturnReason = "opening_scene_settled_packet";
-  packet.canonicalTurnPacket = {
-    controlReturnReason: "opening_scene_settled_packet",
-  };
-  return packet;
-}
-
 function setPrimaryNarratorFactText(
   narratorPacket: {
     evidenceLedger: Array<{ summary: string }>;
@@ -940,10 +926,10 @@ function createNarrationDraftForTest(prose: string) {
 
 function createGroundedSentenceDraftForTest(_prose: string) {
   return {
-    version: "grounded-sentence-draft.v3" as const,
+    version: "grounded-sentence-draft.v2" as const,
     sentences: [
       {
-        selectedFactRefs: ["e1.s1"],
+        factRefs: ["e1.s1"],
         evidenceRefs: ["e1"],
       },
     ],
@@ -954,7 +940,7 @@ function acceptedGroundedNarrationResult() {
   return {
     ok: true,
     narrationDraftAccepted: true,
-    narrationContractVersion: "grounded-sentence-draft.v3",
+    narrationContractVersion: "grounded-sentence-draft.v2",
     groundedSentenceDraft: createGroundedSentenceDraftForTest(""),
     structuredTrace: {
       strategy: "native_json",
@@ -982,31 +968,6 @@ function normalizeGeneratedNarrationForTest(generated: unknown) {
   }
 
   return { text: "", draft: createNarrationDraftForTest("") };
-}
-
-function mockAcceptedVisibleNarration(text: string): void {
-  vi.mocked(runVisibleNarrationWithPacketGuard).mockImplementation(async (args) => {
-    const generated = await args.generateNarration({ attempt: 1, guardAddendum: null });
-    const normalized = normalizeGeneratedNarrationForTest(generated);
-    return {
-      text: normalized.text,
-      draft: normalized.draft,
-      attempts: 1,
-      retried: false,
-      validation: { ok: true, violations: [] },
-      guardAddendum: null,
-    };
-  });
-  vi.mocked(safeGenerateObject).mockResolvedValueOnce({
-    object: createGroundedSentenceDraftForTest(text),
-    trace: {
-      text: "",
-      cleanedText: "",
-      strategy: "native_json",
-      primaryStrategy: "native_json",
-      finishReason: "stop",
-    },
-  } as never);
 }
 
 function installSafeGenerateObjectDefaultMock() {
@@ -1060,7 +1021,7 @@ function createGmReadMock(
     },
     path: "tool_plan",
     turnIntent: "Plan a concrete local scene mutation.",
-    rationale: "The GM selected a concrete runtime verified scene mutation.",
+    rationale: "The GM selected a concrete tool-backed scene mutation.",
     evidenceRefs: ["Player"],
     ...overrides,
   };
@@ -1068,7 +1029,7 @@ function createGmReadMock(
   if (read.path === "tool_plan" && !("runtimeRequirement" in overrides)) {
     read.runtimeRequirement = {
       kind: "scene_beat",
-      durability: "scene_local",
+      durability: "durable",
       beatKind: "event_log",
     };
   }
@@ -1083,41 +1044,12 @@ function createGmReadMock(
       allowCreateSceneExtra: true,
     };
   }
-  if (
-    read.path === "tool_plan"
-    && runtimeRequirement?.kind === "dialogue_outcome"
-    && runtimeRequirement.requiresStructuralEffect === true
-    && !("actionInterpretation" in overrides)
-  ) {
-    const actionInterpretation = read.actionInterpretation as Record<string, unknown> | undefined;
-    if (
-      actionInterpretation
-      && Array.isArray(actionInterpretation.targetRefs)
-      && actionInterpretation.targetRefs.length === 0
-    ) {
-      read.actionInterpretation = {
-        ...actionInterpretation,
-        targetRefs: ["Player"],
-      };
-    }
-  }
   if (!("turnGrounding" in overrides)) {
     if (read.path === "tool_plan") {
-      const requirement = read.runtimeRequirement as {
-        kind?: string;
-        topicKind?: string;
-        durability?: string;
-        requiresStructuralEffect?: boolean;
-      } | undefined;
+      const requirement = read.runtimeRequirement as { kind?: string; topicKind?: string; durability?: string } | undefined;
       const requirementKind = requirement?.kind ?? "scene_beat";
       read.turnGrounding = {
-        intentKind: requirementKind === "state_mutation"
-          || (
-            requirementKind === "dialogue_outcome"
-            && requirement?.requiresStructuralEffect === true
-          )
-          ? "concrete_state_change"
-          : "ordinary_local_response",
+        intentKind: requirementKind === "state_mutation" ? "concrete_state_change" : "ordinary_local_response",
         requiresGrounding: true,
         groundingKind: requirementKind,
         topicKind: requirement?.topicKind,
@@ -1445,13 +1377,6 @@ function sagaStatusTransitions(): string[] {
   return transitionTurnSagaStatusMock.mock.calls.map(
     ([input]) => (input as { toStatus: string }).toStatus,
   );
-}
-
-function pendingNarrationResumePatches(): Array<Record<string, unknown>> {
-  return mergeTurnSagaProvenanceMock.mock.calls.map(([input]) => {
-    const patch = (input as { patch?: { pendingNarrationResume?: Record<string, unknown> } }).patch;
-    return patch?.pendingNarrationResume ?? {};
-  });
 }
 
 function createEntityLookupDb(options: {
@@ -2292,11 +2217,10 @@ describe("processTurn", () => {
   });
 
   it("yields quick_actions event when offer_quick_actions tool is called", async () => {
-    const offerId = "offer_test";
     const actions = [
-      { actionId: "offer_test_1", label: "Loot", action: "Search the body", sourceRefs: ["current_scene"] },
-      { actionId: "offer_test_2", label: "Move", action: "Continue down the corridor", sourceRefs: ["current_scene"] },
-      { actionId: "offer_test_3", label: "Rest", action: "Take a short rest", sourceRefs: ["Player"] },
+      { label: "Loot", action: "Search the body" },
+      { label: "Move", action: "Continue down the corridor" },
+      { label: "Rest", action: "Take a short rest" },
     ];
     setupMocks({
       streamParts: [
@@ -2305,7 +2229,7 @@ describe("processTurn", () => {
           type: "tool-result",
           toolName: "offer_quick_actions",
           input: { actions },
-          output: { success: true, result: { offerId, persisted: true, actions } },
+          output: { success: true, result: { actions } },
         },
       ],
     });
@@ -2316,8 +2240,7 @@ describe("processTurn", () => {
     const quickActions = events.filter((e) => e.type === "quick_actions");
     expect(quickActions).toHaveLength(1);
     expect(quickActions[0]!.data).toEqual({
-      offerId,
-      actions: actions.map(({ actionId, label, action }) => ({ actionId, label, action })),
+      actions,
     });
   });
 
@@ -2708,13 +2631,12 @@ describe("processTurn", () => {
           type: "tool-result",
           toolName: "offer_quick_actions",
           input: {
-            actions: [{ actionId: "offer_post_turn_1", label: "Loot", action: "Loot the goblin" }],
+            actions: [{ label: "Loot", action: "Loot the goblin" }],
           },
           output: {
             success: true,
             result: {
-              offerId: "offer_post_turn",
-              actions: [{ actionId: "offer_post_turn_1", label: "Loot", action: "Loot the goblin" }],
+              actions: [{ label: "Loot", action: "Loot the goblin" }],
             },
           },
         },
@@ -2778,13 +2700,12 @@ describe("processTurn", () => {
             type: "tool-result",
             toolName: "offer_quick_actions",
             input: {
-              actions: [{ actionId: "offer_delayed_1", label: "Loot", action: "Loot the goblin" }],
+              actions: [{ label: "Loot", action: "Loot the goblin" }],
             },
             output: {
               success: true,
               result: {
-                offerId: "offer_delayed",
-                actions: [{ actionId: "offer_delayed_1", label: "Loot", action: "Loot the goblin" }],
+                actions: [{ label: "Loot", action: "Loot the goblin" }],
               },
             },
           },
@@ -5586,11 +5507,11 @@ describe("processTurn ScenePlan path", () => {
     setupMocks();
     setupScenePlanMocks({
       gmRead: createGmReadMock({
-        turnIntent: "Record the clerk's durable procedure answer.",
+        turnIntent: "Record the current scene beat.",
         runtimeRequirement: {
-          kind: "dialogue_outcome",
-          topicKind: "procedure",
+          kind: "scene_beat",
           durability: "durable",
+          beatKind: "event_log",
         },
       }),
     });
@@ -5616,7 +5537,7 @@ describe("processTurn ScenePlan path", () => {
       stateEffects: [{
         effectId: "effect-cleared-by-clerk",
         status: "applied_now",
-        stateChangeRef: "state_change_1_1",
+        stateReceipt: "state_receipt_1_1",
         structuralTool: "add_tag",
         targetRef: "Hero",
         stateKey: "tag",
@@ -5867,7 +5788,7 @@ describe("processTurn ScenePlan path", () => {
     expect(buildNarratorPacket).not.toHaveBeenCalled();
   });
 
-  it("accepts a durable dialogue refusal when no state was applied", async () => {
+  it("accepts a structural-effect dialogue refusal when no state was applied", async () => {
     setupMocks();
     setupScenePlanMocks({
       gmRead: createGmReadMock({
@@ -5876,7 +5797,8 @@ describe("processTurn ScenePlan path", () => {
           kind: "dialogue_outcome",
           topicKind: "permission",
           durability: "durable",
-          requiresStructuralEffect: false,
+          requiresStructuralEffect: true,
+          effectKind: "entity_tag",
         },
       }),
     });
@@ -6520,7 +6442,7 @@ describe("processTurn ScenePlan path", () => {
     const stateEffect = {
       effectId: "effect-trusted-by-clerk",
       status: "applied_now",
-      stateChangeRef: "state_change_1_1",
+      stateReceipt: "state_receipt_1_1",
       structuralTool: "add_tag",
       targetRef: "Hero",
       stateKey: "tag",
@@ -6550,7 +6472,7 @@ describe("processTurn ScenePlan path", () => {
         resources: [],
       },
       stateReceipts: [{
-        stateReceipt: "state_change_1_1",
+        stateReceipt: "state_receipt_1_1",
         tool: "add_tag",
         target: "Hero",
         key: "tag",
@@ -6725,7 +6647,7 @@ describe("processTurn ScenePlan path", () => {
     const stateEffect = {
       effectId: "receipt-issued",
       status: "applied_now",
-      stateChangeRef: "state_change_1_1",
+      stateReceipt: "state_receipt_1_1",
       structuralTool: "spawn_item",
       targetRef: "Stamped Delay-Report Receipt",
       stateKey: "possession",
@@ -6756,7 +6678,7 @@ describe("processTurn ScenePlan path", () => {
         resources: [],
       },
       stateReceipts: [{
-        stateReceipt: "state_change_1_1",
+        stateReceipt: "state_receipt_1_1",
         tool: "spawn_item",
         target: "Stamped Delay-Report Receipt",
         key: "possession",
@@ -7303,10 +7225,10 @@ describe("processTurn ScenePlan path", () => {
       ) {
         return {
           object: {
-            version: "grounded-sentence-draft.v3",
+            version: "grounded-sentence-draft.v2",
             sentences: [
               {
-                selectedFactRefs: ["e1.s1"],
+                text: "[[fact:e1.s1]]",
                 evidenceRefs: ["e1"],
               },
             ],
@@ -7361,10 +7283,10 @@ describe("processTurn ScenePlan path", () => {
         finalNarrationCalls += 1;
         return {
           object: {
-            version: "grounded-sentence-draft.v3",
+            version: "grounded-sentence-draft.v2",
             sentences: [
               {
-                selectedFactRefs: ["e1.s1"],
+                text: "[[fact:e1.s1]]",
                 evidenceRefs: finalNarrationCalls === 1
                   ? ["e1", "e2", "e2", "e3", "e4", "e5", "e6"]
                   : ["e1", "e2", "e3", "e4"],
@@ -7538,11 +7460,6 @@ describe("processTurn ScenePlan path", () => {
       {
         path: "clarification",
         clarificationPrompt: "Which door are you opening?",
-        clarificationReason: "identity_choice",
-        clarificationOptions: [
-          { ref: "Player", label: "Hero", reason: "Visible actor." },
-          { ref: "current_scene", label: "Current scene", reason: "Visible scene." },
-        ],
       },
     ],
   ])("skips planner, validation, and execution for %s GM Read paths", async (_path, pathFields) => {
@@ -7567,8 +7484,6 @@ describe("processTurn ScenePlan path", () => {
         canonicalTurnPacket?: {
           anchorEvent?: { summary?: string };
           responses?: Array<{ summary: string; evidenceAuthority?: string }>;
-          narratorFacts?: { responseIds?: string[] };
-          presentationGuidance?: string[];
         };
       }
       | undefined;
@@ -7585,16 +7500,11 @@ describe("processTurn ScenePlan path", () => {
       "Player action request:",
     );
     expect(typeof expectedGuidance).toBe("string");
-    expect(packetArgs?.canonicalTurnPacket?.responses).toEqual([]);
-    expect(packetArgs?.canonicalTurnPacket?.narratorFacts?.responseIds).toEqual([]);
-    expect(packetArgs?.canonicalTurnPacket?.presentationGuidance?.[0]).toContain(
+    expect(packetArgs?.canonicalTurnPacket?.responses?.[0]?.summary).toContain(
       expectedGuidance as string,
     );
-    const settledPacketArg = persistSettledTurnPacketMock.mock.calls.at(-1)?.[0] as
-      | { sourceRefs?: string[] }
-      | undefined;
-    expect(settledPacketArg?.sourceRefs ?? []).not.toEqual(
-      expect.arrayContaining([expect.stringMatching(/^response-/)]),
+    expect(packetArgs?.canonicalTurnPacket?.responses?.[0]?.evidenceAuthority).toBe(
+      "model_guidance",
     );
     expect(persistSettledTurnPacketMock).toHaveBeenCalled();
     expect(runVisibleNarrationWithPacketGuard).toHaveBeenCalled();
@@ -7627,95 +7537,6 @@ describe("processTurn ScenePlan path", () => {
     expect(assembleFinalNarrationPrompt).not.toHaveBeenCalled();
     expect(runVisibleNarrationWithPacketGuard).not.toHaveBeenCalled();
     expect(assistantAppendCallOrder()).toBeUndefined();
-  });
-
-  it("settles legitimate actor-turn movement with the actor-process receipt contract", async () => {
-    setupMocks();
-    const { frame } = setupScenePlanMocks();
-    frame.roster.active.push({
-      id: "npc-renn",
-      actorId: "npc-renn",
-      type: "npc",
-      label: "Renn",
-      locationId: "loc-1",
-      sceneScopeId: "loc-1",
-      awareness: "clear",
-    });
-    runRequiredActorDecisionPassMock.mockReturnValue({
-      actionResults: [
-        {
-          order: 1,
-          actionId: "actor-move-action",
-          actionRef: "actor-tool:npc-renn:move_to:1",
-          actorId: "npc-renn",
-          toolName: "move_to",
-          input: { targetLocationName: "Dock Gate" },
-          args: { targetLocationName: "Dock Gate" },
-          result: {
-            success: true,
-            status: "success",
-            result: {
-              actorId: "npc-renn",
-              actorName: "Renn",
-              locationId: "loc-dock-gate",
-              locationName: "Dock Gate",
-              travelCost: 1,
-              path: ["Harbor", "Dock Gate"],
-            },
-            authority: {
-              toolResultId: "tool-result-actor-move",
-              campaignId: CAMPAIGN_ID,
-              sourceEntity: { type: "npc", id: "npc-renn" },
-              baseWorldVersion: 7,
-              resultWorldVersion: 8,
-              elapsedWorldTimeMinutes: 1,
-              stateDeltaRefs: ["npc:npc-renn:location", "location:loc-dock-gate"],
-              eventRefs: [],
-              witnesses: [],
-              knowledgeOutputs: [],
-              visibilityOutputs: [],
-              resources: [],
-            },
-          },
-        },
-      ],
-      schedule: { decisions: [] },
-      decisions: [],
-      parallelFrameRetrievalTrace: [],
-      parallelPrepTrace: [],
-    });
-
-    await collectEvents(processTurn(createTestOptions()));
-
-    const packetArgs = vi.mocked(buildNarratorPacket).mock.calls.at(-1)?.[0] as
-      | {
-          canonicalTurnPacket?: {
-            narratorFacts?: {
-              actionIds?: string[];
-              toolResultRefs?: Array<{ actionId: string; toolName: string }>;
-            };
-            effects?: Array<{ actionId?: string; summary?: string }>;
-          };
-        }
-      | undefined;
-    const canonicalTurnPacket = packetArgs?.canonicalTurnPacket;
-
-    expect(canonicalTurnPacket?.narratorFacts?.actionIds).toContain("actor-move-action");
-    expect(canonicalTurnPacket?.narratorFacts?.toolResultRefs).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          actionId: "actor-move-action",
-          toolName: "move_to",
-        }),
-      ]),
-    );
-    expect(canonicalTurnPacket?.effects).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          actionId: "actor-move-action",
-        }),
-      ]),
-    );
   });
 
   it("excludes hidden actor-turn log_event memory from the canonical narrator packet", async () => {
@@ -8234,6 +8055,7 @@ describe("processTurn ScenePlan path", () => {
     );
     getSettledTurnPacketMock.mockReturnValue(null);
     hasPreparedSettledTurnPacketRecoveryMock.mockReturnValue(true);
+    recoverSettledTurnPacketFromPreparedEventMock.mockReturnValue(settledPacket);
     vi.mocked(runVisibleNarrationWithPacketGuard).mockImplementation(async (args) => {
       const generated = await args.generateNarration({ attempt: 1, guardAddendum: null });
       const { text, draft } = normalizeGeneratedNarrationForTest(generated);
@@ -8275,7 +8097,10 @@ describe("processTurn ScenePlan path", () => {
         lockToken: "lock-token",
       }),
     );
-    expect(sagaStatusTransitions()).toEqual(["narrator_rendering"]);
+    expect(sagaStatusTransitions()).toEqual([
+      "resolved_pending_narration",
+      "narrator_rendering",
+    ]);
     expect(events).toEqual(
       expect.arrayContaining([
         { type: "narrative", data: { text: "The recovered prepared packet narrates cleanly." } },
@@ -8348,221 +8173,6 @@ describe("processTurn ScenePlan path", () => {
     );
     expect(callOracle).not.toHaveBeenCalled();
     expect(runGmToolLoop).not.toHaveBeenCalled();
-  });
-
-  it("resumes an opening settled packet with opening finalization instead of the player-turn tail", async () => {
-    setupMocks();
-    const { settledPacket } = setupTurnSagaMocks({
-      status: "narrator_rendering",
-      turnId: "opening:5:pending",
-      provenance: {
-        source: "opening_scene",
-        authority: "settled_packet",
-        recoveryAuthority: "no_mutation_before_settled_packet",
-      },
-    });
-    settledPacket.narratorPacket = createOpeningNarratorPacketMock();
-    setPrimaryNarratorFactText(
-      settledPacket.narratorPacket as ReturnType<typeof createNarratorPacketMock>,
-      "The opening scene resumes from the preserved packet.",
-    );
-    const onPostTurn = vi.fn();
-    mockAcceptedVisibleNarration("The opening scene resumes from the preserved packet.");
-
-    const events = await collectEvents(
-      resumePendingTurnNarration({
-        campaignId: CAMPAIGN_ID,
-        turnId: "opening:5:pending",
-        storytellerProvider: createTestOptions().storytellerProvider,
-        storytellerTemperature: 0.8,
-        storytellerMaxTokens: 2000,
-        onPostTurn,
-      }),
-    );
-
-    expect(incrementTick).not.toHaveBeenCalled();
-    expect(syncWorldClockTurnBoundaryMock).not.toHaveBeenCalled();
-    expect(onPostTurn).not.toHaveBeenCalled();
-    expect(
-      pendingNarrationResumePatches().some((patch) =>
-        Object.prototype.hasOwnProperty.call(patch, "postNarrationTail")),
-    ).toBe(false);
-    expect(appendChatMessages).toHaveBeenCalledWith(CAMPAIGN_ID, [
-      expect.objectContaining({
-        role: "assistant",
-        content: "The opening scene resumes from the preserved packet.",
-        metadata: expect.objectContaining({
-          presentation: expect.objectContaining({
-            source: "opening_scene",
-            settledTurnPacketId: "packet-1",
-          }),
-        }),
-      }),
-    ]);
-    expect(markTurnSagaFinalizedIfNeededMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sagaId: "saga-1",
-        narratorAttemptId: successfulNarratorAttemptId(),
-        lockToken: "lock-token",
-      }),
-    );
-    expect(events).toEqual(
-      expect.arrayContaining([
-        {
-          type: "narrative",
-          data: { text: "The opening scene resumes from the preserved packet." },
-        },
-        {
-          type: "done",
-          data: expect.objectContaining({ tick: 5, resumed: true, opening: true }),
-        },
-      ]),
-    );
-    expect(events.some((event) => event.type === "finalizing_turn")).toBe(false);
-  });
-
-  it("dedupes an already appended opening resume without running the player-turn tail", async () => {
-    setupMocks();
-    const { settledPacket } = setupTurnSagaMocks({
-      status: "narrator_rendering",
-      turnId: "opening:5:pending",
-      provenance: {
-        source: "opening_scene",
-        authority: "settled_packet",
-        recoveryAuthority: "no_mutation_before_settled_packet",
-      },
-    });
-    settledPacket.narratorPacket = createOpeningNarratorPacketMock();
-    setPrimaryNarratorFactText(
-      settledPacket.narratorPacket as ReturnType<typeof createNarratorPacketMock>,
-      "The opening narration already reached the player.",
-    );
-    findLatestSuccessfulNarratorAttemptMock.mockReturnValue({
-      id: "attempt-opening",
-      campaignId: CAMPAIGN_ID,
-      sagaId: "saga-1",
-      settledTurnPacketId: "packet-1",
-      turnId: "opening:5:pending",
-      attemptIndex: 2,
-      status: "succeeded",
-      groundingResult: {
-        ...acceptedGroundedNarrationResult(),
-        attempts: 2,
-        retried: true,
-        guardAddendum: "Use only backend-owned opening facts.",
-      },
-      finalText: "The opening narration already reached the player.",
-      failureReason: null,
-      createdAt: 10,
-      updatedAt: 10,
-    });
-    vi.mocked(getChatHistory).mockReturnValue([
-      {
-        role: "assistant",
-        content: "The opening narration already reached the player.",
-        metadata: {
-          resumeNarration: {
-            sagaId: "saga-1",
-            settledTurnPacketId: "packet-1",
-            narratorAttemptId: "attempt-opening",
-          },
-        },
-      },
-    ]);
-    const onPostTurn = vi.fn();
-
-    const events = await collectEvents(
-      resumePendingTurnNarration({
-        campaignId: CAMPAIGN_ID,
-        turnId: "opening:5:pending",
-        storytellerProvider: createTestOptions().storytellerProvider,
-        storytellerTemperature: 0.8,
-        storytellerMaxTokens: 2000,
-        onPostTurn,
-      }),
-    );
-
-    expect(runVisibleNarrationWithPacketGuard).not.toHaveBeenCalled();
-    expect(appendChatMessages).not.toHaveBeenCalledWith(CAMPAIGN_ID, [
-      expect.objectContaining({ content: "The opening narration already reached the player." }),
-    ]);
-    expect(incrementTick).not.toHaveBeenCalled();
-    expect(onPostTurn).not.toHaveBeenCalled();
-    expect(
-      pendingNarrationResumePatches().some((patch) =>
-        Object.prototype.hasOwnProperty.call(patch, "postNarrationTail")),
-    ).toBe(false);
-    expect(events).toEqual(
-      expect.arrayContaining([
-        {
-          type: "narrative",
-          data: { text: "The opening narration already reached the player." },
-        },
-        {
-          type: "done",
-          data: expect.objectContaining({ tick: 5, resumed: true, opening: true }),
-        },
-      ]),
-    );
-  });
-
-  it("recovers a prepared opening packet and finalizes it with opening semantics", async () => {
-    setupMocks();
-    const { settledPacket } = setupTurnSagaMocks({
-      status: "world_consequence_running",
-      turnId: "opening:5:prepared",
-      provenance: {
-        source: "opening_scene",
-        authority: "settled_packet",
-        recoveryAuthority: "no_mutation_before_settled_packet",
-      },
-    });
-    settledPacket.narratorPacket = createOpeningNarratorPacketMock();
-    setPrimaryNarratorFactText(
-      settledPacket.narratorPacket as ReturnType<typeof createNarratorPacketMock>,
-      "The prepared opening packet resumes cleanly.",
-    );
-    getSettledTurnPacketMock.mockReturnValue(null);
-    hasPreparedSettledTurnPacketRecoveryMock.mockReturnValue(true);
-    const onPostTurn = vi.fn();
-    mockAcceptedVisibleNarration("The prepared opening packet resumes cleanly.");
-
-    const events = await collectEvents(
-      resumePendingTurnNarration({
-        campaignId: CAMPAIGN_ID,
-        turnId: "opening:5:prepared",
-        storytellerProvider: createTestOptions().storytellerProvider,
-        storytellerTemperature: 0.8,
-        storytellerMaxTokens: 2000,
-        onPostTurn,
-      }),
-    );
-
-    expect(recoverSettledTurnPacketFromPreparedEventMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        campaignId: CAMPAIGN_ID,
-        turnId: "opening:5:prepared",
-        lockToken: "lock-token",
-      }),
-    );
-    expect(incrementTick).not.toHaveBeenCalled();
-    expect(onPostTurn).not.toHaveBeenCalled();
-    expect(
-      pendingNarrationResumePatches().some((patch) =>
-        Object.prototype.hasOwnProperty.call(patch, "postNarrationTail")),
-    ).toBe(false);
-    expect(events).toEqual(
-      expect.arrayContaining([
-        {
-          type: "narrative",
-          data: { text: "The prepared opening packet resumes cleanly." },
-        },
-        {
-          type: "done",
-          data: expect.objectContaining({ tick: 5, resumed: true, opening: true }),
-        },
-      ]),
-    );
   });
 
   it("resumes pending narration from settled artifacts without paid resolution work", async () => {
@@ -8642,7 +8252,7 @@ describe("processTurn ScenePlan path", () => {
         sagaId: "saga-1",
         narratorAttemptId: successfulNarratorAttemptId(),
         idempotencyKey: expect.stringMatching(
-          /^post-turn:test-campaign-123:pending-turn:saga-1:packet-1:6$/,
+          /^post-turn:test-campaign-123:pending-turn:saga-1:attempt-\d+:6$/,
         ),
       }),
     );
@@ -8797,7 +8407,7 @@ describe("processTurn ScenePlan path", () => {
     vi.mocked(safeGenerateObject)
       .mockImplementation(async () => ({
         object: {
-          version: "grounded-sentence-draft.v3",
+          version: "grounded-sentence-draft.v2",
           sentences: [
             {
               text: "The scene is complete.",
@@ -8933,12 +8543,10 @@ describe("processTurn ScenePlan path", () => {
             authority: "settled_packet_presentation",
             source: "settled_turn_packet",
             sagaId: "saga-1",
-            settledTurnPacketId: "packet-1",
             narratorAttemptId: "attempt-existing",
           },
           resumeNarration: {
             sagaId: "saga-1",
-            settledTurnPacketId: "packet-1",
             narratorAttemptId: "attempt-existing",
           },
         },
@@ -8954,93 +8562,6 @@ describe("processTurn ScenePlan path", () => {
     expect(events).toEqual(
       expect.arrayContaining([
         { type: "narrative", data: { text: "The already rendered narration lands cleanly." } },
-        {
-          type: "done",
-          data: expect.objectContaining({ tick: 6, resumed: true }),
-        },
-      ]),
-    );
-  });
-
-  it("dedupes guarded resume narration by settled packet after append-before-checkpoint crash", async () => {
-    setupMocks();
-    const { settledPacket } = setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
-    setPrimaryNarratorFactText(
-      settledPacket.narratorPacket as ReturnType<typeof createNarratorPacketMock>,
-      "The guarded narration had already reached the player.",
-    );
-    findLatestSuccessfulNarratorAttemptMock.mockReturnValue({
-      id: "attempt-guarded",
-      campaignId: CAMPAIGN_ID,
-      sagaId: "saga-1",
-      settledTurnPacketId: "packet-1",
-      turnId: "pending-turn",
-      attemptIndex: 2,
-      status: "succeeded",
-      groundingResult: {
-        ...acceptedGroundedNarrationResult(),
-        attempts: 2,
-        retried: true,
-        guardAddendum: "Use only backend-owned packet facts.",
-      },
-      finalText: "The guarded narration had already reached the player.",
-      failureReason: null,
-      createdAt: 10,
-      updatedAt: 10,
-    });
-    vi.mocked(getChatHistory).mockReturnValue([
-      { role: "user", content: "I wait." },
-      {
-        role: "assistant",
-        content: "The guarded narration had already reached the player.",
-        metadata: {
-          resumeNarration: {
-            sagaId: "saga-1",
-            settledTurnPacketId: "packet-1",
-            narratorAttemptId: "attempt-guarded",
-          },
-        },
-      },
-    ]);
-
-    const events = await collectEvents(
-      resumePendingTurnNarration({
-        campaignId: CAMPAIGN_ID,
-        turnId: "pending-turn",
-        storytellerProvider: createTestOptions().storytellerProvider,
-        storytellerTemperature: 0.8,
-        storytellerMaxTokens: 2000,
-      }),
-    );
-
-    expect(assembleFinalNarrationPrompt).not.toHaveBeenCalled();
-    expect(runVisibleNarrationWithPacketGuard).not.toHaveBeenCalled();
-    expect(recordNarratorAttemptMock).not.toHaveBeenCalled();
-    expect(appendChatMessages).not.toHaveBeenCalledWith(CAMPAIGN_ID, [
-      expect.objectContaining({
-        role: "assistant",
-        content: "The guarded narration had already reached the player.",
-      }),
-    ]);
-    expect(mergeTurnSagaProvenanceMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        patch: expect.objectContaining({
-          pendingNarrationResume: expect.objectContaining({
-            assistantAppend: expect.objectContaining({
-              settledTurnPacketId: "packet-1",
-              narratorAttemptId: "attempt-guarded",
-              deduped: true,
-            }),
-          }),
-        }),
-      }),
-    );
-    expect(events).toEqual(
-      expect.arrayContaining([
-        {
-          type: "narrative",
-          data: { text: "The guarded narration had already reached the player." },
-        },
         {
           type: "done",
           data: expect.objectContaining({ tick: 6, resumed: true }),
@@ -9113,12 +8634,10 @@ describe("processTurn ScenePlan path", () => {
             authority: "settled_packet_presentation",
             source: "settled_turn_packet",
             sagaId: "saga-1",
-            settledTurnPacketId: "packet-1",
             narratorAttemptId: expect.any(String),
           },
           resumeNarration: {
             sagaId: "saga-1",
-            settledTurnPacketId: "packet-1",
             narratorAttemptId: expect.any(String),
           },
         },
@@ -9257,12 +8776,10 @@ describe("processTurn ScenePlan path", () => {
             authority: "settled_packet_presentation",
             source: "settled_turn_packet",
             sagaId: "saga-1",
-            settledTurnPacketId: "packet-1",
             narratorAttemptId: "attempt-existing",
           },
           resumeNarration: {
             sagaId: "saga-1",
-            settledTurnPacketId: "packet-1",
             narratorAttemptId: "attempt-existing",
           },
         },
@@ -9390,12 +8907,10 @@ describe("processTurn ScenePlan path", () => {
             authority: "settled_packet_presentation",
             source: "settled_turn_packet",
             sagaId: "saga-1",
-            settledTurnPacketId: "packet-1",
             narratorAttemptId: "attempt-existing",
           },
           resumeNarration: {
             sagaId: "saga-1",
-            settledTurnPacketId: "packet-1",
             narratorAttemptId: "attempt-existing",
           },
         },
@@ -9465,75 +8980,6 @@ describe("processTurn ScenePlan path", () => {
     );
   });
 
-  it("skips post-narration tail by settled packet even when resume regenerates a new narrator attempt", async () => {
-    setupMocks();
-    const onPostTurn = vi.fn();
-    const { settledPacket } = setupTurnSagaMocks({
-      status: "narrator_rendering",
-      turnId: "pending-turn",
-      provenance: {
-        pendingNarrationResume: {
-          postNarrationTail: {
-            settledTurnPacketId: "packet-1",
-            narratorAttemptId: "attempt-before-crash",
-            tick: 9,
-            completedAt: 11,
-          },
-        },
-      },
-    });
-    setPrimaryNarratorFactText(
-      settledPacket.narratorPacket as ReturnType<typeof createNarratorPacketMock>,
-      "A regenerated narration should not rerun the tail.",
-    );
-    vi.mocked(runVisibleNarrationWithPacketGuard).mockImplementation(async (args) => {
-      const generated = await args.generateNarration({ attempt: 1, guardAddendum: null });
-      const { text, draft } = normalizeGeneratedNarrationForTest(generated);
-      return {
-        text,
-        draft,
-        attempts: 1,
-        retried: false,
-        validation: { ok: true, violations: [] },
-        guardAddendum: null,
-      };
-    });
-    vi.mocked(safeGenerateObject).mockResolvedValueOnce({
-      object: createGroundedSentenceDraftForTest("A regenerated narration should not rerun the tail."),
-      trace: {
-        text: "",
-        cleanedText: "",
-        strategy: "native_json",
-        primaryStrategy: "native_json",
-        finishReason: "stop",
-      },
-    } as never);
-
-    const events = await collectEvents(
-      resumePendingTurnNarration({
-        campaignId: CAMPAIGN_ID,
-        turnId: "pending-turn",
-        storytellerProvider: createTestOptions().storytellerProvider,
-        storytellerTemperature: 0.8,
-        storytellerMaxTokens: 2000,
-        onPostTurn,
-      }),
-    );
-
-    expect(onPostTurn).not.toHaveBeenCalled();
-    expect(incrementTick).not.toHaveBeenCalled();
-    expect(advanceCampaignTick).not.toHaveBeenCalled();
-    expect(events.some((event) => event.type === "finalizing_turn")).toBe(false);
-    expect(events).toEqual(
-      expect.arrayContaining([
-        {
-          type: "done",
-          data: expect.objectContaining({ tick: 9, resumed: true }),
-        },
-      ]),
-    );
-  });
-
   it("resumes after normal tail crash without advancing tick again and keeps post-turn idempotency key", async () => {
     setupMocks();
     const { settledPacket } = setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
@@ -9576,7 +9022,7 @@ describe("processTurn ScenePlan path", () => {
         tick: 6,
         sagaId: "saga-1",
         narratorAttemptId: "attempt-existing",
-        idempotencyKey: "post-turn:test-campaign-123:pending-turn:saga-1:packet-1:6",
+        idempotencyKey: "post-turn:test-campaign-123:pending-turn:saga-1:attempt-existing:6",
       }),
     );
     expect(markTurnSagaFinalizedIfNeededMock).toHaveBeenCalledWith(
@@ -9648,104 +9094,7 @@ describe("processTurn ScenePlan path", () => {
     expect(onPostTurn).toHaveBeenCalledWith(
       expect.objectContaining({
         tick: 6,
-        idempotencyKey: "post-turn:test-campaign-123:pending-turn:saga-1:packet-1:6",
-      }),
-    );
-    expect(events).toEqual(
-      expect.arrayContaining([
-        { type: "done", data: expect.objectContaining({ tick: 6, resumed: true }) },
-      ]),
-    );
-  });
-
-  it("does not replay canonical action results without accepted settled refs", async () => {
-    setupMocks();
-    const onPostTurn = vi.fn();
-    const { settledPacket } = setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
-    settledPacket.acceptedToolResultRefs = [];
-    settledPacket.acceptedActorResultRefs = [];
-    const narratorPacket = settledPacket.narratorPacket as Omit<
-      ReturnType<typeof createNarratorPacketMock>,
-      "postNarrationTargetTick"
-    > & {
-      postNarrationTargetTick?: number;
-    };
-    delete narratorPacket.postNarrationTargetTick;
-    narratorPacket.canonicalTurnPacket = {
-      actionResults: [
-        {
-          actionId: "move-action-1",
-          actionRef: "move-ref-1",
-          toolName: "move_actor",
-          args: { actorRef: "Hero", destinationRef: "Inspection Dock" },
-          result: {
-            success: true,
-            status: "success",
-            result: {
-              locationId: "loc-dock",
-              locationName: "Inspection Dock",
-              travelCost: 3,
-              tickAdvance: 3,
-              path: ["Hall", "Inspection Dock"],
-            },
-            authority: {
-              toolResultId: "tool-result-move-1",
-            },
-          },
-        },
-        {
-          actionId: "fact-action-1",
-          actionRef: "fact-ref-1",
-          toolName: "record_world_fact",
-          args: { fact: "The dock inspector keeps a sealed proof pattern." },
-          result: {
-            success: true,
-            status: "success",
-            result: {
-              persisted: true,
-              durability: "durable",
-              factRef: "knowledge:sealed-proof-pattern",
-            },
-            authority: {
-              toolResultId: "tool-result-fact-1",
-            },
-          },
-        },
-      ],
-    };
-    setPrimaryNarratorFactText(narratorPacket, "The hero reaches the inspection dock.");
-    findLatestSuccessfulNarratorAttemptMock.mockReturnValue({
-      id: "attempt-existing",
-      campaignId: CAMPAIGN_ID,
-      sagaId: "saga-1",
-      settledTurnPacketId: "packet-1",
-      turnId: "pending-turn",
-      attemptIndex: 1,
-      status: "succeeded",
-      groundingResult: acceptedGroundedNarrationResult(),
-      finalText: "The hero reaches the inspection dock.",
-      failureReason: null,
-      createdAt: 10,
-      updatedAt: 10,
-    });
-
-    const events = await collectEvents(
-      resumePendingTurnNarration({
-        campaignId: CAMPAIGN_ID,
-        turnId: "pending-turn",
-        storytellerProvider: createTestOptions().storytellerProvider,
-        storytellerTemperature: 0.8,
-        storytellerMaxTokens: 2000,
-        onPostTurn,
-      }),
-    );
-
-    expect(incrementTick).toHaveBeenCalledWith(CAMPAIGN_ID);
-    expect(advanceCampaignTick).not.toHaveBeenCalled();
-    expect(onPostTurn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        tick: 6,
-        toolCalls: [],
+        idempotencyKey: "post-turn:test-campaign-123:pending-turn:saga-1:attempt-existing:6",
       }),
     );
     expect(events).toEqual(
@@ -9759,7 +9108,6 @@ describe("processTurn ScenePlan path", () => {
     setupMocks();
     const onPostTurn = vi.fn();
     const { settledPacket } = setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
-    settledPacket.acceptedToolResultRefs = ["move-action-1"];
     const narratorPacket = settledPacket.narratorPacket as Omit<
       ReturnType<typeof createNarratorPacketMock>,
       "postNarrationTargetTick"
@@ -9833,7 +9181,6 @@ describe("processTurn ScenePlan path", () => {
     setupMocks();
     const onPostTurn = vi.fn();
     const { settledPacket } = setupTurnSagaMocks({ status: "narrator_rendering", turnId: "pending-turn" });
-    settledPacket.acceptedToolResultRefs = ["move-action-1"];
     const narratorPacket = settledPacket.narratorPacket as Omit<
       ReturnType<typeof createNarratorPacketMock>,
       "postNarrationTargetTick"
@@ -9899,7 +9246,7 @@ describe("processTurn ScenePlan path", () => {
     expect(onPostTurn).toHaveBeenCalledWith(
       expect.objectContaining({
         tick: 8,
-        idempotencyKey: "post-turn:test-campaign-123:pending-turn:saga-1:packet-1:8",
+        idempotencyKey: "post-turn:test-campaign-123:pending-turn:saga-1:attempt-existing:8",
       }),
     );
     expect(events).toEqual(
@@ -9928,14 +9275,14 @@ describe("processTurn ScenePlan path", () => {
     expect(onPostTurn).toHaveBeenCalled();
   });
 
-  it("advances passive finalization from the world clock tick without treating world time as tick", async () => {
+  it("advances passive finalization from the world clock when tool commits moved it ahead of campaign tick", async () => {
     setupMocks();
     setupScenePlanMocks();
     vi.mocked(readCampaignConfig).mockReturnValue({ currentTick: 18 } as never);
     readWorldClockMock.mockReturnValue({
       campaignId: CAMPAIGN_ID,
       worldVersion: 7,
-      worldTimeMinutes: 1440,
+      worldTimeMinutes: 21,
       currentTick: 21,
       updatedAt: 0,
     });
@@ -9949,7 +9296,6 @@ describe("processTurn ScenePlan path", () => {
     expect(syncWorldClockTurnBoundaryMock).toHaveBeenCalledWith({
       campaignId: CAMPAIGN_ID,
       currentTick: 22,
-      worldTimeMinutes: 1440,
     });
     expect(events).toEqual(
       expect.arrayContaining([
@@ -10018,9 +9364,9 @@ describe("processOpeningScene", () => {
       ) {
         return {
           object: {
-            version: "grounded-sentence-draft.v3",
+            version: "grounded-sentence-draft.v2",
             sentences: [{
-              selectedFactRefs: ["e1.s1"],
+              factRefs: ["e1.s1"],
               evidenceRefs: ["e1"],
             }],
           },
@@ -10120,12 +9466,10 @@ describe("processOpeningScene", () => {
             authority: "settled_packet_presentation",
             source: "opening_scene",
             sagaId: "saga-1",
-            settledTurnPacketId: "packet-1",
             narratorAttemptId: "attempt-1",
           },
           resumeNarration: {
             sagaId: "saga-1",
-            settledTurnPacketId: "packet-1",
             narratorAttemptId: "attempt-1",
           },
         },
