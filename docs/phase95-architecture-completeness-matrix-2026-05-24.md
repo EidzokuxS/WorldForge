@@ -3,14 +3,15 @@
 Date: 2026-05-24
 Branch: `develop`
 Reviewed implementation HEAD before this documentation slice:
-`b95410819fca9cc00d92f1a4fa39ebf733254a35`
-Status: **architecture coverage ready for bundled Oracle review; gameplay
+`732c9aeb0c36e345abb33d6ddfb7992cd5737adf`
+Status: **current-head Oracle bundle returned ARCHITECTURE NO-GO on evidence
+coverage; local vector rollback evidence was added after that review; gameplay
 acceptance still NO-GO**
 
-This document is the final local "did we forget a layer?" pass before the next
-Oracle gate and Browser/play evidence. It does not declare Phase 95 done. It
-declares the current control-plane map complete enough to be reviewed as one
-gameplay architecture instead of as disconnected patches.
+This document is the local "did we forget a layer?" pass for Oracle and
+Browser/play evidence. It does not declare Phase 95 done. It tracks the
+control-plane map as one gameplay architecture instead of as disconnected
+patches.
 
 ## Product End State
 
@@ -29,11 +30,15 @@ play remains free without making gameplay truth unstable.
 - Read local code and docs for the current reset/rebuild branch, not the old
   safety branch as an authority.
 - Used GitNexus semantic queries after refreshing the index with embeddings at
-  `b9541081`.
+  `732c9aeb`.
 - Folded independent agent findings into this matrix: clone/replay residue and
   whole-architecture coverage.
-- Kept old Oracle/agent answers as risk inventory only; the next Oracle gate
-  must review the current bundle.
+- Ran a current-head Oracle bundle review on `732c9aeb`; it returned
+  `ARCHITECTURE NO-GO` because vector rollback `purge_rebuild` was not proven
+  by the attached implementation files. The follow-up slice adds the missing
+  executable vector rollback/fail-closed evidence locally; it still needs
+  focused external recheck before claiming Oracle GO.
+- Kept old Oracle/agent answers as risk inventory only.
 - Used one compact document plus referenced source files instead of many inline
   browser attachments.
 
@@ -89,38 +94,39 @@ References Used:
 
 Unverified Assumptions:
 
-- Initial in-app Browser smoke confirms `/game` loads on the restarted current
-  dev stack, Saves opens, checkpoint deletion uses public handles, and one
-  freeform player action completes through the action dock with zero console
-  errors or warnings. This is not yet human-style long-play or cloned-world
-  acceptance evidence.
-- The next bundled Oracle review will judge this current HEAD, not stale
-  pre-commit or narrow snippet evidence.
+- Prior same-day in-app Browser smoke confirms `/game` loaded on the restarted
+  dev stack, Saves opened, checkpoint deletion used public handles, and one
+  freeform player action completed through the action dock with zero console
+  errors or warnings. Treat this as historical workability evidence for the
+  slice, not as current acceptance evidence.
+- A focused Oracle/vector recheck can judge the local evidence added after the
+  current-head NO-GO without rerunning broad GPT-5.5 Pro bundles.
 - Existing dirty `.planning` evidence files are outside this architecture
   slice and are not runtime inputs.
 
 ## Top-Level Layer Map
 
-Every gameplay turn is covered by one of these layers. Anything outside these
-layers is support-only, diagnostic-only, or debt.
+The intended gameplay control plane is organized by these layers. Anything
+outside these layers is support-only, diagnostic-only, or debt. Current status
+means local contract/source evidence, not Browser or long-play acceptance.
 
 | Layer | Owner | Authority rule | Recovery rule | Current status |
 | --- | --- | --- | --- | --- |
-| UI action intake | frontend parser plus `/chat/action` route | freeform text or backend-issued handle only; labels/prose are display | malformed/stale handles reject before turn mutation | locally covered; initial Browser smoke passed |
-| Turn boundary | chat route plus turn saga | one lease, one pre-turn snapshot, one authority state machine | retry before lease; resume/rollback after lease/snapshot | locally covered |
-| GM Read | `runGmRead` validator | read/classification only; no mutation | repair/retry before executor | locally covered |
-| GM Tool Loop | descriptor-derived active tool loop | model proposes tool calls; executor owns authority | savepoint rollback for unaccepted mutation | locally covered |
-| Executor/receipts | runtime tool executor and authority traces | mutation only through state owner; accepted receipt creates truth | rollback/replay from accepted receipts or snapshot | locally covered |
-| Actor runtime | scheduler, actor frame, actor tool execution | positive allowed write scopes required for durable actor writes | reject out-of-scope actor writes | locally covered |
-| Due-world runtime | proposal/job/actor-plan executors | deterministic emitted refs must match reserved scopes | fail closed with no DB writes on scope mismatch | locally covered |
-| Time | clock ledger owner | world minutes advance only from accepted clock receipts | ledger replay/snapshot restore | locally covered |
-| Narrator packet | packet builder | selectable facts are backend-visible accepted facts | resume from settled packet | locally covered |
-| Final narration | narration guard/turn processor | model can style/order only selected fact/evidence refs | repair/fail closed before public prose leaks | live and resume legacy-text regressions covered |
-| SSE/API projection | DTO factories and route projectors | public handles and allowlists only | rebuild projection from authority | locally covered for known gameplay surfaces |
-| Frontend projection | `frontend/lib/api.ts` parser | public handles carry authority; local render is not truth | reject/drop raw legacy authority | targeted tests green; Browser Saves and freeform action smoke passed; lookup support cannot replace scene beat |
-| Persistence bundles | store manifest and bundle services | every store has policy/evidence | verify before copy; staged restore | locally covered |
-| Clone/replay/rollback/vector | manifest executor, clone/restore services | clean-start clone is explicit; replay-preserving fails closed | clone manifest, restore staging, vector reconcile | locally covered |
-| Observability/evals | traces, reports, test harness | evidence describes outcomes, never creates gameplay truth | rerun/compare using committed snapshots | contract tests/GitNexus done; initial Browser drawer/freeform-turn smoke done; Oracle/play pending |
+| UI action intake | frontend parser plus `/chat/action` route | freeform text or backend-issued handle only; labels/prose are display | malformed/stale handles reject before turn mutation | local contract evidence; prior Browser smoke only |
+| Turn boundary | chat route plus turn saga | one lease, one pre-turn snapshot, one authority state machine | retry before lease; resume/rollback after lease/snapshot | local contract evidence |
+| GM Read | `runGmRead` validator | read/classification only; no mutation | repair/retry before executor | local contract evidence |
+| GM Tool Loop | descriptor-derived active tool loop | model proposes tool calls; executor owns authority | savepoint rollback for unaccepted mutation | local contract evidence |
+| Executor/receipts | runtime tool executor and authority traces | mutation only through state owner; accepted receipt creates truth | rollback/replay from accepted receipts or snapshot | local contract evidence |
+| Actor runtime | scheduler, actor frame, actor tool execution | positive allowed write scopes required for durable actor writes | reject out-of-scope actor writes | local contract evidence |
+| Due-world runtime | proposal/job/actor-plan executors | deterministic emitted refs must match reserved scopes | fail closed with no DB writes on scope mismatch | local contract evidence |
+| Time | clock ledger owner | world minutes advance only from accepted clock receipts | ledger replay/snapshot restore | local contract evidence |
+| Narrator packet | packet builder | selectable facts are backend-visible accepted facts | resume from settled packet | local contract evidence; live/resume full-path evidence still gateable |
+| Final narration | narration guard/turn processor | model can style/order only selected fact/evidence refs | repair/fail closed before public prose leaks | targeted legacy-text regressions covered; Browser/soak pending |
+| SSE/API projection | DTO factories and route projectors | public handles and allowlists only | rebuild projection from authority | local evidence for known gameplay surfaces; source-scope bundle still needed |
+| Frontend projection | `frontend/lib/api.ts` parser | public handles carry authority; local render is not truth | reject/drop raw legacy authority | targeted tests green; prior Browser smoke passed; lookup support cannot replace scene beat |
+| Persistence bundles | store manifest and bundle services | every store has policy/evidence | verify before copy; staged restore | local contract evidence |
+| Clone/replay/rollback/vector | manifest executor, clone/restore services | clean-start clone is explicit; replay-preserving fails closed | clone manifest, restore staging, vector reconcile | local vector evidence added after Oracle NO-GO; focused recheck pending |
+| Observability/evals | traces, reports, test harness | evidence describes outcomes, never creates gameplay truth | rerun/compare using committed snapshots | contract tests/GitNexus done; Oracle/Browser/play pending |
 
 ## Agent Roles And Tool Calling
 
@@ -283,23 +289,29 @@ These items are intentionally not buried under "green tests":
 - Closed P2: frontend debug reasoning is developer-mode gated. Player builds do
   not expose the settings control and `GamePage` omits `onReasoning` handlers
   unless `NEXT_PUBLIC_WORLDFORGE_DEBUG_REASONING=1`.
-- Evidence gate: bundled Oracle GO on current HEAD.
+- Evidence gate: current-head Oracle bundle returned NO-GO on vector rollback
+  evidence coverage; focused recheck is required after the local vector test
+  addition.
 - Evidence gate: in-app Browser UI workability.
 - Evidence gate: human-style fresh and cloned campaigns plus longer
   soak/replay. Sixty turns are smoke evidence, not the end state.
 
 ## Final Local Verdict
 
-No known P0/P1 implementation blocker remains listed by this local audit after
-the public projection, pending recovery, quick-action receipt, due-world scope,
-restore/vector, and clone/replay slices.
+The current external review label is **ARCHITECTURE NO-GO / ACCEPTANCE NO-GO**
+for the reviewed bundle: Oracle could not prove vector rollback `purge_rebuild`
+because `backend/src/vectors/episodic-events.ts` was missing from the attached
+evidence.
 
-That is not acceptance. The current external review label is **CONDITIONAL
-ARCHITECTURE GO / ACCEPTANCE NO-GO**: the map is coherent enough to proceed to
-Browser/play evidence, but not enough to call Phase 95 mature. If later Browser,
-human-style play, soak/replay, or targeted P2 hardening finds a missing layer or
-invariant, this document becomes the correction board rather than a defense of
-the current design.
+Local follow-up after that review added executable evidence that episodic
+rollback rebuild purges stale failed-turn vector rows, preserves matching
+accepted rows, rebuilds missing accepted rows from `location_recent_events`, and
+fails closed without writing rebuilt rows if the stale vector table cannot be
+purged. That narrows the Oracle blocker to a focused recheck/evidence gate; it
+does not turn Phase 95 into acceptance. If later Browser, human-style play,
+soak/replay, or targeted P2 hardening finds a missing layer or invariant, this
+document becomes the correction board rather than a defense of the current
+design.
 
 Output recheck note: broad Browser/Oracle attachment runs produced tiny or
 missing saved transcripts, but that is an extraction/persistence signal, not

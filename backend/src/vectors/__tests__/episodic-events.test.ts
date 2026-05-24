@@ -60,6 +60,7 @@ function createMockDb({
     "hiddenCauseTerms",
   ],
   schemaThrows = false,
+  dropTableThrows = false,
 }: {
   hasTable?: boolean;
   queryRows?: Record<string, unknown>[];
@@ -67,6 +68,7 @@ function createMockDb({
   vectorSearchThrows?: boolean;
   schemaFields?: string[];
   schemaThrows?: boolean;
+  dropTableThrows?: boolean;
 } = {}) {
   const queryBuilder = {
     where: vi.fn().mockReturnThis(),
@@ -98,7 +100,9 @@ function createMockDb({
     tableNames: vi.fn().mockResolvedValue(hasTable ? ["episodic_events"] : []),
     openTable: vi.fn().mockResolvedValue(table),
     createEmptyTable: vi.fn().mockResolvedValue(table),
-    dropTable: vi.fn().mockResolvedValue(undefined),
+    dropTable: dropTableThrows
+      ? vi.fn().mockRejectedValue(new Error("drop failed"))
+      : vi.fn().mockResolvedValue(undefined),
   };
 
   return { db, table, queryBuilder, vectorSearchBuilder };
@@ -631,6 +635,7 @@ describe("episodic-events", () => {
   describe("rebuildEpisodicEventsFromLocationRecentEvents", () => {
     it("rebuilds the derived episodic table from authoritative location_recent_events after rollback purge", async () => {
       const { db, table } = createMockDb({
+        hasTable: true,
         queryRows: [
           {
             campaignId: "campaign-live",
@@ -750,6 +755,60 @@ describe("episodic-events", () => {
           hiddenCauseTerms: ["forged counterseal"],
         }),
       ]);
+    });
+
+    it("fails closed without writing rebuilt rows if the stale derived table cannot be purged", async () => {
+      const { db, table } = createMockDb({
+        hasTable: true,
+        queryRows: [
+          {
+            campaignId: "campaign-live",
+            id: "failed-turn-event",
+            text: "This failed-turn vector row must not survive rollback.",
+            tick: 14,
+            location: "loc-a",
+            participants: [],
+            importance: 9,
+            type: "event",
+            visibility: "player_perceivable",
+            surfaceRoute: "player_visible",
+            knowledgeRoute: "",
+            hiddenCauseTerms: [],
+            vector: [0.9, 0.9],
+          },
+        ],
+        dropTableThrows: true,
+      });
+      mockGetVectorDb.mockReturnValue(db);
+      const all = vi.fn().mockReturnValue([
+        {
+          id: "recent-row-1",
+          campaignId: "campaign-live",
+          locationId: "loc-a",
+          sourceEventId: "event-accepted-1",
+          eventType: "event",
+          summary: "Only this restored receipt is authoritative.",
+          surfaceRoute: "player_visible",
+          visibility: "player_perceivable",
+          knowledgeRoute: null,
+          hiddenCauseTerms: "[]",
+          tick: 12,
+          importance: 6,
+          createdAt: 100,
+        },
+      ]);
+      const orderBy = vi.fn().mockReturnValue({ all });
+      const where = vi.fn().mockReturnValue({ orderBy });
+      const from = vi.fn().mockReturnValue({ where });
+      const select = vi.fn().mockReturnValue({ from });
+      mockGetDb.mockReturnValue({ select });
+
+      await expect(rebuildEpisodicEventsFromLocationRecentEvents("campaign-live"))
+        .rejects.toThrow("drop failed");
+
+      expect(db.dropTable).toHaveBeenCalledWith("episodic_events");
+      expect(db.createEmptyTable).not.toHaveBeenCalled();
+      expect(table.add).not.toHaveBeenCalled();
     });
   });
 

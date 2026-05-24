@@ -2,7 +2,8 @@
 
 Date: 2026-05-24
 Branch: `develop`
-Reviewed base before this slice: `aa6a7fb582c2203be2813565c48f90af79dc77dc`
+Reviewed current local architecture state through:
+`732c9aeb0c36e345abb33d6ddfb7992cd5737adf`
 Status: **NO-GO for long-play acceptance**
 
 This audit exists to keep the Phase 95 reset/rebuild honest. The product goal is
@@ -47,33 +48,31 @@ architecture completeness matrix, GitNexus, Oracle bundled review, Browser
 evidence, and human-style play/soak evidence pass.
 
 External/current review status after HEAD
-`006421983a794b358cf830f891a149568f8527c3`: **CONDITIONAL ARCHITECTURE GO /
-ACCEPTANCE NO-GO**. The full-cycle control-plane map is coherent enough to
-move to Browser/play evidence gates, but Phase 95 gameplay acceptance remains
-blocked until those gates pass. Browser/Oracle saved transcripts for the broad
-bundle sessions were tiny or missing, but those are now treated as
-`NEEDS_RECHECK` rather than proof of one-token model output. Recheck through
-`scripts/oracle-recheck-output.mjs` recovered full DOM answers for
-`phase95-full-architectu-current-go` and `phase95-full-architectu-current-go-3`;
-`phase95-full-architectu-current-go-2` remains `UNVERIFIED_OUTPUT` because the
-conversation is inaccessible through backend JSON and DOM. Do not repeat
-GPT-5.5 Pro runs for this gate unless explicitly requested.
+`732c9aeb0c36e345abb33d6ddfb7992cd5737adf`: **ARCHITECTURE NO-GO /
+ACCEPTANCE NO-GO** for the reviewed bundle. Oracle found no P0 in the attached
+evidence, but marked vector rollback `purge_rebuild` P1-unproven because
+`backend/src/vectors/episodic-events.ts` was not included in the bundle. The
+follow-up local slice adds explicit vector rollback/fail-closed test evidence;
+that narrows the issue to a focused recheck, not broad Pro reruns. Browser,
+human-style play, soak/replay, and acceptance gates remain blocked.
 
-Initial in-app Browser workability on the restarted current dev stack now
-loads `/game`, opens Saves, deletes an existing checkpoint through a
-`pdto_checkpoint_*` handle, and leaves checkpoint list empty with zero console
-errors. That smoke also caught and closed a live `/world` public projection
-gap: `CharacterDraft.startConditions.startLocationId` and draft social
-location/faction refs are projected as public handles, while the public
+Prior same-day in-app Browser workability on the restarted dev stack loaded
+`/game`, opened Saves, deleted an existing checkpoint through a
+`pdto_checkpoint_*` handle, and left the checkpoint list empty with zero
+console errors. That smoke also caught and closed a live `/world` public
+projection gap: `CharacterDraft.startConditions.startLocationId` and draft
+social location/faction refs are projected as public handles, while the public
 boundary explicitly allows the typed `player-input` enum without allowing raw
 `player-*` ids. Radix Dialog aria-description warnings remain P2 UX debt.
 Expanded Browser workability then sent a freeform player action through the
 real action dock. The turn completed successfully, returned to Ready, cleared
 the submitted draft, emitted no console errors or warnings, and produced
-playable dialogue grounded in backend-visible proof requirements. That pass
-also closed a frontend projection/playfeel bug where persisted lookup/support
-answers could replace the current scene beat; the scene dock now selects the
-latest true narration while the Narrative Log remains the lookup surface.
+playable dialogue grounded in backend-visible proof requirements. Treat this as
+historical workability evidence for the slice, not as current acceptance
+evidence. That pass also closed a frontend projection/playfeel bug where
+persisted lookup/support answers could replace the current scene beat; the
+scene dock now selects the latest true narration while the Narrative Log remains
+the lookup surface.
 
 No long human-style 60-turn, cloned-world, or 600-turn soak acceptance should
 resume until the full local closure matrix is bundled, Oracle-reviewed on a
@@ -148,8 +147,8 @@ Closed locally after this audit:
   rows are rebuilt without inventing new authority.
 
 No P0 blockers are currently listed after this local slice. That is not an
-acceptance claim: the P1 queue, Oracle full architecture GO, Browser evidence,
-and human-style long-play evidence remain required.
+acceptance claim: the P1 queue, focused Oracle recheck, Browser evidence, and
+human-style long-play evidence remain required.
 
 ## Recently Closed P1 Items
 
@@ -234,16 +233,18 @@ and human-style long-play evidence remain required.
 
 ## Current P1 Queue
 
-No current P1 blockers are listed after the local public-API and clone/replay
-closure slices. This is still **not** Phase 95 acceptance: Oracle bundled GO,
-Browser UI evidence, human-style play, longer soak/replay, and P2 hardening
-remain required before calling the gameplay loop mature.
+No current P1 blocker is listed by the local audit after the public-API,
+clone/replay, and vector rollback evidence slices. The current external bundle
+is still **ARCHITECTURE NO-GO** until the vector rollback evidence added after
+Oracle's review is focused-rechecked. This is still **not** Phase 95
+acceptance: Browser UI evidence, human-style play, longer soak/replay, and P2
+hardening remain required before calling the gameplay loop mature.
 
 ## Current P2 Queue
 
 No local P2 implementation/documentation blockers are listed after the
 observability evidence policy and stale harness-prose closure. This is still
-**not** Phase 95 acceptance: Oracle bundled GO, Browser UI evidence,
+**not** Phase 95 acceptance: focused Oracle recheck, Browser UI evidence,
 human-style play, and longer soak/replay remain required.
 
 Recently closed P2:
@@ -486,12 +487,13 @@ Unverified Assumptions:
 
 ### G. Observability, Oracle, Browser, Acceptance
 
-Status: **NO-GO until P1 queues close and Oracle/Browser/play evidence passes**
+Status: **NO-GO until focused Oracle vector recheck and Browser/play evidence
+pass**
 
 Decision in force: 60-turn runs are smoke evidence, not the goal. Acceptance
-requires contract tests, GitNexus impact/detect changes, Oracle GO on bundled
-current evidence, in-app Browser UI workability, and human-style fresh/cloned
-campaigns plus longer soak/replay.
+requires contract tests, GitNexus impact/detect changes, focused Oracle review
+of the current evidence bundle, in-app Browser UI workability, and human-style
+fresh/cloned campaigns plus longer soak/replay.
 
 Options compared:
 
@@ -514,8 +516,8 @@ References Used:
 
 Unverified Assumptions:
 
-- The local in-app Browser path is healthy enough for final gameplay UI
-  verification after backend/frontend servers are restarted.
+- The local in-app Browser path can be revalidated after backend/frontend
+  servers are restarted; prior smoke is not acceptance evidence.
 
 ## "Nothing Forgotten" Checklist
 
@@ -547,7 +549,8 @@ This list is the closure guard before any future "architecture GO" claim:
 - [x] Restore verifies manifest evidence before copy.
 - [x] Restore uses a staged idempotent lifecycle for rerun convergence.
 - [x] Episodic vector rollback preserves/rebuilds pre-turn memory from
-  authoritative receipts.
+  authoritative receipts and fails closed if the stale vector table cannot be
+  purged.
 - [x] Clean-start clone is fully manifest-owned and writes clone evidence.
   Targeted clone tests green.
 - [x] Replay-preserving clone/replay is executable fail-closed. Targeted
@@ -557,7 +560,10 @@ This list is the closure guard before any future "architecture GO" claim:
 
 ## Next Implementation Order
 
-1. Bundle `docs/phase95-architecture-completeness-matrix-2026-05-24.md`
-   with the focused source/docs index for Oracle full architecture GO.
-2. After Oracle GO, run Browser gameplay workability, fresh/cloned human-style
-   60-turn campaigns, and longer soak/replay.
+1. Focused recheck of the vector rollback evidence: include
+   `backend/src/vectors/episodic-events.ts`,
+   `backend/src/vectors/__tests__/episodic-events.test.ts`,
+   `backend/src/campaign/restore-bundle.ts`, and manifest executor tests.
+2. After architecture review is no longer blocked, run Browser gameplay
+   workability, fresh/cloned human-style 60-turn campaigns, and longer
+   soak/replay.
