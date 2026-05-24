@@ -3,6 +3,7 @@ import path from "node:path";
 import { getCampaignDir } from "../campaign/paths.js";
 import { captureCampaignBundle, restoreCampaignBundle } from "../campaign/restore-bundle.js";
 import { createLogger } from "../lib/index.js";
+import { clearPendingCommittedEvents } from "../vectors/episodic-events.js";
 import {
   invalidateAuthorityAfterRestore,
   readWorldClock,
@@ -45,6 +46,7 @@ export async function restoreSnapshot(
   await restoreCampaignBundle(campaignId, snapshot.bundleDir, {
     includeVectors: false,
   });
+  clearPendingCommittedEvents(campaignId);
   const restoredClock = readWorldClock(campaignId);
   invalidateAuthorityAfterRestore({
     campaignId,

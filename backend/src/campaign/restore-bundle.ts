@@ -14,6 +14,7 @@ import {
   assertCampaignStoreBundleRestorable,
   type CampaignStoreBundlePurpose,
 } from "./store-manifest.js";
+import { planCampaignStoreManifestOperation } from "./store-manifest-executor.js";
 
 type BundleOptions = {
   includeVectors: boolean;
@@ -32,6 +33,37 @@ function resolveBundlePaths(bundleDir: string) {
 function removeSqliteSidecarFiles(dbPath: string): void {
   for (const suffix of ["-wal", "-shm", "-journal"]) {
     fs.rmSync(`${dbPath}${suffix}`, { force: true });
+  }
+}
+
+function vectorTableDirForStore(campaignVectorsPath: string, store: string): string {
+  if (store === "vectors:episodic_events") {
+    return path.join(campaignVectorsPath, "episodic_events.lance");
+  }
+  if (store === "vectors:lore_cards") {
+    return path.join(campaignVectorsPath, "lore_cards.lance");
+  }
+  throw new Error(`Unknown vector store in manifest restore plan: ${store}`);
+}
+
+function applyTurnRollbackVectorPolicies(campaignVectorsPath: string): void {
+  const plan = planCampaignStoreManifestOperation({ mode: "turn_rollback_restore" });
+  fs.mkdirSync(campaignVectorsPath, { recursive: true });
+
+  for (const step of plan.steps.filter((candidate) => candidate.store.startsWith("vectors:"))) {
+    if (step.action === "purge_rebuild" || step.action === "purge") {
+      fs.rmSync(vectorTableDirForStore(campaignVectorsPath, step.store), {
+        recursive: true,
+        force: true,
+      });
+      continue;
+    }
+    if (step.action === "preserve_verified") {
+      continue;
+    }
+    throw new Error(
+      `Turn rollback cannot apply vector restore action ${step.action} for ${step.store}.`,
+    );
   }
 }
 
@@ -112,6 +144,8 @@ export async function restoreCampaignBundle(
   if (options.includeVectors && fs.existsSync(vectorsPath)) {
     fs.rmSync(campaignVectorsPath, { recursive: true, force: true });
     fs.cpSync(vectorsPath, campaignVectorsPath, { recursive: true });
+  } else if (!options.includeVectors) {
+    applyTurnRollbackVectorPolicies(campaignVectorsPath);
   }
 
   await loadCampaign(campaignId);

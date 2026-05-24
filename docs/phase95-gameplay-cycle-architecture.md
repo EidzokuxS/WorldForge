@@ -97,14 +97,19 @@ Implemented hardening slices after the reset:
   policy. Unknown stores fail closed, and the planning executor derives one
   manifest-owned action per store before later clone/restore execution work is
   wired in.
+- Vector-safe turn rollback: restoring a turn snapshot now applies the
+  manifest rollback vector policy instead of leaving all live vector state in
+  place. Episodic event vectors are purged for lazy rebuild, lore-card vectors
+  are preserved as verified non-turn state, and pending in-memory committed
+  event queues are cleared after snapshot restore.
 
 Current post-slice status on `develop`:
 
-- Current slice status: manifest restore-policy declarations and the
-  planning-only executor skeleton are implemented locally with targeted
-  backend tests and backend typecheck green. Actual manifest-owned
-  clean-start clone execution, vector-safe turn rollback execution, and vector
-  row-count/hash evidence remain the next blocker cluster.
+- Current slice status: manifest restore-policy declarations, the
+  planning-only executor skeleton, and vector-safe turn rollback execution are
+  implemented locally with targeted backend tests and backend typecheck green.
+  Actual manifest-owned clean-start clone execution and vector row-count/hash
+  evidence remain the next blocker cluster.
 - Long-play status: still NO-GO. These slices close important control-plane
   blockers, but they are not full Phase 95 acceptance evidence.
 

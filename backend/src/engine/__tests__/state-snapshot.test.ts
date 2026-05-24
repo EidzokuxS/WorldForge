@@ -30,6 +30,10 @@ vi.mock("../../campaign/store-manifest.js", () => ({
   assertCampaignStoreBundleRestorable: vi.fn(),
 }));
 
+vi.mock("../../vectors/episodic-events.js", () => ({
+  clearPendingCommittedEvents: vi.fn(),
+}));
+
 vi.mock("node:fs", () => ({
   default: {
     mkdirSync: vi.fn(),
@@ -46,6 +50,7 @@ import { captureSnapshot, restoreSnapshot } from "../state-snapshot.js";
 import { getDb, getSqliteConnection, closeDb } from "../../db/index.js";
 import { loadCampaign, readCampaignConfig } from "../../campaign/manager.js";
 import { getCampaignDir } from "../../campaign/paths.js";
+import { clearPendingCommittedEvents } from "../../vectors/episodic-events.js";
 import fs from "node:fs";
 
 const CAMPAIGN_ID = "test-campaign-123";
@@ -125,7 +130,7 @@ describe("state snapshot rollback bundle", () => {
     );
   });
 
-  it("D-10/D-16 restores state.db, config.json, and chat_history.json from the same bundle while excluding vectors", async () => {
+  it("D-10/D-16 restores state.db, config.json, and chat_history.json while purging rebuild-only vectors", async () => {
     const snapshot = {
       campaignId: CAMPAIGN_ID,
       bundleDir: "/campaigns/test-campaign-123/.turn-boundaries/bundle-001",
@@ -151,6 +156,15 @@ describe("state snapshot rollback bundle", () => {
       expect.any(String),
       expect.anything(),
     );
+    expect(fs.rmSync).toHaveBeenCalledWith(
+      expect.stringContaining("vectors\\episodic_events.lance"),
+      { recursive: true, force: true },
+    );
+    expect(fs.rmSync).not.toHaveBeenCalledWith(
+      expect.stringContaining("vectors\\lore_cards.lance"),
+      expect.anything(),
+    );
+    expect(clearPendingCommittedEvents).toHaveBeenCalledWith(CAMPAIGN_ID);
   });
 
   it("D-04/D-05 invalidates stale runtime state before later gameplay reads by closing and reloading the campaign", async () => {
