@@ -53,7 +53,7 @@ import {
 } from "./parallel-simulation-runner.js";
 import { runFrameRetrievalJobs } from "./frame-retrieval-runner.js";
 import { isAcceptedRuntimeReceiptForTurn } from "./tool-contracts.js";
-import type { SimulationProposalWriteScope } from "./simulation-proposal.js";
+import type { SimulationActorWriteScope } from "./simulation-write-scope.js";
 
 const log = createLogger("actor-tools");
 
@@ -77,6 +77,7 @@ export interface ExecuteActorDecisionPacketArgs {
   packet: ActorDecisionPacket;
   baseWorldVersion: number;
   elapsedWorldTimeMinutes?: number;
+  blockedWriteScopes?: readonly string[];
   orderOffset?: number;
   authorityForTool?: (input: {
     packet: ParsedActorDecisionPacket;
@@ -109,7 +110,7 @@ export interface RunRequiredActorDecisionPassArgs {
   playerSceneScopeId?: string | null;
   elapsedWorldTimeMinutes?: number;
   maxOutputTokens?: number;
-  blockedWriteScopes?: readonly SimulationProposalWriteScope[];
+  blockedWriteScopes?: readonly SimulationActorWriteScope[];
   presentActorReactionRoute?: "required_before_done" | "proposal_after_done";
   legalTools?: readonly RuntimeToolName[];
   scheduleActorProcesses?: typeof scheduleKeyActorProcessesForTurn;
@@ -347,6 +348,7 @@ export async function executeActorDecisionPacket(
     actorFrame: args.actorFrame,
     baseWorldVersion: args.baseWorldVersion,
     elapsedWorldTimeMinutes: args.elapsedWorldTimeMinutes,
+    blockedWriteScopes: args.blockedWriteScopes,
   });
   const actionResults: ExecutedScenePlanActionResult[] = [];
 
@@ -401,6 +403,7 @@ export interface RunScheduledActorDecisionArgs {
   elapsedWorldTimeMinutes?: number;
   maxOutputTokens?: number;
   legalTools?: readonly RuntimeToolName[];
+  blockedWriteScopes?: readonly string[];
   decideActor?: RunRequiredActorDecisionPassArgs["decideActor"];
   authorityForTool?: ExecuteActorDecisionPacketArgs["authorityForTool"];
   commitProcessDecision?: (input: {
@@ -467,6 +470,7 @@ export async function runScheduledActorDecision(
         packet: prepared.packet,
         baseWorldVersion: requireActorFrameWorldVersion(prepared.actorFrame),
         elapsedWorldTimeMinutes: args.elapsedWorldTimeMinutes,
+        blockedWriteScopes: args.blockedWriteScopes,
         authorityForTool: args.authorityForTool,
       });
 
@@ -727,6 +731,7 @@ export async function runRequiredActorDecisionPass(
           packet,
           baseWorldVersion: requireActorFrameWorldVersion(actorFrame),
           elapsedWorldTimeMinutes: args.elapsedWorldTimeMinutes,
+          blockedWriteScopes: args.blockedWriteScopes,
           orderOffset: actionResults.length,
         });
         actionResults.push(...execution.actionResults);

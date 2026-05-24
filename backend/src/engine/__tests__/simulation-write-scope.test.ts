@@ -10,7 +10,11 @@ describe("simulation write scope contracts", () => {
   it("treats broad parent scopes as conflicting with specific child scopes", () => {
     expect(writeScopesConflict("npc:clerk", "npc:clerk:state")).toBe(true);
     expect(writeScopesConflict("location:market:presence", "location:market")).toBe(true);
+    expect(writeScopesConflict("player:hero:state", "player:hero")).toBe(true);
+    expect(writeScopesConflict("item:receipt:holder", "item:receipt")).toBe(true);
     expect(writeScopesConflict("npc:clerk", "npc:guard")).toBe(false);
+    expect(writeScopesConflict("player:hero", "player:rival")).toBe(false);
+    expect(writeScopesConflict("item:receipt", "item:coin")).toBe(false);
   });
 
   it("reserves actor jobs in order and serializes later conflicting jobs", () => {
@@ -81,5 +85,27 @@ describe("simulation write scope contracts", () => {
       blockedWriteScope: "npc:clerk:state",
     });
     expect(ledger.blockedWriteScopes()).toEqual(["npc:clerk:state", "world:dialogue"]);
+  });
+
+  it("does not drop player or item scopes from turn owner claims", () => {
+    const ledger = createTurnWriteScopeLedger();
+
+    expect(ledger.claim({
+      owner: "gm_tool_loop",
+      ownerId: "gm",
+      phase: "gm_tool_loop",
+      writeScopes: ["player:hero:state", "item:receipt:holder"],
+    })).toBeNull();
+
+    expect(ledger.claim({
+      owner: "actor_reaction",
+      ownerId: "npc-clerk",
+      phase: "actor_reactions",
+      writeScopes: ["player:hero", "item:receipt"],
+    })).toMatchObject({
+      writeScope: "player:hero",
+      blockedWriteScope: "player:hero:state",
+    });
+    expect(ledger.blockedWriteScopes()).toEqual(["player:hero:state", "item:receipt:holder"]);
   });
 });

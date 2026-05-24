@@ -25,7 +25,10 @@ import {
   resolveDueSimulationProposalsForScope,
   type ResolveDueSimulationProposalsForScopeResult,
 } from "./simulation-proposal-watchdog.js";
-import { findConflictingWriteScope } from "./simulation-write-scope.js";
+import {
+  findConflictingWriteScope,
+  type SimulationActorWriteScope,
+} from "./simulation-write-scope.js";
 import { consumeActorWakeSignals } from "./actor-wake-signals.js";
 import {
   planParallelSimulationGroups,
@@ -44,7 +47,7 @@ export interface ResolveDueWorldWorkForScopeInput {
   playerSceneScopeId?: string | null;
   elapsedWorldTimeMinutes?: number;
   phase: DueWorldWorkPhase;
-  blockedWriteScopes?: readonly SimulationProposalWriteScope[];
+  blockedWriteScopes?: readonly SimulationActorWriteScope[];
   actorDecisionContext?: {
     provider: ProviderConfig;
     sceneFrame: SceneFrame;
@@ -102,11 +105,11 @@ function mergeProposalResults(
 
 function dueWorkBlockedWriteScopes(
   result: ResolveDueWorldWorkForScopeResult,
-): SimulationProposalWriteScope[] {
+): SimulationActorWriteScope[] {
   return [...new Set([
     ...result.executed.flatMap((entry) => entry.stateDeltaRefs),
     ...result.worldThreads.executed.flatMap((entry) => entry.authority.stateDeltaRefs),
-  ])] as SimulationProposalWriteScope[];
+  ])];
 }
 
 function processByActorId(processes: readonly KeyActorProcess[]): Map<string, KeyActorProcess> {
@@ -215,7 +218,7 @@ function buildDeferredActorProposalPrepTrace(
 export function resolveDueWorldWorkForScope(
   input: ResolveDueWorldWorkForScopeInput,
 ): ResolveDueWorldWorkForScopeResult {
-  const blockedWriteScopes: SimulationProposalWriteScope[] = [
+  const blockedWriteScopes: SimulationActorWriteScope[] = [
     ...(input.blockedWriteScopes ?? []),
   ];
   const worldThreads = resolveDueWorldThreadWorkForScope({
@@ -225,9 +228,9 @@ export function resolveDueWorldWorkForScope(
     blockedWriteScopes,
   });
   blockedWriteScopes.push(
-    ...(worldThreads.executed.flatMap((entry) =>
+    ...worldThreads.executed.flatMap((entry) =>
       entry.authority.stateDeltaRefs,
-    ) as SimulationProposalWriteScope[]),
+    ),
   );
   const schedule = scheduleKeyActorProcessesForTurn({
     campaignId: input.campaignId,
@@ -271,7 +274,7 @@ export function resolveDueWorldWorkForScope(
       });
       executed.push(result);
       if (result.status === "completed") {
-        blockedWriteScopes.push(...(result.stateDeltaRefs as SimulationProposalWriteScope[]));
+        blockedWriteScopes.push(...result.stateDeltaRefs);
         consumeActorWakeSignals({
           campaignId: input.campaignId,
           actorIds: [decision.actorId],

@@ -52,6 +52,7 @@ export interface ToolExecutionContext {
     elapsedWorldTimeMinutes?: number;
     toolResultId?: string;
     allowedWriteScopes?: readonly string[];
+    blockedWriteScopes?: readonly string[];
     metadata?: Record<string, unknown>;
   };
   currentLocationId: string | null;
@@ -94,6 +95,7 @@ export interface CreateActorTurnToolExecutionContextArgs {
   actorFrame: ActorFrame;
   baseWorldVersion: number;
   elapsedWorldTimeMinutes?: number;
+  blockedWriteScopes?: readonly string[];
 }
 
 export interface CreateBackgroundToolExecutionContextArgs {
@@ -103,12 +105,14 @@ export interface CreateBackgroundToolExecutionContextArgs {
   elapsedWorldTimeMinutes?: number;
   toolResultId?: string;
   allowedWriteScopes?: readonly string[];
+  blockedWriteScopes?: readonly string[];
   metadata?: Record<string, unknown>;
 }
 
 export interface CreatePlayerTurnToolExecutionContextArgs {
   frame: SceneFrame;
   addressedTarget?: DialogueAddressedTargetInput | null;
+  blockedWriteScopes?: readonly string[];
 }
 
 export type DialogueAddressedTargetInput =
@@ -759,6 +763,9 @@ export function createPlayerTurnToolExecutionContext(
   }
 
   const authority = buildPlayerTurnAuthority(frame);
+  if (authority && "frame" in input && input.blockedWriteScopes?.length) {
+    authority.blockedWriteScopes = input.blockedWriteScopes;
+  }
   const bridgeLookup = buildBridgeLookupSnapshot({
     frame,
     packet,
@@ -808,6 +815,7 @@ export function createBackgroundToolExecutionContext(
       elapsedWorldTimeMinutes: args.elapsedWorldTimeMinutes ?? 0,
       toolResultId: args.toolResultId,
       allowedWriteScopes: args.allowedWriteScopes,
+      blockedWriteScopes: args.blockedWriteScopes,
       metadata: args.metadata,
     },
     currentLocationId: null,
@@ -913,6 +921,7 @@ export function createActorTurnToolExecutionContext(
         id: actorFrame.observer.actorId,
       },
       elapsedWorldTimeMinutes: args.elapsedWorldTimeMinutes ?? 0,
+      blockedWriteScopes: args.blockedWriteScopes,
     },
     currentLocationId: actorFrame.observer.locationId,
     currentSceneScopeId: actorFrame.observer.sceneScopeId,

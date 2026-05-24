@@ -22,8 +22,8 @@ import {
   findConflictingWriteScope,
   reserveActorWriteScopes,
   type ActorWriteScopeReservation,
+  type SimulationActorWriteScope,
 } from "./simulation-write-scope.js";
-import type { SimulationProposalWriteScope } from "./simulation-proposal.js";
 
 export interface ActorScheduleDecision {
   actorId: string;
@@ -31,7 +31,7 @@ export interface ActorScheduleDecision {
   route: ActorProcessRoute;
   reason: string;
   signals: WakeSignal[];
-  writeScopes: SimulationProposalWriteScope[];
+  writeScopes: SimulationActorWriteScope[];
   reservation?: ActorWriteScopeReservation;
 }
 
@@ -41,7 +41,7 @@ export interface ScheduleKeyActorProcessesInput {
   playerLocationId?: string | null;
   playerSceneScopeId?: string | null;
   elapsedWorldTimeMinutes?: number;
-  blockedWriteScopes?: readonly SimulationProposalWriteScope[];
+  blockedWriteScopes?: readonly SimulationActorWriteScope[];
   reportsByActorId?: ReadonlyMap<string, readonly KeyActorInboxItem[]>;
   explicitActorIds?: readonly string[];
   presentActorReactionRoute?: "required_before_done" | "proposal_after_done";
@@ -59,20 +59,20 @@ function strongestSignal(signals: readonly WakeSignal[]): WakeSignal | null {
   return signals[0] ?? null;
 }
 
-function isProposalWriteScope(scope: string): scope is SimulationProposalWriteScope {
-  return /^(npc|faction|location|world|memory|event|asset):.+/.test(scope);
+function isWriteScope(scope: string): scope is SimulationActorWriteScope {
+  return /^[a-z-]+:.+/i.test(scope);
 }
 
 function actorWriteScopes(
   process: KeyActorProcess,
   route: ActorProcessRoute,
-): SimulationProposalWriteScope[] {
-  const scopes: SimulationProposalWriteScope[] = [`npc:${process.actorId}:state`];
+): SimulationActorWriteScope[] {
+  const scopes: SimulationActorWriteScope[] = [`npc:${process.actorId}:state`];
   if (process.actor.currentLocationId && route !== "sleeping") {
     scopes.push(`location:${process.actor.currentLocationId}:presence`);
   }
   for (const scope of process.state.activePlan?.writeScopes ?? []) {
-    if (isProposalWriteScope(scope)) {
+    if (isWriteScope(scope)) {
       scopes.push(scope);
     }
   }

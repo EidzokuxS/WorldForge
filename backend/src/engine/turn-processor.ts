@@ -84,6 +84,7 @@ import {
 } from "./due-world-work.js";
 import {
   createTurnWriteScopeLedger,
+  type SimulationActorWriteScope,
   type TurnWriteScopeClaimInput,
   type TurnWriteScopeLedger,
 } from "./simulation-write-scope.js";
@@ -185,7 +186,6 @@ import {
   type ScopedForecastExcerpt,
   type StagedWorldTrajectoryForecast,
 } from "./world-forecast.js";
-import type { SimulationProposalWriteScope } from "./simulation-proposal.js";
 import { cleanupTransientSceneObjects } from "./transient-scene-lifecycle.js";
 import { retractStoredEpisodicEvent } from "../vectors/episodic-events.js";
 import { retractReflectionBudget } from "./reflection-budget.js";
@@ -3280,14 +3280,10 @@ function assertTurnWriteScopeClaim(
   );
 }
 
-function isSimulationProposalWriteScope(scope: string): scope is SimulationProposalWriteScope {
-  return /^(npc|faction|location|world|memory|event|asset):.+/.test(scope);
-}
-
-function blockedSimulationWriteScopes(
+function blockedTurnWriteScopes(
   ledger: TurnWriteScopeLedger,
-): SimulationProposalWriteScope[] {
-  return ledger.blockedWriteScopes().filter(isSimulationProposalWriteScope);
+): SimulationActorWriteScope[] {
+  return ledger.blockedWriteScopes().filter((scope) => /^[a-z-]+:.+/i.test(scope));
 }
 
 function oracleDecisionInputFromGmRead(args: {
@@ -5070,6 +5066,7 @@ async function* processTurnScenePlan(
       scopedForecastExcerpt,
       recentConversation: getChatHistory(campaignId).slice(-8),
       maxOutputTokens: storytellerMaxTokens,
+      blockedWriteScopes: turnWriteScopeLedger.blockedWriteScopes(),
     });
     const stepResults = gmToolLoop.stepResults;
     const gmToolLoopAcceptedStepIds = gmToolLoop.acceptedStepIds ?? [];
@@ -5263,7 +5260,7 @@ async function* processTurnScenePlan(
     playerSceneScopeId: actorReactionFrame.currentSceneScopeId,
     elapsedWorldTimeMinutes: postGmClockContext.elapsedWorldTimeMinutes,
     maxOutputTokens: storytellerMaxTokens,
-    blockedWriteScopes: blockedSimulationWriteScopes(turnWriteScopeLedger),
+    blockedWriteScopes: blockedTurnWriteScopes(turnWriteScopeLedger),
     presentActorReactionRoute: shouldDeferPresentActorReactionsAfterSettledOutcome(
       executedPlan.toolCallResults,
       gmRead,
@@ -5449,7 +5446,7 @@ async function* processTurnScenePlan(
     playerSceneScopeId: currentSceneScopeId,
     elapsedWorldTimeMinutes: settledClockContext.elapsedWorldTimeMinutes,
     phase: "pre_narrator_packet",
-    blockedWriteScopes: blockedSimulationWriteScopes(turnWriteScopeLedger),
+    blockedWriteScopes: blockedTurnWriteScopes(turnWriteScopeLedger),
     actorDecisionContext: {
       provider: judgeProvider,
       sceneFrame: preNarratorActorDecisionFrame,

@@ -213,6 +213,7 @@ export interface RunGmToolLoopArgs {
   scopedForecastExcerpt?: ScopedForecastExcerpt | null;
   recentConversation?: Array<{ role: string; content: string }>;
   maxOutputTokens?: number;
+  blockedWriteScopes?: readonly string[];
 }
 
 export interface GmToolLoopResult {
@@ -2723,8 +2724,12 @@ export async function runGmToolLoop(
 
   const model = createModel(args.provider, { role: "judge", reasoningMode: "bypass" });
   const addressedTarget = dialogueAddressedTargetFromGmRead(args);
-  const executionContext = addressedTarget
-    ? createPlayerTurnToolExecutionContext({ frame: args.frame, addressedTarget })
+  const executionContext = addressedTarget || args.blockedWriteScopes?.length
+    ? createPlayerTurnToolExecutionContext({
+        frame: args.frame,
+        addressedTarget,
+        blockedWriteScopes: args.blockedWriteScopes,
+      })
     : createPlayerTurnToolExecutionContext(args.frame);
   const allTools = createStorytellerTools(
     args.campaignId,

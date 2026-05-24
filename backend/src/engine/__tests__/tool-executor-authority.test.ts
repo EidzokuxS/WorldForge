@@ -509,6 +509,93 @@ describe("executeToolCall authority bridge", () => {
     expect(getDb().select().from(authorityTraces).all()).toEqual([]);
   });
 
+  it("rejects blocked world-event scopes before inserting rows", async () => {
+    const context = createBackgroundChronicleContext(0);
+    context.authority = {
+      ...context.authority!,
+      blockedWriteScopes: ["world:event"],
+    };
+
+    const result = await executeToolCall(
+      CAMPAIGN_ID,
+      "add_chronicle_entry",
+      { text: "The blocked bell rings anyway." },
+      3,
+      undefined,
+      context,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("same_turn_write_scope_conflict:world:event");
+    expect(
+      getDb()
+        .select()
+        .from(chronicle)
+        .where(eq(chronicle.campaignId, CAMPAIGN_ID))
+        .all(),
+    ).toHaveLength(0);
+    expect(getDb().select().from(authorityTraces).all()).toEqual([]);
+  });
+
+  it("does not treat scene-local observations as blocked world-event writes", async () => {
+    const context = createAuthorityContext(0);
+    context.authority = {
+      ...context.authority!,
+      blockedWriteScopes: ["world:event"],
+    };
+    context.legalActorRefs = new Set(["player"]);
+
+    const result = await executeToolCall(
+      CAMPAIGN_ID,
+      "log_event",
+      {
+        text: "The player glances at the sealed window.",
+        importance: 1,
+        participants: ["player"],
+        durability: "scene_local",
+      },
+      3,
+      undefined,
+      context,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.authority?.stateDeltaRefs).toEqual(["scene_local_observation"]);
+    expect(getDb().select().from(authorityTraces).all()).toEqual([]);
+  });
+
+  it("rolls back sync state mutations when accepted refs hit a blocked scope", async () => {
+    getDb().insert(players).values({
+      id: "player-1",
+      campaignId: CAMPAIGN_ID,
+      name: "Iria",
+      hp: 5,
+      tags: "[]",
+    }).run();
+    const context = createAuthorityContext(0);
+    context.authority = {
+      ...context.authority!,
+      blockedWriteScopes: ["player:player-1:state"],
+    };
+    context.legalActorRefs = new Set(["iria", "player-1", "player"]);
+    context.subjectActorRefs = new Set(["iria", "player-1", "player"]);
+
+    const result = await executeToolCall(
+      CAMPAIGN_ID,
+      "set_condition",
+      { targetName: "Iria", delta: -2 },
+      3,
+      undefined,
+      context,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("same_turn_write_scope_conflict:player:player-1:state");
+    expect(getDb().select().from(players).where(eq(players.id, "player-1")).get())
+      .toMatchObject({ hp: 5 });
+    expect(getDb().select().from(authorityTraces).all()).toEqual([]);
+  });
+
   it("attaches durable log_event event ids to authority event refs", async () => {
     const context = createAuthorityContext(0);
     context.legalActorRefs = new Set(["player"]);

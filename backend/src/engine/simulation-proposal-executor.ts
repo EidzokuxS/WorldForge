@@ -268,6 +268,7 @@ function createBackgroundExecutionContext(input: {
   baseWorldVersion: number;
   sourceEntity: AuthoritySourceEntity;
   allowedWriteScopes: readonly SimulationProposalWriteScope[];
+  blockedWriteScopes?: readonly string[];
   elapsedWorldTimeMinutes?: number;
   proposalExecution?: SimulationProposalExecutionMetadata;
 }): ToolExecutionContext {
@@ -281,6 +282,7 @@ function createBackgroundExecutionContext(input: {
       elapsedWorldTimeMinutes: input.elapsedWorldTimeMinutes ?? 1,
       toolResultId: input.proposalExecution?.toolResultId,
       allowedWriteScopes: input.allowedWriteScopes,
+      blockedWriteScopes: input.blockedWriteScopes,
       metadata: input.proposalExecution ? { ...input.proposalExecution } : undefined,
     },
     currentLocationId: null,
@@ -1229,6 +1231,7 @@ async function executeActorDecisionTool(input: {
   executionToken: string;
   claimLifecycleMetadata: string;
   elapsedWorldTimeMinutes?: number;
+  blockedWriteScopes?: readonly string[];
   actorDecisionContext?: ExecuteDueSimulationProposalInput["actorDecisionContext"];
 }): Promise<ToolResult> {
   if (!input.actorDecisionContext) {
@@ -1270,6 +1273,7 @@ async function executeActorDecisionTool(input: {
     elapsedWorldTimeMinutes: input.elapsedWorldTimeMinutes,
     maxOutputTokens: input.actorDecisionContext.maxOutputTokens,
     legalTools: [],
+    blockedWriteScopes: input.blockedWriteScopes,
     decideActor: input.actorDecisionContext.decideActor,
     commitProcessDecision: ({
       decision: scheduledDecision,
@@ -1378,6 +1382,7 @@ async function executePreparedTools(input: {
   sourceEntity: AuthoritySourceEntity;
   baseWorldVersion: number;
   elapsedWorldTimeMinutes?: number;
+  blockedWriteScopes?: readonly string[];
   actorDecisionContext?: ExecuteDueSimulationProposalInput["actorDecisionContext"];
 }): Promise<PreparedToolExecutionOutcome> {
   const results: ExecutedProposalToolResult[] = [];
@@ -1400,6 +1405,7 @@ async function executePreparedTools(input: {
       baseWorldVersion: input.baseWorldVersion,
       sourceEntity: input.sourceEntity,
       allowedWriteScopes: input.payload.writeScopes,
+      blockedWriteScopes: input.blockedWriteScopes,
       elapsedWorldTimeMinutes: input.elapsedWorldTimeMinutes,
       proposalExecution: {
         proposalId: input.proposalId,
@@ -1626,6 +1632,7 @@ export async function executeDueSimulationProposal(
       sourceEntity: sourceEntityFromRow(claimedRow),
       baseWorldVersion: claimedRow.baseWorldVersion,
       elapsedWorldTimeMinutes: input.elapsedWorldTimeMinutes,
+      blockedWriteScopes: input.blockedWriteScopes,
       actorDecisionContext: input.actorDecisionContext,
     });
     if (executed.status === "failed") {

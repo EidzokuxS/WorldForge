@@ -9,16 +9,13 @@ import {
   type AuthoritySourceEntity,
 } from "./living-world-authority.js";
 import { simulationProposalAuthorityTraceToolResultId } from "./simulation-proposal-execution.js";
-import { findConflictingWriteScope, writeScopesConflict } from "./simulation-write-scope.js";
+import {
+  findConflictingWriteScope,
+  writeScopesConflict,
+  type SimulationActorWriteScope,
+} from "./simulation-write-scope.js";
 
-export type SimulationProposalWriteScope =
-  | `npc:${string}`
-  | `faction:${string}`
-  | `location:${string}`
-  | `world:${string}`
-  | `memory:${string}`
-  | `event:${string}`
-  | `asset:${string}`;
+export type SimulationProposalWriteScope = SimulationActorWriteScope;
 
 export type SimulationProposalStatus =
   | "pending"

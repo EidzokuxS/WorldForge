@@ -94,7 +94,10 @@ import {
   buildNarrativeOutcomeBounds,
   deriveCombatPosture,
 } from "./combat-envelope.js";
-import { findUncoveredWriteRef } from "./simulation-write-scope.js";
+import {
+  findConflictingWriteScope,
+  findUncoveredWriteRef,
+} from "./simulation-write-scope.js";
 import {
   RUNTIME_AUTHORITY_REQUIRED_TOOL_NAMES,
   RUNTIME_CANONICAL_WORLD_MUTATION_TOOL_NAMES,
@@ -3382,6 +3385,63 @@ function assertAuthorityWriteScopesCovered(input: {
   }
 }
 
+function assertNoBlockedWriteScopeConflict(input: {
+  writeScopes: readonly string[];
+  blockedWriteScopes?: readonly string[];
+}): void {
+  if (!input.blockedWriteScopes || input.blockedWriteScopes.length === 0) return;
+  const scopedWriteRefs = input.writeScopes.filter((ref) => /^[a-z-]+:[^:]+/i.test(ref));
+  const conflict = findConflictingWriteScope({
+    writeScopes: scopedWriteRefs,
+    blockedWriteScopes: input.blockedWriteScopes,
+  });
+  if (conflict) {
+    throw new Error(
+      `same_turn_write_scope_conflict:${conflict.writeScope}:blocked_by:${conflict.blockedWriteScope}`,
+    );
+  }
+}
+
+function coarsePreExecutionWriteScopes(
+  toolName: string,
+  args: Record<string, unknown>,
+): string[] {
+  switch (toolName) {
+    case "add_chronicle_entry":
+      return ["world:event"];
+    case "log_event":
+      return args.durability === "scene_local" ? [] : ["world:event"];
+    case "record_dialogue_outcome":
+      return args.durability === "scene_local" ? [] : ["world:dialogue"];
+    case "record_world_fact":
+      return ["world:fact"];
+    case "advance_time":
+      return ["world:time"];
+    case "set_relationship":
+      return ["world:relationship"];
+    case "start_search":
+    case "record_player_intent":
+      return ["world:intent"];
+    case "transfer_item":
+      return ["world:inventory"];
+    default:
+      return [];
+  }
+}
+
+function preExecutionWriteScopesForToolCall(input: {
+  toolName: string;
+  args: Record<string, unknown>;
+  executionContext?: ToolExecutionContext;
+}): string[] {
+  const allowedWriteScopes = input.executionContext?.authority?.allowedWriteScopes
+    ?.filter((scope) => scope.trim() && scope.trim() !== "*") ?? [];
+  if (allowedWriteScopes.length > 0) {
+    return allowedWriteScopes;
+  }
+  return coarsePreExecutionWriteScopes(input.toolName, input.args);
+}
+
 function durableMemoryRollbackDetails(input: {
   toolName: string;
   args: Record<string, unknown>;
@@ -3628,6 +3688,10 @@ function finalizeAuthorityResult(input: {
     stateDeltaRefs: inferredRefs,
     allowedWriteScopes: authority.allowedWriteScopes,
   });
+  assertNoBlockedWriteScopeConflict({
+    writeScopes: inferredRefs,
+    blockedWriteScopes: authority.blockedWriteScopes,
+  });
   assertSimulationProposalExecutionStillClaimed({
     campaignId: input.campaignId,
     metadata: authority.metadata,
@@ -3838,6 +3902,14 @@ export async function executeToolCall(
             baseWorldVersion: executionContext!.authority!.baseWorldVersion,
             currentTick: tick,
           });
+          assertNoBlockedWriteScopeConflict({
+            writeScopes: preExecutionWriteScopesForToolCall({
+              toolName,
+              args: argsForExecution,
+              executionContext,
+            }),
+            blockedWriteScopes: executionContext!.authority!.blockedWriteScopes,
+          });
           const handlerResult = runToolHandler({
             campaignId,
             toolName,
@@ -3886,6 +3958,14 @@ export async function executeToolCall(
           }
           throw error;
         }
+        assertNoBlockedWriteScopeConflict({
+          writeScopes: preExecutionWriteScopesForToolCall({
+            toolName,
+            args: argsForExecution,
+            executionContext,
+          }),
+          blockedWriteScopes: executionContext!.authority!.blockedWriteScopes,
+        });
       }
 
       const handlerResult = await runToolHandler({

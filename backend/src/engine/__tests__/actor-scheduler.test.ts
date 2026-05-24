@@ -84,6 +84,24 @@ function setActorNextWake(actorId: string, nextWakeWorldTimeMinutes: number | nu
     .run();
 }
 
+function setActorActivePlanWriteScopes(actorId: string, writeScopes: string[]) {
+  const row = getDb().select()
+    .from(actorProcessStates)
+    .where(eq(actorProcessStates.actorId, actorId))
+    .get();
+  if (!row) throw new Error(`missing actor process ${actorId}`);
+  const state = JSON.parse(row.processState) as Record<string, unknown>;
+  state.activePlan = {
+    id: "test-plan",
+    summary: "Touch the player-owned receipt.",
+    writeScopes,
+  };
+  getDb().update(actorProcessStates)
+    .set({ processState: JSON.stringify(state) })
+    .where(eq(actorProcessStates.actorId, actorId))
+    .run();
+}
+
 describe("actor scheduler", () => {
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-actor-scheduler-"));
@@ -407,6 +425,44 @@ describe("actor scheduler", () => {
       reservation: {
         status: "conflict_serialized",
         conflictsWithActorIds: ["external:npc:npc-present"],
+      },
+    });
+  });
+
+  it("preserves player and item active-plan scopes when checking blocked write scopes", () => {
+    seedNpc({
+      id: "npc-present",
+      name: "Present Actor",
+      locationId: "loc-main",
+      sceneId: "scene-a",
+    });
+    backfillKeyActorProcessesForCampaign({
+      campaignId: CAMPAIGN_ID,
+      nextWakeDelayMinutes: 30,
+    });
+    setActorActivePlanWriteScopes("npc-present", [
+      "player:hero:state",
+      "item:receipt:holder",
+    ]);
+
+    const schedule = scheduleKeyActorProcessesForTurn({
+      campaignId: CAMPAIGN_ID,
+      tick: 1,
+      playerLocationId: "loc-main",
+      playerSceneScopeId: "scene-a",
+      elapsedWorldTimeMinutes: 1,
+      blockedWriteScopes: ["player:hero"],
+    });
+
+    expect(schedule.decisions[0]).toMatchObject({
+      actorId: "npc-present",
+      writeScopes: expect.arrayContaining([
+        "player:hero:state",
+        "item:receipt:holder",
+      ]),
+      reservation: {
+        status: "conflict_serialized",
+        conflictsWithActorIds: ["external:player:hero"],
       },
     });
   });
