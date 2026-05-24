@@ -74,14 +74,16 @@ Implemented hardening slices after the reset:
 
 Current post-slice status on `develop`:
 
-- Last pushed hardening commit before this working slice:
-  `21a74d6d Introduce public DTO projection handles`.
-- Current working slice: lookup public projection is implemented locally.
-  Focused backend/frontend lookup parser tests, backend/frontend typechecks,
-  full backend suite (`219` passed, `1` skipped, `2943` tests, `30` todo), and
-  full frontend suite (`64` files, `522` tests) passed. GitNexus
-  `detect_changes`, commit, push, and index refresh are still required before
-  treating this slice as pushed.
+- Last pushed hardening commit: `48c7678f Project lookup results at public
+  boundary`.
+- Current slice status: lookup public projection is implemented, committed,
+  pushed to `origin/develop`, and the GitNexus index was refreshed. Focused
+  backend/frontend lookup parser tests, backend/frontend typechecks, full
+  backend suite (`219` passed, `1` skipped, `2943` tests, `30` todo), and full
+  frontend suite (`64` files, `522` tests) passed. GitNexus staged
+  `detect_changes` reported HIGH because the defensive frontend normalizer
+  touches shared `parseTurnSSE` flows (`submitAction`, `handleRetry`,
+  `submitLookup`), which is the expected blast radius.
 - Long-play status: still NO-GO. These slices close important control-plane
   blockers, but they are not full Phase 95 acceptance evidence.
 
