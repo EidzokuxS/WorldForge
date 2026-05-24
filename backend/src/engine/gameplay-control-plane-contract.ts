@@ -967,6 +967,7 @@ export function assertNoBackendRefsInPublicValue(value: unknown, path = "$"): vo
 export const PUBLIC_PROJECTION_SURFACE_VALUES = [
   "sse",
   "world",
+  "world_review",
   "history",
   "checkpoints",
   "location_entities",
@@ -982,6 +983,9 @@ const WORLD_NPC_PRIVATE_PROJECTION_KEYS = new Set([
   "characterRecord",
   "draft",
   "npc",
+  "persona",
+  "goals",
+  "beliefs",
 ]);
 
 function isPublicProjectionRecord(value: unknown): value is Record<string, unknown> {

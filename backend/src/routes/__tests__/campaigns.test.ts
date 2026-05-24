@@ -772,6 +772,9 @@ describe("GET /:id/world", () => {
     expect(body.npcs[0]).not.toHaveProperty("characterRecord");
     expect(body.npcs[0]).not.toHaveProperty("draft");
     expect(body.npcs[0]).not.toHaveProperty("npc");
+    expect(body.npcs[0]).not.toHaveProperty("persona");
+    expect(body.npcs[0]).not.toHaveProperty("goals");
+    expect(body.npcs[0]).not.toHaveProperty("beliefs");
     expect(body.factions[0]).toMatchObject({ name: "Rebels" });
     expectPublicHandle(body.factions[0].id, "faction");
     expectPublicHandle(body.relationships[0].id, "relationship");
@@ -977,12 +980,71 @@ describe("GET /:id/world", () => {
     expect(body.npcs).toHaveLength(1);
     expect(body.npcs[0]).toMatchObject({
       name: "Signal Runner Toma",
+      tier: "persistent",
+    });
+    expect(body.npcs[0]).not.toHaveProperty("characterRecord");
+    expect(body.npcs[0]).not.toHaveProperty("draft");
+    expect(body.npcs[0]).not.toHaveProperty("npc");
+    expect(body.npcs[0]).not.toHaveProperty("persona");
+    expect(body.npcs[0]).not.toHaveProperty("goals");
+    expect(body.npcs[0]).not.toHaveProperty("beliefs");
+  });
+
+  it("exposes NPC semantic fields only on the explicit review projection", async () => {
+    mockedGetActive.mockReturnValue({
+      id: CAMPAIGN_ID,
+      name: "Test",
+      createdAt: "2026-01-01",
+      generationComplete: true,
+    } as any);
+
+    const mockAll = vi.fn();
+    const mockWhere = vi.fn(() => ({ all: mockAll }));
+    const mockFrom = vi.fn(() => ({ where: mockWhere }));
+    const mockSelect = vi.fn(() => ({ from: mockFrom }));
+
+    mockAll
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([
+        {
+          id: "npc-1",
+          campaignId: CAMPAIGN_ID,
+          name: "Signal Runner Toma",
+          persona: "Carries messages through the storm.",
+          tags: "[]",
+          tier: "persistent",
+          currentLocationId: null,
+          goals: JSON.stringify({
+            short_term: ["Deliver the warning"],
+            long_term: ["Keep the valley connected"],
+          }),
+          beliefs: JSON.stringify(["Roads matter more than banners."]),
+          unprocessedImportance: 0,
+          inactiveTicks: 0,
+          createdAt: 0,
+        },
+      ])
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([])
+      .mockReturnValueOnce([]);
+
+    mockedGetDb.mockReturnValue({
+      select: mockSelect,
+    } as any);
+
+    const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/world?projection=review`);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.npcs[0]).toMatchObject({
+      name: "Signal Runner Toma",
       persona: "Carries messages through the storm.",
       tier: "persistent",
       goals: JSON.stringify({
         short_term: ["Deliver the warning"],
         long_term: ["Keep the valley connected"],
       }),
+      beliefs: JSON.stringify(["Roads matter more than banners."]),
     });
     expect(body.npcs[0]).not.toHaveProperty("characterRecord");
     expect(body.npcs[0]).not.toHaveProperty("draft");
@@ -1181,9 +1243,11 @@ describe("GET /:id/world", () => {
     expect(body.npcs[0]).not.toHaveProperty("npc");
     expect(body.npcs[0]).toMatchObject({
       name: "Signal Runner Toma",
-      persona: "Carries messages through the storm.",
       tier: "key",
     });
+    expect(body.npcs[0]).not.toHaveProperty("persona");
+    expect(body.npcs[0]).not.toHaveProperty("goals");
+    expect(body.npcs[0]).not.toHaveProperty("beliefs");
     expectJsonNotToContain(body, ["\"characterRecord\"", "player-1", "npc-1", "loc-1"]);
   });
 
@@ -1275,17 +1339,15 @@ describe("GET /:id/world", () => {
     const body = await res.json();
     expect(body.npcs[0]).toMatchObject({
       name: "Marshal Selene Voss",
-      persona: "Now leads from the front and trusts the village scouts.",
       tier: "persistent",
       tags: JSON.stringify(["strategist", "scarred", "field medic"]),
-      goals: JSON.stringify({
-        short_term: editedShortTermGoals,
-        long_term: editedLongTermGoals,
-      }),
     });
     expect(body.npcs[0]).not.toHaveProperty("characterRecord");
     expect(body.npcs[0]).not.toHaveProperty("draft");
     expect(body.npcs[0]).not.toHaveProperty("npc");
+    expect(body.npcs[0]).not.toHaveProperty("persona");
+    expect(body.npcs[0]).not.toHaveProperty("goals");
+    expect(body.npcs[0]).not.toHaveProperty("beliefs");
     expectPublicHandle(body.npcs[0].id, "actor");
   });
 

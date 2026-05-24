@@ -178,7 +178,7 @@ describe("Phase 95 gameplay control-plane contracts", () => {
       },
     })).not.toThrow();
 
-    for (const privateField of ["characterRecord", "draft", "npc"]) {
+    for (const privateField of ["characterRecord", "draft", "npc", "persona", "goals", "beliefs"]) {
       expect(() => assertPublicProjectionPayload({
         surface: "world",
         payload: {
@@ -189,6 +189,18 @@ describe("Phase 95 gameplay control-plane contracts", () => {
         },
       })).toThrow(/private npc projection field/i);
     }
+
+    expect(() => assertPublicProjectionPayload({
+      surface: "world_review",
+      payload: {
+        npcs: [{
+          id: "pdto_actor_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          persona: "Public editor-facing persona.",
+          goals: "{\"short_term\":[],\"long_term\":[]}",
+          beliefs: "[]",
+        }],
+      },
+    })).not.toThrow();
 
     expect(() => assertPublicProjectionPayload({
       surface: "world",

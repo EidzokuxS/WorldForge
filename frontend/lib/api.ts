@@ -158,15 +158,15 @@ interface RawWorldData {
     actorHandle?: string;
     campaignId?: string;
     name: string;
-    persona: string;
+    persona?: string;
     tags: string;
     tier: string;
     currentLocationId: string | null;
     currentPlaceHandle?: string | null;
     sceneScopeId?: string | null;
     sceneHandle?: string | null;
-    goals: string;
-    beliefs: string;
+    goals?: string;
+    beliefs?: string;
   }>;
   factions: Array<{
     id?: string;
@@ -575,7 +575,10 @@ function normalizeCharacterResult(
   };
 }
 
-function parseWorldData(raw: RawWorldData): WorldData {
+type WorldDataProjection = "gameplay" | "review";
+
+function parseWorldData(raw: RawWorldData, projection: WorldDataProjection = "gameplay"): WorldData {
+  const exposeNpcSemantics = projection === "review";
   const publicEntityHandle = (...values: unknown[]) => {
     for (const value of values) {
       const handle = publicDtoHandle(value, ["actor", "place", "faction", "item", "entity"]);
@@ -657,13 +660,15 @@ function parseWorldData(raw: RawWorldData): WorldData {
         id: actorHandle,
         actorHandle,
         name: npc.name,
-        persona: npc.persona,
+        persona: exposeNpcSemantics && typeof npc.persona === "string" ? npc.persona : "",
         tags: parseJsonArray(npc.tags),
         tier: npc.tier,
         currentLocationId: currentPlaceHandle,
         currentPlaceHandle,
-        goals: parseNpcGoals(npc.goals),
-        beliefs: parseJsonArray(npc.beliefs),
+        goals: exposeNpcSemantics
+          ? parseNpcGoals(npc.goals ?? "{\"short_term\":[],\"long_term\":[]}")
+          : { short_term: [], long_term: [] },
+        beliefs: exposeNpcSemantics ? parseJsonArray(npc.beliefs ?? "[]") : [],
         sceneScopeId: sceneHandle,
         sceneHandle,
         characterRecord: null,
@@ -1484,9 +1489,13 @@ export function getWorldgenDebugProgress(): Promise<WorldgenDebugProgress> {
   return apiGet<WorldgenDebugProgress>("/api/worldgen/debug/progress");
 }
 
-export async function getWorldData(campaignId: string): Promise<WorldData> {
-  const raw = await apiGet<RawWorldData>(`/api/campaigns/${campaignId}/world`);
-  return parseWorldData(raw);
+export async function getWorldData(
+  campaignId: string,
+  options: { projection?: WorldDataProjection } = {},
+): Promise<WorldData> {
+  const query = options.projection === "review" ? "?projection=review" : "";
+  const raw = await apiGet<RawWorldData>(`/api/campaigns/${campaignId}/world${query}`);
+  return parseWorldData(raw, options.projection ?? "gameplay");
 }
 
 // ───── Lore Cards ─────

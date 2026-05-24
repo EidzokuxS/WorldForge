@@ -257,25 +257,34 @@ function buildWorldCurrentScene(args: {
   };
 }
 
+type WorldNpcProjectionMode = "gameplay" | "review";
+
 function buildWorldNpcPayload(
   campaignId: string,
   row: Parameters<typeof hydrateStoredNpcRecord>[0],
+  projectionMode: WorldNpcProjectionMode,
 ) {
   const actorHandle = requiredPublicHandle(campaignId, "actor", row.id);
-  return {
+  const payload = {
     id: actorHandle,
     actorHandle,
     name: row.name,
-    persona: row.persona,
     tags: row.tags,
     tier: row.tier,
     currentLocationId: publicHandle(campaignId, "place", row.currentLocationId),
     currentPlaceHandle: publicHandle(campaignId, "place", row.currentLocationId),
     sceneScopeId: publicHandle(campaignId, "place", toWorldSceneScopeId(row)),
     sceneHandle: publicHandle(campaignId, "place", toWorldSceneScopeId(row)),
-    goals: row.goals,
-    beliefs: row.beliefs,
   };
+  if (projectionMode === "review") {
+    return {
+      ...payload,
+      persona: row.persona,
+      goals: row.goals,
+      beliefs: row.beliefs,
+    };
+  }
+  return payload;
 }
 
 function buildWorldPlayerPayload(args: {
@@ -387,6 +396,9 @@ app.get("/:id/world", async (c) => {
   try {
     const id = c.req.param("id");
     assertSafeId(id);
+    const projectionMode: WorldNpcProjectionMode = c.req.query("projection") === "review"
+      ? "review"
+      : "gameplay";
 
     const activeCampaign = await requireGeneratedCampaign(c, id);
     if (activeCampaign instanceof Response) return activeCampaign;
@@ -540,7 +552,7 @@ app.get("/:id/world", async (c) => {
       worldVersion: worldClock.worldVersion,
       worldTimeMinutes: worldClock.worldTimeMinutes,
       npcs: worldNpcs.map((row) => {
-        return buildWorldNpcPayload(id, row);
+        return buildWorldNpcPayload(id, row, projectionMode);
       }),
       factions: worldFactions.map((faction) => ({
         id: requiredPublicHandle(id, "faction", faction.id),
@@ -579,7 +591,10 @@ app.get("/:id/world", async (c) => {
         placeHandle: publicHandle(id, "place", item.locationId),
       })),
     };
-    assertPublicProjectionPayload({ surface: "world", payload });
+    assertPublicProjectionPayload({
+      surface: projectionMode === "review" ? "world_review" : "world",
+      payload,
+    });
     return c.json(payload);
   } catch (error) {
     return c.json(

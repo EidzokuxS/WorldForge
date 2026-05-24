@@ -319,7 +319,7 @@ export default function WorldReviewPage(props: { params: Promise<{ id: string }>
         }
 
         const [world, lore] = await Promise.all([
-          getWorldData(campaignId),
+          getWorldData(campaignId, { projection: "review" }),
           getLoreCards(campaignId).catch(() => [] as LoreCardItem[]),
         ]);
 

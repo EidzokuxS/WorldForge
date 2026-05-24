@@ -788,15 +788,63 @@ describe("gameplay API helpers", () => {
     expect(world.npcs[0]).toMatchObject({
       id: PUBLIC_HANDLES.actorNpc,
       name: "Station Guard",
-      persona: "Keeps people moving.",
-      goals: { short_term: ["Watch the gates"], long_term: [] },
+      persona: "",
+      goals: { short_term: [], long_term: [] },
+      beliefs: [],
       characterRecord: null,
       draft: null,
       npc: null,
     });
+    expect(JSON.stringify(world.npcs[0])).not.toContain("Keeps people moving");
+    expect(JSON.stringify(world.npcs[0])).not.toContain("Watch the gates");
     expect(JSON.stringify(world.npcs[0])).not.toContain("Raw Guard");
     expect(JSON.stringify(world.npcs[0])).not.toContain("Draft Guard");
     expect(JSON.stringify(world.npcs[0])).not.toContain("Legacy Guard");
+  });
+
+  it("getWorldData exposes NPC semantic fields only for explicit review projection", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({
+        currentScene: null,
+        locations: [],
+        npcs: [
+          {
+            actorHandle: PUBLIC_HANDLES.actorNpc,
+            name: "Station Guard",
+            persona: "Keeps people moving.",
+            tags: "[]",
+            tier: "supporting",
+            currentPlaceHandle: PUBLIC_HANDLES.placeBroad,
+            sceneHandle: PUBLIC_HANDLES.placeScene,
+            goals: "{\"short_term\":[\"Watch the gates\"],\"long_term\":[]}",
+            beliefs: "[\"Queues should keep moving.\"]",
+          },
+        ],
+        factions: [],
+        relationships: [],
+        items: [],
+        player: null,
+        personaTemplates: [],
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const world = await getWorldData("camp-1", { projection: "review" });
+
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost:3001/api/campaigns/camp-1/world?projection=review");
+    expect(world.npcs[0]).toMatchObject({
+      id: PUBLIC_HANDLES.actorNpc,
+      name: "Station Guard",
+      persona: "Keeps people moving.",
+      goals: { short_term: ["Watch the gates"], long_term: [] },
+      beliefs: ["Queues should keep moving."],
+      characterRecord: null,
+      draft: null,
+      npc: null,
+    });
   });
 
   it("getWorldData refuses to promote raw backend ids from legacy fields into public handles", async () => {
