@@ -1,12 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
-import Database from "better-sqlite3";
 
+import { cloneCampaignCleanStart } from "../../backend/src/campaign/clone.js";
 import type { Phase94RouteId } from "../../backend/src/engine/phase-94-trace-assertions.js";
 import {
   assertPhase94BaselinePoolValid,
-  writeJsonFile,
   type Phase94BaselinePoolArtifact,
   type Phase94BaselineRecord,
   type Phase94RouteCloneRecord,
@@ -72,64 +71,6 @@ function campaignDir(root: string, campaignId: string): string {
   return dir;
 }
 
-function quoteSqlIdentifier(value: string): string {
-  return `"${value.replace(/"/g, '""')}"`;
-}
-
-function rewriteCampaignIdInDatabase(stateDbPath: string, sourceCampaignId: string, targetCampaignId: string): string[] {
-  const db = new Database(stateDbPath);
-  const updatedTables: string[] = [];
-  try {
-    db.pragma("foreign_keys = OFF");
-    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all() as Array<{ name: string }>;
-    const rewrite = db.transaction(() => {
-      if (tables.some((table) => table.name === "campaigns")) {
-        const result = db.prepare("UPDATE campaigns SET id = ?, updated_at = ? WHERE id = ?")
-          .run(targetCampaignId, Date.now(), sourceCampaignId);
-        if (result.changes > 0) updatedTables.push("campaigns");
-      }
-      for (const table of tables) {
-        const tableName = quoteSqlIdentifier(table.name);
-        const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
-        if (!columns.some((column) => column.name === "campaign_id")) continue;
-        const result = db.prepare(`UPDATE ${tableName} SET campaign_id = ? WHERE campaign_id = ?`)
-          .run(targetCampaignId, sourceCampaignId);
-        if (result.changes > 0) updatedTables.push(table.name);
-      }
-    });
-    rewrite();
-    const violations = db.pragma("foreign_key_check") as unknown[];
-    if (violations.length > 0) {
-      throw new Error(`Campaign clone created ${violations.length} foreign-key violation(s).`);
-    }
-    db.pragma("wal_checkpoint(TRUNCATE)");
-    return updatedTables;
-  } finally {
-    db.pragma("foreign_keys = ON");
-    db.close();
-  }
-}
-
-function rewriteCloneFiles(input: {
-  targetDir: string;
-  sourceCampaignId: string;
-  targetCampaignId: string;
-  routeId: Phase94RouteId;
-}): void {
-  const configPath = join(input.targetDir, "config.json");
-  if (existsSync(configPath)) {
-    const config = JSON.parse(readFileSync(configPath, "utf-8")) as Record<string, unknown>;
-    if (config.id === input.sourceCampaignId) config.id = input.targetCampaignId;
-    config.name = `${String(config.name ?? "Phase 94 baseline")} [P94 ${input.routeId}]`;
-    config.updatedAt = Date.now();
-    writeJsonFile(configPath, config);
-  }
-  writeJsonFile(join(input.targetDir, "chat_history.json"), []);
-  rmSync(join(input.targetDir, "checkpoints"), { recursive: true, force: true });
-  rmSync(join(input.targetDir, ".turn-boundaries"), { recursive: true, force: true });
-  rewriteCampaignIdInDatabase(join(input.targetDir, "state.db"), input.sourceCampaignId, input.targetCampaignId);
-}
-
 function baselineForRoute(route: Phase94RouteManifestEntry): BaselineSource {
   const configured = DEFAULT_BASELINES[route.baselinePoolId];
   if (!configured) {
@@ -141,7 +82,7 @@ function baselineForRoute(route: Phase94RouteManifestEntry): BaselineSource {
   };
 }
 
-export function buildPhase94BaselinePool(options: Phase94BaselinePoolOptions): Phase94BaselinePoolArtifact {
+export async function buildPhase94BaselinePool(options: Phase94BaselinePoolOptions): Promise<Phase94BaselinePoolArtifact> {
   const root = campaignsRoot(options.campaignsRoot);
   mkdirSync(root, { recursive: true });
   const baselineRoutes = new Map<string, Phase94RouteId[]>();
@@ -185,13 +126,14 @@ export function buildPhase94BaselinePool(options: Phase94BaselinePoolOptions): P
       if (existsSync(clonePath)) {
         throw new Error(`Clone campaign target already exists: ${clonePath}`);
       }
-      cpSync(sourcePath, clonePath, { recursive: true, errorOnExist: true });
-      rewriteCloneFiles({
-        targetDir: clonePath,
+      const cloneResult = await cloneCampaignCleanStart({
         sourceCampaignId: baseline.sourceCampaignId,
         targetCampaignId: cloneCampaignId,
-        routeId: route.id,
+        nameSuffix: `[P94 ${route.id}]`,
       });
+      if (cloneResult.targetDir !== clonePath) {
+        throw new Error(`Manifest clone returned unexpected target path: ${cloneResult.targetDir}`);
+      }
     }
     routeClones.push(cloneRecord);
   }

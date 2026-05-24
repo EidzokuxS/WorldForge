@@ -102,14 +102,22 @@ Implemented hardening slices after the reset:
   place. Episodic event vectors are purged for lazy rebuild, lore-card vectors
   are preserved as verified non-turn state, and pending in-memory committed
   event queues are cleared after snapshot restore.
+- Manifest-owned clean-start clone: campaign clone creation now runs through a
+  backend clone service that consumes the manifest operation plan. SQLite rows
+  are rewritten or purged by store policy, config IDs are recursively
+  rewritten, chat is reset, vectors are rebuilt from an empty directory, and
+  checkpoint/turn-boundary/image artifacts are rejected instead of copied.
+  Phase 88 and Phase 94 e2e clone helpers call this service rather than
+  defining clone semantics themselves.
 
 Current post-slice status on `develop`:
 
 - Current slice status: manifest restore-policy declarations, the
-  planning-only executor skeleton, and vector-safe turn rollback execution are
-  implemented locally with targeted backend tests and backend typecheck green.
-  Actual manifest-owned clean-start clone execution and vector row-count/hash
-  evidence remain the next blocker cluster.
+  planning-only executor skeleton, vector-safe turn rollback execution, and
+  manifest-owned clean-start clone execution are implemented locally with
+  targeted backend tests and backend typecheck green. Vector row-count/hash
+  evidence and the final architecture-closure audit remain open before
+  long-play acceptance can resume.
 - Long-play status: still NO-GO. These slices close important control-plane
   blockers, but they are not full Phase 95 acceptance evidence.
 

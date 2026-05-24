@@ -198,7 +198,7 @@ async function main(): Promise<void> {
   const liveRunner = args.prepareBaselines
     ? null
     : (await import("./phase-94/live-runner.js")).runPhase94LiveRoutes;
-  const pool = buildPhase94BaselinePool({
+  const pool = await buildPhase94BaselinePool({
     routes,
     runId: id,
     profile: args.profile,

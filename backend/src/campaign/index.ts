@@ -49,3 +49,9 @@ export {
   pruneAutoCheckpoints,
 } from "./checkpoints.js";
 export type { CheckpointMeta } from "./checkpoints.js";
+
+export {
+  cloneCampaignCleanStart,
+  type CleanStartCampaignCloneOptions,
+  type CleanStartCampaignCloneResult,
+} from "./clone.js";
