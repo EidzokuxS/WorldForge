@@ -155,7 +155,11 @@ describe("offscreen catch-up", () => {
       id: "plan-leave",
       summary: "Archivist heads to the depot.",
       deterministic: true,
-      writeScopes: ["npc:npc-nearby:state", "location:loc-away:presence"],
+      writeScopes: [
+        "npc:npc-nearby:state",
+        "location:loc-away:presence",
+        "location:loc-away:recent_event",
+      ],
       action: {
         kind: "travel",
         destinationLocationName: "Depot",
@@ -282,7 +286,11 @@ describe("offscreen catch-up", () => {
       id: "plan-visible-leave",
       summary: "PRIVATE MOONLIGHT ROUTE: Visible Courier leaves before the player looks.",
       deterministic: true,
-      writeScopes: ["npc:npc-visible:state", "location:loc-away:presence"],
+      writeScopes: [
+        "npc:npc-visible:state",
+        "location:loc-away:presence",
+        "location:loc-away:recent_event",
+      ],
       action: {
         kind: "travel",
         destinationLocationName: "Depot",

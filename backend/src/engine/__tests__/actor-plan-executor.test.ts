@@ -160,7 +160,13 @@ describe("actor plan executor", () => {
       id: "plan-travel",
       summary: "Courier goes to the depot.",
       deterministic: true,
-      writeScopes: ["npc:npc-key:state", "location:loc-b:presence"],
+      writeScopes: [
+        "npc:npc-key:state",
+        "location:loc-a:presence",
+        "location:loc-b:presence",
+        "location:loc-b:recent_event",
+        "world:time",
+      ],
       action: {
         kind: "travel",
         destinationLocationName: "Depot",
@@ -179,6 +185,13 @@ describe("actor plan executor", () => {
       tick: 10,
       process: loadProcess(),
       baseWorldVersion: 0,
+      allowedWriteScopes: [
+        "npc:npc-key:state",
+        "location:loc-a:presence",
+        "location:loc-b:presence",
+        "location:loc-b:recent_event",
+        "world:time",
+      ],
     });
 
     expect(result).toMatchObject({
@@ -224,6 +237,133 @@ describe("actor plan executor", () => {
       worldTimeMinutes: 17,
     });
     expect(loadProcess().state.activePlan).toBeNull();
+  });
+
+  it("rejects deterministic travel before DB writes when destination presence is not reserved", () => {
+    setActivePlan({
+      id: "plan-unreserved-destination",
+      summary: "Courier goes to the depot.",
+      deterministic: true,
+      action: {
+        kind: "travel",
+        destinationLocationName: "Depot",
+        summary: "Courier reaches the depot offscreen.",
+      },
+    });
+
+    const result = executeActorPlanStep({
+      campaignId: CAMPAIGN_ID,
+      tick: 10,
+      process: loadProcess(),
+      baseWorldVersion: 0,
+      allowedWriteScopes: [
+        "npc:npc-key:state",
+        "location:loc-a:presence",
+        "location:loc-b:recent_event",
+        "world:time",
+      ],
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failureReason: "actor_plan_write_scope_mismatch:location:loc-b:presence",
+      eventIds: [],
+      stateDeltaRefs: [],
+    });
+    expect(
+      getDb()
+        .select({ currentLocationId: npcs.currentLocationId })
+        .from(npcs)
+        .where(eq(npcs.id, "npc-key"))
+        .get(),
+    ).toMatchObject({ currentLocationId: "loc-a" });
+    expect(getDb().select().from(locationRecentEvents).all()).toEqual([]);
+    expect(getDb().select().from(authorityTraces).all()).toEqual([]);
+    expect(readWorldClock(CAMPAIGN_ID)).toMatchObject({
+      worldVersion: 0,
+      worldTimeMinutes: 10,
+    });
+    expect(loadProcess().state.activePlan).toMatchObject({ id: "plan-unreserved-destination" });
+  });
+
+  it("rejects deterministic travel before DB writes when event scope is not reserved", () => {
+    setActivePlan({
+      id: "plan-unreserved-event",
+      summary: "Courier goes to the depot.",
+      deterministic: true,
+      action: {
+        kind: "travel",
+        destinationLocationName: "Depot",
+        summary: "Courier reaches the depot offscreen.",
+      },
+    });
+
+    const result = executeActorPlanStep({
+      campaignId: CAMPAIGN_ID,
+      tick: 10,
+      process: loadProcess(),
+      baseWorldVersion: 0,
+      allowedWriteScopes: [
+        "npc:npc-key:state",
+        "location:loc-a:presence",
+        "location:loc-b:presence",
+        "world:time",
+      ],
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failureReason: "actor_plan_write_scope_mismatch:location:loc-b:recent_event",
+      eventIds: [],
+      stateDeltaRefs: [],
+    });
+    expect(
+      getDb()
+        .select({ currentLocationId: npcs.currentLocationId })
+        .from(npcs)
+        .where(eq(npcs.id, "npc-key"))
+        .get(),
+    ).toMatchObject({ currentLocationId: "loc-a" });
+    expect(getDb().select().from(locationRecentEvents).all()).toEqual([]);
+    expect(getDb().select().from(authorityTraces).all()).toEqual([]);
+    expect(readWorldClock(CAMPAIGN_ID)).toMatchObject({
+      worldVersion: 0,
+      worldTimeMinutes: 10,
+    });
+    expect(loadProcess().state.activePlan).toMatchObject({ id: "plan-unreserved-event" });
+  });
+
+  it("rejects deterministic record-event before DB writes when event scope is not reserved", () => {
+    setActivePlan({
+      id: "plan-unreserved-record-event",
+      summary: "Courier leaves a depot sign.",
+      deterministic: true,
+      action: {
+        kind: "record_event",
+        locationRef: "Depot",
+        summary: "Courier leaves a sealed sign at the depot.",
+      },
+    });
+
+    const result = executeActorPlanStep({
+      campaignId: CAMPAIGN_ID,
+      tick: 10,
+      process: loadProcess(),
+      baseWorldVersion: 0,
+      allowedWriteScopes: ["npc:npc-key:state"],
+    });
+
+    expect(result).toMatchObject({
+      status: "failed",
+      failureReason: "actor_plan_write_scope_mismatch:location:loc-b:recent_event",
+      eventIds: [],
+      stateDeltaRefs: [],
+    });
+    expect(getDb().select().from(locationRecentEvents).all()).toEqual([]);
+    expect(getDb().select().from(authorityTraces).all()).toEqual([]);
+    expect(loadProcess().state.activePlan).toMatchObject({
+      id: "plan-unreserved-record-event",
+    });
   });
 
   it("records failure and replan work when a deterministic path is invalid", () => {

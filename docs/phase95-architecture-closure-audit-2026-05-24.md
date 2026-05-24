@@ -60,7 +60,7 @@ reviewed on a frozen current tree.
 | Quick-action production | `quick_action_offers` table | quick-action offer service | label/action prose | label/prose suggestions only | source digest, world version, expiry, consumed marker, campaign/player binding, accepted-receipt boundary | `qac_*` handles; stale/forged/replayed tests; GM-loop rollback tests; SSE rollback test |
 | Receipts | authority traces, accepted result refs, settled packet inputs | executor and turn processor | tool observations | none after acceptance | receipt role classification, state-owner matrix, write-scope ledger | replay/rollback fact source; receipt mismatch tests |
 | Actor runtime | key actor process state, actor frame, actor schedule decision | actor scheduler and actor tool execution | actor knowledge retrieval, private memory | actor decision packet requested tools | actor frame binding, base world version, positive allowed scopes, blocked scopes | actor action results and authority traces; positive scope fence tests |
-| Due-world runtime | actor processes, world threads, proposal queue | due-world resolver/proposal executor | forecast/world-brain/guardrails | proposals, deterministic plan payloads | due time, scope conflicts, proposal lifecycle, support-only filtering | deferred proposal rows, skipped/executed traces; **P1: deterministic plan emitted refs need allowed-scope coverage** |
+| Due-world runtime | actor processes, world threads, proposal queue | due-world resolver/proposal executor | forecast/world-brain/guardrails | proposals, deterministic plan payloads | due time, scope conflicts, proposal lifecycle, support-only filtering, deterministic emitted-ref coverage | deferred proposal rows, skipped/executed traces; active-plan scope mismatch tests |
 | Time | `world_clocks`, turn clock ledger | living-world authority clock commit service | UI turn ordinal, narration tick | proposed `advance_time` args | non-negative deltas, no turn-boundary time advance, accepted receipt source | clock ledger rows, public world time, no-op/wait/travel/resume tests |
 | Narrator packet | settled canonical turn packet plus citable fact list | narrator packet builder | recent transcript, opening scene, guardrails, diagnostics | none | redaction audit, support-only classification, packet budget trace | settled packet persisted before final narration; resume from packet |
 | Final narration | backend-issued fact refs and narrator attempt | narration guard/turn processor | style instruction, support context | selected fact refs/evidence refs/order/style | fact-ref required, private/backend term scan, grounding compile, repair/fail-closed | assistant SSE/chat line; no live text fallback; **P2: full turn/resume regression still needed** |
@@ -86,7 +86,7 @@ reviewed on a frozen current tree.
 | Same-turn write scopes | in-memory turn ledger plus accepted refs | turn processor | diagnostic blocked scope lists | none | conflict detection, prefix scope matching | blocks actor/due work later in turn | actor positive allowed-scope test now covers player-owned mutation rejection |
 | World clock | `world_clocks`, `turn_clock_ledger` | living-world authority | UI turn/narration tick | proposed time deltas | accepted clock receipt, non-negative, no boundary time advance | public world time | no-op/wait/travel/restore tests |
 | Actor process | `actor_process_states`, wake signals, actor frame | actor scheduler/actor tools | actor knowledge/private memory | actor decision packet | actor frame binding, route, positive allowed scopes, blocked scopes | actor authority traces and visible consequences | out-of-scope actor mutation rejection test |
-| Due-world proposal/plan | proposals/jobs/world threads/active plans | proposal executor/due-world resolver | forecast/world-brain | proposal payloads and plan actions | lifecycle, due time, scope conflicts, base version | proposal commit receipts, deferred work | P1 deterministic plan emitted-ref coverage and hidden-leak tests |
+| Due-world proposal/plan | proposals/jobs/world threads/active plans | proposal executor/due-world resolver | forecast/world-brain | proposal payloads and plan actions | lifecycle, due time, scope conflicts, base version, active-plan emitted refs | proposal commit receipts, deferred work | deterministic travel/record-event scope mismatch tests; hidden-leak tests remain watch coverage |
 | Inventory/items/documents | items tables/tags/holder state | inventory authority/tool executor | dialogue claims | item/tool args | item existence, holder refs, tag/state descriptors | item public handles/facts | transfer/spawn/document state tests |
 | Knowledge/events | authority traces, events, knowledge rows | tool/proposal owner that accepted the event | recent transcript, observations | summaries as receipt payload only | citable/public/private surface policy | event refs, packet facts | rollback/vector rebuild tests |
 | Narrator packet | settled packet and fact list | narrator packet builder | support context, diagnostics | none | selectable/support/private classification | fact refs/evidence refs | resume packet tests |
@@ -153,6 +153,17 @@ and human-style long-play evidence remain required.
    - Targeted GM-loop and chat-route tests cover solo quick-action rollback,
      receipt-adjacent acceptance, and no quick-action SSE after route rollback.
 
+5. Deterministic due-world actor-plan writes are fenced by emitted refs.
+   - `resolveDueWorldWorkForScope` and exposure catchup pass the scheduler's
+     reserved write scopes into `executeActorPlanStep`.
+   - Actor-plan executor preflights planned actor state, location presence,
+     location recent-event, and world-time refs before writing NPC rows,
+     location events, authority traces, clock state, process state, or replan
+     proposals.
+   - Missing destination/event scopes return a fail-closed actor-plan result
+     with no DB writes; successful deterministic fixtures now reserve
+     `location:*:recent_event` explicitly.
+
 ## Current P1 Queue
 
 1. Adjacent public campaign APIs must be classified or wrapped.
@@ -160,23 +171,17 @@ and human-style long-play evidence remain required.
    - Required closure: mark them explicit admin/system-only surfaces or wrap
      them in public `npcHandle`/`checkpointHandle` contracts.
 
-2. Deterministic due-world actor plans need emitted-ref coverage.
-   - Schedules reserve predicted scopes, but `executeActorPlanStep` does not
-     validate actual emitted `stateDeltaRefs` against those scopes.
-   - Required tests: travel/record-event active plans missing destination,
-     event, or location scopes fail before DB updates.
-
-3. Clean-start clone must become fully manifest-owned.
+2. Clean-start clone must become fully manifest-owned.
    - SQLite uses the manifest plan; non-SQL policies are still partly
      hard-coded and no durable clone manifest is written to the target.
    - Required tests: non-SQL manifest policy mutation fails closed or is
      executed by the plan; target contains clone manifest artifact.
 
-4. Replay-preserving clone/replay must be executable rejection.
+3. Replay-preserving clone/replay must be executable rejection.
    - Manifest has replay policy, but there is no mode that fails closed when a
      caller asks for replay-preserving clone semantics.
 
-5. Clone test coverage must use a representative migrated source fixture.
+4. Clone test coverage must use a representative migrated source fixture.
    - Existing tests prove narrow happy paths. Need source-id residue across all
      rewrite/purge tables and nested JSON/text payloads.
 
@@ -292,7 +297,7 @@ Unverified Assumptions:
 
 ### D. Actor, Due-World, Time
 
-Status: **P1 open after actor P0 closure**
+Status: **Due-world emitted-ref P1 closed locally**
 
 Decision in force: actor and due-world runtime may be creative and proactive,
 but every write must be fenced by positive ownership and same-turn conflict
@@ -303,7 +308,8 @@ Options compared:
 - Block only player-owned scopes during actor work. Good partial guard, but
   insufficient for wrong-NPC/location/item writes.
 - Require positive allowed scopes from schedule/frame and reject emitted refs
-  outside those scopes. Chosen and implemented for actor decision tools.
+  outside those scopes. Chosen and implemented for actor decision tools and
+  deterministic actor-plan execution.
 
 References Used:
 
@@ -311,14 +317,20 @@ References Used:
 - `backend/src/engine/actor-scheduler.ts`
 - `backend/src/engine/actor-plan-executor.ts`
 - `backend/src/engine/due-world-work.ts`
+- `backend/src/engine/actor-exposure-catchup.ts`
 - `backend/src/engine/simulation-write-scope.ts`
 - `backend/src/engine/living-world-authority.ts`
+- `backend/src/engine/__tests__/actor-plan-executor.test.ts`
+- `backend/src/engine/__tests__/key-actor-due-plan.test.ts`
+- `backend/src/engine/__tests__/offscreen-catchup.test.ts`
+- `backend/src/engine/__tests__/key-actor-faction-scheduling-repair.test.ts`
 - Meitner audit, 2026-05-24
 
 Unverified Assumptions:
 
-- Scheduled actor write scopes are specific enough for immediate actor tools.
-  Deterministic due-world plan emitted refs still need their own P1 coverage.
+- Existing long-lived campaigns may contain old deterministic active plans that
+  lack `location:*:recent_event`; these should fail closed until a decision or
+  repair path supplies a complete plan.
 
 ### E. Narrator Packet And Final Narration
 
@@ -428,8 +440,8 @@ This list is the closure guard before any future "architecture GO" claim:
 - [x] Tool executor owns mutation and receipt authority.
 - [x] Same-turn write-scope ledger exists.
 - [x] Actor tool execution has positive allowed-scope fences.
-- [ ] Due-world deterministic plan emitted refs are checked against predicted
-  scopes. P1.
+- [x] Due-world deterministic plan emitted refs are checked against predicted
+  scopes. Targeted actor-plan/due-world tests green.
 - [x] Time has a ledger and no silent turn-boundary minutes.
 - [x] Narrator packet separates citable facts from support context.
 - [x] Final narration is fact-ref based on live path.
@@ -453,8 +465,7 @@ This list is the closure guard before any future "architecture GO" claim:
 
 ## Next Implementation Order
 
-1. Due-world deterministic emitted-ref coverage.
-2. Adjacent public campaign API classification/handle wrapping.
-3. Fully manifest-owned clean-start clone artifact and replay rejection.
-4. Oracle bundled full architecture GO, then Browser gameplay workability,
+1. Adjacent public campaign API classification/handle wrapping.
+2. Fully manifest-owned clean-start clone artifact and replay rejection.
+3. Oracle bundled full architecture GO, then Browser gameplay workability,
     fresh/cloned human-style 60-turn campaigns, and longer soak/replay.

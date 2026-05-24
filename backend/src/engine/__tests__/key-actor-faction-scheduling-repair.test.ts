@@ -277,7 +277,11 @@ describe("Phase 92 key actor and faction scheduling repair acceptance", () => {
       id: "plan-courier-depot",
       summary: "PRIVATE ROUTE: Due Courier carries sealed orders to the depot.",
       deterministic: true,
-      writeScopes: ["npc:npc-due-courier:state", "location:loc-depot:presence"],
+      writeScopes: [
+        "npc:npc-due-courier:state",
+        "location:loc-depot:presence",
+        "location:loc-depot:recent_event",
+      ],
       action: {
         kind: "travel",
         destinationLocationName: "Courier Depot",

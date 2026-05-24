@@ -186,6 +186,7 @@ export function resolveActorExposureCatchup(
         tick: input.tick,
         process,
         baseWorldVersion: readWorldClock(input.campaignId).worldVersion,
+        allowedWriteScopes: decision.writeScopes,
       });
       executed.push(result);
       if (result.status === "completed") {

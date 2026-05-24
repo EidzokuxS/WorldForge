@@ -177,7 +177,11 @@ describe("key actor due plan acceptance", () => {
       id: "plan-deliver",
       summary: "Courier carries a sealed pouch to the depot.",
       deterministic: true,
-      writeScopes: ["npc:npc-due:state", "location:loc-b:presence"],
+      writeScopes: [
+        "npc:npc-due:state",
+        "location:loc-b:presence",
+        "location:loc-b:recent_event",
+      ],
       action: {
         kind: "travel",
         destinationLocationId: "loc-b",

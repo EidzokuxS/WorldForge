@@ -76,6 +76,13 @@ function actorWriteScopes(
       scopes.push(scope);
     }
   }
+  const action = process.state.activePlan?.action;
+  if (
+    action?.kind === "travel"
+    || (action?.kind === "wait" && (action.durationWorldTimeMinutes ?? 0) > 0)
+  ) {
+    scopes.push("world:time");
+  }
   return scopes;
 }
 

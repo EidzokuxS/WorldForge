@@ -271,6 +271,7 @@ export function resolveDueWorldWorkForScope(
         tick: input.tick,
         process,
         baseWorldVersion: readWorldClock(input.campaignId).worldVersion,
+        allowedWriteScopes: decision.reservation?.writeScopes ?? decision.writeScopes,
       });
       executed.push(result);
       if (result.status === "completed") {

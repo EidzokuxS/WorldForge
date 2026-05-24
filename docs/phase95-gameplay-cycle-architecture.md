@@ -92,6 +92,10 @@ Implemented hardening slices after the reset:
   authority-bearing writes without an allowed-scope grant, scheduled actor
   decisions pass their reserved scopes into tool execution, and actor-private
   durable memory is scoped to the actor rather than broad `world:event`.
+- Deterministic due-world emitted-ref fences: due-world and exposure catchup
+  pass reserved scopes into actor-plan execution; the actor-plan executor
+  preflights actor state, location presence, location recent-event, and
+  world-time refs before any NPC/event/authority/clock/process write.
 - Pre-commit blocked-scope guard: the executor now rejects blocked write-scope
   conflicts before mutation where possible and again before authority commit
   from exact backend-visible state-delta refs.
@@ -142,9 +146,10 @@ Current post-slice status on `develop`:
   execution are implemented locally with targeted backend tests and backend
   typecheck green. Public projection guard coverage and frontend raw-id
   rejection are also implemented locally with targeted backend/frontend tests
-  and typechecks green. Pending narration public recovery projection and
-  quick-action accepted-receipt cleanup are implemented locally with route/
-  GM-loop tests and backend/frontend typechecks green.
+  and typechecks green. Pending narration public recovery projection,
+  quick-action accepted-receipt cleanup, and deterministic due-world
+  emitted-ref coverage are implemented locally with route/GM-loop/actor-plan
+  tests and backend/frontend typechecks green.
   The architecture-closure audit is now recorded in
   `docs/phase95-architecture-closure-audit-2026-05-24.md`; it is a NO-GO for
   long-play acceptance until the remaining P1 queue is closed and Oracle/
@@ -160,9 +165,8 @@ Architecture closure audit on 2026-05-24:
   restore-side hash/row evidence verification, episodic vector rollback
   retention/rebuild, and staged rerun-convergent restore.
 - P1s still open: adjacent public campaign API handle/system classification,
-  deterministic due-world emitted ref coverage, fully manifest-owned non-SQL
-  clone policy, executable replay rejection, and broader clone residue fixture
-  coverage.
+  fully manifest-owned non-SQL clone policy, executable replay rejection, and
+  broader clone residue fixture coverage.
 
 ## End State
 

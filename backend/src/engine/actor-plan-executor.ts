@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { locations, npcs } from "../db/schema.js";
 import {
@@ -24,6 +24,10 @@ import {
 } from "./location-graph.js";
 import { recordLocationRecentEvent } from "./location-events.js";
 import { createSimulationProposal } from "./simulation-proposal.js";
+import {
+  findUncoveredWriteRef,
+  type SimulationActorWriteScope,
+} from "./simulation-write-scope.js";
 
 type ActorProcessUpdateStatus = ReturnType<typeof updateActorProcessAfterDecision>["status"];
 
@@ -51,6 +55,7 @@ export interface ExecuteActorPlanStepInput {
   tick: number;
   process: KeyActorProcess;
   baseWorldVersion?: number;
+  allowedWriteScopes?: readonly SimulationActorWriteScope[];
 }
 
 export interface ExecuteActorPlanStepResult {
@@ -198,6 +203,75 @@ function recordActorEvent(input: {
   return event ? [event.id] : [];
 }
 
+function uniqueWriteScopes(
+  values: readonly (SimulationActorWriteScope | null | undefined)[],
+): SimulationActorWriteScope[] {
+  return [...new Set(values.map((value) => value?.trim()).filter((value): value is string =>
+    Boolean(value)))];
+}
+
+function actorStateWriteScope(actorId: string): SimulationActorWriteScope {
+  return `npc:${actorId}:state`;
+}
+
+function locationRecentEventWriteScope(input: {
+  campaignId: string;
+  locationRef: string | null | undefined;
+}): SimulationActorWriteScope | null {
+  const normalizedLocationRef = input.locationRef?.trim();
+  if (!normalizedLocationRef) return null;
+  const location = getDb()
+    .select({
+      id: locations.id,
+      kind: locations.kind,
+      anchorLocationId: locations.anchorLocationId,
+    })
+    .from(locations)
+    .where(
+      sql`${locations.campaignId} = ${input.campaignId} AND (${locations.id} = ${normalizedLocationRef} OR LOWER(${locations.name}) = LOWER(${normalizedLocationRef}))`,
+    )
+    .get();
+  if (!location) return null;
+  const locationId =
+    location.kind === "ephemeral_scene" && location.anchorLocationId
+      ? location.anchorLocationId
+      : location.id;
+  return `location:${locationId}:recent_event`;
+}
+
+function actorPlanWriteScopeFailureResult(input: {
+  process: KeyActorProcess;
+  stateDeltaRef: SimulationActorWriteScope;
+}): ExecuteActorPlanStepResult {
+  return {
+    status: "failed",
+    actorId: input.process.actorId,
+    actorName: input.process.actor.name,
+    summary: `Skipped deterministic plan for ${input.process.actor.name}: planned write ref ${input.stateDeltaRef} was not covered by the reserved write scopes.`,
+    eventIds: [],
+    stateDeltaRefs: [],
+    failureReason: `actor_plan_write_scope_mismatch:${input.stateDeltaRef}`,
+  };
+}
+
+function validateActorPlanWriteScopes(input: {
+  process: KeyActorProcess;
+  stateDeltaRefs: readonly SimulationActorWriteScope[];
+  allowedWriteScopes?: readonly SimulationActorWriteScope[];
+}): ExecuteActorPlanStepResult | null {
+  if (!input.allowedWriteScopes) return null;
+  const uncovered = findUncoveredWriteRef({
+    stateDeltaRefs: input.stateDeltaRefs,
+    allowedWriteScopes: input.allowedWriteScopes,
+  });
+  return uncovered
+    ? actorPlanWriteScopeFailureResult({
+        process: input.process,
+        stateDeltaRef: uncovered.stateDeltaRef,
+      })
+    : null;
+}
+
 function actorPlanSurface(input: {
   locationRef: string | null;
   surface?: KeyActorPlanSurfacePolicy;
@@ -232,10 +306,24 @@ function recordFailure(input: {
   tick: number;
   process: KeyActorProcess;
   reason: string;
+  allowedWriteScopes?: readonly SimulationActorWriteScope[];
 }): ExecuteActorPlanStepResult {
   const clock = readWorldClock(input.campaignId);
   const locationRef = input.process.actor.currentSceneLocationId
     ?? input.process.actor.currentLocationId;
+  const stateDeltaRefs = uniqueWriteScopes([
+    actorStateWriteScope(input.process.actorId),
+    locationRecentEventWriteScope({
+      campaignId: input.campaignId,
+      locationRef,
+    }),
+  ]);
+  const scopeFailure = validateActorPlanWriteScopes({
+    process: input.process,
+    stateDeltaRefs,
+    allowedWriteScopes: input.allowedWriteScopes,
+  });
+  if (scopeFailure) return scopeFailure;
   const eventIds = recordActorEvent({
     campaignId: input.campaignId,
     tick: input.tick,
@@ -260,7 +348,7 @@ function recordFailure(input: {
     elapsedWorldTimeMinutes: 0,
     currentTick: input.tick,
     eventIds,
-    stateDeltaRefs: [`npc:${input.process.actorId}:process`],
+    stateDeltaRefs,
     metadata: {
       planId: input.process.state.activePlan?.id ?? null,
       reason: input.reason,
@@ -313,7 +401,7 @@ function recordFailure(input: {
     summary: input.reason,
     authority,
     eventIds,
-    stateDeltaRefs: [`npc:${input.process.actorId}:process`],
+    stateDeltaRefs,
     failureReason: input.reason,
     replanProposalId: replan.proposalId,
     processUpdateStatus: processUpdate.status,
@@ -328,6 +416,7 @@ function executeTravel(input: ExecuteActorPlanStepInput): ExecuteActorPlanStepRe
       tick: input.tick,
       process: input.process,
       reason: "deterministic travel plan has no travel action payload",
+      allowedWriteScopes: input.allowedWriteScopes,
     });
   }
 
@@ -338,6 +427,7 @@ function executeTravel(input: ExecuteActorPlanStepInput): ExecuteActorPlanStepRe
       tick: input.tick,
       process: input.process,
       reason: "actor has no current location",
+      allowedWriteScopes: input.allowedWriteScopes,
     });
   }
 
@@ -354,6 +444,7 @@ function executeTravel(input: ExecuteActorPlanStepInput): ExecuteActorPlanStepRe
       tick: input.tick,
       process: input.process,
       reason: "destination is not a known traversable location",
+      allowedWriteScopes: input.allowedWriteScopes,
     });
   }
 
@@ -371,6 +462,7 @@ function executeTravel(input: ExecuteActorPlanStepInput): ExecuteActorPlanStepRe
       tick: input.tick,
       process: input.process,
       reason: `${destination.locationName} is not connected to ${findLocationName(actorLocationId) ?? "the actor's current location"}`,
+      allowedWriteScopes: input.allowedWriteScopes,
     });
   }
 
@@ -386,8 +478,26 @@ function executeTravel(input: ExecuteActorPlanStepInput): ExecuteActorPlanStepRe
       tick: input.tick,
       process: input.process,
       reason: "actor NPC record disappeared before travel could commit",
+      allowedWriteScopes: input.allowedWriteScopes,
     });
   }
+
+  const plannedStateDeltaRefs = uniqueWriteScopes([
+    actorStateWriteScope(input.process.actorId),
+    `location:${actorLocationId}:presence`,
+    `location:${destination.locationId}:presence`,
+    locationRecentEventWriteScope({
+      campaignId: input.campaignId,
+      locationRef: destination.locationId,
+    }),
+    path.totalTravelCost > 0 ? "world:time" : null,
+  ]);
+  const scopeFailure = validateActorPlanWriteScopes({
+    process: input.process,
+    stateDeltaRefs: plannedStateDeltaRefs,
+    allowedWriteScopes: input.allowedWriteScopes,
+  });
+  if (scopeFailure) return scopeFailure;
 
   const npcRecord = hydrateStoredNpcRecord(npc, {
     currentLocationName: destination.locationName,
@@ -426,10 +536,15 @@ function executeTravel(input: ExecuteActorPlanStepInput): ExecuteActorPlanStepRe
   });
   const clock = readWorldClock(input.campaignId);
   const stateDeltaRefs = [
-    `npc:${input.process.actorId}:location`,
+    actorStateWriteScope(input.process.actorId),
     `location:${actorLocationId}:presence`,
     `location:${destination.locationId}:presence`,
-    ...eventIds.map((eventId) => `event:${eventId}`),
+    ...(
+      eventIds.length > 0
+        ? [`location:${destination.locationId}:recent_event`]
+        : []
+    ),
+    ...(path.totalTravelCost > 0 ? ["world:time"] : []),
   ];
   const authority = commitAuthorityTrace({
     campaignId: input.campaignId,
@@ -483,6 +598,7 @@ function executeRecordEvent(input: ExecuteActorPlanStepInput): ExecuteActorPlanS
       tick: input.tick,
       process: input.process,
       reason: "deterministic event plan has no event action payload",
+      allowedWriteScopes: input.allowedWriteScopes,
     });
   }
 
@@ -494,6 +610,19 @@ function executeRecordEvent(input: ExecuteActorPlanStepInput): ExecuteActorPlanS
     locationRef,
     surface: action.surface,
   });
+  const plannedStateDeltaRefs = uniqueWriteScopes([
+    actorStateWriteScope(input.process.actorId),
+    locationRecentEventWriteScope({
+      campaignId: input.campaignId,
+      locationRef,
+    }),
+  ]);
+  const scopeFailure = validateActorPlanWriteScopes({
+    process: input.process,
+    stateDeltaRefs: plannedStateDeltaRefs,
+    allowedWriteScopes: input.allowedWriteScopes,
+  });
+  if (scopeFailure) return scopeFailure;
   const eventIds = recordActorEvent({
     campaignId: input.campaignId,
     tick: input.tick,
@@ -507,8 +636,15 @@ function executeRecordEvent(input: ExecuteActorPlanStepInput): ExecuteActorPlanS
   });
   const clock = readWorldClock(input.campaignId);
   const stateDeltaRefs = [
-    ...eventIds.map((eventId) => `event:${eventId}`),
-    `npc:${input.process.actorId}:process`,
+    ...(
+      eventIds.length > 0
+        ? [locationRecentEventWriteScope({
+            campaignId: input.campaignId,
+            locationRef,
+          })].filter((ref): ref is SimulationActorWriteScope => Boolean(ref))
+        : []
+    ),
+    actorStateWriteScope(input.process.actorId),
   ];
   const authority = commitAuthorityTrace({
     campaignId: input.campaignId,
@@ -560,18 +696,29 @@ function executeWait(input: ExecuteActorPlanStepInput): ExecuteActorPlanStepResu
       tick: input.tick,
       process: input.process,
       reason: "deterministic wait plan has no wait action payload",
+      allowedWriteScopes: input.allowedWriteScopes,
     });
   }
 
   const summary = action.summary ?? `${input.process.actor.name} continues waiting.`;
   const clock = readWorldClock(input.campaignId);
-  const stateDeltaRefs = [`npc:${input.process.actorId}:process`];
+  const duration = action.durationWorldTimeMinutes ?? 0;
+  const stateDeltaRefs = uniqueWriteScopes([
+    actorStateWriteScope(input.process.actorId),
+    duration > 0 ? "world:time" : null,
+  ]);
+  const scopeFailure = validateActorPlanWriteScopes({
+    process: input.process,
+    stateDeltaRefs,
+    allowedWriteScopes: input.allowedWriteScopes,
+  });
+  if (scopeFailure) return scopeFailure;
   const authority = commitAuthorityTrace({
     campaignId: input.campaignId,
     operation: "actor_plan:wait",
     baseWorldVersion: clock.worldVersion,
     sourceEntity: { type: "npc", id: input.process.actorId },
-    elapsedWorldTimeMinutes: action.durationWorldTimeMinutes ?? 0,
+    elapsedWorldTimeMinutes: duration,
     currentTick: input.tick,
     stateDeltaRefs,
     metadata: {
@@ -676,6 +823,7 @@ export function executeActorPlanStep(
         tick: input.tick,
         process: input.process,
         reason: "deterministic plan has no executable action payload",
+        allowedWriteScopes: input.allowedWriteScopes,
       }));
     } catch (error) {
       if (error instanceof ActorPlanProcessUpdateError) {
