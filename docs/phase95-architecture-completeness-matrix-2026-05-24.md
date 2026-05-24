@@ -260,14 +260,16 @@ architecture boundaries by accident.
 
 These items are intentionally not buried under "green tests":
 
-- P2: world-brain/forecast/guardrail hidden-leak coverage should become more
-  exhaustive during long-play hardening.
 - P2: faction/command-node row semantics deserve a focused audit beyond clone
   residue coverage.
 - P2: observability retention/redaction policy should be made explicit before
   remote/long-running trace publication.
 - P2: Phase 88 harness prose still says clone copies DBs even though code now
   calls the clean-start clone service.
+- Closed P2: world-brain/forecast/guardrail hidden-leak coverage is hardened
+  for current known support lanes. Final-visible prompt assembly reprojects
+  world-brain direction before formatting visible sections, and grounded
+  narration rejects `guardrail:*` ledger refs as citation/repair evidence.
 - Closed P2: frontend debug reasoning is developer-mode gated. Player builds do
   not expose the settings control and `GamePage` omits `onReasoning` handlers
   unless `NEXT_PUBLIC_WORLDFORGE_DEBUG_REASONING=1`.

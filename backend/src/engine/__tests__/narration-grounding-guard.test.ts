@@ -1685,6 +1685,65 @@ describe("grounded sentence draft compiler", () => {
     ).toThrow(/unknown or disallowed evidence ref/u);
   });
 
+  it("keeps guardrail ledger entries out of citation refs and repair evidence", () => {
+    const packet = createPacket();
+    packet.evidenceLedger = [
+      {
+        id: "guardrail:1",
+        category: "guardrail",
+        summary: "Do not reveal Forest Outpost forecast pressure.",
+      },
+      {
+        id: "perceivable_effect:effect-pressure-clock",
+        category: "perceivable_effect",
+        summary: "The visible pressure clock remains active.",
+        sourceId: "effect-pressure-clock",
+      },
+    ];
+
+    expect(isNarrationDraftCitationEvidence(packet.evidenceLedger[0]!, packet)).toBe(false);
+    const allowedRefs = getAllowedNarrationCitationEvidenceRefs(packet);
+    expect(allowedRefs.map((entry) => ({
+      refId: entry.refId,
+      id: entry.evidence.id,
+      category: entry.evidence.category,
+    }))).toEqual([
+      {
+        refId: "e1",
+        id: "perceivable_effect:effect-pressure-clock",
+        category: "perceivable_effect",
+      },
+    ]);
+    expect(JSON.stringify(allowedRefs)).not.toContain("Forest Outpost");
+
+    expect(() =>
+      compileGroundedSentenceDraftToNarrationDraft({
+        packet,
+        draft: {
+          version: "grounded-sentence-draft.v2",
+          sentences: [
+            {
+              text: "The visible pressure clock remains active.",
+              evidenceRefs: [
+                "guardrail:1",
+                "perceivable_effect:effect-pressure-clock",
+              ],
+            },
+          ],
+        },
+      }),
+    ).toThrow(/unknown or disallowed evidence ref/u);
+
+    const repairAddendum = buildGroundedSentenceDraftRepairAddendum({
+      packet,
+      failureReason: "Guardrail was cited as evidence.",
+    });
+    expect(repairAddendum).not.toContain("guardrail:1");
+    expect(repairAddendum).not.toContain("Forest Outpost");
+    expect(repairAddendum).toContain("e1");
+    expect(repairAddendum).toContain("The visible pressure clock remains active.");
+  });
+
   it("supports static current inventory facts without treating them as inventory changes", () => {
     const packet = createPacket();
     packet.currentInventory = [

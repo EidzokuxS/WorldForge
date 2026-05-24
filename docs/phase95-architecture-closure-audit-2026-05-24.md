@@ -246,6 +246,14 @@ remain required before calling the gameplay loop mature.
 
 Recently closed P2:
 
+- World-brain/forecast/guardrail hidden-leak coverage is locally hardened for
+  current known support lanes. Final-visible prompt assembly now reprojects
+  any supplied world-brain direction through the player-perceivable projection
+  before formatting scene direction or guardrails, so leftover hidden/support
+  guardrails cannot become narrator prompt truth. Grounded narration tests also
+  assert `guardrail:*` ledger entries are not legal citation refs, cannot be
+  mixed with valid evidence refs, and are omitted from repair evidence prompts.
+
 - Frontend raw reasoning is developer-gated instead of player-toggle-gated.
   Backend still keeps provider reasoning server-side and strips player SSE
   reasoning events; the frontend now hides the settings control outside

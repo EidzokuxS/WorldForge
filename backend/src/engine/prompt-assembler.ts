@@ -55,6 +55,7 @@ import {
   formatHiddenWorldBrainDirectionBlock,
   formatPlayerPerceivableWorldBrainDirectionBlock,
   formatWorldBrainNarrationGuardrails,
+  toPlayerPerceivableWorldBrainDirection,
   type WorldBrainSceneDirection,
 } from "./world-brain.js";
 import { buildJudgeAdjudicationContract } from "./hidden-adjudication.js";
@@ -175,10 +176,11 @@ function buildVisibleWorldBrainSections(
   if (!direction) {
     return [];
   }
+  const visibleDirection = toPlayerPerceivableWorldBrainDirection(direction);
 
-  const sceneDirectionContent = formatPlayerPerceivableWorldBrainDirectionBlock(direction)
+  const sceneDirectionContent = formatPlayerPerceivableWorldBrainDirectionBlock(visibleDirection)
     .replace(/^\[SCENE DIRECTION\]\n/, "");
-  const guardrailContent = formatWorldBrainNarrationGuardrails(direction)
+  const guardrailContent = formatWorldBrainNarrationGuardrails(visibleDirection)
     .replace(/^\[NARRATION GUARDRAILS\]\n/, "");
 
   return [

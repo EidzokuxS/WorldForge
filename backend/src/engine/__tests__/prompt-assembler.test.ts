@@ -3067,5 +3067,6 @@ describe("assemblePrompt", () => {
     expect(finalPrompt.prompt).not.toContain("Background actors: Choso");
     expect(finalPrompt.prompt).not.toContain("Choso");
     expect(finalPrompt.prompt).not.toContain("A hidden observer is judging whether to surface.");
+    expect(finalPrompt.prompt).not.toContain("Do not reveal the hidden observer by name.");
   });
 });
