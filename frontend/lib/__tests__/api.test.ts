@@ -7,11 +7,13 @@ import {
   chatResume,
   chatRetry,
   chatUndo,
+  deleteCheckpointApi,
   deleteLoreCardById,
   generateWorld,
   generateCharacter,
   getWorldData,
   importV2Card,
+  loadCheckpointApi,
   IngestionError,
   parseCharacter,
   parseTurnSSE,
@@ -62,6 +64,7 @@ const PUBLIC_HANDLES = {
   placeOtherScene: "pdto_place_44444444444444444444444444444444",
   relationship: "pdto_relationship_11111111111111111111111111111111",
   routeNext: "pdto_route_11111111111111111111111111111111",
+  checkpoint: "pdto_checkpoint_11111111111111111111111111111111",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -98,6 +101,56 @@ describe("readErrorMessage", () => {
       statusText: "",
     } as unknown as Response;
     expect(await readErrorMessage(response)).toBe("Request failed");
+  });
+});
+
+describe("checkpoint API helpers", () => {
+  const fetchMock = vi.fn<typeof fetch>();
+
+  afterEach(() => {
+    fetchMock.mockReset();
+    vi.unstubAllGlobals();
+  });
+
+  it("loads checkpoints through public handles in route paths", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({
+        id: PUBLIC_HANDLES.checkpoint,
+        checkpointHandle: PUBLIC_HANDLES.checkpoint,
+        name: "Before the bridge",
+        description: "",
+        createdAt: 1779610000000,
+        auto: false,
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await loadCheckpointApi("camp-1", PUBLIC_HANDLES.checkpoint);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `http://localhost:3001/api/campaigns/camp-1/checkpoints/${PUBLIC_HANDLES.checkpoint}/load`,
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("deletes checkpoints through public handles in route paths", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await deleteCheckpointApi("camp-1", PUBLIC_HANDLES.checkpoint);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `http://localhost:3001/api/campaigns/camp-1/checkpoints/${PUBLIC_HANDLES.checkpoint}`,
+      expect.objectContaining({ method: "DELETE" }),
+    );
   });
 });
 

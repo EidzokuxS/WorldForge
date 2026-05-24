@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 export const PUBLIC_DTO_HANDLE_KIND_VALUES = [
   "actor",
+  "checkpoint",
   "event",
   "faction",
   "item",

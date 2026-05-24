@@ -292,6 +292,7 @@ function parseLocationPersistence(value: unknown): LocationPersistence | null {
 
 type PublicDtoHandleKind =
   | "actor"
+  | "checkpoint"
   | "event"
   | "faction"
   | "item"
@@ -302,7 +303,7 @@ type PublicDtoHandleKind =
   | "entity";
 
 const PUBLIC_DTO_HANDLE_PATTERN =
-  /^pdto_(actor|event|faction|item|place|relationship|route|template|entity)_[a-f0-9]{32}$/u;
+  /^pdto_(actor|checkpoint|event|faction|item|place|relationship|route|template|entity)_[a-f0-9]{32}$/u;
 
 function publicDtoHandle(value: unknown, kinds: readonly PublicDtoHandleKind[]): string | null {
   if (typeof value !== "string") {
@@ -1804,18 +1805,18 @@ export function createCheckpointApi(
 
 export function loadCheckpointApi(
   campaignId: string,
-  checkpointId: string,
+  checkpointHandle: string,
 ): Promise<CheckpointMeta> {
   return apiPost<CheckpointMeta>(
-    `/api/campaigns/${campaignId}/checkpoints/${checkpointId}/load`,
+    `/api/campaigns/${campaignId}/checkpoints/${checkpointHandle}/load`,
   );
 }
 
 export function deleteCheckpointApi(
   campaignId: string,
-  checkpointId: string,
+  checkpointHandle: string,
 ): Promise<void> {
-  return apiDelete(`/api/campaigns/${campaignId}/checkpoints/${checkpointId}`);
+  return apiDelete(`/api/campaigns/${campaignId}/checkpoints/${checkpointHandle}`);
 }
 
 // ───── WorldBook Import ─────

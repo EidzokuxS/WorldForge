@@ -342,7 +342,8 @@ export type ResolveStartConditionsResult = ResolvedStartConditions;
 export type LoadoutPreviewResult = CanonicalLoadoutPreview;
 
 export type CheckpointMeta = {
-  id: string;
+  id: PublicDtoHandle;
+  checkpointHandle: PublicDtoHandle;
   name: string;
   description: string;
   createdAt: number;

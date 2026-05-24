@@ -109,6 +109,11 @@ Implemented hardening slices after the reset:
 - Lookup public projection boundary: `/chat/lookup` now treats grounded lookup
   output as a support/read-only result, projects it through a typed
   player-facing DTO, and persists only the projected answer into chat history.
+- Adjacent campaign public APIs: checkpoint create/list/load/delete now expose
+  `pdto_checkpoint_*` handles and resolve them to storage ids only inside the
+  backend route. NPC promote now accepts public actor handles and returns only
+  actor/npc handles, not raw `npcId`. The frontend checkpoint panel uses
+  `checkpointHandle` for load/delete actions.
 - Manifest restore-policy executor skeleton: the store manifest now separates
   clean-start clone policy from physical turn-rollback and checkpoint-restore
   policy. Unknown stores fail closed, and the planning executor derives one
@@ -149,7 +154,9 @@ Current post-slice status on `develop`:
   and typechecks green. Pending narration public recovery projection,
   quick-action accepted-receipt cleanup, and deterministic due-world
   emitted-ref coverage are implemented locally with route/GM-loop/actor-plan
-  tests and backend/frontend typechecks green.
+  tests and backend/frontend typechecks green. Adjacent checkpoint/NPC public
+  API handle wrapping is implemented locally with route/API/UI tests and
+  backend/frontend typechecks green.
   The architecture-closure audit is now recorded in
   `docs/phase95-architecture-closure-audit-2026-05-24.md`; it is a NO-GO for
   long-play acceptance until the remaining P1 queue is closed and Oracle/
@@ -164,9 +171,8 @@ Architecture closure audit on 2026-05-24:
 - P0s from that audit are now locally implemented: actor positive write scopes,
   restore-side hash/row evidence verification, episodic vector rollback
   retention/rebuild, and staged rerun-convergent restore.
-- P1s still open: adjacent public campaign API handle/system classification,
-  fully manifest-owned non-SQL clone policy, executable replay rejection, and
-  broader clone residue fixture coverage.
+- P1s still open: fully manifest-owned non-SQL clone policy, executable replay
+  rejection, and broader clone residue fixture coverage.
 
 ## End State
 
@@ -220,9 +226,9 @@ a brittle test survival mode.
 P0 blockers before broad implementation:
 
 - Public projection has local closure for `/world`, inventory, location
-  entities, quick actions, action/retry/resume/opening SSE, history read, and
-  `/chat/lookup`; it still needs a fresh bundled Oracle review before it can
-  be treated as an acceptance gate closure.
+  entities, quick actions, action/retry/resume/opening SSE, history read,
+  `/chat/lookup`, checkpoint APIs, and NPC promote; it still needs a fresh
+  bundled Oracle review before it can be treated as an acceptance gate closure.
 - Clone/replay/rollback/vector lifecycle is only partially contract-closed.
   Oracle R2 confirms the next implementation must make manifest policy
   declarations executable and route both clean-start clone and turn rollback
@@ -620,9 +626,10 @@ Unverified Assumptions:
      legacy raw id authority and keep `pdto_*`/`qac_*` as the public boundary.
    - Pending narration recovery now exposes coarse state plus an opaque resume
      token instead of saga internals.
-   - Next: finish the remaining adjacent public/admin surfaces so they do not
-     expose raw backend ids, authority refs, tool internals, or support-only
-     private terms.
+   - Checkpoint public APIs and NPC promote now use public handles rather than
+     raw storage ids.
+   - Next: keep any newly discovered public/admin surface either handle-wrapped
+     or explicitly system-only before it can join gameplay acceptance.
    - Verify with targeted backend/frontend tests plus in-app Browser evidence
      when UI behavior changes.
    - Run GitNexus impact before symbol edits and detect_changes before commit.

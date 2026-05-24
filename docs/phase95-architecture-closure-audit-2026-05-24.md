@@ -39,9 +39,11 @@ been implemented locally. The restore/vector/recovery P0 queue has also now
 been implemented locally with targeted contract tests. The public projection
 guard, frontend raw-id fallback, pending-narration public recovery DTO P1, and
 quick-action accepted-receipt cleanup have also been implemented locally with
-targeted backend/frontend tests and frontend/backend typechecks, but the branch
-remains NO-GO for long-play acceptance until the remaining P1 queue closes,
-full verification, GitNexus, Oracle bundled review, Browser evidence, and
+targeted backend/frontend tests and frontend/backend typechecks. The adjacent
+checkpoint/NPC public API handle wrapping P1 has also been implemented locally
+with route/API/frontend tests and typechecks. The branch remains NO-GO for
+long-play acceptance until the remaining clone/replay P1 queue closes, full
+verification, GitNexus, Oracle bundled review, Browser evidence, and
 human-style play/soak evidence.
 
 No long human-style 60-turn, cloned-world, or 600-turn soak acceptance should
@@ -64,7 +66,7 @@ reviewed on a frozen current tree.
 | Time | `world_clocks`, turn clock ledger | living-world authority clock commit service | UI turn ordinal, narration tick | proposed `advance_time` args | non-negative deltas, no turn-boundary time advance, accepted receipt source | clock ledger rows, public world time, no-op/wait/travel/resume tests |
 | Narrator packet | settled canonical turn packet plus citable fact list | narrator packet builder | recent transcript, opening scene, guardrails, diagnostics | none | redaction audit, support-only classification, packet budget trace | settled packet persisted before final narration; resume from packet |
 | Final narration | backend-issued fact refs and narrator attempt | narration guard/turn processor | style instruction, support context | selected fact refs/evidence refs/order/style | fact-ref required, private/backend term scan, grounding compile, repair/fail-closed | assistant SSE/chat line; no live text fallback; **P2: full turn/resume regression still needed** |
-| SSE/API projection | player-facing DTO factories | projection modules and route projectors | internal saga/tool/state objects | none | public DTO schemas, backend-ref guard, explicit event allowlists, legacy raw-id rejection | `turn_resolution`, lookup, world, inventory, history tests; raw legacy id guard targeted test green |
+| SSE/API projection | player-facing DTO factories | projection modules and route projectors | internal saga/tool/state objects | none | public DTO schemas, backend-ref guard, explicit event allowlists, legacy raw-id rejection | `turn_resolution`, lookup, world, inventory, history, checkpoint, NPC promote tests; raw legacy id guard targeted test green |
 | Frontend projection | `frontend/lib/api.ts` parsed DTOs | frontend API parser | debug state, local render state | none | public handle parser, SSE parser, malformed payload errors, no raw fallback authority | API parser rejects/drops raw `loc-*`/`npc-*`/`item-*` fallbacks; Browser evidence still required |
 | Persistence bundles | `store-manifest.json` plus campaign stores | manifest/bundle capture and restore services | evidence hashes, playtest reports | none | manifest coverage, policy schemas, path safety, hash/row-count recomputation | checkpoint/turn snapshot tests; corrupted SQLite/vector evidence fails before live copy |
 | Clone | source campaign stores plus manifest plan | clean-start clone service | old source artifacts as forensic context only | none | active-turn rejection, id rewrite/purge/rebuild plan, path safety | clean clone manifest and clone tests; **P1: non-SQL policies partly hard-coded, no durable clone artifact** |
@@ -92,7 +94,7 @@ reviewed on a frozen current tree.
 | Narrator packet | settled packet and fact list | narrator packet builder | support context, diagnostics | none | selectable/support/private classification | fact refs/evidence refs | resume packet tests |
 | Final narration attempt | narrator attempt record and compiled text | narration guard | style and support prompts | selected fact refs and style/order | selected ref existence, citable kind, private-term guard | public assistant message | no text fallback/unsupported term tests; full E2E gap remains |
 | Chat history/pending resume | chat history file plus saga state | chat route/resume owner | internal metadata | none | history projection, resume token check | public history DTO | coarse public recovery state plus opaque resume token; route tests reject saga status/id leakage |
-| Checkpoints/artifacts | checkpoint directories and manifest | checkpoint service | checkpoint UI labels | none | manifest restorable checks, path safety | checkpoint handles/metadata | P1 raw checkpoint ids need system-only or handle contract |
+| Checkpoints/artifacts | checkpoint directories and manifest | checkpoint service | checkpoint UI labels | none | manifest restorable checks, path safety, public handle resolver | `pdto_checkpoint_*` metadata; storage ids stay internal | route/API/UI tests reject raw checkpoint ids and resolve handles to storage ids |
 | Vectors | LanceDB episodic/lore tables | vector services plus rollback policy | vector evidence stats | none | campaign/audience filters, row counts, hashes | semantic retrieval only | restore verifies evidence; turn rollback preserves matching pre-turn vectors and rebuilds missing rows from `location_recent_events` |
 | Observability | logs, trace spans, eval artifacts | observability/test harness | local-only full payloads | human/Codex moves | no private leakage to public/remote, evidence rubric | trace ids, verdict reports | Browser/UI, GitNexus, Oracle, human-style playtest evidence |
 
@@ -164,24 +166,28 @@ and human-style long-play evidence remain required.
      with no DB writes; successful deterministic fixtures now reserve
      `location:*:recent_event` explicitly.
 
+6. Adjacent public campaign APIs are handle-wrapped.
+   - Checkpoint create/list/load/delete routes now project `pdto_checkpoint_*`
+     handles and resolve handles back to storage ids only inside the route.
+   - Raw checkpoint ids are rejected at the public route boundary.
+   - NPC promote now accepts public actor handles, returns actor/npc handles,
+     and no longer exposes raw `npcId`.
+   - Frontend checkpoint API/panel actions use `checkpointHandle` for load and
+     delete.
+
 ## Current P1 Queue
 
-1. Adjacent public campaign APIs must be classified or wrapped.
-   - NPC promote and checkpoint APIs still trade raw ids.
-   - Required closure: mark them explicit admin/system-only surfaces or wrap
-     them in public `npcHandle`/`checkpointHandle` contracts.
-
-2. Clean-start clone must become fully manifest-owned.
+1. Clean-start clone must become fully manifest-owned.
    - SQLite uses the manifest plan; non-SQL policies are still partly
      hard-coded and no durable clone manifest is written to the target.
    - Required tests: non-SQL manifest policy mutation fails closed or is
      executed by the plan; target contains clone manifest artifact.
 
-3. Replay-preserving clone/replay must be executable rejection.
+2. Replay-preserving clone/replay must be executable rejection.
    - Manifest has replay policy, but there is no mode that fails closed when a
      caller asks for replay-preserving clone semantics.
 
-4. Clone test coverage must use a representative migrated source fixture.
+3. Clone test coverage must use a representative migrated source fixture.
    - Existing tests prove narrow happy paths. Need source-id residue across all
      rewrite/purge tables and nested JSON/text payloads.
 
@@ -201,7 +207,7 @@ and human-style long-play evidence remain required.
 
 ### A. Intake, Public Projection, Frontend
 
-Status: **P1 partly closed; adjacent public surfaces still open**
+Status: **P1 closed for current known public campaign surfaces**
 
 Decision in force: durable quick-action handles and backend-issued public DTO
 handles are the player-facing authority boundary.
@@ -224,14 +230,14 @@ References Used:
 - `backend/src/engine/public-dto-handles.ts`
 - `frontend/lib/api.ts`
 - `frontend/lib/__tests__/api.test.ts`
+- `frontend/components/game/checkpoint-panel.tsx`
+- `frontend/components/game/__tests__/checkpoint-panel.test.tsx`
 - `backend/src/engine/__tests__/gameplay-control-plane-contract.test.ts`
 - `frontend/app/game/page.tsx`
 - Read-only public projection/frontend audit from Tesla, 2026-05-24
 
 Unverified Assumptions:
 
-- Checkpoint/NPC admin routes can either move behind system-only semantics or
-  be wrapped without a broad UI redesign.
 - In-app Browser evidence will confirm the stricter frontend parser still
   renders current backend `pdto_*` payloads in the real game UI.
 
@@ -452,7 +458,8 @@ This list is the closure guard before any future "architecture GO" claim:
   tests and frontend typecheck green.
 - [x] Pending narration exposes only public recovery state. Targeted route
   tests green.
-- [ ] Checkpoint/NPC adjacent APIs are system-only or handle-wrapped. P1.
+- [x] Checkpoint/NPC adjacent APIs are handle-wrapped. Targeted route/API/UI
+  tests green.
 - [x] Store manifest covers current stores.
 - [x] Restore verifies manifest evidence before copy.
 - [x] Restore uses a staged idempotent lifecycle for rerun convergence.
@@ -465,7 +472,7 @@ This list is the closure guard before any future "architecture GO" claim:
 
 ## Next Implementation Order
 
-1. Adjacent public campaign API classification/handle wrapping.
-2. Fully manifest-owned clean-start clone artifact and replay rejection.
+1. Fully manifest-owned clean-start clone artifact and replay rejection.
+2. Broader clone residue fixture coverage.
 3. Oracle bundled full architecture GO, then Browser gameplay workability,
     fresh/cloned human-style 60-turn campaigns, and longer soak/replay.

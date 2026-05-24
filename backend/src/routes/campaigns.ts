@@ -12,6 +12,7 @@ import {
   loadCheckpoint,
   deleteCheckpoint,
 } from "../campaign/index.js";
+import type { CheckpointMeta } from "../campaign/index.js";
 import { getDb } from "../db/index.js";
 import { factions, items, locations, npcs, players, relationships } from "../db/schema.js";
 import { getErrorMessage, getErrorStatus } from "../lib/index.js";
@@ -59,6 +60,35 @@ function requiredPublicHandle(
   sourceId: string | number,
 ) {
   return requirePublicDtoHandle({ campaignId, kind, sourceId });
+}
+
+type PublicCheckpointMeta = Omit<CheckpointMeta, "id"> & {
+  id: string;
+  checkpointHandle: string;
+};
+
+function toPublicCheckpointMeta(
+  campaignId: string,
+  checkpoint: CheckpointMeta,
+): PublicCheckpointMeta {
+  const checkpointHandle = requiredPublicHandle(campaignId, "checkpoint", checkpoint.id);
+  return {
+    ...checkpoint,
+    id: checkpointHandle,
+    checkpointHandle,
+  };
+}
+
+function resolvePublicCheckpointMeta(
+  campaignId: string,
+  checkpointHandle: string,
+): CheckpointMeta | null {
+  return resolvePublicDtoHandle({
+    campaignId,
+    kind: "checkpoint",
+    handle: checkpointHandle,
+    rows: listCheckpoints(campaignId),
+  });
 }
 
 function sanitizeCharacterDraftForPublicProjection<T extends ReturnType<typeof toCharacterDraft>>(
@@ -698,7 +728,7 @@ app.post("/:id/load", async (c) => {
 app.post("/:id/npcs/:npcId/promote", async (c) => {
   try {
     const campaignId = c.req.param("id");
-    const npcId = c.req.param("npcId");
+    const npcHandle = c.req.param("npcId");
     assertSafeId(campaignId);
 
     const activeCampaign = requireActiveCampaign(c, campaignId);
@@ -711,12 +741,17 @@ app.post("/:id/npcs/:npcId/promote", async (c) => {
 
     const db = getDb();
 
-    // Find the NPC
-    const npc = db
+    const campaignNpcs = db
       .select({ id: npcs.id, name: npcs.name, tier: npcs.tier })
       .from(npcs)
-      .where(and(eq(npcs.id, npcId), eq(npcs.campaignId, campaignId)))
-      .get();
+      .where(eq(npcs.campaignId, campaignId))
+      .all();
+    const npc = resolvePublicDtoHandle({
+      campaignId,
+      kind: "actor",
+      handle: npcHandle,
+      rows: campaignNpcs,
+    });
 
     if (!npc) {
       return c.json({ error: "NPC not found." }, 404);
@@ -737,15 +772,22 @@ app.post("/:id/npcs/:npcId/promote", async (c) => {
     // Apply promotion
     db.update(npcs)
       .set({ tier: newTier })
-      .where(eq(npcs.id, npcId))
+      .where(and(eq(npcs.id, npc.id), eq(npcs.campaignId, campaignId)))
       .run();
 
-    return c.json({
+    const actorHandle = requiredPublicHandle(campaignId, "actor", npc.id);
+    const payload = {
       ok: true,
-      npcId: npc.id,
+      id: actorHandle,
+      actorHandle,
+      npcHandle: actorHandle,
       name: npc.name,
       oldTier: npc.tier,
       newTier,
+    };
+    assertPublicProjectionPayload({ surface: "npc_promote", payload });
+    return c.json({
+      ...payload,
     });
   } catch (error) {
     return c.json(
@@ -772,7 +814,9 @@ app.post("/:id/checkpoints", async (c) => {
       name: result.data.name,
       description: result.data.description,
     });
-    return c.json(checkpoint, 201);
+    const payload = toPublicCheckpointMeta(id, checkpoint);
+    assertPublicProjectionPayload({ surface: "checkpoints", payload });
+    return c.json(payload, 201);
   } catch (error) {
     return c.json(
       { error: getErrorMessage(error, "Failed to create checkpoint.") },
@@ -789,7 +833,11 @@ app.get("/:id/checkpoints", (c) => {
     const activeCampaign = requireActiveCampaign(c, id);
     if (activeCampaign instanceof Response) return activeCampaign;
 
-    return c.json(listCheckpoints(id));
+    const payload = listCheckpoints(id).map((checkpoint) => (
+      toPublicCheckpointMeta(id, checkpoint)
+    ));
+    assertPublicProjectionPayload({ surface: "checkpoints", payload });
+    return c.json(payload);
   } catch (error) {
     return c.json(
       { error: getErrorMessage(error, "Failed to list checkpoints.") },
@@ -801,15 +849,21 @@ app.get("/:id/checkpoints", (c) => {
 app.post("/:id/checkpoints/:checkpointId/load", async (c) => {
   try {
     const id = c.req.param("id");
-    const checkpointId = c.req.param("checkpointId");
+    const checkpointHandle = c.req.param("checkpointId");
     assertSafeId(id);
-    assertSafeId(checkpointId);
 
     const activeCampaign = requireActiveCampaign(c, id);
     if (activeCampaign instanceof Response) return activeCampaign;
 
-    const meta = await loadCheckpoint(id, checkpointId);
-    return c.json(meta);
+    const checkpoint = resolvePublicCheckpointMeta(id, checkpointHandle);
+    if (!checkpoint) {
+      return c.json({ error: "Checkpoint not found." }, 404);
+    }
+
+    const meta = await loadCheckpoint(id, checkpoint.id);
+    const payload = toPublicCheckpointMeta(id, meta);
+    assertPublicProjectionPayload({ surface: "checkpoints", payload });
+    return c.json(payload);
   } catch (error) {
     return c.json(
       { error: getErrorMessage(error, "Failed to load checkpoint.") },
@@ -821,14 +875,18 @@ app.post("/:id/checkpoints/:checkpointId/load", async (c) => {
 app.delete("/:id/checkpoints/:checkpointId", (c) => {
   try {
     const id = c.req.param("id");
-    const checkpointId = c.req.param("checkpointId");
+    const checkpointHandle = c.req.param("checkpointId");
     assertSafeId(id);
-    assertSafeId(checkpointId);
 
     const activeCampaign = requireActiveCampaign(c, id);
     if (activeCampaign instanceof Response) return activeCampaign;
 
-    deleteCheckpoint(id, checkpointId);
+    const checkpoint = resolvePublicCheckpointMeta(id, checkpointHandle);
+    if (!checkpoint) {
+      return c.json({ error: "Checkpoint not found." }, 404);
+    }
+
+    deleteCheckpoint(id, checkpoint.id);
     return c.json({ ok: true });
   } catch (error) {
     return c.json(

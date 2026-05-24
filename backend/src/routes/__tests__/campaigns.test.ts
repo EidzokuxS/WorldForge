@@ -59,10 +59,14 @@ vi.mock("../../settings/index.js", () => ({
 
 import {
   createCampaign,
+  createCheckpoint,
   deleteCampaign,
+  deleteCheckpoint,
   getActiveCampaign,
+  listCheckpoints,
   listCampaigns,
   loadCampaign,
+  loadCheckpoint,
 } from "../../campaign/index.js";
 import { getDb } from "../../db/index.js";
 import { listRecentLocationEventsForLocations } from "../../engine/location-events.js";
@@ -76,6 +80,10 @@ const mockedList = vi.mocked(listCampaigns);
 const mockedCreate = vi.mocked(createCampaign);
 const mockedLoad = vi.mocked(loadCampaign);
 const mockedDelete = vi.mocked(deleteCampaign);
+const mockedCreateCheckpoint = vi.mocked(createCheckpoint);
+const mockedListCheckpoints = vi.mocked(listCheckpoints);
+const mockedLoadCheckpoint = vi.mocked(loadCheckpoint);
+const mockedDeleteCheckpoint = vi.mocked(deleteCheckpoint);
 const mockedGetActive = vi.mocked(getActiveCampaign);
 const mockedGetDb = vi.mocked(getDb);
 const mockedListRecentLocationEventsForLocations = vi.mocked(
@@ -93,7 +101,7 @@ const app = new Hono();
 app.route("/api/campaigns", campaignRoutes);
 
 const CAMPAIGN_ID = "abc-123";
-const PUBLIC_HANDLE_PATTERN = /^pdto_(actor|event|faction|item|place|relationship|route|template|entity)_[a-f0-9]{32}$/;
+const PUBLIC_HANDLE_PATTERN = /^pdto_(actor|checkpoint|event|faction|item|place|relationship|route|template|entity)_[a-f0-9]{32}$/;
 
 function expectPublicHandle(value: unknown, kind?: string) {
   expect(value).toEqual(expect.stringMatching(PUBLIC_HANDLE_PATTERN));
@@ -1472,5 +1480,182 @@ describe("GET /:id/locations/:locId/entities", () => {
     const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/locations/loc-1/entities`);
 
     expect(res.status).toBe(404);
+  });
+});
+
+describe("checkpoint public handles", () => {
+  const rawCheckpoint = {
+    id: "1779610000000-manual",
+    name: "Before the bridge",
+    description: "Manual save",
+    createdAt: 1779610000000,
+    auto: false,
+  };
+
+  function markCampaignActive() {
+    mockedGetActive.mockReturnValue({
+      id: CAMPAIGN_ID,
+      name: "Test",
+      createdAt: "2026-01-01",
+      generationComplete: true,
+    } as any);
+  }
+
+  it("projects created checkpoint metadata through a public handle", async () => {
+    markCampaignActive();
+    mockedCreateCheckpoint.mockResolvedValue(rawCheckpoint);
+
+    const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/checkpoints`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Before the bridge" }),
+    });
+
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expectPublicHandle(body.id, "checkpoint");
+    expect(body.checkpointHandle).toBe(body.id);
+    expect(body.name).toBe("Before the bridge");
+    expectJsonNotToContain(body, [rawCheckpoint.id, CAMPAIGN_ID]);
+  });
+
+  it("lists checkpoints without exposing storage ids", async () => {
+    markCampaignActive();
+    mockedListCheckpoints.mockReturnValue([rawCheckpoint]);
+
+    const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/checkpoints`);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toHaveLength(1);
+    expectPublicHandle(body[0].id, "checkpoint");
+    expect(body[0].checkpointHandle).toBe(body[0].id);
+    expectJsonNotToContain(body, [rawCheckpoint.id, CAMPAIGN_ID]);
+  });
+
+  it("loads checkpoints by public handle and passes raw ids only to storage", async () => {
+    markCampaignActive();
+    const checkpointHandle = toPublicDtoHandle({
+      campaignId: CAMPAIGN_ID,
+      kind: "checkpoint",
+      sourceId: rawCheckpoint.id,
+    })!;
+    mockedListCheckpoints.mockReturnValue([rawCheckpoint]);
+    mockedLoadCheckpoint.mockResolvedValue(rawCheckpoint);
+
+    const res = await app.request(
+      `/api/campaigns/${CAMPAIGN_ID}/checkpoints/${checkpointHandle}/load`,
+      { method: "POST" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockedLoadCheckpoint).toHaveBeenCalledWith(CAMPAIGN_ID, rawCheckpoint.id);
+    const body = await res.json();
+    expect(body.id).toBe(checkpointHandle);
+    expect(body.checkpointHandle).toBe(checkpointHandle);
+    expectJsonNotToContain(body, [rawCheckpoint.id, CAMPAIGN_ID]);
+  });
+
+  it("rejects raw checkpoint ids at the public route boundary", async () => {
+    markCampaignActive();
+    mockedListCheckpoints.mockReturnValue([rawCheckpoint]);
+
+    const res = await app.request(
+      `/api/campaigns/${CAMPAIGN_ID}/checkpoints/${rawCheckpoint.id}/load`,
+      { method: "POST" },
+    );
+
+    expect(res.status).toBe(404);
+    expect(mockedLoadCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it("deletes checkpoints by public handle and passes raw ids only to storage", async () => {
+    markCampaignActive();
+    const checkpointHandle = toPublicDtoHandle({
+      campaignId: CAMPAIGN_ID,
+      kind: "checkpoint",
+      sourceId: rawCheckpoint.id,
+    })!;
+    mockedListCheckpoints.mockReturnValue([rawCheckpoint]);
+
+    const res = await app.request(
+      `/api/campaigns/${CAMPAIGN_ID}/checkpoints/${checkpointHandle}`,
+      { method: "DELETE" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockedDeleteCheckpoint).toHaveBeenCalledWith(CAMPAIGN_ID, rawCheckpoint.id);
+  });
+});
+
+describe("POST /:id/npcs/:npcId/promote", () => {
+  function markCampaignActive() {
+    mockedGetActive.mockReturnValue({
+      id: CAMPAIGN_ID,
+      name: "Test",
+      createdAt: "2026-01-01",
+      generationComplete: true,
+    } as any);
+  }
+
+  function mockNpcPromotionDb() {
+    const run = vi.fn();
+    const updateWhere = vi.fn(() => ({ run }));
+    const set = vi.fn(() => ({ where: updateWhere }));
+    const update = vi.fn(() => ({ set }));
+    const all = vi.fn(() => [
+      { id: "npc-1", name: "Guard", tier: "temporary" },
+    ]);
+    const selectWhere = vi.fn(() => ({ all }));
+    const from = vi.fn(() => ({ where: selectWhere }));
+    const select = vi.fn(() => ({ from }));
+
+    mockedGetDb.mockReturnValue({ select, update } as any);
+    return { run };
+  }
+
+  it("promotes only through public actor handles and returns public handles", async () => {
+    markCampaignActive();
+    const { run } = mockNpcPromotionDb();
+    const actorHandle = toPublicDtoHandle({
+      campaignId: CAMPAIGN_ID,
+      kind: "actor",
+      sourceId: "npc-1",
+    })!;
+
+    const res = await app.request(
+      `/api/campaigns/${CAMPAIGN_ID}/npcs/${actorHandle}/promote`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newTier: "persistent" }),
+      },
+    );
+
+    expect(res.status).toBe(200);
+    expect(run).toHaveBeenCalled();
+    const body = await res.json();
+    expect(body.id).toBe(actorHandle);
+    expect(body.actorHandle).toBe(actorHandle);
+    expect(body.npcHandle).toBe(actorHandle);
+    expect(body).not.toHaveProperty("npcId");
+    expectJsonNotToContain(body, ["npc-1", CAMPAIGN_ID]);
+  });
+
+  it("rejects raw NPC ids at the public route boundary", async () => {
+    markCampaignActive();
+    const { run } = mockNpcPromotionDb();
+
+    const res = await app.request(
+      `/api/campaigns/${CAMPAIGN_ID}/npcs/npc-1/promote`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newTier: "persistent" }),
+      },
+    );
+
+    expect(res.status).toBe(404);
+    expect(run).not.toHaveBeenCalled();
   });
 });
