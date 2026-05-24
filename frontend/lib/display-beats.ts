@@ -12,7 +12,6 @@ import {
   deriveGameMessageKind,
   isDialogueParagraph,
   splitGameplayParagraphs,
-  stripLookupPrefix,
 } from "./gameplay-text";
 
 export const CONTINUE_ACTION_PAYLOAD = "Continue scene.";
@@ -48,12 +47,15 @@ export function deriveDisplayBeats(input: DeriveDisplayBeatsInput): DisplayBeat[
   const beats: DisplayBeat[] = [];
   const stageSignals = normalizeStageSignals(input.stageSignals);
 
-  const latestAssistant = [...input.messages]
+  const latestNarrationAssistant = [...input.messages]
     .reverse()
-    .find((message) => message.role === "assistant");
+    .find((message) =>
+      message.role === "assistant"
+      && deriveGameMessageKind(message.role, message.content) === "narration"
+    );
 
-  if (latestAssistant) {
-    beats.push(...deriveNarrationBeats(latestAssistant, stageSignals));
+  if (latestNarrationAssistant) {
+    beats.push(...deriveNarrationBeats(latestNarrationAssistant, stageSignals));
   }
 
   if (input.oracleResult) {
@@ -121,18 +123,6 @@ function deriveNarrationBeats(
   message: ChatMessage,
   stageSignals: StageSignal[],
 ): DisplayBeat[] {
-  const kind = deriveGameMessageKind(message.role, message.content);
-  if (kind !== "narration") {
-    return [
-      {
-        id: "latest-support",
-        kind: kind === "progress" ? "progress" : "narration",
-        text: stripLookupPrefix(message.content),
-        stageSignals: stageSignals.length > 0 ? stageSignals : undefined,
-      },
-    ];
-  }
-
   return splitGameplayParagraphs(message.content)
     .slice(0, MAX_NARRATION_BEATS)
     .map((paragraph, index) => {

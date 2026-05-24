@@ -41,6 +41,48 @@ describe("deriveDisplayBeats", () => {
     expect(beats[1].speaker).toBe("Nobara");
   });
 
+  it("keeps lookup support entries out of the current scene beat", () => {
+    const beats = deriveDisplayBeats({
+      messages: [
+        assistantMessage("The inspection bell answers from the dock."),
+        { role: "user", content: "/lookup character: Harbor Master" },
+        assistantMessage("[Lookup: character_canon_fact] The harbor master controls inspection access."),
+      ],
+      turnPhase: "idle",
+      sceneProgress: null,
+      oracleResult: null,
+      travelFeedback: null,
+      quickActions: [],
+    });
+
+    expect(beats[0]).toMatchObject({
+      kind: "narration",
+      text: "The inspection bell answers from the dock.",
+    });
+    expect(JSON.stringify(beats)).not.toContain("harbor master controls inspection access");
+  });
+
+  it("uses the ready handoff instead of promoting lookup-only history to narration", () => {
+    const beats = deriveDisplayBeats({
+      messages: [
+        { role: "user", content: "/lookup character: Silk Maren" },
+        assistantMessage("[Lookup: character_canon_fact] Character \"Silk Maren\" exists but no stored canon facts available."),
+      ],
+      turnPhase: "idle",
+      sceneProgress: null,
+      oracleResult: null,
+      travelFeedback: null,
+      quickActions: [],
+    });
+
+    expect(beats).toEqual([
+      expect.objectContaining({
+        kind: "input_handoff",
+        text: "Ready",
+      }),
+    ]);
+  });
+
   it("creates player-facing progress beats without raw SSE event names", () => {
     const beats = deriveDisplayBeats({
       messages: [],

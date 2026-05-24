@@ -87,8 +87,9 @@ References Used:
 Unverified Assumptions:
 
 - Initial in-app Browser smoke confirms `/game` loads on the restarted current
-  dev stack, Saves opens, and checkpoint deletion uses public handles with zero
-  console errors. This is not yet human-style long-play or cloned-world
+  dev stack, Saves opens, checkpoint deletion uses public handles, and one
+  freeform player action completes through the action dock with zero console
+  errors or warnings. This is not yet human-style long-play or cloned-world
   acceptance evidence.
 - The next bundled Oracle review will judge this current HEAD, not stale
   pre-commit or narrow snippet evidence.
@@ -106,17 +107,17 @@ layers is support-only, diagnostic-only, or debt.
 | Turn boundary | chat route plus turn saga | one lease, one pre-turn snapshot, one authority state machine | retry before lease; resume/rollback after lease/snapshot | locally covered |
 | GM Read | `runGmRead` validator | read/classification only; no mutation | repair/retry before executor | locally covered |
 | GM Tool Loop | descriptor-derived active tool loop | model proposes tool calls; executor owns authority | savepoint rollback for unaccepted mutation | locally covered |
-| Executor/receipts | runtime tool executor and authority traces | mutation only through state owner; accepted receipt creates truth | rollback/replay from accepted receipts or snapshot | locally covered; P2 owner parity remains |
+| Executor/receipts | runtime tool executor and authority traces | mutation only through state owner; accepted receipt creates truth | rollback/replay from accepted receipts or snapshot | locally covered |
 | Actor runtime | scheduler, actor frame, actor tool execution | positive allowed write scopes required for durable actor writes | reject out-of-scope actor writes | locally covered |
 | Due-world runtime | proposal/job/actor-plan executors | deterministic emitted refs must match reserved scopes | fail closed with no DB writes on scope mismatch | locally covered |
 | Time | clock ledger owner | world minutes advance only from accepted clock receipts | ledger replay/snapshot restore | locally covered |
 | Narrator packet | packet builder | selectable facts are backend-visible accepted facts | resume from settled packet | locally covered |
 | Final narration | narration guard/turn processor | model can style/order only selected fact/evidence refs | repair/fail closed before public prose leaks | live and resume legacy-text regressions covered |
 | SSE/API projection | DTO factories and route projectors | public handles and allowlists only | rebuild projection from authority | locally covered for known gameplay surfaces |
-| Frontend projection | `frontend/lib/api.ts` parser | public handles carry authority; local render is not truth | reject/drop raw legacy authority | targeted tests green; Browser Saves smoke passed |
+| Frontend projection | `frontend/lib/api.ts` parser | public handles carry authority; local render is not truth | reject/drop raw legacy authority | targeted tests green; Browser Saves and freeform action smoke passed; lookup support cannot replace scene beat |
 | Persistence bundles | store manifest and bundle services | every store has policy/evidence | verify before copy; staged restore | locally covered |
 | Clone/replay/rollback/vector | manifest executor, clone/restore services | clean-start clone is explicit; replay-preserving fails closed | clone manifest, restore staging, vector reconcile | locally covered |
-| Observability/evals | traces, reports, test harness | evidence describes outcomes, never creates gameplay truth | rerun/compare using committed snapshots | contract tests/GitNexus done; initial Browser smoke done; Oracle/play pending |
+| Observability/evals | traces, reports, test harness | evidence describes outcomes, never creates gameplay truth | rerun/compare using committed snapshots | contract tests/GitNexus done; initial Browser drawer/freeform-turn smoke done; Oracle/play pending |
 
 ## Agent Roles And Tool Calling
 
@@ -208,12 +209,12 @@ architecture boundaries by accident.
 | Final narration attempt | narrator attempts plus compiled text | narration guard/turn processor | selected refs/style/order | selected ref existence, private term scan, grounding | assistant SSE/chat line | live/resume no-legacy-text regressions |
 | Chat history/pending resume | chat history JSON plus saga state | chat route/resume owner | internal metadata | public history DTO, resume token | public history and recovery state | route tests reject saga id/status leaks |
 | SSE/API projection | DTO factories and route projectors | route/projector modules | none | public schemas, event allowlists, backend-ref guard | public events/JSON | raw legacy id rejection tests |
-| Frontend render state | parsed public DTOs/local UI state | frontend API parser/components | draft/debug local state | public handle parser, malformed payload errors | rendered labels/actions only | API/checkpoint tests; Browser Saves smoke |
+| Frontend render state | parsed public DTOs/local UI state | frontend API parser/components | draft/debug local state | public handle parser, malformed payload errors; lookup support filtered from scene beat | rendered labels/actions only | API/checkpoint/display-beat tests; Browser Saves/freeform smoke |
 | Checkpoints/artifacts | checkpoint dirs/manifests | checkpoint service | UI labels | path safety, restorable manifest, handle resolver | `pdto_checkpoint_*` | create/list/load/delete tests; Browser delete smoke |
 | Store manifest/bundles | `store-manifest.json`, captured stores | bundle/restore services | evidence hashes/reports | coverage, policies, hashes, row counts | checkpoint/turn snapshot manifests | tampered SQLite/vector evidence tests |
 | Vectors | LanceDB episodic/lore tables | vector services plus rollback policy | retrieval support | campaign/audience filters, row counts, hashes | semantic retrieval only | restore verification and rollback reconcile tests |
 | Clone/rollback/replay | clone manifest, turn snapshots, restore bundles | clone/rollback/restore service | playtest logs | operation mode, path safety, rewrite/purge/rebuild/reject | clone manifest, restore evidence | clean-start clone, fail-closed replay, staged restore |
-| Observability/evals | logs, traces, reports | observability/playtest harness | human/Codex moves | redaction and evidence rubric | verdict reports, trace ids | GitNexus/tests done; initial Browser smoke done; Oracle/play pending |
+| Observability/evals | logs, traces, reports | observability/playtest harness | human/Codex moves | redaction and evidence rubric | verdict reports, trace ids | GitNexus/tests done; initial Browser drawer/freeform-turn smoke done; Oracle/play pending |
 
 ## Recovery Matrix
 

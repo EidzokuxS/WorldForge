@@ -67,6 +67,13 @@ gap: `CharacterDraft.startConditions.startLocationId` and draft social
 location/faction refs are projected as public handles, while the public
 boundary explicitly allows the typed `player-input` enum without allowing raw
 `player-*` ids. Radix Dialog aria-description warnings remain P2 UX debt.
+Expanded Browser workability then sent a freeform player action through the
+real action dock. The turn completed successfully, returned to Ready, cleared
+the submitted draft, emitted no console errors or warnings, and produced
+playable dialogue grounded in backend-visible proof requirements. That pass
+also closed a frontend projection/playfeel bug where persisted lookup/support
+answers could replace the current scene beat; the scene dock now selects the
+latest true narration while the Narrative Log remains the lookup surface.
 
 No long human-style 60-turn, cloned-world, or 600-turn soak acceptance should
 resume until the full local closure matrix is bundled, Oracle-reviewed on a
@@ -89,7 +96,7 @@ frozen current tree, and Browser workability is expanded beyond this smoke.
 | Narrator packet | settled canonical turn packet plus citable fact list | narrator packet builder | recent transcript, opening scene, guardrails, diagnostics | none | redaction audit, support-only classification, packet budget trace | settled packet persisted before final narration; resume from packet |
 | Final narration | backend-issued fact refs and narrator attempt | narration guard/turn processor | style instruction, support context | selected fact refs/evidence refs/order/style | fact-ref required, private/backend term scan, grounding compile, repair/fail-closed | assistant SSE/chat line; live and resume regressions reject legacy text/private prose |
 | SSE/API projection | player-facing DTO factories | projection modules and route projectors | internal saga/tool/state objects | none | public DTO schemas, backend-ref guard, explicit event allowlists, legacy raw-id rejection | `turn_resolution`, lookup, world, inventory, history, checkpoint, NPC promote tests; raw legacy id guard targeted test green; Browser caught and fixed draft `startLocationId` projection |
-| Frontend projection | `frontend/lib/api.ts` parsed DTOs | frontend API parser | debug state, local render state | none | public handle parser, SSE parser, malformed payload errors, no raw fallback authority | API parser rejects/drops raw `loc-*`/`npc-*`/`item-*` fallbacks; Browser Saves smoke passes with zero console errors |
+| Frontend projection | `frontend/lib/api.ts` parsed DTOs | frontend API parser | debug state, local render state | none | public handle parser, SSE parser, malformed payload errors, no raw fallback authority | API parser rejects/drops raw `loc-*`/`npc-*`/`item-*` fallbacks; Browser Saves and freeform action smoke pass with zero console errors; lookup support no longer replaces scene beat |
 | Persistence bundles | `store-manifest.json` plus campaign stores | manifest/bundle capture and restore services | evidence hashes, playtest reports | none | manifest coverage, policy schemas, path safety, hash/row-count recomputation | checkpoint/turn snapshot tests; corrupted SQLite/vector evidence fails before live copy |
 | Clone | source campaign stores plus manifest plan | clean-start clone service | old source artifacts as forensic context only | none | active-turn rejection, manifest-dispatched id rewrite/purge/rebuild/reject plan, path safety | durable clone manifest, filesystem action evidence, broad residue tests |
 | Rollback/replay/vector | turn snapshots, checkpoints, vector stores, event ledgers | rollback/restore service | vector evidence, playtest harness logs | none | restore policy executor, vector include/exclude policy, recovery mode gate | rollback snapshot restore; episodic vectors reconcile to restored receipts while preserving matching pre-turn vectors |
@@ -275,9 +282,10 @@ References Used:
 
 Unverified Assumptions:
 
-- Initial in-app Browser smoke confirms current backend `pdto_*` world and
-  checkpoint payloads render and delete through Saves, but it is not yet a
-  long-play or cloned-world acceptance run.
+- In-app Browser smoke confirms current backend `pdto_*` world/checkpoint
+  payloads render, Saves can delete through public handles, and one freeform
+  action completes cleanly, but this is not yet a long-play or cloned-world
+  acceptance run.
 
 ### B. Refs, Aliases, Capabilities
 
@@ -308,7 +316,7 @@ Unverified Assumptions:
 
 ### C. GM Read, Tool Loop, Executor, Receipts
 
-Status: **Quick-action receipt P1 closed locally; P2 owner-parity items remain**
+Status: **Quick-action receipt and owner-parity P1/P2 closure covered locally**
 
 Decision in force: model proposes; executor validates, mutates, and records
 accepted receipts. Quick-action production is authority-bearing even though it
