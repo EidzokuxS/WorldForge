@@ -127,27 +127,6 @@
       "when": 1778632200000,
       "tag": "0017_turn_saga_events",
       "breakpoints": true
-    },
-    {
-      "idx": 18,
-      "version": "6",
-      "when": 1779092500000,
-      "tag": "0018_turn_durable_events",
-      "breakpoints": true
-    },
-    {
-      "idx": 19,
-      "version": "6",
-      "when": 1779243200000,
-      "tag": "0019_quick_action_offers",
-      "breakpoints": true
-    },
-    {
-      "idx": 20,
-      "version": "6",
-      "when": 1779573600000,
-      "tag": "0020_location_recent_events_report_only_default",
-      "breakpoints": true
     }
   ]
 }

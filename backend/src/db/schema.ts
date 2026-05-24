@@ -3,7 +3,6 @@ import {
   check,
   index,
   integer,
-  primaryKey,
   sqliteTable,
   text,
   uniqueIndex,
@@ -35,13 +34,6 @@ export const narratorAttemptStatusValues = [
 export const turnSagaEventTypeValues = [
   "settled_packet_prepared",
   "settled_packet_persisted",
-] as const;
-
-export const turnDurableEventStatusValues = [
-  "produced",
-  "accepted",
-  "projected",
-  "retracted",
 ] as const;
 
 export const simulationProposalDispositionValues = [
@@ -184,7 +176,7 @@ export const locationRecentEvents = sqliteTable(
     surfaceRoute: text("surface_route"),
     visibility: text("visibility", {
       enum: ["player_perceivable", "local_signal", "report_only", "hidden"],
-    }).notNull().default("report_only"),
+    }).notNull().default("player_perceivable"),
     knowledgeRoute: text("knowledge_route"),
     hiddenCauseTerms: text("hidden_cause_terms").notNull().default("[]"),
     tick: integer("tick").notNull(),
@@ -1063,69 +1055,6 @@ export const settledTurnPackets = sqliteTable(
       table.resultWorldVersion,
     ),
   ]
-);
-
-export const turnDurableEvents = sqliteTable(
-  "turn_durable_events",
-  {
-    eventId: text("event_id").primaryKey(),
-    campaignId: text("campaign_id")
-      .notNull()
-      .references(() => campaigns.id, { onDelete: "cascade" }),
-    turnId: text("turn_id").notNull(),
-    status: text("status", { enum: turnDurableEventStatusValues })
-      .notNull()
-      .default("produced"),
-    tick: integer("tick").notNull(),
-    acceptedAt: integer("accepted_at", { mode: "number" }),
-    projectedAt: integer("projected_at", { mode: "number" }),
-    retractedAt: integer("retracted_at", { mode: "number" }),
-    createdAt: integer("created_at", { mode: "number" }).notNull(),
-    updatedAt: integer("updated_at", { mode: "number" }).notNull(),
-  },
-  (table) => [
-    index("idx_turn_durable_events_campaign_turn").on(
-      table.campaignId,
-      table.turnId,
-    ),
-    index("idx_turn_durable_events_campaign_status").on(
-      table.campaignId,
-      table.status,
-    ),
-    index("idx_turn_durable_events_turn_status").on(
-      table.turnId,
-      table.status,
-    ),
-  ],
-);
-
-export const quickActionOffers = sqliteTable(
-  "quick_action_offers",
-  {
-    actionId: text("action_id").notNull(),
-    offerId: text("offer_id").notNull(),
-    campaignId: text("campaign_id")
-      .notNull()
-      .references(() => campaigns.id, { onDelete: "cascade" }),
-    label: text("label").notNull(),
-    action: text("action").notNull(),
-    sourceRefs: text("source_refs").notNull().default("[]"),
-    sourceEvidenceDigest: text("source_evidence_digest").notNull(),
-    tick: integer("tick").notNull(),
-    expiresAtTick: integer("expires_at_tick").notNull(),
-    baseWorldVersion: integer("base_world_version").notNull(),
-    consumedAt: integer("consumed_at", { mode: "number" }),
-    createdAt: integer("created_at", { mode: "number" }).notNull(),
-    updatedAt: integer("updated_at", { mode: "number" }).notNull(),
-  },
-  (table) => [
-    primaryKey({
-      columns: [table.campaignId, table.offerId, table.actionId],
-      name: "quick_action_offers_campaign_offer_action_pk",
-    }),
-    index("idx_quick_action_offers_campaign_offer").on(table.campaignId, table.offerId),
-    index("idx_quick_action_offers_campaign_expiry").on(table.campaignId, table.expiresAtTick),
-  ],
 );
 
 export const narratorAttempts = sqliteTable(
