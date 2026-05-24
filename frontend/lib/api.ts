@@ -972,7 +972,23 @@ export interface TurnDoneBoundary {
 
 const TURN_STREAM_EMPTY_NARRATION_ERROR = "Turn finished without visible narration. Please retry.";
 const TURN_STREAM_INCOMPLETE_ERROR = "Turn stream ended before completion.";
+const LOOKUP_RESULT_INVALID_ERROR = "Lookup result failed public projection.";
 const QUICK_ACTION_HANDLE_PATTERN = /^qac_[a-f0-9]{32}$/u;
+const LOOKUP_KINDS = new Set<LookupKind>([
+  "world_canon_fact",
+  "character_canon_fact",
+  "power_profile",
+  "event_clarification",
+]);
+const MAX_LOOKUP_SUBJECT_LENGTH = 160;
+const MAX_LOOKUP_ANSWER_LENGTH = 4_000;
+const MAX_LOOKUP_CITATIONS = 5;
+const MAX_LOOKUP_CITATION_LABEL_LENGTH = 120;
+const MAX_LOOKUP_CITATION_EXCERPT_LENGTH = 800;
+const MAX_LOOKUP_NOTES = 5;
+const MAX_LOOKUP_NOTE_LENGTH = 320;
+const MAX_LOOKUP_SCENE_IMPACT_LENGTH = 320;
+const LOOKUP_CITATION_KIND_PATTERN = /^[a-z][a-z0-9_-]{0,39}$/u;
 
 function readStringField(record: Record<string, unknown>, key: string): string | undefined {
   const value = record[key];
@@ -1040,6 +1056,87 @@ function normalizeTurnDoneBoundary(value: unknown): TurnDoneBoundary | undefined
   return Object.keys(boundary).length > 0 ? boundary : undefined;
 }
 
+function normalizeLookupText(
+  value: unknown,
+  maxLength: number,
+  options: { preserveWhitespace?: boolean } = {},
+): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = options.preserveWhitespace
+    ? value
+    : value.replace(/\s+/g, " ").trim();
+  const text = normalized.length > maxLength
+    ? `${normalized.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`
+    : normalized;
+  return text.trim().length > 0 ? text : undefined;
+}
+
+function normalizeLookupKind(value: unknown): LookupKind | undefined {
+  return typeof value === "string" && LOOKUP_KINDS.has(value as LookupKind)
+    ? value as LookupKind
+    : undefined;
+}
+
+function normalizeLookupCitation(value: unknown): LookupResultEvent["citations"][number] | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const label = normalizeLookupText(record.label, MAX_LOOKUP_CITATION_LABEL_LENGTH)
+    ?? "Stored source";
+  const excerpt = normalizeLookupText(
+    record.excerpt,
+    MAX_LOOKUP_CITATION_EXCERPT_LENGTH,
+    { preserveWhitespace: true },
+  );
+  if (!excerpt) return null;
+  const kind = normalizeLookupText(record.kind, 40);
+  return {
+    ...(kind && LOOKUP_CITATION_KIND_PATTERN.test(kind) ? { kind } : {}),
+    label,
+    excerpt,
+  };
+}
+
+function normalizeLookupResult(value: unknown): LookupResultEvent | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const lookupKind = normalizeLookupKind(record.lookupKind);
+  const subject = normalizeLookupText(record.subject, MAX_LOOKUP_SUBJECT_LENGTH);
+  const answer = normalizeLookupText(
+    record.answer,
+    MAX_LOOKUP_ANSWER_LENGTH,
+    { preserveWhitespace: true },
+  );
+  if (!lookupKind || !subject || !answer) return null;
+
+  const citations = Array.isArray(record.citations)
+    ? record.citations
+        .flatMap((entry): LookupResultEvent["citations"] => {
+          const citation = normalizeLookupCitation(entry);
+          return citation ? [citation] : [];
+        })
+        .slice(0, MAX_LOOKUP_CITATIONS)
+    : [];
+  const uncertaintyNotes = Array.isArray(record.uncertaintyNotes)
+    ? record.uncertaintyNotes
+        .flatMap((entry): string[] => {
+          const note = normalizeLookupText(entry, MAX_LOOKUP_NOTE_LENGTH);
+          return note ? [note] : [];
+        })
+        .slice(0, MAX_LOOKUP_NOTES)
+    : [];
+
+  return {
+    lookupKind,
+    subject,
+    answer,
+    citations,
+    uncertaintyNotes,
+    sceneImpact:
+      normalizeLookupText(record.sceneImpact, MAX_LOOKUP_SCENE_IMPACT_LENGTH)
+      ?? "Lookup only.",
+  };
+}
+
 function normalizeQuickActions(value: unknown): QuickActionChoice[] {
   const record = value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -1101,8 +1198,16 @@ export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: T
       switch (currentEvent) {
         case "scene-settling": handlers.onSceneSettling?.(normalizeTurnStageStatus(parsed)); break;
         case "lookup_result":
-          hasLookupResult = true;
-          handlers.onLookupResult?.(parsed);
+          {
+            const lookup = normalizeLookupResult(parsed);
+            if (!lookup) {
+              hasErrorEvent = true;
+              handlers.onError(LOOKUP_RESULT_INVALID_ERROR);
+              break;
+            }
+            hasLookupResult = true;
+            handlers.onLookupResult?.(lookup);
+          }
           break;
         case "narrative":
           if (typeof parsed.text === "string" && parsed.text.trim().length > 0) {

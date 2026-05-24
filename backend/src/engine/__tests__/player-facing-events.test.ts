@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   sanitizePlayerFacingText,
+  toPlayerFacingLookupResult,
   toPlayerFacingQuickActions,
 } from "../player-facing-events.js";
 
@@ -48,6 +49,50 @@ describe("player-facing event projection", () => {
         ],
       },
     })).toBeNull();
+  });
+
+  it("projects lookup results through an allowlisted player-facing DTO", () => {
+    const projected = toPlayerFacingLookupResult({
+      lookupKind: "character_canon_fact",
+      subject: "actor_hidden",
+      answer:
+        "actor_hidden used record_world_fact near tool-result-7 and 01890f9a-20f3-7cc2-9b7c-1a2b3c4d5e6f.",
+      citations: [
+        {
+          kind: "research",
+          label: "campaign:source",
+          excerpt: "npc_secret saw location:private.",
+          extra: "dropped",
+        },
+      ],
+      uncertaintyNotes: ["forecast-secret remains hidden."],
+      sceneImpact: "loc-secret is not public.",
+      extra: "dropped",
+    });
+
+    expect(projected).toEqual({
+      lookupKind: "character_canon_fact",
+      subject: "[hidden]",
+      answer: "[hidden] used [hidden] near [hidden] and [hidden].",
+      citations: [
+        {
+          kind: "research",
+          label: "[hidden]",
+          excerpt: "[hidden] saw [hidden].",
+        },
+      ],
+      uncertaintyNotes: ["[hidden] remains hidden."],
+      sceneImpact: "[hidden] is not public.",
+    });
+    expect(JSON.stringify(projected)).not.toContain("actor_hidden");
+    expect(JSON.stringify(projected)).not.toContain("record_world_fact");
+    expect(JSON.stringify(projected)).not.toContain("tool-result-7");
+    expect(JSON.stringify(projected)).not.toContain("01890f9a");
+    expect(JSON.stringify(projected)).not.toContain("campaign:source");
+    expect(JSON.stringify(projected)).not.toContain("npc_secret");
+    expect(JSON.stringify(projected)).not.toContain("location:private");
+    expect(JSON.stringify(projected)).not.toContain("forecast-secret");
+    expect(JSON.stringify(projected)).not.toContain("loc-secret");
   });
 
   it("can preserve player-visible narrative whitespace while redacting handles", () => {

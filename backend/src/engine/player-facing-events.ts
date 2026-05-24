@@ -1,3 +1,5 @@
+import type { LookupKind } from "./grounded-lookup.js";
+
 export interface PlayerFacingQuickAction {
   label: string;
   action: string;
@@ -8,10 +10,40 @@ export interface PlayerFacingQuickActionsEvent {
   actions: PlayerFacingQuickAction[];
 }
 
+export interface PlayerFacingLookupCitation {
+  kind?: string;
+  label: string;
+  excerpt: string;
+}
+
+export interface PlayerFacingLookupResult {
+  lookupKind: LookupKind;
+  subject: string;
+  answer: string;
+  citations: PlayerFacingLookupCitation[];
+  uncertaintyNotes: string[];
+  sceneImpact: string;
+}
+
 const MAX_QUICK_ACTIONS = 5;
 const MAX_QUICK_ACTION_LABEL_LENGTH = 80;
 const MAX_QUICK_ACTION_TEXT_LENGTH = 320;
 const PLAYER_FACING_QUICK_ACTION_HANDLE_PATTERN = /^qac_[a-f0-9]{32}$/u;
+const PLAYER_FACING_LOOKUP_KINDS = new Set<LookupKind>([
+  "world_canon_fact",
+  "character_canon_fact",
+  "power_profile",
+  "event_clarification",
+]);
+const MAX_LOOKUP_SUBJECT_LENGTH = 160;
+const MAX_LOOKUP_ANSWER_LENGTH = 4_000;
+const MAX_LOOKUP_CITATIONS = 5;
+const MAX_LOOKUP_CITATION_LABEL_LENGTH = 120;
+const MAX_LOOKUP_CITATION_EXCERPT_LENGTH = 800;
+const MAX_LOOKUP_UNCERTAINTY_NOTES = 5;
+const MAX_LOOKUP_UNCERTAINTY_NOTE_LENGTH = 320;
+const MAX_LOOKUP_SCENE_IMPACT_LENGTH = 320;
+const LOOKUP_CITATION_KIND_PATTERN = /^[a-z][a-z0-9_-]{0,39}$/u;
 
 const PLAYER_REF_REPLACEMENT = "[hidden]";
 const PLAYER_FACING_UUID_PATTERN =
@@ -151,6 +183,51 @@ function playerFacingText(value: unknown, maxLength: number): string | null {
   return text;
 }
 
+function playerFacingLookupText(
+  value: unknown,
+  maxLength: number,
+  options: { preserveWhitespace?: boolean } = {},
+): string | null {
+  if (typeof value !== "string") return null;
+  const text = sanitizePlayerFacingText(value, {
+    maxChars: maxLength,
+    preserveWhitespace: options.preserveWhitespace,
+  });
+  return text.trim() ? text : null;
+}
+
+function playerFacingLookupKind(value: unknown): LookupKind | null {
+  return typeof value === "string" && PLAYER_FACING_LOOKUP_KINDS.has(value as LookupKind)
+    ? value as LookupKind
+    : null;
+}
+
+function playerFacingLookupCitationKind(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const text = sanitizePlayerFacingText(value, { maxChars: 40 });
+  return text === value.trim() && LOOKUP_CITATION_KIND_PATTERN.test(text)
+    ? text
+    : undefined;
+}
+
+function toPlayerFacingLookupCitation(value: unknown): PlayerFacingLookupCitation | null {
+  if (!isRecord(value)) return null;
+  const label = playerFacingLookupText(value.label, MAX_LOOKUP_CITATION_LABEL_LENGTH)
+    ?? "Stored source";
+  const excerpt = playerFacingLookupText(
+    value.excerpt,
+    MAX_LOOKUP_CITATION_EXCERPT_LENGTH,
+    { preserveWhitespace: true },
+  );
+  if (!excerpt) return null;
+  const kind = playerFacingLookupCitationKind(value.kind);
+  return {
+    ...(kind ? { kind } : {}),
+    label,
+    excerpt,
+  };
+}
+
 function playerFacingQuickActionHandle(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const handle = value.trim();
@@ -169,4 +246,45 @@ export function toPlayerFacingQuickActions(value: unknown): PlayerFacingQuickAct
     .slice(0, MAX_QUICK_ACTIONS);
 
   return actions.length > 0 ? { actions } : null;
+}
+
+export function toPlayerFacingLookupResult(value: unknown): PlayerFacingLookupResult | null {
+  if (!isRecord(value)) return null;
+  const lookupKind = playerFacingLookupKind(value.lookupKind);
+  const subject = playerFacingLookupText(value.subject, MAX_LOOKUP_SUBJECT_LENGTH);
+  const answer = playerFacingLookupText(
+    value.answer,
+    MAX_LOOKUP_ANSWER_LENGTH,
+    { preserveWhitespace: true },
+  );
+  if (!lookupKind || !subject || !answer) return null;
+
+  const citations = Array.isArray(value.citations)
+    ? value.citations
+        .flatMap((entry): PlayerFacingLookupCitation[] => {
+          const citation = toPlayerFacingLookupCitation(entry);
+          return citation ? [citation] : [];
+        })
+        .slice(0, MAX_LOOKUP_CITATIONS)
+    : [];
+
+  const uncertaintyNotes = Array.isArray(value.uncertaintyNotes)
+    ? value.uncertaintyNotes
+        .flatMap((entry): string[] => {
+          const note = playerFacingLookupText(entry, MAX_LOOKUP_UNCERTAINTY_NOTE_LENGTH);
+          return note ? [note] : [];
+        })
+        .slice(0, MAX_LOOKUP_UNCERTAINTY_NOTES)
+    : [];
+
+  return {
+    lookupKind,
+    subject,
+    answer,
+    citations,
+    uncertaintyNotes,
+    sceneImpact:
+      playerFacingLookupText(value.sceneImpact, MAX_LOOKUP_SCENE_IMPACT_LENGTH)
+      ?? "Lookup only.",
+  };
 }

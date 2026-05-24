@@ -782,6 +782,60 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(body).not.toContain("event: quick_actions");
   });
 
+  it("projects lookup SSE and assistant history through the player-facing boundary", async () => {
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockResolvedValue({
+      id: CAMPAIGN_ID,
+      name: "Loaded Campaign",
+      createdAt: "2026-01-01",
+    } as any);
+    mockedRunGroundedLookup.mockResolvedValue({
+      lookupKind: "character_canon_fact",
+      subject: "actor:raw_gojo",
+      answer:
+        "actor:raw_gojo invoked record_world_fact through tool-result-secret near loc-secret 123e4567-e89b-12d3-a456-426614174000.",
+      citations: [
+        {
+          kind: "research",
+          label: "campaign:source",
+          excerpt: "npc_secret saw tool-result-secret at location:private.",
+        },
+      ],
+      uncertaintyNotes: ["forecast-secret remains model-internal."],
+      sceneImpact: "location:private should not leave the backend boundary.",
+    });
+
+    const res = await app.request("/chat/lookup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        lookupKind: "character_canon_fact",
+        subject: "actor:raw_gojo",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("event: lookup_result");
+    expect(body).toContain("[hidden]");
+    expect(body).not.toContain("actor:raw_gojo");
+    expect(body).not.toContain("record_world_fact");
+    expect(body).not.toContain("tool-result-secret");
+    expect(body).not.toContain("loc-secret");
+    expect(body).not.toContain("npc_secret");
+    expect(body).not.toContain("location:private");
+    expect(body).not.toContain("forecast-secret");
+    expect(body).not.toContain("123e4567-e89b-12d3-a456-426614174000");
+
+    const persistedMessages = mockedAppendChatMessages.mock.calls.at(-1)?.[1];
+    expect(persistedMessages?.[1]?.content).toContain("[hidden]");
+    expect(persistedMessages?.[1]?.content).not.toContain("actor:raw_gojo");
+    expect(persistedMessages?.[1]?.content).not.toContain("record_world_fact");
+    expect(persistedMessages?.[1]?.content).not.toContain("tool-result-secret");
+    expect(persistedMessages?.[1]?.content).not.toContain("123e4567-e89b-12d3-a456-426614174000");
+  });
+
   it("persists lookup exchanges to /chat/history without creating a live turn snapshot", async () => {
     mockedGetActive.mockReturnValue(null as any);
     mockedLoadCampaign.mockResolvedValue({

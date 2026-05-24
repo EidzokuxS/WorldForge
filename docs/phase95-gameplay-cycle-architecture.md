@@ -65,19 +65,23 @@ Implemented hardening slices after the reset:
 - Pre-commit blocked-scope guard: the executor now rejects blocked write-scope
   conflicts before mutation where possible and again before authority commit
   from exact backend-visible state-delta refs.
+- Public DTO projection handles: `/world`, `/inventory`, and location entity
+  surfaces now expose backend-owned public handles/aliases instead of raw
+  authority ids.
+- Lookup public projection boundary: `/chat/lookup` now treats grounded lookup
+  output as a support/read-only result, projects it through a typed
+  player-facing DTO, and persists only the projected answer into chat history.
 
 Current post-slice status on `develop`:
 
-- Last verified commit: `197ba289 Guard same-turn write scopes before tool
-  commits`.
-- Backend evidence: `npm --prefix backend run typecheck` passed; full backend
-  `vitest` passed `219` files and `2938` tests, with `1` skipped file and
-  `30` todo tests.
-- GitNexus evidence: staged `detect_changes` reported `critical` because the
-  slice intentionally touched `executeToolCall`, `executeValidatedTool`,
-  `runGmToolLoop`, actor/due-world proposal paths, and turn processing. The
-  high-risk symbols were inspected before commit, and the index was refreshed
-  with `npx gitnexus analyze`.
+- Last pushed hardening commit before this working slice:
+  `21a74d6d Introduce public DTO projection handles`.
+- Current working slice: lookup public projection is implemented locally.
+  Focused backend/frontend lookup parser tests, backend/frontend typechecks,
+  full backend suite (`219` passed, `1` skipped, `2943` tests, `30` todo), and
+  full frontend suite (`64` files, `522` tests) passed. GitNexus
+  `detect_changes`, commit, push, and index refresh are still required before
+  treating this slice as pushed.
 - Long-play status: still NO-GO. These slices close important control-plane
   blockers, but they are not full Phase 95 acceptance evidence.
 
@@ -132,10 +136,10 @@ a brittle test survival mode.
 
 P0 blockers before broad implementation:
 
-- Public projection is not yet proven as a closed authority boundary. Route
-  filters and public projection assertions exist, but `/world`, entity routes,
-  history, SSE, quick actions, and frontend state still need a current
-  end-to-end DTO audit before long playtests.
+- Public projection has local closure for `/world`, inventory, location
+  entities, quick actions, action/retry/resume/opening SSE, history read, and
+  `/chat/lookup`; it still needs a fresh bundled Oracle review before it can
+  be treated as an acceptance gate closure.
 - Clone/replay/rollback/vector lifecycle is only partially contract-closed.
   Store-manifest rollback bundles exist, but clean-start clone must consume the
   manifest rather than legacy helper-copy semantics, and vector restore/rebuild

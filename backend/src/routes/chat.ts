@@ -94,6 +94,7 @@ import { runGroundedLookup } from "../engine/grounded-lookup.js";
 import {
   isSafePlayerFacingHyphenToken,
   sanitizePlayerFacingText,
+  toPlayerFacingLookupResult,
   toPlayerFacingQuickActions,
 } from "../engine/player-facing-events.js";
 import {
@@ -1725,6 +1726,10 @@ app.post("/lookup", async (c) => {
           compareAgainst,
           question,
         });
+        const playerFacingLookup = toPlayerFacingLookupResult(lookup);
+        if (!playerFacingLookup) {
+          throw new Error("Lookup result failed player-facing projection.");
+        }
         const persistedMessages = buildLookupHistoryMessages(
           buildLookupCommandText({
             lookupKind,
@@ -1733,14 +1738,14 @@ app.post("/lookup", async (c) => {
             question,
           }),
           toPersistedLookupKind(lookup.lookupKind, compareAgainst),
-          lookup.answer,
+          playerFacingLookup.answer,
         );
 
         appendChatMessages(campaignId, persistedMessages);
 
         await stream.writeSSE({
           event: "lookup_result",
-          data: JSON.stringify(lookup),
+          data: JSON.stringify(playerFacingLookup),
         });
         await stream.writeSSE({
           event: "done",

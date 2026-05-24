@@ -1057,6 +1057,77 @@ describe("parseTurnSSE", () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  it("normalizes lookup_result payloads before exposing them to the UI", async () => {
+    const onLookupResult = vi.fn();
+    const onDone = vi.fn();
+    const onError = vi.fn();
+
+    await parseTurnSSE(
+      createStream([
+        "event: lookup_result",
+        'data: {"lookupKind":"power_profile","subject":"  Gojo  ","answer":"Bounded answer","citations":[{"kind":"research","label":" Character grounding ","excerpt":"Infinity prevents contact.","extra":"ignored"},{"kind":"bad ref","label":"Missing excerpt"}],"uncertaintyNotes":[" Stored facts only. ",""],"sceneImpact":"Lookup only.","extra":"ignored"}',
+        "",
+        "event: done",
+        "data: {\"lookup\":true}",
+        "",
+      ].join("\n")),
+      {
+        onLookupResult,
+        onNarrative: vi.fn(),
+        onOracleResult: vi.fn(),
+        onStateUpdate: vi.fn(),
+        onQuickActions: vi.fn(),
+        onDone,
+        onError,
+      },
+    );
+
+    expect(onLookupResult).toHaveBeenCalledWith({
+      lookupKind: "power_profile",
+      subject: "Gojo",
+      answer: "Bounded answer",
+      citations: [
+        {
+          kind: "research",
+          label: "Character grounding",
+          excerpt: "Infinity prevents contact.",
+        },
+      ],
+      uncertaintyNotes: ["Stored facts only."],
+      sceneImpact: "Lookup only.",
+    });
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("reports malformed lookup_result payloads as projection failures", async () => {
+    const onLookupResult = vi.fn();
+    const onError = vi.fn();
+
+    await parseTurnSSE(
+      createStream([
+        "event: lookup_result",
+        'data: {"lookupKind":"debug","subject":"Gojo","answer":"Bounded answer","citations":[],"uncertaintyNotes":[],"sceneImpact":"Lookup only."}',
+        "",
+        "event: done",
+        "data: {\"lookup\":true}",
+        "",
+      ].join("\n")),
+      {
+        onLookupResult,
+        onNarrative: vi.fn(),
+        onOracleResult: vi.fn(),
+        onStateUpdate: vi.fn(),
+        onQuickActions: vi.fn(),
+        onDone: vi.fn(),
+        onError,
+      },
+    );
+
+    expect(onLookupResult).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith("Lookup result failed public projection.");
+  });
+
   it("preserves resumed completion metadata for pending narration recovery", async () => {
     const onDone = vi.fn();
 
