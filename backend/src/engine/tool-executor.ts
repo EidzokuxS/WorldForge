@@ -98,6 +98,7 @@ import { findUncoveredWriteRef } from "./simulation-write-scope.js";
 import {
   RUNTIME_STATE_BEARING_TOOL_NAMES,
 } from "./tool-contracts.js";
+import { persistQuickActionOffer } from "./quick-action-offers.js";
 
 export type { ToolResult } from "./tool-result.js";
 
@@ -3517,10 +3518,14 @@ function runToolHandler(input: {
     case "advance_time":
       return handleAdvanceTime(input.args);
     case "offer_quick_actions":
-      return {
+      return persistQuickActionOffer({
+        campaignId: input.campaignId,
+        actions: input.args.actions,
+        tick: input.tick,
+      }).then((result) => ({
         success: true,
-        result: { actions: input.args.actions },
-      };
+        result,
+      }));
     case "spawn_npc":
       return handleSpawnNpc(input.campaignId, input.args, input.executionContext);
     case "promote_npc":

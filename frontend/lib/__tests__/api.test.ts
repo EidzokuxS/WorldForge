@@ -273,6 +273,33 @@ describe("gameplay API helpers", () => {
     });
   });
 
+  it("chatAction sends quick-action handles as backend-owned authority when provided", async () => {
+    const response = new Response("event: done\ndata: {}\n\n", {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    });
+
+    fetchMock.mockResolvedValue(response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      chatAction("campaign-42", "Ask the clerk", "Ask the clerk", "", {
+        quickActionHandle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      }),
+    ).resolves.toBe(response);
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost:3001/api/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: "campaign-42",
+        playerAction: "Ask the clerk",
+        intent: "Ask the clerk",
+        method: "",
+        quickActionHandle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      }),
+    });
+  });
+
   it("chatRetry is a streaming helper and sends only the explicit campaignId", async () => {
     const response = new Response("event: done\ndata: {}\n\n", {
       status: 200,
@@ -550,6 +577,36 @@ describe("parseTurnSSE", () => {
       },
     });
   }
+
+  it("preserves quick-action capability handles while normalizing the event payload", async () => {
+    const onQuickActions = vi.fn();
+
+    await parseTurnSSE(
+      createStream([
+        "event: quick_actions",
+        "data: {\"actions\":[{\"label\":\"Ask\",\"action\":\"Ask the clerk.\",\"handle\":\"qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"debug\":\"hidden\"}]}",
+        "",
+        "event: done",
+        "data: {}",
+        "",
+      ].join("\n")),
+      {
+        onNarrative: vi.fn(),
+        onOracleResult: vi.fn(),
+        onStateUpdate: vi.fn(),
+        onQuickActions,
+        onDone: vi.fn(),
+        onError: vi.fn(),
+      },
+    );
+
+    expect(onQuickActions).toHaveBeenCalledWith([{
+      label: "Ask",
+      action: "Ask the clerk.",
+      handle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    }]);
+    expect(JSON.stringify(onQuickActions.mock.calls[0]?.[0])).not.toContain("hidden");
+  });
 
   it("dispatches a dedicated finalization callback before done", async () => {
     const onFinalizing = vi.fn();

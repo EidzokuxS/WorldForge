@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
 
+const { resolveQuickActionSelectionMock } = vi.hoisted(() => ({
+  resolveQuickActionSelectionMock: vi.fn(),
+}));
+
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
@@ -134,6 +138,12 @@ vi.mock("../../engine/index.js", () => ({
 
 vi.mock("../../engine/grounded-lookup.js", () => ({
   runGroundedLookup: vi.fn(),
+}));
+
+vi.mock("../../engine/quick-action-offers.js", () => ({
+  resolveQuickActionSelection: (...args: unknown[]) => resolveQuickActionSelectionMock(...args),
+  isQuickActionSelectionError: (error: unknown) =>
+    Boolean(error && typeof error === "object" && (error as { name?: string }).name === "QuickActionSelectionError"),
 }));
 
 const mockEmbedAndUpdateEvent = vi.fn();
@@ -351,6 +361,7 @@ function createTurnStream(events: Array<{ type: string; data: unknown }>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resolveQuickActionSelectionMock.mockReset();
   mockDrainPendingCommittedEvents.mockReturnValue([]);
   mockDrainPendingCommittedEventsByIds.mockReturnValue([]);
   mockRetractPendingCommittedEventsForTick.mockResolvedValue([]);
@@ -1235,6 +1246,7 @@ describe("Campaign-loaded gameplay transport", () => {
                 {
                   label: "Ask actor_hidden",
                   action: "Ask actor_hidden about route_hidden_path via tool_result_8 and spawn_npc.",
+                  handle: "qac_0123456789abcdef0123456789abcdef",
                 },
                 { label: "Ask", action: "Ask the clerk about the sealed queue." },
                 { label: "Watch", action: "Watch the counter for a change in posture." },
@@ -1265,6 +1277,7 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(res.status).toBe(200);
     const body = await res.text();
     expect(body).toContain("event: quick_actions");
+    expect(body).toContain("qac_0123456789abcdef0123456789abcdef");
     expect(body).toContain("Ask [hidden] about [hidden] via [hidden] and [hidden].");
     expect(body).toContain("Ask the clerk about the sealed queue.");
     expect(body).not.toContain("\"success\"");
@@ -1279,6 +1292,80 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(body).not.toContain("raw debug data");
     expect(body).not.toContain("event: internal_debug");
     expect(body).not.toContain("tool-result-unknown");
+  });
+
+  it("resolves selected quick-action handles before starting the turn processor", async () => {
+    setupStoryteller();
+    setupDbMock();
+    resolveQuickActionSelectionMock.mockResolvedValue({
+      action: "Ask the clerk about the sealed queue.",
+      label: "Ask the clerk",
+      handle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      offerId: "qao-private",
+      actionId: "qaa-private",
+      baseWorldVersion: 0,
+    });
+    mockedProcessTurn.mockImplementation(({ playerAction }) =>
+      createTurnStream([
+        { type: "narrative", data: { text: `Resolved: ${playerAction}` } },
+        { type: "done", data: { tick: 2, worldVersion: 0, worldTimeMinutes: 0 } },
+      ]),
+    );
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Tampered prose from the browser",
+        intent: "Tampered prose from the browser",
+        method: "",
+        quickActionHandle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(resolveQuickActionSelectionMock).toHaveBeenCalledWith({
+      campaignId: CAMPAIGN_ID,
+      handle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      currentTick: 0,
+    });
+    expect(mockedProcessTurn).toHaveBeenCalledWith(expect.objectContaining({
+      playerAction: "Ask the clerk about the sealed queue.",
+      intent: "Ask the clerk about the sealed queue.",
+      method: "",
+    }));
+    const body = await res.text();
+    expect(body).toContain("Resolved: Ask the clerk about the sealed queue.");
+    expect(body).not.toContain("Resolved: Tampered prose from the browser");
+  });
+
+  it("rejects stale or forged quick-action handles without invoking the turn processor", async () => {
+    setupStoryteller();
+    setupDbMock();
+    resolveQuickActionSelectionMock.mockRejectedValue({
+      name: "QuickActionSelectionError",
+      message: "That quick action is no longer available. Choose or type another action.",
+      statusCode: 409,
+    });
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Use stale chip",
+        intent: "Use stale chip",
+        method: "",
+        quickActionHandle: "qac_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      }),
+    });
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      error: "That quick action is no longer available. Choose or type another action.",
+    });
+    expect(mockedProcessTurn).not.toHaveBeenCalled();
   });
 
   it("projects progress events through the player-facing SSE allow-list", async () => {

@@ -820,10 +820,16 @@ export interface TurnSSEHandlers {
   onReasoning?: (payload: { text: string }) => void;
   onOracleResult: (result: { chance: number; roll: number; outcome: string; reasoning: string }) => void;
   onStateUpdate: (update: { tool: string; args: unknown; result: unknown }) => void;
-  onQuickActions: (actions: Array<{ label: string; action: string }>) => void;
+  onQuickActions: (actions: QuickActionChoice[]) => void;
   onFinalizing?: (status?: TurnStageStatus) => void;
   onDone: (boundary?: TurnDoneBoundary) => void;
   onError: (error: string) => void;
+}
+
+export interface QuickActionChoice {
+  label: string;
+  action: string;
+  handle?: string;
 }
 
 export interface TurnDoneBoundary {
@@ -902,6 +908,36 @@ function normalizeTurnDoneBoundary(value: unknown): TurnDoneBoundary | undefined
   return Object.keys(boundary).length > 0 ? boundary : undefined;
 }
 
+function normalizeQuickActions(value: unknown): QuickActionChoice[] {
+  const record = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const source: unknown[] = Array.isArray(record.actions)
+    ? record.actions
+    : (
+      record.result
+      && typeof record.result === "object"
+      && !Array.isArray(record.result)
+      && Array.isArray((record.result as Record<string, unknown>).actions)
+    )
+      ? (record.result as Record<string, unknown>).actions as unknown[]
+      : [];
+
+  return source.flatMap((entry): QuickActionChoice[] => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const action = entry as Record<string, unknown>;
+    if (typeof action.label !== "string" || typeof action.action !== "string") return [];
+    const handle = typeof action.handle === "string" && action.handle.trim().length > 0
+      ? action.handle.trim()
+      : undefined;
+    return [{
+      label: action.label,
+      action: action.action,
+      ...(handle ? { handle } : {}),
+    }];
+  });
+}
+
 function hasDurableTurnDoneBoundary(boundary: TurnDoneBoundary | undefined): boolean {
   return boundary?.tick !== undefined
     && boundary.worldVersion !== undefined
@@ -944,7 +980,7 @@ export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: T
         case "reasoning": handlers.onReasoning?.(parsed); break;
         case "oracle_result": handlers.onOracleResult(parsed); break;
         case "state_update": handlers.onStateUpdate(parsed); break;
-        case "quick_actions": handlers.onQuickActions(parsed.actions ?? parsed.result?.actions ?? []); break;
+        case "quick_actions": handlers.onQuickActions(normalizeQuickActions(parsed)); break;
         case "finalizing_turn":
           requiresVisibleNarrative = true;
           handlers.onFinalizing?.(normalizeTurnStageStatus(parsed));
@@ -1385,13 +1421,18 @@ export function chatAction(
   playerAction: string,
   intent: string,
   method: string,
+  options: { quickActionHandle?: string } = {},
 ): Promise<Response> {
-  return apiStreamPost("/api/chat/action", {
+  const body: Record<string, unknown> = {
     campaignId,
     playerAction,
     intent,
     method,
-  });
+  };
+  if (options.quickActionHandle) {
+    body.quickActionHandle = options.quickActionHandle;
+  }
+  return apiStreamPost("/api/chat/action", body);
 }
 
 export function chatLookup(

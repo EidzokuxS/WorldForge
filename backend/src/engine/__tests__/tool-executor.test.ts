@@ -4,10 +4,12 @@ const {
   accumulateReflectionBudgetMock,
   retractReflectionBudgetMock,
   retractStoredEpisodicEventMock,
+  persistQuickActionOfferMock,
 } = vi.hoisted(() => ({
   accumulateReflectionBudgetMock: vi.fn(),
   retractReflectionBudgetMock: vi.fn(),
   retractStoredEpisodicEventMock: vi.fn(),
+  persistQuickActionOfferMock: vi.fn(),
 }));
 
 // Mock modules before imports
@@ -23,6 +25,10 @@ vi.mock("../../vectors/episodic-events.js", () => ({
 vi.mock("../reflection-budget.js", () => ({
   accumulateReflectionBudget: accumulateReflectionBudgetMock,
   retractReflectionBudget: retractReflectionBudgetMock,
+}));
+
+vi.mock("../quick-action-offers.js", () => ({
+  persistQuickActionOffer: (...args: unknown[]) => persistQuickActionOfferMock(...args),
 }));
 
 import {
@@ -447,6 +453,7 @@ function createStrictResolverDb(options?: {
 describe("executeToolCall", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    persistQuickActionOfferMock.mockReset();
   });
 
   it("returns typed contract failure details for invalid terminal refs", async () => {
@@ -1189,20 +1196,36 @@ describe("executeToolCall", () => {
   });
 
   describe("offer_quick_actions", () => {
-    it("returns actions passthrough with no DB interaction", async () => {
+    it("issues backend-owned quick action capabilities through the offer service", async () => {
       const actions = [
         { label: "Attack", action: "Attack the goblin" },
         { label: "Flee", action: "Run away" },
         { label: "Talk", action: "Try to negotiate" },
       ];
+      persistQuickActionOfferMock.mockResolvedValue({
+        actions: actions.map((action, index) => ({
+          ...action,
+          handle: `qac_${String(index).repeat(32)}`,
+        })),
+      });
 
       const result = await executeToolCall(CAMPAIGN_ID, "offer_quick_actions", {
         actions,
       }, TICK);
 
       expect(result.success).toBe(true);
-      expect(result.result).toEqual({ actions });
-      // getDb should NOT have been called
+      expect(result.result).toEqual({
+        actions: [
+          { label: "Attack", action: "Attack the goblin", handle: "qac_00000000000000000000000000000000" },
+          { label: "Flee", action: "Run away", handle: "qac_11111111111111111111111111111111" },
+          { label: "Talk", action: "Try to negotiate", handle: "qac_22222222222222222222222222222222" },
+        ],
+      });
+      expect(persistQuickActionOfferMock).toHaveBeenCalledWith({
+        campaignId: CAMPAIGN_ID,
+        actions,
+        tick: TICK,
+      });
       expect(getDb).not.toHaveBeenCalled();
     });
   });

@@ -1,6 +1,7 @@
 export interface PlayerFacingQuickAction {
   label: string;
   action: string;
+  handle?: string;
 }
 
 export interface PlayerFacingQuickActionsEvent {
@@ -10,6 +11,7 @@ export interface PlayerFacingQuickActionsEvent {
 const MAX_QUICK_ACTIONS = 5;
 const MAX_QUICK_ACTION_LABEL_LENGTH = 80;
 const MAX_QUICK_ACTION_TEXT_LENGTH = 320;
+const PLAYER_FACING_QUICK_ACTION_HANDLE_PATTERN = /^qac_[a-f0-9]{32}$/u;
 
 const PLAYER_REF_REPLACEMENT = "[hidden]";
 const PLAYER_FACING_UUID_PATTERN =
@@ -149,13 +151,20 @@ function playerFacingText(value: unknown, maxLength: number): string | null {
   return text;
 }
 
+function playerFacingQuickActionHandle(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const handle = value.trim();
+  return PLAYER_FACING_QUICK_ACTION_HANDLE_PATTERN.test(handle) ? handle : undefined;
+}
+
 export function toPlayerFacingQuickActions(value: unknown): PlayerFacingQuickActionsEvent | null {
   const actions = readActionArray(value)
     .flatMap((entry): PlayerFacingQuickAction[] => {
       if (!isRecord(entry)) return [];
       const label = playerFacingText(entry.label, MAX_QUICK_ACTION_LABEL_LENGTH);
       const action = playerFacingText(entry.action, MAX_QUICK_ACTION_TEXT_LENGTH);
-      return label && action ? [{ label, action }] : [];
+      const handle = playerFacingQuickActionHandle(entry.handle);
+      return label && action ? [{ label, action, ...(handle ? { handle } : {}) }] : [];
     })
     .slice(0, MAX_QUICK_ACTIONS);
 

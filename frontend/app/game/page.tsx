@@ -49,7 +49,7 @@ import type { WorldCurrentScene, WorldData } from "@/lib/api-types";
 import { deriveGameMessageKind } from "@/lib/gameplay-text";
 
 type TurnPhase = "idle" | "streaming" | "finalizing";
-type QuickAction = { label: string; action: string };
+type QuickAction = { label: string; action: string; handle?: string };
 type SceneProgress = "opening" | "scene-settling" | null;
 type SceneSettlingStatus = TurnStageStatus;
 type FinalizingTurnStatus = TurnStageStatus;
@@ -960,6 +960,7 @@ export default function GamePage() {
   const submitAction = async (
     actionText: string,
     onStreamAccepted?: () => void,
+    options?: { quickActionHandle?: string },
   ): Promise<boolean> => {
     if (!actionText || isTurnBusy || !activeCampaign) return false;
     const campaignId = activeCampaign.id;
@@ -999,7 +1000,11 @@ export default function GamePage() {
     };
 
     try {
-      const response = await chatAction(campaignId, actionText, actionText, "");
+      const response = options?.quickActionHandle
+        ? await chatAction(campaignId, actionText, actionText, "", {
+          quickActionHandle: options.quickActionHandle,
+        })
+        : await chatAction(campaignId, actionText, actionText, "");
 
       if (!response.body) {
         throw new Error("Empty response stream.");
@@ -1482,8 +1487,8 @@ export default function GamePage() {
         <ActionDock
           value={playSurface.draft}
           onChange={playSurface.setDraft}
-          onSubmitAction={(actionText) => {
-            void submitAction(actionText, playSurface.clearDraft);
+          onSubmitAction={(actionText, options) => {
+            void submitAction(actionText, playSurface.clearDraft, options);
           }}
           onContinue={handleContinueAction}
           disabled={!canInteract}

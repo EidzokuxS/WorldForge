@@ -61,6 +61,7 @@ export interface MechanicRawDetails {
 export interface QuickChoice {
   label: string;
   action: string;
+  handle?: string;
 }
 
 export interface SideRemark {

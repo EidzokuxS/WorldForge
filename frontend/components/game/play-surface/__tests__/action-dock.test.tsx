@@ -82,6 +82,31 @@ describe("ActionDock", () => {
     expect(onSubmitAction).toHaveBeenCalledWith("Ask for details");
   });
 
+  it("submits backend-owned quick-choice handles when present", () => {
+    const onSubmitAction = vi.fn();
+
+    render(
+      <ActionDock
+        value=""
+        onChange={vi.fn()}
+        onSubmitAction={onSubmitAction}
+        onContinue={vi.fn()}
+        isBusy={false}
+        quickActions={[{
+          label: "Ask for details",
+          action: "Ask for details",
+          handle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        }]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Ask for details" }));
+
+    expect(onSubmitAction).toHaveBeenCalledWith("Ask for details", {
+      quickActionHandle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    });
+  });
+
   it("keeps Continue beside the input and Send controls in the bottom action lane", () => {
     render(
       <ActionDock

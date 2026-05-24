@@ -190,6 +190,7 @@ export const chatActionBodySchema = z.object({
   playerAction: z.string().min(1).max(2000),
   intent: z.string().min(1).max(2000),
   method: z.string().max(500).default(""),
+  quickActionHandle: z.string().trim().min(1).max(128).optional(),
 });
 
 export const lookupKindSchema = z.enum([

@@ -584,6 +584,51 @@ export const chronicle = sqliteTable(
   ]
 );
 
+export const quickActionOffers = sqliteTable(
+  "quick_action_offers",
+  {
+    id: text("id").primaryKey(),
+    campaignId: text("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    offerId: text("offer_id").notNull(),
+    actionId: text("action_id").notNull(),
+    capability: text("capability").notNull(),
+    label: text("label").notNull(),
+    action: text("action").notNull(),
+    sourceRefsJson: text("source_refs_json").notNull().default("[]"),
+    sourceEvidenceDigest: text("source_evidence_digest").notNull(),
+    baseWorldVersion: integer("base_world_version").notNull(),
+    worldTimeMinutes: integer("world_time_minutes").notNull(),
+    createdTick: integer("created_tick").notNull(),
+    expiresAtTick: integer("expires_at_tick").notNull(),
+    consumedAt: integer("consumed_at", { mode: "number" }),
+    consumedTick: integer("consumed_tick"),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("quick_action_offers_capability_unique").on(table.capability),
+    uniqueIndex("quick_action_offers_campaign_offer_action_unique").on(
+      table.campaignId,
+      table.offerId,
+      table.actionId,
+    ),
+    index("idx_quick_action_offers_campaign_offer").on(
+      table.campaignId,
+      table.offerId,
+    ),
+    index("idx_quick_action_offers_campaign_expiry").on(
+      table.campaignId,
+      table.expiresAtTick,
+    ),
+    check("quick_action_offers_base_version_non_negative", sql`${table.baseWorldVersion} >= 0`),
+    check("quick_action_offers_world_time_non_negative", sql`${table.worldTimeMinutes} >= 0`),
+    check("quick_action_offers_created_tick_non_negative", sql`${table.createdTick} >= 0`),
+    check("quick_action_offers_expires_at_tick_non_negative", sql`${table.expiresAtTick} >= 0`),
+  ]
+);
+
 export const worldClocks = sqliteTable(
   "world_clocks",
   {

@@ -96,6 +96,10 @@ import {
   sanitizePlayerFacingText,
   toPlayerFacingQuickActions,
 } from "../engine/player-facing-events.js";
+import {
+  isQuickActionSelectionError,
+  resolveQuickActionSelection,
+} from "../engine/quick-action-offers.js";
 import { withSafeTurnProgressPayload } from "../engine/turn-processor.js";
 
 const log = createLogger("chat");
@@ -1180,9 +1184,9 @@ app.post("/action", async (c) => {
     const result = await parseBody(c, chatActionBodySchema);
     if ("response" in result) return result.response;
 
-    const { campaignId, playerAction } = result.data;
-    const compatibilityIntent = playerAction;
-    const compatibilityMethod = "";
+    const { campaignId } = result.data;
+    const submittedPlayerAction = result.data.playerAction;
+    const quickActionHandle = result.data.quickActionHandle;
     const campaign = await requireLoadedCampaign(c, campaignId);
     if (campaign instanceof Response) return campaign;
     if (!tryBeginTurn(campaignId)) {
@@ -1255,6 +1259,30 @@ app.post("/action", async (c) => {
     const turnId = randomUUID();
     const currentTick =
       readCampaignConfig(campaignId).currentTick ?? 0;
+    let playerAction = submittedPlayerAction;
+    let quickActionSelection: Awaited<ReturnType<typeof resolveQuickActionSelection>> | null = null;
+    if (quickActionHandle) {
+      try {
+        quickActionSelection = await resolveQuickActionSelection({
+          campaignId,
+          handle: quickActionHandle,
+          currentTick,
+        });
+        playerAction = quickActionSelection.action;
+      } catch (error) {
+        endTurn(campaignId);
+        turnStartedForCampaign = null;
+        if (isQuickActionSelectionError(error)) {
+          return c.json({ error: error.message }, error.statusCode === 400 ? 400 : 409);
+        }
+        return c.json(
+          { error: getPlayerSafeErrorMessage(error, "Quick action selection failed.") },
+          getErrorStatus(error),
+        );
+      }
+    }
+    const compatibilityIntent = playerAction;
+    const compatibilityMethod = "";
 
     return streamSSE(c, async (stream) => {
       const unregisterAbortCleanup = registerTurnAbortCleanup({
@@ -1270,6 +1298,15 @@ app.post("/action", async (c) => {
           campaignId,
           tick: currentTick,
           rawInput: playerAction,
+          submittedInput: quickActionSelection ? submittedPlayerAction : undefined,
+          quickActionSelection: quickActionSelection
+            ? {
+              handle: quickActionSelection.handle,
+              offerId: quickActionSelection.offerId,
+              actionId: quickActionSelection.actionId,
+              baseWorldVersion: quickActionSelection.baseWorldVersion,
+            }
+            : undefined,
           compatibilityFields: {
             intent: "mirrors rawInput",
             method: "empty",
