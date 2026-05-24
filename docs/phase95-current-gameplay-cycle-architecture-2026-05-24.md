@@ -1,7 +1,7 @@
 # Phase 95 Current Gameplay-Cycle Architecture
 
 Date: 2026-05-24
-HEAD: `458d08c10002b566c18d1726fb3d87218bdb7e04`
+HEAD: `45d371119a2a70b43f1ae4271557745a8baa3a69`
 Reset baseline: `f8d2b3b05cf6a6598208e170f414d171a44ccaf4`
 Oracle gate: compact bundled review `phase95-control-plane-compact-review`, verdict `CONDITIONAL GO`
 
@@ -107,17 +107,35 @@ Official AI SDK reference check: the SDK supports schema-defined tools, model-re
 
 Oracle review result: `CONDITIONAL GO`. Oracle agreed the architecture is directionally sound and broad enough to continue cluster-by-cluster, but not to enter long-run acceptance. The confirmed P0 is restore/rollback crash convergence. Oracle did not promote the listed P1 items to P0 based on the compact bundle, but added terminal receipt parity as a P1 and flagged several call-site/caller-graph assumptions as unverified.
 
+Fresh agent intake after the Oracle gate:
+
+- Restore crash-injection audit, read-only: confirmed the destructive boundaries in `restoreCampaignBundle`: DB copy before config/chat/vector, checkpoint vector remove-before-copy, and non-vector rollback episodic rebuild after restore. The recommended protocol is a durable roll-forward restore journal that keeps staging until restore, reload, invalidation, and vector rebuild converge.
+- Load/startup hook audit, read-only: confirmed `restoreCampaignBundle` is the primary physical restore seam for rollback and checkpoint restore. `loadCampaign` is a secondary lazy startup detector only; route-level rollback must not own physical journal repair because that would duplicate policy and miss checkpoint restore.
+- GM/tool/executor audit, read-only: confirmed GM Read is structured/read-only, GM Tool Loop commits only after accepted receipt/authority checks, and `executeToolCall` owns schema, grounding, authority, world-version, write-scope, receipt, and time validation. It also confirmed P1 gaps in player-turn positive write scopes, terminal receipt parity, actor lifecycle parity, lexical hidden-cause checks, and non-GM caller classification.
+- UI/projection/narration audit, read-only: confirmed quick-action prose is presentation while `qac_*` rows carry authority, and final narration is strongest when production requires fact refs. It added a P1 for `/world` projection leaking broad NPC semantic fields without a closed per-field visibility contract.
+- Persistence/time/clone/vector audit, read-only: confirmed time and clean-start clone are backend-owned enough, replay-preserving clone is explicitly unsupported, and vector recovery is backend-owned derived storage but not transactionally tied to restore.
+
 ### P0
 
 | Gap | Why it blocks architecture acceptance | Owner cluster | Required closure |
 |---|---|---|---|
 | Restore/rollback is staged but not crash-convergent across DB/config/chat/vector overwrite steps | A long campaign cannot trust rollback/recovery if power loss or process death can leave mixed stores. | persistence/recovery | Atomic or journaled restore protocol plus crash-injection tests that prove convergence or fail-closed repair. |
 
+P0 design direction:
+
+- Use a durable restore journal written after staging is complete and before any live store mutation.
+- Make restore roll forward from staging, not prompt the model and not trust partial live files.
+- Preserve `.restore-staging/current` until the operation reaches a durable complete state.
+- Make each destructive step idempotent: close handles, remove SQLite sidecars, apply DB/config/chat, apply vector restore or purge/rebuild policy, reload campaign, invalidate post-restore runtime authority, and rebuild derived episodic vectors.
+- On lazy campaign load, detect a stranded journal before opening the DB and either complete the staged restore or fail closed. Do not generically delete SQLite rollback journals outside the controlled restore path.
+- Checkpoint vector restore must avoid remove-before-copy semantics; turn rollback must not leave stale episodic vectors if rebuild is interrupted.
+
 ### P1
 
 | Gap | Risk | Owner cluster | Candidate fix |
 |---|---|---|---|
 | `done` SSE DTO uses blocklist projection | future raw field can leak by default | API/SSE projection | strict allowlist schema for terminal `done` payload |
+| `/world` projection exposes broad backend-shaped NPC/world fields | player UI can treat semantic internals as presentation/state without a closed visibility contract | API/public DTO/frontend projection | move `/world` to closed DTO builders with explicit field allowlists and visibility metadata |
 | Frontend world-sync failure strands controls fail-closed | authority-safe but poor recovery/playability | frontend projection | explicit recover/refresh/resume state with clear control path |
 | Forecast refresh not wired into current turn path | world pressure can become stale in long campaigns | world runtime | wire `runWorldForecastBuilder` or make deferred policy explicit with cadence |
 | Hidden-cause guard is term/substr based | semantic private-cause leakage if terms incomplete | world runtime/narration | structured visibility metadata and semantic leak tests |
@@ -128,6 +146,7 @@ Oracle review result: `CONDITIONAL GO`. Oracle agreed the architecture is direct
 | Replay-preserving clone fail-closes | replay acceptance cannot claim parity | clone/replay | implement full id rewrite/regenerate plan or keep acceptance scope clean-start only |
 | Lore vector preserve policy lacks freshness/hash proof on rollback | derived memory may drift after rollback | vector recovery | hash/freshness evidence or exact restore policy |
 | Operator logs include raw player input and quick-action handles | sensitive artifacts can outlive gameplay surface | observability | redact/hash handles in standard logs; keep secure trace path separate |
+| Observability policy is not proven on every production artifact publisher | evidence can be mistaken for gameplay truth or public-safe proof | observability | route artifact/report writers through the evidence policy or explicitly mark them local-only |
 
 ### P2
 
@@ -149,10 +168,12 @@ Oracle review result: `CONDITIONAL GO`. Oracle agreed the architecture is direct
 - `backend/src/routes/campaigns.ts` and `backend/src/engine/public-dto-handles.ts` for public DTO handles.
 - `frontend/app/game/page.tsx`, `frontend/lib/api.ts`, and quick action components for browser-visible loop.
 - Erdos agent audit, current HEAD.
+- Mencius agent audit, HEAD `45d37111`.
 
 Unverified assumptions:
 - Browser artifact `phase95-gameplay-live-action3-final-snapshot-20260524.md` is useful evidence but is not a fresh Oracle-gated acceptance run.
 - Current frontend recovery UX is inferred from code/tests, not from a new manual failure drill.
+- `/world` can be converted to closed DTO builders without breaking the live UI if frontend types are migrated in the same slice.
 
 ### GM Read / Tool Loop / Executor
 
@@ -160,11 +181,13 @@ Unverified assumptions:
 - `backend/src/engine/runtime-tool-input-schemas.ts`, `runtime-tool-descriptors.ts`, `tool-contracts.ts`, `tool-execution-context.ts`, `tool-executor.ts`.
 - `backend/src/engine/gameplay-control-plane-contract.ts`.
 - Darwin agent audit, current HEAD.
+- Mill agent audit, HEAD `45d37111`.
 - Official Vercel AI SDK docs via Context7 for schema-defined tools and manual agent loops.
 
 Unverified assumptions:
 - Existing focused tests cover the listed validators, but this canvas has not rerun the full backend/frontend suite.
 - Direct support/background callers are not assumed safe until classified.
+- Player-turn positive write scopes can be derived from active tool descriptors without over-constraining legitimate multi-effect actions.
 
 ### Actor / World Runtime / Time
 
@@ -195,13 +218,14 @@ Unverified assumptions:
 - `backend/src/vectors/episodic-events.ts`, vector policy entries in `gameplay-control-plane-contract.ts`.
 - `backend/src/lib/observability-evidence-policy.ts`, `turn-latency-trace.ts`.
 - Meitner agent audit, current HEAD.
+- Noether agent audit plus restore/load hook audits, HEAD `45d37111`.
 
 Unverified assumptions:
 - Staged restore can be made crash-convergent without rewriting all campaign storage; Oracle must challenge this.
 - Replay-preserving clone remains out of acceptance scope until implemented or explicitly rejected as product scope.
-- Oracle could not verify the full `processTurn`, GM Read, GM Tool Loop, actor scheduler, world-thread runner, prompt assembler, or `executeToolCall` implementation from the compact bundle.
-- Oracle could not verify that production final narration always calls the compiler with `requireFactRefs: true`.
-- Oracle could not verify the full caller graph for support/background state-bearing tool execution.
+- The full-cycle R3 Oracle bundle included `chat.ts`, `tool-execution-context.ts`, `tool-executor.ts`, tool descriptors/schemas, narration guard, restore/clone/manifest, snapshot, and frontend page; it still did not include every actor scheduler/world-thread file or all production artifact publishers.
+- Production final narration appears designed to require fact refs, but future call sites must keep `requireFactRefs: true` as an executable contract.
+- The full caller graph for support/background state-bearing tool execution is still a P1 audit item despite stronger R3 coverage.
 
 ## Oracle Gate Result
 
@@ -209,8 +233,9 @@ Run evidence:
 
 - Broad bundle: `phase95-current-control-plane-architectu`, 30 files in one ZIP bundle, invalid as a full gate because the model returned only one short issue.
 - Compact bundle: `phase95-control-plane-compact-review`, 18 files in one ZIP bundle, valid review result saved at `output/oracle/phase95-current-control-plane-20260524/oracle-compact-review.md`.
+- Full-cycle R3 bundle: `phase95-architecture-full-cycle-r3`, 13 full files in one bundled upload, dry-run verified at ~126k tokens and delivered as `files=13`. Result saved at `output/oracle/phase95-architecture-full-cycle-r3/oracle-review.md`.
 
-Verdict: `CONDITIONAL GO`.
+Verdict: `CONDITIONAL GO` for continued cluster implementation; `NO-GO` for long-play acceptance and for claiming architecture accepted.
 
 Oracle confirmed:
 
@@ -219,13 +244,27 @@ Oracle confirmed:
 - No listed P1 needed promotion to P0 from the compact bundle alone.
 - Final narration architecture is the strongest subsystem: model selects `factRefs`, backend expands and validates prose.
 - Clean-start clone is acceptable as the supported path; replay-preserving clone may fail closed if acceptance wording does not claim it.
+- Forecast refresh should be cadence-based for Phase 95: refresh on relevant world-version deltas, elapsed-time thresholds, pressure changes, or N player turns. Every-turn refresh is not required; fully deferred forecast is too weak for long play.
 
 Oracle added or emphasized:
 
 - Add terminal receipt parity for `record_dialogue_outcome` and `record_world_fact`, not only runtime `stateEffects` parity.
 - Add a generated crosswalk from gameplay lanes to physical stores, rollback policy, replay policy, and projection/rebuild path.
 - Treat production call-site coverage as unverified until `processTurn`, prompt assembler, and executor caller graph are included in an implementation audit.
+- Replace terminal `done` blocklist projection with a strict allowlist DTO.
+- Classify every non-GM `executeToolCall` caller as strict authority, migrated, or explicit legacy with tests.
+- Keep replay-preserving clone out of acceptance claims until implemented; clean-start clone is the supported Phase 95 path for now.
 - Long-play acceptance remains blocked until P0 restore convergence is implemented and proven by crash-injection tests.
+
+Minimum architecture-to-implementation order:
+
+1. Implement durable restore journal/lazy repair and crash-injection tests.
+2. Make terminal `done` and `/world` projection default-deny public DTOs.
+3. Add player-turn positive write scopes, terminal receipt parity, actor lifecycle parity, and strict caller classification.
+4. Generate the gameplay-lane to physical-store/replay/rollback/projection crosswalk.
+5. Make forecast cadence explicit.
+6. Harden frontend post-done sync recovery.
+7. Route production evidence/artifact publishers through the observability policy and redact public logs.
 
 ## Oracle Review Questions
 
