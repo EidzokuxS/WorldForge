@@ -170,8 +170,9 @@ References Used:
 
 Unverified Assumptions:
 
-- Current descriptor names can remain stable while P2 owner-parity work closes
-  `chronicle_entry` and `entity_tag` service details.
+- Current descriptor names can remain stable after the owner-parity slice:
+  `chronicle_entry` has an explicit state lane, and `entity_tag` keeps a
+  service owner with delegate tools.
 
 ## State-Class Matrix
 
@@ -188,14 +189,14 @@ architecture boundaries by accident.
 | Public DTO handles | projector output plus resolver | public DTO handle module | labels only | deterministic handle kind, resolver, raw-id guard | `pdto_*` handles | world/inventory/history/checkpoint/NPC tests |
 | Scene aliases/model refs | scene frame alias map | scene frame builder | visible labels/summaries | reserved namespaces, backend-ref scan | model-facing packet only | collision/raw-id/private-label tests |
 | GM Read result | typed GM Read output | `runGmRead` validator | interpretation/path/runtime requirement | Zod schema, alias resolution, semantic binding | diagnostic receipt only | unsupported/composite/ref tests |
-| Runtime tool descriptors | descriptor registry, owner registry | descriptor contract module | tool descriptions | active allowlist, state lane owner, effect parity | descriptor snapshots | P2 parity for `chronicle_entry`/`entity_tag` |
+| Runtime tool descriptors | descriptor registry, owner registry | descriptor contract module | tool descriptions | active allowlist, state lane owner, effect parity | descriptor snapshots | runtime effect/state-owner parity tests |
 | Tool mutation state | SQLite plus authority traces | runtime executor per lane | typed tool args | input schemas, refs/caps, base version, scopes, savepoints | accepted receipts/state deltas | no-unaccepted-side-effect and rollback tests |
 | Same-turn write scopes | turn ledger plus accepted refs | turn processor | diagnostics | conflict detection, positive/blocked scopes | blocks actor/due-world writes | actor/due-world scope tests |
 | Locations/routes/POIs | locations, edges, recent events | movement/reveal/POI owners | model target aliases | route existence, arrival binding, scope preflight | public place/route handles/facts | movement/reveal/clone/rollback tests |
 | Player/NPC actors | players, npcs, actor lifecycle | movement/condition/promote owners | dialogue/action claims | actor existence, visibility, frame binding | public actor handles/facts | actor promote and out-of-scope tests |
 | Factions/command nodes | factions, command nodes/resources/reports/ops/ledger | faction scheduler/tools | faction reports/proposals | campaign scope, due time, resource ledger invariants | faction public handles/reports | Phase 92 harness plus clone residue coverage; P2 row semantics audit |
 | Relationships/dialogue | relationships, dialogue receipts | dialogue/relationship tools | dialogue summary payloads | speaker binding, relationship refs, private scan | public relationship/fact refs | dialogue/relationship tests |
-| Inventory/items/documents/tags | items and item state/tags | item tools/entity-tag service | item names, tag prose | holder refs, item existence, tag lane owner | item handles/facts | transfer/spawn/tag tests; P2 entity-tag parity |
+| Inventory/items/documents/tags | items and item state/tags | item tools/entity-tag service | item names, tag prose | holder refs, item existence, tag lane owner | item handles/facts | transfer/spawn/tag tests; entity-tag delegate parity tests |
 | World clock/time | `world_clocks`, `turn_clock_ledger` | living-world clock commit | proposed time deltas | accepted clock receipt, non-negative deltas | public world time | no-op/wait/travel/resume/restore tests |
 | Actor process/private memory | process states, wake signals, knowledge records | actor scheduler/tools | actor private memory | actor frame, positive scopes, blocked scopes | actor authority traces/visible effects | out-of-scope actor mutation tests |
 | Due-world jobs/proposals/plans | simulation jobs/proposals, world threads/events | proposal executor/due-world resolver | forecast/world-brain/proposal text | lifecycle, due time, base version, emitted-ref coverage | deferred/executed proposal traces | active-plan scope mismatch tests |
@@ -237,8 +238,8 @@ architecture boundaries by accident.
 - The model may propose, classify, select, or style; backend code owns
   validation, authorization, mutation, time, receipts, persistence, projection,
   clone/replay/rollback, and recovery.
-- Every state class has one write owner; P2 owner-parity gaps are named, not
-  hidden.
+- Every state class has one write owner; runtime effect/state-owner parity is
+  executable for the descriptor-owned effect lanes.
 - Every model/player-facing ref is an issued alias, public DTO handle, or
   backend-owned capability.
 - UI labels and quick-action prose are presentation.
@@ -256,8 +257,6 @@ architecture boundaries by accident.
 
 These items are intentionally not buried under "green tests":
 
-- P2: runtime effect-kind/state-owner parity for `chronicle_entry` and
-  `entity_tag` service lane.
 - P2: full turn/resume final-narration regression for legacy
   `sentences[].text` and unsupported/private terms.
 - P2: world-brain/forecast/guardrail hidden-leak coverage should become more

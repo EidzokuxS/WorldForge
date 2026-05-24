@@ -96,7 +96,7 @@ frozen current tree, and Browser workability is rechecked.
 | Public DTO handles | projector output and resolver | public DTO handle module | UI labels | none | deterministic handle issuer, resolver, public guard | `pdto_*` handles | route tests; P1 raw legacy shape rejection needed |
 | Scene frame aliases | `SceneFrame`, alias map, backend-only ref set | scene frame builder/alias issuer | visible labels and summaries | none | reserved namespaces, backend ref safety, hidden/private term scan | model-facing prompt packet | label collision/raw id tests |
 | GM Read result | accepted typed decision | GM Read validator | repair diagnostics | path/runtime requirement/action interpretation | Zod schema, semantic validators, alias-only refs | diagnostic receipt only | unsupported/composite/ref tests |
-| Runtime tool descriptors | descriptor registry and owner registry | descriptor contract module | tool descriptions | tool calls choose visible tool names | active allowlist, state lane ownership, effect kind parity | descriptor snapshots | P2 `chronicle_entry` lane and `entity_tag` closure remain open |
+| Runtime tool descriptors | descriptor registry and owner registry | descriptor contract module | tool descriptions | tool calls choose visible tool names | active allowlist, state lane ownership, effect kind parity | descriptor snapshots | runtime effect/state-owner parity tests cover `chronicle_entry` and `entity_tag` service ownership |
 | Tool mutation state | SQLite gameplay tables plus traces | tool executor per lane | helper observations | typed tool args | schemas, grounding, authority, write scopes, savepoints | accepted receipt/state delta refs | no-unaccepted-side-effect, rollback, idempotency tests |
 | Same-turn write scopes | in-memory turn ledger plus accepted refs | turn processor | diagnostic blocked scope lists | none | conflict detection, prefix scope matching | blocks actor/due work later in turn | actor positive allowed-scope test now covers player-owned mutation rejection |
 | World clock | `world_clocks`, `turn_clock_ledger` | living-world authority | UI turn/narration tick | proposed time deltas | accepted clock receipt, non-negative, no boundary time advance | public world time | no-op/wait/travel/restore tests |
@@ -200,6 +200,15 @@ and human-style long-play evidence remain required.
      manifest tables, nested JSON/text payloads, config map keys, and verify no
      source campaign id remains in target SQLite gameplay stores.
 
+8. Runtime effect-kind/state-owner parity is executable.
+   - `chronicle_entry` is now a gameplay state lane owned by
+     `add_chronicle_entry`.
+   - `entity_tag` remains owned by the `entity_tag_service` lane, while
+     `add_tag` and `remove_tag` are receipt-capable delegates rather than
+     competing canonical owners.
+   - Contract tests require every runtime state effect kind to map to one
+     gameplay state lane and owner.
+
 ## Current P1 Queue
 
 No current P1 blockers are listed after the local public-API and clone/replay
@@ -209,8 +218,6 @@ remain required before calling the gameplay loop mature.
 
 ## Current P2 Queue
 
-- Runtime effect-kind/state-owner parity is incomplete for `chronicle_entry`
-  and the `entity_tag` service lane.
 - Full turn/resume final-narration regression is still needed for legacy
   `sentences[].text` and unsupported/private terms.
 - Frontend stale/debug reasoning lane should be developer-mode only or ignored.

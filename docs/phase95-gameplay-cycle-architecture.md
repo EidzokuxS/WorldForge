@@ -299,8 +299,9 @@ Already closed from this early list:
   receipt adjacency, and route SSE `done` boundary.
 - Actor/due-world player-owned fences now use positive allowed scopes and
   deterministic emitted-ref preflight.
-- State-owner lanes are executable in the registry, with remaining
-  `chronicle_entry` and `entity_tag` parity tracked as P2.
+- State-owner lanes are executable in the registry; `chronicle_entry` is a
+  first-class lane and `entity_tag` is service-owned with delegate add/remove
+  tools rather than competing canonical owners.
 - World-brain, forecast, guardrails, and support context are explicitly
   support-only unless promoted by an accepted owner receipt.
 - Settled-turn resume, rollback, clean-start clone, vector reconcile, and

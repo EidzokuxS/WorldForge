@@ -96,12 +96,12 @@ export const RUNTIME_TOOL_DESCRIPTORS: Record<RuntimeToolName, RuntimeToolDescri
   add_tag: {
     toolName: "add_tag",
     roles: ["state_mutation"],
-    stateEffects: [{ effectKind: "entity_tag", ownerKind: "canonical" }],
+    stateEffects: [{ effectKind: "entity_tag", ownerKind: "delegate" }],
   },
   remove_tag: {
     toolName: "remove_tag",
     roles: ["state_mutation"],
-    stateEffects: [{ effectKind: "entity_tag", ownerKind: "canonical" }],
+    stateEffects: [{ effectKind: "entity_tag", ownerKind: "delegate" }],
   },
   set_relationship: {
     toolName: "set_relationship",

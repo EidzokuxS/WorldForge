@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   RUNTIME_TOOL_DESCRIPTORS,
+  RUNTIME_TOOL_STATE_EFFECT_KINDS,
   type RuntimeToolStateEffectKind,
 } from "./runtime-tool-descriptors.js";
 import type { RuntimeToolName } from "./runtime-tool-input-schemas.js";
@@ -905,6 +906,7 @@ export const GAMEPLAY_STATE_LANE_VALUES = [
   "item_creation",
   "condition_state",
   "entity_tag",
+  "chronicle_entry",
   "relationship_change",
   "support_actor_creation",
   "actor_lifecycle",
@@ -1011,6 +1013,14 @@ export const GAMEPLAY_STATE_OWNER_REGISTRY: readonly GameplayStateOwnerEntry[] =
     projectionPolicy: "public_fact",
   },
   {
+    lane: "chronicle_entry",
+    owner: "add_chronicle_entry",
+    status: "live",
+    receiptKind: "chronicle_entry",
+    rollbackPolicy: "snapshot_restore",
+    projectionPolicy: "public_fact",
+  },
+  {
     lane: "relationship_change",
     owner: "set_relationship",
     status: "live",
@@ -1070,12 +1080,31 @@ export function assertStateOwnerRegistry(
   return [...registry];
 }
 
-export function runtimeDescriptorCanonicalOwnersByEffectKind(): Partial<Record<
+export const RUNTIME_EFFECT_KIND_STATE_LANES: Record<
+  RuntimeToolStateEffectKind,
+  GameplayStateLane
+> = {
+  movement: "known_route_movement",
+  item_transfer: "item_transfer",
+  item_created: "item_creation",
+  actor_condition: "condition_state",
+  relationship_change: "relationship_change",
+  entity_tag: "entity_tag",
+  support_actor_created: "support_actor_creation",
+  location_revealed: "new_place_reveal",
+  minor_poi_created: "local_poi_creation",
+  chronicle_entry: "chronicle_entry",
+  quick_action_offer: "quick_action_offer",
+};
+
+export function runtimeDescriptorCanonicalOwnersByEffectKind(
+  descriptors: typeof RUNTIME_TOOL_DESCRIPTORS = RUNTIME_TOOL_DESCRIPTORS,
+): Partial<Record<
   RuntimeToolStateEffectKind,
   RuntimeToolName[]
 >> {
   const result: Partial<Record<RuntimeToolStateEffectKind, RuntimeToolName[]>> = {};
-  for (const [toolName, descriptor] of Object.entries(RUNTIME_TOOL_DESCRIPTORS) as [
+  for (const [toolName, descriptor] of Object.entries(descriptors) as [
     RuntimeToolName,
     typeof RUNTIME_TOOL_DESCRIPTORS[RuntimeToolName],
   ][]) {
@@ -1085,5 +1114,105 @@ export function runtimeDescriptorCanonicalOwnersByEffectKind(): Partial<Record<
       result[effect.effectKind]?.push(toolName);
     }
   }
+  return result;
+}
+
+function isRuntimeToolOwner(owner: GameplayStateOwner): owner is RuntimeToolName {
+  return Object.hasOwn(RUNTIME_TOOL_DESCRIPTORS, owner);
+}
+
+const SERVICE_OWNER_CANONICAL_TOOL_ALLOWLIST: Partial<Record<GameplayStateOwner, RuntimeToolName>> = {
+  quick_action_offer_service: "offer_quick_actions",
+};
+
+export interface RuntimeEffectStateOwnerParityEntry {
+  effectKind: RuntimeToolStateEffectKind;
+  lane: GameplayStateLane;
+  owner: GameplayStateOwner;
+  ownerTools: readonly RuntimeToolName[];
+}
+
+export function assertRuntimeEffectStateOwnerParity(input: {
+  registry?: readonly GameplayStateOwnerEntry[];
+  descriptors?: typeof RUNTIME_TOOL_DESCRIPTORS;
+  effectKindStateLanes?: Partial<Record<RuntimeToolStateEffectKind, GameplayStateLane>>;
+} = {}): RuntimeEffectStateOwnerParityEntry[] {
+  const registry = assertStateOwnerRegistry(input.registry ?? GAMEPLAY_STATE_OWNER_REGISTRY);
+  const descriptors = input.descriptors ?? RUNTIME_TOOL_DESCRIPTORS;
+  const lanesByEffectKind = input.effectKindStateLanes ?? RUNTIME_EFFECT_KIND_STATE_LANES;
+  const registryByLane = new Map(registry.map((entry) => [entry.lane, entry]));
+  const canonicalOwnersByEffectKind = runtimeDescriptorCanonicalOwnersByEffectKind(descriptors);
+  const result: RuntimeEffectStateOwnerParityEntry[] = [];
+
+  for (const effectKind of RUNTIME_TOOL_STATE_EFFECT_KINDS) {
+    const lane = lanesByEffectKind[effectKind];
+    if (!lane) {
+      throw new Error(`Missing runtime effect state lane: ${effectKind}.`);
+    }
+
+    const registryEntry = registryByLane.get(lane);
+    if (!registryEntry) {
+      throw new Error(`Runtime effect ${effectKind} maps to missing state owner lane: ${lane}.`);
+    }
+
+    const ownerTools = (Object.keys(descriptors) as RuntimeToolName[])
+      .filter((toolName) =>
+        (descriptors[toolName].stateEffects ?? [])
+          .some((effect) => effect.effectKind === effectKind),
+      );
+    if (ownerTools.length === 0) {
+      throw new Error(`Runtime effect ${effectKind} has no descriptor owner tool.`);
+    }
+
+    const canonicalOwners = canonicalOwnersByEffectKind[effectKind] ?? [];
+    if (isRuntimeToolOwner(registryEntry.owner)) {
+      if (!canonicalOwners.includes(registryEntry.owner)) {
+        throw new Error(
+          `Runtime effect ${effectKind} lane ${lane} owner ${registryEntry.owner} is not the canonical descriptor owner.`,
+        );
+      }
+      const extraCanonicalOwners = canonicalOwners.filter((toolName) => toolName !== registryEntry.owner);
+      if (extraCanonicalOwners.length > 0) {
+        throw new Error(
+          `Runtime effect ${effectKind} has multiple canonical owners: ${canonicalOwners.join(", ")}.`,
+        );
+      }
+    } else {
+      const allowedCanonicalServiceTool = SERVICE_OWNER_CANONICAL_TOOL_ALLOWLIST[registryEntry.owner];
+      if (
+        allowedCanonicalServiceTool
+        && canonicalOwners.length === 1
+        && canonicalOwners[0] === allowedCanonicalServiceTool
+      ) {
+        result.push({
+          effectKind,
+          lane,
+          owner: registryEntry.owner,
+          ownerTools,
+        });
+        continue;
+      }
+      if (canonicalOwners.length > 0) {
+        throw new Error(
+          `Service-owned runtime effect ${effectKind} cannot also expose canonical tool owners: ${canonicalOwners.join(", ")}.`,
+        );
+      }
+      const delegateTools = ownerTools.filter((toolName) =>
+        (descriptors[toolName].stateEffects ?? [])
+          .some((effect) => effect.effectKind === effectKind && effect.ownerKind === "delegate"),
+      );
+      if (delegateTools.length === 0) {
+        throw new Error(`Service-owned runtime effect ${effectKind} has no delegate tools.`);
+      }
+    }
+
+    result.push({
+      effectKind,
+      lane,
+      owner: registryEntry.owner,
+      ownerTools,
+    });
+  }
+
   return result;
 }

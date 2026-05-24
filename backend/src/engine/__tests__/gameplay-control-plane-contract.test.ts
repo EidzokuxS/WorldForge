@@ -5,10 +5,12 @@ import {
   ISSUED_REF_SCHEMA,
   PHASE95_REQUIRED_STORE_KEYS,
   PHASE95_STORE_MANIFEST,
+  RUNTIME_EFFECT_KIND_STATE_LANES,
   TURN_AUTHORITY_STAGE_CONTRACTS,
   TURN_AUTHORITY_STAGE_VALUES,
   TURN_CLOCK_LEDGER_ENTRY_SCHEMA,
   assertPublicProjectionPayload,
+  assertRuntimeEffectStateOwnerParity,
   assertSelectableNarrationRefs,
   assertStateOwnerRegistry,
   assertStoreManifestCoverage,
@@ -16,6 +18,7 @@ import {
   runtimeDescriptorCanonicalOwnersByEffectKind,
   type NarrationFact,
 } from "../gameplay-control-plane-contract.js";
+import { RUNTIME_TOOL_DESCRIPTORS } from "../runtime-tool-descriptors.js";
 
 describe("Phase 95 gameplay control-plane contracts", () => {
   it("locks the turn authority lifecycle in the Oracle-reviewed order", () => {
@@ -100,18 +103,57 @@ describe("Phase 95 gameplay control-plane contracts", () => {
     ])).toThrow(/duplicate state owner lane/i);
   });
 
-  it("makes current descriptor ambiguities visible instead of hiding them", () => {
+  it("keeps descriptor canonical owners aligned with registry owners", () => {
     const owners = runtimeDescriptorCanonicalOwnersByEffectKind();
     expect(owners.movement).toEqual(["move_actor"]);
     expect(owners.location_revealed).toEqual(["reveal_location"]);
     expect(owners.minor_poi_created).toEqual(["create_minor_poi"]);
+    expect(owners.chronicle_entry).toEqual(["add_chronicle_entry"]);
     expect(owners.quick_action_offer).toEqual(["offer_quick_actions"]);
 
-    // Entity tags still have multiple tool verbs. The Phase 95 contract keeps
-    // the write owner as an explicit service until runtime routing is unified.
-    expect(owners.entity_tag).toEqual(["add_tag", "remove_tag"]);
+    // Entity tags have multiple verbs, but the write owner is the service lane.
+    // The verbs stay receipt-capable delegates rather than competing canonical
+    // owners.
+    expect(owners.entity_tag).toBeUndefined();
     expect(GAMEPLAY_STATE_OWNER_REGISTRY.find((entry) => entry.lane === "entity_tag"))
       .toMatchObject({ owner: "entity_tag_service", status: "contract_only" });
+  });
+
+  it("makes every runtime effect kind resolve to exactly one gameplay state owner", () => {
+    const parity = assertRuntimeEffectStateOwnerParity();
+
+    expect(parity.find((entry) => entry.effectKind === "chronicle_entry"))
+      .toMatchObject({
+        lane: "chronicle_entry",
+        owner: "add_chronicle_entry",
+        ownerTools: ["add_chronicle_entry"],
+      });
+    expect(parity.find((entry) => entry.effectKind === "entity_tag"))
+      .toMatchObject({
+        lane: "entity_tag",
+        owner: "entity_tag_service",
+        ownerTools: ["add_tag", "remove_tag"],
+      });
+
+    const { chronicle_entry: _omittedChronicleLane, ...missingChronicleLanes } =
+      RUNTIME_EFFECT_KIND_STATE_LANES;
+    expect(() => assertRuntimeEffectStateOwnerParity({
+      effectKindStateLanes: missingChronicleLanes,
+    })).toThrow(/Missing runtime effect state lane: chronicle_entry/i);
+
+    expect(() => assertRuntimeEffectStateOwnerParity({
+      descriptors: {
+        ...RUNTIME_TOOL_DESCRIPTORS,
+        add_tag: {
+          ...RUNTIME_TOOL_DESCRIPTORS.add_tag,
+          stateEffects: [{ effectKind: "entity_tag", ownerKind: "canonical" }] as const,
+        },
+        remove_tag: {
+          ...RUNTIME_TOOL_DESCRIPTORS.remove_tag,
+          stateEffects: [{ effectKind: "entity_tag", ownerKind: "canonical" }] as const,
+        },
+      },
+    })).toThrow(/Service-owned runtime effect entity_tag cannot also expose canonical tool owners/i);
   });
 
   it("rejects backend refs at the public projection boundary", () => {
