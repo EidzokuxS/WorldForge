@@ -1136,8 +1136,11 @@ describe("Campaign-loaded gameplay transport", () => {
           data: {
             kind: "status_read",
             resolutionState: "observation_grounded",
+            combatIntent: false,
+            toolNames: ["inspect_known_fact", "record_world_fact"],
             evidenceIds: ["action-result:read-1"],
             consequenceIds: ["action-result:mutate-1"],
+            explicitNoCombatEvidenceIds: ["action-result:no-combat-1"],
           },
         },
         { type: "state_update", data: { type: "raw_tool_result", id: "action-result:raw-1" } },
@@ -1189,6 +1192,12 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(body).not.toContain("event: reasoning");
     expect(body).not.toContain("Reasoning stays on a debug lane.");
     expect(body).not.toContain("Secret oracle reasoning.");
+    expect(body).not.toContain("resolutionState");
+    expect(body).not.toContain("observation_grounded");
+    expect(body).not.toContain("combatIntent");
+    expect(body).not.toContain("toolNames");
+    expect(body).not.toContain("inspect_known_fact");
+    expect(body).not.toContain("record_world_fact");
     expect(body).not.toContain("raw_tool_result");
     expect(body).not.toContain("location:raw-secret-market");
     expect(body).not.toContain("location:raw-origin");

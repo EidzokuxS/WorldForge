@@ -703,6 +703,12 @@ function playerSafeNarrative(value: unknown): Record<string, unknown> | null {
   };
 }
 
+function playerSafeTurnResolution(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value)) return null;
+  const kind = playerSafeText(value.kind);
+  return kind ? { kind } : null;
+}
+
 function toPlayerFacingTurnEvent(
   event: { type: string; data: unknown },
 ): { type: string; data: unknown } | null {
@@ -734,14 +740,8 @@ function toPlayerFacingTurnEvent(
     };
   }
   if (event.type === "turn_resolution") {
-    return {
-      ...event,
-      data: omitRecordKeys(event.data, [
-        "evidenceIds",
-        "consequenceIds",
-        "explicitNoCombatEvidenceIds",
-      ]),
-    };
+    const data = playerSafeTurnResolution(event.data);
+    return data ? { ...event, data } : null;
   }
   if (event.type === "done") {
     return {
