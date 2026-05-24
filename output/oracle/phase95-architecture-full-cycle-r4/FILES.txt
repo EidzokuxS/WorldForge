@@ -1,0 +1,17 @@
+output/oracle/phase95-architecture-full-cycle-r4/REQUEST.md
+docs/phase95-current-gameplay-cycle-architecture-r4-2026-05-24.md
+AGENTS.md
+C:/Users/robra/.agents/skills/agents-best-practices/SKILL.md
+backend/src/routes/chat.ts
+backend/src/routes/campaigns.ts
+backend/src/engine/gameplay-control-plane-contract.ts
+backend/src/engine/gm-tool-loop.ts
+backend/src/engine/tool-execution-context.ts
+backend/src/engine/tool-executor.ts
+backend/src/engine/runtime-tool-descriptors.ts
+backend/src/engine/runtime-tool-input-schemas.ts
+backend/src/engine/narration-grounding-guard.ts
+backend/src/campaign/restore-bundle.ts
+backend/src/campaign/store-manifest.ts
+backend/src/campaign/clone.ts
+frontend/lib/api.ts
