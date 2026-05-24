@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type React from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 const mockPush = vi.fn();
@@ -690,6 +690,7 @@ function getLatestNarrativeLogProps() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  delete process.env.NEXT_PUBLIC_WORLDFORGE_DEBUG_REASONING;
   mockedGetImageUrl.mockReset();
   window.localStorage.clear();
   narrativeLogMessageSnapshots.length = 0;
@@ -706,6 +707,10 @@ beforeEach(() => {
   mockedParseTurnSSE.mockImplementation(async (_body, handlers) => {
     handlers.onDone();
   });
+});
+
+afterEach(() => {
+  delete process.env.NEXT_PUBLIC_WORLDFORGE_DEBUG_REASONING;
 });
 
 describe("GamePage", () => {
@@ -1747,7 +1752,8 @@ describe("GamePage", () => {
     });
   });
 
-  it("shows Raw reasoning under the current assistant message only when settings.ui.showRawReasoning is enabled", async () => {
+  it("shows Raw reasoning under the current assistant message only when developer mode and settings toggle are enabled", async () => {
+    process.env.NEXT_PUBLIC_WORLDFORGE_DEBUG_REASONING = "1";
     mockUseSettings.mockReturnValue({
       settings: {
         ui: { showRawReasoning: true },
@@ -1802,7 +1808,7 @@ describe("GamePage", () => {
     });
   });
 
-  it("does not show Raw reasoning when the persisted toggle is off even if a reasoning event arrives", async () => {
+  it("does not store Raw reasoning when the persisted toggle is off even if a reasoning event arrives", async () => {
     mockedChatOpening.mockResolvedValue(createStreamResponse() as never);
     let releaseOpening: (() => void) | undefined;
     mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
@@ -1844,7 +1850,62 @@ describe("GamePage", () => {
       expect(
         latestNarrativeLog?.messages?.find((message) => message.role === "assistant")
           ?.debugReasoning,
-      ).toBe("This should stay hidden while the toggle is off.");
+      ).toBeNull();
+    });
+  });
+
+  it("ignores persisted raw reasoning preference outside developer mode", async () => {
+    mockUseSettings.mockReturnValue({
+      settings: {
+        ui: { showRawReasoning: true },
+      },
+      isLoading: false,
+      isSaving: false,
+      setSettings: vi.fn(),
+      save: vi.fn(),
+    });
+    mockedChatOpening.mockResolvedValue(createStreamResponse() as never);
+    let releaseOpening: (() => void) | undefined;
+    mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
+      await new Promise<void>((resolve) => {
+        releaseOpening = () => {
+          handlers.onNarrative("Lanternlight cuts across the market.");
+          handlers.onReasoning?.({
+            text: "This stale persisted preference should not re-open the lane.",
+          });
+          handlers.onDone();
+          resolve();
+        };
+      });
+    });
+
+    await renderReadyGame({
+      messages: [],
+      premise: "A dark world",
+      hasLiveTurnSnapshot: false,
+    });
+
+    await waitFor(() => {
+      expect(mockedChatOpening).toHaveBeenCalledWith(fakeCampaign.id);
+      expect(mockedParseTurnSSE).toHaveBeenCalledTimes(1);
+    });
+
+    if (releaseOpening) {
+      releaseOpening();
+    }
+
+    openDrawer("Log");
+    await waitFor(() => {
+      const latestNarrativeLog = getLatestNarrativeLogProps();
+
+      expect(latestNarrativeLog?.showRawReasoning).toBe(false);
+      expect(latestNarrativeLog?.messages?.map((message) => message.content)).toContain(
+        "Lanternlight cuts across the market.",
+      );
+      expect(
+        latestNarrativeLog?.messages?.find((message) => message.role === "assistant")
+          ?.debugReasoning,
+      ).toBeNull();
     });
   });
 

@@ -241,11 +241,16 @@ remain required before calling the gameplay loop mature.
 
 ## Current P2 Queue
 
-- Frontend stale/debug reasoning lane should be developer-mode only or ignored.
 - Phase 88 harness text still says clone copies campaign DBs although the code
   now uses `cloneCampaignCleanStart`.
 
 Recently closed P2:
+
+- Frontend raw reasoning is developer-gated instead of player-toggle-gated.
+  Backend still keeps provider reasoning server-side and strips player SSE
+  reasoning events; the frontend now hides the settings control outside
+  `NEXT_PUBLIC_WORLDFORGE_DEBUG_REASONING=1`, omits `onReasoning` handlers
+  outside developer mode, and tests stale persisted preferences as ignored.
 
 - Player portrait asset projection no longer derives image filenames from public
   actor handles. The player portrait filename is the stable public singleton

@@ -76,6 +76,7 @@ import SettingsPage from "@/app/(non-game)/settings/page";
 describe("SettingsPage", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    delete process.env.NEXT_PUBLIC_WORLDFORGE_DEBUG_REASONING;
     persistedSettings = buildSettings();
     loadError = null;
     saveSpy.mockReset();
@@ -86,10 +87,26 @@ describe("SettingsPage", () => {
   });
 
   afterEach(() => {
+    delete process.env.NEXT_PUBLIC_WORLDFORGE_DEBUG_REASONING;
     vi.useRealTimers();
   });
 
-  it("renders a dedicated Gameplay tab with a debug-only raw reasoning toggle that persists across save and reload", async () => {
+  it("renders a dedicated Gameplay tab without the raw reasoning toggle outside developer mode", () => {
+    render(<SettingsPage />);
+
+    expect(screen.getByText("Saved")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Gameplay" })).toBeInTheDocument();
+    expect(screen.queryByText("Show raw reasoning")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("switch", {
+        name: "Show raw reasoning",
+      }),
+    ).not.toBeInTheDocument();
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  it("renders the raw reasoning toggle only in developer mode and persists it across save and reload", async () => {
+    process.env.NEXT_PUBLIC_WORLDFORGE_DEBUG_REASONING = "1";
     const { unmount } = render(<SettingsPage />);
 
     expect(screen.getByText("Saved")).toBeInTheDocument();

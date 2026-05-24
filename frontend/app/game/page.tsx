@@ -21,6 +21,7 @@ import { DrawerHost, type DrawerSlots } from "@/components/game/play-surface/dra
 import { PresenceLayer } from "@/components/game/play-surface/presence-layer";
 import { InspectDrawer } from "@/components/game/play-surface/inspect-drawer";
 import { CONTINUE_ACTION_PAYLOAD } from "@/lib/display-beats";
+import { canExposeRawReasoning } from "@/lib/debug-reasoning";
 import { cn } from "@/lib/utils";
 import { useGamePlaySurfaceState } from "./use-game-play-surface-state";
 import type { CampaignMeta, ChatMessage } from "@worldforge/shared";
@@ -340,7 +341,8 @@ export default function GamePage() {
   const [turnPhase, setTurnPhase] = useState<TurnPhase>("idle");
   const [sceneProgress, setSceneProgress] = useState<SceneProgress>(null);
   const [sceneProgressCopy, setSceneProgressCopy] = useState<string | null>(null);
-  const showRawReasoning = settings.ui.showRawReasoning;
+  const canShowRawReasoning = canExposeRawReasoning();
+  const showRawReasoning = canShowRawReasoning && settings.ui.showRawReasoning;
   const [isInitializing, setIsInitializing] = useState(true);
   const [hasLiveTurnSnapshot, setHasLiveTurnSnapshot] = useState(false);
   const [lastOracleResult, setLastOracleResult] = useState<OracleResultData | null>(null);
@@ -526,7 +528,7 @@ export default function GamePage() {
             setTurnPhase("streaming");
             upsertAssistantMessage(openingNarrative);
           },
-          onReasoning: attachReasoningToLatestAssistant,
+          onReasoning: canShowRawReasoning ? attachReasoningToLatestAssistant : undefined,
           onOracleResult: () => {},
           onStateUpdate: () => {},
           onQuickActions: () => {},
@@ -555,6 +557,7 @@ export default function GamePage() {
     [
       applySceneSettlingStatus,
       attachReasoningToLatestAssistant,
+      canShowRawReasoning,
       refreshWorldData,
       upsertAssistantMessage,
     ],
@@ -587,7 +590,7 @@ export default function GamePage() {
             setTurnPhase("streaming");
             upsertAssistantMessage(narrativeText);
           },
-          onReasoning: attachReasoningToLatestAssistant,
+          onReasoning: canShowRawReasoning ? attachReasoningToLatestAssistant : undefined,
           onOracleResult: (result) => {
             setLastOracleResult(result as OracleResultData);
           },
@@ -637,6 +640,7 @@ export default function GamePage() {
       applyFinalizingStatus,
       applySceneSettlingStatus,
       attachReasoningToLatestAssistant,
+      canShowRawReasoning,
       bufferQuickActions,
       clearQuickActionState,
       finishCompletedTurn,
@@ -1020,7 +1024,7 @@ export default function GamePage() {
           setTurnPhase("streaming");
           upsertAssistantMessage(narrativeText);
         },
-        onReasoning: attachReasoningToLatestAssistant,
+        onReasoning: canShowRawReasoning ? attachReasoningToLatestAssistant : undefined,
         onOracleResult: (result) => {
           setLastOracleResult(result as OracleResultData);
         },
@@ -1115,7 +1119,7 @@ export default function GamePage() {
           setTurnPhase("streaming");
           upsertAssistantMessage(narrativeText);
         },
-        onReasoning: attachReasoningToLatestAssistant,
+        onReasoning: canShowRawReasoning ? attachReasoningToLatestAssistant : undefined,
         onOracleResult: (result) => {
           setLastOracleResult(result as OracleResultData);
         },

@@ -1,6 +1,7 @@
 "use client";
 
 import type { Settings } from "@/lib/types";
+import { canExposeRawReasoning } from "@/lib/debug-reasoning";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 
@@ -13,6 +14,7 @@ export function GameplayTab({ settings, setSettings }: GameplayTabProps) {
   const updateSettings = (updater: (current: Settings) => Settings) => {
     setSettings((current) => updater(current));
   };
+  const showRawReasoningControl = canExposeRawReasoning();
 
   return (
     <section className="wf-set-group">
@@ -26,31 +28,33 @@ export function GameplayTab({ settings, setSettings }: GameplayTabProps) {
         </div>
       </div>
 
-      <div className="wf-set-row">
-        <div className="space-y-2">
-          <Label htmlFor="showRawReasoning" className="wf-set-row-h">
-            Show raw reasoning
-          </Label>
-          <p className="wf-set-row-sub">
-            Debug-only. Hidden by default. When a provider exposes separate
-            reasoning, this only reveals that raw block and does not alter
-            canonical narration.
-          </p>
+      {showRawReasoningControl ? (
+        <div className="wf-set-row">
+          <div className="space-y-2">
+            <Label htmlFor="showRawReasoning" className="wf-set-row-h">
+              Show raw reasoning
+            </Label>
+            <p className="wf-set-row-sub">
+              Debug-only. Hidden by default. When a provider exposes separate
+              reasoning, this only reveals that raw block and does not alter
+              canonical narration.
+            </p>
+          </div>
+          <Switch
+            id="showRawReasoning"
+            checked={settings.ui.showRawReasoning}
+            onCheckedChange={(value: boolean) =>
+              updateSettings((current) => ({
+                ...current,
+                ui: {
+                  ...current.ui,
+                  showRawReasoning: value,
+                },
+              }))
+            }
+          />
         </div>
-        <Switch
-          id="showRawReasoning"
-          checked={settings.ui.showRawReasoning}
-          onCheckedChange={(value: boolean) =>
-            updateSettings((current) => ({
-              ...current,
-              ui: {
-                ...current.ui,
-                showRawReasoning: value,
-              },
-            }))
-          }
-        />
-      </div>
+      ) : null}
     </section>
   );
 }
