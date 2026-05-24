@@ -978,11 +978,40 @@ export const PUBLIC_PROJECTION_SURFACE_VALUES = [
 
 export const PUBLIC_PROJECTION_SURFACE_SCHEMA = z.enum(PUBLIC_PROJECTION_SURFACE_VALUES);
 
+const WORLD_NPC_PRIVATE_PROJECTION_KEYS = new Set([
+  "characterRecord",
+  "draft",
+  "npc",
+]);
+
+function isPublicProjectionRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function assertNoPrivateWorldNpcProjectionFields(payload: unknown): void {
+  if (!isPublicProjectionRecord(payload) || !Array.isArray(payload.npcs)) {
+    return;
+  }
+  payload.npcs.forEach((npc, index) => {
+    if (!isPublicProjectionRecord(npc)) {
+      return;
+    }
+    for (const key of WORLD_NPC_PRIVATE_PROJECTION_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(npc, key)) {
+        throw new Error(`Private NPC projection field crossed world public boundary at $.npcs[${index}].${key}.`);
+      }
+    }
+  });
+}
+
 export function assertPublicProjectionPayload(input: {
   surface: string;
   payload: unknown;
 }): void {
   PUBLIC_PROJECTION_SURFACE_SCHEMA.parse(input.surface);
+  if (input.surface === "world") {
+    assertNoPrivateWorldNpcProjectionFields(input.payload);
+  }
   assertNoBackendRefsInPublicValue(input.payload);
 }
 

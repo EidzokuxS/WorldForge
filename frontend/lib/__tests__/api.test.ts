@@ -743,6 +743,62 @@ describe("gameplay API helpers", () => {
     expect(world.player?.id).toBe(PUBLIC_HANDLES.actorPlayer);
   });
 
+  it("getWorldData ignores private npc identity envelopes on the gameplay world surface", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({
+        currentScene: null,
+        locations: [],
+        npcs: [
+          {
+            actorHandle: PUBLIC_HANDLES.actorNpc,
+            name: "Station Guard",
+            persona: "Keeps people moving.",
+            tags: "[]",
+            tier: "supporting",
+            currentPlaceHandle: PUBLIC_HANDLES.placeBroad,
+            sceneHandle: PUBLIC_HANDLES.placeScene,
+            goals: "{\"short_term\":[\"Watch the gates\"],\"long_term\":[]}",
+            beliefs: "[]",
+            characterRecord: {
+              identity: { id: "npc-raw-1", displayName: "Raw Guard" },
+            },
+            draft: {
+              identity: { displayName: "Draft Guard" },
+            },
+            npc: {
+              name: "Legacy Guard",
+              draft: { identity: { displayName: "Legacy Draft Guard" } },
+            },
+          },
+        ],
+        factions: [],
+        relationships: [],
+        items: [],
+        player: null,
+        personaTemplates: [],
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const world = await getWorldData("camp-1");
+
+    expect(world.npcs[0]).toMatchObject({
+      id: PUBLIC_HANDLES.actorNpc,
+      name: "Station Guard",
+      persona: "Keeps people moving.",
+      goals: { short_term: ["Watch the gates"], long_term: [] },
+      characterRecord: null,
+      draft: null,
+      npc: null,
+    });
+    expect(JSON.stringify(world.npcs[0])).not.toContain("Raw Guard");
+    expect(JSON.stringify(world.npcs[0])).not.toContain("Draft Guard");
+    expect(JSON.stringify(world.npcs[0])).not.toContain("Legacy Guard");
+  });
+
   it("getWorldData refuses to promote raw backend ids from legacy fields into public handles", async () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({

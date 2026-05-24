@@ -770,8 +770,8 @@ describe("GET /:id/world", () => {
     expect(body.npcs[0]).toMatchObject({ name: "Guard" });
     expect(body.npcs[0]).not.toHaveProperty("campaignId");
     expect(body.npcs[0]).not.toHaveProperty("characterRecord");
-    expect(body.npcs[0]).toHaveProperty("draft");
-    expect(body.npcs[0]).toHaveProperty("npc");
+    expect(body.npcs[0]).not.toHaveProperty("draft");
+    expect(body.npcs[0]).not.toHaveProperty("npc");
     expect(body.factions[0]).toMatchObject({ name: "Rebels" });
     expectPublicHandle(body.factions[0].id, "faction");
     expectPublicHandle(body.relationships[0].id, "relationship");
@@ -928,7 +928,7 @@ describe("GET /:id/world", () => {
     expect(mockedLoad).toHaveBeenCalledWith(CAMPAIGN_ID);
   });
 
-  it("surfaces persistent DB npc rows as supporting review-tier aliases", async () => {
+  it("surfaces persistent DB npc rows through the gameplay public projection only", async () => {
     mockedGetActive.mockReturnValue({
       id: CAMPAIGN_ID,
       name: "Test",
@@ -975,8 +975,18 @@ describe("GET /:id/world", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.npcs).toHaveLength(1);
-    expect(body.npcs[0]?.npc?.tier).toBe("supporting");
-    expect(body.npcs[0]?.draft?.identity?.tier).toBe("persistent");
+    expect(body.npcs[0]).toMatchObject({
+      name: "Signal Runner Toma",
+      persona: "Carries messages through the storm.",
+      tier: "persistent",
+      goals: JSON.stringify({
+        short_term: ["Deliver the warning"],
+        long_term: ["Keep the valley connected"],
+      }),
+    });
+    expect(body.npcs[0]).not.toHaveProperty("characterRecord");
+    expect(body.npcs[0]).not.toHaveProperty("draft");
+    expect(body.npcs[0]).not.toHaveProperty("npc");
   });
 
   it("returns connectedPaths and recent happenings for each location instead of raw connectedTo IDs alone", async () => {
@@ -1117,7 +1127,7 @@ describe("GET /:id/world", () => {
     });
   });
 
-  it("projects richer player and npc identity drafts without exposing character records", async () => {
+  it("projects richer player drafts while keeping npc gameplay projection public-only", async () => {
     mockedGetActive.mockReturnValue({
       id: CAMPAIGN_ID,
       name: "Test",
@@ -1167,24 +1177,17 @@ describe("GET /:id/world", () => {
     expectPublicHandle(body.player.draft.socialContext.currentLocationId, "place");
     expectPublicHandle(body.player.draft.startConditions.startLocationId, "place");
     expect(body.npcs[0]).not.toHaveProperty("characterRecord");
-    expect(body.npcs[0].draft.identity.baseFacts.biography).toBe(
-      "Carries messages through the storm.",
-    );
-    expect(body.npcs[0].draft.identity.liveDynamics.activeGoals).toEqual([
-      "Deliver the warning",
-      "Keep the valley connected",
-    ]);
-    expect(body.npcs[0].npc.tags).toEqual(["Remote Researcher"]);
-    expect(body.npcs[0].draft.sourceBundle.secondarySources[0].label).toBe(
-      "Card description",
-    );
-    expect(body.npcs[0].draft.continuity.identityInertia).toBe("anchored");
-    expectPublicHandle(body.npcs[0].draft.socialContext.currentLocationId, "place");
-    expectPublicHandle(body.npcs[0].draft.startConditions.startLocationId, "place");
+    expect(body.npcs[0]).not.toHaveProperty("draft");
+    expect(body.npcs[0]).not.toHaveProperty("npc");
+    expect(body.npcs[0]).toMatchObject({
+      name: "Signal Runner Toma",
+      persona: "Carries messages through the storm.",
+      tier: "key",
+    });
     expectJsonNotToContain(body, ["\"characterRecord\"", "player-1", "npc-1", "loc-1"]);
   });
 
-  it("world route draft-backed npc round-trip reload keeps public draft, npc, and compatibility fields in sync", async () => {
+  it("world route draft-backed npc round-trip reload keeps gameplay public fields in sync", async () => {
     mockedGetActive.mockReturnValue({
       id: CAMPAIGN_ID,
       name: "Test",
@@ -1274,34 +1277,15 @@ describe("GET /:id/world", () => {
       name: "Marshal Selene Voss",
       persona: "Now leads from the front and trusts the village scouts.",
       tier: "persistent",
-      draft: {
-        identity: {
-          displayName: "Marshal Selene Voss",
-          tier: "supporting",
-        },
-        socialContext: {
-          currentLocationName: "Forest",
-          factionName: "Free Company",
-        },
-        motivations: {
-          shortTermGoals: editedShortTermGoals,
-          longTermGoals: editedLongTermGoals,
-        },
-      },
-      npc: {
-        name: "Marshal Selene Voss",
-        persona: "Now leads from the front and trusts the village scouts.",
-        tags: ["Strategist", "Scarred", "Field Medic", "Remote Researcher"],
-        goals: {
-          shortTerm: editedShortTermGoals,
-          longTerm: editedLongTermGoals,
-        },
-        locationName: "Forest",
-        factionName: "Free Company",
-        tier: "supporting",
-      },
+      tags: JSON.stringify(["strategist", "scarred", "field medic"]),
+      goals: JSON.stringify({
+        short_term: editedShortTermGoals,
+        long_term: editedLongTermGoals,
+      }),
     });
     expect(body.npcs[0]).not.toHaveProperty("characterRecord");
+    expect(body.npcs[0]).not.toHaveProperty("draft");
+    expect(body.npcs[0]).not.toHaveProperty("npc");
     expectPublicHandle(body.npcs[0].id, "actor");
   });
 

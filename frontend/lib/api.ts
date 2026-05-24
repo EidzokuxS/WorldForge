@@ -167,9 +167,6 @@ interface RawWorldData {
     sceneHandle?: string | null;
     goals: string;
     beliefs: string;
-    characterRecord?: CharacterRecord | null;
-    draft?: CharacterDraft | null;
-    npc?: ScaffoldNpc | null;
   }>;
   factions: Array<{
     id?: string;
@@ -656,7 +653,6 @@ function parseWorldData(raw: RawWorldData): WorldData {
       const sceneHandle = publicDtoHandle(npc.sceneHandle, ["place"])
         ?? publicDtoHandle(npc.sceneScopeId, ["place"])
         ?? currentPlaceHandle;
-      const draft = npc.draft ?? (npc.characterRecord ? characterRecordToDraft(npc.characterRecord) : npc.npc?.draft ?? null);
       return [{
         id: actorHandle,
         actorHandle,
@@ -670,9 +666,9 @@ function parseWorldData(raw: RawWorldData): WorldData {
         beliefs: parseJsonArray(npc.beliefs),
         sceneScopeId: sceneHandle,
         sceneHandle,
-        characterRecord: npc.characterRecord ?? null,
-        draft,
-        npc: npc.npc ?? (draft ? characterDraftToScaffoldNpc(draft) : null),
+        characterRecord: null,
+        draft: null,
+        npc: null,
       }];
     }),
     factions: raw.factions.flatMap((fac) => {

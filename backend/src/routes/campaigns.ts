@@ -19,12 +19,11 @@ import { getErrorMessage, getErrorStatus } from "../lib/index.js";
 import { parseBody, requireActiveCampaign, requireGeneratedCampaign } from "./helpers.js";
 import { createCampaignSchema, createCheckpointSchema, promoteNpcBodySchema } from "./schemas.js";
 import {
-  hydrateStoredNpcRecord,
   hydrateStoredPlayerRecord,
   toCharacterDraft,
-  toLegacyNpcDraft,
   toLegacyPlayerCharacterWithInventory,
 } from "../character/record-adapters.js";
+import type { hydrateStoredNpcRecord } from "../character/record-adapters.js";
 import { buildCompatibilityTags } from "./compatibility-tags.js";
 import { listRecentLocationEventsForLocations } from "../engine/location-events.js";
 import { listConnectedPaths, loadLocationGraph } from "../engine/location-graph.js";
@@ -262,9 +261,6 @@ function buildWorldNpcPayload(
   campaignId: string,
   row: Parameters<typeof hydrateStoredNpcRecord>[0],
 ) {
-  const record = hydrateStoredNpcRecord(row);
-  const draft = sanitizeCharacterDraftForPublicProjection(campaignId, toCharacterDraft(record));
-  const compatibilityTags = buildCompatibilityTags(record);
   const actorHandle = requiredPublicHandle(campaignId, "actor", row.id);
   return {
     id: actorHandle,
@@ -279,12 +275,6 @@ function buildWorldNpcPayload(
     sceneHandle: publicHandle(campaignId, "place", toWorldSceneScopeId(row)),
     goals: row.goals,
     beliefs: row.beliefs,
-    draft,
-    npc: {
-      ...toLegacyNpcDraft(record),
-      draft,
-      tags: compatibilityTags,
-    },
   };
 }
 

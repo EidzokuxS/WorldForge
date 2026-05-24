@@ -175,9 +175,20 @@ describe("Phase 95 gameplay control-plane contracts", () => {
         placeHandle: "pdto_place_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         actorHandle: "pdto_actor_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         itemHandle: "pdto_item_cccccccccccccccccccccccccccccccc",
-        draft: { provenance: { sourceKind: "player-input" } },
       },
     })).not.toThrow();
+
+    for (const privateField of ["characterRecord", "draft", "npc"]) {
+      expect(() => assertPublicProjectionPayload({
+        surface: "world",
+        payload: {
+          npcs: [{
+            id: "pdto_actor_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            [privateField]: { provenance: { sourceKind: "player-input" } },
+          }],
+        },
+      })).toThrow(/private npc projection field/i);
+    }
 
     expect(() => assertPublicProjectionPayload({
       surface: "world",

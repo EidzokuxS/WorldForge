@@ -746,6 +746,24 @@ function playerSafeTurnResolution(value: unknown): Record<string, unknown> | nul
   return kind ? { kind } : null;
 }
 
+function playerSafeDoneBoundary(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) return {};
+  const data: Record<string, unknown> = {};
+  for (const key of ["tick", "worldVersion", "worldTimeMinutes"] as const) {
+    const numberValue = value[key];
+    if (typeof numberValue === "number" && Number.isFinite(numberValue)) {
+      data[key] = numberValue;
+    }
+  }
+  for (const key of ["opening", "resumed", "lookup"] as const) {
+    const booleanValue = value[key];
+    if (typeof booleanValue === "boolean") {
+      data[key] = booleanValue;
+    }
+  }
+  return data;
+}
+
 function toPlayerFacingTurnEvent(
   event: { type: string; data: unknown },
 ): { type: string; data: unknown } | null {
@@ -783,10 +801,7 @@ function toPlayerFacingTurnEvent(
   if (event.type === "done") {
     return {
       ...event,
-      data: omitRecordKeys(event.data, [
-        "acceptedDurableEventIds",
-        "producedDurableEventIds",
-      ]),
+      data: playerSafeDoneBoundary(event.data),
     };
   }
   if (event.type === "error") {

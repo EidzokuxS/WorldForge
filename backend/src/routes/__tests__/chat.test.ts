@@ -1250,6 +1250,7 @@ describe("Campaign-loaded gameplay transport", () => {
           type: "done",
           data: {
             tick: 2,
+            privateTerm: "hidden-from-done",
             acceptedDurableEventIds: ["evt-speak"],
             producedDurableEventIds: ["evt-speak"],
           },
@@ -1279,6 +1280,8 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(body).toContain("route-confirmation landing");
     expect(body).toContain("Canal Market");
     expect(body).toContain("\"travelCost\":2");
+    expect(body).toContain("\"worldVersion\":0");
+    expect(body).toContain("\"worldTimeMinutes\":0");
     expect(body).not.toContain("event: reasoning");
     expect(body).not.toContain("Reasoning stays on a debug lane.");
     expect(body).not.toContain("Secret oracle reasoning.");
@@ -1293,6 +1296,7 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(body).not.toContain("location:raw-origin");
     expect(body).not.toContain("action-result:");
     expect(body).not.toContain("evt-speak");
+    expect(body).not.toContain("hidden-from-done");
     expect(body).not.toContain("Nanami let the warning land before he moved.Reasoning stays on a debug lane.");
   });
 
