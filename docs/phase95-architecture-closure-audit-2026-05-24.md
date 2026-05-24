@@ -52,9 +52,10 @@ External/current review status after HEAD
 ACCEPTANCE NO-GO** for the reviewed bundle. Oracle found no P0 in the attached
 evidence, but marked vector rollback `purge_rebuild` P1-unproven because
 `backend/src/vectors/episodic-events.ts` was not included in the bundle. The
-follow-up local slice adds explicit vector rollback/fail-closed test evidence;
-that narrows the issue to a focused recheck, not broad Pro reruns. Browser,
-human-style play, soak/replay, and acceptance gates remain blocked.
+follow-up local slice added explicit vector rollback/fail-closed test evidence,
+then focused Oracle session `phase95-vector-rollback-focused-recheck` reviewed
+the vector/restore files and returned `VECTOR P1 CLOSED`. Browser, human-style
+play, soak/replay, and acceptance gates remain blocked.
 
 Prior same-day in-app Browser workability on the restarted dev stack loaded
 `/game`, opened Saves, deleted an existing checkpoint through a
@@ -234,18 +235,19 @@ human-style long-play evidence remain required.
 ## Current P1 Queue
 
 No current P1 blocker is listed by the local audit after the public-API,
-clone/replay, and vector rollback evidence slices. The current external bundle
-is still **ARCHITECTURE NO-GO** until the vector rollback evidence added after
-Oracle's review is focused-rechecked. This is still **not** Phase 95
-acceptance: Browser UI evidence, human-style play, longer soak/replay, and P2
-hardening remain required before calling the gameplay loop mature.
+clone/replay, and vector rollback evidence slices. The broad current-head
+Oracle bundle was **ARCHITECTURE NO-GO** because of a vector evidence gap, and
+the focused Oracle recheck closed that named vector P1. This is still **not**
+Phase 95 acceptance: Browser UI evidence, human-style play, longer soak/replay,
+source-scope architecture evidence, and P2 hardening remain required before
+calling the gameplay loop mature.
 
 ## Current P2 Queue
 
 No local P2 implementation/documentation blockers are listed after the
 observability evidence policy and stale harness-prose closure. This is still
-**not** Phase 95 acceptance: focused Oracle recheck, Browser UI evidence,
-human-style play, and longer soak/replay remain required.
+**not** Phase 95 acceptance: Browser UI evidence, human-style play, and longer
+soak/replay remain required.
 
 Recently closed P2:
 
@@ -487,12 +489,12 @@ Unverified Assumptions:
 
 ### G. Observability, Oracle, Browser, Acceptance
 
-Status: **NO-GO until focused Oracle vector recheck and Browser/play evidence
+Status: **NO-GO until Browser/play evidence and remaining architecture evidence
 pass**
 
 Decision in force: 60-turn runs are smoke evidence, not the goal. Acceptance
-requires contract tests, GitNexus impact/detect changes, focused Oracle review
-of the current evidence bundle, in-app Browser UI workability, and human-style
+requires contract tests, GitNexus impact/detect changes, source-scope
+architecture review evidence, in-app Browser UI workability, and human-style
 fresh/cloned campaigns plus longer soak/replay.
 
 Options compared:
@@ -560,10 +562,7 @@ This list is the closure guard before any future "architecture GO" claim:
 
 ## Next Implementation Order
 
-1. Focused recheck of the vector rollback evidence: include
-   `backend/src/vectors/episodic-events.ts`,
-   `backend/src/vectors/__tests__/episodic-events.test.ts`,
-   `backend/src/campaign/restore-bundle.ts`, and manifest executor tests.
-2. After architecture review is no longer blocked, run Browser gameplay
-   workability, fresh/cloned human-style 60-turn campaigns, and longer
-   soak/replay.
+1. Recheck any remaining source-scope architecture evidence with a tight bundle
+   instead of broad repeated Pro runs.
+2. Run Browser gameplay workability, fresh/cloned human-style 60-turn
+   campaigns, and longer soak/replay.

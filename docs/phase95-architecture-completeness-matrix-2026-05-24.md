@@ -4,9 +4,9 @@ Date: 2026-05-24
 Branch: `develop`
 Reviewed implementation HEAD before this documentation slice:
 `732c9aeb0c36e345abb33d6ddfb7992cd5737adf`
-Status: **current-head Oracle bundle returned ARCHITECTURE NO-GO on evidence
-coverage; local vector rollback evidence was added after that review; gameplay
-acceptance still NO-GO**
+Status: **current-head Oracle bundle returned ARCHITECTURE NO-GO on vector
+evidence coverage; focused Oracle vector recheck returned VECTOR P1 CLOSED;
+gameplay acceptance still NO-GO**
 
 This document is the local "did we forget a layer?" pass for Oracle and
 Browser/play evidence. It does not declare Phase 95 done. It tracks the
@@ -36,8 +36,10 @@ play remains free without making gameplay truth unstable.
 - Ran a current-head Oracle bundle review on `732c9aeb`; it returned
   `ARCHITECTURE NO-GO` because vector rollback `purge_rebuild` was not proven
   by the attached implementation files. The follow-up slice adds the missing
-  executable vector rollback/fail-closed evidence locally; it still needs
-  focused external recheck before claiming Oracle GO.
+  executable vector rollback/fail-closed evidence locally.
+- Ran focused Oracle recheck
+  `phase95-vector-rollback-focused-recheck` with the vector/restore files; it
+  returned `VECTOR P1 CLOSED` and the saved transcript matches the CLI answer.
 - Kept old Oracle/agent answers as risk inventory only.
 - Used one compact document plus referenced source files instead of many inline
   browser attachments.
@@ -99,8 +101,8 @@ Unverified Assumptions:
   freeform player action completed through the action dock with zero console
   errors or warnings. Treat this as historical workability evidence for the
   slice, not as current acceptance evidence.
-- A focused Oracle/vector recheck can judge the local evidence added after the
-  current-head NO-GO without rerunning broad GPT-5.5 Pro bundles.
+- Focused Oracle/vector recheck judged the vector P1 closed. This is not a
+  broad architecture GO and not gameplay acceptance.
 - Existing dirty `.planning` evidence files are outside this architecture
   slice and are not runtime inputs.
 
@@ -125,7 +127,7 @@ means local contract/source evidence, not Browser or long-play acceptance.
 | SSE/API projection | DTO factories and route projectors | public handles and allowlists only | rebuild projection from authority | local evidence for known gameplay surfaces; source-scope bundle still needed |
 | Frontend projection | `frontend/lib/api.ts` parser | public handles carry authority; local render is not truth | reject/drop raw legacy authority | targeted tests green; prior Browser smoke passed; lookup support cannot replace scene beat |
 | Persistence bundles | store manifest and bundle services | every store has policy/evidence | verify before copy; staged restore | local contract evidence |
-| Clone/replay/rollback/vector | manifest executor, clone/restore services | clean-start clone is explicit; replay-preserving fails closed | clone manifest, restore staging, vector reconcile | local vector evidence added after Oracle NO-GO; focused recheck pending |
+| Clone/replay/rollback/vector | manifest executor, clone/restore services | clean-start clone is explicit; replay-preserving fails closed | clone manifest, restore staging, vector reconcile | focused Oracle vector P1 CLOSED; long-play/replay evidence pending |
 | Observability/evals | traces, reports, test harness | evidence describes outcomes, never creates gameplay truth | rerun/compare using committed snapshots | contract tests/GitNexus done; Oracle/Browser/play pending |
 
 ## Agent Roles And Tool Calling
@@ -290,28 +292,29 @@ These items are intentionally not buried under "green tests":
   not expose the settings control and `GamePage` omits `onReasoning` handlers
   unless `NEXT_PUBLIC_WORLDFORGE_DEBUG_REASONING=1`.
 - Evidence gate: current-head Oracle bundle returned NO-GO on vector rollback
-  evidence coverage; focused recheck is required after the local vector test
-  addition.
+  evidence coverage; focused Oracle recheck
+  `phase95-vector-rollback-focused-recheck` closed that vector P1.
 - Evidence gate: in-app Browser UI workability.
 - Evidence gate: human-style fresh and cloned campaigns plus longer
   soak/replay. Sixty turns are smoke evidence, not the end state.
 
 ## Final Local Verdict
 
-The current external review label is **ARCHITECTURE NO-GO / ACCEPTANCE NO-GO**
-for the reviewed bundle: Oracle could not prove vector rollback `purge_rebuild`
-because `backend/src/vectors/episodic-events.ts` was missing from the attached
-evidence.
+The broad current-head Oracle bundle returned **ARCHITECTURE NO-GO /
+ACCEPTANCE NO-GO** because it could not prove vector rollback `purge_rebuild`
+without `backend/src/vectors/episodic-events.ts` in the attachment set.
 
 Local follow-up after that review added executable evidence that episodic
 rollback rebuild purges stale failed-turn vector rows, preserves matching
 accepted rows, rebuilds missing accepted rows from `location_recent_events`, and
 fails closed without writing rebuilt rows if the stale vector table cannot be
-purged. That narrows the Oracle blocker to a focused recheck/evidence gate; it
-does not turn Phase 95 into acceptance. If later Browser, human-style play,
-soak/replay, or targeted P2 hardening finds a missing layer or invariant, this
-document becomes the correction board rather than a defense of the current
-design.
+purged. Focused Oracle session `phase95-vector-rollback-focused-recheck`
+reviewed the attached vector/restore files and returned `VECTOR P1 CLOSED`.
+This closes that named P1 evidence gap only; it does not turn Phase 95 into
+acceptance or replace Browser, human-style play, soak/replay, and any remaining
+source-scope architecture review. If later evidence finds a missing layer or
+invariant, this document becomes the correction board rather than a defense of
+the current design.
 
 Output recheck note: broad Browser/Oracle attachment runs produced tiny or
 missing saved transcripts, but that is an extraction/persistence signal, not
