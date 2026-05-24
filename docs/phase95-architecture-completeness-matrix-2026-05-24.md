@@ -72,6 +72,15 @@ References Used:
 - `backend/src/campaign/clone.ts`
 - `backend/src/vectors/episodic-events.ts`
 - `backend/src/vectors/lore-cards.ts`
+- OpenAI tool/function-calling docs:
+  `https://developers.openai.com/api/docs/guides/tools` and
+  `https://platform.openai.com/docs/guides/function-calling`
+- Hono streaming helper docs:
+  `https://hono.dev/docs/helpers/streaming`
+- LanceDB JavaScript docs for local connect/table row evidence:
+  `https://lancedb.github.io/lancedb/js/`
+- better-sqlite3 backup docs:
+  `https://github.com/WiseLibs/better-sqlite3/blob/master/docs/api.md`
 - GitNexus queries for GM tool loop, public DTO projection, world-brain/
   forecast support lanes, and faction/command-node stores.
 
