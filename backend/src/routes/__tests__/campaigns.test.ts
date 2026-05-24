@@ -11,7 +11,6 @@ vi.mock("../../campaign/index.js", () => ({
   getActiveCampaign: vi.fn(),
   listCampaigns: vi.fn(),
   loadCampaign: vi.fn(),
-  readCampaignConfig: vi.fn(),
   createCheckpoint: vi.fn(),
   listCheckpoints: vi.fn(),
   loadCheckpoint: vi.fn(),
@@ -64,13 +63,13 @@ import {
   getActiveCampaign,
   listCampaigns,
   loadCampaign,
-  readCampaignConfig,
 } from "../../campaign/index.js";
 import { getDb } from "../../db/index.js";
 import { listRecentLocationEventsForLocations } from "../../engine/location-events.js";
 import { listConnectedPaths, loadLocationGraph } from "../../engine/location-graph.js";
 import { readWorldClock } from "../../engine/living-world-authority.js";
 import { loadAuthoritativeInventoryView } from "../../inventory/authority.js";
+import { toPublicDtoHandle } from "../../engine/public-dto-handles.js";
 import campaignRoutes from "../campaigns.js";
 
 const mockedList = vi.mocked(listCampaigns);
@@ -86,7 +85,6 @@ const mockedListConnectedPaths = vi.mocked(listConnectedPaths);
 const mockedLoadLocationGraph = vi.mocked(loadLocationGraph);
 const mockedReadWorldClock = vi.mocked(readWorldClock);
 const mockedLoadAuthoritativeInventoryView = vi.mocked(loadAuthoritativeInventoryView);
-const mockedReadConfig = vi.mocked(readCampaignConfig);
 
 // ---------------------------------------------------------------------------
 // App setup
@@ -95,10 +93,24 @@ const app = new Hono();
 app.route("/api/campaigns", campaignRoutes);
 
 const CAMPAIGN_ID = "abc-123";
+const PUBLIC_HANDLE_PATTERN = /^pdto_(actor|event|faction|item|place|relationship|route|template|entity)_[a-f0-9]{32}$/;
+
+function expectPublicHandle(value: unknown, kind?: string) {
+  expect(value).toEqual(expect.stringMatching(PUBLIC_HANDLE_PATTERN));
+  if (kind) {
+    expect(value).toEqual(expect.stringMatching(new RegExp(`^pdto_${kind}_[a-f0-9]{32}$`)));
+  }
+}
+
+function expectJsonNotToContain(value: unknown, forbidden: string[]) {
+  const encoded = JSON.stringify(value);
+  for (const token of forbidden) {
+    expect(encoded).not.toContain(token);
+  }
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockedReadConfig.mockReturnValue({ personaTemplates: [] } as any);
   mockedLoadLocationGraph.mockReturnValue({
     locations: [],
     edges: [],
@@ -734,26 +746,24 @@ describe("GET /:id/world", () => {
     const body = await res.json();
     expect(body.locations).toEqual([
       expect.objectContaining({
-        id: 1,
+        id: expect.stringMatching(/^pdto_place_[a-f0-9]{32}$/),
+        placeHandle: expect.stringMatching(/^pdto_place_[a-f0-9]{32}$/),
         name: "Forest",
         connectedPaths: [],
         recentHappenings: [],
       }),
     ]);
     expect(body.npcs).toHaveLength(1);
-    expect(body.npcs[0]).toMatchObject(worldData.npcs[0]);
-    expect(body.npcs[0]).toHaveProperty("characterRecord");
+    expectPublicHandle(body.npcs[0].id, "actor");
+    expect(body.npcs[0]).toMatchObject({ name: "Guard" });
+    expect(body.npcs[0]).not.toHaveProperty("campaignId");
+    expect(body.npcs[0]).not.toHaveProperty("characterRecord");
     expect(body.npcs[0]).toHaveProperty("draft");
     expect(body.npcs[0]).toHaveProperty("npc");
-    expect(body.factions).toEqual(worldData.factions);
-    expect(body.relationships).toEqual(worldData.relationships);
-    expect(body.worldClock).toEqual({
-      campaignId: CAMPAIGN_ID,
-      worldVersion: 7,
-      worldTimeMinutes: 42,
-      currentTick: 42,
-      updatedAt: 123456,
-    });
+    expect(body.factions[0]).toMatchObject({ name: "Rebels" });
+    expectPublicHandle(body.factions[0].id, "faction");
+    expectPublicHandle(body.relationships[0].id, "relationship");
+    expect(body).not.toHaveProperty("worldClock");
     expect(body.state).toMatchObject({
       tick: 42,
       currentTick: 42,
@@ -763,10 +773,13 @@ describe("GET /:id/world", () => {
     expect(body.worldVersion).toBe(7);
     expect(body.worldTimeMinutes).toBe(42);
     expect(body.currentTick).toBe(42);
-    expect(body.player).toMatchObject(worldData.player);
-    expect(body.player).toHaveProperty("characterRecord");
+    expect(body.player).toMatchObject({ name: "Hero" });
+    expectPublicHandle(body.player.id, "actor");
+    expect(body.player).not.toHaveProperty("campaignId");
+    expect(body.player).not.toHaveProperty("characterRecord");
     expect(body.player).toHaveProperty("draft");
     expect(body.player).toHaveProperty("character");
+    expectJsonNotToContain(body, ["abc-123", "\"campaignId\""]);
   });
 
   it("keeps broad-only legacy rows compatible without treating them as immediate scene actors", async () => {
@@ -818,15 +831,16 @@ describe("GET /:id/world", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.currentScene).toMatchObject({
-      id: "loc-1",
+      id: expect.stringMatching(/^pdto_place_[a-f0-9]{32}$/),
       name: "Forest",
-      broadLocationId: "loc-1",
+      broadLocationId: expect.stringMatching(/^pdto_place_[a-f0-9]{32}$/),
       broadLocationName: "Forest",
       sceneNpcIds: [],
       clearNpcIds: [],
     });
-    expect(body.player.sceneScopeId).toBe("loc-1");
-    expect(body.npcs[0].sceneScopeId).toBe("loc-1");
+    expectPublicHandle(body.player.sceneScopeId, "place");
+    expectPublicHandle(body.npcs[0].sceneScopeId, "place");
+    expectJsonNotToContain(body, ["loc-1", "npc-legacy"]);
   });
 
   it("returns player as null when no player exists", async () => {
@@ -1056,19 +1070,26 @@ describe("GET /:id/world", () => {
     expect(body.locations[0]).toMatchObject({
       connectedPaths: [
         {
-          edgeId: "edge-1",
-          toLocationId: "loc-2",
+          edgeId: expect.stringMatching(/^pdto_route_[a-f0-9]{32}$/),
+          routeHandle: expect.stringMatching(/^pdto_route_[a-f0-9]{32}$/),
+          toLocationId: expect.stringMatching(/^pdto_place_[a-f0-9]{32}$/),
+          toPlaceHandle: expect.stringMatching(/^pdto_place_[a-f0-9]{32}$/),
           toLocationName: "Shibuya Station",
           travelCost: 1,
         },
       ],
       recentHappenings: [
         expect.objectContaining({
+          id: expect.stringMatching(/^pdto_event_[a-f0-9]{32}$/),
+          locationId: expect.stringMatching(/^pdto_place_[a-f0-9]{32}$/),
           summary: "A rooftop clash spilled cursed residue into the crossing.",
         }),
       ],
     });
-    expect(body.locations[0].connectedTo).toBeUndefined();
+    expect(body.locations[0].connectedTo).toEqual([
+      expect.stringMatching(/^pdto_place_[a-f0-9]{32}$/),
+    ]);
+    expectJsonNotToContain(body.locations[0], ["edge-1", "loc-1", "loc-2", "event-1"]);
     expect(mockedLoadLocationGraph).toHaveBeenCalledWith({ campaignId: CAMPAIGN_ID });
     expect(mockedListRecentLocationEventsForLocations).toHaveBeenCalledWith({
       campaignId: CAMPAIGN_ID,
@@ -1084,7 +1105,7 @@ describe("GET /:id/world", () => {
     });
   });
 
-  it("preserves richer player and npc identity payloads across the world route boundary", async () => {
+  it("projects richer player and npc identity drafts without exposing character records", async () => {
     mockedGetActive.mockReturnValue({
       id: CAMPAIGN_ID,
       name: "Test",
@@ -1119,21 +1140,24 @@ describe("GET /:id/world", () => {
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.player.characterRecord.identity.baseFacts.biography).toBe(
+    expect(body.player).not.toHaveProperty("characterRecord");
+    expect(body.player.draft.identity.baseFacts.biography).toBe(
       "A wandering swordsman.",
     );
-    expect(body.player.characterRecord.identity.behavioralCore.motives).toEqual([
+    expect(body.player.draft.identity.behavioralCore.motives).toEqual([
       "Keep moving before the past catches up",
     ]);
     expect(body.player.character.tags).toEqual(["Brave", "Poor"]);
-    expect(body.player.characterRecord.sourceBundle.secondarySources[0].label).toBe(
+    expect(body.player.draft.sourceBundle.secondarySources[0].label).toBe(
       "Generator concept",
     );
     expect(body.player.draft.continuity.identityInertia).toBe("flexible");
-    expect(body.npcs[0].characterRecord.identity.baseFacts.biography).toBe(
+    expect(body.player.draft.socialContext.currentLocationId).toBeNull();
+    expect(body.npcs[0]).not.toHaveProperty("characterRecord");
+    expect(body.npcs[0].draft.identity.baseFacts.biography).toBe(
       "Carries messages through the storm.",
     );
-    expect(body.npcs[0].characterRecord.identity.liveDynamics.activeGoals).toEqual([
+    expect(body.npcs[0].draft.identity.liveDynamics.activeGoals).toEqual([
       "Deliver the warning",
       "Keep the valley connected",
     ]);
@@ -1142,9 +1166,11 @@ describe("GET /:id/world", () => {
       "Card description",
     );
     expect(body.npcs[0].draft.continuity.identityInertia).toBe("anchored");
+    expect(body.npcs[0].draft.socialContext.currentLocationId).toBeNull();
+    expectJsonNotToContain(body, ["\"characterRecord\"", "player-1", "npc-1", "loc-1"]);
   });
 
-  it("world route draft-backed npc round-trip reload keeps characterRecord, draft, npc, and compatibility fields in sync", async () => {
+  it("world route draft-backed npc round-trip reload keeps public draft, npc, and compatibility fields in sync", async () => {
     mockedGetActive.mockReturnValue({
       id: CAMPAIGN_ID,
       name: "Test",
@@ -1234,12 +1260,6 @@ describe("GET /:id/world", () => {
       name: "Marshal Selene Voss",
       persona: "Now leads from the front and trusts the village scouts.",
       tier: "persistent",
-      characterRecord: {
-        identity: {
-          displayName: "Marshal Selene Voss",
-          tier: "supporting",
-        },
-      },
       draft: {
         identity: {
           displayName: "Marshal Selene Voss",
@@ -1267,6 +1287,8 @@ describe("GET /:id/world", () => {
         tier: "supporting",
       },
     });
+    expect(body.npcs[0]).not.toHaveProperty("characterRecord");
+    expectPublicHandle(body.npcs[0].id, "actor");
   });
 
   it("returns bounded empty fallback arrays when a location has no graph edges or local history", async () => {
@@ -1335,15 +1357,120 @@ describe("GET /:id/world", () => {
     const body = await res.json();
     expect(body.locations).toEqual([
       expect.objectContaining({
-        id: "loc-1",
+        id: expect.stringMatching(/^pdto_place_[a-f0-9]{32}$/),
         connectedPaths: [],
         recentHappenings: [],
       }),
       expect.objectContaining({
-        id: "loc-2",
+        id: expect.stringMatching(/^pdto_place_[a-f0-9]{32}$/),
         connectedPaths: [],
         recentHappenings: [],
       }),
     ]);
+    expectJsonNotToContain(body, ["loc-1", "loc-2"]);
+  });
+});
+
+describe("GET /:id/inventory", () => {
+  it("projects inventory items as public handles", async () => {
+    mockedGetActive.mockReturnValue({
+      id: CAMPAIGN_ID,
+      name: "Test",
+      createdAt: "2026-01-01",
+      generationComplete: true,
+    } as any);
+
+    const mockGet = vi.fn(() => ({ id: "player-1" }));
+    const mockAll = vi.fn(() => [
+      { id: "item-1", name: "Bedroll", tags: "[\"gear\"]" },
+    ]);
+    const mockWhere = vi.fn(() => ({ get: mockGet, all: mockAll }));
+    const mockFrom = vi.fn(() => ({ where: mockWhere }));
+    const mockSelect = vi.fn(() => ({ from: mockFrom }));
+
+    mockedGetDb.mockReturnValue({
+      select: mockSelect,
+    } as any);
+
+    const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/inventory`);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.items).toEqual([
+      expect.objectContaining({
+        id: expect.stringMatching(/^pdto_item_[a-f0-9]{32}$/),
+        itemHandle: expect.stringMatching(/^pdto_item_[a-f0-9]{32}$/),
+        name: "Bedroll",
+      }),
+    ]);
+    expectJsonNotToContain(body, ["item-1", "player-1", CAMPAIGN_ID]);
+  });
+});
+
+describe("GET /:id/locations/:locId/entities", () => {
+  it("resolves public place handles and projects entity handles", async () => {
+    mockedGetActive.mockReturnValue({
+      id: CAMPAIGN_ID,
+      name: "Test",
+      createdAt: "2026-01-01",
+      generationComplete: true,
+    } as any);
+
+    const placeHandle = toPublicDtoHandle({
+      campaignId: CAMPAIGN_ID,
+      kind: "place",
+      sourceId: "loc-1",
+    });
+    const mockAll = vi.fn()
+      .mockReturnValueOnce([{ id: "loc-1" }])
+      .mockReturnValueOnce([{ id: "npc-1", name: "Guard", tags: "[]", tier: "key" }])
+      .mockReturnValueOnce([{ id: "item-1", name: "Lantern", tags: "[]" }]);
+    const mockWhere = vi.fn(() => ({ all: mockAll }));
+    const mockFrom = vi.fn(() => ({ where: mockWhere }));
+    const mockSelect = vi.fn(() => ({ from: mockFrom }));
+
+    mockedGetDb.mockReturnValue({
+      select: mockSelect,
+    } as any);
+
+    const res = await app.request(
+      `/api/campaigns/${CAMPAIGN_ID}/locations/${placeHandle}/entities`,
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.npcs[0]).toMatchObject({
+      id: expect.stringMatching(/^pdto_actor_[a-f0-9]{32}$/),
+      actorHandle: expect.stringMatching(/^pdto_actor_[a-f0-9]{32}$/),
+      name: "Guard",
+    });
+    expect(body.items[0]).toMatchObject({
+      id: expect.stringMatching(/^pdto_item_[a-f0-9]{32}$/),
+      itemHandle: expect.stringMatching(/^pdto_item_[a-f0-9]{32}$/),
+      name: "Lantern",
+    });
+    expectJsonNotToContain(body, ["loc-1", "npc-1", "item-1", CAMPAIGN_ID]);
+  });
+
+  it("rejects raw location ids at the public route boundary", async () => {
+    mockedGetActive.mockReturnValue({
+      id: CAMPAIGN_ID,
+      name: "Test",
+      createdAt: "2026-01-01",
+      generationComplete: true,
+    } as any);
+
+    const mockAll = vi.fn(() => [{ id: "loc-1" }]);
+    const mockWhere = vi.fn(() => ({ all: mockAll }));
+    const mockFrom = vi.fn(() => ({ where: mockWhere }));
+    const mockSelect = vi.fn(() => ({ from: mockFrom }));
+
+    mockedGetDb.mockReturnValue({
+      select: mockSelect,
+    } as any);
+
+    const res = await app.request(`/api/campaigns/${CAMPAIGN_ID}/locations/loc-1/entities`);
+
+    expect(res.status).toBe(404);
   });
 });

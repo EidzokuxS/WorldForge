@@ -12,6 +12,7 @@ vi.mock("@/lib/api", () => ({
   parseCharacter: vi.fn(),
   generateCharacter: vi.fn(),
   importV2Card: vi.fn(),
+  listPersonaTemplates: vi.fn(),
   resolveStartingLocation: vi.fn(),
   previewCanonicalLoadout: vi.fn(),
   applyPersonaTemplate: vi.fn(),
@@ -44,11 +45,12 @@ vi.mock("@/components/character-creation/character-card", () => ({
   CharacterCard: () => <div data-testid="character-card" />,
 }));
 
-import { getWorldData, loadCampaign } from "@/lib/api";
+import { getWorldData, listPersonaTemplates, loadCampaign } from "@/lib/api";
 import CharacterCreationPage from "@/app/(non-game)/campaign/[id]/character/page";
 
 const mockedLoadCampaign = vi.mocked(loadCampaign);
 const mockedGetWorldData = vi.mocked(getWorldData);
+const mockedListPersonaTemplates = vi.mocked(listPersonaTemplates);
 
 async function renderPage(campaignId: string) {
   await act(async () => {
@@ -62,6 +64,7 @@ async function renderPage(campaignId: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockedListPersonaTemplates.mockResolvedValue({ personaTemplates: [] } as never);
 });
 
 describe("CharacterCreationPage", () => {

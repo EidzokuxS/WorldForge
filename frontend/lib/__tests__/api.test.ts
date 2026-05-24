@@ -464,15 +464,23 @@ describe("gameplay API helpers", () => {
 
     const world = await getWorldData("camp-1");
 
-    expect(world.currentScene).toEqual({
+    expect(world.currentScene).toMatchObject({
       id: "scene-platform-7",
+      sceneHandle: "scene-platform-7",
       name: "Platform 7",
       broadLocationId: "loc-shibuya-station",
+      broadPlaceHandle: "loc-shibuya-station",
       broadLocationName: "Shibuya Station",
       sceneNpcIds: ["npc-1", "npc-2"],
+      actorHandles: ["npc-1", "npc-2"],
       clearNpcIds: ["npc-1"],
+      clearActorHandles: ["npc-1"],
       awareness: {
         byNpcId: {
+          "npc-1": "clear",
+          "npc-2": "hint",
+        },
+        byActorHandle: {
           "npc-1": "clear",
           "npc-2": "hint",
         },
@@ -564,6 +572,107 @@ describe("gameplay API helpers", () => {
     expect(world.npcs.map((npc) => npc.id)).toEqual(["npc-clear", "npc-sibling"]);
     expect(world.npcs[1]?.currentLocationId).toBe("loc-shibuya-station");
     expect(world.npcs[1]?.sceneScopeId).toBe("scene-rooftop");
+  });
+
+  it("getWorldData maps public DTO handles into frontend world aliases", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({
+        currentScene: {
+          sceneHandle: "pdto_place_scene",
+          name: "Platform 7",
+          broadPlaceHandle: "pdto_place_broad",
+          broadLocationName: "Shibuya Station",
+          actorHandles: ["pdto_actor_npc"],
+          clearActorHandles: ["pdto_actor_npc"],
+          awareness: {
+            byActorHandle: {
+              pdto_actor_npc: "clear",
+            },
+            hintSignals: [],
+          },
+        },
+        locations: [
+          {
+            placeHandle: "pdto_place_broad",
+            name: "Shibuya Station",
+            description: "Transit hum.",
+            tags: [],
+            connectedToPlaceHandles: ["pdto_place_next"],
+            connectedPaths: [
+              {
+                routeHandle: "pdto_route_next",
+                toPlaceHandle: "pdto_place_next",
+                toLocationName: "Exit 13",
+                travelCost: 1,
+              },
+            ],
+            recentHappenings: [],
+            isStarting: true,
+          },
+        ],
+        npcs: [
+          {
+            actorHandle: "pdto_actor_npc",
+            name: "Station Guard",
+            persona: "",
+            tags: "[]",
+            tier: "supporting",
+            currentPlaceHandle: "pdto_place_broad",
+            sceneHandle: "pdto_place_scene",
+            goals: "{\"short_term\":[],\"long_term\":[]}",
+            beliefs: "[]",
+          },
+        ],
+        factions: [],
+        relationships: [],
+        items: [
+          {
+            itemHandle: "pdto_item_lantern",
+            name: "Lantern",
+            tags: "[]",
+            placeHandle: "pdto_place_broad",
+            ownerActorHandle: null,
+          },
+        ],
+        player: {
+          actorHandle: "pdto_actor_player",
+          name: "Yuji Itadori",
+          race: "",
+          gender: "",
+          age: "",
+          appearance: "",
+          hp: 5,
+          tags: "[]",
+          equippedItems: "[]",
+          inventory: [],
+          equipment: [],
+          currentPlaceHandle: "pdto_place_broad",
+          sceneHandle: "pdto_place_scene",
+        },
+        personaTemplates: [],
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const world = await getWorldData("camp-1");
+
+    expect(world.locations[0]?.id).toBe("pdto_place_broad");
+    expect(world.locations[0]?.connectedTo).toEqual(["pdto_place_next"]);
+    expect(world.locations[0]?.connectedPaths?.[0]).toMatchObject({
+      edgeId: "pdto_route_next",
+      routeHandle: "pdto_route_next",
+      toLocationId: "pdto_place_next",
+      toPlaceHandle: "pdto_place_next",
+    });
+    expect(world.currentScene?.id).toBe("pdto_place_scene");
+    expect(world.currentScene?.sceneNpcIds).toEqual(["pdto_actor_npc"]);
+    expect(world.npcs[0]?.id).toBe("pdto_actor_npc");
+    expect(world.npcs[0]?.currentLocationId).toBe("pdto_place_broad");
+    expect(world.items[0]?.id).toBe("pdto_item_lantern");
+    expect(world.player?.id).toBe("pdto_actor_player");
   });
 });
 

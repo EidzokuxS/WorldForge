@@ -42,6 +42,7 @@ vi.mock("../../inventory/authority.js", async () => {
 
 import { getActiveCampaign, readCampaignConfig } from "../../campaign/index.js";
 import { getDb } from "../../db/index.js";
+import { requirePublicDtoHandle } from "../../engine/public-dto-handles.js";
 import { readWorldClock } from "../../engine/living-world-authority.js";
 import { loadAuthoritativeInventoryView } from "../../inventory/authority.js";
 import campaignRoutes from "../campaigns.js";
@@ -90,6 +91,22 @@ function createMockDb(overrides: {
 
 const app = new Hono();
 app.route("/api/campaigns", campaignRoutes);
+
+function publicPlaceHandle(sourceId: string): string {
+  return requirePublicDtoHandle({
+    campaignId: "abc-123",
+    kind: "place",
+    sourceId,
+  });
+}
+
+function publicActorHandle(sourceId: string): string {
+  return requirePublicDtoHandle({
+    campaignId: "abc-123",
+    kind: "actor",
+    sourceId,
+  });
+}
 
 describe("GET /api/campaigns/:id/world authoritative inventory", () => {
   beforeEach(() => {
@@ -309,18 +326,30 @@ describe("GET /api/campaigns/:id/world authoritative inventory", () => {
 
     expect(response.status).toBe(200);
     const body = await response.json();
+    const sceneHandle = publicPlaceHandle("scene-platform-7");
+    const broadPlaceHandle = publicPlaceHandle("loc-1");
+    const visibleActorHandle = publicActorHandle("npc-1");
+    const hiddenActorHandle = publicActorHandle("npc-2");
 
     expect(body.currentScene).toEqual({
-      id: "scene-platform-7",
+      id: sceneHandle,
+      sceneHandle,
       name: "Platform 7",
-      broadLocationId: "loc-1",
+      broadLocationId: broadPlaceHandle,
+      broadPlaceHandle,
       broadLocationName: "Shibuya Station",
-      sceneNpcIds: ["npc-1", "npc-2"],
-      clearNpcIds: ["npc-1"],
+      sceneNpcIds: [visibleActorHandle, hiddenActorHandle],
+      actorHandles: [visibleActorHandle, hiddenActorHandle],
+      clearNpcIds: [visibleActorHandle],
+      clearActorHandles: [visibleActorHandle],
       awareness: {
         byNpcId: {
-          "npc-1": "clear",
-          "npc-2": "hint",
+          [visibleActorHandle]: "clear",
+          [hiddenActorHandle]: "hint",
+        },
+        byActorHandle: {
+          [visibleActorHandle]: "clear",
+          [hiddenActorHandle]: "hint",
         },
         hintSignals: ["Something concealed is nearby."],
       },
@@ -409,26 +438,40 @@ describe("GET /api/campaigns/:id/world authoritative inventory", () => {
 
     expect(response.status).toBe(200);
     const body = await response.json();
+    const sceneHandle = publicPlaceHandle("loc-concourse");
+    const broadPlaceHandle = publicPlaceHandle("loc-macro");
+    const sameSceneActorHandle = publicActorHandle("npc-same-scene");
+    const siblingSceneActorHandle = publicActorHandle("npc-sibling-scene");
+    const siblingSceneHandle = publicPlaceHandle("loc-rooftop");
 
     expect(body.currentScene).toMatchObject({
-      id: "loc-concourse",
+      id: sceneHandle,
+      sceneHandle,
       name: "Station Concourse",
-      broadLocationId: "loc-macro",
+      broadLocationId: broadPlaceHandle,
+      broadPlaceHandle,
       broadLocationName: "Dense Transit Ward",
-      sceneNpcIds: ["npc-same-scene"],
-      clearNpcIds: ["npc-same-scene"],
+      sceneNpcIds: [sameSceneActorHandle],
+      actorHandles: [sameSceneActorHandle],
+      clearNpcIds: [sameSceneActorHandle],
+      clearActorHandles: [sameSceneActorHandle],
       awareness: {
         byNpcId: {
-          "npc-same-scene": "clear",
+          [sameSceneActorHandle]: "clear",
+        },
+        byActorHandle: {
+          [sameSceneActorHandle]: "clear",
         },
       },
     });
     expect(body.currentScene.sceneNpcIds).not.toContain("npc-sibling-scene");
+    expect(body.currentScene.sceneNpcIds).not.toContain(siblingSceneActorHandle);
     expect(body.currentScene.clearNpcIds).not.toContain("npc-sibling-scene");
-    expect(body.npcs.find((npc: { id: string }) => npc.id === "npc-same-scene")?.sceneScopeId)
-      .toBe("loc-concourse");
-    expect(body.npcs.find((npc: { id: string }) => npc.id === "npc-sibling-scene")?.sceneScopeId)
-      .toBe("loc-rooftop");
+    expect(body.currentScene.clearNpcIds).not.toContain(siblingSceneActorHandle);
+    expect(body.npcs.find((npc: { id: string }) => npc.id === sameSceneActorHandle)?.sceneScopeId)
+      .toBe(sceneHandle);
+    expect(body.npcs.find((npc: { id: string }) => npc.id === siblingSceneActorHandle)?.sceneScopeId)
+      .toBe(siblingSceneHandle);
   });
 
   it("keeps explicitly scoped macro-scene NPCs visible without pulling sibling sublocations", async () => {
@@ -516,22 +559,35 @@ describe("GET /api/campaigns/:id/world authoritative inventory", () => {
 
     expect(response.status).toBe(200);
     const body = await response.json();
+    const macroPlaceHandle = publicPlaceHandle("loc-macro");
+    const clerkActorHandle = publicActorHandle("npc-clerk");
+    const bellHallActorHandle = publicActorHandle("npc-bell-hall");
+    const legacyActorHandle = publicActorHandle("npc-legacy");
 
     expect(body.currentScene).toMatchObject({
-      id: "loc-macro",
+      id: macroPlaceHandle,
+      sceneHandle: macroPlaceHandle,
       name: "Brass Citadel",
-      broadLocationId: "loc-macro",
+      broadLocationId: macroPlaceHandle,
+      broadPlaceHandle: macroPlaceHandle,
       broadLocationName: "Brass Citadel",
-      sceneNpcIds: ["npc-clerk"],
-      clearNpcIds: ["npc-clerk"],
+      sceneNpcIds: [clerkActorHandle],
+      actorHandles: [clerkActorHandle],
+      clearNpcIds: [clerkActorHandle],
+      clearActorHandles: [clerkActorHandle],
       awareness: {
         byNpcId: {
-          "npc-clerk": "clear",
+          [clerkActorHandle]: "clear",
+        },
+        byActorHandle: {
+          [clerkActorHandle]: "clear",
         },
       },
     });
     expect(body.currentScene.sceneNpcIds).not.toContain("npc-bell-hall");
     expect(body.currentScene.sceneNpcIds).not.toContain("npc-legacy");
+    expect(body.currentScene.sceneNpcIds).not.toContain(bellHallActorHandle);
+    expect(body.currentScene.sceneNpcIds).not.toContain(legacyActorHandle);
   });
 
   it("derives persistent sublocation broad scope so support NPCs placed at parent remain visible", async () => {
@@ -595,21 +651,31 @@ describe("GET /api/campaigns/:id/world authoritative inventory", () => {
 
     expect(response.status).toBe(200);
     const body = await response.json();
+    const sceneHandle = publicPlaceHandle("loc-pier");
+    const broadPlaceHandle = publicPlaceHandle("loc-macro");
+    const gondolierActorHandle = publicActorHandle("npc-gondolier");
 
     expect(body.currentScene).toMatchObject({
-      id: "loc-pier",
+      id: sceneHandle,
+      sceneHandle,
       name: "Lantern-Lit Gondola Pier",
-      broadLocationId: "loc-macro",
+      broadLocationId: broadPlaceHandle,
+      broadPlaceHandle,
       broadLocationName: "Canal Market District",
-      sceneNpcIds: ["npc-gondolier"],
-      clearNpcIds: ["npc-gondolier"],
+      sceneNpcIds: [gondolierActorHandle],
+      actorHandles: [gondolierActorHandle],
+      clearNpcIds: [gondolierActorHandle],
+      clearActorHandles: [gondolierActorHandle],
       awareness: {
         byNpcId: {
-          "npc-gondolier": "clear",
+          [gondolierActorHandle]: "clear",
+        },
+        byActorHandle: {
+          [gondolierActorHandle]: "clear",
         },
       },
     });
-    expect(body.npcs.find((npc: { id: string }) => npc.id === "npc-gondolier")?.sceneScopeId)
-      .toBe("loc-pier");
+    expect(body.npcs.find((npc: { id: string }) => npc.id === gondolierActorHandle)?.sceneScopeId)
+      .toBe(sceneHandle);
   });
 });

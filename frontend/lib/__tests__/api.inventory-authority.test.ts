@@ -65,6 +65,7 @@ describe("authoritative world inventory parsing", () => {
     const player = world.player as unknown as {
       inventory?: Array<{
         id: string;
+        itemHandle?: string;
         name: string;
         tags: string[];
         equipState: string;
@@ -73,6 +74,7 @@ describe("authoritative world inventory parsing", () => {
       }>;
       equipment?: Array<{
         id: string;
+        itemHandle?: string;
         name: string;
         tags: string[];
         equipState: string;
@@ -85,6 +87,7 @@ describe("authoritative world inventory parsing", () => {
     expect(player.inventory).toEqual([
       {
         id: "item-bedroll",
+        itemHandle: "item-bedroll",
         name: "Bedroll",
         tags: ["gear"],
         equipState: "carried",
@@ -95,6 +98,7 @@ describe("authoritative world inventory parsing", () => {
     expect(player.equipment).toEqual([
       {
         id: "item-sword",
+        itemHandle: "item-sword",
         name: "Iron Sword",
         tags: ["weapon", "steel"],
         equipState: "equipped",

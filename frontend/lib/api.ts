@@ -132,32 +132,39 @@ interface RawWorldData {
   worldTimeMinutes?: number;
   currentScene?: unknown;
   locations: Array<{
-    id: string;
-    campaignId: string;
+    id?: string;
+    placeHandle?: string;
+    campaignId?: string;
     name: string;
     description: string;
     tags: unknown;
     connectedTo?: unknown;
+    connectedToPlaceHandles?: unknown;
     connectedPaths?: unknown;
     recentHappenings?: unknown;
     isStarting: boolean;
     kind?: LocationKind | null;
     locationKind?: LocationKind | null;
     parentLocationId?: string | null;
+    parentPlaceHandle?: string | null;
     anchorLocationId?: string | null;
+    anchorPlaceHandle?: string | null;
     persistence?: LocationPersistence | null;
     expiresAtTick?: number | null;
     archivedAtTick?: number | null;
   }>;
   npcs: Array<{
-    id: string;
-    campaignId: string;
+    id?: string;
+    actorHandle?: string;
+    campaignId?: string;
     name: string;
     persona: string;
     tags: string;
     tier: string;
     currentLocationId: string | null;
+    currentPlaceHandle?: string | null;
     sceneScopeId?: string | null;
+    sceneHandle?: string | null;
     goals: string;
     beliefs: string;
     characterRecord?: CharacterRecord | null;
@@ -165,31 +172,39 @@ interface RawWorldData {
     npc?: ScaffoldNpc | null;
   }>;
   factions: Array<{
-    id: string;
-    campaignId: string;
+    id?: string;
+    factionHandle?: string;
+    campaignId?: string;
     name: string;
     tags: string;
     goals: string;
     assets: string;
   }>;
   relationships: Array<{
-    id: string;
-    campaignId: string;
-    entityA: string;
-    entityB: string;
+    id?: string;
+    relationshipHandle?: string;
+    campaignId?: string;
+    entityA?: string | null;
+    entityAHandle?: string | null;
+    entityB?: string | null;
+    entityBHandle?: string | null;
     tags: string;
     reason: string | null;
   }>;
   items: Array<{
-    id: string;
+    id?: string;
+    itemHandle?: string;
     name: string;
     tags: string;
     ownerId: string | null;
+    ownerActorHandle?: string | null;
     locationId: string | null;
+    placeHandle?: string | null;
   }>;
   player: {
-    id: string;
-    campaignId: string;
+    id?: string;
+    actorHandle?: string;
+    campaignId?: string;
     name: string;
     race: string;
     gender: string;
@@ -201,7 +216,9 @@ interface RawWorldData {
     inventory?: unknown;
     equipment?: unknown;
     currentLocationId: string | null;
+    currentPlaceHandle?: string | null;
     sceneScopeId?: string | null;
+    sceneHandle?: string | null;
     characterRecord?: CharacterRecord | null;
     draft?: CharacterDraft | null;
     character?: ParsedCharacter | null;
@@ -286,8 +303,14 @@ function parseWorldLocationConnectedPaths(value: unknown): WorldLocationConnecte
       }
 
       const path = item as Record<string, unknown>;
-      const edgeId = typeof path.edgeId === "string" ? path.edgeId : null;
-      const toLocationId = typeof path.toLocationId === "string"
+      const edgeId = typeof path.routeHandle === "string"
+        ? path.routeHandle
+        : typeof path.edgeId === "string"
+          ? path.edgeId
+          : null;
+      const toLocationId = typeof path.toPlaceHandle === "string"
+        ? path.toPlaceHandle
+        : typeof path.toLocationId === "string"
         ? path.toLocationId
         : typeof path.locationId === "string"
           ? path.locationId
@@ -302,7 +325,9 @@ function parseWorldLocationConnectedPaths(value: unknown): WorldLocationConnecte
 
       return [{
         edgeId,
+        routeHandle: edgeId,
         toLocationId,
+        toPlaceHandle: toLocationId,
         toLocationName: typeof path.toLocationName === "string"
           ? path.toLocationName
           : typeof path.locationName === "string"
@@ -330,8 +355,16 @@ function parseWorldLocationRecentHappenings(value: unknown): WorldLocationRecent
       }
 
       const event = item as Record<string, unknown>;
-      const id = typeof event.id === "string" ? event.id : null;
-      const locationId = typeof event.locationId === "string" ? event.locationId : null;
+      const id = typeof event.eventHandle === "string"
+        ? event.eventHandle
+        : typeof event.id === "string"
+          ? event.id
+          : null;
+      const locationId = typeof event.placeHandle === "string"
+        ? event.placeHandle
+        : typeof event.locationId === "string"
+          ? event.locationId
+          : null;
       const eventType = typeof event.eventType === "string" ? event.eventType : null;
       const summary = typeof event.summary === "string" ? event.summary : null;
       const tick = typeof event.tick === "number" && Number.isFinite(event.tick) ? event.tick : null;
@@ -348,9 +381,21 @@ function parseWorldLocationRecentHappenings(value: unknown): WorldLocationRecent
 
       return [{
         id,
+        eventHandle: id,
         locationId,
-        sourceLocationId: typeof event.sourceLocationId === "string" ? event.sourceLocationId : null,
-        anchorLocationId: typeof event.anchorLocationId === "string" ? event.anchorLocationId : null,
+        placeHandle: locationId,
+        sourceLocationId: typeof event.sourcePlaceHandle === "string"
+          ? event.sourcePlaceHandle
+          : typeof event.sourceLocationId === "string" ? event.sourceLocationId : null,
+        sourcePlaceHandle: typeof event.sourcePlaceHandle === "string"
+          ? event.sourcePlaceHandle
+          : typeof event.sourceLocationId === "string" ? event.sourceLocationId : null,
+        anchorLocationId: typeof event.anchorPlaceHandle === "string"
+          ? event.anchorPlaceHandle
+          : typeof event.anchorLocationId === "string" ? event.anchorLocationId : null,
+        anchorPlaceHandle: typeof event.anchorPlaceHandle === "string"
+          ? event.anchorPlaceHandle
+          : typeof event.anchorLocationId === "string" ? event.anchorLocationId : null,
         eventType,
         summary,
         tick,
@@ -377,7 +422,9 @@ function parseWorldPlayerInventoryItems(value: unknown): WorldPlayerInventoryIte
       }
 
       const row = item as Record<string, unknown>;
-      const id = typeof row.id === "string" ? row.id : null;
+      const id = typeof row.itemHandle === "string"
+        ? row.itemHandle
+        : typeof row.id === "string" ? row.id : null;
       const name = typeof row.name === "string" ? row.name : null;
       const equipState = row.equipState === "equipped" ? "equipped" : row.equipState === "carried" ? "carried" : null;
 
@@ -387,6 +434,7 @@ function parseWorldPlayerInventoryItems(value: unknown): WorldPlayerInventoryIte
 
       return [{
         id,
+        itemHandle: id,
         name,
         tags: parseJsonArray(row.tags),
         equipState,
@@ -414,17 +462,40 @@ function parseWorldCurrentScene(value: unknown): WorldCurrentScene | null {
     : {};
   const rawByNpcId = typeof awareness.byNpcId === "object" && awareness.byNpcId !== null
     ? awareness.byNpcId as Record<string, unknown>
+    : typeof awareness.byActorHandle === "object" && awareness.byActorHandle !== null
+      ? awareness.byActorHandle as Record<string, unknown>
     : {};
+  const sceneHandle = typeof scene.sceneHandle === "string"
+    ? scene.sceneHandle
+    : typeof scene.id === "string" ? scene.id : null;
+  const broadPlaceHandle = typeof scene.broadPlaceHandle === "string"
+    ? scene.broadPlaceHandle
+    : typeof scene.broadLocationId === "string" ? scene.broadLocationId : null;
+  const sceneNpcIds = parseJsonArray(scene.actorHandles).length > 0
+    ? parseJsonArray(scene.actorHandles)
+    : parseJsonArray(scene.sceneNpcIds);
+  const clearNpcIds = parseJsonArray(scene.clearActorHandles).length > 0
+    ? parseJsonArray(scene.clearActorHandles)
+    : parseJsonArray(scene.clearNpcIds);
 
   return {
-    id: typeof scene.id === "string" ? scene.id : null,
+    id: sceneHandle,
+    sceneHandle,
     name: typeof scene.name === "string" ? scene.name : null,
-    broadLocationId: typeof scene.broadLocationId === "string" ? scene.broadLocationId : null,
+    broadLocationId: broadPlaceHandle,
+    broadPlaceHandle,
     broadLocationName: typeof scene.broadLocationName === "string" ? scene.broadLocationName : null,
-    sceneNpcIds: parseJsonArray(scene.sceneNpcIds),
-    clearNpcIds: parseJsonArray(scene.clearNpcIds),
+    sceneNpcIds,
+    actorHandles: sceneNpcIds,
+    clearNpcIds,
+    clearActorHandles: clearNpcIds,
     awareness: {
       byNpcId: Object.fromEntries(
+        Object.entries(rawByNpcId)
+          .filter(([npcId]) => npcId.length > 0)
+          .map(([npcId, band]) => [npcId, parseWorldSceneAwarenessBand(band)]),
+      ),
+      byActorHandle: Object.fromEntries(
         Object.entries(rawByNpcId)
           .filter(([npcId]) => npcId.length > 0)
           .map(([npcId, band]) => [npcId, parseWorldSceneAwarenessBand(band)]),
@@ -488,62 +559,122 @@ function parseWorldData(raw: RawWorldData): WorldData {
     currentScene: parseWorldCurrentScene(raw.currentScene),
     locations: raw.locations.map((loc) => {
       const connectedPaths = parseWorldLocationConnectedPaths(loc.connectedPaths);
+      const placeHandle = loc.placeHandle ?? loc.id ?? "";
       const connectedTo = connectedPaths.length > 0
         ? connectedPaths.map((path) => path.toLocationId)
-        : parseJsonArray(loc.connectedTo);
+        : parseJsonArray(loc.connectedToPlaceHandles).length > 0
+          ? parseJsonArray(loc.connectedToPlaceHandles)
+          : parseJsonArray(loc.connectedTo);
+      const parentPlaceHandle = typeof loc.parentPlaceHandle === "string"
+        ? loc.parentPlaceHandle
+        : typeof loc.parentLocationId === "string" ? loc.parentLocationId : null;
+      const anchorPlaceHandle = typeof loc.anchorPlaceHandle === "string"
+        ? loc.anchorPlaceHandle
+        : typeof loc.anchorLocationId === "string" ? loc.anchorLocationId : null;
 
       return {
-        id: loc.id,
-        campaignId: loc.campaignId,
+        id: placeHandle,
+        placeHandle,
         name: loc.name,
         description: loc.description,
         tags: parseJsonArray(loc.tags),
         connectedTo,
+        connectedToPlaceHandles: connectedTo,
         connectedPaths,
         recentHappenings: parseWorldLocationRecentHappenings(loc.recentHappenings),
         isStarting: loc.isStarting,
         locationKind: parseLocationKind(loc.locationKind ?? loc.kind),
-        parentLocationId: typeof loc.parentLocationId === "string" ? loc.parentLocationId : null,
-        anchorLocationId: typeof loc.anchorLocationId === "string" ? loc.anchorLocationId : null,
+        parentLocationId: parentPlaceHandle,
+        parentPlaceHandle,
+        anchorLocationId: anchorPlaceHandle,
+        anchorPlaceHandle,
         persistence: parseLocationPersistence(loc.persistence),
         expiresAtTick: parseNullableNumber(loc.expiresAtTick),
         archivedAtTick: parseNullableNumber(loc.archivedAtTick),
       };
     }),
-    npcs: raw.npcs.map((npc) => ({
-      ...npc,
-      tags: parseJsonArray(npc.tags),
-      goals: parseNpcGoals(npc.goals),
-      beliefs: parseJsonArray(npc.beliefs),
-      sceneScopeId: typeof npc.sceneScopeId === "string" ? npc.sceneScopeId : npc.currentLocationId,
-      characterRecord: npc.characterRecord ?? null,
-      draft: npc.draft ?? (npc.characterRecord ? characterRecordToDraft(npc.characterRecord) : npc.npc?.draft ?? null),
-      npc: npc.npc ?? (npc.draft ? characterDraftToScaffoldNpc(npc.draft) : npc.characterRecord ? characterDraftToScaffoldNpc(characterRecordToDraft(npc.characterRecord)) : null),
-    })),
-    factions: raw.factions.map((fac) => ({
-      ...fac,
-      tags: parseJsonArray(fac.tags),
-      goals: parseJsonArray(fac.goals),
-      assets: parseJsonArray(fac.assets),
-    })),
-    items: raw.items.map((item) => ({
-      ...item,
-      tags: parseJsonArray(item.tags),
-    })),
-    relationships: raw.relationships.map((rel) => ({
-      ...rel,
-      tags: parseJsonArray(rel.tags),
-    })),
+    npcs: raw.npcs.map((npc) => {
+      const actorHandle = npc.actorHandle ?? npc.id ?? "";
+      const currentPlaceHandle = npc.currentPlaceHandle ?? npc.currentLocationId ?? null;
+      const sceneHandle = npc.sceneHandle ?? npc.sceneScopeId ?? currentPlaceHandle;
+      const draft = npc.draft ?? (npc.characterRecord ? characterRecordToDraft(npc.characterRecord) : npc.npc?.draft ?? null);
+      return {
+        id: actorHandle,
+        actorHandle,
+        name: npc.name,
+        persona: npc.persona,
+        tags: parseJsonArray(npc.tags),
+        tier: npc.tier,
+        currentLocationId: currentPlaceHandle,
+        currentPlaceHandle,
+        goals: parseNpcGoals(npc.goals),
+        beliefs: parseJsonArray(npc.beliefs),
+        sceneScopeId: sceneHandle,
+        sceneHandle,
+        characterRecord: npc.characterRecord ?? null,
+        draft,
+        npc: npc.npc ?? (draft ? characterDraftToScaffoldNpc(draft) : null),
+      };
+    }),
+    factions: raw.factions.map((fac) => {
+      const factionHandle = fac.factionHandle ?? fac.id ?? "";
+      return {
+        id: factionHandle,
+        factionHandle,
+        name: fac.name,
+        tags: parseJsonArray(fac.tags),
+        goals: parseJsonArray(fac.goals),
+        assets: parseJsonArray(fac.assets),
+      };
+    }),
+    items: raw.items.map((item) => {
+      const itemHandle = item.itemHandle ?? item.id ?? "";
+      const ownerActorHandle = item.ownerActorHandle ?? item.ownerId ?? null;
+      const placeHandle = item.placeHandle ?? item.locationId ?? null;
+      return {
+        id: itemHandle,
+        itemHandle,
+        name: item.name,
+        tags: parseJsonArray(item.tags),
+        ownerId: ownerActorHandle,
+        ownerActorHandle,
+        locationId: placeHandle,
+        placeHandle,
+      };
+    }),
+    relationships: raw.relationships.map((rel) => {
+      const relationshipHandle = rel.relationshipHandle ?? rel.id ?? "";
+      const entityAHandle = rel.entityAHandle ?? rel.entityA ?? null;
+      const entityBHandle = rel.entityBHandle ?? rel.entityB ?? null;
+      return {
+        id: relationshipHandle,
+        relationshipHandle,
+        entityA: entityAHandle,
+        entityAHandle,
+        entityB: entityBHandle,
+        entityBHandle,
+        tags: parseJsonArray(rel.tags),
+        reason: rel.reason,
+      };
+    }),
     player: raw.player
       ? {
-          ...raw.player,
+          id: raw.player.actorHandle ?? raw.player.id ?? "",
+          actorHandle: raw.player.actorHandle ?? raw.player.id ?? "",
+          name: raw.player.name,
+          race: raw.player.race,
+          gender: raw.player.gender,
+          age: raw.player.age,
+          appearance: raw.player.appearance,
+          hp: raw.player.hp,
           tags: parseJsonArray(raw.player.tags),
           equippedItems: parseJsonArray(raw.player.equippedItems),
           inventory: parseWorldPlayerInventoryItems(raw.player.inventory),
           equipment: parseWorldPlayerInventoryItems(raw.player.equipment),
-          sceneScopeId: typeof raw.player.sceneScopeId === "string"
-            ? raw.player.sceneScopeId
-            : raw.player.currentLocationId,
+          currentLocationId: raw.player.currentPlaceHandle ?? raw.player.currentLocationId,
+          currentPlaceHandle: raw.player.currentPlaceHandle ?? raw.player.currentLocationId,
+          sceneScopeId: raw.player.sceneHandle ?? raw.player.sceneScopeId ?? raw.player.currentPlaceHandle ?? raw.player.currentLocationId,
+          sceneHandle: raw.player.sceneHandle ?? raw.player.sceneScopeId ?? raw.player.currentPlaceHandle ?? raw.player.currentLocationId,
           characterRecord: raw.player.characterRecord ?? null,
           draft: raw.player.draft ?? (raw.player.characterRecord ? characterRecordToDraft(raw.player.characterRecord) : raw.player.character?.draft ?? null),
           character: raw.player.character ?? (raw.player.draft ? characterDraftToParsedCharacter(raw.player.draft) : raw.player.characterRecord ? characterDraftToParsedCharacter(characterRecordToDraft(raw.player.characterRecord)) : null),

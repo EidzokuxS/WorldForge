@@ -11,7 +11,6 @@ import {
   listCheckpoints,
   loadCheckpoint,
   deleteCheckpoint,
-  readCampaignConfig,
 } from "../campaign/index.js";
 import { getDb } from "../db/index.js";
 import { factions, items, locations, npcs, players, relationships } from "../db/schema.js";
@@ -36,10 +35,56 @@ import {
   resolveImmediateScenePresenceScopeId,
   resolveScenePresence,
 } from "../engine/scene-presence.js";
+import { assertPublicProjectionPayload } from "../engine/gameplay-control-plane-contract.js";
+import {
+  requirePublicDtoHandle,
+  resolvePublicDtoHandle,
+  toPublicDtoHandle,
+  type PublicDtoHandleKind,
+} from "../engine/public-dto-handles.js";
 
 const app = new Hono();
 
+function publicHandle(
+  campaignId: string,
+  kind: PublicDtoHandleKind,
+  sourceId: string | number | null | undefined,
+) {
+  return toPublicDtoHandle({ campaignId, kind, sourceId });
+}
+
+function requiredPublicHandle(
+  campaignId: string,
+  kind: PublicDtoHandleKind,
+  sourceId: string | number,
+) {
+  return requirePublicDtoHandle({ campaignId, kind, sourceId });
+}
+
+function sanitizeCharacterDraftForPublicProjection<T extends ReturnType<typeof toCharacterDraft>>(
+  draft: T,
+): T {
+  return {
+    ...draft,
+    socialContext: {
+      ...draft.socialContext,
+      factionId: null,
+      homeLocationId: null,
+      currentLocationId: null,
+      relationshipRefs: draft.socialContext.relationshipRefs.map((ref) => ({
+        ...ref,
+        entityId: null,
+      })),
+    },
+    provenance: {
+      ...draft.provenance,
+      templateId: null,
+    },
+  };
+}
+
 function toWorldPlayerInventoryItem(item: {
+  campaignId: string;
   id: string;
   name: string;
   tags: string;
@@ -47,8 +92,10 @@ function toWorldPlayerInventoryItem(item: {
   equippedSlot: string | null;
   isSignature: boolean;
 }) {
+  const itemHandle = requiredPublicHandle(item.campaignId, "item", item.id);
   return {
-    id: item.id,
+    id: itemHandle,
+    itemHandle,
     name: item.name,
     tags: item.tags,
     equipState: item.equipState,
@@ -65,6 +112,7 @@ function toWorldSceneScopeId(row: {
 }
 
 function buildWorldCurrentScene(args: {
+  campaignId: string;
   player: {
     id: string;
     currentLocationId: string | null;
@@ -147,31 +195,59 @@ function buildWorldCurrentScene(args: {
     ]),
   );
   return {
-    id: sceneLocation?.id ?? sceneScopeId,
+    id: requiredPublicHandle(args.campaignId, "place", sceneLocation?.id ?? sceneScopeId),
+    sceneHandle: requiredPublicHandle(args.campaignId, "place", sceneLocation?.id ?? sceneScopeId),
     name: sceneLocation?.name ?? null,
-    broadLocationId,
+    broadLocationId: publicHandle(args.campaignId, "place", broadLocationId),
+    broadPlaceHandle: publicHandle(args.campaignId, "place", broadLocationId),
     broadLocationName: broadLocation?.name ?? null,
-    sceneNpcIds,
-    clearNpcIds,
+    sceneNpcIds: sceneNpcIds.map((npcId) => requiredPublicHandle(args.campaignId, "actor", npcId)),
+    actorHandles: sceneNpcIds.map((npcId) => requiredPublicHandle(args.campaignId, "actor", npcId)),
+    clearNpcIds: clearNpcIds.map((npcId) => requiredPublicHandle(args.campaignId, "actor", npcId)),
+    clearActorHandles: clearNpcIds.map((npcId) => requiredPublicHandle(args.campaignId, "actor", npcId)),
     awareness: {
-      byNpcId: awarenessByNpcId,
+      byNpcId: Object.fromEntries(
+        Object.entries(awarenessByNpcId).map(([npcId, band]) => [
+          requiredPublicHandle(args.campaignId, "actor", npcId),
+          band,
+        ]),
+      ),
+      byActorHandle: Object.fromEntries(
+        Object.entries(awarenessByNpcId).map(([npcId, band]) => [
+          requiredPublicHandle(args.campaignId, "actor", npcId),
+          band,
+        ]),
+      ),
       hintSignals: [...presenceSnapshot.playerAwarenessHints],
     },
   };
 }
 
 function buildWorldNpcPayload(
+  campaignId: string,
   row: Parameters<typeof hydrateStoredNpcRecord>[0],
 ) {
   const record = hydrateStoredNpcRecord(row);
+  const draft = sanitizeCharacterDraftForPublicProjection(toCharacterDraft(record));
   const compatibilityTags = buildCompatibilityTags(record);
+  const actorHandle = requiredPublicHandle(campaignId, "actor", row.id);
   return {
-    ...row,
-    sceneScopeId: toWorldSceneScopeId(row),
-    characterRecord: record,
-    draft: toCharacterDraft(record),
+    id: actorHandle,
+    actorHandle,
+    name: row.name,
+    persona: row.persona,
+    tags: row.tags,
+    tier: row.tier,
+    currentLocationId: publicHandle(campaignId, "place", row.currentLocationId),
+    currentPlaceHandle: publicHandle(campaignId, "place", row.currentLocationId),
+    sceneScopeId: publicHandle(campaignId, "place", toWorldSceneScopeId(row)),
+    sceneHandle: publicHandle(campaignId, "place", toWorldSceneScopeId(row)),
+    goals: row.goals,
+    beliefs: row.beliefs,
+    draft,
     npc: {
       ...toLegacyNpcDraft(record),
+      draft,
       tags: compatibilityTags,
     },
   };
@@ -179,26 +255,46 @@ function buildWorldNpcPayload(
 
 function buildWorldPlayerPayload(args: {
   campaignId: string;
-  row: NonNullable<Parameters<typeof toWorldSceneScopeId>[0]> & { id: string };
+  row: Parameters<typeof hydrateStoredPlayerRecord>[0];
   playerRecord: ReturnType<typeof hydrateStoredPlayerRecord>;
 }) {
   const playerInventory = loadAuthoritativeInventoryView(args.campaignId, args.row.id);
   const compatibilityTags = buildCompatibilityTags(args.playerRecord);
+  const draft = sanitizeCharacterDraftForPublicProjection(toCharacterDraft(args.playerRecord));
+  const actorHandle = requiredPublicHandle(args.campaignId, "actor", args.row.id);
+  const character = toLegacyPlayerCharacterWithInventory(
+    args.playerRecord,
+    playerInventory ?? undefined,
+  );
   return {
-    ...args.row,
-    sceneScopeId: toWorldSceneScopeId(args.row),
-    characterRecord: args.playerRecord,
-    draft: toCharacterDraft(args.playerRecord),
-    inventory: playerInventory?.carried.map(toWorldPlayerInventoryItem) ?? [],
-    equipment: playerInventory?.equipped.map(toWorldPlayerInventoryItem) ?? [],
+    id: actorHandle,
+    actorHandle,
+    name: args.row.name,
+    race: args.row.race,
+    gender: args.row.gender,
+    age: args.row.age,
+    appearance: args.row.appearance,
+    hp: args.row.hp,
+    tags: args.row.tags,
+    currentLocationId: publicHandle(args.campaignId, "place", args.row.currentLocationId),
+    currentPlaceHandle: publicHandle(args.campaignId, "place", args.row.currentLocationId),
+    sceneScopeId: publicHandle(args.campaignId, "place", toWorldSceneScopeId(args.row)),
+    sceneHandle: publicHandle(args.campaignId, "place", toWorldSceneScopeId(args.row)),
+    draft,
+    inventory: playerInventory?.carried.map((item) => toWorldPlayerInventoryItem({
+      ...item,
+      campaignId: args.campaignId,
+    })) ?? [],
+    equipment: playerInventory?.equipped.map((item) => toWorldPlayerInventoryItem({
+      ...item,
+      campaignId: args.campaignId,
+    })) ?? [],
     inventoryItems: playerInventory?.carried.map((item) => item.name) ?? [],
     equippedItems: playerInventory?.compatibility.equippedItemRefs ?? [],
     signatureItems: playerInventory?.compatibility.signatureItems ?? [],
     character: {
-      ...toLegacyPlayerCharacterWithInventory(
-        args.playerRecord,
-        playerInventory ?? undefined,
-      ),
+      ...character,
+      draft,
       tags: compatibilityTags,
     },
   };
@@ -272,19 +368,19 @@ app.get("/:id/world", async (c) => {
       .select()
       .from(locations)
       .where(eq(locations.campaignId, id))
-      .all();
-    const worldNpcs = db.select().from(npcs).where(eq(npcs.campaignId, id)).all();
+      .all() ?? [];
+    const worldNpcs = db.select().from(npcs).where(eq(npcs.campaignId, id)).all() ?? [];
     const worldFactions = db
       .select()
       .from(factions)
       .where(eq(factions.campaignId, id))
-      .all();
+      .all() ?? [];
     const worldRelationships = db
       .select()
       .from(relationships)
       .where(eq(relationships.campaignId, id))
-      .all();
-    const worldPlayer = db.select().from(players).where(eq(players.campaignId, id)).all();
+      .all() ?? [];
+    const worldPlayer = db.select().from(players).where(eq(players.campaignId, id)).all() ?? [];
     const worldItems = db
       .select({
         id: items.id,
@@ -295,7 +391,7 @@ app.get("/:id/world", async (c) => {
       })
       .from(items)
       .where(eq(items.campaignId, id))
-      .all();
+      .all() ?? [];
     const locationGraph = loadLocationGraph({ campaignId: id });
     const recentEventsByLocationId = listRecentLocationEventsForLocations({
       campaignId: id,
@@ -323,34 +419,119 @@ app.get("/:id/world", async (c) => {
     });
     const playerRow = worldPlayer[0] ?? null;
     const playerRecord = playerRow ? hydrateStoredPlayerRecord(playerRow) : null;
-    const personaTemplates = readCampaignConfig(id).personaTemplates ?? [];
+    const locationIds = new Set(worldLocations.map((location) => location.id));
+    const npcIds = new Set(worldNpcs.map((npc) => npc.id));
+    const factionIds = new Set(worldFactions.map((faction) => faction.id));
+    const itemIds = new Set(worldItems.map((item) => item.id));
+    const publicEntityHandle = (sourceId: string | null | undefined) => {
+      if (!sourceId) {
+        return null;
+      }
+      if (locationIds.has(sourceId)) {
+        return requiredPublicHandle(id, "place", sourceId);
+      }
+      if (npcIds.has(sourceId) || sourceId === playerRow?.id) {
+        return requiredPublicHandle(id, "actor", sourceId);
+      }
+      if (factionIds.has(sourceId)) {
+        return requiredPublicHandle(id, "faction", sourceId);
+      }
+      if (itemIds.has(sourceId)) {
+        return requiredPublicHandle(id, "item", sourceId);
+      }
+      return requiredPublicHandle(id, "entity", sourceId);
+    };
     const currentScene = buildWorldCurrentScene({
+      campaignId: id,
       player: playerRow,
       npcs: worldNpcs,
       locations: normalizedWorldLocations,
     });
     const worldClock = readWorldClock(id);
+    const publicLocations = normalizedWorldLocations.map((location) => {
+      const placeHandle = requiredPublicHandle(id, "place", location.id);
+      return {
+        id: placeHandle,
+        placeHandle,
+        name: location.name,
+        description: location.description,
+        tags: location.tags,
+        connectedTo: location.connectedPaths.map((path) => requiredPublicHandle(id, "place", path.toLocationId)),
+        connectedToPlaceHandles: location.connectedPaths.map((path) => requiredPublicHandle(id, "place", path.toLocationId)),
+        connectedPaths: location.connectedPaths.map((path) => ({
+          edgeId: requiredPublicHandle(id, "route", path.edgeId),
+          routeHandle: requiredPublicHandle(id, "route", path.edgeId),
+          toLocationId: requiredPublicHandle(id, "place", path.toLocationId),
+          toPlaceHandle: requiredPublicHandle(id, "place", path.toLocationId),
+          toLocationName: path.toLocationName,
+          travelCost: path.travelCost,
+        })),
+        recentHappenings: location.recentHappenings.map((event) => ({
+          id: requiredPublicHandle(id, "event", event.id),
+          eventHandle: requiredPublicHandle(id, "event", event.id),
+          locationId: requiredPublicHandle(id, "place", event.locationId),
+          placeHandle: requiredPublicHandle(id, "place", event.locationId),
+          sourceLocationId: publicHandle(id, "place", event.sourceLocationId),
+          sourcePlaceHandle: publicHandle(id, "place", event.sourceLocationId),
+          anchorLocationId: publicHandle(id, "place", event.anchorLocationId),
+          anchorPlaceHandle: publicHandle(id, "place", event.anchorLocationId),
+          eventType: event.eventType,
+          summary: event.summary,
+          tick: event.tick,
+          importance: event.importance,
+          archivedAtTick: event.archivedAtTick,
+          createdAt: event.createdAt,
+        })),
+        isStarting: location.isStarting,
+        locationKind: location.kind,
+        kind: location.kind,
+        parentLocationId: publicHandle(id, "place", location.parentLocationId),
+        parentPlaceHandle: publicHandle(id, "place", location.parentLocationId),
+        anchorLocationId: publicHandle(id, "place", location.anchorLocationId),
+        anchorPlaceHandle: publicHandle(id, "place", location.anchorLocationId),
+        persistence: location.persistence,
+        expiresAtTick: location.expiresAtTick,
+        archivedAtTick: location.archivedAtTick,
+      };
+    });
 
-    return c.json({
-      locations: normalizedWorldLocations,
+    const payload = {
+      locations: publicLocations,
       currentScene,
       state: {
         tick: worldClock.currentTick,
         currentTick: worldClock.currentTick,
         worldVersion: worldClock.worldVersion,
         worldTimeMinutes: worldClock.worldTimeMinutes,
-        currentLocationId: playerRow?.currentLocationId ?? null,
-        currentSceneLocationId: playerRow?.currentSceneLocationId ?? null,
+        currentLocationId: publicHandle(id, "place", playerRow?.currentLocationId),
+        currentPlaceHandle: publicHandle(id, "place", playerRow?.currentLocationId),
+        currentSceneLocationId: publicHandle(id, "place", playerRow?.currentSceneLocationId),
+        currentSceneHandle: publicHandle(id, "place", playerRow?.currentSceneLocationId),
       },
-      worldClock,
       currentTick: worldClock.currentTick,
       worldVersion: worldClock.worldVersion,
       worldTimeMinutes: worldClock.worldTimeMinutes,
       npcs: worldNpcs.map((row) => {
-        return buildWorldNpcPayload(row);
+        return buildWorldNpcPayload(id, row);
       }),
-      factions: worldFactions,
-      relationships: worldRelationships,
+      factions: worldFactions.map((faction) => ({
+        id: requiredPublicHandle(id, "faction", faction.id),
+        factionHandle: requiredPublicHandle(id, "faction", faction.id),
+        name: faction.name,
+        tags: faction.tags,
+        goals: faction.goals,
+        assets: faction.assets,
+      })),
+      relationships: worldRelationships.map((relationship) => ({
+        id: requiredPublicHandle(id, "relationship", relationship.id),
+        relationshipHandle: requiredPublicHandle(id, "relationship", relationship.id),
+        entityA: publicEntityHandle(relationship.entityA),
+        entityAHandle: publicEntityHandle(relationship.entityA),
+        entityB: publicEntityHandle(relationship.entityB),
+        entityBHandle: publicEntityHandle(relationship.entityB),
+        tags: relationship.tags,
+        reason: relationship.reason,
+      })),
       player: playerRow && playerRecord
         ? buildWorldPlayerPayload({
             campaignId: id,
@@ -358,9 +539,20 @@ app.get("/:id/world", async (c) => {
             playerRecord,
           })
         : null,
-      personaTemplates,
-      items: worldItems,
-    });
+      personaTemplates: [],
+      items: worldItems.map((item) => ({
+        id: requiredPublicHandle(id, "item", item.id),
+        itemHandle: requiredPublicHandle(id, "item", item.id),
+        name: item.name,
+        tags: item.tags,
+        ownerId: publicHandle(id, "actor", item.ownerId),
+        ownerActorHandle: publicHandle(id, "actor", item.ownerId),
+        locationId: publicHandle(id, "place", item.locationId),
+        placeHandle: publicHandle(id, "place", item.locationId),
+      })),
+    };
+    assertPublicProjectionPayload({ surface: "world", payload });
+    return c.json(payload);
   } catch (error) {
     return c.json(
       { error: getErrorMessage(error, "Failed to load world data.") },
@@ -399,7 +591,16 @@ app.get("/:id/inventory", (c) => {
       .where(and(eq(items.campaignId, id), eq(items.ownerId, player.id)))
       .all();
 
-    return c.json({ items: playerItems });
+    const payload = {
+      items: playerItems.map((item) => ({
+        id: requiredPublicHandle(id, "item", item.id),
+        itemHandle: requiredPublicHandle(id, "item", item.id),
+        name: item.name,
+        tags: item.tags,
+      })),
+    };
+    assertPublicProjectionPayload({ surface: "inventory", payload });
+    return c.json(payload);
   } catch (error) {
     return c.json(
       { error: getErrorMessage(error, "Failed to get inventory.") },
@@ -412,13 +613,27 @@ app.get("/:id/inventory", (c) => {
 app.get("/:id/locations/:locId/entities", (c) => {
   try {
     const id = c.req.param("id");
-    const locId = c.req.param("locId");
+    const locHandle = c.req.param("locId");
     assertSafeId(id);
 
     const activeCampaign = requireActiveCampaign(c, id);
     if (activeCampaign instanceof Response) return activeCampaign;
 
     const db = getDb();
+    const campaignLocations = db
+      .select({ id: locations.id })
+      .from(locations)
+      .where(eq(locations.campaignId, id))
+      .all();
+    const resolvedLocation = resolvePublicDtoHandle({
+      campaignId: id,
+      kind: "place",
+      handle: locHandle,
+      rows: campaignLocations,
+    });
+    if (!resolvedLocation) {
+      return c.json({ error: "Location not found." }, 404);
+    }
 
     const locationNpcs = db
       .select({
@@ -428,7 +643,7 @@ app.get("/:id/locations/:locId/entities", (c) => {
         tier: npcs.tier,
       })
       .from(npcs)
-      .where(and(eq(npcs.campaignId, id), eq(npcs.currentLocationId, locId)))
+      .where(and(eq(npcs.campaignId, id), eq(npcs.currentLocationId, resolvedLocation.id)))
       .all();
 
     const locationItems = db
@@ -438,10 +653,26 @@ app.get("/:id/locations/:locId/entities", (c) => {
         tags: items.tags,
       })
       .from(items)
-      .where(and(eq(items.campaignId, id), eq(items.locationId, locId)))
+      .where(and(eq(items.campaignId, id), eq(items.locationId, resolvedLocation.id)))
       .all();
 
-    return c.json({ npcs: locationNpcs, items: locationItems });
+    const payload = {
+      npcs: locationNpcs.map((npc) => ({
+        id: requiredPublicHandle(id, "actor", npc.id),
+        actorHandle: requiredPublicHandle(id, "actor", npc.id),
+        name: npc.name,
+        tags: npc.tags,
+        tier: npc.tier,
+      })),
+      items: locationItems.map((item) => ({
+        id: requiredPublicHandle(id, "item", item.id),
+        itemHandle: requiredPublicHandle(id, "item", item.id),
+        name: item.name,
+        tags: item.tags,
+      })),
+    };
+    assertPublicProjectionPayload({ surface: "location_entities", payload });
+    return c.json(payload);
   } catch (error) {
     return c.json(
       { error: getErrorMessage(error, "Failed to get location entities.") },

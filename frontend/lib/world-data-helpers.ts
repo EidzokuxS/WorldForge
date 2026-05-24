@@ -1,5 +1,5 @@
 /**
- * Helpers for transforming raw WorldData (DB IDs) into EditableScaffold
+ * Helpers for transforming public WorldData handles into EditableScaffold
  * (human-readable names). Used by both world-review pages.
  */
 
@@ -95,15 +95,15 @@ export function buildRelationshipMaps(
 
   for (const rel of world.relationships) {
     if (rel.tags.includes("Controls")) {
-      const factionName = idMaps.factionIdToName.get(rel.entityA);
-      const locationName = idMaps.locationIdToName.get(rel.entityB);
+      const factionName = rel.entityA ? idMaps.factionIdToName.get(rel.entityA) : null;
+      const locationName = rel.entityB ? idMaps.locationIdToName.get(rel.entityB) : null;
       if (factionName && locationName) {
         const existing = factionTerritories.get(factionName) ?? [];
         factionTerritories.set(factionName, [...existing, locationName]);
       }
     } else if (rel.tags.includes("Member")) {
-      const nName = idMaps.npcIdToName.get(rel.entityA);
-      const fName = idMaps.factionIdToName.get(rel.entityB);
+      const nName = rel.entityA ? idMaps.npcIdToName.get(rel.entityA) : null;
+      const fName = rel.entityB ? idMaps.factionIdToName.get(rel.entityB) : null;
       if (nName && fName) {
         npcFaction.set(nName, fName);
       }

@@ -12,6 +12,7 @@ import {
   getWorldData,
   importV2Card,
   IngestionError,
+  listPersonaTemplates,
   loadCampaign,
   parseCharacter,
   previewCanonicalLoadout,
@@ -76,9 +77,12 @@ export default function CharacterCreationPage(props: {
           return;
         }
 
-        const world = await getWorldData(campaignId);
+        const [world, templates] = await Promise.all([
+          getWorldData(campaignId),
+          listPersonaTemplates(campaignId).catch(() => ({ personaTemplates: [] })),
+        ]);
         setLocationNames(world.locations.map((location) => location.name));
-        setPersonaTemplates(world.personaTemplates);
+        setPersonaTemplates(templates.personaTemplates);
       } catch (error) {
         if (isGenerationRequiredError(error)) {
           setGenerationRequired(true);

@@ -3,10 +3,8 @@ import type {
   CanonicalLoadoutPreview,
   CharacterDraft,
   CharacterRecord,
-  LocationConnectedPathSummary,
   LocationKind,
   LocationPersistence,
-  LocationRecentHappeningSummary,
   PersonaTemplate,
   PersonaTemplateSummary,
   ResolvedStartConditions,
@@ -20,47 +18,79 @@ export type {
   ResolvedStartConditions,
 } from "@worldforge/shared";
 
-export type WorldLocationConnectedPath = LocationConnectedPathSummary & {
+export type PublicDtoHandle = string;
+
+export type WorldLocationConnectedPath = {
+  edgeId: PublicDtoHandle;
+  routeHandle: PublicDtoHandle;
+  toLocationId: PublicDtoHandle;
+  toPlaceHandle: PublicDtoHandle;
   toLocationName?: string | null;
+  travelCost: number;
+  discovered?: boolean;
 };
 
-export type WorldLocationRecentHappening = LocationRecentHappeningSummary;
+export type WorldLocationRecentHappening = {
+  id: PublicDtoHandle;
+  eventHandle: PublicDtoHandle;
+  locationId: PublicDtoHandle;
+  placeHandle: PublicDtoHandle;
+  sourceLocationId?: PublicDtoHandle | null;
+  sourcePlaceHandle?: PublicDtoHandle | null;
+  anchorLocationId?: PublicDtoHandle | null;
+  anchorPlaceHandle?: PublicDtoHandle | null;
+  eventType: string;
+  summary: string;
+  tick: number;
+  importance: number;
+  archivedAtTick?: number | null;
+  createdAt: number;
+};
 
 export type WorldSceneAwarenessBand = "none" | "hint" | "clear";
 
 export interface WorldCurrentScene {
-  id: string | null;
+  id: PublicDtoHandle | null;
+  sceneHandle?: PublicDtoHandle | null;
   name: string | null;
-  broadLocationId: string | null;
+  broadLocationId: PublicDtoHandle | null;
+  broadPlaceHandle?: PublicDtoHandle | null;
   broadLocationName: string | null;
-  sceneNpcIds: string[];
-  clearNpcIds: string[];
+  sceneNpcIds: PublicDtoHandle[];
+  actorHandles?: PublicDtoHandle[];
+  clearNpcIds: PublicDtoHandle[];
+  clearActorHandles?: PublicDtoHandle[];
   awareness: {
-    byNpcId: Record<string, WorldSceneAwarenessBand>;
+    byNpcId: Record<PublicDtoHandle, WorldSceneAwarenessBand>;
+    byActorHandle?: Record<PublicDtoHandle, WorldSceneAwarenessBand>;
     hintSignals: string[];
   };
 }
 
 export interface WorldLocation {
-  id: string;
-  campaignId: string;
+  id: PublicDtoHandle;
+  placeHandle?: PublicDtoHandle;
   name: string;
   description: string;
   tags: string[];
-  connectedTo: string[];
+  connectedTo: PublicDtoHandle[];
+  connectedToPlaceHandles?: PublicDtoHandle[];
   connectedPaths?: WorldLocationConnectedPath[];
   recentHappenings?: WorldLocationRecentHappening[];
   isStarting: boolean;
   locationKind?: LocationKind | null;
-  parentLocationId?: string | null;
-  anchorLocationId?: string | null;
+  parentLocationId?: PublicDtoHandle | null;
+  parentPlaceHandle?: PublicDtoHandle | null;
+  anchorLocationId?: PublicDtoHandle | null;
+  anchorPlaceHandle?: PublicDtoHandle | null;
   persistence?: LocationPersistence | null;
   expiresAtTick?: number | null;
   archivedAtTick?: number | null;
 }
 
 export interface WorldPlayerInventoryItem {
-  id: string;
+  id: PublicDtoHandle;
+  itemHandle?: PublicDtoHandle;
   name: string;
   tags: string[];
   equipState: "carried" | "equipped";
@@ -122,14 +152,16 @@ export interface WorldData {
   currentScene: WorldCurrentScene | null;
   locations: WorldLocation[];
   npcs: Array<{
-    id: string;
-    campaignId: string;
+    id: PublicDtoHandle;
+    actorHandle?: PublicDtoHandle;
     name: string;
     persona: string;
     tags: string[];
     tier: string;
-    currentLocationId: string | null;
-    sceneScopeId: string | null;
+    currentLocationId: PublicDtoHandle | null;
+    currentPlaceHandle?: PublicDtoHandle | null;
+    sceneScopeId: PublicDtoHandle | null;
+    sceneHandle?: PublicDtoHandle | null;
     goals: { short_term: string[]; long_term: string[] };
     beliefs: string[];
     characterRecord?: CharacterRecord | null;
@@ -137,31 +169,36 @@ export interface WorldData {
     npc?: ScaffoldNpc | null;
   }>;
   factions: Array<{
-    id: string;
-    campaignId: string;
+    id: PublicDtoHandle;
+    factionHandle?: PublicDtoHandle;
     name: string;
     tags: string[];
     goals: string[];
     assets: string[];
   }>;
   relationships: Array<{
-    id: string;
-    campaignId: string;
-    entityA: string;
-    entityB: string;
+    id: PublicDtoHandle;
+    relationshipHandle?: PublicDtoHandle;
+    entityA: PublicDtoHandle | null;
+    entityAHandle?: PublicDtoHandle | null;
+    entityB: PublicDtoHandle | null;
+    entityBHandle?: PublicDtoHandle | null;
     tags: string[];
     reason: string | null;
   }>;
   items: Array<{
-    id: string;
+    id: PublicDtoHandle;
+    itemHandle?: PublicDtoHandle;
     name: string;
     tags: string[];
-    ownerId: string | null;
-    locationId: string | null;
+    ownerId: PublicDtoHandle | null;
+    ownerActorHandle?: PublicDtoHandle | null;
+    locationId: PublicDtoHandle | null;
+    placeHandle?: PublicDtoHandle | null;
   }>;
   player: {
-    id: string;
-    campaignId: string;
+    id: PublicDtoHandle;
+    actorHandle?: PublicDtoHandle;
     name: string;
     race: string;
     gender: string;
@@ -172,8 +209,10 @@ export interface WorldData {
     equippedItems: string[];
     inventory: WorldPlayerInventoryItem[];
     equipment: WorldPlayerInventoryItem[];
-    currentLocationId: string | null;
-    sceneScopeId: string | null;
+    currentLocationId: PublicDtoHandle | null;
+    currentPlaceHandle?: PublicDtoHandle | null;
+    sceneScopeId: PublicDtoHandle | null;
+    sceneHandle?: PublicDtoHandle | null;
     characterRecord?: CharacterRecord | null;
     draft?: CharacterDraft | null;
     character?: ParsedCharacter | null;
