@@ -62,8 +62,17 @@ export function CheckpointPanel({ campaignId, open, onClose }: CheckpointPanelPr
 
   useEffect(() => {
     if (open) {
-      void refresh();
+      let cancelled = false;
+      window.queueMicrotask(() => {
+        if (!cancelled) {
+          void refresh();
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
     }
+    return undefined;
   }, [open, refresh]);
 
   const handleSave = async () => {

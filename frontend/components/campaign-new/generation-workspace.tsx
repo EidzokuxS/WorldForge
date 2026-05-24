@@ -47,21 +47,30 @@ export function GenerationWorkspace({ returnHref }: GenerationWorkspaceProps) {
     if (!progress) {
       return;
     }
-    setHistory((current) => {
-      const last = current[current.length - 1];
-      if (
-        last
-        && last.step === progress.step
-        && last.totalSteps === progress.totalSteps
-        && last.label === progress.label
-        && last.subStep === progress.subStep
-        && last.subTotal === progress.subTotal
-        && last.subLabel === progress.subLabel
-      ) {
-        return current;
+    let cancelled = false;
+    window.queueMicrotask(() => {
+      if (cancelled) {
+        return;
       }
-      return [...current.slice(-7), progress];
+      setHistory((current) => {
+        const last = current[current.length - 1];
+        if (
+          last
+          && last.step === progress.step
+          && last.totalSteps === progress.totalSteps
+          && last.label === progress.label
+          && last.subStep === progress.subStep
+          && last.subTotal === progress.subTotal
+          && last.subLabel === progress.subLabel
+        ) {
+          return current;
+        }
+        return [...current.slice(-7), progress];
+      });
     });
+    return () => {
+      cancelled = true;
+    };
   }, [progress]);
 
   return (

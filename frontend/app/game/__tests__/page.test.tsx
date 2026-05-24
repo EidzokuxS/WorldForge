@@ -811,7 +811,6 @@ describe("GamePage", () => {
 
   it("routes Send and visible Continue through the existing backend turn path", async () => {
     await renderReadyGame();
-    const initialHistoryCallCount = mockedChatHistory.mock.calls.length;
     mockedChatAction.mockResolvedValue(createStreamResponse() as never);
 
     fireEvent.change(screen.getByLabelText("Scene action"), {

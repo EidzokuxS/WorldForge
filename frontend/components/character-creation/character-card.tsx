@@ -140,19 +140,20 @@ function CharacterCardInner({
   onApplyPersonaTemplate,
   isLegacyRecord = false,
 }: CharacterCardProps) {
-  // Local draft state — edits happen here, debounced to parent
-  const [local, setLocal] = useState<CharacterDraft>(draft);
+  // Local draft state - edits happen here, debounced to parent.
+  const [localState, setLocalState] = useState(() => ({
+    sourceDraft: draft,
+    value: draft,
+  }));
+  const local = localState.sourceDraft === draft ? localState.value : draft;
   const onChangeRef = useRef(onChange);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { onChangeRef.current = onChange; }, [onChange]);
 
-  // Sync from parent when a new character arrives (parse/generate/import)
-  useEffect(() => { setLocal(draft); }, [draft]);
-
   // Debounced propagation to parent
   function commitLocal(next: CharacterDraft) {
-    setLocal(next);
+    setLocalState({ sourceDraft: draft, value: next });
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => { onChangeRef.current(next); }, 300);
   }

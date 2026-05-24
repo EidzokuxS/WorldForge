@@ -64,11 +64,23 @@ export function LoadCampaignDialog({ onLoaded }: LoadCampaignDialogProps) {
   }
 
   useEffect(() => {
+    let cancelled = false;
     if (open) {
-      void refreshCampaigns();
+      window.queueMicrotask(() => {
+        if (!cancelled) {
+          void refreshCampaigns();
+        }
+      });
     } else {
-      setCampaignsLoaded(false);
+      window.queueMicrotask(() => {
+        if (!cancelled) {
+          setCampaignsLoaded(false);
+        }
+      });
     }
+    return () => {
+      cancelled = true;
+    };
   }, [open]);
 
   async function handleLoadCampaign(id: string) {

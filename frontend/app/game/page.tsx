@@ -340,7 +340,7 @@ export default function GamePage() {
   const [turnPhase, setTurnPhase] = useState<TurnPhase>("idle");
   const [sceneProgress, setSceneProgress] = useState<SceneProgress>(null);
   const [sceneProgressCopy, setSceneProgressCopy] = useState<string | null>(null);
-  const [showRawReasoning, setShowRawReasoning] = useState(false);
+  const showRawReasoning = settings.ui.showRawReasoning;
   const [isInitializing, setIsInitializing] = useState(true);
   const [hasLiveTurnSnapshot, setHasLiveTurnSnapshot] = useState(false);
   const [lastOracleResult, setLastOracleResult] = useState<OracleResultData | null>(null);
@@ -456,10 +456,6 @@ export default function GamePage() {
     [assertWorldBoundaryFresh, refreshWorldData, revealBufferedQuickActions],
   );
 
-  useEffect(() => {
-    setShowRawReasoning(settings.ui.showRawReasoning);
-  }, [settings.ui.showRawReasoning]);
-
   const restoreGameplayState = useCallback(
     async (campaignId: string) => {
       const [history, world] = await Promise.all([
@@ -487,12 +483,6 @@ export default function GamePage() {
     },
     [],
   );
-
-  useEffect(() => {
-    if (sceneProgress === null) {
-      setSceneProgressCopy(null);
-    }
-  }, [sceneProgress]);
 
   const applySceneSettlingStatus = useCallback((status?: SceneSettlingStatus) => {
     const phase = status?.phase ?? "";
@@ -1247,8 +1237,9 @@ export default function GamePage() {
   }
 
   const hudStatus = getHudStatus(sceneProgress, turnPhase, playSurface.isAutoPlaying);
-  const turnProgressCopy = sceneProgressCopy
-    ?? (turnPhase === "finalizing" ? "Finalizing turn" : hudStatus);
+  const turnProgressCopy = sceneProgress === null && turnPhase !== "finalizing"
+    ? null
+    : sceneProgressCopy ?? (turnPhase === "finalizing" ? "Finalizing turn" : hudStatus);
   const backdropSceneName = scenePanelData?.name ?? currentLocation?.name ?? null;
   const backdropLocationName = scenePanelData?.broadLocationName ?? currentLocation?.name ?? null;
   const selectedActorProfile = selectedActor?.characterRecord?.profile
@@ -1480,7 +1471,7 @@ export default function GamePage() {
           onToggleAuto={playSurface.handleToggleAuto}
           onOpenLog={() => playSurface.openDrawer("log")}
           isBusy={false}
-          statusCopy={isTurnBusy ? turnProgressCopy : undefined}
+          statusCopy={isTurnBusy ? turnProgressCopy ?? undefined : undefined}
         />
       }
       actionDock={

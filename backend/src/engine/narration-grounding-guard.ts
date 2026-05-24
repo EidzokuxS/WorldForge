@@ -654,12 +654,14 @@ export function buildNarrationGroundingRepairAddendum(
 
   return [
     "Revise the final grounded sentence draft. Do not reveal hidden terms.",
-    `Return exactly one GroundedSentenceDraft object with version="${GROUNDED_SENTENCE_DRAFT_VERSION}" and sentences[].text/evidenceRefs fields.`,
+    `Return exactly one GroundedSentenceDraft object with version="${GROUNDED_SENTENCE_DRAFT_VERSION}" and sentences[].factRefs/evidenceRefs fields.`,
     "Return 1-5 sentence objects total; never return 6 or more. Merge or prioritize details if needed.",
     "Every sentence must cite 1-4 short narratable evidence refs such as e1/e2; HARD CAP: evidenceRefs.length MUST be <= 4 for each sentence, never 5 or more.",
     "If many packet facts support one sentence, cite only the strongest 1-4 short refs or split/prioritize the prose inside the 1-5 sentence limit.",
     "Do not include kind; the backend derives internal claim metadata from cited packet evidence.",
-    "Write player-visible prose only in sentences[].text; do not output prose, claims, claimSpans, id, summary, or requiresEvidence.",
+    "Use factRefs, not text. Do not output prose, placeholders, claims, claimSpans, id, summary, or requiresEvidence.",
+    "Every sentence must contain exactly one listed backendFacts ref in factRefs, such as e1.s1 or e1.p1; never repeat the same factRef in another sentence.",
+    "Do not rewrite facts yourself. The backend expands the selected factRef into player-visible prose.",
     "Use only short narratable evidence refs already present in the packet evidence list; do not copy UUIDs, diagnostic source ids, support-only labels, or raw tool-result ids.",
     "Rows or details without backendFacts= are support context only and are not legal evidenceRefs or fact placeholders.",
     "Quoted speech, formal wording, office hours, seals, document phrases, and route labels are precision text: copy them from cited packet evidence or paraphrase generically without changing the exact value.",
@@ -933,7 +935,10 @@ function safeBackendFactText(
   const raw = collapseWhitespace(value);
   if (!raw) return null;
   const sanitized = sanitizeRepairText(raw, forbiddenTerms);
-  return sanitized === raw ? sanitized : null;
+  if (sanitized !== raw) return null;
+  if (containsBackendMetadata(sanitized)) return null;
+  if (containsCaseInsensitive(sanitized, "[private term omitted]")) return null;
+  return sanitized;
 }
 
 function replaceLiteralCaseInsensitive(

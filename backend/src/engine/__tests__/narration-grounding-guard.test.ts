@@ -1180,6 +1180,83 @@ describe("grounded sentence draft compiler", () => {
     ).toThrow("unknown backend fact placeholder");
   });
 
+  it("does not expose redacted support summaries as backend-owned narration facts", () => {
+    const packet = createPacket();
+    packet.evidenceLedger = [
+      {
+        id: "perceivable_effect:route-answer",
+        category: "perceivable_effect",
+        summary:
+          "Dialogue outcome: speaker=[backend ref hidden] Fen Dorrow; route answer was recorded.",
+        sourceId: "route-answer",
+        claimSupport: ["route_status", "playable_beat"],
+        precisionFacts: [
+          {
+            kind: "quote",
+            value:
+              "\"Fen Dorrow says the assessor works from The Ventwatch Ridge.\"",
+            sourcePath: "quote",
+            exhaustive: true,
+          },
+          {
+            kind: "claim",
+            value:
+              "Certified route assessors operate from assessment stations on The Ventwatch Ridge.",
+            sourcePath: "claims.0.summary",
+            claimKind: "route_status",
+            polarity: "states",
+            exhaustive: true,
+          },
+        ],
+      },
+    ];
+
+    const formatted = formatAllowedCitationEvidenceRef({
+      refId: "e1",
+      evidence: packet.evidenceLedger[0]!,
+    }, []);
+
+    expect(formatted).toContain("summary=Dialogue outcome: speaker=[backend ref hidden]");
+    expect(formatted).not.toContain("e1.s1 summary");
+    expect(formatted).toContain("backendFacts=e1.p1 quote");
+    expect(formatted).toContain("e1.p2 claim/states");
+
+    expect(() =>
+      compileGroundedSentenceDraftToNarrationDraft({
+        packet,
+        requireBackendOwnedFactText: true,
+        draft: {
+          version: "grounded-sentence-draft.v2",
+          sentences: [
+            {
+              factRefs: ["e1.s1"],
+              evidenceRefs: ["e1"],
+            },
+          ],
+        },
+      }),
+    ).toThrow("unknown backend fact ref");
+
+    const draft = compileGroundedSentenceDraftToNarrationDraft({
+      packet,
+      requireBackendOwnedFactText: true,
+      draft: {
+        version: "grounded-sentence-draft.v2",
+        sentences: [
+          {
+            factRefs: ["e1.p2"],
+            evidenceRefs: ["e1"],
+          },
+        ],
+      },
+    });
+
+    expect(draft.prose).toBe(
+      "Certified route assessors operate from assessment stations on The Ventwatch Ridge.",
+    );
+    expect(draft.prose).not.toContain("[backend ref hidden]");
+  });
+
   it("keeps support-only evidence summaries out of backend placeholder expansion", () => {
     const packet = createPacket();
     packet.evidenceLedger = [
@@ -1725,6 +1802,9 @@ describe("narration grounding guard", () => {
       }),
     );
     expect(result.repairAddendum).toContain("[ALLOWED NARRATABLE PACKET EVIDENCE REFS]");
+    expect(result.repairAddendum).toContain("sentences[].factRefs/evidenceRefs");
+    expect(result.repairAddendum).toContain("Use factRefs, not text");
+    expect(result.repairAddendum).not.toContain("sentences[].text/evidenceRefs");
     expect(result.repairAddendum).toContain(
       "[category=perceivable_response]",
     );

@@ -43,7 +43,10 @@ export default function LauncherPage() {
   const router = useRouter();
   const [campaigns, setCampaigns] = useState<CampaignMeta[]>([]);
   const [activeCampaign, setActiveCampaign] = useState<CampaignMeta | null>(null);
-  const [worldData, setWorldData] = useState<WorldData | null>(null);
+  const [worldDataState, setWorldDataState] = useState<{
+    campaignId: string;
+    data: WorldData;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -72,29 +75,41 @@ export default function LauncherPage() {
   }, []);
 
   useEffect(() => {
-    void fetchCampaigns();
+    let cancelled = false;
+    window.queueMicrotask(() => {
+      if (!cancelled) {
+        void fetchCampaigns();
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [fetchCampaigns]);
 
   const latestCampaign = sorted[0];
   const heroCampaign = activeCampaign ?? latestCampaign ?? null;
+  const worldData = heroCampaign && worldDataState?.campaignId === heroCampaign.id
+    ? worldDataState.data
+    : null;
 
   useEffect(() => {
     let cancelled = false;
 
     if (!heroCampaign) {
-      setWorldData(null);
       return;
     }
 
     void getWorldData(heroCampaign.id)
       .then((world) => {
         if (!cancelled) {
-          setWorldData(world);
+          setWorldDataState({ campaignId: heroCampaign.id, data: world });
         }
       })
       .catch(() => {
         if (!cancelled) {
-          setWorldData(null);
+          setWorldDataState((current) =>
+            current?.campaignId === heroCampaign.id ? null : current,
+          );
         }
       });
 
