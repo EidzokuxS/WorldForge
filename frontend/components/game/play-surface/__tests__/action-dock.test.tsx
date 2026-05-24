@@ -54,7 +54,11 @@ describe("ActionDock", () => {
         onSubmitAction={vi.fn()}
         onContinue={vi.fn()}
         isBusy
-        quickActions={[{ label: "Press forward", action: "Press forward" }]}
+        quickActions={[{
+          label: "Press forward",
+          action: "Press forward",
+          handle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        }]}
       />,
     );
 
@@ -73,13 +77,19 @@ describe("ActionDock", () => {
         onSubmitAction={onSubmitAction}
         onContinue={vi.fn()}
         isBusy={false}
-        quickActions={[{ label: "Ask for details", action: "Ask for details" }]}
+        quickActions={[{
+          label: "Ask for details",
+          action: "Ask for details",
+          handle: "qac_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        }]}
       />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Ask for details" }));
 
-    expect(onSubmitAction).toHaveBeenCalledWith("Ask for details");
+    expect(onSubmitAction).toHaveBeenCalledWith("Ask for details", {
+      quickActionHandle: "qac_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    });
   });
 
   it("submits backend-owned quick-choice handles when present", () => {
@@ -150,7 +160,11 @@ describe("ActionDock", () => {
         onSubmitAction={vi.fn()}
         onContinue={vi.fn()}
         isBusy={false}
-        quickActions={[{ label: "Ask for details", action: "Ask for details" }]}
+        quickActions={[{
+          label: "Ask for details",
+          action: "Ask for details",
+          handle: "qac_cccccccccccccccccccccccccccccccc",
+        }]}
       />,
     );
 
@@ -168,6 +182,7 @@ describe("ActionDock", () => {
         quickActions={[{
           label: "Follow the unbelievably specific lantern-route through the service corridor without losing sight of the warden",
           action: "Follow the route",
+          handle: "qac_dddddddddddddddddddddddddddddddd",
         }]}
       />,
     );

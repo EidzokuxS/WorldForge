@@ -49,7 +49,7 @@ import type { WorldCurrentScene, WorldData } from "@/lib/api-types";
 import { deriveGameMessageKind } from "@/lib/gameplay-text";
 
 type TurnPhase = "idle" | "streaming" | "finalizing";
-type QuickAction = { label: string; action: string; handle?: string };
+type QuickAction = { label: string; action: string; handle: string };
 type SceneProgress = "opening" | "scene-settling" | null;
 type SceneSettlingStatus = TurnStageStatus;
 type FinalizingTurnStatus = TurnStageStatus;
@@ -960,7 +960,7 @@ export default function GamePage() {
   const submitAction = async (
     actionText: string,
     onStreamAccepted?: () => void,
-    options?: { quickActionHandle?: string },
+    options?: { quickActionHandle: string },
   ): Promise<boolean> => {
     if (!actionText || isTurnBusy || !activeCampaign) return false;
     const campaignId = activeCampaign.id;

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { executeToolCallMock } = vi.hoisted(() => ({
   executeToolCallMock: vi.fn(),
@@ -97,6 +97,10 @@ function createExecutionContext(): ToolExecutionContext {
 }
 
 describe("bridge lookup tool schemas", () => {
+  beforeEach(() => {
+    executeToolCallMock.mockReset();
+  });
+
   it("registers all bridge lookup tools in runtime schemas and Storyteller tools", () => {
     const tools = createStorytellerTools("campaign-1", 3, undefined, createExecutionContext());
 
@@ -195,6 +199,69 @@ describe("bridge lookup tool schemas", () => {
       error: expect.stringContaining("requires an execution context"),
     });
     expect(executeToolCallMock).not.toHaveBeenCalled();
+  });
+
+  it("routes quick-action offers through the runtime executor so handles are backend-owned", async () => {
+    const context = createExecutionContext();
+    const tools = createStorytellerTools("campaign-1", 3, undefined, context);
+    executeToolCallMock.mockResolvedValueOnce({
+      success: true,
+      result: {
+        actions: [
+          {
+            label: "Ask",
+            action: "Ask the clerk.",
+            handle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          },
+          {
+            label: "Watch",
+            action: "Watch the queue.",
+            handle: "qac_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          },
+          {
+            label: "Move",
+            action: "Move to the counter.",
+            handle: "qac_cccccccccccccccccccccccccccccccc",
+          },
+        ],
+      },
+    } satisfies ToolResult);
+    const executeOfferQuickActions = tools.offer_quick_actions.execute as (
+      input: {
+        actions: Array<{ label: string; action: string }>;
+        sourceRefs?: string[];
+      },
+      options?: unknown,
+    ) => Promise<ToolResult>;
+
+    const input = {
+      actions: [
+        { label: "Ask", action: "Ask the clerk." },
+        { label: "Watch", action: "Watch the queue." },
+        { label: "Move", action: "Move to the counter." },
+      ],
+      sourceRefs: ["current_scene"],
+    };
+    const result = await executeOfferQuickActions(input, undefined);
+
+    expect(result).toMatchObject({
+      success: true,
+      result: {
+        actions: [
+          expect.objectContaining({ handle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }),
+          expect.objectContaining({ handle: "qac_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }),
+          expect.objectContaining({ handle: "qac_cccccccccccccccccccccccccccccccc" }),
+        ],
+      },
+    });
+    expect(executeToolCallMock).toHaveBeenCalledWith(
+      "campaign-1",
+      "offer_quick_actions",
+      input,
+      3,
+      undefined,
+      context,
+    );
   });
 
   it("documents lookup tools compactly and marks fact/route lookup as observation-only", () => {

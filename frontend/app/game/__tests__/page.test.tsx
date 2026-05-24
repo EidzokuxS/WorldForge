@@ -407,8 +407,8 @@ vi.mock("@/components/game/play-surface/action-dock", () => ({
     isBusy?: boolean;
     onChange: (value: string) => void;
     onContinue: () => void;
-    onSubmitAction: (value: string) => void;
-    quickActions: Array<{ action: string; label: string }>;
+    onSubmitAction: (value: string, options?: { quickActionHandle: string }) => void;
+    quickActions: Array<{ action: string; handle: string; label: string }>;
     value: string;
   }) => (
     <div data-testid="action-dock">
@@ -431,10 +431,10 @@ vi.mock("@/components/game/play-surface/action-dock", () => ({
       </button>
       {quickActions.map((action) => (
         <button
-          key={action.action}
+          key={action.handle}
           type="button"
           disabled={isBusy}
-          onClick={() => onSubmitAction(action.action)}
+          onClick={() => onSubmitAction(action.action, { quickActionHandle: action.handle })}
         >
           {action.label}
         </button>
@@ -1912,7 +1912,11 @@ describe("GamePage", () => {
     let finishTurn: (() => void) | undefined;
     mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
       handlers.onNarrative("The gate shudders open.");
-      handlers.onQuickActions([{ label: "Press forward", action: "Press forward" }]);
+      handlers.onQuickActions([{
+        label: "Press forward",
+        action: "Press forward",
+        handle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      }]);
       handlers.onFinalizing?.({ stage: "rollback_critical" });
       await new Promise<void>((resolve) => {
         finishTurn = resolve;
@@ -2010,7 +2014,11 @@ describe("GamePage", () => {
     mockedChatAction.mockResolvedValue(createStreamResponse() as never);
     mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
       handlers.onNarrative("The registry clerk lowers the stamp.");
-      handlers.onQuickActions([{ label: "Press the clerk", action: "Press the clerk" }]);
+      handlers.onQuickActions([{
+        label: "Press the clerk",
+        action: "Press the clerk",
+        handle: "qac_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      }]);
       handlers.onFinalizing?.({ stage: "rollback_critical" });
       handlers.onDone({ tick: 20, worldVersion: 3, worldTimeMinutes: 20 });
     });
@@ -2043,7 +2051,11 @@ describe("GamePage", () => {
     let releaseDone: (() => void) | undefined;
     mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
       handlers.onNarrative("The scouts return.");
-      handlers.onQuickActions([{ label: "Ask for details", action: "Ask for details" }]);
+      handlers.onQuickActions([{
+        label: "Ask for details",
+        action: "Ask for details",
+        handle: "qac_cccccccccccccccccccccccccccccccc",
+      }]);
       handlers.onFinalizing?.();
       await new Promise<void>((resolve) => {
         releaseDone = resolve;
@@ -2120,7 +2132,11 @@ describe("GamePage", () => {
         });
       }
       if (turn === 4) {
-        handlers.onQuickActions([{ label: "Ask for details", action: "Ask for details" }]);
+        handlers.onQuickActions([{
+          label: "Ask for details",
+          action: "Ask for details",
+          handle: "qac_dddddddddddddddddddddddddddddddd",
+        }]);
       }
       if (turn === 6) {
         handlers.onStateUpdate({
@@ -2273,7 +2289,11 @@ describe("GamePage", () => {
     mockedChatAction.mockResolvedValue(createStreamResponse() as never);
     mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
       handlers.onNarrative("The hatch opens onto a back room that should roll back.");
-      handlers.onQuickActions([{ label: "Take the stamped chit", action: "Take the chit" }]);
+      handlers.onQuickActions([{
+        label: "Take the stamped chit",
+        action: "Take the chit",
+        handle: "qac_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      }]);
       handlers.onFinalizing?.({ stage: "rollback_critical" });
       handlers.onError("Rollback-critical post-turn failed");
     });
@@ -2316,7 +2336,11 @@ describe("GamePage", () => {
     mockedChatAction.mockResolvedValue(createStreamResponse() as never);
     mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
       handlers.onNarrative("The partial narration should not survive.");
-      handlers.onQuickActions([{ label: "Trust the partial result", action: "Trust it" }]);
+      handlers.onQuickActions([{
+        label: "Trust the partial result",
+        action: "Trust it",
+        handle: "qac_ffffffffffffffffffffffffffffffff",
+      }]);
       handlers.onError("Turn stream ended before completion.");
     });
     mockedChatHistory.mockResolvedValue(restoredBoundaryHistory as never);
@@ -2365,7 +2389,11 @@ describe("GamePage", () => {
     mockedChatRetry.mockResolvedValue(createStreamResponse() as never);
     mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
       handlers.onNarrative("The gate shudders but does not yield.");
-      handlers.onQuickActions([{ label: "Force it open", action: "Force it open" }]);
+      handlers.onQuickActions([{
+        label: "Force it open",
+        action: "Force it open",
+        handle: "qac_11111111111111111111111111111111",
+      }]);
       handlers.onError("Retry replay failed");
     });
 

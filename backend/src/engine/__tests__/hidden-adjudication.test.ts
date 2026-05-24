@@ -206,7 +206,23 @@ describe("hidden adjudication", () => {
       .mockResolvedValueOnce({
         success: true,
         result: {
-          actions: [{ label: "Look around", action: "I scan the shrine courtyard." }],
+          actions: [
+            {
+              label: "Look around",
+              action: "I scan the shrine courtyard.",
+              handle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            },
+            {
+              label: "Call out",
+              action: "I call for anyone nearby.",
+              handle: "qac_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            },
+            {
+              label: "Step back",
+              action: "I step back toward the gate.",
+              handle: "qac_cccccccccccccccccccccccccccccccc",
+            },
+          ],
         },
       });
 
@@ -229,7 +245,13 @@ describe("hidden adjudication", () => {
           },
           {
             toolName: "offer_quick_actions",
-            input: { actions: [{ label: "Look around", action: "I scan the shrine courtyard." }] },
+            input: {
+              actions: [
+                { label: "Look around", action: "I scan the shrine courtyard." },
+                { label: "Call out", action: "I call for anyone nearby." },
+                { label: "Step back", action: "I step back toward the gate." },
+              ],
+            },
           },
         ],
       },
@@ -253,7 +275,13 @@ describe("hidden adjudication", () => {
       2,
       "campaign-1",
       "offer_quick_actions",
-      { actions: [{ label: "Look around", action: "I scan the shrine courtyard." }] },
+      {
+        actions: [
+          { label: "Look around", action: "I scan the shrine courtyard." },
+          { label: "Call out", action: "I call for anyone nearby." },
+          { label: "Step back", action: "I step back toward the gate." },
+        ],
+      },
       7,
       "strong_hit",
       executionContext,
@@ -263,7 +291,23 @@ describe("hidden adjudication", () => {
       {
         type: "quick_actions",
         data: {
-          actions: [{ label: "Look around", action: "I scan the shrine courtyard." }],
+          actions: [
+            {
+              label: "Look around",
+              action: "I scan the shrine courtyard.",
+              handle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            },
+            {
+              label: "Call out",
+              action: "I call for anyone nearby.",
+              handle: "qac_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            },
+            {
+              label: "Step back",
+              action: "I step back toward the gate.",
+              handle: "qac_cccccccccccccccccccccccccccccccc",
+            },
+          ],
         },
       },
     ]);

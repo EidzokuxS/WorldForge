@@ -270,6 +270,13 @@ const offerQuickActionsInputSchema = z.object({
     )
     .min(3)
     .max(5),
+  sourceRefs: z
+    .array(
+      z.string().trim().min(1).max(120)
+        .describe("Visible/current ref or player-known fact ref grounding this quick-action offer")
+    )
+    .max(12)
+    .optional(),
 });
 
 const spawnNpcInputSchema = z.object({

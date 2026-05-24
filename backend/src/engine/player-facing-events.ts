@@ -1,7 +1,7 @@
 export interface PlayerFacingQuickAction {
   label: string;
   action: string;
-  handle?: string;
+  handle: string;
 }
 
 export interface PlayerFacingQuickActionsEvent {
@@ -151,10 +151,10 @@ function playerFacingText(value: unknown, maxLength: number): string | null {
   return text;
 }
 
-function playerFacingQuickActionHandle(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
+function playerFacingQuickActionHandle(value: unknown): string | null {
+  if (typeof value !== "string") return null;
   const handle = value.trim();
-  return PLAYER_FACING_QUICK_ACTION_HANDLE_PATTERN.test(handle) ? handle : undefined;
+  return PLAYER_FACING_QUICK_ACTION_HANDLE_PATTERN.test(handle) ? handle : null;
 }
 
 export function toPlayerFacingQuickActions(value: unknown): PlayerFacingQuickActionsEvent | null {
@@ -164,7 +164,7 @@ export function toPlayerFacingQuickActions(value: unknown): PlayerFacingQuickAct
       const label = playerFacingText(entry.label, MAX_QUICK_ACTION_LABEL_LENGTH);
       const action = playerFacingText(entry.action, MAX_QUICK_ACTION_TEXT_LENGTH);
       const handle = playerFacingQuickActionHandle(entry.handle);
-      return label && action ? [{ label, action, ...(handle ? { handle } : {}) }] : [];
+      return label && action && handle ? [{ label, action, handle }] : [];
     })
     .slice(0, MAX_QUICK_ACTIONS);
 

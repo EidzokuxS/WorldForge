@@ -176,13 +176,21 @@ describe("deriveDisplayBeats", () => {
       sceneProgress: null,
       oracleResult: null,
       travelFeedback: null,
-      quickActions: [{ label: "Question Nobara", action: "Ask Nobara what she saw." }],
+      quickActions: [{
+        label: "Question Nobara",
+        action: "Ask Nobara what she saw.",
+        handle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      }],
     });
 
     expect(beats).toContainEqual(
       expect.objectContaining({
         kind: "choice",
-        choices: [{ label: "Question Nobara", action: "Ask Nobara what she saw." }],
+        choices: [{
+          label: "Question Nobara",
+          action: "Ask Nobara what she saw.",
+          handle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        }],
       }),
     );
   });

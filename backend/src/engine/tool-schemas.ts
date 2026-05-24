@@ -250,10 +250,7 @@ export function createStorytellerTools(
       description:
         "Suggest 3-5 quick action options for the player to choose from. Keep the options varied, concrete, and grounded in the current scene, present NPCs, available items, and visible threats.",
       inputSchema: offerQuickActionsInputSchema,
-      execute: async (args) => ({
-        success: true as const,
-        result: { actions: args.actions },
-      }),
+      execute: (args) => executeRuntimeTool("offer_quick_actions", args),
     }),
 
     spawn_npc: tool({

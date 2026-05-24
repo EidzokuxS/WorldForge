@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import type { QuickChoice } from "./types";
 
 export interface ActionSubmitOptions {
-  quickActionHandle?: string;
+  quickActionHandle: string;
 }
 
 export interface ActionDockProps {
@@ -62,18 +62,14 @@ export function ActionDock({
         <div className="mb-3 flex min-w-0 flex-wrap gap-2 border-b border-white/8 pb-3">
           {quickActions.map((choice) => (
             <Button
-              key={choice.handle ?? `${choice.label}-${choice.action}`}
+              key={choice.handle}
               type="button"
               variant="ghost"
               className="min-h-11 max-w-full whitespace-normal rounded-[var(--r-m)] border border-white/10 bg-zinc-900/70 px-3 text-left text-sm font-semibold leading-5 text-zinc-100 hover:bg-zinc-800 disabled:opacity-50"
               disabled={controlsDisabled}
               onClick={() => {
                 if (!controlsDisabled) {
-                  if (choice.handle) {
-                    onSubmitAction(choice.action, { quickActionHandle: choice.handle });
-                  } else {
-                    onSubmitAction(choice.action);
-                  }
+                  onSubmitAction(choice.action, { quickActionHandle: choice.handle });
                 }
               }}
             >

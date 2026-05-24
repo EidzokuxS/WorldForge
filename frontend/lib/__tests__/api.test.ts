@@ -608,6 +608,31 @@ describe("parseTurnSSE", () => {
     expect(JSON.stringify(onQuickActions.mock.calls[0]?.[0])).not.toContain("hidden");
   });
 
+  it("drops streamed quick actions that lack backend capability handles", async () => {
+    const onQuickActions = vi.fn();
+
+    await parseTurnSSE(
+      createStream([
+        "event: quick_actions",
+        "data: {\"actions\":[{\"label\":\"Ask\",\"action\":\"Ask the clerk.\"},{\"label\":\"Move\",\"action\":\"Move closer.\",\"handle\":\"not-a-capability\"}]}",
+        "",
+        "event: done",
+        "data: {}",
+        "",
+      ].join("\n")),
+      {
+        onNarrative: vi.fn(),
+        onOracleResult: vi.fn(),
+        onStateUpdate: vi.fn(),
+        onQuickActions,
+        onDone: vi.fn(),
+        onError: vi.fn(),
+      },
+    );
+
+    expect(onQuickActions).toHaveBeenCalledWith([]);
+  });
+
   it("dispatches a dedicated finalization callback before done", async () => {
     const onFinalizing = vi.fn();
     const onDone = vi.fn();

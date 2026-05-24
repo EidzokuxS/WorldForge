@@ -177,6 +177,12 @@ vi.mock("../../campaign/index.js", () => ({
 }));
 
 vi.mock("../../lib/index.js", () => ({
+  AppError: class AppError extends Error {
+    constructor(message: string, public readonly statusCode = 500) {
+      super(message);
+      this.name = "AppError";
+    }
+  },
   createLogger: vi.fn(() => ({
     event: logEventMock,
     info: logInfoMock,
@@ -2222,6 +2228,11 @@ describe("processTurn", () => {
       { label: "Move", action: "Continue down the corridor" },
       { label: "Rest", action: "Take a short rest" },
     ];
+    const issuedActions = [
+      { ...actions[0]!, handle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+      { ...actions[1]!, handle: "qac_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+      { ...actions[2]!, handle: "qac_cccccccccccccccccccccccccccccccc" },
+    ];
     setupMocks({
       streamParts: [
         { type: "text-delta", text: "Victory!" },
@@ -2229,7 +2240,7 @@ describe("processTurn", () => {
           type: "tool-result",
           toolName: "offer_quick_actions",
           input: { actions },
-          output: { success: true, result: { actions } },
+          output: { success: true, result: { actions: issuedActions } },
         },
       ],
     });
@@ -2240,7 +2251,7 @@ describe("processTurn", () => {
     const quickActions = events.filter((e) => e.type === "quick_actions");
     expect(quickActions).toHaveLength(1);
     expect(quickActions[0]!.data).toEqual({
-      actions,
+      actions: issuedActions,
     });
   });
 
@@ -2631,12 +2642,32 @@ describe("processTurn", () => {
           type: "tool-result",
           toolName: "offer_quick_actions",
           input: {
-            actions: [{ label: "Loot", action: "Loot the goblin" }],
+            actions: [
+              { label: "Loot", action: "Loot the goblin" },
+              { label: "Watch", action: "Watch for movement" },
+              { label: "Leave", action: "Leave the room" },
+            ],
           },
           output: {
             success: true,
             result: {
-              actions: [{ label: "Loot", action: "Loot the goblin" }],
+              actions: [
+                {
+                  label: "Loot",
+                  action: "Loot the goblin",
+                  handle: "qac_dddddddddddddddddddddddddddddddd",
+                },
+                {
+                  label: "Watch",
+                  action: "Watch for movement",
+                  handle: "qac_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                },
+                {
+                  label: "Leave",
+                  action: "Leave the room",
+                  handle: "qac_ffffffffffffffffffffffffffffffff",
+                },
+              ],
             },
           },
         },
@@ -2699,15 +2730,35 @@ describe("processTurn", () => {
           {
             type: "tool-result",
             toolName: "offer_quick_actions",
-            input: {
-              actions: [{ label: "Loot", action: "Loot the goblin" }],
-            },
-            output: {
-              success: true,
-              result: {
-                actions: [{ label: "Loot", action: "Loot the goblin" }],
+              input: {
+                actions: [
+                  { label: "Loot", action: "Loot the goblin" },
+                  { label: "Watch", action: "Watch for movement" },
+                  { label: "Leave", action: "Leave the room" },
+                ],
               },
-            },
+              output: {
+                success: true,
+                result: {
+                  actions: [
+                    {
+                      label: "Loot",
+                      action: "Loot the goblin",
+                      handle: "qac_11111111111111111111111111111111",
+                    },
+                    {
+                      label: "Watch",
+                      action: "Watch for movement",
+                      handle: "qac_22222222222222222222222222222222",
+                    },
+                    {
+                      label: "Leave",
+                      action: "Leave the room",
+                      handle: "qac_33333333333333333333333333333333",
+                    },
+                  ],
+                },
+              },
           },
         ],
       });

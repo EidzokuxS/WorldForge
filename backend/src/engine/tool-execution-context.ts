@@ -1193,6 +1193,22 @@ function worldFactSourceRefs(context: ToolExecutionContext): Set<string> {
   );
 }
 
+function quickActionSourceRefs(context: ToolExecutionContext): Set<string> {
+  return mergeSets(
+    context.subjectActorRefs,
+    context.legalActorRefs,
+    context.legalItemRefs,
+    context.legalLocationRefs,
+    context.legalFactionRefs,
+    context.legalMovementRefs,
+    context.currentLocationRefs,
+    context.currentSceneRefs,
+    context.sameTurnResultRefs ?? new Set(),
+    sameTurnRefsConsumableBy(context, "offer_quick_actions"),
+    knownFactRefs(context),
+  );
+}
+
 function validateRefArray(input: {
   values: unknown;
   refs: ReadonlySet<string>;
@@ -1214,6 +1230,43 @@ function validateRefArray(input: {
     });
     if (issue) return issue;
   }
+  return null;
+}
+
+function validateOfferQuickActionsGrounding(
+  input: Record<string, unknown>,
+  context: ToolExecutionContext,
+  pathPrefix: string,
+): ToolGroundingIssue | null {
+  const sourceIssue = validateRefArray({
+    values: input.sourceRefs,
+    refs: quickActionSourceRefs(context),
+    path: `${pathPrefix}.sourceRefs`,
+    description: "legal visible/current refs, movement refs, or player-known fact refs",
+    code: "invalid_source_ref",
+    context,
+  });
+  if (sourceIssue) return sourceIssue;
+
+  if (!Array.isArray(input.actions)) return null;
+  for (const [index, entry] of input.actions.entries()) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const action = entry as Record<string, unknown>;
+    const labelIssue = validatePlayerTurnModelText({
+      value: action.label,
+      context,
+      path: `${pathPrefix}.actions.${index}.label`,
+    });
+    if (labelIssue) return labelIssue;
+
+    const actionIssue = validatePlayerTurnModelText({
+      value: action.action,
+      context,
+      path: `${pathPrefix}.actions.${index}.action`,
+    });
+    if (actionIssue) return actionIssue;
+  }
+
   return null;
 }
 
@@ -1815,6 +1868,8 @@ export function validateToolInputGrounding(input: {
       return validateRecordDialogueOutcomeGrounding(toolInput, input.context, path);
     case "record_world_fact":
       return validateRecordWorldFactGrounding(toolInput, input.context, path);
+    case "offer_quick_actions":
+      return validateOfferQuickActionsGrounding(toolInput, input.context, path);
     case "spawn_npc":
       return validateSpawnNpcGrounding(toolInput, input.context, path);
     case "promote_npc":

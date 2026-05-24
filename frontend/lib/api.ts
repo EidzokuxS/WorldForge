@@ -829,7 +829,7 @@ export interface TurnSSEHandlers {
 export interface QuickActionChoice {
   label: string;
   action: string;
-  handle?: string;
+  handle: string;
 }
 
 export interface TurnDoneBoundary {
@@ -841,6 +841,7 @@ export interface TurnDoneBoundary {
 
 const TURN_STREAM_EMPTY_NARRATION_ERROR = "Turn finished without visible narration. Please retry.";
 const TURN_STREAM_INCOMPLETE_ERROR = "Turn stream ended before completion.";
+const QUICK_ACTION_HANDLE_PATTERN = /^qac_[a-f0-9]{32}$/u;
 
 function readStringField(record: Record<string, unknown>, key: string): string | undefined {
   const value = record[key];
@@ -927,13 +928,14 @@ function normalizeQuickActions(value: unknown): QuickActionChoice[] {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
     const action = entry as Record<string, unknown>;
     if (typeof action.label !== "string" || typeof action.action !== "string") return [];
-    const handle = typeof action.handle === "string" && action.handle.trim().length > 0
-      ? action.handle.trim()
-      : undefined;
+    const label = action.label.trim();
+    const actionText = action.action.trim();
+    const handle = typeof action.handle === "string" ? action.handle.trim() : "";
+    if (!label || !actionText || !QUICK_ACTION_HANDLE_PATTERN.test(handle)) return [];
     return [{
-      label: action.label,
-      action: action.action,
-      ...(handle ? { handle } : {}),
+      label,
+      action: actionText,
+      handle,
     }];
   });
 }

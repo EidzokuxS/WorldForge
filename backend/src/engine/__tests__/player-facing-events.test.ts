@@ -14,6 +14,7 @@ describe("player-facing event projection", () => {
             label: "Ask actor_hidden",
             action:
               "Ask actor_hidden about route_hidden_path via tool_result_8, 01890f9a-20f3-7cc2-9b7c-1a2b3c4d5e6f, spawn_npc, record_world_fact, transfer_item, and add_tag.",
+            handle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           },
         ],
       },
@@ -24,6 +25,7 @@ describe("player-facing event projection", () => {
         {
           label: "Ask [hidden]",
           action: "Ask [hidden] about [hidden] via [hidden], [hidden], [hidden], [hidden], [hidden], and [hidden].",
+          handle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         },
       ],
     });
@@ -35,6 +37,17 @@ describe("player-facing event projection", () => {
     expect(JSON.stringify(projected)).not.toContain("record_world_fact");
     expect(JSON.stringify(projected)).not.toContain("transfer_item");
     expect(JSON.stringify(projected)).not.toContain("add_tag");
+  });
+
+  it("drops quick actions without backend-owned capability handles", () => {
+    expect(toPlayerFacingQuickActions({
+      result: {
+        actions: [
+          { label: "Ask", action: "Ask the clerk." },
+          { label: "Move", action: "Move closer.", handle: "not-a-capability" },
+        ],
+      },
+    })).toBeNull();
   });
 
   it("can preserve player-visible narrative whitespace while redacting handles", () => {

@@ -693,7 +693,24 @@ describe("ScenePlan executor", () => {
       },
     };
     const validated = validateForExecution(createExecutionPlan([quickAction]));
-    const toolResult = { success: true, result: { actions: quickAction.input.actions, source: "tool" } };
+    const issuedActions = [
+      {
+        label: "Press",
+        action: "Press the captain for a clear answer.",
+        handle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      },
+      {
+        label: "Wait",
+        action: "Wait and study the patrol.",
+        handle: "qac_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      },
+      {
+        label: "Step back",
+        action: "Step back from the spear line.",
+        handle: "qac_cccccccccccccccccccccccccccccccc",
+      },
+    ];
+    const toolResult = { success: true, result: { actions: issuedActions, source: "tool" } };
     vi.mocked(executeToolCall).mockResolvedValueOnce(toolResult);
 
     const executed = await executeScenePlan({ campaignId: "campaign-1", tick: 12, plan: validated });
@@ -701,7 +718,7 @@ describe("ScenePlan executor", () => {
     expect(executed.quickActionsEmitted).toBe(true);
     expect(executed.emittedEvents).toEqual([{
       type: "quick_actions",
-      data: { actions: quickAction.input.actions },
+      data: { actions: issuedActions },
     }]);
     expect(executed.toolCallResults).toEqual([
       expect.objectContaining({

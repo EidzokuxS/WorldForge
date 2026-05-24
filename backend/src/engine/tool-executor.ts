@@ -3517,15 +3517,20 @@ function runToolHandler(input: {
       return handleRecordWorldFact(input.campaignId, input.args, input.executionContext);
     case "advance_time":
       return handleAdvanceTime(input.args);
-    case "offer_quick_actions":
+    case "offer_quick_actions": {
+      const sourceRefs = Array.isArray(input.args.sourceRefs)
+        ? input.args.sourceRefs.filter((ref): ref is string => typeof ref === "string")
+        : undefined;
       return persistQuickActionOffer({
         campaignId: input.campaignId,
         actions: input.args.actions,
         tick: input.tick,
+        ...(sourceRefs ? { sourceRefs } : {}),
       }).then((result) => ({
         success: true,
         result,
       }));
+    }
     case "spawn_npc":
       return handleSpawnNpc(input.campaignId, input.args, input.executionContext);
     case "promote_npc":

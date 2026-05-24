@@ -101,6 +101,55 @@ describe("createPlayerTurnToolExecutionContext", () => {
     });
   });
 
+  it("grounds quick action offers in visible refs and rejects backend refs in choices", () => {
+    const context = createPlayerTurnToolExecutionContext({
+      ...createFrame(),
+      allowedTools: ["offer_quick_actions"],
+    });
+    const actions = [
+      { label: "Ask", action: "Ask the Road Warden for details." },
+      { label: "Watch", action: "Watch the records counter." },
+      { label: "Move", action: "Step back into the pier crowd." },
+    ];
+
+    expect(validateToolInputGrounding({
+      toolName: "offer_quick_actions",
+      toolInput: {
+        actions,
+        sourceRefs: ["current_scene", "Road Warden"],
+      },
+      context,
+    })).toBeNull();
+
+    expect(validateToolInputGrounding({
+      toolName: "offer_quick_actions",
+      toolInput: {
+        actions,
+        sourceRefs: ["actor:hidden-listener"],
+      },
+      context,
+    })).toMatchObject({
+      code: "invalid_source_ref",
+      path: "input.sourceRefs.0",
+    });
+
+    expect(validateToolInputGrounding({
+      toolName: "offer_quick_actions",
+      toolInput: {
+        actions: [
+          { label: "Ask actor:hidden-listener", action: "Ask for details." },
+          { label: "Watch", action: "Watch the records counter." },
+          { label: "Move", action: "Step back into the pier crowd." },
+        ],
+        sourceRefs: ["current_scene"],
+      },
+      context,
+    })).toMatchObject({
+      code: "invalid_source_ref",
+      path: "input.actions.0.label",
+    });
+  });
+
   it("builds actor refs from model-facing legal targets, not hidden raw target candidates", () => {
     const frame: SceneFrame = {
       ...createFrame(),

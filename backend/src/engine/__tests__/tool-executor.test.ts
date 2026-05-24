@@ -1202,6 +1202,7 @@ describe("executeToolCall", () => {
         { label: "Flee", action: "Run away" },
         { label: "Talk", action: "Try to negotiate" },
       ];
+      const sourceRefs = ["current_scene", "visible_fact:threat"];
       persistQuickActionOfferMock.mockResolvedValue({
         actions: actions.map((action, index) => ({
           ...action,
@@ -1211,6 +1212,7 @@ describe("executeToolCall", () => {
 
       const result = await executeToolCall(CAMPAIGN_ID, "offer_quick_actions", {
         actions,
+        sourceRefs,
       }, TICK);
 
       expect(result.success).toBe(true);
@@ -1225,6 +1227,7 @@ describe("executeToolCall", () => {
         campaignId: CAMPAIGN_ID,
         actions,
         tick: TICK,
+        sourceRefs,
       });
       expect(getDb).not.toHaveBeenCalled();
     });
