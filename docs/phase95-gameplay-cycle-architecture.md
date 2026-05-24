@@ -68,6 +68,10 @@ Implemented hardening slices after the reset:
 - Durable quick-action capabilities: quick-action labels/prose remain
   presentation, while backend-owned offer rows and opaque capabilities carry
   selection authority.
+- Receipt-bound quick-action projection: `offer_quick_actions` is tracked as
+  public-handle authority inside the GM-loop savepoint, rejected/rolled back
+  unless paired with an accepted turn receipt, and buffered from public SSE
+  until the `done` boundary succeeds.
 - Runtime store bundle manifest: checkpoint and turn-rollback bundles now write
   and verify a manifest before restore. Restore also recomputes captured
   SQLite/JSON/vector hashes and row counts before any live copy. The manifest
@@ -138,8 +142,9 @@ Current post-slice status on `develop`:
   execution are implemented locally with targeted backend tests and backend
   typecheck green. Public projection guard coverage and frontend raw-id
   rejection are also implemented locally with targeted backend/frontend tests
-  and typechecks green. Pending narration public recovery projection is
-  implemented locally with route tests and backend/frontend typechecks green.
+  and typechecks green. Pending narration public recovery projection and
+  quick-action accepted-receipt cleanup are implemented locally with route/
+  GM-loop tests and backend/frontend typechecks green.
   The architecture-closure audit is now recorded in
   `docs/phase95-architecture-closure-audit-2026-05-24.md`; it is a NO-GO for
   long-play acceptance until the remaining P1 queue is closed and Oracle/
@@ -155,9 +160,9 @@ Architecture closure audit on 2026-05-24:
   restore-side hash/row evidence verification, episodic vector rollback
   retention/rebuild, and staged rerun-convergent restore.
 - P1s still open: adjacent public campaign API handle/system classification,
-  deterministic due-world emitted ref coverage, quick-action accepted-receipt
-  cleanup, fully manifest-owned non-SQL clone policy, executable replay
-  rejection, and broader clone residue fixture coverage.
+  deterministic due-world emitted ref coverage, fully manifest-owned non-SQL
+  clone policy, executable replay rejection, and broader clone residue fixture
+  coverage.
 
 ## End State
 
@@ -237,10 +242,14 @@ P1 blockers to close in the first hardening wave:
   movement, world event, or scene beat.
 - World-brain, forecast, and support-only context must not become hidden-fact
   authority.
-- Quick-action source digest semantics must be explicit: authority comes from
-  the durable offer row and live resolver checks.
 - Settled-turn resume, retry, rollback, undo, and clone need one shared meaning
   of "settled".
+
+Already closed from this early list:
+
+- Quick-action source digest and accepted-receipt semantics are explicit:
+  authority comes from the durable offer row, live resolver checks, GM-loop
+  receipt adjacency, and route SSE `done` boundary.
 
 The full Oracle verdict is captured as `phase95-architectu-bundle-go`.
 

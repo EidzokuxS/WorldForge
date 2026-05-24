@@ -60,6 +60,7 @@ import {
   runtimeRequirementStateEffectKinds,
   runtimeRequirementStateMutationTools,
   runtimeToolHasRole,
+  runtimeToolRequiresExecutionAuthority,
   runtimeToolIsSideEffecting,
   type RuntimeRequirementLike,
 } from "./tool-contracts.js";
@@ -546,6 +547,7 @@ function canRunBeforeRequiredReceipt(
   if (runtimeRequirementPreparatoryTools(requirement).includes(toolName)) return true;
   if (runtimeRequirementStateMutationTools(requirement).includes(toolName)) return true;
   if (runtimeToolHasRole(toolName, "helper_observation")) return true;
+  if (runtimeToolHasRole(toolName, "public_handle_authority")) return true;
 
   if (requirement.kind === "dialogue_outcome") {
     if (toolName === "create_scene_extra") return true;
@@ -617,7 +619,7 @@ type GmToolLoopMutationBoundary = {
 let gmToolLoopBoundaryCounter = 0;
 
 function shouldUseGmToolLoopMutationBoundary(toolName: RuntimeToolName): boolean {
-  return runtimeToolIsSideEffecting(toolName);
+  return runtimeToolRequiresExecutionAuthority(toolName);
 }
 
 function createGmToolLoopMutationBoundary(campaignId: string): GmToolLoopMutationBoundary {
@@ -2277,6 +2279,13 @@ function acceptedGmToolStepIndexesBeforeCommit(
     });
   }
 
+  if (accepted.size > 0) {
+    stepResults.forEach((step, index) => {
+      if (accepted.has(index) || !isPublicHandleAuthorityStep(step)) return;
+      accepted.add(index);
+    });
+  }
+
   const preparatoryTools = new Set(runtimeRequirementPreparatoryTools(requirement));
   stepResults.forEach((step, index) => {
     if (accepted.has(index) || !isRuntimeToolName(step.toolName)) return;
@@ -2297,7 +2306,15 @@ function acceptedGmToolStepIndexesBeforeCommit(
   return accepted;
 }
 
-function isSuccessfulSideEffectingStep(step: GmToolStepResult): boolean {
+function isPublicHandleAuthorityStep(step: GmToolStepResult): boolean {
+  return step.result?.success === true
+    && step.result.status !== "failure"
+    && isRuntimeToolName(step.toolName)
+    && !isObservationToolResult(step.result)
+    && runtimeToolHasRole(step.toolName, "public_handle_authority");
+}
+
+function isSuccessfulAuthorityBearingStep(step: GmToolStepResult): boolean {
   if (step.result?.success !== true || step.result.status === "failure") {
     return false;
   }
@@ -2310,7 +2327,7 @@ function isSuccessfulSideEffectingStep(step: GmToolStepResult): boolean {
   if (isObservationToolResult(step.result)) {
     return false;
   }
-  return runtimeToolIsSideEffecting(step.toolName);
+  return runtimeToolRequiresExecutionAuthority(step.toolName);
 }
 
 function stableStepComparisonValue(value: unknown): string {
@@ -2350,7 +2367,7 @@ function missingRepresentedExecutions(input: {
 }): GmToolStepResult[] {
   const usedTargetIndexes = new Set<number>();
   return input.source
-    .filter(isSuccessfulSideEffectingStep)
+    .filter(isSuccessfulAuthorityBearingStep)
     .filter((step) => input.sourceFilter?.(step) ?? true)
     .filter((sourceStep) => {
     const matchIndex = input.target.findIndex((targetStep, index) =>
@@ -2361,7 +2378,7 @@ function missingRepresentedExecutions(input: {
   });
 }
 
-function assertTrackedSideEffectsRepresentedBeforeCommit(
+function assertTrackedAuthorityExecutionsRepresentedBeforeCommit(
   parsedStepResults: readonly GmToolStepResult[],
   trackedStepResults: readonly GmToolStepResult[],
 ): void {
@@ -2372,7 +2389,7 @@ function assertTrackedSideEffectsRepresentedBeforeCommit(
   if (missingParsed.length > 0) {
     throw new Error(
       [
-        "GM tool loop mutation boundary tracked successful side-effecting execution(s) missing from parsed SDK steps before commit.",
+        "GM tool loop mutation boundary tracked successful authority-bearing execution(s) missing from parsed SDK steps before commit.",
         missingParsed.map((step) => `${step.toolName ?? "unknown"}:${step.stepId}`).join(", "),
       ].join(" "),
     );
@@ -2385,26 +2402,26 @@ function assertTrackedSideEffectsRepresentedBeforeCommit(
   if (missingTracked.length > 0) {
     throw new Error(
       [
-        "GM tool loop parsed successful side-effecting result(s) missing from the mutation boundary execution log before commit.",
+        "GM tool loop parsed successful authority-bearing result(s) missing from the mutation boundary execution log before commit.",
         missingTracked.map((step) => `${step.toolName ?? "unknown"}:${step.stepId}`).join(", "),
       ].join(" "),
     );
   }
 }
 
-function assertNoUnacceptedSideEffectingStepsBeforeCommit(
+function assertNoUnacceptedAuthorityBearingStepsBeforeCommit(
   args: RunGmToolLoopArgs,
   stepResults: readonly GmToolStepResult[],
   trackedStepResults: readonly GmToolStepResult[] = [],
 ): Set<number> {
-  assertTrackedSideEffectsRepresentedBeforeCommit(stepResults, trackedStepResults);
+  assertTrackedAuthorityExecutionsRepresentedBeforeCommit(stepResults, trackedStepResults);
   const accepted = acceptedGmToolStepIndexesBeforeCommit(args, stepResults);
   const offenders = stepResults.filter((step, index) =>
-    isSuccessfulSideEffectingStep(step) && !accepted.has(index));
+    isSuccessfulAuthorityBearingStep(step) && !accepted.has(index));
   if (offenders.length === 0) return accepted;
   throw new Error(
     [
-      "GM tool loop produced successful side-effecting result(s) that do not satisfy the accepted turn receipt before transaction commit.",
+      "GM tool loop produced successful authority-bearing result(s) that do not satisfy the accepted turn receipt before transaction commit.",
       offenders.map((step) => `${step.toolName ?? "unknown"}:${step.stepId}`).join(", "),
     ].join(" "),
   );
@@ -3031,7 +3048,7 @@ export async function runGmToolLoop(
     }
     assertAppliedNowDialogueEffectsBackedByPriorStructuralReceipts(stepResults);
     assertConversationalToolLoopResolved(args, stepResults);
-    const acceptedStepIndexes = assertNoUnacceptedSideEffectingStepsBeforeCommit(
+    const acceptedStepIndexes = assertNoUnacceptedAuthorityBearingStepsBeforeCommit(
       args,
       stepResults,
       mutationBoundary.trackedStepResults,

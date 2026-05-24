@@ -827,6 +827,37 @@ async function writeRouteTurnEventSSE(
   await writeTurnEventSSE(stream, withTurnBoundaryMetadata(campaignId, event));
 }
 
+function createRouteTurnEventWriter(
+  campaignId: string,
+  stream: { writeSSE: (event: { event: string; data: string }) => Promise<void> },
+): (event: TurnEvent) => Promise<void> {
+  const pendingQuickActions: TurnEvent[] = [];
+
+  return async (event: TurnEvent): Promise<void> => {
+    if (event.type === "quick_actions") {
+      pendingQuickActions.push(event);
+      return;
+    }
+
+    if (event.type === "error") {
+      pendingQuickActions.length = 0;
+      await writeRouteTurnEventSSE(campaignId, stream, event);
+      return;
+    }
+
+    if (event.type === "done") {
+      const doneEvent = withTurnBoundaryMetadata(campaignId, event);
+      for (const quickActionEvent of pendingQuickActions.splice(0)) {
+        await writeTurnEventSSE(stream, quickActionEvent);
+      }
+      await writeTurnEventSSE(stream, doneEvent);
+      return;
+    }
+
+    await writeRouteTurnEventSSE(campaignId, stream, event);
+  };
+}
+
 function isNarrationLockConflict(error: unknown): boolean {
   return error instanceof Error && error.name === "TurnSagaLockConflictError";
 }
@@ -878,6 +909,7 @@ async function streamPendingTurnNarration(args: {
   onDone?: (event: TurnEvent) => void;
 }): Promise<"resumed" | "pending"> {
   try {
+    const writeRouteEvent = createRouteTurnEventWriter(args.campaignId, args.stream);
     const generator = resumePendingTurnNarration({
       campaignId: args.campaignId,
       turnId: args.saga.turnId,
@@ -898,7 +930,7 @@ async function streamPendingTurnNarration(args: {
       if (event.type === "done") {
         args.onDone?.(event);
       }
-      await writeRouteTurnEventSSE(args.campaignId, args.stream, event);
+      await writeRouteEvent(event);
     }
     if (terminalEventType !== "done") {
       if (terminalEventType === "error") {
@@ -1138,9 +1170,10 @@ app.post("/opening", async (c) => {
           });
 
           let terminalEventType: TerminalTurnEventType | null = null;
+          const writeRouteEvent = createRouteTurnEventWriter(campaignId, stream);
           for await (const event of openingGenerator) {
             terminalEventType = noteTerminalTurnEvent(event, terminalEventType);
-            await writeRouteTurnEventSSE(campaignId, stream, event);
+            await writeRouteEvent(event);
           }
           if (terminalEventType !== "done") {
             outcome = "error";
@@ -1382,6 +1415,7 @@ app.post("/action", async (c) => {
           });
 
           let terminalEventType: TerminalTurnEventType | null = null;
+          const writeRouteEvent = createRouteTurnEventWriter(campaignId, stream);
           for await (const event of turnGenerator) {
             // Reactive auto-checkpoint when HP drops to danger zone during turn
             if (event.type === "auto_checkpoint") {
@@ -1411,7 +1445,7 @@ app.post("/action", async (c) => {
             }
             terminalEventType = noteTerminalTurnEvent(event, terminalEventType);
 
-            await writeRouteTurnEventSSE(campaignId, stream, event);
+            await writeRouteEvent(event);
           }
           if (terminalEventType !== "done") {
             outcome = "error";
@@ -1939,6 +1973,7 @@ app.post("/retry", async (c) => {
           });
 
           let terminalEventType: TerminalTurnEventType | null = null;
+          const writeRouteEvent = createRouteTurnEventWriter(campaignId, stream);
           for await (const event of turnGenerator) {
             if (event.type === "auto_checkpoint") {
               const detachedCtx = getTurnContext();
@@ -1967,7 +2002,7 @@ app.post("/retry", async (c) => {
             }
             terminalEventType = noteTerminalTurnEvent(event, terminalEventType);
 
-            await writeRouteTurnEventSSE(campaignId, stream, event);
+            await writeRouteEvent(event);
           }
           if (terminalEventType !== "done") {
             outcome = "error";

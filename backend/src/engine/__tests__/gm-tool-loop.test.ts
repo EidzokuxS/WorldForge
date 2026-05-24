@@ -18,6 +18,7 @@ const {
   spawnNpcExecuteMock,
   spawnItemExecuteMock,
   advanceTimeExecuteMock,
+  offerQuickActionsExecuteMock,
   listVisibleAffordancesExecuteMock,
   findPoiCandidatesExecuteMock,
   inspectKnownFactExecuteMock,
@@ -44,6 +45,7 @@ const {
   spawnNpcExecuteMock: vi.fn(),
   spawnItemExecuteMock: vi.fn(),
   advanceTimeExecuteMock: vi.fn(),
+  offerQuickActionsExecuteMock: vi.fn(),
   listVisibleAffordancesExecuteMock: vi.fn(),
   findPoiCandidatesExecuteMock: vi.fn(),
   inspectKnownFactExecuteMock: vi.fn(),
@@ -208,6 +210,7 @@ vi.mock("../tool-schemas.js", () => ({
     spawn_npc: { description: "Spawn NPC tool", execute: spawnNpcExecuteMock },
     spawn_item: { description: "Spawn Item tool", execute: spawnItemExecuteMock },
     advance_time: { description: "Advance time tool", execute: advanceTimeExecuteMock },
+    offer_quick_actions: { description: "Offer quick actions tool", execute: offerQuickActionsExecuteMock },
   })),
 }));
 
@@ -439,6 +442,8 @@ function toolExecuteMockFor(toolName: string): Mock | null {
       return spawnItemExecuteMock;
     case "advance_time":
       return advanceTimeExecuteMock;
+    case "offer_quick_actions":
+      return offerQuickActionsExecuteMock;
     case "list_visible_affordances":
       return listVisibleAffordancesExecuteMock;
     case "find_poi_candidates":
@@ -575,6 +580,7 @@ describe("runGmToolLoop", () => {
     spawnNpcExecuteMock.mockReset();
     spawnItemExecuteMock.mockReset();
     advanceTimeExecuteMock.mockReset();
+    offerQuickActionsExecuteMock.mockReset();
     listVisibleAffordancesExecuteMock.mockReset();
     findPoiCandidatesExecuteMock.mockReset();
     inspectKnownFactExecuteMock.mockReset();
@@ -652,6 +658,28 @@ describe("runGmToolLoop", () => {
       success: true,
       result: { minutes: 60, clockAdvanced: true },
       authority: toolAuthority(["world:time"]),
+    });
+    offerQuickActionsExecuteMock.mockResolvedValue({
+      success: true,
+      result: {
+        actions: [
+          {
+            label: "Ask",
+            action: "Ask what changed.",
+            handle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          },
+          {
+            label: "Watch",
+            action: "Watch for a reaction.",
+            handle: "qac_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          },
+          {
+            label: "Move",
+            action: "Move toward the open path.",
+            handle: "qac_cccccccccccccccccccccccccccccccc",
+          },
+        ],
+      },
     });
     listVisibleAffordancesExecuteMock.mockResolvedValue({
       success: true,
@@ -764,6 +792,125 @@ describe("runGmToolLoop", () => {
         mutationRefs: expect.arrayContaining(["event-1"]),
       },
     ]);
+  });
+
+  it("keeps quick-action capability rows inside the GM receipt boundary", async () => {
+    const quickActionInput = {
+      actions: [
+        { label: "Ask", action: "Ask what changed." },
+        { label: "Watch", action: "Watch for a reaction." },
+        { label: "Move", action: "Move toward the open path." },
+      ],
+    };
+    generateTextMock().mockImplementationOnce(async (options: {
+      activeTools: string[];
+      tools: Record<string, { execute?: (input: unknown) => Promise<unknown> }>;
+    }) => {
+      expect(options.activeTools).toContain("offer_quick_actions");
+      expect(options.tools.offer_quick_actions).toBeDefined();
+      const output = await options.tools.offer_quick_actions!.execute!(quickActionInput);
+      return {
+        text: "",
+        finishReason: "stop",
+        response: { modelId: "judge-model" },
+        usage: null,
+        steps: [
+          {
+            toolCalls: [{ toolName: "offer_quick_actions", input: quickActionInput }],
+            toolResults: [{ output }],
+          },
+        ],
+      };
+    });
+
+    await expect(runGmToolLoop({
+      campaignId: "campaign-1",
+      provider,
+      tick: 7,
+      playerAction: "I ask for options instead of resolving the promised appointment.",
+      frame: {
+        ...createFrame(),
+        allowedTools: ["log_event", "offer_quick_actions"],
+      } as SceneFrame,
+      gmRead,
+    })).rejects.toThrow(/accepted scene beat|accepted turn receipt/);
+
+    expect(offerQuickActionsExecuteMock).toHaveBeenCalledTimes(1);
+    expect(sqliteExecMock).toHaveBeenCalledWith(expect.stringMatching(/^SAVEPOINT gm_tool_loop_receipt_/u));
+    expect(sqliteExecMock).toHaveBeenCalledWith(expect.stringMatching(/^ROLLBACK TO SAVEPOINT gm_tool_loop_receipt_/u));
+    expect(sqliteExecMock).toHaveBeenCalledWith(expect.stringMatching(/^RELEASE SAVEPOINT gm_tool_loop_receipt_/u));
+  });
+
+  it("accepts quick-action capabilities only alongside an accepted turn receipt", async () => {
+    const logInput = {
+      text: "The dawn appointment is promised.",
+      durability: "durable",
+      futureRelevance: "The appointment should be remembered on later turns.",
+    };
+    const quickActionInput = {
+      actions: [
+        { label: "Ask", action: "Ask what changed." },
+        { label: "Watch", action: "Watch for a reaction." },
+        { label: "Move", action: "Move toward the open path." },
+      ],
+    };
+    logEventExecuteMock.mockResolvedValueOnce(withTerminalTestAuthority("log_event", {
+      success: true,
+      result: {
+        eventId: "event-quick-action-anchor",
+        text: "The dawn appointment is promised.",
+        durability: "durable",
+        persisted: true,
+      },
+    }));
+    generateTextMock().mockImplementationOnce(async (options: {
+      activeTools: string[];
+      tools: Record<string, { execute?: (input: unknown) => Promise<unknown> }>;
+    }) => {
+      expect(options.activeTools).toEqual(["log_event", "offer_quick_actions"]);
+      const logOutput = await options.tools.log_event!.execute!(logInput);
+      const quickOutput = await options.tools.offer_quick_actions!.execute!(quickActionInput);
+      return {
+        text: "",
+        finishReason: "stop",
+        response: { modelId: "judge-model" },
+        usage: null,
+        steps: [
+          {
+            toolCalls: [{ toolName: "log_event", input: logInput }],
+            toolResults: [{ output: logOutput }],
+          },
+          {
+            toolCalls: [{ toolName: "offer_quick_actions", input: quickActionInput }],
+            toolResults: [{ output: quickOutput }],
+          },
+        ],
+      };
+    });
+
+    const result = await runGmToolLoop({
+      campaignId: "campaign-1",
+      provider,
+      tick: 7,
+      playerAction: "I promise to meet the dock worker at dawn.",
+      frame: {
+        ...createFrame(),
+        allowedTools: ["log_event", "offer_quick_actions"],
+      } as SceneFrame,
+      gmRead,
+    });
+
+    expect(result.acceptedStepIds).toEqual([
+      expect.stringMatching(/^tool-call-/u),
+      expect.stringMatching(/^tool-call-/u),
+    ]);
+    expect(result.stepResults.map((step) => step.toolName)).toEqual([
+      "log_event",
+      "offer_quick_actions",
+    ]);
+    expect(sqliteExecMock).toHaveBeenCalledWith(expect.stringMatching(/^SAVEPOINT gm_tool_loop_receipt_/u));
+    expect(sqliteExecMock).not.toHaveBeenCalledWith(expect.stringMatching(/^ROLLBACK TO SAVEPOINT gm_tool_loop_receipt_/u));
+    expect(sqliteExecMock).toHaveBeenCalledWith(expect.stringMatching(/^RELEASE SAVEPOINT gm_tool_loop_receipt_/u));
   });
 
   it("blocks incompatible side-effect tools before execution when a typed runtime receipt is required", async () => {
@@ -999,7 +1146,7 @@ describe("runGmToolLoop", () => {
         stakes: "Whether the opening exchange leaves the player winded.",
         runtimeRequirement: { kind: "none" },
       } as Extract<GmRead, { path: "combat_transition" }>,
-    })).rejects.toThrow("successful side-effecting result");
+    })).rejects.toThrow("successful authority-bearing result");
 
     expect(addTagExecuteMock).not.toHaveBeenCalled();
   });
@@ -2382,7 +2529,7 @@ describe("runGmToolLoop", () => {
         turnIntent: "Apply a concrete state mutation.",
         runtimeRequirement: { kind: "state_mutation", effectKind: "entity_tag" },
       },
-    })).rejects.toThrow("tracked successful side-effecting execution");
+    })).rejects.toThrow("tracked successful authority-bearing execution");
 
     expect(sqliteExecMock.mock.calls.map(([statement]) => statement)).toEqual([
       expect.stringMatching(/^SAVEPOINT gm_tool_loop_receipt_/),
@@ -2391,7 +2538,7 @@ describe("runGmToolLoop", () => {
     ]);
   });
 
-  it("rejects parsed successful side-effecting SDK steps that never executed inside the mutation boundary", async () => {
+  it("rejects parsed successful authority-bearing SDK steps that never executed inside the mutation boundary", async () => {
     const parsedInput = { entityName: "Gate Guard", entityType: "npc", tag: "parsed-only" };
     generateTextMock().mockResolvedValueOnce({
       text: "",
@@ -2426,7 +2573,7 @@ describe("runGmToolLoop", () => {
         turnIntent: "Apply a concrete state mutation.",
         runtimeRequirement: { kind: "state_mutation", effectKind: "entity_tag" },
       },
-    })).rejects.toThrow("parsed successful side-effecting result");
+    })).rejects.toThrow("parsed successful authority-bearing result");
 
     expect(addTagExecuteMock).not.toHaveBeenCalled();
     expect(sqliteExecMock).not.toHaveBeenCalled();
@@ -2622,7 +2769,7 @@ describe("runGmToolLoop", () => {
           topicKind: "procedure",
         },
       },
-    })).rejects.toThrow("parsed successful side-effecting result");
+    })).rejects.toThrow("parsed successful authority-bearing result");
 
     expect(retractActorKnowledgeRecordMock).toHaveBeenCalledWith({
       campaignId: "campaign-1",

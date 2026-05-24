@@ -23,6 +23,7 @@ The current branch has important hardening slices landed and verified:
 - clock ledger and no-silent-minute behavior;
 - public DTO handles on the main `/world`, `/inventory`, location-entities,
   quick-action, lookup, and primary SSE path;
+- receipt-bound quick-action capability creation and public SSE projection;
 - store manifest coverage;
 - vector row-count/hash evidence for checkpoint bundles;
 - manifest-owned clean-start clone service;
@@ -36,11 +37,12 @@ semantics, public projection guard strength, frontend raw-id fallback, and
 pending narration recovery projection. The actor/tool ownership P0 has since
 been implemented locally. The restore/vector/recovery P0 queue has also now
 been implemented locally with targeted contract tests. The public projection
-guard, frontend raw-id fallback, and pending-narration public recovery DTO P1s
-have also been implemented locally with targeted backend/frontend tests and
-frontend/backend typechecks, but the branch remains NO-GO for long-play
-acceptance until the remaining P1 queue closes, full verification, GitNexus,
-Oracle bundled review, Browser evidence, and human-style play/soak evidence.
+guard, frontend raw-id fallback, pending-narration public recovery DTO P1, and
+quick-action accepted-receipt cleanup have also been implemented locally with
+targeted backend/frontend tests and frontend/backend typechecks, but the branch
+remains NO-GO for long-play acceptance until the remaining P1 queue closes,
+full verification, GitNexus, Oracle bundled review, Browser evidence, and
+human-style play/soak evidence.
 
 No long human-style 60-turn, cloned-world, or 600-turn soak acceptance should
 resume until the P1 queue below is executable, tested, bundled, and Oracle
@@ -55,7 +57,7 @@ reviewed on a frozen current tree.
 | GM Read | typed GM Read result | `runGmRead` and validator | prompt context, support forecasts | interpretation, path, runtime requirement, target/action refs by alias | schema, alias resolution, movement binding, speaker binding, durability checks | diagnostic-only receipt; no mutation; route/runtime requirement fixtures |
 | GM Tool Loop | descriptor-derived active tool set and accepted tool results | `runGmToolLoop` | observations, helper results, repair prompts | tool name and args as proposals | active tool allowlist, runtime requirement, ref/capability resolution, write-scope guard | accepted terminal receipts close requirement; rejected/helper results remain support-only |
 | Executor | SQLite authoritative tables and authority traces | runtime tool executor per state lane | same-turn observations | validated tool args only | input schemas, base world version, fences, allowed/blocked write scopes, transactions/savepoints | authority trace, state delta refs, durable event ids, rollback/no-unaccepted-side-effect tests |
-| Quick-action production | `quick_action_offers` table | quick-action offer service | label/action prose | label/prose suggestions only | source digest, world version, expiry, consumed marker, campaign/player binding | `qac_*` handles; stale/forged/replayed tests; **P1: accepted-receipt boundary for offer creation still needs proof** |
+| Quick-action production | `quick_action_offers` table | quick-action offer service | label/action prose | label/prose suggestions only | source digest, world version, expiry, consumed marker, campaign/player binding, accepted-receipt boundary | `qac_*` handles; stale/forged/replayed tests; GM-loop rollback tests; SSE rollback test |
 | Receipts | authority traces, accepted result refs, settled packet inputs | executor and turn processor | tool observations | none after acceptance | receipt role classification, state-owner matrix, write-scope ledger | replay/rollback fact source; receipt mismatch tests |
 | Actor runtime | key actor process state, actor frame, actor schedule decision | actor scheduler and actor tool execution | actor knowledge retrieval, private memory | actor decision packet requested tools | actor frame binding, base world version, positive allowed scopes, blocked scopes | actor action results and authority traces; positive scope fence tests |
 | Due-world runtime | actor processes, world threads, proposal queue | due-world resolver/proposal executor | forecast/world-brain/guardrails | proposals, deterministic plan payloads | due time, scope conflicts, proposal lifecycle, support-only filtering | deferred proposal rows, skipped/executed traces; **P1: deterministic plan emitted refs need allowed-scope coverage** |
@@ -75,7 +77,7 @@ reviewed on a frozen current tree.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Campaign identity/config | campaign directory, `config.json`, `campaigns` row | campaign manager and clean clone service | worldgen drafts before completion | premise/seeds during generation only | safe id, config parser, generation-complete gate | public campaign metadata | load/migrate/clone/delete tests; P1 full source-id residue fixture needed |
 | Player action envelope | validated `/chat/action` body | chat route | `intent`/`method` compatibility mirrors | player prose | schema, campaign, lock, capability/version checks | turn saga row, sanitized history | stale/forged handle tests; legacy mirrors must never override |
-| Quick-action offer | `quick_action_offers` table | quick-action service | UI chips and labels | label/action prose | offer id/action id, source digest, expiry, consumed, base world version | `qac_*` handles | stale/consumed/expired tests; P1 non-receipted creation rollback test needed |
+| Quick-action offer | `quick_action_offers` table | quick-action service | UI chips and labels | label/action prose | offer id/action id, source digest, expiry, consumed, base world version, accepted receipt adjacency | `qac_*` handles | stale/consumed/expired tests; non-receipted GM-loop rollback and route SSE rollback tests |
 | Public DTO handles | projector output and resolver | public DTO handle module | UI labels | none | deterministic handle issuer, resolver, public guard | `pdto_*` handles | route tests; P1 raw legacy shape rejection needed |
 | Scene frame aliases | `SceneFrame`, alias map, backend-only ref set | scene frame builder/alias issuer | visible labels and summaries | none | reserved namespaces, backend ref safety, hidden/private term scan | model-facing prompt packet | label collision/raw id tests |
 | GM Read result | accepted typed decision | GM Read validator | repair diagnostics | path/runtime requirement/action interpretation | Zod schema, semantic validators, alias-only refs | diagnostic receipt only | unsupported/composite/ref tests |
@@ -139,6 +141,18 @@ and human-style long-play evidence remain required.
    - Route tests cover coarse `recoveryState`, opaque `resumeToken`, and
      absence of saga status, saga id, and turn id in public JSON/SSE.
 
+4. Quick-action capability creation is receipt-bound.
+   - `offer_quick_actions` is treated as public-handle authority for GM-loop
+     savepoint tracking, while remaining support/projection authority rather
+     than a terminal scene receipt.
+   - Public-handle authority tools may execute beside a typed receipt, but the
+     GM loop rejects and rolls back successful quick-action rows unless some
+     accepted turn receipt exists.
+   - Route SSE buffers `quick_actions` until the `done` boundary can be built;
+     rollback/error paths drop the buffered capability event.
+   - Targeted GM-loop and chat-route tests cover solo quick-action rollback,
+     receipt-adjacent acceptance, and no quick-action SSE after route rollback.
+
 ## Current P1 Queue
 
 1. Adjacent public campaign APIs must be classified or wrapped.
@@ -152,23 +166,17 @@ and human-style long-play evidence remain required.
    - Required tests: travel/record-event active plans missing destination,
      event, or location scopes fail before DB updates.
 
-3. `offer_quick_actions` needs accepted-receipt boundary proof.
-   - It is durable public-handle authority, but not treated like a mutation in
-     all GM loop boundary checks.
-   - Required tests: if the turn does not reach accepted receipt closure, no
-     quick-action offer row or SSE/projection survives.
-
-4. Clean-start clone must become fully manifest-owned.
+3. Clean-start clone must become fully manifest-owned.
    - SQLite uses the manifest plan; non-SQL policies are still partly
      hard-coded and no durable clone manifest is written to the target.
    - Required tests: non-SQL manifest policy mutation fails closed or is
      executed by the plan; target contains clone manifest artifact.
 
-5. Replay-preserving clone/replay must be executable rejection.
+4. Replay-preserving clone/replay must be executable rejection.
    - Manifest has replay policy, but there is no mode that fails closed when a
      caller asks for replay-preserving clone semantics.
 
-6. Clone test coverage must use a representative migrated source fixture.
+5. Clone test coverage must use a representative migrated source fixture.
    - Existing tests prove narrow happy paths. Need source-id residue across all
      rewrite/purge tables and nested JSON/text payloads.
 
@@ -224,7 +232,7 @@ Unverified Assumptions:
 
 ### B. Refs, Aliases, Capabilities
 
-Status: **P1 open**
+Status: **Quick-action receipt P1 closed locally**
 
 Decision in force: model/player-facing refs must be issued aliases,
 capabilities, or public DTO handles. Raw DB ids are not contracts.
@@ -271,12 +279,16 @@ References Used:
 - `backend/src/engine/tool-executor.ts`
 - `backend/src/engine/runtime-tool-descriptors.ts`
 - `backend/src/engine/turn-processor.ts`
+- `backend/src/engine/__tests__/gm-tool-loop.test.ts`
+- `backend/src/routes/chat.ts`
+- `backend/src/routes/__tests__/chat.test.ts`
 - Meitner audit, 2026-05-24
 
 Unverified Assumptions:
 
-- `offer_quick_actions` can be moved under accepted-receipt cleanup without
-  making normal successful turns lose useful action chips.
+- Route buffering preserves normal successful-turn action chips in live
+  Browser play; targeted tests prove the protocol boundary, but playfeel still
+  needs Browser and long-run evidence.
 
 ### D. Actor, Due-World, Time
 
@@ -409,7 +421,8 @@ Unverified Assumptions:
 This list is the closure guard before any future "architecture GO" claim:
 
 - [x] UI action intake has an owner and does not trust prose labels.
-- [x] Quick actions are durable capabilities, but receipt-bound cleanup is P1.
+- [x] Quick actions are durable capabilities, and receipt-bound GM-loop/SSE
+  cleanup is covered by targeted tests.
 - [x] GM Read is read/classification only.
 - [x] GM Tool Loop is proposal-only until executor acceptance.
 - [x] Tool executor owns mutation and receipt authority.
@@ -440,9 +453,8 @@ This list is the closure guard before any future "architecture GO" claim:
 
 ## Next Implementation Order
 
-1. Quick-action offer accepted-receipt cleanup.
-2. Due-world deterministic emitted-ref coverage.
-3. Adjacent public campaign API classification/handle wrapping.
-4. Fully manifest-owned clean-start clone artifact and replay rejection.
-5. Oracle bundled full architecture GO, then Browser gameplay workability,
+1. Due-world deterministic emitted-ref coverage.
+2. Adjacent public campaign API classification/handle wrapping.
+3. Fully manifest-owned clean-start clone artifact and replay rejection.
+4. Oracle bundled full architecture GO, then Browser gameplay workability,
     fresh/cloned human-style 60-turn campaigns, and longer soak/replay.

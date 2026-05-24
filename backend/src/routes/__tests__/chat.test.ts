@@ -1385,6 +1385,55 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(body).not.toContain("tool-result-unknown");
   });
 
+  it("does not flush quick-action SSE when the turn rolls back before done", async () => {
+    setupStoryteller();
+    setupDbMock();
+    const snapshot = { bundleId: "pre-quick-action-failure" } as any;
+
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
+      id: campaignId,
+      name: `Campaign ${campaignId}`,
+      createdAt: "2026-01-01",
+    }) as any);
+    mockedCaptureSnapshot.mockReturnValue(snapshot);
+    mockedProcessTurn.mockImplementation(() =>
+      (async function* () {
+        yield {
+          type: "quick_actions",
+          data: {
+            actions: [
+              {
+                label: "Ask",
+                action: "Ask what changed.",
+                handle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              },
+            ],
+          },
+        } as any;
+        throw new Error("later receipt boundary failed");
+      })(),
+    );
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Ask for options",
+        intent: "Ask for options",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("event: error");
+    expect(body).not.toContain("event: quick_actions");
+    expect(body).not.toContain("qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    expect(mockedRestoreSnapshot).toHaveBeenCalledWith(CAMPAIGN_ID, snapshot);
+  });
+
   it("resolves selected quick-action handles before starting the turn processor", async () => {
     setupStoryteller();
     setupDbMock();
