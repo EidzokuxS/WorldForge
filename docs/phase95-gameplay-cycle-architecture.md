@@ -25,6 +25,23 @@ Gameplay control-plane bundle review on 2026-05-24:
   commits, but do not resume fresh/cloned 60-turn or longer acceptance
   playtests until these blockers are executable, tested, and reviewed.
 
+Post-write-scope wide bundle review on 2026-05-24:
+
+- Oracle session: `phase95-wide-p0-bundle-valid`.
+- Delivery: one zip bundle with 17 files; dry-run confirmed roughly `130k`
+  tokens and the run reported `files=17`.
+- Invalidated evidence: `phase95-wide-p0-bundle` uploaded an empty zip because
+  the CLI prompt/file argument order was wrong; do not use that response as
+  architecture evidence.
+- Verdict: NO-GO for long-play Phase 95 acceptance; CONDITIONAL-GO only for
+  the next hardening slices.
+- P0 queue confirmed from the current `HEAD`: public projection/API/SSE/
+  frontend boundary; manifest-owned clean-start clone; vector-safe rollback;
+  public DTO handles/shared ref resolver.
+- Recommended first slice: close the public projection boundary with typed DTO
+  factories and frontend public handles, then implement manifest-driven
+  clean-start clone and vector-safe restore.
+
 Implemented hardening slices after the reset:
 
 - Durable quick-action capabilities: quick-action labels/prose remain
@@ -35,6 +52,34 @@ Implemented hardening slices after the reset:
   SQLite gameplay table plus JSON, vector, projection, artifact, and evidence
   stores, so missing store policy blocks restore evidence instead of silently
   trusting helper-copy behavior.
+- Turn clock ledger and authority stages: gameplay world time is now recorded
+  as ledgered accepted authority, while turn-stage evidence is recorded through
+  saga events. UI turn ordering remains separate from world minutes.
+- Fact-ref live narration: final narration uses backend-issued fact/evidence
+  refs instead of a live authority-bearing free-text lane.
+- Live turn authority stages: the current turn spine records the reviewed
+  authority lifecycle through the route, turn processor, executor, narrator
+  packet, final narration, and public projection checkpoints.
+- Same-turn write-scope ledger: accepted player-turn writes reserve scopes for
+  actor/due-world work later in the same turn.
+- Pre-commit blocked-scope guard: the executor now rejects blocked write-scope
+  conflicts before mutation where possible and again before authority commit
+  from exact backend-visible state-delta refs.
+
+Current post-slice status on `develop`:
+
+- Last verified commit: `197ba289 Guard same-turn write scopes before tool
+  commits`.
+- Backend evidence: `npm --prefix backend run typecheck` passed; full backend
+  `vitest` passed `219` files and `2938` tests, with `1` skipped file and
+  `30` todo tests.
+- GitNexus evidence: staged `detect_changes` reported `critical` because the
+  slice intentionally touched `executeToolCall`, `executeValidatedTool`,
+  `runGmToolLoop`, actor/due-world proposal paths, and turn processing. The
+  high-risk symbols were inspected before commit, and the index was refreshed
+  with `npx gitnexus analyze`.
+- Long-play status: still NO-GO. These slices close important control-plane
+  blockers, but they are not full Phase 95 acceptance evidence.
 
 ## End State
 
@@ -87,14 +132,24 @@ a brittle test survival mode.
 
 P0 blockers before broad implementation:
 
-- Public projection is not yet a closed authority boundary. Route-local omit
-  filters must become typed public DTO constructors.
-- Clone/replay/rollback/vector lifecycle is not contract-closed. A store
-  manifest must exist before new state surfaces are added.
-- Clock authority is still split. A turn clock ledger must become the sole
-  gameplay time writer; compatibility ticks can only be derived/cache/debug.
-- Live final narration must not keep an authority-bearing `text` lane.
-- A shared issued-ref/capability resolver is mandatory, not optional.
+- Public projection is not yet proven as a closed authority boundary. Route
+  filters and public projection assertions exist, but `/world`, entity routes,
+  history, SSE, quick actions, and frontend state still need a current
+  end-to-end DTO audit before long playtests.
+- Clone/replay/rollback/vector lifecycle is only partially contract-closed.
+  Store-manifest rollback bundles exist, but clean-start clone must consume the
+  manifest rather than legacy helper-copy semantics, and vector restore/rebuild
+  policy still needs current cluster GO.
+- Clock authority has an executable ledger and no-silent-minute tests, but the
+  next review must confirm that all actor/due-world wakeups, resume, clone, and
+  projection consumers now read the ledgered authority meaning.
+- Live final narration is fact-ref based in the current reset/rebuild branch;
+  next review must confirm no legacy `text` authority path remains reachable in
+  normal gameplay.
+- A shared issued-ref/capability resolver remains the long-term direction. The
+  current branch has backend-owned capability rows, scene aliases, narration
+  fact refs, and write scopes, but the unification is not complete enough to
+  call the ref/capability layer mature.
 
 P1 blockers to close in the first hardening wave:
 
@@ -268,6 +323,15 @@ Current implementation status:
 
 Clean-start clone is the Phase 95 mode. Replay-preserving clone stays rejected
 until it has explicit id rewrite and saga/vector/packet replay semantics.
+
+Post-write-scope bundle focus:
+
+- Verify public projection and clone/replay/vector clusters against the current
+  `HEAD`, not the pre-reset safety branch.
+- Treat the previous Oracle/agent answers as risk inventory. Any GO for
+  long-run campaigns must be rerun on a frozen current-state bundle.
+- Use bundle attachments or compact single-file packets for Oracle and agents;
+  do not paste large inline file sets into the browser composer.
 
 ## Cluster Plan
 
@@ -457,8 +521,12 @@ Unverified Assumptions:
      gate.
 
 2. Public intake/projection spine
-   - Implement durable quick-action handles and public DTO allowlists.
-   - Verify with targeted backend/frontend tests.
+   - Durable quick-action handles are implemented.
+   - Next: prove every public DTO/SSE/API/frontend surface is allowlisted and
+     does not expose raw backend ids, authority refs, saga/tool internals, or
+     support-only private terms.
+   - Verify with targeted backend/frontend tests plus in-app Browser evidence
+     when UI behavior changes.
    - Run GitNexus impact before symbol edits and detect_changes before commit.
 
 3. Unified issued refs/capabilities
