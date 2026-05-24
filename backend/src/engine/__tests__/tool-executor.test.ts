@@ -3036,6 +3036,7 @@ describe("executeToolCall", () => {
         areaRef: "current_location",
         poiType: "tea_stall",
         name: "Lantern Tea Stall",
+        description: "A public tea stall with a chipped brass kettle and two stools under the awning.",
         reason: "The public market supports ordinary tea service.",
       }, TICK, undefined, createPlayerTurnContext({
         currentLocationId: "loc-market",
@@ -3050,6 +3051,7 @@ describe("executeToolCall", () => {
         kind: "minor_poi",
         name: "Lantern Tea Stall",
         poiType: "tea_stall",
+        description: "A public tea stall with a chipped brass kettle and two stools under the awning.",
         impact: "low",
         delegateTool: "reveal_location",
       });

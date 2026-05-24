@@ -1589,6 +1589,108 @@ describe("narrator packet settlement boundary", () => {
     expect(formatNarratorPacketForPrompt(packet)).not.toContain("15 minutes takes 15 minutes");
   });
 
+  it("formats elapsed action clauses as playable beats instead of receipt-style duration tails", () => {
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    const advanceActionId = "action-copy-ridge-marker";
+    canonicalTurnPacket.effects = [
+      {
+        id: "effect-copy-ridge-marker",
+        actionId: advanceActionId,
+        actorId: playerId,
+        toolName: "advance_time",
+        summary: "5 minutes pass.",
+        perceivableByPlayer: true,
+        toolResult: {
+          success: true,
+          result: {
+            minutes: 5,
+            reason:
+              "Fen reads the Ridge Marker aloud while the player copies the exact wording into their damaged field ledger; a few minutes of careful documentation work at the gatehouse threshold before stepping out onto the northern path.",
+            clockAdvanced: true,
+          },
+        },
+      },
+    ];
+    canonicalTurnPacket.actionResults = [];
+    canonicalTurnPacket.narratorFacts.actionIds = [advanceActionId];
+    canonicalTurnPacket.narratorFacts.toolResultRefs = [
+      { actionId: advanceActionId, toolName: "advance_time" },
+    ];
+
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket,
+    });
+    const advanceEvidence = packet.evidenceLedger?.find((entry) =>
+      entry.id === "perceivable_effect:effect-copy-ridge-marker");
+
+    expect(advanceEvidence?.precisionFacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        value:
+          "5 minutes pass as Fen reads the Ridge Marker aloud while the player copies the exact wording into their damaged field ledger.",
+        claimKind: "playable_beat",
+      }),
+    ]));
+    expect(formatNarratorPacketForPrompt(packet)).not.toContain("takes 5 minutes");
+    expect(formatNarratorPacketForPrompt(packet)).not.toContain("a few minutes of careful documentation work");
+  });
+
+  it("exposes public minor-POI descriptions as narratable backend facts", () => {
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    const poiActionId = "action-create-ridge-marker";
+    canonicalTurnPacket.effects = [
+      {
+        id: "effect-create-ridge-marker",
+        actionId: poiActionId,
+        actorId: playerId,
+        toolName: "create_minor_poi",
+        summary: "Ridge Marker becomes available near Disaster Route Gatehouse.",
+        perceivableByPlayer: true,
+        toolResult: {
+          success: true,
+          result: {
+            id: "loc-ridge-marker",
+            name: "Ridge Marker",
+            connectedTo: "Disaster Route Gatehouse",
+            kind: "minor_poi",
+            poiType: "notice_board",
+            visibility: "public",
+            description:
+              "Inscription at the Ventwatch Ridge boundary marker: 'NORTHERN LAVA-TUBE - VENTWATCH BOUNDARY - CLEARANCE ZONE 7-N.'",
+          },
+        },
+      },
+    ];
+    canonicalTurnPacket.actionResults = [];
+    canonicalTurnPacket.narratorFacts.actionIds = [poiActionId];
+    canonicalTurnPacket.narratorFacts.toolResultRefs = [
+      { actionId: poiActionId, toolName: "create_minor_poi" },
+    ];
+
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket,
+    });
+    const poiEvidence = packet.evidenceLedger?.find((entry) =>
+      entry.id === "perceivable_effect:effect-create-ridge-marker");
+
+    expect(poiEvidence).toEqual(expect.objectContaining({
+      summaryBackendFact: false,
+      precisionFacts: expect.arrayContaining([
+        expect.objectContaining({
+          value:
+            "Inscription at the Ventwatch Ridge boundary marker: 'NORTHERN LAVA-TUBE - VENTWATCH BOUNDARY - CLEARANCE ZONE 7-N.'",
+          sourcePath: "toolResult.result.description",
+          claimKind: "playable_beat",
+        }),
+        expect.objectContaining({
+          value: "Ridge Marker is available near Disaster Route Gatehouse.",
+          claimKind: "route_status",
+        }),
+      ]),
+    }));
+  });
+
   it("does not let observation-only scene-extra reuse authorize hidden labels in later effects", () => {
     const frame = createFrame();
     frame.roster.active = frame.roster.active.filter((actor) => actor.id === playerId);

@@ -2487,6 +2487,7 @@ function handleCreateMinorPoi(
       areaRef: prepared.value.areaRef,
       visibility: prepared.value.visibility,
       impact: "low",
+      description: prepared.value.description,
       reason: prepared.value.reason,
       delegateTool: "reveal_location",
     },

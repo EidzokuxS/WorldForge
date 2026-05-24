@@ -635,6 +635,10 @@ function collectStructuralEffectNarratableFacts(
     case "create_minor_poi": {
       const name = readRecordString(result, "name");
       const connectedTo = readRecordString(result, "connectedTo");
+      const description = readRecordString(result, "description");
+      if (description) {
+        addSummaryFact(ensureSentencePunctuation(description), "toolResult.result.description", "playable_beat");
+      }
       if (name && connectedTo) {
         addSummaryFact(`${name} is available near ${connectedTo}.`, "toolResult.result.name", "route_status");
       } else if (name) {
@@ -942,11 +946,34 @@ function reasonAlreadyNamesDuration(reason: string, minutes: number): boolean {
     || normalizedReason.includes(normalizeDurationComparisonText(formatElapsedWorldMinutes(minutes)));
 }
 
+const ELAPSED_BEAT_VERB_PATTERN =
+  /\b(?:asks|answers|checks|compares|copies|examines|follows|guides|listens|marks|moves|reads|records|rests|searches|speaks|steps|studies|travels|waits|walks|watches|writes)\b/iu;
+
+function selectElapsedBeatClause(reason: string): string {
+  const clauses = reason.split(/\s*;\s*/u)
+    .map((clause) => trimTrailingSentencePunctuation(clause))
+    .filter((clause) => clause.length > 0);
+  return clauses[0] ?? reason;
+}
+
+function shouldRenderAsElapsedBeat(reason: string): boolean {
+  const clause = selectElapsedBeatClause(reason);
+  return /\bwhile\b/iu.test(clause) || ELAPSED_BEAT_VERB_PATTERN.test(clause.split(/\s+/u).slice(0, 6).join(" "));
+}
+
 function formatAdvanceTimeReason(reason: string, minutes: number): string {
   if (reasonAlreadyNamesDuration(reason, minutes)) {
     return `${reason}.`;
   }
+  if (shouldRenderAsElapsedBeat(reason)) {
+    return `${formatElapsedWorldMinutes(minutes)} as ${selectElapsedBeatClause(reason)}.`;
+  }
   return `${reason} takes ${formatWorldDuration(minutes)}.`;
+}
+
+function ensureSentencePunctuation(value: string): string {
+  const trimmed = value.trim();
+  return /[.!?][)"'\]]*$/u.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
 function trimTrailingSentencePunctuation(value: string): string {
