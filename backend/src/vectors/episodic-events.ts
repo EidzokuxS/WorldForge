@@ -1,12 +1,12 @@
 import crypto from "node:crypto";
-import { and, eq, or } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { Field, FixedSizeList, Float32, Int32, List, Schema, Utf8 } from "apache-arrow";
 import { getDb } from "../db/index.js";
-import { locationRecentEvents, turnDurableEvents } from "../db/schema.js";
+import { locationRecentEvents } from "../db/schema.js";
 import { getVectorDb } from "./connection.js";
 import { embedTexts } from "./embeddings.js";
 import type { ResolvedRole } from "../ai/resolve-role-model.js";
-import { createLogger, getTurnContext } from "../lib/index.js";
+import { createLogger } from "../lib/index.js";
 import {
   recordLocationRecentEvent,
   type LocationRecentEventSummary,
@@ -65,10 +65,7 @@ export interface PendingCommittedEvent {
 }
 
 const TABLE_NAME = "episodic_events";
-const retractedEpisodicEventIds = new Set<string>();
 const pendingCommittedEvents = new Map<string, PendingCommittedEvent[]>();
-
-type TurnDurableEventStatus = typeof turnDurableEvents.$inferSelect.status;
 
 type VectorDb = ReturnType<typeof getVectorDb>;
 type EpisodicEventsTable = Awaited<ReturnType<VectorDb["openTable"]>>;
@@ -129,7 +126,7 @@ function normalizeStoredEventRow(
     participants: normalizeStringArray(row.participants),
     importance: Number(row.importance ?? 0),
     type: String(row.type ?? "event"),
-    visibility: String(row.visibility ?? "report_only"),
+    visibility: String(row.visibility ?? "player_perceivable"),
     surfaceRoute: String(row.surfaceRoute ?? ""),
     knowledgeRoute: String(row.knowledgeRoute ?? ""),
     hiddenCauseTerms: normalizeStringArray(row.hiddenCauseTerms),
@@ -344,155 +341,6 @@ export function drainPendingCommittedEvents(
   return drained.map(clonePendingCommittedEvent);
 }
 
-function recordProducedTurnDurableEvent(input: {
-  campaignId: string;
-  eventId: string;
-  tick: number;
-}): void {
-  const turnContext = getTurnContext();
-  const timestamp = Date.now();
-  const ownsTurn = Boolean(turnContext && turnContext.campaignId === input.campaignId);
-  getDb()
-    .insert(turnDurableEvents)
-    .values({
-      eventId: input.eventId,
-      campaignId: input.campaignId,
-      turnId: ownsTurn ? turnContext!.turnId : `system:${input.tick}`,
-      status: ownsTurn ? "produced" : "accepted",
-      tick: input.tick,
-      acceptedAt: ownsTurn ? null : timestamp,
-      projectedAt: null,
-      retractedAt: null,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    })
-    .onConflictDoNothing()
-    .run();
-}
-
-function updateTurnDurableEventStatus(input: {
-  campaignId: string;
-  eventId: string;
-  status: TurnDurableEventStatus;
-}): void {
-  const timestamp = Date.now();
-  const statusTimestamps = input.status === "accepted"
-    ? { acceptedAt: timestamp }
-    : input.status === "projected"
-      ? { projectedAt: timestamp }
-      : input.status === "retracted"
-        ? { retractedAt: timestamp }
-        : {};
-  const transitionPredicate = input.status === "accepted"
-    ? or(eq(turnDurableEvents.status, "produced"), eq(turnDurableEvents.status, "accepted"))
-    : input.status === "projected"
-      ? or(eq(turnDurableEvents.status, "accepted"), eq(turnDurableEvents.status, "projected"))
-      : undefined;
-  getDb()
-    .update(turnDurableEvents)
-    .set({
-      status: input.status,
-      ...statusTimestamps,
-      updatedAt: timestamp,
-    })
-    .where(and(
-      eq(turnDurableEvents.campaignId, input.campaignId),
-      eq(turnDurableEvents.eventId, input.eventId),
-      ...(transitionPredicate ? [transitionPredicate] : []),
-    ))
-    .run();
-}
-
-function readTurnDurableEventStatus(eventId: string): TurnDurableEventStatus | null {
-  try {
-    const row = getDb()
-      .select({
-        status: turnDurableEvents.status,
-      })
-      .from(turnDurableEvents)
-      .where(eq(turnDurableEvents.eventId, eventId))
-      .get();
-    return row?.status ?? null;
-  } catch {
-    return null;
-  }
-}
-
-export function isDurableEventProjectionAllowed(eventId: string): boolean {
-  if (retractedEpisodicEventIds.has(eventId)) {
-    return false;
-  }
-  const status = readTurnDurableEventStatus(eventId);
-  return status === "accepted" || status === "projected";
-}
-
-function writeRetractionTombstone(input: {
-  campaignId: string;
-  eventId: string;
-  turnId?: string | null;
-  tick?: number | null;
-}): void {
-  const timestamp = Date.now();
-  getDb()
-    .insert(turnDurableEvents)
-    .values({
-      eventId: input.eventId,
-      campaignId: input.campaignId,
-      turnId: input.turnId ?? "rollback:tombstone",
-      status: "retracted",
-      tick: input.tick ?? 0,
-      acceptedAt: null,
-      projectedAt: null,
-      retractedAt: timestamp,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    })
-    .onConflictDoUpdate({
-      target: turnDurableEvents.eventId,
-      set: {
-        status: "retracted",
-        retractedAt: timestamp,
-        updatedAt: timestamp,
-      },
-    })
-    .run();
-}
-
-export function acceptDurableEventsByIds(
-  campaignId: string,
-  eventIds: readonly string[],
-): void {
-  for (const eventId of new Set(eventIds.map((id) => id.trim()).filter(Boolean))) {
-    updateTurnDurableEventStatus({
-      campaignId,
-      eventId,
-      status: "accepted",
-    });
-  }
-}
-
-export function readTurnDurableEventIds(
-  campaignId: string,
-  turnId: string,
-): string[] {
-  const rows = getDb()
-    .select({
-      eventId: turnDurableEvents.eventId,
-      status: turnDurableEvents.status,
-    })
-    .from(turnDurableEvents)
-    .where(and(
-      eq(turnDurableEvents.campaignId, campaignId),
-      eq(turnDurableEvents.turnId, turnId),
-    ))
-    .all();
-
-  return rows
-    .filter((row) => row.status !== "retracted")
-    .map((row) => row.eventId)
-    .filter((eventId) => eventId.trim().length > 0);
-}
-
 export function drainPendingCommittedEventsByIds(
   campaignId: string,
   eventIds: readonly string[],
@@ -538,66 +386,41 @@ function escapeTableString(value: string): string {
 export async function retractStoredEpisodicEvent(input: {
   campaignId: string;
   eventId: string;
-  turnId?: string | null;
-  tick?: number | null;
 }): Promise<{
   vectorDeleted: boolean;
   pendingEvent: PendingCommittedEvent | null;
 }> {
-  retractedEpisodicEventIds.add(input.eventId);
-  const errors: unknown[] = [];
-  try {
-    writeRetractionTombstone(input);
-  } catch (error) {
-    errors.push(error);
-    // Legacy databases may not have the ledger table yet; in-process/vector cleanup still runs below.
-  }
   const pendingEvent = removePendingCommittedEvent(input.campaignId, input.eventId);
   let vectorDeleted = false;
 
-  try {
-    const vectorDb = getVectorDb();
-    const tableNames = await vectorDb.tableNames();
-    if (tableNames.includes(TABLE_NAME)) {
-      const table = await vectorDb.openTable(TABLE_NAME);
-      const escapedEventId = escapeTableString(input.eventId);
-      const existingRows = await table
-        .query()
-        .where(`id = '${escapedEventId}'`)
-        .toArray();
-      if (existingRows.length > 0) {
-        await table.delete(`id = '${escapedEventId}'`);
-        vectorDeleted = true;
-        log.event("vector.write", {
-          store: "episodic_events",
-          op: "delete",
-          count: 1,
-          rowId: input.eventId,
-        });
-      }
+  const vectorDb = getVectorDb();
+  const tableNames = await vectorDb.tableNames();
+  if (tableNames.includes(TABLE_NAME)) {
+    const table = await vectorDb.openTable(TABLE_NAME);
+    const escapedEventId = escapeTableString(input.eventId);
+    const existingRows = await table
+      .query()
+      .where(`id = '${escapedEventId}'`)
+      .toArray();
+    if (existingRows.length > 0) {
+      await table.delete(`id = '${escapedEventId}'`);
+      vectorDeleted = true;
+      log.event("vector.write", {
+        store: "episodic_events",
+        op: "delete",
+        count: 1,
+        rowId: input.eventId,
+      });
     }
-  } catch (error) {
-    errors.push(error);
   }
 
-  try {
-    getDb()
-      .delete(locationRecentEvents)
-      .where(and(
-        eq(locationRecentEvents.campaignId, input.campaignId),
-        eq(locationRecentEvents.sourceEventId, input.eventId),
-      ))
-      .run();
-  } catch (error) {
-    errors.push(error);
-  }
-
-  if (errors.length > 0) {
-    throw new AggregateError(
-      errors,
-      `Failed to retract all projections for episodic event ${input.eventId}.`,
-    );
-  }
+  getDb()
+    .delete(locationRecentEvents)
+    .where(and(
+      eq(locationRecentEvents.campaignId, input.campaignId),
+      eq(locationRecentEvents.sourceEventId, input.eventId),
+    ))
+    .run();
 
   return { vectorDeleted, pendingEvent };
 }
@@ -642,14 +465,8 @@ export async function storeEpisodicEvent(
   event: Omit<EpisodicEvent, "id" | "campaignId" | "vector">
 ): Promise<string> {
   const id = crypto.randomUUID();
-  retractedEpisodicEventIds.delete(id);
-  recordProducedTurnDurableEvent({
-    campaignId,
-    eventId: id,
-    tick: event.tick,
-  });
+  const visibility = event.visibility ?? "player_perceivable";
   const surfaceRoute = event.surfaceRoute ?? null;
-  const visibility = normalizeEpisodicVisibility(event.visibility, surfaceRoute);
   const knowledgeRoute = event.knowledgeRoute ?? null;
   const hiddenCauseTerms = [...(event.hiddenCauseTerms ?? [])];
 
@@ -739,15 +556,7 @@ export async function embedAndUpdateEvent(
   text: string,
   provider: ResolvedRole["provider"],
 ): Promise<void> {
-  if (!isDurableEventProjectionAllowed(eventId)) {
-    log.info(`Skipped embedding non-accepted episodic event ${eventId}`);
-    return;
-  }
   const vectors = await embedTexts([text], provider);
-  if (!isDurableEventProjectionAllowed(eventId)) {
-    log.info(`Skipped embedding non-accepted episodic event ${eventId}`);
-    return;
-  }
   const vector = vectors[0];
   if (!vector || vector.length === 0) {
     log.warn(`Empty embedding returned for event ${eventId}`);
@@ -764,10 +573,6 @@ export async function embedAndUpdateEvent(
     log.warn(`Event ${eventId} not found in table`);
     return;
   }
-  if (!isDurableEventProjectionAllowed(eventId)) {
-    log.info(`Skipped embedding non-accepted episodic event ${eventId}`);
-    return;
-  }
 
   await table.update({
     where: `id = '${eventId}'`,
@@ -779,23 +584,6 @@ export async function embedAndUpdateEvent(
     count: 1,
     rowId: eventId,
   });
-  const projectedStatus = readTurnDurableEventStatus(eventId);
-  if (projectedStatus === "accepted") {
-    const row = getDb()
-      .select({
-        campaignId: turnDurableEvents.campaignId,
-      })
-      .from(turnDurableEvents)
-      .where(eq(turnDurableEvents.eventId, eventId))
-      .get();
-    if (row) {
-      updateTurnDurableEventStatus({
-        campaignId: row.campaignId,
-        eventId,
-        status: "projected",
-      });
-    }
-  }
 
   log.info(`Embedded episodic event ${eventId} (dim=${vector.length})`);
 }
@@ -856,7 +644,7 @@ export async function searchEpisodicEvents(
       participants: normalizeStringArray(row.participants),
       importance,
       type: String(row.type ?? "event"),
-      visibility: normalizeEpisodicVisibility(row.visibility, normalizeNullableText(row.surfaceRoute)),
+      visibility: normalizeEpisodicVisibility(row.visibility),
       surfaceRoute: normalizeNullableText(row.surfaceRoute),
       knowledgeRoute: normalizeNullableText(row.knowledgeRoute),
       hiddenCauseTerms: normalizeStringArray(row.hiddenCauseTerms),
@@ -877,20 +665,13 @@ function normalizeNullableText(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function normalizeEpisodicVisibility(
-  value: unknown,
-  surfaceRoute?: string | null,
-): EpisodicEventVisibility {
-  const visibility = value === "hidden"
+function normalizeEpisodicVisibility(value: unknown): EpisodicEventVisibility {
+  return value === "hidden"
     || value === "local_signal"
     || value === "report_only"
     || value === "player_perceivable"
     ? value
-    : "report_only";
-  if (visibility === "player_perceivable" && !surfaceRoute?.trim()) {
-    return "report_only";
-  }
-  return visibility;
+    : "player_perceivable";
 }
 
 function episodicEventVisibleToAudience(

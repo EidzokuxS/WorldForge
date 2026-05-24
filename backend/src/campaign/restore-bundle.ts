@@ -87,11 +87,9 @@ export async function restoreCampaignBundle(
     fs.writeFileSync(campaignChatPath, "[]", "utf-8");
   }
 
-  if (options.includeVectors) {
+  if (options.includeVectors && fs.existsSync(vectorsPath)) {
     fs.rmSync(campaignVectorsPath, { recursive: true, force: true });
-    if (fs.existsSync(vectorsPath)) {
-      fs.cpSync(vectorsPath, campaignVectorsPath, { recursive: true });
-    }
+    fs.cpSync(vectorsPath, campaignVectorsPath, { recursive: true });
   }
 
   await loadCampaign(campaignId);
