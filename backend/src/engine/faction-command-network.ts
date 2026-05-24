@@ -486,12 +486,26 @@ export function listAvailableFactionReports(input: {
   limit?: number;
 }): FactionReportRecord[] {
   markDeliverableFactionReports({ campaignId: input.campaignId });
+  const commandNode = getDb()
+    .select()
+    .from(factionCommandNodes)
+    .where(
+      and(
+        eq(factionCommandNodes.campaignId, input.campaignId),
+        eq(factionCommandNodes.id, input.commandNodeId),
+      ),
+    )
+    .get();
+  if (!commandNode) {
+    return [];
+  }
   return getDb()
     .select()
     .from(factionReports)
     .where(
       and(
         eq(factionReports.campaignId, input.campaignId),
+        eq(factionReports.factionId, commandNode.factionId),
         eq(factionReports.commandNodeId, input.commandNodeId),
         eq(factionReports.status, "available"),
       ),
@@ -973,6 +987,7 @@ export function buildFactionCommandNodeFrame(input: {
     .where(
       and(
         eq(factionOperations.campaignId, input.campaignId),
+        eq(factionOperations.factionId, node.factionId),
         eq(factionOperations.commandNodeId, input.commandNodeId),
       ),
     )

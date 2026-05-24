@@ -110,6 +110,7 @@ function loadResources(input: {
 
 function loadRetryOperations(input: {
   campaignId: string;
+  factionId: string;
   commandNodeId: string;
 }): FactionCommandRetryOperation[] {
   return getDb()
@@ -118,6 +119,7 @@ function loadRetryOperations(input: {
     .where(
       and(
         eq(factionOperations.campaignId, input.campaignId),
+        eq(factionOperations.factionId, input.factionId),
         eq(factionOperations.commandNodeId, input.commandNodeId),
         eq(factionOperations.status, "blocked"),
       ),
@@ -183,6 +185,7 @@ export function scheduleFactionCommandNodes(
     const wakeSignals = wakeSignalsByNode.get(node.id) ?? [];
     const retryOperations = loadRetryOperations({
       campaignId: input.campaignId,
+      factionId: node.factionId,
       commandNodeId: node.id,
     });
     const reasons = [

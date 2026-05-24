@@ -8,6 +8,8 @@ import { runMigrations } from "../../db/migrate.js";
 import {
   campaigns,
   factionCommandNodes,
+  factionOperations,
+  factionReports,
   factions,
   locations,
   worldClocks,
@@ -213,5 +215,63 @@ describe("faction command scheduler", () => {
 
     expect(result.candidates.map((candidate) => candidate.commandNodeId)).toEqual([second.id]);
     expect(result.candidates.map((candidate) => candidate.commandNodeId)).not.toContain(first.id);
+  });
+
+  it("does not wake command nodes from faction-mismatched report or retry rows", () => {
+    seedFaction([]);
+    getDb().insert(factions).values({
+      id: "faction-rivals",
+      campaignId: CAMPAIGN_ID,
+      name: "Rival Wardens",
+      tags: "[]",
+      goals: "[]",
+      assets: "[]",
+    }).run();
+    const node = ensureFactionCommandNode({
+      campaignId: CAMPAIGN_ID,
+      factionId: FACTION_ID,
+      standingOrders: [],
+    });
+    const timestamp = Date.now();
+    getDb().insert(factionReports).values({
+      id: "mismatched-report",
+      campaignId: CAMPAIGN_ID,
+      factionId: "faction-rivals",
+      commandNodeId: node.id,
+      sourceActorId: null,
+      sourceLocationId: null,
+      route: "report_message",
+      status: "available",
+      summary: "A rival report should not wake this command node.",
+      sourceEventIds: "[]",
+      sourceKnowledgeIds: "[]",
+      hiddenCauseTerms: "[]",
+      baseWorldVersion: 0,
+      createdWorldTimeMinutes: 0,
+      deliverAtWorldTimeMinutes: 0,
+      deliveredWorldTimeMinutes: 0,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }).run();
+    getDb().insert(factionOperations).values({
+      id: "mismatched-blocked-operation",
+      campaignId: CAMPAIGN_ID,
+      factionId: "faction-rivals",
+      commandNodeId: node.id,
+      status: "blocked",
+      operationKind: "patrol_shift",
+      summary: "A rival retry should not wake this command node.",
+      requiredReportIds: "[]",
+      resourceCosts: JSON.stringify({ patrols: 1 }),
+      targetLocationId: null,
+      baseWorldVersion: 0,
+      committedWorldVersion: null,
+      authorityTraceId: null,
+      blockedReason: "insufficient_resource:patrols",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }).run();
+
+    expect(scheduleFactionCommandNodes({ campaignId: CAMPAIGN_ID }).candidates).toEqual([]);
   });
 });

@@ -3,7 +3,7 @@
 Date: 2026-05-24
 Branch: `develop`
 Reviewed implementation HEAD before this documentation slice:
-`c992a1aacaf4ae2c908fa973be46c9c5640f0ec7`
+`b95410819fca9cc00d92f1a4fa39ebf733254a35`
 Status: **architecture coverage ready for bundled Oracle review; gameplay
 acceptance still NO-GO**
 
@@ -29,7 +29,7 @@ play remains free without making gameplay truth unstable.
 - Read local code and docs for the current reset/rebuild branch, not the old
   safety branch as an authority.
 - Used GitNexus semantic queries after refreshing the index with embeddings at
-  `c992a1aa`.
+  `b9541081`.
 - Folded independent agent findings into this matrix: clone/replay residue and
   whole-architecture coverage.
 - Kept old Oracle/agent answers as risk inventory only; the next Oracle gate
@@ -56,6 +56,9 @@ References Used:
 - `backend/src/engine/actor-scheduler.ts`
 - `backend/src/engine/actor-tools.ts`
 - `backend/src/engine/actor-plan-executor.ts`
+- `backend/src/engine/faction-command-network.ts`
+- `backend/src/engine/faction-command-scheduler.ts`
+- `backend/src/engine/command-node-agent.ts`
 - `backend/src/engine/due-world-work.ts`
 - `backend/src/engine/world-brain.ts`
 - `backend/src/engine/world-forecast.ts`
@@ -197,7 +200,7 @@ architecture boundaries by accident.
 | Same-turn write scopes | turn ledger plus accepted refs | turn processor | diagnostics | conflict detection, positive/blocked scopes | blocks actor/due-world writes | actor/due-world scope tests |
 | Locations/routes/POIs | locations, edges, recent events | movement/reveal/POI owners | model target aliases | route existence, arrival binding, scope preflight | public place/route handles/facts | movement/reveal/clone/rollback tests |
 | Player/NPC actors | players, npcs, actor lifecycle | movement/condition/promote owners | dialogue/action claims | actor existence, visibility, frame binding | public actor handles/facts | actor promote and out-of-scope tests |
-| Factions/command nodes | factions, command nodes/resources/reports/ops/ledger | faction scheduler/tools | faction reports/proposals | campaign scope, due time, resource ledger invariants | faction public handles/reports | Phase 92 harness plus clone residue coverage; P2 row semantics audit |
+| Factions/command nodes | factions, command nodes/resources/reports/ops/ledger | faction scheduler/tools | faction reports/proposals | campaign scope, command-node/faction child-row ownership, due time, commit-time report/resource revalidation, resource ledger invariants | faction public handles/reports | Phase 92 harness, clone residue coverage, FK-valid mismatched-child regressions, and stale proposal row-semantics regression |
 | Relationships/dialogue | relationships, dialogue receipts | dialogue/relationship tools | dialogue summary payloads | speaker binding, relationship refs, private scan | public relationship/fact refs | dialogue/relationship tests |
 | Inventory/items/documents/tags | items and item state/tags | item tools/entity-tag service | item names, tag prose | holder refs, item existence, tag lane owner | item handles/facts | transfer/spawn/tag tests; entity-tag delegate parity tests |
 | World clock/time | `world_clocks`, `turn_clock_ledger` | living-world clock commit | proposed time deltas | accepted clock receipt, non-negative deltas | public world time | no-op/wait/travel/resume/restore tests |
@@ -260,8 +263,11 @@ architecture boundaries by accident.
 
 These items are intentionally not buried under "green tests":
 
-- P2: faction/command-node row semantics deserve a focused audit beyond clone
-  residue coverage.
+- Closed P2: faction/command-node row semantics audit now has executable
+  coverage beyond clone residue. FK-valid child rows with the wrong faction do
+  not wake a command node or enter its frame, and a stale proposal cannot
+  double-spend a consumed report, drain a resource twice, or create a second
+  authority trace.
 - P2: observability retention/redaction policy should be made explicit before
   remote/long-running trace publication.
 - P2: Phase 88 harness prose still says clone copies DBs even though code now

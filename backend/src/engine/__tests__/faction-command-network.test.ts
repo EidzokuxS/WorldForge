@@ -6,8 +6,11 @@ import { eq } from "drizzle-orm";
 import { closeDb, connectDb, getDb } from "../../db/index.js";
 import { runMigrations } from "../../db/migrate.js";
 import {
+  authorityTraces,
   actorKnowledgeRecords,
   campaigns,
+  factionCommandNodes,
+  factionOperations,
   factionReports,
   factionResourceLedger,
   factionResources,
@@ -295,5 +298,152 @@ describe("faction command network", () => {
       surfaceRoute: "faction_report",
       visibility: "local_signal",
     });
+  });
+
+  it("revalidates report/resource rows at commit time so stale proposals cannot double-spend authority", () => {
+    seedFaction([]);
+    const node = ensureFactionCommandNode({
+      campaignId: CAMPAIGN_ID,
+      factionId: FACTION_ID,
+      standingOrders: [],
+    });
+    ensureFactionResource({
+      campaignId: CAMPAIGN_ID,
+      factionId: FACTION_ID,
+      resourceKey: "patrols",
+      quantity: 2,
+    });
+    const report = createFactionReport({
+      campaignId: CAMPAIGN_ID,
+      factionId: FACTION_ID,
+      commandNodeId: node.id,
+      route: "report_message",
+      summary: "A runner reports pressure at the canal gate.",
+      sourceEventIds: ["event-canal-gate"],
+    });
+
+    const first = proposeFactionOperation({
+      campaignId: CAMPAIGN_ID,
+      factionId: FACTION_ID,
+      commandNodeId: node.id,
+      operationKind: "patrol_shift",
+      summary: "Send the first patrol to the canal gate.",
+      requiredReportIds: [report.id],
+      resourceCosts: { patrols: 1 },
+    });
+    const second = proposeFactionOperation({
+      campaignId: CAMPAIGN_ID,
+      factionId: FACTION_ID,
+      commandNodeId: node.id,
+      operationKind: "patrol_shift",
+      summary: "Send a second patrol using the same report.",
+      requiredReportIds: [report.id],
+      resourceCosts: { patrols: 1 },
+    });
+    expect(first.status).toBe("proposed");
+    expect(second.status).toBe("proposed");
+    if (first.status !== "proposed" || second.status !== "proposed") {
+      throw new Error("expected two proposed faction operations");
+    }
+
+    const firstCommit = commitFactionOperation({
+      campaignId: CAMPAIGN_ID,
+      operationId: first.operation.id,
+    });
+    const secondCommit = commitFactionOperation({
+      campaignId: CAMPAIGN_ID,
+      operationId: second.operation.id,
+    });
+
+    expect(firstCommit).toMatchObject({ status: "committed" });
+    expect(secondCommit).toMatchObject({
+      status: "blocked",
+      reason: `missing_or_unavailable_reports:${report.id}`,
+    });
+    expect(getDb().select().from(factionReports).where(eq(factionReports.id, report.id)).get())
+      .toMatchObject({ status: "consumed" });
+    expect(getDb().select().from(factionResources).all()[0]).toMatchObject({
+      resourceKey: "patrols",
+      quantity: 1,
+    });
+    expect(getDb().select().from(factionResourceLedger).all()).toHaveLength(1);
+    expect(getDb().select().from(authorityTraces).all()).toHaveLength(1);
+    expect(getDb().select().from(factionOperations).where(eq(factionOperations.id, second.operation.id)).get())
+      .toMatchObject({
+        status: "blocked",
+        blockedReason: `missing_or_unavailable_reports:${report.id}`,
+        authorityTraceId: null,
+      });
+  });
+
+  it("ignores faction child rows that point at a command node owned by another faction", () => {
+    seedFaction([]);
+    getDb().insert(factions).values({
+      id: "faction-rivals",
+      campaignId: CAMPAIGN_ID,
+      name: "Rival Wardens",
+      tags: "[]",
+      goals: "[]",
+      assets: "[]",
+    }).run();
+    const node = ensureFactionCommandNode({
+      campaignId: CAMPAIGN_ID,
+      factionId: FACTION_ID,
+      standingOrders: [],
+    });
+    const timestamp = Date.now();
+    getDb().insert(factionReports).values({
+      id: "mismatched-report",
+      campaignId: CAMPAIGN_ID,
+      factionId: "faction-rivals",
+      commandNodeId: node.id,
+      sourceActorId: null,
+      sourceLocationId: null,
+      route: "report_message",
+      status: "available",
+      summary: "A rival report should not enter this command node.",
+      sourceEventIds: "[]",
+      sourceKnowledgeIds: "[]",
+      hiddenCauseTerms: "[]",
+      baseWorldVersion: 0,
+      createdWorldTimeMinutes: 0,
+      deliverAtWorldTimeMinutes: 0,
+      deliveredWorldTimeMinutes: 0,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }).run();
+    getDb().insert(factionOperations).values({
+      id: "mismatched-operation",
+      campaignId: CAMPAIGN_ID,
+      factionId: "faction-rivals",
+      commandNodeId: node.id,
+      status: "proposed",
+      operationKind: "patrol_shift",
+      summary: "A rival operation should not enter this command node.",
+      requiredReportIds: "[]",
+      resourceCosts: "{}",
+      targetLocationId: null,
+      baseWorldVersion: 0,
+      committedWorldVersion: null,
+      authorityTraceId: null,
+      blockedReason: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }).run();
+
+    expect(getDb().select().from(factionCommandNodes).all()).toHaveLength(1);
+    expect(listAvailableFactionReports({
+      campaignId: CAMPAIGN_ID,
+      commandNodeId: node.id,
+    })).toEqual([]);
+
+    const frame = buildFactionCommandNodeFrame({
+      campaignId: CAMPAIGN_ID,
+      commandNodeId: node.id,
+    });
+    const frameText = frame.facts.map((fact) => fact.text).join("\n");
+
+    expect(frameText).not.toContain("rival report");
+    expect(frameText).not.toContain("rival operation");
   });
 });
