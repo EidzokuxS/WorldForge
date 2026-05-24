@@ -77,6 +77,7 @@ export interface ExecuteActorDecisionPacketArgs {
   packet: ActorDecisionPacket;
   baseWorldVersion: number;
   elapsedWorldTimeMinutes?: number;
+  allowedWriteScopes?: readonly string[];
   blockedWriteScopes?: readonly string[];
   orderOffset?: number;
   authorityForTool?: (input: {
@@ -348,6 +349,7 @@ export async function executeActorDecisionPacket(
     actorFrame: args.actorFrame,
     baseWorldVersion: args.baseWorldVersion,
     elapsedWorldTimeMinutes: args.elapsedWorldTimeMinutes,
+    allowedWriteScopes: args.allowedWriteScopes,
     blockedWriteScopes: args.blockedWriteScopes,
   });
   const actionResults: ExecutedScenePlanActionResult[] = [];
@@ -470,6 +472,7 @@ export async function runScheduledActorDecision(
         packet: prepared.packet,
         baseWorldVersion: requireActorFrameWorldVersion(prepared.actorFrame),
         elapsedWorldTimeMinutes: args.elapsedWorldTimeMinutes,
+        allowedWriteScopes: args.decision.writeScopes,
         blockedWriteScopes: args.blockedWriteScopes,
         authorityForTool: args.authorityForTool,
       });
@@ -731,6 +734,7 @@ export async function runRequiredActorDecisionPass(
           packet,
           baseWorldVersion: requireActorFrameWorldVersion(actorFrame),
           elapsedWorldTimeMinutes: args.elapsedWorldTimeMinutes,
+          allowedWriteScopes: decision.writeScopes,
           blockedWriteScopes: args.blockedWriteScopes,
           orderOffset: actionResults.length,
         });

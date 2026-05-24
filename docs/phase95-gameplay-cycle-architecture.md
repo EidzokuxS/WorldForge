@@ -83,6 +83,10 @@ Implemented hardening slices after the reset:
   packet, final narration, and public projection checkpoints.
 - Same-turn write-scope ledger: accepted player-turn writes reserve scopes for
   actor/due-world work later in the same turn.
+- Actor positive write-scope fences: actor-turn execution now defaults to no
+  authority-bearing writes without an allowed-scope grant, scheduled actor
+  decisions pass their reserved scopes into tool execution, and actor-private
+  durable memory is scoped to the actor rather than broad `world:event`.
 - Pre-commit blocked-scope guard: the executor now rejects blocked write-scope
   conflicts before mutation where possible and again before authority commit
   from exact backend-visible state-delta refs.
@@ -133,9 +137,9 @@ Architecture closure audit on 2026-05-24:
 
 - Reviewed current `develop` HEAD `b8ebd809340d3897be5623f028c7a8227c5d27f5`
   with three independent read-only agents plus local code/doc inspection.
-- P0s still open: actor positive write-scope fences, restore-side hash/row
-  evidence verification, episodic vector rollback retention/rebuild, and
-  crash-convergent restore.
+- P0s still open: restore-side hash/row evidence verification, episodic vector
+  rollback retention/rebuild, and crash-convergent restore. The actor positive
+  write-scope P0 from the closure audit is now implemented locally.
 - P1s still open: frontend raw-id fallback, public projection guard coverage
   for legacy id shapes, pending narration public recovery DTO, adjacent public
   campaign API handle/system classification, deterministic due-world emitted

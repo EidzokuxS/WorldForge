@@ -17,6 +17,7 @@ projection, and recoverable stores.
 The current branch has important hardening slices landed and verified:
 
 - durable quick-action capability rows;
+- actor-turn positive write-scope fences for authority-bearing actor tools;
 - live turn authority stage evidence;
 - fact-ref final narration path;
 - clock ledger and no-silent-minute behavior;
@@ -27,10 +28,11 @@ The current branch has important hardening slices landed and verified:
 - manifest-owned clean-start clone service;
 - vector-policy turn rollback skeleton.
 
-It is **not** Phase 95 closure. Independent current-HEAD audits found remaining
-blockers in actor/tool ownership, restore integrity/crash convergence, vector
-rollback semantics, public projection guard strength, frontend raw-id fallback,
-and pending narration recovery projection.
+It is **not** Phase 95 closure. Independent current-HEAD audits found blockers
+in actor/tool ownership, restore integrity/crash convergence, vector rollback
+semantics, public projection guard strength, frontend raw-id fallback, and
+pending narration recovery projection. The actor/tool ownership P0 has since
+been implemented locally; the remaining P0 queue is restore/vector/recovery.
 
 No long human-style 60-turn, cloned-world, or 600-turn soak acceptance should
 resume until the P0 queue below is executable, tested, bundled, and Oracle
@@ -47,7 +49,7 @@ reviewed on a frozen current tree.
 | Executor | SQLite authoritative tables and authority traces | runtime tool executor per state lane | same-turn observations | validated tool args only | input schemas, base world version, fences, allowed/blocked write scopes, transactions/savepoints | authority trace, state delta refs, durable event ids, rollback/no-unaccepted-side-effect tests |
 | Quick-action production | `quick_action_offers` table | quick-action offer service | label/action prose | label/prose suggestions only | source digest, world version, expiry, consumed marker, campaign/player binding | `qac_*` handles; stale/forged/replayed tests; **P1: accepted-receipt boundary for offer creation still needs proof** |
 | Receipts | authority traces, accepted result refs, settled packet inputs | executor and turn processor | tool observations | none after acceptance | receipt role classification, state-owner matrix, write-scope ledger | replay/rollback fact source; receipt mismatch tests |
-| Actor runtime | key actor process state, actor frame, actor schedule decision | actor scheduler and actor tool execution | actor knowledge retrieval, private memory | actor decision packet requested tools | actor frame binding, base world version, blocked scopes | actor action results and authority traces; **P0: positive allowed-scope fence missing for actor tools** |
+| Actor runtime | key actor process state, actor frame, actor schedule decision | actor scheduler and actor tool execution | actor knowledge retrieval, private memory | actor decision packet requested tools | actor frame binding, base world version, positive allowed scopes, blocked scopes | actor action results and authority traces; positive scope fence tests |
 | Due-world runtime | actor processes, world threads, proposal queue | due-world resolver/proposal executor | forecast/world-brain/guardrails | proposals, deterministic plan payloads | due time, scope conflicts, proposal lifecycle, support-only filtering | deferred proposal rows, skipped/executed traces; **P1: deterministic plan emitted refs need allowed-scope coverage** |
 | Time | `world_clocks`, turn clock ledger | living-world authority clock commit service | UI turn ordinal, narration tick | proposed `advance_time` args | non-negative deltas, no turn-boundary time advance, accepted receipt source | clock ledger rows, public world time, no-op/wait/travel/resume tests |
 | Narrator packet | settled canonical turn packet plus citable fact list | narrator packet builder | recent transcript, opening scene, guardrails, diagnostics | none | redaction audit, support-only classification, packet budget trace | settled packet persisted before final narration; resume from packet |
@@ -71,9 +73,9 @@ reviewed on a frozen current tree.
 | GM Read result | accepted typed decision | GM Read validator | repair diagnostics | path/runtime requirement/action interpretation | Zod schema, semantic validators, alias-only refs | diagnostic receipt only | unsupported/composite/ref tests |
 | Runtime tool descriptors | descriptor registry and owner registry | descriptor contract module | tool descriptions | tool calls choose visible tool names | active allowlist, state lane ownership, effect kind parity | descriptor snapshots | P2 `chronicle_entry` lane and `entity_tag` closure remain open |
 | Tool mutation state | SQLite gameplay tables plus traces | tool executor per lane | helper observations | typed tool args | schemas, grounding, authority, write scopes, savepoints | accepted receipt/state delta refs | no-unaccepted-side-effect, rollback, idempotency tests |
-| Same-turn write scopes | in-memory turn ledger plus accepted refs | turn processor | diagnostic blocked scope lists | none | conflict detection, prefix scope matching | blocks actor/due work later in turn | P0 actor positive allowed-scope fence still missing |
+| Same-turn write scopes | in-memory turn ledger plus accepted refs | turn processor | diagnostic blocked scope lists | none | conflict detection, prefix scope matching | blocks actor/due work later in turn | actor positive allowed-scope test now covers player-owned mutation rejection |
 | World clock | `world_clocks`, `turn_clock_ledger` | living-world authority | UI turn/narration tick | proposed time deltas | accepted clock receipt, non-negative, no boundary time advance | public world time | no-op/wait/travel/restore tests |
-| Actor process | `actor_process_states`, wake signals, actor frame | actor scheduler/actor tools | actor knowledge/private memory | actor decision packet | actor frame binding, route, blocked/allowed scopes | actor authority traces and visible consequences | P0 actor out-of-scope mutation rejection needed |
+| Actor process | `actor_process_states`, wake signals, actor frame | actor scheduler/actor tools | actor knowledge/private memory | actor decision packet | actor frame binding, route, positive allowed scopes, blocked scopes | actor authority traces and visible consequences | out-of-scope actor mutation rejection test |
 | Due-world proposal/plan | proposals/jobs/world threads/active plans | proposal executor/due-world resolver | forecast/world-brain | proposal payloads and plan actions | lifecycle, due time, scope conflicts, base version | proposal commit receipts, deferred work | P1 deterministic plan emitted-ref coverage and hidden-leak tests |
 | Inventory/items/documents | items tables/tags/holder state | inventory authority/tool executor | dialogue claims | item/tool args | item existence, holder refs, tag/state descriptors | item public handles/facts | transfer/spawn/document state tests |
 | Knowledge/events | authority traces, events, knowledge rows | tool/proposal owner that accepted the event | recent transcript, observations | summaries as receipt payload only | citable/public/private surface policy | event refs, packet facts | rollback/vector rebuild tests |
@@ -86,26 +88,27 @@ reviewed on a frozen current tree.
 
 ## Current P0 Queue
 
-1. Actor decision tools need positive allowed write-scope fences.
-   - Current risk: actor turn execution passes blocked scopes, but when
-     `allowedWriteScopes` is absent the executor can skip positive coverage.
-   - Required closure: actor packets must be rejected before mutation when a
-     scheduled actor is allowed `npc:a:state` but attempts player, other-NPC,
-     item, relationship, or unrelated location mutations.
+Closed locally after this audit:
 
-2. Restore integrity must verify evidence before restore.
+- Actor decision tools now receive positive allowed write scopes from the
+  schedule decision. Actor-turn execution defaults to no authority-bearing
+  writes when no allowed scopes are supplied, actor-private durable memory is
+  scoped to the actor rather than broad `world:event`, and a regression proves
+  a scheduled `npc:npc-key:state` actor cannot tag the player.
+
+1. Restore integrity must verify evidence before restore.
    - Current risk: `assertCampaignStoreBundleRestorable` checks existence, not
      recorded `evidenceHash` or vector `rowCount` recomputation.
    - Required closure: corrupted `state.db`, config/chat files, and LanceDB
      tables fail before any copy into the live campaign.
 
-3. Episodic vector rollback must converge to pre-turn state.
+2. Episodic vector rollback must converge to pre-turn state.
    - Current risk: `purge_rebuild` is currently purge-only for episodic
      vectors, so rollback can erase valid pre-turn semantic memory.
    - Required closure: seed pre-turn episodic vectors, add failed-turn vectors,
      rollback, then prove old rows are queryable and failed-turn rows are gone.
 
-4. Restore must be crash-convergent.
+3. Restore must be crash-convergent.
    - Current risk: restore copies DB, JSON, chat, and vectors sequentially
      without a restore-intent marker, temp target, atomic rename, or recovery
      for a mixed partial restore.
@@ -269,7 +272,7 @@ Unverified Assumptions:
 
 ### D. Actor, Due-World, Time
 
-Status: **P0 open**
+Status: **P1 open after actor P0 closure**
 
 Decision in force: actor and due-world runtime may be creative and proactive,
 but every write must be fenced by positive ownership and same-turn conflict
@@ -280,7 +283,7 @@ Options compared:
 - Block only player-owned scopes during actor work. Good partial guard, but
   insufficient for wrong-NPC/location/item writes.
 - Require positive allowed scopes from schedule/frame and reject emitted refs
-  outside those scopes. Chosen.
+  outside those scopes. Chosen and implemented for actor decision tools.
 
 References Used:
 
@@ -294,8 +297,8 @@ References Used:
 
 Unverified Assumptions:
 
-- Scheduled actor write scopes are specific enough to be used as positive
-  allowed scopes without over-serializing normal visible reactions.
+- Scheduled actor write scopes are specific enough for immediate actor tools.
+  Deterministic due-world plan emitted refs still need their own P1 coverage.
 
 ### E. Narrator Packet And Final Narration
 
@@ -401,7 +404,7 @@ This list is the closure guard before any future "architecture GO" claim:
 - [x] GM Tool Loop is proposal-only until executor acceptance.
 - [x] Tool executor owns mutation and receipt authority.
 - [x] Same-turn write-scope ledger exists.
-- [ ] Actor tool execution has positive allowed-scope fences. P0.
+- [x] Actor tool execution has positive allowed-scope fences.
 - [ ] Due-world deterministic plan emitted refs are checked against predicted
   scopes. P1.
 - [x] Time has a ledger and no silent turn-boundary minutes.
@@ -424,14 +427,13 @@ This list is the closure guard before any future "architecture GO" claim:
 
 ## Next Implementation Order
 
-1. Actor positive write-scope fences.
-2. Restore evidence verification and fail-before-copy tests.
-3. Crash-convergent restore intent/temp/atomic lifecycle.
-4. Episodic vector rollback retention/rebuild semantics.
-5. Public projection guard and frontend raw-id rejection.
-6. Pending narration public recovery DTO.
-7. Quick-action offer accepted-receipt cleanup.
-8. Due-world deterministic emitted-ref coverage.
-9. Fully manifest-owned clean-start clone artifact and replay rejection.
-10. Oracle bundled full architecture GO, then Browser gameplay workability,
+1. Restore evidence verification and fail-before-copy tests.
+2. Crash-convergent restore intent/temp/atomic lifecycle.
+3. Episodic vector rollback retention/rebuild semantics.
+4. Public projection guard and frontend raw-id rejection.
+5. Pending narration public recovery DTO.
+6. Quick-action offer accepted-receipt cleanup.
+7. Due-world deterministic emitted-ref coverage.
+8. Fully manifest-owned clean-start clone artifact and replay rejection.
+9. Oracle bundled full architecture GO, then Browser gameplay workability,
     fresh/cloned human-style 60-turn campaigns, and longer soak/replay.

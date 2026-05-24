@@ -294,6 +294,10 @@ function createActorFrame() {
   });
 }
 
+function actorSelfWriteScopes(extra: readonly string[] = []): string[] {
+  return ["npc:npc-key", ...extra];
+}
+
 function countAuthorityTraces(): number {
   return getDb()
     .select()
@@ -331,6 +335,16 @@ function readNpcRecordText(actorId = "npc-key"): string {
     .where(eq(npcs.id, actorId))
     .get();
   if (!row) throw new Error(`Missing ${actorId}`);
+  return JSON.stringify(row);
+}
+
+function readPlayerRecordText(playerId = "player-1"): string {
+  const row = getDb()
+    .select()
+    .from(players)
+    .where(eq(players.id, playerId))
+    .get();
+  if (!row) throw new Error(`Missing ${playerId}`);
   return JSON.stringify(row);
 }
 
@@ -424,6 +438,7 @@ describe("actor tool execution", () => {
       sceneFrame,
       actorFrame,
       baseWorldVersion: readWorldClock(CAMPAIGN_ID).worldVersion,
+      allowedWriteScopes: actorSelfWriteScopes(["location:loc-a", "location:loc-b"]),
       packet: {
         actorId: "npc-key",
         citedFactIds: ["self:npc-key", "move:loc-b"],
@@ -515,6 +530,7 @@ describe("actor tool execution", () => {
       sceneFrame: createSceneFrame(),
       actorFrame: createActorFrame(),
       baseWorldVersion: 0,
+      allowedWriteScopes: actorSelfWriteScopes(["location:loc-a", "location:loc-b"]),
       packet: {
         actorId: "npc-key",
         citedFactIds: ["self:npc-key", "move:loc-b"],
@@ -795,6 +811,77 @@ describe("actor tool execution", () => {
     expect(JSON.stringify(state)).not.toContain("npc:other:state");
   });
 
+  it("rejects actor tool writes outside the scheduled positive write scopes", async () => {
+    const result = await runRequiredActorDecisionPass({
+      campaignId: CAMPAIGN_ID,
+      tick: 7,
+      provider: {
+        id: "test-provider",
+        name: "Test",
+        baseUrl: "http://localhost:1/v1",
+        apiKey: "test",
+        model: "test-model",
+      },
+      sceneFrame: createSceneFrame(),
+      playerLocationId: "loc-a",
+      playerSceneScopeId: "loc-a",
+      elapsedWorldTimeMinutes: 1,
+      legalTools: ["add_tag"],
+      scheduleActorProcesses: () => {
+        const clock = readWorldClock(CAMPAIGN_ID);
+        return {
+          campaignId: CAMPAIGN_ID,
+          baseWorldVersion: clock.worldVersion,
+          worldTimeMinutes: clock.worldTimeMinutes,
+          candidateActorIds: ["npc-key"],
+          decisions: [{
+            actorId: "npc-key",
+            actorName: "Watcher",
+            route: "required_before_done",
+            reason: "test actor positive scope fence",
+            signals: [],
+            writeScopes: ["npc:npc-key:state"],
+            reservation: {
+              actorId: "npc-key",
+              route: "required_before_done",
+              writeScopes: ["npc:npc-key:state"],
+              status: "reserved",
+              conflictsWithActorIds: [],
+            },
+          }],
+        };
+      },
+      decideActor: ({ actorFrame }) => ({
+        actorId: actorFrame.observer.actorId,
+        citedFactIds: ["self:npc-key"],
+        intent: "try to mark the player from an NPC-only actor write scope",
+        requestedTools: [
+          {
+            toolName: "add_tag",
+            purpose: "invalid player-owned mutation from actor turn",
+            input: {
+              entityName: "Player",
+              entityType: "player",
+              tag: "actor-scope-leak",
+            },
+          },
+        ],
+        nextDecisionTrigger: {
+          reason: "scope leak test complete",
+          delayWorldTimeMinutes: 10,
+        },
+      }),
+    });
+
+    expect(result.actionResults).toHaveLength(1);
+    expect(result.actionResults[0]?.result.success).toBe(false);
+    expect(result.actionResults[0]?.result.error).toContain(
+      "authority_write_scope_mismatch:player:player-1:tags",
+    );
+    expect(readPlayerRecordText()).not.toContain("actor-scope-leak");
+    expect(countAuthorityTraces()).toBe(0);
+  });
+
   it("rolls back actor add_tag when process update fails after tool authority commit", async () => {
     const processBefore = ensureActorProcessSnapshot();
     installProcessUpdateFailureTrigger("tool:add_tag");
@@ -1010,6 +1097,7 @@ describe("actor tool execution", () => {
       sceneFrame: createSceneFrame(),
       actorFrame: createActorFrame(),
       baseWorldVersion: readWorldClock(CAMPAIGN_ID).worldVersion,
+      allowedWriteScopes: actorSelfWriteScopes(),
       packet: {
         actorId: "npc-key",
         citedFactIds: ["self:npc-key"],

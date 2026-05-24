@@ -3077,9 +3077,18 @@ function addScopedWriteRefsForToolResult(
   const payload = input.result.result;
   switch (input.toolName) {
     case "add_chronicle_entry":
-    case "log_event":
       refs.add("world:event");
       break;
+    case "log_event": {
+      const knowledgeRoute = readStringField(payload, "knowledgeRoute");
+      const actorMemoryMatch = /^actor:(.+)$/i.exec(knowledgeRoute ?? "");
+      if (actorMemoryMatch?.[1]) {
+        addStringRefs(refs, [scopedRef("npc", actorMemoryMatch[1])]);
+      } else {
+        refs.add("world:event");
+      }
+      break;
+    }
     case "record_dialogue_outcome":
       refs.add("world:dialogue");
       break;
@@ -3095,15 +3104,15 @@ function addScopedWriteRefsForToolResult(
         ? input.args.entityType.trim().toLowerCase()
         : "";
       const entityName = input.args.entityName;
-      if (entityType === "npc") addStringRefs(refs, [scopedRef("npc", entityName)]);
-      if (entityType === "faction") addStringRefs(refs, [scopedRef("faction", entityName)]);
-      if (entityType === "location") addStringRefs(refs, [scopedRef("location", entityName)]);
-      if (entityType === "item") addStringRefs(refs, [scopedRef("item", entityName)]);
+      const resolvedEntityRef = readStringField(payload, "entityId")
+        ?? (typeof entityName === "string" ? entityName : null);
+      if (entityType === "npc") addStringRefs(refs, [scopedRef("npc", resolvedEntityRef)]);
+      if (entityType === "faction") addStringRefs(refs, [scopedRef("faction", resolvedEntityRef)]);
+      if (entityType === "location") addStringRefs(refs, [scopedRef("location", resolvedEntityRef)]);
+      if (entityType === "item") addStringRefs(refs, [scopedRef("item", resolvedEntityRef)]);
       if (entityType === "player") {
-        const playerRef = readStringField(payload, "entityId")
-          ?? (typeof entityName === "string" ? entityName : null);
         addStringRefs(refs, [
-          scopedWriteRef("player", playerRef, "tags"),
+          scopedWriteRef("player", resolvedEntityRef, "tags"),
         ]);
       }
       break;

@@ -95,6 +95,7 @@ export interface CreateActorTurnToolExecutionContextArgs {
   actorFrame: ActorFrame;
   baseWorldVersion: number;
   elapsedWorldTimeMinutes?: number;
+  allowedWriteScopes?: readonly string[];
   blockedWriteScopes?: readonly string[];
 }
 
@@ -921,6 +922,7 @@ export function createActorTurnToolExecutionContext(
         id: actorFrame.observer.actorId,
       },
       elapsedWorldTimeMinutes: args.elapsedWorldTimeMinutes ?? 0,
+      allowedWriteScopes: args.allowedWriteScopes ?? [],
       blockedWriteScopes: args.blockedWriteScopes,
     },
     currentLocationId: actorFrame.observer.locationId,
