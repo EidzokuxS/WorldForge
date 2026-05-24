@@ -171,6 +171,9 @@ Current post-slice status on `develop`:
   Browser/play evidence passes.
 - Long-play status: still NO-GO. These slices close important control-plane
   blockers, but they are not full Phase 95 acceptance evidence.
+- Completeness matrix: `docs/phase95-architecture-completeness-matrix-2026-05-24.md`
+  now records the full local layer/state/recovery/agent-role pass at
+  `c992a1aacaf4ae2c908fa973be46c9c5640f0ec7` for the next Oracle bundle.
 
 Architecture closure audit on 2026-05-24:
 
@@ -254,7 +257,7 @@ P0 blockers before broad implementation:
   fact refs, and write scopes, but the unification is not complete enough to
   call the ref/capability layer mature.
 
-P1 blockers to close in the first hardening wave:
+Early P1 risks from the first hardening wave:
 
 - Actor/due-world player-owned fences need executable proof.
 - State-owner lanes need sharper granularity than broad categories such as
@@ -269,6 +272,15 @@ Already closed from this early list:
 - Quick-action source digest and accepted-receipt semantics are explicit:
   authority comes from the durable offer row, live resolver checks, GM-loop
   receipt adjacency, and route SSE `done` boundary.
+- Actor/due-world player-owned fences now use positive allowed scopes and
+  deterministic emitted-ref preflight.
+- State-owner lanes are executable in the registry, with remaining
+  `chronicle_entry` and `entity_tag` parity tracked as P2.
+- World-brain, forecast, guardrails, and support context are explicitly
+  support-only unless promoted by an accepted owner receipt.
+- Settled-turn resume, rollback, clean-start clone, vector reconcile, and
+  replay-preserving clone failure now share manifest/receipt language in the
+  local architecture matrix.
 
 The full Oracle verdict is captured as `phase95-architectu-bundle-go`.
 

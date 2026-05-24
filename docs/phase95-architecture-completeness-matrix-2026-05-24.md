@@ -1,0 +1,279 @@
+# Phase 95 Architecture Completeness Matrix
+
+Date: 2026-05-24
+Branch: `develop`
+Reviewed implementation HEAD before this documentation slice:
+`c992a1aacaf4ae2c908fa973be46c9c5640f0ec7`
+Status: **architecture coverage ready for bundled Oracle review; gameplay
+acceptance still NO-GO**
+
+This document is the final local "did we forget a layer?" pass before the next
+Oracle gate and Browser/play evidence. It does not declare Phase 95 done. It
+declares the current control-plane map complete enough to be reviewed as one
+gameplay architecture instead of as disconnected patches.
+
+## Product End State
+
+WorldForge Phase 95 is successful when the game plays like a high-quality,
+LLM-driven RPG: the player acts naturally, the world responds coherently, and a
+campaign remains trustworthy at turn 1, turn 60, turn 600+, after clone, after
+rollback, after replay attempts, and after recovery from partial turns.
+
+The architecture is the means. Backend-owned refs, capabilities, tool
+ownership, time, receipts, persistence, clone/replay/rollback, narration
+grounding, UI projection, recovery, and observability exist so creative LLM
+play remains free without making gameplay truth unstable.
+
+## Completeness Method
+
+- Read local code and docs for the current reset/rebuild branch, not the old
+  safety branch as an authority.
+- Used GitNexus semantic queries after refreshing the index with embeddings at
+  `c992a1aa`.
+- Folded independent agent findings into this matrix: clone/replay residue and
+  whole-architecture coverage.
+- Kept old Oracle/agent answers as risk inventory only; the next Oracle gate
+  must review the current bundle.
+- Used one compact document plus referenced source files instead of many inline
+  browser attachments.
+
+References Used:
+
+- `AGENTS.md`
+- `tasks/lessons.md`
+- `output/phase95-reset-rebuild-brief-20260524.md`
+- `output/phase95-handoff-contract.md`
+- `output/phase95-gameplay-cycle-contract-inventory.md`
+- `docs/phase95-gameplay-cycle-architecture.md`
+- `docs/phase95-architecture-closure-audit-2026-05-24.md`
+- `backend/src/engine/gameplay-control-plane-contract.ts`
+- `backend/src/engine/runtime-tool-descriptors.ts`
+- `backend/src/engine/tool-contracts.ts`
+- `backend/src/engine/gm-turn-read.ts`
+- `backend/src/engine/gm-tool-loop.ts`
+- `backend/src/engine/tool-executor.ts`
+- `backend/src/engine/turn-processor.ts`
+- `backend/src/engine/actor-scheduler.ts`
+- `backend/src/engine/actor-tools.ts`
+- `backend/src/engine/actor-plan-executor.ts`
+- `backend/src/engine/due-world-work.ts`
+- `backend/src/engine/world-brain.ts`
+- `backend/src/engine/world-forecast.ts`
+- `backend/src/engine/living-world-authority.ts`
+- `backend/src/engine/narrator-packet.ts`
+- `backend/src/engine/narration-grounding-guard.ts`
+- `backend/src/engine/public-dto-handles.ts`
+- `backend/src/routes/chat.ts`
+- `backend/src/routes/campaigns.ts`
+- `frontend/lib/api.ts`
+- `backend/src/campaign/store-manifest.ts`
+- `backend/src/campaign/store-manifest-executor.ts`
+- `backend/src/campaign/restore-bundle.ts`
+- `backend/src/campaign/clone.ts`
+- `backend/src/vectors/episodic-events.ts`
+- `backend/src/vectors/lore-cards.ts`
+- GitNexus queries for GM tool loop, public DTO projection, world-brain/
+  forecast support lanes, and faction/command-node stores.
+
+Unverified Assumptions:
+
+- Browser UI evidence will confirm the real app still feels playable after
+  stricter public-handle parsing and recovery DTO fences.
+- The next bundled Oracle review will judge this current HEAD, not stale
+  pre-commit or narrow snippet evidence.
+- Existing dirty `.planning` evidence files are outside this architecture
+  slice and are not runtime inputs.
+
+## Top-Level Layer Map
+
+Every gameplay turn is covered by one of these layers. Anything outside these
+layers is support-only, diagnostic-only, or debt.
+
+| Layer | Owner | Authority rule | Recovery rule | Current status |
+| --- | --- | --- | --- | --- |
+| UI action intake | frontend parser plus `/chat/action` route | freeform text or backend-issued handle only; labels/prose are display | malformed/stale handles reject before turn mutation | locally covered; Browser evidence pending |
+| Turn boundary | chat route plus turn saga | one lease, one pre-turn snapshot, one authority state machine | retry before lease; resume/rollback after lease/snapshot | locally covered |
+| GM Read | `runGmRead` validator | read/classification only; no mutation | repair/retry before executor | locally covered |
+| GM Tool Loop | descriptor-derived active tool loop | model proposes tool calls; executor owns authority | savepoint rollback for unaccepted mutation | locally covered |
+| Executor/receipts | runtime tool executor and authority traces | mutation only through state owner; accepted receipt creates truth | rollback/replay from accepted receipts or snapshot | locally covered; P2 owner parity remains |
+| Actor runtime | scheduler, actor frame, actor tool execution | positive allowed write scopes required for durable actor writes | reject out-of-scope actor writes | locally covered |
+| Due-world runtime | proposal/job/actor-plan executors | deterministic emitted refs must match reserved scopes | fail closed with no DB writes on scope mismatch | locally covered |
+| Time | clock ledger owner | world minutes advance only from accepted clock receipts | ledger replay/snapshot restore | locally covered |
+| Narrator packet | packet builder | selectable facts are backend-visible accepted facts | resume from settled packet | locally covered |
+| Final narration | narration guard/turn processor | model can style/order only selected fact/evidence refs | repair/fail closed; P2 full resume regression pending | live path covered, P2 test gap |
+| SSE/API projection | DTO factories and route projectors | public handles and allowlists only | rebuild projection from authority | locally covered for known gameplay surfaces |
+| Frontend projection | `frontend/lib/api.ts` parser | public handles carry authority; local render is not truth | reject/drop raw legacy authority | targeted tests green, Browser pending |
+| Persistence bundles | store manifest and bundle services | every store has policy/evidence | verify before copy; staged restore | locally covered |
+| Clone/replay/rollback/vector | manifest executor, clone/restore services | clean-start clone is explicit; replay-preserving fails closed | clone manifest, restore staging, vector reconcile | locally covered |
+| Observability/evals | traces, reports, test harness | evidence describes outcomes, never creates gameplay truth | rerun/compare using committed snapshots | contract tests/GitNexus done; Oracle/Browser/play pending |
+
+## Agent Roles And Tool Calling
+
+The word "agent" has two meanings here: gameplay agents inside WorldForge and
+review agents outside the game. Both are explicitly non-authoritative unless
+their output passes a backend owner.
+
+| Agent/actor | May author | May mutate | Available tools/surfaces | Authority boundary |
+| --- | --- | --- | --- | --- |
+| Player | freeform intent, chosen quick-action handle | no direct mutation | UI form, public handles, action chips | `/chat/action` validates and creates turn envelope |
+| GM Read model | interpretation, runtime requirement, proposed refs by alias | no | structured GM Read output | schema plus alias/capability resolver |
+| GM Tool Loop model | tool name and typed args | no direct mutation | active runtime tool set from descriptors | executor validates, mutates, and returns accepted/rejected result |
+| Tool executor | none; backend code only | yes, within lane | SQLite, authority traces, savepoints | state-owner registry, schemas, write scopes, transaction |
+| Actor brain model | actor decision packet, requested actor tools | no direct mutation | actor-frame tools only | actor scheduler grants positive scopes; actor tools validate |
+| Due-world/proposal model | forecast/proposal payloads | no direct mutation | world-brain, forecast, proposals, deterministic plans | proposal executor owns lifecycle and emitted-ref checks |
+| Narrator model | selected fact refs, evidence refs, style/order | no direct mutation of world state | narrator packet facts/support context | narration guard compiles/validates public prose |
+| Frontend | local render state, draft text | no gameplay mutation | public DTOs, SSE events | backend DTO schemas and public-handle parser |
+| Oracle/subagents/playtesters | review findings, player actions, evidence | no gameplay mutation | repo files, bundles, Browser, CLI tests | committed code/tests and backend runtime are the only source of truth |
+
+Tool-calling invariants:
+
+- Tool availability is derived from descriptors and runtime requirement, not
+  from a prompt wish.
+- A model tool call is a proposal until `tool-executor` accepts it.
+- Revision/repair paths inherit the strongest possible mutation boundary.
+- Rejected/helper results are observations and cannot close authority.
+- Durable public affordances, including quick-action offers, are
+  receipt-bound authority/projection effects.
+- Actor and due-world tools require positive write scopes; broad
+  "not player-owned" filtering is not enough.
+- Support tools, forecasts, guardrails, and world-brain context are not hidden
+  fact authority until an owning receipt promotes a fact.
+
+Options Compared:
+
+- Static prompt-only tool discipline: rejected because it relies on model
+  obedience.
+- Per-tool ad hoc guards: useful as local checks, but drift-prone.
+- Descriptor-derived tool availability plus executor-owned validation,
+  receipts, scopes, and projection: chosen.
+
+References Used:
+
+- `backend/src/engine/runtime-tool-descriptors.ts`
+- `backend/src/engine/tool-contracts.ts`
+- `backend/src/engine/gm-tool-loop.ts`
+- `backend/src/engine/tool-executor.ts`
+- `backend/src/engine/actor-tools.ts`
+- `backend/src/engine/actor-scheduler.ts`
+- `backend/src/engine/due-world-work.ts`
+- `backend/src/engine/gameplay-control-plane-contract.ts`
+- `C:\Users\robra\.agents\skills\agents-best-practices\SKILL.md`
+
+Unverified Assumptions:
+
+- Current descriptor names can remain stable while P2 owner-parity work closes
+  `chronicle_entry` and `entity_tag` service details.
+
+## State-Class Matrix
+
+This matrix is deliberately wider than the current implementation diff. The
+point is to make every state class visible so long playtests stop discovering
+architecture boundaries by accident.
+
+| State class | Source of truth | Write owner | Support-only/model fields | Validators | Receipts/projection | Recovery/tests |
+| --- | --- | --- | --- | --- | --- | --- |
+| Campaign identity/config | campaign dir, `config.json`, `campaigns` | campaign manager, clone service | worldgen drafts before completion | safe id, config parser, complete-generation gate | public campaign metadata | load/delete/clone tests; source-id residue clone fixture |
+| Player action envelope | `/chat/action` validated body | chat route | player prose only | schema, active campaign, lock, capability/base version | turn saga row, sanitized history | stale/forged/freeform tests |
+| Turn saga/lease/snapshot | saga rows/events, active lease, pre-turn bundle | turn saga service | progress events | lifecycle order, abandoned saga recovery, manifest presence | stage evidence, rollback snapshot | pending/resume/rollback tests |
+| Quick-action offers | `quick_action_offers` | quick-action service | label/action prose | source digest, expiry, consumed, campaign/player binding | `qac_*` public handles | stale/expired/solo-offer rollback/SSE rollback tests |
+| Public DTO handles | projector output plus resolver | public DTO handle module | labels only | deterministic handle kind, resolver, raw-id guard | `pdto_*` handles | world/inventory/history/checkpoint/NPC tests |
+| Scene aliases/model refs | scene frame alias map | scene frame builder | visible labels/summaries | reserved namespaces, backend-ref scan | model-facing packet only | collision/raw-id/private-label tests |
+| GM Read result | typed GM Read output | `runGmRead` validator | interpretation/path/runtime requirement | Zod schema, alias resolution, semantic binding | diagnostic receipt only | unsupported/composite/ref tests |
+| Runtime tool descriptors | descriptor registry, owner registry | descriptor contract module | tool descriptions | active allowlist, state lane owner, effect parity | descriptor snapshots | P2 parity for `chronicle_entry`/`entity_tag` |
+| Tool mutation state | SQLite plus authority traces | runtime executor per lane | typed tool args | input schemas, refs/caps, base version, scopes, savepoints | accepted receipts/state deltas | no-unaccepted-side-effect and rollback tests |
+| Same-turn write scopes | turn ledger plus accepted refs | turn processor | diagnostics | conflict detection, positive/blocked scopes | blocks actor/due-world writes | actor/due-world scope tests |
+| Locations/routes/POIs | locations, edges, recent events | movement/reveal/POI owners | model target aliases | route existence, arrival binding, scope preflight | public place/route handles/facts | movement/reveal/clone/rollback tests |
+| Player/NPC actors | players, npcs, actor lifecycle | movement/condition/promote owners | dialogue/action claims | actor existence, visibility, frame binding | public actor handles/facts | actor promote and out-of-scope tests |
+| Factions/command nodes | factions, command nodes/resources/reports/ops/ledger | faction scheduler/tools | faction reports/proposals | campaign scope, due time, resource ledger invariants | faction public handles/reports | Phase 92 harness plus clone residue coverage; P2 row semantics audit |
+| Relationships/dialogue | relationships, dialogue receipts | dialogue/relationship tools | dialogue summary payloads | speaker binding, relationship refs, private scan | public relationship/fact refs | dialogue/relationship tests |
+| Inventory/items/documents/tags | items and item state/tags | item tools/entity-tag service | item names, tag prose | holder refs, item existence, tag lane owner | item handles/facts | transfer/spawn/tag tests; P2 entity-tag parity |
+| World clock/time | `world_clocks`, `turn_clock_ledger` | living-world clock commit | proposed time deltas | accepted clock receipt, non-negative deltas | public world time | no-op/wait/travel/resume/restore tests |
+| Actor process/private memory | process states, wake signals, knowledge records | actor scheduler/tools | actor private memory | actor frame, positive scopes, blocked scopes | actor authority traces/visible effects | out-of-scope actor mutation tests |
+| Due-world jobs/proposals/plans | simulation jobs/proposals, world threads/events | proposal executor/due-world resolver | forecast/world-brain/proposal text | lifecycle, due time, base version, emitted-ref coverage | deferred/executed proposal traces | active-plan scope mismatch tests |
+| World-brain/forecast/guardrails | prompt context, forecasts, support rows | forecast/support builders | model suggestions/diagnostics | support-only classification, no hidden-fact promotion | support context only | hidden-leak watch coverage; P2 broader tests |
+| Authority traces/events | authority trace/event rows | accepting executor/proposal owner | summaries as receipt payload | citable/private classification | event refs, packet facts | receipt mismatch/rollback/vector rebuild tests |
+| Narrator packet | settled packet and fact list | packet builder | support context | redaction, packet budget, citable/support split | persisted packet/fact refs | resume packet tests |
+| Final narration attempt | narrator attempts plus compiled text | narration guard/turn processor | selected refs/style/order | selected ref existence, private term scan, grounding | assistant SSE/chat line | no-live-text tests; P2 full turn/resume regression |
+| Chat history/pending resume | chat history JSON plus saga state | chat route/resume owner | internal metadata | public history DTO, resume token | public history and recovery state | route tests reject saga id/status leaks |
+| SSE/API projection | DTO factories and route projectors | route/projector modules | none | public schemas, event allowlists, backend-ref guard | public events/JSON | raw legacy id rejection tests |
+| Frontend render state | parsed public DTOs/local UI state | frontend API parser/components | draft/debug local state | public handle parser, malformed payload errors | rendered labels/actions only | API/checkpoint tests; Browser pending |
+| Checkpoints/artifacts | checkpoint dirs/manifests | checkpoint service | UI labels | path safety, restorable manifest, handle resolver | `pdto_checkpoint_*` | create/list/load/delete tests |
+| Store manifest/bundles | `store-manifest.json`, captured stores | bundle/restore services | evidence hashes/reports | coverage, policies, hashes, row counts | checkpoint/turn snapshot manifests | tampered SQLite/vector evidence tests |
+| Vectors | LanceDB episodic/lore tables | vector services plus rollback policy | retrieval support | campaign/audience filters, row counts, hashes | semantic retrieval only | restore verification and rollback reconcile tests |
+| Clone/rollback/replay | clone manifest, turn snapshots, restore bundles | clone/rollback/restore service | playtest logs | operation mode, path safety, rewrite/purge/rebuild/reject | clone manifest, restore evidence | clean-start clone, fail-closed replay, staged restore |
+| Observability/evals | logs, traces, reports | observability/playtest harness | human/Codex moves | redaction and evidence rubric | verdict reports, trace ids | GitNexus/tests done; Oracle/Browser/play pending |
+
+## Recovery Matrix
+
+| Failure point | Durable evidence | Recovery owner | Expected recovery |
+| --- | --- | --- | --- |
+| Before lease | none | chat route | reject/retry with no mutation |
+| After lease before snapshot | saga lease/event | turn saga service | resume or abandon stale lease |
+| After snapshot before accepted receipt | turn snapshot manifest | turn processor/restore | rollback to snapshot |
+| During tool loop mutation before accepted receipt | savepoint and rejected result | GM tool loop/executor | rollback savepoint; no public side effect |
+| After accepted receipt before canonical commit | authority traces/state deltas | turn processor | resume from receipt batch or rollback by snapshot rule |
+| After canonical commit before settled packet | committed SQLite and traces | packet builder | rebuild/persist packet from accepted facts |
+| After settled packet before narration | settled packet | narrator route/processor | resume final narration from packet |
+| After narration before projection | narrator attempt | route projector | rebuild projection/SSE from accepted attempt |
+| After projection before final marker | projection digest and saga stage | turn saga service | idempotently finalize |
+| During restore copy | `.restore-staging` bundle | restore service | clear stale staging and rerun verified copy |
+| During rollback vector reconciliation | restored SQLite, vector policy | vector rollback service | purge failed-turn rows, preserve matching pre-turn rows, rebuild missing accepted rows |
+| During clean-start clone | target config/DB plus clone manifest | clone service | discard incomplete target unless `clone-manifest.json` proves complete |
+| Replay-preserving clone request | store manifest replay policies | manifest executor | fail closed while any store requires `reject`/`regenerate` |
+| Browser/SSE disconnect | chat history, saga/recovery state | route/frontend parser | load history or resume pending narration with opaque token |
+
+## Cross-Layer Invariants
+
+- Product truth is never stored in prompt prose alone.
+- The model may propose, classify, select, or style; backend code owns
+  validation, authorization, mutation, time, receipts, persistence, projection,
+  clone/replay/rollback, and recovery.
+- Every state class has one write owner; P2 owner-parity gaps are named, not
+  hidden.
+- Every model/player-facing ref is an issued alias, public DTO handle, or
+  backend-owned capability.
+- UI labels and quick-action prose are presentation.
+- Support-only world-brain, forecast, guardrail, observation, and diagnostic
+  lanes cannot become public facts without an accepting owner.
+- Accepted receipts are the source for narration facts, rollback, replay,
+  vector rebuild, and observability correlation.
+- Time is ledgered world time, not UI turn count or narration decoration.
+- Public projection is allowlist-based and rejects legacy raw id shapes.
+- Clean-start clone is the current product mode; replay-preserving clone is an
+  explicit fail-closed product mode until semantics are designed.
+- Oracle and playtests are evidence gates, not architecture substitutes.
+
+## Known Open Work Not Forgotten
+
+These items are intentionally not buried under "green tests":
+
+- P2: runtime effect-kind/state-owner parity for `chronicle_entry` and
+  `entity_tag` service lane.
+- P2: full turn/resume final-narration regression for legacy
+  `sentences[].text` and unsupported/private terms.
+- P2: world-brain/forecast/guardrail hidden-leak coverage should become more
+  exhaustive during long-play hardening.
+- P2: faction/command-node row semantics deserve a focused audit beyond clone
+  residue coverage.
+- P2: observability retention/redaction policy should be made explicit before
+  remote/long-running trace publication.
+- P2: frontend debug reasoning lane should be developer-mode only or ignored.
+- P2: player portrait handle and backend image filename lookup need an asset
+  URL contract test.
+- P2: Phase 88 harness prose still says clone copies DBs even though code now
+  calls the clean-start clone service.
+- Evidence gate: bundled Oracle GO on current HEAD.
+- Evidence gate: in-app Browser UI workability.
+- Evidence gate: human-style fresh and cloned campaigns plus longer
+  soak/replay. Sixty turns are smoke evidence, not the end state.
+
+## Final Local Verdict
+
+No known P0/P1 implementation blocker remains listed by this local audit after
+the public projection, pending recovery, quick-action receipt, due-world scope,
+restore/vector, and clone/replay slices.
+
+That is not acceptance. It means the architecture has a complete local map and
+can now be judged as a whole by Oracle and then by Browser/human-style/soak
+evidence. If Oracle finds a missing layer or invariant, this document becomes
+the correction board rather than a defense of the current design.

@@ -40,15 +40,15 @@ been implemented locally with targeted contract tests. The public projection
 guard, frontend raw-id fallback, pending-narration public recovery DTO P1, and
 quick-action accepted-receipt cleanup have also been implemented locally with
 targeted backend/frontend tests and frontend/backend typechecks. The adjacent
-checkpoint/NPC public API handle wrapping P1 has also been implemented locally
-with route/API/frontend tests and typechecks. The branch remains NO-GO for
-long-play acceptance until the remaining clone/replay P1 queue closes, full
-verification, GitNexus, Oracle bundled review, Browser evidence, and
-human-style play/soak evidence.
+checkpoint/NPC public API handle wrapping P1 and clone/replay P1 closure have
+also been implemented locally with route/API/frontend/clone tests and
+typechecks. The branch remains NO-GO for long-play acceptance until the full
+architecture completeness matrix, GitNexus, Oracle bundled review, Browser
+evidence, and human-style play/soak evidence pass.
 
 No long human-style 60-turn, cloned-world, or 600-turn soak acceptance should
-resume until the P1 queue below is executable, tested, bundled, and Oracle
-reviewed on a frozen current tree.
+resume until the full local closure matrix is bundled, Oracle-reviewed on a
+frozen current tree, and Browser workability is rechecked.
 
 ## Full Stage Coverage
 
@@ -431,6 +431,7 @@ References Used:
 - `output/phase95-reset-rebuild-brief-20260524.md`
 - `output/phase95-handoff-contract.md`
 - `output/phase95-gameplay-cycle-contract-inventory.md`
+- `docs/phase95-architecture-completeness-matrix-2026-05-24.md`
 - `C:\Users\robra\.codex\skills\oracle\SKILL.md`
 - `C:\Users\robra\.agents\skills\agents-best-practices\SKILL.md`
 - Browser plugin requirement from user, 2026-05-24
@@ -480,6 +481,7 @@ This list is the closure guard before any future "architecture GO" claim:
 
 ## Next Implementation Order
 
-1. Full architecture/recovery-matrix completeness audit bundle.
-2. Oracle bundled full architecture GO, then Browser gameplay workability,
-    fresh/cloned human-style 60-turn campaigns, and longer soak/replay.
+1. Bundle `docs/phase95-architecture-completeness-matrix-2026-05-24.md`
+   with the focused source/docs index for Oracle full architecture GO.
+2. After Oracle GO, run Browser gameplay workability, fresh/cloned human-style
+   60-turn campaigns, and longer soak/replay.
