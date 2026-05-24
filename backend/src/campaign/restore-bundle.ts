@@ -8,9 +8,16 @@ import {
 } from "./paths.js";
 import { closeDb, getSqliteConnection } from "../db/index.js";
 import { closeVectorDb } from "../vectors/connection.js";
+import {
+  createCampaignStoreBundleManifest,
+  writeCampaignStoreBundleManifest,
+  assertCampaignStoreBundleRestorable,
+  type CampaignStoreBundlePurpose,
+} from "./store-manifest.js";
 
 type BundleOptions = {
   includeVectors: boolean;
+  purpose?: CampaignStoreBundlePurpose;
 };
 
 function resolveBundlePaths(bundleDir: string) {
@@ -55,6 +62,16 @@ export async function captureCampaignBundle(
     if (options.includeVectors && fs.existsSync(campaignVectorsPath)) {
       fs.cpSync(campaignVectorsPath, vectorsPath, { recursive: true });
     }
+
+    writeCampaignStoreBundleManifest(
+      createCampaignStoreBundleManifest({
+        campaignId,
+        bundleDir,
+        includeVectors: options.includeVectors,
+        purpose: options.purpose ?? "checkpoint",
+      }),
+      bundleDir,
+    );
   } catch (error) {
     fs.rmSync(bundleDir, { recursive: true, force: true });
     throw error;
@@ -72,6 +89,11 @@ export async function restoreCampaignBundle(
   const campaignConfigPath = getCampaignConfigPath(campaignId);
   const campaignChatPath = getChatHistoryPath(campaignId);
   const campaignVectorsPath = path.join(campaignDir, "vectors");
+
+  assertCampaignStoreBundleRestorable({
+    bundleDir,
+    includeVectors: options.includeVectors,
+  });
 
   closeDb();
   closeVectorDb();

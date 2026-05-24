@@ -17,6 +17,19 @@ vi.mock("../../campaign/paths.js", () => ({
   getChatHistoryPath: vi.fn((campaignId: string) => `/campaigns/${campaignId}/chat_history.json`),
 }));
 
+vi.mock("../../campaign/store-manifest.js", () => ({
+  createCampaignStoreBundleManifest: vi.fn((input) => ({
+    schemaVersion: 1,
+    campaignId: input.campaignId,
+    purpose: input.purpose ?? "checkpoint",
+    includeVectors: input.includeVectors,
+    capturedAt: 1,
+    stores: [],
+  })),
+  writeCampaignStoreBundleManifest: vi.fn(),
+  assertCampaignStoreBundleRestorable: vi.fn(),
+}));
+
 vi.mock("node:fs", () => ({
   default: {
     mkdirSync: vi.fn(),

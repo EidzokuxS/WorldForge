@@ -11,6 +11,17 @@ Oracle gate result on 2026-05-24:
   state-owner registry, issued refs/capabilities, public projection DTOs,
   clock ledger contract, and fact-ref narration contract.
 
+Implemented hardening slices after the reset:
+
+- Durable quick-action capabilities: quick-action labels/prose remain
+  presentation, while backend-owned offer rows and opaque capabilities carry
+  selection authority.
+- Runtime store bundle manifest: checkpoint and turn-rollback bundles now write
+  and verify a manifest before restore. The manifest covers every current
+  SQLite gameplay table plus JSON, vector, projection, artifact, and evidence
+  stores, so missing store policy blocks restore evidence instead of silently
+  trusting helper-copy behavior.
+
 ## End State
 
 WorldForge Phase 95 should reach a high-quality, playable LLM-driven RPG loop:
@@ -148,10 +159,10 @@ The full Oracle verdict is captured as `phase95-architectu-bundle-go`.
      routes use allowlists.
 
 12. Persistence, clone, replay, rollback, vector
-   - A store manifest declares preserve, purge, rewrite, rebuild, or external
-     evidence policy for every store.
-   - Snapshots and rollback cover SQLite, config, chat, vectors, projection
-     rows, saga state, and active turn intent.
+  - A store manifest declares preserve, purge, rewrite, rebuild, or external
+    evidence policy for every store.
+  - Snapshots and rollback cover SQLite, config, chat, vectors, projection
+    rows, saga state, and active turn intent.
 
 13. Observability
    - Every stage emits bounded trace events without private payload leakage.
@@ -224,6 +235,22 @@ Every store entry declares:
 - vector policy where relevant;
 - source campaign id scrub policy;
 - hash/count evidence.
+
+Current implementation status:
+
+- `PHASE95_STORE_MANIFEST` covers every current SQLite table named in
+  `backend/src/db/schema.ts`, plus `json:config`, `json:chat_history`,
+  `vectors:episodic_events`, `vectors:lore_cards`, `artifact:checkpoints`,
+  `artifact:images`, `artifact:turn_boundaries`, `projection:public_dtos`,
+  and `evidence:playtest_reports`.
+- `captureCampaignBundle` writes `store-manifest.json` into each checkpoint or
+  turn snapshot bundle.
+- `restoreCampaignBundle` refuses to restore a bundle without a manifest and
+  refuses vector restore when the bundle did not capture vectors.
+- Remaining work: make clean-start clone consume the same manifest instead of
+  using the legacy Phase 94 helper-copy/rewrite path, and add stronger content
+  hashes for logical vector rows once the clone/replay store rewrite service
+  lands.
 
 Clean-start clone is the Phase 95 mode. Replay-preserving clone stays rejected
 until it has explicit id rewrite and saga/vector/packet replay semantics.

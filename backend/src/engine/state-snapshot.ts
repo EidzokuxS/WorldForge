@@ -26,7 +26,10 @@ export async function captureSnapshot(campaignId: string): Promise<TurnSnapshot>
     TURN_BOUNDARY_DIRNAME,
     LAST_TURN_BOUNDARY_DIRNAME,
   );
-  await captureCampaignBundle(campaignId, bundleDir, { includeVectors: false });
+  await captureCampaignBundle(campaignId, bundleDir, {
+    includeVectors: false,
+    purpose: "turn_snapshot",
+  });
 
   return {
     campaignId,

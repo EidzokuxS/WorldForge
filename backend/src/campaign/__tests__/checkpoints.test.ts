@@ -48,6 +48,19 @@ vi.mock("../../vectors/episodic-events.js", () => ({
   clearPendingCommittedEvents: vi.fn(),
 }));
 
+vi.mock("../store-manifest.js", () => ({
+  createCampaignStoreBundleManifest: vi.fn((input) => ({
+    schemaVersion: 1,
+    campaignId: input.campaignId,
+    purpose: input.purpose ?? "checkpoint",
+    includeVectors: input.includeVectors,
+    capturedAt: 1,
+    stores: [],
+  })),
+  writeCampaignStoreBundleManifest: vi.fn(),
+  assertCampaignStoreBundleRestorable: vi.fn(),
+}));
+
 vi.mock("../../engine/living-world-authority.js", () => ({
   readWorldClock: vi.fn(() => ({
     worldVersion: 7,
