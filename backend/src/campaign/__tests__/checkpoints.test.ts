@@ -94,6 +94,10 @@ import {
   deleteCheckpoint,
   pruneAutoCheckpoints,
 } from "../checkpoints.js";
+import {
+  finalizePendingCampaignRestoreAfterLoad,
+  repairPendingCampaignRestoreBeforeLoad,
+} from "../restore-bundle.js";
 import { closeDb, connectDb } from "../../db/index.js";
 import { openVectorDb, closeVectorDb } from "../../vectors/connection.js";
 import { runMigrations } from "../../db/migrate.js";
@@ -106,8 +110,39 @@ import {
   readWorldClock,
 } from "../../engine/living-world-authority.js";
 
+const writtenFileContents = new Map<string, string>();
+
+function installCheckpointRestoreFs(meta: Record<string, unknown>) {
+  writtenFileContents.clear();
+  vi.spyOn(fs, "existsSync").mockImplementation((targetPath) => {
+    const normalizedPath = String(targetPath);
+    if (normalizedPath.endsWith("restore-journal.json")) {
+      return writtenFileContents.has(normalizedPath);
+    }
+    return true;
+  });
+  vi.spyOn(fs, "readFileSync").mockImplementation((targetPath) => {
+    const normalizedPath = String(targetPath);
+    if (writtenFileContents.has(normalizedPath)) {
+      return writtenFileContents.get(normalizedPath) ?? "";
+    }
+    return JSON.stringify(meta);
+  });
+  vi.spyOn(fs, "writeFileSync").mockImplementation((targetPath, contents) => {
+    writtenFileContents.set(String(targetPath), String(contents));
+  });
+  vi.spyOn(fs, "renameSync").mockImplementation((from, to) => {
+    const contents = writtenFileContents.get(String(from));
+    if (contents !== undefined) {
+      writtenFileContents.set(String(to), contents);
+      writtenFileContents.delete(String(from));
+    }
+  });
+}
+
 beforeEach(() => {
   vi.restoreAllMocks();
+  writtenFileContents.clear();
   mockBackup.mockReset().mockResolvedValue(undefined);
   vi.mocked(hasActiveTurn).mockReturnValue(false);
 });
@@ -342,16 +377,13 @@ describe("loadCheckpoint", () => {
   });
 
   it("disconnects DB/vectors, copies files back, reconnects", async () => {
-    vi.spyOn(fs, "existsSync").mockReturnValue(true);
-    vi.spyOn(fs, "readFileSync").mockReturnValue(
-      JSON.stringify({
+    installCheckpointRestoreFs({
         id: "cp-1",
         name: "Save",
         description: "",
         createdAt: 1000,
         auto: false,
-      })
-    );
+    });
     const copySpy = vi.spyOn(fs, "copyFileSync").mockImplementation(() => {});
     const cpSpy = vi.spyOn(fs, "cpSync").mockImplementation(() => {});
     vi.spyOn(fs, "rmSync").mockImplementation(() => {});
@@ -396,7 +428,7 @@ describe("loadCheckpoint", () => {
     ).toBeLessThan(vi.mocked(loadCampaign).mock.invocationCallOrder[0]);
     expect(
       vi.mocked(clearPendingCommittedEvents).mock.invocationCallOrder[0]
-    ).toBeLessThan(vi.mocked(loadCampaign).mock.invocationCallOrder[0]);
+    ).toBeGreaterThan(vi.mocked(loadCampaign).mock.invocationCallOrder[0]);
     expect(vi.mocked(loadCampaign).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(invalidateAuthorityAfterRestore).mock.invocationCallOrder[0],
     );
@@ -405,16 +437,13 @@ describe("loadCheckpoint", () => {
   });
 
   it("restores state.db before reopening the campaign so persisted location_recent_events survive", async () => {
-    vi.spyOn(fs, "existsSync").mockReturnValue(true);
-    vi.spyOn(fs, "readFileSync").mockReturnValue(
-      JSON.stringify({
+    installCheckpointRestoreFs({
         id: "cp-1",
         name: "Save",
         description: "",
         createdAt: 1000,
         auto: false,
-      })
-    );
+    });
     const copySpy = vi.spyOn(fs, "copyFileSync").mockImplementation(() => {});
     vi.spyOn(fs, "cpSync").mockImplementation(() => {});
     vi.spyOn(fs, "rmSync").mockImplementation(() => {});
@@ -427,6 +456,55 @@ describe("loadCheckpoint", () => {
     expect(stateRestoreOrder).toBeDefined();
     expect(copySpy.mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(loadCampaign).mock.invocationCallOrder[0],
+    );
+  });
+
+  it("rolls a checkpoint vector restore forward if the process crashes after live vectors are removed", async () => {
+    installCheckpointRestoreFs({
+      id: "cp-1",
+      name: "Save",
+      description: "",
+      createdAt: 1000,
+      auto: false,
+    });
+    vi.spyOn(fs, "copyFileSync").mockImplementation(() => {});
+    vi.spyOn(fs, "rmSync").mockImplementation(() => {});
+    let failedOnce = false;
+    const cpSpy = vi.spyOn(fs, "cpSync").mockImplementation((from, to) => {
+      if (
+        !failedOnce &&
+        String(from).includes("vectors-replacement") &&
+        String(to).endsWith("vectors")
+      ) {
+        failedOnce = true;
+        throw new Error("simulated crash after live vectors were removed");
+      }
+    });
+
+    await expect(loadCheckpoint("camp-1", "cp-1")).rejects.toThrow(
+      "simulated crash after live vectors were removed",
+    );
+    expect([...writtenFileContents.keys()].some((filePath) =>
+      filePath.endsWith("restore-journal.json"),
+    )).toBe(true);
+
+    cpSpy.mockImplementation(() => {});
+
+    await repairPendingCampaignRestoreBeforeLoad("camp-1");
+    await loadCampaign("camp-1");
+    await finalizePendingCampaignRestoreAfterLoad("camp-1");
+
+    expect(cpSpy).toHaveBeenCalledWith(
+      expect.stringContaining("vectors-replacement"),
+      expect.stringContaining("vectors"),
+      { recursive: true },
+    );
+    expect(clearPendingCommittedEvents).toHaveBeenCalledWith("camp-1");
+    expect(invalidateAuthorityAfterRestore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        campaignId: "camp-1",
+        reason: "checkpoint restored",
+      }),
     );
   });
 });

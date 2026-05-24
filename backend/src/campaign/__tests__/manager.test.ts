@@ -50,6 +50,11 @@ vi.mock("../runtime-state.js", () => ({
   hasAnyActiveTurn: vi.fn(() => false),
 }));
 
+vi.mock("../restore-bundle.js", () => ({
+  repairPendingCampaignRestoreBeforeLoad: vi.fn(async () => false),
+  finalizePendingCampaignRestoreAfterLoad: vi.fn(async () => false),
+}));
+
 vi.mock("../../worldgen/index.js", () => ({
   parseWorldSeeds: vi.fn((s: unknown) => s),
 }));
@@ -97,6 +102,10 @@ import { closeDb, connectDb, getDb } from "../../db/index.js";
 import { openVectorDb, closeVectorDb } from "../../vectors/index.js";
 import { AppError } from "../../lib/index.js";
 import { hasAnyActiveTurn } from "../runtime-state.js";
+import {
+  finalizePendingCampaignRestoreAfterLoad,
+  repairPendingCampaignRestoreBeforeLoad,
+} from "../restore-bundle.js";
 import { jjkWithNarutoPowerSystemArtifact } from "../../worldgen/__tests__/fixtures/jjk-naruto-artifact.js";
 
 beforeEach(() => {
@@ -111,6 +120,8 @@ beforeEach(() => {
   mockSelect.mockReset().mockReturnValue({ from: mockSelectFrom });
   vi.mocked(getDb).mockReset().mockReturnValue(mockDatabase as any);
   vi.mocked(hasAnyActiveTurn).mockReset().mockReturnValue(false);
+  vi.mocked(repairPendingCampaignRestoreBeforeLoad).mockReset().mockResolvedValue(false);
+  vi.mocked(finalizePendingCampaignRestoreAfterLoad).mockReset().mockResolvedValue(false);
 });
 
 describe("readCampaignConfig", () => {
@@ -496,6 +507,37 @@ describe("loadCampaign", () => {
     expect(result.id).toBe("test-id");
     expect(connectDb).toHaveBeenCalled();
     expect(openVectorDb).toHaveBeenCalledWith("test-id");
+  });
+
+  it("repairs a stranded restore journal before reading config or opening the database", async () => {
+    vi.spyOn(fs, "existsSync").mockReturnValue(true);
+    const readSpy = vi.spyOn(fs, "readFileSync").mockReturnValue(
+      JSON.stringify({ name: "Loaded", premise: "A story", createdAt: 2000 })
+    );
+    vi.spyOn(fs, "mkdirSync").mockImplementation(() => "");
+    vi.mocked(repairPendingCampaignRestoreBeforeLoad).mockResolvedValue(true);
+
+    mockSelectGet.mockReturnValue({
+      id: "test-id",
+      name: "Loaded",
+      premise: "A story",
+      createdAt: 2000,
+      updatedAt: 2000,
+    });
+
+    await loadCampaign("test-id");
+
+    expect(repairPendingCampaignRestoreBeforeLoad).toHaveBeenCalledWith("test-id");
+    expect(finalizePendingCampaignRestoreAfterLoad).toHaveBeenCalledWith("test-id");
+    expect(
+      vi.mocked(repairPendingCampaignRestoreBeforeLoad).mock.invocationCallOrder[0],
+    ).toBeLessThan(readSpy.mock.invocationCallOrder[0]);
+    expect(
+      vi.mocked(repairPendingCampaignRestoreBeforeLoad).mock.invocationCallOrder[0],
+    ).toBeLessThan(vi.mocked(connectDb).mock.invocationCallOrder[0]);
+    expect(vi.mocked(openVectorDb).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(finalizePendingCampaignRestoreAfterLoad).mock.invocationCallOrder[0],
+    );
   });
 });
 

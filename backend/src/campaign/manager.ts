@@ -255,10 +255,15 @@ export async function createCampaign(
 export async function loadCampaign(id: string): Promise<CampaignMeta> {
   assertSafeId(id);
   ensureCampaignsDir();
+  const {
+    finalizePendingCampaignRestoreAfterLoad,
+    repairPendingCampaignRestoreBeforeLoad,
+  } = await import("./restore-bundle.js");
+  const repairedPendingRestore = await repairPendingCampaignRestoreBeforeLoad(id);
   const currentActiveCampaign = activeCampaign;
   const isSameActiveCampaign = currentActiveCampaign?.id === id;
 
-  if (isSameActiveCampaign) {
+  if (isSameActiveCampaign && !repairedPendingRestore) {
     try {
       getDb();
       return currentActiveCampaign;
@@ -320,6 +325,9 @@ export async function loadCampaign(id: string): Promise<CampaignMeta> {
 
     ensureCampaignInventoryAuthority(id);
     await openVectorDb(id);
+    if (repairedPendingRestore) {
+      await finalizePendingCampaignRestoreAfterLoad(id);
+    }
 
     const meta: CampaignMeta = {
       id: campaignRow.id,

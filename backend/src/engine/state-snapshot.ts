@@ -1,13 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { getCampaignDir } from "../campaign/paths.js";
-import { captureCampaignBundle, restoreCampaignBundle } from "../campaign/restore-bundle.js";
-import { createLogger } from "../lib/index.js";
-import { clearPendingCommittedEvents } from "../vectors/episodic-events.js";
 import {
-  invalidateAuthorityAfterRestore,
-  readWorldClock,
-} from "./living-world-authority.js";
+  captureCampaignBundle,
+  finalizePendingCampaignRestoreAfterLoad,
+  restoreCampaignBundle,
+} from "../campaign/restore-bundle.js";
+import { loadCampaign } from "../campaign/manager.js";
+import { createLogger } from "../lib/index.js";
 
 const log = createLogger("state-snapshot");
 
@@ -45,16 +45,10 @@ export async function restoreSnapshot(
 ): Promise<void> {
   await restoreCampaignBundle(campaignId, snapshot.bundleDir, {
     includeVectors: false,
+    restoreReason: "turn snapshot restored",
   });
-  clearPendingCommittedEvents(campaignId);
-  const restoredClock = readWorldClock(campaignId);
-  invalidateAuthorityAfterRestore({
-    campaignId,
-    restoredWorldVersion: restoredClock.worldVersion,
-    restoredWorldTimeMinutes: restoredClock.worldTimeMinutes,
-    restoredCurrentTick: restoredClock.currentTick,
-    reason: "turn snapshot restored",
-  });
+  await loadCampaign(campaignId);
+  await finalizePendingCampaignRestoreAfterLoad(campaignId);
   log.info(
     `Snapshot restored for campaign ${campaignId} from ${snapshot.bundleDir}`,
   );

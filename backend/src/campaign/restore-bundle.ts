@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import { loadCampaign } from "./manager.js";
 import {
   getCampaignConfigPath,
   getCampaignDir,
@@ -8,7 +7,14 @@ import {
 } from "./paths.js";
 import { closeDb, getSqliteConnection } from "../db/index.js";
 import { closeVectorDb } from "../vectors/connection.js";
-import { rebuildEpisodicEventsFromLocationRecentEvents } from "../vectors/episodic-events.js";
+import {
+  clearPendingCommittedEvents,
+  rebuildEpisodicEventsFromLocationRecentEvents,
+} from "../vectors/episodic-events.js";
+import {
+  invalidateAuthorityAfterRestore,
+  readWorldClock,
+} from "../engine/living-world-authority.js";
 import {
   createCampaignStoreBundleManifest,
   writeCampaignStoreBundleManifest,
@@ -20,10 +26,36 @@ import { planCampaignStoreManifestOperation } from "./store-manifest-executor.js
 type BundleOptions = {
   includeVectors: boolean;
   purpose?: CampaignStoreBundlePurpose;
+  restoreReason?: string;
 };
 
 const RESTORE_STAGING_DIRNAME = ".restore-staging";
 const RESTORE_STAGING_CURRENT_DIRNAME = "current";
+const RESTORE_JOURNAL_FILENAME = "restore-journal.json";
+
+type RestoreJournalPhase =
+  | "prepared"
+  | "handles_closed"
+  | "db_applied"
+  | "config_applied"
+  | "chat_applied"
+  | "vectors_applied"
+  | "awaiting_load"
+  | "finalizing"
+  | "complete";
+
+type RestoreJournal = {
+  schemaVersion: 1;
+  campaignId: string;
+  bundleDir: string;
+  includeVectors: boolean;
+  stagedDir: string;
+  restoreReason: string;
+  requiresEpisodicRebuild: boolean;
+  phase: RestoreJournalPhase;
+  createdAt: number;
+  updatedAt: number;
+};
 
 function resolveBundlePaths(bundleDir: string) {
   return {
@@ -44,8 +76,87 @@ function restoreStagingRoot(campaignDir: string): string {
   return path.join(campaignDir, RESTORE_STAGING_DIRNAME);
 }
 
+function restoreJournalPath(campaignDir: string): string {
+  return path.join(restoreStagingRoot(campaignDir), RESTORE_JOURNAL_FILENAME);
+}
+
 function clearRestoreStaging(campaignDir: string): void {
   fs.rmSync(restoreStagingRoot(campaignDir), { recursive: true, force: true });
+}
+
+function writeRestoreJournal(campaignDir: string, journal: RestoreJournal): void {
+  const journalPath = restoreJournalPath(campaignDir);
+  fs.mkdirSync(path.dirname(journalPath), { recursive: true });
+  const nextJournal = {
+    ...journal,
+    updatedAt: Date.now(),
+  };
+  const tempJournalPath = `${journalPath}.tmp`;
+  fs.writeFileSync(tempJournalPath, JSON.stringify(nextJournal, null, 2), "utf-8");
+  fs.renameSync(tempJournalPath, journalPath);
+}
+
+function readRestoreJournal(campaignDir: string): RestoreJournal | null {
+  const journalPath = restoreJournalPath(campaignDir);
+  if (!fs.existsSync(journalPath)) {
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(journalPath, "utf-8")) as unknown;
+  } catch (error) {
+    throw new Error(
+      `Pending restore journal at ${journalPath} is unreadable: ${String(error)}`,
+    );
+  }
+
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    (parsed as RestoreJournal).schemaVersion !== 1 ||
+    typeof (parsed as RestoreJournal).campaignId !== "string" ||
+    typeof (parsed as RestoreJournal).bundleDir !== "string" ||
+    typeof (parsed as RestoreJournal).stagedDir !== "string" ||
+    typeof (parsed as RestoreJournal).includeVectors !== "boolean" ||
+    typeof (parsed as RestoreJournal).requiresEpisodicRebuild !== "boolean" ||
+    typeof (parsed as RestoreJournal).restoreReason !== "string" ||
+    typeof (parsed as RestoreJournal).phase !== "string"
+  ) {
+    throw new Error(`Pending restore journal at ${journalPath} is invalid.`);
+  }
+
+  return parsed as RestoreJournal;
+}
+
+function requireJournalForCampaign(campaignDir: string, campaignId: string): RestoreJournal | null {
+  const journal = readRestoreJournal(campaignDir);
+  if (!journal) {
+    return null;
+  }
+  if (journal.campaignId !== campaignId) {
+    throw new Error(
+      `Pending restore journal belongs to ${journal.campaignId}, not ${campaignId}.`,
+    );
+  }
+  const stagingRoot = path.resolve(restoreStagingRoot(campaignDir));
+  const stagedDir = path.resolve(journal.stagedDir);
+  if (stagedDir !== stagingRoot && !stagedDir.startsWith(`${stagingRoot}${path.sep}`)) {
+    throw new Error(
+      `Pending restore journal stagedDir is outside restore staging: ${journal.stagedDir}`,
+    );
+  }
+  return journal;
+}
+
+function updateRestoreJournalPhase(
+  campaignDir: string,
+  journal: RestoreJournal,
+  phase: RestoreJournalPhase,
+): RestoreJournal {
+  const nextJournal = { ...journal, phase, updatedAt: Date.now() };
+  writeRestoreJournal(campaignDir, nextJournal);
+  return nextJournal;
 }
 
 function prepareRestoreStaging(input: {
@@ -88,6 +199,10 @@ function applyTurnRollbackVectorPolicies(campaignVectorsPath: string): void {
 
   for (const step of plan.steps.filter((candidate) => candidate.store.startsWith("vectors:"))) {
     if (step.action === "purge_rebuild") {
+      fs.rmSync(vectorTableDirForStore(campaignVectorsPath, step.store), {
+        recursive: true,
+        force: true,
+      });
       continue;
     }
     if (step.action === "purge") {
@@ -104,6 +219,115 @@ function applyTurnRollbackVectorPolicies(campaignVectorsPath: string): void {
       `Turn rollback cannot apply vector restore action ${step.action} for ${step.store}.`,
     );
   }
+}
+
+function assertStagedRestoreFiles(journal: RestoreJournal): ReturnType<typeof resolveBundlePaths> {
+  const stagedPaths = resolveBundlePaths(journal.stagedDir);
+  for (const requiredPath of [stagedPaths.dbPath, stagedPaths.configPath, stagedPaths.chatPath]) {
+    if (!fs.existsSync(requiredPath)) {
+      throw new Error(
+        `Pending restore journal cannot be repaired because staged file is missing: ${requiredPath}`,
+      );
+    }
+  }
+  if (journal.includeVectors && !fs.existsSync(stagedPaths.vectorsPath)) {
+    throw new Error(
+      `Pending checkpoint restore journal cannot be repaired because staged vectors are missing: ${stagedPaths.vectorsPath}`,
+    );
+  }
+  return stagedPaths;
+}
+
+function applyStagedRestore(input: {
+  campaignId: string;
+  campaignDir: string;
+  journal: RestoreJournal;
+}): RestoreJournal {
+  const stagedPaths = assertStagedRestoreFiles(input.journal);
+  const campaignDbPath = path.join(input.campaignDir, "state.db");
+  const campaignConfigPath = getCampaignConfigPath(input.campaignId);
+  const campaignChatPath = getChatHistoryPath(input.campaignId);
+  const campaignVectorsPath = path.join(input.campaignDir, "vectors");
+  let journal = input.journal;
+
+  closeDb();
+  closeVectorDb();
+  journal = updateRestoreJournalPhase(input.campaignDir, journal, "handles_closed");
+
+  removeSqliteSidecarFiles(campaignDbPath);
+  fs.copyFileSync(stagedPaths.dbPath, campaignDbPath);
+  removeSqliteSidecarFiles(campaignDbPath);
+  journal = updateRestoreJournalPhase(input.campaignDir, journal, "db_applied");
+
+  fs.copyFileSync(stagedPaths.configPath, campaignConfigPath);
+  journal = updateRestoreJournalPhase(input.campaignDir, journal, "config_applied");
+
+  if (fs.existsSync(stagedPaths.chatPath)) {
+    fs.copyFileSync(stagedPaths.chatPath, campaignChatPath);
+  } else {
+    fs.writeFileSync(campaignChatPath, "[]", "utf-8");
+  }
+  journal = updateRestoreJournalPhase(input.campaignDir, journal, "chat_applied");
+
+  if (journal.includeVectors && fs.existsSync(stagedPaths.vectorsPath)) {
+    const replacementVectorsPath = path.join(
+      restoreStagingRoot(input.campaignDir),
+      "vectors-replacement",
+    );
+    fs.rmSync(replacementVectorsPath, { recursive: true, force: true });
+    fs.cpSync(stagedPaths.vectorsPath, replacementVectorsPath, { recursive: true });
+    fs.rmSync(campaignVectorsPath, { recursive: true, force: true });
+    fs.cpSync(replacementVectorsPath, campaignVectorsPath, { recursive: true });
+  } else if (!journal.includeVectors) {
+    applyTurnRollbackVectorPolicies(campaignVectorsPath);
+  }
+  journal = updateRestoreJournalPhase(input.campaignDir, journal, "vectors_applied");
+
+  return updateRestoreJournalPhase(input.campaignDir, journal, "awaiting_load");
+}
+
+export async function repairPendingCampaignRestoreBeforeLoad(
+  campaignId: string,
+): Promise<boolean> {
+  const campaignDir = getCampaignDir(campaignId);
+  const journal = requireJournalForCampaign(campaignDir, campaignId);
+  if (!journal) {
+    return false;
+  }
+
+  applyStagedRestore({
+    campaignId,
+    campaignDir,
+    journal,
+  });
+  return true;
+}
+
+export async function finalizePendingCampaignRestoreAfterLoad(
+  campaignId: string,
+): Promise<boolean> {
+  const campaignDir = getCampaignDir(campaignId);
+  let journal = requireJournalForCampaign(campaignDir, campaignId);
+  if (!journal) {
+    return false;
+  }
+
+  journal = updateRestoreJournalPhase(campaignDir, journal, "finalizing");
+  clearPendingCommittedEvents(campaignId);
+  const restoredClock = readWorldClock(campaignId);
+  invalidateAuthorityAfterRestore({
+    campaignId,
+    restoredWorldVersion: restoredClock.worldVersion,
+    restoredWorldTimeMinutes: restoredClock.worldTimeMinutes,
+    restoredCurrentTick: restoredClock.currentTick,
+    reason: journal.restoreReason,
+  });
+  if (journal.requiresEpisodicRebuild) {
+    await rebuildEpisodicEventsFromLocationRecentEvents(campaignId);
+  }
+  updateRestoreJournalPhase(campaignDir, journal, "complete");
+  clearRestoreStaging(campaignDir);
+  return true;
 }
 
 export async function captureCampaignBundle(
@@ -156,11 +380,12 @@ export async function restoreCampaignBundle(
 ): Promise<void> {
   const campaignDir = getCampaignDir(campaignId);
   const bundlePaths = resolveBundlePaths(bundleDir);
-  const campaignDbPath = path.join(campaignDir, "state.db");
-  const campaignConfigPath = getCampaignConfigPath(campaignId);
-  const campaignChatPath = getChatHistoryPath(campaignId);
-  const campaignVectorsPath = path.join(campaignDir, "vectors");
 
+  if (await repairPendingCampaignRestoreBeforeLoad(campaignId)) {
+    throw new Error(
+      `Campaign ${campaignId} has a repaired pending restore; load the campaign before starting another restore.`,
+    );
+  }
   await assertCampaignStoreBundleRestorableWithEvidence({
     bundleDir,
     includeVectors: options.includeVectors,
@@ -170,36 +395,25 @@ export async function restoreCampaignBundle(
     bundlePaths,
     includeVectors: options.includeVectors,
   });
+  const journal: RestoreJournal = {
+    schemaVersion: 1,
+    campaignId,
+    bundleDir,
+    includeVectors: options.includeVectors,
+    stagedDir: path.dirname(stagedPaths.dbPath),
+    restoreReason:
+      options.restoreReason ??
+      (options.includeVectors ? "checkpoint restored" : "turn snapshot restored"),
+    requiresEpisodicRebuild: !options.includeVectors,
+    phase: "prepared",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  writeRestoreJournal(campaignDir, journal);
 
-  try {
-    closeDb();
-    closeVectorDb();
-
-    removeSqliteSidecarFiles(campaignDbPath);
-    fs.copyFileSync(stagedPaths.dbPath, campaignDbPath);
-    removeSqliteSidecarFiles(campaignDbPath);
-    fs.copyFileSync(stagedPaths.configPath, campaignConfigPath);
-
-    if (fs.existsSync(stagedPaths.chatPath)) {
-      fs.copyFileSync(stagedPaths.chatPath, campaignChatPath);
-    } else {
-      fs.writeFileSync(campaignChatPath, "[]", "utf-8");
-    }
-
-    if (options.includeVectors && fs.existsSync(stagedPaths.vectorsPath)) {
-      fs.rmSync(campaignVectorsPath, { recursive: true, force: true });
-      fs.cpSync(stagedPaths.vectorsPath, campaignVectorsPath, { recursive: true });
-    } else if (!options.includeVectors) {
-      applyTurnRollbackVectorPolicies(campaignVectorsPath);
-    }
-
-    clearRestoreStaging(campaignDir);
-    await loadCampaign(campaignId);
-    if (!options.includeVectors) {
-      await rebuildEpisodicEventsFromLocationRecentEvents(campaignId);
-    }
-  } catch (error) {
-    clearRestoreStaging(campaignDir);
-    throw error;
-  }
+  applyStagedRestore({
+    campaignId,
+    campaignDir,
+    journal,
+  });
 }

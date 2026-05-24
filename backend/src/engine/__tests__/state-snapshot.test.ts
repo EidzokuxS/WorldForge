@@ -39,6 +39,15 @@ vi.mock("../../vectors/episodic-events.js", () => ({
   rebuildEpisodicEventsFromLocationRecentEvents: vi.fn(async () => ({ rebuiltCount: 0 })),
 }));
 
+vi.mock("../living-world-authority.js", () => ({
+  invalidateAuthorityAfterRestore: vi.fn(),
+  readWorldClock: vi.fn(() => ({
+    worldVersion: 7,
+    worldTimeMinutes: 90,
+    currentTick: 7,
+  })),
+}));
+
 vi.mock("node:fs", () => ({
   default: {
     mkdirSync: vi.fn(),
@@ -46,6 +55,8 @@ vi.mock("node:fs", () => ({
     cpSync: vi.fn(),
     existsSync: vi.fn(() => true),
     mkdtempSync: vi.fn(() => "/campaigns/test-campaign-123/.turn-boundaries/bundle-001"),
+    readFileSync: vi.fn(),
+    renameSync: vi.fn(),
     rmSync: vi.fn(),
     writeFileSync: vi.fn(),
   },
@@ -56,17 +67,52 @@ import { getDb, getSqliteConnection, closeDb } from "../../db/index.js";
 import { loadCampaign, readCampaignConfig } from "../../campaign/manager.js";
 import { getCampaignDir } from "../../campaign/paths.js";
 import {
+  finalizePendingCampaignRestoreAfterLoad,
+  repairPendingCampaignRestoreBeforeLoad,
+} from "../../campaign/restore-bundle.js";
+
+import {
   clearPendingCommittedEvents,
   rebuildEpisodicEventsFromLocationRecentEvents,
 } from "../../vectors/episodic-events.js";
 import fs from "node:fs";
 
 const CAMPAIGN_ID = "test-campaign-123";
+const writtenFileContents = new Map<string, string>();
 
 describe("state snapshot rollback bundle", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    writtenFileContents.clear();
     (getCampaignDir as Mock).mockReturnValue(`/campaigns/${CAMPAIGN_ID}`);
+    (fs.existsSync as Mock).mockImplementation(
+      (targetPath: string) => {
+        const normalizedPath = String(targetPath);
+        if (normalizedPath.endsWith("restore-journal.json")) {
+          return writtenFileContents.has(normalizedPath);
+        }
+        return true;
+      },
+    );
+    (fs.writeFileSync as Mock).mockImplementation(
+      (targetPath: string, contents: string) => {
+        writtenFileContents.set(String(targetPath), String(contents));
+      },
+    );
+    (fs.renameSync as Mock).mockImplementation((from: string, to: string) => {
+      const contents = writtenFileContents.get(String(from));
+      if (contents !== undefined) {
+        writtenFileContents.set(String(to), contents);
+        writtenFileContents.delete(String(from));
+      }
+    });
+    (fs.readFileSync as Mock).mockImplementation((targetPath: string) => {
+      const normalizedPath = String(targetPath);
+      if (writtenFileContents.has(normalizedPath)) {
+        return writtenFileContents.get(normalizedPath);
+      }
+      throw new Error(`Unexpected readFileSync(${normalizedPath})`);
+    });
     (getDb as Mock).mockReturnValue({
       select: vi.fn().mockReturnThis(),
       from: vi.fn().mockReturnThis(),
@@ -176,7 +222,7 @@ describe("state snapshot rollback bundle", () => {
       expect.any(String),
       expect.anything(),
     );
-    expect(fs.rmSync).not.toHaveBeenCalledWith(
+    expect(fs.rmSync).toHaveBeenCalledWith(
       expect.stringContaining("vectors\\episodic_events.lance"),
       expect.anything(),
     );
@@ -228,8 +274,62 @@ describe("state snapshot rollback bundle", () => {
     expect((fs.rmSync as Mock).mock.invocationCallOrder[0]).toBeLessThan(
       (fs.copyFileSync as Mock).mock.invocationCallOrder[0],
     );
-    expect((fs.rmSync as Mock).mock.invocationCallOrder.at(-1)!).toBeLessThan(
+    const sidecarRemovalOrders = (fs.rmSync as Mock).mock.calls
+      .map((call, index) => ({
+        target: String(call[0]),
+        order: (fs.rmSync as Mock).mock.invocationCallOrder[index],
+      }))
+      .filter((call) => call.target.includes(`${CAMPAIGN_ID}\\state.db-`))
+      .map((call) => call.order);
+    expect(Math.max(...sidecarRemovalOrders)).toBeLessThan(
       (loadCampaign as Mock).mock.invocationCallOrder[0],
     );
+  });
+
+  it("rolls a pending restore journal forward after a crash leaves DB copied before config/chat", async () => {
+    const snapshot = {
+      campaignId: CAMPAIGN_ID,
+      bundleDir: "/campaigns/test-campaign-123/.turn-boundaries/bundle-001",
+      capturedAt: Date.now(),
+    } as Awaited<ReturnType<typeof captureSnapshot>>;
+    let failedOnce = false;
+    (fs.copyFileSync as Mock).mockImplementation((from: string, to: string) => {
+      if (
+        !failedOnce &&
+        String(from).includes(".restore-staging\\current\\config.json") &&
+        String(to).endsWith("config.json")
+      ) {
+        failedOnce = true;
+        throw new Error("simulated crash after DB copy");
+      }
+    });
+
+    await expect(restoreSnapshot(CAMPAIGN_ID, snapshot)).rejects.toThrow(
+      "simulated crash after DB copy",
+    );
+    expect([...writtenFileContents.keys()].some((filePath) =>
+      filePath.endsWith("restore-journal.json"),
+    )).toBe(true);
+
+    (fs.copyFileSync as Mock).mockImplementation(() => undefined);
+
+    await repairPendingCampaignRestoreBeforeLoad(CAMPAIGN_ID);
+    await loadCampaign(CAMPAIGN_ID);
+    await finalizePendingCampaignRestoreAfterLoad(CAMPAIGN_ID);
+
+    expect(fs.copyFileSync).toHaveBeenCalledWith(
+      expect.stringContaining(".restore-staging\\current\\state.db"),
+      expect.stringContaining(`${CAMPAIGN_ID}\\state.db`),
+    );
+    expect(fs.copyFileSync).toHaveBeenCalledWith(
+      expect.stringContaining(".restore-staging\\current\\config.json"),
+      expect.stringContaining(`${CAMPAIGN_ID}/config.json`),
+    );
+    expect(fs.copyFileSync).toHaveBeenCalledWith(
+      expect.stringContaining(".restore-staging\\current\\chat_history.json"),
+      expect.stringContaining(`${CAMPAIGN_ID}/chat_history.json`),
+    );
+    expect(clearPendingCommittedEvents).toHaveBeenCalledWith(CAMPAIGN_ID);
+    expect(rebuildEpisodicEventsFromLocationRecentEvents).toHaveBeenCalledWith(CAMPAIGN_ID);
   });
 });
