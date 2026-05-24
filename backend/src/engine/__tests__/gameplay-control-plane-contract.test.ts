@@ -172,6 +172,7 @@ describe("Phase 95 gameplay control-plane contracts", () => {
         placeHandle: "pdto_place_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         actorHandle: "pdto_actor_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         itemHandle: "pdto_item_cccccccccccccccccccccccccccccccc",
+        draft: { provenance: { sourceKind: "player-input" } },
       },
     })).not.toThrow();
 

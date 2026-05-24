@@ -92,15 +92,20 @@ function resolvePublicCheckpointMeta(
 }
 
 function sanitizeCharacterDraftForPublicProjection<T extends ReturnType<typeof toCharacterDraft>>(
+  campaignId: string,
   draft: T,
 ): T {
   return {
     ...draft,
+    startConditions: {
+      ...draft.startConditions,
+      startLocationId: publicHandle(campaignId, "place", draft.startConditions.startLocationId),
+    },
     socialContext: {
       ...draft.socialContext,
-      factionId: null,
-      homeLocationId: null,
-      currentLocationId: null,
+      factionId: publicHandle(campaignId, "faction", draft.socialContext.factionId),
+      homeLocationId: publicHandle(campaignId, "place", draft.socialContext.homeLocationId),
+      currentLocationId: publicHandle(campaignId, "place", draft.socialContext.currentLocationId),
       relationshipRefs: draft.socialContext.relationshipRefs.map((ref) => ({
         ...ref,
         entityId: null,
@@ -258,7 +263,7 @@ function buildWorldNpcPayload(
   row: Parameters<typeof hydrateStoredNpcRecord>[0],
 ) {
   const record = hydrateStoredNpcRecord(row);
-  const draft = sanitizeCharacterDraftForPublicProjection(toCharacterDraft(record));
+  const draft = sanitizeCharacterDraftForPublicProjection(campaignId, toCharacterDraft(record));
   const compatibilityTags = buildCompatibilityTags(record);
   const actorHandle = requiredPublicHandle(campaignId, "actor", row.id);
   return {
@@ -290,7 +295,10 @@ function buildWorldPlayerPayload(args: {
 }) {
   const playerInventory = loadAuthoritativeInventoryView(args.campaignId, args.row.id);
   const compatibilityTags = buildCompatibilityTags(args.playerRecord);
-  const draft = sanitizeCharacterDraftForPublicProjection(toCharacterDraft(args.playerRecord));
+  const draft = sanitizeCharacterDraftForPublicProjection(
+    args.campaignId,
+    toCharacterDraft(args.playerRecord),
+  );
   const actorHandle = requiredPublicHandle(args.campaignId, "actor", args.row.id);
   const character = toLegacyPlayerCharacterWithInventory(
     args.playerRecord,

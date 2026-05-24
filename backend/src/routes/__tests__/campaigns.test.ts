@@ -208,7 +208,9 @@ function makeStoredPlayerRow() {
       currencyNotes: "",
       signatureItems: ["Sword"],
     },
-    startConditions: {},
+    startConditions: {
+      startLocationId: "loc-1",
+    },
     provenance: {
       sourceKind: "generator",
       importMode: null,
@@ -331,7 +333,9 @@ function makeStoredNpcRow() {
       currencyNotes: "",
       signatureItems: [],
     },
-    startConditions: {},
+    startConditions: {
+      startLocationId: "loc-1",
+    },
     provenance: {
       sourceKind: "import",
       importMode: "outsider",
@@ -1160,7 +1164,8 @@ describe("GET /:id/world", () => {
       "Generator concept",
     );
     expect(body.player.draft.continuity.identityInertia).toBe("flexible");
-    expect(body.player.draft.socialContext.currentLocationId).toBeNull();
+    expectPublicHandle(body.player.draft.socialContext.currentLocationId, "place");
+    expectPublicHandle(body.player.draft.startConditions.startLocationId, "place");
     expect(body.npcs[0]).not.toHaveProperty("characterRecord");
     expect(body.npcs[0].draft.identity.baseFacts.biography).toBe(
       "Carries messages through the storm.",
@@ -1174,7 +1179,8 @@ describe("GET /:id/world", () => {
       "Card description",
     );
     expect(body.npcs[0].draft.continuity.identityInertia).toBe("anchored");
-    expect(body.npcs[0].draft.socialContext.currentLocationId).toBeNull();
+    expectPublicHandle(body.npcs[0].draft.socialContext.currentLocationId, "place");
+    expectPublicHandle(body.npcs[0].draft.startConditions.startLocationId, "place");
     expectJsonNotToContain(body, ["\"characterRecord\"", "player-1", "npc-1", "loc-1"]);
   });
 

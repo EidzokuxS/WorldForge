@@ -794,9 +794,17 @@ const BACKEND_REF_BOUNDARY_PATTERN =
 const BACKEND_STORAGE_ID_PATTERN =
   /^(?:campaign|camp|loc|location|npc|player|item|faction|relationship|route|edge|event)-[A-Za-z0-9_.:-]+$/i;
 
+const PUBLIC_PROJECTION_SAFE_STRING_VALUES = new Set([
+  "player-input",
+]);
+
 export function assertNoBackendRefsInPublicValue(value: unknown, path = "$"): void {
   if (typeof value === "string") {
-    if (BACKEND_REF_BOUNDARY_PATTERN.test(value) || BACKEND_STORAGE_ID_PATTERN.test(value.trim())) {
+    const trimmed = value.trim();
+    if (
+      !PUBLIC_PROJECTION_SAFE_STRING_VALUES.has(trimmed)
+      && (BACKEND_REF_BOUNDARY_PATTERN.test(value) || BACKEND_STORAGE_ID_PATTERN.test(trimmed))
+    ) {
       throw new Error(`Backend ref crossed public boundary at ${path}.`);
     }
     return;

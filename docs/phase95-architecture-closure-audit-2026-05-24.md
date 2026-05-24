@@ -59,9 +59,18 @@ bundle sessions were tiny or missing, but those are now treated as
 conversation is inaccessible through backend JSON and DOM. Do not repeat
 GPT-5.5 Pro runs for this gate unless explicitly requested.
 
+Initial in-app Browser workability on the restarted current dev stack now
+loads `/game`, opens Saves, deletes an existing checkpoint through a
+`pdto_checkpoint_*` handle, and leaves checkpoint list empty with zero console
+errors. That smoke also caught and closed a live `/world` public projection
+gap: `CharacterDraft.startConditions.startLocationId` and draft social
+location/faction refs are projected as public handles, while the public
+boundary explicitly allows the typed `player-input` enum without allowing raw
+`player-*` ids. Radix Dialog aria-description warnings remain P2 UX debt.
+
 No long human-style 60-turn, cloned-world, or 600-turn soak acceptance should
 resume until the full local closure matrix is bundled, Oracle-reviewed on a
-frozen current tree, and Browser workability is rechecked.
+frozen current tree, and Browser workability is expanded beyond this smoke.
 
 ## Full Stage Coverage
 
@@ -79,8 +88,8 @@ frozen current tree, and Browser workability is rechecked.
 | Time | `world_clocks`, turn clock ledger | living-world authority clock commit service | UI turn ordinal, narration tick | proposed `advance_time` args | non-negative deltas, no turn-boundary time advance, accepted receipt source | clock ledger rows, public world time, no-op/wait/travel/resume tests |
 | Narrator packet | settled canonical turn packet plus citable fact list | narrator packet builder | recent transcript, opening scene, guardrails, diagnostics | none | redaction audit, support-only classification, packet budget trace | settled packet persisted before final narration; resume from packet |
 | Final narration | backend-issued fact refs and narrator attempt | narration guard/turn processor | style instruction, support context | selected fact refs/evidence refs/order/style | fact-ref required, private/backend term scan, grounding compile, repair/fail-closed | assistant SSE/chat line; live and resume regressions reject legacy text/private prose |
-| SSE/API projection | player-facing DTO factories | projection modules and route projectors | internal saga/tool/state objects | none | public DTO schemas, backend-ref guard, explicit event allowlists, legacy raw-id rejection | `turn_resolution`, lookup, world, inventory, history, checkpoint, NPC promote tests; raw legacy id guard targeted test green |
-| Frontend projection | `frontend/lib/api.ts` parsed DTOs | frontend API parser | debug state, local render state | none | public handle parser, SSE parser, malformed payload errors, no raw fallback authority | API parser rejects/drops raw `loc-*`/`npc-*`/`item-*` fallbacks; Browser evidence still required |
+| SSE/API projection | player-facing DTO factories | projection modules and route projectors | internal saga/tool/state objects | none | public DTO schemas, backend-ref guard, explicit event allowlists, legacy raw-id rejection | `turn_resolution`, lookup, world, inventory, history, checkpoint, NPC promote tests; raw legacy id guard targeted test green; Browser caught and fixed draft `startLocationId` projection |
+| Frontend projection | `frontend/lib/api.ts` parsed DTOs | frontend API parser | debug state, local render state | none | public handle parser, SSE parser, malformed payload errors, no raw fallback authority | API parser rejects/drops raw `loc-*`/`npc-*`/`item-*` fallbacks; Browser Saves smoke passes with zero console errors |
 | Persistence bundles | `store-manifest.json` plus campaign stores | manifest/bundle capture and restore services | evidence hashes, playtest reports | none | manifest coverage, policy schemas, path safety, hash/row-count recomputation | checkpoint/turn snapshot tests; corrupted SQLite/vector evidence fails before live copy |
 | Clone | source campaign stores plus manifest plan | clean-start clone service | old source artifacts as forensic context only | none | active-turn rejection, manifest-dispatched id rewrite/purge/rebuild/reject plan, path safety | durable clone manifest, filesystem action evidence, broad residue tests |
 | Rollback/replay/vector | turn snapshots, checkpoints, vector stores, event ledgers | rollback/restore service | vector evidence, playtest harness logs | none | restore policy executor, vector include/exclude policy, recovery mode gate | rollback snapshot restore; episodic vectors reconcile to restored receipts while preserving matching pre-turn vectors |
@@ -107,7 +116,7 @@ frozen current tree, and Browser workability is rechecked.
 | Narrator packet | settled packet and fact list | narrator packet builder | support context, diagnostics | none | selectable/support/private classification | fact refs/evidence refs | resume packet tests |
 | Final narration attempt | narrator attempt record and compiled text | narration guard | style and support prompts | selected fact refs and style/order | selected ref existence, citable kind, private-term guard | public assistant message | no text fallback/unsupported term tests; live/resume fail-closed regressions |
 | Chat history/pending resume | chat history file plus saga state | chat route/resume owner | internal metadata | none | history projection, resume token check | public history DTO | coarse public recovery state plus opaque resume token; route tests reject saga status/id leakage |
-| Checkpoints/artifacts | checkpoint directories and manifest | checkpoint service | checkpoint UI labels | none | manifest restorable checks, path safety, public handle resolver | `pdto_checkpoint_*` metadata; storage ids stay internal | route/API/UI tests reject raw checkpoint ids and resolve handles to storage ids |
+| Checkpoints/artifacts | checkpoint directories and manifest | checkpoint service | checkpoint UI labels | none | manifest restorable checks, path safety, public handle resolver | `pdto_checkpoint_*` metadata; storage ids stay internal | route/API/UI tests reject raw checkpoint ids and resolve handles to storage ids; Browser delete smoke passes |
 | Vectors | LanceDB episodic/lore tables | vector services plus rollback policy | vector evidence stats | none | campaign/audience filters, row counts, hashes | semantic retrieval only | restore verifies evidence; turn rollback preserves matching pre-turn vectors and rebuilds missing rows from `location_recent_events` |
 | Observability | logs, trace spans, eval artifacts | observability/test harness | local-only full payloads | human/Codex moves | no private leakage to public/remote, evidence rubric | trace ids, verdict reports | Browser/UI, GitNexus, Oracle, human-style playtest evidence |
 
@@ -266,8 +275,9 @@ References Used:
 
 Unverified Assumptions:
 
-- In-app Browser evidence will confirm the stricter frontend parser still
-  renders current backend `pdto_*` payloads in the real game UI.
+- Initial in-app Browser smoke confirms current backend `pdto_*` world and
+  checkpoint payloads render and delete through Saves, but it is not yet a
+  long-play or cloned-world acceptance run.
 
 ### B. Refs, Aliases, Capabilities
 
