@@ -7518,6 +7518,72 @@ describe("processTurn ScenePlan path", () => {
     );
   });
 
+  it("fails closed before chat or SSE when live final narration returns legacy text with private prose", async () => {
+    setupMocks();
+    setupScenePlanMocks();
+    const leakedText =
+      "Forest Outpost unlocks the hidden npc:secret_captain route even though no accepted fact granted it.";
+    let finalNarrationCalls = 0;
+    vi.mocked(safeGenerateObject).mockImplementation(async (opts?: { prompt?: unknown }) => {
+      const prompt = String(opts?.prompt ?? "");
+      if (
+        prompt.includes("Final narration prompt")
+        || prompt.includes("[FINAL NARRATION TASK]")
+        || prompt.includes("Opening visible prompt")
+      ) {
+        finalNarrationCalls += 1;
+        return {
+          object: {
+            version: "grounded-sentence-draft.v2",
+            sentences: [
+              {
+                text: leakedText,
+                evidenceRefs: ["e1"],
+              },
+            ],
+          },
+          trace: {
+            text: "",
+            cleanedText: "",
+            strategy: "native_json",
+            primaryStrategy: "native_json",
+            finishReason: "stop",
+            response: { modelId: "mock-model" },
+          },
+        } as never;
+      }
+
+      return { object: { isMovement: false, destination: null }, trace: {} } as never;
+    });
+
+    const events: TurnEvent[] = [];
+    await expect((async () => {
+      for await (const event of processTurn(createTestOptions())) {
+        events.push(event);
+      }
+    })()).rejects.toThrow(NarrationRepairExhaustedError);
+
+    expect(finalNarrationCalls).toBe(2);
+    for (const [call] of vi.mocked(safeGenerateObject).mock.calls.filter(([call]) =>
+      String(call?.prompt ?? "").includes("Final narration prompt"),
+    )) {
+      expect(call).toMatchObject({
+        allowTextFallback: false,
+        allowRepair: false,
+        strictSchema: true,
+        mode: "native_json",
+      });
+    }
+    expect(JSON.stringify(events)).not.toContain(leakedText);
+    expect(JSON.stringify(events)).not.toContain("npc:secret_captain");
+    expect(assistantAppendCallOrder()).toBeUndefined();
+    expect(JSON.stringify(vi.mocked(appendChatMessages).mock.calls)).not.toContain(leakedText);
+    expect(updateNarratorAttemptOutcomeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "failed" }),
+    );
+    expect(markTurnSagaFinalizedMock).not.toHaveBeenCalled();
+  });
+
   it("does not run packet recovery regeneration after grounded sentence draft transport timeout", async () => {
     setupMocks();
     setupScenePlanMocks();

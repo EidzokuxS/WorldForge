@@ -203,7 +203,7 @@ architecture boundaries by accident.
 | World-brain/forecast/guardrails | prompt context, forecasts, support rows | forecast/support builders | model suggestions/diagnostics | support-only classification, no hidden-fact promotion | support context only | hidden-leak watch coverage; P2 broader tests |
 | Authority traces/events | authority trace/event rows | accepting executor/proposal owner | summaries as receipt payload | citable/private classification | event refs, packet facts | receipt mismatch/rollback/vector rebuild tests |
 | Narrator packet | settled packet and fact list | packet builder | support context | redaction, packet budget, citable/support split | persisted packet/fact refs | resume packet tests |
-| Final narration attempt | narrator attempts plus compiled text | narration guard/turn processor | selected refs/style/order | selected ref existence, private term scan, grounding | assistant SSE/chat line | no-live-text tests; P2 full turn/resume regression |
+| Final narration attempt | narrator attempts plus compiled text | narration guard/turn processor | selected refs/style/order | selected ref existence, private term scan, grounding | assistant SSE/chat line | live/resume no-legacy-text regressions |
 | Chat history/pending resume | chat history JSON plus saga state | chat route/resume owner | internal metadata | public history DTO, resume token | public history and recovery state | route tests reject saga id/status leaks |
 | SSE/API projection | DTO factories and route projectors | route/projector modules | none | public schemas, event allowlists, backend-ref guard | public events/JSON | raw legacy id rejection tests |
 | Frontend render state | parsed public DTOs/local UI state | frontend API parser/components | draft/debug local state | public handle parser, malformed payload errors | rendered labels/actions only | API/checkpoint tests; Browser pending |
@@ -257,8 +257,6 @@ architecture boundaries by accident.
 
 These items are intentionally not buried under "green tests":
 
-- P2: full turn/resume final-narration regression for legacy
-  `sentences[].text` and unsupported/private terms.
 - P2: world-brain/forecast/guardrail hidden-leak coverage should become more
   exhaustive during long-play hardening.
 - P2: faction/command-node row semantics deserve a focused audit beyond clone

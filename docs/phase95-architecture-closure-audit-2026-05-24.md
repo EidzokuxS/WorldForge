@@ -78,7 +78,7 @@ frozen current tree, and Browser workability is rechecked.
 | Due-world runtime | actor processes, world threads, proposal queue | due-world resolver/proposal executor | forecast/world-brain/guardrails | proposals, deterministic plan payloads | due time, scope conflicts, proposal lifecycle, support-only filtering, deterministic emitted-ref coverage | deferred proposal rows, skipped/executed traces; active-plan scope mismatch tests |
 | Time | `world_clocks`, turn clock ledger | living-world authority clock commit service | UI turn ordinal, narration tick | proposed `advance_time` args | non-negative deltas, no turn-boundary time advance, accepted receipt source | clock ledger rows, public world time, no-op/wait/travel/resume tests |
 | Narrator packet | settled canonical turn packet plus citable fact list | narrator packet builder | recent transcript, opening scene, guardrails, diagnostics | none | redaction audit, support-only classification, packet budget trace | settled packet persisted before final narration; resume from packet |
-| Final narration | backend-issued fact refs and narrator attempt | narration guard/turn processor | style instruction, support context | selected fact refs/evidence refs/order/style | fact-ref required, private/backend term scan, grounding compile, repair/fail-closed | assistant SSE/chat line; no live text fallback; **P2: full turn/resume regression still needed** |
+| Final narration | backend-issued fact refs and narrator attempt | narration guard/turn processor | style instruction, support context | selected fact refs/evidence refs/order/style | fact-ref required, private/backend term scan, grounding compile, repair/fail-closed | assistant SSE/chat line; live and resume regressions reject legacy text/private prose |
 | SSE/API projection | player-facing DTO factories | projection modules and route projectors | internal saga/tool/state objects | none | public DTO schemas, backend-ref guard, explicit event allowlists, legacy raw-id rejection | `turn_resolution`, lookup, world, inventory, history, checkpoint, NPC promote tests; raw legacy id guard targeted test green |
 | Frontend projection | `frontend/lib/api.ts` parsed DTOs | frontend API parser | debug state, local render state | none | public handle parser, SSE parser, malformed payload errors, no raw fallback authority | API parser rejects/drops raw `loc-*`/`npc-*`/`item-*` fallbacks; Browser evidence still required |
 | Persistence bundles | `store-manifest.json` plus campaign stores | manifest/bundle capture and restore services | evidence hashes, playtest reports | none | manifest coverage, policy schemas, path safety, hash/row-count recomputation | checkpoint/turn snapshot tests; corrupted SQLite/vector evidence fails before live copy |
@@ -105,7 +105,7 @@ frozen current tree, and Browser workability is rechecked.
 | Inventory/items/documents | items tables/tags/holder state | inventory authority/tool executor | dialogue claims | item/tool args | item existence, holder refs, tag/state descriptors | item public handles/facts | transfer/spawn/document state tests |
 | Knowledge/events | authority traces, events, knowledge rows | tool/proposal owner that accepted the event | recent transcript, observations | summaries as receipt payload only | citable/public/private surface policy | event refs, packet facts | rollback/vector rebuild tests |
 | Narrator packet | settled packet and fact list | narrator packet builder | support context, diagnostics | none | selectable/support/private classification | fact refs/evidence refs | resume packet tests |
-| Final narration attempt | narrator attempt record and compiled text | narration guard | style and support prompts | selected fact refs and style/order | selected ref existence, citable kind, private-term guard | public assistant message | no text fallback/unsupported term tests; full E2E gap remains |
+| Final narration attempt | narrator attempt record and compiled text | narration guard | style and support prompts | selected fact refs and style/order | selected ref existence, citable kind, private-term guard | public assistant message | no text fallback/unsupported term tests; live/resume fail-closed regressions |
 | Chat history/pending resume | chat history file plus saga state | chat route/resume owner | internal metadata | none | history projection, resume token check | public history DTO | coarse public recovery state plus opaque resume token; route tests reject saga status/id leakage |
 | Checkpoints/artifacts | checkpoint directories and manifest | checkpoint service | checkpoint UI labels | none | manifest restorable checks, path safety, public handle resolver | `pdto_checkpoint_*` metadata; storage ids stay internal | route/API/UI tests reject raw checkpoint ids and resolve handles to storage ids |
 | Vectors | LanceDB episodic/lore tables | vector services plus rollback policy | vector evidence stats | none | campaign/audience filters, row counts, hashes | semantic retrieval only | restore verifies evidence; turn rollback preserves matching pre-turn vectors and rebuilds missing rows from `location_recent_events` |
@@ -209,6 +209,13 @@ and human-style long-play evidence remain required.
    - Contract tests require every runtime state effect kind to map to one
      gameplay state lane and owner.
 
+9. Final narration legacy-text leakage is regression-covered.
+   - Live full-turn final narration fails closed when the model returns legacy
+     `sentences[].text` with private/unsupported prose.
+   - Existing resume coverage recompiles accepted structured attempts with
+     `requireFactRefs: true`; the new live regression proves leaked prose does
+     not reach assistant chat or narrative SSE before failure.
+
 ## Current P1 Queue
 
 No current P1 blockers are listed after the local public-API and clone/replay
@@ -218,8 +225,6 @@ remain required before calling the gameplay loop mature.
 
 ## Current P2 Queue
 
-- Full turn/resume final-narration regression is still needed for legacy
-  `sentences[].text` and unsupported/private terms.
 - Frontend stale/debug reasoning lane should be developer-mode only or ignored.
 - Public DTO player portrait handle may no longer match backend image filename
   lookup. Needs asset URL contract test.
