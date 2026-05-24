@@ -11,6 +11,20 @@ Oracle gate result on 2026-05-24:
   state-owner registry, issued refs/capabilities, public projection DTOs,
   clock ledger contract, and fact-ref narration contract.
 
+Gameplay control-plane bundle review on 2026-05-24:
+
+- Oracle session: `phase95-gameplay-control-plane-bundle`.
+- Delivery: one zip bundle with three bundle files, no inline file set.
+- Verdict: CONDITIONAL-GO for the architecture direction; NO-GO for long-play,
+  clone/rollback acceptance evidence until P0 blockers close.
+- P0 queue: live turn authority spine and shared same-turn write scopes;
+  fact-ref-only live narration; manifest-constructed clean-start clone and
+  vector-safe restore; typed public DTO projection for `/world` and entity
+  routes; RPG-domain state owner matrix.
+- Implementation implication: continue with verified P0 slices and regular
+  commits, but do not resume fresh/cloned 60-turn or longer acceptance
+  playtests until these blockers are executable, tested, and reviewed.
+
 Implemented hardening slices after the reset:
 
 - Durable quick-action capabilities: quick-action labels/prose remain

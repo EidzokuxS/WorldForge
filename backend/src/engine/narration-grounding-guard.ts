@@ -287,6 +287,7 @@ export function compileGroundedSentenceDraftToNarrationDraft(args: {
   packet: NarratorPacket;
   draft: unknown;
   requireBackendOwnedFactText?: boolean;
+  requireFactRefs?: boolean;
 }): NarrationDraft {
   const draft = groundedSentenceDraftSchema.parse(args.draft);
   const allowedEvidenceByRef = buildAllowedCitationEvidenceByRef(args.packet);
@@ -295,6 +296,11 @@ export function compileGroundedSentenceDraftToNarrationDraft(args: {
   const seenSentences = new Set<string>();
   const seenFactRefs = new Set<string>();
   const normalizedSentences = draft.sentences.map((sentence, index) => {
+    if (args.requireFactRefs && !sentence.factRefs) {
+      throw new Error(
+        `Live GroundedSentenceDraft sentence ${index + 1} must use factRefs; sentences[].text is legacy-only.`,
+      );
+    }
     const evidenceRefs = resolveGroundedSentenceEvidenceRefs(
       sentence.evidenceRefs,
       allowedEvidenceByRef,

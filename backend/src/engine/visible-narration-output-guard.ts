@@ -25,7 +25,7 @@ const THIN_VISIBLE_PACKET_RETRY_ADDENDUM =
   "Revise the final narration because the previous output was too thin. Write a concrete, player-visible beat from the packet and return control on a playable next moment.";
 
 const INVALID_DRAFT_RETRY_ADDENDUM =
-  "Revise the final narration because the previous output was not a valid grounded structured draft. Stay within the visible packet. Return exactly one GroundedSentenceDraft object with version and sentences; put player-visible narration only in sentences[].text. Each sentences[].evidenceRefs array must contain 1-4 short packet evidence refs and never five or more.";
+  "Revise the final narration because the previous output was not a valid grounded structured draft. Stay within the visible packet. Return exactly one GroundedSentenceDraft object with version and sentences. Use sentences[].factRefs with exactly one backend-owned fact ref per sentence, plus 1-4 short packet evidence refs in sentences[].evidenceRefs. Do not output sentences[].text.";
 
 export type VisibleNarrationPacketViolationKind =
   | "forbiddenActorName"

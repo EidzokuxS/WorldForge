@@ -1241,6 +1241,7 @@ async function runVisibleNarrationDraftWithGuard(args: {
             packet: narratorPacket,
             draft: result.object,
             requireBackendOwnedFactText: true,
+            requireFactRefs: true,
           });
           log.event("storyteller.visible.call.end", {
             label,
@@ -3944,6 +3945,7 @@ function reusableNarrationFromAcceptedAttempt(
       packet,
       draft: sourceDraft,
       requireBackendOwnedFactText: true,
+      requireFactRefs: true,
     });
     if (compiledDraft.prose !== attempt.finalText) {
       log.warn("Ignoring reusable narrator attempt whose stored text no longer matches its backend-owned draft", {

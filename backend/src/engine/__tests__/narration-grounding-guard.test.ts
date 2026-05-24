@@ -1550,6 +1550,44 @@ describe("grounded sentence draft compiler", () => {
     );
   });
 
+  it("requires factRefs in the live final narration path and keeps text placeholders legacy-only", () => {
+    const packet = createPacket();
+
+    expect(() =>
+      compileGroundedSentenceDraftToNarrationDraft({
+        packet,
+        requireBackendOwnedFactText: true,
+        requireFactRefs: true,
+        draft: {
+          version: "grounded-sentence-draft.v2",
+          sentences: [
+            {
+              text: "[[fact:e1.s1]]",
+              evidenceRefs: ["e1"],
+            },
+          ],
+        },
+      }),
+    ).toThrow("must use factRefs; sentences[].text is legacy-only");
+
+    const draft = compileGroundedSentenceDraftToNarrationDraft({
+      packet,
+      requireBackendOwnedFactText: true,
+      requireFactRefs: true,
+      draft: {
+        version: "grounded-sentence-draft.v2",
+        sentences: [
+          {
+            factRefs: ["e1.s1"],
+            evidenceRefs: ["e1"],
+          },
+        ],
+      },
+    });
+
+    expect(draft.prose).toBe("The clerk warns that the inspector is due before dusk.");
+  });
+
   it("rejects free factual prose in runtime final narration mode", () => {
     const packet = createPacket();
 

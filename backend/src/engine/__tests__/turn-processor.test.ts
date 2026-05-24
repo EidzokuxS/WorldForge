@@ -7279,7 +7279,7 @@ describe("processTurn ScenePlan path", () => {
             version: "grounded-sentence-draft.v2",
             sentences: [
               {
-                text: "[[fact:e1.s1]]",
+                factRefs: ["e1.s1"],
                 evidenceRefs: ["e1"],
               },
             ],
@@ -7337,7 +7337,7 @@ describe("processTurn ScenePlan path", () => {
             version: "grounded-sentence-draft.v2",
             sentences: [
               {
-                text: "[[fact:e1.s1]]",
+                factRefs: ["e1.s1"],
                 evidenceRefs: finalNarrationCalls === 1
                   ? ["e1", "e2", "e2", "e3", "e4", "e5", "e6"]
                   : ["e1", "e2", "e3", "e4"],
