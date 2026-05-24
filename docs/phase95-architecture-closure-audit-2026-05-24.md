@@ -35,8 +35,10 @@ in actor/tool ownership, restore integrity/crash convergence, vector rollback
 semantics, public projection guard strength, frontend raw-id fallback, and
 pending narration recovery projection. The actor/tool ownership P0 has since
 been implemented locally. The restore/vector/recovery P0 queue has also now
-been implemented locally with targeted contract tests, but the branch remains
-NO-GO for long-play acceptance until P1 closure, full verification, GitNexus,
+been implemented locally with targeted contract tests. The public projection
+guard and frontend raw-id fallback P1s have also been implemented locally with
+targeted backend/frontend tests and frontend/backend typechecks, but the branch
+remains NO-GO for long-play acceptance until the remaining P1 queue closes, full verification, GitNexus,
 Oracle bundled review, Browser evidence, and human-style play/soak evidence.
 
 No long human-style 60-turn, cloned-world, or 600-turn soak acceptance should
@@ -59,8 +61,8 @@ reviewed on a frozen current tree.
 | Time | `world_clocks`, turn clock ledger | living-world authority clock commit service | UI turn ordinal, narration tick | proposed `advance_time` args | non-negative deltas, no turn-boundary time advance, accepted receipt source | clock ledger rows, public world time, no-op/wait/travel/resume tests |
 | Narrator packet | settled canonical turn packet plus citable fact list | narrator packet builder | recent transcript, opening scene, guardrails, diagnostics | none | redaction audit, support-only classification, packet budget trace | settled packet persisted before final narration; resume from packet |
 | Final narration | backend-issued fact refs and narrator attempt | narration guard/turn processor | style instruction, support context | selected fact refs/evidence refs/order/style | fact-ref required, private/backend term scan, grounding compile, repair/fail-closed | assistant SSE/chat line; no live text fallback; **P2: full turn/resume regression still needed** |
-| SSE/API projection | player-facing DTO factories | projection modules and route projectors | internal saga/tool/state objects | none | public DTO schemas, backend-ref guard, explicit event allowlists | `turn_resolution`, lookup, world, inventory, history tests; **P1: guard misses raw legacy id shapes** |
-| Frontend projection | `frontend/lib/api.ts` parsed DTOs | frontend API parser | debug state, local render state | none | public handle parser, SSE parser, malformed payload errors | UI render tests and Browser evidence; **P1: raw-id fallback still accepted** |
+| SSE/API projection | player-facing DTO factories | projection modules and route projectors | internal saga/tool/state objects | none | public DTO schemas, backend-ref guard, explicit event allowlists, legacy raw-id rejection | `turn_resolution`, lookup, world, inventory, history tests; raw legacy id guard targeted test green |
+| Frontend projection | `frontend/lib/api.ts` parsed DTOs | frontend API parser | debug state, local render state | none | public handle parser, SSE parser, malformed payload errors, no raw fallback authority | API parser rejects/drops raw `loc-*`/`npc-*`/`item-*` fallbacks; Browser evidence still required |
 | Persistence bundles | `store-manifest.json` plus campaign stores | manifest/bundle capture and restore services | evidence hashes, playtest reports | none | manifest coverage, policy schemas, path safety, hash/row-count recomputation | checkpoint/turn snapshot tests; corrupted SQLite/vector evidence fails before live copy |
 | Clone | source campaign stores plus manifest plan | clean-start clone service | old source artifacts as forensic context only | none | active-turn rejection, id rewrite/purge/rebuild plan, path safety | clean clone manifest and clone tests; **P1: non-SQL policies partly hard-coded, no durable clone artifact** |
 | Rollback/replay/vector | turn snapshots, checkpoints, vector stores, event ledgers | rollback/restore service | vector evidence, playtest harness logs | none | restore policy executor, vector include/exclude policy, recovery mode gate | rollback snapshot restore; episodic vectors reconcile to restored receipts while preserving matching pre-turn vectors |
@@ -115,54 +117,56 @@ No P0 blockers are currently listed after this local slice. That is not an
 acceptance claim: the P1 queue, Oracle full architecture GO, Browser evidence,
 and human-style long-play evidence remain required.
 
+## Recently Closed P1 Items
+
+1. Frontend raw-id fallback is fenced.
+   - `frontend/lib/api.ts` accepts only valid `pdto_*` handles for world
+     authority fields and drops malformed/legacy raw ids instead of blessing
+     `loc-*`, `npc-*`, `item-*`, relationship, route, faction, or player ids.
+   - Targeted frontend tests cover valid public handles plus legacy raw-id
+     rejection.
+
+2. Public projection guard rejects legacy raw-id shapes.
+   - `assertPublicProjectionPayload` rejects UUID/colon refs, legacy result
+     refs, exact storage-like ids such as `loc-1`, `npc-1`, `item-1`,
+     `campaign-main`, and matching object keys.
+   - Targeted backend tests cover public handles passing while raw shapes fail.
+
 ## Current P1 Queue
 
-1. Frontend raw-id fallback must be removed or fenced.
-   - `frontend/lib/api.ts` still accepts raw `loc-*`, `npc-*`, `item-*`, and
-     related ids as fallback handles.
-   - Required tests: malformed/legacy raw ids are rejected or dropped; only
-     `pdto_*`, `qac_*`, and allowed recovery handles cross the public boundary.
-
-2. Public projection guard must reject legacy raw-id shapes.
-   - The guard catches UUID and some colon refs, but not common storage-like
-     ids such as `loc-1`, `npc-1`, `item-1`, `campaign-a`,
-     `action-result:*`, or `tool_result_*`.
-   - Required tests: values and object keys fail for these shapes while public
-     handles pass.
-
-3. Pending narration must expose public recovery state, not saga internals.
+1. Pending narration must expose public recovery state, not saga internals.
    - `pendingNarrationData` returns saga `status`.
    - Required tests: `/history`, blocked action responses, and `/resume`
      failures expose only coarse public state plus opaque `resumeToken`.
 
-4. Adjacent public campaign APIs must be classified or wrapped.
+2. Adjacent public campaign APIs must be classified or wrapped.
    - NPC promote and checkpoint APIs still trade raw ids.
    - Required closure: mark them explicit admin/system-only surfaces or wrap
      them in public `npcHandle`/`checkpointHandle` contracts.
 
-5. Deterministic due-world actor plans need emitted-ref coverage.
+3. Deterministic due-world actor plans need emitted-ref coverage.
    - Schedules reserve predicted scopes, but `executeActorPlanStep` does not
      validate actual emitted `stateDeltaRefs` against those scopes.
    - Required tests: travel/record-event active plans missing destination,
      event, or location scopes fail before DB updates.
 
-6. `offer_quick_actions` needs accepted-receipt boundary proof.
+4. `offer_quick_actions` needs accepted-receipt boundary proof.
    - It is durable public-handle authority, but not treated like a mutation in
      all GM loop boundary checks.
    - Required tests: if the turn does not reach accepted receipt closure, no
      quick-action offer row or SSE/projection survives.
 
-7. Clean-start clone must become fully manifest-owned.
+5. Clean-start clone must become fully manifest-owned.
    - SQLite uses the manifest plan; non-SQL policies are still partly
      hard-coded and no durable clone manifest is written to the target.
    - Required tests: non-SQL manifest policy mutation fails closed or is
      executed by the plan; target contains clone manifest artifact.
 
-8. Replay-preserving clone/replay must be executable rejection.
+6. Replay-preserving clone/replay must be executable rejection.
    - Manifest has replay policy, but there is no mode that fails closed when a
      caller asks for replay-preserving clone semantics.
 
-9. Clone test coverage must use a representative migrated source fixture.
+7. Clone test coverage must use a representative migrated source fixture.
    - Existing tests prove narrow happy paths. Need source-id residue across all
      rewrite/purge tables and nested JSON/text payloads.
 
@@ -182,7 +186,7 @@ and human-style long-play evidence remain required.
 
 ### A. Intake, Public Projection, Frontend
 
-Status: **P1 open**
+Status: **P1 partly closed; adjacent/recovery public surfaces still open**
 
 Decision in force: durable quick-action handles and backend-issued public DTO
 handles are the player-facing authority boundary.
@@ -203,6 +207,8 @@ References Used:
 - `backend/src/engine/player-facing-events.ts`
 - `backend/src/engine/public-dto-handles.ts`
 - `frontend/lib/api.ts`
+- `frontend/lib/__tests__/api.test.ts`
+- `backend/src/engine/__tests__/gameplay-control-plane-contract.test.ts`
 - `frontend/app/game/page.tsx`
 - Read-only public projection/frontend audit from Tesla, 2026-05-24
 
@@ -210,8 +216,8 @@ Unverified Assumptions:
 
 - Checkpoint/NPC admin routes can either move behind system-only semantics or
   be wrapped without a broad UI redesign.
-- Removing raw fallback in frontend parsers will not break current production
-  primary routes once backend DTO tests are fixed.
+- In-app Browser evidence will confirm the stricter frontend parser still
+  renders current backend `pdto_*` payloads in the real game UI.
 
 ### B. Refs, Aliases, Capabilities
 
@@ -413,8 +419,9 @@ This list is the closure guard before any future "architecture GO" claim:
 - [x] Final narration is fact-ref based on live path.
 - [ ] Final narration full turn/resume fail-closed regression exists. P2.
 - [x] Main backend public projection uses DTO handles.
-- [ ] Public guard rejects all legacy raw id shapes. P1.
-- [ ] Frontend rejects raw id fallback as public handles. P1.
+- [x] Public guard rejects legacy raw id shapes. Targeted backend tests green.
+- [x] Frontend rejects raw id fallback as public handles. Targeted frontend
+  tests and frontend typecheck green.
 - [ ] Pending narration exposes only public recovery state. P1.
 - [ ] Checkpoint/NPC adjacent APIs are system-only or handle-wrapped. P1.
 - [x] Store manifest covers current stores.
@@ -429,10 +436,9 @@ This list is the closure guard before any future "architecture GO" claim:
 
 ## Next Implementation Order
 
-1. Public projection guard and frontend raw-id rejection.
-2. Pending narration public recovery DTO.
-3. Quick-action offer accepted-receipt cleanup.
-4. Due-world deterministic emitted-ref coverage.
-5. Fully manifest-owned clean-start clone artifact and replay rejection.
-6. Oracle bundled full architecture GO, then Browser gameplay workability,
+1. Pending narration public recovery DTO.
+2. Quick-action offer accepted-receipt cleanup.
+3. Due-world deterministic emitted-ref coverage.
+4. Fully manifest-owned clean-start clone artifact and replay rejection.
+5. Oracle bundled full architecture GO, then Browser gameplay workability,
     fresh/cloned human-style 60-turn campaigns, and longer soak/replay.

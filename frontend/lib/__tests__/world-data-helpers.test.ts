@@ -13,6 +13,14 @@ import {
 import { getWorldData } from "../api";
 import type { WorldData, LoreCardItem } from "../api-types";
 
+const API_HANDLES = {
+  placeOne: "pdto_place_11111111111111111111111111111111",
+  placeTwo: "pdto_place_22222222222222222222222222222222",
+  placeScene: "pdto_place_33333333333333333333333333333333",
+  routeOne: "pdto_route_11111111111111111111111111111111",
+  eventOne: "pdto_event_11111111111111111111111111111111",
+} as const;
+
 /** Minimal WorldData fixture with 2 locations, 1 faction, 2 NPCs, 2 relationships. */
 function makeWorldData(overrides: Record<string, unknown> = {}): WorldData {
   return {
@@ -218,7 +226,7 @@ describe("getWorldData", () => {
       json: async () => ({
         locations: [
           {
-            id: "loc-1",
+            id: API_HANDLES.placeOne,
             campaignId: "c1",
             name: "Shibuya Crossing",
             description: "Macro hub",
@@ -228,18 +236,18 @@ describe("getWorldData", () => {
             persistence: "persistent",
             connectedPaths: [
               {
-                edgeId: "edge-1",
-                toLocationId: "loc-2",
+                edgeId: API_HANDLES.routeOne,
+                toLocationId: API_HANDLES.placeTwo,
                 toLocationName: "Shibuya Station",
                 travelCost: 2,
               },
             ],
             recentHappenings: [
               {
-                id: "event-1",
-                locationId: "loc-1",
-                sourceLocationId: "scene-1",
-                anchorLocationId: "loc-1",
+                id: API_HANDLES.eventOne,
+                locationId: API_HANDLES.placeOne,
+                sourceLocationId: API_HANDLES.placeScene,
+                anchorLocationId: API_HANDLES.placeOne,
                 eventType: "ephemeral_scene",
                 summary: "A rooftop clash spilled cursed residue into the crossing.",
                 tick: 12,
@@ -263,11 +271,11 @@ describe("getWorldData", () => {
     const world = await getWorldData("c1");
 
     expect(world.locations[0]).toMatchObject({
-      connectedTo: ["loc-2"],
+      connectedTo: [API_HANDLES.placeTwo],
       connectedPaths: [
         {
-          edgeId: "edge-1",
-          toLocationId: "loc-2",
+          edgeId: API_HANDLES.routeOne,
+          toLocationId: API_HANDLES.placeTwo,
           toLocationName: "Shibuya Station",
           travelCost: 2,
         },
@@ -288,12 +296,12 @@ describe("getWorldData", () => {
       json: async () => ({
         locations: [
           {
-            id: "loc-1",
+            id: API_HANDLES.placeOne,
             campaignId: "c1",
             name: "Old Tavern",
             description: "Compatibility payload",
             tags: JSON.stringify(["safe"]),
-            connectedTo: JSON.stringify(["loc-2"]),
+            connectedTo: JSON.stringify([API_HANDLES.placeTwo]),
             isStarting: true,
           },
         ],
@@ -309,7 +317,7 @@ describe("getWorldData", () => {
     const world = await getWorldData("c1");
 
     expect(world.locations[0]).toMatchObject({
-      connectedTo: ["loc-2"],
+      connectedTo: [API_HANDLES.placeTwo],
       connectedPaths: [],
       recentHappenings: [],
       locationKind: null,

@@ -49,6 +49,21 @@ const RESEARCH_ARTIFACT: WorldgenResearchArtifactV2 = {
   },
 };
 
+const PUBLIC_HANDLES = {
+  actorNpc: "pdto_actor_11111111111111111111111111111111",
+  actorNpc2: "pdto_actor_22222222222222222222222222222222",
+  actorSibling: "pdto_actor_33333333333333333333333333333333",
+  actorPlayer: "pdto_actor_44444444444444444444444444444444",
+  event: "pdto_event_11111111111111111111111111111111",
+  itemLantern: "pdto_item_11111111111111111111111111111111",
+  placeScene: "pdto_place_11111111111111111111111111111111",
+  placeBroad: "pdto_place_22222222222222222222222222222222",
+  placeNext: "pdto_place_33333333333333333333333333333333",
+  placeOtherScene: "pdto_place_44444444444444444444444444444444",
+  relationship: "pdto_relationship_11111111111111111111111111111111",
+  routeNext: "pdto_route_11111111111111111111111111111111",
+} as const;
+
 // ---------------------------------------------------------------------------
 // readErrorMessage
 // ---------------------------------------------------------------------------
@@ -402,20 +417,20 @@ describe("gameplay API helpers", () => {
     });
   });
 
-  it("getWorldData preserves explicit currentScene payload fields and scene-scoped fallback ids", async () => {
+  it("getWorldData preserves explicit currentScene payload fields and scene-scoped fallback handles", async () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({
         currentScene: {
-          id: "scene-platform-7",
+          id: PUBLIC_HANDLES.placeScene,
           name: "Platform 7",
-          broadLocationId: "loc-shibuya-station",
+          broadLocationId: PUBLIC_HANDLES.placeBroad,
           broadLocationName: "Shibuya Station",
-          sceneNpcIds: ["npc-1", "npc-2"],
-          clearNpcIds: ["npc-1"],
+          sceneNpcIds: [PUBLIC_HANDLES.actorNpc, PUBLIC_HANDLES.actorNpc2],
+          clearNpcIds: [PUBLIC_HANDLES.actorNpc],
           awareness: {
             byNpcId: {
-              "npc-1": "clear",
-              "npc-2": "hint",
+              [PUBLIC_HANDLES.actorNpc]: "clear",
+              [PUBLIC_HANDLES.actorNpc2]: "hint",
             },
             hintSignals: ["A pressure shift crawls along the far edge of the platform."],
           },
@@ -423,14 +438,14 @@ describe("gameplay API helpers", () => {
         locations: [],
         npcs: [
           {
-            id: "npc-1",
+            id: PUBLIC_HANDLES.actorNpc,
             campaignId: "camp-1",
             name: "Nobara Kugisaki",
             persona: "",
             tags: "[]",
             tier: "key",
-            currentLocationId: "loc-shibuya-station",
-            sceneScopeId: "scene-platform-7",
+            currentLocationId: PUBLIC_HANDLES.placeBroad,
+            sceneScopeId: PUBLIC_HANDLES.placeScene,
             goals: "{\"short_term\":[],\"long_term\":[]}",
             beliefs: "[]",
           },
@@ -439,7 +454,7 @@ describe("gameplay API helpers", () => {
         relationships: [],
         items: [],
         player: {
-          id: "player-1",
+          id: PUBLIC_HANDLES.actorPlayer,
           campaignId: "camp-1",
           name: "Yuji Itadori",
           race: "",
@@ -451,8 +466,8 @@ describe("gameplay API helpers", () => {
           equippedItems: "[]",
           inventory: [],
           equipment: [],
-          currentLocationId: "loc-shibuya-station",
-          sceneScopeId: "scene-platform-7",
+          currentLocationId: PUBLIC_HANDLES.placeBroad,
+          sceneScopeId: PUBLIC_HANDLES.placeScene,
         },
         personaTemplates: [],
       }), {
@@ -465,47 +480,47 @@ describe("gameplay API helpers", () => {
     const world = await getWorldData("camp-1");
 
     expect(world.currentScene).toMatchObject({
-      id: "scene-platform-7",
-      sceneHandle: "scene-platform-7",
+      id: PUBLIC_HANDLES.placeScene,
+      sceneHandle: PUBLIC_HANDLES.placeScene,
       name: "Platform 7",
-      broadLocationId: "loc-shibuya-station",
-      broadPlaceHandle: "loc-shibuya-station",
+      broadLocationId: PUBLIC_HANDLES.placeBroad,
+      broadPlaceHandle: PUBLIC_HANDLES.placeBroad,
       broadLocationName: "Shibuya Station",
-      sceneNpcIds: ["npc-1", "npc-2"],
-      actorHandles: ["npc-1", "npc-2"],
-      clearNpcIds: ["npc-1"],
-      clearActorHandles: ["npc-1"],
+      sceneNpcIds: [PUBLIC_HANDLES.actorNpc, PUBLIC_HANDLES.actorNpc2],
+      actorHandles: [PUBLIC_HANDLES.actorNpc, PUBLIC_HANDLES.actorNpc2],
+      clearNpcIds: [PUBLIC_HANDLES.actorNpc],
+      clearActorHandles: [PUBLIC_HANDLES.actorNpc],
       awareness: {
         byNpcId: {
-          "npc-1": "clear",
-          "npc-2": "hint",
+          [PUBLIC_HANDLES.actorNpc]: "clear",
+          [PUBLIC_HANDLES.actorNpc2]: "hint",
         },
         byActorHandle: {
-          "npc-1": "clear",
-          "npc-2": "hint",
+          [PUBLIC_HANDLES.actorNpc]: "clear",
+          [PUBLIC_HANDLES.actorNpc2]: "hint",
         },
         hintSignals: ["A pressure shift crawls along the far edge of the platform."],
       },
     });
-    expect(world.npcs[0]?.sceneScopeId).toBe("scene-platform-7");
-    expect(world.player?.sceneScopeId).toBe("scene-platform-7");
+    expect(world.npcs[0]?.sceneScopeId).toBe(PUBLIC_HANDLES.placeScene);
+    expect(world.player?.sceneScopeId).toBe(PUBLIC_HANDLES.placeScene);
   });
 
   it("getWorldData keeps authoritative currentScene ids separate from same-broad NPC rows", async () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({
         currentScene: {
-          id: "scene-platform-7",
+          id: PUBLIC_HANDLES.placeScene,
           name: "Platform 7",
-          broadLocationId: "loc-shibuya-station",
+          broadLocationId: PUBLIC_HANDLES.placeBroad,
           broadLocationName: "Shibuya Station",
-          sceneNpcIds: ["npc-clear", "npc-hint"],
-          clearNpcIds: ["npc-clear"],
+          sceneNpcIds: [PUBLIC_HANDLES.actorNpc, PUBLIC_HANDLES.actorNpc2],
+          clearNpcIds: [PUBLIC_HANDLES.actorNpc],
           awareness: {
             byNpcId: {
-              "npc-clear": "clear",
-              "npc-hint": "hint",
-              "npc-sibling": "clear",
+              [PUBLIC_HANDLES.actorNpc]: "clear",
+              [PUBLIC_HANDLES.actorNpc2]: "hint",
+              [PUBLIC_HANDLES.actorSibling]: "clear",
             },
             hintSignals: ["A cursed echo carries from another platform."],
           },
@@ -513,26 +528,26 @@ describe("gameplay API helpers", () => {
         locations: [],
         npcs: [
           {
-            id: "npc-clear",
+            id: PUBLIC_HANDLES.actorNpc,
             campaignId: "camp-1",
             name: "Concourse Warden",
             persona: "",
             tags: "[]",
             tier: "supporting",
-            currentLocationId: "loc-shibuya-station",
-            sceneScopeId: "scene-platform-7",
+            currentLocationId: PUBLIC_HANDLES.placeBroad,
+            sceneScopeId: PUBLIC_HANDLES.placeScene,
             goals: "{\"short_term\":[],\"long_term\":[]}",
             beliefs: "[]",
           },
           {
-            id: "npc-sibling",
+            id: PUBLIC_HANDLES.actorSibling,
             campaignId: "camp-1",
             name: "Rooftop Lookout",
             persona: "",
             tags: "[]",
             tier: "supporting",
-            currentLocationId: "loc-shibuya-station",
-            sceneScopeId: "scene-rooftop",
+            currentLocationId: PUBLIC_HANDLES.placeBroad,
+            sceneScopeId: PUBLIC_HANDLES.placeOtherScene,
             goals: "{\"short_term\":[],\"long_term\":[]}",
             beliefs: "[]",
           },
@@ -541,7 +556,7 @@ describe("gameplay API helpers", () => {
         relationships: [],
         items: [],
         player: {
-          id: "player-1",
+          id: PUBLIC_HANDLES.actorPlayer,
           campaignId: "camp-1",
           name: "Yuji Itadori",
           race: "",
@@ -552,6 +567,222 @@ describe("gameplay API helpers", () => {
           tags: "[]",
           equippedItems: "[]",
           inventory: [],
+          equipment: [],
+          currentLocationId: PUBLIC_HANDLES.placeBroad,
+          sceneScopeId: PUBLIC_HANDLES.placeScene,
+        },
+        personaTemplates: [],
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const world = await getWorldData("camp-1");
+
+    expect(world.currentScene?.sceneNpcIds).toEqual([PUBLIC_HANDLES.actorNpc, PUBLIC_HANDLES.actorNpc2]);
+    expect(world.currentScene?.clearNpcIds).toEqual([PUBLIC_HANDLES.actorNpc]);
+    expect(world.currentScene?.awareness.byNpcId[PUBLIC_HANDLES.actorSibling]).toBe("clear");
+    expect(world.npcs.map((npc) => npc.id)).toEqual([PUBLIC_HANDLES.actorNpc, PUBLIC_HANDLES.actorSibling]);
+    expect(world.npcs[1]?.currentLocationId).toBe(PUBLIC_HANDLES.placeBroad);
+    expect(world.npcs[1]?.sceneScopeId).toBe(PUBLIC_HANDLES.placeOtherScene);
+  });
+
+  it("getWorldData maps public DTO handles into frontend world aliases", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({
+        currentScene: {
+          sceneHandle: PUBLIC_HANDLES.placeScene,
+          name: "Platform 7",
+          broadPlaceHandle: PUBLIC_HANDLES.placeBroad,
+          broadLocationName: "Shibuya Station",
+          actorHandles: [PUBLIC_HANDLES.actorNpc],
+          clearActorHandles: [PUBLIC_HANDLES.actorNpc],
+          awareness: {
+            byActorHandle: {
+              [PUBLIC_HANDLES.actorNpc]: "clear",
+            },
+            hintSignals: [],
+          },
+        },
+        locations: [
+          {
+            placeHandle: PUBLIC_HANDLES.placeBroad,
+            name: "Shibuya Station",
+            description: "Transit hum.",
+            tags: [],
+            connectedToPlaceHandles: [PUBLIC_HANDLES.placeNext],
+            connectedPaths: [
+              {
+                routeHandle: PUBLIC_HANDLES.routeNext,
+                toPlaceHandle: PUBLIC_HANDLES.placeNext,
+                toLocationName: "Exit 13",
+                travelCost: 1,
+              },
+            ],
+            recentHappenings: [],
+            isStarting: true,
+          },
+        ],
+        npcs: [
+          {
+            actorHandle: PUBLIC_HANDLES.actorNpc,
+            name: "Station Guard",
+            persona: "",
+            tags: "[]",
+            tier: "supporting",
+            currentPlaceHandle: PUBLIC_HANDLES.placeBroad,
+            sceneHandle: PUBLIC_HANDLES.placeScene,
+            goals: "{\"short_term\":[],\"long_term\":[]}",
+            beliefs: "[]",
+          },
+        ],
+        factions: [],
+        relationships: [],
+        items: [
+          {
+            itemHandle: PUBLIC_HANDLES.itemLantern,
+            name: "Lantern",
+            tags: "[]",
+            placeHandle: PUBLIC_HANDLES.placeBroad,
+            ownerActorHandle: null,
+          },
+        ],
+        player: {
+          actorHandle: PUBLIC_HANDLES.actorPlayer,
+          name: "Yuji Itadori",
+          race: "",
+          gender: "",
+          age: "",
+          appearance: "",
+          hp: 5,
+          tags: "[]",
+          equippedItems: "[]",
+          inventory: [],
+          equipment: [],
+          currentPlaceHandle: PUBLIC_HANDLES.placeBroad,
+          sceneHandle: PUBLIC_HANDLES.placeScene,
+        },
+        personaTemplates: [],
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const world = await getWorldData("camp-1");
+
+    expect(world.locations[0]?.id).toBe(PUBLIC_HANDLES.placeBroad);
+    expect(world.locations[0]?.connectedTo).toEqual([PUBLIC_HANDLES.placeNext]);
+    expect(world.locations[0]?.connectedPaths?.[0]).toMatchObject({
+      edgeId: PUBLIC_HANDLES.routeNext,
+      routeHandle: PUBLIC_HANDLES.routeNext,
+      toLocationId: PUBLIC_HANDLES.placeNext,
+      toPlaceHandle: PUBLIC_HANDLES.placeNext,
+    });
+    expect(world.currentScene?.id).toBe(PUBLIC_HANDLES.placeScene);
+    expect(world.currentScene?.sceneNpcIds).toEqual([PUBLIC_HANDLES.actorNpc]);
+    expect(world.npcs[0]?.id).toBe(PUBLIC_HANDLES.actorNpc);
+    expect(world.npcs[0]?.currentLocationId).toBe(PUBLIC_HANDLES.placeBroad);
+    expect(world.items[0]?.id).toBe(PUBLIC_HANDLES.itemLantern);
+    expect(world.player?.id).toBe(PUBLIC_HANDLES.actorPlayer);
+  });
+
+  it("getWorldData refuses to promote raw backend ids from legacy fields into public handles", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({
+        currentScene: {
+          id: "scene-platform-7",
+          broadLocationId: "loc-shibuya-station",
+          sceneNpcIds: ["npc-1"],
+          clearNpcIds: ["npc-1"],
+          awareness: {
+            byNpcId: {
+              "npc-1": "clear",
+            },
+          },
+        },
+        locations: [
+          {
+            id: "loc-shibuya-station",
+            name: "Shibuya Station",
+            description: "Transit hum.",
+            tags: [],
+            connectedTo: ["loc-exit-13"],
+            connectedPaths: [
+              {
+                edgeId: "route-main",
+                toLocationId: "loc-exit-13",
+                travelCost: 1,
+              },
+            ],
+            recentHappenings: [
+              {
+                id: "event-1",
+                locationId: "loc-shibuya-station",
+                eventType: "rumor",
+                summary: "A raw event should not become authority.",
+                tick: 1,
+                importance: 1,
+                createdAt: 1,
+              },
+            ],
+            isStarting: true,
+          },
+        ],
+        npcs: [
+          {
+            id: "npc-1",
+            name: "Station Guard",
+            persona: "",
+            tags: "[]",
+            tier: "supporting",
+            currentLocationId: "loc-shibuya-station",
+            sceneScopeId: "scene-platform-7",
+            goals: "{\"short_term\":[],\"long_term\":[]}",
+            beliefs: "[]",
+          },
+        ],
+        factions: [
+          {
+            id: "faction-1",
+            name: "Transit Office",
+            tags: "[]",
+            goals: "[]",
+            assets: "[]",
+          },
+        ],
+        relationships: [
+          {
+            id: "relationship-1",
+            entityA: "npc-1",
+            entityB: "faction-1",
+            tags: "[]",
+            reason: null,
+          },
+        ],
+        items: [
+          {
+            id: "item-1",
+            name: "Lantern",
+            tags: "[]",
+            ownerId: "player-1",
+            locationId: "loc-shibuya-station",
+          },
+        ],
+        player: {
+          id: "player-1",
+          name: "Yuji Itadori",
+          race: "",
+          gender: "",
+          age: "",
+          appearance: "",
+          hp: 5,
+          tags: "[]",
+          equippedItems: "[]",
+          inventory: [{ id: "item-1", name: "Lantern", equipState: "carried" }],
           equipment: [],
           currentLocationId: "loc-shibuya-station",
           sceneScopeId: "scene-platform-7",
@@ -566,113 +797,14 @@ describe("gameplay API helpers", () => {
 
     const world = await getWorldData("camp-1");
 
-    expect(world.currentScene?.sceneNpcIds).toEqual(["npc-clear", "npc-hint"]);
-    expect(world.currentScene?.clearNpcIds).toEqual(["npc-clear"]);
-    expect(world.currentScene?.awareness.byNpcId["npc-sibling"]).toBe("clear");
-    expect(world.npcs.map((npc) => npc.id)).toEqual(["npc-clear", "npc-sibling"]);
-    expect(world.npcs[1]?.currentLocationId).toBe("loc-shibuya-station");
-    expect(world.npcs[1]?.sceneScopeId).toBe("scene-rooftop");
-  });
-
-  it("getWorldData maps public DTO handles into frontend world aliases", async () => {
-    fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({
-        currentScene: {
-          sceneHandle: "pdto_place_scene",
-          name: "Platform 7",
-          broadPlaceHandle: "pdto_place_broad",
-          broadLocationName: "Shibuya Station",
-          actorHandles: ["pdto_actor_npc"],
-          clearActorHandles: ["pdto_actor_npc"],
-          awareness: {
-            byActorHandle: {
-              pdto_actor_npc: "clear",
-            },
-            hintSignals: [],
-          },
-        },
-        locations: [
-          {
-            placeHandle: "pdto_place_broad",
-            name: "Shibuya Station",
-            description: "Transit hum.",
-            tags: [],
-            connectedToPlaceHandles: ["pdto_place_next"],
-            connectedPaths: [
-              {
-                routeHandle: "pdto_route_next",
-                toPlaceHandle: "pdto_place_next",
-                toLocationName: "Exit 13",
-                travelCost: 1,
-              },
-            ],
-            recentHappenings: [],
-            isStarting: true,
-          },
-        ],
-        npcs: [
-          {
-            actorHandle: "pdto_actor_npc",
-            name: "Station Guard",
-            persona: "",
-            tags: "[]",
-            tier: "supporting",
-            currentPlaceHandle: "pdto_place_broad",
-            sceneHandle: "pdto_place_scene",
-            goals: "{\"short_term\":[],\"long_term\":[]}",
-            beliefs: "[]",
-          },
-        ],
-        factions: [],
-        relationships: [],
-        items: [
-          {
-            itemHandle: "pdto_item_lantern",
-            name: "Lantern",
-            tags: "[]",
-            placeHandle: "pdto_place_broad",
-            ownerActorHandle: null,
-          },
-        ],
-        player: {
-          actorHandle: "pdto_actor_player",
-          name: "Yuji Itadori",
-          race: "",
-          gender: "",
-          age: "",
-          appearance: "",
-          hp: 5,
-          tags: "[]",
-          equippedItems: "[]",
-          inventory: [],
-          equipment: [],
-          currentPlaceHandle: "pdto_place_broad",
-          sceneHandle: "pdto_place_scene",
-        },
-        personaTemplates: [],
-      }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const world = await getWorldData("camp-1");
-
-    expect(world.locations[0]?.id).toBe("pdto_place_broad");
-    expect(world.locations[0]?.connectedTo).toEqual(["pdto_place_next"]);
-    expect(world.locations[0]?.connectedPaths?.[0]).toMatchObject({
-      edgeId: "pdto_route_next",
-      routeHandle: "pdto_route_next",
-      toLocationId: "pdto_place_next",
-      toPlaceHandle: "pdto_place_next",
-    });
-    expect(world.currentScene?.id).toBe("pdto_place_scene");
-    expect(world.currentScene?.sceneNpcIds).toEqual(["pdto_actor_npc"]);
-    expect(world.npcs[0]?.id).toBe("pdto_actor_npc");
-    expect(world.npcs[0]?.currentLocationId).toBe("pdto_place_broad");
-    expect(world.items[0]?.id).toBe("pdto_item_lantern");
-    expect(world.player?.id).toBe("pdto_actor_player");
+    expect(world.currentScene).toBeNull();
+    expect(world.locations).toEqual([]);
+    expect(world.npcs).toEqual([]);
+    expect(world.factions).toEqual([]);
+    expect(world.relationships).toEqual([]);
+    expect(world.items).toEqual([]);
+    expect(world.player).toBeNull();
+    expect(JSON.stringify(world)).not.toMatch(/(?:loc|npc|item|faction|relationship|player)-/);
   });
 });
 

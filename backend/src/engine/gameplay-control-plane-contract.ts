@@ -788,11 +788,14 @@ export const ISSUED_REF_SCHEMA = z.object({
 export type IssuedRef = z.infer<typeof ISSUED_REF_SCHEMA>;
 
 const BACKEND_REF_BOUNDARY_PATTERN =
-  /\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?:actor|location|route|item|tool-result|authority|saga|turn-saga|settled-packet):[A-Za-z0-9_.:-]+)\b/i;
+  /\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?:actor|location|route|item|tool-result|action-result|authority|saga|turn-saga|settled-packet):[A-Za-z0-9_.:-]+|(?:tool_result|action_result|turn_saga|settled_packet)_[A-Za-z0-9_.:-]+)\b/i;
+
+const BACKEND_STORAGE_ID_PATTERN =
+  /^(?:campaign|camp|loc|location|npc|player|item|faction|relationship|route|edge|event)-[A-Za-z0-9_.:-]+$/i;
 
 export function assertNoBackendRefsInPublicValue(value: unknown, path = "$"): void {
   if (typeof value === "string") {
-    if (BACKEND_REF_BOUNDARY_PATTERN.test(value)) {
+    if (BACKEND_REF_BOUNDARY_PATTERN.test(value) || BACKEND_STORAGE_ID_PATTERN.test(value.trim())) {
       throw new Error(`Backend ref crossed public boundary at ${path}.`);
     }
     return;
@@ -803,7 +806,7 @@ export function assertNoBackendRefsInPublicValue(value: unknown, path = "$"): vo
   }
   if (value && typeof value === "object") {
     for (const [key, nested] of Object.entries(value)) {
-      if (BACKEND_REF_BOUNDARY_PATTERN.test(key)) {
+      if (BACKEND_REF_BOUNDARY_PATTERN.test(key) || BACKEND_STORAGE_ID_PATTERN.test(key.trim())) {
         throw new Error(`Backend ref key crossed public boundary at ${path}.${key}.`);
       }
       assertNoBackendRefsInPublicValue(nested, `${path}.${key}`);

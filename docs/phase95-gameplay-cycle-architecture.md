@@ -132,10 +132,12 @@ Current post-slice status on `develop`:
   turn rollback execution, restore-side evidence verification, staged restore,
   episodic vector retention/rebuild, and manifest-owned clean-start clone
   execution are implemented locally with targeted backend tests and backend
-  typecheck green. The architecture-closure audit is now recorded in
+  typecheck green. Public projection guard coverage and frontend raw-id
+  rejection are also implemented locally with targeted backend/frontend tests
+  and typechecks green. The architecture-closure audit is now recorded in
   `docs/phase95-architecture-closure-audit-2026-05-24.md`; it is a NO-GO for
-  long-play acceptance until the current P1 queue is closed and Oracle/Browser/
-  play evidence passes.
+  long-play acceptance until the remaining P1 queue is closed and Oracle/
+  Browser/play evidence passes.
 - Long-play status: still NO-GO. These slices close important control-plane
   blockers, but they are not full Phase 95 acceptance evidence.
 
@@ -146,8 +148,7 @@ Architecture closure audit on 2026-05-24:
 - P0s from that audit are now locally implemented: actor positive write scopes,
   restore-side hash/row evidence verification, episodic vector rollback
   retention/rebuild, and staged rerun-convergent restore.
-- P1s still open: frontend raw-id fallback, public projection guard coverage
-  for legacy id shapes, pending narration public recovery DTO, adjacent public
+- P1s still open: pending narration public recovery DTO, adjacent public
   campaign API handle/system classification, deterministic due-world emitted
   ref coverage, quick-action accepted-receipt cleanup, fully manifest-owned
   non-SQL clone policy, executable replay rejection, and broader clone residue
@@ -597,8 +598,10 @@ Unverified Assumptions:
 
 2. Public intake/projection spine
    - Durable quick-action handles are implemented.
-   - Next: prove every public DTO/SSE/API/frontend surface is allowlisted and
-     does not expose raw backend ids, authority refs, saga/tool internals, or
+   - Public world/inventory/location DTOs and frontend world parsing now reject
+     legacy raw id authority and keep `pdto_*`/`qac_*` as the public boundary.
+   - Next: finish the remaining public recovery/admin surfaces so they do not
+     expose raw backend ids, authority refs, saga/tool internals, or
      support-only private terms.
    - Verify with targeted backend/frontend tests plus in-app Browser evidence
      when UI behavior changes.

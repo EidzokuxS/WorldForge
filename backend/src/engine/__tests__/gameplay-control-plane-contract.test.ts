@@ -120,7 +120,16 @@ describe("Phase 95 gameplay control-plane contracts", () => {
       payload: {
         type: "turn_resolution",
         text: "The clerk nods.",
-        quickActions: [{ handle: "qa_1", label: "Ask about the ledger" }],
+        quickActions: [{ handle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", label: "Ask about the ledger" }],
+      },
+    })).not.toThrow();
+
+    expect(() => assertPublicProjectionPayload({
+      surface: "world",
+      payload: {
+        placeHandle: "pdto_place_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        actorHandle: "pdto_actor_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        itemHandle: "pdto_item_cccccccccccccccccccccccccccccccc",
       },
     })).not.toThrow();
 
@@ -133,6 +142,22 @@ describe("Phase 95 gameplay control-plane contracts", () => {
       surface: "history",
       payload: { sagaId: "turn-saga:abc" },
     })).toThrow(/backend ref/i);
+
+    for (const ref of [
+      "loc-1",
+      "npc-1",
+      "item-1",
+      "faction-1",
+      "relationship-1",
+      "campaign-main",
+      "action-result:abc",
+      "tool_result_abc",
+    ]) {
+      expect(() => assertPublicProjectionPayload({
+        surface: "world",
+        payload: { handle: ref },
+      })).toThrow(/backend ref/i);
+    }
   });
 
   it("validates issued handles without accepting raw backend refs as handles", () => {

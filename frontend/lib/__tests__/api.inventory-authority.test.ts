@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getWorldData } from "../api";
 
+const HANDLES = {
+  actorPlayer: "pdto_actor_11111111111111111111111111111111",
+  itemBedroll: "pdto_item_11111111111111111111111111111111",
+  itemBow: "pdto_item_22222222222222222222222222222222",
+  itemSword: "pdto_item_33333333333333333333333333333333",
+  placeOne: "pdto_place_11111111111111111111111111111111",
+} as const;
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -16,15 +24,15 @@ describe("authoritative world inventory parsing", () => {
         relationships: [],
         items: [
           {
-            id: "legacy-bow",
+            id: HANDLES.itemBow,
             name: "Legacy Bow",
             tags: JSON.stringify(["weapon"]),
-            ownerId: "player-1",
+            ownerId: HANDLES.actorPlayer,
             locationId: null,
           },
         ],
         player: {
-          id: "player-1",
+          id: HANDLES.actorPlayer,
           campaignId: "camp-1",
           name: "Hero",
           race: "Human",
@@ -34,10 +42,10 @@ describe("authoritative world inventory parsing", () => {
           hp: 5,
           tags: JSON.stringify([]),
           equippedItems: JSON.stringify(["Legacy Bow"]),
-          currentLocationId: "loc-1",
+          currentLocationId: HANDLES.placeOne,
           inventory: [
             {
-              id: "item-bedroll",
+              id: HANDLES.itemBedroll,
               name: "Bedroll",
               tags: JSON.stringify(["gear"]),
               equipState: "carried",
@@ -47,7 +55,7 @@ describe("authoritative world inventory parsing", () => {
           ],
           equipment: [
             {
-              id: "item-sword",
+              id: HANDLES.itemSword,
               name: "Iron Sword",
               tags: JSON.stringify(["weapon", "steel"]),
               equipState: "equipped",
@@ -86,8 +94,8 @@ describe("authoritative world inventory parsing", () => {
 
     expect(player.inventory).toEqual([
       {
-        id: "item-bedroll",
-        itemHandle: "item-bedroll",
+        id: HANDLES.itemBedroll,
+        itemHandle: HANDLES.itemBedroll,
         name: "Bedroll",
         tags: ["gear"],
         equipState: "carried",
@@ -97,8 +105,8 @@ describe("authoritative world inventory parsing", () => {
     ]);
     expect(player.equipment).toEqual([
       {
-        id: "item-sword",
-        itemHandle: "item-sword",
+        id: HANDLES.itemSword,
+        itemHandle: HANDLES.itemSword,
         name: "Iron Sword",
         tags: ["weapon", "steel"],
         equipState: "equipped",
