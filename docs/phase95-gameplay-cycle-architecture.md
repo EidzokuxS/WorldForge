@@ -97,11 +97,13 @@ Implemented hardening slices after the reset:
   policy. Unknown stores fail closed, and the planning executor derives one
   manifest-owned action per store before later clone/restore execution work is
   wired in.
-- Vector-safe turn rollback: restoring a turn snapshot now applies the
-  manifest rollback vector policy instead of leaving all live vector state in
-  place. Episodic event vectors are purged for lazy rebuild, lore-card vectors
-  are preserved as verified non-turn state, and pending in-memory committed
-  event queues are cleared after snapshot restore.
+- Vector-policy turn rollback skeleton: restoring a turn snapshot now applies
+  the manifest rollback vector policy instead of leaving all live vector state
+  in place. Episodic event vectors are currently purged for a future lazy
+  rebuild path, lore-card vectors are preserved as verified non-turn state, and
+  pending in-memory committed event queues are cleared after snapshot restore.
+  This is not yet vector rollback closure because pre-turn episodic retention
+  or rebuild is still a P0 gap.
 - Manifest-owned clean-start clone: campaign clone creation now runs through a
   backend clone service that consumes the manifest operation plan. SQLite rows
   are rewritten or purged by store policy, config IDs are recursively
@@ -118,13 +120,28 @@ Implemented hardening slices after the reset:
 Current post-slice status on `develop`:
 
 - Current slice status: manifest restore-policy declarations, the
-  planning-only executor skeleton, vector-safe turn rollback execution, and
+  planning-only executor skeleton, vector-policy turn rollback execution, and
   manifest-owned clean-start clone execution are implemented locally. Vector
   row-count/hash evidence is also implemented locally with targeted backend
-  tests and backend typecheck green. The final architecture-closure audit
-  remains open before long-play acceptance can resume.
+  tests and backend typecheck green. The architecture-closure audit is now
+  recorded in `docs/phase95-architecture-closure-audit-2026-05-24.md`; it is a
+  NO-GO for long-play acceptance until the current P0/P1 queues are closed.
 - Long-play status: still NO-GO. These slices close important control-plane
   blockers, but they are not full Phase 95 acceptance evidence.
+
+Architecture closure audit on 2026-05-24:
+
+- Reviewed current `develop` HEAD `b8ebd809340d3897be5623f028c7a8227c5d27f5`
+  with three independent read-only agents plus local code/doc inspection.
+- P0s still open: actor positive write-scope fences, restore-side hash/row
+  evidence verification, episodic vector rollback retention/rebuild, and
+  crash-convergent restore.
+- P1s still open: frontend raw-id fallback, public projection guard coverage
+  for legacy id shapes, pending narration public recovery DTO, adjacent public
+  campaign API handle/system classification, deterministic due-world emitted
+  ref coverage, quick-action accepted-receipt cleanup, fully manifest-owned
+  non-SQL clone policy, executable replay rejection, and broader clone residue
+  fixture coverage.
 
 ## End State
 
