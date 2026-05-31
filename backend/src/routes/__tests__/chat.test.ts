@@ -1484,6 +1484,70 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(body).not.toContain("Resolved: Tampered prose from the browser");
   });
 
+  it("resolves route quick-action handles while ignoring tampered browser refs", async () => {
+    setupStoryteller();
+    setupDbMock();
+    resolveQuickActionSelectionMock.mockResolvedValue({
+      action: "Follow the east stair toward the glass registry desk.",
+      label: "Follow east stair",
+      handle: "qac_abababababababababababababababab",
+      offerId: "qao-private-route",
+      actionId: "qaa-private-route",
+      baseWorldVersion: 0,
+    });
+    mockedProcessTurn.mockImplementation(({ playerAction }) =>
+      createTurnStream([
+        { type: "narrative", data: { text: `Resolved route: ${playerAction}` } },
+        { type: "done", data: { tick: 2, worldVersion: 0, worldTimeMinutes: 0 } },
+      ]),
+    );
+
+    const tamperedBrowserText =
+      "Follow raw loc-secret-east-stair via npc-hidden-clerk item-private-ledger "
+      + "route-main pdto_place_secret sourceRefs offerId actionId qao-private-route qaa-private-route.";
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: tamperedBrowserText,
+        intent: tamperedBrowserText,
+        method: "",
+        quickActionHandle: "qac_abababababababababababababababab",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(resolveQuickActionSelectionMock).toHaveBeenCalledWith({
+      campaignId: CAMPAIGN_ID,
+      handle: "qac_abababababababababababababababab",
+      currentTick: 0,
+    });
+    expect(mockedProcessTurn).toHaveBeenCalledWith(expect.objectContaining({
+      playerAction: "Follow the east stair toward the glass registry desk.",
+      intent: "Follow the east stair toward the glass registry desk.",
+      method: "",
+    }));
+    const body = await res.text();
+    expect(body).toContain("Resolved route: Follow the east stair toward the glass registry desk.");
+    for (const forbidden of [
+      "loc-secret-east-stair",
+      "npc-hidden-clerk",
+      "item-private-ledger",
+      "route-main",
+      "pdto_place_secret",
+      "sourceRefs",
+      "offerId",
+      "actionId",
+      "qao-private-route",
+      "qaa-private-route",
+      tamperedBrowserText,
+    ]) {
+      expect(body).not.toContain(forbidden);
+    }
+  });
+
   it("rejects stale or forged quick-action handles without invoking the turn processor", async () => {
     setupStoryteller();
     setupDbMock();

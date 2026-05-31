@@ -2178,6 +2178,47 @@ describe("GamePage", () => {
     consoleErrorSpy.mockRestore();
   });
 
+  it("submits route quick actions with backend-owned handles from the settled action dock", async () => {
+    await renderReadyGame();
+    mockedChatAction.mockResolvedValue(createStreamResponse() as never);
+    mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
+      handlers.onNarrative("The east stair becomes the cleanest route.");
+      handlers.onQuickActions([{
+        label: "Follow east stair",
+        action: "Follow the east stair toward the glass registry desk.",
+        handle: "qac_abababababababababababababababab",
+      }]);
+      handlers.onDone();
+    });
+
+    fireEvent.change(screen.getByLabelText("Scene action"), {
+      target: { value: "Study the route options" },
+    });
+    fireEvent.click(screen.getByLabelText("Send action"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Follow east stair")).toBeInTheDocument();
+    });
+
+    mockedChatAction.mockClear();
+    mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
+      handlers.onNarrative("You follow the east stair without trusting browser prose.");
+      handlers.onDone();
+    });
+
+    fireEvent.click(screen.getByText("Follow east stair"));
+
+    await waitFor(() => {
+      expect(mockedChatAction).toHaveBeenCalledWith(
+        fakeCampaign.id,
+        "Follow the east stair toward the glass registry desk.",
+        "Follow the east stair toward the glass registry desk.",
+        "",
+        { quickActionHandle: "qac_abababababababababababababababab" },
+      );
+    });
+  });
+
   it("covers the deterministic 10-turn playable UX slice without default raw debug", async () => {
     const worldData = {
       ...fakeWorldData,

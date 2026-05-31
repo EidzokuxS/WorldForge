@@ -59,7 +59,9 @@ Integrated result:
 - Verdict: CONDITIONAL for A1. UI intake, quick actions, SSE/API projection, and frontend parsing contracts look sound; focused tests passed; fresh current-HEAD Browser evidence still needed.
 - P0: none found.
 - P1: Browser workability evidence gap partially closed by `output/phase95-browser-smoke-inventory-status-20260531.md`: current-HEAD in-app Browser opened `/game`, freeform status/inventory action returned to `Ready`, final narration cited current inventory status, visible `Continue` quick action clicked and returned to `Ready`, console warnings/errors were `[]`.
-- Remaining A1 evidence gap: collect a route/target quick-action probe that verifies backend handle resolution and raw-id/projection leak absence across the API/SSE payloads, not only visible Browser completion.
+- P1 route/target quick-action evidence gap closed by focused tests: backend route test now resolves a route quick-action handle while ignoring tampered browser prose containing raw/projection refs; frontend `GamePage` test now clicks a settled route quick action and asserts `chatAction(..., { quickActionHandle })` is sent from the active `ActionDock` path.
+- Executed local evidence: `npm --prefix backend test -- src/routes/__tests__/chat.test.ts src/engine/__tests__/quick-action-offers.test.ts` passed 55 tests.
+- Executed local evidence: `npm --prefix frontend test -- --run app/game/__tests__/page.test.tsx lib/__tests__/api.test.ts components/game/play-surface/__tests__/action-dock.test.tsx` passed 124 tests.
 - P2: `parseWorldData` fail-closes malformed/raw public handles by dropping entities. Good for authority, but player quality may degrade into missing NPCs/locations without visible projection-health signal.
 - P2: prior Browser/player-quality artifacts show occasional label-heavy prose. Improve narratable fact packets and quick-action wording without weakening projection or grounding.
 - Executed evidence from agent: backend A1 focused tests, 15 passed; frontend A1 focused tests, 12 passed.
@@ -79,6 +81,7 @@ Integrated result:
 - P2: `authorityMode: "legacy_unscoped"` still exists in `tool-executor.ts`, but no production caller was found. Keep/extend caller contract so future use fails loudly.
 - P2: `log_event`, `spawn_npc`, and `move_to` retain legacy/hidden descriptor roles; current paths gate them with hidden-in-player-turn/profile/receipt rules. Watch debt, not current blocker.
 - Optional patch: extend `backend/src/engine/__tests__/tool-executor-caller-contract.test.ts` to assert zero production `legacy_unscoped` usage and pin `turn-processor -> executeAdjudicationPlan -> createPlayerTurnToolExecutionContext`.
+- Wave 2 confirmed this is P2 test-only hardening. No production edit warranted because `executeToolCall` blast radius is critical and no production `legacy_unscoped` caller was found.
 
 ### A3 Actor/World Runtime And Time
 Agent: Poincare (`019e7ccd-8a3a-7bb0-a956-4d928d7e4cca`)
@@ -93,6 +96,8 @@ Integrated result:
 - P2: long-turn coherence evidence gap. Source shows ordered pre-frame due work, GM writes, actor reaction, pre-narrator due work, and ledgered time, but no 60/600-turn soak was run.
 - P2: due-world surface breadth. `world-thread-runner` only advances due routes with scoped surface provenance and skips/defer otherwise. Fail-closed behavior is good; long-play must verify this does not starve offscreen pressure.
 - Recommended validation: long-play artifact should record per-turn world time, world version, accepted state delta refs, due-world skipped/deferred reasons, pending narration state, and actor wake backlog growth across fresh and clean-start clone runs.
+- Wave 2 evidence verdict: source architecture still has no P0/P1, but acceptance remains NO-GO until artifacts record A3 counters. Existing verifier does not require turn-clock ledger continuity, due-world reason distributions, actor wake backlog boundedness, settled-packet due refs, or pending narration recovery outcomes.
+- Recommended A3 evidence patch: add a narrow dev/test coherence snapshot and extend actual-player artifacts/verifier to record `worldClock`, clock ledger tail, pending narration saga, settled packet tail, narrator attempt counts, pending wake counts, due wake counts, and world-thread status/due counts.
 
 ### A4 Narrator And Gameplay Quality
 Agent: Einstein (`019e7ccd-a47c-79c2-822f-95952b0d3fc6`)
@@ -101,7 +106,7 @@ Scope: narrator packet, final narration, grounded fact refs, resume/fail-closed 
 Output: defects that make game feel mechanical/incoherent, grounding holes, tests and Browser probes.
 
 Integrated result:
-- Verdict: CONDITIONAL for A4. Grounding/fail-closed architecture is strong and focused tests pass, but one live packet grounding P1 remains.
+- Verdict: CONDITIONAL for A4. Grounding/fail-closed architecture is strong and focused tests pass. The status/inventory grounding P1 is closed, but wave 2 found a playfeel P1: grounded backend facts are still too receipt-like for long-play quality.
 - P1: no-mutation/status packets can have zero legal final-narration fact refs. `turn-processor.ts` marks no-action primary responses as `model_guidance`; `narrator-packet.ts` drops model-guidance responses; current inventory facts are `summaryBackendFact: false`; final narration requires backend fact refs. Executed probe found `status_read` plus current inventory produced `allowedRefs: []`.
 - Impact: "what am I carrying?", "wait quietly", and other low-mutation human-style turns can preserve authority but strand final narration as pending/mechanical, damaging 1/60/600-turn play.
 - Implemented local slice: `current_inventory_status` evidence is now a backend-owned summary fact, while `narration-grounding-guard` still classifies citations as `inventory_status`, not `inventory_status_change`.
@@ -110,6 +115,8 @@ Integrated result:
 - Executed local evidence: `npm --prefix backend test -- src/engine/__tests__/turn-processor.empty-narration.test.ts src/engine/__tests__/visible-narration-output-guard.test.ts` passed 30 tests.
 - Executed local evidence: `npm --prefix backend run typecheck` passed.
 - P2: fact-ref expansion keeps truth stable, but prose quality depends on narratable backend fact phrasing. Human-style probes must include inventory/status, quiet observation, route choice, NPC answer, movement+time, and resume after failed narration.
+- Wave 2 P1: final narration is structurally biased toward receipt prose because strict `factRefs` expand backend-owned strings verbatim. Browser smoke showed the symptom with inventory lines such as "chalk is ready to hand." Required gameplay-quality slice: polish backend-owned fact builders, not the grounding contract.
+- Recommended next A4 patch: aggregate inventory/status into one narratable fact, add citable scene/observation status for quiet no-mutation turns, improve route-status observation prose, expose safe dialogue summaries as narratable precision facts, and combine movement+time receipts into one playable beat.
 - Executed evidence from agent: narration grounding, narrator packet, visible output guard, and empty narration tests passed; 124 tests.
 
 ### A5 Persistence Clone Replay Rollback Vector
@@ -125,6 +132,7 @@ Integrated result:
 - P2: pending restore repair validates staged file existence but does not revalidate staged DB/config/chat/vector evidence hashes before replaying a journal. Add staged tamper regression after journal creation.
 - P2: clean-start clone is service-covered, but no production route caller for `cloneCampaignCleanStart` was found. If Phase 95 validation needs operator/player clone UX, add public API/e2e path with same manifest policy checks.
 - Recommended patch if needed: staged-restore tamper tests in `backend/src/engine/__tests__/state-snapshot.test.ts` and `backend/src/campaign/__tests__/checkpoints.test.ts`; implementation scope inside `backend/src/campaign/restore-bundle.ts` and manifest evidence helpers.
+- Wave 2 confirmed the staged-restore tamper gap as P2, not P1 under the normal remote/user API threat model. Smallest patch: let manifest verification read the source bundle manifest while verifying physical evidence from an optional staged directory, then call it before applying any staged restore copy.
 
 ### A6 Observability Long-Play Acceptance
 Agent: Leibniz (`019e7ccd-ce2b-7df3-9514-41ebf1e7e2ac`)
@@ -139,6 +147,7 @@ Integrated result:
 - P1: Browser screenshots are workability evidence only, not acceptance.
 - P2: artifact writer may need trace id, terminal event count, stop reason, backend/frontend URL, route, source/clone ids, and artifact root metadata.
 - Recommended patch if needed: extend Phase 95 run artifact metadata and verifier requirements in the run artifact writer plus `scripts/phase95-verify-adaptive-run.mjs`.
+- Wave 2 Oracle bundle prep recommendation: create a current-HEAD review pack under `output/oracle/phase95-6plus1-wave2-b6-full-cycle-head-*/` with `REQUEST.md`, `BUNDLE-INDEX.md`, `CURRENT-SNAPSHOT.md`, `PRIOR-ORACLE-LESSONS.md`, `SOURCE-PACK-CORE.md`, `TEST-EVIDENCE-PACK.md`, and `FILES.txt`. Keep attachments as a small number of generated markdown artifacts, target roughly 120k-170k input tokens, dry-run exact attachment count/size/token budget, and treat Oracle as advisory until locally verified.
 
 ## Agent Output Format
 
