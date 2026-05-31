@@ -353,6 +353,11 @@ export default function GamePage() {
     campaignId: string;
     resumeToken: string;
   } | null>(null);
+  const [pendingResumeFailure, setPendingResumeFailure] = useState<{
+    campaignId: string;
+    resumeToken: string;
+    message: string;
+  } | null>(null);
   const bufferedQuickActionsRef = useRef<QuickAction[]>([]);
   const messagesRef = useRef<DisplayChatMessage[]>([]);
   const openingRequestCampaignRef = useRef<string | null>(null);
@@ -565,6 +570,7 @@ export default function GamePage() {
 
   const requestPendingResume = useCallback(
     async (campaignId: string, resumeToken: string) => {
+      setPendingResumeFailure(null);
       setTurnPhase("idle");
       setSceneProgress("scene-settling");
       setSceneProgressCopy("Resuming turn");
@@ -607,6 +613,7 @@ export default function GamePage() {
           onFinalizing: applyFinalizingStatus,
           onDone: (boundary) => {
             turnCompleted = true;
+            setPendingResumeFailure(null);
             finishCompletedTurn(campaignId, boundary);
           },
           onError: (error) => {
@@ -621,11 +628,18 @@ export default function GamePage() {
         clearQuickActionState();
         setLastOracleResult(null);
         setTravelFeedback(null);
+        let restoredResumeToken: string | null = resumeToken;
         try {
-          await restoreGameplayState(campaignId);
+          const restored = await restoreGameplayState(campaignId);
+          restoredResumeToken = restored.pendingResumeToken ?? resumeToken;
         } catch {
           setHasLiveTurnSnapshot(false);
         }
+        setPendingResumeFailure({
+          campaignId,
+          resumeToken: restoredResumeToken,
+          message: getErrorMessage(error, "Unknown resume error."),
+        });
         toast.error("Failed to resume pending turn", {
           description: getErrorMessage(error, "Unknown resume error."),
         });
@@ -720,6 +734,7 @@ export default function GamePage() {
         setActiveCampaign(campaign);
         const restored = await restoreGameplayState(campaign.id);
         if (!cancelled && restored.pendingResumeToken) {
+          setPendingResumeFailure(null);
           setPendingResumeRequest({
             campaignId: campaign.id,
             resumeToken: restored.pendingResumeToken,
@@ -1377,6 +1392,24 @@ export default function GamePage() {
   );
   const stageRightSlot = (
     <div className="space-y-3">
+      {pendingResumeFailure ? (
+        <StageContextCard label="Recovery" title="Pending turn paused" accent>
+          <p>{pendingResumeFailure.message}</p>
+          <button
+            type="button"
+            className="mt-3 rounded-[8px] border border-[#E63E00]/40 bg-[#E63E00]/15 px-3 py-2 text-[12px] font-semibold text-white transition hover:border-[#ff6a2b]/70 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={isTurnBusy}
+            onClick={() => {
+              setPendingResumeRequest({
+                campaignId: pendingResumeFailure.campaignId,
+                resumeToken: pendingResumeFailure.resumeToken,
+              });
+            }}
+          >
+            Resume turn
+          </button>
+        </StageContextCard>
+      ) : null}
       <StageContextCard label="Presence" title={presenceTitle}>
         {visibleActorCount > 0 ? (
           <div className="flex flex-wrap gap-2">

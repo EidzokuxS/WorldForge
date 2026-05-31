@@ -1246,6 +1246,50 @@ describe("GamePage", () => {
     });
   });
 
+  it("keeps a retry affordance visible when pending narration resume fails", async () => {
+    mockedChatResume
+      .mockRejectedValueOnce(new Error("resume stream unavailable"))
+      .mockResolvedValueOnce({ body: {} } as Response as never);
+    mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
+      handlers.onNarrative("The pending turn resumes after retry.");
+      handlers.onDone({ resumed: true });
+    });
+
+    await renderReadyGame({
+      messages: [
+        { role: "user" as const, content: "Open the sealed hatch" },
+      ],
+      premise: "A dark world",
+      hasLiveTurnSnapshot: false,
+      pendingNarration: {
+        pendingNarration: true,
+        resumable: true,
+        status: "resolved_pending_narration",
+        resumeToken: "resume-safe-token",
+      },
+    });
+
+    await waitFor(() => {
+      expect(mockedToast.error).toHaveBeenCalledWith("Failed to resume pending turn", {
+        description: "resume stream unavailable",
+      });
+    });
+    expect(screen.getByText("Pending turn paused")).toBeInTheDocument();
+    expect(screen.getByText("resume stream unavailable")).toBeInTheDocument();
+    expect(mockedChatResume).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume turn" }));
+
+    await waitFor(() => {
+      expect(mockedChatResume).toHaveBeenCalledTimes(2);
+    });
+    await waitFor(() => {
+      expect(screen.getByText("The pending turn resumes after retry.")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Pending turn paused")).not.toBeInTheDocument();
+    expect(mockedChatAction).not.toHaveBeenCalled();
+  });
+
   it("renders HUD with Home, Settings, and Saves buttons", async () => {
     await renderReadyGame();
 

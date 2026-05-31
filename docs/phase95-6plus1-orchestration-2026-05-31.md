@@ -3,7 +3,7 @@
 Date: 2026-05-31
 Branch: develop
 Baseline HEAD: 7971dab544c5de212c8f1f3fa3a80bb2d7e2ba56
-Current Integrated HEAD: f8a6c8e43eaa64b96958a4e5a2129c3a5d89ddf6
+Current Integrated HEAD: 49b58f6f0902be2ac50ea3dcd2efa731c770b422
 
 ## Product Goal
 
@@ -24,7 +24,7 @@ Oracle run:
 
 Current Oracle P1 blockers:
 - Service-owner matrix P1 closed in `f8a6c8e4`: service-owned lanes are executable-contract validated for physical manifest stores, receipt-kind parity, delegate tool existence, every delegate state effect, `turn_clock_ledger` time-effect role, and `quick_action_offer_service` canonical tool allowlist.
-- Staged restore source-manifest equivalence is locally implemented and verified after `f8a6c8e4`; pending commit. Pending repair now pins the source manifest digest in the journal and checks staged physical evidence against the original source manifest before live apply.
+- Staged restore source-manifest equivalence is closed in `49b58f6f`: pending repair now pins the source manifest digest in the journal and checks staged physical evidence against the original source manifest before live apply.
 - Current-HEAD Browser/long-play evidence remains open: `/game` workability, fresh human-style 60-turn, clean-start clone 60-turn, and 600+ soak/replay are still required.
 - Actor/world/time long-run observability evidence remains open: clock continuity, due-world reason distributions, actor wake backlog, settled-packet due refs, vector growth/rebuild counts, and pending narration recovery outcomes must be captured in long-play artifacts.
 
@@ -66,7 +66,7 @@ J2 staged restore intake:
 
 ### J2 Local Critical Path: Staged Restore Source Equivalence
 
-Status: locally implemented and verified; pending commit.
+Status: committed and pushed in `49b58f6f`.
 
 Invariant being closed:
 - Staged restore evidence is not authoritative because `.restore-staging/current/store-manifest.json` is inside the crash-repair staging area. The original source bundle manifest plus a journal-pinned source manifest digest are the authority for pending repair.
@@ -90,6 +90,24 @@ J3/J4/J5/J6 intake:
 - J4 narration/playfeel grounding: conditional source-level GO; no live P0/P1 in final narration path; P2s remain for long inventory wording and multi-step movement-time phrasing.
 - J5 clone/replay/rollback/vector: staged restore P1 confirmed; P2s remain for clean-start vector rebuild evidence, clone route/operator surface, rollback overclaim text, and verifier breadth.
 - J6 API/SSE/frontend projection: conditional source-level GO; no P0/P1 raw-id or quick-action authority leak; current-head Browser proof and failed-resume UX remain acceptance risks.
+
+### J6 Local Critical Path: Pending Resume Retry UX
+
+Status: locally implemented and verified; pending commit.
+
+Invariant being closed:
+- Pending narration resume is a recovery contract, not a toast-only side effect. If `/chat/resume` fails, the UI must preserve a backend-owned resume token affordance and retry the resume path without reissuing the player action.
+
+Current local changes:
+- `GamePage` records pending resume failure state with campaign id, resume token, and public error message.
+- Failed resume restores gameplay state, preserves the latest pending resume token when available, and keeps a visible `Recovery` card with `Resume turn`.
+- Retry enqueues `pendingResumeRequest` for the same resume token and calls `chatResume`; it does not call `chatAction`.
+
+Executed evidence:
+- `npm.cmd --prefix frontend test -- --run app/game/__tests__/page.test.tsx components/game/play-surface/__tests__/action-dock.test.tsx lib/__tests__/api.test.ts` passed: 125 tests.
+- `npm.cmd --prefix frontend run typecheck` passed.
+- GitNexus staged `detect_changes` returned HIGH because `GamePage` maps to 8 broad UI/process flows; direct upstream symbol impact for `GamePage` returned LOW, and the focused recovery regression covers the changed path.
+- Current-head Browser smoke remains partial: `/game` loaded, first freeform action and one Continue completed successfully on the backend, initial DOM/console/raw-ref checks passed, then Browser automation was blocked by Browser URL policy before final post-Continue UI verification.
 
 Live agents:
 - J1 Service-owner final audit.
