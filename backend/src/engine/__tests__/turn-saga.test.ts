@@ -279,6 +279,19 @@ describe("turn saga persistence", () => {
     expect(first.payload).toMatchObject({
       stage: "intent_created",
       stageOrdinal: 0,
+      traceLedger: {
+        model: "turn_authority_trace.v1",
+        eventStore: "turn_saga_events.authority_stage_committed",
+        correlatedBy: [
+          "campaignId",
+          "sagaId",
+          "turnId",
+          "stage",
+          "stageOrdinal",
+          "idempotencyKey",
+        ],
+        observabilityEvent: "turn.begin",
+      },
       contract: expect.objectContaining({
         owner: "chat_route",
         writeScope: "none",
@@ -309,6 +322,28 @@ describe("turn saga persistence", () => {
     expect(events.every((event) =>
       Boolean((event.payload as { contract?: unknown }).contract)
     )).toBe(true);
+    expect(events.every((event) =>
+      Boolean((event.payload as { traceLedger?: unknown }).traceLedger)
+    )).toBe(true);
+
+    const firstPayload = events[0]!.payload as {
+      contract: Record<string, unknown>;
+    };
+    getDb()
+      .update(turnSagaEvents)
+      .set({
+        payloadJson: JSON.stringify({
+          stage: "intent_created",
+          stageOrdinal: 0,
+          contract: firstPayload.contract,
+          ...authorityStagePayload("intent_created"),
+        }),
+      })
+      .where(eq(turnSagaEvents.id, events[0]!.id))
+      .run();
+    expect(() => assertTurnAuthorityStagesComplete({
+      sagaId: "saga-authority-stages",
+    })).toThrow(/trace ledger snapshot/i);
   });
 
   it("derives pre-turn snapshot recovery from the snapshot authority stage", () => {

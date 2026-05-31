@@ -30,6 +30,17 @@ export const PENDING_NARRATION_STATUSES = [
   "narrator_repairing",
 ] as const satisfies readonly TurnSagaStatus[];
 
+const TURN_AUTHORITY_TRACE_LEDGER_MODEL = "turn_authority_trace.v1";
+const TURN_AUTHORITY_TRACE_EVENT_STORE = "turn_saga_events.authority_stage_committed";
+const TURN_AUTHORITY_TRACE_CORRELATION_KEYS = [
+  "campaignId",
+  "sagaId",
+  "turnId",
+  "stage",
+  "stageOrdinal",
+  "idempotencyKey",
+] as const;
+
 export class TurnSagaNotFoundError extends Error {
   constructor(public readonly selector: GetTurnSagaInput) {
     super("Turn saga not found.");
@@ -1059,6 +1070,12 @@ export function recordTurnAuthorityStage(
       payloadJson: stringifyJson({
         stage,
         stageOrdinal,
+        traceLedger: {
+          model: TURN_AUTHORITY_TRACE_LEDGER_MODEL,
+          eventStore: TURN_AUTHORITY_TRACE_EVENT_STORE,
+          correlatedBy: TURN_AUTHORITY_TRACE_CORRELATION_KEYS,
+          observabilityEvent: contract.observabilityEvent,
+        },
         contract: {
           owner: contract.owner,
           preconditions: contract.preconditions,
@@ -1111,9 +1128,29 @@ function assertTurnAuthorityStageEventPayload(
 ): void {
   const record = isPlainRecord(payload) ? payload : {};
   const contract = isPlainRecord(record.contract) ? record.contract : null;
+  const traceLedger = isPlainRecord(record.traceLedger) ? record.traceLedger : null;
   const expected = turnAuthorityStageContractFor(stage);
+  const expectedStageOrdinal = TURN_AUTHORITY_STAGE_VALUES.indexOf(stage);
+  if (record.stageOrdinal !== expectedStageOrdinal) {
+    throw new Error(`Turn authority stage ${stage} has stale stage ordinal.`);
+  }
   if (!contract) {
     throw new Error(`Turn authority stage ${stage} is missing its lifecycle contract snapshot.`);
+  }
+  if (!traceLedger) {
+    throw new Error(`Turn authority stage ${stage} is missing its trace ledger snapshot.`);
+  }
+  for (const [field, expectedValue] of Object.entries({
+    model: TURN_AUTHORITY_TRACE_LEDGER_MODEL,
+    eventStore: TURN_AUTHORITY_TRACE_EVENT_STORE,
+    observabilityEvent: expected.observabilityEvent,
+  })) {
+    if (traceLedger[field] !== expectedValue) {
+      throw new Error(`Turn authority stage ${stage} has stale trace ledger field ${field}.`);
+    }
+  }
+  if (JSON.stringify(traceLedger.correlatedBy) !== JSON.stringify(TURN_AUTHORITY_TRACE_CORRELATION_KEYS)) {
+    throw new Error(`Turn authority stage ${stage} has stale trace ledger correlation keys.`);
   }
 
   for (const [field, expectedValue] of Object.entries({
