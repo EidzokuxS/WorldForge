@@ -310,6 +310,7 @@ vi.mock("../narrator-packet.js", () => ({
   buildNarratorPacket: vi.fn(),
   repairModelGuidancePerceivableResponses: vi.fn((packet: unknown) => packet),
   repairPromptUnsafePerceivableEffects: vi.fn((packet: unknown) => packet),
+  repairStalePerceivableObservations: vi.fn((packet: unknown) => packet),
   summarizeRuntimeToolResultForNarrator: vi.fn((input: { toolInput?: Record<string, unknown> }) =>
     String(input.toolInput?.text ?? input.toolInput?.summary ?? "Scene consequence settles."),
   ),
@@ -425,6 +426,7 @@ import { assembleAuthoritativeScene } from "../scene-assembly.js";
 import {
   buildNarratorPacket,
   repairModelGuidancePerceivableResponses,
+  repairStalePerceivableObservations,
   type CanonicalTurnPacketResponse,
   type NarratorPacket,
 } from "../narrator-packet.js";
@@ -8557,6 +8559,116 @@ describe("processTurn ScenePlan path", () => {
     expect(packetArg.sourceLinkedSummaries).toEqual([]);
     expect(assembleFinalNarrationPrompt).toHaveBeenCalledWith(
       expect.objectContaining({ narratorPacket: packetArg }),
+    );
+    expect(callOracle).not.toHaveBeenCalled();
+    expect(runGmToolLoop).not.toHaveBeenCalled();
+  });
+
+  it("repairs stale observation wording before resumed narration", async () => {
+    setupMocks();
+    const { settledPacket } = setupTurnSagaMocks({ status: "resolved_pending_narration", turnId: "pending-turn" });
+    const narratorPacket = settledPacket.narratorPacket as unknown as NarratorPacket;
+    const staleObservation = {
+      id: "observation-result:action-observe",
+      actionId: "action-observe",
+      toolName: "list_visible_affordances",
+      summary: "Scene scan: personnel Mira; barriers No visible barrier refs are present.",
+      atoms: [
+        {
+          id: "a1",
+          actionId: "action-observe",
+          toolName: "list_visible_affordances",
+          kind: "actor",
+          summary: "Mira",
+          claimSupport: ["actor_presence"],
+          sourcePath: "result.visibleActors.1.label",
+        },
+      ],
+    } satisfies NonNullable<NarratorPacket["perceivableObservations"]>[number];
+    const repairedPacket: NarratorPacket = {
+      ...narratorPacket,
+      perceivableObservations: [{
+        ...staleObservation,
+        summary: "Scene scan: personnel Mira; barriers No obvious visible barriers are apparent from here.",
+        atoms: [{
+          ...staleObservation.atoms[0]!,
+          summary: "Mira is visible here.",
+        }],
+      }],
+      evidenceLedger: [{
+        id: "observation_result:action-observe:a1",
+        category: "observation_result",
+        summary: "Mira is visible here.",
+        sourceId: "action-observe",
+        claimSupport: ["actor_presence"],
+      }],
+      sourceLinkedSummaries: [],
+      contextBudgetTrace: undefined,
+    };
+    narratorPacket.perceivableObservations = [staleObservation];
+    narratorPacket.evidenceLedger = [{
+      id: "observation_result:action-observe:a1",
+      category: "observation_result",
+      summary: "Mira",
+      sourceId: "action-observe",
+      claimSupport: ["actor_presence"],
+    }];
+    narratorPacket.sourceLinkedSummaries = [{
+      id: "source-linked-stale-observation",
+      summary: "Mira; No visible barrier refs are present.",
+      sourceIds: ["action-observe"],
+      summarizedItemCount: 2,
+    }];
+    setPrimaryNarratorFactText(
+      narratorPacket as unknown as ReturnType<typeof createNarratorPacketMock>,
+      "Mira is visible here.",
+    );
+    vi.mocked(repairStalePerceivableObservations).mockImplementationOnce(() => repairedPacket);
+    vi.mocked(runVisibleNarrationWithPacketGuard).mockImplementation(async (args) => {
+      const generated = await args.generateNarration({ attempt: 1, guardAddendum: null });
+      const { text, draft } = normalizeGeneratedNarrationForTest(generated);
+      return {
+        text,
+        draft,
+        attempts: 1,
+        retried: false,
+        validation: { ok: true, violations: [] },
+        guardAddendum: null,
+      };
+    });
+    vi.mocked(safeGenerateObject).mockResolvedValueOnce({
+      object: createGroundedSentenceDraftForTest("Mira is visible here."),
+      trace: {
+        text: "",
+        cleanedText: "",
+        strategy: "native_json",
+        primaryStrategy: "native_json",
+        finishReason: "stop",
+      },
+    } as never);
+
+    await collectEvents(
+      resumePendingTurnNarration({
+        campaignId: CAMPAIGN_ID,
+        turnId: "pending-turn",
+        storytellerProvider: createTestOptions().storytellerProvider,
+        storytellerTemperature: 0.8,
+        storytellerMaxTokens: 2000,
+      }),
+    );
+
+    expect(repairStalePerceivableObservations).toHaveBeenCalledWith(
+      expect.objectContaining({
+        perceivableObservations: [staleObservation],
+      }),
+    );
+    const packetArg = vi.mocked(runVisibleNarrationWithPacketGuard).mock.calls[0]?.[0]?.packet as NarratorPacket;
+    expect(packetArg).toBe(repairedPacket);
+    expect(packetArg.perceivableObservations?.[0]?.atoms[0]?.summary).toBe("Mira is visible here.");
+    expect(packetArg.evidenceLedger?.map((entry) => entry.summary)).toEqual(["Mira is visible here."]);
+    expect(packetArg.sourceLinkedSummaries).toEqual([]);
+    expect(assembleFinalNarrationPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ narratorPacket: repairedPacket }),
     );
     expect(callOracle).not.toHaveBeenCalled();
     expect(runGmToolLoop).not.toHaveBeenCalled();

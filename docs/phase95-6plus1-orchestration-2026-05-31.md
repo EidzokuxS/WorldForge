@@ -337,6 +337,14 @@ Integrated result:
 - Executed local evidence: `npm --prefix backend test -- src/engine/__tests__/narrator-packet.test.ts src/engine/__tests__/narration-grounding-guard.test.ts src/engine/__tests__/visible-narration-output-guard.test.ts` passed 131 tests.
 - Executed local evidence: `npm --prefix backend test -- src/engine/__tests__/player-facing-packet.test.ts src/engine/__tests__/prompt-assembler.test.ts src/routes/__tests__/chat.test.ts` passed 116 tests; backend typecheck passed.
 - Executed local evidence: `npm --prefix frontend test -- --run lib/__tests__/api.test.ts app/game/__tests__/page.test.tsx` passed 113 tests; frontend typecheck passed.
+- Wave I 6+1 findings for pending-narration observation recovery:
+  - All six agents converged on a read-time resume repair helper as the long-lived option. Live packet build already normalizes new observation prose, but old settled packets persist `perceivableObservations`, observation atom summaries, `observation_result` evidence, and source-linked summaries.
+  - Rejected options: DB migration is too broad for the first fix, and widening the grounding guard is the wrong owner because it would bless stale wording instead of repairing backend-owned playable facts.
+  - The repair remains internal-only: no API/SSE/frontend DTO changes are required because `perceivableObservations` and `sourceLinkedSummaries` are narrator/final-prompt packet internals.
+  - Authority invariants preserved: evidence IDs, categories, source IDs, and claim support stay backend-owned; no tool receipts, canonical action results, public DTO authority, or grounding allow-lists are widened.
+- Implemented A4 pending observation recovery slice: `repairStalePerceivableObservations` normalizes persisted observation summaries, atom summaries, matching `observation_result` evidence summaries/summary precision facts, realigns claim support from the repaired atom, rebuilds source-linked summaries from normalized visible items, and clears stale context budget trace only when the packet changed. `resumePendingTurnNarration` now applies this repair after unsafe-effect and model-guidance-response repairs and before scene assembly, reusable attempt checks, prompt assembly, and Storyteller guard execution.
+- Executed local evidence: `npm --prefix backend test -- src/engine/__tests__/narrator-packet.test.ts src/engine/__tests__/turn-processor.test.ts` passed 186 tests after the precision-fact repair regression caught and fixed stale route precision text.
+- Executed local evidence: `npm --prefix backend test -- src/engine/__tests__/narrator-packet.test.ts src/engine/__tests__/narration-grounding-guard.test.ts src/engine/__tests__/player-facing-packet.test.ts src/engine/__tests__/turn-processor.test.ts` passed 253 tests; backend typecheck passed.
 
 ### A5 Persistence Clone Replay Rollback Vector
 Agent: Goodall (`019e7ccd-b899-7720-9be6-dca69deb6d66`)

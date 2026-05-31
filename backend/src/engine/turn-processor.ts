@@ -126,6 +126,7 @@ import {
   buildNarratorPacket,
   repairModelGuidancePerceivableResponses,
   repairPromptUnsafePerceivableEffects,
+  repairStalePerceivableObservations,
   summarizeRuntimeToolResultForNarrator,
   type CanonicalTurnPacket,
   type CanonicalTurnPacketEffect,
@@ -4343,8 +4344,10 @@ export async function* resumePendingTurnNarration(
       throw new Error(`SettledTurnPacket not found for pending turn ${turnId}.`);
     }
     const storedNarratorPacket = requireNarratorPacket(settledPacket.narratorPacket);
-    const narratorPacket = repairModelGuidancePerceivableResponses(
-      repairPromptUnsafePerceivableEffects(storedNarratorPacket),
+    const narratorPacket = repairStalePerceivableObservations(
+      repairModelGuidancePerceivableResponses(
+        repairPromptUnsafePerceivableEffects(storedNarratorPacket),
+      ),
     );
     if (narratorPacket.perceivableEffects.length !== storedNarratorPacket.perceivableEffects.length) {
       log.warn("Pending narration resume repaired unsafe stale perceivable effects", {
@@ -4360,6 +4363,16 @@ export async function* resumePendingTurnNarration(
         settledTurnPacketId: settledPacket.id,
         removedResponseCount:
           storedNarratorPacket.perceivableResponses.length - narratorPacket.perceivableResponses.length,
+      });
+    }
+    if (
+      JSON.stringify(narratorPacket.perceivableObservations ?? [])
+        !== JSON.stringify(storedNarratorPacket.perceivableObservations ?? [])
+    ) {
+      log.warn("Pending narration resume repaired stale perceivable observation wording", {
+        sagaId: lockedSaga.id,
+        settledTurnPacketId: settledPacket.id,
+        observationCount: narratorPacket.perceivableObservations?.length ?? 0,
       });
     }
     const sceneAssembly = minimalSceneAssemblyFromNarratorPacket(narratorPacket);

@@ -5,6 +5,7 @@ import {
   formatNarratorPacketForPrompt,
   repairModelGuidancePerceivableResponses,
   repairPromptUnsafePerceivableEffects,
+  repairStalePerceivableObservations,
   summarizeRuntimeToolResultForNarrator,
   type CanonicalTurnPacket,
 } from "../narrator-packet.js";
@@ -2556,6 +2557,183 @@ describe("narrator packet settlement boundary", () => {
     expect(atomSummaries.join("\n")).not.toContain("legal");
     expect(formatted).toContain("The route to Archive Stair is reachable from here.");
     expect(formatted).not.toContain("Route to Archive Stair is legal");
+  });
+
+  it("repairs stale persisted lookup observations before resumed narration can cite them", () => {
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    canonicalTurnPacket.turnResolution = {
+      kind: "status_read",
+      resolutionState: "observation_grounded",
+      combatIntent: false,
+      evidenceIds: [`action-result:${successfulActionId}`],
+      consequenceIds: [],
+      explicitNoCombatEvidenceIds: [`action-result:${successfulActionId}`],
+      toolNames: ["list_visible_affordances"],
+    };
+    canonicalTurnPacket.effects = [];
+    canonicalTurnPacket.narratorFacts.actionIds = [];
+    canonicalTurnPacket.narratorFacts.toolResultRefs = [];
+    canonicalTurnPacket.actionResults = [
+      {
+        order: 0,
+        actionId: successfulActionId,
+        actionRef: "step-observe",
+        actorId: playerId,
+        toolName: "list_visible_affordances",
+        input: { focus: "personnel routes barriers" },
+        args: { focus: "personnel routes barriers" },
+        result: {
+          success: true,
+          kind: "observation",
+          observationOnly: true,
+          result: {
+            visibleActors: [{ label: "Mira", type: "npc" }],
+            categories: {
+              barriers: { absence: "No visible barrier refs are present." },
+            },
+          },
+        },
+        summary: "Scene scan: personnel Mira; barriers No visible barrier refs are present.",
+      },
+    ];
+
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket,
+    });
+    packet.perceivableObservations = [{
+      id: `observation-result:${successfulActionId}`,
+      actionId: successfulActionId,
+      toolName: "list_visible_affordances",
+      summary: "Scene scan: personnel Mira; barriers No visible barrier refs are present.",
+      atoms: [
+        {
+          id: "a1",
+          actionId: successfulActionId,
+          toolName: "list_visible_affordances",
+          kind: "actor",
+          summary: "Mira",
+          claimSupport: ["actor_presence"],
+          sourcePath: "result.visibleActors.1.label",
+        },
+        {
+          id: "a2",
+          actionId: successfulActionId,
+          toolName: "list_visible_affordances",
+          kind: "absence",
+          summary: "No visible barrier refs are present.",
+          claimSupport: ["route_status"],
+          sourcePath: "result.categories.barriers.absence",
+        },
+        {
+          id: "a3",
+          actionId: successfulActionId,
+          toolName: "check_route",
+          kind: "route",
+          summary: "Route to Archive Stair is legal",
+          claimSupport: ["route_status"],
+          sourcePath: "result.routeStatus",
+        },
+      ],
+    }];
+    packet.evidenceLedger = [
+      ...(packet.evidenceLedger ?? []).filter((entry) => entry.category !== "observation_result"),
+      {
+        id: `observation_result:${successfulActionId}:a1`,
+        category: "observation_result",
+        summary: "Mira",
+        sourceId: successfulActionId,
+        claimSupport: ["actor_presence"],
+      },
+      {
+        id: `observation_result:${successfulActionId}:a2`,
+        category: "observation_result",
+        summary: "No visible barrier refs are present.",
+        sourceId: successfulActionId,
+        claimSupport: ["route_status"],
+      },
+      {
+        id: `observation_result:${successfulActionId}:a3`,
+        category: "observation_result",
+        summary: "Route to Archive Stair is legal",
+        sourceId: successfulActionId,
+        claimSupport: ["route_status"],
+        precisionFacts: [{
+          kind: "summary",
+          value: "Route to Archive Stair is legal",
+          sourcePath: "result.routeStatus",
+        }],
+      },
+    ];
+    packet.sourceLinkedSummaries = [{
+      id: "source-linked-stale-observation",
+      summary: "Mira; Route to Archive Stair is legal; No visible barrier refs are present.",
+      sourceIds: [successfulActionId],
+      summarizedItemCount: 3,
+    }];
+    packet.contextBudgetTrace = packet.contextBudgetTrace
+      ? { ...packet.contextBudgetTrace, sourceLinkedSummaryCount: 1 }
+      : undefined;
+
+    const repaired = repairStalePerceivableObservations(packet);
+    const formatted = formatNarratorPacketForPrompt(repaired);
+    const allowedRefs = getAllowedNarrationCitationEvidenceRefs(repaired);
+    const actorRef = allowedRefs.find((ref) =>
+      ref.evidence.id === `observation_result:${successfulActionId}:a1`,
+    );
+
+    expect(repaired.perceivableObservations?.[0]?.summary).toBe(
+      "Scene scan: personnel Mira; barriers No obvious visible barriers are apparent from here.",
+    );
+    expect(repaired.perceivableObservations?.[0]?.atoms.map((atom) => atom.summary)).toEqual([
+      "Mira is visible here.",
+      "No obvious visible barriers are apparent from here.",
+      "The route to Archive Stair is reachable from here.",
+    ]);
+    expect(repaired.evidenceLedger).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: `observation_result:${successfulActionId}:a1`,
+          category: "observation_result",
+          summary: "Mira is visible here.",
+          sourceId: successfulActionId,
+          claimSupport: ["actor_presence"],
+        }),
+        expect.objectContaining({
+          id: `observation_result:${successfulActionId}:a3`,
+          category: "observation_result",
+          summary: "The route to Archive Stair is reachable from here.",
+          precisionFacts: [expect.objectContaining({
+            kind: "summary",
+            value: "The route to Archive Stair is reachable from here.",
+          })],
+        }),
+      ]),
+    );
+    expect(repaired.sourceLinkedSummaries).toEqual([]);
+    expect(repaired.contextBudgetTrace).toBeUndefined();
+    expect(formatted).toContain("Mira is visible here.");
+    expect(formatted).toContain("The route to Archive Stair is reachable from here.");
+    expect(formatted).not.toContain("Route to Archive Stair is legal");
+    expect(formatted).not.toContain("barrier refs");
+    expect(actorRef).toBeDefined();
+
+    const draft = compileGroundedSentenceDraftToNarrationDraft({
+      packet: repaired,
+      draft: {
+        version: "grounded-sentence-draft.v2",
+        sentences: [{
+          text: "Mira is visible here.",
+          evidenceRefs: [actorRef!.refId],
+        }],
+      },
+    });
+    expect(draft.prose).toBe("Mira is visible here.");
+    expect(draft.claims[0]).toEqual(expect.objectContaining({
+      kind: "actor_presence",
+      evidenceRefs: [`observation_result:${successfulActionId}:a1`],
+    }));
+    expect(repairStalePerceivableObservations(repaired)).toBe(repaired);
   });
 
   it("lets status-read turns cite current inventory as static backend-owned facts", () => {

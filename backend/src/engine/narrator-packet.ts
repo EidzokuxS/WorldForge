@@ -3285,6 +3285,112 @@ export function repairModelGuidancePerceivableResponses(packet: NarratorPacket):
   };
 }
 
+export function repairStalePerceivableObservations(packet: NarratorPacket): NarratorPacket {
+  const observations = packet.perceivableObservations ?? [];
+  if (observations.length === 0) {
+    return packet;
+  }
+
+  const atomByEvidenceKey = new Map<string, NarratorPacketObservationAtom>();
+  let changed = false;
+  const perceivableObservations = observations.map((observation) => {
+    const summary = boundedSummary(
+      normalizeNarratableObservationSummary(observation.summary),
+      640,
+    );
+    const atoms = observation.atoms.map((atom) => {
+      const atomSummary = boundedSummary(
+        formatObservationAtomNarratableSummary({
+          kind: atom.kind,
+          rawSummary: atom.summary,
+        }),
+        OBSERVATION_ATOM_SUMMARY_MAX,
+      );
+      const repairedAtom = atomSummary === atom.summary ? atom : { ...atom, summary: atomSummary };
+      atomByEvidenceKey.set(`${observation.actionId}:${atom.id}`, repairedAtom);
+      if (atomSummary === atom.summary) {
+        return atom;
+      }
+      changed = true;
+      return repairedAtom;
+    });
+    if (summary === observation.summary && atoms.every((atom, index) => atom === observation.atoms[index])) {
+      return observation;
+    }
+    changed = true;
+    return { ...observation, summary, atoms };
+  });
+
+  const evidenceLedger = (packet.evidenceLedger ?? []).map((entry) => {
+    if (entry.category !== "observation_result") {
+      return entry;
+    }
+    const evidenceKey = entry.id.startsWith("observation_result:")
+      ? entry.id.slice("observation_result:".length)
+      : "";
+    const matchedAtom = atomByEvidenceKey.get(evidenceKey);
+    const summary = matchedAtom?.summary
+      ?? boundedSummary(normalizeNarratableObservationSummary(entry.summary), 640);
+    const precisionFacts = (entry.precisionFacts ?? []).map((fact) => {
+      const value = fact.kind === "summary"
+        ? summary
+        : boundedSummary(normalizeNarratableObservationSummary(fact.value), 640);
+      if (value === fact.value) {
+        return fact;
+      }
+      changed = true;
+      return { ...fact, value };
+    });
+    const claimSupport = matchedAtom?.claimSupport ?? entry.claimSupport;
+    if (
+      summary === entry.summary
+      && claimSupportEqual(claimSupport, entry.claimSupport)
+      && precisionFacts.every((fact, index) => fact === entry.precisionFacts?.[index])
+    ) {
+      return entry;
+    }
+    changed = true;
+    return {
+      ...entry,
+      summary,
+      ...(claimSupport ? { claimSupport } : {}),
+      ...(entry.precisionFacts ? { precisionFacts } : {}),
+    };
+  });
+
+  const sourceLinkedSummaries = buildNarratorSourceLinkedSummaries(
+    collectNarratorPromptVisibleItems({
+      ...packet,
+      perceivableObservations,
+      evidenceLedger,
+      sourceLinkedSummaries: [],
+      contextBudgetTrace: undefined,
+    }),
+  );
+  if (!sourceLinkedSummariesEqual(sourceLinkedSummaries, packet.sourceLinkedSummaries ?? [])) {
+    changed = true;
+  }
+  if (!changed) {
+    return packet;
+  }
+
+  const redactionAudit = packet.redactionAudit
+    ? {
+        ...packet.redactionAudit,
+        retainedEvidenceCount: evidenceLedger.length,
+      }
+    : undefined;
+
+  return {
+    ...packet,
+    perceivableObservations,
+    evidenceLedger,
+    sourceLinkedSummaries,
+    redactionAudit,
+    contextBudgetTrace: undefined,
+  };
+}
+
 function sourceLinkedSummariesEqual(
   left: readonly NarratorPacketSourceLinkedSummary[],
   right: readonly NarratorPacketSourceLinkedSummary[],
@@ -3301,6 +3407,13 @@ function sourceLinkedSummariesEqual(
       && summary.sourceIds.length === other.sourceIds.length
       && summary.sourceIds.every((sourceId, sourceIndex) => sourceId === other.sourceIds[sourceIndex]);
   });
+}
+
+function claimSupportEqual(left: readonly string[] | undefined, right: readonly string[] | undefined): boolean {
+  const leftValues = left ?? [];
+  const rightValues = right ?? [];
+  return leftValues.length === rightValues.length
+    && leftValues.every((value, index) => value === rightValues[index]);
 }
 
 function isPlayerActionEvent(event: CanonicalTurnPacketEvent): boolean {
