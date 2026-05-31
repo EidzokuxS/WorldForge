@@ -35,6 +35,8 @@ import {
   resolveImmediateScenePresenceScopeId,
   resolveScenePresence,
 } from "../engine/scene-presence.js";
+import { executeToolCall } from "../engine/tool-executor.js";
+import type { ToolExecutionContext } from "../engine/tool-execution-context.js";
 import { assertPublicProjectionPayload } from "../engine/gameplay-control-plane-contract.js";
 import {
   requirePublicDtoHandle,
@@ -821,11 +823,53 @@ app.post("/:id/npcs/:npcId/promote", async (c) => {
       );
     }
 
-    // Apply promotion
-    db.update(npcs)
-      .set({ tier: newTier })
-      .where(and(eq(npcs.id, npc.id), eq(npcs.campaignId, campaignId)))
-      .run();
+    const clock = readWorldClock(campaignId);
+    const legalActorRefs = new Set([npc.id, `npc:${npc.id}`, `actor:${npc.id}`, npc.name]);
+    const executionContext: ToolExecutionContext = {
+      scope: "background",
+      subjectActorRefs: new Set(),
+      authority: {
+        baseWorldVersion: clock.worldVersion,
+        sourceEntity: { type: "route", id: "npc_promote" },
+        toolResultId: `route:npc_promote:${campaignId}:${npc.id}:${newTier}:${clock.worldVersion}`,
+        allowedWriteScopes: [`npc:${npc.id}`],
+        metadata: {
+          route: "npc_promote",
+          actorHandle: requiredPublicHandle(campaignId, "actor", npc.id),
+          oldTier: npc.tier,
+          newTier,
+        },
+      },
+      currentLocationId: null,
+      currentSceneScopeId: null,
+      legalLocationRefs: new Set(),
+      legalActorRefs,
+      legalItemRefs: new Set(),
+      legalFactionRefs: new Set(),
+      currentLocationRefs: new Set(),
+      currentSceneRefs: new Set(),
+      legalMovementRefs: new Set(),
+      backendOnlyRefs: new Set([npc.id, `npc:${npc.id}`, `actor:${npc.id}`]),
+    };
+    const toolResult = await executeToolCall(
+      campaignId,
+      "promote_npc",
+      {
+        npcRef: `actor:${npc.id}`,
+        newTier,
+        reason: "Public NPC promote route requested an actor lifecycle promotion.",
+      },
+      clock.currentTick,
+      undefined,
+      executionContext,
+    );
+
+    if (!toolResult.success) {
+      return c.json(
+        { error: toolResult.error ?? "Failed to promote NPC." },
+        400,
+      );
+    }
 
     const actorHandle = requiredPublicHandle(campaignId, "actor", npc.id);
     const payload = {

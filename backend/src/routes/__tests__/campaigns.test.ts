@@ -34,6 +34,10 @@ vi.mock("../../engine/living-world-authority.js", () => ({
   readWorldClock: vi.fn(),
 }));
 
+vi.mock("../../engine/tool-executor.js", () => ({
+  executeToolCall: vi.fn(),
+}));
+
 vi.mock("../../inventory/authority.js", () => ({
   loadAuthoritativeInventoryView: vi.fn(() => null),
 }));
@@ -72,6 +76,7 @@ import { getDb } from "../../db/index.js";
 import { listRecentLocationEventsForLocations } from "../../engine/location-events.js";
 import { listConnectedPaths, loadLocationGraph } from "../../engine/location-graph.js";
 import { readWorldClock } from "../../engine/living-world-authority.js";
+import { executeToolCall } from "../../engine/tool-executor.js";
 import { loadAuthoritativeInventoryView } from "../../inventory/authority.js";
 import { toPublicDtoHandle } from "../../engine/public-dto-handles.js";
 import campaignRoutes from "../campaigns.js";
@@ -92,6 +97,7 @@ const mockedListRecentLocationEventsForLocations = vi.mocked(
 const mockedListConnectedPaths = vi.mocked(listConnectedPaths);
 const mockedLoadLocationGraph = vi.mocked(loadLocationGraph);
 const mockedReadWorldClock = vi.mocked(readWorldClock);
+const mockedExecuteToolCall = vi.mocked(executeToolCall);
 const mockedLoadAuthoritativeInventoryView = vi.mocked(loadAuthoritativeInventoryView);
 
 // ---------------------------------------------------------------------------
@@ -133,6 +139,33 @@ beforeEach(() => {
     currentTick: 42,
     updatedAt: 123456,
   });
+  mockedExecuteToolCall.mockResolvedValue({
+    success: true,
+    result: {
+      npcId: "npc-1",
+      name: "Guard",
+      oldTier: "temporary",
+      newTier: "persistent",
+      reason: "Public NPC promote route requested an actor lifecycle promotion.",
+    },
+    authority: {
+      campaignId: CAMPAIGN_ID,
+      sourceEntity: { type: "route", id: "npc_promote" },
+      baseWorldVersion: 7,
+      resultWorldVersion: 8,
+      worldTimeMinutes: 42,
+      currentTick: 42,
+      uiTurnOrdinal: 42,
+      elapsedWorldTimeMinutes: 0,
+      toolResultId: "authority:npc-promote",
+      stateDeltaRefs: ["npc:npc-1"],
+      eventRefs: [],
+      witnesses: [],
+      knowledgeOutputs: [],
+      visibilityOutputs: [],
+      resources: [],
+    },
+  } as any);
 });
 
 function makeStoredPlayerRow() {
@@ -1775,12 +1808,12 @@ describe("POST /:id/npcs/:npcId/promote", () => {
     const select = vi.fn(() => ({ from }));
 
     mockedGetDb.mockReturnValue({ select, update } as any);
-    return { run };
+    return { run, update };
   }
 
-  it("promotes only through public actor handles and returns public handles", async () => {
+  it("promotes only through public actor handles via runtime authority and returns public handles", async () => {
     markCampaignActive();
-    const { run } = mockNpcPromotionDb();
+    const { run, update } = mockNpcPromotionDb();
     const actorHandle = toPublicDtoHandle({
       campaignId: CAMPAIGN_ID,
       kind: "actor",
@@ -1797,7 +1830,27 @@ describe("POST /:id/npcs/:npcId/promote", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(run).toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+    expect(mockedExecuteToolCall).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      "promote_npc",
+      {
+        npcRef: "actor:npc-1",
+        newTier: "persistent",
+        reason: "Public NPC promote route requested an actor lifecycle promotion.",
+      },
+      42,
+      undefined,
+      expect.objectContaining({
+        scope: "background",
+        authority: expect.objectContaining({
+          baseWorldVersion: 7,
+          sourceEntity: { type: "route", id: "npc_promote" },
+          allowedWriteScopes: ["npc:npc-1"],
+        }),
+      }),
+    );
     const body = await res.json();
     expect(body.id).toBe(actorHandle);
     expect(body.actorHandle).toBe(actorHandle);
@@ -1821,5 +1874,6 @@ describe("POST /:id/npcs/:npcId/promote", () => {
 
     expect(res.status).toBe(404);
     expect(run).not.toHaveBeenCalled();
+    expect(mockedExecuteToolCall).not.toHaveBeenCalled();
   });
 });
