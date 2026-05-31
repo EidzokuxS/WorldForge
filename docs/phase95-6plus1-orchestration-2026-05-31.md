@@ -3,7 +3,7 @@
 Date: 2026-05-31
 Branch: develop
 Baseline HEAD: 7971dab544c5de212c8f1f3fa3a80bb2d7e2ba56
-Current Integrated HEAD: 881156cd191db83aedefab326854cc1b3bb5bc04
+Current Integrated HEAD: 3767de7dcecafb92cf356f637e5e8705ff778017
 
 ## Product Goal
 
@@ -13,7 +13,20 @@ WorldForge Phase 95 target is a long-lived, high-quality LLM-driven RPG gameplay
 
 ## Current Gate
 
-R4 Oracle verdict: conditional architecture GO, long-play acceptance NO-GO.
+Current-head Oracle verdict: conditional architecture GO, long-play acceptance NO-GO.
+
+Oracle run:
+- Slug: `phase95-current-head-architectu`
+- Date: 2026-05-31
+- Model/engine: browser `5.5 Pro`
+- Bundle: one text attachment, 14 files, inline file count 0, about 187k tokens
+- Output: `output/oracle-phase95-current-head-architecture-20260531.md`
+
+Current Oracle P1 blockers:
+- Service-owner matrix is not fully executable. `entity_tag_service` and similar service-owned lanes need store/descriptor/delegate validation rather than only non-empty contract metadata.
+- Staged restore source-manifest equivalence is not visibly proven. Pending repair validates staged evidence against the staged manifest, but must prove staged physical evidence still matches the original source bundle manifest or a source-manifest digest recorded in the journal.
+- Current-HEAD Browser/long-play evidence remains open: `/game` workability, fresh human-style 60-turn, clean-start clone 60-turn, and 600+ soak/replay are still required.
+- Actor/world/time long-run observability evidence remains open: clock continuity, due-world reason distributions, actor wake backlog, settled-packet due refs, vector growth/rebuild counts, and pending narration recovery outcomes must be captured in long-play artifacts.
 
 Known R4 P1s closed in commit `7971dab5`:
 - Default `/world` NPC projection no longer exposes semantic `persona/goals/beliefs`.
