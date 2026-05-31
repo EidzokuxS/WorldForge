@@ -364,6 +364,22 @@ function createTurnStream(events: Array<{ type: string; data: unknown }>) {
   })();
 }
 
+function parseSseEvents(body: string): Array<{ event: string; data: unknown }> {
+  const events: Array<{ event: string; data: unknown }> = [];
+  const blocks = body.split(/\r?\n\r?\n/).map((block) => block.trim()).filter(Boolean);
+  for (const block of blocks) {
+    const event = block.match(/^event: (.+)$/m)?.[1];
+    const data = block.match(/^data: (.*)$/m)?.[1];
+    if (!event || data === undefined) continue;
+    try {
+      events.push({ event, data: JSON.parse(data) });
+    } catch {
+      events.push({ event, data });
+    }
+  }
+  return events;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   resolveQuickActionSelectionMock.mockReset();
@@ -1279,7 +1295,18 @@ describe("Campaign-loaded gameplay transport", () => {
     }) as any);
     mockedProcessTurn.mockImplementation(() =>
       createTurnStream([
-        { type: "oracle_result", data: { outcome: "weak_hit", reasoning: "Secret oracle reasoning." } },
+        {
+          type: "oracle_result",
+          data: {
+            outcome: "weak_hit",
+            reasoning: "Secret oracle reasoning.",
+            rationale: "Secret oracle rationale.",
+            sagaId: "oracle-saga-data-secret",
+            turnId: "oracle-turn-data-secret",
+            authority: "oracle-authority-secret",
+            rawEvent: { marker: "oracle-raw-event-secret" },
+          },
+        },
         {
           type: "turn_resolution",
           data: {
@@ -1344,6 +1371,11 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(body).not.toContain("event: reasoning");
     expect(body).not.toContain("Reasoning stays on a debug lane.");
     expect(body).not.toContain("Secret oracle reasoning.");
+    expect(body).not.toContain("Secret oracle rationale.");
+    expect(body).not.toContain("oracle-saga-data-secret");
+    expect(body).not.toContain("oracle-turn-data-secret");
+    expect(body).not.toContain("oracle-authority-secret");
+    expect(body).not.toContain("oracle-raw-event-secret");
     expect(body).not.toContain("resolutionState");
     expect(body).not.toContain("observation_grounded");
     expect(body).not.toContain("combatIntent");
@@ -1357,6 +1389,168 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(body).not.toContain("evt-speak");
     expect(body).not.toContain("hidden-from-done");
     expect(body).not.toContain("Nanami let the warning land before he moved.Reasoning stays on a debug lane.");
+  });
+
+  it("serializes public SSE from sanitized event data without raw TurnEvent envelope fields", async () => {
+    setupStoryteller();
+    setupDbMock();
+
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
+      id: campaignId,
+      name: `Campaign ${campaignId}`,
+      createdAt: "2026-01-01",
+    }) as any);
+    mockedCaptureSnapshot.mockImplementation((campaignId) => ({
+      campaignId,
+      spawnedNpcIds: [],
+      spawnedItemIds: [],
+      revealedLocationIds: [],
+      createdRelationshipIds: [],
+      createdChronicleIds: [],
+    }) as any);
+    mockedProcessTurn.mockImplementation(() =>
+      createTurnStream([
+        {
+          type: "narrative",
+          data: { text: "The clerk keeps the ledger open on the counter." },
+          sagaId: "saga-top-level-secret",
+          turnId: "turn-top-level-secret",
+          authority: { toolResultId: "tool-result-top-level-secret" },
+          rawEvent: { hidden: "raw-event-top-level-secret" },
+        } as any,
+        {
+          type: "done",
+          data: { tick: 2, worldVersion: 7, worldTimeMinutes: 12 },
+          sagaId: "saga-done-top-level-secret",
+          turnId: "turn-done-top-level-secret",
+          authority: { eventRefs: ["event-top-level-secret"] },
+        } as any,
+      ]),
+    );
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Wait at the ledger counter",
+        intent: "Wait at the ledger counter",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    const events = parseSseEvents(body);
+    expect(events).toEqual([
+      {
+        event: "narrative",
+        data: { text: "The clerk keeps the ledger open on the counter." },
+      },
+      {
+        event: "done",
+        data: { tick: 2, worldVersion: 0, worldTimeMinutes: 0 },
+      },
+    ]);
+    for (const forbidden of [
+      "saga-top-level-secret",
+      "turn-top-level-secret",
+      "tool-result-top-level-secret",
+      "raw-event-top-level-secret",
+      "saga-done-top-level-secret",
+      "turn-done-top-level-secret",
+      "event-top-level-secret",
+      "rawEvent",
+      "authority",
+      "sagaId",
+      "turnId",
+    ]) {
+      expect(body).not.toContain(forbidden);
+    }
+  });
+
+  it("projects error SSE through a player-facing allow-list", async () => {
+    setupStoryteller();
+    setupDbMock();
+
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
+      id: campaignId,
+      name: `Campaign ${campaignId}`,
+      createdAt: "2026-01-01",
+    }) as any);
+    mockedCaptureSnapshot.mockImplementation((campaignId) => ({
+      campaignId,
+      spawnedNpcIds: [],
+      spawnedItemIds: [],
+      revealedLocationIds: [],
+      createdRelationshipIds: [],
+      createdChronicleIds: [],
+    }) as any);
+    mockedProcessTurn.mockImplementation(() =>
+      createTurnStream([
+        {
+          type: "error",
+          data: {
+            error: "Narration guard still needs repair.",
+            pendingNarration: true,
+            resumable: true,
+            recoveryState: "resume_ready",
+            resumeToken: "resume_deadbeefcafef00d",
+            settled: true,
+            recoverable: true,
+            sagaId: "saga-error-data-secret",
+            turnId: "turn-error-data-secret",
+            authority: { toolResultId: "tool-result-error-data-secret" },
+            rawEvent: { hidden: "raw-event-error-data-secret" },
+            debugOnly: "debug-error-data-secret",
+          },
+        },
+      ]),
+    );
+
+    const res = await app.request("/chat/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        campaignId: CAMPAIGN_ID,
+        playerAction: "Wait at the ledger counter",
+        intent: "Wait at the ledger counter",
+        method: "",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(parseSseEvents(body)).toEqual([
+      {
+        event: "error",
+        data: {
+          error: "Narration guard still needs repair.",
+          pendingNarration: true,
+          resumable: true,
+          recoveryState: "resume_ready",
+          resumeToken: "resume_deadbeefcafef00d",
+          settled: true,
+          recoverable: true,
+        },
+      },
+    ]);
+    for (const forbidden of [
+      "saga-error-data-secret",
+      "turn-error-data-secret",
+      "tool-result-error-data-secret",
+      "raw-event-error-data-secret",
+      "debug-error-data-secret",
+      "sagaId",
+      "turnId",
+      "authority",
+      "rawEvent",
+      "debugOnly",
+    ]) {
+      expect(body).not.toContain(forbidden);
+    }
   });
 
   it("projects quick actions through a player-facing SSE allow-list", async () => {

@@ -410,6 +410,12 @@ const pendingNarrationRecoveryStates = [
   "recovering",
 ] as const;
 
+const playerSafeErrorRecoveryStates = [
+  ...pendingNarrationRecoveryStates,
+  "pre_turn_snapshot_restored",
+  "manual_recovery_required",
+] as const;
+
 type PendingNarrationRecoveryState = (typeof pendingNarrationRecoveryStates)[number];
 
 type PendingNarrationPublicStatus = {
@@ -679,17 +685,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function omitRecordKeys(
-  value: unknown,
-  keys: readonly string[],
-): unknown {
-  if (!isRecord(value)) return value;
-  const blocked = new Set(keys);
-  return Object.fromEntries(
-    Object.entries(value).filter(([key]) => !blocked.has(key)),
-  );
-}
-
 function isPlayerSafeStateUpdate(value: unknown): value is Record<string, unknown> {
   return isRecord(value) && value.type === "location_change";
 }
@@ -760,6 +755,12 @@ function playerSafeTurnResolution(value: unknown): Record<string, unknown> | nul
   return kind ? { kind } : null;
 }
 
+function playerSafeOracleResult(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) return {};
+  const outcome = playerSafeText(value.outcome);
+  return outcome ? { outcome } : {};
+}
+
 function playerSafeDoneBoundary(value: unknown): Record<string, unknown> {
   if (!isRecord(value)) return {};
   const data: Record<string, unknown> = {};
@@ -774,6 +775,43 @@ function playerSafeDoneBoundary(value: unknown): Record<string, unknown> {
     if (typeof booleanValue === "boolean") {
       data[key] = booleanValue;
     }
+  }
+  return data;
+}
+
+function playerSafeErrorBoundary(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) return {};
+  const data: Record<string, unknown> = {};
+  const error = playerSafeText(value.error);
+  if (error) {
+    data.error = error;
+  }
+  for (const key of [
+    "incompleteTurnStream",
+    "pendingNarration",
+    "resumable",
+    "settled",
+    "recoverable",
+    "restored",
+    "retryable",
+  ] as const) {
+    const booleanValue = value[key];
+    if (typeof booleanValue === "boolean") {
+      data[key] = booleanValue;
+    }
+  }
+  const recoveryState = typeof value.recoveryState === "string"
+    && (playerSafeErrorRecoveryStates as readonly string[]).includes(value.recoveryState)
+    ? value.recoveryState
+    : undefined;
+  if (recoveryState) {
+    data.recoveryState = recoveryState;
+  }
+  const resumeToken = typeof value.resumeToken === "string" && value.resumeToken.startsWith("resume_")
+    ? playerSafeText(value.resumeToken)
+    : undefined;
+  if (resumeToken) {
+    data.resumeToken = resumeToken;
   }
   return data;
 }
@@ -805,7 +843,7 @@ function toPlayerFacingTurnEvent(
   if (event.type === "oracle_result") {
     return {
       ...event,
-      data: omitRecordKeys(event.data, ["reasoning", "rationale"]),
+      data: playerSafeOracleResult(event.data),
     };
   }
   if (event.type === "turn_resolution") {
@@ -821,7 +859,7 @@ function toPlayerFacingTurnEvent(
   if (event.type === "error") {
     return {
       ...event,
-      data: omitRecordKeys(event.data, ["sagaId", "turnId"]),
+      data: playerSafeErrorBoundary(event.data),
     };
   }
   if (event.type === "state_update") {
