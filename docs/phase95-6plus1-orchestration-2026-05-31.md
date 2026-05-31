@@ -58,7 +58,8 @@ Output: P0/P1/P2 findings, exact files/functions, tests to add/run, player-quali
 Integrated result:
 - Verdict: CONDITIONAL for A1. UI intake, quick actions, SSE/API projection, and frontend parsing contracts look sound; focused tests passed; fresh current-HEAD Browser evidence still needed.
 - P0: none found.
-- P1: Browser workability evidence gap. Need current-HEAD probe covering freeform action -> finalizing_turn -> done boundary -> world refresh -> quick actions visible -> quick action click -> backend handle resolution, no raw ids/projection leaks, console clean.
+- P1: Browser workability evidence gap partially closed by `output/phase95-browser-smoke-inventory-status-20260531.md`: current-HEAD in-app Browser opened `/game`, freeform status/inventory action returned to `Ready`, final narration cited current inventory status, visible `Continue` quick action clicked and returned to `Ready`, console warnings/errors were `[]`.
+- Remaining A1 evidence gap: collect a route/target quick-action probe that verifies backend handle resolution and raw-id/projection leak absence across the API/SSE payloads, not only visible Browser completion.
 - P2: `parseWorldData` fail-closes malformed/raw public handles by dropping entities. Good for authority, but player quality may degrade into missing NPCs/locations without visible projection-health signal.
 - P2: prior Browser/player-quality artifacts show occasional label-heavy prose. Improve narratable fact packets and quick-action wording without weakening projection or grounding.
 - Executed evidence from agent: backend A1 focused tests, 15 passed; frontend A1 focused tests, 12 passed.
