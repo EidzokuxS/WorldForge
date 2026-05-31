@@ -1271,6 +1271,41 @@ describe("createPlayerTurnToolExecutionContext", () => {
       },
       context,
     })).toBeNull();
+
+    expect(validateToolInputGrounding({
+      toolName: "record_dialogue_outcome",
+      toolInput: {
+        addresseeRefs: ["Mira Voss"],
+        outcomeKind: "no_current_answer",
+        topicKind: "procedure",
+        authorityKind: "no_visible_authority",
+        truthStatus: "unconfirmed",
+        durability: "scene_local",
+        requestedRoleText: "dispatch clerk (no office visible)",
+        summary: "No dispatch clerk can be reached.",
+        sourceRefs: ["current_scene"],
+      },
+      context,
+    })).toBeNull();
+
+    expect(validateToolInputGrounding({
+      toolName: "record_dialogue_outcome",
+      toolInput: {
+        addresseeRefs: ["Mira Voss"],
+        outcomeKind: "no_current_answer",
+        topicKind: "procedure",
+        authorityKind: "no_visible_authority",
+        truthStatus: "unconfirmed",
+        durability: "scene_local",
+        requestedRoleText: "permit office (no office visible)",
+        summary: "No dispatch clerk can be reached.",
+        sourceRefs: ["current_scene"],
+      },
+      context,
+    })).toMatchObject({
+      code: "addressed_target_mismatch",
+      path: "input.requestedRoleText",
+    });
   });
 
   it("grounds world facts with explicit source refs instead of parsing summary prose", () => {

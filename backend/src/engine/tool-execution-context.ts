@@ -261,10 +261,12 @@ function normalizeAddressedRoleText(value: string): string {
 function addressedRoleMatchesExistingActorLabel(roleText: string, actorLabel: string): boolean {
   const role = normalizeAddressedRoleText(roleText);
   const label = normalizeAddressedRoleText(actorLabel);
+  const labelWithoutTrailingParenthetical = label.replace(/\s*\([^)]*\)\s*$/u, "").trim();
   return Boolean(role)
     && Boolean(label)
     && (
       role === label
+      || role === labelWithoutTrailingParenthetical
       || label.endsWith(` ${role}`)
       || role.endsWith(` ${label}`)
     );
