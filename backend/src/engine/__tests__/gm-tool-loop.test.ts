@@ -2266,6 +2266,117 @@ describe("runGmToolLoop", () => {
     ]);
   });
 
+  it("rejects scene-extra responders that smuggle completed player travel without movement receipt", async () => {
+    const sceneExtraInput = {
+      locationRef: "current_scene",
+      role: "vendor",
+      name: "Lower Gallery Stationer",
+      tags: ["temporary", "stationer"],
+      reason:
+        "Player has traveled to the lower gallery corridor stationer's stall and needs to ask about paper pricing.",
+    };
+    const dialogueInput = {
+      speakerRef: "Lower Gallery Stationer",
+      addresseeRefs: ["Player"],
+      outcomeKind: "answered",
+      topicKind: "trade",
+      authorityKind: "public_service",
+      truthStatus: "settled_by_backend",
+      durability: "durable",
+      futureUseKind: "route_choice",
+      futureRelevance: "The paper price determines the next lawful route.",
+      summary: "The stationer quotes the paper price.",
+      claims: [
+        {
+          claimKind: "other",
+          polarity: "states",
+          subjectText: "paper price",
+          summary: "One unmarked folio costs eight half-pence.",
+        },
+      ],
+      sourceRefs: ["Lower Gallery Stationer"],
+    };
+    createSceneExtraExecuteMock.mockResolvedValueOnce({
+      success: true,
+      result: {
+        id: "actor-lower-gallery-stationer",
+        name: "Lower Gallery Stationer",
+        role: "vendor",
+        modelSafeRefs: ["Lower Gallery Stationer"],
+      },
+      authority: toolAuthority(["actor:actor-lower-gallery-stationer:presence"]),
+    });
+    recordDialogueOutcomeExecuteMock.mockResolvedValueOnce(withTerminalTestAuthority(
+      "record_dialogue_outcome",
+      {
+        success: true,
+        result: {
+          eventId: "event-stationer-dialogue",
+          speakerRef: "Lower Gallery Stationer",
+          outcomeKind: "answered",
+          topicKind: "trade",
+          authorityKind: "public_service",
+          truthStatus: "settled_by_backend",
+          durability: "durable",
+          persisted: true,
+          futureUseKind: "route_choice",
+          futureRelevance: "The paper price determines the next lawful route.",
+        },
+      },
+    ));
+    generateTextMock().mockImplementationOnce(async (options: {
+      tools: Record<string, { execute: (input: unknown) => Promise<unknown> }>;
+    }) => {
+      const sceneExtraResult = await options.tools.create_scene_extra!.execute(sceneExtraInput);
+      const dialogueResult = await options.tools.record_dialogue_outcome!.execute(dialogueInput);
+      return {
+        text: "",
+        finishReason: "stop",
+        response: { modelId: "judge-model" },
+        usage: null,
+        steps: [
+          {
+            toolCalls: [{ toolName: "create_scene_extra", input: sceneExtraInput }],
+            toolResults: [{ output: sceneExtraResult }],
+          },
+          {
+            toolCalls: [{ toolName: "record_dialogue_outcome", input: dialogueInput }],
+            toolResults: [{ output: dialogueResult }],
+          },
+        ],
+      };
+    });
+
+    await expect(runGmToolLoop({
+      campaignId: "campaign-1",
+      provider,
+      tick: 7,
+      playerAction:
+        "I follow the clerk's directions down to the lower gallery stationer's stall. At the stall I ask the price for one unmarked folio.",
+      frame: {
+        ...createFrame(),
+        allowedTools: ["create_scene_extra", "record_dialogue_outcome"],
+      } as SceneFrame,
+      gmRead: {
+        ...gmRead,
+        situationSummary: "The player tries to ask a stationer after traveling to their stall.",
+        sceneQuestion: "What does the stationer answer about paper price?",
+        actionInterpretation: {
+          intent: "travel to the lower gallery stationer and ask the paper price",
+          targetRefs: [],
+        },
+        turnIntent: "Create the stationer responder and record the price answer.",
+        runtimeRequirement: {
+          kind: "dialogue_outcome",
+          durability: "durable",
+          topicKind: "trade",
+        },
+      },
+    })).rejects.toThrow(
+      "create_scene_extra attempted to satisfy completed player travel in current_scene without an accepted move_actor receipt",
+    );
+  });
+
   it("rolls back the GM mutation boundary when a structural pre-tool is not backed by a terminal receipt", async () => {
     const addTagInput = {
       entityName: "Gate Guard",

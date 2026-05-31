@@ -484,6 +484,8 @@ const DOCUMENT_PREMISE_ISSUE_CODE = "document-premise-requires-backed-state";
 const REUSABLE_DIALOGUE_DURABILITY_ISSUE_CODE = "reusable-dialogue-requires-durable-requirement";
 const STRUCTURAL_DIALOGUE_EFFECT_KIND_ISSUE_CODE =
   "structural-dialogue-requires-explicit-effect-kind";
+const MIXED_TRAVEL_DIALOGUE_ISSUE_CODE =
+  "mixed-travel-dialogue-requires-movement-first";
 const NO_MUTATION_ADMISSIBILITY_ISSUE_CODE = "no-mutation-admissibility-requires-runtime";
 const DOCUMENT_STATE_TAG_KEYS = new Set([
   "officially-unsealed",
@@ -585,6 +587,32 @@ function validateRefs(
   return issues;
 }
 
+function hasExplicitTravelThenInteraction(playerAction: string | undefined): boolean {
+  const text = playerAction?.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!text) return false;
+  const travelIntent = /\b(?:follow|go|walk|head|proceed|travel|move|descend|climb|return|make my way|make our way)\b/.test(text)
+    && /\b(?:to|toward|towards|into|through|down|up|back to|over to)\b/.test(text);
+  if (!travelIntent) return false;
+  const placeTarget = /\b(?:stall|office|desk|counter|window|hall|gallery|corridor|gate|room|chamber|yard|station|bench|scribe|guild)\b/.test(text);
+  if (!placeTarget) return false;
+  return /\b(?:at|there|once there|upon arrival|when i arrive|when we arrive|then)\b[^.?!;]*(?:ask|speak|address|talk|inquire|request|buy|purchase|present|show)\b/.test(text)
+    || /\b(?:ask|speak|address|talk|inquire|request|buy|purchase|present|show)\b[^.?!;]*(?:at|there)\b/.test(text);
+}
+
+function validateDialogueOutcomeDoesNotAbsorbPlayerTravel(
+  read: GmRead,
+  playerAction: string | undefined,
+): GmReadValidationIssue[] {
+  const requirement = read.runtimeRequirement;
+  if (read.path !== "tool_plan" || requirement?.kind !== "dialogue_outcome") return [];
+  if (!hasExplicitTravelThenInteraction(playerAction)) return [];
+  return [{
+    path: "runtimeRequirement",
+    message:
+      `${MIXED_TRAVEL_DIALOGUE_ISSUE_CODE}: a player action that first travels to a distinct place and then speaks/shops there must resolve movement before dialogue. Use runtimeRequirement { kind: "state_mutation", effectKind: "movement" } for the travel beat, then let the responder answer after the player is actually at that scene.`,
+  }];
+}
+
 export function validateGmReadForFrame(
   read: GmRead,
   frame: SceneFrame,
@@ -636,6 +664,7 @@ export function validateGmReadForFrame(
   issues.push(...validateDialogueRuntimeRequirementSpeakerBinding(read, frame));
   issues.push(...validatePostedProofRuntimeRequirement(read));
   issues.push(...validateReusableDialogueDurability(read));
+  issues.push(...validateDialogueOutcomeDoesNotAbsorbPlayerTravel(read, playerAction));
 
   return issues;
 }
@@ -1390,6 +1419,7 @@ function isRepairableGmReadValidationIssue(issue: GmReadValidationIssue): boolea
     || issue.message.includes(DOCUMENT_STATE_ISSUE_CODE)
     || issue.message.includes(REUSABLE_DIALOGUE_DURABILITY_ISSUE_CODE)
     || issue.message.includes(STRUCTURAL_DIALOGUE_EFFECT_KIND_ISSUE_CODE)
+    || issue.message.includes(MIXED_TRAVEL_DIALOGUE_ISSUE_CODE)
     || issue.message.includes(NO_MUTATION_ADMISSIBILITY_ISSUE_CODE)
   );
 }

@@ -671,6 +671,116 @@ describe("GM Read contract", () => {
     );
   });
 
+  it("rejects dialogue outcomes that absorb explicit travel to a distinct responder location", () => {
+    const read = gmReadSchema.parse({
+      ...baseRead,
+      path: "tool_plan",
+      actionInterpretation: {
+        intent: "follow directions down to the lower gallery stationer's stall and ask the price there",
+        targetRefs: [],
+      },
+      turnGrounding: testTurnGrounding({
+        intentKind: "procedural_information",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "trade",
+        durability: "durable",
+      }),
+      turnIntent: "Create a stationer responder and record their answer about paper prices.",
+      runtimeRequirement: {
+        kind: "dialogue_outcome",
+        durability: "durable",
+        topicKind: "trade",
+        speakerBinding: {
+          kind: "prose_role",
+          requestedRoleText: "Lower Gallery Stationer",
+          allowCreateSceneExtra: true,
+        },
+      },
+    });
+
+    expect(validateGmReadForFrame(
+      read,
+      createFrame(),
+      "I follow the clerk's directions down from the receiving desk toward the lower gallery corridor stationer's stall. At the stall I ask the price for one acceptable unmarked folio.",
+    )).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: "runtimeRequirement",
+        message: expect.stringContaining("mixed-travel-dialogue-requires-movement-first"),
+      }),
+    ]));
+  });
+
+  it("repairs mixed travel plus dialogue into a movement runtime requirement", async () => {
+    const invalidRead = gmReadSchema.parse({
+      ...baseRead,
+      path: "tool_plan",
+      actionInterpretation: {
+        intent: "follow directions down to the lower gallery stationer's stall and ask the price there",
+        targetRefs: [],
+      },
+      turnGrounding: testTurnGrounding({
+        intentKind: "procedural_information",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "trade",
+        durability: "durable",
+      }),
+      turnIntent: "Create a stationer responder and record their answer about paper prices.",
+      runtimeRequirement: {
+        kind: "dialogue_outcome",
+        durability: "durable",
+        topicKind: "trade",
+        speakerBinding: {
+          kind: "prose_role",
+          requestedRoleText: "Lower Gallery Stationer",
+          allowCreateSceneExtra: true,
+        },
+      },
+    });
+    const repairedRead = gmReadSchema.parse({
+      ...invalidRead,
+      situationSummary: "The player follows directions toward a lower-gallery stationer's stall.",
+      sceneQuestion: "Which legal movement or blocked-route outcome can be grounded now?",
+      actionInterpretation: {
+        intent: "follow directions to the lower gallery corridor stationer's stall",
+        targetRefs: [],
+      },
+      turnGrounding: testTurnGrounding({
+        intentKind: "concrete_state_change",
+        requiresGrounding: true,
+        groundingKind: "state_mutation",
+        topicKind: "route",
+        durability: "scene_local",
+      }),
+      turnIntent:
+        "Resolve movement to the lower gallery stationer's stall, or record the grounded blocked/no-current-route outcome.",
+      runtimeRequirement: {
+        kind: "state_mutation",
+        effectKind: "movement",
+      },
+    });
+
+    vi.mocked(safeGenerateObject)
+      .mockResolvedValueOnce(safeResult(invalidRead))
+      .mockResolvedValueOnce(safeResult(repairedRead));
+
+    await expect(runGmRead({
+      provider,
+      playerAction:
+        "I follow the clerk's directions down from the receiving desk toward the lower gallery corridor stationer's stall. At the stall I ask the price for one acceptable unmarked folio.",
+      frame: createFrame(),
+    })).resolves.toMatchObject({
+      path: "tool_plan",
+      runtimeRequirement: { kind: "state_mutation", effectKind: "movement" },
+    });
+
+    expect(safeGenerateObject).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(safeGenerateObject).mock.calls[1]?.[0]?.prompt).toContain(
+      "mixed-travel-dialogue-requires-movement-first",
+    );
+  });
+
   it("keeps runtimeRequirement topicKind aligned with runtime tool schemas", () => {
     expect(gmReadSchema.safeParse({
       ...baseRead,

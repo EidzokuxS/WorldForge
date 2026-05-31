@@ -2027,6 +2027,32 @@ function dialogueOutcomeSettlesStructuralRequirementWithoutMutation(
   return dialogueOutcomeSatisfiesStructuralRequirement(payload);
 }
 
+function createSceneExtraReasonClaimsCompletedPlayerTravel(step: GmToolStepResult): boolean {
+  if (step.toolName !== "create_scene_extra") return false;
+  const input = isRecord(step.candidateInput) ? step.candidateInput : {};
+  if (stringField(input, "locationRef") !== "current_scene") return false;
+  const reason = stringField(input, "reason");
+  if (!reason) return false;
+  const normalized = reason.toLowerCase().replace(/\s+/g, " ").trim();
+  return /\b(?:player|the player|mara)\s+(?:has\s+)?(?:traveled|travelled|walked|gone|moved|followed|headed|proceeded|descended|climbed|arrived)\b/.test(normalized)
+    && /\b(?:to|toward|towards|into|down|up|at)\b/.test(normalized);
+}
+
+function hasAcceptedMoveActorReceipt(stepResults: readonly GmToolStepResult[]): boolean {
+  return stepResults.some((step) =>
+    step.toolName === "move_actor" && step.result?.success === true);
+}
+
+function assertCreateSceneExtraDidNotAbsorbPlayerTravel(
+  stepResults: readonly GmToolStepResult[],
+): void {
+  if (hasAcceptedMoveActorReceipt(stepResults)) return;
+  if (!stepResults.some(createSceneExtraReasonClaimsCompletedPlayerTravel)) return;
+  throw new Error(
+    "create_scene_extra attempted to satisfy completed player travel in current_scene without an accepted move_actor receipt.",
+  );
+}
+
 function effectHasPriorReceipt(
   stepResults: readonly GmToolStepResult[],
   dialogueStepIndex: number,
@@ -2657,6 +2683,7 @@ function assertConversationalToolLoopResolved(
     return;
   }
   if (requirement?.kind !== "dialogue_outcome") return;
+  assertCreateSceneExtraDidNotAbsorbPlayerTravel(stepResults);
   const dialogueOutcomeSteps = stepResults.filter((step, index) =>
     isDialogueOutcomeStep(step, stepResults, index));
   const hasDialogueOutcome = dialogueOutcomeSteps.length > 0;
