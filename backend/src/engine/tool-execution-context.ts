@@ -147,6 +147,7 @@ export interface ToolGroundingIssue {
     | "missing_structural_claim"
     | "missing_background_authority"
     | "missing_background_write_scope"
+    | "unsupported_background_tool_owner"
     | "unsupported_tool_owner";
   path: string;
   message: string;
@@ -1820,6 +1821,15 @@ function validateBackgroundGrounding(input: {
       "missing_background_write_scope",
       input.pathPrefix,
       `background state-bearing tool ${input.toolName} requires non-empty allowedWriteScopes.`,
+    );
+  }
+
+  if (input.toolName === "record_dialogue_outcome" || input.toolName === "set_relationship") {
+    return scopedIssue(
+      "unsupported_background_tool_owner",
+      input.pathPrefix,
+      `background model-authored tools cannot directly own ${input.toolName}; use actor/player turn grounding or a typed backend proposal executor.`,
+      input.toolName,
     );
   }
 

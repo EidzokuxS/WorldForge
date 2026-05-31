@@ -95,6 +95,65 @@ describe("createPlayerTurnToolExecutionContext", () => {
         baseWorldVersion: 2,
         elapsedWorldTimeMinutes: 0,
       });
+      expect(validateToolInputGrounding({
+        toolName: "log_event",
+        toolInput: {
+          text: "A deterministic background event is recorded.",
+          importance: 1,
+          participants: ["system"],
+        },
+        context: {
+          ...backgroundContext,
+          authority: {
+            ...backgroundContext.authority!,
+            allowedWriteScopes: ["world:event"],
+          },
+        },
+      })).toBeNull();
+      expect(validateToolInputGrounding({
+        toolName: "record_dialogue_outcome",
+        toolInput: {
+          speakerRef: "Road Warden",
+          addresseeRefs: ["Player"],
+          outcomeKind: "answered",
+          topicKind: "social",
+          authorityKind: "witness",
+          truthStatus: "speaker_asserted",
+          durability: "scene_local",
+          quote: "The road is passable.",
+          summary: "The warden answers.",
+          sourceRefs: ["Road Warden", "Player"],
+        },
+        context: {
+          ...backgroundContext,
+          authority: {
+            ...backgroundContext.authority!,
+            allowedWriteScopes: ["world:dialogue"],
+          },
+        },
+      })).toMatchObject({
+        code: "unsupported_background_tool_owner",
+        path: "input",
+      });
+      expect(validateToolInputGrounding({
+        toolName: "set_relationship",
+        toolInput: {
+          entityA: "Road Warden",
+          entityB: "Player",
+          tag: "ally",
+          reason: "The model-authored reflection liked the last exchange.",
+        },
+        context: {
+          ...backgroundContext,
+          authority: {
+            ...backgroundContext.authority!,
+            allowedWriteScopes: ["world:relationship"],
+          },
+        },
+      })).toMatchObject({
+        code: "unsupported_background_tool_owner",
+        path: "input",
+      });
 
       const actorFrame: ActorFrame = {
         campaignId: "campaign-1",

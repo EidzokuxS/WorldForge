@@ -31,6 +31,7 @@ export type ScenePlanValidationIssueCode =
   | "missing_structural_claim"
   | "missing_background_authority"
   | "missing_background_write_scope"
+  | "unsupported_background_tool_owner"
   | "unsupported_tool_owner"
   | "outcome_contradiction"
   | "too_many_primary_scene_changers";

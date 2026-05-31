@@ -192,7 +192,7 @@ export function createStorytellerTools(
 
     record_dialogue_outcome: tool({
       description:
-        "State-bearing semantic dialogue outcome. Use for an NPC/source answer, refusal, silence, gesture, warning, redirect, unavailable role, or no-current-answer result. Outcome semantics live in enum fields; quote/summary may be any language and are display/evidence only.",
+        "State-bearing semantic dialogue outcome. Use for an NPC/source answer, refusal, silence, gesture, warning, redirect, unavailable role, or no-current-answer result. Outcome semantics live in enum fields plus claims. Every outcome needs quote or claims; quote is player-visible speech, and summary is display/evidence only and is never final-narration authority.",
       inputSchema: recordDialogueOutcomeInputSchema,
       execute: (args) => executeRuntimeTool("record_dialogue_outcome", args),
     }),

@@ -361,6 +361,25 @@ describe("record_dialogue_outcome schema", () => {
     }).success).toBe(false);
   });
 
+  it("rejects summary-only dialogue outcomes because summary is not narration authority", () => {
+    const result = runtimeToolInputSchemas.record_dialogue_outcome.safeParse({
+      speakerRef: "Road Warden",
+      addresseeRefs: ["Player"],
+      outcomeKind: "refused",
+      topicKind: "social",
+      authorityKind: "witness",
+      truthStatus: "speaker_asserted",
+      durability: "scene_local",
+      summary: "The warden refuses to discuss the matter.",
+      sourceRefs: ["Road Warden", "Player"],
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) => issue.path.join(".") === "claims")).toBe(true);
+    }
+  });
+
   it("rejects durable procedural answers without a concrete quote surface", () => {
     const result = runtimeToolInputSchemas.record_dialogue_outcome.safeParse({
       speakerRef: "Lead Warden",

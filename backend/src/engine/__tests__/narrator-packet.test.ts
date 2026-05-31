@@ -1154,6 +1154,29 @@ describe("narrator packet settlement boundary", () => {
     expect(toolEvidence?.precisionFacts?.map((fact) => fact.value)).toEqual(
       effectEvidence?.precisionFacts?.map((fact) => fact.value),
     );
+
+    const allowedRefs = getAllowedNarrationCitationEvidenceRefs(packet);
+    const dialogueRef = allowedRefs.find((ref) => ref.evidence.id === effectEvidence?.id);
+    const routeFactIndex = dialogueRef?.evidence.precisionFacts?.findIndex((fact) =>
+      fact.value.includes("east aqueduct maintenance catwalk south along the channel")
+    );
+    expect(dialogueRef).toBeDefined();
+    expect(routeFactIndex).toBeGreaterThanOrEqual(0);
+
+    const draft = compileGroundedSentenceDraftToNarrationDraft({
+      packet,
+      requireFactRefs: true,
+      requireBackendOwnedFactText: true,
+      draft: {
+        version: "grounded-sentence-draft.v2",
+        sentences: [{
+          evidenceRefs: [dialogueRef!.refId],
+          factRefs: [`${dialogueRef!.refId}.p${routeFactIndex! + 1}`],
+        }],
+      },
+    });
+    expect(draft.prose).toContain("east aqueduct maintenance catwalk south along the channel");
+    expect(draft.prose).not.toContain(dialogueResult.summary);
   });
 
   it("uses legacy log_event summary text when no explicit effect was authored", () => {

@@ -3,7 +3,7 @@
 Date: 2026-05-31
 Branch: develop
 Baseline HEAD: 7971dab544c5de212c8f1f3fa3a80bb2d7e2ba56
-Current Integrated HEAD: 49b58f6f0902be2ac50ea3dcd2efa731c770b422
+Current Integrated HEAD: b726c6c462dd4402e455814d6c19e3dba589980b
 
 ## Product Goal
 
@@ -93,7 +93,7 @@ J3/J4/J5/J6 intake:
 
 ### J6 Local Critical Path: Pending Resume Retry UX
 
-Status: locally implemented and verified; pending commit.
+Status: committed and pushed in `b726c6c4`.
 
 Invariant being closed:
 - Pending narration resume is a recovery contract, not a toast-only side effect. If `/chat/resume` fails, the UI must preserve a backend-owned resume token affordance and retry the resume path without reissuing the player action.
@@ -108,6 +108,96 @@ Executed evidence:
 - `npm.cmd --prefix frontend run typecheck` passed.
 - GitNexus staged `detect_changes` returned HIGH because `GamePage` maps to 8 broad UI/process flows; direct upstream symbol impact for `GamePage` returned LOW, and the focused recovery regression covers the changed path.
 - Current-head Browser smoke remains partial: `/game` loaded, first freeform action and one Continue completed successfully on the backend, initial DOM/console/raw-ref checks passed, then Browser automation was blocked by Browser URL policy before final post-Continue UI verification.
+
+## Wave K Gameplay Agent/Dialogue Authority Slice
+
+Date: 2026-05-31
+Base HEAD: `b726c6c4` (`Expose pending resume recovery action`)
+Mode: six read-only agents; Codex integrates/reviews/tests/commits.
+
+### K1 Dialogue Receipts / Fact Source Map
+
+Status: complete and closed after result intake.
+
+Findings:
+- P1: `record_dialogue_outcome` allowed summary-only outcomes. That makes an accepted receipt durable enough to steer the loop but not precise enough for final narration, because `summary` is support/display text.
+- P2: durable source mapping from receipt/event/fact refs into narrator packets should stay explicit.
+
+Integrated decision:
+- `record_dialogue_outcome` now fails closed unless it includes `quote` or at least one structured `claims[]` item.
+- `summary` remains support/display text and is never final-narration authority.
+
+### K2 In-Game Agent Harness / Tool Ownership
+
+Status: complete and closed after result intake.
+
+Findings:
+- P1: background model-authored NPC/reflection paths could attempt canonical player-facing dialogue or relationship mutation through `record_dialogue_outcome` and `set_relationship`.
+- P2: background grounding had authority/write-scope checks but no explicit owner-class denylist for canonical player-facing lanes.
+
+Integrated decision:
+- Background model-authored tool contexts now reject direct `record_dialogue_outcome` and `set_relationship` ownership with `unsupported_background_tool_owner`.
+- Deterministic background `log_event` remains allowed when authority and write scopes are valid.
+- Future relationship/dialogue changes from background agents must route through actor/player-turn grounding or a typed backend proposal executor, not direct canonical mutation.
+
+### K3 Final Narration Grounding
+
+Status: complete and closed after result intake.
+
+Findings:
+- Quote/claims are the correct narratable precision source; summary must remain support-only.
+- P1: missing integrated regression from accepted dialogue receipt to narrator packet precision facts to live `factRefs` compile path.
+
+Integrated decision:
+- Added regression proving accepted dialogue precision facts become selectable backend-owned `factRefs` and can compile through the live final narration path without using `summary`.
+
+### K4 API/SSE/Frontend Projection
+
+Status: complete and closed after result intake.
+
+Findings:
+- Dialogue is still mostly projected as prose, not a typed dialogue DTO.
+- Resume can still lose some quick-action continuity in older flows.
+
+Disposition:
+- No code in this backend ownership slice. Carry as P2/P1-watch for the next frontend/API pass after backend authority is sealed.
+
+### K5 Tests / Contract Inventory
+
+Status: complete and closed after result intake.
+
+Findings:
+- Existing coverage is strong in pieces, but dialogue precision needed end-to-end grounding coverage.
+
+Executed evidence for integrated slice:
+- `tool-schemas.bridge-tools.test.ts`: 19 tests passed.
+- `tool-execution-context.test.ts`: 25 tests passed.
+- `narrator-packet.test.ts` + `narration-grounding-guard.test.ts`: 104 tests passed.
+- `gm-tool-loop.test.ts`: 96 tests passed.
+- `npc-agent.test.ts` + `reflection-agent.test.ts`: 40 tests passed.
+- `actor-tools.test.ts` + `tool-executor-caller-contract.test.ts`: 16 tests passed.
+- `scene-plan-validator.test.ts` + `scene-plan-executor.test.ts` + `turn-processor.scene-plan.test.ts`: 47 tests passed.
+- `backend run typecheck` passed.
+
+### K6 Clone/Replay/Vector Implications
+
+Status: complete and closed after result intake.
+
+Findings:
+- Dialogue precision facts should stay inside `NarratorPacket.evidenceLedger[].precisionFacts`; they should not become a new vector source.
+- Old packets without precision facts must remain resume/re-render compatible.
+
+Disposition:
+- Current slice adds no new store/vector authority. Clone/replay/vector remain unchanged; the receipt is more precise before it reaches narrator evidence.
+
+### K Integration Notes
+
+Discarded option:
+- Keep accepting summary-only dialogue and teach narrator to treat summary as truth. Rejected because it gives model-authored prose authority over final narration and long-run memory.
+
+Chosen contract:
+- Model can propose summary for display/support, but backend-visible dialogue truth must be enum fields plus `quote` and/or structured `claims`.
+- Background agents can log their own deterministic observations, but cannot directly own player-facing dialogue or relationship state.
 
 Live agents:
 - J1 Service-owner final audit.

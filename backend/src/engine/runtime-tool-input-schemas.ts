@@ -677,6 +677,14 @@ const recordDialogueOutcomeInputSchema = z.object({
     }
   }
 
+  if (!data.quote?.trim() && data.claims.length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["claims"],
+      message: "record_dialogue_outcome requires quote or structured claims so final narration has backend-owned dialogue facts",
+    });
+  }
+
   if (data.outcomeKind === "unavailable" || data.outcomeKind === "no_current_answer") {
     if (data.authorityKind !== "no_visible_authority") {
       ctx.addIssue({
