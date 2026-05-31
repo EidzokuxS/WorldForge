@@ -1935,6 +1935,9 @@ describe("assemblePrompt", () => {
     expect(result.prompt).not.toContain("; supports=");
     expect(result.prompt).toContain("Return only the structured draft object. No markdown. No prose outside the structured output.");
     expect(result.system).toContain("Return exactly one GroundedSentenceDraft structured object");
+    expect(result.system).toContain("sentences[].factRefs with exactly one backendFacts ref");
+    expect(result.system).toContain("Do not output sentences[].text");
+    expect(result.system).not.toContain("sentences[].text field must contain player-visible narrative prose only");
     expect(result.prompt).toContain("Do not output sentences[].text");
     expect(result.system).not.toContain("Your output must be narrative prose only.");
     expect(result.prompt).toContain("Iria keeps both palms open.");
