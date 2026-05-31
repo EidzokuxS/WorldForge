@@ -50,6 +50,7 @@ vi.mock("../../vectors/episodic-events.js", () => ({
 }));
 
 vi.mock("../store-manifest.js", () => ({
+  STORE_BUNDLE_MANIFEST_FILENAME: "store-manifest.json",
   createCampaignStoreBundleManifest: vi.fn((input) => ({
     schemaVersion: 1,
     campaignId: input.campaignId,
@@ -105,6 +106,9 @@ import { AppError } from "../../lib/index.js";
 import { loadCampaign } from "../manager.js";
 import { clearCampaignRuntimeState, hasActiveTurn } from "../runtime-state.js";
 import { clearPendingCommittedEvents } from "../../vectors/episodic-events.js";
+import {
+  assertCampaignStoreBundleRestorableWithEvidence,
+} from "../store-manifest.js";
 import {
   invalidateAuthorityAfterRestore,
   readWorldClock,
@@ -506,6 +510,71 @@ describe("loadCheckpoint", () => {
         reason: "checkpoint restored",
       }),
     );
+  });
+
+  it("refuses to repair a pending checkpoint restore when staged evidence is tampered", async () => {
+    installCheckpointRestoreFs({
+      id: "cp-1",
+      name: "Save",
+      description: "",
+      createdAt: 1000,
+      auto: false,
+    });
+    vi.spyOn(fs, "copyFileSync").mockImplementation(() => {});
+    vi.spyOn(fs, "cpSync").mockImplementation(() => {});
+    vi.spyOn(fs, "rmSync").mockImplementation(() => {});
+    vi.mocked(closeDb).mockImplementationOnce(() => {
+      throw new Error("simulated crash before live apply");
+    });
+
+    await expect(loadCheckpoint("camp-1", "cp-1")).rejects.toThrow(
+      "simulated crash before live apply",
+    );
+    expect([...writtenFileContents.keys()].some((filePath) =>
+      filePath.endsWith("restore-journal.json"),
+    )).toBe(true);
+
+    vi.mocked(fs.copyFileSync).mockClear();
+    vi.mocked(fs.cpSync).mockClear();
+    vi.mocked(loadCampaign).mockClear();
+    vi.mocked(clearPendingCommittedEvents).mockClear();
+    vi.mocked(invalidateAuthorityAfterRestore).mockClear();
+    vi.mocked(assertCampaignStoreBundleRestorableWithEvidence).mockImplementation(
+      async ({ bundleDir }) => {
+        if (String(bundleDir).includes(".restore-staging")) {
+          throw new Error("Campaign store bundle evidence hash mismatch for json:config.");
+        }
+        return {
+          schemaVersion: 1,
+          campaignId: "camp-1",
+          purpose: "checkpoint",
+          includeVectors: true,
+          capturedAt: 1,
+          stores: [],
+        };
+      },
+    );
+
+    await expect(repairPendingCampaignRestoreBeforeLoad("camp-1")).rejects.toThrow(
+      /evidence hash mismatch.*json:config/i,
+    );
+    expect(assertCampaignStoreBundleRestorableWithEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bundleDir: expect.stringContaining(".restore-staging\\current"),
+        includeVectors: true,
+      }),
+    );
+    expect(vi.mocked(fs.copyFileSync).mock.calls.some((call) =>
+      String(call[0]).includes(".restore-staging\\current\\state.db")
+      && String(call[1]).endsWith("state.db")
+    )).toBe(false);
+    expect(vi.mocked(fs.cpSync).mock.calls.some((call) =>
+      String(call[0]).includes("vectors-replacement")
+      && String(call[1]).endsWith("vectors")
+    )).toBe(false);
+    expect(loadCampaign).not.toHaveBeenCalled();
+    expect(clearPendingCommittedEvents).not.toHaveBeenCalled();
+    expect(invalidateAuthorityAfterRestore).not.toHaveBeenCalled();
   });
 });
 

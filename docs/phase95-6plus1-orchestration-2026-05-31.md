@@ -352,6 +352,16 @@ Integrated result:
 - P2: clean-start clone is service-covered, but no production route caller for `cloneCampaignCleanStart` was found. If Phase 95 validation needs operator/player clone UX, add public API/e2e path with same manifest policy checks.
 - Recommended patch if needed: staged-restore tamper tests in `backend/src/engine/__tests__/state-snapshot.test.ts` and `backend/src/campaign/__tests__/checkpoints.test.ts`; implementation scope inside `backend/src/campaign/restore-bundle.ts` and manifest evidence helpers.
 - Wave 2 confirmed the staged-restore tamper gap as P2, not P1 under the normal remote/user API threat model. Smallest patch: let manifest verification read the source bundle manifest while verifying physical evidence from an optional staged directory, then call it before applying any staged restore copy.
+- Wave H 6+1 findings for staged restore recovery:
+  - Source bundles are already verified before staging, but crash repair previously checked only staged file existence before live apply.
+  - The lowest-blast fix is in `restore-bundle.ts`: carry the store manifest across the copy boundary and re-run existing manifest evidence validation against `.restore-staging/current` before every staged apply.
+  - Checkpoint public API/DTO shape is unchanged; restore failure timing becomes stricter but still uses the existing route error envelope.
+  - Vector consequences should be covered through the manifest verifier, not a separate vector-specific checker: checkpoint restore exact-restores captured vectors, while turn rollback still purges/rebuilds episodic vectors by policy.
+- Implemented A5 staged restore revalidation slice: `prepareRestoreStaging` now copies `store-manifest.json` into `.restore-staging/current`, and `applyStagedRestore` awaits staged bundle evidence validation before closing handles or copying live DB/config/chat/vectors. Pending journal repair now fails closed if staged evidence is tampered.
+- Executed local evidence: `npm --prefix backend test -- src/engine/__tests__/state-snapshot.test.ts src/campaign/__tests__/checkpoints.test.ts` passed 29 tests.
+- Executed local evidence: `npm --prefix backend test -- src/campaign/__tests__/store-manifest.test.ts src/campaign/__tests__/store-manifest-executor.test.ts src/campaign/__tests__/manager.test.ts src/campaign/__tests__/clone.test.ts` passed 61 tests; backend typecheck passed after the typed mock update.
+- Executed local evidence: `npm --prefix backend test -- src/routes/__tests__/campaigns.test.ts` passed 37 tests.
+- Executed local evidence: `npm --prefix frontend test -- --run lib/__tests__/api.test.ts components/game/__tests__/checkpoint-panel.test.tsx` passed 61 tests, with existing Radix dialog description warnings.
 
 ### A6 Observability Long-Play Acceptance
 Agent: Leibniz (`019e7ccd-ce2b-7df3-9514-41ebf1e7e2ac`)

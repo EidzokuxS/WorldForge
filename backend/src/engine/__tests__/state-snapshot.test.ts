@@ -18,6 +18,7 @@ vi.mock("../../campaign/paths.js", () => ({
 }));
 
 vi.mock("../../campaign/store-manifest.js", () => ({
+  STORE_BUNDLE_MANIFEST_FILENAME: "store-manifest.json",
   createCampaignStoreBundleManifest: vi.fn((input) => ({
     schemaVersion: 1,
     campaignId: input.campaignId,
@@ -66,6 +67,7 @@ import { captureSnapshot, restoreSnapshot } from "../state-snapshot.js";
 import { getDb, getSqliteConnection, closeDb } from "../../db/index.js";
 import { loadCampaign, readCampaignConfig } from "../../campaign/manager.js";
 import { getCampaignDir } from "../../campaign/paths.js";
+import { assertCampaignStoreBundleRestorableWithEvidence } from "../../campaign/store-manifest.js";
 import {
   finalizePendingCampaignRestoreAfterLoad,
   repairPendingCampaignRestoreBeforeLoad,
@@ -331,5 +333,53 @@ describe("state snapshot rollback bundle", () => {
     );
     expect(clearPendingCommittedEvents).toHaveBeenCalledWith(CAMPAIGN_ID);
     expect(rebuildEpisodicEventsFromLocationRecentEvents).toHaveBeenCalledWith(CAMPAIGN_ID);
+  });
+
+  it("refuses to repair a pending turn snapshot restore when staged evidence is tampered", async () => {
+    const snapshot = {
+      campaignId: CAMPAIGN_ID,
+      bundleDir: "/campaigns/test-campaign-123/.turn-boundaries/bundle-001",
+      capturedAt: Date.now(),
+    } as Awaited<ReturnType<typeof captureSnapshot>>;
+    (closeDb as Mock).mockImplementationOnce(() => {
+      throw new Error("simulated crash before live apply");
+    });
+
+    await expect(restoreSnapshot(CAMPAIGN_ID, snapshot)).rejects.toThrow(
+      "simulated crash before live apply",
+    );
+    expect([...writtenFileContents.keys()].some((filePath) =>
+      filePath.endsWith("restore-journal.json"),
+    )).toBe(true);
+
+    (fs.copyFileSync as Mock).mockClear();
+    (loadCampaign as Mock).mockClear();
+    (clearPendingCommittedEvents as Mock).mockClear();
+    (rebuildEpisodicEventsFromLocationRecentEvents as Mock).mockClear();
+    (assertCampaignStoreBundleRestorableWithEvidence as Mock).mockImplementation(
+      async ({ bundleDir }: { bundleDir: string }) => {
+        if (String(bundleDir).includes(".restore-staging")) {
+          throw new Error("Campaign store bundle evidence hash mismatch for state.db.");
+        }
+        return { schemaVersion: 1, stores: [] };
+      },
+    );
+
+    await expect(repairPendingCampaignRestoreBeforeLoad(CAMPAIGN_ID)).rejects.toThrow(
+      /evidence hash mismatch.*state\.db/i,
+    );
+    expect(assertCampaignStoreBundleRestorableWithEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bundleDir: expect.stringContaining(".restore-staging\\current"),
+        includeVectors: false,
+      }),
+    );
+    expect((fs.copyFileSync as Mock).mock.calls.some((call) =>
+      String(call[0]).includes(".restore-staging\\current\\state.db")
+      && String(call[1]).includes(`${CAMPAIGN_ID}\\state.db`)
+    )).toBe(false);
+    expect(loadCampaign).not.toHaveBeenCalled();
+    expect(clearPendingCommittedEvents).not.toHaveBeenCalled();
+    expect(rebuildEpisodicEventsFromLocationRecentEvents).not.toHaveBeenCalled();
   });
 });

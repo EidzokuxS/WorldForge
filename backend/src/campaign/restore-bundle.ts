@@ -19,6 +19,7 @@ import {
   createCampaignStoreBundleManifest,
   writeCampaignStoreBundleManifest,
   assertCampaignStoreBundleRestorableWithEvidence,
+  STORE_BUNDLE_MANIFEST_FILENAME,
   type CampaignStoreBundlePurpose,
 } from "./store-manifest.js";
 import { planCampaignStoreManifestOperation } from "./store-manifest-executor.js";
@@ -63,6 +64,7 @@ function resolveBundlePaths(bundleDir: string) {
     configPath: path.join(bundleDir, "config.json"),
     chatPath: path.join(bundleDir, "chat_history.json"),
     vectorsPath: path.join(bundleDir, "vectors"),
+    manifestPath: path.join(bundleDir, STORE_BUNDLE_MANIFEST_FILENAME),
   };
 }
 
@@ -172,6 +174,7 @@ function prepareRestoreStaging(input: {
   const stagedPaths = resolveBundlePaths(stagingDir);
   fs.copyFileSync(input.bundlePaths.dbPath, stagedPaths.dbPath);
   fs.copyFileSync(input.bundlePaths.configPath, stagedPaths.configPath);
+  fs.copyFileSync(input.bundlePaths.manifestPath, stagedPaths.manifestPath);
   if (fs.existsSync(input.bundlePaths.chatPath)) {
     fs.copyFileSync(input.bundlePaths.chatPath, stagedPaths.chatPath);
   } else {
@@ -221,9 +224,14 @@ function applyTurnRollbackVectorPolicies(campaignVectorsPath: string): void {
   }
 }
 
-function assertStagedRestoreFiles(journal: RestoreJournal): ReturnType<typeof resolveBundlePaths> {
+async function assertStagedRestoreFiles(journal: RestoreJournal): Promise<ReturnType<typeof resolveBundlePaths>> {
   const stagedPaths = resolveBundlePaths(journal.stagedDir);
-  for (const requiredPath of [stagedPaths.dbPath, stagedPaths.configPath, stagedPaths.chatPath]) {
+  for (const requiredPath of [
+    stagedPaths.dbPath,
+    stagedPaths.configPath,
+    stagedPaths.chatPath,
+    stagedPaths.manifestPath,
+  ]) {
     if (!fs.existsSync(requiredPath)) {
       throw new Error(
         `Pending restore journal cannot be repaired because staged file is missing: ${requiredPath}`,
@@ -235,15 +243,19 @@ function assertStagedRestoreFiles(journal: RestoreJournal): ReturnType<typeof re
       `Pending checkpoint restore journal cannot be repaired because staged vectors are missing: ${stagedPaths.vectorsPath}`,
     );
   }
+  await assertCampaignStoreBundleRestorableWithEvidence({
+    bundleDir: journal.stagedDir,
+    includeVectors: journal.includeVectors,
+  });
   return stagedPaths;
 }
 
-function applyStagedRestore(input: {
+async function applyStagedRestore(input: {
   campaignId: string;
   campaignDir: string;
   journal: RestoreJournal;
-}): RestoreJournal {
-  const stagedPaths = assertStagedRestoreFiles(input.journal);
+}): Promise<RestoreJournal> {
+  const stagedPaths = await assertStagedRestoreFiles(input.journal);
   const campaignDbPath = path.join(input.campaignDir, "state.db");
   const campaignConfigPath = getCampaignConfigPath(input.campaignId);
   const campaignChatPath = getChatHistoryPath(input.campaignId);
@@ -295,7 +307,7 @@ export async function repairPendingCampaignRestoreBeforeLoad(
     return false;
   }
 
-  applyStagedRestore({
+  await applyStagedRestore({
     campaignId,
     campaignDir,
     journal,
@@ -411,7 +423,7 @@ export async function restoreCampaignBundle(
   };
   writeRestoreJournal(campaignDir, journal);
 
-  applyStagedRestore({
+  await applyStagedRestore({
     campaignId,
     campaignDir,
     journal,
