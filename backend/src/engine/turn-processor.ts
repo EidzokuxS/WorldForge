@@ -6862,6 +6862,7 @@ function createOpeningNarrationLedger(input: {
   const baseClock = readWorldClock(input.campaignId);
   const turnId = `opening:${input.currentTick}:${randomUUID()}`;
   const lockToken = randomUUID();
+  const activeWorkerId = `opening-scene:${randomUUID()}`;
   let saga = createTurnSaga({
     campaignId: input.campaignId,
     turnId,
@@ -6874,10 +6875,36 @@ function createOpeningNarrationLedger(input: {
     baseWorldVersion: baseClock.worldVersion,
     requiresNarration: true,
     activeLockToken: lockToken,
-    activeWorkerId: `opening-scene:${randomUUID()}`,
+    activeWorkerId,
     provenance: {
       source: "opening_scene",
       authority: "settled_packet",
+    },
+  });
+  recordLiveTurnAuthorityStage({
+    saga,
+    stage: "intent_created",
+    lockToken,
+    payload: {
+      actionTextLength: "[opening scene]".length,
+      processor: "opening-scene",
+    },
+  });
+  recordLiveTurnAuthorityStage({
+    saga,
+    stage: "lease_acquired",
+    lockToken,
+    payload: {
+      leaseOwner: activeWorkerId,
+    },
+  });
+  recordLiveTurnAuthorityStage({
+    saga,
+    stage: "snapshot_taken",
+    lockToken,
+    payload: {
+      provided: false,
+      openingScene: true,
     },
   });
 
@@ -6892,6 +6919,40 @@ function createOpeningNarrationLedger(input: {
 
   const { canonicalTurnPacket, narratorPacket } = openingNarrationPackets(input);
   const resultWorldVersion = readWorldClock(input.campaignId).worldVersion;
+  recordLiveTurnAuthorityStage({
+    saga,
+    stage: "effects_staged",
+    resultWorldVersion,
+    lockToken,
+    payload: {
+      gmActionResultCount: 0,
+      actorActionResultCount: 0,
+      openingScene: true,
+    },
+  });
+  recordLiveTurnAuthorityStage({
+    saga,
+    stage: "receipts_accepted",
+    resultWorldVersion,
+    lockToken,
+    payload: {
+      acceptedToolResultRefs: [],
+      acceptedActorResultRefs: [],
+      acceptedDurableEventIds: [],
+      acceptedCommittedEventIds: [],
+      openingScene: true,
+    },
+  });
+  recordLiveTurnAuthorityStage({
+    saga,
+    stage: "canonical_state_committed",
+    resultWorldVersion,
+    lockToken,
+    payload: {
+      worldVersion: resultWorldVersion,
+      openingScene: true,
+    },
+  });
   const settledTurnPacketInput = {
     id: randomUUID(),
     sagaId: saga.id,
@@ -6915,6 +6976,17 @@ function createOpeningNarrationLedger(input: {
   recordPreparedSettledTurnPacket(settledTurnPacketInput);
   const settledPacket = persistSettledTurnPacket(settledTurnPacketInput);
   saga = getTurnSaga({ sagaId: saga.id }) ?? saga;
+  recordLiveTurnAuthorityStage({
+    saga,
+    stage: "settled_packet_persisted",
+    resultWorldVersion: settledPacket.resultWorldVersion,
+    settledTurnPacketId: settledPacket.id,
+    lockToken,
+    payload: {
+      settledTurnPacketId: settledPacket.id,
+      openingScene: true,
+    },
+  });
   if (saga.status === "resolved_pending_narration") {
     saga = transitionTurnSagaStatus({
       sagaId: saga.id,
@@ -7028,13 +7100,44 @@ export async function* processOpeningScene(
     });
     const narrativeText = narration.narrativeText;
     const reasoningText = narration.reasoningText;
-    appendAssistantNarrationForResume({
+    recordLiveTurnAuthorityStage({
+      saga: openingLedger.saga,
+      stage: "narration_accepted",
+      resultWorldVersion: openingLedger.settledPacket.resultWorldVersion,
+      settledTurnPacketId: openingLedger.settledPacket.id,
+      lockToken: openingLedger.lockToken,
+      payload: {
+        narratorAttemptId: narration.narratorAttemptId,
+        attempts: narration.guardedNarration.attempts,
+        retried: narration.guardedNarration.retried,
+        openingScene: true,
+      },
+    });
+    const projectedSaga = appendAssistantNarrationForResume({
       campaignId,
       saga: openingLedger.saga,
       narratorAttemptId: narration.narratorAttemptId,
       narrativeText,
       presentationSource: "opening_scene",
       lockToken: openingLedger.lockToken,
+    });
+    recordLiveTurnAuthorityStage({
+      saga: projectedSaga,
+      stage: "public_projection_committed",
+      resultWorldVersion: openingLedger.settledPacket.resultWorldVersion,
+      settledTurnPacketId: openingLedger.settledPacket.id,
+      lockToken: openingLedger.lockToken,
+      payload: {
+        narratorAttemptId: narration.narratorAttemptId,
+        projectionAction: "assistant_message_append",
+        projectionDigest: assistantProjectionDigest({
+          settledTurnPacketId: openingLedger.settledPacket.id,
+          narratorAttemptId: narration.narratorAttemptId,
+          narrativeText,
+        }),
+        assistantMessageChars: narrativeText.length,
+        openingScene: true,
+      },
     });
     yield { type: "narrative", data: { text: narrativeText } };
 
@@ -7051,6 +7154,19 @@ export async function* processOpeningScene(
       yield { type: "reasoning", data: { text: reasoningText } };
     }
 
+    recordLiveTurnAuthorityStage({
+      saga: projectedSaga,
+      stage: "turn_finalized",
+      resultWorldVersion: openingLedger.settledPacket.resultWorldVersion,
+      settledTurnPacketId: openingLedger.settledPacket.id,
+      lockToken: openingLedger.lockToken,
+      payload: {
+        narratorAttemptId: narration.narratorAttemptId,
+        tick: currentTick,
+        openingScene: true,
+      },
+    });
+    assertTurnAuthorityStagesComplete({ sagaId: openingLedger.saga.id });
     markTurnSagaFinalized({
       sagaId: openingLedger.saga.id,
       narratorAttemptId: narration.narratorAttemptId,

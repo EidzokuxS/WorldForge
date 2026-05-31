@@ -420,6 +420,7 @@ import {
   assembleFinalNarrationPrompt,
   assembleJudgeAdjudicationPrompt,
 } from "../prompt-assembler.js";
+import { TURN_AUTHORITY_STAGE_VALUES } from "../gameplay-control-plane-contract.js";
 import {
   appendChatMessages,
   advanceCampaignTick,
@@ -9873,6 +9874,44 @@ describe("processOpeningScene", () => {
       },
     ]);
     expect(persistSettledTurnPacketMock).toHaveBeenCalled();
+    expect(recordTurnAuthorityStageMock.mock.calls.map(([input]) =>
+      (input as { stage: string }).stage,
+    )).toEqual([...TURN_AUTHORITY_STAGE_VALUES]);
+    expect(recordTurnAuthorityStageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: "effects_staged",
+        payload: expect.objectContaining({
+          gmActionResultCount: 0,
+          actorActionResultCount: 0,
+          openingScene: true,
+        }),
+      }),
+    );
+    expect(recordTurnAuthorityStageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: "receipts_accepted",
+        payload: expect.objectContaining({
+          acceptedToolResultRefs: [],
+          acceptedActorResultRefs: [],
+          openingScene: true,
+        }),
+      }),
+    );
+    expect(recordTurnAuthorityStageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: "public_projection_committed",
+        payload: expect.objectContaining({
+          narratorAttemptId: "attempt-1",
+          projectionAction: "assistant_message_append",
+          projectionDigest: expect.any(String),
+          openingScene: true,
+        }),
+      }),
+    );
+    expect(assertTurnAuthorityStagesCompleteMock).toHaveBeenCalledWith({ sagaId: "saga-1" });
+    expect(assertTurnAuthorityStagesCompleteMock.mock.invocationCallOrder[0]).toBeLessThan(
+      markTurnSagaFinalizedMock.mock.invocationCallOrder[0]!,
+    );
     expect(recordNarratorAttemptMock).toHaveBeenCalledWith(
       expect.objectContaining({
         sagaId: "saga-1",
