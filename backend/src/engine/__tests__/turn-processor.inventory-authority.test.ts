@@ -304,7 +304,7 @@ describe("processTurn inventory authority", () => {
     (incrementTick as Mock).mockReturnValue(6);
   });
 
-  it("reaches the live hidden adjudication transfer_item seam and mutates authoritative item rows", async () => {
+  it("rejects legacy hidden adjudication transfer_item before mutating authoritative inventory", async () => {
     const { db, state } = createMutableInventoryDb();
     (getDb as Mock).mockReturnValue(db);
     const previousScenePlanFlag = process.env.SCENE_PLAN_ENABLED;
@@ -323,9 +323,8 @@ describe("processTurn inventory authority", () => {
       actions: [{ toolName: "transfer_item", input: transferArgs }],
     });
 
-    let events: TurnEvent[];
     try {
-      events = await collectEvents(
+      await expect(collectEvents(
         processTurn({
           campaignId: CAMPAIGN_ID,
           playerAction: "Ready the sword",
@@ -348,7 +347,7 @@ describe("processTurn inventory authority", () => {
           storytellerTemperature: 0.8,
           storytellerMaxTokens: 512,
         }),
-      );
+      )).rejects.toThrow("hidden adjudication cannot execute transfer_item");
     } finally {
       if (previousScenePlanFlag === undefined) {
         delete process.env.SCENE_PLAN_ENABLED;
@@ -357,13 +356,18 @@ describe("processTurn inventory authority", () => {
       }
     }
 
-    expect(events.filter((event) => event.type === "state_update")).toEqual([]);
-
     const authoritativeView = buildAuthoritativeInventoryView(
       state.items.filter((item) => item.ownerId === "player-1"),
     );
 
-    expect(authoritativeView.equipped.map((item) => item.name)).toEqual(["Iron Sword"]);
+    expect(authoritativeView.equipped).toHaveLength(0);
     expect(authoritativeView.carried).toHaveLength(0);
+    expect(state.items[0]).toMatchObject({
+      name: "Iron Sword",
+      ownerId: null,
+      locationId: "loc-1",
+      equipState: "carried",
+      equippedSlot: null,
+    });
   });
 });

@@ -2010,19 +2010,12 @@ describe("processTurn", () => {
       streamParts: [{ type: "text-delta", text: "The goblin falls." }],
     });
     (runHiddenAdjudicationPlan as Mock).mockResolvedValueOnce({
-      rationale: "The strike lands cleanly and should commit the scene state immediately.",
-      actions: [
-        {
-          toolName: "log_event",
-          input: {
-            text: "The goblin falls.",
-          },
-        },
-      ],
+      rationale: "The strike lands cleanly; scene-plan ownership already governs mutation.",
+      actions: [],
       trace: {
-        text: "{\"rationale\":\"The strike lands cleanly and should commit the scene state immediately.\",\"actions\":[{\"toolName\":\"log_event\",\"input\":{\"text\":\"The goblin falls.\"}}]}",
-        cleanedText: "{\"rationale\":\"The strike lands cleanly and should commit the scene state immediately.\",\"actions\":[{\"toolName\":\"log_event\",\"input\":{\"text\":\"The goblin falls.\"}}]}",
-        reasoningText: "A clean strong hit should create one authoritative scene mutation, not extra flourish.",
+        text: "{\"rationale\":\"The strike lands cleanly; scene-plan ownership already governs mutation.\",\"actions\":[]}",
+        cleanedText: "{\"rationale\":\"The strike lands cleanly; scene-plan ownership already governs mutation.\",\"actions\":[]}",
+        reasoningText: "A clean strong hit should not let hidden adjudication create an extra mutation.",
         response: {
           modelId: "glm-5.1",
         },
@@ -2052,10 +2045,10 @@ describe("processTurn", () => {
     expect(logEventMock).toHaveBeenCalledWith(
       "judge.hidden.plan",
       expect.objectContaining({
-        rationale: "The strike lands cleanly and should commit the scene state immediately.",
-        actionTools: ["log_event"],
+        rationale: "The strike lands cleanly; scene-plan ownership already governs mutation.",
+        actionTools: [],
         providerReasoningLen:
-          "A clean strong hit should create one authoritative scene mutation, not extra flourish.".length,
+          "A clean strong hit should not let hidden adjudication create an extra mutation.".length,
         responseModel: "glm-5.1",
         usage: {
           inputTokens: 420,
@@ -2068,7 +2061,7 @@ describe("processTurn", () => {
       "judge.reasoning",
       expect.objectContaining({
         source: "hidden-adjudication",
-        reasoningText: "A clean strong hit should create one authoritative scene mutation, not extra flourish.",
+        reasoningText: "A clean strong hit should not let hidden adjudication create an extra mutation.",
         responseModel: "glm-5.1",
       }),
     );

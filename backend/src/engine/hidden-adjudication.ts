@@ -10,7 +10,10 @@ import {
   type ToolExecutionContext,
 } from "./tool-execution-context.js";
 import { runtimeToolInputSchemas, type RuntimeToolName } from "./tool-schemas.js";
-import { buildHiddenAdjudicationPromptContract } from "./prompt-contracts.js";
+import {
+  buildHiddenAdjudicationPromptContract,
+  HIDDEN_ADJUDICATION_TOOL_NAMES,
+} from "./prompt-contracts.js";
 import {
   toPlayerFacingQuickActions,
   type PlayerFacingQuickActionsEvent,
@@ -18,32 +21,14 @@ import {
 
 export const ADJUDICATION_PLAN_ACTION_LIMIT = 8;
 export const ADJUDICATION_PLAN_RATIONALE_MAX = 280;
-const ADJUDICATION_STATE_MUTATION_TOOLS = new Set<RuntimeToolName>([
-  "add_tag",
-  "remove_tag",
-  "set_relationship",
-  "log_event",
-  "advance_time",
-  "promote_npc",
-  "spawn_item",
-  "reveal_location",
-  "set_condition",
-  "transfer_item",
-]);
+const HIDDEN_ADJUDICATION_ALLOWED_TOOL_SET = new Set<RuntimeToolName>(
+  HIDDEN_ADJUDICATION_TOOL_NAMES,
+);
 
-export const adjudicationActionSchema = z.discriminatedUnion("toolName", [
-  z.object({ toolName: z.literal("add_tag"), input: runtimeToolInputSchemas.add_tag }),
-  z.object({ toolName: z.literal("remove_tag"), input: runtimeToolInputSchemas.remove_tag }),
-  z.object({ toolName: z.literal("set_relationship"), input: runtimeToolInputSchemas.set_relationship }),
-  z.object({ toolName: z.literal("log_event"), input: runtimeToolInputSchemas.log_event }),
-  z.object({ toolName: z.literal("advance_time"), input: runtimeToolInputSchemas.advance_time }),
-  z.object({ toolName: z.literal("offer_quick_actions"), input: runtimeToolInputSchemas.offer_quick_actions }),
-  z.object({ toolName: z.literal("promote_npc"), input: runtimeToolInputSchemas.promote_npc }),
-  z.object({ toolName: z.literal("spawn_item"), input: runtimeToolInputSchemas.spawn_item }),
-  z.object({ toolName: z.literal("reveal_location"), input: runtimeToolInputSchemas.reveal_location }),
-  z.object({ toolName: z.literal("set_condition"), input: runtimeToolInputSchemas.set_condition }),
-  z.object({ toolName: z.literal("transfer_item"), input: runtimeToolInputSchemas.transfer_item }),
-]);
+export const adjudicationActionSchema = z.object({
+  toolName: z.literal("offer_quick_actions"),
+  input: runtimeToolInputSchemas.offer_quick_actions,
+});
 
 export const adjudicationPlanSchema = z.object({
   rationale: z
@@ -93,7 +78,7 @@ export function buildJudgeAdjudicationContract(): string {
     "Oracle result, world-brain direction, and authoritative scene facts are binding constraints.",
     "Plan only actions the backend can execute right now.",
     "Order actions exactly as they should execute.",
-    "If no state mutation is justified, return an empty actions list rather than inventing one.",
+    "Gameplay mutations belong to the scene-plan/GM tool-loop pipeline; return an empty actions list rather than inventing one.",
     "Keep quick actions grounded in the settled immediate scene and only include them through offer_quick_actions.",
   ].join("\n");
 }
@@ -119,32 +104,6 @@ export async function runHiddenAdjudicationPlan(args: {
   };
 }
 
-function getSuccessfulMoveToolResult(result: ToolResult): SuccessfulTravelLike | null {
-  const payload = result.result;
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return null;
-  }
-
-  const moveResult = payload as Record<string, unknown>;
-  if (
-    typeof moveResult.locationId !== "string" ||
-    typeof moveResult.locationName !== "string" ||
-    typeof moveResult.travelCost !== "number" ||
-    typeof moveResult.tickAdvance !== "number" ||
-    !Array.isArray(moveResult.path)
-  ) {
-    return null;
-  }
-
-  return {
-    locationId: moveResult.locationId,
-    locationName: moveResult.locationName,
-    travelCost: moveResult.travelCost,
-    tickAdvance: moveResult.tickAdvance,
-    path: moveResult.path.filter((entry): entry is string => typeof entry === "string"),
-  };
-}
-
 export async function executeAdjudicationPlan(args: {
   campaignId: string;
   tick: number;
@@ -155,18 +114,13 @@ export async function executeAdjudicationPlan(args: {
   const toolCallResults: ExecutedAdjudication["toolCallResults"] = [];
   const emittedEvents: ExecutedAdjudication["emittedEvents"] = [];
   let quickActionsEmitted = false;
-  let successfulTravel: SuccessfulTravelLike | null = null;
-  const stateMutationActions = args.plan.actions.filter((action) =>
-    ADJUDICATION_STATE_MUTATION_TOOLS.has(action.toolName),
-  );
-
-  if (stateMutationActions.length > 1) {
-    throw new Error(
-      "Adjudication plan rejected before execution: legacy hidden adjudication may execute at most one state-bearing action. Use the GM tool loop/scene-plan pipeline for multi-step mutations.",
-    );
-  }
 
   for (const action of args.plan.actions) {
+    if (!HIDDEN_ADJUDICATION_ALLOWED_TOOL_SET.has(action.toolName)) {
+      throw new Error(
+        `Adjudication plan rejected before execution: hidden adjudication cannot execute ${action.toolName}. Use the scene-plan/GM tool-loop pipeline for gameplay mutations.`,
+      );
+    }
     const toolInput = action.input as Record<string, unknown>;
     const toolResult = await executeToolCall(
       args.campaignId,
@@ -204,13 +158,12 @@ export async function executeAdjudicationPlan(args: {
       }
       continue;
     }
-
   }
 
   return {
     toolCallResults,
     emittedEvents,
     quickActionsEmitted,
-    successfulTravel,
+    successfulTravel: null,
   };
 }

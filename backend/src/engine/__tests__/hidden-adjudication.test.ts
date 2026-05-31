@@ -91,8 +91,14 @@ describe("hidden adjudication", () => {
       adjudicationPlanSchema.parse({
         rationale: "bounded",
         actions: Array.from({ length: ADJUDICATION_PLAN_ACTION_LIMIT + 1 }, () => ({
-          toolName: "log_event",
-          input: { text: "event", importance: 1, participants: [] },
+          toolName: "offer_quick_actions",
+          input: {
+            actions: [
+              { label: "Wait", action: "I hold position." },
+              { label: "Look", action: "I study the immediate scene." },
+              { label: "Ask", action: "I ask what changed." },
+            ],
+          },
         })),
       }),
     ).toThrow();
@@ -148,6 +154,26 @@ describe("hidden adjudication", () => {
         ],
       }),
     ).toThrow();
+
+    for (const stateToolName of [
+      "add_tag",
+      "remove_tag",
+      "set_relationship",
+      "log_event",
+      "advance_time",
+      "promote_npc",
+      "spawn_item",
+      "reveal_location",
+      "set_condition",
+      "transfer_item",
+    ]) {
+      expect(() =>
+        adjudicationPlanSchema.parse({
+          rationale: "Hidden adjudication cannot own gameplay mutation.",
+          actions: [{ toolName: stateToolName, input: {} }],
+        }),
+      ).toThrow();
+    }
   });
 
   it("runs hidden adjudication through safeGenerateObject on the judge model", async () => {
@@ -192,39 +218,30 @@ describe("hidden adjudication", () => {
     );
   });
 
-  it("executes ordered non-movement plan actions deterministically and preserves quick_actions mapping", async () => {
+  it("executes quick-action offers deterministically without state-bearing actions", async () => {
     const executionContext = createExecutionContext();
-    (executeToolCall as Mock)
-      .mockResolvedValueOnce({
-        success: true,
-        result: {
-          eventId: "event-pressure",
-          durability: "scene_local",
-          persisted: false,
-        },
-      })
-      .mockResolvedValueOnce({
-        success: true,
-        result: {
-          actions: [
-            {
-              label: "Look around",
-              action: "I scan the shrine courtyard.",
-              handle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            },
-            {
-              label: "Call out",
-              action: "I call for anyone nearby.",
-              handle: "qac_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            },
-            {
-              label: "Step back",
-              action: "I step back toward the gate.",
-              handle: "qac_cccccccccccccccccccccccccccccccc",
-            },
-          ],
-        },
-      });
+    (executeToolCall as Mock).mockResolvedValueOnce({
+      success: true,
+      result: {
+        actions: [
+          {
+            label: "Look around",
+            action: "I scan the shrine courtyard.",
+            handle: "qac_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          },
+          {
+            label: "Call out",
+            action: "I call for anyone nearby.",
+            handle: "qac_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          },
+          {
+            label: "Step back",
+            action: "I step back toward the gate.",
+            handle: "qac_cccccccccccccccccccccccccccccccc",
+          },
+        ],
+      },
+    });
 
     const executed = await executeAdjudicationPlan({
       campaignId: "campaign-1",
@@ -232,17 +249,8 @@ describe("hidden adjudication", () => {
       outcomeTier: "strong_hit",
       executionContext,
       plan: {
-        rationale: "Record the pressure, then present concrete follow-ups.",
+        rationale: "Present concrete follow-ups without committing gameplay mutation.",
         actions: [
-          {
-            toolName: "log_event",
-            input: {
-              text: "The shrine pressure sharpens.",
-              importance: 3,
-              participants: ["Player"],
-              durability: "scene_local",
-            },
-          },
           {
             toolName: "offer_quick_actions",
             input: {
@@ -259,20 +267,6 @@ describe("hidden adjudication", () => {
 
     expect(executeToolCall).toHaveBeenNthCalledWith(
       1,
-      "campaign-1",
-      "log_event",
-      {
-        text: "The shrine pressure sharpens.",
-        importance: 3,
-        participants: ["Player"],
-        durability: "scene_local",
-      },
-      7,
-      "strong_hit",
-      executionContext,
-    );
-    expect(executeToolCall).toHaveBeenNthCalledWith(
-      2,
       "campaign-1",
       "offer_quick_actions",
       {
@@ -317,7 +311,7 @@ describe("hidden adjudication", () => {
     const executionContext = createExecutionContext();
     (executeToolCall as Mock).mockResolvedValueOnce({
       success: true,
-      result: { durability: "scene_local", persisted: false },
+      result: { actions: [] },
     });
 
     await executeAdjudicationPlan({
@@ -326,15 +320,16 @@ describe("hidden adjudication", () => {
       outcomeTier: "weak_hit",
       executionContext,
       plan: {
-        rationale: "Record a local beat.",
+        rationale: "Offer local follow-ups.",
         actions: [
           {
-            toolName: "log_event",
+            toolName: "offer_quick_actions",
             input: {
-              text: "The gate pressure changes.",
-              importance: 3,
-              participants: ["Player"],
-              durability: "scene_local",
+              actions: [
+                { label: "Wait", action: "I wait and watch." },
+                { label: "Look", action: "I study the gate." },
+                { label: "Ask", action: "I ask what changed." },
+              ],
             },
           },
         ],
@@ -343,12 +338,13 @@ describe("hidden adjudication", () => {
 
     expect(executeToolCall).toHaveBeenCalledWith(
       "campaign-1",
-      "log_event",
+      "offer_quick_actions",
       {
-        text: "The gate pressure changes.",
-        importance: 3,
-        participants: ["Player"],
-        durability: "scene_local",
+        actions: [
+          { label: "Wait", action: "I wait and watch." },
+          { label: "Look", action: "I study the gate." },
+          { label: "Ask", action: "I ask what changed." },
+        ],
       },
       7,
       "weak_hit",
@@ -372,36 +368,43 @@ describe("hidden adjudication", () => {
           rationale: "Bad plan should abort immediately.",
           actions: [
             {
-              toolName: "add_tag",
-              input: { entityName: "Ghost", entityType: "npc", tag: "observed" },
+              toolName: "offer_quick_actions",
+              input: {
+                actions: [
+                  { label: "Wait", action: "I wait." },
+                  { label: "Look", action: "I look." },
+                  { label: "Ask", action: "I ask." },
+                ],
+              },
             },
           ],
         },
       }),
-    ).rejects.toThrow("Adjudication action failed: add_tag");
+    ).rejects.toThrow("Adjudication action failed: offer_quick_actions");
   });
 
-  it("rejects multi-mutation hidden plans before executing any action", async () => {
+  it("rejects legacy state-bearing hidden plans before executing any action", async () => {
     await expect(
       executeAdjudicationPlan({
         campaignId: "campaign-1",
         tick: 4,
         executionContext: createExecutionContext(),
         plan: {
-          rationale: "Legacy hidden adjudication must not partially commit multi-step state.",
+          rationale: "Legacy hidden adjudication must not commit inventory mutation.",
           actions: [
             {
-              toolName: "add_tag",
-              input: { entityName: "Gate", entityType: "location", tag: "watched" },
-            },
-            {
-              toolName: "log_event",
-              input: { text: "A second mutation should not run.", importance: 1, participants: [] },
+              toolName: "transfer_item",
+              input: {
+                itemName: "Iron Sword",
+                targetName: "Hero",
+                targetType: "character",
+                equipState: "equipped",
+              },
             },
           ],
-        },
+        } as any,
       }),
-    ).rejects.toThrow("may execute at most one state-bearing action");
+    ).rejects.toThrow("hidden adjudication cannot execute transfer_item");
 
     expect(executeToolCall).not.toHaveBeenCalled();
   });
@@ -421,13 +424,13 @@ describe("hidden adjudication", () => {
     expect(contract).toContain("unsupported toolName");
     expect(contract).toContain("payload instead of input");
     expect(contract).toContain("invented source truth");
-    const allowedHiddenToolNames = [
+    const allowedHiddenToolNames = ["offer_quick_actions"];
+    const forbiddenHiddenToolNames = [
       "add_tag",
       "remove_tag",
       "set_relationship",
       "log_event",
       "advance_time",
-      "offer_quick_actions",
       "promote_npc",
       "spawn_item",
       "reveal_location",
@@ -436,6 +439,9 @@ describe("hidden adjudication", () => {
     ];
     for (const toolName of allowedHiddenToolNames) {
       expect(contract).toContain(`"${toolName}"`);
+    }
+    for (const toolName of forbiddenHiddenToolNames) {
+      expect(contract).not.toContain(`"${toolName}" input`);
     }
     for (const toolName of Object.keys(runtimeToolInputSchemas)) {
       if (toolName === "request_contested_outcome") continue;

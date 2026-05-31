@@ -7,19 +7,9 @@ import { runtimeToolInputSchemas, type RuntimeToolName } from "./tool-schemas.js
 export const ENGINE_CONTRACT_MARKER_PREFIX = "STRUCTURED_OUTPUT_CONTRACT:";
 
 const runtimeToolNames = Object.keys(runtimeToolInputSchemas) as RuntimeToolName[];
-const hiddenAdjudicationToolNames: RuntimeToolName[] = [
-  "add_tag",
-  "remove_tag",
-  "set_relationship",
-  "log_event",
-  "advance_time",
+export const HIDDEN_ADJUDICATION_TOOL_NAMES = [
   "offer_quick_actions",
-  "promote_npc",
-  "spawn_item",
-  "reveal_location",
-  "set_condition",
-  "transfer_item",
-];
+] as const satisfies readonly RuntimeToolName[];
 
 const runtimeToolInputShapes = {
   list_visible_affordances: [
@@ -536,7 +526,7 @@ export function buildHiddenAdjudicationPromptContract(options: {
 } = {}): string {
   const allowedTools = options.allowedTools
     ? options.allowedTools.filter((toolName) => toolName !== "request_contested_outcome")
-    : hiddenAdjudicationToolNames;
+    : HIDDEN_ADJUDICATION_TOOL_NAMES;
 
   return [
     `${ENGINE_CONTRACT_MARKER_PREFIX} hidden-adjudication.v1`,
