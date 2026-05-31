@@ -3,7 +3,7 @@
 Date: 2026-05-31
 Branch: develop
 Baseline HEAD: 7971dab544c5de212c8f1f3fa3a80bb2d7e2ba56
-Current Integrated HEAD: 3767de7dcecafb92cf356f637e5e8705ff778017
+Current Integrated HEAD: 23aa2922c8dd8ac143592e2dbb9a7e3672b29b55
 
 ## Product Goal
 
@@ -23,10 +23,54 @@ Oracle run:
 - Output: `output/oracle-phase95-current-head-architecture-20260531.md`
 
 Current Oracle P1 blockers:
-- Service-owner matrix is not fully executable. `entity_tag_service` and similar service-owned lanes need store/descriptor/delegate validation rather than only non-empty contract metadata.
+- Service-owner matrix closure is in progress after the Oracle review. Local patch makes service-owned lanes executable-contract validated: physical manifest stores, receipt-kind parity, delegate tool existence, delegate state effects, `turn_clock_ledger` time-effect role, and `quick_action_offer_service` canonical tool allowlist.
 - Staged restore source-manifest equivalence is not visibly proven. Pending repair validates staged evidence against the staged manifest, but must prove staged physical evidence still matches the original source bundle manifest or a source-manifest digest recorded in the journal.
 - Current-HEAD Browser/long-play evidence remains open: `/game` workability, fresh human-style 60-turn, clean-start clone 60-turn, and 600+ soak/replay are still required.
 - Actor/world/time long-run observability evidence remains open: clock continuity, due-world reason distributions, actor wake backlog, settled-packet due refs, vector growth/rebuild counts, and pending narration recovery outcomes must be captured in long-play artifacts.
+
+## Wave J 6+1 Live Orchestration
+
+Date: 2026-05-31
+Base HEAD: `23aa2922` (`Record current-head Oracle architecture verdict`)
+Mode: six live read-only agents plus this shared canvas; Codex owns integration, implementation review, tests, commits, and closing agents only after final result intake.
+
+### J0 Local Critical Path: Service-Owned Gameplay Contracts
+
+Status: locally implemented and verified; pending commit.
+
+Invariant being closed:
+- Service-owned state lanes are not prose metadata. They must be executable contracts tied to physical stores, tool descriptors, receipt kinds, runtime validators, projections, recovery modes, and tests.
+
+Current local changes:
+- `entity_tag_service` source of truth is the canonical `tags` columns on `players`, `npcs`, `items`, `locations`, and `factions`; stale logical stores `sqlite:entity_tags` and `sqlite:actors` are rejected.
+- `turn_clock_ledger` names `sqlite:turn_clock_ledger` and `sqlite:world_clocks`, and its service contract requires at least one `time_effect` delegate tool.
+- `quick_action_offer_service` remains service-owned but must retain its allowlisted canonical runtime tool, `offer_quick_actions`, for `quick_action_offer`.
+- `GameplayStateServiceContract.stores` is typed as `Phase95RequiredStoreKey[]`, while runtime validation still fails closed for corrupted injected contracts.
+- `assertStateOwnerRegistry` accepts injected descriptors so custom descriptor drift cannot bypass service-contract validation.
+
+Executed evidence:
+- `npm.cmd --prefix backend run typecheck` passed.
+- `$env:NODE_OPTIONS='--max-old-space-size=4096'; npm.cmd --prefix backend run typecheck` passed after one default-heap OOM retry.
+- `npm.cmd --prefix backend test -- src/engine/__tests__/gameplay-control-plane-contract.test.ts src/engine/__tests__/tool-contracts.test.ts src/engine/__tests__/tool-executor-authority.test.ts src/campaign/__tests__/store-manifest.test.ts src/campaign/__tests__/store-manifest-executor.test.ts` passed: 59 tests.
+- `npm.cmd --prefix backend test -- src/engine/__tests__/gameplay-control-plane-contract.test.ts src/engine/__tests__/tool-contracts.test.ts src/engine/__tests__/tool-executor-authority.test.ts src/engine/__tests__/quick-action-offers.test.ts src/routes/__tests__/chat.test.ts src/campaign/__tests__/store-manifest.test.ts src/campaign/__tests__/store-manifest-executor.test.ts` passed: 114 tests.
+- One earlier parallel test run hit Vitest `ERR_IPC_CHANNEL_CLOSED` after passing contract files; rerun alone passed.
+
+J1 review intake:
+- P0: none.
+- P1 found and fixed locally: `quick_action_offer_service` and `turn_clock_ledger` must validate every declared delegate, not only prove that at least one correct tool is present.
+- P2 found and fixed locally: service `receiptKinds` must not include stale receipts outside the lane's `acceptedReceiptKinds`.
+
+J2 staged restore intake:
+- P1 confirmed: pending restore repair currently validates staged evidence against the staged manifest, but coordinated tampering of staged files plus staged manifest can pass without proving equivalence to the original source bundle.
+- Recommended next production slice: add cross-directory manifest verifier reading the source manifest while hashing staged evidence, record `sourceManifestDigest` in restore journal, and call it from `assertStagedRestoreFiles` before live apply.
+
+Live agents:
+- J1 Service-owner final audit.
+- J2 Staged restore source-manifest equivalence.
+- J3 Gameplay GM/tool-loop/agent-harness boundary.
+- J4 Narration/playfeel grounding.
+- J5 Clone/replay/rollback/vector.
+- J6 UI/API/SSE public projection.
 
 Known R4 P1s closed in commit `7971dab5`:
 - Default `/world` NPC projection no longer exposes semantic `persona/goals/beliefs`.

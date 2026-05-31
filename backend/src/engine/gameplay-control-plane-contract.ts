@@ -321,6 +321,8 @@ export const PHASE95_REQUIRED_STORE_KEYS = [
   "evidence:playtest_reports",
 ] as const;
 
+export type Phase95RequiredStoreKey = (typeof PHASE95_REQUIRED_STORE_KEYS)[number];
+
 const PHASE95_STORE_MANIFEST_BASE = [
   {
     store: "sqlite:campaigns",
@@ -1144,7 +1146,7 @@ export interface GameplayStateServiceContract {
   owner: Exclude<GameplayStateOwner, RuntimeToolName>;
   sourceOfTruth: string;
   delegateTools: readonly RuntimeToolName[];
-  stores: readonly string[];
+  stores: readonly Phase95RequiredStoreKey[];
   validators: readonly string[];
   receiptKinds: readonly string[];
   projections: readonly string[];
@@ -1430,9 +1432,9 @@ export const GAMEPLAY_STATE_OWNER_REGISTRY: readonly GameplayStateOwnerEntry[] =
 export const GAMEPLAY_STATE_SERVICE_CONTRACTS: readonly GameplayStateServiceContract[] = [
   {
     owner: "entity_tag_service",
-    sourceOfTruth: "Canonical entity tag rows for player, NPC, item, location, and faction scopes.",
+    sourceOfTruth: "Canonical tag columns on player, NPC, item, location, and faction rows.",
     delegateTools: ["add_tag", "remove_tag"],
-    stores: ["sqlite:entity_tags", "sqlite:actors", "sqlite:items", "sqlite:locations", "sqlite:factions"],
+    stores: ["sqlite:players", "sqlite:npcs", "sqlite:items", "sqlite:locations", "sqlite:factions"],
     validators: ["entity scope resolver", "tag schema", "write-scope guard"],
     receiptKinds: ["entity_tag_delta"],
     projections: ["tag-derived world/inventory/history facts"],
@@ -1443,7 +1445,7 @@ export const GAMEPLAY_STATE_SERVICE_CONTRACTS: readonly GameplayStateServiceCont
     owner: "turn_clock_ledger",
     sourceOfTruth: "Turn clock ledger rows and canonical campaign world time.",
     delegateTools: ["advance_time"],
-    stores: ["turn_clock_ledger", "sqlite:campaigns"],
+    stores: ["sqlite:turn_clock_ledger", "sqlite:world_clocks"],
     validators: ["TURN_CLOCK_LEDGER_ENTRY_SCHEMA", "nonnegative delta validator"],
     receiptKinds: ["clock_receipt"],
     projections: ["narrator packet elapsed-time facts", "history/time projection"],
@@ -1566,6 +1568,7 @@ function assertRuntimeDescriptorRoleBacking(input: {
 function assertServiceContractBacking(input: {
   entry: GameplayStateOwnerEntry;
   contracts: readonly GameplayStateServiceContract[];
+  descriptors: typeof RUNTIME_TOOL_DESCRIPTORS;
 }): void {
   if (isRuntimeToolOwner(input.entry.owner)) {
     throw new Error(`Gameplay state lane ${input.entry.lane} service backing cannot use runtime tool owner.`);
@@ -1585,6 +1588,90 @@ function assertServiceContractBacking(input: {
   ] as const) {
     if (field[1].length === 0) {
       throw new Error(`Gameplay state lane ${input.entry.lane} service contract has no ${field[0]}.`);
+    }
+  }
+  for (const store of contract.stores) {
+    if (!PHASE95_REQUIRED_STORE_KEYS.includes(store as typeof PHASE95_REQUIRED_STORE_KEYS[number])) {
+      throw new Error(
+        `Gameplay state lane ${input.entry.lane} service contract references non-manifest store ${store}.`,
+      );
+    }
+  }
+  if (!contract.receiptKinds.includes(input.entry.receiptKind)) {
+    throw new Error(
+      `Gameplay state lane ${input.entry.lane} service contract does not include receipt ${input.entry.receiptKind}.`,
+    );
+  }
+  for (const receiptKind of contract.receiptKinds) {
+    if (!input.entry.acceptedReceiptKinds.includes(receiptKind)) {
+      throw new Error(
+        `Gameplay state lane ${input.entry.lane} service contract receipt ${receiptKind} is not accepted by the lane.`,
+      );
+    }
+  }
+  for (const toolName of contract.delegateTools) {
+    if (!Object.hasOwn(input.descriptors, toolName)) {
+      throw new Error(
+        `Gameplay state lane ${input.entry.lane} service contract references unknown delegate tool ${toolName}.`,
+      );
+    }
+  }
+
+  if (input.entry.backing.kind === "time_ledger") {
+    for (const toolName of contract.delegateTools) {
+      if (!input.descriptors[toolName].roles.includes("time_effect")) {
+        throw new Error(
+          `Gameplay state lane ${input.entry.lane} delegate tool ${toolName} is not a time-effect delegate.`,
+        );
+      }
+    }
+    return;
+  }
+
+  const effectKind = (Object.entries(RUNTIME_EFFECT_KIND_STATE_LANES) as Array<[
+    RuntimeToolStateEffectKind,
+    GameplayStateLane,
+  ]>).find(([, lane]) => lane === input.entry.lane)?.[0];
+  if (!effectKind) {
+    throw new Error(`Gameplay state lane ${input.entry.lane} service contract has no runtime effect mapping.`);
+  }
+  const allowedCanonicalServiceTool = SERVICE_OWNER_CANONICAL_TOOL_ALLOWLIST[input.entry.owner];
+  if (allowedCanonicalServiceTool) {
+    if (!contract.delegateTools.includes(allowedCanonicalServiceTool)) {
+      throw new Error(
+        `Gameplay state lane ${input.entry.lane} service contract is missing canonical service tool ${allowedCanonicalServiceTool}.`,
+      );
+    }
+    const descriptor = input.descriptors[allowedCanonicalServiceTool];
+    if (
+      !(descriptor.stateEffects ?? [])
+        .some((effect) => effect.effectKind === effectKind && effect.ownerKind === "canonical")
+    ) {
+      throw new Error(
+        `Gameplay state lane ${input.entry.lane} canonical service tool ${allowedCanonicalServiceTool} does not own ${effectKind}.`,
+      );
+    }
+    for (const toolName of contract.delegateTools) {
+      if (toolName === allowedCanonicalServiceTool) continue;
+      const hasDelegateEffect = (input.descriptors[toolName].stateEffects ?? [])
+        .some((effect) => effect.effectKind === effectKind && effect.ownerKind === "delegate");
+      if (!hasDelegateEffect) {
+        throw new Error(
+          `Gameplay state lane ${input.entry.lane} delegate tool ${toolName} does not delegate ${effectKind}.`,
+        );
+      }
+    }
+    return;
+  }
+
+  for (const toolName of contract.delegateTools) {
+    const descriptor = input.descriptors[toolName];
+    const hasDelegateEffect = (descriptor.stateEffects ?? [])
+      .some((effect) => effect.effectKind === effectKind && effect.ownerKind === "delegate");
+    if (!hasDelegateEffect) {
+      throw new Error(
+        `Gameplay state lane ${input.entry.lane} delegate tool ${toolName} does not delegate ${effectKind}.`,
+      );
     }
   }
 }
@@ -1614,10 +1701,18 @@ function assertStateOwnerBacking(input: {
       if (input.entry.owner !== "turn_clock_ledger" || input.entry.receiptKind !== "clock_receipt") {
         throw new Error(`Gameplay state lane ${input.entry.lane} has invalid time ledger backing.`);
       }
-      assertServiceContractBacking({ entry: input.entry, contracts: input.serviceContracts });
+      assertServiceContractBacking({
+        entry: input.entry,
+        contracts: input.serviceContracts,
+        descriptors: input.descriptors,
+      });
       return;
     case "service_contract":
-      assertServiceContractBacking({ entry: input.entry, contracts: input.serviceContracts });
+      assertServiceContractBacking({
+        entry: input.entry,
+        contracts: input.serviceContracts,
+        descriptors: input.descriptors,
+      });
       return;
     case "projection_contract":
       return;
@@ -1630,6 +1725,8 @@ function assertStateOwnerBacking(input: {
 
 export function assertStateOwnerRegistry(
   registry: readonly GameplayStateOwnerEntry[] = GAMEPLAY_STATE_OWNER_REGISTRY,
+  serviceContracts: readonly GameplayStateServiceContract[] = GAMEPLAY_STATE_SERVICE_CONTRACTS,
+  descriptors: typeof RUNTIME_TOOL_DESCRIPTORS = RUNTIME_TOOL_DESCRIPTORS,
 ): GameplayStateOwnerEntry[] {
   const lanes = new Set<GameplayStateLane>();
   for (const entry of registry) {
@@ -1649,8 +1746,8 @@ export function assertStateOwnerRegistry(
     assertNonEmptyStateOwnerArray(entry.lane, "tests", entry.tests);
     assertStateOwnerBacking({
       entry,
-      descriptors: RUNTIME_TOOL_DESCRIPTORS,
-      serviceContracts: GAMEPLAY_STATE_SERVICE_CONTRACTS,
+      descriptors,
+      serviceContracts,
     });
     lanes.add(entry.lane);
   }
@@ -1719,8 +1816,12 @@ export function assertRuntimeEffectStateOwnerParity(input: {
   descriptors?: typeof RUNTIME_TOOL_DESCRIPTORS;
   effectKindStateLanes?: Partial<Record<RuntimeToolStateEffectKind, GameplayStateLane>>;
 } = {}): RuntimeEffectStateOwnerParityEntry[] {
-  const registry = assertStateOwnerRegistry(input.registry ?? GAMEPLAY_STATE_OWNER_REGISTRY);
   const descriptors = input.descriptors ?? RUNTIME_TOOL_DESCRIPTORS;
+  const registry = assertStateOwnerRegistry(
+    input.registry ?? GAMEPLAY_STATE_OWNER_REGISTRY,
+    GAMEPLAY_STATE_SERVICE_CONTRACTS,
+    descriptors,
+  );
   const lanesByEffectKind = input.effectKindStateLanes ?? RUNTIME_EFFECT_KIND_STATE_LANES;
   const registryByLane = new Map(registry.map((entry) => [entry.lane, entry]));
   const canonicalOwnersByEffectKind = runtimeDescriptorCanonicalOwnersByEffectKind(descriptors);

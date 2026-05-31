@@ -175,8 +175,16 @@ describe("Phase 95 gameplay control-plane contracts", () => {
     expect(GAMEPLAY_STATE_SERVICE_CONTRACTS.find((entry) => entry.owner === "entity_tag_service"))
       .toMatchObject({
         delegateTools: ["add_tag", "remove_tag"],
+        stores: expect.arrayContaining(["sqlite:players", "sqlite:npcs", "sqlite:items", "sqlite:locations", "sqlite:factions"]),
         receiptKinds: expect.arrayContaining(["entity_tag_delta"]),
         projections: expect.arrayContaining(["tag-derived world/inventory/history facts"]),
+      });
+    expect(GAMEPLAY_STATE_SERVICE_CONTRACTS.find((entry) => entry.owner === "entity_tag_service")?.stores)
+      .not.toEqual(expect.arrayContaining(["sqlite:entity_tags", "sqlite:actors"]));
+    expect(GAMEPLAY_STATE_SERVICE_CONTRACTS.find((entry) => entry.owner === "turn_clock_ledger"))
+      .toMatchObject({
+        delegateTools: ["advance_time"],
+        stores: expect.arrayContaining(["sqlite:turn_clock_ledger", "sqlite:world_clocks"]),
       });
     expect(GAMEPLAY_STATE_SERVICE_CONTRACTS.find((entry) => entry.owner === "quick_action_offer_service"))
       .toMatchObject({
@@ -191,6 +199,51 @@ describe("Phase 95 gameplay control-plane contracts", () => {
         backing: { kind: "runtime_state_effect", refs: ["entity_tag"] },
       },
     ])).toThrow(/entity_tag.*runtime state effect/i);
+
+    const replaceServiceContract = (
+      owner: typeof GAMEPLAY_STATE_SERVICE_CONTRACTS[number]["owner"],
+      patch: Partial<typeof GAMEPLAY_STATE_SERVICE_CONTRACTS[number]>,
+    ) => GAMEPLAY_STATE_SERVICE_CONTRACTS.map((entry) =>
+      entry.owner === owner
+        ? { ...entry, ...patch }
+        : entry,
+    );
+    expect(() => assertStateOwnerRegistry(
+      GAMEPLAY_STATE_OWNER_REGISTRY,
+      replaceServiceContract("entity_tag_service", { stores: ["sqlite:entity_tags" as never] }),
+    )).toThrow(/entity_tag.*non-manifest store sqlite:entity_tags/i);
+    expect(() => assertStateOwnerRegistry(
+      GAMEPLAY_STATE_OWNER_REGISTRY,
+      replaceServiceContract("entity_tag_service", { delegateTools: ["log_event"] }),
+    )).toThrow(/entity_tag.*delegate tool log_event does not delegate entity_tag/i);
+    expect(() => assertStateOwnerRegistry(
+      GAMEPLAY_STATE_OWNER_REGISTRY,
+      replaceServiceContract("entity_tag_service", { delegateTools: ["promote_npc"] }),
+    )).toThrow(/entity_tag.*delegate tool promote_npc does not delegate entity_tag/i);
+    expect(() => assertStateOwnerRegistry(
+      GAMEPLAY_STATE_OWNER_REGISTRY,
+      replaceServiceContract("entity_tag_service", { delegateTools: ["missing_tool" as never] }),
+    )).toThrow(/entity_tag.*unknown delegate tool missing_tool/i);
+    expect(() => assertStateOwnerRegistry(
+      GAMEPLAY_STATE_OWNER_REGISTRY,
+      replaceServiceContract("entity_tag_service", { receiptKinds: ["wrong_receipt"] }),
+    )).toThrow(/entity_tag.*does not include receipt entity_tag_delta/i);
+    expect(() => assertStateOwnerRegistry(
+      GAMEPLAY_STATE_OWNER_REGISTRY,
+      replaceServiceContract("entity_tag_service", { receiptKinds: ["entity_tag_delta", "wrong_receipt"] }),
+    )).toThrow(/entity_tag.*receipt wrong_receipt is not accepted/i);
+    expect(() => assertStateOwnerRegistry(
+      GAMEPLAY_STATE_OWNER_REGISTRY,
+      replaceServiceContract("turn_clock_ledger", { delegateTools: ["log_event"] }),
+    )).toThrow(/clock_delta.*delegate tool log_event is not a time-effect delegate/i);
+    expect(() => assertStateOwnerRegistry(
+      GAMEPLAY_STATE_OWNER_REGISTRY,
+      replaceServiceContract("turn_clock_ledger", { delegateTools: ["advance_time", "log_event"] }),
+    )).toThrow(/clock_delta.*delegate tool log_event is not a time-effect delegate/i);
+    expect(() => assertStateOwnerRegistry(
+      GAMEPLAY_STATE_OWNER_REGISTRY,
+      replaceServiceContract("quick_action_offer_service", { delegateTools: ["offer_quick_actions", "log_event"] }),
+    )).toThrow(/quick_action_offer.*delegate tool log_event does not delegate quick_action_offer/i);
   });
 
   it("keeps descriptor canonical owners aligned with registry owners", () => {
@@ -243,7 +296,17 @@ describe("Phase 95 gameplay control-plane contracts", () => {
           stateEffects: [{ effectKind: "entity_tag", ownerKind: "canonical" }] as const,
         },
       },
-    })).toThrow(/Service-owned runtime effect entity_tag cannot also expose canonical tool owners/i);
+    })).toThrow(/entity_tag.*delegate tool add_tag does not delegate entity_tag/i);
+
+    expect(() => assertRuntimeEffectStateOwnerParity({
+      descriptors: {
+        ...RUNTIME_TOOL_DESCRIPTORS,
+        offer_quick_actions: {
+          ...RUNTIME_TOOL_DESCRIPTORS.offer_quick_actions,
+          stateEffects: [{ effectKind: "quick_action_offer", ownerKind: "delegate" }] as const,
+        },
+      },
+    })).toThrow(/quick_action_offer.*canonical service tool offer_quick_actions does not own quick_action_offer/i);
   });
 
   it("rejects backend refs at the public projection boundary", () => {
