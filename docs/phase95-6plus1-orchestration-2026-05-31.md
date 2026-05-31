@@ -328,6 +328,15 @@ Integrated result:
 - Executed local evidence: `npm --prefix backend run typecheck` passed.
 - Recommended next A4 patches: add citable scene/observation status for quiet no-mutation direct turns, expose safe dialogue summaries as narratable precision facts, and combine movement+time receipts into one playable beat.
 - Executed evidence from agent: narration grounding, narrator packet, visible output guard, and empty narration tests passed; 124 tests.
+- Wave G 6+1 findings for backend-owned settled facts:
+  - Quiet/status read authority belongs in `narrator-packet.ts`, not `turn-processor.ts`; no-mutation GM text remains `model_guidance` and uncitable.
+  - Movement+time should be a derived narrator evidence row with provenance to accepted `advance_time` and player movement receipts; movement/time receipts remain backend-owned receipts, not mutated prose.
+  - New narrator evidence stays internal. API/SSE/frontend projection does not consume `NarratorPacket.evidenceLedger` categories, so no public DTO expansion is required.
+  - Stale persisted observation wording on pending narration resume remains an open recovery follow-up: normalize persisted observation summaries/atoms/evidence before resumed final narration.
+- Implemented A4 quiet/movement-time settled fact slice: `scene_status:current` is emitted only for quiet `status_read`/`direct_noop` settled packets with no response/effect/observation evidence and derives from public scene name, clear visible actors, and connected movement candidates. Accepted `advance_time` plus one accepted player `move_to`/`move_actor` now emits a derived `movement_time_beat:*` evidence row with a single backend-owned precision fact suitable for one `factRef`.
+- Executed local evidence: `npm --prefix backend test -- src/engine/__tests__/narrator-packet.test.ts src/engine/__tests__/narration-grounding-guard.test.ts src/engine/__tests__/visible-narration-output-guard.test.ts` passed 131 tests.
+- Executed local evidence: `npm --prefix backend test -- src/engine/__tests__/player-facing-packet.test.ts src/engine/__tests__/prompt-assembler.test.ts src/routes/__tests__/chat.test.ts` passed 116 tests; backend typecheck passed.
+- Executed local evidence: `npm --prefix frontend test -- --run lib/__tests__/api.test.ts app/game/__tests__/page.test.tsx` passed 113 tests; frontend typecheck passed.
 
 ### A5 Persistence Clone Replay Rollback Vector
 Agent: Goodall (`019e7ccd-b899-7720-9be6-dca69deb6d66`)

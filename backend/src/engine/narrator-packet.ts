@@ -189,6 +189,8 @@ export type NarratorPacketEvidenceCategory =
   | "committed_event"
   | "perceivable_response"
   | "perceivable_effect"
+  | "scene_status"
+  | "movement_time_beat"
   | "observation_result"
   | "visible_actor"
   | "current_inventory_status"
@@ -202,6 +204,8 @@ export type NarratorPacketPrecisionFactKind =
   | "claim"
   | "quote"
   | "summary"
+  | "scene_status"
+  | "movement_time_beat"
   | "state_effect"
   | "subject";
 
@@ -219,6 +223,7 @@ export interface NarratorPacketEvidence {
   category: NarratorPacketEvidenceCategory;
   summary: string;
   sourceId?: string;
+  sourceIds?: string[];
   summaryBackendFact?: boolean;
   claimSupport?: string[];
   precisionFacts?: NarratorPacketPrecisionFact[];
@@ -689,6 +694,137 @@ function collectStructuralEffectNarratableFacts(
   return facts;
 }
 
+function formatSceneStatusSummary(args: {
+  frame: SceneFrame;
+  visibleActors: readonly NarratorPacketActor[];
+}): string | null {
+  const parts: string[] = [];
+  const sceneName = args.frame.currentSceneScopeName ?? args.frame.currentLocationName ?? null;
+  if (!sceneName) return null;
+  parts.push(`You are at ${sceneName}.`);
+
+  const visibleNpcLabels = uniqueStrings(
+    args.visibleActors
+      .filter((actor) => actor.type !== "player")
+      .map((actor) => actor.label),
+  );
+  if (visibleNpcLabels.length > 0) {
+    parts.push(`${joinNaturalList(visibleNpcLabels)} ${visibleNpcLabels.length === 1 ? "is" : "are"} visible here.`);
+  }
+
+  const connectedRoutes = uniqueStrings(
+    args.frame.movementCandidates
+      .filter((candidate) => candidate.connected !== false)
+      .map((candidate) => candidate.label),
+  ).slice(0, 3);
+  if (connectedRoutes.length > 0) {
+    parts.push(`Reachable from here: ${joinNaturalList(connectedRoutes)}.`);
+  }
+
+  return parts.length > 0 ? parts.join(" ") : null;
+}
+
+function quietTurnCanUseSceneStatus(args: {
+  packet: CanonicalTurnPacket;
+  perceivableResponses: readonly CanonicalTurnPacketResponse[];
+  perceivableEffects: readonly CanonicalTurnPacketEffect[];
+  perceivableObservations: readonly NarratorPacketObservation[];
+}): boolean {
+  const resolution = args.packet.turnResolution;
+  if (!resolution) return false;
+  if (resolution.kind !== "direct_noop" && resolution.kind !== "status_read") {
+    return false;
+  }
+  if (
+    resolution.resolutionState !== "explicit_no_change"
+    && resolution.resolutionState !== "observation_grounded"
+  ) {
+    return false;
+  }
+  return args.perceivableResponses.length === 0
+    && args.perceivableEffects.length === 0
+    && args.perceivableObservations.length === 0;
+}
+
+function collectSceneStatusEvidence(args: {
+  packet: CanonicalTurnPacket;
+  frame: SceneFrame;
+  visibleActors: readonly NarratorPacketActor[];
+  perceivableResponses: readonly CanonicalTurnPacketResponse[];
+  perceivableEffects: readonly CanonicalTurnPacketEffect[];
+  perceivableObservations: readonly NarratorPacketObservation[];
+}): NarratorPacketEvidence[] {
+  if (!quietTurnCanUseSceneStatus(args)) return [];
+  const summary = formatSceneStatusSummary({
+    frame: args.frame,
+    visibleActors: args.visibleActors,
+  });
+  if (!summary) return [];
+  return [{
+    id: evidenceId("scene_status", "current"),
+    category: "scene_status",
+    summary,
+    sourceId: "current",
+    summaryBackendFact: true,
+    claimSupport: ["playable_beat"],
+  }];
+}
+
+function collectMovementTimeBeatEvidence(
+  effects: readonly CanonicalTurnPacketEffect[],
+): NarratorPacketEvidence[] {
+  const timeEffects = effects.filter((effect) =>
+    effect.toolName === "advance_time"
+    && effect.toolResult?.success === true
+    && Boolean(effect.actionId));
+  const movementEffects = effects.filter((effect) =>
+    (effect.toolName === "move_to" || effect.toolName === "move_actor")
+    && effect.toolResult?.success === true
+    && Boolean(effect.actionId)
+    && (effect.toolName === "move_to"
+      || isPlayerMoveActorRef(readRecordString(effect.toolResult.result, "actorRef"), effect.toolResult.result)));
+  if (timeEffects.length !== 1 || movementEffects.length !== 1) {
+    return [];
+  }
+
+  const timeEffect = timeEffects[0]!;
+  const movementEffect = movementEffects[0]!;
+  const timeResult = timeEffect.toolResult?.result;
+  const movementResult = movementEffect.toolResult?.result;
+  const minutes = readRecordNumber(timeResult, "minutes")
+    ?? timeEffect.toolResult?.authority?.elapsedWorldTimeMinutes
+    ?? null;
+  const locationName = readRecordString(movementResult, "locationName");
+  if (!locationName) {
+    return [];
+  }
+
+  const reason = trimTrailingSentencePunctuation(readRecordString(timeResult, "reason") ?? "");
+  const elapsedClause = minutes !== null && reason
+    ? trimTrailingSentencePunctuation(formatAdvanceTimeReason(reason, minutes))
+    : minutes !== null
+      ? trimTrailingSentencePunctuation(formatElapsedWorldMinutes(minutes))
+      : "In-world time passes";
+  const summary = `${elapsedClause}, and you arrive at ${locationName}.`;
+  const sourceId = `movement_time_beat:${timeEffect.actionId}:${movementEffect.actionId}`;
+  return [{
+    id: sourceId,
+    category: "movement_time_beat",
+    summary: "Accepted movement and elapsed time combine into one playable travel beat.",
+    sourceId,
+    sourceIds: [timeEffect.id, movementEffect.id],
+    summaryBackendFact: false,
+    claimSupport: ["playable_beat"],
+    precisionFacts: [{
+      kind: "movement_time_beat",
+      value: summary,
+      sourcePath: `${timeEffect.id}+${movementEffect.id}`,
+      claimKind: "playable_beat",
+      exhaustive: true,
+    }],
+  }];
+}
+
 function effectSummaryContributesBackendFact(effect: CanonicalTurnPacketEffect): boolean {
   if (effect.toolName && SUPPORT_ONLY_STRUCTURAL_EFFECT_SUMMARY_TOOLS.has(effect.toolName)) {
     return false;
@@ -698,6 +834,7 @@ function effectSummaryContributesBackendFact(effect: CanonicalTurnPacketEffect):
 }
 
 function collectEvidenceLedger(args: {
+  frame: SceneFrame;
   packet: CanonicalTurnPacket;
   visibleActors: NarratorPacketActor[];
   currentInventory: NarratorPacketInventoryItem[];
@@ -766,6 +903,9 @@ function collectEvidenceLedger(args: {
       }, precisionFacts));
     }
   }
+  for (const entry of collectMovementTimeBeatEvidence(args.perceivableEffects)) {
+    add(entry);
+  }
   for (const observation of args.perceivableObservations) {
     for (const atom of observation.atoms) {
       add({
@@ -776,6 +916,16 @@ function collectEvidenceLedger(args: {
         claimSupport: atom.claimSupport,
       });
     }
+  }
+  for (const entry of collectSceneStatusEvidence({
+    packet: args.packet,
+    frame: args.frame,
+    visibleActors: args.visibleActors,
+    perceivableResponses: args.perceivableResponses,
+    perceivableEffects: args.perceivableEffects,
+    perceivableObservations: args.perceivableObservations,
+  })) {
+    add(entry);
   }
   for (const actor of args.visibleActors) {
     const isPlayer = actor.type === "player";
@@ -2933,6 +3083,7 @@ export function buildNarratorPacket(args: BuildNarratorPacketArgs): NarratorPack
     perceivableEffects,
   });
   const evidenceLedger = collectEvidenceLedger({
+    frame: args.frame,
     packet: args.canonicalTurnPacket,
     visibleActors,
     currentInventory,

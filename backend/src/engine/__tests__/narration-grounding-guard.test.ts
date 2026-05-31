@@ -1637,6 +1637,181 @@ describe("grounded sentence draft compiler", () => {
     }));
   });
 
+  it("expands quiet scene status fact refs into backend-owned playable prose", () => {
+    const packet = createPacket();
+    packet.evidenceLedger = [
+      {
+        id: "scene_status:current",
+        category: "scene_status",
+        summary:
+          "You are at Canal Market Archive Counter. Ledger Clerk is visible here. Reachable from here: Archive Stair.",
+        sourceId: "current",
+        summaryBackendFact: true,
+        claimSupport: ["playable_beat"],
+      },
+    ];
+
+    const refs = getAllowedNarrationCitationEvidenceRefs(packet);
+    expect(refs.map((ref) => ref.evidence.id)).toEqual(["scene_status:current"]);
+    expect(formatAllowedCitationEvidenceRef(refs[0]!, [])).toContain("backendFacts=e1.s1 summary:");
+
+    const draft = compileGroundedSentenceDraftToNarrationDraft({
+      packet,
+      requireBackendOwnedFactText: true,
+      requireFactRefs: true,
+      draft: {
+        version: "grounded-sentence-draft.v2",
+        sentences: [
+          {
+            factRefs: ["e1.s1"],
+            evidenceRefs: ["e1"],
+          },
+        ],
+      },
+    });
+
+    expect(draft.prose).toBe(
+      "You are at Canal Market Archive Counter. Ledger Clerk is visible here. Reachable from here: Archive Stair.",
+    );
+    expect(draft.claims[0]).toEqual(expect.objectContaining({
+      kind: "playable_beat",
+      evidenceRefs: ["scene_status:current"],
+    }));
+  });
+
+  it("expands combined movement-time fact refs without exposing receipt summaries as backend facts", () => {
+    const packet = createPacket();
+    packet.evidenceLedger = [
+      {
+        id: "perceivable_effect:effect-advance-gondola",
+        category: "perceivable_effect",
+        summary: "12 minutes pass.",
+        sourceId: "effect-advance-gondola",
+        summaryBackendFact: false,
+        precisionFacts: [
+          {
+            kind: "summary",
+            value: "Gondola transit takes 12 minutes.",
+            sourcePath: "toolResult.result.reason",
+            claimKind: "playable_beat",
+            exhaustive: true,
+          },
+        ],
+      },
+      {
+        id: "movement_time_beat:action-advance-gondola:action-move-gondola",
+        category: "movement_time_beat",
+        summary: "Accepted movement and elapsed time combine into one playable travel beat.",
+        sourceId: "movement_time_beat:action-advance-gondola:action-move-gondola",
+        sourceIds: ["effect-advance-gondola", "effect-move-gondola"],
+        summaryBackendFact: false,
+        claimSupport: ["playable_beat"],
+        precisionFacts: [
+          {
+            kind: "movement_time_beat",
+            value:
+              "Gondola transit from Lantern-Lit Gondola Pier to Tower Bridge east gallery takes 12 minutes, "
+              + "and you arrive at Tower Bridge Concourse - East Gallery Landing.",
+            sourcePath: "effect-advance-gondola+effect-move-gondola",
+            claimKind: "playable_beat",
+            exhaustive: true,
+          },
+        ],
+      },
+    ];
+
+    const refs = getAllowedNarrationCitationEvidenceRefs(packet);
+    expect(refs.map((ref) => ref.evidence.id)).toEqual([
+      "perceivable_effect:effect-advance-gondola",
+      "movement_time_beat:action-advance-gondola:action-move-gondola",
+    ]);
+    expect(formatAllowedCitationEvidenceRef(refs[0]!, [])).not.toContain("backendFacts=e1.s1");
+    expect(formatAllowedCitationEvidenceRef(refs[1]!, [])).toContain("backendFacts=e2.p1 movement_time_beat:");
+
+    const draft = compileGroundedSentenceDraftToNarrationDraft({
+      packet,
+      requireBackendOwnedFactText: true,
+      requireFactRefs: true,
+      draft: {
+        version: "grounded-sentence-draft.v2",
+        sentences: [
+          {
+            factRefs: ["e2.p1"],
+            evidenceRefs: ["e2"],
+          },
+        ],
+      },
+    });
+
+    expect(draft.prose).toBe(
+      "Gondola transit from Lantern-Lit Gondola Pier to Tower Bridge east gallery takes 12 minutes, "
+      + "and you arrive at Tower Bridge Concourse - East Gallery Landing.",
+    );
+    expect(draft.claims[0]).toEqual(expect.objectContaining({
+      kind: "playable_beat",
+      evidenceRefs: ["movement_time_beat:action-advance-gondola:action-move-gondola"],
+    }));
+
+    expect(() =>
+      compileGroundedSentenceDraftToNarrationDraft({
+        packet,
+        requireBackendOwnedFactText: true,
+        requireFactRefs: true,
+        draft: {
+          version: "grounded-sentence-draft.v2",
+          sentences: [
+            {
+              factRefs: ["e2.p1"],
+              evidenceRefs: ["e1"],
+            },
+          ],
+        },
+      }),
+    ).toThrow("without citing its packet evidence ref");
+  });
+
+  it("does not expose unsupported precision kinds as backend-owned fact refs", () => {
+    const packet = createPacket();
+    packet.evidenceLedger = [
+      {
+        id: "perceivable_effect:model-guidance",
+        category: "perceivable_effect",
+        summary: "Model guidance receipt.",
+        sourceId: "model-guidance",
+        summaryBackendFact: false,
+        precisionFacts: [
+          {
+            kind: "model_guidance" as never,
+            value: "The clerk opens the sealed route.",
+            sourcePath: "response.guidance",
+            exhaustive: true,
+          },
+        ],
+      },
+    ];
+
+    expect(getAllowedNarrationCitationEvidenceRefs(packet)).toEqual([]);
+    expect(formatAllowedCitationEvidenceRef({ refId: "e1", evidence: packet.evidenceLedger[0]! }, []))
+      .not.toContain("backendFacts=");
+
+    expect(() =>
+      compileGroundedSentenceDraftToNarrationDraft({
+        packet,
+        requireBackendOwnedFactText: true,
+        requireFactRefs: true,
+        draft: {
+          version: "grounded-sentence-draft.v2",
+          sentences: [
+            {
+              factRefs: ["e1.p1"],
+              evidenceRefs: ["e1"],
+            },
+          ],
+        },
+      }),
+    ).toThrow("unknown or disallowed evidence ref");
+  });
+
   it("rejects free factual prose in runtime final narration mode", () => {
     const packet = createPacket();
 

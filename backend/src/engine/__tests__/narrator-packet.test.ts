@@ -1527,6 +1527,8 @@ describe("narrator packet settlement boundary", () => {
       entry.id === "perceivable_effect:effect-advance-gondola");
     const moveEvidence = packet.evidenceLedger?.find((entry) =>
       entry.id === "perceivable_effect:effect-move-gondola");
+    const movementTimeBeat = packet.evidenceLedger?.find((entry) =>
+      entry.id === `movement_time_beat:${advanceActionId}:${moveActionId}`);
 
     expect(advanceEvidence).toEqual(expect.objectContaining({
       summary: "12 minutes pass.",
@@ -1547,6 +1549,21 @@ describe("narrator packet settlement boundary", () => {
           claimKind: "location_change",
         }),
       ]),
+    }));
+    expect(movementTimeBeat).toEqual(expect.objectContaining({
+      category: "movement_time_beat",
+      summaryBackendFact: false,
+      claimSupport: ["playable_beat"],
+      sourceIds: ["effect-advance-gondola", "effect-move-gondola"],
+      precisionFacts: [
+        expect.objectContaining({
+          kind: "movement_time_beat",
+          value:
+            "Gondola transit from Lantern-Lit Gondola Pier to Tower Bridge east gallery takes 12 minutes, "
+            + "and you arrive at Tower Bridge Concourse - East Gallery Landing.",
+          claimKind: "playable_beat",
+        }),
+      ],
     }));
   });
 
@@ -1693,6 +1710,55 @@ describe("narrator packet settlement boundary", () => {
         }),
       ]),
     }));
+  });
+
+  it("does not create a combined travel fact when movement is rejected", () => {
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    const advanceActionId = "action-advance-before-locked-gate";
+    const moveActionId = "action-move-locked-gate";
+    canonicalTurnPacket.effects = [
+      {
+        id: "effect-advance-before-locked-gate",
+        actionId: advanceActionId,
+        actorId: playerId,
+        toolName: "advance_time",
+        summary: "3 minutes pass.",
+        perceivableByPlayer: true,
+        toolResult: {
+          success: true,
+          result: {
+            minutes: 3,
+            reason: "Testing the locked gate",
+            clockAdvanced: true,
+          },
+        },
+      },
+      {
+        id: "effect-move-locked-gate",
+        actionId: moveActionId,
+        actorId: playerId,
+        toolName: "move_actor",
+        summary: "The locked gate blocks the movement.",
+        perceivableByPlayer: true,
+        toolResult: {
+          success: false,
+          error: "route_blocked",
+        },
+      },
+    ];
+    canonicalTurnPacket.actionResults = [];
+    canonicalTurnPacket.narratorFacts.actionIds = [advanceActionId, moveActionId];
+    canonicalTurnPacket.narratorFacts.toolResultRefs = [
+      { actionId: advanceActionId, toolName: "advance_time" },
+      { actionId: moveActionId, toolName: "move_actor" },
+    ];
+
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket,
+    });
+
+    expect(packet.evidenceLedger?.some((entry) => entry.category === "movement_time_beat")).toBe(false);
   });
 
   it("does not let observation-only scene-extra reuse authorize hidden labels in later effects", () => {
@@ -2585,6 +2651,69 @@ describe("narrator packet settlement boundary", () => {
       kind: "inventory_status",
       evidenceRefs: ["current_inventory_status:current"],
     }));
+  });
+
+  it("lets quiet status-read turns cite public scene status as backend-owned facts", () => {
+    const frame = createFrame();
+    frame.playerAction = "I take stock of the room.";
+    frame.currentLocationName = "Canal Market Archive Counter";
+    frame.movementCandidates = [
+      {
+        id: "movement-archive-stair",
+        locationId: "loc-archive-stair",
+        label: "Archive Stair",
+        connected: true,
+        travelCost: 1,
+      },
+    ];
+
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    canonicalTurnPacket.playerAction = frame.playerAction;
+    canonicalTurnPacket.turnResolution = {
+      kind: "status_read",
+      resolutionState: "explicit_no_change",
+      combatIntent: false,
+      evidenceIds: [],
+      consequenceIds: [],
+      explicitNoCombatEvidenceIds: [],
+      toolNames: [],
+    };
+    canonicalTurnPacket.events = [];
+    canonicalTurnPacket.responses = [
+      {
+        id: "response-model-guidance-status",
+        actorId: visibleNpcId,
+        responseKind: "system",
+        eventId: anchorEventId,
+        summary: "The GM says nothing has changed here.",
+        visibleToPlayer: true,
+        evidenceAuthority: "model_guidance",
+      },
+    ];
+    canonicalTurnPacket.effects = [];
+    canonicalTurnPacket.actionResults = [];
+    canonicalTurnPacket.narratorFacts.eventIds = [];
+    canonicalTurnPacket.narratorFacts.responseIds = ["response-model-guidance-status"];
+    canonicalTurnPacket.narratorFacts.actionIds = [];
+    canonicalTurnPacket.narratorFacts.toolResultRefs = [];
+
+    const packet = buildNarratorPacket({
+      frame,
+      canonicalTurnPacket,
+    });
+
+    const allowedRefs = getAllowedNarrationCitationEvidenceRefs(packet);
+    expect(packet.perceivableResponses).toEqual([]);
+    expect(packet.evidenceLedger).toContainEqual(expect.objectContaining({
+      id: "scene_status:current",
+      category: "scene_status",
+      summary:
+        "You are at Canal Market Archive Counter. Mira is visible here. Reachable from here: Archive Stair.",
+      summaryBackendFact: true,
+      claimSupport: ["playable_beat"],
+    }));
+    expect(allowedRefs.map((ref) => ref.evidence.id)).toContain("scene_status:current");
+    expect(formatNarratorPacketForPrompt(packet)).not.toContain("The GM says nothing has changed here");
   });
 
   it("omits observation results that are neither turn-resolution evidence nor narratorFacts", () => {

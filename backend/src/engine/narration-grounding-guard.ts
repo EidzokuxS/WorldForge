@@ -983,7 +983,11 @@ interface AllowedBackendFactRef {
 }
 
 function precisionFactContributesBackendFact(fact: NarratorPacketPrecisionFact): boolean {
-  return fact.kind === "quote" || fact.kind === "claim" || fact.kind === "summary";
+  return fact.kind === "quote"
+    || fact.kind === "claim"
+    || fact.kind === "summary"
+    || fact.kind === "scene_status"
+    || fact.kind === "movement_time_beat";
 }
 
 function evidenceSummaryContributesBackendFact(evidence: NarratorPacketEvidence): boolean {
@@ -991,7 +995,11 @@ function evidenceSummaryContributesBackendFact(evidence: NarratorPacketEvidence)
   if (evidence.category === "visible_actor") {
     return evidence.summaryBackendFact === true;
   }
-  if (evidence.category === "current_inventory_status") {
+  if (
+    evidence.category === "current_inventory_status"
+    || evidence.category === "scene_status"
+    || evidence.category === "movement_time_beat"
+  ) {
     return evidence.summaryBackendFact === true;
   }
   return evidence.category !== "tool_result";
