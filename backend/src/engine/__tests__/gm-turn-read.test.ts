@@ -711,7 +711,7 @@ describe("GM Read contract", () => {
     ]));
   });
 
-  it("repairs mixed travel plus dialogue into a movement runtime requirement", async () => {
+  it("hardens mixed travel plus dialogue into a movement runtime requirement before repair", async () => {
     const invalidRead = gmReadSchema.parse({
       ...baseRead,
       path: "tool_plan",
@@ -738,32 +738,8 @@ describe("GM Read contract", () => {
         },
       },
     });
-    const repairedRead = gmReadSchema.parse({
-      ...invalidRead,
-      situationSummary: "The player follows directions toward a lower-gallery stationer's stall.",
-      sceneQuestion: "Which legal movement or blocked-route outcome can be grounded now?",
-      actionInterpretation: {
-        intent: "follow directions to the lower gallery corridor stationer's stall",
-        targetRefs: [],
-      },
-      turnGrounding: testTurnGrounding({
-        intentKind: "concrete_state_change",
-        requiresGrounding: true,
-        groundingKind: "state_mutation",
-        topicKind: "route",
-        durability: "scene_local",
-      }),
-      turnIntent:
-        "Resolve movement to the lower gallery stationer's stall, or record the grounded blocked/no-current-route outcome.",
-      runtimeRequirement: {
-        kind: "state_mutation",
-        effectKind: "movement",
-      },
-    });
-
     vi.mocked(safeGenerateObject)
-      .mockResolvedValueOnce(safeResult(invalidRead))
-      .mockResolvedValueOnce(safeResult(repairedRead));
+      .mockResolvedValueOnce(safeResult(invalidRead));
 
     await expect(runGmRead({
       provider,
@@ -775,10 +751,7 @@ describe("GM Read contract", () => {
       runtimeRequirement: { kind: "state_mutation", effectKind: "movement" },
     });
 
-    expect(safeGenerateObject).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(safeGenerateObject).mock.calls[1]?.[0]?.prompt).toContain(
-      "mixed-travel-dialogue-requires-movement-first",
-    );
+    expect(safeGenerateObject).toHaveBeenCalledTimes(1);
   });
 
   it("keeps runtimeRequirement topicKind aligned with runtime tool schemas", () => {

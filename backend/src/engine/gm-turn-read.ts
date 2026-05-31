@@ -1082,6 +1082,57 @@ function hardenReusableDialogueRuntimeRequirement(
   };
 }
 
+function hardenMixedTravelDialogueToMovementFirst(
+  read: GmRead,
+  playerAction: string,
+): GmRead {
+  if (!hasExplicitTravelThenInteraction(playerAction)) return read;
+  if (read.path !== "tool_plan") return read;
+  const requirement = read.runtimeRequirement;
+  const isDialogueAbsorbingTravel = requirement?.kind === "dialogue_outcome";
+  const isPartialMovementRepair =
+    requirement?.kind === "state_mutation" && requirement.effectKind === "movement";
+  if (!isDialogueAbsorbingTravel && !isPartialMovementRepair) return read;
+
+  return {
+    ...read,
+    situationSummary:
+      "The player is attempting to travel to a distinct destination before interacting there.",
+    sceneQuestion:
+      "Which movement, route-opening, or blocked-route outcome can be grounded before any at-destination dialogue?",
+    actionInterpretation: {
+      ...read.actionInterpretation,
+      intent:
+        "Resolve the player's travel to the named destination before any at-destination question or purchase.",
+    },
+    turnGrounding: {
+      intentKind: "concrete_state_change",
+      requiresGrounding: true,
+      groundingKind: "state_mutation",
+      topicKind: "route",
+      durability: "scene_local",
+      reason:
+        "The player action first changes location and only then asks or buys at the destination, so backend movement authority must settle before any destination responder can answer.",
+    },
+    turnIntent:
+      "Resolve movement to the destination first, or ground that the route is currently unavailable, before any responder at that destination can answer.",
+    runtimeRequirement: {
+      kind: "state_mutation",
+      effectKind: "movement",
+    },
+  };
+}
+
+function hardenGmReadForBackendContracts(
+  read: GmRead,
+  playerAction: string,
+): GmRead {
+  return hardenMixedTravelDialogueToMovementFirst(
+    hardenReusableDialogueRuntimeRequirement(read),
+    playerAction,
+  );
+}
+
 function sceneHasPlayableStatusReadContext(frame: SceneFrame): boolean {
   const visibleNonPlayerActors = [...frame.roster.active, ...frame.roster.support].filter(
     (actor) => actor.type !== "player" && actor.awareness === "clear",
@@ -1580,10 +1631,12 @@ export async function runGmRead(args: RunGmReadArgs): Promise<GmRead> {
     });
 
   let result = await withRole("judge", () => generateRead(prompt));
-  let read = hardenReusableDialogueRuntimeRequirement(result.object);
+  let read = hardenGmReadForBackendContracts(result.object, args.playerAction);
   if (read !== result.object) {
     log.event("judge.gm-read.runtime-requirement-hardened", {
-      reason: REUSABLE_DIALOGUE_DURABILITY_ISSUE_CODE,
+      reason: hasExplicitTravelThenInteraction(args.playerAction)
+        ? MIXED_TRAVEL_DIALOGUE_ISSUE_CODE
+        : REUSABLE_DIALOGUE_DURABILITY_ISSUE_CODE,
       path: read.path,
     });
   }
@@ -1642,10 +1695,12 @@ export async function runGmRead(args: RunGmReadArgs): Promise<GmRead> {
 
     if (repairResult?.object) {
       result = repairResult;
-      read = hardenReusableDialogueRuntimeRequirement(result.object);
+      read = hardenGmReadForBackendContracts(result.object, args.playerAction);
       if (read !== result.object) {
         log.event("judge.gm-read.runtime-requirement-hardened", {
-          reason: REUSABLE_DIALOGUE_DURABILITY_ISSUE_CODE,
+          reason: hasExplicitTravelThenInteraction(args.playerAction)
+            ? MIXED_TRAVEL_DIALOGUE_ISSUE_CODE
+            : REUSABLE_DIALOGUE_DURABILITY_ISSUE_CODE,
           path: read.path,
           validationRepair: true,
         });
