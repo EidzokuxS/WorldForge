@@ -40,6 +40,7 @@ vi.mock("../../engine/index.js", () => ({
   findPendingNarrationSaga: vi.fn(() => null),
   resumePendingTurnNarration: vi.fn(),
   getSettledTurnPacket: vi.fn(() => null),
+  hasPreparedSettledTurnPacketRecovery: vi.fn(() => false),
   NarrationRepairExhaustedError: class NarrationRepairExhaustedError extends Error {},
   PendingNarrationError: class PendingNarrationError extends Error {},
   queuePostTurnSimulationProposals: vi.fn((input: { campaignId: string }) => ({

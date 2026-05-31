@@ -53,6 +53,7 @@ import {
   buildDoneBoundaryData,
   findPendingNarrationSaga,
   getSettledTurnPacket,
+  hasPreparedSettledTurnPacketRecovery,
   NarrationRepairExhaustedError,
   PendingNarrationError,
   queuePostTurnSimulationProposals,
@@ -369,6 +370,16 @@ function durableEventMetadataFromSettledSaga(
     : { acceptedDurableEventIds: [], producedDurableEventIds: [] };
 }
 
+function sagaHasPreparedSettledPacketRecovery(
+  saga: Pick<TurnSagaRecord, "campaignId" | "turnId" | "status">,
+): boolean {
+  return saga.status === "world_consequence_running"
+    && hasPreparedSettledTurnPacketRecovery({
+      campaignId: saga.campaignId,
+      turnId: saga.turnId,
+    });
+}
+
 function sagaCanResumeNarration(
   saga: Pick<TurnSagaRecord, "campaignId" | "turnId" | "status" | "settledTurnPacketId"> | null | undefined,
 ): boolean {
@@ -380,7 +391,8 @@ function sagaCanResumeNarration(
   }
   return Boolean(
     saga.settledTurnPacketId
-      || getSettledTurnPacket({ campaignId: saga.campaignId, turnId: saga.turnId }),
+      || getSettledTurnPacket({ campaignId: saga.campaignId, turnId: saga.turnId })
+      || sagaHasPreparedSettledPacketRecovery(saga),
   );
 }
 

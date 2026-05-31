@@ -17,6 +17,7 @@ import {
   assertRuntimeEffectStateOwnerParity,
   assertSelectableNarrationRefs,
   assertStateOwnerRegistry,
+  assertTurnAuthorityStageContracts,
   assertStoreManifestCoverage,
   assertTurnAuthorityLifecycle,
   runtimeDescriptorCanonicalOwnersByEffectKind,
@@ -41,6 +42,40 @@ describe("Phase 95 gameplay control-plane contracts", () => {
 
     expect(TURN_AUTHORITY_STAGE_CONTRACTS.map((entry) => entry.stage))
       .toEqual([...TURN_AUTHORITY_STAGE_VALUES]);
+    const stageContracts = assertTurnAuthorityStageContracts();
+    for (const contract of stageContracts) {
+      expect(contract.owner).toMatch(/\S/);
+      expect(contract.preconditions.length).toBeGreaterThan(0);
+      expect(contract.writes.length).toBeGreaterThan(0);
+      expect(contract.idempotencyKey).toMatch(/\S/);
+      expect(contract.acceptedReceiptRequirements.length).toBeGreaterThan(0);
+      expect(contract.projectionAction).toMatch(/\S/);
+      expect(contract.recoveryAction).toMatch(/\S/);
+      expect(contract.replayRollbackAction).toMatch(/\S/);
+      expect(contract.observabilityEvent).toMatch(/\S/);
+      expect(contract.failureTransition).toMatch(/\S/);
+      expect(contract.tests.length).toBeGreaterThan(0);
+    }
+    expect(stageContracts.find((entry) => entry.stage === "settled_packet_persisted"))
+      .toMatchObject({
+        owner: "turn_saga",
+        writeScope: "packet",
+        recoveryMode: "resume",
+        projectionAction: expect.stringContaining("turn_resolution"),
+      });
+    expect(stageContracts.find((entry) => entry.stage === "public_projection_committed"))
+      .toMatchObject({
+        owner: "public_projection_builder",
+        writeScope: "projection",
+        recoveryMode: "rebuild",
+      });
+    expect(() => assertTurnAuthorityStageContracts([
+      {
+        ...TURN_AUTHORITY_STAGE_CONTRACTS[0]!,
+        preconditions: [],
+      },
+      ...TURN_AUTHORITY_STAGE_CONTRACTS.slice(1),
+    ])).toThrow(/intent_created.*preconditions/i);
     expect(() => assertTurnAuthorityLifecycle([
       "intent_created",
       "snapshot_taken",

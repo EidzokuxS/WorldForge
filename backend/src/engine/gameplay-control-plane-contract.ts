@@ -25,84 +25,277 @@ export const TURN_AUTHORITY_STAGE_SCHEMA = z.enum(TURN_AUTHORITY_STAGE_VALUES);
 
 export interface TurnAuthorityStageContract {
   stage: TurnAuthorityStage;
+  owner: string;
+  preconditions: readonly string[];
+  writes: readonly string[];
   idempotencyKey: string;
   writeScope: "none" | "lease" | "snapshot" | "staged_effects" | "authority" | "packet" | "narration" | "projection" | "final";
+  requiredPayloadFields: readonly string[];
+  acceptedReceiptRequirements: readonly string[];
+  projectionAction: string;
   recoveryMode: "retry" | "resume" | "rollback" | "rebuild" | "terminal";
+  recoveryAction: string;
+  replayRollbackAction: string;
   vectorPolicy: "none" | "staged" | "rebuild_from_receipts" | "purge";
+  observabilityEvent: string;
+  failureTransition: string;
+  tests: readonly string[];
 }
 
 export const TURN_AUTHORITY_STAGE_CONTRACTS: readonly TurnAuthorityStageContract[] = [
   {
     stage: "intent_created",
+    owner: "chat_route",
+    preconditions: [
+      "public player action or backend-resolved quick-action handle is accepted",
+      "no pending narration saga blocks the campaign",
+    ],
+    writes: ["turn_sagas", "turn_saga_events"],
     idempotencyKey: "campaign_id:turn_id:action_id",
     writeScope: "none",
+    requiredPayloadFields: ["actionTextLength", "processor"],
+    acceptedReceiptRequirements: ["none: intent creation cannot accept gameplay mutation receipts"],
+    projectionAction: "no public projection; intent remains backend lifecycle state",
     recoveryMode: "retry",
+    recoveryAction: "drop incomplete intent and retry from the original public action",
+    replayRollbackAction: "replay must recreate the same source action before any mutation",
     vectorPolicy: "none",
+    observabilityEvent: "turn.begin",
+    failureTransition: "request fails before gameplay mutation",
+    tests: ["chat.test.ts", "turn-processor.test.ts", "turn-saga.test.ts"],
   },
   {
     stage: "lease_acquired",
+    owner: "turn_saga_worker",
+    preconditions: [
+      "turn saga exists and is not terminal",
+      "no active non-stale worker lock is present",
+    ],
+    writes: ["turn_sagas.active_lock_token", "turn_sagas.active_worker_id", "turn_saga_events"],
     idempotencyKey: "turn_saga_id:lease_token",
     writeScope: "lease",
+    requiredPayloadFields: ["leaseOwner"],
+    acceptedReceiptRequirements: ["none: worker lease is not gameplay authority"],
+    projectionAction: "surface only coarse recovery state if a lease blocks public work",
     recoveryMode: "resume",
+    recoveryAction: "stale lease can be reclaimed by pending narration recovery",
+    replayRollbackAction: "retry/replay must acquire a fresh lease token",
     vectorPolicy: "none",
+    observabilityEvent: "turn.worker.claimed",
+    failureTransition: "TurnSagaLockConflictError",
+    tests: ["turn-saga.test.ts", "chat.resilience.test.ts", "turn-processor.test.ts"],
   },
   {
     stage: "snapshot_taken",
+    owner: "store_manifest_restore",
+    preconditions: [
+      "lease is acquired for the live turn",
+      "pre-turn restore bundle is captured or explicitly absent",
+    ],
+    writes: ["turn_saga_events", "restore bundle metadata"],
     idempotencyKey: "turn_saga_id:snapshot_id",
     writeScope: "snapshot",
+    requiredPayloadFields: ["provided"],
+    acceptedReceiptRequirements: ["none: snapshot capture precedes gameplay mutation receipts"],
+    projectionAction: "no public projection; snapshot is rollback evidence only",
     recoveryMode: "rollback",
+    recoveryAction: "restore the verified pre-turn bundle before retrying after pre-settled failure",
+    replayRollbackAction: "rollback restores DB/config/chat/vector stores from the snapshot contract",
     vectorPolicy: "none",
+    observabilityEvent: "turn.snapshot",
+    failureTransition: "rollback_critical failure if snapshot restore evidence is invalid",
+    tests: ["rollback.test.ts", "store-manifest-executor.test.ts", "turn-processor.test.ts"],
   },
   {
     stage: "effects_staged",
+    owner: "gm_tool_loop",
+    preconditions: [
+      "GM Read/ScenePlan selected legal runtime tools",
+      "tool execution occurs inside mutation boundary or backend service boundary",
+    ],
+    writes: ["runtime side-effect savepoints", "turn_saga_events"],
     idempotencyKey: "turn_saga_id:effect_batch_id",
     writeScope: "staged_effects",
+    requiredPayloadFields: ["gmActionResultCount", "actorActionResultCount"],
+    acceptedReceiptRequirements: [
+      "state-bearing tool results are not terminal until accepted by receipt checks",
+      "observation-only results cannot authorize mutation",
+    ],
+    projectionAction: "no public projection until settled packet persistence",
     recoveryMode: "rollback",
+    recoveryAction: "rollback mutation boundary and retract staged durable/vector writes",
+    replayRollbackAction: "replay must re-execute tools from typed requirements, not prior prose",
     vectorPolicy: "staged",
+    observabilityEvent: "gm-tool-loop.mutation-boundary",
+    failureTransition: "rollback_critical before settled packet",
+    tests: ["gm-tool-loop.test.ts", "gm-tool-step.test.ts", "tool-executor-authority.test.ts"],
   },
   {
     stage: "receipts_accepted",
+    owner: "tool_executor",
+    preconditions: [
+      "every terminal runtime requirement has an accepted authoritative receipt",
+      "write scopes and base world version match the backend authority context",
+    ],
+    writes: ["authority_traces", "turn_clock_ledger", "runtime gameplay tables", "turn_saga_events"],
     idempotencyKey: "turn_saga_id:receipt_batch_id",
     writeScope: "authority",
+    requiredPayloadFields: ["acceptedToolResultRefs", "acceptedActorResultRefs"],
+    acceptedReceiptRequirements: [
+      "successful",
+      "authoritative",
+      "non-observation-only",
+      "state delta refs cover the claimed mutation lane",
+    ],
+    projectionAction: "receipt facts become eligible for narrator packet construction",
     recoveryMode: "resume",
+    recoveryAction: "resume from accepted receipts and rebuild derived vectors/facts",
+    replayRollbackAction: "replay compares accepted receipt refs before accepting settled packet reuse",
     vectorPolicy: "rebuild_from_receipts",
+    observabilityEvent: "tool.call",
+    failureTransition: "state corruption if committed receipt evidence cannot be recovered",
+    tests: ["tool-contracts.test.ts", "tool-executor-authority.test.ts", "turn-processor.test.ts"],
   },
   {
     stage: "canonical_state_committed",
+    owner: "living_world_authority",
+    preconditions: [
+      "accepted receipts have committed their canonical rows",
+      "world clock/version ledger is monotonic for the turn",
+    ],
+    writes: ["world_clocks", "canonical gameplay stores", "turn_saga_events"],
     idempotencyKey: "turn_saga_id:world_version",
     writeScope: "authority",
+    requiredPayloadFields: ["worldVersion"],
+    acceptedReceiptRequirements: [
+      "result world version is not lower than base world version",
+      "time delta exists only when backed by accepted elapsed/travel authority",
+    ],
+    projectionAction: "canonical rows become source for settled packet and public projection builders",
     recoveryMode: "resume",
+    recoveryAction: "resume from canonical rows and accepted authority traces",
+    replayRollbackAction: "rollback restores prior snapshot; replay rejects stale world versions",
     vectorPolicy: "rebuild_from_receipts",
+    observabilityEvent: "authority.trace",
+    failureTransition: "failed_state_corruption on world-version mismatch",
+    tests: ["living-world-authority.test.ts", "tool-executor-authority.test.ts", "turn-processor.test.ts"],
   },
   {
     stage: "settled_packet_persisted",
+    owner: "turn_saga",
+    preconditions: [
+      "canonical turn packet and narrator packet are built from backend-owned evidence",
+      "accepted tool/actor/durable refs are attached to the packet",
+    ],
+    writes: ["settled_turn_packets", "turn_sagas.settled_turn_packet_id", "turn_saga_events"],
     idempotencyKey: "turn_saga_id:settled_packet_id",
     writeScope: "packet",
+    requiredPayloadFields: ["settledTurnPacketId"],
+    acceptedReceiptRequirements: [
+      "settled packet lists accepted tool result refs",
+      "settled packet lists accepted actor result refs or an explicit empty set",
+      "settled packet stores base/result world versions",
+    ],
+    projectionAction: "public SSE may expose turn_resolution derived from settled packet only",
     recoveryMode: "resume",
+    recoveryAction: "recover prepared settled packet event before rerunning narration",
+    replayRollbackAction: "replay can resume narration from packet without re-running paid resolution",
     vectorPolicy: "rebuild_from_receipts",
+    observabilityEvent: "settled_packet_persisted",
+    failureTransition: "pending settled narration until packet is recovered or rebuilt",
+    tests: ["turn-saga.test.ts", "turn-processor.test.ts", "chat.resilience.test.ts"],
   },
   {
     stage: "narration_accepted",
+    owner: "narration_grounding_guard",
+    preconditions: [
+      "settled packet exists",
+      "final narration draft cites backend-issued selectable fact refs",
+    ],
+    writes: ["narrator_attempts", "turn_saga_events"],
     idempotencyKey: "turn_saga_id:narrator_attempt_id",
     writeScope: "narration",
+    requiredPayloadFields: ["narratorAttemptId"],
+    acceptedReceiptRequirements: [
+      "successful narrator attempt has final text",
+      "grounding guard result is accepted for the settled packet",
+    ],
+    projectionAction: "accepted final text may be appended after settled packet presentation metadata is recorded",
     recoveryMode: "resume",
+    recoveryAction: "resume narration from settled packet and latest successful narrator attempt",
+    replayRollbackAction: "replay does not regenerate gameplay truth; it may rerender narration from settled facts",
     vectorPolicy: "rebuild_from_receipts",
+    observabilityEvent: "visible-narration.packet-guard",
+    failureTransition: "resolved_pending_narration or narrator_repairing until accepted",
+    tests: ["narration-grounding-guard.test.ts", "turn-processor.test.ts", "chat.test.ts"],
   },
   {
     stage: "public_projection_committed",
+    owner: "public_projection_builder",
+    preconditions: [
+      "narration is accepted or a no-narration settled packet is finalized",
+      "public payloads pass projection guards",
+    ],
+    writes: ["chat_history assistant message", "SSE done/narrative payloads", "turn_saga_events"],
     idempotencyKey: "turn_saga_id:projection_digest",
     writeScope: "projection",
+    requiredPayloadFields: ["narratorAttemptId", "projectionAction", "projectionDigest"],
+    acceptedReceiptRequirements: [
+      "public projection uses settled packet/narrator attempt metadata",
+      "no backend-only refs leak into public DTO/SSE payloads",
+    ],
+    projectionAction: "commit public assistant/SSE projection from settled packet presentation only",
     recoveryMode: "rebuild",
+    recoveryAction: "dedupe assistant append and rebuild public projection from settled packet",
+    replayRollbackAction: "rollback removes post-settled public append only if finalization never completed",
     vectorPolicy: "rebuild_from_receipts",
+    observabilityEvent: "sse.emit",
+    failureTransition: "resume_ready pending narration if projection fails after packet persistence",
+    tests: ["chat.test.ts", "chat.resilience.test.ts", "player-facing-events.test.ts"],
   },
   {
     stage: "turn_finalized",
+    owner: "turn_saga",
+    preconditions: [
+      "public projection is committed or explicitly unnecessary",
+      "post-narration finalization tail completed",
+    ],
+    writes: ["turn_sagas.status", "turn_saga_events", "post-turn summary hooks"],
     idempotencyKey: "turn_saga_id:final_status",
     writeScope: "final",
+    requiredPayloadFields: ["narratorAttemptId", "tick"],
+    acceptedReceiptRequirements: [
+      "successful narrator attempt is attached when narration is required",
+      "settled packet remains attached to the finalized saga",
+    ],
+    projectionAction: "final done boundary can be emitted after saga finalization succeeds",
     recoveryMode: "terminal",
+    recoveryAction: "finalized saga is immutable except same-attempt idempotent finalization",
+    replayRollbackAction: "retry/undo must start from explicit restore/replay path, not mutate finalized saga",
     vectorPolicy: "rebuild_from_receipts",
+    observabilityEvent: "turn.finalized",
+    failureTransition: "failed_state_corruption only for verified restore/corruption faults",
+    tests: ["turn-saga.test.ts", "turn-processor.test.ts", "chat.resilience.test.ts"],
   },
 ] as const;
+
+const REQUIRED_TURN_STAGE_ARRAY_FIELDS = [
+  "preconditions",
+  "writes",
+  "requiredPayloadFields",
+  "acceptedReceiptRequirements",
+  "tests",
+] as const satisfies readonly (keyof TurnAuthorityStageContract)[];
+
+const REQUIRED_TURN_STAGE_TEXT_FIELDS = [
+  "owner",
+  "idempotencyKey",
+  "projectionAction",
+  "recoveryAction",
+  "replayRollbackAction",
+  "observabilityEvent",
+  "failureTransition",
+] as const satisfies readonly (keyof TurnAuthorityStageContract)[];
 
 export function assertTurnAuthorityLifecycle(
   stages: readonly string[],
@@ -121,6 +314,40 @@ export function assertTurnAuthorityLifecycle(
     }
   });
   return parsed.data;
+}
+
+export function assertTurnAuthorityStageContracts(
+  contracts: readonly TurnAuthorityStageContract[] = TURN_AUTHORITY_STAGE_CONTRACTS,
+): TurnAuthorityStageContract[] {
+  const stages = assertTurnAuthorityLifecycle(contracts.map((contract) => contract.stage));
+  contracts.forEach((contract, index) => {
+    if (contract.stage !== stages[index]) {
+      throw new Error(`Turn authority stage contract out of order at ${contract.stage}.`);
+    }
+    for (const field of REQUIRED_TURN_STAGE_TEXT_FIELDS) {
+      const value = contract[field];
+      if (typeof value !== "string" || value.trim().length === 0) {
+        throw new Error(`Turn authority stage ${contract.stage} has no ${field}.`);
+      }
+    }
+    for (const field of REQUIRED_TURN_STAGE_ARRAY_FIELDS) {
+      const value = contract[field];
+      if (!Array.isArray(value) || value.length === 0) {
+        throw new Error(`Turn authority stage ${contract.stage} has no ${field}.`);
+      }
+    }
+  });
+  return [...contracts];
+}
+
+export function turnAuthorityStageContractFor(
+  stage: TurnAuthorityStage,
+): TurnAuthorityStageContract {
+  const contract = TURN_AUTHORITY_STAGE_CONTRACTS.find((entry) => entry.stage === stage);
+  if (!contract) {
+    throw new Error(`Missing turn authority stage contract: ${stage}.`);
+  }
+  return contract;
 }
 
 export const STORE_AUTHORITY_LEVEL_VALUES = [

@@ -254,6 +254,7 @@ export {
   getTurnSaga,
   findLatestSuccessfulNarratorAttempt,
   heartbeatTurnSagaWorker,
+  hasPreparedSettledTurnPacketRecovery,
   markTurnSagaFailedStateCorruption,
   markTurnSagaFinalized,
   markTurnSagaFinalizedIfNeeded,

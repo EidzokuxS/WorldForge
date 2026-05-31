@@ -12,7 +12,7 @@ import {
   getSafeGenerateObjectErrorCode,
   safeGenerateObject as generateObject,
 } from "../ai/generate-object-safe.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
@@ -5850,6 +5850,14 @@ async function* processTurnScenePlan(
     );
 
     if (narrativeText) {
+      const projectionDigest = createHash("sha256")
+        .update(JSON.stringify({
+          projectionAction: "assistant_message_append",
+          settledTurnPacketId: settledPacket.id,
+          narratorAttemptId: narration.narratorAttemptId,
+          narrativeText,
+        }))
+        .digest("hex");
       turnSaga = appendAssistantNarrationForResume({
         campaignId,
         saga: turnSaga,
@@ -5865,6 +5873,8 @@ async function* processTurnScenePlan(
         lockToken: liveClaim.lockToken,
         payload: {
           narratorAttemptId: narration.narratorAttemptId,
+          projectionAction: "assistant_message_append",
+          projectionDigest,
           assistantMessageChars: narrativeText.length,
         },
       });

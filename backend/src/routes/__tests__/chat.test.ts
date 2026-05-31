@@ -100,6 +100,7 @@ vi.mock("../../db/index.js", () => ({
 
 const mockGetSettledTurnPacket = vi.fn((_input?: unknown) => null);
 const mockGetTurnSaga = vi.fn((_input?: unknown) => null);
+const mockHasPreparedSettledTurnPacketRecovery = vi.fn((_input?: unknown) => false);
 
 vi.mock("../../engine/index.js", () => ({
   processTurn: vi.fn(),
@@ -109,6 +110,8 @@ vi.mock("../../engine/index.js", () => ({
   restoreSnapshot: vi.fn(),
   findPendingNarrationSaga: vi.fn(() => null),
   getSettledTurnPacket: (input: unknown) => mockGetSettledTurnPacket(input),
+  hasPreparedSettledTurnPacketRecovery: (input: unknown) =>
+    mockHasPreparedSettledTurnPacketRecovery(input),
   getTurnSaga: (input: unknown) => mockGetTurnSaga(input),
   PendingNarrationError: class PendingNarrationError extends Error {
     constructor(public readonly pendingSaga: unknown) {
@@ -366,6 +369,7 @@ beforeEach(() => {
   mockDrainPendingCommittedEventsByIds.mockReturnValue([]);
   mockRetractPendingCommittedEventsForTick.mockResolvedValue([]);
   mockGetSettledTurnPacket.mockReturnValue(null);
+  mockHasPreparedSettledTurnPacketRecovery.mockReturnValue(false);
   runtimeSnapshots.clear();
   runtimeSnapshotMetadata.clear();
   runtimeActiveTurns.clear();
@@ -455,6 +459,32 @@ describe("GET /chat/history", () => {
     expect(JSON.stringify(body)).not.toContain("world_consequence_running");
     expect(JSON.stringify(body)).not.toContain("saga-hidden-history");
     expect(JSON.stringify(body)).not.toContain("turn-hidden-history");
+  });
+
+  it("marks prepared settled-packet recovery as resumable without exposing saga internals", async () => {
+    activateCampaign();
+    mockedFindPendingNarrationSaga.mockReturnValue({
+      id: "saga-prepared-history",
+      campaignId: CAMPAIGN_ID,
+      turnId: "turn-prepared-history",
+      status: "world_consequence_running",
+      settledTurnPacketId: null,
+    } as any);
+    mockHasPreparedSettledTurnPacketRecovery.mockReturnValue(true);
+
+    const res = await app.request(`/chat/history?campaignId=${CAMPAIGN_ID}`);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.pendingNarration).toMatchObject({
+      pendingNarration: true,
+      resumable: true,
+      recoveryState: "resume_ready",
+      resumeToken: expect.stringMatching(/^resume_/),
+    });
+    expect(JSON.stringify(body)).not.toContain("world_consequence_running");
+    expect(JSON.stringify(body)).not.toContain("saga-prepared-history");
+    expect(JSON.stringify(body)).not.toContain("turn-prepared-history");
   });
 
   it("returns 404 when the requested campaign cannot be loaded", async () => {

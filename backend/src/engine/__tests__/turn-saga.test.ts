@@ -73,6 +73,37 @@ function createSaga(id: string, turnId = id) {
   });
 }
 
+function authorityStagePayload(
+  stage: typeof TURN_AUTHORITY_STAGE_VALUES[number],
+): Record<string, unknown> {
+  switch (stage) {
+    case "intent_created":
+      return { actionTextLength: 21, processor: "turn-saga-test" };
+    case "lease_acquired":
+      return { leaseOwner: "turn-saga-test" };
+    case "snapshot_taken":
+      return { provided: false };
+    case "effects_staged":
+      return { gmActionResultCount: 1, actorActionResultCount: 0 };
+    case "receipts_accepted":
+      return { acceptedToolResultRefs: ["tool-result-1"], acceptedActorResultRefs: [] };
+    case "canonical_state_committed":
+      return { worldVersion: 11 };
+    case "settled_packet_persisted":
+      return { settledTurnPacketId: "packet-1" };
+    case "narration_accepted":
+      return { narratorAttemptId: "attempt-1" };
+    case "public_projection_committed":
+      return {
+        narratorAttemptId: "attempt-1",
+        projectionAction: "assistant_message_append",
+        projectionDigest: "projection-digest-1",
+      };
+    case "turn_finalized":
+      return { narratorAttemptId: "attempt-1", tick: 2 };
+  }
+}
+
 function advanceSaga(
   sagaId: string,
   statuses: readonly TurnSagaStatus[],
@@ -229,17 +260,31 @@ describe("turn saga persistence", () => {
     const first = recordTurnAuthorityStage({
       sagaId: "saga-authority-stages",
       stage: "intent_created",
-      payload: { receipt: "player-action-1" },
+      payload: { ...authorityStagePayload("intent_created"), receipt: "player-action-1" },
       nowMs: 2_000,
     });
     const duplicate = recordTurnAuthorityStage({
       sagaId: "saga-authority-stages",
       stage: "intent_created",
-      payload: { receipt: "different-payload-is-ignored" },
+      payload: {
+        ...authorityStagePayload("intent_created"),
+        receipt: "different-payload-is-ignored",
+      },
       nowMs: 2_001,
     });
 
     expect(duplicate.id).toBe(first.id);
+    expect(first.payload).toMatchObject({
+      stage: "intent_created",
+      stageOrdinal: 0,
+      contract: expect.objectContaining({
+        owner: "chat_route",
+        writeScope: "none",
+        recoveryMode: "retry",
+        observabilityEvent: "turn.begin",
+      }),
+      receipt: "player-action-1",
+    });
     expect(listTurnAuthorityStageEvents({ sagaId: "saga-authority-stages" }))
       .toHaveLength(1);
 
@@ -249,7 +294,7 @@ describe("turn saga persistence", () => {
         stage,
         baseWorldVersion: 10,
         resultWorldVersion: stage === "intent_created" ? null : 11,
-        payload: { receipt: `receipt-${stage}` },
+        payload: { ...authorityStagePayload(stage), receipt: `receipt-${stage}` },
         nowMs: 2_100 + index,
       });
     });
@@ -259,6 +304,53 @@ describe("turn saga persistence", () => {
     });
     expect(events.map((event) => (event.payload as { stage: string }).stage))
       .toEqual([...TURN_AUTHORITY_STAGE_VALUES]);
+    expect(events.every((event) =>
+      Boolean((event.payload as { contract?: unknown }).contract)
+    )).toBe(true);
+  });
+
+  it("rejects incomplete or out-of-order turn authority stage audit trails", () => {
+    createSaga("saga-authority-order", "turn-authority-order");
+    recordTurnAuthorityStage({
+      sagaId: "saga-authority-order",
+      stage: "lease_acquired",
+      payload: authorityStagePayload("lease_acquired"),
+      nowMs: 2_000,
+    });
+    recordTurnAuthorityStage({
+      sagaId: "saga-authority-order",
+      stage: "intent_created",
+      payload: authorityStagePayload("intent_created"),
+      nowMs: 2_001,
+    });
+
+    expect(() => assertTurnAuthorityStagesComplete({
+      sagaId: "saga-authority-order",
+    })).toThrow(/include every required stage|out of order/i);
+
+    createSaga("saga-authority-legacy", "turn-authority-legacy");
+    for (const [index, stage] of TURN_AUTHORITY_STAGE_VALUES.entries()) {
+      getDb()
+        .insert(turnSagaEvents)
+        .values({
+          id: `legacy-stage-${index}`,
+          campaignId: CAMPAIGN_ID,
+          sagaId: "saga-authority-legacy",
+          turnId: "turn-authority-legacy",
+          eventType: "authority_stage_committed",
+          idempotencyKey: `legacy-stage:${stage}`,
+          baseWorldVersion: 10,
+          resultWorldVersion: 11,
+          settledTurnPacketId: null,
+          payloadJson: JSON.stringify({ stage, stageOrdinal: index }),
+          createdAt: 3_000 + index,
+        })
+        .run();
+    }
+
+    expect(() => assertTurnAuthorityStagesComplete({
+      sagaId: "saga-authority-legacy",
+    })).toThrow(/missing its lifecycle contract snapshot/i);
   });
 
   it("fails authority stage recovery when stages are invalid or missing", () => {
@@ -268,7 +360,16 @@ describe("turn saga persistence", () => {
       assertTurnAuthorityStagesComplete({
         sagaId: "saga-missing-authority-stage",
       }),
-    ).toThrow(/Missing turn authority stage: intent_created/);
+    ).toThrow(/include every required stage/i);
+
+    expect(() =>
+      recordTurnAuthorityStage({
+        sagaId: "saga-missing-authority-stage",
+        stage: "public_projection_committed",
+        payload: { narratorAttemptId: "attempt-1" },
+        nowMs: 2_000,
+      }),
+    ).toThrow(/public_projection_committed missing required payload field: projectionAction/i);
 
     expect(() =>
       recordTurnAuthorityStage({

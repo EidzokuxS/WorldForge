@@ -14,6 +14,8 @@ import {
 import {
   TURN_AUTHORITY_STAGE_SCHEMA,
   TURN_AUTHORITY_STAGE_VALUES,
+  assertTurnAuthorityLifecycle,
+  turnAuthorityStageContractFor,
   type TurnAuthorityStage,
 } from "./gameplay-control-plane-contract.js";
 
@@ -999,6 +1001,13 @@ export function recordTurnAuthorityStage(
   const saga = requireTurnSagaRow(input);
   assertLockTokenIfProvided(saga, input.lockToken);
   const stage = TURN_AUTHORITY_STAGE_SCHEMA.parse(input.stage);
+  const contract = turnAuthorityStageContractFor(stage);
+  const payload = input.payload ?? {};
+  for (const field of contract.requiredPayloadFields) {
+    if (!Object.hasOwn(payload, field)) {
+      throw new Error(`Turn authority stage ${stage} missing required payload field: ${field}.`);
+    }
+  }
   const stageOrdinal = TURN_AUTHORITY_STAGE_VALUES.indexOf(stage);
   const timestamp = now(input.nowMs);
   const idempotencyKey = input.idempotencyKey ?? `authority-stage:${stage}`;
@@ -1017,7 +1026,24 @@ export function recordTurnAuthorityStage(
       payloadJson: stringifyJson({
         stage,
         stageOrdinal,
-        ...(input.payload ?? {}),
+        contract: {
+          owner: contract.owner,
+          preconditions: contract.preconditions,
+          writes: contract.writes,
+          idempotencyKey: contract.idempotencyKey,
+          writeScope: contract.writeScope,
+          requiredPayloadFields: contract.requiredPayloadFields,
+          acceptedReceiptRequirements: contract.acceptedReceiptRequirements,
+          projectionAction: contract.projectionAction,
+          recoveryMode: contract.recoveryMode,
+          recoveryAction: contract.recoveryAction,
+          replayRollbackAction: contract.replayRollbackAction,
+          vectorPolicy: contract.vectorPolicy,
+          observabilityEvent: contract.observabilityEvent,
+          failureTransition: contract.failureTransition,
+          tests: contract.tests,
+        },
+        ...payload,
       }, {}),
       createdAt: timestamp,
     });
@@ -1046,6 +1072,47 @@ export function recordTurnAuthorityStage(
   return toTurnSagaEvent(row);
 }
 
+function assertTurnAuthorityStageEventPayload(
+  stage: TurnAuthorityStage,
+  payload: unknown,
+): void {
+  const record = isPlainRecord(payload) ? payload : {};
+  const contract = isPlainRecord(record.contract) ? record.contract : null;
+  const expected = turnAuthorityStageContractFor(stage);
+  if (!contract) {
+    throw new Error(`Turn authority stage ${stage} is missing its lifecycle contract snapshot.`);
+  }
+
+  for (const [field, expectedValue] of Object.entries({
+    owner: expected.owner,
+    idempotencyKey: expected.idempotencyKey,
+    writeScope: expected.writeScope,
+    projectionAction: expected.projectionAction,
+    recoveryMode: expected.recoveryMode,
+    recoveryAction: expected.recoveryAction,
+    replayRollbackAction: expected.replayRollbackAction,
+    vectorPolicy: expected.vectorPolicy,
+    observabilityEvent: expected.observabilityEvent,
+    failureTransition: expected.failureTransition,
+  })) {
+    if (contract[field] !== expectedValue) {
+      throw new Error(`Turn authority stage ${stage} has stale lifecycle contract field ${field}.`);
+    }
+  }
+
+  for (const [field, expectedValue] of Object.entries({
+    preconditions: expected.preconditions,
+    writes: expected.writes,
+    requiredPayloadFields: expected.requiredPayloadFields,
+    acceptedReceiptRequirements: expected.acceptedReceiptRequirements,
+    tests: expected.tests,
+  })) {
+    if (JSON.stringify(contract[field]) !== JSON.stringify(expectedValue)) {
+      throw new Error(`Turn authority stage ${stage} has stale lifecycle contract array ${field}.`);
+    }
+  }
+}
+
 export function assertTurnAuthorityStagesComplete(
   input: GetTurnSagaInput,
 ): TurnSagaEventRecord[] {
@@ -1054,11 +1121,10 @@ export function assertTurnAuthorityStagesComplete(
     const payload = isPlainRecord(event.payload) ? event.payload : {};
     return typeof payload.stage === "string" ? payload.stage : "";
   });
-  for (const expectedStage of TURN_AUTHORITY_STAGE_VALUES) {
-    if (!stages.includes(expectedStage)) {
-      throw new Error(`Missing turn authority stage: ${expectedStage}`);
-    }
-  }
+  assertTurnAuthorityLifecycle(stages);
+  events.forEach((event, index) =>
+    assertTurnAuthorityStageEventPayload(TURN_AUTHORITY_STAGE_VALUES[index]!, event.payload)
+  );
   return events;
 }
 
