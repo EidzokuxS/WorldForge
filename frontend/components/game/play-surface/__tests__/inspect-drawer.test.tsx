@@ -6,15 +6,10 @@ import { InspectDrawer } from "../inspect-drawer";
 const mechanicBeat: DisplayBeat = {
   id: "mechanic-miss",
   kind: "mechanical_result",
-  text: "Close call",
+  text: "Miss",
   mechanic: {
-    label: "Close call",
+    label: "Miss",
     outcome: "miss",
-  },
-  rawDetails: {
-    chance: 65,
-    roll: 68,
-    reasoning: "The timing almost works, but the platform crowd breaks line of sight.",
   },
 };
 
@@ -24,11 +19,11 @@ describe("InspectDrawer", () => {
       <InspectDrawer
         currentBeat={mechanicBeat}
         oracleResult={{
+          outcome: "miss",
           chance: 65,
           roll: 68,
-          outcome: "miss",
           reasoning: "The timing almost works, but the platform crowd breaks line of sight.",
-        }}
+        } as never}
         status="Ready"
         showDebug={false}
         debugReasoning={null}
@@ -36,12 +31,13 @@ describe("InspectDrawer", () => {
     );
 
     expect(screen.getByRole("tab", { name: "Beat" })).toBeInTheDocument();
-    expect(screen.getByText("Close call")).toBeInTheDocument();
-    expect(screen.getByText("Chance")).toBeInTheDocument();
-    expect(screen.getByText("65%")).toBeInTheDocument();
-    expect(screen.getByText("Roll")).toBeInTheDocument();
-    expect(screen.getByText("68")).toBeInTheDocument();
+    expect(screen.getByText("Miss")).toBeInTheDocument();
     expect(screen.getByText("miss")).toBeInTheDocument();
+    expect(screen.queryByText("Chance")).not.toBeInTheDocument();
+    expect(screen.queryByText("65%")).not.toBeInTheDocument();
+    expect(screen.queryByText("Roll")).not.toBeInTheDocument();
+    expect(screen.queryByText("68")).not.toBeInTheDocument();
+    expect(screen.queryByText("The timing almost works, but the platform crowd breaks line of sight.")).not.toBeInTheDocument();
     expect(screen.queryByText("Raw reasoning")).not.toBeInTheDocument();
     expect(screen.queryByText("JSON")).not.toBeInTheDocument();
     expect(screen.queryByText("payload")).not.toBeInTheDocument();
@@ -58,7 +54,7 @@ describe("InspectDrawer", () => {
       />,
     );
 
-    expect(screen.getByText("No mechanics for the current beat. Raw details appear here only when available.")).toBeInTheDocument();
+    expect(screen.getByText("No mechanics for the current beat.")).toBeInTheDocument();
   });
 
   it("gates raw reasoning and debug payload affordances behind showDebug", () => {

@@ -1,4 +1,4 @@
-import type { OracleResultData } from "../oracle-panel";
+import type { OracleResultData } from "@/lib/oracle-result";
 
 export type DisplayBeatKind =
   | "narration"
@@ -48,14 +48,8 @@ export interface StageSignalInput
 }
 
 export interface MechanicSummary {
-  label: "Clean success" | "Costly success" | "Miss" | "Bad break" | "Close call";
+  label: "Clean success" | "Costly success" | "Miss";
   outcome: OracleResultData["outcome"];
-}
-
-export interface MechanicRawDetails {
-  chance: number;
-  roll: number;
-  reasoning: string;
 }
 
 export interface QuickChoice {
@@ -77,7 +71,6 @@ export interface DisplayBeat {
   speaker?: string;
   visualPriority?: "primary" | "secondary";
   mechanic?: MechanicSummary;
-  rawDetails?: MechanicRawDetails;
   choices?: QuickChoice[];
   stageSignals?: StageSignal[];
   unlocksActionDock?: boolean;

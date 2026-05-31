@@ -1,5 +1,5 @@
 import type { ChatMessage } from "@worldforge/shared";
-import type { OracleResultData } from "@/components/game/oracle-panel";
+import type { OracleResultData } from "@/lib/oracle-result";
 import type {
   DisplayBeat,
   MechanicSummary,
@@ -148,23 +148,11 @@ function createMechanicalBeat(result: OracleResultData): DisplayBeat {
       label,
       outcome: result.outcome,
     },
-    rawDetails: {
-      chance: result.chance,
-      roll: result.roll,
-      reasoning: result.reasoning,
-    },
   };
 }
 
 function getMechanicLabel(result: OracleResultData): MechanicSummary["label"] {
-  if (result.outcome !== "miss") {
-    return ORACLE_LABELS[result.outcome];
-  }
-
-  const missMargin = result.roll - result.chance;
-  if (missMargin > 25) return "Bad break";
-  if (missMargin > 0 && missMargin <= 10) return "Close call";
-  return "Miss";
+  return ORACLE_LABELS[result.outcome];
 }
 
 function getProgressText(sceneProgress: SceneProgress, turnPhase: TurnPhase): string | null {

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ChatMessage } from "@worldforge/shared";
-import type { OracleResultData } from "@/components/game/oracle-panel";
+import type { OracleResultData } from "@/lib/oracle-result";
 import type {
   DisplayBeat,
   DrawerKind,

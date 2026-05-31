@@ -502,9 +502,9 @@ vi.mock("@/components/game/play-surface/inspect-drawer", () => ({
     showDebug,
     status,
   }: {
-    currentBeat?: { text?: string; rawDetails?: { chance: number; roll: number; reasoning: string } } | null;
+    currentBeat?: { text?: string } | null;
     debugReasoning?: string | null;
-    oracleResult?: { chance: number; roll: number; outcome: string; reasoning: string } | null;
+    oracleResult?: { outcome: string } | null;
     showDebug?: boolean;
     status: string;
   }) => (
@@ -513,17 +513,11 @@ vi.mock("@/components/game/play-surface/inspect-drawer", () => ({
       {currentBeat?.text ? <p>{currentBeat.text}</p> : null}
       {oracleResult ? (
         <dl>
-          <dt>Chance</dt>
-          <dd>{oracleResult.chance}%</dd>
-          <dt>Roll</dt>
-          <dd>{oracleResult.roll}</dd>
           <dt>Outcome</dt>
           <dd>{oracleResult.outcome}</dd>
-          <dt>Reason</dt>
-          <dd>{oracleResult.reasoning}</dd>
         </dl>
       ) : (
-        <p>No mechanics for the current beat. Raw details appear here only when available.</p>
+        <p>No mechanics for the current beat.</p>
       )}
       {showDebug && debugReasoning ? (
         <section>
@@ -781,7 +775,7 @@ describe("GamePage", () => {
 
     openDrawer("Inspect");
     expect(screen.getByTestId("inspect-drawer")).toBeInTheDocument();
-    expect(screen.getByText("No mechanics for the current beat. Raw details appear here only when available.")).toBeInTheDocument();
+    expect(screen.getByText("No mechanics for the current beat.")).toBeInTheDocument();
 
     openDrawer("Inventory");
     expect(screen.getByTestId("inventory-drawer")).toBeInTheDocument();
@@ -877,11 +871,11 @@ describe("GamePage", () => {
     mockedChatAction.mockResolvedValue(createStreamResponse() as never);
     mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
       handlers.onOracleResult({
+        outcome: "miss",
         chance: 65,
         roll: 68,
-        outcome: "miss",
         reasoning: "The timing almost works, but the platform crowd breaks line of sight.",
-      });
+      } as never);
       handlers.onNarrative("The curse slips away through the closing train doors.");
       handlers.onReasoning?.({ text: "debug-only provider trace" });
       handlers.onDone();
@@ -893,7 +887,7 @@ describe("GamePage", () => {
     fireEvent.click(screen.getByLabelText("Send action"));
 
     await waitFor(() => {
-      expect(screen.getByText("Close call")).toBeInTheDocument();
+      expect(screen.getByText("Miss")).toBeInTheDocument();
     });
 
     expect(screen.queryByText("Chance")).not.toBeInTheDocument();
@@ -905,12 +899,13 @@ describe("GamePage", () => {
     expect(screen.queryByText("Support Actions")).not.toBeInTheDocument();
 
     openDrawer("Inspect");
-    expect(screen.getByTestId("inspect-drawer")).toHaveTextContent("Close call");
-    expect(screen.getByText("Chance")).toBeInTheDocument();
-    expect(screen.getByText("65%")).toBeInTheDocument();
-    expect(screen.getByText("Roll")).toBeInTheDocument();
-    expect(screen.getByText("68")).toBeInTheDocument();
-    expect(screen.getByText("The timing almost works, but the platform crowd breaks line of sight.")).toBeInTheDocument();
+    expect(screen.getByText("Outcome")).toBeInTheDocument();
+    expect(screen.getByText("miss")).toBeInTheDocument();
+    expect(screen.queryByText("Chance")).not.toBeInTheDocument();
+    expect(screen.queryByText("65%")).not.toBeInTheDocument();
+    expect(screen.queryByText("Roll")).not.toBeInTheDocument();
+    expect(screen.queryByText("68")).not.toBeInTheDocument();
+    expect(screen.queryByText("The timing almost works, but the platform crowd breaks line of sight.")).not.toBeInTheDocument();
     expect(screen.queryByText("debug-only provider trace")).not.toBeInTheDocument();
   });
 
@@ -1016,10 +1011,7 @@ describe("GamePage", () => {
     mockedChatAction.mockResolvedValue(createStreamResponse() as never);
     mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
       handlers.onOracleResult({
-        chance: 65,
-        roll: 68,
         outcome: "miss",
-        reasoning: "Stale roll that belongs to the previous turn.",
       });
       handlers.onNarrative("The first turn needed mechanics.");
       handlers.onDone();
@@ -1031,7 +1023,7 @@ describe("GamePage", () => {
     fireEvent.click(screen.getByLabelText("Send action"));
 
     await waitFor(() => {
-      expect(screen.getByText("Close call")).toBeInTheDocument();
+      expect(screen.getByText("Miss")).toBeInTheDocument();
     });
 
     mockedParseTurnSSE.mockImplementationOnce(async (_body, handlers) => {
@@ -1049,7 +1041,7 @@ describe("GamePage", () => {
     });
 
     openDrawer("Inspect");
-    expect(screen.getByText("No mechanics for the current beat. Raw details appear here only when available.")).toBeInTheDocument();
+    expect(screen.getByText("No mechanics for the current beat.")).toBeInTheDocument();
     expect(screen.queryByText("Chance")).not.toBeInTheDocument();
     expect(screen.queryByText("65%")).not.toBeInTheDocument();
     expect(screen.queryByText("Roll")).not.toBeInTheDocument();
@@ -2300,10 +2292,7 @@ describe("GamePage", () => {
       turn += 1;
       if (turn === 2) {
         handlers.onOracleResult({
-          chance: 72,
-          roll: 28,
           outcome: "strong_hit",
-          reasoning: "The route stays clear and the read is clean.",
         });
       }
       if (turn === 4) {

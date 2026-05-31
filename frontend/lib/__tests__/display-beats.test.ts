@@ -103,20 +103,20 @@ describe("deriveDisplayBeats", () => {
     expect(JSON.stringify(beats)).not.toContain("finalizing_turn");
   });
 
-  it("keeps oracle math in raw details while showing a fiction-facing mechanic label", () => {
+  it("shows oracle outcome as a fiction-facing mechanic label without raw math", () => {
     const beats = deriveDisplayBeats({
       messages: [],
       turnPhase: "idle",
       sceneProgress: null,
       oracleResult: {
+        outcome: "strong_hit",
         chance: 65,
         roll: 42,
-        outcome: "strong_hit",
         reasoning: "The player has leverage from cover and timing.",
       },
       travelFeedback: null,
       quickActions: [],
-    });
+    } as Parameters<typeof deriveDisplayBeats>[0]);
 
     expect(beats[0]).toMatchObject({
       kind: "mechanical_result",
@@ -125,15 +125,13 @@ describe("deriveDisplayBeats", () => {
         label: "Clean success",
         outcome: "strong_hit",
       },
-      rawDetails: {
-        chance: 65,
-        roll: 42,
-        reasoning: "The player has leverage from cover and timing.",
-      },
     });
     expect(beats[0].text).not.toContain("65");
     expect(beats[0].text).not.toContain("42");
     expect(beats[0].text).not.toContain("leverage");
+    expect(JSON.stringify(beats[0])).not.toContain("65");
+    expect(JSON.stringify(beats[0])).not.toContain("42");
+    expect(JSON.stringify(beats[0])).not.toContain("leverage");
   });
 
   it("uses costly success and miss labels for weaker oracle outcomes", () => {
@@ -141,7 +139,7 @@ describe("deriveDisplayBeats", () => {
       messages: [],
       turnPhase: "idle",
       sceneProgress: null,
-      oracleResult: { chance: 50, roll: 49, outcome: "weak_hit", reasoning: "Barely works." },
+      oracleResult: { outcome: "weak_hit" },
       travelFeedback: null,
       quickActions: [],
     });
@@ -149,37 +147,13 @@ describe("deriveDisplayBeats", () => {
       messages: [],
       turnPhase: "idle",
       sceneProgress: null,
-      oracleResult: { chance: 50, roll: 65, outcome: "miss", reasoning: "Too late." },
+      oracleResult: { outcome: "miss" },
       travelFeedback: null,
       quickActions: [],
     });
 
     expect(weak[0].text).toBe("Costly success");
     expect(miss[0].text).toBe("Miss");
-  });
-
-  it("uses close call and bad break labels for miss margins without exposing oracle math", () => {
-    const closeCall = deriveDisplayBeats({
-      messages: [],
-      turnPhase: "idle",
-      sceneProgress: null,
-      oracleResult: { chance: 65, roll: 68, outcome: "miss", reasoning: "Only just fails." },
-      travelFeedback: null,
-      quickActions: [],
-    });
-    const badBreak = deriveDisplayBeats({
-      messages: [],
-      turnPhase: "idle",
-      sceneProgress: null,
-      oracleResult: { chance: 65, roll: 98, outcome: "miss", reasoning: "Everything cuts against the player." },
-      travelFeedback: null,
-      quickActions: [],
-    });
-
-    expect(closeCall[0].text).toBe("Close call");
-    expect(badBreak[0].text).toBe("Bad break");
-    expect(JSON.stringify(closeCall[0].mechanic)).not.toContain("65");
-    expect(JSON.stringify(badBreak[0].mechanic)).not.toContain("98");
   });
 
   it("creates travel state-change beats only from travel feedback", () => {

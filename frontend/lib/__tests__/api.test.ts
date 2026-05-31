@@ -976,6 +976,34 @@ describe("parseTurnSSE", () => {
     });
   }
 
+  it("normalizes oracle_result to outcome-only and drops leaked reasoning and math", async () => {
+    const onOracleResult = vi.fn();
+
+    await parseTurnSSE(
+      createStream([
+        "event: oracle_result",
+        'data: {"outcome":"weak_hit","chance":65,"roll":42,"reasoning":"SECRET","rationale":"SECRET_RATIONALE"}',
+        "",
+        "event: done",
+        "data: {}",
+        "",
+      ].join("\n")),
+      {
+        onNarrative: vi.fn(),
+        onOracleResult,
+        onStateUpdate: vi.fn(),
+        onQuickActions: vi.fn(),
+        onDone: vi.fn(),
+        onError: vi.fn(),
+      },
+    );
+
+    expect(onOracleResult).toHaveBeenCalledWith({ outcome: "weak_hit" });
+    expect(JSON.stringify(onOracleResult.mock.calls[0]?.[0])).not.toContain("65");
+    expect(JSON.stringify(onOracleResult.mock.calls[0]?.[0])).not.toContain("42");
+    expect(JSON.stringify(onOracleResult.mock.calls[0]?.[0])).not.toContain("SECRET");
+  });
+
   it("preserves quick-action capability handles while normalizing the event payload", async () => {
     const onQuickActions = vi.fn();
 

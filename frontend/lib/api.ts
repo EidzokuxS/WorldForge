@@ -56,6 +56,8 @@ import {
   parsedCharacterToDraft,
   scaffoldNpcToDraft,
 } from "./character-drafts";
+import type { OracleResultData } from "./oracle-result";
+import { normalizeOracleResult } from "./oracle-result";
 
 // Re-export all types so existing `import type { X } from "@/lib/api"` keeps working.
 export type {
@@ -1023,7 +1025,7 @@ export interface TurnSSEHandlers {
   onLookupResult?: (result: LookupResultEvent) => void;
   onNarrative: (text: string) => void;
   onReasoning?: (payload: { text: string }) => void;
-  onOracleResult: (result: { chance: number; roll: number; outcome: string; reasoning: string }) => void;
+  onOracleResult: (result: OracleResultData) => void;
   onStateUpdate: (update: { tool: string; args: unknown; result: unknown }) => void;
   onQuickActions: (actions: QuickActionChoice[]) => void;
   onFinalizing?: (status?: TurnStageStatus) => void;
@@ -1290,7 +1292,14 @@ export async function parseTurnSSE(body: ReadableStream<Uint8Array>, handlers: T
           handlers.onNarrative(parsed.text);
           break;
         case "reasoning": handlers.onReasoning?.(parsed); break;
-        case "oracle_result": handlers.onOracleResult(parsed); break;
+        case "oracle_result":
+          {
+            const oracleResult = normalizeOracleResult(parsed);
+            if (oracleResult) {
+              handlers.onOracleResult(oracleResult);
+            }
+          }
+          break;
         case "state_update": handlers.onStateUpdate(parsed); break;
         case "quick_actions": handlers.onQuickActions(normalizeQuickActions(parsed)); break;
         case "finalizing_turn":

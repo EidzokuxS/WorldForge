@@ -115,11 +115,6 @@ describe("NarrationDock", () => {
         label: "Costly success",
         outcome: "weak_hit",
       },
-      rawDetails: {
-        chance: 65,
-        roll: 42,
-        reasoning: "The backend compared difficulty and tags.",
-      },
     };
 
     render(

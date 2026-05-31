@@ -1,7 +1,7 @@
 import { Activity, FileText, Gauge, ListTree, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import type { OracleResultData } from "../oracle-panel";
+import type { OracleResultData } from "@/lib/oracle-result";
 import type { DisplayBeat } from "./types";
 
 export interface InspectDrawerProps {
@@ -25,7 +25,7 @@ export function InspectDrawer({
   eventSummary,
   className,
 }: InspectDrawerProps) {
-  const hasMechanics = Boolean(currentBeat?.mechanic || currentBeat?.rawDetails || oracleResult);
+  const hasMechanics = Boolean(currentBeat?.mechanic || oracleResult);
 
   return (
     <div data-testid="inspect-drawer" className={cn("space-y-4", className)}>
@@ -60,25 +60,7 @@ export function InspectDrawer({
       {oracleResult ? (
         <InspectSection icon={ShieldCheck} label="Oracle">
           <dl className="grid gap-3 text-[12px] leading-5 text-zinc-300">
-            <InspectRow label="Chance" value={`${oracleResult.chance}%`} />
-            <InspectRow label="Roll" value={String(oracleResult.roll)} />
             <InspectRow label="Outcome" value={oracleResult.outcome} />
-            <div>
-              <dt className="font-semibold text-zinc-500">Reason</dt>
-              <dd className="mt-1 text-[16px] leading-6 text-zinc-300">{oracleResult.reasoning}</dd>
-            </div>
-          </dl>
-        </InspectSection>
-      ) : currentBeat?.rawDetails ? (
-        <InspectSection icon={ShieldCheck} label="Oracle">
-          <dl className="grid gap-3 text-[12px] leading-5 text-zinc-300">
-            <InspectRow label="Chance" value={`${currentBeat.rawDetails.chance}%`} />
-            <InspectRow label="Roll" value={String(currentBeat.rawDetails.roll)} />
-            <InspectRow label="Outcome" value={currentBeat.mechanic?.outcome ?? "mechanical_result"} />
-            <div>
-              <dt className="font-semibold text-zinc-500">Reason</dt>
-              <dd className="mt-1 text-[16px] leading-6 text-zinc-300">{currentBeat.rawDetails.reasoning}</dd>
-            </div>
           </dl>
         </InspectSection>
       ) : null}
@@ -121,7 +103,7 @@ export function InspectDrawer({
 function EmptyMechanics() {
   return (
     <p className="rounded-[8px] border border-white/10 bg-black/20 px-3 py-3 text-[16px] leading-6 text-zinc-400">
-      No mechanics for the current beat. Raw details appear here only when available.
+      No mechanics for the current beat.
     </p>
   );
 }

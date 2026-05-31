@@ -9,7 +9,7 @@ import { NarrativeLog } from "@/components/game/narrative-log";
 import { CharacterPanel } from "@/components/game/character-panel";
 import { LorePanel } from "@/components/game/lore-panel";
 import { CheckpointPanel } from "@/components/game/checkpoint-panel";
-import type { OracleResultData } from "@/components/game/oracle-panel";
+import type { OracleResultData } from "@/lib/oracle-result";
 import { GameSceneShell } from "@/components/game/play-surface/game-scene-shell";
 import { SceneBackdrop } from "@/components/game/play-surface/scene-backdrop";
 import { SceneHUD, type SceneHUDStatus } from "@/components/game/play-surface/scene-hud";
@@ -598,7 +598,7 @@ export default function GamePage() {
           },
           onReasoning: canShowRawReasoning ? attachReasoningToLatestAssistant : undefined,
           onOracleResult: (result) => {
-            setLastOracleResult(result as OracleResultData);
+            setLastOracleResult(result);
           },
           onStateUpdate: (update) => {
             const locationChange = getLocationChangeUpdate(update);
@@ -1041,7 +1041,7 @@ export default function GamePage() {
         },
         onReasoning: canShowRawReasoning ? attachReasoningToLatestAssistant : undefined,
         onOracleResult: (result) => {
-          setLastOracleResult(result as OracleResultData);
+          setLastOracleResult(result);
         },
         onStateUpdate: (update) => {
           const locationChange = getLocationChangeUpdate(update);
@@ -1136,7 +1136,7 @@ export default function GamePage() {
         },
         onReasoning: canShowRawReasoning ? attachReasoningToLatestAssistant : undefined,
         onOracleResult: (result) => {
-          setLastOracleResult(result as OracleResultData);
+          setLastOracleResult(result);
         },
         onStateUpdate: (update) => {
           const locationChange = getLocationChangeUpdate(update);
@@ -1288,10 +1288,7 @@ export default function GamePage() {
     .reverse()
     .find((message) => message.role === "assistant" && message.debugReasoning?.trim())
     ?.debugReasoning ?? null;
-  const inspectBeat = playSurface.currentBeat?.rawDetails
-    ? playSurface.currentBeat
-    : playSurface.beats.find((beat) => beat.rawDetails)
-      ?? playSurface.currentBeat;
+  const inspectBeat = playSurface.currentBeat;
   const drawerSlots: DrawerSlots = {
     log: (
       <NarrativeLog
