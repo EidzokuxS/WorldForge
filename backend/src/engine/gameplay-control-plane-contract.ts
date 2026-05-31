@@ -1104,13 +1104,52 @@ export type GameplayStateOwner =
   | "turn_clock_ledger"
   | "quick_action_offer_service";
 
+export type GameplayStateOwnerStatus =
+  | "live"
+  | "legacy_hidden"
+  | "background_only"
+  | "contract_only";
+
+export type GameplayStateBackingKind =
+  | "runtime_state_effect"
+  | "terminal_receipt"
+  | "legacy_scene_beat"
+  | "runtime_descriptor_role"
+  | "time_ledger"
+  | "service_contract"
+  | "projection_contract";
+
 export interface GameplayStateOwnerEntry {
   lane: GameplayStateLane;
   owner: GameplayStateOwner;
-  status: "live" | "legacy_hidden" | "contract_only";
+  status: GameplayStateOwnerStatus;
+  sourceOfTruth: string;
+  supportOnlySurfaces: readonly string[];
+  modelAuthoredFields: readonly string[];
+  runtimeValidators: readonly string[];
   receiptKind: string;
+  acceptedReceiptKinds: readonly string[];
   rollbackPolicy: "receipt_replay" | "snapshot_restore" | "purge" | "rebuild";
   projectionPolicy: "public_fact" | "public_handle" | "support_only" | "hidden";
+  projections: readonly string[];
+  recoveryModes: readonly string[];
+  tests: readonly string[];
+  backing: {
+    kind: GameplayStateBackingKind;
+    refs: readonly string[];
+  };
+}
+
+export interface GameplayStateServiceContract {
+  owner: Exclude<GameplayStateOwner, RuntimeToolName>;
+  sourceOfTruth: string;
+  delegateTools: readonly RuntimeToolName[];
+  stores: readonly string[];
+  validators: readonly string[];
+  receiptKinds: readonly string[];
+  projections: readonly string[];
+  recoveryModes: readonly string[];
+  tests: readonly string[];
 }
 
 export const GAMEPLAY_STATE_OWNER_REGISTRY: readonly GameplayStateOwnerEntry[] = [
@@ -1118,131 +1157,476 @@ export const GAMEPLAY_STATE_OWNER_REGISTRY: readonly GameplayStateOwnerEntry[] =
     lane: "known_route_movement",
     owner: "move_actor",
     status: "live",
+    sourceOfTruth: "Canonical actor location row plus accepted movement receipt.",
+    supportOnlySurfaces: ["route candidate labels", "movement receipt summaries"],
+    modelAuthoredFields: ["movement target alias", "movement intent prose"],
+    runtimeValidators: ["route reachability validator", "actor write-scope validator", "world-version authority validator"],
     receiptKind: "movement_receipt",
+    acceptedReceiptKinds: ["movement_receipt"],
     rollbackPolicy: "snapshot_restore",
     projectionPolicy: "public_fact",
+    projections: ["narrator packet movement facts", "world/history projection"],
+    recoveryModes: ["turn snapshot restore", "settled packet replay from accepted receipts"],
+    tests: ["tool-executor-authority.test.ts", "narrator-packet.test.ts", "chat.test.ts"],
+    backing: { kind: "runtime_state_effect", refs: ["movement"] },
   },
   {
     lane: "new_place_reveal",
     owner: "reveal_location",
     status: "live",
+    sourceOfTruth: "Canonical location table and route/location reveal receipt.",
+    supportOnlySurfaces: ["candidate location aliases", "world lore summaries"],
+    modelAuthoredFields: ["location candidate alias", "reveal reason prose"],
+    runtimeValidators: ["location candidate resolver", "reveal permission validator", "world-version authority validator"],
     receiptKind: "location_revealed",
+    acceptedReceiptKinds: ["location_revealed"],
     rollbackPolicy: "snapshot_restore",
     projectionPolicy: "public_fact",
+    projections: ["world projection", "narrator packet location facts"],
+    recoveryModes: ["turn snapshot restore", "public projection rebuild"],
+    tests: ["tool-contracts.test.ts", "tool-executor-authority.test.ts", "campaigns.test.ts"],
+    backing: { kind: "runtime_state_effect", refs: ["location_revealed"] },
   },
   {
     lane: "local_poi_creation",
     owner: "create_minor_poi",
     status: "live",
+    sourceOfTruth: "Canonical location minor-POI records and accepted POI creation receipt.",
+    supportOnlySurfaces: ["POI candidate prose", "scene affordance summaries"],
+    modelAuthoredFields: ["POI label", "POI description"],
+    runtimeValidators: ["minor-POI schema", "location write-scope validator", "world-version authority validator"],
     receiptKind: "minor_poi_created",
+    acceptedReceiptKinds: ["minor_poi_created"],
     rollbackPolicy: "snapshot_restore",
     projectionPolicy: "public_fact",
+    projections: ["world projection", "narrator packet POI facts"],
+    recoveryModes: ["turn snapshot restore", "public projection rebuild"],
+    tests: ["tool-contracts.test.ts", "narrator-packet.test.ts"],
+    backing: { kind: "runtime_state_effect", refs: ["minor_poi_created"] },
   },
   {
     lane: "dialogue_outcome",
     owner: "record_dialogue_outcome",
     status: "live",
+    sourceOfTruth: "Accepted dialogue outcome receipt and dialogue state receipt ledger.",
+    supportOnlySurfaces: ["dialogue prompt context", "NPC public labels"],
+    modelAuthoredFields: ["spoken quote", "dialogue claim", "speaker/listener aliases"],
+    runtimeValidators: ["dialogue outcome schema", "dialogue state receipt validator", "visible actor resolver"],
     receiptKind: "dialogue_outcome",
+    acceptedReceiptKinds: ["dialogue_outcome", "dialogue_state_receipt"],
     rollbackPolicy: "receipt_replay",
     projectionPolicy: "public_fact",
+    projections: ["narrator packet dialogue precision facts", "history projection"],
+    recoveryModes: ["settled packet replay", "turn snapshot restore before accepted receipts"],
+    tests: ["dialogue-state-receipt.test.ts", "narrator-packet.test.ts", "narration-grounding-guard.test.ts"],
+    backing: { kind: "terminal_receipt", refs: ["record_dialogue_outcome:dialogue_outcome"] },
   },
   {
     lane: "durable_world_fact",
     owner: "record_world_fact",
     status: "live",
+    sourceOfTruth: "Accepted world fact receipt and canonical world fact/event store.",
+    supportOnlySurfaces: ["lore context", "world fact summaries"],
+    modelAuthoredFields: ["fact text", "topic aliases", "durability"],
+    runtimeValidators: ["world fact schema", "grounding/runtime requirement validator", "world-version authority validator"],
     receiptKind: "world_fact",
+    acceptedReceiptKinds: ["world_fact"],
     rollbackPolicy: "receipt_replay",
     projectionPolicy: "public_fact",
+    projections: ["narrator packet world facts", "history/world projection"],
+    recoveryModes: ["receipt replay", "turn snapshot restore before accepted receipts"],
+    tests: ["tool-contracts.test.ts", "narrator-packet.test.ts"],
+    backing: { kind: "terminal_receipt", refs: ["record_world_fact:world_fact"] },
   },
   {
     lane: "scene_local_event",
     owner: "log_event",
     status: "legacy_hidden",
+    sourceOfTruth: "Legacy accepted scene beat receipt while newer structural tools replace durable state writes.",
+    supportOnlySurfaces: ["legacy scene beat summaries"],
+    modelAuthoredFields: ["scene event prose"],
+    runtimeValidators: ["hidden tool gate", "legacy scene beat contract", "source-boundary guard"],
     receiptKind: "legacy_scene_beat",
+    acceptedReceiptKinds: ["legacy_scene_beat"],
     rollbackPolicy: "purge",
     projectionPolicy: "support_only",
+    projections: ["support-only narrator packet context"],
+    recoveryModes: ["purge unaccepted legacy beats", "turn snapshot restore"],
+    tests: ["tool-contracts.test.ts", "narrator-packet.test.ts"],
+    backing: { kind: "legacy_scene_beat", refs: ["log_event"] },
   },
   {
     lane: "item_transfer",
     owner: "transfer_item",
     status: "live",
+    sourceOfTruth: "Canonical item ownership rows and accepted transfer receipt.",
+    supportOnlySurfaces: ["inventory labels", "trade/give prose"],
+    modelAuthoredFields: ["source alias", "target alias", "item alias", "transfer reason prose"],
+    runtimeValidators: ["item ownership validator", "recipient resolver", "world-version authority validator"],
     receiptKind: "item_transfer",
+    acceptedReceiptKinds: ["item_transfer"],
     rollbackPolicy: "snapshot_restore",
     projectionPolicy: "public_fact",
+    projections: ["inventory projection", "narrator packet item transfer facts"],
+    recoveryModes: ["turn snapshot restore", "inventory projection rebuild"],
+    tests: ["tool-executor-authority.test.ts", "narrator-packet.test.ts", "campaigns.inventory-authority.test.ts"],
+    backing: { kind: "runtime_state_effect", refs: ["item_transfer"] },
   },
   {
     lane: "item_creation",
     owner: "spawn_item",
     status: "live",
+    sourceOfTruth: "Canonical item table plus accepted item creation receipt.",
+    supportOnlySurfaces: ["item candidate prose", "inventory support context"],
+    modelAuthoredFields: ["item label", "item description", "recipient alias"],
+    runtimeValidators: ["item creation schema", "duplicate inventory guard", "world-version authority validator"],
     receiptKind: "item_created",
+    acceptedReceiptKinds: ["item_created"],
     rollbackPolicy: "snapshot_restore",
     projectionPolicy: "public_fact",
+    projections: ["inventory projection", "narrator packet item status facts"],
+    recoveryModes: ["turn snapshot restore", "inventory projection rebuild"],
+    tests: ["tool-contracts.test.ts", "narrator-packet.test.ts", "campaigns.inventory-authority.test.ts"],
+    backing: { kind: "runtime_state_effect", refs: ["item_created"] },
   },
   {
     lane: "condition_state",
     owner: "set_condition",
     status: "live",
+    sourceOfTruth: "Canonical actor condition/HP rows plus accepted condition receipt.",
+    supportOnlySurfaces: ["condition summaries", "combat outcome prose"],
+    modelAuthoredFields: ["condition target alias", "delta/reason prose"],
+    runtimeValidators: ["condition schema", "actor write-scope validator", "world-version authority validator"],
     receiptKind: "condition_state",
+    acceptedReceiptKinds: ["condition_state"],
     rollbackPolicy: "snapshot_restore",
     projectionPolicy: "public_fact",
+    projections: ["narrator packet condition facts", "world/history projection"],
+    recoveryModes: ["turn snapshot restore", "actor condition projection rebuild"],
+    tests: ["tool-executor-authority.test.ts", "narrator-packet.test.ts"],
+    backing: { kind: "runtime_state_effect", refs: ["actor_condition"] },
   },
   {
     lane: "entity_tag",
     owner: "entity_tag_service",
     status: "contract_only",
+    sourceOfTruth: "Canonical entity tag tables across player, NPC, item, location, and faction scopes.",
+    supportOnlySurfaces: ["tag-derived summaries", "classification context"],
+    modelAuthoredFields: ["tag key/value proposal", "entity alias"],
+    runtimeValidators: ["entity tag service scope validator", "tag schema", "actor/player write-scope guard"],
     receiptKind: "entity_tag_delta",
+    acceptedReceiptKinds: ["entity_tag_delta"],
     rollbackPolicy: "snapshot_restore",
     projectionPolicy: "public_fact",
+    projections: ["tag-derived public facts", "world/inventory/history projection"],
+    recoveryModes: ["turn snapshot restore", "projection rebuild from canonical tag tables"],
+    tests: ["gameplay-control-plane-contract.test.ts", "tool-executor-authority.test.ts"],
+    backing: { kind: "service_contract", refs: ["entity_tag_service"] },
   },
   {
     lane: "chronicle_entry",
     owner: "add_chronicle_entry",
-    status: "live",
+    status: "background_only",
+    sourceOfTruth: "Accepted background chronicle receipt and chronicle/event store.",
+    supportOnlySurfaces: ["chronicle summaries", "history support context"],
+    modelAuthoredFields: ["chronicle text", "topic aliases"],
+    runtimeValidators: ["hidden-in-player-turn gate", "chronicle schema", "world-version authority validator"],
     receiptKind: "chronicle_entry",
+    acceptedReceiptKinds: ["chronicle_entry"],
     rollbackPolicy: "snapshot_restore",
     projectionPolicy: "public_fact",
+    projections: ["history projection", "supporting narrator facts when explicitly accepted"],
+    recoveryModes: ["turn snapshot restore", "history projection rebuild"],
+    tests: ["gameplay-control-plane-contract.test.ts", "tool-contracts.test.ts"],
+    backing: { kind: "runtime_state_effect", refs: ["chronicle_entry"] },
   },
   {
     lane: "relationship_change",
     owner: "set_relationship",
     status: "live",
+    sourceOfTruth: "Canonical relationship rows plus accepted relationship change receipt.",
+    supportOnlySurfaces: ["relationship summaries", "NPC context"],
+    modelAuthoredFields: ["source actor alias", "target actor alias", "relationship delta prose"],
+    runtimeValidators: ["relationship schema", "actor resolver", "world-version authority validator"],
     receiptKind: "relationship_change",
+    acceptedReceiptKinds: ["relationship_change"],
     rollbackPolicy: "snapshot_restore",
     projectionPolicy: "public_fact",
+    projections: ["relationship context", "narrator packet relationship facts"],
+    recoveryModes: ["turn snapshot restore", "relationship projection rebuild"],
+    tests: ["tool-executor-authority.test.ts", "narrator-packet.test.ts"],
+    backing: { kind: "runtime_state_effect", refs: ["relationship_change"] },
   },
   {
     lane: "support_actor_creation",
     owner: "create_scene_extra",
     status: "live",
+    sourceOfTruth: "Canonical support actor rows plus accepted scene-extra receipt.",
+    supportOnlySurfaces: ["support actor labels", "encounter support context"],
+    modelAuthoredFields: ["support actor label", "public description"],
+    runtimeValidators: ["scene-extra schema", "same-turn visible creation guard", "world-version authority validator"],
     receiptKind: "support_actor_created",
+    acceptedReceiptKinds: ["support_actor_created"],
     rollbackPolicy: "snapshot_restore",
     projectionPolicy: "support_only",
+    projections: ["narrator packet support context", "world projection when promoted"],
+    recoveryModes: ["turn snapshot restore", "support actor projection rebuild"],
+    tests: ["narrator-packet.test.ts", "tool-contracts.test.ts"],
+    backing: { kind: "runtime_state_effect", refs: ["support_actor_created"] },
   },
   {
     lane: "actor_lifecycle",
     owner: "promote_npc",
     status: "live",
+    sourceOfTruth: "Canonical actor lifecycle rows and promotion trace.",
+    supportOnlySurfaces: ["NPC promote labels", "review projection"],
+    modelAuthoredFields: ["promotion target handle", "public actor label"],
+    runtimeValidators: ["public handle resolver", "promotion permission validator", "world-version authority validator"],
     receiptKind: "actor_lifecycle",
+    acceptedReceiptKinds: ["actor_lifecycle", "support_actor_created"],
     rollbackPolicy: "snapshot_restore",
     projectionPolicy: "public_fact",
+    projections: ["world projection", "location_entities projection", "npc_promote response"],
+    recoveryModes: ["turn snapshot restore", "public projection rebuild"],
+    tests: ["campaigns.test.ts", "api.test.ts", "gameplay-control-plane-contract.test.ts"],
+    backing: { kind: "runtime_descriptor_role", refs: ["promote_npc:state_mutation"] },
   },
   {
     lane: "clock_delta",
     owner: "turn_clock_ledger",
     status: "live",
+    sourceOfTruth: "Turn clock ledger entry plus canonical campaign world time.",
+    supportOnlySurfaces: ["elapsed-time support summaries"],
+    modelAuthoredFields: ["elapsed-time reason prose"],
+    runtimeValidators: ["TURN_CLOCK_LEDGER_ENTRY_SCHEMA", "nonnegative delta validator", "turn authority lifecycle"],
     receiptKind: "clock_receipt",
+    acceptedReceiptKinds: ["clock_receipt", "time_effect"],
     rollbackPolicy: "receipt_replay",
     projectionPolicy: "public_fact",
+    projections: ["narrator packet elapsed-time facts", "history/time projection"],
+    recoveryModes: ["receipt replay", "turn snapshot restore", "zero-time status ledger rebuild"],
+    tests: ["gameplay-control-plane-contract.test.ts", "narrator-packet.test.ts"],
+    backing: { kind: "time_ledger", refs: ["advance_time", "TURN_CLOCK_LEDGER_ENTRY_SCHEMA"] },
   },
   {
     lane: "quick_action_offer",
     owner: "quick_action_offer_service",
     status: "live",
+    sourceOfTruth: "quick_action_offers rows plus accepted source receipt digest.",
+    supportOnlySurfaces: ["quick action label", "quick action prose"],
+    modelAuthoredFields: ["quick action label", "quick action prose"],
+    runtimeValidators: ["offer handle schema", "source receipt digest validator", "expiry/consumed/world-version validator"],
     receiptKind: "quick_action_offer",
+    acceptedReceiptKinds: ["quick_action_offer", "quick_action_consumption_trace"],
     rollbackPolicy: "purge",
     projectionPolicy: "public_handle",
+    projections: ["SSE quick actions", "frontend action chips"],
+    recoveryModes: ["purge unreceipted offers", "expire stale offers", "reject consumed offers"],
+    tests: ["quick-action-offers.test.ts", "chat.test.ts", "quick-actions.test.tsx"],
+    backing: { kind: "service_contract", refs: ["quick_action_offer_service", "offer_quick_actions"] },
   },
 ] as const;
+
+export const GAMEPLAY_STATE_SERVICE_CONTRACTS: readonly GameplayStateServiceContract[] = [
+  {
+    owner: "entity_tag_service",
+    sourceOfTruth: "Canonical entity tag rows for player, NPC, item, location, and faction scopes.",
+    delegateTools: ["add_tag", "remove_tag"],
+    stores: ["sqlite:entity_tags", "sqlite:actors", "sqlite:items", "sqlite:locations", "sqlite:factions"],
+    validators: ["entity scope resolver", "tag schema", "write-scope guard"],
+    receiptKinds: ["entity_tag_delta"],
+    projections: ["tag-derived world/inventory/history facts"],
+    recoveryModes: ["turn snapshot restore", "projection rebuild"],
+    tests: ["gameplay-control-plane-contract.test.ts", "tool-executor-authority.test.ts"],
+  },
+  {
+    owner: "turn_clock_ledger",
+    sourceOfTruth: "Turn clock ledger rows and canonical campaign world time.",
+    delegateTools: ["advance_time"],
+    stores: ["turn_clock_ledger", "sqlite:campaigns"],
+    validators: ["TURN_CLOCK_LEDGER_ENTRY_SCHEMA", "nonnegative delta validator"],
+    receiptKinds: ["clock_receipt"],
+    projections: ["narrator packet elapsed-time facts", "history/time projection"],
+    recoveryModes: ["receipt replay", "turn snapshot restore"],
+    tests: ["gameplay-control-plane-contract.test.ts", "narrator-packet.test.ts"],
+  },
+  {
+    owner: "quick_action_offer_service",
+    sourceOfTruth: "quick_action_offers rows plus accepted source receipt digest.",
+    delegateTools: ["offer_quick_actions"],
+    stores: ["sqlite:quick_action_offers"],
+    validators: ["offer handle schema", "source digest validator", "expiry/consumed/world-version validator"],
+    receiptKinds: ["quick_action_offer", "quick_action_consumption_trace"],
+    projections: ["SSE quick actions", "frontend quick action chips"],
+    recoveryModes: ["purge unreceipted offers", "expire stale offers", "reject consumed offers"],
+    tests: ["quick-action-offers.test.ts", "chat.test.ts", "quick-actions.test.tsx"],
+  },
+] as const;
+
+function assertNonEmptyStateOwnerArray(
+  lane: GameplayStateLane,
+  fieldName: keyof Pick<
+    GameplayStateOwnerEntry,
+    | "runtimeValidators"
+    | "acceptedReceiptKinds"
+    | "projections"
+    | "recoveryModes"
+    | "tests"
+  >,
+  values: readonly string[],
+): void {
+  if (values.length === 0) {
+    throw new Error(`Gameplay state lane ${lane} has no ${fieldName}.`);
+  }
+  if (values.some((value) => value.trim().length === 0)) {
+    throw new Error(`Gameplay state lane ${lane} has blank ${fieldName}.`);
+  }
+}
+
+function assertRuntimeStateEffectBacking(input: {
+  entry: GameplayStateOwnerEntry;
+  descriptors: typeof RUNTIME_TOOL_DESCRIPTORS;
+}): void {
+  const [effectKind] = input.entry.backing.refs;
+  if (!effectKind || !RUNTIME_TOOL_STATE_EFFECT_KINDS.includes(effectKind as RuntimeToolStateEffectKind)) {
+    throw new Error(`Gameplay state lane ${input.entry.lane} has invalid runtime state effect backing.`);
+  }
+  const mappedLane = RUNTIME_EFFECT_KIND_STATE_LANES[effectKind as RuntimeToolStateEffectKind];
+  if (mappedLane !== input.entry.lane) {
+    throw new Error(
+      `Gameplay state lane ${input.entry.lane} backing effect ${effectKind} maps to ${mappedLane ?? "nothing"}.`,
+    );
+  }
+  const ownerTools = (Object.keys(input.descriptors) as RuntimeToolName[])
+    .filter((toolName) =>
+      (input.descriptors[toolName].stateEffects ?? [])
+        .some((effect) => effect.effectKind === effectKind),
+    );
+  if (ownerTools.length === 0) {
+    throw new Error(`Gameplay state lane ${input.entry.lane} has no descriptor owner tool.`);
+  }
+  if (!isRuntimeToolOwner(input.entry.owner)) {
+    throw new Error(`Gameplay state lane ${input.entry.lane} service-owned lane cannot use runtime state effect backing.`);
+  }
+  if (isRuntimeToolOwner(input.entry.owner)) {
+    const ownerDescriptor = input.descriptors[input.entry.owner];
+    if (
+      !(ownerDescriptor.stateEffects ?? [])
+        .some((effect) => effect.effectKind === effectKind && effect.ownerKind === "canonical")
+    ) {
+      throw new Error(
+        `Gameplay state lane ${input.entry.lane} owner ${input.entry.owner} is not canonical for ${effectKind}.`,
+      );
+    }
+  }
+}
+
+function assertTerminalReceiptBacking(input: {
+  entry: GameplayStateOwnerEntry;
+  descriptors: typeof RUNTIME_TOOL_DESCRIPTORS;
+}): void {
+  if (!isRuntimeToolOwner(input.entry.owner)) {
+    throw new Error(`Gameplay state lane ${input.entry.lane} terminal backing must use a runtime tool owner.`);
+  }
+  const descriptor = input.descriptors[input.entry.owner];
+  if (descriptor.terminalKind !== input.entry.receiptKind) {
+    throw new Error(
+      `Gameplay state lane ${input.entry.lane} terminal backing ${input.entry.owner} does not match ${input.entry.receiptKind}.`,
+    );
+  }
+}
+
+function assertLegacySceneBeatBacking(input: {
+  entry: GameplayStateOwnerEntry;
+  descriptors: typeof RUNTIME_TOOL_DESCRIPTORS;
+}): void {
+  if (!isRuntimeToolOwner(input.entry.owner)) {
+    throw new Error(`Gameplay state lane ${input.entry.lane} legacy backing must use a runtime tool owner.`);
+  }
+  if (!input.descriptors[input.entry.owner].roles.includes("legacy_scene_beat")) {
+    throw new Error(`Gameplay state lane ${input.entry.lane} owner ${input.entry.owner} is not a legacy scene beat.`);
+  }
+  if (input.entry.projectionPolicy !== "support_only" || input.entry.rollbackPolicy !== "purge") {
+    throw new Error(`Gameplay state lane ${input.entry.lane} legacy scene beats must be support-only and purgeable.`);
+  }
+}
+
+function assertRuntimeDescriptorRoleBacking(input: {
+  entry: GameplayStateOwnerEntry;
+  descriptors: typeof RUNTIME_TOOL_DESCRIPTORS;
+}): void {
+  if (!isRuntimeToolOwner(input.entry.owner)) {
+    throw new Error(`Gameplay state lane ${input.entry.lane} descriptor-role backing must use a runtime tool owner.`);
+  }
+  if (!input.descriptors[input.entry.owner].roles.includes("state_mutation")) {
+    throw new Error(`Gameplay state lane ${input.entry.lane} owner ${input.entry.owner} is not a state mutation tool.`);
+  }
+}
+
+function assertServiceContractBacking(input: {
+  entry: GameplayStateOwnerEntry;
+  contracts: readonly GameplayStateServiceContract[];
+}): void {
+  if (isRuntimeToolOwner(input.entry.owner)) {
+    throw new Error(`Gameplay state lane ${input.entry.lane} service backing cannot use runtime tool owner.`);
+  }
+  const contract = input.contracts.find((candidate) => candidate.owner === input.entry.owner);
+  if (!contract) {
+    throw new Error(`Gameplay state lane ${input.entry.lane} missing service contract for ${input.entry.owner}.`);
+  }
+  for (const field of [
+    ["delegateTools", contract.delegateTools],
+    ["stores", contract.stores],
+    ["validators", contract.validators],
+    ["receiptKinds", contract.receiptKinds],
+    ["projections", contract.projections],
+    ["recoveryModes", contract.recoveryModes],
+    ["tests", contract.tests],
+  ] as const) {
+    if (field[1].length === 0) {
+      throw new Error(`Gameplay state lane ${input.entry.lane} service contract has no ${field[0]}.`);
+    }
+  }
+}
+
+function assertStateOwnerBacking(input: {
+  entry: GameplayStateOwnerEntry;
+  descriptors: typeof RUNTIME_TOOL_DESCRIPTORS;
+  serviceContracts: readonly GameplayStateServiceContract[];
+}): void {
+  if (input.entry.backing.refs.length === 0) {
+    throw new Error(`Gameplay state lane ${input.entry.lane} has no backing refs.`);
+  }
+  switch (input.entry.backing.kind) {
+    case "runtime_state_effect":
+      assertRuntimeStateEffectBacking({ entry: input.entry, descriptors: input.descriptors });
+      return;
+    case "terminal_receipt":
+      assertTerminalReceiptBacking({ entry: input.entry, descriptors: input.descriptors });
+      return;
+    case "legacy_scene_beat":
+      assertLegacySceneBeatBacking({ entry: input.entry, descriptors: input.descriptors });
+      return;
+    case "runtime_descriptor_role":
+      assertRuntimeDescriptorRoleBacking({ entry: input.entry, descriptors: input.descriptors });
+      return;
+    case "time_ledger":
+      if (input.entry.owner !== "turn_clock_ledger" || input.entry.receiptKind !== "clock_receipt") {
+        throw new Error(`Gameplay state lane ${input.entry.lane} has invalid time ledger backing.`);
+      }
+      assertServiceContractBacking({ entry: input.entry, contracts: input.serviceContracts });
+      return;
+    case "service_contract":
+      assertServiceContractBacking({ entry: input.entry, contracts: input.serviceContracts });
+      return;
+    case "projection_contract":
+      return;
+    default: {
+      const unreachable: never = input.entry.backing.kind;
+      throw new Error(`Unsupported gameplay state backing: ${unreachable}`);
+    }
+  }
+}
 
 export function assertStateOwnerRegistry(
   registry: readonly GameplayStateOwnerEntry[] = GAMEPLAY_STATE_OWNER_REGISTRY,
@@ -1252,6 +1636,22 @@ export function assertStateOwnerRegistry(
     if (lanes.has(entry.lane)) {
       throw new Error(`Duplicate state owner lane: ${entry.lane}.`);
     }
+    if (entry.sourceOfTruth.trim().length === 0) {
+      throw new Error(`Gameplay state lane ${entry.lane} has no sourceOfTruth.`);
+    }
+    if (entry.receiptKind.trim().length === 0) {
+      throw new Error(`Gameplay state lane ${entry.lane} has no receiptKind.`);
+    }
+    assertNonEmptyStateOwnerArray(entry.lane, "runtimeValidators", entry.runtimeValidators);
+    assertNonEmptyStateOwnerArray(entry.lane, "acceptedReceiptKinds", entry.acceptedReceiptKinds);
+    assertNonEmptyStateOwnerArray(entry.lane, "projections", entry.projections);
+    assertNonEmptyStateOwnerArray(entry.lane, "recoveryModes", entry.recoveryModes);
+    assertNonEmptyStateOwnerArray(entry.lane, "tests", entry.tests);
+    assertStateOwnerBacking({
+      entry,
+      descriptors: RUNTIME_TOOL_DESCRIPTORS,
+      serviceContracts: GAMEPLAY_STATE_SERVICE_CONTRACTS,
+    });
     lanes.add(entry.lane);
   }
   for (const lane of GAMEPLAY_STATE_LANE_VALUES) {

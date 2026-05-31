@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   GAMEPLAY_STATE_LANE_VALUES,
   GAMEPLAY_STATE_OWNER_REGISTRY,
+  GAMEPLAY_STATE_SERVICE_CONTRACTS,
   ISSUED_REF_NAMESPACE_VALUES,
   ISSUED_REF_OWNER_MATRIX,
   ISSUED_REF_SCHEMA,
@@ -87,23 +88,109 @@ describe("Phase 95 gameplay control-plane contracts", () => {
     const registry = assertStateOwnerRegistry();
     expect(registry.map((entry) => entry.lane).sort())
       .toEqual([...GAMEPLAY_STATE_LANE_VALUES].sort());
+    for (const entry of registry) {
+      expect(entry.sourceOfTruth).toMatch(/\S/);
+      expect(entry.runtimeValidators.length).toBeGreaterThan(0);
+      expect(entry.receiptKind).toMatch(/\S/);
+      expect(entry.acceptedReceiptKinds.length).toBeGreaterThan(0);
+      expect(entry.projections.length).toBeGreaterThan(0);
+      expect(entry.recoveryModes.length).toBeGreaterThan(0);
+      expect(entry.tests.length).toBeGreaterThan(0);
+      expect(entry.backing.refs.length).toBeGreaterThan(0);
+    }
     expect(GAMEPLAY_STATE_OWNER_REGISTRY.find((entry) => entry.lane === "clock_delta"))
       .toMatchObject({
         owner: "turn_clock_ledger",
         status: "live",
         receiptKind: "clock_receipt",
+        backing: { kind: "time_ledger" },
       });
     expect(GAMEPLAY_STATE_OWNER_REGISTRY.find((entry) => entry.lane === "quick_action_offer"))
       .toMatchObject({
         owner: "quick_action_offer_service",
         status: "live",
         receiptKind: "quick_action_offer",
+        backing: { kind: "service_contract" },
+      });
+    expect(GAMEPLAY_STATE_OWNER_REGISTRY.find((entry) => entry.lane === "dialogue_outcome"))
+      .toMatchObject({ backing: { kind: "terminal_receipt" } });
+    expect(GAMEPLAY_STATE_OWNER_REGISTRY.find((entry) => entry.lane === "durable_world_fact"))
+      .toMatchObject({ backing: { kind: "terminal_receipt" } });
+    expect(GAMEPLAY_STATE_OWNER_REGISTRY.find((entry) => entry.lane === "scene_local_event"))
+      .toMatchObject({
+        status: "legacy_hidden",
+        rollbackPolicy: "purge",
+        projectionPolicy: "support_only",
+        backing: { kind: "legacy_scene_beat" },
+      });
+    expect(GAMEPLAY_STATE_OWNER_REGISTRY.find((entry) => entry.lane === "actor_lifecycle"))
+      .toMatchObject({ owner: "promote_npc", backing: { kind: "runtime_descriptor_role" } });
+    expect(GAMEPLAY_STATE_OWNER_REGISTRY.find((entry) => entry.lane === "entity_tag"))
+      .toMatchObject({
+        owner: "entity_tag_service",
+        status: "contract_only",
+        backing: { kind: "service_contract" },
+      });
+    expect(GAMEPLAY_STATE_OWNER_REGISTRY.find((entry) => entry.lane === "chronicle_entry"))
+      .toMatchObject({
+        owner: "add_chronicle_entry",
+        status: "background_only",
+        backing: { kind: "runtime_state_effect" },
       });
 
     expect(() => assertStateOwnerRegistry([
       ...GAMEPLAY_STATE_OWNER_REGISTRY,
       GAMEPLAY_STATE_OWNER_REGISTRY[0],
     ])).toThrow(/duplicate state owner lane/i);
+
+    const replaceLane = (
+      patch: Partial<typeof GAMEPLAY_STATE_OWNER_REGISTRY[number]>,
+    ) => GAMEPLAY_STATE_OWNER_REGISTRY.map((entry) =>
+      entry.lane === "known_route_movement" ? { ...entry, ...patch } : entry
+    );
+
+    expect(() => assertStateOwnerRegistry(replaceLane({ sourceOfTruth: "" })))
+      .toThrow(/known_route_movement.*sourceOfTruth/i);
+    expect(() => assertStateOwnerRegistry(replaceLane({ runtimeValidators: [] })))
+      .toThrow(/known_route_movement.*runtimeValidators/i);
+    expect(() => assertStateOwnerRegistry(replaceLane({ acceptedReceiptKinds: [] })))
+      .toThrow(/known_route_movement.*acceptedReceiptKinds/i);
+    expect(() => assertStateOwnerRegistry(replaceLane({ projections: [] })))
+      .toThrow(/known_route_movement.*projections/i);
+    expect(() => assertStateOwnerRegistry(replaceLane({ recoveryModes: [] })))
+      .toThrow(/known_route_movement.*recoveryModes/i);
+    expect(() => assertStateOwnerRegistry(replaceLane({ tests: [] })))
+      .toThrow(/known_route_movement.*tests/i);
+    expect(() => assertStateOwnerRegistry(replaceLane({
+      backing: { kind: "runtime_state_effect", refs: [] },
+    }))).toThrow(/known_route_movement.*backing refs/i);
+    expect(() => assertStateOwnerRegistry(replaceLane({
+      backing: { kind: "time_ledger", refs: ["advance_time"] },
+    }))).toThrow(/known_route_movement.*time ledger/i);
+  });
+
+  it("keeps service-owned gameplay lanes backed by explicit service contracts", () => {
+    expect(GAMEPLAY_STATE_SERVICE_CONTRACTS.map((entry) => entry.owner).sort())
+      .toEqual(["entity_tag_service", "quick_action_offer_service", "turn_clock_ledger"]);
+    expect(GAMEPLAY_STATE_SERVICE_CONTRACTS.find((entry) => entry.owner === "entity_tag_service"))
+      .toMatchObject({
+        delegateTools: ["add_tag", "remove_tag"],
+        receiptKinds: expect.arrayContaining(["entity_tag_delta"]),
+        projections: expect.arrayContaining(["tag-derived world/inventory/history facts"]),
+      });
+    expect(GAMEPLAY_STATE_SERVICE_CONTRACTS.find((entry) => entry.owner === "quick_action_offer_service"))
+      .toMatchObject({
+        delegateTools: ["offer_quick_actions"],
+        stores: expect.arrayContaining(["sqlite:quick_action_offers"]),
+      });
+
+    expect(() => assertStateOwnerRegistry([
+      ...GAMEPLAY_STATE_OWNER_REGISTRY.filter((entry) => entry.lane !== "entity_tag"),
+      {
+        ...GAMEPLAY_STATE_OWNER_REGISTRY.find((entry) => entry.lane === "entity_tag")!,
+        backing: { kind: "runtime_state_effect", refs: ["entity_tag"] },
+      },
+    ])).toThrow(/entity_tag.*runtime state effect/i);
   });
 
   it("keeps descriptor canonical owners aligned with registry owners", () => {

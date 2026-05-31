@@ -211,6 +211,22 @@ Oracle recommended next commits:
 2. Add backend-owned quiet scene status and movement-time narratable facts.
 3. Then do staged restore manifest revalidation as a separate recovery commit.
 
+### Owner Matrix Implementation Slice
+
+Status: implementation in progress after Oracle.
+
+Design decision:
+- Keep this as a low-blast-radius contract/data slice inside `gameplay-control-plane-contract.ts` and its focused tests.
+- Do not rewrite runtime descriptors, executor behavior, projection guards, or issued-ref matrix in this slice.
+- Extend each `GAMEPLAY_STATE_OWNER_REGISTRY` lane with executable source-of-truth, validator, receipt, projection, recovery, test, and backing metadata.
+- Add explicit service contracts for `entity_tag_service`, `turn_clock_ledger`, and `quick_action_offer_service`.
+- Classify `chronicle_entry` as `background_only`, not `projection_from_receipts`, because current executable behavior inserts canonical chronicle rows through hidden/background authority and player-turn GM profiles reject it.
+
+Executed local evidence:
+- `npm.cmd --prefix backend test -- src/engine/__tests__/gameplay-control-plane-contract.test.ts src/engine/__tests__/tool-contracts.test.ts src/engine/__tests__/gm-turn-read.test.ts` passed 101 tests.
+- `npm.cmd --prefix backend test -- src/engine/__tests__/tool-executor-authority.test.ts src/engine/__tests__/tool-execution-context.test.ts src/engine/__tests__/dialogue-state-receipt.test.ts` passed 57 tests.
+- `npm.cmd --prefix backend run typecheck` passed.
+
 ## Dirty Tail Policy
 
 The branch is owned by this Phase 95 Codex work. Do not call repo artifacts "someone else's".
