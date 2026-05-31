@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { safeGenerateObject } from "../../ai/generate-object-safe.js";
@@ -272,6 +273,26 @@ beforeEach(() => {
 });
 
 describe("GM Read contract", () => {
+  it("keeps GM Read as a no-write authority classifier outside runtime mutation owners", () => {
+    const source = fs.readFileSync(new URL("../gm-turn-read.ts", import.meta.url), "utf-8");
+    const forbiddenMutationSurfaces = [
+      { label: "runtime executor import", pattern: /from\s+["']\.\/tool-executor\.js["']/u },
+      { label: "executeToolCall call", pattern: /\bexecuteToolCall\s*\(/u },
+      { label: "authority trace import", pattern: /from\s+["']\.\/living-world-authority\.js["']/u },
+      { label: "commitAuthorityTrace call", pattern: /\bcommitAuthorityTrace\s*\(/u },
+      { label: "sqlite connection import", pattern: /from\s+["']\.\.\/db\//u },
+      { label: "database write chain", pattern: /\bdb\.(?:insert|update|delete|transaction|run)\s*\(/u },
+      { label: "episodic vector write", pattern: /\bstoreEpisodicEvent\s*\(/u },
+      { label: "snapshot capture", pattern: /\bcaptureSnapshot\s*\(/u },
+      { label: "snapshot restore", pattern: /\brestoreSnapshot\s*\(/u },
+      { label: "filesystem write", pattern: /\bfs\.(?:writeFileSync|rmSync|renameSync|copyFileSync)\s*\(/u },
+    ];
+
+    for (const { label, pattern } of forbiddenMutationSurfaces) {
+      expect(source, label).not.toMatch(pattern);
+    }
+  });
+
   it("states the GM job as one playable beat with NPC knowledge bounds", () => {
     const contract = buildGmReadPromptContract({
       allowedTools: ["log_event", "spawn_npc", "reveal_location"],
