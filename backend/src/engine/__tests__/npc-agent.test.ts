@@ -387,7 +387,7 @@ describe("createNpcAgentTools", () => {
     expect(Object.keys(tools)).toHaveLength(4);
   });
 
-  it("act tool calls Oracle and executeToolCall; returns oracle result", async () => {
+  it("act returns an action proposal without Oracle or background execution", async () => {
     const mockDb = setupMockDb({});
     const tools = createNpcAgentTools(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
 
@@ -396,12 +396,25 @@ describe("createNpcAgentTools", () => {
       { toolCallId: "tc1", messages: [], abortSignal: undefined as unknown as AbortSignal }
     );
 
-    expect(callOracle).toHaveBeenCalled();
-    expect(result).toHaveProperty("oracleResult");
+    expect(result).toMatchObject({
+      accepted: false,
+      proposalOnly: true,
+      toolName: "act",
+      proposal: {
+        npcId: NPC_ID,
+        action: "steal the ruby",
+      },
+    });
+    expect(callOracle).not.toHaveBeenCalled();
+    expect(resolveActionTargetContext).not.toHaveBeenCalled();
+    expect(executeToolCall).not.toHaveBeenCalled();
+    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(mockDb.run).not.toHaveBeenCalled();
+    expect(commitAuthorityTraceMock).not.toHaveBeenCalled();
   });
 
-  it("act passes combatEnvelope for hostile character-target actions when both sides have power stats", async () => {
-    setupMockDb({
+  it("act does not perform combat target resolution or roll hostile actions", async () => {
+    const mockDb = setupMockDb({
       npc: createPoweredMockNpc(),
     });
     vi.mocked(resolveActionTargetContext).mockResolvedValueOnce({
@@ -425,22 +438,29 @@ describe("createNpcAgentTools", () => {
 
     const tools = createNpcAgentTools(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
 
-    await tools.act.execute!(
+    const result = await tools.act.execute!(
       { action: "Strike the intruder with a cursed blow" },
       { toolCallId: "tc-hostile", messages: [], abortSignal: undefined as unknown as AbortSignal },
     );
 
-    const oraclePayload = vi.mocked(callOracle).mock.calls.at(-1)?.[0] as
-      | Record<string, unknown>
-      | undefined;
-    expect(oraclePayload?.combatEnvelope).toMatchObject({
-      matchup: expect.any(String),
-      durabilityTierGap: expect.any(Number),
+    expect(result).toMatchObject({
+      accepted: false,
+      proposalOnly: true,
+      toolName: "act",
+      proposal: {
+        npcId: NPC_ID,
+        action: "Strike the intruder with a cursed blow",
+      },
     });
-    expect(oraclePayload?.targetTags).toEqual(["Fast", "Armed"]);
+    expect(callOracle).not.toHaveBeenCalled();
+    expect(resolveActionTargetContext).not.toHaveBeenCalled();
+    expect(executeToolCall).not.toHaveBeenCalled();
+    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(mockDb.run).not.toHaveBeenCalled();
+    expect(commitAuthorityTraceMock).not.toHaveBeenCalled();
   });
 
-  it("keeps non-character or no-power target behavior compatible by omitting combatEnvelope", async () => {
+  it("act stays proposal-only for non-character or no-power targets", async () => {
     setupMockDb({
       npc: createPoweredMockNpc(),
     });
@@ -454,16 +474,19 @@ describe("createNpcAgentTools", () => {
 
     const tools = createNpcAgentTools(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
 
-    await tools.act.execute!(
+    const result = await tools.act.execute!(
       { action: "Strike the intruder with a cursed blow" },
       { toolCallId: "tc-item", messages: [], abortSignal: undefined as unknown as AbortSignal },
     );
 
-    const oraclePayload = vi.mocked(callOracle).mock.calls.at(-1)?.[0] as
-      | Record<string, unknown>
-      | undefined;
-    expect("combatEnvelope" in (oraclePayload ?? {})).toBe(false);
-    expect(oraclePayload?.targetTags).toEqual([]);
+    expect(result).toMatchObject({
+      accepted: false,
+      proposalOnly: true,
+      toolName: "act",
+    });
+    expect(callOracle).not.toHaveBeenCalled();
+    expect(resolveActionTargetContext).not.toHaveBeenCalled();
+    expect(executeToolCall).not.toHaveBeenCalled();
   });
 
   it("move_to validates destination is adjacent; rejects non-adjacent", async () => {
@@ -482,7 +505,7 @@ describe("createNpcAgentTools", () => {
     expect((result as { error: string }).error).toMatch(/not found|not adjacent/i);
   });
 
-  it("move_to delegates NPC movement through authority-backed tool execution", async () => {
+  it("move_to returns a movement proposal without authority-backed execution", async () => {
     const adjLocation = {
       id: "loc-002",
       name: "Harbor",
@@ -500,25 +523,22 @@ describe("createNpcAgentTools", () => {
       { toolCallId: "tc1", messages: [], abortSignal: undefined as unknown as AbortSignal }
     );
 
-    expect(result).toHaveProperty("moved", true);
+    expect(result).toMatchObject({
+      accepted: false,
+      proposalOnly: true,
+      toolName: "move_to",
+      proposal: {
+        npcId: NPC_ID,
+        targetLocation: "Harbor",
+        from: "Market Square",
+        travelCost: 1,
+        path: ["Market Square", "Harbor"],
+      },
+    });
+    expect(mockDb.update).not.toHaveBeenCalled();
     expect(mockDb.run).not.toHaveBeenCalled();
-    expect(executeToolCall).toHaveBeenCalledWith(
-      CAMPAIGN_ID,
-      "move_to",
-      { targetLocationName: "Harbor" },
-      TICK,
-      undefined,
-      expect.objectContaining({
-        scope: "actor_turn",
-        subjectActorId: NPC_ID,
-        authority: expect.objectContaining({
-          baseWorldVersion: 0,
-          sourceEntity: { type: "npc", id: NPC_ID },
-          allowedWriteScopes: ["npc:npc-001", "location:loc-002"],
-        }),
-        legalMovementRefs: expect.any(Set),
-      }),
-    );
+    expect(commitAuthorityTraceMock).not.toHaveBeenCalled();
+    expect(executeToolCall).not.toHaveBeenCalled();
   });
 
   it("move_to shares the travel cost contract with player movement for multi-edge destinations", async () => {
@@ -559,27 +579,22 @@ describe("createNpcAgentTools", () => {
       { toolCallId: "tc-phase43", messages: [], abortSignal: undefined as unknown as AbortSignal }
     );
 
-    expect(result).toEqual({
-      moved: true,
-      from: "Shibuya Crossing",
-      to: "Tokyo Jujutsu High",
-      travelCost: 2,
-      path: ["Shibuya Crossing", "Hidden Station Platform", "Tokyo Jujutsu High"],
+    expect(result).toMatchObject({
+      accepted: false,
+      proposalOnly: true,
+      toolName: "move_to",
+      proposal: {
+        npcId: NPC_ID,
+        targetLocation: "Tokyo Jujutsu High",
+        from: "Shibuya Crossing",
+        travelCost: 2,
+        path: ["Shibuya Crossing", "Hidden Station Platform", "Tokyo Jujutsu High"],
+      },
     });
+    expect(mockDb.update).not.toHaveBeenCalled();
     expect(mockDb.run).not.toHaveBeenCalled();
-    expect(executeToolCall).toHaveBeenCalledWith(
-      CAMPAIGN_ID,
-      "move_to",
-      { targetLocationName: "Tokyo Jujutsu High" },
-      TICK,
-      undefined,
-      expect.objectContaining({
-        scope: "actor_turn",
-        authority: expect.objectContaining({
-          allowedWriteScopes: ["npc:npc-001", "location:loc-003"],
-        }),
-      }),
-    );
+    expect(commitAuthorityTraceMock).not.toHaveBeenCalled();
+    expect(executeToolCall).not.toHaveBeenCalled();
   });
 
   it("update_own_goal returns a proposal without mutating NPC goals", async () => {
@@ -690,31 +705,64 @@ describe("createNpcAgentTools", () => {
     expect(commitAuthorityTraceMock).not.toHaveBeenCalled();
   });
 
-  it("avoids double-counting reflection budget when present-NPC act piggybacks through log_event", async () => {
-    setupMockDb({});
+  it("act does not route present-NPC outcomes through log_event or reflection budget", async () => {
+    const mockDb = setupMockDb({});
     const tools = createNpcAgentTools(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
 
-    await tools.act.execute!(
+    const result = await tools.act.execute!(
       { action: "broker a risky deal" },
       { toolCallId: "tc3", messages: [], abortSignal: undefined as unknown as AbortSignal }
     );
 
-    expect(executeToolCall).toHaveBeenCalledWith(
-      CAMPAIGN_ID,
-      "log_event",
-      expect.objectContaining({
-        participants: ["Greta the Merchant"],
-      }),
-      TICK,
-      undefined,
-      expect.objectContaining({
-        scope: "background",
-        authority: expect.objectContaining({
-          sourceEntity: { type: "npc", id: NPC_ID },
-        }),
-      }),
-    );
+    expect(result).toMatchObject({
+      accepted: false,
+      proposalOnly: true,
+      toolName: "act",
+      proposal: {
+        npcId: NPC_ID,
+        action: "broker a risky deal",
+      },
+    });
+    expect(callOracle).not.toHaveBeenCalled();
+    expect(executeToolCall).not.toHaveBeenCalled();
+    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(mockDb.run).not.toHaveBeenCalled();
+    expect(commitAuthorityTraceMock).not.toHaveBeenCalled();
     expect(accumulateReflectionBudgetMock).not.toHaveBeenCalled();
+  });
+
+  it("all NPC tool proposals avoid authority writes and background execution", async () => {
+    setupMockDb({
+      adjacentLocation: {
+        id: "loc-002",
+        name: "Harbor",
+        connectedTo: '["loc-001"]',
+      },
+    });
+    const tools = createNpcAgentTools(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
+
+    await tools.act.execute!(
+      { action: "broker a risky deal" },
+      { toolCallId: "tc-act", messages: [], abortSignal: undefined as unknown as AbortSignal },
+    );
+    await tools.speak.execute!(
+      { dialogue: "The price changes at dusk.", target: "Hero" },
+      { toolCallId: "tc-speak", messages: [], abortSignal: undefined as unknown as AbortSignal },
+    );
+    await tools.move_to.execute!(
+      { targetLocation: "Harbor" },
+      { toolCallId: "tc-move", messages: [], abortSignal: undefined as unknown as AbortSignal },
+    );
+    await tools.update_own_goal.execute!(
+      { oldGoal: "", newGoal: "watch the harbor", type: "short_term" as const },
+      { toolCallId: "tc-goal", messages: [], abortSignal: undefined as unknown as AbortSignal },
+    );
+
+    expect(callOracle).not.toHaveBeenCalled();
+    expect(executeToolCall).not.toHaveBeenCalled();
+    expect(storeEpisodicEvent).not.toHaveBeenCalled();
+    expect(accumulateReflectionBudgetMock).not.toHaveBeenCalled();
+    expect(commitAuthorityTraceMock).not.toHaveBeenCalled();
   });
 });
 
@@ -1195,7 +1243,8 @@ describe("tickNpcAgent", () => {
 
     const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
     expect(systemPrompt).not.toContain("[COMBAT POSTURE]");
-    expect(systemPrompt).toContain("Choose at most ONE action that best serves your current goals.");
+    expect(systemPrompt).toContain("Choose at most ONE proposal that best serves your current goals");
+    expect(systemPrompt).toContain("standalone NPC ticks do not roll, adjudicate, or commit world state");
     expect(systemPrompt).toContain("passing is valid");
     expect(logEventMock).not.toHaveBeenCalledWith(
       "combat.posture.derived",

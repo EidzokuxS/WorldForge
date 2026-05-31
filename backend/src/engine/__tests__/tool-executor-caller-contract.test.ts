@@ -9,7 +9,7 @@ const aiSdkToolImportPattern = /import\s*\{\s*tool\s*\}\s*from\s*["']ai["']/;
 const aiSdkToolFactoryPattern = /\btool\s*\(\s*\{/g;
 const aiSdkToolNamePattern = /^\s{4}([a-zA-Z0-9_]+): tool\(\{/gm;
 const unsafeModelFacingWritePattern =
-  /\bcommitAuthorityTrace\s*\(|\bexecuteToolCall\s*\(|\bdb\.(?:insert|update|delete)\s*\(|\bgetDb\(\)\.(?:insert|update|delete)\b/g;
+  /\bcommitAuthorityTrace\s*\(|\bexecuteToolCall\s*\(|\bdb\.(?:insert|update|delete|run)\s*\(|\bgetDb\(\)\.(?:insert|update|delete|run)\b/g;
 
 function collectSourceFiles(dir: string): string[] {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -47,7 +47,7 @@ const classifiedAiSdkToolSurfaces: Record<string, {
     ],
   },
   "npc-tools.ts": {
-    classification: "hybrid_owned_and_proposal",
+    classification: "proposal_only",
     toolNames: [
       "act",
       "speak",
@@ -123,7 +123,6 @@ describe("tool executor caller authority contract", () => {
       "actor-tools.ts": 1,
       "gm-tool-step.ts": 2,
       "hidden-adjudication.ts": 1,
-      "npc-tools.ts": 2,
       "scene-plan-executor.ts": 1,
       "tool-schemas.ts": 1,
     });
@@ -133,11 +132,6 @@ describe("tool executor caller authority contract", () => {
 
     expect(sourceFor("gm-tool-step.ts")).toEqual(expect.stringContaining("input.context"));
     expect(sourceFor("hidden-adjudication.ts")).toEqual(expect.stringContaining("args.executionContext"));
-
-    const npcTools = sourceFor("npc-tools.ts");
-    expect(npcTools).toEqual(expect.stringContaining("createBackgroundToolExecutionContext({"));
-    expect(npcTools).toEqual(expect.stringContaining("createNpcAuthorityContext({"));
-    expect(npcTools).toEqual(expect.stringContaining("createNpcMoveAuthorityContext({"));
 
     expect(sourceFor("reflection-tools.ts")).not.toMatch(executeToolCallPattern);
 
@@ -186,18 +180,16 @@ describe("tool executor caller authority contract", () => {
     }
   });
 
-  it("keeps hybrid NPC tools limited to owned executor calls plus quarantined dialogue and goals", () => {
+  it("keeps NPC model-facing tools proposal-only and quarantined from writes", () => {
     const npcTools = sourceFor("npc-tools.ts");
+    expect(npcTools).not.toMatch(executeToolCallPattern);
     expect(npcTools).not.toMatch(/\bcommitAuthorityTrace\s*\(/);
-    expect(npcTools).not.toMatch(/\bdb\.(?:insert|update|delete)\s*\(|\bgetDb\(\)\.(?:insert|update|delete)\b/);
-    expect([...npcTools.matchAll(executeToolCallPattern)]).toHaveLength(2);
+    expect(npcTools).not.toMatch(/\bdb\.(?:insert|update|delete|run)\s*\(|\bgetDb\(\)\.(?:insert|update|delete|run)\b/);
 
+    expect(npcTools).toEqual(expect.stringContaining('npcProposalOnly("act"'));
     expect(npcTools).toEqual(expect.stringContaining('npcProposalOnly("speak"'));
+    expect(npcTools).toEqual(expect.stringContaining('npcProposalOnly("move_to"'));
     expect(npcTools).toEqual(expect.stringContaining('npcProposalOnly("update_own_goal"'));
-    expect(npcTools).toEqual(expect.stringContaining('executeToolCall(campaignId, "log_event"'));
-    expect(npcTools).toEqual(expect.stringContaining('executeToolCall(campaignId, "move_to"'));
-    expect(npcTools).toEqual(expect.stringContaining("createNpcAuthorityContext({"));
-    expect(npcTools).toEqual(expect.stringContaining("createNpcMoveAuthorityContext({"));
   });
 
   it("keeps the storyteller AI SDK surface behind the canonical executor bridge", () => {

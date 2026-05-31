@@ -426,12 +426,12 @@ async function tickNpcAgentInternal(
     `Decide whether you have a meaningful next action. Act only when your goals, relationships, pressure, or the current scene justify it; passing is valid when restraint, watching, waiting, or silence is the honest character choice.`,
     ``,
     `You may:`,
-    `- act(action) — attempt an action (will be evaluated for success via dice roll)`,
+    `- act(action) — propose an intended action; standalone NPC ticks do not roll, adjudicate, or commit world state`,
     `- speak(dialogue) — propose something to say; this is proposal-only and cannot commit dialogue state`,
-    `- move_to(location) — travel to an adjacent location`,
+    `- move_to(location) — propose travel to a connected location; authoritative movement must execute later through actor/runtime authority`,
     `- update_own_goal(old, new) — propose a goal revision; this is proposal-only and cannot commit NPC goal state`,
     ``,
-    `Choose at most ONE action that best serves your current goals. Prefer a small believable beat over forced activity.`,
+    `Choose at most ONE proposal that best serves your current goals, or pass. Proposals are advisory until routed through backend actor authority.`,
   ]
     .filter(Boolean)
     .join("\n");
