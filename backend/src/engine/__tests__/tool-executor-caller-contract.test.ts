@@ -8,8 +8,23 @@ const executeToolCallPattern = /\bexecuteToolCall\s*\(/g;
 const aiSdkToolImportPattern = /import\s*\{\s*tool\s*\}\s*from\s*["']ai["']/;
 const aiSdkToolFactoryPattern = /\btool\s*\(\s*\{/g;
 const aiSdkToolNamePattern = /^\s{4}([a-zA-Z0-9_]+): tool\(\{/gm;
-const unsafeModelFacingWritePattern =
-  /\bcommitAuthorityTrace\s*\(|\bexecuteToolCall\s*\(|\bdb\.(?:insert|update|delete|run)\s*\(|\bgetDb\(\)\.(?:insert|update|delete|run)\b/g;
+
+const unsafeProposalOnlyToolSurfacePatterns: Array<{ label: string; pattern: RegExp }> = [
+  {
+    label: "executeToolCall import",
+    pattern: /import\s*\{[^}]*\bexecuteToolCall\b[^}]*\}\s*from\s*["'][^"']*tool-executor\.js["']/,
+  },
+  {
+    label: "commitAuthorityTrace import",
+    pattern: /import\s*\{[^}]*\bcommitAuthorityTrace\b[^}]*\}\s*from\s*["'][^"']*living-world-authority\.js["']/,
+  },
+  { label: "executeToolCall call", pattern: /\bexecuteToolCall\s*\(/ },
+  { label: "commitAuthorityTrace call", pattern: /\bcommitAuthorityTrace\s*\(/ },
+  { label: "direct db write", pattern: /\bdb\.(?:insert|update|delete|run|prepare)\s*\(/ },
+  { label: "direct getDb write", pattern: /\bgetDb\(\)\.(?:insert|update|delete|run|prepare|transaction)\s*\(/ },
+  { label: "transaction write", pattern: /\btx\.(?:insert|update|delete|run|prepare)\s*\(/ },
+  { label: "direct db transaction", pattern: /\bdb\.transaction\s*\(/ },
+];
 
 function collectSourceFiles(dir: string): string[] {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -31,6 +46,12 @@ function sourceFor(relativePath: string): string {
 
 function extractAiSdkToolNames(source: string): string[] {
   return [...source.matchAll(aiSdkToolNamePattern)].map((match) => match[1]);
+}
+
+function forbiddenProposalOnlyToolSurfaceMatches(source: string): string[] {
+  return unsafeProposalOnlyToolSurfacePatterns
+    .filter(({ pattern }) => pattern.test(source))
+    .map(({ label }) => label);
 }
 
 const classifiedAiSdkToolSurfaces: Record<string, {
@@ -174,7 +195,7 @@ describe("tool executor caller authority contract", () => {
         continue;
       }
 
-      expect(source).not.toMatch(unsafeModelFacingWritePattern);
+      expect(forbiddenProposalOnlyToolSurfaceMatches(source)).toEqual([]);
       expect(source).toMatch(/proposalOnly: true|status: "proposal_only"|status: "proposal_only" as const/);
       expect(source).toMatch(/accepted: false|committed: false|committed: false as const/);
     }
@@ -182,14 +203,30 @@ describe("tool executor caller authority contract", () => {
 
   it("keeps NPC model-facing tools proposal-only and quarantined from writes", () => {
     const npcTools = sourceFor("npc-tools.ts");
-    expect(npcTools).not.toMatch(executeToolCallPattern);
-    expect(npcTools).not.toMatch(/\bcommitAuthorityTrace\s*\(/);
-    expect(npcTools).not.toMatch(/\bdb\.(?:insert|update|delete|run)\s*\(|\bgetDb\(\)\.(?:insert|update|delete|run)\b/);
+    expect(forbiddenProposalOnlyToolSurfaceMatches(npcTools)).toEqual([]);
 
     expect(npcTools).toEqual(expect.stringContaining('npcProposalOnly("act"'));
     expect(npcTools).toEqual(expect.stringContaining('npcProposalOnly("speak"'));
     expect(npcTools).toEqual(expect.stringContaining('npcProposalOnly("move_to"'));
     expect(npcTools).toEqual(expect.stringContaining('npcProposalOnly("update_own_goal"'));
+  });
+
+  it("keeps reflection model-facing tools proposal-only and quarantined from writes", () => {
+    const reflectionTools = sourceFor("reflection-tools.ts");
+    expect(forbiddenProposalOnlyToolSurfaceMatches(reflectionTools)).toEqual([]);
+
+    for (const toolName of classifiedAiSdkToolSurfaces["reflection-tools.ts"].toolNames) {
+      expect(reflectionTools).toEqual(expect.stringContaining(`reflectionProposalOnly("${toolName}"`));
+    }
+  });
+
+  it("keeps faction model-facing tools proposal-only and quarantined from writes", () => {
+    const factionTools = sourceFor("faction-tools.ts");
+    expect(forbiddenProposalOnlyToolSurfaceMatches(factionTools)).toEqual([]);
+
+    expect(factionTools).toEqual(expect.stringContaining("const PROPOSAL_ONLY_MESSAGE"));
+    expect(factionTools).toEqual(expect.stringContaining('status: "proposal_only" as const'));
+    expect(factionTools).toEqual(expect.stringContaining("committed: false as const"));
   });
 
   it("keeps the storyteller AI SDK surface behind the canonical executor bridge", () => {
