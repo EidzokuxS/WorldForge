@@ -172,6 +172,7 @@ vi.mock("../../engine/index.js", () => ({
   findPendingNarrationSaga: vi.fn(() => null),
   getSettledTurnPacket: (input: unknown) => mockGetSettledTurnPacket(input),
   hasPreparedSettledTurnPacketRecovery: vi.fn(() => false),
+  hasTurnSagaSnapshotRecovery: vi.fn(() => false),
   tickPresentNpcs: vi.fn(),
   simulateOffscreenNpcs: vi.fn(),
   checkAndTriggerReflections: vi.fn(),

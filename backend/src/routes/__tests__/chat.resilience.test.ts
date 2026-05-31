@@ -92,6 +92,7 @@ vi.mock("../../db/index.js", () => ({
 const mockGetSettledTurnPacket = vi.fn((_input?: unknown) => null);
 const mockGetTurnSaga = vi.fn((_input?: unknown) => null);
 const mockHasPreparedSettledTurnPacketRecovery = vi.fn((_input?: unknown) => false);
+const mockHasTurnSagaSnapshotRecovery = vi.fn((_input?: unknown) => false);
 
 vi.mock("../../engine/index.js", () => ({
   processTurn: vi.fn(),
@@ -103,6 +104,7 @@ vi.mock("../../engine/index.js", () => ({
   getSettledTurnPacket: (input: unknown) => mockGetSettledTurnPacket(input),
   hasPreparedSettledTurnPacketRecovery: (input: unknown) =>
     mockHasPreparedSettledTurnPacketRecovery(input),
+  hasTurnSagaSnapshotRecovery: (input: unknown) => mockHasTurnSagaSnapshotRecovery(input),
   getTurnSaga: (input: unknown) => mockGetTurnSaga(input),
   PendingNarrationError: class PendingNarrationError extends Error {
     constructor(public readonly pendingSaga: unknown) {
@@ -353,6 +355,7 @@ beforeEach(() => {
   mockDrainPendingCommittedEventsByIds.mockReturnValue([]);
   mockGetSettledTurnPacket.mockReturnValue(null);
   mockHasPreparedSettledTurnPacketRecovery.mockReturnValue(false);
+  mockHasTurnSagaSnapshotRecovery.mockReturnValue(false);
   mockedFindPendingNarrationSaga.mockReturnValue(null);
   mockGetTurnSaga.mockReturnValue(null);
   mockedCaptureSnapshot.mockReturnValue({

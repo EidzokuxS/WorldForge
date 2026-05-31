@@ -54,6 +54,7 @@ import {
   findPendingNarrationSaga,
   getSettledTurnPacket,
   hasPreparedSettledTurnPacketRecovery,
+  hasTurnSagaSnapshotRecovery,
   NarrationRepairExhaustedError,
   PendingNarrationError,
   queuePostTurnSimulationProposals,
@@ -392,7 +393,8 @@ function sagaCanResumeNarration(
   return Boolean(
     saga.settledTurnPacketId
       || getSettledTurnPacket({ campaignId: saga.campaignId, turnId: saga.turnId })
-      || sagaHasPreparedSettledPacketRecovery(saga),
+      || sagaHasPreparedSettledPacketRecovery(saga)
+      || hasTurnSagaSnapshotRecovery({ campaignId: saga.campaignId, turnId: saga.turnId }),
   );
 }
 

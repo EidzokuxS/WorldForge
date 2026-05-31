@@ -120,6 +120,11 @@ export interface TurnSagaEventRecord {
   createdAt: number;
 }
 
+export interface TurnSagaSnapshotRecovery {
+  bundleDir: string;
+  capturedAt: number | null;
+}
+
 export interface OracleDecisionRecord {
   id: string;
   campaignId: string;
@@ -977,6 +982,34 @@ export function hasPreparedSettledTurnPacketRecovery(
   input: GetPreparedSettledTurnPacketEventInput,
 ): boolean {
   return getPreparedSettledTurnPacketEvent(input) !== null;
+}
+
+export function getTurnSagaSnapshotRecovery(
+  input: GetTurnSagaInput,
+): TurnSagaSnapshotRecovery | null {
+  const snapshotEvent = listTurnAuthorityStageEvents(input)
+    .filter((event) => {
+      const payload = isPlainRecord(event.payload) ? event.payload : {};
+      return payload.stage === "snapshot_taken" && payload.provided === true;
+    })
+    .at(-1);
+  const payload = snapshotEvent && isPlainRecord(snapshotEvent.payload)
+    ? snapshotEvent.payload
+    : null;
+  const bundleDir = typeof payload?.bundleDir === "string"
+    ? payload.bundleDir.trim()
+    : "";
+  if (!bundleDir) {
+    return null;
+  }
+  const capturedAt = typeof payload?.capturedAt === "number" && Number.isFinite(payload.capturedAt)
+    ? payload.capturedAt
+    : null;
+  return { bundleDir, capturedAt };
+}
+
+export function hasTurnSagaSnapshotRecovery(input: GetTurnSagaInput): boolean {
+  return getTurnSagaSnapshotRecovery(input) !== null;
 }
 
 export function listTurnAuthorityStageEvents(

@@ -157,11 +157,13 @@ import {
   assertNoPendingNarrationBeforeNewTurn,
   findLatestSuccessfulNarratorAttempt,
   getSettledTurnPacket,
+  getTurnSagaSnapshotRecovery,
   getTurnSaga,
   hasPreparedSettledTurnPacketRecovery,
   heartbeatTurnSagaWorker,
   markTurnSagaFinalized,
   markTurnSagaFinalizedIfNeeded,
+  markTurnSagaFailedStateCorruption,
   mergeTurnSagaProvenance,
   persistOracleDecision,
   persistSettledTurnPacket,
@@ -179,6 +181,7 @@ import {
   type TurnSagaRecord,
   type TurnSagaStatus,
 } from "./turn-saga.js";
+import { restoreSnapshot } from "./state-snapshot.js";
 import {
   buildScopedForecastExcerpt,
   loadWorldTrajectoryForecast,
@@ -4141,22 +4144,6 @@ function isPendingNarrationStatus(status: TurnSagaStatus): boolean {
   );
 }
 
-function buildPendingSettledTurnEvent(saga: TurnSagaRecord): TurnEvent {
-  return {
-    type: "error",
-    data: {
-      error:
-        "Turn resolution is already claimed but no settled narration packet is durable yet.",
-      pendingNarration: true,
-      pendingSettledTurnPacket: true,
-      resumable: false,
-      sagaId: saga.id,
-      turnId: saga.turnId,
-      status: saga.status,
-    },
-  };
-}
-
 function buildPostTurnIdempotencyKey(input: {
   campaignId: string;
   turnId?: string;
@@ -4232,6 +4219,97 @@ function appendAssistantNarrationForResume(input: {
   });
 }
 
+function assistantProjectionDigest(input: {
+  settledTurnPacketId: string;
+  narratorAttemptId: string;
+  narrativeText: string;
+}): string {
+  return createHash("sha256")
+    .update(JSON.stringify({
+      projectionAction: "assistant_message_append",
+      settledTurnPacketId: input.settledTurnPacketId,
+      narratorAttemptId: input.narratorAttemptId,
+      narrativeText: input.narrativeText,
+    }))
+    .digest("hex");
+}
+
+async function restoreStrandedWorldConsequenceSaga(
+  saga: TurnSagaRecord,
+): Promise<TurnEvent> {
+  const snapshot = getTurnSagaSnapshotRecovery({ sagaId: saga.id });
+  if (snapshot) {
+    try {
+      await restoreSnapshot(saga.campaignId, {
+        campaignId: saga.campaignId,
+        bundleDir: snapshot.bundleDir,
+        capturedAt: snapshot.capturedAt ?? Date.now(),
+      });
+      log.event("turn.recovery.pre_settled_snapshot_restored", {
+        sagaId: saga.id,
+        turnId: saga.turnId,
+      });
+      return {
+        type: "error",
+        data: {
+          error:
+            "Turn recovery restored the pre-turn boundary before settled narration was durable. Please try the action again.",
+          pendingNarration: false,
+          restored: true,
+          retryable: true,
+          recoveryState: "pre_turn_snapshot_restored",
+        },
+      };
+    } catch (error) {
+      log.error(
+        "Turn recovery could not restore verified pre-turn snapshot for pre-settled saga",
+        error,
+      );
+      try {
+        markTurnSagaFailedStateCorruption({
+          sagaId: saga.id,
+          reason:
+            "Pre-settled turn snapshot restore failed; recovery evidence is not trusted.",
+        });
+      } catch (markError) {
+        log.error("Turn recovery could not mark pre-settled saga as failed", markError);
+      }
+      return {
+        type: "error",
+        data: {
+          error:
+            "Turn recovery could not restore the verified pre-turn boundary. Manual recovery is required before this turn can be trusted.",
+          pendingNarration: false,
+          restored: false,
+          retryable: false,
+          recoveryState: "manual_recovery_required",
+        },
+      };
+    }
+  }
+
+  markTurnSagaFailedStateCorruption({
+    sagaId: saga.id,
+    reason:
+      "World consequences reached recovery without a settled packet, prepared packet, or pre-turn snapshot.",
+  });
+  log.error(
+    "Turn recovery marked saga failed_state_corruption after pre-settled recovery evidence was missing",
+    { sagaId: saga.id, turnId: saga.turnId },
+  );
+  return {
+    type: "error",
+    data: {
+      error:
+        "Turn recovery could not verify a safe pre-turn restore point. Manual recovery is required before this turn can be trusted.",
+      pendingNarration: false,
+      restored: false,
+      retryable: false,
+      recoveryState: "manual_recovery_required",
+    },
+  };
+}
+
 function recordLiveTurnAuthorityStage(input: {
   saga: TurnSagaRecord;
   stage: TurnAuthorityStage;
@@ -4304,7 +4382,7 @@ export async function* resumePendingTurnNarration(
     && !settledPacketBeforeClaim
     && !hasPreparedSettledPacketRecovery
   ) {
-    yield buildPendingSettledTurnEvent(saga);
+    yield await restoreStrandedWorldConsequenceSaga(saga);
     return;
   }
 
@@ -4343,6 +4421,17 @@ export async function* resumePendingTurnNarration(
     if (!settledPacket) {
       throw new Error(`SettledTurnPacket not found for pending turn ${turnId}.`);
     }
+    const stageSaga = getTurnSaga({ sagaId: lockedSaga.id }) ?? lockedSaga;
+    recordLiveTurnAuthorityStage({
+      saga: stageSaga,
+      stage: "settled_packet_persisted",
+      resultWorldVersion: settledPacket.resultWorldVersion,
+      settledTurnPacketId: settledPacket.id,
+      lockToken: claim.lockToken,
+      payload: {
+        settledTurnPacketId: settledPacket.id,
+      },
+    });
     const storedNarratorPacket = requireNarratorPacket(settledPacket.narratorPacket);
     const narratorPacket = repairStalePerceivableObservations(
       repairModelGuidancePerceivableResponses(
@@ -4435,12 +4524,39 @@ export async function* resumePendingTurnNarration(
       resumeSaga = getTurnSaga({ sagaId: resumeSaga.id }) ?? resumeSaga;
     }
 
+    recordLiveTurnAuthorityStage({
+      saga: resumeSaga,
+      stage: "narration_accepted",
+      resultWorldVersion: settledPacket.resultWorldVersion,
+      settledTurnPacketId: settledPacket.id,
+      lockToken: claim.lockToken,
+      payload: {
+        narratorAttemptId: narration.narratorAttemptId,
+      },
+    });
     resumeSaga = appendAssistantNarrationForResume({
       campaignId,
       saga: resumeSaga,
       narratorAttemptId: narration.narratorAttemptId,
       narrativeText: narration.narrativeText,
       lockToken: claim.lockToken,
+    });
+    recordLiveTurnAuthorityStage({
+      saga: resumeSaga,
+      stage: "public_projection_committed",
+      resultWorldVersion: settledPacket.resultWorldVersion,
+      settledTurnPacketId: settledPacket.id,
+      lockToken: claim.lockToken,
+      payload: {
+        narratorAttemptId: narration.narratorAttemptId,
+        projectionAction: "assistant_message_append",
+        projectionDigest: assistantProjectionDigest({
+          settledTurnPacketId: settledPacket.id,
+          narratorAttemptId: narration.narratorAttemptId,
+          narrativeText: narration.narrativeText,
+        }),
+        assistantMessageChars: narration.narrativeText.length,
+      },
     });
     yield { type: "narrative", data: { text: narration.narrativeText } };
 
@@ -4495,6 +4611,18 @@ export async function* resumePendingTurnNarration(
     }
 
     workerHeartbeat.heartbeat();
+    recordLiveTurnAuthorityStage({
+      saga: resumeSaga,
+      stage: "turn_finalized",
+      resultWorldVersion: settledPacket.resultWorldVersion,
+      settledTurnPacketId: settledPacket.id,
+      lockToken: claim.lockToken,
+      payload: {
+        narratorAttemptId: narration.narratorAttemptId,
+        tick,
+      },
+    });
+    assertTurnAuthorityStagesComplete({ sagaId: resumeSaga.id });
     markTurnSagaFinalizedIfNeeded({
       sagaId: lockedSaga.id,
       narratorAttemptId: narration.narratorAttemptId,
@@ -5850,14 +5978,11 @@ async function* processTurnScenePlan(
     );
 
     if (narrativeText) {
-      const projectionDigest = createHash("sha256")
-        .update(JSON.stringify({
-          projectionAction: "assistant_message_append",
-          settledTurnPacketId: settledPacket.id,
-          narratorAttemptId: narration.narratorAttemptId,
-          narrativeText,
-        }))
-        .digest("hex");
+      const projectionDigest = assistantProjectionDigest({
+        settledTurnPacketId: settledPacket.id,
+        narratorAttemptId: narration.narratorAttemptId,
+        narrativeText,
+      });
       turnSaga = appendAssistantNarrationForResume({
         campaignId,
         saga: turnSaga,

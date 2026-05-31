@@ -101,6 +101,7 @@ vi.mock("../../db/index.js", () => ({
 const mockGetSettledTurnPacket = vi.fn((_input?: unknown) => null);
 const mockGetTurnSaga = vi.fn((_input?: unknown) => null);
 const mockHasPreparedSettledTurnPacketRecovery = vi.fn((_input?: unknown) => false);
+const mockHasTurnSagaSnapshotRecovery = vi.fn((_input?: unknown) => false);
 
 vi.mock("../../engine/index.js", () => ({
   processTurn: vi.fn(),
@@ -112,6 +113,7 @@ vi.mock("../../engine/index.js", () => ({
   getSettledTurnPacket: (input: unknown) => mockGetSettledTurnPacket(input),
   hasPreparedSettledTurnPacketRecovery: (input: unknown) =>
     mockHasPreparedSettledTurnPacketRecovery(input),
+  hasTurnSagaSnapshotRecovery: (input: unknown) => mockHasTurnSagaSnapshotRecovery(input),
   getTurnSaga: (input: unknown) => mockGetTurnSaga(input),
   PendingNarrationError: class PendingNarrationError extends Error {
     constructor(public readonly pendingSaga: unknown) {
@@ -370,6 +372,7 @@ beforeEach(() => {
   mockRetractPendingCommittedEventsForTick.mockResolvedValue([]);
   mockGetSettledTurnPacket.mockReturnValue(null);
   mockHasPreparedSettledTurnPacketRecovery.mockReturnValue(false);
+  mockHasTurnSagaSnapshotRecovery.mockReturnValue(false);
   runtimeSnapshots.clear();
   runtimeSnapshotMetadata.clear();
   runtimeActiveTurns.clear();
@@ -485,6 +488,32 @@ describe("GET /chat/history", () => {
     expect(JSON.stringify(body)).not.toContain("world_consequence_running");
     expect(JSON.stringify(body)).not.toContain("saga-prepared-history");
     expect(JSON.stringify(body)).not.toContain("turn-prepared-history");
+  });
+
+  it("marks pre-turn snapshot recovery as resumable without exposing saga internals", async () => {
+    activateCampaign();
+    mockedFindPendingNarrationSaga.mockReturnValue({
+      id: "saga-snapshot-history",
+      campaignId: CAMPAIGN_ID,
+      turnId: "turn-snapshot-history",
+      status: "world_consequence_running",
+      settledTurnPacketId: null,
+    } as any);
+    mockHasTurnSagaSnapshotRecovery.mockReturnValue(true);
+
+    const res = await app.request(`/chat/history?campaignId=${CAMPAIGN_ID}`);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.pendingNarration).toMatchObject({
+      pendingNarration: true,
+      resumable: true,
+      recoveryState: "resume_ready",
+      resumeToken: expect.stringMatching(/^resume_/),
+    });
+    expect(JSON.stringify(body)).not.toContain("world_consequence_running");
+    expect(JSON.stringify(body)).not.toContain("saga-snapshot-history");
+    expect(JSON.stringify(body)).not.toContain("turn-snapshot-history");
   });
 
   it("returns 404 when the requested campaign cannot be loaded", async () => {
@@ -2677,6 +2706,61 @@ describe("Campaign-loaded gameplay transport", () => {
     expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
     expect(mockedGetLastPlayerAction).not.toHaveBeenCalled();
     expect(mockedQueuePostTurnSimulationProposals).not.toHaveBeenCalled();
+  });
+
+  it("routes pre-turn snapshot recovery through /chat/resume for pre-settled crash states", async () => {
+    setupStoryteller();
+    setupDbMock();
+    const pendingSaga = {
+      id: "saga-snapshot-resume",
+      campaignId: CAMPAIGN_ID,
+      turnId: "turn-snapshot-resume",
+      status: "world_consequence_running",
+      settledTurnPacketId: null,
+    } as any;
+
+    mockedGetActive.mockReturnValue(null as any);
+    mockedLoadCampaign.mockImplementation(async (campaignId) => ({
+      id: campaignId,
+      name: `Campaign ${campaignId}`,
+      createdAt: "2026-01-01",
+    }) as any);
+    mockedFindPendingNarrationSaga.mockReturnValue(pendingSaga);
+    mockHasTurnSagaSnapshotRecovery.mockReturnValue(true);
+    mockedResumePendingTurnNarration.mockImplementation(() =>
+      createTurnStream([
+        {
+          type: "error",
+          data: {
+            error: "Turn recovery restored the pre-turn boundary. Please try the action again.",
+            pendingNarration: false,
+            restored: true,
+            retryable: true,
+            recoveryState: "pre_turn_snapshot_restored",
+          },
+        },
+      ]) as any,
+    );
+
+    const res = await app.request("/chat/resume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ campaignId: CAMPAIGN_ID, resumeToken: "resume_deadbeefcafef00d" }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("pre_turn_snapshot_restored");
+    expect(body).not.toContain("saga-snapshot-resume");
+    expect(body).not.toContain("turn-snapshot-resume");
+    expect(mockedResumePendingTurnNarration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        campaignId: CAMPAIGN_ID,
+        turnId: "turn-snapshot-resume",
+      }),
+    );
+    expect(mockedProcessTurn).not.toHaveBeenCalled();
+    expect(mockedRestoreSnapshot).not.toHaveBeenCalled();
   });
 });
 

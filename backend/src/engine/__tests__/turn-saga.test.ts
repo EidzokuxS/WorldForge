@@ -25,7 +25,9 @@ import {
   findPendingNarrationSaga,
   findLatestSuccessfulNarratorAttempt,
   getSettledTurnPacket,
+  getTurnSagaSnapshotRecovery,
   getTurnSaga,
+  hasTurnSagaSnapshotRecovery,
   heartbeatTurnSagaWorker,
   markTurnSagaFailedStateCorruption,
   markTurnSagaFinalized,
@@ -307,6 +309,29 @@ describe("turn saga persistence", () => {
     expect(events.every((event) =>
       Boolean((event.payload as { contract?: unknown }).contract)
     )).toBe(true);
+  });
+
+  it("derives pre-turn snapshot recovery from the snapshot authority stage", () => {
+    createSaga("saga-snapshot-recovery", "turn-snapshot-recovery");
+
+    expect(getTurnSagaSnapshotRecovery({ sagaId: "saga-snapshot-recovery" })).toBeNull();
+    expect(hasTurnSagaSnapshotRecovery({ sagaId: "saga-snapshot-recovery" })).toBe(false);
+
+    recordTurnAuthorityStage({
+      sagaId: "saga-snapshot-recovery",
+      stage: "snapshot_taken",
+      payload: {
+        provided: true,
+        bundleDir: "R:\\WorldForge\\campaigns\\test\\.turn-boundaries\\last-turn-boundary",
+        capturedAt: 12_345,
+      },
+    });
+
+    expect(getTurnSagaSnapshotRecovery({ sagaId: "saga-snapshot-recovery" })).toEqual({
+      bundleDir: "R:\\WorldForge\\campaigns\\test\\.turn-boundaries\\last-turn-boundary",
+      capturedAt: 12_345,
+    });
+    expect(hasTurnSagaSnapshotRecovery({ sagaId: "saga-snapshot-recovery" })).toBe(true);
   });
 
   it("rejects incomplete or out-of-order turn authority stage audit trails", () => {

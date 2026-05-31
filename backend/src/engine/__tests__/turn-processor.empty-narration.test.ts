@@ -260,9 +260,11 @@ vi.mock("../turn-saga.js", () => ({
   getSettledTurnPacket: vi.fn(),
   getTurnSaga: getTurnSagaMock,
   heartbeatTurnSagaWorker: vi.fn(),
+  getTurnSagaSnapshotRecovery: vi.fn(() => null),
   hasPreparedSettledTurnPacketRecovery: vi.fn(() => false),
   markTurnSagaFinalized: markTurnSagaFinalizedMock,
   markTurnSagaFinalizedIfNeeded: vi.fn(),
+  markTurnSagaFailedStateCorruption: vi.fn(),
   mergeTurnSagaProvenance: vi.fn(),
   PendingSettledTurnNarrationError: class PendingSettledTurnNarrationError extends Error {
     constructor(
@@ -287,6 +289,10 @@ vi.mock("../turn-saga.js", () => ({
   recoverSettledTurnPacketFromPreparedEvent: vi.fn(() => null),
   transitionTurnSagaStatus: transitionTurnSagaStatusMock,
   updateNarratorAttemptOutcome: updateNarratorAttemptOutcomeMock,
+}));
+
+vi.mock("../state-snapshot.js", () => ({
+  restoreSnapshot: vi.fn(),
 }));
 
 vi.mock("../world-forecast.js", () => ({

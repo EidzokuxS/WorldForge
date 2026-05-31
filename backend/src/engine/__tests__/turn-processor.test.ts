@@ -19,10 +19,12 @@ const {
   getTurnSagaMock,
   findLatestSuccessfulNarratorAttemptMock,
   hasPreparedSettledTurnPacketRecoveryMock,
+  getTurnSagaSnapshotRecoveryMock,
   heartbeatTurnSagaWorkerMock,
   assertTurnAuthorityStagesCompleteMock,
   markTurnSagaFinalizedMock,
   markTurnSagaFinalizedIfNeededMock,
+  markTurnSagaFailedStateCorruptionMock,
   mergeTurnSagaProvenanceMock,
   persistOracleDecisionMock,
   persistSettledTurnPacketMock,
@@ -36,6 +38,7 @@ const {
   transitionTurnSagaStatusMock,
   updateNarratorAttemptOutcomeMock,
   recoverSettledTurnPacketFromPreparedEventMock,
+  restoreSnapshotMock,
 } = vi.hoisted(() => ({
   logEventMock: vi.fn(),
   logInfoMock: vi.fn(),
@@ -53,10 +56,12 @@ const {
   getTurnSagaMock: vi.fn(),
   findLatestSuccessfulNarratorAttemptMock: vi.fn(),
   hasPreparedSettledTurnPacketRecoveryMock: vi.fn(),
+  getTurnSagaSnapshotRecoveryMock: vi.fn(),
   heartbeatTurnSagaWorkerMock: vi.fn(),
   assertTurnAuthorityStagesCompleteMock: vi.fn(),
   markTurnSagaFinalizedMock: vi.fn(),
   markTurnSagaFinalizedIfNeededMock: vi.fn(),
+  markTurnSagaFailedStateCorruptionMock: vi.fn(),
   mergeTurnSagaProvenanceMock: vi.fn(),
   persistOracleDecisionMock: vi.fn(),
   persistSettledTurnPacketMock: vi.fn(),
@@ -70,6 +75,7 @@ const {
   transitionTurnSagaStatusMock: vi.fn(),
   updateNarratorAttemptOutcomeMock: vi.fn(),
   recoverSettledTurnPacketFromPreparedEventMock: vi.fn(),
+  restoreSnapshotMock: vi.fn(),
 }));
 
 vi.mock("../../db/index.js", () => ({
@@ -271,11 +277,13 @@ vi.mock("../turn-saga.js", () => ({
   createTurnSaga: createTurnSagaMock,
   findLatestSuccessfulNarratorAttempt: findLatestSuccessfulNarratorAttemptMock,
   getSettledTurnPacket: getSettledTurnPacketMock,
+  getTurnSagaSnapshotRecovery: getTurnSagaSnapshotRecoveryMock,
   getTurnSaga: getTurnSagaMock,
   hasPreparedSettledTurnPacketRecovery: hasPreparedSettledTurnPacketRecoveryMock,
   markTurnSagaFinalized: markTurnSagaFinalizedMock,
   heartbeatTurnSagaWorker: heartbeatTurnSagaWorkerMock,
   markTurnSagaFinalizedIfNeeded: markTurnSagaFinalizedIfNeededMock,
+  markTurnSagaFailedStateCorruption: markTurnSagaFailedStateCorruptionMock,
   mergeTurnSagaProvenance: mergeTurnSagaProvenanceMock,
   persistOracleDecision: persistOracleDecisionMock,
   persistSettledTurnPacket: persistSettledTurnPacketMock,
@@ -286,6 +294,10 @@ vi.mock("../turn-saga.js", () => ({
   recoverSettledTurnPacketFromPreparedEvent: recoverSettledTurnPacketFromPreparedEventMock,
   transitionTurnSagaStatus: transitionTurnSagaStatusMock,
   updateNarratorAttemptOutcome: updateNarratorAttemptOutcomeMock,
+}));
+
+vi.mock("../state-snapshot.js", () => ({
+  restoreSnapshot: restoreSnapshotMock,
 }));
 
 vi.mock("../scene-plan-validator.js", () => {
@@ -1292,6 +1304,7 @@ function setupTurnSagaMocks(overrides: {
   getTurnSagaMock.mockImplementation(() => saga);
   getSettledTurnPacketMock.mockImplementation(() => settledPacket);
   hasPreparedSettledTurnPacketRecoveryMock.mockReturnValue(false);
+  getTurnSagaSnapshotRecoveryMock.mockReturnValue(null);
   recordPreparedSettledTurnPacketMock.mockImplementation(() => ({
     id: "prepared-event-1",
     sagaId: saga.id,
@@ -1321,6 +1334,14 @@ function setupTurnSagaMocks(overrides: {
     createdAt: 0,
   }));
   assertTurnAuthorityStagesCompleteMock.mockReturnValue([]);
+  markTurnSagaFailedStateCorruptionMock.mockImplementation((input: { reason: string }) => {
+    saga = {
+      ...saga,
+      status: "failed_state_corruption",
+      statusReason: input.reason,
+    };
+    return saga;
+  });
   recoverSettledTurnPacketFromPreparedEventMock.mockImplementation(() => {
     saga = {
       ...saga,
@@ -8185,7 +8206,7 @@ describe("processTurn ScenePlan path", () => {
     expect(events.some((event) => event.type === "done")).toBe(false);
   });
 
-  it("surfaces pre-settled world consequence blockers without starting paid or narration work", async () => {
+  it("marks pre-settled world consequence blockers as failed when no snapshot recovery exists", async () => {
     setupMocks();
     setupTurnSagaMocks({ status: "world_consequence_running", turnId: "pending-turn" });
     getSettledTurnPacketMock.mockReturnValue(null);
@@ -8204,15 +8225,17 @@ describe("processTurn ScenePlan path", () => {
       {
         type: "error",
         data: expect.objectContaining({
-          pendingNarration: true,
-          pendingSettledTurnPacket: true,
-          resumable: false,
-          sagaId: "saga-1",
-          turnId: "pending-turn",
-          status: "world_consequence_running",
+          pendingNarration: false,
+          restored: false,
+          retryable: false,
+          recoveryState: "manual_recovery_required",
         }),
       },
     ]);
+    expect(markTurnSagaFailedStateCorruptionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ sagaId: "saga-1" }),
+    );
+    expect(restoreSnapshotMock).not.toHaveBeenCalled();
     expect(claimTurnSagaWorkerMock).not.toHaveBeenCalled();
     expect(assembleFinalNarrationPrompt).not.toHaveBeenCalled();
     expect(runVisibleNarrationWithPacketGuard).not.toHaveBeenCalled();
@@ -8276,6 +8299,13 @@ describe("processTurn ScenePlan path", () => {
       "resolved_pending_narration",
       "narrator_rendering",
     ]);
+    expect(recordTurnAuthorityStageMock.mock.calls.map(([input]) => input.stage)).toEqual([
+      "settled_packet_persisted",
+      "narration_accepted",
+      "public_projection_committed",
+      "turn_finalized",
+    ]);
+    expect(assertTurnAuthorityStagesCompleteMock).toHaveBeenCalledWith({ sagaId: "saga-1" });
     expect(events).toEqual(
       expect.arrayContaining([
         { type: "narrative", data: { text: "The recovered prepared packet narrates cleanly." } },
@@ -8561,6 +8591,95 @@ describe("processTurn ScenePlan path", () => {
       expect.objectContaining({ narratorPacket: packetArg }),
     );
     expect(callOracle).not.toHaveBeenCalled();
+    expect(runGmToolLoop).not.toHaveBeenCalled();
+  });
+
+  it("restores the pre-turn snapshot for a post-consequence no-packet crash", async () => {
+    setupMocks();
+    setupTurnSagaMocks({ status: "world_consequence_running", turnId: "pending-turn" });
+    getSettledTurnPacketMock.mockReturnValue(null);
+    getTurnSagaSnapshotRecoveryMock.mockReturnValue({
+      bundleDir: "R:\\WorldForge\\campaigns\\test\\.turn-boundaries\\last-turn-boundary",
+      capturedAt: 12_345,
+    });
+
+    const events = await collectEvents(
+      resumePendingTurnNarration({
+        campaignId: CAMPAIGN_ID,
+        turnId: "pending-turn",
+        storytellerProvider: createTestOptions().storytellerProvider,
+        storytellerTemperature: 0.8,
+        storytellerMaxTokens: 2000,
+      }),
+    );
+
+    expect(restoreSnapshotMock).toHaveBeenCalledWith(
+      CAMPAIGN_ID,
+      expect.objectContaining({
+        campaignId: CAMPAIGN_ID,
+        bundleDir: "R:\\WorldForge\\campaigns\\test\\.turn-boundaries\\last-turn-boundary",
+        capturedAt: 12_345,
+      }),
+    );
+    expect(events).toEqual([
+      {
+        type: "error",
+        data: expect.objectContaining({
+          pendingNarration: false,
+          restored: true,
+          retryable: true,
+          recoveryState: "pre_turn_snapshot_restored",
+        }),
+      },
+    ]);
+    expect(markTurnSagaFailedStateCorruptionMock).not.toHaveBeenCalled();
+    expect(claimTurnSagaWorkerMock).not.toHaveBeenCalled();
+    expect(assembleFinalNarrationPrompt).not.toHaveBeenCalled();
+    expect(runVisibleNarrationWithPacketGuard).not.toHaveBeenCalled();
+    expect(generateText).not.toHaveBeenCalled();
+    expect(callOracle).not.toHaveBeenCalled();
+    expect(runGmToolLoop).not.toHaveBeenCalled();
+  });
+
+  it("marks a post-consequence no-packet saga failed when snapshot recovery cannot be verified", async () => {
+    setupMocks();
+    setupTurnSagaMocks({ status: "world_consequence_running", turnId: "pending-turn" });
+    getSettledTurnPacketMock.mockReturnValue(null);
+    getTurnSagaSnapshotRecoveryMock.mockReturnValue({
+      bundleDir: "R:\\WorldForge\\campaigns\\test\\.turn-boundaries\\last-turn-boundary",
+      capturedAt: 12_345,
+    });
+    restoreSnapshotMock.mockRejectedValueOnce(new Error("manifest evidence mismatch"));
+
+    const events = await collectEvents(
+      resumePendingTurnNarration({
+        campaignId: CAMPAIGN_ID,
+        turnId: "pending-turn",
+        storytellerProvider: createTestOptions().storytellerProvider,
+        storytellerTemperature: 0.8,
+        storytellerMaxTokens: 2000,
+      }),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "error",
+        data: expect.objectContaining({
+          pendingNarration: false,
+          restored: false,
+          retryable: false,
+          recoveryState: "manual_recovery_required",
+        }),
+      },
+    ]);
+    expect(markTurnSagaFailedStateCorruptionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sagaId: "saga-1",
+        reason: expect.stringContaining("snapshot restore failed"),
+      }),
+    );
+    expect(claimTurnSagaWorkerMock).not.toHaveBeenCalled();
+    expect(runVisibleNarrationWithPacketGuard).not.toHaveBeenCalled();
     expect(runGmToolLoop).not.toHaveBeenCalled();
   });
 

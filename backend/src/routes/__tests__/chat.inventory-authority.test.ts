@@ -132,6 +132,7 @@ vi.mock("../../engine/index.js", () => ({
   findPendingNarrationSaga: vi.fn(() => null),
   getSettledTurnPacket: vi.fn(() => null),
   hasPreparedSettledTurnPacketRecovery: vi.fn(() => false),
+  hasTurnSagaSnapshotRecovery: vi.fn(() => false),
   NarrationRepairExhaustedError: class NarrationRepairExhaustedError extends Error {},
   PendingNarrationError: class PendingNarrationError extends Error {},
   tickPresentNpcs: vi.fn(async () => []),
