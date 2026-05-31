@@ -1512,6 +1512,118 @@ describe("GET /:id/locations/:locId/entities", () => {
     expectJsonNotToContain(body, ["loc-1", "npc-1", "item-1", CAMPAIGN_ID]);
   });
 
+  it("resolves current_scene through backend player state and projects only public handles", async () => {
+    mockedGetActive.mockReturnValue({
+      id: CAMPAIGN_ID,
+      name: "Test",
+      createdAt: "2026-01-01",
+      generationComplete: true,
+    } as any);
+
+    const mockGet = vi.fn(() => ({
+      currentLocationId: "loc-broad",
+      currentSceneLocationId: "loc-scene",
+    }));
+    const mockAll = vi.fn()
+      .mockReturnValueOnce([{ id: "loc-broad" }, { id: "loc-scene" }])
+      .mockReturnValueOnce([{
+        id: "npc-scene",
+        name: "Scene Warden",
+        tags: "[\"visible\"]",
+        tier: "key",
+      }])
+      .mockReturnValueOnce([{ id: "item-scene", name: "Scene Ledger", tags: "[\"document\"]" }]);
+    const mockWhere = vi.fn(() => ({ get: mockGet, all: mockAll }));
+    const mockFrom = vi.fn(() => ({ where: mockWhere }));
+    const mockSelect = vi.fn(() => ({ from: mockFrom }));
+
+    mockedGetDb.mockReturnValue({
+      select: mockSelect,
+    } as any);
+
+    const res = await app.request(
+      `/api/campaigns/${CAMPAIGN_ID}/locations/current_scene/entities`,
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.npcs).toEqual([
+      expect.objectContaining({
+        id: expect.stringMatching(/^pdto_actor_[a-f0-9]{32}$/),
+        actorHandle: expect.stringMatching(/^pdto_actor_[a-f0-9]{32}$/),
+        name: "Scene Warden",
+        tags: "[\"visible\"]",
+        tier: "key",
+      }),
+    ]);
+    expect(body.items).toEqual([
+      expect.objectContaining({
+        id: expect.stringMatching(/^pdto_item_[a-f0-9]{32}$/),
+        itemHandle: expect.stringMatching(/^pdto_item_[a-f0-9]{32}$/),
+        name: "Scene Ledger",
+        tags: "[\"document\"]",
+      }),
+    ]);
+    expectJsonNotToContain(body, [
+      "loc-broad",
+      "loc-scene",
+      "npc-scene",
+      "item-scene",
+      CAMPAIGN_ID,
+      "current_scene",
+    ]);
+  });
+
+  it("resolves current_location through backend player state without accepting raw ids", async () => {
+    mockedGetActive.mockReturnValue({
+      id: CAMPAIGN_ID,
+      name: "Test",
+      createdAt: "2026-01-01",
+      generationComplete: true,
+    } as any);
+
+    const mockGet = vi.fn(() => ({
+      currentLocationId: "loc-broad",
+      currentSceneLocationId: "loc-scene",
+    }));
+    const mockAll = vi.fn()
+      .mockReturnValueOnce([{ id: "loc-broad" }, { id: "loc-scene" }])
+      .mockReturnValueOnce([{ id: "npc-broad", name: "Gate Guard", tags: "[]", tier: "minor" }])
+      .mockReturnValueOnce([{ id: "item-broad", name: "Gate Sign", tags: "[]" }]);
+    const mockWhere = vi.fn(() => ({ get: mockGet, all: mockAll }));
+    const mockFrom = vi.fn(() => ({ where: mockWhere }));
+    const mockSelect = vi.fn(() => ({ from: mockFrom }));
+
+    mockedGetDb.mockReturnValue({
+      select: mockSelect,
+    } as any);
+
+    const res = await app.request(
+      `/api/campaigns/${CAMPAIGN_ID}/locations/current_location/entities`,
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.npcs[0]).toMatchObject({
+      id: expect.stringMatching(/^pdto_actor_[a-f0-9]{32}$/),
+      actorHandle: expect.stringMatching(/^pdto_actor_[a-f0-9]{32}$/),
+      name: "Gate Guard",
+    });
+    expect(body.items[0]).toMatchObject({
+      id: expect.stringMatching(/^pdto_item_[a-f0-9]{32}$/),
+      itemHandle: expect.stringMatching(/^pdto_item_[a-f0-9]{32}$/),
+      name: "Gate Sign",
+    });
+    expectJsonNotToContain(body, [
+      "loc-broad",
+      "loc-scene",
+      "npc-broad",
+      "item-broad",
+      CAMPAIGN_ID,
+      "current_location",
+    ]);
+  });
+
   it("rejects raw location ids at the public route boundary", async () => {
     mockedGetActive.mockReturnValue({
       id: CAMPAIGN_ID,

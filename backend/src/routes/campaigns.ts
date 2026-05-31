@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { Hono } from "hono";
 import {
   assertSafeId,
@@ -88,6 +88,39 @@ function resolvePublicCheckpointMeta(
     handle: checkpointHandle,
     rows: listCheckpoints(campaignId),
   });
+}
+
+function resolveLocationEntitiesTarget(input: {
+  campaignId: string;
+  db: ReturnType<typeof getDb>;
+  locHandle: string;
+  locations: Array<{ id: string }>;
+}): { id: string } | null {
+  if (input.locHandle !== "current_scene" && input.locHandle !== "current_location") {
+    return resolvePublicDtoHandle({
+      campaignId: input.campaignId,
+      kind: "place",
+      handle: input.locHandle,
+      rows: input.locations,
+    });
+  }
+
+  const player = input.db
+    .select({
+      currentLocationId: players.currentLocationId,
+      currentSceneLocationId: players.currentSceneLocationId,
+    })
+    .from(players)
+    .where(eq(players.campaignId, input.campaignId))
+    .get();
+  if (!player?.currentLocationId) {
+    return null;
+  }
+
+  const targetId = input.locHandle === "current_scene"
+    ? player.currentSceneLocationId ?? player.currentLocationId
+    : player.currentLocationId;
+  return input.locations.find((location) => location.id === targetId) ?? null;
 }
 
 function sanitizeCharacterDraftForPublicProjection<T extends ReturnType<typeof toCharacterDraft>>(
@@ -668,11 +701,11 @@ app.get("/:id/locations/:locId/entities", (c) => {
       .from(locations)
       .where(eq(locations.campaignId, id))
       .all();
-    const resolvedLocation = resolvePublicDtoHandle({
+    const resolvedLocation = resolveLocationEntitiesTarget({
       campaignId: id,
-      kind: "place",
-      handle: locHandle,
-      rows: campaignLocations,
+      db,
+      locHandle,
+      locations: campaignLocations,
     });
     if (!resolvedLocation) {
       return c.json({ error: "Location not found." }, 404);
@@ -686,7 +719,13 @@ app.get("/:id/locations/:locId/entities", (c) => {
         tier: npcs.tier,
       })
       .from(npcs)
-      .where(and(eq(npcs.campaignId, id), eq(npcs.currentLocationId, resolvedLocation.id)))
+      .where(and(
+        eq(npcs.campaignId, id),
+        or(
+          eq(npcs.currentLocationId, resolvedLocation.id),
+          eq(npcs.currentSceneLocationId, resolvedLocation.id),
+        ),
+      ))
       .all();
 
     const locationItems = db
