@@ -18,7 +18,9 @@ import {
 import {
   createCampaignStoreBundleManifest,
   writeCampaignStoreBundleManifest,
+  assertCampaignStoreBundleEvidenceMatchesManifest,
   assertCampaignStoreBundleRestorableWithEvidence,
+  readCampaignStoreBundleManifestDigest,
   STORE_BUNDLE_MANIFEST_FILENAME,
   type CampaignStoreBundlePurpose,
 } from "./store-manifest.js";
@@ -49,6 +51,7 @@ type RestoreJournal = {
   schemaVersion: 1;
   campaignId: string;
   bundleDir: string;
+  sourceManifestDigest: string;
   includeVectors: boolean;
   stagedDir: string;
   restoreReason: string;
@@ -119,6 +122,7 @@ function readRestoreJournal(campaignDir: string): RestoreJournal | null {
     (parsed as RestoreJournal).schemaVersion !== 1 ||
     typeof (parsed as RestoreJournal).campaignId !== "string" ||
     typeof (parsed as RestoreJournal).bundleDir !== "string" ||
+    typeof (parsed as RestoreJournal).sourceManifestDigest !== "string" ||
     typeof (parsed as RestoreJournal).stagedDir !== "string" ||
     typeof (parsed as RestoreJournal).includeVectors !== "boolean" ||
     typeof (parsed as RestoreJournal).requiresEpisodicRebuild !== "boolean" ||
@@ -245,6 +249,17 @@ async function assertStagedRestoreFiles(journal: RestoreJournal): Promise<Return
   }
   await assertCampaignStoreBundleRestorableWithEvidence({
     bundleDir: journal.stagedDir,
+    includeVectors: journal.includeVectors,
+  });
+  const actualSourceManifestDigest = readCampaignStoreBundleManifestDigest(journal.bundleDir);
+  if (actualSourceManifestDigest !== journal.sourceManifestDigest) {
+    throw new Error(
+      `Pending restore journal source manifest digest mismatch for ${journal.bundleDir}.`,
+    );
+  }
+  await assertCampaignStoreBundleEvidenceMatchesManifest({
+    manifestDir: journal.bundleDir,
+    evidenceDir: journal.stagedDir,
     includeVectors: journal.includeVectors,
   });
   return stagedPaths;
@@ -411,6 +426,7 @@ export async function restoreCampaignBundle(
     schemaVersion: 1,
     campaignId,
     bundleDir,
+    sourceManifestDigest: readCampaignStoreBundleManifestDigest(bundleDir),
     includeVectors: options.includeVectors,
     stagedDir: path.dirname(stagedPaths.dbPath),
     restoreReason:

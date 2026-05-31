@@ -321,6 +321,14 @@ export function readCampaignStoreBundleManifest(bundleDir: string): CampaignStor
   return assertCampaignStoreBundleManifest(parsed);
 }
 
+export function readCampaignStoreBundleManifestDigest(bundleDir: string): string {
+  const manifestPath = path.join(bundleDir, STORE_BUNDLE_MANIFEST_FILENAME);
+  if (!fs.existsSync(manifestPath)) {
+    throw new Error(`Campaign store bundle manifest is missing: ${manifestPath}`);
+  }
+  return fileDigest(manifestPath);
+}
+
 function findStore(
   manifest: CampaignStoreBundleManifest,
   store: string,
@@ -441,21 +449,39 @@ export function assertCampaignStoreBundleRestorable(input: {
   includeVectors: boolean;
 }): CampaignStoreBundleManifest {
   const manifest = readCampaignStoreBundleManifest(input.bundleDir);
+  return assertCampaignStoreBundleRestorableAgainstManifest({
+    manifest,
+    evidenceDir: input.bundleDir,
+    includeVectors: input.includeVectors,
+  });
+}
+
+function assertCampaignStoreBundleRestorableAgainstManifest(input: {
+  manifest: CampaignStoreBundleManifest;
+  evidenceDir: string;
+  includeVectors: boolean;
+}): CampaignStoreBundleManifest {
+  const { manifest, evidenceDir, includeVectors } = input;
+  if (manifest.includeVectors !== includeVectors) {
+    throw new Error(
+      `Campaign store bundle manifest includeVectors mismatch: expected ${includeVectors}, got ${manifest.includeVectors}.`,
+    );
+  }
   assertCapturedFile({
     manifest,
-    bundleDir: input.bundleDir,
+    bundleDir: evidenceDir,
     store: "sqlite:campaigns",
     relativePath: "state.db",
   });
   assertCapturedFile({
     manifest,
-    bundleDir: input.bundleDir,
+    bundleDir: evidenceDir,
     store: "json:config",
     relativePath: "config.json",
   });
   assertCapturedFile({
     manifest,
-    bundleDir: input.bundleDir,
+    bundleDir: evidenceDir,
     store: "json:chat_history",
     relativePath: "chat_history.json",
   });
@@ -464,8 +490,8 @@ export function assertCampaignStoreBundleRestorable(input: {
     findStore(manifest, "vectors:episodic_events"),
     findStore(manifest, "vectors:lore_cards"),
   ];
-  if (input.includeVectors) {
-    if (!fs.existsSync(path.join(input.bundleDir, "vectors"))) {
+  if (includeVectors) {
+    if (!fs.existsSync(path.join(evidenceDir, "vectors"))) {
       throw new Error("Campaign store bundle vectors directory is missing.");
     }
     for (const vectorEntry of vectorEntries) {
@@ -475,7 +501,7 @@ export function assertCampaignStoreBundleRestorable(input: {
       if (typeof vectorEntry.rowCount !== "number" || vectorEntry.rowCount < 0) {
         throw new Error(`Campaign store bundle vector row count is missing for ${vectorEntry.store}.`);
       }
-      if (vectorEntry.bundlePath !== null && !fs.existsSync(path.join(input.bundleDir, vectorEntry.bundlePath))) {
+      if (vectorEntry.bundlePath !== null && !fs.existsSync(path.join(evidenceDir, vectorEntry.bundlePath))) {
         throw new Error(`Campaign store bundle vector table directory is missing for ${vectorEntry.store}.`);
       }
     }
@@ -494,6 +520,28 @@ export async function assertCampaignStoreBundleRestorableWithEvidence(input: {
   await verifyVectorBundleEvidence({
     manifest,
     bundleDir: input.bundleDir,
+    includeVectors: input.includeVectors,
+  });
+  verifyMetadataOnlyEvidence(manifest);
+  return manifest;
+}
+
+export async function assertCampaignStoreBundleEvidenceMatchesManifest(input: {
+  manifestDir: string;
+  evidenceDir: string;
+  includeVectors: boolean;
+}): Promise<CampaignStoreBundleManifest> {
+  const manifest = readCampaignStoreBundleManifest(input.manifestDir);
+  assertCampaignStoreBundleRestorableAgainstManifest({
+    manifest,
+    evidenceDir: input.evidenceDir,
+    includeVectors: input.includeVectors,
+  });
+  verifySqliteBundleEvidence(manifest, input.evidenceDir);
+  verifyJsonBundleEvidence(manifest, input.evidenceDir);
+  await verifyVectorBundleEvidence({
+    manifest,
+    bundleDir: input.evidenceDir,
     includeVectors: input.includeVectors,
   });
   verifyMetadataOnlyEvidence(manifest);

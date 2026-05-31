@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -11,11 +12,17 @@ import {
   PHASE95_REQUIRED_STORE_KEYS,
   PHASE95_SQLITE_STORE_TABLES,
 } from "../../engine/gameplay-control-plane-contract.js";
-import { captureCampaignBundle } from "../restore-bundle.js";
 import {
+  captureCampaignBundle,
+  repairPendingCampaignRestoreBeforeLoad,
+  restoreCampaignBundle,
+} from "../restore-bundle.js";
+import {
+  assertCampaignStoreBundleEvidenceMatchesManifest,
   assertCampaignStoreBundleRestorable,
   assertCampaignStoreBundleRestorableWithEvidence,
   readCampaignStoreBundleManifest,
+  type CampaignStoreBundleManifest,
 } from "../store-manifest.js";
 
 const CAMPAIGN_ID = "manifest-campaign";
@@ -84,6 +91,45 @@ async function seedVectorTables(): Promise<void> {
       vector: [0.4, 0.5, 0.6],
     },
   ]);
+}
+
+function fileDigest(filePath: string): string {
+  return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+}
+
+function readManifestFile(bundleDir: string): CampaignStoreBundleManifest {
+  return JSON.parse(
+    fs.readFileSync(path.join(bundleDir, "store-manifest.json"), "utf-8"),
+  ) as CampaignStoreBundleManifest;
+}
+
+function writeManifestFile(bundleDir: string, manifest: CampaignStoreBundleManifest): void {
+  fs.writeFileSync(
+    path.join(bundleDir, "store-manifest.json"),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    "utf-8",
+  );
+}
+
+function rewriteSqliteManifestEvidence(bundleDir: string): void {
+  const dbPath = path.join(bundleDir, "state.db");
+  const dbHash = fileDigest(dbPath);
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  const manifest = readManifestFile(bundleDir);
+  try {
+    for (const entry of manifest.stores) {
+      if (!entry.store.startsWith("sqlite:")) continue;
+      const tableName = entry.store.slice("sqlite:".length);
+      const row = db
+        .prepare(`SELECT COUNT(*) AS count FROM "${tableName.replace(/"/gu, '""')}"`)
+        .get() as { count: number };
+      entry.evidenceHash = dbHash;
+      entry.rowCount = row.count;
+    }
+  } finally {
+    db.close();
+  }
+  writeManifestFile(bundleDir, manifest);
 }
 
 describe("campaign store bundle manifest", () => {
@@ -237,6 +283,64 @@ describe("campaign store bundle manifest", () => {
       bundleDir,
       includeVectors: false,
     })).rejects.toThrow(/evidence hash mismatch/i);
+  });
+
+  it("compares staged evidence against the source manifest instead of trusting staged self-evidence", async () => {
+    const bundleDir = path.join(campaignDir(), ".turn-boundaries", "last-turn-boundary");
+    const stagedDir = path.join(tempRoot, "coordinated-staged-tamper");
+
+    await captureCampaignBundle(CAMPAIGN_ID, bundleDir, {
+      includeVectors: false,
+      purpose: "turn_snapshot",
+    });
+    fs.cpSync(bundleDir, stagedDir, { recursive: true });
+
+    const stagedDb = new Database(path.join(stagedDir, "state.db"));
+    try {
+      stagedDb
+        .prepare("INSERT INTO campaigns (id, name, premise, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+        .run("tampered-campaign", "Tampered", "Staged manifest was rewritten.", Date.now(), Date.now());
+    } finally {
+      stagedDb.close();
+    }
+    rewriteSqliteManifestEvidence(stagedDir);
+
+    await expect(assertCampaignStoreBundleRestorableWithEvidence({
+      bundleDir: stagedDir,
+      includeVectors: false,
+    })).resolves.toMatchObject({ campaignId: CAMPAIGN_ID });
+    await expect(assertCampaignStoreBundleEvidenceMatchesManifest({
+      manifestDir: bundleDir,
+      evidenceDir: stagedDir,
+      includeVectors: false,
+    })).rejects.toThrow(/evidence hash mismatch/i);
+  });
+
+  it("fails pending restore repair when staged evidence no longer matches the pinned source manifest", async () => {
+    const bundleDir = path.join(campaignDir(), ".turn-boundaries", "last-turn-boundary");
+
+    await captureCampaignBundle(CAMPAIGN_ID, bundleDir, {
+      includeVectors: false,
+      purpose: "turn_snapshot",
+    });
+    await restoreCampaignBundle(CAMPAIGN_ID, bundleDir, {
+      includeVectors: false,
+      purpose: "turn_snapshot",
+    });
+
+    const stagedDir = path.join(campaignDir(), ".restore-staging", "current");
+    const stagedDb = new Database(path.join(stagedDir, "state.db"));
+    try {
+      stagedDb
+        .prepare("INSERT INTO campaigns (id, name, premise, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+        .run("pending-tamper", "Pending Tamper", "Pending repair must reject this.", Date.now(), Date.now());
+    } finally {
+      stagedDb.close();
+    }
+    rewriteSqliteManifestEvidence(stagedDir);
+
+    await expect(repairPendingCampaignRestoreBeforeLoad(CAMPAIGN_ID))
+      .rejects.toThrow(/evidence hash mismatch/i);
   });
 
   it("refuses to restore a checkpoint when vector row-count evidence is tampered", async () => {

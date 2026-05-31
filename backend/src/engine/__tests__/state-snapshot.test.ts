@@ -33,6 +33,11 @@ vi.mock("../../campaign/store-manifest.js", () => ({
     schemaVersion: 1,
     stores: [],
   })),
+  assertCampaignStoreBundleEvidenceMatchesManifest: vi.fn(async () => ({
+    schemaVersion: 1,
+    stores: [],
+  })),
+  readCampaignStoreBundleManifestDigest: vi.fn(() => "source-manifest-digest"),
 }));
 
 vi.mock("../../vectors/episodic-events.js", () => ({

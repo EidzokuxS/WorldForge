@@ -3,7 +3,7 @@
 Date: 2026-05-31
 Branch: develop
 Baseline HEAD: 7971dab544c5de212c8f1f3fa3a80bb2d7e2ba56
-Current Integrated HEAD: 23aa2922c8dd8ac143592e2dbb9a7e3672b29b55
+Current Integrated HEAD: f8a6c8e43eaa64b96958a4e5a2129c3a5d89ddf6
 
 ## Product Goal
 
@@ -23,8 +23,8 @@ Oracle run:
 - Output: `output/oracle-phase95-current-head-architecture-20260531.md`
 
 Current Oracle P1 blockers:
-- Service-owner matrix closure is in progress after the Oracle review. Local patch makes service-owned lanes executable-contract validated: physical manifest stores, receipt-kind parity, delegate tool existence, delegate state effects, `turn_clock_ledger` time-effect role, and `quick_action_offer_service` canonical tool allowlist.
-- Staged restore source-manifest equivalence is not visibly proven. Pending repair validates staged evidence against the staged manifest, but must prove staged physical evidence still matches the original source bundle manifest or a source-manifest digest recorded in the journal.
+- Service-owner matrix P1 closed in `f8a6c8e4`: service-owned lanes are executable-contract validated for physical manifest stores, receipt-kind parity, delegate tool existence, every delegate state effect, `turn_clock_ledger` time-effect role, and `quick_action_offer_service` canonical tool allowlist.
+- Staged restore source-manifest equivalence is locally implemented and verified after `f8a6c8e4`; pending commit. Pending repair now pins the source manifest digest in the journal and checks staged physical evidence against the original source manifest before live apply.
 - Current-HEAD Browser/long-play evidence remains open: `/game` workability, fresh human-style 60-turn, clean-start clone 60-turn, and 600+ soak/replay are still required.
 - Actor/world/time long-run observability evidence remains open: clock continuity, due-world reason distributions, actor wake backlog, settled-packet due refs, vector growth/rebuild counts, and pending narration recovery outcomes must be captured in long-play artifacts.
 
@@ -36,7 +36,7 @@ Mode: six live read-only agents plus this shared canvas; Codex owns integration,
 
 ### J0 Local Critical Path: Service-Owned Gameplay Contracts
 
-Status: locally implemented and verified; pending commit.
+Status: committed and pushed in `f8a6c8e4`.
 
 Invariant being closed:
 - Service-owned state lanes are not prose metadata. They must be executable contracts tied to physical stores, tool descriptors, receipt kinds, runtime validators, projections, recovery modes, and tests.
@@ -63,6 +63,33 @@ J1 review intake:
 J2 staged restore intake:
 - P1 confirmed: pending restore repair currently validates staged evidence against the staged manifest, but coordinated tampering of staged files plus staged manifest can pass without proving equivalence to the original source bundle.
 - Recommended next production slice: add cross-directory manifest verifier reading the source manifest while hashing staged evidence, record `sourceManifestDigest` in restore journal, and call it from `assertStagedRestoreFiles` before live apply.
+
+### J2 Local Critical Path: Staged Restore Source Equivalence
+
+Status: locally implemented and verified; pending commit.
+
+Invariant being closed:
+- Staged restore evidence is not authoritative because `.restore-staging/current/store-manifest.json` is inside the crash-repair staging area. The original source bundle manifest plus a journal-pinned source manifest digest are the authority for pending repair.
+
+Current local changes:
+- `RestoreJournal` records `sourceManifestDigest` at restore start.
+- Pending repair fails closed if the source manifest is missing or digest-mismatched.
+- `assertCampaignStoreBundleEvidenceMatchesManifest` reads the manifest from the source bundle while hashing SQLite/config/chat/vector evidence from the staged directory.
+- `assertStagedRestoreFiles` keeps staged self-validation as defense-in-depth, then checks source-manifest equivalence before any live `state.db`, config, chat, or vector copy.
+
+Executed evidence:
+- `npm.cmd --prefix backend test -- src/campaign/__tests__/store-manifest.test.ts src/campaign/__tests__/store-manifest-executor.test.ts src/engine/__tests__/state-snapshot.test.ts src/campaign/__tests__/checkpoints.test.ts` passed: 45 tests.
+- `npm.cmd --prefix backend test -- src/campaign/__tests__/store-manifest.test.ts src/campaign/__tests__/store-manifest-executor.test.ts src/campaign/__tests__/clone.test.ts src/campaign/__tests__/checkpoints.test.ts src/engine/__tests__/state-snapshot.test.ts src/vectors/__tests__/episodic-events.test.ts` passed: 75 tests.
+- `npm.cmd --prefix backend test -- src/campaign/__tests__/manager.test.ts src/campaign/__tests__/store-manifest.test.ts src/campaign/__tests__/checkpoints.test.ts src/engine/__tests__/state-snapshot.test.ts` passed: 80 tests.
+- `$env:NODE_OPTIONS='--max-old-space-size=4096'; npm.cmd --prefix backend run typecheck` passed.
+- First focused run exposed stale test mocks for the new source-manifest digest/verifier exports; mocks were updated and the suite passed.
+- GitNexus staged `detect_changes` returned HIGH because the expected `loadCampaign` repair process is touched; focused `manager`, checkpoint, state-snapshot, store-manifest, clone, and vector tests passed.
+
+J3/J4/J5/J6 intake:
+- J3 GM/tool/actor harness: conditional source-level GO; no live P0/P1 in `/chat/action` player-turn path; acceptance evidence still open.
+- J4 narration/playfeel grounding: conditional source-level GO; no live P0/P1 in final narration path; P2s remain for long inventory wording and multi-step movement-time phrasing.
+- J5 clone/replay/rollback/vector: staged restore P1 confirmed; P2s remain for clean-start vector rebuild evidence, clone route/operator surface, rollback overclaim text, and verifier breadth.
+- J6 API/SSE/frontend projection: conditional source-level GO; no P0/P1 raw-id or quick-action authority leak; current-head Browser proof and failed-resume UX remain acceptance risks.
 
 Live agents:
 - J1 Service-owner final audit.
