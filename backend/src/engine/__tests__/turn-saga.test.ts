@@ -346,6 +346,41 @@ describe("turn saga persistence", () => {
     })).toThrow(/trace ledger snapshot/i);
   });
 
+  it("orders authority stage completeness by lifecycle ordinal when timestamps tie", () => {
+    createSaga("saga-authority-stage-tie", "turn-authority-stage-tie");
+
+    const persistedOrder = [
+      "intent_created",
+      "lease_acquired",
+      "snapshot_taken",
+      "effects_staged",
+      "canonical_state_committed",
+      "receipts_accepted",
+      "settled_packet_persisted",
+      "narration_accepted",
+      "public_projection_committed",
+      "turn_finalized",
+    ] as const;
+
+    persistedOrder.forEach((stage) => {
+      recordTurnAuthorityStage({
+        sagaId: "saga-authority-stage-tie",
+        stage,
+        baseWorldVersion: 10,
+        resultWorldVersion: stage === "intent_created" ? null : 11,
+        payload: authorityStagePayload(stage),
+        nowMs: 3_000,
+      });
+    });
+
+    const events = assertTurnAuthorityStagesComplete({
+      sagaId: "saga-authority-stage-tie",
+    });
+
+    expect(events.map((event) => (event.payload as { stage: string }).stage))
+      .toEqual([...TURN_AUTHORITY_STAGE_VALUES]);
+  });
+
   it("derives pre-turn snapshot recovery from the snapshot authority stage", () => {
     createSaga("saga-snapshot-recovery", "turn-snapshot-recovery");
 

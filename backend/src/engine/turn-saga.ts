@@ -1186,7 +1186,16 @@ function assertTurnAuthorityStageEventPayload(
 export function assertTurnAuthorityStagesComplete(
   input: GetTurnSagaInput,
 ): TurnSagaEventRecord[] {
-  const events = listTurnAuthorityStageEvents(input);
+  const events = [...listTurnAuthorityStageEvents(input)].sort((a, b) => {
+    // Adjacent lifecycle stages can land in the same millisecond; the
+    // persisted ordinal is only a tie-breaker for that storage ambiguity.
+    const aPayload = isPlainRecord(a.payload) ? a.payload : {};
+    const bPayload = isPlainRecord(b.payload) ? b.payload : {};
+    const aOrdinal = typeof aPayload.stageOrdinal === "number" ? aPayload.stageOrdinal : Number.POSITIVE_INFINITY;
+    const bOrdinal = typeof bPayload.stageOrdinal === "number" ? bPayload.stageOrdinal : Number.POSITIVE_INFINITY;
+    if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt;
+    return aOrdinal - bOrdinal;
+  });
   const stages = events.map((event) => {
     const payload = isPlainRecord(event.payload) ? event.payload : {};
     return typeof payload.stage === "string" ? payload.stage : "";

@@ -48,6 +48,14 @@ Output:
   over dispersed route/projection implementation.
 - [inspected] Replay-preserving clone is explicitly fail-closed rather than a
   supported successful clone mode.
+- [executed] Current-HEAD clone recovery pilot
+  `output/phase95-current-head-clone-api-pilot-20260531-2019` now verifies
+  1/1 turn after pending narration resume: `ok: true`, `hardFailureCount: 0`,
+  `warningCount: 0`.
+- [executed] The recovery pilot exposed a same-millisecond authority lifecycle
+  ordering defect: `receipts_accepted` and `canonical_state_committed` can share
+  `createdAt`, so completeness checks now use the persisted lifecycle ordinal as
+  the timestamp tie-breaker.
 
 ### A3 Existing Patterns
 Status: complete
@@ -104,6 +112,9 @@ Output:
   must avoid treating stale output/oracle artifacts as current evidence.
 - [inspected] Current live fresh-pilot attempt timed out in worldgen locations,
   making acceptance evidence still open rather than failed on a completed turn.
+- [executed] Clone recovery live resume now emits `scene-settling`,
+  `narrative`, and `done` with no `error`; adaptive verifier passes for the
+  artifact root above.
 
 ## Integration Notes
 
