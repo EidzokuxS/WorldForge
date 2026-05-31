@@ -57,6 +57,40 @@ function writeProgress(root, count) {
   fs.writeFileSync(path.join(root, "clean-adaptive-progress.jsonl"), `${lines.join("\n")}\n`, "utf8");
 }
 
+function runEvidenceTurn(current, overrides = {}) {
+  return {
+    index: current.index,
+    turnId: `turn-${current.index}`,
+    mode: current.mode,
+    before: current.before,
+    after: current.after,
+    done: current.done,
+    acceptedReceiptRefs: [`receipt-${current.index}`],
+    terminalEventCount: 1,
+    retryCount: 0,
+    recoveryOutcome: "none",
+    dueWorldReasons: ["none"],
+    actorBacklogCount: 0,
+    vectorCounts: {
+      episodicEvents: current.index,
+      loreCards: 0,
+    },
+    ...overrides,
+  };
+}
+
+function writeRunEvidence(root, turns, overrides = {}) {
+  const evidence = {
+    version: "phase95-run-evidence.v1",
+    campaignId: overrides.campaignId ?? "campaign-fresh",
+    head: "test-head",
+    dirtyState: "clean",
+    turns: turns.map((current) => runEvidenceTurn(current)),
+    ...overrides,
+  };
+  writeJson(path.join(root, "run-evidence.json"), evidence);
+}
+
 function writeFreshRun(root, turns) {
   writeJson(path.join(root, "state.json"), {
     setupMode: "worldgen",
@@ -237,6 +271,83 @@ describe("phase95 adaptive run verifier", () => {
 
     expect(result.ok).toBe(false);
     expect(result.issues.map((issue) => issue.code)).toContain("low-action-mode-diversity");
+  });
+
+  it("requires run evidence for 60-turn acceptance", () => {
+    const root = makeRoot();
+    const turns = Array.from({ length: 60 }, (_, index) => turn(index + 1));
+    writeFreshRun(root, turns);
+
+    const result = validateAdaptiveRun({ root, targetTurns: 60, minModeDiversity: 8 });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "missing-run-evidence" }),
+    ]));
+  });
+
+  it("accepts 60-turn evidence when per-turn trust fields are present", () => {
+    const root = makeRoot();
+    const turns = Array.from({ length: 60 }, (_, index) => turn(index + 1));
+    writeFreshRun(root, turns);
+    writeRunEvidence(root, turns);
+
+    const result = validateAdaptiveRun({ root, targetTurns: 60, minModeDiversity: 8 });
+
+    expect(result.ok).toBe(true);
+    expect(result.hasRunEvidence).toBe(true);
+  });
+
+  it("rejects incomplete long-loop evidence fields", () => {
+    const root = makeRoot();
+    const turns = Array.from({ length: 60 }, (_, index) => turn(index + 1));
+    writeFreshRun(root, turns);
+    writeRunEvidence(root, turns, {
+      turns: turns.map((current) => runEvidenceTurn(current)),
+    });
+    const evidencePath = path.join(root, "run-evidence.json");
+    const evidence = JSON.parse(fs.readFileSync(evidencePath, "utf8"));
+    evidence.turns[4].acceptedReceiptRefs = [];
+    evidence.turns[4].terminalEventCount = 0;
+    evidence.turns[4].retryCount = -1;
+    evidence.turns[4].recoveryOutcome = "";
+    evidence.turns[4].dueWorldReasons = [];
+    evidence.turns[4].actorBacklogCount = -1;
+    evidence.turns[4].vectorCounts = { episodicEvents: -1 };
+    writeJson(evidencePath, evidence);
+
+    const result = validateAdaptiveRun({ root, targetTurns: 60, minModeDiversity: 8 });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "run-evidence-missing-receipts" }),
+      expect.objectContaining({ code: "run-evidence-terminal-count" }),
+      expect.objectContaining({ code: "run-evidence-retry-count" }),
+      expect.objectContaining({ code: "run-evidence-recovery-outcome" }),
+      expect.objectContaining({ code: "run-evidence-due-world-reasons" }),
+      expect.objectContaining({ code: "run-evidence-actor-backlog" }),
+      expect.objectContaining({ code: "run-evidence-vector-counts" }),
+    ]));
+  });
+
+  it("requires clone evidence to name lineage and manifest digest", () => {
+    const root = makeRoot();
+    const turns = Array.from({ length: 60 }, (_, index) => turn(index + 1));
+    writeCloneRun(root, turns);
+    writeRunEvidence(root, turns, {
+      campaignId: "clone-campaign",
+      cloneLineage: {
+        sourceCampaignId: "source-campaign",
+        cloneCampaignId: "clone-campaign",
+      },
+    });
+
+    const result = validateAdaptiveRun({ root, targetTurns: 60, minModeDiversity: 8 });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "run-evidence-clone-lineage-incomplete" }),
+    ]));
   });
 
   it("rejects world clock regressions and stale done boundaries", () => {

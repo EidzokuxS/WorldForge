@@ -205,6 +205,170 @@ function validateClockBoundary(input, issues) {
   }
 }
 
+function isNonNegativeNumber(value) {
+  return Number.isFinite(value) && value >= 0;
+}
+
+function validateStringArray(input, issues, code, message, detail) {
+  if (
+    !Array.isArray(input)
+    || input.length === 0
+    || input.some((value) => typeof value !== "string" || value.trim().length === 0)
+  ) {
+    add(issues, "hard", code, message, detail);
+    return false;
+  }
+  return true;
+}
+
+function validateRunEvidence(input, issues) {
+  const evidencePath = path.join(input.root, "run-evidence.json");
+  if (!fileExists(evidencePath)) {
+    if (input.targetTurns >= 60) {
+      add(issues, "hard", "missing-run-evidence", "60+ turn acceptance requires run-evidence.json.");
+    }
+    return null;
+  }
+
+  let evidence = null;
+  try {
+    evidence = readJson(evidencePath);
+  } catch (error) {
+    add(issues, "hard", "invalid-run-evidence", "run-evidence.json is not readable JSON.", {
+      evidencePath,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+
+  if (!isRecord(evidence)) {
+    add(issues, "hard", "run-evidence-shape", "run-evidence.json must be an object.", evidence);
+    return null;
+  }
+  if (evidence.version !== "phase95-run-evidence.v1") {
+    add(issues, "hard", "run-evidence-version", "run-evidence.json has an unsupported version.", {
+      version: evidence.version ?? null,
+    });
+  }
+  if (evidence.campaignId !== input.state.campaignId) {
+    add(issues, "hard", "run-evidence-campaign-mismatch", "run-evidence campaignId does not match state.campaignId.", {
+      evidenceCampaignId: evidence.campaignId ?? null,
+      stateCampaignId: input.state.campaignId ?? null,
+    });
+  }
+  if (input.setupMode === "clone") {
+    if (!isRecord(evidence.cloneLineage)) {
+      add(issues, "hard", "run-evidence-missing-clone-lineage", "Clone run evidence lacks cloneLineage.");
+    } else {
+      for (const field of ["sourceCampaignId", "cloneCampaignId", "manifestDigest"]) {
+        if (typeof evidence.cloneLineage[field] !== "string" || evidence.cloneLineage[field].trim().length === 0) {
+          add(issues, "hard", "run-evidence-clone-lineage-incomplete", `Clone run evidence lacks cloneLineage.${field}.`, evidence.cloneLineage);
+        }
+      }
+      if (evidence.cloneLineage.cloneCampaignId && evidence.cloneLineage.cloneCampaignId !== input.state.campaignId) {
+        add(issues, "hard", "run-evidence-clone-campaign-mismatch", "run-evidence cloneLineage.cloneCampaignId does not match state.campaignId.", {
+          cloneCampaignId: evidence.cloneLineage.cloneCampaignId,
+          stateCampaignId: input.state.campaignId,
+        });
+      }
+    }
+  }
+  if (!Array.isArray(evidence.turns)) {
+    add(issues, "hard", "run-evidence-missing-turns", "run-evidence.json lacks turns[].");
+    return evidence;
+  }
+  if (evidence.turns.length < input.targetTurns) {
+    add(issues, "hard", "run-evidence-insufficient-turns", `run-evidence has ${evidence.turns.length} turns, expected ${input.targetTurns}.`);
+  }
+
+  const evidenceByIndex = new Map();
+  evidence.turns.forEach((turn, index) => {
+    const fallbackIndex = index + 1;
+    if (!isRecord(turn)) {
+      add(issues, "hard", "run-evidence-turn-shape", `run-evidence turn ${fallbackIndex} is not an object.`, turn);
+      return;
+    }
+    if (!Number.isInteger(turn.index) || turn.index < 1) {
+      add(issues, "hard", "run-evidence-turn-index", `run-evidence turn ${fallbackIndex} lacks a positive index.`, turn);
+      return;
+    }
+    if (evidenceByIndex.has(turn.index)) {
+      add(issues, "hard", "run-evidence-duplicate-turn", `run-evidence repeats turn ${turn.index}.`, turn);
+      return;
+    }
+    evidenceByIndex.set(turn.index, turn);
+  });
+
+  for (let index = 0; index < Math.min(input.turns.length, input.targetTurns); index += 1) {
+    const stateTurn = input.turns[index];
+    const turnIndex = index + 1;
+    const evidenceTurn = evidenceByIndex.get(turnIndex);
+    if (!evidenceTurn) {
+      add(issues, "hard", "run-evidence-missing-turn", `run-evidence lacks turn ${turnIndex}.`);
+      continue;
+    }
+    if (typeof evidenceTurn.turnId !== "string" || evidenceTurn.turnId.trim().length === 0) {
+      add(issues, "hard", "run-evidence-missing-turn-id", `run-evidence turn ${turnIndex} lacks turnId.`, evidenceTurn);
+    }
+    if (isRecord(stateTurn)) {
+      for (const field of ["tick", "worldVersion", "worldTimeMinutes"]) {
+        const afterValue = numericBoundaryField(stateTurn.after, field);
+        const doneValue = numericBoundaryField(stateTurn.done, field);
+        const evidenceAfterValue = numericBoundaryField(evidenceTurn.after, field);
+        const evidenceDoneValue = numericBoundaryField(evidenceTurn.done, field);
+        if (afterValue != null && evidenceAfterValue !== afterValue) {
+          add(issues, "hard", `run-evidence-after-${field}-mismatch`, `run-evidence turn ${turnIndex} after.${field} does not match state.`, {
+            state: afterValue,
+            evidence: evidenceAfterValue,
+          });
+        }
+        if (doneValue != null && evidenceDoneValue !== doneValue) {
+          add(issues, "hard", `run-evidence-done-${field}-mismatch`, `run-evidence turn ${turnIndex} done.${field} does not match state.`, {
+            state: doneValue,
+            evidence: evidenceDoneValue,
+          });
+        }
+      }
+    }
+    validateStringArray(
+      evidenceTurn.acceptedReceiptRefs,
+      issues,
+      "run-evidence-missing-receipts",
+      `run-evidence turn ${turnIndex} lacks acceptedReceiptRefs[].`,
+      evidenceTurn,
+    );
+    if (!isNonNegativeNumber(evidenceTurn.terminalEventCount) || evidenceTurn.terminalEventCount < 1) {
+      add(issues, "hard", "run-evidence-terminal-count", `run-evidence turn ${turnIndex} must record at least one terminal event.`, evidenceTurn);
+    }
+    if (!isNonNegativeNumber(evidenceTurn.retryCount)) {
+      add(issues, "hard", "run-evidence-retry-count", `run-evidence turn ${turnIndex} lacks non-negative retryCount.`, evidenceTurn);
+    }
+    if (typeof evidenceTurn.recoveryOutcome !== "string" || evidenceTurn.recoveryOutcome.trim().length === 0) {
+      add(issues, "hard", "run-evidence-recovery-outcome", `run-evidence turn ${turnIndex} lacks recoveryOutcome.`, evidenceTurn);
+    }
+    validateStringArray(
+      evidenceTurn.dueWorldReasons,
+      issues,
+      "run-evidence-due-world-reasons",
+      `run-evidence turn ${turnIndex} lacks dueWorldReasons[].`,
+      evidenceTurn,
+    );
+    if (!isNonNegativeNumber(evidenceTurn.actorBacklogCount)) {
+      add(issues, "hard", "run-evidence-actor-backlog", `run-evidence turn ${turnIndex} lacks non-negative actorBacklogCount.`, evidenceTurn);
+    }
+    if (!isRecord(evidenceTurn.vectorCounts)) {
+      add(issues, "hard", "run-evidence-vector-counts", `run-evidence turn ${turnIndex} lacks vectorCounts.`, evidenceTurn);
+    } else {
+      for (const field of ["episodicEvents", "loreCards"]) {
+        if (!isNonNegativeNumber(evidenceTurn.vectorCounts[field])) {
+          add(issues, "hard", "run-evidence-vector-counts", `run-evidence turn ${turnIndex} lacks non-negative vectorCounts.${field}.`, evidenceTurn.vectorCounts);
+        }
+      }
+    }
+  }
+  return evidence;
+}
+
 function validateSetup(input, issues) {
   const mode = input.state.setupMode ?? (fileExists(path.join(input.root, "clone-provenance.json")) ? "clone" : "worldgen");
   if (mode === "clone") {
@@ -327,6 +491,7 @@ export function validateAdaptiveRun(options) {
   const setupMode = validateSetup({ root, state, strictNoSeeds }, issues);
 
   const turns = Array.isArray(state.turns) ? state.turns : [];
+  const runEvidence = validateRunEvidence({ root, state, setupMode, targetTurns, turns }, issues);
   if (turns.length < targetTurns) {
     add(issues, "hard", "insufficient-turns", `Run has ${turns.length} turns, expected at least ${targetTurns}.`);
   }
@@ -419,6 +584,7 @@ export function validateAdaptiveRun(options) {
     setupMode,
     campaignId: state.campaignId ?? null,
     sourceCampaignId: state.sourceCampaignId ?? null,
+    hasRunEvidence: Boolean(runEvidence),
     turnCount: turns.length,
     modeCount: seenModes.size,
     modes: Array.from(seenModes).sort(),
