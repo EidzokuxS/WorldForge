@@ -20,6 +20,10 @@ import {
   applySuccessfulToolObservationToExecutionContext,
 } from "../tool-execution-context.js";
 import { executeToolCall } from "../tool-executor.js";
+import {
+  RUNTIME_AUTHORITY_REQUIRED_TOOL_NAMES,
+} from "../tool-contracts.js";
+import { runtimeToolInputSchemas, type RuntimeToolName } from "../tool-schemas.js";
 import { closeVectorDb, openVectorDb } from "../../vectors/connection.js";
 
 const CAMPAIGN_ID = "tool-authority-campaign";
@@ -71,6 +75,213 @@ function createBackgroundChronicleContext(baseWorldVersion: number): ToolExecuti
   };
   return context;
 }
+
+const executorAuthorityProofInputs = {
+  list_visible_affordances: { scope: "visible" },
+  list_navigation_options: { actorRef: "Player", fromLocationRef: "current_location" },
+  find_location_candidates: { query: "north gate", scope: "visible", tags: [] },
+  find_object_candidates: { query: "ledger", scope: "visible", tags: [] },
+  find_actor_candidates: { query: "clerk", scope: "visible", tags: [] },
+  find_poi_candidates: { query: "notice board", scope: "current_location", tags: [] },
+  inspect_known_fact: { query: "route permit", scope: "known" },
+  check_route: { actorRef: "Player", destinationRef: "North Road", mode: "walk" },
+  move_actor: {
+    actorRef: "Player",
+    destinationRef: "North Road",
+    mode: "walk",
+    evidenceRefs: ["route_1"],
+  },
+  create_minor_poi: {
+    areaRef: "current_location",
+    poiType: "notice_board",
+    tags: [],
+    reason: "The player examines public notices.",
+  },
+  create_scene_extra: {
+    locationRef: "current_scene",
+    role: "witness",
+    tags: [],
+    reason: "The player asks whether anyone nearby saw the courier.",
+  },
+  start_search: {
+    actorRef: "Player",
+    query: "missing courier seal",
+    scope: "current_scene",
+    method: "look",
+  },
+  record_player_intent: {
+    actorRef: "Player",
+    intentType: "seek",
+    targetHint: "missing courier seal",
+    stance: "intends",
+  },
+  record_dialogue_outcome: {
+    addresseeRefs: ["Player"],
+    outcomeKind: "no_current_answer",
+    topicKind: "other",
+    authorityKind: "no_visible_authority",
+    truthStatus: "unconfirmed",
+    durability: "scene_local",
+    requestedRoleText: "route clerk",
+    quote: "No one here can answer that.",
+    summary: "The requested route clerk is not visible.",
+    claims: [],
+    stateEffects: [],
+    sourceRefs: ["Player"],
+  },
+  record_world_fact: {
+    sourceKind: "direct_observation",
+    truthStatus: "observed",
+    factKind: "status",
+    topicKind: "status",
+    durability: "durable",
+    futureUseKind: "evidence",
+    futureRelevance: "The observed queue status can matter in later route choices.",
+    summary: "The player observes that the permit queue is closed.",
+    claims: [
+      {
+        claimKind: "status",
+        polarity: "states",
+        subjectText: "permit queue",
+        summary: "The permit queue is closed.",
+      },
+    ],
+    subjectRefs: [],
+    sourceRefs: ["Player"],
+  },
+  add_tag: { entityName: "Player", entityType: "player", tag: "wounded" },
+  remove_tag: { entityName: "Player", entityType: "player", tag: "wounded" },
+  set_relationship: {
+    entityA: "Player",
+    entityB: "Clerk",
+    tag: "trusted",
+    reason: "The clerk accepts the stamped writ.",
+  },
+  add_chronicle_entry: { text: "The bell rang once." },
+  log_event: {
+    text: "The player studies the quiet counter.",
+    importance: 2,
+    participants: ["Player"],
+    durability: "scene_local",
+  },
+  advance_time: {
+    minutes: 10,
+    reason: "The player waits through a short queue.",
+  },
+  offer_quick_actions: {
+    actions: [
+      { label: "Ask", action: "Ask the clerk about the seal." },
+      { label: "Wait", action: "Wait for the next clerk." },
+      { label: "Leave", action: "Step away from the counter." },
+    ],
+    sourceRefs: ["Player"],
+  },
+  spawn_npc: {
+    name: "Route Clerk",
+    tags: ["clerk", "visible"],
+    locationRef: "current_scene",
+  },
+  promote_npc: {
+    npcRef: "Route Clerk",
+    newTier: "persistent",
+    reason: "The clerk now carries a future-usable route answer.",
+  },
+  spawn_item: {
+    name: "Stamped Writ",
+    tags: ["document", "proof"],
+    ownerName: "Player",
+    ownerType: "character",
+  },
+  reveal_location: {
+    name: "Permit Alcove",
+    description: "A public alcove used for route stamps.",
+    tags: ["public", "local"],
+    connectedToName: "current_scene",
+  },
+  request_contested_outcome: {
+    actorName: "Player",
+    targetName: "Guard",
+    mode: "contest",
+    intent: "push past the guard",
+    stakes: "control of the doorway",
+    evidenceRefs: ["Player", "Guard"],
+  },
+  set_condition: { targetName: "Player", delta: -1 },
+  move_to: { targetLocationName: "North Road" },
+  transfer_item: {
+    itemName: "Stamped Writ",
+    targetName: "Player",
+    targetType: "character",
+  },
+} satisfies Record<RuntimeToolName, Record<string, unknown>>;
+
+const executorGroundingProbeInputs = {
+  move_actor: { destinationRef: "backend-location-id", evidenceRefs: ["backend-route-id"] },
+  create_minor_poi: {
+    areaRef: "backend-location-id",
+    poiType: "notice_board",
+    reason: "Probe invalid location grounding.",
+  },
+  start_search: {
+    actorRef: "backend-player-id",
+    query: "sealed ledger",
+  },
+  record_player_intent: {
+    actorRef: "backend-player-id",
+    intentType: "seek",
+  },
+  record_dialogue_outcome: {
+    ...executorAuthorityProofInputs.record_dialogue_outcome,
+    sourceRefs: ["backend-player-id"],
+  },
+  record_world_fact: {
+    ...executorAuthorityProofInputs.record_world_fact,
+    sourceRefs: ["backend-player-id"],
+  },
+  add_tag: { entityName: "backend-player-id", entityType: "player", tag: "wounded" },
+  remove_tag: { entityName: "backend-player-id", entityType: "player", tag: "wounded" },
+  set_relationship: {
+    entityA: "backend-player-id",
+    entityB: "backend-npc-id",
+    tag: "trusted",
+    reason: "Probe invalid relationship grounding.",
+  },
+  add_chronicle_entry: { text: "Player-turn chronicle probe." },
+  log_event: {
+    text: "The raw backend actor id backend-player-id should not ground this.",
+    importance: 2,
+    participants: ["backend-player-id"],
+    durability: "scene_local",
+  },
+  offer_quick_actions: {
+    actions: executorAuthorityProofInputs.offer_quick_actions.actions,
+    sourceRefs: ["backend-player-id"],
+  },
+  promote_npc: {
+    npcRef: "backend-npc-id",
+    newTier: "persistent",
+    reason: "Probe invalid promotion grounding.",
+  },
+  spawn_item: {
+    name: "Stamped Writ",
+    tags: ["document"],
+    ownerName: "backend-player-id",
+    ownerType: "character",
+  },
+  reveal_location: {
+    name: "Permit Alcove",
+    description: "A public alcove used for route stamps.",
+    tags: ["public"],
+    connectedToName: "backend-location-id",
+  },
+  set_condition: { targetName: "backend-player-id", delta: -1 },
+  move_to: { targetLocationName: "backend-location-id" },
+  transfer_item: {
+    itemName: "backend-item-id",
+    targetName: "backend-player-id",
+    targetType: "character",
+  },
+} satisfies Partial<Record<RuntimeToolName, Record<string, unknown>>>;
 
 describe("executeToolCall authority bridge", () => {
   beforeEach(async () => {
@@ -305,6 +516,72 @@ describe("executeToolCall authority bridge", () => {
         .where(eq(worldClocks.campaignId, CAMPAIGN_ID))
         .get(),
     ).toBeUndefined();
+  });
+
+  it("runs schema validation for every runtime tool schema entry before executor dispatch", async () => {
+    const toolNames = Object.keys(runtimeToolInputSchemas) as RuntimeToolName[];
+
+    expect(Object.keys(executorAuthorityProofInputs).sort()).toEqual([...toolNames].sort());
+
+    for (const toolName of toolNames) {
+      const result = await executeToolCall(
+        CAMPAIGN_ID,
+        toolName,
+        { ...executorAuthorityProofInputs[toolName], unsupportedAuthorityProbe: true },
+        3,
+        undefined,
+        createAuthorityContext(0),
+      );
+
+      expect(result.success, toolName).toBe(false);
+      expect(result.error, toolName).toContain(`Tool schema validation failed for ${toolName}`);
+    }
+  });
+
+  it("requires execution authority for every authority-bearing runtime tool", async () => {
+    const authorityRequiredToolNames = [...RUNTIME_AUTHORITY_REQUIRED_TOOL_NAMES];
+
+    expect(authorityRequiredToolNames.length).toBeGreaterThan(0);
+    for (const toolName of authorityRequiredToolNames) {
+      const result = await executeToolCall(
+        CAMPAIGN_ID,
+        toolName,
+        executorAuthorityProofInputs[toolName],
+        3,
+      );
+
+      expect(result.success, toolName).toBe(false);
+      expect(result.error, toolName).toContain("requires execution authority");
+    }
+  });
+
+  it("runs grounding validation before handlers for every ref-grounded authority tool", async () => {
+    const coveredGroundingTools = Object.keys(executorGroundingProbeInputs).sort();
+    const intentionallyUngroundedAuthorityTools = [
+      "advance_time",
+      "create_scene_extra",
+      "spawn_npc",
+    ];
+    expect([
+      ...coveredGroundingTools,
+      ...intentionallyUngroundedAuthorityTools,
+    ].sort()).toEqual([...RUNTIME_AUTHORITY_REQUIRED_TOOL_NAMES].sort());
+
+    for (const [toolName, input] of Object.entries(executorGroundingProbeInputs) as Array<
+      [RuntimeToolName, Record<string, unknown>]
+    >) {
+      const result = await executeToolCall(
+        CAMPAIGN_ID,
+        toolName,
+        input,
+        3,
+        undefined,
+        createAuthorityContext(0),
+      );
+
+      expect(result.success, toolName).toBe(false);
+      expect(result.error, toolName).toContain("Tool grounding failed");
+    }
   });
 
   it("rejects background state-bearing tools without declared write scopes", async () => {
