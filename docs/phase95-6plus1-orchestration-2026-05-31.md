@@ -178,6 +178,39 @@ Next slice:
 5. Oracle full-architecture bundle review on frozen current tree.
 6. Only after those: fresh/cloned human-style 60-turn campaigns and longer soak/replay coverage.
 
+## Oracle Review On Wave E Bundle
+
+Session: `phase95-full-cycle-arch-head-2`
+Run date: 2026-05-31
+Bundle commit: `cba3ea49`
+Code review HEAD inside bundle: `881156cd`
+Delivery: 4 compact inline bundle files, about 10.5k input tokens. First attempt with model picker failed because the separate Oracle Chrome profile had no matching Pro option/cookies; second run used `--browser-model-strategy ignore` and completed.
+
+Oracle verdict:
+- Architecture: CONDITIONAL GO.
+- Gameplay acceptance: NO-GO.
+- P0: none found in supplied bundle.
+- Control-plane shape is coherent enough to continue targeted implementation.
+- Do not use this as long-play acceptance; Browser, fresh/cloned 60-turn, 600+ soak/replay, and human prose continuity evidence are still required.
+
+Oracle-confirmed P1s:
+- Gameplay state owner matrix is incomplete: every state lane needs executable source-of-truth/write-owner/validator/receipt/projection/recovery/test coverage.
+- Backend-owned narratable settled facts are insufficient for common play: quiet/no-mutation turns and movement+time need citable backend facts.
+- Interrupted staged restore repair must revalidate staged physical evidence against the source manifest before applying staged restore.
+- Current-HEAD Browser proof and long-play observability are acceptance gates, not substitutes for the code-level P1s.
+
+Oracle option decisions:
+- Use an executable global owner contract plus service-local subcontracts where needed; do not rely on docs-only owner tables.
+- Build quiet `scene_status` facts from current public scene-visible state; do not make `model_guidance` citable.
+- Build derived `movement_time_beat` facts with provenance to both movement and time receipts; do not merge time ownership into movement receipts.
+- Revalidate staged restore evidence hashes/counts before applying; fall back to fail-closed restart from source bundle if manifest/source evidence is unavailable.
+- Use layered evidence for acceptance: current-head Browser, fresh 60-turn, cloned 60-turn, 600+ soak/replay, and manifest fields tied to gameplay invariants.
+
+Oracle recommended next commits:
+1. Seal executable gameplay state owner contract, reconciling `chronicle_entry` and `entity_tag_service`.
+2. Add backend-owned quiet scene status and movement-time narratable facts.
+3. Then do staged restore manifest revalidation as a separate recovery commit.
+
 ## Dirty Tail Policy
 
 The branch is owned by this Phase 95 Codex work. Do not call repo artifacts "someone else's".
