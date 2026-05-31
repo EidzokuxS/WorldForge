@@ -17,6 +17,14 @@ describe("simulation write scope contracts", () => {
     expect(writeScopesConflict("item:receipt", "item:coin")).toBe(false);
   });
 
+  it("allows independent sibling scopes on the same entity while preserving broad locks", () => {
+    expect(writeScopesConflict("location:market:recent_event", "location:market:topology")).toBe(false);
+    expect(writeScopesConflict("location:market:recent_event", "location:market:recent_event")).toBe(true);
+    expect(writeScopesConflict("location:market:recent_event", "location:market")).toBe(true);
+    expect(writeScopesConflict("location:market", "location:market:topology")).toBe(true);
+    expect(writeScopesConflict("*", "location:market:topology")).toBe(true);
+  });
+
   it("reserves actor jobs in order and serializes later conflicting jobs", () => {
     expect(
       reserveActorWriteScopes([

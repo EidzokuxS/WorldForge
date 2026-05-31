@@ -74,6 +74,12 @@ export function writeScopesConflict(
       return false;
     }
   }
+  if (leftParts.length === rightParts.length) {
+    return true;
+  }
+  if (leftParts.length > 2 && rightParts.length > 2) {
+    return false;
+  }
   return true;
 }
 

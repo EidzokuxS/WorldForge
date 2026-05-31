@@ -9,6 +9,7 @@ import {
   authorityTraces,
   campaigns,
   chronicle,
+  locations,
   npcs,
   players,
   quickActionOffers,
@@ -839,6 +840,61 @@ describe("executeToolCall authority bridge", () => {
     expect(result.success).toBe(true);
     expect(result.authority?.stateDeltaRefs).toEqual(["scene_local_observation"]);
     expect(getDb().select().from(authorityTraces).all()).toEqual([]);
+  });
+
+  it("lets local POI topology writes proceed after a same-location recent event", async () => {
+    getDb().insert(locations).values({
+      id: "loc-market",
+      campaignId: CAMPAIGN_ID,
+      name: "Market District",
+      description: "A public district with counters and corridors.",
+      kind: "macro",
+      tags: "[]",
+      isStarting: true,
+      connectedTo: "[]",
+    }).run();
+
+    const context = createAuthorityContext(0);
+    context.currentLocationId = "loc-market";
+    context.currentSceneScopeId = "loc-market";
+    context.legalLocationRefs = new Set(["current_location", "current_scene", "Market District", "loc-market", "location:loc-market"]);
+    context.currentLocationRefs = new Set(["current_location", "Market District", "loc-market", "location:loc-market"]);
+    context.currentSceneRefs = new Set(["current_scene", "Market District", "loc-market", "location:loc-market"]);
+    context.authority = {
+      ...context.authority!,
+      blockedWriteScopes: ["location:loc-market:recent_event"],
+    };
+
+    const result = await executeToolCall(
+      CAMPAIGN_ID,
+      "create_minor_poi",
+      {
+        areaRef: "current_location",
+        poiType: "notice_board",
+        name: "Overseer Receiving Desk",
+        description: "A public receiving desk in the same market district.",
+        reason: "The player follows a visible public route to the desk.",
+      },
+      3,
+      undefined,
+      context,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.authority?.stateDeltaRefs).toEqual(
+      expect.arrayContaining([
+        "location:loc-market:topology",
+        expect.stringMatching(/^location:.+:revealed$/u),
+      ]),
+    );
+    expect(
+      getDb()
+        .select()
+        .from(locations)
+        .where(eq(locations.campaignId, CAMPAIGN_ID))
+        .all(),
+    ).toHaveLength(2);
+    expect(getDb().select().from(authorityTraces).all()).toHaveLength(1);
   });
 
   it("rolls back sync state mutations when accepted refs hit a blocked scope", async () => {

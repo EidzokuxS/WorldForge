@@ -3138,9 +3138,9 @@ function addScopedWriteRefsForToolResult(
     case "reveal_location":
     case "create_minor_poi":
       addStringRefs(refs, [
-        scopedRef("location", readStringField(payload, "id")),
-        scopedRef("location", readStringField(payload, "parentLocationId")),
-        scopedRef("location", readStringField(payload, "anchorLocationId")),
+        scopedWriteRef("location", readStringField(payload, "id"), "revealed"),
+        scopedWriteRef("location", readStringField(payload, "parentLocationId"), "topology"),
+        scopedWriteRef("location", readStringField(payload, "anchorLocationId"), "topology"),
       ]);
       break;
     case "move_to":

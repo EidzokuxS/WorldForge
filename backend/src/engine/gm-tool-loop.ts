@@ -1562,6 +1562,53 @@ function hasAcceptedTerminalReceiptInStepResults(
     }));
 }
 
+function hasAcceptedRuntimeReceiptInStepResults(
+  requirement: NonNullable<GmRead["runtimeRequirement"]> | null,
+  stepResults: readonly GmToolStepResult[],
+): boolean {
+  if (!requirement) return false;
+  return stepResults.some((step, index) =>
+    isAcceptedRuntimeReceipt({
+      toolName: step.toolName,
+      result: step.result,
+      requirement,
+      appliedStructuralEffectsBacked: appliedStructuralEffectsBackedByPriorReceipts(
+        stepResults,
+        index,
+      ),
+    }));
+}
+
+function hasAcceptedRuntimeReceiptForRequirement(
+  requirement: NonNullable<GmRead["runtimeRequirement"]> | null,
+  trackedStepResults?: () => readonly GmToolStepResult[],
+): StopCondition<any> {
+  return ({ steps }) => {
+    if (!requirement) return false;
+    const step = steps.at(-1);
+    if (!isRecord(step)) return false;
+    const toolResults = step.toolResults;
+    if (!Array.isArray(toolResults)) return false;
+    return toolResults.some((entry, index) => {
+      if (!isRecord(entry)) return false;
+      const toolName = toolNameFromStepResult(step, entry, index);
+      if (!toolName) return false;
+      const payload = toolResultPayload(entry);
+      return isToolResult(payload)
+        && isAcceptedRuntimeReceipt({
+          toolName,
+          result: payload,
+          requirement,
+          appliedStructuralEffectsBacked: appliedStructuralEffectsBackedForToolResult(
+            trackedStepResults?.() ?? [],
+            toolName,
+            payload,
+          ),
+        });
+    });
+  };
+}
+
 function hasRequiredTerminalToolCallInStepResults(
   requirement: NonNullable<GmRead["runtimeRequirement"]> | null,
   stepResults: readonly GmToolStepResult[],
@@ -1683,6 +1730,69 @@ function buildTerminalClosurePrompt(input: {
     "",
     "CLOSURE RULE",
     "Stop as soon as the required terminal receipt succeeds. If the exact requested outcome cannot be applied, record the typed refusal/unavailable/no-current-answer/gap instead of continuing to probe.",
+  ].join("\n");
+}
+
+function buildStateMutationClosurePrompt(input: {
+  args: RunGmToolLoopArgs;
+  profile: GmToolLoopProfile;
+  allowedTools: readonly RuntimeToolName[];
+  priorStepResults: readonly GmToolStepResult[];
+}): string {
+  const scenePacket = buildModelFacingScenePacket(input.args.frame);
+  const extraForbiddenTerms = privateToolObservationTerms(input.args.frame);
+  const requirement = gmReadRuntimeRequirement(input.args);
+  const effectKinds = runtimeRequirementStateEffectKinds(requirement).join(", ") || "unknown";
+
+  return [
+    "GM RUNTIME STATE-MUTATION CLOSURE TASK",
+    "The previous GM tool pass made helper observations, preparatory changes, or time changes, but did not produce the required primary state mutation receipt.",
+    "This is a protocol-closure phase, not a new exploratory phase.",
+    `Original profile: ${input.profile.name}.`,
+    `Required state effect kind(s): ${effectKinds}.`,
+    "Use exactly one of the allowed state mutation tools to close the already-started player action.",
+    "Do not call helper lookup, route scan, find, inspect, creation-prep, dialogue, log, quick-action, or advance_time tools in this closure phase.",
+    "Do not write final player-facing narration.",
+    "Use legal refs from the model-facing scene or concrete prior tool observations from this same turn.",
+    "For movement after a successful reveal_location/create_minor_poi, move the player actor to the newly revealed place using its visible name/result ref.",
+    "",
+    "PLAYER ACTION RAW TEXT (SANITIZED PLAYER-AUTHORED PROSE; NOT LEGAL REFS)",
+    formatModelFacingPlayerActionText(input.args.playerAction, {
+      safety: scenePacket.safety,
+      extraForbiddenTerms: input.args.scopedForecastExcerpt?.forbiddenPrivateTerms ?? [],
+    }),
+    "",
+    "GM READ",
+    JSON.stringify(
+      redactModelFacingJson(
+        buildGmReadForToolLoopPrompt(input.args.gmRead, scenePacket.view),
+        scenePacket.safety,
+      ),
+      null,
+      2,
+    ),
+    "",
+    "RUNTIME REQUIREMENT",
+    JSON.stringify(redactModelFacingJson(requirement ?? { kind: "none" }, scenePacket.safety), null, 2),
+    "",
+    "MODEL-FACING SCENE VIEW",
+    JSON.stringify(buildGmToolLoopSceneViewForPrompt(scenePacket.view), null, 2),
+    "",
+    "CANDIDATE REFS FROM MODEL-FACING VIEW ONLY",
+    JSON.stringify(buildCandidateRefsForPrompt(scenePacket.view), null, 2),
+    "",
+    "PRIOR TOOL RESULTS FROM THIS SAME TURN",
+    JSON.stringify(
+      modelFacingPriorToolSteps(input.priorStepResults, scenePacket.safety, extraForbiddenTerms),
+      null,
+      2,
+    ),
+    "",
+    "ALLOWED TOOLS",
+    input.allowedTools.map((toolName) => `- ${toolName}`).join("\n"),
+    "",
+    "CLOSURE RULE",
+    "Stop as soon as the required state mutation receipt succeeds. If no allowed state mutation can be grounded from the listed refs, let the backend fail rather than inventing refs.",
   ].join("\n");
 }
 
@@ -3046,6 +3156,127 @@ export async function runGmToolLoop(
         toolCallNames: closureRawToolCalls.map((call) => call.tool),
         durationMs: Date.now() - closureStartMs,
       });
+    }
+    if (
+      runtimeRequirement?.kind === "state_mutation"
+      && !hasAcceptedRuntimeReceiptInStepResults(runtimeRequirement, stepResults)
+    ) {
+      const activeToolSet = new Set<RuntimeToolName>(profile.activeTools);
+      const closureToolNames = runtimeRequirementStateMutationTools(runtimeRequirement)
+        .filter((toolName) => activeToolSet.has(toolName));
+      if (closureToolNames.length > 0) {
+        const closurePrompt = buildStateMutationClosurePrompt({
+          args,
+          profile,
+          allowedTools: closureToolNames,
+          priorStepResults: stepResults,
+        });
+        const closureTools = filterToolsToAllowed(
+          tools as ReturnType<typeof createStorytellerTools>,
+          closureToolNames,
+        );
+        const closureStartMs = Date.now();
+        const closureResult = await withRole("judge", () =>
+          generateText({
+            model,
+            tools: closureTools,
+            activeTools: closureToolNames,
+            temperature: 0,
+            maxOutputTokens: profile.maxOutputTokens,
+            timeout: { totalMs: profile.timeoutMs },
+            providerOptions: GM_TOOL_LOOP_SEQUENTIAL_TOOL_PROVIDER_OPTIONS,
+            maxRetries: GM_TOOL_LOOP_TRANSPORT_MAX_RETRIES,
+            stopWhen: [
+              stepCountIs(GM_TOOL_LOOP_TERMINAL_CLOSURE_MAX_STEPS),
+              hasAcceptedRuntimeReceiptForRequirement(
+                runtimeRequirement,
+                () => mutationBoundary.trackedStepResults,
+              ),
+            ],
+            system: [
+              "You are the GM/Judge runtime state-mutation closure agent.",
+              "Your only job is to close the already-started runtime contract with the required state mutation tool.",
+              "Do not narrate to the player in this pass.",
+            ].join(" "),
+            prompt: closurePrompt,
+            experimental_onToolCallStart(event) {
+              const toolCall = event.toolCall;
+              if (!toolCall) return;
+              log.event("gm-tool-loop.state-closure.tool-call.start", {
+                toolName: toolCall.toolName,
+                toolCallId: toolCall.toolCallId,
+              });
+            },
+            experimental_onToolCallFinish(event) {
+              const toolCall = event.toolCall;
+              if (!toolCall) return;
+              log.event("gm-tool-loop.state-closure.tool-call.finish", {
+                transportSuccess: event.success,
+                toolName: toolCall.toolName,
+                toolCallId: toolCall.toolCallId,
+                durationMs: event.durationMs,
+              });
+            },
+          }),
+        );
+
+        const closureResultRecord: Record<string, unknown> = isRecord(closureResult)
+          ? closureResult
+          : {};
+        const closureSteps = Array.isArray(closureResultRecord.steps)
+          ? closureResultRecord.steps
+          : [];
+        const closureRawToolCalls = collectToolCalls(
+          closureSteps as unknown as Parameters<typeof collectToolCalls>[0],
+        );
+        const closureStepResults = closureRawToolCalls.map((call, index) =>
+          toToolStepResult(
+            call,
+            index,
+            args.tick,
+            args.scopedForecastExcerpt?.forbiddenPrivateTerms ?? [],
+            stepResults.length,
+          ));
+        rawToolCalls = [...rawToolCalls, ...closureRawToolCalls];
+        stepResults = [...stepResults, ...closureStepResults];
+        const closureReasoningText = isRecord(closureResult)
+          ? extractReasoningText(closureResult)
+          : undefined;
+        const closureResponseModel = isRecord(closureResultRecord.response)
+          && typeof closureResultRecord.response.modelId === "string"
+          ? closureResultRecord.response.modelId
+          : null;
+        if (closureReasoningText) {
+          reasoningText = reasoningText
+            ? `${reasoningText}\n\n${closureReasoningText}`
+            : closureReasoningText;
+          log.event("judge.reasoning", {
+            source: "gm-tool-loop.state-closure",
+            reasoningText: closureReasoningText,
+            responseModel: closureResponseModel,
+            usage: closureResultRecord.usage ?? null,
+          });
+        }
+        log.event("judge.gm-tool-loop.state-closure", {
+          profile: profile.name,
+          allowedTools: closureToolNames,
+          runtimeRequirementKind: runtimeRequirement.kind,
+          runtimeRequirementEffectKinds: runtimeRequirementStateEffectKinds(runtimeRequirement),
+          finishReason: closureResultRecord.finishReason ?? null,
+          responseModel: closureResponseModel,
+          usage: closureResultRecord.usage ?? null,
+          rawTextLen: typeof closureResultRecord.text === "string"
+            ? closureResultRecord.text.length
+            : 0,
+          reasoningLen: closureReasoningText?.length ?? 0,
+          stepCount: closureSteps.length,
+          toolCallCount: closureRawToolCalls.length,
+          successCount: closureStepResults.filter((step) => step.result?.success === true).length,
+          failureCount: closureStepResults.filter((step) => step.result?.success !== true).length,
+          toolCallNames: closureRawToolCalls.map((call) => call.tool),
+          durationMs: Date.now() - closureStartMs,
+        });
+      }
     }
     assertAppliedNowDialogueEffectsBackedByPriorStructuralReceipts(stepResults);
     assertConversationalToolLoopResolved(args, stepResults);

@@ -1200,6 +1200,68 @@ describe("runGmToolLoop", () => {
     ]);
   });
 
+  it("runs state-mutation closure when the first pass only performs contextual time", async () => {
+    generateTextMock()
+      .mockImplementationOnce(async (options: {
+        tools: Record<string, { execute: (input: unknown) => Promise<unknown> }>;
+      }) => {
+        const timeInput = { minutes: 5, reason: "The player crosses the public corridor." };
+        const timeOutput = await options.tools.advance_time!.execute(timeInput);
+        return {
+          text: "",
+          finishReason: "stop",
+          response: { modelId: "judge-model" },
+          usage: null,
+          steps: [
+            {
+              toolCalls: [{ toolName: "advance_time", input: timeInput }],
+              toolResults: [{ output: timeOutput }],
+            },
+          ],
+        };
+      })
+      .mockImplementationOnce(async (options: {
+        activeTools: string[];
+        tools: Record<string, { execute: (input: unknown) => Promise<unknown> }>;
+      }) => {
+        expect(options.activeTools).toEqual(["move_actor"]);
+        const moveInput = { actorRef: "Player", destinationRef: "Receiving Desk" };
+        const moveOutput = await options.tools.move_actor!.execute(moveInput);
+        return {
+          text: "",
+          finishReason: "stop",
+          response: { modelId: "judge-model" },
+          usage: null,
+          steps: [
+            {
+              toolCalls: [{ toolName: "move_actor", input: moveInput }],
+              toolResults: [{ output: moveOutput }],
+            },
+          ],
+        };
+      });
+
+    const result = await runGmToolLoop({
+      campaignId: "campaign-1",
+      provider,
+      tick: 7,
+      playerAction: "I walk through the public corridor to the receiving desk.",
+      frame: {
+        ...createFrame(),
+        allowedTools: ["advance_time", "move_actor"],
+      } as SceneFrame,
+      gmRead: {
+        ...gmRead,
+        turnIntent: "Move the player after the corridor traversal.",
+        runtimeRequirement: { kind: "state_mutation", effectKind: "movement" },
+      },
+    });
+
+    expect(result.stepResults.map((step) => step.toolName)).toEqual(["advance_time", "move_actor"]);
+    expect(result.acceptedStepIds).toHaveLength(2);
+    expect(generateTextMock()).toHaveBeenCalledTimes(2);
+  });
+
   it("accepts advance_time as a contextual post-tool after a state mutation receipt", async () => {
     generateTextMock().mockImplementationOnce(async (options: {
       tools: Record<string, { execute: (input: unknown) => Promise<unknown> }>;
