@@ -43,8 +43,7 @@ describe("tool executor caller authority contract", () => {
       "actor-tools.ts": 1,
       "gm-tool-step.ts": 2,
       "hidden-adjudication.ts": 1,
-      "npc-tools.ts": 3,
-      "reflection-tools.ts": 1,
+      "npc-tools.ts": 2,
       "scene-plan-executor.ts": 1,
       "tool-schemas.ts": 1,
     });
@@ -60,9 +59,7 @@ describe("tool executor caller authority contract", () => {
     expect(npcTools).toEqual(expect.stringContaining("createNpcAuthorityContext({"));
     expect(npcTools).toEqual(expect.stringContaining("createNpcMoveAuthorityContext({"));
 
-    const reflectionTools = sourceFor("reflection-tools.ts");
-    expect(reflectionTools).toEqual(expect.stringContaining("createBackgroundToolExecutionContext({"));
-    expect(reflectionTools).toEqual(expect.stringContaining("allowedWriteScopes: [\"world:relationship\"]"));
+    expect(sourceFor("reflection-tools.ts")).not.toMatch(executeToolCallPattern);
 
     expect(sourceFor("scene-plan-executor.ts"))
       .toEqual(expect.stringContaining("createScenePlanActionToolExecutionContext({"));

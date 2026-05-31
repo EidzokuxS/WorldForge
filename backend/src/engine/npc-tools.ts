@@ -1,8 +1,9 @@
 /**
  * NPC Agent tool definitions for AI SDK.
  *
- * Factory creates campaign-scoped tools that let an NPC agent
- * act (through Oracle), speak, move between locations, and update goals.
+ * Factory creates campaign-scoped tools for NPC background beats.
+ * Player-facing dialogue and goal edits are proposal-only until routed through
+ * the canonical gameplay owner registry.
  */
 
 import { z } from "zod";
@@ -25,7 +26,6 @@ import { createLogger } from "../lib/index.js";
 import { parseTags } from "./parse-helpers.js";
 import {
   hydrateStoredNpcRecord,
-  projectNpcRecord,
 } from "../character/record-adapters.js";
 import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
 import {
@@ -36,12 +36,22 @@ import {
   resolveTravelPath,
 } from "./location-graph.js";
 import { resolveActionTargetContext } from "./target-context.js";
-import {
-  commitAuthorityTrace,
-  validateBaseWorldVersion,
-} from "./living-world-authority.js";
 
 const log = createLogger("npc-tools");
+
+function npcProposalOnly(
+  toolName: string,
+  proposal: Record<string, unknown>,
+) {
+  return {
+    accepted: false,
+    proposalOnly: true,
+    toolName,
+    reason:
+      "NPC background tools cannot directly mutate player-facing dialogue or goals; route through actor/player turn grounding or a typed backend proposal executor.",
+    proposal,
+  };
+}
 
 function createNpcAuthorityContext(input: {
   campaignId: string;
@@ -86,10 +96,6 @@ function createNpcMoveAuthorityContext(input: {
       ...input.travelPath.locationIds.map((locationId) => `location:${locationId}`),
     ]),
   };
-}
-
-function authorityError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 // -- Tool factory -------------------------------------------------------------
@@ -227,51 +233,17 @@ export function createNpcAgentTools(
 
     speak: tool({
       description:
-        "Say something to someone present. No dice roll needed.",
+        "Propose something to say to someone present. Proposal-only; does not commit dialogue state.",
       inputSchema: z.object({
         dialogue: z.string().describe("What you say"),
         target: z.string().optional().describe("Who you're addressing"),
       }),
       execute: async ({ dialogue, target }) => {
-        const db = getDb();
-        const npc = db
-          .select({ name: npcs.name, currentLocationId: npcs.currentLocationId })
-          .from(npcs)
-          .where(eq(npcs.id, npcId))
-          .get();
-
-        const npcName = npc?.name ?? "Unknown NPC";
-        const currentLocation = npc?.currentLocationId
-          ? db
-              .select({ name: locations.name })
-              .from(locations)
-              .where(eq(locations.id, npc.currentLocationId))
-              .get()
-          : null;
-        const result = await executeToolCall(campaignId, "record_dialogue_outcome", {
-          speakerRef: npcName,
-          addresseeRefs: target ? [target] : [],
-          outcomeKind: "answered",
-          topicKind: "social",
-          authorityKind: "witness",
-          truthStatus: "speaker_asserted",
-          quote: dialogue,
-          summary: `${npcName} said to ${target ?? "everyone"}: "${dialogue}"`,
-          sourceRefs: [npcName, currentLocation?.name].filter((value): value is string => Boolean(value)),
-          durability: "durable",
-          futureUseKind: "npc_memory",
-          futureRelevance: "NPC-authored dialogue may inform future NPC memory and player-facing recall.",
-        }, tick, undefined, createNpcAuthorityContext({
-          campaignId,
+        return npcProposalOnly("speak", {
           npcId,
-          allowedWriteScopes: ["world:dialogue"],
-        }));
-
-        if (!result.success) {
-          return { error: result.error ?? "NPC dialogue was rejected by authority" };
-        }
-
-        return { spoke: true, dialogue };
+          dialogue,
+          target: target ?? null,
+        });
       },
     }),
 
@@ -373,95 +345,19 @@ export function createNpcAgentTools(
 
     update_own_goal: tool({
       description:
-        "Revise one of your goals based on recent events. Replace an old goal with a new one, or add a new goal.",
+        "Propose a goal revision based on recent events. Proposal-only; does not commit NPC goal state.",
       inputSchema: z.object({
         oldGoal: z.string().describe("The goal to replace (or empty to add new)"),
         newGoal: z.string().describe("The new goal"),
         type: z.enum(["short_term", "long_term"]).describe("Goal category"),
       }),
       execute: async ({ oldGoal, newGoal, type }) => {
-        const db = getDb();
-
-        const npc = db
-          .select()
-          .from(npcs)
-          .where(eq(npcs.id, npcId))
-          .get();
-
-        if (!npc) return { error: "NPC not found" };
-
-        const npcRecord = hydrateStoredNpcRecord(npc);
-        const goals = {
-          short_term: [...npcRecord.motivations.shortTermGoals],
-          long_term: [...npcRecord.motivations.longTermGoals],
-        };
-        const goalList = goals[type];
-
-        const idx = goalList.indexOf(oldGoal);
-        if (idx >= 0) {
-          goalList[idx] = newGoal;
-        } else {
-          goalList.push(newGoal);
-        }
-
-        const authorityContext = createNpcAuthorityContext({
-          campaignId,
+        return npcProposalOnly("update_own_goal", {
           npcId,
-          allowedWriteScopes: [`npc:${npcId}`],
+          oldGoal,
+          newGoal,
+          type,
         });
-        const authority = authorityContext.authority;
-        if (!authority) {
-          return { error: "NPC goal update requires execution authority" };
-        }
-
-        try {
-          db.transaction(() => {
-            validateBaseWorldVersion({
-              campaignId,
-              baseWorldVersion: authority.baseWorldVersion,
-              currentTick: tick,
-            });
-
-            db.update(npcs)
-              .set(projectNpcRecord({
-                ...npcRecord,
-                motivations: {
-                  ...npcRecord.motivations,
-                  shortTermGoals: goals.short_term,
-                  longTermGoals: goals.long_term,
-                },
-              }))
-              .where(eq(npcs.id, npcId))
-              .run();
-            log.event("db.write", {
-              table: "npcs",
-              op: "update",
-              rowId: npcId,
-              rowName: npc.name,
-            });
-
-            commitAuthorityTrace({
-              campaignId,
-              operation: "npc:update_own_goal",
-              baseWorldVersion: authority.baseWorldVersion,
-              sourceEntity: authority.sourceEntity,
-              elapsedWorldTimeMinutes: authority.elapsedWorldTimeMinutes,
-              currentTick: tick,
-              toolResultId: authority.toolResultId,
-              stateDeltaRefs: [`npc:${npcId}`, `npc_goal:${type}`],
-              metadata: {
-                toolName: "update_own_goal",
-                oldGoal,
-                newGoal,
-                type,
-              },
-            });
-          });
-        } catch (error) {
-          return { error: `NPC goal update rejected by authority: ${authorityError(error)}` };
-        }
-
-        return { updated: true, goals };
       },
     }),
   };

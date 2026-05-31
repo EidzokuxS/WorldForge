@@ -54,14 +54,6 @@ function setupMockDb(entity: Record<string, unknown> | null = createMockEntity()
   return db;
 }
 
-function latestEntitySetCall(mockDb: ReturnType<typeof setupMockDb>): Record<string, unknown> {
-  const call = mockDb.set.mock.calls
-    .map(([payload]) => payload as Record<string, unknown>)
-    .find((payload) => typeof payload.tags === "string" || typeof payload.characterRecord === "string");
-  expect(call).toBeDefined();
-  return call!;
-}
-
 const execCtx = {
   toolCallId: "tc1",
   messages: [],
@@ -104,7 +96,7 @@ describe("upgrade_wealth", () => {
     vi.clearAllMocks();
   });
 
-  it("replaces old wealth tier tag with new one (Poor -> Comfortable)", async () => {
+  it("returns a wealth proposal without replacing old tier tags (Poor -> Comfortable)", async () => {
     const mockDb = setupMockDb(createMockEntity({ tags: '["merchant","Poor"]' }));
 
     const tools = createReflectionTools(CAMPAIGN_ID, NPC_ID);
@@ -113,13 +105,22 @@ describe("upgrade_wealth", () => {
       execCtx,
     );
 
-    expect(result).toHaveProperty("updated", true);
-    const setCall = latestEntitySetCall(mockDb);
-    const tagsStr = setCall?.tags as string;
-    const tags = JSON.parse(tagsStr) as string[];
-    expect(tags).toContain("Comfortable");
-    expect(tags).not.toContain("Poor");
-    expect(tags).toContain("merchant");
+    expect(result).toMatchObject({
+      accepted: false,
+      proposalOnly: true,
+      toolName: "upgrade_wealth",
+      proposal: {
+        npcId: NPC_ID,
+        entityName: "Greta the Merchant",
+        entityType: "npc",
+        currentWealthTag: "Poor",
+        newTier: "Comfortable",
+      },
+    });
+    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(mockDb.insert).not.toHaveBeenCalled();
+    expect(mockDb.run).not.toHaveBeenCalled();
+    expect(mockDb.transaction).not.toHaveBeenCalled();
   });
 
   it("rejects downgrade (Wealthy -> Poor returns error)", async () => {
@@ -148,7 +149,7 @@ describe("upgrade_wealth", () => {
     expect((result as { error: string }).error).toMatch(/one step/i);
   });
 
-  it("allows setting Destitute or Poor as starting tier when no wealth tag exists", async () => {
+  it("returns a starting wealth proposal when no wealth tag exists", async () => {
     const mockDb = setupMockDb(createMockEntity({ tags: '["merchant"]' }));
 
     const tools = createReflectionTools(CAMPAIGN_ID, NPC_ID);
@@ -157,11 +158,22 @@ describe("upgrade_wealth", () => {
       execCtx,
     );
 
-    expect(result).toHaveProperty("updated", true);
-    const setCall = latestEntitySetCall(mockDb);
-    const tagsStr = setCall?.tags as string;
-    const tags = JSON.parse(tagsStr) as string[];
-    expect(tags).toContain("Poor");
+    expect(result).toMatchObject({
+      accepted: false,
+      proposalOnly: true,
+      toolName: "upgrade_wealth",
+      proposal: {
+        npcId: NPC_ID,
+        entityName: "Greta the Merchant",
+        entityType: "npc",
+        currentWealthTag: null,
+        newTier: "Poor",
+      },
+    });
+    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(mockDb.insert).not.toHaveBeenCalled();
+    expect(mockDb.run).not.toHaveBeenCalled();
+    expect(mockDb.transaction).not.toHaveBeenCalled();
   });
 });
 
@@ -172,7 +184,7 @@ describe("upgrade_skill", () => {
     vi.clearAllMocks();
   });
 
-  it("replaces old skill tier tag with new one (Novice Swordsman -> Skilled Swordsman)", async () => {
+  it("returns a skill proposal without replacing old skill tags (Novice Swordsman -> Skilled Swordsman)", async () => {
     const mockDb = setupMockDb(
       createMockEntity({ tags: '["merchant","Novice Swordsman"]' }),
     );
@@ -188,12 +200,23 @@ describe("upgrade_skill", () => {
       execCtx,
     );
 
-    expect(result).toHaveProperty("updated", true);
-    const setCall = latestEntitySetCall(mockDb);
-    const tagsStr = setCall?.tags as string;
-    const tags = JSON.parse(tagsStr) as string[];
-    expect(tags).toContain("Skilled Swordsman");
-    expect(tags).not.toContain("Novice Swordsman");
+    expect(result).toMatchObject({
+      accepted: false,
+      proposalOnly: true,
+      toolName: "upgrade_skill",
+      proposal: {
+        npcId: NPC_ID,
+        entityName: "Greta the Merchant",
+        entityType: "npc",
+        skillName: "Swordsman",
+        currentTier: "Novice",
+        newTier: "Skilled",
+      },
+    });
+    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(mockDb.insert).not.toHaveBeenCalled();
+    expect(mockDb.run).not.toHaveBeenCalled();
+    expect(mockDb.transaction).not.toHaveBeenCalled();
   });
 
   it("rejects downgrade (Master Swordsman -> Novice Swordsman returns error)", async () => {
@@ -214,7 +237,7 @@ describe("upgrade_skill", () => {
     expect((result as { error: string }).error).toMatch(/downgrade|one step/i);
   });
 
-  it("allows setting Novice as starting tier when no skill tag exists", async () => {
+  it("returns a starting skill proposal when no skill tag exists", async () => {
     const mockDb = setupMockDb(createMockEntity({ tags: '["merchant"]' }));
 
     const tools = createReflectionTools(CAMPAIGN_ID, NPC_ID);
@@ -228,10 +251,22 @@ describe("upgrade_skill", () => {
       execCtx,
     );
 
-    expect(result).toHaveProperty("updated", true);
-    const setCall = latestEntitySetCall(mockDb);
-    const tagsStr = setCall?.tags as string;
-    const tags = JSON.parse(tagsStr) as string[];
-    expect(tags).toContain("Novice Alchemy");
+    expect(result).toMatchObject({
+      accepted: false,
+      proposalOnly: true,
+      toolName: "upgrade_skill",
+      proposal: {
+        npcId: NPC_ID,
+        entityName: "Greta the Merchant",
+        entityType: "npc",
+        skillName: "Alchemy",
+        currentTier: null,
+        newTier: "Novice",
+      },
+    });
+    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(mockDb.insert).not.toHaveBeenCalled();
+    expect(mockDb.run).not.toHaveBeenCalled();
+    expect(mockDb.transaction).not.toHaveBeenCalled();
   });
 });

@@ -6,6 +6,9 @@ const generateTextMock = vi.hoisted(() =>
     steps: [],
   }),
 );
+const executeToolCallMock = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ success: true, result: {} }),
+);
 
 vi.mock("../../db/index.js", () => ({
   getDb: vi.fn(),
@@ -25,7 +28,7 @@ vi.mock("../../ai/provider-registry.js", () => ({
 }));
 
 vi.mock("../tool-executor.js", () => ({
-  executeToolCall: vi.fn().mockResolvedValue({ success: true, result: {} }),
+  executeToolCall: (...args: unknown[]) => executeToolCallMock(...args),
 }));
 
 vi.mock("ai", () => ({
@@ -196,7 +199,7 @@ describe("reflection personality contract", () => {
       "Current personality: summary=A patient fixer who turns favors into structure.; voice=Low-key, dry, and careful not to waste leverage.; contradictions=[Insists everything is transactional, but keeps rescuing people she cannot invoice.]; self-image=Keeps the market stitched together.",
     );
     expect(systemPrompt).toContain(
-      "Use promote_identity_change only when repeated, material evidence justifies modifying personality or baseFacts.",
+      "Use promote_identity_change only when repeated, material evidence justifies proposing personality or baseFacts changes.",
     );
     expect(systemPrompt).not.toContain("Current behavioral core:");
   });
@@ -230,11 +233,11 @@ describe("reflection personality contract", () => {
     ).toBe(false);
   });
 
-  it("writes promoted identity changes into personality and live dynamics attachments", async () => {
+  it("returns promoted identity proposals without personality or live dynamics mutation", async () => {
     const { db } = setupMockDb();
     const tools = createReflectionTools(CAMPAIGN_ID, NPC_ID);
 
-    await tools.promote_identity_change.execute!(
+    const result = await tools.promote_identity_change.execute!(
       {
         personality: {
           summary: "Now trusts Elara with the ledger keys.",
@@ -249,28 +252,28 @@ describe("reflection personality contract", () => {
       { toolCallId: "tc1", messages: [], abortSignal: undefined as unknown as AbortSignal },
     );
 
-    const payload = db.set.mock.calls
-      .map(([entry]) => entry as Record<string, string>)
-      .find((entry) => typeof entry.characterRecord === "string");
-    expect(payload).toBeDefined();
-    if (!payload) throw new Error("Expected NPC record update payload");
-    const updatedRecord = JSON.parse(payload.characterRecord);
-    expect(updatedRecord.identity.personality.summary).toBe(
-      "Now trusts Elara with the ledger keys.",
-    );
-    expect(updatedRecord.identity.personality.voice).toBe(
-      "Still dry, but no longer hiding every concern.",
-    );
-    expect(updatedRecord.identity.personality.worldview).toBe(
-      "Order comes from the people who keep accounts.",
-    );
-    expect(updatedRecord.identity.liveDynamics.attachments).toEqual(["Elara"]);
-    expect(updatedRecord.identity.behavioralCore.selfImage).toBe(
-      "A broker willing to risk herself for the market.",
-    );
-    expect(updatedRecord.identity.baseFacts.hardConstraints).toEqual([
-      "Protect the bazaar",
-      "Protect Elara",
-    ]);
+    expect(result).toMatchObject({
+      accepted: false,
+      proposalOnly: true,
+      toolName: "promote_identity_change",
+      proposal: {
+        npcId: NPC_ID,
+        personality: {
+          summary: "Now trusts Elara with the ledger keys.",
+          voice: "Still dry, but no longer hiding every concern.",
+        },
+        liveDynamicsAttachments: ["Elara"],
+        selfImage: "A broker willing to risk herself for the market.",
+        hardConstraints: ["Protect the bazaar", "Protect Elara"],
+        evidence: ["Elara saved the bazaar twice."],
+        whyNow: "Repeated evidence finally justifies promoting the change into her durable identity.",
+      },
+    });
+    expect(db.select).not.toHaveBeenCalled();
+    expect(db.update).not.toHaveBeenCalled();
+    expect(db.set).not.toHaveBeenCalled();
+    expect(db.run).not.toHaveBeenCalled();
+    expect(db.transaction).not.toHaveBeenCalled();
+    expect(executeToolCallMock).not.toHaveBeenCalled();
   });
 });

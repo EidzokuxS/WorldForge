@@ -427,9 +427,9 @@ async function tickNpcAgentInternal(
     ``,
     `You may:`,
     `- act(action) — attempt an action (will be evaluated for success via dice roll)`,
-    `- speak(dialogue) — say something to someone present`,
+    `- speak(dialogue) — propose something to say; this is proposal-only and cannot commit dialogue state`,
     `- move_to(location) — travel to an adjacent location`,
-    `- update_own_goal(old, new) — revise your goals based on events`,
+    `- update_own_goal(old, new) — propose a goal revision; this is proposal-only and cannot commit NPC goal state`,
     ``,
     `Choose at most ONE action that best serves your current goals. Prefer a small believable beat over forced activity.`,
   ]

@@ -1,40 +1,20 @@
 /**
  * Reflection Agent tool definitions for AI SDK.
  *
- * Factory creates campaign-scoped tools that let the Reflection Agent
- * update an NPC's beliefs, goals, and relationships based on accumulated
- * episodic events.
+ * Factory creates campaign-scoped proposal tools for the Reflection Agent.
+ * These tools do not directly mutate gameplay state; accepted reflection
+ * changes must route through a typed backend proposal executor.
  */
 
 import { z } from "zod";
 import { tool } from "ai";
-import { and, eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { getDb } from "../db/index.js";
-import { authorityTraces, npcs, players } from "../db/schema.js";
-import { executeToolCall } from "./tool-executor.js";
-import { createBackgroundToolExecutionContext } from "./tool-execution-context.js";
-import { recordActorKnowledge } from "./knowledge-model.js";
+import { npcs, players } from "../db/schema.js";
 import {
-  commitAuthorityTrace,
-  readWorldClock,
-  validateBaseWorldVersion,
-} from "./living-world-authority.js";
-import type { ToolResultAuthority } from "./tool-result.js";
-import { createLogger } from "../lib/index.js";
-import {
-  blankPersonality,
   hydrateStoredNpcRecord,
   hydrateStoredPlayerRecord,
-  projectNpcRecord,
-  projectPlayerRecord,
 } from "../character/record-adapters.js";
-import type { CharacterPersonality, CharacterRecord } from "@worldforge/shared";
-
-const log = createLogger("reflection-tools");
-
-const MAX_BELIEFS = 10;
-const MAX_GOALS_PER_CATEGORY = 5;
-const MAX_EARNED_CHANGES = 10;
 
 // -- Tier constants -----------------------------------------------------------
 
@@ -44,63 +24,18 @@ export const RELATIONSHIP_TAGS = ["Trusted Ally", "Friendly", "Neutral", "Suspic
 
 type EntityType = "player" | "npc";
 
-type ReflectionAuthorityContext = {
-  authority: ToolResultAuthority;
-  authorityTraceId: string;
-};
-
-function readAuthorityTraceId(campaignId: string, toolResultId: string): string | null {
-  const row = getDb()
-    .select({ id: authorityTraces.id })
-    .from(authorityTraces)
-    .where(and(
-      eq(authorityTraces.campaignId, campaignId),
-      eq(authorityTraces.toolResultId, toolResultId),
-    ))
-    .get();
-  return row?.id ?? null;
-}
-
-function withReflectionMutationAuthority<T>(
-  input: {
-    campaignId: string;
-    npcId: string;
-    operation: string;
-    stateDeltaRefs: string[];
-    eventIds?: string[];
-    metadata?: Record<string, unknown>;
-  },
-  mutate: (context: ReflectionAuthorityContext) => T,
-): T {
-  const db = getDb();
-
-  return db.transaction(() => {
-    const clock = readWorldClock(input.campaignId);
-    validateBaseWorldVersion({
-      campaignId: input.campaignId,
-      baseWorldVersion: clock.worldVersion,
-      currentTick: clock.currentTick,
-    });
-    const authority = commitAuthorityTrace({
-      campaignId: input.campaignId,
-      operation: `reflection:${input.operation}`,
-      baseWorldVersion: clock.worldVersion,
-      sourceEntity: { type: "npc", id: input.npcId },
-      elapsedWorldTimeMinutes: 0,
-      currentTick: clock.currentTick,
-      eventIds: input.eventIds,
-      stateDeltaRefs: input.stateDeltaRefs,
-      metadata: {
-        source: "reflection-agent",
-        ...input.metadata,
-      },
-    });
-    const authorityTraceId =
-      readAuthorityTraceId(input.campaignId, authority.toolResultId)
-      ?? authority.toolResultId;
-
-    return mutate({ authority, authorityTraceId });
-  });
+function reflectionProposalOnly(
+  toolName: string,
+  proposal: Record<string, unknown>,
+) {
+  return {
+    accepted: false,
+    proposalOnly: true,
+    toolName,
+    reason:
+      "Reflection tools cannot directly mutate gameplay state; route through a typed backend proposal executor with explicit state owners, receipts, rollback, projection, and recovery.",
+    proposal,
+  };
 }
 
 function resolveEntityForUpgrade(
@@ -148,293 +83,7 @@ function resolveEntityForUpgrade(
   };
 }
 
-function persistResolvedEntity(
-  entity:
-    | { id: string; type: "player"; record: ReturnType<typeof hydrateStoredPlayerRecord> }
-    | { id: string; type: "npc"; record: ReturnType<typeof hydrateStoredNpcRecord> },
-) {
-  const db = getDb();
-
-  if (entity.type === "player") {
-    db.update(players)
-      .set(projectPlayerRecord(entity.record))
-      .where(eq(players.id, entity.id))
-      .run();
-    log.event("db.write", {
-      table: "players",
-      op: "update",
-      rowId: entity.id,
-      rowName: entity.record.identity?.displayName ?? null,
-    });
-    return;
-  }
-
-  db.update(npcs)
-    .set(projectNpcRecord(entity.record))
-    .where(eq(npcs.id, entity.id))
-    .run();
-  log.event("db.write", {
-    table: "npcs",
-    op: "update",
-    rowId: entity.id,
-    rowName: entity.record.identity?.displayName ?? null,
-  });
-}
-
-function dedupeCaseInsensitive(values: string[]): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
-
-  for (const value of values) {
-    const normalized = value.trim();
-    if (!normalized) continue;
-    const key = normalized.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(normalized);
-  }
-
-  return result;
-}
-
-function capTrailing(values: string[], max: number): string[] {
-  return values.length > max ? values.slice(values.length - max) : values;
-}
-
-function mergeDefined<T extends object>(base: T, patch?: Partial<T>): T {
-  if (!patch) {
-    return { ...base };
-  }
-
-  return {
-    ...base,
-    ...Object.fromEntries(
-      Object.entries(patch).filter(([, value]) => value !== undefined),
-    ),
-  };
-}
-
-function persistNpcReflectionRecord(npcId: string, record: CharacterRecord) {
-  getDb()
-    .update(npcs)
-    .set(projectNpcRecord(record))
-    .where(eq(npcs.id, npcId))
-    .run();
-  log.event("db.write", {
-    table: "npcs",
-    op: "update",
-    rowId: npcId,
-    rowName: record.identity?.displayName ?? null,
-  });
-}
-
-function updateLiveDynamicsBeliefs(record: CharacterRecord, belief: string): CharacterRecord {
-  const beliefs = capTrailing(
-    dedupeCaseInsensitive([...record.motivations.beliefs, belief]),
-    MAX_BELIEFS,
-  );
-  const beliefDrift = capTrailing(
-    dedupeCaseInsensitive([...(record.identity.liveDynamics?.beliefDrift ?? []), belief]),
-    MAX_BELIEFS,
-  );
-
-  return {
-    ...record,
-    motivations: {
-      ...record.motivations,
-      beliefs,
-    },
-    identity: {
-      ...record.identity,
-      liveDynamics: {
-        ...record.identity.liveDynamics,
-        attachments: record.identity.liveDynamics?.attachments ?? [],
-        activeGoals: record.identity.liveDynamics?.activeGoals ?? [],
-        beliefDrift,
-        currentStrains: record.identity.liveDynamics?.currentStrains ?? [],
-        earnedChanges: record.identity.liveDynamics?.earnedChanges ?? [],
-      },
-    },
-  };
-}
-
-function updateLiveDynamicsGoals(
-  record: CharacterRecord,
-  goal: string,
-  priority: "short_term" | "long_term",
-): CharacterRecord {
-  const shortTermGoals = priority === "short_term"
-    ? capTrailing(dedupeCaseInsensitive([...record.motivations.shortTermGoals, goal]), MAX_GOALS_PER_CATEGORY)
-    : record.motivations.shortTermGoals;
-  const longTermGoals = priority === "long_term"
-    ? capTrailing(dedupeCaseInsensitive([...record.motivations.longTermGoals, goal]), MAX_GOALS_PER_CATEGORY)
-    : record.motivations.longTermGoals;
-  const activeGoals = capTrailing(
-    dedupeCaseInsensitive([...(record.identity.liveDynamics?.activeGoals ?? []), goal]),
-    MAX_GOALS_PER_CATEGORY * 2,
-  );
-
-  return {
-    ...record,
-    motivations: {
-      ...record.motivations,
-      shortTermGoals,
-      longTermGoals,
-    },
-    identity: {
-      ...record.identity,
-      liveDynamics: {
-        ...record.identity.liveDynamics,
-        attachments: record.identity.liveDynamics?.attachments ?? [],
-        activeGoals,
-        beliefDrift: record.identity.liveDynamics?.beliefDrift ?? [],
-        currentStrains: record.identity.liveDynamics?.currentStrains ?? [],
-        earnedChanges: record.identity.liveDynamics?.earnedChanges ?? [],
-      },
-    },
-  };
-}
-
-function dropLiveDynamicsGoal(record: CharacterRecord, goal: string): CharacterRecord {
-  const lowerGoal = goal.toLowerCase();
-  const shortTermGoals = record.motivations.shortTermGoals.filter(
-    (entry) => entry.toLowerCase() !== lowerGoal,
-  );
-  const longTermGoals = record.motivations.longTermGoals.filter(
-    (entry) => entry.toLowerCase() !== lowerGoal,
-  );
-  const activeGoals = (record.identity.liveDynamics?.activeGoals ?? []).filter(
-    (entry) => entry.toLowerCase() !== lowerGoal,
-  );
-
-  return {
-    ...record,
-    motivations: {
-      ...record.motivations,
-      shortTermGoals,
-      longTermGoals,
-    },
-    identity: {
-      ...record.identity,
-      liveDynamics: {
-        ...record.identity.liveDynamics,
-        attachments: record.identity.liveDynamics?.attachments ?? [],
-        activeGoals,
-        beliefDrift: record.identity.liveDynamics?.beliefDrift ?? [],
-        currentStrains: record.identity.liveDynamics?.currentStrains ?? [],
-        earnedChanges: record.identity.liveDynamics?.earnedChanges ?? [],
-      },
-    },
-  };
-}
-
 const REQUIRED_EVIDENCE = 1;
-
-type PromoteIdentityChangeInput = {
-  personality?: Partial<CharacterPersonality>;
-  liveDynamicsAttachments?: string[];
-  selfImage?: string;
-  hardConstraints?: string[];
-  whyNow: string;
-};
-
-function summarizePromotedIdentityChange(
-  input: PromoteIdentityChangeInput,
-): string {
-  const changes: string[] = [];
-
-  if (input.personality && Object.keys(input.personality).length > 0) {
-    changes.push("personality");
-  }
-  if (input.liveDynamicsAttachments) {
-    changes.push("attachments");
-  }
-  if (input.selfImage) {
-    changes.push("self-image");
-  }
-  if (input.hardConstraints) {
-    changes.push("hard-constraints");
-  }
-
-  return `identity-promotion: ${changes.join(", ") || "none"} | ${input.whyNow}`;
-}
-
-function appendEarnedIdentityChange(record: CharacterRecord, summary: string): CharacterRecord {
-  return {
-    ...record,
-    identity: {
-      ...record.identity,
-      liveDynamics: {
-        ...record.identity.liveDynamics,
-        attachments: record.identity.liveDynamics?.attachments ?? [],
-        activeGoals: record.identity.liveDynamics?.activeGoals ?? [],
-        beliefDrift: record.identity.liveDynamics?.beliefDrift ?? [],
-        currentStrains: record.identity.liveDynamics?.currentStrains ?? [],
-        earnedChanges: capTrailing(
-          dedupeCaseInsensitive([...(record.identity.liveDynamics?.earnedChanges ?? []), summary]),
-          MAX_EARNED_CHANGES,
-        ),
-      },
-    },
-  };
-}
-
-function promoteIdentityChange(
-  record: CharacterRecord,
-  input: PromoteIdentityChangeInput,
-): CharacterRecord {
-  const nextRecord = appendEarnedIdentityChange(
-    record,
-    summarizePromotedIdentityChange(input),
-  );
-
-  return {
-    ...nextRecord,
-    profile: {
-      ...nextRecord.profile,
-      personaSummary: input.selfImage ?? nextRecord.profile.personaSummary,
-    },
-    identity: {
-      ...nextRecord.identity,
-      personality: mergeDefined(
-        nextRecord.identity.personality ?? blankPersonality(),
-        input.personality,
-      ),
-      liveDynamics: {
-        ...nextRecord.identity.liveDynamics,
-        attachments:
-          input.liveDynamicsAttachments
-          ?? nextRecord.identity.liveDynamics?.attachments
-          ?? [],
-        activeGoals: nextRecord.identity.liveDynamics?.activeGoals ?? [],
-        beliefDrift: nextRecord.identity.liveDynamics?.beliefDrift ?? [],
-        currentStrains: nextRecord.identity.liveDynamics?.currentStrains ?? [],
-        earnedChanges: nextRecord.identity.liveDynamics?.earnedChanges ?? [],
-      },
-      behavioralCore: {
-        ...nextRecord.identity.behavioralCore,
-        motives: nextRecord.identity.behavioralCore?.motives ?? [],
-        pressureResponses: nextRecord.identity.behavioralCore?.pressureResponses ?? [],
-        taboos: nextRecord.identity.behavioralCore?.taboos ?? [],
-        attachments:
-          nextRecord.identity.behavioralCore?.attachments
-          ?? nextRecord.identity.liveDynamics?.attachments
-          ?? [],
-        selfImage: input.selfImage ?? nextRecord.identity.behavioralCore?.selfImage ?? "",
-      },
-      baseFacts: {
-        ...nextRecord.identity.baseFacts,
-        biography:
-          nextRecord.identity.baseFacts?.biography
-          ?? nextRecord.profile.backgroundSummary,
-        socialRole: nextRecord.identity.baseFacts?.socialRole ?? [],
-        hardConstraints: input.hardConstraints
-          ? dedupeCaseInsensitive(input.hardConstraints)
-          : nextRecord.identity.baseFacts?.hardConstraints ?? [],
-      },
-    },
-  };
-}
 
 // -- Tool factory -------------------------------------------------------------
 
@@ -461,55 +110,11 @@ export function createReflectionTools(campaignId: string, npcId: string) {
         evidence: z.array(z.string()).describe("Event references supporting this belief"),
       }),
       execute: async ({ belief, evidence }) => {
-        const db = getDb();
-
-        const npc = db
-          .select()
-          .from(npcs)
-          .where(eq(npcs.id, npcId))
-          .get();
-
-        if (!npc) return { error: "NPC not found" };
-
-        const npcRecord = hydrateStoredNpcRecord(npc);
-        const updatedRecord = updateLiveDynamicsBeliefs(npcRecord, belief);
-        const trimmedEvidence = evidence.map((entry) => entry.trim()).filter(Boolean);
-        const result = withReflectionMutationAuthority(
-          {
-            campaignId,
-            npcId,
-            operation: "set_belief",
-            stateDeltaRefs: [`npc:${npcId}:beliefs`, `npc:${npcId}:knowledge`],
-            eventIds: trimmedEvidence,
-            metadata: { belief },
-          },
-          ({ authorityTraceId }) => {
-            persistNpcReflectionRecord(npcId, updatedRecord);
-            const knowledge = recordActorKnowledge({
-              campaignId,
-              actorId: npcId,
-              route: "belief",
-              truthStatus: "believed",
-              statement: belief,
-              subjectRefs: [npcId],
-              sourceEventIds: trimmedEvidence,
-              authorityTraceIds: [authorityTraceId],
-              confidence: 70,
-              reliability: 65,
-              metadata: { source: "reflection:set_belief" },
-            });
-            return {
-              knowledgeId: knowledge.id,
-            };
-          },
-        );
-
-        log.info(`NPC ${npcId}: set belief "${belief}"`);
-        return {
-          updated: true,
-          knowledgeId: result.knowledgeId,
-          beliefs: updatedRecord.motivations.beliefs,
-        };
+        return reflectionProposalOnly("set_belief", {
+          npcId,
+          belief,
+          evidence,
+        });
       },
     }),
 
@@ -521,37 +126,11 @@ export function createReflectionTools(campaignId: string, npcId: string) {
         priority: z.enum(["short_term", "long_term"]).describe("Goal category"),
       }),
       execute: async ({ goal, priority }) => {
-        const db = getDb();
-
-        const npc = db
-          .select()
-          .from(npcs)
-          .where(eq(npcs.id, npcId))
-          .get();
-
-        if (!npc) return { error: "NPC not found" };
-
-        const npcRecord = hydrateStoredNpcRecord(npc);
-        const updatedRecord = updateLiveDynamicsGoals(npcRecord, goal, priority);
-        withReflectionMutationAuthority(
-          {
-            campaignId,
-            npcId,
-            operation: "set_goal",
-            stateDeltaRefs: [`npc:${npcId}:goals`],
-            metadata: { goal, priority },
-          },
-          () => persistNpcReflectionRecord(npcId, updatedRecord),
-        );
-
-        log.info(`NPC ${npcId}: set ${priority} goal "${goal}"`);
-        return {
-          updated: true,
-          goals: {
-            short_term: updatedRecord.motivations.shortTermGoals,
-            long_term: updatedRecord.motivations.longTermGoals,
-          },
-        };
+        return reflectionProposalOnly("set_goal", {
+          npcId,
+          goal,
+          priority,
+        });
       },
     }),
 
@@ -562,37 +141,10 @@ export function createReflectionTools(campaignId: string, npcId: string) {
         goal: z.string().describe("The goal text to remove"),
       }),
       execute: async ({ goal }) => {
-        const db = getDb();
-
-        const npc = db
-          .select()
-          .from(npcs)
-          .where(eq(npcs.id, npcId))
-          .get();
-
-        if (!npc) return { error: "NPC not found" };
-
-        const npcRecord = hydrateStoredNpcRecord(npc);
-        const updatedRecord = dropLiveDynamicsGoal(npcRecord, goal);
-        withReflectionMutationAuthority(
-          {
-            campaignId,
-            npcId,
-            operation: "drop_goal",
-            stateDeltaRefs: [`npc:${npcId}:goals`],
-            metadata: { goal },
-          },
-          () => persistNpcReflectionRecord(npcId, updatedRecord),
-        );
-
-        log.info(`NPC ${npcId}: dropped goal "${goal}"`);
-        return {
-          updated: true,
-          goals: {
-            short_term: updatedRecord.motivations.shortTermGoals,
-            long_term: updatedRecord.motivations.longTermGoals,
-          },
-        };
+        return reflectionProposalOnly("drop_goal", {
+          npcId,
+          goal,
+        });
       },
     }),
 
@@ -605,39 +157,12 @@ export function createReflectionTools(campaignId: string, npcId: string) {
         reason: z.string().describe("Why this relationship exists or changed"),
       }),
       execute: async ({ target, tag, reason }) => {
-        const db = getDb();
-
-        // Load NPC name for entityA
-        const npc = db
-          .select({ name: npcs.name })
-          .from(npcs)
-          .where(eq(npcs.id, npcId))
-          .get();
-
-        if (!npc) return { error: "NPC not found" };
-
-        // Reuse existing set_relationship tool executor logic
-        const result = await executeToolCall(
-          campaignId,
-          "set_relationship",
-          {
-            entityA: npc.name,
-            entityB: target,
-            tag,
-            reason,
-          },
-          0,
-          undefined,
-          createBackgroundToolExecutionContext({
-            campaignId,
-            sourceEntity: { type: "npc", id: npcId },
-            elapsedWorldTimeMinutes: 0,
-            allowedWriteScopes: ["world:relationship"],
-          }),
-        );
-
-        log.info(`NPC ${npcId}: set relationship with "${target}" -> [${tag}]`);
-        return result;
+        return reflectionProposalOnly("set_relationship", {
+          npcId,
+          target,
+          tag,
+          reason,
+        });
       },
     }),
 
@@ -660,15 +185,6 @@ export function createReflectionTools(campaignId: string, npcId: string) {
         evidence,
         whyNow,
       }) => {
-        const npc = getDb()
-          .select()
-          .from(npcs)
-          .where(eq(npcs.id, npcId))
-          .get();
-
-        if (!npc) return { error: "NPC not found" };
-
-        const npcRecord = hydrateStoredNpcRecord(npc);
         const strongEvidence = evidence.map((entry) => entry.trim()).filter(Boolean);
 
         if (strongEvidence.length < REQUIRED_EVIDENCE || whyNow.trim().length < 24) {
@@ -677,43 +193,15 @@ export function createReflectionTools(campaignId: string, npcId: string) {
           };
         }
 
-        const updatedRecord = promoteIdentityChange(
-          npcRecord,
-          {
-            personality,
-            liveDynamicsAttachments,
-            selfImage: selfImage?.trim() || undefined,
-            hardConstraints,
-            whyNow: whyNow.trim(),
-          },
-        );
-        withReflectionMutationAuthority(
-          {
-            campaignId,
-            npcId,
-            operation: "promote_identity_change",
-            stateDeltaRefs: [`npc:${npcId}:identity`],
-            eventIds: strongEvidence,
-            metadata: {
-              whyNow: whyNow.trim(),
-              changedFields: {
-                personality: Boolean(personality),
-                liveDynamicsAttachments: Boolean(liveDynamicsAttachments),
-                selfImage: Boolean(selfImage?.trim()),
-                hardConstraints: Boolean(hardConstraints),
-              },
-            },
-          },
-          () => persistNpcReflectionRecord(npcId, updatedRecord),
-        );
-
-        log.info(`NPC ${npcId}: promoted personality/baseFacts change`);
-        return {
-          updated: true,
-          personality: updatedRecord.identity.personality,
-          liveDynamicsAttachments: updatedRecord.identity.liveDynamics?.attachments ?? [],
-          earnedChanges: updatedRecord.identity.liveDynamics?.earnedChanges ?? [],
-        };
+        return reflectionProposalOnly("promote_identity_change", {
+          npcId,
+          personality: personality ?? null,
+          liveDynamicsAttachments: liveDynamicsAttachments ?? null,
+          selfImage: selfImage?.trim() || null,
+          hardConstraints: hardConstraints ?? null,
+          evidence: strongEvidence,
+          whyNow: whyNow.trim(),
+        });
       },
     }),
 
@@ -738,25 +226,13 @@ export function createReflectionTools(campaignId: string, npcId: string) {
           if (newIndex > 1) {
             return { error: `No current wealth tier. Can only set Destitute or Poor as starting tier, not ${newTier}.` };
           }
-          entity.record = {
-            ...entity.record,
-            capabilities: {
-              ...entity.record.capabilities,
-              wealthTier: newTier,
-            },
-          };
-          withReflectionMutationAuthority(
-            {
-              campaignId,
-              npcId,
-              operation: "upgrade_wealth",
-              stateDeltaRefs: [`${entity.type}:${entity.id}:capabilities`],
-              metadata: { entityName, entityType, newTier },
-            },
-            () => persistResolvedEntity(entity),
-          );
-          log.info(`${entityName}: set initial wealth tier "${newTier}"`);
-          return { updated: true, tags: entity.record.capabilities.wealthTier ? [entity.record.capabilities.wealthTier] : [] };
+          return reflectionProposalOnly("upgrade_wealth", {
+            npcId,
+            entityName,
+            entityType,
+            currentWealthTag: null,
+            newTier,
+          });
         }
 
         const currentIndex = WEALTH_TIERS.indexOf(currentWealthTag as typeof WEALTH_TIERS[number]);
@@ -769,26 +245,13 @@ export function createReflectionTools(campaignId: string, npcId: string) {
           return { error: `Wealth must progress one step at a time. Current: ${currentWealthTag}, requested: ${newTier}, expected next: ${WEALTH_TIERS[currentIndex + 1] ?? "max reached"}.` };
         }
 
-        // Replace old tier with new tier
-        entity.record = {
-          ...entity.record,
-          capabilities: {
-            ...entity.record.capabilities,
-            wealthTier: newTier,
-          },
-        };
-        withReflectionMutationAuthority(
-          {
-            campaignId,
-            npcId,
-            operation: "upgrade_wealth",
-            stateDeltaRefs: [`${entity.type}:${entity.id}:capabilities`],
-            metadata: { entityName, entityType, currentWealthTag, newTier },
-          },
-          () => persistResolvedEntity(entity),
-        );
-        log.info(`${entityName}: wealth ${currentWealthTag} -> ${newTier}`);
-        return { updated: true, tags: [newTier] };
+        return reflectionProposalOnly("upgrade_wealth", {
+          npcId,
+          entityName,
+          entityType,
+          currentWealthTag,
+          newTier,
+        });
       },
     }),
 
@@ -816,28 +279,14 @@ export function createReflectionTools(campaignId: string, npcId: string) {
           if (newIndex !== 0) {
             return { error: `No existing ${skillName} skill. Can only set Novice as starting tier, not ${newTier}.` };
           }
-          entity.record = {
-            ...entity.record,
-            capabilities: {
-              ...entity.record.capabilities,
-              skills: [
-                ...entity.record.capabilities.skills,
-                { name: skillName, tier: newTier },
-              ],
-            },
-          };
-          withReflectionMutationAuthority(
-            {
-              campaignId,
-              npcId,
-              operation: "upgrade_skill",
-              stateDeltaRefs: [`${entity.type}:${entity.id}:capabilities`],
-              metadata: { entityName, entityType, skillName, newTier },
-            },
-            () => persistResolvedEntity(entity),
-          );
-          log.info(`${entityName}: set initial skill "${newTier} ${skillName}"`);
-          return { updated: true, tags: [`${newTier} ${skillName}`] };
+          return reflectionProposalOnly("upgrade_skill", {
+            npcId,
+            entityName,
+            entityType,
+            skillName,
+            currentTier: null,
+            newTier,
+          });
         }
 
         const currentTier = existingSkill.tier;
@@ -855,30 +304,14 @@ export function createReflectionTools(campaignId: string, npcId: string) {
           return { error: `Skill must progress one step at a time. Current: ${currentTier} ${skillName}, expected next: ${SKILL_TIERS[currentIndex + 1] ?? "max reached"} ${skillName}.` };
         }
 
-        // Replace old skill tag with new one
-        entity.record = {
-          ...entity.record,
-          capabilities: {
-            ...entity.record.capabilities,
-            skills: entity.record.capabilities.skills.map((entry) =>
-              entry.name.toLowerCase() === skillName.toLowerCase()
-                ? { ...entry, tier: newTier }
-                : entry,
-            ),
-          },
-        };
-        withReflectionMutationAuthority(
-          {
-            campaignId,
-            npcId,
-            operation: "upgrade_skill",
-            stateDeltaRefs: [`${entity.type}:${entity.id}:capabilities`],
-            metadata: { entityName, entityType, skillName, currentTier, newTier },
-          },
-          () => persistResolvedEntity(entity),
-        );
-        log.info(`${entityName}: skill ${currentTier} ${skillName} -> ${newTier} ${skillName}`);
-        return { updated: true, tags: [`${newTier} ${skillName}`] };
+        return reflectionProposalOnly("upgrade_skill", {
+          npcId,
+          entityName,
+          entityType,
+          skillName,
+          currentTier,
+          newTier,
+        });
       },
     }),
   };

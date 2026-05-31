@@ -5,6 +5,7 @@ const mockReadPendingCommittedEvents = vi.fn();
 const mockCommitAuthorityTrace = vi.fn();
 const mockReadWorldClock = vi.fn();
 const mockValidateBaseWorldVersion = vi.fn();
+const mockExecuteToolCall = vi.fn();
 
 // Mock all external dependencies before imports
 vi.mock("../../db/index.js", () => ({
@@ -21,7 +22,7 @@ vi.mock("../../vectors/embeddings.js", () => ({
 }));
 
 vi.mock("../tool-executor.js", () => ({
-  executeToolCall: vi.fn().mockResolvedValue({ success: true, result: {} }),
+  executeToolCall: (...args: unknown[]) => mockExecuteToolCall(...args),
 }));
 
 vi.mock("../living-world-authority.js", () => ({
@@ -42,7 +43,7 @@ vi.mock("ai", () => ({
           },
         ],
         toolResults: [
-          { output: { updated: true } },
+          { output: { accepted: false, proposalOnly: true, toolName: "set_belief" } },
         ],
       },
     ],
@@ -58,7 +59,6 @@ vi.mock("../../ai/provider-registry.js", () => ({
 import { createReflectionTools } from "../reflection-tools.js";
 import { runReflection, checkAndTriggerReflections, REFLECTION_THRESHOLD } from "../reflection-agent.js";
 import { getDb } from "../../db/index.js";
-import { executeToolCall } from "../tool-executor.js";
 
 const CAMPAIGN_ID = "test-campaign-123";
 const NPC_ID = "npc-001";
@@ -247,7 +247,7 @@ describe("createReflectionTools", () => {
     expect(Object.keys(tools)).toHaveLength(7);
   });
 
-  it("set_belief appends a new belief to NPC beliefs JSON", async () => {
+  it("set_belief returns a proposal without mutating NPC beliefs or actor knowledge", async () => {
     const mockDb = setupMockDb({});
 
     const tools = createReflectionTools(CAMPAIGN_ID, NPC_ID);
@@ -256,37 +256,26 @@ describe("createReflectionTools", () => {
       { toolCallId: "tc1", messages: [], abortSignal: undefined as unknown as AbortSignal },
     );
 
-    expect(result).toHaveProperty("updated", true);
-    expect(mockDb.transaction).toHaveBeenCalled();
-    expect(mockValidateBaseWorldVersion).toHaveBeenCalledWith({
-      campaignId: CAMPAIGN_ID,
-      baseWorldVersion: 7,
-      currentTick: 70,
+    expect(result).toMatchObject({
+      accepted: false,
+      proposalOnly: true,
+      toolName: "set_belief",
+      proposal: {
+        npcId: NPC_ID,
+        belief: "The market is dangerous",
+        evidence: ["bandit attack"],
+      },
     });
-    expect(mockCommitAuthorityTrace).toHaveBeenCalledWith(expect.objectContaining({
-      campaignId: CAMPAIGN_ID,
-      operation: "reflection:set_belief",
-      baseWorldVersion: 7,
-      sourceEntity: { type: "npc", id: NPC_ID },
-      elapsedWorldTimeMinutes: 0,
-      currentTick: 70,
-      eventIds: ["bandit attack"],
-      stateDeltaRefs: [`npc:${NPC_ID}:beliefs`, `npc:${NPC_ID}:knowledge`],
-    }));
-    expect(mockDb.run).toHaveBeenCalled();
-    // Check the set() call contains the updated beliefs
-    const setCall = mockDb.set.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
-    expect(setCall).toBeDefined();
-    const beliefsStr = setCall?.beliefs as string;
-    expect(beliefsStr).toBeDefined();
-    const beliefs = JSON.parse(beliefsStr) as string[];
-    expect(beliefs).toContain("Every debt can be collected");
-    expect(beliefs).toContain("The market is dangerous");
-    const knowledgeRow = mockDb.values.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
-    expect(JSON.parse(String(knowledgeRow?.authorityTraceIds))).toEqual(["authority-trace-1"]);
+    expect(mockDb.transaction).not.toHaveBeenCalled();
+    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(mockDb.insert).not.toHaveBeenCalled();
+    expect(mockDb.run).not.toHaveBeenCalled();
+    expect(mockValidateBaseWorldVersion).not.toHaveBeenCalled();
+    expect(mockCommitAuthorityTrace).not.toHaveBeenCalled();
+    expect(mockExecuteToolCall).not.toHaveBeenCalled();
   });
 
-  it("set_goal adds a goal to the appropriate priority array", async () => {
+  it("set_goal returns a proposal without mutating NPC goals", async () => {
     const mockDb = setupMockDb({});
 
     const tools = createReflectionTools(CAMPAIGN_ID, NPC_ID);
@@ -295,19 +284,23 @@ describe("createReflectionTools", () => {
       { toolCallId: "tc1", messages: [], abortSignal: undefined as unknown as AbortSignal },
     );
 
-    expect(result).toHaveProperty("updated", true);
-    expect(mockCommitAuthorityTrace).toHaveBeenCalledWith(expect.objectContaining({
-      operation: "reflection:set_goal",
-      stateDeltaRefs: [`npc:${NPC_ID}:goals`],
-    }));
-    const setCall = mockDb.set.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
-    const goalsStr = setCall?.goals as string;
-    const goals = JSON.parse(goalsStr) as { short_term: string[]; long_term: string[] };
-    expect(goals.short_term).toContain("hire bodyguards");
-    expect(goals.short_term).toContain("Stabilize the bazaar");
+    expect(result).toMatchObject({
+      accepted: false,
+      proposalOnly: true,
+      toolName: "set_goal",
+      proposal: {
+        npcId: NPC_ID,
+        goal: "hire bodyguards",
+        priority: "short_term",
+      },
+    });
+    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(mockDb.run).not.toHaveBeenCalled();
+    expect(mockCommitAuthorityTrace).not.toHaveBeenCalled();
+    expect(mockExecuteToolCall).not.toHaveBeenCalled();
   });
 
-  it("drop_goal removes a goal from NPC goals (case-insensitive)", async () => {
+  it("drop_goal returns a proposal without mutating NPC goals", async () => {
     const mockDb = setupMockDb({});
 
     const tools = createReflectionTools(CAMPAIGN_ID, NPC_ID);
@@ -316,19 +309,23 @@ describe("createReflectionTools", () => {
       { toolCallId: "tc1", messages: [], abortSignal: undefined as unknown as AbortSignal },
     );
 
-    expect(result).toHaveProperty("updated", true);
-    expect(mockCommitAuthorityTrace).toHaveBeenCalledWith(expect.objectContaining({
-      operation: "reflection:drop_goal",
-      stateDeltaRefs: [`npc:${NPC_ID}:goals`],
-    }));
-    const setCall = mockDb.set.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
-    const goalsStr = setCall?.goals as string;
-    const goals = JSON.parse(goalsStr) as { short_term: string[]; long_term: string[] };
-    expect(goals.short_term).not.toContain("sell rare goods");
+    expect(result).toMatchObject({
+      accepted: false,
+      proposalOnly: true,
+      toolName: "drop_goal",
+      proposal: {
+        npcId: NPC_ID,
+        goal: "Sell Rare Goods",
+      },
+    });
+    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(mockDb.run).not.toHaveBeenCalled();
+    expect(mockCommitAuthorityTrace).not.toHaveBeenCalled();
+    expect(mockExecuteToolCall).not.toHaveBeenCalled();
   });
 
-  it("set_relationship calls executeToolCall with set_relationship", async () => {
-    setupMockDb({});
+  it("set_relationship returns a proposal without background tool execution", async () => {
+    const mockDb = setupMockDb({});
 
     const tools = createReflectionTools(CAMPAIGN_ID, NPC_ID);
     const result = await tools.set_relationship.execute!(
@@ -336,28 +333,25 @@ describe("createReflectionTools", () => {
       { toolCallId: "tc1", messages: [], abortSignal: undefined as unknown as AbortSignal },
     );
 
-    expect(executeToolCall).toHaveBeenCalledWith(
-      CAMPAIGN_ID,
-      "set_relationship",
-      expect.objectContaining({
-        entityA: "Greta the Merchant",
-        entityB: "Bandit Leader",
+    expect(result).toMatchObject({
+      accepted: false,
+      proposalOnly: true,
+      toolName: "set_relationship",
+      proposal: {
+        npcId: NPC_ID,
+        target: "Bandit Leader",
         tag: "enemy",
         reason: "Threatened my livelihood",
-      }),
-      0,
-      undefined,
-      expect.objectContaining({
-        scope: "background",
-        authority: expect.objectContaining({
-          sourceEntity: { type: "npc", id: NPC_ID },
-        }),
-      }),
-    );
+      },
+    });
+    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(mockDb.run).not.toHaveBeenCalled();
+    expect(mockCommitAuthorityTrace).not.toHaveBeenCalled();
+    expect(mockExecuteToolCall).not.toHaveBeenCalled();
   });
 
-  it("promote_identity_change persists only behind reflection authority", async () => {
-    setupMockDb({});
+  it("promote_identity_change returns a proposal without identity mutation authority", async () => {
+    const mockDb = setupMockDb({});
 
     const tools = createReflectionTools(CAMPAIGN_ID, NPC_ID);
     const result = await tools.promote_identity_change.execute!(
@@ -369,35 +363,68 @@ describe("createReflectionTools", () => {
       { toolCallId: "tc1", messages: [], abortSignal: undefined as unknown as AbortSignal },
     );
 
-    expect(result).toHaveProperty("updated", true);
-    expect(mockCommitAuthorityTrace).toHaveBeenCalledWith(expect.objectContaining({
-      operation: "reflection:promote_identity_change",
-      eventIds: ["evt-strong-1"],
-      stateDeltaRefs: [`npc:${NPC_ID}:identity`],
-    }));
+    expect(result).toMatchObject({
+      accepted: false,
+      proposalOnly: true,
+      toolName: "promote_identity_change",
+      proposal: {
+        npcId: NPC_ID,
+        selfImage: "A merchant who now sees threat before profit.",
+        evidence: ["evt-strong-1"],
+        whyNow: "The repeated direct threats forced a durable self-image change.",
+      },
+    });
+    expect(mockDb.select).not.toHaveBeenCalled();
+    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(mockDb.run).not.toHaveBeenCalled();
+    expect(mockCommitAuthorityTrace).not.toHaveBeenCalled();
+    expect(mockExecuteToolCall).not.toHaveBeenCalled();
   });
 
-  it("upgrade_wealth and upgrade_skill persist through reflection authority", async () => {
-    setupMockDb({});
+  it("upgrade_wealth and upgrade_skill return proposals without capability mutation authority", async () => {
+    const mockDb = setupMockDb({});
 
     const tools = createReflectionTools(CAMPAIGN_ID, NPC_ID);
-    await tools.upgrade_wealth.execute!(
+    const wealthResult = await tools.upgrade_wealth.execute!(
       { entityName: "Greta the Merchant", entityType: "npc", newTier: "Obscenely Rich" },
       { toolCallId: "tc1", messages: [], abortSignal: undefined as unknown as AbortSignal },
     );
-    await tools.upgrade_skill.execute!(
+    const skillResult = await tools.upgrade_skill.execute!(
       { entityName: "Greta the Merchant", entityType: "npc", skillName: "Alchemy", newTier: "Novice" },
       { toolCallId: "tc2", messages: [], abortSignal: undefined as unknown as AbortSignal },
     );
 
-    expect(mockCommitAuthorityTrace).toHaveBeenCalledWith(expect.objectContaining({
-      operation: "reflection:upgrade_wealth",
-      stateDeltaRefs: [`npc:${NPC_ID}:capabilities`],
-    }));
-    expect(mockCommitAuthorityTrace).toHaveBeenCalledWith(expect.objectContaining({
-      operation: "reflection:upgrade_skill",
-      stateDeltaRefs: [`npc:${NPC_ID}:capabilities`],
-    }));
+    expect(wealthResult).toMatchObject({
+      accepted: false,
+      proposalOnly: true,
+      toolName: "upgrade_wealth",
+      proposal: {
+        npcId: NPC_ID,
+        entityName: "Greta the Merchant",
+        entityType: "npc",
+        currentWealthTag: "Wealthy",
+        newTier: "Obscenely Rich",
+      },
+    });
+    expect(skillResult).toMatchObject({
+      accepted: false,
+      proposalOnly: true,
+      toolName: "upgrade_skill",
+      proposal: {
+        npcId: NPC_ID,
+        entityName: "Greta the Merchant",
+        entityType: "npc",
+        skillName: "Alchemy",
+        currentTier: null,
+        newTier: "Novice",
+      },
+    });
+    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(mockDb.insert).not.toHaveBeenCalled();
+    expect(mockDb.run).not.toHaveBeenCalled();
+    expect(mockDb.transaction).not.toHaveBeenCalled();
+    expect(mockCommitAuthorityTrace).not.toHaveBeenCalled();
+    expect(mockExecuteToolCall).not.toHaveBeenCalled();
   });
 });
 
@@ -475,7 +502,10 @@ describe("runReflection", () => {
       "Beliefs, goals, and relationships are the first-class outcomes for ordinary reflection.",
     );
     expect(systemPrompt).toContain(
-      "Prefer durable structured-state updates over flavor-only narration or debug counters.",
+      "Reflection tools are proposal-only: they cannot directly mutate gameplay truth, NPC records, relationships, capabilities, or actor knowledge.",
+    );
+    expect(systemPrompt).toContain(
+      "Accepted reflection changes must be routed later through a typed backend proposal executor with explicit state owners and receipts.",
     );
     expect(systemPrompt).toContain("Wealth changes require significant trade/loot events.");
     expect(systemPrompt).toContain("Skill upgrades require 3+ successful uses of that skill.");
@@ -644,7 +674,7 @@ describe("runReflection", () => {
       "Beliefs, goals, and relationships are the first-class outcomes for ordinary reflection.",
     );
     expect(systemPrompt).toContain(
-      "Prefer durable structured-state updates over flavor-only narration or debug counters.",
+      "Ordinary interaction arcs should usually produce belief, goal, or relationship drift proposals using the structured-state tools.",
     );
   });
 
@@ -707,9 +737,9 @@ describe("runReflection", () => {
     });
 
     const systemPrompt = (generateText as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]?.system as string;
-    expect(systemPrompt).toContain("Live dynamics are the default mutation surface for ordinary reflection.");
-    expect(systemPrompt).toContain("Update active goals, belief drift, current strains, and relationships before considering deeper identity edits.");
-    expect(systemPrompt).toContain("Deeper identity changes require explicit promotion with multiple strong evidence points.");
+    expect(systemPrompt).toContain("Reflection tools are proposal-only: they cannot directly mutate gameplay truth, NPC records, relationships, capabilities, or actor knowledge.");
+    expect(systemPrompt).toContain("Propose active goals, belief drift, current strains, and relationships before considering deeper identity edits.");
+    expect(systemPrompt).toContain("Deeper identity-change proposals require explicit promotion with multiple strong evidence points.");
   });
 });
 

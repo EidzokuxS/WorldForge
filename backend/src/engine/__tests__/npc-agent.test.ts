@@ -582,7 +582,7 @@ describe("createNpcAgentTools", () => {
     );
   });
 
-  it("update_own_goal replaces old goal with new goal", async () => {
+  it("update_own_goal returns a proposal without mutating NPC goals", async () => {
     const mockDb = setupMockDb({});
 
     const tools = createNpcAgentTools(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
@@ -592,25 +592,25 @@ describe("createNpcAgentTools", () => {
       { toolCallId: "tc1", messages: [], abortSignal: undefined as unknown as AbortSignal }
     );
 
-    expect(result).toHaveProperty("updated", true);
-    expect(mockDb.run).toHaveBeenCalled();
-    expect(validateBaseWorldVersionMock).toHaveBeenCalledWith({
-      campaignId: CAMPAIGN_ID,
-      baseWorldVersion: 0,
-      currentTick: TICK,
+    expect(result).toMatchObject({
+      accepted: false,
+      proposalOnly: true,
+      toolName: "update_own_goal",
+      proposal: {
+        npcId: NPC_ID,
+        oldGoal: "sell rare goods",
+        newGoal: "find rare artifacts",
+        type: "short_term",
+      },
     });
-    expect(commitAuthorityTraceMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        campaignId: CAMPAIGN_ID,
-        operation: "npc:update_own_goal",
-        baseWorldVersion: 0,
-        sourceEntity: { type: "npc", id: NPC_ID },
-        stateDeltaRefs: ["npc:npc-001", "npc_goal:short_term"],
-      }),
-    );
+    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(mockDb.run).not.toHaveBeenCalled();
+    expect(validateBaseWorldVersionMock).not.toHaveBeenCalled();
+    expect(commitAuthorityTraceMock).not.toHaveBeenCalled();
+    expect(executeToolCall).not.toHaveBeenCalled();
   });
 
-  it("update_own_goal refuses stale authority before writing", async () => {
+  it("update_own_goal does not enter stale authority validation because it is proposal-only", async () => {
     const mockDb = setupMockDb({});
     validateBaseWorldVersionMock.mockImplementationOnce(() => {
       throw new Error("stale world version");
@@ -623,14 +623,19 @@ describe("createNpcAgentTools", () => {
       { toolCallId: "tc-stale", messages: [], abortSignal: undefined as unknown as AbortSignal },
     );
 
-    expect(result).toHaveProperty("error");
-    expect((result as { error: string }).error).toContain("stale world version");
+    expect(result).toMatchObject({
+      accepted: false,
+      proposalOnly: true,
+      toolName: "update_own_goal",
+    });
+    expect(validateBaseWorldVersionMock).not.toHaveBeenCalled();
     expect(mockDb.run).not.toHaveBeenCalled();
     expect(commitAuthorityTraceMock).not.toHaveBeenCalled();
+    expect(executeToolCall).not.toHaveBeenCalled();
   });
 
-  it("speak returns dialogue text as result without Oracle", async () => {
-    setupMockDb({});
+  it("speak returns a dialogue proposal without Oracle or background execution", async () => {
+    const mockDb = setupMockDb({});
 
     const tools = createNpcAgentTools(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
 
@@ -639,59 +644,50 @@ describe("createNpcAgentTools", () => {
       { toolCallId: "tc1", messages: [], abortSignal: undefined as unknown as AbortSignal }
     );
 
-    expect(result).toHaveProperty("spoke", true);
-    expect(result).toHaveProperty("dialogue", "Welcome to my shop!");
+    expect(result).toMatchObject({
+      accepted: false,
+      proposalOnly: true,
+      toolName: "speak",
+      proposal: {
+        npcId: NPC_ID,
+        dialogue: "Welcome to my shop!",
+        target: "player",
+      },
+    });
     expect(callOracle).not.toHaveBeenCalled();
     expect(storeEpisodicEvent).not.toHaveBeenCalled();
-    expect(executeToolCall).toHaveBeenCalledWith(
-      CAMPAIGN_ID,
-      "record_dialogue_outcome",
-      expect.objectContaining({
-        speakerRef: "Greta the Merchant",
-        addresseeRefs: ["player"],
-        quote: "Welcome to my shop!",
-        durability: "durable",
-        futureUseKind: "npc_memory",
-      }),
-      TICK,
-      undefined,
-      expect.objectContaining({
-        scope: "background",
-        authority: expect.objectContaining({
-          sourceEntity: { type: "npc", id: NPC_ID },
-          allowedWriteScopes: ["world:dialogue"],
-        }),
-      }),
-    );
+    expect(executeToolCall).not.toHaveBeenCalled();
+    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(mockDb.run).not.toHaveBeenCalled();
+    expect(commitAuthorityTraceMock).not.toHaveBeenCalled();
   });
 
-  it("does not write NPC dialogue memory directly outside authority execution", async () => {
-    setupMockDb({});
+  it("does not write NPC dialogue memory or route player-facing dialogue through background executor", async () => {
+    const mockDb = setupMockDb({});
 
     const tools = createNpcAgentTools(CAMPAIGN_ID, NPC_ID, TICK, JUDGE_PROVIDER);
 
-    await tools.speak.execute!(
+    const result = await tools.speak.execute!(
       { dialogue: "We need allies before dawn.", target: "Hero" },
       { toolCallId: "tc2", messages: [], abortSignal: undefined as unknown as AbortSignal }
     );
 
+    expect(result).toMatchObject({
+      accepted: false,
+      proposalOnly: true,
+      toolName: "speak",
+      proposal: {
+        npcId: NPC_ID,
+        dialogue: "We need allies before dawn.",
+        target: "Hero",
+      },
+    });
     expect(storeEpisodicEvent).not.toHaveBeenCalled();
     expect(accumulateReflectionBudgetMock).not.toHaveBeenCalled();
-    expect(executeToolCall).toHaveBeenCalledWith(
-      CAMPAIGN_ID,
-      "record_dialogue_outcome",
-      expect.objectContaining({
-        quote: "We need allies before dawn.",
-        addresseeRefs: ["Hero"],
-      }),
-      TICK,
-      undefined,
-      expect.objectContaining({
-        authority: expect.objectContaining({
-          allowedWriteScopes: ["world:dialogue"],
-        }),
-      }),
-    );
+    expect(executeToolCall).not.toHaveBeenCalled();
+    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(mockDb.run).not.toHaveBeenCalled();
+    expect(commitAuthorityTraceMock).not.toHaveBeenCalled();
   });
 
   it("avoids double-counting reflection budget when present-NPC act piggybacks through log_event", async () => {
@@ -1245,7 +1241,9 @@ describe("tickNpcAgent", () => {
           toolResults: [
             {
               output: {
-                spoke: true,
+                accepted: false,
+                proposalOnly: true,
+                toolName: "speak",
               },
             },
           ],
