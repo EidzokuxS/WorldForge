@@ -14,6 +14,7 @@ import {
   formatCurrentInventoryStatusSummary,
   formatInventoryStatusSummary,
   getNarratorPacketRedactionAudit,
+  normalizeNarratableObservationSummary,
   sourceBoundaryTermIsAllowedCommittedActorCreation,
 } from "./narrator-packet.js";
 import { sourceBoundaryTermIsLeak } from "./source-boundary.js";
@@ -144,7 +145,9 @@ function formatObservation(
   observation: NarratorPacketObservation,
   includeTechnicalRefs: boolean,
 ): string {
-  const summary = sanitizeModelFacingText(observation.summary);
+  const summary = sanitizeModelFacingText(
+    normalizeNarratableObservationSummary(observation.summary),
+  );
   return includeTechnicalRefs
     ? `- ${formatDiagnosticRef(observation.id)}: ${summary} [tool=${sanitizeModelFacingText(observation.toolName)}]`
     : `- ${summary}`;
@@ -159,7 +162,7 @@ function visibleTexts(packet: PlayerFacingPacket): string[] {
     ...packet.perceivableResponses.map((response) => sanitizeModelFacingText(response.summary)),
     ...packet.perceivableEffects.map((effect) => sanitizeModelFacingText(effect.summary)),
     ...(packet.perceivableObservations ?? []).map((observation) =>
-      sanitizeModelFacingText(observation.summary)
+      sanitizeModelFacingText(normalizeNarratableObservationSummary(observation.summary))
     ),
     ...packet.visibleActors.map((actor) => sanitizeModelFacingText(actor.label)),
     ...packet.currentInventory.map((item) => sanitizeModelFacingText(formatInventoryStatusSummary(item))),
@@ -208,7 +211,7 @@ function sourceBoundaryCheckedTexts(
     })),
     ...packet.perceivableObservations.map((observation, index) => ({
       source: `observation_result:o${index + 1}`,
-      text: sanitizeModelFacingText(observation.summary),
+      text: sanitizeModelFacingText(normalizeNarratableObservationSummary(observation.summary)),
       toolName: observation.toolName,
     })),
     ...packet.visibleActors.map((actor, index) => ({
@@ -377,7 +380,10 @@ export function buildPlayerFacingPacketFromNarratorPacket(
     committedEvents: [...packet.perceivableEvents],
     perceivableResponses: [...packet.perceivableResponses],
     perceivableEffects: [...packet.perceivableEffects],
-    perceivableObservations: [...(packet.perceivableObservations ?? [])],
+    perceivableObservations: (packet.perceivableObservations ?? []).map((observation) => ({
+      ...observation,
+      summary: normalizeNarratableObservationSummary(observation.summary),
+    })),
     visibleActors: [...packet.visibleActors],
     currentInventory: [...(packet.currentInventory ?? [])],
     hintSignals: [...packet.hintSignals],

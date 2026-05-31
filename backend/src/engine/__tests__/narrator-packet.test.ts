@@ -2408,18 +2408,18 @@ describe("narrator packet settlement boundary", () => {
 
     expect(packet.perceivableEffects).toEqual([]);
     expect(packet.perceivableObservations?.map((observation) => observation.summary)).toEqual([
-      "Scene scan: personnel Mira; barriers No visible barrier refs are present.",
+      "Scene scan: personnel Mira; barriers No obvious visible barriers are apparent from here.",
     ]);
     expect(packet.perceivableObservations?.[0]?.atoms).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           kind: "actor",
-          summary: "Mira",
+          summary: "Mira is visible here.",
           claimSupport: expect.arrayContaining(["actor_presence"]),
         }),
         expect.objectContaining({
           kind: "absence",
-          summary: "No visible barrier refs are present.",
+          summary: "No obvious visible barriers are apparent from here.",
           claimSupport: expect.arrayContaining(["route_status"]),
         }),
       ]),
@@ -2429,18 +2429,67 @@ describe("narrator packet settlement boundary", () => {
         expect.objectContaining({
           id: `observation_result:${successfulActionId}:a1`,
           category: "observation_result",
-          summary: "Mira",
+          summary: "Mira is visible here.",
           claimSupport: expect.arrayContaining(["actor_presence"]),
         }),
         expect.objectContaining({
           category: "observation_result",
-          summary: "No visible barrier refs are present.",
+          summary: "No obvious visible barriers are apparent from here.",
           claimSupport: expect.arrayContaining(["route_status"]),
         }),
       ]),
     );
     expect(formatted).toContain("[PLAYER-VISIBLE OBSERVATIONS]");
-    expect(formatted).toContain("o1.a1 [actor]: Mira");
+    expect(formatted).toContain("o1.a1 [actor]: Mira is visible here.");
+  });
+
+  it("formats route observation atoms as player-facing status instead of internal legality", () => {
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    canonicalTurnPacket.turnResolution = {
+      kind: "status_read",
+      resolutionState: "observation_grounded",
+      combatIntent: false,
+      evidenceIds: [`action-result:${successfulActionId}`],
+      consequenceIds: [],
+      explicitNoCombatEvidenceIds: [`action-result:${successfulActionId}`],
+      toolNames: ["check_route"],
+    };
+    canonicalTurnPacket.effects = [];
+    canonicalTurnPacket.narratorFacts.actionIds = [];
+    canonicalTurnPacket.narratorFacts.toolResultRefs = [];
+    canonicalTurnPacket.actionResults = [
+      {
+        order: 0,
+        actionId: successfulActionId,
+        actionRef: "step-check-route",
+        actorId: playerId,
+        toolName: "check_route",
+        input: { targetRef: "Archive Stair" },
+        args: { targetRef: "Archive Stair" },
+        result: {
+          success: true,
+          kind: "observation",
+          observationOnly: true,
+          result: {
+            routeStatus: "legal",
+            destination: { label: "Archive Stair" },
+          },
+        },
+        summary: "A visible route to Archive Stair is confirmed.",
+      },
+    ];
+
+    const packet = buildNarratorPacket({
+      frame: createFrame(),
+      canonicalTurnPacket,
+    });
+    const atomSummaries = packet.perceivableObservations?.[0]?.atoms.map((atom) => atom.summary) ?? [];
+    const formatted = formatNarratorPacketForPrompt(packet);
+
+    expect(atomSummaries).toContain("The route to Archive Stair is reachable from here.");
+    expect(atomSummaries.join("\n")).not.toContain("legal");
+    expect(formatted).toContain("The route to Archive Stair is reachable from here.");
+    expect(formatted).not.toContain("Route to Archive Stair is legal");
   });
 
   it("lets status-read turns cite current inventory as static backend-owned facts", () => {

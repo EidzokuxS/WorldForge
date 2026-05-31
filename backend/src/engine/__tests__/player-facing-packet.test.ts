@@ -384,6 +384,9 @@ describe("PlayerFacingPacket", () => {
     expect(packet.perceivableObservations).toHaveLength(1);
     expect(formatted).toContain("[PLAYER-VISIBLE OBSERVATIONS]");
     expect(formatted).toContain("Scene scan: personnel Depot Clerk");
+    expect(formatted).toContain("No obvious visible barriers are apparent from here.");
+    expect(formatted).not.toContain("barrier refs");
+    expect(formatted).not.toContain("current scene packet");
   });
 
   it("formats current inventory status as player-facing source without exposing raw canonical data", () => {

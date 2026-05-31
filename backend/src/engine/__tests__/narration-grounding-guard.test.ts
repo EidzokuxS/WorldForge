@@ -2093,6 +2093,63 @@ describe("narration grounding guard", () => {
     });
   });
 
+  it("expands observation fact refs into complete backend-owned status prose", () => {
+    const packet = createPacket();
+    packet.canonicalTurnPacket.turnResolution = {
+      kind: "status_read",
+      resolutionState: "observation_grounded",
+      combatIntent: false,
+      evidenceIds: ["action-result:scan-1"],
+      consequenceIds: [],
+      explicitNoCombatEvidenceIds: ["action-result:scan-1"],
+      toolNames: ["list_visible_affordances"],
+    };
+    packet.evidenceLedger = [
+      {
+        id: "observation_result:scan-1:a1",
+        category: "observation_result",
+        summary: "Ledger Clerk is visible here.",
+        sourceId: "scan-1",
+        claimSupport: ["actor_presence", "playable_beat"],
+      },
+      {
+        id: "observation_result:scan-1:a2",
+        category: "observation_result",
+        summary: "No obvious visible barriers are apparent from here.",
+        sourceId: "scan-1",
+        claimSupport: ["route_status", "threat_hazard", "playable_beat"],
+      },
+    ];
+
+    const draft = compileGroundedSentenceDraftToNarrationDraft({
+      packet,
+      requireBackendOwnedFactText: true,
+      requireFactRefs: true,
+      draft: {
+        version: "grounded-sentence-draft.v2",
+        sentences: [
+          {
+            factRefs: ["e1.s1"],
+            evidenceRefs: ["e1"],
+          },
+          {
+            factRefs: ["e2.s1"],
+            evidenceRefs: ["e2"],
+          },
+        ],
+      },
+    });
+
+    expect(draft.prose).toBe(
+      "Ledger Clerk is visible here. No obvious visible barriers are apparent from here.",
+    );
+    expect(draft.claims.map((claim) => claim.kind)).toEqual(["actor_presence", "route_status"]);
+    expect(draft.claims.map((claim) => claim.evidenceRefs)).toEqual([
+      ["observation_result:scan-1:a1"],
+      ["observation_result:scan-1:a2"],
+    ]);
+  });
+
   it("rejects legacy internal NarrationDraft claims that cite context-only refs", () => {
     const packet = createPacket();
     packet.evidenceLedger = [

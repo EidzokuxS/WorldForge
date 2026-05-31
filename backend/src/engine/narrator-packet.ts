@@ -2220,8 +2220,8 @@ function observationAtomSummaryFromRecord(
         ?? readObservationString(record, ["label", "name", "title"]);
       const status = formatInventoryTagForPrompt(routeStatus);
       return destinationLabel
-        ? `Route to ${destinationLabel} is ${status}.`
-        : `Route status is ${status}.`;
+        ? formatRouteStatusObservation(destinationLabel, status)
+        : formatRouteStatusObservation(null, status);
     }
   }
 
@@ -2236,6 +2236,87 @@ function observationAtomSummaryFromRecord(
   ]);
 }
 
+function formatRouteStatusObservation(
+  destinationLabel: string | null,
+  status: string,
+): string {
+  const normalizedStatus = status.trim().toLocaleLowerCase();
+  if (normalizedStatus === "legal") {
+    return destinationLabel
+      ? `The route to ${destinationLabel} is reachable from here.`
+      : "A route is reachable from here.";
+  }
+  if (normalizedStatus === "already here") {
+    return destinationLabel
+      ? `You are already at ${destinationLabel}.`
+      : "You are already at the checked destination.";
+  }
+  return destinationLabel
+    ? `The route to ${destinationLabel} is ${status}.`
+    : `The route status is ${status}.`;
+}
+
+function hasSentencePunctuation(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  const last = trimmed[trimmed.length - 1];
+  return last === "." || last === "!" || last === "?";
+}
+
+function looksLikeShortObservationLabel(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed || hasSentencePunctuation(trimmed)) return false;
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  return words.length <= 5;
+}
+
+export function normalizeNarratableObservationSummary(value: string): string {
+  return value
+    .replace(
+      /\bNo visible barrier refs are present(?: in current scene packet or player-visible\/player-known facts)?\.?/i,
+      "No obvious visible barriers are apparent from here.",
+    )
+    .replace(/\bbarrier refs\b/gi, "barriers")
+    .replace(/\brefs\b/gi, "signs");
+}
+
+function formatObservationAtomNarratableSummary(input: {
+  kind: NarratorPacketObservationAtomKind;
+  rawSummary: string;
+  absenceOf?: NarratorPacketObservationAtomKind | null;
+}): string {
+  const normalized = normalizeNarratableObservationSummary(input.rawSummary.trim());
+  if (!normalized) return normalized;
+  if (input.kind === "route") {
+    const legalDestination = normalized.match(/^Route to (.+) is legal\.?$/i);
+    if (legalDestination?.[1]) {
+      return formatRouteStatusObservation(legalDestination[1], "legal");
+    }
+    if (/^Route status is legal\.?$/i.test(normalized)) {
+      return formatRouteStatusObservation(null, "legal");
+    }
+  }
+  if (input.kind === "absence") {
+    const absenceKind = input.absenceOf ?? null;
+    if (absenceKind === "barrier" && /no .*barrier/i.test(normalized)) {
+      return "No obvious visible barriers are apparent from here.";
+    }
+  }
+  if (looksLikeShortObservationLabel(normalized)) {
+    switch (input.kind) {
+      case "actor":
+        return `${normalized} is visible here.`;
+      case "object":
+        return `${normalized} is visible here.`;
+      case "route":
+        return `${normalized} is reachable from here.`;
+      default:
+        break;
+    }
+  }
+  return normalized;
+}
+
 function pushObservationAtomDraft(input: {
   drafts: NarratorPacketObservationAtomDraft[];
   seen: Set<string>;
@@ -2245,8 +2326,15 @@ function pushObservationAtomDraft(input: {
   absenceOf?: NarratorPacketObservationAtomKind | null;
 }): void {
   if (input.drafts.length >= OBSERVATION_ATOM_MAX) return;
+  const narratableSummary = input.rawSummary
+    ? formatObservationAtomNarratableSummary({
+        kind: input.kind,
+        rawSummary: input.rawSummary,
+        absenceOf: input.absenceOf ?? null,
+      })
+    : "";
   const summary = sanitizeModelFacingText(
-    boundedSummary(input.rawSummary ?? "", OBSERVATION_ATOM_SUMMARY_MAX),
+    boundedSummary(narratableSummary, OBSERVATION_ATOM_SUMMARY_MAX),
   );
   if (!summary) return;
 
@@ -2451,15 +2539,16 @@ function collectPerceivableObservations(input: {
       && isObservationToolResult(result.result)
       && isPacketObservationEvidenceRef(packet, result.actionId))
     .map((result) => {
+      const rawSummary = result.summary
+        ?? summarizeRuntimeToolResultForNarrator({
+          toolName: result.toolName,
+          actionId: result.actionId,
+          toolInput: result.input,
+          toolArgs: result.args,
+          toolResult: result.result,
+        });
       const summary = boundedSummary(
-        result.summary
-          ?? summarizeRuntimeToolResultForNarrator({
-            toolName: result.toolName,
-            actionId: result.actionId,
-            toolInput: result.input,
-            toolArgs: result.args,
-            toolResult: result.result,
-          }),
+        normalizeNarratableObservationSummary(rawSummary),
         640,
       );
       return {
