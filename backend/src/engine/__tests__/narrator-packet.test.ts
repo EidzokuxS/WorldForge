@@ -8,6 +8,10 @@ import {
   summarizeRuntimeToolResultForNarrator,
   type CanonicalTurnPacket,
 } from "../narrator-packet.js";
+import {
+  compileGroundedSentenceDraftToNarrationDraft,
+  getAllowedNarrationCitationEvidenceRefs,
+} from "../narration-grounding-guard.js";
 import { buildModelFacingScenePacket } from "../model-facing-scene.js";
 import { buildPlayerFacingPacketFromNarratorPacket } from "../player-facing-packet.js";
 import type { SceneFrame } from "../scene-frame.js";
@@ -2437,6 +2441,77 @@ describe("narrator packet settlement boundary", () => {
     );
     expect(formatted).toContain("[PLAYER-VISIBLE OBSERVATIONS]");
     expect(formatted).toContain("o1.a1 [actor]: Mira");
+  });
+
+  it("lets status-read turns cite current inventory as static backend-owned facts", () => {
+    const frame = createFrame();
+    frame.playerAction = "What am I carrying right now?";
+    frame.playerInventory = [
+      {
+        id: "current-inventory:item-satchel",
+        itemId: "item-satchel",
+        label: "Worn Leather Satchel",
+        tags: ["pack"],
+        equipState: "equipped",
+        equippedSlot: "shoulder",
+        isSignature: true,
+      },
+    ];
+
+    const canonicalTurnPacket = createCanonicalTurnPacket();
+    canonicalTurnPacket.playerAction = frame.playerAction;
+    canonicalTurnPacket.turnResolution = {
+      kind: "status_read",
+      resolutionState: "observation_grounded",
+      combatIntent: false,
+      evidenceIds: [],
+      consequenceIds: [],
+      explicitNoCombatEvidenceIds: [],
+      toolNames: [],
+    };
+    canonicalTurnPacket.events = [];
+    canonicalTurnPacket.responses = [];
+    canonicalTurnPacket.effects = [];
+    canonicalTurnPacket.actionResults = [];
+    canonicalTurnPacket.narratorFacts.eventIds = [];
+    canonicalTurnPacket.narratorFacts.responseIds = [];
+    canonicalTurnPacket.narratorFacts.actionIds = [];
+    canonicalTurnPacket.narratorFacts.toolResultRefs = [];
+
+    const packet = buildNarratorPacket({
+      frame,
+      canonicalTurnPacket,
+    });
+
+    const allowedRefs = getAllowedNarrationCitationEvidenceRefs(packet);
+    expect(allowedRefs).toEqual([
+      expect.objectContaining({
+        refId: "e1",
+        evidence: expect.objectContaining({
+          id: "current_inventory_status:item-satchel",
+          category: "current_inventory_status",
+          summaryBackendFact: true,
+        }),
+      }),
+    ]);
+
+    const draft = compileGroundedSentenceDraftToNarrationDraft({
+      packet,
+      draft: {
+        version: "grounded-sentence-draft.v2",
+        sentences: [
+          {
+            text: "Your worn leather satchel is still ready at your shoulder.",
+            evidenceRefs: ["e1"],
+          },
+        ],
+      },
+    });
+
+    expect(draft.claims[0]).toEqual(expect.objectContaining({
+      kind: "inventory_status",
+      evidenceRefs: ["current_inventory_status:item-satchel"],
+    }));
   });
 
   it("omits observation results that are neither turn-resolution evidence nor narratorFacts", () => {

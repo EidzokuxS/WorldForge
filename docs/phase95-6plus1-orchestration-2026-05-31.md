@@ -51,39 +51,93 @@ Agents must not revert or stage these unless explicitly assigned.
 
 ### A1 UI Intake And Projection
 Agent: Mendel (`019e7ccd-5ad1-7021-b54c-43f4ccaf6288`)
-Status: running
+Status: completed, result integrated
 Scope: UI action intake, quick actions, capabilities, SSE/API public projection, frontend parsing, Browser workability.
 Output: P0/P1/P2 findings, exact files/functions, tests to add/run, player-quality notes.
 
+Integrated result:
+- Verdict: CONDITIONAL for A1. UI intake, quick actions, SSE/API projection, and frontend parsing contracts look sound; focused tests passed; fresh current-HEAD Browser evidence still needed.
+- P0: none found.
+- P1: Browser workability evidence gap. Need current-HEAD probe covering freeform action -> finalizing_turn -> done boundary -> world refresh -> quick actions visible -> quick action click -> backend handle resolution, no raw ids/projection leaks, console clean.
+- P2: `parseWorldData` fail-closes malformed/raw public handles by dropping entities. Good for authority, but player quality may degrade into missing NPCs/locations without visible projection-health signal.
+- P2: prior Browser/player-quality artifacts show occasional label-heavy prose. Improve narratable fact packets and quick-action wording without weakening projection or grounding.
+- Executed evidence from agent: backend A1 focused tests, 15 passed; frontend A1 focused tests, 12 passed.
+- Recommended next action: collect current-HEAD Browser evidence before A1 code patch.
+
 ### A2 GM Tool Loop And Executor
 Agent: Schrodinger (`019e7ccd-709b-71f2-bc40-1ded714e2600`)
-Status: running
+Status: completed, result integrated
 Scope: GM Read, GM Tool Loop, `executeToolCall`, tool schemas, runtime validation, receipts, authority denials, all tool ownership.
 Output: caller map risks, missing authority guards, receipt gaps, tests.
 
+Integrated result:
+- Verdict: GO for A2 architecture at `7971dab5`; not a long-play acceptance claim.
+- P0/P1: none found.
+- Caller map inspected/GitNexus: `executeToolCall` callers are `gm-tool-step`, `actor-tools`, `scene-plan-executor`, `hidden-adjudication`, `npc-tools`, `reflection-tools`, and `tool-schemas` AI SDK bridge. Current paths use strict context, grounding validation, background/NPC scopes, relationship scope, or reject state-bearing execution without context.
+- Executed evidence from agent: `tool-executor-caller-contract`, `tool-executor-authority`, `tool-execution-context`, `gm-tool-loop` passed 138 tests; `tool-contracts`, `gameplay-control-plane-contract`, `turn-processor.scene-plan`, `turn-processor` passed 185 tests; `gm-turn-read`, `gm-tool-step` passed 97 tests.
+- P2: `authorityMode: "legacy_unscoped"` still exists in `tool-executor.ts`, but no production caller was found. Keep/extend caller contract so future use fails loudly.
+- P2: `log_event`, `spawn_npc`, and `move_to` retain legacy/hidden descriptor roles; current paths gate them with hidden-in-player-turn/profile/receipt rules. Watch debt, not current blocker.
+- Optional patch: extend `backend/src/engine/__tests__/tool-executor-caller-contract.test.ts` to assert zero production `legacy_unscoped` usage and pin `turn-processor -> executeAdjudicationPlan -> createPlayerTurnToolExecutionContext`.
+
 ### A3 Actor/World Runtime And Time
 Agent: Poincare (`019e7ccd-8a3a-7bb0-a956-4d928d7e4cca`)
-Status: running
+Status: completed, result integrated
 Scope: actor runtime, NPC/background agents, due-world runtime, scheduling, time ledger, state write owners, recovery of pending work.
 Output: owner parity matrix gaps, runtime ordering risks, long-turn coherence risks.
 
+Integrated result:
+- Verdict: CONDITIONAL for A3. One-write-owner parity is source-backed and focused-test-backed, but 60/600+ coherence remains unproven acceptance evidence.
+- P0/P1: none found for one-write-owner parity.
+- Executed evidence from agent: A3 authority/scope tests passed: actor scheduling, actor tools, actor plan executor, simulation proposal executor/lifecycle, executor caller contract, tool authority; 8 files, 94 tests. Turn/pending narration recovery tests passed: 3 files, 188 tests. World thread, wake signal, key actor due plan, faction scheduler tests passed: 4 files, 13 tests.
+- P2: long-turn coherence evidence gap. Source shows ordered pre-frame due work, GM writes, actor reaction, pre-narrator due work, and ledgered time, but no 60/600-turn soak was run.
+- P2: due-world surface breadth. `world-thread-runner` only advances due routes with scoped surface provenance and skips/defer otherwise. Fail-closed behavior is good; long-play must verify this does not starve offscreen pressure.
+- Recommended validation: long-play artifact should record per-turn world time, world version, accepted state delta refs, due-world skipped/deferred reasons, pending narration state, and actor wake backlog growth across fresh and clean-start clone runs.
+
 ### A4 Narrator And Gameplay Quality
 Agent: Einstein (`019e7ccd-a47c-79c2-822f-95952b0d3fc6`)
-Status: running
+Status: completed, result integrated; P1 implementation slice landed locally
 Scope: narrator packet, final narration, grounded fact refs, resume/fail-closed paths, player-facing prose quality.
 Output: defects that make game feel mechanical/incoherent, grounding holes, tests and Browser probes.
 
+Integrated result:
+- Verdict: CONDITIONAL for A4. Grounding/fail-closed architecture is strong and focused tests pass, but one live packet grounding P1 remains.
+- P1: no-mutation/status packets can have zero legal final-narration fact refs. `turn-processor.ts` marks no-action primary responses as `model_guidance`; `narrator-packet.ts` drops model-guidance responses; current inventory facts are `summaryBackendFact: false`; final narration requires backend fact refs. Executed probe found `status_read` plus current inventory produced `allowedRefs: []`.
+- Impact: "what am I carrying?", "wait quietly", and other low-mutation human-style turns can preserve authority but strand final narration as pending/mechanical, damaging 1/60/600-turn play.
+- Implemented local slice: `current_inventory_status` evidence is now a backend-owned summary fact, while `narration-grounding-guard` still classifies citations as `inventory_status`, not `inventory_status_change`.
+- Executed local evidence: added a live packet regression for a no-mutation `status_read` turn with current inventory; `getAllowedNarrationCitationEvidenceRefs` returns `current_inventory_status:*`, and `compileGroundedSentenceDraftToNarrationDraft` accepts grounded final narration as `inventory_status`.
+- Executed local evidence: `npm --prefix backend test -- src/engine/__tests__/narrator-packet.test.ts src/engine/__tests__/narration-grounding-guard.test.ts` passed 95 tests.
+- Executed local evidence: `npm --prefix backend test -- src/engine/__tests__/turn-processor.empty-narration.test.ts src/engine/__tests__/visible-narration-output-guard.test.ts` passed 30 tests.
+- Executed local evidence: `npm --prefix backend run typecheck` passed.
+- P2: fact-ref expansion keeps truth stable, but prose quality depends on narratable backend fact phrasing. Human-style probes must include inventory/status, quiet observation, route choice, NPC answer, movement+time, and resume after failed narration.
+- Executed evidence from agent: narration grounding, narrator packet, visible output guard, and empty narration tests passed; 124 tests.
+
 ### A5 Persistence Clone Replay Rollback Vector
 Agent: Goodall (`019e7ccd-b899-7720-9be6-dca69deb6d66`)
-Status: running
+Status: completed, result integrated
 Scope: persistence, restore journal, clone modes, replay policy, rollback, vector rebuild/reconcile, checkpoint APIs.
 Output: deterministic recovery risks, replay divergences, vector/state mismatch tests.
 
+Integrated result:
+- Verdict: GO for A5 architecture and focused regression contracts; not long-play acceptance.
+- P0/P1: none found.
+- Executed evidence from agent: restore, checkpoint, rollback-vector rebuild, replay-preserving clone rejection, clean-start clone, and checkpoint public-handle tests passed; 7 files, 108 tests.
+- P2: pending restore repair validates staged file existence but does not revalidate staged DB/config/chat/vector evidence hashes before replaying a journal. Add staged tamper regression after journal creation.
+- P2: clean-start clone is service-covered, but no production route caller for `cloneCampaignCleanStart` was found. If Phase 95 validation needs operator/player clone UX, add public API/e2e path with same manifest policy checks.
+- Recommended patch if needed: staged-restore tamper tests in `backend/src/engine/__tests__/state-snapshot.test.ts` and `backend/src/campaign/__tests__/checkpoints.test.ts`; implementation scope inside `backend/src/campaign/restore-bundle.ts` and manifest evidence helpers.
+
 ### A6 Observability Long-Play Acceptance
 Agent: Leibniz (`019e7ccd-ce2b-7df3-9514-41ebf1e7e2ac`)
-Status: running
+Status: completed, result integrated
 Scope: observability, evals, 60/600+ playtest plan, human-style evidence, clone-world campaigns, regression gates.
 Output: acceptance matrix, minimal non-harness-heavy validation path, telemetry gaps.
+
+Integrated result:
+- Verdict: CONDITIONAL for validation readiness; long-play acceptance remains NO-GO.
+- P1: acceptance evidence still open. Need fresh human-style 60-turn campaign, clean-start clone 60-turn campaign, and 600+ coherence soak before Phase 95 acceptance.
+- P1: use existing artifact verifier as hard gate, not new giant harness. Required artifacts: `state.json`, transcript, per-turn JSON, progress JSONL, done boundaries, mode diversity, no projection leaks; clone run also needs clone provenance, baseline pool, clone manifest, and source-id residue check.
+- P1: Browser screenshots are workability evidence only, not acceptance.
+- P2: artifact writer may need trace id, terminal event count, stop reason, backend/frontend URL, route, source/clone ids, and artifact root metadata.
+- Recommended patch if needed: extend Phase 95 run artifact metadata and verifier requirements in the run artifact writer plus `scripts/phase95-verify-adaptive-run.mjs`.
 
 ## Agent Output Format
 

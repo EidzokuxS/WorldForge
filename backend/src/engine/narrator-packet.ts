@@ -757,7 +757,7 @@ function collectEvidenceLedger(args: {
       category: "current_inventory_status",
       summary: formatInventoryStatusSummary(item),
       sourceId: item.itemId,
-      summaryBackendFact: false,
+      summaryBackendFact: true,
     });
   }
   for (let index = 0; index < args.hintSignals.length; index += 1) {
