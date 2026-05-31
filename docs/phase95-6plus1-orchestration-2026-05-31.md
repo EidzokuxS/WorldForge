@@ -3,6 +3,7 @@
 Date: 2026-05-31
 Branch: develop
 Baseline HEAD: 7971dab544c5de212c8f1f3fa3a80bb2d7e2ba56
+Current Integrated HEAD: 881156cd191db83aedefab326854cc1b3bb5bc04
 
 ## Product Goal
 
@@ -24,6 +25,158 @@ Still not acceptance:
 - Browser/human-style gameplay quality needs fresh validation.
 - Long-play 60/600+ coherence needs evidence.
 - Agent/tool loop, narrator quality, world runtime, clone/replay/vector, and observability need final architecture sweep against live code and product goal.
+
+## Wave E Full Architecture Sweep
+
+Date: 2026-05-31
+HEAD: `881156cd` (`Polish observation route narration facts`)
+Mode: six live agents plus this shared canvas; Codex integrated/reviewed and closed each agent after result intake.
+
+### E1 GM Read Tool Loop Executor
+
+Verdict: conditional GO for GM Read -> GM Tool Loop -> executor source/test architecture; not long-play acceptance.
+
+Executed evidence:
+- 11 focused backend files, 444 tests passed.
+
+Covered contracts:
+- GM Read is a read/intent classifier, not a tool author.
+- GM Tool Loop derives available tools from scene-frame allowed tools plus typed runtime requirements.
+- `ToolExecutionContext` and `executeToolCall` own stale-version checks, write scopes, schema validation, authority denials, and mutation execution.
+- Runtime descriptors and tool contracts separate terminal receipts, mutation tools, helper observations, UI suggestions, and legacy hidden tools.
+- Model-authored proposal fields remain typed proposals; backend executes or rejects them.
+- In-game actor/NPC tool paths mostly delegate mutation through the same executor authority path.
+
+Open items:
+- P2: assert zero production `authorityMode: "legacy_unscoped"` usage directly.
+- P2: classify NPC `update_own_goal` as a deliberate separate `agent_authority_trace` lane or migrate later into descriptor/executor receipt plane.
+- P2: keep legacy/hidden tools (`log_event`, `spawn_npc`, `move_to`) gated until replaced or explicitly documented.
+
+### E2 State Ownership Validators Receipts
+
+Verdict: conditional GO for current runtime-effect owner parity; P1 remains for reverse coverage of every gameplay state lane.
+
+Executed evidence:
+- 7 focused backend files, 243 tests passed.
+
+P1 gaps:
+- Reverse owner coverage is partial. `assertRuntimeEffectStateOwnerParity()` covers effect-kind -> state lane, but lanes represented through `terminalKind`, `legacy_scene_beat`, `time_effect`, service owners, or registry-only entries are not yet one executable owner matrix.
+- `chronicle_entry` is runtime-safe but contractually mixed: GM Read excludes it and player-turn grounding rejects direct use, while descriptors/contracts still make `add_chronicle_entry` a canonical-looking state mutation.
+- `entity_tag_service` is named as owner, but its delegates, stores, validators, projections, rollback/recovery, and tests are not yet one explicit service contract object.
+
+Next slice:
+- Extend `GAMEPLAY_STATE_OWNER_REGISTRY` or a companion contract with `sourceOfTruth`, `runtimeValidators`, `receipts`, `projections`, `recoveryModes`, `tests`, and descriptor backing for every lane.
+- Pin `chronicle_entry` as `background_only` or `projection_from_receipts`.
+- Add explicit `entity_tag_service` delegate/store contract for player/NPC/item/location/faction tags.
+
+### E3 Narration Playability
+
+Verdict: conditional for narrator/player-facing architecture; P1 remains in backend-owned narratable facts, not harness.
+
+Executed evidence:
+- 7 backend files, 200 tests passed.
+- Backend typecheck passed.
+
+Covered contracts:
+- Accepted lookup observations now become citable playable facts.
+- Inventory/status has backend-owned citable summary facts.
+- Dialogue precision facts are attached from accepted `record_dialogue_outcome` receipts.
+- Final narration requires accepted backend fact refs and fails closed.
+- Pending narration preserves settled state and avoids rerunning paid resolution.
+
+P1 gaps:
+- Quiet/no-mutation direct turns without accepted lookup evidence or inventory can still have no legal final-narration fact refs.
+- Movement plus time remains split into separate citable facts; with one fact-ref per grounded sentence, the narrator cannot naturally say "time passed and you arrived" unless backend provides a combined fact.
+
+P2 gaps:
+- Pending narration resume should normalize older persisted observation atoms before final narration can cite them.
+- Dialogue precision needs one end-to-end final narration regression through real `factRefs`.
+
+Next slice:
+- Add backend-owned `scene_status`/quiet observation facts derived only from current visible public scene facts.
+- Add combined movement-time precision facts when accepted movement and accepted time passage occur in the same settled packet.
+- Repair stale persisted observation atom prose on pending narration resume.
+
+### E4 Clone Replay Rollback Vector
+
+Verdict: conditional GO for backend-owned clone/replay/rollback/vector contracts; acceptance NO-GO without long-play evidence.
+
+Executed evidence:
+- Recovery/clone/vector suites: 71 tests.
+- Route rollback/pending narration suites: 65 tests.
+- Phase 95 artifact verifier suite: 7 tests.
+- Total: 143 tests passed.
+
+Covered contracts:
+- Snapshot/restore is backend-owned physical state, not UI/prose state.
+- Clean-start clone is service-owned and manifest-driven.
+- Replay-preserving clone fails closed when stores require regenerate/reject.
+- Vector recovery is explicit: checkpoint exact restore, rollback purge/rebuild, episodic rebuild from authoritative `location_recent_events`.
+- Final narration failure after settled state becomes pending narration instead of rolling back accepted state.
+
+P1 gap:
+- Interrupted staged restore repair replays `journal.stagedDir` after checking staged file existence, but does not revalidate staged DB/config/chat/vector hashes against the source manifest before `applyStagedRestore`.
+
+P2 gaps:
+- Clean-start clone has no production HTTP/operator route found; current Phase 95 validation imports service code.
+- Verifier does not yet require restore journal phase, vector rebuild counts, rollback outcome receipts, or checkpoint recovery receipts.
+- If `restoreSnapshot` fails during route rollback, route logs failure but player text can still say pre-turn state was restored.
+
+Next slice:
+- Revalidate staged restore physical evidence against original bundle manifest before applying pending journal repair.
+- Add staged tamper regressions for `state.db`, `config.json`, `chat_history.json`, and checkpoint vectors.
+
+### E5 Frontend API SSE Projection
+
+Verdict: conditional GO for API/SSE/frontend authority; Browser evidence stale on current HEAD.
+
+Executed evidence:
+- Backend projection/quick-action/API suite: 107 tests passed.
+- Frontend page/API/action-dock/quick-action suite: 129 tests passed.
+
+Covered contracts:
+- Quick actions are backend-issued capabilities; labels/prose are presentation.
+- `/api/chat/action` resolves `quickActionHandle` before turn processing and ignores tampered browser prose.
+- SSE projection allow-lists player-facing events and strips internal reasoning/state payloads.
+- Public world projection emits `pdto_*` handles and keeps review-only semantic fields behind explicit `projection=review`.
+- Frontend drops malformed/raw legacy ids and submits quick action handles from `ActionDock`.
+
+P1 gap:
+- Current-HEAD in-app Browser workability evidence is stale after `881156cd`.
+
+P2 gaps:
+- Fail-closed frontend projection can silently erase malformed/raw world entities; authority-safe but can degrade play quality without a projection-health signal.
+- Sanitized quick-action prose can surface `[hidden]`; safe but ugly.
+- Stale world-refresh recovery path needs Browser proof.
+
+Next slice:
+- Current-HEAD in-app Browser proof for `/game`: freeform route/status action, Ready, non-Continue quick action with handle, Ready, no raw refs in DOM/console/network.
+
+### E6 Observability Long-Play Evidence
+
+Verdict: conditional for evidence design; acceptance remains NO-GO.
+
+Covered contracts:
+- Observability route tests cover turn seam logging, `turnId`, `campaignId`, tick correlation, compact payloads, redaction, latency trace, and SSE byte-equivalence.
+- Adaptive verifier covers core artifacts, clone provenance, clone manifest, source-id residue, projection leaks, done boundaries, repeated loops, and 60-turn mode diversity.
+
+P1/P2 evidence gaps:
+- Current artifacts still prove route execution more than player-quality coherence at turn 1/60/600.
+- Fresh run metadata lacks consistent run id, frontend URL, route id, stop reason, trace/log root, artifact policy summary.
+- Per-turn artifacts store event types but not a durable `turnId` to join artifacts to backend logs.
+- Verifier does not yet gate clock ledger continuity, receipt refs, due-world reasons, pending narration recovery, actor backlog, vector growth, terminal events, or prose-quality samples.
+
+Next slice:
+- Add a small acceptance manifest/report layer only after gameplay P1s are closed. It should tie run id, HEAD, dirty summary, route, campaign/clone ids, artifact/log roots, turn ids, backend log hashes, accepted receipt counts, world clock/version, pending narration state, retry counts, and sampled human play notes together.
+
+### Wave E Priority Order
+
+1. P1 state owner matrix: make every gameplay state lane executable-contract covered.
+2. P1 narratable settled facts: quiet scene status, combined movement-time fact, stale observation resume repair.
+3. P1 staged restore revalidation before interrupted journal replay.
+4. Current-HEAD Browser proof for public projection and quick-action handles.
+5. Oracle full-architecture bundle review on frozen current tree.
+6. Only after those: fresh/cloned human-style 60-turn campaigns and longer soak/replay coverage.
 
 ## Dirty Tail Policy
 
