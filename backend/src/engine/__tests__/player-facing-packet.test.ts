@@ -404,8 +404,7 @@ describe("PlayerFacingPacket", () => {
       {
         id: "current_inventory_status:item-logbook",
         category: "current_inventory_status",
-        summary:
-          "Courier Route Logbook is carried by the player. Visible marks/status: document, reviewed.",
+        summary: "You have Courier Route Logbook with you. Courier Route Logbook shows document and reviewed.",
         sourceId: "item-logbook",
       },
     ];
@@ -422,7 +421,7 @@ describe("PlayerFacingPacket", () => {
     });
     expect(formatted).toContain("[CURRENT INVENTORY STATUS]");
     expect(formatted).toContain(
-      "Courier Route Logbook is carried by the player. Visible marks/status: document, reviewed.",
+      "You have Courier Route Logbook with you. Courier Route Logbook shows document and reviewed.",
     );
     expect(formatted).not.toContain("canonicalTurnPacket");
   });
@@ -444,7 +443,7 @@ describe("PlayerFacingPacket", () => {
     const packet = buildPlayerFacingPacketFromNarratorPacket(narratorPacket);
     const formatted = formatPlayerFacingPacketForPrompt(packet);
 
-    expect(formatted).toContain("Pocket Tuning Fork is ready to hand.");
+    expect(formatted).toContain("You have Pocket Tuning Fork ready to hand.");
     expect(formatted).not.toContain("equipped in equipped");
     expect(formatted).not.toContain("currently equipped");
   });

@@ -2456,6 +2456,15 @@ describe("narrator packet settlement boundary", () => {
         equippedSlot: "shoulder",
         isSignature: true,
       },
+      {
+        id: "current-inventory:item-ledger",
+        itemId: "item-ledger",
+        label: "Damaged Field Ledger",
+        tags: ["document", "rain-stained"],
+        equipState: "carried",
+        equippedSlot: null,
+        isSignature: false,
+      },
     ];
 
     const canonicalTurnPacket = createCanonicalTurnPacket();
@@ -2488,12 +2497,27 @@ describe("narrator packet settlement boundary", () => {
       expect.objectContaining({
         refId: "e1",
         evidence: expect.objectContaining({
-          id: "current_inventory_status:item-satchel",
+          id: "current_inventory_status:current",
           category: "current_inventory_status",
+          summary:
+            "You have Worn Leather Satchel at your shoulder and Damaged Field Ledger with you. "
+            + "Worn Leather Satchel shows pack. Damaged Field Ledger shows document and rain stained.",
           summaryBackendFact: true,
         }),
       }),
     ]);
+    expect(packet.evidenceLedger).toContainEqual(expect.objectContaining({
+      id: "current_inventory_status:item-satchel",
+      category: "current_inventory_status",
+      summary: "You have Worn Leather Satchel at your shoulder. Worn Leather Satchel shows pack.",
+      summaryBackendFact: false,
+    }));
+    expect(packet.evidenceLedger).toContainEqual(expect.objectContaining({
+      id: "current_inventory_status:item-ledger",
+      category: "current_inventory_status",
+      summary: "You have Damaged Field Ledger with you. Damaged Field Ledger shows document and rain stained.",
+      summaryBackendFact: false,
+    }));
 
     const draft = compileGroundedSentenceDraftToNarrationDraft({
       packet,
@@ -2510,7 +2534,7 @@ describe("narrator packet settlement boundary", () => {
 
     expect(draft.claims[0]).toEqual(expect.objectContaining({
       kind: "inventory_status",
-      evidenceRefs: ["current_inventory_status:item-satchel"],
+      evidenceRefs: ["current_inventory_status:current"],
     }));
   });
 

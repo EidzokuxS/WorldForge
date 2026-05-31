@@ -11,6 +11,8 @@ import type {
 } from "./narrator-packet.js";
 import {
   collectCommittedVisibleActorCreationLabels,
+  formatCurrentInventoryStatusSummary,
+  formatInventoryStatusSummary,
   getNarratorPacketRedactionAudit,
   sourceBoundaryTermIsAllowedCommittedActorCreation,
 } from "./narrator-packet.js";
@@ -148,53 +150,6 @@ function formatObservation(
     : `- ${summary}`;
 }
 
-const NON_NARRATIVE_INVENTORY_TAGS = new Set(["starting-loadout", "equipped", "carried"]);
-
-function formatInventoryTagForPrompt(tag: string): string {
-  let formatted = "";
-  let pendingSpace = false;
-
-  for (const char of tag) {
-    if (char === "_" || char === "-") {
-      pendingSpace = formatted.length > 0;
-      continue;
-    }
-    if (pendingSpace) {
-      formatted += " ";
-      pendingSpace = false;
-    }
-    formatted += char;
-  }
-
-  return formatted.trim();
-}
-
-function playerVisibleInventoryStates(tags: readonly string[]): string[] {
-  return uniqueStrings(tags)
-    .filter((tag) => !NON_NARRATIVE_INVENTORY_TAGS.has(tag.toLowerCase()))
-    .map((tag) => formatInventoryTagForPrompt(tag));
-}
-
-function formatEquippedSlotForPrompt(slot: string | null): string | null {
-  const formatted = slot ? formatInventoryTagForPrompt(slot) : "";
-  if (!formatted || formatted.toLowerCase() === "equipped") {
-    return null;
-  }
-  return formatted;
-}
-
-function formatInventoryStatus(item: NarratorPacketInventoryItem): string {
-  const equippedSlot = formatEquippedSlotForPrompt(item.equippedSlot);
-  const state = item.equipState === "equipped"
-    ? equippedSlot
-      ? `ready at the player's ${equippedSlot}`
-      : "ready to hand"
-    : "carried by the player";
-  const tags = playerVisibleInventoryStates(item.tags);
-  const tagSummary = tags.length > 0 ? ` Visible marks/status: ${tags.join(", ")}.` : "";
-  return sanitizeModelFacingText(`${item.label} is ${state}.${tagSummary}`);
-}
-
 function visibleTexts(packet: PlayerFacingPacket): string[] {
   return [
     sanitizeModelFacingText(packet.playerActionRequest),
@@ -207,7 +162,7 @@ function visibleTexts(packet: PlayerFacingPacket): string[] {
       sanitizeModelFacingText(observation.summary)
     ),
     ...packet.visibleActors.map((actor) => sanitizeModelFacingText(actor.label)),
-    ...packet.currentInventory.map(formatInventoryStatus),
+    ...packet.currentInventory.map((item) => sanitizeModelFacingText(formatInventoryStatusSummary(item))),
     ...packet.hintSignals.map((hint) => sanitizeModelFacingText(hint)),
     ...packet.guardrails.map((guardrail) => sanitizeModelFacingText(guardrail)),
     sanitizeModelFacingText(packet.controlReturnReason),
@@ -262,7 +217,7 @@ function sourceBoundaryCheckedTexts(
     })),
     ...packet.currentInventory.map((item, index) => ({
       source: `current_inventory_status:i${index + 1}`,
-      text: formatInventoryStatus(item),
+      text: sanitizeModelFacingText(formatInventoryStatusSummary(item)),
     })),
     ...packet.hintSignals.map((hint, index) => ({
       source: `hint_signal:${index + 1}`,
@@ -662,6 +617,7 @@ export function formatPlayerFacingPacketForPrompt(
   assertPlayerFacingPacketPromptSafe(packet);
   const includeDiagnostics = options.includeDiagnostics ?? false;
   const includeTechnicalRefs = options.includeTechnicalRefs ?? false;
+  const currentInventoryStatus = formatCurrentInventoryStatusSummary(packet.currentInventory);
 
   return [
     "[PLAYER-FACING PACKET]",
@@ -688,7 +644,7 @@ export function formatPlayerFacingPacketForPrompt(
     "",
     formatListSection(
       "CURRENT INVENTORY STATUS",
-      packet.currentInventory.map((item) => `- ${formatInventoryStatus(item)}`),
+      currentInventoryStatus ? [`- ${sanitizeModelFacingText(currentInventoryStatus)}`] : [],
       "No carried, equipped, or signature items are currently recorded.",
     ),
     "",

@@ -438,7 +438,7 @@ describe("ScenePlan execution and narrator packet", () => {
     );
     expect(prompt).toContain("[CURRENT INVENTORY STATUS]");
     expect(prompt).toContain(
-      "Worn Leather Satchel is ready at the player's shoulder. Visible marks/status: pack, route authorized.",
+      "You have Worn Leather Satchel at your shoulder. Worn Leather Satchel shows pack and route authorized.",
     );
   });
 

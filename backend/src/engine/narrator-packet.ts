@@ -426,6 +426,16 @@ function playerVisibleInventoryStates(tags: readonly string[]): string[] {
     .map((tag) => formatInventoryTagForPrompt(tag));
 }
 
+function joinNaturalList(items: readonly string[]): string {
+  if (items.length <= 1) {
+    return items[0] ?? "";
+  }
+  if (items.length === 2) {
+    return `${items[0]} and ${items[1]}`;
+  }
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
+}
+
 function formatEquippedSlotForPrompt(slot: string | null): string | null {
   const formatted = slot ? formatInventoryTagForPrompt(slot) : "";
   if (!formatted || formatted.toLowerCase() === "equipped") {
@@ -434,16 +444,42 @@ function formatEquippedSlotForPrompt(slot: string | null): string | null {
   return formatted;
 }
 
-function formatInventoryStatusSummary(item: NarratorPacketInventoryItem): string {
+function formatInventoryItemStatusPhrase(item: NarratorPacketInventoryItem): string {
   const equippedSlot = formatEquippedSlotForPrompt(item.equippedSlot);
-  const state = item.equipState === "equipped"
-    ? equippedSlot
-      ? `ready at the player's ${equippedSlot}`
-      : "ready to hand"
-    : "carried by the player";
+  if (item.equipState === "equipped") {
+    return equippedSlot
+      ? `${item.label} at your ${equippedSlot}`
+      : `${item.label} ready to hand`;
+  }
+  return `${item.label} with you`;
+}
+
+function formatInventoryItemVisibleStatus(item: NarratorPacketInventoryItem): string | null {
   const tags = playerVisibleInventoryStates(item.tags);
-  const tagSummary = tags.length > 0 ? ` Visible marks/status: ${tags.join(", ")}.` : "";
-  return `${item.label} is ${state}.${tagSummary}`;
+  return tags.length > 0
+    ? `${item.label} shows ${joinNaturalList(tags)}.`
+    : null;
+}
+
+export function formatInventoryStatusSummary(item: NarratorPacketInventoryItem): string {
+  const visibleStatus = formatInventoryItemVisibleStatus(item);
+  return [
+    `You have ${formatInventoryItemStatusPhrase(item)}.`,
+    visibleStatus,
+  ].filter((part): part is string => Boolean(part)).join(" ");
+}
+
+export function formatCurrentInventoryStatusSummary(
+  items: readonly NarratorPacketInventoryItem[],
+): string | null {
+  if (items.length === 0) {
+    return null;
+  }
+  const inventoryLine = `You have ${joinNaturalList(items.map(formatInventoryItemStatusPhrase))}.`;
+  const visibleStatuses = items
+    .map(formatInventoryItemVisibleStatus)
+    .filter((part): part is string => Boolean(part));
+  return [inventoryLine, ...visibleStatuses].join(" ");
 }
 
 function addPrecisionFact(
@@ -751,13 +787,23 @@ function collectEvidenceLedger(args: {
       summaryBackendFact: false,
     });
   }
+  const currentInventorySummary = formatCurrentInventoryStatusSummary(args.currentInventory);
+  if (currentInventorySummary) {
+    add({
+      id: evidenceId("current_inventory_status", "current"),
+      category: "current_inventory_status",
+      summary: currentInventorySummary,
+      sourceId: "current",
+      summaryBackendFact: true,
+    });
+  }
   for (const item of args.currentInventory) {
     add({
       id: evidenceId("current_inventory_status", item.itemId),
       category: "current_inventory_status",
       summary: formatInventoryStatusSummary(item),
       sourceId: item.itemId,
-      summaryBackendFact: true,
+      summaryBackendFact: false,
     });
   }
   for (let index = 0; index < args.hintSignals.length; index += 1) {

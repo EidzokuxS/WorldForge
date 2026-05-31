@@ -1588,6 +1588,55 @@ describe("grounded sentence draft compiler", () => {
     expect(draft.prose).toBe("The clerk warns that the inspector is due before dusk.");
   });
 
+  it("expands aggregated inventory status fact refs into playable backend-owned prose", () => {
+    const packet = createPacket();
+    packet.evidenceLedger = [
+      {
+        id: "current_inventory_status:current",
+        category: "current_inventory_status",
+        summary:
+          "You have Worn Leather Satchel at your shoulder and Damaged Field Ledger with you. "
+          + "Worn Leather Satchel shows pack. Damaged Field Ledger shows document and rain stained.",
+        sourceId: "current",
+        summaryBackendFact: true,
+      },
+      {
+        id: "current_inventory_status:item-satchel",
+        category: "current_inventory_status",
+        summary: "You have Worn Leather Satchel at your shoulder. Worn Leather Satchel shows pack.",
+        sourceId: "item-satchel",
+        summaryBackendFact: false,
+      },
+    ];
+
+    const refs = getAllowedNarrationCitationEvidenceRefs(packet);
+    expect(refs.map((ref) => ref.evidence.id)).toEqual(["current_inventory_status:current"]);
+
+    const draft = compileGroundedSentenceDraftToNarrationDraft({
+      packet,
+      requireBackendOwnedFactText: true,
+      requireFactRefs: true,
+      draft: {
+        version: "grounded-sentence-draft.v2",
+        sentences: [
+          {
+            factRefs: ["e1.s1"],
+            evidenceRefs: ["e1"],
+          },
+        ],
+      },
+    });
+
+    expect(draft.prose).toBe(
+      "You have Worn Leather Satchel at your shoulder and Damaged Field Ledger with you. "
+      + "Worn Leather Satchel shows pack. Damaged Field Ledger shows document and rain stained.",
+    );
+    expect(draft.claims[0]).toEqual(expect.objectContaining({
+      kind: "inventory_status",
+      evidenceRefs: ["current_inventory_status:current"],
+    }));
+  });
+
   it("rejects free factual prose in runtime final narration mode", () => {
     const packet = createPacket();
 
@@ -1759,11 +1808,11 @@ describe("grounded sentence draft compiler", () => {
     ];
     packet.evidenceLedger = [
       {
-        id: "current_inventory_status:item-satchel",
+        id: "current_inventory_status:current",
         category: "current_inventory_status",
         summary:
-          "Worn Leather Satchel is equipped at the player's shoulder as a signature item. Visible marks/status: pack.",
-        sourceId: "item-satchel",
+          "You have Worn Leather Satchel at your shoulder. Worn Leather Satchel shows pack.",
+        sourceId: "current",
         summaryBackendFact: true,
       },
     ];
@@ -1782,7 +1831,7 @@ describe("grounded sentence draft compiler", () => {
     });
 
     expect(draft.claims[0]?.kind).toBe("inventory_status");
-    expect(draft.claims[0]?.evidenceRefs).toEqual(["current_inventory_status:item-satchel"]);
+    expect(draft.claims[0]?.evidenceRefs).toEqual(["current_inventory_status:current"]);
 
     expect(() =>
       compileGroundedSentenceDraftToNarrationDraft({
