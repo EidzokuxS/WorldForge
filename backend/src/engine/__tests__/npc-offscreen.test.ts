@@ -576,13 +576,13 @@ describe("applyOffscreenUpdate", () => {
     vi.clearAllMocks();
   });
 
-  it("writes new location and goal changes to DB", async () => {
+  it("quarantines new location and goal changes without writing DB state", async () => {
     const mockDb = setupMockDb({
       locationByName: { id: "loc-003", name: "Castle Keep" },
     });
 
     const storedNpc = createMockNpc();
-    await applyOffscreenUpdate(
+    const result = await applyOffscreenUpdate(
       CAMPAIGN_ID,
       {
         npcId: "npc-001",
@@ -613,34 +613,29 @@ describe("applyOffscreenUpdate", () => {
       10,
     );
 
-    // Should have called update for location change
-    expect(mockDb.update).toHaveBeenCalled();
-    expect(mockDb.set).toHaveBeenCalledWith(
-      expect.objectContaining({
-        currentLocationId: "loc-003",
-        goals: expect.stringContaining("Formed alliance with Duke"),
-        characterRecord: expect.stringContaining("Formed alliance with Duke"),
-        derivedTags: expect.any(String),
-      }),
-    );
-    // Should store episodic event
-    expect(storeEpisodicEvent).toHaveBeenCalledWith(
-      CAMPAIGN_ID,
-      expect.objectContaining({
-        visibility: "hidden",
-        surfaceRoute: "legacy_npc_offscreen_memory",
-        knowledgeRoute: "actor:npc-001",
-      }),
-    );
+    expect(result).toMatchObject({
+      npcName: "Lord Blackwood",
+      npcId: "npc-001",
+      accepted: false,
+      proposalOnly: true,
+      reason: "legacy_offscreen_authority_quarantine",
+      locationChanged: false,
+      goalsUpdated: false,
+    });
+    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(mockDb.set).not.toHaveBeenCalled();
+    expect(mockDb.run).not.toHaveBeenCalled();
+    expect(storeEpisodicEvent).not.toHaveBeenCalled();
+    expect(accumulateReflectionBudgetMock).not.toHaveBeenCalled();
   });
 
-  it("increments reflection budget after committed off-screen event writes", async () => {
-    setupMockDb({
+  it("keeps legacy off-screen memory and reflection budget proposal-only", async () => {
+    const mockDb = setupMockDb({
       locationByName: { id: "loc-003", name: "Castle Keep" },
     });
 
     const storedNpc = createMockNpc();
-    await applyOffscreenUpdate(
+    const result = await applyOffscreenUpdate(
       CAMPAIGN_ID,
       {
         npcId: "npc-001",
@@ -671,21 +666,20 @@ describe("applyOffscreenUpdate", () => {
       10,
     );
 
-    expect(storeEpisodicEvent).toHaveBeenCalled();
-    expect(accumulateReflectionBudgetMock).toHaveBeenCalledWith(
-      CAMPAIGN_ID,
-      ["Lord Blackwood"],
-      3,
-    );
+    expect(result.accepted).toBe(false);
+    expect(result.proposalOnly).toBe(true);
+    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(storeEpisodicEvent).not.toHaveBeenCalled();
+    expect(accumulateReflectionBudgetMock).not.toHaveBeenCalled();
   });
 
-  it("falls back to the NPC's authoritative current location when no newLocation is provided", async () => {
+  it("keeps existing-location offscreen summaries proposal-only", async () => {
     setupMockDb({
       locationByName: null,
     });
 
     const storedNpc = createMockNpc();
-    await applyOffscreenUpdate(
+    const result = await applyOffscreenUpdate(
       CAMPAIGN_ID,
       {
         npcId: "npc-001",
@@ -716,14 +710,14 @@ describe("applyOffscreenUpdate", () => {
       10,
     );
 
-    expect(storeEpisodicEvent).toHaveBeenCalledWith(
-      CAMPAIGN_ID,
-      expect.objectContaining({
-        location: "Council Hall",
-        visibility: "hidden",
-        surfaceRoute: "legacy_npc_offscreen_memory",
-        knowledgeRoute: "actor:npc-001",
-      }),
-    );
+    expect(result).toMatchObject({
+      actionSummary: "Held a covert strategy meeting in the council hall",
+      accepted: false,
+      proposalOnly: true,
+      locationChanged: false,
+      goalsUpdated: false,
+    });
+    expect(storeEpisodicEvent).not.toHaveBeenCalled();
+    expect(accumulateReflectionBudgetMock).not.toHaveBeenCalled();
   });
 });

@@ -168,6 +168,43 @@ function validateTurnArtifact(input, issues) {
   }
 }
 
+function numericBoundaryField(boundary, field) {
+  if (!isRecord(boundary)) return null;
+  const value = boundary[field];
+  return Number.isFinite(value) ? value : null;
+}
+
+function validateClockBoundary(input, issues) {
+  const fields = ["tick", "worldVersion", "worldTimeMinutes"];
+  for (const field of fields) {
+    const beforeValue = numericBoundaryField(input.turn.before, field);
+    const afterValue = numericBoundaryField(input.turn.after, field);
+    const doneValue = numericBoundaryField(input.turn.done, field);
+
+    if (beforeValue != null && afterValue != null && afterValue < beforeValue) {
+      add(issues, "hard", `turn-${field}-regression`, `Turn ${input.turnIndex} ${field} regressed within the turn.`, {
+        before: beforeValue,
+        after: afterValue,
+      });
+    }
+    if (afterValue != null && doneValue != null && doneValue !== afterValue) {
+      add(issues, "hard", `done-${field}-mismatch`, `Turn ${input.turnIndex} done boundary ${field} does not match after boundary.`, {
+        after: afterValue,
+        done: doneValue,
+      });
+    }
+    if (input.previous && field !== "tick") {
+      const previousAfter = numericBoundaryField(input.previous.after, field);
+      if (previousAfter != null && beforeValue != null && beforeValue !== previousAfter) {
+        add(issues, "hard", `between-turn-${field}-drift`, `Turn ${input.turnIndex} starts from a different ${field} than previous after.`, {
+          previousAfter,
+          currentBefore: beforeValue,
+        });
+      }
+    }
+  }
+}
+
 function validateSetup(input, issues) {
   const mode = input.state.setupMode ?? (fileExists(path.join(input.root, "clone-provenance.json")) ? "clone" : "worldgen");
   if (mode === "clone") {
@@ -343,22 +380,11 @@ export function validateAdaptiveRun(options) {
     }
     validateQuickActions({ turnIndex, quickActions: turn.quickActions }, issues);
     validateTurnArtifact({ root, turnIndex }, issues);
-    if (index > 0) {
-      const previous = turns[index - 1];
-      if (
-        isRecord(previous)
-        && isRecord(turn.before)
-        && isRecord(previous.after)
-        && turn.before.worldVersion != null
-        && previous.after.worldVersion != null
-        && turn.before.worldVersion !== previous.after.worldVersion
-      ) {
-        add(issues, "warning", "between-turn-world-version-drift", `Turn ${turnIndex} starts from a different worldVersion than previous after.`, {
-          previousAfter: previous.after.worldVersion,
-          currentBefore: turn.before.worldVersion,
-        });
-      }
-    }
+    validateClockBoundary({
+      turn,
+      previous: index > 0 && isRecord(turns[index - 1]) ? turns[index - 1] : null,
+      turnIndex,
+    }, issues);
   }
 
   if (targetTurns >= 60 && seenModes.size < minModeDiversity) {

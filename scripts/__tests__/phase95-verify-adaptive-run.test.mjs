@@ -238,4 +238,48 @@ describe("phase95 adaptive run verifier", () => {
     expect(result.ok).toBe(false);
     expect(result.issues.map((issue) => issue.code)).toContain("low-action-mode-diversity");
   });
+
+  it("rejects world clock regressions and stale done boundaries", () => {
+    const root = makeRoot();
+    writeFreshRun(root, [
+      turn(1, {
+        before: { tick: 1, worldVersion: 3, worldTimeMinutes: 30 },
+        after: { tick: 2, worldVersion: 2, worldTimeMinutes: 20 },
+        done: { tick: 2, worldVersion: 3, worldTimeMinutes: 30 },
+      }),
+    ]);
+
+    const result = validateAdaptiveRun({ root, targetTurns: 1 });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "turn-worldVersion-regression" }),
+      expect.objectContaining({ code: "turn-worldTimeMinutes-regression" }),
+      expect.objectContaining({ code: "done-worldVersion-mismatch" }),
+      expect.objectContaining({ code: "done-worldTimeMinutes-mismatch" }),
+    ]));
+  });
+
+  it("rejects between-turn clock drift as a hard acceptance failure", () => {
+    const root = makeRoot();
+    writeFreshRun(root, [
+      turn(1, {
+        after: { tick: 2, worldVersion: 4, worldTimeMinutes: 15 },
+        done: { tick: 2, worldVersion: 4, worldTimeMinutes: 15 },
+      }),
+      turn(2, {
+        before: { tick: 2, worldVersion: 5, worldTimeMinutes: 10 },
+        after: { tick: 3, worldVersion: 5, worldTimeMinutes: 20 },
+        done: { tick: 3, worldVersion: 5, worldTimeMinutes: 20 },
+      }),
+    ]);
+
+    const result = validateAdaptiveRun({ root, targetTurns: 2 });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "between-turn-worldVersion-drift" }),
+      expect.objectContaining({ code: "between-turn-worldTimeMinutes-drift" }),
+    ]));
+  });
 });

@@ -179,6 +179,23 @@ describe("Phase 95 gameplay control-plane contracts", () => {
         status: "background_only",
         backing: { kind: "runtime_state_effect" },
       });
+    for (const lane of [
+      "npc_belief_state",
+      "npc_goal_state",
+      "npc_identity_profile",
+      "npc_capability_profile",
+    ] as const) {
+      expect(GAMEPLAY_STATE_OWNER_REGISTRY.find((entry) => entry.lane === lane))
+        .toMatchObject({
+          owner: "npc_profile_authority_quarantine",
+          status: "quarantined",
+          receiptKind: "quarantined_proposal",
+          acceptedReceiptKinds: ["proposal_rejected"],
+          rollbackPolicy: "purge",
+          projectionPolicy: "hidden",
+          backing: { kind: "proposal_quarantine_contract" },
+        });
+    }
 
     expect(() => assertStateOwnerRegistry([
       ...GAMEPLAY_STATE_OWNER_REGISTRY,
@@ -209,6 +226,20 @@ describe("Phase 95 gameplay control-plane contracts", () => {
     expect(() => assertStateOwnerRegistry(replaceLane({
       backing: { kind: "time_ledger", refs: ["advance_time"] },
     }))).toThrow(/known_route_movement.*time ledger/i);
+    expect(() => assertStateOwnerRegistry(
+      GAMEPLAY_STATE_OWNER_REGISTRY.map((entry) =>
+        entry.lane === "npc_belief_state"
+          ? { ...entry, status: "contract_only" }
+          : entry
+      ),
+    )).toThrow(/npc_belief_state.*quarantined/i);
+    expect(() => assertStateOwnerRegistry(
+      GAMEPLAY_STATE_OWNER_REGISTRY.map((entry) =>
+        entry.lane === "npc_goal_state"
+          ? { ...entry, acceptedReceiptKinds: ["goal_committed"] }
+          : entry
+      ),
+    )).toThrow(/npc_goal_state.*reject proposals/i);
   });
 
   it("keeps service-owned gameplay lanes backed by explicit service contracts", () => {

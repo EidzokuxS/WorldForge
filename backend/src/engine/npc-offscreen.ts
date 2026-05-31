@@ -3,8 +3,11 @@
  *
  * Every N ticks (default 5), Key NPCs not at the player's location
  * get batch-simulated via a single Judge LLM call. The LLM produces
- * structured updates (location changes, action summaries, goal progress)
- * that are silently written to DB without narrating to the player.
+ * structured updates (location changes, action summaries, goal progress).
+ *
+ * Legacy offscreen updates are proposal-only. Canonical offscreen work must go
+ * through the simulation proposal queue/executor so backend authority receipts,
+ * owner registry checks, rollback, and replay stay on one mutation plane.
  */
 
 import { z } from "zod";
@@ -13,12 +16,9 @@ import { eq, and, sql } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { npcs, locations } from "../db/schema.js";
 import { createModel, type ProviderConfig } from "../ai/provider-registry.js";
-import { storeEpisodicEvent } from "../vectors/episodic-events.js";
 import { createLogger, withRole } from "../lib/index.js";
-import { accumulateReflectionBudget } from "./reflection-budget.js";
 import {
   hydrateStoredNpcRecord,
-  toLegacyNpcDraft,
 } from "../character/record-adapters.js";
 import { deriveRuntimeCharacterTags } from "../character/runtime-tags.js";
 import { resolveStoredSceneScopeId } from "./scene-presence.js";
@@ -41,6 +41,9 @@ export interface AppliedOffscreenUpdate extends OffscreenUpdate {
   npcId: string;
   locationChanged: boolean;
   goalsUpdated: boolean;
+  accepted: false;
+  proposalOnly: true;
+  reason: "legacy_offscreen_authority_quarantine";
 }
 
 export interface NpcContext {
@@ -158,10 +161,11 @@ export function parseOffscreenUpdates(
 }
 
 /**
- * Apply a single off-screen update to the database.
- * - If newLocation is set, resolve location by name and update npcs.currentLocationId.
- * - If goalProgress is set, append to goals short_term.
- * - Store action summary as episodic event.
+ * Quarantine a legacy off-screen update.
+ *
+ * This function intentionally performs no writes. Off-screen NPC movement,
+ * goals, beliefs, identity, wealth, skill, and memory must be committed through
+ * the simulation proposal authority path, not this legacy LLM batch helper.
  */
 export async function applyOffscreenUpdate(
   campaignId: string,
@@ -169,193 +173,24 @@ export async function applyOffscreenUpdate(
   update: OffscreenUpdate,
   tick: number,
 ): Promise<AppliedOffscreenUpdate> {
-  const db = getDb();
-  let locationChanged = false;
-  let goalsUpdated = false;
-  let resolvedLocationId = npcCtx.storedRecord?.currentLocationId ?? null;
-  let resolvedSceneLocationId = npcCtx.storedRecord?.currentSceneLocationId ?? resolvedLocationId;
-  let resolvedLocationName: string | null = null;
-
-  // -- Resolve and apply location change --
-  if (update.newLocation) {
-    const loc = db
-      .select({ id: locations.id, name: locations.name })
-      .from(locations)
-      .where(
-        and(
-          eq(locations.campaignId, campaignId),
-          sql`LOWER(${locations.name}) = LOWER(${update.newLocation})`
-        )
-      )
-      .get();
-
-    if (loc) {
-      locationChanged = true;
-      resolvedLocationId = loc.id;
-      resolvedSceneLocationId = loc.id;
-      resolvedLocationName = loc.name;
-      log.info(`${npcCtx.npcName} moved to ${loc.name}`);
-    } else {
-      log.warn(`Location "${update.newLocation}" not found for ${npcCtx.npcName}, skipping move`);
-    }
-  }
-
-  if (npcCtx.storedRecord) {
-    const currentRecord = hydrateStoredNpcRecord({
-      id: npcCtx.npcId,
-      campaignId,
-      name: npcCtx.npcName,
-      persona: npcCtx.storedRecord.persona,
-      tags: npcCtx.storedRecord.tags,
-      tier: npcCtx.storedRecord.tier,
-      currentLocationId: npcCtx.storedRecord.currentLocationId,
-      goals: npcCtx.storedRecord.goals,
-      beliefs: npcCtx.storedRecord.beliefs,
-      unprocessedImportance: npcCtx.storedRecord.unprocessedImportance ?? 0,
-      inactiveTicks: npcCtx.storedRecord.inactiveTicks ?? 0,
-      createdAt: npcCtx.storedRecord.createdAt ?? 0,
-      characterRecord:
-        npcCtx.currentCharacterRecord ?? npcCtx.storedRecord.characterRecord ?? null,
-      derivedTags: npcCtx.storedRecord.derivedTags ?? null,
-    });
-
-    const updatedRecord = {
-      ...currentRecord,
-      socialContext: {
-        ...currentRecord.socialContext,
-        currentLocationId: resolvedLocationId,
-        currentLocationName:
-          resolvedLocationName ?? currentRecord.socialContext.currentLocationName,
-      },
-      motivations: {
-        ...currentRecord.motivations,
-        shortTermGoals: update.goalProgress
-          ? [...currentRecord.motivations.shortTermGoals, update.goalProgress]
-          : currentRecord.motivations.shortTermGoals,
-      },
-      state: {
-        ...currentRecord.state,
-        activityState: "active" as const,
-      },
-    };
-
-    const legacyNpc = toLegacyNpcDraft(updatedRecord);
-    const derivedTags = deriveRuntimeCharacterTags(updatedRecord);
-
-    db.update(npcs)
-      .set({
-        currentLocationId: resolvedLocationId,
-        currentSceneLocationId: resolvedSceneLocationId,
-        persona: legacyNpc.persona,
-        tags: JSON.stringify(legacyNpc.tags),
-        goals: JSON.stringify({
-          short_term: legacyNpc.goals.shortTerm,
-          long_term: legacyNpc.goals.longTerm,
-        }),
-        beliefs: JSON.stringify(updatedRecord.motivations.beliefs),
-        characterRecord: JSON.stringify(updatedRecord),
-        derivedTags: JSON.stringify(derivedTags),
-        inactiveTicks: 0,
-      })
-      .where(eq(npcs.id, npcCtx.npcId))
-      .run();
-    log.event("db.write", {
-      table: "npcs",
-      op: "update",
-      rowId: npcCtx.npcId,
-      rowName: npcCtx.npcName,
-    });
-
-    goalsUpdated = Boolean(update.goalProgress);
-  } else {
-    if (update.goalProgress) {
-      try {
-        const goals = JSON.parse(npcCtx.currentGoals) as {
-          short_term: string[];
-          long_term: string[];
-        };
-        goals.short_term.push(update.goalProgress);
-        db.update(npcs)
-          .set({ goals: JSON.stringify(goals) })
-          .where(eq(npcs.id, npcCtx.npcId))
-          .run();
-        log.event("db.write", {
-          table: "npcs",
-          op: "update",
-          rowId: npcCtx.npcId,
-          rowName: npcCtx.npcName,
-        });
-        goalsUpdated = true;
-      } catch {
-        log.warn(`Failed to parse goals for ${npcCtx.npcName}`);
-      }
-    }
-
-    db.update(npcs)
-      .set({
-        currentLocationId: resolvedLocationId,
-        currentSceneLocationId: resolvedSceneLocationId,
-        inactiveTicks: 0,
-      })
-      .where(eq(npcs.id, npcCtx.npcId))
-      .run();
-    log.event("db.write", {
-      table: "npcs",
-      op: "update",
-      rowId: npcCtx.npcId,
-      rowName: npcCtx.npcName,
-    });
-  }
-
-  // -- Store episodic event (best-effort) --
-  const eventLocationName =
-    resolvedLocationName ??
-    update.newLocation ??
-    (npcCtx.currentCharacterRecord
-      ? hydrateStoredNpcRecord({
-          id: npcCtx.npcId,
-          campaignId,
-          name: npcCtx.npcName,
-          persona: npcCtx.storedRecord?.persona ?? "",
-          tags: npcCtx.storedRecord?.tags ?? "[]",
-          tier: npcCtx.storedRecord?.tier ?? "key",
-          currentLocationId: npcCtx.storedRecord?.currentLocationId ?? null,
-          goals:
-            npcCtx.storedRecord?.goals ??
-            '{"short_term":[],"long_term":[]}',
-          beliefs: npcCtx.storedRecord?.beliefs ?? "[]",
-          unprocessedImportance: npcCtx.storedRecord?.unprocessedImportance ?? 0,
-          inactiveTicks: npcCtx.storedRecord?.inactiveTicks ?? 0,
-          createdAt: npcCtx.storedRecord?.createdAt ?? 0,
-          characterRecord: npcCtx.currentCharacterRecord,
-          derivedTags: npcCtx.storedRecord?.derivedTags ?? null,
-        }).socialContext.currentLocationName
-      : null) ??
-    "";
-
-  try {
-    await storeEpisodicEvent(campaignId, {
-      text: `[Off-screen] ${npcCtx.npcName}: ${update.actionSummary}`,
-      tick,
-      location: eventLocationName,
-      participants: [npcCtx.npcName],
-      importance: 3,
-      type: "npc_offscreen",
-      visibility: "hidden",
-      surfaceRoute: "legacy_npc_offscreen_memory",
-      knowledgeRoute: `actor:${npcCtx.npcId}`,
-      hiddenCauseTerms: [npcCtx.npcId],
-    });
-    await accumulateReflectionBudget(campaignId, [npcCtx.npcName], 3);
-  } catch (err) {
-    log.warn(`Failed to store episodic event for ${npcCtx.npcName}`, err);
-  }
+  log.event("npcOffscreen.proposalOnly", {
+    campaignId,
+    npcId: npcCtx.npcId,
+    npcName: npcCtx.npcName,
+    tick,
+    requestedLocation: update.newLocation,
+    hasGoalProgress: Boolean(update.goalProgress),
+    reason: "legacy_offscreen_authority_quarantine",
+  });
 
   return {
     ...update,
     npcId: npcCtx.npcId,
-    locationChanged,
-    goalsUpdated,
+    locationChanged: false,
+    goalsUpdated: false,
+    accepted: false,
+    proposalOnly: true,
+    reason: "legacy_offscreen_authority_quarantine",
   };
 }
 
@@ -581,9 +416,10 @@ async function simulateOffscreenNpcsInternal(
 
   log.event("npcOffscreen.batch", {
     npcCount: offscreenKeyNpcs.length,
-    appliedCount: results.length,
+    proposedCount: results.length,
+    appliedCount: 0,
     durationMs: Date.now() - batchStart,
   });
-  log.info(`Off-screen simulation complete: ${results.length} updates applied`);
+  log.info(`Off-screen simulation complete: ${results.length} update(s) quarantined as proposal-only`);
   return results;
 }

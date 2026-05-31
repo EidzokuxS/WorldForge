@@ -1319,6 +1319,10 @@ export const GAMEPLAY_STATE_LANE_VALUES = [
   "entity_tag",
   "chronicle_entry",
   "relationship_change",
+  "npc_belief_state",
+  "npc_goal_state",
+  "npc_identity_profile",
+  "npc_capability_profile",
   "support_actor_creation",
   "actor_lifecycle",
   "transient_scene_lifecycle",
@@ -1333,13 +1337,15 @@ export type GameplayStateOwner =
   | "entity_tag_service"
   | "transient_scene_lifecycle_service"
   | "turn_clock_ledger"
-  | "quick_action_offer_service";
+  | "quick_action_offer_service"
+  | "npc_profile_authority_quarantine";
 
 export type GameplayStateOwnerStatus =
   | "live"
   | "legacy_hidden"
   | "background_only"
-  | "contract_only";
+  | "contract_only"
+  | "quarantined";
 
 export type GameplayStateBackingKind =
   | "runtime_state_effect"
@@ -1349,7 +1355,8 @@ export type GameplayStateBackingKind =
   | "time_ledger"
   | "deterministic_service_contract"
   | "service_contract"
-  | "projection_contract";
+  | "projection_contract"
+  | "proposal_quarantine_contract";
 
 export interface GameplayStateOwnerEntry {
   lane: GameplayStateLane;
@@ -1588,6 +1595,86 @@ export const GAMEPLAY_STATE_OWNER_REGISTRY: readonly GameplayStateOwnerEntry[] =
     recoveryModes: ["turn snapshot restore", "relationship projection rebuild"],
     tests: ["tool-executor-authority.test.ts", "narrator-packet.test.ts"],
     backing: { kind: "runtime_state_effect", refs: ["relationship_change"] },
+  },
+  {
+    lane: "npc_belief_state",
+    owner: "npc_profile_authority_quarantine",
+    status: "quarantined",
+    sourceOfTruth: "No direct belief mutation owner is live; reflection/offscreen belief updates are rejected as proposals until an authority-backed owner exists.",
+    supportOnlySurfaces: ["reflection proposal text", "offscreen proposal summaries"],
+    modelAuthoredFields: ["belief proposal"],
+    runtimeValidators: ["reflection proposal-only guard", "legacy offscreen proposal-only guard", "simulation proposal executor allowlist"],
+    receiptKind: "quarantined_proposal",
+    acceptedReceiptKinds: ["proposal_rejected"],
+    rollbackPolicy: "purge",
+    projectionPolicy: "hidden",
+    projections: ["no public projection from unaccepted belief proposals"],
+    recoveryModes: ["drop quarantined proposal", "retain canonical NPC belief state"],
+    tests: ["reflection-agent.test.ts", "npc-offscreen.test.ts", "simulation-proposal-lifecycle.test.ts"],
+    backing: {
+      kind: "proposal_quarantine_contract",
+      refs: ["reflection-tools:set_belief", "npc-offscreen:goalProgress/belief", "simulation-proposal-executor allowlist"],
+    },
+  },
+  {
+    lane: "npc_goal_state",
+    owner: "npc_profile_authority_quarantine",
+    status: "quarantined",
+    sourceOfTruth: "No direct goal mutation owner is live; reflection/offscreen goal updates are rejected as proposals until an authority-backed owner exists.",
+    supportOnlySurfaces: ["reflection proposal text", "offscreen proposal summaries"],
+    modelAuthoredFields: ["goal proposal", "goal progress proposal"],
+    runtimeValidators: ["reflection proposal-only guard", "legacy offscreen proposal-only guard", "simulation proposal executor allowlist"],
+    receiptKind: "quarantined_proposal",
+    acceptedReceiptKinds: ["proposal_rejected"],
+    rollbackPolicy: "purge",
+    projectionPolicy: "hidden",
+    projections: ["no public projection from unaccepted goal proposals"],
+    recoveryModes: ["drop quarantined proposal", "retain canonical NPC goal state"],
+    tests: ["reflection-agent.test.ts", "npc-agent.test.ts", "npc-offscreen.test.ts"],
+    backing: {
+      kind: "proposal_quarantine_contract",
+      refs: ["reflection-tools:set_goal/drop_goal", "npc-tools:update_own_goal", "npc-offscreen:goalProgress"],
+    },
+  },
+  {
+    lane: "npc_identity_profile",
+    owner: "npc_profile_authority_quarantine",
+    status: "quarantined",
+    sourceOfTruth: "No direct identity/personality mutation owner is live; model-authored identity changes are rejected as proposals until an authority-backed owner exists.",
+    supportOnlySurfaces: ["reflection proposal text", "NPC prompt identity slice"],
+    modelAuthoredFields: ["identity proposal", "personality proposal", "persona proposal"],
+    runtimeValidators: ["reflection proposal-only guard", "legacy offscreen proposal-only guard", "public NPC projection private-field guard"],
+    receiptKind: "quarantined_proposal",
+    acceptedReceiptKinds: ["proposal_rejected"],
+    rollbackPolicy: "purge",
+    projectionPolicy: "hidden",
+    projections: ["no public projection from unaccepted identity proposals"],
+    recoveryModes: ["drop quarantined proposal", "retain canonical characterRecord/persona state"],
+    tests: ["reflection-agent.test.ts", "npc-offscreen.test.ts", "gameplay-control-plane-contract.test.ts"],
+    backing: {
+      kind: "proposal_quarantine_contract",
+      refs: ["reflection-tools:promote_identity_change", "npc-offscreen:characterRecord/persona", "public projection guard"],
+    },
+  },
+  {
+    lane: "npc_capability_profile",
+    owner: "npc_profile_authority_quarantine",
+    status: "quarantined",
+    sourceOfTruth: "No direct wealth/skill mutation owner is live; model-authored capability changes are rejected as proposals until an authority-backed owner exists.",
+    supportOnlySurfaces: ["reflection proposal text", "NPC prompt capability slice"],
+    modelAuthoredFields: ["wealth proposal", "skill proposal", "capability proposal"],
+    runtimeValidators: ["reflection proposal-only guard", "legacy offscreen proposal-only guard", "public NPC projection private-field guard"],
+    receiptKind: "quarantined_proposal",
+    acceptedReceiptKinds: ["proposal_rejected"],
+    rollbackPolicy: "purge",
+    projectionPolicy: "hidden",
+    projections: ["no public projection from unaccepted wealth/skill proposals"],
+    recoveryModes: ["drop quarantined proposal", "retain canonical NPC capability state"],
+    tests: ["reflection-agent.test.ts", "npc-offscreen.test.ts", "gameplay-control-plane-contract.test.ts"],
+    backing: {
+      kind: "proposal_quarantine_contract",
+      refs: ["reflection-tools:upgrade_wealth/upgrade_skill", "npc-offscreen:derivedTags/capabilities", "public projection guard"],
+    },
   },
   {
     lane: "support_actor_creation",
@@ -1974,6 +2061,21 @@ function assertDeterministicServiceContractBacking(input: {
   }
 }
 
+function assertProposalQuarantineBacking(entry: GameplayStateOwnerEntry): void {
+  if (entry.owner !== "npc_profile_authority_quarantine") {
+    throw new Error(`Gameplay state lane ${entry.lane} quarantine backing has invalid owner ${entry.owner}.`);
+  }
+  if (entry.status !== "quarantined") {
+    throw new Error(`Gameplay state lane ${entry.lane} quarantine backing must be quarantined.`);
+  }
+  if (entry.receiptKind !== "quarantined_proposal" || !entry.acceptedReceiptKinds.includes("proposal_rejected")) {
+    throw new Error(`Gameplay state lane ${entry.lane} quarantine backing must reject proposals.`);
+  }
+  if (entry.projectionPolicy !== "hidden" || entry.rollbackPolicy !== "purge") {
+    throw new Error(`Gameplay state lane ${entry.lane} quarantine backing must be hidden and purgeable.`);
+  }
+}
+
 function assertStateOwnerBacking(input: {
   entry: GameplayStateOwnerEntry;
   descriptors: typeof RUNTIME_TOOL_DESCRIPTORS;
@@ -2019,6 +2121,9 @@ function assertStateOwnerBacking(input: {
       });
       return;
     case "projection_contract":
+      return;
+    case "proposal_quarantine_contract":
+      assertProposalQuarantineBacking(input.entry);
       return;
     default: {
       const unreachable: never = input.entry.backing.kind;
