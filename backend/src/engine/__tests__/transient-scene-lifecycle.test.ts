@@ -4,7 +4,13 @@ vi.mock("../../db/index.js", () => ({
   getDb: vi.fn(),
 }));
 
+vi.mock("../living-world-authority.js", () => ({
+  readWorldClock: vi.fn(),
+  commitAuthorityTrace: vi.fn(),
+}));
+
 import { getDb } from "../../db/index.js";
+import { commitAuthorityTrace, readWorldClock } from "../living-world-authority.js";
 import { cleanupTransientSceneObjects } from "../transient-scene-lifecycle.js";
 
 function getDrizzleTableName(table: unknown): string | null {
@@ -70,6 +76,28 @@ function createMutableCleanupDb(options: {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(readWorldClock).mockReturnValue({
+    campaignId: "campaign-1",
+    worldVersion: 7,
+    worldTimeMinutes: 11,
+    currentTick: 8,
+    updatedAt: 123,
+  });
+  vi.mocked(commitAuthorityTrace).mockReturnValue({
+    campaignId: "campaign-1",
+    sourceEntity: { type: "transient_scene_lifecycle", id: "post_turn_cleanup" },
+    baseWorldVersion: 7,
+    resultWorldVersion: 8,
+    worldTimeMinutes: 11,
+    elapsedWorldTimeMinutes: 0,
+    toolResultId: "transient_scene_cleanup:campaign-1:8",
+    stateDeltaRefs: ["npc:npc-temp-clerk:state", "location:scene-expired:lifecycle"],
+    eventRefs: [],
+    witnesses: [],
+    knowledgeOutputs: [],
+    visibilityOutputs: [],
+    resources: [],
+  });
 });
 
 describe("cleanupTransientSceneObjects", () => {
@@ -102,6 +130,26 @@ describe("cleanupTransientSceneObjects", () => {
       archivedSceneIds: ["scene-expired"],
       retiredNpcIds: ["npc-temp-clerk"],
       skippedProtectedSceneIds: [],
+      authority: expect.objectContaining({
+        toolResultId: "transient_scene_cleanup:campaign-1:8",
+        stateDeltaRefs: ["npc:npc-temp-clerk:state", "location:scene-expired:lifecycle"],
+      }),
+    });
+    expect(commitAuthorityTrace).toHaveBeenCalledWith({
+      campaignId: "campaign-1",
+      operation: "transient_scene_lifecycle:cleanup",
+      baseWorldVersion: 7,
+      sourceEntity: { type: "transient_scene_lifecycle", id: "post_turn_cleanup" },
+      elapsedWorldTimeMinutes: 0,
+      currentTick: 8,
+      toolResultId: "transient_scene_cleanup:campaign-1:8",
+      stateDeltaRefs: ["npc:npc-temp-clerk:state", "location:scene-expired:lifecycle"],
+      metadata: {
+        owner: "transient_scene_lifecycle_service",
+        archivedSceneIds: ["scene-expired"],
+        retiredNpcIds: ["npc-temp-clerk"],
+        skippedProtectedSceneIds: [],
+      },
     });
     expect(state.locations[0]).toMatchObject({ archivedAtTick: 8 });
     expect(state.npcs[0]).toMatchObject({
@@ -146,6 +194,7 @@ describe("cleanupTransientSceneObjects", () => {
     expect(result.archivedSceneIds).toEqual([]);
     expect(result.retiredNpcIds).toEqual([]);
     expect(result.skippedProtectedSceneIds).toEqual(["scene-player", "scene-promoted"]);
+    expect(commitAuthorityTrace).not.toHaveBeenCalled();
     expect(state.locations).toEqual([
       expect.objectContaining({ id: "scene-player", archivedAtTick: null }),
       expect.objectContaining({ id: "scene-promoted", archivedAtTick: null }),

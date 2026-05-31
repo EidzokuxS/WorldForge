@@ -1,7 +1,7 @@
 # Phase 95 Current-Head Authority Bypass 6+1 Canvas
 
 Date: 2026-05-31
-HEAD: `c0a5c7f0d3dc153e322e8479b328e67863f6d6ff`
+Current release basis: `f6ebe27f` plus the in-progress transient scene lifecycle slice
 
 ## Objective
 
@@ -28,7 +28,7 @@ Owner: A1
 Scope: Lock the user contract and current source hierarchy.
 Output:
 
-- [inspected] Current HEAD is `c0a5c7f0`; tree started clean and synced.
+- [inspected] Current release basis is `f6ebe27f`; tree started clean and synced.
 - [inspected] The product contract remains a long-lived playable LLM RPG loop,
   not just a green control-plane checklist.
 - [inspected] No current explicit P0 blocker was found in inspected artifacts.
@@ -71,10 +71,12 @@ Output:
 - [inspected] `POST /api/campaigns/:id/npcs/:npcId/promote` directly updated
   `npcs.tier` even though the owner registry assigns `actor_lifecycle` to
   `promote_npc`.
-- [inspected] Transient scene cleanup also has deterministic direct cleanup
-  writes and needs a later explicit lifecycle owner slice.
-- [inferred] The next bounded backend-owned slice should quarantine NPC
-  promotion through runtime `promote_npc` authority first.
+- [executed] `POST /api/campaigns/:id/npcs/:npcId/promote` now routes through
+  runtime `promote_npc` authority instead of directly updating `npcs.tier`.
+- [executed] Transient scene cleanup now has an explicit
+  `transient_scene_lifecycle_service` owner lane, deterministic service
+  contract, authority receipt kind, and `commitAuthorityTrace` output for
+  retired temporary NPC / archived ephemeral scene state deltas.
 
 ### A5 Verification/Proof
 Status: complete
@@ -109,6 +111,11 @@ Output:
   resolve public handles and reject stale/raw requests, but it must request
   mutation through `executeToolCall("promote_npc", ...)` with authority context
   so `commitAuthorityTrace` owns the truth transition.
+- +1 decision: close the deterministic transient scene lifecycle gap as a
+  backend-only service contract rather than a model/runtime tool. Expired
+  ephemeral scene archival and temporary NPC retirement remain hidden
+  projection cleanup, but non-empty state deltas now emit
+  `transient_scene_cleanup` authority.
 - Discarded alternative: leaving the route direct update in place because it is
   user/admin initiated. That preserves a second writer for actor lifecycle and
   contradicts the owner registry.

@@ -1321,6 +1321,7 @@ export const GAMEPLAY_STATE_LANE_VALUES = [
   "relationship_change",
   "support_actor_creation",
   "actor_lifecycle",
+  "transient_scene_lifecycle",
   "clock_delta",
   "quick_action_offer",
 ] as const;
@@ -1330,6 +1331,7 @@ export type GameplayStateLane = (typeof GAMEPLAY_STATE_LANE_VALUES)[number];
 export type GameplayStateOwner =
   | RuntimeToolName
   | "entity_tag_service"
+  | "transient_scene_lifecycle_service"
   | "turn_clock_ledger"
   | "quick_action_offer_service";
 
@@ -1345,6 +1347,7 @@ export type GameplayStateBackingKind =
   | "legacy_scene_beat"
   | "runtime_descriptor_role"
   | "time_ledger"
+  | "deterministic_service_contract"
   | "service_contract"
   | "projection_contract";
 
@@ -1621,6 +1624,26 @@ export const GAMEPLAY_STATE_OWNER_REGISTRY: readonly GameplayStateOwnerEntry[] =
     backing: { kind: "runtime_descriptor_role", refs: ["promote_npc:state_mutation"] },
   },
   {
+    lane: "transient_scene_lifecycle",
+    owner: "transient_scene_lifecycle_service",
+    status: "background_only",
+    sourceOfTruth: "Ephemeral scene archival rows, temporary NPC retirement fields, and transient cleanup authority trace.",
+    supportOnlySurfaces: ["post-turn cleanup summaries", "scene lifecycle diagnostics"],
+    modelAuthoredFields: [],
+    runtimeValidators: ["expired ephemeral scene predicate", "protected actor guard", "world-version authority validator"],
+    receiptKind: "transient_scene_cleanup",
+    acceptedReceiptKinds: ["transient_scene_cleanup"],
+    rollbackPolicy: "snapshot_restore",
+    projectionPolicy: "hidden",
+    projections: ["world projection excludes archived scenes", "location_entities projection excludes retired temporary NPCs"],
+    recoveryModes: ["turn snapshot restore", "projection rebuild from canonical scene/NPC rows"],
+    tests: ["transient-scene-lifecycle.test.ts", "gameplay-control-plane-contract.test.ts"],
+    backing: {
+      kind: "deterministic_service_contract",
+      refs: ["transient_scene_lifecycle_service", "transient_scene_cleanup"],
+    },
+  },
+  {
     lane: "clock_delta",
     owner: "turn_clock_ledger",
     status: "live",
@@ -1689,6 +1712,17 @@ export const GAMEPLAY_STATE_SERVICE_CONTRACTS: readonly GameplayStateServiceCont
     projections: ["SSE quick actions", "frontend quick action chips"],
     recoveryModes: ["purge unreceipted offers", "expire stale offers", "reject consumed offers"],
     tests: ["quick-action-offers.test.ts", "chat.test.ts", "quick-actions.test.tsx"],
+  },
+  {
+    owner: "transient_scene_lifecycle_service",
+    sourceOfTruth: "Expired ephemeral scene rows plus temporary NPC location retirement fields.",
+    delegateTools: [],
+    stores: ["sqlite:locations", "sqlite:npcs", "sqlite:authority_traces"],
+    validators: ["expired ephemeral scene predicate", "protected actor guard", "world-version authority validator"],
+    receiptKinds: ["transient_scene_cleanup"],
+    projections: ["world projection", "location_entities projection"],
+    recoveryModes: ["turn snapshot restore", "projection rebuild"],
+    tests: ["transient-scene-lifecycle.test.ts", "gameplay-control-plane-contract.test.ts"],
   },
 ] as const;
 
@@ -1903,6 +1937,43 @@ function assertServiceContractBacking(input: {
   }
 }
 
+function assertDeterministicServiceContractBacking(input: {
+  entry: GameplayStateOwnerEntry;
+  contracts: readonly GameplayStateServiceContract[];
+}): void {
+  if (isRuntimeToolOwner(input.entry.owner)) {
+    throw new Error(`Gameplay state lane ${input.entry.lane} deterministic service cannot use runtime tool owner.`);
+  }
+  const contract = input.contracts.find((candidate) => candidate.owner === input.entry.owner);
+  if (!contract) {
+    throw new Error(`Gameplay state lane ${input.entry.lane} missing deterministic service contract for ${input.entry.owner}.`);
+  }
+  for (const field of [
+    ["stores", contract.stores],
+    ["validators", contract.validators],
+    ["receiptKinds", contract.receiptKinds],
+    ["projections", contract.projections],
+    ["recoveryModes", contract.recoveryModes],
+    ["tests", contract.tests],
+  ] as const) {
+    if (field[1].length === 0) {
+      throw new Error(`Gameplay state lane ${input.entry.lane} deterministic service contract has no ${field[0]}.`);
+    }
+  }
+  for (const store of contract.stores) {
+    if (!PHASE95_REQUIRED_STORE_KEYS.includes(store as typeof PHASE95_REQUIRED_STORE_KEYS[number])) {
+      throw new Error(
+        `Gameplay state lane ${input.entry.lane} deterministic service contract references non-manifest store ${store}.`,
+      );
+    }
+  }
+  if (!contract.receiptKinds.includes(input.entry.receiptKind)) {
+    throw new Error(
+      `Gameplay state lane ${input.entry.lane} deterministic service contract does not include receipt ${input.entry.receiptKind}.`,
+    );
+  }
+}
+
 function assertStateOwnerBacking(input: {
   entry: GameplayStateOwnerEntry;
   descriptors: typeof RUNTIME_TOOL_DESCRIPTORS;
@@ -1932,6 +2003,12 @@ function assertStateOwnerBacking(input: {
         entry: input.entry,
         contracts: input.serviceContracts,
         descriptors: input.descriptors,
+      });
+      return;
+    case "deterministic_service_contract":
+      assertDeterministicServiceContractBacking({
+        entry: input.entry,
+        contracts: input.serviceContracts,
       });
       return;
     case "service_contract":

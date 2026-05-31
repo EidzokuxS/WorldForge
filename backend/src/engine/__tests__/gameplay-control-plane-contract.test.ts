@@ -160,6 +160,13 @@ describe("Phase 95 gameplay control-plane contracts", () => {
       });
     expect(GAMEPLAY_STATE_OWNER_REGISTRY.find((entry) => entry.lane === "actor_lifecycle"))
       .toMatchObject({ owner: "promote_npc", backing: { kind: "runtime_descriptor_role" } });
+    expect(GAMEPLAY_STATE_OWNER_REGISTRY.find((entry) => entry.lane === "transient_scene_lifecycle"))
+      .toMatchObject({
+        owner: "transient_scene_lifecycle_service",
+        status: "background_only",
+        receiptKind: "transient_scene_cleanup",
+        backing: { kind: "deterministic_service_contract" },
+      });
     expect(GAMEPLAY_STATE_OWNER_REGISTRY.find((entry) => entry.lane === "entity_tag"))
       .toMatchObject({
         owner: "entity_tag_service",
@@ -206,7 +213,12 @@ describe("Phase 95 gameplay control-plane contracts", () => {
 
   it("keeps service-owned gameplay lanes backed by explicit service contracts", () => {
     expect(GAMEPLAY_STATE_SERVICE_CONTRACTS.map((entry) => entry.owner).sort())
-      .toEqual(["entity_tag_service", "quick_action_offer_service", "turn_clock_ledger"]);
+      .toEqual([
+        "entity_tag_service",
+        "quick_action_offer_service",
+        "transient_scene_lifecycle_service",
+        "turn_clock_ledger",
+      ]);
     expect(GAMEPLAY_STATE_SERVICE_CONTRACTS.find((entry) => entry.owner === "entity_tag_service"))
       .toMatchObject({
         delegateTools: ["add_tag", "remove_tag"],
@@ -225,6 +237,12 @@ describe("Phase 95 gameplay control-plane contracts", () => {
       .toMatchObject({
         delegateTools: ["offer_quick_actions"],
         stores: expect.arrayContaining(["sqlite:quick_action_offers"]),
+      });
+    expect(GAMEPLAY_STATE_SERVICE_CONTRACTS.find((entry) => entry.owner === "transient_scene_lifecycle_service"))
+      .toMatchObject({
+        delegateTools: [],
+        stores: expect.arrayContaining(["sqlite:locations", "sqlite:npcs", "sqlite:authority_traces"]),
+        receiptKinds: expect.arrayContaining(["transient_scene_cleanup"]),
       });
 
     expect(() => assertStateOwnerRegistry([
@@ -279,6 +297,14 @@ describe("Phase 95 gameplay control-plane contracts", () => {
       GAMEPLAY_STATE_OWNER_REGISTRY,
       replaceServiceContract("quick_action_offer_service", { delegateTools: ["offer_quick_actions", "log_event"] }),
     )).toThrow(/quick_action_offer.*delegate tool log_event does not delegate quick_action_offer/i);
+    expect(() => assertStateOwnerRegistry(
+      GAMEPLAY_STATE_OWNER_REGISTRY,
+      replaceServiceContract("transient_scene_lifecycle_service", { stores: ["sqlite:transient_scene_cleanup" as never] }),
+    )).toThrow(/transient_scene_lifecycle.*non-manifest store sqlite:transient_scene_cleanup/i);
+    expect(() => assertStateOwnerRegistry(
+      GAMEPLAY_STATE_OWNER_REGISTRY,
+      replaceServiceContract("transient_scene_lifecycle_service", { receiptKinds: ["wrong_receipt"] }),
+    )).toThrow(/transient_scene_lifecycle.*does not include receipt transient_scene_cleanup/i);
   });
 
   it("keeps descriptor canonical owners aligned with registry owners", () => {

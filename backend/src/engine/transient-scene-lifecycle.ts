@@ -2,6 +2,11 @@ import { eq } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { locations, npcs, players } from "../db/schema.js";
 import { createLogger } from "../lib/index.js";
+import {
+  commitAuthorityTrace,
+  readWorldClock,
+} from "./living-world-authority.js";
+import type { ToolResultAuthority } from "./tool-result.js";
 
 const log = createLogger("transient-scene-lifecycle");
 
@@ -29,6 +34,7 @@ export interface TransientSceneCleanupResult {
   archivedSceneIds: string[];
   retiredNpcIds: string[];
   skippedProtectedSceneIds: string[];
+  authority?: ToolResultAuthority;
 }
 
 function isExpiredEphemeralScene(location: CleanupLocationRow, tick: number): boolean {
@@ -65,6 +71,7 @@ export function cleanupTransientSceneObjects(
   tick: number,
 ): TransientSceneCleanupResult {
   const db = getDb();
+  const clock = readWorldClock(campaignId);
   const locationRows = db
     .select({
       id: locations.id,
@@ -147,10 +154,33 @@ export function cleanupTransientSceneObjects(
       skippedProtectedSceneCount: protectedSceneIds.size,
     });
   }
+  const stateDeltaRefs = [
+    ...retiredNpcIds.map((npcId) => `npc:${npcId}:state`),
+    ...archivedSceneIds.map((sceneId) => `location:${sceneId}:lifecycle`),
+  ];
+  const authority = stateDeltaRefs.length > 0
+    ? commitAuthorityTrace({
+      campaignId,
+      operation: "transient_scene_lifecycle:cleanup",
+      baseWorldVersion: clock.worldVersion,
+      sourceEntity: { type: "transient_scene_lifecycle", id: "post_turn_cleanup" },
+      elapsedWorldTimeMinutes: 0,
+      currentTick: tick,
+      toolResultId: `transient_scene_cleanup:${campaignId}:${tick}`,
+      stateDeltaRefs,
+      metadata: {
+        owner: "transient_scene_lifecycle_service",
+        archivedSceneIds,
+        retiredNpcIds,
+        skippedProtectedSceneIds: [...protectedSceneIds],
+      },
+    })
+    : undefined;
 
   return {
     archivedSceneIds,
     retiredNpcIds,
     skippedProtectedSceneIds: [...protectedSceneIds],
+    ...(authority ? { authority } : {}),
   };
 }
