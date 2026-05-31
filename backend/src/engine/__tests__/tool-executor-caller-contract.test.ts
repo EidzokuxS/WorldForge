@@ -5,6 +5,11 @@ import { describe, expect, it } from "vitest";
 
 const engineDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const executeToolCallPattern = /\bexecuteToolCall\s*\(/g;
+const aiSdkToolImportPattern = /import\s*\{\s*tool\s*\}\s*from\s*["']ai["']/;
+const aiSdkToolFactoryPattern = /\btool\s*\(\s*\{/g;
+const aiSdkToolNamePattern = /^\s{4}([a-zA-Z0-9_]+): tool\(\{/gm;
+const unsafeModelFacingWritePattern =
+  /\bcommitAuthorityTrace\s*\(|\bexecuteToolCall\s*\(|\bdb\.(?:insert|update|delete)\s*\(|\bgetDb\(\)\.(?:insert|update|delete)\b/g;
 
 function collectSourceFiles(dir: string): string[] {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -23,6 +28,81 @@ function collectSourceFiles(dir: string): string[] {
 function sourceFor(relativePath: string): string {
   return fs.readFileSync(path.join(engineDir, relativePath), "utf8");
 }
+
+function extractAiSdkToolNames(source: string): string[] {
+  return [...source.matchAll(aiSdkToolNamePattern)].map((match) => match[1]);
+}
+
+const classifiedAiSdkToolSurfaces: Record<string, {
+  classification: "proposal_only" | "owned_executor_bridge" | "hybrid_owned_and_proposal";
+  toolNames: string[];
+}> = {
+  "faction-tools.ts": {
+    classification: "proposal_only",
+    toolNames: [
+      "faction_action",
+      "update_faction_goal",
+      "add_chronicle_entry",
+      "declare_world_event",
+    ],
+  },
+  "npc-tools.ts": {
+    classification: "hybrid_owned_and_proposal",
+    toolNames: [
+      "act",
+      "speak",
+      "move_to",
+      "update_own_goal",
+    ],
+  },
+  "reflection-tools.ts": {
+    classification: "proposal_only",
+    toolNames: [
+      "set_belief",
+      "set_goal",
+      "drop_goal",
+      "set_relationship",
+      "promote_identity_change",
+      "upgrade_wealth",
+      "upgrade_skill",
+    ],
+  },
+  "tool-schemas.ts": {
+    classification: "owned_executor_bridge",
+    toolNames: [
+      "list_visible_affordances",
+      "list_navigation_options",
+      "find_location_candidates",
+      "find_object_candidates",
+      "find_actor_candidates",
+      "find_poi_candidates",
+      "inspect_known_fact",
+      "check_route",
+      "move_actor",
+      "create_minor_poi",
+      "create_scene_extra",
+      "start_search",
+      "record_player_intent",
+      "record_dialogue_outcome",
+      "record_world_fact",
+      "add_tag",
+      "remove_tag",
+      "set_relationship",
+      "add_chronicle_entry",
+      "log_event",
+      "advance_time",
+      "offer_quick_actions",
+      "spawn_npc",
+      "promote_npc",
+      "spawn_item",
+      "reveal_location",
+      "request_contested_outcome",
+      "set_condition",
+      "move_to",
+      "transfer_item",
+    ],
+  },
+};
 
 describe("tool executor caller authority contract", () => {
   it("keeps every production executeToolCall caller classified by strict authority context", () => {
@@ -67,5 +147,68 @@ describe("tool executor caller authority contract", () => {
     const toolSchemas = sourceFor("tool-schemas.ts");
     expect(toolSchemas).toEqual(expect.stringContaining("if (!executionContext && toolRequiresExecutionAuthority(toolName))"));
     expect(toolSchemas).toEqual(expect.stringContaining("buildValidationFailureToolResult"));
+  });
+
+  it("keeps every production model-facing AI SDK tool surface explicitly classified", () => {
+    const discoveredSurfaces = new Map<string, string[]>();
+    for (const file of collectSourceFiles(engineDir)) {
+      const relativePath = path.relative(engineDir, file).replace(/\\/g, "/");
+      const source = fs.readFileSync(file, "utf8");
+      if (!aiSdkToolImportPattern.test(source)) {
+        continue;
+      }
+      const toolCount = [...source.matchAll(aiSdkToolFactoryPattern)].length;
+      if (toolCount > 0) {
+        discoveredSurfaces.set(relativePath, extractAiSdkToolNames(source));
+      }
+    }
+
+    expect(Object.fromEntries(discoveredSurfaces)).toEqual(
+      Object.fromEntries(
+        Object.entries(classifiedAiSdkToolSurfaces).map(([file, contract]) => [
+          file,
+          contract.toolNames,
+        ]),
+      ),
+    );
+  });
+
+  it("keeps proposal-only model-facing tools quarantined from direct state mutation", () => {
+    for (const [file, contract] of Object.entries(classifiedAiSdkToolSurfaces)) {
+      const source = sourceFor(file);
+      if (contract.classification !== "proposal_only") {
+        continue;
+      }
+
+      expect(source).not.toMatch(unsafeModelFacingWritePattern);
+      expect(source).toMatch(/proposalOnly: true|status: "proposal_only"|status: "proposal_only" as const/);
+      expect(source).toMatch(/accepted: false|committed: false|committed: false as const/);
+    }
+  });
+
+  it("keeps hybrid NPC tools limited to owned executor calls plus quarantined dialogue and goals", () => {
+    const npcTools = sourceFor("npc-tools.ts");
+    expect(npcTools).not.toMatch(/\bcommitAuthorityTrace\s*\(/);
+    expect(npcTools).not.toMatch(/\bdb\.(?:insert|update|delete)\s*\(|\bgetDb\(\)\.(?:insert|update|delete)\b/);
+    expect([...npcTools.matchAll(executeToolCallPattern)]).toHaveLength(2);
+
+    expect(npcTools).toEqual(expect.stringContaining('npcProposalOnly("speak"'));
+    expect(npcTools).toEqual(expect.stringContaining('npcProposalOnly("update_own_goal"'));
+    expect(npcTools).toEqual(expect.stringContaining('executeToolCall(campaignId, "log_event"'));
+    expect(npcTools).toEqual(expect.stringContaining('executeToolCall(campaignId, "move_to"'));
+    expect(npcTools).toEqual(expect.stringContaining("createNpcAuthorityContext({"));
+    expect(npcTools).toEqual(expect.stringContaining("createNpcMoveAuthorityContext({"));
+  });
+
+  it("keeps the storyteller AI SDK surface behind the canonical executor bridge", () => {
+    const toolSchemas = sourceFor("tool-schemas.ts");
+    expect([...toolSchemas.matchAll(aiSdkToolFactoryPattern)]).toHaveLength(
+      classifiedAiSdkToolSurfaces["tool-schemas.ts"].toolNames.length,
+    );
+    expect(toolSchemas).toEqual(expect.stringContaining("const executeRuntimeTool = ("));
+    expect(toolSchemas).toEqual(expect.stringContaining("executeToolCall("));
+    expect(toolSchemas).toEqual(expect.stringContaining("toolRequiresExecutionAuthority(toolName)"));
+    expect(toolSchemas).toEqual(expect.stringContaining("const executeBridgeLookupTool = ("));
+    expect(toolSchemas).toEqual(expect.stringContaining("executeBridgeCandidateTool(toolName, args, executionContext)"));
   });
 });
