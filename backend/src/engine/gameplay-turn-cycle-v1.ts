@@ -917,6 +917,7 @@ export function buildNarratorPromptFromSettledPacketV1(packet: SettledTurnPacket
     "Write only prose for the player. Do not output JSON, markdown, bullet lists, tool names, ids, schemas, logs, or diagnostics.",
     "Use only acceptedEvidence, gmRead, and oracleResult. Do not invent new consequences, locations, items, injuries, NPC actions, permissions, or world changes.",
     "When acceptedEvidence contains a concrete resolved outcome, narrate that outcome as authoritative and let it override any looser setup in gmRead.",
+    "When acceptedEvidence says movement completed or names the current scene after movement, narrate the completed arrival; do not describe the choice as still pending.",
     "Candidate lookup acceptedEvidence supports only the returned labels and explicit returned details. Do not infer object contents, markings, text, serial/registration numbers, addresses, hidden contents, or absence of such details from candidate labels.",
     "Never narrate failedSteps, skippedSteps, privateGuardTerms, backend ids, hidden facts, or planned-but-unaccepted effects.",
     narratorLanguageContractV1(language),
@@ -1136,6 +1137,57 @@ function summarizeToolSettlementForNarration(
       query ? `Search started: ${query}.` : "Search started.",
       "No concrete discovery, proof, number, address, or mark is confirmed by this step; that does not prove absence.",
     ].join(" ");
+  }
+
+  if (settlement.toolName === "check_route") {
+    const destination = readRecord(payload.destination);
+    const destinationLabel = typeof destination?.label === "string" && destination.label.trim().length > 0
+      ? destination.label.trim()
+      : null;
+    const routeStatus = typeof payload.routeStatus === "string" && payload.routeStatus.trim().length > 0
+      ? payload.routeStatus.trim()
+      : null;
+    const pathLabels = readLabelList(payload.path, 8)
+      .filter((label) => label !== "current_location");
+    if (russian) {
+      return [
+        destinationLabel
+          ? `Проверка маршрута подтвердила направление: ${destinationLabel}.`
+          : "Проверка маршрута завершена.",
+        routeStatus ? `Статус маршрута: ${routeStatus}.` : null,
+        pathLabels.length ? `Маршрут: ${pathLabels.join(" -> ")}.` : null,
+      ].filter(Boolean).join(" ");
+    }
+    return [
+      destinationLabel
+        ? `Route check confirmed destination: ${destinationLabel}.`
+        : "Route check completed.",
+      routeStatus ? `Route status: ${routeStatus}.` : null,
+      pathLabels.length ? `Path: ${pathLabels.join(" -> ")}.` : null,
+    ].filter(Boolean).join(" ");
+  }
+
+  if (settlement.toolName === "move_actor" || settlement.toolName === "move_to") {
+    const locationName = typeof payload.locationName === "string" && payload.locationName.trim().length > 0
+      ? payload.locationName.trim()
+      : typeof payload.destinationRef === "string" && payload.destinationRef.trim().length > 0
+        ? payload.destinationRef.trim()
+        : null;
+    const pathLabels = readLabelList(payload.path, 8);
+    if (russian) {
+      return [
+        locationName
+          ? `Перемещение завершено: текущая сцена теперь ${locationName}.`
+          : "Перемещение завершено.",
+        pathLabels.length ? `Пройденный путь: ${pathLabels.join(" -> ")}.` : null,
+      ].filter(Boolean).join(" ");
+    }
+    return [
+      locationName
+        ? `Movement completed: current scene is now ${locationName}.`
+        : "Movement completed.",
+      pathLabels.length ? `Travel path: ${pathLabels.join(" -> ")}.` : null,
+    ].filter(Boolean).join(" ");
   }
 
   if (settlement.result.observationOnly || settlement.toolName === "list_visible_affordances") {

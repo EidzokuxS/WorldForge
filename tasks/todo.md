@@ -355,3 +355,9 @@ Session: `gm-v1-consequenc-slice`.
   - Final DB after row 63: `chat_history=120`, `settled_turn_packets=60`, `turn_sagas=60`, `narrator_attempts=60`, `finalized=60`, `pending=0`, scene `Charter Gallery`, `worldVersion=43`, `currentTick=65`.
   - Artifact: `output/phase95-manual-play/lane-b-reserve3-manual.json`; raw SSE files under `output/phase95-manual-play/sse/`.
   - Residual non-blocking narrative quality notes: occasional phrasing/typos and overconfident route-name interpretation remain prose/GM judgment polish, not settled-packet corruption; per operator direction, do not add deterministic prose choke points until gameplay proof is stronger.
+- Lane A reserve-2 diagnostic run, not acceptance:
+  - Started zero-turn clone `ea9e1cc4-3829-43c8-9d8d-fafdc5d86c02` with player `Tanaka Kouta` in `Shibuya Ward`; artifact `output/phase95-manual-play/lane-a-reserve2-manual.json`.
+  - Reached 46 finalized packets with `pending=0`, but the lane is not accepted: turn 46 moved state to `Shibuya Backstreet Collection Point` while narration said the choice was still pending.
+  - Root cause: Stage 6 accepted evidence did not summarize `check_route` / `move_actor` concretely, so the narrator filled the gap with planning prose over an accepted movement receipt.
+  - Fix in progress: Stage 6 now emits explicit route-check and movement-completed evidence, and narrator system prompt states completed movement evidence must be narrated as arrival, not pending choice.
+  - Operator correction: final acceptance lanes count only when they run cleanly from 0 to about 60 without failed, replayed, restored, or invalid player-facing turns. This Lane A run is diagnostic only; after the fix, use a fresh zero-turn clone.

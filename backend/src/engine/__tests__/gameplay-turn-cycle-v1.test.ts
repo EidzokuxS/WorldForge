@@ -968,6 +968,88 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(built.prompt).not.toContain("В поле внимания есть: Courier satchel");
   });
 
+  it("summarizes accepted route checks and movement as completed arrival evidence", () => {
+    const packet: SettledTurnPacketV1 = {
+      version: "settled-turn-packet.v1",
+      packetId: "packet-1",
+      turnId: "turn-1",
+      campaignId: "campaign-1",
+      baseWorldVersion: 4,
+      resultWorldVersion: 5,
+      tick: 8,
+      playerAction: "Я выбираю безопасный путь к Shibuya Backstreet Collection Point и иду туда.",
+      gmRead: {
+        path: "tool_plan",
+        situationSummary: "Player chooses a safe route and moves.",
+        sceneQuestion: "Which route is safe?",
+        actionInterpretation: {
+          intent: "choose route and move",
+          targetRefs: ["Shibuya Backstreet Collection Point"],
+        },
+        rationale: "Movement changes current scene.",
+        evidenceRefs: ["Player"],
+        narrationGuardrails: ["Do not narrate movement before it is accepted."],
+      },
+      oracleResult: null,
+      visibleFacts: [],
+      skippedSteps: [],
+      failedSteps: [],
+      checklist: null,
+      stepSettlements: [],
+      acceptedToolResults: [{
+        stepId: "step-1",
+        toolName: "check_route",
+        input: {
+          actorRef: "Player",
+          destinationRef: "Shibuya Backstreet Collection Point",
+          mode: "walk",
+        },
+        result: {
+          success: true,
+          status: "success",
+          kind: "observation",
+          observationOnly: true,
+          result: {
+            routeStatus: "legal",
+            destination: {
+              type: "location",
+              label: "Shibuya Backstreet Collection Point",
+            },
+            path: ["current_location", "Shibuya Backstreet Collection Point"],
+          },
+        },
+      }, {
+        stepId: "step-2",
+        toolName: "move_actor",
+        input: {
+          destinationRef: "Shibuya Backstreet Collection Point",
+          mode: "walk",
+        },
+        result: {
+          success: true,
+          status: "success",
+          result: {
+            kind: "move_actor",
+            locationName: "Shibuya Backstreet Collection Point",
+            path: ["Shibuya Ward", "Shibuya Backstreet Collection Point"],
+          },
+        },
+      }],
+      localConsequenceResult: null,
+      acceptedActorResults: [],
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+      privateGuardTerms: [],
+    };
+
+    const built = buildNarratorPromptFromSettledPacketV1(packet);
+    expect(built.system).toContain("narrate the completed arrival");
+    expect(built.prompt).toContain("Проверка маршрута подтвердила направление: Shibuya Backstreet Collection Point.");
+    expect(built.prompt).toContain("Перемещение завершено: текущая сцена теперь Shibuya Backstreet Collection Point.");
+    expect(built.prompt).not.toContain("Мир принял результат действия.");
+    expect(built.prompt).not.toContain("The world accepted the action result.");
+  });
+
   it("uses accepted log_event input text as actor-visible settled evidence", () => {
     const packet: SettledTurnPacketV1 = {
       version: "settled-turn-packet.v1",
