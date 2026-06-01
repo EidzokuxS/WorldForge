@@ -283,10 +283,19 @@ describe("gameplay turn cycle v1 contracts", () => {
 
     expect(prompt).toContain("Use toolNeed=find_object_candidates only when the needed result is which visible/current/inventory object labels match");
     expect(prompt).toContain("mixed current-scene affordance");
-    expect(prompt).toContain("Never satisfy a visible-person search with only find_object_candidates");
+    expect(prompt).toContain("Never satisfy a visible-person request with routes, points of interest, objects, or gmRead refs alone");
     expect(prompt).toContain("Use toolNeed=start_search");
     expect(prompt).toContain("registration numbers");
     expect(prompt).toContain("must not assert the searched detail exists or is absent");
+  });
+
+  it("tells Stage 3 to cover explicit visible-people requests with actor authority", () => {
+    const prompt = gmActionChecklistSystemPromptV1();
+
+    expect(prompt).toContain("If the player asks who/which people/actors/NPCs/guards/traders/porters are visible");
+    expect(prompt).toContain("include a required list_visible_affordances or find_actor_candidates step");
+    expect(prompt).toContain("Never satisfy a visible-person request with routes, points of interest, objects, or gmRead refs alone");
+    expect(prompt).toContain("steps covering every requested category");
   });
 
   it("tells Stage 3 not to materialize already-visible addressed actors", () => {
@@ -1055,8 +1064,10 @@ describe("gameplay turn cycle v1 contracts", () => {
     const built = buildNarratorPromptFromSettledPacketV1(packet);
     expect(built.system).toContain("The playerAction is the player's first-person action");
     expect(built.system).toContain("Never make a non-player gmRead targetRef or evidenceRef");
+    expect(built.system).toContain("Never narrate a non-player actor as present, visible, nearby");
     expect(built.prompt).toContain("\"playerActionSubject\": \"player\"");
     expect(built.prompt).toContain("gmRead targetRefs/evidenceRefs are never the subject");
+    expect(built.prompt).toContain("gmRead targetRefs/evidenceRefs/narrationGuardrails never establish NPC presence or visibility");
     expect(built.prompt).toContain("Совпавшие видимые люди или акторы этим lookup не подтверждены");
   });
 
