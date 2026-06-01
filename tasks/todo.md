@@ -198,6 +198,16 @@ Session: `gm-v1-consequenc-slice`.
   - Lane A / JJK reserve: source `711a16bb-cab4-4e2d-ad3f-b93ba81cdd93` -> clone `6bc742b5-1f87-4ed3-ba99-ac8e8b3d1473`; `chat_history=0`, `settled_turn_packets=0`, `turn_sagas=0`, `narrator_attempts=0`, manifest source/target verified.
   - Lane B / Lacquer reserve: source `139070ce-442a-4eea-88a0-0f735879ade5` -> clone `ce740a13-3b78-43a9-9bdc-6973be2ff7b9`; `chat_history=0`, `settled_turn_packets=0`, `turn_sagas=0`, `narrator_attempts=0`, manifest source/target verified.
   - Lane C / Ashfall reserve: source `2badd884-f63a-456c-b832-e88439fb62b4` -> clone `b61eca3d-c71b-4521-81bd-2b636464844f`; `chat_history=0`, `settled_turn_packets=0`, `turn_sagas=0`, `narrator_attempts=0`, manifest source/target verified.
+- Lane A reserve live acceptance:
+  - Preflight verified clone `6bc742b5-1f87-4ed3-ba99-ac8e8b3d1473` loaded through `/api/campaigns/:id/load`; `chat_history=0`, `settled_turn_packets=0`, `turn_sagas=0`, `narrator_attempts=0`.
+  - Turn 1 real `/api/chat/action`: `Я проверяю delivery manifest и burner phone, затем осматриваюсь на Shibuya Ward, чтобы выбрать самый безопасный следующий маршрут.`
+  - Turn 1 reached `narrative` and `done`; DB showed `chat_history=2`, `settled_turn_packets=1`, `turn_sagas=1`, `narrator_attempts=1`; saga `5243f65d-0cb5-42b1-84b7-c9be6c79e9b3` finalized and narrator attempt `82c66cdb-7d8f-4ede-9067-423023036011` succeeded.
+  - Packet `11d2357d-d411-4a2c-aca0-29bcfbadca90` had `gmRead.path="tool_plan"`, checklist steps `find_object_candidates` and `list_navigation_options`, and accepted both tools. `list_navigation_options` returned 6 connected routes including `East Exit Underground Passage`.
+  - Narration quality smell: storyteller summarized the route assessment without naming the available routes. Packet truth is correct, but long-run polish should make route-list observation turns expose useful route names to the player.
+  - Turn 2 real `/api/chat/action`: `Я выбираю East Exit Underground Passage как самый безопасный путь и иду туда, держа burner phone под рукой.`
+  - Turn 2 reached `narrative` and `done`; DB showed `chat_history=4`, `settled_turn_packets=2`, `turn_sagas=2`, `narrator_attempts=2`, `pendingSagas=0`.
+  - Packet `ade9551f-d72a-4682-84dd-be9960eb5ece` had `gmRead.path="tool_plan"`, one `move_actor` checklist step, accepted `move_actor` input with destination `East Exit Underground Passage`, path `["Shibuya Ward","East Exit Underground Passage"]`, and resultWorldVersion `1`.
+  - Grounding check: player `Tanaka Kouta` current location and current scene both updated to `East Exit Underground Passage`.
 - Lane A first-turn live acceptance:
   - First attempt exposed a Stage 4 prompt contract gap: `list_navigation_options` was proposed with `maxResults: 10` while the backend schema caps it at 8. Fixed `toolContractHint` for bridge lookup tools so prompt contracts expose `maxResults` bounds.
   - Second attempt exposed a real ownership mismatch: Stage 3/4 selected `inspect_known_fact` for visible inventory objects (`Delivery manifest`, `Burner phone`), and the bridge correctly rejected it with `no_player_visible_or_known_fact`.
