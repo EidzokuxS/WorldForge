@@ -236,6 +236,13 @@ Session: `gm-v1-consequenc-slice`.
   - Result reached `narrative` and `done`; DB showed `chat_history=2`, `settled_turn_packets=1`, `turn_sagas=1`, `narrator_attempts=1`, `pendingSagas=0`.
   - Packet `5cedbb52-9a6b-470d-b44a-0ea58a341eb3` had `gmRead.path="tool_plan"`, accepted `find_object_candidates` labels `Sealed lacquer message tube`, `Courier satchel`, and accepted `list_navigation_options` labels `Anchor Chain Pylon`, `Auditor Spire`, `Charter Gallery`, `Resonance Tower`, `Silt Warrens`, `Slip Twelve Berth`, `The Copper Tap`, `Upper Dam Ruins`.
   - Grounding check: narrator now exposed the actual route names to the player. Remaining quality smell: one English connective leaked into Russian prose (`nor`), so language purity still needs a later narrator polish pass rather than a regex patch.
+- Lane B reserve second-turn movement and language-contract replay:
+  - Tightened Stage 6 narrator language contract for Russian turns: ordinary prose words/connectors/articles/transitions must be Russian, while accepted proper nouns, item names, place names, and canon terms remain exact.
+  - Verification before live replay: `npm --prefix backend run typecheck`; `npm --prefix backend test -- gameplay-turn-cycle-v1.test.ts` passed with 27 tests.
+  - Real `/api/chat/action`: `Я выбираю Silt Warrens как путь с наименьшим количеством открытых линий обзора и иду туда, держа sealed lacquer message tube в satchel.`
+  - Result reached `narrative` and `done`; DB showed `chat_history=4`, `settled_turn_packets=2`, `turn_sagas=2`, `narrator_attempts=2`, `pendingSagas=0`.
+  - Packet `a51b4b35-954b-4866-96df-8a80ba5b1cdf` had `gmRead.path="tool_plan"`, one required `move_actor` checklist step, accepted destination `Silt Warrens`, path `["Lowwater Bazaar","Silt Warrens"]`, and resultWorldVersion `1`.
+  - Grounding check: player current location/current scene updated to `Silt Warrens`; narrator preserved accepted item/place labels but did not contain the earlier common English leaks `and`, `or`, `nor`, `reveals`, or `openness`.
 - Lane B second-turn live acceptance:
   - Verified current SceneFrame after first turn: tick `1`, location/scene `Lowwater Bazaar`, 8 connected movement candidates, including `Silt Warrens`.
   - Real `/api/chat/action` against `ba788102-b970-43f2-8221-6f0f136e23f8`: `Я выбираю Silt Warrens как путь с наименьшим количеством открытых линий обзора и иду туда, держа sealed lacquer message tube в satchel.`

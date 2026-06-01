@@ -501,6 +501,8 @@ describe("gameplay turn cycle v1 contracts", () => {
 
     const built = buildNarratorPromptFromSettledPacketV1(packet);
     expect(built.system).toContain("Write in Russian.");
+    expect(built.system).toContain("ordinary prose words, connectors, articles");
+    expect(built.prompt).toContain("Russian prose");
     expect(built.prompt).toContain("Gate plaza is visible.");
     expect(built.prompt).not.toContain("SECRET_ROUTE_TOKEN");
     expect(built.prompt).not.toContain("Planned ambush did not happen.");

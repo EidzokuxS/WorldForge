@@ -871,6 +871,18 @@ function acceptedNarrationEvidence(packet: SettledTurnPacketV1): string[] {
   ]).map((entry) => stripPrivateTerms(entry, packet.privateGuardTerms));
 }
 
+function narratorLanguageContractV1(language: "ru" | "en"): string {
+  if (language === "ru") {
+    return [
+      "Write in Russian.",
+      "All ordinary prose words, connectors, articles, transitions, and explanatory phrases must be Russian.",
+      "Keep acceptedEvidence proper nouns, character names, item names, place names, and canon/franchise terms exactly as written.",
+      "Do not leave English connective words such as and/or/nor/reveals/openness in Russian prose unless they are part of an accepted proper noun.",
+    ].join(" ");
+  }
+  return "Write in English.";
+}
+
 export function buildNarratorPromptFromSettledPacketV1(packet: SettledTurnPacketV1): {
   system: string;
   prompt: string;
@@ -883,7 +895,7 @@ export function buildNarratorPromptFromSettledPacketV1(packet: SettledTurnPacket
     "Use only acceptedEvidence, gmRead, and oracleResult. Do not invent new consequences, locations, items, injuries, NPC actions, permissions, or world changes.",
     "When acceptedEvidence contains a concrete resolved outcome, narrate that outcome as authoritative and let it override any looser setup in gmRead.",
     "Never narrate failedSteps, skippedSteps, privateGuardTerms, backend ids, hidden facts, or planned-but-unaccepted effects.",
-    language === "ru" ? "Write in Russian." : "Write in English.",
+    narratorLanguageContractV1(language),
   ].join(" ");
   return {
     system,
@@ -891,6 +903,9 @@ export function buildNarratorPromptFromSettledPacketV1(packet: SettledTurnPacket
       contract: {
         output: "player-facing prose only",
         language,
+        languageContract: language === "ru"
+          ? "Russian prose; preserve accepted proper nouns exactly; do not use English connective/common words."
+          : "English prose.",
         allowedSources: ["acceptedEvidence", "gmRead", "oracleResult"],
         forbidden: [
           "new consequences",
