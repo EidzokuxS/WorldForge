@@ -5,6 +5,10 @@ import { createModel } from "../ai/provider-registry.js";
 import { safeGenerateObject } from "../ai/generate-object-safe.js";
 import { appendChatMessages, advanceCampaignTick, getChatHistory, readCampaignConfig } from "../campaign/index.js";
 import { createLogger, withRole } from "../lib/index.js";
+import {
+  runRequiredActorDecisionPass,
+  type RunRequiredActorDecisionPassResult,
+} from "./actor-tools.js";
 import { callOracle, type OraclePayload, type OracleResult } from "./oracle.js";
 import {
   executeBridgeCandidateTool,
@@ -13,6 +17,7 @@ import {
 import { buildSceneFrame, type SceneActor, type SceneFrame } from "./scene-frame.js";
 import { runGmRead, type GmRead } from "./gm-turn-read.js";
 import { readWorldClock, syncWorldClockTurnBoundary } from "./living-world-authority.js";
+import type { ExecutedScenePlanActionResult } from "./scene-plan-executor.js";
 import { executeToolCall, type ToolResult } from "./tool-executor.js";
 import {
   applySuccessfulToolObservationToExecutionContext,
@@ -204,6 +209,48 @@ export interface GmToolStepSettlementV1 {
   reason?: string;
 }
 
+export interface AcceptedActorResultV1 {
+  settlementId: string;
+  actorId: string;
+  actorLabel: string;
+  toolName: RuntimeToolName;
+  input: Record<string, unknown>;
+  result: ToolResult;
+  visibleFact?: string;
+}
+
+export interface LocalActorConsequenceSettlementV1 {
+  settlementId: string;
+  actorId: string;
+  actorLabel: string;
+  scheduleReason: string;
+  status: "accepted" | "no_action_accepted" | "skipped" | "failed";
+  visibleToPlayer: boolean;
+  actionResults: AcceptedActorResultV1[];
+  visibleFacts: string[];
+  durableEventIds: string[];
+  authorityRefs: string[];
+}
+
+export interface LocalConsequenceResultV1 {
+  version: "local-consequence-result.v1";
+  runId: string;
+  stage: "local_actor_reactions";
+  trigger: {
+    gmReadPath: GmReadPath;
+    acceptedGmStepIds: string[];
+    acceptedToolResultRefs: string[];
+  };
+  baseWorldVersion: number;
+  frameWorldVersion: number;
+  resultWorldVersion: number;
+  route: "required_before_packet" | "none" | "queued_after_done";
+  actorSettlements: LocalActorConsequenceSettlementV1[];
+  queuedSimulationProposalRefs: string[];
+  skipped: Array<{ reason: string; actorId?: string; scheduleRef?: string }>;
+  failed: Array<{ reason: string; actorId?: string; scheduleRef?: string }>;
+}
+
 export interface GameplayFrameEnvelopeV1 {
   version: "gameplay-frame-envelope.v1";
   turnId: string;
@@ -244,6 +291,8 @@ export interface SettledTurnPacketV1 {
     input: Record<string, unknown>;
     result: ToolResult;
   }>;
+  localConsequenceResult: LocalConsequenceResultV1 | null;
+  acceptedActorResults: AcceptedActorResultV1[];
   acceptedDurableEventIds: string[];
   producedDurableEventIds: string[];
   privateGuardTerms: string[];
@@ -437,6 +486,257 @@ function visibleFactFromToolSettlement(settlement: GmToolStepSettlementV1): stri
   return summarizeToolSettlementForNarration(settlement, false);
 }
 
+function acceptedToolResultsFromSettlementsV1(
+  settlements: readonly GmToolStepSettlementV1[],
+): SettledTurnPacketV1["acceptedToolResults"] {
+  return settlements
+    .filter((settlement): settlement is GmToolStepSettlementV1 & {
+      toolName: RuntimeToolName;
+      input: Record<string, unknown>;
+      result: ToolResult;
+    } => settlement.status === "accepted" && Boolean(settlement.toolName && settlement.input && settlement.result))
+    .map((settlement) => ({
+      stepId: settlement.stepId,
+      toolName: settlement.toolName,
+      input: settlement.input,
+      result: settlement.result,
+    }));
+}
+
+function acceptedToolResultRefsV1(
+  acceptedToolResults: readonly SettledTurnPacketV1["acceptedToolResults"][number][],
+): string[] {
+  return uniqueStrings(acceptedToolResults.flatMap((accepted) => [
+    accepted.result.authority?.toolResultId,
+    `${accepted.stepId}:${accepted.toolName}`,
+  ]));
+}
+
+function durableEventIdsFromToolResultV1(result: ToolResult): string[] {
+  const resultEventId = isRecord(result.result)
+    ? result.result.eventId
+    : null;
+  return uniqueStrings([
+    ...(result.authority?.eventRefs ?? []),
+    typeof resultEventId === "string" ? resultEventId : null,
+  ]);
+}
+
+function acceptedGmWriteScopesV1(
+  acceptedToolResults: readonly SettledTurnPacketV1["acceptedToolResults"][number][],
+): string[] {
+  return uniqueStrings(acceptedToolResults.flatMap((accepted) =>
+    accepted.result.authority?.stateDeltaRefs ?? [],
+  ));
+}
+
+function visibleFactFromActorResultV1(
+  actionResult: ExecutedScenePlanActionResult,
+  actorLabel: string,
+): string | null {
+  if (!isRuntimeToolName(actionResult.toolName) || !actionResult.result.success) return null;
+  return summarizeToolSettlementForNarration({
+    stepId: actionResult.actionRef,
+    purpose: `Local actor reaction by ${actorLabel}.`,
+    status: "accepted",
+    toolName: actionResult.toolName,
+    input: actionResult.input,
+    result: actionResult.result,
+  }, false);
+}
+
+function acceptedActorResultFromActionV1(input: {
+  settlementId: string;
+  actorId: string;
+  actorLabel: string;
+  actionResult: ExecutedScenePlanActionResult;
+}): AcceptedActorResultV1 | null {
+  const { actionResult } = input;
+  if (!isRuntimeToolName(actionResult.toolName) || actionResult.result.success !== true) {
+    return null;
+  }
+  return {
+    settlementId: input.settlementId,
+    actorId: input.actorId,
+    actorLabel: input.actorLabel,
+    toolName: actionResult.toolName,
+    input: actionResult.input,
+    result: actionResult.result,
+    visibleFact: visibleFactFromActorResultV1(actionResult, input.actorLabel) ?? undefined,
+  };
+}
+
+export function buildLocalConsequenceResultFromActorPassV1(input: {
+  envelope: GameplayFrameEnvelopeV1;
+  read: GmRead;
+  acceptedToolResults: SettledTurnPacketV1["acceptedToolResults"];
+  refreshedFrame: SceneFrame;
+  actorPass: RunRequiredActorDecisionPassResult;
+  resultWorldVersion: number;
+}): LocalConsequenceResultV1 {
+  const actorSettlements = input.actorPass.decisions.map((decision, index): LocalActorConsequenceSettlementV1 => {
+    const settlementId = `local-actor:${decision.schedule.actorId}:${index + 1}`;
+    const acceptedResults = decision.actionResults
+      .map((actionResult) => acceptedActorResultFromActionV1({
+        settlementId,
+        actorId: decision.schedule.actorId,
+        actorLabel: decision.schedule.actorName,
+        actionResult,
+      }))
+      .filter((result): result is AcceptedActorResultV1 => Boolean(result));
+    const failedAction = decision.actionResults.find((actionResult) =>
+      actionResult.result.success !== true || !isRuntimeToolName(actionResult.toolName),
+    );
+    const visibleFacts = uniqueStrings(acceptedResults.map((result) => result.visibleFact));
+    const durableEventIds = uniqueStrings(acceptedResults.flatMap((result) =>
+      durableEventIdsFromToolResultV1(result.result),
+    ));
+    const authorityRefs = uniqueStrings(acceptedResults.flatMap((result) => [
+      result.result.authority?.toolResultId,
+      ...(result.result.authority?.stateDeltaRefs ?? []),
+    ]));
+
+    return {
+      settlementId,
+      actorId: decision.schedule.actorId,
+      actorLabel: decision.schedule.actorName,
+      scheduleReason: decision.schedule.reason,
+      status: failedAction
+        ? "failed"
+        : acceptedResults.length > 0
+          ? "accepted"
+          : "no_action_accepted",
+      visibleToPlayer: visibleFacts.length > 0,
+      actionResults: acceptedResults,
+      visibleFacts,
+      durableEventIds,
+      authorityRefs,
+    };
+  });
+
+  return {
+    version: "local-consequence-result.v1",
+    runId: randomUUID(),
+    stage: "local_actor_reactions",
+    trigger: {
+      gmReadPath: input.read.path,
+      acceptedGmStepIds: input.acceptedToolResults.map((result) => result.stepId),
+      acceptedToolResultRefs: acceptedToolResultRefsV1(input.acceptedToolResults),
+    },
+    baseWorldVersion: input.envelope.baseWorldVersion,
+    frameWorldVersion: input.refreshedFrame.worldVersion,
+    resultWorldVersion: input.resultWorldVersion,
+    route: "required_before_packet",
+    actorSettlements,
+    queuedSimulationProposalRefs: [],
+    skipped: input.actorPass.schedule.decisions
+      .filter((decision) => decision.route !== "required_before_done")
+      .map((decision) => ({
+        reason: `Actor decision routed ${decision.route}; not settled before packet.`,
+        actorId: decision.actorId,
+        scheduleRef: decision.reason,
+      })),
+    failed: actorSettlements
+      .filter((settlement) => settlement.status === "failed")
+      .map((settlement) => ({
+        reason: "Required local actor reaction did not produce accepted runtime receipts.",
+        actorId: settlement.actorId,
+        scheduleRef: settlement.scheduleReason,
+      })),
+  };
+}
+
+export function emptyLocalConsequenceResultV1(input: {
+  envelope: GameplayFrameEnvelopeV1;
+  read: GmRead;
+  resultWorldVersion?: number;
+}): LocalConsequenceResultV1 {
+  return {
+    version: "local-consequence-result.v1",
+    runId: randomUUID(),
+    stage: "local_actor_reactions",
+    trigger: {
+      gmReadPath: input.read.path,
+      acceptedGmStepIds: [],
+      acceptedToolResultRefs: [],
+    },
+    baseWorldVersion: input.envelope.baseWorldVersion,
+    frameWorldVersion: input.envelope.frame.worldVersion,
+    resultWorldVersion: input.resultWorldVersion ?? input.envelope.baseWorldVersion,
+    route: "none",
+    actorSettlements: [],
+    queuedSimulationProposalRefs: [],
+    skipped: [],
+    failed: [],
+  };
+}
+
+export function assertLocalConsequencePassAcceptedV1(result: LocalConsequenceResultV1): void {
+  if (result.route !== "required_before_packet") return;
+  const failed = result.failed[0];
+  if (failed) {
+    throw new Error(
+      `Required local actor consequence failed before settled packet persistence: ${failed.reason}`,
+    );
+  }
+}
+
+async function runLocalConsequencePassV1(input: {
+  options: TurnOptions;
+  envelope: GameplayFrameEnvelopeV1;
+  read: GmRead;
+  acceptedToolResults: SettledTurnPacketV1["acceptedToolResults"];
+}): Promise<LocalConsequenceResultV1> {
+  if (input.acceptedToolResults.length === 0) {
+    const clock = readWorldClock(input.options.campaignId);
+    return emptyLocalConsequenceResultV1({
+      envelope: input.envelope,
+      read: input.read,
+      resultWorldVersion: clock.worldVersion,
+    });
+  }
+
+  const clockBeforeFrame = readWorldClock(input.options.campaignId);
+  const elapsedWorldTimeMinutes = Math.max(
+    0,
+    clockBeforeFrame.worldTimeMinutes - input.envelope.baseTick,
+  );
+  const refreshedFrame = await buildSceneFrame({
+    campaignId: input.options.campaignId,
+    tick: Math.max(input.envelope.baseTick, clockBeforeFrame.currentTick, clockBeforeFrame.worldTimeMinutes),
+    playerAction: input.options.playerAction,
+    intent: input.options.intent,
+    method: input.options.method,
+    elapsedWorldTimeMinutes,
+    runActorExposureCatchup: false,
+  });
+  const actorPass = await runRequiredActorDecisionPass({
+    campaignId: input.options.campaignId,
+    tick: refreshedFrame.tick,
+    provider: input.options.judgeProvider,
+    sceneFrame: refreshedFrame,
+    playerAction: input.options.playerAction,
+    playerLocationId: refreshedFrame.currentLocationId,
+    playerSceneScopeId: refreshedFrame.currentSceneScopeId,
+    elapsedWorldTimeMinutes,
+    maxOutputTokens: input.options.storytellerMaxTokens,
+    blockedWriteScopes: acceptedGmWriteScopesV1(input.acceptedToolResults),
+    presentActorReactionRoute: "required_before_done",
+    legalTools: refreshedFrame.allowedTools,
+  });
+  const resultClock = readWorldClock(input.options.campaignId);
+  const result = buildLocalConsequenceResultFromActorPassV1({
+    envelope: input.envelope,
+    read: input.read,
+    acceptedToolResults: input.acceptedToolResults,
+    refreshedFrame,
+    actorPass,
+    resultWorldVersion: resultClock.worldVersion,
+  });
+  assertLocalConsequencePassAcceptedV1(result);
+  return result;
+}
+
 function buildSettledTurnPacketV1(input: {
   envelope: GameplayFrameEnvelopeV1;
   read: GmRead;
@@ -444,6 +744,7 @@ function buildSettledTurnPacketV1(input: {
   resultWorldVersion: number;
   checklist: GmActionChecklistV1 | null;
   stepSettlements: GmToolStepSettlementV1[];
+  localConsequenceResult: LocalConsequenceResultV1 | null;
 }): SettledTurnPacketV1 {
   const skippedSteps = input.stepSettlements
     .filter((settlement) => settlement.status === "skipped")
@@ -457,19 +758,11 @@ function buildSettledTurnPacketV1(input: {
       stage: settlement.stepId,
       reason: settlement.reason ?? settlement.result?.error ?? "Step failed.",
     }));
-  const acceptedToolResults = input.stepSettlements
-    .filter((settlement): settlement is GmToolStepSettlementV1 & {
-      toolName: RuntimeToolName;
-      input: Record<string, unknown>;
-      result: ToolResult;
-    } => settlement.status === "accepted" && Boolean(settlement.toolName && settlement.input && settlement.result))
-    .map((settlement) => ({
-      stepId: settlement.stepId,
-      toolName: settlement.toolName,
-      input: settlement.input,
-      result: settlement.result,
-    }));
-  const durableEventIds = durableEventIdsFromPacketV1({ acceptedToolResults });
+  const acceptedToolResults = acceptedToolResultsFromSettlementsV1(input.stepSettlements);
+  const acceptedActorResults = input.localConsequenceResult?.actorSettlements.flatMap((settlement) =>
+    settlement.actionResults,
+  ) ?? [];
+  const durableEventIds = durableEventIdsFromPacketV1({ acceptedToolResults, acceptedActorResults });
 
   return {
     version: "settled-turn-packet.v1",
@@ -493,12 +786,15 @@ function buildSettledTurnPacketV1(input: {
     visibleFacts: uniqueStrings([
       ...visibleFactsFromRead(input.read, input.oracleResult),
       ...input.stepSettlements.map(visibleFactFromToolSettlement),
+      ...(input.localConsequenceResult?.actorSettlements.flatMap((settlement) => settlement.visibleFacts) ?? []),
     ]),
     skippedSteps,
     failedSteps,
     checklist: input.checklist,
     stepSettlements: input.stepSettlements,
     acceptedToolResults,
+    localConsequenceResult: input.localConsequenceResult,
+    acceptedActorResults,
     acceptedDurableEventIds: durableEventIds,
     producedDurableEventIds: durableEventIds,
     privateGuardTerms: input.envelope.scopedForecastExcerpt?.forbiddenPrivateTerms ?? [],
@@ -526,6 +822,14 @@ function acceptedNarrationEvidence(packet: SettledTurnPacketV1): string[] {
     ...packet.acceptedToolResults.map((entry) => summarizeToolSettlementForNarration({
       stepId: entry.stepId,
       purpose: entry.stepId,
+      status: "accepted",
+      toolName: entry.toolName,
+      input: entry.input,
+      result: entry.result,
+    }, russian)),
+    ...packet.acceptedActorResults.map((entry) => entry.visibleFact ?? summarizeToolSettlementForNarration({
+      stepId: entry.settlementId,
+      purpose: `Local actor reaction by ${entry.actorLabel}.`,
       status: "accepted",
       toolName: entry.toolName,
       input: entry.input,
@@ -572,6 +876,8 @@ export function buildNarratorPromptFromSettledPacketV1(packet: SettledTurnPacket
       auditOnlyNotNarratorEvidence: {
         failedStepCount: packet.failedSteps.length,
         skippedStepCount: packet.skippedSteps.length,
+        failedLocalConsequenceCount: packet.localConsequenceResult?.failed.length ?? 0,
+        skippedLocalConsequenceCount: packet.localConsequenceResult?.skipped.length ?? 0,
       },
     }, null, 2),
   };
@@ -1617,6 +1923,25 @@ export async function* processGameplayTurnCycleV1(
   });
   assertRequiredToolStepsAcceptedV1({ checklist, stepSettlements });
 
+  const acceptedToolResults = acceptedToolResultsFromSettlementsV1(stepSettlements);
+  yield { type: "scene-settling", data: { stage: "local-consequences", phase: "start", tick: envelope.baseTick } };
+  const localConsequenceResult = await runLocalConsequencePassV1({
+    options,
+    envelope,
+    read: gmRead,
+    acceptedToolResults,
+  });
+  yield {
+    type: "scene-settling",
+    data: {
+      stage: "local-consequences",
+      phase: "settled",
+      tick: envelope.baseTick,
+      route: localConsequenceResult.route,
+      actorSettlementCount: localConsequenceResult.actorSettlements.length,
+    },
+  };
+
   const resultClock = readWorldClock(options.campaignId);
   const packet = buildSettledTurnPacketV1({
     envelope,
@@ -1625,6 +1950,7 @@ export async function* processGameplayTurnCycleV1(
     resultWorldVersion: resultClock.worldVersion,
     checklist,
     stepSettlements,
+    localConsequenceResult,
   });
 
   yield { type: "scene-settling", data: { stage: "settled-packet", phase: "persisting", tick: envelope.baseTick } };

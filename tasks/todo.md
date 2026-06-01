@@ -103,6 +103,18 @@ Session: `gm-v1-multistep-loop-retry`.
 - Feed later tool proposals only backend-accepted refs/receipts from previous successful steps, not checklist expected effects or failed/skipped plans.
 - Keep durable packet store unchanged; it is already the right Stage 5/6 boundary.
 
+## Oracle Decision 2026-06-01: Local/World/Actor Consequences
+
+Session: `gm-v1-consequenc-slice`.
+
+- Implement the next slice as a narrow `LocalConsequencePassV1` between accepted GM tool settlements and `SettledTurnPacketV1`.
+- Use split architecture: visible immediate local actor consequences are accepted before packet/narration; nonlocal/offscreen/world progress stays as versioned post-turn simulation proposals.
+- Reuse `runRequiredActorDecisionPass` through a v1 adapter with explicit route, legal tools, scene frame, player scope, and blocked write scopes. Do not call the old `processTurnScenePlan`, ScenePlanner, or TurnSaga recovery as v1 drivers.
+- Refresh the `SceneFrame` after accepted GM mutations before local actor reactions, especially after movement.
+- Do not create a second durable pre-narration packet yet. Embed accepted local consequence facts/result refs into `SettledTurnPacketV1`; the settled packet remains the single narration truth boundary.
+- Required local-visible actor consequence failures abort before packet persistence and route restore handles rollback. Optional/deferred actor work is skipped or queued and must not enter narrator evidence.
+- Keep `resolveDueWorldWorkForScopeWithProposalWatchdog` out of the synchronous v1 critical path for this slice.
+
 ## Implementation Notes 2026-06-01
 
 - Added `backend/src/engine/gameplay-turn-cycle-v1.ts`.
@@ -144,8 +156,23 @@ Session: `gm-v1-multistep-loop-retry`.
   - The previous live smoke exposed a Stage 6 evidence packaging bug: object-shaped tool results such as `record_dialogue_outcome` were summarized as a generic accepted-result phrase, leaving the narrator without the concrete settled outcome. Fixed by feeding `payload.text` / `payload.summary` into acceptedEvidence before narration.
   - Failed-step live smoke on clone `37940a97-371a-4bea-88f6-50c40adc6ae3` passed through real `/api/chat/action`: Stage 3 planned `check_route` then `move_actor`, Stage 4 rejected required `check_route` with `route_not_visible_or_legal`, v1 aborted before packet persistence, SSE emitted `error` with no `narrative`, route snapshot restore succeeded, and DB showed no `settled_turn_packets`, `narrator_attempts`, or `turn_sagas` for the failed turn.
   - Failed-step smoke exposed a route restore idempotency bug outside the v1 packet boundary: repeated restore receipts conflicted on `turn_clock_ledger(campaign_id, source_receipt_ref)`. Fixed `invalidateAuthorityAfterRestore` to make restore ledger insertion idempotent against that actual unique boundary and added a regression test.
-- Movement specifically is blocked in the current smoke campaign because SceneFrame exposes no legal movement candidates at the current location; this needs a clean movement-capable world/clone or a SceneFrame movement-candidate fix later.
+- Movement is live-smoke-proven on a clean movement-capable clone; stale/expired movement fixtures remain useful only as failed-route coverage.
 - Movement success is live-smoke-proven on clean movement-capable clone `3a606353-5968-4174-936b-45d80056ac1f` cloned from `142cf3f0-e6da-4f6b-8467-5721da7d963f`: real `/api/chat/action` moved the player from `The Canal Market District` to `Flooded Auction House` via accepted `move_actor`, advanced tick/worldVersion, persisted/finalized `SettledTurnPacketV1`, and DB showed player current location/scene updated to `Flooded Auction House`.
 - The earlier Ashfall/Gatehouse movement failure is now understood as a stale-source fixture issue, not proof that v1 movement is generally broken: source `1973fbeb-cd81-4556-8252-6aeccde5d5d8` has the player in an expired `Municipal Stores Front Counter`, with its only outgoing edge pointing to an archived/expired scene. Keep it as failed-route coverage, not as movement-success source.
 - Durable `SettledTurnPacketV1` persistence is implemented and focused-test plus live-smoke proven for direct narration.
 - Live smoke has proven observation/bridge tool execution, storyteller narration, durable direct packet persistence, and durable mutating packet persistence for one accepted `add_tag` state mutation.
+- Local/world/actor consequences are the next architecture slice. They are not yet implemented in v1 as accepted packet truth.
+
+## Implementation Notes 2026-06-01: Local Consequence Pass V1
+
+- Added a narrow Stage 4.5 `LocalConsequencePassV1` inside `processGameplayTurnCycleV1`, after required GM tool settlements are accepted and before `SettledTurnPacketV1` is built.
+- The pass skips direct/no-tool turns with a `route: "none"` artifact, and runs `runRequiredActorDecisionPass` only when accepted GM tool results exist.
+- The pass refreshes `SceneFrame` after accepted GM mutations, passes explicit `presentActorReactionRoute: "required_before_done"`, legal tools, player scope, and blocked GM write scopes into actor execution.
+- `SettledTurnPacketV1` now carries `localConsequenceResult` and `acceptedActorResults`; narrator evidence includes only accepted actor visible facts/results, while skipped/failed local consequence data remains audit-only.
+- Deferred/offscreen skipped local consequences are audit-only and do not abort packet persistence; failed required local actor receipts still abort before packet.
+- Durable packet persistence now records `acceptedActorResultRefs`, actor model-safe source refs, and actor durable event ids through the same settled packet boundary.
+- Verified:
+  - `npm --prefix backend run typecheck`
+  - `npm --prefix backend test -- gameplay-turn-cycle-v1.test.ts settled-turn-packet-v1-store.test.ts actor-tools.test.ts`
+  - `npm --prefix backend test -- chat.scene-plan.test.ts chat.test.ts gameplay-turn-cycle-v1.test.ts settled-turn-packet-v1-store.test.ts actor-tools.test.ts`
+  - real `/api/chat/action` smoke on campaign `3a606353-5968-4174-936b-45d80056ac1f`: accepted `add_tag`, ran `local-consequences`, persisted/finalized packet, emitted grounded `narrative` and `done`; DB packet showed `localRoute=required_before_packet`, zero actor settlements because the campaign has no `actor_process_states`, accepted tool refs persisted, and no backend listener remained on `3109/3001`.

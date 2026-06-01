@@ -14,6 +14,7 @@ import {
   turnSagas,
 } from "../../db/schema.js";
 import {
+  acceptedActorResultRefsFromPacketV1,
   durableEventIdsFromPacketV1,
   persistSettledTurnPacketV1,
   readSettledTurnPacketV1,
@@ -136,6 +137,8 @@ function makePacket(overrides: Partial<SettledTurnPacketV1> = {}): SettledTurnPa
         modelSafeRefs: ["item:report-1"],
       },
     }],
+    localConsequenceResult: null,
+    acceptedActorResults: [],
     acceptedDurableEventIds: ["event-authority-1", "event-result-1"],
     producedDurableEventIds: ["event-authority-1", "event-result-1"],
     privateGuardTerms: [],
@@ -184,6 +187,7 @@ describe("SettledTurnPacketV1 durable store", () => {
       "tool-result-1",
       "step-tag-1:add_tag",
     ]);
+    expect(json(storedPacket!.acceptedActorResultRefs)).toEqual([]);
     expect(json(storedPacket!.acceptedDurableEventIds)).toEqual([
       "event-authority-1",
       "event-result-1",
@@ -203,6 +207,97 @@ describe("SettledTurnPacketV1 durable store", () => {
       role: "settled-packet-anchor",
     });
     expect(getDb().select().from(turnSagaEvents).all()).toHaveLength(0);
+  });
+
+  it("persists accepted actor result refs and durable event ids inside the settled packet boundary", () => {
+    const packet = makePacket({
+      packetId: "packet-v1-actor",
+      turnId: "turn-v1-actor",
+      localConsequenceResult: {
+        version: "local-consequence-result.v1",
+        runId: "local-run-1",
+        stage: "local_actor_reactions",
+        trigger: {
+          gmReadPath: "tool_plan",
+          acceptedGmStepIds: ["step-tag-1"],
+          acceptedToolResultRefs: ["tool-result-1"],
+        },
+        baseWorldVersion: 7,
+        frameWorldVersion: 8,
+        resultWorldVersion: 9,
+        route: "required_before_packet",
+        actorSettlements: [],
+        queuedSimulationProposalRefs: [],
+        skipped: [],
+        failed: [],
+      },
+      acceptedActorResults: [{
+        settlementId: "local-actor:npc-clerk:1",
+        actorId: "npc-clerk",
+        actorLabel: "Desk Clerk",
+        toolName: "record_dialogue_outcome",
+        input: { targetActorName: "Desk Clerk", summary: "The clerk logs the urgent mark." },
+        result: {
+          success: true,
+          status: "success",
+          kind: "mutation",
+          result: { eventId: "event-actor-result-1", text: "The clerk logs the urgent mark." },
+          authority: {
+            toolResultId: "actor-tool-result-1",
+            campaignId: CAMPAIGN_ID,
+            sourceEntity: { type: "npc", id: "npc-clerk" },
+            baseWorldVersion: 8,
+            resultWorldVersion: 9,
+            elapsedWorldTimeMinutes: 0,
+            stateDeltaRefs: ["npc:npc-clerk:state"],
+            eventRefs: ["event-actor-authority-1"],
+            witnesses: [],
+            knowledgeOutputs: [],
+            visibilityOutputs: [],
+            resources: [],
+          },
+          modelSafeRefs: ["npc-clerk"],
+        },
+        visibleFact: "The clerk logs the urgent mark.",
+      }],
+      acceptedDurableEventIds: [
+        "event-authority-1",
+        "event-result-1",
+        "event-actor-authority-1",
+        "event-actor-result-1",
+      ],
+      producedDurableEventIds: [
+        "event-authority-1",
+        "event-result-1",
+        "event-actor-authority-1",
+        "event-actor-result-1",
+      ],
+    });
+
+    persistSettledTurnPacketV1({ packet, nowMs: 2_000 });
+
+    const [storedPacket] = getDb().select().from(settledTurnPackets).all();
+    expect(acceptedActorResultRefsFromPacketV1(packet)).toEqual([
+      "actor-tool-result-1",
+      "local-actor:npc-clerk:1:npc-clerk:record_dialogue_outcome",
+    ]);
+    expect(json(storedPacket!.acceptedActorResultRefs)).toEqual([
+      "actor-tool-result-1",
+      "local-actor:npc-clerk:1:npc-clerk:record_dialogue_outcome",
+    ]);
+    expect(json(storedPacket!.acceptedDurableEventIds)).toEqual([
+      "event-authority-1",
+      "event-result-1",
+      "event-actor-authority-1",
+      "event-actor-result-1",
+    ]);
+    expect(json(storedPacket!.sourceRefs)).toEqual(["item:report-1", "npc-clerk"]);
+    expect(durableEventIdsFromPacketV1(packet)).toEqual([
+      "event-authority-1",
+      "event-result-1",
+      "event-actor-authority-1",
+      "event-actor-result-1",
+    ]);
   });
 
   it("records successful narration and finalizes only after projection", () => {

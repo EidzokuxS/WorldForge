@@ -59,10 +59,20 @@ export function acceptedToolResultRefsFromPacketV1(
   ]));
 }
 
-export function durableEventIdsFromPacketV1(
-  packet: Pick<SettledTurnPacketV1, "acceptedToolResults">,
+export function acceptedActorResultRefsFromPacketV1(
+  packet: Partial<Pick<SettledTurnPacketV1, "acceptedActorResults">>,
 ): string[] {
-  return uniqueStrings(packet.acceptedToolResults.flatMap((accepted) => {
+  return uniqueStrings((packet.acceptedActorResults ?? []).flatMap((accepted) => [
+    accepted.result.authority?.toolResultId,
+    `${accepted.settlementId}:${accepted.actorId}:${accepted.toolName}`,
+  ]));
+}
+
+export function durableEventIdsFromPacketV1(
+  packet: Pick<SettledTurnPacketV1, "acceptedToolResults">
+    & Partial<Pick<SettledTurnPacketV1, "acceptedActorResults">>,
+): string[] {
+  const toolEventIds = packet.acceptedToolResults.flatMap((accepted) => {
     const resultEventId = isRecord(accepted.result.result)
       ? accepted.result.result.eventId
       : null;
@@ -70,7 +80,17 @@ export function durableEventIdsFromPacketV1(
       ...(accepted.result.authority?.eventRefs ?? []),
       resultEventId,
     ];
-  }));
+  });
+  const actorEventIds = (packet.acceptedActorResults ?? []).flatMap((accepted) => {
+    const resultEventId = isRecord(accepted.result.result)
+      ? accepted.result.result.eventId
+      : null;
+    return [
+      ...(accepted.result.authority?.eventRefs ?? []),
+      resultEventId,
+    ];
+  });
+  return uniqueStrings([...toolEventIds, ...actorEventIds]);
 }
 
 export function persistSettledTurnPacketV1(input: {
@@ -80,10 +100,12 @@ export function persistSettledTurnPacketV1(input: {
   const timestamp = now(input.nowMs);
   const sagaId = randomUUID();
   const acceptedToolResultRefs = acceptedToolResultRefsFromPacketV1(input.packet);
+  const acceptedActorResultRefs = acceptedActorResultRefsFromPacketV1(input.packet);
   const durableEventIds = durableEventIdsFromPacketV1(input.packet);
   const sourceRefs = uniqueStrings([
     ...input.packet.gmRead.evidenceRefs,
     ...input.packet.acceptedToolResults.flatMap((accepted) => accepted.result.modelSafeRefs ?? []),
+    ...input.packet.acceptedActorResults.flatMap((accepted) => accepted.result.modelSafeRefs ?? []),
   ]);
 
   getDb().transaction((tx) => {
@@ -126,7 +148,7 @@ export function persistSettledTurnPacketV1(input: {
       }),
       sourceRefs: stringifyStringArray(sourceRefs),
       acceptedToolResultRefs: stringifyStringArray(acceptedToolResultRefs),
-      acceptedActorResultRefs: "[]",
+      acceptedActorResultRefs: stringifyStringArray(acceptedActorResultRefs),
       acceptedDurableEventIds: stringifyStringArray(durableEventIds),
       producedDurableEventIds: stringifyStringArray(durableEventIds),
       dueWorldRefs: "[]",

@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertLocalConsequencePassAcceptedV1,
   assertRequiredToolStepsAcceptedV1,
   assertNarrationRespectsSettledPacketV1,
   assertNoExecutableGmReadPayloadV1,
+  buildLocalConsequenceResultFromActorPassV1,
   buildNarratorPromptFromSettledPacketV1,
   buildSceneFrameForecastRefsV1,
+  emptyLocalConsequenceResultV1,
   gmActionChecklistV1Schema,
   mutatingGmActionChecklistV1Schema,
   nextExecutableChecklistStepV1,
@@ -12,6 +15,7 @@ import {
   toolRequestSchemaForAllowedToolsV1,
   validateAndNormalizeToolRequestV1,
   type SettledTurnPacketV1,
+  type GameplayFrameEnvelopeV1,
 } from "../gameplay-turn-cycle-v1.js";
 import type { GmRead } from "../gm-turn-read.js";
 import type { SceneFrame } from "../scene-frame.js";
@@ -461,6 +465,8 @@ describe("gameplay turn cycle v1 contracts", () => {
       checklist: null,
       stepSettlements: [],
       acceptedToolResults: [],
+      localConsequenceResult: null,
+      acceptedActorResults: [],
       acceptedDurableEventIds: [],
       producedDurableEventIds: [],
       privateGuardTerms: ["SECRET_ROUTE_TOKEN"],
@@ -516,6 +522,8 @@ describe("gameplay turn cycle v1 contracts", () => {
           },
         },
       }],
+      localConsequenceResult: null,
+      acceptedActorResults: [],
       acceptedDurableEventIds: [],
       producedDurableEventIds: [],
       privateGuardTerms: [],
@@ -524,6 +532,219 @@ describe("gameplay turn cycle v1 contracts", () => {
     const built = buildNarratorPromptFromSettledPacketV1(packet);
     expect(built.prompt).toContain("No seal-intact duplicate can be issued for CRN-7843-V.");
     expect(built.prompt).not.toContain("Мир принял результат действия.");
+  });
+
+  it("includes accepted local actor consequence facts in Stage 6 evidence", () => {
+    const packet: SettledTurnPacketV1 = {
+      version: "settled-turn-packet.v1",
+      packetId: "packet-1",
+      turnId: "turn-1",
+      campaignId: "campaign-1",
+      baseWorldVersion: 1,
+      resultWorldVersion: 3,
+      tick: 4,
+      playerAction: "Я ставлю печать на отчет.",
+      gmRead: {
+        path: "tool_plan",
+        situationSummary: "Player marks a report near the clerk.",
+        sceneQuestion: "How does the clerk react?",
+        actionInterpretation: {
+          intent: "mark report",
+          targetRefs: ["report-1"],
+        },
+        rationale: "The action mutates a visible item.",
+        evidenceRefs: ["report-1"],
+        narrationGuardrails: [],
+      },
+      oracleResult: null,
+      visibleFacts: ["The clerk says the urgent seal is accepted into the desk log."],
+      skippedSteps: [],
+      failedSteps: [],
+      checklist: null,
+      stepSettlements: [],
+      acceptedToolResults: [],
+      localConsequenceResult: {
+        version: "local-consequence-result.v1",
+        runId: "run-1",
+        stage: "local_actor_reactions",
+        trigger: {
+          gmReadPath: "tool_plan",
+          acceptedGmStepIds: ["step-1"],
+          acceptedToolResultRefs: ["tool-result-1"],
+        },
+        baseWorldVersion: 1,
+        frameWorldVersion: 2,
+        resultWorldVersion: 3,
+        route: "required_before_packet",
+        actorSettlements: [],
+        queuedSimulationProposalRefs: [],
+        skipped: [{ reason: "Offscreen actor queued after done.", actorId: "npc-offscreen" }],
+        failed: [{ reason: "Failed offscreen probe.", actorId: "npc-hidden" }],
+      },
+      acceptedActorResults: [{
+        settlementId: "local-actor:npc-clerk:1",
+        actorId: "npc-clerk",
+        actorLabel: "Desk Clerk",
+        toolName: "record_dialogue_outcome",
+        input: {},
+        result: {
+          success: true,
+          status: "success",
+          result: {
+            text: "The clerk says the urgent seal is accepted into the desk log.",
+          },
+        },
+        visibleFact: "The clerk says the urgent seal is accepted into the desk log.",
+      }],
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+      privateGuardTerms: [],
+    };
+
+    const built = buildNarratorPromptFromSettledPacketV1(packet);
+    expect(built.prompt).toContain("urgent seal is accepted into the desk log");
+    expect(built.prompt).toContain("failedLocalConsequenceCount");
+    expect(built.prompt).not.toContain("Failed offscreen probe");
+  });
+
+  it("builds accepted LocalConsequenceResultV1 from required actor pass receipts", () => {
+    const frame = {
+      campaignId: "campaign-1",
+      tick: 5,
+      worldVersion: 2,
+      playerActorId: "player-1",
+      currentLocationId: "loc-1",
+      currentSceneScopeId: "scene-1",
+      playerAction: "Я ставлю печать на отчет.",
+      roster: { active: [], support: [], background: [] },
+      perception: { visible: [], hidden: [] },
+      recentEvents: [],
+      targetCandidates: [],
+      movementCandidates: [],
+      deferredHooks: [],
+      allowedTools: ["record_dialogue_outcome"],
+      oracle: null,
+    } as unknown as SceneFrame;
+    const envelope = {
+      version: "gameplay-frame-envelope.v1",
+      turnId: "turn-1",
+      campaignId: "campaign-1",
+      baseTick: 4,
+      baseWorldVersion: 1,
+      frame,
+      scopedForecastExcerpt: null,
+    } satisfies GameplayFrameEnvelopeV1;
+
+    const result = buildLocalConsequenceResultFromActorPassV1({
+      envelope,
+      read: directRead({ path: "tool_plan" as GmRead["path"] }),
+      acceptedToolResults: [{
+        stepId: "step-1",
+        toolName: "add_tag",
+        input: { targetId: "report-1", tag: "urgent" },
+        result: {
+          success: true,
+          status: "success",
+          authority: { toolResultId: "tool-result-1", stateDeltaRefs: ["item:report-1:tags"] } as never,
+        },
+      }],
+      refreshedFrame: frame,
+      actorPass: {
+        schedule: {
+          campaignId: "campaign-1",
+          baseWorldVersion: 2,
+          worldTimeMinutes: 5,
+          decisions: [{
+            actorId: "npc-clerk",
+            actorName: "Desk Clerk",
+            route: "required_before_done",
+            reason: "visible local reaction",
+            signals: [],
+            writeScopes: ["npc:npc-clerk:state"],
+          }],
+        },
+        decisions: [{
+          schedule: {
+            actorId: "npc-clerk",
+            actorName: "Desk Clerk",
+            route: "required_before_done",
+            reason: "visible local reaction",
+            signals: [],
+            writeScopes: ["npc:npc-clerk:state"],
+          },
+          actorFrame: {} as never,
+          packet: {} as never,
+          processUpdateStatus: "updated",
+          actionResults: [{
+            order: 0,
+            actionId: "actor-action-1",
+            actionRef: "actor-tool:npc-clerk:record_dialogue_outcome:1",
+            actorId: "npc-clerk",
+            toolName: "record_dialogue_outcome",
+            input: {},
+            args: {},
+            result: {
+              success: true,
+              status: "success",
+              result: {
+                eventId: "actor-event-1",
+                text: "The clerk logs the urgent seal.",
+              },
+              authority: {
+                toolResultId: "actor-tool-result-1",
+                eventRefs: ["actor-authority-event-1"],
+                stateDeltaRefs: ["npc:npc-clerk:state"],
+              } as never,
+            },
+          }],
+        }],
+        actionResults: [],
+        parallelFrameRetrievalTrace: [],
+        parallelPrepTrace: [],
+      },
+      resultWorldVersion: 3,
+    });
+
+    expect(result.route).toBe("required_before_packet");
+    expect(result.actorSettlements[0]).toMatchObject({
+      actorId: "npc-clerk",
+      status: "accepted",
+      visibleToPlayer: true,
+      visibleFacts: ["The clerk logs the urgent seal."],
+    });
+    expect(result.actorSettlements[0]!.actionResults[0]).toMatchObject({
+      toolName: "record_dialogue_outcome",
+      visibleFact: "The clerk logs the urgent seal.",
+    });
+    expect(() => assertLocalConsequencePassAcceptedV1(result)).not.toThrow();
+  });
+
+  it("fails closed for required local actor failures and keeps deferred skips audit-only", () => {
+    const emptyResult = emptyLocalConsequenceResultV1({
+      envelope: {
+        version: "gameplay-frame-envelope.v1",
+        turnId: "turn-1",
+        campaignId: "campaign-1",
+        baseTick: 1,
+        baseWorldVersion: 1,
+        frame: { worldVersion: 1 } as SceneFrame,
+        scopedForecastExcerpt: null,
+      },
+      read: directRead(),
+    });
+    expect(() => assertLocalConsequencePassAcceptedV1(emptyResult)).not.toThrow();
+
+    expect(() => assertLocalConsequencePassAcceptedV1({
+      ...emptyResult,
+      route: "required_before_packet",
+      failed: [{ reason: "actor tool rejected", actorId: "npc-clerk" }],
+    })).toThrow(/failed before settled packet persistence/u);
+
+    expect(() => assertLocalConsequencePassAcceptedV1({
+      ...emptyResult,
+      route: "required_before_packet",
+      skipped: [{ reason: "routed proposal_after_done", actorId: "npc-clerk" }],
+    })).not.toThrow();
   });
 
   it("rejects Stage 6 narration that leaks structured or private material", () => {
