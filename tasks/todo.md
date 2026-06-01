@@ -198,6 +198,10 @@ Session: `gm-v1-consequenc-slice`.
   - Lane A / JJK reserve: source `711a16bb-cab4-4e2d-ad3f-b93ba81cdd93` -> clone `6bc742b5-1f87-4ed3-ba99-ac8e8b3d1473`; `chat_history=0`, `settled_turn_packets=0`, `turn_sagas=0`, `narrator_attempts=0`, manifest source/target verified.
   - Lane B / Lacquer reserve: source `139070ce-442a-4eea-88a0-0f735879ade5` -> clone `ce740a13-3b78-43a9-9bdc-6973be2ff7b9`; `chat_history=0`, `settled_turn_packets=0`, `turn_sagas=0`, `narrator_attempts=0`, manifest source/target verified.
   - Lane C / Ashfall reserve: source `2badd884-f63a-456c-b832-e88439fb62b4` -> clone `b61eca3d-c71b-4521-81bd-2b636464844f`; `chat_history=0`, `settled_turn_packets=0`, `turn_sagas=0`, `narrator_attempts=0`, manifest source/target verified.
+- Created reserve-2 zero-turn clones after the reserve lanes began being consumed by live turns:
+  - Lane A / JJK reserve 2: source `711a16bb-cab4-4e2d-ad3f-b93ba81cdd93` -> clone `ea9e1cc4-3829-43c8-9d8d-fafdc5d86c02`; `chat_history=0`, `settled_turn_packets=0`, `turn_sagas=0`, `narrator_attempts=0`, player `Tanaka Kouta`, manifest source/target verified.
+  - Lane B / Lacquer reserve 2: source `139070ce-442a-4eea-88a0-0f735879ade5` -> clone `deb08e55-a00a-432d-b276-fb9726f96d91`; `chat_history=0`, `settled_turn_packets=0`, `turn_sagas=0`, `narrator_attempts=0`, player `Mira Voss`, manifest source/target verified.
+  - Lane C / Ashfall reserve 2: source `2badd884-f63a-456c-b832-e88439fb62b4` -> clone `2fe891b4-537b-4d9d-b14f-59f4fd3cef7b`; `chat_history=0`, `settled_turn_packets=0`, `turn_sagas=0`, `narrator_attempts=0`, player `Mara Venn`, manifest source/target verified.
 - Lane A reserve live acceptance:
   - Preflight verified clone `6bc742b5-1f87-4ed3-ba99-ac8e8b3d1473` loaded through `/api/campaigns/:id/load`; `chat_history=0`, `settled_turn_packets=0`, `turn_sagas=0`, `narrator_attempts=0`.
   - Turn 1 real `/api/chat/action`: `Я проверяю delivery manifest и burner phone, затем осматриваюсь на Shibuya Ward, чтобы выбрать самый безопасный следующий маршрут.`
