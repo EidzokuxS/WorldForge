@@ -195,6 +195,7 @@ import { retractStoredEpisodicEvent } from "../vectors/episodic-events.js";
 import { retractReflectionBudget } from "./reflection-budget.js";
 import { retractActorKnowledgeRecord } from "./knowledge-model.js";
 import { toPlayerFacingQuickActions } from "./player-facing-events.js";
+import { processGameplayTurnCycleV1 } from "./gameplay-turn-cycle-v1.js";
 
 const log = createLogger("turn-processor");
 const VISIBLE_NARRATION_TRANSPORT_RETRY_LIMIT = 2;
@@ -4336,9 +4337,7 @@ function recordLiveTurnAuthorityStage(input: {
 export async function* processTurn(
   options: TurnOptions
 ): AsyncGenerator<TurnEvent> {
-  const events = isScenePlanEnabled()
-    ? processTurnScenePlan(options)
-    : processTurnLegacy(options);
+  const events = processGameplayTurnCycleV1(options);
 
   for await (const event of events) {
     yield withSafeTurnProgressPayload(event);

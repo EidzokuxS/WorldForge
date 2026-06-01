@@ -1,0 +1,545 @@
+import { describe, expect, it } from "vitest";
+import {
+  assertRequiredToolStepsAcceptedV1,
+  assertNarrationRespectsSettledPacketV1,
+  assertNoExecutableGmReadPayloadV1,
+  buildNarratorPromptFromSettledPacketV1,
+  buildSceneFrameForecastRefsV1,
+  gmActionChecklistV1Schema,
+  mutatingGmActionChecklistV1Schema,
+  nextExecutableChecklistStepV1,
+  selectAllowedToolNamesForStepV1,
+  toolRequestSchemaForAllowedToolsV1,
+  validateAndNormalizeToolRequestV1,
+  type SettledTurnPacketV1,
+} from "../gameplay-turn-cycle-v1.js";
+import type { GmRead } from "../gm-turn-read.js";
+import type { SceneFrame } from "../scene-frame.js";
+
+function directRead(overrides: Partial<GmRead> = {}): GmRead {
+  return {
+    version: "gm-read.v1",
+    path: "direct",
+    situationSummary: "The player studies the marked door.",
+    sceneQuestion: "What does the player learn?",
+    focalActorRefs: ["player-1"],
+    backgroundActorRefs: [],
+    actionInterpretation: {
+      intent: "inspect the door",
+      targetRefs: ["door-1"],
+    },
+    rationale: "Inspection does not mutate world state.",
+    evidenceRefs: ["door-1"],
+    turnGrounding: {
+      requiresGrounding: false,
+      groundingKind: "none",
+      evidenceRefs: [],
+    },
+    narrationGuardrails: [],
+    directResolutionNotes: "The marks look fresh, but the door stays closed.",
+    ...overrides,
+  } as GmRead;
+}
+
+describe("gameplay turn cycle v1 contracts", () => {
+  it("accepts a GM Read that stays out of backend execution ownership", () => {
+    expect(() => assertNoExecutableGmReadPayloadV1(directRead())).not.toThrow();
+  });
+
+  it("rejects executable tool payload fields inside GM Read", () => {
+    const read = directRead({
+      actionInterpretation: {
+        intent: "inspect the door",
+        targetRefs: ["door-1"],
+        candidateToolRequest: {
+          toolName: "mutate_world",
+          input: { targetId: "door-1" },
+        },
+      } as never,
+    });
+
+    expect(() => assertNoExecutableGmReadPayloadV1(read)).toThrow(
+      /candidateToolRequest.*toolName.*input/u,
+    );
+  });
+
+  it("rejects executable tool payload fields inside the Stage 3 checklist", () => {
+    expect(() =>
+      gmActionChecklistV1Schema.parse({
+        version: "gm-action-checklist.v1",
+        turnPath: "mutating",
+        steps: [{
+          stepId: "step-1",
+          purpose: "Move the player to the market road.",
+          evidenceRefs: ["Market Road"],
+          dependsOnStepIds: [],
+          expectedVisibleEffect: "The player reaches the market road.",
+          requiredAction: "backend_tool",
+          toolNeed: "movement",
+          toolName: "move_to",
+          input: { targetLocationName: "Market Road" },
+        }],
+      }),
+    ).toThrow(/executable tool payload fields/u);
+  });
+
+  it("requires a backend tool step for mutating Stage 3 checklists", () => {
+    expect(() =>
+      mutatingGmActionChecklistV1Schema.parse({
+        version: "gm-action-checklist.v1",
+        turnPath: "mutating",
+        steps: [{
+          stepId: "step-1",
+          purpose: "Resolve a location change.",
+          evidenceRefs: ["Cellar Stairs"],
+          dependsOnStepIds: [],
+          expectedVisibleEffect: "The player reaches the cellar stairs.",
+          requiredAction: "narration_constraint",
+        }],
+      }),
+    ).toThrow();
+
+    expect(() =>
+      mutatingGmActionChecklistV1Schema.parse({
+        version: "gm-action-checklist.v1",
+        turnPath: "mutating",
+        steps: [{
+          stepId: "step-1",
+          purpose: "Resolve a location change.",
+          evidenceRefs: ["Cellar Stairs"],
+          dependsOnStepIds: [],
+          expectedVisibleEffect: "The player reaches the cellar stairs.",
+          requiredAction: "backend_tool",
+          toolNeed: "movement",
+        }],
+      }),
+    ).not.toThrow();
+  });
+
+  it("accepts bounded multi-step planning-only checklists", () => {
+    const checklist = mutatingGmActionChecklistV1Schema.parse({
+      version: "gm-action-checklist.v1",
+      turnPath: "mutating",
+      steps: [
+        {
+          stepId: "step-1",
+          purpose: "Check the route.",
+          evidenceRefs: ["Market Road"],
+          dependsOnStepIds: [],
+          expectedVisibleEffect: "The route is known.",
+          requiredAction: "backend_tool",
+          settlementPolicy: "required",
+          toolNeed: "route_check",
+        },
+        {
+          stepId: "step-2",
+          purpose: "Move after the route is checked.",
+          evidenceRefs: ["Market Road"],
+          dependsOnStepIds: ["step-1"],
+          expectedVisibleEffect: "The player reaches the road.",
+          requiredAction: "backend_tool",
+          settlementPolicy: "required",
+          toolNeed: "movement",
+        },
+      ],
+    });
+
+    expect(checklist.steps).toHaveLength(2);
+    expect(checklist.steps[1]!.dependsOnStepIds).toEqual(["step-1"]);
+  });
+
+  it("rejects invalid multi-step checklist graphs and budgets", () => {
+    const step = (stepId: string, dependsOnStepIds: string[] = []) => ({
+      stepId,
+      purpose: `Resolve ${stepId}.`,
+      evidenceRefs: ["evidence"],
+      dependsOnStepIds,
+      expectedVisibleEffect: `Effect ${stepId}.`,
+      requiredAction: "backend_tool" as const,
+      settlementPolicy: "required" as const,
+      toolNeed: "entity_tag",
+    });
+
+    expect(() =>
+      mutatingGmActionChecklistV1Schema.parse({
+        version: "gm-action-checklist.v1",
+        turnPath: "mutating",
+        steps: [step("step-1"), step("step-1")],
+      }),
+    ).toThrow(/Duplicate checklist stepId/u);
+
+    expect(() =>
+      mutatingGmActionChecklistV1Schema.parse({
+        version: "gm-action-checklist.v1",
+        turnPath: "mutating",
+        steps: [step("step-2", ["step-1"])],
+      }),
+    ).toThrow(/must refer to an earlier step/u);
+
+    expect(() =>
+      mutatingGmActionChecklistV1Schema.parse({
+        version: "gm-action-checklist.v1",
+        turnPath: "mutating",
+        steps: [
+          step("step-1"),
+          step("step-2"),
+          step("step-3"),
+          step("step-4"),
+          step("step-5"),
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("narrows Stage 4 tool selection to the checklist state-effect need", () => {
+    const allowed = selectAllowedToolNamesForStepV1(
+      { toolNeed: "movement" },
+      {
+        allowedTools: [
+          "find_location_candidates",
+          "move_actor",
+          "move_to",
+          "reveal_location",
+        ],
+      },
+    );
+
+    expect(allowed).toEqual(["move_actor", "move_to"]);
+  });
+
+  it("narrows Stage 4 tool selection for terminal and helper needs", () => {
+    expect(selectAllowedToolNamesForStepV1(
+      { toolNeed: "entity_tag" },
+      { allowedTools: ["add_tag", "remove_tag", "record_dialogue_outcome", "check_route"] },
+    )).toEqual(["add_tag", "remove_tag"]);
+    expect(selectAllowedToolNamesForStepV1(
+      { toolNeed: "create_scene_extra" },
+      { allowedTools: ["add_tag", "create_scene_extra", "record_dialogue_outcome"] },
+    )).toEqual(["create_scene_extra"]);
+    expect(selectAllowedToolNamesForStepV1(
+      { toolNeed: "record_dialogue_outcome" },
+      { allowedTools: ["create_scene_extra", "record_dialogue_outcome"] },
+    )).toEqual(["record_dialogue_outcome"]);
+    expect(selectAllowedToolNamesForStepV1(
+      { toolNeed: "actor_creation" },
+      { allowedTools: ["create_scene_extra", "record_dialogue_outcome"] },
+    )).toEqual(["create_scene_extra"]);
+    expect(selectAllowedToolNamesForStepV1(
+      { toolNeed: "dialogue_recording" },
+      { allowedTools: ["create_scene_extra", "record_dialogue_outcome"] },
+    )).toEqual(["record_dialogue_outcome"]);
+    expect(selectAllowedToolNamesForStepV1(
+      { toolNeed: "dialogue_outcome" },
+      { allowedTools: ["add_tag", "record_dialogue_outcome", "record_world_fact"] },
+    )).toEqual(["record_dialogue_outcome"]);
+    expect(selectAllowedToolNamesForStepV1(
+      { toolNeed: "route_check" },
+      { allowedTools: ["check_route", "move_actor"] },
+    )).toEqual(["check_route"]);
+  });
+
+  it("selects the next dependency-ready backend step deterministically", () => {
+    const checklist = mutatingGmActionChecklistV1Schema.parse({
+      version: "gm-action-checklist.v1",
+      turnPath: "mutating",
+      steps: [
+        {
+          stepId: "step-1",
+          purpose: "Resolve first.",
+          evidenceRefs: ["first"],
+          dependsOnStepIds: [],
+          expectedVisibleEffect: "First accepted.",
+          requiredAction: "backend_tool",
+          settlementPolicy: "required",
+          toolNeed: "entity_tag",
+        },
+        {
+          stepId: "step-2",
+          purpose: "Resolve second.",
+          evidenceRefs: ["second"],
+          dependsOnStepIds: ["step-1"],
+          expectedVisibleEffect: "Second accepted.",
+          requiredAction: "backend_tool",
+          settlementPolicy: "required",
+          toolNeed: "entity_tag",
+        },
+      ],
+    });
+
+    expect(nextExecutableChecklistStepV1(checklist, [])?.stepId).toBe("step-1");
+    expect(nextExecutableChecklistStepV1(checklist, [{
+      stepId: "step-1",
+      purpose: "Resolve first.",
+      status: "accepted",
+      result: { success: true },
+    }])?.stepId).toBe("step-2");
+  });
+
+  it("validates Stage 4 tool requests against the selected tool input schema", () => {
+    const schema = toolRequestSchemaForAllowedToolsV1(["add_tag"]);
+
+    expect(() =>
+      schema.parse({
+        version: "gm-tool-request.v1",
+        stepId: "step-1",
+        toolName: "add_tag",
+        input: {
+          value: "{\"entityName\":\"condition report\",\"entityType\":\"item\",\"tag\":\"durable-smoke\"}",
+        },
+        evidenceRefs: ["condition report"],
+      }),
+    ).toThrow(/entityName/u);
+
+    expect(schema.parse({
+      version: "gm-tool-request.v1",
+      stepId: "step-1",
+      toolName: "add_tag",
+      input: {
+        entityName: "condition report",
+        entityType: "item",
+        tag: "durable-smoke",
+      },
+      evidenceRefs: ["condition report"],
+    })).toMatchObject({
+      toolName: "add_tag",
+      input: {
+        entityName: "condition report",
+        entityType: "item",
+        tag: "durable-smoke",
+      },
+    });
+  });
+
+  it("rejects Stage 4 tool requests for the wrong checklist step", () => {
+    const request = toolRequestSchemaForAllowedToolsV1(["add_tag"]).parse({
+      version: "gm-tool-request.v1",
+      stepId: "other-step",
+      toolName: "add_tag",
+      input: {
+        entityName: "condition report",
+        entityType: "item",
+        tag: "durable-smoke",
+      },
+      evidenceRefs: ["condition report"],
+    });
+
+    const validation = validateAndNormalizeToolRequestV1(
+      request,
+      { allowedTools: ["add_tag"] } as SceneFrame,
+      {
+        stepId: "step-1",
+        purpose: "Mark report.",
+        evidenceRefs: ["condition report"],
+        dependsOnStepIds: [],
+        expectedVisibleEffect: "Report marked.",
+        requiredAction: "backend_tool",
+        settlementPolicy: "required",
+        toolNeed: "entity_tag",
+      },
+    );
+
+    expect(validation.failure).toMatch(/does not match checklist stepId/u);
+  });
+
+  it("aborts before packet persistence when required mutating tool step has no receipt", () => {
+    const checklist = mutatingGmActionChecklistV1Schema.parse({
+      version: "gm-action-checklist.v1",
+      turnPath: "mutating",
+      steps: [{
+        stepId: "step-1",
+        purpose: "Mark the report.",
+        evidenceRefs: ["condition report"],
+        dependsOnStepIds: [],
+        expectedVisibleEffect: "The report has a durable mark.",
+        requiredAction: "backend_tool",
+        toolNeed: "entity_tag",
+      }],
+    });
+
+    expect(() =>
+      assertRequiredToolStepsAcceptedV1({
+        checklist,
+        stepSettlements: [{
+          stepId: "step-1",
+          purpose: "Mark the report.",
+          status: "failed",
+          toolName: "add_tag",
+          input: { value: "{\"entityName\":\"condition report\"}" },
+          reason: "entityName missing",
+        }],
+      }),
+    ).toThrow(/failed before settled packet persistence/u);
+  });
+
+  it("scopes forecast refs to local scene-frame entities and candidates", () => {
+    const frame = {
+      campaignId: "campaign-1",
+      playerActorId: "player-1",
+      currentLocationId: "loc-1",
+      currentSceneScopeId: "scene-1",
+      currentLocationName: "Old Gate",
+      currentSceneScopeName: "North Arch",
+      roster: {
+        active: [{
+          id: "player-1",
+          actorId: "player-actor-1",
+          type: "player",
+          label: "Mira",
+          locationId: "loc-1",
+          sceneScopeId: "scene-1",
+          awareness: "present",
+          tags: ["scout"],
+        }],
+        support: [],
+        background: [],
+      },
+      movementCandidates: [{
+        id: "move-1",
+        locationId: "loc-2",
+        label: "Market Road",
+        connected: true,
+        path: ["loc-1", "loc-2"],
+      }],
+      targetCandidates: [{
+        id: "door-1",
+        type: "location",
+        label: "Marked Door",
+        locationId: "loc-3",
+        tags: ["sealed"],
+      }],
+    } as unknown as SceneFrame;
+
+    expect(buildSceneFrameForecastRefsV1(frame)).toEqual([
+      "campaign-1",
+      "player-1",
+      "loc-1",
+      "scene-1",
+      "Old Gate",
+      "North Arch",
+      "player-actor-1",
+      "Mira",
+      "scout",
+      "move-1",
+      "loc-2",
+      "Market Road",
+      "door-1",
+      "loc-3",
+      "Marked Door",
+      "sealed",
+    ]);
+  });
+
+  it("builds Stage 6 narrator prompt from settled evidence without failed or private terms", () => {
+    const packet: SettledTurnPacketV1 = {
+      version: "settled-turn-packet.v1",
+      packetId: "packet-1",
+      turnId: "turn-1",
+      campaignId: "campaign-1",
+      baseWorldVersion: 1,
+      resultWorldVersion: 1,
+      tick: 4,
+      playerAction: "Я осматриваюсь.",
+      gmRead: {
+        path: "tool_plan",
+        situationSummary: "Player is at the gate.",
+        sceneQuestion: "What is visible?",
+        actionInterpretation: {
+          intent: "look around",
+          targetRefs: [],
+        },
+        rationale: "Observation only.",
+        evidenceRefs: ["gate"],
+        narrationGuardrails: [],
+      },
+      oracleResult: null,
+      visibleFacts: [
+        "Gate plaza is visible.",
+        "SECRET_ROUTE_TOKEN must not leak.",
+      ],
+      skippedSteps: [{ stage: "step-2", reason: "Planned ambush did not happen." }],
+      failedSteps: [{ stage: "step-3", reason: "Hidden trap failed validation." }],
+      checklist: null,
+      stepSettlements: [],
+      acceptedToolResults: [],
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+      privateGuardTerms: ["SECRET_ROUTE_TOKEN"],
+    };
+
+    const built = buildNarratorPromptFromSettledPacketV1(packet);
+    expect(built.system).toContain("Write in Russian.");
+    expect(built.prompt).toContain("Gate plaza is visible.");
+    expect(built.prompt).not.toContain("SECRET_ROUTE_TOKEN");
+    expect(built.prompt).not.toContain("Planned ambush did not happen.");
+    expect(built.prompt).not.toContain("Hidden trap failed validation.");
+    expect(built.prompt).toContain("failedStepCount");
+    expect(built.prompt).toContain("skippedStepCount");
+  });
+
+  it("includes concrete object-shaped tool result text in Stage 6 accepted evidence", () => {
+    const packet: SettledTurnPacketV1 = {
+      version: "settled-turn-packet.v1",
+      packetId: "packet-1",
+      turnId: "turn-1",
+      campaignId: "campaign-1",
+      baseWorldVersion: 1,
+      resultWorldVersion: 2,
+      tick: 4,
+      playerAction: "Я спрашиваю архивного клерка про CRN-7843-V.",
+      gmRead: {
+        path: "tool_plan",
+        situationSummary: "Player asks a clerk.",
+        sceneQuestion: "What does the clerk answer?",
+        actionInterpretation: {
+          intent: "ask clerk",
+          targetRefs: ["архивный клерк"],
+        },
+        rationale: "Dialogue outcome must be recorded.",
+        evidenceRefs: ["current_scene"],
+        narrationGuardrails: [],
+      },
+      oracleResult: null,
+      visibleFacts: [],
+      skippedSteps: [],
+      failedSteps: [],
+      checklist: null,
+      stepSettlements: [],
+      acceptedToolResults: [{
+        stepId: "step-1",
+        toolName: "record_dialogue_outcome",
+        input: {},
+        result: {
+          success: true,
+          status: "success",
+          result: {
+            text: "Dialogue outcome redirected on procedure. Summary: No seal-intact duplicate can be issued for CRN-7843-V.",
+          },
+        },
+      }],
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+      privateGuardTerms: [],
+    };
+
+    const built = buildNarratorPromptFromSettledPacketV1(packet);
+    expect(built.prompt).toContain("No seal-intact duplicate can be issued for CRN-7843-V.");
+    expect(built.prompt).not.toContain("Мир принял результат действия.");
+  });
+
+  it("rejects Stage 6 narration that leaks structured or private material", () => {
+    const packet = {
+      privateGuardTerms: ["SECRET_ROUTE_TOKEN"],
+    } as SettledTurnPacketV1;
+
+    expect(() => assertNarrationRespectsSettledPacketV1("Ты видишь площадь.", packet)).not.toThrow();
+    expect(() => assertNarrationRespectsSettledPacketV1("{\"text\":\"bad\"}", packet)).toThrow(
+      /structured data/u,
+    );
+    expect(() => assertNarrationRespectsSettledPacketV1("toolName: list_visible_affordances", packet)).toThrow(
+      /non-player-facing marker/u,
+    );
+    expect(() => assertNarrationRespectsSettledPacketV1("SECRET_ROUTE_TOKEN", packet)).toThrow(
+      /private forecast/u,
+    );
+  });
+});

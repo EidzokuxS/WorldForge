@@ -474,7 +474,13 @@ function addCreatedActorRefsForAddressedTarget(input: {
   ]) {
     if (!ref) continue;
     const normalized = normalizeToolRef(ref);
-    if (input.context.legalActorRefs.has(normalized)) {
+    if (
+      input.context.legalActorRefs.has(normalized)
+      || (
+        input.toolName === "create_scene_extra"
+        && toolInputMatchesAddressedRole(input.toolInput, target.roleText)
+      )
+    ) {
       target.createdActorRefs.add(normalized);
     }
   }
@@ -960,10 +966,6 @@ export function applySuccessfulToolObservationToExecutionContext(input: {
   }
   addSameTurnToolResultRefs(input.context, input.toolName, input.result);
 
-  if (input.context.scope === "player_turn" && isObservationToolResult(input.result)) {
-    return;
-  }
-
   const payload = input.result.result;
   const id = readResultString(payload, "id")
     ?? readResultString(payload, "locationId")
@@ -973,6 +975,29 @@ export function applySuccessfulToolObservationToExecutionContext(input: {
     ?? id;
   const name = readResultString(payload, "name")
     ?? readResultString(payload, "locationName");
+
+  if (input.context.scope === "player_turn" && isObservationToolResult(input.result)) {
+    if (input.toolName === "create_scene_extra") {
+      const target = input.context.addressedTarget;
+      if (
+        target?.kind === "prose_role"
+        && toolInputMatchesAddressedRole(input.toolInput, target.roleText)
+      ) {
+        addActorScopedRefs(input.context.legalActorRefs, [actorId, id]);
+        addRefs(input.context.legalActorRefs, [name]);
+      }
+      addCreatedActorRefsForAddressedTarget({
+        context: input.context,
+        toolName: input.toolName,
+        toolInput: input.toolInput,
+        payload,
+        id,
+        actorId,
+        name,
+      });
+    }
+    return;
+  }
 
   switch (input.toolName) {
     case "advance_time":

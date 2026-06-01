@@ -830,6 +830,8 @@ export function invalidateAuthorityAfterRestore(input: {
       ...ledgerEntry,
       createdAt: timestamp,
     } satisfies typeof turnClockLedger.$inferInsert)
-    .onConflictDoNothing({ target: turnClockLedger.clockReceiptId })
+    .onConflictDoNothing({
+      target: [turnClockLedger.campaignId, turnClockLedger.sourceReceiptRef],
+    })
     .run();
 }

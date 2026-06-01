@@ -1240,6 +1240,22 @@ describe("GM Read contract", () => {
     expect(secondCall?.prompt).toContain("Do not trust the previous turnGrounding label");
   });
 
+  it("can accept no-mutation reads under the clean stage1 contract without the legacy classifier", async () => {
+    vi.mocked(safeGenerateObject).mockResolvedValueOnce(safeResult(validReads[0]));
+
+    const result = await runGmRead({
+      provider,
+      playerAction: "I just say hello.",
+      frame: createFrame(),
+      noMutationAdmissibilityMode: "stage1_contract",
+    });
+
+    expect(result).toMatchObject({ path: "direct" });
+    expect(safeGenerateObject).toHaveBeenCalledTimes(1);
+    const onlyCall = vi.mocked(safeGenerateObject).mock.calls[0]?.[0];
+    expect(onlyCall?.prompt).not.toContain("NO-MUTATION ADMISSIBILITY CHECK");
+  });
+
   it.each([
     {
       playerAction: "Which permit lets me pass through the posted gate?",

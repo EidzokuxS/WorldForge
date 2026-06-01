@@ -469,6 +469,7 @@ export interface RunGmReadArgs {
   recentConversation?: Array<{ role: string; content: string }>;
   responseLanguage?: SessionResponseLanguage;
   maxOutputTokens?: number;
+  noMutationAdmissibilityMode?: "legacy_strict" | "stage1_contract";
 }
 
 export type GmReadValidationIssue = {
@@ -1452,9 +1453,16 @@ async function validateGeneratedGmRead(input: {
   sceneView: ModelFacingSceneView;
   safety: ModelFacingPromptSafety;
   extraForbiddenTerms: readonly string[];
+  noMutationAdmissibilityMode?: RunGmReadArgs["noMutationAdmissibilityMode"];
 }): Promise<GmReadValidationIssue[]> {
   const issues = validateGmReadForFrame(input.read, input.frame, input.playerAction);
   if (issues.length > 0) return issues;
+  if (
+    input.noMutationAdmissibilityMode === "stage1_contract"
+    && isNoMutationReadPath(input.read)
+  ) {
+    return [];
+  }
   return validateNoMutationAdmissibility(input);
 }
 
@@ -1650,6 +1658,7 @@ export async function runGmRead(args: RunGmReadArgs): Promise<GmRead> {
     sceneView: scenePacket.view,
     safety: scenePacket.safety,
     extraForbiddenTerms,
+    noMutationAdmissibilityMode: args.noMutationAdmissibilityMode,
   });
   let trace = result.trace;
   let validationRepairAttempted = false;

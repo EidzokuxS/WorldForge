@@ -1665,6 +1665,52 @@ describe("createPlayerTurnToolExecutionContext", () => {
     });
   });
 
+  it("allows observation-only create_scene_extra reuse to bind the addressed prose-role responder", () => {
+    const context = createPlayerTurnToolExecutionContext({
+      frame: createFrame(),
+      addressedTarget: { kind: "prose_role", roleText: "archive clerk" },
+    });
+
+    applySuccessfulToolObservationToExecutionContext({
+      toolName: "create_scene_extra",
+      toolInput: {
+        locationRef: "current_scene",
+        role: "clerk",
+        roleText: "archive clerk",
+        reason: "The player called to an archive clerk at the current counter.",
+      },
+      context,
+      result: buildObservationToolResult({
+        result: {
+          kind: "scene_extra",
+          observationOnly: true,
+          reusedExisting: true,
+          id: "support-archive-clerk",
+          actorId: "npc-archive-clerk",
+          name: "Archive Clerk",
+          roleText: "archive clerk",
+          delegateTool: "existing_npc",
+        },
+      }),
+    });
+
+    expect(validateToolInputGrounding({
+      toolName: "record_dialogue_outcome",
+      toolInput: {
+        speakerRef: "Archive Clerk",
+        addresseeRefs: ["Mira Voss"],
+        outcomeKind: "answered",
+        topicKind: "procedure",
+        authorityKind: "public_service",
+        truthStatus: "speaker_asserted",
+        durability: "scene_local",
+        requestedRoleText: "archive clerk",
+        summary: "The archive clerk answers the procedural question.",
+      },
+      context,
+    })).toBeNull();
+  });
+
   it("rejects raw player-known backend provenance refs even when internally resolvable", () => {
     const context = createPlayerTurnToolExecutionContext({
       ...createFrame(),

@@ -283,6 +283,32 @@ describe("living world authority", () => {
     });
   });
 
+  it("treats repeated restore invalidation for the same boundary as idempotent", () => {
+    ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 16 });
+
+    invalidateAuthorityAfterRestore({
+      campaignId: CAMPAIGN_ID,
+      restoredWorldVersion: 0,
+      restoredWorldTimeMinutes: 5,
+      restoredCurrentTick: 16,
+      reason: "test rollback",
+    });
+    expect(() =>
+      invalidateAuthorityAfterRestore({
+        campaignId: CAMPAIGN_ID,
+        restoredWorldVersion: 0,
+        restoredWorldTimeMinutes: 5,
+        restoredCurrentTick: 16,
+        reason: "test rollback retry",
+      }),
+    ).not.toThrow();
+
+    const restoreEntries = readTurnClockLedger(CAMPAIGN_ID).filter((entry) =>
+      entry.sourceReceiptRef === "restore:0:5:16",
+    );
+    expect(restoreEntries).toHaveLength(1);
+  });
+
   it("keeps world-version linearity at the database level", () => {
     ensureWorldClock({ campaignId: CAMPAIGN_ID, currentTick: 0 });
     commitAuthorityTrace({
