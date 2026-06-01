@@ -687,6 +687,25 @@ function validateDialogueRuntimeRequirementSpeakerBinding(
   if (binding.kind === "visible_actor") {
     return validateRefs([binding.speakerRef], frame, "runtimeRequirement.speakerBinding.speakerRef");
   }
+  if (binding.kind === "prose_role") {
+    const visibleActorRefs = new Set(
+      [...frame.roster.active, ...frame.roster.support]
+        .filter((actor) => actor.type !== "player" && actor.awareness === "clear")
+        .flatMap((actor) => [actor.label, actor.id, actor.actorId])
+        .filter((ref): ref is string => typeof ref === "string" && ref.trim().length > 0)
+        .map(normalizeRef),
+    );
+    const visibleAddressedTargets = read.actionInterpretation.targetRefs.filter((ref) =>
+      visibleActorRefs.has(normalizeRef(ref)),
+    );
+    if (visibleAddressedTargets.length > 0) {
+      return [{
+        path: "runtimeRequirement.speakerBinding",
+        message:
+          "GM Read dialogue_outcome addressed existing visible actor ref(s); use speakerBinding.kind=visible_actor with one primary visible speakerRef. Do not combine visible actor labels into prose_role; keep other addressed visible actors in targetRefs/evidenceRefs/sourceRefs.",
+      }];
+    }
+  }
   return [];
 }
 
@@ -1564,7 +1583,7 @@ export function buildGmReadPrompt(args: RunGmReadArgs): string {
     "If the turn only asks what would be sufficient, what a source believes, or what rule applies, use dialogue_outcome with requiresStructuralEffect=false.",
     "If the turn should actually apply durable backend-owned structure now (access granted, guard convinced, suspicion attached, stamp/mark added, relationship changed, possession transferred, route opened, wound/condition set), use tool_plan and set runtimeRequirement.requiresStructuralEffect=true plus runtimeRequirement.effectKind or effectKinds so runtime exposes exactly the matching structural owner classes before record_dialogue_outcome.",
     "If a dialogue turn produces a concrete but non-structural social/trade/procedure outcome (for example a paid answer, refusal, warning, route hint, or named price) and no backend-owned item/currency/location/relationship state is being structurally changed, use runtimeRequirement { kind: \"dialogue_outcome\", durability: \"durable\", requiresStructuralEffect: false }.",
-    "For every dialogue_outcome runtimeRequirement, set speakerBinding. Use visible_actor only when the player addressed an existing visible actor ref. Use prose_role when the player addressed a role/office/source in prose, even if some other visible NPC is present. Use no_visible_authority only when the scene has no current speaker who can answer.",
+    "For every dialogue_outcome runtimeRequirement, set speakerBinding. Use visible_actor when the player addressed an existing visible actor ref. If the player addresses multiple existing visible actors, choose one primary visible_actor speakerRef and keep all addressed visible actors in targetRefs/evidenceRefs; do not combine their labels into one prose_role. Use prose_role only when the addressed role/office/source is not already a visible actor ref. Use no_visible_authority only when the scene has no current speaker who can answer.",
     "Exact speakerBinding keys: visible_actor uses speakerRef; prose_role and no_visible_authority use requestedRoleText. Do not write proseRole or roleText in GM Read speakerBinding.",
     "speakerBinding is a binding contract for runtime, not narration. A prose_role target may be answered only by a same-turn created matching support actor or by unavailable/no_current_answer; it must not be silently rebound to a different visible NPC.",
     "",

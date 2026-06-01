@@ -184,6 +184,7 @@ export const GM_TOOL_REQUEST_SYSTEM_PROMPT_V1 = [
   "For record_dialogue_outcome, requestedRoleText is only for unavailable/no_current_answer or an explicit GM Read prose_role/no_visible_authority binding; otherwise omit it, never send requestedRoleText:\"\".",
   "For record_dialogue_outcome stateEffects, omit the field unless acceptedContext exposes a prior stateReceipts[].stateReceipt alias. If you use applied_now, every stateEffects entry must include effectId, status:\"applied_now\", stateReceipt copied exactly from acceptedContext, and summary.",
   "If gmRead.runtimeRequirement.speakerBinding.kind is prose_role or no_visible_authority, record_dialogue_outcome input must include requestedRoleText copied exactly from that binding.",
+  "If gmRead.runtimeRequirement.speakerBinding.kind is visible_actor, record_dialogue_outcome speakerRef must copy that visible speakerRef; do not create or use a composed responder name for multiple already-visible actors.",
   "If a previous create_scene_extra result provides a responder name, use that model-safe name as speakerRef and still preserve requestedRoleText from GM Read.",
   "Do not narrate. Do not add extra steps. Do not invent backend IDs.",
 ].join(" ");
@@ -1530,6 +1531,7 @@ export function gmActionChecklistSystemPromptV1(): string {
     "Do not create transfer_item or any item-state step when the player merely keeps, pockets, hides, carries, holds, readies, secures, or stows an item already in playerInventory/current possession; that is narration detail unless ownership, location, or equip state actually changes.",
     "Do not create transfer_item for ordinary small/unmodeled currency, coins, fees, tips, bribes, or prices unless that money exists as a visible/current/inventory item in the SceneFrame. For a paid answer, sold hint, named price, refusal, or bargain with no modeled currency item, use one record_dialogue_outcome step.",
     "Use toolNeed=create_scene_extra when an ordinary temporary current-scene responder must be materialized.",
+    "Never use toolNeed=create_scene_extra for actor labels already present in gmRead.actionInterpretation.targetRefs, gmRead.evidenceRefs, or scene.visibleActors. If the player addresses multiple visible actors, record one dialogue outcome from an existing primary speaker and cite the other visible actors as evidence/source refs.",
     "Use toolNeed=record_dialogue_outcome when an NPC/source answer, refusal, warning, redirect, unavailable role, or no-current-answer must be recorded.",
     "Use toolNeed=find_object_candidates when the player checks, reads, searches, or inspects visible/current/inventory objects.",
     "Use toolNeed=inspect_known_fact only for player-known facts or canon claims, not for locating visible/current/inventory objects.",
@@ -1676,7 +1678,7 @@ export function selectAllowedToolNamesForStepV1(
   return compatibleTools.length > 0 ? compatibleTools : [...frame.allowedTools];
 }
 
-function normalizeChecklistForGmReadV1(
+export function normalizeChecklistForGmReadV1(
   checklist: GmActionChecklistV1,
   read: GmRead,
   frame: SceneFrame,
@@ -1684,6 +1686,28 @@ function normalizeChecklistForGmReadV1(
   const binding = read.runtimeRequirement?.kind === "dialogue_outcome"
     ? read.runtimeRequirement.speakerBinding
     : null;
+  if (binding?.kind === "visible_actor") {
+    const invalidResponderStepIds = new Set(checklist.steps
+      .filter((step) =>
+        step.requiredAction === "backend_tool"
+        && selectAllowedToolNamesForStepV1(step, frame).includes("create_scene_extra")
+      )
+      .map((step) => step.stepId));
+    if (invalidResponderStepIds.size > 0) {
+      const steps = checklist.steps
+        .filter((step) => !invalidResponderStepIds.has(step.stepId))
+        .map((step) => ({
+          ...step,
+          dependsOnStepIds: step.dependsOnStepIds.filter((stepId) => !invalidResponderStepIds.has(stepId)),
+        }));
+      if (steps.length > 0) {
+        return mutatingGmActionChecklistV1Schema.parse({
+          ...checklist,
+          steps,
+        });
+      }
+    }
+  }
   if (binding?.kind !== "prose_role") return checklist;
   if (!frame.allowedTools.includes("create_scene_extra")) return checklist;
   if (checklist.steps.some((step) =>

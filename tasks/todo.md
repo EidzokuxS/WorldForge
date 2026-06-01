@@ -326,3 +326,12 @@ Session: `gm-v1-consequenc-slice`.
   - Retry succeeded: payment + Litha route hint settled with `record_dialogue_outcome`; following the hint moved to `The Copper Tap`; Sessik refusal/redirect settled with `record_dialogue_outcome`.
   - Final DB after row 27: `chat_history=48`, `settled_turn_packets=24`, `turn_sagas=24`, `narrator_attempts=24`, `finalized=24`, `pending=0`, scene `The Copper Tap`.
   - Verification: `npm --prefix backend run typecheck`; `npm --prefix backend test -- gameplay-turn-cycle-v1.test.ts gm-turn-read.test.ts` passed with 109 tests.
+- Lane B reserve-3 manual continuation, rows 28-38:
+  - Continued real `/api/chat/action` on clone `16edf584-2a43-4f2a-9a32-589befd42b51` with human-chosen actions only.
+  - Rows 28-32 succeeded: Sessik route advice, movement `The Copper Tap -> Silt Warrens -> Resonance Tower`, tower route inspection, movement to `Transmission Basement`.
+  - Row 33 initially exposed a root contract bug: Stage 3 created a temporary NPC named `Relay-Tech Dorin и Venn the Borrowed` even though both addressed NPCs were already visible.
+  - Fix: GM Read now rejects `prose_role` when addressed targets include visible actor refs; Stage 3/4 prompts forbid composed responders for multiple visible actors; v1 checklist normalization removes invalid `create_scene_extra` helper steps when GM Read already binds a visible speaker.
+  - Replayed row 33 from `.turn-boundaries/last-turn-boundary`; accepted only `record_dialogue_outcome`, no composite NPC remained in DB.
+  - Rows 34-38 succeeded: Dorin route/procedure details, movement `Transmission Basement -> Resonance Tower`, navigation lookup proving no visible archive-window bypass, movement to `Ground-Floor Barricade`, Rost durable refusal.
+  - Final DB after row 38: `chat_history=70`, `settled_turn_packets=35`, `turn_sagas=35`, `narrator_attempts=35`, `finalized=35`, `pending=0`, scene `Ground-Floor Barricade`.
+  - Verification in this chunk: `npm --prefix backend run typecheck`; `npm --prefix backend test -- gameplay-turn-cycle-v1.test.ts gm-turn-read.test.ts` passed with 112 tests before live replay.

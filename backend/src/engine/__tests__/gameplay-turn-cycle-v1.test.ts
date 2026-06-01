@@ -16,6 +16,7 @@ import {
   gmActionChecklistV1Schema,
   mutatingGmActionChecklistV1Schema,
   nextExecutableChecklistStepV1,
+  normalizeChecklistForGmReadV1,
   selectAllowedToolNamesForStepV1,
   toolContractHint,
   toolInputLanguageContractV1,
@@ -244,6 +245,14 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(prompt).toContain("use one record_dialogue_outcome step");
   });
 
+  it("tells Stage 3 not to materialize already-visible addressed actors", () => {
+    const prompt = gmActionChecklistSystemPromptV1();
+
+    expect(prompt).toContain("Never use toolNeed=create_scene_extra for actor labels already present");
+    expect(prompt).toContain("If the player addresses multiple visible actors");
+    expect(prompt).toContain("record one dialogue outcome from an existing primary speaker");
+  });
+
   it("exposes transfer_item target contract without item targets", () => {
     const hint = toolContractHint("transfer_item");
 
@@ -331,6 +340,99 @@ describe("gameplay turn cycle v1 contracts", () => {
       status: "accepted",
       result: { success: true },
     }])?.stepId).toBe("step-2");
+  });
+
+  it("removes temporary-responder checklist steps when GM Read already binds a visible speaker", () => {
+    const checklist = mutatingGmActionChecklistV1Schema.parse({
+      version: "gm-action-checklist.v1",
+      turnPath: "mutating",
+      steps: [
+        {
+          stepId: "prose-role-responder",
+          purpose: "Materialize the addressed temporary responder for \"Road Warden and Gate Clerk\".",
+          evidenceRefs: ["Player", "Road Warden", "Gate Clerk"],
+          dependsOnStepIds: [],
+          expectedVisibleEffect: "A current-scene support responder is available.",
+          requiredAction: "backend_tool",
+          settlementPolicy: "required",
+          toolNeed: "create_scene_extra",
+        },
+        {
+          stepId: "step-1",
+          purpose: "Record the answer from the existing visible speakers.",
+          evidenceRefs: ["Player", "Road Warden", "Gate Clerk"],
+          dependsOnStepIds: ["prose-role-responder"],
+          expectedVisibleEffect: "The procedural answer is recorded.",
+          requiredAction: "backend_tool",
+          settlementPolicy: "required",
+          toolNeed: "record_dialogue_outcome",
+        },
+      ],
+    });
+
+    const normalized = normalizeChecklistForGmReadV1(
+      checklist,
+      {
+        ...directRead({
+          path: "tool_plan",
+          turnIntent: "Record visible actor answer.",
+          actionInterpretation: {
+            intent: "ask visible actors",
+            targetRefs: ["Road Warden", "Gate Clerk"],
+          },
+          evidenceRefs: ["Player", "Road Warden", "Gate Clerk"],
+          runtimeRequirement: {
+            kind: "dialogue_outcome",
+            durability: "durable",
+            topicKind: "procedure",
+            speakerBinding: { kind: "visible_actor", speakerRef: "Road Warden" },
+          },
+        }),
+      } as GmRead,
+      {
+        allowedTools: ["create_scene_extra", "record_dialogue_outcome"],
+        roster: {
+          active: [
+            {
+              id: "player",
+              actorId: "player",
+              type: "player",
+              label: "Player",
+              locationId: null,
+              sceneScopeId: null,
+              awareness: "clear",
+            },
+            {
+              id: "warden",
+              actorId: "warden",
+              type: "npc",
+              label: "Road Warden",
+              locationId: null,
+              sceneScopeId: null,
+              awareness: "clear",
+            },
+          ],
+          support: [
+            {
+              id: "clerk",
+              actorId: "clerk",
+              type: "npc",
+              label: "Gate Clerk",
+              locationId: null,
+              sceneScopeId: null,
+              awareness: "clear",
+            },
+          ],
+          background: [],
+        },
+      } as unknown as SceneFrame,
+    );
+
+    expect(normalized.steps).toEqual([expect.objectContaining({
+      stepId: "step-1",
+      toolNeed: "record_dialogue_outcome",
+      dependsOnStepIds: [],
+    })]);
   });
 
   it("validates Stage 4 tool requests against the selected tool input schema", () => {

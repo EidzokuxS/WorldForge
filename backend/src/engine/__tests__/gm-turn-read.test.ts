@@ -571,6 +571,11 @@ describe("GM Read contract", () => {
             topicKind: "other",
             durability: "scene_local",
           }),
+          actionInterpretation: {
+            intent: "ask a local clerk role",
+            targetRefs: [],
+          },
+          evidenceRefs: ["Player"],
           turnIntent: "Resolve the clerk role if the scene can support one.",
           runtimeRequirement: {
             kind: "dialogue_outcome",
@@ -585,6 +590,42 @@ describe("GM Read contract", () => {
         createFrame(),
       ),
     ).toEqual([]);
+  });
+
+  it("rejects prose_role binding when the player addressed existing visible actor refs", () => {
+    const read = gmReadSchema.parse({
+      ...baseRead,
+      path: "tool_plan",
+      turnGrounding: testTurnGrounding({
+        intentKind: "procedural_information",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "procedure",
+        durability: "durable",
+      }),
+      actionInterpretation: {
+        intent: "ask the visible road warden and gate clerk",
+        targetRefs: ["Road Warden"],
+      },
+      evidenceRefs: ["Player", "Road Warden"],
+      turnIntent: "Record the visible actor answer.",
+      runtimeRequirement: {
+        kind: "dialogue_outcome",
+        durability: "durable",
+        topicKind: "procedure",
+        speakerBinding: {
+          kind: "prose_role",
+          requestedRoleText: "Road Warden and Gate Clerk",
+        },
+      },
+    });
+
+    expect(validateGmReadForFrame(read, createFrame())).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: "runtimeRequirement.speakerBinding",
+        message: expect.stringContaining("Do not combine visible actor labels into prose_role"),
+      }),
+    ]));
   });
 
   it("accepts incomplete structural dialogue proposals into semantic repair instead of schema-failing the turn", () => {
