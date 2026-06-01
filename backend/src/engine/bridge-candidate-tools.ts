@@ -285,7 +285,7 @@ function compactTarget(
   aliases: BridgeDisplayAliases,
 ): Record<string, unknown> {
   const ref = aliases.targetRefs.get(candidate) ?? candidate.label;
-  return {
+  const payload: Record<string, unknown> = {
     ref,
     type: candidate.type,
     label: candidate.label,
@@ -293,6 +293,10 @@ function compactTarget(
     observationOnly: true,
     usableAs: safeUsableAs(ref, candidate.label),
   };
+  if (candidate.tags && candidate.tags.length > 0) {
+    payload.visibleTags = [...candidate.tags];
+  }
+  return payload;
 }
 
 function compactMovement(
@@ -766,6 +770,12 @@ function findTargets(input: {
     queryMatched: candidates.length > 0,
     candidates: sortCandidates(candidates).slice(0, maxResults),
     count: Math.min(candidates.length, maxResults),
+    detailAuthority: input.types.includes("item")
+      ? "candidate_identity_and_visible_tags_only"
+      : "candidate_identity_only",
+    limitations: input.types.includes("item")
+      ? "This lookup confirms matching visible item labels and visible tags only; it does not inspect contents, markings, text, serial numbers, registration numbers, addresses, or the absence of details not returned."
+      : "This lookup confirms matching visible candidate labels only; it does not inspect unreturned details or prove their absence.",
   });
 }
 

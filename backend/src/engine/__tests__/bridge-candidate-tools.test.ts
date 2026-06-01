@@ -279,6 +279,26 @@ describe("bridge candidate lookup tools", () => {
     expect(JSON.stringify(results)).toContain("East Tea Lane");
   });
 
+  it("marks object candidate lookups as label-and-tag observations, not detail inspection", () => {
+    const result = executeBridgeCandidateTool(
+      "find_object_candidates",
+      { query: "Painted Tea Sign marks serial number", maxResults: 4 },
+      createContext(),
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.result).toMatchObject({
+      detailAuthority: "candidate_identity_and_visible_tags_only",
+      limitations: expect.stringContaining("does not inspect contents"),
+      candidates: [
+        expect.objectContaining({
+          label: "Painted Tea Sign",
+          visibleTags: ["tea", "shop", "sign"],
+        }),
+      ],
+    });
+  });
+
   it("keeps inspect_known_fact visible and known scopes separate", () => {
     const context = createContext();
 

@@ -245,6 +245,15 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(prompt).toContain("use one record_dialogue_outcome step");
   });
 
+  it("tells Stage 3 to use start_search for unconfirmed object details", () => {
+    const prompt = gmActionChecklistSystemPromptV1();
+
+    expect(prompt).toContain("Use toolNeed=find_object_candidates only when the needed result is which visible/current/inventory object labels match");
+    expect(prompt).toContain("Use toolNeed=start_search");
+    expect(prompt).toContain("registration numbers");
+    expect(prompt).toContain("must not assert the searched detail exists or is absent");
+  });
+
   it("tells Stage 3 not to materialize already-visible addressed actors", () => {
     const prompt = gmActionChecklistSystemPromptV1();
 
@@ -776,7 +785,65 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(built.prompt).toContain("Delivery manifest");
     expect(built.prompt).toContain("East Exit Underground Passage");
     expect(built.prompt).toContain("Dogenzaka Apartment Safehouse");
+    expect(built.system).toContain("Do not infer object contents");
+    expect(built.prompt).toContain("не подтверждает содержимое");
     expect(built.prompt).not.toContain("Ты осматриваешься вокруг.");
+  });
+
+  it("summarizes start_search as unconfirmed discovery rather than absence", () => {
+    const packet: SettledTurnPacketV1 = {
+      version: "settled-turn-packet.v1",
+      packetId: "packet-1",
+      turnId: "turn-1",
+      campaignId: "campaign-1",
+      baseWorldVersion: 0,
+      resultWorldVersion: 0,
+      tick: 0,
+      playerAction: "Я ищу регистрационный номер на sealed tube.",
+      gmRead: {
+        path: "tool_plan",
+        situationSummary: "Player searches for a registration number.",
+        sceneQuestion: "Is a number established?",
+        actionInterpretation: {
+          intent: "search for registration number",
+          targetRefs: ["Sealed tube"],
+        },
+        rationale: "Search target is unconfirmed.",
+        evidenceRefs: ["Player", "Sealed tube"],
+        narrationGuardrails: [],
+      },
+      oracleResult: null,
+      visibleFacts: [],
+      skippedSteps: [],
+      failedSteps: [],
+      checklist: null,
+      stepSettlements: [],
+      acceptedToolResults: [{
+        stepId: "step-1",
+        toolName: "start_search",
+        input: { query: "registration number on sealed tube", method: "inspect" },
+        result: {
+          success: true,
+          status: "success",
+          result: {
+            kind: "search_started",
+            query: "registration number on sealed tube",
+            status: "active",
+            targetTruth: "unconfirmed",
+            found: false,
+          },
+        },
+      }],
+      localConsequenceResult: null,
+      acceptedActorResults: [],
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+      privateGuardTerms: [],
+    };
+
+    const built = buildNarratorPromptFromSettledPacketV1(packet);
+    expect(built.prompt).toContain("Конкретная находка");
+    expect(built.prompt).toContain("это не доказывает их отсутствие");
   });
 
   it("uses accepted log_event input text as actor-visible settled evidence", () => {
@@ -1183,14 +1250,29 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(toolContractHint("record_dialogue_outcome")).toMatchObject({
       input: {
         futureUseKind: expect.stringContaining("route_choice|permission_check|evidence"),
+        claims: [expect.objectContaining({
+          claimKind: expect.stringContaining("use other for procedure/document/authority/policy categories"),
+        })],
         requestedRoleText: expect.stringContaining("never empty string"),
       },
     });
     expect(JSON.stringify(toolContractHint("record_dialogue_outcome"))).toContain(
       "use evidence for proof/documentary value",
     );
+    expect(toolContractHint("start_search")).toMatchObject({
+      input: {
+        query: expect.stringContaining("specific unconfirmed detail"),
+        intentSummary: expect.stringContaining("do not claim the detail was found"),
+      },
+      notes: [
+        expect.stringContaining("specific unconfirmed detail"),
+        expect.stringContaining("targetTruth=unconfirmed"),
+      ],
+    });
     expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("futureUseKind=evidence");
     expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("never futureUseKind=proof");
+    expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("claims[].claimKind must be one of");
+    expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("use other rather than inventing a new enum");
     expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("Never send empty strings for optional fields");
     expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("acceptedContext exposes a prior stateReceipts");
   });

@@ -181,6 +181,7 @@ export const GM_TOOL_REQUEST_SYSTEM_PROMPT_V1 = [
   "If moving an actor, destinationRef and evidenceRefs must copy the same exact connected movement candidate ref.",
   "Never send empty strings for optional fields; omit the field entirely unless you have a non-empty value.",
   "For record_dialogue_outcome, futureUseKind must be one of route_choice|permission_check|evidence|safety|obligation|npc_memory|relationship|other; proof is topicKind only, so documentary/proof later use maps to futureUseKind=evidence, never futureUseKind=proof.",
+  "For record_dialogue_outcome claims[].claimKind must be one of requirement|permission|prohibition|office|route_status|warning|lead|document_status|other; if the claim is a procedure step, document, authority, policy, office, access path, or category not represented exactly, use other rather than inventing a new enum.",
   "For record_dialogue_outcome, requestedRoleText is only for unavailable/no_current_answer or an explicit GM Read prose_role/no_visible_authority binding; otherwise omit it, never send requestedRoleText:\"\".",
   "For record_dialogue_outcome stateEffects, omit the field unless acceptedContext exposes a prior stateReceipts[].stateReceipt alias. If you use applied_now, every stateEffects entry must include effectId, status:\"applied_now\", stateReceipt copied exactly from acceptedContext, and summary.",
   "If gmRead.runtimeRequirement.speakerBinding.kind is prose_role or no_visible_authority, record_dialogue_outcome input must include requestedRoleText copied exactly from that binding.",
@@ -916,6 +917,7 @@ export function buildNarratorPromptFromSettledPacketV1(packet: SettledTurnPacket
     "Write only prose for the player. Do not output JSON, markdown, bullet lists, tool names, ids, schemas, logs, or diagnostics.",
     "Use only acceptedEvidence, gmRead, and oracleResult. Do not invent new consequences, locations, items, injuries, NPC actions, permissions, or world changes.",
     "When acceptedEvidence contains a concrete resolved outcome, narrate that outcome as authoritative and let it override any looser setup in gmRead.",
+    "Candidate lookup acceptedEvidence supports only the returned labels and explicit returned details. Do not infer object contents, markings, text, serial/registration numbers, addresses, hidden contents, or absence of such details from candidate labels.",
     "Never narrate failedSteps, skippedSteps, privateGuardTerms, backend ids, hidden facts, or planned-but-unaccepted effects.",
     narratorLanguageContractV1(language),
   ].join(" ");
@@ -1054,11 +1056,39 @@ function summarizeToolSettlementForNarration(
     || settlement.toolName === "find_poi_candidates") {
     const labels = readLabelList(payload.candidates, 8);
     if (labels.length > 0) {
+      if (settlement.toolName === "find_object_candidates") {
+        if (russian) {
+          return [
+            `Подходящие видимые предметы: ${labels.join(", ")}.`,
+            "Эта проверка подтверждает только совпавшие видимые предметы и явно возвращенные детали; она не подтверждает содержимое, внешние marks, текст, серийные или регистрационные номера, адреса или отсутствие деталей, которых нет в результате.",
+          ].join(" ");
+        }
+        return [
+          `Matching visible objects: ${labels.join(", ")}.`,
+          "This lookup confirms only matching visible objects and explicitly returned details; it does not confirm contents, external marks, text, serial or registration numbers, addresses, or absence of details not returned.",
+        ].join(" ");
+      }
       if (russian) {
         return `Подходящие видимые варианты: ${labels.join(", ")}.`;
       }
       return `Matching visible options: ${labels.join(", ")}.`;
     }
+  }
+
+  if (settlement.toolName === "start_search") {
+    const query = typeof payload.query === "string" && payload.query.trim().length > 0
+      ? payload.query.trim()
+      : null;
+    if (russian) {
+      return [
+        query ? `Поиск начат: ${query}.` : "Поиск начат.",
+        "Конкретная находка, доказательство, номер, адрес или отметка этим шагом не подтверждены; это не доказывает их отсутствие.",
+      ].join(" ");
+    }
+    return [
+      query ? `Search started: ${query}.` : "Search started.",
+      "No concrete discovery, proof, number, address, or mark is confirmed by this step; that does not prove absence.",
+    ].join(" ");
   }
 
   if (settlement.result.observationOnly || settlement.toolName === "list_visible_affordances") {
@@ -1236,6 +1266,22 @@ export function toolContractHint(toolName: RuntimeToolName): Record<string, unkn
           summary: "brief summary",
         },
       };
+    case "start_search":
+      return {
+        toolName,
+        roles: descriptor.roles,
+        input: {
+          actorRef: "optional Player/current_player; omit for player",
+          query: "specific unconfirmed detail or thing being searched for",
+          scope: "current_scene|current_location|visible",
+          method: "look|ask|inspect|listen|track|browse",
+          intentSummary: "brief reason; do not claim the detail was found",
+        },
+        notes: [
+          "Use when the player searches, reads, checks, or inspects for a specific unconfirmed detail that no lookup result can actually return.",
+          "This records an active search with targetTruth=unconfirmed and found=false; it must not be narrated as proof that the detail is absent.",
+        ],
+      };
     case "transfer_item":
       return {
         toolName,
@@ -1313,7 +1359,7 @@ export function toolContractHint(toolName: RuntimeToolName): Record<string, unkn
           quote: "direct speech when answered/warned/redirected and durable",
           summary: "brief outcome summary",
           claims: [{
-            claimKind: "requirement|permission|prohibition|office|route_status|warning|lead|document_status|other",
+            claimKind: "exact enum requirement|permission|prohibition|office|route_status|warning|lead|document_status|other; use other for procedure/document/authority/policy categories that do not exactly fit",
             polarity: "allows|denies|requires|redirects|unknown|states",
             subjectText: "free text when not an exact visible ref",
             summary: "claim summary",
@@ -1533,7 +1579,9 @@ export function gmActionChecklistSystemPromptV1(): string {
     "Use toolNeed=create_scene_extra when an ordinary temporary current-scene responder must be materialized.",
     "Never use toolNeed=create_scene_extra for actor labels already present in gmRead.actionInterpretation.targetRefs, gmRead.evidenceRefs, or scene.visibleActors. If the player addresses multiple visible actors, record one dialogue outcome from an existing primary speaker and cite the other visible actors as evidence/source refs.",
     "Use toolNeed=record_dialogue_outcome when an NPC/source answer, refusal, warning, redirect, unavailable role, or no-current-answer must be recorded.",
-    "Use toolNeed=find_object_candidates when the player checks, reads, searches, or inspects visible/current/inventory objects.",
+    "Use toolNeed=find_object_candidates only when the needed result is which visible/current/inventory object labels match the player's words.",
+    "Use toolNeed=start_search when the player checks, reads, searches, or inspects visible/current/inventory objects in order to find a specific unconfirmed detail such as markings, text, contents, serial numbers, registration numbers, addresses, hidden compartments, or proof that current lookup tools cannot return.",
+    "A start_search step records that the search target is unconfirmed; it must not assert the searched detail exists or is absent.",
     "Use toolNeed=inspect_known_fact only for player-known facts or canon claims, not for locating visible/current/inventory objects.",
     "Use toolNeed=list_navigation_options when the player asks which routes or movement options are available.",
   ].join(" ");
