@@ -198,3 +198,22 @@ Session: `gm-v1-consequenc-slice`.
   - Result: SSE reached `narrative` and `done`; DB showed `chat=2`, `settled_turn_packets=1`, `turn_sagas=1`, `narrator_attempts=1`, `pendingSagas=0`.
   - Latest saga `116483ab-a84a-4b77-9114-800646604263` finalized; packet `b5faf28d-afae-47aa-b42d-09915c54408e` persisted accepted tool refs `["step-1:find_object_candidates","step-2:list_navigation_options"]`; narrator attempt `3b74cb65-2afb-4bfd-951d-e132454fbcd5` succeeded.
   - Verification: `npm --prefix backend run typecheck`; `npm --prefix backend test -- gameplay-turn-cycle-v1.test.ts`; `npm --prefix backend test -- gameplay-turn-cycle-v1.test.ts settled-turn-packet-v1-store.test.ts actor-tools.test.ts chat.scene-plan.test.ts chat.test.ts` passed with 113 tests.
+- Lane A second-turn live acceptance:
+  - Verified current SceneFrame after first turn: tick `1`, location/scene `Shibuya Ward`, 8 connected movement candidates, including `East Exit Underground Passage`.
+  - Real `/api/chat/action` against `a4e06d79-3695-437e-bef2-b1ae64286e35`: `Я выбираю East Exit Underground Passage как самый безопасный путь и иду туда, держа burner phone под рукой.`
+  - Result: SSE reached `narrative` and `done`; backend log showed accepted `move_actor` with destination `East Exit Underground Passage`, travelCost `1`, path `["Shibuya Ward","East Exit Underground Passage"]`.
+  - DB showed `chat=4`, `settled_turn_packets=2`, `turn_sagas=2`, `narrator_attempts=2`, `pendingSagas=0`; player location and scene both updated to `East Exit Underground Passage`.
+  - Packet `964773d1-a346-494a-bed0-337e614f5fd9` persisted resultWorldVersion `1` and accepted refs including `step-1:move_actor`.
+- Lane B first-turn live acceptance:
+  - Real `/api/chat/action` against zero-turn clone `ba788102-b970-43f2-8221-6f0f136e23f8`: `Я проверяю sealed lacquer message tube и courier satchel, затем осматриваю Lowwater Bazaar и выбираю самый безопасный дальнейший путь.`
+  - Stage 3 checklist produced two backend steps with `toolNeed=["find_object_candidates","list_navigation_options"]`; Stage 4 accepted `find_object_candidates` and `list_navigation_options`.
+  - DB showed `chat=2`, `settled_turn_packets=1`, `turn_sagas=1`, `narrator_attempts=1`, `pendingSagas=0`.
+  - Packet `09b0044f-eec2-4c50-8c2e-2ac4b1e2a5df` persisted accepted refs `["inspect-items:find_object_candidates","assess-routes:list_navigation_options"]`; narrator attempt `c446f935-f8b9-40f8-ad7f-f84ce36716e6` succeeded.
+  - Minor narration quality smell observed: one English word leaked into Russian prose (`reveals`). Not a settled-truth contract failure, but worth tracking before final polish.
+- Lane C first-turn live acceptance:
+  - Real `/api/chat/action` against zero-turn clone `b13e8cfd-468e-44ef-a464-62e13fd70a7a`: `Я показываю master clerk requisition chit и спрашиваю, какие записи в municipal logs подтверждают выдачу supplies; затем сверяю это с ledger folio.`
+  - Stage 3 checklist produced one backend step with `toolNeed=["record_dialogue_outcome"]`; Stage 4 accepted durable `record_dialogue_outcome`.
+  - Backend accepted quote: `Log entry fifty-three, cycle nine, records issuance against this chit—eight sealed repair bars. Your ledger here shows twelve. The numbers don't match.`
+  - DB showed `chat=2`, `settled_turn_packets=1`, `turn_sagas=1`, `narrator_attempts=1`, `pendingSagas=0`.
+  - Packet `bde4dcf8-d5bf-4aaf-ba65-46c5fac5c401` persisted resultWorldVersion `132` and accepted refs including `step-1:record_dialogue_outcome`; narrator attempt `ce012543-8fa7-4869-85d1-e0624e13402e` succeeded.
+  - Grounding check: narrator's 8-vs-12 discrepancy matches accepted `record_dialogue_outcome`, so this was not a narration leak.
