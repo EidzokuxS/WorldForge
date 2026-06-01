@@ -534,6 +534,82 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(built.prompt).not.toContain("Мир принял результат действия.");
   });
 
+  it("uses accepted log_event input text as actor-visible settled evidence", () => {
+    const packet: SettledTurnPacketV1 = {
+      version: "settled-turn-packet.v1",
+      packetId: "packet-1",
+      turnId: "turn-1",
+      campaignId: "campaign-1",
+      baseWorldVersion: 1,
+      resultWorldVersion: 2,
+      tick: 4,
+      playerAction: "Я показываю журнал Silk Maren.",
+      gmRead: {
+        path: "tool_plan",
+        situationSummary: "Player shows a ledger.",
+        sceneQuestion: "How does Silk Maren react?",
+        actionInterpretation: {
+          intent: "show ledger",
+          targetRefs: ["Silk Maren"],
+        },
+        rationale: "The actor can react locally.",
+        evidenceRefs: ["Silk Maren"],
+        narrationGuardrails: [],
+      },
+      oracleResult: null,
+      visibleFacts: [],
+      skippedSteps: [],
+      failedSteps: [],
+      checklist: null,
+      stepSettlements: [],
+      acceptedToolResults: [],
+      localConsequenceResult: {
+        version: "local-consequence-result.v1",
+        runId: "run-1",
+        stage: "local_actor_reactions",
+        trigger: {
+          gmReadPath: "tool_plan",
+          acceptedGmStepIds: ["step-1"],
+          acceptedToolResultRefs: ["step-1:record_dialogue_outcome"],
+        },
+        baseWorldVersion: 1,
+        frameWorldVersion: 1,
+        resultWorldVersion: 2,
+        route: "required_before_packet",
+        actorSettlements: [],
+        queuedSimulationProposalRefs: [],
+        skipped: [],
+        failed: [],
+      },
+      acceptedActorResults: [{
+        settlementId: "local-actor:npc-silk:1",
+        actorId: "npc-silk",
+        actorLabel: "Silk Maren",
+        toolName: "log_event",
+        input: {
+          text: "Silk Maren leans over the ledger and confirms the burned route numbers are visible.",
+        },
+        result: {
+          success: true,
+          status: "success",
+          result: {
+            durability: "scene_local",
+            persisted: false,
+          },
+        },
+      }],
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+      privateGuardTerms: [],
+    };
+
+    const built = buildNarratorPromptFromSettledPacketV1(packet);
+    expect(built.prompt).toContain(
+      "Silk Maren leans over the ledger and confirms the burned route numbers are visible.",
+    );
+    expect(built.prompt).not.toContain("The world accepted the action result.");
+  });
+
   it("includes accepted local actor consequence facts in Stage 6 evidence", () => {
     const packet: SettledTurnPacketV1 = {
       version: "settled-turn-packet.v1",
@@ -715,6 +791,132 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(result.actorSettlements[0]!.actionResults[0]).toMatchObject({
       toolName: "record_dialogue_outcome",
       visibleFact: "The clerk logs the urgent seal.",
+    });
+    expect(() => assertLocalConsequencePassAcceptedV1(result)).not.toThrow();
+  });
+
+  it("keeps a required actor settlement accepted when an extra actor tool is rejected after a receipt", () => {
+    const frame = {
+      campaignId: "campaign-1",
+      tick: 5,
+      worldVersion: 2,
+      playerActorId: "player-1",
+      currentLocationId: "loc-1",
+      currentSceneScopeId: "scene-1",
+      playerAction: "Я требую свидетельское подтверждение.",
+      roster: { active: [], support: [], background: [] },
+      perception: { visible: [], hidden: [] },
+      recentEvents: [],
+      targetCandidates: [],
+      movementCandidates: [],
+      deferredHooks: [],
+      allowedTools: ["log_event", "set_relationship"],
+      oracle: null,
+    } as unknown as SceneFrame;
+    const envelope = {
+      version: "gameplay-frame-envelope.v1",
+      turnId: "turn-1",
+      campaignId: "campaign-1",
+      baseTick: 4,
+      baseWorldVersion: 1,
+      frame,
+      scopedForecastExcerpt: null,
+    } satisfies GameplayFrameEnvelopeV1;
+
+    const result = buildLocalConsequenceResultFromActorPassV1({
+      envelope,
+      read: directRead({ path: "tool_plan" as GmRead["path"] }),
+      acceptedToolResults: [{
+        stepId: "step-1",
+        toolName: "log_event",
+        input: { text: "The player demands witness confirmation." },
+        result: {
+          success: true,
+          status: "success",
+          authority: { toolResultId: "gm-tool-result-1", eventRefs: ["gm-event-1"] } as never,
+        },
+      }],
+      refreshedFrame: frame,
+      actorPass: {
+        schedule: {
+          campaignId: "campaign-1",
+          baseWorldVersion: 2,
+          worldTimeMinutes: 5,
+          decisions: [{
+            actorId: "npc-clerk",
+            actorName: "Desk Clerk",
+            route: "required_before_done",
+            reason: "visible local reaction",
+            signals: [],
+            writeScopes: ["npc:npc-clerk:state"],
+          }],
+        },
+        decisions: [{
+          schedule: {
+            actorId: "npc-clerk",
+            actorName: "Desk Clerk",
+            route: "required_before_done",
+            reason: "visible local reaction",
+            signals: [],
+            writeScopes: ["npc:npc-clerk:state"],
+          },
+          actorFrame: {} as never,
+          packet: {} as never,
+          processUpdateStatus: "updated",
+          actionResults: [
+            {
+              order: 0,
+              actionId: "actor-action-1",
+              actionRef: "actor-tool:npc-clerk:log_event:1",
+              actorId: "npc-clerk",
+              toolName: "log_event",
+              input: { text: "The clerk refuses to testify without compensation." },
+              args: { text: "The clerk refuses to testify without compensation." },
+              result: {
+                success: true,
+                status: "success",
+                result: {
+                  eventId: "actor-event-1",
+                  persisted: true,
+                },
+                authority: {
+                  toolResultId: "actor-tool-result-1",
+                  eventRefs: ["actor-authority-event-1"],
+                  stateDeltaRefs: ["npc:npc-clerk:state"],
+                } as never,
+              },
+            },
+            {
+              order: 1,
+              actionId: "actor-action-2",
+              actionRef: "actor-tool:npc-clerk:set_relationship:2",
+              actorId: "npc-clerk",
+              toolName: "set_relationship",
+              input: { entityA: "Desk Clerk", entityB: "Player", tag: "wary" },
+              args: { entityA: "Desk Clerk", entityB: "Player", tag: "wary" },
+              result: {
+                success: false,
+                status: "failure",
+                error: "authority_write_scope_mismatch:world:relationship",
+              },
+            },
+          ],
+        }],
+        actionResults: [],
+        parallelFrameRetrievalTrace: [],
+        parallelPrepTrace: [],
+      },
+      resultWorldVersion: 3,
+    });
+
+    expect(result.actorSettlements[0]).toMatchObject({
+      status: "accepted",
+      visibleFacts: ["The clerk refuses to testify without compensation."],
+    });
+    expect(result.failed).toEqual([]);
+    expect(result.skipped[0]).toMatchObject({
+      reason: "Actor extra tool rejected after accepted local reaction: set_relationship.",
+      actorId: "npc-clerk",
     });
     expect(() => assertLocalConsequencePassAcceptedV1(result)).not.toThrow();
   });

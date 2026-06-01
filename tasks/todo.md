@@ -161,7 +161,7 @@ Session: `gm-v1-consequenc-slice`.
 - The earlier Ashfall/Gatehouse movement failure is now understood as a stale-source fixture issue, not proof that v1 movement is generally broken: source `1973fbeb-cd81-4556-8252-6aeccde5d5d8` has the player in an expired `Municipal Stores Front Counter`, with its only outgoing edge pointing to an archived/expired scene. Keep it as failed-route coverage, not as movement-success source.
 - Durable `SettledTurnPacketV1` persistence is implemented and focused-test plus live-smoke proven for direct narration.
 - Live smoke has proven observation/bridge tool execution, storyteller narration, durable direct packet persistence, and durable mutating packet persistence for one accepted `add_tag` state mutation.
-- Local/world/actor consequences are the next architecture slice. They are not yet implemented in v1 as accepted packet truth.
+- Local actor consequences are implemented as Stage 4.5 accepted packet truth and live-smoke-proven for an actor receipt before narration. Nonlocal/offscreen/world progress remains post-turn proposal work by design and still needs broader long-run validation.
 
 ## Implementation Notes 2026-06-01: Local Consequence Pass V1
 
@@ -176,3 +176,8 @@ Session: `gm-v1-consequenc-slice`.
   - `npm --prefix backend test -- gameplay-turn-cycle-v1.test.ts settled-turn-packet-v1-store.test.ts actor-tools.test.ts`
   - `npm --prefix backend test -- chat.scene-plan.test.ts chat.test.ts gameplay-turn-cycle-v1.test.ts settled-turn-packet-v1-store.test.ts actor-tools.test.ts`
   - real `/api/chat/action` smoke on campaign `3a606353-5968-4174-936b-45d80056ac1f`: accepted `add_tag`, ran `local-consequences`, persisted/finalized packet, emitted grounded `narrative` and `done`; DB packet showed `localRoute=required_before_packet`, zero actor settlements because the campaign has no `actor_process_states`, accepted tool refs persisted, and no backend listener remained on `3109/3001`.
+  - real `/api/chat/action` actor smoke on campaign `9c80976a-0b6f-4be2-b2c4-0173f90ac2ca`: GM path was `tool_plan`, `local-consequences` ran before packet, Silk Maren produced one accepted `log_event` actor receipt, `SettledTurnPacketV1` packet `1552b4e5-423c-421e-9e81-e34552d7fc8a` persisted `localRoute=required_before_packet`, one accepted actor settlement, concrete actor visible fact, and non-empty `acceptedActorResultRefs`.
+  - The same actor smoke exposed and fixed a v1 adapter contract bug: an actor settlement with one accepted local reaction receipt plus one rejected extra actor tool was incorrectly treated as fatal. The contract is now: required local actor consequence fails only when no accepted runtime receipt exists for that actor; rejected extra tools after an accepted receipt are audit-only `skipped`.
+  - Re-verified after the actor receipt fix:
+    - `npm --prefix backend run typecheck`
+    - `npm --prefix backend test -- gameplay-turn-cycle-v1.test.ts settled-turn-packet-v1-store.test.ts actor-tools.test.ts chat.scene-plan.test.ts chat.test.ts`

@@ -601,10 +601,10 @@ export function buildLocalConsequenceResultFromActorPassV1(input: {
       actorId: decision.schedule.actorId,
       actorLabel: decision.schedule.actorName,
       scheduleReason: decision.schedule.reason,
-      status: failedAction
-        ? "failed"
-        : acceptedResults.length > 0
-          ? "accepted"
+      status: acceptedResults.length > 0
+        ? "accepted"
+        : failedAction
+          ? "failed"
           : "no_action_accepted",
       visibleToPlayer: visibleFacts.length > 0,
       actionResults: acceptedResults,
@@ -612,6 +612,21 @@ export function buildLocalConsequenceResultFromActorPassV1(input: {
       durableEventIds,
       authorityRefs,
     };
+  });
+  const partialFailures = input.actorPass.decisions.flatMap((decision) => {
+    const acceptedRuntimeReceipt = decision.actionResults.some((actionResult) =>
+      actionResult.result.success === true && isRuntimeToolName(actionResult.toolName),
+    );
+    if (!acceptedRuntimeReceipt) return [];
+    return decision.actionResults
+      .filter((actionResult) =>
+        actionResult.result.success !== true || !isRuntimeToolName(actionResult.toolName),
+      )
+      .map((actionResult) => ({
+        reason: `Actor extra tool rejected after accepted local reaction: ${actionResult.toolName}.`,
+        actorId: decision.schedule.actorId,
+        scheduleRef: decision.schedule.reason,
+      }));
   });
 
   return {
@@ -629,13 +644,16 @@ export function buildLocalConsequenceResultFromActorPassV1(input: {
     route: "required_before_packet",
     actorSettlements,
     queuedSimulationProposalRefs: [],
-    skipped: input.actorPass.schedule.decisions
-      .filter((decision) => decision.route !== "required_before_done")
-      .map((decision) => ({
-        reason: `Actor decision routed ${decision.route}; not settled before packet.`,
-        actorId: decision.actorId,
-        scheduleRef: decision.reason,
-      })),
+    skipped: [
+      ...input.actorPass.schedule.decisions
+        .filter((decision) => decision.route !== "required_before_done")
+        .map((decision) => ({
+          reason: `Actor decision routed ${decision.route}; not settled before packet.`,
+          actorId: decision.actorId,
+          scheduleRef: decision.reason,
+        })),
+      ...partialFailures,
+    ],
     failed: actorSettlements
       .filter((settlement) => settlement.status === "failed")
       .map((settlement) => ({
@@ -995,6 +1013,13 @@ function summarizeToolSettlementForNarration(
     ? payload.summary.trim()
     : null;
   if (payloadSummary) return payloadSummary;
+
+  const acceptedLogEventText = settlement.toolName === "log_event"
+    && typeof settlement.input?.text === "string"
+    && settlement.input.text.trim().length > 0
+    ? settlement.input.text.trim()
+    : null;
+  if (acceptedLogEventText) return acceptedLogEventText;
 
   const resultText = typeof settlement.result.result === "string"
     ? settlement.result.result
