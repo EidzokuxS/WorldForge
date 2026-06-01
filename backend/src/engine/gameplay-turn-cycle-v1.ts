@@ -991,6 +991,39 @@ function summarizeToolSettlementForNarration(
       : "The action was accepted by the world state.";
   }
 
+  if (settlement.toolName === "list_navigation_options") {
+    const current = readRecord(payload.current);
+    const location = typeof current?.locationName === "string"
+      ? current.locationName
+      : typeof current?.sceneName === "string"
+        ? current.sceneName
+        : null;
+    const routes = readLabelList(payload.candidates, 8);
+    if (russian) {
+      return [
+        location ? `Ты сверяешь доступные маршруты из места: ${location}.` : "Ты сверяешь доступные маршруты.",
+        routes.length ? `Доступные направления: ${routes.join(", ")}.` : null,
+      ].filter(Boolean).join(" ");
+    }
+    return [
+      location ? `You check available routes from ${location}.` : "You check available routes.",
+      routes.length ? `Open routes: ${routes.join(", ")}.` : null,
+    ].filter(Boolean).join(" ");
+  }
+
+  if (settlement.toolName === "find_object_candidates"
+    || settlement.toolName === "find_actor_candidates"
+    || settlement.toolName === "find_location_candidates"
+    || settlement.toolName === "find_poi_candidates") {
+    const labels = readLabelList(payload.candidates, 8);
+    if (labels.length > 0) {
+      if (russian) {
+        return `Подходящие видимые варианты: ${labels.join(", ")}.`;
+      }
+      return `Matching visible options: ${labels.join(", ")}.`;
+    }
+  }
+
   if (settlement.result.observationOnly || settlement.toolName === "list_visible_affordances") {
     const current = readRecord(payload.current);
     const location = typeof current?.locationName === "string"

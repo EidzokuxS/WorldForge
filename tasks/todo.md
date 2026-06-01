@@ -228,6 +228,14 @@ Session: `gm-v1-consequenc-slice`.
   - DB showed `chat=2`, `settled_turn_packets=1`, `turn_sagas=1`, `narrator_attempts=1`, `pendingSagas=0`.
   - Packet `09b0044f-eec2-4c50-8c2e-2ac4b1e2a5df` persisted accepted refs `["inspect-items:find_object_candidates","assess-routes:list_navigation_options"]`; narrator attempt `c446f935-f8b9-40f8-ad7f-f84ce36716e6` succeeded.
   - Minor narration quality smell observed: one English word leaked into Russian prose (`reveals`). Not a settled-truth contract failure, but worth tracking before final polish.
+- Lane B reserve first-turn route evidence replay:
+  - Preflight verified clone `ce740a13-3b78-43a9-9bdc-6973be2ff7b9` was still zero-turn: `chat_history=0`, `settled_turn_packets=0`, `turn_sagas=0`, `narrator_attempts=0`.
+  - Fixed Stage 6 accepted evidence packaging for bridge lookup observations: `find_object_candidates` and `list_navigation_options` now summarize `result.candidates` directly instead of falling through to generic `legalTargets` / `legalMovement` fields that those tools do not return.
+  - Verification before live replay: `npm --prefix backend run typecheck`; `npm --prefix backend test -- gameplay-turn-cycle-v1.test.ts` passed with 27 tests.
+  - Real `/api/chat/action`: `Я проверяю sealed lacquer message tube и courier satchel, затем осматриваю Lowwater Bazaar и выбираю самый безопасный дальнейший путь.`
+  - Result reached `narrative` and `done`; DB showed `chat_history=2`, `settled_turn_packets=1`, `turn_sagas=1`, `narrator_attempts=1`, `pendingSagas=0`.
+  - Packet `5cedbb52-9a6b-470d-b44a-0ea58a341eb3` had `gmRead.path="tool_plan"`, accepted `find_object_candidates` labels `Sealed lacquer message tube`, `Courier satchel`, and accepted `list_navigation_options` labels `Anchor Chain Pylon`, `Auditor Spire`, `Charter Gallery`, `Resonance Tower`, `Silt Warrens`, `Slip Twelve Berth`, `The Copper Tap`, `Upper Dam Ruins`.
+  - Grounding check: narrator now exposed the actual route names to the player. Remaining quality smell: one English connective leaked into Russian prose (`nor`), so language purity still needs a later narrator polish pass rather than a regex patch.
 - Lane B second-turn live acceptance:
   - Verified current SceneFrame after first turn: tick `1`, location/scene `Lowwater Bazaar`, 8 connected movement candidates, including `Silt Warrens`.
   - Real `/api/chat/action` against `ba788102-b970-43f2-8221-6f0f136e23f8`: `Я выбираю Silt Warrens как путь с наименьшим количеством открытых линий обзора и иду туда, держа sealed lacquer message tube в satchel.`

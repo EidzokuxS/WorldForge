@@ -561,6 +561,88 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(built.prompt).not.toContain("Мир принял результат действия.");
   });
 
+  it("includes concrete bridge lookup candidates in Stage 6 accepted evidence", () => {
+    const packet: SettledTurnPacketV1 = {
+      version: "settled-turn-packet.v1",
+      packetId: "packet-1",
+      turnId: "turn-1",
+      campaignId: "campaign-1",
+      baseWorldVersion: 0,
+      resultWorldVersion: 0,
+      tick: 0,
+      playerAction: "Я проверяю вещи и маршруты.",
+      gmRead: {
+        path: "tool_plan",
+        situationSummary: "Player checks inventory and routes.",
+        sceneQuestion: "Which objects and routes are available?",
+        actionInterpretation: {
+          intent: "check inventory and routes",
+          targetRefs: ["Burner phone", "Delivery manifest"],
+        },
+        rationale: "Bridge lookups must ground visible options.",
+        evidenceRefs: ["Player"],
+        narrationGuardrails: [],
+      },
+      oracleResult: null,
+      visibleFacts: [],
+      skippedSteps: [],
+      failedSteps: [],
+      checklist: null,
+      stepSettlements: [],
+      acceptedToolResults: [
+        {
+          stepId: "step-1",
+          toolName: "find_object_candidates",
+          input: { query: "delivery manifest burner phone" },
+          result: {
+            success: true,
+            status: "success",
+            kind: "observation",
+            observationOnly: true,
+            result: {
+              toolName: "find_object_candidates",
+              candidates: [
+                { label: "Burner phone" },
+                { label: "Delivery manifest" },
+              ],
+            },
+          },
+        },
+        {
+          stepId: "step-2",
+          toolName: "list_navigation_options",
+          input: { actorRef: "Player", maxResults: 6 },
+          result: {
+            success: true,
+            status: "success",
+            kind: "observation",
+            observationOnly: true,
+            result: {
+              toolName: "list_navigation_options",
+              current: { locationName: "Shibuya Ward" },
+              candidates: [
+                { label: "East Exit Underground Passage" },
+                { label: "Dogenzaka Apartment Safehouse" },
+              ],
+            },
+          },
+        },
+      ],
+      localConsequenceResult: null,
+      acceptedActorResults: [],
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+      privateGuardTerms: [],
+    };
+
+    const built = buildNarratorPromptFromSettledPacketV1(packet);
+    expect(built.prompt).toContain("Burner phone");
+    expect(built.prompt).toContain("Delivery manifest");
+    expect(built.prompt).toContain("East Exit Underground Passage");
+    expect(built.prompt).toContain("Dogenzaka Apartment Safehouse");
+    expect(built.prompt).not.toContain("Ты осматриваешься вокруг.");
+  });
+
   it("uses accepted log_event input text as actor-visible settled evidence", () => {
     const packet: SettledTurnPacketV1 = {
       version: "settled-turn-packet.v1",
