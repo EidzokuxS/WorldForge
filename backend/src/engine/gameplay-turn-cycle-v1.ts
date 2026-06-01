@@ -490,8 +490,8 @@ function buildOraclePayloadV1(
   };
 }
 
-function visibleFactsFromRead(read: GmRead, oracleResult: OracleResult | null): string[] {
-  const facts = [read.situationSummary, read.actionInterpretation.intent];
+export function visibleFactsFromRead(read: GmRead, oracleResult: OracleResult | null): string[] {
+  const facts: string[] = [];
   if (read.path === "direct") facts.push(read.directResolutionNotes);
   if (read.path === "continue") facts.push(read.continuationGuidance);
   if (read.path === "clarification") facts.push(read.clarificationPrompt);

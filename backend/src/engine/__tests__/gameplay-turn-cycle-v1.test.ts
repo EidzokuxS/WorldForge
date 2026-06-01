@@ -22,6 +22,7 @@ import {
   toolInputLanguageContractV1,
   toolRequestSchemaForAllowedToolsV1,
   validateAndNormalizeToolRequestV1,
+  visibleFactsFromRead,
   type SettledTurnPacketV1,
   type GameplayFrameEnvelopeV1,
 } from "../gameplay-turn-cycle-v1.js";
@@ -74,6 +75,38 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(() => assertNoExecutableGmReadPayloadV1(read)).toThrow(
       /candidateToolRequest.*toolName.*input/u,
     );
+  });
+
+  it("does not promote mutating GM Read intent text into visible facts", () => {
+    const read = {
+      ...directRead({
+        path: "tool_plan",
+        situationSummary: "Player picks up the tube from the counter.",
+        actionInterpretation: {
+          intent: "pick up the tube and confirm possession",
+          targetRefs: ["Sealed lacquer message tube"],
+        },
+        rationale: "A runtime receipt must own possession truth.",
+      }),
+      turnIntent: "Ground the possession change before narration claims it happened.",
+    } as Extract<GmRead, { path: "tool_plan" }>;
+
+    expect(visibleFactsFromRead(read, null)).toEqual([]);
+  });
+
+  it("keeps direct resolution text as visible fact for no-mutation direct reads", () => {
+    const read = directRead({
+      situationSummary: "Player studies the door.",
+      actionInterpretation: {
+        intent: "inspect the door",
+        targetRefs: ["door-1"],
+      },
+      directResolutionNotes: "The door marks are fresh, but the door stays closed.",
+    });
+
+    expect(visibleFactsFromRead(read, null)).toEqual([
+      "The door marks are fresh, but the door stays closed.",
+    ]);
   });
 
   it("rejects executable tool payload fields inside the Stage 3 checklist", () => {
