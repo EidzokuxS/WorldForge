@@ -310,3 +310,11 @@ Session: `gm-v1-consequenc-slice`.
   - Covered clarification/direct turns from invalid sibling-subscene targets (`Litha Corsen`, `Old Route Hand Sessik`), movement Lowwater Bazaar -> The Copper Tap, The Copper Tap -> Silt Warrens, Silt Warrens -> Transmission Basement, scene-extra creation for `Barkeep Drenn`, and visible NPC dialogue with `Relay-Tech Dorin` and `Venn the Borrowed`.
   - Packet refs confirmed accepted `move_actor`, `create_scene_extra`, `record_dialogue_outcome`, and `check_route` where appropriate; clarification turns had no accepted tool refs and did not mutate worldVersion.
   - Operator correction: earlier Lane A reserve-3 8-turn artifact was an automated action-generator smoke, not acceptable manual play evidence. Do not count it toward final 3x60 human/manual acceptance.
+- Lane B reserve-3 manual continuation:
+  - Continued artifact `output/phase95-manual-play/lane-b-reserve3-manual.json` from 8 to 16 rows; 15 accepted turns total and 1 failed-closed turn attempt.
+  - Failed attempt: `убираю tube обратно в courier satchel` was incorrectly planned as `transfer_item`; Stage 4 proposed invalid `targetType=item`. Rollback preserved `chat=18`, `settled_turn_packets=9`, `turn_sagas=9`, `finalized=9`, `pending=0`.
+  - Fix: Stage 3 now forbids transfer/item-state steps when the player only keeps, pockets, hides, carries, holds, readies, secures, or stows an already-held item; `toolContractHint("transfer_item")` exposes the legal `targetType` contract.
+  - Retry and follow-up manual turns succeeded: Transmission Basement -> Resonance Tower, tower inspection, Ground-Floor Barricade approach, Rost document procedure, seal-only registration denial, retreat to Resonance Tower.
+  - Final DB after chunk: `chat_history=30`, `settled_turn_packets=15`, `turn_sagas=15`, `narrator_attempts=15`, `finalized=15`, `pending=0`, scene `Resonance Tower`.
+  - Verification: `npm --prefix backend run typecheck`; focused `gameplay-turn-cycle-v1.test.ts`; 5-file suite `gameplay-turn-cycle-v1.test.ts settled-turn-packet-v1-store.test.ts actor-tools.test.ts chat.scene-plan.test.ts chat.test.ts` passed with 121 tests.
+  - Known gap: row 11 still contains mixed-script `dẫnёт`; prompt language contracts were strengthened for unrelated non-Russian/non-turn scripts, but final acceptance still needs a clean narrator language scan.

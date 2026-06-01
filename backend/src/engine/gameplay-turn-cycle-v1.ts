@@ -881,6 +881,7 @@ function narratorLanguageContractV1(language: "ru" | "en"): string {
       "All ordinary prose words, connectors, articles, transitions, and explanatory phrases must be Russian.",
       "Keep acceptedEvidence proper nouns, character names, item names, place names, and canon/franchise terms exactly as written.",
       "An English word is allowed only when it is an exact accepted label/name/canon term from acceptedEvidence; otherwise translate it into Russian.",
+      "Do not introduce unrelated non-Russian scripts such as Chinese, Japanese, Korean, Arabic, Vietnamese, or mixed-script fragments into ordinary Russian prose unless that exact text appears as an accepted label/name/canon term.",
       "Do not create mixed-language phrases by attaching English common adjectives/nouns to Russian grammar, such as requisite поля.",
       "Do not leave English connective words such as and/or/nor/reveals/openness in Russian prose unless they are part of an accepted proper noun.",
     ].join(" ");
@@ -895,6 +896,7 @@ export function toolInputLanguageContractV1(language: "ru" | "en"): string {
       "This includes quote, summary, futureRelevance, reason, claims[].summary, stateEffects[].summary, and other explanatory fields.",
       "Preserve exact visible refs, character names, item names, place names, document labels, and canon terms as written.",
       "Do not put English ordinary phrases into dialogue quotes unless the phrase is an exact accepted source label or proper noun.",
+      "Do not introduce unrelated non-turn scripts such as Chinese, Japanese, Korean, Arabic, Vietnamese, or mixed-script fragments into ordinary prose unless exact accepted source text contains them.",
       "Do not use English schema/internal words as Russian prose, such as durable, official, stamped, proof, procedure, or applied_now; translate them unless they are exact accepted labels.",
       "Do not mix Latin and Cyrillic inside one ordinary Russian word, such as procedурные.",
     ].join(" ");
@@ -1233,6 +1235,24 @@ export function toolContractHint(toolName: RuntimeToolName): Record<string, unkn
           summary: "brief summary",
         },
       };
+    case "transfer_item":
+      return {
+        toolName,
+        roles: descriptor.roles,
+        input: {
+          itemName: "exact existing item label",
+          targetName: "exact receiving actor/player/NPC/location label; never a container item label",
+          targetType: "character|npc|player|actor|location; never item",
+          equipState: "optional carried|equipped only for actor/player/NPC targets",
+          equippedSlot: "optional non-empty slot only when equipState=equipped",
+          transferredItemName: "optional only for partial payment/deposit/split",
+          remainingItemName: "optional only for partial payment/deposit/split",
+        },
+        notes: [
+          "Use only for real custody/owner/location/equip-state changes.",
+          "Do not use when the player merely keeps, pockets, hides, carries, or stows an item already in their inventory/current possession.",
+        ],
+      };
     case "record_world_fact":
       return {
         toolName,
@@ -1506,6 +1526,7 @@ export function gmActionChecklistSystemPromptV1(): string {
     "If one player action contains multiple backend-owned consequences, create one required step per consequence.",
     "If the player marks, labels, flags, tags, annotates, or otherwise physically changes a visible/current object, create a separate required backend_tool step with toolNeed=entity_tag before any dependent dialogue/procedure step.",
     "Do not fold player-applied physical marks or annotations into record_dialogue_outcome; dialogue records only the responder outcome.",
+    "Do not create transfer_item or any item-state step when the player merely keeps, pockets, hides, carries, holds, readies, secures, or stows an item already in playerInventory/current possession; that is narration detail unless ownership, location, or equip state actually changes.",
     "Use toolNeed=create_scene_extra when an ordinary temporary current-scene responder must be materialized.",
     "Use toolNeed=record_dialogue_outcome when an NPC/source answer, refusal, warning, redirect, unavailable role, or no-current-answer must be recorded.",
     "Use toolNeed=find_object_candidates when the player checks, reads, searches, or inspects visible/current/inventory objects.",

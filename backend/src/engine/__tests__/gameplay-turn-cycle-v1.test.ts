@@ -227,6 +227,22 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(prompt).toContain("Do not fold player-applied physical marks or annotations into record_dialogue_outcome");
   });
 
+  it("tells Stage 3 not to turn already-held item stowing into transfer_item", () => {
+    const prompt = gmActionChecklistSystemPromptV1();
+
+    expect(prompt).toContain("Do not create transfer_item");
+    expect(prompt).toContain("already in playerInventory/current possession");
+    expect(prompt).toContain("unless ownership, location, or equip state actually changes");
+  });
+
+  it("exposes transfer_item target contract without item targets", () => {
+    const hint = toolContractHint("transfer_item");
+
+    expect(JSON.stringify(hint)).toContain("character|npc|player|actor|location; never item");
+    expect(JSON.stringify(hint)).toContain("never a container item label");
+    expect(JSON.stringify(hint)).toContain("Do not use when the player merely keeps, pockets, hides, carries, or stows");
+  });
+
   it("narrows Stage 4 tool selection for terminal and helper needs", () => {
     expect(selectAllowedToolNamesForStepV1(
       { toolNeed: "entity_tag" },
@@ -504,6 +520,8 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(built.system).toContain("Write in Russian.");
     expect(built.system).toContain("ordinary prose words, connectors, articles");
     expect(built.system).toContain("exact accepted label/name/canon term");
+    expect(built.system).toContain("unrelated non-Russian scripts");
+    expect(built.system).toContain("Chinese, Japanese, Korean, Arabic, Vietnamese");
     expect(built.system).toContain("requisite поля");
     expect(built.prompt).toContain("Russian prose");
     expect(built.prompt).toContain("English only for exact accepted labels/names/canon terms");
@@ -1069,6 +1087,7 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("responseLanguage/toolInputLanguageContract");
     expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("model-authored prose input field");
     expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("Preserve exact refs, names, item labels");
+    expect(toolInputLanguageContractV1("ru")).toContain("unrelated non-turn scripts");
     expect(toolInputLanguageContractV1("ru")).toContain("durable, official, stamped");
     expect(toolInputLanguageContractV1("ru")).toContain("procedурные");
   });
