@@ -1140,6 +1140,33 @@ function summarizeToolSettlementForNarration(
     ].join(" ");
   }
 
+  if (settlement.toolName === "inspect_known_fact") {
+    const facts = readLabelList(payload.facts, 8);
+    const candidates = readLabelList(payload.candidates, 8);
+    const matches = uniqueStrings([...facts, ...candidates]);
+    const query = typeof payload.query === "string" && payload.query.trim().length > 0
+      ? payload.query.trim()
+      : typeof settlement.input?.query === "string" && settlement.input.query.trim().length > 0
+        ? settlement.input.query.trim()
+        : typeof settlement.input?.ref === "string" && settlement.input.ref.trim().length > 0
+          ? settlement.input.ref.trim()
+          : null;
+    if (matches.length > 0) {
+      return russian
+        ? `Проверка известных игроку фактов подтвердила совпадения: ${matches.join(", ")}.`
+        : `Player-known fact lookup confirmed matches: ${matches.join(", ")}.`;
+    }
+    return russian
+      ? [
+        query ? `Проверка известных игроку фактов по запросу "${query}" выполнена.` : "Проверка известных игроку фактов выполнена.",
+        "Совпавший видимый или уже известный игроку факт не подтверждён; это не подтверждает запрошенную деталь и не является общим осмотром сцены.",
+      ].join(" ")
+      : [
+        query ? `Player-known fact lookup for "${query}" completed.` : "Player-known fact lookup completed.",
+        "No matching player-visible or player-known fact is confirmed; this does not confirm the requested detail and is not a general scene look-around.",
+      ].join(" ");
+  }
+
   if (settlement.toolName === "check_route") {
     const current = readRecord(payload.current);
     const currentLabel = typeof current?.locationName === "string" && current.locationName.trim().length > 0

@@ -939,6 +939,67 @@ describe("gameplay turn cycle v1 contracts", () => {
     expect(built.prompt).toContain("не доказывает их отсутствие");
   });
 
+  it("summarizes empty known-fact lookup as a checked non-confirmation, not generic look-around", () => {
+    const packet: SettledTurnPacketV1 = {
+      version: "settled-turn-packet.v1",
+      packetId: "packet-1",
+      turnId: "turn-1",
+      campaignId: "campaign-1",
+      baseWorldVersion: 0,
+      resultWorldVersion: 0,
+      tick: 16,
+      playerAction: "Я проверяю delivery manifest на строку, которая может относиться к North Barrier Blind Spot.",
+      gmRead: {
+        path: "tool_plan",
+        situationSummary: "Player checks whether a manifest line is known.",
+        sceneQuestion: "Does the known information confirm the line?",
+        actionInterpretation: {
+          intent: "check manifest against known facts",
+          targetRefs: ["delivery manifest", "North Barrier Blind Spot"],
+        },
+        rationale: "Known-fact lookup must ground the answer.",
+        evidenceRefs: ["delivery manifest"],
+        narrationGuardrails: [],
+      },
+      oracleResult: null,
+      visibleFacts: [],
+      skippedSteps: [],
+      failedSteps: [],
+      checklist: null,
+      stepSettlements: [],
+      acceptedToolResults: [{
+        stepId: "step-1",
+        toolName: "inspect_known_fact",
+        input: { query: "delivery manifest North Barrier Blind Spot", scope: "known", maxResults: 3 },
+        result: {
+          success: true,
+          status: "success",
+          kind: "observation",
+          observationOnly: true,
+          result: {
+            toolName: "inspect_known_fact",
+            query: "delivery manifest North Barrier Blind Spot",
+            facts: [],
+            candidates: [],
+            count: 0,
+          },
+        },
+      }],
+      localConsequenceResult: null,
+      acceptedActorResults: [],
+      acceptedDurableEventIds: [],
+      producedDurableEventIds: [],
+      privateGuardTerms: [],
+    };
+
+    const built = buildNarratorPromptFromSettledPacketV1(packet);
+    expect(built.prompt).toContain("Проверка известных игроку фактов по запросу");
+    expect(built.prompt).toContain("delivery manifest North Barrier Blind Spot");
+    expect(built.prompt).toContain("Совпавший видимый или уже известный игроку факт не подтверждён");
+    expect(built.prompt).toContain("не является общим осмотром сцены");
+    expect(built.prompt).not.toContain("Ты осматриваешься вокруг.");
+  });
+
   it("summarizes equipped visible items as carried, not unattended scene objects", () => {
     const packet: SettledTurnPacketV1 = {
       version: "settled-turn-packet.v1",
