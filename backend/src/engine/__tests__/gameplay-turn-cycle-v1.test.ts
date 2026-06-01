@@ -9,6 +9,7 @@ import {
   buildNarratorPromptFromSettledPacketV1,
   buildSceneFrameForecastRefsV1,
   emptyLocalConsequenceResultV1,
+  GM_TOOL_REQUEST_SYSTEM_PROMPT_V1,
   gmActionChecklistSystemPromptV1,
   gmActionChecklistV1Schema,
   mutatingGmActionChecklistV1Schema,
@@ -955,6 +956,21 @@ describe("gameplay turn cycle v1 contracts", () => {
         maxResults: expect.stringContaining("never exceed 8"),
       },
     });
+  });
+
+  it("exposes exact record_dialogue_outcome enum and optional-field contracts to Stage 4 prompts", () => {
+    expect(toolContractHint("record_dialogue_outcome")).toMatchObject({
+      input: {
+        futureUseKind: expect.stringContaining("route_choice|permission_check|evidence"),
+        requestedRoleText: expect.stringContaining("never empty string"),
+      },
+    });
+    expect(JSON.stringify(toolContractHint("record_dialogue_outcome"))).toContain(
+      "use evidence for proof/documentary value",
+    );
+    expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("futureUseKind=evidence");
+    expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("never futureUseKind=proof");
+    expect(GM_TOOL_REQUEST_SYSTEM_PROMPT_V1).toContain("Never send empty strings for optional fields");
   });
 
   it("repairs inspect_known_fact misses toward visible-object bridge lookups", () => {

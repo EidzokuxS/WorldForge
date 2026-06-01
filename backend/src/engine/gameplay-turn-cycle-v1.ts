@@ -170,6 +170,19 @@ const gmToolRequestV1Schema = z
 
 type GmToolRequestV1 = z.infer<typeof gmToolRequestV1Schema>;
 
+export const GM_TOOL_REQUEST_SYSTEM_PROMPT_V1 = [
+  "You select exactly one backend tool request for one checklist step.",
+  "Return JSON only. Use one allowed tool and only visible/current refs from the scene.",
+  "The only legal toolName values are listed in allowedToolNames. Never use any other tool.",
+  "If moving an actor, destinationRef and evidenceRefs must copy the same exact connected movement candidate ref.",
+  "Never send empty strings for optional fields; omit the field entirely unless you have a non-empty value.",
+  "For record_dialogue_outcome, futureUseKind must be one of route_choice|permission_check|evidence|safety|obligation|npc_memory|relationship|other; proof is topicKind only, so documentary/proof later use maps to futureUseKind=evidence, never futureUseKind=proof.",
+  "For record_dialogue_outcome, requestedRoleText is only for unavailable/no_current_answer or an explicit GM Read prose_role/no_visible_authority binding; otherwise omit it, never send requestedRoleText:\"\".",
+  "If gmRead.runtimeRequirement.speakerBinding.kind is prose_role or no_visible_authority, record_dialogue_outcome input must include requestedRoleText copied exactly from that binding.",
+  "If a previous create_scene_extra result provides a responder name, use that model-safe name as speakerRef and still preserve requestedRoleText from GM Read.",
+  "Do not narrate. Do not add extra steps. Do not invent backend IDs.",
+].join(" ");
+
 export function toolRequestSchemaForAllowedToolsV1(allowedToolNames: readonly RuntimeToolName[]) {
   const names = allowedToolNames.length > 0 ? allowedToolNames : runtimeToolNames;
   const variants = names.map((toolName) =>
@@ -1179,9 +1192,9 @@ export function toolContractHint(toolName: RuntimeToolName): Record<string, unkn
           authorityKind: "role_authority|public_service|witness|hearsay|not_authorized|no_visible_authority|unknown",
           truthStatus: "settled_by_backend|speaker_asserted|unconfirmed|contested|conflicting",
           durability: "durable|scene_local",
-          futureUseKind: "required when durable",
+          futureUseKind: "required when durable; exact enum route_choice|permission_check|evidence|safety|obligation|npc_memory|relationship|other; use evidence for proof/documentary value, never proof",
           futureRelevance: "required when durable",
-          requestedRoleText: "required for unavailable/no_current_answer and for any GM Read prose_role/no_visible_authority speaker binding",
+          requestedRoleText: "optional non-empty string; required only for unavailable/no_current_answer and GM Read prose_role/no_visible_authority bindings; omit otherwise, never empty string",
           quote: "direct speech when answered/warned/redirected and durable",
           summary: "brief outcome summary",
           claims: [{
@@ -1662,15 +1675,7 @@ async function proposeToolRequestV1(input: {
     safeGenerateObject({
       model,
       schema: toolRequestSchemaForAllowedToolsV1(allowedToolNames),
-      system: [
-        "You select exactly one backend tool request for one checklist step.",
-        "Return JSON only. Use one allowed tool and only visible/current refs from the scene.",
-        "The only legal toolName values are listed in allowedToolNames. Never use any other tool.",
-        "If moving an actor, destinationRef and evidenceRefs must copy the same exact connected movement candidate ref.",
-        "If gmRead.runtimeRequirement.speakerBinding.kind is prose_role or no_visible_authority, record_dialogue_outcome input must include requestedRoleText copied exactly from that binding.",
-        "If a previous create_scene_extra result provides a responder name, use that model-safe name as speakerRef and still preserve requestedRoleText from GM Read.",
-        "Do not narrate. Do not add extra steps. Do not invent backend IDs.",
-      ].join(" "),
+      system: GM_TOOL_REQUEST_SYSTEM_PROMPT_V1,
       prompt: JSON.stringify({
         requiredVersion: TOOL_REQUEST_VERSION_V1,
         allowedToolNames,
