@@ -1113,7 +1113,16 @@ function checkRoute(
       || refMatches(destinationRef, movementDisplayRefs(candidate, snapshot, aliases))
     )
   );
-  if (!route) return denial(toolName, "route_not_visible_or_legal");
+  if (!route) {
+    return observation(toolName, {
+      routeStatus: "not_visible_or_legal",
+      reason: "route_not_visible_or_legal",
+      destination: null,
+      cost: null,
+      path: [],
+      usableAs: [],
+    });
+  }
   const routeRef = aliases.movementRefs.get(route) ?? route.label;
 
   return observation(toolName, {

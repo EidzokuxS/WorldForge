@@ -557,7 +557,16 @@ describe("bridge candidate lookup tools", () => {
         path: expect.arrayContaining(["current_location", "East Tea Lane"]),
       }),
     });
-    expect(denied.success).toBe(false);
+    expect(denied).toMatchObject({
+      success: true,
+      kind: "observation",
+      observationOnly: true,
+      result: expect.objectContaining({
+        routeStatus: "not_visible_or_legal",
+        reason: "route_not_visible_or_legal",
+        path: [],
+      }),
+    });
     expect(JSON.stringify(denied)).not.toContain("Secret Vault");
     expect(context.authority?.baseWorldVersion).toBe(baseWorldVersion);
   });
