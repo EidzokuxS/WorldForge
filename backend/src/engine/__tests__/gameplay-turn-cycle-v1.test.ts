@@ -9,6 +9,7 @@ import {
   buildNarratorPromptFromSettledPacketV1,
   buildSceneFrameForecastRefsV1,
   emptyLocalConsequenceResultV1,
+  gmActionChecklistSystemPromptV1,
   gmActionChecklistV1Schema,
   mutatingGmActionChecklistV1Schema,
   nextExecutableChecklistStepV1,
@@ -211,6 +212,14 @@ describe("gameplay turn cycle v1 contracts", () => {
     );
 
     expect(allowed).toEqual(["move_actor", "move_to"]);
+  });
+
+  it("tells Stage 3 to split physical annotations from dialogue outcomes", () => {
+    const prompt = gmActionChecklistSystemPromptV1();
+
+    expect(prompt).toContain("multiple backend-owned consequences");
+    expect(prompt).toContain("toolNeed=entity_tag");
+    expect(prompt).toContain("Do not fold player-applied physical marks or annotations into record_dialogue_outcome");
   });
 
   it("narrows Stage 4 tool selection for terminal and helper needs", () => {

@@ -224,3 +224,13 @@ Session: `gm-v1-consequenc-slice`.
   - DB showed `chat=2`, `settled_turn_packets=1`, `turn_sagas=1`, `narrator_attempts=1`, `pendingSagas=0`.
   - Packet `bde4dcf8-d5bf-4aaf-ba65-46c5fac5c401` persisted resultWorldVersion `132` and accepted refs including `step-1:record_dialogue_outcome`; narrator attempt `ce012543-8fa7-4869-85d1-e0624e13402e` succeeded.
   - Grounding check: narrator's 8-vs-12 discrepancy matches accepted `record_dialogue_outcome`, so this was not a narration leak.
+- Lane C second-turn contract failure and replay:
+  - Original second turn against `b13e8cfd-468e-44ef-a464-62e13fd70a7a`: `Я мелом помечаю в damaged field ledger строку с расхождением восемь против двенадцати как urgent discrepancy и прошу master clerk поставить рядом короткую отметку о сверке.`
+  - Failure: Stage 3 folded the player-applied chalk annotation into a single `record_dialogue_outcome`. The narrator referenced the chalk mark, but `damaged field ledger` tags were unchanged. This was a missing accepted state receipt, not a narration-only polish issue.
+  - Fix: Stage 3 checklist prompt now requires separate required backend steps for multiple backend-owned consequences; player-applied marks/tags/annotations on visible objects must use `toolNeed=entity_tag` before dependent dialogue/procedure steps and must not be folded into `record_dialogue_outcome`.
+  - Focused verification: `npm --prefix backend run typecheck`; `npm --prefix backend test -- gameplay-turn-cycle-v1.test.ts` passed with 24 tests.
+  - Live replay clone: source `2badd884-f63a-456c-b832-e88439fb62b4` -> clone `f2050c32-0308-4597-a0b8-7eac2aecf99a`.
+  - Replay first turn reached `narrative` and `done`, persisted packet `89060968-c84b-4033-9f59-b5a032fae0d1` with accepted `step-1:record_dialogue_outcome`.
+  - Replay second turn reached `narrative` and `done`; Stage 3 produced two required backend steps with `toolNeed=["entity_tag","record_dialogue_outcome"]`.
+  - Stage 4 accepted `add_tag` on `damaged field ledger` with tag `urgent discrepancy`, then accepted durable `record_dialogue_outcome` for the clerk's refusal/redirect to a separate discrepancy form.
+  - DB showed `chat=4`, `settled_turn_packets=2`, `turn_sagas=2`, `narrator_attempts=2`, `pendingSagas=0`; `damaged field ledger` tags now include `urgent discrepancy`; packet `39b585ed-3bee-4b21-9534-9ba860fd4615` persisted accepted refs including `step-1:add_tag` and `step-2:record_dialogue_outcome`.

@@ -1375,6 +1375,30 @@ function acceptedStepContextV1(
     }));
 }
 
+export function gmActionChecklistSystemPromptV1(): string {
+  return [
+    "You create a GM Action Checklist for one player turn.",
+    "Return one JSON object only.",
+    "Return exactly these top-level keys: version, turnPath, steps.",
+    `Return between 1 and ${GM_ACTION_CHECKLIST_MAX_STEPS_V1} steps.`,
+    "Each step must use exactly these keys: stepId, purpose, evidenceRefs, dependsOnStepIds, expectedVisibleEffect, requiredAction, settlementPolicy, toolNeed.",
+    "The checklist is NOT execution. Do not include toolName, input, args, payload, candidateToolRequest, plannedTools, state deltas, or narration.",
+    "Do not wrap the object in a key named checklist. Do not use checklistVersion, stage, action, description, or requiredOutcome.",
+    "Each backend_tool step says what needs to become true; a later backend stage will choose and validate the concrete tool.",
+    "Use settlementPolicy=required for consequences required by the player action. Use optional only for nice-to-have helper/context steps.",
+    "Dependencies must refer only to earlier stepId values.",
+    "toolNeed must be either a known state-effect kind or an exact runtime tool name.",
+    "If one player action contains multiple backend-owned consequences, create one required step per consequence.",
+    "If the player marks, labels, flags, tags, annotates, or otherwise physically changes a visible/current object, create a separate required backend_tool step with toolNeed=entity_tag before any dependent dialogue/procedure step.",
+    "Do not fold player-applied physical marks or annotations into record_dialogue_outcome; dialogue records only the responder outcome.",
+    "Use toolNeed=create_scene_extra when an ordinary temporary current-scene responder must be materialized.",
+    "Use toolNeed=record_dialogue_outcome when an NPC/source answer, refusal, warning, redirect, unavailable role, or no-current-answer must be recorded.",
+    "Use toolNeed=find_object_candidates when the player checks, reads, searches, or inspects visible/current/inventory objects.",
+    "Use toolNeed=inspect_known_fact only for player-known facts or canon claims, not for locating visible/current/inventory objects.",
+    "Use toolNeed=list_navigation_options when the player asks which routes or movement options are available.",
+  ].join(" ");
+}
+
 async function runGmActionChecklistV1(input: {
   envelope: GameplayFrameEnvelopeV1;
   read: GmRead;
@@ -1402,24 +1426,7 @@ async function runGmActionChecklistV1(input: {
   }
 
   const model = createModel(input.provider, { role: "judge" });
-  const system = [
-    "You create a GM Action Checklist for one player turn.",
-    "Return one JSON object only.",
-    "Return exactly these top-level keys: version, turnPath, steps.",
-    `Return between 1 and ${GM_ACTION_CHECKLIST_MAX_STEPS_V1} steps.`,
-    "Each step must use exactly these keys: stepId, purpose, evidenceRefs, dependsOnStepIds, expectedVisibleEffect, requiredAction, settlementPolicy, toolNeed.",
-    "The checklist is NOT execution. Do not include toolName, input, args, payload, candidateToolRequest, plannedTools, state deltas, or narration.",
-    "Do not wrap the object in a key named checklist. Do not use checklistVersion, stage, action, description, or requiredOutcome.",
-    "Each backend_tool step says what needs to become true; a later backend stage will choose and validate the concrete tool.",
-    "Use settlementPolicy=required for consequences required by the player action. Use optional only for nice-to-have helper/context steps.",
-    "Dependencies must refer only to earlier stepId values.",
-    "toolNeed must be either a known state-effect kind or an exact runtime tool name.",
-    "Use toolNeed=create_scene_extra when an ordinary temporary current-scene responder must be materialized.",
-    "Use toolNeed=record_dialogue_outcome when an NPC/source answer, refusal, warning, redirect, unavailable role, or no-current-answer must be recorded.",
-    "Use toolNeed=find_object_candidates when the player checks, reads, searches, or inspects visible/current/inventory objects.",
-    "Use toolNeed=inspect_known_fact only for player-known facts or canon claims, not for locating visible/current/inventory objects.",
-    "Use toolNeed=list_navigation_options when the player asks which routes or movement options are available.",
-  ].join(" ");
+  const system = gmActionChecklistSystemPromptV1();
   const { object } = await withRole("judge", () =>
     safeGenerateObject({
       model,
