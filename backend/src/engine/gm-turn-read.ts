@@ -485,9 +485,12 @@ const DOCUMENT_PREMISE_ISSUE_CODE = "document-premise-requires-backed-state";
 const REUSABLE_DIALOGUE_DURABILITY_ISSUE_CODE = "reusable-dialogue-requires-durable-requirement";
 const STRUCTURAL_DIALOGUE_EFFECT_KIND_ISSUE_CODE =
   "structural-dialogue-requires-explicit-effect-kind";
+const DIALOGUE_SPEAKER_BINDING_ISSUE_CODE =
+  "dialogue-outcome-requires-speaker-binding";
 const MIXED_TRAVEL_DIALOGUE_ISSUE_CODE =
   "mixed-travel-dialogue-requires-movement-first";
 const NO_MUTATION_ADMISSIBILITY_ISSUE_CODE = "no-mutation-admissibility-requires-runtime";
+const GM_READ_VALIDATION_REPAIR_MAX_ATTEMPTS = 2;
 const DOCUMENT_STATE_TAG_KEYS = new Set([
   "officially-unsealed",
   "unsealed",
@@ -681,7 +684,7 @@ function validateDialogueRuntimeRequirementSpeakerBinding(
     return [{
       path: "runtimeRequirement.speakerBinding",
       message:
-        "GM Read dialogue_outcome requires speakerBinding: visible_actor for an existing visible speaker, prose_role for a role/office described only in player prose, or no_visible_authority when no current speaker exists.",
+        `${DIALOGUE_SPEAKER_BINDING_ISSUE_CODE}: GM Read dialogue_outcome requires speakerBinding: visible_actor for an existing visible speaker, prose_role for a role/office described only in player prose, or no_visible_authority when no current speaker exists.`,
     }];
   }
   if (binding.kind === "visible_actor") {
@@ -702,7 +705,7 @@ function validateDialogueRuntimeRequirementSpeakerBinding(
       return [{
         path: "runtimeRequirement.speakerBinding",
         message:
-          "GM Read dialogue_outcome addressed existing visible actor ref(s); use speakerBinding.kind=visible_actor with one primary visible speakerRef. Do not combine visible actor labels into prose_role; keep other addressed visible actors in targetRefs/evidenceRefs/sourceRefs.",
+          `${DIALOGUE_SPEAKER_BINDING_ISSUE_CODE}: GM Read dialogue_outcome addressed existing visible actor ref(s); use speakerBinding.kind=visible_actor with one primary visible speakerRef. Do not combine visible actor labels into prose_role; keep other addressed visible actors in targetRefs/evidenceRefs/sourceRefs.`,
       }];
     }
   }
@@ -1482,6 +1485,7 @@ function isRepairableGmReadValidationIssue(issue: GmReadValidationIssue): boolea
     issue.message.includes(TURN_GROUNDING_CONSISTENCY_ISSUE_CODE)
     || issue.message.includes(PASSIVE_STATUS_READ_ISSUE_CODE)
     || issue.message.includes(POSTED_PROOF_REQUIREMENT_ISSUE_CODE)
+    || issue.message.includes(DIALOGUE_SPEAKER_BINDING_ISSUE_CODE)
     || issue.message.includes(DOCUMENT_STATE_ISSUE_CODE)
     || issue.message.includes(REUSABLE_DIALOGUE_DURABILITY_ISSUE_CODE)
     || issue.message.includes(STRUCTURAL_DIALOGUE_EFFECT_KIND_ISSUE_CODE)
@@ -1685,11 +1689,18 @@ export async function runGmRead(args: RunGmReadArgs): Promise<GmRead> {
     latencyMs: Date.now() - startMs,
   });
 
-  if (shouldAttemptGmReadValidationRepair(issues)) {
+  for (
+    let repairAttempt = 1;
+    issues.length > 0
+      && repairAttempt <= GM_READ_VALIDATION_REPAIR_MAX_ATTEMPTS
+      && shouldAttemptGmReadValidationRepair(issues);
+    repairAttempt += 1
+  ) {
     validationRepairAttempted = true;
     log.event("judge.gm-read.rejected", {
       reason: "validation_failed",
       repairAttempted: true,
+      repairAttempt,
       issueCount: issues.length,
       issues: formatGmReadValidationIssues(issues),
     });
@@ -1720,6 +1731,7 @@ export async function runGmRead(args: RunGmReadArgs): Promise<GmRead> {
             : REUSABLE_DIALOGUE_DURABILITY_ISSUE_CODE,
           path: read.path,
           validationRepair: true,
+          repairAttempt,
         });
       }
       issues = await validateGeneratedGmRead({
@@ -1739,6 +1751,7 @@ export async function runGmRead(args: RunGmReadArgs): Promise<GmRead> {
         success: issues.length === 0,
         issueCount: issues.length,
         validationRepair: true,
+        repairAttempt,
         strategy: trace?.strategy ?? null,
         primaryStrategy: trace?.primaryStrategy ?? null,
         fallbackStrategy: trace?.fallbackStrategy ?? null,
@@ -1750,6 +1763,7 @@ export async function runGmRead(args: RunGmReadArgs): Promise<GmRead> {
       });
     } else {
       log.warn("GM Read validation repair returned no object; preserving original validation failure.");
+      break;
     }
   }
 

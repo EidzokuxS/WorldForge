@@ -2317,6 +2317,97 @@ describe("GM Read contract", () => {
     expect(safeGenerateObject).toHaveBeenCalledTimes(2);
   });
 
+  it("continues semantic GM Read repair when a recovered dialogue outcome is still missing speakerBinding", async () => {
+    const invalidRead = {
+      ...baseRead,
+      path: "tool_plan",
+      situationSummary: "The player asks a clerk which posted item applies to a sealed message.",
+      sceneQuestion: "Which public record observation applies here?",
+      focalActorRefs: ["Player"],
+      actionInterpretation: {
+        intent: "ask a clerk to identify which posted item applies to the sealed message",
+        targetRefs: [],
+      },
+      turnGrounding: testTurnGrounding({
+        intentKind: "posted_proof_applicability",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "proof",
+        durability: "durable",
+      }),
+      turnIntent:
+        "Look up posted signs and summarize the applicable record without recording a clerk outcome.",
+      runtimeRequirement: {
+        kind: "observation_read",
+        categories: ["public_records"],
+      },
+      rationale: "A public-record read is enough.",
+      evidenceRefs: ["Player"],
+      narrationGuardrails: ["The answer may matter later."],
+    } satisfies GmRead;
+    const missingBindingRead = {
+      ...baseRead,
+      path: "tool_plan",
+      situationSummary: "The player asks Road Warden to verify a proof-related delivery code.",
+      sceneQuestion: "What confirmation does the warden give?",
+      actionInterpretation: {
+        intent: "ask Road Warden to verify the proof-related delivery code",
+        targetRefs: ["Road Warden"],
+      },
+      turnGrounding: testTurnGrounding({
+        intentKind: "posted_proof_applicability",
+        requiresGrounding: true,
+        groundingKind: "dialogue_outcome",
+        topicKind: "proof",
+        durability: "durable",
+      }),
+      turnIntent:
+        "Record the visible actor's proof-related answer before narration relies on it.",
+      runtimeRequirement: {
+        kind: "dialogue_outcome",
+        durability: "durable",
+        topicKind: "proof",
+        requiresStructuralEffect: false,
+      },
+      rationale: "The answer is reusable and proof-related.",
+      evidenceRefs: ["Player", "Road Warden"],
+      narrationGuardrails: ["Do not invent a completed transfer."],
+    } satisfies GmRead;
+    const repairedRead = {
+      ...missingBindingRead,
+      runtimeRequirement: {
+        ...missingBindingRead.runtimeRequirement,
+        speakerBinding: { kind: "visible_actor", speakerRef: "Road Warden" },
+      },
+    } satisfies GmRead;
+
+    vi.mocked(safeGenerateObject)
+      .mockResolvedValueOnce(safeResult(invalidRead))
+      .mockResolvedValueOnce(safeResult(missingBindingRead))
+      .mockResolvedValueOnce(safeResult(repairedRead));
+
+    await expect(
+      runGmRead({
+        provider,
+        playerAction:
+          "I ask Road Warden to verify which posted proof item applies to this sealed message.",
+        frame: createFrame(),
+      }),
+    ).resolves.toMatchObject({
+      path: "tool_plan",
+      runtimeRequirement: {
+        kind: "dialogue_outcome",
+        topicKind: "proof",
+        speakerBinding: { kind: "visible_actor", speakerRef: "Road Warden" },
+      },
+    });
+
+    expect(safeGenerateObject).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(safeGenerateObject).mock.calls[2]?.[0]?.prompt).toContain(
+      "dialogue-outcome-requires-speaker-binding",
+    );
+  });
+
   it("rejects no-mutation structured grounding instead of silently promoting into a tool path", async () => {
     const invalidRead = {
       ...baseRead,
